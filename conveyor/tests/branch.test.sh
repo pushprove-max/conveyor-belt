@@ -67,3 +67,16 @@ t_branchnolink() {
   [ -z "$(ls "$T/$CASE/cards")" ] || fail "that blocked card left files beside its worktree: $(ls "$T/$CASE/cards")"
   rm -rf "$R/sub"; loop check || fail "the record check fails after the card whose dependencies could not be linked"
 }
+
+# Bug (#1457): a land-branch card started its processes with no card's mark (CONVEYOR_CARDRUN), which only a card of
+# the loop had (cardrun()). So a review it started, left running once the card's shell was gone, was no process of the
+# card's to retry or shut (leftin(), lib/run.sh), and they took its worktree from under it. A process the card starts
+# (card() a stand-in that runs one) carries the card's id.
+t_branchmark() {
+  local c
+  branchsetup; lane seven s.txt ess
+  fx_in 'card() { printenv CONVEYOR_CARDRUN > "$STUB/mark"; }; landbranch seven'
+  c=$(newest)
+  [ -n "$c" ] && [ "$(cat "$STUB/mark" 2>/dev/null)" = "$c" ] \
+    || fail "land-branch seven: a process its card ${c:-(none picked)} started carried the mark '$(cat "$STUB/mark" 2>/dev/null)', not the card's id: $(cat "$T/$CASE/run.out")"
+}

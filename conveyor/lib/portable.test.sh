@@ -83,6 +83,8 @@ t_host() {
   grep -qx " *$k  *$BASHPID  *[a-z/]* 30" <<<"$(p p_procs)" || fail "the process list does not hold the process: $(p p_procs | grep " $k ")"
   ( cd "$T" && P_T='a b' exec sleep 30 ) & e=$! # sleep: a stand-in for a running process, in a folder and with a variable of its own
   wait_until '[ "$(p p_cwd $e)" -ef "$T" ]' || fail "the folder a process runs in: $(p p_cwd $e)"
+  # Every process with its folder: retry finds what a gone card left running in its folders by it (leftin(), lib/run.sh).
+  grep -qx "$e"$'\t'"$(cd "$T" && pwd -P)" <<<"$(p p_cwds)" || fail "the list of every process's folder does not hold $e in $T: $(p p_cwds | grep "^$e"$'\t')"
   [ "$(p p_env $e P_T)" = 'a b' ] || fail "a variable of a process: $(p p_env $e P_T)"
   s2=$(p p_env $e P_NONE) && [ -z "$s2" ] || fail "a variable a process does not have: $s2"
   # Its arguments come apart where the system keeps them so (Linux), a space inside one kept: doctor tells a loop from

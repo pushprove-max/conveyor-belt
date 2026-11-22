@@ -147,6 +147,18 @@ t_unblockhold() {
     || fail "the released #7 did not resume from its kept patch: $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
 }
 
+# Bug (#1457, R78): a refused unblock took its hold off with `control release`, which also marks the issue as released
+# for good (startSeen). An outside issue under Held with no card yet (#9) was left released by `unblock 9 --hold`, so
+# the filing hook's adopt no longer held it and the loop would build an issue no one approved. The refused unblock
+# leaves held and startSeen as they were, and adopt still holds #9.
+t_unblockseen() {
+  setup '[]'
+  jq -c '.start = "held" | .startHeld = [{from: 6, to: null}]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  loop unblock 9 --hold >/dev/null 2>&1 && fail "unblock 9 --hold, #9 with no card, exited 0"
+  [ "$(jq -c '[.held, .startSeen]' "$ST/control.json")" = '[[],[]]' ] || fail "the refused unblock 9 --hold left held or startSeen changed: $(cat "$ST/control.json")"
+  [ "$(loop control adopt 9 | jq -c .held)" = '[9]' ] || fail "control adopt 9, after the refused unblock 9 --hold, did not hold #9: $(cat "$ST/control.json")"
+}
+
 # A run whose max-cards are used up (run 1, its one card #10 on the belt) picks with `pick retried` (run(),
 # lib/run.sh): that pick takes the retried #7 and nothing else, so the run builds it while it waits on #10.
 t_retrywait() {

@@ -16,10 +16,12 @@
 . "$HERE/lib/install.sh" || exit 1
 [[ ${2:-} =~ ^[1-9][0-9]{0,8}$ ]] && [ $# = 3 ] && [ "$3" = --hold ] || { echo "usage: conveyor.sh unblock <issue> --hold" >&2; exit 2; }
 unblock() { # <issue>
-  local was
+  local was c new
   was=$(ctl | jq -r --argjson n "$1" '.held | index($n) != null') || { echo "conveyor: cannot read the control record; nothing changed" >&2; return 1; }
   control hold "$1" >/dev/null || return 1
-  retry "$1" >/dev/null || { [ "$was" = true ] || control release "$1" >/dev/null; return 1; }
+  # The hold is taken off as it was put on: held alone. A release would also mark the issue as released for good
+  # (startSeen), so an outside issue no one approved yet would never be held for the owner's yes.
+  retry "$1" >/dev/null || { [ "$was" = true ] || { c=$(ctl) && new=$(jq -ce --argjson n "$1" '.held -= [$n]' <<<"$c") && ctlput "$c" "$new"; }; return 1; }
   echo "conveyor: issue #$1 is held and its card is off the belt; its kept work is kept. Release it to build it again: conveyor.sh control release $1"
 }
 locked unblock "$2"

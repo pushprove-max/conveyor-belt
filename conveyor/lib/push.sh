@@ -759,7 +759,18 @@ failclass() { # <reason>
 # A card that stops for the owner's yes to a visible change keeps the project's own screenshots of it (keepshots()),
 # or, retried on the same kept patch, those of the card it resumes (keptshots()).
 block() { # <card> <issue> <worktree> <reason> [post the reason on the issue whatever the review holds]
-  local k=$ST/kept/$1 f kept='' left='' stay='' hold='' patch='' reason=${4%%$'\n'*} tail='' shown body d size=null sp named=null err ws=null
+  local k=$ST/kept/$1 f kept='' left='' stay='' hold='' patch='' reason=${4%%$'\n'*} tail='' shown body d size=null sp named=null err ws=null bl
+  # One block of a card at a time: `retry` or `shut` (endcard(), lib/run.sh) and the loop (turnended(), revive()) can
+  # end the same card at once. Each holds the card's lock (<cards>/<card>.block) to its end, and leaves a card that has
+  # a blocked or closed line by then (exit 2): a second block would stage the worktree the first one removes, and
+  # remove the patch the first one kept. A card that landed is still blocked when its declined findings cannot be
+  # written (cardland.sh). The lock file goes once the blocked line is written, so a block that waited on it finds
+  # that line.
+  { exec {bl}>>"$CARDS/$1.block" && flock "$bl"; } 2>/dev/null || { [ -z "${bl:-}" ] || exec {bl}>&-; bl=''; }
+  if stdb ask card "$1" 2>/dev/null | jq -es 'any(.[]; .step | IN("blocked", "closed"))' >/dev/null 2>&1; then
+    [ -z "$bl" ] || { rm -f "$CARDS/$1.block"; exec {bl}>&-; }
+    return 2
+  fi
   [ -z "${waitsec+x}" ] || ws=$((waitsec + ${mainsec:-0}))
   # Blocked by the loop, outside card() (its process gone or stuck): the blocked line carries the card's pick too.
   local PICK=${PICK:-} PICKCARD=${PICKCARD:-}; [ "$PICKCARD" = "$1" ] || heldpick "$1"
@@ -828,4 +839,6 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
     + (if $sc == "" then {} else {speedcheck: ($sc | tonumber)} end) + (if $bc == "" then {} else {class: $bc} end) + (if $ws == null then {} else {waitSec: $ws} end) + (if $d == null then {} else {diff: $d} end) + (if $p == null then {} else {paths: $p} end) + $e
     + (if $sp == null then {} else {spent: $sp, tokens: {claude: ($sp.tokens.claude // 0), codex: ($sp.tokens.codex // 0)}} end)
     + (if ($sp.stalls // 0) > 0 then {stalls: $sp.stalls} else {} end) + (if ($sp.resumed // 0) > 0 then {resumed: $sp.resumed} else {} end)')"
+  [ -z "$bl" ] || { rm -f "$CARDS/$1.block"; exec {bl}>&-; }
+  return 0
 }

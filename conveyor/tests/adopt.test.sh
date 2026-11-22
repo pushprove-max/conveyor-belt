@@ -230,6 +230,35 @@ t_switchcode() {
   [ "$t" = new2 ] || fail "a restart would say c-5 runs $t, not new2"
 }
 
+# Bug (#1457, R111): the loop a restart starts removed loop.json at its start and wrote it only at its first turn, after
+# speedretry(): a card it adopted that began a step before then found no record of the loop's commit, and ran that step
+# (a land, say) on its old code. Here run() starts on commit new2 (an install, a copy of this engine whose redbrief(),
+# called after the step's start line, ends the card), and before its first turn (in its speedretry()) card c-5, in a
+# process of the loop's own on commit old1 as an adopted card is, begins its first step: its start line names new2.
+t_switchfirst() {
+  local new out
+  setup "[$(issue 5 2026-01-01)]"; export XDG_DATA_HOME=$T/$CASE/data; new=$XDG_DATA_HOME/conveyor/versions/new2/conveyor
+  mkdir -p "$new" && cp -a "$SRC/." "$new/" && sed -i '/^redbrief() {/a exit 0' "$new/lib/card.sh" || fail "no copy of the engine to switch to"
+  adoptrec c-5 5 picked
+  out=$(serveeng "$SRC" "OWN=new2 RAN=new2; nojobs; speedretry() { ( OWN=old1 RAN=old1; cd \"\$R\" && card c-5 5 ); exit 0; }; run 1 serve" 2>&1)
+  [ "$(st 'select(.card == "c-5" and .step == "start") | "\(.of) \(.engine // "")"' | head -n 1)" = 'build new2' ] \
+    || fail "c-5's first step, begun before the restarted loop's first turn, does not name new2: $(st 'select(.card == "c-5") | "\(.step) \(.of // "") \(.engine // "")"' | paste -sd,) $out"
+}
+
+# Bug (#1457, R111): a restart execs the new loop in the same process, and the new loop names its commit in loop.json
+# only once its files are read. Until then the record left under that pid named the old commit, so a card that began a
+# step then ran it on the old code (switchcode(), lib/card.sh). Here the loop on old1 restarts on the install new2;
+# the program it execs (a stand-in for the new loop) reads loop.json as it starts: it names new2 under its pid.
+t_switchrestart() {
+  setup '[]'
+  serveeng "$SRC" "printf '#!/bin/sh\ncat \"%s\" > \"%s\"\n' \"\$SAYS\" \"\$STUB/says\" > \"\$STUB/atexec\" && chmod +x \"\$STUB/atexec\" || exit 1
+    jq -cn --argjson p \$\$ '{pid: \$p, commit: \"old1\"}' > \"\$SAYS\" && echo \$\$ > \"\$STUB/pid\" || exit 1
+    OWN=old1 RAN=old1 FOLLOW='' BASH=\$STUB/atexec new=\$VERSIONS/new2/conveyor/conveyor.sh self=\$(p_started \$\$)
+    declare -A mine=() took=() kids=(); turnrestart" > "$T/$CASE/run.out" 2>&1
+  [ "$(jq -r --argjson p "$(cat "$STUB/pid")" 'select(.pid == $p) | .commit' "$STUB/says" 2>&1)" = new2 ] \
+    || fail "loop.json, read as the restart's new loop starts, does not name new2 under the loop's pid $(cat "$STUB/pid" 2>&1): $(cat "$STUB/says" "$T/$CASE/run.out" 2>&1)"
+}
+
 # Bug (#449): a card switches to new code that reads another form of step files than its old code saved, or does not
 # say why it stays on its old code.
 t_switchkeep() {

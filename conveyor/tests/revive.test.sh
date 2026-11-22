@@ -291,3 +291,67 @@ t_retrystopped() {
     || fail "--fresh did not move the kept work aside: $(ls -R "$ST/kept-dropped" 2>&1)"
   wait $p7 2>/dev/null; return 0
 }
+
+# Bug (#1457, R25): the loop gave back the issue of a card the owner shut. shut killed the card's process (here a
+# land-branch card's, which no loop runs as its own) and only then blocked it; in that gap the loop's revive() found
+# the process gone, blocked the card itself and gave #7 back (retry), so shut's close no longer held the issue. Here
+# revive() runs in that gap, at shut's first look whether the card ended, after the kill (stdb is wrapped for it).
+# It leaves the card to shut: no line of #7 is given back, and the card closes as shut by the owner, its work kept.
+t_shutrevive() {
+  local p7 c7=c20260101T000000-t-7
+  setup "[$(issue 7 2026-01-01)]"
+  sleep 600 & p7=$! # sleep: a stand-in for the land-branch card's process, running
+  gonecard $c7 7 $p7 "$(p_started $p7)" review; wtchange $c7
+  jq -c 'if .step == "picked" then . + {branch: "hand/seven"} else . end' "$ST/cards.jsonl" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/cards.jsonl"
+  fx_in 'eval "$(declare -f stdb | sed "1s/^stdb /stdb0 /")"
+    stdb() { [ "$1 $2" != "ask ended" ] || [ -n "${revived:-}" ] || { revived=1; revive "" > "$STUB/revive.out" 2>&1; }; stdb0 "$@"; }
+    set -- shut 7; . "$HERE/commands/shut.sh"'
+  [ "$RC" = 0 ] && [ -e "$STUB/revive.out" ] || fail "shut 7 exited $RC, or revive() did not run between its kill and its block: $(cat "$T/$CASE/run.out")"
+  [ -z "$(jq -c 'select(.issue == 7)' "$ST/retried.jsonl" 2>/dev/null)" ] \
+    || fail "shut 7, revive() run after its kill: #7 was given back, to be picked again: $(cat "$STUB/revive.out") $(cat "$ST/retried.jsonl")"
+  [ "$(st "select(.card == \"$c7\") | [.step, .reason] | @tsv" | paste -sd,)" = $'picked\t,worktree\t,start\t,blocked\tshut by the owner,closed\tshut by the owner' ] \
+    && [ -s "$ST/kept/$c7/$c7.patch" ] || fail "shut 7, revive() run after its kill: $c7 did not close as shut by the owner, its work kept: $(st "select(.card == \"$c7\")")"
+  wait $p7 2>/dev/null; return 0
+}
+
+# Bug (#1457, R112): retry or shut and the loop could block the same card at once. Each block() staged the worktree;
+# the first removed it while the second still ran, so the second wrote a second blocked line, or found no worktree to
+# write its patch from and removed the patch the first had kept. Two block() calls of #7's card run side by side, each
+# held at its comment on the issue: one blocked line is written, and kept/<card>.patch is there and applies to main.
+t_blocktwice() {
+  local c=c20260101T000000-t-7
+  setup "[$(issue 7 2026-01-01)]"
+  gonecard $c 7 1 "$(date)"; wtchange $c
+  echo 'sleep 1' > "$STUB/comment-cmd" # sleep: holds the first block() at its comment, so the second runs beside it
+  fx_in "( block $c 7 \"\$CARDS/$c\" first ) & ( block $c 7 \"\$CARDS/$c\" second ) & wait"
+  [ "$(st "select(.card == \"$c\" and .step == \"blocked\") | .reason" | wc -l)" = 1 ] \
+    || fail "two block() calls of $c side by side did not write one blocked line: $(st "select(.card == \"$c\") | [.step, .reason, .kept] | @tsv") $(cat "$T/$CASE/run.out")"
+  git -C "$R" apply --check "$ST/kept/$c/$c.patch" && [ ! -e "$T/$CASE/cards/$c.block" ] \
+    || fail "two block() calls of $c side by side: its kept patch is gone or does not apply, or its lock file was left: $(ls -a "$ST/kept/$c" "$T/$CASE/cards" 2>&1)"
+}
+
+# Bug (#1457, R113): `retry` of a card whose process was gone killed nothing, so a session it had started, no longer
+# under it, still worked in its worktree while block() staged it and took it away. Bugs too: retry ended a shell an
+# operator had open in the worktree, which matched by its folder alone, and missed a test run on main's code in
+# mainrun/<card>.unfixed (bugproof.sh), whose clean environment (cleanrun()) dropped the card's mark. #7's process
+# (cardrun(), card() a stand-in) starts its session in its worktree and a test run in mainrun/<card>.unfixed through
+# cleanrun(), as bugproof.sh does, then ends; both run on. The gh stub's comment hook, run by block() before it writes
+# the blocked line, notes each still running then. retry 7 ends both first, and leaves the operator's shell.
+t_retryleft() {
+  local ended op k out c=c20260101T000000-t-7
+  setup "[$(issue 7 2026-01-01)]"
+  sleep 0 & ended=$!; wait $ended # sleep: a stand-in for the card's process record, ended
+  gonecard $c 7 $ended "$(date)"; wtchange $c; mkdir -p "$T/$CASE/cards/mainrun/$c.unfixed"
+  # The card's session and its test run on main's code, left running in its folders. cleanrun() starts its run in the
+  # background and watches it, so the run's pid is known only once the run writes it: card() waits for that.
+  fx_in 'card() { ( cd "$CARDS/$1" && exec sleep 600 ) & echo $! >> "$STUB/kids"; ( cleanrun "$CARDS/mainrun/$1.unfixed" "echo \$\$ > \"$STUB/run.pid\"; exec sleep 600" ) & wait_until "[ -s \"\$STUB/run.pid\" ]" && cat "$STUB/run.pid" >> "$STUB/kids"; }; cardrun '"$c"' 7' # sleep: the stand-ins run until the case kills them
+  ( cd "$T/$CASE/cards/$c" && exec sleep 600 ) & op=$! # sleep: a stand-in for an operator's shell open in the worktree
+  [ "$(wc -l < "$STUB/kids" 2>/dev/null)" = 2 ] || fail "the stand-in card did not start its two processes: $(cat "$T/$CASE/run.out")"
+  printf '%s\n' 'for k in $(cat "$STUB/kids"); do ! ps -o stat= -p $k | grep -qv Z || echo $k >> "$STUB/kid-at-block"; done' > "$STUB/comment-cmd"
+  out=$(loop retry 7 2>&1)
+  ps -o stat= -p $op | grep -qv Z || fail "retry 7 ended the operator's shell open in $c's worktree: $out"
+  for k in $(cat "$STUB/kids") $op; do kill $k 2>/dev/null; done
+  [ ! -e "$STUB/kid-at-block" ] || fail "retry 7: a process $c started still ran when block() took its worktree (session $(sed -n 1p "$STUB/kids"), main run $(sed -n 2p "$STUB/kids")): $(cat "$STUB/kid-at-block") $out"
+  [ "$(jq -r 'select(.step == "blocked") | .card' "$ST/retried.jsonl" 2>/dev/null)" = "$c" ] || fail "retry 7 did not block $c and give #7 back: $out"
+  wait $op 2>/dev/null; return 0
+}

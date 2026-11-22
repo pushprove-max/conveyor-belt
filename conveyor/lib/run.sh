@@ -215,15 +215,18 @@ gonewt() { # <card> <worktree> <its last step>
   fi
 }
 revive() { # <the loop's own cards, one a line>
-  local c n p t step wt
+  local c n p t step wt sp st
   while IFS=$'\t' read -r c n p t step; do
     [ -n "$c" ] && ! grep -qxF "$c" <<<"$1" && ! p_alive "$p" "$t" || continue
+    # A card a live `shut` is ending (its mark, shutopen()) is shut's: given back here, the issue the owner shut would
+    # be picked again. Read before the read below: shut takes its mark away only once its blocked line is written.
+    ! { read -r sp st < "$CARDS/$c.shut" && p_alive "$sp" "$st"; } 2>/dev/null || continue
     # Read again now its process is gone: a card writes its closing line before its process ends, so one that closed
     # since the read above (another process's: a land-branch) is closed, not gone.
     [ "$(stdb ask ended "$c" 2>/dev/null)" != true ] || continue
     wt=$CARDS/$c
     gonewt "$c" "$wt" "$step" || continue
-    ( block "$c" "$n" "$wt" "$GONE" )
+    ( block "$c" "$n" "$wt" "$GONE" ) || continue # blocked meanwhile by another process (block() leaves it): that one gives it back
     if [ -d "$wt" ] || [ "$n" = 0 ]; then
       echo "conveyor: card $c had an open record and its process was gone; it is blocked$([ "$n" = 0 ] || echo ", its change left in its worktree: \`retry $n\` takes issue #$n again")"
     else
@@ -239,10 +242,10 @@ revive() { # <the loop's own cards, one a line>
 # A card of the loop: card() in a process of its own, under this one, which writes that process's exit status to
 # <cards>/<card>.exit when it ends (128 + N when signal N killed it), so the loop can say why a card that wrote no
 # closing line ended (cardgone()). LOOPCARD marks it as the loop's: a step whose seat's CLI stays gone waits for the
-# loop to start it again (seatwait(), cliwake()).
+# loop to start it again (seatwait(), cliwake()). CONVEYOR_CARDRUN marks what it starts, for retry and shut (leftin()).
 cardrun() { # <card> <issue>
   # shellcheck disable=SC2034 # LOOPCARD is read by seatwait() in lib/control.sh
-  ( LOOPCARD=1; card "$1" "$2" ); echo $? > "$CARDS/$1.exit"
+  ( LOOPCARD=1; export CONVEYOR_CARDRUN=$1; card "$1" "$2" ); echo $? > "$CARDS/$1.exit"
 }
 # The Conveyor commit a card of the loop runs now: the one its last switch to new code named on its start line
 # (began(), lib/card.sh), else the one it started on.
@@ -302,17 +305,31 @@ stuckcard() { # <card> [turn | any]
 stuckwhy() { # <step> <gone | stopped | stuck>
   if [ "$2" = gone ]; then echo "$GONE"; elif [ "$2" = stopped ]; then echo "$1: its process was stopped by a signal, so the engine ended the card"; else echo "$1: no process of this step ran for $((STUCK + REVIEW_PAUSE))s (the pack's stuck and reviewPause), so the engine stopped the card"; fi
 }
+# The processes a card started that still work in its folders (as busy.sh finds them: <cards>/<card>, under it, beside
+# it as <card>.rv, mainrun/<card>.unfixed or .repair) and carry its mark (CONVEYOR_CARDRUN: cardrun(), landbranch()
+# in lib/lane.sh). An operator's shell in those folders has none and is never ended; nor is one this process runs under.
+leftin() { # <card>
+  local c p d up=' ' q=$BASHPID
+  c=$(cd "$CARDS" 2>/dev/null && pwd -P) || return 0
+  while [[ $q =~ ^[0-9]+$ ]] && [ "$q" -gt 1 ]; do up+="$q "; q=$(ps -o ppid= -p "$q" 2>/dev/null) || break; q=${q//[[:space:]]/}; done
+  p_cwds | while IFS=$'\t' read -r p d; do
+    d=${d% (deleted)}; [[ $up != *" $p "* ]] && [[ $d == "$c/$1" || $d == "$c/$1"[/.]* || $d == "$c/mainrun/$1" || $d == "$c/mainrun/$1"[/.]* ]] && [ "$(p_env "$p" CONVEYOR_CARDRUN)" = "$1" ] && echo "$p"
+  done; return 0
+}
 # Ends a card stuck in flight (stuckcard()) as a block ends a card: a process that is still alive is stopped with
 # every process under it, then all are killed, so none writes a line after; then the card is blocked with <reason>,
 # its work kept (gonewt(), block()). Fails, leaving the card open, when its change cannot be put back (gonewt()).
+# When its process is gone, what it started that still works in its folders (leftin()) is ended so, before block()
+# takes the worktree away, as the loop ends what it kept of a card of its own (turnended()).
 endcard() { # <card> <issue> <pid, or "" when its process is gone> <its step> <reason>
-  local k=''
-  [ -z "$3" ] || { k=$(freeze "$3"); kill -KILL $k 2>/dev/null; }
+  local k p
+  k=$(if [ -n "$3" ]; then freeze "$3"; else for p in $(leftin "$1"); do freeze "$p"; done; fi)
+  [ -z "$k" ] || kill -KILL $k 2>/dev/null
   for k in $k; do while ps -o stat= -p "$k" 2>/dev/null | grep -qv Z; do sleep 0.1; done; done
   # Closed meanwhile (a card writes its closing line before its process ends): closed, not stuck.
   [ "$(stdb ask ended "$1" 2>/dev/null)" != true ] || return 0
   gonewt "$1" "$CARDS/$1" "$4" || return 1
-  ( block "$1" "$2" "$CARDS/$1" "$5" )
+  ( block "$1" "$2" "$CARDS/$1" "$5" ) || [ $? = 2 ] # 2: blocked meanwhile by another process (block()): ended, as one closed meanwhile is
 }
 # `retry <issue>` (#466): each open card of the issue stuck in flight, or whose process a signal stopped
 # (stuckcard()), is ended first, as the loop ends one (endcard()), outside the records' lock, which block() takes.
@@ -358,7 +375,9 @@ shutopen() { # <issue | card id>
     elif [ "$q" = file ]; then echo "conveyor: card $c has begun filing its follow-ups or the slices of its issue; it is left to finish" >&2; s=''; fi
     [ -n "$s" ] || { [ "$how" != running ] || [ -z "$k" ] || kill -CONT $k 2>/dev/null; continue; }
     [ "$how" != gone ] || p=''
+    { printf '%s %s\n' "$$" "$(p_started $$)" > "$CARDS/$c.shut"; } 2>/dev/null # shut's from before the kill till blocked: revive() leaves it
     endcard "$c" "$n" "$p" "$s" "$OWNSHUT" && echo "conveyor: card $c was open in its $s step ($([ "$how" = gone ] && echo "its process gone" || echo "its process $how, now ended")); it is blocked, its work kept"
+    rm -f "$CARDS/$c.shut"
   done
 }
 # run()'s cards in progress (running), set in run()'s own variables: its jobs less the push (pusher) and the other
@@ -570,6 +589,12 @@ turncount() {
     '{pid: $p, started: $t, state: $s, reason: (if $r == "" then null else $r end), commit: (if $c == "" then null else $c end), checkout: (if $h == "" then null else $h end), building: $b, waiting: $w, reviewing: $rv, testing: $ts, running: $n}')
   [ "$say" = "$said" ] || { printf '%s\n' "$say" > "$SAYS.new" && mv -f "$SAYS.new" "$SAYS" && said=$say; }
 }
+# What the loop says of itself (SAYS) outside a turn (turncount()): its process and the commit a card of it reads as
+# it begins a step, to run that step on it (switchcode(), lib/card.sh).
+sayself() { # <commit, or ""> <checkout, or "">
+  jq -cn --argjson p "$$" --arg t "$self" --arg c "$1" --arg h "$2" '{pid: $p, started: $t, commit: (if $c == "" then null else $c end), checkout: (if $h == "" then null else $h end)}' \
+    > "$SAYS.new" 2>/dev/null && mv -f "$SAYS.new" "$SAYS" || rm -f "$SAYS"
+}
 # The restart on the new code (new), at a turn where the loop's code is stale (old), in run()'s own variables; it does
 # not return.
 # Restarted as soon as the push job (if any) has ended, without waiting for the cards in flight: the new loop
@@ -590,6 +615,9 @@ turnrestart() {
   done | sort -u)
   local -A on=() # the commit each card runs now (cardcode())
   for k in "${!mine[@]}"; do read -r c _ <<<"${mine[$k]}"; on[$k]=$(cardcode "$c" "${took[$k]:-$RAN}"); done
+  # The new commit, named before the exec (sayself()): no record names the old one under this pid from then on.
+  local c=${new%/conveyor/conveyor.sh}
+  if [ -n "$FOLLOW" ]; then sayself "$(git -C "$HERE" rev-parse -q --verify HEAD 2>/dev/null)" "$HERE"; else sayself "${c##*/}" ''; fi
   echo "conveyor: restarting on the new code; ${#mine[@]} cards in flight carry on on $( (for k in "${!mine[@]}"; do echo "${on[$k]}"; done; [ ${#mine[@]} != 0 ] || echo "$RAN") | sort -u | paste -sd' ' - | sed 's/ /, /g')$([ ${#mine[@]} = 0 ] || echo "; a stop of this loop or of the machine's Conveyor, or a restart of its service, ends them")"
   # Without its copy of stderr (LOGFD): the new code makes its own, so each restart kept one more, and after some
   # hundreds every card's test runner got fd 255, bash's own.
@@ -700,10 +728,13 @@ run() { # [max-cards] [serve]
   # process's children, running the code they started on. They are this loop's own cards from here on.
   while read -r p c n k; do [ -z "$p" ] || { mine[$p]="$c $n"; took[$p]=$k; }; done <<<"$adopt"
   while read -r p k t; do [ -z "$p" ] || [ -z "${took[$p]:-}" ] || kids[$p]+="$k $t"$'\n'; done <<<"$held"
-  # A loop killed during its push left them; this loop has said nothing yet. A push record whose process lives is a push
-  # that runs (the Board's Push now, under the push lock): it stays.
-  rm -f "$SAYS"; p=$(jq -r '.pid | numbers' "$PUSHING" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null || rm -f "$PUSHING"
+  # A loop killed during its push left it. A push record whose process lives is a push that runs (the Board's Push
+  # now, under the push lock): it stays.
+  p=$(jq -r '.pid | numbers' "$PUSHING" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null || rm -f "$PUSHING"
   self=$(p_started $$)
+  # Said now (sayself()), for a card it adopted that begins a step before its first turn: the commit read as its files
+  # loaded (RAN), which a checkout's HEAD can move past, not the one the loop before it restarted on (turnrestart()).
+  sayself "$RAN" "$([ -n "$OWN" ] || echo "$HERE")"
   # A wake (wakeloop(), lib/control.sh, on a hold, a release or a filing) is URG: it kills the turn's timer, as the
   # turn's own end does, and sets nudged, which turnwait() reads. A trapped signal also cuts short a `wait` this shell
   # runs, so no wait of this shell's own may read its status as a job's (the cards' and other jobs' are subshells,

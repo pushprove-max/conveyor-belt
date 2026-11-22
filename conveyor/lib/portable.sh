@@ -167,6 +167,13 @@ p_cwd() { # <pid>
   else readlink "/proc/$1/cwd" 2>/dev/null; fi
 }
 
+# Every process with the folder it runs in, one a line: "<pid><tab><folder>". On Linux a folder removed under a process
+# reads "<folder> (deleted)".
+p_cwds() {
+  if p_darwin; then lsof -nP -d cwd -Fpn 2>/dev/null | awk '/^p/ { p = substr($0, 2) } /^n/ { print p "\t" substr($0, 2) }'
+  else find /proc/[0-9]*/cwd -maxdepth 0 -printf '%h\t%l\n' 2>/dev/null | sed 's|^/proc/||'; fi
+}
+
 # What <name> was in <pid>'s environment when it started (nothing when it was not set). Fails when the environment
 # cannot be read: the process is gone, or another user's.
 p_env() { # <pid> <name>

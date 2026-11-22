@@ -317,7 +317,7 @@ repairproof() { # <card> <worktree>
 }
 # One run of <command> in <worktree> in a clean harness (repairproof()): a session of its own (p_setsid), no file
 # descriptor above 2 of the loop's (closefds), and a minimal environment: the loop's PATH, HOME, USER, LOGNAME, LANG,
-# LC_ALL, TMPDIR and XDG_CONFIG_HOME, and the variables a run is given (README.md), with the load factor
+# LC_ALL, TMPDIR and XDG_CONFIG_HOME, the card's mark (CONVEYOR_CARDRUN: leftin(), lib/run.sh), and the variables a run is given (README.md), with the load factor
 # (CONVEYOR_LOAD_FACTOR: loadfactor(), lib/loadfactor.sh) as testonce() gives it. CONVEYOR_TEST_SLOTS names the
 # worktree's own conveyor/lib/slots.sh when it has one (the engine's own repository: the harness the change may
 # repair), else the running engine's. It holds no test slot of the loop's: the runners take their own. Output in
@@ -325,7 +325,7 @@ repairproof() { # <card> <worktree>
 cleanrun() { # <worktree> <command> [<list>]
   local lib=$HERE/lib e=() v pid rs=''
   [ ! -f "$1/conveyor/lib/slots.sh" ] || lib=$1/conveyor/lib
-  for v in PATH HOME USER LOGNAME LANG LC_ALL TMPDIR XDG_CONFIG_HOME; do [ -z "${!v+x}" ] || e+=("$v=${!v}"); done
+  for v in PATH HOME USER LOGNAME LANG LC_ALL TMPDIR XDG_CONFIG_HOME CONVEYOR_CARDRUN; do [ -z "${!v+x}" ] || e+=("$v=${!v}"); done
   rm -rf "$1.testlog" "$1.report"; mkdir "$1.testlog" 2>"$1.test" || return 1
   # A suite runner on <list> is taken off it (testlist.sh runnersoff(), #382); a list so left with no `fail` line runs nothing.
   # The output names each, with those listcmd() took off its command's list (RUNOFF).

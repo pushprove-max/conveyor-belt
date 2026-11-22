@@ -46,7 +46,9 @@ landbranch() { # <branch>
   fi
   c=$(codexready) || { echo "conveyor: $c; nothing recorded" >&2; return 1; }
   c=$(locked pickbranch "$br" "$n" "$title") || return 1
-  card "$c" "$n" "$br" "$tip"
+  # Each process the card starts carries its mark, as a card of the loop's does (cardrun(), lib/run.sh): a review left
+  # running when this shell is gone is ended by retry or shut before its worktree is taken (leftin()).
+  CONVEYOR_CARDRUN=$c card "$c" "$n" "$br" "$tip"
   end=$(jq -rs --arg c "$c" 'map(select(.card == $c and (.step | IN("landed", "closed", "blocked")))) | last | select(.) | "\(.step) \(.sha) \(.reason | gsub("\n"; "; "))"' < <(stdb ask card "$c"))
   echo "conveyor: card $c, branch $br: ${end:-no closing line}"
   [[ $end == landed\ * ]]
