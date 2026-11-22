@@ -5,7 +5,7 @@
 // dashboard-view.helpers.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, full, act, ruled, rulesP } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, full, act, ruled, rulesP, css } from './dashboard-view.helpers.mjs';
 
 const DEVBOX = { kind: 'devbox', size: '4x8', tag: 'conveyor-suite-sample', idleStop: '15m' };
 const SSH = { kind: 'ssh', target: 'me@box.example.com', dir: '~/conveyor-suite' };
@@ -211,4 +211,16 @@ test('Rules: Test files at once names the suite machine\'s slots', () => {
   assert.match(ruled(w).querySelector('[data-rule="atonce"]').textContent, /Capped at the suite machine's slots: 4 on the devbox\./, 'the size\'s CPUs, 4 for 4x8');
   next(w, data(undefined, 1));
   assert.doesNotMatch(ruled(w).querySelector('[data-rule="atonce"]').textContent, /suite machine's slots/);
+});
+
+// Bug this guards: the chosen machine's description kept --muted on the --accent fill, 1.17:1 in the light theme and
+// 1.04:1 in the dark. A stylesheet test (jsdom draws no layout): the description's class in the rendered choice is the
+// one the checked-choice rule hands the choice's own text color, which is --on-accent on the --accent fill.
+test('Rules: the chosen suite machine\'s description is drawn in the choice\'s own text color', () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, data(undefined));
+  const what = row(w).querySelector('input[type="radio"]').parentElement.lastElementChild;
+  assert.equal(what.className, 'board-from');
+  assert.match(css, /\.rules-suite-kind:has\(input:checked\) \{[^}]*background: var\(--accent\); color: var\(--on-accent\);/);
+  assert.match(css, /\.rules-suite-kind:has\(input:checked\) \.board-from \{ color: inherit; \}/);
 });

@@ -778,6 +778,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .rules-suite-kinds { grid-template-columns: repeat(auto-fit, minmax(18ch, 1fr)); }
 .rules-suite-kind { display: grid; gap: var(--sp-1); text-align: left; padding: var(--sp-2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
 .rules-suite-kind:has(input:checked) { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.rules-suite-kind:has(input:checked) .board-from { color: inherit; } /* --muted on the --accent fill is 1.04:1 to 1.17:1 */
 .rules-suite-kind:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 .rules-suite-checks { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-1); }
 .rules-suite-fact { margin: 0; }
