@@ -303,7 +303,9 @@ record the reason as `stop`, with `pass` (the reviews of this card) and `rounds`
 Board, that review shows "Fix loop ended:" and the reason.
 
 The judge, when it is on (`conveyor.sh control judge on`), reads each review and declines a finding that does not earn
-its place. A declined finding causes no fix and no follow-up (`conveyor/README.md`, The judge).
+its place. A declined finding causes no fix and no follow-up (`conveyor/README.md`, The judge). After a fix round,
+the judge also gets the findings that the round was told to fix, each with the reason that the judge gave when it
+accepted it.
 
 A finding that a test does not check what its name, its comment or the issue's Done-when says it checks is a real
 defect, not "only a test gap".
