@@ -274,6 +274,9 @@ t_pridlenofile() {
   la_land 1; la_eng push c1 1 || fail "the push failed"
   la_eng idlemerge
   [ "$(la_prst 7)" = MERGED ] || fail "the pull request did not merge, with no test.fileCommand and no test.list, once the belt was empty"
+  # setup's test.command (. "$STUB/file-cmd", which sources $STUB/test-cmd) notes each run in $STUB/tests and passes:
+  # a merge after a run of it would also pass the check above, though the pages say no test runs here.
+  [ ! -e "$STUB/tests" ] || fail "the push or the idle merge ran the test command, with no test.fileCommand and no test.list: $(wc -l < "$STUB/tests") run(s)"
 }
 # R106 of #1389. Bug it catches: with Merge PR idle, `control release` of a held issue while the push run ran (it takes
 # minutes) left that issue waiting to be picked with no card yet, and the pull request merged, as only the rule and
