@@ -186,6 +186,15 @@ t_tapartial() {
     && testfacts tests/x.test.sh | jq -c '[.newest, (.runs | map(.card // "suite"))]')
   [ "$out" = '[{"time":"2026-11-10T00:00:00Z","run":"the test step of card c7-12 (#12)","result":"passed"},["suite"]]' ] \
     || fail "testfacts tests/x.test.sh, its only card step naming it partial: the newest run is not that step, or the step is given a time of it: $out"
+  # Bug it catches: a later step that ran a case of the file too but gave no result (killed after the runner named the
+  # case, before it ended: cardfailed()'s no-result line, its partial part and no failures), or that timed out in
+  # another file, was told as a pass of it. Neither is a run of it with a result: the passing step stays the newest.
+  jq -cn '{card: "c8-13", issue: 13, step: "test", time: "2026-11-11T00:00:00Z", result: "fail", reason: "no result: exit 143: the run was killed by a signal", partial: ["tests/x.test.sh"]}' >> "$ST/cards.jsonl"
+  jq -cn '{card: "c9-14", issue: 14, step: "test", time: "2026-11-12T00:00:00Z", result: "fail", partial: ["tests/x.test.sh"],
+    failures: {files: [{file: "tests/y.test.sh", cases: []}], timeout: {sec: 600, file: "tests/y.test.sh"}}}' >> "$ST/cards.jsonl"
+  out=$(tanewest)
+  [ "$out" = '{"time":"2026-11-10T00:00:00Z","run":"the test step of card c7-12 (#12)","result":"passed"}' ] \
+    || fail "testfacts tests/x.test.sh, a no-result step (11-11) and a timed-out one (11-12) that each name it partial: the newest run is not the passing step of 11-10: $out"
 }
 # Bug it catches (O238): a carried line's times were dated to the later step that carried them, so a card step that ran
 # the file before a release suite failed it was listed after that suite in runs, which are oldest first. The file

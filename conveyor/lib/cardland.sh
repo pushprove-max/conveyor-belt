@@ -291,7 +291,8 @@ cardfailed() {
   # loop that adopted the card) proves nothing: nothing of it runs on main, goes to the main-red record, a wait
   # for main or a fix session. Its test line says so, and the test step runs again; the third such run in a row
   # blocks the card (a run with a result, a pass too, starts the count again: above).
-  # Its own run's files kept as passed and not run (testlist.sh carriedrec()): the step that ran them is an earlier one.
+  # Its own run's files kept as passed and not run, and those it ran some cases of (testlist.sh carriedrec()): the
+  # step that ran them whole is an earlier one.
   cr='{}'; [ -z "$own" ] || cr=$(carriedrec "$wt")
   if t=$(voidrun "$wt" "$rc"); then
     voids=$((voids + 1))

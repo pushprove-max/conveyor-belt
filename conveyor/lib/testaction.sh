@@ -488,8 +488,8 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # test line of a card, {card, issue, time} and its times, clocks (its seconds on the clock), and timed parts for
 # the file, and carried: true on a line that kept it as passed and did not run it, its times an earlier step's of the
 # same card (testlist.sh carriedrec(); a failed step saves none, so they may be the only ones of that run), and so its
-# time that of the latest earlier line of that card that did not carry the file and is not a reused pass, as
-# startlines() dates it (its own time with no such line), and each whole-suite run of $SUITERUNS (testlist.sh suiterec()), {time, whole: true, how, cpu, sec, result}, and the time the test-speed
+# time that of the latest earlier line of that card that did not carry the file, did not run only some cases of it
+# (`partial`) and is not a reused pass, as startlines() dates it (its own time with no such line), and each whole-suite run of $SUITERUNS (testlist.sh suiterec()), {time, whole: true, how, cpu, sec, result}, and the time the test-speed
 # survey saved for it (testsurvey(), lib/testfiles.sh), {time, survey: true, cpu, sec}; cards: the
 # cards of the test lines, {card, issue}; flaky: the entries of the flaky-test record for it or a case of it ("<file>: <case>");
 # failures: its newest TAFAILS failed test steps (those that passed on re-run too), newest first, as the Tests page has
@@ -499,8 +499,8 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # out, which may have ended before the file ran; a `held` step, its failures the machine's, read as a failed one and
 # named held; a step that ran it, its line with no time of it as a failed step saves none, passed it when the card's
 # next step carried it; a step that ran some cases of it, its line naming it partial with no time of it, testlist.sh
-# partran()), a whole-suite run (the
-# release suite's too) or a run of it alone (tafile(), its record in $TESTACTS), {time, run (which run it was),
+# partran(), when it passed or its failures were read and it did not time out: one with no result, killed say (voidrun(),
+# lib/testrun.sh; no failures), or timed out may have ended before those cases did), a whole-suite run (the release suite's too) or a run of it alone (tafile(), its record in $TESTACTS), {time, run (which run it was),
 # result}, null with none. Times are to the second: runs that share the newest time are all named in one, as which
 # ran last is not known.}
 TAFAILS=5
@@ -514,7 +514,7 @@ testfacts() { # <file>
     --slurpfile ta <(cat "$TESTACTS"/*.json 2>/dev/null | jq -cR --arg f "$1" 'fromjson? | objects | select(.action == "run" and .file == $f and (.result | strings) and (.end | strings))' 2>/dev/null) "$HISTFROM"'$fl[0] as $fl | ($su | map(fromstart($st))) as $su | ($ta | map(select($st == "" or (.end | strings) >= $st))) as $ta | ($sv[0] | map(fromstart($st))) as $sv | '"$OWNERS$FAILURE"'([inputs | fromjson? | objects | select(.step == "test")] | startlines($st)) as $ls
     | ([$ls[] | failedrun | select(any(failedfiles[]; . == $f)) | failure($f)] | sort_by(.time) | reverse | .[:$n]) as $fails
     | def car: any(.carried | arrays | .[]; . == $f);
-      [$ls | to_entries[] | .key as $i | .value | {card, issue, time: (if car then (.card as $k | [$ls[:$i][] | select(.card == $k and .reused != true and (car | not)) | .time] | last) // .time else .time end),
+      [$ls | to_entries[] | .key as $i | .value | {card, issue, time: (if car then (.card as $k | [$ls[:$i][] | select(.card == $k and .reused != true and (car | not) and (any(.partial | arrays | .[]; . == $f) | not)) | .time] | last) // .time else .time end),
          times: ((.times | objects | .[$f]) // null), clocks: ((.clocks | objects | .[$f]) // null), timed: ([.timed | arrays | .[] | objects | select(.file == $f)] | first), carried: (if car then true else null end)}
          | select(.times != null or .clocks != null or .timed != null) | del(.[] | nulls)] as $c
     | [$su[] | . as $w | .files | objects | .[$f] | objects | {time: $w.time, whole: true, how: $w.how, cpu, sec, result} | del(.[] | nulls)] as $w
@@ -524,7 +524,7 @@ testfacts() { # <file>
     | ([$ls | to_entries[] | .key as $i | .value | .result as $r | [if $r == "held" then .result = "fail" else . end | failedrun | select(any(failedfiles[]; . == $f))] as $x
         | select($x != [] or ((any(.carried | arrays | .[]; . == $f) | not)
             and (((.times | objects | .[$f]) // (.clocks | objects | .[$f]) // ([.timed | arrays | .[] | objects | select(.file == $f)] | first)) != null or any($ranat[]; . == $i)
-              or any(.partial | arrays | .[]; . == $f))))
+              or (any(.partial | arrays | .[]; . == $f) and ($r == "pass" or ((.failures | type) == "object" and (.failures.timeout | type) != "object"))))))
         | {time, run: "the test step of card \(.card) (#\(.issue))", result: ((if $x == [] then "passed"
             elif $x[0].result == "pass" then "failed, then passed when run again"
             elif ($x[0].again | type) == "array" and (any($x[0].again[]; . == $f) | not) then

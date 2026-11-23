@@ -101,11 +101,11 @@ ran() { sed -n "s/^$1 //p" "$STUB/ran" | tr '\n' ' ' | sed 's/ $//'; } # <run>: 
 # run and the fix session, t_rerunfail; the retry, t_rerunretry, in rerunkept.test.sh. A session that moved HEAD,
 # t_rerunmoved, and the rebuild onto main, t_rerunrebuilt and t_rerunmergedoubt, are tests() on a worktree too.)
 rerunedit() { (cd "$T/$CASE/cards/c7" && eval "$1") && git -C "$T/$CASE/cards/c7" add -A; } # <shell edit in the worktree>: the build's or a fix's edit, staged
-rerunstep() { # exits as tests() returns; its test line's part of the run (testrec()) is in c7.testrec, and a pass leaves its part of the first run, as card() puts it (firstrun()), in c7.firstrun, and its times part (slowtests(), slowrec()) in c7.slowrec
+rerunstep() { # exits as tests() returns; its test line's part of the run (testrec()) is in c7.testrec, a failure leaves its line's carried and partial part, as cardfailed() puts it (carriedrec()), in c7.failrec, and a pass leaves its part of the first run, as card() puts it (firstrun()), in c7.firstrun, and its times part (slowtests(), slowrec()) in c7.slowrec
   ( set -- run; HERE=$SRC; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; local rc
     eval "$(sed -n '/^\. "\$HERE\/lib\/portable.sh"/,/^\. "\$HERE\/lib\/records.sh"/p' "$SRC/conveyor.sh"; grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
     names || exit 1; tests "$T/$CASE/cards/c7"; rc=$?; testrec "$T/$CASE/cards/c7" "$rc" 0 > "$T/$CASE/cards/c7.testrec"
-    [ $rc = 0 ] || exit $rc; firstrun "$T/$CASE/cards/c7" pass > "$T/$CASE/cards/c7.firstrun"
+    [ $rc = 0 ] || { carriedrec "$T/$CASE/cards/c7" > "$T/$CASE/cards/c7.failrec"; exit $rc; }; firstrun "$T/$CASE/cards/c7" pass > "$T/$CASE/cards/c7.firstrun"
     slowtests "$T/$CASE/cards/c7"; slowrec "$T/$CASE/cards/c7" > "$T/$CASE/cards/c7.slowrec" ) > /dev/null 2>&1
 }
 rerunwt() { # <the build's edit> <plan line>...: rerunsetup's main and stubs, and the card's worktree with its change staged
@@ -333,4 +333,26 @@ t_rerunfixpart() {
     || fail "the run after the fix, which ran a case of a.test, names it carried (or does not name c.test, which it did not run): $(cat "$T/$CASE/cards/c7.oldfiles" 2>&1)"
   [ "$(jq -c '[(.clocks, .times | objects | has("a.test")), .partial]' "$T/$CASE/cards/c7.slowrec" 2>&1)" = '[false,false,["a.test"]]' ] \
     || fail "the run after the fix, which ran only a case of a.test, gives it the first step's time as its own, or does not name it partial: $(cat "$T/$CASE/cards/c7.slowrec" 2>&1)"
+  # Bug it catches: the card then joins a landing batch with no case left to run (claim.sh: norun(), which removes the
+  # step's logs) before card() writes its passing line (cardland.sh: slowrec()), and the line lost a.test's partial
+  # mark, read again from the logs, not from the list slowtests() saved.
+  ( set -- run; export HERE=$SRC CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    eval "$(sed -n '/^\. "\$HERE\/lib\/portable.sh"/,/^\. "\$HERE\/lib\/records.sh"/p' "$SRC/conveyor.sh"; grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
+    names || exit 1; norun "$T/$CASE/cards/c7" "no case to run"; slowrec "$T/$CASE/cards/c7" ) > "$T/$CASE/cards/c7.batchrec" 2>/dev/null
+  [ "$(jq -c .partial "$T/$CASE/cards/c7.batchrec" 2>&1)" = '["a.test"]' ] \
+    || fail "after a landing batch that ran no case (norun), the passing line of the step that ran only a case of a.test does not name it partial: $(cat "$T/$CASE/cards/c7.batchrec" 2>&1)"
+}
+
+# Bug it catches: as t_rerunfixpart, but the step after the fix fails (b.test's case flaky): its failed line named
+# no file partial (only a passing line did), so when a later step carried a.test's time from the first step, the
+# Tests page and its judge dated that time by the failed step, past the history's start (HISTFROM, testfiles.sh).
+t_rerunfailpart() {
+  rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky' '3 fail flaky' '4 fail flaky'
+  # shellcheck disable=SC2016 # expanded where the test command sources it
+  echo 'grep -qxF "pass	$CONVEYOR_TEST_FILE" "$RR" || printf "TESTRUN sec\t%s\t1\t1\n" "$CONVEYOR_TEST_FILE" >> "$L"' > "$STUB/pre"
+  ! rerunstep || fail "the first test step passed"
+  rerunedit 'echo x >> x.txt'; ! rerunstep || fail "the step after the fix passed, though b.test's case flaky fails"
+  grep -qxF '3 one' "$STUB/ran" || fail "the run after the fix did not run a.test's case one: $(cat "$STUB/ran")"
+  [ "$(jq -c .partial "$T/$CASE/cards/c7.failrec" 2>&1)" = '["a.test"]' ] \
+    || fail "the failed step after the fix, which ran only a case of a.test, does not name it partial on its line: $(cat "$T/$CASE/cards/c7.failrec" 2>&1)"
 }

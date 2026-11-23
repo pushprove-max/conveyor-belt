@@ -398,7 +398,7 @@ testproxy() { # <each test file of main's checkout>...
 # only its COVERED-BY lines (optimize).
 TESTLINE='select(test("\"step\":\"(test|picked|bugproof|blocked|closed|landed|review)\"")) | fromjson? | objects
   | def cut: if type == "string" then .[-1500:] else . end;
-  {card, issue, step, time, result} + if .step == "test" then {times, clocks, carried, reused, wait, run}
+  {card, issue, step, time, result} + if .step == "test" then {times, clocks, carried, partial, reused, wait, run}
       + (if .result == "fail" or .rerun != null then {verdicts, failures, rerun: (.rerun | if type == "object" and has("tail") then .tail |= cut else . end), tail: (.tail | cut)} else {} end)
     elif .step == "landed" then {sha, testedits} elif .step == "bugproof" then {speed} elif .step == "blocked" then {reason}
     elif .step == "review" then {reason: (.reason | if type == "string" then [split("\n")[] | select(test("^COVERED-BY: [^\\s:]+: "))] | join("\n") else . end)}
@@ -411,18 +411,18 @@ TESTLINE='select(test("\"step\":\"(test|picked|bugproof|blocked|closed|landed|re
 # as the same UTC text the records write (2026-11-21T00:00:00Z), so the text compares as the time does.
 # `startlines($s)` does it for the card test lines, oldest first: a line on or after the start, and of its times,
 # clocks and timed entries only those of a run on or after it. A file the line carried (`carried`: kept as passed, not
-# run) has the time of the latest earlier line of that card that did not carry it and is not a reused pass: that step ran
-# it (a failed step saves no times, so the later line that carries the file is the only record of its time); a time with
-# no such line is left out.
+# run) has the time of the latest earlier line of that card that did not carry it, did not run only some cases of it
+# (`partial`, testlist.sh partran()) and is not a reused pass: that step ran it whole (a failed step saves no times, so
+# the later line that carries the file is the only record of its time); a time with no such line is left out.
 HISTFROM='def fromstart($s): select($s == "" or ((.time | strings) >= $s));
   def startlines($s): if $s == "" then . else
     (reduce .[] as $l ({h: {}, out: []};
       ($l.card | tostring) as $c | ($l.carried | if type == "array" then . else [] end) as $cf | .h[$c] as $h
       | (reduce ((($l.times, $l.clocks) | objects | keys[]), ($l.timed | arrays | .[] | objects | .file | strings), $cf[]) as $f ({};
-          .[$f] = (if any($cf[]; . == $f) then ([$h[]? | select(.r != true and (.c | any(. == $f) | not))] | last | .t) else $l.time end))) as $o
+          .[$f] = (if any($cf[]; . == $f) then ([$h[]? | select(.r != true and (.c | any(. == $f) | not) and (.p | any(. == $f) | not))] | last | .t) else $l.time end))) as $o
       | .out += [$l | select((.time | strings) >= $s) | (.times, .clocks) |= (if type == "object" then with_entries(select(.key as $k | ($o[$k] | strings) >= $s)) else . end)
           | .timed |= (if type == "array" then map(select(.file as $k | ($o[$k] | strings) >= $s)) else . end)]
-      | .h[$c] += [{t: $l.time, c: $cf, r: ($l.reused == true)}])).out end;'
+      | .h[$c] += [{t: $l.time, c: $cf, p: ($l.partial | if type == "array" then . else [] end), r: ($l.reused == true)}])).out end;'
 histstart() { ctl 2>/dev/null | jq -r '.testsFrom // ""' 2>/dev/null || :; }
 # The retried lines, then the card records, as the Tests part reads them (TESTLINE), each from its summary (linesum());
 # nothing when they cannot be read.

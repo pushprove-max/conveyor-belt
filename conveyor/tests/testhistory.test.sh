@@ -280,3 +280,39 @@ t_thsurveyrows() {
     = '[{"file":"src/f.mjs","runs":[[2,true,false]]},{"file":"src/s.mjs","runs":[[6.25,true,false],[8,false,true]]}]' ] \
     || fail "the survey time of a file only a suite run or a filing puts on the page is not on its row: $(jq -c '[.files[] | select(.file | startswith("src/"))]' <<<"$got")"
 }
+
+# Bug it catches: a carried time was dated by a step that ran only some cases of the file, so a whole-file time from
+# before the start came back. p.test passed whole (900 CPU s) before the start; after it, a fix's step ran one case of
+# it (its line names it partial, with no time of it); then a step that ran another shared file again carried p.test's
+# 900 s from the runs before (testlist.sh timed(): <worktree>.oldtimes). That time is the first step's, so with the
+# start set no reader counts it: the partial step is not its source. q.test, of another card, is the same after the
+# start: passed whole (30 CPU s) at 12:01, one case of it ran in a failed step (testlist.sh carriedrec() names it
+# partial on a failed line too), then a passing step carried its 30 s. That time stays, dated 12:01, not by the
+# failed step.
+th_partfixture() {
+  setup '[]'
+  jq -cn '{card: "c-p", issue: 1, step: "test", time: "2026-11-10T00:00:00Z", result: "pass", times: {"p.test": 900}, clocks: {"p.test": 901}, timed: [{file: "p.test", sec: 901, cpu: 900}]}' >> "$ST/cards.jsonl"
+  jq -cn '{card: "c-p", issue: 1, step: "test", time: "2026-11-20T12:05:00Z", result: "pass", partial: ["p.test"]}' >> "$ST/cards.jsonl"
+  jq -cn '{card: "c-p", issue: 1, step: "test", time: "2026-11-20T12:10:00Z", result: "pass", times: {"p.test": 900, "s.test": 4}, clocks: {"p.test": 901, "s.test": 5}, timed: [{file: "p.test", sec: 901, cpu: 900}], carried: ["p.test"]}' >> "$ST/cards.jsonl"
+  jq -cn '{card: "c-q", issue: 2, step: "test", time: "2026-11-20T12:01:00Z", result: "pass", times: {"q.test": 30}, clocks: {"q.test": 31}}' >> "$ST/cards.jsonl"
+  jq -cn '{card: "c-q", issue: 2, step: "test", time: "2026-11-20T12:05:00Z", result: "fail", partial: ["q.test"], failures: {of: 1, files: [{file: "r.test", cases: [{name: "one"}]}], timeout: null}}' >> "$ST/cards.jsonl"
+  jq -cn '{card: "c-q", issue: 2, step: "test", time: "2026-11-20T12:10:00Z", result: "pass", times: {"q.test": 30, "r.test": 2}, clocks: {"q.test": 31, "r.test": 3}, carried: ["q.test"]}' >> "$ST/cards.jsonl"
+  loop test-settings history-start "$TH_START" || fail "the start $TH_START was not saved"
+}
+# The Tests page (testspart(): startlines()).
+t_thpartpage() {
+  local got; th_partfixture
+  got=$(th_as snapshot testspart 2026-11-09) || fail "testspart failed with the start $TH_START: $got"
+  [ "$(jq -c '[.files[] | select(.file == "p.test") | .runs[] | .cpu]' <<<"$got")" = '[]' ] \
+    || fail "with the start $TH_START, the Tests page keeps p.test's 900 s from before it, carried after a step that ran one case of it: $(jq -c '.files[] | select(.file == "p.test")' <<<"$got")"
+}
+# The Tests judge's facts (testfacts()).
+t_thpartfacts() {
+  local got; th_partfixture
+  got=$(th_as testaction testfacts p.test) || fail "testfacts p.test failed with the start $TH_START: $got"
+  [ "$(jq -c '[.runs[] | select(.times != null or .timed != null) | .time]' <<<"$got")" = '[]' ] \
+    || fail "with the start $TH_START, the facts for p.test keep its 900 s from before it, dated by a later step that ran one case of it: $got"
+  got=$(th_as testaction testfacts q.test) || fail "testfacts q.test failed with the start $TH_START: $got"
+  [ "$(jq -c '[.runs[] | select(.carried == true) | .time]' <<<"$got")" = '["2026-11-20T12:01:00Z"]' ] \
+    || fail "with the start $TH_START, the facts for q.test do not date its carried 30 s by the step that ran it whole (12:01), not the failed step that ran one case of it (12:05): $got"
+}

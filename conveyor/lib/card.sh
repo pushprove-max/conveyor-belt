@@ -192,8 +192,8 @@ cardsubject() { # <card> <issue json>
 # A failed (or held) test step's line, past its common fields: the run's record (testrec()), its reason (the exit, and
 # the timeout with the file still running when there was one), its failures (testfails()), the last 60 lines of its
 # output (its tail, each line whole), its first-run marks (firstrun()), the verdicts of what ran again on main
-# (mainred.sh verdicts()) and its carried part (testlist.sh carriedrec()).
-failline() { # <worktree> <exit> <seconds> <failures json, or null> <verdicts json> <carried json>
+# (mainred.sh verdicts()) and its carried and partial part (testlist.sh carriedrec()).
+failline() { # <worktree> <exit> <seconds> <failures json, or null> <verdicts json> <carried and partial json>
   tail -n 60 "$1.test" 2>/dev/null | tr -d '\000' | jq -cRs --slurpfile x <(testrec "$1" "$2" "$3") --slurpfile f <(printf '%s' "$4") --arg rc "$2" --slurpfile r <(firstrun "$1") --slurpfile v <(printf '%s' "$5") --slurpfile o <(printf '%s' "$6") \
     '$x[0] as $x | $f[0] as $f | $r[0] as $r | $v[0] as $v | $o[0] as $o | sub("\n+$"; "") as $t | $x + $o + {
        reason:("exit " + $rc + (if $f.timeout then ": timed out after \($f.timeout.sec)s" + (if $f.timeout.file then " in \($f.timeout.file)" else "" end) else "" end))}
@@ -292,7 +292,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
   local held # held: its test step waited for main or the machine (mainred.sh mainwait(), holdwait())
   local route # route: where a failed test run goes (testroute())
-  local cr # cr: a failed test line's carried part (testlist.sh carriedrec())
+  local cr # cr: a failed test line's carried and partial part (testlist.sh carriedrec())
   local mainsec=0 mwon # mwon: main's commit and the cases it waits on there (mainred.sh mainwait()); mainsec: the seconds it has waited for main to change or for the machine (mainwaited(), holdwaited()); its landed line's waitSec adds them to waitsec
   local repaired='' lane queued='' # repaired: the repair lane passed its test step (mainred.sh repairlane()), saying how; lane: its exit; queued: another card had the landing turn (gather()), so it waits for the next batch
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (donewhen.sh rereview()), reused when the last review stands (reusable())

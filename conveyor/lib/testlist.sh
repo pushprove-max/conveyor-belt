@@ -75,18 +75,25 @@ suiterec() { # <worktree> <full | release> <commit>
 }
 # Its test line's part: {timed: <worktree>.timed} when the run timed a test file the change adds or modifies,
 # {times: <worktree>.cpus, clocks: <worktree>.clocks} when it timed any file (times is {} when each was timed by the
-# clock only), {partial: <worktree>.partial} when it ran some cases of a file and timed none of it (partran()), and
-# carriedrec()'s part, else {}.
+# clock only), and carriedrec()'s part, its partial list the one slowtests() saved (<worktree>.partial): a landing
+# batch that runs no case (norun(), lib/claim.sh) removes the logs partran() reads before this line is written, else {}.
 slowrec() { # <worktree>
-  jq -cn --slurpfile t "$1.timed" --slurpfile c "$1.cpus" --slurpfile k "$1.clocks" --slurpfile p "$1.partial" --slurpfile o <(carriedrec "$1") '(if $t[0] | length > 0 then {timed: $t[0]} else {} end)
+  jq -cn --slurpfile t "$1.timed" --slurpfile c "$1.cpus" --slurpfile k "$1.clocks" --slurpfile o <(carriedrec "$1" "$1.partial") '(if $t[0] | length > 0 then {timed: $t[0]} else {} end)
     + (if ($c[0] | length > 0) or ($k[0] | length > 0) then {times: $c[0], clocks: $k[0]} else {} end)
-    + (if $p[0] | length > 0 then {partial: $p[0]} else {} end)
     + $o[0]' 2>/dev/null || echo '{}'
 }
-# A card's test line's part for the files its run kept as passed and did not run, though a run before timed them
-# (<worktree>.oldfiles, tests()): {carried: [file]}, else {}. Their times on the line are the earlier run's.
-carriedrec() { # <worktree>
-  jq -c 'if type == "array" and length > 0 then {carried: .} else {} end' "$1.oldfiles" 2>/dev/null || echo '{}'
+# A card's test line's part, a passing (slowrec()) or a failed one (cardfailed(), lib/cardland.sh), for the files
+# whose time on record is not this step's: {carried: [file]} for those its run kept as passed and did not run, though a
+# run before timed them (<worktree>.oldfiles, tests()), their times on the line the earlier run's; and {partial: [file]}
+# for those it ran some cases of and timed none of (partran(), or the list <partial file> holds when given). Else {}.
+# The Tests page and its judge date a carried time by the latest earlier step that ran the file whole (HISTFROM,
+# lib/testfiles.sh): a failed step that ran one case of it is not one, so its line names the file partial too.
+carriedrec() { # <worktree> [<partial file>]
+  local p
+  if [ -n "${2:-}" ]; then p=$(jq -c 'if type == "array" then . else [] end' "$2" 2>/dev/null) || p='[]'
+  else p=$(partran "$1" 2>/dev/null) || p='[]'; fi
+  { jq -c 'if type == "array" and length > 0 then {carried: .} else {} end' "$1.oldfiles" 2>/dev/null || echo '{}'; } \
+    | jq -c --slurpfile p <(printf '%s' "$p") '. + (if $p[0] | length > 0 then {partial: $p[0]} else {} end)' 2>/dev/null || echo '{}'
 }
 # The test results cache (README.md, Test file times: The test results cache; the owner, 2026-11-14): each test file a run passed whole,
 # with the inputs its command's log named for it (`TESTRUN inputs<TAB><file><TAB><input>...`), one a line in
