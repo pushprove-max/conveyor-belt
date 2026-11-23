@@ -266,3 +266,95 @@ t_swewaited() {
   o=$(waited '{"card":"c1","issue":1,"step":"landed","result":"ok"}')
   [ -z "$o" ] || fail "a card that landed ended the trial: $o"
 }
+
+# The stand-in docker with <shell code> run first on each call (its arguments "$@"), then the fixture's own.
+swedocker() { # <shell code>
+  mv "$SWE_FX/bin/docker" "$SWE_FX/bin/docker.real" && printf '%s\n' '#!/usr/bin/env bash' "$1" 'exec "$SWE_FX/bin/docker.real" "$@"' > "$SWE_FX/bin/docker" \
+    && chmod +x "$SWE_FX/bin/docker" || fail "the docker stand-in's hook was not made"
+}
+# A stand-in for timeout that gives the trial's command a limit of 1 s, and keeps the host process that runs it (its
+# parent) in $SWE_FX/trial.
+swetimeout1() {
+  printf '%s\n' '#!/usr/bin/env bash' 't=$(PATH=${PATH//"$SWE_FX/bin:"/} command -v timeout)' \
+    'case "$*" in *SWE_SB=*/work/*SWE_PROMPT=*) echo "$PPID" > "$SWE_FX/trial"; shift; exec "$t" 1 "$@" ;; esac' 'exec "$t" "$@"' \
+    > "$SWE_FX/bin/timeout" && chmod +x "$SWE_FX/bin/timeout" || fail "the timeout stand-in was not made"
+}
+# Run <id>'s conveyor trial on <task>, its checkout <main> in the sandbox, at Stop: the build's line (2M input: $2),
+# which swe_watch last read, and the review's (1M cache reads: $0.50), written since, in its container. A session goes
+# on there: it adds a fix line (1M cache reads) once Stop has read the records, at the run's end's docker ps (the list
+# of its containers to remove), unless it was ended before; that ps waits for its line or its end.
+swecostbox() { # <run id> <task> <main>
+  local s=$B/work/$2/$3/conveyor/state c=conveyor-swe-$1-conveyor-$2
+  mkdir -p "$s" "$SWE_FX/boxes/$c" && printf '%s\n' '{"card":"c1","issue":1,"step":"build","result":"ok","model":"bench-m","usage":{"input":2000000}}' \
+    '{"card":"c1","issue":1,"step":"start","result":"ok","of":"review"}' '{"card":"c1","issue":1,"step":"review","result":"GO","model":"bench-m","usage":{"read":1000000}}' > "$s/cards.jsonl" \
+    || fail "the trial's container and its card's lines were not made"
+  swedocker 'if [ "$1" = ps ]; then : > "$SWE_FX/go"; i=0; while [ ! -e "$SWE_FX/wrote" ] && kill -0 "$(cat "$SWE_FX/writer")" 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; fi' # sleep: the stand-in's ps holds Stop at its weak point while a session still running writes
+  docker exec "$c" bash -c 'echo $$ > "$SWE_FX/writer"; until [ -e "$SWE_FX/go" ]; do sleep 0.05; done
+    echo "{\"card\":\"c1\",\"issue\":1,\"step\":\"fix\",\"result\":\"ok\",\"model\":\"bench-m\",\"usage\":{\"read\":1000000}}" >> "$1/cards.jsonl"; : > "$SWE_FX/wrote"' _ "$s" > /dev/null 2>&1 &
+  # A poll on the session: it runs in the container (its process group the stand-in keeps) before Stop comes.
+  wait_until "[ -s '$SWE_FX/writer' ] && [ -n \"\$(ls '$SWE_FX/boxes/$c/groups' 2>/dev/null)\" ]" || fail "the session in the trial's container did not start"
+}
+# Bugs (#1454 R157): Stop kept the cost swe_watch last read of the trial it interrupted (at most every 2 s, and only
+# when the records changed), so a session's usage written after that read was lost; a session that went on in the
+# container wrote usage after Stop's read, before the container was removed. The cost Stop keeps is that of every line
+# in the container at the trial's end: $2.50 (the session ended before the read), never $2.50 with its fix line written.
+t_swestopcostlast() {
+  swe; local o id=r20261101T000000-4 t=proj__b-2
+  swecostbox "$id" "$t" swe-x
+  o=$(swefn 'sweliveseed "$1" "{\"arm\": \"conveyor\", \"task\": \"$2\", \"phase\": \"Reviewing\", \"start\": \"2026-01-01T00:00:00Z\", \"cost\": {\"usd\": 2, \"state\": \"known\", \"unpriced\": 0}}" \
+    && SWE_RUN=$1 SWE_KIND=conveyor SWE_ARMJ="{\"name\": \"conveyor\"}" && swe_end stopped && tail -n 1 "$SWE_DIR/runs.jsonl" | jq -c .interrupted.cost' "$id" "$t" 2>&1)
+  [ ! -e "$SWE_FX/wrote" ] || fail "Stop of run $id on $t left its session running after it read the trial's records: it wrote a fix line the cost leaves out ($o)"
+  [ "$o" = '{"usd":2.5,"state":"known","unpriced":0}' ] \
+    || fail "Stop of run $id on $t (cost last read \$2; a build and a review line in its container) did not keep the cost of the review line written since: $o"
+}
+# Bug (#1454 R157, review E2): Stop of a run whose process is gone read no records in its trial's container, so it
+# kept the cost swe_watch last read. Its column names its kind; its prices are the run's copy of the pack.
+t_swestopcostgone() {
+  swe; local o id=r20261119T000000-1 t
+  t=$(sweorder | head -n 1); swegone "$id"; swecostbox "$id" "$t" "swe-${R##*/}"
+  tune '.prices = {"bench-m": {input: 1, output: 2, cacheRead: 0.5}}'
+  mkdir -p "$B/frozen/conveyor/main/.conveyor" && cp "$R/.conveyor/project.json" "$B/frozen/conveyor/main/.conveyor/" \
+    && jq -c '.cols = [{arm: "conveyor", key: "k", kind: "conveyor"}] | .active.cost = {usd: 2, state: "known", unpriced: 0}' "$B/live.json" > "$B/l.new" && mv "$B/l.new" "$B/live.json" \
+    || fail "the run's copy of the pack or its column was not made"
+  o=$(loop bench swe stop "$id" 2>&1) || fail "stop failed: $o"
+  [ ! -e "$SWE_FX/wrote" ] || fail "Stop of gone run $id on $t left its session running after it read the trial's records: it wrote a fix line the cost leaves out"
+  o=$(tail -n 1 "$B/runs.jsonl" | jq -c .interrupted.cost)
+  [ "$o" = '{"usd":2.5,"state":"known","unpriced":0}' ] \
+    || fail "Stop of gone run $id on $t (cost last read \$2; a build and a review line in its container) did not keep the cost of the review line written since: $o"
+}
+
+# Bug (#1454 R155): the time limit ended only the host's docker client, as docker exec passes no signal on, so the
+# arm's command went on in the container while its patch was read, and a file it wrote after its limit was graded.
+# The stand-in's exec runs its script apart from its client, as a container does; the limit here is 1 s
+# (swetimeout1), the read of the change takes 3 s, and stub-late writes late.py 2 s after it starts.
+# loop: only a whole run gives the trial's command its time limit and grades the patch read after it.
+t_swetriallate() {
+  swe; local first o p r
+  first=$(sweorder | head -n 1)
+  r='if [ -e hello.py ]; then echo "print(\"hello\")" > hello.py; echo "{\"type\": \"done\"}"; else echo fixed > x.py; echo "{\"type\": \"done\"}"; (sleep 2; echo late > late.py) & sleep 4; fi' # sleep: the arm's late write after its limit, and its command still running past it
+  jq -n --arg r "$r" \
+    '{label: "Stub late", kind: "agent", login: ["claude"], preflight: "true", run: $r, fired: "any(.type == \"done\")", tokens: "map(.tokens // 0) | add", sessions: 1}' > "$SWE_FX/arms/stub-late.json" \
+    || fail "the arm was not made"
+  swetimeout1; swedocker 'case "$*" in *SWE_SB=*/work/*"git add -A"*) sleep 3 ;; esac' # sleep: the slow read of the change, longer than the arm takes to write late
+  o=$(loop bench swe 1 --arm stub-late 2>&1) || fail "the run failed: $o"
+  p=$(echo "$B"/results/stub-late*/"$first.patch")
+  jq -e '.timedOut == true' "$B"/results/stub-late*/"$first.json" > /dev/null && grep -q '^+fixed' "$p" \
+    || fail "the trial of stub-late on $first did not reach its 1 s limit with x.py fixed: $(cat "$B"/results/stub-late*/"$first.json" "$p" 2>&1) $o"
+  ! grep -q late "$p" || fail "the graded patch of stub-late on $first holds late.py, written 2 s after its 1 s limit: $(cat "$p")"
+}
+
+# Bug (#1454 R155, review E3): when a conveyor arm's docker client ended at its time limit, swe_watch read its
+# container once more while the engine went on there, and the engine was stopped only after that read, so a fix it
+# landed in that time was graded. The engine holds ($SWE_FX/hold) past its 1 s limit (swetimeout1); a swe_watch read
+# once the trial's host process has ended lets it go and waits for it to end: an engine still running lands "fixed".
+# loop: only a whole run gives the trial's command its time limit, watches it and grades the patch read after it.
+t_swetriallatecv() {
+  swe; local first o
+  first=$(sweorder | head -n 1); : > "$SWE_FX/hold"; swetimeout1
+  swedocker 'case "$*" in *"tail -n 200"*) p=$(cat "$SWE_FX/trial" 2>/dev/null); if [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; then rm -f "$SWE_FX/hold"
+    e=$(cat "$SWE_FX/pid" 2>/dev/null); i=0; while [ -n "$e" ] && kill -0 "$e" 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; fi ;; esac' # sleep: the stand-in's read holds swe_watch at its weak point while an engine still running lands
+  o=$(loop bench swe 1 2>&1) || fail "the run failed: $o"
+  [ -s "$SWE_FX/pid" ] && [ -s "$SWE_FX/trial" ] || fail "the trial's engine did not start under its 1 s limit: $o"
+  jq -e '.resolved == false' "$B"/results/*/"$first.json" > /dev/null && ! grep -q fixed "$B"/results/*/"$first.patch" \
+    || fail "the trial on $first graded the fix its engine landed after its 1 s limit, while swe_watch read its container: $(cat "$B"/results/*/"$first.patch" 2>&1) $o"
+}

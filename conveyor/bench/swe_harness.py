@@ -183,6 +183,12 @@ def diff_files(text):
     return files
 
 
+# {new path: old path} of the files a git diff renames (its rename from / rename to lines): diff_files names each
+# by its new path alone.
+def renames(text):
+    return {m.group(2): m.group(1) for m in re.finditer(r'^rename from (.*)\nrename to (.*)$', text, re.MULTILINE)}
+
+
 # The size of a diff's files, split into code and test files.
 def diff_size(files):
     r = {k: {'files': 0, 'added': 0, 'removed': 0} for k in ('code', 'test')}
@@ -242,14 +248,17 @@ def ruff_findings(folder, paths, cwd):
 
 
 # True when ruff finds nothing in the patch's python files that those files did not have at the base commit (a line
-# that moved is not new; a file the patch adds starts with nothing). None when it could not be measured.
-def lint_clean(box, patch, py, cache):
+# that moved is not new; a file the patch adds starts with nothing). A file the patch renames (<moved>: {new path: old
+# path}) is read at the base from its old path, under its new one (what it had before is not new), and is put at its
+# old path for the patch to apply. None when it could not be measured.
+def lint_clean(box, patch, py, moved, cache):
     before, after = tempfile.mkdtemp(prefix='before', dir=cache), tempfile.mkdtemp(prefix='after', dir=cache)
     for p in py:
+        src = moved.get(p, p)
         os.makedirs(os.path.dirname(os.path.join(before, p)), exist_ok=True)
-        os.makedirs(os.path.dirname(os.path.join(after, p)), exist_ok=True)
-        if run(['docker', 'cp', f'{box}:/testbed/{p}', os.path.join(before, p)]).returncode == 0:
-            shutil.copy(os.path.join(before, p), os.path.join(after, p))
+        os.makedirs(os.path.dirname(os.path.join(after, src)), exist_ok=True)
+        if run(['docker', 'cp', f'{box}:/testbed/{src}', os.path.join(before, p)]).returncode == 0:
+            shutil.copy(os.path.join(before, p), os.path.join(after, src))
     if run(['git', 'apply', '--include=*.py', patch], cwd=after).returncode != 0:
         return None
     old = ruff_findings(before, [p for p in py if os.path.exists(os.path.join(before, p))], cache)
@@ -284,7 +293,8 @@ def proves_fix(box, patch, row, tests):
 # named box so that the run's end removes it when this process is stopped.
 def checks(row, patch, image, box, cache):
     with open(patch) as f:
-        files = diff_files(f.read())
+        text = f.read()
+    files, moved = diff_files(text), renames(text)
     py = [p for p in files if p.endswith('.py')]
     out = {'lintClean': True, 'provesFix': False}
     if not py:
@@ -300,7 +310,7 @@ def checks(row, patch, image, box, cache):
     try:
         if run(['docker', 'run', '-d', '--name', box, image, 'sleep', 'infinity']).returncode != 0:
             return {'lintClean': None, 'provesFix': None}
-        return {'lintClean': measured(lint_clean, py, cache), 'provesFix': measured(proves_fix, row, tests)}
+        return {'lintClean': measured(lint_clean, py, moved, cache), 'provesFix': measured(proves_fix, row, tests)}
     except OSError:
         return {'lintClean': None, 'provesFix': None}
     finally:

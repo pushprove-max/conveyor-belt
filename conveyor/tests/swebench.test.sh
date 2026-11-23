@@ -57,7 +57,7 @@ if [ -e "$SWE_FX/ewait" ]; then
 fi
 # The project name this checkout's loop takes, as the real engine names it (and its machine slot file after it).
 (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && echo "$RTAG" > "$SWE_FX/rtag")
-J='{"model":"m","tokens":{"claude":5,"codex":0},"accepted":[],"declined":[]}' # a judge session on the review
+J='{"model":"m","sec":3,"tokens":{"claude":5,"codex":0},"accepted":[],"declined":[]}' # a judge session that ran on the review
 if [ "$V" = B ] && [[ $t == *a-1 ]]; then rec review NO-GO '[P1] x.py:1 the fix is wrong' "$J" '' '{"P0":0,"P1":2,"P2":1,"P3":0}'; rec fix ok; rec review NO-GO '[P1] x.py:1 still wrong' "$J" $'[P1] x.py:1 still wrong\n[P2] y.py:2 past the cut reason' '{"P0":0,"P1":1,"P2":1,"P3":0}'; rec blocked blocked 'review: the last review said NO-GO'; exit 0; fi
 cp "$CONVEYOR_MAIN/conveyor/state/control.json" "$SWE_FX/control.seen"; cp "$CONVEYOR_MAIN/.conveyor/project.json" "$SWE_FX/pack.seen"; (set -- run; HERE=$SWE_SRC; . "$SWE_SRC/lib/paths.sh" && . "$SWE_SRC/lib/prompts.sh" && cardrules "$(gh issue view 1)") > "$SWE_FX/rules.seen" 2>&1
 gh issue view 1 > "$SWE_FX/issue.seen" 2>&1 # the task's issue, as the card's gh gives it (its priority label)
@@ -99,10 +99,13 @@ EOF
   # A stand-in for Docker: a container is a folder under $SWE_FX/boxes, its home the folder's home; exec runs the script
   # on this machine in that home, with none of the caller's login, Git identity or checkout variables, and git takes
   # its identity from its config only (a task's image has no usable host name to make one from). Every call is kept in
-  # $SWE_FX/docker.log; with $SWE_FX/nodocker, Docker does not answer.
+  # $SWE_FX/docker.log; with $SWE_FX/nodocker, Docker does not answer. As in a container, an exec's script runs in a
+  # process group of its own (the box's groups folder) that a client which ends leaves running, until the box's rm or
+  # a root `sh -c 'kill -9 -1'` in it ends every group of the box; any other root exec does nothing.
   mkdir -p "$F/bin" "$F/arms" && cat > "$F/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 B=$SWE_FX/boxes; echo "$*" >> "$SWE_FX/docker.log"
+boxkill() { local g; for g in "$B/$1"/groups/*; do [ ! -e "$g" ] || kill -9 -- "-${g##*/}" 2>/dev/null; done; }
 case $1 in
   info) [ ! -e "$SWE_FX/nodocker" ] ;;
   create) shift; while [ "${1#-}" != "$1" ]; do [ "$1" != --name ] || n=$2; shift 2; done; mkdir -p "$B/$n/home" ;;
@@ -110,9 +113,11 @@ case $1 in
   start) [ -d "$B/$2" ] ;;
   exec) shift; e=(); w=.; u=''
     while [ "${1#-}" != "$1" ]; do case $1 in -i) shift ;; -u) u=$2; shift 2 ;; -w) w=$2; shift 2 ;; -e) e+=("$2"); shift 2 ;; *) exit 1 ;; esac; done
-    n=$1; shift; [ -d "$B/$n" ] || exit 1; [ "$u" != 0 ] || exit 0
-    cd "$w" && exec env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u CONVEYOR_MAIN -u CONVEYOR_CARDS -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL -u EMAIL GIT_CONFIG_PARAMETERS="'user.useconfigonly'='true'" HOME="$B/$n/home" "${e[@]}" "$@" ;;
-  rm) shift; [ "$1" != -f ] || shift; [ -d "$B/$1" ] || exit 1; echo "$1" >> "$SWE_FX/removed"; rm -rf "$B/$1" ;;
+    n=$1; shift; [ -d "$B/$n" ] || exit 1; if [ "$u" = 0 ]; then [ "$*" != 'sh -c kill -9 -1' ] || boxkill "$n"; exit 0; fi
+    cd "$w" && mkdir -p "$B/$n/groups" || exit 1
+    set -m; ( set +m; exec env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u CONVEYOR_MAIN -u CONVEYOR_CARDS -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL -u EMAIL GIT_CONFIG_PARAMETERS="'user.useconfigonly'='true'" HOME="$B/$n/home" "${e[@]}" "$@" ) & p=$!; set +m
+    : > "$B/$n/groups/$p"; wait "$p"; r=$?; rm -f "$B/$n/groups/$p"; exit "$r" ;;
+  rm) shift; [ "$1" != -f ] || shift; [ -d "$B/$1" ] || exit 1; boxkill "$1"; echo "$1" >> "$SWE_FX/removed"; rm -rf "$B/$1" ;;
   image) [ "$2" = inspect ] && echo 4100000000 ;; # the task image's size: 4.1 GB
   ps) ls "$B" 2>/dev/null ;; # every container, whatever the filter: the caller picks its own by name
   *) exit 1 ;;
@@ -183,7 +188,8 @@ t_swepresets() {
   { read -r first; read -r second; } < <(sweorder)
   out=$(loop bench swe 1 2>&1) || fail "swe 1 failed: $out"
   [ "$(cat "$SWE_FX/log")" = "B SWE-bench $first" ] || fail "swe 1 did not build the first task of the pinned order ($first) with main's engine: $(cat "$SWE_FX/log")"
-  grep -q "Expected: about 2 sessions (worst case 8)" <<<"$out" || fail "the run did not say the sessions expected before it began (worst case: build, 3 reviews, 2 fixes, a test fix and its review): $out"
+  # Bug (#1454 R148): the worst case left out the retry of a review that ended with no verdict: each of the 4 runs twice.
+  grep -q "Expected: about 2 sessions (worst case 12)" <<<"$out" || fail "the run did not say the sessions expected before it began (worst case: build, 3 reviews, 2 fixes, a test fix and its review, each review run twice): $out"
   # Bug: every sandbox's checkout was named main, so the benchmarks of two projects running at once took one project
   # name, main, and shared one machine slot file (lib/pick.sh), each loop leaving the other's cards out of its count.
   [ "$(cat "$SWE_FX/rtag")" = "swe-${R##*/}" ] || fail "the sandbox's loop does not take a name of this project's own: $(cat "$SWE_FX/rtag" 2>&1)"
@@ -494,7 +500,7 @@ t_swewrong() {
   first=$(sweorder | head -n 1)
   jq -c '.judgeOn = true' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json"
   out=$(loop bench swe 1 --engine v1.0.0 2>&1) || fail "the run on v1.0.0 failed: $out"
-  grep -q "Expected: about 2 sessions (worst case 12)" <<<"$out" || fail "the worst case leaves out a judge session for each of the 4 reviews, or the test fix and its review: $out"
+  grep -q "Expected: about 2 sessions (worst case 16)" <<<"$out" || fail "the worst case leaves out a judge session for each of the 4 reviews, the test fix and its review, or each review's retry: $out"
   echo "$first" > "$SWE_FX/wrong"
   out=$(loop bench swe 1 2>&1) || fail "the run on main failed: $out"
   grep -q "1/1 $first: unresolved$" <<<"$out" && jq -e '.resolved == false' "$B"/results/*-"$EB/$first.json" > /dev/null \

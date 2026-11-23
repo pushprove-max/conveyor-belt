@@ -403,3 +403,13 @@ t_swerelnamefetched() {
   [ "$(jq -r '.state + " " + .cols[1].version' "$B/live.json")" = "refused v1.1.0" ] \
     || fail "the refused run of $c, the commit of v1.1.0, which the origin has and the checkout has not fetched, does not name v1.1.0: $(cat "$B/live.json")"
 }
+
+# Bug (#1454 R166): a spec of two JSON objects passed the check (jq read each as an object, one a line), the calls
+# after it then failed on two lines, and the save wrote an empty arm, arm-e3b0c44298fc, which show refuses. Two
+# values are no one JSON object: nothing is saved.
+t_swearmsavetwo() {
+  swe; local o s='{"kind":"agent","recipe":"solo","cli":"claude","model":"m"} {"kind":"agent","recipe":"solo","cli":"claude","model":"m"}'
+  o=$(loop bench swe arms save Example "$s" 2>&1) && fail "bench swe arms save Example '$s' saved: $o"
+  [ "$o" = "conveyor: the arm's spec is not a JSON object; nothing saved" ] || fail "bench swe arms save Example '$s' did not say its spec is not a JSON object: $o"
+  [ -z "$(ls "$B/arms" 2>/dev/null)" ] || fail "bench swe arms save Example '$s' wrote an arm: $(ls "$B/arms")"
+}

@@ -72,7 +72,8 @@ swe_choices() {
 # add a model to the project's choices (swe_pack adds a host arm's seat models to the sandbox's list, never a saved one's).
 swe_armsave() { # <name> <spec json>
   local s w id
-  s=$(jq -cSe 'objects' <<<"$2" 2>/dev/null) || { echo "conveyor: the arm's spec is not a JSON object; nothing saved" >&2; return 1; }
+  # One value, read whole: two objects would be two lines, which the jq calls below cannot take as one.
+  s=$(jq -cSse 'select(length == 1) | .[0] | objects' <<<"$2" 2>/dev/null) || { echo "conveyor: the arm's spec is not a JSON object; nothing saved" >&2; return 1; }
   w=$(swe_armwhy "$1" "$s")
   [ -z "$w" ] || { echo "conveyor: $w; nothing saved" >&2; return 1; }
   id=arm-$(jq -cSn --arg n "$1" --argjson s "$s" '{name: $n, spec: $s}' | sha256sum | cut -c1-12)
@@ -154,7 +155,7 @@ swe_armkey() { # <arm json> <engine commit, conveyor kind> <model>
 # Board's history, Compare, a check's request read for the arms' list).
 # Sets the caller's o to that folder and PACK, the pack packget reads, to the pack there: the caller makes both local.
 swe_root() {
-  if [ -n "${SWE_FZ:-}" ]; then o=$SWE_FZ/main; PACK=$o/.conveyor/project.json; else o=$MAIN; fi
+  if [ -n "${SWE_FZ:-}" ]; then o=$SWE_FZ/main; PACK=$o/.conveyor/project.json; else o=${MAIN-}; fi
 }
 # A run's copy of what a conveyor arm's sandbox reads of the project, taken once at the run's start, so every task of
 # the run builds on the same seats, policy and rules, even when the project's change while it runs (a check's too,
@@ -409,10 +410,15 @@ swe_trial() { # as swe_trialrun
   if flock -s "$f"; then swe_trialrun "$@"; rc=$?; else echo "the dataset lock $SWE_DSLOCK could not be taken"; rc=1; fi
   exec {f}>&-; return $rc
 }
+# A trial's container, named with the run's ID (a check's, check), which a run's end and a Stop find it by; and the
+# end of every process in it but its sleep (PID 1): a time limit, or a kill, ends only the host's docker client, as
+# docker exec passes no signal on, so the arm's command goes on in the container until then.
+swe_boxname() { local n; n=conveyor-swe-${SWE_RUN:-check}-$(jq -r .name <<<"$1")-$2; printf '%s\n' "${n//[^A-Za-z0-9_.-]/-}"; } # <arm json> <task id>
+swe_boxstop() { timeout "${2:-60}" docker exec -u 0 "$1" sh -c 'kill -9 -1' > /dev/null 2>&1; } # <container> [seconds]
 swe_trialrun() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor kind> [<logins>: a check's, fixed at its admission; else swe_logins now]
-  local sb=$2 a=$3 h=$2.h base t0 c rc='' run why='' kind eng='' to b n p=0 ended='' wc='' lw lf=''
+  local sb=$2 a=$3 h=$2.h base t0 c rc='' run why='' kind eng='' to b p=0 ended='' wc='' lw lf=''
   base=$(jq -r .base <<<"$1"); t0=$(date +%s); kind=$(jq -r .kind <<<"$a"); to=$(swe_set .taskTimeout)
-  n=conveyor-swe-${SWE_RUN:-check}-$(jq -r .name <<<"$a")-$(jq -r .id <<<"$1"); c=${n//[^A-Za-z0-9_.-]/-}
+  c=$(swe_boxname "$a" "$(jq -r .id <<<"$1")")
   { chmod -R u+w "$h"; rm -rf "$h"; } 2>/dev/null; mkdir -m 700 "$h" && : > "$h/out" || { echo "its trial's folder $h could not be made"; return 1; }
   { printf '%s\n\n' "$SWE_ASK"; jq -r .issue <<<"$1"; } > "$sb/prompt" && jq -r '.exclude // [] | .[]' <<<"$a" >> "$sb/$SWE_MAIN/.git/info/exclude" \
     || { echo "its task's prompt could not be written in the sandbox"; return 1; }
@@ -434,8 +440,10 @@ swe_trialrun() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor k
     why="its preflight command failed: $(cliwords "$(tail -n 20 "$h/install.log")" | tail -n 2 | paste -sd ' ' -)"
   else
     swe_ckstep 'Running the trivial task'
-    # A run's task shows the step the command is at while it runs (swe_watch, bench/swe.sh).
-    swe_in "$to" "$c" "$sb/$SWE_MAIN" "$run" "SWE_SB=$sb" "SWE_PROMPT=$sb/prompt" "SWE_MODEL=${SWE_MODEL:-}" "SWE_EFFORT=$(jq -r '.effort | strings' <<<"$a")" < /dev/null > "$h/out" 2> "$h/err" &
+    # A run's task shows the step the command is at while it runs (swe_watch, bench/swe.sh). The container's
+    # processes end as its docker client ends (swe_boxstop), before swe_watch's last read and the patch's.
+    { swe_in "$to" "$c" "$sb/$SWE_MAIN" "$run" "SWE_SB=$sb" "SWE_PROMPT=$sb/prompt" "SWE_MODEL=${SWE_MODEL:-}" "SWE_EFFORT=$(jq -r '.effort | strings' <<<"$a")"
+      rc=$?; swe_boxstop "$c"; exit "$rc"; } < /dev/null > "$h/out" 2> "$h/err" &
     local j=$!; swe_watch "$j" "$c" "$kind" "$sb"; wait "$j"; rc=$?
     # A card that only waited (swe_watch stopped its command) ended the trial: its change is graded, as a card's that
     # ended, and ended says why.
@@ -454,6 +462,7 @@ swe_trialrun() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor k
   # there, so a host read or write could follow its symlink to a host file, and the checkout's .git/config could make
   # the host's git run the arm's code (a clean filter, an external diff).
   swe_ckstep 'Reading its change'; [ -z "${SWE_TASK:-}" ] || swe_phase 'Reading patch'
+  swe_boxstop "$c" # again: swe_watch's kill of a card that only waited ends the host's processes before they do it
   # A card that waited has landed nothing on main: its change is what its worktree (<sb>/cards/<card>) has staged, as
   # the engine stages the fix before its tests and commits it only to land.
   swe_in 600 "$c" "$sb/$SWE_MAIN" 'if [ -n "$SWE_CARD" ]; then git -C "$SWE_SB/cards/$SWE_CARD" diff --binary --no-ext-diff --no-textconv --cached "$SWE_BASE" --
@@ -471,14 +480,7 @@ swe_trialrun() { # <task json> <sb> <arm json> <engine's conveyor.sh, conveyor k
   [ "$p" = 0 ] || { echo "its change could not be read in its container"; return 1; }
   local secs=$(( $(date +%s) - t0 ))
   if [ "$kind" = conveyor ]; then
-    b=$(jq -sc --argjson m "$secs" 'map(select(.issue == 1 and (.step | IN("start", "picked", "worktree", "deps", "brief") | not))) as $s
-      | {fixRounds: ($s | map(select(.step == "fix")) | length),
-         findingsFixed: ([range($s | length) as $i | select($s[$i].step == "review" and $s[$i].result == "NO-GO" and ($s[$i + 1:] | any(.step == "fix")))
-           | $s[$i].counts | objects | add // 0] | add // 0),
-         sessions: ($s | map(select(.step | IN("build", "review", "fix", "rebase"))) | length) + ($s | map(select(.judge | type == "object")) | length),
-         tokens: ($s | map((.tokens.claude // 0) + (.tokens.codex // 0) + (.judge.tokens.claude // 0) + (.judge.tokens.codex // 0)) | add // 0),
-         minutes: ($m / 6 | round / 10), steps: ($s | map({step, result, reason, time, tokens} + if .step == "review" and .result != "GO" and has("tail") then {tail} else {} end
-           + ({model, usage, byModel: .stats.byModel?, judge: (.judge | if type == "object" then {model, usage} else null end)} | with_entries(select(.value != null)))))}' "$h/cards.jsonl" 2>/dev/null) \
+    b=$(swe_cardsum "$secs" "$h/cards.jsonl" 2>/dev/null) \
       && b=$(jq -c --argjson k "$(cat "$h/cards.jsonl" "$h/live" "$h/reviewer" 2>/dev/null | swe_cost)" '. + {cost: $k}' <<<"$b") \
       || b=$(jq -nc --argjson m "$secs" '{sessions: 0, tokens: 0, minutes: ($m / 6 | round / 10), steps: [], cost: {usd: null, state: "unknown", unpriced: null, basis: {}}}')
     # An engine that built no card (its pack refused, its loop failed) did not fire.

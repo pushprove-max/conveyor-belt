@@ -158,6 +158,27 @@ t_swegradelintclean() {
   # Clean is resolved, lint clean, size 1 here (at most 2) and no strays: all four hold.
   [ "$(jq -c .measures.clean <<<"$out")" = true ] || fail "a resolved, lint clean patch of the reference fix's size in its own file is not clean true: $out"
 }
+# A patch (git diff text, with rename detection as the trial's diff makes it) that renames lib/x.py to lib/y.py, with
+# one hunk from line 1: <old> lines of the base's file and <new> of the patch's, given as the hunk's lines.
+swerenamed() { # <old count> <new count> <hunk line>...
+  printf '%s\n' 'diff --git a/lib/x.py b/lib/y.py' 'similarity index 80%' 'rename from lib/x.py' 'rename to lib/y.py' '--- a/lib/x.py' '+++ b/lib/y.py' \
+    "@@ -1,$1 +1,$2 @@"; shift 2; printf '%s\n' "$@"
+}
+# Bug (#1454 R167): the lint of a patch that renames a Python file was not measured (lintClean null): only the new
+# path was copied from the base, where it is not, so the patch did not apply. Here the rename adds an unused import.
+t_swegradelintrename() {
+  local out; swegradefx "$T/$CASE"; swebase lib/x.py 'import os\n\n\ndef f():\n    return os.getcwd()\n'
+  out=$(swegrade '["t1","t2","t3","t4"]' "$(swerenamed 5 6 ' import os' '+import sys' ' ' ' ' ' def f():' '     return os.getcwd()')") || fail "the grade failed: $out"
+  [ "$(jq -c .measures.lintClean <<<"$out")" = false ] || fail "a patch that renames lib/x.py to lib/y.py and adds an unused import is not lintClean false: $out"
+}
+# The base's own findings of a file the patch renames are not new: the unused import lib/x.py had at the base, still
+# in lib/y.py, leaves the patch lintClean true (read under the old path alone, it would be new in lib/y.py).
+t_swegradelintmoved() {
+  local out; swegradefx "$T/$CASE"; swebase lib/x.py 'import os\nimport json\n\n\ndef f():\n    return os.getcwd()\n'
+  out=$(swegrade '["t1","t2","t3","t4"]' "$(swerenamed 6 6 ' import os' ' import json' ' ' ' ' ' def f():' '-    return os.getcwd()' '+    return os.getcwd() + "/"')") \
+    || fail "the grade failed: $out"
+  [ "$(jq -c .measures.lintClean <<<"$out")" = true ] || fail "a patch that renames lib/x.py, whose unused import was there at the base, to lib/y.py is not lintClean true: $out"
+}
 
 # Bug: clean ignored the size limit: a resolved, lint clean patch with no strays that changes 8 code lines against the
 # reference fix's 2 (size 4, over 2) was counted clean.
@@ -447,6 +468,18 @@ t_swegradefaillogs() {
   out=$(SWE_FIRST=$first CONVEYOR_BENCH_PYTHON=$T/$CASE/py loop bench swe 2 --arm stub-a 2>&1) || fail "the run failed: $out"
   grep -q "^1/2 $first: not run: the harness could not grade it (exit 1)$" <<<"$out" || fail "the first task's grade did not fail: $out"
   [ -e "$SWE_FX/evals-left" ] && [ ! -s "$SWE_FX/evals-left" ] || fail "the failed grade of $first left its hidden tests in the run's folder: $(cat "$SWE_FX/evals-left" 2>&1)"
+}
+
+# Bug (#1454 R134): a grade that exited 3 (the harness's evaluation wrote no report) after the trial ran said the
+# harness could not fetch or build the task's image, and the run's ran left that trial out, so the Board's Plan
+# overstated the share of the week one trial uses. The harness in front of the fixture's exits 3 on the grade.
+t_swegradefailran() {
+  swe; local out first; first=$(sweorder | head -n 1)
+  printf '%s\n' '#!/usr/bin/env bash' '[ "$2" != grade ] || exit 3' 'exec "$SWE_FX/py" "$@"' > "$T/$CASE/py" && chmod +x "$T/$CASE/py" || fail "the harness was not made"
+  out=$(CONVEYOR_BENCH_PYTHON=$T/$CASE/py loop bench swe 1 --arm stub-a 2>&1) || fail "the run failed: $out"
+  grep -q "^1/1 $first: not run: the harness could not grade it (exit 3)$" <<<"$out" || fail "the grade that exited 3 after the trial ran does not say the harness could not grade it: $out"
+  out=$(loop bench swe history 2>&1) && [ "$(jq -c '[.runs[0].cols[0] | .ran, .notRun]' <<<"$out")" = '[1,1]' ] \
+    || fail "the run's ran leaves out the trial whose grade failed (or its notRun does not count the task): $(jq -c '.runs[0].cols' <<<"$out" 2>&1 || echo "$out")"
 }
 
 # Bug: a trial whose command failed on its login (an expired sign-in) was kept as the arm's unresolved result, so

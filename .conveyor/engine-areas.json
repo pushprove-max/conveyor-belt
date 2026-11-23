@@ -1591,6 +1591,7 @@
 {"area": "bench", "test": "swebenchstop.test.sh"}
 {"area": "bench", "test": "swebenchruns.test.sh"}
 {"area": "bench", "test": "swebenchgrade.test.sh"}
+{"area": "bench", "test": "swebenchcount.test.sh"}
 {"area": "bench", "test": "cardrules.test.sh"}
 {"area": "busy", "test": "swebench.test.sh"}
 {"area": "busy", "test": "swebencharms.test.sh"}
