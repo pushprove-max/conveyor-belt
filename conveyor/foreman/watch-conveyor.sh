@@ -269,17 +269,20 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
 # blocked since two polls or more before <now> that no session has got: no wake was put for it (its key is not in
 # conveyor-reported.txt: no watcher ran), or its wake is still in pending (no live session took it), or was relayed at
 # the stop sent-stop names, which stop.sh refused (refused-stops): the waiter relays that wake again (waiter.sh). One
-# line each, "<repo>: not yet reported: blocked <the card: #N, or a main-red fix card's name>".
+# line each, "<repo>: not yet reported: blocked <the card: #N, or a main-red fix card's name>". A wake line and a problem
+# line are matched without the "(as of HH:MMZ)" either may end with (PROBLEMS: a snapshot behind the card records), as
+# the wake and the snapshot read now can differ in it alone.
 unreported() {
   local pend k=''
   pend=$(cat "$PENDING"/*.wake 2>/dev/null)
   { read -r k < "$FD/sent-stop"; } 2>/dev/null
   [ -z "$k" ] || ! grep -qxF -- "$k" "$REFUSED" 2>/dev/null || pend+=$'\n'$(cat "$PENDING"/*.wake.sent-* 2>/dev/null)
   jq -rRs --argjson now "$1" --argjson poll "$POLL" --arg seen "$(cat "$SEEN" 2>/dev/null)" \
-    --arg pend "$pend" '($seen | split("\n")) as $seen | ($pend | split("\n")) as $pend
+    --arg pend "$pend" 'def bare: sub(" \\(as of [0-9]{2}:[0-9]{2}Z\\)$"; "");
+    ($seen | split("\n")) as $seen | ($pend | split("\n") | map(bare)) as $pend
     | split("\n")[] | select(. != "") | split("\t") | select(.[2] == "blocked") | .[0] as $repo | .[4] as $text
     | ($text | capture(" is blocked since (?<t>[0-9T:-]+Z):") | .t | fromdate? // empty) as $t
-    | select($now - $t >= 2 * $poll and (("\($repo)/\(.[1])" | IN($seen[]) | not) or ("\($repo): \($text)" | IN($pend[]))))
+    | select($now - $t >= 2 * $poll and (("\($repo)/\(.[1])" | IN($seen[]) | not) or ("\($repo): \($text)" | bare | IN($pend[]))))
     | "\($repo): not yet reported: blocked \($text | sub(" is blocked since .*$"; ""))"'
 }
 
