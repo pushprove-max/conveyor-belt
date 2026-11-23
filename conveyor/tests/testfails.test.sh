@@ -364,6 +364,20 @@ EOF
   [ "$f" = '[2,{"sec":2,"file":"tests/my slow file.test.sh "},[]]' ] \
     || fail "a timeout does not name, whole to its last space, the file with spaces in its name that was still running: $f"
 }
+# Bug it catches (E1 of the #1461 follow-up): two files past their own limits (filecmd()'s `-- timeout` line, no end
+# line) left the timeout naming the last alone, so the Tests judge told the first one's partial run as a pass.
+# stopped names each file begun and not ended, and not the file between them that passed.
+t_testfailsstopped() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+L=$CONVEYOR_TEST_LOG/run.log
+echo "== tests/a.test.sh" | tee -a "$L"; echo "-- timeout tests/a.test.sh" >> "$L"
+echo "== tests/b.test.sh" | tee -a "$L"; echo "-- ok tests/b.test.sh" >> "$L"
+echo "== tests/c.test.sh" | tee -a "$L"; echo "-- timeout tests/c.test.sh" >> "$L"
+EOF
+  f=$(logfails 124 2 | jq -c '[.timeout, .stopped]') || fail "the failures could not be read"
+  [ "$f" = '[{"sec":2,"file":"tests/c.test.sh"},["tests/a.test.sh","tests/c.test.sh"]]' ] \
+    || fail "a run (exit 124) where tests/a.test.sh and tests/c.test.sh timed out and tests/b.test.sh passed: stopped does not name both timed-out files alone: $f"
+}
 
 # Bug: a test command that writes no runner log (a pack that runs one test file itself) had its failing cases under
 # no file: the Board could not say what failed. Such a run is one file, the command (the pack's test.command).

@@ -40,7 +40,8 @@
 # ended ok (tests() runs them no more on the same change); okcases, of each other file, the cases a line `ok <case>`
 # (or node's `✔ <name> (<n>ms)`, or TAP's `ok <n> - <name>`) under it says passed (a runner killed part-way runs
 # them no more); passcases, the same of each file that passed (what a batch that takes the card need not run again:
-# testlist.sh passlist()). A run whose command wrote no such
+# testlist.sh passlist()); stopped, with a timeout only, each file begun and not ended (its own limit stopped it, or
+# the run's did): timeout names only the last of them, and another file's cases may have passed. A run whose command wrote no such
 # log is one file, named by the command (test.command): its cases are that file's, and a timeout is in it. An output
 # that is no run's (norun(): no log folder) names no file.
 # A case's line ends with where it failed, ` (at <file>:<line>: <that line's text>)`, when a stack trace follows a
@@ -145,7 +146,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
        passed: $passed,
        okcases: [.oks | to_entries[] | .key as $f | select(IN($passed[]; $f) | not)
          | {file: $f, cases: ((.value | unique) - [$fs[] | select(.file == $f) | .cases[].name])} | select(.cases != [])],
-       passcases: [.oks | to_entries[] | select(IN($passed[]; .key)) | {file: .key, cases: (.value | unique)}]}') || return 1
+       passcases: [.oks | to_entries[] | select(IN($passed[]; .key)) | {file: .key, cases: (.value | unique)}]} + (if $rc == "124" then {stopped: (if $only then [$only] else $log.open | flatten | unique end)} else {} end)') || return 1
   [[ $out == *'"at":['* ]] || { printf '%s\n' "$out"; return 0; }
   atsource "$wd" <<<"$out"
 }

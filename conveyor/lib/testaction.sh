@@ -499,8 +499,8 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # out, which may have ended before the file ran; a `held` step, its failures the machine's, read as a failed one and
 # named held; a step that ran it, its line with no time of it as a failed step saves none, passed it when the card's
 # next step carried it; a step that ran some cases of it, its line naming it partial with no time of it, testlist.sh
-# partran(), when it passed or its failures were read and it did not time out: one with no result, killed say (voidrun(),
-# lib/testrun.sh; no failures), or timed out may have ended before those cases did), a whole-suite run (the release suite's too) or a run of it alone (tafile(), its record in $TESTACTS), {time, run (which run it was),
+# partran(), when it passed or its failures were read (one with none, killed say, voidrun() of lib/testrun.sh, may have ended before those
+# cases did; a time-out in another file ran it to its end, filecmd(), unless the step's failures, its last attempt's, name it stopped too, testfails(), or its first attempt's do and the last timed out too, which may have ended before the file ran again), a whole-suite run (the release suite's too) or a run of it alone (tafile(), its record in $TESTACTS), {time, run (which run it was),
 # result}, null with none. Times are to the second: runs that share the newest time are all named in one, as which
 # ran last is not known.}
 TAFAILS=5
@@ -524,7 +524,7 @@ testfacts() { # <file>
     | ([$ls | to_entries[] | .key as $i | .value | .result as $r | [if $r == "held" then .result = "fail" else . end | failedrun | select(any(failedfiles[]; . == $f))] as $x
         | select($x != [] or ((any(.carried | arrays | .[]; . == $f) | not)
             and (((.times | objects | .[$f]) // (.clocks | objects | .[$f]) // ([.timed | arrays | .[] | objects | select(.file == $f)] | first)) != null or any($ranat[]; . == $i)
-              or (any(.partial | arrays | .[]; . == $f) and ($r == "pass" or ((.failures | type) == "object" and (.failures.timeout | type) != "object"))))))
+              or (any(.partial | arrays | .[]; . == $f) and ($r == "pass" or (.failures | type) == "object") and (any((.failures | objects | .stopped | arrays | .[]), (select((.failures | objects | .timeout | type) == "object") | .rerun | objects | .failures | objects | .stopped | arrays | .[]); . == $f) | not)))))
         | {time, run: "the test step of card \(.card) (#\(.issue))", result: ((if $x == [] then "passed"
             elif $x[0].result == "pass" then "failed, then passed when run again"
             elif ($x[0].again | type) == "array" and (any($x[0].again[]; . == $f) | not) then

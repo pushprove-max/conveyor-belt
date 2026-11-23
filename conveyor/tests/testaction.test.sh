@@ -187,14 +187,45 @@ t_tapartial() {
   [ "$out" = '[{"time":"2026-11-10T00:00:00Z","run":"the test step of card c7-12 (#12)","result":"passed"},["suite"]]' ] \
     || fail "testfacts tests/x.test.sh, its only card step naming it partial: the newest run is not that step, or the step is given a time of it: $out"
   # Bug it catches: a later step that ran a case of the file too but gave no result (killed after the runner named the
-  # case, before it ended: cardfailed()'s no-result line, its partial part and no failures), or that timed out in
-  # another file, was told as a pass of it. Neither is a run of it with a result: the passing step stays the newest.
+  # case, before it ended: cardfailed()'s no-result line, its partial part and no failures), was told as a pass of it.
+  # It is no run of it with a result: the passing step stays the newest.
   jq -cn '{card: "c8-13", issue: 13, step: "test", time: "2026-11-11T00:00:00Z", result: "fail", reason: "no result: exit 143: the run was killed by a signal", partial: ["tests/x.test.sh"]}' >> "$ST/cards.jsonl"
-  jq -cn '{card: "c9-14", issue: 14, step: "test", time: "2026-11-12T00:00:00Z", result: "fail", partial: ["tests/x.test.sh"],
-    failures: {files: [{file: "tests/y.test.sh", cases: []}], timeout: {sec: 600, file: "tests/y.test.sh"}}}' >> "$ST/cards.jsonl"
   out=$(tanewest)
   [ "$out" = '{"time":"2026-11-10T00:00:00Z","run":"the test step of card c7-12 (#12)","result":"passed"}' ] \
-    || fail "testfacts tests/x.test.sh, a no-result step (11-11) and a timed-out one (11-12) that each name it partial: the newest run is not the passing step of 11-10: $out"
+    || fail "testfacts tests/x.test.sh, a no-result step (11-11) that names it partial: the newest run is not the passing step of 11-10: $out"
+  # Bug it catches (#1461 follow-up): a step that named x partial and timed out in another file (y, on both attempts)
+  # was dropped, but a file past its own limit leaves the others to run to their end (testrun.sh filecmd()), so the
+  # cases of x that step ran had passed: it is the newest run of x, not the older 11-10 step.
+  jq -cn '{card: "c9-14", issue: 14, step: "test", time: "2026-11-12T00:00:00Z", result: "fail", partial: ["tests/x.test.sh"],
+    failures: {files: [], timeout: {sec: 600, file: "tests/y.test.sh"}, stopped: ["tests/y.test.sh"]},
+    rerun: {failures: {files: [], timeout: {sec: 600, file: "tests/y.test.sh"}, stopped: ["tests/y.test.sh"]}}}' >> "$ST/cards.jsonl"
+  out=$(tanewest)
+  [ "$out" = '{"time":"2026-11-12T00:00:00Z","run":"the test step of card c9-14 (#14)","result":"passed"}' ] \
+    || fail "testfacts tests/x.test.sh, a step (11-12) naming it partial whose timeout names tests/y.test.sh on both attempts: the newest run is not that step's pass: $out"
+  # Bug it catches (E1): when x timed out too on both attempts, before y did, the timeout named y alone (the last file
+  # open) and that step was told as a pass of x. Its last attempt's stopped names x: it is no pass, and 11-12 stays newest.
+  jq -cn '{card: "c10-15", issue: 15, step: "test", time: "2026-11-13T00:00:00Z", result: "fail", partial: ["tests/x.test.sh"],
+    failures: {files: [], timeout: {sec: 600, file: "tests/y.test.sh"}, stopped: ["tests/x.test.sh", "tests/y.test.sh"]},
+    rerun: {failures: {files: [], timeout: {sec: 600, file: "tests/y.test.sh"}, stopped: ["tests/x.test.sh", "tests/y.test.sh"]}}}' >> "$ST/cards.jsonl"
+  out=$(tanewest)
+  [ "$out" = '{"time":"2026-11-12T00:00:00Z","run":"the test step of card c9-14 (#14)","result":"passed"}' ] \
+    || fail "testfacts tests/x.test.sh, a step (11-13) naming it partial whose stopped names it and tests/y.test.sh on both attempts: the newest run is not the 11-12 pass: $out"
+  # Bug it catches (E2): x stopped on the first attempt (w failed, x and y past their limits), and on the run again w
+  # used up the run's limit, so x never ran again. Only the first attempt's stopped names x: it is no pass of x.
+  jq -cn '{card: "c11-16", issue: 16, step: "test", time: "2026-11-14T00:00:00Z", result: "fail", partial: ["tests/x.test.sh"],
+    failures: {files: [], timeout: {sec: 600, file: "tests/w.test.sh"}, stopped: ["tests/w.test.sh"]},
+    rerun: {failures: {files: [{file: "tests/w.test.sh", cases: []}], timeout: {sec: 600, file: "tests/y.test.sh"}, stopped: ["tests/x.test.sh", "tests/y.test.sh"]}}}' >> "$ST/cards.jsonl"
+  out=$(tanewest)
+  [ "$out" = '{"time":"2026-11-12T00:00:00Z","run":"the test step of card c9-14 (#14)","result":"passed"}' ] \
+    || fail "testfacts tests/x.test.sh, a step (11-14) naming it partial whose first attempt's stopped names it and whose run again timed out in tests/w.test.sh: the newest run is not the 11-12 pass: $out"
+  # Bug it catches: the same first attempt, but a run again that did not time out ran each file it chose, x too, to its
+  # end; w failed and x did not, so that step is the newest run of x and passed it.
+  jq -cn '{card: "c12-17", issue: 17, step: "test", time: "2026-11-15T00:00:00Z", result: "fail", partial: ["tests/x.test.sh"],
+    failures: {files: [{file: "tests/w.test.sh", cases: []}], timeout: null},
+    rerun: {failures: {files: [{file: "tests/w.test.sh", cases: []}], timeout: {sec: 600, file: "tests/y.test.sh"}, stopped: ["tests/x.test.sh", "tests/y.test.sh"]}}}' >> "$ST/cards.jsonl"
+  out=$(tanewest)
+  [ "$out" = '{"time":"2026-11-15T00:00:00Z","run":"the test step of card c12-17 (#17)","result":"passed"}' ] \
+    || fail "testfacts tests/x.test.sh, a step (11-15) naming it partial whose first attempt's stopped names it and whose run again ended with tests/w.test.sh failed: the newest run is not that step's pass: $out"
 }
 # Bug it catches (O238): a carried line's times were dated to the later step that carried them, so a card step that ran
 # the file before a release suite failed it was listed after that suite in runs, which are oldest first. The file
