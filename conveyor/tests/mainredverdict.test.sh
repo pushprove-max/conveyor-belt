@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# timeout: 120
+# Engine cases: which failures mainred.sh verdicts() gives to main, which landing brokeby() blames for a red case, and
+# the links testlinks() stages for a fix card.
+# The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
+# file runs its own cases through the runner. redrunner() is mainredproof.test.sh's; eng(), linkfix() and linkfns()
+# are mainred.test.sh's.
+[ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
+  exec bash "$(dirname "$0")/../conveyor.test.sh"
+# The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
+SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+
+# Bug (O266): verdicts() alone on card c7, whose last run ran out of time in c.test (a unit naming no case). A unit
+# naming no case was main's only when main's run failed the file naming no case, so the card was blamed and main got
+# no main-red entry. The verdict is main, and the main-red record holds c.test, for each way main's run of c.test fails:
+# - fail: it fails its case `two` (a named failure);
+# - timeout (E15, review): it runs out of time in c.test too, so it names no failed case at all.
+mrtimeout() { # <fail | timeout>
+  redrunner ''
+  local w=$T/$CASE/cards/c7 out
+  echo 't_two() { false; }' > "$R/c.test" && git -C "$R" add c.test && git -C "$R" commit -qm c.test \
+    && git -C "$R" worktree add -q --detach "$w" || fail "the card's worktree could not be made"
+  # Main's run opens c.test and outlasts the card's time limit, set to 1 second (TEST_TIMEOUT): that limit ends the
+  # run (exit 124), so main's result names c.test only as its timeout, with no failed file. A file's own exit 124 is
+  # not this: it is read as the file failing with no case.
+  [ "$1" = fail ] || printf '%s\n' 'cp "$CONVEYOR_TEST_RERUN" "$STUB/redlist"; echo "== c.test" | tee -a "$CONVEYOR_TEST_LOG/r"; sleep 10' > "$STUB/mainrun-cmd" # sleep: main's run must outlast its 1-second limit, which ends it
+  out=$(eng 'TEST_TIMEOUT=1; TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts c7 "$CONVEYOR_CARDS/c7" '"'"'{"files":[],"timeout":{"sec":1,"file":"c.test"}}'"'"' | jq -c .verdicts') \
+    || fail "verdicts failed: $out"
+  [ "$out" = '[{"case":"c.test","verdict":"main"}]' ] && grep -qx $'fail\tc.test\t*' "$STUB/redlist" \
+    || fail "a time-out in a file that main's run ends with $1 did not run there or was not main's: $out: $(cat "$STUB/redlist" 2>&1)"
+  [ "$(jq -c '[.reds[].cases[].case]' "$ST/mainred.json" 2>/dev/null)" = '["c.test"]' ] \
+    || fail "with main's run of c.test ending with $1, the main-red record does not hold c.test: $(cat "$ST/mainred.json" 2>&1)"
+}
+t_mainredtimeout() { mrtimeout fail; }
+t_mainredtimeoutmain() { mrtimeout timeout; }
+
+# bkinit <text of tests/x.test.sh>: the case's repository, with that test file. bkland <card> <issue> <the rest of its
+# test line, as JSON>: a landing of that card that changes lib/a.sh, with its test line and landed line in the case's
+# card records. bkblame <case>: the card brokeby() blames for <case> of tests/x.test.sh at HEAD, as brokeby() reads them.
+bkinit() { BR=$T/$CASE/r; mkdir -p "$BR/tests" "$BR/lib" && git -C "$BR" init -q && printf '%s\n' "$1" > "$BR/tests/x.test.sh" || fail "the repository"; }
+bkland() {
+  echo "$1" > "$BR/lib/a.sh"; git -C "$BR" add -A; git -C "$BR" commit -qm "$1"
+  jq -cn --arg c "$1" --argjson n "$2" --arg s "$(git -C "$BR" rev-parse HEAD)" --argjson t "$3" \
+    '({card: $c, issue: $n, step: "test", result: "pass"} + $t), {card: $c, issue: $n, step: "landed", result: "ok", sha: $s}' >> "$T/$CASE/cards.jsonl"
+}
+bkblame() {
+  ( cd "$BR" && eval "$(sed -n '/^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/mainred.sh")"
+    stdb() { cat "$T/$CASE/cards.jsonl"; }
+    brokeby tests/x.test.sh HEAD tests/x.test.sh "$1" | jq -r .card )
+}
+
+# Bug (O255): brokeby() took a card's test line that names the file in why or times as a run of the red case, before it
+# looked at ranCases; a card that ran only some cases of the file (its ranCases for the file lack the case) stopped the
+# walk, and the landing after it was blamed. Landings, oldest first: l1 ran the whole file (why alone), p2 ran only
+# `other` of it (why and ranCases), b3 ran nothing of it. For the case `partial`, the landing after l1 broke it: p2.
+t_brokebypartial() {
+  local got
+  bkinit $'t_partial() { :; }\nt_other() { :; }'
+  bkland l1 1 '{"why": {"tests/x.test.sh": "linked"}}'
+  bkland p2 2 '{"why": {"tests/x.test.sh": "linked"}, "ranCases": {"tests/x.test.sh": ["other"]}}'
+  bkland b3 3 '{}'
+  got=$(bkblame partial) || fail "brokeby found no landing: $got"
+  [ "$got" = p2 ] || fail "brokeby for the case partial blamed $got, not p2, the landing after the last one that ran it (l1)"
+}
+
+# Bug (O255, review): a test line's ranCases for another file that the test file names (here tests/y.test.sh, in a
+# comment) were read as a partial run of this file, so its full run (times) did not count and the walk went past it.
+# Landings, oldest first: l1 ran the whole file, f2 ran the whole file and only `zz` of y.test.sh, b3 ran nothing of it.
+# For the case `partial`, the landing after f2 broke it: b3.
+t_brokebyother() {
+  local got
+  bkinit $'# its cases join those of tests/y.test.sh\nt_partial() { :; }'
+  bkland l1 1 '{"why": {"tests/x.test.sh": "linked"}}'
+  bkland f2 2 '{"times": {"tests/x.test.sh": 3}, "ranCases": {"tests/y.test.sh": ["zz"]}}'
+  bkland b3 3 '{}'
+  got=$(bkblame partial) || fail "brokeby found no landing: $got"
+  [ "$got" = b3 ] || fail "brokeby for the case partial blamed $got, not b3, the landing after f2, whose test line ran the whole file and some cases of y.test.sh"
+}
+
+# Bug (O252): mainred() gave jq the links of the landing that broke a case as one argument (--argjson), testlinks()
+# main's whole .conveyor/test-links.json and the new links, and linksonly() main's copy too; over 128 KiB Linux refuses
+# to start jq, so the case's landing was not recorded, the fix card's links were not staged, and its change was not
+# taken as the links alone. Each map here is over 128 KiB: main's links are 2,000 entries, and the landing that broke
+# tests/b.test.sh changes 2,000 files of long names, so its links in the main-red record, and the new links testlinks()
+# stages, are 2,000 entries too. The record names the landing with all its links, they are staged beside main's, and
+# the change is still the links alone.
+t_mainredbiglinks() {
+  local w=$T/$CASE got s
+  linkfix "$(jq -cn '[range(2000) | {key: "lib/\(.)-\("x" * 60).sh", value: ["tests/t.test.sh"]}] | from_entries')"
+  rm -f "$w/mainred.json"; mkdir -p "$w/fix/src" "$w/fix/tests" && echo 't_b() { :; }' > "$w/fix/tests/b.test.sh" \
+    && seq 2000 | sed "s/\$/-$(printf 'y%.0s' {1..60}).sh/" | (cd "$w/fix/src" && xargs touch) \
+    && git -C "$w/fix" add -A && git -C "$w/fix" commit -qm landing && s=$(git -C "$w/fix" rev-parse HEAD) || fail "the landing of 2,000 files"
+  [ "$(wc -c < "$w/fix/.conveyor/test-links.json")" -gt 131072 ] || fail "main's links over 128 KiB were not made"
+  got=$( cd "$w/fix" && eval "$(linkfns)" && eval "$(sed -n '/^mainred() {/,/^}/p; /^landingof() {/,/^}/p' "$SRC/lib/mainred.sh")"
+    export MAINRED=$w/mainred.json
+    mainred c9 "tests/b.test.sh: b" tests/b.test.sh "$s" "$s cbreak 5" && jq -c '.reds[0].card = "cfix"' "$MAINRED" > "$MAINRED.new" && mv "$MAINRED.new" "$MAINRED" \
+      && testlinks cfix "$w/fix" && linksonly cfix "$w/fix" && echo only ) || fail "mainred(), testlinks() or linksonly() failed with link maps over 128 KiB: $got"
+  [ "$(jq -c '.reds[0].cases[0] | [.landing.card, (.links | length), (.links | [.[]] | unique)]' "$w/mainred.json" 2>/dev/null)" = '["cbreak",2000,[["tests/b.test.sh"]]]' ] \
+    || fail "with the landing's links over 128 KiB, the main-red record does not name the landing cbreak with its 2,000 links: $(head -c 300 "$w/mainred.json" 2>&1)"
+  [ "$got" = only ] && jq -e 'length == 4000 and .["src/1-\("y" * 60).sh"] == ["tests/b.test.sh"]' "$w/fix/.conveyor/test-links.json" >/dev/null \
+    && [ "$(git -C "$w/fix" diff --cached --name-only)" = .conveyor/test-links.json ] \
+    || fail "with main's links and the new links each over 128 KiB, the new links were not staged beside main's, or the change was not the links alone: $got"
+}

@@ -6,8 +6,9 @@
 # when the issue's verdict is merge, a change that keeps the file adds to that figure the median on record of each
 # test file the change removes (a change with no verdict adds none). A change that keeps
 # its file must make it faster than that figure (for a stabilise or merge verdict, no slower), and the files of a
-# split, summed, may take that figure plus a start-up allowance for each file it adds. A change that deletes the file,
-# or merges it into another, is not timed: a delete's review is asked for the tests that cover its cases.
+# split, summed, may take that figure plus a start-up allowance for each file it adds. A change that deletes the file
+# is not timed: a delete's review is asked for the tests that cover its cases. One that merges it into another test
+# file holds that file, with the change, to its CPU seconds without it plus the removed file's figure.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -232,10 +233,40 @@ t_optdeleteland() {
 # Bug it catches (#74): a merge recorded as a delete, so the Tests page could not name the file that took the cases of
 # the file it removed. A change that removes the file and changes another test file is a merge into that file. What
 # it records is the Optimize check's (speedproof.sh optproof()) alone: the check is called on such a change in a card's worktree.
+# g.test.sh takes 4 CPU s with the change and without it: within its 4 plus f's 10 (its median on record).
 t_optmerge() {
-  optmain 4
+  optmain 4; echo 4 > "$STUB/cpu-g.test.sh"
   fx_wt 'rm f.test.sh; echo "echo slow" >> g.test.sh' f.test.sh 'echo slow' g.test.sh 'echo other'
   fx_in 'optproof c7 "$FXWT" "{\"number\": 7}" f.test.sh'
   [ "$RC" = 0 ] || fail "the Optimize check failed a merge: $(cat "$T/$CASE/run.out")"
-  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":10,"after":null,"fix":"merged","into":["g.test.sh"]}' ] || fail "a merge's record: $(st 'select(.step == "bugproof")')"
+  [ "$(speedline)" = 'ok {"file":"f.test.sh","before":14,"after":4,"fix":"merged","into":["g.test.sh"]}' ] || fail "a merge's record: $(st 'select(.step == "bugproof")')"
+}
+
+# Bug (O250): optproof() did not run a merge into another test file, so the file merged into could become any amount
+# slower. g.test.sh takes 20 CPU s a line: 20 without the change, 40 with f's case moved into it, over the 30 it may take
+# (its 20 plus f's 10, the median on record). The check fails naming the cost, and the card is blocked.
+t_optmergecost() {
+  optmain 4
+  printf '%s\n' '[ "$CONVEYOR_TEST_FILE" != g.test.sh ] || echo $((20 * $(wc -l < g.test.sh))) > "$STUB/cpu-g.test.sh"' \
+    | cat - "$STUB/mainrun-cmd" > "$STUB/mainrun-cmd.new" && mv "$STUB/mainrun-cmd.new" "$STUB/mainrun-cmd" || fail "the runner that times g.test.sh by its lines"
+  fx_wt 'rm f.test.sh; echo "echo slow" >> g.test.sh' f.test.sh 'echo slow' g.test.sh 'echo other'
+  fx_in 'optproof c7 "$FXWT" "{\"number\": 7, \"title\": \"Optimize the test file f.test.sh\"}" f.test.sh \
+    || { r=$?; SPEEDCHECKED=$SPEEDCHECK block c7 7 "$FXWT" "build: $(<"$FXWT.unfixed")"; exit $r; }'
+  [ "$RC" = 1 ] && [ "$(st 'select(.step == "blocked") | .reason')" = 'build: the merge costs more than the files apart: g.test.sh take 40 CPU s with the change, over the 30 CPU s they may take: 20 CPU s without it plus 10 CPU s of f.test.sh (its median on record)' ] \
+    || fail "a merge that doubles g.test.sh's CPU seconds was not blocked naming the cost (exit $RC): $(st 'select(.step == "blocked")') $(cat "$T/$CASE/run.out")"
+  [ "$(speedline)" = 'fail {"file":"f.test.sh","before":30,"after":40,"fix":"merged","into":["g.test.sh"]}' ] || fail "the merge's record: $(st 'select(.step == "bugproof")')"
+}
+
+# Bug (O250, review): the merge check read the CPU seconds of the files merged into and dropped their run's exit, and a
+# runner times a file that fails too, so a merge that broke g.test.sh was recorded bugproof ok. g.test.sh fails here
+# once the change puts `broken` in it, in the same 4 CPU s: the check fails naming the failure, and the card is blocked.
+t_optmergefail() {
+  optmain 4; echo 4 > "$STUB/cpu-g.test.sh"
+  echo '[ "$f" != g.test.sh ] || ! grep -q broken g.test.sh || exit 1' >> "$STUB/mainrun-cmd"
+  fx_wt 'rm f.test.sh; echo "broken" >> g.test.sh' f.test.sh 'echo slow' g.test.sh 'echo other'
+  fx_in 'optproof c7 "$FXWT" "{\"number\": 7, \"title\": \"Optimize the test file f.test.sh\"}" f.test.sh \
+    || { r=$?; SPEEDCHECKED=$SPEEDCHECK block c7 7 "$FXWT" "build: $(<"$FXWT.unfixed")"; exit $r; }'
+  [ "$RC" = 1 ] && [[ $(st 'select(.step == "blocked") | .reason') == 'build: the test files f.test.sh is merged into, g.test.sh, fail with the change, run alone on main'"'"'s code at '* ]] \
+    && [ "$(speedline)" = 'fail {"file":"f.test.sh","before":10,"after":null,"fix":"merged","into":["g.test.sh"]}' ] \
+    || fail "a merge whose g.test.sh fails with the change was not blocked naming the failure (exit $RC): $(st 'select(.step == "blocked" or .step == "bugproof")') $(cat "$T/$CASE/run.out")"
 }

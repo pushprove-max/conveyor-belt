@@ -56,7 +56,7 @@ t_install() {
   [ ! -e "$V/${A:0:12}" ] || fail "an abbreviated commit id left a version folder"
   bad=$(printf '%040d' 0)
   bash "$X" install "$bad" >/dev/null 2>&1 && fail "a commit the repo does not have was installed"
-  [ ! -e "$V/$bad" ] && [ ! -e "$V/$bad.part" ] || fail "a commit that could not be verified left a folder: $(ls "$V")"
+  [ ! -e "$V/$bad" ] && ! compgen -G "$V/$bad.part*" >/dev/null || fail "a commit that could not be verified left a folder: $(ls "$V")"
   mkdir -p "$V/$B"; bash "$X" install "$B" >/dev/null 2>&1 && fail "a version folder that is not its commit was taken as installed"
   rmdir "$V/$B"
   # An empty version folder inside a checkout of that very commit: Git would find the checkout above it.
@@ -67,7 +67,7 @@ t_install() {
   mkdir -p "$T/$CASE/tpl/hooks" && printf '#!/bin/sh\nprintf "\\necho altered\\n" >> conveyor/conveyor.sh\n' > "$T/$CASE/tpl/hooks/post-checkout" \
     && chmod +x "$T/$CASE/tpl/hooks/post-checkout" || fail "the template hook was not made"
   GIT_TEMPLATE_DIR=$T/$CASE/tpl bash "$X" install "$A" >/dev/null 2>&1 && fail "a fresh clone a checkout hook changed was installed"
-  [ ! -e "$V/$A" ] && [ ! -e "$V/$A.part" ] || fail "a fresh clone a checkout hook changed left a folder: $(ls "$V")"
+  [ ! -e "$V/$A" ] && ! compgen -G "$V/$A.part*" >/dev/null || fail "a fresh clone a checkout hook changed left a folder: $(ls "$V")"
   # Then, on the same code repo (each case pays about 0.3 CPU s for its keeper and its code repo), the install made.
   bash "$X" install "$A" >/dev/null || fail "install of a commit the repo has exited non-zero"
   [ "$(git -C "$V/$A" rev-parse HEAD)" = "$A" ] && [ "$(cat "$V/$A/conveyor/conveyor.sh")" = "$(git -C "$D" show "$A:conveyor/conveyor.sh")" ] \
@@ -145,7 +145,7 @@ t_installrace() {
   mv "$V/first" "$V/$A" && : > "$w/go" || fail "the first install's folder was not moved in"
   wait $ip; rc=$?
   [ "$rc" = 0 ] && grep -q "conveyor: $A is installed in $V/$A, read-only" "$w/out" || fail "the second install of the same commit failed: $(cat "$w/out")"
-  [ ! -e "$V/$A.part" ] && [ ! -e "$V/$A/$A.part" ] && [ -z "$(find "$V/$A" ! -type l -perm /222)" ] \
+  ! compgen -G "$V/$A.part*" >/dev/null && ! compgen -G "$V/$A/$A.part*" >/dev/null && [ -z "$(find "$V/$A" ! -type l -perm /222)" ] \
     || fail "the second install left its own copy, or the folder writable: $(ls -a "$V" "$V/$A")"
 }
 
@@ -157,15 +157,32 @@ t_installmv() {
   coderepo; X=$D/conveyor/conveyor.sh; local w=$T/$CASE rc
   # Text check, as a comment has no behaviour: the one above the move said the older engine predates the mirror's lock,
   # but that engine takes the lock and lets it go before its move.
-  grep -B2 '^ *chmod -R a-w "$d.part" && mv "$d.part" "$d"' "$SRC/lib/install.sh" | grep -q "lets the mirror's lock go before it moves" \
+  grep -B2 '^ *chmod -R a-w "$p" && mv "$p" "$d"' "$SRC/lib/install.sh" | grep -q "lets the mirror's lock go before it moves" \
     && ! grep -q 'older than this lock' "$SRC/lib/install.sh" || fail "install.sh's comment above the move misstates when an older engine moves its folder in"
   bash "$X" install "$A" >/dev/null && mv "$V/$A" "$V/first" || fail "the first install was not made"
   trap 'chmod -R u+w "$T/$CASE"' EXIT
   mkdir -p "$w/bin" && printf '%s\n' '#!/usr/bin/env bash' \
-    '[ "$1 $2" != "$V/$A.part $V/$A" ] || [ ! -e "$V/first" ] || command -p mv "$V/first" "$V/$A"' 'exec command -p mv "$@"' > "$w/bin/mv" \
+    '[[ $1 != "$V/$A".part.* || $2 != "$V/$A" ]] || [ ! -e "$V/first" ] || command -p mv "$V/first" "$V/$A"' 'exec command -p mv "$@"' > "$w/bin/mv" \
     && chmod +x "$w/bin/mv" || fail "the stand-in mv was not made"
   export V A; PATH=$w/bin:$PATH bash "$X" install "$A" > "$w/out" 2>&1; rc=$?
   [ "$rc" = 0 ] && [ ! -e "$V/first" ] && grep -q "conveyor: $A is installed in $V/$A, read-only" "$w/out" \
     || fail "the install whose move met the other engine's folder failed: rc=$rc $(cat "$w/out")"
-  [ ! -e "$V/$A.part" ] && [ -z "$(find "$V/$A" ! -type l -perm /222)" ] || fail "the install left its own copy, or the folder writable: $(ls -a "$V")"
+  ! compgen -G "$V/$A.part*" >/dev/null && [ -z "$(find "$V/$A" ! -type l -perm /222)" ] || fail "the install left its own copy, or the folder writable: $(ls -a "$V")"
+}
+
+# Bug (O202): an older engine builds in the shared <commit>.part and lets the mirror's lock go before its chmod and
+# move. A new install then took the lock, found no version folder, removed that .part and cloned into it, so the old
+# engine's move could publish the new install's half-made, unverified clone. Here the old engine's .part stands, with
+# a file of its own, outside the lock: the new install neither removes nor uses it, and the folder it publishes is the
+# commit, read-only.
+t_installold() {
+  coderepo; X=$D/conveyor/conveyor.sh; local w=$T/$CASE
+  trap 'chmod -R u+w "$T/$CASE"' EXIT
+  mkdir -p "$V/$A.part" && echo old > "$V/$A.part/old-engine" || fail "the old engine's folder was not made"
+  bash "$X" install "$A" > "$w/out" 2>&1 || fail "the install beside the old engine's folder failed: $(cat "$w/out")"
+  [ "$(ls -A "$V/$A.part")" = old-engine ] && [ "$(cat "$V/$A.part/old-engine")" = old ] \
+    || fail "the install removed or used the old engine's $V/$A.part: $(ls -A "$V/$A.part" 2>&1)"
+  # installed ro: its HEAD, every tracked file's content and mode as commit A has them, nothing added, nothing writable.
+  ( . "$SRC/lib/install.sh" && installed "$A" ro "$V/$A" ) && [ "$(compgen -G "$V/$A.part*")" = "$V/$A.part" ] \
+    || fail "the published $V/$A does not pass installed $A ro, or the install left its own folder: $(ls -a "$V")"
 }

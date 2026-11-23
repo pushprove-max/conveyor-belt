@@ -23,12 +23,13 @@ tpfiles() { # <file>...: named for this file alone, as the runner sources every 
 
 # Bug it catches: the engine knew only __tests__, .test. and .spec., so a project with any other convention had every
 # test file taken for product code, and its bug cards found no test file. With no setting, the default finds the
-# common conventions of the main languages, and no source file.
+# common conventions of the main languages, and no source file. Bug (O195): no default matched a Swift test file
+# (pkg/Tests/CoreTests/MathTests.swift: Tests/ is not tests/), so filerun.sh's Swift runner was never given one.
 t_testpathsdefault() {
   setup '[]'
-  local tests='test_x.py pkg/x_test.go spec/x_spec.rb src/FooTest.java a/__tests__/b.js x.test.ts y.spec.js py/a_test.py tests/x.sh test/y.sh src/test-a.mjs t/a.sh lib/a.t A/BarTests.cs' out
+  local tests='test_x.py pkg/x_test.go spec/x_spec.rb src/FooTest.java a/__tests__/b.js x.test.ts y.spec.js py/a_test.py tests/x.sh test/y.sh src/test-a.mjs t/a.sh lib/a.t A/BarTests.cs pkg/Tests/CoreTests/MathTests.swift' out
   # #367: a page in a test folder (tests/speed/page.md) is no test file, so the bug-card check does not run it as one.
-  out=$(tpeng "printf '%s\n' $tests src/x.py latest.go contest.py src/spec.rb Test.javax src/t.sh retest/a.sh tests/speed/page.md | testpaths
+  out=$(tpeng "printf '%s\n' $tests src/x.py latest.go contest.py src/spec.rb Test.javax src/t.sh retest/a.sh pkg/Sources/Core/Math.swift tests/speed/page.md | testpaths
     printf '%s\n' tests/x.sh tests/speed/Page.MD | testpaths -v
     printf '%s\0' tests/x.sh tests/speed/page.md | testpaths -z | tr '\0' '\n'
     printf '%s\0' tests/x.sh tests/speed/page.txt | testpaths -vz | tr '\0' '\n'") || fail "testpaths failed: $out"

@@ -15,6 +15,8 @@
 # - main: the same case (or the same file failing naming no case) failed on main too, an input of its file changed
 #   since its last recorded pass (the file has no pass in the test results cache with main's content: testlist.sh cachehits()),
 #   and a control passed beside it, or no control could run (below). A timeout or a kill on main says nothing of the case.
+#   A file the card's run ran out of time in (a unit naming no case) failed on main too when main's run failed that file
+#   with any case, or ran out of time in that same file.
 #   The test command itself (testfails()'s name for a run that logged no file) gets no verdict: it names no test (a
 #   card's run whose only failure it is gave no result: voidrun()).
 # - machine (issue 221): it failed on main too, but its file passed before with the same inputs, or every control failed:
@@ -66,7 +68,9 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
     '$u[0] as $u | $um[0] as $um | $m[0] as $m | $l[0] as $l | $fst[0] as $fst | $h[0] as $h | $ctl[0] as $ctl | $cf[0] as $cf | '"$NOTPASSED$PASSEDAGAIN"'
     [($fst | select(. != null) | passedagain($l)[] | {case: ., verdict: "flaky"}),
      ($u[] | . as $x | {case: (if .case == null then .file else "\(.file): \(.case)" end), file,
-       verdict: (if $m != null and ($x | IN($um[])) and any($m.files[]?; .file == $x.file and (if $x.case == null then .cases == [] else any(.cases[]; .name == $x.case) end))
+       # A file the card ran out of time in names no case: main failing it with any case, or running out of time there, is main red.
+       verdict: (if $m != null and ($x | IN($um[])) and (any($m.files[]?; .file == $x.file and (if $x.case == null then .cases == [] or $x.file == ($l.timeout.file? // null)
+           else any(.cases[]; .name == $x.case) end)) or ($x.case == null and $x.file == ($l.timeout.file? // null) and $x.file == ($m.timeout.file? // null)))
          then (if ($x.file | IN($h[]) | not) and ($ctl == [] or $ctl - $cf != []) then "main" else "machine" end) else "card" end)}
        + if $x.file | IN($nt[]) then {why: "no test file: a selection error"} else {} end)]') || v='[]'
   while IFS=$'\t' read -r c f; do mainred "$1" "$c" "$f" "$sha" || :; done < <(jq -r '.[] | select(.verdict == "main") | [.case, .file] | @tsv' <<<"$v")
@@ -423,7 +427,7 @@ mainred() { # <card> <case> <its file> <main's commit> [<the landing that broke 
   by=null
   if [ -n "${5:-}" ]; then read -r s lc li <<<"$5"; by=$(landingof "$s" "$lc" "$li" "${fs[0]:-$3}" | jq -ce objects 2>/dev/null) || by=null
   elif [ ${#fs[@]} = 1 ]; then by=$(brokeby "${fs[0]}" "$4" "$3" "$k" | jq -ce objects 2>/dev/null) || by=null; fi
-  jq -c --arg s "$4" --arg c "$2" --arg f "$3" --arg by "$1" --arg t "$t" --argjson b "$by" --args '({case: $c, file: $f, by: $by, files: $ARGS.positional, last: $t}
+  jq -c --arg s "$4" --arg c "$2" --arg f "$3" --arg by "$1" --arg t "$t" --slurpfile b <(printf '%s' "$by") --args '$b[0] as $b | ({case: $c, file: $f, by: $by, files: $ARGS.positional, last: $t}
       + if $b == null then {} else {landing: ($b | {sha, card, issue}), links: $b.links} end) as $x
     | {reds: (if any(.[]; .sha == $s) then map(if .sha == $s then .cases += [$x] else . end) else . + [{sha: $s, cases: [$x], card: null}] end | .[-100:])}' \
     "${fs[@]}" <<<"$rec" > "$MAINRED.new" && mv -f "$MAINRED.new" "$MAINRED" \
@@ -433,7 +437,9 @@ mainred() { # <card> <case> <its file> <main's commit> [<the landing that broke 
 # The landing that broke a test file on main without its card running it (issue 598; mainred()): of main's commits
 # up to <main's commit>, newest first, back to the last landing whose card's test step ran the file (its test lines
 # name it in why or times, or say the whole engine suite ran, for an engine case file, or its ranCases name <case>
-# under the file its run named it under: a run of only some cases of the file, issue 604) and so passed it, the first
+# under the file its run named it under: a run of only some cases of the file, issue 604; when <case> is given and
+# the line's ranCases list the test file itself, its why or times stand for a run of those cases only, so they count
+# only through ranCases; ranCases of any other file leave them as a whole run) and so passed it, the first
 # landing after that one. Prints {sha, card, issue, links: {<each file that landing changed>: [<test file>]}}; fails
 # when no landing ran the file in the last TESTLINK_DEPTH commits (when it last passed is not known) or none is after it.
 TESTLINK_DEPTH=500
@@ -443,9 +449,9 @@ brokeby() { # <test file> <main's commit> [<the file its run named the case unde
   # cases it ran of the engine's case files under their runner, conveyor/conveyor.test.sh.
   rn=$(git show "$2:$1" 2>/dev/null | grep -oE '[A-Za-z0-9_.-]+\.test\.[A-Za-z0-9]+' | jq -cRn '[inputs] | unique') || rn='[]'
   l=$(stdb ask lines cards 2>/dev/null | jq -rs --arg f "$1" --arg r "${3:-}" --arg c "${4:-}" --argjson rn "${rn:-[]}" '(map(select(.step == "test")) | group_by(.card)
-      | map({key: .[0].card, value: any(.[]; (.why // {} | has($f)) or (.times // {} | has($f))
-        or (.wholeSuite == true and ($f | startswith("conveyor/tests/")))
-        or ($c != "" and any(.ranCases // {} | objects | to_entries[] | select(.key == $r or IN(.key | split("/")[-1]; $rn[])) | .value | arrays | .[]; . == $c)))}) | from_entries) as $ran
+      | map({key: .[0].card, value: any(.[]; (.wholeSuite == true and ($f | startswith("conveyor/tests/")))
+        or ($c != "" and any(.ranCases // {} | objects | to_entries[] | select(.key == $r or IN(.key | split("/")[-1]; $rn[])) | .value | arrays | .[]; . == $c))
+        or (($c == "" or ((.ranCases | objects | .[$f] | arrays) // null) == null) and ((.why // {} | has($f)) or (.times // {} | has($f)))))}) | from_entries) as $ran
     | .[] | select(.step == "landed" and (.sha | type) == "string" and .sha != "") | "\(.sha) \(.card) \(.issue) \($ran[.card] // false)"' 2>/dev/null) || return 1
   while read -r s; do
     s=$(grep -m 1 "^$s " <<<"$l") || continue
@@ -472,13 +478,16 @@ landingof() { # <sha> <card> <issue> <test file>
 testlinks() { # <card> <worktree>
   local add new f=$2/.conveyor/test-links.json old d
   declare -gA STAGEDLINKS; d=${STAGEDLINKS[$2]:-null}
-  add=$(jq -c --arg c "$1" --argjson d "$d" 'reduce (.reds[]? | select(.card == $c) | .cases[] | .links // {} | to_entries[]) as $e ({}; .[$e.key] += $e.value)
+  # The link maps go in by file, not as arguments: one argument over 128 KiB fails to start jq on Linux.
+  add=$(jq -c --arg c "$1" --slurpfile d <(printf '%s' "$d") '$d[0] as $d | reduce (.reds[]? | select(.card == $c) | .cases[] | .links // {} | to_entries[]) as $e ({}; .[$e.key] += $e.value)
     | with_entries(.value = (.value - ($d[.key] // []) | unique)) | with_entries(select(.value != []))' "$MAINRED" 2>/dev/null) || return 0
   [ "$add" != '{}' ] || return 0
   old=$(jq -ce objects "$f" 2>/dev/null) || old='{}'
-  mkdir -p "${f%/*}" && new=$(jq -n --argjson a "$old" --argjson b "$add" 'reduce ($b | to_entries[]) as $e ($a; .[$e.key] = ((.[$e.key] // []) + $e.value | unique))') \
+  mkdir -p "${f%/*}" && new=$(jq -n --slurpfile a <(printf '%s' "$old") --slurpfile b <(printf '%s' "$add") '$a[0] as $a | $b[0] as $b
+      | reduce ($b | to_entries[]) as $e ($a; .[$e.key] = ((.[$e.key] // []) + $e.value | unique))') \
     && printf '%s\n' "$new" | linkput "$2" && git -C "$2" add -- .conveyor/test-links.json \
-    && STAGEDLINKS[$2]=$(jq -cn --argjson a "$d" --argjson b "$add" 'reduce ($b | to_entries[]) as $e ($a // {}; .[$e.key] = ((.[$e.key] // []) + $e.value | unique))')
+    && STAGEDLINKS[$2]=$(jq -cn --slurpfile a <(printf '%s' "$d") --slurpfile b <(printf '%s' "$add") '$a[0] as $a | $b[0] as $b
+      | reduce ($b | to_entries[]) as $e ($a // {}; .[$e.key] = ((.[$e.key] // []) + $e.value | unique))')
 }
 # Writes stdin as <worktree>'s .conveyor/test-links.json: first into a new file beside the worktree, outside it
 # (mktemp: made only where no file is, under a name no process knows before), then renamed into place. A rename
@@ -511,9 +520,9 @@ linksonly() { # <card> <worktree>
   if h=$(git -C "$2" show "HEAD:$f" 2>/dev/null); then printf '%s\n' "$h" | linkput "$2"; else h='{}'; rm -f "$2/$f"; fi \
     && git -C "$2" add -A -- "$f" && testlinks "$1" "$2" \
     && jq -en --slurpfile s <(git -C "$2" cat-file blob "$b") --slurpfile n <(git -C "$2" cat-file blob ":$f" 2>/dev/null || echo '{}') \
-      --argjson e "$e" --argjson h "$h" '
+      --slurpfile e <(printf '%s' "$e") --slurpfile h <(printf '%s' "$h") '
       def within($a; $b): ($a | type) == "object" and all($a | to_entries[]; (.value | type) == "array" and .value - ($b[.key] // []) == []);
-      $s[0] as $s | within($h; $s) and within($e; $s) and within($s; $n[0])' >/dev/null 2>&1 && return 0
+      $s[0] as $s | $e[0] as $e | $h[0] as $h | within($h; $s) and within($e; $s) and within($s; $n[0])' >/dev/null 2>&1 && return 0
   git -C "$2" cat-file blob "$b" | linkput "$2" && git -C "$2" add -- "$f"
   STAGEDLINKS[$2]=$e
   return 1

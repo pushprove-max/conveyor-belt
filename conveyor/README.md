@@ -1265,13 +1265,17 @@ Then the check depends on what the change does:
   seconds summed must be at most the median of the old file's recent runs plus a start-up allowance for each file the split adds (Test
   file times, above). Else the card is blocked with no review. The reason names the sum, how far it is over its limit,
   and the allowance.
-- The change removes the file and adds no test file (a delete, or a merge into another file): it is not run with the
-  change. The file runs alone on main's code, and the review gets the cases that its runner named. The review must
+- The change removes the file and adds no test file (a delete, or a merge into another file): the file runs alone on
+  main's code, without the change, and the review gets the cases that its runner named. The review must
   name, for each case, the test that still covers it, one line each: `COVERED-BY: <test file>: <case>`. Such a line is
   not a finding, and it stays in the review's record. A case with no test named is a finding.
+- For a merge, the test files that the change modifies also run alone on main's code, without the change and with it.
+  They must pass both times. With the change, they may take their CPU seconds without it plus the figure of the removed
+  file. Otherwise the check fails and names the cause.
 
 The card's `bugproof` line names the file and both numbers, as for a speed-up: `after` is the CPU seconds summed of a
-split, and null for a delete or a merge. It also names the fix: `fix` is `sped up`, `split`, `merged` or `deleted`,
+split, or of the files that a merge modifies, with the change, and null for a delete. For a merge, `before` is the
+limit for those files. It also names the fix: `fix` is `sped up`, `split`, `merged` or `deleted`,
 and `into` lists the test files that a split adds or that a merge changes (empty for the others). A change that
 removes the file and changes another test file is a merge into that file; one that changes no other test file is a
 delete.

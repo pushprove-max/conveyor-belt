@@ -61,6 +61,53 @@ t_shut() {
   [ -s "$ST/kept/$c7/$c7.patch" ] && [ "$(st "select(.card == \"$c8\") | .step" | tr '\n' ' ')" = 'picked blocked ' ] || fail "the kept patch of #7 went, or #8's card changed"
 }
 
+# Bug (O204): reopened(), approved() and startagain() each gave jq the open list, bodies and all, as one argument
+# (--argjson open); over 128 KiB Linux refuses to start jq, the error went to /dev/null, and no card was given back.
+# A turn hands the same list to all three (run.sh), so each has a case below. bigopen <issue 7's json>: the open list
+# $T/$CASE/open.json, #7 and two issues of 70 KB bodies.
+bigopen() {
+  jq -cn --argjson i "$1" '[$i, (900, 901 | {number: ., title: "long", body: ("x" * 70000)})]' > "$T/$CASE/open.json" \
+    && [ "$(wc -c < "$T/$CASE/open.json")" -gt 131072 ] || fail "the open list over 128 KiB was not made"
+}
+# reopened(): #7's card shut, and #7 open again on GitHub: its card is given back.
+t_shutbig() {
+  local c7=c0-7
+  setup "[$(issue 7 2026-01-01)]"; shutrec 7
+  fx_in 'locked shut "[7]"'
+  [ "$(st "select(.card == \"$c7\") | .step" | tail -n 1)" = closed ] || fail "#7's card was not shut: $(cat "$T/$CASE/run.out")"
+  bigopen "$(issue 7 2026-01-01)"
+  echo '[]' > "$STUB/closed-issues.json"
+  fx_in 'reopened "$(cat "$T/$CASE/open.json")"'
+  [ "$(jq -r .card "$ST/retried.jsonl" 2>/dev/null | sort -u)" = "$c7" ] && ! grep -q "\"card\":\"$c7\"" "$ST/cards.jsonl" \
+    || fail "with an open list over 128 KiB, the reopened #7's shut card was not given back (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+# approved() and startagain() below: retry is a stand-in that lists the issue it is given. The case proves which issue
+# the function hands on from the large list; what retry then does with a card is the visible and fail cases'.
+# approved(): #7's card stopped for the owner's yes with its body kept, and the open list's #7 holds an approval line
+# added since: #7 is given back.
+t_approvedbig() {
+  local o
+  setup "[$(issue 7 2026-01-01)]"; mkdir -p "$ST/kept/c0-7" && issue 7 2026-01-01 > "$ST/kept/c0-7/c0-7.body" || fail "the kept body"
+  o=$(jq -r .owner.name "$R/.conveyor/project.json")
+  landed 7 | jq -c --arg o "$o" '(.step = "picked"), (.step = "blocked" | .result = "blocked" | .kept = "kept/c0-7"
+    | .reason = "visible to customers or staff: needs \($o)'\''s yes: the new button")' >> "$ST/cards.jsonl"
+  bigopen "$(issue 7 2026-01-01 | jq -c --arg o "$o" '.body += "\n\nVisible change approved: \($o) 2026-01-02 (yes)\n"')"
+  fx_in 'retry() { echo "$1" >> "$T/$CASE/retries"; }; approved "$(cat "$T/$CASE/open.json")"'
+  [ "$(cat "$T/$CASE/retries" 2>/dev/null)" = 7 ] \
+    || fail "with an open list over 128 KiB, #7, approved since its card stopped for the yes, was not given back (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+# startagain(): #7's card blocked by a session that never began its work, and a check session (a stand-in that ends
+# well) now starts: #7 is given back.
+t_startagainbig() {
+  setup "[$(issue 7 2026-01-01)]"; tune '.tunables.apiPause = 0'; mkdir -p "$ST"
+  landed 7 | jq -c '(.step = "picked"), (.step = "blocked" | .result = "blocked" | .reason = "build: the session never began"
+    | .spent = {start: {seat: "builder", cli: "claude", model: "m", account: ""}})' >> "$ST/cards.jsonl"
+  bigopen "$(issue 7 2026-01-01)"
+  fx_in 'retry() { echo "$1" >> "$T/$CASE/retries"; }; startcheck() { :; }; startagain "$(cat "$T/$CASE/open.json")"'
+  [ "$(cat "$T/$CASE/retries" 2>/dev/null)" = 7 ] \
+    || fail "with an open list over 128 KiB, #7, blocked before its session began, was not given back once a check session started (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+
 # t_shut calls shut() and reopened() with the issues it names; this case runs the loop, as only a turn shows run()
 # (lib/run.sh) asking GitHub for each blocked card's issue and taking the closed ones out of the open list it read.
 # Bugs: the stale open list still shows the closed #7, and the turn picks it again or leaves it in the sample's list

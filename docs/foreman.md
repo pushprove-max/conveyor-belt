@@ -349,7 +349,9 @@ asks the host about the record over ssh. Open decisions for that record come fro
   it in the Foreman's folder, beside `rules.md`: `foreman` in the folder that `conveyor.sh state-dir` prints. For a
   group in `foreman.groups`, use the folder of the first project in the group. The
   Foreman keeps it current. While auto is on, the Foreman reads it before it decides. It keeps the file's "Never
-  decide; ask" and "Hard lines" sections as it keeps `auto.reserved`. The plugin ships no such file. With no file,
+  decide; ask" and "Hard lines" sections as it keeps `auto.reserved`. `auto decide` leaves a decision under "Waiting
+  for the owner" when its text holds an item of those sections (a `- ` line under the heading), as it does for a word
+  of `auto.reserved`. The plugin ships no such file. With no file,
   auto reads only the ruling log.
 
 ## Standing yes
@@ -372,7 +374,9 @@ asking"). The pack keeps the list as `auto.standing`. A kind works whether `/con
   Foreman's watcher runs `conveyor.sh retry <issue>` on the host itself and logs the step in the ruling log. While
   auto is on, the engine on the host does this step too, also when the watcher is not running. The
   Foreman gets no wake for that card and does not tell you. If the retry fails, the blocked card wakes the Foreman, and
-  the wake gives the reason of the failed retry. A card blocked for another reason wakes the Foreman as before.
+  the wake gives the reason of the failed retry. A card blocked for another reason wakes the Foreman as before. The
+  engine does not retry a card whose block reason holds a word of `auto.reserved` (a finding tagged `[security]`, for
+  example) or an item of the owner's profile. It puts that card to you.
 
 Some steps always go to you, whatever kinds are on: new engine behaviour that you did not ask for, a design choice, a
 release that you did not ask for, and anything that `auto.reserved` holds.

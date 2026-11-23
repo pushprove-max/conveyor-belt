@@ -196,6 +196,19 @@ t_hollowshclose() {
     || fail "the old one-line case is not declined: $(cat "$T/$CASE/run.out")"
 }
 
+# Bug (O269): casestarts() read a shell case of one line with a trailing comment (t_a() { f; } # note) as one that
+# does not close on its line, so it ran on to the line before the next case, and an edit to the helper lines after it
+# counted as an edit to it in the hollow and Optimize checks. The review found the same with a comment that holds a
+# quote (t_a's "it's") and with a second case on the line (t_b's line, whose last bracket closes t_c's opener). t_a and
+# t_b end on their own lines; t_d on its close.
+t_casestartsnote() {
+  setup '[]'; mkdir -p "$T/$CASE/wt"
+  printf '%s\n' "t_a() { f; } # it's a note" 'V=1' 't_b() { :; }; t_c() { return 1; }' 'echo helper' 't_d() {' '  :' '}' > "$T/$CASE/wt/x.test.sh"
+  fx_in 'casestarts "$T/$CASE/wt" x.test.sh'
+  [ "$(cut -f1,2 "$T/$CASE/run.out" | tr '\n\t' ' -')" = 'row 1-1 3-3 5-7 ' ] \
+    || fail "casestarts on x.test.sh ($(tr '\n' '|' < "$T/$CASE/wt/x.test.sh")) gave t_a or t_b, each of one line, other lines than its own: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug it catches (#584 review): with every case start line put in a comment the file had no case left, so its whole
 # text was read, and the names in the comments passed as kept cases with no COVERED-BY line.
 t_hollowcommented() {

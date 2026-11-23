@@ -357,7 +357,7 @@ bugnamed() { # <card> <worktree> <issue json>
 # HEAD), $CARDS/mainrun/<card>.unfixed: first without the change, then with it staged. Each must fail without the
 # change and pass with it. Tests the change adds are not asked for and not run here (the test step runs them). Writes
 # the result in <worktree>.unfixed, which the review is shown; its first line is the reason when the check fails.
-# Exit 0 when the check holds; 3 when every case passes without the change (main is no longer red for them: card()
+# Exit 0 when the check holds; 3 when every case passes without the change in each of FULL_ALONE runs (main is no longer red for them: card()
 # closes the card as already done), or when the pack's test command cannot run them alone (no test.fileCommand, and
 # nofilecmd() refuses: nothing shows main red the pack's way); 2 when a case still fails with the change, a case passes without it while another
 # fails, a run gave no result for a case, or a run could not be made (card() blocks the card with that first line).
@@ -365,7 +365,7 @@ bugnamed() { # <card> <worktree> <issue json>
 # run gave no result, or could not be made, names that file and quotes its end. A check that holds, or a card that
 # closes as already done, keeps none. Sets REDRAN: the cases it ran (redclosed()).
 redproof() { # <card> <worktree>
-  local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2 kw='' ki='' kf='' fc nw
+  local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2 kw='' ki='' kf='' fc nw i
   REDRAN=''
   cs=$(redcases "$1") && REDRAN=$cs \
     || { echo "the main-red record names no case of this card, so the cases main fails could not be run" > "$2.unfixed"; return 2; }
@@ -375,13 +375,18 @@ redproof() { # <card> <worktree>
     # With no test.fileCommand and a test command that cannot be given one file (testlist.sh nofilecmd(), #1275), no
     # run shows main red the pack's way (verdicts() marks no case so): the mark has no proof, and the card closes.
     packget test.fileCommand fc 2>/dev/null && [ -z "$fc" ] && ! nw=$(TEST_PACKONLY=1 nofilecmd "$mwt") || nw=''
-    [ -n "$nw" ] || { wo=$(redrun "$mwt" "$cs") || wo=''; kw=$(redkeep "$1" "$mwt.test" without); }
+    # Main is no longer red only when every case passes in each of FULL_ALONE runs (as redgreen() runs them): a case that
+    # fails one run in three is still red, so the first run that fails or gives no result is the one judged below.
+    [ -n "$nw" ] || for ((i = 0; i < FULL_ALONE; i++)); do
+      wo=$(redrun "$mwt" "$cs") || wo=''; kw=$(redkeep "$1" "$mwt.test" without)
+      [ -n "$wo" ] && [ -z "$(rednames fail "$wo")$(rednames none "$wo")" ] || break
+    done
     if [ -n "$nw" ]; then
       out="main is not red for $(jq -r '[.[] | "`\(.name)`"] | join(", ")' <<<"$cs") the pack's way: $nw; main is marked red only when that run fails, so the card closes as already done"; rc=3
     elif [ -z "$wo" ] || [ -n "$(rednames none "$wo")" ]; then
       out="the run on main's code at $sha without the change gave no result for $(rednames none "${wo:-$cs}" | sed 's/^$/its cases/'), so it proves nothing either way"; kf=$kw
     elif [ -z "$(rednames fail "$wo")" ]; then
-      out="main is no longer red for $(rednames pass "$wo"): they pass on main's code at $sha without the change, so the card closes as already done"; rc=3
+      out="main is no longer red for $(rednames pass "$wo"): they pass on main's code at $sha without the change in each of $FULL_ALONE runs, so the card closes as already done"; rc=3
     elif [ -n "$(rednames pass "$wo")" ]; then
       out="$(rednames pass "$wo") passes on main's code at $sha without the change (main is no longer red for it), while $(rednames fail "$wo") fails there"
     elif git -C "$2" diff --cached --quiet HEAD 2>/dev/null; then

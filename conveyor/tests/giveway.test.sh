@@ -73,6 +73,27 @@ t_giveway() {
   out=$(gweng aways) && [ "$out" = '{"c7-7":{"to":8,"fixing":false}}' ] || fail "the Board's view does not say #7 gave way to #8: $out"
 }
 
+# Bug (O188): claim() gave jq the list of the staged paths, and the other cards' claims, each as one argument
+# (--argjson); over 128 KiB Linux refuses to start jq, so claim() failed and a card with a very large change could not
+# claim its files. #8 stages a.txt and 2,000 files of 80-byte paths, and #7's claim holds a.txt and 2,000 other paths of
+# 80 bytes (each over 160 KiB as JSON: the review found a large claim of another card unchecked): #8 waits on #7, which
+# holds a.txt, then claims all 2,001 once #7 gives way, and #7's claim names it.
+# gwbig7 <the rest of its claim>: #7's claim, alive, on a.txt and the 2,000 other paths.
+gwbig7() {
+  jq -cn --argjson p $$ --argjson r "{$1}" '{pid: $p, paths: (["a.txt"] + [range(1; 2001) | tostring | "held/f" + ("0" * (74 - length)) + .])} + $r' > "$CARDS/c7-7.claim" \
+    && [ "$(wc -c < "$CARDS/c7-7.claim")" -gt 131072 ] || fail "#7's claim over 128 KiB was not made"
+}
+t_claimbig() {
+  gwcards 7 8; gwchg 8 1s/.*/eight/
+  (cd "$CARDS/c8-8" && mkdir big && for i in $(seq 2000); do : > "big/$(printf 'f%075d' "$i")"; done && git add -A) || fail "the large change could not be staged"
+  gwbig7 '"held":true,"gave":0'
+  w=$(gweng claim c8-8 "$CARDS/c8-8" $$) && [ "$(jq -r .on <<<"$w")" = c7-7 ] && [ "$(gwc 8 '[.held, (.paths | length)]')" = '[false,2001]' ] \
+    || fail "#8, with 2,001 staged paths, did not wait on #7, whose claim of 2,001 paths holds a.txt: $w $(gwc 8 '[.held, (.paths | length)]')"
+  gwbig7 '"held":false,"away":true,"gave":1,"for":[],"to":null'
+  w=$(gweng claim c8-8 "$CARDS/c8-8" $$) && [ -z "$w" ] && [ "$(gwc 8 '[.held, (.paths | length)]')" = '[true,2001]' ] && [ "$(gwc 7 .to)" = 8 ] \
+    || fail "#8, with 2,001 staged paths, did not claim them once #7 gave way, or #7's claim does not name it: $w $(cat "$CARDS/c7-7.claim")"
+}
+
 # Bug: a card gave way only to a card already waiting when it began its rebase, so one that came to land during the
 # rebase waited the whole session. #7 gives way with no card waiting; #8 comes to its claim after that, claims a.txt
 # at once, and #7 names it.

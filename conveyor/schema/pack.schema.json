@@ -150,7 +150,7 @@
         "patterns": {
           "description": "The project's test files, as globs of paths from the repository root (docs/configuration.md, How test files are found): * and ? match in one folder name, ** across folders, a glob ending in / matches each file under such a folder, and a glob matches at any depth unless it starts with /. A path one of them matches is a test file, never product code. Set, it replaces the default.",
           "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 },
-          "default": ["__tests__/", "*.test.*", "*.spec.*", "test_*.py", "*_test.py", "*_test.go", "tests/", "test/", "spec/", "*_spec.rb", "*Test.java", "*Tests.cs", "test-*.mjs", "*.t", "t/*.sh"]
+          "default": ["__tests__/", "*.test.*", "*.spec.*", "test_*.py", "*_test.py", "*_test.go", "tests/", "test/", "spec/", "*_spec.rb", "*Test.java", "*Tests.cs", "*Tests.swift", "test-*.mjs", "*.t", "t/*.sh"]
         },
         "inline": {
           "description": "The kinds of tests written inside product files (docs/configuration.md, Tests inside product files), one entry a kind: files, the globs of the files it is found in (as tests.patterns); start, a POSIX extended regular expression that starts a test block; end, \"braces\" (the block ends where the brackets opened after start close, or at a ; before any opens) or a regular expression the block ends on; has, a regular expression one line of the block must match to make it a test (none: every block is one). A bug card's check runs such a file with its new test blocks and without the rest of the change. The pack's entries are added to the default ones; an entry of the same name replaces the default's.",

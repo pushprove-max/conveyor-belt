@@ -34,7 +34,7 @@ installed() { # <commit> [ro] [folder]
 # when it is that commit as installed() verifies it: a hook (a Git template's post-checkout) may change the files the
 # checkout wrote.
 install() { # <commit> [<repository>]
-  local c=$1 d=$VERSIONS/$1 src=${2:-} m=$VERSIONS/mirror.git rc
+  local c=$1 d=$VERSIONS/$1 src=${2:-} m=$VERSIONS/mirror.git rc p
   [[ $c =~ ^[0-9a-f]{40}$ ]] || { echo "conveyor: $c is not a full commit id: an install cannot be verified against it" >&2; return 1; }
   if [ ! -e "$d" ]; then
     [ -n "$src" ] || src=$(git -C "$HERE" remote get-url origin 2>/dev/null) || { echo "conveyor: $HERE is in no git checkout with an origin to clone" >&2; return 1; }
@@ -52,19 +52,21 @@ install() { # <commit> [<repository>]
         && { git --no-replace-objects -C "$m" cat-file -e "$c^{commit}" \
           || timeout 600 git -C "$m" fetch -q --no-tags "$src" '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'; } \
         && git --no-replace-objects -C "$m" cat-file -e "$c^{commit}" || exit 1
-      # Made beside its place and moved in once read-only, so a version folder is never there half made.
-      [ ! -e "$d.part" ] || { chmod -R u+w "$d.part" && rm -rf "$d.part"; } || exit 1
-      { git clone -q --no-checkout "file://$m" "$d.part" && git -C "$d.part" remote set-url origin "$src" \
-        && git --no-replace-objects -C "$d.part" -c advice.detachedHead=false checkout -q --detach "$c" && installed "$c" '' "$d.part"; } \
-        || { rm -rf "$d.part"; exit 1; }
+      # Made beside its place and moved in once read-only, so a version folder is never there half made. Each install
+      # makes its own folder (<commit>.part.XXXXXX), its mode as mkdir gives it: an older engine builds in <commit>.part
+      # and moves it in after it lets the lock go, so that folder is never removed or used here.
+      p=$(mktemp -d "$d.part.XXXXXX") && chmod "$(printf %o $((0777 & ~0$(umask))))" "$p" || exit 1
+      { git clone -q --no-checkout "file://$m" "$p" && git -C "$p" remote set-url origin "$src" \
+        && git --no-replace-objects -C "$p" -c advice.detachedHead=false checkout -q --detach "$c" && installed "$c" '' "$p"; } \
+        || { rm -rf "$p"; exit 1; }
       # An older engine lets the mirror's lock go before it moves its folder in, so its move can come after this check:
       # when the move fails with the folder there, that folder is taken now, as at exit 3, and this one's copy put away.
-      chmod -R a-w "$d.part" && mv "$d.part" "$d" \
-        || { [ -e "$d" ] || exit 2; [ ! -e "$d.part" ] || { chmod -R u+w "$d.part" && rm -rf "$d.part"; } || exit 2; exit 3; }
+      chmod -R a-w "$p" && mv "$p" "$d" \
+        || { [ -e "$d" ] || exit 2; [ ! -e "$p" ] || { chmod -R u+w "$p" && rm -rf "$p"; } || exit 2; exit 3; }
     ) 9>>"$m.lock" 2>/dev/null; rc=$?
     case $rc in
       0) echo "conveyor: $c is installed in $d, read-only"; return 0 ;;
-      2) echo "conveyor: commit $c was checked out and verified in $d.part, and could not be made read-only and moved to $d" >&2; return 1 ;;
+      2) echo "conveyor: commit $c was checked out and verified in a $d.part.* folder, and could not be made read-only and moved to $d" >&2; return 1 ;;
       3) ;;
       *) echo "conveyor: commit $c could not be fetched from $src, checked out and verified" >&2; return 1 ;;
     esac

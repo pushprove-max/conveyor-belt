@@ -300,6 +300,33 @@ t_needsautores() {
     || fail "a job with no new decision ran the auto pass again: $(cat "$AUTOLOG") $(cat "$T/$CASE/run.out")"
 }
 
+# Bug (O212, review): needsask() cut the block reason at 300 characters, so "delete" (the default auto.reserved) past
+# the cut never reached the question auto decide reads, and the engine's pass answered it and retried the card. The
+# question names the word after the cut, and the decision waits for the owner.
+t_needsautolong() {
+  local pad
+  setup "[$(issue 7 2026-01-01)]"; nainit 7
+  pad=$(printf 'the build stopped. %.0s' {1..17})
+  jq -c --arg p "$pad" '.reason |= "\($p)it would delete the old table"' "$ST/cards.jsonl" > "$T/$CASE/cards.new" && mv "$T/$CASE/cards.new" "$ST/cards.jsonl" || fail "the card's reason"
+  naauto on; najob
+  [ "$(nadec c0-7 | jq .answeredAt)" = null ] && ! naretried c0-7 && nadec c0-7 | jq -e '.question | contains("(it names: delete)")' > /dev/null \
+    || fail "for a block reason of ${#pad} characters before \"it would delete the old table\", the decision was answered, or its question does not name delete: $(nadec c0-7)"
+}
+
+# Bug (E14, review): the cut named past it only the words of auto.reserved, so an item of the owner's profile (its
+# "Never decide; ask" section) past the cut never reached the question auto decide reads: the engine's pass answered it
+# "Retry keeping the work" and retried the card. The question names the item, and the decision waits for the owner.
+t_needsautoprofile() {
+  local pad
+  setup "[$(issue 7 2026-01-01)]"; nainit 7
+  mkdir -p "$ST/foreman" && printf '%s\n' '## Never decide; ask' '- `.claude/scripts/__tests__/`' > "$ST/foreman/owner-way.md" || fail "the profile"
+  pad=$(printf 'the build stopped. %.0s' {1..17})
+  jq -c --arg p "$pad" '.reason |= "\($p)it moves .claude/scripts/__tests__/ away"' "$ST/cards.jsonl" > "$T/$CASE/cards.new" && mv "$T/$CASE/cards.new" "$ST/cards.jsonl" || fail "the card's reason"
+  naauto on; najob
+  [ "$(nadec c0-7 | jq .answeredAt)" = null ] && ! naretried c0-7 && nadec c0-7 | jq -e '.question | contains("(it names: .claude/scripts/__tests__/)")' > /dev/null \
+    || fail "for a block reason of ${#pad} characters before \"it moves .claude/scripts/__tests__/ away\", which the profile holds, the decision was answered, or its question does not name the item: $(nadec c0-7)"
+}
+
 # nareview: the case's blocked card (nainit) blocked by its review instead, as card.sh words that block; auto on, with
 # the standing kind review-retry on in the pack.
 nareview() {
@@ -320,6 +347,22 @@ t_needsautoretry() {
     || fail "the review-retry of #7 is not logged once in the ruling log: $(cat "$CONVEYOR_RULING_LOG")"
   [ -z "$(nadec c0-7)" ] || fail "the card given back by review-retry was put to the owner too: $(nadec c0-7)"
 }
+
+# Bug (O212): needsretry() gave back every card blocked by its review, with no look at auto.reserved: a finding tagged
+# [security] (a word of the pack's default auto.reserved) put "security" in the block reason, and the card was retried
+# though anything auto.reserved holds waits for the owner. The card stays blocked, put to the owner, and is not logged.
+# The same holds for an item of the owner's profile (E14, review: its "Never decide; ask" section) in the reason.
+nrheld() { # <the finding the review blocked on> [a "- " line of the profile's Never decide; ask]
+  setup "[$(issue 7 2026-01-01)]"; nainit 7; nareview
+  [ -z "${2:-}" ] || { mkdir -p "$ST/foreman" && printf '%s\n' '## Never decide; ask' "$2" > "$ST/foreman/owner-way.md"; } || fail "the profile"
+  jq -c --arg f "$1" 'if .step == "blocked" then .reason = "the fix for \($f) did not hold after 2 rounds" else . end' "$ST/cards.jsonl" > "$T/$CASE/cards.new" \
+    && mv "$T/$CASE/cards.new" "$ST/cards.jsonl" || fail "the card's reason"
+  najob
+  ! naretried c0-7 && [ -n "$(nadec c0-7)" ] && ! grep -q 'review-retry' "$CONVEYOR_RULING_LOG" 2>/dev/null \
+    || fail "the card blocked for the finding \"$1\" (profile item: ${2:-none}) was given back by review-retry, or not put to the owner: $(cat "$T/$CASE/run.out") $(cat "$ST/retried.jsonl" 2>&1)"
+}
+t_needsretryreserved() { nrheld '[P1][security] a.txt:1 drops the line'; }
+t_needsretryprofile() { nrheld '[P1] a.txt:1 drops the billing table' '- billing table'; }
 
 # Bug (#1168, review): a review-retry that fails (here #7 has a card that landed, so retry refuses) must be tried once,
 # not again in each job every IDLE seconds: the card stays blocked for the owner. The second job tries no retry.

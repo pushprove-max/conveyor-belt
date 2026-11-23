@@ -71,9 +71,7 @@ reserved() { packget auto.reserved RES && jq -r 'join(", ")' <<<"$RES"; }
 # reading (foreman/lib.sh FD) names: the launcher's, else for a group the first-named project's, never this checkout's.
 profile() {
   local f
-  f=$(CONVEYOR_MAIN=$MAIN bash -c '. "$1" > /dev/null && printf %s "$FD"' _ "$HERE/foreman/lib.sh") && [ -n "$f" ] || return 0
-  f=$f/owner-way.md
-  [ -s "$f" ] || return 0
+  f=$(profilefile) || return 0
   printf '\n%s' "- The owner's written profile of how they decide is in $f: read it before you decide. Follow its \"Never decide; ask\" and \"Hard lines\" sections as you follow the pack's auto.reserved."
 }
 # The records of this checkout's Foreman (foreman/lib.sh mine) whose main checkout is not on this machine, one name a
@@ -202,7 +200,8 @@ EOF
     m=$(mode) || die "auto went off while this pass waited"
     IFS=$'\t' read -r scope since log < <(jq -r '[.scope, .since, .log] | @tsv' <<<"$m")
     [ -f "$log" ] || die "the log $log is gone"
-    packget auto.reserved RES || exit 1
+    # The pack's auto.reserved and the owner's profile (owner-way.md): its "Never decide; ask" and "Hard lines" items.
+    heldlist RES || die "the pack's auto.reserved or the owner's profile could not be read"
     L=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl}
     open='[]' seen=
     # A blocked-card decision's key: its issue and the first 200 characters of its block reason, digits as N (the card id and the
@@ -225,7 +224,8 @@ EOF
       # Split on the unit separator, not on a tab: read joins tabs in a row, so an empty field would move the rest.
       IFS=$'\x1f' read -r id q def asked opts < <(jq -r 'def one: gsub("[\r\n\u001f]+"; " "); [.id, (.question | one), (.proposedDefault | one), .askedAt,
         ((.options // []) | map(one) | join("; "))] | join("\u001f")' <<<"$row")
-      # Reserved: a word or phrase of the pack's list in the question, the recommended option or an option.
+      # Reserved: a word or phrase of the pack's list, or an item of the owner's profile, in the question, the
+      # recommended option or an option.
       t=$(jq -r --argjson r "$RES" '([.question, .proposedDefault] + (.options // []) | join("\n") | ascii_downcase) as $t
         | first($r[] | select(. as $w | $t | contains($w | ascii_downcase))) // ""' <<<"$row")
       if [ -n "$t" ]; then hold "$id" "$q" "reserved: $t"; continue; fi

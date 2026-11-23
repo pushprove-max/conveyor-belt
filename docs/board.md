@@ -1109,7 +1109,9 @@ pass in fewer CPU seconds than the median of the last runs that the issue lists,
 that names the verdict and both numbers (`conveyor/README.md`, Bug cards: the new tests fail without the fix). For the
 verdict stabilise, the file may cost as much as those runs, and the build's reply must name the cause of each flaky
 case and how the change removes it. For the verdict merge, a file that takes in another test file may cost as much as
-those runs plus that file's median. Each file of a split must pass, and the files' CPU seconds summed must be at most the old file's plus a
+those runs plus that file's median. When the file goes into another test file, that file must pass with the change
+and may cost as much as it did without the change plus the median of the last runs of the file it takes in, else the
+card is blocked with a reason that names the failure or both numbers. Each file of a split must pass, and the files' CPU seconds summed must be at most the old file's plus a
 start-up allowance for each new file. For a delete or a merge, the review names the
 test that still covers each case of the file. Each file of an action on many files gets its own action or issue, and
 its own answer. At most 3 test actions run at once. The others wait as queued and start in the order asked. Stop

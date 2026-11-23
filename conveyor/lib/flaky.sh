@@ -192,7 +192,8 @@ flakyrun() { # <worktree> [testfails() of the run again, when it failed]
   local e c=${1##*/} n
   n=${c##*-}; [[ $n =~ ^[1-9][0-9]*$ ]] || n=null # a main-red fix card or a land-branch card ends in -0: no issue
   if [ $# -ge 2 ]; then
-    e=$(jq -ce --arg c "$c" --argjson n "$n" --argjson l "${2:-null}" "$NOTPASSED$PASSEDAGAIN"'[passedagain($l)[] | {case: ., card: $c, issue: $n}] | select(length > 0)' "$1.first" 2>/dev/null) || return 0
+    # The run's result goes in by file, not as an argument: one argument over 128 KiB fails to start jq on Linux.
+    e=$(jq -ce --arg c "$c" --argjson n "$n" --slurpfile l <(printf '%s' "${2:-null}") "$NOTPASSED$PASSEDAGAIN"'$l[0] as $l | [passedagain($l)[] | {case: ., card: $c, issue: $n}] | select(length > 0)' "$1.first" 2>/dev/null) || return 0
   else
     e=$(jq -ce --arg c "$c" --argjson n "$n" "$NOTPASSED"'[notpassed[] | {case: ., card: $c, issue: $n}] | select(length > 0)' "$1.first" 2>/dev/null) || return 0
   fi

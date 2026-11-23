@@ -7,12 +7,45 @@
 # (`conveyor.sh auto standing <kind> on|off`). The Foreman is told the kinds that are on, with their limits, at its
 # start (foreman.sh asks each of its records for `conveyor.sh auto standing`, on the host that has the record). Each act under a kind is one row of the
 # ruling log, source "standing", with its kind (standinglog); the Foreman then tells the owner in one line (a
-# review-retry act the watcher takes and logs, and no one tells the owner of).
+# review-retry act the watcher takes and logs, and no one tells the owner of). What no kind and no auto pass may take,
+# as it waits for the owner, is heldlist's: the pack's auto.reserved and the owner's profile items.
 # Sourced by commands/auto.sh and lib/followups.sh, after lib/prompts.sh (packget).
 # Test seam: CONVEYOR_RULING_LOG (the ruling log).
 STANDING_KINDS=(asked-fix review-followup release-check fixed-block review-retry)
 # The ruling log's path (.claude/hooks/lib/rulings.sh rulings_log, of main's checkout); fails when it cannot be named.
 rulingslog() { [ -z "${CONVEYOR_RULING_LOG:-}" ] || { echo "$CONVEYOR_RULING_LOG"; return; }; CONVEYOR_MAIN=$MAIN bash -c '. "$1" && rulings_log' _ "$HERE/../.claude/hooks/lib/rulings.sh"; }
+# The owner's written profile of how they decide (owner-way.md, in the folder foreman/lib.sh FD names): its path when
+# it is there and not empty; fails when there is none.
+profilefile() {
+  local f
+  f=$(CONVEYOR_MAIN=$MAIN bash -c '. "$1" > /dev/null && printf %s "$FD"' _ "$HERE/foreman/lib.sh") && [ -n "$f" ] || return 1
+  [ -s "$f/owner-way.md" ] && printf %s "$f/owner-way.md"
+}
+# The items of the profile's "Never decide; ask" and "Hard lines" sections, as a JSON list: each "- " or "* " line under
+# either heading (any level), trimmed, in two forms, as the question's text has no Markdown marks: with no marks
+# (**bold**, _italic_, ~~struck~~, a [link](url)'s text only) outside its `code` spans, whose text is kept as written;
+# and as written with only the code spans' backticks taken out, so a path such as .claude/scripts/__tests__/ written
+# with no backticks is still held. [] with no profile; fails when the profile cannot be read.
+profileheld() {
+  local f
+  f=$(profilefile) || { echo '[]'; return 0; }
+  [ -r "$f" ] || return 1
+  awk '/^#+[[:space:]]/ { h = tolower($0); sub(/^#+[[:space:]]+/, "", h); sub(/[[:space:]]+$/, "", h); on = (h == "never decide; ask" || h == "hard lines"); next }
+    on && /^[[:space:]]*[-*][[:space:]]+[^[:space:]]/ { sub(/^[[:space:]]*[-*][[:space:]]+/, ""); print }' "$f" \
+    | jq -Rsc 'def trim: gsub("^\\s+|\\s+$"; "");
+      def plain: gsub("\\[(?<t>[^\\]]*)\\]\\([^)]*\\)"; "\(.t)") | gsub("[*~]"; "") | gsub("(?<!\\w)_+|_+(?!\\w)"; "");
+      split("\n") | map(select(trim != "") | (split("`") | to_entries | map(if .key % 2 == 0 then .value | plain else .value end) | join("") | trim),
+        (gsub("`"; "") | trim)) | map(select(. != "")) | unique'
+}
+# heldlist <var>: what waits for the owner, as one JSON list in <var>: the words of the pack's auto.reserved and the
+# profile's items (profileheld). auto decide holds a decision that holds one (case-insensitive); lib/needsask.sh names
+# each one a question's cut would hide (askcut()) and gives back no card whose block reason holds one (needsretry()).
+# Fails when either cannot be read.
+heldlist() {
+  local h_ p_
+  packget auto.reserved h_ && p_=$(profileheld) && h_=$(jq -c --argjson p "$p_" '. + $p' <<<"$h_") || return 1
+  printf -v "$1" %s "$h_"
+}
 standingon() { # <kind>: 0 when the pack turns that kind on
   local s_; packget auto.standing s_ && jq -e --arg k "$1" 'index($k) != null' <<<"$s_" >/dev/null
 }

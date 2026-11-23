@@ -92,7 +92,7 @@ root of the repository:
 
 When you set `tests.patterns`, it replaces the default. Without it, Conveyor uses a default for the common
 conventions: `__tests__/`, `*.test.*`, `*.spec.*`, `test_*.py`, `*_test.py`, `*_test.go`, `tests/`, `test/`, `spec/`,
-`*_spec.rb`, `*Test.java`, `*Tests.cs`, `test-*.mjs`, `*.t` and `t/*.sh`.
+`*_spec.rb`, `*Test.java`, `*Tests.cs`, `*Tests.swift`, `test-*.mjs`, `*.t` and `t/*.sh`.
 
 Some parts of Conveyor use a smaller list of test files: the Tests page, the flaky-test record, the search for the file
 that holds a failed case, and the record of the test files that a card changed. They use the files named `*.test.*`

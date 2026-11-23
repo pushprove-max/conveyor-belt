@@ -160,6 +160,37 @@ The owner is here. Decide only the formalities; ask them everything else as usua
 t_autoprofile() { autoprofile on; }
 t_autoprofilen() { autoprofile narrow; }
 
+# Bug: auto decide held only auto.reserved's words, so a question the owner's profile (owner-way.md) lists under
+# "Never decide; ask" got its recommended answer, in full mode and in narrow (where the ruling x-1 gave that answer
+# before). Its "Hard lines" items are held too. The decision waits for the owner, naming the item. The items are written
+# with Markdown marks (bold, italic): the bug the review found (E9) kept the asterisks, so "**Docs fix**" matched no question.
+# A path is held as written, in backticks or not: the next fix took the underscores of __tests__ out of the code item
+# `.claude/scripts/__tests__/` too (E9 again), so a question that names the real path was answered.
+autoprofileheld() { # <on|narrow>
+  local out log; autoledger
+  mkdir -p "$ST/foreman"
+  printf '%s\n' '# How the owner decides' '## Never decide; ask' '- pricing' '* **Docs fix**  ' '- `.claude/scripts/__tests__/`' '## Hard lines' '- _no tracking_' \
+    '- docs/__drafts__/' >"$ST/foreman/owner-way.md"
+  jq -cn '{id: "d-track", askedAt: "2026-11-15T10:03:00Z", question: "Ship the beta now?", proposedDefault: "yes, with no tracking",
+    source: "t", answer: null, answeredAt: null},
+    {id: "d-tests", askedAt: "2026-11-15T10:04:00Z", question: "Move the cases in .claude/scripts/__tests__/ now?", proposedDefault: "yes",
+    source: "t", answer: null, answeredAt: null},
+    {id: "d-drafts", askedAt: "2026-11-15T10:05:00Z", question: "Publish docs/__drafts__/ now?", proposedDefault: "yes",
+    source: "t", answer: null, answeredAt: null}' >> "$LEDGER"
+  out=$(cd "$R" && loop auto "$1" && loop auto decide) || fail "auto $1 failed: $out"
+  log=$(jq -r .log "$ST/auto/mode.json")
+  [ "$(answer d-docs)" = open ] && grep -qxF -- '- d-docs: Merge the docs fix now? (reserved: Docs fix)' "$log" \
+    || fail "auto $1 answered d-docs $(answer d-docs), which the profile's Never decide; ask holds: $(cat "$log")"
+  [ "$(answer d-track)" = open ] && grep -qxF -- '- d-track: Ship the beta now? (reserved: no tracking)' "$log" \
+    || fail "auto $1 answered d-track $(answer d-track), which the profile's Hard lines hold: $(cat "$log")"
+  [ "$(answer d-tests)" = open ] && grep -qxF -- '- d-tests: Move the cases in .claude/scripts/__tests__/ now? (reserved: .claude/scripts/__tests__/)' "$log" \
+    || fail "auto $1 answered d-tests $(answer d-tests), which the profile's code item \`.claude/scripts/__tests__/\` holds: $(cat "$log")"
+  [ "$(answer d-drafts)" = open ] && grep -qxF -- '- d-drafts: Publish docs/__drafts__/ now? (reserved: docs/__drafts__/)' "$log" \
+    || fail "auto $1 answered d-drafts $(answer d-drafts), which the profile's item docs/__drafts__/ holds: $(cat "$log")"
+}
+t_autoprofileheld() { autoprofileheld on; }
+t_autoprofileheldn() { autoprofileheld narrow; }
+
 # Bug (#1168): the engine's pass (lib/needsask.sh needsauto) and the Foreman's both start on a new decision; two passes
 # that read it open at once would each log and answer it. Another pass holds decide.lock and answers d-docs while
 # this one waits: this pass then finds it answered and logs no entry for it. The other pass is a real process holding

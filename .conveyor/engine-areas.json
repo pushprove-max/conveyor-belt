@@ -402,6 +402,7 @@
 {"area": "testrun", "test": "mainred.test.sh"}
 {"area": "testrun", "test": "mainredproof.test.sh"}
 {"area": "testrun", "test": "mainredlinkput.test.sh"}
+{"area": "testrun", "test": "mainredverdict.test.sh"}
 {"area": "testrun", "test": "redpickbig.test.sh"}
 {"area": "testrun", "test": "redproofkept.test.sh"}
 {"area": "testrun", "test": "machinehold.test.sh"}

@@ -60,6 +60,19 @@ t_redproofstill() {
   [ "$(head -n 1 <<<"$got")" = "exit 2" ] && [ "$(tail -n 1 <<<"$got")" = '`c.test` still fails with the change.' ] \
     || fail "a change that leaves c.test failing was not blocked naming it: $got"
 }
+# Bug it catches: redproof() closed the card (exit 3, "main is no longer red") after one run without the change, so a
+# case that passed once and fails one run in three closed a red main's card. Main's runner here fails `one` in its
+# third run only, the last of FULL_ALONE (3) (the file n counts a.test's calls), so a check that stops after any fewer
+# runs closes the card: the check runs all three and judges the third.
+t_redproofflaky() {
+  redsetup $'one\nc.test'
+  local got
+  printf '%s\n' '[ "${CONVEYOR_TEST_FILE:-}" = a.test ] && { n=$(($(cat "$STUB/n" 2>/dev/null || echo 0) + 1)); echo $n > "$STUB/n"; [ $n != 3 ] || { grep -vx one ok.txt > ok.new; mv ok.new ok.txt; }; }' \
+    | cat - "$STUB/mainrun-cmd" > "$STUB/mainrun-cmd.new" && mv "$STUB/mainrun-cmd.new" "$STUB/mainrun-cmd" || fail "the flaky runner could not be made"
+  got=$(redcheck $'one\nc.test\nfixed')
+  [ "$(cat "$STUB/n")" = 3 ] && [ "$(head -n 1 <<<"$got")" = "exit 2" ] && [[ $(tail -n 1 <<<"$got") == '`c.test` passes on main'"'"'s code at '*' while `a.test: one` fails there.' ]] \
+    || fail "the card whose case failed in its third run without the change closed, or the check did not judge that run (runs: $(cat "$STUB/n")): $got"
+}
 # The real test file conveyor/foreman/<file>, run as the test step runs a case of it (its case <run>, by
 # CONVEYOR_SHELL_TEST_CASE) in the fixture of redrunner(): no stub of its output, which is what the proof reads. The run passes
 # when ok.txt in the change holds `fixed`; else it runs with a jq that always fails, as a broken fix would leave it. The entry
@@ -225,7 +238,7 @@ t_mainrednochange() {
   out=$(eng 'wt=$CONVEYOR_CARDS/cfix issue="" sprompt=""; redbrief cfix 0 "" && echo "staged $(git -C "$wt" diff --cached --name-only)"
     emptychange cfix 0 "$wt" ""; echo "empty $?"; nochange cfix 0 "$wt" brief' 2>&1)
   [[ $out == "staged .conveyor/test-links.json"$'\n'"empty 0"* ]] || fail "the fix card's staged links alone were not taken for no change (emptychange() exit 0): $out"
-  [ "$(st 'select(.step == "closed") | .reason')" = 'Not needed: the session made no change, and its cases were checked again on main. Main is no longer red for `a.test: one`, `c.test`: they pass on main'"'"'s code at '"$s"' without the change, so the card closes as already done.' ] \
+  [ "$(st 'select(.step == "closed") | .reason')" = 'Not needed: the session made no change, and its cases were checked again on main. Main is no longer red for `a.test: one`, `c.test`: they pass on main'"'"'s code at '"$s"' without the change in each of 3 runs, so the card closes as already done.' ] \
     || fail "the fix card with no change did not close as not needed: $out: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   out=$(eng "redopen cfix && echo open")
   [ -z "$(st 'select(.step | IN("blocked", "landed", "review"))')" ] && [[ $out != *open* ]] && [ "$(git -C "$R" rev-parse HEAD)" = "$s" ] && [ ! -e "$w" ] \
@@ -261,7 +274,7 @@ t_mainredjoinrun() {
   out=$(eng 'eval "real$(declare -f redrun)"; redrun() { realredrun "$@"; mainred c9 "b.test: two" b.test '"$s"' > /dev/null 2>&1; }
     nochange cfix 0 "$CONVEYOR_CARDS/cfix" brief; redopen cfix && echo open' 2>&1)
   # The blocked reason quotes the run's result without its "so the card closes as already done": the card stayed open.
-  [[ $(st 'select(.card == "cfix" and .step == "blocked") | .reason') == *'without the change. The card was not closed: a case joined its entry in the main-red record while its cases ran, and did not run: `b.test: two`.'* ]] \
+  [[ $(st 'select(.card == "cfix" and .step == "blocked") | .reason') == *'without the change in each of 3 runs. The card was not closed: a case joined its entry in the main-red record while its cases ran, and did not run: `b.test: two`.'* ]] \
     && [ -z "$(st 'select(.card == "cfix" and .step == "closed")')" ] && [[ $out == *open* ]] \
     || fail "the fix card closed as already done though a case joined its entry while its cases ran, or its blocked reason said it closes: $out: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
 }

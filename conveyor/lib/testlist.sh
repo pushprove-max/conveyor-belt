@@ -38,6 +38,14 @@ timed() { # <worktree> [own]
     | jq -cRn '[inputs | capture("^TESTRUN sec\t(?<f>[^\t]+)\t(?<s>[0-9]+(\\.[0-9]+)?)(\t(?<c>[0-9]+(\\.[0-9]+)?))?$")
       | {key: .f, value: {sec: (.s | tonumber), cpu: (.c | tonumber? // null)}}] | from_entries'
 }
+# The CPU seconds, summed, of test files <file>... run alone in <worktree> on a test slot (test.fileCommand), each as its
+# runner times it (timed()); nothing when one of them has none. Fails when their run fails: a runner times a failed
+# file too. The merge check of an Optimize card runs it (lib/speedproof.sh optproof()).
+mergecpu() { # <worktree> <file>...
+  printf 'fail\t%s\n' "${@:2}" > "$1.rerun" && tests "$1" test.fileCommand alone > /dev/null 2>&1 || return 1
+  timed "$1" 2>/dev/null | jq -r '. as $t | [$ARGS.positional[] | $t[.].cpu?] | if all(.[]; type == "number") then add | . * 1000 | round / 1000 else empty end' \
+    --args "${@:2}" 2>/dev/null
+}
 # The files the step in <worktree> ran some cases of and timed none of, as a JSON list: a `TESTRUN case` line of its
 # logs or of the run before a run again (<worktree>.times, tests()) names them, and no `TESTRUN sec` line of this step
 # does (timed own): a runner times no file it ran in part. A time of one on record is an earlier step's. The map of

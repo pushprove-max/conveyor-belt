@@ -325,15 +325,17 @@ speedproof() { # <card> <worktree> <issue json> <test file> [<test file the chan
 # bug-card check: the card speeds its test file up, splits it, merges it into another test file or deletes it, and
 # keeps what it tests, so no test must fail on main's code. A change that keeps the file, or adds test files (a split),
 # is checked as a speed-up (speedproof(), given the test files it adds). A change that removes the file and adds no
-# test file (a delete, or a merge into a file main has) is not run: the file runs alone on the commit the card was built
+# test file (a delete, or a merge into a file main has) is not run as a speed-up: the file runs alone on the commit the card was built
 # on, as it is there, and the review is told the cases its runner named (testfails()) and asked to name, for each, the
-# test that still covers it, on a COVERED-BY line (the Tests page's, testspart(), for a delete). Its bugproof line is ok, with speed: {file, before: the figure recentcpu() gives or null, after: null, fix:
-# merged, into: the test files the change modifies, or, when it modifies none, deleted, into: []}.
-# First, the change must take the shape its issue's verdict asks (optverdict()); one that does not fails, with the
-# reason in <worktree>.unfixed and a bugproof line with result fail.
-# Returns as speedproof() does; a delete or merge of the shape its verdict asks never fails it.
+# test that still covers it, on a COVERED-BY line (the Tests page's, testspart(), for a delete). The test files a merge
+# modifies (into) run alone there without the change and with it (mergecpu(), lib/testlist.sh): they must pass both
+# times, and with it take at most what they took without it plus the file's figure (recentcpu()), else the check fails
+# naming why. Its bugproof line has speed: {file, before: the figure (a merge's: that limit) or null, after: null (a
+# merge's: into's CPU s with the change), fix: deleted (into: []) or merged, into}. First, the change must take the shape
+# its issue's verdict asks (optverdict()); one that does not fails, with the reason in <worktree>.unfixed and a bugproof
+# line with result fail. Returns as speedproof() does.
 optproof() { # <card> <worktree> <issue json> <test file>
-  local mwt=$CARDS/mainrun/$1.speed f=$4 sha='' out='' rc='' before cs='' add=() into=() gone=() v why='' fix
+  local mwt=$CARDS/mainrun/$1.speed f=$4 sha='' out='' rc='' before bw cs='' add=() into=() gone=() v why='' fix mb='' ma='' lim=''
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || { rm -f "$2.unfixed"; return 0; }
   mapfile -t add < <(git -C "$2" diff --cached --name-only --no-renames --diff-filter=A HEAD 2>/dev/null | testpaths \
@@ -379,23 +381,39 @@ optproof() { # <card> <worktree> <issue json> <test file>
   fi
   if [ -e "$2/$f" ] || [ ${#add[@]} != 0 ]; then speedproof "$@" "${add[@]}"; return; fi
   rm -f "$2.unfixed"
-  before=$(recentcpu "$3" "$f"); before=${before%%$'\t'*}
+  before=$(recentcpu "$3" "$f"); bw=${before#*$'\t'}; before=${before%%$'\t'*}
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } 2>&1 < /dev/null); then
     # The run is of the file alone: every case its runner names is the file's.
     printf 'fail\t%s\n' "$f" > "$mwt.rerun"; tests "$mwt" test.fileCommand alone; rc=$?
     cs=$(testfails "$mwt.test" "$rc" 2>/dev/null | jq -r '[(.passcases + .okcases)[]?.cases[]?, .files[]?.cases[]?.name | select(. != "")] | unique[]' 2>/dev/null)
+    if [ ${#into[@]} != 0 ]; then # a merge
+      mb=$(mergecpu "$mwt" "${into[@]}") || mb=fail
+      ! git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index > /dev/null 2>&1 || ma=$(mergecpu "$mwt" "${into[@]}") || ma=fail
+    fi
   fi
-  { printf 'This change removes the test file %s and adds no test file: it deletes the file, or merges it into another test file. No test must fail on main'"'"'s code for it, and it was not run with the change.\n' "$f"
+  # They must pass, and cost with the change at most what they cost without it plus the removed file's figure.
+  if [ ${#into[@]} = 0 ]; then :
+  elif [ "$ma" = fail ] || [ "$mb" = fail ]; then why="the test files $f is merged into, ${into[*]}, fail $([ "$ma" = fail ] && echo with || echo without) the change, run alone on main's code at $sha"
+  elif [ -z "$before" ]; then why="the test file $f has no CPU seconds on record to compare the files it is merged into with"
+  elif [ -z "$mb" ] || [ -z "$ma" ]; then why="the test files $f is merged into, ${into[*]}, gave no CPU seconds run alone on main's code without the change and with it"
+  else lim=$(jq -n --argjson a "$before" --argjson b "$mb" '$a + $b | . * 1000 | round / 1000')
+    jq -en --argjson a "$ma" --argjson m "$lim" '$a <= $m' >/dev/null 2>&1 \
+      || why="the merge costs more than the files apart: ${into[*]} take $ma CPU s with the change, over the $lim CPU s they may take: $mb CPU s without it plus $before CPU s of $f ($bw)"
+  fi
+  if [ -n "$why" ]; then printf '%s\n' "$why" > "$2.unfixed"
+  else { printf 'This change removes the test file %s and adds no test file: it deletes the file, or merges it into another test file. No test must fail on main'"'"'s code for it, and the file it removes was not run with the change.\n' "$f"
     if [ -n "$cs" ]; then printf 'The cases %s held, as its runner named them in a run of it alone on main'"'"'s code at %s:\n' "$f" "$sha"; sed 's/^/- /' <<<"$cs"
     elif [ -n "$rc" ]; then printf 'Its runner named no case of it in a run of it alone on main'"'"'s code at %s (exit %s): read the file there for its cases.\n' "$sha" "$rc"
     else printf 'It could not be run alone on main'"'"'s code (%s): read the file there for its cases.\n' "${out:0:300}"; fi
-    echo 'Name, for each of its cases, the test that still covers it after the change, each on its own line, exactly: `COVERED-BY: <its test file>: <its case>`. A case with no test named is a finding.'; } > "$2.unfixed"
-  record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof ok "$(jq -cn --arg f "$f" --arg b "$before" '{reason: "", speed: {file: $f, before: ($b | tonumber? // null), after: null,
-    fix: (if $ARGS.positional == [] then "deleted" else "merged" end), into: $ARGS.positional}}' --args "${into[@]}")"
+    [ -z "$lim" ] || printf 'The test files it is merged into, %s, run alone, take %s CPU s with the change: not more than the %s CPU s they took without it plus the %s CPU s of %s (%s).\n' \
+      "${into[*]}" "$ma" "$mb" "$before" "$f" "$bw"
+    echo 'Name, for each of its cases, the test that still covers it after the change, each on its own line, exactly: `COVERED-BY: <its test file>: <its case>`. A case with no test named is a finding.'; } > "$2.unfixed"; fi
+  record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof "$([ -z "$why" ] && echo ok || echo fail)" "$(jq -cn --arg r "$why" --arg f "$f" --arg b "${lim:-$before}" --arg a "$ma" '{reason: $r, speed: {file: $f,
+    before: ($b | tonumber? // null), after: ($a | tonumber? // null), fix: (if $ARGS.positional == [] then "deleted" else "merged" end), into: $ARGS.positional}}' --args "${into[@]}")"
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
-  return 0
+  [ -z "$why" ]
 }
 # The check of a Fix failures card (#188; card(): a bug card whose issue speedfile() names with FIXFAILS, as the
 # Board's Fix failures files it), in place of the bug-card check: the card makes its test file pass reliably and keeps
@@ -482,6 +500,15 @@ HOLLOW_JQ='def cases: [table[] | any(.ext[]; . == "py") as $py
     | . + {note: (if any(.ext[]; . == "sh") or $py then "^\\s*(#|$)" else "^\\s*(//|/\\*|\\*(\\s|/|$)|$)" end),
       close: (if $py then null else "[)\\]}]\\s*;?\\s*$" end), sh: any(.ext[]; . == "sh")}];
   def row($f): (($f | capture("\\.(?<x>[^./]+)$").x | ascii_downcase) // "") as $x | first(cases[] | select(any(.ext[]; . == $x))) // null;
+  def shopen: "^.*?\\(\\s*\\)\\s*[{(]|^\\s*@test\\s+(\"(\\\\.|[^\"])*\"|\\S+)\\s*\\{";
+  def shstart: . as $l | (first(match(shopen)) // null) as $m | ($m.string // "" | .[-1:]) as $o | (reduce range(0; length) as $i ({q: null, e: false, d: 0, one: false, at: null};
+      $l[$i:$i + 1] as $c | if .at != null then . elif .e then .e = false
+          elif .q == "\u0027" then (if $c == "\u0027" then .q = null else . end)
+          elif $c == "\\" then .e = true elif .q == "\"" then (if $c == "\"" then .q = null else . end)
+          elif $c == "\u0027" or $c == "\"" then .q = $c
+          elif $c == "#" and $i > 0 and ($l[$i - 1:$i] | test("\\s")) then .at = $i elif $m == null or $i < $m.length or .one then . elif $c == $o then .d += 1
+          elif $c == ({"{": "}", "(": ")"}[$o]) then (if .d == 0 then .one = true else .d -= 1 end) else . end)) as $r
+    | {text: (if $r.at == null then $l else $l[:$r.at] | sub("\\s+$"; "") end), one: $r.one};
   def plain: gsub("\\\\(?<c>.)"; .c);
   def ind: match("^\\s*").length;
   def tq: [scan("\"\"\"|\u0027\u0027\u0027")] | length;
@@ -525,14 +552,17 @@ HOLLOW_JQ='def cases: [table[] | any(.ext[]; . == "py") as $py
 # template string, a comment or a docstring at the left edge) does not end it, as it starts inside text (shin, jsin,
 # tq); brackets are not counted across lines, as one in a regular expression or a case pattern closes nothing. In
 # shell a comment or a line of code whose last bracket closes one it opened (shin) does not end it either (#612),
-# and shin reads a start line without the case's own opener, so a case of one line (t_x() { f; }) ends there.
+# and a shell case ends on its start line when the bracket that closes its opener (shopen) is on it, after a trailing
+# comment is dropped (shstart: from a "#" after a blank outside quotes): t_x() { f; } # it's a note, or t_x() { f; }; t_y() { g; }.
 casestarts() { # <worktree> <test file>
   jq -Rsr --arg f "$2" "$TESTEDIT_TABLE$HOLLOW_JQ"'row($f) as $t
       | if $t == null then "none" else split("\n") as $ls | [range(0; $ls | length) | select($ls[.] | test($t.case))] as $k
-        | (if $t.close == null then [] elif $t.sh then [[$ls[] | if test($t.case) then sub("^.*?\\(\\s*\\)\\s*[{(]|^\\s*@test\\s+(\"(\\\\.|[^\"])*\"|\\S+)\\s*\\{"; "") else . end] | shin] else [$ls | jsin] end) as $tx | [$ls[] | tq] as $tq
+        | [$ls[] | if $t.sh and test($t.case) then shstart else {text: ., one: false} end] as $sl | [$sl[].text] as $lc
+        | (if $t.close == null then [] elif $t.sh then [[$lc[] | if test($t.case) then sub(shopen; "") else . end] | shin] else [$ls | jsin] end) as $tx | [$ls[] | tq] as $tq
         | ["row"] + [range(0; $k | length) as $i | $k[$i] as $a | (if $i + 1 < ($k | length) then $k[$i + 1] else ($ls | length) end) as $z
           | ($ls[$a] | ind) as $in
-          | (if $t.close then first(range($a; $z) | select(($tx[.] | not) and ($ls[.] | ind) <= $in and ($ls[.] | test($t.close)))) // ($z - 1)
+          | (if $sl[$a].one then $a
+            elif $t.close then first(range($a; $z) | select(($tx[.] | not) and ($ls[.] | ind) <= $in and ($lc[.] | test($t.close)))) // ($z - 1)
             else (first(foreach range($a + 1; $z) as $j ({q: $tq[$a]}; {p: .q, q: (.q + $tq[$j])};
                 select(.p % 2 == 0 and ($ls[$j] | test($t.note) | not) and ($ls[$j] | ind) <= $in) | $j)) // $z) - 1 end) as $e
           | "\($a + 1)\t\($e + 1)\t\($ls[$a] | plain)"] | join("\n") end' "$1/$2" 2>/dev/null

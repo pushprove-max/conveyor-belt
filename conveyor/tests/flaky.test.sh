@@ -32,6 +32,23 @@ t_flakyrerun() {
   [ "$(flakyfiled)" = 0 ] || fail "one card's entries filed an issue: $(cat "$STUB/filed")"
 }
 
+# Bug (O196): flakyrun() gave jq the run again's testfails() as one argument (--argjson); over 128 KiB (here 900 cases
+# still failing, of 200-byte names) Linux refuses to start jq, and `|| return 0` recorded nothing. b.test's flaky
+# passed in the run again: its entry is recorded; c.test's three did not pass, and has none.
+t_flakyrunbig() {
+  setup '[]'
+  local w=$T/$CASE/cards/c20260101T000000-repo-7 l
+  mkdir -p "${w%/*}"
+  jq -cn '{exit: 1, failures: {files: [{file: "b.test", cases: [{name: "flaky"}]}, {file: "c.test", cases: [{name: "three"}]}]}}' > "$w.first"
+  l=$(jq -cn '{passed: [], okcases: [], passcases: [{file: "b.test", cases: ["flaky"]}],
+    files: [{file: "z.test", cases: [range(900) | {name: "case-\(.)-\("x" * 190)", line: "FAIL"}]}, {file: "c.test", cases: [{name: "three"}]}]}')
+  [ ${#l} -gt 131072 ] || fail "the run again's result over 128 KiB was not made"
+  ( STATE=$ST/cards.jsonl; . "$SRC/lib/flaky.sh"; eval "$(sed -n '/^clock() {/p' "$SRC/lib/control.sh"; sed -n "/^NOTPASSED=/,/unique;'\$/p" "$SRC/lib/testrun.sh")"
+    flakyrun "$w" "$l" ) || fail "flakyrun failed"
+  [ "$(fl '[.entries[] | .case] | join("|")')" = 'b.test: flaky' ] \
+    || fail "with the run again's result over 128 KiB, the case that passed again was not the one entry: $(cat "$ST/flaky.json" 2>&1)"
+}
+
 # A main-red fix card and a land-branch card have no issue, and their ids end in -0. Bug: flakyrun() read the 0 as
 # the card's issue, so the entry held issue 0 and the filed issue listed it as "issue #0".
 t_flakyrunzero() {

@@ -170,7 +170,8 @@ reopened() { # <open issues, a json list>
   while read -r n; do
     t=$(timeout 20 gh issue view "$n" --json closed 2>/dev/null | jq -r '.closed' 2>/dev/null) || t=''
     [ "$t" != false ] || { locked retry "$n"; stdbkeeps; } || true
-  done < <(jq -rs --arg shut "$SHUT" --argjson open "$1" 'map(select(.step != "push")) | group_by(.issue)[]
+  # The open list goes in by file, not as an argument: one argument over 128 KiB (a few long bodies) fails to start jq on Linux.
+  done < <(jq -rs --arg shut "$SHUT" --slurpfile open <(printf '%s' "$1") '$open[0] as $open | map(select(.step != "push")) | group_by(.issue)[]
     | select((.[0].issue | IN($open[].number)) and all(.step != "landed" and .step != "pushed" and (.step != "closed" or .reason == $shut)))
     | group_by(.card) | max_by(.[0].time) | select(any(.step == "closed" and .reason == $shut)) | .[0].issue' < <(turncards) 2>/dev/null)
 }
@@ -182,11 +183,11 @@ approved() { # <open issues, a json list>
   local n c k
   [ -n "${YES:-}" ] || return 0
   while read -r n c k; do
-    jq -en --argjson open "$1" --argjson n "$n" --slurpfile was "$ST/$k/$c.body" "$SEE"'
-      ($open | map(select(.number == $n)) | first) as $now | $now != null and ($was[0] | type) == "object"
+    jq -en --slurpfile open <(printf '%s' "$1") --argjson n "$n" --slurpfile was "$ST/$k/$c.body" "$SEE"'
+      ($open[0] | map(select(.number == $n)) | first) as $now | $now != null and ($was[0] | type) == "object"
       and ($now | approvals) > ($was[0] | approvals)' >/dev/null 2>&1 || continue
     { locked retry "$n"; stdbkeeps; } || true
-  done < <(jq -rs --arg yes "$YES" --arg lintyes "$LINTYES" --argjson open "$1" 'map(select(.step != "push")) | group_by(.issue)[]
+  done < <(jq -rs --arg yes "$YES" --arg lintyes "$LINTYES" --slurpfile open <(printf '%s' "$1") '$open[0] as $open | map(select(.step != "push")) | group_by(.issue)[]
     | select((.[0].issue | IN($open[].number)) and all(.step != "landed" and .step != "pushed" and .step != "closed"))
     | group_by(.card) | max_by(.[0].time) | map(select(.step == "blocked")) | last | select(. != null)
     | select((.reason | startswith($yes) or startswith($lintyes)) and (.kept // "") != "") | "\(.issue) \(.card) \(.kept)"' < <(turncards) 2>/dev/null)
@@ -210,7 +211,7 @@ startagain() { # <open issues, a json list>
     ok=${tried[$s]}; [ -n "$ok" ] || continue
     echo "conveyor: a check session on $(jq -r '"\(.cli) \(.model)"' <<<"$s") started: issue #$n, whose card was blocked before its session began its work, is put back"
     { locked retry "$n"; stdbkeeps; } || true
-  done < <(jq -rs --argjson open "$1" --argjson p "$API_PAUSE" 'map(select(.step != "push")) | group_by(.issue)[]
+  done < <(jq -rs --slurpfile open <(printf '%s' "$1") --argjson p "$API_PAUSE" '$open[0] as $open | map(select(.step != "push")) | group_by(.issue)[]
     | select((.[0].issue | IN($open[].number)) and all(.step != "landed" and .step != "pushed" and .step != "closed"))
     | group_by(.card) | max_by(.[0].time) | map(select(.step == "blocked")) | last | select(. != null)
     | select((.spent.start | type) == "object" and (try (.time | fromdate) catch now) + $p <= now) | "\(.issue)\t\(.spent.start | tojson)"' < <(turncards) 2>/dev/null)
