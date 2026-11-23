@@ -62,7 +62,14 @@ if ! grep -qxF "$t" <<<"$fresh"; then
     kept=$(($(wc -w <<<"$all") - $(wc -w <<<"$cs"))); fi
 fi
 for c in $cs; do echo "ok $c"; ran="$ran $c"; k=$((k + 1)); done
-f=${f%%"$f"}; if [ "${CONVEYOR_TEST_N:-1}" = 1 ]; then echo "${PWD##*-}$ran" >> "$STUB/runs"; else sed -i "\$ s/\$/$ran/" "$STUB/runs"; fi
+f=${f%%"$f"}; c=${PWD##*-}
+# Two cards' runs can go side by side (#7's run alone and #9's, in batchreuseagain): one writer at a time, and a later
+# file adds its cases to its own card's last line, not to the file's last line, which can be the other card's.
+until mkdir "$STUB/runs.lock" 2>/dev/null; do sleep 0.05; done
+if [ "${CONVEYOR_TEST_N:-1}" = 1 ]; then echo "$c$ran" >> "$STUB/runs"
+else awk -v c="$c" -v r="$ran" '{ l[NR] = $0; if ($1 == c) n = NR } END { for (i = 1; i <= NR; i++) print l[i] (i == n ? r : "") }' \
+  "$STUB/runs" > "$STUB/runs.new" && mv "$STUB/runs.new" "$STUB/runs"; fi
+rmdir "$STUB/runs.lock"
 echo "TESTRUN cases=$k" >> "$L"; [ "$RR" = /dev/null ] || echo "TESTRUN kept=$kept" >> "$L"
 EOF
 }

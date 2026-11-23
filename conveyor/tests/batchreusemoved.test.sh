@@ -51,7 +51,7 @@ t_batchsharedmoved() {
   # and only those: checked below.
   echo 'd=$(echo ../*-8); echo more >> "$d/y.txt"; git -C "$d" add -A' > "$STUB/held-then"
   # Main moves at the batch's run of y.test.sh, once its cases are on the run's line: a later file's run adds its
-  # cases to the last line of $STUB/runs (reusesetup), which `moved` would be.
+  # cases to its own card's last line of $STUB/runs (reusesetup), never to `moved`, which has no card number.
   echo '[ "${CONVEYOR_TEST_FILE:-}" = y.test.sh ] && grep -qx seven a.txt && grep -qx eight a.txt && [ ! -e "$STUB/moved" ] && { : > "$STUB/moved"; echo moved >> "$STUB/runs"; (cd "$R" && echo main >> lib/other.sh && git commit -qam "main changes the other source"); }; :' >> "$STUB/test-cmd"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c7=$(cardof 7); c8=$(cardof 8)
