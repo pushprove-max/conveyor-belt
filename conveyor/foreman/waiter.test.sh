@@ -546,7 +546,8 @@ wait
 bad=0
 for c in "${cases[@]}"; do
   cat "$B/$c.out" >&2
-  [ -e "$B/$c.passed" ] || { bad=1; [ -s "$B/$c.out" ] || echo "FAIL [$c]: ended with no word" >&2; }
+  # A passing case prints `ok <case>`, named as its FAIL line names it: the main-red proof reads a case's pass from that line.
+  if [ -e "$B/$c.passed" ]; then echo "ok $c"; else bad=1; [ -s "$B/$c.out" ] || echo "FAIL [$c]: ended with no word" >&2; fi
 done
 [ "$bad" = 0 ] || exit 1
 echo ok

@@ -310,6 +310,6 @@ cases=$(declare -F | sed -n 's/^declare -f t_//p')
 SEL=${CONVEYOR_SHELL_TEST_CASE:-$cases}; SEL=${SEL//,/ }
 for c in $SEL; do declare -F "t_$c" >/dev/null || { echo "unknown case $c" >&2; exit 2; }; done
 rc=0; pids=()
-for c in $SEL; do (CASE=$c; "t_$c" && echo "ok [plugin-problem-$c]") & pids+=($!); done
+for c in $SEL; do (CASE=$c; "t_$c" && echo "ok plugin-problem-$c") & pids+=($!); done
 for p in "${pids[@]}"; do wait "$p" || rc=1; done
 exit "$rc"

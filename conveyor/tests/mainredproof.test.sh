@@ -60,6 +60,36 @@ t_redproofstill() {
   [ "$(head -n 1 <<<"$got")" = "exit 2" ] && [ "$(tail -n 1 <<<"$got")" = '`c.test` still fails with the change.' ] \
     || fail "a change that leaves c.test failing was not blocked naming it: $got"
 }
+# The real test file conveyor/foreman/foreman-title.test.sh, run as the test step runs a case of it (its case `startup`, by
+# CONVEYOR_SHELL_TEST_CASE) in the fixture of redrunner(): no stub of its output, which is what the proof reads. The run passes
+# when ok.txt in the change holds `fixed`; else it runs with a jq that always fails, as a broken fix would leave it. The entry
+# holds its case `title-startup`, named as the file's FAIL line names it.
+redforeman() {
+  redrunner ''
+  mkdir -p "$STUB/nojq"; printf '#!/bin/sh\nexit 1\n' > "$STUB/nojq/jq"; chmod +x "$STUB/nojq/jq"
+  printf '%s\n' 'cp "$CONVEYOR_TEST_RERUN" "$STUB/redlist"; L=$CONVEYOR_TEST_LOG/r; rc=0' \
+    'while IFS=$'"'"'\t'"'"' read -r k f c; do' \
+    '  [ "$k" = fail ] && [ "$f" = foreman-title.test.sh ] || continue; echo "== $f" | tee -a "$L"' \
+    '  P=$PATH; grep -qx fixed ok.txt 2>/dev/null || P=$STUB/nojq:$PATH' \
+    "  if PATH=\$P CONVEYOR_SHELL_TEST_CASE=startup bash $SRC/foreman/foreman-title.test.sh; then r=ok; else r=FAIL; rc=1; fi" \
+    '  echo "-- $r $f" >> "$L"' 'done < "$CONVEYOR_TEST_RERUN"' 'exit $rc' > "$STUB/mainrun-cmd"
+  eng 'mainred c1 "foreman-title.test.sh: title-startup" foreman-title.test.sh '"$(git -C "$R" rev-parse HEAD)" || fail "the case was not recorded"
+}
+# Bug it catches (#1525): a fix of a case of a Foreman test file was blocked with "gave no result": the file printed one
+# `ok [title]` line when all its cases passed, so the run with the change named no passed case. Each file now prints `ok <case>`.
+t_redproofforeman() {
+  redforeman
+  local got; got=$(redcheck fixed)
+  [ "$(head -n 1 <<<"$got")" = "exit 0" ] && [[ $(tail -n 1 <<<"$got") == "Each case main fails at "*"passes with it: \`foreman-title.test.sh: title-startup\`."* ]] \
+    || fail "a fix that made the Foreman test file pass its case title-startup (ok.txt held 'fixed') did not pass the check: $got"
+}
+# Bug it catches (#1525): the reading of a Foreman file's pass must not turn a case that still fails with the change into a pass.
+t_redproofforemanstill() {
+  redforeman
+  local got; got=$(redcheck broken)
+  [ "$(head -n 1 <<<"$got")" = "exit 2" ] && [[ $(tail -n 1 <<<"$got") == *"still fails with the change."* ]] \
+    || fail "a change that leaves the Foreman test file's case title-startup failing (ok.txt held 'broken') was not blocked as still failing: $got"
+}
 # card.sh cardbuild() on fix card cfix's fixture state, as card() takes it (its locals; waitsec, the card's wait), with
 # a stand-in build session (session(): it notes each call in $STUB/sessions and fails, so the card ends there). Prints
 # cardbuild()'s output.

@@ -29,4 +29,4 @@ CONVEYOR_FOREMAN_DIR=$FD CONVEYOR_MAIN=$M CONVEYOR_FOREMAN_NOW=$NOW \
 w=$(cat "$FD"/pending/*.wake)
 grep -qF "alpha: no snapshot for 2 minutes (the Conveyor install $I the Foreman's watcher runs from is gone; run /conveyor-belt:setup in $M to install the project's engine again)" <<<"$w" \
   || fail "the wake does not name the install that is gone and the fix: $w"
-echo "ok [watch-conveyor]"
+echo "ok watch-conveyor"

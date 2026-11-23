@@ -65,4 +65,4 @@ till '! kill -0 "$wp" 2>/dev/null' || fail "no wake came for the blocked #9"
 wait "$wp"; rc=$?; wp=''
 [ "$rc" = 2 ] && grep -q '#9 is blocked' "$T/err" && ! grep -q '^WATCHER DOWN' "$T/err" \
   || fail "the blocked #9 did not wake the session once the waiter ran again (exit $rc): $(cat "$T/err")"
-echo "ok [gone]"
+echo "ok gone"

@@ -107,6 +107,12 @@ the builder's line for it, and the reviewer's answer when the review gave one.
 A main-red fix card runs its cases on main before its build session. A case that fails in any of three runs keeps the
 card going. When every case passes in all three runs, the card ends as `closed` with no session.
 
+After the build, the card runs each case on main with its change. A case passes when the run prints a line
+`ok <case>` for it. A case that is a whole file also passes when the file passes, and so does any case when the test
+runner keeps no log of its own. A case fails when the run prints a `FAIL [<case>]` line for it. A run that prints
+neither line for a named case gives no result, and the card is blocked. So a test file with named cases must print an
+`ok <case>` line for each case that passes.
+
 A main-red fix card whose session changes no file runs its cases again on main. When they pass, the card ends as
 `closed`, and when they fail, the card is blocked. Any other build session that changes no file blocks the card with "the session made no change", unless
 its reply ends with one of two lines:

@@ -54,4 +54,4 @@ took=$(( (${EPOCHREALTIME/[.,]/} - t0) / 100000 ))
 read -r _ c _ < "$FD/waiter.pid"
 [ "$rc" = 2 ] && grep -q '^Renew: ' "$T/err" && [ "$c" = "$B" ] && [ "$took" -lt 75 ] \
   || fail "the moved waiter did not keep its renew time: exit $rc in $took tenths of a second from $c: $(cat "$T/err")"
-echo "ok [moved]"
+echo "ok moved"
