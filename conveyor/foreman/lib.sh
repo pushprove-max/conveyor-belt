@@ -364,6 +364,28 @@ ask() {
   else timeout -k 2 "${ASK_LIMIT:-45}" bash -c "$cmd" < "${ASK_IN:-/dev/null}"; fi
 }
 
+# retryable <record> <jq path to its blocked list>: "<card> TAB <issue>" for each card the standing kind review-retry
+# (lib/standing.sh) gives back: blocked by its review (card.sh: "the fix for [P1] ... did not hold after <n> rounds",
+# as the Board's reviewWhy reads it, with any notes block() adds after it in brackets, lib/push.sh), with an issue,
+# whose reason holds no word of `conveyor.sh auto reserved` (case-insensitive), and not reported yet. None unless the
+# kind is on in the pack now, as `conveyor.sh auto standing` on the record's host reads it: a kept snapshot's standing
+# can be from before the owner turned it off, and health has none. Called by watch-conveyor.sh with its $repo, $main,
+# $errf and $SEEN.
+retryable() {
+  local c st res held
+  c=$(jq -r "$2"' | arrays | .[] | objects | select((.issue | numbers) > 0 and (.reason | strings
+    | test("\\Athe fix for \\[P[0-3]\\][\\s\\S]* did not hold after [0-9]+ rounds?( \\[[\\s\\S]*\\])?\\z"))) | "\(.card)\t\(.issue)"' <<<"$1" 2>/dev/null \
+    | awk -F'\t' -v p="$repo/blocked:" 'FILENAME == ARGV[1] { s[$0]; next } !((p $1) in s)' "$SEEN" -)
+  [ -n "$c" ] && st=$(ask "$repo" "$main" auto standing 2>>"${errf:-/dev/null}") && grep -q '^- review-retry:' <<<"$st" || return 0
+  # A reason that holds a word of auto.reserved or an item of the owner's profile waits for the owner (needsretry()
+  # leaves it too): the words are read from the record's host; none read, none retried.
+  res=$(ask "$repo" "$main" auto reserved 2>>"${errf:-/dev/null}") && jq -e arrays >/dev/null 2>&1 <<<"$res" || return 0
+  held=$(jq -r --argjson r "$res" "$2"' | arrays | .[] | objects | select((.reason | strings | ascii_downcase) as $t
+    | any($r[]; . as $w | $t | contains($w | ascii_downcase))) | .card' <<<"$1" 2>/dev/null) || return 0
+  c=$(awk -F'\t' 'FILENAME == ARGV[1] { s[$0]; next } !($1 in s)' <(printf '%s\n' "$held") - <<<"$c")
+  [ -z "$c" ] || printf '%s\n' "$c"
+}
+
 # The pending items (a watcher's wake, owed to the session). $FD/pending holds one file per wake, written as
 # <name>.tmp and renamed into place, so a reader sees a whole file or none. A watcher puts its wake here BEFORE it
 # records the item as seen: a kill between the two repeats the item, never loses it. The waiter (waiter.sh) relays

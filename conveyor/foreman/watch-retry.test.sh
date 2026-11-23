@@ -19,7 +19,7 @@ fail() { echo "FAIL [watch-retry-$CASE]: $*" >&2; exit 1; }
 # auto.standing <kinds> (a json list), its snapshot with card c7 of issue 7 blocked for <block reason> and the standing
 # <snapshot kinds> (default <kinds>: a kept snapshot can list kinds from before the pack changed). The ask seam (lib.sh
 # ask): the snapshot is $T/snap, or times out (exit 124) while $T/slow is there; health is the snapshot's; `retry <n>`
-# is listed in $T/retries, then does <what the retry does>; `auto standing` and `auto act review-retry <what>` run the
+# is listed in $T/retries, then does <what the retry does>; `auto standing`, `auto reserved` and `auto act review-retry <what>` run the
 # engine on alpha's main, as on its host, the act into the ruling log $T/rulings.jsonl; any other ask fails.
 fixture() {
   CASE=$1 T=$B/$1
@@ -33,7 +33,7 @@ fixture() {
         blocked: [{card: "c7", issue: 7, since: "2026-11-19T09:58:00Z", reason: $r}], pushError: null, pushFailingSince: null}}' > "$T/snap" \
     || fail "the fixture was not made"
   export CONVEYOR_FOREMAN_ASK="case \$CONVEYOR_CMD in snapshot) [ ! -e $T/slow ] || exit 124; cat $T/snap ;; health) jq -c .health $T/snap ;;
-    'retry '*) echo \"\$CONVEYOR_CMD\" >> $T/retries; $4 ;; 'auto standing') cd \"\$CONVEYOR_MAIN\" && bash \"\$ENG\" auto standing ;;
+    'retry '*) echo \"\$CONVEYOR_CMD\" >> $T/retries; $4 ;; 'auto standing'|'auto reserved') cd \"\$CONVEYOR_MAIN\" && bash \"\$ENG\" auto \"\${CONVEYOR_CMD#auto }\" ;;
     'auto act review-retry '*) cd \"\$CONVEYOR_MAIN\" && bash \"\$ENG\" auto act review-retry \"\${CONVEYOR_CMD#auto act review-retry }\" ;; *) exit 3 ;; esac"
 }
 # One poll; 0 with a wake put, which $wake holds.
@@ -100,7 +100,28 @@ t_health() {
   [ "$(cat "$T/retries" 2>/dev/null)" = 'retry 7' ] || fail "#7 was not retried when the snapshot read again: $(cat "$T/retries" "$T/err" 2>/dev/null)"
 }
 
-cases=(on off fails other stale health)
+# The kind on, and the reason holds a word of auto.reserved (a finding tagged [Security]; the pack's default list holds "security"),
+# in another case: the block wakes, and no retry. Bug it catches: the watcher retried every review block,
+# so a card blocked on a finding the owner reserves was queued again with no one asking, as needsretry() does not.
+t_reserved() {
+  fixture reserved '["review-retry"]' 'the fix for [P1][Security] conveyor/lib/x.sh:3 The guard can be skipped. Proof: a quoted name passes did not hold after 2 rounds' 'exit 0'
+  poll || fail "no wake for a review block that holds a reserved word: $(cat "$T/err")"
+  grep -qF "${BLOCKED}the fix for [P1][Security]" <<<"$wake" || fail "the wake does not name the block: $wake"
+  [ ! -e "$T/retries" ] || fail "the watcher retried a block whose reason holds a reserved word: $(cat "$T/retries")"
+}
+
+# The pack's own auto.reserved list decides, not a fixed word: the pack holds "gizmo" in place of the default words, and the
+# reason holds "Gizmo" and no default word. Bug it catches: the watcher matched only "security", so a word the owner
+# reserves in the pack did not hold a retry back.
+t_reservedpack() {
+  fixture reservedpack '["review-retry"]' 'the fix for [P1] conveyor/lib/x.sh:3 The Gizmo guard can be skipped. Proof: a quoted name passes did not hold after 2 rounds' 'exit 0'
+  jq '.auto.reserved = ["gizmo"]' "$M/.conveyor/project.json" > "$T/pack.json" && cp "$T/pack.json" "$M/.conveyor/project.json" || fail "the pack was not changed"
+  poll || fail "no wake for a review block that holds the pack's own reserved word: $(cat "$T/err")"
+  grep -qF "${BLOCKED}the fix for [P1] conveyor/lib/x.sh:3 The Gizmo" <<<"$wake" || fail "the wake does not name the block: $wake"
+  [ ! -e "$T/retries" ] || fail "the watcher retried a block whose reason holds the pack's reserved word: $(cat "$T/retries")"
+}
+
+cases=(on off fails other stale health reserved reservedpack)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

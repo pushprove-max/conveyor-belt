@@ -8,7 +8,8 @@
 # at once, in a wake of its own (poll()). The problems, each a record's own:
 #   a card waiting on the owner's yes       an issue waiting on the owner's yes before its build (health's before)
 #   a card blocked; one blocked by its review, while the standing kind review-retry is on, the watcher retries itself
-#     and wakes nothing for, unless that retry fails (reviewretry()); a card still blocked 30 minutes after a poll
+#     and wakes nothing for, unless that retry fails or its reason holds a word of auto.reserved or an item of
+#     the owner's profile, which it leaves blocked (retryable(), lib.sh, reviewretry()); a card still blocked 30 minutes after a poll
 #     first listed it, and once an hour after, while no open owner question names its issue (stillblocked()); of a
 #     snapshot made before the last change to the card records, only a card health still lists blocked (recheck()),
 #     its line ending "(as of <the snapshot's time>)"
@@ -483,20 +484,7 @@ record() { # <repo> <main> <now> <await>
     [ -z "$skip" ] || hcur=$(awk -F'\t' 'FILENAME == ARGV[1] { s["blocked:" $0]; next } !($1 in s)' <(printf '%s\n' "$skip") - <<<"$hcur")
     return 0
   }
-  # retryable <record> <jq path to its blocked list>: "<card> TAB <issue>" for each card the standing kind review-retry
-  # (lib/standing.sh) gives back: blocked by its review (card.sh: "the fix for [P1] ... did not hold after <n> rounds",
-  # as the Board's reviewWhy reads it, with any notes block() adds after it in brackets, lib/push.sh), with an issue,
-  # and not reported yet. None unless the kind is on in the pack now, as `conveyor.sh auto standing` on the record's
-  # host reads it: a kept snapshot's standing can be from before the owner turned it off, and health has none.
-  retryable() {
-    local c st
-    c=$(jq -r "$2"' | arrays | .[] | objects | select((.issue | numbers) > 0 and (.reason | strings
-      | test("\\Athe fix for \\[P[0-3]\\][\\s\\S]* did not hold after [0-9]+ rounds?( \\[[\\s\\S]*\\])?\\z"))) | "\(.card)\t\(.issue)"' <<<"$1" 2>/dev/null \
-      | awk -F'\t' -v p="$repo/blocked:" 'FILENAME == ARGV[1] { s[$0]; next } !((p $1) in s)' "$SEEN" -)
-    [ -n "$c" ] && st=$(ask "$repo" "$main" auto standing 2>>"$errf") && grep -q '^- review-retry:' <<<"$st" || return 0
-    printf '%s\n' "$c"
-  }
-  # The standing kind review-retry: each card retryable gives back is given back with `conveyor.sh retry <issue>` on
+  # The standing kind review-retry: each card retryable (lib.sh) gives back is given back with `conveyor.sh retry <issue>` on
   # the record's host, and the act is logged there (`auto act review-retry`: standinglog). Its line then keeps only
   # its key: it wakes nothing, and is not retried again while a snapshot still lists it. A retry that fails, or an act
   # that is not logged, wakes as the block does, with why. Another block, or a main-red fix card (no issue), wakes as

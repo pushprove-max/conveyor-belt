@@ -191,6 +191,16 @@ autoprofileheld() { # <on|narrow>
 t_autoprofileheld() { autoprofileheld on; }
 t_autoprofileheldn() { autoprofileheld narrow; }
 
+# Bug it catches: the Foreman's watcher had no way to read what waits for the owner on a record's host, so it retried review
+# blocks the owner reserves. `auto reserved` gives the pack's auto.reserved words and the profile's items as one JSON list.
+t_autoreserved() {
+  local out; setup '[]'; mkdir -p "$ST/foreman"
+  printf '%s\n' '## Hard lines' '- no tracking' >"$ST/foreman/owner-way.md"
+  out=$(cd "$R" && loop auto reserved) || fail "auto reserved failed: $out"
+  jq -e 'type == "array" and index("security") != null and index("no tracking") != null' <<<"$out" >/dev/null \
+    || fail "auto reserved gave no list of the pack's words and the profile's items: $out"
+}
+
 # Bug (#1168): the engine's pass (lib/needsask.sh needsauto) and the Foreman's both start on a new decision; two passes
 # that read it open at once would each log and answer it. Another pass holds decide.lock and answers d-docs while
 # this one waits: this pass then finds it answered and logs no entry for it. The other pass is a real process holding
