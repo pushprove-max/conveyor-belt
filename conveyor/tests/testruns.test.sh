@@ -80,7 +80,10 @@ t_testsfix() {
   local head out
   setup "[$(issue 7 2026-01-01)]"
   for i in 1 2 3 4; do moved "$i" "${NOGO/\[P1\]/[P2]}" > "$STUB/review.$i"; done
-  echo 'echo x >> "$STUB/tests"; seq 300 | sed "s/^/out line /"; for i in $(seq 59); do printf "FAIL %03000d\n" 0; done; echo "FAIL gadget.test.ts: expected 2"; printf "%s\n" "== gadget.test.ts" "-- FAIL gadget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1' > "$STUB/test-cmd"
+  # The stub writes no `-- FAIL <file>` line to the runner's log: testprogress() counts each file such lines name as a
+  # file run, once however many lines name it, and gadget.test.ts is not the a.test.sh the run was given, so the
+  # count of 2 stops the run (testrun.sh tests(), <worktree>.wide) before its fix round.
+  echo 'echo x >> "$STUB/tests"; seq 300 | sed "s/^/out line /"; for i in $(seq 59); do printf "FAIL %03000d\n" 0; done; echo "FAIL gadget.test.ts: expected 2"; exit 1' > "$STUB/test-cmd"
   head=$(git -C "$R" rev-parse HEAD)
   # A whole card: the one fix round, and the block after it, are card()'s test step, which only the card's own run
   # takes after its reviews.
