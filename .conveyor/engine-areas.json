@@ -781,6 +781,7 @@
 {"area": "setup", "test": "servicerenew.test.sh"}
 {"area": "setup", "test": "setupservice.test.sh"}
 {"area": "setup", "test": "setupmachine.test.sh"}
+{"area": "setup", "test": "setupsize.test.sh"}
 {"area": "setup", "test": "reserve.test.sh"}
 {"area": "setup", "file": "conveyor/lib/setup.sh"}
 {"area": "setup", "file": "conveyor/lib/requires.sh"}

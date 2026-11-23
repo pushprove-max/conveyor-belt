@@ -125,7 +125,8 @@ goes turn after turn. Each turn calls these functions in this order:
   finds the code that a `serve` restarts on.
 - `turnended` blocks each card of the loop that ended without a result or is stuck. When the control record says
   stop, it ends the loop's cards, except a card that has begun to land, to file its follow-ups or to file the slices
-  of a split. A card that waits at its land step for a release run is ended, unless it has filed slices.
+  of a split. A card that waits at its land step for a release run, or at any step for the CLI of its seat, is ended,
+  unless it has filed slices.
 - `turnside` starts the jobs that a `serve` runs beside the cards: the whole test on main, the idle mutation checks
   and the test-speed survey.
 - `turncount` counts the cards that build against the cap, the cards that wait, and the cards in their review or

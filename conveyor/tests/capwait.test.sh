@@ -287,6 +287,23 @@ t_capshut() {
   kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; return 0
 }
 
+# Bug it catches (R246): halt (control stop) spared every card with a filed line, so a card past its filing that waits in
+# seatwait() for a missing CLI (its live record names the CLI) ran on after the stop; a card with a filed line and no
+# such record is still spared.
+t_haltseat() {
+  setup '[]'; mkdir -p "$T/$CASE/cards"
+  fx_in "$(cat <<'EOF'
+record c1-1 1 filed ok '{"followups":[]}'; record c2-2 2 filed ok '{"followups":[]}'
+jq -cn '{step: "review", at: "2026-11-01T00:00:00Z", last: "2026-11-01T00:00:00Z", turns: 0, cli: "codex", action: "waiting for codex"}' > "$CARDS/c1-1.live"
+command sleep 600 & p1=$!; command sleep 600 & p2=$! # sleep: stand-ins for the two cards' processes
+printf '%s c1-1\n%s c2-2\n' "$p1" "$p2" | halt | sed -e "s/^$p1 /ended /" -e "s/^$p2 /ended /"
+kill "$p1" "$p2" 2> /dev/null
+EOF
+)"
+  grep -qx 'ended c1-1' "$T/$CASE/run.out" && ! grep -q 'ended c2-2' "$T/$CASE/run.out" \
+    || fail "halt on c1-1 (a filed line, its live record naming codex: waiting in seatwait) and c2-2 (a filed line only): it spared c1-1 or ended c2-2: $(cat "$T/$CASE/run.out")"
+}
+
 # The loop's own count at its last turn, as loop.json gives it: "<building> <reviewing> <running>".
 cwsteps() { jq -r '"\(.building) \(.reviewing) \(.running)"' "$ST/loop.json" 2>/dev/null; }
 

@@ -215,10 +215,12 @@ leave out, such as `vendor`. On a limit, setup writes:
   out is an `:(exclude)<folder>/*` pathspec of the entry, so no file under it is read.
 - The exempt file `.conveyor/size-exempt.txt`. It names each file that the entry reads and that is over the limit now,
   so the limit stops only what grows past it. A file in a folder that you left out is not named. A line that the file
-  already has stays. Setup commits the file with the pack, when you say yes to committing it.
+  already has stays. At the end of each run, setup also names the pack and the exempt file, when the entry reads them
+  and they are over the limit by then. Setup commits the file with the pack, when you say yes to committing it.
 - The exempt file in the pack's `lint.policy`, so that a card that changes it stops for your yes.
 
-When the pack already has a size entry, setup writes nothing for the limit.
+When the pack already has a size entry, setup writes no new entry. Only the names of the pack and the exempt file
+are added, as above, so you can run setup again after a run that stopped.
 
 Setup asks these questions again on each run until the pack has a `lint` field.
 

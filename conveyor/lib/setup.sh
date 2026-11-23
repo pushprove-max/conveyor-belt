@@ -51,7 +51,8 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # The question "Limit the length of files?" (docs/setup.md) is asked by /conveyor-belt:setup, answered by --size <lines>
 # or --size no, with --size-files <pathspec> (one for each) and --size-skip <folder> (one for each, left out). On a
 # limit, setupsize() writes a size entry in the pack's lint.commands, the exempt file .conveyor/size-exempt.txt naming
-# each file the entry reads that is over the limit now, and that file in lint.policy.
+# each file the entry reads that is over the limit now, and that file in lint.policy; at its end each run, setup names the
+# pack and that file there too when the entry reads them and they are over the limit by then (sizeself()).
 # Before the host file names the project, the control record is written when there is none, with new issues and every
 # open issue held (heldstart()).
 # With --foreman it then sets up Foreman mode (foreman/foreman.sh setup), which `conveyor.sh foreman` starts.
@@ -310,6 +311,7 @@ setup() { # as SETUP_USAGE
   # A Board left on older Conveyor would keep running it (it may not read the host file just written): started again.
   boardrenew
   agentfiles
+  sizeself || return 1
   packget test.full full || return 1
   echo "conveyor: landed cards wait for Push landed on the Board until push is turned on in the Rules tab$([ -n "$full" ] || echo "; Push landed needs the pack's test.full, the full test suite: add it")"
 }
@@ -488,26 +490,52 @@ setupready() {
 }
 # The size limit's exempt file, and its place in lint.policy.
 SIZE_EXEMPT=.conveyor/size-exempt.txt
+# exemptadd <path>: <path> as a line of the main checkout's SIZE_EXEMPT, unless it is there; a last line with no newline gets one first.
+exemptadd() {
+  local x=$MAIN/$SIZE_EXEMPT
+  grep -qxF -- "$1" "$x" && return 0
+  { [ ! -s "$x" ] || [ -z "$(tail -c1 "$x")" ] || echo >> "$x"; } && printf '%s\n' "$1" >> "$x"
+}
 # setupsize <commit> <limit> <pathspec>...: a size entry (the files, the limit and SIZE_EXEMPT) added to the pack's
 # lint.commands, SIZE_EXEMPT added to lint.policy, and SIZE_EXEMPT in the main checkout naming each file the entry
 # reads (a tracked file, or one not tracked and not ignored) that already has more lines than the limit, so the limit
-# stops only what grows past it. A file under a folder that a pathspec excludes is not read, so it is not named. A line already in SIZE_EXEMPT stays. A pack that already has a size entry is left as it is.
+# stops only what grows past it. A file under a folder that a pathspec excludes is not read, so it is not named. A line
+# already in SIZE_EXEMPT stays. The pack and SIZE_EXEMPT are counted last, when setup has written them (sizeself()).
+# A pathspec git refuses writes nothing. A pack that already has a size entry is left as it is.
 setupsize() {
-  local p=$1 lim=$2 out rc f; shift 2
+  local p=$1 lim=$2 out rc f t new=''; shift 2
   local -a fs
   jq -e 'any(.lint.commands[]?; .size)' "$PACK" >/dev/null && { echo "conveyor: the pack's lint.commands already has a size entry"; return 0; }
-  mapfile -d '' -t fs < <(git -C "$MAIN" ls-files -z --cached --others --exclude-standard -- "$@") || { echo "conveyor: the files of $MAIN could not be listed for the size limit" >&2; return 1; }
+  [ -e "$MAIN/$SIZE_EXEMPT" ] || new=1
+  mkdir -p "$MAIN/.conveyor" && touch "$MAIN/$SIZE_EXEMPT" || { echo "conveyor: $SIZE_EXEMPT could not be written" >&2; return 1; }
+  # Listed into a file: the status of a process substitution is never read, so a pathspec git refuses would list nothing and pass.
+  t=$(mktemp) && git -C "$MAIN" ls-files -z --cached --others --exclude-standard -- "$@" > "$t" && mapfile -d '' -t fs < "$t" \
+    || { rm -f "$t"; [ -z "$new" ] || rm -f "$MAIN/$SIZE_EXEMPT"; echo "conveyor: the files of $MAIN could not be listed for the size limit" >&2; return 1; }
+  rm -f "$t"
   rc=0; out=$([ ${#fs[@]} = 0 ] || lintsize "$MAIN" "$lim" '' "${fs[@]}" 2>&1) || rc=$?
   [ "$rc" -le 1 ] || { echo "conveyor: the size limit was not written: ${out:-the lines could not be counted}" >&2; return 1; }
-  mkdir -p "$MAIN/.conveyor" && touch "$MAIN/$SIZE_EXEMPT" || { echo "conveyor: $SIZE_EXEMPT could not be written" >&2; return 1; }
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -qxF -- "$f" "$MAIN/$SIZE_EXEMPT" || printf '%s\n' "$f" >> "$MAIN/$SIZE_EXEMPT"
+    exemptadd "$f" || { echo "conveyor: $SIZE_EXEMPT could not be written" >&2; return 1; }
   done < <(sed 's/:[0-9]*: size [0-9]* lines, limit [0-9]*$//' <<<"$out")
   jq --argjson l "$lim" --arg e "$SIZE_EXEMPT" --argjson fs "$(jq -nc '$ARGS.positional' --args "$@")" '.lint.commands = (.lint.commands // []) + [{files: $fs, size: {file: $l, exempt: $e}}]
     | .lint.policy = (.lint.policy // [] | if index($e) then . else . + [$e] end)' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
     || { rm -f "$PACK.new"; echo "conveyor: the size entry could not be written in the pack's lint.commands" >&2; return 1; }
   echo "conveyor: wrote a size entry in the pack's lint.commands: no file over $lim lines on $(printf '%s, ' "$@" | sed 's/, $//'); $SIZE_EXEMPT names the files that are over it now (the pack's commit takes it too), and is in the pack's lint.policy, so a card that changes it stops for your yes"
+}
+# sizeself: once setup has written the pack, the pack and SIZE_EXEMPT named in SIZE_EXEMPT when a size entry of the pack
+# that has SIZE_EXEMPT as its exempt file reads them and they are over its limit then (lintsizelist(): the size check's
+# own count). The pack's own line is added first, since it makes SIZE_EXEMPT longer. A file at the limit is not named.
+# It reads the pack, not what setupsize() did in this run, so a run that stopped after the entry was written (a lane that
+# could not be made) is finished by the next run, which finds the entry already there.
+sizeself() {
+  local f l
+  jq -e --arg e "$SIZE_EXEMPT" 'any(.lint.commands[]?; .size.exempt == $e)' "$PACK" >/dev/null || return 0
+  for f in "${PACK#"$MAIN"/}" "$SIZE_EXEMPT"; do
+    l=$(lintsizelist "$MAIN") || return 1
+    grep -qxF -- "$f" <<<"$l" || continue
+    exemptadd "$f" || { echo "conveyor: $SIZE_EXEMPT could not be written" >&2; return 1; }
+  done
 }
 # lintlangs: the languages with no ready lint entry of the paths on stdin, one a line, as one list "Go, Rust".
 lintlangs() {
