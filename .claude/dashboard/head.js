@@ -116,8 +116,9 @@
         read: (part, ctx) => cost(part('cost') && part('cost').cards, 'weekUsd', 'weekLeftOut', ctx) },
       { key: 'per', label: 'Per landed card', panel: 'cost', drop: 2,
         read: (part, ctx) => cost(part('cost') && part('cost').cards, 'perLandedUsd', 'perLandedLeftOut', ctx) },
-      // Cards on the belt of the slots in force, in any step and waiting or not; a card that lands (offCap), or has
-      // landed and waits for its push, holds no slot (belt.js).
+      // Cards on the belt of the card cap (the Belt part's cap: dashboard_panels.sh, cardcap), in any step and waiting
+      // or not; a card that lands (offCap), or has landed and waits for its push, does not count against the card cap
+      // (belt.js), though a landing card still holds a machine slot.
       { key: 'belt', label: 'On the belt', panel: 'belt', drop: 5,
         read: (part) => {
           const b = part('belt');

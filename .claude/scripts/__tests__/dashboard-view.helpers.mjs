@@ -504,8 +504,9 @@ export function full(now = T0) {
           { repo: 'sample', card: 'c5-7', issue: 7, title: 'Landed one', url: `${P}/7`, time: iso(now - 3600000), usd: 2.5, reviews: [{ round: 1, verdict: 'NO-GO', counts: counts(0, 1, 0, 0) }, { round: 2, verdict: 'GO', counts: null }] },
           { repo: 'sample', card: 'c6-8', issue: 8, title: 'Fixed before', url: `${P}/8`, time: iso(now - 7200000), usd: 0.5, reviews: [] },
         ],
-        // What the deck behind the floor reads out: the host, the machine's state and the belt's slots in use of those
-        // in force, as the head's "On the belt" tile (the belt part above: 2 of 3).
+        // What the deck behind the floor reads out: the host, the machine's state and the slots in use of those in
+        // force (here the same 2 of 3 as the belt part above). The collector gives the machine bar the same count; the
+        // machine part above is not filled to match (its cap is null, so its bar shows 2).
         deck: { host: 'buildhost', state: 'running', used: 2, cap: 3 } } },
       queue: { error: null, data: { next: [
         { repo: 'sample', issue: 20, title: 'Next up', priority: 'P1', followup: true, retried: false, url: `${P}/20` },

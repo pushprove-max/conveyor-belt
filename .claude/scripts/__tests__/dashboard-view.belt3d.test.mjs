@@ -803,14 +803,16 @@ const readouts = (w) => Array.from(b3(w).querySelectorAll('.b3-ro'), (el) => Arr
 // (the mockup's figures), one left at the last snapshot's value, or a loop called LIVE when it is paused.
 // Issue 413 (UX30): the corners repeated the header strip's counts 40 px below it, and read the host's test-slot pool
 // ("SLOTS 2/16 FREE", then "16/16 FREE") while the head's tile said "5 of 13": four slot figures on one screen. The
-// deck's one slots figure is the head tile's (the collector gives both from one count, dashboard-cards.test.sh), filtered to
-// a project or not, and no corner repeats a count the header strip shows.
-test('belt3d: the deck\'s readouts are the snapshot\'s values, its slots the head tile\'s figure, no header-strip count repeated, and follow each refresh', async () => {
+// deck's one slots figure is its own part's: the cards holding a machine slot of the slots in force, filtered to a
+// project or not, and no corner repeats a count the header strip shows. The collector gives the machine bar the same
+// count (dashboard-cards.test.sh); this view fixture does not fill the machine part to match, so no machine bar figure
+// is checked here. The head's "On the belt" tile counts against the card cap; in this fixture the two agree.
+test('belt3d: the deck\'s readouts are the snapshot\'s values, its slots the deck part\'s used of cap, no header-strip count repeated, and follow each refresh', async () => {
   const data = full();
   const w = await open3d(data);
   // T0 is 17:00 UTC on 9 November: 12:00 in New York (EST).
   assert.deepEqual(readouts(w), [['CONVEYOR · BUILDHOST'], ['SLOTS 2 OF 3 IN USE'], ['ET 12:00:00 PM'], ['LOOP ● LIVE']]);
-  assert.equal(fig(w, 'belt'), '2 of 3', 'the head\'s tile gives the same figure');
+  assert.equal(fig(w, 'belt'), '2 of 3', 'the head\'s tile, with no card waiting or landing, gives the same figure');
   assert.doesNotMatch(readouts(w).flat().join(' '), /RUNNING|WAITING|HELD|LANDED|FREE/, 'no corner repeats the header strip\'s counts or a free-slot pool');
   assert.equal(b3(w).querySelector('.b3-ro .bar i') !== null, true, 'the bar under the top-left readout');
   tick(w, 1000);
@@ -822,12 +824,14 @@ test('belt3d: the deck\'s readouts are the snapshot\'s values, its slots the hea
   assert.deepEqual(readouts(w).slice(0, 2), [['CONVEYOR · BUILDHOST'], ['SLOTS 3 OF 4 IN USE']]);
   assert.deepEqual(readouts(w)[3], ['LOOP ● PAUSED']);
   assert.equal(b3(w).querySelector('.b3-ro.br span').className, 'off', 'a loop not running is not marked live');
-  // Filtered to one project, the floor shows its cards alone and the deck the machine's slots, as the head's tile.
+  // Filtered to one project, the floor shows its cards alone and the deck its part's slots, every project's; the
+  // head's tile, not filtered either, still agrees here.
   data.panels.machine.data.repos = ['sample', 'widgetshop'];
   const one = await open3d(clone(data), { query: '?tab=belt3d&project=widgetshop' });
   assert.deepEqual(readouts(one)[1], ['SLOTS 2 OF 3 IN USE']);
   assert.equal(fig(one, 'belt'), '2 of 3');
-  // No slots in force read: the cards alone, as the tile; a count or a machine not read is a dash, never a number.
+  // No slots in force read: the cards in use alone; a count not read is a dash, never a number, and so
+  // is a host or a state that is missing (a state of "not read" is shown as it is).
   assert.deepEqual(readouts(await open3d(floor({ deck: { host: 'buildhost', state: 'running', used: 2, cap: null } })))[1], ['SLOTS 2 IN USE']);
   const unread = await open3d(floor({ deck: { host: 'buildhost', state: 'not read', used: null, cap: 3 } }));
   assert.deepEqual(readouts(unread).slice(1), [['SLOTS — IN USE'], ['ET 12:00:00 PM'], ['LOOP ● NOT READ']]);

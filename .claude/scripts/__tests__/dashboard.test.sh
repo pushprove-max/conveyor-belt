@@ -149,6 +149,8 @@ q '.panels.belt == {error: null, data: {cards: [], cap: 6, building: null, behin
 # Its deck's cap is `slots` in dashboard_panels.sh, as the machine bar's is; the head's "On the belt" reads the Belt
 # part's cap, `cardcap`. With no machine cap set, as here, both are the records' builder caps together: 6.
 # Issue 413: the deck read the host's test-slot pool, "2/16 FREE" with 5 cards running, beside the tile's "5 of 13".
+# Its deck's slots are the machine bar's figure, the cards holding a machine slot of the slots in force (issue 413: the
+# deck read the host's test-slot pool, "2/16 FREE" with 5 cards running, beside the tile's "5 of 13").
 q '.panels.belt3d == {error: null, data: {repos: ["sample", "widgetshop"], byRepo: {}, belt: [], queue: {next: [], held: [], waiting: []}, needs: [], landed: [],
   deck: {host: "devbox", state: "running", used: 0, cap: 6}}}' \
   "Belt 3D on an empty host: measured empty lists (a snapshot with no held or waiting issues has none of them), and no slot in use of both records' 6"
