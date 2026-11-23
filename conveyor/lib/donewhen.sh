@@ -466,7 +466,10 @@ fixonly() { # <worktree> <round>
 # What the review after fix round <round> is told, in its brief (REREVIEW): what else it may raise (the whole change,
 # or with fix as fourth argument the fix's lines and their callers alone), the findings that round was told to fix,
 # each led by its id (rounded()) and followed by where the fix moved its location or that its location needs review,
-# the file of its diff, and the findings declined on this card so far, each with its reason.
+# the file of its diff, and the findings declined on this card so far, each with its reason. As in donotraise()
+# (followups.sh), only a decline whose kind is `claim wrong`, `cannot happen` or `fixed` is listed: REREVIEW lets the
+# reviewer raise a listed one again only with a new reason, so a `rare case`, `not this change` or `other` decline, or
+# one with no kind, listed here stayed hidden for the rest of the card although the judge would judge it again.
 rereview() { # <card> <worktree> <round> [fix]
   local dec t=$REREVIEWALL
   [ "${4:-}" != fix ] || t=$REREVIEWFIX
@@ -475,6 +478,6 @@ rereview() { # <card> <worktree> <round> [fix]
     + if .location == "needs review" then "\n  Its location needs review: the fix removed or replaced the lines it named. Find where the defect is now, if it is anywhere."
       elif .moved != null and .moved != .at then "\n  The fix moved its location to \(.moved)." else "" end' "$2.rounds/findings.jsonl"
   printf '\n## The diff of the fix\nThe file %s\n' "$2.rounds/$3.diff"
-  dec=$(stdb ask lines declined 2>/dev/null | jq -rR --arg c "$1" 'fromjson? | objects | select(.card == $c) | "- \(.finding) (declined: \(.why))"' 2>/dev/null | awk '!seen[$0]++')
+  dec=$(stdb ask lines declined 2>/dev/null | jq -rR --arg c "$1" 'fromjson? | objects | select(.card == $c and (.kind | IN("claim wrong", "cannot happen", "fixed"))) | "- \(.finding) (declined: \(.why))"' 2>/dev/null | awk '!seen[$0]++')
   printf '\n## The findings declined on this card\n%s\n' "${dec:-None.}"
 }

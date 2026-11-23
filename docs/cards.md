@@ -262,8 +262,9 @@ needs. `any`, the default, takes any proof that can be reproduced. `real` asks f
 runs: its real config, commands and inputs. A finding with no such proof becomes an `UNPROVEN:` line, which never
 holds the verdict. A security finding needs only a proof that can be reproduced.
 
-A review after a fix gets the findings that the fix was told to fix and the findings declined so far. It says for each
-earlier finding whether the fix holds. It raises a declined finding again only with a new, concrete reason.
+A review after a fix gets the findings that the fix was told to fix and the findings declined so far as `claim wrong`,
+`cannot happen` or `fixed`. It says for each earlier finding whether the fix holds. It raises one of those declined
+findings again only with a new, concrete reason.
 
 ### When the fix loop ends
 

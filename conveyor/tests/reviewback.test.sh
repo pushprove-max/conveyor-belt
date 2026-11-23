@@ -531,6 +531,22 @@ t_donotraiserare() {
     || fail "donotraise() should list findings 1 2 3 (claim wrong, cannot happen, fixed) and not 4 5 6 (rare case, not this change, other), 7 8 (no kind, by the judge and the owner) or 9 (built); it listed: $kept: $(cat "$STUB/dnr" "$T/$CASE/run.out" 2>&1)"
 }
 
+# Bug: the review after a fix was told every decline on its card, and REREVIEW lets it raise a listed one again only
+# with a new reason, so a `rare case`, `not this change` or `other` decline, or one with no kind, stayed hidden for the
+# rest of the card though the judge judges it again. Only `claim wrong`, `cannot happen` and `fixed` are listed, and
+# only this card's.
+t_rereviewkinds() {
+  setup "[$(issue 7 2026-01-01)]"
+  mkdir -p "$ST" "$T/$CASE/w.rounds"; : > "$T/$CASE/w.rounds/findings.jsonl"
+  jq -cn 'def d($n; $kind): {id: "d\($n)", time: "2026-03-04T00:00:00Z", card: "c1-7", issue: 7, finding: "[P2] a.txt:\($n) finding \($n)", by: "judge", why: "why \($n)", repo: "sample"} + if $kind then {kind: $kind} else {} end;
+    d(1; "claim wrong"), d(2; "cannot happen"), d(3; "fixed"), d(4; "rare case"), d(5; "not this change"), d(6; "other"), d(7; null),
+    (d(8; "claim wrong") | .card = "c2-9")' > "$ST/declined.jsonl"
+  fx_in 'rereview c1-7 "$T/$CASE/w" 1 > "$STUB/rr"'
+  local kept; kept=$(sed -n '/^## The findings declined on this card$/,$p' "$STUB/rr" | grep -o '^- \[P2\] a.txt:[0-9]* finding [0-9]*' | sed 's/.* //' | tr '\n' ' ')
+  [ "$RC" = 0 ] && [ "$kept" = '1 2 3 ' ] \
+    || fail "rereview c1-7 with declines 1 to 7 (claim wrong, cannot happen, fixed, rare case, not this change, other, no kind) and 8 (claim wrong, card c2-9) should list 1 2 3 alone; it listed: $kept: $(cat "$STUB/rr" "$T/$CASE/run.out" 2>&1)"
+}
+
 # Bugs (#1522): a finding declined again on its card under another kind keeps its first kind, so donotraise() lists it
 # by a kind the judge has since dropped, or leaves out one it now allows; or the later kind makes a second line, so the
 # Board shows the finding twice, with two "File as issue" buttons, and filing one leaves the other on the do-not-raise
