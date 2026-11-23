@@ -100,9 +100,12 @@ export type Landed = Card & Times & { closed: boolean; at: number | null; usd: n
 // again, the pass under way ({pass, of, done: its files done, failed: its files failed, at: when it last moved}), else
 // null. building: the running
 // loop's cards counted against its builder cap (cap; null with no cap) at its last turn, every card on the belt but one
-// that lands; null when no loop runs or the snapshot does not say. onBelt: the record's
+// that lands; null when no loop runs or the snapshot does not say. behind: the snapshot is behind its card records or
+// loop.json (it carries recordsNow: `conveyor.sh snapshot`), as the Foreman takes it; now: then the running loop's count
+// as loop.json gives it now, null when no loop process lives or the loop has not counted a turn yet (and when not
+// behind). onBelt: the record's
 // cards on the belt; landing: those of them landing or landed, in Push (the cap does not count them).
-export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; cap: number | null; onBelt: number; landing: number }
+export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; behind: boolean; now: number | null; cap: number | null; onBelt: number; landing: number }
 // machine: where a release's suite runs when that is not this machine ({kind: ssh or devbox, name, step: the step the run
 // is at (start, setup, checkout, run, results, done), given: a devbox's lease went back}), else null.
 export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null
@@ -275,7 +278,8 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
   const card = (x: any): Card => ({ repo, card: one(x.card), issue: num(x.issue) ?? 0, title: one(x.title), name: one(x.name) })
   const next = Array.isArray(j.queue.next) ? j.queue.next.filter((x: unknown) => x && typeof x === 'object') : null
   return {
-    loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null, building: num(j.health?.building), cap: num(j.health?.builderCap),
+    loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null, building: num(j.health?.building),
+      ...(j.recordsNow && typeof j.recordsNow === 'object' ? { behind: true, now: num(j.recordsNow.building) } : { behind: false, now: null }), cap: num(j.health?.builderCap),
       onBelt: j.belt.length, landing: j.belt.filter((x: any) => x?.offCap === true || x?.step === 'push' || x?.step === 'issue').length },
     needs: [
       ...j.needsYou.waiting.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: true, text: one(x.sentence), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
@@ -768,10 +772,13 @@ const loopText = (snap: Snap): string => snap.loops
 // The cards on the belt against the builder cap, for the head of ON THE BELT: `1 of 7`, and `1 of 7, 1 landing not
 // counted` for a card that lands or has landed, in Push, the one kind on the belt that takes no slot. With more than
 // one project, each project's count after its name: `bakery 1 of 3 · gadgetlab 1`; a project whose loop gives no cap has its count on the belt only. None when the belt is empty and no
-// loop gives a cap.
+// loop gives a cap. While the snapshot is behind, the count is loop.json's now (now), 0 when it gives none (no loop
+// process lives, or the loop has not counted a turn yet), as the Board counts it: the kept belt can still hold a card's
+// old row beside the cards started since, which would count it twice, and its rows outlive the loop.
 const beltCounts = (snap: Snap): string[] => {
-  const capped = (l: Loop) => l.building !== null && l.cap !== null
+  const capped = (l: Loop) => (l.behind ? l.now : l.building) !== null && l.cap !== null
   const one = (l: Loop) => {
+    if (l.behind) return capped(l) ? `${l.now} of ${l.cap}${l.landing ? `, ${l.landing} landing not counted` : ''}` : `${l.now ?? 0}`
     return capped(l) ? `${l.onBelt - l.landing} of ${l.cap}${l.landing ? `, ${l.landing} landing not counted` : ''}` : `${l.onBelt}`
   }
   if (!snap.belt.length && !snap.loops.some(capped)) return []
@@ -1171,7 +1178,11 @@ const MARK: Record<Step['state'], Seg> = { done: { t: '✓', c: C.ok }, now: { t
 const STEP_AT: Record<string, number> = { build: 0, review: 1, fix: 2, tests: 3, landing: 4, push: 5, issue: 5 }
 const statesOf = (b: Belt): Step['state'][] => (b.track ? b.track.steps.map(st => st.state)
   : STEP_NAMES.map((_, i) => { const at = STEP_AT[b.step]; return at === undefined || i > at ? 'todo' : i < at ? 'done' : 'now' }))
-const slotsOf = (l: Loop) => (l.cap !== null ? `${l.building ?? l.onBelt}/${l.cap} slots` : `${l.building ?? l.onBelt} building`)
+// While the snapshot is behind, the count is loop.json's now, 0 when it gives none, as in the head of ON THE BELT.
+const slotsOf = (l: Loop) => {
+  const n = l.behind ? l.now ?? 0 : l.building ?? l.onBelt
+  return l.cap !== null ? `${n}/${l.cap} slots` : `${n} building`
+}
 
 // One project's matrix: ID, a column a step (headed by its first letter), Age, Cost and last the title, which takes
 // the rest of the row's width at any pane width (#603). Age goes first when the row does not fit; the title is left

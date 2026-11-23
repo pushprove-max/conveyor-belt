@@ -75,6 +75,32 @@ test('/units gives every card on the belt against the cap, a waiting one too', (
   expect(tableText(s, 56).split('\n')[1]).toMatch(/ 2 on belt · 0 queued$/)
 })
 
+// Bug: while the snapshot is behind, `conveyor.sh snapshot` adds a card started since to the kept belt, which can still
+// hold the old row of a card that has since left review to land: /units counted both rows against the cap (2 of 7),
+// where the Board and the Foreman give loop.json's count now (recordsNow.building, 1).
+test('/units counts the loop\'s cards now against the cap while the snapshot is behind, not the kept belt\'s rows', () => {
+  const started = { card: 'c8-3865', issue: 3865, title: 'Started since', step: 'build', stepAt: ago(1), landed: false, fromRecords: true }
+  const s = board({ belt: [BELT[1], started], recordsNewer: true, recordsNow: { building: 1, blocked: [], waiting: [] },
+    health: { loop: true, state: 'running', building: 1, builderCap: 7 } })
+  expect(section(tableText(s, 120), 'ON THE BELT').split('\n')[0]).toBe('ON THE BELT (1 of 7)')
+})
+
+// Bug: while the snapshot is behind, /units took whether a loop runs from the old snapshot's health.building. A loop
+// started since (health.building null, recordsNow.building 1) drew the rows' count with no cap; a loop exited since
+// (recordsNow.building null) drew the old build row as 1 of 7, where the Board counts none (dashboard-cards behindgone),
+// and the pane's BUILD MATRIX still drew it as 1/7 slots. With only loop.json newer than the snapshot (recordsNewer
+// false, recordsNow given), /units counted the rows where the Foreman gives loop.json's count (watch-conveyor.sh).
+test('/units takes whether a loop runs from loop.json now while the snapshot is behind', () => {
+  const snap = (building: number | null, now: number | null, newer = true) => board({ belt: [BELT[0]], recordsNewer: newer,
+    recordsNow: { building: now, blocked: [], waiting: [] }, health: { state: 'running', building, builderCap: 7 } })
+  const head = (s: State) => section(tableText(s, 120), 'ON THE BELT').split('\n')[0]
+  expect(head(snap(null, 1))).toBe('ON THE BELT (1 of 7)')
+  expect(head(snap(1, null))).toBe('ON THE BELT (0)')
+  expect(head(snap(1, 0, false)), 'only loop.json newer: recordsNewer false, recordsNow.building 0').toBe('ON THE BELT (0 of 7)')
+  expect(section(paneModel(snap(1, null), 100, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')[0], 'pane, loop exited since: recordsNow.building null')
+    .toMatch(/ 0\/7 slots$/)
+})
+
 // Issue 195. Bug it catches: a card the machine held back did not say why. Issue 346: the machine room is removed, so
 // a snapshot that still names the machine's pressure draws no machine line in ON THE BELT.
 test('/units says why the machine holds a queued card back, and draws no machine room line', () => {

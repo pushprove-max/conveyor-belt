@@ -17,7 +17,8 @@ right-aligned and the title is what gives way.
 
 - A head, two lines: `CONVEYOR`, dollars today and the Conveyor host (`● buildbox`); then the weekly limit with its
   reset (`weekly limit 94% · resets 1d 18h`) and the counts on the belt and queued. While the loop runs with a builder
-  cap, the `ON THE BELT` head gives the cards on the belt and the cap, and a card that lands or has landed, which the
+  cap, the `ON THE BELT` head gives the cards on the belt and the cap (when the snapshot is older than the card records
+  or the loop's own count, the count the loop gives now; 0 when the loop gives no count, as on the Board), and a card that lands or has landed, which the
   cap does not count (`ON THE BELT (2 of 7, 1 landing not counted)`). With more than one project, each project's count
   follows its name (`ON THE BELT (bakery 1 of 3 · gadgetlab 1)`). In `/units` a third line gives how
   many findings the review's judge declined today (`judge declined 3 findings today`), from the snapshot's declined
@@ -165,7 +166,7 @@ not be read, a fetch error and the snapshot age note. A word wider than the pane
   the test map line and the weekly limit.
 - The old-engine line and the whole-suite line, when there is one (while it runs, a second line with its counts, or the progress of the pass that runs failed cases again, when it has some), and the cards that need you, one line each.
 - **BUILD MATRIX**: on the right, the project and its slots in use against the builder cap (`bookstore · 3/4
-  slots`). One row for each card on the belt: the issue (`#486`; a card with no issue shows `red <commit>`, with the
+  slots`; the same count as the `ON THE BELT` head when the snapshot is older). One row for each card on the belt: the issue (`#486`; a card with no issue shows `red <commit>`, with the
   first 7 characters of the commit, for a fix of a red main, and `card <N>` for any other, with the number its card id ends in, or `card` when it ends in no number or in `-0` (a card that
   the Tests page files), as in WORKER ACTIVITY and
   LANDED TODAY), one column for each step (`B R F T L P`: Build,

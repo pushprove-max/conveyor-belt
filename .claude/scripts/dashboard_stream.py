@@ -112,7 +112,8 @@ def figures_only(old, new):
 
 # The parts of a record's snapshot that /units draws (hooks/sources.ts parseRecord). The rest (tests, testActions ...)
 # is the Board's alone and grows with the Tests page's history. `declined` and `declinedRest` are cut to the judge's
-# lines, by id, who and time; `open` to the two lists /units reads.
+# lines, by id, who and time; `open` to the two lists /units reads; `recordsNow` to its building, the loop's count now
+# that /units gives while the snapshot is behind (the snapshot carries recordsNow then).
 UNITS_PARTS = ('health', 'needsYou', 'belt', 'landed', 'landedCount', 'queue', 'cost', 'awaitingDeploy', 'suites', 'snapshotAt')
 
 
@@ -122,6 +123,8 @@ def units_snap(snap):
     out = {k: snap[k] for k in UNITS_PARTS if k in snap}
     if isinstance(snap.get('open'), dict):
         out['open'] = {k: snap['open'][k] for k in ('umbrellas', 'held') if k in snap['open']}
+    if isinstance(snap.get('recordsNow'), dict):
+        out['recordsNow'] = {'building': snap['recordsNow'].get('building')}
     for k in ('declined', 'declinedRest'):
         if isinstance(snap.get(k), list):
             out[k] = [{f: x.get(f) for f in ('id', 'by', 'time')} for x in snap[k] if isinstance(x, dict) and x.get('by') == 'judge']

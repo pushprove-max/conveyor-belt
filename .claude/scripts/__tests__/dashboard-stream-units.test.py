@@ -15,8 +15,11 @@ spec.loader.exec_module(ds)
 
 CAP = 4 * 1024 * 1024  # hooks/units.tsx MAX_DATA
 DRAWN = {'health': {'state': 'ok'}, 'needsYou': {'waiting': [], 'blocked': []}, 'belt': [{'issue': 1}], 'landed': [], 'landedCount': 0,
-         'queue': {'next': [], 'held': {}}, 'cost': {'today': 1}, 'awaitingDeploy': [], 'suites': [], 'snapshotAt': 't'}
-SNAP = dict(DRAWN,
+         'queue': {'next': [], 'held': {}}, 'cost': {'today': 1}, 'awaitingDeploy': [], 'suites': [], 'snapshotAt': 't',
+         # Bug: the feed dropped recordsNow, so /units counted the kept belt's rows against the cap, not loop.json's
+         # count now. Of recordsNow the feed keeps building alone: /units reads no more of it (SNAP's lists).
+         'recordsNow': {'building': 1}}
+SNAP = dict(DRAWN, recordsNow={'building': 1, 'waitingCount': 0, 'running': 2, 'landed': 1, 'blocked': [{'card': 'c1'}], 'waiting': [], 'started': [{'card': 'c2'}]},
             tests=[{'file': f'f{i}', 'log': 'x' * 1000} for i in range(4200)], testActions=[{'a': 'y' * 1000}] * 300,
             declined=[{'id': 'a', 'by': 'judge', 'time': 't1', 'why': 'long'}, {'id': 'b', 'by': 'owner', 'time': 't2'}], declinedRest=[],
             open={'umbrellas': [{'issue': 2}], 'held': [], 'issues': list(range(500))})
