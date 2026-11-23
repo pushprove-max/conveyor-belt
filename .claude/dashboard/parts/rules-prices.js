@@ -82,7 +82,14 @@
     if (a[0] === 'add') return [['prices', ['remove', m]]];
     if (a[0] === 'name') return [['prices', e.name ? ['name', m, e.name] : ['name', m]]];
     if (a[0] === 'alias') return [['prices', ['alias', m, a[2] === 'add' ? 'remove' : 'add', a[3]]]];
-    return [['prices', ['add', m, providerOf(m, e), e.name || m, ...rates(e)]], ...list(e.aliases).map((x) => ['prices', ['alias', m, 'add', x]])];
+    // A removed entry `prices set` made (no provider, such as a fast mode's own rate) comes back by set, and name if it
+    // had one: `prices add` would write a name and a provider it never had, and keep it a model after a clear. An add
+    // and a remove go first all the same: the host refuses the add, and so the Undo, when the pack has m again or
+    // another model has it as an alias since, and set would write over that.
+    const check = [['prices', ['add', m, 'other', m.slice(0, 60), '0', '0', '0']], ['prices', ['remove', m]]];
+    const back = e.provider ? [['prices', ['add', m, providerOf(m, e), e.name || m, ...rates(e)]]]
+      : [...check, ...(priced(e) ? [['prices', ['set', m, ...rates(e)]]] : []), ...(e.name ? [['prices', ['name', m, e.name]]] : [])];
+    return [...back, ...list(e.aliases).map((x) => ['prices', ['alias', m, 'add', x]])];
   }
   function priceWords(a) {
     const m = a[1], cw = (x) => (x !== undefined ? `, $${x} cache write` : '');

@@ -633,6 +633,38 @@ test('Rules: a fast mode whose model has no price is a row of its own, with its 
   assert.deepEqual(chips(r).filter((x) => x !== 'added'), ['reviewer', '2 sessions in 30 days']);
 });
 
+// A fast mode's own rate, as `prices set` and `prices alias` made it: no provider and no display name. Removed from
+// its row, with the line that says so (and its Undo) shown.
+const FAST = 'gpt-daybreak-blue-latest:fast';
+async function removedFast() {
+  const w = open({ overrides: { ...PRICES.overrides, [FAST]: { input: 4, output: 20, cacheRead: 0.2, aliases: ['gpt-daybreak-blue-latest'] } } });
+  act(rowOf(w, FAST), 'price-remove').click();
+  await settle();
+  assert.deepEqual(posted(w), [['remove', FAST]]);
+  return w;
+}
+// Bug: Undo of Remove of such a rate sent `prices add`, which wrote a name and a provider the entry never had, so a
+// later `prices clear` left it a model; a fix that sent a name with no name before (the ID) would invent one. Undo puts
+// back the entry's own fields, set and aliases, after the add and remove that check the ID is free (next case).
+test('Rules: Undo of Remove of a fast mode\'s own rate puts back its rate and aliases, with no provider or name', async () => {
+  const w = await removedFast();
+  act(said(w), 'undo').click();
+  await settle();
+  assert.deepEqual(posted(w), [['add', FAST, 'other', FAST, '0', '0', '0'], ['remove', FAST], ['set', FAST, '4', '20', '0.2'],
+    ['alias', FAST, 'add', 'gpt-daybreak-blue-latest']], 'Undo of remove of an entry with no provider and no name');
+});
+// Bug: Undo sent `prices set` straight away, so a price set for the ID after Remove, or the ID taken as another
+// model's alias, was written over. The host refuses the first add then (conveyor/tests/prices.test.sh t_pricesmodels),
+// and Undo sends nothing more.
+test('Rules: Undo of Remove of a fast mode\'s own rate stops when the host refuses the ID as taken', async () => {
+  const w = await removedFast();
+  w.reply = { ok: false, status: 409, text: () => Promise.resolve(`conveyor: prices add: the pack has ${FAST} already; nothing changed`) };
+  act(said(w), 'undo').click();
+  await settle();
+  assert.deepEqual(posted(w), [['add', FAST, 'other', FAST, '0', '0', '0']], 'Undo refused at its check: no set over the newer price');
+  assert.match(said(w).textContent, /^Not done: .*already/);
+});
+
 // Bug: the page head covered the section as it scrolled. jsdom has no layout, so this reads the rule that keeps a part
 // the page scrolls to below the head.
 test('Board: a part the page scrolls to stops below the page head', () => {
