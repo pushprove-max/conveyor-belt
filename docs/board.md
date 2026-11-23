@@ -208,7 +208,8 @@ lists every project's rows, so it stays as it is.
     new card builds the issue from nothing.
 
   A landing conflict ("rebase onto main conflicts") has no Fix button. **Retry** already brings the kept patch onto
-  main. A push that fails a check needs a fix on main first. A card that waits for your yes to a visible change has
+  main. If the issue's section of what customers or staff will see changed since the review, Retry builds the issue
+  from nothing. A push that fails a check needs a fix on main first. A card that waits for your yes to a visible change has
   **Approve** and **Decline**.
 - **The next step.** The line above the buttons tells you the step to take for that kind of block:
   - A review asked for changes again, the changed tests failed again, or the card's process ended without a result:
@@ -216,8 +217,9 @@ lists every project's rows, so it stays as it is.
     fix. You do not have to do anything first.
   - A review that says main does not do what the issue asks, after the card made no change: "Retry: a new session
     gets the reviewer's finding and builds the issue."
-  - A landing conflict: "Retry: a new session brings the kept change onto main as it is now." You do not have to
-    wait for the conflict to go.
+  - A landing conflict: "Retry: a new session brings the kept change onto main as it is now. If the issue's section
+    of what customers or staff will see changed since the review, the new card builds the issue from nothing." You
+    do not have to wait for the conflict to go.
   - A block that needs you first says what to do, then "Then press Retry.". For example: sign in again on the build
     machine, install a tool that is missing, set a model the account can run, make the project's dependencies reach
     the card, finish or release an issue that it depends on, answer a decision or an approval, or add a missing model

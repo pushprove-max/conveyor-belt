@@ -568,3 +568,29 @@ t_resumeportrewritten() {
     && [ "$(jq -r .note <<<"$RESUMED")" = "the issue's section of what customers or staff will see changed since the review of the kept patch of card c1-8: built from nothing" ] \
     || fail "the kept patch of a rewritten issue that no longer applies was ported, not built from nothing: $RESUMED"
 }
+
+# Bug it catches: a card blocked on a landing conflict kept no issue body (landconflict(), lib/cardland.sh), so when
+# its issue was then rewritten to ask for another change (its section of what customers or staff will see changed),
+# keptway() could not compare and its next card ported the old change. The block keeps the body its review read, and
+# the next card is built from nothing (resumeplan()), as t_resumeportrewritten's card that stopped for the yes is.
+t_resumeconflictrewritten() {
+  local k c out
+  rebasesetup 9
+  issue 9 2026-01-01 | jq -c '[.body = "Add (a).\n\n## What customers or staff will see\nGuests see a new Pay button."]' > "$STUB/issues.json"
+  # ported=1: the card's one port is spent, so this conflict blocks it.
+  conflicted 9 'ported=1; land1; go=end; landconflict; outcome'
+  k=$(st 'select(.issue == 9 and .step == "blocked") | "\($ENV.ST)/\(.kept)"'); c=$(st 'select(.issue == 9 and .step == "blocked") | .card')
+  [ "$(jq -r .body "$k/$c.body" 2>/dev/null)" = "$(jq -r '.[0].body' "$STUB/issues.json")" ] \
+    || fail "a card blocked on a landing conflict (outcome $OUTCOME) did not keep the issue body its review read (kept: $k)"
+  # Bug: the block comment and retry promised the kept patch, which a rewrite of the visible section voids.
+  grep -q "If the issue's section of what customers or staff will see changes first, the next card is built from nothing\.$" "$STUB/comments" \
+    || fail "the landing-conflict block comment does not say a rewrite of the visible section builds from nothing: $(tail -n 3 "$STUB/comments")"
+  issue 9 2026-01-01 | jq -c '[.body = "Do (b) instead.\n\n## What customers or staff will see\nNothing visible changes."]' > "$STUB/issues.json"
+  out=$(loop retry 9) || fail "retry of #9 exited non-zero"
+  grep -q "only if it now applies to main; if not, it is built from nothing: the issue's section" <<<"$out" \
+    || fail "retry of #9 (landing conflict, visible section rewritten) promised the kept patch: $out"
+  resumed 9
+  [ "$(jq -c '[.rc, .mode, .fin, .staged]' <<<"$RESUMED")" = '[0,"","",[]]' ] \
+    && [ "$(jq -r .note <<<"$RESUMED")" = "the issue's section of what customers or staff will see changed since the review of the kept patch of card $c: built from nothing" ] \
+    || fail "the kept patch of a landing conflict whose issue was rewritten was ported, not built from nothing: $RESUMED"
+}

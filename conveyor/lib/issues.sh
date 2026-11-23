@@ -110,6 +110,12 @@ retry() { # <issue, or the card id of a main-red fix card or a Tests page card> 
       build) echo "conveyor: its next card is built from nothing: the issue's section of what customers or staff will see changed since the kept patch $ends was reviewed"; return 0 ;;
     esac
   fi
+  # A patch kept on a landing conflict (with the body its review read, landconflict()): a port of it is built from
+  # nothing once the issue's section of what customers or staff will see has changed (card.sh resumeplan()).
+  if [[ $(jq -r .reason <<<"$p") == "rebase onto main conflicts: "* ]] && [ -s "${ends%.patch}.body" ] && names 2>/dev/null \
+    && l=$(gh issue view "$n" --json number,title,body,labels,milestone 2>/dev/null) && [ "$(keptway "$l" "${ends%.patch}.body")" = build ]; then
+    echo "conveyor: its next card starts from the kept patch $ends only if it now applies to main; if not, it is built from nothing: the issue's section of what customers or staff will see changed since that patch was reviewed"; return 0
+  fi
   echo "conveyor: its next card starts from the kept patch $ends: applied if it still applies to main, brought onto main by a session if not"
 }
 # Under the lock, at a turn of the loop that found a blocked card's issue closed: a blocked card whose issue is closed
@@ -259,7 +265,7 @@ yeskept() { # <prior json>
     && [ -s "$rev" ] && [ "$(verdict "$rev")" != none ] && [ -n "$(visible "$rev" any)" ]
 }
 # How the next card takes up such a kept patch, from the issue as it is now ($1, its json) and the issue as the
-# review of that patch read it (the .body file its card kept when it stopped for the yes, $2). Approval lines aside:
+# review of that patch read it (the .body file its card kept when it stopped for the yes or on a landing conflict, $2). Approval lines aside:
 # land: the body is the one the review read and an approval line has come since; wait: nothing has changed, and the
 # card stops again for the yes (no build and no review); review: the body changed, or cannot be compared, with the
 # same section of what customers or staff will see, so the patch is built on and reviewed against the issue as it

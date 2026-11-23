@@ -676,7 +676,7 @@ resumeplan() {
     fi
   fi
   # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it
-  # stopped for the yes). A body changed since: the patch is built on and reviewed against the issue as it is now. A
+  # stopped for the yes, or on a landing conflict). A body changed since: the patch is built on and reviewed against the issue as it is now. A
   # section of what customers or staff will see changed since: the issue asks for another change, built from nothing, a port too (bug: it ported the refused change).
   if { [ "$mode" = land ] || [ "$mode" = port ]; } && [ -n "$issue" ]; then
     d=$fromk/$from.body; [ -e "$d" ] || d=$CARDS/$from.body

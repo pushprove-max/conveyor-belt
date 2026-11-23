@@ -64,8 +64,9 @@ const STEPS = [
   // A review that says main does not do what the issue asks, where the session said ALREADY-DONE: a review block too,
   // but that session made no change, so there is no kept work to start from.
   [/^the session made no change and said that main already fixes the issue\. The reviewer says/, "Retry: a new session gets the reviewer's finding and builds the issue."],
-  // Retry does not wait for the conflict to clear: its new session brings the kept patch onto main as it is.
-  [/^rebase onto main conflicts/, 'Retry: a new session brings the kept change onto main as it is now.'],
+  // Retry does not wait for the conflict to clear: its new session brings the kept patch onto main as it is, unless the
+  // issue's visible section changed since the review (card.sh resumeplan(): then the card is built from nothing).
+  [/^rebase onto main conflicts/, "Retry: a new session brings the kept change onto main as it is now. If the issue's section of what customers or staff will see changed since the review, the new card builds the issue from nothing."],
   [/sign-in/i, 'Sign in again on the build machine, as the reason says. Then press Retry.'],
   [/\bis not installed\b|\bnot on PATH\b/, 'Install what the reason names on the build machine. Then press Retry.'],
   [/\bcannot run the model\b/, 'Set a model the account can run, on the Rules tab. Then press Retry.'],

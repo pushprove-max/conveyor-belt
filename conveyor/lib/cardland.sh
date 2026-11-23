@@ -501,5 +501,9 @@ landconflict() {
   # A landing that fails after the follow-ups were filed withdraws them, unless main did get the commit.
   # shellcheck disable=SC2046 # the filed follow-ups' issue numbers, one word each
   case $t in "landed as "*) [ -z "$dec" ] || decline "$c" "$n" "$FUCAP" <<<"$dec" ;; *) [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups") ;; esac
+  # A landing conflict keeps the issue body its review read (.body), so that the port of its kept patch is built from
+  # nothing when the issue's section of what customers or staff will see changes later (resumeplan(), keptway()).
+  # Bug: it kept none, and a port of the old change ran on a rewritten issue.
+  [[ $t != "rebase onto main conflicts: "* ]] || [ -z "$issue" ] || jq -c '{body}' <<<"$issue" > "$wt.body" 2>/dev/null || rm -f "$wt.body"
   block "$c" "$n" "$wt" "$t"; return
 }
