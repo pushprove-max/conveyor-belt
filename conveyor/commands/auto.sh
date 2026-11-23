@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# `conveyor.sh auto on | narrow | off | status | band | rules | decide | rulings | standing [<run> | <kind> on|off] | act <kind> <what> | reserved`:
+# `conveyor.sh auto on | narrow | off | status | band | rules | decide | rulings | send | standing [<run> | <kind> on|off] | act <kind> <what> | reserved`:
 # /conveyor-belt:auto, for the project it is called in. While it is on, the Foreman decides the owner's open decisions for them, by the owner's recorded way of
 # deciding, and logs each with its reasons; what the pack reserves (auto.reserved) is never decided and waits for the
 # owner. Sourced by conveyor.sh.
@@ -33,17 +33,23 @@
 #   The Foreman's pass first sends the owner's rulings to the hosts (hostrulings), so the engine there reads the new ones.
 # - rulings: the owner's picker answers from the ruling log of the Foreman's machine (hostrulings there), read on stdin
 #   and kept as <state folder>/auto/rulings.jsonl, in place of the last ones sent: decide reads them beside this
-#   machine's ruling log.
+#   machine's ruling log. The row of the owner's profile items sent with them ({source: "profile", held}) is kept in
+#   the same file, and decide holds those items as it holds the profile's (lib/standing.sh profileheld).
+# - send: while auto is on or narrow, the owner's rulings and profile items sent again to each host whose last send
+#   (hostrulings) carried other profile items, so an item the owner adds to the profile holds there before the
+#   Foreman's next `auto decide`. The Foreman's Stop hook runs it (foreman/stop.sh state) at the end of each turn.
+#   Fails, each host not reached named on stderr (hostrulings), when the items were not sent to a host or the profile
+#   cannot be read; a host not reached is sent them again at the next run, as its last send still carries the old items.
 # The owner's way of deciding is read from the project's ruling log (.claude/hooks/lib/rulings.sh rulings_log: every
 # picker answer the owner gave, with whether it was the recommended option), never written here.
 # Test seams: CONVEYOR_LEDGER (decision.sh's), CONVEYOR_RULING_LOG (the ruling log).
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/testfiles.sh" || exit 1
 . "$HERE/lib/standing.sh" || exit 1
-{ [ $# = 2 ] && [[ $2 =~ ^(on|narrow|off|status|band|rules|decide|rulings|standing|reserved)$ ]]; } \
+{ [ $# = 2 ] && [[ $2 =~ ^(on|narrow|off|status|band|rules|decide|rulings|send|standing|reserved)$ ]]; } \
   || { [ $# = 3 ] && [ "$2" = standing ] && [[ $3 == *[![:space:]]* ]]; } \
   || { [ $# = 4 ] && [[ " ${STANDING_KINDS[*]} " == *" $3 "* ]] && { { [ "$2" = standing ] && [[ $4 =~ ^(on|off)$ ]]; } || { [ "$2" = act ] && [[ $4 == *[![:space:]]* ]]; }; }; } \
-  || { echo "usage: conveyor.sh auto on | narrow | off | status | band | rules | decide | rulings | standing [<run> | <kind> on|off] | act <kind> <what> | reserved (a kind: ${STANDING_KINDS[*]})" >&2; exit 2; }
+  || { echo "usage: conveyor.sh auto on | narrow | off | status | band | rules | decide | rulings | send | standing [<run> | <kind> on|off] | act <kind> <what> | reserved (a kind: ${STANDING_KINDS[*]})" >&2; exit 2; }
 AD=$ST/auto MODE=$ST/auto/mode.json LAST=$ST/auto/last.json DECISION=$HERE/../.claude/scripts/decision.sh
 die() { echo "conveyor: auto: $*" >&2; exit 1; }
 # The mode while on, as JSON: {scope, since, log}; fails while off.
@@ -86,13 +92,19 @@ remote() {
   return 0
 }
 # hostrulings <repo>: the owner's picker answers of this machine's ruling log sent to the record's host (`auto rulings`
-# there), as the owner answers on this machine and the decide pass there reads their rulings; fails when not sent.
+# there), as the owner answers on this machine and the decide pass there reads their rulings; and with them one row
+# {source: "profile", held}, the items of the owner's profile (profileheld), as the profile is in the Foreman's folder
+# on this machine, not there, and the decide pass there must hold them too. Fails when not sent, or when the profile
+# cannot be read (then nothing is sent). The items sent are kept in $AD/sent/<repo>.json, which send reads.
 hostrulings() {
-  local f out rc
+  local f out rc h
+  h=$(profileheld) || { echo "conveyor: auto: $1, on its host: the owner's profile could not be read, so the owner's rulings were not sent there" >&2; return 1; }
   f=$(mktemp) || return 1
   [ -z "$RL" ] || [ ! -r "$RL" ] || jq -cR 'fromjson? | objects | select(.source == "ask" and .void != true) | {id, utc, source, question, answer, pick}' "$RL" > "$f"
+  jq -cn --argjson h "$h" '{source: "profile", held: $h}' >> "$f" || { rm -f "$f"; return 1; }
   out=$(ASK_IN=$f CONVEYOR_MAIN=$MAIN bash "$HERE/foreman/foreman.sh" ask "$1" auto rulings 2>&1); rc=$?; rm -f "$f"
-  [ "$rc" = 0 ] || echo "conveyor: auto: $1, on its host: the owner's rulings were not sent there: ${out//$'\n'/ }" >&2
+  if [ "$rc" = 0 ]; then mkdir -p "$AD/sent" && printf '%s\n' "$h" > "$AD/sent/${1//\//_}.json" || :
+  else echo "conveyor: auto: $1, on its host: the owner's rulings were not sent there: ${out//$'\n'/ }" >&2; fi
   return "$rc"
 }
 # tohosts <on|narrow|off>: the same mode set on the host of each such record (foreman.sh ask), so the engine there
@@ -190,9 +202,18 @@ EOF
     echo "Done without asking ($3): ${4//$'\n'/ }; logged as $id." ;;
   reserved) heldlist r || die "the pack's auto.reserved or the owner's profile could not be read"; echo "$r" ;;
   rulings)
-    mkdir -p "$AD" && jq -cR 'fromjson? | objects | select(.source == "ask" and .void != true and (.question | type == "string"))' > "$AD/rulings.$$.new" \
-      && mv "$AD/rulings.$$.new" "$AD/rulings.jsonl" || die "the rulings of the owner's machine could not be kept in $AD/rulings.jsonl"
-    echo "auto: $(wc -l < "$AD/rulings.jsonl" | tr -d ' ') ruling(s) of the owner's machine kept in $AD/rulings.jsonl" ;;
+    # One file, so one rename keeps the rulings and the profile items sent with them together.
+    mkdir -p "$AD" && jq -cR 'fromjson? | objects | select((.source == "ask" and .void != true and (.question | type == "string"))
+      or (.source == "profile" and (.held | type == "array"))) | if .source == "profile" then {source, held: [.held[] | strings]} else . end' > "$AD/rulings.$$.new" \
+      && mv "$AD/rulings.$$.new" "$AD/rulings.jsonl" || { rm -f "$AD/rulings.$$.new"; die "the rulings of the owner's machine could not be kept in $AD/rulings.jsonl"; }
+    echo "auto: $(jq -nR '[inputs | fromjson | select(.source == "ask")] | length' "$AD/rulings.jsonl") ruling(s) and $(jq -nR '[inputs | fromjson | select(.source == "profile") | .held[]] | unique | length' "$AD/rulings.jsonl") item(s) of the owner's profile from the owner's machine kept in $AD/rulings.jsonl" ;;
+  send)
+    [ -n "$m" ] || exit 0
+    h=$(profileheld) || die "the owner's profile could not be read, so it was not sent to the hosts"
+    # A host not reached keeps deciding by the items it last got, so the caller (the Stop hook) is told: it fails.
+    rc=0
+    while IFS= read -r rep; do [ "$(cat "$AD/sent/${rep//\//_}.json" 2>/dev/null)" = "$h" ] || hostrulings "$rep" || rc=1; done < <(remote)
+    exit "$rc" ;;
   decide)
     [ -n "$m" ] || { echo "conveyor: auto is off; /conveyor-belt:auto on or narrow turns it on" >&2; exit 2; }
     # The rulings the owner gave since they were last sent go to the hosts first, so the engine there decides by them.

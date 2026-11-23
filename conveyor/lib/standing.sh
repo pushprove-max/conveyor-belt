@@ -25,17 +25,22 @@ profilefile() {
 # either heading (any level), trimmed, in two forms, as the question's text has no Markdown marks: with no marks
 # (**bold**, _italic_, ~~struck~~, a [link](url)'s text only) outside its `code` spans, whose text is kept as written;
 # and as written with only the code spans' backticks taken out, so a path such as .claude/scripts/__tests__/ written
-# with no backticks is still held. [] with no profile; fails when the profile cannot be read.
+# with no backticks is still held. On a build host, whose Foreman's folder has no profile, the items the owner's machine
+# sent with their rulings (`auto rulings`, their {source: "profile", held} row in <state folder>/auto/rulings.jsonl)
+# are added. [] with neither; fails when either cannot be read.
 profileheld() {
-  local f
-  f=$(profilefile) || { echo '[]'; return 0; }
-  [ -r "$f" ] || return 1
-  awk '/^#+[[:space:]]/ { h = tolower($0); sub(/^#+[[:space:]]+/, "", h); sub(/[[:space:]]+$/, "", h); on = (h == "never decide; ask" || h == "hard lines"); next }
-    on && /^[[:space:]]*[-*][[:space:]]+[^[:space:]]/ { sub(/^[[:space:]]*[-*][[:space:]]+/, ""); print }' "$f" \
-    | jq -Rsc 'def trim: gsub("^\\s+|\\s+$"; "");
-      def plain: gsub("\\[(?<t>[^\\]]*)\\]\\([^)]*\\)"; "\(.t)") | gsub("[*~]"; "") | gsub("(?<!\\w)_+|_+(?!\\w)"; "");
-      split("\n") | map(select(trim != "") | (split("`") | to_entries | map(if .key % 2 == 0 then .value | plain else .value end) | join("") | trim),
-        (gsub("`"; "") | trim)) | map(select(. != "")) | unique'
+  local f l='[]' s=$ST/auto/rulings.jsonl
+  if f=$(profilefile); then
+    [ -r "$f" ] || return 1
+    l=$(awk '/^#+[[:space:]]/ { h = tolower($0); sub(/^#+[[:space:]]+/, "", h); sub(/[[:space:]]+$/, "", h); on = (h == "never decide; ask" || h == "hard lines"); next }
+      on && /^[[:space:]]*[-*][[:space:]]+[^[:space:]]/ { sub(/^[[:space:]]*[-*][[:space:]]+/, ""); print }' "$f" \
+      | jq -Rsc 'def trim: gsub("^\\s+|\\s+$"; "");
+        def plain: gsub("\\[(?<t>[^\\]]*)\\]\\([^)]*\\)"; "\(.t)") | gsub("[*~]"; "") | gsub("(?<!\\w)_+|_+(?!\\w)"; "");
+        split("\n") | map(select(trim != "") | (split("`") | to_entries | map(if .key % 2 == 0 then .value | plain else .value end) | join("") | trim),
+          (gsub("`"; "") | trim)) | map(select(. != "")) | unique') || return 1
+  fi
+  [ ! -e "$s" ] || l=$(jq -ncR --argjson l "$l" '$l + [inputs | fromjson? | objects | select(.source == "profile") | .held[]? | strings] | unique' "$s") || return 1
+  printf '%s\n' "$l"
 }
 # heldlist <var>: what waits for the owner, as one JSON list in <var>: the words of the pack's auto.reserved and the
 # profile's items (profileheld). auto decide holds a decision that holds one (case-insensitive); lib/needsask.sh names

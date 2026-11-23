@@ -3,7 +3,9 @@
 # stop.sh state | reply -- the Foreman's Stop hooks (the Foreman session only; every other session passes).
 # state: while the open lines of the saved state ($FD/state.md: all but the '- DONE' items, with their indented lines,
 #   which the next start archives, archive.py) are over the cap (CAP in foreman.sh), the stop is blocked once with their size; the
-#   second stop (stop_hook_active) passes, so it never loops. A warning at startup alone was ignored.
+#   second stop (stop_hook_active) passes, so it never loops. A warning at startup alone was ignored. First, each stop
+#   sends the owner's profile items to the build hosts when they changed since last sent (`conveyor.sh auto send`); when
+#   that fails (a host not reached), the stop is blocked once with its error, so the owner is told.
 # reply: the turn's last reply (every text block after its last tool call or user entry, such as a refused stop's
 #   feedback) is refused once per turn (the turn is its opening entry: the newest user entry that is
 #   not a tool result, nor meta unless it holds the wake; a refused turn is marked in reply-mark, so its next stop passes) when it
@@ -39,7 +41,13 @@ block() {
 
 case ${1:-} in
   state)
+    # An item the turn added to the owner's profile goes to the build hosts now (commands/auto.sh send), not at the next
+    # `auto decide`: the engine there decides while this session is closed. A host it did not reach decides by the items
+    # it last got, so the stop is refused once with why, for the owner; each later stop sends them again. Only exit 1 is
+    # that failure (a host not reached, the profile not read): another code (no conveyor.sh beside it) is not.
+    sent=$(bash "$(dirname "${BASH_SOURCE[0]}")/../conveyor.sh" auto send 2>&1 < /dev/null > /dev/null); rc=$?
     [ "$(jq -r '.stop_hook_active // false' <<<"$INPUT" 2>/dev/null)" != true ] || exit 0
+    [ "$rc" != 1 ] || block "The owner's profile items (owner-way.md) did not reach a build host, so the engine there can still decide what a new item holds, until a later stop sends them: ${sent//$'\n'/ } Tell the owner."
     cap=$(sed -n 's/^CAP=\([0-9][0-9]*\)[ ;].*/\1/p' "$(dirname "${BASH_SOURCE[0]}")/foreman.sh" 2>/dev/null)
     [ -n "$cap" ] || { echo "stop.sh: no CAP=<bytes> line in foreman.sh" >&2; exit 2; }
     # The same split archive.py makes: an item starts at a line beginning '- DONE', or beginning '- ' and ending ' - DONE', and runs over the indented lines after it.

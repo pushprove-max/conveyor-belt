@@ -344,9 +344,12 @@ asks the host about the record over ssh. Open decisions for that record come fro
   names. When `review-retry` is on ([Standing yes](#standing-yes)), the engine also retries a card that its review
   blocked, and logs that step in the ruling log. When the Foreman runs on your own machine, `/conveyor-belt:auto on`,
   `narrow` and `off` set the same mode on the host, with a log of its own there. `on` and `narrow` first send your
-  picker answers from the ruling log on your machine to the host, and each `auto decide` of the Foreman sends them
-  again. When the Foreman session starts again, it reads that log and tells you what the engine decided. What
-  `auto.reserved` holds, and anything against one of your rulings, still wait for you.
+  picker answers from the ruling log on your machine to the host, with the items of `owner-way.md` on your machine,
+  and each `auto decide` of the Foreman sends them again. When the items of `owner-way.md` change, the end of the
+  Foreman's next turn sends them to the host. If the host does not get them, the Foreman tells you, because the engine
+  there decides by the items it got last. The end of each later turn sends them again. When the Foreman session starts again, it reads that log and
+  tells you what the engine decided. What `auto.reserved` and `owner-way.md` hold, and anything against one of your
+  rulings, still wait for you.
 - `owner-way.md`: a project can keep a written profile of how its owner decides. Make it from the ruling log, and put
   it in the Foreman's folder, beside `rules.md`: `foreman` in the folder that `conveyor.sh state-dir` prints. For a
   group in `foreman.groups`, use the folder of the first project in the group. The
@@ -354,7 +357,7 @@ asks the host about the record over ssh. Open decisions for that record come fro
   decide; ask" and "Hard lines" sections as it keeps `auto.reserved`. `auto decide` leaves a decision under "Waiting
   for the owner" when its text holds an item of those sections (a `- ` line under the heading), as it does for a word
   of `auto.reserved`. The plugin ships no such file. With no file,
-  auto reads only the ruling log.
+  auto reads the ruling log, and on a host, the items of `owner-way.md` that your machine sent there.
 
 ## Standing yes
 

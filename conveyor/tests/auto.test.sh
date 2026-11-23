@@ -241,7 +241,7 @@ t_autohosts() {
   export CONVEYOR_FOREMAN_ASK='echo "$CONVEYOR_REPO $CONVEYOR_CMD" >> "$CALLS"; [ "$CONVEYOR_CMD" != "auto rulings" ] || cat >> "$SENT"; echo "auto ON: until off. Log: /srv/state/auto/a.md"'
   out=$(cd "$R" && loop auto on 2>&1) && grep -qxF 'origin, on its host: auto ON: until off. Log: /srv/state/auto/a.md' <<<"$out" \
     || fail "auto on did not set the mode on the record's host: $out $(cat "$CALLS" 2>&1)"
-  [ "$(jq -sr 'map("\(.id) \(.answer)") | join(", ")' "$SENT" 2>&1)" = 'x-1 yes, merge it (Recommended), x-2 no' ] \
+  [ "$(jq -sr 'map(select(.source == "ask") | "\(.id) \(.answer)") | join(", ")' "$SENT" 2>&1)" = 'x-1 yes, merge it (Recommended), x-2 no' ] \
     || fail "auto on did not send the ruling log's picker answers to the host: $(cat "$SENT" 2>&1)"
   out=$(cd "$R" && loop auto rules) && grep -qF "ask origin auto status\`: it names the log there" <<<"$out" \
     || fail "the rules do not name the host's auto log: $out"
@@ -276,6 +276,51 @@ t_autohostrul() {
   log=$(jq -r .log "$ST/auto/mode.json")
   [ "$(answer d-docs)" = open ] && grep -qF -- '- d-docs: Merge the docs fix now? (against the owner'"'"'s latest ruling x-9 on this question)' "$log" \
     || fail "decide answered d-docs against the ruling x-9 sent from the owner's machine: $(answer d-docs) $(cat "$log")"
+}
+
+# Bug (#1571): auto on sent the build host only the owner's picker answers, never the items of their profile, which is
+# in the Foreman's folder on the owner's machine (owner-way.md beside rules.md). auto on now sends them with the rulings.
+t_autohostheld() {
+  local out; autohost
+  export CONVEYOR_FOREMAN_ASK='echo "$CONVEYOR_REPO $CONVEYOR_CMD" >> "$CALLS"; [ "$CONVEYOR_CMD" != "auto rulings" ] || cat >> "$SENT"; echo "auto ON: until off."'
+  mkdir -p "$ST/foreman" && printf '%s\n' '## Never decide; ask' '- **Docs fix**' '## Hard lines' '- no tracking' > "$ST/foreman/owner-way.md"
+  out=$(cd "$R" && loop auto on 2>&1) || fail "auto on failed: $out"
+  [ "$(jq -sc 'map(select(.source == "profile") | .held)' "$SENT" 2>&1)" = '[["**Docs fix**","Docs fix","no tracking"]]' ] \
+    || fail "auto on did not send the build host the items of the owner's profile ($ST/foreman/owner-way.md) with the rulings: $(cat "$SENT" 2>&1)"
+}
+
+# Bug (#1571): auto turned on with no profile sent the host []; an item the owner then added to the profile reached the
+# host only at the Foreman's next `auto decide`, so with the session closed the engine there decided against it.
+# The Foreman's Stop hook (foreman/stop.sh state) sends the changed items, once. Bug (#1571, review): a send that did
+# not reach the host was dropped and the turn ended, so the owner never knew the engine there decided by the old items;
+# the stop is now refused with the host's error, and a later stop sends the items again.
+t_autohoststop() {
+  local out in; autohost; export DOWN=$T/$CASE/down
+  export CONVEYOR_FOREMAN_ASK='if [ "$CONVEYOR_CMD" = "auto rulings" ]; then [ ! -e "$DOWN" ] || { echo "no route to host" >&2; exit 255; }; cat >> "$SENT"; fi; echo "auto ON: until off."'
+  out=$(cd "$R" && loop auto on 2>&1) || fail "auto on failed: $out"
+  mkdir -p "$ST/foreman" && printf '%s\n' '## Never decide; ask' '- Retry keeping the work' > "$ST/foreman/owner-way.md" && touch "$DOWN"
+  # stop: the Foreman session's Stop hook, given $in.
+  stop() { (cd "$R" && CONVEYOR_FOREMAN=1 CONVEYOR_FOREMAN_DIR=$ST/foreman CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards bash "$SRC/foreman/stop.sh" state <<<"$in"); }
+  in='{"stop_hook_active": false}'; out=$(stop); jq -e '.decision == "block" and (.reason | contains("origin, on its host") and contains("no route to host"))' <<<"$out" >/dev/null \
+    || fail "stop.sh state, given $in with the host down after the profile gained an item, did not refuse the stop naming the host and its error: $out"
+  in='{"stop_hook_active": true}'; out=$(stop); [ -z "$out" ] || fail "stop.sh state, given $in with the host down, refused the stop again: $out"
+  rm -f "$DOWN"; in='{"stop_hook_active": false}'
+  out=$(stop && stop); [ -z "$out" ] || fail "stop.sh state, given $in twice with the host up, refused a stop: $out"
+  [ "$(jq -sc 'map(select(.source == "profile") | .held)' "$SENT" 2>&1)" = '[[],["Retry keeping the work"]]' ] \
+    || fail "stop.sh state, given $in twice once the host was up, did not send the host \"Retry keeping the work\" exactly once: $(cat "$SENT" 2>&1)"
+}
+
+# Bug (#1571): on the build host, whose Foreman's folder has no owner-way.md, profileheld read [], so decide answered a
+# question the owner's profile holds. The owner's machine sent the item "Docs fix" with the ruling x-1 (which gave the
+# recommended answer to d-docs before): decide there leaves d-docs for the owner, naming the item.
+t_autohostheldd() {
+  local out log; autoledger
+  out=$(cd "$R" && jq -cn '{id: "x-1", source: "ask", question: "Merge the docs fix now?", answer: "yes, merge it (Recommended)", pick: "recommended"},
+    {source: "profile", held: ["Docs fix"]}' | loop auto rulings) || fail "auto rulings failed: $out"
+  out=$(cd "$R" && loop auto on && loop auto decide 2>&1) || fail "auto on or decide failed: $out"
+  log=$(jq -r .log "$ST/auto/mode.json")
+  [ "$(answer d-docs)" = open ] && grep -qxF -- '- d-docs: Merge the docs fix now? (reserved: Docs fix)' "$log" \
+    || fail "decide on the build host answered d-docs $(answer d-docs), which the profile item \"Docs fix\" sent from the owner's machine holds: $(cat "$log")"
 }
 
 # Bug: on the build host, with no ruling log of its own, the reason logged for a decision says the owner's picks are
