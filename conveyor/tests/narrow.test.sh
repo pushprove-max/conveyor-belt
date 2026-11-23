@@ -303,6 +303,17 @@ t_narrowownlinks() {
     || fail "the test line's list: $(cat "$T/$CASE/cards/c7.rec")"
 }
 
+# Bug it catches: a card that changed only one case of its test file (t_group of foreman-title.test.sh, with the title
+# in foreman.sh) never ran the files .conveyor/test-links.json links to that file (foreman-size.test.sh's size cases),
+# as only a file run whole brought its links. A change to t_aone of a.test.sh, linked to b.test.sh and to itself, runs
+# t_aone alone (the link to itself does not make it whole) and b.test.sh whole.
+t_narrowowncaselinks() {
+  ownrun "mkdir -p .conveyor && echo '{\"tests/a.test.sh\": [\"tests/a.test.sh\", \"tests/b.test.sh\"]}' > .conveyor/test-links.json \
+    && ownedit tests/a.test.sh '^  echo 1\$' '  echo 11'"
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/a.test.sh|aone\none:tests/b.test.sh|' ] \
+    || fail "a changed case's file did not bring its linked b.test.sh whole, or a.test.sh ran more than t_aone (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+}
+
 # D2 (#384). Bug it catches: a change with no test file of its own, linked to nearly every test file (a shared
 # helper), ran all of them, about 45 minutes a card. Of 120 linked files it runs 5, each alone: the two that failed
 # most recently in a test step on record, newest first, then the rest in order; the test line and output say so and

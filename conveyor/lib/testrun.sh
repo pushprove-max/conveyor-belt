@@ -412,7 +412,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
 # it got (watch() stops a run that reports more: tests()). <report args> (reportask() files) go after the command,
 # before each file's path.
 listcmd() { # <worktree> [report args]
-  local s fs=() by fc rn='' f c nf=0 nw=0 ws=() lk=()
+  local s fs=() by fc rn='' f c nf=0 nw=0 lk=()
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
   # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only
   # while it is not set.
@@ -433,13 +433,14 @@ listcmd() { # <worktree> [report args]
     # file whose cases cannot be named so runs whole.
     for f in "${fs[@]}"; do
       if c=$(owncases "$1" "$f"); then nf=$((nf + 1)); TEST_CASES+=$(awk -v f="$f" '{print f "\t" $0}' <<<"$c")$'\n'
-      else nw=$((nw + 1)); ws+=("$f"); fi
+      else nw=$((nw + 1)); fi
     done
-    # A file that runs whole (its helpers or setup changed) brings the test files .conveyor/test-links.json links to
-    # it, those still there, each run whole: they call its helpers (#1000). One already on the list with only its
-    # changed cases runs whole too, as a case it did not change can call them.
-    [ ${#ws[@]} = 0 ] || mapfile -t lk < <(jq -r '. as $m | $ARGS.positional[] | $m[.] | arrays[] | strings' \
-      --args "${ws[@]}" < "$1/.conveyor/test-links.json" 2>/dev/null | sort -u)
+    # Each of the card's test files, whole or only its changed cases, brings the test files .conveyor/test-links.json
+    # links to it, those still there, each run whole: they call its helpers (#1000), or a change that needed this file
+    # changed broke them before (a Foreman title case and the start's size cases). One already on the list with only its
+    # changed cases runs whole too, as a case it did not change can call them; a link of a file to itself is no reason.
+    mapfile -t lk < <(jq -r '. as $m | $ARGS.positional[] as $k | $m[$k] | arrays[] | strings | select(. != $k)' \
+      --args "${fs[@]}" < "$1/.conveyor/test-links.json" 2>/dev/null | sort -u)
     for f in "${lk[@]}"; do
       [ -n "$f" ] && [ -f "$1/$f" ] || continue
       if printf '%s\n' "${fs[@]}" | grep -qxF -- "$f"; then
