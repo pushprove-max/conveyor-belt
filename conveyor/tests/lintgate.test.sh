@@ -234,15 +234,17 @@ t_lintgatetriggerexclude() {
 # `does run`), or stays off after another session's change, still passed. It also missed README's `with no gate run
 # after it` on the fix session. Each statement is matched on its own clause, with its `no` or `not` in the pattern, so a
 # page that turns one round fails; a wording that keeps the rule (`has a lint gate` for `has its lint gate`) passes.
+# Bug: the exception's clause on each page did not name the gate whose lint fix it is, so a page that put the fix at the
+# review gate still passed. Each such clause now holds `landing gate` before it.
 t_lintgatedocs() {
   local e p s d
-  for e in 'docs/cards.md|review of the change (that|the) (lint )?fix left (has|gets) no lint gate' \
+  for e in 'docs/cards.md|after a fix of lint findings at the landing gate, the review of the change (that|the) (lint )?fix left (has|gets) no lint gate' \
     'docs/cards.md|because the landing gate checks' \
     'docs/cards.md|another session changes it( again)?, the next review (has|gets) (a|an|the|its) lint gate' \
     'docs/cards.md|gate before (that|this|the) review does not run( again)? on the (fixed )?change' \
-    'docs/configuration.md|while no other session changes it, no lint command runs before (that|this|the) review' \
+    'docs/configuration.md|fix of lint findings at the landing gate left: while no other session changes it, no lint command runs before (that|this|the) review' \
     'docs/configuration.md|because the landing gate checks' \
-    'conveyor/README.md|while no other session changes it, it has no (review |lint )?gate' \
+    'conveyor/README.md|the landing gate'\''s lint fix left: while no other session changes it, it has no (review |lint )?gate' \
     'conveyor/README.md|because the landing gate checks' \
     'conveyor/README.md|reply is, with no ([a-z]+ )?gate runs? after it' \
     'conveyor/README.md|review gate of (that|this|the) pass does not run on the change the fix left'; do
