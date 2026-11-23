@@ -20,7 +20,7 @@ right-aligned and the title is what gives way.
   cap, the `ON THE BELT` head gives the cards on the belt and the cap. It also gives a card that lands or has landed,
   which the cap does not count (`ON THE BELT (2 of 7, 1 landing not counted)`). When the snapshot is older than the
   card records or the loop's own count, the head gives the count the loop gives now. When the loop gives no count, the
-  head gives 0. The Board uses the loop's count only when the snapshot is older than the card records. With more than
+  head gives the snapshot's count, or else the cards on the belt that the cap counts. The Board uses the loop's count only when the snapshot is older than the card records. With more than
   one project, each project's count follows its name (`ON THE BELT (bakery 1 of 3 · gadgetlab 1)`). In `/units` a
   third line gives how many findings the review's judge declined today (`judge declined 3 findings today`), from the
   snapshot's declined list (its `declined` and `declinedRest` lines by the judge, by this machine's day, each line

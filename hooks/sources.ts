@@ -805,15 +805,17 @@ const loopText = (snap: Snap): string => snap.loops
 // The cards on the belt against the builder cap, for the head of ON THE BELT: `1 of 7`, and `1 of 7, 1 landing not
 // counted` for a card that lands or has landed, in Push, the one kind on the belt that takes no slot. With more than
 // one project, each project's count after its name: `bakery 1 of 3 · gadgetlab 1`; a project whose loop gives no cap has its count on the belt only. None when the belt is empty and no
-// loop gives a cap. While the snapshot is behind, the count is loop.json's now (now), 0 when it gives none (no loop
-// process lives, or the loop has not counted a turn yet): the kept belt can still hold a card's old row beside the cards
-// started since, which would count it twice, and its rows outlive the loop. The Board counts it so only while the
-// snapshot is behind its card records (recordsNewer), not when only loop.json is newer.
+// loop gives a cap. While the snapshot is behind, the count is loop.json's now (now): the kept belt can still hold a
+// card's old row beside the cards started since, which would count it twice. When now is unknown (a snapshot made where
+// the loop does not run has no loop.json to read), the count is health.building, then the belt's cards that take a slot:
+// never 0 for a count nobody knows. The Board counts it so only while the snapshot is behind its card records
+// (recordsNewer), not when only loop.json is newer.
 const beltCounts = (snap: Snap): string[] => {
-  const capped = (l: Loop) => (l.behind ? l.now : l.building) !== null && l.cap !== null
+  const capped = (l: Loop) => l.cap !== null && (l.behind ? l.now ?? l.building : l.building) !== null
   const one = (l: Loop) => {
-    if (l.behind) return capped(l) ? `${l.now} of ${l.cap}${l.landing ? `, ${l.landing} landing not counted` : ''}` : `${l.now ?? 0}`
-    return capped(l) ? `${l.onBelt - l.landing} of ${l.cap}${l.landing ? `, ${l.landing} landing not counted` : ''}` : `${l.onBelt}`
+    const n = l.behind ? l.now ?? l.building ?? l.onBelt - l.landing : capped(l) ? l.onBelt - l.landing : null
+    if (n === null) return `${l.onBelt}`
+    return l.cap !== null ? `${n} of ${l.cap}${l.landing ? `, ${l.landing} landing not counted` : ''}` : `${n}`
   }
   if (!snap.belt.length && !snap.loops.some(capped)) return []
   if (snap.loops.length > 1) return snap.loops.map(l => `${l.repo} ${one(l)}`)
@@ -1226,9 +1228,10 @@ const MARK: Record<Step['state'], Seg> = { done: { t: '✓', c: C.ok }, now: { t
 const STEP_AT: Record<string, number> = { build: 0, review: 1, fix: 2, tests: 3, landing: 4, push: 5, issue: 5 }
 const statesOf = (b: Belt): Step['state'][] => (b.track ? b.track.steps.map(st => st.state)
   : STEP_NAMES.map((_, i) => { const at = STEP_AT[b.step]; return at === undefined || i > at ? 'todo' : i < at ? 'done' : 'now' }))
-// While the snapshot is behind, the count is loop.json's now, 0 when it gives none, as in the head of ON THE BELT.
+// While the snapshot is behind, the count is loop.json's now; when that is unknown, health.building, then the belt's
+// cards that take a slot (not those in Push), as in the head of ON THE BELT: never 0 for a count nobody knows.
 const slotsOf = (l: Loop) => {
-  const n = l.behind ? l.now ?? 0 : l.building ?? l.onBelt
+  const n = l.behind ? l.now ?? l.building ?? l.onBelt - l.landing : l.building ?? l.onBelt
   return l.cap !== null ? `${n}/${l.cap} slots` : `${n} building`
 }
 

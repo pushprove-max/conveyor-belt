@@ -86,21 +86,35 @@ test('/units counts the loop\'s cards now against the cap while the snapshot is 
 })
 
 // Bug: while the snapshot is behind, /units took whether a loop runs from the old snapshot's health.building. A loop
-// started since (health.building null, recordsNow.building 1) drew the rows' count with no cap; a loop exited since
-// (recordsNow.building null) drew the old build row as 1 of 7, where the Board counts none (dashboard-cards behindgone),
-// and the pane's BUILD MATRIX still drew it as 1/7 slots. With only loop.json newer than the snapshot (recordsNewer
-// false, recordsNow given), /units counted the rows where the Foreman gives loop.json's count (watch-conveyor.sh).
+// started since (health.building null, recordsNow.building 1) drew the rows' count with no cap. With only loop.json
+// newer than the snapshot (recordsNewer false, recordsNow given), /units counted the rows where the Foreman gives
+// loop.json's count (watch-conveyor.sh).
 const behind = (building: number | null, now: number | null, newer = true) => board({ belt: [BELT[0]], recordsNewer: newer,
   recordsNow: { building: now, blocked: [], waiting: [] }, health: { state: 'running', building, builderCap: 7 } })
 const beltHead = (s: State) => section(tableText(s, 120), 'ON THE BELT').split('\n')[0]
 test('/units counts the cards of a loop started since the snapshot against the cap', () => {
   expect(beltHead(behind(null, 1))).toBe('ON THE BELT (1 of 7)')
 })
-test('/units counts no card, and the pane no slot, for a loop exited since the snapshot', () => {
-  const s = behind(1, null)
-  expect(beltHead(s)).toBe('ON THE BELT (0)')
-  expect(section(paneModel(s, 100, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')[0], 'pane, loop exited since: recordsNow.building null')
-    .toMatch(/ 0\/7 slots$/)
+// Issue 1583. Bug it catches: a snapshot made where the loop does not run (the Board on another machine, no loop.json)
+// carries recordsNow.building null; /units drew that unknown count as 0 (`0/8 slots` with 7 cards on the belt). It
+// takes health.building, then the belt's count.
+const matrixHead = (s: State) => section(paneModel(s, 100, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')[0]
+// One of the 7 belt cards is in Push, which takes no slot: the belt's own count is 6, so 7 can come only from
+// health.building (a view that skipped that fallback and counted the rows would draw 6).
+test('/units takes health.building when the snapshot is behind and recordsNow.building is null', () => {
+  const belt = Array.from({ length: 7 }, (_, i) => ({ ...BELT[0], card: `c9-${4000 + i}`, issue: 4000 + i, step: i ? 'build' : 'push' }))
+  const s = board({ belt, recordsNewer: true, recordsNow: { building: null }, health: { state: 'running', building: 7, builderCap: 8 } })
+  const feed = 'feed: recordsNow {building: null}, health.building 7, builderCap 8, 7 belt cards (1 in Push)'
+  expect(matrixHead(s), feed).toMatch(/ 7\/8 slots$/)
+  expect(beltHead(s), feed).toBe('ON THE BELT (7 of 8, 1 landing not counted)')
+})
+// Bug it also catches: with both counts null, BUILD MATRIX counted a card in Push as a slot where ON THE BELT does not.
+test('/units takes the belt\'s count when recordsNow.building and health.building are both null', () => {
+  const s = board({ belt: [BELT[0], { ...BELT[1], step: 'push' }], recordsNewer: true,
+    recordsNow: { building: null, blocked: [], waiting: [] }, health: { state: 'running', building: null, builderCap: 7 } })
+  const feed = 'feed: recordsNow.building null, health.building null, builderCap 7, 2 belt cards (1 in Push)'
+  expect(matrixHead(s), feed).toMatch(/ 1\/7 slots$/)
+  expect(beltHead(s), feed).toBe('ON THE BELT (1 of 7, 1 landing not counted)')
 })
 test('/units takes loop.json\'s card count when only loop.json is newer than the snapshot', () => {
   expect(beltHead(behind(1, 0, false)), 'only loop.json newer: recordsNewer false, recordsNow.building 0').toBe('ON THE BELT (0 of 7)')
