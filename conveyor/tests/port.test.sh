@@ -413,17 +413,19 @@ t_resumep1() {
 # Bug (#1385): a retried card counted the reviews of its chain from before an automatic port (landconflict(),
 # lib/cardland.sh, which starts pass and rounds again) as its rounds. Card c1-7: 3 reviews, its port (its rebase line
 # marks it), 2 reviews (the port's own, then one of its fix), then a failed step. The retried card carries the 1
-# review after the port's own alone, so its first NO-GO (a P2, review 2 of 3) gets a fix round; with the 5 counted,
-# or the 2 after the port, it was its last review and landed the finding as a follow-up.
+# review after the port's own alone, so its first NO-GO (a P1, review 2 of 3) gets a fix round; with the 5 counted,
+# or the 2 after the port, it was its last review and landed the finding as a follow-up. A P1, as p1at2() makes one:
+# from review 2 on, a NO-GO of new P2 findings alone ends the loop (loopstop(): new-p2) whatever the count. p1fix is
+# set (the card's one P1 round spent), so a miscounted last review prints "p1 max-reviews", not the P1's own fix round.
 t_resumeport3() {
   local r l=''
   resumesetup 7
   r=$(kline c1-7 7 review NO-GO); l=$(printf '%s\n' "$r" "$r" "$r" "$(kline c1-7 7 rebase ok '{"port": true}')" "$r" "$r")
-  portkept 7 c1-7 'test: exit 1' 'echo two >> a.txt' "$(printf '%s\n' '[P2] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO')" "$l"
+  portkept 7 c1-7 'test: exit 1' 'echo two >> a.txt' "$(printf '%s\n' '[P1] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO')" "$l"
   loop retry 7 >/dev/null || fail "retry of #7 exited non-zero"
-  resumed 7 'res=NO-GO rep="" finrev="" earlier="" pass=1 rebased="" tfix="" lfix="" privfix="" p1fix=""; afterreview; echo "$after $stop" > "$T/$CASE/after"'
+  resumed 7 'res=NO-GO rep="" finrev="" earlier="" pass=1 rebased="" tfix="" lfix="" privfix="" p1fix=1; afterreview; echo "$after $stop" > "$T/$CASE/after"'
   [ "$(jq -c '[.mode, .rounds]' <<<"$RESUMED")" = '["session",1]' ] || fail "the reviews before the port of c1-7, or the port's own review, were counted as the retried card's rounds: $RESUMED"
-  [ "$(cat "$T/$CASE/after")" = "fix " ] || fail "the retried card's first NO-GO (review 1, 1 round carried) did not get a fix round: $(cat "$T/$CASE/after")"
+  [ "$(cat "$T/$CASE/after")" = "fix " ] || fail "the retried card's first NO-GO (a P1 on review 2: pass 1, 1 round carried) did not get a fix round: $(cat "$T/$CASE/after")"
 }
 # Card c1-7 of #7 after an automatic port (its rebase line marks it): the port's own review gave a NO-GO, its fix
 # round 1 was kept, and the review after that fix was recorded with <result>; with <told>, that review left the rounds

@@ -901,7 +901,8 @@
     ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/foreman/watch-conveyor.sh": [
-    ".claude/scripts/__tests__/dashboard.test.sh"
+    ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/port.test.sh"
   ],
   "conveyor/foreman/watch-recordsnewer.test.sh": [
     ".claude/scripts/__tests__/dashboard.test.sh"
@@ -923,5 +924,8 @@
   ],
   "conveyor/tests/swebenchcheck.test.sh": [
     "conveyor/tests/filedhold.test.sh"
+  ],
+  "conveyor/foreman/watch-retry.test.sh": [
+    "conveyor/tests/port.test.sh"
   ]
 }
