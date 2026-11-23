@@ -189,6 +189,26 @@ t_unblockrace() {
     || fail "the refused unblock 9 --hold left #9's moved.json entry $(cat "$STUB/after"), but it was $(cat "$STUB/before") just before the hold"
 }
 
+# Bug: a refused unblock took #9's hold off control.json, then put back #9's entry in moved.json, each in a lock of its
+# own. A snapshot that read control.json between the two wrote #9's first Queue entry, and the undo wrote "none" over
+# it. A stand-in snapshot (a Queue sight dated after the hold) starts just after the hold is taken off: at once if
+# moved.json's lock is free then, else in the background, where it waits for the lock. Its Queue entry must stay.
+# The case polls for the background stand-in's mark: only a second process can wait on the lock the rollback holds.
+t_unblockundo() {
+  setup '[]'
+  fx_in 'set -- unblock 9 --hold; eval "$(sed "\$d" "$SRC/commands/unblock.sh")"
+    eval "$(declare -f ctlput | sed "1s/^ctlput/realctlput/")"
+    snap() { movedsaw "{\"9\":{\"col\":\"queue\",\"other\":false,\"by\":null,\"alone\":false}}" 2099-01-01T00:00:00Z >/dev/null; touch "$STUB/snapped"; }
+    ctlput() { realctlput "$@" || return 1; jq -e ".held | index(9) == null" <<<"$2" >/dev/null || return 0
+      if flock -n "$MOVED.lock" true; then movedlocked snap; else ( unset MOVED_IN; movedlocked snap ) 3>&- & fi; }
+    locked unblock 9 && exit 3; exit 0'
+  [ "$RC" != 3 ] || fail "unblock 9 --hold, #9 with no card, exited 0: $(cat "$T/$CASE/run.out")"
+  wait_until '[ -e "$STUB/snapped" ]' || fail "the stand-in snapshot did not run after unblock 9 --hold took the hold off: $(cat "$T/$CASE/run.out")"
+  local after; after=$(jq -c '.["9"] | [.col, .seen]' "$ST/moved.json")
+  [ "$after" = '["queue","2099-01-01T00:00:00Z"]' ] \
+    || fail "a snapshot that read control.json after the refused unblock 9 --hold took the hold off lost its Queue entry for #9: $after"
+}
+
 # Bug (#1472): a snapshot copies control.json without the records' lock, so a copy taken while a refused
 # unblock held #9 for a moment still lists #9 held when the snapshot dates its sight, after the rollback. Written then,
 # the sight dated a Held move that never stood, and the next hold kept its time. The sight of an issue held by your hold
