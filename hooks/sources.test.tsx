@@ -90,15 +90,20 @@ test('/units counts the loop\'s cards now against the cap while the snapshot is 
 // (recordsNow.building null) drew the old build row as 1 of 7, where the Board counts none (dashboard-cards behindgone),
 // and the pane's BUILD MATRIX still drew it as 1/7 slots. With only loop.json newer than the snapshot (recordsNewer
 // false, recordsNow given), /units counted the rows where the Foreman gives loop.json's count (watch-conveyor.sh).
-test('/units takes whether a loop runs from loop.json now while the snapshot is behind', () => {
-  const snap = (building: number | null, now: number | null, newer = true) => board({ belt: [BELT[0]], recordsNewer: newer,
-    recordsNow: { building: now, blocked: [], waiting: [] }, health: { state: 'running', building, builderCap: 7 } })
-  const head = (s: State) => section(tableText(s, 120), 'ON THE BELT').split('\n')[0]
-  expect(head(snap(null, 1))).toBe('ON THE BELT (1 of 7)')
-  expect(head(snap(1, null))).toBe('ON THE BELT (0)')
-  expect(head(snap(1, 0, false)), 'only loop.json newer: recordsNewer false, recordsNow.building 0').toBe('ON THE BELT (0 of 7)')
-  expect(section(paneModel(snap(1, null), 100, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')[0], 'pane, loop exited since: recordsNow.building null')
+const behind = (building: number | null, now: number | null, newer = true) => board({ belt: [BELT[0]], recordsNewer: newer,
+  recordsNow: { building: now, blocked: [], waiting: [] }, health: { state: 'running', building, builderCap: 7 } })
+const beltHead = (s: State) => section(tableText(s, 120), 'ON THE BELT').split('\n')[0]
+test('/units counts the cards of a loop started since the snapshot against the cap', () => {
+  expect(beltHead(behind(null, 1))).toBe('ON THE BELT (1 of 7)')
+})
+test('/units counts no card, and the pane no slot, for a loop exited since the snapshot', () => {
+  const s = behind(1, null)
+  expect(beltHead(s)).toBe('ON THE BELT (0)')
+  expect(section(paneModel(s, 100, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')[0], 'pane, loop exited since: recordsNow.building null')
     .toMatch(/ 0\/7 slots$/)
+})
+test('/units takes loop.json\'s card count when only loop.json is newer than the snapshot', () => {
+  expect(beltHead(behind(1, 0, false)), 'only loop.json newer: recordsNewer false, recordsNow.building 0').toBe('ON THE BELT (0 of 7)')
 })
 
 // Issue 195. Bug it catches: a card the machine held back did not say why. Issue 346: the machine room is removed, so
