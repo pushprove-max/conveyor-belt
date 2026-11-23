@@ -557,6 +557,9 @@ t_resumeportrewritten() {
   resumesetup 8
   portkept 8 c1-8 "visible to customers or staff: needs Dana's yes: guests see a new Pay button" 'echo two >> a.txt' "$YES"
   jq -cn '{body: "Add (a).\n\n## What customers or staff will see\nGuests see a new Pay button."}' > "$K/c1-8.body"
+  # The kept patch's STABILISED lines come with it (resumeplan()); a build from nothing must drop them, or its own
+  # check would take the old patch's cause for the new change's.
+  echo 'a.txt: the old cause' > "$K/c1-8.stabilised"
   issue 8 2026-01-01 | jq -c '[.body = "Do (b) instead.\n\n## What customers or staff will see\nNothing visible changes."]' > "$STUB/issues.json"
   echo ONE > "$R/a.txt" && git -C "$R" commit -qam other || fail "main could not move"
   loop retry 8 >/dev/null || fail "retry of #8 exited non-zero"

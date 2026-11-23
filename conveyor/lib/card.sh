@@ -641,7 +641,7 @@ cardfix() {
 # issue's section of what customers or staff will see changed since its review (keptway() build, below): that card is built from nothing.
 # It reads card()'s n, br, wt, issue, vrule, heldto and inh, and sets its from, fromk, was, mode (land, review,
 # session, port, stale, or none: built from nothing), note, fin, finend, pro and rounds, and the files
-# beside the worktree that come with the kept patch (review, rerun, trailers, covered, outside, rounds). It fails, with the
+# beside the worktree that come with the kept patch (review, rerun, trailers, covered, stabilised, outside, rounds). It fails, with the
 # reason in err, when the card must block: a kept patch it could not take out again, or retried lines it could not read (cardtree() has checked the new worktree holds no staged change).
 resumeplan() {
   local prev d t rev='' kw='' crev='[]' # rev: the kept review prior() found; kw: keptway()'s answer for a kept patch; crev: the review lines of the kept-patch chain this card carries (pro and rounds are read from them)
@@ -670,9 +670,9 @@ resumeplan() {
       else
         mode=stale; note="the kept patch of card $from cannot be read: built from nothing"
       fi
-      # Its commit trailers and the COVERED-BY lines of its replies (speedproof.sh hollowproof()) come with its patch (a card that
-      # lands from it has no session to write them again, and its deleted hollow cases are checked again on them); so do, whatever the patch, the findings its judge found outside its change (judged()), which this card files when it lands.
-      [ "$mode" = stale ] || for t in trailers covered; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done; cp "$fromk/$from.outside" "$wt.outside" 2>/dev/null || cp "$CARDS/$from.outside" "$wt.outside" 2>/dev/null || :
+      # Its commit trailers, the COVERED-BY lines of its replies (speedproof.sh hollowproof()) and their STABILISED lines (speedproof.sh stabilised()) come with its patch (a card that
+      # lands from it has no session to write them again, its deleted hollow cases are checked again on them, and a fix whose reply names no cause keeps them); so do, whatever the patch, the findings its judge found outside its change (judged()), which this card files when it lands.
+      [ "$mode" = stale ] || for t in trailers covered stabilised; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done; cp "$fromk/$from.outside" "$wt.outside" 2>/dev/null || cp "$CARDS/$from.outside" "$wt.outside" 2>/dev/null || :
     fi
   fi
   # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it
@@ -684,7 +684,7 @@ resumeplan() {
     case $mode:$kw in
       land:review) mode=session; note="resumed from the kept patch of card $from: the issue changed since its review: one session, then review" ;;
       *:build) git -C "$wt" reset -q --hard 2>/dev/null || { err="worktree: the kept patch of card $from could not be taken out of the worktree"; return 1; }
-        rm -f "$wt.rerun" "$wt.trailers" "$wt.covered"; mode='' fin=''; note="the issue's section of what customers or staff will see changed since the review of the kept patch of card $from: built from nothing" ;;
+        rm -f "$wt.rerun" "$wt.trailers" "$wt.covered" "$wt.stabilised"; mode='' fin=''; note="the issue's section of what customers or staff will see changed since the review of the kept patch of card $from: built from nothing" ;;
     esac
   fi
   # The owner's yes with a condition: the kept review was written before that line was, so nothing has held the change

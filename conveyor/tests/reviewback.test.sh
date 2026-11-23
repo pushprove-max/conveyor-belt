@@ -179,6 +179,21 @@ t_retryoutside() {
     || fail "the retried card did not take back the outside findings beside its worktree: $RESUMED $(cat "$T/$CASE/outside" 2>&1)"
 }
 
+# Bug: a blocked stabilise card's STABILISED lines (<worktree>.stabilised, speedproof.sh stabilised()) were not kept
+# with its patch, nor taken back by its retry: a fix of the retry whose reply named no cause (it changed the test and
+# left the cause alone) then blocked the card for a missing STABILISED line.
+t_retrystabilised() {
+  local l='t_flaky | a timing wait | waits on the lock file'
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' b.txt base
+  # The build's reply names the cause; the check reads it (stabilised() keeps it beside the worktree), then the card blocks.
+  keptblock 7 1 'fix: the session failed' "jq -cn --arg r 'STABILISED: $l' '{type: \"result\", result: \$r}' > \"\$wt.out\" && stabilised \"\$wt\" >/dev/null"
+  [ "$(cat "$K/c7.stabilised" 2>&1)" = "$l" ] || fail "block() did not keep the STABILISED lines with the patch: $(ls "$K" 2>&1)"
+  # The retry's fix reply names no cause: the check still reads the kept one.
+  resumed 7 'jq -cn "{type: \"result\", result: \"fixed the test\"}" > "$wt.out"; stabilised "$wt" > "$T/$CASE/lines"'
+  [ "$(jq -r .mode <<<"$RESUMED")" = session ] && [ "$(cat "$T/$CASE/lines")" = "$l" ] \
+    || fail "the retried card lost the kept STABILISED line when its fix's reply named none: $RESUMED $(cat "$T/$CASE/lines" 2>&1)"
+}
+
 # A repeat is known whatever else ends the loop. Bugs: a P1 finding back after its fix on the last round lands with
 # follow-ups instead of blocking; a card that blocks deletes its fix rounds, so its retry fixes a finding that came
 # back as if new; a card whose patch could not be kept deletes them too. Its cases (repeatkept*) each block card c7
