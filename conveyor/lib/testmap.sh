@@ -581,14 +581,13 @@ briefcap() { # <lines>
   awk 'NR <= 12 { printf "%s%s", (NR > 1 ? ", " : ""), $0 } NR > 12 { n++ } END { if (n) printf " and %d more", n }' <<<"$1"
 }
 # The files of <lines> (one a line) that refer to a named file, as the brief lists them: every code file, then test
-# files (the pack's test patterns, TESTRX, a suite runner too), then data and text (JSON, YAML, TOML, CSV, text), each
+# files (testpaths(): a suite runner or a document is no test file), then data and text (JSON, YAML, TOML, CSV, text), each
 # part in the order given, with only the tests and data cut at 12 (briefcap()). The code files are the callers a
 # builder needs, and a file that many source has more than 12 of equal rank (conveyor/lib/control.sh: 30 commands).
 briefrank() { # <lines>
   local r code
-  [ -n "${TESTRX:-}" ] || names > /dev/null 2>&1 || :
   r=$(awk 'NR == FNR { t[$0]; next } { print (($0 in t) ? 1 : ($0 ~ /\.(json|jsonl|ya?ml|toml|csv|txt)$/) ? 2 : 0) "\t" $0 }' \
-    <({ [ -z "${TESTRX:-}" ] || grep -E -e "$TESTRX" <<<"$1"; echo; }) <(printf '%s\n' "$1") | sort -s -t$'\t' -k1,1n)
+    <({ testpaths <<<"$1" 2> /dev/null || :; echo; }) <(printf '%s\n' "$1") | sort -s -t$'\t' -k1,1n)
   code=$(awk '/^0\t/ { sub(/^0\t/, ""); printf "%s%s", (n++ ? ", " : ""), $0 }' <<<"$r")
   r=$(awk '!/^0\t/ { sub(/^[0-9]\t/, ""); print }' <<<"$r")
   printf '%s%s' "$code" "$([ -z "$r" ] || printf '%s%s' "${code:+, }" "$(briefcap "$r")")"

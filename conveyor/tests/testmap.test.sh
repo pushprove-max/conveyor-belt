@@ -558,19 +558,19 @@ t_startbriefvar() {
 # and source it too (as 19 do conveyor/lib/control.sh) still hid them: every code file is listed, then tests, then
 # data, and only those are cut at 12. (O114) lib/own.sh sources lib/a.sh as "${BASH_SOURCE[0]%/*}/a.sh", its own
 # folder, and was not named, as another file is named a.sh; other/own.sh, the same line in other/, names other/a.sh
-# and is still not named for lib/a.sh.
+# and is still not named for lib/a.sh. (#1553) A suite runner and a document are no test files: both rank as code.
 t_startbriefrank() {
   startmain
   mkdir -p "$R/cmd" "$R/aa" && echo : > "$R/lib/u2.sh" && for f in run serve $(seq -f 'c%02g' 19); do printf '. "$HERE/lib/u2.sh"\n' > "$R/cmd/$f.sh"; done \
     && for i in 01 02 03 04 05 06 07 08 09 10 11 12; do echo 'x=lib/u2.sh' > "$R/aa/t$i.test.sh"; done && echo '{"f": "lib/u2.sh"}' > "$R/aa/d.json" \
-    && for d in lib other; do printf '. "${BASH_SOURCE[0]%%/*}/a.sh"\n' > "$R/$d/own.sh"; done \
+    && for d in lib other; do printf '. "${BASH_SOURCE[0]%%/*}/a.sh"\n' > "$R/$d/own.sh"; done && for f in tests/speed/page.rst suite/all.test.sh; do mkdir -p "$R/${f%/*}" && echo 'x=lib/u2.sh' > "$R/$f"; done && tune '.test.wholeCommands = ["suite/all.test.sh"]' \
     && git -C "$R" add -A && git -C "$R" commit -qm rank || fail "the fixture could not be committed"
   local ISSUE
   # shellcheck disable=SC2034 # read by the command fx_in() runs
   ISSUE=$(issue 7 2026-01-01 | jq -c '.title = "Change lib/u2.sh:1136 and lib/a.sh" | .body = ""')
   fx_in 'startbrief "$R" "$ISSUE"'
-  grep -qF -e "- \`lib/u2.sh\`: named in $(seq -f 'cmd/c%02g.sh' 19 | tr '\n' , | sed 's/,/, /g')cmd/run.sh, cmd/serve.sh, aa/t01.test.sh, " "$T/$CASE/run.out" \
-    || fail "the brief for an issue naming lib/u2.sh:1136 does not list all 21 commands that source it, cmd/run.sh and cmd/serve.sh too, before its tests and data: $(cat "$T/$CASE/run.out")"
+  grep -qF -e "- \`lib/u2.sh\`: named in $(seq -f 'cmd/c%02g.sh' 19 | tr '\n' , | sed 's/,/, /g')cmd/run.sh, cmd/serve.sh, suite/all.test.sh, tests/speed/page.rst, aa/t01.test.sh, " "$T/$CASE/run.out" \
+    || fail "the brief for an issue naming lib/u2.sh:1136 does not list all 21 commands that source it, cmd/run.sh and cmd/serve.sh too, then the suite runner suite/all.test.sh and the document tests/speed/page.rst, all before its tests: $(cat "$T/$CASE/run.out")"
   grep -qE -e '^- `lib/u2\.sh`: .*, aa/t12\.test\.sh and 1 more$' "$T/$CASE/run.out" \
     || fail "the brief for an issue naming lib/u2.sh:1136 does not cut its 12 tests and 1 data file at 12: $(cat "$T/$CASE/run.out")"
   grep -qxF -e '- `lib/a.sh`: named in lib/b.sh, lib/own.sh, areas.json; mapped test files tests/a.test.sh' "$T/$CASE/run.out" \
