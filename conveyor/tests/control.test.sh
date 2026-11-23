@@ -296,13 +296,17 @@ t_controlkept() {
     || fail "the record's cap 2 and judge off were not kept, or a key it leaves out is not the new defaults': $CTL_V"
   # conveyor/README.md's rule defaults paragraph must say what this record (saved with no rules) reads (#446): its
   # rules are what the paragraph claims for an older record, built from its own words, not a copy of them.
-  local para off want
+  local para off split want
   para=$(awk '/^Every rule is on by default/ {p = 1} p && /^$/ {exit} p' "$SRC/README.md" | tr '\n' ' ')
   off=$(sed -n 's/.*except \(.*\), which are off.*/\1/p' <<<"$para" | grep -o '`[A-Za-z0-9]*`' | tr -d '`' | jq -Rsc 'split("\n") | map(select(. != ""))')
+  # Split's default, from the paragraph too: the value it names ("`split`, which is `shadow`"), else off when it is in
+  # the off list, else on as every rule. Bug caught: a paragraph that gave Split another default still passed.
+  split=$(sed -n 's/.*`split`, which is `\([a-z]*\)`.*/\1/p' <<<"$para")
+  [ -n "$split" ] || split=$(jq -r 'if IN(.[]; "split") then "off" else "on" end' <<<"$off")
   case $para in
     *"saved before a rule existed reads that rule at its default"*)
-      want=$(jq -c --argjson off "$off" '{P0: true, P1: true, P2: true, P3: true, followups: true, push: true, visible: true}
-        | with_entries(.value = (.key | IN($off[]) | not)) + {split: "on"}' <<<null) ;;
+      want=$(jq -c --argjson off "$off" --arg split "$split" '{P0: true, P1: true, P2: true, P3: true, followups: true, push: true, visible: true}
+        | with_entries(.value = (.key | IN($off[]) | not)) + {split: $split}' <<<null) ;;
     *"saved before a rule existed reads that rule as on"*)
       want='{"P0":true,"P1":true,"P2":true,"P3":true,"followups":true,"push":true,"visible":true,"split":"on"}' ;;
     *) want='"no rule for an older record"' ;;

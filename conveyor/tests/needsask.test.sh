@@ -222,12 +222,14 @@ t_needsturn() {
 # Bug (#1171): the docs said nothing of which `needs you` items become decisions for `auto decide`, nor what step it picks,
 # so an owner could not tell what auto does with a blocked card or a held main-red issue. docs/foreman.md must name both
 # items and the recommended step of each, as the engine's own option labels read. Text check: a doc page has no behaviour to run.
+# Each label is matched in its own item's sentence: matched anywhere on the page, the two steps swapped passed.
 t_needsdoc() {
-  local d l; d=$(tr '\n' ' ' < "$SRC/../docs/foreman.md" | tr -s ' ')
-  for l in NEEDSASK_RETRY NEEDSMAIN_RELEASE; do
-    l=$(sed -n "s/.*\b$l='\([^']*\)'.*/\1/p" "$SRC/lib/needsask.sh" | head -1)
+  local d v l item; d=$(tr '\n' ' ' < "$SRC/../docs/foreman.md" | tr -s ' ')
+  for v in 'NEEDSASK_RETRY:A card that is blocked with its work kept' 'NEEDSMAIN_RELEASE:that fails on main, and the engine holds'; do
+    l=$(sed -n "s/.*\b${v%%:*}='\([^']*\)'.*/\1/p" "$SRC/lib/needsask.sh" | head -1) item=${v#*:}
     [ -n "$l" ] || fail "lib/needsask.sh has no recommended-step label to check the docs against"
-    grep -qF "\"$l\"" <<<"$d" || fail "docs/foreman.md does not name the recommended step \"$l\" of an item auto decides"
+    grep -qF "$item: the recommended step is \"$l\"" <<<"$d" \
+      || fail "docs/foreman.md does not give the recommended step \"$l\" in the item that starts \"$item\", which auto decides"
   done
 }
 

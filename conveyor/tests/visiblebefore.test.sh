@@ -27,7 +27,9 @@ beforestart() {
   setup '[]'
   echo 'echo two >> a.txt; mkdir -p web; echo pay >> web/pay.ts' > "$STUB/build"
   # The issues have a `## Done when`: each session's reply ends with its line (the Done-when check).
-  sed -i 's|^echo .{"type":"result","is_error":false,|&"result":"## Done when\\nD1 met: web/pay.ts:1 is green",|' "$STUB/claude"
+  sed -i 's|^answer .{"type":"result","is_error":false,|&"result":"## Done when\\nD1 met: web/pay.ts:1 is green",|' "$STUB/claude"
+  # A stub whose result line changed shape would drop the reply, and each card would stop at the Done-when check.
+  grep -q '"result":"## Done when' "$STUB/claude" || fail "the claude stub's result line no longer takes the Done-when reply"
   sed -i 's|^cat > /dev/null; echo x|cat > "$STUB/asked"; echo x|' "$STUB/codex"
   steps() { st "select(.issue == $1) | \"\(.step) \(.result) \(.reason)\"" | tr '\n' ,; }
 }

@@ -329,4 +329,11 @@ t_dwfields() {
   err=$(cat "$T/$CASE/err")
   [ -z "$out" ] && grep -qF "conveyor: card c7: the build session's fields (its tokens, stats and Done-when check) could not be put on its build line; the line is written without them" <<<"$err" \
     || fail "fields that are not JSON were not left out with the card and step named: out=$out err=$err"
+  # The reply's D<n> lines given to jq as --argjson d, not JSON (donelines() made to print bad text), with good fields
+  # on stdin: the failure of an --argjson value, not of the input, is logged with the card and the step too.
+  out=$( ( STATE=$ST/cards.jsonl; . "$SRC/lib/testrun.sh"; donelines() { echo 'not json'; }; dwfields c7 "$T/$CASE/c7" build '' '.' <<<'{}' ) 2> "$T/$CASE/err") \
+    || fail "dwfields failed on a --argjson d that is not JSON"
+  err=$(cat "$T/$CASE/err")
+  [ -z "$out" ] && grep -qF "conveyor: card c7: the build session's fields (its tokens, stats and Done-when check) could not be put on its build line; the line is written without them" <<<"$err" \
+    || fail "dwfields with --argjson d 'not json' and fields {} was not left out with the card and step named: out=$out err=$err"
 }

@@ -278,13 +278,17 @@ t_pridlerelease() {
 }
 # Bug it catches (#463): the pages said Merge PR idle always runs the linked test files before it merges, but
 # pushtests() runs none with the push check off (push.check), so a reader took an untested merge for a tested one.
-# A text check: the claim is in the docs, with no behaviour of its own to run (t_pridle runs the merge itself).
+# A text check: the claim is in the docs, with no behaviour of its own to run (t_pridle runs the merge itself). The
+# sentence itself is matched (when Test before a push is on, the linked test files run or pass first): the old claim
+# with "See Test before a push." added named the setting and passed.
 t_pridledocs() {
   local p s
   for p in "docs/configuration.md:^- \`idle\`:" "docs/board.md:^Idle merges it"; do
     s=$(awk -v re="${p#*:}" '$0 ~ re {on = 1} on && (/^$/ || (/^- / && $0 !~ re)) {exit} on' "$SRC/../${p%%:*}")
     [ -n "$s" ] || fail "${p%%:*}: the Merge PR idle text is not found"
-    [[ $(tr '\n' ' ' <<< "$s") == *"Test before a push"* ]] || fail "${p%%:*}: the Merge PR idle text does not say its test run depends on Test before a push: $s"
+    s=$(tr -s '\n ' '  ' <<< "${s//\*\*/}")
+    [[ $s =~ When\ Test\ before\ a\ push\ is\ on,\ [^.]*(first\ [^.]*test\ files|test\ files[^.]*\ first) ]] \
+      || fail "${p%%:*}: the Merge PR idle text does not say the linked test files run first when Test before a push is on: $s"
   done
 }
 # Bugs it catches: with Merge PR release, release-prep ran the suite on origin's default branch, which lacks the cards

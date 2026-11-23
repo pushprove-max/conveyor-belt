@@ -134,3 +134,34 @@ t_contractgh() {
   cread 'openissues number,title | jq -c "map(.number)"' || fail "openissues failed: $(cat "$T/$CASE/out")"
   [ "$(cat "$T/$CASE/out")" = '[7]' ] || fail "openissues did not read the gh stub's issues: $(cat "$T/$CASE/out")"
 }
+# The shared claude stub alone in a folder of its own ($T/$CASE), with the build $1; nothing else of a case is needed.
+stubonly() { # <the build>
+  mkdir -p "$T/$CASE" && cp "$SRC/tests/stubs/claude" "$T/$CASE/claude" && printf '%s\n' "$1" > "$T/$CASE/build" # stub: the shared stub itself, run alone
+}
+# Bug: the stub answered --output-format json and stream-json alike, so a session that asked for the wrong one was
+# still read here, and failed only on a real Claude Code: json with --verbose (as a session asks) prints every event
+# in one array, which the stream reader (SESSIONREAD) cannot read, and stream-json with no --verbose is refused.
+t_contractformats() {
+  local d=$T/$CASE j s
+  stubonly : || fail "the fixture could not be made"
+  j=$(cd "$d" && STUB=$d ./claude -p --output-format json --verbose <<<brief | jq -cRn --arg m m --arg e "" --argjson s 0 -f "$SRC/jq/sessionread.jq")
+  [ "$(jq -r '.unread // "read"' <<<"$j")" = 'the session output holds no event' ] \
+    || fail "claude -p --output-format json --verbose, read as a session's stream, was read: $j"
+  (cd "$d" && STUB=$d ./claude -p --output-format stream-json <<<brief > "$d/s.out" 2>&1); s=$?
+  [ "$s" = 1 ] && grep -q 'requires --verbose' "$d/s.out" \
+    || fail "claude -p --output-format stream-json with no --verbose did not fail (exit $s): $(cat "$d/s.out")"
+  [ "$(cd "$d" && STUB=$d ./claude -p --tools "" --output-format json <<<q | jq -r .result)" = OK ] \
+    || fail "claude -p --tools '' --output-format json did not give one result object"
+}
+# Bug: each session wrote its prompt to the one $STUB/brief and its build read it from there, so a build run beside
+# another session (two cards at once) could read the other card's prompt. Each build waits until both sessions have
+# written theirs, so the later write has always happened before either reads: a poll of the other stub, as only two
+# stubs run at once can show the shared file.
+t_stubbrief() {
+  local d=$T/$CASE i
+  stubonly 'i=0; while [ "$(wc -l < "$STUB/sessions")" -lt 2 ] && [ $i -lt 400 ]; do i=$((i + 1)); sleep 0.05; done
+cp "$STUB/brief" "$STUB/read.$ME"' || fail "the fixture could not be made"
+  for i in 1 2; do (cd "$d" && STUB=$d ME=$i ./claude -p --output-format stream-json --verbose <<<"prompt $i" > /dev/null) & done; wait
+  [ "$(cat "$d/read.1" 2>&1)" = 'prompt 1' ] && [ "$(cat "$d/read.2" 2>&1)" = 'prompt 2' ] \
+    || fail "two sessions at once did not each read their own prompt: 1 read '$(cat "$d/read.1" 2>&1)', 2 read '$(cat "$d/read.2" 2>&1)'"
+}

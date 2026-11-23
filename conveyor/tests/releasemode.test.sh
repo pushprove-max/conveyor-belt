@@ -26,9 +26,10 @@ modesetup() {
   mkdir -p "$XDG_CONFIG_HOME/conveyor" && echo '{"testTmpMB": 1}' > "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the fixture could not be made"
   # Each start line also names the pool slot the file was started on, "none" when it holds none: the slot file that
   # CONVEYOR_TEST_SLOT's descriptor is open on (a turn on the run's home slot, <fd>.t, names the home slot's descriptor),
+  # and that slot locked (flock -n on the file fails: a descriptor open on the slot but not holding it names none),
   # then the order test-full.sh started it in: in a parallel run, the file's own log folder, <n>.log, is the nth started.
   for i in 1 2 3 4; do
-    printf '%s\n' "p=${POOL#2:}" 'd=${CONVEYOR_TEST_SLOT:-}; d=${d%%.*}; k=none; for s in 1 2; do [ -n "$d" ] && [ "/dev/fd/$d" -ef "$p/$s" ] && k=$s; done' \
+    printf '%s\n' "p=${POOL#2:}" 'd=${CONVEYOR_TEST_SLOT:-}; d=${d%%.*}; k=none; for s in 1 2; do [ -n "$d" ] && [ "/dev/fd/$d" -ef "$p/$s" ] && ! flock -n "$p/$s" true && k=$s; done' \
       'n=${CONVEYOR_TEST_LOG##*/}; echo "$0 start $EPOCHREALTIME $k ${n%.log}" >> "$STUB/times"' 'sleep 0.5' 'echo "$0 end $EPOCHREALTIME" >> "$STUB/times"' > "$R/t/f$i.test.sh" # sleep: a stand-in test file that runs a while, so files run at once overlap
   done
   git -C "$R" add -f .conveyor/test-full.sh .conveyor/test-share.sh t && git -C "$R" commit -qm 'the suite' && git -C "$R" push -q origin main || fail "the fixture could not be made"

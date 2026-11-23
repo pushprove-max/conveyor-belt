@@ -365,11 +365,14 @@ t_declinefail() {
 t_declinefailrun() {
   # Its last NO-GO is a P2 back after its one fix round (the last review, as a third NO-GO is), in two reviews.
   setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up depth: 2"')]"; provenbug
-  for i in 1 2; do printf '%s\n' '[P2] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done
+  # Review 2 gives the same finding (its id mark, E1) in words of its own, so the review kept is shown to be the last
+  # one: with the same words in both, a block that kept review 1 only passed.
+  printf '%s\n' '[P2] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  printf '%s\n' '[P2] [E1] a.txt:1 wrong word, seen again in review 2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   mkdir -p "$ST/declined.jsonl"
   # loop: the order of the landing, decline() and the block that keeps the review is card()'s own, after afterreview
   loop run >/dev/null 2>&1 || fail "run exited non-zero"
   [ "$(st 'select(.step | IN("landed", "blocked")) | .step' | tr '\n' ' ')" = 'landed blocked ' ] \
     && st 'select(.step == "blocked") | .reason' | grep -q 'could not write its leftover findings to the declined list' || fail "a card whose findings could not be declined did not end landed, then blocked saying so: $(st 'select(.step | IN("landed", "blocked"))')"
-  k=$ST/$(st 'select(.step == "blocked") | .kept'); grep -q 'wrong word' "$k"/*.review || fail "the review of the findings that could not be declined was not kept: $(ls "$k" 2>&1)"
+  k=$ST/$(st 'select(.step == "blocked") | .kept'); grep -q 'seen again in review 2' "$k"/*.review || fail "the last review, of the findings that could not be declined, was not kept: $(ls "$k" 2>&1)"
 }

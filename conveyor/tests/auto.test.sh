@@ -163,16 +163,25 @@ t_autoprofilen() { autoprofile narrow; }
 # Bug (#1168): the engine's pass (lib/needsask.sh needsauto) and the Foreman's both start on a new decision; two passes
 # that read it open at once would each log and answer it. Another pass holds decide.lock and answers d-docs while
 # this one waits: this pass then finds it answered and logs no entry for it. The other pass is a real process holding
-# the lock, as only two processes at once show whether the second waits.
+# the lock, as only two processes at once show whether the second waits. The holder lets go only once this pass's own
+# flock is seen waiting (a process under it), and a pass that ends first fails the case: a fixed pause let a pass that
+# started late find d-docs answered with no lock at all.
 t_autolock() {
-  local out log; autoledger
+  local out log d; autoledger; d=$T/$CASE
   out=$(cd "$R" && loop auto on) || fail "auto on failed: $out"
   log=$(jq -r .log "$ST/auto/mode.json")
-  ( flock 9 && : > "$T/$CASE/held" && sleep 1 && CONVEYOR_MAIN=$R bash "$SRC/../.claude/scripts/decision.sh" answer d-docs 'yes, merge it' > /dev/null ) 9>>"$ST/auto/decide.lock" & # sleep: the holder keeps the lock while this pass starts and waits on it
-  wait_until '[ -e "$T/$CASE/held" ]' || fail "the other pass never took decide.lock"
-  out=$(cd "$R" && loop auto decide 2>&1); wait
+  ( flock 9 && : > "$d/held" && wait_until '[ -e "$d/go" ]' && CONVEYOR_MAIN=$R bash "$SRC/../.claude/scripts/decision.sh" answer d-docs 'yes, merge it' > /dev/null ) 9>>"$ST/auto/decide.lock" &
+  wait_until '[ -e "$d/held" ]' || fail "the other pass never took decide.lock"
+  (cd "$R" && loop auto decide > "$d/decide.out" 2>&1; echo $? > "$d/decide.rc") &
+  # The pass's flock on decide.lock, under the pass, or the pass's end.
+  wait_until "[ -s '$d/decide.rc' ] || ps -A -ww -o pid=,ppid=,args= | awk -v r=$! '{ p[NR] = \$1; pp[NR] = \$2; \$1 = \$2 = \"\"; a[NR] = \$0 }
+    END { t[r] = 1; do { n = 0; for (i = 1; i <= NR; i++) if ((pp[i] in t) && !(p[i] in t)) { t[p[i]] = 1; n = 1 } } while (n)
+      for (i = 1; i <= NR; i++) if ((p[i] in t) && a[i] ~ /^ *flock -w /) f = 1; exit !f }'"
+  [ ! -s "$d/decide.rc" ] || { : > "$d/go"; wait; fail "auto decide ended while another pass held decide.lock: $(cat "$d/decide.out")"; }
+  : > "$d/go"; wait
+  [ "$(cat "$d/decide.rc")" = 0 ] || fail "auto decide failed (exit $(cat "$d/decide.rc")): $(cat "$d/decide.out")"
   [ "$(answer d-docs)" = 'yes, merge it' ] && ! grep -q '^### .* d-docs: ' "$log" \
-    || fail "auto decide did not wait for the pass holding the lock, and decided d-docs again ($out): $(cat "$log")"
+    || fail "auto decide did not wait for the pass holding the lock, and decided d-docs again ($(cat "$d/decide.out")): $(cat "$log")"
 }
 
 # Bug (#1168): auto's mode was only on the Foreman's machine, so the engine on the host that has the record never

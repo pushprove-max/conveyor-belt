@@ -80,8 +80,7 @@ EOF
 # running its tests on #7's stack again: each session of #8 notes whether its <worktree>.ready holds the mark (a line
 # of mark8: true; without the mark, false, or none when the file is gone), and the last one, which brings #8 onto main
 # once #7 gave way, must note true. That session runs only after #8's wait on #7's stack ended, so the note does not
-# hang on how fast either card is. The build tells the sessions apart by their worktree (`broken` there, built8), not
-# by $STUB/brief, which the sessions of #7 and #8 both write at once.
+# hang on how fast either card is. The build tells the sessions apart by their worktree (`broken` there, built8).
 t_givewaystackred() {
   local out rc c7 c8
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; tune '.landBatch = 8'; for i in $(seq 10); do echo "$GO" > "$STUB/review.$i"; done

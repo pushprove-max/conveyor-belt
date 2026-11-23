@@ -233,11 +233,15 @@ t_oldgithooks() {
     || fail "with passing hooks the card did not land, or commit-msg did not get its message: $(cat "$T/$CASE/run.out") $(cat "$STUB/msg")"
 }
 
-# Git 2.36 or newer runs main's commit hooks itself, with `git hook run` (issue 1022 keeps that path as it was).
+# Git 2.36 or newer runs main's commit hooks itself, with `git hook run` (issue 1022 keeps that path as it was). An
+# older git (Ubuntu 22.04's 2.34) has no `git hook` (`git hook -h` exits 129 where it is there): the landing runs the
+# hook files itself (t_oldgithooks), so there only the landing is checked.
 t_githookrun() {
   setup '[]'
   real=$(command -v git); printf '%s\n' '#!/usr/bin/env bash' "[ \"\$1\" != hook ] || echo \"\$*\" >> '$STUB/hookcalls'" "exec $real \"\$@\"" > "$STUB/git"; chmod +x "$STUB/git"
   flcard 7 'echo two >> a.txt'; flland 7
+  "$real" hook -h >/dev/null 2>&1
+  if [ $? != 129 ]; then [ "$(flout)" = "land: 0" ] || fail "with a git that has no git hook the card did not land: $(cat "$T/$CASE/run.out")"; return; fi
   [ "$(flout)" = "land: 0" ] && grep -qx 'hook run --ignore-missing pre-commit --' "$STUB/hookcalls" \
     && grep -q '^hook run --ignore-missing commit-msg -- .*c7-7\.msg$' "$STUB/hookcalls" \
     || fail "the landing did not run its hooks with git hook run: $(cat "$STUB/hookcalls" 2>&1) $(cat "$T/$CASE/run.out")"

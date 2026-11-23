@@ -69,6 +69,9 @@ t_readyclaim() {
   pass 7 100; pass 8 200; set7 '"held":true'; rm -f "$CARDS/c8-8.claim"
   git -C "$CARDS/c7-7" diff --cached --binary --no-renames > "$CARDS/c7-7.bpatch"; git -C "$CARDS/c7-7" rev-parse HEAD > "$CARDS/c7-7.lent"
   echo mate > "$CARDS/c7-7/z.txt"; git -C "$CARDS/c7-7" add -A
+  # Main moves under the batch (its third line, in the context of #7's patch, apart from #8's change) and the lent
+  # worktree's HEAD with it: #7's own change is read on the commit it was lent on, not on HEAD, where it does not apply.
+  sed -i 3s/3/main/ "$R/a.txt"; git -C "$R" commit -qam "main moves under the batch"; git -C "$CARDS/c7-7" reset -q --soft main
   w=$(cl 8) && [ "$(jq -r .on <<<"$w")" = c7-7 ] && [ "$(jq -c .passed "$CARDS/c7-7.claim")" = null ] \
     || fail "#8, ready after #7, went past #7 while #7's batch ran: $w $(cat "$CARDS/c7-7.claim")"
 }

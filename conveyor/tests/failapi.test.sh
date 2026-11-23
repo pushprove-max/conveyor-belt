@@ -89,11 +89,13 @@ t_apifresh() {
   jq -en --argjson first "$(sed -n 1p "$STUB/calls")" --slurpfile u "$STUB/marked" '$u[0] >= $first + 2 and $u[0] < $first + 4' >/dev/null \
     || fail "a refused session did not mark the API error fresh for 5 times apiPause: refused at $(sed -n 1p "$STUB/calls"), fresh until $(cat "$STUB/marked")"
   # The loop's pick (run(), lib/run.sh) is held while the error is fresh: marked fresh for 3 s, the card is picked no sooner.
-  echo 0 > "$STUB/refuse"; jq -n 'now + 3' > "$ST/apierror"; cp "$ST/apierror" "$STUB/marked"
+  # The mark is a whole second, as the pick's time is: against a fractional one, a pick in the mark's own second, up
+  # to a second early, passed the check.
+  echo 0 > "$STUB/refuse"; jq -n 'now + 3 | ceil' > "$ST/apierror"; cp "$ST/apierror" "$STUB/marked"
   # loop: the pick is held inside run()'s turn, which no function call short of the loop runs
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ "$(st 'select(.step | IN("blocked", "landed")) | .step')" = landed ] || fail "the card did not land: $(st '[.step, .reason] | join(" ")' | tr '\n' ,)"
-  jq -en --argjson p "$(st 'select(.step == "picked") | .time | fromdate')" --slurpfile u "$STUB/marked" '$p >= ($u[0] | floor)' >/dev/null \
+  jq -en --argjson p "$(st 'select(.step == "picked") | .time | fromdate')" --slurpfile u "$STUB/marked" '$p >= $u[0]' >/dev/null \
     || fail "the loop picked a card while the API error was fresh: fresh until $(cat "$STUB/marked"), picked at $(st 'select(.step == "picked") | .time')"
 }
 # Bug: only the pick was held, so a card picked before the outage started its session into it: the first review here

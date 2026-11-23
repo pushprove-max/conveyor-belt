@@ -95,7 +95,9 @@ t_mainred() {
   ( eng 'LIVE=0.1; began c8 8 test && mainwait "$CONVEYOR_CARDS/c8" '"$s"' d.test "d.test: late"; echo "ended $?"' > "$STUB/mw.out" 2>&1 ) & mw=$!
   wait_until "grep -qs 'waiting for main to change: d.test, d.test: late fail on main at ${s:0:12} too' '$T/$CASE/cards/c8.live' && [ -e '$T/$CASE/cards/c8.idle' ]" 'cat "$STUB/mw.out"' \
     || fail "the card waiting for main did not say so, or did not mark itself waiting: the loop would count it against the cap"
-  snap=$(loop snapshot --fresh 2>/dev/null)
+  # The snapshot's clock is c7's landing (CONVEYOR_NOW): metrics.today is the local day of the clock, so a case that ran
+  # past midnight between c7's landing and this snapshot counted no failure today.
+  snap=$(CONVEYOR_NOW=$(st 'select(.card == "c7" and .step == "landed") | .time | fromdate') loop snapshot --fresh 2>/dev/null)
   [ "$(jq -r '.belt[] | select(.card == "c8") | .live.at' <<<"$snap")" = "$(jq -r .at "$T/$CASE/cards/c8.live")" ] \
     || fail "the snapshot does not give when the wait for main began: $(jq -c ".belt" <<<"$snap")"
   [ "$(jq -c '.metrics.today.testFailures' <<<"$snap")" = '{"card":0,"main":4,"flaky":0,"mainSec":12}' ] \

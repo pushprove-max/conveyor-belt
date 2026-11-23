@@ -5,21 +5,33 @@
 #   claude-rc      the exit code of a call with no tools, else 0 (the answer is still printed)
 #   claude-delay   seconds a call with no tools waits before it answers
 #   claude-usage   the stream a session prints (the lines in the file), else a result with 10/20/999/5 tokens
-# --output-format json: one JSON object with `result`; stream-json: the stream's result line; text: the text alone.
+# Each --output-format answers in the shape Claude Code prints, so a call that asks for the wrong one is not read:
+# json, the one result object (with --verbose, every event in one JSON array); stream-json, which fails with no
+# --verbose as Claude Code does, an init event and then the result line; text, the text alone.
 # --version is doctor's requirement check. A call with no tools is no session; any other call is a session: its
-# prompt is kept in $STUB/brief, its arguments are added to $STUB/sessions, and $STUB/build runs in the worktree.
+# prompt is kept in a file of its own, which its $STUB/build reads as "$STUB/brief" (two sessions at once each read
+# their own), and is copied to $STUB/brief for a case that reads it after the run; its arguments are added to
+# $STUB/sessions, and $STUB/build runs in the worktree.
 [ "${1:-}" != --version ] || { echo '2.1.322 (Claude Code)'; exit 0; }
+fmt=text; case " $* " in *" --output-format stream-json "*) fmt=stream ;; *" --output-format json "*) fmt=json ;; esac
+case " $* " in *" --verbose "*) [ $fmt != json ] || fmt=jsonall ;;
+  *) [ $fmt != stream ] || { echo 'Error: When using --print, --output-format=stream-json requires --verbose' >&2; exit 1; } ;; esac
+answer() { # <the result line>: printed in the shape $fmt asks for (a text answer is printed by the caller)
+  case $fmt in
+    stream) echo '{"type":"system","subtype":"init"}'; printf '%s\n' "$1" ;;
+    jsonall) jq -c '[{type: "system", subtype: "init"}, .]' <<<"$1" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
 case " $* " in *" --tools  "*) cat > /dev/null
   [ ! -f "$STUB/claude-delay" ] || sleep "$(cat "$STUB/claude-delay")"
   a=$(cat "$STUB/claude-answer" 2>/dev/null || echo OK)
-  case " $* " in
-    *" --output-format json "* | *" --output-format stream-json "*)
-      jq -cn --arg r "$a" '{type: "result", is_error: false, subtype: "success", result: $r, num_turns: 1}' ;;
-    *) printf '%s\n' "$a" ;;
-  esac
+  if [ $fmt = text ]; then printf '%s\n' "$a"
+  else answer "$(jq -cn --arg r "$a" '{type: "result", is_error: false, subtype: "success", result: $r, num_turns: 1}')"; fi
   exit "$(cat "$STUB/claude-rc" 2>/dev/null || echo 0)" ;; esac
-cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"; . "$STUB/build"
-# A session asked for no stream and no JSON gets text, as Claude Code prints it; json prints the one result line.
-case " $* " in *" --output-format stream-json "* | *" --output-format json "*) ;; *) echo done; exit 0 ;; esac
+STUB_BRIEF=$STUB/session-brief.$$; cat > "$STUB_BRIEF"; cp "$STUB_BRIEF" "$STUB_BRIEF.last" && mv "$STUB_BRIEF.last" "$STUB/brief"
+echo "$*" >> "$STUB/sessions"; eval "$(sed 's|\$STUB/brief"|$STUB_BRIEF"|g' "$STUB/build")"
+# A session asked for no stream and no JSON gets text, as Claude Code prints it.
+[ $fmt != text ] || { echo done; exit 0; }
 [ ! -f "$STUB/claude-usage" ] || { cat "$STUB/claude-usage"; exit 0; }
-echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'
+answer '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'

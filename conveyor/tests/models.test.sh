@@ -287,7 +287,10 @@ t_opencodeland() {
   echo "$GO" > "$STUB/review.1"
   loop run --only 7 > "$STUB/log" 2>&1 || fail "run of #7 exited non-zero: $(cat "$STUB/log")"
   [ -n "$(st 'select(.issue == 7 and .step == "landed") | .sha')" ] || fail "#7 did not land: $(st 'select(.issue == 7)')"
-  tl=$(loop snapshot --fresh | jq -c '[.landed[] | select(.issue == 7) | .metrics.timeline[] | select(.step == "review") | [.usd, .unpriced]]')
+  # The snapshot's clock is #7's landing (CONVEYOR_NOW): .landed holds the cards landed on the clock's local day, so a
+  # snapshot read past midnight after the landing left #7 out.
+  tl=$(CONVEYOR_NOW=$(st 'select(.issue == 7 and .step == "landed") | .time | fromdate') loop snapshot --fresh \
+    | jq -c '[.landed[] | select(.issue == 7) | .metrics.timeline[] | select(.step == "review") | [.usd, .unpriced]]')
   [ "$tl" = '[[0.75,null]]' ] || fail "the landed timeline does not price the OpenCode review at the cost OpenCode reported: $tl"
 }
 

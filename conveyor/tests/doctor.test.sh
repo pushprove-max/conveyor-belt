@@ -178,12 +178,19 @@ t_doctordamaged() {
 }
 # Bug: on Claude Code before 2.1.329 a card's guard hooks fail open (it ignores card-settings.json's "onFailure":
 # "block"), and doctor said nothing. Doctor names it on 2.1.328 and says nothing of the guards on 2.1.330.
+# On macOS doctor reads the claude first on PATH once Homebrew's bin is put first (p_path), so with the stub merely
+# first on PATH a Mac with Claude Code in Homebrew's bin had its version read. The case makes the Homebrew prefix its
+# own ($T/$CASE/brew: p_brewprefix takes it from the gtimeout first on PATH), with the real prefix's GNU and openssl
+# folders under it, and puts the stub in its bin.
 t_doctorguards() {
-  local X out v c=$T/$CASE/old/claude; doctordone; mkdir -p "$T/$CASE/old"
+  local X out v pre d b=$T/$CASE/brew c=$T/$CASE/brew/bin/claude; doctordone; mkdir -p "$b/bin" "$b/opt"
+  if p_darwin; then pre=$(p_brewprefix); ln -s "$pre/bin/gtimeout" "$b/bin/gtimeout" || fail "the Homebrew prefix was not made"
+    for d in coreutils findutils gnu-sed grep openssl@3; do [ ! -d "$pre/opt/$d" ] || ln -s "$pre/opt/$d" "$b/opt/$d" || fail "the Homebrew prefix was not made"; done
+  fi
   for v in 2.1.328 2.1.330; do
-    # stub: the sample's claude ($G/claude) at the version under test, first on PATH; any other call goes to it.
+    # stub: the sample's claude ($G/claude) at the version under test, in the case's Homebrew bin; any other call goes to it.
     printf '#!/bin/sh\n[ "$1" != --version ] || { echo "%s (Claude Code)"; exit 0; }\nexec "%s" "$@"\n' "$v" "$G/claude" > "$c" && chmod +x "$c" || fail "the claude stub was not made"
-    out=$(cd "$S" && PATH=$T/$CASE/old:$PATH bash "$X" doctor 2>&1)
+    out=$(cd "$S" && PATH=$b/bin:$PATH bash "$X" doctor 2>&1)
     if [ $v = 2.1.328 ]; then
       grep -qxF "missing: Claude Code 2.1.329 or later for the card guards (found 2.1.328 at $c): card guards need 2.1.329 or later, as an older one lets a tool call through when a guard fails to run; fix: run $c update" <<<"$out" \
         || fail "doctor did not name 2.1.328 as too old for the card guards: $out"
