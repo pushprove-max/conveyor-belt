@@ -306,6 +306,19 @@ test('the Board: a move in the queue that keeps the moved issue in place keeps a
   assert.deepEqual(w.posts.pop(), { url: 'control', body: { action: 'order', args: ['20', '90', '21'], repo: 'sample' } }, 'saved order [20, 90, 21], #20 dragged onto #21: #90 stays after #20');
 });
 
+// Bug: the newer pin followed the issue moved even when it moved down past a pin the record had below the newer pin,
+// so with saved order [20, 90, 21, 22] a drag of #20 onto #22 sent 21 20 90 22, and the host saved #90 below #21.
+test('the Board: a move down in the queue keeps a newer pin above a pin that was below it', async () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  d.panels.board.data.control.order = [20, 90, 21, 22];
+  d.panels.board.data.open = { issues: [20, 21, 22].map((issue) => ({ issue })) };
+  deliver(w, d);
+  dragTo(w, bcard(w, 20), bcard(w, 22));
+  await settle();
+  assert.deepEqual(w.posts.pop(), { url: 'control', body: { action: 'order', args: ['90', '21', '20', '22'], repo: 'sample' } }, 'saved order [20, 90, 21, 22], #20 dragged onto #22: #90 stays above #21');
+});
+
 test('the Board at phone width: Hold, Release, Move up and Move down on each card, and the arrow keys', async () => {
   const w = boot({ tab: 'control' });
   deliver(w, full());
