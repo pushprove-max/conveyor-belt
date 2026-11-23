@@ -65,3 +65,16 @@ t_sweweekone() {
   [ "$o" = '{"conveyor":70,"agent":70,"shared":true}' ] \
     || fail "swe_weeks 1 1 fresh, a conveyor and another arm on the builder's account (askings 30%, then 31%), does not give one share left for both: $o"
 }
+
+# Bug (#1454 follow-up): with both roles on a proxy the conveyor guard reads no account, and that empty list matched
+# the default login's empty name, so the other arm took the kept start reading (30%) in place of asking again (40%).
+t_sweweekproxy() {
+  swe; local o
+  jq -c 'del(.account)' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" || fail "the default account was not set"
+  tune '.models.claudeProxy = {baseUrl: "http://192.0.2.1:4141", roles: {builder: "proxy", reviewer: "proxy"}}'
+  export CONVEYOR_LIMIT_CMD='echo "{\"seven_day\":{\"utilization\":$(cat "$SWE_FX/n" 2>/dev/null || echo 30)}}"'
+  o=$(set -- bench; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards HERE=$SRC; . "$SRC/lib/paths.sh" && . "$SRC/lib/records.sh" && . "$SRC/lib/prompts.sh" \
+    && . "$SRC/lib/control.sh" && tunables && . "$SRC/bench/swe.sh" && swe_weeks '' 1 > /dev/null && echo 40 > "$SWE_FX/n" && swe_weeks 1 1 fresh 2>&1)
+  [ "$o" = '{"conveyor":null,"agent":60,"shared":false}' ] \
+    || fail "swe_weeks 1 1 fresh, both roles on a proxy and the default account (start reading 30%, then 40%), does not give the other arm 60 left: $o"
+}

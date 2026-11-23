@@ -249,7 +249,9 @@ swe_weeks() { # <conveyor: non-empty when the run has a conveyor arm> <agent: no
   local c='' a='' s=false o=false fa=${3:-}
   if ctlread 2>/dev/null; then
     [[ $'\n'$(subaccts "$CTL_V" | cut -d ' ' -f 2-)$'\n' == *$'\n'"$(ctlacct "$CTL_V")"$'\n'* ]] && o=true
-    [ -z "$1" ] || { c=$(swe_pct "$CTL_V" '' "${3:-}"); [ "$o:${3:-}" != true:fresh ] || fa=last; }
+    # The other arm takes the conveyor guard's asking only when it gave a reading: with every role on an API route, no
+    # account is read and the empty list matches the default login's empty name, so lastread would give a stale one.
+    [ -z "$1" ] || { c=$(swe_pct "$CTL_V" '' "${3:-}"); [ "$o:${3:-}" != true:fresh ] || [ -z "$c" ] || fa=last; }
     [ -z "$2" ] || a=$(swe_pct "$CTL_V" 1 "$fa")
     if [ -n "$c" ] && [ "$c" = "$a" ] && [ "$o" = true ]; then s=true; fi
   fi
