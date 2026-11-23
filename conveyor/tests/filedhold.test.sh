@@ -179,6 +179,21 @@ t_filedlink() {
   loop control start held >/dev/null; echo '[ "$4" != open ] || exit 1' > "$STUB/list-cmd"
   out=$(loop control start queue filed 2>&1); [ $? = 1 ] && [ "$(jq -r .start "$C")" = held ] || fail "Queue with the open issues unread: $out $(cat "$C")"
 }
+# Bug: a command that files an issue and also links #4, opened in the queue before the filing, left #4 queued (as it
+# should: the command did not file it) but told the Foreman that #4 was released already, which the owner never did.
+# filed says #4 was opened before the filing, and holds the issue the command filed.
+t_filedolder() {
+  filedsetup
+  cmd='gh issue create --title a --body a'
+  hook filing "$cmd" >/dev/null
+  o=$(gh issue create --title a --body a) || fail "the stub filed no issue"
+  a=${o##*/}; o="$o"$'\n'"${o%/*}/4"
+  out=$(hook filed "$cmd" "$o"$'\n')
+  [ "$(jq -c .held "$C")" = "[$a]" ] || fail "filed with output '$o' did not hold #$a alone: $(cat "$C")"
+  jq -e '.hookSpecificOutput.additionalContext | test("released already") | not' <<<"$out" >/dev/null \
+    && jq -e '.hookSpecificOutput.additionalContext | test("opened before this filing.*\\(r: 4\\)")' <<<"$out" >/dev/null \
+    || fail "filed with output '$o' (#4 opened in the queue before the filing) did not tell the Foreman #4 was opened before it: $out"
+}
 # Bug (issue 1333): the filing hooks sent the running loop nothing, so an issue filed and released already (the
 # owner's yes given before filed ran, as in t_filedlink) was picked only once the loop's idle timer (here 100 s)
 # ended. GitHub lists the issue only once the command has ended (the stub's list-filed), after the release, so here

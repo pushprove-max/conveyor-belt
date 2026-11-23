@@ -204,6 +204,9 @@ hooksmissing() { # <folder>
 take() { # [wait]
   ( if [ "${1:-}" = wait ]; then flock -w 600 9 || { echo "conveyor: another take of the plugin's main did not end" >&2; exit 1; }
     else flock -n 9 || { echo "conveyor: another take of the plugin's Conveyor runs now: this one ends"; exit 0; }; fi
+    # The lock holds the commit this take read and its name, for stalenote(): empty until taken() reads the remote,
+    # as a take before (one that failed) left its own there.
+    : > "$ENGINE.lock" || exit 1
     taken ) 9>>"$ENGINE.lock"
 }
 # Whether a take of this project runs now (holds ENGINE's lock). The probe holds the lock for an instant: a take that
@@ -214,7 +217,9 @@ taken() {
   packget plugin.follow f || return 1; [ -n "$f" ] || return 0
   # Listed for the prune of every other project of this machine, whose host file may not name this one.
   grep -qxF "$MAIN" "$FOLLOWERS" 2>/dev/null || { mkdir -p "${FOLLOWERS%/*}" && echo "$MAIN" >> "$FOLLOWERS"; } || return 1
+  # ENGINE's lock (emptied by take()) gets the commit this take read and its name, for stalenote().
   IFS=$'\t' read -r u h n < <(headof "$f") && [ -n "$h" ] || { echo "conveyor: the plugin's $f could not be read from its remote" >&2; return 1; }
+  printf '%s\t%s\n' "$h" "$n" > "$ENGINE.lock" || return 1
   # The commit read is kept (head) when it changed, so stalenote() can say, with no remote read, that a newer one is
   # there to take.
   if [ "$h" != "$(jq -r '.head.commit // ""' "$ENGINE" 2>/dev/null)" ]; then
@@ -343,15 +348,26 @@ behind() { # <commit> <branch>
 # command that takes it now. The newest commit is read from the remote with `live` (headof), else (or when
 # that read fails) the one the last take read (ENGINE's head). Nothing for a pinned pack, one with no commit taken
 # here, or when the newest commit is the one it runs or the one refused (doctor and Needs you name that one). While a
-# take of this project runs (taking), the line says so in place of the old engine.
+# take of this project runs (taking), the line says so in place of the old engine, naming the commit the take read
+# (none while it reads the remote).
 stalenote() { # [live]
-  local f c h n w ok why
+  local f c h n w ok why th tn
   packget plugin.follow f 2>/dev/null && [ -n "$f" ] || return 0
   c=$(jq -r '.commit // empty | strings' "$ENGINE" 2>/dev/null) && [ -n "$c" ] || return 0
   { [ "${1:-}" = live ] && IFS=$'\t' read -r _ h n < <(headof "$f") && [ -n "$h" ]; } \
     || IFS=$'\t' read -r h n < <(jq -r '.head | objects | [.commit, .name] | select(all(type == "string")) | @tsv' "$ENGINE" 2>/dev/null) || return 0
   [ -n "$h" ] && [ "$h" != "$c" ] && [ "$h" != "$(jq -r '.refused.commit // ""' "$ENGINE" 2>/dev/null)" ] || return 0
-  ! taking || { echo "Conveyor takes the plugin's $n now: commit ${h:0:7}; the project runs commit ${c:0:7} until the take ends"; return 0; }
+  # The commit a running take installs is the one it read (in ENGINE's lock, taken()), not the remote's newest, which
+  # may have moved since, nor ENGINE's head, which a take before may have left; none is named while it reads the
+  # remote. A take whose commit is the project's, or the refused one (the take refused it and runs on, to its prune,
+  # holding the lock), installs nothing.
+  if taking; then
+    { IFS=$'\t' read -r th tn < "$ENGINE.lock"; } 2>/dev/null || th=''
+    if [ -z "$th" ]; then echo "Conveyor takes the plugin's $n now; the project runs commit ${c:0:7} until the take ends"; return 0
+    elif [ "$th" != "$c" ] && [ "$th" != "$(jq -r '.refused.commit // ""' "$ENGINE" 2>/dev/null)" ]; then
+      echo "Conveyor takes the plugin's $tn now: commit ${th:0:7}; the project runs commit ${c:0:7} until the take ends"; return 0
+    fi
+  fi
   w=$(jq -r '.worked // empty | strings' "$ENGINE" 2>/dev/null)
   IFS=$'\t' read -r ok why < <({ cat "$ENGINELOG" 2>/dev/null || :; } | jq -nRr --arg w "$w" '[inputs | fromjson? | objects] as $l
     | [([$l[] | select(.exit == 0) | .time | strings] + [$w] | map(select(. != "")) | max // "none in the log"),

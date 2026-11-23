@@ -365,6 +365,9 @@ gets any newer commit. While a take runs, the same places show this line in plac
 Conveyor takes the plugin's main now: commit 9f8e7d6; the project runs commit 0543507 until the take ends
 ```
 
+The line names no commit until the take reads the newest commit from the remote. When the take refuses that commit,
+the places show the old-engine line again while the take finishes.
+
 When a new commit or release fails its check, or lacks a hook that the project's `.claude/settings.json` calls through
 `shim.sh`, the project stays on the engine it has. Needs you on the Board names the commit and the reason. The entry
 goes when a later commit or release is taken.

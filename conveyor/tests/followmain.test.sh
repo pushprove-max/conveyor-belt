@@ -379,6 +379,40 @@ t_followprune() {
   [ ! -e "$V/$A" ] && [ -d "$V/$C1" ] && [ -d "$V/$C2" ] || fail "the install of a card that ended was kept: $(ls "$V")"
 }
 
+# Bug (R260): while a take installs commit B (the commit it read, kept in ENGINE's lock), doctor's line (stalenote
+# live) named the remote's newest commit, C, as the one being taken. It names B. Calls stalenote() with the take and
+# the remote stood in for (taking, headof), as only the line is under test.
+t_followtakinghead() {
+  setup '[]'; tune '.plugin = {follow: "main"}'
+  local a b c; a=$(printf 'a%.0s' {1..40}); b=$(printf 'b%.0s' {1..40}); c=$(printf 'c%.0s' {1..40})
+  fx_in "jq -cn '{commit: \"$a\", head: {commit: \"$b\", name: \"main\"}}' > \"\$ENGINE\"; printf '%s\tmain\n' $b > \"\$ENGINE.lock\"
+    taking() { true; }; headof() { printf 'u\t%s\tmain\n' $c; }; stalenote live"
+  [ "$(cat "$T/$CASE/run.out")" = "Conveyor takes the plugin's main now: commit bbbbbbb; the project runs commit aaaaaaa until the take ends" ] \
+    || fail "with ENGINE {commit: a..., head: b...}, a take of b... running and the remote at c...: doctor's line is not the take of b: $(cat "$T/$CASE/run.out")"
+}
+# Bug: a take that failed to install B left B in ENGINE's head and lock; while the next take read the remote, now at
+# C, doctor said Conveyor takes B, from the moment the next take held the lock until it had read the remote (its
+# pack and followers reads too). take() empties the lock as it takes it, so the line given in taken(), whose stand-in
+# calls stalenote before anything else, names no commit.
+t_followtakingread() {
+  setup '[]'; tune '.plugin = {follow: "main"}'
+  local a b; a=$(printf 'a%.0s' {1..40}); b=$(printf 'b%.0s' {1..40})
+  fx_in "jq -cn '{commit: \"$a\", head: {commit: \"$b\", name: \"main\"}}' > \"\$ENGINE\"; printf '%s\tmain\n' $b > \"\$ENGINE.lock\"
+    taking() { true; }; taken() { stalenote; }; take"
+  [ "$(cat "$T/$CASE/run.out")" = "Conveyor takes the plugin's main now; the project runs commit aaaaaaa until the take ends" ] \
+    || fail "with ENGINE {commit: a..., head: b...} and lock b... left by a failed take, the line while the next take reads the remote: $(cat "$T/$CASE/run.out")"
+}
+# Bug: a take that refused its head B runs on to its prune with the lock held; with the remote moved on to C, doctor
+# said Conveyor takes B, which it had refused. It gives the old-engine line, with the remote's C.
+t_followtakingrefused() {
+  setup '[]'; tune '.plugin = {follow: "main"}'
+  local a b c; a=$(printf 'a%.0s' {1..40}); b=$(printf 'b%.0s' {1..40}); c=$(printf 'c%.0s' {1..40})
+  fx_in "jq -cn '{commit: \"$a\", head: {commit: \"$b\", name: \"main\"}, refused: {commit: \"$b\"}}' > \"\$ENGINE\"; printf '%s\tmain\n' $b > \"\$ENGINE.lock\"
+    taking() { true; }; headof() { printf 'u\t%s\tmain\n' $c; }; stalenote live"
+  [[ $(cat "$T/$CASE/run.out") == "Conveyor runs an old engine here: commit aaaaaaa, and the plugin's main is at ccccccc "* ]] \
+    || fail "with ENGINE {commit: a..., head: b..., refused: b...}, a take of b... running and the remote at c...: doctor's line is not the old engine at c: $(cat "$T/$CASE/run.out")"
+}
+
 # Bugs: each take of a new commit clones the plugin's whole repository again (minutes for one with large media), and
 # every other take queues behind it, so the install stays behind and the old-engine line never clears.
 t_followfetch() {

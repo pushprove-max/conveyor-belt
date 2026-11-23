@@ -280,13 +280,17 @@ challenger() {
     || { echo "conveyor: card $1: not on the challenger: its account is at the weekly limit guard" >&2; PICKSEAT=''; return 1; }
 }
 # The blocked trial cards, of every issue: this issue's, and the group's (a drop at two), counted from the owner's
-# last decision on the group (`control pick`): after keep, the blocks before it no longer drop the challenger. Prints
-# why the card gets no trial for them, else nothing; fails when the records cannot be read.
+# last decision on the group (`control pick`): after keep, the blocks before it no longer drop the challenger. A
+# blocked line that the card's own later landed or pushed line follows (a landed card whose process died, blocked and
+# then pushed) is no block, as the snapshot's trials.dropped does not count it either. Prints why the card gets no
+# trial for them, else nothing; fails when the records cannot be read.
 trialblocked() { # <issue> <group> <control record>
   local lines
   lines=$({ stdb ask lines cards; stdb ask lines retried; } 2>/dev/null) || return 1
   jq -rs --argjson n "$1" --arg g "$2" --argjson c "$3" '($c.picks[$g].at // "") as $at
-    | [.[] | objects | select(.step == "blocked" and .pick.trial == true)]
+    | [.[] | objects] as $a
+    | (reduce range($a | length) as $i ({}; if $a[$i].step | IN("landed", "pushed") then .[$a[$i].card | tostring] = $i else . end)) as $ok
+    | [range($a | length) as $i | $a[$i] | select(.step == "blocked" and .pick.trial == true and $i > ($ok[.card | tostring] // -1))]
     | if any(.[]; .issue == $n) then "a trial card of the issue was blocked: its retry builds on the default"
       elif ([.[] | select(.pick.group == $g and (.time // "") > $at) | .card] | unique | length) >= 2 then "two trial cards of the group were blocked: its challenger is dropped"
       else "" end' <<<"$lines"

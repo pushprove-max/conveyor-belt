@@ -79,22 +79,33 @@ t_startqueue() {
 # Issue 330: the filing hook's hold (`control adopt`, foreman.sh filed) comes after the command that filed the issues.
 # A release given in between stays: `control hold` held #6 again, a few seconds after the owner said yes. The other
 # issues filed in the same command (#7, #8) are held; #4, opened before the filing, and #9, held and released before,
-# are not.
+# are not. The filing hook marks the record (`control filing on`) before the command runs, as foreman.sh filing does.
 t_startadopt() {
   startsetup
-  ctl start held >/dev/null; ctl hold 9 >/dev/null; ctl release 6 9 >/dev/null
+  ctl start held >/dev/null; ctl filing on >/dev/null; ctl hold 9 >/dev/null; ctl release 6 9 >/dev/null
+  [ "$(jq -c .filing "$C")" = 4 ] || fail "filing on did not mark the newest issue, #4: $(cat "$C")"
   add "$(issue 6 2000-01-01T00:00:00Z P2),$(issue 7 2000-01-01T00:00:00Z P2),$(issue 8 2000-01-01T00:00:00Z P2),$(issue 9 2000-01-01T00:00:00Z P2)"
   # The record saved, not only the one printed, holds all three filed and unreleased.
   [ "$(ctl adopt 4 6 7 8 9 | jq -c '[.held, .startSeen]')" = '[[7,8],[6,7,8,9]]' ] && [ "$(jq -c '[.held, .startSeen]' "$C")" = '[[7,8],[6,7,8,9]]' ] \
     || fail "adopt: $(cat "$C")"
   # Released after the hold, #7 stays released when the hook's hold is asked again.
   ctl release 7 >/dev/null; ctl adopt 7 8 >/dev/null; [ "$(jq -c .held "$C")" = '[8]' ] || fail "adopt after a release: $(cat "$C")"
-  # The owner selects Queue while the command files more: #10, filed after the span ended, is held too, as the hook
-  # filed it; held only up to the span's end, it was left open to be picked.
+  # The owner selects Queue while the command files more: #10, filed after the span ended (but after the filing
+  # mark), is held too, as the hook filed it; held only up to the span's end, it was left open to be picked.
   ctl start queue >/dev/null; add "$(issue 10 2000-01-01T00:00:00Z P2)"
   [ "$(jq -c .startHeld "$C")" = '[{"from":4,"to":9}]' ] && ctl adopt 10 >/dev/null && [ "$(jq -c .held "$C")" = '[8,10]' ] \
     || fail "an issue filed after Queue was selected was not held: $(cat "$C")"
   out=$(ctl adopt 0); [ $? = 2 ] || fail "adopt 0 was not refused: $out"
+}
+# Bug (R247): adopt held any issue opened after a span's start, with no bound at the span's end, so a command that
+# filed #11 and printed the url of #10 (opened in the queue between two Held spans) held #10 too. Only #11 is held.
+t_startadoptold() {
+  startsetup
+  ctl start held >/dev/null; add "$(issue 5 2000-01-01T00:00:00Z P2)"; ctl start queue >/dev/null
+  add "$(issue 10 2000-01-01T00:00:00Z P2)"; ctl start held >/dev/null; ctl filing on >/dev/null
+  add "$(issue 11 2000-01-01T00:00:00Z P2)"
+  [ "$(jq -c '[.startHeld, .filing]' "$C")" = '[[{"from":4,"to":5},{"from":10,"to":null}],10]' ] || fail "the spans and the filing mark: $(cat "$C")"
+  [ "$(ctl adopt 10 11 | jq -c .held)" = '[11]' ] || fail "adopt 10 11, #10 opened in the queue between the spans, did not hold #11 alone: $(cat "$C")"
 }
 # Issue 453: under Queue, every new issue was picked, whoever opened it, so text from anyone with a GitHub account
 # reached a card session with write tools. Bug: an issue whose author is NONE or CONTRIBUTOR (someone outside the

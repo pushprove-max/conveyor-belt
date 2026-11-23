@@ -339,6 +339,22 @@ t_pickjudgelists() {
     || fail "the judge was not given the chosen models of each seat at their ranges: $(cat "$STUB/pick-asked")"
 }
 
+# Bug (R275): the judge's price table left out the pack's price aliases, so a builder named by its alias
+# (anthropic/claude-sonnet-4-6) had no price, and the clamp fell back to the first chosen model (Opus 5.5), not the
+# model the alias names; and the judge's prompt gave a reviewer allowed by its alias `no price`.
+t_pickjudgealias() {
+  seatsetup "[$(issue 7 2026-01-01)]"
+  tune '.models.allowed.claude += ["claude-opus-5-5", "claude-sonnet-4-6"] | .models.allowed."claude-reviewer" += ["anthropic/claude-sonnet-4-6"] | .pick = {builder: {"claude-opus-5-5": {}, "claude-sonnet-4-6": {}}}
+    | .prices = {"claude-opus-5-5": {input: 5, output: 25, cacheRead: 0}, "claude-sonnet-4-6": {input: 3, output: 15, cacheRead: 0, aliases: ["anthropic/claude-sonnet-4-6"]}}'
+  loop control rules pick=on >/dev/null || fail "control rules pick=on was refused"
+  pjask 'anthropic/claude-sonnet-4-6 medium' 'x2 high' 'j2 max'
+  fx_in "N=7; $PJ"
+  [ "$(sed -n 2p "$T/$CASE/run.out")" = 'claude-sonnet-4-6 medium' ] \
+    || fail "the judge's builder anthropic/claude-sonnet-4-6 (an alias of claude-sonnet-4-6) was not clamped to claude-sonnet-4-6: $(cat "$T/$CASE/run.out")"
+  grep -qx -- '- anthropic/claude-sonnet-4-6 (claude; efforts: low, medium, high, xhigh, max; $3 input, $15 output per million tokens)' "$STUB/pick-asked" \
+    || fail "the judge's prompt did not price the reviewer anthropic/claude-sonnet-4-6 as claude-sonnet-4-6: $(grep -- '^- ' "$STUB/pick-asked")"
+}
+
 # Bugs: a seat the owner set for the issue (`control card`) was moved to the judge's; a trial card left its challenger
 # for the judge's builder, or did not take the judge's effort fitted to the builder's range (xhigh: high), or its
 # reviewer was moved off the project's (a trial card's review stays at the defaults); or its choice took that effort,
@@ -458,6 +474,28 @@ t_pickjudgeguard() {
   [ "$(sed -n '2,4p' "$T/$CASE/run.out" | paste -sd,)" = 'm medium,x medium,j medium' ] && head -n 1 "$T/$CASE/run.out" | jq -e '.guard | test("weekly limit guard")' >/dev/null \
     || fail "the judge's seats moved the card onto an account at the guard, or the pick does not say why not: $(cat "$T/$CASE/run.out")"
   recok "$ST/cards.jsonl" "a pick held by the guard"
+}
+
+# Bug (R243): a card's seat was checked against the host's saved CLI report alone, so a Codex model Codex took on since
+# that (fresh) report was refused until `conveyor.sh clis` ran. Codex is read afresh first. The saved report has px
+# false: with no px, hostclis() reads Codex again on any read, and the case would pass without the refresh.
+t_cardseatfresh() {
+  seatsetup "[$(issue 7 2026-01-01)]"
+  jq -cn '{at: (now | floor), clis: {codex: ["x", "x2"]}, px: false}' > "$ST/clis.json"
+  export CODEX_HOME=$T/$CASE/codex; mkdir -p "$CODEX_HOME" && echo '{"models":[{"slug":"gpt-new","visibility":"list"}]}' > "$CODEX_HOME/models_cache.json"
+  out=$(loop control card 7 reviewer gpt-new 2>&1) && [ "$(jq -c '.cards["7"]' <<<"$out")" = '{"reviewer":{"model":"gpt-new"}}' ] \
+    || fail "control card 7 reviewer gpt-new, with Codex listing gpt-new and the saved report not, was refused: $out"
+  # Bug (E13): a builder seat waited for the Codex refresh too, though the builder's Codex list (codex-builder) is not
+  # the one it refreshes. The saved report is left as it was.
+  jq -cn '{at: (now | floor), clis: {codex: ["x", "x2"]}, px: false}' > "$ST/clis.json"; cp "$ST/clis.json" "$T/$CASE/clis.before"
+  out=$(loop control card 7 builder m2 2>&1) && cmp -s "$ST/clis.json" "$T/$CASE/clis.before" \
+    || fail "control card 7 builder m2 refreshed the saved Codex report or was refused: $out; the report: $(cat "$ST/clis.json")"
+  # Pick for me reads Codex afresh too: the judge's reviewer gpt-new is taken, with the saved report made stale again.
+  jq -cn '{at: (now | floor), clis: {codex: ["x", "x2"]}, px: false}' > "$ST/clis.json"
+  printf '%s\n' '{"builder": {"model": "m2", "effort": "high", "why": "w"}, "reviewer": {"model": "gpt-new", "effort": "low", "why": "s"},' \
+    '"judge": {"model": "j", "effort": "medium", "why": "c"}}' > "$STUB/pick"
+  out=$(loop control card 7 pick 2>&1) && [ "$(jq -r .reviewer.model <<<"$out")" = gpt-new ] \
+    || fail "control card 7 pick, with the judge choosing reviewer gpt-new, Codex listing it and the saved report not, was refused: $out"
 }
 
 # Bug: a Codex judge's call was recorded with no tokens (its output went unread), so the card had no price. Its

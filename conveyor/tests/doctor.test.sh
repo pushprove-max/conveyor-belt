@@ -31,6 +31,28 @@ t_agentfilesmissing() {
 }
 # Both files there: t_doctor, whose setup and doctor runs are this case's.
 
+# Bug (R143): setup's step 4 wrote a missing CLAUDE.md at the root of the checkout it ran in, but doctor checks the
+# main checkout, so from a linked worktree (the fast lane) doctor still said it was missing. Step 4 writes it in the
+# folder doctor's missing: line names: there, doctor run in the worktree says ok.
+t_agentfileslane() {
+  local X out f w=$T/$CASE/lane; sample; X=$D/conveyor/conveyor.sh
+  git -C "$S" rm -q CLAUDE.md && git -C "$S" commit -qm 'no CLAUDE.md' && git -C "$S" worktree add -q --detach "$w" || fail "the linked worktree with no CLAUDE.md"
+  # Step 4 is done by the setup session from this text, which no case can run: the text is checked.
+  tr -s ' \n' '  ' < "$SRC/../commands/setup.md" | grep -qF 'write that file in the folder the `missing:` line names after "at the root of"' \
+    || fail "commands/setup.md step 4 does not write the file in the folder doctor's missing: line names"
+  out=$(cd "$w" && bash "$X" doctor 2>&1); f=$(sed -n 's/^missing: CLAUDE\.md at the root of \(.*\), the project.s instructions .*/\1/p' <<<"$out")
+  [ "$f" = "$S" ] || fail "doctor run in the linked worktree $w did not name the main checkout $S as the root CLAUDE.md is missing from: $out"
+  echo '# Sample' > "$f/CLAUDE.md"
+  out=$(cd "$w" && bash "$X" doctor 2>&1); grep -q '^ok: CLAUDE\.md, ' <<<"$out" || fail "doctor run in $w, with CLAUDE.md written in $f, did not say ok: $out"
+  # Bug: step 4's commit command, run from the worktree, committed the whole index of the main checkout, so a file
+  # staged there for other work went in with CLAUDE.md. The command step 4 gives, run as given, commits CLAUDE.md alone.
+  local cmd; cmd=$(tr -s ' \n' '  ' < "$SRC/../commands/setup.md" | sed -n 's/.*in that folder: `\([^`]*\)`.*/\1/p')
+  cmd=${cmd//<that folder>/$(printf %q "$f")}; cmd=${cmd// AGENTS.md/}
+  echo other > "$f/other.txt" && git -C "$f" add other.txt && (cd "$w" && eval "$cmd" >/dev/null) || fail "step 4's commit command failed: $cmd"
+  [ "$(git -C "$f" show --name-only --format= HEAD)" = CLAUDE.md ] && [ "$(git -C "$f" diff --cached --name-only)" = other.txt ] \
+    || fail "step 4's command '$cmd', with other.txt staged in $f, committed $(git -C "$f" show --name-only --format= HEAD | paste -sd' ')"
+}
+
 # A PATH holding every program this one does but <name>...: a folder of links, so the machine's own copy is gone too.
 # The first of a name on PATH is the one linked; all are made by one ln, not one ln a program (thousands of them).
 without() { local p=$T/$CASE/without-${*// /-} d f n fs=(); local -A seen; mkdir -p "$p"

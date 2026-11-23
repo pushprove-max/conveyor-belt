@@ -34,8 +34,8 @@ t_lintpolicylisted() {
   fx_wt 'echo c.sh >> .size-exempt && echo new > .lintrc && echo "{\"lint\": {\"commands\": []}}" > .conveyor/project.json && git add -f .conveyor/project.json' \
     .size-exempt a.sh .lintrc old
   policyof
-  [ "$(sed -n '2,$p' "$T/$CASE/run.out" | paste -sd' ')" = '.conveyor/project.json .lintrc .size-exempt' ] && [[ $(head -n 1 "$T/$CASE/run.out") =~ ^[0-9a-f]{40,64}$ ]] \
-    || fail "the policy files or their hash were not listed: $(cat "$T/$CASE/run.out")"
+  [ "$(sed -n '2,$p' "$T/$CASE/run.out" | paste -sd' ')" = '.conveyor/project.json .lintrc .size-exempt' ] && [[ $(head -n 1 "$T/$CASE/run.out") =~ ^[0-9a-f]{40,64}\ [0-9]+$ ]] \
+    || fail "the policy files or their hash and width were not listed: $(cat "$T/$CASE/run.out")"
 }
 # Bug (R268): a policy file whose name holds a newline was read as two paths, neither of them the file, so its diff was
 # hashed as empty: the hash stayed the same when the file changed, and an owner's yes to one content covered another.
@@ -53,6 +53,85 @@ b"' keep.txt one
   # shellcheck disable=SC2016 # expanded in fx_in's shell
   fx_in 'lintpolicy "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" '"'$l'"
   [ "$RC" = 0 ] && [ "$(head -n 1 "$T/$CASE/run.out")" != "$h1" ] || fail "a change to the content of the policy file $p kept its hash $h1: $(cat "$T/$CASE/run.out")"
+}
+# Bug (R269): the hash kept the @@ headers' line numbers and the context lines, so a line main added directly above
+# the same .lintrc edit gave another hash, and the owner's yes to that edit no longer covered it.
+t_lintpolicymoved() {
+  local h1
+  setup '[]'
+  fx_wt 'printf "a\nb\nc\nd\nE\n" > .lintrc' .lintrc "$(printf 'a\nb\nc\nd\ne')"
+  policyof; h1=$(head -n 1 "$T/$CASE/run.out")
+  (cd "$FXWT" && git reset -q --hard && printf 'a\nb\nc\nd\n# note\ne\n' > .lintrc && git commit -qam main \
+    && printf 'a\nb\nc\nd\n# note\nE\n' > .lintrc && git add -A) || fail "main's line above the edit and the same edit"
+  policyof
+  [ -n "$h1" ] && [ "$(head -n 1 "$T/$CASE/run.out")" = "$h1" ] \
+    || fail "the .lintrc edit e -> E hashed $h1 before main added '# note' directly above it and $(head -n 1 "$T/$CASE/run.out") after"
+}
+# Bug (R269): an edit after a line the file holds twice (`done`) hashed its @@ line numbers and the base blob, so a
+# line main added at the top of the file gave the same .lintrc edit another hash, and the owner's yes no longer covered it.
+t_lintpolicytwice() {
+  local h1
+  setup '[]'
+  fx_wt 'printf "a\ndone\nb\ndone\n# why\nc\n" > .lintrc' .lintrc "$(printf 'a\ndone\nb\ndone\nc')"
+  policyof; h1=$(head -n 1 "$T/$CASE/run.out")
+  (cd "$FXWT" && git reset -q --hard && printf 'top\na\ndone\nb\ndone\nc\n' > .lintrc && git commit -qam main \
+    && printf 'top\na\ndone\nb\ndone\n# why\nc\n' > .lintrc && git add -A) || fail "main's line at the top and the same edit"
+  policyof
+  [ -n "$h1" ] && [ "$(head -n 1 "$T/$CASE/run.out")" = "$h1" ] \
+    || fail "the .lintrc edit adding '# why' after the second 'done' hashed $h1 before main added 'top' at line 1 and $(head -n 1 "$T/$CASE/run.out") after"
+}
+# Bug (R269): at the end of the file the widened place is cut short, so `exit 0` added after the first or after the
+# last of a `done` pair (with another pair above) wrote the same lines and hashed the same: the owner's yes to one
+# covered the other. Each gives its own hash.
+t_lintpolicyend() {
+  local h1 b='done\ndone\nx\n# end\ndone\ndone\n'
+  setup '[]'
+  fx_wt "printf 'done\ndone\nx\n# end\ndone\nexit 0\ndone\n' > .lintrc" .lintrc "$(printf "$b")"
+  policyof; h1=$(head -n 1 "$T/$CASE/run.out")
+  printf "${b}exit 0\n" > "$FXWT/.lintrc" && git -C "$FXWT" add -A || fail "the edit after the last 'done'"
+  policyof
+  [ -n "$h1" ] && [ "$(head -n 1 "$T/$CASE/run.out")" != "$h1" ] \
+    || fail "the .lintrc edit adding 'exit 0' after line 5 and after line 6 (the last 'done' pair of '$b') both hashed $h1"
+}
+# Bug: with the @@ line numbers left out, the same edit at two places with the same context lines hashed the same,
+# so the owner's yes to one .lintrc edit covered the other. Each place gives its own hash.
+t_lintpolicyplace() {
+  local h1 x='x\nx\nx\n'
+  setup '[]'
+  fx_wt "printf '${x}M\n${x}${x}m\n${x}' > .lintrc" .lintrc "$(printf "${x}m\n${x}${x}m\n${x}")"
+  policyof; h1=$(head -n 1 "$T/$CASE/run.out")
+  printf "${x}m\n${x}${x}M\n${x}" > "$FXWT/.lintrc" && git -C "$FXWT" add -A || fail "the edit at the second place"
+  policyof
+  [ -n "$h1" ] && [ "$(head -n 1 "$T/$CASE/run.out")" != "$h1" ] \
+    || fail "the .lintrc edit m -> M at line 4 and at line 11 (3 lines of x around each) both hashed $h1"
+}
+# Bug: an edit after a line the file holds twice (`done`) hashed with context lines, and when main changed the other
+# `done` (an inline comment) the place was unique, the context lines were dropped and the same edit at the same place
+# hashed another way: the owner's yes no longer covered it. Widened at least as far as the approved hash, it hashes the same.
+t_lintpolicyunique() {
+  local h1
+  setup '[]'
+  fx_wt 'printf "a\ndone\n# why\nb\ndone\nc\n" > .lintrc' .lintrc "$(printf 'a\ndone\nb\ndone\nc')"
+  policyof; h1=$(head -n 1 "$T/$CASE/run.out")
+  (cd "$FXWT" && git reset -q --hard && printf 'a\ndone\nb\ndone # end\nc\n' > .lintrc && git commit -qam main \
+    && printf 'a\ndone\n# why\nb\ndone # end\nc\n' > .lintrc && git add -A) || fail "main's comment on the other done and the same edit"
+  fx_in "lintpolicy \"\$FXWT\" \"\$(git -C \"\$FXWT\" rev-parse HEAD)\" '$POLICY' '${h1#* }'"
+  [ "$RC" = 0 ] && [ -n "$h1" ] && [ "$(head -n 1 "$T/$CASE/run.out")" = "$h1" ] \
+    || fail "the .lintrc edit adding '# why' after the first 'done' hashed '$h1' before main added '# end' to the other 'done' and '$(head -n 1 "$T/$CASE/run.out")' after, given the width ${h1#* } (exit $RC)"
+}
+# Bug: the hash named an edit by how many copies of its lines came before it, so when main added a copy of the edited
+# rule above it, an edit of that new copy hashed as the approved edit of the old one, and the owner's yes covered a
+# change to another rule. With the rule now in two places, the edit of the new copy gets another hash.
+t_lintpolicycopy() {
+  local h1
+  setup '[]'
+  fx_wt 'printf "a\nrule 20\nb\n" > .lintrc' .lintrc "$(printf 'a\nrule 30\nb')"
+  policyof; h1=$(head -n 1 "$T/$CASE/run.out")
+  (cd "$FXWT" && git reset -q --hard && printf 'rule 30\nc\na\nrule 30\nb\n' > .lintrc && git commit -qam main \
+    && printf 'rule 20\nc\na\nrule 30\nb\n' > .lintrc && git add -A) || fail "main's copy of the rule above and the edit of that copy"
+  policyof
+  [ -n "$h1" ] && [ "$(head -n 1 "$T/$CASE/run.out")" != "$h1" ] \
+    || fail "the .lintrc edit 'rule 30' -> 'rule 20' of line 4, and of line 1 (a copy main added above it), both hashed $h1"
 }
 
 # Card #7 on a main whose pack makes .lintrc lint policy, with a lint command that passes: its build runs <build>

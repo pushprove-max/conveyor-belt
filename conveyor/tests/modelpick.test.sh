@@ -182,6 +182,17 @@ t_picktrialrace() {
   [ "$(cat "$T/$CASE/run.out")" = $'conveyor: card c1-15: no trial: two trial cards of the group were blocked: its challenger is dropped\ntrial false' ] \
     || fail "c1-10 (the claim's trial card) blocked between the count and the claim, c1-5 blocked before: c1-15's pick: $(cat "$T/$CASE/run.out")"
 }
+# Bug caught (R277): picktrial() counted the blocked line of a card that pushed after it (a landed card whose process
+# died is blocked, then pushes), so c1-5's block and c1-10's made two and dropped the challenger, while the snapshot's
+# trials.dropped, which does not count c1-10, listed no drop. Both see one block: c1-15 is a trial, and no drop is listed.
+t_picktrialpushed() {
+  trialsetup
+  tln c1-5 5 picked; tln c1-5 5 worktree; tln c1-5 5 blocked
+  for s in picked worktree landed blocked pushed; do tln c1-10 10 "$s"; done
+  fx_in 'tln c1-15 15 picked; SEATCARD=15 PICK="" PICKSEAT=""; modelpick c1-15 15 2>/dev/null; echo "trial $(jq -c .trial <<<"$PICK")"'
+  [ "$(cat "$T/$CASE/run.out")" = 'trial true' ] && [ "$(loop snapshot | jq -c '.cost.trials.dropped')" = '[]' ] \
+    || fail "c1-5 blocked and c1-10 landed, blocked, pushed: c1-15's pick ($(cat "$T/$CASE/run.out")) and the snapshot's dropped ($(loop snapshot | jq -c .cost.trials.dropped)) are not a trial and none"
+}
 
 # Bug caught: a card that starts again for the same issue was picked again, so a restart could move it to another
 # group. The issue's earlier card (blocked) holds a pick of another group and builder than this issue now gets; the

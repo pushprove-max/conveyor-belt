@@ -522,9 +522,9 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       echo "conveyor: card $1: the fast resolver merged its conflicts with main in $(printf '%s' "$cf" | grep -c .) file(s), with no fitting session; its tests run again on the merged files"
       # The owner's yes to a lint policy change covers one policy diff (lintyes()), and no landing gate runs after this
       # merge: a policy diff (lintpolicy()) that is not the one the gate let through (card()'s ph, cardready()) stops
-      # for the yes again, as there, keeping its hash.
+      # for the yes again, as there, keeping its hash. Its places are widened at least as far as in ph (lintpolicy()).
       if lintrule; then
-        { packget lint t && t=$(lintpolicy "$3" "$(git -C "$3" rev-parse HEAD)" "$t"); } || { block "$1" "$2" "$3" "lint: the engine could not read the lint policy files that the change changes, so nothing landed"; return 1; }
+        { packget lint t && t=$(lintpolicy "$3" "$(git -C "$3" rev-parse HEAD)" "$t" "$(pw=${ph:-}; printf '%s' "${pw#* }")"); } || { block "$1" "$2" "$3" "lint: the engine could not read the lint policy files that the change changes, so nothing landed"; return 1; }
         if [ -n "$t" ] && [ "${t%%$'\n'*}" != "${ph:-}" ]; then
           jq -c --arg p "${t%%$'\n'*}" '{body, policy: $p}' <<<"$6" > "$3.body"
           block "$1" "$2" "$3" "${LINTYES}it changes lint policy: $(tail -n +2 <<<"$t" | jq -Rrs 'split("\n") | map(select(. != "")) | join(", ")')" post; return 1

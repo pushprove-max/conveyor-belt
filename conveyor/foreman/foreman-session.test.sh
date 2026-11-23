@@ -240,7 +240,7 @@ jq -e '.hookSpecificOutput.additionalContext | test("#?12") and test("15") and t
 # Issue 330: the Foreman is told as held only the issues the record holds after the adopt: one released already
 # (#15) is named apart, not as held with a word to release it again.
 in=$(jq -cn --arg c "$cmd" '{hook_event_name: "PostToolUse", tool_input: {command: $c}, tool_response: {stdout: "https://github.com/example/beta/issues/12\nhttps://github.com/example/beta/issues/15\n"}}')
-out=$(CONVEYOR_FOREMAN_ASK="[ \"\$CONVEYOR_CMD\" != 'control adopt 12 15' ] || echo '{\"held\":[3,12]}'" bash "$SRC/foreman.sh" filed <<<"$in")
+out=$(CONVEYOR_FOREMAN_ASK="[ \"\$CONVEYOR_CMD\" != 'control adopt 12 15' ] || echo '{\"held\":[3,12],\"startSeen\":[3,12,15]}'" bash "$SRC/foreman.sh" filed <<<"$in")
 jq -e '.hookSpecificOutput.additionalContext | test("Held in Conveyor \\(beta: 12\\)") and test("released already \\(beta: 15\\)")' <<<"$out" >/dev/null \
   || fail "a released issue was told to the Foreman as held: $out"
 # Issue 330: a record whose engine has no `control adopt` (it pins an older one) refuses it as a usage error: the

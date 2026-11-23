@@ -67,8 +67,8 @@
 #   when a record cannot be set, or the command is to run in the background, the command is refused. filed holds every
 #   issue the command's output links (github.com/<owner>/<name>/issues/<n>) in the record whose main checkout's GitHub
 #   repository is <owner>/<name> (read on the host file's ssh host for a main not on this machine), else the record named <name> whose main's repository cannot be read, letter case aside (lib.sh record_of; filing needs no lookup,
-#   as it sets every record), unless it was released or held already (conveyor.sh control adopt; control hold in a record whose engine has no adopt), so a
-#   release given before filed runs stays, and tells the Foreman only those it holds; then it sets back to
+#   as it sets every record), unless it was released or held already, or is an older issue opened in the queue (conveyor.sh control adopt; control hold in a
+#   record whose engine has no adopt), so a release given before filed runs stays, and tells the Foreman which it holds, which were released and which were older; then it sets back to
 #   the queue each record a filing set to held, and takes each mark off (lib.sh unmark), once no other filing, of any Foreman, is in flight (SF, below), which
 #   holds every open issue opened while it was held, a follow-up too (conveyor.sh control start queue filed), so an
 #   issue the output does not link (`gh issue create ... | grep -oE '[0-9]+$'`) is held too, and one released already
@@ -702,7 +702,7 @@ queue_again() {
 }
 
 filed() {
-  local in ev recs gh repo main c='' rc h r n nums left made unlinked='' said=() freed=() bad=()
+  local in ev recs gh repo main c='' rc h r o n nums left made unlinked='' said=() freed=() old=() bad=()
   in=$IN
   files "$in" || return 0
   ev=$(jq -r '.hook_event_name // "PostToolUse"' <<<"$in")
@@ -721,12 +721,12 @@ filed() {
       c=$(ask "$repo" "$main" control adopt $nums 2>&1); rc=$?
       # An engine before `control adopt` (a record's pack pins its own) refuses it as a usage error (2): hold them.
       [ "$rc" != 2 ] || [[ $c != *'usage: conveyor.sh control'* ]] || { c=$(ask "$repo" "$main" control hold $nums 2>&1); rc=$?; }
-      if [ "$rc" = 0 ]; then
-        # The record printed last tells which it holds; one not held was released already, and stays so.
+      if [ "$rc" = 0 ]; then # The record printed last: .held; one seen (.startSeen) not held was released; others older.
         h=$(jq -er '.held | arrays' <<<"${c##*$'\n'}" >/dev/null 2>&1 \
           && jq -r '.held as $h | $ARGS.positional[] | select(tonumber | IN($h[]))' --args $nums <<<"${c##*$'\n'}" | paste -sd' ' -) || h=$nums
-        r=$(printf '%s\n' $nums | grep -vxF -f <(printf '%s\n' $h) | paste -sd' ' -)
-        [ -z "$h" ] || said+=("$repo: ${h// /, }"); [ -z "$r" ] || freed+=("$repo: ${r// /, }")
+        r=$(jq -r '.held as $h | (.startSeen // []) as $s | $ARGS.positional[] | select(tonumber | IN($s[]) and (IN($h[]) | not))' --args $nums <<<"${c##*$'\n'}" 2>/dev/null | paste -sd' ' -)
+        o=$(printf '%s\n' $nums | grep -vxF -f <(printf '%s\n' $h $r) | paste -sd' ' -)
+        [ -z "$h" ] || said+=("$repo: ${h// /, }"); [ -z "$r" ] || freed+=("$repo: ${r// /, }"); [ -z "$o" ] || old+=("$repo: ${o// /, }")
       else bad+=("${nums// /, } of $repo (${c##*$'\n'})"); fi
     fi
   done < <(awk '{ print $1 }' <<<"$n" | uniq)
@@ -747,8 +747,8 @@ filed() {
   if [ -n "$unlinked" ]; then mapfile -t -O "${#bad[@]}" bad < <(kept_hold "$recs"); else rm -f "$(kept_file)"; fi
   if [ ${#bad[@]} != 0 ] || [ -n "$left" ]; then
     jq -cn --arg r "${unlinked}${bad[*]:+Not held in Conveyor: ${bad[*]}. Hold each issue you filed (conveyor.sh control hold <issue>, in its record) unless the owner has said yes to it. }${left:+The filing left $left as it set them: in each, take its mark off (conveyor.sh control filing off), and set new issues back to the queue (conveyor.sh control start queue) unless the owner set them held.}" '{decision: "block", reason: $r}'
-  elif [ -n "$unlinked" ] || [ ${#said[@]} != 0 ] || [ ${#freed[@]} != 0 ]; then
-    jq -cn --arg e "$ev" --arg c "${unlinked}${said[*]:+Held in Conveyor (${said[*]}): not built until you release it (conveyor.sh control release <issue>, in its record), which you do only once the owner has said yes to it. }${freed[*]:+Not held, as released already (${freed[*]}).}" \
+  elif [ -n "$unlinked" ] || [ ${#said[@]} != 0 ] || [ ${#freed[@]} != 0 ] || [ ${#old[@]} != 0 ]; then
+    jq -cn --arg e "$ev" --arg c "${unlinked}${said[*]:+Held in Conveyor (${said[*]}): not built until you release it (conveyor.sh control release <issue>, in its record), which you do only once the owner has said yes to it. }${freed[*]:+Not held, as released already (${freed[*]}). }${old[*]:+Not held, as opened before this filing or in the queue, not by this command: left as it was (${old[*]}).}" \
       '{hookSpecificOutput: {hookEventName: $e, additionalContext: $c}}'
   fi
 }

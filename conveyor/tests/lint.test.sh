@@ -222,6 +222,36 @@ t_linttighten() {
     || fail "old lines the tightened rule fails were reported, a later command's base run read the tightened file, or no base run was made (exit $RC): $REP $(lintargs) $(cat "$T/$CASE/out")"
 }
 
+# Bug (R266): the triggers and lint.policy were synced as one pathspec list, so the policy's :(exclude).lintwords kept
+# the tightened trigger out of the base worktree: the base run read the old word, and the untouched a.c:1 was reported.
+t_linttightenexclude() {
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "triggers": [".lintwords"], "run": "$L {files}"}]'
+  tune '.lint.policy = ["other.cfg", ":(exclude).lintwords"]'
+  lintwt .lintwords xyz a.c "$(printf 'foo\nbar')" other.cfg x
+  echo foo > "$W/.lintwords"; echo baz >> "$W/a.c"
+  lintrat
+  [ "$RC" = 0 ] && [ "$REP" = '' ] && [ "$(lintargs)" = 'run a.c|run a.c' ] \
+    || fail "with lint.policy [other.cfg, :(exclude).lintwords] the base run did not read the tree's .lintwords (exit $RC): $REP $(lintargs) $(cat "$T/$CASE/out")"
+}
+
+# Bug: the triggers and lint.policy kept two sync records. With base's tracked link `config` (to a folder holding
+# rules), a card that makes config a folder holding the trigger config/rules, and a policy of config, the second
+# command's base run put the policy's record back first (the link again), then the triggers', whose config/rules then
+# was deleted through the link: the link's target lost its rules file.
+t_lintsynctwolists() {
+  local tg=$T/$CASE/target
+  lintsetup
+  lintcmds '[{"files": ["*.c"], "triggers": ["config/rules"], "run": "$L {files}"}, {"files": ["*.c"], "run": "$L {files}"}]'
+  tune '.lint.policy = ["config"]'
+  mkdir -p "$tg" && echo keep > "$tg/rules" && ln -s "$tg" "$R/config" && git -C "$R" add config || fail "main's link"
+  lintwt a.c 'BAD old'
+  (cd "$W" && rm config && mkdir config && echo new > config/rules && echo two >> a.c) || fail "the card's change"
+  lintrat
+  [ "$RC" = 0 ] && [ "$(cat "$tg/rules" 2>/dev/null)" = keep ] && [ "$(lintargs)" = 'run a.c|run a.c|run a.c|run a.c' ] \
+    || fail "with triggers [config/rules], lint.policy [config] and base's link config to $tg, the target's rules is $(cat "$tg/rules" 2>&1), or a base run was not made (exit $RC): $(lintargs) $(cat "$T/$CASE/out")"
+}
+
 # Bug: a card that deletes a trigger config gets a base run that still reads it. Each run notes whether it sees one.
 t_lintdeltrigger() {
   lintsetup
@@ -367,7 +397,7 @@ t_lintsynclink() {
   (cd "$W" && rm config && mkdir config && echo 'line-length = 1' > config/ruff.toml) || fail "the card's change"
   # shellcheck disable=SC2016 # expanded in lintin
   lintin 'lintindex "$W" "$T/$CASE/ix" && b=$(git -C "$W" rev-parse HEAD) && bw=$T/$CASE/bw
-    lintsync "$W" "$T/$CASE/ix" "$b" "$bw" "$T/$CASE/s" "$T/$CASE/rec" config/ruff.toml || exit 3
+    lintsync "$W" "$T/$CASE/ix" "$b" "$bw" "$T/$CASE/s" "$T/$CASE/rec" 1 config/ruff.toml || exit 3
     [ ! -L "$bw/config" ] && [ "$(cat "$bw/config/ruff.toml")" = "line-length = 1" ] || exit 4
     [ -z "$(ls -A "'"$tg"'")" ] || exit 5
     lintsync "$W" "$T/$CASE/ix" "$b" "$bw" "$T/$CASE/s" "$T/$CASE/rec" || exit 6
@@ -386,7 +416,7 @@ t_lintsyncdir() {
   (cd "$W" && git rm -rq config && echo 'line-length = 1' > config) || fail "the card's change"
   # shellcheck disable=SC2016 # expanded in lintin
   lintin 'lintindex "$W" "$T/$CASE/ix" && b=$(git -C "$W" rev-parse HEAD) && bw=$T/$CASE/bw
-    lintsync "$W" "$T/$CASE/ix" "$b" "$bw" "$T/$CASE/s" "$T/$CASE/rec" config || exit 3
+    lintsync "$W" "$T/$CASE/ix" "$b" "$bw" "$T/$CASE/s" "$T/$CASE/rec" 1 config || exit 3
     [ -f "$bw/config" ] && [ "$(cat "$bw/config")" = "line-length = 1" ] || exit 4
     lintsync "$W" "$T/$CASE/ix" "$b" "$bw" "$T/$CASE/s" "$T/$CASE/rec" || exit 5
     [ "$(cat "$bw/config/old.toml")" = old ] || exit 6'
@@ -445,6 +475,21 @@ t_lintdoctor() {
     'lint command 6 (size, limit 1 lines): findings: 1')" ] \
     || fail "doctor's lint lines are not ok, findings, missing, error, empty and the size entry's findings: $(cat "$T/$CASE/out")"
   [ "$(lintargs)" = 'run a.txt' ] || fail "the per-file command was not run on one tracked file alone, or the empty one was run: $(lintargs)"
+}
+
+# Bug (R265): a pathspec git refuses made git ls-files fail with its error thrown away, so doctor said `empty`. It
+# says error, with git's line.
+t_lintdoctorgit() {
+  lintsetup
+  lintcmds '[{"files": [":(glob,literal)*.txt"], "run": "$L {files}"}]'
+  lintin 'lintdoctor'
+  [ "$RC" = 0 ] && [[ $(cat "$T/$CASE/out") == "lint command 1 (bash $STUB/lint {files}): error: fatal: "*incompatible* ]] \
+    || fail "doctor did not give git's error for files [':(glob,literal)*.txt'] (exit $RC): $(cat "$T/$CASE/out")"
+  # The first git ls-files, of every tracked path, gives git's line too: run on a main checkout that is no repository.
+  mkdir -p "$T/$CASE/norepo" "$T/$CASE/probe"
+  lintin 'MAIN=$T/$CASE/norepo GIT_CEILING_DIRECTORIES=$T/$CASE lintprobe '"'"'{"files": ["*.txt"], "run": "true"}'"'"' "$T/$CASE/probe"'
+  [ "$RC" = 0 ] && [[ $(cat "$T/$CASE/out") == "error: fatal: not a git repository"* ]] \
+    || fail "lintprobe on the main checkout $T/$CASE/norepo, no repository, did not give git's error (exit $RC): $(cat "$T/$CASE/out")"
 }
 
 # Bug: a pack with no lint field gets lint lines from doctor or a lint run, or fails. There is nothing to say.

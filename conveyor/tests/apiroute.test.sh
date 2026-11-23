@@ -307,7 +307,9 @@ t_zerodoctor() {
 # Each kind's key as the session is given it (proxyenv(), codexargs()), called in the engine's shell: the Anthropic
 # API's as ANTHROPIC_API_KEY (x-api-key), never as a Bearer token, always or only on the try after the login failed
 # (fallback); a proxy's as ANTHROPIC_AUTH_TOKEN (Bearer); a key file others may read is not read; Codex's API key
-# reaches Codex in the variable its provider settings name.
+# reaches Codex in the variable its provider settings name. Bug (R244): a session on the subscription (the fallback
+# before the login failed) kept a base URL and keys from the engine's environment, so it went through that URL while it
+# was counted as the subscription; it is given none of them.
 t_apienv() {
   local k=sk-ant-file-$RANDOM$RANDOM o=sk-openai-file-$RANDOM$RANDOM f g out
   mkdir -p "$XDG_CONFIG_HOME/conveyor" "$T/$CASE"; f=$T/$CASE/anthropic.key g=$T/$CASE/openai.key
@@ -322,7 +324,8 @@ t_apienv() {
     PROXY_NOW=1 PROXY_ROLE=builder show proxyenv
     PROXY_ROLE=reviewer show codexargs
     jq '.claudeProxy.kind = "proxy"' "$HOST" > "$HOST.new" && mv "$HOST.new" "$HOST"; PROXY_ROLE=reviewer show proxyenv
-    chmod 644 "$f"; jq '.claudeProxy.kind = "api"' "$HOST" > "$HOST.new" && mv "$HOST.new" "$HOST"; PROXY_ROLE=reviewer show proxyenv ) 2>&1 )
+    chmod 644 "$f"; jq '.claudeProxy.kind = "api"' "$HOST" > "$HOST.new" && mv "$HOST.new" "$HOST"; PROXY_ROLE=reviewer show proxyenv
+    ANTHROPIC_BASE_URL=http://192.0.2.9 ANTHROPIC_AUTH_TOKEN=held ANTHROPIC_API_KEY=held PROXY_ROLE=builder show proxyenv; echo end ) 2>&1 )
   [ "$(sed -n 1p <<<"$out")" = "ANTHROPIC_API_KEY=$k ANTHROPIC_BASE_URL=https://api.anthropic.com " ] \
     || fail "the API route did not send its key from the key file as ANTHROPIC_API_KEY alone (no Bearer token): $out"
   [ "$(sed -n 2p <<<"$out")" = "" ] && [ "$(sed -n 3p <<<"$out")" = "ANTHROPIC_API_KEY=$k ANTHROPIC_BASE_URL=https://api.anthropic.com " ] \
@@ -331,6 +334,8 @@ t_apienv() {
     || fail "Codex was not given the OpenAI API with its key from the key file: $out"
   [ "$(sed -n 5p <<<"$out")" = "ANTHROPIC_AUTH_TOKEN=$k ANTHROPIC_BASE_URL=https://api.anthropic.com " ] || fail "the proxy route did not send its key as a Bearer token: $out"
   [ "$(sed -n 6p <<<"$out")" = "ANTHROPIC_BASE_URL=https://api.anthropic.com " ] || fail "a key file of mode 644 was read: $out"
+  [ "$(sed -n 7,8p <<<"$out" | paste -sd'|' -)" = '|end' ] \
+    || fail "proxyenv for the fallback before the login failed, given ANTHROPIC_BASE_URL=http://192.0.2.9 ANTHROPIC_AUTH_TOKEN=held ANTHROPIC_API_KEY=held, kept some: $out"
 }
 
 # Bug: the reviewer's model family (sol) was looked up in the OpenAI API's model list with a key read only from the

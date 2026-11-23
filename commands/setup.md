@@ -98,8 +98,9 @@ First install the requirements, then sign in, before step 1:
    pushed, or that the pack is not committed and stays on this machine, as cards read the pack from the default
    branch. Never ask the user to type a git command for the pack.
 4. For each `missing: CLAUDE.md` or `missing: AGENTS.md` line doctor printed, ask the user "Write an optimized
-   CLAUDE.md (or AGENTS.md) for this project?" (yes / no). On no, write nothing. On yes, write that file at the root of
-   this checkout, and only when no file or link of that name is there; never overwrite or edit a file that is there.
+   CLAUDE.md (or AGENTS.md) for this project?" (yes / no). On no, write nothing. On yes, write that file in the folder
+   the `missing:` line names after "at the root of" (the main checkout, which doctor checks; from a linked worktree it
+   is not this checkout), and only when no file or link of that name is there; never overwrite or edit a file that is there.
    Write it from the project itself, reading its code, its README and docs, and the pack `.conveyor/project.json`:
    what the project is, its layout, its languages, how and where its tests run (the pack's `test.command` and
    `test.full`), its conventions, and where its deeper docs live. Keep only what a session cannot learn from the code,
@@ -107,8 +108,9 @@ First install the requirements, then sign in, before step 1:
    `CLAUDE.md` is read by the builder, the fixer, the Foreman and the lanes; `AGENTS.md` is read by the Codex reviewer
    and names `CLAUDE.md` for the project's content (read it first) rather than repeating it, adding only what a
    reviewer needs beyond it. Show each file you wrote, and give the user the one command that commits it, on the
-   default branch: `git add CLAUDE.md AGENTS.md && git commit -m "Add the agent instruction files"` (naming only
-   the files you wrote). Do not run it yourself.
+   default branch, in that folder: `git -C <that folder> add CLAUDE.md AGENTS.md && git -C <that folder> commit -m
+   "Add the agent instruction files" -- CLAUDE.md AGENTS.md` (naming only the files you wrote, both times; the paths
+   after `--` keep out anything else staged in that folder). Do not run it yourself.
 5. When doctor printed no `missing:` line other than the `CLAUDE.md` and `AGENTS.md` ones, ask the user "Start Conveyor now as this machine's service?" (yes / no)
    and, beside it, when doctor printed the `warning: the Board is not running` line, "Start the Board now?" (yes / no).
    But when doctor printed an `ok: the project <name> is served on the build machine <host>` line, do not ask the

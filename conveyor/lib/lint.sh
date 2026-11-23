@@ -302,17 +302,20 @@ lintbasewt() { # <worktree> <base> <base worktree>
 lintbasegone() { # <worktree> <base worktree>
   git -C "$1" worktree remove --force "$2" > /dev/null 2>&1; rm -rf "$2"; git -C "$1" worktree prune 2>/dev/null; rmdir "${2%/*}" 2>/dev/null; return 0
 }
-# Makes <base worktree>'s copies of the files that <pathspec>... match equal to <worktree>'s tree (<index>), the
-# change being from <base>: each one the tree has is written, each one it deleted is deleted. First, each file an
+# Makes <base worktree>'s copies of the files that any <list> matches equal to <worktree>'s tree (<index>), the change
+# being from <base>: each one the tree has is written, each one it deleted is deleted. Each <list> is its count, then
+# that many pathspecs, read alone, so that an :(exclude) in one does not apply to another; one record is kept for all
+# of them, so that putting it back deletes and checks out in one order. First, each file an
 # earlier call wrote or deleted (the paths in <record file>) gets base's copy again, or is deleted when base lacks it,
 # so a command's base run reads no other command's triggers; the record then holds this call's paths. A folder of a
 # path that is a link in the base worktree (a tracked link the tree made a folder) is first made a folder there, and
 # noted before the path, so that nothing is written or deleted in the link's target; the next call, putting the record
 # back, deletes each path last path first (that folder too), then checks base's copy of each out again (the link too).
 # A path the tree made a file where base has a folder (config, for base's config/old.toml) has that folder deleted.
-lintsync() { # <worktree> <index> <base> <base worktree> <scratch file> <record file> <pathspec>...
-  local w=$1 ix=$2 b=$3 bw=$4 s=$5 rec=$6 st p d r i
+lintsync() { # <worktree> <index> <base> <base worktree> <scratch file> <record file> [<count> <pathspec>...]...
+  local w=$1 ix=$2 b=$3 bw=$4 s=$5 rec=$6 st p d r i k
   local -a ps
+  local -A want=()
   shift 6
   if [ -s "$rec" ]; then
     mapfile -d '' -t ps < "$rec"
@@ -323,9 +326,19 @@ lintsync() { # <worktree> <index> <base> <base worktree> <scratch file> <record 
     done
   fi
   : > "$rec" || return 1
-  [ $# != 0 ] || return 0
-  GIT_INDEX_FILE=$ix git -C "$w" diff --cached --no-renames -z --name-status "$b" -- "$@" > "$s" || return 1
+  while [ $# != 0 ]; do
+    k=$1; shift
+    # An empty list matches nothing (a git diff given no pathspec would give every path).
+    [ "$k" != 0 ] || continue
+    GIT_INDEX_FILE=$ix git -C "$w" diff --cached --no-renames -z --name-only "$b" -- "${@:1:k}" > "$s" || return 1
+    # Each key starts with x: a path `@` or `*` would be read as the whole array.
+    while IFS= read -r -d '' p; do want[x$p]=1; done < "$s"
+    shift "$k"
+  done
+  [ ${#want[@]} != 0 ] || return 0
+  GIT_INDEX_FILE=$ix git -C "$w" diff --cached --no-renames -z --name-status "$b" > "$s" || return 1
   while IFS= read -r -d '' st && IFS= read -r -d '' p; do
+    [ -n "${want[x$p]:-}" ] || continue
     d='' r=$p
     while [[ $r == */* ]]; do
       d=${d:+$d/}${r%%/*} r=${r#*/}
@@ -357,7 +370,7 @@ lintsyncrm() { # <base worktree> <path>
 # Fails, saying why, when the pack, the tree or the change cannot be read.
 lintratchet() { # <worktree> <base> <card>
   local out l c n=0 t bw=$CARDS/mainrun/$3.lint made='' bad='' run rc r why v bs
-  local -a bf sp
+  local -a bf sp pp
   out=$(lintcheck "$1" "$2") || return 1
   [ -n "$out" ] || return 0
   packget lint l || { echo "conveyor lint: the pack's lint field could not be read" >&2; return 1; }
@@ -381,10 +394,13 @@ lintratchet() { # <worktree> <base> <card>
       || mapfile -d '' -t bf < <(jq -j '[.findings[] | select(.kind != "card") | .base] | unique | .[] + "\u0000"' <<<"$c")
     if [ ${#bf[@]} != 0 ]; then
       r='' why=''
-      mapfile -d '' -t sp < <(jq -j --argjson n $n '(.commands[$n - 1].triggers // []) + (.policy // []) | .[] + "\u0000"' <<<"$l")
+      mapfile -d '' -t sp < <(jq -j --argjson n $n '(.commands[$n - 1].triggers // []) | .[] + "\u0000"' <<<"$l")
+      mapfile -d '' -t pp < <(jq -j '(.policy // []) | .[] + "\u0000"' <<<"$l")
       # made: 1 once the base worktree is made, 0 when it could not be (each later command's base run fails too).
       [ -n "$made" ] || { made=0; lintbasewt "$1" "$2" "$bw" && made=1; }
-      if [ "$made" = 1 ] && lintsync "$1" "$t/index" "$2" "$bw" "$t/st" "$t/synced" "${sp[@]}" && lintindex "$bw" "$t/bindex" \
+      # The triggers and the policy are two pathspec lists, so that an :(exclude) in one does not apply to the other.
+      if [ "$made" = 1 ] && lintsync "$1" "$t/index" "$2" "$bw" "$t/st" "$t/synced" ${#sp[@]} "${sp[@]}" ${#pp[@]} "${pp[@]}" \
+        && lintindex "$bw" "$t/bindex" \
         && { [ ${#LINT_DEPS[@]} = 0 ] || GIT_INDEX_FILE=$t/bindex git -C "$bw" rm -rq --cached --ignore-unmatch -- "${LINT_DEPS[@]}"; } \
         && GIT_INDEX_FILE=$t/bindex git -C "$bw" ls-files -z > "$t/bpaths"; then
         run=$(jq -r .run <<<"$c"); [[ $run == *'{files}'* ]] || bf=()
@@ -467,14 +483,17 @@ lintline() { # <card> <issue> <output file> <lintrun's exit> <review|land|wait>
 # unless it is false.
 lintrule() { [ "$(jq -r '.rules.lint' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>/dev/null)" != false ]; }
 
-# The lint policy that <worktree>'s staged change changes from <base>: the hash of that policy diff (its index lines
-# left out, so a kept patch on a newer main hashes the same), then its paths, one a line: each file that the
-# lint.policy pathspecs of <lint field> (main's pack's) match, and .conveyor/project.json when its lint field changed
-# (lintfield). A change that only removes lines from an exempt file (one that the files of a `ratchet: false`
+# The lint policy that <worktree>'s staged change changes from <base>: the hash of that policy diff (each file's as
+# lintpolicyhunks writes it, so a kept patch on a newer main mostly hashes the same) and the width of the places it
+# names, `<hash> <width>`, then its paths, one a line: each
+# file that the lint.policy pathspecs of <lint field> (main's pack's) match, and .conveyor/project.json when its lint
+# field changed (lintfield). A change that only removes lines from an exempt file (one that the files of a `ratchet: false`
 # command match) only tightens, so it is left out. Nothing when no path is left. Fails when the change cannot be read.
-# Paths are read whole, NUL-separated, so a name with a newline is one path.
-lintpolicy() { # <worktree> <base> <lint field>
-  local a f p ix t h i
+# Paths are read whole, NUL-separated, so a name with a newline is one path. Each place is widened to one width, at
+# least <least width> (the width of the hash it is checked against, so a main that left only one copy of an approved
+# place's lines does not drop its context lines and change the hash).
+lintpolicy() { # <worktree> <base> <lint field> [<least width>]
+  local a f p ix t h i w=0 lw=${4:-0}
   local -a ps xs ns fs=()
   local -A ex=()
   mapfile -d '' -t ps < <(jq -j '(.policy // [])[] + "\u0000"' <<<"${3:-null}")
@@ -500,11 +519,50 @@ lintpolicy() { # <worktree> <base> <lint field>
   ix=$(git -C "$1" rev-parse --path-format=absolute --git-path index) || return 1
   lintfield "$1" "$ix" "$2" && f=.conveyor/project.json || f=''
   [ ${#fs[@]} != 0 ] || [ -n "$f" ] || return 0
-  h=$({ [ ${#fs[@]} = 0 ] || git -C "$1" diff --cached --no-renames --binary "$2" -- "${fs[@]/#/:(literal)}" | sed '/^index /d'
+  [[ $lw =~ ^[0-9]{1,6}$ ]] || lw=0
+  # The width: the widest any place needs to be told apart in <base>, and no less than <least width>.
+  for p in "${fs[@]}"; do i=$(lintpolicyhunks "$1" "$2" "$p" "$lw") || return 1; i=${i##*$'\n'}; [ "$i" -le "$w" ] || w=$i; done
+  [ "$lw" -le "$w" ] || w=$lw
+  h=$({ for p in "${fs[@]}"; do lintpolicyhunks "$1" "$2" "$p" "$w" || exit 1; done
     [ -z "$f" ] || git -C "$1" show ":$f" | jq -c .lint; } | git -C "$1" hash-object --stdin) && [ -n "$h" ] || return 1
-  printf '%s\n' "$h"; printf '%s\0' "${fs[@]}" ${f:+"$f"} | sort -zu | tr '\0' '\n'
+  printf '%s %s\n' "$h" "$w"; printf '%s\0' "${fs[@]}" ${f:+"$f"} | sort -zu | tr '\0' '\n'
 }
-# Whether the owner's yes covers the policy diff hashed <hash>: the card that stopped for it kept that hash in its
+# <worktree>'s staged diff of <path> from <base>, written the same for the same edit on a newer main where it can be
+# told apart: no context lines, no index line, and each @@ header made `@@`, so lines main adds or removes away from
+# the edit leave it as it was. A hunk's place is its removed lines, or, for a hunk that only adds, the line it follows.
+# Each place is widened by <width> lines each side, and by one more again and again while <base>'s file names those
+# lines more than once (a line such as `done` twice); widened, its lines are written after the header, the place's own
+# lines marked: the same edit at another copy, or at a copy main adds, gives another text. The last line written is
+# the widest any place got. Fails when the diff or <base>'s file cannot be read.
+lintpolicyhunks() { # <worktree> <base> <path> <width>
+  local o d rc=1
+  o=$(mktemp) || return 1
+  d=$(mktemp) || { rm -f "$o"; return 1; }
+  # <base>'s file is empty when <base> has none (the change adds it).
+  if git -C "$1" diff --cached --no-renames --binary -U0 "$2" -- ":(literal)$3" > "$d" \
+    && { ! git -C "$1" cat-file -e "$2:$3" 2>/dev/null || git -C "$1" show "$2:$3" > "$o"; }; then
+    # Header `@@ -<s>[,<c>] ...`: the hunk removes lines s to s+c-1, or, with c 0, adds after line s (0: at the top).
+    awk -v w0="$4" 'FILENAME == ARGV[1] { o[++n] = $0; next }
+      /^index / { next }
+      # w: how many lines the place is widened by each side; a to e: the lines written after the header.
+      /^@@ / { split(substr($2, 2), m, ","); s = m[1] + 0; c = (2 in m) ? m[2] + 0 : 1; l = c ? c : 1; print "@@"
+        if (s == 0) next
+        for (w = w0 + 0; ; w++) { a = s - w < 1 ? 1 : s - w; e = s + l - 1 + w > n ? n : s + l - 1 + w; k = 0
+          for (p = 1; p + e - a <= n && k < 2; p++) { for (i = 0; i <= e - a && o[p + i] == o[a + i]; i++); if (i > e - a) k++ }
+          if (k == 1) break }
+        if (w > wm) wm = w
+        # The lines of the place itself are marked "=": lines cut short at the start or end of the file can be the same
+        # for two places (after the first or the second of a last done pair), and the mark tells them apart.
+        if (w || !c) for (i = a; i <= e; i++) print (i < s || i > s + l - 1 ? " " : "=") o[i]
+        next }
+      { print }
+      END { print wm + 0 }' "$o" "$d" && rc=0
+  fi
+  rm -f "$o" "$d"
+  return $rc
+}
+# Whether the owner's yes covers the policy diff hashed <hash> (lintpolicy()'s `<hash> <width>`, its places widened at
+# least as far as the kept one's): the card that stopped for it kept that hash in its
 # <kept body file> (policy), and the issue now holds more approval lines than that body did. A yes covers one diff:
 # a change to a policy file after it gives another hash.
 lintyes() { # <issue json> <kept body file> <hash>
@@ -692,15 +750,17 @@ lintreport() { # <worktree> <base>
 # {files} run on one tracked file of the main checkout that its `files` match, a command without {files} run as it is;
 # `ok`, `findings: <n>`, `missing: <tool>`, `error: <first line>` (or why, when it printed nothing or ran over the
 # limit), or `empty` when no tracked file matches its `files` (it is not called). A size entry (lintsize) is run on
-# every tracked file it matches. <scratch folder> holds its files: `paths`, the main checkout's tracked paths, is made
-# when it is not there.
+# every tracked file it matches. A git ls-files that fails (a pathspec git refuses) gives `error: <git's first line>`.
+# <scratch folder> holds its files: `paths`, the main checkout's tracked paths, is made when it is not there.
 lintprobe() { # <command json> <scratch folder>
   local c=$1 t=$2 run rc r why f sz l
   local -a fs one
-  [ -e "$t/paths" ] || git -C "$MAIN" ls-files -z > "$t/paths" || : > "$t/paths"
+  [ -e "$t/paths" ] || git -C "$MAIN" ls-files -z > "$t/paths" 2> "$t/err" \
+    || { rm -f "$t/paths"; IFS= read -r l < "$t/err"; echo "error: ${l:-git ls-files failed}"; return 0; }
   run=$(jq -r "$LINTRUN" <<<"$c"); sz=$(jq -r '.size // empty | "\(.file | floor)\t\(.exempt)"' <<<"$c")
   mapfile -d '' -t fs < <(jq -j '.files[] + "\u0000"' <<<"$c")
-  git -C "$MAIN" ls-files -z -- "${fs[@]}" > "$t/m" 2>/dev/null || : > "$t/m"
+  git -C "$MAIN" ls-files -z -- "${fs[@]}" > "$t/m" 2> "$t/err" \
+    || { IFS= read -r l < "$t/err"; echo "error: ${l:-git ls-files failed}"; return 0; }
   mapfile -d '' -t -n 1 one < "$t/m"
   if [ ${#one[@]} = 0 ]; then echo empty; return 0; fi
   if [ -n "$sz" ]; then

@@ -710,12 +710,15 @@ subroles() { routesnow | jq -r '(.subscription.roles // ["builder", "reviewer"])
 # is sent the key as a Bearer token (ANTHROPIC_AUTH_TOKEN); the Anthropic API (kind api) as its own API key
 # (ANTHROPIC_API_KEY, sent as x-api-key), never as a Bearer token. Any other Anthropic key in the environment is
 # dropped first, so the route is never sent a key it was not named. A session on the subscription (proxyroute
-# subscription) is given none of it. With no key, a proxy (and the fallback route of either kind) is given a stand-in
+# subscription) is given none of it, and the base URL and keys it inherits are dropped, so it does not go through a
+# URL from the engine's environment while it is counted as the subscription. With no key, a proxy (and the fallback route of either kind) is given a stand-in
 # key (NOKEY): with none, Claude Code sends the machine's own login, which a proxy that needs no key does not take,
 # and which on the fallback is the one that failed. The API (kind api, not the fallback) with no key is given none.
 NOKEY=no-key
 proxyenv() {
-  local p b t v r; proxypack; r=$(proxyroute); [ "$r" = proxy ] || return 0
+  local p b t v r; proxypack; r=$(proxyroute)
+  [ "$r" != subscription ] || { unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY; return 0; }
+  [ "$r" = proxy ] || return 0
   p=$(claudeproxy); b=$(jq -r '.baseUrl // "https://api.anthropic.com"' <<<"$p"); t=$(jq -r '.toolSearch // "true"' <<<"$p")
   routekey "$p"; v=$KEY_V
   [ -n "$v" ] || { [ -z "${PROXY_NOW:-}" ] && [ "$(jq -r .kind <<<"$p")" = api ]; } || v=$NOKEY
@@ -1039,7 +1042,7 @@ cardok() { # <builder|reviewer|judge> <model> [effort]
 # issue's own), with no tools and PICK_TIMEOUT at most, that chooses the builder, reviewer and judge settings for the
 # issue from the models the pack allows each seat, given the issue's title and body, its size and areas (SPLITSIZE,
 # lib/slices.sh), the project's seats in force and each allowed model's price (the price table the Board shows,
-# dashboard_limit.py, with the pack's prices over it). Prints one JSON line, {issue, builder, reviewer, judge, model:
+# dashboard_limit.py, with the pack's prices over it, a model named by an alias priced as its model). Prints one JSON line, {issue, builder, reviewer, judge, model:
 # the judge's}, each seat {model, effort (null: none, as an OpenCode builder takes), why}; changes nothing: the owner applies it (`control card`). An answer
 # with a seat missing, a model or effort the seat does not take (cardok), or no reason, is refused with why: exit 1.
 PICK_TIMEOUT=300
@@ -1084,7 +1087,12 @@ pickcall() { # <issue json> <control record> [<seats' models>]
   size=$(jq -c --arg area "$AREA" "$SPLITSIZE"' | .doneWhen |= length | .files |= length' <<<"$issue") || { PICKWHY="the issue's size cannot be read"; return 1; }
   packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
   prices=$(jq -cn --argjson p "$pp" '{cards: [], prices: $p}' | python3 "$HERE/../.claude/scripts/dashboard_limit.py" cards 2>/dev/null \
-    | jq -c --argjson p "$pp" '.table | with_entries(.value = {input: .value[0], output: .value[1]}) + ($p | with_entries(select(.value.input != null and .value.output != null) | .value |= {input, output}))' 2>/dev/null) \
+    | jq -c --argjson p "$pp" '(.table | with_entries(.value = {input: .value[0], output: .value[1]}) + ($p | with_entries(select(.value.input != null and .value.output != null) | .value |= {input, output}))) as $t
+      # Each alias (the built-in ones, then the pack'"'"'s, the first naming one kept, as dashboard_limit.py does) is
+      # priced as its model, unless it is a model itself: so the clamp and the prompt price a model named by an alias.
+      | reduce ((.aliases // {} | to_entries[]), ($p | to_entries[] | .key as $m | .value | objects | .aliases | arrays | .[] | strings
+          | select(. != "" and . != $m) | {key: ., value: $m})) as $x ({}; if has($x.key) then . else . + {($x.key): $x.value} end)
+      | $t + with_entries(.key as $a | .value as $m | select(($t | has($a) | not) and ($p | has($a) | not) and ($t | has($m))) | .value = $t[$m])' 2>/dev/null) \
     && [ -n "$prices" ] || prices='{}'
   PICKPRICES=$prices
   s=$(SEATCARD='' seat judge "$c") && jqget "$s" model model effort effort agent agent || { PICKWHY="the project has no judge to ask"; return 1; }
@@ -1208,9 +1216,10 @@ control() { # [action [arguments]]
         set -- ssh "$2" "${4:-}"; f='.suiteMachine = {kind: "ssh", target: $v[1], dir: (if $v[2] == "" then "~/conveyor-suite" else $v[2] end)}'
       else bad; return; fi ;;
     hold) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.held = (.held + ($v | map(tonumber)) | unique)' ;;
-    # adopt: the filing hooks' hold (foreman/foreman.sh filed) of the issues named: each one opened after a span of
-    # startHeld began, whether or not it has ended (the owner may select Queue while a command files several), that
-    # startSeen does not have yet, whatever its labels (adopted() also passes over a follow-up). One released already,
+    # adopt: the filing hooks' hold (foreman/foreman.sh filed) of the issues named: each one opened in a span of
+    # startHeld, or after the filing mark (the owner may select Queue while a command files several), that
+    # startSeen does not have yet (an older issue opened in the queue, which the command's output may link too, is
+    # left as it is), whatever its labels (adopted() also passes over a follow-up). One released already,
     # even a moment after it was filed, or held once, is left as it is, so a release is never undone.
     # `adopt since <UTC time>`: the same for every open issue created at or after that second (the filing hooks' hold
     # in a record that started new issues held before the filing began, when the command's output links no issue): a
@@ -1222,7 +1231,8 @@ control() { # [action [arguments]]
           || { echo "conveyor: cannot read the open issues; nothing changed" >&2; return 1; }
         local -a ids; read -ra ids <<<"$x"; set -- "${ids[@]}"
       else [ $# != 0 ] && nums "$@" || { bad; return; }; fi
-      f='. as $c | [$v[] | tonumber | select(. as $i | (IN($c.startSeen[]) | not) and ($c.startHeld | any($i > .from)))] as $n
+      f='. as $c | [$v[] | tonumber | select(. as $i | (IN($c.startSeen[]) | not)
+           and (($c.startHeld | any($i > .from and (.to == null or $i <= .to))) or (($c.filing | numbers) as $m | $i > $m)))] as $n
          | .held = (.held + $n | unique) | .startSeen = (.startSeen + $n | unique)' ;;
     # filing: the filing hooks' mark (foreman/foreman.sh filing and queue_again) while a command that may file an issue
     # runs, in a record that starts new issues held (the hooks' Held or the owner's). on sets filing to the newest
