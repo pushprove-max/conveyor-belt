@@ -190,3 +190,22 @@ t_shotsmode() {
   [ "$(cat "$T/$CASE/run.out")" = $'b same\nc differs' ] \
     || fail "the same edit over main's chmod +x is not the same change, or one with chmod -x too is: $(cat "$T/$CASE/run.out")"
 }
+# Bug (#1495): samechange() skipped the merge for a file whose two patched blobs were equal, so a retry that gave the
+# earlier patch's exact text passed as the same change although main had added a footer between the two bases and the
+# retry dropped it (here main also ran chmod +x and the retry keeps the executable bit, so the mode check passed). a.patch edits the first line; main adds a
+# footer and runs chmod +x; b.patch restores a.patch's text (the footer goes), c.patch is a.patch's edit moved over
+# main's footer.
+t_shotsdrop() {
+  setup "[$(issue 7 2026-01-01)]"; mkdir -p "$R/web" && cd "$R" || fail "main"
+  local a b
+  printf '0\n1\n2\n' > web/nums.ts && git add web/nums.ts && git commit -qm base && a=$(git rev-parse HEAD) \
+    && printf 'x\n1\n2\n' > web/nums.ts && git diff --binary --no-renames > "$T/$CASE/a.patch" && git checkout -q -- web/nums.ts \
+    && printf '0\n1\n2\nfooter\n' > web/nums.ts && chmod +x web/nums.ts && git commit -qam 'main adds a footer and chmod +x' && b=$(git rev-parse HEAD) \
+    && printf 'x\n1\n2\n' > web/nums.ts && git diff --binary --no-renames > "$T/$CASE/b.patch" && git checkout -q -- web/nums.ts \
+    && printf 'x\n1\n2\nfooter\n' > web/nums.ts && git diff --binary --no-renames > "$T/$CASE/c.patch" && git reset -q --hard \
+    && [ "$(git ls-files -s web/nums.ts | cut -d' ' -f1)" = 100755 ] || fail "the patches"
+  fx_in "samechange '$T/$CASE/a.patch' $a '$T/$CASE/b.patch' $b && echo b same || echo b differs
+    samechange '$T/$CASE/a.patch' $a '$T/$CASE/c.patch' $b && echo c same || echo c differs"
+  [ "$(cat "$T/$CASE/run.out")" = $'b differs\nc same' ] \
+    || fail "a retry that drops main's footer is the same change, or the edit over the footer is not: $(cat "$T/$CASE/run.out")"
+}

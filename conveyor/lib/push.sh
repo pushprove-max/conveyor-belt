@@ -682,7 +682,8 @@ samechange() { # <earlier patch> <the commit it was made on> <later patch> <the 
     while IFS= read -r -d '' p; do
       # Each entry is "<mode> <type> <id>", or nothing for a file the patch deletes.
       ea=$(g ls-tree "$ta" -- "$p") && eb=$(g ls-tree "$tb" -- "$p") && mo=$(g ls-tree "$2" -- "$p") && mt=$(g ls-tree "$4" -- "$p") || exit 1
-      ea=${ea%%$'\t'*} eb=${eb%%$'\t'*} mo=${mo%% *} mt=${mt%% *}
+      ea=${ea%%$'\t'*} eb=${eb%%$'\t'*} mo=${mo%%$'\t'*} mt=${mt%%$'\t'*}
+      o=${mo##* } t=${mt##* } mo=${mo%% *} mt=${mt%% *} # the file's blob ids at the two commits, empty when it is not there
       [ -n "$ea$eb" ] || continue
       [ -n "$ea" ] && [ -n "$eb" ] || exit 1
       # The mode is merged as the content is: main's mode change to a file at both commits is the mode the later
@@ -692,10 +693,9 @@ samechange() { # <earlier patch> <the commit it was made on> <later patch> <the 
         if [ "$ma" = "$mo" ]; then ma=$mt; elif [ "$ma" != "$mt" ]; then exit 1; fi
       fi
       [ "${eb%% *}" = "$ma" ] || exit 1
-      [ "${ea##* }" != "${eb##* }" ] || continue
-      # Main did not change the file between the two commits: the change to it differs.
-      o=$(g rev-parse -q --verify "$2:$p") t=$(g rev-parse -q --verify "$4:$p")
-      [ "$o" != "$t" ] || exit 1
+      # Main did not change the file's contents between the two commits: the same change gives the same blob.
+      if [ "$o" = "$t" ]; then [ "${ea##* }" = "${eb##* }" ] && continue; exit 1; fi
+      # Main did change its contents: equal blobs are not enough, as the later patch may drop main's change, so the merge decides.
       { [ -z "$o" ] || g cat-file blob "$o"; } > "$d/o" && { [ -z "$t" ] || g cat-file blob "$t"; } > "$d/t" \
         && g cat-file blob "${ea##* }" > "$d/x" && g merge-file -p "$d/x" "$d/o" "$d/t" > "$d/m" 2>/dev/null \
         && [ "$(g hash-object -- "$d/m")" = "${eb##* }" ] || exit 1
