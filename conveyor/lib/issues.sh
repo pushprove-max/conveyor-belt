@@ -553,14 +553,18 @@ ghvalue() { # <gh arguments>: the value options of this command, space-separated
   esac
   printf ' %s %s ' "$GHVALUE" "$more"
 }
-# The terms file the host file names (terms; ~/ is the user's home), when it can be read; nothing otherwise.
+# The terms file the host file names (terms; ~/ is the user's home), when it can be read; nothing otherwise. A name
+# with a line break or a NUL byte is never read: the shell drops a NUL byte, and a line break at the end, so another
+# file would be read (bug: "./terms\n" read an empty ./terms, and a public commit carried a term of the file named).
+# A host file of more than one value names no file (bug: the second value's file was read in place of the first's).
 termsfile() {
   local t
-  t=$(jq -r '.terms // empty' "$HOST" 2>/dev/null); [[ $t != "~/"* ]] || t=$HOME/${t#"~/"}
+  t=$(jq -rs 'select(length == 1) | .[0].terms // empty | select(type != "string" or (test("\n|\u0000") | not))' "$HOST" 2>/dev/null)
+  [[ $t != \~/* ]] || t=$HOME/${t#\~/}
   [ -r "$t" ] && [ ! -d "$t" ] && printf '%s' "$t"
 }
-# Whether the host file may name a terms file: 1 only when there is no host file or it is an object with no terms.
-termsnamed() { [ -e "$HOST" ] && ! jq -e 'type == "object" and (.terms // "") == ""' "$HOST" >/dev/null 2>&1; }
+# Whether the host file may name a terms file: 1 only when there is no host file or it is one object with no terms.
+termsnamed() { [ -e "$HOST" ] && ! jq -se 'length == 1 and (.[0] | type == "object" and (.terms // "") == "")' "$HOST" >/dev/null 2>&1; }
 gh_write() { # <gh arguments>
   local a st d h mode terms hits rc pre src v fld i c w want='' n=0 args=() val cmd ended=''
   val=$(ghvalue "$@"); cmd=$(ghcmd "$@")
@@ -618,9 +622,10 @@ gh_write() { # <gh arguments>
 }
 # <text>: each word of the text (a run of characters that are not spaces) the privacy check flags, once, as
 # "<the hit's name>\t<word>"; the check reads the text as gh_write does: the <cards> and <state> folders so named, each
-# word with its string escapes decoded as well, the host's terms file. Fails when the check could not be made. A hit
-# that only words together make (a private key header, a term of two words) is printed as the shortest run of words
-# of one line that holds it, those words with the spaces between them as the text has them.
+# word with its string escapes decoded as well, the host's terms file. Fails when the check could not be made, as when
+# the host file names a terms file that cannot be read. A hit that only words together make (a private key header, a
+# term of two words) is printed as the shortest run of words of one line that holds it, those words with the spaces
+# between them as the text has them.
 privwords() {
   local a t hits terms w l rc
   local row='def row: [., ('"$UNESCAPE"')] | map(gsub("[\\n\\r]"; " ")) | join(" ");'
@@ -631,7 +636,10 @@ privwords() {
       | capture("^(?<l>[0-9]+): (?<n>[^(]*[^ (])") | "\(.l) \(.n)"'
   }
   a=${1//"$CARDS"/<cards>}; a=${a//"${STATE%/*}"/<state>}
-  t=$(mktemp) || return 1; terms=$(termsfile)
+  # A terms file the host file names that cannot be read: its terms are unknown, so the check cannot be made (as
+  # gh_write holds a public write). Bug: the check ran with no terms, and a public rollout's commit carried a term.
+  terms=$(termsfile); [ -n "$terms" ] || ! termsnamed || { echo "conveyor: privacy: the host file's terms file cannot be read" >&2; return 1; }
+  t=$(mktemp) || return 1
   # One line per word: the word, then each decoding of it (one line, its line breaks made spaces).
   jq -rn --arg a "$a" "$row"' $a | [scan("\\S+")] | unique[] | row' > "$t" && l=$(privhit) \
     && w=$(jq -rn --arg a "$a" --arg l "$l" '[$a | scan("\\S+")] | unique as $w

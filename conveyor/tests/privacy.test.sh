@@ -117,6 +117,31 @@ t_privjson() {
   out=$(loop gh-write issue comment 7 --body-file "$T/$CASE/none" 2>&1); [ $? = 3 ] && [ "$(wc -l < "$STUB/comments")" = 1 ] || fail "an unreadable body file was posted: $out"
 }
 
+# Bug (#1486): with the host file naming a terms file that cannot be read, privwords() ran the check with no terms and
+# passed, so privmask() left a term in a public card's Rollout lines (cardready(), lib/cardland.sh) and the commit
+# carried it. Now the check fails, and the card is blocked. With the file readable, the same line has the term masked.
+t_privterms() {
+  privsetup; local ro='Open port 22 to Zed | the deploy fails | a.txt:2' h
+  fx_in "privmask '$ro'"
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = 'Open port 22 to <private term> | the deploy fails | a.txt:2' ] \
+    || fail "privmask '$ro' with a readable terms file did not mask the term (exit $RC): $(cat "$T/$CASE/run.out")"
+  # Each host file names a terms file that cannot be read (<stub>/none is missing, <stub>/empty is readable and empty).
+  # Bugs: the shell dropped a line break at the end of the name (h1) or a NUL byte in it (h2), so <stub>/empty was read
+  # in place of the file named; of a host file of two values, the first named the file, and the second named
+  # <stub>/empty (h3, termsfile()) or no file (h4, termsnamed()); each time the check passed with no terms.
+  : > "$STUB/empty"; mkdir "$T/$CASE/hosts"
+  jq -n --arg t "$STUB/none" '{terms: $t}' > "$T/$CASE/hosts/h0"
+  jq -n --arg t "$STUB/empty" '{terms: ($t + "\n")}' > "$T/$CASE/hosts/h1"
+  jq -n --arg t "$STUB/em" '{terms: ($t + "\u0000pty")}' > "$T/$CASE/hosts/h2"
+  jq -n --arg t "$STUB" '{terms: ($t + "/none\n")}, {terms: ($t + "/empty")}' > "$T/$CASE/hosts/h3"
+  jq -n --arg t "$STUB/none" '{terms: $t}, {}' > "$T/$CASE/hosts/h4"
+  for h in "$T/$CASE"/hosts/h*; do
+    cp "$h" "$XDG_CONFIG_HOME/conveyor/host.json"; fx_in "privmask '$ro'"
+    [ "$RC" != 0 ] && grep -q "terms file cannot be read" "$T/$CASE/run.out" && ! grep -q Zed "$T/$CASE/run.out" \
+      || fail "privmask '$ro' with the host file ${h##*/} $(jq -c . "$h" | paste -sd ' ' -) did not fail, or printed the term (exit $RC): $(cat "$T/$CASE/run.out")"
+  done
+}
+
 # A private pack (the test pack's mode): the finding t_privacy holds is posted and filed, with a warning that names no
 # matched text.
 t_privprivate() {
