@@ -382,7 +382,8 @@ MOVEJQ='def files: reduce (split("\n")[]) as $l ([];
 # followed through the round's diff too, in a record {round, id, words, tracked: true} with moved and mkey, or location
 # "needs review": its key keeps to its code, so a later finding at the line that took its place is not joined to it.
 # A finding the judge of the review it fixes accepted (in <review line>, that review's record line: judge.accepted,
-# judged()) keeps the judge's reason, as reason, for the judge of the next review (review.sh fixedbefore()).
+# judged()) keeps the judge's reason, as reason, for the judge of the next review (review.sh fixedbefore()); one the
+# judge gave no readable line for (cost null) keeps none, as the reason it has there is not the judge's.
 # The round is one no review has answered yet: <worktree>.rounds/told and answered go (cardreview() writes them,
 # resumeplan() and keptrep() read them).
 rounded() { # <worktree> <round> <numbered() lines> [<review line>]
@@ -395,7 +396,7 @@ rounded() { # <worktree> <round> <numbered() lines> [<review line>]
       | del(.named, .seen) + {round: $r}
       + (if $f.at == "" then {mkey: $f.key} else follow($f.at; $f.words) end)
       + (if $o == null then {} else {first: ($o | {round, at, line})} end)
-      + ([$rv.judge.accepted[]? | objects | select(.finding == $f.line and .reason != null)] | first | if . then {reason} else {} end)),
+      + ([$rv.judge.accepted[]? | objects | select(.finding == $f.line and .reason != null and .cost != null)] | first | if . then {reason} else {} end)),
     ($h | group_by(.id)[] | last | select(.moved != null and (.id | IN($ids[]) | not))
       | {round: $r, id, words, tracked: true} + follow(.moved; .words))' <<<"$3" >> "$1.rounds/findings.jsonl"
 }

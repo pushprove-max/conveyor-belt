@@ -150,8 +150,9 @@ t_judgebackrun() {
 }
 
 # Bug caught: a finding the judge gave no readable line for is kept in .judge.accepted, so the next review's judge was
-# told "(accepted: the judge gave no line for this finding that could be read)", as if the judge had accepted it.
-# Round 1's judge answers F1 only; F2 is undecided (cost null). Made as t_judgeback makes its round, with no card run.
+# told "(accepted: the judge gave no line for this finding that could be read)", as if the judge had accepted it
+# (rounded() copied that reason into findings.jsonl). Round 1's judge answers F1 only; F2 is undecided (cost null).
+# Fix round 1 is recorded by rounded() alone, with no card run.
 t_judgebackundecided() {
   local f1='[P1] a.txt:2 wrong word. Proof: a.txt:2' f2='[P1] b.txt:3 wrong name. Proof: b.txt:3' wt rd
   judging "[$(issue 7 2026-01-01)]"; wt=$T/$CASE/cards/c7; rd=$wt.rounds
@@ -162,7 +163,11 @@ t_judgebackundecided() {
   jq -e '.judge.accepted | map(select(.n == 2)) | length == 1 and .[0].cost == null and (.[0] | has("undecided") | not)' "$wt.fields" >/dev/null \
     || fail "the review record does not keep F2, which the judge gave no line for, in accepted with cost null: $(jq -c .judge "$wt.fields")"
   jq -c '{card: "c7", issue: 7, step: "review", result: "NO-GO"} + .' "$wt.fields" >> "$ST/cards.jsonl"
-  mkdir -p "$rd" && jq -cn --arg a "$f1" --arg b "$f2" '{round: 1, id: "E1", line: $a}, {round: 1, id: "E2", line: $b}' > "$rd/findings.jsonl"
+  # fixedbefore() takes the reason only from findings.jsonl: fix round 1 is recorded by rounded() itself, given the
+  # review's record line as cardfix() gives it, so a reason rounded() copies for F2 (cost null) reaches the judge.
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && mkdir -p "$rd" && : > "$rd/1.diff" \
+    && rounded "$wt" 1 "$(numbered "$wt")" "$(cat "$wt.fields")" ) || fail "rounded() could not record c7's fix round 1"
   printf '%s\n' "[P1] [E1] $f1" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   echo 'F1 DECLINE: other: the fix changed the word' > "$STUB/judge.2"
   judgeone 7 -
