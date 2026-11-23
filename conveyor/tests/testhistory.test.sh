@@ -257,8 +257,8 @@ t_thretrynew() {
   jq -cn '{card: "c-r", issue: 1, step: "test", time: "2026-11-20T12:15:00Z", result: "pass", times: {"r.test": 10}, timed: [{file: "r.test", sec: 11, cpu: 10}], carried: ["r.test"]}' >> "$ST/cards.jsonl"
   loop test-settings history-start "$TH_START" || fail "the start $TH_START was not saved"
   got=$(th_as testaction testfacts r.test) || fail "testfacts r.test failed with the start $TH_START: $got"
-  [ "$(jq -c '[.runs[] | select(.times != null or .timed != null) | .time]' <<<"$got")" = '["2026-11-20T12:15:00Z"]' ] \
-    || fail "the facts for r.test with the start $TH_START drop the new time a retry carried, or keep the one before it: $got"
+  [ "$(jq -c '[.runs[] | select(.times != null or .timed != null) | [.time, .times, .timed.cpu]]' <<<"$got")" = '[["2026-11-20T12:10:00Z",10,10]]' ] \
+    || fail "the facts for r.test with the start $TH_START drop the new time a retry carried, keep the 900 s one before it, or date it by the step that carried it (12:15) and not the step that ran it (12:10): $got"
 }
 
 # Bug it guards (#1461 B-R390): a survey time counts for each file the Tests page has a row for (testspart() $rows:
