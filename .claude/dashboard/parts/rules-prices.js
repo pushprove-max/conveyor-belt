@@ -145,8 +145,8 @@
     const { p, aliasTo, canon, isModel } = P;
     const ms = S.d.modelSettings && typeof S.d.modelSettings === 'object' ? S.d.modelSettings : {}, c = ctl() || {};
     const roles = new Map(), sessions = new Map(), raw = new Set();
-    // A fast mode (an ID, or the alias it is given, ends in :fast) is marked on its model's row, which shows it, or on
-    // its own row when its model has none (priceFacts).
+    // A fast mode (an ID, the alias it is given or the model the steps' sessions are priced as ends in :fast) is marked
+    // and counted on its model's row, which shows it, or on its own row when its model has none (priceFacts).
     const rowId = (c) => { const b = c.replace(/:fast$/, ''); return b !== c && isModel(b) ? b : c; };
     const role = (id, t) => { raw.add(id); const m = rowId(canon(id)), l = roles.get(m) || []; if (!l.includes(t)) l.push(t); roles.set(m, l); };
     ROLES.forEach((k) => { const s = ms[k]; if (s && typeof s.model === 'string' && s.model) role(s.model, k); });
@@ -156,7 +156,7 @@
     const seen = list(p.seen).filter((x) => x && typeof x.model === 'string' && num(x.sessions) !== null);
     seen.forEach((x) => {
       raw.add(x.model);
-      const m = typeof x.as === 'string' ? x.as.replace(/:fast$/, '') : canon(x.model);
+      const m = typeof x.as === 'string' ? rowId(x.as) : canon(x.model);
       sessions.set(m, (sessions.get(m) || 0) + x.sessions);
     });
     const inUse = (m) => roles.has(m) || sessions.has(m);

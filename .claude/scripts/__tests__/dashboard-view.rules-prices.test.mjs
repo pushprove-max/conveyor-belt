@@ -591,16 +591,19 @@ test('Rules: a role on an alias to a fast mode is marked on the model\'s row', (
 
 // Bug: a fast mode the pack prices for a model with no price of its own (gpt-daybreak-blue-latest:fast) had no row, as
 // only a model's row shows its fast mode, so the reviewer on its alias was marked on no row.
-test('Rules: a fast mode whose model has no price is a row of its own, with its role\'s mark', () => {
+// Bug: the sessions the steps ran on that alias (priced as gpt-daybreak-blue-latest:fast) lost the :fast and were
+// counted on gpt-daybreak-blue-latest, which has no row, so the fast mode's row showed no session count.
+test('Rules: a fast mode whose model has no price is a row of its own, with its role\'s mark and sessions', () => {
   const w = boot({ tab: 'rules' });
   const d = full();
   d.panels.rules.data.prices = JSON.parse(JSON.stringify(PRICES));
   d.panels.rules.data.prices.overrides['gpt-daybreak-blue-latest:fast'] = { input: 4, output: 20, cacheRead: 0.2, aliases: ['gpt-daybreak-blue-latest'] };
+  d.panels.rules.data.prices.seen.push({ model: 'gpt-daybreak-blue-latest', sessions: 2, routes: [], as: 'gpt-daybreak-blue-latest:fast' });
   d.panels.rules.data.modelSettings.reviewer.model = 'gpt-daybreak-blue-latest';
   deliver(w, d);
   const r = rowOf(w, 'gpt-daybreak-blue-latest:fast');
   assert.ok(r && groupOf(w, 'use').contains(r), 'the fast mode has a row, in use');
-  assert.deepEqual(chips(r).filter((x) => x !== 'added'), ['reviewer']);
+  assert.deepEqual(chips(r).filter((x) => x !== 'added'), ['reviewer', '2 sessions in 30 days']);
 });
 
 // Bug: the page head covered the section as it scrolled. jsdom has no layout, so this reads the rule that keeps a part
