@@ -273,6 +273,25 @@ EOF
     || fail "the build session's live record did not name its answer while it ran: $(cat "$STUB/live.seen" "$T/$CASE/run.out" 2>/dev/null)"
 }
 
+# Issue 1524's follow-up: the loop runs with SIGPIPE ignored (systemd's IgnoreSIGPIPE, which machineloop() keeps) and
+# pipefail on. watch() read a session's new lines with `tail | head`: when more had come after them (here a line half
+# written, longer than a pipe holds), tail got EPIPE, the look failed and its lines were never read, so the live
+# record named no output. Here watch() runs so, on an output of one whole answer and a long half line after it.
+t_sessionpipe() {
+  local w=$T/$CASE/c
+  mkdir -p "$T/$CASE"; { echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","name":"Bash","input":{"command":"make"}}],"usage":{"input_tokens":10,"output_tokens":1}}}'
+    printf '{"type":"user","message":{"content":"%s' "$(head -c 1048576 /dev/zero | tr '\0' x)"; } > "$w.out"
+  ( . "$SRC/lib/portable.sh"; eval "$(for g in holds watch; do sed -n "/^$g() {/,/^}/p" "$SRC/lib/session.sh"; done)"
+    set -o pipefail; trap '' PIPE
+    # shellcheck disable=SC2034 # LIVE, STUCK and SESSION_STUCK are read by watch(), defined by the eval
+    LIVE=0.2 STUCK=1200 SESSION_STUCK=600
+    # The session: it ends once its live record names an output, or after 15 s.
+    (for _ in $(seq 150); do jq -e '.last | strings' "$w.live" > /dev/null 2>&1 && { cp "$w.live" "$w.seen"; break; }; sleep 0.1; done) &
+    watch $! "$w.out" "$w.live" build claude-opus-5-5 ) > "$T/$CASE/run.out" 2>&1
+  [ "$(jq -c '[.step, .turns, .action]' "$w.seen" 2>/dev/null)" = '["build",1,"Bash: make"]' ] \
+    || fail "watch() read no line of an output whose last line is half written, with SIGPIPE ignored: $(cat "$w.seen" "$T/$CASE/run.out" 2>/dev/null | cut -c1-300)"
+}
+
 # Issue 366: a main-red fix card's run of main's failing cases after its build (bugproof.sh redproof(), mainred.sh redrun()) keeps
 # its live record in $CARDS/mainrun/<card>.unfixed.live, not <card>.live, and its last line is its build's: health
 # called it stuck 20 minutes after the build while its tests ran. The card's records end with its build, 1300 s ago

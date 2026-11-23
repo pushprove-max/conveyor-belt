@@ -181,8 +181,8 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
       fi
     fi
     if now=$(p_stat "$f") && [ "${now% *}" != "$size" ]; then
-      size=${now% *}; n=$(wc -l < "$f"); [ "$n" -le "$lines" ] || { lines=$n; seen=$EPOCHSECONDS; }
-      new=$(tail -n +$((have + 1)) "$f" | head -n $((n - have)) | jq -cRn --argjson st "$st" --argjson t "${now#* }" --argjson cx "$cx" --arg wt "$wt" '
+      size=${now% *}; n=$(wc -l < "$f"); [ "$n" -le "$lines" ] || { lines=$n; seen=$EPOCHSECONDS; } # the new whole lines, read by one awk that stops at line n: a `tail | head` failed each look that found more after them (a line written since, or one half written), as the loop runs with SIGPIPE ignored (systemd's IgnoreSIGPIPE, kept by machineloop()): tail got EPIPE, pipefail failed the look and its lines were never read
+      new=$(awk -v a="$have" -v b="$n" 'NR > b {exit} NR > a' "$f" | jq -cRn --argjson st "$st" --argjson t "${now#* }" --argjson cx "$cx" --arg wt "$wt" '
         def use: (.cache_creation.ephemeral_1h_input_tokens // 0) as $h | {input: (.input_tokens // 0), write: ((.cache_creation_input_tokens // 0) - $h),
           write1h: $h, read: (.cache_read_input_tokens // 0), output: (.output_tokens // 0)};
         def plus($b): with_entries(.value += ($b[.key] // 0)); def minus($b): with_entries(.value = ([.value - ($b[.key] // 0), 0] | max)); def u0: {input: 0, write: 0, write1h: 0, read: 0, output: 0};
