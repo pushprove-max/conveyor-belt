@@ -213,6 +213,70 @@ test('Needs you: a new P0 with a \'"\' in a two-backtick code span before a cut 
   assert.equal(rows[0].querySelector('.finding-proof-text').textContent, p0.slice(p0.indexOf('it prints')).replace('`"`', '"'), `the P0 proof is whole for the reason ${reason}`);
 });
 
+// Bug: a single repeated P0 whose proof quotes "; [P1]" (cardfix() joins nothing) drew as two rows, split at the
+// quote: with no join outside quotes, the first quoted marker was taken as the join.
+test('Needs you: a single repeated P0 whose proof quotes "; [P1]" draws as one row', () => {
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  const reason = 'the fix for [P0] c.txt:1 deletes the data. Proof: it prints "kept; [P1] x" did not hold after 1 round';
+  d.panels.needs.data.cards.blocked[0].reason = reason;
+  deliver(w, d);
+  const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
+  assert.equal(rows.length, 1, `one row for the reason ${reason}`);
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, 'it prints "kept; [P1] x"', `the proof is whole for the reason ${reason}`);
+});
+
+// Bug: the same P0 with the marker in single quotes still drew as two rows: only '"' and '`' were taken as quotes.
+test("Needs you: a single repeated P0 whose proof quotes '; [P1]' in single quotes draws as one row", () => {
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  const reason = "the fix for [P0] c.txt:1 deletes the card's data. Proof: it prints 'kept; [P1] x' did not hold after 1 round";
+  d.panels.needs.data.cards.blocked[0].reason = reason;
+  deliver(w, d);
+  const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
+  assert.equal(rows.length, 1, `one row for the reason ${reason}`);
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, "it prints 'kept; [P1] x'", `the proof is whole for the reason ${reason}`);
+});
+
+// Bug: a '\"' inside the P0's quoted proof was taken as its closing '"', so the quoted "; [P1]" after it split the
+// single repeated P0 into a false second row.
+test('Needs you: a single repeated P0 whose quoted proof has a \'\\"\' before "; [P1]" draws as one row', () => {
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  const reason = 'the fix for [P0] c.txt:1 deletes the data. Proof: it runs printf "kept \\"; [P1] x" did not hold after 1 round';
+  d.panels.needs.data.cards.blocked[0].reason = reason;
+  deliver(w, d);
+  const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
+  assert.equal(rows.length, 1, `one row for the reason ${reason}`);
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, 'it runs printf "kept \\"; [P1] x"', `the proof is whole for the reason ${reason}`);
+});
+
+// Bug: a new P0 whose proof names 'Stop' in the possessive form ('Stop's) left its "'" quote open, so the join was
+// taken as inside it: one row, the repeated P1 hidden in the P0's proof.
+test("Needs you: a new P0 whose proof has a quoted name in the possessive form is still split from the repeated P1", () => {
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  const reason = "the fix for [P0] c.sh:1 Deletes the data. Proof: 'Stop's response says the suite ended.; [P1] a.sh:1 First wrong. Proof: it fails did not hold after 1 round";
+  d.panels.needs.data.cards.blocked[0].reason = reason;
+  deliver(w, d);
+  const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
+  assert.deepEqual(rows.map((r) => r.querySelector('.finding-claim').textContent), ['Deletes the data.', 'First wrong.'], `one row a finding for the reason ${reason}`);
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, "'Stop's response says the suite ended.", `the P0 proof stops before the P1 for the reason ${reason}`);
+});
+
+// Bug: a new P0 that cites a '"' in a code span left an odd count of '"' before the join, so the join was taken as
+// inside a quote: one row, the repeated P1 in the P0's proof. A mark inside another quote is text.
+test('Needs you: a new P0 that cites a \'"\' in a code span is still split from the repeated P1', () => {
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  const reason = 'the fix for [P0] c.sh:1 Deletes the data. Proof: A row containing `"` clears the file.; [P1] a.sh:1 First wrong. Proof: it fails did not hold after 1 round';
+  d.panels.needs.data.cards.blocked[0].reason = reason;
+  deliver(w, d);
+  const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
+  assert.deepEqual(rows.map((r) => r.querySelector('.finding-claim').textContent), ['Deletes the data.', 'First wrong.'], `one row a finding for the reason ${reason}`);
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, 'A row containing " clears the file.', `the P0 proof stops before the P1 for the reason ${reason}`);
+});
+
 // Bug: a single repeated finding whose proof quotes "; [P2]" drew as two rows, split there: only the engine's join of
 // a new P0 (a reason that starts with [P0]) is split at "; ".
 test('Needs you: a repeated finding whose proof quotes "; [P2]" draws as one row', () => {

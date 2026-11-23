@@ -609,25 +609,28 @@
   // that already says the whole reason has no block. Code spans and file paths are drawn as fill draws them, linked in
   // the card's repository (repoOf). brief (reviewWhy): only the first finding, with the first sentence of its proof.
   const SHOWN_LINES = 12;
-  function reviewWhy(full, repoUrl, known, brief) {
-    const m = /^the fix for (\[P[0-3]\][\s\S]*?)\s+did not hold after \d+ rounds?$/.exec(full);
-    if (!m) return null;
-    const rows = h('ol', 'output-findings');
-    // A repeat's block names a new P0 of its review first, joined to the repeated finding, a P0 or P1, by "; " (card.sh
-    // cardfix()): the recorded reason is one line, so that join, like a new line, starts a finding's row. Only a reason
-    // that starts with the P0 has it, and only its first "; [P0]" or "; [P1]" outside quotes and code spans (a '"'
-    // inside a code span opens no quote; as in Markdown, a run of backticks opens a span that the next run of as many
-    // closes, and a run that none closes is text, unless a join sits at the cut below: then the cut took its closing
-    // run, and its span runs to the cut), or right after the P0's first 300 characters (card.sh keeps no more of it,
-    // so a quote or code span it opened may not close), is it: the findings' texts are as the review wrote them. Bugs:
-    // a proof that quoted "; [P2]" drew as a second finding, one that quoted "; [P1]" after the join as a third, and a
-    // P0 proof that quoted "; [P1]" was cut there, its rest drawn as a false finding that took the repeated P1 in its
-    // proof (also when the engine cut the P0 before its closing quote or backtick, and when a code span before the
-    // quote, with one backtick or more each side, held a '"').
-    const atCut = (i) => [...m[1].slice(0, i)].length === 300;
-    const joins = m[1].startsWith('[P0]') ? [...m[1].matchAll(/; \[P[01]\]/g)].map((x) => x.index) : [];
+  // A repeat's block names a new P0 of its review first, joined to the repeated finding, a P0 or P1, by "; " (card.sh
+  // cardfix()): the recorded reason is one line, so that join, like a new line, starts a finding's row (reviewWhy).
+  // joinAt(s) gives where the join starts in the reason's findings s, or -1 for none. Only a reason
+  // that starts with the P0 has it, and only its first "; [P0]" or "; [P1]" outside quotes and code spans (a '"', or
+  // a "'" that starts a word, opens a quote that only the same mark closes, a "'" only where it ends a word or ends a
+  // quoted name of one word before "s" ('Stop's): a mark inside another quote or a code span, a '\"' inside a '"'
+  // quote, or an apostrophe, is text; as in Markdown, a run of backticks opens a span that the next run of as many
+  // closes, and a run that none closes is text, unless a join sits at the cut below: then the cut took its closing
+  // run, and its span runs to the cut), or right after the P0's first 300 characters (card.sh keeps no more of it,
+  // so a quote or code span it opened may not close), is it: the findings' texts are as the review wrote them. Bugs:
+  // a proof that quoted "; [P2]" drew as a second finding, one that quoted "; [P1]" after the join as a third, and a
+  // P0 proof that quoted "; [P1]" was cut there, its rest drawn as a false finding that took the repeated P1 in its
+  // proof (also when the engine cut the P0 before its closing quote or backtick, and when a code span before the
+  // quote, with one backtick or more each side, held a '"'); a single repeated P0 whose proof quoted "; [P1]" (no
+  // join at all) was split there too, as the first quoted marker stood in for a join that was not found; one that
+  // quoted it in single quotes, or after a '\"' in its quote, was split; a join after a P0 that cited a '"' in a code
+  // span, or a quoted name in the possessive form, was taken as inside a quote.
+  function joinAt(s) {
+    const atCut = (i) => [...s.slice(0, i)].length === 300;
+    const joins = s.startsWith('[P0]') ? [...s.matchAll(/; \[P[01]\]/g)].map((x) => x.index) : [];
     const cutAt = joins.find(atCut) ?? -1;
-    const ticks = [...m[1].matchAll(/`+/g)], spans = [];
+    const ticks = [...s.matchAll(/`+/g)], spans = [];
     for (let k = 0; k < ticks.length; k++) {
       const e = ticks.findIndex((t, j) => j > k && t[0].length === ticks[k][0].length);
       if (e < 0) {
@@ -639,11 +642,24 @@
     }
     const inCode = (i) => spans.some(([a, b]) => i >= a && i < b);
     const outside = (i) => {
-      let quote = false;
-      for (let j = 0; j < i; j++) if (m[1][j] === '"' && !inCode(j)) quote = !quote;
-      return !quote && !inCode(i);
+      const word = (c) => /\w/.test(c ?? '');
+      let q = '', at = 0;
+      const closes = (k) => s[k] === q && (q !== "'" || !word(s[k + 1]) || (/^s(?!\w)/.test(s.slice(k + 1)) && !/\s/.test(s.slice(at, k))));
+      for (let k = 0; k < i; k++) {
+        const c = s[k];
+        if (inCode(k)) continue;
+        if (q === '"' && c === '\\') k++;
+        else if (q) { if (closes(k)) q = ''; }
+        else if (c === '"' || (c === "'" && !word(s[k - 1]))) { q = c; at = k; }
+      }
+      return q === '' && !inCode(i);
     };
-    const join = joins.length ? joins.find((i) => outside(i) || atCut(i)) ?? joins[0] : -1;
+    return joins.find((i) => outside(i) || atCut(i)) ?? -1;
+  }
+  function reviewWhy(full, repoUrl, known, brief) {
+    const m = /^the fix for (\[P[0-3]\][\s\S]*?)\s+did not hold after \d+ rounds?$/.exec(full);
+    if (!m) return null;
+    const rows = h('ol', 'output-findings'), join = joinAt(m[1]);
     (join < 0 ? m[1] : `${m[1].slice(0, join)}\n${m[1].slice(join + 2)}`).split(/\n(?=\[P[0-3]\])/).slice(0, brief ? 1 : Infinity).forEach((t) => {
       const f = /^\[(P[0-3])\]\s*(?:\[(?:E\d+|cleanup)\]\s*)*(?:(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S))?([\s\S]*)$/.exec(t.trim());
       if (!f) return;
