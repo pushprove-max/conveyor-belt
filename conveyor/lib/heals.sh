@@ -27,12 +27,20 @@ healsbatch() { # <area | -> [docs]
   ( # A card with no GitHub issue is added to the Tests page's record (tcput()): that lock is taken before the list's, the
     # order testpick() and its retry take them in. Taken the other way round, each waits for the other with no end,
     # until the pick's time limit (lockedfor(), lib/records.sh) or the Board's call limit stops one.
+    # The rule is read again under the list's lock, as the owner can turn it off while this ask waits for that lock: an
+    # issue filed on the old rule cannot be taken back. Turned off while the cards lock is not held, the list's lock is
+    # let go, the cards lock taken first, and the rule read again.
     noissue=0 tl=''
-    if [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" = false ]; then
-      noissue=1; mkdir -p "$TESTACTS" 2>/dev/null
-      { exec {tl}>>"$TACARDS.lock"; } 2>/dev/null && flock "$tl" || { echo "conveyor: the record of the Tests page's cards could not be locked; nothing filed" >&2; exit 1; }
-    fi
-    flock 9 || exit 1
+    while :; do
+      if [ -z "$tl" ] && [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" = false ]; then
+        mkdir -p "$TESTACTS" 2>/dev/null
+        { exec {tl}>>"$TACARDS.lock"; } 2>/dev/null && flock "$tl" || { echo "conveyor: the record of the Tests page's cards could not be locked; nothing filed" >&2; exit 1; }
+      fi
+      flock 9 || exit 1
+      [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" = false ] || break
+      [ -z "$tl" ] || { noissue=1; break; }
+      flock -u 9
+    done
     # The cards that have not ended (no landed or closed line: in flight or blocked) and their issues. An entry of such a
     # card waits, as does one a review wrote (from: review) on an issue with such a card (a retry's new card): the code
     # its finding names is only in that card's change, so a batch card built on main now finds nothing to fix. It goes

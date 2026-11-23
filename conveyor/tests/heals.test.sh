@@ -413,6 +413,37 @@ t_healsbatchlock() {
     || fail "a batch card with no GitHub issue held the list's lock (held: $held) while it waited for the cards lock, so a pick holding the cards lock never got the list's: $(cat "$out" "$ST/selfheals.jsonl" "$ST/testactions/cards.json" 2>&1)"
 }
 
+# Bug (review of issue 1563): the batch read rules.followupissues before it waited for the list's lock, so an ask that
+# waited while the owner turned the rule off still opened a GitHub issue, which the engine cannot take back. The case
+# holds the list's lock, starts the batch with the rule on, waits until it is blocked on the list's lock (`flock 9`),
+# turns the rule off and lets the lock go. It then plays testpick(), as in t_healsbatchlock: it holds the cards lock
+# while the batch is let into the list's, so a batch that keeps the list's lock while it waits for the cards lock
+# (no `flock -u 9`, lib/heals.sh) stalls a pick that holds the cards lock and waits for the list's.
+# A real `heals batch` and a real lock: only a second process waits for it.
+t_healsbatchrule() {
+  local out=$T/$CASE/batch.out fd cf bp k held=no
+  setup '[]'
+  jq -cn '{id: "h00000000a1", time: "2026-11-20T00:00:00Z", card: "c5", issue: 5, repo: "r", area: "area:engine", finding: "[P2] a.sh:1 a slow poll", why: "it heals", effect: "self-heals", from: "review"}' >> "$ST/selfheals.jsonl"
+  exec {fd}>>"$ST/selfheals.jsonl.lock"; flock "$fd"
+  # shellcheck disable=SC2016 # the inner script reads its own arguments
+  timeout 30 bash -c 'CONVEYOR_MAIN=$1 CONVEYOR_CARDS=$2 exec bash "$3" heals batch area:engine' _ "$R" "$T/$CASE/cards" "$SRC/conveyor.sh" > "$out" 2>&1 {fd}>&- & bp=$!
+  # shellcheck disable=SC2016 # wait_until evaluates the loop
+  wait_until 'for k in $(below '"$bp"'); do [ "$(ps -o args= -p "$k" 2>/dev/null)" = "flock 9" ] && break; done' \
+    || { exec {fd}>&-; fail "the batch did not wait for the list's lock"; }
+  loop control rules followupissues=off > /dev/null || { exec {fd}>&-; fail "control rules followupissues=off was refused"; }
+  mkdir -p "$ST/testactions"
+  exec {cf}>>"$ST/testactions/cards.json.lock"; flock "$cf"
+  exec {fd}>&-
+  wait_until "waits_on_a_lock $bp" || { exec {cf}>&-; fail "heals batch area:engine, let into the list's lock after followupissues was turned off, did not wait for the cards lock: $(cat "$out")"; }
+  flock -n "$ST/selfheals.jsonl.lock" true || held=yes
+  exec {cf}>&-
+  wait "$bp"; rc=$?
+  [ "$held" = no ] || fail "heals batch area:engine, let into the list's lock after followupissues was turned off, kept that lock while it waited for the cards lock, so a pick holding the cards lock never got the list's"
+  [ $rc = 0 ] && [ ! -e "$STUB/filed" ] && [ "$(jq -c '.cards | length' "$ST/testactions/cards.json" 2>/dev/null)" = 1 ] \
+    && [ "$(heals .batched)" = "$(jq -r '.cards[0].id' "$ST/testactions/cards.json")" ] \
+    || fail "heals batch area:engine, started with followupissues on and let into the list's lock after it was turned off, opened a GitHub issue or filed no card with none (exit $rc): $(cat "$out" "$STUB/filed" 2>&1)"
+}
+
 # Bug (issue 1565): `retry` moves a blocked card's lines to the retried file, and the issue's next card has no line until
 # it is picked, so in that gap a review finding of the issue counted as ended and a batch card was built on main
 # before the source card's code landed. The issue stays busy until a card of it has landed.
