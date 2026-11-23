@@ -164,6 +164,25 @@ t_old_live() {
   [ "$(grep -c RULESBODY <<<"$c")" = 10 ] \
     || fail "a start without --rules-apart, with 15 open decisions in the live summary, has $(grep -c RULESBODY <<<"$c") of the 10 rules.md lines: $(grep -E 'did not fit|cut to fit' <<<"$c" | cut -c1-200)"
 }
+# t_old's sample with auto off, so the standing text stays in the start, and rules.md grown until the state and the whole
+# rules leave the live summary 20 bytes: the start keeps the 16 lines of state and every line of rules.md, under 10,000
+# characters (the standing text moves to start-rest.md, which leaves the live summary its room). The first start's cut
+# line gives the room the live summary had; the line added to rules.md takes all but 20 bytes of it.
+# Bug it catches: the live summary got the 20 bytes but printed its cut line (about 31 bytes) anyway, so the start went
+# over its limit and rules_text cut rules.md.
+t_old_gap() {
+  local out c n
+  oldsample old_gap
+  (cd "$M" && bash "$SRC/../conveyor.sh" auto off) > /dev/null || fail "auto was not turned off"
+  marked; c=$(hook start sA | ctx)
+  n=$(sed -n 's/^\[live summary cut at \([0-9]*\) bytes\]$/\1/p' <<<"$c")
+  [ -n "$n" ] && [ "$n" -gt 35 ] && [ "$n" -lt 1500 ] && grep -q -- '^- review-retry: ' <<<"$c" \
+    || fail "the first start has the standing text in start-rest.md, or its live summary is not cut under LIVE_CAP with over 35 bytes (the added line's 15 and 20 left), so the gap cannot be set: '$n'"
+  printf 'RULESBODY gap %s\n' "$(printf 'g%.0s' $(seq 1 $((n - 20 - 15))))" >> "$FD/rules.md"
+  out=$(hook start sA); c=$(ctx <<<"$out")
+  [ "$(grep -c RULESBODY <<<"$c")" = 11 ] && [ "$(grep -c STATEBODY <<<"$c")" = 16 ] && [ "${#out}" -lt 10000 ] \
+    || fail "a start without --rules-apart that leaves the live summary 20 bytes (rules.md grown by $((n - 20)) bytes) has $(grep -c RULESBODY <<<"$c") of 11 rules lines, $(grep -c STATEBODY <<<"$c") of 16 state lines, or is ${#out} characters: $(grep -E 'did not fit|cut to fit|cut at' <<<"$c" | cut -c1-200)"
+}
 
 # The sample of t_old (10 lines of rules, 16 of state) fits this repository's own start without --rules-apart: its pack
 # (every standing kind on, its auto.reserved), its record's name, the plugin-home text, the state folder in the checkout
@@ -399,7 +418,7 @@ t_words_notes_full() {
 }
 
 cases=(fit fixed big other race old old_live words_old owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
-cases=(fit fixed big other race old own words_old owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
+cases=(fit fixed big other race old own old_gap words_old owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

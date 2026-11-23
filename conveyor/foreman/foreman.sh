@@ -416,7 +416,7 @@ off() {
 # line that tells the Foreman to Read owner-rules.md stands for them, and names rules.md in the same line when the project has one. That line comes first:
 # the fixed text has no cap, and an output over the limit is shown as a short preview of its start, which keeps it.
 context() {
-  local head mid mrd notes st stl left room cap lv i tiers='' own=0 res=0 rd='' rdl='' tr
+  local head mid mrd notes st stl left room cap lv lcut i tiers='' own=0 res=0 rd='' rdl='' tr
   launcher; FQ=$(printf %q "$LAUNCHER")
   # Without --rules-apart the owner rules come in this output too, so the saved state yields room for them.
   [ -n "$RULES_APART" ] || [ ! -s "$FHERE/owner-rules.md" ] || own=$(($(p_stat "$FHERE/owner-rules.md" | cut -d' ' -f1) + 1))
@@ -427,16 +427,16 @@ context() {
   [ "$own" = 0 ] || rdl="# $FHERE/owner-rules.md$([ ! -s "$FD/rules.md" ] || echo " and $FD/rules.md") did not fit in this start (Claude Code cuts a start over 10,000 characters): Read $([ -s "$FD/rules.md" ] && echo both || echo it) now, before you act."
   # Without --rules-apart, what the state and rules need beyond those lines, best first (tiers): state, owner rules and
   # rules.md; state and owner rules; owner rules. The live summary gets what the rest, those lines and the best tier that
-  # fits (res; ctx_tier <bytes> gives its place) leave, up to LIVE_CAP, less the shortest notes list (context_notes 0). If
-  # under 0, or if a better tier then fits, auto's rules and the standing kinds go to start-rest.md, named by a Read line.
-  # Bug: the output was over 10,000 characters, or auto's rules or a full live summary swapped the state for a Read line.
+  # fits (res; ctx_tier <bytes> gives its place) leave, up to LIVE_CAP, less the shortest notes list (context_notes 0) and
+  # live()'s cut line (lcut), printed at any cap. If under 0, or if a better tier then fits, auto's rules and the standing
+  # kinds go to start-rest.md, named by a Read line. Bug: a start over the limit, or the state or rules.md swapped or cut.
   st=$(context_state); [ -n "$RULES_APART" ] || { i=$(($([ -z "$st" ] && echo 0 || printf '%s\n' "$st" | wc -c) - $(printf '%s\n%s\n\n' "$stl" "$rdl" | wc -c))); tiers="$((i + $(rules_text "$CTX_LIMIT" | wc -c))) $((i + own))"; [ "$own" = 0 ] || tiers+=" $((own - ${#rdl} - 2))"; }
   ctx_tier() { local t n=0; for t in $tiers; do [ "$t" -le "$1" ] && break; n=$((n + 1)); done; echo "$n"; }
-  ctx_room() { room=$((CTX_LIMIT - $(printf '%s\n%s%s\n%s\n\n' "$head" "$mid" "$stl" "$rdl" | wc -c))) cap=$((room - $(context_notes 0 | wc -c) - 1)); }
+  lcut="[live summary cut at $LIVE_CAP bytes]"; lcut=$((${#lcut} + 1)); ctx_room() { room=$((CTX_LIMIT - $(printf '%s\n%s%s\n%s\n\n' "$head" "$mid" "$stl" "$rdl" | wc -c))) cap=$((room - $(context_notes 0 | wc -c) - 1 - lcut)); }
   mrd=$(printf '\n# %s (auto'"'"'s rules and the standing kinds of routine yes) did not fit in this start (Claude Code cuts a start over 10,000 characters): Read it now, before you act.\n\nx' "$FD/start-rest.md"); mrd=${mrd%x}
   ctx_room; if [ "$cap" -lt 0 ] || [ "$(ctx_tier $((cap + $(printf %s "$mid" | wc -c) - $(printf %s "$mrd" | wc -c))))" -lt "$(ctx_tier "$cap")" ]; then
     printf '%s' "$mid" > "$FD/start-rest.md.$$" && mv -f "$FD/start-rest.md.$$" "$FD/start-rest.md" && mid=$mrd && ctx_room; fi
-  read -ra tr <<<"$tiers 0"; res=${tr[$(ctx_tier "$cap")]}; cap=$((cap - res))
+  read -ra tr <<<"$tiers 0"; res=${tr[$(ctx_tier "$cap")]}; cap=$((cap - res + lcut))
   [ "$cap" -le "$LIVE_CAP" ] || cap=$LIVE_CAP; [ "$cap" -ge 0 ] || cap=0
   lv=$(LIVE_CAP=$cap live); mid+=$lv
   notes=$(context_notes $((room - res - $(printf '%s\n' "$lv" | wc -c) - 1))); [ -z "$notes" ] || head+=$'\n'$notes
