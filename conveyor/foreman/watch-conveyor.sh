@@ -271,8 +271,9 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
 # the stop sent-stop names, which stop.sh refused (refused-stops): the waiter relays that wake again (waiter.sh). One
 # line each, "<repo>: not yet reported: blocked <the card: #N, or a main-red fix card's name>". A wake line and a problem
 # line are matched without the "(as of HH:MMZ)" either may end with (PROBLEMS: a snapshot behind the card records), as
-# the wake and the snapshot read now can differ in it alone, and a wake line matches with the note reviewretry() adds
-# after it ("; the review-retry of #N failed: <error>", or that the act was not logged), which the status line has not.
+# the wake and the snapshot read now can differ in it alone: the status builds its blocked lines from the card records
+# now (NOWBLOCKED), with no such suffix. A wake line matches with the note reviewretry() adds after it ("; the
+# review-retry of #N failed: <error>", or that the act was not logged), which the status line has not.
 unreported() {
   local pend k=''
   pend=$(cat "$PENDING"/*.wake 2>/dev/null)
@@ -281,8 +282,8 @@ unreported() {
   jq -rRs --argjson now "$1" --argjson poll "$POLL" --arg seen "$(cat "$SEEN" 2>/dev/null)" \
     --arg pend "$pend" 'def bare: sub(" \\(as of [0-9]{2}:[0-9]{2}Z\\)$"; "");
     def tail: test("^( \\(as of [0-9]{2}:[0-9]{2}Z\\))?(; (the review-retry of #[0-9]+ failed|#[0-9]+ was retried \\(review-retry\\), but the act was not logged): .*)?$");
-    ($seen | split("\n")) as $seen | ($pend | split("\n")) as $pend
-    | split("\n")[] | select(. != "") | split("\t") | select(.[2] == "blocked") | .[0] as $repo | .[4] as $text
+    ($seen | split("\n")) as $seen | ($pend | split("\n") | map(bare)) as $pend
+    | split("\n")[] | select(. != "") | split("\t") | select(.[2] == "blocked") | .[0] as $repo | (.[4] | bare) as $text
     | ($text | capture(" is blocked since (?<t>[0-9T:-]+Z):") | .t | fromdate? // empty) as $t
     | ("\($repo): \($text)" | bare) as $w
     | select($now - $t >= 2 * $poll and (("\($repo)/\(.[1])" | IN($seen[]) | not) or any($pend[]; startswith($w) and (.[($w | length):] | tail))))

@@ -452,6 +452,32 @@ grep -qx 'not yet reported: blocked #7' <<<"$out" \
   || fail "with the wake '$w' relayed at the refused stop k1, the status does not name #7 as not yet reported: $out"
 }
 
+# Bug caught: the watcher queued a block from a snapshot behind the card records, so its wake line ends in
+# " (as of HH:MMZ)"; the status builds that block from the card records now (NOWBLOCKED) with no suffix, and the
+# exact match missed both the wake still pending (#8) and the wake relayed at the refused stop (#9), so the status
+# left them out; and a later poll, from a snapshot made at another time, gave the next wake (for the new #10) none of
+# them, as its own block lines end in another time.
+t_unrepsentasof() {
+CASE=unrepsentasof; fixture unrepsentasof; mkdir -p "$FD/pending"
+b() { echo "{card: \"c$1\", issue: $1, since: \"2026-11-15T11:00:00Z\", reason: \"tests failed twice\"}"; } # <issue>
+snap ".recordsNewer = true | .snapshotAt = \"2026-11-15T11:50:00Z\" | .health.blocked = [$(b 8), $(b 9)]
+  | .recordsNow = {blocked: [$(b 8), $(b 9)], waiting: []}"
+printf '%s\n' alpha/blocked:c8 alpha/blocked:c9 > "$FD/conveyor-reported.txt"
+w8='alpha: #8 is blocked since 2026-11-15T11:00:00Z: tests failed twice (as of 11:50Z)'
+w9='alpha: #9 is blocked since 2026-11-15T11:00:00Z: tests failed twice (as of 11:50Z)'
+printf '%s\n' 'Conveyor: alpha: blocked: #8' "$w8" > "$FD/pending/20261115T110000Z-1-p.wake"
+printf '%s\n' 'Conveyor: alpha: blocked: #9' "$w9" > "$FD/pending/20261115T110000Z-2-x.wake.sent-S.42"
+echo k1 > "$FD/sent-stop"; echo k1 > "$FD/refused-stops"
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+grep -qx 'not yet reported: blocked #8' <<<"$out" || fail "with the pending wake '$w8' of #8, the status does not name #8 as not yet reported: $out"
+grep -qx 'not yet reported: blocked #9' <<<"$out" || fail "with the wake '$w9' of #9 relayed at the refused stop k1, the status does not name #9 as not yet reported: $out"
+snap ".recordsNewer = true | .snapshotAt = \"2026-11-15T11:55:00Z\" | .health.blocked = [$(b 8), $(b 9), $(b 10)]"
+poll || fail "no wake for the new blocked card #10 (snapshot of 11:55Z): $(cat "$T/err")"
+w=$(cat "$(find "$FD/pending" -name '*.wake' ! -name 20261115T110000Z-1-p.wake)")
+[ "$(grep 'not yet reported' <<<"$w")" = $'alpha: not yet reported: blocked #8\nalpha: not yet reported: blocked #9' ] \
+  || fail "a poll of a snapshot made at 11:55Z, with the pending wake '$w8' and the wake '$w9' relayed at the refused stop k1, gave a wake that does not name #8 and #9 as not yet reported: $w"
+}
+
 # Issue 1029: `serve` and all under it were stopped by a stop signal (state T), and the wake said only "#N is stuck:
 # no new step and no output", with no cause and no way out. A stopped engine health reads (engineStopped) is one item,
 # naming the card it holds, and a stuck card whose own process health reads as stopped (stopped: {pid, of, since}) is
@@ -568,7 +594,7 @@ watcher: last poll ended 2026-11-15T11:59:47Z, took 47 s (alpha: slow, read heal
 waiter: listening" ] || fail "ask alpha foreman status (host devhost, live waiter $wp) did not give this Foreman's watcher and waiter: $out"
 }
 
-cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog unreported unrepsent unrepasof unrepretry stopped resumed resumedhost askhost)
+cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog unreported unrepsent unrepasof unrepretry unrepsentasof stopped resumed resumedhost askhost)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
