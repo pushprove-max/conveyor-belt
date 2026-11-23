@@ -327,6 +327,97 @@ t_needsautoprofile() {
     || fail "for a block reason of ${#pad} characters before \"it moves .claude/scripts/__tests__/ away\", which the profile holds, the decision was answered, or its question does not name the item: $(nadec c0-7)"
 }
 
+# Bug (follow-up of #1571): the question was cut once, when it was put, so one put before the host got the owner's
+# profile named no profile item past the cut; after `auto on` sent the profile there (`auto rulings`, the
+# {source: "profile"} row of auto/rulings.jsonl), the engine's pass answered it "Retry keeping the work" and retried the
+# card. auto decide reads the whole block reason the engine kept, and the decision waits for the owner. The kept text is
+# removed after the question is put, as an engine before this fix kept none (review E1). auto decide, run before the
+# loop's next pass keeps it again for the decision already in the ledger, leaves the cut question for the owner.
+t_needsautolate() {
+  local pad
+  setup "[$(issue 7 2026-01-01)]"; nainit 7
+  pad=$(printf 'the build stopped. %.0s' {1..17})
+  jq -c --arg p "$pad" '.reason |= "\($p)it moves .claude/scripts/__tests__/ away"' "$ST/cards.jsonl" > "$T/$CASE/cards.new" && mv "$T/$CASE/cards.new" "$ST/cards.jsonl" || fail "the card's reason"
+  nask
+  nadec c0-7 | jq -e '.answeredAt == null and (.question | contains("__tests__") | not)' > /dev/null || fail "the question was not put, or it names the item before the profile came: $(nadec c0-7)"
+  grep -qF '.claude/scripts/__tests__/ away' "$ST/auto/asked/blocked-c0-7.txt" 2>/dev/null \
+    || fail "the question was put, but the whole block reason was not kept in auto/asked/blocked-c0-7.txt: $(cat "$ST/auto/asked/blocked-c0-7.txt" 2>&1)"
+  rm -f "$ST/auto/asked/blocked-c0-7.txt"
+  printf '%s\n' '{"source":"profile","held":[".claude/scripts/__tests__/"]}' > "$ST/auto/rulings.jsonl" || fail "the profile sent to the host"
+  naauto on
+  loop auto decide > "$T/$CASE/decide.out" 2>&1 || fail "auto decide failed: $(cat "$T/$CASE/decide.out")"
+  [ "$(nadec c0-7 | jq .answeredAt)" = null ] && grep -qF -- '- blocked-c0-7: ' "$AUTOLOG" \
+    || fail "auto decide, run before the loop kept the whole block reason again, answered the cut question or did not leave it for the owner: $(nadec c0-7) $(cat "$T/$CASE/decide.out")"
+  najob
+  grep -qF '.claude/scripts/__tests__/ away' "$ST/auto/asked/blocked-c0-7.txt" 2>/dev/null \
+    || fail "the loop's pass did not keep the whole block reason again for the decision already in the ledger"
+  # Review E5: the job ran no decide pass on a decision already waiting, so this pass is the one that reads the kept text.
+  loop auto decide > "$T/$CASE/decide.out" 2>&1 || fail "auto decide failed: $(cat "$T/$CASE/decide.out")"
+  [ "$(nadec c0-7 | jq .answeredAt)" = null ] && ! naretried c0-7 \
+    || fail "for a block reason of ${#pad} characters before \"it moves .claude/scripts/__tests__/ away\", put before the profile that holds it came, the decision was answered or the card retried: $(nadec c0-7) $(cat "$T/$CASE/run.out")"
+}
+
+# Bug (follow-up of #1571, review E2): the same for a held issue of the nightly whole test. Its list of failing tests was
+# cut once, when the question was put, and kept by no file in an engine before this fix, so a profile item that came
+# later and is named past the cut did not hold the decision: the engine's pass released the issue. The kept list is
+# removed after the question is put, as such an engine kept none. auto decide, run
+# before the loop's next pass keeps it again, leaves it for the owner; the decision waits, and #7 stays held.
+t_needsmainlate() {
+  setup "[$(issue 7 2026-01-01)]"; mmain 7
+  jq -cn '{sha: "abc", filed: [{issue: 7, cases: ([range(20) | "x.test.sh: case pad\(.)"] + [".claude/scripts/__tests__/board.test.js: board"])}]}' > "$ST/maintest.json" || fail "the whole test's record"
+  nmain
+  mdec 7 | jq -e '.answeredAt == null and (.question | contains("__tests__") | not)' > /dev/null || fail "the question was not put, or it names the item before the profile came: $(mdec 7)"
+  grep -qF '.claude/scripts/__tests__/board.test.js' "$ST/auto/asked/mainred-7.txt" 2>/dev/null \
+    || fail "the question was put, but the whole list of tests was not kept in auto/asked/mainred-7.txt: $(cat "$ST/auto/asked/mainred-7.txt" 2>&1)"
+  rm -f "$ST/auto/asked/mainred-7.txt"
+  printf '%s\n' '{"source":"profile","held":[".claude/scripts/__tests__/"]}' > "$ST/auto/rulings.jsonl" || fail "the profile sent to the host"
+  naauto on
+  loop auto decide > "$T/$CASE/decide.out" 2>&1 || fail "auto decide failed: $(cat "$T/$CASE/decide.out")"
+  [ "$(mdec 7 | jq .answeredAt)" = null ] && grep -qF -- '- mainred-7: ' "$AUTOLOG" \
+    || fail "auto decide, run before the loop kept the whole list of tests again, answered the cut question or did not leave it for the owner: $(mdec 7) $(cat "$T/$CASE/decide.out")"
+  najob
+  grep -qF '.claude/scripts/__tests__/board.test.js' "$ST/auto/asked/mainred-7.txt" 2>/dev/null \
+    || fail "the loop's pass did not keep the whole list of tests again for the decision already in the ledger"
+  # Review E5: the job ran no decide pass on a decision already waiting, so this pass is the one that reads the kept text.
+  loop auto decide > "$T/$CASE/decide.out" 2>&1 || fail "auto decide failed: $(cat "$T/$CASE/decide.out")"
+  [ "$(mdec 7 | jq .answeredAt)" = null ] && [ "$(jq -c .held "$ST/control.json")" = '[7]' ] \
+    || fail "for a list of 21 failing tests whose last, .claude/scripts/__tests__/board.test.js, is past the cut, put before the profile that holds it came, the decision was answered or #7 released: $(mdec 7) $(cat "$ST/control.json") $(cat "$T/$CASE/run.out")"
+}
+
+# Bug (review E3): askkeep() wrote the kept text in place, so the file was empty from the open until the write, and an
+# `auto decide` that read it then saw no text and answered the cut question. What must stay true: auto decide (the other
+# reader) reads the whole text or none. The loop's pass (needsask, the writer) keeps the text again for the decision in
+# the ledger; its printf is paused after the file is opened, auto decide runs there, and the decision must still wait.
+t_needsautokeep() {
+  local pad
+  setup "[$(issue 7 2026-01-01)]"; nainit 7
+  pad=$(printf 'the build stopped. %.0s' {1..17})
+  jq -c --arg p "$pad" '.reason |= "\($p)it moves .claude/scripts/__tests__/ away"' "$ST/cards.jsonl" > "$T/$CASE/cards.new" && mv "$T/$CASE/cards.new" "$ST/cards.jsonl" || fail "the card's reason"
+  nask
+  printf '%s\n' '{"source":"profile","held":[".claude/scripts/__tests__/"]}' > "$ST/auto/rulings.jsonl" || fail "the profile sent to the host"
+  naauto on
+  # shellcheck disable=SC2016 # run by fx_in's eval, in the engine's shell
+  fx_in 'printf() { if [ "$1" = %s ] && [[ ${2-} == *"__tests__/ away" ]] && [ ! -e "$T/$CASE/paused" ]; then
+      : > "$T/$CASE/paused"; loop auto decide > "$T/$CASE/decide.out" 2>&1; fi; builtin printf "$@"; }; needsask'
+  [ "$RC" = 0 ] && [ -e "$T/$CASE/paused" ] || fail "needsask exited $RC, or it did not keep the block reason again: $(cat "$T/$CASE/run.out")"
+  [ "$(nadec c0-7 | jq .answeredAt)" = null ] && ! naretried c0-7 \
+    || fail "auto decide, run while needsask kept the block reason again, answered the decision whose reason names .claude/scripts/__tests__/ past the cut: $(nadec c0-7) $(cat "$T/$CASE/decide.out")"
+  grep -qF '.claude/scripts/__tests__/ away' "$ST/auto/asked/blocked-c0-7.txt" || fail "the whole block reason is not kept after the pass"
+}
+
+# Bug (review E4): a question of exactly 300 characters is not cut, so the engine kept no text for it, and auto decide,
+# which cannot tell from 300 characters whether a question was cut, left it for the owner on every pass. The engine keeps
+# its text too, and auto decide answers it when nothing in it is reserved.
+t_needsauto300() {
+  local r
+  setup "[$(issue 7 2026-01-01)]"; nainit 7
+  r=$(printf 'the build stopped. %.0s' {1..16}); r=${r:0:300}
+  jq -c --arg r "$r" '.reason = $r' "$ST/cards.jsonl" > "$T/$CASE/cards.new" && mv "$T/$CASE/cards.new" "$ST/cards.jsonl" || fail "the card's reason"
+  naauto on; najob
+  nadec c0-7 | jq -e '.answer == "Retry keeping the work"' > /dev/null && naretried c0-7 \
+    || fail "for a block reason of exactly 300 characters that names nothing reserved, the decision was not answered with its recommended option, or the card not retried: $(nadec c0-7) $(cat "$AUTOLOG")"
+}
+
 # nareview: the case's blocked card (nainit) blocked by its review instead, as card.sh words that block; auto on, with
 # the standing kind review-retry on in the pack.
 nareview() {

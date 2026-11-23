@@ -349,8 +349,10 @@ t_autohostway() {
     || fail "decide with only the rulings sent from the owner's machine did not log their picks for d-docs: $(answer d-docs) $(cat "$log")"
 }
 
-# A blocked-card decision as the engine puts it (lib/needsask.sh): <card> <issue> <reason>, the reason cut at 300 characters.
+# A blocked-card decision as the engine puts it (lib/needsask.sh): <card> <issue> <reason>, the reason cut at 300 characters
+# and one of 300 or more kept whole in auto/asked/blocked-<card>.txt (askcut).
 autoblocked() {
+  [ ${#3} -lt 300 ] || { mkdir -p "$ST/auto/asked" && printf %s "$3" > "$ST/auto/asked/blocked-$1.txt"; } || fail "the whole reason of blocked-$1"
   jq -cn --arg c "$1" --arg n "$2" --arg r "${3:0:300}" '{id: "blocked-\($c)", askedAt: "2026-11-15T10:0\($c | length):00Z", source: "t", answer: null, answeredAt: null,
     question: "Card \($c) (#\($n)) is blocked with its work kept: \($r). What should the engine do with it?",
     proposedDefault: "Retry keeping the work", options: ["Retry keeping the work", "Fresh retry", "Leave it held"]}' >> "$LEDGER"

@@ -16,19 +16,34 @@
 # Test seam: CONVEYOR_LEDGER (decision.sh's).
 NEEDSASK_RETRY='Retry keeping the work' NEEDSASK_FRESH='Fresh retry' NEEDSASK_HELD='Leave it held'
 NEEDSASK_GONE='Closed: the card is no longer blocked with its work kept'
-# askcut <text>: the text's first 300 characters, as a question to the owner gives it. auto decide holds a question that
-# holds a word of the pack's auto.reserved or an item of the owner's profile (lib/standing.sh heldlist), so each such
-# word or item of a longer text is named after the cut, where the cut would hide it; with the list unread, the whole text.
+# askcut <id> <text>: the text's first 300 characters, as the question of decision <id> to the owner gives it. auto
+# decide holds a question that holds a word of the pack's auto.reserved or an item of the owner's profile (lib/standing.sh
+# heldlist), so each such word or item of a longer text is named after the cut, where the cut would hide it; with the
+# list unread, the whole text. The list can grow after the question is put (the owner's profile reaches a host later), so
+# the whole text of a question that may be cut (300 characters or more) is kept first in $ST/auto/asked/<id>.txt
+# (askkeep), where auto decide reads it; it fails, and gives no question, when that file cannot be written.
 askcut() {
   local l w
-  [ ${#1} -gt 300 ] || { printf %s "$1"; return 0; }
+  askkeep "$1" "$2" || return 1
+  [ ${#2} -gt 300 ] || { printf %s "$2"; return 0; }
   heldlist l 2>/dev/null && w=$(jq -rRs --argjson l "$l" 'ascii_downcase as $t
-    | [$l[] | select(. as $w | $t | contains($w | ascii_downcase))] | join(", ")' <<<"$1" 2>/dev/null) || { printf %s "$1"; return 0; }
-  printf %s "${1:0:300}${w:+ (it names: $w)}"
+    | [$l[] | select(. as $w | $t | contains($w | ascii_downcase))] | join(", ")' <<<"$2" 2>/dev/null) || { printf %s "$2"; return 0; }
+  printf %s "${2:0:300}${w:+ (it names: $w)}"
+}
+# askkeep <id> <text>: a text of 300 characters or more kept whole in $ST/auto/asked/<id>.txt. auto decide holds such a
+# question while that file is not there, as its text cannot show whether it was cut, so one of exactly 300 is kept too.
+# needsask() and needsmain() also run it for a decision already in the ledger, each pass before auto decide: one put by an
+# engine that kept no whole text (before this file was kept) gets it there, so an item the profile holds past the cut
+# still holds the decision. Written to a new file, then renamed: auto decide may read the file at the same time, and must
+# never read it empty or in part.
+askkeep() {
+  local f=$ST/auto/asked/$1.txt
+  [ ${#2} -ge 300 ] || return 0
+  mkdir -p "$ST/auto/asked" && printf %s "$2" > "$f.$$.new" && mv "$f.$$.new" "$f" || { rm -f "$f.$$.new"; return 1; }
 }
 needsask() {
   local dec=$HERE/../.claude/scripts/decision.sh led=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl}
-  local cs rows='[]' c n k r e id ans asked opts
+  local cs rows='[]' c n k r e id ans asked opts q
   local -A issue=()
   # The cards blocked now: a card's last closing line is a blocked one, so a card retried (its lines moved to the
   # retried file), shut or landed is not here. Not a card of a main-red fix (issue 0), nor one stopped for the owner's yes.
@@ -36,11 +51,15 @@ needsask() {
   [ ! -e "$led" ] || rows=$(CONVEYOR_MAIN=$MAIN bash "$dec" list) || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
   while IFS=$'\t' read -r c n k r; do
     [ -s "$ST/$k/$c.patch" ] && issue[$c]=$n || continue
-    ! jq -e --arg id "blocked-$c" 'any(.[]; .id == $id)' <<<"$rows" >/dev/null || continue
+    if jq -e --arg id "blocked-$c" 'any(.[]; .id == $id)' <<<"$rows" >/dev/null; then
+      askkeep "blocked-$c" "$r" || echo "conveyor: the whole block reason of decision blocked-$c could not be kept in $ST/auto/asked" >&2
+      continue
+    fi
     # --reask: decision.sh refuses as a repeat a question like one answered in the last 24 hours (the issue's earlier
     # card, retried by hand): this card is a new one, and its id is the check that it is put once.
     opts=$(jq -cn --arg a "$NEEDSASK_RETRY" --arg b "$NEEDSASK_FRESH" --arg c "$NEEDSASK_HELD" '[$a, $b, $c]')
-    e=$(CONVEYOR_MAIN=$MAIN bash "$dec" add "blocked-$c" "Card $c (#$n) is blocked with its work kept: $(askcut "$r"). What should the engine do with it?" \
+    q=$(askcut "blocked-$c" "$r") || { echo "conveyor: decision blocked-$c was not put to the owner: the whole block reason could not be kept in $ST/auto/asked" >&2; continue; }
+    e=$(CONVEYOR_MAIN=$MAIN bash "$dec" add "blocked-$c" "Card $c (#$n) is blocked with its work kept: $q. What should the engine do with it?" \
       "$NEEDSASK_RETRY" "conveyor engine: card $c blocked" --options "$opts" --reask "a new card, $c, is blocked" 2>&1 >/dev/null) \
       && echo "conveyor: card $c (#$n) is blocked with its work kept: put to the owner as decision blocked-$c" >&2 \
       || echo "conveyor: decision blocked-$c could not be put to the owner: ${e//$'\n'/ }" >&2
@@ -89,15 +108,19 @@ mainclose() { local dec=$HERE/../.claude/scripts/decision.sh
 }
 needsmain() {
   local dec=$HERE/../.claude/scripts/decision.sh led=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl}
-  local c rows='[]' n cases id ans asked opts e st rest=()
+  local c rows='[]' n cases id ans asked opts e st q rest=()
   c=$(ctl) || { echo "conveyor: the control record could not be read; no held issue was put to the owner" >&2; return 1; }
   [ ! -e "$led" ] || rows=$(CONVEYOR_MAIN=$MAIN bash "$dec" list) || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
   # A short run (a run that skipped cases) files an issue too, but names no test that fails: left out.
   while IFS=$'\t' read -r n cases; do
-    ! jq -e --arg id "mainred-$n" 'any(.[]; .id == $id)' <<<"$rows" >/dev/null || continue
+    if jq -e --arg id "mainred-$n" 'any(.[]; .id == $id)' <<<"$rows" >/dev/null; then
+      askkeep "mainred-$n" "$cases" || echo "conveyor: the whole list of tests of decision mainred-$n could not be kept in $ST/auto/asked" >&2
+      continue
+    fi
     [ "$(mainstate "$n")" = OPEN ] || continue
     opts=$(jq -cn --arg a "$NEEDSMAIN_RELEASE" --arg b "$NEEDSMAIN_HELD" '[$a, $b]')
-    e=$(CONVEYOR_MAIN=$MAIN bash "$dec" add "mainred-$n" "Issue #$n was filed by the nightly whole test for a test that fails on main ($(askcut "$cases")), and the engine holds it. What should the engine do with it?" \
+    q=$(askcut "mainred-$n" "$cases") || { echo "conveyor: decision mainred-$n was not put to the owner: its whole list of tests could not be kept in $ST/auto/asked" >&2; continue; }
+    e=$(CONVEYOR_MAIN=$MAIN bash "$dec" add "mainred-$n" "Issue #$n was filed by the nightly whole test for a test that fails on main ($q), and the engine holds it. What should the engine do with it?" \
       "$NEEDSMAIN_RELEASE" "conveyor engine: issue #$n held" --options "$opts" --reask "a new issue, #$n, is held" 2>&1 >/dev/null) \
       && echo "conveyor: issue #$n, filed by the nightly whole test, is held: put to the owner as decision mainred-$n" >&2 \
       || echo "conveyor: decision mainred-$n could not be put to the owner: ${e//$'\n'/ }" >&2

@@ -28,6 +28,8 @@
 #   one gets its log entry (question, pick, why, reversible), written before decision.sh answers it with its
 #   recommended option; each one it leaves gets a line under "## Waiting for the owner", once. The Foreman runs it, and
 #   the engine's loop runs it on a new open decision; one pass at a time (decide.lock), so each is decided once.
+#   The whole text of a question the engine cut (<state folder>/auto/asked/<id>.txt) is checked for reserved items too;
+#   a blocked-card or nightly question that may be cut and has no such file waits for the owner.
 #   A blocked-card decision whose issue was already retried (answered with its recommended option) for the same block
 #   reason is left for the owner, not retried again. The owner's own "Retry keeping the work" counts; their "Fresh retry" does not.
 #   The Foreman's pass first sends the owner's rulings to the hosts (hostrulings), so the engine there reads the new ones.
@@ -251,8 +253,23 @@ EOF
       IFS=$'\x1f' read -r id q def asked opts < <(jq -r 'def one: gsub("[\r\n\u001f]+"; " "); [.id, (.question | one), (.proposedDefault | one), .askedAt,
         ((.options // []) | map(one) | join("; "))] | join("\u001f")' <<<"$row")
       # Reserved: a word or phrase of the pack's list, or an item of the owner's profile, in the question, the
-      # recommended option or an option.
-      t=$(jq -r --argjson r "$RES" '([.question, .proposedDefault] + (.options // []) | join("\n") | ascii_downcase) as $t
+      # recommended option or an option. A question the engine cut (lib/needsask.sh askcut) names only the items held when
+      # it was put, so its whole text, kept in $AD/asked/<id>.txt, is read too: an item held since then is past the cut.
+      # An engine before that file put such a question with no kept text, and the loop keeps it there only on its next
+      # pass (needsask, needsmain askkeep): until then a question of 300 characters or more there may be cut, so it waits.
+      # The engine keeps the text of each one of 300 or more, so a question of exactly 300 waits only until that pass.
+      # An empty file is taken as none: askkeep renames a whole file into place and never writes an empty one.
+      wt=''
+      if [[ $id =~ ^(blocked|mainred)-[A-Za-z0-9._-]+$ ]]; then
+        if [ -s "$AD/asked/$id.txt" ]; then
+          wt=$(cat "$AD/asked/$id.txt") || { hold "$id" "$q" "the whole text of its cut question could not be read"; continue; }
+        elif jq -e '.question | (capture("^Card \\S+ \\(#[0-9]+\\) is blocked with its work kept: (?<r>.*)\\. What should the engine do with it\\?$"; "s")
+            // capture("^Issue #[0-9]+ was filed by the nightly whole test for a test that fails on main \\((?<r>.*)\\), and the engine holds it\\. What should the engine do with it\\?$"; "s")
+            // {r: .}) | .r | length >= 300' <<<"$row" >/dev/null; then
+          hold "$id" "$q" "its question may be cut, and its whole text is not kept yet"; continue
+        fi
+      fi
+      t=$(jq -r --argjson r "$RES" --arg w "$wt" '([.question, .proposedDefault, $w] + (.options // []) | join("\n") | ascii_downcase) as $t
         | first($r[] | select(. as $w | $t | contains($w | ascii_downcase))) // ""' <<<"$row")
       if [ -n "$t" ]; then hold "$id" "$q" "reserved: $t"; continue; fi
       # A card blocked again for a reason its issue was already retried for goes to the owner (rules.md "Cards": a repeated
