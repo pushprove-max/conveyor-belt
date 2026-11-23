@@ -178,7 +178,8 @@ p_cwds() {
 # (the process is gone, or another user's). Each entry is read apart from the others, as ps joins them with spaces, so
 # that a value holding " <name>=<value>" reads as that entry too. On macOS the kernel gives them (sysctl
 # KERN_PROCARGS2: argc, the program's path, NUL bytes, then each argument and each entry ended by a NUL byte), into a
-# buffer of kern.argmax bytes, as ps sizes its own: the kernel refuses a bigger one (EINVAL).
+# buffer of kern.argmax bytes, as ps sizes its own. The kernel takes 4 bytes off for argc before it compares the size
+# with kern.argmax, so it accepts up to kern.argmax + 4 bytes and refuses a bigger buffer (EINVAL).
 p_envhas() { # <pid> <name>=<value>
   local v
   if p_darwin; then
