@@ -40,8 +40,8 @@ lines() { # <step>...
 # watch() (lib/session.sh), the engine's own, on a <step> held open until $STUB/go, whose output is <output file> as
 # it stands; its live record is copied to $W.seen once <jq test> holds of it, and it is gone once the step ends.
 viewswatched() { # <output file> <step> <model> <jq test>
-  # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
-  ( . "$SRC/lib/portable.sh"; eval "$(for f in watch rollout holds; do sed -n "/^$f() {/,/^}/p" "$SRC/lib/session.sh"; done)"; LIVE=0.05 STUCK=600
+  # shellcheck disable=SC2034 # LIVE, STUCK and SESSION_STUCK are read by watch(), defined by the eval
+  ( . "$SRC/lib/portable.sh"; eval "$(for f in watch rollout holds; do sed -n "/^$f() {/,/^}/p" "$SRC/lib/session.sh"; done)"; LIVE=0.05 STUCK=600 SESSION_STUCK=600
     (while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.05; done) & watch $! "$1" "$W.live" "$2" "$3" ) > "$T/$CASE/run.out" 2>&1 & run=$!
   # A wait on a real process: watch() keeps the live record only while its step runs and removes it as the step ends
   # (a step that has ended leaves it nothing to read), so the record is read while the step is held.

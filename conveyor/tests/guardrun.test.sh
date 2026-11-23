@@ -95,8 +95,8 @@ t_guardseen() {
   local d=$T/$CASE w=$T/$CASE/cards/c7-7; mkdir -p "$d/cards"
   printf 'crash.sh\tit crashed with exit 1\ncrash.sh\tit crashed with exit 1\n' > "$w.guardfail"
   ( . "$SRC/lib/portable.sh"; eval "$(sed -n '/^watch() {/,/^}/p' "$SRC/lib/session.sh")"
-    # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
-    LIVE=1 STUCK=1200; { sleep 1.4; : > "$d/denied"; exec sleep 30; } > "$w.out" 2>&1 < /dev/null & # sleep: the session reads the refusal 1.4 s in, then goes on until it is ended
+    # shellcheck disable=SC2034 # LIVE, STUCK and SESSION_STUCK are read by watch(), defined by the eval
+    LIVE=1 STUCK=1200 SESSION_STUCK=600; { sleep 1.4; : > "$d/denied"; exec sleep 30; } > "$w.out" 2>&1 < /dev/null & # sleep: the session reads the refusal 1.4 s in, then goes on until it is ended
     watch $! "$w.out" "$w.live" build claude-sonnet-5-5; echo "rc=$?" ) > "$d/run.out" 2>&1
   [ -e "$d/denied" ] || fail "the session was ended before it read the refusal of the guard that failed twice (guardfail: crash.sh twice): $(cat "$d/run.out")"
   grep -qx 'rc=143' "$d/run.out" || fail "the session that read the refusal was not ended by watch() (guardfail: crash.sh twice): $(cat "$d/run.out")"

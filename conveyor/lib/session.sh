@@ -124,16 +124,16 @@ holds() { # <worktree>: when it last changed, epoch seconds: the newest of its f
     | awk -v n="$EPOCHSECONDS" '{t = int($1)} t <= n && t > m {m = t} END {print m + 0}' # a time after now is a wrong clock, not progress
 }
 watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the program that runs it: codex for a Codex build, fix or rebase] [the effort it runs at]
-  local pid=$1 f=$2 out=$3 st new who rc=0 timer n have=0 size=0 now logs roll='' rsize=0 wt=${3%.live} was='' seen=$EPOCHSECONDS at lines=0 rhave=0 rn cs dn cx=false wn wb wk=0 gk=''
+  local pid=$1 f=$2 out=$3 st='' new who rc=0 timer n have=0 size=0 now logs roll='' rsize=0 wt=${3%.live} was='' seen=$EPOCHSECONDS at lines=0 rhave=0 rn cs dn cx=false wn wb wk=0 gk='' cpu=0 cpt=0
   [ "${6:-}" != codex ] || cx=true
   # rm only when there is a file to remove (#532: most steps have none).
   [ "$4" = test ] || { [ ! -e "$wt.stalled" ] && [ ! -L "$wt.stalled" ]; } || { [ ! -s "$wt.stalled" ] || was=$(<"$wt.stalled"); rm -f "$wt.stalled"; }
-  st=$(jq -cn --arg s "$4" --arg m "${5:-}" --arg e "${7:-}" --arg w "$was" --slurpfile tl <([ "$4" != test ] || cat "$wt.testlist" 2>/dev/null) --arg b "${TEST_BEFORE:-}" '{step: $s, at: (now | todate), last: null, turns: 0}
+  while :; do
+    [ -n "$st" ] || { st=$(jq -cn --arg s "$4" --argjson p "$pid" --arg m "${5:-}" --arg e "${7:-}" --arg w "$was" --slurpfile tl <([ "$4" != test ] || cat "$wt.testlist" 2>/dev/null) --arg b "${TEST_BEFORE:-}" '{step: $s, at: (now | todate), last: null, turns: 0, pid: $p}
       + (if $s == "test" then {progress: (now | todate), files: {run: 0, of: null}, tests: null} + (if $tl[0] | type == "object" then {list: $tl[0]} else {} end)
           + (if $b == "" then {} else {before: ($b | tonumber)} end) else {} end)
       + (if $m == "" then {} else {model: $m} end) + (if $e == "" then {} else {effort: $e} end) + (if $w == "" then {} else {stalled: $w} end)') \
-    && printf '%s\n' "$st" > "$out"
-  while :; do
+      && [ -n "$st" ] && printf '%s\n' "$st" > "$out"; } || st='' # the live record, made at the first look and at each look until it is: a first jq that failed left the state empty, each later look failed on it, and the session had no live record (issue 1524); pid: the process watched (health: a session whose record names none runs no session now)
     sleep "$LIVE" > /dev/null 8>&- & timer=$!
     # A bash before 5.3 takes a step that ended off its job table as a job starts (the timer): `wait -n` says "no such
     # job" and waits out the timer (#1319). A step that ended is asked for by itself, below, for its kept status.
@@ -205,8 +205,8 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
         def ocuse: .tokens | {input: (.input // 0), write: (.cache.write? // 0), write1h: 0, read: (.cache.read? // 0), output: ((.output // 0) + (.reasoning // 0))};
         def ocact: (.tool // "a tool" | tostring) + ((.state.input? // {} | objects | .command // .filePath // .pattern // .description // .url // null)
           | if . == null then "" else ": " + short end);
-        # A line with nothing in it is no output: a session that stalls may still be sent such lines, and stays silent.
-        [inputs] as $ls | reduce $ls[] as $l ($st;
+        # A line with nothing in it is no output: a session that stalls may still be sent such lines, and stays silent. A line this cannot read (JSON that is no event object, or an event of a shape it does not know) is passed over, still output (last): its error failed each later look, which read it again, so the live record stopped there for the rest of the session (issue 1524).
+        [inputs] as $ls | reduce $ls[] as $l ($st; . as $kept | try (
           ($l | fromjson? // null) as $e
             # An OpenCode build or review: read first, so the events of a review never reach the reading of a Codex review.
             | if (.model // "" | startswith("opencode:")) then
@@ -238,13 +238,13 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
                 (if .id == $e.message.id then . else (.cur // {}) as $c | .done = ((.done // u0) | plus($c)) | .bmd = bym | .turns += 1 end)
                 | .id = $e.message.id | .cm = ($e.message.model | if type == "string" and . != "" then . else $st.model // "" end) | .cur = ($e.message.usage | use) | .cur as $c | .usage = (.done | plus($c))
                 | (($e.message | act) // .action) as $a | if $a == null then . else .action = $a end
-              else . end)
+              else . end) catch $kept)
           | if (.rdone | type) == "object" then (.rbase // u0) as $b | (sofar | minus($b)) as $a | (.rdone | plus($a)) as $r | (if (.usage // {} | del(.cost) | [.[]] | add // 0) < ($r | [.[]] | add) then .usage = $r else . end) else . end
           | bym as $now | (.rbm // {}) as $was | if (.mu | type) != "object" then . else .stats.byModel = (reduce ($now | keys[]) as $k (.mu; ($now[$k] | minus($was[$k] // u0)) as $d | if $was[$k] != null and ($d | add) == 0 then . else .[$k] = ((.[$k] // {input: 0, write: 0, read: 0, output: 0}) | .input += $d.input | .write += $d.write + $d.write1h | .read += $d.read | .output += $d.output) end) | with_entries(.key as $k | .value += (if $now[$k] == null then {} else {write1h: $now[$k].write1h} end)) | del(.["<synthetic>"])) end
           # zero: a Claude session whose answers so far all report usage 0, and no result yet: its cost is read when its step ends (sofar in snapshot.sh), not "no reading yet".
           | .zero = (.id != null and (.usage // {} | [.[] | numbers] | add // 0) == 0)
           | if any($ls[]; test("\\S")) then .last = ([($t | todate), (.last // "")] | max) else . end' 2>/dev/null) && [ -n "$new" ] && st=$new && have=$n && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
-    fi
+    fi; [ "$4" = review ] || [ $((EPOCHSECONDS - cpt)) -lt $((SESSION_STUCK / 10)) ] || { cpt=$EPOCHSECONDS; cpu=$(p_cpurose "$pid" "$cpu") && new=$(jq -c --argjson t "$cpt" '.cpuAt = ($t | todate)' <<<"$st") && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"; } # a session's CPU use, a sign of life beside its output (health): read from the first look on, each tenth of SESSION_STUCK, its last use is cpuAt, the look that read it (p_cpurose())
     [ $((EPOCHSECONDS - seen)) -ge "$STUCK" ] || continue
     at=$(holds "$wt")
     if [ "$at" -gt "$seen" ]; then

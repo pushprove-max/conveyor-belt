@@ -3,7 +3,8 @@
 # timeout: 300
 # Engine cases: a Claude session whose stream gives every answer usage 0 (a route that reports usage only in its
 # result line, #391): its card says its cost is shown when the step ends, and shows the cost once the result comes;
-# the live usage after a result (the answers after it, the split by model it names) is the one the step's line keeps.
+# the live usage after a result (the answers after it, the split by model it names) is the one the step's line keeps;
+# a look of watch() that fails does not stop the live record.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -28,8 +29,8 @@ echo '{"type":"result","is_error":false,"usage":{"input_tokens":1000000,"cache_c
 until [ -e "$STUB/end" ] || [ ! -d "$STUB" ]; do sleep 0.1; done
 EOF
   ( . "$SRC/lib/portable.sh"; eval "$(sed -n '/^watch() {/,/^}/p' "$SRC/lib/session.sh")"
-    # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
-    LIVE=0.2 STUCK=1200; bash "$STUB/zero-cmd" > "$w.out" 2>&1 < /dev/null &
+    # shellcheck disable=SC2034 # LIVE, STUCK and SESSION_STUCK are read by watch(), defined by the eval
+    LIVE=0.2 STUCK=1200 SESSION_STUCK=600; bash "$STUB/zero-cmd" > "$w.out" 2>&1 < /dev/null &
     watch $! "$w.out" "$w.live" build claude-sonnet-5-5 ) > "$T/$CASE/run.out" 2>&1 & run=$!
   wait_until "jq -e '.zero == true and .turns == 2' '$w.live' > /dev/null" "cat '$w.live'" || fail "the live record does not say every answer reported usage 0"
   b=$(loop snapshot | jq -c '.belt[] | select(.card == "c7-7") | [.reading, .atEnd, .usd]')
@@ -59,8 +60,8 @@ livestream() {
   done
   cp "$1" "$w.out"; printf '%s\n' 'until [ -e "$1" ]; do sleep 0.1; done' > "$T/$CASE/session" # sleep: a session that runs until the case ends it
   ( . "$SRC/lib/portable.sh"; eval "$(sed -n '/^watch() {/,/^}/p' "$SRC/lib/session.sh")"
-    # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
-    LIVE=0.2 STUCK=1200; bash "$T/$CASE/session" "$T/$CASE/end" < /dev/null > /dev/null 2>&1 &
+    # shellcheck disable=SC2034 # LIVE, STUCK and SESSION_STUCK are read by watch(), defined by the eval
+    LIVE=0.2 STUCK=1200 SESSION_STUCK=600; bash "$T/$CASE/session" "$T/$CASE/end" < /dev/null > /dev/null 2>&1 &
     watch $! "$w.out" "$w.live" build claude-sonnet-5-5 ) > "$T/$CASE/run.out" 2>&1 & LIVERUN=$!
   wait_until "jq -e '$2' '$w.live' > /dev/null" "cat '$w.live'" || fail "the live record did not read the stream: $(cat "$w.live" 2>&1)"
   cp "$w.live" "$T/$CASE/live"; [ "${3:-}" = keep ] || { : > "$T/$CASE/end"; wait $LIVERUN; }
@@ -115,4 +116,29 @@ t_zerousagesplit() {
   livestream "$s" '.id == "m3"'
   [ "$(jq -c '.stats.byModel | keys' "$T/$CASE/live")" = '["claude-opus-5-5","claude-sonnet-5-5"]' ] && [ "$(jq -cS .stats.byModel "$T/$CASE/live")" = "$(jq -cS .stats.byModel "$T/$CASE/read")" ] \
     || fail "the live record does not keep the last result's split by model (its usage unreadable), as the step's line does: live $(jq -c .stats "$T/$CASE/live"), at the end $(jq -c .stats.byModel "$T/$CASE/read")"
+}
+# Issue 1524: a build session worked 18 minutes, its output whole when it ended, and health read no live output for
+# it. Card c7-7's build session, watched by the engine's own watch() with no card run, writes a line that reads as
+# JSON but is no event (a number), then, once its live record is made, its answer. watch()'s jq fails once, at its
+# first look (as one can on a loaded machine). Bugs it catches, each alone: that first failure left watch() with no
+# state, every later look failed on it, and no live record was ever made; the number line failed the look that read
+# it and each look after, which read it again, so the live record never named the answer after it.
+t_livewedge() {
+  local w=$T/$CASE/cards/c7-7 run r; setup "[$(issue 7 2026-01-01)]"; mkdir -p "$T/$CASE/cards"
+  cat > "$T/$CASE/session" <<'EOF'
+echo 42
+until [ -s "$1.live" ] || [ -e "$2" ]; do sleep 0.1; done # sleep: the answer comes once watch() has made the live record
+echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","name":"Bash","input":{"command":"make"}}],"usage":{"input_tokens":10,"output_tokens":1}}}'
+until [ -e "$2" ]; do sleep 0.1; done # sleep: a session that runs until the case ends it
+EOF
+  ( . "$SRC/lib/portable.sh"; eval "$(sed -n '/^watch() {/,/^}/p' "$SRC/lib/session.sh")"
+    # shellcheck disable=SC2034 # LIVE, STUCK and SESSION_STUCK are read by watch(), defined by the eval
+    LIVE=0.2 STUCK=1200 SESSION_STUCK=600
+    jq() { [ -e "$T/$CASE/failed" ] || { : > "$T/$CASE/failed"; return 1; }; command jq "$@"; } # the first jq watch() runs fails
+    bash "$T/$CASE/session" "$w" "$T/$CASE/end" > "$w.out" 2> /dev/null < /dev/null &
+    watch $! "$w.out" "$w.live" build claude-sonnet-5-5 ) > "$T/$CASE/run.out" 2>&1 & run=$!
+  wait_until "jq -e '.id == \"m1\" and .action == \"Bash: make\" and (.last | type) == \"string\"' '$w.live' > /dev/null" "cat '$w.live'"; r=$?
+  cp "$w.live" "$T/$CASE/live" 2>/dev/null; : > "$T/$CASE/end"; wait "$run"
+  [ -e "$T/$CASE/failed" ] || fail "watch() ran no jq for the stand-in to fail: $(cat "$T/$CASE/run.out")"
+  [ $r = 0 ] || fail "the live record did not name the answer after a failed first look and a number line ($(head -c 300 "$w.out" 2>/dev/null)): $(cat "$T/$CASE/live" 2>&1)"
 }

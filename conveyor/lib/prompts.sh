@@ -192,8 +192,8 @@ runnerfiles() {
 # and no issue to pick looks again after this. STUCK: `health` lists an open card with no new line and no output for
 # this long (a card waiting at its claim brings its output up to date each poll), and one waiting longer than this on a
 # card that is not alive; a build, fix, rebase or review with no progress for this long is ended and runs once more
-# (watch()). SESSION_STUCK: a card whose session (build, fix, rebase) has had no output for this long is
-# listed too, when that is sooner. CASE_STUCK: so is a card whose test step has one case running for this long (the
+# (watch()). SESSION_STUCK: a card whose session (build, fix, rebase) has had no output and no CPU use for this long
+# is listed too, when that is sooner. CASE_STUCK: so is a card whose test step has one case running for this long (the
 # ceiling of one case). WAIT_LIMIT, in minutes (waitLimitMin): so is a card that has waited on other cards for longer
 # than this in total. SAMPLE: a sample is taken at most this often. LIVE: a running step's live record is brought up to date
 # this often; `watch` streams it. CLOSE_WAIT: after a push, GitHub is given this long to show a landed card's

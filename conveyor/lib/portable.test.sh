@@ -78,6 +78,10 @@ t_host() {
   [ -n "$s" ] && p p_alive $k "$s" || fail "a running process with its start time is not alive: $s"
   p p_alive $k "Thu Jan  1 00:00:00 1970" && fail "a pid with another start time is alive"
   p p_alive $k "" && fail "a pid with no start time is alive"
+  # A CPU reading below the kept one (a process under it ended) is no use, and is kept in its place: else a session
+  # that once ran a busy command had to use as much again before watch() dated a use (issue 1524).
+  s2=$(p p_cpurose $k 5) && fail "p_cpurose $k 5: a reading below the kept one is a use"
+  [ "$s2" = 0 ] || fail "p_cpurose $k 5: the reading of a sleep that used no CPU is not kept in place of 5: $s2"
   # A process is found with its parent and command line, the folder it runs in and what its environment held: doctor
   # tells a loop of another project, and of another host file, by them.
   grep -qx " *$k  *$BASHPID  *[a-z/]* 30" <<<"$(p p_procs)" || fail "the process list does not hold the process: $(p p_procs | grep " $k ")"
@@ -95,6 +99,8 @@ t_host() {
   kill "$(cat "$T/argv")" $s2; wait $s2 2>/dev/null
   kill $e; wait $e 2>/dev/null; p p_env $e P_T >/dev/null && fail "an ended process has an environment"
   kill $k; wait $k 2>/dev/null; p p_alive $k "$s" && fail "an ended process is alive"
+  s2=$(p p_cpurose $k 5) && fail "p_cpurose $k 5: an ended process used CPU"
+  [ "$s2" = 5 ] || fail "p_cpurose $k 5: an ended process did not keep the kept reading: $s2"
   # A process whose parent never reaps it stays a zombie, with its start time: it is not alive.
   bash -c 'sleep 0.2 & echo $!; exec sleep 30' > "$T/z" & k=$! # sleep: a child that ends, and a parent that goes on without reaping it
   wait_until '[ "$(ps -o stat= -p "$(cat "$T/z")" | tr -d " ")" = Z ]' || fail "no zombie: $(ps -o stat= -p "$(cat "$T/z")")"

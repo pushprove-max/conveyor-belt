@@ -112,8 +112,8 @@ c7at() { # <epoch seconds> <step>...
 c7watch() { # <step> <command file>
   local f; w=$T/$CASE/cards/c7-7; f=$w.out; [ "$1" != test ] || f=$w.test; mkdir -p "$w.testlog"
   ( . "$SRC/lib/portable.sh"; eval "$(for g in watch testlogs testcases testdone testprogress; do sed -n "/^$g() {/,/^}/p" "$SRC/lib/session.sh"; done)"
-    # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
-    LIVE=0.5 STUCK=1200; (cd "$T/$CASE" && CONVEYOR_TEST_LOG=$w.testlog exec bash "$2" < /dev/null) > "$f" 2>&1 &
+    # shellcheck disable=SC2034 # LIVE, STUCK and SESSION_STUCK are read by watch(), defined by the eval
+    LIVE=0.5 STUCK=1200 SESSION_STUCK=600; (cd "$T/$CASE" && CONVEYOR_TEST_LOG=$w.testlog exec bash "$2" < /dev/null) > "$f" 2>&1 &
     watch $! "$f" "$w.live" "$1" ) > "$T/$CASE/run.out" 2>&1 & run=$!
 }
 
@@ -175,6 +175,102 @@ t_sessionquiet() {
     || fail "a session with no output for 10 minutes is not stuck: $(CONVEYOR_NOW=$((at + 600)) loop health | jq -c .stuck)"
   # The limit is the pack's setting.
   [ "$(CONVEYOR_NOW=$((at + 600)) tuned '.tunables.sessionStuck = 900' loop health | jq -c .stuck)" = '[]' ] || fail "the session limit is not the pack's tunables.sessionStuck"
+}
+
+# Issue 1524: a build session that worked for 18 minutes was listed stuck, as health read no live output for it. A
+# session that uses CPU works: it is listed only with neither output nor CPU use for tunables.sessionStuck. Card c1-1's
+# process runs watch() over its build session, as session1() does (no card run: the session is a stand-in whose CPU
+# use the case sets), with no live output; its last step began 700 s ago. The session waits out watch's first look,
+# then a child of it uses CPU until the live record names a use (cpuAt) and ends; then the session itself uses CPU
+# until cpuAt moves, and sleeps, its use still counted. Bugs: only a first reading dated, or only a first use, so
+# cpuAt never moves; an old total read as a new use at each look, so cpuAt moves on while the session sleeps.
+# Health's first reading, past the limit after the last use, lists it as idle since then (a bug dated a use health had
+# not seen at its first reading, so an idle session was kept off the list); the second before the limit, it does not
+# (a bug listed a session that worked with no output). With its process gone, it is stuck, and says no live output
+# was recorded and its process is gone.
+t_sessionbusy() {
+  local p now h at f; setup '[]'; now=$(date +%s); mkdir -p "$T/$CASE/cards"
+  # The stand-in session, given the cards folder.
+  cat > "$T/$CASE/session.sh" <<'EOF'
+d=$1 l=$1/c1-1.live
+burn() { for _ in {1..20000}; do :; done; }
+sleep 1 # sleep: no CPU used at the first look of watch
+( until grep -q cpuAt "$l" 2>/dev/null || [ -e "$d/stop" ]; do burn; done )
+jq -r .cpuAt "$l" > "$d/first"; until [ "$(jq -r .cpuAt "$l")" != "$(cat "$d/first")" ] || [ -e "$d/stop" ]; do burn; done
+echo "$$" > "$d/session"; exec sleep 600 # sleep: the session lives on, its CPU still counted, until the case ends it
+EOF
+  # SESSION_STUCK=10: watch reads the session's CPU each second (each tenth of it); health keeps the pack's limit.
+  ( fx_in 'SESSION_STUCK=10 LIVE=0.2; bash "$T/$CASE/session.sh" "$CONVEYOR_CARDS" < /dev/null &
+      watch $! "$CONVEYOR_CARDS/c1-1.out" "$CONVEYOR_CARDS/c1-1.live" build' ) & p=$!
+  stoppedcard "$p" $((now - 700))
+  # Poll: watch reads the CPU from the real process table (ps, whole seconds on Linux), which no stand-in can move: wait
+  # until the session has used a whole second twice, and watch has dated both.
+  for _ in $(seq 300); do [ -s "$T/$CASE/cards/session" ] && break; sleep 0.1; done
+  f=$(cat "$T/$CASE/cards/first" 2>/dev/null); at=$(jq -r --arg f "$f" '.cpuAt | strings | select(. != $f) | fromdate' "$T/$CASE/cards/c1-1.live" 2>/dev/null)
+  [ -n "$f" ] && [ -n "$at" ] || { h=$(cat "$T/$CASE/cards/c1-1.live" "$T/$CASE/run.out" 2>/dev/null); sessionend "$p"
+    fail "watch did not date both uses of CPU the build session made after its first look (first: ${f:-none}): $h"; }
+  # A look whose ps ran as the session stopped can date one more whole second, a second later: at + 601 is past the
+  # limit either way, and the cpuAt health gives is the live record's.
+  h=$(CONVEYOR_NOW=$((at + 601)) loop health | jq -c '.stuck | map([.issue, .late, .outputAt, .process, .cpuAt])')
+  [ "$h" = "[[1,true,null,\"idle\",\"$(jq -r .cpuAt "$T/$CASE/cards/c1-1.live")\"]]" ] \
+    || { sessionend "$p"; fail "health's first reading, tunables.sessionStuck after the session's last CPU use with no output, does not list it as idle since then: $h"; }
+  h=$(CONVEYOR_NOW=$((at + 599)) loop health | jq -c .stuck)
+  sessionend "$p"
+  [ "$h" = '[]' ] || fail "a session that used CPU within tunables.sessionStuck, with no output for longer, is stuck: $h"
+  h=$(CONVEYOR_NOW=$((at + 601)) loop health | jq -c '.stuck | map([.issue, .step, .late, .outputAt, .process])')
+  [ "$h" = '[[1,"build",true,null,"gone"]]' ] || fail "a session whose process is gone is not stuck, or does not say it lacks both: $h"
+}
+# Ends t_sessionbusy's stand-in session (its use of CPU, then its sleep), so watch() and the card's process <pid> end
+# as a step's do.
+sessionend() { # <pid>
+  : > "$T/$CASE/cards/stop"
+  for _ in $(seq 100); do [ -s "$T/$CASE/cards/session" ] && break; sleep 0.1; done
+  kill "$(cat "$T/$CASE/cards/session" 2>/dev/null)" 2>/dev/null; wait "$1" 2>/dev/null
+}
+
+# The same card whose session runs but uses no CPU (a sleep): alive is not working, so it is stuck past the limit, and
+# says its process has used no CPU (its live record names the session's pid, as watch() writes it, and no use: cpuAt
+# null). Its live record has an edit in its worktree 10 s in (progress) and no session line: no live output was
+# recorded (a bug gave the edit's time as outputAt, and the wake said "no output" as if the session had said
+# something). Then the pause before the step runs again: watch() ended the session (a stall) and removed its live
+# record, and the card's process sleeps out the pause (session1()); a refusal of the model API leaves a record that
+# names no session (apitries()). It runs no session (a bug called it a session alive with no CPU use).
+t_sessionidle() {
+  local p now h s; setup '[]'; now=$(date +%s); mkdir -p "$T/$CASE/cards"
+  ( sleep 600 & echo $! > "$T/$CASE/session"; wait ) & p=$! # sleep: the session under the card's process, doing nothing until killed below
+  stoppedcard "$p" "$now"
+  for _ in $(seq 50); do [ -s "$T/$CASE/session" ] && break; sleep 0.1; done
+  jq -cn --argjson t "$now" --argjson s "$(cat "$T/$CASE/session")" '{step: "build", at: ($t | todate), turns: 0, pid: $s, progress: ($t + 10 | todate)}' > "$T/$CASE/cards/c1-1.live"
+  h=$(CONVEYOR_NOW=$((now + 610)) loop health | jq -c '.stuck | map([.issue, .step, .late, .outputAt, .process, .cpuAt])')
+  rm -f "$T/$CASE/cards/c1-1.live"; s=$(CONVEYOR_NOW=$((now + 610)) loop health | jq -c '.stuck | map([.issue, .process, .cpuAt])')
+  pkill -P "$p"; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null # the process may have ended with its sleep
+  [ "$h" = '[[1,"build",true,null,"idle",null]]' ] || fail "an idle session with only a worktree edit past tunables.sessionStuck is not stuck as idle with no live output: $h"
+  [ "$s" = '[[1,"none",null]]' ] || fail "a card in the pause before its step runs again (its process alive, no live record) does not say it runs no session: $s"
+}
+
+# Issue 1524: health reads a session's live output from its live record (<worktree>.live), which watch() brings up to
+# date from the stream the session writes (<worktree>.out). A Claude build session the engine starts (session(),
+# lib/session.sh, on card c7's worktree, no card run): while it runs, its live record names its answer. The stub answers
+# once, then waits for the live record to name that answer and keeps what it read. As the real CLI does with -p, it
+# writes its events as they come only when started with --output-format stream-json and --verbose, else its answer
+# only once it ends: a launch without them (builder()) gives no live output until the session ends.
+t_sessionlive() {
+  setup "[$(issue 7 2026-01-01)]"
+  # stub: a session that answers once and, while it still runs, reads the live record the engine writes of it
+  cat > "$STUB/claude" <<'EOF'
+#!/usr/bin/env bash
+s='' v='' b=''
+for a in "$@"; do [ "$b $a" != "--output-format stream-json" ] || s=1; [ "$a" != --verbose ] || v=1; b=$a; done
+cat > /dev/null
+[ -z "$s" ] || [ -z "$v" ] || echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","name":"Bash","input":{"command":"make"}}],"usage":{"input_tokens":10,"output_tokens":1}}}'
+for _ in $(seq 100); do jq -e '.last | strings' "$PWD.live" > /dev/null 2>&1 && { cp "$PWD.live" "$STUB/live.seen"; break; }; sleep 0.1; done
+[ -n "$s" ] && [ -n "$v" ] || { echo done; exit 0; }
+echo '{"type":"result","is_error":false,"num_turns":1,"usage":{"input_tokens":10,"output_tokens":1}}'
+EOF
+  fx_wt : x.txt x
+  fx_in 'echo "{}" > "$FXWT.settings"; session "$FXWT" brief > /dev/null'
+  [ "$(jq -c '[.step, .turns, .action]' "$STUB/live.seen" 2>/dev/null)" = '["build",1,"Bash: make"]' ] \
+    || fail "the build session's live record did not name its answer while it ran: $(cat "$STUB/live.seen" "$T/$CASE/run.out" 2>/dev/null)"
 }
 
 # Issue 366: a main-red fix card's run of main's failing cases after its build (bugproof.sh redproof(), mainred.sh redrun()) keeps

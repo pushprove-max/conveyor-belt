@@ -168,7 +168,12 @@ cards() {
 # every open card that has waited STUCK seconds on a same-file card that is not alive (not on the belt, or its process
 # gone: the wait never ends) (step waiting, since: when
 # the wait began, waitsOn: that card's {card, issue, state}, as the belt's), every open card whose session (build,
-# fix, rebase) has had no output for SESSION_STUCK seconds, every open card that has waited on other cards for more
+# fix, rebase) has had no output and no CPU use for SESSION_STUCK seconds (each listed session, this or its process
+# gone, has outputAt: the newest session line its live record of the step read, null when none was recorded (an edit
+# in its worktree is not output), and process: "gone" (the card's process), "idle" with cpuAt: its session runs (the
+# live record names its pid) and when the engine's watch of the step last read it using CPU (the live record's cpuAt,
+# watch()), null when it read none, or "none": the card runs no session now, as in the pause before a step runs
+# again), every open card that has waited on other cards for more
 # than WAIT_LIMIT minutes in all (step waiting, since and waitsOn as above, waitedMin: the whole minutes of all its
 # waits, waitedOn: each card it waited on, in order, as waitsOn), and every open card whose test step has a case
 # running for CASE_STUCK seconds (step test, cases: their names, since: when the first of them started; testcases()); engineStopped ({pid, since, pids: it and each stopped process under it}: the
@@ -497,12 +502,21 @@ health() {
        guard: {at: $ctl.guard, reading: $r.pct, readAt: $r.time, missing: ($ctl.guard != null and $r == null)}, start: $ctl.start, newest: (last.time // null),
        blocked: ($b | map(select(.reason | startswith($yes) or startswith($lintyes) | not))), waiting: ($b | map(select(.reason | startswith($yes) or startswith($lintyes)))),
        stuck: ($c | map(select(.end == null) | . + {since: ([.last.time, .out // ""] | max)}
-           # A session (build, fix, rebase) that says nothing is listed after SESSION_STUCK, when that is sooner.
-           | ((.card | IN($gone[])) or $now - (.since | fromdate) >= (if .last.step == "start" and (.last.of | IN("build", "fix", "rebase")) then [$stuck, $sstuck] | min else $stuck end)) as $late
+           # A session (build, fix, rebase) that says nothing is listed after SESSION_STUCK, when that is sooner, and only
+           # while it uses no CPU either: its live record of the step ($sl) has cpuAt, its last CPU use the watch of the
+           # step read (watch()), so a session that works with no line for that long is not stuck. One so listed says what it
+           # lacks: outputAt, the newest line that record read from the session (.last; null: no live output was recorded;
+           # an edit in its worktree, .progress, is not output), and process: "gone" (the card process), "idle" (a session runs,
+           # its record naming its pid, its last CPU use at cpuAt, null when none was read), or "none": no session runs now
+           # (the pause before a step runs again, after a stall or a refusal of the model API, or the wait for its CLI).
+           | (.last.step == "start" and (.last.of | IN("build", "fix", "rebase"))) as $ses | (.card | IN($gone[])) as $g
+           | (.last.of as $o | $live[.card] | if $ses and . != null and .step == $o then . else {} end) as $sl
+           | ($g or $now - ([.since, ($sl.cpuAt | strings) // ""] | max | fromdate) >= (if $ses then [$stuck, $sstuck] | min else $stuck end)) as $late
            | select($late or $stopped.cards[.card])
          | ($live[.card].waits.on // null) as $h
          | {card, issue, step: (if $h then "waiting" else .last | if .step == "start" then .of else .step end end), since} + (if $h then {waitsOn: holder($h)} else {} end)
-           + (if $late then {late: true} else {} end))
+           + (if $late then {late: true} else {} end)
+           + (if $late and $ses then {outputAt: (($sl.last | strings) // null)} + (if $g then {process: "gone"} elif ($sl.pid | type) == "number" then {process: "idle", cpuAt: (($sl.cpuAt | strings) // null)} else {process: "none"} end) else {} end))
          # A step the engine ended for making no progress, run once more (watch()): stuck since its progress stopped,
          # for as long as the run after it goes on.
          | . + [$c[] | select(.end == null and (.card | IN($gone[]) | not)) | $live[.card] as $v

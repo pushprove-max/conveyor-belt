@@ -138,6 +138,21 @@ p_stoppedtree() { # <pid>
       for (i = 1; i <= NR; i++) if (p[i] == r && s[i] ~ /^T/) print p[i]
       for (i = 1; i <= NR; i++) if (p[i] != r && (p[i] in t) && s[i] ~ /^T/) print p[i] }'
 }
+# Whether <pid> and every process under it used a whole second of CPU or more since the <kept> reading (CPU seconds so
+# far, 0 before the first). Prints the reading to keep: this one when that is so, or when it is below <kept> (a process
+# under it ended, and is no longer counted), else <kept>, as it is when <pid> is gone (false). ps gives what a process
+# has used so far, not when: watch() dates a session's use (cpuAt) at the look that read it, never before it was made.
+# ps's time is [dd-]hh:mm:ss on Linux and [[dd-]hh:]mm:ss.ss on macOS: Linux reads whole seconds, so less is no use on
+# macOS either. One ps.
+p_cpurose() { # <pid> <kept CPU seconds>
+  local r
+  r=$(LC_ALL=C ps -A -o pid= -o ppid= -o time= 2>/dev/null | awk -v r="$1" -v b="$2" '
+    { p[NR] = $1; pp[NR] = $2; t = $3; d = 0; if (i = index(t, "-")) { d = substr(t, 1, i - 1); t = substr(t, i + 1) }
+      k = split(t, f, ":"); s = 0; for (i = 1; i <= k; i++) s = s * 60 + f[i]; c[NR] = s + d * 86400; if ($1 == r) h = 1 }
+    END { if (!h) exit; u[r] = 1; do { m = 0; for (i = 1; i <= NR; i++) if ((pp[i] in u) && !(p[i] in u)) { u[p[i]] = 1; m = 1 } } while (m)
+      s = 0; for (i = 1; i <= NR; i++) if (p[i] in u) s += c[i]; print (s >= b + 1 ? s " 1" : (s < b ? s : b) " 0") }') && [ -n "$r" ] || r="$2 0"
+  printf '%s\n' "${r% *}"; [ "${r#* }" = 1 ]
+}
 
 # Runs <command> as the leader of a session of its own (no controlling terminal, a process group of its own) and
 # exits as it does: setsid on Linux; macOS has no setsid command, so perl's POSIX::setsid there.

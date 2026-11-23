@@ -15,7 +15,8 @@
 #     snapshot made before the last change to the card records, only a card health still lists blocked (recheck()),
 #     its line ending "(as of <the snapshot's time>)"
 #   a card stuck (health's stuck: no new step and no output, its process gone, a wait on other cards past the
-#     limit, with the cards it waited on, or a test case that hangs, by name); one whose step the engine ended
+#     limit, with the cards it waited on, or a test case that hangs, by name; a session says whether any live output
+#     was recorded and whether its process is gone, uses no CPU or runs no session now); one whose step the engine ended
 #     for no progress and runs once more (did) is a new problem, and says so ("ended and retried"); a second stall
 #     blocks the card, and its blocked alert says so; one whose process is stopped by a stop signal (health's
 #     stopped) names the stopped process, since when health first read it so, and the command that resumes it, in
@@ -144,7 +145,10 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
       else ["stuck:\(.card)", "stuck", ref, "\(ref) is stuck: " + (
       if (.waitedOn | type) == "array" then "it has waited on other cards for \(.waitedMin) minutes in all (\([.waitedOn[] | objects | ref] | join(", ")))"
       elif (.cases | type) == "array" then "its test step has had \(.cases | map(tostring) | join(", ") | one) running since \(.since)"
-      else "no new step and no output since \(.since) (last step: \(.step))" end)] end),
+      # A session says which signs of life it lacks: live output (none recorded in the step) and a working process.
+      else "no new step and \(if has("outputAt") and .outputAt == null then "no live output recorded" else "no output" end) since \(.since) (last step: \(.step))"
+        + (if .process == "gone" then "; its process is gone" elif .process == "idle" then "; its process has used no CPU"
+          + (if (.cpuAt | type) == "string" then " since \(.cpuAt)" else "" end) elif .process == "none" then "; it runs no session now" else "" end) end)] end),
     # An awaited landing while another awaited issue of this record is on the belt, not blocked, is "held landing": poll() sends
     # the held ones in one wake once none is left (holdlandings()). A held landing kept in conveyor-held.txt that this
     # snapshot and its history no longer list (kept, which record() gives unless the history was asked for and did not

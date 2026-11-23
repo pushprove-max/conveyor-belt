@@ -238,16 +238,25 @@ bash "$SRC/watch-conveyor.sh" --once || fail "no wake for a card two snapshots a
 [ "$(cat "$FD"/pending/*.wake | grep -c '#27 is stuck')" = 1 ] || fail "not one wake for the stuck card: $(cat "$FD"/pending/*.wake)"
 CONVEYOR_FOREMAN_NOW=$((CONVEYOR_FOREMAN_NOW + 60))
 bash "$SRC/watch-conveyor.sh" --once && fail "a stuck card already reported woke again: $(cat "$FD"/pending/*.wake)"
-# A stuck card's line says why: the cards a long wait was behind, the test case that hangs, else the silent step.
+# A stuck card's line says why: the cards a long wait was behind, the test case that hangs, else the silent step; a
+# silent session says what it lacks (issue 1524: a working build read as "no output"): no live output recorded
+# (outputAt null), its process gone or using no CPU since cpuAt, or no session running (a pause before a try again,
+# which a bug called a process that used no CPU).
 rm -f "$FD"/pending/*.wake
 jq -c '.health.stuck = [{card: "c30", issue: 30, step: "waiting", since: "2026-11-11T11:00:00Z", waitsOn: {card: "c33", issue: 33, state: "test"}, waitedMin: 41,
     waitedOn: [{card: "c31", issue: 31, state: "landed"}, {card: "c33", issue: 33, state: "test"}]},
-  {card: "c34", issue: 34, step: "test", since: "2026-11-11T11:30:00Z", cases: ["serve", "views"]}, {card: "c35", issue: 35, step: "build", since: "2026-11-11T11:40:00Z"}]' "$T/ask/beta" > "$T/b" && mv "$T/b" "$T/ask/beta"
+  {card: "c34", issue: 34, step: "test", since: "2026-11-11T11:30:00Z", cases: ["serve", "views"]}, {card: "c35", issue: 35, step: "build", since: "2026-11-11T11:40:00Z"},
+  {card: "c36", issue: 36, step: "build", since: "2026-11-11T11:45:00Z", late: true, outputAt: null, process: "gone"},
+  {card: "c37", issue: 37, step: "fix", since: "2026-11-11T11:50:00Z", late: true, outputAt: "2026-11-11T11:50:00Z", process: "idle", cpuAt: "2026-11-11T11:48:00Z"},
+  {card: "c38", issue: 38, step: "build", since: "2026-11-11T11:55:00Z", late: true, outputAt: null, process: "none"}]' "$T/ask/beta" > "$T/b" && mv "$T/b" "$T/ask/beta"
 bash "$SRC/watch-conveyor.sh" --once; CONVEYOR_FOREMAN_NOW=$((CONVEYOR_FOREMAN_NOW + 60))
-bash "$SRC/watch-conveyor.sh" --once || fail "no wake for three stuck cards"
+bash "$SRC/watch-conveyor.sh" --once || fail "no wake for six stuck cards"
 w=$(cat "$FD"/pending/*.wake)
 for l in "beta: #30 is stuck: it has waited on other cards for 41 minutes in all (#31, #33)" "beta: #34 is stuck: its test step has had serve, views running since 2026-11-11T11:30:00Z" \
-    "beta: #35 is stuck: no new step and no output since 2026-11-11T11:40:00Z (last step: build)"; do
+    "beta: #35 is stuck: no new step and no output since 2026-11-11T11:40:00Z (last step: build)" \
+    "beta: #36 is stuck: no new step and no live output recorded since 2026-11-11T11:45:00Z (last step: build); its process is gone" \
+    "beta: #37 is stuck: no new step and no output since 2026-11-11T11:50:00Z (last step: fix); its process has used no CPU since 2026-11-11T11:48:00Z" \
+    "beta: #38 is stuck: no new step and no live output recorded since 2026-11-11T11:55:00Z (last step: build); it runs no session now"; do
   grep -qF "$l" <<<"$w" || fail "a stuck card's line does not say why ($l): $w"
 done
 }

@@ -133,8 +133,8 @@ stallwatched() { # <step> <stuck> <last shell>
   printf '%s\n' "$p" "$3" > "$T/$CASE/step.sh"
   s=$SECONDS
   ( eval "$(sed -n '/^rollout() {/,/^}/p; /^holds() {/,/^}/p; /^watch() {/,/^}/p' "$SRC/lib/session.sh")"
-    # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), defined by the eval
-    LIVE=0.2 STUCK=$2; (cd "$W" && exec bash "$T/$CASE/step.sh") > "$W.out" 2>&1 < /dev/null &
+    # shellcheck disable=SC2034 # LIVE, STUCK and SESSION_STUCK are read by watch(), defined by the eval
+    LIVE=0.2 STUCK=$2 SESSION_STUCK=600; (cd "$W" && exec bash "$T/$CASE/step.sh") > "$W.out" 2>&1 < /dev/null &
     watch $! "$W.out" "$W.live" "$1" ); RC=$?; TOOK=$((SECONDS - s))
 }
 # Issue 1319: a step that ended before watch() started its timer. Bash 5.1 and 5.2 take a job that ended off their
