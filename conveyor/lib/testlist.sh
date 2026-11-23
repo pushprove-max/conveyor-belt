@@ -20,7 +20,8 @@ slowtests() { # <worktree>
   c=$(git -C "$1" diff --cached --no-renames --name-status -z --diff-filter=AM HEAD 2>/dev/null \
     | jq -cRs 'split("\u0000") | . as $a | [range(0; length - 1; 2) | {key: $a[. + 1], value: $a[.]}] | from_entries') || return 1
   p=$(partran "$1") || return 1; printf '%s\n' "$p" > "$1.partial"
-  t=$(timed "$1" | jq -c --argjson p "$p" 'with_entries(select(.key | IN($p[]) | not))') || return 1
+  # The map and the list go to jq as files: as an argument, a run that timed many files passes Linux's 128 KiB limit of one (#344).
+  t=$(timed "$1" | jq -c --slurpfile p "$1.partial" '$p[0] as $p | with_entries(select(.key | IN($p[]) | not))') || return 1
   jq -c --slurpfile c <(printf '%s' "$c") '$c[0] as $c | [to_entries[] | select($c[.key] != null) | {file: .key} + .value]' <<<"$t" > "$1.timed" || return 1
   { IFS= read -r x && IFS= read -r y; } < <(jq -c '(with_entries(select(.value.cpu != null)) | map_values(.cpu)), map_values(.sec)' <<<"$t") \
     && printf '%s\n' "$x" > "$1.cpus" && printf '%s\n' "$y" > "$1.clocks"
@@ -39,13 +40,14 @@ timed() { # <worktree> [own]
 }
 # The files the step in <worktree> ran some cases of and timed none of, as a JSON list: a `TESTRUN case` line of its
 # logs or of the run before a run again (<worktree>.times, tests()) names them, and no `TESTRUN sec` line of this step
-# does (timed own): a runner times no file it ran in part. A time of one on record is an earlier step's.
+# does (timed own): a runner times no file it ran in part. A time of one on record is an earlier step's. The map of
+# times goes to jq as a file, as in slowtests().
 partran() { # <worktree>
   local o l=()
   o=$(timed "$1" own) || return 1
   mapfile -t l < <(testlogs "$1")
   { cat "$1.times" 2>/dev/null; [ ${#l[@]} = 0 ] || cat "${l[@]}" 2>/dev/null; } \
-    | jq -cRn --argjson o "$o" '[inputs | capture("^TESTRUN case\t(?<f>[^\t]+)\t") | .f | select($o[.] == null)] | unique'
+    | jq -cRn --slurpfile o <(printf '%s' "$o") '$o[0] as $o | [inputs | capture("^TESTRUN case\t(?<f>[^\t]+)\t") | .f | select($o[.] == null)] | unique'
 }
 # A whole-suite run's files, for the Tests page (the snapshot's tests part, testspart() of lib/testfiles.sh): a line
 # for the run appended to $SUITERUNS, {time, how (full: the Board's full test suite, lib/fulltest.sh; release:

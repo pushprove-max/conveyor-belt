@@ -12,8 +12,10 @@
 
 # A test command that, in a worktree, times each <name>.test at the clock and CPU seconds its last line holds
 # (`<sec> <cpu>`), as a runner does in its log (`TESTRUN sec`): the time is the file's own, so main's s.test and a
-# card's edit of it time apart. Each file it runs is noted in $STUB/timedruns, `<folder> <file>`.
-budgetcmd() { echo 'for f in *.test; do [ ! -f "$f" ] || { echo "$PWD $f" >> "$STUB/timedruns"; printf "== %s\n-- ok %s\nTESTRUN sec\t%s\t%s\t%s\n" "$f" "$f" "$f" $(tail -n 1 "$f") >> "$CONVEYOR_TEST_LOG/r.log"; }; done' >> "$STUB/test-cmd"; }
+# card's edit of it time apart. Each file it runs is noted in $STUB/timedruns, `<folder> <file>`. It runs as the card's
+# one given file (a.test.sh, through test.fileCommand), so its log has no `== <file>` or `-- ok <file>` line of a .test:
+# with one, the run reports a file it was not given, and the engine stops it as a wide run (watch(), lib/session.sh).
+budgetcmd() { echo 'for f in *.test; do [ ! -f "$f" ] || { echo "$PWD $f" >> "$STUB/timedruns"; printf "TESTRUN sec\t%s\t%s\t%s\n" "$f" $(tail -n 1 "$f") >> "$CONVEYOR_TEST_LOG/r.log"; }; done' >> "$STUB/test-cmd"; }
 # Issues 7 and 8, every review a GO. With '<main seconds> <main CPU seconds>', main has s.test of those, before any card.
 budgetsetup() { # [main seconds and CPU seconds]
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-02))"
