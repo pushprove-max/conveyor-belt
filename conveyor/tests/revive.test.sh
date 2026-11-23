@@ -336,6 +336,21 @@ t_blocktwice() {
     || fail "two block() calls of $c side by side: its kept patch is gone or does not apply, or its lock file was left: $(ls -a "$ST/kept/$c" "$T/$CASE/cards" 2>&1)"
 }
 
+# Bug (#1473): `retry` takes no card lock, so it could move a card's lines out (moveout()) after one block() wrote its
+# blocked line and before a second block(), waiting on the lock, read them. That block() found no line of the card and
+# wrote a new blocked line of the old card into the records retry had just cleared. Here the three run in that order:
+# the second block() leaves the card (exit 2), no line of it is back in the records, and the kept patch stays.
+t_blockretried() {
+  local c=c20260101T000000-t-7
+  setup "[$(issue 7 2026-01-01)]"
+  gonecard $c 7 1 "$(date)"; wtchange $c
+  fx_in "block $c 7 \"\$CARDS/$c\" first && moveout '.card == \$n' --arg n $c && { block $c 7 \"\$CARDS/$c\" second; echo \"second: \$?\"; }"
+  [ "$RC" = 0 ] && grep -qx 'second: 2' "$T/$CASE/run.out" \
+    || fail "block, moveout, block of $c: the second block() did not leave the card (exit 2): $RC $(cat "$T/$CASE/run.out")"
+  [ -z "$(st "select(.card == \"$c\")")" ] && git -C "$R" apply --check "$ST/kept/$c/$c.patch" \
+    || fail "block, moveout, block of $c: a line of the retried card is back in the records, or its kept patch is gone: $(st "select(.card == \"$c\") | [.step, .reason] | @tsv") $(ls -a "$ST/kept/$c" 2>&1)"
+}
+
 # Bug (#1475): the loop and `retry` each ran gonewt() and then block() on the same card stopped mid-batch, gonewt()
 # outside any lock. One block() read the worktree between the other's reset and its apply, saw no change, and
 # removed the worktree and the .bpatch: the card was blocked with its own change lost. Here #7 is stopped running

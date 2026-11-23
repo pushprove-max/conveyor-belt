@@ -772,9 +772,10 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   # a blocked or closed line by then (exit 2): a second block would stage the worktree the first one removes, and
   # remove the patch the first one kept. A card that landed is still blocked when its declined findings cannot be
   # written (cardland.sh). The lock file goes once the blocked line is written, so a block that waited on it finds
-  # that line.
+  # that line. Its lines are read from the retried records too, in the same reading: `retry` takes no card lock, so it
+  # can move the card's blocked line out (moveout(), lib/issues.sh) before a block that waited on the lock reads it.
   { exec {bl}>>"$CARDS/$1.block" && flock "$bl"; } 2>/dev/null || { [ -z "${bl:-}" ] || exec {bl}>&-; bl=''; }
-  if stdb ask card "$1" 2>/dev/null | jq -es 'any(.[]; .step | IN("blocked", "closed"))' >/dev/null 2>&1; then
+  if stdb ask card "$1" -- issue retried "$2" 2>/dev/null | jq -es --arg c "$1" 'any(.[]; .card == $c and (.step | IN("blocked", "closed")))' >/dev/null 2>&1; then
     [ -z "$bl" ] || { rm -f "$CARDS/$1.block"; exec {bl}>&-; }
     return 2
   fi
