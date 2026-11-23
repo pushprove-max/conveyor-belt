@@ -463,6 +463,7 @@ stdin_file() {
     if [ "$c" = '\' ]; then # unquoted: keeps the next character; in double quotes: only before $ ` " \ (as bash does)
       d=${s:i:1}
       i=$((i + 1))
+      [ "$d" != $'\n' ] || continue # a backslash and newline is a line continuation: bash removes both
       if [ $st = word ]; then
         if [ "$q" = '"' ]; then case $d in '$' | '`' | '"' | '\') ;; *) w+=$c ;; esac; fi
         w+=$d

@@ -58,6 +58,9 @@ refused "gh issue create --title 'Handle < redirection' --body-file - < $T/fix.m
 refused "gh issue create --title \"it's <b>\" --body-file - < $T/fix.md"
 refused "gh issue create --title x --body-file - < '$T/fix notes.md'"
 refused "gh issue create --title x --body-file - < \"$T/fix notes.md\""
+# Bug: a backslash and newline (a line continuation, which bash removes) was kept in the name, so no file was read.
+refused "gh issue create --title x --body-file - < $T/\\"$'\n'"'fix notes.md'"
+refused "gh issue create --title x --body-file - < \"$T/\\"$'\n'"fix notes.md\""
 passes "gh issue create --title 'Handle < redirection' --body-file - < $T/body.md"
 # Bug (#1518): a backslash was read as a plain character: an escaped quote in a title ended the quote early, so a `<`
 # after it was missed, and `fix\ notes.md` was cut at the space and kept its backslash.
