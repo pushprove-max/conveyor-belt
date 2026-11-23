@@ -281,7 +281,7 @@ test('the waiting line before the first fetch is wrapped to a 32-column dock bod
   w.hold = new Promise<void>(r => { release = r })
   const ui = await ($ as any).ui.mount({ plugin: 'conveyor-belt', surface: 'terminal', component: 'Pane', requestId: 'units', props: { title: 'Conveyor', isFocused: false, placement: 'dock', bodyColumns: 32 } })
   const rows = ((await ui.findAll({ type: 'Text' })) as { text: string }[]).map(t => t.text)
-  // Each Text in a row Box of its own, under one column Box: two Texts in one row Box draw as one 36-column row.
+  // Each Text in a row Box of its own, under one column Box: two Texts in one row Box draw as one 35-column row.
   const boxes = ((await ui.findAll({ type: 'Box' })) as { props: { flexDirection?: string }; text: string }[]).map(b => [b.props.flexDirection, b.text])
   await ui.unmount()
   expect(rows).toEqual(['units: reading the Conveyor', 'snapshot'])
