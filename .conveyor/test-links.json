@@ -739,10 +739,12 @@
   ],
   "conveyor/bench/swe.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh",
+    "conveyor/tests/filedhold.test.sh",
     "conveyor/tests/port.test.sh"
   ],
   "conveyor/bench/swe_arms.sh": [
-    ".claude/scripts/__tests__/dashboard-local.test.sh"
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
+    "conveyor/tests/filedhold.test.sh"
   ],
   "conveyor/tests/swebencharms.test.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh"
@@ -909,5 +911,8 @@
   ],
   "conveyor/tests/snapshot.test.sh": [
     ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/tests/swebenchcheck.test.sh": [
+    "conveyor/tests/filedhold.test.sh"
   ]
 }

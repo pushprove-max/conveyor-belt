@@ -86,8 +86,10 @@ plugin_home() {
   done < <(mine 2>/dev/null)
   return 1
 }
-# slug_of <address>: "owner/name" of git@host:owner/name.git or https://host/owner/name, lower case; nonzero for none.
-slug_of() { local s=${1%/} n; s=${s%.git}; s=${s//:/\/}; [[ $s == */*/* ]] || return 1; n=${s##*/}; s=${s%/*}; s="${s##*/}/$n"
+# slug_of <address>: "owner/name" of git@host:owner/name.git or https://host/owner/name, lower case; nonzero for none,
+# as for a remote that is a folder on this machine (a path or file:// address), which names no hosted repository.
+slug_of() { local s=${1%/} n; case $s in /* | .* | '~'* | file:*) return 1 ;; esac
+  s=${s%.git}; s=${s//:/\/}; [[ $s == */*/* ]] || return 1; n=${s##*/}; s=${s%/*}; s="${s##*/}/$n"
   [[ ${s,,} =~ ^[a-z0-9._-]+/[a-z0-9._-]+$ ]] && printf '%s' "${s,,}"; }
 # repo_slug <checkout>: slug_of the remote its pack names (.remote, default origin); nonzero when there is none.
 repo_slug() {
