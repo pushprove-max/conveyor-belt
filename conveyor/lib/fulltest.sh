@@ -543,20 +543,30 @@ relnoteswait() { # <version> <card> <then> <what the run found>
 # the record is still the stopped run's (its pid and start): a run started once the lock was free has its own record,
 # which is never marked stopped.
 # 1: the lock is still held 10 s on (relreap's time for a TERM; with the stop's own reap, within the Board's 30 s); the
-# record is left as it is, and the snapshot shows the run stopped once the lock is free.
+# record is left as it is, its suite on a box is not stopped, and the snapshot shows the run stopped once the lock is free.
+# 1 too when the run's suite on a box is not stopped as the record became another run's (hoststop()).
 releasestop() {
-  local p s v lk='' rc=1 r
-  # The pid, start and version from one read of the record, so they are all of one run.
-  r=$(jq -er 'select(.ended == null and (.pid | numbers)) | "\(.pid)\t\(.since)\t\(.version)"' "$RELRUN" 2>/dev/null) && IFS=$'\t' read -r p s v <<<"$r" \
+  local p s v b lk='' rc=1 hs=2 r
+  # The pid, start, version and name of the box whose suite's run the stop ends (HOSTLIVE) from one read of the record,
+  # so they are all of one run.
+  r=$(jq -er 'select(.ended == null and (.pid | numbers)) | "\(.pid)\t\(.since)\t\(.version)\t\(('"$HOSTLIVE"' | .name // "its box") // "")"' "$RELRUN" 2>/dev/null) \
+    && IFS=$'\t' read -r p s v b <<<"$r" \
     && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q 'conveyor\.sh' || { relstopwaiting; return; }
-  relreap "$p" "$p"; hoststop
+  relreap "$p" "$p"
   { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null && flock -w 10 "$lk" && rc=0
+  # The run's suite on a box stopped only holding the lock, and only while its record is still the run's: a release-prep
+  # started next takes the lock before it writes its own record and machine, and may start its own suite on the same box,
+  # which a stop without the lock could end (its record read before the new one was written).
+  [ $rc != 0 ] || { hoststop "$p" "$s"; hs=$?; }
   # .counts: the suite's counts while its failed cases run alone, which the run's own end takes into the record; the
   # stop does the same, as the snapshot does for a run that ended with no record of it (lib/snapshot.sh suites()).
   [ $rc != 0 ] || relrec --argjson p "$p" --arg s "$s" --arg t "$(clock)" 'if .pid == $p and .since == $s then . + (.counts // {}) | del(.counts) | .state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"] else . end'
   [ -z "$lk" ] || exec {lk}>&-
   # Not the lock, but another run's record: that run took the lock once this one's processes had let it go.
-  [ $rc = 0 ] || jq -e --argjson p "$p" --arg s "$s" '.pid != $p or .since != $s' "$RELRUN" > /dev/null 2>&1 || { echo "conveyor: release-run stop: the run is stopped, but a process of it still holds $CARDS/release/lock; release-prep and release are refused until it ends" >&2; return 1; }
+  [ $rc = 0 ] || jq -e --argjson p "$p" --arg s "$s" '.pid != $p or .since != $s' "$RELRUN" > /dev/null 2>&1 || { echo "conveyor: release-run stop: the run is stopped, but a process of it still holds $CARDS/release/lock; release-prep and release are refused until it ends${b:+, and the suite of the run on $b is not stopped}" >&2; return 1; }
+  # No stop sent to the box (no lock, or the record was by then another run's): the run that took the lock may run its
+  # own suite there, which a stop could end, so the stopped run's suite may still run there.
+  [ -z "$b" ] || [ $hs != 2 ] || { echo "conveyor: release-run stop: the release run of $v is stopped, but not its suite's run on $b: a release run started next took $CARDS/release/lock and may run its own suite there; the suite's run of $v there goes on until it ends" >&2; return 1; }
   echo "conveyor: release-run: the release run of $v is stopped"
 }
 # A release-prep of another version that waits on its notes card (relnoteswait()) is the one record relfixes() starts

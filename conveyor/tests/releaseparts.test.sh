@@ -109,17 +109,50 @@ fakerun() { # [<jq changes>]
     state: "running", sha: null, pid: $p, reasons: [], done: 0, failed: 0} | '"${1:-.}" > "$RUN" || fail "the fixture could not be made"
 }
 
+# The box's run of a stopped run, named in its record: a box over ssh whose run has not ended.
+BOXREC='.machine = {kind: "ssh", name: "box.example.com", target: "tester@box.example.com", dir: "~/suite", lease: null, step: "run"}'
+
 # Bug (R178): the stop read the run's pid, then its version: a run that ended meanwhile, and a release-prep 1.2.0 whose
 # record was written between the two reads, made the stop say the run of 1.2.0 was stopped. The kill that checks the
 # pid writes that new record here; the stop names 1.1.0, the run it stopped, and leaves the new record as it is.
+# Bug: the stop read the record's machine with no check that the record was still the stopped run's, so the next run's
+# suite on its box (the record's machine, kept in the new record here) was stopped too: the stop sends nothing to the
+# box (hostssh).
+# Bug: the stop then said the run was stopped (exit 0), while its suite on the box, sent no stop, still ran: it fails and
+# says the box's suite is not stopped.
 t_relpartstopversion() {
-  setup '[]'; fakerun
+  setup '[]'; fakerun "$BOXREC"
   # shellcheck disable=SC2016 # expanded in the run's shell
   partrun 'kill() { [ "$1" != -0 ] || jq ".pid = 1 | .since = \"2099-01-01T00:00:00Z\" | .version = \"1.2.0\"" "$RELRUN" > "$RELRUN.new" && mv "$RELRUN.new" "$RELRUN"; builtin kill "$@"; }' \
-    'releasestop'
+    'hostssh() { printf "%s\n" "$1" >> "$STUB/hostssh"; }' 'releasestop'
   builtin kill "$FAKE" 2>/dev/null
-  [ "$RC" = 0 ] && grep -qx 'conveyor: release-run: the release run of 1.1.0 is stopped' "$T/$CASE/run.out" && jq -e '.version == "1.2.0" and .ended == null' "$RUN" > /dev/null \
-    || fail "the stop did not name 1.1.0, the run it stopped, or changed the next run's record (exit $RC): $(cat "$T/$CASE/run.out") $(cat "$RUN")"
+  [ "$RC" = 1 ] && grep -q "the release run of 1.1.0 is stopped, but not its suite's run on box.example.com" "$T/$CASE/run.out" && jq -e '.version == "1.2.0" and .ended == null and .machine.step == "run"' "$RUN" > /dev/null \
+    && [ ! -e "$STUB/hostssh" ] \
+    || fail "the stop did not name 1.1.0, the run it stopped, did not fail saying its box's suite was not stopped, changed the next run's record, or sent a stop to the next run's box (exit $RC; box commands: $(cat "$STUB/hostssh" 2>/dev/null)): $(cat "$T/$CASE/run.out") $(cat "$RUN")"
+}
+
+# Bug: a stop that could not take the release lock (a release-prep started next holds it) still sent the box its stop
+# from the record it read before the next run wrote its own, so that run's suite on the same box could be stopped. The
+# lock file opens, and its flock -w times out (the stub, for the 10 s wait): the stop sends nothing to the box
+# (hostssh), fails, and says the box's suite is not stopped.
+t_relpartstopboxnolock() {
+  setup '[]'; fakerun "$BOXREC"
+  # shellcheck disable=SC2016 # expanded in the run's shell
+  partrun 'flock() { [ "$1" != -w ] && command flock "$@"; }' 'hostssh() { printf "%s\n" "$1" >> "$STUB/hostssh"; }' 'releasestop'
+  builtin kill "$FAKE" 2>/dev/null
+  [ "$RC" = 1 ] && [ ! -e "$STUB/hostssh" ] && grep -q "release/lock; .*the suite of the run on box.example.com is not stopped" "$T/$CASE/run.out" \
+    || fail "release-run stop whose flock on the release lock timed out sent a stop to the box, did not fail, or did not say the box's suite is not stopped (exit $RC; box commands: $(cat "$STUB/hostssh" 2>/dev/null)): $(cat "$T/$CASE/run.out")"
+}
+
+# Bug: the stop sent the box its stop before it took the release lock, so a release-prep could start meanwhile and
+# write its own record and box. The stop's box command (hostssh) notes whether the lock was free as it ran: it is held.
+t_relpartstopboxlock() {
+  setup '[]'; fakerun "$BOXREC"
+  # shellcheck disable=SC2016 # expanded in the run's shell
+  partrun 'hostssh() { if flock -n "$CARDS/release/lock" true; then echo free; else echo held; fi >> "$STUB/hostssh"; }' 'releasestop'
+  builtin kill "$FAKE" 2>/dev/null
+  [ "$RC" = 0 ] && [ "$(cat "$STUB/hostssh" 2>/dev/null)" = held ] \
+    || fail "release-run stop of a run on a box did not send the box its stop once, holding the release lock (exit $RC; lock as the stop ran: $(cat "$STUB/hostssh" 2>/dev/null)): $(cat "$T/$CASE/run.out")"
 }
 
 # Bug (R179): a stop whose release lock could not be opened (here the lock's path is a folder) ended on bash's "lk:

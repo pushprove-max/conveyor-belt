@@ -50,6 +50,9 @@ echo "$r" > ../wt.rc'
 # "conveyor-kill: stopped" when it was stopped, "conveyor-kill: ended" when there was none to stop (the run had ended, or
 # none started): its output, not its exit, as `devbox exec` gives 1 for any exit of its command but 0.
 HOSTKILL='r=ended; p=$(cat "$D/wt.pid" 2> /dev/null) && { kill -TERM -- -"$p" 2> /dev/null || kill -TERM "$p" 2> /dev/null; } && r=stopped; rm -f "$D/wt.pid"; echo "conveyor-kill: $r"'
+# The jq filter of a release record's machine whose suite's run `release-run stop` stops (hoststop()): a box over ssh, or
+# a devbox leased or named, whose step is not done; empty for any other record.
+HOSTLIVE='.machine | objects | select((.kind == "ssh" or (.kind == "devbox" and (((.lease // "") | length > 0) or ((.box // "") | length > 0)))) and .step != "done")'
 # The run on the rule's box stopped (HOSTKILL), in words: stopped, ended, or not reached <via> (' over ssh' or nothing),
 # which fails.
 hostkill() { # <via>
@@ -292,10 +295,15 @@ hostfinish() { # <command name>
   hoststep 'done'
 }
 # `release-run stop`: the run on the box over ssh or the devbox that the record names, stopped there (HOSTKILL), when the
-# record's machine has not reached done; a devbox's lease is given back too.
-hoststop() {
+# record is still the stopped run's (its <pid> and <since>, read in the same read as its machine) and its machine has
+# not reached done; a devbox's lease is given back too. A record of another run (one started once the stopped run let
+# the release lock go), or one that cannot be read, is left alone: its machine is that run's, and its suite there is not
+# stopped (exit 2).
+hoststop() { # <pid> <since>
   local m via='' out
-  m=$(jq -ce '.machine | objects | select((.kind == "ssh" or (.kind == "devbox" and (((.lease // "") | length > 0) or ((.box // "") | length > 0)))) and .step != "done")' "$RELRUN" 2>/dev/null) || return 0
+  # One read: nothing when the record is not the run's, null when the run has no suite's run on a box to stop.
+  m=$(jq -c --argjson p "$1" --arg s "$2" 'select(.pid == $p and .since == $s) | ('"$HOSTLIVE"') // null' "$RELRUN" 2>/dev/null) && [ -n "$m" ] || return 2
+  [ "$m" != null ] || return 0
   SH_KIND=$(jq -r .kind <<<"$m") SH_TARGET=$(jq -r '.target // ""' <<<"$m") SH_DIR=$(jq -r '.dir // "~/conveyor-suite"' <<<"$m") SH_LEASE=$(jq -r '.lease // ""' <<<"$m") SH_BOX=$(jq -r '.box // ""' <<<"$m") && hostd
   [ "$SH_KIND" != ssh ] || via=' over ssh'
   out=$(hostkill "$via") || echo "conveyor: release-run stop: the suite's run on $(jq -r .name <<<"$m") $out" >&2

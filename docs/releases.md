@@ -207,7 +207,8 @@ no machine.
 When the box cannot be reached, or its setup or checkout fails, the run ends as `not started` with the reason. When
 the devbox cannot be leased, the reason is "Not logged in to Namespace" for a missing login. No
 test runs, no status is posted, and the suite never moves to another machine by itself. `release-run stop` also
-stops the suite on the box or the devbox. `release-run atonce` does not print a number for a devbox, because Conveyor
+stops the suite on the box or the devbox. When the stop cannot get the release lock, or a release run that
+started next got it first, the stop does not stop that suite, and it fails with a message that says so. `release-run atonce` does not print a number for a devbox, because Conveyor
 reads its test slots when a run leases it. To run one suite on this machine without a change to the rule, add `--machine local`:
 `conveyor.sh release-run [prep] <version> [--parallel | --serial] --machine local`. That run does not use a pass
 from a box, so the suite runs on this machine.
