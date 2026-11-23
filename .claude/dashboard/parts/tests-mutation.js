@@ -8,7 +8,7 @@
   // What this part uses of panels/tests.js, set when tests.js asks for the part (DASH_APP.part, at the end).
   let S, num, list, obj, one, pct, dk, say, button, ACTS, FILES_MAX, RUNNER_WHY, ENDED, ID, BODY_MAX, NO_SEAT,
     WAIT, SENDING, actions, mmss, limitOf, used, tmodel, hollowOf, hollowSaid, verdictOf, causeSaid, failsOf,
-    fixable, kindSaid, casesSaid, runBy, draw, inForce, tests;
+    fixable, partsOf, kindSaid, casesSaid, runBy, draw, inForce, tests;
 
   // ---- mutation checks (#79): the snapshot's mutation (a file's newest check) and mutationPlace (its place in the asked list) ----
   const MUT_WHY = 'A check starts only when no card needs a test slot.';
@@ -362,7 +362,8 @@
       const at = items.findIndex((x) => { const l = line(said(x)); if (head.concat(l, done).join('\n').length + 40 > BODY_MAX) return true; head.push(l); return false; });
       if (at >= 0) head.push(`- and ${items.length - at} more`);
     };
-    add(xs, (x) => `- ${x.time}, card ${num(x.issue) ? `#${x.issue}` : x.card}: ${kindSaid(x.verdict)}. Failing cases: ${casesSaid(x)}.`);
+    // A line for each verdict of a step's cases: a step with a flaky case and a main case names each with its own.
+    add(xs.flatMap(partsOf), (x) => `- ${x.time}, card ${num(x.issue) ? `#${x.issue}` : x.card}: ${kindSaid(x.verdict)}. Failing cases: ${casesSaid(x)}.`);
     if (causes.length) { head.push('', 'The causes the judge named:'); add(causes, (x) => `- CAUSE: ${causeSaid(x)}`); }
     // The end of each failure's output, newest first, while the body holds it; the last one cut to its end.
     const tails = [];
@@ -476,7 +477,7 @@
   window.DASH_APP.part('tests-mutation', function (shared) {
     ({ S, num, list, obj, one, pct, dk, say, button, ACTS, FILES_MAX, RUNNER_WHY, ENDED, ID, BODY_MAX, NO_SEAT,
       WAIT, SENDING, actions, mmss, limitOf, used, tmodel, hollowOf, hollowSaid, verdictOf, causeSaid, failsOf,
-      fixable, kindSaid, casesSaid, runBy, draw, inForce, tests } = shared);
+      fixable, partsOf, kindSaid, casesSaid, runBy, draw, inForce, tests } = shared);
     return { MUT_WHY, mutDone, survivors, trimmed, mutState, mutCell, mutAsk, progress, mutNow, actBtn, send, merge,
       copy, actArgs, start, stop, verdictChip, result, running, queued, live, queuedSaid, actNow, md, reasonOf, box,
       rowAction, draftIssue, draftFix, drafted, caseHit, shows, neverWhy, draftHollow, draftWaits, draftRun,

@@ -139,6 +139,21 @@ test('Tests failures: a step with a card case and a main case is a catch for the
   assert.match(body, /- The cases that failed \(mergeclean\) succeed/, `the Done-when names mergeclean alone:\n${body}`);
 });
 
+// Bug it guards (follow-up of #1453): the Fix failures draft gave each step one verdict, so a step whose mergeclean
+// failed on main and mergewait flaked named mergewait as "failed on main too". The draft names each case with its own.
+test('Tests failures: the Fix failures draft names a step\'s main case and flaky case each with its own verdict', () => {
+  const d = snap(), f = d.panels.tests.data.tests.files.find((x) => x.file === MERGE);
+  const given = 'the step with failures [mergeclean main, mergewait flaky, mergeorder card]';
+  f.failures = [{ ...fail(511, 1, 'main', ['mergeclean', 'mergeorder', 'mergewait'], TAIL), caseVerdicts: { mergeclean: 'main', mergeorder: 'card', mergewait: 'flaky' } }];
+  const w = boot({ tab: 'tests' });
+  deliver(w, d);
+  act(open(w, MERGE), 'fix-failures').click();
+  const body = act(opened(w, MERGE), 'issue-body').value;
+  assert.match(body, /card #511: failed on main too\. Failing cases: mergeclean\.\n- .+, card #511: flaky\. Failing cases: mergewait\.\n/, `${given}: the draft names each case with its own verdict:\n${body}`);
+  assert.doesNotMatch(body, /mergeorder/, `${given}: the card's case is not one to fix:\n${body}`);
+  assert.equal(body.split('The end of the output of card #511').length, 2, `${given}: the step's output is given once:\n${body}`);
+});
+
 // Bug it guards (#188): a file with many failures gave a Fix failures body over the 2500 characters the server takes,
 // so the issue could not be filed, or its Done-when was cut off. The list stops with "and N more" and Done-when stays.
 test('Tests failures: with 40 flaky failures the Fix failures body stays within 2500 characters and keeps its Done-when', () => {
