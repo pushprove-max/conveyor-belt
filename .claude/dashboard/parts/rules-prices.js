@@ -130,9 +130,10 @@
     Object.entries(p.aliases && typeof p.aliases === 'object' ? p.aliases : {}).forEach(([x, m]) => { if (typeof m === 'string' && !Object.hasOwn(over, x)) aliasTo.set(x, m); });
     Object.keys(over).sort().forEach((m) => list(over[m] && over[m].aliases).forEach((x) => { if (typeof x === 'string' && !packed.has(x)) { packed.add(x); aliasTo.set(x, m); } }));
     const canon = (id) => { const b = String(id).replace(/\[[^\]]*\]$/, '').replace(/-\d{8}$/, ''); return aliasTo.get(b) || b; };
-    // The models: each built-in one (its fast mode is its second line) and each the pack prices or adds.
+    // The models: each built-in one (its fast mode is its second line) and each the pack prices or adds; a fast mode
+    // whose model has no price of its own is a row of its own, as no row has it as its second line.
     const isModel = (m) => built.has(m) || priced(over[m]) || !!(over[m] && over[m].provider);
-    const models = [...new Set([...built.keys(), ...Object.keys(over)])].filter((m) => !m.endsWith(':fast') && isModel(m));
+    const models = [...new Set([...built.keys(), ...Object.keys(over)])].filter((m) => isModel(m) && !(m.endsWith(':fast') && isModel(m.slice(0, -5))));
     const rateOf = (m) => (priced(over[m]) ? over[m] : built.get(m) || null);
     const P = { p, over, names, built, nameOf, aliasTo, canon, isModel, models, rateOf };
     priceUse(P);
@@ -144,7 +145,10 @@
     const { p, aliasTo, canon, isModel } = P;
     const ms = S.d.modelSettings && typeof S.d.modelSettings === 'object' ? S.d.modelSettings : {}, c = ctl() || {};
     const roles = new Map(), sessions = new Map(), raw = new Set();
-    const role = (id, t) => { raw.add(id); const m = canon(id), l = roles.get(m) || []; if (!l.includes(t)) l.push(t); roles.set(m, l); };
+    // A fast mode (an ID, or the alias it is given, ends in :fast) is marked on its model's row, which shows it, or on
+    // its own row when its model has none (priceFacts).
+    const rowId = (c) => { const b = c.replace(/:fast$/, ''); return b !== c && isModel(b) ? b : c; };
+    const role = (id, t) => { raw.add(id); const m = rowId(canon(id)), l = roles.get(m) || []; if (!l.includes(t)) l.push(t); roles.set(m, l); };
     ROLES.forEach((k) => { const s = ms[k]; if (s && typeof s.model === 'string' && s.model) role(s.model, k); });
     const ts = c.tests && typeof c.tests === 'object' && typeof c.tests.model === 'string' ? c.tests : null;
     if (ts) role(ts.cli === 'opencode' && !ts.model.startsWith('opencode:') ? `opencode:${ts.model}` : ts.model, 'Tests');

@@ -483,6 +483,35 @@ test('Rules: a pack alias with the ID of a built-in alias marks the pack\'s mode
   assert.deepEqual([chips(rowOf(w, 'gpt-6.1-sol')), chips(rowOf(w, 'gpt-5.6-sol'))], [['reviewer'], []]);
 });
 
+// Bug: a pack alias to a fast mode (gpt-daybreak-blue-latest to gpt-6.1-sol:fast, which prices.sh accepts) put the
+// reviewer's mark on gpt-6.1-sol:fast, which has no row of its own (the fast mode is its model's second line), so no
+// row showed the mark.
+test('Rules: a role on an alias to a fast mode is marked on the model\'s row', () => {
+  const w = boot({ tab: 'rules' });
+  const d = full();
+  d.panels.rules.data.prices = JSON.parse(JSON.stringify(PRICES));
+  d.panels.rules.data.prices.overrides['gpt-6.1-sol:fast'] = { aliases: ['gpt-daybreak-blue-latest'] };
+  d.panels.rules.data.modelSettings.reviewer.model = 'gpt-daybreak-blue-latest';
+  deliver(w, d);
+  const r = rowOf(w, 'gpt-6.1-sol');
+  assert.ok(groupOf(w, 'use').contains(r), 'the model of the fast mode is in use');
+  assert.deepEqual(chips(r), ['reviewer']);
+});
+
+// Bug: a fast mode the pack prices for a model with no price of its own (gpt-daybreak-blue-latest:fast) had no row, as
+// only a model's row shows its fast mode, so the reviewer on its alias was marked on no row.
+test('Rules: a fast mode whose model has no price is a row of its own, with its role\'s mark', () => {
+  const w = boot({ tab: 'rules' });
+  const d = full();
+  d.panels.rules.data.prices = JSON.parse(JSON.stringify(PRICES));
+  d.panels.rules.data.prices.overrides['gpt-daybreak-blue-latest:fast'] = { input: 4, output: 20, cacheRead: 0.2, aliases: ['gpt-daybreak-blue-latest'] };
+  d.panels.rules.data.modelSettings.reviewer.model = 'gpt-daybreak-blue-latest';
+  deliver(w, d);
+  const r = rowOf(w, 'gpt-daybreak-blue-latest:fast');
+  assert.ok(r && groupOf(w, 'use').contains(r), 'the fast mode has a row, in use');
+  assert.deepEqual(chips(r).filter((x) => x !== 'added'), ['reviewer']);
+});
+
 // Bug: the page head covered the section as it scrolled. jsdom has no layout, so this reads the rule that keeps a part
 // the page scrolls to below the head.
 test('Board: a part the page scrolls to stops below the page head', () => {
