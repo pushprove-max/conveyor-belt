@@ -23,7 +23,9 @@ unset CONVEYOR_FOREMAN CONVEYOR_FOREMAN_LAUNCH CONVEYOR_MAIN CLAUDE_PROJECT_DIR
 NOW=$(jq -n '"2026-11-15T12:00:00Z" | fromdate')
 stage() ( # <the read the stop comes in: snapshot or health> <seconds after NOW the outage wakes>
   local at=$1 wakes=$2 D=$T/$1 rc
-  # The case is newoutage-<read>, one word: the main-red proof reads a pass only from `ok <case>`, with no space in it.
+  # The case is newoutage-<read>, one word, as `ok <case>` reads no name with a space. Its pass also goes out as a TAP
+  # line under the name the case had before, `watch-conveyor-newoutage <read>`: a main-red entry made under that name
+  # gets a result only from a pass of that same name (mainred.sh redrun()).
   fail() { echo "FAIL [newoutage-$at]: $*" >&2; exit 1; }
   local M=$D/alpha
   export XDG_CONFIG_HOME=$D/config XDG_DATA_HOME=$D/data HOME=$D/home CONVEYOR_FOREMAN_DIR=$D/state/foreman CONVEYOR_FOREMAN_NOW=$NOW
@@ -55,6 +57,6 @@ stage() ( # <the read the stop comes in: snapshot or health> <seconds after NOW 
 stage snapshot 180 & s=$!
 stage health 120 & h=$!
 ok=1
-if wait "$s"; then echo "ok newoutage-snapshot"; else ok=''; fi
-if wait "$h"; then echo "ok newoutage-health"; else ok=''; fi
+if wait "$s"; then echo "ok newoutage-snapshot"; echo "ok 1 - watch-conveyor-newoutage snapshot"; else ok=''; fi
+if wait "$h"; then echo "ok newoutage-health"; echo "ok 2 - watch-conveyor-newoutage health"; else ok=''; fi
 [ -n "$ok" ] || exit 1

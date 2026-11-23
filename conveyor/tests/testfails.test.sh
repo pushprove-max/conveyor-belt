@@ -463,3 +463,24 @@ t_foremanoklines() {
     [ -z "$gaps" ] || fail "conveyor/foreman/$f.test.sh does not print one pass line ok <case> for each case its FAIL lines name: $(tr '\n' ';' <<<"$gaps")"
   done
 }
+
+# Bug it catches: watch-conveyor-newoutage.test.sh's cases were renamed from `watch-conveyor-newoutage <read>` to
+# `newoutage-<read>`, and the file printed a pass only under the new names, so a main-red entry recorded under an old
+# name got no result from a fixed run (mainred.sh redrun() needs the same name) and its fix card blocked.
+# It runs the file's own lines from its first `stage` launch to its end, with stage() made to pass for one read only,
+# through testfails(): a run of the whole file from an engine case is a nested run that the card's test step refuses
+# (.conveyor/test-changed.sh metaran()). As only one stage passes, a pass line that reads another stage's wait (the old
+# names swapped, or one old name given twice) passes the wrong case and fails this check.
+newoutagepass() { # <the one read whose stage passes: snapshot or health>
+  local f=conveyor/foreman/watch-conveyor-newoutage.test.sh got
+  mkdir -p "$T/$CASE"
+  { echo "echo '== $f'; echo '== $f' >> \"\$CONVEYOR_TEST_LOG/a.log\""
+    echo "stage() { [ \"\$1\" = $1 ]; }"
+    echo "trap 'echo \"-- FAIL $f\" >> \"\$CONVEYOR_TEST_LOG/a.log\"' EXIT"
+    sed -n '/^stage [a-z]* [0-9]* & [a-z]*=\$!$/,$p' "$SRC/${f#conveyor/}"; } > "$T/$CASE/cmd"
+  got=$(allfails 1 | jq -c --arg f "$f" '[(.okcases + .passcases)[] | select(.file == $f) | .cases[]] | sort') || fail "the run could not be read"
+  [ "$got" = "[\"newoutage-$1\",\"watch-conveyor-newoutage $1\"]" ] \
+    || fail "with only the $1 stage of $f passing, its pass is not read under the case's new and old names alone (commands: $(tr '\n' ';' < "$T/$CASE/cmd")): $got"
+}
+t_newoutageoldsnapshot() { newoutagepass snapshot; }
+t_newoutageoldhealth() { newoutagepass health; }
