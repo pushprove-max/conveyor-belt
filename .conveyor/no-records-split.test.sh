@@ -30,11 +30,21 @@ for l in 1 2 3 5 6 7; do
 done
 # The project's checks (test-changed.sh --checks, the pack's test.checkCommand) run it: an engine file that splits the
 # records fails them. It runs test-changed.sh in a small repo: no direct call shows that the checks start this script.
-R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/lib"
-cp "$ROOT/.conveyor/test-changed.sh" "$ROOT/.conveyor/test-share.sh" "$ROOT/.conveyor/lint-shell.sh" "$ROOT/.conveyor/no-records-split.sh" "$R/.conveyor/"
-: > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"; cp "$T/piped.sh" "$R/conveyor/lib/landed.sh"
-git -C "$R" init -q && git -C "$R" add -A && git -C "$R" -c user.name=t -c user.email=t@example.com commit -qm init
-out=$(cd "$R" && unset CONVEYOR_TEST_LOG CONVEYOR_TEST_RERUN && bash .conveyor/test-changed.sh --checks 2>&1)
+# The repo's area map is valid, so the records check is the only one that can fail the run. Bug it catches: a run that
+# ignores the records check's exit status (no `|| rc=1`) still prints the diagnostic, and another failing check would
+# hide that: the run must exit 1 for the splitting file and 0 for a clean one.
+fixture() { # <name> <landed.sh source>: a committed small repo at $T/<name> holding that file as its one engine file
+  local d=$T/$1; mkdir -p "$d/.conveyor" "$d/conveyor/lib"
+  cp "$ROOT/.conveyor/test-changed.sh" "$ROOT/.conveyor/test-share.sh" "$ROOT/.conveyor/lint-shell.sh" "$ROOT/.conveyor/no-records-split.sh" "$d/.conveyor/"
+  : > "$d/.conveyor/test-lint.sh"; : > "$d/.conveyor/no-browser-tests.sh"; cp "$2" "$d/conveyor/lib/landed.sh"
+  printf '%s\n' '{"area": "core", "tests": "all"}' '{"area": "core", "why": "fixture"}' '{"area": "core", "file": "conveyor/lib/landed.sh"}' > "$d/.conveyor/engine-areas.json"
+  git -C "$d" init -q && git -C "$d" add -A && git -C "$d" -c user.name=t -c user.email=t@example.com commit -qm init
+}
+checks_of() { (cd "$T/$1" && unset CONVEYOR_TEST_LOG CONVEYOR_TEST_RERUN && bash .conveyor/test-changed.sh --checks 2>&1); }
+printf '%s\n' 'a() { recs | jq -cR '"'"'fromjson? | .issue'"'"'; }' > "$T/clean.sh"
+fixture clean "$T/clean.sh"; fixture split "$T/piped.sh"
+out=$(checks_of clean) || { echo "not ok - the project's checks failed for a clean engine file: $out"; exit 1; }
+out=$(checks_of split) && { echo "not ok - the project's checks exited 0 for conveyor/lib/landed.sh, which splits recs: $out"; exit 1; }
 grep -q "conveyor/lib/landed.sh:1: " <<<"$out" || { echo "not ok - the project's checks did not refuse conveyor/lib/landed.sh, which splits recs: $out"; exit 1; }
 # Not refused: the records read a line at a time, and a --rawfile of git's output split (its commits, not the records).
 printf '%s\n' 'a() { recs | jq -cR '"'"'fromjson? | .issue'"'"'; } # the records'"'"' lines' \
