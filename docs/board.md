@@ -140,7 +140,8 @@ The status mark in the head tells you how new the data is:
 - **Stale** or **No data**: the page does not get new data.
 - **Feed stopped**: the feed's heartbeat stopped. The page can still show data that a feed message brings.
 
-A line under the head tells you what to do.
+When the mark says **Stale**, **No data** or **Feed stopped**, a line under the head tells you what to do. When it
+says **Live** or **Polling**, there is no line.
 
 **Restart the Board's feed** is in each place that tells you to press it:
 

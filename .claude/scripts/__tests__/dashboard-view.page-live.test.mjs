@@ -3,6 +3,7 @@
 // the top bar and the live feed. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { read, html, css, LIST, T0, iso, clone, CONTROL_IDS, RULES_IDS, BELT3D_IDS, TAB, OVERVIEW, boot, $, panel, state, pending, deliver, refresh, next, tick, later, seen, act, rulesP, groupEl, heldMany, P, full, SAYS, cases, settle } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
@@ -176,11 +177,29 @@ test('the status says whether the data is fresh, stale or missing', () => {
     "Stale: the newest data is 7 min old, so what you see can be out of date. If it stays old, press Restart the Board's feed, beside the mark above (in Menu on a phone).");
 });
 
+// Bug this guards: docs/board.md said a line under the head tells you what to do for every status mark, while the
+// page hides that line on Polling. The guide's two lists of marks are checked against the banner the page shows.
+const headLine = () => {
+  const doc = readFileSync(new URL('../../../docs/board.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  const m = doc.match(/When the mark says (.+?), a line under the head tells you what to do\. When it says (.+?), there is no line\./);
+  assert.ok(m, 'docs/board.md names the marks that have a line under the head and the marks that have none');
+  const marks = (s) => [...s.matchAll(/\*\*(.+?)\*\*/g)].map((x) => x[1]);
+  return { shown: marks(m[1]), none: marks(m[2]) };
+};
+const bannerAsGuideSays = (w) => {
+  const mark = w.document.getElementById('status').textContent;
+  const { shown, none } = headLine();
+  const hidden = shown.includes(mark) ? false : none.includes(mark) ? true : undefined;
+  assert.notEqual(hidden, undefined, `docs/board.md does not say if the mark "${mark}" has a line under the head`);
+  assert.equal(w.document.getElementById('banner').hidden, hidden, `docs/board.md and the page differ on the line under the mark "${mark}"`);
+};
+
 test('a first load that fails says so in every panel; a later one keeps the last snapshot', () => {
   const w = boot({ list: [...OVERVIEW, ...BELT3D_IDS, ...CONTROL_IDS, ...RULES_IDS] });
   pending(w, 'data.js').dispatchEvent(new w.Event('error'));
   assert.equal(w.document.getElementById('status').textContent, 'No data');
   assert.equal(w.document.getElementById('banner').hidden, false);
+  bannerAsGuideSays(w);
   // #112: before any data the page does not know of a build machine, so it names none.
   assert.match(w.document.getElementById('banner').textContent, /^No data: the page could not load the Board's data, so there is nothing to show\. Press Restart/);
   for (const id of OVERVIEW) {
@@ -198,10 +217,12 @@ test('a first load that fails says so in every panel; a later one keeps the last
   next(w, full());
   assert.equal(w.document.getElementById('status').textContent, 'Polling');
   assert.equal(w.document.getElementById('banner').hidden, true);
+  bannerAsGuideSays(w);
   for (const id of OVERVIEW) assert.equal(state(w, id), 'ready');
   for (let i = 0; i < 2; i += 1) { refresh(w); pending(w, 'data.js').dispatchEvent(new w.Event('error')); }
   for (const id of OVERVIEW) assert.equal(state(w, id), 'ready', `${id} keeps the last snapshot`);
   assert.equal(w.document.getElementById('status').textContent, 'Stale');
+  bannerAsGuideSays(w);
   assert.match(w.document.getElementById('banner').textContent, /^Stale: the last refreshes could not reach the build machine\. This is the last data that loaded/);
   next(w, { nonsense: true });
   assert.equal(state(w, 'belt'), 'ready', 'a data.js that is not the collector\'s shape is a failed load');
@@ -221,6 +242,7 @@ test('a heartbeat that stops is a stopped collector, and a changed page reloads 
   deliver(w, full());
   tick(w, 30000);
   assert.equal(w.document.getElementById('status').textContent, 'Feed stopped', 'the same heartbeat for over 45 s is no heartbeat');
+  bannerAsGuideSays(w);
   assert.match(w.document.getElementById('banner').textContent, /^Feed stopped: .*Press Restart the Board's feed/);
   refresh(w);
   beat(w.clock, 'v1');
@@ -579,6 +601,8 @@ test('health says how old what the page shows is: Live, or the seconds since the
   es.emit('panel', { id: 'health', part: up, updatedAt: iso(w.clock) });
   assert.match(text(), /Data.*Live.*each change as it happens/);
   assert.doesNotMatch(text(), /s old/);
+  assert.equal(w.document.getElementById('status').textContent, 'Live');
+  bannerAsGuideSays(w);
   // This page's own feed drops: the host's stream is still live, but what the page shows is as old as data.js.
   es.readyState = 0; es.emit('error');
   tick(w, 3000);

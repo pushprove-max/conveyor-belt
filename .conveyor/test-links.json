@@ -447,6 +447,7 @@
   "docs/board.md": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/port.test.sh",
