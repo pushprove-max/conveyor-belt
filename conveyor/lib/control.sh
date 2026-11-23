@@ -1528,17 +1528,27 @@ RULED='def ruled($c): .by != null and ((.by.labels | any(IN($c.rules.never[])))
 # do not count (nodep in place of other), but a label or anything else besides them still does.
 # An entry with no column (a release before the first sight) is not kept.
 movedsaw() { # <cols json> <saw>
-  local m sight gone stay; m=$(movedread)
-  stay=$(jq -c --argjson o "$1" "$RULED"'[to_entries[] | .key as $k | select(.value.left != null and .value.rules != null and $o[$k].col == "held")
-      | .value.rules as $r | .value.dep as $d | select($o[$k] | (if $d then .nodep else .other end) or ruled({rules: $r})) | $k]' <<<"$m") \
-    && m=$(jq -c --argjson s "$stay" 'reduce $s[] as $k (.; if .[$k].col == null then del(.[$k]) else .[$k] |= del(.left, .rules, .dep) end)' <<<"$m") || return 1
-  gone=$(jq -c --argjson o "$1" --argjson s "$stay" '(.held // []) as $h | [$o | to_entries[]
-      | select(.value.alone and (.key | tonumber | IN($h[]) | not) and (.key | IN($s[]) | not)) | .key]' "${STATE%/*}/control.json" 2>/dev/null) || gone='[]'
-  sight=$(jq -c --argjson o "$1" --arg t "$2" '. as $m | $o | with_entries(.key as $k | .value as $s
+  local mv c out new sight
+  # moved.json and the control record as it now stands are worked out in one jq, which prints moved.json as it is to
+  # be written, then the sight: each snapshot runs this, and each jq is a program more. Both go to jq as files
+  # (--rawfile), not as arguments: a large file is over the system's limit for one argument, and jq does not start.
+  # moved.json that cannot be read, or does not hold an object, is read as {}. A control record that cannot be read
+  # leaves gone empty: the snapshot keeps the holds it saw.
+  mv=$MOVED c=${STATE%/*}/control.json
+  { [ -f "$mv" ] && [ -r "$mv" ]; } || mv=/dev/null
+  { [ -f "$c" ] && [ -r "$c" ]; } || c=/dev/null
+  out=$(jq -nc --argjson o "$1" --arg t "$2" --rawfile mv "$mv" --rawfile c "$c" "$RULED"'((try ($mv | fromjson) catch null) | objects // {}) as $m
+    | [$m | to_entries[] | .key as $k | select(.value.left != null and .value.rules != null and $o[$k].col == "held")
+      | .value.rules as $r | .value.dep as $d | select($o[$k] | (if $d then .nodep else .other end) or ruled({rules: $r})) | $k] as $stay
+    | ($m | reduce $stay[] as $k (.; if .[$k].col == null then del(.[$k]) else .[$k] |= del(.left, .rules, .dep) end)) as $m
+    | (try (($c | fromjson | .held // []) as $h | [$o | to_entries[]
+        | select(.value.alone and (.key | tonumber | IN($h[]) | not) and (.key | IN($stay[]) | not)) | .key]) catch []) as $gone
+    | ($o | with_entries(.key as $k | .value as $s
       | .value = ($m[$k] | {col: $s.col, other: $s.other, by: $s.by, seen: $t, at: (if .col == $s.col and .left == null then .at
-          elif .col == "held" and .left != null and $s.col == "queue" then .left else $t end)}))' <<<"$m") \
-    && movedwrite "$(jq -c --argjson s "$sight" --arg t "$2" --argjson g "$gone" '. as $m | ($s + with_entries(select(.value.seen >= $t)))
-      | reduce $g[] as $k (.; .[$k] = $m[$k]) | with_entries(select(.value.col != null))' <<<"$m")" && printf '%s\n' "$sight"
+          elif .col == "held" and .left != null and $s.col == "queue" then .left else $t end)}))) as $sight
+    | ($m | ($sight + with_entries(select(.value.seen >= $t))) | reduce $gone[] as $k (.; .[$k] = $m[$k]) | with_entries(select(.value.col != null))),
+      $sight') && { IFS= read -r new; IFS= read -r sight; } <<<"$out" && [ -n "$sight" ] || return 1
+  movedwrite "$new" && printf '%s\n' "$sight"
 }
 # Under moved.json's lock: `control hold` dates each issue in Held from now, unless it was there already and not released
 # since; `control release` marks when it left, unless the last snapshot saw something besides your hold and the rules

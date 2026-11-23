@@ -217,12 +217,20 @@ t_unblockundo() {
 # hold taken off (a release) does not take its Held time away.
 t_unblocksnap() {
   setup '[]'
-  jq -c '.held = [7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
-  echo '{"8":{"col":"queue","other":false,"by":null,"seen":"2026-11-01T00:00:00Z","at":"2026-11-01T00:00:00Z"}}' > "$ST/moved.json"
-  cp "$ST/moved.json" "$STUB/moved.was"
+  # Bug it catches (E1): movedsaw gave jq moved.json and control.json as arguments, and a file over 128 KiB (one
+  # argument's limit on Linux) stopped jq with "Argument list too long". Both are padded over it: moved.json with old
+  # Queue entries of other issues (dropped as not seen since), control.json with a field nothing reads.
+  jq -c '.held = [7] | .pad = ("x" * 140000)' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  echo '{"8":{"col":"queue","other":false,"by":null,"seen":"2026-11-01T00:00:00Z","at":"2026-11-01T00:00:00Z"}}' > "$STUB/moved.was"
+  jq -c '. + ([range(10000; 12000) | {key: tostring, value: {col: "queue", other: false, by: null, seen: "2026-10-01T00:00:00Z",
+    at: "2026-10-01T00:00:00Z", pad: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}] | from_entries)' "$STUB/moved.was" > "$ST/moved.json"
   jq -cn '[6, 7, 8, 9] | map({key: tostring, value: {col: "held", other: false, by: null, alone: (. != 6)}}) | from_entries' > "$STUB/cols.json"
-  fx_in 'movedlocked movedsaw "$(cat "$STUB/cols.json")" 2026-11-05T00:00:00Z'
+  # Each jq movedsaw starts is noted: it runs on every snapshot, and the live control record's read (gone) added a jq.
+  fx_in 'jq() { echo jq >> "$STUB/jq.log"; command jq "$@"; }; movedlocked movedsaw "$(cat "$STUB/cols.json")" 2026-11-05T00:00:00Z'
   [ "$RC" = 0 ] || fail "movedsaw with a copy that held #6, #7, #8 and #9 exited $RC: $(cat "$T/$CASE/run.out")"
+  # Bug it catches (snapexec over its bound): movedsaw read moved.json, the stays, the live control record (gone) and the
+  # sight each with a jq of its own; one jq works all out.
+  [ "$(wc -l < "$STUB/jq.log")" -eq 1 ] || fail "movedsaw with a copy that held #6, #7, #8 and #9 started $(wc -l < "$STUB/jq.log") jq, not 1"
   [ "$(jq -c '[(.["6", "7"] | .at), has("9")]' "$ST/moved.json")" = '["2026-11-05T00:00:00Z","2026-11-05T00:00:00Z",false]' ] \
     || fail "#6 (a rule keeps it) and #7 (held) are not dated, or #9 (no longer held) is: $(cat "$ST/moved.json")"
   [ "$(jq -cS '.["8"]' "$ST/moved.json")" = "$(jq -cS '.["8"]' "$STUB/moved.was")" ] || fail "#8, no longer held, lost its Queue entry or its time: $(cat "$ST/moved.json")"

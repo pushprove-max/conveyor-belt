@@ -44,6 +44,9 @@ snapdue() { snapinputs || ! p_newer "$KEPT" "$SNAPOLD"; }
 snapask() { # <since> [nowait]
   [ -z "$GITHUB" ] || return 0
   [ -d "$SNAPGH" ] || mkdir -p "$SNAPGH" || return 1
+  # The control record read in this shell, not only in the subshell below: the build after it finds it kept
+  # (ctlread's CTL_K), and does not check it again with a jq of its own (t_snapexec).
+  local CTL_V; ctlread 2>/dev/null || :
   ( if [ -n "${2-}" ]; then flock -n 9 || exit 3; else flock -w 600 9 || { echo "conveyor: another call asked GitHub for 600 s" >&2; exit 1; }; fi
     [ ! "$SNAPGH/at" -nt "$1" ] || exit 0
     # What github() keeps (lib/issues.sh), but the label times (labelled) only when an open issue names the label

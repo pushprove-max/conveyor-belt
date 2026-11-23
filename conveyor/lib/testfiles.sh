@@ -530,7 +530,7 @@ rawok() { if [ -f "$1" ] && [ -r "$1" ]; then printf '%s' "$1"; else printf /dev
 JSONL='def jsonl: split("\n") | map(fromjson? | objects);'
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   # The caller's defs and refs when it has read them (testowners: the snapshot's), else read here.
-  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru tf=() ln ch hv px out nv rp cp su sv hs ot=() t x
+  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru tf=() ln ch hv px out nv rp cp su sv CTL_V ot=() t x
   packget test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
   # The test files once, as names (tf: testhollow and testproxy take them so, with no jq of their own; the part's jq
   # reads them ended by NULs, all): main's tracked test files (testtracked(), lib/issues.sh; #1036: a project's
@@ -540,7 +540,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   { [ -s "$FLAKY" ] && fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null); } || fl='{}'
   { [ -s "${STATE%/*}/slow.json" ] && sf=$(jq -ce 'objects' "${STATE%/*}/slow.json" 2>/dev/null); } || sf='{}'
   ru=$(testrulesettings) || ru=null
-  hs=$(histstart)
+  ctlread 2>/dev/null || CTL_V=null # the part's jq reads the test history's start (histstart()) from it: no jq more
   hv=$(testhollow "${tf[@]}" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
   px=$(testproxy "${tf[@]}" 2>/dev/null) && [ -n "$px" ] || px='{}'
   [ -n "$defs" ] && [ -n "$refs" ] || testowners
@@ -561,13 +561,13 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   ch=$(printf '%s\n' "$ch" | git -C "$MAIN" diff-tree --stdin -r --root --name-only --no-renames -z 2>/dev/null \
     | jq -Rsc --rawfile want <(printf '%s\n' "$ch") '($want | split("\n") | map(select(. != "") | {key: ., value: true}) | from_entries) as $w
       | reduce (split("\u0000")[] | select(. != "")) as $x ({k: null, m: {}}; if $w[$x] then .k = $x | .m[$x] = [] elif .k == null then . else .m[.k] += [$x] end) | .m') || ch='{}'
-  out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --arg st "$hs" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
+  out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --argjson ctl "$CTL_V" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
     --argjson mn "$mn" --slurpfile fs <(printf '%s' "$fs") --slurpfile fl <(printf '%s' "$fl") --slurpfile sf <(printf '%s' "$sf") --argjson keep "$TESTKEEP" --argjson days "$FLAKY_DAYS" \
     --slurpfile cs <(printf '%s' "$cs") --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") --argjson ru "$ru" --rawfile all <(printf '%s\0' "${tf[@]}") \
     --slurpfile hv <(printf '%s' "$hv") --slurpfile px <(printf '%s' "$px") --slurpfile mu <(cat "$MUTS"/*.json 2>/dev/null | jq -c 'objects' 2>/dev/null) --rawfile mq "$(rawok "$MUTS/asked")" --rawfile su "$su" --slurpfile sv <(printf '%s' "$sv") --slurpfile last <(jq -ce 'objects' "$TESTRULES" 2>/dev/null || echo null) \
     --rawfile rl "$(rawok "$TESTRULESLOG")" --argjson shown "$TESTRULES_SHOWN" --rawfile tf "$(rawok "$TAFILED")" \
     --slurpfile tc <(jq -c '[.cards | arrays | .[] | objects | select(.file | type == "string") | {file, time, card: ((.card | strings) // null), issue: null}]' "$TACARDS" 2>/dev/null || echo '[]') \
-    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) "$HISTFROM"'$fs[0] as $fs | ($fl[0] | if (.entries | type) == "array" then .entries |= map(fromstart($st)) else . end) as $fl | $sf[0] as $sf | ($all | split("\u0000") | map(select(. != ""))) as $all | $hv[0] as $hv | $px[0] as $px | '"$JSONL$OWNERS$FAILURE$RUNDEFS$FLAKYAGAIN"'
+    --slurpfile tj <(cat "$TESTACTS"/*.json 2>/dev/null | jq -c 'objects | select(.action == "judge" and .state == "done" and (.file | type) == "string" and (.waits | type) == "array") | {file, end, waits}' 2>/dev/null) "$HISTFROM"'(($ctl | objects | .testsFrom) // "") as $st | $fs[0] as $fs | ($fl[0] | if (.entries | type) == "array" then .entries |= map(fromstart($st)) else . end) as $fl | $sf[0] as $sf | ($all | split("\u0000") | map(select(. != ""))) as $all | $hv[0] as $hv | $px[0] as $px | '"$JSONL$OWNERS$FAILURE$RUNDEFS$FLAKYAGAIN"'
     # The rules log and the Board test issues, each read once: the log'"'"'s last $shown lines, newest first (lg), and
     # their filed lines (fd); the test issues with a file and an issue number (ta).
     ($su | jsonl) as $su | ($rl | split("\n") | if .[-1] == "" then .[:-1] else . end | .[-$shown:] | map(fromjson? | objects) | reverse) as $lg
@@ -650,7 +650,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   nv=$(neverwhy "$(jq -c '[.files[] | select((.everRun | not) and (.removed | not)) | .file]' <<<"$out")") || nv='{}'
   packget test.report rp 2>/dev/null && [ -n "$rp" ] || rp=null
   cp=$(cpuplan 2>/dev/null) || cp=null
-  jq -c --slurpfile nv <(printf '%s' "$nv") --argjson rp "$rp" --argjson cp "$cp" --rawfile su "$su" --arg st "$hs" "$JSONL$HISTFROM"'$nv[0] as $nv | ($su | jsonl | map(fromstart($st))) as $su | .files |= map(.neverRun = ($nv[.file] // null))
+  jq -c --slurpfile nv <(printf '%s' "$nv") --argjson rp "$rp" --argjson cp "$cp" --rawfile su "$su" "$JSONL$HISTFROM"'(.settings.historyStart // "") as $st | $nv[0] as $nv | ($su | jsonl | map(fromstart($st))) as $su | .files |= map(.neverRun = ($nv[.file] // null))
     | .settings.report = $rp | .settings.cpuTime = $cp
     | .suite = ($su | max_by(.time // "") | if . == null then null
         else {time, cpu: ([.files | objects | .[] | objects | .cpu | numbers] | if . == [] then null else add * 1000 | round / 1000 end)} end)' <<<"$out"
