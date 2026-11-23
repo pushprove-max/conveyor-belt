@@ -108,7 +108,7 @@ t_loadsaid() {
   [ "$(jq -c .sec <<<"$out" 2>/dev/null)" = 4 ] || fail "the run cut by its clock at 4 s (testTimeout 2, factor 2) says it timed out after: $out"
 }
 # Bug it catches (O253): the card's test files went to its command as one value of the environment
-# (CONVEYOR_TEST_FILES), and 4,000 paths of 40 bytes passed Linux's 128 KiB limit of one: the command did not start.
+# (CONVEYOR_TEST_FILES), and 4,000 paths of 42 bytes passed Linux's 128 KiB limit of one: the command did not start.
 # They go in a file (CONVEYOR_TEST_FILELIST): the command starts and reads every path.
 t_loadlist() {
   local w=$T/$CASE/wt rc
@@ -116,20 +116,24 @@ t_loadlist() {
   for i in $(seq 4000); do printf 'tests/%033d.sh\n' "$i"; done > "$T/$CASE/files"
   loadonce "$w" 'grep -c . "$CONVEYOR_TEST_FILELIST" > "$PWD.n"' > "$T/$CASE/out" 2>&1; rc=$?
   [ "$rc" = 0 ] && [ "$(cat "$w.n" 2>/dev/null)" = 4000 ] \
-    || fail "with TEST_FILES of 4000 40-byte paths, the test command did not start and read them all (exit $rc, read $(cat "$w.n" 2>&1)): $(cat "$w.test" "$T/$CASE/out" 2>/dev/null | tail -n 5)"
+    || fail "with TEST_FILES of 4000 42-byte paths, the test command did not start and read them all (exit $rc, read $(cat "$w.n" 2>&1)): $(cat "$w.test" "$T/$CASE/out" 2>/dev/null | tail -n 5)"
 }
 # Bug it catches (#1154): the clean run that checks a failure on main and runs its controls (cleanrun(), lib/mainred.sh)
 # starts the command with `env -i` and left CONVEYOR_LOAD_FACTOR out, so a file there was held to its unscaled limit.
 # And (O267) the clean run ended its command at testTimeout unscaled, while each file's own limit was scaled: with
 # testTimeout 2 at a factor of 2, a command of 3 s, inside its scaled 4 s, was cut at 2 s (exit 124).
+# And (O253) the repair lane's clean run gets the card's files as testonce() does, in a file (CONVEYOR_TEST_FILELIST):
+# 4,000 paths of 42 bytes in one value of the environment pass Linux's 128 KiB limit of one, and the command does not start.
 t_loadclean() {
-  local w=$T/$CASE/wt out c
+  local w=$T/$CASE/wt out c files
   setup '[]'; git -C "$R" worktree add -q --detach "$w" || fail "the worktree"
-  c='printf %s "${CONVEYOR_LOAD_FACTOR-unset}" > "$PWD.factor"; sleep 3' # sleep: 1.5 times testTimeout 2, inside its scaled 4 s
-  # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), which cleanrun() runs
-  out=$( ( LIVE=0.2 STUCK=1200 TEST_TIMEOUT=2; unset CONVEYOR_LOAD_FACTOR; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards SLOT_HOME=$T/$CASE/slot
+  files=$(for i in $(seq 4000); do printf 'tests/%033d.sh\n' "$i"; done)
+  c='printf %s "${CONVEYOR_LOAD_FACTOR-unset}" > "$PWD.factor"; grep -c . "$CONVEYOR_TEST_FILELIST" > "$PWD.n"; sleep 3' # sleep: 1.5 times testTimeout 2, inside its scaled 4 s
+  # shellcheck disable=SC2034 # LIVE, STUCK and TEST_FILES are read by watch() and cleanrun()
+  out=$( ( LIVE=0.2 STUCK=1200 TEST_TIMEOUT=2 TEST_FILES=$files; unset CONVEYOR_LOAD_FACTOR; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards SLOT_HOME=$T/$CASE/slot
     cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" \
     && p_load() { echo "$((2 * $(nproc --all)))"; } && cleanrun "$w" "$c" ) 2>&1 ) \
     || fail "testTimeout 2 at a load factor of 2: the clean run of a 3 s command (inside its scaled 4 s) failed: $out $(cat "$w.test" 2>/dev/null)"
   [ "$(cat "$w.factor")" = 2 ] || fail "the clean run's command was not given the factor 2 in CONVEYOR_LOAD_FACTOR: $(cat "$w.factor")"
+  [ "$(cat "$w.n" 2>/dev/null)" = 4000 ] || fail "with TEST_FILES of 4000 42-byte paths, the clean run's command did not read them all from CONVEYOR_TEST_FILELIST (read $(cat "$w.n" 2>&1))"
 }
