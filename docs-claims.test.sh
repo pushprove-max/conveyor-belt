@@ -8,8 +8,9 @@
 # - a stylesheet rule with no layout to show it (the tab row's sideways scroll), so its text is read once and the page's line checked;
 # - the comment of a function that a case calls but whose comment no case reads (rules-rows.js, card.sh, control.sh): a
 #   comment that still told the old rule beside a changed behaviour is the bug, so each comment is read for the new words.
-# - the /units guide's short IDs: hooks/sources.test.tsx ('a card with no issue has a short ID in every table', and the
-#   one for a card id ending in -0) draws `red <commit>`, `card <N>` and `card`, but a test of the mod has no file access
+# - the /units guide's short IDs: hooks/sources.test.tsx ('a card with no issue has a short ID in every table' draws `red <commit>`
+#   and `card <N>`, the one for a card id ending in -0 draws `card`, and the Issue 1582 case draws `fu #N`, `split #N`, `red <commit>`
+#   and `test <file>`), but a test of the mod has no file access
 #   in its types, so it cannot read the guide, and the guide's text is read here.
 # - a page or release note line that states a condition of behaviour that other cases run (issue 1447): a release note
 #   is the fixed text of a past version, so only its text can be read; each line below names the code or case that runs it.
@@ -35,10 +36,14 @@ line() {
 # O347: the tab row scrolls sideways with no bar, so on a narrow screen the tabs past the edge are reached by a swipe.
 has .claude/dashboard/app.css '.tabs-list { overflow-x: auto; scrollbar-width: none; }' 'the tab row no longer scrolls sideways, or shows a bar'
 has docs/board.md 'swipe it sideways to reach the other tabs' 'the guide left out the sideways swipe'
-# O369: a card with no issue has `red <commit>`, `card <N>` or `card` for its ID, and its whole name in Title.
-has docs/units.md 'a card with no issue shows `red <commit>`' 'the guide names only the issue as the matrix ID'
-has docs/units.md '`card <N>` for any other, with the number its card id ends in, or `card` when it ends in no number or in `-0`' 'the guide leaves out the plain ID, or the card id that ends in -0'
-has docs/units.md 'a card with no issue shows its whole name there' 'the guide leaves out where the whole name is'
+# O369, #1582: a card with no issue has `fu #N`, `split #N`, `red <commit>`, `test <file>`, `card <N>` or `card` for its ID, and its work in Title.
+has docs/units.md 'A card with no issue shows its kind and its parent' 'the guide names only the issue as the matrix ID'
+has docs/units.md '`fu #1571` for a review follow-up' 'the guide leaves out the review follow-up ID'
+has docs/units.md '`split #1453` for a split part' 'the guide leaves out the split part ID'
+has docs/units.md '`red <commit>` (the' 'the guide leaves out the main-red fix card ID'
+has docs/units.md '`test <file>` for a card of the Tests page' 'the guide leaves out the Tests page card ID'
+has docs/units.md '`card <N>`, with the number its card id ends in, or `card` when it ends in no number or in `-0`' 'the guide leaves out the plain ID, or the card id that ends in -0'
+has docs/units.md 'a review follow-up shows its finding there' 'the guide leaves out what the Title shows'
 # O337: the comment on the Approve visible changes row.
 has .claude/dashboard/parts/rules-rows.js 'or a parent issue it inherits the yes from (follow-ups and split slices)' 'the comment names only the issue'"'"'s own line'
 # O352: the loop comment of a last NO-GO.

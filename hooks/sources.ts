@@ -439,10 +439,34 @@ export const parseLimit = (text: string): Limit | null => {
 
 // ---- what the views say ----
 
-// A card by its issue; a main-red fix card by its name (repo before it, as before an issue number); a branch by its title.
-const named = (c: Ref) => (c.name ? `${c.repo ? `${c.repo} ` : ''}${c.name}` : '')
+// A card with no issue that follows from another work, named by its kind and parent, as its name says (conveyor's
+// tcadd() labels): `fu #N` for a review follow-up, `split #N` for a split part, `test <file>` for a Tests page card
+// (the test file's name without its folder and extension, cut to fit the matrix's ID column), `red <commit's first 7>`
+// for a main-red fix card; its title is the work itself. null for any other card.
+const ID_MAX = 12
+const KINDS: [RegExp, (m: RegExpExecArray) => string][] = [
+  [/^Review follow-up of #(\d+)$/, m => `fu #${m[1]}`],
+  [/^Split part of #(\d+)$/, m => `split #${m[1]}`],
+  [/^Tests page: (.+)$/, m => `test ${(m[1]?.split('/').pop() ?? '').replace(/\.test\.[^.]+$|\.[^.]+$/, '').slice(0, ID_MAX - 5)}`],
+]
+// A finding's title without its tags ([P1], [E2], [cleanup]), the place cut to the file's base name and the line:
+// "[P2] [E1] conveyor/lib/auto.sh:239 The build host can ..." reads "auto.sh:239 The build host can ...". Any other title is kept.
+const findingTitle = (title: string): string => {
+  const bare = title.replace(/^(?:\[(?:P[0-3]|[A-Za-z]+[0-9]+|cleanup)\]\s*)+/, '')
+  const m = /^(\S+?):(\d+(?:-\d+)?)\s+(.+)$/.exec(bare)
+  return m ? `${m[1]?.split('/').pop()}:${m[2]} ${m[3]}` : bare
+}
+const kindOf = (c: Ref): { id: string; title: string } | null => {
+  for (const [re, id] of KINDS) { const m = re.exec(c.name ?? ''); if (m) return { id: id(m), title: findingTitle(c.title) } }
+  // A main-red fix card: its Title is its name, "Main is red (<commit>)"; the snapshot's title, which lists the failing cases, is not shown.
+  const red = /^Main is red \(([0-9a-f]+)\)/.exec(c.name ?? '')
+  return red?.[1] ? { id: `red ${red[1].slice(0, 7)}`, title: c.name ?? '' } : null
+}
+// A card by its issue; a card with no issue by its kind and parent (kindOf, repo before it, as before an issue number), else by its name; a branch by its title.
+const named = (c: Ref) => { const k = kindOf(c); return k ? `${c.repo ? `${c.repo} ` : ''}${k.id}` : c.name ? `${c.repo ? `${c.repo} ` : ''}${c.name}` : '' }
 const ref = (c: Ref) => (c.issue ? `${c.repo}#${c.issue}` : named(c) || c.title || 'a branch')
-export const nameOf = (c: Ref) => (c.issue || c.name ? `${ref(c)}${c.title ? ` ${c.title}` : ''}` : c.title || 'a branch with no issue')
+const titleOf = (c: Ref) => kindOf(c)?.title ?? c.title
+export const nameOf = (c: Ref) => (c.issue || c.name ? `${ref(c)}${titleOf(c) ? ` ${titleOf(c)}` : ''}` : c.title || 'a branch with no issue')
 // The round in progress, as the track names it ("review 2 of 3", "fix after review 1", "tests", "landing"). A review
 // past the rule's count (after a landing conflict or a test fix) is named by its number alone.
 export const stepOf = (b: Belt) => b.track?.label || (b.step === 'review' && b.review ? `review ${b.review}${b.of && b.review <= b.of ? ` of ${b.of}` : ''}` : b.step || 'step unknown')
@@ -853,7 +877,7 @@ const titled = (c: Ref & { parent: number | null }, lead: Seg[], right: Seg[], w
   const ref: Seg = { t: c.issue ? `${c.repo}#${c.issue} ` : c.name ? `${named(c)} ` : '', c: C.name, b: bold }
   const parent: Seg[] = c.parent ? [{ t: ` ↳ #${c.parent}`, d: true }] : []
   const fixed = cols(plain(lead)) + cols(ref.t) + cols(plain(parent)) + (right.length ? cols(plain(right)) + 2 : 0)
-  const title = fitWidth([{ t: shortTitle(c.title) || (c.issue ? '' : 'a branch with no issue'), c: C.name, b: bold }], Math.max(6, w - fixed))
+  const title = fitWidth([{ t: kindOf(c)?.title || shortTitle(c.title) || (c.issue ? '' : 'a branch with no issue'), c: C.name, b: bold }], Math.max(6, w - fixed))
   return spread([...lead, ref, ...title, ...parent], right.length ? right : null, w)
 }
 // A card's cost so far: its dollars, "no reading yet" before any token is read ("cost shown when the step ends" when the
@@ -1175,17 +1199,16 @@ const padR = (t: string, n: number) => `${t}${' '.repeat(Math.max(0, n - cols(t)
 const padL = (t: string, n: number) => `${' '.repeat(Math.max(0, n - cols(t)))}${t}`
 const rule = (w: number): Line => [{ t: '─'.repeat(w), d: true }]
 const section = (title: string, right: string, w: number): Line => spread([{ t: title, c: C.head, b: true }], right ? { t: right, d: true } : null, w)
-// A card's ID in a table: `#<issue>`; with no issue, short so no name pushes a column: a main-red fix card `red <commit's
-// first 7>`, any other `card` and the number its card id ends in (a card id ending in `-0` has no number: `card`). The matrix shows its whole name in the Title column.
+// A card's ID in a table: `#<issue>`; with no issue, short so no name pushes a column: its kind and parent (kindOf), any other `card` and the number its card id ends in (a card id ending in `-0` has no number: `card`). The matrix shows the card's work in the Title column.
 const idOf = (c: Card) => {
   if (c.issue) return `#${c.issue}`
-  const red = /^Main is red \(([0-9a-f]+)\)/.exec(c.name ?? '')
-  if (red?.[1]) return `red ${red[1].slice(0, 7)}`
+  const kind = kindOf(c)
+  if (kind) return kind.id
   const n = /-([1-9]\d{0,6})$/.exec(c.card)?.[1]
   return n ? `card ${n}` : 'card'
 }
 // A card that is a part of a parent issue names it: `#636 of #647`.
-const beltId = (b: Belt) => `${idOf(b)}${b.umbrella ? ` of #${b.umbrella}` : ''}`
+const beltId = (b: Belt) => `${idOf(b)}${b.umbrella && (b.issue || !kindOf(b)) ? ` of #${b.umbrella}` : ''}`
 // The pick order's counts, the parts of one parent issue counted as one entry: ready when any part is ready, else
 // waiting when any part waits.
 const pickCounts = (snap: Snap): { ready: number; waiting: number } => {
@@ -1225,7 +1248,7 @@ const matrixTable = (s: State, cards: Belt[], w: number): Line[] => {
   const titleW = w - fixed - 2 >= 6 ? w - fixed - 2 : 0
   const head = `${padR('ID', idW)}  ${STEP_NAMES.map(n => n[0]).join(' ')}  ${age ? `${padL('Age', ageW)}  ` : ''}${padL('Cost', costW)}${titleW ? '  Title' : ''}`
   // The card's own name (no project name: the heading has it) goes before its title.
-  const text = (b: Belt) => [b.issue ? '' : b.name, shortTitle(b.title)].filter(Boolean).join(' ') || (b.issue ? '' : 'a branch with no issue')
+  const text = (b: Belt) => kindOf(b)?.title || [b.issue ? '' : b.name, shortTitle(b.title)].filter(Boolean).join(' ') || (b.issue ? '' : 'a branch with no issue')
   const title = (b: Belt): Line => [{ t: '  ' }, ...fitWidth([{ t: text(b), c: C.name }], titleW)]
   return [
     fitWidth([{ t: head, d: true }], w),

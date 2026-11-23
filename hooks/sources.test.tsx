@@ -815,13 +815,15 @@ test('a lane with no worktree on this machine is drawn nowhere; a lane that has 
 })
 
 // Issue 141: a main-red fix card has no issue (issue 0): /units named it by its title alone, the Foreman's views "#0".
-// It is named as the snapshot names it, "Main is red (<commit>)", on the belt and in Needs you.
-test('a main-red fix card is named "Main is red (<commit>)" on the belt and in Needs you, never #0', () => {
+// It is named `red <commit>` with its name, "Main is red (<commit>)", as its Title, once, on the belt and in Needs you: the
+// snapshot's title ("Main is red: <cases>") is not shown in its place (issue 1582).
+test('a main-red fix card is named `red <commit>` with its name as Title on the belt and in Needs you, never #0', () => {
   const red = { issue: 0, name: 'Main is red (0123456789ab)', title: 'Main is red: a.test' }
   const text = tableText(board({ needsYou: { waiting: [], blocked: [{ ...BLOCKED, ...red, card: 'c20261110T040000-bookstore-0' }] },
     belt: [{ ...BELT[0], ...red, card: 'c20261110T041000-bookstore-0', name: 'Main is red (fedcba987654)' }] }), 100)
-  expect(section(text, 'NEEDS YOU')).toMatch(/Main is red \(0123456789ab\) Main is red: a\.test/)
-  expect(section(text, 'ON THE BELT')).toMatch(/Main is red \(fedcba987654\) Main is red: a\.test/)
+  expect(section(text, 'NEEDS YOU')).toMatch(/red 0123456 Main is red \(0123456789ab\)/)
+  expect(section(text, 'ON THE BELT')).toMatch(/red fedcba9 Main is red \(fedcba987654\)/)
+  expect(text, 'the failing cases of the snapshot title are not shown').not.toMatch(/a\.test/)
   expect(text).not.toMatch(/#0\b/)
 })
 
@@ -1057,6 +1059,42 @@ test('a card with no issue whose card id ends in -0 has the ID `card`, not `card
   const s = board({ belt: [zero], landed: [] })
   expect(activityModel(s, s.snap!, 62, 0).map(plain)[1], 'WORKER ACTIVITY row of a card id ending in -0').toMatch(/^◐ card  /)
   expect(section(paneModel(s, 100, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')[2], 'matrix row of a card id ending in -0').toMatch(/^card  /)
+})
+
+// Issue 1582. Bug it catches: a card with no issue read `card` (a review follow-up or a split part ends its card id in
+// -0, so no number), and its Title began with "Review follow-up of #N", so the finding was cut off: no row said which
+// card it was. Each table and the toasts name it by its kind and parent, and its Title is the work itself (a finding on
+// a file with no extension is cut to its base name too).
+test('a review follow-up, a split part, a main-red fix card and a Tests page card are named by kind and parent in every table, the Title is the work, an issue card is unchanged', () => {
+  const fu = { issue: 0, name: 'Review follow-up of #1571', title: '[P2] [E1] conveyor/lib/auto.sh:239 The build host can stop the run', card: 'c20261123T100000-bookstore-0' }
+  const split = { issue: 0, name: 'Split part of #1453', title: '[P3][cleanup] conveyor/lanes/research-bash:526 One repeated line is not caught', card: 'c20261123T100100-bookstore-0' }
+  // The title is the one the snapshot gives (conveyor/tests/mainred.test.sh: name and title of a fix card): it lists the failing cases.
+  const red = { issue: 0, name: 'Main is red (19e3b6e4f5a6)', title: 'Main is red: a.test: one, c.test, b.test: flaky', card: 'c20261123T100200-bookstore-0' }
+  const tp = { issue: 0, name: 'Tests page: conveyor/tests/snapexec.test.sh', title: 'snapexec: one snapshot starts a run', card: 'c20261123T100300-bookstore-0' }
+  const issue = { ...BELT[1], issue: 1524, card: 'c20261123T100400-bookstore-1524', title: 'Health lists a working build' }
+  const belt = [...[fu, split, red, tp].map(x => ({ ...BELT[0], ...x })), issue]
+  const s = board({ belt, landed: [{ ...LANDED[0], ...fu, card: 'c20261123T090000-bookstore-0', time: ago(5) }],
+    needsYou: { waiting: [], blocked: [{ ...BLOCKED, ...split, reason: 'review 3 was NO-GO' }] } })
+  const rows = section(paneModel(s, 100, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')
+  const head = rows[1] ?? ''
+  const idW = head.indexOf('B') - 2
+  // No ID passes the ID column's width (#1414), and each row carries its kind and parent.
+  expect(idW, `ID column width in "${head}"`).toBeLessThanOrEqual(12)
+  const ids = rows.slice(2, 7).map(r => r.slice(0, idW).trim())
+  expect(ids).toEqual(['fu #1571', 'split #1453', 'red 19e3b6e', 'test snapexe', '#1524'])
+  expect(rows[2]).toMatch(/ {2}auto\.sh:239 The build host can stop the run$/)
+  expect(rows[3]).toMatch(/ {2}research-bash:526 One repeated line is not caught$/)
+  expect(rows[4], 'main-red Title is its name, not the failing cases').toMatch(/ {2}Main is red \(19e3b6e4f5a6\)$/)
+  expect(rows[5]).toMatch(/ {2}snapexec: one snapshot starts a run$/)
+  expect(rows[6]).toMatch(/ {2}Health lists a working build$/)
+  expect(rows[2], 'no tag, prefix or folder in the Title').not.toMatch(/\[P2\]|\[E1\]|\[cleanup\]|Review follow-up|conveyor\/l/)
+  const activity = activityModel(s, s.snap!, 62, 0).map(plain)
+  expect(activity.slice(1, 6).map(l => l.slice(2).split('  ')[0])).toEqual(['fu #1571', 'split #1453', 'red 19e3b6e', 'test snapexe', '#1524'])
+  expect(section(paneModel(s, 100, 0).map(plain).join('\n'), 'LANDED TODAY'), 'LANDED TODAY').toMatch(/\n\S+ [AP]M +fu #1571 +/)
+  const needs = tableText(s, 100)
+  expect(needs, 'NEEDS YOU').toMatch(/split #1453 research-bash:526 One repeated line is not caught/)
+  expect(needs, 'no table says "Split part of" or "Review follow-up of"').not.toMatch(/Split part of|Review follow-up of/)
+  expect(toasts(seenOf(board().snap!), seenOf(s.snap!))).toEqual(['split #1453 is blocked', 'fu #1571 landed'])
 })
 
 // Issue 497. Bugs it catches: the pane said "0 queued" and "the queue is empty" while issues waited on other cards,

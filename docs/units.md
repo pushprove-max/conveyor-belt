@@ -179,11 +179,13 @@ A word wider than the pane breaks between whole characters.
   the test map line and the weekly limit.
 - The old-engine line and the whole-suite line, when there is one (while it runs, a second line with its counts, or the progress of the pass that runs failed cases again, when it has some), and the cards that need you, one line each.
 - **BUILD MATRIX**: on the right, the project and its slots in use against the builder cap (`bookstore · 3/4
-  slots`; the same count as the `ON THE BELT` head when the snapshot is older). One row for each card on the belt: the issue (`#486`; a card with no issue shows `red <commit>`, with the
-  first 7 characters of the commit, for a fix of a red main, and `card <N>` for any other, with the number its card id ends in, or `card` when it ends in no number or in `-0` (a card that
-  the Tests page files), as in WORKER ACTIVITY and
-  LANDED TODAY), one column for each step (`B R F T L P`: Build,
-  Review, Fix, Test, Land, Push), its overall time (`Age`), its cost and, last, its short title (`Title`; a card with no issue shows its whole name there). The title
+  slots`; the same count as the `ON THE BELT` head when the snapshot is older). One row for each card on the belt: the issue (`#486`; a part of a parent issue `#636 of #647`). A card with no issue shows its kind and its parent:
+  `fu #1571` for a review follow-up of #1571, `split #1453` for a split part of #1453, `red <commit>` (the
+  first 7 characters of the commit) for a fix of a red main, and `test <file>` for a card of the Tests page (the
+  test file's name, without its folder and extension, cut to fit the column). Any other card with no issue shows `card <N>`, with the number its
+  card id ends in, or `card` when it ends in no number or in `-0`. The same ID shows in WORKER ACTIVITY,
+  LANDED TODAY, the lists of cards that need you and the toasts. After the ID: one column for each step (`B R F T L P`: Build,
+  Review, Fix, Test, Land, Push), its overall time (`Age`), its cost and, last, its short title (`Title`; a review follow-up shows its finding there, as the file's name and line and the finding's text, with no `[P1]` or `[E2]` tag; a fix card of a red main shows its name, `Main is red (<commit>)`). The title
   uses the remaining width of the row, and a title that is too long ends in `…`. A step shows `▶` while it runs,
   `✓` when it is done, `✗` when it failed and `·` when the card did not get to it (Fix after a GO, too). A dim
   legend is under the table. Each project with cards on the belt has its own matrix. Each other project of the
