@@ -58,6 +58,9 @@ t_standingrelfix() {
 # Bug: when `auto reserved` fails on the card's host (an owner's profile there that cannot be read), the watcher wakes
 # the Foreman with the block's own reason and runs no retry (retryable(), foreman/lib.sh). A review-retry rule that
 # names only a failed retry and a reserved-word block lets the Foreman tell the owner a retry failed when none ran.
+# Bug: reviewretry() (foreman/watch-conveyor.sh) also wakes the Foreman after a retry that worked when
+# `auto act review-retry` fails ("was retried (review-retry), but the act was not logged"); a rule that calls every
+# wake a failed retry lets the Foreman tell the owner that retry failed.
 t_standingretry() {
   local out; setup '[]'
   tune '.auto.standing = ["review-retry"]'
@@ -65,6 +68,8 @@ t_standingretry() {
   out=$(grep -F -- '- review-retry: ' <<<"$out")
   grep -qF 'a block the watcher did not retry, as it could not read auto.reserved' <<<"$out" && grep -qF 'do not say that a retry failed' <<<"$out" \
     || fail "review-retry does not tell the Foreman of a block the watcher could not retry: $out"
+  grep -qF 'was retried (review-retry), but the act was not logged' <<<"$out" && grep -qF 'do not say that the retry failed' <<<"$out" \
+    || fail "review-retry calls a retry that worked but was not logged a failed retry: $out"
 }
 
 # A card's worktree beside main, its change to the pipeline file a.txt staged, and its NO-GO review with three findings
