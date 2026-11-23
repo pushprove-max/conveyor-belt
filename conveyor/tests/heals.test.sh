@@ -123,6 +123,23 @@ t_healscard() {
     || fail "the snapshot's review does not count the finding for the self-heals list, or its track step does not show its line: $(jq -c '.landed[] | select(.issue == 7) | [.rounds, .track.records]' <<<"$out")"
 }
 
+# Bug (issue 1567): the check that healsbrief() puts a moved finding out of the card's scope called the function alone,
+# so it passed with the call in card() removed, and the build session still got the finding as part of its scope. Here
+# the build session of a card of issue 9 is given the prompt card() makes, with a finding the sort moved from #9.
+t_healsbrief() {
+  local moved='[P2] a.txt:1 the wait is one turn longer' e
+  setup "[$(issue 9 2026-01-01)]"
+  fx_in 'healsadd c0-9 9 area:engine "the turn waits" "'"$moved"'" sort'
+  e=$(cat "$T/$CASE/run.out")
+  [ "$RC" = 0 ] && [ -n "$e" ] || fail "the sort's entry was not written to the self-heals list: $e $(cat "$ST/selfheals.jsonl" 2>&1)"
+  # The build session keeps the prompt it is given: card() joins the brief and healsbrief() as the session is made.
+  echo 'cp "$STUB/brief" "$STUB/build.brief"; echo two >> a.txt' > "$STUB/build"
+  # loop: only a whole card shows the prompt card() gives its build session, which no function of it makes alone
+  loop run --only 9 1 > "$T/$CASE/run.log" 2>&1 || fail "run of #9 exited non-zero: $(tail -n 20 "$T/$CASE/run.log")"
+  grep -qx '# Findings of this issue that are on the self-heals list' "$STUB/build.brief" && grep -qF "$moved (list entry $e)" "$STUB/build.brief" \
+    || fail "the build session of #9 is not given its moved finding out of its scope, with its list entry $e: $(cat "$STUB/build.brief" 2>&1)"
+}
+
 # Bugs (issue 1559): the first review of a card that is no follow-up stops fixing an in-scope finding the judge sorts
 # as self-heals; one still left at the last review is filed as a follow-up, or lost, rather than listed.
 t_healsfirst() {
