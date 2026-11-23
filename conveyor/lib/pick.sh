@@ -43,9 +43,11 @@ upnext() { # <open issues json> [retried] [all] [the control record, when the ca
   packget test.surveyHour sh || return 1
   # The open issues whose own seats' accounts are at the guard: the pick, the same-file check, the dry pick and the
   # Board's order all leave them out, so none of them names an issue the loop will not start.
-  # None held starts no jq to write the empty list (#1542).
-  gd=$(jq -r --argjson i "$1" 'select(.guard != null) | .cards // {} | keys[] | select(tonumber? | IN($i[].number))' <<<"$c" 2>/dev/null \
-    | while read -r n; do ! cardheld "$c" "$n" || echo "$n"; done) && { [ -z "$gd" ] && gd='[]' || gd=$(jq -cs . <<<"$gd"); } || gd='[]'
+  # None held starts no jq to write the empty list (#1542). The list goes to jq as a file, not an argument: a big list
+  # (bodies included) is over the argument limit, and a jq that does not start must stop the pick, not read as none held.
+  gd=$(jq -r --slurpfile i <(printf '%s' "$1") 'select(.guard != null) | .cards // {} | keys[] | select(tonumber? | IN($i[0][].number))' <<<"$c" \
+    | while read -r n; do ! cardheld "$c" "$n" || echo "$n"; done) || return 1
+  [ -z "$gd" ] && gd='[]' || gd=$(jq -cs . <<<"$gd") || return 1
   # Read first, one after the other: a read that fails stops the pick (a process substitution's failure is not
   # passed back, and jq would read no cards at all, so every issue with a card would be picked again).
   if [ -n "${UPREC:-}" ]; then cards=$(<"$UPREC") && old=$(<"$UPOLD") || return 1

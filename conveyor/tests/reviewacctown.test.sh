@@ -62,3 +62,16 @@ t_reviewacctcard() {
   fx_in "pick '' 10 \"\$(<$(printf %q "$STUB/issues.json"))\""
   [ "$RC" = 0 ] && [ ! -s "$T/$CASE/run.out" ] || fail "the pick took #10, or logged that the next ready issue was picked when none was ready: $(cat "$T/$CASE/run.out")"
 }
+# Bug: upnext() gave the open issues to the guard's jq as an argument, bodies included; over the argument limit (three
+# 45 KiB bodies on Linux) jq did not start, the list of held issues read as empty, and #10, whose own reviewer's account is
+# at the guard, was not left out. #10 is held by the same fixture as t_reviewacctcard's, with big bodies on every issue.
+t_reviewacctbig() {
+  reviewacctsetup "[$(issue 10 2026-01-04)]"
+  ctl reviewer default >/dev/null; ctl review-account second >/dev/null; ctl card 10 reviewer claude-sonnet-5-5 >/dev/null
+  local body; body=$(head -c 45000 /dev/zero | tr '\0' x)
+  jq -c --arg b "$body" '[., (. | .number = 11), (. | .number = 12)] | map(.body = $b)' <<<"$(issue 10 2026-01-04)" > "$STUB/up.json"
+  # guardread records #10's reading as turnask() does (at the fixture's 95 %), then upnext reads the record.
+  fx_in "SEATCARD=10 guardread \"\$(ctl)\" ask >/dev/null && upnext \"\$(<$(printf %q "$STUB/up.json"))\" '' all"
+  [ "$RC" = 0 ] && [ "$(jq -c '[.[] | select(.rule != null) | {number, rule}]' "$T/$CASE/run.out")" = '[{"number":10,"rule":"the weekly limit guard"}]' ] \
+    || fail "upnext did not leave #10 out by the weekly limit guard for a list of over 128 KiB: $(jq -c "[.[] | {number, rule}]" "$T/$CASE/run.out" 2>&1 | head -c 400)"
+}
