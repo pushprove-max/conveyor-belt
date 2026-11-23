@@ -186,8 +186,8 @@ t_judgerare() {
   judgeone 7 "$STUB/review"
   for l in 'Accept a finding only when all of these hold. One rule holds at every level, P0 to P3:' \
     '- It is inside the diff, or the card'"'"'s change causes it: a caller or dependant the change breaks. For one outside the' \
-    'Decline a finding at any level only when its claim is wrong about the code, or its proof cannot happen with what the' \
-    'project really runs. The reason says which of the two, and why. "Rare case" is no reason to decline at any level: an'; do
+    'Decline a finding at any level only when its claim is wrong about the code, its proof cannot happen with what the' \
+    'project really runs, or its defect is already fixed on main. The reason says which of the three, and why. "Rare case" is no reason to decline at any level: an'; do
     grep -qxF -- "$l" "$STUB/judge-asked" || fail "the judge's prompt does not hold the one scope rule and decline rule: no line '$l'"
   done
   old='only when it is inside the diff|with the reason `(rare case|style)`|A P2 finding has a higher bar|Judge a P3 finding as a P2|a tie is a decline|Decline unless the finding earns'
@@ -205,7 +205,7 @@ t_judgerare() {
 # at every level, or allows one at another level, and with none it still allows one.
 t_judgerarelevels() {
   local p r=$'[P3] a.txt:2 the message names the wrong file. Proof: run it with two cards at once\nUSER-VISIBLE: no\nVERDICT: NO-GO'
-  local none='project really runs. The reason says which of the two, and why. "Rare case" is no reason to decline at any level: an'
+  local none='project really runs, or its defect is already fixed on main. The reason says which of the three, and why. "Rare case" is no reason to decline at any level: an'
   judging "[$(issue 7 2026-01-01)]"
   [ "$(loop control | jq -c .judgeRare)" = '[]' ] || fail "a new record does not read as no rare-case level: $(loop control | jq -c .judgeRare)"
   [ "$(loop control judge rare P3 P2 P3 | jq -c .judgeRare)" = '["P2","P3"]' ] || fail "control judge rare P3 P2 P3 did not write P2 and P3, each once, in order"
@@ -218,7 +218,7 @@ t_judgerarelevels() {
   # The prompt the judge is given with two levels names both of them.
   printf '%s\n' "$r" > "$STUB/review"; echo 'F1 ACCEPT: real. Cost to every card: none' > "$STUB/judge.1"
   judgeone 7 "$STUB/review"
-  grep -qF 'really runs, or, at P2 and P3 only, it is a rare case' "$STUB/judge-asked" \
+  grep -qF 'already fixed on main, or, at P2 and P3 only, it is a rare case' "$STUB/judge-asked" \
     || fail "with judgeRare [P2, P3], the judge's prompt does not allow a rare-case decline at P2 and P3: $(grep -n -i 'rare case' "$STUB/judge-asked")"
   [ "$(loop control judge rare none | jq -c .judgeRare)" = '[]' ] || fail "control judge rare none did not clear the levels"
   jq -c 'del(.judgeRare)' "$ST/control.json" > "$ST/c.new" && mv "$ST/c.new" "$ST/control.json" \
@@ -227,7 +227,7 @@ t_judgerarelevels() {
   loop control judge rare P3 >/dev/null || fail "control judge rare P3 failed"
   printf '%s\n' "$r" > "$STUB/review"; echo 'F1 DECLINE: rare case: two cards at once seldom touch this line' > "$STUB/judge.2"
   judgeone 7 "$STUB/review"
-  grep -qF 'really runs, or, at P3 only, it is a rare case: its proof needs an input, timing or setup that the project runs' "$STUB/judge-asked" \
+  grep -qF 'already fixed on main, or, at P3 only, it is a rare case: its proof needs an input, timing or setup that the project runs' "$STUB/judge-asked" \
     && grep -qF 'At any other level,' "$STUB/judge-asked" && ! grep -qF "$none" "$STUB/judge-asked" && ! grep -qE 'at P[0-2]' "$STUB/judge-asked" \
     || fail "with judgeRare [P3], the judge's prompt does not allow a rare-case decline at P3 alone: $(grep -n -i 'rare case' "$STUB/judge-asked")"
   loop control judge rare none >/dev/null || fail "control judge rare none failed"
@@ -235,6 +235,35 @@ t_judgerarelevels() {
   judgeone 7 "$STUB/review"
   grep -qxF -- "$none" "$STUB/judge-asked" && ! grep -qF 'it is a rare case' "$STUB/judge-asked" \
     || fail "with judgeRare none, the judge's prompt still allows a rare-case decline: $(grep -n -i 'rare case' "$STUB/judge-asked")"
+}
+
+# Bugs (#1522): the judge's prompt lets it decline a weak test as "only a test gap" or "hypothetical", or decline a
+# repeat whatever the earlier decline's kind was, so a rare-case decline buries a finding for good; a decline line has
+# no kind, or its kind is not kept on the declined list (donotraise() reads it there), or the next judge of the issue
+# is not told the kind of each earlier decline (none for a line with no kind).
+t_judgeweaktest() {
+  local p
+  judging "[$(issue 7 2026-01-01)]"
+  printf '%s\n' '[P2] a.txt:1 the test passes with the fix removed' '[P2] a.txt:2 two cards at once' '[P2] a.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  printf '%s\n' 'F1 DECLINE: claim wrong: the test fails with the fix removed' 'F2 DECLINE: Rare case: two cards seldom meet' 'F3 DECLINE: a matter of taste' > "$STUB/judge.1"
+  judgeone 7 "$STUB/review"
+  # The prompt's lines are joined, so a sentence is checked whole across its line breaks.
+  p=$(tr '\n' ' ' < "$STUB/judge-asked" | tr -s ' ')
+  grep -qF "A finding that a test does not check what its name, its comment or the issue's Done-when says it checks (it passes with the behaviour broken) is a real defect at its level: \"only a test gap\" and \"hypothetical\" are no reason to decline it." <<<"$p" \
+    || fail "the judge's prompt does not make a weak test a real defect that is not declined as a test gap: $(grep -n 'test' "$STUB/judge-asked")"
+  grep -qF 'is declined as a repeat, with the earlier kind, only when that kind is `claim wrong`, `cannot happen` or `fixed`, or the defect is fixed on main. When the earlier kind is `rare case`, `not this change`, `other` or none, judge the finding again from the code, as a new finding.' <<<"$p" \
+    || fail "the judge's prompt does not decline a repeat only after an allowed earlier kind: $(grep -n 'repeat\|already declined' "$STUB/judge-asked")"
+  grep -qxF '`F<n> DECLINE: <kind>: <one-line reason>`' "$STUB/judge-asked" \
+    && grep -qF '`claim wrong` (its claim is wrong about the code), `cannot happen` (its proof cannot happen with what the project really runs), `fixed` (the defect is already fixed on main), `rare case` (only where the rule above allows it), `not this change` or `other`.' <<<"$p" \
+    || fail "the judge's decline line format does not carry the kind: $(grep -n 'DECLINE\|kind' "$STUB/judge-asked")"
+  [ "$(jq -r '"\(.kind // "none") \(.why)"' "$ST/declined.jsonl" | tr '\n' '|')" = 'claim wrong claim wrong: the test fails with the fix removed|rare case Rare case: two cards seldom meet|none a matter of taste|' ] \
+    && [ "$(jf 7 '[.judge.declined[] | .kind // "none"] | join(",")')" = 'claim wrong,rare case,none' ] \
+    || fail "the declined list or the review's judge line does not keep each decline's kind (none with no kind): $(cat "$ST/declined.jsonl") $(jf 7 .judge.declined)"
+  printf '%s\n' '[P2] a.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"; echo 'F1 DECLINE: other: still a matter of taste' > "$STUB/judge.2"
+  judgeone 7 "$STUB/review"
+  grep -qxF -- '- [P2] a.txt:1 the test passes with the fix removed (declined: claim wrong: the test fails with the fix removed) [kind: claim wrong]' "$STUB/judge-asked" \
+    && grep -qxF -- '- [P2] a.txt:3 a nit (declined: a matter of taste) [kind: none]' "$STUB/judge-asked" \
+    || fail "the next judge is not told the kind of each earlier decline: $(grep -n 'declined' "$STUB/judge-asked")"
 }
 
 # Bugs (#534): the writing method the reviewer and the judge read is missing, changed from the pinned upstream text,
@@ -268,7 +297,7 @@ t_judgeaccept() {
   # The second review of the same card (judgeone keeps its worktree): its judge is the issue's second.
   judgeone 7 "$STUB/review.2"
   [ "$(jf 7 '[.verdict, (.judge.declined | length)] | join(" ")')" = "GO 1" ] || fail "a review whose one finding the judge declined is not a GO: $(jr 7)"
-  grep -qxF -- '- [P2] a.txt:2 a nit (declined: a matter of taste)' "$STUB/judge-asked" || fail "the second judge was not given the finding declined before on this issue"
+  grep -qxF -- '- [P2] a.txt:2 a nit (declined: a matter of taste) [kind: none]' "$STUB/judge-asked" || fail "the second judge was not given the finding declined before on this issue"
   [ "$(jq -r '"\(.by): \(.finding)"' "$ST/declined.jsonl" | tr '\n' ,)" = 'judge: [P2] a.txt:2 a nit,judge: [P1] a.txt:12 another word,' ] \
     || fail "the declined list does not hold the declined findings alone, each once: $(cat "$ST/declined.jsonl" 2>&1)"
 }

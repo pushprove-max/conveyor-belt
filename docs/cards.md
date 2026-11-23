@@ -287,6 +287,15 @@ Board, that review shows "Fix loop ended:" and the reason.
 The judge, when it is on (`conveyor.sh control judge on`), reads each review and declines a finding that does not earn
 its place. A declined finding causes no fix and no follow-up (`conveyor/README.md`, The judge).
 
+A finding that a test does not check what its name, its comment or the issue's Done-when says it checks is a real
+defect, not "only a test gap".
+
+Each decline has a kind: `claim wrong`, `cannot happen`, `fixed` (already fixed on main), `rare case`,
+`not this change` or `other`. The declined list keeps it beside the reason. A finding that repeats a declined one is
+declined as a repeat only when the earlier kind is `claim wrong`, `cannot happen` or `fixed`, or when the defect is
+fixed on main now. A repeat of a finding declined with another kind, or with no kind, is judged again as a new
+finding. The reviewer's list of findings not to raise holds only lines of those three kinds.
+
 A real defect that the card's change did not cause is never declined for that. The judge marks it `OUTSIDE`. The card
 gets no fix round for it and lands as its other findings let it. When the card lands, the finding is filed as a
 follow-up of the card, with its level and the card's issue as its parent, as a finding of a last `NO-GO` is. The

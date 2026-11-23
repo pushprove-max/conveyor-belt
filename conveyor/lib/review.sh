@@ -246,15 +246,15 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 # The judge. With the control record's judge on (`control judge on`; judgeon()), a judge reads each review of a card's change that holds findings, before
 # the card acts on it: the findings, the card's staged change, the issue (the brief) and the findings already
 # declined on this issue's cards (the declined list, DECLINED, holds them). It marks each finding accepted, declined or
-# outside (real, but not caused by the card's change), with a one-line reason, and declines a finding at any level (P0 to P3) only when its claim is wrong about the code or its proof cannot happen with what the project really runs ("rare case" is
+# outside (real, but not caused by the card's change), with a one-line reason, and declines a finding at any level (P0 to P3) only when its claim is wrong about the code, its proof cannot happen with what the project really runs, or its defect is already fixed on main ("rare case" is
 # no reason, except at a level the control record's judgeRare names: judgeprompt(); a P3 is not declined for being minor). A declined finding becomes a line `DECLINED:
 # <finding> (judge: <reason>)` of the review, which is no finding (NOTFINDING): it causes no fix round and no
 # follow-up, and a review left with no finding is a GO; it goes to the declined list
-# (declined(), by: "judge", why: the reason). An outside finding becomes a line `OUTSIDE: <finding> (judge: <reason>)`
+# (declined(), by: "judge", why: the reason, kind: the kind the reason starts with, JUDGE, when it starts with one). An outside finding becomes a line `OUTSIDE: <finding> (judge: <reason>)`
 # of the review, no finding either (no fix round for this card), and a JSON line {finding, reason} of
 # <worktree>.outside, kept over the card's rounds: when the card lands, followups() files each as a follow-up of the
 # card, as a NO-GO finding is filed. The review's record line holds judge: {model, effort, sec,
-# tokens, usage, accepted: [{n, finding, place, reason, cost}], declined: [{n, finding, place, reason}], outside: [the same]}; n is the
+# tokens, usage, accepted: [{n, finding, place, reason, cost}], declined: [{n, finding, place, reason, kind (when its reason starts with one)}], outside: [{n, finding, place, reason}]}; n is the
 # finding's number as the judge was given it (its F<n>), and cost is what the judge wrote after "Cost to every card:",
 # which every accepted finding has.
 # Each finding reaches the judge marked with its place: inside the card's diff (any file:line it names, a path under the worktree read as one in it, is a
@@ -289,16 +289,23 @@ Accept a finding only when all of these hold. One rule holds at every level, P0 
 - Its proof can happen with what the project really runs: its real config, commands and inputs. Decline a proof that
   needs a stub built to misbehave, or a setup the project does not have.
 <rare>
-A finding already declined (listed before the findings, when there are any) and raised again with nothing new is
-declined for the reason it was declined, when that reason is one of the two above. Judge it again from the code when
-that reason was "rare case" or any other.
+A finding that a test does not check what its name, its comment or the issue'"'"'s Done-when says it checks (it passes
+with the behaviour broken) is a real defect at its level: "only a test gap" and "hypothetical" are no reason to
+decline it.
+A decline reason starts with its kind, then a colon and why: `claim wrong` (its claim is wrong about the code),
+`cannot happen` (its proof cannot happen with what the project really runs), `fixed` (the defect is already fixed on
+main), `rare case` (only where the rule above allows it), `not this change` or `other`.
+A finding already declined (listed before the findings, each with the kind of its decline, when there are any) and
+raised again with nothing new is declined as a repeat, with the earlier kind, only when that kind is `claim wrong`,
+`cannot happen` or `fixed`, or the defect is fixed on main. When the earlier kind is `rare case`, `not this change`,
+`other` or none, judge the finding again from the code, as a new finding.
 Answer OUTSIDE for a real finding of any level that the change did not cause, also when its proof needs an uncommon
 input or timing.
 A finding marked `always accepted` is of a kind the project always accepts: answer ACCEPT for it. It is accepted
 whatever you answer, so its line always ends with its `Cost to every card:`.
 Answer with exactly one line for each finding, in order, and no other line:
 `F<n> ACCEPT: <one-line reason>. Cost to every card: <any run, wait, retry or gate the fix would add to every card, or none>`
-`F<n> DECLINE: <one-line reason>`
+`F<n> DECLINE: <kind>: <one-line reason>`
 `F<n> OUTSIDE: <one-line reason: why it is real, and why this card'"'"'s change did not cause it>`
 A reason that names another finding by its number quotes that finding'"'"'s file and line beside it, as
 `F1 (src/a.js:12)`, so the reason reads on its own.
@@ -310,13 +317,13 @@ judgeprompt() {
   local l r
   l=$(ctl 2>/dev/null | jq -r '.judgeRare // [] | if length < 2 then join("") else "\(.[:-1] | join(", ")) and \(last)" end' 2>/dev/null) || l=''
   if [ -z "$l" ]; then
-    r='Decline a finding at any level only when its claim is wrong about the code, or its proof cannot happen with what the
-project really runs. The reason says which of the two, and why. "Rare case" is no reason to decline at any level: an
+    r='Decline a finding at any level only when its claim is wrong about the code, its proof cannot happen with what the
+project really runs, or its defect is already fixed on main. The reason says which of the three, and why. "Rare case" is no reason to decline at any level: an
 unusual input, timing or setup that the project really runs is not one. A P3 is minor by its level: do not decline it
 because it causes no wrong result.'
   else
-    r="Decline a finding only when its claim is wrong about the code, or its proof cannot happen with what the project
-really runs, or, at $l only, it is a rare case: its proof needs an input, timing or setup that the project runs
+    r="Decline a finding only when its claim is wrong about the code, its proof cannot happen with what the project
+really runs, its defect is already fixed on main, or, at $l only, it is a rare case: its proof needs an input, timing or setup that the project runs
 only rarely. The reason says which of these, and why; a rare-case reason starts with \"rare case\". At any other level,
 \"rare case\" is no reason to decline: an unusual input, timing or setup that the project really runs is not one. A P3
 is minor by its level: do not decline it because it causes no wrong result."
@@ -449,9 +456,10 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
   local wt=$3 ja before j why f
   ja=$(judgeon) && [ "$(verdict "$wt.review")" != none ] && grep -Evq "$NOTFINDING" "$wt.review" \
     || { printf '%s\n' "$5"; return 0; }
-  # The findings already declined on this issue's cards, the last 50: one raised again with nothing new is declined again.
+  # The findings already declined on this issue's cards, the last 50, each with its decline's kind (none on a line
+  # that has no kind): one raised again with nothing new is declined again only after a kind JUDGE allows.
   before=$(stdb ask lines declined 2>/dev/null | jq -rR --arg c "$1" --argjson n "$2" --arg repo "$REPO" 'fromjson? | objects | select(.card == $c or (.issue == $n and $n != 0 and .repo == $repo))
-    | "- \(.finding) (declined: \(.why))"' 2>/dev/null | awk '!seen[$0]++' | tail -n 50)
+    | "- \(.finding) (declined: \(.why)) [kind: \(.kind // "none")]"' 2>/dev/null | awk '!seen[$0]++' | tail -n 50)
   if ! { judgemarks "$wt" "$ja" > "$wt.judge.marks" && jq -e 'length > 0' "$wt.judge.marks" > /dev/null; } 2>/dev/null; then
     j=$(jq -cn '{failed: "the findings could not be read for the judge"}')
   elif [ -z "$before" ] || before="# Findings already declined on the cards of this issue"$'\n'"$before"$'\n\n'
@@ -471,7 +479,8 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
             else {n: $x.n, finding: $x.finding, place: $x.place}
               + (if $d.d == "ACCEPT" then {accept: true, reason: $rc.r, cost: $rc.c}
                  elif $x.kind != null then {accept: true, reason: "always accepted: a \($x.kind) finding (the judge \(if $d.d == "OUTSIDE" then "found it outside the change" else "declined it" end): \($rc.r))", cost: $rc.c}
-                 else {accept: false, outside: ($d.d == "OUTSIDE"), reason: $d.r} end) end
+                 elif $d.d == "OUTSIDE" then {accept: false, outside: true, reason: $d.r}
+                 else {accept: false, outside: false, reason: $d.r} + (($d.r | capture("^(?<k>claim wrong|cannot happen|fixed|rare case|not this change|other):"; "i") | {kind: (.k | ascii_downcase)}) // {}) end) end
           else null end)
           // {n: $x.n, finding: $x.finding, place: $x.place, accept: true, undecided: true, reason: "the judge gave no line for this finding that could be read", cost: null}))) as $s
       | if all($s[]; .undecided) then error("none") else {whole: (all($s[]; .undecided | not) and ($all | length) == ($said | length) and ($said | length) == ($s | length)), d: $s} end' > "$wt.judge.said" 2>/dev/null; then
@@ -484,10 +493,10 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
       && mv -f "$wt.review.new" "$wt.review"; } 2>/dev/null; then
     j=$(jq -c '. + {failed: "the review could not be written again with what the judge declined"}' <<<"$j")
   else
-    # Each declined finding goes to the declined list (declined()).
-    while IFS=$'\t' read -r why f; do
-      declined "$1" "$2" judge "$why" "$f" || echo "conveyor: cannot write the declined findings of $1 to the declined list" >&2
-    done < <(jq -r '.d[] | select((.accept or .outside) | not) | [.reason, .finding] | map(gsub("[[:space:]]+"; " ")) | join("\t")' "$wt.judge.said")
+    # Each declined finding goes to the declined list (declined()), with its kind when its reason starts with one.
+    while IFS=$'\t' read -r why f kind; do
+      declined "$1" "$2" judge "$why" "$f" ${kind:+"$kind"} || echo "conveyor: cannot write the declined findings of $1 to the declined list" >&2
+    done < <(jq -r '.d[] | select((.accept or .outside) | not) | [.reason, .finding, .kind // ""] | map(gsub("[[:space:]]+"; " ")) | join("\t")' "$wt.judge.said")
     # Each outside finding goes to <worktree>.outside, {finding, reason} a line, once a finding: the card files them when it lands.
     ! jq -e 'any(.d[]; .outside)' "$wt.judge.said" >/dev/null 2>&1 \
       || { { cat "$wt.outside" 2>/dev/null; jq -c '.d[] | select(.outside) | {finding, reason}' "$wt.judge.said"; } \

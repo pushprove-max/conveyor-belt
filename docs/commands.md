@@ -173,10 +173,13 @@ Tests:
 
 Declined findings:
 
-- `declined add <card> <issue> <code | judge | owner> <why> <finding>` adds a line.
+- `declined add <card> <issue> <code | judge | owner> <why> <finding> [<kind>]` adds a line. `<kind>` is one of
+  `claim wrong`, `cannot happen`, `fixed`, `rare case`, `not this change` or `other`. The reviewer is told not to
+  raise the finding only when the kind is `claim wrong`, `cannot happen` or `fixed`. Added again for the same card and
+  finding with another kind, the line takes the new kind and reason.
 - `declined build <id>` files one as an issue.
 - `declined dismiss [--by <who>] <id>...` hides lines from the Board's panel. The reviewer is still told not to raise
-  them.
+  them when their kind allows that.
 
 Lanes and the Foreman:
 

@@ -494,7 +494,7 @@ t_donotraise() {
   printf '%s\n' '# Sample' '' '## Run' 'Run it with care.' '' '## Accepted limits' '' '- Two changes that each pass alone can fail together on main.' '' '## License' 'Any.' > "$R/README.md"
   # A finding still declined, dismissed from the Board's panel; one the owner asked to be built; 200 more built after them.
   mkdir -p "$ST"
-  jq -cn '{id: "d1", time: "2026-03-04T00:00:00Z", card: "c1-7", issue: 7, finding: "[P1] b.txt:2 no mark here", by: "judge", why: "its proof needs a stub built to misbehave", repo: "sample", dismissed: {time: "2026-03-04T00:00:01Z", by: "the host"}},
+  jq -cn '{id: "d1", time: "2026-03-04T00:00:00Z", card: "c1-7", issue: 7, finding: "[P1] b.txt:2 no mark here", by: "judge", why: "proof cannot happen: it needs a stub built to misbehave", kind: "cannot happen", repo: "sample", dismissed: {time: "2026-03-04T00:00:01Z", by: "the host"}},
     {id: "d2", time: "2026-03-04T00:00:00Z", card: "c1-7", issue: 7, finding: "[P2] a.txt:1 wrong word", by: "code", why: "follow-up of a follow-up", repo: "sample", built: 100101},
     (range(200) | {id: "dx\(.)", time: "2026-03-05T00:00:00Z", card: "c2-9", issue: 9, finding: "[P2] f.txt:\(.) a nit", by: "judge", why: "built after all", repo: "sample", built: (200 + .)})' > "$ST/declined.jsonl"
   # What donotraise() prints, and the instructions a review of a change hands its session (review(), the session
@@ -505,9 +505,42 @@ t_donotraise() {
   grep -qx '# Do not raise these' "$STUB/asked" && grep -qx -- '- Two changes that each pass alone can fail together on main.' "$STUB/asked" \
     || fail "the review prompt lacks the README's accepted limits: $(grep -n -A6 'Do not raise' "$STUB/asked")"
   ! grep -qx 'Run it with care.' "$STUB/asked" && ! grep -qx 'Any.' "$STUB/asked" || fail "the review prompt takes the README's other sections for limits"
-  grep -qxF -- '- its proof needs a stub built to misbehave (the finding: [P1] b.txt:2 no mark here)' "$STUB/asked" \
+  grep -qxF -- '- proof cannot happen: it needs a stub built to misbehave (the finding: [P1] b.txt:2 no mark here)' "$STUB/asked" \
     || fail "the review prompt lacks the reason of a declined finding: $(grep -n -A8 'Do not raise' "$STUB/asked")"
   ! grep -q 'follow-up of a follow-up\|built after all' "$STUB/asked" || fail "the reviewer is told not to raise a finding the owner asked to be built"
+}
+
+# Bug (#1522): a finding declined for a kind of reason no longer allowed (rare case, not this change, other), or with
+# no kind (every decline from before kinds were kept), stays on the reviewer's do-not-raise list, so it is buried for
+# good; or the list decides from the words of a reason rather than from its kind. Only a line whose kind is `claim
+# wrong`, `cannot happen` or `fixed` is listed, and one built is not.
+t_donotraiserare() {
+  setup "[$(issue 8 2026-01-02)]"
+  mkdir -p "$ST"
+  jq -cn 'def d($n; $kind): {id: "d\($n)", time: "2026-03-04T00:00:00Z", card: "c1-7", issue: 7, finding: "[P2] a.txt:\($n) finding \($n)", by: "judge", why: "claim wrong: the line is guarded", repo: "sample"} + if $kind then {kind: $kind} else {} end;
+    d(1; "claim wrong"), d(2; "cannot happen"), d(3; "fixed"), d(4; "rare case"), d(5; "not this change"), d(6; "other"), d(7; null),
+    (d(8; null) | .by = "owner"), (d(9; "claim wrong") + {built: 100101})' > "$ST/declined.jsonl"
+  fx_in 'donotraise > "$STUB/dnr"'
+  local kept; kept=$(grep -o 'finding [0-9]*)$' "$STUB/dnr" | tr -dc '0-9\n' | tr '\n' ' ')
+  [ "$kept" = '1 2 3 ' ] \
+    || fail "donotraise() should list findings 1 2 3 (claim wrong, cannot happen, fixed) and not 4 5 6 (rare case, not this change, other), 7 8 (no kind, by the judge and the owner) or 9 (built); it listed: $kept: $(cat "$STUB/dnr" "$T/$CASE/run.out" 2>&1)"
+}
+
+# Bugs (#1522): a finding declined again on its card under another kind keeps its first kind, so donotraise() lists it
+# by a kind the judge has since dropped, or leaves out one it now allows; or the later kind makes a second line, so the
+# Board shows the finding twice, with two "File as issue" buttons, and filing one leaves the other on the do-not-raise
+# list. Finding 2 goes rare case -> claim wrong, finding 3 claim wrong -> rare case: one line each, with its later kind.
+t_declinedrekind() {
+  setup "[$(issue 7 2026-01-01)]"
+  fx_in 'declined c1-7 7 judge "rare case: needs a full disk" "[P1] b.txt:2 no mark" "rare case" \
+    && declined c1-7 7 judge "claim wrong: line 2 is guarded" "[P1] b.txt:2 no mark" "claim wrong" \
+    && declined c1-7 7 judge "claim wrong: line 3 is guarded" "[P1] b.txt:3 no mark" "claim wrong" \
+    && declined c1-7 7 judge "rare case: needs a full disk" "[P1] b.txt:3 no mark" "rare case" && donotraise > "$STUB/dnr"'
+  [ "$RC" = 0 ] && [ "$(jq -r '"\(.finding)|\(.kind)|\(.why)"' "$ST/declined.jsonl")" = '[P1] b.txt:2 no mark|claim wrong|claim wrong: line 2 is guarded
+[P1] b.txt:3 no mark|rare case|rare case: needs a full disk' ] \
+    || fail "declined() of b.txt:2 as rare case then claim wrong, and of b.txt:3 as claim wrong then rare case, on card c1-7: not one line each with its later kind and reason: $(cat "$ST/declined.jsonl" "$T/$CASE/run.out" 2>&1)"
+  grep -qF -- '- claim wrong: line 2 is guarded (the finding: [P1] b.txt:2 no mark)' "$STUB/dnr" && ! grep -qF 'b.txt:3' "$STUB/dnr" \
+    || fail "after those declines, donotraise() does not list b.txt:2 (now claim wrong) alone, without b.txt:3 (now rare case): $(cat "$STUB/dnr" 2>&1)"
 }
 
 # Bug: a project with no limit and no declined finding gets an empty "Do not raise these".

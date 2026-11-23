@@ -24,7 +24,7 @@ REPLAY_LAST=20
 # sec, tokens, usage}, findings: [{n, finding, place, accept}] in the order the judge was given them, sha: the landed
 # commit or "", kept: the kept patch's path or "", patch: the patch-id of the change its review read or "", before:
 # the lines of the findings already declined on the card or its issue before its judge ran ("- <finding> (declined:
-# <why>)", the last 50, as judged() gives them)}. A decline is before the judge ran when it is older than the review's
+# <why>) [kind: <kind, or none>]", the last 50, as judged() gives them)}. A decline is before the judge ran when it is older than the review's
 # line less the judge's seconds: the judge's own declines are written after its call ends.
 replaycases() { # <n>
   { stdb ask lines retried -- lines cards; } 2>/dev/null | jq -cs --argjson last "$1" --arg st "$ST" --arg repo "$REPO" \
@@ -36,7 +36,7 @@ replaycases() { # <n>
     | sort_by(.time) | .[-$last:][] | .card as $c | .issue as $n | (.judge.sec | numbers // 0) as $sec | (.time | t | if . == null then null else . - $sec end) as $ran
     | {card: $c, issue, time, main: (.main // ""), patch: (.patch // ""),
        before: ([$dl[] | select((.card == $c or (.issue == $n and $n != 0 and .repo == $repo)) and $ran != null and ((.time | t) // $ran) < $ran)
-                 | "- \(.finding) (declined: \(.why))"] | reduce .[] as $l ([]; if index([$l]) then . else . + [$l] end) | .[-50:]), judge: (.judge | {model, effort, sec, tokens, usage} | del(.[] | nulls)),
+                 | "- \(.finding) (declined: \(.why)) [kind: \(.kind // "none")]"] | reduce .[] as $l ([]; if index([$l]) then . else . + [$l] end) | .[-50:]), judge: (.judge | {model, effort, sec, tokens, usage} | del(.[] | nulls)),
        findings: ([(.judge.accepted | arrays[] | . + {accept: (.reason | tostring | test("^always accepted: a .* finding \\(the judge declined it: ") | not)}),
                    (.judge.declined | arrays[] | . + {accept: false})] | sort_by(.n) | map({n, finding, place, accept})),
        sha: ([$all[] | select(.card == $c and .step == "landed" and (.sha // "") != "") | .sha] | last // ""),

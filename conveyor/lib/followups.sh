@@ -312,18 +312,28 @@ Follow-up depth: $((depth + 1))"
 }
 
 # A finding that is not built goes to the declined list (DECLINED), once: declined again for the same card (the
-# reviewer raised it again in a later round), it is the line it has (id names the card and the finding). The
-# review's judge (judged()) and `conveyor.sh declined add` are its callers. The finding and the reason are each one line. Bug: a declined finding left no trace, and the next review raised it again.
-declined() { # <card> <issue> <code | judge | owner> <why> <finding>
+# reviewer raised it again in a later round), it is the line it has (id names the card and the finding). Declined again
+# with another kind (or none after one), that line takes the later kind, its reason and who declined it, and keeps the rest (time,
+# built, dismissed), so donotraise() reads the later kind and the Board has one row, and one "File as issue", for the
+# finding. Bug: each kind was a line of its own, so the finding could be filed twice, and filing one row left the other
+# on the do-not-raise list. The review's judge (judged()) and `conveyor.sh declined add` are its callers. The finding
+# and the reason are each one line; kind, when given, is the kind of the reason (JUDGE in review.sh), which donotraise()
+# reads. Bug: a declined finding left no trace, and the next review raised it again.
+declined() { # <card> <issue> <code | judge | owner> <why> <finding> [<kind>]
   local id l
-  [ $# = 5 ] && [[ $2 =~ ^[0-9]+$ && $3 =~ ^(code|judge|owner)$ && $1 == *[![:space:]]* && $4 == *[![:space:]]* && $5 == *[![:space:]]* ]] \
-    || { echo "usage: conveyor.sh declined add <card> <issue> <code | judge | owner> <why> <finding>" >&2; return 2; }
-  l=$(jq -cn --arg t "$(clock)" --arg c "$1" --argjson n "$2" --arg by "$3" --arg why "$4" --arg f "$5" --arg repo "$REPO" \
-    'def one: gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; ""); {time: $t, card: $c, issue: $n, finding: ($f | one), by: $by, why: ($why | one), repo: $repo}') \
+  [[ $# =~ ^[56]$ && $2 =~ ^[0-9]+$ && $3 =~ ^(code|judge|owner)$ && $1 == *[![:space:]]* && $4 == *[![:space:]]* && $5 == *[![:space:]]* ]] \
+    && [[ $# = 5 || $6 =~ ^(claim wrong|cannot happen|fixed|rare case|not this change|other)$ ]] \
+    || { echo "usage: conveyor.sh declined add <card> <issue> <code | judge | owner> <why> <finding> [claim wrong | cannot happen | fixed | rare case | not this change | other]" >&2; return 2; }
+  l=$(jq -cn --arg t "$(clock)" --arg c "$1" --argjson n "$2" --arg by "$3" --arg why "$4" --arg f "$5" --arg kind "${6:-}" --arg repo "$REPO" \
+    'def one: gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; ""); {time: $t, card: $c, issue: $n, finding: ($f | one), by: $by, why: ($why | one)}
+      + (if $kind == "" then {} else {kind: $kind} end) + {repo: $repo}') \
     && id=d$(jq -j '.card, "\n", .finding' <<<"$l" | git hash-object --stdin | cut -c1-12) && [ ${#id} = 13 ] || return 1
   ( flock 9 || exit 1
-    ! stdb ask lines declined 2>/dev/null | grep -F "{\"id\":\"$id\"," >/dev/null || exit 0
-    jq -c --arg id "$id" '{id: $id} + .' <<<"$l" | stdb append declined ) 9>>"$DECLINED.lock"
+    old=$(stdb ask lines declined 2>/dev/null | jq -c --arg id "$id" 'objects | select(.id == $id)' 2>/dev/null | head -n 1)
+    [ -n "$old" ] || { jq -c --arg id "$id" '{id: $id} + .' <<<"$l" | stdb append declined; exit; }
+    [ "$(jq -r '.kind // ""' <<<"$old")" != "${6:-}" ] || exit 0
+    stdb ask lines declined | jq -c --arg id "$id" --argjson l "$l" 'if .id == $id then del(.kind) + ($l | {by, why} + if .kind then {kind} else {} end) else . end' > "$DECLINED.new" \
+      && stdb rewrite declined < "$DECLINED.new" && rm -f "$DECLINED.new" || { rm -f "$DECLINED.new"; exit 1; } ) 9>>"$DECLINED.lock"
 }
 # "File as issue" on the Board's Declined panel: the owner wants a declined finding built after all. It is filed as an
 # ordinary issue that names the finding (no follow-up label: it is picked as any new issue is), and its line keeps the
@@ -353,7 +363,8 @@ declinedbuild() { # <id>
 }
 # "Dismiss" and "Dismiss all shown" on the Board's Declined panel: each line named is marked dismissed, {time, by: who
 # dismissed it, "the host" unless --by names them}, and leaves the panel (snapshot: declined). It stays in the list:
-# the reviewer is still told not to raise it (donotraise()) and the panel's "Show every line" shows it. A line dismissed
+# the reviewer is still told not to raise it when its kind is one donotraise() lists, and the panel's "Show every
+# line" shows it. A line dismissed
 # already keeps its first dismissal. An id the list does not have changes nothing (exit 2).
 declineddismiss() { # [--by <who>] <id>...
   local by="the host"
@@ -371,12 +382,14 @@ declineddismiss() { # [--by <who>] <id>...
 }
 # What a review of a change is told not to raise, after its instructions: the project's stated limits (the section of
 # the checkout's README.md headed `## Accepted limits`, to the next heading of level one or two; its first 4000
-# characters) and the last 20 declined findings the owner has not asked to be built, each with its reason. Nothing
-# when the project has neither.
+# characters) and the last 20 declined findings the owner has not asked to be built, each with its reason. Only a line
+# whose kind (declined(), the kind the judge wrote, JUDGE in review.sh) is `claim wrong`, `cannot happen` or `fixed` is
+# listed: a line of another kind or with no kind (every decline from before kinds were kept, and one by the code or
+# the owner) is not, so a finding raised again is judged again. Nothing when the project has neither.
 donotraise() {
   local lim dec
   lim=$(awk '/^##? / { on = ($0 ~ /^## +Accepted limits[[:space:]]*$/); next } on' "$MAIN/README.md" 2>/dev/null | sed '/[^[:space:]]/,$!d' | head -c 4000)
-  dec=$(stdb ask lines declined 2>/dev/null | jq -r 'select(.built == null) | "- \(.why) (the finding: \(.finding[0:300]))"' 2>/dev/null | tail -n 20)
+  dec=$(stdb ask lines declined 2>/dev/null | jq -r 'select(.built == null and (.kind | IN("claim wrong", "cannot happen", "fixed"))) | "- \(.why) (the finding: \(.finding[0:300]))"' 2>/dev/null | tail -n 20)
   [ -n "$lim$dec" ] || return 0
   printf '\n\n# Do not raise these\nA problem named here is no finding and is not written on any line of the review.'
   [ -z "$lim" ] || printf "\nThe project's stated limits (its README's accepted limits):\n%s" "$lim"

@@ -159,7 +159,7 @@ check, with a line naming these commands. `conveyor.sh control judge on` switche
 `conveyor.sh control judge off` off, from the next review; it is on in a new project (docs/configuration.md, The control record). On, a judge reads each review
 that holds findings before the card acts on it, and marks each finding accepted, declined or outside with a one-line
 reason. It declines a finding only when its proof cannot happen with what the project really
-runs, or its claim is wrong, or, at a level that `control judge rare` names (below), it is a rare case. A real defect in code that the card neither changed nor broke is never
+runs, its claim is wrong, its defect is already fixed on main, or, at a level that `control judge rare` names (below), it is a rare case. A real defect in code that the card neither changed nor broke is never
 declined for that: the judge marks it outside. It becomes an `OUTSIDE:` line of the review, with no fix round for
 this card, and a review with no accepted finding is a GO. When the card lands, each outside finding is filed as a
 follow-up of the card, with its level and the card's issue as its parent, as a finding of a last NO-GO is; a card
@@ -168,8 +168,8 @@ at the follow-up depth cap puts it on the declined list instead. The card's file
 itself starts with `OUTSIDE:` is a finding. One scope rule holds at every level, P0 to P3: a finding is accepted
 when it is inside the diff (any file and line it names is a changed line, or one of the two lines a removal sits between), or outside it because the card's change
 causes it, such as a caller the change breaks; the judge's reason names the changed line. A finding is declined only when
-its claim is wrong about the code, or its proof cannot happen with what the project really runs, and the reason says
-which, and why. "Rare case" is no reason to decline, except at a level that `control judge rare` names (below). A P3 finding (a real but minor defect, such as a
+its claim is wrong about the code, its proof cannot happen with what the project really runs, or its defect is already fixed
+on main, and the reason says which, and why. "Rare case" is no reason to decline, except at a level that `control judge rare` names (below). A finding that a test does not check what its name, its comment or the issue's Done-when says it checks is a real defect at its level: "only a test gap" and "hypothetical" are no reason to decline it. The judge starts the reason of each decline with its kind: `claim wrong`, `cannot happen`, `fixed` (already fixed on main), `rare case` (where the setting allows it), `not this change` or `other`. A finding that repeats an earlier declined one is declined as a repeat only when the earlier decline's kind is `claim wrong`, `cannot happen` or `fixed`, or the defect is fixed on main. A repeat of a finding declined with another kind, or with no kind, is judged again as a new finding. A P3 finding (a real but minor defect, such as a
 misleading name or message, a small inconsistency or dead code the change left) is not declined because it causes no
 wrong result. A real outside finding is filed at any level, also when its proof needs an uncommon input or timing. An accepted P3 is handled by the control record's rule `P3` (the Rules
 tab): on, it is a finding as a P2 is, so it makes a NO-GO, goes to the fix round and, still open after the last
@@ -179,7 +179,8 @@ an issue with none counts as P3). Off, it becomes a
 review left with no other finding is a GO. This holds with the judge off too, where every finding is accepted. A
 line the reviewer itself starts with `MINOR:` is a finding. A declined finding causes no fix round and no
 follow-up, and a review with no accepted finding is a GO. Each declined finding goes to the declined list, one line
-in `declined.jsonl` of the state folder: its time, card, issue, the finding, who declined it (`judge`) and why. A line
+in `declined.jsonl` of the state folder: its time, card, issue, the finding, who declined it (`judge`), why and the kind of the reason (`kind`, when the reason starts with one). A finding declined again on the same card
+keeps its one line, which takes the later kind and reason. A line
 the reviewer itself starts with `DECLINED:` is a finding, as any other line is. The review's record line holds each finding, the judge's
 reason and, for an accepted one, its "Cost to every card" (a finding accepted because the judge's answer held no line for it that could be read, or two lines for it, has the reason "the judge gave no line for this finding that could be read" and no cost). `conveyor.sh control judge always security data` names
 the finding kinds that are always accepted, whatever the judge says: the reviewer tags a finding of one with its
@@ -1706,9 +1707,11 @@ waiting card whose change does not and that is not earlier in `order`.
 ## Declined findings
 
 A review finding that is not built is one line of `declined.jsonl` in the state folder: `id`, `time`, `card`,
-`issue`, `finding`, `by` (who declined it: `code`, `judge` or `owner`), `why` and `repo`. A finding declined again
-for the same card is the line it already has. The owner declines one by hand with
-`conveyor.sh declined add <card> <issue> owner <why> <finding>`.
+`issue`, `finding`, `by` (who declined it: `code`, `judge` or `owner`), `why`, `kind` and `repo`. `kind` is the kind
+of the reason: `claim wrong`, `cannot happen`, `fixed`, `rare case`, `not this change` or `other`. A line has no
+`kind` when its reason has none. A finding declined again for the same card with the same kind is the line it
+already has. With another kind, it gets a new line. The owner
+declines one by hand with `conveyor.sh declined add <card> <issue> owner <why> <finding> [<kind>]`.
 
 The Board's Declined panel lists the lines of every project that are not dismissed, not built and at most 7 days old,
 newest first, each with its reason; its count is of those. "Show every line" shows the rest too, each marked and
@@ -1720,7 +1723,7 @@ is picked as any new issue is; the line keeps the issue's number (`built`), and 
 "Dismiss all shown (n)" and "Dismiss all (n)" (every line the panel counts, shown or not), in the panel's heading
 and confirmed by a second click (`conveyor.sh declined dismiss
 [--by <who>] <id>...`), take lines off the panel: each keeps who dismissed it and when (`dismissed`) and stays in the
-list, so the reviewer is still told not to raise it.
+list, so the reviewer is still told not to raise it when its kind allows that (below).
 
 Four checks hold on every review of a change (`REVIEWT`, `lib/prompts.sh`): each test the change adds names the bug it
 would catch; a test that only finds text in a source file, where the behaviour could be run, is a finding (one whose
@@ -1729,7 +1732,9 @@ unrequested placeholder UI is a P1 finding; and a smaller change that fully solv
 
 Every review of a change is told what not to raise, under "Do not raise these" after its instructions: the project's
 stated limits (the section of the checkout's `README.md` headed `## Accepted limits`, its first 4000 characters) and
-the last 20 declined findings the owner has not asked to be built, each as its reason and the finding. A project with
+the last 20 declined findings the owner has not asked to be built, each as its reason and the finding. Only a line
+whose `kind` is `claim wrong`, `cannot happen` or `fixed` is on this list. A line of another kind, or with no kind, is
+not, and a finding raised again from it is judged again. A project with
 neither is told nothing. The check of an ALREADY-DONE claim is not a review of a change and is not told.
 
 ## The snapshot

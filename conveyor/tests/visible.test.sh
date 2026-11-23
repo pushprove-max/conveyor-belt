@@ -274,7 +274,7 @@ t_visibleoff() {
   [ "$(loop control rules visible=off | jq .rules.visible)" = false ] && [ "$(loop control | jq .rules.visible)" = false ] || fail "control rules visible=off was refused or not printed"
   printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.1"
   # Bug: the review given the rule-off instructions is no longer told what not to raise.
-  loop declined add c1-6 6 judge 'out of scope here' '[P2] x.txt:1 a nit' || fail "the declined line was not added"
+  loop declined add c1-6 6 judge 'the line is guarded' '[P2] x.txt:1 a nit' 'claim wrong' || fail "the declined line was not added"
   # loop: the build brief and the review prompt with the rule off are what a card writes, and no other case has them
   loop run >/dev/null || fail "run exited non-zero"
   grep -qx '# Do not raise these' "$STUB/asked" || fail "with the rule off, the review is not told what not to raise"

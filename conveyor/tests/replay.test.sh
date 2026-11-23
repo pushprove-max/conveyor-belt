@@ -41,7 +41,7 @@ replaysetup() {
   landed c1-7 7 2026-11-01T00:02:00Z
   # c1-7's declines: one of an earlier round, before its judge ran (00:00:55, the review's line less its 5 s), which
   # the replay judge is given, and the one its judge declined (written after its call), which it is not.
-  printf '%s\n' '{"id":"d000000000001","time":"2026-11-01T00:00:30Z","card":"c1-7","issue":7,"finding":"[P2] a.txt:1 F-old","by":"judge","why":"nothing new","repo":"r"}' \
+  printf '%s\n' '{"id":"d000000000001","time":"2026-11-01T00:00:30Z","card":"c1-7","issue":7,"finding":"[P2] a.txt:1 F-old","by":"judge","why":"nothing new","kind":"claim wrong","repo":"r"}' \
     '{"id":"d000000000002","time":"2026-11-01T00:00:58Z","card":"c1-7","issue":7,"finding":"[P2] a.txt:1 F-two","by":"judge","why":"style","repo":"r"}' >> "$ST/declined.jsonl"
   base=$sha rline c1-8 8 3 "$P8" '{"accepted":[{"n":1,"finding":"[P1][security] a.txt:3 F-three","place":"inside","reason":"always accepted: a security finding (the judge declined it: weak)","cost":"none"}],"declined":[]}' "$ST/retried.jsonl"
   jq -cn '{card: "c1-8", issue: 8, step: "blocked", time: "2026-11-01T00:04:00Z", tokens: {claude: 0, codex: 0}, result: "blocked", sha: "", reason: "tests failed", kept: "kept/c1-8"}' >> "$ST/retried.jsonl"
@@ -91,7 +91,7 @@ t_replayjudge() {
   grep -q '^+three$' "$STUB/judged" && grep -q '^+four$' "$STUB/judged" && grep -q '^F1 \[inside the diff\] \[P1\] a.txt:2 F-one$' "$STUB/judged" \
     && grep -q '^F2 \[outside the diff\] \[P2\] a.txt:1 F-two$' "$STUB/judged" && grep -q '^#7 title 7$' "$STUB/judged" \
     || fail "the judge was not given each case's diff, issue and findings: $(cat "$STUB/judged")"
-  [ "$(grep -cF 'really runs, or, at P2 only, it is a rare case' "$STUB/judge-prompt")" = 3 ] \
+  [ "$(grep -cF 'really runs, its defect is already fixed on main, or, at P2 only, it is a rare case' "$STUB/judge-prompt")" = 3 ] \
     || fail "a replay judge's prompt does not hold the record's rare-case level P2: $(grep -n -i 'rare case' "$STUB/judge-prompt")"
   # Bug caught: c1-7's landed commit was staged on its parent, a later main than its review read, so the judge saw
   # other hunk line numbers (line 5, below "zero") than its review did (line 4, on B0).
@@ -100,9 +100,10 @@ t_replayjudge() {
   # Bug caught: the replay judge was given a change its review never read (c1-12's, landed after a fix round).
   ! grep -q 'c1-12$' "$STUB/judged" || fail "c1-12, whose review read another change, was replayed: $(cat "$STUB/judged")"
   # Bug caught: the replay judge was not told what was declined on the issue before, so it could not decline a
-  # finding raised again with nothing new; nor may it be told the declines its own review made after its call.
-  grep -q '^# Findings already declined on the cards of this issue$' "$STUB/judged" && grep -q '^- \[P2\] a.txt:1 F-old (declined: nothing new)$' "$STUB/judged" \
-    && ! grep -q '(declined: style)$' "$STUB/judged" || fail "the earlier declines given to the judge: $(cat "$STUB/judged")"
+  # finding raised again with nothing new; nor may it be told the declines its own review made after its call; nor
+  # told each earlier decline without its kind, which JUDGE needs to decline a repeat (#1522).
+  grep -q '^# Findings already declined on the cards of this issue$' "$STUB/judged" && grep -q '^- \[P2\] a.txt:1 F-old (declined: nothing new) \[kind: claim wrong\]$' "$STUB/judged" \
+    && ! grep -q '(declined: style)' "$STUB/judged" || fail "the earlier declines given to the judge: $(cat "$STUB/judged")"
   [ "$(eval "$SUMS")" = "$(cat "$STUB/before")" ] || fail "the replay changed a card line, a setting or main: $(eval "$SUMS") was $(cat "$STUB/before")"
 }
 
