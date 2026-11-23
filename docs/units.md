@@ -149,8 +149,8 @@ sign-in failed, shows the reason after the state (`shop paused: build: Claude Co
 
 The pane shows the board as tables, from top to bottom. A line that is wider than the pane is cut, unless
 this page says that it wraps. Before the first fetch answers, the pane shows `units: reading the Conveyor snapshot`.
-That message, a line about what could not be read and a fetch error go on to more lines at their spaces when they are
-wider than the pane. A word wider than the pane breaks between whole characters.
+Some lines wrap at their spaces when they are wider than the pane. These are that message, a line about what could
+not be read, a fetch error and the snapshot age note. A word wider than the pane breaks between whole characters.
 
 - **The head**: `/units` as a filled label, the Conveyor host in bold and, on the right, `DAY SPEND` and the dollars
   today.
