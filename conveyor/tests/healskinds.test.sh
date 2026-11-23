@@ -13,10 +13,11 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
 kdocs() { jq -rc "$1" "$ST/docsdrift.jsonl" 2>/dev/null; } # <jq filter>: of each line of the docs list
-# What afterreview() decides for card c8's review (judgeone 8) as card() calls it, with <pass> reviews so far and
-# <rounds> fix rounds, its one P1 fix round given (p1fix): "<after> <stop> <last0> <p1> <hard>", tab-separated.
+# What afterreview() decides for card c8's review (judgeone 8) as card() calls it, with the verdict judged() left,
+# <pass> reviews so far and <rounds> fix rounds, its one P1 fix round given (p1fix): "<after> <stop> <last0> <p1>
+# <hard>", tab-separated.
 kgate() { # <pass> <rounds>
-  fx_in 'wt=$T/$CASE/cards/c8 issue=$(cat "$T/$CASE/issue8") res=NO-GO fin="" finrev="" finend="" earlier="" earlyend="" pass='"$1"' rounds='"$2"' \
+  fx_in 'wt=$T/$CASE/cards/c8 issue=$(cat "$T/$CASE/issue8") res=$(verdict "$wt.review") fin="" finrev="" finend="" earlier="" earlyend="" pass='"$1"' rounds='"$2"' \
       rebased="" tfix="" lfix="" mode="" privfix="" p1fix=1; afterreview; printf "%s\t%s\t%s\t%s\t%s\n" "$after" "$stop" "$last0" "$p1" "$hard"'
   [ "$RC" = 0 ] || fail "afterreview() failed: $(cat "$T/$CASE/run.out")"
   tail -n 1 "$T/$CASE/run.out"
@@ -75,11 +76,9 @@ t_kindsgate() {
   printf '%s\n' 'F1 ACCEPT: harm: the record line is lost. Cost to every card: none' > "$STUB/judge.2"
   printf '%s\n' 'F1 ACCEPT: it is real. Cost to every card: none' > "$STUB/judge.3"
   JUDGEISSUE=$is judgeone 8 "$STUB/review"
-  [ "$(kgate 3 0)" = "$(printf 'last\tmax-reviews\t\t\t')" ] || fail "the last review's in-scope self-heals P1 did not land the card: $(kgate 3 0)"
-  fx_in 'followups c8 "$(cat "$T/$CASE/issue8")" "$T/$CASE/cards/c8.review"'
-  [ "$RC" = 0 ] && [ "$(tail -n 1 "$T/$CASE/run.out")" = '[]' ] && [ ! -s "$STUB/filed" ] \
-    && [ "$(heals '[.card, .issue, .finding, .effect] | tojson')" = "$(jq -cn --arg f "$f" '["c8", 8, $f, "self-heals"]')" ] \
-    || fail "the landed card's self-heals P1 is not on the self-heals list with card c8, or was filed: $(cat "$T/$CASE/run.out") $(cat "$ST/selfheals.jsonl" "$STUB/filed" 2>&1)"
+  [ "$(kgate 3 0)" = "$(printf 'go\tgo\t\t\t')" ] || fail "the last review's in-scope self-heals P1 did not land the card: $(kgate 3 0)"
+  [ "$(heals '[.card, .issue, .finding, .effect] | tojson')" = "$(jq -cn --arg f "$f" '["c8", 8, $f, "self-heals"]')" ] \
+    || fail "the landed card's self-heals P1 is not on the self-heals list with card c8: $(cat "$ST/selfheals.jsonl" 2>&1)"
   JUDGEISSUE=$is judgeone 8 "$STUB/review"
   [ "$(kgate 3 0)" = "$(printf 'p1\tmax-reviews\t\t%s\t' "$f")" ] || fail "the last review's in-scope harm P1 did not block the card: $(kgate 3 0)"
   JUDGEISSUE=$is judgeone 8 "$STUB/review"
@@ -92,19 +91,59 @@ t_kindsgate() {
   mkdir -p "$T/$CASE/cards/c8.rounds" && jq -cn --arg f "$f" '{id: "E1", round: 1, line: $f, mkey: "x"}' > "$T/$CASE/cards/c8.rounds/findings.jsonl"
   printf '%s\n' "$e" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   printf '%s\n' 'F1 ACCEPT: self-heals: the next turn picks it up. Cost to every card: none' > "$STUB/judge.5"
-  printf '%s\n' 'F1 ACCEPT: self-heals: the next turn picks it up. Cost to every card: none' 'F2 ACCEPT: self-heals: the next poll redraws it. Cost to every card: none' > "$STUB/judge.6"
+  printf '%s\n' 'F1 ACCEPT: self-heals: the next turn picks it up. Cost to every card: none' 'F2 ACCEPT: harm: the badge hides a stuck card. Cost to every card: none' > "$STUB/judge.6"
   printf '%s\n' 'F1 ACCEPT: harm: the record line is lost. Cost to every card: none' > "$STUB/judge.7"
   JUDGEISSUE=$is judgeone 8 "$STUB/review"
-  [ "$(kgate 1 1)" = "$(printf 'last\trepeat\t\t\t')" ] || fail "a repeated in-scope self-heals P1 did not end the loop to land: $(kgate 1 1)"
-  # With a new P1 beside the repeat, its fix round follows, as on any review before the last.
+  [ "$(kgate 1 1)" = "$(printf 'go\tgo\t\t\t')" ] || fail "a repeated in-scope self-heals P1 did not end the loop to land: $(kgate 1 1)"
+  # With a new harm P1 beside the repeat, its fix round follows, as on any review before the last.
   printf '%s\n' "$e" "$new" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   JUDGEISSUE=$is judgeone 8 "$STUB/review"
   [ "$(kgate 1 1)" = "$(printf 'fix\t\t\t\t')" ] && ! grep -qF '[outside the diff]' "$STUB/judge-asked" \
-    || fail "a repeat ended the loop while a new in-scope self-heals P1 still had its fix round, or the new P1 was outside the change: $(kgate 1 1) $(grep '^F2' "$STUB/judge-asked")"
+    || fail "a repeat ended the loop while a new in-scope harm P1 still had its fix round, or the new P1 was outside the change: $(kgate 1 1) $(grep '^F2' "$STUB/judge-asked")"
   printf '%s\n' "$e" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   JUDGEISSUE=$is judgeone 8 "$STUB/review"
   [ "$(kgate 1 1 | cut -f1,2)" = "$(printf 'hard\t')" ] || fail "a repeated in-scope harm P1 did not block the card: $(kgate 1 1)"
 }
+
+# Bug (issue 1576): the first review of a card that is no follow-up, whose one accepted finding inside the change the
+# judge sorts as <kind>, gives NO-GO and a fix round for it, though the finding harms nothing: it must give GO and put
+# the finding on its list (selfheals or docsdrift, in the state folder) with its kind.
+kinside() { # <kind> <the judge's reason> <the list: selfheals | docsdrift>
+  local f='[P3] a.txt:2 the name tmp says nothing. Proof: a.txt:2' is l
+  is=$(issue 8 2026-01-01 P1 area:engine)
+  judging "[$is]"; l=$ST/$3.jsonl
+  printf '%s\n' "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  printf '%s\n' "F1 ACCEPT: $1: $2. Cost to every card: none" > "$STUB/judge.1"
+  JUDGEISSUE=$is judgeone 8 "$STUB/review" fix
+  [ "$(jf 8 .verdict)" = GO ] && [ ! -e "$T/$CASE/cards/c8.fix" ] && grep -qxF "SELFHEALS: $f (judge: $1: $2)" <(jr 8) \
+    && [ "$(jq -cs 'map([.card, .finding, .effect, .from])' "$l" 2>&1)" = "$(jq -cn --arg f "$f" --arg k "$1" '[["c8", $f, $k, "review"]]')" ] \
+    || fail "the first review with one accepted finding '$f' the judge answered 'F1 ACCEPT: $1: $2' did not give GO with the finding on the $3 list alone: $(jr 8) $(cat "$T/$CASE/cards/c8.fix" "$l" 2>&1)"
+}
+t_insideselfheals() { kinside self-heals 'the next turn picks it up' selfheals; }
+t_insidecleanup() { kinside cleanup 'the name changes nothing the code does' selfheals; }
+t_insideguarded() { kinside 'already guarded' 'the check at a.txt:1 stops the outcome' selfheals; }
+t_insidedocs() { kinside 'docs drift' 'the guide says less than the code does' docsdrift; }
+
+# Bugs (issue 1576): an accepted finding with no kind (an unsure judge's, which is harm), or one whose list entry
+# cannot be written, beside a self-heals one, lets the review give GO, or leaves the self-heals one on its list while
+# the fix round fixes it too; a list entry that cannot be written fails the whole judge (healsput() handed jq its file
+# as an argument), so no finding is judged. Each gives NO-GO from a judged review, and both findings go to the fix round alone.
+kblock() { # <the judge's answer for F2> [docs: the docs list cannot be written]
+  local slow='[P3] a.txt:2 the poll waits one turn more. Proof: a.txt:2' other='[P3] a.txt:2 the guide omits the docs list. Proof: a.txt:2' is
+  is=$(issue 8 2026-01-01 P1 area:engine)
+  judging "[$is]"
+  [ -z "${2:-}" ] || mkdir -p "$ST/docsdrift.jsonl"
+  printf '%s\n' "$slow" "$other" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  printf '%s\n' 'F1 ACCEPT: self-heals: the next turn picks it up. Cost to every card: none' "$1" > "$STUB/judge.1"
+  JUDGEISSUE=$is judgeone 8 "$STUB/review" fix
+  [ "$(jf 8 .verdict)" = NO-GO ] && [ "$(jf 8 .judge.failed)" = null ] && grep -qxF "E1 $slow" "$T/$CASE/cards/c8.fix" && grep -qxF "E2 $other" "$T/$CASE/cards/c8.fix" \
+    && [ -z "$(cat "$ST/selfheals.jsonl" 2>/dev/null)" ] && [ "$(jf 8 '.judge.selfheals // [] | length')" = 0 ] \
+    || fail "the review the judge answered 'F1 ACCEPT: self-heals: ...' and '$1'${2:+ (docs list not writable)} did not give NO-GO with both findings in its fix round and none on a list: $(jf 8 .judge) $(jr 8) $(cat "$T/$CASE/cards/c8.fix" "$ST/selfheals.jsonl" 2>&1)"
+}
+t_insidenokind() { kblock 'F2 ACCEPT: the guide is wrong. Cost to every card: none'; }
+t_insidelistfail() { kblock 'F2 ACCEPT: docs drift: the guide says less than the code does. Cost to every card: none' docs; }
+# An already-guarded finding whose reason names no check is harm (guardsaid()), so it blocks as one with no kind does.
+t_insideunguarded() { kblock 'F2 ACCEPT: already guarded: it cannot happen twice. Cost to every card: none'; }
 
 # Bugs (issue 1563): the sort of the queued follow-ups knows harm and self-heals alone, so a cleanup or docs drift
 # card stays queued and is built; an already-guarded card that names no guard leaves the queue; a docs drift card goes

@@ -175,7 +175,8 @@ its claim is wrong about the code, its proof cannot happen with what the project
 on main, and the reason says which, and why. "Rare case" is no reason to decline, except at a level that `control judge rare` names (below). A finding that a test does not check what its name, its comment or the issue's Done-when says it checks is a real defect at its level: "only a test gap" and "hypothetical" are no reason to decline it. The judge starts the reason of each decline with its kind: `claim wrong`, `cannot happen`, `fixed` (already fixed on main), `rare case` (where the setting allows it), `not this change` or `other`. A finding that repeats an earlier declined one is declined as a repeat only when the earlier decline's kind is `claim wrong`, `cannot happen` or `fixed`, or the defect is fixed on main. A repeat of a finding declined with another kind, or with no kind, is judged again as a new finding. A P3 finding (a real but minor defect, such as a
 misleading name or message, a small inconsistency or dead code the change left) is not declined because it causes no
 wrong result. A real outside finding is filed at any level, also when its proof needs an uncommon input or timing. An accepted P3 is handled by the control record's rule `P3` (the Rules
-tab): on, it is a finding as a P2 is, so it makes a NO-GO, goes to the fix round and, still open after the last
+tab): on, it is a finding as a P2 is, so it goes to its list when the judge gives it a kind that is not `harm` (below)
+and otherwise makes a NO-GO, goes to the fix round and, still open after the last
 review, is filed as a follow-up of the pack's P3 priority (with no priority label when the pack has fewer than four:
 an issue with none counts as P3). Off, it becomes a
 `MINOR:` line of the review: listed and counted on the card's review line, with no fix round and no follow-up, and a
@@ -209,9 +210,12 @@ follow-up as before, and the follow-up's body names its kind and the judge's rea
 another kind outside the change, and on a follow-up card such a finding in the change, goes to the self-heals list
 (`selfheals.jsonl` of the state folder), or to the docs list for `docs drift` (`docsdrift.jsonl`, whose entries never
 expire): it becomes a `SELFHEALS:` line of the review, with no fix round and no
-follow-up, and the review's record line holds it in `judge.selfheals`. A card that is not a follow-up still fixes its
-in-scope findings of every kind in its fix rounds; one still open after the last review goes to its list, and at
-that review only a `harm` P0 or P1 (or one with no kind) blocks the card. A line that
+follow-up, and the review's record line holds it in `judge.selfheals`. On a card that is not a follow-up, a finding
+in the change that is not `harm` never blocks a review: at any review whose accepted findings in the change are each
+of another kind, the findings go to their lists in the same way and the review gives GO. When a `harm` finding, or
+a finding with no kind, is beside them, the review gives NO-GO and the fix round fixes all of them, with none on a
+list. A finding that cannot be written to its list has no kind. One still open after the last review goes to its
+list, and at that review only a `harm` P0 or P1 (or one with no kind) blocks the card. A line that
 the reviewer itself starts with `SELFHEALS:` is a finding. `conveyor.sh heals batch <area>` (the Board's "File a batch
 card", `-` for the entries with no area) files one card that holds an area's open entries as its scope, and marks them
 with that card. `conveyor.sh heals docs <area>` (the Board's "File a docs sweep card") does the same with the docs

@@ -60,8 +60,8 @@ t_healsfollowup() {
 }
 
 # Bugs (issue 1559): a finding a later review sends to the self-heals list keeps the earlier review's outside ruling,
-# so it is both on the list and filed as a follow-up; an earlier self-heals kind outlives a later ruling with no kind,
-# so a finding with no kind, which is harm, goes to the list and is never fixed; a listed finding a later review rules
+# so it is both on the list and filed as a follow-up; an earlier self-heals ruling outlives a later ruling with no kind,
+# so a finding with no kind, which is harm, stays on the list and is never fixed; a listed finding a later review rules
 # harm stays on the list, so it is both listed and filed. Three reviews of one card.
 t_healslast() {
   local out='[P1] b.txt:1 stale text in b. Proof: b.txt:1' acc='[P2] a.txt:2 a check passes that should fail. Proof: a.txt:2' is
@@ -72,12 +72,12 @@ t_healslast() {
   printf '%s\n' 'F1 OUTSIDE: self-heals: the next poll corrects b, and b.txt is not the change'"'"'s' 'F2 ACCEPT: the check is wrong. Cost to every card: none' > "$STUB/judge.2"
   printf '%s\n' 'F1 OUTSIDE: harm: b is written wrong, and b.txt is not the change'"'"'s' 'F2 ACCEPT: the check is wrong. Cost to every card: none' > "$STUB/judge.3"
   JUDGEISSUE=$is judgeone 8 "$STUB/review" fix
-  jq -e --arg f "$out" 'select(.finding == $f)' "$T/$CASE/cards/c8.outside" >/dev/null && jq -e --arg f "$acc" 'select(.finding == $f and .effect == "self-heals")' "$T/$CASE/cards/c8.effects" >/dev/null \
-    || fail "the first review did not keep its outside finding and its accepted self-heals kind: $(cat "$T/$CASE/cards/c8.outside" "$T/$CASE/cards/c8.effects" 2>&1)"
+  jq -e --arg f "$out" 'select(.finding == $f)' "$T/$CASE/cards/c8.outside" >/dev/null && [ "$(heals .finding)" = "$acc" ] \
+    || fail "the first review did not keep its outside finding, or did not list its accepted self-heals one: $(cat "$T/$CASE/cards/c8.outside" "$ST/selfheals.jsonl" 2>&1)"
   JUDGEISSUE=$is judgeone 8 "$STUB/review" fix
   fx_in 'tofile "$T/$CASE/cards/c8.review"'
-  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "$acc" ] \
-    || fail "after the second review, the findings to file are not the accepted one with no kind alone (the outside one is on the list): $(cat "$T/$CASE/run.out" "$T/$CASE/cards/c8.outside" "$T/$CASE/cards/c8.effects" 2>&1)"
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "$acc" ] && [ -z "$(jq -r --arg f "$acc" 'select(.finding == $f) | .id' "$ST/selfheals.jsonl" 2>/dev/null)" ] \
+    || fail "after the second review, the findings to file are not the accepted one with no kind alone (the outside one is on the list), or the one with no kind stayed on the list: $(cat "$T/$CASE/run.out" "$T/$CASE/cards/c8.outside" "$ST/selfheals.jsonl" 2>&1)"
   [ "$(jq -r --arg f "$out" 'select(.finding == $f) | .from' "$ST/selfheals.jsonl" 2>/dev/null)" = review ] || fail "the outside finding the second review sorted as self-heals is not on the list: $(cat "$ST/selfheals.jsonl" 2>&1)"
   JUDGEISSUE=$is judgeone 8 "$STUB/review" fix
   fx_in 'tofile "$T/$CASE/cards/c8.review"'
@@ -140,27 +140,28 @@ t_healsbrief() {
     || fail "the build session of #9 is not given its moved finding out of its scope, with its list entry $e: $(cat "$STUB/build.brief" 2>&1)"
 }
 
-# Bugs (issue 1559): the first review of a card that is no follow-up stops fixing an in-scope finding the judge sorts
-# as self-heals; one still left at the last review is filed as a follow-up, or lost, rather than listed.
+# Bugs (issues 1559, 1576): a harm finding beside an in-scope finding the judge sorts as self-heals gives the review
+# GO, or sends the self-heals one to the list as well as to the fix round; one still left at the last review is
+# filed as a follow-up, or lost, rather than listed.
 t_healsfirst() {
-  local slow='[P2] a.txt:2 the poll waits one turn more. Proof: a.txt:2' is
+  local slow='[P2] a.txt:2 the poll waits one turn more. Proof: a.txt:2' lost='[P2] a.txt:1 the record line is lost. Proof: a.txt:1' is
   is=$(issue 8 2026-01-01 P1 area:engine)
   judging "[$is]"; printf '%s\n' "$is" > "$T/$CASE/issue8"
-  printf '%s\n' "$slow" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
-  printf '%s\n' 'F1 ACCEPT: self-heals: the next turn picks it up. Cost to every card: none' > "$STUB/judge.1"
+  printf '%s\n' "$slow" "$lost" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  printf '%s\n' 'F1 ACCEPT: self-heals: the next turn picks it up. Cost to every card: none' 'F2 ACCEPT: harm: the line is lost. Cost to every card: none' > "$STUB/judge.1"
   JUDGEISSUE=$is judgeone 8 "$STUB/review" fix
-  [ "$(jf 8 .verdict)" = NO-GO ] && grep -qxF "E1 $slow" "$T/$CASE/cards/c8.fix" && [ ! -s "$ST/selfheals.jsonl" ] \
-    || fail "the first review of a card that is no follow-up does not send its self-heals finding to its fix round: $(cat "$T/$CASE/cards/c8.fix" 2>&1) $(cat "$ST/selfheals.jsonl" 2>&1)"
+  [ "$(jf 8 .verdict)" = NO-GO ] && grep -qxF "E1 $slow" "$T/$CASE/cards/c8.fix" && grep -qxF "E2 $lost" "$T/$CASE/cards/c8.fix" && [ ! -s "$ST/selfheals.jsonl" ] \
+    || fail "a review with a harm finding beside a self-heals one did not send both to its fix round alone (self-heals, harm): $(cat "$T/$CASE/cards/c8.fix" 2>&1) $(cat "$ST/selfheals.jsonl" 2>&1)"
   fx_in 'followups c8 "$(cat "$T/$CASE/issue8")" "$T/$CASE/cards/c8.review"'
-  [ "$RC" = 0 ] && [ "$(tail -n 1 "$T/$CASE/run.out")" = '[]' ] && [ ! -s "$STUB/filed" ] \
-    || fail "a self-heals finding left at the last review was filed as a follow-up, or the filing failed: $(cat "$T/$CASE/run.out") $(cat "$STUB/filed" 2>&1)"
+  [ "$RC" = 0 ] && [ "$(jq -cs 'map(.title)' "$STUB/filed" 2>/dev/null)" = "$(jq -cn --arg a "$lost" '[$a]')" ] \
+    || fail "the findings left at the last review were not the harm one filed alone, or the filing failed: $(cat "$T/$CASE/run.out") $(cat "$STUB/filed" 2>&1)"
   [ "$(heals '[.card, .issue, .area, .finding, .from] | tojson')" = "$(jq -cn --arg a "$slow" '["c8", 8, "area:engine", $a, "review"]')" ] \
     || fail "the self-heals finding left at the last review is not in the self-heals list: $(cat "$ST/selfheals.jsonl" 2>&1)"
 }
 
 # Bugs (issue 1559): a judge whose answer cannot be read leaves the review as the reviewer wrote it, but an earlier
-# round's self-heals ruling still holds: an accepted finding's kind (F1) sends it to the self-heals list at the last
-# review, not to a harm follow-up, and an outside one's list entry (F2) stays while the finding is filed too.
+# round's self-heals ruling still holds: an accepted finding's list entry (F1) stays, so it is not filed as harm, and
+# an outside one's list entry (F2) stays while the finding is filed too.
 t_healsunread() {
   local slow='[P2] a.txt:2 the poll waits one turn more. Proof: a.txt:2' out='[P2] b.txt:1 stale text until the next poll. Proof: b.txt:1' is
   is=$(issue 8 2026-01-01 P1 area:engine)
@@ -169,7 +170,7 @@ t_healsunread() {
   printf '%s\n' 'F1 ACCEPT: self-heals: the next turn picks it up. Cost to every card: none' 'F2 OUTSIDE: self-heals: the next poll corrects it, and b.txt is not the change'"'"'s' > "$STUB/judge.1"
   echo 'no decision line' > "$STUB/judge.2"
   JUDGEISSUE=$is judgeone 8 "$STUB/review" fix
-  [ "$(heals .finding)" = "$out" ] && grep -qF '"effect":"self-heals"' "$T/$CASE/cards/c8.effects" || fail "the first round did not list F2 and keep F1's kind: $(cat "$ST/selfheals.jsonl" "$T/$CASE/cards/c8.effects" 2>&1)"
+  [ "$(heals .finding)" = "$slow"$'\n'"$out" ] || fail "the first round did not list F1 and F2: $(cat "$ST/selfheals.jsonl" 2>&1)"
   JUDGEISSUE=$is judgeone 8 "$STUB/review" fix
   [ "$(jf 8 .judge.failed)" = 'the answer of the judge holds no decision line that could be read' ] && [ ! -s "$ST/selfheals.jsonl" ] \
     || fail "the unreadable answer did not fail the judge, or F2's entry stayed on the self-heals list: $(jf 8 .judge) $(cat "$ST/selfheals.jsonl" 2>&1)"

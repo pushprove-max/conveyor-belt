@@ -285,9 +285,10 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 # a "Follow-up depth: N" line, N 1 or more: followups()) an accepted one, is written to its list (healsadd(),
 # lib/followups.sh: the self-heals list, or the docs list for docs drift) in place of a follow-up or a fix round: it
 # becomes a line `SELFHEALS: <finding> (judge: <kind>: <reason>)` of the review, no finding (NOTFINDING), in the line's
-# selfheals. On a card that is no follow-up, an accepted finding of a kind kept off the belt inside the change is
-# fixed in the card's fix rounds as before; its effect goes to <worktree>.effects ({finding, effect, reason} a line,
-# the last ruling of a finding kept), which afterreview() (lib/card.sh) reads at the last review, where it blocks no
+# selfheals. On a card that is no follow-up, so are the accepted findings of a review whose accepted findings are each
+# of such a kind, at any review (HEALSEVERY); with a harm finding, or one with no kind, beside them, each accepted
+# finding of a kind kept off the belt is fixed in the card's fix rounds as before; its effect goes to
+# <worktree>.effects ({finding, effect, reason} a line, the last ruling of a finding kept), which afterreview() (lib/card.sh) reads at the last review, where it blocks no
 # card, and followups() should it be left there. A finding of an always-accepted kind is harm whatever kind its
 # reason gives, its reason saying so: it is never moved, and it blocks a card at its last review as any harm finding
 # does. The lists keep the last ruling too: a finding an earlier round put on one that this round does not leaves it
@@ -509,7 +510,7 @@ guardsaid() { # <worktree>
   local bad
   bad=$(jq -r '.d[] | select(.effect == "already guarded") | [.n, .reason] | map(tostring | gsub("[[:space:]]+"; " ")) | join("\t")' "$1.judge.said" | guardless "$1") || return 1
   [ "$bad" != '[]' ] || return 0
-  jq -c --argjson b "$bad" --arg w "$GUARDLESS" '.d |= map(if .n | IN($b[]) then .effect = "harm" | .reason += $w | del(.heals) else . end)' "$1.judge.said" > "$1.judge.said.new" \
+  jq -c --argjson b "$bad" --arg w "$GUARDLESS" '.d |= map(if .n | IN($b[]) then .effect = "harm" | .reason += $w | del(.heals) else . end) | '"$HEALSEVERY" "$1.judge.said" > "$1.judge.said.new" \
     && mv -f "$1.judge.said.new" "$1.judge.said"
 }
 # Each finding of the judge's decisions (<the decisions file>, judged()) marked heals is written to the list of its kind
@@ -520,8 +521,14 @@ healsput() { # <card> <issue> <area> <the decisions file>
   while IFS=$'\t' read -r n e why f; do
     healsadd "$1" "$2" "$3" "$why" "$f" review "$e" >/dev/null || { keep+=("$n"); echo "conveyor: card $1: a $e finding could not be written to its list, so it stays a finding: ${f:0:200}" >&2; }
   done < <(jq -r '.d[] | select(.heals) | [.n, .effect, .reason, .finding] | map(tostring | gsub("[[:space:]]+"; " ")) | join("\t")' "$4")
-  [ ${#keep[@]} = 0 ] || { jq -c '($ARGS.positional | map(tonumber)) as $k | .d |= map(if .n | IN($k[]) then del(.heals, .effect) else . end)' --args "${keep[@]}" "$4" > "$4.new" && mv -f "$4.new" "$4"; }
+  [ ${#keep[@]} = 0 ] || { jq -c '($ARGS.positional | map(tonumber)) as $k | .d |= map(if .n | IN($k[]) then del(.heals, .effect) else . end) | '"$HEALSEVERY" "$4" --args "${keep[@]}" > "$4.new" && mv -f "$4.new" "$4"; }
 }
+# On a card that is no follow-up, the judge's parser (judged()) marks heals each accepted finding of a review whose
+# accepted findings are each of a kind kept off the belt (LISTKINDS), and marks the decisions every. When one of them
+# becomes harm (guardsaid()) or loses its kind (its list entry could not be written: healsput()), the review gives a fix
+# round, and that round fixes its accepted findings as before: none keeps its mark, and healsunput() (judged()) takes
+# off its list any entry this round wrote.
+HEALSEVERY='if .every and any(.d[]; .accept and (.heals | not)) then .d |= map(if .accept then del(.heals) else . end) | del(.every) else . end'
 # The entries an earlier review of <card> wrote to the self-heals list or the docs list (from: review) for the findings
 # of the judge's decisions (<the decisions file>) that this round does not send to that list; with all, for each of its
 # findings (its review stands as the reviewer wrote it). The last ruling of a finding stands, as in
@@ -574,8 +581,8 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue
   # else the finding is accepted (a duplicate id, a line that cannot be read, no line). A line for no finding of the
   # review is dropped. A line's bullet or list number (`- `, `1. `, `1) `) is not read. None read at all fails the answer. An always-accepted kind beats a decline and an OUTSIDE.
   # An ACCEPT or OUTSIDE reason's leading kind (`harm:`, `self-heals:`, `cleanup:`, `already guarded:` or `docs drift:`)
-  # is its effect, taken off the reason (HARMRULE); heals marks the ones that go to a list (above).
-  elif ! jq -cn --slurpfile m "$wt.judge.marks" --rawfile a "$wt.judge" --arg seen "$SEENRX" --arg fu "$fu" 'def rx: "^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE|OUTSIDE):[[:space:]]*(?<r>.*[^[:space:]].*)$";
+  # is its effect, taken off the reason (HARMRULE); heals marks the ones that go to a list (above, and HEALSEVERY).
+  elif ! jq -cn --slurpfile m "$wt.judge.marks" --rawfile a "$wt.judge" --arg seen "$SEENRX" --arg fu "$fu" --argjson k "$LISTKINDS" 'def rx: "^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE|OUTSIDE):[[:space:]]*(?<r>.*[^[:space:]].*)$";
       ($a | split("\n") | map(gsub("^([[:space:]`*-]|[0-9]+[.)])+|[[:space:]`*]+$"; "") | select(test("^F[0-9]+")))) as $said
       | ($said | map(capture(rx))) as $all
       | ($said | map(select([capture(rx)] | length == 0) | capture("^F(?<n>[0-9]+)").n | tonumber)) as $bad
@@ -600,7 +607,9 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue
               + (if $e != null and $e != "harm" and $x.kind == null and ($d.d == "OUTSIDE" or $fu != "") then {heals: true} else {} end) end
           else null end)
           // {n: $x.n, finding: $x.finding, place: $x.place, accept: true, undecided: true, reason: "the judge gave no line for this finding that could be read", cost: null}))) as $s
-      | if all($s[]; .undecided) then error("none") else {whole: (all($s[]; .undecided | not) and ($all | length) == ($said | length) and ($said | length) == ($s | length)), d: $s} end' > "$wt.judge.said" 2>/dev/null; then
+      | ($fu == "" and any($s[]; .accept) and all($s[] | select(.accept); .effect | IN($k[]))) as $every
+      | if all($s[]; .undecided) then error("none") else {whole: (all($s[]; .undecided | not) and ($all | length) == ($said | length) and ($said | length) == ($s | length)),
+        d: (if $every then $s | map(if .accept then .heals = true else . end) else $s end)} + (if $every then {every: true} else {} end) end' > "$wt.judge.said" 2>/dev/null; then
     j=$(jq -c --rawfile r "$wt.judge" '. + {failed: "the answer of the judge holds no decision line that could be read", decided: 0, raw: ($r | .[-2000:])}' <<<"$j"); stood=1
   elif ! guardsaid "$wt" || ! healsput "$1" "$2" "$area" "$wt.judge.said"; then
     # The review stands as the reviewer wrote it, each finding a finding: none stays on the list (healsnone(), below).

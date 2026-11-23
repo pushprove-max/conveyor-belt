@@ -255,7 +255,7 @@ A second model reviews each card, at most three times, once more after the fix o
 - P1: the change does not do what the issue asks, or breaks behaviour the project uses today.
 - P2: a real defect with a limited effect.
 - P3: a real but minor defect with no wrong result that users or the next card meet. While the rule `P3` is on, an
-  accepted P3 is fixed and filed as a P2 is. Off, the card only lists it.
+  accepted P3 is handled as a P2 is: fixed and filed, or put on its list when its kind is not `harm` (below). Off, the card only lists it.
 
 The `review.proof` of the pack (the project's settings, `.conveyor/project.json`) sets the proof that a finding
 needs. `any`, the default, takes any proof that can be reproduced. `real` asks for a proof with what the project really
@@ -345,8 +345,12 @@ whatever kind the judge gives it.
 - A `self-heals`, `cleanup` or `already guarded` finding goes to the self-heals list with its kind. A `docs drift`
   finding goes to the docs list. No follow-up is filed for them. On a follow-up card, they also get no fix round. The
   review shows each one as a `SELFHEALS:` line, with its kind and the judge's reason.
-- The first review of a card that is not a follow-up still fixes all of its in-scope findings in the card's fix
-  rounds, of every kind. If such a finding is still open after the last review, it goes to its list.
+- On a card that is not a follow-up, a finding in the card's own change that is not `harm` never stops a review. At
+  any review, when each accepted finding in the change is `self-heals`, `cleanup`, `already guarded` or `docs drift`,
+  the review gives GO and each finding goes to its list. When a `harm` finding, or a finding with no kind, is beside
+  them, the review gives NO-GO and the fix round fixes all of them; none goes to a list. A finding that cannot be
+  written to its list is a finding with no kind. If such a finding is still open after the last review, it goes to
+  its list.
 - At the last review, a P0 or P1 in the card's own change stops the card only when it is `harm`. A P0 or P1 of
   another kind does not stop it: the card lands, and the finding goes to its list with that card. A finding with no
   kind is `harm`, so it still stops the card.
