@@ -483,11 +483,15 @@ testlinks() { # <card> <worktree>
 # Writes stdin as <worktree>'s .conveyor/test-links.json: first into a new file beside the worktree, outside it
 # (mktemp: made only where no file is, under a name no process knows before), then renamed into place. A rename
 # replaces a symlink or hard link a lingering session process put at the file, and never writes through it to a file
-# outside the worktree (R133).
+# outside the worktree (R133). The rename is made from inside .conveyor (cd -P), after a check that the folder entered
+# is the worktree's own .conveyor and not a symlink's target: a session process that swaps .conveyor for a symlink after
+# the check changes nothing, as the rename names the file from the folder the engine is in, not through the path
+# (issue 1488). testlinks() reaches this write too, so the check is here. mv -T (GNU mv, first on PATH on macOS too:
+# p_path()) replaces a test-links.json that is a symlink to a folder, and does not move the new file into that folder.
 linkput() { # <worktree>
-  local t
-  t=$(mktemp "$1.links.XXXXXX") || return 1
-  cat > "$t" && mv -f "$t" "$1/.conveyor/test-links.json" || { rm -f "$t"; return 1; }
+  ( w=$(cd -P -- "$1" && pwd -P) && t=$(mktemp "$w.links.XXXXXX") || exit 1
+    { cd -P -- "$w/.conveyor" && [ "$(pwd -P)" = "$w/.conveyor" ] && cat > "$t" && mv -fT -- "$t" test-links.json; } \
+      || { rm -f -- "$t"; exit 1; } )
 }
 # Whether the staged change of main-red fix card <card>'s worktree is only the links testlinks() stages (issue 323):
 # its session made no change of its own. The links are staged again from main's copy of the file, with the links its
