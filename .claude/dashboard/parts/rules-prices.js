@@ -268,7 +268,9 @@
     const { names } = P;
     const v = PRICE_KEYS.map(([k]) => String(ed[k]).trim()), changes = [];
     const base = priced(e) ? Object.fromEntries(PRICE_KEYS.map(([k]) => [k, num(e[k]) !== null ? String(e[k]) : ''])) : ed.start;
-    const same = PRICE_KEYS.every(([k], i) => v[i] === base[k]);
+    // A price typed in the host's form (prices.sh) with the value held counts as the same: 3.0 is the 3 saved.
+    const form = /^(0|[1-9][0-9]{0,5})(\.[0-9]{1,6})?$/, eq = (x, y) => x === y || (form.test(x) && form.test(y) && +x === +y);
+    const same = PRICE_KEYS.every(([k], i) => eq(v[i], base[k]));
     if (!same) {
       if (v.slice(0, 3).some((x) => !x)) { say('Give the input, output and cache read prices.'); return; }
       changes.push(['set', m, ...v.slice(0, 3), ...(v[3] ? [v[3]] : [])]);

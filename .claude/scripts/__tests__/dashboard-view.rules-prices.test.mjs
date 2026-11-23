@@ -229,20 +229,21 @@ test('Rules: Edit :fast saved with nothing changed sends nothing', async () => {
   assert.deepEqual(posted(w), []);
 });
 
-// Edit of a priced Sonnet 5.5 (4 / 10 / 0.1) where the Save sends the price (3) and the host refuses the display name
-// (too long): the price is saved, the edit stays open with the name typed. The host then answers every send.
-async function partialSave() {
+// Edit of a priced Sonnet 5.5 (4 / 10 / 0.1) where the Save sends the input price typed (3 unless given) and the host
+// refuses the display name (too long): the price is saved, the edit stays open with the name typed. The host then
+// answers every send.
+async function partialSave(input = '3') {
   const w = open({ overrides: { 'claude-sonnet-5-5': { input: 4, output: 10, cacheRead: 0.1 } } });
   act(rowOf(w, 'claude-sonnet-5-5'), 'price-edit').click();
   const ed = rowOf(w, 'claude-sonnet-5-5');
-  type(act(ed, 'price-input'), '3');
+  type(act(ed, 'price-input'), input);
   type(act(ed, 'price-name'), 'S'.repeat(61));
   const refusal = { ok: false, status: 409, text: () => Promise.resolve('conveyor: prices name: the name is up to 60 characters; nothing changed') };
   // The second send of the Save is the name: the host takes the first and refuses it.
   Object.defineProperty(w, 'reply', { configurable: true, get: () => (w.posts.length > 1 ? refusal : null) });
   act(ed, 'price-save').click();
   await settle(); await settle();
-  assert.deepEqual(posted(w), [['set', 'claude-sonnet-5-5', '3', '10', '0.1'], ['name', 'claude-sonnet-5-5', 'S'.repeat(61)]]);
+  assert.deepEqual(posted(w), [['set', 'claude-sonnet-5-5', input, '10', '0.1'], ['name', 'claude-sonnet-5-5', 'S'.repeat(61)]]);
   assert.match(said(w).textContent, /^Not done: .*up to 60 characters/);
   Object.defineProperty(w, 'reply', { configurable: true, writable: true, value: null });
   return w;
@@ -259,6 +260,16 @@ test('Rules: Edit retried after a refused display name sends the name alone, and
   act(said(w), 'undo').click();
   await settle();
   assert.deepEqual(posted(w), [['name', 'claude-sonnet-5-5']], 'Undo puts back the name alone');
+});
+
+// Bug: Save compared the typed price as text, so after a Save saved 3.0 (the pack then reads 3) and the host refused
+// the name, the retry sent 3.0 again, and its Undo set 3 back over a later `prices set`.
+test('Rules: Edit retried after a refused display name does not send a price typed with a trailing zero again', async () => {
+  const w = await partialSave('3.0');
+  type(act(rowOf(w, 'claude-sonnet-5-5'), 'price-name'), 'Sonnet (proxy)');
+  act(rowOf(w, 'claude-sonnet-5-5'), 'price-save').click();
+  await settle(); await settle();
+  assert.deepEqual(posted(w), [['name', 'claude-sonnet-5-5', 'Sonnet (proxy)']], 'the input price 3.0, saved as 3, is not sent again');
 });
 
 // Bug: Save compared the price with the one the Edit opened at, so after a Save saved 3 and the host refused the name,
