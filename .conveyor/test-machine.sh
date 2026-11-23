@@ -55,8 +55,8 @@ if [ ! -x "$V/bin/pip" ]; then
   $SUDO mkdir -p "$V" && $SUDO chown "$(id -u):$(id -g)" "$V"
   python3.14 -m venv --clear "$V"
 fi
-# ruff 0.17.6.
-[ "$(ver ruff --version)" = 0.17.6 ] || "$V/bin/pip" install -q ruff==0.17.6
+# ruff 0.17.6, in the environment: the link below points there, so a ruff 0.17.6 elsewhere on the PATH does not do.
+[ "$(ver "$V/bin/ruff" --version)" = 0.17.6 ] || "$V/bin/pip" install -q ruff==0.17.6
 for t in python3 pip ruff; do $SUDO ln -sf "$V/bin/$t" "/usr/local/bin/$t"; done
 
 # The tool shellcheck at 0.11.0, from its GitHub release (the one in the distribution is older).

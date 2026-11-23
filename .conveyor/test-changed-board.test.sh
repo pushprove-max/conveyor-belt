@@ -20,10 +20,11 @@ cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/te
 printf '%s\n' '{"area": "a", "file": "conveyor/x.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 printf 't_aone() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"; echo 'echo one' > "$R/conveyor/x.sh"
 (cd "$ROOT" && git ls-files -z "$D" .claude/dashboard/panels .claude/dashboard/app.css .claude/dashboard/app.js | tar -cf - --null -T -) | tar -xf - -C "$R" || { echo "not ok - the Board files could not be copied"; exit 1; }
-# This checkout's links of the page's stylesheet and app.js alone (.conveyor/test-links.json), so the links of the
+# This checkout's links of the page's stylesheet, app.js and guide (.conveyor/test-links.json), so the links of the
 # other files changed below do not add to their lists.
-jq '{".claude/dashboard/app.css": .[".claude/dashboard/app.css"], ".claude/dashboard/app.js": .[".claude/dashboard/app.js"]}' \
+jq '{".claude/dashboard/app.css": .[".claude/dashboard/app.css"], ".claude/dashboard/app.js": .[".claude/dashboard/app.js"], "docs/board.md": .["docs/board.md"]}' \
   "$HERE/test-links.json" > "$R/.conveyor/test-links.json" || { echo "not ok - the page's test links could not be read"; exit 1; }
+mkdir -p "$R/docs"; cp "$ROOT/docs/board.md" "$R/docs/board.md"; cp "$ROOT/docs-claims.test.sh" "$R/docs-claims.test.sh"
 # Tests no list names: a new one that imports the fixture and draws Landed is selected by both rules; one that only
 # names the fixture and the panel's file, or a panel whose id starts with landed, is selected by neither.
 printf "import { boot, panel } from './dashboard-view.helpers.mjs';\nconst l = (w) => panel(w, 'landed');\n" > "$R/$D/zz-new.test.mjs"
@@ -83,5 +84,19 @@ has "$got" dashboard-view.page-live.test.mjs \
 got=$(listed .claude/dashboard/app.js)
 has "$got" dashboard-view.focus.test.mjs \
   || no "a code change to app.js does not list dashboard-view.focus.test.mjs: $(tr '\n' ' ' <<<"$got")"
+
+# Bug: a card that changed only docs/board.md did not list dashboard-view.rules-index.test.mjs, which reads that page
+# and checks the order of its two top lines of the Rules panel, as no link named it. The same card also did not list
+# the two other tests that read the guide (dashboard-server-plugin.test.sh, docs-claims.test.sh). A card that adds or
+# changes no test file runs only the first CARDLINKED (5) of the linked files (conveyor/lib/prompts.sh), so
+# rules-index must be among the first five.
+got=$(listed docs/board.md)
+for t in dashboard-view.rules-index.test.mjs dashboard-server-plugin.test.sh; do
+  has "$got" "$t" || no "a change to docs/board.md alone does not list $t, which reads it: $(tr '\n' ' ' <<<"$got")"
+done
+grep -qxF docs-claims.test.sh <<<"$got" \
+  || no "a change to docs/board.md alone does not list docs-claims.test.sh, which reads it: $(tr '\n' ' ' <<<"$got")"
+head -n 5 <<<"$got" | grep -qxF "$D/dashboard-view.rules-index.test.mjs" \
+  || no "dashboard-view.rules-index.test.mjs is not among the first 5 files listed for a change to docs/board.md alone, so a card's run leaves it out: $(tr '\n' ' ' <<<"$got")"
 
 [ ! -s "$T/notok" ] && echo "ok - a change to the Board's fixture or a panel lists the test files that import it or draw it" || exit 1

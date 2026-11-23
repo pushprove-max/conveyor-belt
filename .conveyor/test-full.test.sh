@@ -98,13 +98,17 @@ grep -qx 'TESTRUN files=3' "$T/out" && grep -qx 'TESTRUN cases=4' "$T/out" || no
 # Every fixture file notes that it ran, so a run that also starts a passed file or a case file is seen.
 printf '%s\n' "import { test } from 'node:test'; import { appendFileSync } from 'node:fs';" "const ran = new URL('../ran', import.meta.url);" \
   "test('a (b)', () => appendFileSync(ran, 'node a\\n'));" "test('c', () => appendFileSync(ran, 'node c\\n'));" > "$R/lib/fx-node.test.mjs"
+# A Python file has no case filter: its `fail` line runs the whole file (the notes of test-full.sh say so). The file notes
+# its arguments, so a case name passed to it as a filter shows as `py a case`, not `py`.
+printf '%s\n' 'import os, sys' 'open(os.path.join(os.path.dirname(__file__), "..", "ran"), "a").write(" ".join(["py"] + sys.argv[1:]) + "\n")' > "$R/lib/fx-py.test.py"
 git -C "$R" add -A && git -C "$R" commit -qm runner && rm -f "$R/ran"
 printf '%s\t%s\t%s\n' pass lib/fx-env.test.sh '' fail lib/fx-pass.test.sh '' fail conveyor/conveyor.test.sh one \
-  fail conveyor/tests/fx-b.test.sh two fail lib/fx-node.test.mjs 'a (b)' | sed 's/\t$//' > "$T/rerun"
+  fail conveyor/tests/fx-b.test.sh two fail lib/fx-node.test.mjs 'a (b)' fail lib/fx-py.test.py 'a case' | sed 's/\t$//' > "$T/rerun"
 (cd "$R" && CONVEYOR_TEST_RERUN=$T/rerun bash -c "$full") > "$T/out" 2>&1 || no "the run of failed cases alone failed: $(cat "$T/out")"
 got=$(sort "$R/ran" 2>/dev/null | tr '\n' ' ')
-[ "$got" = "node a pass runner one,two " ] || no "a list's failed cases were not run alone: $got"
-grep -qx 'TESTRUN files=3' "$T/out" && grep -qx 'TESTRUN cases=4' "$T/out" || no "the totals of a run alone are not of its cases: $(grep TESTRUN "$T/out")"
+[ "$got" = "node a pass py runner one,two " ] || no "a list's failed cases were not run alone, or a Python file named with a case did not run whole: $got"
+grep -qx 'TESTRUN files=4' "$T/out" && grep -qx 'TESTRUN cases=5' "$T/out" || no "the totals of a run alone are not of its cases: $(grep TESTRUN "$T/out")"
+git -C "$R" rm -q -f lib/fx-py.test.py && git -C "$R" commit -qm nopy && rm -f "$R/ran" # the later cases run the suite whole
 # Bug (#1007): the suite wrote no log of its files, so the engine (testrun.sh testfails()) put every failed case of a
 # red suite under the suite's command, and each run of one alone (fulltest.sh fullalone()) named the command in its
 # `fail` line: the suite ran whole again for each, and a release with 3 failed cases took an hour. Each failed case of

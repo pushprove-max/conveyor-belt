@@ -59,6 +59,22 @@ t_packcommitexempt() {
   out=$(loop setup pack-commit) && grep -q '^ask:' <<<"$out" || fail "a changed exempt file was not asked: $out"
 }
 
+# Bug (R144 of #1450): step 3 of setup.md asked for the pack only when git status of .conveyor/project.json and the
+# fixed path .conveyor/size-exempt.txt printed a line, so a change to an exempt file at another path alone was never
+# put to the owner, and the Foreman's rule looked at the pack alone. Both now run pack-commit, which reads the exempt
+# paths from the pack. setup.md is instructions to a Claude session, so no behaviour of it can run here: the case
+# runs pack-commit with a custom exempt path, and reads the two texts for the call to it and for the old gates.
+t_packcommitcustom() {
+  packsetup; local out
+  tune '.lint = {commands: [{files: ["*.txt"], size: {file: 3, exempt: "docs/big-files.txt"}}]}' && mkdir -p "$R/docs" && echo big.txt > "$R/docs/big-files.txt" || fail "the fixture was not made"
+  out=$(loop setup pack-commit yes) || fail "yes failed: $out"
+  echo more >> "$R/docs/big-files.txt"
+  out=$(loop setup pack-commit) && grep -q '^ask:' <<<"$out" && grep -q 'docs/big-files.txt' <<<"$out" || fail "a changed exempt file at a custom path was not asked: $out"
+  grep -q 'conveyor.sh" setup pack-commit' "$SRC/../commands/setup.md" && grep -q 'conveyor.sh setup pack-commit' "$SRC/foreman/foreman.sh" \
+    || fail "setup.md or the Foreman's rules no longer run setup pack-commit, the only check that reads the exempt paths from the pack"
+  ! grep -q 'status --porcelain' "$SRC/../commands/setup.md" "$SRC/foreman/foreman.sh" || fail "setup.md or the Foreman's rules gate the pack's question on a git status of fixed paths: $(grep -n 'status --porcelain' "$SRC/../commands/setup.md" "$SRC/foreman/foreman.sh" | cut -c1-200)"
+}
+
 # Bug (E2 of #1157): a size entry whose exempt file is on no disk and in no commit (the docs allow it) went to git add,
 # which failed with "pathspec did not match", so the pack was never committed.
 t_packcommitnoexempt() {

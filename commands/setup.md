@@ -88,9 +88,8 @@ First install the requirements, then sign in, before step 1:
      answers, but not `--survey`: the run that ended 0 saved that answer, and `--survey yes` again files a second survey issue. Tell the user that the script installs nothing yet: the project must finish it and commit it.
    - Any other failure: show its message, then go on to step 2, where doctor names what is missing and its fix.
 2. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" doctor` and show its output.
-3. When `bash "${CLAUDE_PLUGIN_ROOT}/conveyor/lib/requires.sh" run git status --porcelain -- .conveyor/project.json .conveyor/size-exempt.txt`
-   prints a line (the pack or its exempt file is not committed, or setup changed
-   it since its commit), run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup pack-commit`. When it exits 1 (the
+3. Run `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" setup pack-commit`. It checks the pack and the exempt files of its
+   size entries itself, and prints `ok:` when they are committed and no change is waiting. When it exits 1 (the
    default branch is not checked out, or the pack has a conflict), show its message and ask nothing more about the
    pack. When it prints an `ask:` line, ask the user that question with AskUserQuestion ("Commit the Conveyor pack
    (.conveyor/project.json) on <default branch> now?", yes / no), with the change it printed shown in the question.
