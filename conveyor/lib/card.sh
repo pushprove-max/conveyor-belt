@@ -411,11 +411,11 @@ cardopen() {
   go=''
 }
 # The findings the resumed session of a retried card is told came back (donewhen.sh again()), in card()'s rep: those the kept
-# review repeats (donewhen.sh repeats()) when it came after the last of its fix rounds (it is the issue's last review, and that
-# round followed an earlier one), else none. It reads card()'s wt and rounds (the reviews a retried card carries).
+# review repeats (donewhen.sh repeats()) when its verdict stands after the last of its fix rounds (<worktree>.rounds/answered,
+# cardreview(): a reused review's too), else none. It reads card()'s wt. Bugs: it compared the last round's number with the
+# reviews carried, which a port's round numbers outgrow (roundno()); then it read rounds/told, which a reused review lacks.
 keptrep() {
-  rep=''; [ "$(verdict "$wt.review" 2>/dev/null)" != NO-GO ] || ! jq -se --argjson r "$rounds" 'map(.round) | max < $r' "$wt.rounds/findings.jsonl" >/dev/null 2>&1 \
-    || rep=$(repeats "$wt")
+  rep=''; [ "$(verdict "$wt.review" 2>/dev/null)" != NO-GO ] || [ ! -e "$wt.rounds/answered" ] || rep=$(repeats "$wt")
 }
 # Ends a main-red fix card as closed, its reason the first line of <worktree>.unfixed (bugproof.sh redgreen(), redproof()): main is no
 # longer red for its cases. Its change is dropped: the worktree goes. A closed line that cannot be written (bugproof.sh redclosed(): a case joined its entry as they ran, too) blocks the card, its reason without the result's "so the card closes" clause.
@@ -577,7 +577,7 @@ cardreview() {
     refix=''
     res=$(verdict "$wt.review"); vis=$(visible "$wt.review" "$vmode"); unclear=''
     [ -n "$vis" ] || { [ "$res" = none ] || unclear=": it does not hold exactly one USER-VISIBLE line, written as asked"; res=none; }
-    [ "$res" = none ] || [ "$rr" = reused ] || [ ! -d "$wt.rounds" ] || : > "$wt.rounds/told" # a review with a verdict answered the fix rounds before it: told until the next round (donewhen.sh rounded()); resumeplan() reads it. Not a reused one, written before the round (bug: a retry's first review lost the round's finding ids and diff)
+    [ "$res" = none ] || [ ! -d "$wt.rounds" ] || { : > "$wt.rounds/answered"; [ "$rr" = reused ] || : > "$wt.rounds/told"; } # a review with a verdict answered the fix rounds before it, until the next round (donewhen.sh rounded()): told, which resumeplan() reads, not for a reused one, written before the round (bug: a retry's first review lost the round's finding ids and diff); answered, which keptrep() reads, for a reused one too, as the loop blocks on its repeats
     # A NO-GO's line names the findings that came back after a fix round told to fix them (survived: id, rounds), for the Board.
     # Every review's line keeps its answers on the findings fix rounds were told, each beside its first location
     # and proof (donewhen.sh answers()), so a review that blocks or ends the loop keeps them too.
@@ -625,9 +625,9 @@ cardfix() {
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(fixprompt "$sprompt" "$fl$more")" fix fix "$([ "$fixed" = 0 ] || echo up)") || { block "$c" "$n" "$wt" "fix: $t"; return; }
     fixed=$((fixed + 1))
     checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
-    # This fix round's findings, with their ids, and the diff it made, for the review after it (donewhen.sh repeats(), rereview()).
-    mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$((pass + rounds)).diff" \
-      && rounded "$wt" "$((pass + rounds))" "$ids" && refix=$((pass + rounds)) && fixtree=$old
+    # This fix round's findings, with their ids, and the diff it made, for the review after it (donewhen.sh repeats(), rereview()), under a number no round in the folder has (roundno()).
+    local fr; fr=$(roundno "$wt" "$((pass + rounds))"); mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$fr.diff" \
+      && rounded "$wt" "$fr" "$ids" && refix=$fr && fixtree=$old
     go=next; return
   fi
   go=''

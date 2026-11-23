@@ -381,9 +381,10 @@ MOVEJQ='def files: reduce (split("\n")[]) as $l ([];
 # location and line (with its proof). Each earlier finding this round was not told (one a review said holds) is
 # followed through the round's diff too, in a record {round, id, words, tracked: true} with moved and mkey, or location
 # "needs review": its key keeps to its code, so a later finding at the line that took its place is not joined to it.
-# The round is one no review has answered yet: <worktree>.rounds/told goes (cardreview() writes it, resumeplan() reads it).
+# The round is one no review has answered yet: <worktree>.rounds/told and answered go (cardreview() writes them,
+# resumeplan() and keptrep() read them).
 rounded() { # <worktree> <round> <numbered() lines>
-  rm -f "$1.rounds/told"; [ -n "$3" ] || return 0
+  rm -f "$1.rounds/told" "$1.rounds/answered"; [ -n "$3" ] || return 0
   jq -cs --argjson r "$2" --rawfile d "$1.rounds/$2.diff" --rawfile ls <(git -C "$1" ls-files) --slurpfile h <(cat "$1.rounds/findings.jsonl" 2>/dev/null) "$MOVEJQ"'
     ($d | files) as $fs | ($ls | split("\n") | map(select(. != ""))) as $l | map(.id) as $ids
     | def follow($at; $w): ($at | capture("^(?<p>.*):(?<n>[0-9]+)$")) as $a | moveto($fs; $l; $a.p; ($a.n | tonumber))
@@ -394,6 +395,18 @@ rounded() { # <worktree> <round> <numbered() lines>
       + (if $o == null then {} else {first: ($o | {round, at, line})} end)),
     ($h | group_by(.id)[] | last | select(.moved != null and (.id | IN($ids[]) | not))
       | {round: $r, id, words, tracked: true} + follow(.moved; .words))' <<<"$3" >> "$1.rounds/findings.jsonl"
+}
+# The number of the next fix round in <worktree>.rounds: <pass + rounds> (cardfix(), card.sh), or one more than the
+# highest round with a diff there when that is as high. A retry after an automatic port carries only the reviews after
+# the port's own (resumeplan()), so pass + rounds can name a round copied from the card it resumes: that round's diff
+# was overwritten and the review after it was told the findings of both rounds (rereview()).
+roundno() { # <worktree> <pass + rounds>
+  local r=$2 f k
+  for f in "$1".rounds/*.diff; do
+    k=${f##*/}; k=${k%.diff}
+    if [[ $k =~ ^[0-9]+$ ]] && [ "$((10#$k))" -ge "$r" ]; then r=$((10#$k + 1)); fi
+  done
+  echo "$r"
 }
 # The review beside the worktree as its fix session is told it (FIX): every line but the DECLINED, MINOR, OUTSIDE and ROLLOUT
 # ones (a rollout action is no defect, rollouts()), each finding led by its id (<numbered() lines>).

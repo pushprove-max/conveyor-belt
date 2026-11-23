@@ -206,9 +206,9 @@ keptsetup() { # <issue>
 t_repeatkept() {
   keptsetup 10
   # #10: the third review, the round limit, repeats a P1 its fix round was told to fix: it blocks (after hard), so
-  # nothing is filed.
+  # nothing is filed. The third review has a verdict, so it answered round 2 (answered, as cardreview() writes it).
   echo "$NOGO" > "$FXWT.review"; printf '%s\n' "$B" 'USER-VISIBLE: no' 'VERDICT: NO-GO' | tee "$STUB/review.2" > "$STUB/review.3"
-  afterrun "$(issue 10 2026-01-01)" 'told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && told 2 "echo fix3 >> a.txt" && cp "$STUB/review.3" "$wt.review" && pass=3'
+  afterrun "$(issue 10 2026-01-01)" 'told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && told 2 "echo fix3 >> a.txt" && cp "$STUB/review.3" "$wt.review" && : > "$wt.rounds/answered" && pass=3'
   [ "$(jq -c '[.after, .hard]' <<<"$AFTER")" = "[\"hard\",\"$B did not hold after 1 round\"]" ] || fail "a P1 repeat on the last round did not block: $AFTER"
   # Blocked so after its three reviews (its worktree, fix rounds and last review as afterrun left them), and retried:
   # the resumed session is told the finding came back, with the diff of the fix round told to fix it (keptrep(), then
@@ -251,6 +251,25 @@ t_repeatkeptfail() {
   [ ! -s "$T/$CASE/rep" ] || fail "the resumed session was told of a repeat its kept review, written before the fix round, cannot show: $(cat "$T/$CASE/rep")"
 }
 
+# #12: a retry after an automatic port carries only the reviews after the port's own (resumeplan()), here none
+# (pass 1, rounds 0), and round 1, copied, that no review answered. Its first review has a new P1 (N): cardfix() runs
+# its fix round, the session and checks replaced. Bugs it catches: that round took number pass + rounds = 1, so it
+# overwrote the copied 1.diff and the review after it was told the ids of both rounds (rereview()); and once that
+# review repeated N and blocked, its retry (two reviews, rounds 1 and 2) was not told N came back (keptrep(): 2 < 2).
+t_repeatportround() {
+  keptsetup 12; local N='[P1] a.txt:2 a new finding. Proof: line 2'
+  echo "$NOGO" > "$FXWT.review"; printf '%s\n' "$N" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  afterrun "$(issue 12 2026-01-01)" 'told 1 "echo fix2 >> a.txt" && cp "$wt.rounds/1.diff" "$T/$CASE/1.diff" && cp "$STUB/review.2" "$wt.review"' \
+    'c=c7 n=12 rline="" fixed=0 sprompt="" br="" rep=""; session() { (cd "$1" && echo fix3 >> a.txt); }; checked() { :; }
+     cardfix; echo "$go $refix" > "$T/$CASE/fix"; rereview c7 "$wt" "$refix" > "$T/$CASE/rereview"
+     cp "$STUB/review.2" "$wt.review"; : > "$wt.rounds/answered"; rounds=2; keptrep; printf "%s" "$rep" > "$T/$CASE/rep"'
+  [ "$(cat "$T/$CASE/fix")" = 'next 2' ] && cmp -s "$T/$CASE/1.diff" "$FXWT.rounds/1.diff" && grep -qx '+fix3' "$FXWT.rounds/2.diff" \
+    || fail "cardfix() after copied round 1 (pass 1, rounds 0, review: $N) did not record its round as 2 beside an unchanged 1.diff: $(cat "$T/$CASE/fix" "$T/$CASE/run.out" 2>&1) $(ls "$FXWT.rounds")"
+  [ "$(grep -cE '^E[0-9]+ \[P' "$T/$CASE/rereview")" = 1 ] && grep -qxF "E2 $N" "$T/$CASE/rereview" \
+    || fail "the review after round 2 (review: $N) was told findings of other rounds: $(cat "$T/$CASE/rereview")"
+  grep -qF "$N" "$T/$CASE/rep" || fail "keptrep() with rounds 1 and 2, 2 reviews and an answering review repeating $N did not tell the repeat: $(cat "$T/$CASE/rep" "$T/$CASE/run.out")"
+}
+
 # #15: as #11 (t_repeatkeptfail), its retry run as a whole card for what only it shows: the review prompt, which
 # cardreview() puts together inline. The retried card's first review is told the findings of the fix round that came
 # after its kept review, with their ids and that round's diff (refix), and reviews the whole change, as its own
@@ -285,11 +304,14 @@ t_toldround() {
     redbrief() { :; }; trialflag() { :; }; lintgate() { return 0; }; began() { :; }; reusable() { return 1; }; minor() { :; }
     reviewed() { printf "%s\n" "[P2] a.txt:2 other word" "USER-VISIBLE: no" "VERDICT: NO-GO" > "$1.review"; echo "{}"; }; judged() { printf "%s\n" "$5"; }
     [ ! -e "$wt.rounds/told" ] || exit 4; cardreview; [ -e "$wt.rounds/told" ] || exit 5
-    told 2 "echo fix3 >> a.txt"; [ ! -e "$wt.rounds/told" ] || exit 6
-    reusable() { :; }; rtree=""; pass=3; cardreview; [ ! -e "$wt.rounds/told" ] || exit 7'
+    told 2 "echo fix3 >> a.txt"; [ ! -e "$wt.rounds/told" ] || exit 6; keptrep; [ -z "$rep" ] || exit 8
+    reusable() { :; }; rtree=""; pass=3; cardreview; [ ! -e "$wt.rounds/told" ] || exit 7; keptrep; [ -n "$rep" ] || exit 10'
   # Bug it catches too: the review that stands again after fix round 2 (reusable(): no review session, so no reviewer
   # read that round) marked it answered, and a retry's first review was not told its finding ids and diff (exit 7).
-  [ "$RC" = 0 ] || fail "a NO-GO review after fix round 1 did not mark the round answered (exit 5), fix round 2 of its finding did not take the mark away (exit 6), or the last review reused after it marked it (exit 7) (exit $RC): $(cat "$T/$CASE/run.out")"
+  # And (keptrep(), rounds/answered): the reused NO-GO after round 2 repeats its finding and the loop blocks on that,
+  # so a retry's resumed session must be told it came back. Bug: keptrep() read rounds/told, so it was not (exit 10).
+  # While round 2 is unanswered, the review before it cannot show a repeat (exit 8).
+  [ "$RC" = 0 ] || fail "a NO-GO review after fix round 1 did not mark the round answered (exit 5), fix round 2 of its finding did not take the mark away (exit 6), the last review reused after it marked it (exit 7), keptrep() told a repeat of the unanswered round 2 (exit 8) or not that of the reused review after it (exit 10) (exit $RC): $(cat "$T/$CASE/run.out")"
 }
 
 t_repeatkeptstage() {
