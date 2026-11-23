@@ -379,3 +379,36 @@ t_healsretry() {
   [ "$(grep -E '^(first|then) ' "$T/$CASE/run.out")" = $'first 1\nthen 0' ] && [ "$(cat "$STUB/closed" 2>&1)" = 20 ] \
     || fail "the loop's next turn did not sort again after the sort that could not read the issues, or held the pick after its sort: $(cat "$T/$CASE/run.out" "$STUB/closed" 2>&1)"
 }
+
+# Whether a process under <pid> is a flock on a descriptor of 10 or more: the cards lock, taken with `exec {fd}>>`, gets
+# one; the list's lock is `flock 9`, so the batch's first and uncontended flock is not taken for a wait on the cards.
+waits_on_a_lock() { # <pid>
+  local k
+  for k in $(below "$1"); do
+    [[ $(ps -o args= -p "$k" 2>/dev/null) =~ ^flock\ [0-9]{2,}$ ]] && return 0
+  done
+  return 1
+}
+
+# Bugs (issue 1566): with followupissues off, a batch card with no GitHub issue took the self-heals list's lock, then the
+# lock of the Tests page's cards (tcadd()), while testpick() holds the second and its retry (healstake()) waits for the
+# first: each waited for the other, and only a time limit (the pick's, lockedfor(), or the Board's call) ended it. This
+# case plays testpick(): it holds the cards lock, starts the batch, and waits until the batch is blocked on the cards
+# lock (a flock process of its own) or holds the list's lock, which it must not while it waits for the cards.
+# A real `heals batch` and a real lock: only two processes show the order the locks are taken in.
+t_healsbatchlock() {
+  local out=$T/$CASE/batch.out fd bp held=no
+  setup '[]'
+  jq -cn '{id: "h00000000a1", time: "2026-11-20T00:00:00Z", card: "c5", issue: 5, repo: "r", area: "area:engine", finding: "[P2] a.sh:1 a slow poll", why: "it heals", effect: "self-heals", from: "review"}' >> "$ST/selfheals.jsonl"
+  loop control rules followupissues=off > /dev/null || fail "control rules followupissues=off was refused"
+  mkdir -p "$ST/testactions"
+  exec {fd}>>"$ST/testactions/cards.json.lock"; flock "$fd"
+  # shellcheck disable=SC2016 # the inner script reads its own arguments
+  timeout 30 bash -c 'CONVEYOR_MAIN=$1 CONVEYOR_CARDS=$2 exec bash "$3" heals batch area:engine' _ "$R" "$T/$CASE/cards" "$SRC/conveyor.sh" > "$out" 2>&1 {fd}>&- & bp=$! # {fd}>&-: the batch must not hold the lock open, or closing it here frees nothing
+  wait_until "waits_on_a_lock $bp || ! flock -n '$ST/selfheals.jsonl.lock' true" || { exec {fd}>&-; fail "the batch neither waited for the cards lock nor took the list's"; }
+  flock -n "$ST/selfheals.jsonl.lock" true || held=yes
+  exec {fd}>&-
+  wait "$bp"; rc=$?; [ $rc = 0 ] || fail "the batch card with no GitHub issue was not filed (exit $rc): $(cat "$out")"
+  [ "$held" = no ] && [ "$(heals '.batched != null')" = true ] && [ "$(jq -c '.cards | length' "$ST/testactions/cards.json")" = 1 ] \
+    || fail "a batch card with no GitHub issue held the list's lock (held: $held) while it waited for the cards lock, so a pick holding the cards lock never got the list's: $(cat "$out" "$ST/selfheals.jsonl" "$ST/testactions/cards.json" 2>&1)"
+}

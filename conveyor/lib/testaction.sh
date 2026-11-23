@@ -162,10 +162,11 @@ testcard() { # <test file> <title> <body> [held [<why it is held>]]
 # (testcardissue()), the pack's type and last priority when none; <parent> the issue a review follow-up or a split part
 # follows up (parent in the entry: a run limited by --only to that issue takes the card, testpick()). Prints the card's id.
 tcadd() { # <test file> <title> <body> <"held" or ""> [<label> [<labels json> [<parent issue>]]]
-  local lock rec id drop
-  mkdir -p "$TESTACTS" 2>/dev/null
+  local lock rc=0; mkdir -p "$TESTACTS" 2>/dev/null
   { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the record of the Tests page's cards could not be locked; no card started" >&2; return 1; }
-  rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) || rec='[]'
+  tcput "$@" || rc=1; exec {lock}>&-; return $rc
+}
+tcput() { local rec id drop; rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) || rec='[]' # tcadd() with TACARDS.lock held by the caller (tcadd(), healsbatch())
   id=$(tcfree "$rec")
   # The picked cards the trim may drop (none with the records unread): those whose work is on main (TADONE), but one whose
   # proof deleted or merged its test file (bugproof speed.fix), the only source of its removed mark (testspart()). A card
@@ -180,8 +181,7 @@ tcadd() { # <test file> <title> <body> <"held" or ""> [<label> [<labels json> [<
       + (if $parent == "" then {} else {parent: ($parent | tonumber)} end)]
     | ([to_entries[] | select(.value.card != null) | .key] | .[:-200]) as $old
     | {cards: [to_entries[] | select((.key | IN($old[])) and $drop[.value.card] == true | not) | .value]}' <<<"$rec" > "$TACARDS.new" \
-    && mv -f "$TACARDS.new" "$TACARDS" || { rm -f "$TACARDS.new"; exec {lock}>&-; echo "conveyor: the record of the Tests page's cards could not be written; no card started" >&2; return 1; }
-  exec {lock}>&-
+    && mv -f "$TACARDS.new" "$TACARDS" || { rm -f "$TACARDS.new"; echo "conveyor: the record of the Tests page's cards could not be written; no card started" >&2; return 1; }
   echo "$id"
 }
 # `conveyor.sh card [--release <version>] <title> <body>`: a card the Foreman's owner ordered (the Foreman runs it as

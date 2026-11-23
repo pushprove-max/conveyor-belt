@@ -6,16 +6,24 @@
 
 # `conveyor.sh heals batch <area | ->` (the Board's Self-heals panel, "File a batch card"): one audit card for the
 # entries of the list in <area> (an area label; - for the entries with none) that no batch card holds yet and whose
-# card has ended (below), with them as its scope. With the control record's rules.followupissues false it is a card with no GitHub issue (tcadd(),
-# lib/testaction.sh), as a review follow-up is; else an issue. Either way it has the pack's type and last priority and
-# the area's label, and no follow-up depth: it is a first card, whose own review fixes its findings. Each entry it
+# card has ended (below), with them as its scope. With the control record's rules.followupissues false it is a card with no GitHub issue (tcput(),
+# lib/testaction.sh, under the cards lock, taken before the list's), as a review follow-up is; else an issue. Either way
+# it has the pack's type and last priority and the area's label, and no follow-up depth: it is a first card, whose own review fixes its findings. Each entry it
 # holds keeps its issue number or card id (batched), so a second ask files none for them. The list's lock is held from
 # the reading of the entries to their mark: two asks at once file one card. Exit 2 when the area has no open entry
 # whose card has ended.
 healsbatch() { # <area | ->
   [ $# = 1 ] && [[ -n $1 && $1 != *$'\n'* ]] || { echo "usage: conveyor.sh heals batch <area | ->" >&2; return 2; }
   local a=$1; [ "$a" != - ] || a=''
-  ( flock 9 || exit 1
+  ( # A card with no GitHub issue is added to the Tests page's record (tcput()): that lock is taken before the list's, the
+    # order testpick() and its retry take them in. Taken the other way round, each waits for the other with no end,
+    # until the pick's time limit (lockedfor(), lib/records.sh) or the Board's call limit stops one.
+    noissue=0 tl=''
+    if [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" = false ]; then
+      noissue=1; mkdir -p "$TESTACTS" 2>/dev/null
+      { exec {tl}>>"$TACARDS.lock"; } 2>/dev/null && flock "$tl" || { echo "conveyor: the record of the Tests page's cards could not be locked; nothing filed" >&2; exit 1; }
+    fi
+    flock 9 || exit 1
     # The cards that have not ended (no landed or closed line: in flight or blocked) and their issues. An entry of such a
     # card waits, as does one a review wrote (from: review) on an issue with such a card (a retry's new card): the code
     # its finding names is only in that card's change, so a batch card built on main now finds nothing to fix. It goes
@@ -33,8 +41,8 @@ healsbatch() { # <area | ->
     body=$(jq -r --arg a "${a:-no area}" '"Conveyor'"'"'s self-heals list holds the findings below, of \($a). The judge sorted each as self-heals: its failure heals itself (a card waits longer, a step runs again, text the next poll corrects, extra work with no wrong result). Fix them together in this card. Check each one against main first: fix one that still holds, with a test that fails without the fix; name in the reply one that is already fixed or no longer true, and why.\n\n## Findings\n"
       + (map("- \(.finding)\n  - From: card \(.card), issue #\(.issue). The judge: \(.why) (list entry \(.id))") | join("\n"))' <<<"$es")
     prio=$(jq -r '.[-1] // empty' <<<"$PRIOS")
-    if [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" = false ]; then
-      num=$(tcadd "" "$title" "$body" "" "Self-heals batch: ${a:-no area}" "$(jq -cn '$ARGS.positional' --args "$TYPE" ${prio:+"$prio"} ${a:+"$a"})") || exit 1
+    if [ "$noissue" = 1 ]; then
+      num=$(tcput "" "$title" "$body" "" "Self-heals batch: ${a:-no area}" "$(jq -cn '$ARGS.positional' --args "$TYPE" ${prio:+"$prio"} ${a:+"$a"})") || exit 1
     else
       pm=''; packget privacy.mode pm || { echo "conveyor: the pack's privacy mode could not be read; nothing filed" >&2; exit 1; }
       [ "$pm" != public ] || body=$(privmask "$body") || { echo "conveyor: the privacy check could not be made; nothing filed" >&2; exit 1; }
