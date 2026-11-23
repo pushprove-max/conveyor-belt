@@ -284,6 +284,97 @@ test('Rules: Edit retried after a refused display name sends the opened price ag
   assert.deepEqual(posted(w), [['set', 'claude-sonnet-5-5', '4', '10', '0.1'], ['name', 'claude-sonnet-5-5', 'Sonnet (proxy)']]);
 });
 
+// The snapshot after a partial Save, where `prices set` elsewhere made Sonnet 5.5 5 / 10 / 0.1: it replaces the saved 3.
+const priceAt5 = () => { const d = full(); d.panels.rules.data.prices = Object.assign(clone(PRICES), { overrides: { 'claude-sonnet-5-5': { input: 5, output: 10, cacheRead: 0.1 } } }); return d; };
+
+// Bug: Save knew the price its first Save saved (3) only while the pack showed it, so once a snapshot showed 5 from
+// elsewhere, a retry that fixed only the name sent 3 back over 5.
+test('Rules: Edit retried after a refused name and a price changed elsewhere sends the name alone', async () => {
+  const w = await partialSave();
+  next(w, priceAt5());
+  type(act(rowOf(w, 'claude-sonnet-5-5'), 'price-name'), 'Sonnet (proxy)');
+  act(rowOf(w, 'claude-sonnet-5-5'), 'price-save').click();
+  await settle(); await settle();
+  assert.deepEqual(posted(w), [['name', 'claude-sonnet-5-5', 'Sonnet (proxy)']], 'the saved 3 is not sent over the 5 set elsewhere');
+});
+
+// Bug: the same retry with 4 typed (the price the Edit opened at) sent no price, as 4 was the opened price, and left 5.
+test('Rules: Edit retried after a refused name and a price changed elsewhere sends the opened price typed back', async () => {
+  const w = await partialSave();
+  next(w, priceAt5());
+  const ed = rowOf(w, 'claude-sonnet-5-5');
+  type(act(ed, 'price-input'), '4');
+  type(act(ed, 'price-name'), 'Sonnet (proxy)');
+  act(ed, 'price-save').click();
+  await settle(); await settle();
+  assert.deepEqual(posted(w), [['set', 'claude-sonnet-5-5', '4', '10', '0.1'], ['name', 'claude-sonnet-5-5', 'Sonnet (proxy)']]);
+});
+
+// Bug: Save read the prices of the project on screen after its run to learn whether the host saved the price, so with
+// another project (Sonnet 5.5 at 7 / 10 / 0.1) picked while it was sending, it did not learn that sample saved 3, and
+// a retry in sample that fixed only the name, after a snapshot showed 5 set elsewhere, sent 3 back over 5.
+test('Rules: Edit retried after another project was picked while it saved sends the name alone', async () => {
+  const frame = (sonnet) => {
+    const d = full(), r = d.panels.rules.data, at = (o) => Object.assign(clone(PRICES), { overrides: { 'claude-sonnet-5-5': { input: o, output: 10, cacheRead: 0.1 } } });
+    d.panels.machine.data.repos = ['sample', 'widgetshop'];
+    Object.assign(r, { prices: at(sonnet), repos: ['sample', 'widgetshop'] });
+    r.others = { widgetshop: { ...clone(r), repo: 'widgetshop', queue: [], prices: at(7) } };
+    return d;
+  };
+  const w = boot({ tab: 'rules' });
+  deliver(w, frame(4));
+  pickProject(w, 'sample');
+  act(rowOf(w, 'claude-sonnet-5-5'), 'price-edit').click();
+  type(act(rowOf(w, 'claude-sonnet-5-5'), 'price-input'), '3');
+  type(act(rowOf(w, 'claude-sonnet-5-5'), 'price-name'), 'S'.repeat(61));
+  let answer;
+  const held = new Promise((r) => { answer = r; });
+  const refusal = { ok: false, status: 409, text: () => Promise.resolve('conveyor: prices name: the name is up to 60 characters; nothing changed') };
+  // The set's answer is held until widgetshop is picked; the host then takes it and refuses the name.
+  Object.defineProperty(w, 'reply', { configurable: true, get: () => (w.posts.length > 1 ? refusal : held) });
+  act(rowOf(w, 'claude-sonnet-5-5'), 'price-save').click();
+  await settle();
+  pickProject(w, 'widgetshop');
+  answer({ ok: true, status: 200, text: () => Promise.resolve('conveyor: prices: set') });
+  await settle(); await settle(); await settle();
+  assert.deepEqual(posted(w), [['set', 'claude-sonnet-5-5', '3', '10', '0.1'], ['name', 'claude-sonnet-5-5', 'S'.repeat(61)]]);
+  Object.defineProperty(w, 'reply', { configurable: true, writable: true, value: null });
+  pickProject(w, 'sample');
+  next(w, frame(5));
+  type(act(rowOf(w, 'claude-sonnet-5-5'), 'price-name'), 'Sonnet (proxy)');
+  act(rowOf(w, 'claude-sonnet-5-5'), 'price-save').click();
+  await settle(); await settle();
+  assert.deepEqual(posted(w), [['name', 'claude-sonnet-5-5', 'Sonnet (proxy)']], 'the 3 sample saved is not sent over the 5 set elsewhere');
+});
+
+// Bug: a first Save of 3.00, which the pack holds as 3, was not known as saved (the texts differ), so typing the opened
+// 4 back on the retry sent no price and left 3.
+test('Rules: Edit retried after saving 3.00 and a refused name sends the opened price typed back', async () => {
+  const w = await partialSave('3.00');
+  const ed = rowOf(w, 'claude-sonnet-5-5');
+  type(act(ed, 'price-input'), '4');
+  type(act(ed, 'price-name'), 'Sonnet (proxy)');
+  act(ed, 'price-save').click();
+  await settle(); await settle();
+  assert.deepEqual(posted(w), [['set', 'claude-sonnet-5-5', '4', '10', '0.1'], ['name', 'claude-sonnet-5-5', 'Sonnet (proxy)']]);
+});
+
+// Bug: Save compared the typed price with the pack's price now, so a name changed in an Edit opened at 3 / 10 / 0.1,
+// saved after `prices set` made it 4 / 10 / 0.1 elsewhere, sent the old 3 back over the new price.
+test('Rules: Edit saved with the price left as opened does not overwrite a price changed while it was open', async () => {
+  const at = (input) => { const d = full(); d.panels.rules.data.prices = Object.assign(clone(PRICES), { overrides: { 'claude-sonnet-5-5': { input, output: 10, cacheRead: 0.1 } } }); return d; };
+  const w = boot({ tab: 'rules' });
+  deliver(w, at(3));
+  act(rowOf(w, 'claude-sonnet-5-5'), 'price-edit').click();
+  next(w, at(4));
+  const ed = rowOf(w, 'claude-sonnet-5-5');
+  assert.equal(act(ed, 'price-input').value, '3', 'the field keeps the price the Edit opened at');
+  type(act(ed, 'price-name'), 'Sonnet (proxy)');
+  act(ed, 'price-save').click();
+  await settle(); await settle();
+  assert.deepEqual(posted(w), [['name', 'claude-sonnet-5-5', 'Sonnet (proxy)']], 'only the name is sent, not the opened price 3 over the new 4');
+});
+
 // Bug: no way to price a model the table does not know. Add model takes its ID, name, provider and prices ("Same price
 // as" copies a known model's), refuses an ID that is priced already, and the model shows in its group, marked added.
 test('Rules: Add model sends the ID, name, provider and prices, and the model shows as added', async () => {

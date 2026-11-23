@@ -264,20 +264,26 @@
     }));
     return [h('label', 'rules-price-field', 'Display name'), priceField('price-name', `Display name of ${m}`, ed.name, (v) => { ed.name = v; }, names[m] || m), ids];
   }
-  // Save in Edit (editRow): sends what differs of model m (e: its pack entry) as typed (ed), from what the pack holds now,
-  // so what an earlier Save of this edit saved before the host refused a later change is not sent again. For a model
-  // the pack holds no price of, the prices are compared with the ones as opened (ed.start): left as they were, no price
-  // is sent. A display name that is the model's own name counts as none, so Save clears a pack name that equals it.
+  // Save in Edit (editRow): sends what differs of model m (e: its pack entry) as typed (ed). The prices are sent only
+  // when they differ from both the pack's now and the ones this edit last knew the pack to hold (ed.base): as opened
+  // (ed.start), or as an earlier Save of this edit saved them. So prices left as they were never overwrite a price
+  // changed elsewhere while Edit was open, also after a snapshot replaces the price shown as saved, and what an earlier
+  // Save saved before the host refused a later change is not sent again. A price is the same as another written as the
+  // same number (3.00 is the 3 the pack stores). A display name that is the model's own name counts as none, so Save
+  // clears a pack name that equals it.
   function editSave(P, m, e, ed) {
     const { names } = P;
     const v = PRICE_KEYS.map(([k]) => String(ed[k]).trim()), changes = [];
-    const base = priced(e) ? Object.fromEntries(PRICE_KEYS.map(([k]) => [k, num(e[k]) !== null ? String(e[k]) : ''])) : ed.start;
+    const asPack = (o) => (priced(o) ? Object.fromEntries(PRICE_KEYS.map(([k]) => [k, num(o[k]) !== null ? String(o[k]) : ''])) : null);
     // A price typed in the host's form (prices.sh) with the value held counts as the same: 3.0 is the 3 saved.
     const form = /^(0|[1-9][0-9]{0,5})(\.[0-9]{1,6})?$/, eq = (x, y) => x === y || (form.test(x) && form.test(y) && +x === +y);
-    const same = PRICE_KEYS.every(([k], i) => eq(v[i], base[k]));
-    if (!same) {
+    const same = (a, b) => !!a && !!b && PRICE_KEYS.every(([k]) => eq(a[k], b[k]));
+    const typed = Object.fromEntries(PRICE_KEYS.map(([k], i) => [k, v[i]]));
+    let sent = null;
+    if (!same(typed, asPack(e)) && !same(typed, ed.base || ed.start)) {
       if (v.slice(0, 3).some((x) => !x)) { say('Give the input, output and cache read prices.'); return; }
       changes.push(['set', m, ...v.slice(0, 3), ...(v[3] ? [v[3]] : [])]);
+      sent = typed;
     }
     if (!ed.ratesOnly) {
       const n = ed.name.trim(), had = typeof e.name === 'string' ? e.name : '', want = n && n !== (names[m] || m) ? n : '';
@@ -287,7 +293,14 @@
       was.filter((x) => !ed.aliases.includes(x)).forEach((x) => changes.push(['alias', m, 'remove', x]));
     }
     if (!changes.length) { S.priceEdit = null; draw(); return; }
-    priceRun(changes, () => { S.priceEdit = null; });
+    // The set is the first change: the host saved it, though it refused a later change, if the run kept a new saved
+    // value for this edit's project (S.priceSaved, by repo, written by run() on each answer saved, whichever project is
+    // on screen then) that holds the prices sent. Not the prices on screen: another project can be picked meanwhile.
+    const repo = S.d.repo, before = S.priceSaved.get(repo);
+    priceRun(changes, () => { S.priceEdit = null; }).then(() => {
+      const s = S.priceSaved.get(repo);
+      if (sent && s && s !== before && same(sent, asPack(s.over[m]))) ed.base = sent;
+    });
   }
   // Reset names the price that clearing m gives: the fast mode of a model with your price then costs twice that
   // price, not its built-in price (use_prices in dashboard_limit.py).
@@ -307,7 +320,7 @@
     return set || from.cacheWrite !== from.input * 1.25 ? String(from.cacheWrite) : '';
   };
   // from: the prices the fields start at, for a fast mode the pack does not price (its row's second line). start: the
-  // prices as opened, which Save compares with for a model the pack holds no price of (editSave).
+  // prices as opened, which Save compares with until a Save of this edit saves others (editSave).
   const openEdit = (P, m, ratesOnly, from) => {
     const e = P.over[m] || {}, r = (ratesOnly ? (priced(e) ? e : from) : P.rateOf(m)) || {};
     const f = { ...Object.fromEntries(RATES.map((k) => [k, num(r[k]) !== null ? String(r[k]) : ''])), cacheWrite: startWrite(P, m, ratesOnly, from) };
