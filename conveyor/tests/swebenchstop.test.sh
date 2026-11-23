@@ -308,19 +308,21 @@ t_swestopcostlast() {
     || fail "Stop of run $id on $t (cost last read \$2; a build and a review line in its container) did not keep the cost of the review line written since: $o"
 }
 # Bug (#1454 R157, review E2): Stop of a run whose process is gone read no records in its trial's container, so it
-# kept the cost swe_watch last read. Its column names its kind; its prices are the run's copy of the pack.
+# kept the cost swe_watch last read. Its column names its kind; its prices are the run's copy of the pack: the live
+# pack's prices change after the copy (ten times as much), so a cost priced from the live pack is $25, not $2.50.
 t_swestopcostgone() {
   swe; local o id=r20261119T000000-1 t
   t=$(sweorder | head -n 1); swegone "$id"; swecostbox "$id" "$t" "swe-${R##*/}"
   tune '.prices = {"bench-m": {input: 1, output: 2, cacheRead: 0.5}}'
   mkdir -p "$B/frozen/conveyor/main/.conveyor" && cp "$R/.conveyor/project.json" "$B/frozen/conveyor/main/.conveyor/" \
     && jq -c '.cols = [{arm: "conveyor", key: "k", kind: "conveyor"}] | .active.cost = {usd: 2, state: "known", unpriced: 0}' "$B/live.json" > "$B/l.new" && mv "$B/l.new" "$B/live.json" \
+    && tune '.prices = {"bench-m": {input: 10, output: 20, cacheRead: 5}}' \
     || fail "the run's copy of the pack or its column was not made"
   o=$(loop bench swe stop "$id" 2>&1) || fail "stop failed: $o"
   [ ! -e "$SWE_FX/wrote" ] || fail "Stop of gone run $id on $t left its session running after it read the trial's records: it wrote a fix line the cost leaves out"
   o=$(tail -n 1 "$B/runs.jsonl" | jq -c .interrupted.cost)
   [ "$o" = '{"usd":2.5,"state":"known","unpriced":0}' ] \
-    || fail "Stop of gone run $id on $t (cost last read \$2; a build and a review line in its container) did not keep the cost of the review line written since: $o"
+    || fail "Stop of gone run $id on $t (cost last read \$2; a build and a review line in its container) did not keep the cost of the review line written since, at the prices of the run's copy of the pack: $o"
 }
 
 # Bug (#1454 R155): the time limit ended only the host's docker client, as docker exec passes no signal on, so the
