@@ -489,9 +489,10 @@ EOF
 # context_notes <room>: in the plugin's own repository (plugin_home), each noted plugin problem that names no issue
 # (no "filed as #<n>"), so an older one is not lost, with the line that marks it filed: in the form, its own text
 # (between its card and its evidence) with the note's card and evidence fields after it, unless the text already ends
-# with them (a note saved from a line in the form), which stop.sh matches exactly. All of it, notices too, is kept in
-# <room> bytes: whole notes that fit, then a line to Read the file for the rest (bug: 30 notes made the words hook's
-# output 22,000 characters); with no room for one note, one short line to Read it (bug: the notices alone went over).
+# with them (a note saved from a line in the form), which stop.sh matches exactly. When one note fits, all of it,
+# notices too, is kept in <room> bytes: whole notes that fit, then a line to Read the file for the rest (bug: 30 notes
+# made the words hook's output 22,000 characters). With no room for one note, it prints only one short line to Read
+# the file, which is not kept in <room> and is printed even when <room> is 0 (bug: the notices alone went over).
 context_notes() {
   local n l t f row warn mfmt more out='' all=0 shown=0 re='^- [^ ]* · card ([^ ]*) · (.*) · evidence: (.*)$'
   plugin_home && n=$(grep '^- ' "$FD/plugin-bugs.md" 2>/dev/null | grep -viE '[ ,;]filed as #[1-9][0-9]*[[:space:]]*\.? · evidence: ') && [ -n "$n" ] || return 0
