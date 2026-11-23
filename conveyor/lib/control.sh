@@ -1489,7 +1489,7 @@ movedwrite() { printf '%s\n' "$1" > "$MOVED.$$" && mv -f "$MOVED.$$" "$MOVED" ||
 # cards hold that one most of the time on a busy host, and each wait cost a snapshot seconds. `control` takes it
 # inside the records' lock, a snapshot alone; nothing takes the records' lock while it holds this one.
 movedlocked() { ( flock 3 && "$@" ) 3>>"$MOVED.lock"; }
-# Under moved.json's lock: moved.json with the columns a snapshot saw ({"<issue>": {col, other, by}}) when it listed the issues
+# Under moved.json's lock: moved.json with the columns a snapshot saw ({"<issue>": {col, other, alone, by}}) when it listed the issues
 # (<saw>); prints the times of this sight. An issue in the column it was in keeps its time; one released from Held (left) and seen in Queue
 # came there when it was released; one in another column, seen for the first time, or released and seen back in
 # Held, is dated <saw> (when it came there before the first snapshot is not known; when it was opened is not it).
@@ -1497,12 +1497,17 @@ movedlocked() { ( flock 3 && "$@" ) 3>>"$MOVED.lock"; }
 # ends after a newer one never writes its older sight over it; an issue no longer open is dropped. What it prints is
 # its own sight, not what was kept: a hold or release that came while it ran dates the column it moved the issue to,
 # not the one this snapshot shows.
+# An issue the snapshot saw in Held with your hold as the only reason (alone), which the control record no longer holds,
+# is not dated: its entry stays as it is, so a hold taken back after the copy (a refused `unblock`) is not written as a
+# move to Held. One that a rule or something else keeps in Held is dated, whatever happened to your hold.
 movedsaw() { # <cols json> <saw>
-  local m sight; m=$(movedread)
+  local m sight gone; m=$(movedread)
+  gone=$(jq -c --argjson o "$1" '(.held // []) as $h | [$o | to_entries[] | select(.value.alone and (.key | tonumber | IN($h[]) | not)) | .key]' "${STATE%/*}/control.json" 2>/dev/null) || gone='[]'
   sight=$(jq -c --argjson o "$1" --arg t "$2" '. as $m | $o | with_entries(.key as $k | .value as $s
       | .value = ($m[$k] | {col: $s.col, other: $s.other, by: $s.by, seen: $t, at: (if .col == $s.col and .left == null then .at
           elif .col == "held" and .left != null and $s.col == "queue" then .left else $t end)}))' <<<"$m") \
-    && movedwrite "$(jq -c --argjson s "$sight" --arg t "$2" '$s + with_entries(select(.value.seen >= $t))' <<<"$m")" && printf '%s\n' "$sight"
+    && movedwrite "$(jq -c --argjson s "$sight" --arg t "$2" --argjson g "$gone" '. as $m | ($s + with_entries(select(.value.seen >= $t)))
+      | reduce $g[] as $k (.; .[$k] = $m[$k]) | with_entries(select(.value != null))' <<<"$m")" && printf '%s\n' "$sight"
 }
 # Under moved.json's lock: `control hold` dates each issue in Held from now, unless it was there already and not released
 # since; `control release` marks when it left, unless the last snapshot saw something besides your hold and the rules
@@ -1516,6 +1521,13 @@ movedhold() { # <hold|release> <the control record as it now stands> <issue>...
     reduce $ARGS.positional[] as $k (.; .[$k] |= if $a == "release" then (if . == null or .other or ruled then . else . + {left: $t, seen: $t} end)
       elif .col == "held" and .left == null then .seen = $t else . + {col: "held", at: $t, seen: $t} | del(.left) end) | with_entries(select(.value != null))' --args "$@" <<<"$m") \
     && movedwrite "$new" || echo "conveyor: cannot write $MOVED; Held's time for $* is dated by the next snapshot" >&2
+}
+# Under moved.json's lock: the issue's own entry put back as it was (<entry> is the JSON a movedread gave for it, null
+# for none), so a hold that is taken back leaves no move to Held in the history. Other issues' entries stay as they are.
+movedundo() { # <issue> <entry>
+  local m; m=$(movedread)
+  movedwrite "$(jq -c --arg k "$1" --argjson v "$2" '.[$k] = $v | with_entries(select(.value != null))' <<<"$m")" \
+    || echo "conveyor: cannot write $MOVED; Held's time for #$1 is dated by the next snapshot" >&2
 }
 # Under the lock (where new issues start is a setting, Queue by default): every open issue
 # opened in a span of startHeld joins held, unless it is a follow-up (it builds as before: it inherits its parent's

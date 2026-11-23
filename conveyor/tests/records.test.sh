@@ -159,6 +159,55 @@ t_unblockseen() {
   [ "$(loop control adopt 9 | jq -c .held)" = '[9]' ] || fail "control adopt 9, after the refused unblock 9 --hold, did not hold #9: $(cat "$ST/control.json")"
 }
 
+# Bug (#1472): a refused unblock took its hold off control.json but left the move to Held in moved.json, the Board's
+# history, so the next snapshot or adopt kept the failed command's Held time. The refused unblock leaves the issue's
+# entry as it was (none for #9, its Queue entry for #8) and the entry of another issue (#5) alone.
+t_unblockmoved() {
+  setup '[]'
+  echo '{"8":{"col":"queue","other":false,"by":null,"seen":"2026-11-01T00:00:00Z","at":"2026-11-01T00:00:00Z"},"5":{"col":"held","at":"2026-11-02T00:00:00Z","seen":"2026-11-02T00:00:00Z"}}' > "$ST/moved.json"
+  cp "$ST/moved.json" "$STUB/moved.was"
+  loop unblock 9 --hold >/dev/null 2>&1 && fail "unblock 9 --hold, #9 with no card, exited 0"
+  loop unblock 8 --hold >/dev/null 2>&1 && fail "unblock 8 --hold, #8 with no card, exited 0"
+  [ "$(jq -cS . "$ST/moved.json")" = "$(jq -cS . "$STUB/moved.was")" ] || fail "a refused unblock 9 --hold and 8 --hold left moved.json changed: $(cat "$ST/moved.json")"
+}
+
+# Bug (#1472): a snapshot copies control.json without the records' lock, so a copy taken while a refused
+# unblock held #9 for a moment still lists #9 held when the snapshot dates its sight, after the rollback. Written then,
+# the sight dated a Held move that never stood, and the next hold kept its time. The sight of an issue held by your hold
+# alone (alone) that the live control record no longer holds is not written: #9 stays without an entry, and #8 keeps its
+# whole Queue entry (its time too). #7, still held, is dated; so is #6, which a rule keeps in Held (not alone): its
+# hold taken off (a release) does not take its Held time away.
+t_unblocksnap() {
+  setup '[]'
+  jq -c '.held = [7]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  echo '{"8":{"col":"queue","other":false,"by":null,"seen":"2026-11-01T00:00:00Z","at":"2026-11-01T00:00:00Z"}}' > "$ST/moved.json"
+  cp "$ST/moved.json" "$STUB/moved.was"
+  jq -cn '[6, 7, 8, 9] | map({key: tostring, value: {col: "held", other: false, by: null, alone: (. != 6)}}) | from_entries' > "$STUB/cols.json"
+  fx_in 'movedlocked movedsaw "$(cat "$STUB/cols.json")" 2026-11-05T00:00:00Z'
+  [ "$RC" = 0 ] || fail "movedsaw with a copy that held #6, #7, #8 and #9 exited $RC: $(cat "$T/$CASE/run.out")"
+  [ "$(jq -c '[(.["6", "7"] | .at), has("9")]' "$ST/moved.json")" = '["2026-11-05T00:00:00Z","2026-11-05T00:00:00Z",false]' ] \
+    || fail "#6 (a rule keeps it) and #7 (held) are not dated, or #9 (no longer held) is: $(cat "$ST/moved.json")"
+  [ "$(jq -cS '.["8"]' "$ST/moved.json")" = "$(jq -cS '.["8"]' "$STUB/moved.was")" ] || fail "#8, no longer held, lost its Queue entry or its time: $(cat "$ST/moved.json")"
+}
+
+# Bug (#1472): a release that came while a snapshot ran, after its copy of the control record, took the Held time of
+# #9 away: #9 stays in Held (a P3 rule is off), but the snapshot dated no entry for it, and the next snapshot gave it
+# its own time. #8 (held by your hold alone, then released) gets no entry for a Held it left. This runs the snapshot
+# because it is the snapshot that says which issues are held by your hold alone.
+t_releasesnap() {
+  setup "[$(issue 5 2026-03-01 P2)]"
+  loop control start held >/dev/null 2>&1 || fail "start held was refused"
+  jq -c ". + [$(issue 8 2026-03-02 P2), $(issue 9 2026-03-02 P3)]" "$STUB/issues.json" > "$STUB/i" && mv "$STUB/i" "$STUB/issues.json"
+  loop control rules P3=off >/dev/null
+  on() { local t=$1; shift; CONVEYOR_NOW=$(date -u -d "$t" +%s) loop "$@"; }
+  # The pack's progress command runs after the snapshot's copy of the control record and before it dates its sight.
+  tuned '.checks = {run: [], progress: "CONVEYOR_NOW=$(date -u -d 2026-10-02 +%s) bash '"$SRC"'/conveyor.sh control release 8 9 >/dev/null"}' on 2026-10-01 snapshot --fresh >/dev/null
+  [ "$(jq -c '[has("8"), .["9"].col, .["9"].at]' "$ST/moved.json")" = '[false,"held","2026-10-01T00:00:00Z"]' ] \
+    || fail "#8 (held by your hold alone) has an entry, or #9 (a rule keeps it) has none, after the release: $(cat "$ST/moved.json")"
+  out=$(on 2026-10-03 snapshot --fresh) || fail "the second snapshot exited non-zero"
+  [ "$(jq -c '.open.held | map([.issue, .since])' <<<"$out")" = '[[9,"2026-10-01T00:00:00Z"]]' ] || fail "#9, in Held all along, is not held since its first sight: $(jq -c '.open.held' <<<"$out")"
+}
+
 # A run whose max-cards are used up (run 1, its one card #10 on the belt) picks with `pick retried` (run(),
 # lib/run.sh): that pick takes the retried #7 and nothing else, so the run builds it while it waits on #10.
 t_retrywait() {

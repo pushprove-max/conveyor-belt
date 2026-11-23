@@ -1118,8 +1118,10 @@ snapshot() (
     | walk(if type == "object" and (.card | type) == "string" and $nm[.card] then .name = $nm[.card] else . end)' > "$d/out" || exit 1
   # Each issue in Held or Queue gets since from moved.json as this snapshot leaves it; none when the issues were not
   # listed, and moved.json is then left as it was.
+  # other: something besides your hold and the rules keeps it in Held; alone: your hold is the only thing that does.
   cols=$(jq -c '.cols as $c | if $c == null then null else [.open.held[] | select(any(.reasons[]; .kind | IN("you", "rule") | not)) | .issue | tostring] as $o
-    | $c | with_entries(.value += {other: (.key | IN($o[]))}) end' "$d/out") || exit 1
+    | [.open.held[] | select(.reasons != [] and all(.reasons[]; .kind == "you")) | .issue | tostring] as $y
+    | $c | with_entries(.value += {other: (.key | IN($o[])), alone: (.key | IN($y[]))}) end' "$d/out") || exit 1
   [ "$cols" = null ] || moved=$(movedlocked movedsaw "$cols" "$saw") || moved=null
   # declined: the lines the Declined panel shows, newest first; declinedRest: the others (dismissed, built or older
   # than 7 days), which an old line's "Show every line" still reaches. A line the judge declined carries the review it
