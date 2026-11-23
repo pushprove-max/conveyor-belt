@@ -27,15 +27,15 @@
 # and a rewrite (moveout) never overlap: each holds the lock on $STATE.checked.lock, taken after the records' lock
 # and never before it.
 # A line the check refuses (jq/check.jq names the field it refused) is set aside, not read: quarantine() moves it out
-# of the card records to $QUARANTINE, under the records' lock (taken here unless the caller holds it: LOCKHELD), and
-# health names it until the owner deals with it. A copy a reader holds (READ, not STATE: whole(), the snapshot)
+# of the card records to $QUARANTINE, under the records' lock (taken here, for LOCKLIMIT seconds at most, unless the
+# caller holds it: LOCKHELD), and health names it until the owner deals with it. A copy a reader holds (READ, not STATE: whole(), the snapshot)
 # drops the same lines. The check then reads the rest again; a line still refused after three tries stops the reader.
 check() {
   local rc
   for _ in 1 2 3; do
     checkpart; rc=$?
     [ $rc = 3 ] || return $rc
-    if [ -n "${LOCKHELD:-}" ]; then quarantine; else locked quarantine; fi || return 1
+    if [ -n "${LOCKHELD:-}" ]; then quarantine; else lockedfor "the set-aside of a bad line" quarantine; fi || return 1
     [ "$READ" = "$STATE" ] || dropbad "$READ" || return 1
   done
   echo "conveyor: $READ still holds a line that is not a whole record of a known step after it was set aside; stopping" >&2

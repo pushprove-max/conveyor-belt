@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: the work done under the card records' lock is bounded: adopted() reads the landed issues from their
-# running summary, and a pick that holds the lock past its limit (lockedfor, lib/records.sh) is stopped.
+# running summary, a set-aside of a bad line, and a pick that holds the lock past its limit (lockedfor, lib/records.sh) is stopped.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -51,4 +51,24 @@ t_locklimit() {
   grep -q "conveyor: pick ran out of time: it held the card records' lock for over 2 s" <<<"$out" || fail "the log does not say the pick ran out of time: $out"
   grep -q '^lock: free$' <<<"$out" || fail "the card records' lock was still held after the pick was stopped: $out"
   grep -q '^next turn: 1$' <<<"$out" && [ "$(cat "$T/$CASE/started" 2>&1)" = 7 ] || fail "the loop's next turn did not pick #7: $out"
+}
+
+# Bug it catches (#1491): check() set a bad line aside under the card records' lock with no time limit (`locked
+# quarantine`), so a jq there that did not end held every card's record writes until it was stopped by hand. Here
+# quarantine's jq never ends: check() must stop it at the limit (2 s here), say which step ran out of time, fail, and
+# leave the lock free. READ is a copy of the records, as the snapshot's is (snapshot.sh): a limit that applied only
+# when READ is STATE would let the snapshot's set-aside run on past it.
+t_checklimit() {
+  setup "[$(issue 7 2026-01-01)]"
+  echo junk >> "$ST/cards.jsonl"
+  # The jq runs at full CPU far longer than the limit; its own timeout (100 s) only keeps it from running on after the
+  # case when the stop fails.
+  fx_in 'LOCKLIMIT=2; eval "$(declare -f quarantine | sed "1s/^quarantine /realquarantine /")"
+    quarantine() { timeout 100 jq -n "last(range(1e15))"; realquarantine; }
+    READ=$STATE.copy; cp "$STATE" "$READ"; s=$SECONDS; check; echo "check: $? after $((SECONDS - s)) s"
+    flock -n "$STATE" true && echo "lock: free"'
+  local out; out=$(cat "$T/$CASE/run.out")
+  grep -q '^check: 1 after \([0-9]\|1[0-9]\) s$' <<<"$out" || fail "check() was not stopped at the lock's limit, or did not fail: $out"
+  grep -q "conveyor: the set-aside of a bad line ran out of time: it held the card records' lock for over 2 s" <<<"$out" || fail "the log does not say the set-aside ran out of time: $out"
+  grep -q '^lock: free$' <<<"$out" || fail "the card records' lock was still held after the set-aside was stopped: $out"
 }
