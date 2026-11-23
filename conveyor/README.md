@@ -5,20 +5,23 @@
 `conveyor.sh control [<action>]` changes the control record; with no action it prints the record. A new project starts
 on the values in `conveyor/lib/control-defaults.json`; a record keeps each value it sets.
 
-`conveyor.sh control cap <1-100|off>` sets the builder cap: how many cards build at once (Cards at once on the Rules
-tab). The cap counts the cards in their build, fix or rebase step: these steps run a builder session. A card in its
-review (with the judge), its Test step or its landing does not count. Its tests take the machine's test slots (the
-host file's `testSlots`), which limit them apart from the cap. Its waits do not count either:
+`conveyor.sh control cap <1-100|off>` sets the card cap: the most cards on the belt at once (Cards at once on the Rules
+tab). The cap counts every card of the project on the belt, in any step: its brief, build, fix, review (with the
+judge), Test step or any wait. The only cards it leaves out are those that land or push, or have landed or pushed. A
+card that waits at its landing claim on another card still counts. A card whose landing fails (main moved, a conflict)
+counts again at once. The loop starts no card until the count is under the cap, so for a short time the belt can hold
+more cards than the cap. The machine's test slots (the host file's
+`testSlots`) limit tests apart from the cap. These waits count:
 
 - a wait at the landing claim on a card that changes the same files,
 - a wait on the batch card that took the card,
 - a wait in the Test step for main to change, when main is red.
 
-A card in its build, fix or rebase step that waits for its seat's CLI does not take a build slot. The loop leaves out
-no more of these waiting cards than the cap. Each one past that limit counts, so the loop does not start new cards
-while old cards wait. The machine's cap counts every card of each project that builds, reviews, tests or lands,
-and leaves out the waiting cards in the same way. `conveyor.sh foreman status`, `/units` and the Board show a waiting card as waiting, and
-give the count of cards that build against the cap without the waiting cards.
+A card that waits for its seat's CLI counts against the cap too. The loop picks a new card only while the count is
+under the cap, so waiting cards use up its space. Two picks go past a full cap: a card that others wait on, once
+`retry` has given it back, and the fix card of a red main. The machine's cap (`cap` in the host file) counts every card of
+each project that builds, reviews, tests or lands, and leaves out the waiting cards. `conveyor.sh foreman status`,
+`/units` and the Board give the count of cards against the cap.
 
 `conveyor.sh control judge on|off`, `conveyor.sh control judge always [<kind>...]`,
 `conveyor.sh control judge rare <level>...|none` and
@@ -537,7 +540,7 @@ failure gets a verdict:
   longer exists is dropped. When every failure is main's, the card neither goes to fix nor blocks: it gives way and waits in its
   Test step, its live record saying so, until main is at another commit; then it is fitted onto main as it is now
   and its test step runs again (the same change keeps its passes, so the cases that failed run again). Those cards
-  hold no build slot while they wait (Control, above), but the waiting cards past the cap still hold theirs, so the
+  count against the cap while they wait (Control, above), so the
   loop starts a main-red fix card even with the project's cap reached: it takes one slot beyond the cap, one such card at a time, and the slot ends with it. The machine's cap
   and pause apply as to any card. The Board shows that card as "beyond the cap: main is red".
 - **machine**: the same case failed on main too, but the machine is at fault, not main. This is so when the case's
@@ -555,7 +558,7 @@ failure gets a verdict:
   and says why once: "the machine fails <files> on main, with no change to main that explains it". At
   most once every `tunables.poll` seconds the loop runs those files on main as it is now, on a test slot. When they
   all pass, the hold goes and the loop picks again. A card with a machine verdict and no card verdict gives way and
-  waits in its Test step, its live record saying "waiting for the machine", and holds no build slot. When the hold
+  waits in its Test step, its live record saying "waiting for the machine". When the hold
   goes, it is fitted onto main as it is now and its test step runs again. `health` shows the hold as `machineHold`,
   and the Foreman gets one wake for each hold that names the failing files.
   The repair lane lets a change that repairs the test step itself land while the hold stands. The lane opens for a

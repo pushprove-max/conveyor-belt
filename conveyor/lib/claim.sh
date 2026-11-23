@@ -386,8 +386,10 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     # The card records kept in this shell (stdb, lib/records.sh): a look that finds them unchanged asks no database.
     stdb ask lines cards >/dev/null 2>&1 || :
     w=$(locked claim "$1" "$3" "$me") || { rm -f "$3.idle"; block "$1" "$2" "$3" "$5: the engine could not write the claim on the files of the card"; return 1; }
-    # While it only sleeps out a wait, on a card or on the batch card that took it, <worktree>.idle stands: the loop
-    # does not count the card against the builder cap then (idle(), lib/run.sh). It goes before any work of the card.
+    # While it only sleeps out a wait, on a card or on the batch card that took it, <worktree>.idle stands: the machine's
+    # count (room()) leaves the card out then, as idle() (lib/run.sh) counts it; the card cap counts it. It goes before
+    # any work of the card, and so does the <worktree>.nocap mark of the land step: its lint, checks and tests run
+    # before the landing, so the loop counts the card against the cap then (capmark(), lib/run.sh).
     # Taken into a batch (gather()): it waits for the card that took it, which lands it (3) or finds it breaks the
     # batch's tests (4). A batch whose card is gone takes it no more.
     if [ -e "$3.batch" ]; then
@@ -434,7 +436,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       # landed or failed its tests).
       [ -z "$parsecheck" ] || [ ! -e "$3.stack" ] || ! parses "$3" >/dev/null 2>&1 || parsecheck=''
       if [ -z "$parsecheck" ] && [ -e "$3.ready" ] && ! jq -e '.tested == true or .alone == true or .stackred == true' "$3.ready" >/dev/null 2>&1 && packget landBatch b && [ "$b" -gt 1 ]; then
-        rm -f "$3.idle"
+        rm -f "$3.idle" "$3.nocap"
         # The gate for a waiting card first (lintwait(), lib/lint.sh): a finding or an execution error removes
         # <worktree>.ready, so it waits on with no check, test or session, and its landing gate deals with it. Its lint
         # line goes after the wait's start line: a new start line makes the wait the card's last step again, so the
@@ -463,7 +465,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       : > "$3.idle"; sleep "$LIVE"; continue
     fi
     # The wait ended: a later wait of this call begins anew, what the card waited before it counted once.
-    rm -f "$3.idle"; [ -z "$waited" ] || { rm -f "$3.live"; waited=''; }
+    rm -f "$3.idle" "$3.nocap"; [ -z "$waited" ] || { rm -f "$3.live"; waited=''; }
     old=$(git -C "$3" rev-parse HEAD 2>&1) || { block "$1" "$2" "$3" "$5: the engine could not read the commit of the worktree:${old:0:300}"; return 1; }
     [ "$old" != "$(git rev-parse "$onto" 2>/dev/null)" ] || return $moved
     # Stacked, it is reviewed again on the base. A stacked card that waits no more (that card landed, or failed its

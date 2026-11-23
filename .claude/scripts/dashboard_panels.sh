@@ -23,9 +23,9 @@
 #           Fix, Test, Land, Push, with every recorded step as its detail) and its times: start (the first pick-up
 #           of its work), pickedAt, priorSec and totalSec, as the snapshot gives them. No time is estimated.
 #           A card that has landed stays here (landed true) until it is pushed and its issue is closed (with the rule
-#           "Push when a card lands" off, the snapshot leaves an unpushed one out: Landed today shows it). cap: the
-#           slots in force (every project's own cap together, no more than the machine cap; null when neither is known).
-#           waiting: the cards on it that hold no slot as they only wait on another card (each loop's health.waitingCount).
+#           "Push when a card lands" off, the snapshot leaves an unpushed one out: Landed today shows it). cap: the card
+#           cap (every project's own cap together; null when none is known), never the machine's cap: the cards counted
+#           against it are the loop's own count, not the machine's.
 #   belt3d  the Belt 3D panel, cut from the parts above and nothing else: repos, belt (each belt card's repo, card,
 #           issue, title, url, step, stepAt, landed, waitsOn, usd, turns (its live record's), its reviews (round,
 #           verdict, counts) and its track's steps, at, since, tests and files, and its records' name and at, and
@@ -38,7 +38,7 @@
 #           blocked, with its reason, since, reviews, track and its metrics' usd) and landed (today's: repo, card,
 #           issue, title, url, time, usd, its reviews' rounds and its track, as belt's but no records), and deck (what the deck behind
 #           the floor reads out: host, state (the machine's, as machine's), used (the belt cards holding a slot, every
-#           project's) and cap (the slots in force, as belt's); the page's project filter leaves it whole, as the head).
+#           project's) and cap (the slots in force, as machine's); the page's project filter leaves it whole, as the head).
 #   queue   next (the issues the loop takes next, in its order), held (how many open issues are held: the snapshot's
 #           open.held, the Board's Held column, less those landed and not pushed; null when a record does not list them),
 #           awaitingDeploy (the open issues labelled awaiting-deploy: built, waiting for the owner's PROD deploy; each with
@@ -156,16 +156,16 @@
 #           is null).
 #   machine the machine's one Conveyor, over every project: host, state (paused: the host file's mode; running: a
 #           project's loop runs; stopped: none does; not read: the host's host file does not read), cap (the slots
-#           in force, as belt's), used (the cards holding a slot now, every project's together),
+#           in force: every project's own cap together, no more than the machine cap), used (the cards holding a slot now, every project's together),
 #           todayUsd and todayLeftOut (as cost's), repos, projects (each project on its own: repo, state, reason, loop,
-#           mode (its control record's), cap (its own, in force), guard (its control record's weekly-limit guard) and used (its cards holding a slot), needs (its cards
+#           mode (its control record's), cap (its own, in force), guard (its control record's weekly-limit guard) and used (its cards counted against its own cap, as belt's), needs (its cards
 #           blocked or waiting for the owner's yes, its issues waiting for that yes before their build, and its open
 #           decisions, each {repo, decision: its id, title: the question}), belt,
 #           queue (pick order), held, waiting (its issues waiting on an open dependency, the snapshot's queue.waiting;
 #           null when the snapshot does not list them), order (the issues its record pins), rules, models ({builder, reviewer}: model and
 #           effort in force; judge: {on: false}, or {on: true, model, effort} in force, null when its record does not
 #           read), landedToday, todayUsd, todayLeftOut) and foremen (as foremen() gives them, with foremenError).
-#   belt, belt3d, queue and cost's cards also carry byRepo ({repo: the fields that are one project's}: belt's cap and waiting, queue's held,
+#   belt, belt3d, queue and cost's cards also carry byRepo ({repo: the fields that are one project's}: belt's cap and building, queue's held,
 #   belt3d's queue while the queue of all is unknown,
 #   cost's figures), which the
 #   page shows in their place when it is filtered to one project.
@@ -187,11 +187,16 @@ PANELS_JQ='
   # The slots in force of the records (the record list), the one slots figure of the page (issue 413: the head, the
   # machine bar and Belt 3D each gave their own): every project'"'"'s own cap together, and no more than the machine cap
   # where the host file sets one; null when neither is known.
-  def slots: ([.[].snap.health.builderCap | numbers] | if length == 0 then null else add end) as $sum
+  # cardcap is the sum of the own caps of the projects alone: the card cap, which the Belt part counts against.
+  def cardcap: [.[].snap.health.builderCap | numbers] | if length == 0 then null else add end;
+  def slots: cardcap as $sum
     | ([.[].snap.health.machine | objects][0].cap | numbers) // null
     | if . == null then $sum elif $sum == null then . else [., $sum] | min end;
-  # The cards of the records (the record list) that hold no slot as they only wait on another card: the count each
-  # running loop leaves out of its own against its cap (health.waitingCount), together; 0 when none says.
+  # A card of a belt that counts against the card cap: every card but one that lands (offCap, from the loop'"'"'s own
+  # mark) or has landed (landed), in any step, waiting or not.
+  def counted: .landed != true and .offCap != true;
+  # The cards of the records (the record list) that hold no machine slot as they only wait: the count each running loop
+  # leaves out of the machine'"'"'s own (health.waitingCount), together; 0 when none says. The card cap leaves none out.
   def idle: [.[].snap.health.waitingCount | numbers] | add // 0;
   # The issues of a snapshot that wait on an open issue but that something else keeps from the pick as well (held,
   # skipped by a rule, waiting for the owner'"'"'s yes), so its queue.waiting leaves them out: each open.held entry with a
@@ -363,15 +368,15 @@ PANELS_JQ='
         # The cards the host of each record gave back (the retried line of its stream): a blocked card among them waits for its turn.
         retried: ($R // [] | map(. as $r | .retried | arrays | .[] | objects | select(.card | type == "string") | {repo: $r.repo, card, issue}))}} end),
    belt: (if $R == null then {error: $cerr, data: null} else {error: null, data: {cards: [$belt[] | select((pushFailed and (. as $c | any($landed[]; .repo == $c.repo and .card == $c.card))) | not)],
-        cap: ($R | slots), waiting: ($R | idle),
+        cap: ($R | cardcap),
         # building: while a record is behind its card records, the cards building now: loop.json'"'"'s count for each
         # such record (0 once its loop has exited: never the old belt'"'"'s), and for any other its cards on the belt not
-        # landed less those that only wait (idle), as the page counts them; null when none is behind, and in byRepo for
+        # landed or landing (counted), as the page counts them; null when none is behind, and in byRepo for
         # a record that is not. behind: those records.
         building: (if $behind != [] then [$R[] | . as $r | first($behind[] | select(.repo == $r.repo) | .building | numbers)
-            // (([$belt[] | select(.repo == $r.repo and .landed != true)] | length) as $a | $a - ([[$r] | idle, $a] | min))] | add else null end),
+            // ([$belt[] | select(.repo == $r.repo and counted)] | length)] | add else null end),
         behind: [$behind[] | {repo, at}],
-        byRepo: ($R | map(.repo as $p | {key: .repo, value: {cap: (.snap.health.builderCap | if type == "number" then . else null end), waiting: ([.] | idle),
+        byRepo: ($R | map(.repo as $p | {key: .repo, value: {cap: (.snap.health.builderCap | if type == "number" then . else null end),
           building: (first($behind[] | select(.repo == $p) | .building | numbers) // null)}}) | from_entries)}} end),
    queue: (if $R == null then {error: $cerr, data: null} else {error: null, data: (
         # held: how many open issues the Board holds (the snapshot open.held: by you, a label, a rule or a wait), the
@@ -425,9 +430,8 @@ PANELS_JQ='
           | map({repo, card, issue, name: (.name // null), title, url, kind, reason, since, reviews: (.reviews | rounds), usd: (.metrics.usd // null), track: (.track | track3)})),
         landed: [$landed[] | {repo, card, issue, name: (.name // null), title, url, time, usd, reviews: (.rounds | rounds), track: (.track | track3)}],
         # What the deck behind the floor reads out: the host, its machine state (as the machine part has it) and the
-        # slots as the "On the belt" tile of the head has them: the cards holding one (a card landed and waiting for its
-        # push holds none, nor does a card that only waits on another card: idle) and the slots in force, as the Belt
-        # part and the machine bar have them.
+        # slots as the machine bar has them: the cards holding one of the machine'"'"'s (a landing card does; a card landed and
+        # waiting for its push holds none, nor does a card that only waits: idle) and the slots in force.
         deck: {host: $conv.host, state: ($R | mstate), used: ([([$belt[] | select(.landed != true)] | length) - ($R | idle), 0] | max),
           cap: ($R | slots)}}} end),
    health: {error: null, data: {
@@ -543,8 +547,9 @@ PANELS_JQ='
    # The one Conveyor of the machine over every project, each project on its own, and each Foreman. The settings of
    # the machine are those of the host file on the host, as the health of every record names them (health.machine;
    # null from a host file that sets none, and from a snapshot from before it said). A card holds a slot from its
-   # pick to its landing (a landed card waiting for its push holds none, as belt counts them), but while it only waits
-   # on another card (idle).
+   # pick to its landing, a landing card too (a landed card waiting for its push holds none), but while it only waits (idle):
+   # the machine'"'"'s count (room(), conveyor/lib/run.sh), not the card cap'"'"'s (counted). That count, with the machine cap, is
+   # the machine'"'"'s figure; each project'"'"'s own row gives the cards counted against its own cap (counted).
    machine: (if $R == null then {error: $cerr, data: null} else
         def used: [([.snap.belt[] | select(.landed != true)] | length) - ([.] | idle), 0] | max;
         def inforce: if type == "object" then {model: (.model // null), effort: (.effort // null)} else null end;
@@ -553,7 +558,7 @@ PANELS_JQ='
         cap: ($R | slots), used: ([$R[] | used] | add), todayUsd: ([$R[].snap.cost.today] | total),
         todayLeftOut: ([$R[].snap.cost.todayLeftOut | numbers] | add // 0), repos: [$R[].repo],
         projects: [$R[] | . as $r | .snap as $s | {repo, state: ($s.health.state // null), reason: ($s.health.reason // null), loop: $s.health.loop,
-          mode: ($s.control.mode // null), cap: ($s.health.builderCap // null), guard: ($s.control.guard // null), used: used,
+          mode: ($s.control.mode // null), cap: ($s.health.builderCap // null), guard: ($s.control.guard // null), used: ([$s.belt[] | select(counted)] | length),
           needs: (([$s.needsYou.waiting[], $s.needsYou.blocked[], ($s.needsYou.before | arrays | .[]), ($s.needsYou.pipeline | arrays | .[]), ($s.needsYou.farDeps | arrays | .[]) | {card, issue, name: (.name // null), title}] | few($r))
             + [$dec.decisions | arrays | .[] | select(.repo == $r.repo) | {repo, decision: .id, title: .question}]),
           belt: ([$s.belt[] | select(.landed != true) | {card, issue, name: (.name // null), title, step}] | few($r)),

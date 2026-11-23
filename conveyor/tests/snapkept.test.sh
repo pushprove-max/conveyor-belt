@@ -284,8 +284,8 @@ t_snapkeptnow() {
   # the one its picked line gives (c5 is on no belt and its picked line is older than the snapshot: null).
   # Bug (#1107): the loop's count left out c2, landed since and on the belt until it pushes, so the status said fewer
   # cards on the belt than it held: landed counts it.
-  # Bug (#1305): the count left out a card in review or in its Test step (in neither building nor waiting): running
-  # is loop.json's count of every card in progress.
+  # Bug (#1305): the count left out a card in review or in its Test step: running is loop.json's count of every card
+  # in progress.
   jq -e --arg now "$now" '.recordsNewer == true and .recordsNow == {building: 2, waitingCount: 1, running: 4, landed: 1, blocked: [
       {card: "c5", issue: 5, name: null, title: null, reason: "old block", since: "2026-11-17T10:08:00Z"},
       {card: "c3", issue: 0, name: "Main is red (abcdef012345)", title: "red", reason: "the session made no change", since: $now}],
@@ -403,7 +403,7 @@ t_snapkeptloop() {
   exec {lk}>&-
   mkdir -p "$c/conveyor" && jq -n --arg m "$R" '{records: [{repo: "alpha", main: $m}]}' > "$c/conveyor/host.json" || fail "the host file could not be written"
   out=$(XDG_CONFIG_HOME=$c CONVEYOR_FOREMAN_DIR=$T/$CASE/foreman CONVEYOR_MAIN=$R CONVEYOR_FOREMAN_ASK="cat $T/$CASE/snap" bash "$SRC/foreman/watch-conveyor.sh" --status 2>&1)
-  grep -qF 'building 2 of the cap 4' <<<"$out" \
+  grep -qF '2 of the cap 4' <<<"$out" \
     || fail "the status of a snapshot older than loop.json did not give loop.json's count: $out $(jq -c '{recordsNewer, recordsNow}' "$T/$CASE/snap")"
   loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
 }

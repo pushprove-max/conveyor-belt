@@ -427,6 +427,10 @@ cardland() {
     # Landed: its declined findings are written; when they cannot be, the card ends blocked, its review kept.
     t=$(locked land "${t5[@]}") && { [ -z "$dec" ] || decline "$c" "$n" "$FUCAP" <<<"$dec" \
       || { block "$c" "$n" "$wt" "the card landed, but the engine could not write its leftover findings to the declined list. The findings are in the kept review"; return; }; go=landed; return; }
+    # Not landed (main moved, a release run or a landing turn, a conflict): it lands no more now, so the loop counts it against
+    # the cap again (capmark(), lib/run.sh) while it waits, rebuilds or runs its lint and checks again, until its next step begins.
+    # Cards the loop started while it landed stay: the belt holds more than the cap until the count is under it again.
+    rm -f "$wt.nocap"
     # A batch that did not land. Main moved again before it could: it stays a batch, and its run is found to stand
     # on main as it is now, or it is tested again there (rebatch()). Else its other cards wait on at their claims,
     # and the card is tested alone, then tries alone, in no batch (its batch's run judged it with them).

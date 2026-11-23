@@ -803,9 +803,9 @@ accounts. `conveyor.sh control` or the Board's Control and Rules tabs set it. Ev
   Rules tab; [Merge PR](#merge-pr)),
 - the test run before a push (`conveyor.sh control push-check on|off`), when you set it over the pack's `push.check`.
 
-A card that only waits on another card does not take one of the cards at once: for example, a card that waits to land
-after a card that changes the same files. The loop leaves out no more waiting cards than the cap. Each waiting card
-past that limit counts. A waiting card that runs its own checks or tests counts while they run.
+Every card on the belt counts against the cards at once, in any step. A card that waits counts too: for example, a
+card that waits to land after a card that changes the same files. Only a card that lands or pushes, or has landed or
+pushed, does not count.
 
 Setup writes the control record of a new project. In it, new issues start held, and each issue that is open at setup
 is held. Thus Conveyor builds no issue until you release it. Without this, the first loop would queue and build the

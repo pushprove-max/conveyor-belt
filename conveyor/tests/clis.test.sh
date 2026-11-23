@@ -159,8 +159,8 @@ t_cliback() {
 # naming codex and the snapshot (the Board, /units) showing that wait, its idle mark standing. The cap is then lowered
 # to 1, so the two waits stand past it. Once codex is back, the loop's turns start the reviews in turn, on the cards'
 # own worktrees, with no build again and no retry, and both land.
-# A real loop, not a call of cliwake(): only run() counts the free slots and calls it in a turn. A call alone passed
-# with run() never calling it, and with run()'s count, capped on idle cards, leaving no slot free once the cap fell.
+# A real loop, not a call of cliwake(): only run() calls it in a turn. A call alone passed with run() never calling it,
+# and with the waiting cards held past a lowered cap.
 t_cliwait() {
   local lp g s
   clisetup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-02))"
@@ -179,7 +179,7 @@ t_cliwait() {
   rm "$CLIDIR/back/codex"; exec {g}>&-
   # shellcheck disable=SC2016 # expanded by wait_until
   wait_until '[ "$(cat "$T/$CASE/cards/"*.live 2>/dev/null | jq -s "map(select(.cli == \"codex\" and .step == \"review\")) | length")" = 2 ] && [ "$(ls "$T/$CASE/cards/"*.idle 2>/dev/null | wc -l)" -eq 2 ]' \
-    'cat "$STUB/run.out"; ls "$T/$CASE/cards"' || cwstop "the two cards do not both wait for codex in their reviews, with no build slot held"
+    'cat "$STUB/run.out"; ls "$T/$CASE/cards"' || cwstop "the two cards do not both wait for codex in their reviews, with their idle marks standing"
   [ "$(grep -cx seatwait "$TURNS")" = 8 ] || cwstop "the two steps did not check four times each, SEAT_PAUSE apart: $(grep -cx seatwait "$TURNS")"
   s=$(loop snapshot --fresh | jq '[.belt[] | select(.live.action // "" | startswith("waiting for codex: the reviewer is set to codex"))] | length')
   [ "$s" = 2 ] || cwstop "the snapshot does not show the two waits for codex: $s"
@@ -230,4 +230,35 @@ t_clinull() {
     'seatwait reviewer "{\"model\":\"gpt-a\",\"effort\":\"low\",\"agent\":\"codex\"}" "$CARDS/c7" review; echo "rc=$?"'
   [ "$(tail -n 1 "$STUB/eng.out")" = rc=1 ] && [ ! -s "$STUB/slept" ] && grep -q 'codex is not installed on this host' "$STUB/eng.out" \
     || fail "seatwait for a codex seat, on a report with clis.codex null and no codex installed, did not fail at once: $(cat "$STUB/eng.out"); pauses: $(cat "$STUB/slept" 2>&1)"
+}
+
+# Bug it catches (issue 1538): a card in its build, fix or rebase step that waited for its seat's CLI started again only
+# in a free slot of the cap, and the cap counts it now, so with the cap full of waiting cards a free-slot check would
+# leave every one of them waiting for ever. Here two cards wait in their build for claude with the cap at 1: one turn's
+# count (turncount()) takes the idle mark off both, and counts both against the cap.
+# It calls turncount(): a real loop does not reach a build that waits for its CLI, as a loop holds its pick while a seat's
+# CLI is gone (clis()), and the reviews are in t_cliwait.
+t_clibuildwake() {
+  # shellcheck disable=SC2016 # expanded in the engine shell (cliengine)
+  cliengine "$(jq -cn '{at: (now | floor), clis: {claude: null}, seen: ["claude"]}')" \
+    'declare -A mine=() took=(); running=0 cap=1 old="" why="" serve=1 mhold="" self=x now=running said=""
+     for c in c7 c8; do command tail -f /dev/null & mine[$!]="$c ${c#c}"; echo "{\"step\":\"build\",\"cli\":\"claude\"}" > "$CARDS/$c.live"; : > "$CARDS/$c.idle"; done
+     turncount; echo "building=$building idle=$(ls "$CARDS" | grep -c "[.]idle$")"; kill "${!mine[@]}"'
+  [ "$(tail -n 1 "$STUB/eng.out")" = "building=2 idle=0" ] \
+    || fail "two cards that waited for claude in their build, with the cap at 1, were not both woken and counted against the cap: $(cat "$STUB/eng.out")"
+}
+
+# Bug it catches (issue 1538): a card of a batch whose landing was done kept its slot until its own process woke, as it
+# still slept at its claim with its idle mark: the loop counted it, and started no card in the slot a landed card had
+# freed. Here c7's batch has landed and c8's has not, both asleep in their land step: the count is 1 (c8), not 2.
+# It calls turncount(): the marks are those of a card asleep at its claim, which a real loop's cards write only for the
+# moment between the landing and the wake (settle(), lib/claim.sh), too short to hold for a check.
+t_clibatchlanded() {
+  cliengine "$(jq -cn '{at: (now | floor), clis: {claude: ["m"]}, seen: ["claude"]}')" \
+    'declare -A mine=() took=(); running=0 cap=1 old="" why="" serve=1 mhold="" self=x now=running said=""
+     for c in c7 c8; do command tail -f /dev/null & mine[$!]="$c ${c#c}"; echo land > "$CARDS/$c.nocap"; : > "$CARDS/$c.idle"; done
+     echo "{\"by\": \"c9\", \"landed\": \"abc\"}" > "$CARDS/c7.batch"; echo "{\"by\": \"c9\"}" > "$CARDS/c8.batch"
+     turncount; echo "building=$building"; kill "${!mine[@]}"'
+  [ "$(tail -n 1 "$STUB/eng.out")" = "building=1" ] \
+    || fail "a card whose batch has landed, asleep at its claim, was not left out of the cap's count (c7 landed, c8 not: 1 expected): $(cat "$STUB/eng.out")"
 }

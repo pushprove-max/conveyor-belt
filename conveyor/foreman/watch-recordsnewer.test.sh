@@ -61,8 +61,8 @@ check 'the status of a snapshot made before the last change to the card records 
 # Bug (#1107): the status said "0 on the belt", the old snapshot's empty belt, while loop.json said building: 5. The
 # belt's count is the one of now, loop.json's 5 and one card landed since and on the belt for its push (recordsNow's
 # landed: bug, the count left it out), and the line says the snapshot is behind the card records.
-# Bug (#1305): a card in review or in its Test step is in neither building nor waitingCount, so the count left out
-# the 2 here: the belt's count is loop.json's running (7: 5 building, 2 in review or tests), not building.
+# Bug (#1305): the count left out a card in review or in its Test step: the belt's count is loop.json's running
+# (7), not the cards counted against the cap.
 blocked() {
   snap true '{health: {builderCap: 8, building: 3, waitingCount: 0,
       blocked: [{card: "c4", issue: 4, reason: "the session made no change", since: "2026-11-20T13:00:00Z"}],
@@ -71,7 +71,7 @@ blocked() {
       waiting: [{card: "c5", issue: 5, name: null, reason: "needs a yes", since: "2026-11-20T13:30:00Z"},
         {card: "c8", issue: 8, name: null, reason: "needs a yes too", since: "2026-11-20T14:06:00Z"}]}}'
   wake=; out=$(statusof blocked)
-  grep -qxF 'alpha: 8 on the belt now, from loop.json and the card records (the snapshot, as of 2026-11-20T14:00:00Z, is behind the card records: it lists 0); building 5 of the cap 8' <<<"$out" \
+  grep -qxF 'alpha: 8 on the belt now, from loop.json and the card records (the snapshot, as of 2026-11-20T14:00:00Z, is behind the card records: it lists 0); 5 of the cap 8' <<<"$out" \
     && grep -qxF 'needs you: #7 is blocked since 2026-11-20T14:05:00Z: the session made no change' <<<"$out" \
     && grep -qxF "needs you: #5 needs the owner's yes since 2026-11-20T13:30:00Z: needs a yes" <<<"$out" \
     && grep -qxF "needs you: #8 needs the owner's yes since 2026-11-20T14:06:00Z: needs a yes too" <<<"$out" \

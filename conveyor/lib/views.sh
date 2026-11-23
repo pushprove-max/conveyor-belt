@@ -208,9 +208,9 @@ cards() {
 # to run: the record's signin; null otherwise), guard: at (the guard's percent, null for none), reading and
 # readAt (the reading it is held against, null when no guard is set or there is no reading) and missing (true when a
 # guard is set and there is no reading: the guard then pauses nothing), start (where new issues start: queue or held;
-# null when the record does not read), builderCap (the cap in force), building and waitingCount (the running loop's cards
-# counted against that cap at its last turn, and its cards left out of that count as they only wait, run(); null when
-# no loop runs), models and
+# null when the record does not read), builderCap (the cap in force), building (the running loop's cards counted against that
+# cap at its last turn: every card on the belt but one that lands, run()) and waitingCount (its cards left
+# out of the machine's count as they only wait; null for both when no loop runs), models and
 # efforts (the ones in force, {claude, codex}: the next session's and the next review's), and homes (plan section 6).
 # homes: each setting the loop reads, by its name in the pack (tunables.poll, models.allowed, rulings.log, checks)
 # or the control record (control.cap, control.model, control.reviewer), as {value: the one in force, home: "pack",
@@ -263,6 +263,18 @@ testouts() {
     | map(select(.value | type == "number")) | group_by(.key) | map({key: .[0].key, value: (map(.value) | max | todate)}) | from_entries' \
     "${m[@]}" < /dev/null 2>/dev/null)
   echo "${o:-{\}}"
+}
+# The cards the loop leaves out of its count against the card cap: each card in its land step (<worktree>.nocap holds land, capmark(),
+# lib/run.sh) that does not wait (no <worktree>.idle), and each card of a batch that has landed (batchlanded()), as one object by card,
+# true each; {} for none. The Board shows them as offCap.
+offcaps() {
+  local f c s o=''
+  for f in "$CARDS"/*.nocap "$CARDS"/*.batch; do
+    c=${f##*/}; c=${c%.*}; [ -e "$f" ] || continue
+    if batchlanded "$c"; then o+=$c$'\n'
+    elif [ "$f" = "$CARDS/$c.nocap" ] && [ ! -e "$CARDS/$c.idle" ] && read -r s < "$f" && [ "$s" = land ]; then o+=$c$'\n'; fi
+  done
+  jq -Rsc 'split("\n") | map(select(. != "") | {(.): true}) | add // {}' <<<"$o"
 }
 aways() { # each card that gave way (giveway()): {to: the issue it gave way to, fixing: for the fix of its failed tests}, as one object by card
   local f c o=''
@@ -385,7 +397,7 @@ health() {
   if [ "$loop" = true ] && said=$(jq -ce 'select(.state == "control record unreadable" and (.pid | type == "number")) | {pid, reason}' "$SAYS" 2>/dev/null) \
     && kill -0 "$(jq -r .pid <<<"$said")" 2>/dev/null; then st='control record unreadable'; why=$(jq -r '.reason // ""' <<<"$said"); fi
   [ "$loop" = true ] && cm=$(jq -ce '.commit | strings' "$SAYS" 2>/dev/null) || cm=null
-  # The running loop's count at its last turn: {building: the cards counted against the cap, waiting: those left out}.
+  # The running loop's count at its last turn: {building: the cards counted against the cap, waiting: those left out of the machine's count}.
   [ "$loop" = true ] && bw=$(jq -ce 'select((.building | type) == "number" and (.waiting | type) == "number") | {building, waiting}' "$SAYS" 2>/dev/null) || bw='{"building":null,"waiting":null}'
   # The push in progress, whoever started it (the loop, Push now, Push landed): stale when its process is gone and it
   # did not end (push() clears the record at its end); line, the newest line of its log, or its last "N/M passed".

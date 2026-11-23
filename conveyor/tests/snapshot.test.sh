@@ -147,3 +147,31 @@ t_snapcliwait() {
   s=$(loop snapshot --fresh | jq -c '.belt[0].live.action')
   [ "$s" = '"waiting for codex: the judge is set to codex, and codex is not on PATH on this host now"' ] || fail "a judge's wait for its CLI after the build line is not shown: $s"
 }
+
+# Bug it catches (issue 1538): the Board and /units took a card in the step "landing" as one the card cap leaves out, but
+# that step also shows a card rebuilt after a landing conflict and one that waits for a release run, which the loop
+# counts, so they showed a free slot the loop did not have. A card is offCap only while the loop's land mark stands
+# (<worktree>.nocap holds land, capmark(), lib/run.sh) and it does not wait (<worktree>.idle).
+t_snapoffcap() {
+  local s c=c20261117T100000-r-7
+  setup "[]"
+  snapoff_line() { jq -cn --arg c "$c" --arg s "$1" --arg r "$2" --arg t "2026-11-17T10:$3:00Z" --argjson x "${4:-{\}}" \
+    '{card: $c, issue: 7, step: $s, time: $t, tokens: {claude: 0, codex: 0}, result: $r, sha: "", reason: "", repo: "r"} * $x'; }
+  { snapoff_line picked ok 00 '{"title": "t", "created": "2026-11-17T09:59:00Z"}'; snapoff_line worktree ok 01; snapoff_line deps ok 01; snapoff_line brief ok 02
+    snapoff_line start ok 02 '{"of": "build"}'; snapoff_line build ok 05; snapoff_line start ok 05 '{"of": "review"}'; snapoff_line review GO 28
+    snapoff_line start ok 28 '{"of": "land"}'; } > "$ST/cards.jsonl"
+  mkdir -p "$T/$CASE/cards"
+  echo '{"step": "land", "at": "2026-11-17T10:29:00Z", "last": null, "turns": 0}' > "$T/$CASE/cards/$c.live"
+  s=$(loop snapshot --fresh | jq -c '.belt[0] | [.step, .offCap]')
+  [ "$s" = '["landing",false]' ] || fail "a card in the step landing with no land mark (rebuilt, or waiting for a release run) is left out of the cap: $s"
+  echo land > "$T/$CASE/cards/$c.nocap"
+  s=$(loop snapshot --fresh | jq -c '.belt[0] | [.step, .offCap]')
+  [ "$s" = '["landing",true]' ] || fail "a card in its land step, marked land, is not left out of the cap: $s"
+  : > "$T/$CASE/cards/$c.idle"
+  s=$(loop snapshot --fresh | jq -c '.belt[0].offCap')
+  [ "$s" = false ] || fail "a card in its land step that waits (<worktree>.idle) is left out of the cap: $s"
+  # Its batch has landed it (landone(), lib/claim.sh): it lands no more, though it sleeps until its process wakes.
+  echo '{"by": "c9", "landed": "abc"}' > "$T/$CASE/cards/$c.batch"
+  s=$(loop snapshot --fresh | jq -c '.belt[0].offCap')
+  [ "$s" = true ] || fail "a card whose batch has landed, still asleep (<worktree>.idle), is counted against the cap: $s"
+}

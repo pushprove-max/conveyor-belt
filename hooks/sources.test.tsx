@@ -52,19 +52,24 @@ test('a head with no limit in the data file says so, and a day with an unpriced 
   expect(text.split('\n')[1]).toMatch(/^weekly limit not read +0 on belt · 0 queued$/)
 })
 
-// Bug: a card that only waits on another card takes no build slot, but /units gave only the count on the belt, so the
-// owner saw a full cap where the loop had a free slot.
-test('/units gives the cards building against the cap and leaves out those waiting on another card, as foreman status does', () => {
-  const s = board({ belt: BELT, health: { loop: true, state: 'running', building: 1, waitingCount: 1, builderCap: 1 } })
+// Bug: /units named a card that waits on another card as not counted against the cap, but the cap counts every card
+// on the belt (issue 1538): the owner saw fewer cards against the cap than the belt held.
+test('/units gives every card on the belt against the cap, a waiting one too', () => {
+  const s = board({ belt: BELT, health: { loop: true, state: 'running', building: 2, waitingCount: 1, builderCap: 1 } })
   const text = tableText(s, 120)
   // Issue 287. Bug it catches: the cap was a hard-to-read line of its own under the head ("building 1 of the cap 1");
-  // it is in the head now, the waiting card still named as not counted.
-  expect(section(text, 'ON THE BELT').split('\n')[0]).toBe('ON THE BELT (2 of 1, 1 waiting not counted)')
+  // it is in the head now, with no card named as not counted.
+  expect(section(text, 'ON THE BELT').split('\n')[0]).toBe('ON THE BELT (2 of 1)')
   expect(section(text, 'ON THE BELT')).not.toMatch(/building|of the cap/)
-  // Bug: the head counted the loop's building cards, which leave out a landed card in Push, so a belt of that one
-  // card said `0 of 7`. It counts every card on the belt and names the landed one as not counted.
-  const push = board({ belt: [{ ...BELT[0], step: 'push' }], health: { loop: true, state: 'running', building: 0, waitingCount: 0, builderCap: 7 } })
-  expect(section(tableText(push, 120), 'ON THE BELT').split('\n')[0]).toBe('ON THE BELT (1 of 7, 1 landing not counted)')
+  // Bug: the head counted every card on the belt, so a card that lands (the snapshot's offCap) or has landed (Push)
+  // took a slot in the figure, as the loop does not count it (issue 1538). Each is named as not counted, beside the one
+  // card that counts.
+  const lands = (step: string, offCap = false) => board({ belt: [BELT[0], { ...BELT[1], step, offCap }], health: { loop: true, state: 'running', building: 1, builderCap: 7 } })
+  for (const [step, offCap] of [['landing', true], ['push', false], ['issue', false]] as const)
+    expect(section(tableText(lands(step, offCap), 120), 'ON THE BELT').split('\n')[0]).toBe('ON THE BELT (1 of 7, 1 landing not counted)')
+  // Bug: a card in the step landing that the loop counts (rebuilt after a landing conflict, or waiting for a release
+  // run: offCap false) was left out of the figure, so the owner saw a free slot where the loop had none.
+  expect(section(tableText(lands('landing'), 120), 'ON THE BELT').split('\n')[0]).toBe('ON THE BELT (2 of 7)')
   // Bug: the cap text in the head made its right side too wide for /units' 56 columns, so the belt and queue counts
   // were dropped.
   expect(tableText(s, 56).split('\n')[1]).toMatch(/ 2 on belt · 0 queued$/)
@@ -96,14 +101,14 @@ test('/units says why the machine holds a queued card back, and draws no machine
 // count is after its name.
 test('with more than one project, the head gives each project\'s count after its name', () => {
   const two = state(fetched([
-    ['bookstore', snapshot({ belt: [BELT[0]], health: { loop: true, state: 'running', building: 1, waitingCount: 1, builderCap: 3, machine: { cap: 4 } } })],
+    ['bookstore', snapshot({ belt: [{ ...BELT[0], step: 'push' }], health: { loop: true, state: 'running', building: 0, builderCap: 3, machine: { cap: 4 } } })],
     ['gadgetlab', snapshot({ belt: [{ ...BELT[1], card: 'c5-7', issue: 7 }], health: { loop: true, state: 'running', machine: { cap: 4 } } })],
   ]))
   const lines = section(tableText(two, 72), 'ON THE BELT').split('\n')
-  expect(lines[0].trimEnd()).toBe('ON THE BELT (bookstore 1 of 3, 1 waiting not counted · gadgetlab 1)')
+  expect(lines[0].trimEnd()).toBe('ON THE BELT (bookstore 0 of 3, 1 landing not counted · gadgetlab 1)')
   // At /units' 56 columns the head wraps at a project, never cutting one off.
   const narrow = section(tableText(two, 56), 'ON THE BELT').split('\n')
-  expect(narrow.slice(0, 2).map(l => l.trimEnd())).toEqual(['ON THE BELT (bookstore 1 of 3, 1 waiting not counted', '  gadgetlab 1)'])
+  expect(narrow.slice(0, 2).map(l => l.trimEnd())).toEqual(['ON THE BELT (bookstore 0 of 3, 1 landing not counted','  gadgetlab 1)'])
 })
 
 // Bug: a release's whole suite (about 15 minutes) runs and /units shows nothing of it, so the owner asks the Foreman

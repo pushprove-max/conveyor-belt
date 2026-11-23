@@ -163,13 +163,14 @@ grep -qxF 'alpha: GitHub refused the merge of landing pull request #12, which st
   || fail "the wake does not give GitHub's reason: $(cat "$FD"/pending/*.wake)"
 }
 
-# Issue 201: a card that only waits on another card takes no build slot, and the status says so. Bug it catches: the
-# owner saw three cards on the belt with the cap at 3 and could not tell one of them was waiting and held no slot.
+# Issue 1538: the cap counts every card on the belt but one that lands, and the status says no card is left out. Bug it
+# catches: the status said "waiting not counted" for a card that waits, and the owner saw fewer cards against the cap
+# than the belt held.
 t_building() {
 CASE=building; fixture building
-snap ".belt = [$(card 3 One build),$(card 4 Two land)] | .health.builderCap = 1 | .health.building = 1 | .health.waitingCount = 1"
+snap ".belt = [$(card 3 One build),$(card 4 Two land)] | .health.builderCap = 1 | .health.building = 2"
 out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
-grep -qxF 'alpha: 2 on the belt; building 1 of the cap 1, 1 waiting not counted' <<<"$out" || fail "the status does not give the count against the cap without the waiting card: $out"
+grep -qxF 'alpha: 2 on the belt; 2 of the cap 1' <<<"$out" || fail "the status does not give the count against the cap with every card: $out"
 }
 
 # Issue 241: a snapshot read that takes longer than the ask's first wait (45 s), here as the ask's timeout exit, after 2

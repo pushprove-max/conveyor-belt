@@ -582,7 +582,7 @@ redlisted() { # <case>...
 # issue 1313) does not fail each of <case>... as main's (verdicts(): a case `<file>: <name>`, or a file failing naming
 # no case). While each fails at main's new commit, it waits on at that commit. Its live record says so and is brought
 # up to date as it waits (so `health` does not call it stuck). It only sleeps there: <worktree>.idle stands
-# meanwhile, so the loop does not count it against the builder cap (idle()). It ends too once the main-red record
+# meanwhile, so the machine's count leaves it out (idle()); the card cap counts it. It ends too once the main-red record
 # ($MAINRED) holds main red for none of <case>... (redlisted(); issue 358: the owner or the Foreman removed a wrong
 # entry, or its fix card closed as already done), when it held one as the wait began; a wait on cases the record did
 # not hold (mainred() could not write them) ends only as main's state changes. Sets the caller's mainrun: the runs on

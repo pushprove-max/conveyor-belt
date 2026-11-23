@@ -531,8 +531,8 @@ seatready() { # <builder|reviewer|judge> <its seat>
 # report of this host has listed (its seen, or the clis of a report written before seen was, with a list for it: a
 # null there is a CLI an engine up to v1.9 found not installed), the host's CLIs are read again (a fresh report) SEAT_TRIES times, SEAT_PAUSE seconds apart, the card keeping its build slot. When the CLI is
 # still missing, a card of the loop (LOOPCARD, cardrun()) waits in its step: its live record names the CLI (its cli
-# and action) and <worktree>.idle stands, so it holds no build slot, until the loop takes that mark away in a turn with
-# a free slot once the host's report lists the CLI again (cliwake(), lib/run.sh); the step then starts, or waits again
+# and action) and <worktree>.idle stands, so the machine's count leaves it out (the card cap counts it), until the loop takes
+# that mark away in a turn once the host's report lists the CLI again, with no look at the free slots (cliwake(), lib/run.sh); the step then starts, or waits again
 # when the CLI is gone again. Outside the loop (a lane's preview review), and for a CLI that no report of this host
 # has listed, it fails with seatready's reason.
 SEAT_TRIES=4 SEAT_PAUSE=30

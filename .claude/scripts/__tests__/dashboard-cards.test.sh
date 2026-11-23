@@ -389,7 +389,7 @@ q '.panels.machine.data.projects[0] | .repo == "sample" and .state == "paused" a
 q '.panels.machine.data.projects[1] | .repo == "widgetshop" and .state == null and .mode == null and .cap == 2 and .guard == null and .used == 1 and (.belt | map([.issue, .url])) == [[5, "'"$CU"'/5"]]
   and .queue == null and .held == null and .waiting == null and .order == null and .rules == null and .models == null and .todayUsd == 0.5' \
   "the other project is its own section: a list or record its snapshot does not give is null, never the first project's and never empty"
-q '.panels.belt.data | .cap == 5 and .building == null and .byRepo == {sample: {cap: 3, waiting: 0, building: null}, widgetshop: {cap: 2, waiting: 0, building: null}}' "the belt carries each project's own cap beside the sum, for the page filtered to one project"
+q '.panels.belt.data | .cap == 5 and .building == null and .byRepo == {sample: {cap: 3, building: null}, widgetshop: {cap: 2, building: null}}' "the belt carries each project's own cap beside the sum, for the page filtered to one project"
 q '.panels.queue.data.byRepo == {sample: {held: 2}, widgetshop: {held: 1}}' "the queue carries each project's own held count beside the sum"
 # The host file here names no Foreman group and no state folder holds a mark: each project has its own Foreman line,
 # and each says no session holds the role.
@@ -477,15 +477,27 @@ q '.panels.machine.data.projects[1].models.judge == {on: false}' "a project whos
 # The whole machine paused (the host file's mode): the machine says so; no project's own state is rewritten.
 # Its cap is 4 here, under the projects' 3 and 2: the slots in force are the machine's 4, everywhere on the page.
 MP=$(jq -c '.paused = true | .cap = 4' <<<"$MC")
-# widgetshop's loop leaves one of its 3 cards out of its count against its cap, as it only waits on another card
-# (health.waiting, issue 201): the machine, the project, Belt 3D's deck and the On the belt tile (the Belt part's
-# waiting) count 1 + 2 slots in use, never 4.
-answer "$(with_machine "$MP" "$P")" "$P_URL" 1794000000 "$(with_machine "$MP" "$(jq -c '.health.waitingCount = 1' <<<"$C3")")" "$C_URL" 0
+# widgetshop's 3 cards: one lands (offCap, issue 1538) and one waits on another card (health.waitingCount 1). The card cap
+# leaves out the landing card, but the machine's own cap does not: the loop sends the landing card to the machine's gate
+# (room(), conveyor/lib/run.sh) and leaves out the waiting one. So the machine, the project and Belt 3D's deck count
+# 1 + 2 slots in use: never 4 (the waiting card counted) and never 1 + 1 (the landing card left out, which showed a
+# free slot on a full machine).
+answer "$(with_machine "$MP" "$P")" "$P_URL" 1794000000 "$(with_machine "$MP" "$(jq -c '.health.waitingCount = 1 | .belt[2].offCap = true' <<<"$C3")")" "$C_URL" 0
 run
 q '.panels.machine.data | .state == "paused" and (.projects | map(.state)) == ["paused", "running"]' "a paused machine is paused; each project's state stays its own record's"
-q '[.panels.machine.data.used, (.panels.machine.data.projects | map(.used)), .panels.belt3d.data.deck.used, .panels.belt.data.waiting, .panels.belt.data.byRepo.sample.waiting, .panels.belt.data.byRepo.widgetshop.waiting] == [3, [1, 2], 3, 1, 0, 1]' \
-  "a card that only waits on another card holds no slot in the machine's, the project's and the deck's count, and the Belt part says how many wait, all and each project's own (issue 204: the Belt panel filtered to a project counts against that project's)"
-q '[.panels.machine.data.cap, .panels.belt.data.cap, .panels.belt3d.data.deck.cap] == [4, 4, 4]' "a machine cap under the projects' own caps together is the slots in force, the same in every part"
+q '[.panels.machine.data.used, (.panels.machine.data.projects | map(.used)), .panels.belt3d.data.deck.used] == [3, [1, 2], 3]' \
+  "a card that only waits on another card holds no slot in the machine's, the project's and the deck's count, and a landing card (offCap) holds one"
+q '[.panels.machine.data.cap, .panels.belt3d.data.deck.cap] == [4, 4]' "a machine cap under the projects' own caps together is the slots in force, the same in the machine bar and Belt 3D"
+# Bug: the Belt part (the On the belt tile, the Belt panel) paired the cards counted against the card cap with the machine's
+# cap, "2 of 1" with a project cap of 3 and a machine cap of 1; the Machine page's project row paired the machine's count
+# (a waiting card left out) with the project's own cap, "1 of 3". The cap beside the count is the card cap (the projects'
+# own together; the project's own in its row), and the count is the cards counted against it, a waiting card too.
+q '[.panels.belt.data.cap, .panels.belt.data.byRepo.widgetshop.cap, (.panels.machine.data.projects | map([.repo, .cap, .used]))] == [5, 2, [["sample", 3, 1], ["widgetshop", 2, 2]]]' \
+  "a machine cap under the projects' own caps leaves the Belt part's cap the card cap, and a project's row counts its cards against its own cap"
+answer "$(with_machine "$MP" "$P")" "$P_URL" 1794000000 "$(with_machine "$MP" "$(jq -c '.health.waitingCount = 1' <<<"$C3")")" "$C_URL" 0
+run
+q '[.panels.machine.data.used, (.panels.machine.data.projects | map(.used)), (.panels.machine.data.projects | map(.cap)), .panels.belt.data.cap] == [3, [1, 3], [3, 2], 5]' \
+  "a waiting card holds no machine slot (used 1 + 2) but counts against its project's own cap (3 cards), and the Belt part's cap stays the card cap, not the machine's 4"
 # Belt 3D's deck reads out the machine's state as the machine part has it (its LOOP readout) (issue 393): a deck that
 # said LIVE on a paused machine would lie.
 q '.panels.belt3d.data.deck | {host, state} == {host: "devbox", state: "paused"}' "Belt 3D's deck: the paused machine"
@@ -861,14 +873,14 @@ answer "$(snap "$(jq -cn --arg at "$at" '{snapshotAt: $at, recordsNewer: true,
     recordsNow: {building: 4, waitingCount: 0, blocked: [{card: "c5", issue: 15, name: null, reason: "the session made no change", since: $at}],
       waiting: [{card: "c1", issue: 12, name: null, reason: "needs a yes", since: $at, sentence: "a"},
         {card: "c6", issue: 16, name: null, title: "Sixteen", reason: "needs a yes", since: $at, sentence: "Guests see a new page."}]}}')")" "$P_URL" 1794000000 \
-  "$(snap '{"belt": [{"card": "w1", "issue": 3, "title": "Three", "step": "build"}]}')" "$C_URL" 0
+  "$(snap '{"belt": [{"card": "w1", "issue": 3, "title": "Three", "step": "build"}, {"card": "w2", "issue": 4, "title": "Four", "step": "landing", "offCap": true}]}')" "$C_URL" 0
 run
 q '.panels.needs.data | (.cards.waiting | map([.card, .repo, .title, .sentence])) == [["c1", "sample", "Button copy", "Staff see a button."], ["c6", "sample", "Sixteen", "Guests see a new page."]]
   and (.cards.blocked | map([.card, .repo, .title])) == [["c0", "sample", "Pushed"], ["c5", "sample", "Fifteen"]]
   and ([.cards.waiting[], .cards.blocked[] | .fromRecords == true] == [false, true, false, true])
   and .behind == [{repo: "sample", at: "'"$at"'"}]' "Needs you holds the cards the records hold blocked and waiting for the yes now, and names the record that is behind"
 q '.panels.belt.data | .building == 5 and .byRepo.sample.building == 4 and .byRepo.widgetshop.building == null and .behind == [{repo: "sample", at: "'"$at"'"}]' \
-  "the belt counts loop.json's 4 for the record that is behind, and its cards for the one that is not"
+  "the belt counts loop.json's 4 for the record that is behind, and its cards for the one that is not, a card that lands (offCap: widgetshop's w2) left out (issue 1538)"
 ) & started behind
 
 ( fresh behindgone

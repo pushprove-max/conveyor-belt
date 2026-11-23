@@ -48,7 +48,7 @@
 # belt: every open card, then every card that has landed and is not yet pushed with its issue closed (landed true;
 #   its step is push or issue, and it takes no builder slot; with the rule "Push when a card lands" off, a card whose
 #   commit is not pushed is not among them: landed lists it, its track labelled "Landed, waiting for Push landed"): step (brief, build, review, fix, tests, landing: the one in progress, the one its live record names while that runs; proof while a bug card's new tests run on main's code without its fix, proofs(); waiting while it waits
-#   on a same-file card, never the landing it waits to begin), waitsOn (that card's {card, issue, state}, else null), gaveWay (the issue
+#   on a same-file card, never the landing it waits to begin), offCap (true while the card lands, in its land step and not waiting: the one kind of open card that the loop's count against the card cap leaves out; false for the rest, a landing rebuilt after a conflict and a wait for a release run too: offcaps(), lib/views.sh), waitsOn (that card's {card, issue, state}, else null), gaveWay (the issue
 #   of the card it gave up its land turn to while it is fitted, reviewed, fixed or tested again: giveway(); else null),
 #   gaveWayFixing (it gave that turn up for the fix of its failed tests), review (the number of
 #   the review in progress, else null; it can pass `of`, the 3 of the review rule, after a landing conflict or a test
@@ -572,8 +572,8 @@ snapshot() (
   # A step that waits for its seat's CLI (seatwait(), its live record's cli) is shown with no start line before it too:
   # the judge's check of a test file for hollow cases waits after the build line.
   # A running step whose result named the models that ran it keeps their split (stats.byModel, watch()): its live part is priced at each one's rate.
-  jq -c --argjson m "$models" --argjson live "$LIVEJSON" --argjson proof "$(proofs)" --argjson away "$(aways)" --argjson red "$(redtitles)" --slurpfile old "$d/old" '(map($live[.card] as $v | $proof[.card] as $p
-      | .title = ($red[.card] // .title) | .gaveWay = ($away[.card].to // null) | .gaveWayFixing = ($away[.card].fixing == true)
+  jq -c --argjson m "$models" --argjson live "$LIVEJSON" --argjson proof "$(proofs)" --argjson away "$(aways)" --argjson capoff "$(offcaps)" --argjson red "$(redtitles)" --slurpfile old "$d/old" '(map($live[.card] as $v | $proof[.card] as $p
+      | .title = ($red[.card] // .title) | .gaveWay = ($away[.card].to // null) | .gaveWayFixing = ($away[.card].fixing == true) | .offCap = ($capoff[.card] == true)
       | if $v != null and .result == "" and ((.x.log | last | .step == "start" and .of == $v.step) or ($v.cli | type) == "string") then .live = ($v | {step, at, turns, last, usage, files, tests, list, action, waits, before} + (if $v.zero == true then {zero: true} else {} end) +(if $v.model then {model: $v.model} else {} end) + (if ($v.effort | type) == "string" and $v.effort != "" then {effort: $v.effort} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end) + (if ($v.stats.byModel | type) == "object" then {stats: {byModel: $v.stats.byModel}} else {} end)) else . end
       | if ($p | type) == "object" and .result == "" and (.x.log | last | .step != "start") then .proof = ($p | {at, files, tests, list, action}) else . end)
     + ($old[0] | map(.x.retried = true)) | map(.models = $m))[]' "$d/rows" > "$d/all" || exit 1
@@ -1009,7 +1009,7 @@ snapshot() (
          | (.live.waits.on // null | if . == null then null else . as $w | ([$all[0][] | select(.card == $w)] | last) as $r
              | {card: $w, issue: ($r.issue // ($w | capture("-(?<n>[0-9]+)$").n | tonumber? ) // null),
                 state: (if $r == null then "gone" elif $r.x.retried then "queued" elif $r.result == "" then $r.x.at else $r.step end)} end) as $won
-         | {card, issue, title, step: $step, waitsOn: $won, gaveWay: (if $landed then null else .gaveWay end), gaveWayFixing: (.gaveWayFixing and ($landed | not)), review: (if $step == "review" then .x.review // (.reviews + 1) else null end), of: $max, stepAt: $stepAt, landed: $landed,
+         | {card, issue, title, step: $step, waitsOn: $won, gaveWay: (if $landed then null else .gaveWay end), gaveWayFixing: (.gaveWayFixing and ($landed | not)), review: (if $step == "review" then .x.review // (.reviews + 1) else null end), of: $max, stepAt: $stepAt, landed: $landed, offCap: (.offCap == true and ($landed | not)),
          model: (.live.model // {build: $m.claude, fix: $m.claude, review: $m.codex}[$step] // null), effort: (if .live.model then .live.effort // null else null end), tokens: $s.tokens, usd: $s.usd, reading: $s.reading, atEnd: $s.atEnd,
          # A proof run gives what it does now, "waiting for a test slot (2 of 2 in use)" while the slots are full (testrun.sh).
          live: (if .live then {turns: .live.turns, lastOutputAt: .live.last, action: (.live.action // null), at: (.live.at // null)}

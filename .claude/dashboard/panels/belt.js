@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// On the belt: each card being built and where it is. Its part: {cards, cap, waiting, building (the loop's count now
+// On the belt: each card being built and where it is. Its part: {cards, cap, building (the loop's count now
 // while a snapshot is behind the card records, else null), behind ([{repo, at}]: ctx.behind)}; a card is {repo, card,
 // issue, title, url, parent, step, review, of, stepAt, landed, model, tokens, usd, reading, atEnd, live ({turns, lastOutputAt,
 // action} | null), reviews, track, start, pickedAt, priorSec, earlier, totalSec, fromRecords}, as `conveyor.sh snapshot` gives its
@@ -94,13 +94,13 @@
     tab: 'overview',
     projects: true,  // filtered to one project, cap is that project's own (the part's byRepo)
     rows: 5,  // a card is four lines: five of them fill the panel's default length
-    // A card that has landed and waits for its push or for its issue to close holds no builder slot, and nor does a card
-    // the loop leaves out of its count as it only waits on another card (the part's waiting): neither is counted, as
-    // the On the belt tile of the head counts them (head.js). While a project's snapshot is behind its card records,
-    // the count is the loop's own now (the part's building, from loop.json: dashboard.sh), not the cards it shows.
+    // Every card on the belt counts against the cap, in any step and waiting or not, but one that lands (offCap)
+    // or has landed and waits for its push or for its issue to close, as the On the belt tile of the head counts them
+    // (head.js). While a project's snapshot is behind its card records, the count is the loop's own now (the part's building, from
+    // loop.json: dashboard.sh), not the cards it shows.
     count: (d) => {
-      const all = d.cards.filter((c) => !c.landed).length;
-      const n = num(d.building) ? d.building : all - Math.min(typeof d.waiting === 'number' && d.waiting > 0 ? d.waiting : 0, all);
+      const all = d.cards.filter((c) => !c.landed && !c.offCap).length;
+      const n = num(d.building) ? d.building : all;
       return typeof d.cap === 'number' ? `${n} of ${d.cap}` : n;
     },
     // A belt shown from a snapshot behind the card records is never "empty": cards may have begun since.

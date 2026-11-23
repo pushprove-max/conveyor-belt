@@ -83,54 +83,57 @@ packturn() {
 machined() { grep -qE '^(cmd machine |  machine\) )' "$1" 2>/dev/null; }
 # The issues, as a JSON list, of the cards a card on the belt waits on now (its live record's waits, at settle()) that
 # `retry` gave back: their lines are out of the card records. Nothing when there are none. The loop picks one of them
-# first, even with every slot taken: a card that waits on it past the waiting cards left out of the count (idle())
-# holds a slot, and with the belt full of such cards it would never be picked. A card that waited once and went on
-# holds its slot for work, and starts nothing past the cap.
+# first, even with every slot taken: the cap counts every card that waits on it, and with the belt full of such cards
+# it would never be picked. A card that waited once and went on starts nothing past the cap.
 # A run with --only takes only the listed ones.
 # How many of the loop's cards in progress only wait now: alive, with <worktree>.idle standing. A card stands it while
 # it sleeps out a wait on a same-file card or on the batch card that took it (settle()), or for main to change on a
-# red main (mainred.sh mainwait()), or for the machine hold to go (mainred.sh holdwait()), or for its seat's CLI to come back (seatwait()); never while it runs its checks or tests. run() leaves at most the cap of them out of its count
-# against the cap: the rest count, so the loop does not start card after card while the old ones pile up waiting.
-# A card in a step that runs no builder session never counts, waiting or not (offcap()), so this limit holds the others.
+# red main (mainred.sh mainwait()), or for the machine hold to go (mainred.sh holdwait()), or for its seat's CLI to come back (seatwait()); never while it runs its checks or tests. The machine's count (room()) leaves
+# them out; the cap on the loop's cards counts them.
 idle() { # <the loop's own cards in progress, "<pid> <card>" one a line>
   local p c n=0
   while read -r p c; do [ -n "$c" ] && [ -e "$CARDS/$c.idle" ] && kill -0 "$p" 2>/dev/null && n=$((n + 1)); done <<<"$1"
   echo "$n"
 }
 # The mark of a card that runs no builder session now: <worktree>.nocap, holding the step, from the start of its
-# review (with the judge), test, land or file step (began(), lib/card.sh) to the start of its next build, fix or
-# rebase step, the only steps that run a builder session. The loop leaves such a card out of its count against the
-# builder cap, whether it waits or not (offcap()): its tests take slots of the machine's test pool (lib/slots.sh),
-# which limits them apart.
+# review (with the judge), test or land step (began(), lib/card.sh) to the start of its next build, fix, rebase or file
+# step. Only a card in its land step, not waiting on another card or on main, is left out of the loop's count against
+# the cap (offcap()): every other card on the belt counts, the one that files follow-ups before its landing too.
+# A card that wakes from a wait at its claim (settle(), lib/claim.sh) to run its lint, checks or tests takes the mark
+# away until its next step begins: those run before the landing.
 capmark() { # <card> <the step it begins>
-  case $2 in review|test|land|file) printf '%s\n' "$2" > "$CARDS/$1.nocap" ;; *) rm -f "$CARDS/$1.nocap" ;; esac
+  case $2 in review|test|land) printf '%s\n' "$2" > "$CARDS/$1.nocap" ;; *) rm -f "$CARDS/$1.nocap" ;; esac
 }
-# How many of the loop's cards in progress hold no builder slot: alive, with <worktree>.nocap standing (capmark()).
-# Prints "<all of them> <those that wait (<worktree>.idle)> <in their review step, not waiting> <in their test step,
-# not waiting>".
+# Whether a card of a batch has landed (landone(), lib/claim.sh, records it in <worktree>.batch): it lands no more, though
+# its own process may still sleep at its claim, with <worktree>.idle standing, until it wakes and ends its step.
+batchlanded() { [ -e "$CARDS/$1.batch" ] && jq -e '.landed | . != null and . != false' "$CARDS/$1.batch" >/dev/null 2>&1; } # <card>
+# How many of the loop's cards in progress run no builder session: alive, with <worktree>.nocap standing (capmark()), or
+# in a batch that has landed. Prints "<those in their land step, not waiting, and those whose batch landed> <those that
+# wait (<worktree>.idle)> <in their review step, not waiting> <in their test step, not waiting>".
 offcap() { # <the loop's own cards in progress, "<pid> <card>" one a line>
   local p c s n=0 w=0 r=0 t=0
   while read -r p c; do
-    [ -n "$c" ] && read -r s 2>/dev/null < "$CARDS/$c.nocap" && kill -0 "$p" 2>/dev/null || continue
-    n=$((n + 1)); if [ -e "$CARDS/$c.idle" ]; then w=$((w + 1)); elif [ "$s" = review ]; then r=$((r + 1)); elif [ "$s" = test ]; then t=$((t + 1)); fi
+    [ -n "$c" ] && kill -0 "$p" 2>/dev/null || continue
+    if batchlanded "$c"; then n=$((n + 1)); continue; fi
+    read -r s 2>/dev/null < "$CARDS/$c.nocap" || continue
+    if [ -e "$CARDS/$c.idle" ]; then w=$((w + 1)); else
+      case $s in land) n=$((n + 1)) ;; review) r=$((r + 1)) ;; test) t=$((t + 1)) ;; esac
+    fi
   done <<<"$1"
   echo "$n $w $r $t"
 }
 # The loop's cards that wait for their seat's CLI (seatwait(), lib/control.sh: alive, <worktree>.idle standing, their
-# live record's cli naming it) whose step starts again in this turn: at most <free> of them, each once the CLI is on
-# PATH and the host's report, read fresh, lists it. Each has its idle mark taken away here, so it counts against the
-# cap from this turn on, and the card starts its step. Prints how many.
-cliwake() { # <the loop's own cards in progress, "<pid> <card>" one a line> <free slots>
-  local p c a n=0 h=''
+# live record's cli naming it) whose step starts again in this turn: each once the CLI is on PATH and the host's
+# report, read fresh, lists it. Each has its idle mark taken away here and the card starts its step.
+cliwake() { # <the loop's own cards in progress, "<pid> <card>" one a line>
+  local p c a h=''
   while read -r p c; do
-    [ "$n" -lt "$2" ] || break
     [ -n "$c" ] && [ -e "$CARDS/$c.idle" ] && kill -0 "$p" 2>/dev/null && a=$(jq -r '.cli | strings' "$CARDS/$c.live" 2>/dev/null) \
       && [ -n "$a" ] && command -v "$a" >/dev/null || continue
     [ -n "$h" ] || h=$(hostclis fresh) || h=''
     jq -e --arg a "$a" 'has($a)' <<<"${h:-null}" >/dev/null 2>&1 || continue
-    rm -f "$CARDS/$c.idle"; n=$((n + 1))
+    rm -f "$CARDS/$c.idle"
   done <<<"$1"
-  echo "$n"
 }
 urgent() {
   live | jq -c --slurpfile s <(turncards) --argjson only "${ONLY:-null}" '[$s[] | select(.step == "picked") | .card] as $on
@@ -542,21 +545,14 @@ turnside() {
 turncount() {
   local p c on='' off='' past pidle rev tst
   cardsrun; waits=''
-  # The cards counted against the builder cap (building): those running, less those in a step that runs no builder
-  # session (offcap(): review and judge, test, land), waiting or not, and less those of the rest that only wait
-  # (idle()), at most as many of them as the cap. running still counts every card: the loop ends only once none is left.
-  # A card that waits for its seat's CLI starts its step again once the host lists the CLI (cliwake()): one in a step
-  # with no builder session at once, any other in a free slot. The free slots are the cap less the cards that build:
-  # counted after the cap on idle cards, waits past the cap (the cap lowered while they waited) would fill every slot
-  # and none would start again.
-  for p in "${!mine[@]}"; do c=${mine[$p]% *}; if [ -e "$CARDS/$c.nocap" ]; then off+="$p $c"$'\n'; else on+="$p $c"$'\n'; fi; done
-  cliwake "$off" "${#mine[@]}" >/dev/null || :
+  # The cards counted against the cap (building): every card running, in any step and waiting or not, but a card that lands
+  # (offcap()). running still counts every card: the loop ends only once none is left.
+  # A card that waits for its seat's CLI starts its step again once the host lists the CLI (cliwake()).
+  for p in "${!mine[@]}"; do c=${mine[$p]% *}; if [ -e "$CARDS/$c.nocap" ] || batchlanded "$c"; then off+="$p $c"$'\n'; else on+="$p $c"$'\n'; fi; done
+  cliwake "$off$on"
   read -r past pidle rev tst <<<"$(offcap "$off")"
-  idles=$(idle "$on")
-  [ $((running - past - idles)) -ge "$cap" ] || { woke=$(cliwake "$on" $((cap - running + past + idles))) && idles=$((idles - woke)); } || :
-  [ "$idles" -le "$cap" ] || idles=$cap; [ "$idles" -ge 0 ] || idles=0
-  building=$((running - past - idles)); [ "$building" -ge 0 ] || building=0
-  idles=$((idles + pidle)) # every waiting card left out of the count, for loop.json
+  building=$((running - past)); [ "$building" -ge 0 ] || building=0
+  idles=$(( $(idle "$on") + pidle )) # every waiting card, for the machine's count and loop.json
   # The machine's count (inuse, room()): every card that builds, reviews, tests or lands, the waiting ones left out.
   inuse=$((running - idles)); [ "$inuse" -ge 0 ] || inuse=0
   # The machine hold's look (mainred.sh machineprobe()), at most once every POLL seconds (as often as a free loop would pick)
@@ -577,8 +573,8 @@ turncount() {
     else echo "conveyor: the pack pins another Conveyor commit than this loop's $OWN; nothing new is picked, and the loop $([ -n "$serve" ] && echo "restarts on the pinned commit once its push is done" || echo "ends once its cards and push are done")"; fi
   fi
   [ -z "$why" ] || [ -z "$old" ] || why+="; the loop $([ -n "$serve" ] && echo "restarts on the $([ -n "$FOLLOW" ] && echo "checkout's new code" || echo "project's Conveyor commit") once its push is done" || echo "ends once its cards and push are done")"
-  # building and waiting: the cards counted against the cap, and those left out as they only wait (health());
-  # reviewing and testing: those left out as they are in their review (with the judge) or test step (offcap());
+  # building: the cards counted against the cap, and waiting: those left out of the machine's count as they only wait
+  # (health()); reviewing and testing: those in their review (with the judge) or test step and not waiting (offcap());
   # running: every card of the loop in progress, waiting or not, in whatever step (the Foreman's count on the belt).
   say=$(jq -cn --argjson p "$$" --arg t "$self" --arg s "$now" --arg r "$why" --arg c "$RAN" --arg h "$([ -n "$OWN" ] || echo "$HERE")" --argjson b "$building" --argjson w "$idles" \
     --argjson rv "$rev" --argjson ts "$tst" --argjson n "$running" \
@@ -704,7 +700,7 @@ turnpick() {
 }
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
-  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000 woke nudged=''
+  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000 nudged=''
   local mhold htold='' prober='' htried=-1000000 gone gs merger='' gtried=-1000000 fixer='' rtried=-1000000 asker='' atried=-1000000
   local inuse # the machine's count of the turn (turncount())
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;

@@ -17,8 +17,8 @@ right-aligned and the title is what gives way.
 
 - A head, two lines: `CONVEYOR`, dollars today and the Conveyor host (`● buildbox`); then the weekly limit with its
   reset (`weekly limit 94% · resets 1d 18h`) and the counts on the belt and queued. While the loop runs with a builder
-  cap, the `ON THE BELT` head gives the cards on the belt and the cap, and the cards that take no build slot: those
-  that wait on another card, and a landed card in Push (`ON THE BELT (2 of 7, 1 waiting and 1 landing not counted)`). With more than one project, each project's count
+  cap, the `ON THE BELT` head gives the cards on the belt and the cap, and a card that lands or has landed, which the
+  cap does not count (`ON THE BELT (2 of 7, 1 landing not counted)`). With more than one project, each project's count
   follows its name (`ON THE BELT (bakery 1 of 3 · gadgetlab 1)`). In `/units` a third line gives how
   many findings the review's judge declined today (`judge declined 3 findings today`), from the snapshot's declined
   list (its `declined` and `declinedRest` lines by the judge, by this machine's day, each line once).

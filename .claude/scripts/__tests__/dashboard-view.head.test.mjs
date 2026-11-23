@@ -212,15 +212,29 @@ test('the account page\'s head follows the live feed\'s changes, not only its sn
   assert.equal(w.document.getElementById('status').textContent, 'Live');
 });
 
-// Issue 201: a card that only waits on another card takes no build slot, so the On the belt tile leaves it out of the
-// cards it counts against the slots in force, and says so on a tap. Bug it catches: the tile counted every card on the
-// belt, so with the cap reached by one waiting card the owner saw a full belt while the loop picked a new card.
-test('the On the belt tile leaves out the cards that only wait on another card, and says how many', () => {
+// Issue 1538: the cap counts every card on the belt but a landed one, a card that waits on another card too. Bug it
+// catches: the tile took the part's waiting count off its figure and named those cards as not counted, so the owner
+// saw fewer cards against the cap than the belt held. The part still carries waiting here, as an older Board's does.
+test('the On the belt tile counts every card on the belt, a waiting one too, and names none as left out', () => {
   const w = boot();
   const data = full();
   data.panels.belt.data.waiting = 1;
   deliver(w, data);
-  assert.equal(fig(w, 'belt'), '1 of 3', 'two cards on the belt, one waiting: one holds a slot');
+  assert.equal(fig(w, 'belt'), '2 of 3', 'two cards on the belt, one waiting: both count');
   tile(w, 'belt').click();
-  assert.equal(tile(w, 'belt').querySelector('.stat-gap').textContent, '1 card waits on another card: not counted');
+  assert.equal(tile(w, 'belt').querySelector('.stat-gap').hidden, true, 'no card is named as left out: the tap opens the panel');
+});
+
+// Issue 1538: a card that lands (offCap, as the loop marks it) is left out of the cap's count before it has landed
+// (landed true). Bug it catches: the tile counted it, so the owner saw a full cap while the loop picked a new card.
+// A card in the step landing that the loop counts (rebuilt after a landing conflict, or waiting for a release run:
+// offCap false) stays in the count: filtering on the step left it out, so the tile showed a free slot the loop did not have.
+test('the On the belt tile leaves out a card that lands, and counts one in the step landing that is not landing', () => {
+  const w = boot();
+  const data = full();
+  const base = data.panels.belt.data.cards[0];
+  data.panels.belt.data.cards.push({ ...base, card: 'c1-99', issue: 99, step: 'landing', landed: false, offCap: true });
+  data.panels.belt.data.cards.push({ ...base, card: 'c1-98', issue: 98, step: 'landing', landed: false, offCap: false });
+  deliver(w, data);
+  assert.equal(fig(w, 'belt'), '3 of 3', 'four cards on the belt, one of them landing (offCap): three count');
 });

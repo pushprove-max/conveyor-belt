@@ -278,7 +278,7 @@ unreported() {
 # snapshot, with no wake put and nothing marked reported: the belt (its count, "as of <snapshotAt>, the belt has
 # changed since" when the card records changed after the snapshot was made, or, while the loop runs then, the count
 # now (loop.json's cards and the landed cards not yet pushed, recordsNow) with "the snapshot, as of <snapshotAt>, is behind the card records", and while the loop runs its cards
-# building against the cap, loop.json's count now while the snapshot is behind (recordsNow, commands/snapshot.sh), and those waiting on another card, which that count leaves out; then, when the
+# against the cap, loop.json's count now while the snapshot is behind (recordsNow, commands/snapshot.sh); then, when the
 # snapshot names the engine stopped and ps no longer shows it stopped, "the engine (pid <n>) runs" or "has ended"; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
 # cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
 # that ended), then every problem a wake names (the blocked cards as NOWBLOCKED gives them), the push failing at once, the suite that ended left out (its line is
@@ -305,7 +305,7 @@ STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
     else .kind end;
   (.belt | if type == "array" then length else 0 end) as $n
   # While the snapshot is behind the card records and the loop runs, the count on the belt is the one of now: loop.json'"'"'s
-  # cards in progress (running: building, waiting, in review or in their Test step), and the landed cards still on the
+  # cards in progress (running: every card in any step), and the landed cards still on the
   # belt for their push (recordsNow), and the line says the snapshot the card lines below come from is behind (#1107:
   # "0 on the belt" while 5 built).
   | ([.recordsNow | objects | select(.running | numbers) | .running + (.landed | numbers // 0)][0]) as $live
@@ -314,9 +314,9 @@ STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
     else "\($repo): \($n) on the belt"
       + (if .recordsNewer == true then " (as of \(.snapshotAt // "an unknown time"), the belt has changed since)" else "" end) end)
     # While the snapshot is behind the card records, the loop'"'"'s count is the one loop.json gives now (recordsNow).
-    + (((if (.recordsNow | type) == "object" then .recordsNow | {building, waitingCount} else (.health | objects) // {} end) as $b
+    + (((if (.recordsNow | type) == "object" then .recordsNow | {building} else (.health | objects) // {} end) as $b
       | .health | objects | select(($b.building | type) == "number" and (.builderCap | type) == "number")
-      | "; building \($b.building) of the cap \(.builderCap)\(if ($b.waitingCount // 0) > 0 then ", \($b.waitingCount) waiting not counted" else "" end)") // ""),
+      | "; \($b.building) of the cap \(.builderCap)") // ""),
   (.belt | arrays | .[] | objects | "  \(ref) \(.step)\((.waitsOn | objects | select(.issue | numbers) | " on \(ref)") // "")"
     + " \((.stepAt | fromdate? | $now - .) // null | if . == null then "?" else took end) \(.title // "" | tostring | gsub("\\s+"; " ") | .[0:60] | sub(" $"; ""))"),
   (.queue.waiting | arrays | select(length > 0) | "waiting: " + (map(objects | "\(.issue | num) on \(.waitsFor | arrays | map(num) | join(" "))") | join(", "))),

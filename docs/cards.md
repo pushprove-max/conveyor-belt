@@ -126,9 +126,9 @@ gives what the reviewer found.
 
 Before a build, fix or review session starts, Conveyor checks that the CLI of its seat is on PATH. An update or a
 reinstall can remove a CLI for a short time. So when the CLI is missing, Conveyor reads the host's CLIs again for
-about two minutes. When the CLI is still missing, the card waits in its step and takes no build slot. The Board and
+about two minutes. When the CLI is still missing, the card waits in its step and still counts against the card cap. The Board and
 `/units` show the wait as `waiting for <cli>`. When the host's CLIs list that CLI again, the loop starts the step on
-the card's kept work in its next turn with a free build slot. You do not retry the card. A seat set to a CLI that this
+the card's kept work in its next turn. You do not retry the card. A seat set to a CLI that this
 host never had blocks the card at once, and the reason names the seat and the CLI. A review that `conveyor.sh lane`
 starts does not wait: after the two minutes, it fails with that reason.
 
