@@ -1281,8 +1281,9 @@ or the arms have no guard, or, with the guard on, when no earlier run kept the s
 and the command that the run sends. **Start the run** sends that command,
 with the engine's default settings. It stays off while a run goes, with no arm picked, while an arm that you picked is
 not ready, while the usage guard holds an arm that you picked, and while an action that you sent has no answer yet.
-**Check the arms first** runs the preflight of each arm that you picked and that is not ready, or of every arm that
-you picked when all are ready. It stays off with no arm picked, while the arms that you picked are being checked, and
+**Check the arms first** runs the preflight of each arm that you picked and that is not ready. An arm that is being
+checked gets no new preflight. When all the other arms that you picked are ready, it runs the preflight of each of them
+again. It stays off with no arm picked, while all the arms that you picked are being checked, and
 while an action that you sent has no answer yet. After a check, the Board reads the arms again, so the arms show their
 new state, until a read answers and no arm is being checked. When a button is off, one line
 under the buttons says why. The cost is an estimate: each session costs the mean of
