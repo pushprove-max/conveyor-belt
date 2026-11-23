@@ -766,8 +766,11 @@ files they do not run). A line with no CPU seconds is recorded with its clock se
 holds each test file its change adds or modifies with both times (`timed`). The test
 line also holds the clock seconds of each file it timed (`clocks`, `{file: sec}`). A run after a fix session lists
 the files it kept as passed and did not run (`carried`): their times are from an earlier run, and the test judge
-does not count them as a run of that file. A file of which the run ran only some cases gets no time on the line,
-as a runner does not time it: the line lists it as `partial`, and the test judge counts it as a run of that file.
+does not count them as a run of that file. A shell test file of which the run ran only some cases or parts (an
+engine case file, the engine's runner, or another shell test file run with some of its parts) gets no time on the
+line, as a runner does not time it: the line lists it as `partial`, and the test judge counts it as a run of that
+file. A Board test file run again with the cases that passed skipped is timed as a run of the file, and is not
+`partial`.
 
 **How a split is checked.** A split does not lower the CPU seconds summed: each new file has its own start-up. It
 gives files that run side by side. So the check of an Optimize card (Bug cards: the new tests
