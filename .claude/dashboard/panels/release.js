@@ -243,9 +243,13 @@
     const card = notes ? '' : held;
     const notesClosed = closed ? card : '';
     const waiting = notesClosed ? '' : card;
-    // The run still waits (Stop ends the wait): its card is not closed and relfixes() has not started it again. That holds
-    // after the notes reach main too, while another card is open (relfixes() waits for none to be open).
-    const stoppable = !!held && !closed && cur.restarted == null;
+    // The last run still waits (Stop ends the wait): relfixes() has not started it again. That holds after the notes
+    // reach main too, while another card is open (relfixes() waits for none to be open), and with its card closed. Read
+    // from the last run, whatever version is typed: while it waits, Conveyor refuses a run of any other version
+    // (relother(), lib/fulltest.sh), so Stop shows for that version too. stopOf: the waiting run's version, else ''.
+    const stopOf = run && run.ended !== null && run.state === 'waiting' && run.notes && typeof run.notes.card === 'string'
+      && run.restarted == null ? String(run.version) : '';
+    const stoppable = !!stopOf;
     let chip;
     if (going) chip = ['Suite running', 'info'];
     else if (failed) chip = ['Suite failed', 'bad'];
@@ -262,7 +266,7 @@
     // Release reuses a passed release-prep of v on main's head, main not moved since (release-run); else it runs the
     // suite first.
     const reuse = passed && !moved && cur.step === 'release-prep' && cur.state === 'passed';
-    return { cur, going, passed: passed && !moved, failed, notStarted, moved, released, reuse, waiting, stoppable, notesClosed, chip };
+    return { cur, going, passed: passed && !moved, failed, notStarted, moved, released, reuse, waiting, stoppable, stopOf, notesClosed, chip };
   }
 
   // One numbered step: its mark (done, failed, in progress or to do), its name and its one line, then what else.
@@ -437,6 +441,12 @@
       stop.type = 'button'; stop.dataset.act = 'release-stop';
       stop.title = 'End the wait: nothing starts when the card lands, or when the other open cards end. The card itself is not closed.';
       const box = h('div', 'release-stop');
+      // A version typed that is not the waiting run's: say whose wait Stop ends, and why it matters for this version.
+      if (s.stopOf !== v) {
+        const other = h('p', 'row-meta', `Release ${s.stopOf} waits on its notes card. Conveyor runs no other version until that wait ends. Stop ends it.`);
+        other.dataset.figure = 'stop-other';
+        box.append(other);
+      }
       box.append(ctx.twice(stop, 'final', 'Click again to stop the wait', () => send(ctx, rec.repo, ['stop'], 'The run no longer waits for the card.')));
       return box;
     };
@@ -447,7 +457,7 @@
       p.dataset.figure = 'notes-card';
       s1 = step(h, 'Release notes', 'now', `docs/releases/${v}.md on main: card ${s.waiting} adds the notes draft`, p, waitStop());
     } else if (s.notesClosed) {
-      s1 = step(h, 'Release notes', 'failed', `docs/releases/${v}.md on main: missing: card ${s.notesClosed} was closed before it landed. Draft notes writes them again`);
+      s1 = step(h, 'Release notes', 'failed', `docs/releases/${v}.md on main: missing: card ${s.notesClosed} was closed before it landed. Draft notes writes them again`, waitStop());
     } else {
       s1 = step(h, 'Release notes', notes ? 'done' : notesFailed ? 'failed' : 'todo',
         `docs/releases/${v}.md on main: ${notes ? 'written' : 'missing: Draft notes writes them'}`, reasonsList(h, why[0]), waitStop());

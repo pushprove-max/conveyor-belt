@@ -298,7 +298,7 @@ RELRUN=$CARDS/release/run.json
 RELSTARTED=''
 relrec() { jq -c "$@" "$RELRUN" > "$RELRUN.new" 2>/dev/null && mv -f "$RELRUN.new" "$RELRUN"; } # <jq arguments, the filter first>
 relstart() { # <command name> <version>
-  local was=null
+  local was=null; relother "$1" "$2" || return 1 # another version's run waits on its notes card (lib/fulltest.sh)
   # release keeps the suite's commit, mode and cases from release-prep's pass of its version, or from a release of it
   # refused since (a retry takes the pass from the status and runs no suite). From release-prep's failed suite of its
   # version: that suite, and red, the failed run `release --anyway` may go over, kept through a refused release.
@@ -566,10 +566,10 @@ releaseprep() { # <version>
   local v=$1 cmd sha last d out was wn nx=${CONVEYOR_RELEASE_THEN:-prep} # nx: what follows a pass (relnoteswait()), as relstart() unsets it
   packget test.full cmd || return 1
   [ -n "$cmd" ] || { echo "conveyor: release-prep: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
-  rellock release-prep || return $?
+  relother release-prep "$v" && rellock release-prep || return $? # relother: before the lock and its hold (a push under way); relstart() checks again
   was=$(jq -r --arg v "$v" 'select(.step == "release-prep" and (.state | IN("waiting", "stopped")) and .version == $v) | .notes.card // empty' "$RELRUN" 2>/dev/null) wn=$(jq -c --arg v "$v" 'select(.step == "release-prep" and .state == "waiting" and .version == $v) | .notes | objects' "$RELRUN" 2>/dev/null) # the last run's notes card (waiting, or stopped while it waited: relstopwaiting()), and the notes of a run that waits on it (relnoteskept()), before relstart()
   [ -n "$was" ] || was=$( . "$HERE/lib/testaction.sh" && jq -r --arg v "$v" '[.cards[]? | select(.label == "Release notes" and (.title | startswith("Release notes \($v): ")))] | last | .id // empty' "$TACARDS" 2>/dev/null) # another version's run in between leaves the record naming that run's card: the newest notes card of $v is then its one
-  relstart release-prep "$v"
+  relstart release-prep "$v" || return 1
   # The commit `release` releases is the remote's head of the branch, and the tags are the remote's; with Merge PR
   # release, the head of LANDING (relhead(), lib/push.sh), which relfixes() (lib/fulltest.sh) reads too.
   sha=$(relhead) || { echo "conveyor: release-prep: $REMOTE/$BRANCH could not be read; nothing run" >&2; return 1; }
@@ -597,8 +597,8 @@ release() { # <version>
   local P=.claude-plugin/plugin.json M=.claude-plugin/marketplace.json tested=${CONVEYOR_RELEASE_SHA-} at=refs/remotes/$REMOTE/$BRANCH pr=''
   [ -z "${CONVEYOR_RELEASE_SHA+x}" ] || [ -n "$tested" ] || tested=none # set by the Board with no commit: nothing passed
   unset CONVEYOR_RELEASE_SHA
-  rellock release || return 1
-  relstart release "$v"
+  relother release "$v" && rellock release || return 1 # relother: before the lock and its hold (a push under way); relstart() checks again
+  relstart release "$v" || return 1
   git fetch -q "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" 'refs/tags/v*:refs/tags/v*' < /dev/null \
     && sha=$(git rev-parse -q --verify 'HEAD^{commit}') \
     || { echo "conveyor: release: refused, nothing tagged or released: $REMOTE/$BRANCH or the checkout's HEAD could not be read" >&2; return 1; }
@@ -739,8 +739,8 @@ releasego() { # <version> [prep: release-prep alone | anyway <who>]
   # The release lock, taken here, before run.log is opened, and kept by the run's process (CONVEYOR_RELEASE_LOCK, its
   # descriptor, for its release-prep and release, rellock()): a second release-run, while the first waits for its
   # hold (a push under way), is refused, and does not wait behind it nor write over its run.log.
-  { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null || { echo "conveyor: release-run: its lock could not be made; nothing run" >&2; return 1; }
-  flock -n "$lk" || { exec {lk}>&-; echo "conveyor: release-run: release-prep or release is already running; this one is not started" >&2; return 2; }
+  relother release-run "$1" || return 1; { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null || { echo "conveyor: release-run: its lock could not be made; nothing run" >&2; return 1; }
+  flock -n "$lk" || { exec {lk}>&-; echo "conveyor: release-run: release-prep or release is already running; this one is not started" >&2; return 2; }; relother release-run "$1" || { exec {lk}>&-; return 1; } # here, not only in run.log; and before the lock (above), as a lock taken for a moment refuses the release-run relfixes() starts a waiting run with
   [ -n "${2:-}" ] || { ok=$(jq -er --arg v "$1" 'select(.step == "release-prep" and .state == "passed" and .version == $v and .moved == false and (env.CONVEYOR_RELEASE_MACHINE != "local" or ((.machine.kind // "local") == "local" and ((.reused.kept // 0) == 0 or (.reused.machine // "local") == "local")))) | .sha | strings' "$RELRUN" 2>/dev/null) \
     && [ "$ok" = "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" ] || ok=''; }
   ( trap '' HUP; exec {LOGFD}>&- && exec {LOGFD}>&2

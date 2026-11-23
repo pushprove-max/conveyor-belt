@@ -172,6 +172,31 @@ t_relfixesclosed() {
   fixrec "a fix closed with no landed card is not named, or a run started" '.state == "failed" and .restarted == null and .fixes == [{issue: 20, state: "landed"}, {issue: 21, state: "closed"}]'
   [ ! -e "${RUN%/*}/run.log" ] || fail "a run started over a fix closed with no landed card: $(cat "${RUN%/*}/run.log")"
 }
+# Bugs it catches (follow-up of #1461): the release lock held a moment (by a `release-run stop` that read the wait just
+# before) refused the release-run relfixes() starts a waiting run with, and the record kept its restarted mark: the run
+# never started, every stop skipped it, and it held every other version (relother(), lib/fulltest.sh) for ever. The
+# mark is taken off, and a stop then ends the wait.
+t_relnotesrefused() {
+  setup '[]'
+  local id=c20261119T110000-main-0 out rc f
+  RUN=$T/$CASE/cards/release/run.json
+  mkdir -p "${RUN%/*}" "$ST/testactions" && git -C "$R" push -q origin main \
+    && jq -cn --arg c "$id" '{kind: "release", step: "release-prep", version: "1.1.0", since: "2026-11-19T09:00:00Z", ended: "2026-11-19T10:00:00Z",
+      state: "waiting", sha: null, reasons: [], pid: 1, notes: {card: $c, then: "prep", mode: null, machine: null}}' > "$RUN" \
+    && jq -cn --arg c "$id" '{cards: [{file: null, title: "Release notes 1.1.0: add docs/releases/1.1.0.md", body: "", time: "2026-11-19T10:00:00Z", id: $c, label: "Release notes"}]}' > "$ST/testactions/cards.json" \
+    && jq -cn --arg c "$id" --arg s "$(git -C "$R" rev-parse HEAD)" '{card: $c, issue: 0, step: "landed", time: "2026-11-19T12:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: $s, reason: ""}' >> "$ST/cards.jsonl" \
+    && f=$(command -v flock) || fail "the fixture could not be made"
+  # A flock that finds the lock held at a try (-n) once the record is marked restarted: the stop's moment, made certain.
+  printf '%s\n' '#!/usr/bin/env bash' "[ \"\$1\" != -n ] || ! jq -e '.restarted | strings' '$RUN' > /dev/null 2>&1 || exit 1" "exec $f \"\$@\"" > "$STUB/flock" \
+    && chmod +x "$STUB/flock" || fail "the flock stand-in could not be made"
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names \
+    && cd "$R" && relfixes ) > "$T/$CASE.fix" 2>&1; rc=$?
+  [ $rc != 0 ] && grep -q 'already running; this one is not started' "$T/$CASE.fix" || fail "relfixes(), its release-run refused at the lock, did not fail as refused (rc $rc): $(cat "$T/$CASE.fix")"
+  fixrec "the restart refused at the lock left the record marked restarted, or not waiting on notes card $id" '.state == "waiting" and .restarted == null and .notes.card == "'"$id"'"'
+  rm -f "$STUB/flock" || fail "the flock stand-in could not be removed"
+  out=$(loop release-run stop 2>&1) || fail "release-run stop of the waiting run, its mark taken off, failed: $out"
+  fixrec "release-run stop did not end the wait the refused restart left" '.state == "stopped" and .reasons == ["stopped by the owner"]'
+}
 # Bug (#758): a red run with no fix filed yet has, by "all its fixes landed", nothing that could have fixed it: no run.
 t_relfixesnone() {
   setup '[]'

@@ -559,6 +559,19 @@ releasestop() {
   [ $rc = 0 ] || jq -e --argjson p "$p" --arg s "$s" '.pid != $p or .since != $s' "$RELRUN" > /dev/null 2>&1 || { echo "conveyor: release-run stop: the run is stopped, but a process of it still holds $CARDS/release/lock; release-prep and release are refused until it ends" >&2; return 1; }
   echo "conveyor: release-run: the release run of $v is stopped"
 }
+# A release-prep of another version that waits on its notes card (relnoteswait()) is the one record relfixes() starts
+# that run again from: a run of <version> would replace it (relstart(), commands/release-prep.sh), so it is refused (1)
+# until that run starts again (also once relfixes() has marked it restarted and let the lock go, before its release-run
+# has written its own record), or `release-run stop` ends the wait (relstopwaiting()). A closed card holds it too: the
+# record's fixes entry says closed only as of relfixes()'s last pass, and a card retried since may still land.
+relother() { # <command name> <version>
+  local o
+  o=$(jq -r --arg v "$2" 'select(.step == "release-prep" and .state == "waiting" and (.ended | type) == "string" and (.notes.card | type) == "string"
+    and .version != $v)
+    | if .restarted == null then "release-prep \(.version) waits on notes card \(.notes.card), and a run of \($v) would end that wait; nothing run: `conveyor.sh release-run stop` ends it first"
+      else "release-prep \(.version) starts again, as its notes card \(.notes.card) has landed, and a run of \($v) would take its place; nothing run: run it again once that run has started" end' "$RELRUN" 2>/dev/null)
+  [ -z "$o" ] || { echo "conveyor: $1: $o" >&2; return 1; }
+}
 # A release-prep that waits on its notes card (state waiting: relnoteswait()) has no process to end: `release-run stop`
 # (releasestop(), above) marks its record stopped, so relfixes() does not start the run again when the
 # card lands. The card is not closed (`conveyor.sh shut` closes it) and may still land. Only a record that waits, was not
@@ -634,8 +647,17 @@ relfixes() {
     m=$(jq -r '.notes.mode // ""' <<<"$r"); [[ ! $m =~ ^(serial|parallel)$ ]] || a+=("--$m")
     [ "$(jq -r '.notes.machine // ""' <<<"$r")" != local ] || a+=(--machine local)
     echo "conveyor: the notes card $nc of release $v has landed: release-prep $v starts again$([ "${a[0]}" = prep ] || echo ', then release')" >&2
-    CONVEYOR_RELEASE_BY='notes landed' bash "$HERE/conveyor.sh" release-run "${a[@]}" < /dev/null; return
-  fi
-  echo "conveyor: each fix card of release $v's failed suite has landed ($(jq -r 'map(if .issue == null then .card else "#\(.issue)" end) | join(", ")' <<<"$fx")): release-prep $v starts again" >&2
-  CONVEYOR_RELEASE_BY='fixes landed' bash "$HERE/conveyor.sh" release-run prep "$v" < /dev/null
+    CONVEYOR_RELEASE_BY='notes landed' bash "$HERE/conveyor.sh" release-run "${a[@]}" < /dev/null
+  else
+    echo "conveyor: each fix card of release $v's failed suite has landed ($(jq -r 'map(if .issue == null then .card else "#\(.issue)" end) | join(", ")' <<<"$fx")): release-prep $v starts again" >&2
+    CONVEYOR_RELEASE_BY='fixes landed' bash "$HERE/conveyor.sh" release-run prep "$v" < /dev/null
+  fi && return
+  # The release-run was refused and started nothing (the lock was held a moment, as by a `release-run stop`): the mark
+  # is taken off the record it left as it was, so the next pass starts the run again and a stop can end its wait;
+  # marked, the run would never start, and a waiting one would hold every other version (relother()).
+  { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null && flock -w 10 "$lk" \
+    && go=$(jq -c --arg s "$s" --arg t "$(jq -r .restarted <<<"$go")" 'if .since == $s and .restarted == $t then .restarted = null else . end' "$f" 2>/dev/null) \
+    && printf '%s\n' "$go" > "$f.new" && mv -f "$f.new" "$f"
+  [ -z "$lk" ] || exec {lk}>&-
+  return 1
 }

@@ -230,15 +230,39 @@ t_relnoteskeepthen() {
 # R51. Bug: release-prep found a version's notes card only from the last run's record, so release-prep 1.12.0 (card
 # waiting), then 1.13.0, then 1.12.0 again read no card for 1.12.0 and started a second one adding the same file. The
 # third press finds the card in the Tests page's cards and waits on it again: one card titled for 1.12.0.
+# Bugs it catches too (follow-up of #1461): release-prep 1.13.0, or release-run or release of it, while 1.12.0 waited on
+# its notes card replaced the one record relfixes() starts 1.12.0 again from, so its card landed and nothing ran. Another
+# version is refused, the record left waiting: before the release lock and its hold (with the lock held elsewhere, the
+# refusal still names the waiting run, not a run under way), and also once relfixes() has marked the run restarted and
+# let the lock go, as a lock taken then would refuse the release-run it starts. `release-run stop` ends the wait: 1.13.0
+# then runs. A waiting run whose fixes entry says its notes card is closed still holds other versions (bug: that
+# entry is only as new as relfixes()'s last pass, and a card retried since may land); a stop ends that wait too.
 t_relnotesother() {
-  local out cards n
-  relsetup true nonotes; cards=$ST/testactions/cards.json
+  local out cards n run lk
+  relsetup true nonotes; cards=$ST/testactions/cards.json run=$T/$CASE/cards/release/run.json
   relmodel $'# 1.12.0\n\nCards can wait. [#5]\n\n## Cards\n\n- You can hold a card. [#5]'
-  for n in 1.12.0 1.13.0 1.12.0; do
-    out=$(loop release-prep "$n" 2>&1); [ $? = 1 ] || fail "release-prep $n did not stop on a head with no notes: $out"
+  out=$(loop release-prep 1.12.0 2>&1); [ $? = 1 ] || fail "release-prep 1.12.0 did not stop on a head with no notes: $out"
+  exec {lk}>>"$T/$CASE/cards/release/lock" && flock -x "$lk" || fail "the release lock could not be held"
+  for n in "release-prep 1.13.0" "release-run prep 1.13.0" "release 1.13.0"; do
+    out=$(loop $n 2>&1); [ $? = 1 ] && grep -q 'release-prep 1.12.0 waits on notes card .*release-run stop' <<<"$out" \
+      && jq -e '.version == "1.12.0" and .state == "waiting" and .restarted == null' "$run" > /dev/null \
+      || fail "$n, while release-prep 1.12.0 waits on its notes card and the lock is held, was not refused for it or replaced its record: $out; $(cat "$run")"
   done
+  jq -c '.restarted = "2026-01-01T00:00:00Z"' "$run" > "$run.new" && mv -f "$run.new" "$run"
+  out=$(loop release-run prep 1.13.0 2>&1); [ $? = 1 ] && grep -q 'release-prep 1.12.0 starts again' <<<"$out" \
+    || fail "release-run prep 1.13.0, after relfixes() marked 1.12.0 restarted, was not refused for it before the lock: $out"
+  exec {lk}>&-; jq -c '.restarted = null' "$run" > "$run.new" && mv -f "$run.new" "$run"
+  out=$(loop release-run stop 2>&1) || fail "release-run stop of the waiting 1.12.0 failed: $out"
+  relmodel $'# 1.13.0\n\nCards can wait. [#5]\n\n## Cards\n\n- You can hold a card. [#5]'
+  out=$(loop release-prep 1.13.0 2>&1); [ $? = 1 ] && ! grep -q 'release-prep 1.12.0' <<<"$out" && jq -e '.version == "1.13.0" and .state == "waiting"' "$run" > /dev/null \
+    || fail "release-prep 1.13.0, after release-run stop of 1.12.0, did not run to its own notes card: $out; $(cat "$run")"
+  jq -c '.fixes = [{issue: null, card: .notes.card, state: "closed"}]' "$run" > "$run.new" && mv -f "$run.new" "$run"
+  out=$(loop release-prep 1.12.0 2>&1); [ $? = 1 ] && grep -q 'release-prep 1.13.0 waits on notes card' <<<"$out" && jq -e '.version == "1.13.0" and .state == "waiting"' "$run" > /dev/null \
+    || fail "release-prep 1.12.0, while 1.13.0 waits on a notes card its fixes entry says is closed, was not refused for it or replaced its record: $out; $(cat "$run")"
+  out=$(loop release-run stop 2>&1) || fail "release-run stop of the waiting 1.13.0, its notes card closed, failed: $out"
+  out=$(loop release-prep 1.12.0 2>&1); [ $? = 1 ] || fail "release-prep 1.12.0 did not stop on a head with no notes: $out"
   [ "$(jq -r '[.cards[] | select(.title | startswith("Release notes 1.12.0"))] | length' "$cards")" = 1 ] && grep -q 'is still under way' <<<"$out" \
-    || fail "release-prep 1.12.0 after 1.13.0 did not keep its one notes card: $out; $(cat "$cards")"
+    || fail "release-prep 1.12.0, after 1.13.0's wait was stopped, did not keep its one notes card: $out; $(cat "$cards")"
 }
 # R254. Bug it catches: relnoteskept() took a notes card that had landed as done, though its commit was not pushed yet,
 # so release-prep on origin's head (no notes there yet) wrote a new draft and started a second card adding the same

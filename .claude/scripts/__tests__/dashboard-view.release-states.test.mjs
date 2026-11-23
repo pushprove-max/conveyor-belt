@@ -89,3 +89,33 @@ test('Run suite again after a passed suite asks the mode; nothing is sent until 
   assert.ok(card(w).querySelector('[data-figure="mode-ask"]'), 'the mode question shows');
   assert.deepEqual(await sent(w, () => act(card(w), 'mode-parallel').click()), [{ action: 'release-run', args: ['prep', '1.0.0', '--parallel'], repo: 'plugin' }]);
 });
+
+// Bug it guards (follow-up of #1461): while 1.0.0 waited on its notes card, Conveyor refused Draft notes for 1.1.0 and
+// said to stop 1.0.0 first, but the panel read the wait only from a run of the typed version, so with 1.1.0 typed it
+// hid Stop until the owner typed 1.0.0 again. Stop shows, names the waiting version, and sends the stop.
+const WAITING = { ...RUN, sha: null, ended: '2026-11-14T08:15:00Z', state: 'waiting', notes: { card: 'c20261114T081500-plugin-0', then: 'prep', mode: null, machine: null } };
+test('with 1.1.0 typed while 1.0.0 waits on its notes card, Stop shows in the notes step, names 1.0.0 and sends the stop', async () => {
+  const w = boot();
+  deliver(w, data([WAITING], { notes: false, written: [] }));
+  const field = card(w).querySelector('[data-field="version"]');
+  field.value = '1.1.0'; field.dispatchEvent(new w.Event('input'));
+  const s1 = stepOf(w, 'release-notes');
+  assert.match(s1.querySelector('.release-line').textContent, /^docs\/releases\/1\.1\.0\.md on main/, 'the typed version is 1.1.0');
+  assert.ok(s1.querySelector('[data-act="release-stop"]'), 'Stop shows with 1.1.0 typed');
+  assert.equal(s1.querySelector('[data-figure="stop-other"]').textContent,
+    'Release 1.0.0 waits on its notes card. Conveyor runs no other version until that wait ends. Stop ends it.');
+  assert.deepEqual(await sent(w, () => { act(card(w), 'release-stop').click(); act(card(w), 'release-stop').click(); }), [{ action: 'release-run', args: ['stop'], repo: 'plugin' }]);
+});
+
+// Bug it guards (follow-up of #1461): a run whose notes card its fixes entry says is closed still waits, and Conveyor
+// refuses another version while it does (that entry can be older than a retry of the card), but the panel hid Stop for
+// it, so the owner could not end the wait from the Board. Stop shows beside the closed card, with no other-version line.
+test('a run waiting on a notes card its fixes entry says is closed shows Stop in the notes step', () => {
+  const w = boot();
+  const id = WAITING.notes.card;
+  deliver(w, data([{ ...WAITING, fixes: [{ issue: null, card: id, ids: [id], state: 'closed' }] }], { notes: false, written: [] }));
+  const s1 = stepOf(w, 'release-notes');
+  assert.match(s1.querySelector('.release-line').textContent, /was closed before it landed/, 'the fixture is the closed-card state');
+  assert.ok(s1.querySelector('[data-act="release-stop"]'), 'Stop shows beside the closed card');
+  assert.equal(s1.querySelector('[data-figure="stop-other"]'), null, 'the run is of the typed version: no other-version line');
+});
