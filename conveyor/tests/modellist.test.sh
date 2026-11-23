@@ -40,7 +40,7 @@ t_modelcache() {
 # each, the seat check takes both for the reviewer and the judge, and the pack's first model stays the default.
 t_modelsadd() {
   setup '[]'
-  jq -cn '{at: (now | floor), clis: {codex: ["gpt-a", "gpt-b"]}}' > "$ST/clis.json"
+  jq -cn '{at: (now | floor), clis: {codex: ["gpt-a", "gpt-b"]}, px: false}' > "$ST/clis.json"
   tune '.models.allowed.codex = ["gpt-a"]'
   looks 'modelsettings null | jq -c ".reviewer | [.allowed.codex, [.choices[] | select(startswith(\"gpt-\"))], .model]"
     for m in gpt-a gpt-b; do for s in reviewer judge; do printf "%s %s: [%s]\n" "$s" "$m" "$(cardok "$s" "$m" medium)"; done; done'
@@ -147,6 +147,34 @@ t_pxmodelsleft() {
   out=$(cat "$T/$CASE/out")
   [[ $out == $'--- taken\ngpt-d is not one of the models'* ]] \
     || fail "after the reviewer was set to the subscription, cardok reviewer gpt-d (a proxy-only model) was not refused: $out"
+}
+# Bug (#1517): a saved report with no px (written before px was) and a Codex list read through the proxy was taken as
+# px false, so after the reviewer moved to the subscription, cardok still took gpt-d (a proxy-only model) until
+# CLI_TTL. Here the report has gpt-d and no px, the reviewer is on the subscription, and cardok refuses gpt-d.
+t_pxmodelsnopx() {
+  local out
+  pxmodels "http://192.0.2.1:9" subscription
+  # shellcheck disable=SC2016 # expanded in the engine shell (looks)
+  looks 'jq -n "{at: now | floor, clis: {codex: [\"gpt-b\", \"gpt-d\"]}}" > "$CLIS" && cardok reviewer gpt-d medium; echo "--- px $(jq .px "$CLIS")"'
+  out=$(cat "$T/$CASE/out")
+  [[ $out == 'gpt-d is not one of the models'*$'\n--- px false' ]] \
+    || fail "with a saved report with no px and the reviewer on the subscription, cardok reviewer gpt-d was not refused, or Codex was not read again: $out"
+}
+# Bug (#1517): the host file could move the reviewer to the subscription while Codex's list was read through the proxy;
+# px was then saved false beside the proxy's models, so gpt-d stayed offered until CLI_TTL. Here the host file changes
+# as the proxy's list comes back (codexpxmodels() wrapped), and the saved report has px true, so the next read reads
+# Codex again and cardok refuses gpt-d.
+t_pxmodelsrace() {
+  local d=$T/$CASE/px out; mkdir -p "$d"
+  pxstub
+  pxmodels "http://127.0.0.1:$(cat "$d/port")"
+  # shellcheck disable=SC2016 # expanded in the engine shell (looks)
+  looks 'eval "pxasked_$(declare -f codexpxmodels)"
+    codexpxmodels() { local r=0; pxasked_codexpxmodels || r=$?; jq ".codexProxy.roles.reviewer = \"subscription\"" "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/host.new" && mv "$T/$CASE/host.new" "$XDG_CONFIG_HOME/conveyor/host.json"; return "$r"; }
+    hostclis fresh >/dev/null && echo "--- px $(jq -c "[.px, .clis.codex]" "$CLIS")" && cardok reviewer gpt-d medium'
+  out=$(cat "$T/$CASE/out")
+  [[ $out == $'--- px [true,["gpt-b","gpt-d","gpt-a"]]\ngpt-d is not one of the models'* ]] \
+    || fail "with the reviewer moved to the subscription while the proxy's list was read, px was not saved true or cardok reviewer gpt-d was not refused: $out"
 }
 # Bug it catches: a model only the proxy serves was offered to, and taken for, a reviewer whose Codex sessions stay on
 # the subscription (the host's report has one Codex list for every role). With the reviewer on subscription, the
@@ -273,7 +301,7 @@ t_nopricefamily() {
 # the note is for a model the belt runs.
 t_nopriceallowed() {
   setup '[]'; unset CONVEYOR_NOPRICE_CMD
-  jq -cn '{at: (now | floor), clis: {codex: ["gpt-extra-9"]}}' > "$ST/clis.json"
+  jq -cn '{at: (now | floor), clis: {codex: ["gpt-extra-9"]}, px: false}' > "$ST/clis.json"
   looks 'noprice'
   out=$(missing); [ "$out" = '["gpt-extra-9","m","x"]' ] \
     || fail "a model the host's Codex reports, added to the pack's models.allowed.codex and offered, is not listed: $out"
@@ -282,7 +310,7 @@ t_nopriceallowed() {
 # With no models.allowed the Board offers the host's Codex models, so one with no price is listed.
 t_nopricehost() {
   setup '[]'; unset CONVEYOR_NOPRICE_CMD
-  jq -cn '{at: (now | floor), clis: {codex: ["gpt-extra-9"]}}' > "$ST/clis.json"
+  jq -cn '{at: (now | floor), clis: {codex: ["gpt-extra-9"]}, px: false}' > "$ST/clis.json"
   tune 'del(.models.allowed)'
   looks 'noprice'
   out=$(missing)

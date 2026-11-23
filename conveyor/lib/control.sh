@@ -477,8 +477,9 @@ pxon() {
 # The report as CLIS holds it, for the CLIs installed now, is worked out in one jq run and kept, keyed on CLIS's exact
 # text and those CLIs (HOST_K), so a step that asks again before it is due starts no program for it, nor does a
 # subshell or card started after.
-# CLIS's px is true when its Codex list was read while the proxy route was on (pxon()), whether or not the proxy listed
-# any model (codexpxmodels()): once a role's Codex sessions no longer take the proxy, Codex is read again at the next
+# CLIS's px is true when its Codex list was read while the proxy route was on (pxon()) as the read started or ended,
+# whether or not the proxy listed any model (codexpxmodels()); a CLIS with no px (one written before px was) and a
+# Codex list is taken as px true: once a role's Codex sessions no longer take the proxy, Codex is read again at the next
 # read, due or not, so a model only the proxy serves is not kept for a role on the subscription until CLI_TTL.
 # What it printed is in HOST_R too ("" when it failed), for a caller that keeps it in its own shell (seatready).
 HOST_K=() # the key, then CLIS read as an object, when it was read (.at, whole seconds), the report and its px
@@ -490,7 +491,7 @@ hostclis() { # [fresh | due | <cli>]
   # A file with a NUL byte is read as before and never kept (a bash variable cannot hold it).
   [ "$a" = 1 ] && [ "${#HOST_K[@]}" = 5 ] && [ "${HOST_K[0]}" = "$k"$'\037'"$t" ] || {
     mapfile -d '' -t x < <(jq -Rsj '(try fromjson catch null | objects) // {} | . as $o
-        | tojson, ((.at | numbers | floor) // 0 | tostring), ([$ARGS.positional[] | {key: ., value: ($o.clis[.] // null)}] | from_entries | tojson), (.px == true | tostring)
+        | tojson, ((.at | numbers | floor) // 0 | tostring), ([$ARGS.positional[] | {key: ., value: ($o.clis[.] // null)}] | from_entries | tojson), (if .px | type == "boolean" then .px else $o.clis.codex | type == "array" end | tostring)
         | . + "\u0000"' --args $k < <(if [ "$a" = 1 ]; then printf '%s' "$t"; else cat "$CLIS"; fi) 2>/dev/null) && [ "${#x[@]}" = 4 ] || return 1
     HOST_K=('' "${x[@]}"); [ "$a" != 1 ] || HOST_K[0]=$k$'\037'$t
   }
@@ -503,7 +504,10 @@ hostclis() { # [fresh | due | <cli>]
   # Each installed CLI and its models: read now, or "*" for those CLIS has (null when it has none).
   for c in $CLINAMES; do
     command -v "$c" >/dev/null || continue
-    if [ "$one" = fresh ] || [ "$one" = "$c" ]; then found+=("$c" "$(climodels "$c" || echo null)"); [ "$c" != codex ] || ! pxon || px=true; else found+=("$c" '"*"'); fi
+    if [ "$one" = fresh ] || [ "$one" = "$c" ]; then
+      # The host file can change while climodels asks the proxy: px is true when the route was on before or after.
+      [ "$c" != codex ] || ! pxon || px=true; found+=("$c" "$(climodels "$c" || echo null)"); [ "$c" != codex ] || ! pxon || px=true
+    else found+=("$c" '"*"'); fi
   done
   r=$(jq -cn --argjson o "$old" '$ARGS.positional as $p | [range(0; $p | length; 2) | {key: $p[.], value: ($p[. + 1] | fromjson)}
       | if .value == "*" then .value = ($o.clis[.key] // null) else . end] | from_entries' --args "${found[@]}") || return 1
