@@ -109,12 +109,13 @@ capmark() { # <card> <the step it begins>
 batchlanded() { [ -e "$CARDS/$1.batch" ] && jq -e '.landed | . != null and . != false' "$CARDS/$1.batch" >/dev/null 2>&1; } # <card>
 # How many of the loop's cards in progress run no builder session: alive, with <worktree>.nocap standing (capmark()), or
 # in a batch that has landed. Prints "<those in their land step, not waiting, and those whose batch landed> <those that
-# wait (<worktree>.idle)> <in their review step, not waiting> <in their test step, not waiting>".
+# wait (<worktree>.idle), a card whose batch landed among them while it still sleeps> <in their review step, not
+# waiting> <in their test step, not waiting>".
 offcap() { # <the loop's own cards in progress, "<pid> <card>" one a line>
   local p c s n=0 w=0 r=0 t=0
   while read -r p c; do
     [ -n "$c" ] && kill -0 "$p" 2>/dev/null || continue
-    if batchlanded "$c"; then n=$((n + 1)); continue; fi
+    if batchlanded "$c"; then n=$((n + 1)); [ ! -e "$CARDS/$c.idle" ] || w=$((w + 1)); continue; fi
     read -r s 2>/dev/null < "$CARDS/$c.nocap" || continue
     if [ -e "$CARDS/$c.idle" ]; then w=$((w + 1)); else
       case $s in land) n=$((n + 1)) ;; review) r=$((r + 1)) ;; test) t=$((t + 1)) ;; esac

@@ -251,6 +251,8 @@ t_clibuildwake() {
 # Bug it catches (issue 1538): a card of a batch whose landing was done kept its slot until its own process woke, as it
 # still slept at its claim with its idle mark: the loop counted it, and started no card in the slot a landed card had
 # freed. Here c7's batch has landed and c8's has not, both asleep in their land step: the count is 1 (c8), not 2.
+# Bug it catches too (follow-up of issue 1538): offcap() did not count the landed c7 as waiting, so the machine's count
+# (inuse, room()) took a slot for a card that only sleeps: both sleep, so inuse is 0, not 1.
 # It calls turncount(): the marks are those of a card asleep at its claim, which a real loop's cards write only for the
 # moment between the landing and the wake (settle(), lib/claim.sh), too short to hold for a check.
 t_clibatchlanded() {
@@ -258,7 +260,7 @@ t_clibatchlanded() {
     'declare -A mine=() took=(); running=0 cap=1 old="" why="" serve=1 mhold="" self=x now=running said=""
      for c in c7 c8; do command tail -f /dev/null & mine[$!]="$c ${c#c}"; echo land > "$CARDS/$c.nocap"; : > "$CARDS/$c.idle"; done
      echo "{\"by\": \"c9\", \"landed\": \"abc\"}" > "$CARDS/c7.batch"; echo "{\"by\": \"c9\"}" > "$CARDS/c8.batch"
-     turncount; echo "building=$building"; kill "${!mine[@]}"'
-  [ "$(tail -n 1 "$STUB/eng.out")" = "building=1" ] \
-    || fail "a card whose batch has landed, asleep at its claim, was not left out of the cap's count (c7 landed, c8 not: 1 expected): $(cat "$STUB/eng.out")"
+     turncount; echo "building=$building inuse=$inuse"; kill "${!mine[@]}"'
+  [ "$(tail -n 1 "$STUB/eng.out")" = "building=1 inuse=0" ] \
+    || fail "a card whose batch has landed, asleep at its claim, was not left out of the cap's count and the machine's count (c7 landed, c8 not, both idle: building=1 inuse=0 expected): $(cat "$STUB/eng.out")"
 }
