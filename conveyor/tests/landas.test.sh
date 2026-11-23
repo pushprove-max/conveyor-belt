@@ -263,6 +263,18 @@ t_pridle() {
   la_eng idlemerge
   [ "$(la_prst 7)" = MERGED ] && git -C "$T/$CASE/origin" merge-base --is-ancestor "$sha" main || fail "the pull request did not merge once the belt was empty and its run passed"
 }
+# Issue 1447 (R401). Bug it catches: docs/configuration.md said Merge PR idle runs the linked test files whenever Test
+# before a push is on, but a pack with neither test.fileCommand nor a test.list form that gives one file runs none
+# (pushtests() skips them) and idle merges. Here card 1's linked test file fails if run, and the pull request merges.
+t_pridlenofile() {
+  setup "[$(issue 1 2026-01-01)]"; la_prstub
+  tune '.push.check = true | .push.landAs = "pr" | del(.test.fileCommand, .test.list)'
+  loop control pr-merge idle > /dev/null || fail "control pr-merge idle was refused"
+  mkdir -p "$R/lib" && echo bad > "$R/lib/m.js" && echo 'grep -qx good lib/m.js' > "$R/lib/m.test.js" || fail "the fixture could not be made"
+  la_land 1; la_eng push c1 1 || fail "the push failed"
+  la_eng idlemerge
+  [ "$(la_prst 7)" = MERGED ] || fail "the pull request did not merge, with no test.fileCommand and no test.list, once the belt was empty"
+}
 # R106 of #1389. Bug it catches: with Merge PR idle, `control release` of a held issue while the push run ran (it takes
 # minutes) left that issue waiting to be picked with no card yet, and the pull request merged, as only the rule and
 # the card records were read again. #3 is held; the stubbed push run releases it: the run runs, and nothing merges.

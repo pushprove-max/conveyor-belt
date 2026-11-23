@@ -137,7 +137,10 @@ The status mark in the head tells you how new the data is:
 - **Live**: the Board's feed is open and sends each change as it happens.
 - **Polling**: the feed is not open, and the page reads the Board's data again at each refresh. **Updated** shows the
   age of the data.
-- **Stale**, **No data** or **Feed stopped**: the page does not get new data. A line under the head tells you what to do.
+- **Stale** or **No data**: the page does not get new data.
+- **Feed stopped**: the feed's heartbeat stopped. The page can still show data that a feed message brings.
+
+A line under the head tells you what to do.
 
 **Restart the Board's feed** is in each place that tells you to press it:
 
@@ -448,7 +451,7 @@ cards; merge it to close their issues" ([Land as](configuration.md#land-as)).
 **Merge PR** is **Button**, **Release** or **Idle**. Until you set it, it shows the pack's `push.prMerge`. Button
 leaves the merge to you, with **Merge** on the Control tab. Release merges the pull request when you make a release.
 Idle merges it when no card is on the belt and no issue can be picked. When **Test before a push** is on, the test files
-linked to its cards must pass first ([Merge PR](configuration.md#merge-pr)).
+linked to its cards must pass first, when the pack can run one test file at a time ([Merge PR](configuration.md#merge-pr)).
 
 **Test before a push** is a switch per project. On, before each push Conveyor runs the test files linked to the
 landings since the last push, and a file that fails holds the push. Off, a push runs no test first, and the tab says

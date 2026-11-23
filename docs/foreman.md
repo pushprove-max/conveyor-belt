@@ -240,7 +240,8 @@ A clause that holds `[likely]` outside the part is noted inside it. The report t
 part on its own line, as `Cause (not checked): <text>`.
 
 Each such problem also goes into `plugin-bugs.md` in the Foreman's folder, one line each: the time, the card, what the
-Foreman saw and the evidence path. The Board's Health panel and `/units` then show "N plugin problems noted", with
+Foreman saw and the evidence path. In the plugin's own repository, a line that is said again with `filed as #<n>` takes
+the place of the first one. In another project, it is a second line. The Board's Health panel and `/units` then show "N plugin problems noted", with
 the path of that file.
 
 The watchers run from the Conveyor version that the project uses. When the project moves to a new version, as when

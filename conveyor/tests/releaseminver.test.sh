@@ -37,7 +37,10 @@ t_relminver() {
     && git -C "$R" tag -fa v1.0.0 -m 'Release 1.0.0' > /dev/null && git -C "$R" cherry-pick "$O" > /dev/null \
     && git -C "$R" push -qf origin main v1.0.0 || fail "the fixture could not be made"
 
-  # The commits since v1.0.0 add the notes alone: no check, and the record says why.
+  # The commits since v1.0.0 change a plugin file outside the mod (commands/setup.md; issue 1447, R416: the docs said
+  # any plugin file starts the check) and add the notes: no check, and the record says why.
+  mkdir -p "$R/commands" && echo 'setup' > "$R/commands/setup.md" && git -C "$R" add -A && git -C "$R" commit -qm 'docs: a command' \
+    && git -C "$R" push -q origin main || fail "the fixture could not be made"
   out=$(loop release-prep 1.1.0 2>&1) || fail "release-prep failed on a release that changes no mod file: $out"
   [ ! -e "$STUB/npm-calls" ] && [ ! -e "$STUB/old-calls" ] || fail "a release that changes no mod file installed or ran Claude Code: $(cat "$STUB/npm-calls" "$STUB/old-calls" 2>&1)"
   jq -e '.minver.state == "skipped" and .minver.version == null and (.minver.why | test("change no file of the mod"))' "$T/$CASE/cards/release/run.json" > /dev/null \
@@ -46,7 +49,7 @@ t_relminver() {
   # A commit changes hooks/ alone: validate runs with 2.1.322 on the packaged commit, fails, and stops the release
   # before the suite, with its output.
   mkdir -p "$R/hooks" && echo 'export {}' > "$R/hooks/a.ts" && git -C "$R" add -A && git -C "$R" commit -qm 'feat: a hook' \
-    && [ "$(git -C "$R" diff --name-only v1.0.0 HEAD | sort | tr '\n' ' ')" = "docs/releases/1.1.0.md hooks/a.ts " ] \
+    && [ "$(git -C "$R" diff --name-only v1.0.0 HEAD | sort | tr '\n' ' ')" = "commands/setup.md docs/releases/1.1.0.md hooks/a.ts " ] \
     && git -C "$R" push -q origin main && rm -f "$STUB/runs" "$STUB/gh-calls" && touch "$STUB/old-fail" \
     || fail "the fixture could not be made: $(git -C "$R" diff --name-only v1.0.0 HEAD)"
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not stop on a failed validate on the oldest version: $out"

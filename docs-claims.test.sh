@@ -11,7 +11,9 @@
 # - the /units guide's short IDs: hooks/sources.test.tsx ('a card with no issue has a short ID in every table', and the
 #   one for a card id ending in -0) draws `red <commit>`, `card <N>` and `card`, but a test of the mod has no file access
 #   in its types, so it cannot read the guide, and the guide's text is read here.
-# Bugs it catches: a /units guide that names only the issue as a row's ID; a tab row the guide does not tell to swipe; a comment that again says a card waits only for its own
+# - a page or release note line that states a condition of behaviour that other cases run (issue 1447): a release note
+#   is the fixed text of a past version, so only its text can be read; each line below names the code or case that runs it.
+# Bugs it catches: a page or release note that says more than the code does (issue 1447, each line below); a /units guide that names only the issue as a row's ID; a tab row the guide does not tell to swipe; a comment that again says a card waits only for its own
 # issue's approval line, a last NO-GO that lands or blocks with no P1 round, or a seat's model only from the pack's list.
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
@@ -35,5 +37,46 @@ has .claude/dashboard/parts/rules-rows.js 'or a parent issue it inherits the yes
 has conveyor/lib/card.sh 'or gets one fix round and a review on a P1' 'the loop comment leaves out the P1 round'
 # O357: the comment of cardok().
 has conveyor/lib/control.sh 'the review'"'"'s list has the Codex models that Codex reports too, when the pack sets no models.allowed or its codex' 'the comment names only the pack'"'"'s list, or Codex'"'"'s models as an addition for every seat or with no condition'
+# Issue 1447 (R-ids are the audit's). Each line is a claim that was wider than the code; the behaviour is run in the case named.
+# R400: a release pushes the default branch (commands/release-prep.sh `git push --atomic`), so Land as pr cannot say never.
+has docs/configuration.md 'Conveyor never pushes the default branch, except that a release pushes its commits and tag.' 'Land as pr says no push of the default branch happens, though a release does it'
+# R401: with no test.fileCommand or test.list form that gives one file, pushtests() runs nothing and idle merges. The merge
+# runs in tests/landas.test.sh t_pridlenofile; the words are read here and in t_pridledocs.
+has docs/configuration.md 'This run needs a pack that can run one test file at a time' 'Idle promises tests before a merge to a pack that cannot run one file'
+has docs/configuration.md 'or the pack cannot run one test file, Conveyor merges with no test run first' 'Idle leaves out the merge with no test run for such a pack'
+has docs/board.md 'must pass first, when the pack can run one test file at a time' 'the Board guide promises the idle test run to a pack that cannot run one file'
+# R397: the Feed stopped mark follows the heartbeat alone (app-feed.js), so new data can still arrive.
+has docs/board.md "**Feed stopped**: the feed's heartbeat stopped." 'the guide says Feed stopped means no data arrives'
+# R208: a "filed as" line outside the plugin's own repository is a second row (foreman/stop.sh, plugin_home).
+has docs/foreman.md 'In another project, it is a second line.' 'the guide says one line each, though a filed line outside the plugin repository is a second one'
+# R408 (lib/claim.sh): the batch is on any files, off at landBatch 1, and runs a shared test file again once for each change.
+has docs/releases/1.11.0.md "The cards can change different files. A batch holds up to the pack's \`landBatch\` cards, and \`landBatch\` 1 turns batches off." 'the 1.11.0 batch line leaves out the files and the off value'
+has docs/releases/1.11.0.md 'the batch runs that file again on main before it lands, once for each change of that card.' 'the 1.11.0 batch line promises a second run whenever a landing shares a file'
+# R409 (lib/mainred.sh; tests/mainredproof.test.sh t_mainreddepsnew): a result is shared only for matching test files and dependencies.
+has docs/releases/1.11.0.md 'one diagnosis for the cards that wait on the same test file, as long as the installed dependencies are the same.' 'the 1.11.0 notes give one diagnosis to every waiting card'
+has docs/releases/1.11.0.md 'and so does a card that waits after the installed dependencies change.' 'the 1.11.0 notes leave out the new check after a change of dependencies'
+# R124 (lib/session.sh): no session ID in the output, no resume.
+has docs/releases/1.11.0.md 'when its output names one, and else started again from nothing' 'the 1.11.0 notes resume with no session ID'
+# R411 (tests/narrow.test.sh t_narrowownwhole).
+has docs/releases/1.6.0.md 'A changed helper outside any case runs the whole file.' 'the 1.6.0 notes leave out the whole-file run for a helper'
+# R414 (lib/lint.sh lintratchet; tests/lint.test.sh t_lintnoratchet: two findings on unchanged lines fail it).
+has docs/releases/1.7.0.md 'A lint command with `ratchet` set to false judges every finding, on any line, so a finding on a line you did not change fails it.' 'the 1.7.0 lint note leaves out that ratchet false fails on every finding'
+# R418 (docs/cards.md): a seat CLI that the host never had blocks at once.
+has docs/releases/1.7.0.md 'A seat set to a CLI that the host never had still blocks the card at once.' 'the 1.7.0 notes say any missing tool waits'
+# R126 (foreman/watch-idle.sh): only a turn that wrote the cache and read none stops the pings.
+has docs/releases/1.7.0.md "after a ping that visibly did not keep the model's cache warm" 'the 1.7.0 notes say the pings stop when the cache use cannot be read'
+# R416 (commands/release-prep.sh; tests/releaseminver.test.sh t_relminver: a commands/setup.md change runs no check): the check reads the diff of hooks, types and .claude-plugin/plugin.json only.
+has docs/releases/1.7.0.md 'when `hooks/`, `types/` or `.claude-plugin/plugin.json` has changed' 'the 1.7.0 notes say any plugin file starts the oldest-version check'
+# R421, R424 (lib/card.sh loopstop and privfix; tests/reviewback.test.sh).
+has docs/releases/1.8.0.md 'comes back after its fix and that review has no P0 or P1 finding.' 'the 1.8.0 notes end the loop on a repeated P2 or P3 beside a new P0 or P1'
+has docs/releases/1.8.0.md "A privacy finding in the card's own change gets one more fix round and one more review." 'the 1.8.0 notes leave out the privacy fix round'
+# R422 (bench/swe.sh swe_versionsnow): a file:// source is a folder read each time.
+has docs/releases/1.8.0.md 'A source given as a `file://` folder is read from its git folder each time.' 'the 1.8.0 notes give the hourly read to a file:// source'
+# R423 (lib/fulltest.sh suitereuse; docs/configuration.md).
+has docs/releases/1.8.0.md "a file that its suite commands name, the whole suite runs." 'the 1.8.0 notes leave out the settings and suite file exception'
+# R425 (docs/cards.md): the lint reuse conditions.
+has docs/releases/1.9.0.md "none of the files a lint command reads for all changes, and did not change the pack's \`lint\` field." 'the 1.9.0 notes leave out two lint reuse conditions'
+# R426 (commands/release-prep.sh relnotes): the first release's draft has no source check.
+has docs/releases/1.9.0.md 'For releases after the first, release notes check each line' 'the 1.9.0 notes promise the source check for the first release'
 [ "$fails" = 0 ] || exit 1
 echo "ok docs-claims"

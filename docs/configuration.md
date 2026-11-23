@@ -889,7 +889,8 @@ order, and each next card builds on the last.
   card's `Closes #N` line closes its issue when the push reaches the remote.
 - `pr`: the push sends main to the branch `conveyor/landing` and keeps one pull request open from it into the
   default branch. The first push opens the pull request, and so does the first push after you merge it. Each later
-  push updates it. Conveyor never pushes the default branch. The issues close when you merge the pull request.
+  push updates it. Conveyor never pushes the default branch, except that a release pushes its commits and tag. The
+  issues close when you merge the pull request.
 
 At each push, Conveyor writes the pull request's body again. It lists every card in it, in the order they landed: the
 `Closes #N` line, the title, the card id, its Done-when check (how many items are met, and each `D<n>` line of the
@@ -910,8 +911,9 @@ Merge PR sets who merges the pull request of Land as `pr`.
 - `idle`: Conveyor merges it when no card is on the belt and no issue can be picked. When Test before a push is on,
   Conveyor first runs the test files linked to every card in the pull request, each one alone, on the head of
   `conveyor/landing`. Conveyor merges only when they all pass. A file that fails goes to a main-fix card, as in the run
-  before a push. When Test before a push is off, Conveyor merges with no test run first
-  ([Which tests a card runs](#which-tests-a-card-runs)).
+  before a push. This run needs a pack that can run one test file at a time: `test.fileCommand`, or a `test.list` form
+  that can give the test command one file. When Test before a push is off, or the pack cannot run one test file,
+  Conveyor merges with no test run first ([Which tests a card runs](#which-tests-a-card-runs)).
 
 With every rule, **Merge** shows on the Control tab while a pull request is open. Conveyor merges with a merge
 commit. Then your local default branch moves to the remote's default branch, Conveyor closes the issues of the cards
