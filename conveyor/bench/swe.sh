@@ -838,10 +838,12 @@ swe_run() { # <n> <engine> <arm>...
   # failed preflight is, so the run history still says what to repair once the Board no longer waits for the answer.
   # Its conveyor arms name the engine asked for. Written here, not by swe_end: no container or sandbox is this run's,
   # and the ones swe_end removes can be an arms check's.
-  why=$(swe_setup 2>&1) || { echo "$why" >&2; trap - TERM INT
-    # An engine given as a commit is named by its version, as a run that started names it (swe_resolve).
-    SWE_VERSION=$(swe_relname "$eng0")
-    l=$(printf '%s\n' "${specs[@]}" | swe_setuprec "$n" "$eng0" refused "${why#conveyor: }") && swe_put "$SWE_DIR/live.json" "$l" && swe_runlog "$l"; SWE_RUN=; swe_board; return 1; }
+  why=$(swe_setup 2>&1) || { echo "$why" >&2
+    # An engine given as a commit is named by its version, as a run that started names it (swe_resolve). The lookup
+    # can wait for the origin: a Stop then still records the time it reached the run (swe_stopping). A Stop while the
+    # refused end is written waits for it, as one in swe_end does.
+    SWE_VERSION=$(swe_relname "$eng0"); trap '' TERM INT
+    l=$(printf '%s\n' "${specs[@]}" | swe_setuprec "$n" "$eng0" refused "${why#conveyor: }") && swe_put "$SWE_DIR/live.json" "$l" && swe_runlog "$l"; SWE_RUN=; swe_board; trap - TERM INT; return 1; }
   tf=$(swe_tasks) || { swe_unstart "$prev"; return 1; }; all=$(wc -l < "$tf")
   [ "$n" -le "$all" ] || { swe_unstart "$prev"; echo "conveyor: the task list holds $all tasks: n is 1 to $all" >&2; return 2; }
   # --task: the run's one task is that one, not the first of the order.

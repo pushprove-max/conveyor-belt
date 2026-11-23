@@ -225,6 +225,25 @@ t_swewaitmain() {
     || fail "show does not carry why the trial ended: $out"
 }
 
+# Bug (#1448 review): a run that Docker refused cleared its Stop trap before it looked up the release of its engine's
+# commit, which can wait 20 s for the origin; a Stop in that lookup killed it and recorded its end with no stopping time.
+# The git stand-in holds ls-remote once Docker has refused (the lookup), until the hold file is gone.
+t_swestoprelname() {
+  swe; local out id g=$T/$CASE/gitbin
+  mkdir -p "$g" && : > "$T/$CASE/hold" && printf '%s\n' '#!/usr/bin/env bash' \
+    "if [ \"\$1\" = ls-remote ] && [ -e '$SWE_FX/nodocker' ] && grep -qx info '$SWE_FX/docker.log' 2>/dev/null; then" \
+    "  : > '$T/$CASE/inlookup'; while [ -e '$T/$CASE/hold' ]; do sleep 0.1; done; fi" \
+    "PATH=\${PATH#*gitbin:} exec git \"\$@\"" > "$g/git" && chmod +x "$g/git" && : > "$SWE_FX/nodocker" || fail "the git stand-in was not made"
+  PATH=$g:$PATH loop bench swe 1 --solo --arm conveyor --engine "$EA" > "$T/$CASE/run.out" 2>&1 &
+  # A poll: the run reaches the lookup in its own time, after its setup is refused.
+  wait_until "[ -e '$T/$CASE/inlookup' ]" || fail "the run did not look up the release after Docker refused: $(cat "$T/$CASE/run.out")"
+  id=$(jq -r .id "$B/live.json")
+  out=$(loop bench swe stop "$id" 2>&1); rm -f "$T/$CASE/hold"; wait $! 2>/dev/null
+  [ "$out" = "conveyor: run $id is stopped. Its finished tasks are kept." ] || fail "Stop in the release lookup did not stop run $id: $out"
+  tail -n 1 "$B/runs.jsonl" | jq -e --arg id "$id" '.id == $id and .state == "stopped" and (.stopping | type) == "string" and .gone == null' > /dev/null \
+    || fail "Stop in the release lookup of run $id recorded its end without the time it reached the run: $(tail -n 1 "$B/runs.jsonl")"
+}
+
 # Bug (#1051): which card records end a trial. Only a card of the task's issue that has not ended and whose idle mark
 # stands (the engine stands it only while the card sleeps out a wait) ends it: a card in a session (its live record and
 # no idle mark), an idle mark of another card, or a card that ended, does not.
