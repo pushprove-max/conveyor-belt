@@ -359,7 +359,7 @@ landpr() { # <"card issue sha" of each card this push carries>...
 }
 # The landing pull request as the Board and the Foreman see it (health's landingPr), in $LANDPR: {number, url (null
 # when GitHub gave none), merge ({time, by, sha, result: merged or refused, reason}: the last merge asked of it, else
-# null), merged (when it was merged, else null), closed (when GitHub showed it not open, merged or closed there, prsync(); else
+# null), merged (when it was merged, here or on GitHub (prsync()), else null), closed (when GitHub showed it not open, merged or closed there, prsync(); else
 # null)}. A pull request of another number starts the file anew.
 prstate() { # <number> <jq filter, with $t the time> [jq arguments]
   local x n=$1 f=$2
@@ -371,7 +371,8 @@ prstate() { # <number> <jq filter, with $t the time> [jq arguments]
 }
 # $LANDPR brought to GitHub's state (health() reads it, else `github` for `watch`): the pull request GitHub has open
 # from LANDING is named there, with its link (one opened before $LANDPR was kept too), and with none open, the one it
-# names as open is closed (merged or closed on GitHub, not here), so the Board shows no Merge for it. Skipped while a
+# names as open is closed (merged or closed on GitHub, not here), so the Board shows no Merge for it, and merged, with
+# GitHub's time, when GitHub shows it merged. Skipped while a
 # push or a merge holds the push lock (each writes $LANDPR itself), and when GitHub does not answer. With Land as main
 # it still asks while $LANDPR names one open: a pull request left open when the rule changed is merged or closed on
 # GitHub later, and the Board must not keep showing it.
@@ -383,7 +384,11 @@ prsync() {
     if out=$(landingprs 20 {lk}>&-) \
       && n=$(jq -er '.[0].number // 0 | numbers' <<<"$out" 2>/dev/null); then
       if [ "$n" != 0 ]; then u=$(jq -r '.[0].url // "" | strings' <<<"$out"); prstate "$n" '.closed = null | .url = (if $u == "" then .url else $u end)' --arg u "$u"
-      elif n=$(jq -er 'objects | select(.merged == null and .closed == null) | .number | numbers' "$LANDPR" 2>/dev/null); then prstate "$n" '.closed = $t'
+      elif n=$(jq -er 'objects | select(.merged == null and .closed == null) | .number | numbers' "$LANDPR" 2>/dev/null); then
+        # One merged on GitHub is merged here too, with GitHub's time, so health's landingMerged names it (lib/views.sh).
+        out=$(timeout 20 gh pr view "$n" --json state,mergedAt {lk}>&- 2>/dev/null) \
+          && u=$(jq -er 'select(.state == "MERGED") | .mergedAt | strings' <<<"$out" 2>/dev/null) || u=''
+        prstate "$n" '.closed = $t | .merged = (if $m == "" then null else $m end)' --arg m "$u"
       fi
     fi
   fi

@@ -179,7 +179,7 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
           | ((($snap.control | objects | .landAs) // $snap.packLandAs) == "pr"
               and (($snap.control | objects | .prMerge) // $snap.packPrMerge) == "button") as $bymerge
           | ([$snap.health.landingPr | objects | select(.merged == null and .closed == null) | .number | numbers][0]) as $pr
-          # landingMerged: the last landing pull request merged (landingPr drops it), named only if it carried each fix.
+          # landingMerged: the last landing pull request merged (landingPr drops it), named only if each fix went in by it or an earlier one.
           | ([$snap.health.landingMerged | objects | select(.issues | arrays | . as $in | all($fx[]; .issue | IN($in[]))) | .number | numbers][0]) as $merged
           | (if .restarted != null then select($now - (.restarted | fromdate? // $now) >= 2 * $poll)
               | ["restart", "release-prep was started again at \(.restarted), but no run began: run `conveyor.sh release-run prep \($v)`"]

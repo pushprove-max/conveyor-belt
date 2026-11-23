@@ -199,8 +199,9 @@ cards() {
 # null, for the Foreman's watcher; landingPr ({number, url, merge, cards}): the open pull request of Land as pr as
 # GitHub last showed it ($LANDPR, prstate() and prsync(), lib/push.sh), with how many cards its pushed lines name and its last merge (a merge
 # GitHub refused gives the reason), for the Board's Merge and the Foreman; null with none open; landingMerged ({number,
-# merged, issues}): the last landing pull request Conveyor merged ($LANDPR's merged, until a new one is opened), with
-# the issues its pushed lines name, for the Foreman's watcher, else null. Every object of it that names a main-red fix card
+# merged, issues}): the last landing pull request merged, by Conveyor or on GitHub ($LANDPR's merged, until a new one is opened), with
+# the issues whose pushed lines name it or an earlier one (each went to LANDING before it, so is merged with it), for
+# the Foreman's watcher, else null. Every object of it that names a main-red fix card
 # (card) also has name, "Main is red (<commit>)", as rows.jq names it, and so does a Tests page card ("Tests page:
 # <file>"): the card has no issue (issue 0) to be shown by.
 # A bad line is set aside first (check()); records that still do not check give no record: the reason and exit 1.
@@ -533,7 +534,7 @@ health() {
        unchecked: ([group_by(.card)[] | select(any(.step == "landed")) | map(select(.step == "lint")) | last | select(.skipped == true)] | length), report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold, machineHold: ($mh[0] // null),
        landingPr: ([.[] | select(.step == "pushed" and (.pr | type) == "number") | {pr, card}] as $pp
          | $lp[0] // null | if . == null then null else . + {cards: ([$pp[] | select(.pr == $lp[0].number) | .card] | unique | length)} end),
-       landingMerged: ([.[] | select(.step == "pushed" and (.pr | type) == "number" and .pr == $lm[0].number) | .issue | numbers] as $mi
+       landingMerged: ([.[] | select(.step == "pushed" and (.pr | type) == "number" and .pr <= $lm[0].number) | .issue | numbers] as $mi
          | $lm[0] // null | if . == null then null else . + {issues: ($mi | unique)} end)}
     | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$hd/rec"
   rc=$?; rm -rf "$hd"; return $rc

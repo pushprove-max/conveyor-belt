@@ -57,7 +57,7 @@ la_land() { # <n> [<fix rounds>]
 }
 # gh's pull requests, in front of the shared stub (its issues): each one a file $STUB/pr.<n>, numbered from 7 (one with
 # .cross true is a fork's: listed by its branch name, as GitHub lists it, with isCrossRepository true); a list is
-# newest first (highest number first), as gh lists them; every
+# newest first (highest number first), as gh lists them; a view gives its state, with a mergedAt once merged; every
 # pr call is logged in $STUB/pr-calls. A merge (gh pr merge <n> --merge) makes GitHub's merge commit on origin's
 # main, of it and the head branch, unless $STUB/merge-refuse holds the reason GitHub gives; $STUB/merge-then, when
 # there is one, is sourced after a merge.
@@ -67,7 +67,7 @@ la_prstub() {
   cat > "$STUB/gh" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" = pr ] || exec "$STUB/gh.issues" "$@"
-echo "$*" >> "$STUB/pr-calls"; c=$2; n=''; [ "$c" != edit ] && [ "$c" != merge ] || { n=$3; shift; }; shift 2
+echo "$*" >> "$STUB/pr-calls"; c=$2; n=''; [ "$c" != edit ] && [ "$c" != merge ] && [ "$c" != view ] || { n=$3; shift; }; shift 2
 while [ $# -gt 0 ]; do case $1 in --head) h=$2 ;; --base) b=$2 ;; --title) t=$2 ;; --body) y=$2 ;; --merge) shift; continue ;; esac; shift 2; done
 case $c in
   list) cat "$STUB"/pr.* 2>/dev/null | jq -cs --arg h "$h" --arg b "$b" '[.[] | select(.head == $h and .base == $b and .state == "OPEN")] | sort_by(-.number) | [.[] | {number, url: "https://github.com/o/r/pull/\(.number)", isCrossRepository: (.cross // false)}]' ;;
@@ -80,6 +80,7 @@ case $c in
   create) n=$((7 + $(cat "$STUB"/pr.* 2>/dev/null | jq -s length)))
     jq -n --argjson n "$n" --arg h "$h" --arg b "$b" --arg t "$t" --arg y "$y" '{number: $n, head: $h, base: $b, title: $t, body: $y, state: "OPEN"}' > "$STUB/pr.$n"
     echo "https://github.com/o/r/pull/$n" ;;
+  view) jq -c '{state, mergedAt: (if .state == "MERGED" then "2026-01-02T00:00:00Z" else null end)}' "$STUB/pr.$n" ;;
   edit) jq --arg t "$t" --arg y "$y" '.title = $t | .body = $y' "$STUB/pr.$n" > "$STUB/pr.new" && mv "$STUB/pr.new" "$STUB/pr.$n" ;;
 esac
 EOF
@@ -161,11 +162,17 @@ t_prbutton() {
   [ "$(cat "$STUB/closed" 2>/dev/null)" = 1 ] || fail "issue 1, still open after the merge, was not closed: $(cat "$STUB/closed" 2>&1)"
   [ "$(loop health | jq -c .landingPr)" = null ] || fail "the merged pull request is still shown open: $(loop health | jq -c .landingPr)"
   # R214: the Foreman's watcher tells a merged landing pull request by landingMerged, as landingPr drops it, and cites
-  # it only for the issues it carried (#1, whose pushed line names it).
+  # it only for the issues merged by it (#1, whose pushed line names it, or an earlier one).
   [ "$(loop health | jq -c '[.landingMerged.number, .landingMerged.issues]')" = '[7,[1]]' ] || fail "health does not name the merged pull request and the issue it carried: $(loop health | jq -c .landingMerged)"
   la_land 2; la_eng push c2 2 || fail "the push after the merge failed"
   [ "$(la_prst 8)" = OPEN ] && [ "$(la_prst 7)" = MERGED ] || fail "the push after the merge opened no new pull request: $(cat "$STUB/pr-calls")"
   [ "$(jq -r .body "$STUB/pr.8" | grep -o '^Closes #[0-9]*' | paste -sd ' ')" = 'Closes #2' ] || fail "the new pull request does not hold only the card landed since: $(jq -r .body "$STUB/pr.8")"
+  # Bug it catches: landingMerged listed only the issues pushed into the last merged pull request, so with #1 merged
+  # through 7 and #2 through 8, the watcher's release wake said the suite's commit lacked #1's fix; and 8 merged on
+  # GitHub (not by Conveyor) gave no landingMerged at all, as prsync() marked it closed only.
+  "$STUB/gh" pr merge 8 --merge || fail "the stub's GitHub merge of pull request 8 failed"
+  [ "$(loop health | jq -c '[.landingMerged.number, .landingMerged.merged, .landingMerged.issues, .landingPr]')" = '[8,"2026-01-02T00:00:00Z",[1,2],null]' ] \
+    || fail "health does not name pull request 8, merged on GitHub, with the issues merged through 7 too: $(loop health | jq -c '[.landingMerged, .landingPr]')"
 }
 # Issue 462. Bug it catches: a fork's pull request from its own conveyor/landing (gh pr list --head matches the branch
 # name in any repository, newest first) taken for the landing pull request: the push wrote the cards into it (or opened
