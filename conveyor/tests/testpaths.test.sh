@@ -66,6 +66,25 @@ t_testpathsone() {
     || fail "an engine file that finds a change's test files still has a pattern of its own"
 }
 
+# Bug it catches: the Foreman's test files sourced a helper beside them (conveyor/foreman/casesreport.sh) that the
+# test patterns took for product code, so the bug-card check put those test files alone on main's code without it and
+# each failed there on the missing file, not on the bug. Each file they source is a test file of this repository's
+# pack (it sets no tests.patterns, so the default's) or a file a product file sources too, which main's code has.
+t_testpathshelper() {
+  setup '[]'
+  local root h d p out bad=''
+  root=$(cd "$SRC/.." && pwd -P)
+  jq -e '.tests.patterns == null' "$root/.conveyor/project.json" > /dev/null || fail "this repository's pack sets tests.patterns: the case reads the default's"
+  for h in $(sed -n 's/^[[:space:]]*\. "\$SRC\/\([^"]*\)".*/\1/p' "$SRC"/foreman/*.test.sh | sort -u); do
+    d=$(cd "$SRC/foreman/$(dirname "$h")" && pwd -P) || fail "the folder of $h, which a Foreman test file sources, is missing"
+    p=${d#"$root"/}/${h##*/}
+    [ -f "$root/$p" ] || fail "$p, which a Foreman test file sources, is missing"
+    out=$(tpeng "printf '%s\n' '$p' | testpaths") || fail "testpaths failed on $p: $out"
+    [ -n "$out" ] || git -C "$root" grep -qF "${h##*/}" -- conveyor ':!*.test.*' ':!conveyor/tests/' || bad+=" $p"
+  done
+  [ -z "$bad" ] || fail "a Foreman test file sources a helper the bug-card check leaves off main's code (no test file, and no product file sources it):$bad"
+}
+
 # Bug it catches: setup wrote no pattern for a project whose tests the default misses. Its guess, from the names of
 # the tracked files, is each convention's glob: test-*.mjs from src/test-a.mjs and src/test-b.mjs (here against the old
 # fixed patterns, which miss them), never a document's (docs/test-plan.md) or a file with no test word in its name

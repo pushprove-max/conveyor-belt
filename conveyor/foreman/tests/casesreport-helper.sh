@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # The Foreman's test files that run their cases side by side (each case in a subshell, its output in <dir>/<case>.out,
 # a mark <dir>/<case>.passed when it passed) report them through this. Sourced, never run.
+# It lives in a tests/ folder so the pack's test patterns take it for a test file: the bug-card check puts a change's
+# test files alone on main's code, and a helper they source from outside such a folder is left behind, so each of them
+# fails there on the missing file, not on the bug. Its name holds `helper`, so a card's run does not run it as a test.
 # casesreport <dir> <name prefix> <case>...: for each case, prints its output to stderr, then the line `ok <prefix><case>`
 # when it passed: the name its FAIL line gives, which is the one the main-red proof reads a case's pass by (a file that
 # prints one summary line gives a case no result). Returns 1 when a case did not pass.

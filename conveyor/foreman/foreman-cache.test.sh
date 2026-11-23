@@ -80,6 +80,6 @@ for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c"
 read -ra cases <<<"$SEL"
 for c in "${cases[@]}"; do (t_"$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & done
 wait
-. "$SRC/casesreport.sh"
+. "$SRC/tests/casesreport-helper.sh"
 casesreport "$B" cache- "${cases[@]}" || exit 1
 echo "ok [foreman-cache]"

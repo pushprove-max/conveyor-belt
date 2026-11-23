@@ -337,11 +337,12 @@ t_narrowcapunder() {
 # D3, #351 scenario 8. Bug it catches: the bug card's proof run on main gave the suite command every test file of the
 # change, past the limit. With test.cardFiles 2, a change to three test files runs two on main, each alone through
 # test.fileCommand (one process a file, each given its own path), the one that failed most recently first, and the
-# check's result says one was left out.
+# check's result says one was left out. Bug it catches too (#1525's follow-up): the file left out was not put on
+# main's code either, so a file that runs and sources it (a test helper) failed there on the missing file, not on the bug.
 t_narrowcapproof() {
   local wt=$T/$CASE/cards/c7
   setup '[]'; tune '.test.cardFiles = 2'
-  printf '%s\n' 'echo "$CONVEYOR_TEST_FILE" >> "$STUB/given"; exit 1' > "$STUB/mainrun-cmd"
+  printf '%s\n' 'echo "$CONVEYOR_TEST_FILE" >> "$STUB/given"; [ -f c.test.sh ] || echo "$CONVEYOR_TEST_FILE" >> "$STUB/nohelper"; exit 1' > "$STUB/mainrun-cmd"
   echo '{"card":"c1","issue":1,"step":"test","time":"2026-11-10T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"d.test.sh","cases":[]}],"timeout":null}}' >> "$ST/cards.jsonl"
   git -C "$R" worktree add -q --detach "$wt" && echo two >> "$wt/a.txt" \
     && for f in a c d; do printf '%s\n' '#!/usr/bin/env bash' 'grep -qx two a.txt' > "$wt/$f.test.sh"; done && git -C "$wt" add -A || fail "the card's change could not be staged"
@@ -352,6 +353,7 @@ t_narrowcapproof() {
   [ "$(cat "$STUB/given" 2>&1)" = $'d.test.sh\na.test.sh' ] || fail "the proof run did not run the two files alone, d.test.sh first: $(cat "$STUB/given" "$T/$CASE/run.out" 2>&1)"
   grep -qF '1 of the 3 test files linked to the change did not run, as a card runs at most 2 (test.cardFiles)' "$T/$CASE/unfixed" && ! grep -qx -- '- c.test.sh' "$T/$CASE/unfixed" \
     || fail "the check's result does not say one file was left out: $(cat "$T/$CASE/unfixed")"
+  [ ! -e "$STUB/nohelper" ] || fail "the file left out, c.test.sh, was not on main's code when these ran: $(cat "$STUB/nohelper")"
 }
 
 # Card c7's list of tests (listcmd()), on a pack changed by <filter>, when testsel() fails as jq does on a test map

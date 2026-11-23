@@ -195,7 +195,7 @@ commentsonly() { # <worktree>
 # A main-red fix card is not checked so: its proof is main's own failing cases (redproof(), its exits too).
 # That selection is read only when the change adds or changes no test file.
 bugproof() { # <card> <worktree> <issue json>
-  local mwt=$CARDS/mainrun/$1.unfixed fs=() tf=() ins=() iks=() nf=() f k out rc fx held='' sha='' why nr='' sh='' stop='' cn
+  local mwt=$CARDS/mainrun/$1.unfixed fs=() tf=() ta=() ins=() iks=() nf=() f k out rc fx held='' sha='' why nr='' sh='' stop='' cn
   rm -f "$2.unfixed"; BUGWHY=$UNFIXED
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
@@ -227,9 +227,10 @@ bugproof() { # <card> <worktree> <issue json>
   while IFS= read -r -d '' f && IFS= read -r -d '' k; do
     inlinesplit "$2" "$f" "$k" > /dev/null; case $? in 0) ins+=("$f") iks+=("$k") ;; 3) sh=${sh:-$f} ;; esac
   done < <(inlinekinds "$2" 2>/dev/null)
-  fs=("${tf[@]}" "${ins[@]}")
-  # At most test.cardFiles of them run, as in the card's run (testcap()); the files left out are neither put on main's
-  # code nor named as run, and the result says so.
+  fs=("${tf[@]}" "${ins[@]}") ta=("${tf[@]}")
+  # At most test.cardFiles of them run, as in the card's run (testcap()); the files left out are not named as run, and
+  # the result says so. Every test file of the change (ta) is still put on main's code: a file that runs may source one
+  # left out, a test helper, and without it fails on the missing file, not on the bug.
   cn=''
   if testcap "${fs[@]}" && [ "$CAPLEFT" != 0 ]; then
     cn=$CAPNOTE; declare -A kp=(); for f in "${CAPFILES[@]}"; do kp[$f]=1; done
@@ -246,7 +247,7 @@ bugproof() { # <card> <worktree> <issue json>
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && out=$({ git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt" \
-      && { [ ${#tf[@]} = 0 ] || git -C "$2" diff --cached --binary --no-renames HEAD -- "${tf[@]/#/:(literal)}" | git -C "$mwt" apply --index; } \
+      && { [ ${#ta[@]} = 0 ] || git -C "$2" diff --cached --binary --no-renames HEAD -- "${ta[@]/#/:(literal)}" | git -C "$mwt" apply --index; } \
       && for k in "${!ins[@]}"; do
            mkdir -p "$(dirname "$mwt/${ins[k]}")" && inlinesplit "$2" "${ins[k]}" "${iks[k]}" > "$mwt/${ins[k]}" \
              && git -C "$mwt" add -- ":(literal)${ins[k]}" || exit 1

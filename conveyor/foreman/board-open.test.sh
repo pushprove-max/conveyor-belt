@@ -134,6 +134,6 @@ read -ra cases <<<"$SEL"
 pids=()
 for c in "${cases[@]}"; do (t_"$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & pids+=($!); done
 [ ${#pids[@]} = 0 ] || wait "${pids[@]}" # with no pid, wait waits for the Board's server too
-. "$SRC/casesreport.sh"
+. "$SRC/tests/casesreport-helper.sh"
 casesreport "$B" board-open- "${cases[@]}" || exit 1
 echo "ok [board-open]"
