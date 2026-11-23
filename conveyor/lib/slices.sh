@@ -369,7 +369,7 @@ umbrellas() { # <open issues, a json list>
       ([.[] | select('"$TADONE"') | .card] | unique) as $lc
       | ([.[] | select(.step == "split" and (.split.cards | type) == "array" and .split.cards != [] and (.issue | IN($open[] | select((.parts // []) == []) | .number)))]
       | group_by(.issue)[] | last | select(all(.split.cards[]; . as $d | any($tac[0][]? | select(.id == $d) | .id, .card, (.was // [])[]; IN($lc[])))) | "split\t\(.issue)\t\(.split.cards | join(", "))")' \
-    --slurpfile tac <(jq -c '.cards | arrays' "${TACARDS:-/dev/null}" 2>/dev/null) < <(turncards) 2>/dev/null)
+    --slurpfile tac <([ ! -s "${TACARDS:-}" ] || jq -c '.cards | arrays' "$TACARDS" 2>/dev/null) < <(turncards) 2>/dev/null)
 }
 # The issues given attached to <parent> as its GitHub sub-issues (its parts): GitHub takes each one's id, not its
 # number. The id is read through graphql (privacy.test.sh's ghwrite refuses a REST call outside gh_write in lib/)

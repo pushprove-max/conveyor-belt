@@ -43,8 +43,9 @@ upnext() { # <open issues json> [retried] [all] [the control record, when the ca
   packget test.surveyHour sh || return 1
   # The open issues whose own seats' accounts are at the guard: the pick, the same-file check, the dry pick and the
   # Board's order all leave them out, so none of them names an issue the loop will not start.
+  # None held starts no jq to write the empty list (#1542).
   gd=$(jq -r --argjson i "$1" 'select(.guard != null) | .cards // {} | keys[] | select(tonumber? | IN($i[].number))' <<<"$c" 2>/dev/null \
-    | while read -r n; do ! cardheld "$c" "$n" || echo "$n"; done | jq -cs .) || gd='[]'
+    | while read -r n; do ! cardheld "$c" "$n" || echo "$n"; done) && { [ -z "$gd" ] && gd='[]' || gd=$(jq -cs . <<<"$gd"); } || gd='[]'
   # Read first, one after the other: a read that fails stops the pick (a process substitution's failure is not
   # passed back, and jq would read no cards at all, so every issue with a card would be picked again).
   if [ -n "${UPREC:-}" ]; then cards=$(<"$UPREC") && old=$(<"$UPOLD") || return 1
@@ -141,13 +142,14 @@ cardheld() { # <control record> <issue>
   jq -e --arg n "$2" '.guard != null and (.cards // {} | has($n))' <<<"${1:-null}" >/dev/null 2>&1 || return 1
   [ "$(state "$1" "$(SEATCARD=$2 guardread "$1" | jq -r '.pct // empty')")" = "paused by guard" ]
 }
-pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues, as asked() gives them] [acctkey of the record the reading was taken for]
+pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues, as asked() gives them] [the control record the reading was taken for]
   local issues=${3:-} n card l again c u m f
   check && c=$(ctl) || return 1
   [ -z "$issues" ] || adopt "$issues" || return 1
   [ "$(state "$c" "${2:-}")" = running ] || return 0
   # The accounts changed since the loop read the record: its reading is another account's; the next turn reads again.
-  [ -z "${4:-}" ] || [ "$(acctkey "$c")" = "$4" ] || { echo wait; return 0; }
+  # The same record is not read again: no jq for it (#1542).
+  [ -z "${4:-}" ] || [ "$c" = "$4" ] || [ "$(acctkey "$c")" = "$(acctkey "$4")" ] || { echo wait; return 0; }
   # No list: the loop asked for none, the record not saying running a moment ago. It asks at its next turn.
   [ -n "$issues" ] || { echo wait; return 0; }
   # The fix card of a red main commit (redpick(), lib/mainred.sh) goes ahead of the queue, as its P0 issue did; it counts

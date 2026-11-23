@@ -104,7 +104,7 @@ testprogress() { # <output file> [log...]
 # A review's tokens are not in its stream before its turn ends: Codex writes the running total (`token_count`) to the session file it keeps under its home, named after the thread the stream opens with. rollout() finds that file.
 rollout() { # <a review's events file>; prints the session file of that review, nothing when there is none yet
   local id
-  id=$(grep -m 1 '"thread.started"' "$1" 2>/dev/null | jq -r '.thread_id // empty' 2>/dev/null) && [[ $id =~ ^[0-9A-Za-z-]+$ ]] || return 0
+  id=$(grep -m 1 '"thread.started"' "$1" 2>/dev/null) && id=$(jq -r '.thread_id // empty' <<<"$id" 2>/dev/null) && [[ $id =~ ^[0-9A-Za-z-]+$ ]] || return 0
   find "${CODEX_HOME:-$HOME/.codex}/sessions" -type f -name "rollout-*-$id.jsonl" 2>/dev/null | head -n 1
 }
 # A build, fix, rebase or review that makes no progress for STUCK seconds is ended: no new output line (its live
@@ -142,8 +142,8 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
     [ "$who" != "$pid" ] || break
     kill -0 "$pid" 2>/dev/null || { wait "$pid"; rc=$?; break; }
     [ -n "$who" ] || break
-    # A card that gave way (giveway()): once a card took its turn, the live record names it (gaveWay: its issue).
-    new=$(jq -c --argjson st "$st" 'select(.away == true and (.to | type) == "number" and .to != $st.gaveWay) | $st + {gaveWay: .to}' "${out%.live}.claim" 2>/dev/null) \
+    # A card that gave way (giveway()): once a card took its turn, the live record names it (gaveWay: its issue); no jq while it has no claim (#1542).
+    [ -s "${out%.live}.claim" ] && new=$(jq -c --argjson st "$st" 'select(.away == true and (.to | type) == "number" and .to != $st.gaveWay) | $st + {gaveWay: .to}' "${out%.live}.claim" 2>/dev/null) \
       && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
     # A guard that failed twice (guardrun.sh) ends the session, as OpenCode and Codex ignore "continue": false: at the look after the one that saw it (gk), as guardrun.sh records the failure before it gives the session the refusal, which the session reads in between.
     [ "$4" = test ] || [ ! -s "$wt.guardfail" ] || ! awk -F'\t' '++n[$1] == 2 { f = 1 } END { exit !f }' "$wt.guardfail" || { [ -z "$gk" ] && gk=1 || { kill "$pid" 2>/dev/null; wait "$pid"; rc=$?; break; }; }

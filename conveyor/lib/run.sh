@@ -686,18 +686,21 @@ turnask() {
 turnpick() {
   # A queued card a card on the belt waits on (urgent) goes first, past the cap; the rest only below the cap. Each pick
   # holds the records' lock for LOCKLIMIT seconds at most (lockedfor): one stopped there fails as any failed pick.
-  picked=''; [ "$asking" != 1 ] || [ -z "$urgent" ] || { picked=$(ONLY=$urgent lockedfor pick fresh pick retried "$pct" "${issues:-}" "$(acctkey "$ctl")") && [ "$picked" != wait ]; } || picked=''
+  picked=''; [ "$asking" != 1 ] || [ -z "$urgent" ] || { picked=$(ONLY=$urgent lockedfor pick fresh pick retried "$pct" "${issues:-}" "${ctl:-null}") && [ "$picked" != wait ]; } || picked=''
   # With the cap reached, a main-red fix card (red) takes the one slot beyond it; no queued issue does.
   [ -n "$picked" ] || [ "$asking" != 1 ] || [ -z "$red" ] \
-    || { picked=$(BEYOND='main is red' lockedfor pick fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "$(acctkey "$ctl")") && [ "$picked" != wait ]; } || picked=''
+    || { picked=$(BEYOND='main is red' lockedfor pick fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "${ctl:-null}") && [ "$picked" != wait ]; } || picked=''
   # Below the cap, the issue it would take is first read beside the cards on the belt (overlap(), outside the lock).
   [ -n "$picked" ] || [ "$building" -ge "$cap" ] || [ "$asking" != 1 ] || { overlap "${issues:-}" "$([ "$left" != 0 ] || echo retried)" "$ctl"; issues=$OVL; }
   [ -n "$picked" ] || [ "$building" -ge "$cap" ] \
-    || picked=$([ "$asking" = 1 ] && lockedfor pick fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "$(acctkey "$ctl")") || { [ "$running" != 0 ] || [ -n "$serve" ] || [ -n "$pusher" ] || exit 1; picked=''; }
+    || picked=$([ "$asking" = 1 ] && lockedfor pick fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "${ctl:-null}") || { [ "$running" != 0 ] || [ -n "$serve" ] || [ -n "$pusher" ] || exit 1; picked=''; }
   [ "$picked" != stale ] || return 1 # the next turn says so and stops picking
   [ "$picked" != wait ] || { waits=1; picked=''; }
   [ -n "$picked" ] || return 0
   read -r c n again <<<"$picked"
+  # The pick may have written the control record (adopt()): read again in this shell, so the card starts with it kept
+  # and does not check it again at each of its reads (#1542).
+  local CTL_V; ctlread 2>/dev/null || :
   CARDCTL=$ctl cardrun "$c" "$n" & mine[$!]="$c $n"; ranon[$!]=$RAN
   [ "$again" = true ] || left=$((left - 1)); started=$((started + 1))
   return 1

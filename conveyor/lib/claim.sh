@@ -62,7 +62,7 @@ claim() { # <card> <worktree> <the card's pid>; under the lock
       o=$(jq -r --arg c "${c%.claim}" 'select((.pid | type) == "number" and (.paths | type) == "array") | "\(.pid) \(. + {card: $c} | tojson)"' "$o" 2>/dev/null) || continue
       [ -z "$o" ] || ! kill -0 "${o%% *}" 2>/dev/null || printf '%s\n' "${o#* }"
     done) || return 1
-  [ -z "$others" ] && others='[]' || others=$(jq -sc . <<<"$others") || return 1
+  others="[${others//$'\n'/,}]" # one claim a line, each one line of JSON (tojson): no jq makes the list (#1542)
   # Cards whose change applies together with this one are no overlap: left out here, as if they shared no file.
   git -C "$2" diff --cached --binary --no-renames > "$2.cpatch.new" || return 1
   if [ "$others" != '[]' ]; then
@@ -336,11 +336,12 @@ giveway() { # <card> <worktree> [fixing|fix]; under the lock
 # stack, base: the base commit, restacks}. Prints the base when the card is to be stacked now; else returns 1.
 stackto() { # <card> <worktree> <claim()'s wait> <issue json>
   local h n id s d b rc o
-  h=$(jq -r .on <<<"$3") && [[ ${h##*-} =~ ^[0-9]+$ ]] && [[ ${1##*-} =~ ^[0-9]+$ ]] && packget landBatch n && [ "$n" -gt 1 ] || return 1
-  jq -e --argjson h $((10#${h##*-})) "$DEPS"' needs | index($h) | not' <<<"$4" >/dev/null 2>&1 || return 1
+  # This runs at each turn of a wait (settle()): H, when the issue names H's in no `Depends on:` line, from one jq (#1542).
+  h=$(jq -r --argjson w "$3" "$DEPS"'. as $i | $w.on | strings | select(test("-[0-9]+$")) | select((sub(".*-"; "") | tonumber) as $h | $i | needs | index($h) | not)' <<<"$4" 2>/dev/null) \
+    && [ -n "$h" ] && [[ ${1##*-} =~ ^[0-9]+$ ]] && packget landBatch n && [ "$n" -gt 1 ] || return 1
   if ! readysince "$CARDS/$h" >/dev/null; then
-    o=$(ctl 2>/dev/null) && o=$(jq -c '.order | arrays' <<<"$o") && [ -n "$o" ] || o='[]'
-    jq -e --argjson a $((10#${1##*-})) --argjson b $((10#${h##*-})) '(index($a) // -1) != (index($b) // -1)' <<<"$o" >/dev/null || return 1
+    o=$(ctl 2>/dev/null) || o=null
+    jq -e --argjson a $((10#${1##*-})) --argjson b $((10#${h##*-})) '((.order | arrays) // []) | (index($a) // -1) != (index($b) // -1)' <<<"${o:-null}" >/dev/null || return 1
   fi
   d=$(mktemp -d) || return 1
   cp "$CARDS/$h.cpatch" "$d/patch" 2>/dev/null && id=$(git patch-id --stable < "$d/patch") && id=${id%% *} && [ -n "$id" ] || { rm -rf "$d"; return 1; }

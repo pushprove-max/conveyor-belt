@@ -197,7 +197,9 @@ startagain() { # <open issues, a json list>
   local n s last ok
   declare -A tried=()
   last=$(cat "$ST/startcheck" 2>/dev/null); [[ $last =~ ^[0-9]+$ ]] || last=0
-  jq -en --argjson l "$last" --argjson p "$API_PAUSE" '$l + $p <= now' >/dev/null 2>&1 || return 0
+  # A whole number of seconds is compared in the shell: no jq at each turn of the loop (#1542).
+  if [[ $API_PAUSE =~ ^[0-9]+$ ]]; then [ $((last + API_PAUSE)) -le "$EPOCHSECONDS" ] || return 0
+  else jq -en --argjson l "$last" --argjson p "$API_PAUSE" '$l + $p <= now' >/dev/null 2>&1 || return 0; fi
   while IFS=$'\t' read -r n s; do
     startonce "$n" && s=$(startnow "$s") || continue
     [ -n "${tried[$s]+1}" ] || { echo "$EPOCHSECONDS" > "$ST/startcheck"; if startcheck "$s"; then tried[$s]=1; else tried[$s]=''; fi; }

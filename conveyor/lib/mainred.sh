@@ -199,6 +199,7 @@ machinehold() { # <card> <main's commit> <the files, json> <the cases, json>
 }
 # What the loop says while the machine hold stands, nothing when none does: the files that must pass on main again.
 machineheld() {
+  [ -s "$MACHINEHOLD" ] || return 0 # no hold: no jq at each turn of the loop (#1542)
   jq -re 'objects | "the machine fails \(.controls | join(", ")) on main, with no change to main that explains it (found by card \(.card) at \(.sha[0:12]), since \(.since): no card is picked until they pass again"' "$MACHINEHOLD" 2>/dev/null || :
 }
 # The loop's look at the hold (run()), at most once every POLL seconds while it stands: the hold's files run on main as it is now, in a

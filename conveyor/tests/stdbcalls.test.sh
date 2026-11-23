@@ -106,8 +106,10 @@ t_stdbpipe() {
 # real one. On main before issue 595 this run made 760 or more of them (700 to 712 jq and 60 or 61 state store calls in
 # three runs, without the 3 jq calls of this case's own landing checks): the batch path read a file once a field (the card's claim in claim(), its batch mark in settle(), its
 # ready mark in readysince()), and the run's cards one by one, each with its own jq (batchkeep(), batchpass(),
-# gather()). Bug it catches: those reads made one by one again.
-BATCHCALLS_WAS=760
+# gather()). Bug it catches: those reads made one by one again. Issue 1542: main made 822 (761 jq, 61 state store) when
+# a wait's every turn ran jq again (stackto(), startagain(), machineheld(), and the claim list in claim()); with those
+# cut, runs made 716 (655 jq, 61 state store). The limit of 740 catches those per-turn calls coming back.
+BATCHCALLS_MAX=740
 t_batchcalls() {
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'x.txt x.test' 'y.txt y.test'
   local py jqp n by; py=$(command -v python3); jqp=$(command -v jq)
@@ -121,5 +123,5 @@ case $a in *"$STUB"/*) ;; *) echo jq >> "$STUB/calls" ;; esac' "$jqp" > "$STUB/j
   # Count before the checks below: their jq calls are the test's, not the engine's.
   n=$(wc -l < "$STUB/calls"); by=$(sort "$STUB/calls" | uniq -c | tr -s ' \n' ' ')
   landedtogether "$(cardof 8) $(cardof 7)" || fail "the two cards did not land as one batch: $(st 'select(.step == "landed")')"
-  [ "$n" -lt "$BATCHCALLS_WAS" ] || fail "one batch run of two cards made $n jq and state store calls, not fewer than the $BATCHCALLS_WAS before issue 595: $by"
+  [ "$n" -lt "$BATCHCALLS_MAX" ] || fail "one batch run of two cards made $n jq and state store calls, not fewer than the limit of $BATCHCALLS_MAX (760 before issue 595, 822 before issue 1542): $by"
 }
