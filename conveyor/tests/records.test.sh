@@ -261,6 +261,68 @@ t_ruleadopt() {
     || fail "#9, held at 2026-10-01 and released after P3=off, lost its Held time: $(cat "$ST/moved.json")"
 }
 
+# The cases below run `control hold 9` (no `by`) on 2026-10-01, then `control release 9` with P3 on and `control
+# depends 9 add 8` on 2026-10-02, and a real snapshot on 2026-10-03: it is the snapshot that builds other and nodep from
+# the reasons #9 is held for, which a sight given to movedsaw() by hand would set itself. Prints #9's [col, at, left].
+depafter() {
+  ghedits
+  ruleon 2026-10-01 control hold 9; ruleon 2026-10-02 control release 9; ruleon 2026-10-02 control depends 9 add 8
+  ruleon 2026-10-03 snapshot --fresh || fail "the snapshot at 2026-10-03 exited non-zero"
+  jq -c '.["9"] | [.col, .at, .left]' "$ST/moved.json"
+}
+
+# Bug (follow-up of #1472): #9 went to Queue on the release and came back on the dependency, but the snapshot saw
+# `other` and took it as held all along, so #9 kept the time of its first hold and the two stays in Held counted as one.
+t_ruledepafter() {
+  setup "$(jq -cs . <(issue 8 2026-01-01 P3) <(issue 9 2026-01-01 P3))"
+  [ "$(depafter)" = '["held","2026-10-03T00:00:00Z",null]' ] \
+    || fail "#9, released and back in Held by a dependency added after the release, keeps its first Held time: $(cat "$ST/moved.json")"
+}
+
+# Bug (E1): `control depends 9 add 8` for #9 with no entry in moved.json wrote the file blank, so every other issue's
+# Held and Queue time was lost.
+t_ruledepnew() {
+  setup "$(jq -cs . <(issue 8 2026-01-01 P3) <(issue 9 2026-01-01 P3))"
+  ghedits; mkdir -p "$ST"; echo '{"7":{"col":"held","at":"2026-10-01T00:00:00Z","seen":"2026-10-01T00:00:00Z"}}' > "$ST/moved.json"
+  ruleon 2026-10-02 control depends 9 add 8
+  [ "$(jq -c 'keys' "$ST/moved.json")" = '["7"]' ] || fail "control depends 9 add 8, #9 with no entry, did not keep #7's entry in moved.json: $(cat "$ST/moved.json")"
+}
+
+# Bug (E2): with a label (awaiting-deploy) that kept #9 in Held all along, a dependency added after `control release 9`
+# masked the label too, so the snapshot gave #9 a new Held time though it never left Held. Also caught (E6): a snapshot
+# that left the label out of nodep.
+t_ruledeplabel() {
+  setup "$(jq -cs . <(issue 8 2026-01-01 P3) <(issue 9 2026-01-01 P3 awaiting-deploy))"
+  [ "$(depafter)" = '["held","2026-10-01T00:00:00Z",null]' ] \
+    || fail "#9, kept in Held by a label, got a new Held time when a dependency was added after the release: $(cat "$ST/moved.json")"
+}
+
+# Bug (E3): #9 already named #7, open but landed (push off), so it did not wait on it; the dependency on #8 added after
+# the release was taken as not its first, and the snapshot kept #9's first Held time for two stays in Held.
+t_ruledeplanded() {
+  setup "$(jq -cs . <(issue 7 2026-01-01 P3) <(issue 8 2026-01-01 P3) <(dep "$(issue 9 2026-01-01 P3)" 'Depends on: #7'))"
+  mkdir -p "$ST"; landed 7 >> "$ST/cards.jsonl"
+  [ "$(depafter)" = '["held","2026-10-03T00:00:00Z",null]' ] \
+    || fail "#9, waiting on no landed #7 and back in Held by #8 added after the release, keeps its first Held time: $(cat "$ST/moved.json")"
+}
+
+# Bug (E4): #9 already named other/repo#600, closed, so it did not wait on it; `control depends` read that issue with
+# no state and took it as open, so the dependency on #8 was not its first, and #9 kept its first Held time.
+t_ruledepfar() {
+  setup "$(jq -cs . <(issue 8 2026-01-01 P3) <(dep "$(issue 9 2026-01-01 P3)" 'Depends on: other/repo#600'))"
+  echo CLOSED > "$STUB/repo.other_repo.600"
+  [ "$(depafter)" = '["held","2026-10-03T00:00:00Z",null]' ] \
+    || fail "#9, waiting on no closed other/repo#600 and back in Held by #8 added after the release, keeps its first Held time: $(cat "$ST/moved.json")"
+}
+
+# Bug (E5): #9's line `Depends on: # 2 3` is not a list of #N, so a rule held #9 before the release and after it; the
+# dependency on #8 added after the release was taken as its first, and the snapshot gave #9 a new Held time.
+t_ruledepbad() {
+  setup "$(jq -cs . <(issue 8 2026-01-01 P3) <(dep "$(issue 9 2026-01-01 P3)" 'Depends on: # 2 3'))"
+  [ "$(depafter)" = '["held","2026-10-01T00:00:00Z",null]' ] \
+    || fail "#9, kept in Held by the line 'Depends on: # 2 3', got a new Held time when #8 was added after the release: $(cat "$ST/moved.json")"
+}
+
 # Bug (E3): a snapshot's copy saw the new P3 #9 held by start-in-Held and a label (awaiting-deploy), with P3 on; a
 # `control release 9` before it dated its sight wrote a release with no column, which took the place of the sight and
 # was then dropped, so the next snapshot dated #9 later, though the label kept it in Held all along.

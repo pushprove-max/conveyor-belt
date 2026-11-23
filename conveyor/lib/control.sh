@@ -1474,6 +1474,12 @@ depends() ( # <issue> <add|remove> <issue>...
     [ -z "$cyc" ] || { echo "conveyor: #$n depending on $(printf '#%s, ' "$@" | sed 's/, $//') would make a dependency cycle ($cyc): none of them would ever be picked; nothing changed" >&2; exit 2; }
   fi
   jq -j . <<<"$new" | gh_write issue edit "$n" --body-file - >/dev/null || { echo "conveyor: the body of #$n could not be written; nothing changed" >&2; exit 1; }
+  # A first dependency it waits on, added after a release the snapshot has not judged yet (movedsaw()), is not what held
+  # it then. What it waited on before is read as the snapshot reads it (waits(): open and not landed, and its follow-ups,
+  # with another repository's issue in its state as asked (far); baddeps: a line that is not a list of #N holds it too).
+  if [ "$how" = add ] && jq -e --argjson n "$n" --slurpfile cards <(recs 2>/dev/null) "$DEPS"'map(.number) as $o | .[] | select(.number == $n)
+      | waits($cards; $o) == [] and baddeps == []' <<<"$open" >/dev/null; then
+    movedlocked moveddep "$n"; fi
   if [ "$how" = add ]; then echo "conveyor: #$n now waits on $(printf '#%s, ' "$@" | sed 's/, $//')"
   else echo "conveyor: #$n no longer depends on $(printf '#%s, ' "$@" | sed 's/, $//')"; fi
 )
@@ -1508,12 +1514,14 @@ RULED='def ruled($c): .by != null and ((.by.labels | any(IN($c.rules.never[])))
 # something besides your hold and the rules (other: a label, a dependency) or that those rules exclude: the entry loses
 # that left (one with no column goes), and the issue counts as held, so a label, or a rule turned off before the
 # release, keeps its Held time. A rule turned off after the release brings it back to Held: that entry keeps its left.
+# So does a first dependency it waits on, added after the release (dep, moveddep()): for that entry its dependencies
+# do not count (nodep in place of other), but a label or anything else besides them still does.
 # An entry with no column (a release before the first sight) is not kept.
 movedsaw() { # <cols json> <saw>
   local m sight gone stay; m=$(movedread)
   stay=$(jq -c --argjson o "$1" "$RULED"'[to_entries[] | .key as $k | select(.value.left != null and .value.rules != null and $o[$k].col == "held")
-      | .value.rules as $r | select($o[$k] | .other or ruled({rules: $r})) | $k]' <<<"$m") \
-    && m=$(jq -c --argjson s "$stay" 'reduce $s[] as $k (.; if .[$k].col == null then del(.[$k]) else .[$k] |= del(.left, .rules) end)' <<<"$m") || return 1
+      | .value.rules as $r | .value.dep as $d | select($o[$k] | (if $d then .nodep else .other end) or ruled({rules: $r})) | $k]' <<<"$m") \
+    && m=$(jq -c --argjson s "$stay" 'reduce $s[] as $k (.; if .[$k].col == null then del(.[$k]) else .[$k] |= del(.left, .rules, .dep) end)' <<<"$m") || return 1
   gone=$(jq -c --argjson o "$1" --argjson s "$stay" '(.held // []) as $h | [$o | to_entries[]
       | select(.value.alone and (.key | tonumber | IN($h[]) | not) and (.key | IN($s[]) | not)) | .key]' "${STATE%/*}/control.json" 2>/dev/null) || gone='[]'
   sight=$(jq -c --argjson o "$1" --arg t "$2" '. as $m | $o | with_entries(.key as $k | .value as $s
@@ -1534,8 +1542,16 @@ movedhold() { # <hold|release> <the control record as it now stands> <issue>...
   new=$(jq -c --arg a "$a" --argjson c "$c" --arg t "$(clock)" "$RULED"'
     reduce $ARGS.positional[] as $k (.; .[$k] |= if $a == "release" then (if .other or ruled($c) then . else . + {left: $t, seen: $t}
         + if .by == null then {rules: $c.rules} else {} end end)
-      elif .col == "held" and .left == null then .seen = $t else . + {col: "held", at: $t, seen: $t} | del(.left, .rules) end) | with_entries(select(.value != null))' --args "$@" <<<"$m") \
+      elif .col == "held" and .left == null then .seen = $t else . + {col: "held", at: $t, seen: $t} | del(.left, .rules, .dep) end) | with_entries(select(.value != null))' --args "$@" <<<"$m") \
     && movedwrite "$new" || echo "conveyor: cannot write $MOVED; Held's time for $* is dated by the next snapshot" >&2
+}
+# Under moved.json's lock: `control depends <issue> add` gave the issue its first dependency it waits on. An entry
+# released with no `by` (rules), which no snapshot has judged yet, is marked dep: the dependency came after the release,
+# so movedsaw() does not take it as something that kept the issue in Held all along (nodep). No entry: nothing changes.
+moveddep() { # <issue>
+  local m new; m=$(movedread)
+  new=$(jq -c --arg k "$1" 'if .[$k] | type == "object" and .left != null and .rules != null then .[$k].dep = true else . end' <<<"$m") \
+    && { [ "$new" = "$m" ] || movedwrite "$new"; } || echo "conveyor: cannot write $MOVED; Held's time for #$1 may not count its new dependency" >&2
 }
 # Under moved.json's lock: `control hold <issue>`, and the issue's entry in moved.json just before it (JSON, null for
 # none), printed for movedundo. Both in one lock, so a snapshot cannot write the entry between the read and the hold:
