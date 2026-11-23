@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 60
-# The Foreman's filing hook (foreman.sh filing, no_cause) refuses a fix issue with no `## Cause` section (#1293).
+# timeout: 120
+# The Foreman's filing hook (foreman.sh filing, cause.sh no_cause) refuses a fix issue with no `## Cause` section (#1293).
 # Bug caught: the Foreman filed a fix that named a symptom ("the reader is over its size cap") and never the source of
 # the problem, because nothing in the filing path asked for the cause.
 set -uo pipefail
@@ -117,7 +117,38 @@ out=$(cd "$M" && jq -cn --arg c "$(body $'## What happens now\nIt breaks.')" '{s
 [ -z "$out" ] || fail "a fix issue filed in a session that is not the Foreman's was checked; command: $(body $'## What happens now\nIt breaks.'); output: $out"
 }
 
-cases=(what heading bug new)
+# Bug: a card that changed only no_cause did not run this file. The Foreman folder is outside the engine's area map and
+# no test is named after foreman.sh, so only its test links chose this file, one of six, and a card's Test step runs
+# five (CARDLINKED): the cap left it out. The case stages a change to no_cause in a copy of this checkout and asks the
+# engine for the card's list as its Test step does (testsel narrow, then testcap with CARDLINKED; neither runs a
+# test): the list comes from the links, the name lookup and the cap together, which the link text alone does not show.
+t_linked() {
+CASE=linked
+local root W=$B/linked R=$B/linked/r f
+root=$(cd "$SRC/../.." && pwd -P)
+f=$(cd "$root" && grep -l '^no_cause()' conveyor/foreman/*.sh)
+[ -n "$f" ] || fail "no file under conveyor/foreman/ defines no_cause()"
+mkdir -p "$R" "$W/home" && git -C "$root" ls-files -z | while IFS= read -r -d '' p; do [ ! -e "$root/$p" ] || printf '%s\0' "$p"; done \
+  | tar -C "$root" --null -T - -cf - | tar -C "$R" -xf - || fail "the checkout was not copied"
+git -C "$R" init -q && git -C "$R" add -A && git -C "$R" -c user.name=t -c user.email=t@example.com commit -qm base \
+  || fail "the copy was not committed"
+sed 's/^no_cause() {/no_cause() { :;/' "$R/$f" > "$W/f.tmp" && mv "$W/f.tmp" "$R/$f" && git -C "$R" add -A || fail "no_cause was not changed"
+# The engine of the copy, on the copy as its main, with no host file, so its state folder is the copy's own.
+( unset "${!CONVEYOR_TEST_@}" SHAREDRUN CAPMAX
+  export HOME=$W/home XDG_CONFIG_HOME=$W/config CONVEYOR_MAIN=$R CONVEYOR_CARDS=$W/cards
+  . "$R/conveyor/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$R/conveyor/commands/run.sh")" || exit 1
+  s=$(testsel "$R" narrow) || exit 1; mapfile -t a < <(tail -n +2 <<<"$s")
+  CAPMAX=$CARDLINKED testcap "${a[@]}"; echo "$CAPLEFT"; printf '%s\n' "${CAPFILES[@]}" ) > "$W/list" 2> "$W/err" \
+  || fail "the card's list of tests was not made for a change to no_cause in $f: $(tail -5 "$W/err")"
+grep -qxF conveyor/foreman/filing-cause.test.sh <(tail -n +2 "$W/list") \
+  || fail "a card that changes only no_cause in $f does not run conveyor/foreman/filing-cause.test.sh; its list: $(tr '\n' ' ' < "$W/list")"
+# The copy has no test records, so the cap keeps the given order; a card's records put the files that failed last first
+# (testcap), and any of them can push this file out. Only a list the cap leaves whole runs it whatever the records say.
+[ "$(head -1 "$W/list")" = 0 ] \
+  || fail "the cap leaves files out of the list of a card that changes only no_cause in $f, so its records can drop conveyor/foreman/filing-cause.test.sh; left out: $(head -1 "$W/list"), list: $(tail -n +2 "$W/list" | tr '\n' ' ')"
+}
+
+cases=(what heading bug new linked)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"
