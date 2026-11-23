@@ -27,7 +27,7 @@
     task: null,         // the task the Task page shows (null: the first shared task)
     sel: [],            // the runs ticked in the run history
     cmp: { a: '', b: '', n: 0 },   // Compare's two sides, and how many times they changed (a diff that failed is asked again once after a change)
-    diffs: new Map(),   // each pair of results keys' diff (`bench swe diff`), asked once while the Board is open, all asked again once a run is deleted (parts/bench-versions.js)
+    diffs: new Map(),   // each pair of results keys' diff (`bench swe diff`), asked once while the Board is open and again when a later run adds a flipped task, all asked again once a run is deleted (parts/bench-versions.js)
     plan: null,         // Plan a run: the question, the tasks and the arms ticked
     by: 'all',          // what the Task map is coloured by
     folds: new Set(),   // the folds opened (fold), by their key, so a redraw keeps them open

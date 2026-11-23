@@ -1141,7 +1141,8 @@ shows no answer when it works, and shows a refusal beside the button.
 Two pages load what they show with no click: the commits on **Versions** and the readings on **Compare**. Each comes
 from `bench swe diff`, which calls the model for each flipped task that has no saved reading. So the page asks for
 the diff of a pair of results once while the Board is open. A redraw, or a return to the page, uses the answer that it
-has. A new pair asks once more: a new version on **Versions**, or a changed picker on **Compare**. When a run is
+has. A new pair asks once more: a new version on **Versions**, or a changed picker on **Compare**. A pair also asks
+once more when a later run adds a flipped task that its diff does not have, also after an ask that did not come. When a run is
 deleted, from the Board or on the build machine, each page asks for its diffs again. A diff or a
 reading that did not come is not asked for again by itself. **Versions** shows a dash in **Changed steps**, and
 **Compare** shows "not kept". **Compare** asks once more when you change a picker, and every page asks

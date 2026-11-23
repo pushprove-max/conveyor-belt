@@ -139,6 +139,97 @@ test('Compare: a history read with a run gone from the build machine asks for th
   assert.equal(diffs().length, 1, `the history read without ${V14} asks for the pair again`);
 });
 
+// Bug it guards: Compare kept a diff of a pair that had every reading, and a later run that added a flipped task under the
+// same results keys showed that task's reading as "not kept" until a picker changed: the diff read before the run has no
+// entry for it. A flipped task no ask of the pair named asks once more; a redraw after that asks for nothing.
+test('Compare: a later run that adds a flipped task under keys already read asks for the diff again', async () => {
+  const set = BH.study(), w = await opened(set, 'compare'), arms = ['conveyor', 'conveyor-codex-claude'], [NEW, NEW2] = BH.ORDER.slice(50, 52);
+  const diffs = () => w.posts.splice(0).map((p) => p.body.args).filter((a) => a[0] === 'diff');
+  const flipsTable = () => Array.from(page(w).querySelectorAll('.bench-flips tbody tr'), (r) => [r.dataset.task, text(r.lastElementChild)]);
+  const answer = (ids) => BH.reply(JSON.stringify({ flipped: ids.map((task) => ({ task, a: { resolved: true }, b: { resolved: false }, reading: `Read ${task}.` })) }));
+  diffs();
+  w.reply = answer([BH.TASKS[35], BH.TASKS[36]]);
+  const b = act(bp(w), 'cmp-b'); b.value = 'arm:conveyor-codex-claude'; b.dispatchEvent(new w.Event('change'));
+  await settle(); await settle();
+  assert.equal(diffs().length, 1, 'the picked pair is asked for once');
+  assert.deepEqual(flipsTable(), [[BH.TASKS[35], `Read ${BH.TASKS[35]}.`], [BH.TASKS[36], `Read ${BH.TASKS[36]}.`]], 'the pair\'s two flips have their readings');
+  // A later run: both arms on one more task, under the same results keys, Conveyor resolving it and Codex builds not
+  // (the cells of TASKS[35], which flipped the same way), then a poll that reads it (a new guard stamp makes the tab read
+  // the history again).
+  const later = async (task, id, guard) => {
+    const show = structuredClone(set.shows[STUDY]), src = show.tasks[35];
+    const line = { ...show.run, id, n: 1, arms, cols: show.run.cols.filter((c) => arms.includes(c.arm)).map((c) => ({ ...c, done: 1, resolved: c.arm === 'conveyor' ? 1 : 0 })) };
+    set.shows[id] = { run: line, tasks: [{ id: task, title: 'A later task', cells: src.cells.filter((c) => arms.includes(c.arm)) }], tail: [] };
+    set.hist = { ...set.hist, runs: [line, ...set.hist.runs] };
+    const d = full();
+    Object.assign(d.panels.bench.data.bench, { live: set.live, versions: set.versions });
+    Object.assign(d.panels.bench.data, { drift: set.drift, guard });
+    next(w, d);
+    await settle(); await settle(); await settle();
+  };
+  // That ask fails (the Board's time limit): the complete answer read before stays, with no entry for the new task.
+  w.reply = { ok: false, status: 504, text: () => Promise.resolve('conveyor: the request took too long') };
+  await later(NEW, 'r20261109T180000-6', 1);
+  assert.deepEqual(flipsTable().map(([id]) => id).sort(), [BH.TASKS[35], BH.TASKS[36], NEW].sort(), 'the later run\'s task is shown as flipped');
+  assert.equal(diffs().length, 1, `the flipped task ${NEW}, not in the diff read before, asks for the pair again`);
+  assert.equal(new Map(flipsTable()).get(NEW), 'not kept', 'a failed ask leaves the new task\'s reading missing');
+  BH.go(w, 'score'); BH.go(w, 'compare'); await settle(); await settle();
+  assert.deepEqual(diffs(), [], 'a failed ask is not asked again on each draw');
+  // Bug it guards: a failed ask blocked every later automatic ask of the pair, so a flip a later run added under the same
+  // pickers stayed "not kept" too. Its ask fails again, and a redraw after it asks for nothing.
+  await later(NEW2, 'r20261109T190000-7', 2);
+  assert.ok(new Map(flipsTable()).has(NEW2), `the second later run's task ${NEW2} is shown as flipped`);
+  assert.equal(diffs().length, 1, `the flipped task ${NEW2}, which no ask named, asks for the pair again after a failed ask`);
+  BH.go(w, 'score'); BH.go(w, 'compare'); await settle(); await settle();
+  assert.deepEqual(diffs(), [], 'that failed ask is not asked again on each draw');
+  // Bug it guards: the failed ask marked the new task as asked, and the answer read before had every reading, so a picker
+  // that came back to the pair asked for nothing and the task stayed "not kept".
+  w.reply = answer([]);
+  b.value = 'arm:solo'; b.dispatchEvent(new w.Event('change'));
+  await settle(); await settle();
+  diffs();
+  w.reply = answer([BH.TASKS[35], BH.TASKS[36], NEW, NEW2]);
+  const b2 = act(bp(w), 'cmp-b'); b2.value = 'arm:conveyor-codex-claude'; b2.dispatchEvent(new w.Event('change'));
+  await settle(); await settle();
+  assert.equal(diffs().length, 1, `a picker back on the pair asks again: its diff has no entry for ${NEW} or ${NEW2}`);
+  assert.equal(new Map(flipsTable()).get(NEW), `Read ${NEW}.`, 'the new answer gives its reading');
+  assert.equal(new Map(flipsTable()).get(NEW2), `Read ${NEW2}.`, 'the new answer gives the second task\'s reading');
+  BH.go(w, 'score'); BH.go(w, 'compare'); await settle(); await settle();
+  assert.deepEqual(diffs(), [], 'a redraw after that asks for nothing');
+});
+
+// Bug it guards: the same on Versions. Its newest pair's diff was asked for once while the Board was open, so a later run
+// of each version on a task that flipped showed that task's commits as "not kept" for good.
+test('Versions: later runs that add a flipped task under keys already read ask for the newest pair\'s diff again', async () => {
+  const set = BH.study(), w = await opened(set), NEW = BH.ORDER[50], [V18] = OLDS[0], key = (v) => `conveyor-${v[3].repeat(40)}`;
+  const diffs = () => w.posts.splice(0).map((p) => p.body.args).filter((a) => a[0] === 'diff');
+  const commits = () => new Map(Array.from(page(w).querySelectorAll('.bench-flips tbody tr'), (r) => [r.dataset.task, text(r.lastElementChild)]));
+  const answer = (ids) => BH.reply(JSON.stringify({ flipped: ids.map((task) => ({ task, a: { resolved: false }, b: { resolved: true }, changes: [{ commit: 'abc1234', title: `fixed ${task}` }] })), steps: ['review'] }));
+  w.reply = answer([]);
+  BH.go(w, 'versions');
+  for (let i = 0; i < 30; i += 1) await settle();
+  assert.equal(diffs().length, 5, 'each pair of the 6 versions is asked for once');
+  // A later run of each version on one more task: v1.8.0 does not resolve it and v1.9.0 does (the cells of TASKS[35], which
+  // flipped the same way).
+  const later = (from, id, at) => {
+    const show = structuredClone(set.shows[from]), line = { ...show.run, id, n: 1, arms: ['conveyor'], started: at, cols: show.run.cols.filter((c) => c.arm === 'conveyor').map((c) => ({ ...c, done: 1, resolved: from === STUDY ? 1 : 0 })) };
+    set.shows[id] = { run: line, tasks: [{ id: NEW, title: 'A later task', cells: show.tasks[35].cells.filter((c) => c.arm === 'conveyor') }], tail: [] };
+    return line;
+  };
+  set.hist = { ...set.hist, runs: [later(STUDY, 'r20261109T180000-6', set.hist.runs[0].started), later(OLDS[0][1], 'r20261108T180000-6', set.hist.runs[1].started), ...set.hist.runs] };
+  w.reply = answer([NEW]);
+  const d = full();
+  Object.assign(d.panels.bench.data.bench, { live: set.live, versions: set.versions });
+  Object.assign(d.panels.bench.data, { drift: set.drift, guard: 1 });
+  next(w, d);
+  for (let i = 0; i < 10; i += 1) await settle();
+  assert.ok(commits().has(NEW), `the later runs' task ${NEW} is shown as flipped from ${V18}`);
+  assert.deepEqual(diffs(), [['diff', key(V18), key('v1.9.0'), '--json']], `the flipped task ${NEW}, not in the diff read before, asks for the newest pair again`);
+  assert.equal(commits().get(NEW), `abc1234 fixed ${NEW}`, 'the new answer gives its commits');
+  BH.go(w, 'score'); BH.go(w, 'versions'); await settle(); await settle();
+  assert.deepEqual(diffs(), [], 'a redraw after that asks for nothing');
+});
+
 // Bug it guards: a run that has not ended (its process may still write its results) could be archived or deleted. With a
 // run going ticked in the run history, Archive and Delete are off with the reason; ticked with an ended run, one request
 // archives both runs.

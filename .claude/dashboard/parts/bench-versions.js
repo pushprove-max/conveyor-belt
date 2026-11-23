@@ -92,21 +92,31 @@
     return el;
   }
   // The diff (`bench swe diff --json`) of two results keys, once read. It is asked for once for a pair while the Board is
-  // open (K.B.diffs), and again once a run is deleted (panels/bench.js empties K.B.diffs: a new run can reuse its results
+  // open (K.B.diffs), again for a flipped task the pair's answers did not cover yet (below), and again once a run is
+  // deleted (panels/bench.js empties K.B.diffs: a new run can reuse its results
   // key): each reading in it is a model call for a task with none saved, so a redraw uses what it has, and a
   // diff that failed (no answer, or a flipped task with no reading: `diff` saves none then) stays missing until the Board
-  // starts again, or, for Compare, until the pickers change (change: K.B.cmp.n, which Compare passes) once more. Versions
-  // asks for one at a time (alone): each answer draws the page, which asks for the next. Nothing here draws before the answer.
+  // starts again, or, for Compare, until the pickers change (change: K.B.cmp.n, which Compare passes) once more. A flipped
+  // task the page shows (ids) that no ask of the pair named yet (e.tried) asks once more: a later run can add a task
+  // under keys already read, and the diff read before it has no entry for it. Each ask adds its tasks to e.tried, so a
+  // failed ask is not asked again on each draw, while a flip a later run adds still asks. Only an answer adds its tasks
+  // to e.ids, so a task a failed ask named asks again when the pickers change. Versions asks for one at a time (alone):
+  // each answer draws the page, which asks for the next. Nothing here draws before the answer.
   const parse = (text) => { try { return K.obj(JSON.parse(text)) || { flipped: [] }; } catch { return { flipped: [] }; } };
   const diffOf = (a, b) => { const e = K.B.diffs.get(`${a}|${b}`); return e ? K.obj(e.data) : null; };
   const missing = (e) => !e.data || K.list(e.data.flipped).some((f) => !K.obj(f) || !f.reading);
-  function wantDiff(a, b, alone, change) {
-    const D = K.B.diffs, k = `${a}|${b}`, old = D.get(k);
-    if (old && (old.busy || change === undefined || old.change === change || !missing(old))) return;
+  function wantDiff(a, b, alone, change, ids = []) {
+    const D = K.B.diffs, k = `${a}|${b}`, old = D.get(k), got = old ? old.ids : new Set(), tried = old ? old.tried : new Set();
+    const again = old && change !== undefined && old.change !== change && (ids.some((id) => !got.has(id)) || missing(old));
+    if (old && (old.busy || !(again || ids.some((id) => !tried.has(id))))) return;
     if (alone && Array.from(D.values()).some((x) => x.busy)) return;
-    const e = { busy: true, data: old ? old.data : null, change };
+    const e = { busy: true, data: old ? old.data : null, change, ids: got, tried: new Set([...tried, ...ids]) };
     D.set(k, e);
-    K.ask(['diff', a, b, '--json']).then((text) => { e.busy = false; if (text !== null) e.data = parse(text); if (K.B.diffs === D) K.draw(); });
+    K.ask(['diff', a, b, '--json']).then((text) => {
+      e.busy = false;
+      if (text !== null) { e.data = parse(text); e.ids = new Set([...got, ...ids]); }
+      if (K.B.diffs === D) K.draw();
+    });
   }
   const pairOf = (p, v) => diffOf(p.col.key, v.col.key);
   // The steps whose engine files changed between a version and the one before, a task flipped or not (the diff's steps);
@@ -169,7 +179,7 @@
   function flipsBox(vs) {
     const prev = vs[vs.length - 2], last = vs[vs.length - 1], fl = flipsOf(prev, last);
     const s = K.box(`Tasks that flipped from ${prev.v} to ${last.v}`, 'Each with the first step where the runs went apart and the engine commits that changed that step.');
-    vs.slice(1).map((v, i) => [vs[i], v]).reverse().forEach(([p, v]) => wantDiff(p.col.key, v.col.key, true));
+    vs.slice(1).map((v, i) => [vs[i], v]).reverse().forEach(([p, v]) => wantDiff(p.col.key, v.col.key, true, undefined, v === last ? fl.map((f) => f.id) : []));
     s.append(K.table(['Task', 'Now', 'First step apart', 'Commits that changed it'], fl.map((f) => [{ v: f.id, c: 'mono' }, K.chip(f.now ? 'now resolved' : 'now unresolved', f.now ? 'ok' : 'bad'), f.apart, { v: commitsOf(prev, last, f.id), c: 'bench-small' }]),
       'bench-flips', (tr, i) => { tr.dataset.task = fl[i].id; tr.classList.add('bench-click'); tr.addEventListener('click', () => K.openTask(fl[i].id)); }));
     return s;
@@ -268,7 +278,7 @@
   }
   function differ(A, Bs, x) {
     const s = K.box('Where they differ', 'Every task falls in one box. Only the two "only" boxes move the score.'), fl = x.onlyA.map((id) => [id, A, Bs]).concat(x.onlyB.map((id) => [id, Bs, A])).slice(0, 12);
-    if (fl.length) wantDiff(A.key, Bs.key, false, K.B.cmp.n);
+    if (fl.length) wantDiff(A.key, Bs.key, false, K.B.cmp.n, fl.map(([id]) => id));
     s.append(K.add(h('div', 'bench-grid bench-g-2 bench-fours'), [boxOf('Both resolve', x.both, 'ok'), boxOf(`Only ${A.label}`, x.onlyA.length, 'info'), boxOf(`Only ${Bs.label}`, x.onlyB.length, 'warn'), boxOf('Neither', x.none, 'quiet')]),
       h('h3', 'bench-h', 'The flipped tasks'),
       K.table(['Task', 'Resolved by', 'First step apart', 'Why, in short'], fl.map(([id, w, l]) => [{ v: id, c: 'mono' }, K.armSaid(w), whereApart(id, w, l), { v: readingOf(id, A, Bs), c: 'bench-small bench-muted' }]), 'bench-flips',
