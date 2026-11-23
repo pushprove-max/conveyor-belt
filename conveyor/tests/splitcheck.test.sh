@@ -151,8 +151,9 @@ t_speedothermain() {
     || fail "a failure the main-red record holds was not said to be main's from the record: exit $RC, $n runs: $(cat "$STUB/runs"), $WHY"
   # Bug (#1436): the guide said the file of a speed-up runs alone, and never said that a test command which also runs other
   # files has their failure named "another test file the change selects" (g.test.sh above), apart from f.test.sh's own.
-  # The guide says it only when the command does so: the project's own `--file` command runs the named file alone.
-  pagesays_splitcheck conveyor/README.md 'a failure of one of them is named as another test file the change selects, apart from the file' "the reason names g.test.sh as another test file the change selects: $WHY"
+  # The guide says it only when the command does so: the project's own `--file` command runs the named file alone. The
+  # check starts at "When that command": a guide that drops the condition (says the command always runs other files) fails.
+  pagesays_splitcheck conveyor/README.md 'When that command also runs other test files, a failure of one of them is named as another test file the change selects, apart from the file' "the reason names g.test.sh as another test file the change selects: $WHY"
 }
 
 # Bug (#1436): the guide for a split said its files run alone, and never said that a test command which also runs other
