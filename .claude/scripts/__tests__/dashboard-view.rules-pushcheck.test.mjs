@@ -35,6 +35,19 @@ test('Rules: Test before a push shows the pack value, then the record over it, a
   assert.deepEqual(await sent(w, () => act(rulesP(w), 'push-check-off').click()), [{ action: 'push-check', args: ['off'], repo: 'sample' }]);
 });
 
+// Bug: Undo of On/Off sent the opposite value, so with no record value (the pack's push.check holds) it left a permanent
+// override of the pack. With no record value, Undo sends `default`; with one, it sends that value back.
+test('Rules: Undo of Test before a push puts the record back as it was, no value when it had none', async () => {
+  const w = boot({ tab: 'rules' });
+  const undo = () => act(rulesP(w).querySelector('.rules-last'), 'undo');
+  deliver(w, data(false, null));
+  await sent(w, () => act(rulesP(w), 'push-check-on').click());
+  assert.deepEqual(await sent(w, () => undo().click()), [{ action: 'push-check', args: ['default'], repo: 'sample' }], 'the record had none: Undo clears it');
+  next(w, data(false, true));
+  await sent(w, () => act(rulesP(w), 'push-check-off').click());
+  assert.deepEqual(await sent(w, () => undo().click()), [{ action: 'push-check', args: ['on'], repo: 'sample' }], 'the record had on: Undo sends on');
+});
+
 // Bug this guards: a snapshot with no pushCheck (an engine before the rule) was sent an action its engine refuses.
 test('Rules: Test before a push, unknown to the snapshot, is not sent', () => {
   const w = boot({ tab: 'rules' });

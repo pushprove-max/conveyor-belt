@@ -143,7 +143,7 @@
     'dep-guard': (r, action, a) => { r.depGuard = a[0] === 'on'; return [r, 'dep-guard']; },
     'land-as': (r, action, a) => { r.landAs = a[0]; return [r, 'land-as']; },
     'pr-merge': (r, action, a) => { r.prMerge = a[0]; return [r, 'pr-merge']; },
-    'push-check': (r, action, a) => { r.pushCheck = a[0] === 'on'; return [r, 'push-check']; },
+    'push-check': (r, action, a) => { r.pushCheck = a[0] === 'default' ? null : a[0] === 'on'; return [r, 'push-check']; },
     onboarded: (r, action, a) => { r.onboarded = { at: new Date(Date.now()).toISOString(), rules: a.slice() }; return [r, ONB]; },
   };
   // The rules changed by a `rules` action (guessed), and the row of the first.

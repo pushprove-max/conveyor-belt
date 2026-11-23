@@ -99,7 +99,7 @@ adds the issue to `forced`, and it is picked despite its open dependencies; it l
 landed or its issue is closed. With the guard on, `control force` is refused (exit 2) and changes nothing; a forced
 issue waits again while the guard is on.
 
-`conveyor.sh control push-check on|off` (the Rules tab's Test before a push) sets whether the test files linked to the
+`conveyor.sh control push-check on|off|default` (the Rules tab's Test before a push; `default` clears it) sets whether the test files linked to the
 landings since the last push run before a push (`pushCheck` in the record). A record that does not set it, as a new
 one does not, takes the pack's `push.check` (on by default). Off, a push runs no test first.
 

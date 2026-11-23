@@ -82,8 +82,8 @@ def control_ok(body):
         return n == 0 or (n == 1 and ACCOUNT.fullmatch(v[0]) is not None)
     if a == 'start':  # where new issues start
         return v in (['queue'], ['held'])
-    if a in ('dep-guard', 'push-check'):  # the dependency guard; the run before a push
-        return v in (['on'], ['off'])
+    if a in ('dep-guard', 'push-check'):  # the dependency guard; the run before a push (default: the pack's holds)
+        return v in (['on'], ['off']) or (a == 'push-check' and v == ['default'])
     if a == 'land-as':  # Land as: the push to main, or to one pull request
         return v in (['main'], ['pr'])
     if a == 'pr-merge':  # Merge PR: who merges the pull request of Land as pr

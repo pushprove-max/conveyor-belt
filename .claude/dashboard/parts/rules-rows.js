@@ -427,8 +427,8 @@
     // push before each push, and a file that fails holds it; Off pushes with no test first. The pack's push.check
     // sets it until a change here, which the control record keeps over the pack.
     const checkOn = pushCheckOn(c), checkKnown = typeof S.d.pushCheck === 'boolean';
-    const cOn = choice('On', 'push-check-on', 'Test before a push: on', checkOn, () => { if (!checkOn) send('push-check', ['on'], null, ['push-check', ['off']]); });
-    const cOff = choice('Off', 'push-check-off', 'Test before a push: off', !checkOn, () => { if (checkOn) send('push-check', ['off'], null, ['push-check', ['on']]); });
+    const cOn = choice('On', 'push-check-on', 'Test before a push: on', checkOn, () => { if (!checkOn) send('push-check', ['on']); });
+    const cOff = choice('Off', 'push-check-off', 'Test before a push: off', !checkOn, () => { if (checkOn) send('push-check', ['off']); });
     cOn.disabled = cOff.disabled = !checkKnown;
     el.append(row('push-check', 'Test before a push', 'the test files linked to the landings run before each push, and one that fails holds the push',
       seg('Test before a push', cOn, cOff), checkKnown ? offLine(checkOn, 'a push runs no test first') : newer(checkKnown)));

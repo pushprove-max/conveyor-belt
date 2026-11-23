@@ -213,6 +213,7 @@
     if (action === 'account') return ['account', typeof c.account === 'string' && c.account ? [c.account] : []];
     if (action === 'review-account') return ['review-account', typeof c.reviewAccount === 'string' && c.reviewAccount ? [c.reviewAccount] : []];
     if (action === 'start') return ['start', [c.start === 'held' ? 'held' : 'queue']];
+    if (action === 'push-check') return ['push-check', [typeof c.pushCheck === 'boolean' ? (c.pushCheck ? 'on' : 'off') : 'default']];
     if (action === 'dep-guard') return ['dep-guard', [c.depGuard === false ? 'off' : 'on']];
     return null;
   }

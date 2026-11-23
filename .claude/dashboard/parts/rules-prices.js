@@ -259,11 +259,15 @@
     }));
     return [h('label', 'rules-price-field', 'Display name'), priceField('price-name', `Display name of ${m}`, ed.name, (v) => { ed.name = v; }, names[m] || m), ids];
   }
-  // Save in Edit (editRow): sends what changed of model m (e: its pack entry) as typed (ed).
+  // Save in Edit (editRow): sends what differs of model m (e: its pack entry) as typed (ed), from what the pack holds now,
+  // so what an earlier Save of this edit saved before the host refused a later change is not sent again. For a model
+  // the pack holds no price of, the prices are compared with the ones as opened (ed.start): left as they were, no price
+  // is sent. A display name that is the model's own name counts as none, so Save clears a pack name that equals it.
   function editSave(P, m, e, ed) {
-    const { names, rateOf } = P;
-    const v = PRICE_KEYS.map(([k]) => String(ed[k]).trim()), shown = rateOf(m) || {}, changes = [];
-    const same = RATES.every((k, i) => v[i] === (num(shown[k]) !== null ? String(shown[k]) : '')) && v[3] === (priced(e) && num(e.cacheWrite) !== null ? String(e.cacheWrite) : '');
+    const { names } = P;
+    const v = PRICE_KEYS.map(([k]) => String(ed[k]).trim()), changes = [];
+    const base = priced(e) ? Object.fromEntries(PRICE_KEYS.map(([k]) => [k, num(e[k]) !== null ? String(e[k]) : ''])) : ed.start;
+    const same = PRICE_KEYS.every(([k], i) => v[i] === base[k]);
     if (!same) {
       if (v.slice(0, 3).some((x) => !x)) { say('Give the input, output and cache read prices.'); return; }
       changes.push(['set', m, ...v.slice(0, 3), ...(v[3] ? [v[3]] : [])]);
@@ -285,11 +289,22 @@
     return button(`${fast ? 'Reset :fast' : 'Reset'} to ${mine ? 'twice your price' : 'built-in'} (${['input', 'output', 'cacheRead'].map((k) => usd(to[k])).join(' / ')} / ${usd(writeOf(to))})`, 'btn-quiet', fast ? 'price-fast-reset' : 'price-reset',
       `Put ${m} back to ${mine ? `twice your price of ${m.slice(0, -5)}` : 'its built-in price'}`, () => priceRun([['clear', m]], () => { if (S.priceEdit && S.priceEdit.model === m) S.priceEdit = null; }));
   };
-  // from: the prices the fields start at, for a fast mode the pack does not price (its row's second line).
+  // The cache write Edit starts at, '' for the 1.25 × input default: the pack's own, else (a fast mode the pack does not
+  // price, ratesOnly) the one of the prices its fields start at (from) when the pack's price of the model sets a cache
+  // write or from differs from the default, so a Save of another price keeps it.
+  const startWrite = (P, m, ratesOnly, from) => {
+    const e = P.over[m] || {};
+    if (priced(e)) return num(e.cacheWrite) !== null ? String(e.cacheWrite) : '';
+    if (!ratesOnly || !from || num(from.cacheWrite) === null) return '';
+    const base = P.over[m.replace(/:fast$/, '')], set = priced(base) && num(base.cacheWrite) !== null;
+    return set || from.cacheWrite !== from.input * 1.25 ? String(from.cacheWrite) : '';
+  };
+  // from: the prices the fields start at, for a fast mode the pack does not price (its row's second line). start: the
+  // prices as opened, which Save compares with for a model the pack holds no price of (editSave).
   const openEdit = (P, m, ratesOnly, from) => {
     const e = P.over[m] || {}, r = (ratesOnly ? (priced(e) ? e : from) : P.rateOf(m)) || {};
-    S.priceEdit = { model: m, ratesOnly, name: typeof e.name === 'string' ? e.name : '', aliases: list(e.aliases).slice(), alias: '',
-      ...Object.fromEntries(RATES.map((k) => [k, num(r[k]) !== null ? String(r[k]) : ''])), cacheWrite: priced(e) && num(e.cacheWrite) !== null ? String(e.cacheWrite) : '' };
+    const f = { ...Object.fromEntries(RATES.map((k) => [k, num(r[k]) !== null ? String(r[k]) : ''])), cacheWrite: startWrite(P, m, ratesOnly, from) };
+    S.priceEdit = { model: m, ratesOnly, name: typeof e.name === 'string' ? e.name : '', aliases: list(e.aliases).slice(), alias: '', ...f, start: f };
     draw();
   };
     // A model's row: its name (bold), marks, ID and other IDs; its prices and where they are from; Edit, and Reset to

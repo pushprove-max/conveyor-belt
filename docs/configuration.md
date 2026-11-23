@@ -249,7 +249,7 @@ a main-fix card, and holds the push ([Push](cards.md#push)).
 
 `push.check` in `.conveyor/project.json` turns this run on or off. It is on in a new project. Set it to `false`, and
 a push runs no test first. `conveyor.sh control push-check on` or `off`, or the Rules tab's **Test before a push**,
-sets it in the control record, and that value wins over the pack's.
+sets it in the control record, and that value wins over the pack's. `conveyor.sh control push-check default` clears it, so the pack's holds again.
 
 The check of a bug card on main's code runs at most `test.cardFiles` test files (in `.conveyor/project.json`). If
 more are linked, the files that failed most recently in a test step run first.

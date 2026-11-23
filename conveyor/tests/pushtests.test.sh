@@ -111,6 +111,16 @@ t_pushcheckctl() {
   pushnow; pushedunchecked
 }
 
+# R70 of #1441. Bug it catches: the Rules tab's Undo of a Test before a push change could only send on or off, so a
+# record that set nothing (the pack's push.check holds) kept a permanent override after Undo. `push-check default`
+# puts the record back to no value, so the pack's push.check holds again.
+t_pushcheckdefault() {
+  setup '[]'
+  [ "$(loop control push-check on 2>&1 | jq .pushCheck)" = true ] || fail "control push-check on did not set the record's pushCheck: $(cat "$ST/control.json")"
+  [ "$(loop control push-check default 2>&1 | jq .pushCheck)" = null ] || fail "control push-check default left a value in the record: $(cat "$ST/control.json")"
+  [ "$(jq -c .pushCheck "$ST/control.json")" = null ] || fail "the stored record keeps a pushCheck after default: $(cat "$ST/control.json")"
+}
+
 # R104 of #1389. Bug it catches: a file that failed, passed, then failed again across three landings was blamed on the
 # first, as the landings ran oldest first up to the first that failed it, so the main-fix card went to a change a later
 # landing had fixed. c1 adds lib/cart.js broken with its test, c2 fixes it, c3 breaks it again: the push and the

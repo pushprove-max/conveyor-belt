@@ -194,6 +194,85 @@ test('Rules: a fast mode price edits in its row and resets to built-in on its ow
   assert.deepEqual(posted(w), [['clear', 'claude-opus-5-5:fast']]);
 });
 
+// Bug: Edit :fast on a fast mode the pack does not price started its cache write blank, so a Save of another price sent
+// no cache write and the engine took 1.25 × input (2.5), not the twice-your-price 14 the row showed.
+test('Rules: Edit :fast of a model with your cache write keeps twice that cache write when only another price changes', async () => {
+  const w = open({ overrides: { 'claude-opus-5-5': { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 7 } } });
+  act(rowOf(w, 'claude-opus-5-5'), 'price-fast-edit').click();
+  const ed = rowOf(w, 'claude-opus-5-5');
+  assert.equal(act(ed, 'price-cacheWrite').value, '14');
+  type(act(ed, 'price-output'), '6');
+  act(ed, 'price-save').click();
+  await settle();
+  assert.deepEqual(posted(w), [['set', 'claude-opus-5-5:fast', '2', '6', '0.2', '14']]);
+});
+
+// Bug: an inherited cache write that equals 1.25 × the inherited input started blank, so a Save of a new input sent no
+// cache write and the engine charged 1.25 × the new input (3.75), not the inherited 2.5.
+test('Rules: Edit :fast keeps an inherited cache write that equals 1.25 × the inherited input', async () => {
+  const w = open({ overrides: { 'claude-opus-5-5': { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 } } });
+  act(rowOf(w, 'claude-opus-5-5'), 'price-fast-edit').click();
+  const ed = rowOf(w, 'claude-opus-5-5');
+  type(act(ed, 'price-input'), '3');
+  act(ed, 'price-save').click();
+  await settle();
+  assert.deepEqual(posted(w), [['set', 'claude-opus-5-5:fast', '3', '10', '0.2', '2.5']]);
+});
+
+// Bug: Save of Edit :fast with nothing changed compared the inherited cache write (14) with the built-in default and
+// sent a :fast override the user never asked for.
+test('Rules: Edit :fast saved with nothing changed sends nothing', async () => {
+  const w = open({ overrides: { 'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 7 } } });
+  act(rowOf(w, 'claude-opus-5-5'), 'price-fast-edit').click();
+  act(rowOf(w, 'claude-opus-5-5'), 'price-save').click();
+  await settle();
+  assert.deepEqual(posted(w), []);
+});
+
+// Edit of a priced Sonnet 5.5 (4 / 10 / 0.1) where the Save sends the price (3) and the host refuses the display name
+// (too long): the price is saved, the edit stays open with the name typed. The host then answers every send.
+async function partialSave() {
+  const w = open({ overrides: { 'claude-sonnet-5-5': { input: 4, output: 10, cacheRead: 0.1 } } });
+  act(rowOf(w, 'claude-sonnet-5-5'), 'price-edit').click();
+  const ed = rowOf(w, 'claude-sonnet-5-5');
+  type(act(ed, 'price-input'), '3');
+  type(act(ed, 'price-name'), 'S'.repeat(61));
+  const refusal = { ok: false, status: 409, text: () => Promise.resolve('conveyor: prices name: the name is up to 60 characters; nothing changed') };
+  // The second send of the Save is the name: the host takes the first and refuses it.
+  Object.defineProperty(w, 'reply', { configurable: true, get: () => (w.posts.length > 1 ? refusal : null) });
+  act(ed, 'price-save').click();
+  await settle(); await settle();
+  assert.deepEqual(posted(w), [['set', 'claude-sonnet-5-5', '3', '10', '0.1'], ['name', 'claude-sonnet-5-5', 'S'.repeat(61)]]);
+  assert.match(said(w).textContent, /^Not done: .*up to 60 characters/);
+  Object.defineProperty(w, 'reply', { configurable: true, writable: true, value: null });
+  return w;
+}
+
+// Bug: Save sent the price again on a retry after the host refused the name, so the Undo of the retry carried a set of the
+// price the first Save had saved (3), and undoing the name put 3 back as if it were the old price.
+test('Rules: Edit retried after a refused display name sends the name alone, and its Undo puts back the name alone', async () => {
+  const w = await partialSave();
+  type(act(rowOf(w, 'claude-sonnet-5-5'), 'price-name'), 'Sonnet (proxy)');
+  act(rowOf(w, 'claude-sonnet-5-5'), 'price-save').click();
+  await settle(); await settle();
+  assert.deepEqual(posted(w), [['name', 'claude-sonnet-5-5', 'Sonnet (proxy)']], 'the price saved by the first Save is not sent again');
+  act(said(w), 'undo').click();
+  await settle();
+  assert.deepEqual(posted(w), [['name', 'claude-sonnet-5-5']], 'Undo puts back the name alone');
+});
+
+// Bug: Save compared the price with the one the Edit opened at, so after a Save saved 3 and the host refused the name,
+// typing the opened price (4) back and saving sent no price and left 3 in the pack.
+test('Rules: Edit retried after a refused display name sends the opened price again when it is typed back', async () => {
+  const w = await partialSave();
+  const ed = rowOf(w, 'claude-sonnet-5-5');
+  type(act(ed, 'price-input'), '4');
+  type(act(ed, 'price-name'), 'Sonnet (proxy)');
+  act(ed, 'price-save').click();
+  await settle(); await settle();
+  assert.deepEqual(posted(w), [['set', 'claude-sonnet-5-5', '4', '10', '0.1'], ['name', 'claude-sonnet-5-5', 'Sonnet (proxy)']]);
+});
+
 // Bug: no way to price a model the table does not know. Add model takes its ID, name, provider and prices ("Same price
 // as" copies a known model's), refuses an ID that is priced already, and the model shows in its group, marked added.
 test('Rules: Add model sends the ID, name, provider and prices, and the model shows as added', async () => {
