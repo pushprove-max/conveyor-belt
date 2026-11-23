@@ -117,6 +117,11 @@ t_judgeback() {
   grep -qxF '# The findings the last fix round was told to fix' "$STUB/judge-asked" \
     && grep -qxF -- "- E1 $f (accepted: the word is wrong in the change)" "$STUB/judge-asked" \
     || fail "the judge of the second review was not given the first round's accepted finding and its reason: $(cat "$STUB/judge-asked")"
+  # Bug caught: the review's line did not keep that section, so the judge replay (lib/replay.sh), with no rounds file to
+  # read, gave its judge another card's accepted findings with no E<n> ids; the first review's line keeps none.
+  jq -e --arg l "- E1 $f (accepted: the word is wrong in the change)" '.judge.back == [$l]' "$wt.fields" >/dev/null \
+    && jq -e 'select(.card == "c6") | .judge | has("back") | not' "$ST/retried.jsonl" >/dev/null \
+    || fail "judged() on c7's second review, given E1 of round 1, did not keep that line alone as judge.back, or the first review's line has one: $(jq -c .judge.back "$wt.fields"; jq -c .judge.back "$ST/retried.jsonl")"
 }
 
 # Bug caught: JUDGE did not say what an [E<n>] mark means, so the judge did not know a finding was back after its fix, or

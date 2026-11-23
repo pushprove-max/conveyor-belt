@@ -255,7 +255,7 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 # of the review, no finding either (no fix round for this card), and a JSON line {finding, reason} of
 # <worktree>.outside, kept over the card's rounds: when the card lands, followups() files each as a follow-up of the
 # card, as a NO-GO finding is filed. The review's record line holds judge: {model, effort, sec,
-# tokens, usage, accepted: [{n, finding, place, reason, cost}], declined: [{n, finding, place, reason, kind (when its reason starts with one)}], outside: [{n, finding, place, reason}]}; n is the
+# tokens, usage, accepted: [{n, finding, place, reason, cost}], declined: [{n, finding, place, reason, kind (when its reason starts with one)}], outside: [{n, finding, place, reason}], back: the lines of the fix round's findings it was given, when it was given any}; n is the
 # finding's number as the judge was given it (its F<n>), and cost is what the judge wrote after "Cost to every card:",
 # which every accepted finding has.
 # Each finding reaches the judge marked with its place: inside the card's diff (any file:line it names, a path under the worktree read as one in it, is a
@@ -525,7 +525,9 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
       + (if $s.whole then {} else {failed: "the answer of the judge does not hold exactly one line for each finding and no other, each accepted one with its reason and cost", decided: ($d | map(select(.undecided | not)) | length), raw: ($r | .[-2000:])} end)' <<<"$j")
   fi
   rm -f "$wt.judge" "$wt.judge.marks" "$wt.judge.said" "$wt.judge.events" "$wt.judge.err" "$wt.review.new" "$wt.outside.new"
-  jq -ce --slurpfile j <(printf '%s' "${j:-null}") '. + {judge: $j[0]}' <<<"$5" 2>/dev/null || printf '%s\n' "$5"
+  # The judge's line keeps the findings of the last fix round it was given (back: fixedbefore()'s lines, with their
+  # E<n> ids), which the judge replay (lib/replay.sh) gives its judge in turn: the rounds file is not kept with the records.
+  jq -ce --slurpfile j <(printf '%s' "${j:-null}") --arg b "$back" '. + {judge: ($j[0] | if $b == "" or . == null then . else . + {back: ($b | split("\n") | map(select(startswith("- "))))} end)}' <<<"$5" 2>/dev/null || printf '%s\n' "$5"
 }
 # The P3 findings the review still holds after the judge (judged()) are handled by the control record's rule P3 (the
 # Rules tab). On, the default, each is a finding as a P2 is: it makes a NO-GO, goes to the fix round and, still open

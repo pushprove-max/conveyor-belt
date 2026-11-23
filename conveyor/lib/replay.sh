@@ -24,9 +24,10 @@ REPLAY_LAST=20
 # sec, tokens, usage}, findings: [{n, finding, place, accept}] in the order the judge was given them, sha: the landed
 # commit or "", kept: the kept patch's path or "", patch: the patch-id of the change its review read or "", before:
 # the lines of the findings already declined on the card or its issue before its judge ran ("- <finding> (declined:
-# <why>) [kind: <kind, or none>]", the last 50, as judged() gives them), back: the findings the review before it
-# (the issue's last one) accepted, "- <finding> (accepted: <reason>)", which the fix round before this review was told to
-# fix (fixedbefore(), lib/review.sh, gives them with their ids, which the records do not keep)}. A decline is before the judge ran when it is older than the review's
+# <why>) [kind: <kind, or none>]", the last 50, as judged() gives them), back: the findings of the fix round before
+# this review, "- E<n> <finding> (accepted: <reason>)", as its judge was given them (fixedbefore(), lib/review.sh) and
+# its line keeps them (judge.back); none when no fix round of the card ran (a card built from nothing after `retry
+# <issue> --fresh`, say)}. A decline is before the judge ran when it is older than the review's
 # line less the judge's seconds: the judge's own declines are written after its call ends. A line declined again under
 # another kind (declined(), lib/followups.sh) gives the last of its rulings made before then: its earlier ones (was) and
 # its latest (made at ruled, else at time).
@@ -37,10 +38,9 @@ replaycases() { # <n>
     map(objects) as $all
     | [$all[] | select(.step == "review" and (.judge | type) == "object" and .judge.failed == null
         and ([.judge.accepted, .judge.declined | arrays[]] | length) > 0)]
-    | sort_by(.time) | .[-$last:][] | .card as $c | .issue as $n | .time as $tm | (.judge.sec | numbers // 0) as $sec | (.time | t | if . == null then null else . - $sec end) as $ran
+    | sort_by(.time) | .[-$last:][] | .card as $c | .issue as $n |(.judge.sec | numbers // 0) as $sec | (.time | t | if . == null then null else . - $sec end) as $ran
     | {card: $c, issue, time, main: (.main // ""), patch: (.patch // ""),
-       back: ([$all[] | select(.step == "review" and .issue == $n and (.time // "") < $tm and (.judge | type) == "object")] | sort_by(.time) | last // {}
-              | [.judge.accepted[]? | objects | "- \(.finding) (accepted: \(.reason))"]),
+       back: [.judge.back | arrays[] | strings],
        before: ([$dl[] | select((.card == $c or (.issue == $n and $n != 0 and .repo == $repo)) and $ran != null)
                  | .finding as $f | [(.was // [])[], {time: (.ruled // .time), why, kind}] | map(select(((.time | t) // $ran) < $ran)) | last // empty
                  | "- \($f) (declined: \(.why)) [kind: \(.kind // "none")]"] | reduce .[] as $l ([]; if index([$l]) then . else . + [$l] end) | .[-50:]), judge: (.judge | {model, effort, sec, tokens, usage} | del(.[] | nulls)),

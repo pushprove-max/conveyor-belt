@@ -12,11 +12,14 @@
 # The recorded reviews, each judged on claude-sonnet-5-5 with 1M input tokens ($2.00):
 # - c1-7 (issue 7, landed as a commit that adds "three" to a.txt): F1 accepted, F2 declined. Its review sat on B0;
 #   another card landed between them, which adds "zero" at the top of a.txt, so the landed commit's parent is not B0.
+# - c1-6 (issue 8, in the retried lines, as `retry 8 --fresh` leaves it): F-nine accepted; no diff, so it is skipped.
 # - c1-8 (issue 8, blocked, in the retried lines; its kept patch adds "four" to a.txt): F1 of a kind always accepted,
-#   that the judge declined, so its own ruling is a decline.
+#   that the judge declined, so its own ruling is a decline. Built from nothing after c1-6, its judge was given no
+#   findings of a fix round before it (no back).
 # - c1-9 (issue 9): no landed commit and no kept patch, so it has no diff and is skipped.
 # - c1-10: a judge that failed, which ruled on nothing.
-# - c1-11 (issue 9, landed as the same commit as c1-7): F1 accepted; the replay judge's call on it fails.
+# - c1-11 (issue 9, landed as the same commit as c1-7): F1 accepted; the replay judge's call on it fails. Its judge
+#   was given the finding E2 (F-eight) of the card's own fix round before it (back), not c1-10's F-five.
 # - c1-12 (issue 9, landed as the same commit, but its review read the change of c1-8): skipped.
 # Each review line keeps the patch-id of the change it read; c1-7 has a decline of an earlier round and its own.
 # The replay judge is claude-haiku-5-5, allowed for the review here: 1M input tokens a call cost $0.10.
@@ -43,11 +46,12 @@ replaysetup() {
   # the replay judge is given, and the one its judge declined (written after its call), which it is not.
   printf '%s\n' '{"id":"d000000000001","time":"2026-11-01T00:00:30Z","card":"c1-7","issue":7,"finding":"[P2] a.txt:1 F-old","by":"judge","why":"nothing new","kind":"claim wrong","repo":"r"}' \
     '{"id":"d000000000002","time":"2026-11-01T00:00:58Z","card":"c1-7","issue":7,"finding":"[P2] a.txt:1 F-two","by":"judge","why":"style","repo":"r"}' >> "$ST/declined.jsonl"
+  rline c1-6 8 2 "$P8" '{"accepted":[{"n":1,"finding":"[P1] a.txt:3 F-nine","place":"inside","reason":"real","cost":"none"}],"declined":[]}' "$ST/retried.jsonl"
   base=$sha rline c1-8 8 3 "$P8" '{"accepted":[{"n":1,"finding":"[P1][security] a.txt:3 F-three","place":"inside","reason":"always accepted: a security finding (the judge declined it: weak)","cost":"none"}],"declined":[]}' "$ST/retried.jsonl"
   jq -cn '{card: "c1-8", issue: 8, step: "blocked", time: "2026-11-01T00:04:00Z", tokens: {claude: 0, codex: 0}, result: "blocked", sha: "", reason: "tests failed", kept: "kept/c1-8"}' >> "$ST/retried.jsonl"
   rline c1-9 9 5 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:1 F-four","place":"inside","reason":"real","cost":"none"}],"declined":[]}'
   rline c1-10 9 6 "$P7" '{"failed":"the judge call failed","accepted":[{"n":1,"finding":"[P1] a.txt:1 F-five","place":"inside","reason":"real","cost":"none"}]}'
-  rline c1-11 9 7 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:2 F-six","place":"inside","reason":"real","cost":"none"}],"declined":[]}'
+  rline c1-11 9 7 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:2 F-six","place":"inside","reason":"real","cost":"none"}],"declined":[],"back":["- E2 [P1] a.txt:1 F-eight (accepted: real)"]}'
   landed c1-11 9 2026-11-01T00:08:00Z
   # c1-12: its review read another change (P8) than the commit that landed after a fix round, so it is skipped.
   rline c1-12 9 9 "$P8" '{"accepted":[{"n":1,"finding":"[P1] a.txt:2 F-seven","place":"inside","reason":"real","cost":"none"}],"declined":[]}'
@@ -81,7 +85,7 @@ t_replayjudge() {
   fx_in '. "$HERE/lib/replay.sh"; '"$STUBJUDGE"'; replay judge claude-haiku-5-5 low'
   [ "$RC" = 0 ] || fail "the replay failed: $(cat "$T/$CASE/run.out")"
   out=$(tail -n 1 "$T/$CASE/run.out")
-  jq -e '{reviews, skipped, findings, agree, unanswered, usd, recordedUsd, model, effort} == {"reviews":3,"skipped":2,"findings":3,"agree":2,"unanswered":1,"usd":0.3,"recordedUsd":6,"model":"claude-haiku-5-5","effort":"low"}' <<<"$out" >/dev/null \
+  jq -e '{reviews, skipped, findings, agree, unanswered, usd, recordedUsd, model, effort} == {"reviews":3,"skipped":3,"findings":3,"agree":2,"unanswered":1,"usd":0.3,"recordedUsd":6,"model":"claude-haiku-5-5","effort":"low"}' <<<"$out" >/dev/null \
     || fail "the replay's counts and costs: $out"
   [ "$(jq -c .differ <<<"$out")" = '[{"card":"c1-7","issue":7,"n":2,"finding":"[P2] a.txt:1 F-two","recorded":"decline","replay":"accept","reason":"the change causes it. Cost to every card: none"}]' ] \
     || fail "the findings where the rulings differ: $(jq -c .differ <<<"$out")"
@@ -106,10 +110,14 @@ t_replayjudge() {
     && ! grep -q '(declined: style)' "$STUB/judged" || fail "the earlier declines given to the judge: $(cat "$STUB/judged")"
   # Bug caught: a review's judge is told the findings the fix round before it was told to fix, each with the reason it
   # accepted it with (#1379), but the replay judge was not, so it ruled on a finding back after its fix as on a new
-  # one. c1-11 follows c1-10 on issue 9, which accepted F-five; c1-7 and c1-8 have no review before them.
+  # one. Bugs caught: the replay judge was given the findings another card's review (c1-10's F-five, before c1-11 on
+  # issue 9) accepted, which no fix round of c1-11 was told (after `retry <issue> --fresh` its card builds from
+  # nothing), and was given them without their E<n> ids. c1-11's own line keeps the section its judge was given (E2,
+  # F-eight); c1-7 and c1-8 have none, and c1-8 must not fall back to c1-6's F-nine, accepted before it on issue 8.
   [ "$(grep -c '^# The findings the last fix round was told to fix$' "$STUB/judged")" = 1 ] \
-    && [ "$(awk '/^== /{on = /c1-11$/} on' "$STUB/judged" | grep -cxF -- '- [P1] a.txt:1 F-five (accepted: real)')" = 1 ] \
-    || fail "the replay judge of c1-11 was not given the finding the review before it accepted, or c1-7 or c1-8 was given a section: $(grep -n 'fix round\|F-five\|^== ' "$STUB/judged")"
+    && [ "$(awk '/^== /{on = /c1-11$/} on' "$STUB/judged" | grep -cxF -- '- E2 [P1] a.txt:1 F-eight (accepted: real)')" = 1 ] \
+    && ! grep -q 'F-five\|F-nine' "$STUB/judged" \
+    || fail "the replay judge of c1-11 was not given the section its review's judge was given (E2 F-eight), was given c1-10's F-five or c1-6's F-nine, or c1-7 or c1-8 was given a section: $(grep -n 'fix round\|F-five\|F-nine\|F-eight\|^== ' "$STUB/judged")"
   [ "$(eval "$SUMS")" = "$(cat "$STUB/before")" ] || fail "the replay changed a card line, a setting or main: $(eval "$SUMS") was $(cat "$STUB/before")"
 }
 
@@ -126,7 +134,7 @@ t_replayestimate() {
     || fail "the estimate wrote other files than the lock and the state database: $(cd "$ST" && find . -type f | sort | comm -13 <(echo "$before") - | tr '\n' ' ')"
   local head; head=$(sed -n '/^# SPDX/,/^[^#]/p' "$SRC/lib/replay.sh")
   grep -q 'REPLAYS\.lock' <<<"$head" && grep -q 'state\.db' <<<"$head" || fail "the header of lib/replay.sh does not name each file an estimate makes"
-  head -n 1 "$T/$CASE/run.out" | jq -e '. == {"estimate":true,"model":"claude-haiku-5-5","effort":"medium","reviews":3,"skipped":2,"findings":4,"usd":0.3,"recordedUsd":6}' >/dev/null \
+  head -n 1 "$T/$CASE/run.out" | jq -e '. == {"estimate":true,"model":"claude-haiku-5-5","effort":"medium","reviews":3,"skipped":3,"findings":4,"usd":0.3,"recordedUsd":6}' >/dev/null \
     || fail "the estimate: $(cat "$T/$CASE/run.out")"
   # Bug caught: `conveyor.sh pick replay` (commands/pick.sh) did not reach replay(), which the cases above call
   # directly; the estimate is the one replay the CLI can run here with no judge.
@@ -147,8 +155,8 @@ t_replaylong() {
     | {card: "c1-7", issue: 7, step: "review", time: "2026-11-01T01:\($i):00Z", tokens: {claude: 0, codex: 0}, result: "GO", sha: "", reason: "", main: $m, patch: $p,
        judge: {model: "claude-sonnet-5-5", effort: "medium", sec: 5, tokens: {claude: 1000000, codex: 0}, usage: $u, accepted: [{n: 1, finding: $f, place: "inside", reason: "real", cost: "none"}]}}' >> "$ST/cards.jsonl"
   fx_in '. "$HERE/lib/replay.sh"; replay judge claude-haiku-5-5 --estimate --last 50'
-  [ "$RC" = 0 ] && head -n 1 "$T/$CASE/run.out" | jq -e '{reviews, skipped, findings} == {"reviews":43,"skipped":2,"findings":44}' >/dev/null \
-    || fail "the estimate of 45 reviews: $RC $(head -c 2000 "$T/$CASE/run.out")"
+  [ "$RC" = 0 ] && head -n 1 "$T/$CASE/run.out" | jq -e '{reviews, skipped, findings} == {"reviews":43,"skipped":3,"findings":44}' >/dev/null \
+    || fail "the estimate of 46 reviews (43 replayed, 3 skipped): $RC $(head -c 2000 "$T/$CASE/run.out")"
 }
 
 # Bug caught: a finding declined on issue 9 as a rare case (00:04:20), then as claim wrong (00:05:30), then as other
