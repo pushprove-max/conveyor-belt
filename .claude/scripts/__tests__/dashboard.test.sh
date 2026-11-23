@@ -146,8 +146,9 @@ q '.panels | all(.[]; has("error") and has("data"))' "every part is {error, data
 
 # --- a host with nothing on it: every list is a measured empty list, never null ---
 q '.panels.belt == {error: null, data: {cards: [], cap: 6, building: null, behind: [], byRepo: {sample: {cap: 3, building: null}, widgetshop: {cap: 3, building: null}}}}' "an empty belt is an empty list, with the builder slots of both records and each record's own"
-# Its deck's slots are the head's "On the belt" figure, the Belt part's cards of its cap (issue 413: the deck read the
-# host's test-slot pool, "2/16 FREE" with 5 cards running, beside the tile's "5 of 13").
+# Its deck's cap is `slots` in dashboard_panels.sh, as the machine bar's is; the head's "On the belt" reads the Belt
+# part's cap, `cardcap`. With no machine cap set, as here, both are the records' builder caps together: 6.
+# Issue 413: the deck read the host's test-slot pool, "2/16 FREE" with 5 cards running, beside the tile's "5 of 13".
 q '.panels.belt3d == {error: null, data: {repos: ["sample", "widgetshop"], byRepo: {}, belt: [], queue: {next: [], held: [], waiting: []}, needs: [], landed: [],
   deck: {host: "devbox", state: "running", used: 0, cap: 6}}}' \
   "Belt 3D on an empty host: measured empty lists (a snapshot with no held or waiting issues has none of them), and no slot in use of both records' 6"
