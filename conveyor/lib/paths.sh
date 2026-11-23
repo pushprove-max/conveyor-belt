@@ -127,6 +127,8 @@ choosecards() {
 [ -n "${CONVEYOR_CARDS:-}" ] || CARDS=$(dirname "$MAIN")/$(keptcards "$CARDSNAME" || choosecards)
 STATE=$ST/cards.jsonl
 RETRIED=${STATE%/*}/retried.jsonl # the lines of blocked cards that `retry` took out of the card records
+# shellcheck disable=SC2034 # read by lib/mainred.sh and lib/heals.sh, which conveyor.sh sources beside this file
+MAINRED=${STATE%/*}/mainred.json # the fix card of each red main commit (mainred(), lib/mainred.sh)
 # shellcheck disable=SC2034 # read by lib/run.sh, which conveyor.sh sources beside this file
 SPEEDRETRIED=${STATE%/*}/speedretried.jsonl # the cards an older speed check blocked that the loop retried (speedretry())
 # shellcheck disable=SC2034 # read by lib/replay.sh and lib/snapshot.sh, which conveyor.sh sources beside this file

@@ -385,7 +385,6 @@ redrun() { # <worktree> <cases json>
 # their names are the same, or when the entry's name is of a runner of the case's file (`<runner>: <case>`, its files
 # holding <its file>): an entry made when the engine's runner named its case files' cases as its own (before issue 214)
 # is the case its case file names now.
-MAINRED=${STATE%/*}/mainred.json
 mainred() { # <card> <case> <its file> <main's commit> [<the landing that broke it: "<sha> <card> <issue>">]
   local lock rec c t k re f fs tf by s lc li cmd='' same='def same($c; $f; $k): .case == $c or ($k != "" and (.case | endswith(": " + $k)) and any(.files[]?; . == $f));'
   [ -n "$4" ] || return 1

@@ -412,3 +412,120 @@ t_healsbatchlock() {
   [ "$held" = no ] && [ "$(heals '.batched != null')" = true ] && [ "$(jq -c '.cards | length' "$ST/testactions/cards.json")" = 1 ] \
     || fail "a batch card with no GitHub issue held the list's lock (held: $held) while it waited for the cards lock, so a pick holding the cards lock never got the list's: $(cat "$out" "$ST/selfheals.jsonl" "$ST/testactions/cards.json" 2>&1)"
 }
+
+# Bug (issue 1565): `retry` moves a blocked card's lines to the retried file, and the issue's next card has no line until
+# it is picked, so in that gap a review finding of the issue counted as ended and a batch card was built on main
+# before the source card's code landed. The issue stays busy until a card of it has landed.
+t_healsretried() {
+  local out
+  judging '[]'; rm -f "$ST/healssort.jsonl"
+  jq -cn '{id: "h00000000r1", time: "2026-11-20T00:00:00Z", card: "c7", issue: 7, repo: "r", area: "area:engine", finding: "[P2] d.sh:4 a late line", why: "it heals", effect: "self-heals", from: "review"}' >> "$ST/selfheals.jsonl"
+  landed 7 | jq -c '.card = "c7" | (.step = "picked"), (.step = "blocked" | .result = "blocked" | .reason = "build: it failed")' >> "$ST/cards.jsonl"
+  out=$(loop retry 7 2>&1) || fail "retry of the blocked card of #7 failed: $out"
+  [ -z "$(st 'select(.issue == 7) | .card')" ] || fail "retry left a line of #7 in the card records, so the gap this case needs is not there: $(st '[.step, .card] | join(" ")')"
+  out=$(loop heals batch area:engine 2>&1); rc=$?
+  [ "$rc" = 2 ] && [ ! -e "$STUB/filed" ] && [ "$(heals '.batched')" = null ] \
+    || fail "a batch card was filed (rc $rc) for the finding of #7, whose retried card has not landed: $out"
+  landed 7 >> "$ST/cards.jsonl" # the retried issue's next card has landed
+  out=$(loop heals batch area:engine 2>&1) && [ "$(heals '.batched')" = 100101 ] \
+    || fail "the batch card was not filed once the retried card of #7 landed: $out $(cat "$ST/selfheals.jsonl")"
+}
+
+# Bug (issue 1565, review of its first fix): a main-red fix card (no GitHub issue) given back by `retry` has no line in
+# the card records until its next pick, and a check of issue numbers alone let the finding its review wrote count as
+# ended, so a batch card was built on main before the fix landed. The card is busy while the main-red record names it,
+# and, once the loop picks its next card (the record names that card then, the same commit), until that card has landed.
+t_healsretriedred() {
+  local out old=c20261120T000000-r-0 new=c20261120T010000-r-0
+  judging '[]'; rm -f "$ST/healssort.jsonl"
+  jq -cn --arg c "$old" '{id: "h00000000r2", time: "2026-11-20T00:00:00Z", card: $c, issue: 0, repo: "r", area: "area:engine", finding: "[P1] d.sh:4 a late line", why: "it drops a line", effect: "harm", from: "review"}' >> "$ST/selfheals.jsonl"
+  landed 0 | jq -c --arg c "$old" '.card = $c | (.step = "picked" | .mainRed = "abc1234"), (.step = "blocked" | .result = "blocked" | .reason = "build: it failed")' >> "$ST/cards.jsonl"
+  jq -cn --arg c "$old" '{reds: [{sha: "abc1234", cases: [{case: "x: y", file: "x.test.sh"}], card: $c}]}' > "$ST/mainred.json"
+  out=$(loop retry "$old" 2>&1) || fail "retry of the blocked main-red card failed: $out"
+  [ -z "$(st "select(.card == \"$old\") | .card")" ] || fail "retry left a line of $old in the card records, so the gap this case needs is not there: $(st '[.step, .card] | join(" ")')"
+  out=$(loop heals batch area:engine 2>&1); rc=$?
+  [ "$rc" = 2 ] && [ ! -e "$STUB/filed" ] && [ "$(heals '.batched')" = null ] \
+    || fail "a batch card was filed (rc $rc) for the finding of $old, a main-red card whose retried card has not been picked: $out"
+  # The loop picks the next card (redpick(): the record names it, and not the given-back card) and it is in flight.
+  jq -c --arg c "$new" '.reds[0].card = $c' "$ST/mainred.json" > "$ST/mainred.new" && mv "$ST/mainred.new" "$ST/mainred.json"
+  landed 0 | jq -c --arg c "$new" '.card = $c | .step = "picked" | .mainRed = "abc1234"' >> "$ST/cards.jsonl"
+  out=$(loop heals batch area:engine 2>&1); rc=$?
+  [ "$rc" = 2 ] && [ ! -e "$STUB/filed" ] && [ "$(heals '.batched')" = null ] \
+    || fail "a batch card was filed (rc $rc) for the finding of $old once its replacement $new was picked, before it landed: $out"
+  landed 0 | jq -c --arg c "$new" '.card = $c' >> "$ST/cards.jsonl" # the replacement has landed
+  out=$(loop heals batch area:engine 2>&1) && [ "$(heals '.batched')" = 100101 ] \
+    || fail "the batch card was not filed once the replacement $new of the main-red card landed: $out $(cat "$ST/selfheals.jsonl")"
+}
+
+# Bug (issue 1565, review of its second fix): a Tests page card given back by `retry` is busy while its record names
+# it, but the check failed whole, and the card counted as ended, when the project has no main-red record (mainred.json is
+# written by the first main-red commit): the card's entry was batched before its next pick.
+t_healsretriedtests() {
+  local out c=c20261120T000000-r-0
+  judging '[]'; rm -f "$ST/healssort.jsonl" "$ST/mainred.json"; mkdir -p "$ST/testactions"
+  jq -cn --arg c "$c" '{id: "h00000000r3", time: "2026-11-20T00:00:00Z", card: $c, issue: 0, repo: "r", area: "area:engine", finding: "[P1] d.sh:4 a late line", why: "it drops a line", effect: "harm", from: "review"}' >> "$ST/selfheals.jsonl"
+  landed 0 | jq -c --arg c "$c" '.card = $c | (.step = "picked" | .testFile = "x.test.sh"), (.step = "blocked" | .result = "blocked" | .reason = "build: it failed")' >> "$ST/cards.jsonl"
+  jq -cn --arg c "$c" '{cards: [{id: "t1", card: $c}]}' > "$ST/testactions/cards.json"
+  out=$(loop retry "$c" 2>&1) || fail "retry of the blocked Tests page card failed: $out"
+  [ -z "$(st "select(.card == \"$c\") | .card")" ] || fail "retry left a line of $c in the card records, so the gap this case needs is not there: $(st '[.step, .card] | join(" ")')"
+  out=$(loop heals batch area:engine 2>&1); rc=$?
+  [ "$rc" = 2 ] && [ ! -e "$STUB/filed" ] && [ "$(heals '.batched')" = null ] \
+    || fail "a batch card was filed (rc $rc) for the finding of $c, a Tests page card whose retried card has not been picked (no mainred.json: $(ls "$ST/mainred.json" 2>&1)): $out"
+}
+
+# Bug (issue 1565, review of its second fix): the retried file went to jq as one argument, and Linux refuses one over
+# 128 KiB, so with a long retry history no batch card could be filed at all. 2,000 retried cards, 200 KB and more.
+t_healsretriedbig() {
+  local out
+  judging '[]'; rm -f "$ST/healssort.jsonl"
+  jq -cn '{id: "h00000000r4", time: "2026-11-20T00:00:00Z", card: "c5", issue: 5, repo: "r", area: "area:engine", finding: "[P2] d.sh:4 a late line", why: "it heals", effect: "self-heals", from: "review"}' >> "$ST/selfheals.jsonl"
+  jq -cn 'range(2000) | {card: "c\(100000 + .)-\(1000 + .)", issue: (1000 + .), step: "blocked", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "blocked", sha: "", reason: "build: it failed, and this line is long enough that the file is over the limit of one argument"}' > "$ST/retried.jsonl"
+  [ "$(wc -c < "$ST/retried.jsonl")" -gt 200000 ] || fail "the retried file of this case is not over 128 KiB: $(wc -c < "$ST/retried.jsonl")"
+  out=$(loop heals batch area:engine 2>&1) && [ "$(heals '.batched')" = 100101 ] \
+    || fail "the batch card was not filed with a retried file of $(wc -c < "$ST/retried.jsonl") bytes: $out"
+}
+
+# Bug (issue 1565, review of its third fix): `retry` writes a card's lines to the retried file, then takes them out of
+# the card records, and healsbatch() read the retried file first: a retry that ended between the two reads left the
+# card in neither, and the batch card was built on main before the source card's code landed. A retry that ends
+# between the two reads is made by wrapping stdb(): the engine's functions are sourced as the run command does
+# (teststep()), because a `conveyor.sh heals batch` run cannot be stopped between its two reads.
+t_healsretryrace() {
+  local out rc
+  judging '[]'; rm -f "$ST/healssort.jsonl"
+  jq -cn '{id: "h00000000r5", time: "2026-11-20T00:00:00Z", card: "c7", issue: 7, repo: "r", area: "area:engine", finding: "[P2] d.sh:4 a late line", why: "it heals", effect: "self-heals", from: "review"}' >> "$ST/selfheals.jsonl"
+  landed 7 | jq -c '.card = "c7" | (.step = "picked"), (.step = "blocked" | .result = "blocked" | .reason = "build: it failed")' >> "$ST/cards.jsonl"
+  # shellcheck disable=SC2034 # HERE is read by the libraries sourced below
+  out=$( HERE=$SRC; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    eval "$(sed -n '/^\. "\$HERE\/lib\/portable.sh"/,/^\. "\$HERE\/lib\/records.sh"/p' "$SRC/conveyor.sh"; grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
+    names || exit 1
+    eval "real_$(declare -f stdb)"
+    stdb() { # the first read of the records ends, then the retry of #7 does
+      local rc; real_stdb "$@"; rc=$?
+      if [ "${1:-} ${2:-}" = "ask lines" ] && [ ! -e "$STUB/retried" ]; then : > "$STUB/retried"; moveout '.issue == $n' --argjson n 7 > /dev/null 2>&1; fi
+      return $rc
+    }
+    healsbatch area:engine 2>&1 ); rc=$?
+  [ -e "$STUB/retried" ] && [ -z "$(st 'select(.issue == 7) | .card')" ] \
+    || fail "the retry of #7 did not end during the reads, so the gap this case needs is not there: $(ls "$STUB" 2>&1) $(st '[.step, .card] | join(" ")')"
+  [ "$rc" = 2 ] && [ ! -e "$STUB/filed" ] && [ "$(heals '.batched')" = null ] \
+    || fail "a batch card was filed (rc $rc) for the finding of #7 when its retry ended between the reads of the card records and the retried file: $out"
+}
+
+# Bug (issue 1565, review of its third fix): testpick() names a Tests page card's new card in the record (was: the
+# given-back card) before it writes the new card's picked line. In between, the given-back card has no line in the card
+# records and is busy, but the new card is not, and the entry was looked up under the new card only: it was batched.
+t_healsretrypick() {
+  local out rc old=c20261120T000000-r-0 new=c20261120T010000-r-0
+  judging '[]'; rm -f "$ST/healssort.jsonl" "$ST/mainred.json"; mkdir -p "$ST/testactions"
+  jq -cn --arg c "$old" '{id: "h00000000r6", time: "2026-11-20T00:00:00Z", card: $c, issue: 0, repo: "r", area: "area:engine", finding: "[P1] d.sh:4 a late line", why: "it drops a line", effect: "harm", from: "review"}' >> "$ST/selfheals.jsonl"
+  landed 0 | jq -c --arg c "$old" '.card = $c | (.step = "picked" | .testFile = "x.test.sh"), (.step = "blocked" | .result = "blocked" | .reason = "build: it failed")' >> "$ST/cards.jsonl"
+  out=$(loop retry "$old" 2>&1) || fail "retry of the blocked Tests page card failed: $out"
+  jq -cn --arg o "$old" --arg n "$new" '{cards: [{id: "t1", card: $n, was: [$o]}]}' > "$ST/testactions/cards.json"
+  out=$(loop heals batch area:engine 2>&1); rc=$?
+  [ "$rc" = 2 ] && [ ! -e "$STUB/filed" ] && [ "$(heals '.batched')" = null ] \
+    || fail "a batch card was filed (rc $rc) for the finding of $old when the record named its new card $new, which has no line yet: $out"
+  landed 0 | jq -c --arg c "$new" '.card = $c' >> "$ST/cards.jsonl" # the new card has landed
+  out=$(loop heals batch area:engine 2>&1) && [ "$(heals '.batched')" = 100101 ] \
+    || fail "the batch card was not filed once the new card $new of $old landed: $out $(cat "$ST/selfheals.jsonl")"
+}

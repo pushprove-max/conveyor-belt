@@ -28,12 +28,36 @@ healsbatch() { # <area | ->
     # card waits, as does one a review wrote (from: review) on an issue with such a card (a retry's new card): the code
     # its finding names is only in that card's change, so a batch card built on main now finds nothing to fix. It goes
     # to the next batch card of its area once that card ends. A card with no GitHub issue given back by `retry` is
-    # known by its new card (TACARDS was).
-    busy=$(stdb ask lines cards | jq -cs 'map(objects) | group_by(.card) | map(select(any(.step | IN("landed", "closed")) | not) | .[0])
-      | {cards: map(.card), issues: map(.issue | select(. != 0))}') || { echo "conveyor: the card records could not be read; nothing filed" >&2; exit 1; }
-    es=$(jq -cs --arg a "$a" --argjson b "$busy" --slurpfile tc <(jq -c '.cards // []' "$TACARDS" 2>/dev/null || echo '[]') \
-      'map(objects | select((.area // "") == $a and .batched == null)) | map(.card as $c | . + {wait: ((first($tc[0][] | select((.was // []) | index($c))) | .card) // $c
-        | IN($b.cards[])) or (.from == "review" and (.issue | IN($b.issues[])))})' "$SELFHEALS" 2>/dev/null) || es='[]'
+    # known by its new card too (TACARDS was): the entry waits while the card of its own id or its new card is busy.
+    # An issue given back by `retry` has no line in the card records until its next card is picked (its lines are in the
+    # retried file), so it is busy too, until a card of it has landed or closed. So is a card with no GitHub issue given
+    # back so (a main-red fix card or a Tests page card): it is busy while the card of its record (TACARDS, MAINRED) has
+    # not landed or closed. That card is the given-back one until the pick, and its next card from the pick on: a
+    # Tests page entry names the given-back card in its was, a main-red one by its commit, which the given-back card's
+    # picked line (in the retried file) names. The retried file is long and the records grow, so each goes to jq as a
+    # file, not an argument (Linux refuses one over 128 KiB). A record file that is not there holds no card.
+    # The card records are read before the retried file, and the Tests page's cards once. `retry` (moveout(),
+    # lib/issues.sh) writes a card's lines to the retried file before it takes them out of the card records, so a retry
+    # that ends between the two reads leaves the card in one of them at least (the other way round, in neither).
+    # testpick() sets the new card in TACARDS before its picked line is written, so an entry whose card was given back
+    # waits while either the given-back card or its new one is busy (below).
+    cl=$(stdb ask lines cards) && rt=$(stdb ask lines retried | jq -c 'objects | {card, issue, red: (.mainRed | if type == "string" then . else null end)}' | sort -u) \
+      && tac=$(jq -c '.cards // []' "$TACARDS" 2>/dev/null || echo '[]') \
+      || { echo "conveyor: the card records could not be read; nothing filed" >&2; exit 1; }
+    busy=$(jq -cs --slurpfile r <(printf '%s\n' "$rt") --slurpfile ta <(printf '%s\n' "$tac") \
+      --slurpfile re <(jq -c '.reds // []' "$MAINRED" 2>/dev/null || echo '[]') \
+      'def idx: map({key: ., value: true}) | from_entries; def done: any(.step | IN("landed", "closed"));
+      map(objects) | group_by(.card) as $g | ($g | map(select(done) | .[0])) as $end | ($g | map(select(done | not) | .[0])) as $open
+      | ($end | map(.card) | idx) as $ec | ($g | map(.[0].card) | idx) as $have | ($r | map(.card | strings) | idx) as $rs
+      | ($r | map(.issue | select(. != null and . != 0)) | unique) as $ri
+      | ([($ta[0][], $re[0][]) | select((.card | type) == "string" and $ec[.card] == null) | .card, (.was // [])[]]
+        + [$re[0][] | select((.card | type) == "string" and $ec[.card] == null) | .sha | strings | . as $s | $r[] | select(.red == $s) | .card]
+        | map(select($rs[.] != null and $have[.] == null)) | unique) as $rc
+      | {cards: (($open | map(.card)) + $rc), issues: (($open | map(.issue | select(. != 0))) + ($ri - ($end | map(.issue))))}' <<<"$cl") \
+      || { echo "conveyor: the card records could not be read; nothing filed" >&2; exit 1; }
+    es=$(jq -cs --arg a "$a" --slurpfile b <(printf '%s\n' "$busy") --slurpfile tc <(printf '%s\n' "$tac") \
+      'map(objects | select((.area // "") == $a and .batched == null)) | map(.card as $c | . + {wait: (([$c, ((first($tc[0][] | select((.was // []) | index($c))) | .card) // $c)]
+        | any(IN($b[0].cards[]))) or (.from == "review" and (.issue | IN($b[0].issues[]))))})' "$SELFHEALS" 2>/dev/null) || es='[]'
     w=$(jq 'map(select(.wait)) | length' <<<"$es"); es=$(jq -c 'map(select(.wait | not) | del(.wait))' <<<"$es")
     k=$(jq length <<<"$es")
     [ "$k" -gt 0 ] || { echo "conveyor: the self-heals list holds no open entry in ${a:-no area}$([ "$w" = 0 ] || echo " whose card has ended ($w wait for theirs to land or close)"); nothing filed" >&2; exit 2; }
