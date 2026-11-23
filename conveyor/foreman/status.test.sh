@@ -452,11 +452,12 @@ grep -qx 'not yet reported: blocked #7' <<<"$out" \
   || fail "with the wake '$w' relayed at the refused stop k1, the status does not name #7 as not yet reported: $out"
 }
 
-# Bug caught: the watcher queued a block from a snapshot behind the card records, so its wake line ends in
-# " (as of HH:MMZ)"; the status builds that block from the card records now (NOWBLOCKED) with no suffix, and the
-# exact match missed both the wake still pending (#8) and the wake relayed at the refused stop (#9), so the status
-# left them out; and a later poll, from a snapshot made at another time, gave the next wake (for the new #10) none of
-# them, as its own block lines end in another time.
+# Guards the "(as of HH:MMZ)" a wake line may end with: the watcher queued a block from a snapshot behind the card
+# records, so its wake line ends in " (as of 11:50Z)", while the status builds that block from the card records now
+# (NOWBLOCKED) with no suffix, and a later poll, from a snapshot made at 11:55Z, ends its own block lines in another
+# time. A match that compared the lines whole, suffix and all, would leave out the `not yet reported` lines for #8
+# (its wake still pending) and #9 (its wake relayed at the refused stop), in the status and in the next wake (for the
+# new #10).
 t_unrepsentasof() {
 CASE=unrepsentasof; fixture unrepsentasof; mkdir -p "$FD/pending"
 b() { echo "{card: \"c$1\", issue: $1, since: \"2026-11-15T11:00:00Z\", reason: \"tests failed twice\"}"; } # <issue>
