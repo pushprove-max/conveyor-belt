@@ -198,17 +198,17 @@ GONE='its process was gone: the machine or the loop stopped'
 # own goes back first, on the commit it was on, and no list of passes goes with it: the batch's run, of the batch's
 # change, writes <worktree>.rerun (batchlist()). It fails, saying so, when its change cannot be put back: the card is
 # left open, as block() would keep the batch's changes as its work and remove its own .bpatch.
+# `retry` (endcard()) and the loop (turnended(), revive()) can end the same card at once: it holds the card's block lock (<cards>/<card>.block, block()) from its look at the worktree to its end, so no block() reads the worktree between one caller's reset and apply, sees no change, and removes the worktree and the .bpatch.
 gonewt() { # <card> <worktree> <its last step>
-  local c=$1 wt=$2 f
+  local c=$1 wt=$2 f bl rc=0
+  { exec {bl}>>"$CARDS/$c.block" && flock "$bl"; } 2>/dev/null || { [ -z "${bl:-}" ] || exec {bl}>&-; bl=''; }
   if [ -s "$wt.lent" ] && [ -d "$wt" ]; then
-    git -C "$wt" reset -q --hard "$(<"$wt.lent")" 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null || {
-      echo "conveyor: card $c had an open record and its process was gone mid-batch, and its change could not be put back in its worktree; it is left open: its change is the patch $wt.bpatch on commit $(<"$wt.lent")"
-      return 1; }
-    rm -f "$wt.lent" "$wt.rerun"
+    git -C "$wt" reset -q --hard "$(<"$wt.lent")" 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null && rm -f "$wt.lent" "$wt.rerun" || {
+      echo "conveyor: card $c had an open record and its process was gone mid-batch, and its change could not be put back in its worktree; it is left open: its change is the patch $wt.bpatch on commit $(<"$wt.lent")"; rc=1; }
   elif [ "$3" = test ] && [ -d "$wt" ] && [ -d "$wt.testlog" ] && f=$(testfails "$wt.test" 137); then
     rerunlist "$wt" "$(git -C "$wt" diff --cached --binary --no-renames HEAD 2>/dev/null | git hash-object --stdin)" "$f" \
-      "$(git -C "$wt" rev-parse -q --verify HEAD 2>/dev/null)" "$(git -C "$wt" write-tree 2>/dev/null)"
-  fi
+      "$(git -C "$wt" rev-parse -q --verify HEAD 2>/dev/null)" "$(git -C "$wt" write-tree 2>/dev/null)" || rc=$?
+  fi; [ -z "$bl" ] || exec {bl}>&-; return $rc
 }
 revive() { # <the loop's own cards, one a line>
   local c n p t step wt sp st

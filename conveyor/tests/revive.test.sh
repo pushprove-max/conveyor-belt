@@ -336,6 +336,38 @@ t_blocktwice() {
     || fail "two block() calls of $c side by side: its kept patch is gone or does not apply, or its lock file was left: $(ls -a "$ST/kept/$c" "$T/$CASE/cards" 2>&1)"
 }
 
+# Bug (#1475): the loop and `retry` each ran gonewt() and then block() on the same card stopped mid-batch, gonewt()
+# outside any lock. One block() read the worktree between the other's reset and its apply, saw no change, and
+# removed the worktree and the .bpatch: the card was blocked with its own change lost. Here #7 is stopped running
+# #8's change (as in t_gonebatch). The first caller is held before its reset until the second's block() is about to
+# read the worktree; the second is held there until the first has reset, so it reads between the first's reset and
+# apply; the first is held at its apply until the second's gonewt() and block() have returned. Each wait is 2 s at
+# most. One blocked line is written, and its kept patch is #7's own change.
+t_gonetwice() {
+  local c=c20260101T000000-t-7 wt
+  setup "[$(issue 7 2026-01-01)]"
+  gonecard $c 7 1 "$(date)" test
+  wt=$T/$CASE/cards/$c
+  git -C "$R" worktree add -q --detach "$wt" && echo two >> "$wt/a.txt" && echo new > "$wt/u.txt" && git -C "$wt" add -A \
+    && git -C "$wt" diff --cached --binary --no-renames > "$wt.bpatch" && git -C "$wt" rev-parse HEAD > "$wt.lent" \
+    && git -C "$wt" reset -q --hard && echo eight > "$wt/m.txt" && git -C "$wt" add -A || fail "no mid-batch worktree for #7"
+  # waitfor <mark>: polls for the other caller's mark, 2 s at most; with the lock the first caller never sees it, so it
+  # waits those 2 s out and goes on.
+  fx_in 'waitfor() { local i=0; while [ ! -e "$1" ] && [ $((i += 1)) -le 20 ]; do sleep 0.1; done; }
+    ( git() { case "$1 $2 $3" in
+        "-C $wt reset") local r; : > "$STUB/b-in"; waitfor "$STUB/a-reads"; command git "$@"; r=$?; : > "$STUB/b-reset"; return $r ;;
+        "-C $wt apply") waitfor "$STUB/a-done"; command git "$@" ;;
+        *) command git "$@" ;; esac; }
+      gonewt "$c" "$CARDS/$c" test || exit 0; ( block "$c" 7 "$CARDS/$c" "$GONE" ) ) &
+    ( git() { [ "$1 $2 $3 $4" != "-C $wt add -A" ] || { : > "$STUB/a-reads"; waitfor "$STUB/b-reset"; }; command git "$@"; }
+      waitfor "$STUB/b-in"; gonewt "$c" "$CARDS/$c" test && ( block "$c" 7 "$CARDS/$c" "$GONE" ); : > "$STUB/a-done" ) &
+    wait'
+  [ "$(st "select(.card == \"$c\" and .step == \"blocked\") | .reason" | wc -l)" = 1 ] \
+    || fail "gonewt() and block() of $c, stopped mid-batch, run by two callers side by side: not one blocked line: $(st "select(.card == \"$c\") | [.step, .reason, .kept] | @tsv") $(cat "$T/$CASE/run.out")"
+  [ "$(git apply --numstat "$ST/kept/$c/$c.patch" 2>/dev/null | cut -f3 | sort | tr '\n' ' ')" = "a.txt u.txt " ] \
+    || fail "gonewt() and block() of $c, stopped mid-batch with its own change in $c.bpatch, run by two callers side by side: the kept patch is not its own change: $(cat "$ST/kept/$c/$c.patch" 2>&1) $(cat "$T/$CASE/run.out")"
+}
+
 # Bug (#1457, R113): `retry` of a card whose process was gone killed nothing, so a session it had started, no longer
 # under it, still worked in its worktree while block() staged it and took it away. Bugs too: retry ended a shell an
 # operator had open in the worktree, which matched by its folder alone, and missed a test run on main's code in
