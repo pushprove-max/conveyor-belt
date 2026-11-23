@@ -122,10 +122,21 @@ plug_cause() {
 plug_join() { local o='' x; for x; do x=${x#"${x%%[![:space:]]*}"}; x=${x%"${x##*[![:space:]]}"}; [ -z "$x" ] || o=${o:+$o, }$x; done; printf '%s' "$o"; }
 # plug_untag <text>: the text without any [likely] tag, trimmed.
 plug_untag() { local s=$1 p; while [[ ${s,,} == *'[likely]'* ]]; do p=${s,,}; p=${p%%\[likely\]*}; s=${s:0:${#p}}${s:${#p}+8}; done; plug_join "$s"; }
+# The notes file is read and rewritten by the Board's Dismiss and appended to by serve's price notes, all under
+# noprice.lock beside it (noprice(), lib/control.sh): the loop holds that lock, so a note it writes is not lost under
+# the Board's older copy. Only a reply with a plugin-problem line takes it (plug_lock, at its first such line). A lock
+# that cannot be taken in 30 s is dropped and the loop runs without it: the hook never blocks.
+plug_lock() {
+  [ -z "${NLTRIED:-}" ] || return 0
+  NLTRIED=1
+  mkdir -p "$FD" 2>/dev/null && exec {NL}>>"$FD/noprice.lock" 2>/dev/null && { flock -w 30 "$NL" || { exec {NL}>&-; unset NL; }; } 2>/dev/null
+  return 0
+}
 shopt -s nocasematch
 while IFS= read -r l; do
   [[ $l =~ $PLUG ]] || continue
   seen=${l:${#BASH_REMATCH[0]}}; seen=${seen%"${seen##*[![:space:]]}"}; [ -n "$seen" ] || continue
+  plug_lock
   # The "filed as #<n>" end is set aside, so a cause part never swallows it. A number that names no issue is left out
   # of the note, so the line with a valid number later takes its place.
   sfx=; [[ $seen =~ $NOISSUE ]] && { sfx=${BASH_REMATCH[0]}; seen=${seen:0:${#seen}-${#sfx}}; }
@@ -166,6 +177,7 @@ while IFS= read -r l; do
     printf -- '- %s · card %s · %s · evidence: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${card:--}" "$seen" "${ev:--}"; } >> "$NOTES"; } 2>/dev/null
 done < <(grep -iE "${PLUG}[^[:space:]]" <<<"$REPLY")
 shopt -u nocasematch
+[ -z "${NL:-}" ] || exec {NL}>&-
 # The wake and unfinished-work checks below read the reply without its plugin-problem lines.
 # A "Done without asking" line (the standing-yes rule's one line to the owner) is read out of it too: it is how the
 # owner hears of an act taken for them, so a wake reply may carry it. It must have the whole form, kind and id.

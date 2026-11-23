@@ -305,6 +305,37 @@ form_check() {
 t_formhome() { form_check home; }
 t_formother() { form_check other; }
 
+# Bug (#1481): the stop hook appended a note without noprice.lock, so a Board Dismiss (read, edit, replace under that
+# lock) that read the file before the append and replaced it after lost the note. Here the lock is held, as a Dismiss
+# holds it, over a notes file that already has a note (the only file a Dismiss opens): the new note must wait for the
+# lock, so the file keeps its one note until the lock is freed. A real wait on a held lock, as a direct check cannot
+# show the hook waits. The hook runs with descriptor 8 closed, so this shell alone holds the lock and closing it here
+# frees it for the hook.
+t_locked() {
+  fixture locked https://github.com/example/alpha
+  printf -- '# Plugin problems the Foreman noted (for the conveyor-belt repo)\n\n- 2026-11-18T09:54:00Z · card - · setup never sets linkFromMain · evidence: -\n' > "$FD/plugin-bugs.md"
+  exec 8>>"$FD/noprice.lock"; flock 8
+  turn u1 "$LINE" 8>&- >/dev/null & p=$!
+  sleep 1  # sleep: the hook must stay blocked on the held lock; no event marks "still waiting", so time must pass
+  [ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 1 ] || fail "a note was written while noprice.lock was held, for the reply '$LINE': $(cat "$FD/plugin-bugs.md")"
+  exec 8>&-
+  wait "$p" || fail "the stop hook exited with an error (status $?) after noprice.lock was freed, for the reply '$LINE'"
+  [ "$(grep -c '^- ' "$FD/plugin-bugs.md")" = 2 ] && grep -q ' · running cards keep the old engine code, ' "$FD/plugin-bugs.md" \
+    || fail "the note was not added after noprice.lock was freed, for the reply '$LINE': $(cat "$FD/plugin-bugs.md" 2>&1)"
+}
+
+# A reply with no plugin problem writes no note, so it does not queue on noprice.lock behind a Dismiss: with the lock
+# held the hook still ends. A real wait for the hook's end, as a direct check cannot show it did not block on the lock.
+t_unlocked() {
+  fixture unlocked https://github.com/example/alpha
+  exec 8>>"$FD/noprice.lock"; flock 8
+  turn u1 "Idle." 8>&- >/dev/null & p=$!
+  for _ in $(seq 100); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done  # sleep: polls for the hook's end, up to 10 s
+  if kill -0 "$p" 2>/dev/null; then kill "$p" 2>/dev/null; fail "a reply with no plugin problem waited for noprice.lock, for the reply 'Idle.'"; fi
+  exec 8>&-
+  wait "$p" || fail "the stop hook exited with an error (status $?) while noprice.lock was held, for the reply 'Idle.'"
+}
+
 # The default list is every t_ function in this file: a hand-kept list left t_split out (bug #558).
 cases=$(declare -F | sed -n 's/^declare -f t_//p')
 SEL=${CONVEYOR_SHELL_TEST_CASE:-$cases}; SEL=${SEL//,/ }
