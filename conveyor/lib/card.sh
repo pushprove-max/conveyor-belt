@@ -675,16 +675,16 @@ resumeplan() {
       [ "$mode" = stale ] || for t in trailers covered stabilised; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done; cp "$fromk/$from.outside" "$wt.outside" 2>/dev/null || cp "$CARDS/$from.outside" "$wt.outside" 2>/dev/null || :
     fi
   fi
-  # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it
-  # stopped for the yes, or on a landing conflict). A body changed since: the patch is built on and reviewed against the issue as it is now. A
-  # section of what customers or staff will see changed since: the issue asks for another change, built from nothing, a port too (bug: it ported the refused change).
+  # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it stopped for the yes, or on a landing conflict). A body changed
+  # since: the patch is built on and reviewed against the issue as it is now. A section of what customers or staff will see changed since: the issue asks for another change, built from
+  # nothing, a port too (bug: it ported the refused change); the old block reason (was) goes too, so its own landing conflict gets its port (landconflict(); bug: it was skipped).
   if { [ "$mode" = land ] || [ "$mode" = port ]; } && [ -n "$issue" ]; then
     d=$fromk/$from.body; [ -e "$d" ] || d=$CARDS/$from.body
     kw=$(keptway "$issue" "$d")
     case $mode:$kw in
       land:review) mode=session; note="resumed from the kept patch of card $from: the issue changed since its review: one session, then review" ;;
       *:build) git -C "$wt" reset -q --hard 2>/dev/null || { err="worktree: the kept patch of card $from could not be taken out of the worktree"; return 1; }
-        rm -f "$wt.rerun" "$wt.trailers" "$wt.covered" "$wt.stabilised"; mode='' fin=''; note="the issue's section of what customers or staff will see changed since the review of the kept patch of card $from: built from nothing" ;;
+        rm -f "$wt.rerun" "$wt.trailers" "$wt.covered" "$wt.stabilised"; mode='' fin='' was=''; note="the issue's section of what customers or staff will see changed since the review of the kept patch of card $from: built from nothing" ;;
     esac
   fi
   # The owner's yes with a condition: the kept review was written before that line was, so nothing has held the change

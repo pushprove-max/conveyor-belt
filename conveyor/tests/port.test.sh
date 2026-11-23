@@ -352,7 +352,7 @@ portkept() {
 # lib/card.sh), with no card run: card()'s new worktree of main ($T/$CASE/cards/c9), its issue as GitHub gives it, the rule
 # "visible changes need the owner's yes" and the inherited yes as card() reads them (the moved cases' issues have
 # no section naming a change, so none is held to one: heldto is empty). Its outcome, as card() acts on it, in
-# $RESUMED: {rc, err, mode, note, from, fin, finend, pro, rounds, staged (the worktree's staged files), beside (the
+# $RESUMED: {rc, err, mode, note, from, fin, finend, was, pro, rounds, staged (the worktree's staged files), beside (the
 # files beside the worktree, by their ending)}. <commands> run after it, in its shell (wt is that worktree).
 # Used by the resume cases of kept, rerunkept, reviewback, visible and visibleinherit too (the runner loads every case
 # file into one shell; .conveyor/test-links.json runs them when this file changes).
@@ -366,9 +366,9 @@ resumed() {
     [ "$vrule" = off ] || inh=$(inherit "$issue")
     from="" fromk="" was="" mode="" note="" fin="" finend="{}" pro="[]" rounds=0 err=""
     resumeplan; rc=$?
-    jq -cn --argjson rc "$rc" --arg err "$err" --arg mode "$mode" --arg note "$note" --arg from "$from" --arg fin "$fin" --argjson finend "$finend" \
+    jq -cn --argjson rc "$rc" --arg err "$err" --arg mode "$mode" --arg note "$note" --arg from "$from" --arg fin "$fin" --argjson finend "$finend" --arg was "$was" \
       --argjson pro "$pro" --argjson rounds "$rounds" --arg staged "$(git -C "$wt" diff --cached --name-only)" --arg beside "$(cd "$CARDS" && ls -d c9.* 2>/dev/null)" \
-      "{rc: \$rc, err: \$err, mode: \$mode, note: \$note, from: \$from, fin: \$fin, finend: \$finend, pro: \$pro, rounds: \$rounds,
+      "{rc: \$rc, err: \$err, mode: \$mode, note: \$note, from: \$from, fin: \$fin, finend: \$finend, was: \$was, pro: \$pro, rounds: \$rounds,
         staged: (\$staged | split(\"\n\") | map(select(. != \"\"))), beside: (\$beside | split(\"\n\") | map(select(. != \"\") | ltrimstr(\"c9.\")))}" > "$T/$CASE/resumed.json" || exit 3
     '"${2:-}"
   RESUMED=$(cat "$T/$CASE/resumed.json" 2>/dev/null)
@@ -593,4 +593,7 @@ t_resumeconflictrewritten() {
   [ "$(jq -c '[.rc, .mode, .fin, .staged]' <<<"$RESUMED")" = '[0,"","",[]]' ] \
     && [ "$(jq -r .note <<<"$RESUMED")" = "the issue's section of what customers or staff will see changed since the review of the kept patch of card $c: built from nothing" ] \
     || fail "the kept patch of a landing conflict whose issue was rewritten was ported, not built from nothing: $RESUMED"
+  # Bug: was kept the old patch's conflict, so landconflict() (lib/cardland.sh) took this new build's own landing
+  # conflict for the conflict of a port and blocked it with no port.
+  [ "$(jq -r .was <<<"$RESUMED")" = "" ] || fail "a card built from nothing kept the discarded patch's block reason, which skips its own port: $RESUMED"
 }
