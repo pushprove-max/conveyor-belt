@@ -117,6 +117,21 @@ test('Tests failures: an open Fix failures preview is made again when the test h
   assert.equal(act(opened(w, MERGE), 'issue-body'), null, 'with no failure left to fix the preview closes');
 });
 
+// Bug it guards (R323): one verdict per step (main before card) hid a card's catch: a step whose mergeorder was the
+// card's and mergeclean main's showed no caught card change, and Fix failures listed mergeorder to fix. Each case's own
+// verdict (caseVerdicts) counts: the step is a catch for mergeorder, and Fix failures names mergeclean alone.
+test('Tests failures: a step with a card case and a main case is a catch for the one and a failure to fix for the other', () => {
+  const d = snap(), f = d.panels.tests.data.tests.files.find((x) => x.file === MERGE);
+  f.failures = [{ ...fail(510, 1, 'main', ['mergeclean', 'mergeorder'], TAIL), caseVerdicts: { mergeclean: 'main', mergeorder: 'card' } }];
+  const w = boot({ tab: 'tests' });
+  deliver(w, d);
+  assert.equal(status(w, MERGE).querySelector('.tests-caught-cards')?.textContent, 'caught 1 card change', 'the step with failures [mergeclean main, mergeorder card] shows its catch');
+  act(open(w, MERGE), 'fix-failures').click();
+  const body = act(opened(w, MERGE), 'issue-body').value;
+  assert.match(body, /card #510: failed on main too\. Failing cases: mergeclean\.\n/, `the step with failures [mergeclean main, mergeorder card] asks to fix mergeclean alone:\n${body}`);
+  assert.match(body, /- The cases that failed \(mergeclean\) succeed/, `the Done-when names mergeclean alone:\n${body}`);
+});
+
 // Bug it guards (#188): a file with many failures gave a Fix failures body over the 2500 characters the server takes,
 // so the issue could not be filed, or its Done-when was cut off. The list stops with "and N more" and Done-when stays.
 test('Tests failures: with 40 flaky failures the Fix failures body stays within 2500 characters and keeps its Done-when', () => {

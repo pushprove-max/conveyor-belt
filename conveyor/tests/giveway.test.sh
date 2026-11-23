@@ -313,7 +313,7 @@ t_stackfixround() {
   echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":false,\"passed\":false}" > "$CARDS/c8-8.claim"
   jq -cn --arg b "$(git -C "$CARDS/c8-8" rev-parse HEAD)" '{on: "c7-7", base: $b, id: "x", restacks: 0}' > "$CARDS/c8-8.stack"
   # claim(), giveway() and what they call, as the engine has them, run from main's checkout.
-  eval "$(sed -n '/^claim() {/,/^}/p; /^giveway() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^testedhere() {/p; /^readysince() {/,/^}/p; /^turnq() {/,/^}/p' "$SRC/lib/claim.sh")"
+  eval "$(sed -n '/^claim() {/,/^}/p; /^giveway() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^readyput() {/,/^}/p; /^testedhere() {/p; /^readysince() {/,/^}/p; /^turnq() {/,/^}/p' "$SRC/lib/claim.sh")"
   packget() { printf -v "$2" 1; } # for turnq(): the test pack's landBatch, batches off
   eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p' "$SRC/lib/records.sh")"
   # shellcheck disable=SC2034 # read by stdb(), for the folder state.py is in

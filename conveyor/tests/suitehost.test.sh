@@ -273,6 +273,34 @@ t_hoststallended() {
   [ "$rc" = 1 ] && grep -q 'box.example.com stopped answering over ssh while the suite ran there; it had already ended there' "$w.test" \
     || fail "hosttests with a box whose polls stall and a suite that had ended there did not say it had ended: exit $rc, output $(cat "$w.test" 2>&1)"
 }
+# Bug (R405): a release checked jq and git alone on its box, not the tools the `# needs:` lines of
+# .conveyor/test-machine.sh name, so a box that lacked one started the run, which failed in the suite, not as not
+# started. The check runs as relsuite() calls the steps: hoststart(), then hostsetup() of the tested commit.
+# Commit s1's script installs tool-405 on the box and needs it; s2's needs notatool-405 too, which no script installs.
+# The main checkout's script is s1's. Bugs it catches: the start refused a new box the script sets up (tool-405 is
+# missing until the script runs); the box lost tool-405 after s1's setup, and the check ran only when a new script ran,
+# so s1's setup again (its script not run again) passed; the check read the main checkout's script, not the tested
+# commit's, so s2 passed; or a box that lacks a tool did not end the run not started in the record, naming that tool alone.
+t_hostneedsmissing() {
+  # shellcheck disable=SC2034 # FXWT is read by fx_in, a fix card's worktree; this case has none
+  local FXWT=$T/$CASE/none s1 s2 rec=$T/$CASE/run.json
+  setup '[]'; boxsetup 3; boxrule
+  # shellcheck disable=SC2016 # the script's $HOME is the box's, read there
+  mkdir -p "$R/.conveyor" && printf '# needs: tool-405\nmkdir -p "$HOME/bin" && printf "#!/bin/sh\\n" > "$HOME/bin/tool-405" && chmod +x "$HOME/bin/tool-405"\n' > "$R/.conveyor/test-machine.sh" \
+    && git -C "$R" add -f .conveyor/test-machine.sh && git -C "$R" commit -qm setup && s1=$(git -C "$R" rev-parse HEAD) \
+    && echo '# needs: notatool-405 24' >> "$R/.conveyor/test-machine.sh" && git -C "$R" commit -qam 'needs more' && s2=$(git -C "$R" rev-parse HEAD) \
+    && git -C "$R" show "$s1:.conveyor/test-machine.sh" > "$R/.conveyor/test-machine.sh" && echo '{}' > "$rec" || fail "the fixture could not be made"
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'cd "$R" && . "$HERE/lib/suitehost.sh" && relrec() { jq -c "$@" "$rec" > "$rec.new" && mv -f "$rec.new" "$rec"; }
+    hoststart release-prep && hostsetup release-prep "$s1"; echo "s1 $?"; rm -f "$STUB/box/bin/tool-405"
+    hostsetup release-prep "$s1"; echo "again $? $(jq -r .machine.reason "$rec")"; hostsetup release-prep "$s2"; echo "s2 $?"'
+  grep -qx 's1 0' "$T/$CASE/run.out" || fail "hoststart, then hostsetup of a commit whose script installs tool-405, which it needs, did not pass: $(cat "$T/$CASE/run.out")"
+  grep -qx 'again 1 tool-405: not installed there (.conveyor/test-machine.sh needs it)' "$T/$CASE/run.out" \
+    || fail "hostsetup of s1 again, on a box whose setup.blob is s1's script and that lost tool-405 since, did not end the run not started naming tool-405: $(cat "$T/$CASE/run.out")"
+  grep -qx 's2 1' "$T/$CASE/run.out" \
+    && jq -e '.state == "not started" and .machine.step == "setup" and .machine.reason == "notatool-405: not installed there (.conveyor/test-machine.sh needs it)"' "$rec" > /dev/null \
+    || fail "hostsetup of a commit whose script needs notatool-405, which the box lacks (the main checkout's script does not name it), did not end the run not started naming it alone: $(cat "$T/$CASE/run.out") record $(cat "$rec")"
+}
 # `suite-machine check` names each need of the rule's box, ok or missing. Bugs: a tool a `# needs: <tool> [<version>]`
 # line of .conveyor/test-machine.sh names was not checked (the old `# tools:` line is not one), a missing one passed the
 # check, or the box's slots were its CPUs, not its pool's. The box has 3 CPUs and 2 test slots, and the script names a

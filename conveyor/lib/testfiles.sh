@@ -28,7 +28,7 @@
 #   everRun (a run on record at all, one before the history start too: the Board's Never run has none), wholeOnly (its test.files entry's wholeOnly), failedSteps (the test steps
 #   that failed with it among the failed files, or with a case it defines that its runner named, or timed out in it;
 #   a step that went again counts with the failures of its first run too: failedrun, FAILURE),
-#   failures (those steps, newest first, each {card, issue, time, verdict: main, flaky, card or null, cases, tail}
+#   failures (those steps, newest first, each {card, issue, time, verdict: main, flaky, card or null, cases, caseVerdicts, tail}
 #   (FAILURE); tail is null past the newest TESTKEEP), caught and changedToPass (those of them whose card landed: caught when the landed commit left the file as it was,
 #   so the fix went into the code; changedToPass when that commit changed the file),
 #   flaky (its entries in the flaky-test record, its cases' too, a runner's name for them as well), flakyAgain (the
@@ -96,13 +96,12 @@ OWNERS='$defs[0] as $defs | $refs[0] as $refs | def owners($f; $c): ($defs[$c //
     def failedfiles: [(.failures.files | arrays | .[] | objects | (.file | strings) as $f
         | if (.cases | arrays | length) > 0 then .cases[] | owners($f; .name | strings)[] else $f end), (.failures.timeout.file? | strings)] | unique;'
 # One failed test line, as a failure of the file $f it counts for (failedfiles), read with OWNERS: {card, issue, time,
-# verdict, cases, tail}. verdict: the test line's verdicts (verdicts(), lib/mainred.sh) of the cases that count for $f,
+# verdict, cases, caseVerdicts, tail}. verdict: the test line's verdicts (verdicts(), lib/mainred.sh) of the cases that count for $f,
 # main when one of them failed on main too, else flaky when one failed and then passed when run again, else card (the
 # card's own change made it fail: the test did its job); null when the line has none for it (a line written before
 # verdicts were kept). cases: the names of its failing cases that count for $f ([] for a file that failed naming no
-# case). tail: the last 1500 characters of the step's output (the line's tail), null with none. failedrun: a test
-# line as a failed step: a line that failed, with its first run's failures (in rerun, firstrun(), when the run went
-# again) added to its own, so a case that passed on the run again (its verdict flaky) still counts while another file
+# case). caseVerdicts: each of those cases with a verdict, its own ({<case>: <verdict>}): a step whose cases' verdicts differ is a catch of the card for its card cases and a failure to fix for the rest (the Board's caughtOf() and fixable(); R323: one verdict for the step hid the catch).
+# tail: the last 1500 characters of the step's output (the line's tail), null with none. failedrun: a test line as a failed step: a line that failed, with its first run's failures (in rerun, firstrun(), when the run went again) added to its own, so a case that passed on the run again (its verdict flaky) still counts while another file
 # failed again, with the first run's output's end as its tail (the files that failed again kept in again, with the
 # line's own tail); a first run's time-out as its file failing naming no case; a line that passed on re-run (card():
 # `test pass` with the first run's failures and output's end in rerun) with those failures and that tail as its own;
@@ -117,6 +116,7 @@ FAILURE='def failedrun: if .result == "fail" then (if (.rerun.failures | type) =
        verdict: (if any($v[]; . == "main") then "main" elif any($v[]; . == "flaky") then "flaky" elif any($v[]; . == "card") then "card" else null end),
        cases: [.failures.files | arrays | .[] | objects | (.file | strings) as $x | .cases | arrays | .[] | (.name | strings) as $n
          | select(any(owners($x; $n)[]; . == $f)) | $n] | unique,
+       caseVerdicts: ([.verdicts | arrays | .[] | objects | (.case | strings) as $c | ($c | index(": ")) as $i | select($i != null) | select(any(owners($c[:$i]; $c[$i + 2:])[]; . == $f)) | {key: $c[$i + 2:], value: (.verdict | strings)}] | from_entries),
        tail: (if (.again | type) == "array" and (any(.again[]; . == $f) | not) then .rerun.tail else .tail end | (strings | .[-1500:]) // null)};'
 # What a card did to the test files it changed that main already had (#76), written on its landed line as testedits:
 # one entry a file, {file, read, removedAsserts, changedExpected, skipsAdded, timeoutsRaised, casesDeleted}. The one

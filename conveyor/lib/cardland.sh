@@ -48,15 +48,17 @@ cardready() {
   # The trailers the commit carries are these, read here where they were reviewed and checked: nothing after (the
   # tests) changes them.
   cmsg=$(trailers "$wt") || { block "$c" "$n" "$wt" "the engine could not read the commit trailers of the card, so nothing landed"; return; }
-  # Its rollout actions (rollouts()): those its reviews named (its retried cards' review lines' (pro), its own lines', then its kept review's, as a card
-  # that lands from a kept patch has no review line of its own), then its Rollout trailers, each once and in the order
-  # named (ROLLOUTONCE). All go on its landed line (rollout) and, in that order, at the end of the commit message as
+  # Its rollout actions (rollouts()): those of its newest review that decides them, its last review's file (the kept
+  # review, for a card that lands from a kept patch with no review line of its own) when it names any, else its own
+  # newest review line with a rollout, else the retried cards' (pro). A review that names some replaces the earlier
+  # ones (R234), and so does a GO of the whole change that names none (its line's rollout is []); a NO-GO or a review
+  # of the fix alone that names none keeps them. Then its Rollout trailers, each once and in the order named (ROLLOUTONCE). All go on its landed line (rollout) and, in that order, at the end of the commit message as
   # Rollout lines in place of its Rollout trailers, so the push carries each one. They are no findings: nothing here
   # holds the card, but a check that cannot be made: with the pack's privacy.mode public, a terms file the host file names that cannot be read blocks it (privwords()). With the pack's privacy.mode public, the Rollout lines have each word the privacy check flags
   # masked (privmask(), lib/issues.sh), as cardsubject() masks a body: they are reviewer text, and the push checks no
   # commit message. Bug: an address a review named in its ROLLOUT line was pushed in the commit message.
   rtr=$(rollouts <(printf '%s\n' "$cmsg") Rollout) && rrev=$(rollouts "$wt.review" ROLLOUT) \
-    && ro=$(stdb ask card "$c" | jq -cs --argjson p "$pro" --argjson k "$rrev" --argjson t "$rtr" '[$p[], (.[] | select(.step == "review") | .rollout // [] | .[]), $k[], $t[]] | '"$ROLLOUTONCE") \
+    && ro=$(stdb ask card "$c" | jq -cs --argjson p "$pro" --argjson k "$rrev" --argjson t "$rtr" '[(($k | select(length > 0)) // ([.[] | select(.step == "review" and has("rollout")) | .rollout] | last) // $p)[], $t[]] | '"$ROLLOUTONCE") \
     && rmsg=$(jq -r '.[] | "Rollout: \(.action) | \(.fails) | \(.place)"' <<<"$ro") \
     || { block "$c" "$n" "$wt" "the engine could not read the rollout actions of the card, so nothing landed"; return; }
   { [ -z "$rmsg" ] || { packget privacy.mode t && { [ "$t" != public ] || rmsg=$(privmask "$rmsg"); }; }; } \
@@ -272,6 +274,10 @@ cardtest() {
   [ $rc != 0 ] || [ -n "$apart" ] || [ -z "$shared" ] || locked turntake "$c" "$me" || :
   go=''
 }
+# card()'s wait for the machine hold or the repair lane (mainred.sh holdwait()), its seconds added to card()'s mainsec, as
+# mainwaited() (card.sh) adds a wait for main: the landed line's waitSec counts it, so the drift watch does not count it as work.
+holdwaited() { # <worktree> [lane]
+  local hw=$SECONDS; holdwait "$@"; mainsec=$((mainsec + SECONDS - hw)); }
 # A test run that failed (rc). go: again (the test step again: no result, a wait for main or the machine, or main
 # moved), next (its one fix round, or a fit onto main that went back) or landed; '' when the repair lane passed it.
 cardfailed() {
@@ -324,7 +330,7 @@ cardfailed() {
       if [ $lane = 2 ]; then echo "conveyor: card $c: a case it still fails is the machine's: it waits for the repair lane, which another card holds"
       else echo "conveyor: card $c: a case it still fails is the machine's, not main's, and the repair lane did not pass it ($REPAIRED): it waits until the machine passes its controls again"; fi
       rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
-      holdwait "$wt" "$([ $lane != 2 ] || echo lane)"; held=1
+      holdwaited "$wt" "$([ $lane != 2 ] || echo lane)"; held=1
     fi
   elif [ "$route" = main ]; then
     echo "conveyor: card $c: every case it still fails fails on main too: it waits for main to change"

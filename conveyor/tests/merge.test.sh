@@ -25,10 +25,10 @@ claims() { # <c8's change>
   [ "$RC" = 0 ] || fail "the claims failed: $(cat "$T/$CASE/run.out")"
 }
 
-# The engine's functions the cases call, from lib/claim.sh: together(), fits(), merge3(), cardpatch(), tested(),
-# testedhere(), docsonly() and inconflicts(), run in this shell.
+# The engine's functions the cases call, from lib/claim.sh: together(), fits(), merge3(), cardpatch(), tested() with
+# the readyput() it writes through, testedhere(), docsonly() and inconflicts(), run in this shell.
 claimfns() { eval "$(sed -n '/^together() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^docsonly() {/,/^}/p
-  /^inconflicts() {/,/^}/p; /^cardpatch() {/p; /^tested() {/{N;p;}; /^testedhere() {/p' "$SRC/lib/claim.sh")"; }
+  /^inconflicts() {/,/^}/p; /^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^readyput() {/,/^}/p; /^testedhere() {/p' "$SRC/lib/claim.sh")"; }
 
 # A main of its own, $r on branch main, its a.txt nine lines (as nine() makes it), with the cards' worktrees under
 # $CARDS: none of the case's setup is needed by the functions above.

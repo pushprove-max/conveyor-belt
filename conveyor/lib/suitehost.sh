@@ -110,12 +110,21 @@ hostfacts() { # <tool>...
   s="set -- $(printf '%q ' "$@"); $HOSTFACTS"
   if [ "$SH_KIND" = local ]; then bash -c "$s" < "$HERE/lib/slots.sh"; else hostssh "$s" 60 < "$HERE/lib/slots.sh"; fi
 }
-# A box over ssh, or a devbox with its lease, fit to run the suite: it answers, with bash 5.1 or later, jq and git. Sets
-# SH_SLOTS to its test slots, or SH_WHY to why it is not fit, and fails.
-hostneeds() {
-  local f rc v via=''
+# The tools a .conveyor/test-machine.sh names on its `# needs: <tool> [<version>]` lines, one a line, jq and git left
+# out (hostneeds() and hostcheck() name those apart): the script of <blob> (a commit's, hostsetup()), else the main
+# checkout's.
+hostneedtools() { # [blob]
+  { if [ -n "${1:-}" ]; then git cat-file blob "$1"; else cat "$MAIN/.conveyor/test-machine.sh"; fi; } 2>/dev/null \
+    | sed -n 's/^# needs:[[:space:]]*//p' | awk '{print $1}' | grep -E '^[A-Za-z0-9._+-]+$' | grep -vxE 'jq|git' | sort -u
+}
+# A box over ssh, or a devbox with its lease, fit to run the suite: it answers, with bash 5.1 or later, jq and git, and
+# each <tool> given (after its setup, the tools its commit's .conveyor/test-machine.sh needs: hostsetup()). Sets SH_SLOTS
+# to its test slots, or SH_WHY to why it is not fit, and fails.
+hostneeds() { # [tool...]
+  local f rc v via='' tools=("$@") miss
   [ "$SH_KIND" != ssh ] || via=' over ssh'
-  SH_WHY=''; f=$(hostfacts jq git 2>&1); rc=$?
+  SH_WHY=''; f=$(hostfacts jq git "${tools[@]}" 2>&1); rc=$?
+  miss=$(for v in "${tools[@]}"; do grep -qxF "$(printf 'tool\t%s\tok' "$v")" <<<"$f" || echo "$v"; done | paste -sd ' ' -)
   if [ $rc = 255 ] && [ "$SH_KIND" = ssh ]; then SH_WHY="$SH_TARGET does not answer over ssh: $(grep . <<<"$f" | tail -n 1)"
   elif [ $rc = 124 ]; then SH_WHY="${SH_TARGET:-$SH_NAME} did not answer$via in 60 s"
   elif [ $rc != 0 ]; then SH_WHY="bash could not run there (exit $rc): $(grep . <<<"$f" | tail -n 1)"
@@ -123,6 +132,7 @@ hostneeds() {
     SH_WHY="it has bash ${v:-of no version}, not 5.1 or later"
   elif ! grep -qx $'tool\tjq\tok' <<<"$f"; then SH_WHY="jq is not installed there (slot_pool, and the suite's cases, read JSON with it)"
   elif ! grep -qx $'tool\tgit\tok' <<<"$f"; then SH_WHY="git is not installed there"
+  elif [ -n "$miss" ]; then SH_WHY="$miss: not installed there (.conveyor/test-machine.sh needs it)"
   elif ! SH_SLOTS=$(sed -n 's/^slots\t\([1-9][0-9]*\)$/\1/p' <<<"$f") || [ -z "$SH_SLOTS" ]; then SH_WHY="its test slots cannot be read"; fi
   [ -z "$SH_WHY" ]
 }
@@ -204,17 +214,24 @@ hoststart() { # <command name>
 # setup: the commit's .conveyor/test-machine.sh, sent on ssh's input, run on the box when it last ran another blob. The box
 # keeps the time of that run in setup.at beside setup.blob (a box set up before that file, the mtime of setup.blob, or now
 # where date cannot read it), and says it on its last line; a devbox's rule keeps it (setupAt, hostsetupat()), whether the
-# script ran in this call or an earlier one.
+# script ran in this call or an earlier one. Then the box has each tool the script's `# needs:` lines name, or the run
+# ends not started (hostneeds()). Bug (R405): only jq and git were checked, so a box whose script had run before
+# (setup.blob current) and that lacked a needed tool started the run, which failed in the suite. The tools are the
+# commit's script's, read after it ran: the main checkout's script, read at the start, refused a new box the script
+# would set up, and named the tools of another commit than the one tested.
 hostsetup() { # <command name> <commit>
-  local h out t
+  local h out t tools=()
   hoststep setup
   [ "$SH_KIND" != local ] && h=$(git rev-parse -q --verify "$2:.conveyor/test-machine.sh" 2>/dev/null) || return 0
   out=$(git cat-file blob "$h" | hostssh "$SH_D"'; mkdir -p "$D" && cd "$D" && { [ "$(cat setup.blob 2> /dev/null)" = '"$h"' ] || { bash -s && echo '"$h"' > setup.blob && date -u +%Y-%m-%dT%H:%M:%SZ > setup.at; }; } \
     && { [ -s setup.at ] || { date -u -r setup.blob +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u +%Y-%m-%dT%H:%M:%SZ; } > setup.at; } && echo "conveyor-setup-at $(cat setup.at)"' 2>&1) \
     || { hostfail "$1" "its .conveyor/test-machine.sh failed: $(grep . <<<"$out" | tail -n 5 | paste -sd ';' -)"; return 1; }
-  [ "$SH_KIND" = devbox ] || return 0
-  t=$(grep '^conveyor-setup-at ' <<<"$out" | tail -n 1); t=${t#conveyor-setup-at }
-  [[ $t =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] && locked hostsetupat "$t" || echo "conveyor: $1: the devbox's set-up time could not be kept in the control record" >&2
+  if [ "$SH_KIND" = devbox ]; then
+    t=$(grep '^conveyor-setup-at ' <<<"$out" | tail -n 1); t=${t#conveyor-setup-at }
+    [[ $t =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] && locked hostsetupat "$t" || echo "conveyor: $1: the devbox's set-up time could not be kept in the control record" >&2
+  fi
+  mapfile -t tools < <(hostneedtools "$h")
+  [ ${#tools[@]} = 0 ] || hostneeds "${tools[@]}" || { hostfail "$1" "$SH_WHY"; return 1; }
 }
 # Under the lock: the devbox rule keeps <time> as when the box's script last ran (setupAt, the Board's Box line), when the rule is still a devbox.
 hostsetupat() { # <time>
@@ -354,7 +371,7 @@ hostcheck() { # [json [no-create]]
     n+=("$(jq -cn --argjson ok $ok --arg w "$SH_WHY" '{need: "Namespace login", ok: $ok, detail: (if $ok then "logged in" else $w end)}')")
     [ "$ok" = false ] || hostboxneed "${2:-}"
   else
-    mapfile -t tools < <(sed -n 's/^# needs:[[:space:]]*//p' "$MAIN/.conveyor/test-machine.sh" 2>/dev/null | awk '{print $1}' | grep -E '^[A-Za-z0-9._+-]+$' | grep -vxE 'jq|git' | sort -u)
+    mapfile -t tools < <(hostneedtools)
     f=$(hostfacts jq git "${tools[@]}" 2>&1); rc=$?
     [ "$SH_KIND" = local ] || n+=("$(jq -cn --arg t "$SH_TARGET" --argjson ok "$([ $rc = 255 ] && echo false || echo true)" --arg w "$([ $rc != 255 ] || grep . <<<"$f" | tail -n 1)" \
       '{need: "ssh", ok: $ok, detail: (if $ok then "\($t) answers" else "\($t) does not answer: \($w)" end)}')")

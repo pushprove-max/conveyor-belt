@@ -183,14 +183,16 @@ t_mergesharedonceconflict() {
 
 # Bug (#345): unshare() named a shared file that had passed only as failed, so the run again logged "did not pass" for
 # it. Each shared file no `fail` line names gets a `shared` line beside its `fail` line; one that failed a case (c) gets
-# none, as it did fail; so does each file whose passes it drops when the shared files could not be listed.
+# none, as it did fail; so does each file whose passes it drops when the shared files could not be listed. Bug (R238):
+# a shared file the list had no line for (e, which never ran) was named shared too, so the run again logged "main
+# changed what it tests since it passed" for a file that never passed: it gets a `fail` line alone.
 t_mergeunshare() {
   eval "$(sed -n '/^unshare() {/,/^}/p' "$SRC/lib/claim.sh")"
   local w=$T/$CASE/w
   mkdir -p "$T/$CASE"; printf 'change\tx\npass\ta\npass\tb\nfail\tc\tone\nok\tc\ttwo\n' > "$w.rerun"
   unshare "$w" $'a\nc\ne'
-  [ "$(sort "$w.rerun" | tr '\t\n' ':|')" = "change:x|fail:a|fail:c|fail:c:one|fail:e|pass:b|shared:a|shared:e|" ] \
-    || fail "the shared files that passed are not each named shared, or one that failed is: $(cat "$w.rerun")"
+  [ "$(sort "$w.rerun" | tr '\t\n' ':|')" = "change:x|fail:a|fail:c|fail:c:one|fail:e|pass:b|shared:a|" ] \
+    || fail "the shared files that passed are not each named shared, or one that failed or never ran (e) is: $(cat "$w.rerun")"
   printf 'change\tx\npass\ta\nfail\tc\tone\nok\tc\ttwo\n' > "$w.rerun"
   unshare "$w" "(the test files of the change or of main's could not be listed)"
   [ "$(sort "$w.rerun" | tr '\t\n' ':|')" = "change:x|fail:c:one|shared:a|" ] \

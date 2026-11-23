@@ -42,6 +42,24 @@ t_rollout() {
     || fail "the snapshot's landed card lacks its rollout actions in order: $(loop snapshot | jq -c '.landed')"
 }
 
+# Bug (R234): the commit took the rollout actions of every review round, so a NO-GO's 'Run migration 0004', whose fix
+# replaced 0004 with 0005, went into the commit beside the GO's 0005 and an operator would run a migration that no
+# longer exists. Only the last review of the patch that lands counts.
+t_rolloutlast() {
+  setup "[$(issue 7 2026-01-01)]"
+  local old='Run migration 0004 before the deploy | the new column is missing | a.txt:2'
+  local new='Run migration 0005 before the deploy | the new column is missing | a.txt:2'
+  echo 'echo "two$(wc -l < "$STUB/sessions")" >> a.txt' > "$STUB/build"
+  printf '%s\n' '[P1] a.txt:2 the migration is wrong' "ROLLOUT: $old" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  printf '%s\n' "ROLLOUT: $new" 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.2"
+  # loop: the commit message is put together from the card's review lines at its landing, which only a card reaches.
+  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
+  [ "$(st 'select(.step == "review") | .result' | paste -sd ' ' -)" = 'NO-GO GO' ] || fail "#7 was not a NO-GO, then a GO: $(st 'select(.step == "review")')"
+  local m; m=$(git -C "$T/$CASE/origin" log -1 --format=%B main)
+  [ "$(grep '^Rollout: ' <<<"$m")" = "Rollout: $new" ] \
+    || fail "the pushed commit of a card whose NO-GO named 0004 and whose GO named 0005 does not carry only the 0005 Rollout line: $m"
+}
+
 # Bug: a line that starts ROLLOUT but is not of its shape (no file:line, or a part left empty) passes as no finding,
 # so a reviewer's defect written that way holds no verdict, reaches neither the fix nor the judge, and is kept as
 # no rollout action either.
@@ -62,22 +80,74 @@ t_rolloutshape() {
 # Bug: a rollout action named only in the review before the owner's yes was lost: `retry` moves that review line out
 # of the card records, the review of the kept patch against the yes's condition replaces the kept review, and the
 # landing read only the new card's lines and review file. It lands on the new card's landed line and in its push.
+# Bug (R234): the retried card's NO-GO named migration 0003, which its GO replaced with 0004, and the landing after
+# `retry` read every review round of that card, so 0003 went into the commit too: only its last review counts.
 t_rolloutretry() {
   setup "[$(issue 11 2026-01-01)]"
   local yes='USER-VISIBLE: yes: guests see a new Pay button' mig='Run migration 0004 before the deploy | the new column is missing | e.txt:1' want
-  echo 'echo eleven > e.txt; mkdir -p web; echo eleven > web/e.ts' > "$STUB/build"
-  printf '%s\n' "ROLLOUT: $mig" "$yes" 'VERDICT: GO' > "$STUB/review.1"
+  echo 'echo "eleven$(wc -l < "$STUB/sessions")" > e.txt; mkdir -p web; echo eleven > web/e.ts' > "$STUB/build"
+  printf '%s\n' '[P1] e.txt:1 the migration is wrong' 'ROLLOUT: Run migration 0003 before the deploy | the new column is missing | e.txt:1' "$yes" 'VERDICT: NO-GO' > "$STUB/review.1"
+  printf '%s\n' "ROLLOUT: $mig" "$yes" 'VERDICT: GO' > "$STUB/review.2"
   # loop: the block for the yes is a card's whole path (its review line with the rollout action, kept patch and body)
   loop run >/dev/null; st 'select(.issue == 11 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#11 was not blocked for Dana's yes: $(st 'select(.issue == 11)')"
   issue 11 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-12, only for admins"]' > "$STUB/issues.json"
-  printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$yes" 'VERDICT: NO-GO' > "$STUB/review.2"; printf '%s\n' "$yes" 'VERDICT: GO' > "$STUB/review.3"
+  printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$yes" 'VERDICT: NO-GO' > "$STUB/review.3"; printf '%s\n' "$yes" 'VERDICT: GO' > "$STUB/review.4"
   echo 'echo admins >> e.txt' > "$STUB/build"
   # loop: the bug is in the landing after new reviews (landed line and pushed commit); resumeplan stops before both
   loop retry 11 >/dev/null && loop run >/dev/null || fail "the retry and run of #11 exited non-zero"
   want=$(jq -cRn --arg s "$mig" '[$s | split(" | ") | {action: .[0], fails: .[1], place: .[2]}]')
   [ "$(st 'select(.issue == 11 and .step == "landed") | .rollout | tojson')" = "$want" ] \
-    || fail "the landed line of the retried card lacks the rollout action of the review before the yes: $(st 'select(.issue == 11 and .step == "landed")')"
-  grep -qx "Rollout: $mig" <<<"$(git -C "$T/$CASE/origin" log -1 --format=%B main)" || fail "the push does not carry the rollout action of the review before the yes: $(git -C "$T/$CASE/origin" log -1 --format=%B main)"
+    || fail "the landed line of the retried card does not hold only the rollout action of the last review before the yes:$(st 'select(.issue == 11 and .step == "landed")')"
+  [ "$(git -C "$T/$CASE/origin" log -1 --format=%B main | grep '^Rollout: ')" = "Rollout: $mig" ] \
+    || fail "the push does not carry only the rollout action of the last review before the yes: $(git -C "$T/$CASE/origin" log -1 --format=%B main)"
+}
+
+# Bug (R234): the GO before the yes named migration 0004; after `retry` the review against the yes's condition asked
+# for a fix, and the GO after it named 0005 in its place. The landing added the retried card's 0004 to the new GO's
+# 0005, so an operator would run a migration that no longer exists: a later review that names some replaces them.
+t_rolloutreplaced() {
+  setup "[$(issue 13 2026-01-01)]"
+  local yes='USER-VISIBLE: yes: guests see a new Pay button' old='Run migration 0004 before the deploy | the new column is missing | e.txt:1'
+  local new='Run migration 0005 before the deploy | the new column is missing | e.txt:1'
+  echo 'echo thirteen > e.txt; mkdir -p web; echo thirteen > web/e.ts' > "$STUB/build"
+  printf '%s\n' "ROLLOUT: $old" "$yes" 'VERDICT: GO' > "$STUB/review.1"
+  # loop: the block for the yes is a card's whole path (its review line with the rollout action, kept patch and body)
+  loop run >/dev/null; st 'select(.issue == 13 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#13 was not blocked for Dana's yes: $(st 'select(.issue == 13)')"
+  issue 13 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-14, only for admins"]' > "$STUB/issues.json"
+  printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$yes" 'VERDICT: NO-GO' > "$STUB/review.2"
+  printf '%s\n' "ROLLOUT: $new" "$yes" 'VERDICT: GO' > "$STUB/review.3"
+  echo 'echo admins >> e.txt' > "$STUB/build"
+  # loop: the bug is in the landing after new reviews (landed line and pushed commit); resumeplan stops before both
+  loop retry 13 >/dev/null && loop run >/dev/null || fail "the retry and run of #13 exited non-zero"
+  [ "$(st 'select(.issue == 13 and .step == "landed") | .rollout | map(.action) | join(",")')" = 'Run migration 0005 before the deploy' ] \
+    || fail "the landed line of the card whose GO after the retry named 0005 in place of 0004 does not hold only 0005: $(st 'select(.issue == 13 and .step == "landed")')"
+  [ "$(git -C "$T/$CASE/origin" log -1 --format=%B main | grep '^Rollout: ')" = "Rollout: $new" ] \
+    || fail "the push of the card whose GO after the retry named 0005 in place of 0004 does not carry only 0005: $(git -C "$T/$CASE/origin" log -1 --format=%B main)"
+}
+
+# Bug (R234): the GO before the yes named migration 0004; after `retry` the fix took the migration out,
+# and the GO of the whole change after it named no ROLLOUT line. A review that named none was passed over, so the
+# landing took the retried card's 0004 and an operator would run a migration the change no longer has. A GO of the
+# whole change that names none clears them. review.rereviewWhole 0 makes the review after the fix one of the whole change.
+t_rolloutcleared() {
+  setup "[$(issue 15 2026-01-01)]"; tune '.review.rereviewWhole = 0'
+  local yes='USER-VISIBLE: yes: guests see a new Pay button' old='Run migration 0004 before the deploy | the new column is missing | e.txt:1'
+  echo 'echo fifteen > e.txt; mkdir -p web; echo fifteen > web/e.ts' > "$STUB/build"
+  printf '%s\n' "ROLLOUT: $old" "$yes" 'VERDICT: GO' > "$STUB/review.1"
+  # loop: the block for the yes is a card's whole path (its review line with the rollout action, kept patch and body)
+  loop run >/dev/null; st 'select(.issue == 15 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#15 was not blocked for Dana's yes: $(st 'select(.issue == 15)')"
+  issue 15 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-16, only for admins"]' > "$STUB/issues.json"
+  printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$yes" 'VERDICT: NO-GO' > "$STUB/review.2"
+  printf '%s\n' "$yes" 'VERDICT: GO' > "$STUB/review.3"
+  echo 'echo admins > e.txt' > "$STUB/build"
+  # loop: the bug is in the landing after new reviews (landed line and pushed commit); resumeplan stops before both
+  loop retry 15 >/dev/null && loop run >/dev/null || fail "the retry and run of #15 exited non-zero"
+  [ "$(st 'select(.issue == 15 and .step == "review") | .rollout | tojson' | tail -n 1)" = '[]' ] \
+    || fail "the GO of the whole change after the retry, which named no ROLLOUT line, has no empty rollout on its line: $(st 'select(.issue == 15) | [.step, .result, .rollout, .reason[0:160]] | tojson')"
+  [ "$(st 'select(.issue == 15 and .step == "landed") | .rollout')" = null ] \
+    || fail "the landed line of the card whose whole-change GO after the retry named no rollout action holds the retried card's 0004: $(st 'select(.issue == 15 and .step == "landed")')"
+  ! git -C "$T/$CASE/origin" log -1 --format=%B main | grep -q '^Rollout: ' \
+    || fail "the push of the card whose whole-change GO after the retry named no rollout action carries the retried card's 0004: $(git -C "$T/$CASE/origin" log -1 --format=%B main)"
 }
 
 # Bug: a retry brought back the rollout action of a patch the owner discarded: after `retry --fresh` the card is

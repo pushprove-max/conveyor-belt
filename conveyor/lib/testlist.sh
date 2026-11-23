@@ -285,8 +285,8 @@ wideeach() { # <worktree> [read]
 # line of the run's list (CONVEYOR_TEST_RERUN). A file that runs past its own time limit (its `# timeout:` line:
 # filecmd()) is stopped and fails, and the output says so; one still running when the run's own limit (the
 # testTimeout setting) stops the run is named by the run's clock (testclock(), TEST_LATE), and the output ends with a
-# line saying it timed out. Either is named in <worktree>.late, `<seconds><TAB><file>`; bugproof.sh testfailed() counts it as
-# failing.
+# line saying the run's limit stopped it. Either is named in <worktree>.late, `<seconds><TAB><file>`, with the run's
+# limit after a second tab for the second; bugproof.sh testfailed() counts it as failing.
 bugrun() { # <worktree> <file>...
   local w=$1 rc TEST_LATE=1; shift
   rm -f "$w.late"
@@ -298,15 +298,17 @@ bugrun() { # <worktree> <file>...
 }
 # The line that says a file of the bug-card check's run timed out (<worktree>.late, testclock()).
 latesaid() { # <worktree>
-  local n f
-  [ -s "$1.late" ] && IFS=$'\t' read -r n f < "$1.late" || return 1
-  printf 'conveyor: %s timed out: it ran past its time limit, %s s, and the run was stopped there\n' "$f" "$n"
+  local n f r
+  [ -s "$1.late" ] && IFS=$'\t' read -r n f r < "$1.late" || return 1
+  if [ -n "$r" ]; then printf "conveyor: %s timed out: the run's time limit, %s s (testTimeout), stopped the run after the file ran %s s\n" "$f" "$r" "$n"
+  else printf 'conveyor: %s timed out: it ran past its time limit, %s s, and the run was stopped there\n' "$f" "$n"; fi
 }
 # The bug-card check's result line for a run whose file timed out (<worktree>.late): it counts as failing without the fix.
 latecount() { # <worktree>
-  local n f
-  [ -s "$1.late" ] && IFS=$'\t' read -r n f < "$1.late" || return 0
-  printf '%s timed out: it ran past its time limit, %s s, and was stopped. A test that hangs without the fix counts as failing without it.\n' "$f" "$n"
+  local n f r
+  [ -s "$1.late" ] && IFS=$'\t' read -r n f r < "$1.late" || return 0
+  if [ -n "$r" ]; then printf "%s timed out: the run's time limit, %s s, stopped it after it ran %s s. A test that hangs without the fix counts as failing without it.\n" "$f" "$r" "$n"
+  else printf '%s timed out: it ran past its time limit, %s s, and was stopped. A test that hangs without the fix counts as failing without it.\n' "$f" "$n"; fi
 }
 # The times the runner's own report gives (the pack's test.report: format, and path, a file or folder from the
 # worktree, else <worktree>.report (and each file's <worktree>.report.<n> of a card's run) when its env or args has
@@ -440,23 +442,30 @@ treediff() { # <worktree> <from> <to>
 # 30 s later, exit 124. It holds no descriptor of the loop's (a lock, the slot) while it runs.
 # With TEST_LATE (the bug-card check's run, bugrun()), when the run's own limit ends the run, a file the runner's logs
 # (testlogs(); its output when it wrote none) name as begun (`== <file>`) and not ended (`-- ok|FAIL <file>`) is named
-# in <worktree>.late as `<seconds><TAB><file>`, with that limit (TEST_TIMEOUT, scaled). A file's own limit is its run's
+# in <worktree>.late as `<seconds><TAB><file><TAB><limit>`: the seconds it ran (from the last look that did not see it
+# begun, so never fewer than it ran, and at most a look's second more), and the run's limit (TEST_TIMEOUT, scaled).
+# Bug (R332): the line held the limit as the file's seconds, so a file that began after others had used most of the
+# run's time was said to have run past its time limit; timed from the first look that saw it begun, a file that began
+# just after a look and ran to the limit at the next was said to have run 0 s. A file's own limit is its run's
 # (filecmd()).
 testclock() { # <timeout's pid> <turn wait file> <the run's limit: TEST_TIMEOUT, scaled>
-  local s=$SECONDS w wt=${2%.turnwait} f open l=() lim=${3:-${TEST_TIMEOUT:-3600}}
+  local s=$SECONDS w wt=${2%.turnwait} f open l=() lim=${3:-${TEST_TIMEOUT:-3600}} p=$SECONDS now
+  local -A at=() # at: the last look before each file was seen begun (p: the look before this one), for its own seconds
   closefds
   exec </dev/null >/dev/null 2>&1
   while sleep 1; do
     if [ -n "${TEST_LATE:-}" ]; then
+      now=$SECONDS
       mapfile -t l < <(testlogs "$wt"); [ ${#l[@]} != 0 ] || l=("$wt.test")
       open=
-      while IFS= read -r f; do open=$f
+      while IFS= read -r f; do open=$f; [ -n "${at[$f]:-}" ] || at[$f]=$p
       done < <(cat "${l[@]}" 2>/dev/null | awk '/^== / { o[substr($0, 4)] = 1 } /^-- ok / { delete o[substr($0, 7)] } /^-- FAIL / { delete o[substr($0, 9)] }
         END { for (f in o) print f }')
+      p=$now
     fi
     w=$(cat "$2" 2>/dev/null); [[ $w =~ ^[0-9]{1,9}$ ]] || w=0
     [ $((SECONDS - s)) -ge $((lim + w)) ] || continue
-    [ -z "${open:-}" ] || printf '%s\t%s\n' "$lim" "$open" > "$wt.late"
+    [ -z "${open:-}" ] || printf '%s\t%s\t%s\n' "$((SECONDS - ${at[$open]:-$s}))" "$open" "$lim" > "$wt.late"
     kill -ALRM "$1"; return
   done
 }

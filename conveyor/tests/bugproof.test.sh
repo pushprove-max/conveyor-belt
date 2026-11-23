@@ -98,10 +98,40 @@ hungsaid() { # <seconds> <stop> <exit>
 
 # Bug it catches: a hung new test whose file has no `# timeout:` line was stopped by the run's own limit (testTimeout,
 # 2 s here) with nothing naming it, so the run gave no failing file and did not count as proof; the card went back to
-# build. The file is named as timed out at the testTimeout limit and counts as failing without the fix.
+# build. The file is named as stopped by the run's testTimeout limit and counts as failing without the fix.
 t_bughungdefault() {
   TUNE='.tunables.testTimeout = 2' bugtest 'until grep -qx two a.txt; do sleep 0.2; done' # sleep: the new test's own wait, which never ends on main's code
-  hungsaid 2 'the run was stopped there' 124
+  grep -qE "^conveyor: a\.test\.sh timed out: the run's time limit, 2 s \(testTimeout\), stopped the run after the file ran [0-2] s$" "$FXWT.unfixed" \
+    && grep -q "^The run failed there (exit 124): at least one fails without the fix" "$FXWT.unfixed" \
+    && grep -qE "^a\.test\.sh timed out: the run's time limit, 2 s, stopped it after it ran [0-2] s\. A test that hangs without the fix counts as failing without it\.$" "$FXWT.unfixed" \
+    || fail "the proof run was not stopped at the run's limit, naming the hung file, and counted as failing: $(head -40 "$FXWT.unfixed" 2>&1)"
+  [ "$RC" = 0 ] || fail "a new test that hangs without the fix did not prove it (exit $RC): $BW"
+}
+
+# Bug it catches (R332): with two files in the bug-card check's run, the run's clock (testclock()) wrote the run's whole
+# limit as the open file's seconds, so the proof said the second file 'ran past its time limit, 40 s' though it ran only
+# what the first file left; and, timed from the first look that saw it begun, a file that began just after one look
+# and ran to the limit at the next was said to have run 0 s. The clock's looks are 10 s apart on a stand-in clock (its
+# sleep sets SECONDS, so no real time passes); the limit is 40 s. a.test.sh ends and b.test.sh begins between the looks at
+# 30 s and 40 s, and b.test.sh hangs: .late holds b.test.sh's 10 s (from the look at 30 s, the last that did not see it)
+# and the limit apart, and the proof lines say the run's limit stopped it.
+t_bugrunlate() {
+  # shellcheck disable=SC2034 # FXWT is read by fx_in, a fix card's worktree; this case has none
+  local FXWT=$T/$CASE/none w=$T/$CASE/w p
+  setup '[]'
+  # A stand-in log, written as a run of a.test.sh then b.test.sh writes it, and a stand-in for timeout's process: the clock
+  # is under test, not a real run.
+  mkdir -p "$w.testlog" && printf '== a.test.sh\n' > "$w.testlog/files" || fail "the fixture could not be made"
+  sleep 60 & p=$! # sleep: stands for the run that the clock ends with ALRM
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'k=0 lg=$w.testlog/files; sleep() { k=$((k + 1)); SECONDS=$((k * 10)); [ "$k" != 4 ] || printf -- "-- ok a.test.sh\n== b.test.sh\n" >> "$lg"; }
+    ( SECONDS=0; TEST_LATE=1 testclock "$p" "$w.turnwait" 40 ); unset -f sleep; cat "$w.late"; latesaid "$w"; latecount "$w"'
+  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
+  local n; n=$(cut -f1 < <(head -n 1 "$T/$CASE/run.out"))
+  [ "$(head -n 1 "$T/$CASE/run.out" | cut -f2-)" = $'b.test.sh\t40' ] && [ "$n" -ge 9 ] && [ "$n" -le 11 ] \
+    && sed -n 2p "$T/$CASE/run.out" | grep -qxF "conveyor: b.test.sh timed out: the run's time limit, 40 s (testTimeout), stopped the run after the file ran $n s" \
+    && sed -n 3p "$T/$CASE/run.out" | grep -qxF "b.test.sh timed out: the run's time limit, 40 s, stopped it after it ran $n s. A test that hangs without the fix counts as failing without it." \
+    || fail "testclock with a 40 s limit and looks 10 s apart, b.test.sh begun after the look at 30 s and left open, did not give b.test.sh about 10 s and say the run's limit stopped it: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug it catches: a runner that runs another file's cases logs them under its own name (the engine's runner,

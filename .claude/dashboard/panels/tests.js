@@ -384,10 +384,20 @@
   // flaky (it failed, then passed when run again) and main (it failed on main too) do, and so does one with no verdict
   // on record (a step from before verdicts were kept).
   const failsOf = (f) => list(f.failures).filter((x) => obj(x) && (x.verdict === null || ['card', 'main', 'flaky'].includes(x.verdict)));
-  const caughtOf = (f) => failsOf(f).filter((x) => x.verdict === 'card');
+  // A failure with only its cases of the verdicts vs, by each case's own verdict (caseVerdicts; a case with none has the
+  // step's), and the verdict of those cases (main before flaky before card); null when none has one of vs. A step whose
+  // cases' verdicts differ is a catch for its card cases and a failure to fix for the rest. Bug (R323): the step's one
+  // verdict (main) hid the card's catch and put its card case under Fix failures.
+  const partOf = (x, vs) => {
+    const cv = obj(x.caseVerdicts) ? x.caseVerdicts : {}, cs = list(x.cases).filter((c) => typeof c === 'string');
+    if (!cs.length) return vs.includes(x.verdict) ? x : null;
+    const vOf = (c) => (typeof cv[c] === 'string' ? cv[c] : x.verdict), mine = cs.filter((c) => vs.includes(vOf(c)));
+    return mine.length ? { ...x, verdict: ['main', 'flaky', 'card'].find((v) => mine.some((c) => vOf(c) === v)), cases: mine } : null;
+  };
+  const caughtOf = (f) => failsOf(f).map((x) => partOf(x, ['card'])).filter(Boolean);
   const notCard = (f) => failsOf(f).filter((x) => x.verdict !== 'card');
-  // The failures Fix failures acts on: those with a cause outside a card's change.
-  const fixable = (f) => failsOf(f).filter((x) => x.verdict === 'flaky' || x.verdict === 'main');
+  // The failures Fix failures acts on: those with a cause outside a card's change, with only those cases.
+  const fixable = (f) => failsOf(f).map((x) => partOf(x, ['flaky', 'main'])).filter(Boolean);
   const KIND = { flaky: 'flaky', main: 'failed on main too', card: 'caught a card change' };
   const kindSaid = (v) => KIND[v] || 'no verdict on record';
   const casesSaid = (x) => (list(x.cases).filter((c) => typeof c === 'string').join(', ') || 'no case named');

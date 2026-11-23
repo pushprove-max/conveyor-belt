@@ -122,8 +122,8 @@ redmsg() { # <card> <issue json>
 mainwaited() { # <worktree> <main's commit> <case>...
   local mw=$SECONDS mainrun=null; mainwait "$@"; mainsec=$((mainsec + SECONDS - mw - $(jq '.sec // 0' <<<"$mainrun" 2>/dev/null || echo 0))); }
 # A card's landed line's extra (card(), as it lands): <left> (its filed follow-ups) with waitSec, the seconds it waited
-# on other cards (settle()) and for main to change (mainwaited()), for the drift watch (bench/drift.sh); yesFrom; and
-# rollout, its rollout actions, as its ready file holds them too.
+# on other cards (settle()), for main to change (mainwaited()) and for the machine hold or the repair lane (holdwaited(),
+# lib/cardland.sh), for the drift watch (bench/drift.sh); yesFrom; and rollout, its rollout actions, as its ready file holds them too.
 landextra() { # <left json> <yesfrom json, or none> <rollout json>
   local x; x=$(jq -c --argjson w "$(waited)" '. + $w' <<<"${1:-"{}"}") || x=$1
   [ -z "$2" ] || x=$(jq -c --argjson f "$2" '. + {yesFrom: $f}' <<<"${x:-"{}"}")
@@ -293,7 +293,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local held # held: its test step waited for main or the machine (mainred.sh mainwait(), holdwait())
   local route # route: where a failed test run goes (testroute())
   local cr # cr: a failed test line's carried part (testlist.sh carriedrec())
-  local mainsec=0 mwon # mwon: main's commit and the cases it waits on there (mainred.sh mainwait()); mainsec: the seconds it has waited for main to change (mainwaited()); its landed line's waitSec adds them to waitsec
+  local mainsec=0 mwon # mwon: main's commit and the cases it waits on there (mainred.sh mainwait()); mainsec: the seconds it has waited for main to change or for the machine (mainwaited(), holdwaited()); its landed line's waitSec adds them to waitsec
   local repaired='' lane queued='' # repaired: the repair lane passed its test step (mainred.sh repairlane()), saying how; lane: its exit; queued: another card had the landing turn (gather()), so it waits for the next batch
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (donewhen.sh rereview()), reused when the last review stands (reusable())
   local ph pf pb # ph, pf: the hash and the files of the change's lint policy diff (lintpolicy()); pb: the body kept by the card it resumes
@@ -589,9 +589,10 @@ cardreview() {
     # from the tree before that fix (fixtree), which holds the lines the fix deleted; a reused review, from the tree the review it reuses read (rtree).
     ex=$(excerpts "$wt" "$fixtree"); rtree=$fixtree; fixtree=''
     # The line is written once the loop's end is known (stop, below); a review with no verdict blocks with it here. Its tail, the review's recorded lines (no USER-VISIBLE or VERDICT line; their last 60, TAIL in records.sh), as the reason is cut at 1500 characters: on a NO-GO, and on a GO with an OUTSIDE line, which the Board lists.
+    # Its rollout: the actions its ROLLOUT lines name; on a GO of a review session of the whole change (not the fix alone, a port's difference or a reused review), [] when it names none, as that GO says the change needs none (cardready(), lib/cardland.sh).
     rline=$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
-      --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" --argjson ex "${ex:-[]}" \
-      'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" or ($r | test("(^|\n)(OUTSIDE|SELFHEALS): ")) then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')
+      --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" --argjson ex "${ex:-[]}" --argjson whole "$([ "$res" = GO ] && [ -z "$rr$fin" ] && echo true || echo false)" \
+      'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" or ($r | test("(^|\n)(OUTSIDE|SELFHEALS): ")) then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] or $whole then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')
     [ -n "$rline" ] || rline='{}' # the grep finds no line in a review of only unrecorded lines: that is no failure
     [ "$res" != none ] || { record "$c" "$n" review "$res" "$rline"; block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
   fi
@@ -702,11 +703,10 @@ resumeplan() {
   # have grown to cover the change; only a kept "part" lands unreviewed.
   [ "$mode" != land ] || [ -z "$inh" ] || [ "$(inheritance "$wt.review")" = part ] \
     || { mode=review; note="reviewing the kept patch of card $from: is its visible change part of the yes of #$(jq -r .from <<<"$inh")? No build"; }
-  # pro: the rollout actions the reviews of the retried cards whose kept patch this card carries named, in order: the
-  # card it resumes ($from), the card whose kept patch that one resumed (its worktree line names it), and so on back
-  # to one built from nothing. `retry` moved those review lines out of its card records, and a new review replaces the
-  # kept one, so its landing reads them (ro, card()). Bug: every retried card of the issue was read, so a patch
-  # `retry --fresh` discarded brought its rollout action back into the commit.
+  # pro: the rollout actions of the retried cards whose kept patch this card carries ($from, the one whose kept patch that one resumed, and so on back to one built from nothing):
+  # `retry` moved their review lines out, and a new review replaces the kept one, so its landing reads them (ro, cardready()): the newest review line with a rollout, one that
+  # names any or a GO of the whole change ([] when it names none). Bugs: a patch `retry --fresh` discarded brought its action back; so did a NO-GO's that its card's GO replaced,
+  # and a GO's that a GO after the retry replaced (R234).
   # One read gives the chain's review lines and port lines (crev): pro is the reviews' rollout actions, and rounds (below) counts the reviews.
   if [ -n "$from" ] && [ -n "$mode" ] && [ "$mode" != stale ]; then
     # shellcheck disable=SC2034 # pro: card()'s, read by cardready() (lib/cardland.sh)
@@ -715,7 +715,7 @@ resumeplan() {
           | select(test("built from nothing") | not) | capture("kept patch of card (?<c>c[A-Za-z0-9-]+)").c) // null;
       [limit(100; $f | recurse(up; . != null))] as $chain
       | [$l[] | select((.step == "review" or (.step == "rebase" and .port == true)) and (.card | IN($chain[])))]') \
-      && pro=$(jq -c '[.[] | .rollout // [] | .[]]' <<<"$crev") \
+      && pro=$(jq -c '[.[] | select(.step == "review" and has("rollout")) | .rollout] | last // []' <<<"$crev") \
       || { err="worktree: the engine could not read the rollout actions of the retried cards of the issue"; return 1; }
   fi
   # A card that takes up the kept patch of a loop that did not finish carries that loop's review rounds: the round

@@ -169,6 +169,36 @@ t_relholdfullpush() {
     || fail "Push landed's result under a release run does not give the release's reason: $(cat "$T/$CASE/fullpush.out")"
   [ "$(ftorigin)" != "$(ftmain)" ] || fail "Push landed pushed during a release run"
 }
+# Bug (R286): a release run waits for RELLANDING (a push under way) after it holds RELHOLD and before it writes its
+# version to run.json (relstart()), so a card that reached its land step then said "waiting for the release of 1.8.0",
+# the version of the last run, which had ended. The stand-in run holds the hold with run.json still the ended 1.8.0
+# run's: the card's wait names no version. The wait runs in a process of its own and is polled: the live record it
+# writes, as the Board reads it, is only there while the wait is under way.
+t_relholdold() {
+  local p
+  setup '[]'; mkdir -p "$T/$CASE/cards/release"
+  echo '{"kind":"release","step":"release","version":"1.8.0","since":"2026-11-20T10:00:00Z","ended":"2026-11-20T11:00:00Z","state":"released"}' > "$T/$CASE/cards/release/run.json"
+  rh_hold
+  rh_eng "$T/$CASE/wait.out" 'releasewait c7-7 7 "$CARDS/c7-7"; echo waited' & p=$!
+  wait_until "jq -e '.action | startswith(\"waiting for the release\")' '$T/$CASE/cards/c7-7.live'" || { touch "$STUB/letgo"; fail "the card did not wait for the release"; }
+  local a; a=$(jq -r .action "$T/$CASE/cards/c7-7.live"); touch "$STUB/letgo"; wait "$p" 2>/dev/null
+  [ "$a" = 'waiting for the release: no card lands on main until it ends' ] \
+    || fail "the card's wait, with run.json the ended run of 1.8.0 and a new run holding the release hold, says: $a"
+}
+# Bug (R286): a run killed before relend() leaves run.json with ended null, so the next run's wait for RELLANDING
+# still named the dead run's version 1.8.0. A run whose process has ended counts as ended. Polled as t_relholdold is.
+t_relholddead() {
+  local p d a
+  setup '[]'; mkdir -p "$T/$CASE/cards/release"
+  ( : ) & d=$!; wait "$d" # d: the pid of a process that has ended, the killed run's
+  echo "{\"kind\":\"release\",\"step\":\"release-prep\",\"version\":\"1.8.0\",\"since\":\"2026-11-20T10:00:00Z\",\"ended\":null,\"state\":\"running\",\"pid\":$d}" > "$T/$CASE/cards/release/run.json"
+  rh_hold
+  rh_eng "$T/$CASE/wait.out" 'releasewait c7-7 7 "$CARDS/c7-7"; echo waited' & p=$!
+  wait_until "jq -e '.action | startswith(\"waiting for the release\")' '$T/$CASE/cards/c7-7.live'" || { touch "$STUB/letgo"; fail "the card did not wait for the release"; }
+  a=$(jq -r .action "$T/$CASE/cards/c7-7.live"); touch "$STUB/letgo"; wait "$p" 2>/dev/null
+  [ "$a" = 'waiting for the release: no card lands on main until it ends' ] \
+    || fail "the card's wait, with run.json the run of 1.8.0 whose process $d has ended and a new run holding the release hold, says: $a"
+}
 # Bug (#1076 review): stop (halt(), lib/run.sh) left a card that waited for a release run, as its wait opened with a
 # land start line, and the card landed once the run ended. Its follow-ups, filed before the hold refused its landing,
 # were withdrawn: their filed line does not keep it either.

@@ -41,9 +41,10 @@ def ok: . as $r | (keys - known) == need
         # for it (followups(), lib/followups.sh): its issue number, or the id of a follow-up card with no GitHub issue.
         and (.outside == null or (.step == "filed" and (.outside | type == "array" and length > 0
           and all(type == "object" and keys == ["finding", "issue"] and (.finding | type == "string") and (.issue | type | IN("number", "string"))))))
-        # rollout: the rollout actions a review named, or a landed card carries (rollouts(), lib/prompts.sh).
-        and (.rollout == null or ((.step | IN("review", "landed")) and (.rollout | type == "array" and length > 0
-          and all(type == "object" and keys == ["action", "fails", "place"] and all(type == "string")))))
+        # rollout: the rollout actions a review named, or a landed card carries (rollouts(), lib/prompts.sh); [] on the
+        # review line of a GO of the whole change that named none (card()).
+        and (.rollout == null or ((.step | IN("review", "landed")) and (.step == "review" or (.rollout | length > 0))
+          and (.rollout | type == "array" and all(type == "object" and keys == ["action", "fails", "place"] and all(type == "string")))))
         and (.visible // "" | type == "string") and (.branch // "" | type == "string") and (.mainRed // "" | type == "string")
         # testFile: a Tests page card's picked line names its test file (testpick(), lib/testaction.sh).
         and (.testFile == null or (.step == "picked" and (.testFile | type == "string")))

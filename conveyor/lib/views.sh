@@ -16,7 +16,8 @@
 # A review line of a card's change adds visible: the review's USER-VISIBLE answer ("no", or "yes: <what a customer or
 # staff member would see>"), or "" when the review gave no single answer. A card blocked right after a review line
 # whose visible starts "yes" is waiting on the owner's yes. A review line whose review named rollout actions (ROLLOUT
-# lines, lib/prompts.sh) adds rollout: [{action, fails, place}]; a landed line adds the card's own (card()).
+# lines, lib/prompts.sh) adds rollout: [{action, fails, place}], as does a GO of the whole change, [] when it named
+# none (card()); a landed line adds the card's own (card()).
 # The picked line of a card made by land-branch adds branch: the branch whose change the card lands.
 # The picked line of a card of the loop adds created: when its issue was opened (the time it waited is the track's
 # first step). A review line adds counts: its findings at each level (donewhen.sh counts()). A start line adds of.

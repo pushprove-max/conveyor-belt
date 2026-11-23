@@ -105,3 +105,30 @@ t_batchqueuestale() {
   [ "$RC" = 0 ] && [ "$(tr '\n' ',' < "$T/$CASE/run.out")" = 'a.txt: ["lib/view.test.sh"] kept,lib/panel.sh: null gone,sharedran: ["lib/view.test.sh"] kept,' ] \
     || fail "stalepass c8 $R c7 did not drop c7's pass for the landing on its test file alone: $(cat "$T/$CASE/run.out")"
 }
+
+# Bug it catches (R239): a queued card's settle() brings its waitSec up to date in <worktree>.ready while the batch
+# card's stalepass() takes the card's passes out of the same file, in another process. Unlocked, settle()'s rewrite read
+# the file first and wrote it after, so the units stalepass() removed came back and batchkeep() kept the stale pass.
+# settle() runs in the background as a queued card: its claim always says it waits (claim() stubbed), and its second
+# look brings waitSec (mainsec 60, and the second it waited) up to date; stdb(), asked right after that rewrite, ends it.
+# Its rewrite reads the file and then waits 3 s before it writes; stalepass() runs within that wait: the file keeps
+# both changes, no units and the new waitSec.
+t_batchqueuerace() {
+  local slow='jq() { command jq "$@"; local r=$?; case "$*" in *waitSec*) sleep 3 ;; esac; return $r; }' # sleep: the rewrite waits between its read and its write, for stalepass() to run there
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  local race='LIVE=0.1 waitsec=0 mainsec=60 parsecheck="" behind="[]"; claim() { echo "{\"on\":\"c8\",\"paths\":[\"lib/panel.sh\"],\"turn\":true}"; }
+    stackto() { return 1; }; turnfree() { :; }; began() { :; }; stdb() { [ -z "$waited" ] || exit 0; }
+    ( settle c7 7 "$FXWT" prompt land "{}" > /dev/null ) &
+    until [ -e "$FXWT.idle" ]; do sleep 0.1; done; sleep 0.6' # sleep: stalepass() starts once settle() has slept out its first look (LIVE) and its rewrite has read the file
+  setup '[]'; mkdir -p "$R/lib"; linkset '{"lib/panel.sh": ["lib/view.test.sh"], "lib/rows.sh": ["lib/view.test.sh"]}'
+  fx_wt 'echo eight >> lib/rows.sh' lib/panel.sh panel lib/rows.sh rows lib/view.test.sh case1
+  fx_in 'printf "base\t%s\n" "$(git -C "$FXWT" rev-parse HEAD)" > "$FXWT.rerun"
+    echo "{\"issue\":7,\"tested\":true,\"units\":[\"lib/view.test.sh\"],\"cases\":1,\"extra\":{\"waitSec\":0}}" > "$FXWT.ready"
+    echo landed >> "$R/lib/panel.sh" && git -C "$R" commit -qam "lib/panel.sh lands" || exit 3
+    '"$slow"'
+    '"$race"'
+    stalepass c8 "$R" c7; wait; command jq -c "[.units, .extra.waitSec]" "$FXWT.ready"'
+  # waitSec 60 (mainsec), or 61 when the clock's second turns in the wait.
+  [ "$RC" = 0 ] && grep -qxE '\[null,6[01]\]' "$T/$CASE/run.out" \
+    || fail "stalepass c8 $R c7, run while settle() of c7 rewrote its ready file's waitSec (60), did not leave [no units, waitSec 60]: $(tr '\n' '|' < "$T/$CASE/run.out")"
+}

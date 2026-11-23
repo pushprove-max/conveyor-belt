@@ -211,11 +211,11 @@ t_tfrunner() {
   [ "$(jq -c '[.files[] | select(.file | IN("cases/r.test.sh", "cases/q.test.sh", "c.test.sh")) | {file, cases}]' <<<"$got")" \
     = '[{"file":"cases/r.test.sh","cases":["rfour","rone","rthree"]},{"file":"c.test.sh","cases":[]},{"file":"cases/q.test.sh","cases":["rtwo"]}]' ] \
     || fail "each file's own cases: $(jq -c '[.files[] | {file, cases}]' <<<"$got")"
-  # Bug it catches (#188): "Fails often" counted every failed step, also those the card's own change caused (the test
-  # did its job). Each failure carries the verdict of the cases that count for the file (main before flaky before
-  # card; a line's other verdicts are not the file's), its cases, its card and the end of its output.
-  [ "$(jq -c '[.files[] | select(.file | IN("cases/r.test.sh", "cases/q.test.sh")) | {file, f: [.failures[] | {card, verdict, cases, tail: (.tail | if . then [length, .[-3:]] else . end)}]}]' <<<"$got")" \
-    = '[{"file":"cases/r.test.sh","f":[{"card":"c-f1","verdict":"main","cases":["rone","rthree"],"tail":[1500,"END"]}]},{"file":"cases/q.test.sh","f":[{"card":"c-f2","verdict":"card","cases":["rtwo"],"tail":null}]}]' ] \
+  # Bug it catches (#188): "Fails often" counted every failed step, also the card's own catches. Each failure carries the
+  # verdict of the cases that count for the file (main before flaky before card), its cases, each case's own verdict
+  # (R323: with one, main, the Board showed no catch for c-f1's rone, the card's), its card and its output's end.
+  [ "$(jq -c '[.files[] | select(.file | IN("cases/r.test.sh", "cases/q.test.sh")) | {file, f: [.failures[] | {card, verdict, cases, caseVerdicts, tail: (.tail | if . then [length, .[-3:]] else . end)}]}]' <<<"$got")" \
+    = '[{"file":"cases/r.test.sh","f":[{"card":"c-f1","verdict":"main","cases":["rone","rthree"],"caseVerdicts":{"rone":"card","rthree":"main"},"tail":[1500,"END"]}]},{"file":"cases/q.test.sh","f":[{"card":"c-f2","verdict":"card","cases":["rtwo"],"caseVerdicts":{"rtwo":"card"},"tail":null}]}]' ] \
     || fail "the failures of the runner's case files: $(jq -c '[.files[] | select(.file | startswith("cases/")) | {file, failures}]' <<<"$got")"
   # Bug it catches (#188): a step that passed on re-run (the flaky failure) was left out, as it is a `test pass` line;
   # and (#228) it had no output, as its tail is its first run's, in rerun.

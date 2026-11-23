@@ -380,7 +380,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     # card()'s mainsec): a batch that lands it writes its landed line from that extra (fives()), for the drift watch.
     if [ -n "$waited" ]; then
       waitsec=$((wb + SECONDS - ws))
-      [ ! -e "$3.ready" ] || { jq -c --argjson w "$((waitsec + ${mainsec:-0}))" '.extra.waitSec = $w' "$3.ready" > "$3.ready.new" && mv -f "$3.ready.new" "$3.ready"; } || rm -f "$3.ready.new"
+      readyput "$3" '.extra.waitSec = $w' --argjson w "$((waitsec + ${mainsec:-0}))" || :
     fi
     # A change a session changed here is reviewed again before it lands: no batch takes it till then (gather()).
     [ $moved = 0 ] || rm -f "$3.ready"
@@ -454,7 +454,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
         [ "$trc" = 0 ] || [ ! -s "$3.stop" ] || { block "$1" "$2" "$3" "test: $(<"$3.stop")"; return 1; }
         if [ "$trc" != 0 ] && [ "$(git -C "$3" rev-parse HEAD 2>/dev/null)" = "$(jq -r .base "$3.stack" 2>/dev/null)" ]; then
           echo "conveyor: card $1: its checks or tests failed on main with the change of card $(jq -r .on "$3.stack"), which has not passed its own yet: it waits on, and runs them again after that card"
-          jq -c '. + {stackred: true}' "$3.ready" > "$3.ready.new" && mv -f "$3.ready.new" "$3.ready" || rm -f "$3.ready"
+          readyput "$3" '. + {stackred: true}' || rm -f "$3.ready"
           trc=''; began "$1" "$2" "$5"; continue
         fi
         [ "$trc" = 0 ] || { waitsec=$((wb + SECONDS - ws)); return 4; }
@@ -477,7 +477,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     # its change alone (readysince()), so they run again on main before it lands (testedhere(), card()).
     if [ -n "$stk" ]; then moved=2; caught=''
     elif [ "$old" = "$(jq -r .base "$3.stack" 2>/dev/null)" ]; then caught=''
-      [ ! -e "$3.ready" ] || { jq -c 'del(.tested)' "$3.ready" > "$3.ready.new" && mv -f "$3.ready.new" "$3.ready"; } || rm -f "$3.ready"
+      readyput "$3" 'del(.tested)' || rm -f "$3.ready"
     fi
     # A card an ordered card went past is reviewed again on main as it is now, even when its patch applies there, and
     # even when that card landed before this claim.
@@ -507,7 +507,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     # the merged files before it lands, and two edits to one test that do not work together fail and go to its fix.
     if [ -n "$tf" ] && [ -n "$cf" ]; then
       if unionfit "$3" "$cf" "$tf" "$ix"; then
-        [ ! -e "$3.ready" ] || { jq -c 'del(.tested)' "$3.ready" > "$3.ready.new" && mv -f "$3.ready.new" "$3.ready"; } || rm -f "$3.ready"
+        readyput "$3" 'del(.tested)' || rm -f "$3.ready"
         parsecheck=1; rm -f "$3.base"; return $moved
       fi
       err=$(git -C "$3" reset -q --hard "$onto" 2>&1) \
@@ -517,7 +517,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     # (the owner's pick, 2026-11-18): as after a union merge, its tests are not taken as passed (testedhere()), so the
     # merged files' parse check and its tests run on them before it lands.
     if fastfit "$3" "$cf" "$onto" "$mt"; then
-      [ ! -e "$3.ready" ] || { jq -c 'del(.tested)' "$3.ready" > "$3.ready.new" && mv -f "$3.ready.new" "$3.ready"; } || rm -f "$3.ready"
+      readyput "$3" 'del(.tested)' || rm -f "$3.ready"
       echo "conveyor: card $1: the fast resolver merged its conflicts with main in $(printf '%s' "$cf" | grep -c .) file(s), with no fitting session; its tests run again on the merged files"
       # The owner's yes to a lint policy change covers one policy diff (lintyes()), and no landing gate runs after this
       # merge: a policy diff (lintpolicy()) that is not the one the gate let through (card()'s ph, cardready()) stops
@@ -582,8 +582,21 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
 # of the files <pathspec> names when it is given. Empty when the change is. The id is diffid()'s: whitespace counts, so a
 # change that only re-indents is another change (Python and YAML read indent), and the line numbers do not.
 cardpatch() { local p r; p=$(git -C "$1" diff --cached --binary --no-renames -U0 HEAD -- "${@:2}" 2>/dev/null | diffid 2>/dev/null); r=$?; [ -z "$p" ] || printf '%s\n' "$p"; return $r; } # <worktree> [pathspec...]
-tested() { [ ! -e "$1.ready" ] || { jq -c --arg t "$(git -C "$1" write-tree)" --arg h "$(git -C "$1" rev-parse HEAD)" --arg p "$(cardpatch "$1")" --argjson u "$(jq -ce objects "$1.passed" 2>/dev/null || echo null)" \
-  'del(.units, .cases, .sel) + {tested: true, tree: $t, head: $h, patch: $p, since: now} + if $u then $u | {units, cases} else {} end' "$1.ready" > "$1.ready.new" && mv -f "$1.ready.new" "$1.ready"; } || rm -f "$1.ready"; } # <worktree>
+tested() { [ ! -e "$1.ready" ] || readyput "$1" 'del(.units, .cases, .sel) + {tested: true, tree: $t, head: $h, patch: $p, since: now} + if $u then $u | {units, cases} else {} end' \
+  --arg t "$(git -C "$1" write-tree)" --arg h "$(git -C "$1" rev-parse HEAD)" --arg p "$(cardpatch "$1")" --argjson u "$(jq -ce objects "$1.passed" 2>/dev/null || echo null)" || rm -f "$1.ready"; } # <worktree>
+# <worktree>.ready rewritten by <jq filter> (with its jq args), under <worktree>.ready.lock; nothing when it has none, 1
+# when it could not be written. A queued card's own rewrites (settle(), tested()) and a batch card's (stalepass(),
+# batchrun()) run in two processes: unlocked, a rewrite that read the file before the other's write put back what that
+# write took out (R239: settle()'s waitSec brought back the units stalepass() removed, and batchkeep() kept a stale pass).
+readyput() { # <worktree> <jq filter> [jq args...]
+  local lock r=0 tmp=$1.ready.new.$BASHPID # read here: $BASHPID in jq's redirect would be jq's own pid, not mv's name
+  [ -e "$1.ready" ] || return 0
+  { exec {lock}>>"$1.ready.lock"; } 2>/dev/null && flock "$lock" || return 1
+  if [ -e "$1.ready" ]; then
+    jq -c "${@:3}" "$2" "$1.ready" > "$tmp" && mv -f "$tmp" "$1.ready" || { rm -f "$tmp"; r=1; }
+  fi
+  exec {lock}>&-; return $r
+}
 # Whether they passed on the change it holds now: the same staged change, on whatever commit (owner, 2026-11-13: a
 # change that passed its tests and still applies to a main that moved is not tested again; each landing made every
 # other card run its tests anew, and one card landed per test run), save for sharedtests() below.
@@ -647,14 +660,15 @@ landedsince() { # <worktree> <the commit its tests ran on>
 # The run again for <sharedtests() of the card> (card()): the card's list (<worktree>.rerun, which tests() keeps on a
 # main that moved, rerunsince()) loses its `pass` and `ok` lines of the shared files and names each as failed with no
 # case, so the command runs it whole, though it passed before and main's change alone does not select it. When the
-# shared files could not be listed, it loses every `pass` and `ok` line. Each such file that no `fail` line names gets a
-# `shared` line too: it runs because main changed what it tests, and its log says so, not that it did not pass (#345).
+# shared files could not be listed, it loses every `pass` and `ok` line. Each file whose `pass` or `ok` line it drops,
+# and that no `fail` line names, gets a `shared` line too: it runs because main changed what it tests, and its log says
+# so, not that it did not pass (#345). A shared file the list has no line for never ran: it gets no `shared` line.
 unshare() { # <worktree> <sharedtests() of it>
   [ -s "$1.rerun" ] || return 0
   awk -F'\t' -v S="$2" 'BEGIN { all = S ~ /^\(/; n = split(S, a, "\n"); for (i = 1; i <= n; i++) if (!all && a[i] != "") s[a[i]] = 1 }
     ($1 == "pass" || $1 == "ok") && (all || ($2 in s)) { d[$2] = 1; next }
     $1 == "fail" { f[$2] = 1; if ($3 == "") delete s[$2] }
-    { print } END { for (x in s) { print "fail\t" x; d[x] = 1 } for (x in d) if (!(x in f)) print "shared\t" x }' "$1.rerun" > "$1.rerun.new" && mv -f "$1.rerun.new" "$1.rerun"
+    { print } END { for (x in s) print "fail\t" x; for (x in d) if (!(x in f)) print "shared\t" x }' "$1.rerun" > "$1.rerun.new" && mv -f "$1.rerun.new" "$1.rerun"
 }
 # The other cards of <card>'s batch whose tests ran on a commit before the one <worktree> holds, the main the batch runs
 # on (the base of <worktree>.rerun, as card() reads it: a card queued for the batch waits on the main its tests ran on,
@@ -671,7 +685,7 @@ stalepass() { # <card> <worktree> <the batch's cards>
   for m in "${@:3}"; do
     [ "$m" != "$1" ] && b=$(sed -n 's/^base\t//p' "$CARDS/$m.rerun" 2>/dev/null) && sharedtests "$CARDS/$m" "$b" "$t" "$2" >/dev/null \
       && [ "$(cat "$CARDS/$m.sharedran" 2>/dev/null)" != "$(cardpatch "$CARDS/$m")" ] || continue
-    rm -f "$CARDS/$m.bpass"; jq -c '.sel = (.units // .sel) | del(.units, .cases)' "$CARDS/$m.ready" > "$CARDS/$m.ready.new" 2>/dev/null && mv -f "$CARDS/$m.ready.new" "$CARDS/$m.ready" || rm -f "$CARDS/$m.ready.new"
+    rm -f "$CARDS/$m.bpass"; readyput "$CARDS/$m" '.sel = (.units // .sel) | del(.units, .cases)' 2>/dev/null || :
   done
 }
 gather() { # <card> <worktree> <the card's pid>; under the lock: prints the batch's cards in order, one a line (nothing when it takes none), each other one marked taken (<worktree>.batch); 2 when another card has the landing turn
@@ -1030,7 +1044,7 @@ rebatch() { # <card> <worktree>; card()'s mates is the batch
       m=$(sort -u <<<"$m" | grep .)
       if [ -n "$m" ]; then
         for x in "${mates[@]}"; do w=$CARDS/$x; [ "$x" != "$c" ] || w=$wt; rm -f "$w.bpass"
-          [ ! -e "$w.ready" ] || { jq -c '.sel = (.units // .sel) | del(.units, .cases)' "$w.ready" > "$w.ready.new" && mv -f "$w.ready.new" "$w.ready"; } || rm -f "$w.ready"; done
+          readyput "$w" '.sel = (.units // .sel) | del(.units, .cases)' || rm -f "$w.ready"; done
         m="conveyor: card $c: cards landed during its batch's run touch its test files too, so the batch is tested again: $(paste -sd ' ' <<<"$m")"
         if [ -z "$gone" ] && [ ${#k[@]} -gt 1 ]; then
           git -C "$wt" reset -q --hard 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null || { asitwas || return 2; return 1; }

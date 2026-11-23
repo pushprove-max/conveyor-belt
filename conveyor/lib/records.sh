@@ -182,8 +182,8 @@ lastread() {
 lastpct() { lastread | jq -r .pct; }
 # The fields a closing line (landed, closed, blocked) adds: {limit} when there is a reading, else {}.
 ending() { local p; p=$(lastpct); if [ -n "$p" ]; then echo "{\"limit\":$p}"; else echo '{}'; fi; }
-# The field a closed line adds: called in card(), {waitSec}, the seconds the card waited on other cards and for main to
-# change (card()'s waitsec and mainsec), as on its landed and blocked lines, for the drift watch (bench/drift.sh), which
+# The field a closed line adds: called in card(), {waitSec}, the seconds the card waited on other cards, for main to
+# change and for the machine hold or the repair lane (card()'s waitsec and mainsec), as on its landed and blocked lines, for the drift watch (bench/drift.sh), which
 # would leave a closed card out of the mean wait without it; outside card(), {}.
 waited() { if [ -n "${waitsec+x}" ]; then echo "{\"waitSec\":$((waitsec + ${mainsec:-0}))}"; else echo '{}'; fi; }
 # The size of a worktree's staged change, {files, added, removed}; a binary file is a file with no lines.

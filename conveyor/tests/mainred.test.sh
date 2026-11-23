@@ -200,6 +200,24 @@ t_mainredcaught() {
   [ "$(st 'select(.step == "landed") | .waitSec | IN(5, 6)')" = true ] || fail "the landed line does not count the wait for main: $(st 'select(.step == "landed")')"
 }
 
+# Bug it catches (R235): a card whose failed case was the machine's waited for the machine hold or the repair lane
+# (cardfailed(), mainred.sh holdwait()) and did not add that wait to mainsec, which its landed line's waitSec counts
+# (t_mainredcaught, above), so the drift watch counted the wait as work. cardfailed() runs its machine route, each step
+# around the wait stubbed: holdwait() moves the shell's clock on 60 s in place of a real wait, and settle() stops it.
+t_mainredholdsec() {
+  # shellcheck disable=SC2034 # FXWT is read by fx_in, a fix card's worktree; this case has none
+  local FXWT=$T/$CASE/none
+  setup '[]'
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'c=c7 n=7 wt=$T/$CASE/c7 rc=1 own="" sec=1 mainsec=0 br="" sprompt="" issue=""
+    depsmissing() { :; }; voidrun() { return 1; }; testfails() { :; }; verdicts() { echo "{\"verdicts\":[]}"; }; testroute() { echo machine; }
+    record() { :; }; failline() { :; }; testrulespass() { :; }; repairlane() { REPAIRED=no; return 1; }; locked() { :; }; began() { :; }
+    unmate() { :; }; redbrief() { :; }; settle() { return 1; }; holdwait() { SECONDS=$((SECONDS + 60)); }
+    cardfailed || :; echo "mainsec $mainsec"'
+  # 60 s, or 61 when the clock's second turns as it is read.
+  grep -qxE 'mainsec (60|61)' "$T/$CASE/run.out" || fail "cardfailed of a card whose failed case is the machine's did not add its 60 s wait for the machine hold to mainsec: $(tr '\n' '|' < "$T/$CASE/run.out")"
+}
+
 # Issue 598. Bug it catches: a landing broke a test its card did not run, and nothing linked the test to the files it
 # changed, so later cards changing them did not run it either. In a fixture repo, landing L1's card ran
 # tests/b.test.sh; landing A changes lib/a.sh and its card does not run it; landing C after it changes lib/c.sh. b.test

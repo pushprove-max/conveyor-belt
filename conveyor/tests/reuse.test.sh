@@ -175,7 +175,7 @@ EOF
 # the two reuses read nothing else of the change. The review line is stubbed to the patch, the main and the seen text
 # the last review kept (stdb), its main being the HEAD asked about, so only the patch decides.
 t_reusereindent() {
-  eval "$(sed -n '/^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^testedhere() {/p' "$SRC/lib/claim.sh"; sed -n '/^reusable() {/,/^}/p' "$SRC/lib/review.sh")"
+  eval "$(sed -n '/^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^readyput() {/,/^}/p; /^testedhere() {/p' "$SRC/lib/claim.sh"; sed -n '/^reusable() {/,/^}/p' "$SRC/lib/review.sh")"
   local d=$T/reindent r; mkdir "$d" && git -C "$d" init -q && git -C "$d" config user.email t@example.com && git -C "$d" config user.name t || fail "no repo"
   printf 'for i in range(3):\n    print(i)\nprint("done")\n' > "$d/f.py"; git -C "$d" add f.py; git -C "$d" commit -qm base
   r=$d.ready; echo '{}' > "$r"

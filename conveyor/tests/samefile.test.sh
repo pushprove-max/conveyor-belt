@@ -23,7 +23,7 @@ sfcard() {
 # claim() and what it calls (lib/claim.sh), with stdb() (lib/records.sh), in the case's shell. cl <issue>: that card's
 # claim, under this shell's pid (alive), printing what it waits on ({"on": ...}), nothing when it holds its files.
 sfclaim() {
-  eval "$(sed -n '/^claim() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^testedhere() {/p; /^readysince() {/,/^}/p; /^bpid() {/,/^}/p; /^turnq() {/,/^}/p' "$SRC/lib/claim.sh")"
+  eval "$(sed -n '/^claim() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^readyput() {/,/^}/p; /^testedhere() {/p; /^readysince() {/,/^}/p; /^bpid() {/,/^}/p; /^turnq() {/,/^}/p' "$SRC/lib/claim.sh")"
   packget() { printf -v "$2" 1; } # for turnq(): the test pack's landBatch, batches off
   eval "$(sed -n '/^stdb() {/,/^}/p' "$SRC/lib/records.sh")"
   # shellcheck disable=SC2034 # read by stdb(): its answers, and the folder state.py is in

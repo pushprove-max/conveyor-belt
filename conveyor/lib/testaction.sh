@@ -494,7 +494,7 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # cards of the test lines, {card, issue}; flaky: the entries of the flaky-test record for it or a case of it ("<file>: <case>");
 # failures: its newest TAFAILS failed test steps (those that passed on re-run too), newest first, as the Tests page has
 # them (FAILURE and failedrun, lib/testfiles.sh):
-# {card, issue, time, verdict, cases, tail}; newest: its newest run of every record that holds one, a card's test step
+# {card, issue, time, verdict, cases, caseVerdicts, tail}; newest: its newest run of every record that holds one, a card's test step
 # that ran it (a file that passed on its run again while another file failed again: failed, then passed, unless the run again timed
 # out, which may have ended before the file ran; a `held` step, its failures the machine's, read as a failed one and
 # named held; a step that ran it, its line with no time of it as a failed step saves none, passed it when the card's

@@ -593,7 +593,11 @@ releasewait() { # <card> <issue> <worktree>
   record "$1" "$2" start ok '{"of":"land","waitFor":"release"}'
   at=$(date -u +%FT%TZ)
   while relheld; do
-    v=$(jq -r '.version // empty' "$CARDS/release/run.json" 2>/dev/null)
+    # No version while run.json's run has ended, or its process has (a run killed before relend() leaves ended null):
+    # the run that holds RELHOLD writes its own once it holds RELLANDING too (relstart()), and till then run.json is
+    # the last run's (R286: the wait named that run's version).
+    v=$(jq -r 'select(.ended == null and (.pid | numbers)) | "\(.pid)\t\(.version // "")"' "$CARDS/release/run.json" 2>/dev/null)
+    kill -0 "${v%%$'\t'*}" 2>/dev/null && v=${v#*$'\t'} || v=''
     jq -cn --arg at "$at" --arg v "$v" '{step: "land", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
       action: "waiting for the release\(if $v == "" then "" else " of \($v)" end): no card lands on main until it ends"}' > "$3.live.tmp" 2>/dev/null && mv -f "$3.live.tmp" "$3.live"
     : > "$3.idle"; sleep "$LIVE"
@@ -622,7 +626,7 @@ pushturn() {
 # ends; one its job left (the job was killed) stays, for health to show it stale, until the next push writes its own.
 pushended() { [ -z "$pusher" ] || jobs -rp | grep -qx "$pusher" || pusher=''; }
 
-tidy() { git worktree remove --force "$1" 2>/dev/null; rm -f "$1".events "$1".firsttry "$1".firsttry.new "$1".reviewed "$1".patch "$1".index "$1".msg "$1".review.new "$1".carried "$1".base "$1".live "$1".live.tmp "$1".idle "$1".nocap "$1".capheld "$1".claim "$1".claim.new "$1".cpatch "$1".cpatch.new "$1".stack "$1".settings "$1".opencode.json "$1".donewhen "$1".unfixed "$1".covered "$1".stabilised "$1".stalled "$1".ready "$1".ready.new "$1".batch "$1".batch.new "$1".bpatch "$1".lent "$1".batchtest "$1".batchfirst "$1".batchuncovered "$1".first "$1".rerun "$1".rerun.new "$1".sharedran "$1".linted "$1".whole "$1".passed "$1".bpass "$1".oldtimes "$1".times "$1".reported "$1".report "$1".report.[0-9]* "$1".testlist "$1".testfiles "$1".limit "$1".uncovered "$1".slow "$1".timed "$1".cpus "$1".clocks "$1".partial "$1".oldfiles "$1".before; rm -rf "$1".rv "$1".batchtestlog "$1".covfirst "$1".checks "$1".briefs; }
+tidy() { git worktree remove --force "$1" 2>/dev/null; rm -f "$1".events "$1".firsttry "$1".firsttry.new "$1".reviewed "$1".patch "$1".index "$1".msg "$1".review.new "$1".carried "$1".base "$1".live "$1".live.tmp "$1".idle "$1".nocap "$1".capheld "$1".claim "$1".claim.new "$1".cpatch "$1".cpatch.new "$1".stack "$1".settings "$1".opencode.json "$1".donewhen "$1".unfixed "$1".covered "$1".stabilised "$1".stalled "$1".ready "$1".ready.new "$1".ready.new.[0-9]* "$1".ready.lock "$1".batch "$1".batch.new "$1".bpatch "$1".lent "$1".batchtest "$1".batchfirst "$1".batchuncovered "$1".first "$1".rerun "$1".rerun.new "$1".sharedran "$1".linted "$1".whole "$1".passed "$1".bpass "$1".oldtimes "$1".times "$1".reported "$1".report "$1".report.[0-9]* "$1".testlist "$1".testfiles "$1".limit "$1".uncovered "$1".slow "$1".timed "$1".cpus "$1".clocks "$1".partial "$1".oldfiles "$1".before; rm -rf "$1".rv "$1".batchtestlog "$1".covfirst "$1".checks "$1".briefs; }
 # The project's own screenshots of a change that waits for the owner's yes, kept local for the Board: the images
 # (PNG, JPEG, GIF, WebP) in the worktree folder the pack's review.screenshots names, which the project's own run
 # writes (Conveyor takes none). Each is copied to <kept>/shots named by its content (git hash-object), the first
@@ -761,7 +765,8 @@ failclass() { # <reason>
 # is the line's class, the block class the metrics give it ("proof check": a check that proves the change refused it,
 # card.sh and cardland.sh, its reason starting as a failed session's does; api error, stall or timeout: a failed build
 # session, failclass() above). A failed session that was resumed (session1()) gives the line resumed. Called in card(), the
-# line's waitSec is the seconds the card waited on other cards and for main to change (card()'s waitsec and mainsec),
+# line's waitSec is the seconds the card waited on other cards, for main to change and for the machine hold or the
+# repair lane (card()'s waitsec and mainsec),
 # as on its landed line, for the drift watch (bench/drift.sh); outside card() it has none.
 # A card that stops for the owner's yes to a visible change keeps the project's own screenshots of it (keepshots()),
 # or, retried on the same kept patch, those of the card it resumes (keptshots()).
