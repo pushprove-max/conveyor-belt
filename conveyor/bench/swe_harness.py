@@ -155,6 +155,19 @@ def is_test(path):
     return bool(re.search(r'(^|/)tests?/', path)) or name.startswith('test_') or name.endswith('_test.py') or name == 'conftest.py'
 
 
+# A path as git diff writes it, unquoted: with core.quotePath (the default) git puts a path with a non-ASCII byte, a
+# control character, a quote or a backslash in double quotes, with C escapes (\303\251 for é).
+GIT_ESC = {b'a': b'\a', b'b': b'\b', b't': b'\t', b'n': b'\n', b'v': b'\v', b'f': b'\f', b'r': b'\r'}
+
+
+def git_path(s):
+    if len(s) < 2 or not (s.startswith('"') and s.endswith('"')):
+        return s
+    raw = re.sub(rb'\\([0-7]{3}|.)', lambda m: bytes([int(m[1], 8)]) if len(m[1]) == 3 else GIT_ESC.get(m[1], m[1]),
+                 s[1:-1].encode('utf-8', 'surrogateescape'))
+    return raw.decode('utf-8', 'surrogateescape')
+
+
 # {path: [lines added, lines removed]} of a git diff: the lines of each hunk are counted by the hunk's own header, so
 # a removed line that starts with "--" is not read as a file header.
 def diff_files(text):
@@ -171,9 +184,10 @@ def diff_files(text):
                 old -= 1
                 new -= 1
             continue
-        m = re.match(r'diff --git a/.* b/(.*)$', line)
+        # An unquoted path has no '"' (git quotes it), so a quoted destination that holds " b/" is read whole.
+        m = re.match(r'diff --git (?:"a/(?:[^"\\]|\\.)*"|a/.*) ("b/(?:[^"\\]|\\.)*"|b/[^"]*)$', line)
         if m:
-            cur = m.group(1)
+            cur = git_path(m.group(1)).removeprefix('b/')
             files.setdefault(cur, [0, 0])
             continue
         m = re.match(r'@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@', line)
@@ -186,7 +200,7 @@ def diff_files(text):
 # {new path: old path} of the files a git diff renames (its rename from / rename to lines): diff_files names each
 # by its new path alone.
 def renames(text):
-    return {m.group(2): m.group(1) for m in re.finditer(r'^rename from (.*)\nrename to (.*)$', text, re.MULTILINE)}
+    return {git_path(m.group(2)): git_path(m.group(1)) for m in re.finditer(r'^rename from (.*)\nrename to (.*)$', text, re.MULTILINE)}
 
 
 # The size of a diff's files, split into code and test files.

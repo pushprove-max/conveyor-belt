@@ -171,6 +171,24 @@ t_swegradelintrename() {
   out=$(swegrade '["t1","t2","t3","t4"]' "$(swerenamed 5 6 ' import os' '+import sys' ' ' ' ' ' def f():' '     return os.getcwd()')") || fail "the grade failed: $out"
   [ "$(jq -c .measures.lintClean <<<"$out")" = false ] || fail "a patch that renames lib/x.py to lib/y.py and adds an unused import is not lintClean false: $out"
 }
+# Bug: with git's default core.quotePath, a rename to "lib/café b/y.py" is written with quoted, escaped paths
+# ("b/lib/caf\303\251 b/y.py"); the file header did not match (or matched only its last " b/y.py\""), so the file
+# was not linted and lintClean stayed true.
+t_swegradelintquoted() {
+  local out; swegradefx "$T/$CASE"; swebase lib/x.py 'import os\n\n\ndef f():\n    return os.getcwd()\n'
+  out=$(swegrade '["t1","t2","t3","t4"]' 'diff --git a/lib/x.py "b/lib/caf\303\251 b/y.py"' 'similarity index 80%' 'rename from lib/x.py' \
+    'rename to "lib/caf\303\251 b/y.py"' '--- a/lib/x.py' '+++ "b/lib/caf\303\251 b/y.py"' '@@ -1,4 +1,5 @@' ' import os' '+import sys' ' ' ' ' ' def f():') \
+    || fail "the grade failed: $out"
+  [ "$(jq -c .measures.lintClean <<<"$out")" = false ] || fail "a patch that renames lib/x.py to a quoted \"b/lib/caf\\303\\251 b/y.py\" and adds an unused import is not lintClean false: $out"
+}
+# Bug: the same quoted header of a new file, lib/café.py with an unused import, was not matched, so the new file was
+# not linted and lintClean stayed true.
+t_swegradelintquotedadd() {
+  local out; swegradefx "$T/$CASE"
+  out=$(swegrade '["t1","t2","t3","t4"]' 'diff --git "a/lib/caf\303\251.py" "b/lib/caf\303\251.py"' 'new file mode 100644' '--- /dev/null' \
+    '+++ "b/lib/caf\303\251.py"' '@@ -0,0 +1 @@' '+import sys') || fail "the grade failed: $out"
+  [ "$(jq -c .measures.lintClean <<<"$out")" = false ] || fail "a patch that adds a quoted \"b/lib/caf\\303\\251.py\" with an unused import is not lintClean false: $out"
+}
 # The base's own findings of a file the patch renames are not new: the unused import lib/x.py had at the base, still
 # in lib/y.py, leaves the patch lintClean true (read under the old path alone, it would be new in lib/y.py).
 t_swegradelintmoved() {
@@ -178,6 +196,15 @@ t_swegradelintmoved() {
   out=$(swegrade '["t1","t2","t3","t4"]' "$(swerenamed 6 6 ' import os' ' import json' ' ' ' ' ' def f():' '-    return os.getcwd()' '+    return os.getcwd() + "/"')") \
     || fail "the grade failed: $out"
   [ "$(jq -c .measures.lintClean <<<"$out")" = true ] || fail "a patch that renames lib/x.py, whose unused import was there at the base, to lib/y.py is not lintClean true: $out"
+}
+# Bug: a quoted source path ("rename from \"lib/caf\303\251.py\"") read as is names no base file, so the renamed file
+# was not copied from the base, the patch did not apply and lintClean was null, not true (its unused import is the base's).
+t_swegradelintquotedfrom() {
+  local out; swegradefx "$T/$CASE"; swebase lib/café.py 'import os\nimport json\n\n\ndef f():\n    return os.getcwd()\n'
+  out=$(swegrade '["t1","t2","t3","t4"]' 'diff --git "a/lib/caf\303\251.py" b/lib/y.py' 'similarity index 80%' 'rename from "lib/caf\303\251.py"' 'rename to lib/y.py' \
+    '--- "a/lib/caf\303\251.py"' '+++ b/lib/y.py' '@@ -1,6 +1,6 @@' ' import os' ' import json' ' ' ' ' ' def f():' '-    return os.getcwd()' '+    return os.getcwd() + "/"') \
+    || fail "the grade failed: $out"
+  [ "$(jq -c .measures.lintClean <<<"$out")" = true ] || fail "a patch that renames a quoted \"lib/caf\\303\\251.py\", whose unused import was there at the base, to lib/y.py is not lintClean true: $out"
 }
 
 # Bug: clean ignored the size limit: a resolved, lint clean patch with no strays that changes 8 code lines against the
