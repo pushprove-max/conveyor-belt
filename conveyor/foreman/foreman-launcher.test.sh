@@ -38,6 +38,10 @@ start() { (cd "$M" && bash "$SRC/foreman.sh" claim sA) || fail "the claim failed
 # and the start is shorter than it was with the versioned path in the same places.
 t_text() {
   local st old n v=0123456789abcdef0123456789abcdef01234567
+  # The fixture's folder is padded to its length in a card's test slot (/tmp/tmp.<x>.tmp/f/tmp.<y>, 40 characters). Bug
+  # (#1557): the start, which names the launcher's path in each place, kept its standing kinds at a short /tmp path (and
+  # failed only the count below), but went over its limit in the slot and lost its standing kinds.
+  local B=$B; [ "${#B}" -ge 39 ] || B+=/$(printf '%*s' $((39 - ${#B})) '' | tr ' ' p)
   fixture text
   st=$(start)
   grep -qF -- '# STANDING YES' <<<"$st" || fail "the start has no standing kinds: $st"

@@ -152,7 +152,7 @@ grep -qF '"In parallel (<n> at once)" (faster' <<<"$out" \
   && grep -qF "<n> is the number $XDG_DATA_HOME/conveyor/foreman.sh ask <project> release-run atonce prints for the release's project" <<<"$out" \
   || fail "the Foreman's release question does not name, in its parallel option, the number release-run atonce prints for the release's project: $out"
 # Bug (R193): with the machine question too, the option quoted the rule's machine's number alone; each number is named with its machine, one not printed (a devbox's) left out.
-grep -qF '"In parallel (<n> at once on <the rule'"'"'s machine>, <m> on this machine)", where <m> is the number '"$XDG_DATA_HOME/conveyor/foreman.sh ask <project> release-run atonce --machine local prints; leave out the part of a machine whose command prints no number (a devbox's is read only when a run leases it), as \"In parallel (<m> at once on this machine)\"" <<<"$out" || fail "the Foreman's release question does not name each machine beside its number, leaving out one with no number: $out"
+grep -qF '"In parallel (<n> at once on <the rule'"'"'s machine>, <m> on this machine)", where <m> is what that command prints with --machine local added; leave out a machine whose command prints no number (a devbox'"'"'s is read only when a run leases it).' <<<"$out" || fail "the Foreman's release question does not name each machine beside its number, leaving out one with no number: $out"
 # Bug (#1364): the release question put no mode first, so the owner chose against the project's rule each time. It marks
 # the rule's mode (suiteMode, in the record `ask <project> control` prints) Recommended. The rules are text the
 # Foreman's model reads, so their text is the behaviour here.
