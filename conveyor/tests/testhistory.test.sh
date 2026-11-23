@@ -152,12 +152,15 @@ t_thsteps() {
 # Tests page no longer showed. With the start set, its runs, newest run, failures and flaky entries are all on or after it.
 # A carried time is dated by the step that ran the file (c-new's 12:00:30), not by the later step that carried it (12:00:40).
 t_thfacts() {
-  local got; th_fixture
+  local got want have; th_fixture
   loop test-settings history-start "$TH_START" || fail "the start $TH_START was not saved"
   got=$(th_as testaction testfacts h.test) || fail "testfacts failed with the start $TH_START: $got"
-  [ "$(jq -c '[[.runs[].time], [.runs[] | select(.carried) | .time], [.failures[].time], [.flaky[].time], .newest.time]' <<<"$got")" \
-    = '[["2026-11-20T12:00:00Z","2026-11-20T12:00:30Z","2026-11-20T12:00:30Z","2026-11-20T12:01:00Z","2026-11-20T12:02:00Z","2026-11-20T12:03:00Z","2026-11-22T00:00:00Z"],["2026-11-20T12:00:30Z"],["2026-11-21T00:00:00Z"],["2026-11-21T00:00:00Z"],"2026-11-22T00:00:00Z"]' ] \
-    || fail "the facts for h.test with the start $TH_START list a run, survey time, carried time or failure before it: $got"
+  # The want list is [run times, carried run times, failure times, flaky times, newest run time]: c-new's carried run
+  # is at 12:00:30, the time of the step that ran the file.
+  want='[["2026-11-20T12:00:00Z","2026-11-20T12:00:30Z","2026-11-20T12:00:30Z","2026-11-20T12:01:00Z","2026-11-20T12:02:00Z","2026-11-20T12:03:00Z","2026-11-22T00:00:00Z"],["2026-11-20T12:00:30Z"],["2026-11-21T00:00:00Z"],["2026-11-21T00:00:00Z"],"2026-11-22T00:00:00Z"]'
+  have=$(jq -c '[[.runs[].time], [.runs[] | select(.carried) | .time], [.failures[].time], [.flaky[].time], .newest.time]' <<<"$got")
+  [ "$have" = "$want" ] \
+    || fail "the facts for h.test with the start $TH_START do not have the expected times (want $want, have $have): $got"
   # g.test has only a card run, a failed step, a flaky entry and a run on its own (which would be its newest run) from before the start.
   got=$(th_as testaction testfacts g.test) || fail "testfacts g.test failed with the start $TH_START: $got"
   [ "$(jq -c '[.runs, .cards, .failures, .flaky, .newest]' <<<"$got")" = '[[],[],[],[],null]' ] \
