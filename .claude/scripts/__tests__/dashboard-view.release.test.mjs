@@ -131,7 +131,7 @@ test('#1369: a run waiting on its notes card shows Stop in the notes step, and a
     notes: { card: id, then: 'prep', mode: null, machine: null } }, { notes: false, written: [] }));
   assert.ok(stepOf(w, 'release-notes').querySelector('[data-act="release-stop"]'), 'Stop shows in the notes step');
   assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), []);
-  assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), [{ action: 'release-run', args: ['stop'], repo: 'plugin' }]);
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), [{ action: 'release-run', args: ['stop', '1.0.0'], repo: 'plugin' }]);
 });
 // Bug this guards (#1369): the notes reached main while another card was open, the run still waited for that card, and
 // the panel (which read the wait from the missing notes) hid Stop, so the owner could not end it.
@@ -211,7 +211,9 @@ test('D2: a run under way shows a progress bar of files done of all, the failed 
   assert.equal(act(card(w), 'release').disabled, true);
   assert.ok(shown(w, act(card(w), 'release')) && shown(w, act(card(w), 'release-prep')), 'both buttons show while the suite runs');
   assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), []);
-  assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), [{ action: 'release-run', args: ['stop'], repo: 'plugin' }]);
+  // Bug: Stop sent no version, so a late second click stopped whatever run was under way by then, of any version. It
+  // sends the version of the run it shows, and the engine stops no run of another one.
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), [{ action: 'release-run', args: ['stop', '1.0.0'], repo: 'plugin' }]);
 });
 
 // Bug (#1240): while the failed cases ran again, the row kept the first run's bar with no sign of the rerun. The

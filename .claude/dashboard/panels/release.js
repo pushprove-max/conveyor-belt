@@ -28,7 +28,7 @@
 // lease, shows the machine's steps as chips and says what Stop does there; a run that did not start (state "not
 // started") on a box shows its failed step with the reason, one fix line, Run on this machine instead and Run suite again
 // (one that did not start on this machine lists the reason, with the fix line and Run suite again); a run
-// here shows no machine line or steps; step 2 shows the mode of the run under way and of the last run. Stop (`release-run stop`, a second click too) shows while a run is
+// here shows no machine line or steps; step 2 shows the mode of the run under way and of the last run. Stop (`release-run stop <version>`, the version of the run it stops, a second click too) shows while a run is
 // under way and while a run waits on its notes card or on open cards (it ends the wait), else not. Each reason a refused or failed run printed shows under the step it belongs to, and each failed case
 // release-prep judged flaky (it passed every run alone) under the suite's step, and beside a red result the fix cards of
 // that run (its record's fixes), each with its state, and what happens next. The panel is Small by default: in that
@@ -447,7 +447,9 @@
         other.dataset.figure = 'stop-other';
         box.append(other);
       }
-      box.append(ctx.twice(stop, 'final', 'Click again to stop the wait', () => send(ctx, rec.repo, ['stop'], 'The run no longer waits for the card.')));
+      // The version goes with the stop: a run of another version started since the panel was drawn is not stopped (a new
+      // run of the same version is).
+      box.append(ctx.twice(stop, 'final', 'Click again to stop the wait', () => send(ctx, rec.repo, ['stop', s.stopOf], 'The run no longer waits for the card.')));
       return box;
     };
     let s1;
@@ -473,7 +475,14 @@
       const moved = run.moved === true ? h('p', 'warn-note', 'Main moved while the suite runs: a card landed, so the suite does not test the new main.') : null;
       const lines = machineLines(h, ctx, run, false);
       const stopBox = h('div', 'release-stop');
-      stopBox.append(ctx.twice(stop, 'final', 'Click again to stop the run', () => send(ctx, rec.repo, ['stop'], 'The run is stopped.')));
+      // A version typed that is not the running suite's: say which release Stop stops.
+      if (run.version !== v) {
+        const other = h('p', 'row-meta', `The suite of release ${run.version} runs. Stop stops it.`);
+        other.dataset.figure = 'stop-other';
+        stopBox.append(other);
+      }
+      // The version goes with the stop: a run of another version started since the panel was drawn is not stopped.
+      stopBox.append(ctx.twice(stop, 'final', 'Click again to stop the run', () => send(ctx, rec.repo, ['stop', String(run.version)], 'The run is stopped.')));
       if (lines.length) {
         const sl = h('span', 'board-from', run.machine.kind === 'devbox' ? 'Stops the run on the devbox and gives the box back.' : 'Stops the run on the box.');
         sl.dataset.figure = 'stop-line';

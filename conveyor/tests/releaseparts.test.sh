@@ -192,3 +192,31 @@ t_relpartstopcounts() {
   jq -e '.state == "stopped" and (has("counts") | not) and .done == 40 and .failed == 2' "$RUN" > /dev/null \
     || fail "the stopped record keeps .counts, or not the suite's counts: $(cat "$RUN")"
 }
+
+# Bug (follow-up of #1461): the Board's Stop sent `release-run stop` with no version, so a Stop shown for 1.0.0, clicked
+# once 1.0.0 had ended and 1.1.0 had started from a terminal, stopped the run of 1.1.0. `release-run stop 1.0.0` stops
+# no run of 1.1.0: it fails, the run's process lives and its record is not marked stopped; `stop 1.1.0` stops it.
+t_relpartstopother() {
+  local out
+  setup '[]'; fakerun
+  out=$(loop release-run stop 1.0.0 2>&1); RC=$?
+  kill -0 "$FAKE" 2>/dev/null || fail "release-run stop 1.0.0 ended the process of the run of 1.1.0: $out"
+  [ "$RC" = 1 ] && grep -q 'under way is of 1.1.0, not 1.0.0; nothing stopped' <<<"$out" && jq -e '.state == "running" and .ended == null' "$RUN" > /dev/null \
+    || { kill "$FAKE" 2>/dev/null; fail "release-run stop 1.0.0 of a run of 1.1.0 did not fail, or marked it stopped (exit $RC): $out; $(cat "$RUN")"; }
+  out=$(loop release-run stop 1.1.0 2>&1) || { kill "$FAKE" 2>/dev/null; fail "release-run stop 1.1.0 of the run of 1.1.0 failed: $out"; }
+  kill "$FAKE" 2>/dev/null
+  jq -e '.state == "stopped"' "$RUN" > /dev/null || fail "release-run stop 1.1.0 did not mark the run of 1.1.0 stopped: $(cat "$RUN")"
+}
+
+# Bug: the same, for a run that waits on its notes card (relstopwaiting()): a late Stop of 1.0.0 ended the wait of 1.1.0.
+t_relpartstopwaitother() {
+  local out run=$T/$CASE/cards/release/run.json
+  setup '[]'
+  mkdir -p "${run%/*}" && jq -n '{kind: "release", step: "release-prep", version: "1.1.0", since: "2026-01-01T00:00:00Z",
+    ended: "2026-01-01T00:10:00Z", state: "waiting", restarted: null, notes: {card: "c1"}}' > "$run" || fail "the fixture could not be made"
+  out=$(loop release-run stop 1.0.0 2>&1); RC=$?
+  [ "$RC" = 1 ] && grep -q 'that waits is of 1.1.0, not 1.0.0; nothing stopped' <<<"$out" && jq -e '.state == "waiting"' "$run" > /dev/null \
+    || fail "release-run stop 1.0.0 of the wait of 1.1.0 did not fail, or ended the wait (exit $RC): $out; $(cat "$run")"
+  out=$(loop release-run stop 1.1.0 2>&1) && jq -e '.state == "stopped"' "$run" > /dev/null \
+    || fail "release-run stop 1.1.0 did not end the wait of 1.1.0: $out; $(cat "$run")"
+}

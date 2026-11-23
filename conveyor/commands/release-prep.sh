@@ -760,7 +760,7 @@ releasego() { # <version> [prep: release-prep alone | anyway <who>]
   elif [ -n "$ok" ]; then echo "conveyor: release-run: release $1 is running, with the suite that passed on ${ok:0:12}; its output is in $CARDS/release/run.log"
   else echo "conveyor: release-run: release-prep $1 is running, then release $1 once its suite passes; their output is in $CARDS/release/run.log"; fi
 }
-# `release-run stop`: releasestop() (lib/fulltest.sh).
+# `release-run stop [<version>]`: releasestop() (lib/fulltest.sh); with the version, only a run of it is stopped.
 shift
 if [ "$CMD_ARG" = release ]; then
   RELUSE='usage: conveyor.sh release <version: X.Y.Z> [--anyway] [--allow-commit <sha>]... [--by <who>: with --anyway or --allow-commit]'
@@ -778,7 +778,7 @@ if [ "$CMD_ARG" = release ]; then
     && [[ $ver =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { printf '%s\n%s\n' "$RELUSE" "$RELHELP" >&2; exit 2; }
   relrun release "$ver"
 elif [ "$CMD_ARG" = release-run ]; then
-  if [ "$*" = stop ]; then releasestop
+  if [ "$*" = stop ] || { [ $# = 2 ] && [ "$1" = stop ] && [[ $2 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; }; then releasestop "${2:-}"
   elif [ "$*" = atonce ] || [ "$*" = 'atonce --machine local' ]; then
     # With --machine local: the number of a run here, as `release-run ... --machine local` runs it, whatever the rule says.
     if [ $# = 3 ]; then export CONVEYOR_RELEASE_MACHINE=local; else unset CONVEYOR_RELEASE_MACHINE; fi
@@ -790,7 +790,7 @@ elif [ "$CMD_ARG" = release-run ]; then
     if [ $# -ge 2 ] && [ "$1" != anyway ] && [[ ${!#} =~ ^--(parallel|serial)$ ]]; then RELMODE=${BASH_REMATCH[1]}; set -- "${@:1:$#-1}"; fi
     if [ $# = 2 ] && [ "$1" = prep ]; then how=prep; shift
     elif [ $# = 4 ] && [ "$1" = anyway ] && [ "$3" = --by ] && [[ $4 == *[![:space:]]* && $4 != *$'\n'* ]]; then how=anyway by=$4; set -- "$2"; fi
-    [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-run [prep] <version: X.Y.Z> [--parallel | --serial] [--machine local] | release-run anyway <version: X.Y.Z> --by <who> | release-run stop | release-run atonce [--machine local]" >&2; exit 2; }
+    [ $# = 1 ] && [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "usage: conveyor.sh release-run [prep] <version: X.Y.Z> [--parallel | --serial] [--machine local] | release-run anyway <version: X.Y.Z> --by <who> | release-run stop [<version: X.Y.Z>] | release-run atonce [--machine local]" >&2; exit 2; }
     mkdir -p "$CARDS/release" && releasego "$1" $how "$by"
   fi
 else

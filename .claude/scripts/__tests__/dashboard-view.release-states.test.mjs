@@ -104,7 +104,7 @@ test('with 1.1.0 typed while 1.0.0 waits on its notes card, Stop shows in the no
   assert.ok(s1.querySelector('[data-act="release-stop"]'), 'Stop shows with 1.1.0 typed');
   assert.equal(s1.querySelector('[data-figure="stop-other"]').textContent,
     'Release 1.0.0 waits on its notes card. Conveyor runs no other version until that wait ends. Stop ends it.');
-  assert.deepEqual(await sent(w, () => { act(card(w), 'release-stop').click(); act(card(w), 'release-stop').click(); }), [{ action: 'release-run', args: ['stop'], repo: 'plugin' }]);
+  assert.deepEqual(await sent(w, () => { act(card(w), 'release-stop').click(); act(card(w), 'release-stop').click(); }), [{ action: 'release-run', args: ['stop', '1.0.0'], repo: 'plugin' }]);
 });
 
 // Bug it guards (follow-up of #1461): a run whose notes card its fixes entry says is closed still waits, and Conveyor
@@ -118,4 +118,18 @@ test('a run waiting on a notes card its fixes entry says is closed shows Stop in
   assert.match(s1.querySelector('.release-line').textContent, /was closed before it landed/, 'the fixture is the closed-card state');
   assert.ok(s1.querySelector('[data-act="release-stop"]'), 'Stop shows beside the closed card');
   assert.equal(s1.querySelector('[data-figure="stop-other"]'), null, 'the run is of the typed version: no other-version line');
+});
+
+// Bug it guards (review of the follow-up of #1461): with 1.1.0 typed while the suite of 1.0.0 ran, the suite step showed
+// only Stop under the typed 1.1.0, so the owner could not see that Stop stops the run of 1.0.0. The step names 1.0.0, and
+// Stop sends that version; with 1.0.0 typed, no such line shows.
+test('with 1.1.0 typed while the suite of 1.0.0 runs, the suite step says Stop stops 1.0.0, and Stop sends 1.0.0', async () => {
+  const w = boot();
+  deliver(w, data([{ ...RUN, ended: null, state: 'running' }]));
+  assert.equal(stepOf(w, 'full-suite').querySelector('[data-figure="stop-other"]'), null, 'the run is of the typed version: no other-version line');
+  const field = card(w).querySelector('[data-field="version"]');
+  field.value = '1.1.0'; field.dispatchEvent(new w.Event('input'));
+  const s2 = stepOf(w, 'full-suite');
+  assert.equal(s2.querySelector('[data-figure="stop-other"]').textContent, 'The suite of release 1.0.0 runs. Stop stops it.');
+  assert.deepEqual(await sent(w, () => { act(card(w), 'release-stop').click(); act(card(w), 'release-stop').click(); }), [{ action: 'release-run', args: ['stop', '1.0.0'], repo: 'plugin' }]);
 });

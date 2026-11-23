@@ -545,13 +545,17 @@ relnoteswait() { # <version> <card> <then> <what the run found>
 # 1: the lock is still held 10 s on (relreap's time for a TERM; with the stop's own reap, within the Board's 30 s); the
 # record is left as it is, its suite on a box is not stopped, and the snapshot shows the run stopped once the lock is free.
 # 1 too when the run's suite on a box is not stopped as the record became another run's (hoststop()).
-releasestop() {
-  local p s v b lk='' rc=1 hs=2 r
+# With <version> (the Board's Stop names the version it shows): 1, and nothing stopped, when the run under way, or the
+# run that waits, is of another version, so a late Stop of a run that ended never stops a run of another version
+# started after it. A run of the same version started after it is stopped: the version is all the check reads.
+releasestop() { # [<version>]
+  local p s v b lk='' rc=1 hs=2 r want=${1:-}
   # The pid, start, version and name of the box whose suite's run the stop ends (HOSTLIVE) from one read of the record,
   # so they are all of one run.
   r=$(jq -er 'select(.ended == null and (.pid | numbers)) | "\(.pid)\t\(.since)\t\(.version)\t\(('"$HOSTLIVE"' | .name // "its box") // "")"' "$RELRUN" 2>/dev/null) \
     && IFS=$'\t' read -r p s v b <<<"$r" \
-    && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q 'conveyor\.sh' || { relstopwaiting; return; }
+    && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q 'conveyor\.sh' || { relstopwaiting "$want"; return; }
+  [ -z "$want" ] || [ "$v" = "$want" ] || { echo "conveyor: release-run stop: the release run under way is of $v, not $want; nothing stopped" >&2; return 1; }
   relreap "$p" "$p"
   { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null && flock -w 10 "$lk" && rc=0
   # The run's suite on a box stopped only holding the lock, and only while its record is still the run's: a release-prep
@@ -587,12 +591,13 @@ relother() { # <command name> <version>
 # card lands. The card is not closed (`conveyor.sh shut` closes it) and may still land. Only a record that waits, was not
 # started again and is still the one read, and only holding the release lock (as relfixes() does). 2: no run is under
 # way and none waits; 1: the lock is held 10 s on, or the record changed before the lock was taken (relfixes() started
-# the run again, or another run began): nothing stopped.
-relstopwaiting() {
+# the run again, or another run began), or the run that waits is not of <version>, when one is given: nothing stopped.
+relstopwaiting() { # [<version>]
   local r s v c lk='' rc=1
   r=$(jq -ce 'select(.state == "waiting" and (.ended | type) == "string" and .restarted == null and (.notes.card | type) == "string")' "$RELRUN" 2>/dev/null) \
     || { echo "conveyor: release-run stop: no release run is under way; nothing stopped" >&2; return 2; }
   s=$(jq -r .since <<<"$r") && v=$(jq -r .version <<<"$r") && c=$(jq -r .notes.card <<<"$r") || { echo "conveyor: release-run stop: $RELRUN could not be read; nothing stopped" >&2; return 1; }
+  [ -z "${1:-}" ] || [ "$v" = "$1" ] || { echo "conveyor: release-run stop: the release run that waits is of $v, not $1; nothing stopped" >&2; return 1; }
   { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null && flock -w 10 "$lk" && rc=0
   if [ $rc = 0 ] && ! jq -e --arg s "$s" '.since == $s and .state == "waiting" and .restarted == null' "$RELRUN" > /dev/null 2>&1; then
     exec {lk}>&-

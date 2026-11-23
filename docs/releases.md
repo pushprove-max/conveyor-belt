@@ -291,7 +291,8 @@ and `main` did not move after it, else `release-prep`, then `release` when the s
 is in `release/run.log` in the cards folder. When `main` has no notes, the run waits for the card that adds the
 notes draft, then goes on by itself after the push or the merge that puts the card's commit in the commit the suite
 tests, once no other card is open ([Making a release](#making-a-release), step 2). When a step stops, the panel shows each reason, and nothing more runs. `/units` shows the run while it is in
-progress ([/units](units.md)). `conveyor.sh release-run stop` is the panel's **Stop**. While the run waits for the notes card, it ends the wait: nothing
+progress ([/units](units.md)). `conveyor.sh release-run stop <version>` is the panel's **Stop**. It stops only a run of the version that the panel
+shows. If a run of another version started after the panel showed it, nothing stops. While the run waits for the notes card, it ends the wait: nothing
 starts when the card lands, or when the other open cards end. The card is not closed and can still land: `conveyor.sh shut` closes it. If you start the release again,
 it waits on that card and starts no second one. While a run waits for its notes card, Conveyor refuses a run of
 another version, as that run would end the wait. It also refuses one after the card lands, until the waiting run
