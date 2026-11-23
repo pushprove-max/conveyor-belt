@@ -66,11 +66,14 @@ t_filedkept() {
 # filedmid <command>: the pick while the filing runs, between its filing hook and its filed hook: #4 is held by the
 # owner, and the command has filed a follow-up (#$n) that GitHub lists already, so the dry pick reads both.
 # Bug caught: the loop's own hold (adopted()) passed over a follow-up, and filed held it only once the command ended,
-# so a pick in that time took it before the owner's yes. Now filing marks the record (control filing on) and the pick
-# holds it; filed then takes the mark off, and the follow-up stays held.
+# so a pick in that time took it before the owner's yes. Now filing marks the record (control filing on) and sets new
+# issues held, and the pick holds it; filed then takes the mark off, and the follow-up stays held.
 filedmid() {
   loop control hold 4 >/dev/null || fail "hold 4 was refused"
-  out=$(hook filing "$1"); [ -z "$out" ] && jq -e '.filing | numbers' "$C" >/dev/null || fail "filing (command: $1) did not mark the record: $out $(cat "$C")"
+  # Held as well as marked while the command runs: filed's Queue holds the follow-up even when the record stayed in
+  # Queue, so only this check catches a filing that marks a listed record and passes over setting it held.
+  out=$(hook filing "$1"); [ -z "$out" ] && jq -e '(.filing | numbers) and .start == "held"' "$C" >/dev/null \
+    || fail "filing (command: $1) did not mark the record or set new issues held: $out $(cat "$C")"
   n=$(gh issue create --title example --body example --label conveyor-followup | grep -oE '[0-9]+$') || fail "the stub filed no issue"
   printf '[%s,%s]' "$(issue 4 2000-01-01T00:00:00Z P2)" "$(issue "$n" 2026-06-01T00:00:00Z P2 conveyor-followup)" > "$STUB/mid.json"
   p=$(loop pick --dry --issues "$STUB/mid.json" --state "$ST" 2>&1); [ -z "$p" ] || fail "a pick while the command (command: $1) ran took the follow-up #$n: $p"
