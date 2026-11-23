@@ -150,7 +150,7 @@ sign-in failed, shows the reason after the state (`shop paused: build: Claude Co
 The pane shows the board as tables, from top to bottom. A line that is wider than the pane is cut, unless
 this page says that it wraps. Before the first fetch answers, the pane shows `units: reading the Conveyor snapshot`.
 That message, a line about what could not be read and a fetch error go on to more lines at their spaces when they are
-wider than the pane.
+wider than the pane. A word wider than the pane breaks between whole characters.
 
 - **The head**: `/units` as a filled label, the Conveyor host in bold and, on the right, `DAY SPEND` and the dollars
   today.
@@ -194,7 +194,7 @@ wider than the pane.
   `issue open` or `not pushed`). A card that still waits shows `waiting` there, and what it waits for (such as
   `Landed, waiting for Push landed`) on the line under its row.
 - The Fast and Research lanes, and the lines about what could not be read. A line about what could not be read wraps
-  at its spaces.
+  at its spaces. A word wider than the line breaks between whole characters.
 
 A section with nothing to show has one dim line: `nothing on the belt`, `nothing waiting`, `nothing landed today`.
 The pane and `/units` write times of day in the form that the Board's **Time** setting gives, or the `time` setting
@@ -294,8 +294,8 @@ A snapshot that cannot be read is one plain note in every view, and nothing from
 `this machine has no host file at <paths looked at>`, `the host file is not understood`,
 `the fetch did not run` or `the fetch did not finish`, or
 `the fetch printed over the 4.2 MB cap and was cut short` (the engine keeps a command's first 4 MiB of output).
-In the pane, a note that is wider than the pane goes on to more lines at its spaces. The Foreman line still shows
-under it.
+In the pane, a note that is wider than the pane goes on to more lines at its spaces. A word wider than the pane, such
+as a long host file path, breaks between whole characters. The Foreman line still shows under it.
 
 Smaller gaps are named where they are: `weekly limit not read`, `today partial` and `cost partial` (a step could not be
 priced: never a part sum), `QUEUE` `not read: GitHub did not list the issues`, and under the board `units: the <record> snapshot cannot be read` when one record of several fails. A Board feed

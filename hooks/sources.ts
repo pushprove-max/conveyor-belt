@@ -942,8 +942,9 @@ const pieces = (t: string, room: number): string[] => {
   }
   return cur ? [...out, cur] : out
 }
-// A note (a fetch that failed, a record not read, the pane's first wait) wrapped at its spaces to the pane's width,
-// never cut: the terminal wraps a line wider than a dock, and a cut note loses its reason.
+// A note (a fetch that failed, a record not read, the pane's first wait) wrapped at its spaces to the pane's width
+// (a word wider than the pane broken between whole characters, by pieces), never cut:
+// the terminal wraps a line wider than a dock, and a cut note loses its reason.
 export const noteLines = (t: string, w: number, style: Omit<Seg, 't'> = { c: C.you }): Line[] => pieces(t, w).map(p => fitWidth([{ ...style, t: p }], w))
 
 // What the pick held back, a count a rule, wrapped at its counts, never cut: at 40 columns four rules are wider than
@@ -1140,7 +1141,8 @@ export const tableText = (s: State, w: number): string => (s.snap ? board(s, s.s
 
 // The side pane, the Build matrix layout (#497): the head, the count band, the Foreman's state, Machine details (one
 // toggle line until it is opened), then BUILD MATRIX, WORKER ACTIVITY, PICK ORDER and LANDED TODAY, each a table that
-// scans. A line that would wrap is cut at the width; a note (a fetch error, a record not read) wraps at its spaces.
+// scans. A line that would wrap is cut at the width; a note (a fetch error, a record not read) wraps at its spaces,
+// and a word in it wider than the pane (a host file path) breaks between whole characters (pieces).
 const padR = (t: string, n: number) => `${t}${' '.repeat(Math.max(0, n - cols(t)))}`
 const padL = (t: string, n: number) => `${' '.repeat(Math.max(0, n - cols(t)))}${t}`
 const rule = (w: number): Line => [{ t: '─'.repeat(w), d: true }]
