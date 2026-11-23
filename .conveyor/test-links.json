@@ -117,6 +117,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   ".claude/dashboard/panels/belt.js": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   ".claude/dashboard/panels/health.js": [
@@ -139,6 +140,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-view.helpers.mjs": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/port.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -225,6 +227,7 @@
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/port.test.sh",
     "conveyor/tests/snapexec.test.sh"
@@ -256,6 +259,7 @@
     "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/lib/claim.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/issues.sh": [
@@ -317,6 +321,7 @@
     ".claude/scripts/__tests__/dashboard-view.needs.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/codex.test.sh",
     "conveyor/tests/models.test.sh",
     "conveyor/tests/modelsproxy.test.sh",
@@ -366,6 +371,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/views.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -668,6 +674,7 @@
   ],
   ".claude/scripts/dashboard_panels.sh": [
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/port.test.sh"
   ],
   ".claude/scripts/dashboard_server_auth.py": [
@@ -693,7 +700,8 @@
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
   ],
   "conveyor/lib/snapshot.sh": [
-    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
+    ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
+    ".claude/scripts/__tests__/dashboard.test.sh"
   ],
   "conveyor/tests/snapsize.test.sh": [
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
@@ -748,6 +756,7 @@
     "conveyor/tests/metrics.test.sh"
   ],
   ".claude/dashboard/parts/rules-rows.js": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/metrics.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-view.rules.test.mjs": [
@@ -769,6 +778,7 @@
     "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/lib/control.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/batch.test.sh",
     "conveyor/tests/metrics.test.sh"
   ],
@@ -783,6 +793,7 @@
     "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/lib/run.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/lib/slices.sh": [
@@ -798,6 +809,7 @@
     "conveyor/tests/metrics.test.sh"
   ],
   "docs/cards.md": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/metrics.test.sh"
   ],
   "docs/releases.md": [
@@ -822,6 +834,7 @@
     "conveyor/tests/port.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-cards.test.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/port.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-server-time.test.sh": [
@@ -849,12 +862,15 @@
     "conveyor/tests/port.test.sh"
   ],
   "docs/units.md": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/port.test.sh"
   ],
   "hooks/sources.test.tsx": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/port.test.sh"
   ],
   "hooks/sources.ts": [
+    ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/port.test.sh"
   ],
   "hooks/units.test.tsx": [
@@ -862,5 +878,35 @@
   ],
   "hooks/units.tsx": [
     "conveyor/tests/port.test.sh"
+  ],
+  ".claude/dashboard/head.js": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.head.test.mjs": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/foreman/status.test.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/foreman/watch-conveyor.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/foreman/watch-recordsnewer.test.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/lib/cardland.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/tests/capwait.test.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/tests/clis.test.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/tests/snapkept.test.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
+  ],
+  "conveyor/tests/snapshot.test.sh": [
+    ".claude/scripts/__tests__/dashboard.test.sh"
   ]
 }
