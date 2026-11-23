@@ -38,6 +38,17 @@ t_testrecended() {
   [ "$(jq -r .ended <<<"$l")" = killed ] || fail "a run killed by a signal is not recorded as killed: $l"
   e=$(refused "$l"); [ -z "$e" ] || fail "$e"
 }
+# Bug (#1537): the record check did not know partial, so each test line the step wrote with it was set aside in quarantined.jsonl.
+# A list of file names passes; a string or a list holding a number is refused, and the check names partial.
+t_testrecpartial() {
+  local l v f; mkdir -p "$T/$CASE"; echo 'true' > "$T/$CASE/cmd"
+  l=$(recline pass) || fail "the test line could not be made"
+  v=$(jq -c '. + {partial: ["conveyor/tests/x.test.sh"]}' <<<"$l"); [ -z "$(refused "$v")" ] || fail "a test line with partial as a list of file names is refused: $(refused "$v")"
+  for p in '"x"' '[1]'; do
+    v=$(jq -c --argjson p "$p" '. + {partial: $p}' <<<"$l"); f=$(jq -Rrn -f "$SRC/jq/check.jq" <<<"$v" | cut -f2)
+    [ "$f" = partial ] || fail "a test line with partial $p is not refused naming partial (the check named '$f'): $v"
+  done
+}
 # A runner that selects no file of 4 and no case of 9 passes, and its line says "nothing selected", not "passed".
 t_testrecnothing() {
   local l e; mkdir -p "$T/$CASE"; echo 'printf "TESTRUN files=0 of=4\nTESTRUN cases=0 of=9\n" > "$CONVEYOR_TEST_LOG/r.log"' > "$T/$CASE/cmd"
