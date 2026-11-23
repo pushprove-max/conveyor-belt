@@ -134,6 +134,29 @@ t_bugrunlate() {
     || fail "testclock with a 40 s limit and looks 10 s apart, b.test.sh begun after the look at 30 s and left open, did not give b.test.sh about 10 s and say the run's limit stopped it: $(cat "$T/$CASE/run.out")"
 }
 
+# Bug it catches: filecmd() logs no `-- FAIL` for a file its own `# timeout:` limit stopped, only the output's line
+# saying so, and the run's clock (testclock()) read the logs alone: that file stayed open, so when the run's limit
+# came later the clock could name it in .late as stopped by the run's limit, in place of the file still running. Here
+# b.test.sh is stopped by its own limit and a.test.sh then hangs to the run's limit (40 s, on the stand-in clock of
+# t_bugrunlate): .late must name a.test.sh alone, with the run's limit. The stopped file is b.test.sh because the
+# clock names the last open file its awk lists, and mawk lists b.test.sh after a.test.sh, so the old clock named it.
+t_bugrunownlimit() {
+  # shellcheck disable=SC2034 # FXWT is read by fx_in, a fix card's worktree; this case has none
+  local FXWT=$T/$CASE/none w=$T/$CASE/w p
+  setup '[]'
+  # The logs and output filecmd() writes for that run, and a stand-in for timeout's process: the clock is under test.
+  mkdir -p "$w.testlog" && printf '== b.test.sh\n== a.test.sh\n' > "$w.testlog/files" \
+    && printf '== b.test.sh\nconveyor: b.test.sh timed out: it ran past its time limit, 5 s, and it was stopped there\n== a.test.sh\n' > "$w.test" \
+    || fail "the fixture could not be made"
+  sleep 60 & p=$! # sleep: stands for the run that the clock ends with ALRM
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'k=0; sleep() { k=$((k + 1)); SECONDS=$((k * 10)); }
+    ( SECONDS=0; TEST_LATE=1 testclock "$p" "$w.turnwait" 40 ); unset -f sleep; cut -f2- "$w.late"'
+  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
+  [ "$(cat "$T/$CASE/run.out")" = $'a.test.sh\t40' ] \
+    || fail "testclock at its 40 s limit, given logs where b.test.sh was stopped by its own limit and a.test.sh was still running, did not name a.test.sh alone in .late: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug it catches: a runner that runs another file's cases logs them under its own name (the engine's runner,
 # conveyor/conveyor.test.sh, those of a case file), so a run whose case file passed, and which failed only for the
 # runner's own check, was read as giving no result for the case file and blocked as "gave no result" in place of

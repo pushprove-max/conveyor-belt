@@ -456,7 +456,8 @@ treediff() { # <worktree> <from> <to>
 # it is sent ALRM, its own timer's signal, so it ends the run as on its own timeout: TERM to the command's group, KILL
 # 30 s later, exit 124. It holds no descriptor of the loop's (a lock, the slot) while it runs.
 # With TEST_LATE (the bug-card check's run, bugrun()), when the run's own limit ends the run, a file the runner's logs
-# (testlogs(); its output when it wrote none) name as begun (`== <file>`) and not ended (`-- ok|FAIL <file>`) is named
+# (testlogs(); its output when it wrote none) name as begun (`== <file>`) and not ended (`-- ok|FAIL <file>`, or the
+# output's line that its own `# timeout:` limit stopped it, which filecmd() writes in place of `-- FAIL`) is named
 # in <worktree>.late as `<seconds><TAB><file><TAB><limit>`: the seconds it ran (from the last look that did not see it
 # begun, so never fewer than it ran, and at most a look's second more), and the run's limit (TEST_TIMEOUT, scaled).
 # Bug (R332): the line held the limit as the file's seconds, so a file that began after others had used most of the
@@ -474,7 +475,10 @@ testclock() { # <timeout's pid> <turn wait file> <the run's limit: TEST_TIMEOUT,
       mapfile -t l < <(testlogs "$wt"); [ ${#l[@]} != 0 ] || l=("$wt.test")
       open=
       while IFS= read -r f; do open=$f; [ -n "${at[$f]:-}" ] || at[$f]=$p
-      done < <(cat "${l[@]}" 2>/dev/null | awk '/^== / { o[substr($0, 4)] = 1 } /^-- ok / { delete o[substr($0, 7)] } /^-- FAIL / { delete o[substr($0, 9)] }
+      done < <({ cat "${l[@]}"; [ "${l[0]}" = "$wt.test" ] || grep -a '^conveyor: .* timed out: it ran past its time limit' "$wt.test"; } 2>/dev/null \
+        | awk '/^== / { o[substr($0, 4)] = 1 } /^-- ok / { delete o[substr($0, 7)] } /^-- FAIL / { delete o[substr($0, 9)] }
+        /^conveyor: .* timed out: it ran past its time limit, [0-9]+ s, and it was stopped there(; the limit is .*)?$/ {
+          f = substr($0, 11); sub(/ timed out: it ran past its time limit, [0-9]+ s, and it was stopped there(; the limit is .*)?$/, "", f); delete o[f] }
         END { for (f in o) print f }')
       p=$now
     fi
