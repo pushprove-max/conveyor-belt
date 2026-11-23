@@ -381,8 +381,9 @@ MOVEJQ='def files: reduce (split("\n")[]) as $l ([];
 # location and line (with its proof). Each earlier finding this round was not told (one a review said holds) is
 # followed through the round's diff too, in a record {round, id, words, tracked: true} with moved and mkey, or location
 # "needs review": its key keeps to its code, so a later finding at the line that took its place is not joined to it.
+# The round is one no review has answered yet: <worktree>.rounds/told goes (cardreview() writes it, resumeplan() reads it).
 rounded() { # <worktree> <round> <numbered() lines>
-  [ -n "$3" ] || return 0
+  rm -f "$1.rounds/told"; [ -n "$3" ] || return 0
   jq -cs --argjson r "$2" --rawfile d "$1.rounds/$2.diff" --rawfile ls <(git -C "$1" ls-files) --slurpfile h <(cat "$1.rounds/findings.jsonl" 2>/dev/null) "$MOVEJQ"'
     ($d | files) as $fs | ($ls | split("\n") | map(select(. != ""))) as $l | map(.id) as $ids
     | def follow($at; $w): ($at | capture("^(?<p>.*):(?<n>[0-9]+)$")) as $a | moveto($fs; $l; $a.p; ($a.n | tonumber))

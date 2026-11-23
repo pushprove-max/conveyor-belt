@@ -64,10 +64,23 @@ stabilised() { # <worktree> [<issue json>]
   got=$(jq -Rrn '[inputs | fromjson? // empty | objects | if .type == "result" then .result elif .type == "item.completed" and .item.type? == "agent_message" then .item.text
       elif .type == "text" then .part.text? else empty end | strings | split("\n")[] | sub("^[\\s*`_>-]+"; "")
       | capture("^STABILISED:\\s*`?(?<case>[^|`]*[^|\\s`])`?\\s*\\|\\s*(?<cause>[^|]*[^|\\s])\\s*\\|\\s*(?<how>.*?[^\\s*`_])[\\s*`_]*$")] | unique[] | "\(.case) | \(.cause) | \(.how)"' "$1.out" 2>/dev/null)
+  # The lines are kept in <worktree>.stabilised, so the check again after a fix round (cardreview()) still reads the
+  # build's: the fix's reply replaces <worktree>.out. A case the newer reply names has its lines alone, not the kept
+  # ones. They are sorted, so the same lines read the same (rechecked()). Bugs: a fix that named no cause blocked the
+  # card; one that named a new cause left the old one for review; one that repeated a line had the check run again.
+  got=$({ [ -z "$got" ] || printf '%s\n' "$got"; echo; cat "$1.stabilised" 2>/dev/null; } \
+    | awk -F ' [|] ' '!o { if (!NF) { o = 1; next } n[$1] = 1; print; next } NF && !($1 in n) && !s[$0]++' | LC_ALL=C sort)
+  [ -z "$got" ] || printf '%s\n' "$got" > "$1.stabilised"
   [ $# -gt 1 ] || { [ -z "$got" ] || printf '%s\n' "$got"; return 0; }
   jq -r '.body // ""' <<<"$2" | tatagged CAUSE "$TACAUSE" /dev/stdin 2>/dev/null | jq -r '.[] | objects | .case | gsub("^[`\"'"'"']+|[`\"'"'"']+$"; "")' 2>/dev/null \
     | awk 'NF && !s[$0]++' | jq -Rrn --arg got "$got" '[$got | split("\n")[] | select(. != "") | split(" | ")[0]] as $g | [inputs] as $c
       | if $c == [] then (if $g == [] then "-" else empty end) else $c[] | select(IN($g[]; .) | not) end'
+}
+# Whether a fix or rebase session since a card's last check changed what the check reads, so cardreview() runs it
+# again: the worktree's tree, or, for an Optimize, Rewrite or Split card (no <pk>), the STABILISED lines of its replies
+# (stabilised()). Bug: a fix that corrected a STABILISED line alone, its tree unchanged, left the old line for review.
+rechecked() { # <worktree> <its tree at the last check> <pk: the Board fix issue's kind, or empty> <the STABILISED lines then>
+  [ "$(git -C "$1" write-tree)" != "$2" ] || { [ -z "$3" ] && [ "$(stabilised "$1")" != "$4" ]; }
 }
 # The target of a speed-up or Optimize card, for its build brief (card()): the file's CPU seconds on record (its median,
 # testspart()); its cases, as its runner names them in a
@@ -299,7 +312,7 @@ speedproof() { # <card> <worktree> <issue json> <test file> [<test file the chan
     else printf 'This change splits the test file %s, so no test must fail on main'"'"'s code. Run alone with the change, on a test slot, %s passed in %s CPU s summed (%s of %s is %s CPU s): %s.\n' "$f" "$l" "$after" \
       "$([ "$bw" = 'its median on record' ] && echo the median on record || echo the median of the recent runs)" "$f" "$before" "$(jq -r 'map("\(.file) \(.cpu) CPU s") | join(", ")' <<<"$cpus")"; fi
     # The review checks each cause a stabilise card's reply names against the code.
-    [ -n "$why" ] || [ "$v" != stabilise ] || { echo 'The build'"'"'s reply names these causes of the file'"'"'s failures, each with how the change removes it (case | cause | how). Check each against the code: a cause the change does not remove, or a case whose cause it does not name, is a finding.'
+    [ -n "$why" ] || [ "$v" != stabilise ] || { echo 'The card'"'"'s replies (its build'"'"'s, or a later fix'"'"'s that names the case again) name these causes of the file'"'"'s failures, each with how the change removes it (case | cause | how). Check each against the code: a cause the change does not remove, or a case whose cause it does not name, is a finding.'
       stabilised "$2" | sed 's/^/- /'; }
     [ -z "$rc" ] || { echo 'The end of that run'"'"'s output:'; echo '```'; printf '%s\n' "$tl"; echo '```'; }; } > "$2.unfixed"
   record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof "$(if [ -z "$why" ]; then echo ok; else echo fail; fi)" \

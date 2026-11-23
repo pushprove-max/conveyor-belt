@@ -133,14 +133,17 @@ $([ "$lines" = '[]' ] || jq -r '"\nTheir failure lines, each case run alone '"$M
 
 $(if [ -n "$pass" ]; then echo "Commits since the last pass (${pass:0:12}..${sha:0:12}):"; git log --format='- %h %s' "$pass..$sha" | head -n 50
   else echo "No pass of it is recorded here yet: main is at ${sha:0:12}."; fi)"
+  # The body goes to gh in a file, cut to stay under GitHub's limit (65536 characters). Bug: given as an argument, the body of a
+  # few hundred failing cases passed the system's limit on one argument, so gh could not start and nothing was filed.
+  [ ${#body} -le 65000 ] || body="${body:0:64900}"$'\n\n'"(The rest is cut: GitHub takes no longer text.)"
   if [ "$state" = OPEN ]; then
-    gh_write issue comment "$n" --body "$body" >/dev/null 2>&1 || { told=false; echo "conveyor: the whole test on main failed again; no comment could be added to #$n" >&2; }
+    printf '%s' "$body" | gh_write issue comment "$n" --body-file - >/dev/null 2>&1 || { told=false; echo "conveyor: the whole test on main failed again; no comment could be added to #$n" >&2; }
   elif [ -z "$n" ] || [ "$state" = CLOSED ]; then
     prio=$(jq -r '.[[1, length - 1] | min]' <<<"$PRIOS")
     title=$(jq -r --arg s "${sha:0:12}" --arg short "$short" 'if $short != "" then "The whole test on main " + $short + " at " + $s else
       "The whole test fails on main" + (if . == [] then " at " + $s
       else ": " + (.[:3] | join(", ")) + (if length > 3 then " and \(length - 3) more" else "" end) end) end | .[0:200]' <<<"$cases")
-    n=$(gh_write issue create --title "$title" --label "$TYPE" --label "$prio" --body "$body" 2>&1 | grep -oE '/issues/[0-9]+' | tail -n 1); n=${n##*/}
+    n=$(printf '%s' "$body" | gh_write issue create --title "$title" --label "$TYPE" --label "$prio" --body-file - 2>&1 | grep -oE '/issues/[0-9]+' | tail -n 1); n=${n##*/}
     [ -n "$n" ] || { told=false; echo "conveyor: the whole test on main failed; its issue could not be filed" >&2; }
   else
     told=false; echo "conveyor: the whole test on main failed again; the state of #$n could not be read" >&2
@@ -163,6 +166,9 @@ leftovers() { grep -Ev "$NOTFINDING" "$1" 2>/dev/null | sed -E 's/^[[:space:]]+/
 # <review file>: the findings followups() files, in its order: the review's finding lines (leftovers()), then the
 # findings of <worktree>.outside that are not among them, each once.
 tofile() { { leftovers "$1"; jq -r '.finding' "${1%.review}.outside" 2>/dev/null; } | awk 'NF && !seen[$0]++'; }
+# <review file>: why a last NO-GO with no finding line files nothing, with the reviewer's own line (its first UNPROVEN
+# line, else its VERDICT line, as afterreview() quotes one), cut at 200 characters.
+nofiling() { local w; w=$(grep -m1 '^UNPROVEN:' "$1" || grep -m1 '^VERDICT:' "$1"); echo "the last review said NO-GO and named no finding to file${w:+: ${w:0:200}}"; }
 decline() { # <card> <issue> <why>, the findings on stdin, one a line: each to the declined list (declined()), by code
   local f
   while IFS= read -r f; do
@@ -174,11 +180,11 @@ decline() { # <card> <issue> <why>, the findings on stdin, one a line: each to t
 # path is read as git would: "." parts and doubled slashes dropped, ".." taking the part before it, so another
 # spelling of a listed file is that file, and a longer name that starts with one (a.sh.bak) is not. A name may hold
 # spaces: every run of words between the finding's other separators is a candidate. A "*" is a separator too, so a
-# name in Markdown emphasis (**conveyor/lib/**) is that name.
+# name in Markdown emphasis (**conveyor/lib/**) is that name. The sentence marks a candidate ends in (".", "?", "!") are dropped.
 onpipeline() {
   jq -r --arg f "$1" 'def norm: reduce (split("/")[] | select(. != "" and . != ".")) as $s ([]; if $s == ".." and length > 0 and .[-1] != ".." then .[:-1] else . + [$s] end) | join("/");
     map(norm) as $e | [$f | scan("[^\\]\\[:,;()\u0027\"`<>*]+") | [splits("\\s+") | select(. != "")] as $w
-      | range(0; $w | length) as $i | range($i + 1; ($w | length) + 1) as $j | $w[$i:$j] | join(" ") | sub("\\.+$"; "") | norm]
+      | range(0; $w | length) as $i | range($i + 1; ($w | length) + 1) as $j | $w[$i:$j] | join(" ") | sub("[.?!]+$"; "") | norm]
     | if any(. as $p | $e | any(. as $x | $x == "" or $p == $x or ($p | startswith($x + "/")))) then "1" else "" end'
 }
 # <finding> <worktree>: prints 1 when the finding names a file, and each file it names is one of the worktree's staged
@@ -238,7 +244,7 @@ followups() { # <card> <issue json> <review file>
   [ "$n" != 0 ] || n=$(tcparent "$1")
   mapfile -t found < <(tofile "$3")
   rm -f "$fc" "$ofc"; [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" != false ] || nocard=1
-  [ ${#found[@]} != 0 ] || { echo "the last review said NO-GO and named no finding to file"; return 1; }
+  [ ${#found[@]} != 0 ] || { nofiling "$3"; return 1; }
   for f in "${found[@]}"; do
     # The finding's level, P0 to P3 (P1 when it names none), is the pack's priority at that place, or its last one.
     # A P3 finding in a pack of fewer than four priorities gets none of them: the engine reads an issue with none as P3

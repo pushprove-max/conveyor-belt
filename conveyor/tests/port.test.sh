@@ -424,6 +424,59 @@ t_resumeport3() {
   [ "$(jq -c '[.mode, .rounds]' <<<"$RESUMED")" = '["session",1]' ] || fail "the reviews before the port of c1-7, or the port's own review, were counted as the retried card's rounds: $RESUMED"
   [ "$(cat "$T/$CASE/after")" = "fix " ] || fail "the retried card's first NO-GO (review 1, 1 round carried) did not get a fix round: $(cat "$T/$CASE/after")"
 }
+# Card c1-7 of #7 after an automatic port (its rebase line marks it): the port's own review gave a NO-GO, its fix
+# round 1 was kept, and the review after that fix was recorded with <result>; with <told>, that review left the rounds
+# folder marked answered (told, cardreview()). Card c1-7 blocked and is retried; the retried card's refix (the round
+# its first review is told, rereview()) is in $T/$CASE/refix.
+portround() { # <result> [<told>]
+  local r
+  resumesetup 7
+  r=$(kline c1-7 7 review NO-GO)
+  portkept 7 c1-7 'review 2 ended without one clear verdict' 'echo two >> a.txt' "$(printf '%s\n' '[P2] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO')" \
+    "$(printf '%s\n' "$r" "$(kline c1-7 7 rebase ok '{"port": true}')" "$r" "$(kline c1-7 7 review "$1")")"
+  mkdir -p "$K/c1-7.rounds" && : > "$K/c1-7.rounds/1.diff" && echo '{"round":1,"id":"E1","line":"[P2] a.txt:1 wrong word"}' > "$K/c1-7.rounds/findings.jsonl" \
+    && { [ -z "${2:-}" ] || : > "$K/c1-7.rounds/told"; } || fail "the kept fix round of c1-7 could not be made"
+  loop retry 7 >/dev/null || fail "retry of #7 exited non-zero"
+  resumed 7 'echo "${refix:-}" > "$T/$CASE/refix"'
+}
+# Bug it catches: after an automatic port, the port's own review (pass 1 there, landconflict()) gave a NO-GO and its
+# fix round 1 was kept; the review after that fix ended with no verdict. resumeplan() counted the reviews only after
+# the port's own, so it found no review the round followed, and the retried card's first review was not told the
+# round's findings and diff (refix, rereview()).
+t_resumeportrefix() {
+  portround none
+  [ "$(jq -c '[.mode, .rounds]' <<<"$RESUMED") $(cat "$T/$CASE/refix")" = '["session",1] 1' ] \
+    || fail "the retried card's first review after the port's fix round 1 was not told that round (refix $(cat "$T/$CASE/refix")): $RESUMED"
+}
+# Bug it catches: a round a review with a verdict has answered (its rounds folder marked told, cardreview()) was told
+# again to the retried card's first review, as if no review had read it: that review was asked about findings a NO-GO
+# already answered.
+t_resumetold() {
+  portround NO-GO told
+  [ -z "$(cat "$T/$CASE/refix")" ] || fail "the retried card's first review was told fix round $(cat "$T/$CASE/refix"), which a review with a verdict had answered: $RESUMED"
+}
+# Bug it catches: the second retry after a port. c1-7: the port, then both review attempts after it ended with no
+# verdict, so reviewed() blocked with no review line. c2-7, its retry, carried 0 rounds, so its first NO-GO saved fix
+# round 1, and its next review blocked again with no line. resumeplan() counted the record lines after the port's own
+# review to find the round, found none, and the third card's first review was not told round 1's findings and diff.
+t_resumeportrefix2() {
+  local b
+  resumesetup 7
+  portkept 7 c1-7 'review 1: the review session failed' 'echo two >> a.txt' "$(printf '%s\n' '[P2] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO')" \
+    "$(printf '%s\n' "$(kline c1-7 7 review NO-GO)" "$(kline c1-7 7 rebase ok '{"port": true}')")"
+  loop retry 7 >/dev/null || fail "the first retry of #7 exited non-zero"
+  b=$(printf '%s\n' "$(kline c2-7 7 worktree ok '{"reason": "resumed from the kept patch of card c1-7: one session, then review"}')" "$(kline c2-7 7 review NO-GO)")
+  portkept 7 c2-7 'review 2: the review session failed' 'echo three >> a.txt' "$(printf '%s\n' '[P2] a.txt:2 other word' 'USER-VISIBLE: no' 'VERDICT: NO-GO')" "$b"
+  # Its worktree line names the card it resumed (the chain resumeplan() reads): portkept's plain one goes.
+  jq -c 'select(.card != "c2-7" or .step != "worktree" or .reason != "")' "$ST/cards.jsonl" > "$ST/cards.new" && mv -f "$ST/cards.new" "$ST/cards.jsonl" \
+    || fail "the worktree line of c2-7 could not be made"
+  mkdir -p "$K/c2-7.rounds" && : > "$K/c2-7.rounds/1.diff" && echo '{"round":1,"id":"E1","line":"[P2] a.txt:2 other word"}' > "$K/c2-7.rounds/findings.jsonl" \
+    || fail "the kept fix round of c2-7 could not be made"
+  loop retry 7 >/dev/null || fail "the second retry of #7 exited non-zero"
+  resumed 7 'echo "${refix:-}" > "$T/$CASE/refix"'
+  [ "$(jq -r .from <<<"$RESUMED") $(cat "$T/$CASE/refix")" = 'c2-7 1' ] \
+    || fail "the third card's first review after c2-7's fix round 1, with no review line after the port, was not told that round (refix $(cat "$T/$CASE/refix")): $RESUMED"
+}
 
 # A failed step (here the review) with a patch that still applies: the next card starts from the patch, one session
 # (resumeplan(): session).
@@ -494,4 +547,21 @@ t_portyes() {
     || fail "a port whose visible change goes beyond its parent's yes does not stop for the owner: $(cat "$T/$CASE/gate")"
   [ "$(jq -sc '.[1]' "$T/$CASE/gate")" = '{"review":"earlier","rc":"0","err":"","yesfrom":"7"}' ] \
     || fail "the earlier loop's review, the one that must not stand for the port's, does not land on the yes of #7: $(cat "$T/$CASE/gate")"
+}
+
+# Bug it catches: a card stopped for the owner's yes whose issue was then rewritten to ask for another change (its
+# section of what customers or staff will see changed), and whose kept patch no longer applies to main, was ported:
+# its one session was told to keep what that card changed, so the refused change came back. Its next card is built
+# from nothing (resumeplan(), keptway()), as when the patch still applies (t_visiblerewritten).
+t_resumeportrewritten() {
+  resumesetup 8
+  portkept 8 c1-8 "visible to customers or staff: needs Dana's yes: guests see a new Pay button" 'echo two >> a.txt' "$YES"
+  jq -cn '{body: "Add (a).\n\n## What customers or staff will see\nGuests see a new Pay button."}' > "$K/c1-8.body"
+  issue 8 2026-01-01 | jq -c '[.body = "Do (b) instead.\n\n## What customers or staff will see\nNothing visible changes."]' > "$STUB/issues.json"
+  echo ONE > "$R/a.txt" && git -C "$R" commit -qam other || fail "main could not move"
+  loop retry 8 >/dev/null || fail "retry of #8 exited non-zero"
+  resumed 8
+  [ "$(jq -c '[.rc, .mode, .fin, .staged, .beside]' <<<"$RESUMED")" = '[0,"","",[],["review"]]' ] \
+    && [ "$(jq -r .note <<<"$RESUMED")" = "the issue's section of what customers or staff will see changed since the review of the kept patch of card c1-8: built from nothing" ] \
+    || fail "the kept patch of a rewritten issue that no longer applies was ported, not built from nothing: $RESUMED"
 }

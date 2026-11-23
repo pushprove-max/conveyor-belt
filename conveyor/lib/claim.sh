@@ -580,7 +580,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
 # change that only re-indents is another change (Python and YAML read indent), and the line numbers do not.
 cardpatch() { local p r; p=$(git -C "$1" diff --cached --binary --no-renames -U0 HEAD -- "${@:2}" 2>/dev/null | diffid 2>/dev/null); r=$?; [ -z "$p" ] || printf '%s\n' "$p"; return $r; } # <worktree> [pathspec...]
 tested() { [ ! -e "$1.ready" ] || { jq -c --arg t "$(git -C "$1" write-tree)" --arg h "$(git -C "$1" rev-parse HEAD)" --arg p "$(cardpatch "$1")" --argjson u "$(jq -ce objects "$1.passed" 2>/dev/null || echo null)" \
-  'del(.units, .cases) + {tested: true, tree: $t, head: $h, patch: $p, since: now} + if $u then $u | {units, cases} else {} end' "$1.ready" > "$1.ready.new" && mv -f "$1.ready.new" "$1.ready"; } || rm -f "$1.ready"; } # <worktree>
+  'del(.units, .cases, .sel) + {tested: true, tree: $t, head: $h, patch: $p, since: now} + if $u then $u | {units, cases} else {} end' "$1.ready" > "$1.ready.new" && mv -f "$1.ready.new" "$1.ready"; } || rm -f "$1.ready"; } # <worktree>
 # Whether they passed on the change it holds now: the same staged change, on whatever commit (owner, 2026-11-13: a
 # change that passed its tests and still applies to a main that moved is not tested again; each landing made every
 # other card run its tests anew, and one card landed per test run), save for sharedtests() below.
@@ -608,16 +608,28 @@ readysince() { # <worktree>
 # ran on neither change with the other: two cards that each passed alone can fail together on main (#334), so they run
 # again on the combined code before the card lands (card(), once for its change: #447; rebatch()). Lists that cannot be made count as shared, the
 # message saying so: the tests run again. Given <tip>, main's change is the one to that commit, not to HEAD (stalepass()).
-sharedtests() { # <worktree> <the commit its tests ran on> [tip]
-  local h a b r
+# Given <the worktree at tip> too (a batch's, holding tip: stalepass(), rebatch()), both changes are read with the test
+# map and test files there, not the card's own worktree's, still on its old base: bug, a map main changed during the
+# run selected no test of the card's. Of a batch run's passes (.bpass), the card's own (by) count, the card being the
+# worktree's name: bug, a pass another card of the batch selected counted as the card's (card()'s call too). A worktree lent to its batch (<worktree>.lent) holds the batch's changes:
+# its card's own is <worktree>.bpatch on that commit, as bpid() reads it. Given own too, the change's are its testsel()
+# alone, not the files its runs passed: a batch run's pass the run's combined change selected can be given to a card
+# whose change does not select it (batchpass()), so it is no proof the card shares the file (markshared()).
+sharedtests() { # <worktree> <the commit its tests ran on> [tip [<the worktree at tip> [own]]]
+  local h a b r='' w=${4:-$1} by=${1##*/} i=''
   h=${3:-$(git -C "$1" rev-parse HEAD 2>/dev/null)} && [ -n "$h" ] && [ -n "$2" ] && [ "$2" != "$h" ] || return 1
-  a=$(testsel "$1" narrow) && b=$(testsel "$1" narrow "$2" "$h") && r=$(git -C "$1" rev-list "$2..$h" 2>/dev/null) \
+  if [ -n "${4:-}" ] && [ -s "$1.lent" ]; then
+    a=$(<"$1.lent") && i=$(mktemp) && rm -f "$i" && GIT_INDEX_FILE=$i git -C "$1" read-tree "$a" 2>/dev/null \
+      && GIT_INDEX_FILE=$i git -C "$1" apply --cached < "$1.bpatch" 2>/dev/null && r=$(GIT_INDEX_FILE=$i git -C "$1" write-tree 2>/dev/null); rm -f "${i:-}"
+    [ -n "$r" ] && a=$(testsel "$4" narrow "$a" "$r")
+  elif [ -n "${4:-}" ]; then a=$(git -C "$1" rev-parse HEAD 2>/dev/null) && r=$(git -C "$1" write-tree 2>/dev/null) && a=$(testsel "$4" narrow "$a" "$r")
+  else a=$(testsel "$1" narrow); fi && b=$(testsel "$w" narrow "$2" "$h") && r=$(git -C "$w" rev-list "$2..$h" 2>/dev/null) \
     && b+=$'\n'$(stdb ask lines cards 2>/dev/null | jq -rRn --arg r "$r" '($r | split("\n")) as $s
       | reduce (inputs | fromjson? | objects) as $l ({l: [], t: []}; if $l.step == "landed" and ($l.sha | IN($s[])) then .l += [$l.card]
           elif $l.step == "test" then .t += [$l] else . end)
       | .l as $l | .t[] | select(.card | IN($l[])) | (.times, .clocks, .why, .ranCases) | objects | keys[]') \
     || { echo "(the test files of the change or of main's could not be listed)"; return 0; }
-  comm -12 <({ sed 1d <<<"$a"; cat "$1.ready" "$1.bpass" 2>/dev/null | jq -r '.units[]? | strings | split("\t")[0]' 2>/dev/null; } | sort -u) \
+  comm -12 <({ sed 1d <<<"$a"; [ "${5:-}" = own ] || cat "$1.ready" "$1.bpass" 2>/dev/null | jq -r --arg c "$by" '(if $c != "" and has("by") then .by[$c] else .units end)[]? | strings | split("\t")[0]' 2>/dev/null; } | sort -u) \
     <(sed 1d <<<"$b" | grep . | sort -u) | grep .
 }
 # The cards whose landed line names a commit main made from <the commit its tests ran on> to the worktree's HEAD, in
@@ -646,14 +658,17 @@ unshare() { # <worktree> <sharedtests() of it>
 # turnq()): each loses its passes (units and cases of <worktree>.ready, and .bpass) when main's change since touches a
 # test file of its own (sharedtests()). Else batchkeep() would keep them, and the batch's run would not run those files
 # on main as it is, as the card's own run again would have (#334); as there, not when they ran again once for the change
-# it holds (<worktree>.sharedran, #447). <card> itself ran them again before its batch formed (card()).
+# it holds (<worktree>.sharedran, #447). <card> itself ran them again before its batch formed (card()). The units of
+# a pass it loses stay as what its change selects (sel), so a batch run that passes gives each card its own (batchpass(),
+# rebatch() too). Bug: with every card's passes gone, that run gave every card every file, and a later change to one
+# card's test file counted as shared with each other card.
 stalepass() { # <card> <worktree> <the batch's cards>
   local m b t
   t=$(git -C "$2" rev-parse HEAD 2>/dev/null) || return 0
   for m in "${@:3}"; do
-    [ "$m" != "$1" ] && b=$(sed -n 's/^base\t//p' "$CARDS/$m.rerun" 2>/dev/null) && sharedtests "$CARDS/$m" "$b" "$t" >/dev/null \
+    [ "$m" != "$1" ] && b=$(sed -n 's/^base\t//p' "$CARDS/$m.rerun" 2>/dev/null) && sharedtests "$CARDS/$m" "$b" "$t" "$2" >/dev/null \
       && [ "$(cat "$CARDS/$m.sharedran" 2>/dev/null)" != "$(cardpatch "$CARDS/$m")" ] || continue
-    rm -f "$CARDS/$m.bpass"; jq -c 'del(.units, .cases)' "$CARDS/$m.ready" > "$CARDS/$m.ready.new" 2>/dev/null && mv -f "$CARDS/$m.ready.new" "$CARDS/$m.ready" || rm -f "$CARDS/$m.ready.new"
+    rm -f "$CARDS/$m.bpass"; jq -c '.sel = (.units // .sel) | del(.units, .cases)' "$CARDS/$m.ready" > "$CARDS/$m.ready.new" 2>/dev/null && mv -f "$CARDS/$m.ready.new" "$CARDS/$m.ready" || rm -f "$CARDS/$m.ready.new"
   done
 }
 gather() { # <card> <worktree> <the card's pid>; under the lock: prints the batch's cards in order, one a line (nothing when it takes none), each other one marked taken (<worktree>.batch); 2 when another card has the landing turn
@@ -804,8 +819,10 @@ batchlist() { # <worktree> <batchkeep() of the run>
 }
 # A batch run that passed (or had nothing to run): each card of it keeps that run's passes, the cards with the
 # patch-id of each's change, for a batch formed again (batchkeep()), and which units each card selects (by): a unit
-# its own passes (<worktree>.ready, still on its change) have, else, when none has it, each card with no own passes,
-# else every card, as the run's combined change selected it.
+# its own passes (<worktree>.ready, still on its change; those it lost, sel, stalepass()) have, else, when none has it,
+# each card whose own have a unit of its file, else each card with no own passes, else every card, as the run's
+# combined change selected it. Bug: a case main added to one card's test file during the run was in no card's own
+# cases, so it went to every card, and a later change to that file counted as shared with each.
 batchpass() { # <card> <worktree> <units json> <cases> <the run's cards>
   local c=$1 wt=$2 u=$3 n=$4 m w x r a=()
   shift 4
@@ -817,9 +834,10 @@ batchpass() { # <card> <worktree> <units json> <cases> <the run's cards>
       def file: split("\t")[0];
       def meets($a; $b): ($a | file) == ($b | file) and ($a == $b or ($a | contains("\t") | not) or ($b | contains("\t") | not));
       [$ARGS.positional as $a | range(0; $a | length; 3) | {card: $a[.], patch: $a[. + 1], ready: ([$a[. + 2] | try fromjson catch null | objects] | first)}]
-      | [.[] | . as $m | {card, own: (.ready | if (type) == "object" and .tested == true and $m.patch != "" and .patch == $m.patch and (.units | type) == "array" then .units else null end)}] as $ms
-      | [$u[] | . as $x | [$ms[] | select(any(.own[]?; meets(.; $x))) | .card] as $o
-         | (if $o != [] then $o else [$ms[] | select(.own == null) | .card] | if . != [] then . else [$ms[].card] end end)[] | {card: ., unit: $x}] as $e
+      | [.[] | . as $m | {card, own: (.ready | if (type) == "object" and .tested == true and $m.patch != "" and .patch == $m.patch then
+          [.units, .sel | arrays] | first else null end)}] as $ms
+      | [$u[] | . as $x | first([$ms[] | select(any(.own[]?; meets(.; $x))) | .card], [$ms[] | select(any(.own[]?; file == ($x | file))) | .card],
+           [$ms[] | select(.own == null) | .card], [$ms[].card] | select(. != []))[] | {card: ., unit: $x}] as $e
       | {cards: (map({(.card): .patch}) | add), units: $u, cases: $n,
          by: (reduce $ms[].card as $c ({}; .[$c] = [$e[] | select(.card == $c) | .unit]))}' --args "${a[@]}") || return 0
   for m in "$@"; do w=$CARDS/$m; [ "$m" != "$c" ] || w=$wt; printf '%s\n' "$x" > "$w.bpass"; done
@@ -928,17 +946,34 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
 # main as it is now with its change, mates the cards in it, and it returns 3 for card() to run the batch there
 # (batch() splits it and sends the card that breaks it to its fix); else the batch is tested again, as when a card of
 # it changed. So too when the cards landed during the run touch a test file the batch's change touches too
-# (sharedtests()): it returns 3 as for a red run, or 1 when the card is alone in it or its change no longer applies,
-# and its cards' passes are dropped, so the run again runs their tests. A card whose change no longer applies there leaves
-# the batch and is fitted afterwards, as any waiting card is; the others land. When that is the card itself it is apart
+# (sharedtests()), save those of a card whose shared files ran again once for the change it holds (<worktree>.sharedran):
+# it returns 4 (as 3 for a red run), or 1 when the card is alone in it or its change no longer applies, and its cards'
+# passes are dropped, so the run again runs their tests. A card whose change no longer applies there leaves the batch
+# and is fitted afterwards, as any waiting card is; the others land. When that is the card itself it is apart
 # (sets apart), as in batch(). Sets mates to the cards that land. The card among them, its worktree is left on main as
 # it is now with its change, where land() finds the batch's run. Else it is left there with no change, for the others'
 # landing, and back names the commit the card's change goes back onto after it (card()). Returns 1 when the batch is
 # to be tested again, the worktree as it was; 2 when the card's change could not be put back in its worktree; 3 for a
-# red run (above).
+# red run (above); 4 when it is for the shared test files (its passes dropped), run as 3 is (card() marks .sharedran then,
+# for the cards of sharers alone: those whose own change shares a test file with main's change, sharedtests()).
+# markshared(): that run passed, so it is the one run again of their shared files (<worktree>.sharedran, card()) for
+# each card of sharers that passed in it, by its own change's patch-id: the card's, while its worktree holds the batch
+# (.lent), bpid()'s. The cards that passed are batch()'s mates, and the card unless it was apart; and each of its
+# shared files (sharedown, the same place in it as the card in sharers) is a file of the units that run passed with it
+# (<worktree>.bpass). Bugs: a card the run's split found red was marked from the card's pass, and its next run again
+# was skipped; a run that ran only the test files a card of it edits (testrun.sh listcmd()) marked another card whose
+# shared file it never ran.
+markshared() { # <card> <worktree>
+  local i x w f ran
+  for i in "${!sharers[@]}"; do x=${sharers[i]}; w=$CARDS/$x; [ "$x" != "$1" ] || w=$2
+    if [ "$x" = "$1" ]; then [ -z "$apart" ] || continue; elif [[ " ${mates[*]} " != *" $x "* ]]; then continue; fi
+    ran=$(jq -r '.units[]? | strings | split("\t")[0]' "$w.bpass" 2>/dev/null) || continue
+    while IFS= read -r f; do grep -qxF -- "$f" <<<"$ran" || continue 2; done < <(grep . <<<"${sharedown[i]:-}" || echo '(none)')
+    if [ "$x" = "$1" ] && [ -s "$2.lent" ]; then bpid "$2"; else cardpatch "$w"; fi > "$w.sharedran" || rm -f "$w.sharedran"; done
+}
 rebatch() { # <card> <worktree>; card()'s mates is the batch
-  local c=$1 wt=$2 m old new k=() left=() gone x w
-  back=''
+  local c=$1 wt=$2 m old new k=() left=() gone x w s
+  back=''; sharers=(); sharedown=()
   old=$(git -C "$wt" rev-parse HEAD 2>/dev/null) && new=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null) || return 1
   [ "$old" != "$new" ] || return 0
   for m in "${mates[@]}"; do
@@ -972,16 +1007,32 @@ rebatch() { # <card> <worktree>; card()'s mates is the batch
       fi
       # Main moved again during the checks: the batch is fitted onto main as it is now and they run there, not its tests.
       m=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null) && [ "$m" != "$new" ] && { new=$m; continue; }
-      # The cards landed during the run touch a test file the batch touches too (sharedtests()): it is tested again,
-      # keeping none of its cards' passes (<worktree>.ready's units, .bpass), which batchkeep() would else reuse.
-      if m=$(sharedtests "$wt" "$old"); then
+      # The cards landed during the run touch a test file a card of the batch's own change selects (sharedtests() own): it
+      # is tested again, keeping none of its cards' passes (<worktree>.ready's units, .bpass), which batchkeep() would else
+      # reuse. Each card, the card too, is asked alone, on its own change (the card's: bpid()), before its passes go; not
+      # one whose shared files ran again once for the change it holds (<worktree>.sharedran, card()): with none left that
+      # shares one, the batch lands on that run, as card() lets a card alone. Each card that shares one is a sharer, those
+      # files in sharedown: the run again, when it runs them, is its one run of them (markshared()). Bugs: main moved after the run again, and the batch ran a third
+      # time; the card's mark let another card's shared file land with no run again; with the card unmarked the batch
+      # was asked whole, so another card's mark did not count and it ran a third time; every card was marked, so one whose
+      # files main had not touched yet had used up its run again, and main's next change to a file it shares landed unrun;
+      # a card that shared a file through a batch pass alone (a test main linked to another card's change during the
+      # run) was a sharer, and used up its run again; such a pass ran the batch again with no sharer, so, the card whose
+      # change selects the file marked, each later move of main onto that file ran it again. Only a sharer's files count.
+      m=''
+      for x in "${k[@]}"; do w=$CARDS/$x; [ "$x" != "$c" ] || w=$wt
+        { [ -s "$w.sharedran" ] && [ "$(<"$w.sharedran")" = "$(if [ "$x" = "$c" ]; then bpid "$wt"; else cardpatch "$w"; fi)" ]; } \
+          || ! s=$(sharedtests "$w" "$old" "$new" "$wt" own) || { m+=$s$'\n'; sharers+=("$x"); sharedown+=("$s"); }
+      done
+      m=$(sort -u <<<"$m" | grep .)
+      if [ -n "$m" ]; then
         for x in "${mates[@]}"; do w=$CARDS/$x; [ "$x" != "$c" ] || w=$wt; rm -f "$w.bpass"
-          [ ! -e "$w.ready" ] || { jq -c 'del(.units, .cases)' "$w.ready" > "$w.ready.new" && mv -f "$w.ready.new" "$w.ready"; } || rm -f "$w.ready"; done
+          [ ! -e "$w.ready" ] || { jq -c '.sel = (.units // .sel) | del(.units, .cases)' "$w.ready" > "$w.ready.new" && mv -f "$w.ready.new" "$w.ready"; } || rm -f "$w.ready"; done
         m="conveyor: card $c: cards landed during its batch's run touch its test files too, so the batch is tested again: $(paste -sd ' ' <<<"$m")"
         if [ -z "$gone" ] && [ ${#k[@]} -gt 1 ]; then
           git -C "$wt" reset -q --hard 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null || { asitwas || return 2; return 1; }
           echo "$m on main as it is now"; [ ${#left[@]} = 0 ] || unbatch "${left[@]}"
-          mates=("${k[@]}"); return 3
+          mates=("${k[@]}"); return 4
         fi
         asitwas || return 2; echo "$m"; return 1
       fi

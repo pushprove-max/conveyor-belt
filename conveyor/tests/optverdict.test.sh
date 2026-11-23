@@ -95,6 +95,39 @@ t_optstable() {
     || fail "the build's brief does not give the recent figure, keep the other test files (#613) or ask for the STABILISED lines: $(cat "$T/$CASE/run.out")"
 }
 
+# Bug it catches: the check again after a fix round (cardreview()) read the fix's reply, which replaces the build's
+# in <worktree>.out, so a stabilise card whose fix named no cause was blocked. The build's STABILISED line still holds,
+# until a later fix names its case again.
+t_optstablefix() {
+  ovrun stabilise 'echo steady > f.test.sh' 22 "$FIXED"
+  jq -cn '{type: "result", result: "Fixed E1."}' > "$FXWT.out"; (cd "$FXWT" && echo steadier > f.test.sh) || fail "the fix could not change the file"
+  fx_in 'optproof c7 "$FXWT" "$ISSUE" f.test.sh'
+  [ "$RC" = 0 ] && grep -qxF -- '- relstop | a fixed sleep raced the stop | the case now waits for the exit file the stop writes' "$FXWT.unfixed" \
+    || fail "a stabilise card's check after a fix lost the build's cause: exit $RC, $(cat "$FXWT.unfixed")"
+  # Bug it catches: a second fix that names a new cause for relstop left the build's line too, so the review was asked
+  # to check a cause the code no longer has. The fix's line alone is shown.
+  jq -cn '{type: "result", result: "Fixed E2.\nSTABILISED: relstop | a fixed sleep raced the stop | the case now waits on flock"}' > "$FXWT.out"
+  fx_in 'optproof c7 "$FXWT" "$ISSUE" f.test.sh'
+  [ "$RC" = 0 ] && [ "$(grep -c '^- relstop |' "$FXWT.unfixed")" = 1 ] && grep -qxF -- '- relstop | a fixed sleep raced the stop | the case now waits on flock' "$FXWT.unfixed" \
+    || fail "a fix's new cause for relstop did not replace the build's: exit $RC, $(cat "$FXWT.unfixed")"
+}
+
+# Bug it catches: before a later review, a stabilise card's check ran again only when its tree changed (cardreview()),
+# so a fix that corrected its STABILISED line alone, the tree as it was, left the build's line in the review's brief.
+# rechecked() is asked as cardreview() asks it, pt and ps as cardbuild() leaves them: not again for a fix whose reply
+# names no line (exit 4), again for one that names a new cause (exit 5), and never on reply lines for a pk card (exit 6).
+# Bug it catches too: a fix that repeated one of two lines as it was put it first, and that order read as a new line (exit 7).
+t_optstablerecheck() {
+  ovrun stabilise 'echo steady > f.test.sh' 22 "$FIXED"
+  fx_in 'pt=$(git -C "$FXWT" add -A && git -C "$FXWT" write-tree) && ps=$(stabilised "$FXWT") || exit 3
+    jq -cn "{type: \"result\", result: \"Fixed E1.\"}" > "$FXWT.out"; ! rechecked "$FXWT" "$pt" "" "$ps" || exit 4
+    jq -cn "{type: \"result\", result: \"Fixed E2.\nSTABILISED: relstop | a fixed sleep raced the stop | the case now waits on flock\"}" > "$FXWT.out"
+    ! rechecked "$FXWT" "$pt" WAITFIX "$ps" || exit 6; rechecked "$FXWT" "$pt" "" "$ps" || exit 5
+    jq -cn "{type: \"result\", result: \"Fixed E3.\nSTABILISED: zstop | a lock raced | it waits\nSTABILISED: relstop | a fixed sleep raced the stop | the case now waits on flock\"}" > "$FXWT.out"; ps=$(stabilised "$FXWT")
+    jq -cn "{type: \"result\", result: \"Fixed E4.\nSTABILISED: zstop | a lock raced | it waits\"}" > "$FXWT.out"; ! rechecked "$FXWT" "$pt" "" "$ps" || exit 7'
+  [ "$RC" = 0 ] || fail "a fix that changed only a stabilise card's STABILISED line was not checked again before review, or the check ran when nothing it reads changed: exit $RC, $(cat "$T/$CASE/run.out")"
+}
+
 # D3. Bug it catches: a "stabilise" card lands with no account of why its flaky case failed, so nothing shows that the
 # change removed the cause. Its reply names none for relstop: it is blocked before the file runs, and the reason says so.
 t_optnocause() {

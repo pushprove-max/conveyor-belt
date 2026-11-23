@@ -613,7 +613,13 @@
     const m = /^the fix for (\[P[0-3]\][\s\S]*?)\s+did not hold after \d+ rounds?$/.exec(full);
     if (!m) return null;
     const rows = h('ol', 'output-findings');
-    m[1].split(/\n(?=\[P[0-3]\])/).slice(0, brief ? 1 : Infinity).forEach((t) => {
+    // A repeat's block names a new P0 of its review first, joined to the repeated finding, a P0 or P1, by "; " (card.sh
+    // cardfix()): the recorded reason is one line, so that join, like a new line, starts a finding's row. Only a reason
+    // that starts with the P0 has it, and only its first "; [P0]" or "; [P1]" is it: the findings' texts are as the
+    // review wrote them. Bugs: a proof that quoted "; [P2]" drew as a second finding, and one that quoted "; [P1]" after
+    // the join as a third.
+    const join = m[1].startsWith('[P0]') ? m[1].search(/; \[P[01]\]/) : -1;
+    (join < 0 ? m[1] : `${m[1].slice(0, join)}\n${m[1].slice(join + 2)}`).split(/\n(?=\[P[0-3]\])/).slice(0, brief ? 1 : Infinity).forEach((t) => {
       const f = /^\[(P[0-3])\]\s*(?:\[(?:E\d+|cleanup)\]\s*)*(?:(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S))?([\s\S]*)$/.exec(t.trim());
       if (!f) return;
       const { at: cut, label } = proofAt(f[3]), claim = (cut < 0 ? f[3] : f[3].slice(0, cut)).trim(), proof = cut < 0 ? '' : f[3].slice(cut + label.length).trim();

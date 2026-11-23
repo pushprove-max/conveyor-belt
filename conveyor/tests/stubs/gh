@@ -42,14 +42,18 @@ case $2 in
   # network check, which fails with $STUB/signed-out, and times out (as a GitHub that does not answer) with $STUB/unreached.
   token) [ ! -e "$STUB/token-timeout" ] || exit 124; [ ! -e "$STUB/token-empty" ] || exit 0; [ ! -e "$STUB/signed-out" ] || { echo 'no oauth token found for github.com' >&2; exit 1; }; echo gho_stub ;;
   status) [ ! -f "$STUB/status-cmd" ] || . "$STUB/status-cmd"; [ ! -e "$STUB/unreached" ] || exit 124; [ ! -e "$STUB/signed-out" ] ;;
-  comment) [ ! -f "$STUB/comment-cmd" ] || . "$STUB/comment-cmd"; shift 2; printf '%s\n' "$*" >> "$STUB/comments" ;;
+  # A comment's --body-file <file> is noted as --body <its text>, as a comment given --body is.
+  comment) [ ! -f "$STUB/comment-cmd" ] || . "$STUB/comment-cmd"; shift 2; a=()
+    while [ $# -gt 0 ]; do if [ "$1" = --body-file ] && [ $# -gt 1 ]; then a+=(--body "$(cat -- "$2")"); shift 2; else a+=("$1"); shift; fi; done
+    printf '%s\n' "${a[*]}" >> "$STUB/comments" ;;
   close) echo "$3" >> "$STUB/closed"; shift 3; printf '%s\n' "$*" >> "$STUB/close-comments" ;;
   reopen) echo "$3" >> "$STUB/reopened"; shift 3; printf '%s\n' "$*" >> "$STUB/reopen-comments" ;;
   # gh issue edit <n> --remove-label <label>: the label is taken off the issue's line in $STUB/filed (any other edit is ignored).
   edit) n=$3; shift 3; while [ $# -gt 0 ]; do [ "$1" != --remove-label ] || { jq -c --argjson n "$n" --arg l "$2" 'if .number == $n then .labels |= map(select(.name != $l)) else . end' "$STUB/filed" > "$STUB/filed.new" && mv -f "$STUB/filed.new" "$STUB/filed"; }; shift; done ;;
   create) shift 2; n=$((100101 + $(cat "$STUB/filed" 2>/dev/null | wc -l))); l=(); m=
     [ ! -f "$STUB/create-cmd" ] || . "$STUB/create-cmd"
-    while [ $# -gt 0 ]; do case $1 in --title) t=$2 ;; --body) b=$2 ;; --label) l+=("$2") ;; --milestone) m=$2 ;; esac; shift 2; done
+    # The option that gave the body (--body or --body-file) is noted in $STUB/body-from, a line per issue filed.
+    while [ $# -gt 0 ]; do case $1 in --title) t=$2 ;; --body) b=$2; echo "$1" >> "$STUB/body-from" ;; --body-file) b=$(cat -- "$2"); echo "$1" >> "$STUB/body-from" ;; --label) l+=("$2") ;; --milestone) m=$2 ;; esac; shift 2; done
     jq -cn --argjson n "$n" --arg t "$t" --arg b "$b" --arg m "$m" '{number:$n,title:$t,body:$b,milestone:(if $m == "" then null else {title:$m} end),
       createdAt:"2026-12-01",labels:($ARGS.positional|map({name:.}))}' --args "${l[@]}" >> "$STUB/filed"
     echo "https://github.com/o/r/issues/$n" ;;

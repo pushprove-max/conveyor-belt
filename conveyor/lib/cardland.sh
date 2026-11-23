@@ -245,11 +245,12 @@ cardtest() {
   fi
   # Main moved during its batch's run: the batch lands on that run when it still stands there (rebatch()). A
   # product check that fails on its change there is a red run: the batch is run again there, as batch() does one.
+  # That run (4: for the shared files, its passes dropped), passed, is their run again for each card that shares one and passed in it (markshared(); bug: a third run; a red run's, 3, can reuse every pass).
   back=''
   if [ ${#mates[@]} != 0 ]; then
     rebatch "$c" "$wt"; t=$?
     [ $t != 2 ] || { block "$c" "$n" "$wt" "the engine fitted the batch of the card onto main, but it could not put the change of the card back in its worktree. Nothing landed. The change is in the patch $wt.bpatch"; return; }
-    [ $t != 3 ] || { ran=1; batch "$c" "$wt" "${mates[@]}"; rc=$?; }
+    [ $t != 3 ] && [ $t != 4 ] || { ran=1; batch "$c" "$wt" "${mates[@]}"; rc=$?; [ $rc != 0 ] || [ $t != 4 ] || markshared "$c" "$wt"; }
   fi
   sec=$((SECONDS - sec))
   # It broke its batch, or its patch did not apply on the cards before it there: the cards that passed land without it,
@@ -408,7 +409,7 @@ cardland() {
       [ -n "$last" ] || { isfu=1; [ "$(fudepth "$issue")" -lt "$MAX_DEPTH" ] 2>/dev/null && isfu=''; }
       if [ -n "$isfu" ]; then
         dec=$(tofile "$wt.review"); left='{"leftover":true,"followups":[]}'; [ -n "$last" ] || left='{"followups":[]}'
-        [ -n "$dec" ] || { block "$c" "$n" "$wt" "the last review said NO-GO and named no finding to file"; return; }
+        [ -n "$dec" ] || { block "$c" "$n" "$wt" "$(nofiling "$wt.review")"; return; }
       else
         began "$c" "$n" file
         ups=$(followups "$c" "$issue" "$wt.review") || { block "$c" "$n" "$wt" "$ups"; return; }

@@ -96,6 +96,30 @@ t_nogo() {
   [ ! -e "$STUB/filed" ] && [ "$(st 'select(.step == "landed") | has("leftover") or has("followups")')" = false ] || fail "a card that landed on a GO filed follow-ups or is recorded as leftover"
 }
 
+# Bug it catches: a last review whose NO-GO holds an UNPROVEN line and no finding (it ends the loop before its
+# nofinding check, afterreview()) blocked the card with no word of what the reviewer said. The block reason the filing
+# gives (followups(); cardland() gives the same one for a follow-up at the depth cap, nofiling(): t_capnogounproven)
+# quotes that line.
+t_lastnogounproven() {
+  setup "[$(issue 7 2026-01-01)]"
+  printf '%s\n' 'UNPROVEN: b.txt may be read before it is written' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/r.review"
+  fx_in 'followups c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" "$STUB/r.review"'
+  [ "$RC" != 0 ] && [ "$(cat "$T/$CASE/run.out")" = 'the last review said NO-GO and named no finding to file: UNPROVEN: b.txt may be read before it is written' ] \
+    && [ ! -e "$STUB/filed" ] || fail "a last NO-GO with only an UNPROVEN line did not block with that line (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches: a card whose issue is a follow-up at the depth cap (isfu) files nothing, so cardland() blocks a last
+# NO-GO with no finding itself; that block said "named no finding to file" with no word of the reviewer's UNPROVEN line.
+t_capnogounproven() {
+  setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up to #5.\n\nFollow-up depth: 2"')]"
+  fx_wt 'echo two >> a.txt' b.txt base
+  printf '%s\n' 'UNPROVEN: b.txt may be read before it is written' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  fx_in 'releasewait() { :; }; landwait() { :; }
+    c=c7 n=7 wt=$FXWT issue=$(jq -c ".[0]" "$STUB/issues.json") last=1 isfu=1 res=NO-GO merged="" earlier="" br="" mates=(); cardland'
+  [ "$(st 'select(.issue == 7 and .step == "blocked") | .reason')" = 'the last review said NO-GO and named no finding to file: UNPROVEN: b.txt may be read before it is written' ] \
+    && [ ! -e "$STUB/filed" ] || fail "a last NO-GO at the depth cap with only an UNPROVEN line did not block with that line (exit $RC): $(st 'select(.issue == 7)') $(cat "$T/$CASE/run.out")"
+}
+
 # Bugs: an UNPROVEN line holds a GO, is counted as a finding, or is dropped from the review's record; the reviewer is
 # not asked for a proof or the three angles.
 t_unproven() {

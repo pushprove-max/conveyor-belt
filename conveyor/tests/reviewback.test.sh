@@ -25,6 +25,10 @@ t_pipeline() {
   # A listed name with a space in it is that name, quoted or not; one of its words alone is not.
   [ "$(for f in '[P1] `ci/build engine.sh`:9 wrong command' 'see ci/build engine.sh:9.' '[P1] ci/build:9 x' '[P1] engine.sh:9 x'; do
     echo "[$(onpipeline "$f" <<<'["ci/build engine.sh"]')]"; done | tr -d '\n')" = '[1][1][][]' ] || fail "a pipeline file whose name holds a space is not held, or one of its words alone is"
+  # Bug it catches: a path that ends a question or an exclamation kept its "?" or "!", so the finding was not on a
+  # pipeline file, and the issue could go to a model trial (modelpick.sh).
+  [ "$(for f in 'Can we simplify a.txt?' 'Look at lib/b.sh!' 'Why lib/b.sh?!'; do
+    echo "[$(onpipeline "$f" <<<'["a.txt", "lib/"]')]"; done | tr -d '\n')" = '[1][1][1]' ] || fail "a pipeline path that ends a question or an exclamation is not held"
   echo "$NOGO3" > "$STUB/r.review"; echo "$GO" > "$STUB/review.1"
   fx_in 'followups c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" "$STUB/r.review"'
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = '[100101,100102,100103]' ] || fail "the last NO-GO's three follow-ups were not filed: $(cat "$T/$CASE/run.out")"
@@ -201,6 +205,21 @@ t_repeatkept() {
     || fail "the resumed session of a card blocked on a repeat was not told it came back with the earlier fix's diff: $(cat "$b") $RESUMED"
 }
 
+t_repeatkeptp0() {
+  keptsetup 14
+  # #14: as #10 (t_repeatkept), with a new P0 beside the repeated P1 on the third review: it blocks on the repeat
+  # (after hard), its block reason naming the P0 first (cardfix()) and keeping the form the review-retry and the
+  # Board read: "the fix for [P..] ... did not hold after <n> rounds" (needsask.sh needsretry()). Bugs it catches: a
+  # repeat skipped the P0 check, so the block named only the P1 that came back, and the P0 reached no one; a reason
+  # that began with the P0 was no longer retried or shown as a review's block. And: the P0's proof quotes "; [P2]",
+  # which the reason wrote ";[P2]": each finding's text is as the review wrote it.
+  echo "$NOGO" > "$FXWT.review"; printf '%s\n' "$B" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  printf '%s\n' "$B" '[P0] c.txt:1 deletes the data. Proof: it prints "kept; [P2] x"' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
+  afterrun "$(issue 14 2026-01-01)" 'told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && told 2 "echo fix3 >> a.txt" && cp "$STUB/review.3" "$wt.review" && pass=3' 'c=c7 n=14 rline=""; cardfix'
+  [ "$(st 'select(.issue == 14 and .step == "blocked") | .reason')" = "the fix for [P0] c.txt:1 deletes the data. Proof: it prints \"kept; [P2] x\"; $B did not hold after 1 round" ] \
+    || fail "a repeat's block did not name the new P0 of its review first, in the form the review-retry reads: $(st 'select(.issue == 14 and .step == "blocked")') $AFTER"
+}
+
 t_repeatkeptfail() {
   keptsetup 11
   # #11: a NO-GO, its fix, then a review that fails: blocked with its patch and its fix round kept. The retry's review
@@ -215,6 +234,47 @@ t_repeatkeptfail() {
   [ "$(jq -c '[.mode, .rounds]' <<<"$RESUMED")" = '["session",1]' ] && [ "$(jq -c '[.after, .hard]' <<<"$AFTER")" = "[\"hard\",\"$B did not hold after 1 round\"]" ] \
     || fail "a retry did not know a repeat of its earlier card's fix round: $RESUMED $AFTER"
   [ ! -s "$T/$CASE/rep" ] || fail "the resumed session was told of a repeat its kept review, written before the fix round, cannot show: $(cat "$T/$CASE/rep")"
+}
+
+# #15: as #11 (t_repeatkeptfail), its retry run as a whole card for what only it shows: the review prompt, which
+# cardreview() puts together inline. The retried card's first review is told the findings of the fix round that came
+# after its kept review, with their ids and that round's diff (refix), and reviews the whole change, as its own
+# session may have changed more than that fix (review.rereviewWhole 100 would let it review the fix alone). The
+# review after the round ended with no verdict (recorded none): it said nothing of the round. Bugs it catches: that
+# review was not told the round's findings, so it gave no answer on them (so too when the review with no verdict was
+# counted as the round's answer); told them, it reviewed the fix alone.
+t_repeatkeptreview() {
+  keptsetup 15; tune '.review.rereviewWhole = 100'
+  printf '%s\n' "$B" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  { kline c7 15 review NO-GO; kline c7 15 review none; } >> "$ST/cards.jsonl"
+  keptblock 15 0 'review 2 ended without one clear verdict' 'told 1 "echo fix2 >> a.txt"'
+  # stub: the shared codex stub, made to keep each review's prompt, as t_reusewhole keeps it
+  sed -i 's|^cat > /dev/null; echo x >> "$STUB/reviews";|echo x >> "$STUB/reviews"; cat > "$STUB/prompt.$(wc -l < "$STUB/reviews")";|' "$STUB/codex"
+  echo "$GO" > "$STUB/review.1"
+  # loop: the first review's prompt is put together inline in cardreview(), from the refix resumeplan() sets
+  loop run --only 15 >/dev/null || fail "run of #15 exited non-zero"
+  grep -qx 'E1 \[P1\] b.txt:2 broken' "$STUB/prompt.1" && grep -qx 'The file .*/c[^/]*\.rounds/1\.diff' "$STUB/prompt.1" \
+    && grep -q '^Review the staged change in this worktree' "$STUB/prompt.1" && ! grep -q 'Review the fix of the last review' "$STUB/prompt.1" \
+    || fail "the retried card's first review was not told its kept fix round's findings and diff, or reviewed that fix alone: $(grep -A3 '^# This review follows' "$STUB/prompt.1" 2>&1) $(head -n 2 "$STUB/prompt.1" 2>&1)"
+}
+
+# Bug it catches: a retry found the fix round no review had answered by counting the chain's record lines, and a
+# review that blocked with no line, or a port, put that count off, so the retried card's first review was not told the
+# round. Now the rounds folder says it: cardreview() writes <worktree>.rounds/told once a review gives a verdict, and
+# the next fix round's rounded() takes it away (resumeplan() reads it: t_resumeportrefix2, t_resumetold). The review
+# session and the steps before it are stubbed; cardreview() is called as card() calls it, after fix round 1.
+t_toldround() {
+  keptsetup 16; echo "$NOGO" > "$FXWT.review"
+  fx_in 'c=c7 n=16 wt=$FXWT br="" sprompt="" sf="" sk="" pk="" pt="" mode="" kept="" grown=1 fin="" refix="" fixtree="" vmode="" pass=2 rounds=0 rv=$REVIEW prv=""
+    issue=$(jq -c ".[0]" "$STUB/issues.json"); told 1 "echo fix2 >> a.txt" || exit 3
+    redbrief() { :; }; trialflag() { :; }; lintgate() { return 0; }; began() { :; }; reusable() { return 1; }; minor() { :; }
+    reviewed() { printf "%s\n" "[P2] a.txt:2 other word" "USER-VISIBLE: no" "VERDICT: NO-GO" > "$1.review"; echo "{}"; }; judged() { printf "%s\n" "$5"; }
+    [ ! -e "$wt.rounds/told" ] || exit 4; cardreview; [ -e "$wt.rounds/told" ] || exit 5
+    told 2 "echo fix3 >> a.txt"; [ ! -e "$wt.rounds/told" ] || exit 6
+    reusable() { :; }; rtree=""; pass=3; cardreview; [ ! -e "$wt.rounds/told" ] || exit 7'
+  # Bug it catches too: the review that stands again after fix round 2 (reusable(): no review session, so no reviewer
+  # read that round) marked it answered, and a retry's first review was not told its finding ids and diff (exit 7).
+  [ "$RC" = 0 ] || fail "a NO-GO review after fix round 1 did not mark the round answered (exit 5), fix round 2 of its finding did not take the mark away (exit 6), or the last review reused after it marked it (exit 7) (exit $RC): $(cat "$T/$CASE/run.out")"
 }
 
 t_repeatkeptstage() {

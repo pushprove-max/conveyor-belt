@@ -126,6 +126,35 @@ test('Needs you: a blocked card shows its first finding, next step and Retry bef
   assert.equal(again.querySelector(':scope > details.block-more').open, true, 'a new part for the same card keeps it open');
 });
 
+// Bug: a repeat's block that names a new P0 first ("the fix for [P0] ...; [P1] ... did not hold after 1 round",
+// card.sh cardfix(); the recorded reason is one line) drew one row, the P0, whose proof held the whole repeated P1.
+// Each finding gets its own row, and the P0's proof ends where the P1 starts. Bug too: the P1's proof, which quotes
+// "; [P1]" as the review wrote it, was split there into a third row.
+test('Needs you: a repeat block that names a new P0 first draws the P0 and the repeated P1 as two rows', () => {
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  const reason = 'the fix for [P0] c.sh:1 Deletes the data. Proof: rm runs on /; [P1] a.sh:1 First wrong. Proof: it prints "a; [P1] b" did not hold after 1 round';
+  d.panels.needs.data.cards.blocked[0].reason = reason;
+  deliver(w, d);
+  const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
+  assert.deepEqual(rows.map((r) => r.querySelector('.finding-claim').textContent), ['Deletes the data.', 'First wrong.'], `one row a finding for the reason ${reason}`);
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, 'rm runs on /', `the P0 proof stops before the P1 for the reason ${reason}`);
+  assert.equal(rows[1].querySelector('.finding-proof-text').textContent, 'it prints "a; [P1] b"', `the P1 proof is whole for the reason ${reason}`);
+});
+
+// Bug: a single repeated finding whose proof quotes "; [P2]" drew as two rows, split there: only the engine's join of
+// a new P0 (a reason that starts with [P0]) is split at "; ".
+test('Needs you: a repeated finding whose proof quotes "; [P2]" draws as one row', () => {
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  const reason = 'the fix for [P1] a.sh:1 First wrong. Proof: The output reads "passed; [P2] a.sh:1 wrong". did not hold after 1 round';
+  d.panels.needs.data.cards.blocked[0].reason = reason;
+  deliver(w, d);
+  const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
+  assert.equal(rows.length, 1, `one row for the reason ${reason}`);
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, 'The output reads "passed; [P2] a.sh:1 wrong".', `the proof is whole for the reason ${reason}`);
+});
+
 // Bug #456: every block ended "Fix the cause. Then press Retry.", though for a review, test or no-result block Retry is
 // the fix and nothing on the Board fixes anything first. Each kind's last line names its step; the review block's
 // finding holds words of other kinds ("sign-in", "depends on"), which do not change its kind.

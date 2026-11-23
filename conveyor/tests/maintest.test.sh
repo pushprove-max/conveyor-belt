@@ -158,6 +158,25 @@ t_maintestgh() {
   [ "$(runs)" = 5 ] && grep -q "^100101 --body .*failed again, with the same cases, at ${I:0:12}" "$STUB/comments" && [ "$(rec .sha)" = "\"$I\"" ] && [ "$(wc -l < "$STUB/filed")" = 1 ] \
     || fail "a comment that could not be added was never added with main where it was: $(runs) runs, $(rec .), $(cat "$STUB/comments")"
 }
+# Bug it catches: the failure of many cases with long names (here 60 of 2,409 bytes, 144 KB) was given to gh as one
+# --body argument, and to the snapshot's jq as one --argjson argument, each past the system's limit on one argument
+# (128 KiB on Linux): gh did not start, so no issue was filed, and no snapshot was made. From a pass at A, maintest() is
+# called as `main-test` calls it, each case's runs alone stubbed as failed (fullalone()): 180 runs alone would cost the
+# case its CPU time. The issue is filed with the body cut at GitHub's limit, and the snapshot names all 60 cases.
+t_maintestlong() {
+  maintest_start; local L
+  maintest_pass $T0; L=$(printf 'x%.0s' {1..2400})
+  echo 'echo "x$CONVEYOR_TEST_RERUN" >> "$STUB/mains"; for ((i = 100; i < 160; i++)); do echo "FAIL [case $i '"$L"']: wrong"; done; exit 1' > "$STUB/main-cmd"
+  move "move b" > /dev/null
+  fx_in 'export CONVEYOR_NOW=$((T0 + 3600)); fullalone() { echo failed; }; maintest'
+  [ "$RC" = 0 ] && [ "$(rec '.fail | [.issue, (.cases | length), (.cases[0] | length)]')" = '[100101,60,2409]' ] \
+    && jq -e '(.body | length) <= 65536 and (.body | contains("- case 100 ")) and (.body | endswith("(The rest is cut: GitHub takes no longer text.)"))' "$STUB/filed" > /dev/null \
+    || fail "the failure of 60 cases with long names was not filed with its body cut at GitHub's limit (exit $RC): $(rec '.fail | del(.cases)') $(cut -c 1-300 "$T/$CASE/run.out")"
+  # The cut body alone fits one argument: only the option gh was given shows that the body went in a file.
+  [ "$(cat "$STUB/body-from" 2>/dev/null)" = --body-file ] || fail "the body of the main-test issue was given to gh as $(cat "$STUB/body-from" 2>/dev/null), not as --body-file"
+  touch "$STUB/list-filed"
+  [ "$(loop snapshot --fresh | jq -c '.mainTest | [.issue, (.cases | length)]')" = '[100101,60]' ] || fail "the snapshot does not carry the failure of 60 cases with long names"
+}
 # A case of another file: from a pass at A, with no issue filed before.
 t_maintestfile() {
   maintest_start

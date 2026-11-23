@@ -655,7 +655,8 @@ snapshot() (
     && { read -r day t0d && read -r since t0w && read -r prev t0p; } < <(printf '%s\n' "$day" "$day 6 days ago" "$day 13 days ago" | p_dates '+%F %s') \
     && [[ $t0p =~ ^[0-9]+$ ]] || exit 1
   # A failure stands only while the pack still names a whole test (maintest() runs none without one, so nothing clears
-  # it) and, when the open issues were listed, while the issue it filed is open.
+  # it) and, when the open issues were listed, while the issue it filed is open. It goes to jq in a file (--slurpfile):
+  # the failure of a few hundred cases passed the system's limit on one argument (--argjson), and no snapshot was made.
   packget test.main mt && [ -n "$mt" ] && mt=$(jq -ce --slurpfile iss "$d/issues" \
     '.fail | objects | select(.issue == null or $iss[0] == null or (.issue as $n | $iss[0] | any(.number == $n)))' "$MAINTEST" 2>/dev/null) || mt=null
   # The commit of the plugin's main (or newest release) this machine did not take, while the pack follows it (take(), lib/install.sh).
@@ -690,7 +691,7 @@ snapshot() (
     && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$ht" "$SAMPLE" "$yes" \
     || exit 1
   # The records of the cards with no GitHub issue (testcard(), lib/testaction.sh), by their card: body, filed and filedUrl, which a landed one shows.
-  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --argjson mt "$mt" \
+  jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --slurpfile mt <(printf '%s' "$mt") \
     --slurpfile tac <(jq -c '[.cards | arrays | .[] | objects | select(.card | type == "string") | {key: .card, value: {body: (.body // null), filed: (.filed // null), filedUrl: (.filedUrl // null)}}] | from_entries' "$TACARDS" 2>/dev/null || echo '{}') --slurpfile fl <(printf '%s' "$fl") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson np "$np" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --arg pef "$pef" --argjson efforts "$EFFORTS" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson pn "$pn" --argjson cr "$cr" --argjson ts "$ts" \
@@ -991,7 +992,7 @@ snapshot() (
               | {issue: $i.number, title: ($i.title // "")[0:200], ref: $r, reason: $i.far[$r].error,
                  line: ([$i.body // "" | splits("\r?\n") | select({body: .} | farneeds | index([$r]) != null)] | first // "" | sub("^\\s+"; "") | .[0:300])}]
            | sort_by(.issue) end)},
-       mainTest: $mt,
+       mainTest: $mt[0],
        priceNotes: $pn,
        fullTest: $ft,
        suites: $su,

@@ -154,6 +154,43 @@ t_optsplit() {
     || fail "the result does not show the split's numbers: $(cat "$FXWT.unfixed")"
 }
 
+# Bug it catches: an Optimize, Rewrite or Split card was checked once, after its build, so a fix round that made its
+# split slower than it may be went on to review and landed. cardbuild() and then cardreview() are called as card()
+# calls them, the build session and the steps before the review's check stubbed, on the split of t_optsplit (its
+# build's check holds); then a fix round adds f3.test.sh, a slow case of 17 CPU s: the card is blocked before the
+# review, its blocked line carrying the check's version. A check that timed the tree from before the fix round sees no
+# f3.test.sh (the stub times a file by its name), so its 5 CPU s hold and the case fails.
+t_optrefix() {
+  optmain '' 2 3; echo 17 > "$STUB/cpu-f3.test.sh"; fx_wt 'rm f.test.sh; echo one > f1.test.sh; echo two > f2.test.sh' f.test.sh 'echo slow' g.test.sh 'echo other'
+  fx_in 'c=c7 n=7 wt=$FXWT br="" sprompt="" sf="" sk="" pk="" pt="" mk="" mode="" kept="" grown=1 more="" rounds=0
+    issue="{\"number\": 7, \"title\": \"Optimize the test file f.test.sh\", \"labels\": [{\"name\": \"bug\"}]}"
+    redbrief() { :; }; startbrief() { :; }; session() { echo "{}"; }; checked() { return 0; }; trialflag() { :; }; lintgate() { return 0; }
+    began() { [ "$3" != review ] || { : > "$T/$CASE/reviewed"; exit 5; }; }
+    go=end; cardbuild; [ -z "$go" ] || exit 3
+    echo three > "$wt/f3.test.sh" || exit 3
+    pass=2; cardreview'
+  [ "$RC" = 0 ] && [ ! -e "$T/$CASE/reviewed" ] && st 'select(.step == "blocked") | .reason' | grep -q '^review 2: .*the files take 22 CPU s summed' \
+    && [ "$(st 'select(.step == "blocked") | .speedcheck')" = "$SPEEDV" ] \
+    || fail "a split a fix round made slower than it may be was not blocked before its review (exit $RC): $(st 'select(.step == "blocked")') $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches: a Split card retried from its kept patch with no build (mode review, after a conditional yes) set
+# no tree to check against, so a fix round that added a slow case went on to review unchecked. As t_optrefix, the
+# build replaced by the retry: the fix round's f3.test.sh (17 CPU s) blocks the card before the review. sf is the
+# test file, as cardopen() sets it before cardbuild(): bug, a branch that ran only with sf empty never set the tree.
+t_optretryfix() {
+  optmain '' 2 3; echo 17 > "$STUB/cpu-f3.test.sh"; fx_wt 'rm f.test.sh; echo one > f1.test.sh; echo two > f2.test.sh' f.test.sh 'echo slow' g.test.sh 'echo other'
+  fx_in 'c=c7 n=7 wt=$FXWT br="" sprompt="" sf=f.test.sh sk="" pk="" pt="" ps="" mk="" mode=review kept="" grown=1 more="" rounds=0
+    issue="{\"number\": 7, \"title\": \"Optimize the test file f.test.sh\", \"labels\": [{\"name\": \"bug\"}]}"
+    redbrief() { :; }; trialflag() { :; }; lintgate() { return 0; }
+    began() { [ "$3" != review ] || { : > "$T/$CASE/reviewed"; exit 5; }; }
+    go=end; cardbuild; [ -z "$go" ] || exit 3
+    echo three > "$wt/f3.test.sh" || exit 3
+    pass=2; cardreview'
+  [ "$RC" = 0 ] && [ ! -e "$T/$CASE/reviewed" ] && st 'select(.step == "blocked") | .reason' | grep -q '^review 2: .*the files take 22 CPU s summed' \
+    || fail "a retried split a fix round made slower than it may be was not blocked before its review (exit $RC): $(st 'select(.step == "blocked")') $(cat "$T/$CASE/run.out")"
+}
+
 # D3. Bug it catches: a delete is failed for having no test that fails on main, or for having no file to time, or the
 # review is never told what the file tested. The file runs alone on main's code as main has it, the check holds, and
 # the result gives its cases and asks for the test that covers each.

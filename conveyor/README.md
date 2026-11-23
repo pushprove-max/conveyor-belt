@@ -1217,7 +1217,8 @@ what the verdict asks, else the card is blocked with a reason that names the ver
 - stabilise: the change keeps the file and adds or removes no other test file. The build's reply ends with one line
   `STABILISED: <case> | <its cause> | <how the change removes it>` for each case that the issue names on a `CAUSE:`
   line, or at least one line when the issue names none. A case with no line blocks the card before the run. The file
-  must cost no more than its recent runs. The review gets the lines and checks each one against the code.
+  must cost no more than its recent runs. The review gets the lines and checks each one against the code. When a fix's
+  reply gives a line for a case again, that line replaces the build's line for the case.
 - split: the change changes or removes the file and adds test files.
 - merge: the change removes the file and changes another test file, or changes the file and removes another test
   file. It adds no test file. When the file stays, it must cost no more than its recent runs plus the median on record
@@ -1270,7 +1271,8 @@ has moved since its last run.
 When it fails, Conveyor runs each failed case again alone, 3 times, on the same commit. A case that passes all 3
 times goes to the flaky-test record (Flaky tests, above) and files nothing. For the cases that fail alone, Conveyor
 files one issue of the pack's second priority that names them, their failure lines and the commits since the last
-pass, and the Board lists it under Needs you until a run passes. A later failure of the same cases adds a comment to
+pass, and the Board lists it under Needs you until a run passes. When that text is longer than GitHub accepts, its end
+is cut, so a long list of cases can push the failure lines and the commits out of it. A later failure of the same cases adds a comment to
 that issue while it is open, and files no other. A run whose failed cases all pass alone counts as a pass.
 
 A run that names no failing case but prints under 90% of the `ok <case>` lines of the last run that passed does not
