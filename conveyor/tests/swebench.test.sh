@@ -114,7 +114,7 @@ case $1 in
   exec) shift; e=(); w=.; u=''
     while [ "${1#-}" != "$1" ]; do case $1 in -i) shift ;; -u) u=$2; shift 2 ;; -w) w=$2; shift 2 ;; -e) e+=("$2"); shift 2 ;; *) exit 1 ;; esac; done
     n=$1; shift; [ -d "$B/$n" ] || exit 1; if [ "$u" = 0 ]; then [ "$*" != 'sh -c kill -9 -1' ] || boxkill "$n"; exit 0; fi
-    cd "$w" && mkdir -p "$B/$n/groups" || exit 1
+    cd "$w" && mkdir -p "$B/$n/groups" || exit 1; for x in "${e[@]}"; do case $x in SWE_MAINDIR=*) mkdir -p "$SWE_FX/proc/1" "$SWE_FX/proc/2" "$SWE_FX/proc/3" && ln -sfn /testbed "$SWE_FX/proc/1/cwd" && ln -sfn / "$SWE_FX/proc/2/cwd" && ln -sfn "${x#SWE_MAINDIR=}" "$SWE_FX/proc/3/cwd" && e+=("SWE_PROC=$SWE_FX/proc") ;; esac; done # this stand-in runs on the host, whose /proc lists the whole machine: swe_watch's read (SWE_IDLE) gets a container's list: process 1 (the idle keeper, in /testbed), the exec (cwd /) and the engine (the main checkout)
     set -m; ( set +m; exec env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u CONVEYOR_MAIN -u CONVEYOR_CARDS -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL -u EMAIL GIT_CONFIG_PARAMETERS="'user.useconfigonly'='true'" HOME="$B/$n/home" "${e[@]}" "$@" ) & p=$!; set +m
     : > "$B/$n/groups/$p"; wait "$p"; r=$?; rm -f "$B/$n/groups/$p"; exit "$r" ;;
   rm) shift; [ "$1" != -f ] || shift; [ -d "$B/$1" ] || exit 1; boxkill "$1"; echo "$1" >> "$SWE_FX/removed"; rm -rf "$B/$1" ;;

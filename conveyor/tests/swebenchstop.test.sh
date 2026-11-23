@@ -248,21 +248,92 @@ t_swestoprelname() {
 # stands (the engine stands it only while the card sleeps out a wait) ends it: a card in a session (its live record and
 # no idle mark), an idle mark of another card, or a card that ended, does not.
 t_swewaited() {
-  local d=$T/$CASE/cards o
-  # The card records given, then what SWE_IDLE reads of the cards folder, through swe_waited.
-  waited() { (export HERE=$SRC RTAG=x ST=$T/$CASE/state; . "$SRC/bench/swe.sh" && { printf '%s\n' '{"card":"c1","issue":1,"step":"start","result":"ok","of":"test"}' "$@"
-    SWE_CARDS=$d bash -c "$SWE_IDLE"; } | swe_waited); }
-  mkdir -p "$d" && echo '{"step":"build","action":"editing x.py"}' > "$d/c1.live" || fail "the cards folder was not made"
+  local d=$T/$CASE/cards o P=$T/$CASE/proc m
+  mkdir -p "$d" "$T/$CASE/main" && m=$(cd -P "$T/$CASE/main" && pwd) || fail "the cards or main folder was not made"
+  # The process list SWE_IDLE reads: a folder with one <n>/cwd link to each given folder, from process 2 on, and process 1
+  # (the container's `sleep infinity`) in the image's own folder, as /testbed (none given: only process 1).
+  proc() { local i=1 t; rm -rf "$P"; mkdir -p "$P/1" && ln -s "$T/$CASE/testbed" "$P/1/cwd" || fail "the process list was not made"
+    for t in "$@"; do i=$((i + 1)); mkdir -p "$P/$i" && ln -s "$t" "$P/$i/cwd" || fail "the process list was not made"; done; }
+  proc / "$m"
+  # The card log with the records given, then what swe_watch reads (SWE_READ: the log's tail, the live records as they
+  # stand, SWE_IDLE), through swe_waited.
+  waited() { (export HERE=$SRC RTAG=x ST=$T/$CASE/state; . "$SRC/bench/swe.sh" && { mkdir -p "$T/$CASE/log" && printf '%s\n' '{"card":"c1","issue":1,"step":"start","result":"ok","of":"test"}' "$@" > "$T/$CASE/log/cards.jsonl"
+    SWE_SST=$T/$CASE/log SWE_CARDS=$d SWE_MAINDIR=$m SWE_PROC=$P bash -c "$SWE_READ"; } | swe_waited); }
+  echo '{"step":"build","action":"editing x.py"}' > "$d/c1.live" || fail "the cards folder was not made"
   o=$(waited) || fail "swe_waited failed: $o"
   [ -z "$o" ] || fail "a card in a session ended the trial: $o"
-  : > "$d/c0.idle"; o=$(waited)
+  # c0 has an idle mark and a waiting live record (so SWE_IDLE lists it): only swe_waited's card match leaves it out.
+  echo '{"step":"test","action":"waiting for main to change: t fail on main at abc too"}' > "$d/c0.live" && : > "$d/c0.idle"; o=$(waited)
   [ -z "$o" ] || fail "another card's idle mark ended the trial: $o"
   # Bug (#1383 R39): a session stood its own idle mark (`touch $PWD.idle` from its worktree) and ended the trial,
   # so its half-made change was graded. Its live record, which names its model, says a session runs.
-  echo '{"step":"build","model":"bench-m","action":"editing x.py"}' > "$d/c1.live" && : > "$d/c1.idle"; o=$(waited)
+  # The record has a wait's action, so only its model keeps the trial running.
+  echo '{"step":"build","model":"bench-m","action":"waiting for main to change: x"}' > "$d/c1.live" && : > "$d/c1.idle"; o=$(waited)
   [ -z "$o" ] || fail "a card in a session with an idle mark ended the trial (live record $(cat "$d/c1.live")): $o"
+  # Bug (#1503): a session removed its live record (the engine writes it) and left the idle mark: no model was read, so
+  # the idle mark looked like a wait and ended the trial.
+  rm -f "$d/c1.live"; o=$(waited)
+  [ -z "$o" ] || fail "an idle mark with no live record ended the trial: $o"
+  # Bug (#1503 E1): a session emptied its live record instead (the file stands, no model is read): that is no wait either.
+  : > "$d/c1.live"; o=$(waited)
+  [ -z "$o" ] || fail "an idle mark with an empty live record ended the trial: $o"
+  echo 'not json' > "$d/c1.live"; o=$(waited)
+  [ -z "$o" ] || fail "an idle mark with an unreadable live record ended the trial: $o"
+  # Bug (#1503 E2): a session left no model and an action of its own (a test run's live record names none), with the
+  # idle mark: only a wait's action ("waiting ...") is a wait.
+  echo '{"step":"test","action":"running the tests"}' > "$d/c1.live"; o=$(waited)
+  [ -z "$o" ] || fail "an idle mark beside a live record with the action 'running the tests' ended the trial: $o"
+  # Bug (#1503 E1): `{}` is an object with no model, and passed as a wait; a wait's live record always has an action.
+  echo '{}' > "$d/c1.live"; o=$(waited)
+  [ -z "$o" ] || fail "an idle mark with a live record of {} ended the trial: $o"
+  # Bug (#1503 E1): a live record that holds an idle record of its own (here with no idle mark) was read as the engine's.
+  rm -f "$d/c1.idle"; printf '%s\n' '{"idle":"c1","action":"waiting for main to change: x","model":""}' > "$d/c1.live"; o=$(waited)
+  [ -z "$o" ] || fail "a live record holding an idle record ended the trial: $o"
+  : > "$d/c1.idle"; printf '%s\n' '{"model":"","idles":[{"idle":"c1","action":"waiting x","model":""}]}' > "$d/c1.live"; o=$(waited)
+  [ -z "$o" ] || fail "a live record holding an idles list ended the trial: $o"
+  # Bug (#1503 E4): a live record that holds a card record of another card of the issue (c0, with a mark and a waiting
+  # live record of its own) made c0 the newest card of the issue, and its mark ended the trial while c1 ran.
+  # The record is one line that is a card record and a wait both: only reading card records before the first "---" line leaves it out.
+  rm -f "$d/c1.idle"; printf '%s\n' '{"card":"c0","issue":1,"step":"start","result":"ok","of":"test","action":"waiting for main to change: x"}' > "$d/c0.live"; o=$(waited)
+  [ -z "$o" ] || fail "a live record holding a card record of another card ended the trial: $o"
   echo '{"step":"test","action":"waiting for main to change: t fail on main at abc too"}' > "$d/c1.live" && : > "$d/c1.idle"; o=$(waited)
   [ "$o" = '{"card":"c1","why":"its card waited for main to change: t fail on main at abc too"}' ] || fail "the waiting card did not end the trial: $o"
+  # Bug (#1503 E3): a session wrote the idle mark and a live record of a wait, exactly the engine's (the session can
+  # write the cards folder), and ended the trial. A running session is a process whose cwd is its worktree; a wait has
+  # only the engine (cwd: the main checkout) and the scan (cwd "/"). The process list is a folder of cwd links (SWE_PROC),
+  # as the session cannot write what the kernel lists; each case below changes only that list.
+  # Bug (#1503 E8): the scan counted process 1 (`sleep infinity`, in the image's folder, as /testbed) as a session, so a
+  # waiting card ran to the time limit: this plain wait has process 1 in /testbed, and must end the trial.
+  proc / "$m"; o=$(waited)
+  [ -n "$o" ] || fail "the waiting card, with only the engine (cwd: the main checkout) and the scan running, did not end the trial"
+  proc / "$m" "$d/c1"; o=$(waited)
+  [ -z "$o" ] || fail "a card with a process in its worktree (a session) and a live record of a wait ended the trial: $o"
+  # Bug (#1503 E6): the session moved its worktree out of the cards folder (here beside it, and into the main checkout),
+  # so a cwd prefix check of the cards folder did not see its process.
+  proc / "$m" "$T/$CASE/moved"; o=$(waited)
+  [ -z "$o" ] || fail "a session with its worktree moved beside the cards folder ended the trial: $o"
+  proc / "$m" "$m/moved"; o=$(waited)
+  [ -z "$o" ] || fail "a session with its worktree moved into the main checkout ended the trial: $o"
+  # A process that cannot be read counts as a session, and so does an empty list: neither shows a wait.
+  proc / "$m"; mkdir -p "$P/9" && : > "$P/9/cwd"; o=$(waited) # a plain file: readlink fails on it, as on a process the scan may not read
+  [ -z "$o" ] || fail "a process whose cwd cannot be read ended the trial: $o"
+  proc; o=$(waited)
+  [ -z "$o" ] || fail "a process list of only process 1 ended the trial: $o"
+  # Bug (#1503 E6): a worktree whose path is the main checkout's and a newline: $(readlink) dropped the newline.
+  mkdir -p "$m"$'\n' && proc / "$m" "$m"$'\n'; o=$(waited)
+  [ -z "$o" ] || fail "a session in a folder named like the main checkout and a newline ended the trial: $o"
+  # Bug (#1503 E4): the session appended a start line of another card (c0, with a mark and a live record of a wait, no
+  # process) to the card log it can write, and c0 became the newest card of the issue while c1's session ran.
+  proc / "$m" "$d/c1"; rm -f "$d/c1.idle"; echo '{"step":"test","action":"waiting for main to change: x"}' > "$d/c0.live"; : > "$d/c0.idle"
+  o=$(waited '{"card":"c0","issue":1,"step":"start","result":"ok","of":"test"}')
+  [ -z "$o" ] || fail "a card record of another card in the card log, appended while a session ran, ended the trial: $o"
+  rm -f "$d/c0.idle" "$d/c0.live"; : > "$d/c1.idle"
+  # Bug (#1503 E7): the session writes the first folder of the PATH swe_in gives ($HOME/.local/bin), so a program there
+  # (here a readlink that names no process but the scan's) hid its own process from the scan.
+  mkdir -p "$d/bin" && printf '#!/bin/sh\necho /\n' > "$d/bin/readlink" && chmod +x "$d/bin/readlink" || fail "the program of the session's PATH was not made"
+  o=$(PATH=$d/bin:$PATH waited)
+  [ -z "$o" ] || fail "a program of the session's PATH hid its process from the scan, and the trial ended: $o"
+  proc / "$m"
   o=$(waited '{"card":"c1","issue":1,"step":"landed","result":"ok"}')
   [ -z "$o" ] || fail "a card that landed ended the trial: $o"
 }

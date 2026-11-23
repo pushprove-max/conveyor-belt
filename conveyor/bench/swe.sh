@@ -606,24 +606,48 @@ SWE_LIVES='for f in "$SWE_CARDS"/*.live; do [ ! -f "$f" ] || { echo; head -c 400
     printf "\n{\"second\":%s,\"firsttry\":" "$s"; tr -d "\n" < "$f"; printf "}\n"
   done
   for f in "$SWE_CARDS"/*.reviewed; do [ ! -s "$f" ] || { printf "\n{\"reviewed\":"; tr -d "\n" < "$f"; printf "}\n"; }; done; :'
-# Each card of the cards folder that only waits: its <worktree>.idle mark stands (the engine stands it while the
-# card sleeps out a wait for main to change, on another card, for the machine or for its seat's CLI, and never while
-# a session, check or test of it runs), as {idle: <card>, action: <its live record's action>, model: <its live
-# record's model>}.
-SWE_IDLE='for f in "$SWE_CARDS"/*.idle; do [ -e "$f" ] || continue; w=${f%.idle}
-    jq -cn --arg c "${w##*/}" --arg a "$(jq -r ".action | strings" "$w.live" 2>/dev/null)" --arg m "$(jq -r ".model | strings" "$w.live" 2>/dev/null)" \
-      "{idle: \$c, action: \$a, model: \$m}"; done; :'
-# Whether the trial's card only waits, from the lines on stdin (its card records, and SWE_IDLE's): the newest card of
-# the task's issue has not ended, and its idle mark stands. Prints {card, why} then, why naming the wait from its live
-# record's action (cut to 300 characters); nothing otherwise. A card in a session, check or test has no idle mark; a
-# mark beside a live record that names a model is a session's own (a session's and the judge's record name their
-# model, a wait's never does): the session can write the cards folder, and it does not end the trial.
+# Each card of the cards folder with an <worktree>.idle mark (the engine stands it while the card sleeps out a wait for
+# main to change, on another card, for the machine or for its seat's CLI, and never while a session, check or test of
+# it runs), as a line "idle:<card>:<its live record>", both in base64, after a line "---" of their own; swe_waited reads
+# the live record. The session can write the whole sandbox and its own PATH, so no file proves a wait and no tool of
+# its PATH can be trusted: SWE_READ runs from /usr/bin and /bin alone (the bench's jq is not there, so base64 carries
+# the record to the host), and no mark is listed while any process has a cwd other than "/" and the main checkout of
+# the sandbox (SWE_MAINDIR), where the engine and its sleep run: the engine runs a session from its card's worktree,
+# and a session that moved the worktree, or wrote a card of its own with a mark and a live record of a wait, still has
+# its process. Process 1 is left out (the container's own `sleep infinity`, in the image's folder, as /testbed). A
+# process whose cwd cannot be read, or no process listed at all, counts as a session. The cwd is read with an "x" after
+# it, as $(...) drops the newlines at the end of a path: a worktree named like the main checkout and a newline would
+# match it. SWE_PROC is the folder of the process list (/proc).
+SWE_IDLE='echo; echo ---; q=$(cd -P "$SWE_MAINDIR" 2>/dev/null && pwd) || q=//; s=; n=0
+    for p in "${SWE_PROC:-/proc}"/[0-9]*/cwd; do
+      case $p in */1/cwd) continue ;; esac
+      l=$(readlink "$p" 2>/dev/null && echo x) || { [ ! -d "${p%/cwd}" ] || s=1; continue; }
+      l=${l%?x}; n=$((n + 1)); case $l in /|"$q") ;; *) s=1 ;; esac
+    done
+    [ "$n" -gt 0 ] || s=1
+    for f in "$SWE_CARDS"/*.idle; do [ -e "$f" ] && [ -z "$s" ] || continue; w=${f%.idle}
+      printf "idle:%s:%s\n" "$(printf %s "${w##*/}" | base64 | tr -d "\n")" "$(head -c 4000 "$w.live" 2>/dev/null | base64 | tr -d "\n")"; done; :'
+# What swe_watch reads in the trial's container: the tail of the card log, a line "---", then SWE_LIVES and SWE_IDLE (which
+# starts with a line "---" of its own). The session can write the live records and the card log, so swe_waited takes the
+# card records only from before the first "---" line and the idle lines only from after the last one. PATH is set first
+# (the session writes the PATH that swe_in gives).
+SWE_READ='PATH=/usr/bin:/bin; tail -n 200 "$SWE_SST/cards.jsonl" 2>/dev/null; echo; echo ---; '"$SWE_LIVES; $SWE_IDLE"
+# Whether the trial's card only waits, from the lines SWE_READ prints on stdin: the newest card of the task's issue in the
+# card log (above the first "---" line; a live record the session wrote is no card record) has not ended, and its idle
+# mark stands (an "idle:" line after the last "---" line, which is SWE_IDLE's). Prints {card, why} then, why naming the
+# wait from its live record's action (cut to 300 characters); nothing otherwise. A card in a session, check or test has
+# no idle mark; a mark whose live record is missing, empty, cut, has an action that does not start with "waiting " or
+# names a model is a session's own (a session's and the judge's record name their model, a wait's never does): the
+# session can write the cards folder, and it does not end the trial.
 swe_waited() {
-  jq -Rsc '[splits("\n") | fromjson? | objects] as $r | ([$r[] | select(has("card") and .issue == 1)] | last) as $s
+  jq -Rsc '[splits("\n")] as $l | ($l | index("---") // ($l | length)) as $n | ([$l | to_entries[] | select(.value == "---") | .key] | last) as $m
+    | [$l[:$n][] | fromjson? | objects] as $r
+    | [select($m > $n) | $l[$m + 1:][] | select(startswith("idle:")) | split(":") | select(length == 3)
+        | {idle: (.[1] | @base64d), live: (.[2] | @base64d | fromjson? | objects)}] as $t
+    | ([$r[] | select(has("card") and .issue == 1)] | last) as $s
     | select($s != null and ($s.step | IN("landed", "blocked", "closed") | not))
-    | [$r[] | select(.idle | strings | . == $s.card)] | last | objects | select((.model // "") == "")
-    | {card: .idle, why: ("its card waited" + (.action | strings // "" | .[:300]
-        | if startswith("waiting ") then " " + .[8:] elif . == "" then ", with no session or test of it running" else ": " + . end))}'
+    | $t | map(select(.idle == $s.card and ((.live.model // "") == "") and (.live.action | strings | startswith("waiting ")))) | last | objects
+    | {card: .idle, why: ("its card waited" + (.live.action[:300] | " " + .[8:]))}'
 }
 # A conveyor card that waits (swe_waited) waits on in a trial for its whole time limit: no other card lands and main
 # never changes there. The trial's command is then stopped (each process under <pid>) and <sb>.h/waited keeps
@@ -635,8 +659,8 @@ swe_watch() { # <pid> <container> <kind> <sb>
   while :; do
     # Read once more after the command ended: a step that started since the last read is still shown.
     kill -0 "$1" 2>/dev/null || end=1
-    if { [ -n "$end" ] || [ $((k % 10)) = 0 ]; } && r=$(swe_in 60 "$2" / 'tail -n 200 "$SWE_SST/cards.jsonl" 2>/dev/null; '"$SWE_LIVES; $SWE_IDLE" \
-        "SWE_SST=$SWE_SST" "SWE_CARDS=$4/cards" < /dev/null); then
+    if { [ -n "$end" ] || [ $((k % 10)) = 0 ]; } && r=$(swe_in 60 "$2" / "$SWE_READ" \
+        "SWE_SST=$SWE_SST" "SWE_CARDS=$4/cards" "SWE_MAINDIR=$4/$SWE_MAIN" < /dev/null); then
       [ -n "$end" ] || v=$(swe_waited <<<"$r")
       if [ -z "$end" ] && [ -n "$v" ]; then
         printf '%s\n' "$v" > "$4.h/waited"; mapfile -t ps < <(swe_tree "$1"); kill -TERM "${ps[@]}" 2>/dev/null; break
