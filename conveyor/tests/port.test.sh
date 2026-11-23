@@ -57,7 +57,7 @@ t_rebase() {
   echo 'printf "ONE\ntwo\n" > a.txt' > "$STUB/rebuild"; echo 'ONE other' > "$STUB/move"
   # loop: only a whole card run shows the landing conflict, the rebuild, its review and the landing on the other commit
   loop run 1 >/dev/null || fail "run exited non-zero"
-  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start test start start rebase start review start test start landed pushed issue " ] || fail "steps of a card that conflicts at landing: $(st '"\(.step) \(.reason)"' | tr '\n' ',')"
+  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start test start start start rebase start review start test start landed pushed issue " ] && [ "$(st 'select(.step == "start" and .waitFor == "cap") | .of')" = rebase ] || fail "steps of a card that conflicts at landing (one wait for room, caphold(), before its rebuild): $(st '"\(.step) \(.of) \(.waitFor) \(.reason)"' | tr '\n' ',')"
   [ "$(wc -l < "$STUB/sessions")" = 2 ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] || fail "$(wc -l < "$STUB/sessions") sessions and $(wc -l < "$STUB/reviews") reviews, not 2 and 2"
   [ "$(cat "$STUB/started-from")" = ONE ] || fail "the rebuild did not start from main as it stands: $(cat "$STUB/started-from")"
   [ "$(st 'select(.step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(git -C "$R" log -1 --format=%s HEAD~1)" = other ] || fail "the card did not land on top of the other commit"

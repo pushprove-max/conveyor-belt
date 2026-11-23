@@ -59,6 +59,63 @@ sfsettle() {
     settle "c$SFN-$SFN" "$SFN" "$CARDS/c$SFN-$SFN" "Build the issue." land "$(issue "$SFN" 2026-01-01)"; echo "settle: $?"'
 }
 sfout() { tail -n 1 "$T/$CASE/run.out"; }
+# sfheld <issue>: sfsettle, with sleep() in caphold() (lib/cardland.sh) a stand-in for the loop's turn: it says "held"
+# and lets the card go as capfree() does when no other card counts at cap 1. A hold of over 3 looks ends the call (exit 7).
+sfheld() {
+  # shellcheck disable=SC2034 # read by the commands fx_in runs
+  SFN=$1
+  # LOOPCARD: the card is the loop's (cardrun(), lib/run.sh), so it waits for room (caphold()).
+  fx_in 'cd "$R" || exit 9; caught="" waitsec=0 behind="[]" parsecheck="" SLEPT=0 HELD=0 LOOPCARD=1
+    sleep() { [ "${FUNCNAME[1]}" = caphold ] || { sfsleep "$@"; return; }
+      HELD=$((HELD + 1)); [ $HELD -le 3 ] || exit 7; echo held; capfree "$BASHPID c$SFN-$SFN" 1; }
+    settle "c$SFN-$SFN" "$SFN" "$CARDS/c$SFN-$SFN" "Build the issue." land "$(issue "$SFN" 2026-01-01)"; echo "settle: $?"'
+}
+SFHELD='conveyor: card c8-8 waited on another card; it waits for room under the card cap before it works again'
+
+# Bug it catches (E1 of a follow-up of issue 1538): at cap 1, #8 waits on #7 at its claim, so the loop's turn leaves it
+# out of its count (capfree(), lib/cardland.sh) and lets held card c9-9 go in its slot. When #8's wait ended, it went on
+# at once, beside c9-9: two cards worked at cap 1. capfree() marks #8 "owed" as it lets c9-9 go, and #8 waits for room
+# when its wait ends (capowed()). The turn is capfree() called at the first look of the wait; #7 lands at the second.
+t_samefileowed() {
+  setup '[]'; sfclaim; sfcard 7 'echo seven >> a.txt'; sfcard 8 'echo eight >> a.txt'
+  [ -z "$(cl 7)" ] || fail "#7 waited with no other claim"
+  : > "$CARDS/c9-9.capheld"
+  atlook() {
+    [ "$SLEPT" != 1 ] || { capfree "$BASHPID c8-8"$'\n'"$BASHPID c9-9" 1; cp "$CARDS/c8-8.capheld" "$STUB/owed" 2>/dev/null; [ ! -e "$CARDS/c9-9.capheld" ] || : > "$STUB/stillheld"; }
+    [ "$SLEPT" != 2 ] || gone 7 'echo other > other.txt'
+  }
+  sfheld 8
+  [ ! -e "$STUB/stillheld" ] && [ "$(cat "$STUB/owed" 2>/dev/null)" = owed ] \
+    || fail "capfree at cap 1, #8 waiting on #7 at its claim and c9-9 held: c9-9 was not let go, or #8 was not marked owed ($(cat "$STUB/owed" 2>/dev/null)): $(cat "$T/$CASE/run.out")"
+  [ "$(sfout)" = "settle: 0" ] && grep -qx "$SFHELD" "$T/$CASE/run.out" && [ "$(grep -A1 -x "$SFHELD" "$T/$CASE/run.out" | tail -n 1)" = held ] \
+    || fail "settle of #8, owed, after its wait on #7: it did not wait for room before it went on: $(cat "$T/$CASE/run.out")"
+  [ ! -e "$CARDS/c8-8.capheld" ] && [ ! -e "$CARDS/c8-8.idle" ] || fail "#8's hold marks stayed after it was let go: $(ls "$CARDS")"
+}
+
+# Bug it catches (E1 of a follow-up of issue 1538): a card that waited in a batch, its slot lent to a held card
+# (capfree() marks it "owed"), went to its fix at once when the batch's tests failed. It waits for room first.
+t_samefileowedbatch() {
+  setup '[]'; sfclaim; sfcard 8 'echo eight >> a.txt'
+  echo '{"fail":1,"sec":2,"pid":0}' > "$CARDS/c8-8.batch"; echo owed > "$CARDS/c8-8.capheld"
+  sfheld 8
+  [ "$(sfout)" = "settle: 4" ] && grep -qx "$SFHELD" "$T/$CASE/run.out" && grep -qx held "$T/$CASE/run.out" \
+    || fail "settle of #8, owed, its batch failed (batch: fail 1): it did not wait for room before its fix: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (E1 of a follow-up of issue 1538): a ready card that waits on another card at its claim, its slot lent
+# to a held card (capfree() marks it "owed"), ran its product checks at once, with batches on. It waits for room first:
+# the check notes whether the mark still stood when it ran.
+t_samefileowedcheck() {
+  setup '[]'; sfclaim; sfcard 7 'echo seven >> a.txt'; sfcard 8 'echo eight >> a.txt'
+  printf '%s\n' "[ -e '$CARDS/c8-8.capheld' ] && echo early >> '$STUB/checked' || echo after >> '$STUB/checked'" > "$STUB/check"
+  tune --arg c "$STUB/check" '.landBatch = 2 | .checks += [$c]'
+  echo '{"issue":8,"msg":"title 8 (#8)","extra":{"waitSec":0}}' > "$CARDS/c8-8.ready"; echo owed > "$CARDS/c8-8.capheld"
+  [ -z "$(cl 7)" ] || fail "#7 waited with no other claim"
+  sfheld 8
+  # Tested, #8 goes past #7, not ready, and settle() returns 0 (as in lintwait.test.sh's t_lintwaitskip).
+  [ "$(cat "$STUB/checked" 2>/dev/null)" = after ] && grep -qx "$SFHELD" "$T/$CASE/run.out" && [ "$(sfout)" = "settle: 0" ] \
+    || fail "settle of #8, owed, ready and waiting on #7 (landBatch 2): its checks did not run once, after it waited for room ($(cat "$STUB/checked" 2>/dev/null)): $(cat "$T/$CASE/run.out")"
+}
 
 # Bug: two cards in flight that change the same file both went on to land, and the second met "rebase onto main
 # conflicts". The second, #8, waits at its landing claim while #7 holds a.txt, its live record naming #7 and the file,

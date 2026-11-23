@@ -9,8 +9,11 @@ on the values in `conveyor/lib/control-defaults.json`; a record keeps each value
 tab). The cap counts every card of the project on the belt, in any step: its brief, build, fix, review (with the
 judge), Test step or any wait. The only cards it leaves out are those that land or push, or have landed or pushed. A
 card that waits at its landing claim on another card still counts. A card whose landing fails (main moved, a conflict)
-counts again at once. The loop starts no card until the count is under the cap, so for a short time the belt can hold
-more cards than the cap. The machine's test slots (the host file's
+counts again at once. Before it runs its checks or a session again, it waits until the count is under the cap and
+prints that it waits for room. The fix card of a red main does not wait: it goes on at once. `conveyor.sh shut`
+ends a card that waits for room. `conveyor.sh control stop` ends it too, but not a card that has filed the slices of its issue: that card goes on after the stop and finishes. A card that waits on such a card at its claim can lend its room to it: when its own
+wait ends, it waits for room in the same way. The loop starts no card until the count is under the cap, so for a short
+time the belt can hold more cards than the cap. The machine's test slots (the host file's
 `testSlots`) limit tests apart from the cap. These waits count:
 
 - a wait at the landing claim on a card that changes the same files,

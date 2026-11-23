@@ -47,7 +47,7 @@
 - `conveyor.sh shut <issue>` or `conveyor.sh shut <card id>` stops an open card. It ends the card's processes, keeps
   its work as `retry` keeps it, and closes the card with the reason "shut by the owner". It holds nothing, and the
   loop does not pick the issue again on its own: `retry <issue>` gives the card back. A card in its land step is left
-  to land. A card that has started to file its follow-ups or the slices of its issue is left to finish. `shut` prints what it did. If it did nothing, it says why and exits 1, for example when the issue has no
+  to land, but a card that waits for room under the card cap after its landing failed is stopped. A card that has started to file its follow-ups or the slices of its issue is left to finish. `shut` prints what it did. If it did nothing, it says why and exits 1, for example when the issue has no
   card or its card landed.
 - `conveyor.sh retry <issue> --fresh` gives a blocked card back without its kept work: the next card builds from
   nothing. The kept work moves to a dated folder under `kept-dropped/` in the state folder; it is not deleted.

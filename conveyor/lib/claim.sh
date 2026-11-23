@@ -400,7 +400,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
         || { bl=false bf=false bp=0; }
       [ "$bl" != true ] || { rm -f "$3.idle"; return 3; }
       # That run was the batch card's: its wait and run are not known here (testrec()).
-      [ "$bf" != true ] || { trc=$bt; sec=$bs; TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; rm -f "$3.batch" "$3.idle"; return 4; }
+      [ "$bf" != true ] || { trc=$bt; sec=$bs; TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; rm -f "$3.batch" "$3.idle"; capowed "$1" "$2" "$3" "$5"; return 4; }
       if kill -0 "$bp" 2>/dev/null; then [ -n "$w" ] || { : > "$3.idle"; sleep "$LIVE"; continue; }; else rm -f "$3.batch"; fi
     fi
     # Told to wait, it is stacked on that card instead when it can be (stackto()): fitted below onto the stack's base
@@ -437,7 +437,8 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       # landed or failed its tests).
       [ -z "$parsecheck" ] || [ ! -e "$3.stack" ] || ! parses "$3" >/dev/null 2>&1 || parsecheck=''
       if [ -z "$parsecheck" ] && [ -e "$3.ready" ] && ! jq -e '.tested == true or .alone == true or .stackred == true' "$3.ready" >/dev/null 2>&1 && packget landBatch b && [ "$b" -gt 1 ]; then
-        rm -f "$3.idle" "$3.nocap"
+        # Its wait so far may have lent its slot under the cap to a held card (capowed(), lib/cardland.sh).
+        rm -f "$3.idle" "$3.nocap"; capowed "$1" "$2" "$3" "$5"
         # The gate for a waiting card first (lintwait(), lib/lint.sh): a finding or an execution error removes
         # <worktree>.ready, so it waits on with no check, test or session, and its landing gate deals with it. Its lint
         # line goes after the wait's start line: a new start line makes the wait the card's last step again, so the
@@ -466,7 +467,8 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       : > "$3.idle"; sleep "$LIVE"; continue
     fi
     # The wait ended: a later wait of this call begins anew, what the card waited before it counted once.
-    rm -f "$3.idle" "$3.nocap"; [ -z "$waited" ] || { rm -f "$3.live"; waited=''; }
+    # Its slot under the cap may have gone to a held card while it waited: it waits for room first (capowed(), lib/cardland.sh).
+    rm -f "$3.idle" "$3.nocap"; [ -z "$waited" ] || { rm -f "$3.live"; waited=''; }; capowed "$1" "$2" "$3" "$5"
     old=$(git -C "$3" rev-parse HEAD 2>&1) || { block "$1" "$2" "$3" "$5: the engine could not read the commit of the worktree:${old:0:300}"; return 1; }
     [ "$old" != "$(git rev-parse "$onto" 2>/dev/null)" ] || return $moved
     # Stacked, it is reviewed again on the base. A stacked card that waits no more (that card landed, or failed its

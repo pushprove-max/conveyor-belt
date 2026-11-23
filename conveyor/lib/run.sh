@@ -29,15 +29,15 @@
 # has begun filing its follow-ups or landing is left to finish: stopped there, it could leave filed issues with no
 # landing. So is a card that has begun filing the slices of a split (splitcheck(), growcheck(): lib/slices.sh) or has
 # filed them: stopped, its issue would go back to the queue with its slices open. Under the lock, none of them can
-# begin either while this asks. A card that waits at its land step for a release run (releasewait(), lib/push.sh)
-# or for another card's landing turn (landwait(), lib/claim.sh) has begun neither (a follow-up it filed before the hold refused its landing was withdrawn), and ends (bug #1076:
-# left, it landed after the stop once the run ended). Each card that ends has its processes killed here, all of them (the card, its session
-# or review, the timeout around it), and prints its card id.
+# begin either while this asks. A card that waits at its land step for a release run (releasewait(), lib/push.sh) or for another card's landing turn (landwait(), lib/claim.sh),
+# or after a landing that failed waits for room under the cap (caphold(), lib/cardland.sh), has begun neither (a follow-up it filed before the hold refused its landing was withdrawn), and ends (bug #1076:
+# left, it landed after the stop once the run ended), unless it has filed slices: then it is left to finish, and the stopped loop's turn lets it go from its wait for room
+# (capfree(), lib/cardland.sh, in turncount()). Each card that ends has its processes killed here, all of them (the card, its session or review, the timeout around it), and prints its card id.
 halt() { # <pid> <card> lines
   local p c
   while read -r p c; do
     [ -n "$p" ] && kill -0 "$p" 2>/dev/null || continue
-    stdb ask card "$c" 2>/dev/null | jq -es --arg c "$c" 'map(select(.card == $c)) | (last | .step == "start" and (.waitFor | IN("release", "turn"))) as $w
+    stdb ask card "$c" 2>/dev/null | jq -es --arg c "$c" 'map(select(.card == $c)) | (last | .step == "start" and (.waitFor | IN("release", "turn", "cap"))) as $w
       | ($w | not) and (any(.step | IN("filed", "landed", "closed", "blocked")) or (last | .step == "start" and (.of | IN("file", "land"))))
       or any(.[]; (.split, .grown) | objects | (.filed, .cards) | type == "array" and length > 0)' >/dev/null 2>&1 && continue
     kill -TERM $(tree "$p") 2>/dev/null; echo "$p $c"
@@ -343,8 +343,8 @@ unstick() { # <issue>
 }
 # `shut <issue | card id>` (#1030): each open card named, every one of the issue's or the one card, is ended as
 # endcard() ends a card stuck in flight, whatever its step and whether its process runs, outside the records' lock,
-# and blocked with OWNSHUT, its work kept; shut() then closes it. A card in its land step is left as it is: its change
-# may be going onto main. So is one that has begun filing issues (its last start line is of file: its follow-ups, or the
+# and blocked with OWNSHUT, its work kept; shut() then closes it. A card in its land step is left as it is: its change may be going onto main (but one whose landing failed and that waits for room under the cap, caphold() in
+# lib/cardland.sh, is ended: no landing of it is under way, and its follow-ups were withdrawn first; w is cap then). So is one that has begun filing issues (its last start line is of file: its follow-ups, or the
 # slices of a split, lib/slices.sh), as halt() leaves it: ended there, it would leave some of them open on GitHub, or a
 # split's umbrella not held. A card that has filed them and begun its next step (a grown split's fix, growcheck()) is
 # ended as any other. Bug: shut ended a card while it filed the
@@ -355,7 +355,7 @@ unstick() { # <issue>
 # until they time out. Bug (issue 1385): shut read the step, the card then began filing, and shut ended it with a slice
 # filed. Prints a line for each card it ended; a card left is said on stderr, as is one whose records cannot be read.
 shutopen() { # <issue | card id>
-  local c n p q s t how k
+  local c n p q s t how k w
   [ -n "${NAMED:-}" ] || names || return 1
   if [[ $1 =~ ^[0-9]+$ ]]; then c=$(stdb ask issue cards "$1" 2>/dev/null | jq -r '.card' 2>/dev/null | sort -u)
   else c=$1; fi
@@ -365,9 +365,9 @@ shutopen() { # <issue | card id>
     for q in $k; do [[ $(ps -o args= -p "$q" 2>/dev/null) != *state.py* ]] || kill -CONT "$q" 2>/dev/null; done
     # A card the loop blocked meanwhile has no step now: it is ended as before (endcard() reads it closed), shut's own.
     ! read -r _ t _ < <(stuckcard "$c" any) || s=$t
-    n=''; read -r n q < <(stdb ask card "$c" 2>/dev/null | jq -rs --arg c "$c" 'map(select(.card == $c)) | "\(first | .issue) \(map(select(.step == "start")) | last | .of // "none")"' 2>/dev/null)
+    n=''; read -r n q w < <(stdb ask card "$c" 2>/dev/null | jq -rs --arg c "$c" 'map(select(.card == $c)) | "\(first | .issue) \(map(select(.step == "start")) | last | .of // "none") \(last | if .step == "start" then .waitFor // "none" else "none" end)"' 2>/dev/null)
     if [[ ! $n =~ ^[0-9]+$ ]]; then echo "conveyor: card $c: its records could not be read; it is left as it is" >&2; s=''
-    elif [ "$s" = land ]; then echo "conveyor: card $c is in its land step; it is left to land" >&2; s=''
+    elif [ "$s" = land ] && [ "$w" != cap ]; then echo "conveyor: card $c is in its land step; it is left to land" >&2; s=''
     elif [ "$q" = file ]; then echo "conveyor: card $c has begun filing its follow-ups or the slices of its issue; it is left to finish" >&2; s=''; fi
     [ -n "$s" ] || { [ "$how" != running ] || [ -z "$k" ] || kill -CONT $k 2>/dev/null; continue; }
     [ "$how" != gone ] || p=''
@@ -548,11 +548,11 @@ turnside() {
 turncount() {
   local p c on='' off='' past pidle rev tst
   cardsrun; waits=''
-  # The cards counted against the cap (building): every card running, in any step and waiting or not, but a card that lands
-  # (offcap()). running still counts every card: the loop ends only once none is left.
-  # A card that waits for its seat's CLI starts its step again once the host lists the CLI (cliwake()).
+  # The cards counted against the cap (building): every card running, in any step and waiting or not, but a card that lands (offcap()). running still counts every card: the loop ends only once none is left.
+  # A card that waits for its seat's CLI starts its step again once the host lists the CLI (cliwake()). A card whose landing did not land works again once there is room under the cap (caphold(), lib/cardland.sh).
+  # A stopped loop lets it go too: stop (halt(), in turnended() before this) ended each held card but one that has filed slices, which it leaves to finish, and the stopped loop starts no card that could take its room.
   for p in "${!mine[@]}"; do c=${mine[$p]% *}; if [ -e "$CARDS/$c.nocap" ] || batchlanded "$c"; then off+="$p $c"$'\n'; else on+="$p $c"$'\n'; fi; done
-  cliwake "$off$on"
+  cliwake "$off$on"; capfree "$off$on" "$cap"
   read -r past pidle rev tst <<<"$(offcap "$off")"
   building=$((running - past)); [ "$building" -ge 0 ] || building=0
   idles=$(( $(idle "$on") + pidle )) # every waiting card, for the machine's count and loop.json

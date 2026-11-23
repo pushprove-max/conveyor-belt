@@ -372,9 +372,73 @@ cardfailed() {
   fi
   go=''
 }
+# A card of the loop (LOOPCARD, cardrun(), lib/run.sh) whose landing did not land, before it works again (its lint,
+# checks, tests or a session): its land step was off the cap, so the loop may have filled the cap with new cards
+# meanwhile. It sleeps, <worktree>.capheld and <worktree>.idle standing, until a turn of the loop finds room for it
+# under the cap and takes both marks away (capfree()). It wakes the loop (wakeloop(), lib/control.sh), so with room
+# already there that turn comes at once. Its start line marked waitFor: cap says so, and stop (halt(), lib/run.sh)
+# and `shut` (shutopen(), lib/run.sh) end a card that waits here: no landing of it is under way. Its landing turn
+# (turnon(), lib/claim.sh) ends first: a card that waits for that turn at its land step counts against the cap, so
+# the two would wait on each other for ever. A card that no loop runs (land-branch, `lane fast land`) has no turn to
+# let it go: it goes on at once. Nor does a main-red fix card (issue 0, no branch: card()'s br; redfix(), lib/run.sh)
+# wait: the cards that fill the cap may wait for main (mainwait(), lib/mainred.sh), so for its fix, and the loop picks
+# no other fix card while it is open. As it waits, its live record says so and is brought up to date (as in
+# releasewait(), lib/push.sh), so `health` and the loop's stuck check (turnended(), lib/run.sh) see a card that waits.
+caphold() { # <card> <issue> <worktree> <the step it waits to work in> [why it waits, after "card <card>"]
+  local at
+  [ -n "${LOOPCARD:-}" ] && { [ "$2" != 0 ] || [ -n "${br:-}" ]; } || { rm -f "$3.capheld"; return 0; }
+  : > "$3.capheld" || return 0
+  locked turnfree "$1"
+  record "$1" "$2" start ok "$(jq -cn --arg s "$4" '{of: $s, waitFor: "cap"}')"
+  echo "conveyor: card $1 ${5:-did not land}; it waits for room under the card cap before it works again"; wakeloop
+  at=$(date -u +%FT%TZ)
+  while [ -e "$3.capheld" ]; do
+    jq -cn --arg s "$4" --arg at "$at" '{step: $s, at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
+      action: "waiting for room under the card cap"}' > "$3.live.tmp" 2>/dev/null && mv -f "$3.live.tmp" "$3.live"
+    : > "$3.idle"; sleep "$LIVE"
+  done
+  rm -f "$3.live" "$3.idle"
+}
+# A card that slept out a wait at its claim (settle(), lib/claim.sh), before it works again: while it slept, capfree()
+# left it out of its count and may have let a held card go in its slot. Then its <worktree>.capheld holds "owed", and
+# it waits for room as a held card does (caphold()). Only the card itself takes that mark away, here.
+capowed() { # <card> <issue> <worktree> <the step it waits to work in>
+  [ -s "$3.capheld" ] || return 0
+  caphold "$1" "$2" "$3" "$4" "waited on another card"
+}
+# In the loop's turn (turncount(), lib/run.sh): lets go of the held cards (caphold()) while the cards that work and
+# count against the cap are fewer than the cap, and takes away their .idle as it does, so a card let go counts from then.
+# Only a card that waits on another card at its claim (settle(), lib/claim.sh: <worktree>.idle, with its live record
+# naming that card and what it waited, or <worktree>.batch the batch card that took it) is not counted here, so a card
+# that waits on a held card's files does not keep it held for ever. A card that waits at its land step for the landing
+# turn (landwait(), lib/claim.sh) also names a card, but it counts: it goes on with no look at the cap. Before a held
+# card is let go in a turn that left such cards out, each of them gets "owed" in its <worktree>.capheld, so it waits for
+# room when its wait ends (capowed()); one whose .idle is gone once the mark is written works already, so its mark goes
+# and it counts. A card marked "owed" in an earlier turn that has no .idle counts, and its mark stays: its wait may have
+# ended before it read the mark. Every other waiting card counts: it works again with no look at the cap (one that
+# waits for its seat's CLI, cliwake(), lib/run.sh; for main or the machine hold, lib/mainred.sh).
+capfree() { # <the loop's own cards in progress, "<pid> <card>" one a line> <the cap>
+  local p c s n=0 held=() lent=()
+  while read -r p c; do
+    [ -n "$c" ] && kill -0 "$p" 2>/dev/null && ! batchlanded "$c" || continue
+    if [ -s "$CARDS/$c.capheld" ]; then [ ! -e "$CARDS/$c.idle" ] || continue
+    elif [ -e "$CARDS/$c.capheld" ]; then held+=("$c"); continue
+    elif [ -e "$CARDS/$c.idle" ] && { [ -e "$CARDS/$c.batch" ] || jq -e '(.waits.on | type) == "string" and (.waited | type) == "object"' "$CARDS/$c.live" >/dev/null 2>&1; }; then lent+=("$c"); continue; fi
+    read -r s 2>/dev/null < "$CARDS/$c.nocap" && [ "$s" = land ] && continue
+    n=$((n + 1))
+  done <<<"$1"
+  [ ${#held[@]} != 0 ] && [ "$n" -lt "$2" ] || return 0
+  for c in "${lent[@]}"; do
+    [ -e "$CARDS/$c.capheld" ] || echo owed > "$CARDS/$c.capheld"
+    [ ! -e "$CARDS/$c.idle" ] || continue
+    [ ! -s "$CARDS/$c.capheld" ] || rm -f "$CARDS/$c.capheld"; n=$((n + 1))
+  done
+  for c in "${held[@]}"; do [ "$n" -lt "$2" ] || break; rm -f "$CARDS/$c.capheld" "$CARDS/$c.idle"; n=$((n + 1)); done
+}
 # The land step, its tests passed: files the follow-ups of a last review and lands, run again while a release run,
 # an ordered or ready card or main moving holds it. go: landed, again (cardlanding() again), next or out.
 cardland() {
+  local capdue='' # a landing of this call did not land: the card counts against the cap again and waits for room before it works (caphold())
   while :; do
     # While a release run is under way (relhold(), lib/push.sh) it waits here, at its land step, and lands once the
     # run has ended: on main as the release left it, where it is fitted again (STALE, below).
@@ -390,6 +454,8 @@ cardland() {
     # land() reads the same mark under the lock, so a card passed after this reading does not land: it comes back here.
     # A card that tested in a batch is tested again after it.
     if jq -e '.passed == true' "$wt.claim" >/dev/null 2>&1; then
+      # It is fitted again or runs its checks below: after a landing that did not land, it waits for room first.
+      [ -z "$capdue" ] || caphold "$c" "$n" "$wt" land; capdue=''
       t=${#mates[@]}; unmate; old=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
       redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
       [ $rc != 1 ] || return
@@ -431,14 +497,19 @@ cardland() {
       || { block "$c" "$n" "$wt" "the card landed, but the engine could not write its leftover findings to the declined list. The findings are in the kept review"; return; }; go=landed; return; }
     # Not landed (main moved, a release run or a landing turn, a conflict): it lands no more now, so the loop counts it against
     # the cap again (capmark(), lib/run.sh) while it waits, rebuilds or runs its lint and checks again, until its next step begins.
-    # Cards the loop started while it landed stay: the belt holds more than the cap until the count is under it again.
+    # Cards the loop started while it landed stay; before it works again (its lint, checks, tests or a session) it
+    # waits for room under the cap among them (caphold()), so a landing that failed never puts more cards to work than the cap.
     rm -f "$wt.nocap"
     # A batch that did not land. Main moved again before it could: it stays a batch, and its run is found to stand
     # on main as it is now, or it is tested again there (rebatch()). Else its other cards wait on at their claims,
     # and the card is tested alone, then tries alone, in no batch (its batch's run judged it with them).
     if [ ${#mates[@]} != 0 ] && [ "$t" != "$STALE" ] && [ "$t" != "$RELHELD" ] && [ "$t" != "$TURNHELD" ]; then
       unmate
-      [[ $t == "landed as "* ]] || { echo "conveyor: card $c: its batch did not land, so it is tested alone: $t"; rm -f "$wt.ready"; go=again; return; }
+      [[ $t == "landed as "* ]] || { echo "conveyor: card $c: its batch did not land, so it is tested alone: $t"; rm -f "$wt.ready"
+        # Its follow-ups are withdrawn first, as below: stop ends a card that waits for room (caphold()).
+        # shellcheck disable=SC2046 # the filed follow-ups' issue numbers, one word each
+        [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups"); ups=''; left=''; dec=''
+        caphold "$c" "$n" "$wt" land; go=again; return; }
     fi
     [ "$t" = "$PASSED" ] || [ "$t" = "$STALE" ] || [ "$t" = "$RELHELD" ] || [ "$t" = "$TURNHELD" ] || { go=out; return; }
     # Passed, or main moved, or a release run began, or another card took the landing turn, while it went to land: its
@@ -447,7 +518,11 @@ cardland() {
     # onto main as it is now and its checks run again there, its tests only when the fitted change is not the one that passed.
     # shellcheck disable=SC2046 # the filed follow-ups' issue numbers, one word each
     [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups"); ups=''; left=''; dec=''
-    [ "$t" != "$STALE" ] || { go=again; return; }
+    # Main moved: it is fitted again and runs its checks, so it waits for room first. Else (a card went past it, a
+    # release run or another card's landing turn) it waits for room once it is found passed (above), which it may be
+    # only after its wait for the run or the turn.
+    [ "$t" != "$STALE" ] || { caphold "$c" "$n" "$wt" land; go=again; return; }
+    capdue=1
   done
 }
 # A landing that did not land (its reason in t): the one rebuild of a GO card whose change no longer applies to main,
@@ -462,6 +537,8 @@ landconflict() {
     # when the clash is in documentation alone (docsonly()).
     docs=$(cardpatch "$wt" ':(exclude)*.md'); docsonly "$wt.patch" "$docs" || docs=''; docpass=''; ! testedhere "$wt" || docpass=$docs
     rebased=1; caught=1; locked giveway "$c" "$wt"; why=$t; old=$(git -C "$wt" rev-parse HEAD 2>/dev/null); printf '%s\n' "$old" > "$wt.base"
+    # It waits for room before the reset, so the session starts on main as it is once the wait ends.
+    caphold "$c" "$n" "$wt" rebase
     err=$(git -C "$wt" reset -q --hard "refs/heads/$BRANCH" 2>&1) \
       || { block "$c" "$n" "$wt" "$why [the engine could not reset the worktree to main for the rebuild:${err:0:300}]"; return; }
     began "$c" "$n" rebase
@@ -488,6 +565,7 @@ landconflict() {
     finend=$ended
     # shellcheck disable=SC2046 # the filed follow-ups' issue numbers, one word each
     [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups"); ups=''; left=''; dec=''
+    caphold "$c" "$n" "$wt" rebase # before the reset, as for the rebuild above
     err=$(git -C "$wt" reset -q --hard "refs/heads/$BRANCH" 2>&1) \
       || { block "$c" "$n" "$wt" "$why [the engine could not reset the worktree to main for the port:${err:0:300}]"; return; }
     began "$c" "$n" rebase

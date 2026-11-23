@@ -95,6 +95,198 @@ t_capstale() {
   capwaitend
 }
 
+# Bug it catches (follow-up of issue 1538): a card whose landing found main moved ran its checks again at once, beside
+# the cards the loop had picked while its land step was off the cap, so more cards worked than the cap. At cap 1, #17
+# is held in its land step, #18 is picked meanwhile and held in its build, and main moves: #17's landing is stale. It
+# must wait (<worktree>.capheld, caphold()) and run its checks again only once #18 no longer counts (it is in its land
+# step). The case holds #18 at its after reading of the limit, in its land step, and the second checks of #17 note
+# #18's land mark as they start: one let go while #18 was in its build notes none, and one let go in its review or Test
+# step notes review or test (E3 of a later review).
+# It runs the real loop: the hold is let go by the loop's turn (capfree() in turncount()) as #18's own process moves
+# its marks, and the stale landing comes from cardland() itself; a direct call reads only marks the case wrote.
+t_capstaleheld() {
+  capwaitsetup "$(jq -cs . <(issue 17 2026-01-03) <(issue 18 2026-01-04))"
+  echo 'case $PWD in *-18) : > "$STUB/building18"; flock "$STUB/build18.gate" true ;; esac; echo "${PWD##*-}" > "f${PWD##*-}.txt"' > "$STUB/build"
+  # Each card's first product checks run on; a second run of #17's (after its stale landing) is marked, with #18's
+  # land mark as it stands then (none when #18 has no .nocap).
+  printf '%s\n' "n=\${PWD##*-}; [ ! -e \"\$STUB/checked\$n\" ] || { cat \"$T/$CASE/cards/\"*-18.nocap > \"\$STUB/at18\" 2>/dev/null || echo none > \"\$STUB/at18\"; : > \"\$STUB/rechecked\$n\"; }; : > \"\$STUB/checked\$n\"" > "$STUB/recheck.sh"
+  tune --arg c "$STUB/recheck.sh" '.checks = [$c]'
+  local lk
+  # shellcheck disable=SC2034 # gate_limit is read by ungate() and capwaitrun()
+  exec {lk}>>"$ST/limit.jsonl.lock" && flock "$lk" && gate_limit=$lk || fail "the case could not hold the limit reading's lock"
+  gate build18; capwaitrun
+  wait_until '[ -e "$STUB/building18" ]' 'cat "$STUB/run.out"' || fail "#18 was not picked while #17 was in its land step with the cap at 1"
+  (cd "$R" && echo other > other.txt && git add other.txt && git commit -qm "another file") || fail "the case could not move main"
+  ungate limit
+  wait_until 'compgen -G "$T/$CASE/cards/*-17.capheld" >/dev/null' 'cat "$STUB/run.out"' || fail "#17's landing found main moved, but #17 did not wait for room under the cap of 1 with #18 building: $(cat "$STUB/run.out")"
+  turns 3 # each would have let #17 go, were #18's build left out of the count
+  [ ! -e "$STUB/rechecked17" ] || fail "#17 ran its product checks again beside #18's build with the cap at 1"
+  # #18 cannot land now: it waits at its after reading of the limit, in its land step, until the case lets it go.
+  # shellcheck disable=SC2034 # gate_limit is read by ungate()
+  exec {lk}>>"$ST/limit.jsonl.lock" && flock "$lk" && gate_limit=$lk || fail "the case could not hold the limit reading's lock again"
+  ungate build18
+  wait_until '[ -e "$STUB/rechecked17" ]' 'cat "$STUB/run.out"' || fail "#17 did not run its checks again once #18 had left the cap: $(cat "$STUB/run.out")"
+  [ "$(cat "$STUB/at18")" = land ] || fail "#17 ran its checks again with the cap at 1 while #18 still counted (its land mark then: $(cat "$STUB/at18")), not yet in its land step"
+  ungate limit
+  capwaitend
+}
+
+# Bugs it catches (E1 of this follow-up): capfree() left every card with <worktree>.idle out of its count. At cap 1,
+# a card that waits for its seat's CLI (cliwake() starts it with no look at the cap), or a held card let go in an
+# earlier turn and not awake yet (its .idle still there), left the slot free, so a held card was let go beside it.
+# A card that waits on the held card at its claim (its live record names that card) is still left out, or the two
+# would wait on each other for ever. capfree() is called alone on marks the case writes: each state is one a card's
+# own wait writes (seatlive(), lib/control.sh; settle(), lib/claim.sh; landwait(), lib/claim.sh).
+# Bugs it catches too (E3, E6 of a later review): a card marked "owed" in an earlier turn, its claim wait just ended
+# (.idle gone) but its mark not yet read, had the mark taken away by the turn, so it went on beside the held card it
+# had lent its slot to; and a card that waits at its land step for the landing turn (its live record names a card,
+# with no waited field) lent its slot, though it never reads the mark.
+t_capfreecount() {
+  setup '[]'; local C=$T/$CASE/cards; mkdir -p "$C"
+  command sleep 60 & local p=$! # sleep: a stand-in for the cards' processes, alive
+  cfree() { # <the other card's marks: cli, claim, woken, land or owed>; prints whether held card c1 is still held after a turn at cap 1, and c2's mark
+    rm -f "$C"/c*; : > "$C/c1.capheld"; : > "$C/c2.idle"
+    case $1 in
+      cli) jq -cn '{step: "review", cli: "claude", action: "waiting for claude"}' > "$C/c2.live" ;;
+      claim) jq -cn '{step: "test", waits: {on: "c1", paths: ["a.txt"]}, waited: {before: 0, behind: ["c1"]}}' > "$C/c2.live" ;;
+      land) jq -cn '{step: "land", waits: {on: "c1", paths: []}}' > "$C/c2.live" ;;
+      owed) rm -f "$C/c2.idle"; echo owed > "$C/c2.capheld" ;;
+    esac
+    CONVEYOR_MAIN=$R CONVEYOR_CARDS=$C bash -c '. "$1/conveyor.sh" state-dir > /dev/null && . "$1/lib/card.sh" && . "$1/lib/run.sh" && capfree "$2 c2"$'"'\n'"'"$2 c1" 1' _ "$SRC" "$p" \
+      || echo "capfree failed"
+    { [ -e "$C/c1.capheld" ] && echo held || echo free; } | tr -d '\n'; echo " $(cat "$C/c2.capheld" 2>/dev/null)"
+  }
+  local r
+  r=$(cfree cli); [ "$r" = "held " ] || fail "capfree with cap 1, c2 waiting for its CLI (live: cli claude) and c1 held: c1 was let go ($r)"
+  r=$(cfree woken); [ "$r" = "held " ] || fail "capfree with cap 1, c2 let go from its hold in an earlier turn (.idle, no live record) and c1 held: c1 was let go ($r)"
+  r=$(cfree claim); [ "$r" = "free owed" ] || fail "capfree with cap 1, c2 waiting at its claim on c1 (live: waits.on c1, waited) and c1 held: c1 stayed held, or c2 was not marked owed ($r)"
+  r=$(cfree land); [ "$r" = "held " ] || fail "capfree with cap 1, c2 waiting at its land step for c1's landing turn (live: waits.on c1, no waited) and c1 held: c2 lent its slot ($r)"
+  r=$(cfree owed); [ "$r" = "held owed" ] || fail "capfree with cap 1, c2 marked owed with no .idle (its wait just ended) and c1 held: c1 was let go, or c2's mark was taken away ($r)"
+  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null || :
+}
+
+# Bug it catches (E4 of a later review): a card that no loop runs (land-branch, `lane fast land`) whose landing found
+# main moved waited in caphold() for a loop's turn that never came. With no LOOPCARD, caphold() returns at once and
+# leaves no mark; its sleep is made to end the call (exit 7), so a hold shows as rc 7, not as a hang.
+# Bug it catches too (E1 of a later review): a main-red fix card (issue 0, no branch) whose landing found main moved
+# waited for room under a cap filled by cards that wait for main, so for its fix: none could go on. It goes on at once.
+t_capholdnoloop() {
+  setup '[]'; mkdir -p "$T/$CASE/cards"
+  # The engine's commands are a here-document: its lines are read one by one by the test lint, its comments too.
+  fx_in "$(cat <<'EOF'
+unset LOOPCARD; sleep() { [ "${FUNCNAME[1]}" != caphold ] || exit 7; command sleep "$@"; } # sleep: a stand-in that ends a hold, never a wait for a condition
+caphold c1-1 1 "$CARDS/c1-1" land; echo "back $([ -e "$CARDS/c1-1.capheld" ] && echo marked || echo clean)"
+LOOPCARD=1 br=''; caphold c2-0 0 "$CARDS/c2-0" land; echo "fix back $([ -e "$CARDS/c2-0.capheld" ] && echo marked || echo clean)"
+EOF
+)"
+  grep -qx "back clean" "$T/$CASE/run.out" \
+    || fail "caphold c1-1 1 <worktree> land, with no LOOPCARD: it waited for a loop's turn (rc $RC) or left its mark: $(cat "$T/$CASE/run.out")"
+  [ "$RC" = 0 ] && [ "$(tail -n 1 "$T/$CASE/run.out")" = "fix back clean" ] \
+    || fail "caphold c2-0 0 <worktree> land, with LOOPCARD=1 and br='' (a main-red fix card): it waited for room under the cap (rc $RC) or left its mark: $(cat "$T/$CASE/run.out")"
+}
+
+# Bugs it catches (E5 of two later reviews): stop spared a card that waits for room after its landing failed, as its
+# last land step's start line looked like a landing under way; and a card spared as it has filed slices (halt() leaves
+# it to finish) then waited for room for ever, as a stopped loop's turn let no held card go. Both cards wait in
+# caphold() in their own processes; as in the loop's turn, halt() (turnended()) runs first, then turncount().
+# Bug it catches too (E2 of a later review): a card that waited for room wrote no live record, so `health` listed it as
+# stuck once SESSION_STUCK passed, and the loop's stuck check (turnended()) could end it. Its live record is checked
+# while it waits, written again after the case makes it old (E5 of a later review: a record written once goes stale),
+# and gone once it is let go.
+t_capstop() {
+  setup '[]'; mkdir -p "$T/$CASE/cards"
+  # The engine's commands are a here-document, as in t_capholdnoloop.
+  fx_in "$(cat <<'EOF'
+LOOPCARD=1 LIVE=0.2; record c1-1 1 start ok '{"of":"land"}'
+record c2-2 2 grown split '{"grown":{"mode":"on","files":5,"limit":3,"verdict":"split","why":"too big","filed":[101]}}'; record c2-2 2 start ok '{"of":"land"}'
+( caphold c1-1 1 "$CARDS/c1-1" land ) & p1=$!
+( caphold c2-2 2 "$CARDS/c2-2" land ) & p2=$!
+i=0; until { [ -e "$CARDS/c1-1.idle" ] && [ -e "$CARDS/c2-2.idle" ]; } || [ $i -gt 100 ]; do command sleep 0.1; i=$((i + 1)); done # sleep: wait_until is not loaded in the engine shell fx_in runs
+echo "live $(jq -r '"\(.step) \(.last | fromdate > now - 60) \(.action)"' "$CARDS/c1-1.live" 2> /dev/null)"
+# The live record is made old; a wait that wrote it once and never again leaves it old.
+jq -c '.last = "2000-01-01T00:00:00Z"' "$CARDS/c1-1.live" > "$CARDS/c1-1.live.old" && mv -f "$CARDS/c1-1.live.old" "$CARDS/c1-1.live"
+i=0; until jq -e '.last | fromdate > now - 60' "$CARDS/c1-1.live" > /dev/null 2>&1 || [ $i -gt 50 ]; do command sleep 0.1; i=$((i + 1)); done # sleep: a bounded wait for caphold()'s next write of the record (LIVE, set below 1 s)
+echo "refreshed $(jq -r '.last | fromdate > now - 60' "$CARDS/c1-1.live" 2> /dev/null)"
+printf '%s c1-1\n%s c2-2\n' "$p1" "$p2" | halt | sed -e "s/^$p1 /ended /" -e "s/^$p2 /ended /"
+# run()'s own variables that turncount() reads, as a stopped loop whose stop spared c2-2 has them
+declare -A mine=([$p2]="c2-2 2") took=(); now=stopped cap=1 mhold="" htried=0 old="" why="" self="" said="" serve=""
+turncount > /dev/null 2>&1
+i=0; while { kill -0 "$p1" || kill -0 "$p2"; } 2> /dev/null && [ $i -lt 50 ]; do command sleep 0.1; i=$((i + 1)); done # sleep: a bounded wait, so a card left waiting fails the case, not hangs it
+for p in "$p1" "$p2"; do if kill -0 "$p" 2> /dev/null; then echo "alive $p"; kill -TERM $(tree "$p") 2> /dev/null; fi; done
+echo "c2-2 $([ -e "$CARDS/c2-2.capheld" ] && echo held || echo free) $([ -e "$CARDS/c2-2.live" ] && echo live || echo nolive)"
+EOF
+)"
+  grep -qx 'live land true waiting for room under the card cap' "$T/$CASE/run.out" \
+    || fail "caphold c1-1 1 <worktree> land, waiting: no live record of its land step brought up to date, so health and the loop's stuck check saw a card that says nothing: $(cat "$T/$CASE/run.out")"
+  grep -qx 'refreshed true' "$T/$CASE/run.out" \
+    || fail "caphold c1-1 1 <worktree> land, waiting with LIVE=0.2, its live record made old: the wait wrote the record once and never again, so it went stale while the card waited: $(cat "$T/$CASE/run.out")"
+  grep -qx 'ended c1-1' "$T/$CASE/run.out" && ! grep -q 'ended c2-2' "$T/$CASE/run.out" \
+    || fail "halt on c1-1 (its last line: start, of land, waitFor cap) and c2-2 (the same, with slices filed): it spared c1-1 or ended c2-2: $(cat "$T/$CASE/run.out")"
+  grep -qx 'c2-2 free nolive' "$T/$CASE/run.out" && ! grep -q '^alive' "$T/$CASE/run.out" \
+    || fail "turncount with now=stopped, cap 1 and only c2-2 (spared, with slices filed) left: c2-2 still waited for room, or its live record of the wait stayed: $(cat "$T/$CASE/run.out")"
+  recok "$ST/cards.jsonl" "caphold c1-1 1 and c2-2 2 <worktree> land"
+}
+
+# Bug it catches (E8 of a later review): a card that waited for room kept its landing turn, and a card that waits at
+# its land step for that turn (landwait(), lib/claim.sh) counts against the cap, so at cap 1 neither went on. caphold()
+# ends the turn before it waits; its sleep, a stand-in for the loop's turn, reads the turn and lets the card go.
+t_capholdturn() {
+  setup '[]'; mkdir -p "$T/$CASE/cards"
+  # The engine's commands are a here-document, as in t_capholdnoloop.
+  fx_in "$(cat <<'EOF'
+LOOPCARD=1; echo '{}' > "$CARDS/c1-1.claim"; locked turntake c1-1 $$; echo "before: $(turnon || echo none)"
+sleep() { [ "${FUNCNAME[1]}" = caphold ] || { command sleep "$@"; return; }; echo "held: $(turnon || echo none)"; rm -f "$CARDS/c1-1.capheld"; } # sleep: a stand-in for the loop's turn that lets the card go
+caphold c1-1 1 "$CARDS/c1-1" land
+EOF
+)"
+  [ "$RC" = 0 ] && grep -qx 'before: c1-1' "$T/$CASE/run.out" && grep -qx 'held: none' "$T/$CASE/run.out" \
+    || fail "caphold c1-1 1 <worktree> land, c1-1 holding the landing turn: it kept the turn while it waited for room (rc $RC): $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (E7 of a later review): a card whose landing met another card's landing turn (TURNHELD) went back to
+# wait for that turn, was then found passed, and was fitted again and ran its checks (settle()) at once, beside the
+# cards the loop picked while its land step was off the cap. cardland() is called with land() answering TURNHELD and
+# marking the card passed, caphold() and settle() stand-ins that say they ran: it waits for room before settle().
+t_caplandturn() {
+  setup '[]'; mkdir -p "$T/$CASE/cards"
+  # The engine's commands are a here-document, as in t_capholdnoloop.
+  fx_in "$(cat <<'EOF'
+c=c1-1 n=1 wt=$CARDS/c1-1 br="" sprompt="" issue="" last="" ups="" left="" dec="" yesfrom="" ro="[]" cmsg="m" mates=() t=""
+echo '{}' > "$wt.claim"
+releasewait() { :; }; landwait() { :; }; redbrief() { :; }; began() { :; }; landextra() { :; }
+locked() { [ "$1" = land ] || { "$@"; return; }; jq -c '.passed = true' "$wt.claim" > "$wt.claim.new" && mv -f "$wt.claim.new" "$wt.claim"; echo "$TURNHELD"; return 1; }
+caphold() { echo "caphold $4"; }; settle() { echo settle; return 1; }
+cardland; echo end
+EOF
+)"
+  [ "$(tr '\n' ' ' < "$T/$CASE/run.out")" = "caphold land settle end " ] \
+    || fail "cardland, land() answering TURNHELD and the card then passed: it did not wait for room before settle(): $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (E10 of a later review): the rebuild reset its worktree to main, then waited for room; a card that
+# landed meanwhile was not in it, so the session started on the earlier commit. A caphold() stand-in lands a commit on
+# main; the rebuild must start on it. rebasesetup and conflicted are port.test.sh's.
+t_caprebaseheld() {
+  rebasesetup 7
+  echo 'git log -1 --format=%s > "$STUB/started-on"; printf "ONE\ntwo\n" > a.txt' > "$STUB/rebuild"
+  conflicted 7 'caphold() { echo held > "$R/c.txt" && git -C "$R" add c.txt && git -C "$R" commit -qm "landed while it waited"; }; land1; go=end; landconflict; outcome'
+  [ "$(cat "$STUB/started-on" 2>&1)" = "landed while it waited" ] || fail "landconflict on #7, a card landing on main while it waited for room: the rebuild started on $(cat "$STUB/started-on" 2>&1)"
+}
+
+# Bug it catches (E11 of a later review): `shut` read a card that waits for room after its landing failed as in its
+# land step, and left it to land. Its last line is the land step's start marked waitFor: cap (caphold()); shut ends it.
+t_capshut() {
+  local p l out
+  setup "[$(issue 7 2026-01-01)]"
+  command sleep 600 & p=$! # sleep: a stand-in for the card's process, waiting for room
+  l='{card:"c1-7",issue:7,time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}'
+  jq -cn --argjson p "$p" --arg s "$(p_started "$p")" "$l"' | (. + {step:"worktree",pid:$p,started:$s}), (. + {step:"start",of:"land"}), (. + {step:"start",of:"land",waitFor:"cap"})' >> "$ST/cards.jsonl"
+  out=$(loop shut 7 2>&1)
+  ! kill -0 "$p" 2>/dev/null && grep -qF 'card c1-7 was open in its land step' <<<"$out" && [ -n "$(st 'select(.card == "c1-7" and .step == "blocked")')" ] \
+    || fail "shut 7, its card's last line the land step's start with waitFor cap: it was left to land: $out $(st 'select(.card == "c1-7")')"
+  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; return 0
+}
+
 # The loop's own count at its last turn, as loop.json gives it: "<building> <reviewing> <running>".
 cwsteps() { jq -r '"\(.building) \(.reviewing) \(.running)"' "$ST/loop.json" 2>/dev/null; }
 
