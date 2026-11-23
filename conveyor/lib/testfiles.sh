@@ -32,7 +32,7 @@
 #   (FAILURE); tail is null past the newest TESTKEEP), caught and changedToPass (those of them whose card landed: caught when the landed commit left the file as it was,
 #   so the fix went into the code; changedToPass when that commit changed the file),
 #   flaky (its entries in the flaky-test record, its cases' too, a runner's name for them as well), flakyAgain (the
-#   issue of its earlier fix when it is flaky again: two entries within FLAKY_DAYS days, FLAKYAGAIN in lib/flaky.sh; else null), issue (the issue last filed for it, the highest number of the slow-test record's, the test rules' log's and the Board's filings ($TAFILED), else null; the Board's Close its issue as done closes it), slowOnPurpose (its reason, else null), usual (the median of
+#   issue of its earlier fix when it is flaky again: entries from two different sources within FLAKY_DAYS days, FLAKYAGAIN in lib/flaky.sh; else null), issue (the issue last filed for it, the highest number of the slow-test record's, the test rules' log's and the Board's filings ($TAFILED), else null; the Board's Close its issue as done closes it), slowOnPurpose (its reason, else null), usual (the median of
 #   its runs before its last slower.runs runs; null with fewer than slower.minRuns runs on record) and slower; a wholeOnly
 #   file (a runner that starts other test files whole, each timed on its own) has slower false; optimize: each issue the Board filed for it ($TAFILED: Optimize, and older
 #   speed-up, issues), and each Tests page card of no issue ($TACARDS: issue null, with card, null until picked, and

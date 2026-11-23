@@ -578,7 +578,8 @@ alone, Conveyor pushes the same commit again without the hook. The files go on t
 "flaky: passed alone". When a file fails alone too, the push stays blocked as a `check` failure. The push also stays
 blocked when the hook prints `FAILED <name>` for a check that is not one of those files, or names no test file.
 
-A file whose flaky issue is still open gets a comment on that issue, not a new issue. A file recorded flaky twice
-within seven days, after an issue was filed for it, is flaky again. When that issue is closed, Conveyor opens it
+A file whose flaky issue is still open gets a comment on that issue, not a new issue. A file recorded flaky from two
+different sources within seven days, after an issue was filed for it, is flaky again. A card, a push and a full test run
+of one commit are each one source, however many cases of the file failed in it. When that issue is closed, Conveyor opens it
 again, holds it and adds the comment "Flaky again since its fix #N". It does not file a new issue. The Tests page
 shows "Flaky again since its fix #N" on the file's row.

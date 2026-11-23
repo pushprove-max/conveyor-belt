@@ -166,7 +166,7 @@
           },
           "default": {
             "rust": { "files": ["*.rs"], "start": "#\\[(cfg\\(test\\)|([A-Za-z_]+::)?test)\\]", "end": "braces" },
-            "python": { "files": ["*.py"], "start": "[rRuU]?(\"\"\"|''')", "end": "(\"\"\"|''')", "has": "^[[:space:]]*>>>" },
+            "python": { "files": ["*.py"], "start": "[rRuU]?(\"\"\"|''')", "end": "(\"\"\"|''')", "has": "(^|\"\"\"|''')[[:space:]]*>>>" },
             "elixir": { "files": ["*.ex", "*.exs"], "start": "(@(module)?doc[[:space:]]+)?(~[sS])?\"\"\"", "end": "\"\"\"", "has": "^[[:space:]]*iex(\\([0-9]+\\))?>" }
           }
         }

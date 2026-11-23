@@ -343,12 +343,13 @@ t_machineerror() {
 
 # The machine's Conveyor (bare) sent <signal> once its first turn is over: it ends with <status>, and its last line
 # names the signal.
-sigend() { # <signal> <status>
+sigend() { # <signal> <status> [unit: the signal goes to the machine's children too, its stderr reader among them]
   local rc
   bare
   # The poll: the signal goes to the running machine once its first turn is over (its traps are set before it), as
   # only a running process can show how it ends on it: it says its loop ended.
   wait_until 'grep -q "the loop of gone ended" "$T/$CASE/out"' || fail "the machine's Conveyor did not take its first turn: $(cat "$T/$CASE/out")"
+  [ "${3:-}" != unit ] || kill "-$1" $(pgrep -P "$mp") 2>/dev/null
   kill "-$1" "$mp"
   # The poll: a wait on a machine that does not end on the signal would never return; this one fails after its ceiling.
   WAIT_CEILING=20 wait_until '[ -z "$(running "$mp")" ]' || fail "the machine's Conveyor did not end on $1: $(cat "$T/$CASE/out")"
@@ -364,3 +365,8 @@ t_machinehup() { sigend HUP 129; }
 # Bug (#1332): on INT (Ctrl+C on `conveyor.sh machine`) the machine's Conveyor ended as on its stop, with no line.
 # It ends its loops as on TERM, and its last line names the signal.
 t_machineint() { sigend INT 130; }
+
+# Bug it catches: the stderr reader trapped only TERM, INT and HUP, so a USR1 sent to the whole unit (a service
+# manager's signal to all its processes) killed it with the machine; the machine's last line then had no reader to
+# write it, and the exit cause was lost.
+t_machineunit() { sigend USR1 138 unit; }

@@ -907,7 +907,7 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
     if [ -n "$lost" ]; then
       unbatch "${good[@]}" "${s[@]}" $(for t in "${todo[@]}"; do echo "${t#* * }"; done)
       git -C "$wt" reset -q --hard && git -C "$wt" apply --index "$wt.bpatch" || { norun "$wt" "the card's change could not be put back in its worktree after its batch's tests"; return 1; }
-      rm -rf "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst" "$wt.batchuncovered"; echo "conveyor: card $c: its change no longer applied in its batch, so it is tested alone"; tests "$wt"; return
+      rm -rf "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst" "$wt.batchuncovered" "$wt.batchnoresult"; echo "conveyor: card $c: its change no longer applied in its batch, so it is tested alone"; tests "$wt"; return
     fi
     [ ${#in[@]} != 0 ] || continue
     bt=''; TEST_REFUSED=''; lr=''
@@ -939,7 +939,7 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
     for m in "${in[@]}"; do
       # The card's run's times go with its output (testrec()): a later part's run sets them again.
       if [ -n "$lr" ]; then lintleave "$c" "$wt" "$m"
-      elif [ "$m" = "$c" ]; then lrc=$rc; keeprun "$wt" "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst" "$wt.batchuncovered"; bw=$TEST_WAIT br=$TEST_RUN bf=$TEST_FREE bz=$TEST_REFUSED bb=$bt
+      elif [ "$m" = "$c" ]; then lrc=$rc; keeprun "$wt" "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst" "$wt.batchuncovered" "$wt.batchnoresult"; bw=$TEST_WAIT br=$TEST_RUN bf=$TEST_FREE bz=$TEST_REFUSED bb=$bt
       elif [ $rc != 0 ]; then
         keeprun "$wt" "$CARDS/$m.test" "$CARDS/$m.testlog" "$CARDS/$m.first" "$CARDS/$m.uncovered" && jq -c --argjson r "$rc" --argjson s "$t" '. + {fail: $r, sec: $s}' "$CARDS/$m.batch" > "$CARDS/$m.batch.new" && mv -f "$CARDS/$m.batch.new" "$CARDS/$m.batch"
       fi
@@ -947,6 +947,7 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
   done
   git -C "$wt" reset -q --hard && git -C "$wt" apply --index "$wt.bpatch" || { unbatch "${good[@]}"; norun "$wt" "the card's change could not be put back in its worktree after its batch's tests"; return 1; }
   [ ! -e "$wt.batchtest" ] || { rm -f "$wt.uncovered"; [ ! -e "$wt.batchuncovered" ] || mv -f "$wt.batchuncovered" "$wt.uncovered"; }
+  [ ! -e "$wt.batchtest" ] || { rm -f "$wt.noresult"; [ ! -e "$wt.batchnoresult" ] || mv -f "$wt.batchnoresult" "$wt.noresult"; } # the card's own run says why it gave no result (voidrun())
   rm -f "$wt.first"; [ ! -e "$wt.batchtest" ] || { rm -rf "$wt.testlog"; mv -f "$wt.batchtest" "$wt.test"; [ ! -d "$wt.batchtestlog" ] || mv -f "$wt.batchtestlog" "$wt.testlog"; [ ! -e "$wt.batchfirst" ] || mv -f "$wt.batchfirst" "$wt.first"; TEST_WAIT=$bw TEST_RUN=$br TEST_FREE=$bf TEST_REFUSED=$bz TEST_BATCH=$bb; }
   [ ${#good[@]} -lt 2 ] && [ "${good[0]:-$c}" = "$c" ] || mates=("${good[@]}")
   [ -z "$apart" ] || return 0

@@ -185,6 +185,24 @@ t_flakysame() {
   [ "$(flakyfiled)" = 0 ] || fail "three entries from one source filed an issue: $(cat "$STUB/filed")"
 }
 
+# Bug it catches: again() counted the entries (or their times) of a file, so one full test run that found two cases
+# of it flaky made the file "flaky again" and reopened the issue of its fix, though it failed once: fulljudge() (lib/fulltest.sh) writes each case with its own `flaky` call, so the run's entries have one source
+# and times seconds apart. The entries go in through the real writer, `flaky add`, an hour apart: one source is one
+# failure; a second source (a card) is the second, and issue 5 is the one to reopen.
+t_flakyagainsources() {
+  setup '[]'
+  printf 'x\ny\n' > "$R/b.test"; git -C "$R" add b.test && git -C "$R" commit -qm tests || fail "main's test file"
+  printf '{"entries": [], "filed": [{"case": "b.test: x", "issue": 5, "time": "2020-01-01T00:00:00Z"}]}\n' > "$ST/flaky.json"
+  flakyat 7200 "b.test: x" "full test c0ffee" "first" > /dev/null && flakyat 3600 "b.test: y" "full test c0ffee" "second" > /dev/null \
+    || fail "flaky add failed: $(cat "$ST/flaky.json")"
+  cp "$ST/flaky.json" "$T/$CASE/one.json"
+  flakyat 60 "b.test: x" "card c1" "third" > /dev/null || fail "flaky add failed: $(cat "$ST/flaky.json")"
+  cp "$ST/flaky.json" "$T/$CASE/two.json"
+  fx_in 'for r in one two; do echo "$r: $(jq -c --slurpfile defs <(echo "{}") --slurpfile refs <(echo "{}") "$OWNERS$FLAKYAGAIN"'"'"'again("b.test"; now; 7)'"'"' "$T/$CASE/$r.json")"; done'
+  grep -qxF 'one: null' "$T/$CASE/run.out" && grep -qxF 'two: 5' "$T/$CASE/run.out" \
+    || fail "again(): two cases of one full test run were not one failure, or a second source did not reopen issue 5: $(cat "$T/$CASE/run.out") from $(cat "$T/$CASE/one.json")"
+}
+
 # Bug it catches (#1048): a runner's case files were looked for in the *.test.* files alone, so the case run.mjs names
 # as its own, defined in src/test-a.mjs (the pack's tests.patterns), which names run.mjs, was dropped as gone.
 t_flakypatterns() {

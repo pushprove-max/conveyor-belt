@@ -116,13 +116,15 @@ flakylabels() {
 # A test file flaky again (the owner, 2026-11-20: "A file that fails twice in a week gets reopened, not marked fixed
 # again"): again($f; <now, seconds>; <days>) is the issue last filed for the file or a case of it (`<file>: <case>`,
 # a runner's name for the case too: caseowners, OWNERS in lib/testfiles.sh, read before it with its defs and refs)
-# when the record has two or more entries of them within <days> days of now, the newest made after that issue was
+# when the record has entries of them from two or more different sources within <days> days of now (the full test
+# writes each case of one run on its own, in different seconds, but under one source: so a source counts once, as in
+# flakyfile()), the newest made after that issue was
 # filed (a filed line with no time: before every entry); else null. The Tests page names it (testspart(),
 # lib/testfiles.sh) and a push's flaky issue reopens it (flakypush()).
 FLAKYAGAIN='def mine($f): (.case | strings) | any(caseowners[]; . == $f);
   def again($f; $t; $d): ([.entries | arrays | .[] | objects | select(mine($f) and ((.time | fromdate?) // 0) > $t - $d * 86400)] | sort_by(.time)) as $e
     | ([.filed | arrays | .[] | objects | select(mine($f) and (.issue | type) == "number")] | last) as $i
-    | if ($e | length) >= 2 and $i != null and (($i.time // "") | tostring) < $e[-1].time then $i.issue else null end;'
+    | if ([$e[] | .source] | unique | length) >= 2 and $i != null and (($i.time // "") | tostring) < $e[-1].time then $i.issue else null end;'
 # A push whose pre-push hook failed naming test files, each of which passed when run alone (pushone(), lib/push.sh):
 # one entry of the flaky-test record for each file, its source "push <commit>", and one issue for the files, filed
 # held (`control hold`, as a follow-up that changes a pipeline file is), not one each. A file the issue last filed for

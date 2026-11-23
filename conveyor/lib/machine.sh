@@ -109,12 +109,12 @@ machineend() { # <exit status> <the command>
 # The reader of the machine's own stderr (machineloop): each line goes on as it is, at once. Its last line
 # (machineend) ends it; when that line gives an exit status and the line before it is the shell's own error
 # ("<file>: line <n>: <error>"), the error that ended the shell, the line names that error first. It ignores the
-# signals that end the machine (Ctrl+C sends INT to the whole group), so it is still there to write that line, which
+# signals that end the machine (Ctrl+C sends INT to the whole group; a service manager can send USR1 to the whole unit), so it is still there to write that line, which
 # the machine waits for before it ends (machineend). It holds no lock (fd 8), so a reader that outlives that wait
 # keeps no next machine from starting.
 machineerr() {
   local l='' p
-  trap '' TERM INT HUP; exec 8>&-
+  trap '' TERM INT HUP QUIT USR1 USR2 ALRM; exec 8>&-
   while IFS= read -r p; do
     [[ $p != "conveyor: the machine's Conveyor ends: exit status "* || ! $l =~ :\ line\ [0-9]+:\ (.+)$ ]] \
       || p="conveyor: the machine's Conveyor ends: the shell's error \"${BASH_REMATCH[1]}\", ${p#"conveyor: the machine's Conveyor ends: "}"

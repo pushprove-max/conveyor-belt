@@ -454,6 +454,22 @@ t_batchcoverage() {
   bout 'norun: null' || fail "a test step that ran nothing kept the coverage of the run before: $(grep '^norun' "$T/$CASE/run.out")"
 }
 
+# Bug it catches: a batch that split ran tests() again after the card's own run, and tests() deletes <worktree>.noresult
+# at its start, so the reason the card's run gave no result was lost and voidrun() took the run for a real failure.
+# The stand-in writes .noresult in a run of #7 alone (as tests() does for a file whose filter ran no case) and, as
+# tests() does, deletes it at the start of every run.
+t_batchnoresult() {
+  bmain; bwt 7 'echo seven > 7.txt' 200 true; bwt 8 'echo eight > 8.txt' 100
+  echo '{"by":"c7-7","pid":1}' > "$CARDS/c8-8.batch"
+  bfx 'tests() { rm -f "$1.noresult"; echo ran > "$1.test"; TEST_WAIT="" TEST_RUN="" TEST_FREE=""
+      git -C "$1" diff --cached --quiet -- 8.txt || { echo fail > "$1.test"; return 1; }
+      echo "seven: its filter ran no case" > "$1.noresult"; }
+    batch c7-7 "$W" c7-7 c8-8; echo "batch: $?"
+    echo "void: $(voidrun "$W" 1)"'
+  bout 'void: seven: its filter ran no case' \
+    || fail "the card's run that gave no result lost its reason when the batch split and ran again: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug (#1574): gather(), stackto() and settle() gave jq the card's claim, the other claims and the wait as arguments
 # (--argjson); over 128 KiB Linux refuses to start jq, so a card whose claim holds 2,000 long paths could not make a
 # batch, be stacked, or wait. BIGP is 2,000 paths of about 80 bytes (over 160 KiB as JSON).

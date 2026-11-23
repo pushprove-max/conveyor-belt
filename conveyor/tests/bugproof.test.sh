@@ -425,6 +425,15 @@ t_buginlinedoctest() {
     || fail "the doctest that fails without the fix did not prove it (exit $RC): $BW $(cat "$FXWT.unfixed" 2>&1)"
 }
 
+# Bug it catches: a doctest written on the line of the docstring's opening quotes (""">>> double(2)) matched no line of
+# the python kind's `has` (^[[:space:]]*>>>), so the block was no test and the card was blocked as having no new test.
+t_buginlinedoctestquotes() {
+  inlinewt lib.py $'def double(x):\n    return x * 3' $'def double(x):\n    """>>> double(2)\n    4\n    """\n    return x * 2' \
+    'PYTHONDONTWRITEBYTECODE=1 python3 -m doctest lib.py'
+  [ "$RC" = 0 ] && grep -qxF -- '- lib.py (its inline tests, with the rest of its change taken out)' "$FXWT.unfixed" && grep -q '^The run failed there (exit 1)' "$FXWT.unfixed" \
+    || fail "a doctest that starts on the line of the opening quotes was not found as an inline test (exit $RC): $BW $(cat "$FXWT.unfixed" 2>&1)"
+}
+
 # #140 D2. Bug it catches: a new test written on the same line as the fix cannot be run without the fix, and the card
 # was blocked as "no test file found" or as "the new tests pass without the fix", though nothing ran. The check fails
 # with the reason that names the file, and nothing runs on main.
