@@ -33,5 +33,11 @@ STUB_BRIEF=$STUB/session-brief.$$; cat > "$STUB_BRIEF"; cp "$STUB_BRIEF" "$STUB_
 echo "$*" >> "$STUB/sessions"; eval "$(sed 's|\$STUB/brief"|$STUB_BRIEF"|g' "$STUB/build")"
 # A session asked for no stream and no JSON gets text, as Claude Code prints it.
 [ $fmt != text ] || { echo done; exit 0; }
-[ ! -f "$STUB/claude-usage" ] || { cat "$STUB/claude-usage"; exit 0; }
+# The claude-usage stream in the shape $fmt asks for: json gives its result event alone, as Claude Code prints it;
+# json with --verbose gives every event in one array, which the stream reader does not read.
+[ ! -f "$STUB/claude-usage" ] || case $fmt in
+  stream) cat "$STUB/claude-usage"; exit 0 ;;
+  jsonall) jq -cs . "$STUB/claude-usage"; exit 0 ;;
+  json) jq -cs 'map(select(.type == "result")) | last' "$STUB/claude-usage"; exit 0 ;;
+esac
 answer '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'

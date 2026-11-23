@@ -153,6 +153,25 @@ t_contractformats() {
   [ "$(cd "$d" && STUB=$d ./claude -p --tools "" --output-format json <<<q | jq -r .result)" = OK ] \
     || fail "claude -p --tools '' --output-format json did not give one result object"
 }
+# Bug: with a claude-usage stream (as t_metrics sets one), the stub printed the stream raw for every --output-format,
+# so a session that asked for json --verbose was still read by the stream reader (SESSIONREAD).
+t_contractusage() {
+  local d=$T/$CASE j
+  stubonly : || fail "the fixture could not be made"
+  printf '%s\n' '{"type":"system","subtype":"init"}' '{"type":"result","is_error":false,"usage":{"input_tokens":10,"output_tokens":5}}' > "$d/claude-usage"
+  local out
+  out=$(cd "$d" && STUB=$d ./claude -p --output-format json --verbose <<<brief)
+  # The array must hold every fixture event: an empty or cut array would also be unread as a stream.
+  [ "$(jq -c 'map([.type, .usage.output_tokens])' <<<"$out")" = '[["system",null],["result",5]]' ] \
+    || fail "claude -p --output-format json --verbose with claude-usage did not give every event in one array: $out"
+  j=$(jq -cRn --arg m m --arg e "" --argjson s 0 -f "$SRC/jq/sessionread.jq" <<<"$out")
+  [ "$(jq -r '.unread // "read"' <<<"$j")" = 'the session output holds no event' ] \
+    || fail "claude -p --output-format json --verbose with claude-usage, read as a session's stream, was read: $j"
+  j=$(cd "$d" && STUB=$d ./claude -p --output-format json <<<brief | jq -c '[.type, .usage.output_tokens]')
+  [ "$j" = '["result",5]' ] || fail "claude -p --output-format json with claude-usage did not give its result object alone: $j"
+  j=$(cd "$d" && STUB=$d ./claude -p --output-format stream-json --verbose <<<brief | jq -cRn --arg m m --arg e "" --argjson s 0 -f "$SRC/jq/sessionread.jq")
+  [ "$(jq -r '.unread // "read"' <<<"$j")" = read ] || fail "claude -p --output-format stream-json --verbose with claude-usage was not read: $j"
+}
 # Bug: each session wrote its prompt to the one $STUB/brief and its build read it from there, so a build run beside
 # another session (two cards at once) could read the other card's prompt. Each build waits until both sessions have
 # written theirs, so the later write has always happened before either reads: a poll of the other stub, as only two
