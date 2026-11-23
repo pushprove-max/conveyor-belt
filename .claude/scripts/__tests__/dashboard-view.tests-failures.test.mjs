@@ -122,13 +122,19 @@ test('Tests failures: an open Fix failures preview is made again when the test h
 // verdict (caseVerdicts) counts: the step is a catch for mergeorder, and Fix failures names mergeclean alone.
 test('Tests failures: a step with a card case and a main case is a catch for the one and a failure to fix for the other', () => {
   const d = snap(), f = d.panels.tests.data.tests.files.find((x) => x.file === MERGE);
-  f.failures = [{ ...fail(510, 1, 'main', ['mergeclean', 'mergeorder'], TAIL), caseVerdicts: { mergeclean: 'main', mergeorder: 'card' } }];
+  f.failures = [{ ...fail(510, 1, 'main', ['mergeclean', 'mergeorder', 'mergewait'], TAIL), caseVerdicts: { mergeclean: 'main', mergeorder: 'card', mergewait: 'machine' } }];
   const w = boot({ tab: 'tests' });
   deliver(w, d);
-  assert.equal(status(w, MERGE).querySelector('.tests-caught-cards')?.textContent, 'caught 1 card change', 'the step with failures [mergeclean main, mergeorder card] shows its catch');
-  act(open(w, MERGE), 'fix-failures').click();
+  const said = 'the step with failures [mergeclean main, mergeorder card, mergewait machine]';
+  assert.equal(status(w, MERGE).querySelector('.tests-caught-cards')?.textContent, 'caught 1 card change', `${said} shows its catch`);
+  // Bug it guards: the Failures list labelled the step by its one verdict, so mergeorder showed under "failed on main
+  // too"; and a machine case took the step's verdict, so mergewait showed under it too.
+  const items = Array.from(open(w, MERGE).querySelectorAll('.tests-fail-list > li'), (li) => `${li.dataset.verdict}: ${li.textContent.replace(/^.* · (.+? · card #510 · .+)$/, '$1')}`);
+  assert.deepEqual(items, ['main: failed on main too · card #510 · mergeclean', 'card: caught a card change · card #510 · mergeorder', 'machine: a build machine fault · card #510 · mergewait'], `${said} lists each case under its own kind`);
+  act(opened(w, MERGE), 'fix-failures').click();
   const body = act(opened(w, MERGE), 'issue-body').value;
-  assert.match(body, /card #510: failed on main too\. Failing cases: mergeclean\.\n/, `the step with failures [mergeclean main, mergeorder card] asks to fix mergeclean alone:\n${body}`);
+  // A machine case that took the step's main verdict was in this draft too.
+  assert.match(body, /card #510: failed on main too\. Failing cases: mergeclean\.\n/, `${said} asks to fix mergeclean alone:\n${body}`);
   assert.match(body, /- The cases that failed \(mergeclean\) succeed/, `the Done-when names mergeclean alone:\n${body}`);
 });
 

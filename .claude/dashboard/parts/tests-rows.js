@@ -7,7 +7,7 @@
   // What this part uses of panels/tests.js, set when tests.js asks for the part (DASH_APP.part, at the end).
   let NEVER, PACK, CONTROL, MARKS, S, num, list, obj, one, pct, tests, settings, dk, shown, marks, look, timed, wallOnly,
     clockTook, COLS, say, button, row, section, setting, control, ENDED, SENDING, actions, mmss, hollowOf, proxyOf,
-    proxySaid, hollowSaid, verdictOf, causesOf, causeSaid, failsOf, caughtOf, notCard, kindSaid, casesSaid, plural,
+    proxySaid, hollowSaid, verdictOf, causesOf, causeSaid, failsOf, caughtOf, partsOf, notCard, kindSaid, casesSaid, plural,
     failKinds, mutDone, survivors, trimmed, mutState, mutCell, progress, send, verdictChip, reasonOf, box, rowAction,
     caseHit, shows, neverWhy, wholeCost, wallWhy, runBy, asking, stepButtons, judged, rowActions, actionsHead,
     selBar, optsOf, stateSaid, fixSaid, gainOf, helpedChip, numbersSaid, mutantsSaid, optRuns, optRunSaid, recent,
@@ -239,7 +239,8 @@
     return el;
   }
   // Its failures (#188), on Overview: the card changes it caught, apart, with their cards; then each failed test step,
-  // newest first: when, its kind, its card and its failing cases. null with none.
+  // newest first: when, its kind, its card and its failing cases, a line for each verdict its cases have (partsOf()).
+  // null with none.
   function failures(f) {
     const h = S.ctx.h, xs = failsOf(f), caught = caughtOf(f);
     if (!xs.length) return null;
@@ -252,7 +253,7 @@
     }
     const ul = h('ul', 'tests-runs tests-fail-list');
     ul.setAttribute('aria-label', `Failed test steps of ${f.file}, newest first`);
-    xs.forEach((x) => {
+    xs.flatMap(partsOf).forEach((x) => {
       const li = h('li', 'tests-fail');
       li.dataset.verdict = x.verdict === null ? 'none' : x.verdict;
       li.append(h('span', 'board-from', S.ctx.when(x.time)), ' · ', h('span', 'board-label', kindSaid(x.verdict)), ' · card ', S.ctx.issueLink(x), ` · ${casesSaid(x)}`);
@@ -731,7 +732,7 @@
   window.DASH_APP.part('tests-rows', function (shared) {
     ({ NEVER, PACK, CONTROL, MARKS, S, num, list, obj, one, pct, tests, settings, dk, shown, marks, look, timed, wallOnly,
       clockTook, COLS, say, button, row, section, setting, control, ENDED, SENDING, actions, mmss, hollowOf, proxyOf,
-      proxySaid, hollowSaid, verdictOf, causesOf, causeSaid, failsOf, caughtOf, notCard, kindSaid, casesSaid, plural,
+      proxySaid, hollowSaid, verdictOf, causesOf, causeSaid, failsOf, caughtOf, partsOf, notCard, kindSaid, casesSaid, plural,
       failKinds, mutDone, survivors, trimmed, mutState, mutCell, progress, send, verdictChip, reasonOf, box,
       rowAction, caseHit, shows, neverWhy, wholeCost, wallWhy, runBy, asking, stepButtons, judged, rowActions,
       actionsHead, selBar, optsOf, stateSaid, fixSaid, gainOf, helpedChip, numbersSaid, mutantsSaid, optRuns,

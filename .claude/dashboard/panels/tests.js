@@ -384,21 +384,25 @@
   // flaky (it failed, then passed when run again) and main (it failed on main too) do, and so does one with no verdict
   // on record (a step from before verdicts were kept).
   const failsOf = (f) => list(f.failures).filter((x) => obj(x) && (x.verdict === null || ['card', 'main', 'flaky'].includes(x.verdict)));
-  // A failure with only its cases of the verdicts vs, by each case's own verdict (caseVerdicts; a case with none has the
-  // step's), and the verdict of those cases (main before flaky before card); null when none has one of vs. A step whose
-  // cases' verdicts differ is a catch for its card cases and a failure to fix for the rest. Bug (R323): the step's one
-  // verdict (main) hid the card's catch and put its card case under Fix failures.
+  // A failure with only its cases of the verdicts vs, by each case's own verdict (caseVerdicts, machine too; a case with
+  // none has the step's), and the verdict of those cases (main before flaky before card); null when none has one of vs.
+  // A step whose cases' verdicts differ is a catch for its card cases and a failure to fix for the rest. Bug (R323): the
+  // step's one verdict (main) hid the card's catch and put its card case under Fix failures.
+  const casesOf = (x) => list(x.cases).filter((c) => typeof c === 'string');
+  const caseVerdict = (x, c) => (obj(x.caseVerdicts) && typeof x.caseVerdicts[c] === 'string' ? x.caseVerdicts[c] : x.verdict);
   const partOf = (x, vs) => {
-    const cv = obj(x.caseVerdicts) ? x.caseVerdicts : {}, cs = list(x.cases).filter((c) => typeof c === 'string');
+    const cs = casesOf(x), mine = cs.filter((c) => vs.includes(caseVerdict(x, c)));
     if (!cs.length) return vs.includes(x.verdict) ? x : null;
-    const vOf = (c) => (typeof cv[c] === 'string' ? cv[c] : x.verdict), mine = cs.filter((c) => vs.includes(vOf(c)));
-    return mine.length ? { ...x, verdict: ['main', 'flaky', 'card'].find((v) => mine.some((c) => vOf(c) === v)), cases: mine } : null;
+    return mine.length ? { ...x, verdict: ['main', 'flaky', 'card'].find((v) => mine.some((c) => caseVerdict(x, c) === v)) || caseVerdict(x, mine[0]), cases: mine } : null;
   };
+  // A failure split by its cases' verdicts (main, flaky, card, then the others), so a list puts each case under its own
+  // kind. Bug: the step's one verdict put its card case, and a machine case, under the step's kind.
+  const partsOf = (x) => (casesOf(x).length ? [...new Set(['main', 'flaky', 'card', ...casesOf(x).map((c) => caseVerdict(x, c))])].map((v) => partOf(x, [v])).filter(Boolean) : [x]);
   const caughtOf = (f) => failsOf(f).map((x) => partOf(x, ['card'])).filter(Boolean);
   const notCard = (f) => failsOf(f).filter((x) => x.verdict !== 'card');
   // The failures Fix failures acts on: those with a cause outside a card's change, with only those cases.
   const fixable = (f) => failsOf(f).map((x) => partOf(x, ['flaky', 'main'])).filter(Boolean);
-  const KIND = { flaky: 'flaky', main: 'failed on main too', card: 'caught a card change' };
+  const KIND = { flaky: 'flaky', main: 'failed on main too', card: 'caught a card change', machine: 'a build machine fault' };
   const kindSaid = (v) => KIND[v] || 'no verdict on record';
   const casesSaid = (x) => (list(x.cases).filter((c) => typeof c === 'string').join(', ') || 'no case named');
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -749,7 +753,7 @@
     shown, marks, look, timed, wallOnly, clockTook, COLS, say, button, row, section, setting, control, ACTS,
     FILES_MAX, RUNNER_WHY, ENDED, MODEL, OTHER, ID, BODY_MAX, TITLE_MAX, NO_SEAT, WAIT, SENDING, ta, ctlTests,
     actions, mmss, limitOf, used, seatOf, tmodel, hollowOf, proxyOf, proxySaid, hollowSaid, verdictOf, causesOf,
-    causeSaid, failsOf, caughtOf, notCard, fixable, kindSaid, casesSaid, plural, failKinds, wholeCost, wallWhy,
+    causeSaid, failsOf, caughtOf, partsOf, notCard, fixable, kindSaid, casesSaid, plural, failKinds, wholeCost, wallWhy,
     runBy, asking, field, stepButtons, judged, rowActions, anyIssueUrl, draw };
   Object.assign(shared, window.DASH_APP.use('tests-mutation', shared));
   Object.assign(shared, window.DASH_APP.use('tests-actions', shared));
