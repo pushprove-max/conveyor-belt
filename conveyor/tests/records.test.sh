@@ -171,6 +171,24 @@ t_unblockmoved() {
   [ "$(jq -cS . "$ST/moved.json")" = "$(jq -cS . "$STUB/moved.was")" ] || fail "a refused unblock 9 --hold and 8 --hold left moved.json changed: $(cat "$ST/moved.json")"
 }
 
+# Bug: unblock read #9's entry in moved.json, then held #9, each in a lock of its own. A snapshot that wrote #9's first
+# Queue entry between the two was erased by a refused unblock's undo, which put back the older read (none), and the
+# next snapshot dated #9 in Queue anew. A stand-in snapshot runs just before the hold, if moved.json's lock is free
+# then; the refused unblock must leave #9's entry as it was just before the hold. The command's own unblock() runs (its
+# file loaded without its last line, the call), so the stand-in can wrap control() after the file loads lib/control.sh.
+t_unblockrace() {
+  setup '[]'
+  fx_in 'set -- unblock 9 --hold; eval "$(sed "\$d" "$SRC/commands/unblock.sh")"
+    eval "$(declare -f control | sed "1s/^control/realcontrol/")"
+    control() { ! flock -n "$MOVED.lock" true || movedsaw "{\"9\":{\"col\":\"queue\",\"other\":false,\"by\":null,\"alone\":false}}" 2026-11-05T00:00:00Z >/dev/null
+      movedread | jq -c ".[\"9\"]" > "$STUB/before"; realcontrol "$@"; }
+    locked unblock 9 && exit 3; jq -c ".[\"9\"]" "$MOVED" > "$STUB/after"'
+  [ "$RC" != 3 ] || fail "unblock 9 --hold, #9 with no card, exited 0: $(cat "$T/$CASE/run.out")"
+  [ -s "$STUB/before" ] || fail "unblock 9 --hold did not hold #9 through control(): $(cat "$T/$CASE/run.out")"
+  [ "$(cat "$STUB/after")" = "$(cat "$STUB/before")" ] \
+    || fail "the refused unblock 9 --hold left #9's moved.json entry $(cat "$STUB/after"), but it was $(cat "$STUB/before") just before the hold"
+}
+
 # Bug (#1472): a snapshot copies control.json without the records' lock, so a copy taken while a refused
 # unblock held #9 for a moment still lists #9 held when the snapshot dates its sight, after the rollback. Written then,
 # the sight dated a Held move that never stood, and the next hold kept its time. The sight of an issue held by your hold

@@ -1487,8 +1487,9 @@ movedread() { jq -ce 'objects' "$MOVED" 2>/dev/null || echo '{}'; }
 movedwrite() { printf '%s\n' "$1" > "$MOVED.$$" && mv -f "$MOVED.$$" "$MOVED" || { rm -f "$MOVED.$$"; return 1; }; }
 # moved.json has a lock of its own, so a snapshot dating its sight never waits on the records' lock: the loop's
 # cards hold that one most of the time on a busy host, and each wait cost a snapshot seconds. `control` takes it
-# inside the records' lock, a snapshot alone; nothing takes the records' lock while it holds this one.
-movedlocked() { ( flock 3 && "$@" ) 3>>"$MOVED.lock"; }
+# inside the records' lock, a snapshot alone; nothing takes the records' lock while it holds this one. A call made
+# while this shell holds it already (movedheld's `control hold`) runs in that lock: a second flock would wait for ever.
+movedlocked() { if [ -n "${MOVED_IN:-}" ]; then ( "$@" ); else ( flock 3 && MOVED_IN=1 && "$@" ) 3>>"$MOVED.lock"; fi; }
 # Under moved.json's lock: moved.json with the columns a snapshot saw ({"<issue>": {col, other, alone, by}}) when it listed the issues
 # (<saw>); prints the times of this sight. An issue in the column it was in keeps its time; one released from Held (left) and seen in Queue
 # came there when it was released; one in another column, seen for the first time, or released and seen back in
@@ -1522,7 +1523,15 @@ movedhold() { # <hold|release> <the control record as it now stands> <issue>...
       elif .col == "held" and .left == null then .seen = $t else . + {col: "held", at: $t, seen: $t} | del(.left) end) | with_entries(select(.value != null))' --args "$@" <<<"$m") \
     && movedwrite "$new" || echo "conveyor: cannot write $MOVED; Held's time for $* is dated by the next snapshot" >&2
 }
-# Under moved.json's lock: the issue's own entry put back as it was (<entry> is the JSON a movedread gave for it, null
+# Under moved.json's lock: `control hold <issue>`, and the issue's entry in moved.json just before it (JSON, null for
+# none), printed for movedundo. Both in one lock, so a snapshot cannot write the entry between the read and the hold:
+# an undo would put back an older entry and erase the snapshot's.
+movedheld() { # <issue>
+  local e; e=$(movedread | jq -c --arg k "$1" '.[$k]') || { echo "conveyor: cannot read $MOVED; nothing changed" >&2; return 1; }
+  control hold "$1" >/dev/null || return 1
+  printf '%s\n' "$e"
+}
+# Under moved.json's lock: the issue's own entry put back as it was (<entry> is the JSON movedheld printed for it, null
 # for none), so a hold that is taken back leaves no move to Held in the history. Other issues' entries stay as they are.
 movedundo() { # <issue> <entry>
   local m; m=$(movedread)

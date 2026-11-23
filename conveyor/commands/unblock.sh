@@ -18,8 +18,7 @@
 unblock() { # <issue>
   local was c new m
   was=$(ctl | jq -r --argjson n "$1" '.held | index($n) != null') || { echo "conveyor: cannot read the control record; nothing changed" >&2; return 1; }
-  m=$(movedlocked movedread | jq -c --arg k "$1" '.[$k]') || { echo "conveyor: cannot read $MOVED; nothing changed" >&2; return 1; }
-  control hold "$1" >/dev/null || return 1
+  m=$(movedlocked movedheld "$1") || return 1
   # The hold is taken off as it was put on: held alone, and the issue's entry in moved.json (the Board's history) as it
   # was. A release would also mark the issue as released for good (startSeen), so an outside issue no one approved yet
   # would never be held for the owner's yes, and would date a move to Held that never stood.
