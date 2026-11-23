@@ -117,7 +117,7 @@ def control_ok(body):
     if a == 'release-run':  # the Release panel's Release (the version typed), Draft notes and Run suite (prep, the version),
         # Release anyway over release-prep's red suite (anyway, the version) and Stop (stop, the version of the run the panel
         # shows: the engine stops no run of another version, so a late Stop never stops a later run of another version; a
-        # later run of the same version it still stops). Release and prep may end in
+        # later run of the same version it still stops; or stop <since> of a wait). Release and prep may end in
         # the suite's mode, --serial or --parallel (the owner's choice when the press runs the suite), then, last, `--machine
         # local` (the owner's choice to run that suite here, whatever the rule's machine is).
         if n >= 3 and v[-2:] == ['--machine', 'local'] and v[0] not in ('stop', 'anyway'):
@@ -125,6 +125,10 @@ def control_ok(body):
         if n >= 2 and v[-1] in ('--serial', '--parallel') and v[0] not in ('stop', 'anyway'):
             v, n = v[:-1], n - 1
         version = globals()['VERSION']  # the base part's, as REDCARD is below
+        # Stop of a run that waits on its notes card names that run's start (`stop <since>`), so a late one ends no suite.
+        # (ASKED_AT is the base part's too.)
+        if n == 2 and v[0] == 'stop' and globals()['ASKED_AT'].fullmatch(v[1]) is not None:
+            return True
         return (n == 1 and version.fullmatch(v[0]) is not None) or (n == 2 and v[0] in ('prep', 'anyway', 'stop') and version.fullmatch(v[1]) is not None)
     if a == 'test-settings':  # the Tests page: a test limit of the pack, or one file's mark
         return test_settings_ok(v)

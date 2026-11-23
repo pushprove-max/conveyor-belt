@@ -900,7 +900,8 @@ pass=$((pass + 8))
 # `prep <version>` (release-prep alone) reaches it as two words. The suite's mode the owner chose (#791) reaches it after the version, then `--machine local`
 # (this machine chosen over the rule's) last. Bug: a press with the mode or the machine is refused, so no suite starts from the panel.
 # Stop reaches it with the version of the run the panel shows, so the engine stops no run of another version.
-for a in 1.2.0 'stop 1.2.0' 'prep 1.2.0' 'prep 1.2.0 --parallel' 'prep 1.2.0 --serial' '1.2.0 --parallel' 'prep 1.2.0 --machine local' 'prep 1.2.0 --serial --machine local' '1.2.0 --parallel --machine local'; do
+# Stop of a wait names the waiting run's start (follow-up of #1461). Bug: it is refused, so the Board cannot end the wait.
+for a in 1.2.0 'stop 1.2.0' 'stop 2026-11-14T08:00:00Z' 'prep 1.2.0' 'prep 1.2.0 --parallel' 'prep 1.2.0 --serial' '1.2.0 --parallel' 'prep 1.2.0 --machine local' 'prep 1.2.0 --serial --machine local' '1.2.0 --parallel --machine local'; do
   fresh_control
   # shellcheck disable=SC2086 # each word an argument
   [ "$(ctl "$(act release-run $a)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM release-run $a" ] || fail "release_run_${a// /_}_reaches_conveyor: $(cat "$M/ctl.out") ran '$(calls)'"
@@ -913,7 +914,7 @@ fresh_control
 fresh_control
 # Bug: a Stop with no version (stop) reached the engine, which stopped whatever run was under way when it came.
 for a in '' stop 'stop 1.2' 'stop 1.2.0 1.3.0' 1.2 01.2.0 'v1.2.0' '1.2.0 stop' '1.2.0;id' prep 'prep stop' 'prep 1.2' '1.2.0 prep' anyway 'anyway 1.2' 'anyway 1.2.0 --by' \
-  --parallel 'prep --parallel' 'stop --serial' 'anyway 1.2.0 --parallel' '1.2.0 --fast' '1.2.0 --serial --parallel' '--machine local' 'stop --machine local' 'anyway 1.2.0 --machine local' 'prep 1.2.0 --machine ssh' 'prep 1.2.0 --machine local --serial' 'prep 1.2.0 --machine'; do
+  --parallel 'prep --parallel' 'stop --serial' 'anyway 1.2.0 --parallel' '1.2.0 --fast' '1.2.0 --serial --parallel' '--machine local' 'stop --machine local' 'stop 2026-11-14' 'stop 2026-11-14T08:00:00Z;id' 'anyway 1.2.0 --machine local' 'prep 1.2.0 --machine ssh' 'prep 1.2.0 --machine local --serial' 'prep 1.2.0 --machine'; do
   # shellcheck disable=SC2086 # each word an argument
   [ "$(ctl "$(act release-run $a)")" = 400 ] || fail "release_run_takes_a_version_or_stop: '$a' answered '$(cat "$M/ctl.out")'"
 done

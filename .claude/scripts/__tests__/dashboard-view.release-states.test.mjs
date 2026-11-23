@@ -104,7 +104,7 @@ test('with 1.1.0 typed while 1.0.0 waits on its notes card, Stop shows in the no
   assert.ok(s1.querySelector('[data-act="release-stop"]'), 'Stop shows with 1.1.0 typed');
   assert.equal(s1.querySelector('[data-figure="stop-other"]').textContent,
     'Release 1.0.0 waits on its notes card. Conveyor runs no other version until that wait ends. Stop ends it.');
-  assert.deepEqual(await sent(w, () => { act(card(w), 'release-stop').click(); act(card(w), 'release-stop').click(); }), [{ action: 'release-run', args: ['stop', '1.0.0'], repo: 'plugin' }]);
+  assert.deepEqual(await sent(w, () => { act(card(w), 'release-stop').click(); act(card(w), 'release-stop').click(); }), [{ action: 'release-run', args: ['stop', WAITING.since], repo: 'plugin' }]);
 });
 
 // Bug it guards (follow-up of #1461): a run whose notes card its fixes entry says is closed still waits, and Conveyor

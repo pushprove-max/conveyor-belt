@@ -755,7 +755,7 @@ run, a second click stops the processes of that run. Conveyor itself continues. 
 beside it says that Stop stops the run on the devbox and gives the box back.
 
 While a run waits, **Stop** shows in the notes step. After a second click, the run does not start again when the card
-lands. The card is not closed and can still land: `conveyor.sh shut` closes it.
+lands. If the run started again before the click arrived, Conveyor stops nothing and the panel shows the reason. The card is not closed and can still land: `conveyor.sh shut` closes it.
 
 When a card lands while the suite runs, the status stays Suite running, and the suite step says that `main` moved. The
 two buttons stay disabled until the suite ends. Then the status is Main moved since the suite, and the button is **Run again

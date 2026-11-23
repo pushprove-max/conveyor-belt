@@ -131,7 +131,9 @@ test('#1369: a run waiting on its notes card shows Stop in the notes step, and a
     notes: { card: id, then: 'prep', mode: null, machine: null } }, { notes: false, written: [] }));
   assert.ok(stepOf(w, 'release-notes').querySelector('[data-act="release-stop"]'), 'Stop shows in the notes step');
   assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), []);
-  assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), [{ action: 'release-run', args: ['stop', '1.0.0'], repo: 'plugin' }]);
+  // Follow-up of #1461: the stop names the waiting run's start, so one that arrives after relfixes() started the suite
+  // ends nothing. Bug: a bare stop killed that suite.
+  assert.deepEqual(await sent(w, () => act(card(w), 'release-stop').click()), [{ action: 'release-run', args: ['stop', RUN.since], repo: 'plugin' }]);
 });
 // Bug this guards (#1369): the notes reached main while another card was open, the run still waited for that card, and
 // the panel (which read the wait from the missing notes) hid Stop, so the owner could not end it.

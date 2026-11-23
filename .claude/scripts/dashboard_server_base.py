@@ -96,7 +96,7 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or replay (the Cost panel's judge replay study: `conveyor.sh pick replay judge <model> [<effort>] [--last <n>]
 # [--estimate]`; the estimate answers its JSON, a run starts on the host and answers that it started),
 # or merge-pr (the Control tab's Merge: `conveyor.sh pr merge`, the open pull request of Land as pr merged now),
-# or release-run (the Release panel's buttons and Stop: `conveyor.sh release-run [prep] <version> | release-run stop <version>`,
+# or release-run (the Release panel's buttons and Stop: `conveyor.sh release-run [prep] <version> | release-run stop <version> | release-run stop <since>`,
 # and Release anyway: `release-run anyway <version> --by <Board user>`),
 # or test-settings (the Tests page's limits, and one file's "slow on purpose" mark: `conveyor.sh test-settings`),
 # or standing (the Rules tab's Done without asking: one standing kind of routine yes on or off, `conveyor.sh auto standing`),

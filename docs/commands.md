@@ -247,7 +247,9 @@ GitHub and releases:
   `release-run prep <version>` is its **Draft notes** and **Run suite**: `release-prep` alone, which releases nothing.
   `release-run anyway <version> --by <who>` is its **Release anyway**: `release --anyway` alone.
   `release-run stop` stops that run ([Releases](releases.md#a-release-from-the-board)). `release-run stop <version>`
-  is its **Stop**: it stops the run only when the run is of that version.
+  stops the run only when the run is of that version.
+  `release-run stop <since>` is the **Stop** of a run that waits for its notes card. It ends only the wait of the run
+  that started at `<since>`. If that run has started again, it stops nothing.
   `release-run atonce` prints the most test files a parallel suite runs at once on the machine it runs on.
   `release-run atonce --machine local` prints that number for a run on this machine.
   Add `--machine local` at the end to run that one suite on this machine, whatever `control suite-machine` chose.

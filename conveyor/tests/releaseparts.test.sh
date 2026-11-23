@@ -220,3 +220,41 @@ t_relpartstopwaitother() {
   out=$(loop release-run stop 1.1.0 2>&1) && jq -e '.state == "stopped"' "$run" > /dev/null \
     || fail "release-run stop 1.1.0 did not end the wait of 1.1.0: $out; $(cat "$run")"
 }
+
+# Follow-up of #1461. Bug it catches: the Board's Stop, sent while the panel showed the notes wait, reached the host after
+# relfixes() had started that run again, and the stop killed the suite under way. The stop names the waiting run's
+# start (2025-12-31T23:50:00Z here); the run under way began later, so it is not stopped and its record is left as it is.
+t_relpartstopsincelive() {
+  setup '[]'; fakerun
+  partrun 'releasestop 2025-12-31T23:50:00Z'
+  local alive=no; kill -0 "$FAKE" 2>/dev/null && alive=yes; kill "$FAKE" 2>/dev/null
+  [ "$RC" = 1 ] && [ $alive = yes ] && jq -e '.state == "running" and .ended == null' "$RUN" > /dev/null && grep -q 'no longer waits' "$T/$CASE/run.out" \
+    || fail "releasestop 2025-12-31T23:50:00Z, with the run of 2026-01-01T00:00:00Z under way, stopped it or did not refuse (exit $RC, run alive: $alive): $(cat "$RUN") $(cat "$T/$CASE/run.out")"
+}
+
+# Follow-up of #1461. Bug it catches: `release-run stop <since>`, the Board's Stop of a wait, is refused, or does not end
+# the wait of the run that began at <since>.
+t_relpartstopsincewait() {
+  local out
+  setup '[]'
+  RUN=$T/$CASE/cards/release/run.json
+  mkdir -p "${RUN%/*}" && jq -n '{kind: "release", step: "release-prep", version: "1.1.0", since: "2026-01-01T00:00:00Z",
+    ended: "2026-01-01T00:10:00Z", state: "waiting", restarted: null, notes: {card: "c1"}}' > "$RUN" || fail "the fixture could not be made"
+  out=$(loop release-run stop 2026-01-01T00:00:00Z 2>&1); RC=$?
+  [ "$RC" = 0 ] && jq -e '.state == "stopped" and .reasons == ["stopped by the owner"]' "$RUN" > /dev/null \
+    || fail "release-run stop 2026-01-01T00:00:00Z did not end the wait of the run that began then (exit $RC): $out $(cat "$RUN")"
+}
+
+# Follow-up of #1461. Bug it catches: a late Stop of the wait of the run that began at 2025-12-31T23:50:00Z ended the
+# wait of a newer run (it started again, failed its notes check once more and now waits from 2026-01-01T00:00:00Z), so
+# that run no longer starts when its notes card lands.
+t_relpartstopsincenewer() {
+  local out
+  setup '[]'
+  RUN=$T/$CASE/cards/release/run.json
+  mkdir -p "${RUN%/*}" && jq -n '{kind: "release", step: "release-prep", version: "1.1.0", since: "2026-01-01T00:00:00Z",
+    ended: "2026-01-01T00:10:00Z", state: "waiting", restarted: null, notes: {card: "c1"}}' > "$RUN" || fail "the fixture could not be made"
+  out=$(loop release-run stop 2025-12-31T23:50:00Z 2>&1); RC=$?
+  [ "$RC" = 1 ] && jq -e '.state == "waiting" and .since == "2026-01-01T00:00:00Z" and has("reasons") == false' "$RUN" > /dev/null && grep -q 'no longer waits' <<<"$out" \
+    || fail "release-run stop 2025-12-31T23:50:00Z ended the wait of the run that began at 2026-01-01T00:00:00Z, or did not refuse (exit $RC): $out $(cat "$RUN")"
+}

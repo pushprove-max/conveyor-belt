@@ -29,7 +29,8 @@
 // started") on a box shows its failed step with the reason, one fix line, Run on this machine instead and Run suite again
 // (one that did not start on this machine lists the reason, with the fix line and Run suite again); a run
 // here shows no machine line or steps; step 2 shows the mode of the run under way and of the last run. Stop (`release-run stop <version>`, the version of the run it stops, a second click too) shows while a run is
-// under way and while a run waits on its notes card or on open cards (it ends the wait), else not. Each reason a refused or failed run printed shows under the step it belongs to, and each failed case
+// under way and while a run waits on its notes card or on open cards (`release-run stop <since>` of the waiting run: it ends
+// that wait, and nothing once that run has started again), else not. Each reason a refused or failed run printed shows under the step it belongs to, and each failed case
 // release-prep judged flaky (it passed every run alone) under the suite's step, and beside a red result the fix cards of
 // that run (its record's fixes), each with its state, and what happens next. The panel is Small by default: in that
 // narrow column every line wraps, a change's title too.
@@ -447,9 +448,10 @@
         other.dataset.figure = 'stop-other';
         box.append(other);
       }
-      // The version goes with the stop: a run of another version started since the panel was drawn is not stopped (a new
-      // run of the same version is).
-      box.append(ctx.twice(stop, 'final', 'Click again to stop the wait', () => send(ctx, rec.repo, ['stop', s.stopOf], 'The run no longer waits for the card.')));
+      // The waiting run's start goes with the stop: a run started since the panel was drawn (of another version or of this
+      // one) is not stopped, and a stop that arrives once that run's suite has started ends nothing (releasestop(),
+      // lib/fulltest.sh): the panel can still show the wait after relfixes() started the run again.
+      box.append(ctx.twice(stop, 'final', 'Click again to stop the wait', () => send(ctx, rec.repo, ['stop', String(run.since)], 'The run no longer waits for the card.')));
       return box;
     };
     let s1;
