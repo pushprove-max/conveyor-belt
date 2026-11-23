@@ -23,6 +23,14 @@ say() { echo "FAIL [docs-claims]: $*" >&2; fails=$((fails + 1)); }
 flat() { tr '\n' ' ' < "$SRC/$1" | tr -s ' '; }
 # has <file> <text> <what is wrong without it>
 has() { flat "$1" | grep -qF -- "$2" || say "$1 does not have \"$2\": $3"; }
+# line <file> <text> <what is wrong without it>: a line of the file is the text whole, and the Markdown block ends
+# there (the next line is blank, a new "- " item or a heading, or there is none), so words added before or after it,
+# on its line or on a line that continues the bullet, fail.
+line() {
+  want=$2 awk 'hit { ok = /^[[:space:]]*$/ || /^- / || /^#/; exit } $0 == ENVIRON["want"] { hit = 1; ok = 1 }
+    END { exit !(hit && ok) }' "$SRC/$1" ||
+    say "$1 has no line that is exactly \"$2\" and ends its bullet: $3"
+}
 
 # O347: the tab row scrolls sideways with no bar, so on a narrow screen the tabs past the edge are reached by a swipe.
 has .claude/dashboard/app.css '.tabs-list { overflow-x: auto; scrollbar-width: none; }' 'the tab row no longer scrolls sideways, or shows a bar'
@@ -54,9 +62,10 @@ has docs/releases/1.11.0.md "The cards can change different files. A batch holds
 has docs/releases/1.11.0.md 'the batch runs that file again on main before it lands, once for each change of that card.' 'the 1.11.0 batch line promises a second run whenever a landing shares a file'
 # R409 (lib/mainred.sh mainprobe() and mainkeep(): a run is kept only when its controls pass, a file that timed out is
 # not kept, and a card takes a kept file only at the same dependencies and with each control it needs run beside it;
-# tests/mainredproof.test.sh t_mainreddepsnew, t_mainredmachinefixed, t_mainredcontrol). The bullet is read whole, from
-# its dash to its end, so a word put in, such as a "no" or a different outcome, fails the check.
-has docs/releases/1.11.0.md "- At a red commit, cards that wait on the same test file can share one run of it. A card uses an earlier run of a test file at that commit only when the file ended in time in that run, the installed dependencies are the same, and each control test (the pack's \`test.control\`) that the card needs ran and passed in that run. Else the card runs that test file at that commit itself. A waiting card wakes only when main's state changes." 'the 1.11.0 notes share a run of a file that timed out, ran at other dependencies, or did not run and pass each control the card needs'
+# tests/mainredproof.test.sh t_mainreddepsnew, t_mainredmachinefixed, t_mainredcontrol). The bullet's line must be the
+# text whole, from its dash to its end, and the bullet must end there, so a word put in, such as a "no", or a sentence
+# added that says the opposite, on the bullet's line or on a line below that continues it, fails.
+line docs/releases/1.11.0.md "- At a red commit, cards that wait on the same test file can share one run of it. A card uses an earlier run of a test file at that commit only when the file ended in time in that run, the installed dependencies are the same, and each control test (the pack's \`test.control\`) that the card needs ran and passed in that run. Else the card runs that test file at that commit itself. A waiting card wakes only when main's state changes." 'the 1.11.0 notes share a run of a file that timed out, ran at other dependencies, or did not run and pass each control the card needs'
 # R124 (lib/session.sh): no session ID in the output, no resume.
 has docs/releases/1.11.0.md 'when its output names one, and else started again from nothing' 'the 1.11.0 notes resume with no session ID'
 # R411 (tests/narrow.test.sh t_narrowownwhole).
