@@ -19,13 +19,15 @@ out=$(chk "$T/rawfile.sh" 2>&1) && { echo "not ok - a --rawfile of recs split on
 grep -q "rawfile.sh:2:" <<<"$out" || { echo "not ok - the refusal of $T/rawfile.sh does not name the command's first line: $out"; exit 1; }
 # The same split in its other forms, one a line, each refused by its line: -R and -s apart, blanks inside splits( ),
 # a pipe that ends the line, --slurp with the filter in double quotes, --arg of the records' text with jq's / "\n", and
-# -s -R across a backslash with the records as its input. Bug it catches: a form the check does not read lets the
+# -s -R across a backslash with the records as its input, a blank line and a comment line after a pipe, and a line break
+# after splits(. Bug it catches: a form the check does not read lets the
 # belt-stopping jq back in under another spelling.
 printf '%s\n' 'a() { recs | jq -R -s '"'"'[splits("\n")]'"'"'; }' 'b() { recs | jq -Rs '"'"'splits( "\n" )'"'"'; }' \
   'c() { recs |' '  jq -Rs '"'"'[splits("\n")]'"'"'; }' 'd() { olds 2>/dev/null | jq --slurp -cR "[split(\"\\n\")]"; }' \
-  'e() { jq -n --arg r "$(recs)" '"'"'$r / "\n"'"'"'; }' 'f() { jq -s \' '  -R '"'"'[splits("\n")]'"'"' < <(recs); }' > "$T/forms.sh"
+  'e() { jq -n --arg r "$(recs)" '"'"'$r / "\n"'"'"'; }' 'f() { jq -s \' '  -R '"'"'[splits("\n")]'"'"' < <(recs); }' \
+  'g() { recs |' '' '  # a comment' '  jq -Rs '"'"'[splits("\n")]'"'"'; }' 'h() { recs | jq -Rs '"'"'[splits(' '"\n")]'"'"'; }' > "$T/forms.sh"
 out=$(chk "$T/forms.sh" 2>&1)
-for l in 1 2 3 5 6 7; do
+for l in 1 2 3 5 6 7 9 13; do
   grep -q "forms.sh:$l: " <<<"$out" || { echo "not ok - line $l of this file was let through: $(cat "$T/forms.sh") -> $out"; exit 1; }
 done
 # The project's checks (test-changed.sh --checks, the pack's test.checkCommand) run it: an engine file that splits the

@@ -7,7 +7,8 @@
 # text (--rawfile, --arg of its text, or -R with -s, in any form of the flags) and splits it on "\n" (split, splits or
 # the / operator, with any blanks or shell escapes): the records are recs, olds, turncards, `stdb ask ... lines`, $READ,
 # $READ_OLD, $STATE, $RETRIED, or a file named cards.jsonl or retried.jsonl. One command is read across the lines a
-# trailing backslash, |, || or && or an open single quote joins; a whole-line comment is not read. With no file, it
+# trailing backslash, |, || or && or an open single quote joins (after a |, || or &&, blank lines and whole-line comments
+# join too, as in bash); a whole-line comment is not read. With no file, it
 # reads every shell file under conveyor/ that is not a test (conveyor/tests/, *.test.sh) or state (conveyor/state/).
 # The project's checks run it (.conveyor/test-changed.sh). no-records-split.test.sh is its own test.
 set -u
@@ -45,7 +46,7 @@ bad=$(awk '
       cmd ~ /<[ \t]*(<\(|<<[ \t]*"?\$\()[ \t]*(recs|olds|turncards|stdb ask[^|)]* lines )/
     # The split on a newline: "\n", or "\\n" or "\u000a", its quotes escaped or not, read as "NL".
     t = cmd; gsub(/\\+(n|u000[aA])/, "NL", t); gsub(/\\+"/, "\"", t)
-    if ((raw || whole) && t ~ /splits?[ \t]*\([ \t]*"NL"[ \t]*[;)]|\/[ \t]*"NL"/) {
+    if ((raw || whole) && t ~ /splits?[ \t\n]*\([ \t\n]*"NL"[ \t\n]*[;)]|\/[ \t\n]*"NL"/) {
       cut = substr(cmd, 1, 160); gsub(/\\\n/, " ", cut); gsub(/[ \t\n]+/, " ", cut); print FILENAME ":" from ": " cut }
     cmd = ""
   }
@@ -54,8 +55,10 @@ bad=$(awk '
     RECS = "(^|[ \t(|;&{])(recs|olds|turncards)([ \t)|;&}]|$)|stdb ask[^|;]* lines "
     PATHS = "\\$\\{?(READ|READ_OLD|STATE|RETRIED)(\\}|#|\"|[ \t)]|$)|(cards|retried)\\.jsonl"
   }
-  FNR == 1 { check(); n = 0 }
+  FNR == 1 { check(); n = 0; pipe = 0 }
   n == 0 && /^[ \t]*#/ { next }
+  # A blank or whole-line comment line after a line that ends in | && or || (outside quotes) is skipped: the command goes on.
+  pipe && n < 60 && /^[ \t]*(#.*)?$/ && gsub(/\047/, "\047", cmd) % 2 == 0 { n++; next }
   {
     if (n == 0) from = FNR
     # A comment after the code (a # after a blank, outside single quotes) is not read: its apostrophes are no quotes.
@@ -66,8 +69,9 @@ bad=$(awk '
     }
     cmd = cmd line "\n"; n++
     q = gsub(/\047/, "\047", cmd)
-    if ((q % 2 == 1 || line ~ /(\\|\||&&)[ \t]*$/) && n < 60) next
-    check(); n = 0
+    pipe = line ~ /(\||&&)[ \t]*$/
+    if ((q % 2 == 1 || pipe || line ~ /\\[ \t]*$/) && n < 60) next
+    check(); n = 0; pipe = 0
   }
   END { check() }' "${files[@]}")
 [ -z "$bad" ] && exit 0
