@@ -702,11 +702,15 @@ poll() { # 0 when a wake was put in pending; 2 when one was due but the session'
   # the poll ends there. That is each record failed so far, and each one in an outage whose read is under way or not
   # made yet: its outage is not over, and its last failed poll's time, kept from an earlier poll, can be over 3
   # minutes old by now, after slow reads of the records before it, so the next watcher's poll would start a new one.
+  # A file whose last failed poll was over three polls before this poll began holds an outage that was over then
+  # (record()'s own test): it is left as it is, so the next failed read starts a new outage, whose unreachable wake
+  # comes once that outage has failed polls enough, and its old reported key is not kept.
   stopped() {
-    local r f a c
+    local r f a l c
     while IFS=$'\t' read -r r _; do
       f=$FD/conveyor-down-$r.txt
-      read -r a _ c 2>/dev/null < "$f" && echo "$a $((now + EPOCHSECONDS - p0)) $c" > "$f"
+      read -r a l c 2>/dev/null < "$f" && [[ $l =~ ^[0-9]+$ ]] && [ $((now - l)) -le $((POLL * 3)) ] \
+        && echo "$a $((now + EPOCHSECONDS - p0)) $c" > "$f"
     done <<<"$RECS"
     exit 143
   }
