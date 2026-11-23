@@ -91,7 +91,11 @@ t_rolloutretry() {
   # loop: the block for the yes is a card's whole path (its review line with the rollout action, kept patch and body)
   loop run >/dev/null; st 'select(.issue == 11 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#11 was not blocked for Dana's yes: $(st 'select(.issue == 11)')"
   issue 11 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-12, only for admins"]' > "$STUB/issues.json"
-  printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$yes" 'VERDICT: NO-GO' > "$STUB/review.3"; printf '%s\n' "$yes" 'VERDICT: GO' > "$STUB/review.4"
+  printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$yes" 'VERDICT: NO-GO' > "$STUB/review.3"
+  # The GO after the fix reviews the fix alone, and keeps an action by writing it again: it writes those its prompt
+  # names as in force (rereview()), so 0004 lands only when the retried card's action reached that review.
+  sed -i 's|^cat > /dev/null; echo x >> "$STUB/reviews";|echo x >> "$STUB/reviews"; cat > "$STUB/prompt.$(wc -l < "$STUB/reviews")";|' "$STUB/codex"
+  printf '%s\n' '[ "$(wc -l < "$STUB/reviews")" != 4 ] || { sed -n "/^## The rollout actions in force\$/,\$p" "$STUB/prompt.4" | grep "^ROLLOUT: "; printf "%s\n" "'"$yes"'" "VERDICT: GO"; } > "$STUB/review.4"' > "$STUB/review-cmd"
   echo 'echo admins >> e.txt' > "$STUB/build"
   # loop: the bug is in the landing after new reviews (landed line and pushed commit); resumeplan stops before both
   loop retry 11 >/dev/null && loop run >/dev/null || fail "the retry and run of #11 exited non-zero"
@@ -125,6 +129,29 @@ t_rolloutreplaced() {
     || fail "the push of the card whose GO after the retry named 0005 in place of 0004 does not carry only 0005: $(git -C "$T/$CASE/origin" log -1 --format=%B main)"
 }
 
+# Bug: a NO-GO named migration 0004 and asked to take it out; the fix took out one line of three, so the default
+# review.rereviewWhole gave it a review of the fix alone. That review was told no rollout action, and its GO, naming
+# none, kept the NO-GO's 0004, so the commit landed with a migration the change no longer has. The review of the fix
+# alone is told the actions in force, and its GO that names none clears them.
+t_rolloutfixonly() {
+  setup "[$(issue 7 2026-01-01)]"
+  local old='Run migration 0004 before the deploy | the new column is missing | a.txt:4'
+  sed -i 's|^cat > /dev/null; echo x >> "$STUB/reviews";|echo x >> "$STUB/reviews"; cat > "$STUB/prompt.$(wc -l < "$STUB/reviews")";|' "$STUB/codex"
+  echo 'if [ "$(wc -l < "$STUB/sessions")" = 1 ]; then printf "%s\n" two three migrate0004 >> a.txt; else sed -i "/migrate0004/d" a.txt; fi' > "$STUB/build"
+  printf '%s\n' '[P2] a.txt:4 migration 0004 is not needed: take it out' "ROLLOUT: $old" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  printf '%s\n' 'EARLIER: E1 holds' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.2"
+  # loop: the landing reads the card's review lines after a fix round, which only card()'s review loop writes.
+  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
+  [ "$(st 'select(.step == "review") | .result' | paste -sd ' ' -)" = 'NO-GO GO' ] && grep -q '^Review the fix of the last review.s findings' "$STUB/prompt.2" \
+    || fail "#7 was not a NO-GO, then a GO of the fix alone: $(st 'select(.step == "review") | .result') $(head -n 1 "$STUB/prompt.2" 2>&1)"
+  sed -n '/^## The rollout actions in force$/,$p' "$STUB/prompt.2" | grep -qxF "ROLLOUT: $old" \
+    || fail "the review of the fix alone after a NO-GO that named 0004 was not told 0004 as in force: $(grep -A5 'rollout actions in force' "$STUB/prompt.2")"
+  ! grep -q 'rollout actions in force' "$STUB/prompt.1" || fail "the first review was told rollout actions in force"
+  local m; m=$(git -C "$T/$CASE/origin" log -1 --format=%B main)
+  [ "$(st 'select(.step == "landed") | .rollout')" = null ] && ! grep -q '^Rollout: ' <<<"$m" \
+    || fail "the card whose fix-only GO named no rollout action landed with the NO-GO's 0004: $(st 'select(.step == "landed")'); $m"
+}
+
 # Bug (R234): the GO before the yes named migration 0004; after `retry` the fix took the migration out,
 # and the GO of the whole change after it named no ROLLOUT line. A review that named none was passed over, so the
 # landing took the retried card's 0004 and an operator would run a migration the change no longer has. A GO of the
@@ -148,6 +175,30 @@ t_rolloutcleared() {
     || fail "the landed line of the card whose whole-change GO after the retry named no rollout action holds the retried card's 0004: $(st 'select(.issue == 15 and .step == "landed")')"
   ! git -C "$T/$CASE/origin" log -1 --format=%B main | grep -q '^Rollout: ' \
     || fail "the push of the card whose whole-change GO after the retry named no rollout action carries the retried card's 0004: $(git -C "$T/$CASE/origin" log -1 --format=%B main)"
+}
+
+# Bug: as t_rolloutcleared, but the fix after the retry is small, so the default review.rereviewWhole gives it a review
+# of the fix alone. That review was told no rollout action, and its GO, naming none, kept the retried card's 0004
+# (pro, resumeplan()), so the commit landed with a migration the change no longer has. It is told 0004 as in force, and
+# its GO that names none clears it.
+t_rolloutretryfix() {
+  setup "[$(issue 17 2026-01-01)]"
+  local yes='USER-VISIBLE: yes: guests see a new Pay button' old='Run migration 0004 before the deploy | the new column is missing | e.txt:1'
+  sed -i 's|^cat > /dev/null; echo x >> "$STUB/reviews";|echo x >> "$STUB/reviews"; cat > "$STUB/prompt.$(wc -l < "$STUB/reviews")";|' "$STUB/codex"
+  echo 'printf "%s\n" one two three four > e.txt; mkdir -p web; echo seventeen > web/e.ts' > "$STUB/build"
+  printf '%s\n' "ROLLOUT: $old" "$yes" 'VERDICT: GO' > "$STUB/review.1"
+  # loop: the block for the yes is a card's whole path (its review line with the rollout action, kept patch and body)
+  loop run >/dev/null; st 'select(.issue == 17 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#17 was not blocked for Dana's yes: $(st 'select(.issue == 17)')"
+  issue 17 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-18, only for admins"]' > "$STUB/issues.json"
+  printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$yes" 'VERDICT: NO-GO' > "$STUB/review.2"
+  printf '%s\n' "$yes" 'VERDICT: GO' > "$STUB/review.3"
+  echo 'echo admins >> e.txt' > "$STUB/build"
+  # loop: the bug is in the landing after new reviews (landed line and pushed commit); resumeplan stops before both
+  loop retry 17 >/dev/null && loop run >/dev/null || fail "the retry and run of #17 exited non-zero"
+  grep -q '^Review the fix of the last review.s findings' "$STUB/prompt.3" && sed -n '/^## The rollout actions in force$/,$p' "$STUB/prompt.3" | grep -qxF "ROLLOUT: $old" \
+    || fail "the review after the fix that followed the retry was not one of the fix alone told the retried card's 0004: $(head -n 1 "$STUB/prompt.3" 2>&1); $(grep -A3 'rollout actions in force' "$STUB/prompt.3" 2>&1)"
+  [ "$(st 'select(.issue == 17 and .step == "landed") | .rollout')" = null ] && ! git -C "$T/$CASE/origin" log -1 --format=%B main | grep -q '^Rollout: ' \
+    || fail "the card whose fix-only GO after the retry named no rollout action landed with the retried card's 0004: $(st 'select(.issue == 17 and .step == "landed")'); $(git -C "$T/$CASE/origin" log -1 --format=%B main)"
 }
 
 # Bug: a retry brought back the rollout action of a patch the owner discarded: after `retry --fresh` the card is

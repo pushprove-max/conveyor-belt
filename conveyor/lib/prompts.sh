@@ -698,6 +698,12 @@ REREVIEWALL='A new defect anywhere in the change, in what the fix changed or els
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 REREVIEWFIX='A new defect that the fix'"'"'s lines cause, in its diff or in the code that calls what it changed, may
 still be raised, at any level. Do not review the rest of the change again: it passed its earlier review.'
+# What a review of the fix alone is told of the change's rollout actions in force (rereview()), before them: its GO
+# decides them, as a GO of the whole change does (cardreview(), card.sh), so an action the fix made obsolete is dropped.
+# shellcheck disable=SC2034 # used in lib/donewhen.sh
+REREVIEWROLLOUT='## The rollout actions in force
+The earlier reviews named these rollout actions for the change. For each one the change still needs after the fix,
+write its ROLLOUT line again. A GO drops each one you do not write again.'
 # Dependencies. An issue body may hold lines `Depends on: #N` (several on a line, each with its own #, split by
 # spaces or commas); `owner/repo#N` there names issue N of another repository (farneeds, as "owner/repo#N"), never this
 # one's #N. baddeps is each such line that names no #N, or that keeps a digit or a # once its #N are taken out

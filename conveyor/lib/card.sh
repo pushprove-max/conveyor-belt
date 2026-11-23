@@ -589,9 +589,9 @@ cardreview() {
     # from the tree before that fix (fixtree), which holds the lines the fix deleted; a reused review, from the tree the review it reuses read (rtree).
     ex=$(excerpts "$wt" "$fixtree"); rtree=$fixtree; fixtree=''
     # The line is written once the loop's end is known (stop, below); a review with no verdict blocks with it here. Its tail, the review's recorded lines (no USER-VISIBLE or VERDICT line; their last 60, TAIL in records.sh), as the reason is cut at 1500 characters: on a NO-GO, and on a GO with an OUTSIDE line, which the Board lists.
-    # Its rollout: the actions its ROLLOUT lines name; on a GO of a review session of the whole change (not the fix alone, a port's difference or a reused review), [] when it names none, as that GO says the change needs none (cardready(), lib/cardland.sh).
+    # Its rollout: the actions its ROLLOUT lines name; on a GO of a review session of the whole change or of the fix alone (not a port's difference or a reused review), [] when it names none, as that GO says the change needs none (cardready(), lib/cardland.sh); one of the fix alone was told the actions in force (rereview()). Bug: its GO naming none kept a NO-GO's migration the fix took out.
     rline=$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
-      --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" --argjson ex "${ex:-[]}" --argjson whole "$([ "$res" = GO ] && [ -z "$rr$fin" ] && echo true || echo false)" \
+      --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" --argjson ex "${ex:-[]}" --argjson whole "$([ "$res" = GO ] && [ "$rr" != reused ] && [ -z "$fin" ] && echo true || echo false)" \
       'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" or ($r | test("(^|\n)(OUTSIDE|SELFHEALS): ")) then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] or $whole then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')
     [ -n "$rline" ] || rline='{}' # the grep finds no line in a review of only unrecorded lines: that is no failure
     [ "$res" != none ] || { record "$c" "$n" review "$res" "$rline"; block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
@@ -705,7 +705,7 @@ resumeplan() {
     || { mode=review; note="reviewing the kept patch of card $from: is its visible change part of the yes of #$(jq -r .from <<<"$inh")? No build"; }
   # pro: the rollout actions of the retried cards whose kept patch this card carries ($from, the one whose kept patch that one resumed, and so on back to one built from nothing):
   # `retry` moved their review lines out, and a new review replaces the kept one, so its landing reads them (ro, cardready()): the newest review line with a rollout, one that
-  # names any or a GO of the whole change ([] when it names none). Bugs: a patch `retry --fresh` discarded brought its action back; so did a NO-GO's that its card's GO replaced,
+  # names any or a GO of the whole change or of the fix alone ([] when it names none). Bugs: a patch `retry --fresh` discarded brought its action back; so did a NO-GO's that its card's GO replaced,
   # and a GO's that a GO after the retry replaced (R234).
   # One read gives the chain's review lines and port lines (crev): pro is the reviews' rollout actions, and rounds (below) counts the reviews.
   if [ -n "$from" ] && [ -n "$mode" ] && [ "$mode" != stale ]; then

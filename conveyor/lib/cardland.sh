@@ -53,8 +53,8 @@ cardready() {
   # Its rollout actions (rollouts()): those of its newest review that decides them, its last review's file (the kept
   # review, for a card that lands from a kept patch with no review line of its own) when it names any, else its own
   # newest review line with a rollout, else the retried cards' (pro). A review that names some replaces the earlier
-  # ones (R234), and so does a GO of the whole change that names none (its line's rollout is []); a NO-GO or a review
-  # of the fix alone that names none keeps them. Then its Rollout trailers, each once and in the order named (ROLLOUTONCE). All go on its landed line (rollout) and, in that order, at the end of the commit message as
+  # ones (R234), and so does a GO of the whole change, or of the fix alone (told the actions in force, rereview()), that
+  # names none (its line's rollout is []); a NO-GO that names none keeps them. Then its Rollout trailers, each once and in the order named (ROLLOUTONCE). All go on its landed line (rollout) and, in that order, at the end of the commit message as
   # Rollout lines in place of its Rollout trailers, so the push carries each one. They are no findings: nothing here
   # holds the card, but a check that cannot be made: with the pack's privacy.mode public, a terms file the host file names that cannot be read blocks it (privwords()). With the pack's privacy.mode public, the Rollout lines have each word the privacy check flags
   # masked (privmask(), lib/issues.sh), as cardsubject() masks a body: they are reviewer text, and the push checks no

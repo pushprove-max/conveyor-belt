@@ -472,7 +472,7 @@ fixonly() { # <worktree> <round>
 # reviewer raise a listed one again only with a new reason, so a `rare case`, `not this change` or `other` decline, or
 # one with no kind, listed here stayed hidden for the rest of the card although the judge would judge it again.
 rereview() { # <card> <worktree> <round> [fix]
-  local dec t=$REREVIEWALL
+  local dec ro t=$REREVIEWALL
   [ "${4:-}" != fix ] || t=$REREVIEWFIX
   printf '%s\n%s\n\n## The findings the fix was told to fix\n' "$REREVIEW" "$t"
   jq -rs --argjson r "$3" 'map(select(.round == $r and (.tracked | not)))[] | "\(.id) \(.line)"
@@ -481,4 +481,11 @@ rereview() { # <card> <worktree> <round> [fix]
   printf '\n## The diff of the fix\nThe file %s\n' "$2.rounds/$3.diff"
   dec=$(stdb ask lines declined 2>/dev/null | jq -rR --arg c "$1" 'fromjson? | objects | select(.card == $c and (.kind | IN("claim wrong", "cannot happen", "fixed"))) | "- \(.finding) (declined: \(.why))"' 2>/dev/null | awk '!seen[$0]++')
   printf '\n## The findings declined on this card\n%s\n' "${dec:-None.}"
+  # A review of the fix alone is told the rollout actions in force, read as cardready() (lib/cardland.sh) reads them:
+  # the last review's file, else this card's newest review line with a rollout, else the retried cards' (pro, card()).
+  # Bug: it was told none, so its GO, naming none, kept the NO-GO's migration that the fix took out.
+  [ "${4:-}" = fix ] || return 0
+  ro=$(stdb ask card "$1" | jq -rs --argjson p "${pro:-[]}" --argjson k "$(rollouts "$2.review" ROLLOUT)" \
+    '(($k | select(length > 0)) // ([.[] | select(.step == "review" and has("rollout")) | .rollout] | last) // $p)[] | "ROLLOUT: \(.action) | \(.fails) | \(.place)"') || return 1
+  [ -z "$ro" ] || printf '\n%s\n%s\n' "$REREVIEWROLLOUT" "$ro"
 }
