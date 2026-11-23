@@ -39,7 +39,7 @@ CASE=status; fixture status
 # Issue 357: the watcher's last poll, from its poll log. Bug it catches: a wake 5 minutes late, and nothing told how
 # long each poll had taken.
 mkdir -p "$FD" && echo '2026-11-15T11:59:00Z 2026-11-15T11:59:47Z 47s alpha: slow, read health; woke' > "$FD/conveyor-polls.log"
-echo alpha/blocked:c7 > "$FD/conveyor-reported.txt" # #7 was reported (t_unreported is the case of one that was not)
+echo alpha/blocked:c7 > "$FD/conveyor-reported.txt" # #7 was reported (t_unreported in status-unrep.test.sh is the case of one that was not)
 snap '.belt = ['"$(card 3 'Fix the login form on the account page so that it keeps the address typed' build),$(card 4 'Add a field' review),$(card 5 'Speed up tests' tests)"']
   | .queue.waiting = [{issue: 6, title: "Later", waitsFor: [3]}] | .open.held = [{issue: 8}]
   | .health.blocked = [{card: "c7", issue: 7, since: "2026-11-15T11:00:00Z", reason: "tests failed twice"}]
@@ -591,6 +591,7 @@ waiter: listening" ] || fail "ask alpha foreman status (host devhost, live waite
 }
 
 cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog unreported unrepsent unrepretry unrepsentasof stopped resumed resumedhost askhost)
+cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog stopped resumed resumedhost askhost)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
