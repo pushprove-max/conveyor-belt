@@ -412,7 +412,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
 # it got (watch() stops a run that reports more: tests()). <report args> (reportask() files) go after the command,
 # before each file's path.
 listcmd() { # <worktree> [report args]
-  local s fs=() by fc rn='' f c nf=0 nw=0 lk=()
+  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() sh=() ns=0
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
   # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only
   # while it is not set.
@@ -426,6 +426,10 @@ listcmd() { # <worktree> [report args]
   # links to every landing (pushtests(), lib/pushrun.sh).
   mapfile -t fs < <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames --diff-filter=AM HEAD -- 2>/dev/null | testpaths \
     | jq -Rr "$SHAREDJQ"'select(. != "" and (shared | not))')
+  # A run again of the test files a card's change shares with main's (SHAREDRUN, one a line, those still there: card()'s
+  # sharedtests(); its batch's, rebatch()'s sharedown) runs each whole, on the list or not, past the cap: bug, a change
+  # with a test file of its own listed only that one, and the shared file it also links never ran, yet the card landed.
+  mapfile -t sh < <(grep . <<<"${SHAREDRUN:-}" | sort -u | while IFS= read -r f; do [ ! -f "$1/$f" ] || printf '%s\n' "$f"; done)
   CAPLEFT=0; CAPNOTE=''
   if [ ${#fs[@]} != 0 ]; then by='{"by":"own","age":null}'
     # Of each, only the cases the change adds or changes run (testlist.sh owncases(), #414): TEST_CASES, `<file><TAB><case>`
@@ -439,8 +443,9 @@ listcmd() { # <worktree> [report args]
     # links to it, those still there, each run whole: they call its helpers (#1000), or a change that needed this file
     # changed broke them before (a Foreman title case and the start's size cases). One already on the list with only its
     # changed cases runs whole too, as a case it did not change can call them; a link of a file to itself is no reason.
-    mapfile -t lk < <(jq -r '. as $m | $ARGS.positional[] as $k | $m[$k] | arrays[] | strings | select(. != $k)' \
-      --args "${fs[@]}" < "$1/.conveyor/test-links.json" 2>/dev/null | sort -u)
+    # The shared files of a run again (sh) are added the same way.
+    mapfile -t lk < <({ jq -r '. as $m | $ARGS.positional[] as $k | $m[$k] | arrays[] | strings | select(. != $k)' \
+      --args "${fs[@]}" < "$1/.conveyor/test-links.json" 2>/dev/null; [ ${#sh[@]} = 0 ] || printf '%s\n' "${sh[@]}"; } | sort -u)
     for f in "${lk[@]}"; do
       [ -n "$f" ] && [ -f "$1/$f" ] || continue
       if printf '%s\n' "${fs[@]}" | grep -qxF -- "$f"; then
@@ -460,8 +465,19 @@ listcmd() { # <worktree> [report args]
       narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
     by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"
     runnersout
-    CAPMAX=$CARDLINKED testcap "${fs[@]}"; fs=("${CAPFILES[@]}")
-    [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/${#fs[@]}}; CAPNOTE=${CAPNOTE//'<all>'/$((${#fs[@]} + CAPLEFT))}; }
+    lk=("${fs[@]}"); CAPMAX=$CARDLINKED testcap "${fs[@]}"; fs=("${CAPFILES[@]}"); ns=0
+    # The shared files of a run again (sh) join after the cap, taking none of its places. One the cap left out of the
+    # linked files runs, so it is not left out (CAPLEFT): bug, the list said 6 files ran and 115 of 120 were left out.
+    for f in "${sh[@]}"; do
+      printf '%s\n' "${fs[@]}" | grep -qxF -- "$f" && continue
+      fs+=("$f"); printf '%s\n' "${lk[@]}" | grep -qxF -- "$f" && { CAPLEFT=$((CAPLEFT - 1)); ns=$((ns + 1)); }
+    done
+    [ ${#sh[@]} = 0 ] || runnersout
+    # The note's <n> counts only the linked files the cap chose, most recent failure first; the shared linked files
+    # past it (ns), in name order, get their own sentence (SHAREDLINKED): bug, the note said all of them ran in order
+    # of most recent failure.
+    [ ${#lk[@]} = 0 ] || [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/$((${#lk[@]} - CAPLEFT - ns))}; CAPNOTE=${CAPNOTE//'<all>'/${#lk[@]}}
+      [ $ns = 0 ] || CAPNOTE+=${SHAREDLINKED//'<k>'/$ns}; }
   fi
   # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.
   [ -z "${TESTRUNNERS:-}" ] || rn=$(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | grep -xF -f <(printf '%s\n' "$TESTRUNNERS")) || rn=''

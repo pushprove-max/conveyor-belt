@@ -231,14 +231,14 @@ cardtest() {
   # Its shared files run again once for the change it holds (<worktree>.sharedran: that change's patch-id, once
   # that run passed): on a busy main, each run again let another card land on them, and the card never landed
   # (#447). A failure of the two changes together that this lets onto main is caught there (main red).
-  # Past that run, it has the landing turn once this step passed (turntake(), below).
+  # That run's list holds the shared files (t; SHAREDRUN, testrun.sh listcmd()). Past that run, it has the landing turn once this step passed (turntake(), below).
   shared=''; sb=$(sed -n 's/^base\t//p' "$wt.rerun" 2>/dev/null)
   if [ -z "$own" ] && t=$(sharedtests "$wt" "$sb"); then
     if [ "$(cat "$wt.sharedran" 2>/dev/null)" = "$(cardpatch "$wt")" ]; then
       shared=2; echo "conveyor: card $c: cards landed since its shared test files ran again touch them too ($(paste -sd ' ' <<<"$t")); they ran again once, so it lands with no second run again. Cards landed since: $(landedsince "$wt" "$sb")"
     else own=1; shared=1; unshare "$wt" "$t"; echo "conveyor: card $c: cards landed since its tests ran touch its test files too, so they run again on main as it is now: $(paste -sd ' ' <<<"$t")"; fi
   fi
-  [ -z "$own" ] || { ran=1; tests "$wt"; rc=$?; [ $rc != 0 ] || slowtests "$wt" || :; }
+  [ -z "$own" ] || { ran=1; SHAREDRUN=${shared:+$t} tests "$wt"; rc=$?; [ $rc != 0 ] || slowtests "$wt" || :; }
   [ $rc != 0 ] || [ -z "$own" ] || tested "$wt"
   [ $rc != 0 ] || [ "$shared" != 1 ] || cardpatch "$wt" > "$wt.sharedran" || rm -f "$wt.sharedran"
   if [ $rc = 0 ] && [ -z "$away" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
@@ -249,12 +249,12 @@ cardtest() {
   fi
   # Main moved during its batch's run: the batch lands on that run when it still stands there (rebatch()). A
   # product check that fails on its change there is a red run: the batch is run again there, as batch() does one.
-  # That run (4: for the shared files, its passes dropped) is their run again for each card that shares one and passed in it, the card failing or not (markshared(); bugs: a third run; a mate that passed went back to its own test step unmarked when the card failed; a red run's, 3, can reuse every pass).
+  # That run (4: for the shared files, its passes dropped; its list holds its sharers' shared files, sharedown as SHAREDRUN, testrun.sh listcmd()) is their run again for each card that shares one and passed in it, the card failing or not (markshared(); bugs: a third run; a mate that passed went back to its own test step unmarked when the card failed; a red run's, 3, can reuse every pass).
   back=''
   if [ ${#mates[@]} != 0 ]; then
     rebatch "$c" "$wt"; t=$?
     [ $t != 2 ] || { block "$c" "$n" "$wt" "the engine fitted the batch of the card onto main, but it could not put the change of the card back in its worktree. Nothing landed. The change is in the patch $wt.bpatch"; return; }
-    [ $t != 3 ] && [ $t != 4 ] || { ran=1; batch "$c" "$wt" "${mates[@]}"; rc=$?; [ $t != 4 ] || markshared "$c" "$wt" $rc; }
+    [ $t != 3 ] && [ $t != 4 ] || { ran=1; SHAREDRUN=$([ $t != 4 ] || printf '%s\n' "${sharedown[@]}") batch "$c" "$wt" "${mates[@]}"; rc=$?; [ $t != 4 ] || markshared "$c" "$wt" $rc; }
   fi
   sec=$((SECONDS - sec))
   # It broke its batch, or its patch did not apply on the cards before it there: the cards that passed land without it,

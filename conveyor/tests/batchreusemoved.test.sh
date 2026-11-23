@@ -97,6 +97,24 @@ t_batchrerunshared() {
   [ -s "$T/$CASE/patch8" ] && cmp -s "$T/$CASE/patch8" "$T/$CASE/cards/c8.sharedran" || fail "the batch's other card c8 was not marked after the batch's run again"
 }
 
+# Bug it catches: the run again of the shared test files ran only the files of the change's own list (testrun.sh
+# listcmd()), so a shared file off it never ran and the card landed. cardtest() is called as card() calls it, on card
+# c7 of #7, the runs stubbed to save SHAREDRUN, the files listcmd() adds: its own run again (sharedtests() gives
+# s.test.sh), then its batch's run again for the shared files (rebatch() exit 4, its sharers' files a.test.sh and
+# b.test.sh) are each given their shared files.
+t_sharedrunlist() {
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo seven >> a.txt' b.txt base
+  fx_in 'c=c7 n=7 wt=$FXWT issue="{}" sprompt="" br="" parsecheck="" tmain="" away="" apart="" me=$$ cmsg=x mates=()
+    lintgate() { return 0; }; checks() { :; }; treecheck() { :; }; testedhere() { return 0; }; landedsince() { :; }; gather() { return 1; }; turntake() { :; }
+    sharedtests() { echo s.test.sh; }; tests() { printf "%s\n" "${SHAREDRUN:-}" > "$T/$CASE/own"; return 0; }; cardtest; [ "$rc" = 0 ] || exit 3
+    mates=(c7 c8); sharedtests() { return 1; }; rebatch() { sharers=(c7 c8); sharedown=(a.test.sh b.test.sh); return 4; }
+    batch() { printf "%s\n" "${SHAREDRUN:-}" > "$T/$CASE/batch"; return 0; }; cardtest; [ "$rc" = 0 ] || exit 4'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/own" 2>&1)" = s.test.sh ] \
+    || fail "cardtest, sharedtests() giving s.test.sh: its own run again was not given it (exit $RC, given: $(cat "$T/$CASE/own" 2>&1)): $(cat "$T/$CASE/run.out")"
+  [ "$(cat "$T/$CASE/batch" 2>&1)" = $'a.test.sh\nb.test.sh' ] \
+    || fail "cardtest, rebatch() exit 4 with sharedown a.test.sh, b.test.sh: the batch's run again was not given them (given: $(cat "$T/$CASE/batch" 2>&1)): $(cat "$T/$CASE/run.out")"
+}
+
 # c8, on main as it was (old), changes lib/claim.sh, which the test map (map.json) gives lib/a.test.sh; lib/opt.test.sh
 # is lib/speed.sh's. Main then runs <main's change> (old to new). W holds new with c8's change, as rebatch() and
 # stalepass() have the batch's worktree. run.out holds what sharedtests() prints for <asked> (c8, or c7: W itself) asked

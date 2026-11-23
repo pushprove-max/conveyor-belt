@@ -683,7 +683,9 @@ The list is the test files the card's change adds or changes (`"by": "own"`; a s
 adds a test file that had a failed case in the card's last run, though the change does not change it. It does this
 only when the file is still there and the card's change links it (the test map, the links or its name)
 (`conveyor/lib/testlist.sh` `failsleft()`). Thus a fix that changes only another test file still runs the failed case
-again. The list's `files` count includes the added file. Of a test file
+again. The list's `files` count includes the added file. When cards landed on main change a test file that the
+card's change also uses, Conveyor runs that file again. It adds the file to the list, runs it whole and runs it in
+addition to the limit of linked files. This applies to a card's own run and to its batch's run. Of a test file
 main has, it runs only the cases (`t_<case>() {` to its `}` line, with the comment lines above it) that hold a line
 the change adds or changes; a file whose change touches a line outside every case (a helper or setup), a new file,
 and a file with no such case run whole. The command gets those cases in `CONVEYOR_TEST_CASES`, one `<file><TAB><case>`

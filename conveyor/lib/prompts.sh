@@ -595,6 +595,9 @@ NONELINKED='no test file is linked to the files the change touches, so no test r
 CARDLINKED=5
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 LINKED='the change adds or changes no test file, so the card ran <n> of the <all> test files linked to it, those that failed most recently first. The run before the push runs all of them.'
+# Added to LINKED when a run again of the shared test files (listcmd() SHAREDRUN) ran <k> linked files past those <n>.
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+SHAREDLINKED=' It also ran <k> more of the linked files, because cards that landed on main changed them.'
 # What a card's test step says when it ran only the <n> cases its change adds or changes of <m>
 # of its own test files (listcmd(), testlist.sh owncases(): #414), with OWNWHOLE when <w> of them ran whole; <s> is "s" for a
 # count over 1.
