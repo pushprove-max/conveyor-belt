@@ -418,17 +418,20 @@ suites() {
 # version after the newest release). plugin.json's version is not read: it can name a version with no notes.
 relhigher() { [ "$1" != "$2" ] && [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$1" ]; } # <X.Y.Z> <X.Y.Z>
 releasemain() {
-  local h tag base next v w rel=false re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+  local h tag='' base next v w='' t rel=false re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' a b
   h=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) || { echo null; return; }
-  tag=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+  # The shell reads each list git gives (the newest tag first; the notes' names): no grep, sed, tail or awk of its own.
+  while IFS= read -r t; do [[ $t =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && { tag=$t; break; }; done < <(git tag -l --sort=-version:refname 'v*')
   base=${tag#v}; base=${base:-0.0.0}
-  [ "$(git cat-file -t "$h:docs/releases" 2>/dev/null)" != tree ] || rel=true
-  w=$(git ls-tree --name-only "$h" docs/releases/ 2>/dev/null | sed -n 's|^docs/releases/\(.*\)\.md$|\1|p' | grep -E "$re" | sort -V)
-  v=$(tail -n 1 <<<"$w")
+  while IFS= read -r t; do
+    rel=true; t=${t#docs/releases/}; [[ $t == *.md && ${t%.md} =~ $re ]] && w+=${t%.md}$'\n'
+  done < <(git ls-tree --name-only "$h" docs/releases/ 2>/dev/null)
+  w=${w%$'\n'}; [ -z "$w" ] || w=$(sort -V <<<"$w")
+  v=${w##*$'\n'}
   if [ -n "$v" ] && relhigher "$v" "$base"; then next=$v
-  else next=$(awk -F. '{ print $1 "." $2 + 1 ".0" }' <<<"$base"); fi
+  else IFS=. read -r a b _ <<<"$base"; next="$a.$((10#$b + 1)).0"; fi
   git log -n 100 --format='%H%x09%s' "${tag:+$tag..}$h" 2>/dev/null | jq -Rcs --arg h "$h" --arg t "$tag" --arg n "$next" --argjson rel "$rel" --arg w "$w" \
-    --argjson c "$(git rev-list --count "${tag:+$tag..}$h" 2>/dev/null || echo null)" --argjson nt "$(git cat-file -e "$h:docs/releases/$next.md" 2>/dev/null && echo true || echo false)" \
+    --argjson c "$(git rev-list --count "${tag:+$tag..}$h" 2>/dev/null || echo null)" --argjson nt "$([[ $'\n'$w$'\n' == *$'\n'"$next"$'\n'* ]] && echo true || echo false)" \
     '{tag: (if $t == "" then null else $t end), count: $c, commits: [split("\n")[] | select(. != "") | split("\t") | {sha: .[0], subject: (.[1:] | join("\t"))}],
       next: $n, notes: $nt, written: [$w | split("\n")[] | select(. != "")], head: $h, releases: $rel}'
 }
@@ -437,9 +440,10 @@ releasemain() {
 # it is kept in $STATE.drift beside the sum of the worktree and end lines (landed, closed, blocked) it was made of, and
 # made again only when they changed.
 driftof() { # <scratch folder>
-  local k v
+  local k v='' ok=''
   k=$(grep -hE '"step":"(worktree|landed|closed|blocked)"' -- "$1/${STATE##*/}" "$1/${RETRIED##*/}" 2>/dev/null | cksum) || { echo null; return; }
-  if [ "$(head -n 1 "$STATE.drift" 2>/dev/null)" = "$k" ] && v=$(sed -n 2p "$STATE.drift") && [[ $v == null || $v == \{* ]]; then printf '%s\n' "$v"; return; fi
+  { read -r ok && read -r v; } 2>/dev/null < "$STATE.drift" || :
+  if [ "$ok" = "$k" ] && [[ $v == null || $v == \{* ]]; then printf '%s\n' "$v"; return; fi
   v=$(cat -- "$1/${STATE##*/}" "$1/${RETRIED##*/}" 2>/dev/null | "$HERE/bench/drift.sh" --json /dev/stdin 2>/dev/null) || v=null
   { printf '%s\n%s\n' "$k" "$v" > "$STATE.drift.$$" && mv -f "$STATE.drift.$$" "$STATE.drift"; } 2>/dev/null || rm -f "$STATE.drift.$$"
   printf '%s\n' "$v"

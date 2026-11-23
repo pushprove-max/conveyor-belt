@@ -76,6 +76,10 @@ t_relnext() {
   [ "$(relmain .written)" = '["1.0.0","1.3.0"]' ] || fail "written does not name the versions with notes on main: $(relmain .written)"
   git -C "$R" tag v1.3.0
   [ "$(relmain)" = '["v1.3.0","1.4.0",false,true]' ] || fail "with notes and plugin.json no higher than v1.3.0, not its next minor: $(relmain)"
+  # Bug it catches: the newest tag is read in the shell now (no grep or sort): v1.10.0 is newer than v1.9.0 (a version
+  # order, not a text one), and v2.0.0-rc1 is no release.
+  git -C "$R" tag v1.9.0 && git -C "$R" tag v1.10.0 && git -C "$R" tag v2.0.0-rc1
+  [ "$(relmain)" = '["v1.10.0","1.11.0",false,true]' ] || fail "with tags v1.9.0, v1.10.0 and v2.0.0-rc1, not v1.10.0 and its next minor: $(relmain)"
 }
 # Bug it catches (E6): while a large failed suite's cases ran alone, suites() passed the suite's progress and the record
 # read again as one jq argument each; past Linux's 128 KiB limit of one argument jq did not start, and the Release

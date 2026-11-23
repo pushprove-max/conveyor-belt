@@ -581,13 +581,14 @@ timingscripts() {
 #   {kind: "card", file, title, body}  the test command runs a script of the project that prints no test times: a held
 #                             card for the owner, whose body is timinghint()'s wrap steps (the script is the owner's)
 timesplan() {
-  local cmd r p f
-  packget test.command cmd || return 1
-  if ! jq -e '.test.report.format' "$PACK" >/dev/null 2>&1 && r=$(reportguess "$cmd") && jq -e '.format' <<<"$r" >/dev/null 2>&1; then
+  local cmd fmt r p f
+  packget test.command cmd test.report.format fmt || return 1
+  if [ -z "$fmt" ] && r=$(reportguess "$cmd") && jq -e '.format' <<<"$r" >/dev/null 2>&1; then
     jq -cn --argjson r "$r" '{kind: "report", report: $r}'; return 0
   fi
-  if p=$(cpuplan 2>/dev/null) && jq -e '.file' <<<"$p" >/dev/null 2>&1; then jq -c '{kind: "wrap"} + .' <<<"$p"; return 0; fi
-  f=$(timingscripts | head -n 1) || return 1
+  # cpuplan() writes {file: ...} (a plan) or {why: ...} (none): the plan's text starts with its file.
+  if p=$(cpuplan 2>/dev/null) && [[ $p == '{"file":'* ]]; then jq -c '{kind: "wrap"} + .' <<<"$p"; return 0; fi
+  f=$(timingscripts) || return 1; f=${f%%$'\n'*}
   if [ -n "$f" ]; then
     jq -cn --arg f "$f" --arg b "$(timinghint)" '{kind: "card", file: $f, title: "Record test times: wrap each test file'"'"'s run in \($f)", body: $b}'; return 0
   fi

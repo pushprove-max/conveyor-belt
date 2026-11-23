@@ -417,7 +417,7 @@ health() {
   if ghok; then gh=true; ghreach && ghr=true || ghr=false; else ghwhy=$GHWHY; fi
   # The card the machine holds back (room()), while the loop runs: {issue, reason, since}.
   rm=null; [ "$loop" != true ] || rm=$(jq -ce 'select((.issue | type == "number") and (.reason | type == "string"))' "$ROOMF" 2>/dev/null) || rm=null
-  free=$(df -Pk "$CARDS" 2>/dev/null | awk 'NR == 2 { print $4 }'); [[ $free =~ ^[0-9]+$ ]] || free=null
+  free=''; { read -r _ && read -r _ _ _ free _; } 2>/dev/null < <(df -Pk "$CARDS" 2>/dev/null) || :; [[ $free =~ ^[0-9]+$ ]] || free=null
   mc=$(mhost); mc=${mc:-null}
   # The cores kept for the user (the host file's reserveCores, lib/slots.sh slot_reserved) and the test-slot pool's
   # size on the cores left (null when the pool cannot be read), or why this machine cannot keep cores, for the Rules tab.
