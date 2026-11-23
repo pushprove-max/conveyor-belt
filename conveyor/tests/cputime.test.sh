@@ -10,6 +10,8 @@
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
+# A page of the repository says <text> (lines joined, spaces folded). Each case file that calls it defines its own, named after the file: the bug check puts only the card's test files on main's code, where a helper in lib.sh is missing, and the runner sources the case files into one shell, where one name cannot be defined twice.
+pagesays_cputime() { tr '\n' ' ' < "$SRC/../$1" | tr -s ' ' | grep -qF -- "$2" || fail "$1 does not say \"$2\": $3"; } # <page> <text> <what the run showed>
 
 # Bug it catches: a Wall only file had no way to record its CPU seconds, or the saved command still gave none. The test
 # command runs one test file, w.test.sh, so the plan wraps it; test-settings cpu-time saves that command, and the
@@ -100,6 +102,8 @@ t_timesplancard() {
   jq -e --arg w "$wrap" '.cards | length == 1 and (.[0] | .held == true and .card == null and .file == "run-all.sh" and (.body | split("\n") | any(sub("^\\s+"; "") == $w)))' \
     "$ST/testactions/cards.json" > /dev/null || fail "no held card with the wrap command: $(cat "$ST/testactions/cards.json" "$T/$CASE/rt.out")"
   [ "$(cat "$R/.conveyor/project.json")" = "$before" ] || fail "record-times changed the pack for a script"
+  # Bug (#1436): the guide said every test-settings command but history-start changes the pack; the run above filed a card and left it as it was.
+  pagesays_cputime conveyor/README.md '`record-times` when its plan is a held card, which files the card and leaves the pack as it is' "record-times filed a held card and left the pack as it was"
   loop test-settings record-times > "$T/$CASE/rt.out" 2>&1 && fail "a second record-times filed the card again"
   [ "$(jq '.cards | length' "$ST/testactions/cards.json")" = 1 ] || fail "a second record-times filed a second card: $(cat "$T/$CASE/rt.out")"
 }

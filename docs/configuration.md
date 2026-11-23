@@ -122,21 +122,19 @@ that changes the runner runs the test files that name the runner, and the tests 
 `.conveyor/test-links.json` give it. The card's list and the test map show the runner with the reason "the test
 runner, not a test".
 
-For a bug card, Conveyor gives the card's test files to your test command (`test.command`) on main's code, without
-the fix. If your test command cannot run a test file that it gets alone, set `test.fileCommand` to a command that
-runs one test file, for example `"fileCommand": "node --test"`. Conveyor then runs it once for each test file, with
-the file's path added at the end.
+For a bug card, Conveyor runs each of the card's test files alone, on main's code without the fix, with
+`test.fileCommand`. It adds the path of the file at the end of the command, for example `"fileCommand": "node --test"`.
+With no `test.fileCommand`, it runs the file with the runner of its language
+([Which tests a card runs](#which-tests-a-card-runs)). It does not run `test.command` or the full suite for this check.
+When Conveyor has no runner for a file, the check stops with exit 2 and runs no test. The reason says that the pack
+sets no `test.fileCommand` and that Conveyor cannot run the file itself, and it names `test.fileCommand`: set it to a
+command that runs one test file.
 
 When a bug card has no file that the patterns match, the card goes back to its build. If it still has none, the card
-is blocked with the reason `no test file found in the change (patterns: <list>)`. When your test command does not run
-the test files that it gets, the card is blocked, and the reason says so. Correct `tests.patterns` or
-`test.fileCommand`, then retry the card.
-
-Some test commands run every test file, whatever files they get. For a bug card, such a command runs the full suite
-on main's code, not only the card's test files. When the command runs far more test files than it gets, the check
-result that the review sees says so, and `conveyor.sh doctor` shows a `warning:` line. Both tell you to set
-`test.fileCommand`. When your test files run alone as plain scripts, for example `node <file>`, they name the value
-to use. Setup also suggests that value when the pack has no `test.fileCommand`.
+is blocked with the reason `no test file found in the change (patterns: <list>)`. When a test file runs other test
+files, the check stops it, and the reason tells you to set `test.fileCommand`. Correct `tests.patterns` or
+`test.fileCommand`, then retry the card. When your test files run alone as plain scripts, for example `node <file>`,
+setup suggests that value when the pack has no `test.fileCommand`.
 
 Setup suggests patterns from the config of your test runner, or when the default misses your test files
 ([Setup](setup.md#setup)). `conveyor.sh doctor` shows a `missing:` line when the patterns match no tracked file. It
@@ -147,8 +145,9 @@ runner's config that setup reads, matches.
 
 Some tests are in the same file as the code that they test, for example a Rust `#[cfg(test)]` module or a Python
 doctest. For a bug card, Conveyor finds new tests of this type in the product files that the card changes. It runs
-your test command on main's code with these tests and without the rest of the change. At least one test must fail
-there. When you set `test.fileCommand`, Conveyor gives it each such product file.
+each such product file alone on main's code, with these tests and without the rest of the change, in the way it runs a
+test file: with `test.fileCommand`, else with the runner of its language, else the check stops with exit 2 and names
+`test.fileCommand`. At least one test must fail there.
 
 Conveyor knows these kinds of test:
 
@@ -938,8 +937,9 @@ An issue can have its own builder, reviewer and judge, before it is picked or wh
 is a model and an effort. A seat you do not set uses the project's.
 
 - `conveyor.sh control card <issue> builder|reviewer|judge <model> [effort]` sets one seat. The model must be one
-  that `models.allowed` lists for that seat: the builder's models for the builder, the review's models for the
-  reviewer and the judge. Conveyor refuses any other model and names the allowed ones. The effort is one that the
+  that `models.allowed` lists for that seat: the builder's models for the builder, the review's models for the reviewer
+  and the judge. The review's models also include the Codex models that Codex reports, when `models.allowed` is not set or
+  its `codex` list has a model in it. Conveyor refuses any other model and names the allowed ones. The effort is one that the
   model's CLI takes. With no effort, the seat uses the project's effort, or `medium` when the model's CLI does not
   take that effort.
 - `conveyor.sh control card <issue> <seat> clear` clears one seat. `conveyor.sh control card <issue> clear` clears
@@ -977,6 +977,7 @@ yet. The models that Codex reports are added after the pack's `models.allowed.co
 the pack's first model stays the seat's default. An empty `models.allowed.codex` gets no Codex models, so the
 reviewer stays on Claude. When you do not set `models.allowed` (setup does not), the project
 uses the models that the CLIs report: Codex's from its models cache, and for Claude the list that comes with Conveyor.
+When Codex is installed but gives no list, the built-in Codex models stay.
 
 `conveyor.sh doctor` shows a `warning:` line for each model that the pack's `models.allowed` lists for Codex or
 OpenCode and that the CLI does not report, as a seat set to it may not start. A Codex family name, such as `sol`,
@@ -993,7 +994,8 @@ listed under:
 
 A model that a seat runs, or that the project's model list has, can have no price. The model list is
 `models.allowed` when you set it, with the Codex models that Codex reports added to its `codex` list when that list has a model in it. When you do not, it is Conveyor's built-in models, with the Codex models that Codex
-reports in place of the built-in Codex ones, and with no Codex models when Codex is not installed. The Rules tab shows such a
+reports in place of the built-in Codex ones, and with no Codex models when Codex is not installed. When Codex is
+installed but gives no list, the built-in Codex ones stay. The Rules tab shows such a
 model under Model prices, in "Offered with no price". A model that the card sessions of the last 30 days used, and that no price prices, shows in
 "Seen but not priced". A model that only the research lane's sessions used is not in these lists, because the belt
 does not run it. While the loop runs, Needs you shows one line that counts these models, with a link to Model prices.

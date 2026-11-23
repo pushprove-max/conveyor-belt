@@ -211,10 +211,18 @@ nosnap "echo 'conveyor: the snapshot is being made anew from the whole card reco
 grep -qxF 'alpha: no snapshot (conveyor: the snapshot is being made anew from the whole card records (a retry or a resume rewrote them, or the engine changed); this one takes longer)' <<<"$out" \
   || fail "the status does not say the snapshot is being made anew: $out"
 }
+# Bug (#1436): the guide's list of what `foreman status` shows left out the two heading lines of a read that failed. The
+# page gives each as the run printed it, its project, age and reason as <project>, <age> and <why>.
+page_says() { # <heading line the status printed> <sed expression that makes the page's form of it>
+  local want; want=$(sed -E "$2" <<<"$1")
+  [ "$want" != "$1" ] || fail "the heading line '$1' has no part to make a page form of"
+  tr '\n' ' ' < "$SRC/../../docs/foreman.md" | tr -s ' ' | grep -qF -- "$want" || fail "docs/foreman.md does not say \"$want\", which the status printed as '$1'"
+}
 t_nosnapquiet() {
 CASE=nosnapquiet; fixture nosnapquiet
 nosnap "exit 124"
 grep -qxF 'alpha: no snapshot (it took over 45 s and was stopped)' <<<"$out" || fail "the status does not say the read was stopped at its wait: $out"
+page_says "$(grep -m1 ': no snapshot (' <<<"$out")" 's/^[^:]+: no snapshot \(.*\)$/<project>: no snapshot (<why>)/'
 }
 
 # Issue 359: a snapshot that failed while the loop worked gave "no snapshot" and the tail of a Python stack trace, and
@@ -234,6 +242,7 @@ for l in 'alpha: the last snapshot, made 5m ago (a new one failed: FileNotFoundE
   grep -qxF -- "$l" <<<"$out" || fail "no line '$l' in: $out"
 done
 ! grep -qE 'no snapshot|Traceback|File "|open\(' <<<"$out" || fail "the status says no snapshot or shows the stack trace: $out"
+page_says "$(grep -m1 ': the last snapshot, made ' <<<"$out")" 's/^[^:]+: the last snapshot, made [^(]+ \(a new one failed: .*\):$/<project>: the last snapshot, made <age> (a new one failed: <why>):/'
 snap ".belt = [$(card 4 'Read by status' review)] | .health.time = \"2026-11-15T12:05:00Z\""; export CONVEYOR_FOREMAN_ASK="cat $T/snap"
 out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
 export CONVEYOR_FOREMAN_ASK="$tb" CONVEYOR_FOREMAN_NOW=$((NOW + 330))
@@ -372,6 +381,9 @@ w=$(cat "$FD"/pending/*.wake)
 grep -qxF 'Conveyor: alpha: stuck: #7; stopped: #5 #8 #6' <<<"$w" || fail "the wake's first line does not name the stopped cards: $w"
 grep -qxF "alpha: the engine is stopped (state T) since 2026-11-15T11:40:00Z: \`kill -CONT 4242 4250\` resumes it (it holds #5, #8)$own" <<<"$w" \
   || fail "the wake does not name the stopped engine and how to resume it: $w"
+# Bug (#1436): the guide's list of wakes had no stopped process and no resume step; the wake above names both.
+tr '\n' ' ' < "$SRC/../../docs/foreman.md" | tr -s ' ' | grep -qF 'A stopped process: the engine, or the process of a card, is stopped (state T in `ps`). The wake names it. Run `kill -CONT` with each process ID of the tree' \
+  || fail "docs/foreman.md does not list the stopped-process wake and kill -CONT, which the wake names: $w"
 # Issue 1106: the Board's Needs you lists the stopped engine too (needsYou.stopped, a kind of dashboard_needs.json);
 # the watcher reads it from health alone, so neither the status nor the wake names it a second time.
 ! grep -qF 'The engine is stopped' <<<"$out$w" || fail "the stopped engine is named twice, once from the Board's Needs you: $out $w"

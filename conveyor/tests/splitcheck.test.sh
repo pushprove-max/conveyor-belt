@@ -8,6 +8,8 @@
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
+# A page of the repository says <text> (lines joined, spaces folded). Each case file that calls it defines its own, named after the file: the bug check puts only the card's test files on main's code, where a helper in lib.sh is missing, and the runner sources the case files into one shell, where one name cannot be defined twice.
+pagesays_splitcheck() { tr '\n' ' ' < "$SRC/../$1" | tr -s ' ' | grep -qF -- "$2" || fail "$1 does not say \"$2\": $3"; } # <page> <text> <what the run showed>
 
 # speedproof.sh speedproof() called as card() calls it, on card c7 of #7, whose change runs <change> in its worktree on main, where
 # f.test.sh (`echo slow`) has a median of 10 CPU s on record (whole-suite runs of 9, 10 and 11) and the pack still
@@ -20,7 +22,10 @@
 # a Board test file's link selects one), which fails its case snapcase with the change (and passes on main's
 # f.test.sh), and with OTHERFAIL=main the main-red record holds that case, its fix card not picked yet, and a run of
 # one file runs g.test.sh too (a test.fileCommand that also runs the files a file links); with OTHERFAIL=base it fails
-# on main's f.test.sh too. Else a run of one other file (test.fileCommand, as `test-changed.sh --file` selects that
+# on main's f.test.sh too. With OTHERFAIL=only (the main-red record holds the case, as for main), the run is made by a
+# stand-in for tests() that exits 1 with a log of the files it was given passing and g.test.sh failing alone: the file
+# wrapper (filecmd(), lib/testrun.sh) logs `-- FAIL` for the file whenever its command exits 1, so a run of a stub command
+# never reads as a failure of only another file. Else a run of one other file (test.fileCommand, as `test-changed.sh --file` selects that
 # file alone) does not run g.test.sh. Either failure makes the run exit 1, its
 # files named in its log. Each run adds a line to $STUB/runs (the file it names and the checkout it runs in), and each
 # run of g.test.sh its checkout to $STUB/ran-g, and each time line it writes of a file that file's name to $STUB/timed. A
@@ -40,7 +45,9 @@ splitrun() { # <change> <cpu f.test.sh> <cpu f1.test.sh> <cpu f2.test.sh> <cpu p
   [ -z "${OTHERFAIL:-}" ] || : > "$STUB/other-fail"
   [ "${OTHERFAIL:-}" != base ] || : > "$STUB/other-base"
   [ "${OTHERFAIL:-}" != main ] || : > "$STUB/other-alone"
-  [ "${OTHERFAIL:-}" != main ] || jq -cn '{reds: [{sha: "abc", cases: [{case: "g.test.sh: snapcase", file: "g.test.sh", by: "c1", files: ["g.test.sh"], last: ""}], card: null}]}' > "$ST/mainred.json"
+  case ${OTHERFAIL:-} in main | only)
+    jq -cn '{reds: [{sha: "abc", cases: [{case: "g.test.sh: snapcase", file: "g.test.sh", by: "c1", files: ["g.test.sh"], last: ""}], card: null}]}' > "$ST/mainred.json" ;;
+  esac
   cat > "$STUB/mainrun-cmd" <<'EOF'
 rc=0; printf '%s %s\n' "${CONVEYOR_TEST_FILE:-}" "$PWD" >> "$STUB/runs"
 if [ "${CONVEYOR_TEST_FILE:-g.test.sh}" != g.test.sh ] && [ ! -e "$STUB/other-alone" ]; then :
@@ -70,6 +77,12 @@ EOF
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
     . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 9
     names || exit 9
+    if [ "${OTHERFAIL:-}" = only ]; then tests() { # <worktree> ...: its list's files pass, and g.test.sh, which the run also ran, fails
+      local k f; rm -rf "$1.testlog"; mkdir "$1.testlog"
+      while IFS=$'\t' read -r k f _; do [ "$k" = fail ] && printf '== %s\n-- ok %s\n' "$f" "$f"; done < "$1.rerun" > "$1.testlog/files"
+      printf '== g.test.sh\nFAIL [snapcase]: the snapshot differs\n-- FAIL g.test.sh\n' > "$1.testlog/r"
+      cat "$1.testlog/files" "$1.testlog/r" > "$1.test"; return 1
+    }; fi
     speedproof c7 "$wt" '{"number":7}' f.test.sh "${@:6}" ) > "$T/$CASE/run.out" 2>&1; RC=$?
   [ "$RC" != 9 ] || fail "the engine could not be loaded: $(cat "$T/$CASE/run.out")"
   WHY=$(head -n 1 "$wt.unfixed" 2>/dev/null)
@@ -136,6 +149,37 @@ t_speedothermain() {
   local n; n=$(wc -l < "$STUB/runs")
   [ "$RC" != 0 ] && [ "$n" = 1 ] && [ "$WHY" = 'the file f.test.sh fails with the change (exit 1); another test file the change selects fails too: g.test.sh fails (main'"'"'s failure, not the change'"'"'s: the main-red record holds it), case `snapcase`: FAIL [snapcase]: the snapshot differs' ] \
     || fail "a failure the main-red record holds was not said to be main's from the record: exit $RC, $n runs: $(cat "$STUB/runs"), $WHY"
+  # Bug (#1436): the guide said the file of a speed-up runs alone, and never said that a test command which also runs other
+  # files has their failure named "another test file the change selects" (g.test.sh above), apart from f.test.sh's own.
+  # The guide says it only when the command does so: the project's own `--file` command runs the named file alone.
+  pagesays_splitcheck conveyor/README.md 'a failure of one of them is named as another test file the change selects, apart from the file' "the reason names g.test.sh as another test file the change selects: $WHY"
+}
+
+# Bug (#1436): the guide for a split said its files run alone, and never said that a test command which also runs other
+# files has their failure named. Bug it catches: a split's run that also runs g.test.sh, another file, which fails, blocks the
+# split, and the reason names g.test.sh as that other file beside the split's own failure. The guide's split paragraph
+# says so in its own words, as the guide's speed-up paragraph (t_speedothermain) does in its own.
+t_splitotherfail() {
+  OTHERFAIL=main splitrun 'echo fast > f.test.sh; echo one > f1.test.sh; echo two > f2.test.sh' '' 4 7 '' f1.test.sh f2.test.sh
+  [ "$RC" != 0 ] && [[ $WHY == 'the files of the split, f.test.sh, f1.test.sh, f2.test.sh, fail with the change (exit 1); another test file the change selects fails too: g.test.sh fails'* ]] \
+    || fail "a split's run that also ran a failing g.test.sh was not blocked with g.test.sh named as another test file: exit $RC, $WHY"
+  pagesays_splitcheck conveyor/README.md 'When the command also runs other test files, a failure of one of them is named as another test file the change selects. They must pass.' "the split's reason names g.test.sh as another test file the change selects: $WHY"
+}
+
+# #602, #1436. Bug it catches: a speed-up whose own file passes but whose run fails only in g.test.sh, another file the change
+# selects, is said to fail in f.test.sh, or passes: the reason says f.test.sh does not fail and names g.test.sh. Without the
+# branch of speedproof() for a failure of only another file, the reason would be that of t_speedownfail (the file fails).
+t_speedotheronly() {
+  OTHERFAIL=only splitrun "$SPEEDUP" 4 '' '' ''
+  [ "$RC" != 0 ] && [[ $WHY == 'the file f.test.sh does not fail with the change, but another test file the change selects does (exit 1): g.test.sh fails (main'"'"'s failure'* ]] \
+    || fail "a run that failed only in g.test.sh was not blocked naming g.test.sh alone: exit $RC, $WHY"
+}
+
+# #1436. The same for a split: its files pass and only g.test.sh fails.
+t_splitotheronly() {
+  OTHERFAIL=only splitrun 'echo fast > f.test.sh; echo one > f1.test.sh; echo two > f2.test.sh' '' 4 7 '' f1.test.sh f2.test.sh
+  [ "$RC" != 0 ] && [[ $WHY == 'the files of the split, f.test.sh, f1.test.sh, f2.test.sh, do not fail with the change, but another test file the change selects does (exit 1): g.test.sh fails'* ]] \
+    || fail "a split's run that failed only in g.test.sh was not blocked naming g.test.sh alone: exit $RC, $WHY"
 }
 
 # #602. Bug it catches: naming another file's failure loses the optimized file's own: when f.test.sh fails (its case

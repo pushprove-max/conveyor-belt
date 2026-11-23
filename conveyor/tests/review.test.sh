@@ -6,6 +6,11 @@
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
+# A page of the repository says <text> (lines joined, spaces folded). A case that has just run the behaviour a page describes
+# calls this with what the run showed, so the page and the run cannot disagree. Each case file that calls it defines its own,
+# named after the file: the bug check puts only the card's test files on main's code, where a helper in lib.sh is missing,
+# and the runner sources the case files into one shell, where one name cannot be defined twice.
+pagesays_review() { tr '\n' ' ' < "$SRC/../$1" | tr -s ' ' | grep -qF -- "$2" || fail "$1 does not say \"$2\": $3"; } # <page> <text> <what the run showed>
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
@@ -143,6 +148,9 @@ t_nogounproven() {
   [ "$(wc -l < "$STUB/sessions")" = 1 ] || fail "a fix session was started for a NO-GO with no finding: $(cat "$STUB/sessions")"
   [ "$(st 'select(.step == "blocked") | .reason')" = "review 1 is NO-GO with no finding to fix: ${U:0:200}" ] \
     || fail "the block does not quote the review's UNPROVEN line: $(st 'select(.step == "blocked") | .reason')"
+  # Bug (#1436): the guide's list of how the fix loop ends had no block for a NO-GO with no finding; the run above blocked on review 1.
+  pagesays_review docs/cards.md 'review <n> is NO-GO with no finding to fix:' "the card blocked with: $(st 'select(.step == "blocked") | .reason' | cut -c1-80)"
+  pagesays_review docs/cards.md 'blocks the card when none of the reasons above ends the loop at that review' "a NO-GO of an unproven line alone blocked the card"
 }
 
 # Bugs: a leftover finding is not filed, or filed with the wrong mark, depth, labels or milestone; a NEW CARD line is
@@ -275,6 +283,8 @@ t_privfixagain() {
     || fail "a privacy hit found again after its fix round (review: [P2] a.txt:3 flags \$HY/bench, privfix=1) did not block the card: $(cat "$T/$CASE/after" "$T/$CASE/run.out" 2>&1)"
   [ "$(cat "$T/$CASE/blocked")" = "review 4 is the last review and still holds a privacy hit in the card's own change after its one fix round, so it files no follow-up: [P2] a.txt:3 flags $HY/bench" ] \
     || fail "the block does not name the privacy hit of review 4: $(cat "$T/$CASE/blocked" 2>&1)"
+  # Bug (#1436): the guide said a card has at most three reviews, but a fourth review follows the privacy fix round (the block above is its).
+  pagesays_review docs/cards.md 'at most three times, once more after the fix of a privacy hit on the last review' "review 4 came after the privacy fix: $(cat "$T/$CASE/blocked")"
 }
 
 # Bug: a P1 that is new in a last review (the fix-only review after its one fix round finds another, not the one fixed,
@@ -291,6 +301,17 @@ t_p1lastnew() {
   printf '%s\n' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
   afterrun "$(issue 7 2026-01-01)" 'pass=4 p1fix=1'
   [ "$(jq -c '[.after, .stop, .last]' <<<"$AFTER")" = '["last","max-reviews","1"]' ] || fail "a last review with only a P2 after the P1 fix round did not land: $AFTER"
+}
+
+# Bug (#1436): the guide gave one more review for the fix of a P1 or of a privacy hit, as if the two shared it. Each has its
+# own fix round (privfix, p1fix): review 4, which follows a privacy fix round (privfix=1), holds a P1 that is no privacy
+# hit, and it still goes to its own fix round (and a review 5), and does not block.
+t_privfixthenp1() {
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo fix1 >> a.txt' b.txt base
+  printf '%s\n' '[P1] a.txt:3 drops what the issue asks' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  afterrun "$(issue 7 2026-01-01)" 'pass=4 privfix=1'
+  [ "$(jq -c '[.after, .stop, .last]' <<<"$AFTER")" = '["fix","",""]' ] || fail "a P1 on review 4, after a privacy fix round, did not go to its own fix round: $AFTER"
+  pagesays_review docs/cards.md 'once more after the fix of a privacy hit on the last review and once more after the fix of a P1 on a last review' "review 4 held a P1 after the privacy fix and got a fix round: $AFTER"
 }
 
 # Bug: a follow-up chain goes past the cap: a card whose issue is a follow-up at the cap (MAX_DEPTH, 2) files another

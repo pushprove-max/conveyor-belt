@@ -2,9 +2,13 @@
 // The dashboard page's Rules tab: the rules, what they produce, and the held issues, each its own panel.
 // Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { T0, clone, boot, state, deliver, next, settle, P, CONTROL, MODELS, CLIS, full, act, record, panel,
   rulesP, rulesAll, rulesText, ruled, produced, figure, nextUp, heldP, groupsOf, groupEl, rowsOf, heldMany, cases, pickProject } from './dashboard-view.helpers.mjs';
 
+// A page of the repository (a name with no folder is a page of docs/), its bold marks taken out and its lines joined. Defined in
+// this file, not in the helpers: the bug check puts only the card's test files on main's code, where a new helper is missing.
+const guide = (name) => readFileSync(new URL(`../../../${name.includes('/') ? name : `docs/${name}`}`, import.meta.url), 'utf8').replace(/\*\*/g, '').replace(/\s+/g, ' ');
 const test = cases(import.meta.url);
 
 test('Rules: one row a rule on the left, what the snapshot says they produce on the right', () => {
@@ -183,7 +187,9 @@ test('Rules: Queue releases an issue the record holds; on one a label holds it s
   q().click();
   await settle();
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'unlabel', args: ['35', 'ux-change'], repo: 'sample' } }], 'the Board\'s "Remove the label and queue it"');
-  assert.match(groupEl(w, 'web').querySelector('[data-issue="35"]').textContent, /Label removed/);
+  assert.match(groupEl(w, 'web').querySelector('[data-issue="35"]').textContent, /Label removed: it goes into the queue in about a minute\./);
+  // Bug (#1436): the guide gave the Queue note for every Queue, but a row queued by removing its label says this one.
+  assert.ok(guide('board.md').includes('Label removed: it goes into the queue in about a minute.'), 'docs/board.md names the note of a row queued by removing its label');
 });
 
 test('Rules: Queue all asks once, naming the count and the labelled ones, and leaves those out unless asked', async () => {

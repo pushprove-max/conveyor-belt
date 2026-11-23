@@ -433,7 +433,7 @@
     el.append(row('push-check', 'Test before a push', 'the test files linked to the landings run before each push, and one that fails holds the push',
       seg('Test before a push', cOn, cOff), checkKnown ? offLine(checkOn, 'a push runs no test first') : newer(checkKnown)));
     // Approve visible changes: On stops a card whose change customers or staff will see until its
-    // issue has a `Visible change approved:` line; Off (the default) lets it land without one, and says so beside the switch, so a
+    // issue, or a parent issue it inherits the yes from (follow-ups and split slices), has a `Visible change approved:` line; Off (the default) lets it land without one, and says so beside the switch, so a
     // landed visible change is not read as approved.
     const yesOn = r.visible !== false, yesKnown = typeof r.visible === 'boolean';
     const yOn = choice('On', 'visible-on', 'Approve visible changes: on', yesOn, () => { if (!yesOn) send('rules', ['visible=on'], null, ['rules', ['visible=off']]); });

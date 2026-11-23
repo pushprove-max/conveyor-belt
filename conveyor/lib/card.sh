@@ -314,8 +314,8 @@ card() { # <card> <issue> [<branch> <tip>]
   prv=$'\n\n'"$PORTREVIEW"$'\n'"The difference is the file $wt.port."; kp=$fromk/$from.patch
   # A NO-GO is fixed and reviewed again; a NO-GO on a last review (review MAX_REVIEWS, counting the rounds a retried
   # card carries, or the one review after a landing conflict, a test fix or the landing gate's lint fix, or one that
-  # repeats a finding after its fix with every finding P2 or P3) lands with follow-ups, or blocks when it holds a P0. A GO card whose landing
-  # conflicts goes round once more: rebase, review. A finished loop whose landing still conflicts is ported once, as `retry` would port it.
+  # repeats a finding after its fix with every finding P2 or P3) lands with follow-ups, blocks on a P0, or gets one fix round and a review on a P1 (p1, below).
+  # A GO card whose landing conflicts goes round once more: rebase, review. A finished loop whose landing still conflicts is ported once, as `retry` would port it.
   # Whatever the review, the changed tests pass here before anything is filed or landed.
   while pass=$((${pass:-0} + 1)); do
     go=end; cardreview; sx=$?; [ "$go" != end ] || return $sx

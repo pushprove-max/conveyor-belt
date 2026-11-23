@@ -6,6 +6,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { T0, iso, clone, boot, panel, deliver, next, tick, full, settle, cases } from './dashboard-view.helpers.mjs';
 
+// A page of the repository (a name with no folder is a page of docs/), its bold marks taken out and its lines joined. Defined in
+// this file, not in the helpers: the bug check puts only the card's test files on main's code, where a new helper is missing.
+const guide = (name) => readFileSync(new URL(`../../../${name.includes('/') ? name : `docs/${name}`}`, import.meta.url), 'utf8').replace(/\*\*/g, '').replace(/\s+/g, ' ');
 const test = cases(import.meta.url);
 // A page with only the panel a case reads: every other panel's script is evaluated on each boot (and drawn when it is
 // on the tab in view), CPU paid for panels these cases never read and that their own files check.
@@ -114,6 +117,12 @@ test('Health: the plugin problems a Foreman noted are a warning row, "N plugin p
   assert.match(row.textContent, /2 plugin problems noted in \/srv\/sample\/conveyor\/state\/foreman\/plugin-bugs\.md/);
   assert.equal(row.querySelector('a').getAttribute('href'), 'plugin-bugs/sample.txt');
   assert.match(row.querySelector('.check-next').textContent, /conveyor-belt repo/);
+  // Bug (#1436): the step said "Then dismiss it" after "file it", but a note filed with File on GitHub leaves the list, so it has no Dismiss.
+  assert.match(row.querySelector('.check-next').textContent, /Dismiss, unless you filed it with File on GitHub, which removes the note/);
+  // The server keeps the note when the issue is filed but the file cannot be written ("filed as ..., but the note could not be removed"), so the step must still tell to dismiss it then.
+  assert.match(row.querySelector('.check-next').textContent, /filed the issue but could not remove the note, click Dismiss/);
+  assert.ok(guide('board.md').includes('unless you filed it with File on GitHub, which removes the note'), 'docs/board.md says the same as the Health step');
+  assert.ok(guide('board.md').includes('filed the issue but could not remove the note, click Dismiss'), 'docs/board.md names the failed removal too');
 });
 
 // Issue 1042: the owner could only read the notes in the file. Bugs it catches: no pane listing each note with its time,

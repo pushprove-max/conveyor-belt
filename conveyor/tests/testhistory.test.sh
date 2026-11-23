@@ -8,6 +8,8 @@
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
+# A page of the repository says <text> (lines joined, spaces folded). Each case file that calls it defines its own, named after the file: the bug check puts only the card's test files on main's code, where a helper in lib.sh is missing, and the runner sources the case files into one shell, where one name cannot be defined twice.
+pagesays_testhistory() { tr '\n' ' ' < "$SRC/../$1" | tr -s ' ' | grep -qF -- "$2" || fail "$1 does not say \"$2\": $3"; } # <page> <text> <what the run showed>
 
 # The start is the exact time of one run (h.test's first run after it), so a filter that keeps only what is after it
 # (not on or after it) drops that run.
@@ -71,8 +73,14 @@ th_figs() { jq -c '[.cpu, .median, .change, .usual, .slower, .runsOnRecord, .fai
 # time too, the survey time and a carried time of a run before it not), a file with no run since has no row, and the
 # totals follow.
 t_thstart() {
-  local got; th_fixture
+  local got pack; th_fixture; pack=$(cat "$R/.conveyor/project.json")
   loop test-settings history-start "$TH_START" || fail "the start $TH_START was not saved"
+  # Bug (#1436): the guide said test-settings changes the pack and nothing else, then named history-start as an
+  # exception; the run shows history-start changes the control record and leaves the pack as it was.
+  [ "$(jq -r .testsFrom "$ST/control.json")" = "$TH_START" ] && [ "$(cat "$R/.conveyor/project.json")" = "$pack" ] \
+    || fail "history-start did not change the control record alone: $(jq -c .testsFrom "$ST/control.json" 2>&1)"
+  pagesays_testhistory conveyor/README.md 'except `history-start`, which changes the control record' "history-start saved to the control record, not the pack"
+  ! tr '\n' ' ' < "$SRC/README.md" | tr -s ' ' | grep -qF 'and nothing else. Each' || fail "conveyor/README.md still says test-settings changes the pack and nothing else"
   got=$(th_as snapshot testspart 2026-11-09) || fail "testspart failed with the start $TH_START: $got"
   [ "$(th_figs "$got")" = '[30,10,2,10,true,7,1,1,1,["2026-11-22T00:00:00Z","2026-11-20T12:03:00Z","2026-11-20T12:02:00Z","2026-11-20T12:01:00Z","2026-11-20T12:00:40Z"],["2026-11-21T00:00:00Z"]]' ] \
     || fail "h.test's figures with the start $TH_START are not those of its runs on or after it: $(th_figs "$got")"

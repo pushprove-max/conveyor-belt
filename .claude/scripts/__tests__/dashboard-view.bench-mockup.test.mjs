@@ -4,8 +4,12 @@
 // are made up (BH.study(), 7 arms on 50 tasks; BH.few(), the 2 runs of 1 task; BH.live(), a run going). The tests use
 // jsdom only. Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { boot, settle, act, cases, BH } from './dashboard-view.helpers.mjs';
 
+// A page of the repository (a name with no folder is a page of docs/), its bold marks taken out and its lines joined. Defined in
+// this file, not in the helpers: the bug check puts only the card's test files on main's code, where a new helper is missing.
+const guide = (name) => readFileSync(new URL(`../../../${name.includes('/') ? name : `docs/${name}`}`, import.meta.url), 'utf8').replace(/\*\*/g, '').replace(/\s+/g, ' ');
 const test = cases(import.meta.url);
 const { bp, page } = BH;
 const text = (el) => el.textContent.replace(/\s+/g, ' ').trim();
@@ -140,6 +144,7 @@ test('Live run, a run going with 2 task runs not run (an image and a grading): t
   const w = await opened(set, 'run');
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-stat')).map((s) => [text(s.children[0]), text(s.children[1]), text(s.children[2])]).pop(),
     ['2', 'Not run', 'image fetch failed, grading failed · tried again next run']);
+  assert.ok(guide('board.md').includes('Not run has a chip with their causes and "tried again next run"'), 'docs/board.md names the chip of Not run and its words');
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-legend span')).map(text).pop(), 'Not run (image)');
 });
 
@@ -209,6 +214,7 @@ test('Task, 7 arms on the third task of the study: Open the logs shows the kept 
   // Bug it guards: while the Board waits for the answer, the button was off with a hover title alone; the page said nothing of why.
   assert.equal(act(bp(w), 'run-again').disabled, true);
   assert.equal(text(q(w, '.bench-again-why')), 'The Board waits for the answer to the last action.');
+  assert.ok(guide('board.md').includes('The Board waits for the answer to an action that you sent.'), 'docs/board.md lists the wait among the reasons the button is off');
   await settle();
   assert.equal(q(w, '[data-said="again-' + id + '"]'), null, 'the mockup gives Run this task again no answer line');
   assert.equal(q(w, '.bench-again-why'), null, 'a button that is on gives no reason');
@@ -227,6 +233,7 @@ test('Task, Conveyor arms that ran the task on two engines: Run this task again 
   assert.equal(b.disabled, true);
   assert.match(b.title, /more than one engine/);
   assert.match(text(q(w, '.bench-again-why')), /more than one engine/, 'the reason shows on the page, not only in the hover title');
+  assert.ok(guide('board.md').includes('ran the task on two engines, or on one that is not known'), 'docs/board.md lists the engine reason');
   b.click();
   assert.deepEqual(w.posts, [], 'a disabled button sends nothing');
 });
@@ -260,6 +267,31 @@ test('Task, no arm reached the task: Run this task again is off and says so', as
   assert.equal(b.disabled, true);
   assert.match(b.title, /No arm reached this task/);
   assert.match(text(q(w, '.bench-again-why')), /No arm reached this task/, 'the reason shows on the page, not only in the hover title');
+  assert.ok(guide('board.md').includes('No arm reached the task.'), 'docs/board.md lists the no-arm reason');
+  b.click();
+  assert.deepEqual(w.posts, [], 'a disabled button sends nothing');
+});
+
+// Bug it guards (#1436): the guide's list of reasons Run this task again is off fell behind the page (it left out the wait for
+// the last action's answer, checked in the case above); each reason the page gives has its line in the list, here the task that
+// is not in the pinned order, which no run can reach: the page says so under the buttons.
+test('Task, a task that is not in the pinned order: Run this task again is off and says so', async () => {
+  const set = BH.study();
+  const id = set.shows[BH.STUDY].tasks[2].id;
+  const w = await opened(set, 'map');
+  act(bp(w), `sq-${id}`).click();
+  await settle();
+  // The square comes from the pinned order, so the task leaves it while its page is open: the press of Run this task again
+  // reads the history anew, and the next read has an order without the task.
+  set.hist.order = set.hist.order.filter((t) => t !== id);
+  w.reply = BH.reply('conveyor: run r20261109T170000-9 started');
+  act(bp(w), 'run-again').click();
+  w.posts.splice(0);
+  await settle();
+  const b = act(bp(w), 'run-again');
+  assert.equal(b.disabled, true);
+  assert.equal(text(q(w, '.bench-again-why')), 'The task is not in the pinned order, so no run can reach it.');
+  assert.ok(guide('board.md').includes('The task is not in the pinned order.'), 'docs/board.md lists the pinned-order reason');
   b.click();
   assert.deepEqual(w.posts, [], 'a disabled button sends nothing');
 });
@@ -287,6 +319,7 @@ test('Task, a run goes now: Run this task again is off and the page says why und
   const b = act(bp(w), 'run-again');
   assert.equal(b.disabled, true);
   assert.equal(text(q(w, '.bench-again-why')), 'A run goes now: this task can run again when it ends.');
+  assert.ok(guide('board.md').includes('A run goes.'), 'docs/board.md lists the running-run reason');
   b.click();
   assert.deepEqual(w.posts, [], 'a disabled button sends nothing');
 });

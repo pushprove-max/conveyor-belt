@@ -207,6 +207,10 @@ t_swegradeshow() {
   [ "$(loop bench swe results --json | jq -c '.[0] | [.classes, (.tasks | map([.class, .measures.strays]))]')" = '[{"broke":1},[["broke",false]]]' ] \
     || fail "results --json does not give the class counts and each task's grade fields: $(loop bench swe results --json)"
   [ "$(loop bench swe history | jq -c '.runs[0].cols[0].classes')" = '{"broke":1}' ] || fail "history does not give the class counts of the run's arm: $(loop bench swe history | jq -c '.runs[0].cols')"
+  # Bug (#1436): the guide said history shows the per-result fields, but its runs hold figures and no task records, which show and results --json do.
+  [ "$(loop bench swe history | jq -c '[.. | objects | select(has("tasks"))] | length')" = 0 ] || fail "history gives task records: $(loop bench swe history | jq -c '.runs[0]' | cut -c1-300)"
+  tr '\n' ' ' < "$SRC/../docs/benchmarks.md" | tr -s ' ' | grep -qF '`bench swe show` and `results --json` show them for each result; `history` gives only the figures' \
+    || fail "docs/benchmarks.md does not say that only show and results --json give the per-result fields, which the run above shows"
 }
 
 # Bug: a result kept before these fields were kept would show them as zero or as a class of its own. Every reader shows

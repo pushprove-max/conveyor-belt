@@ -7,6 +7,8 @@
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
+# A page of the repository says <text> (lines joined, spaces folded). Each case file that calls it defines its own, named after the file: the bug check puts only the card's test files on main's code, where a helper in lib.sh is missing, and the runner sources the case files into one shell, where one name cannot be defined twice.
+pagesays_modellist() { tr '\n' ' ' < "$SRC/../$1" | tr -s ' ' | grep -qF -- "$2" || fail "$1 does not say \"$2\": $3"; } # <page> <text> <what the run showed>
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
@@ -54,6 +56,27 @@ judge gpt-b: []' ] || fail "the pack's models.allowed.codex and Codex's report a
   looks 'modelsallowed a && jq -c "$OKMODELS [.codex, seed(\"reviewer\").model]" <<<"$a"'
   out=$(cat "$T/$CASE/out")
   [ "$out" = '[[],"claude-opus-5-5"]' ] || fail "an empty models.allowed.codex took Codex's report, and the reviewer's default moved: $out"
+  # Bug (#1436): the per-card seat guide named only the pack's list as the models a seat takes, but gpt-b above, which
+  # only Codex reports, is taken too (by the reviewer and the judge), and, with the pack's codex list empty, refused (the
+  # refusal says when Codex's models count). The builder never takes it: it reads codex-builder, so its refusal names no report.
+  looks 'cardok reviewer gpt-b; cardok builder gpt-b'
+  out=$(cat "$T/$CASE/out")
+  [[ $out == "gpt-b is not one of the models the pack's models.allowed, with the Codex models that Codex reports when it sets no list or its codex list has a model in it, lets the reviewer run: "*$'\n'"gpt-b is not one of the models the pack's models.allowed lets the builder run: "* ]] \
+    || fail "gpt-b, which only Codex reports, was taken with an empty models.allowed.codex, or a refusal does not say whose models count: $out"
+  pagesays_modellist docs/configuration.md 'The review'"'"'s models also include the Codex models that Codex reports, when `models.allowed` is not set or its `codex` list has a model in it' "cardok took gpt-b for the reviewer with a codex list of one model and refused it with an empty one: $out"
+}
+
+# Bug (#1436): the model-list guide covered a Codex that reports a list and a Codex not installed, not a Codex that is
+# installed and gives no list (its report is {"codex": null}): there neither the report replaces the built-in Codex
+# models nor empties them, so they stay.
+t_modelsnolist() {
+  setup '[]'; tune 'del(.models.allowed)'
+  looks 'hostclis() { HOST_R="{\"codex\":null}"; }; modelsallowed a && jq -c ".codex" <<<"$a"; jq -c ".codex" <<<"$MODELS0"'
+  out=$(cat "$T/$CASE/out")
+  [ "$(sed -n 1p <<<"$out")" = "$(sed -n 2p <<<"$out")" ] && [ "$(sed -n 1p <<<"$out")" != '[]' ] \
+    || fail "with no models.allowed and Codex giving no list, the built-in Codex models did not stay: $out"
+  pagesays_modellist docs/configuration.md 'When Codex is installed but gives no list, the built-in Codex models stay.' "the built-in Codex models stay: $out"
+  pagesays_modellist docs/configuration.md 'installed but gives no list, the built-in Codex ones stay' "the built-in Codex models stay: $out"
 }
 
 # A host file whose codexProxy (at <base>/v1) takes the builder's Codex sessions through a proxy, and the reviewer's

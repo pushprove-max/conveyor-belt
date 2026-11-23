@@ -3,8 +3,12 @@
 // made after the change shows it. Bug: the row went at once, a snapshot made before the change drew it again as held,
 // and the next one took it away. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { T0, boot, deliver, next, settle, full, act, record, rulesP, groupEl, issuesP, heldP, clone, tick, cases } from './dashboard-view.helpers.mjs';
 
+// A page of the repository (a name with no folder is a page of docs/), its bold marks taken out and its lines joined. Defined in
+// this file, not in the helpers: the bug check puts only the card's test files on main's code, where a new helper is missing.
+const guide = (name) => readFileSync(new URL(`../../../${name.includes('/') ? name : `docs/${name}`}`, import.meta.url), 'utf8').replace(/\*\*/g, '').replace(/\s+/g, ' ');
 const test = cases(import.meta.url);
 
 // Bug (issue 1430): a split umbrella held by the owner had Queue on its Held row and was in Queue all, which send
@@ -48,6 +52,7 @@ test('Rules: a queued row stays shown as queued through a snapshot made before t
   await queued(w, record({ held: [] }, T0));
   assert.ok(row(w).classList.contains('is-pending'), 'shown as moved, not removed');
   assert.match(row(w).textContent, /Queued: this shows in about a minute/);
+  assert.ok(guide('board.md').includes('the row says "Queued: this shows in about a minute."'), 'docs/board.md names the note the row shows after Queue');
   assert.equal(act(row(w), 'queue'), null, 'no second Queue while it waits');
   w.clock = T0 + 30000;
   next(w, snap(T0 - 1000));

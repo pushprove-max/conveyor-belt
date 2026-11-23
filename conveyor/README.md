@@ -40,7 +40,8 @@ its own, and the Board's Rules tab sets them in its Judge row.
   below), and the Board shows how many landed cards are not pushed and which.
 - `visible`: whether a change customers or staff will see needs the owner's yes (Approve visible changes). On,
   a card whose change touches product code and that its reviewer says is visible stops for a
-  `Visible change approved:` line, and an issue whose `## What customers or staff will see` section names a change is
+  `Visible change approved:` line on its issue, or on a parent issue that it inherits the yes from (follow-ups and split
+  slices), and an issue whose `## What customers or staff will see` section names a change is
   not picked without one. Off, no card or issue waits for that line: the build brief and the review do not ask for it,
   the reviewer still answers the USER-VISIBLE line (kept on the card's review line), and the card lands as any other.
   A visible change landed while it is off was never approved; the Board says so beside the switch.
@@ -957,10 +958,12 @@ A file's own settings are in the pack's `test.files`, by its path from the repos
 The pack's `test.fileBudget`, a `budget` in `test.files` and a test rule with the measure `budget` are ignored.
 `doctor` names them on one line while the pack holds them.
 
-The Board saves these settings with `conveyor.sh test-settings`, which changes main's pack (`.conveyor/project.json`)
-and nothing else. Each command checks its value and the changed pack (lib/pack.sh) before it saves; a bad value is
-refused with the reason, and the pack does not change. `history-start` is the one setting that changes the control
-record, not the pack. The Board saves it too, in "Test history starts at" of the Test settings.
+The Board saves these settings with `conveyor.sh test-settings`, which changes main's pack (`.conveyor/project.json`),
+except `history-start`, which changes the control record, and `record-times` when its plan is a held card, which files the
+card and leaves the pack as it is. Each other command checks its value and the changed pack
+(lib/pack.sh) before it saves; a bad value is refused with the reason, and the pack does not change. `history-start`
+checks its own value (a UTC time, or `clear`) and changes no pack. The Board saves
+`history-start` too, in "Test history starts at" of the Test settings.
 
 - `test-settings slow-issues <true | false>`: `test.slowIssues`, which files nothing now (Test rules, below);
 - `test-settings slow-mark <file> <reason>`: the "slow on purpose" mark of one file that main's checkout tracks, with
@@ -1190,7 +1193,9 @@ the result the review sees say why. The review reads that change as it reads any
 A bug card that speeds up one test file is checked another way too. This is an issue whose title starts "Speed up the
 test file", as the Board's Tests page files it (`conveyor.sh testissue`). The file is the one that filing named, else
 the title's next word. Such a change keeps what the file tests, so its tests pass on main's code, and no test must fail
-there. The file runs alone, with the change, on a test slot, through the pack's `test.fileCommand`. It must pass, and its CPU
+there. The file runs alone, with the change, on a test slot, through the pack's `test.fileCommand`. When that command
+also runs other test files, a failure of one of them is named as another test file the change selects, apart from the
+file's own failure. The file must pass, and its CPU
 seconds must be lower than the median of its recent runs: the runs on the issue's "Last runs, newest first" line, as
 the Tests page writes it. The Tests page writes `none` on that line when the file has no runs, and `— CPU s` for a
 run with a clock time only. When the issue has no such line, or the line gives no CPU seconds, the check uses the
@@ -1226,7 +1231,8 @@ Then the check depends on what the change does:
 - The change keeps the file and adds no test file: the check is the speed-up check above (for stabilise and merge,
   the file may cost as much as its figure).
 - The change adds test files (a split): the new files run alone, with the change, on a test slot, and so does the rest
-  of the old file when the change keeps it. They must pass. Their CPU
+  of the old file when the change keeps it. When the command also runs other test files, a failure of one of them is
+  named as another test file the change selects. They must pass. Their CPU
   seconds summed must be at most the median of the old file's recent runs plus a start-up allowance for each file the split adds (Test
   file times, above). Else the card is blocked with no review. The reason names the sum, how far it is over its limit,
   and the allowance.
@@ -1774,7 +1780,8 @@ the older ones.
 The Board's 3D View tab (after Overview; `?tab=belt3d` opens it) shows a factory floor: one belt lane for each card
 on the belt, with six pads (Build, Review, Fix, Test, Land, Push), each coloured by what happened at that step, and the
 card's crate on the step it is in. Each lane has the card's number and title at its left and its live status at its
-right: how many tests have run, with a bar, while it is in Test, else the time in its step. Stuck cards (blocked, or
+right: how many tests have run, with a bar, while it is in Test, else the time in its step. While a card is in Test and
+runs one test file, its lane names the file by its short name: hover over the card or click it to see the full path. Stuck cards (blocked, or
 waiting for your yes) are in red lanes below, with the reason. Four bays along the bottom hold the queued issues, those
 waiting on another card (and on which), the held ones and the cards that just landed. The header strip counts each state
 and each step. Hover a card for its full title; click it for its six steps and their times, its review rounds, why it

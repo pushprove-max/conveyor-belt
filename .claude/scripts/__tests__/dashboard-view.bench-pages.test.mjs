@@ -5,8 +5,12 @@
 // runs of 1 task); Compare's four boxes and verdict as the pickers change; Plan a run's slider, cost and Start; Stop.
 // Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { boot, settle, act, cases, BH, T0, iso } from './dashboard-view.helpers.mjs';
 
+// A page of the repository (a name with no folder is a page of docs/), its bold marks taken out and its lines joined. Defined in
+// this file, not in the helpers: the bug check puts only the card's test files on main's code, where a new helper is missing.
+const guide = (name) => readFileSync(new URL(`../../../${name.includes('/') ? name : `docs/${name}`}`, import.meta.url), 'utf8').replace(/\*\*/g, '').replace(/\s+/g, ' ');
 const test = cases(import.meta.url);
 const { bp, page, heads, pages, TASKS } = BH;
 const text = (el) => el.textContent.replace(/\s+/g, ' ').trim();
@@ -191,6 +195,7 @@ test('Compare: an older version of a Conveyor arm other than conveyor can be pic
   const w = await opened(set, 'compare'), ids = () => Array.from(act(bp(w), 'cmp-a').options, (o) => o.value);
   assert.ok(ids().includes(`ver:${arm}:v1.7.0`), `the picker offers the older version of ${arm}: ${ids().join(', ')}`);
   assert.ok(ids().includes('ver:v1.8.0'), 'the older versions of the conveyor arm are still offered');
+  assert.ok(guide('board.md').includes('an older version of any Conveyor arm of the study'), 'docs/board.md says Compare offers the older versions of each Conveyor arm');
   await pick(w, 'cmp-a', `ver:${arm}:v1.7.0`);
   assert.equal(act(bp(w), 'cmp-a').value, `ver:${arm}:v1.7.0`);
   assert.match(fours(w)[1][0], /^Only Conveyor, Codex builds v1\.7\.0$/);
@@ -210,6 +215,8 @@ test('Compare, 2 runs of 1 task: nothing can be told yet, and only cost and time
   assert.equal(text(q(w, '.bench-vw')), 'There is no flipped task to explain. The only difference is cost and time: Conveyor v1.7.0 took 3 sessions, 77k tokens and 2.9 minutes;'
     + ' Claude alone took 1 session, 2k tokens and 0.5 minutes.');
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-pair'), (p) => text(p)), ['TokensConveyor v1.7.077kClaude alone2k', 'MinutesConveyor v1.7.02.9 minClaude alone0.5 min', 'SessionsConveyor v1.7.03Claude alone1']);
+  // Bug (#1436): the guide said Cost and time always shows the cost and the cost for each resolved task; on 1 shared task it shows the three figures above and no cost.
+  assert.ok(guide('board.md').includes('With fewer than 3 shared tasks it shows only the tokens, the minutes and the sessions'), 'docs/board.md names the figures Cost and time shows on 1 shared task');
 });
 
 // ---- Live run ----
@@ -223,6 +230,8 @@ test('Live run, 7 arms on 50 tasks going: the verdict, the figures, the grid wit
   assert.equal(text(q(w, '.bench-vv')), 'On time and on budget. 73 of 350 task runs done; about 7.6 h left.');
   assert.equal(text(q(w, '.bench-vw')), 'Spent $61.24 of the $293 estimate. The usage guard\'s week left: not kept.');
   assert.deepEqual(stats(w).map((s) => s.slice(0, 2)), [['73/350', 'Task runs done'], ['7.6 h', 'Left, at this pace'], ['$61.24', 'Spent so far'], ['0', 'Not run']]);
+  // Bug (#1436): the guide named three of the four figures; Not run is the fourth.
+  assert.ok(guide('board.md').includes('Not run, the number of task runs that did not run'), 'docs/board.md names the fourth figure, Not run');
   assert.equal(stats(w)[2][2], '21% of the estimate');
   const cell = (t, a) => page(w).querySelector(`.bench-gc[data-task="${t}"][data-arm="${a}"]`), LT = BH.LIVE_TASKS;
   assert.deepEqual([cell(LT[10], 'codex-sol').className, cell(LT[10], 'codex-sol').textContent], ['bench-gc bench-g-work', 'Running agent · 4 min'], 'the working cell says its step and minutes');

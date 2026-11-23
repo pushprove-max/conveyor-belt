@@ -114,7 +114,10 @@ its reply ends with one of two lines:
 - `ALREADY-DONE: <where it is fixed>`: main already does what the issue asks. A reviewer checks this against main.
 - `DONE-OUTSIDE: <what it did and where the evidence is>`: the issue asks for no change to a tracked file, and the
   session did the work outside the repository, for example records in the state folder or issues it filed. A
-  reviewer checks each `Done when` item against the evidence that the line names.
+  reviewer checks each `Done when` item against the evidence that the line names. The reviewer sees each state file that
+  the line names cut at 4000 bytes, and at most 40000 characters in all. The files that the line names come first,
+  then its folders; in a folder, the files that the session changed come first, the smallest first. A file that the
+  limit leaves out is counted in the evidence, not shown.
 
 When the reviewer answers GO, Conveyor closes the issue and the card ends as `closed`, not landed. For
 `DONE-OUTSIDE`, the issue's closing comment is the session's report, and the card's reason starts "Done outside
@@ -181,7 +184,8 @@ changed none of the card's files, no file that a lint command reads for all chan
 The pass stays the card's lint result, and the card gets no new `lint` line.
 
 - A finding goes to one fix session before any test runs. Its step is `Fix <n>: lint findings`. Then the card goes to
-  a review, and that review is its last review: a `NO-GO` lands with follow-ups, or blocks if it holds a P0. The gate before that review does not
+  a review, and that review is its last review: a `NO-GO` lands with follow-ups, blocks if it holds a P0, or gets one fix
+  round if it holds a P1 ([When the fix loop ends](#when-the-fix-loop-ends)). The gate before that review does not
   run again on the fixed change.
 - At the next landing gate, a finding that is still there blocks the card with the reason
   `lint: <n> findings left after its fix session; nothing landed`. If a different session (a test fix, for example)
@@ -229,7 +233,7 @@ card, the brief has no `# Lint` section, and a change of lint policy does not st
 
 ## Review and the judge
 
-A second model reviews each card, at most three times. Each finding has a level:
+A second model reviews each card, at most three times, once more after the fix of a privacy hit on the last review and once more after the fix of a P1 on a last review. Each finding has a level:
 
 - P0: it breaks main, loses data or opens a security hole.
 - P1: the change does not do what the issue asks, or breaks behaviour the project uses today.
@@ -255,7 +259,7 @@ highest effort its program takes when the list names no range. A model with no e
 has no step. The loop ends at the first of these:
 
 - `go`: a review says `GO`.
-- `max-reviews`: the card has had three reviews. A card that starts from the kept patch of a blocked card also counts
+- `max-reviews`: the card has had three reviews. One more review follows the fix of a privacy hit on the last review, and one more the fix of a P1 on a last review (below). A card that starts from the kept patch of a blocked card also counts
   the reviews of that card and of the cards whose kept patch it took. It does not count the reviews of other cards of
   the same issue. After an automatic port of one of those cards, it counts only the reviews after the review of the
   port.
@@ -265,6 +269,10 @@ has no step. The loop ends at the first of these:
 - `land`: the card lands from a kept patch on its kept review, with no new review.
 - `repeat`: a finding comes back after its fix, and each finding of the review is P2 or P3. A P0 or P1 that comes
   back blocks the card.
+
+A `NO-GO` with no finding to fix, such as one that holds only an `UNPROVEN` line, blocks the card when none of the
+reasons above ends the loop at that review. The reason is
+`review <n> is NO-GO with no finding to fix:` and the reviewer's first `UNPROVEN` line, else its `VERDICT` line.
 
 If a finding of the last review is a privacy hit in the card's own change, the card gets one more fix session. If a
 last review after that session still holds such a hit, the card blocks and files no follow-up. If the

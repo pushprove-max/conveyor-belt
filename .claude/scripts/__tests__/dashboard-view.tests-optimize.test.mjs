@@ -4,8 +4,12 @@
 // their state and numbers, the run where one landed, and the files an Optimize removed. Shared setup:
 // dashboard-view.helpers.mjs (TA.snap(): the three files of TESTS, with the Tests model and the actions).
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { boot, deliver, settle, act, cases, iso, T0, P, TA } from './dashboard-view.helpers.mjs';
 
+// A page of the repository (a name with no folder is a page of docs/), its bold marks taken out and its lines joined. Defined in
+// this file, not in the helpers: the bug check puts only the card's test files on main's code, where a new helper is missing.
+const guide = (name) => readFileSync(new URL(`../../../${name.includes('/') ? name : `docs/${name}`}`, import.meta.url), 'utf8').replace(/\*\*/g, '').replace(/\s+/g, ' ');
 const test = cases(import.meta.url);
 const { MERGE, X, ID1, ID2, rec, snap, tp, rowOf, opened, open, type } = TA;
 const OLD = 'conveyor/tests/old.test.sh';
@@ -148,7 +152,7 @@ test('Tests history: no run is marked when the first run after the landed Optimi
 });
 
 // Bug it guards (D7): a file an Optimize merged away lost its history, or stayed in the table as if main had it.
-test('Tests history: a file an Optimize merged shows under Removed by Optimize with its issue and the file that took its cases', () => {
+test('Tests history: a file an Optimize merged shows under Removed by Optimize with its issue and the file that took its cases, and Recent actions names it as plain text', () => {
   const w = show(history());
   assert.equal(rowOf(w, OLD), undefined, 'not in the table');
   const sec = tp(w).querySelector('.tests-removed');
@@ -157,4 +161,13 @@ test('Tests history: a file an Optimize merged shows under Removed by Optimize w
   assert.equal(item.dataset.file, OLD);
   assert.match(item.textContent, new RegExp(`^${OLD} · its last run 5\\.0 CPU s, its median 6\\.0 CPU s · #620 · merged .+ · its cases are now in ${MERGE}$`));
   assert.ok(tp(w).querySelector('.tests-files').compareDocumentPosition(sec) & 4, 'after the table');
+  // Bug it guards (#1436), on the same render: the guide said to click a file name in Recent actions to open its row, but the
+  // name of a file an Optimize removed has no row, so it is plain text and a click does nothing. The name of a file that has a row is a button.
+  const names = Array.from(tp(w).querySelectorAll('.tests-results .tests-result-file'));
+  const old = names.find((n) => n.textContent === OLD), kept = names.find((n) => n.textContent === MERGE);
+  assert.ok(old, `the removed file is listed: ${names.map((n) => n.textContent)}`);
+  assert.equal(old.tagName, 'SPAN', 'plain text, no button');
+  assert.ok(kept, `the file with a row is listed: ${names.map((n) => n.textContent)}`);
+  assert.equal(kept.tagName, 'BUTTON');
+  assert.ok(guide('board.md').includes('The name of a file that Optimize removed is plain text'), 'docs/board.md says the removed file has no button');
 });

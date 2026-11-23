@@ -5,8 +5,12 @@
 // also in the few page's history fold. One case for each fixture (BH.study(), 7 arms on 50 tasks; BH.few(), 2 runs of 1
 // task; BH.live(), a run going), changed to reach the state. The tests use jsdom only. Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { boot, settle, act, cases, BH, iso, T0, tick as clockTick } from './dashboard-view.helpers.mjs';
 
+// A page of the repository (a name with no folder is a page of docs/), its bold marks taken out and its lines joined. Defined in
+// this file, not in the helpers: the bug check puts only the card's test files on main's code, where a new helper is missing.
+const guide = (name) => readFileSync(new URL(`../../../${name.includes('/') ? name : `docs/${name}`}`, import.meta.url), 'utf8').replace(/\*\*/g, '').replace(/\s+/g, ' ');
 const test = cases(import.meta.url);
 const { bp, page, TASKS, STUDY } = BH;
 const text = (el) => el.textContent.replace(/\s+/g, ' ').trim();
@@ -336,6 +340,9 @@ test('Plan a run, 2 runs of 1 task: the arm table shows the mockup\'s states, bo
   for (const arm of ['conveyor', 'solo']) { const b = act(bp(w), `arm-${arm}`); b.checked = false; b.dispatchEvent(new w.Event('change')); }
   assert.deepEqual(['start', 'check-arms'].map((a) => act(bp(w), a).disabled), [true, true]);
   assert.equal(text(q(w, '.bench-why')), 'Start is off: no arm is ticked. Check the arms first is off: no arm is ticked.');
+  // Bug (#1436): the guide lists each reason a Plan a run button is off; a reason the page shows and the guide leaves out is the gap.
+  assert.ok(guide('board.md').includes('with no arm picked, while an arm that you picked is not ready, while the usage guard holds an arm that you picked, and while an action'), 'docs/board.md lists the reasons Start the run is off');
+  assert.ok(guide('board.md').includes('It stays off with no arm picked, while the arms that you picked are being checked, and while an action'), 'docs/board.md lists the reasons Check the arms first is off');
 });
 
 // Bug it guards: with the usage guard reached, Start was off with no word of why.
@@ -345,6 +352,7 @@ test('Plan a run, the usage guard reached: Start is off and says why, Check the 
   const w = await opened(set, 'plan');
   assert.deepEqual(['start', 'check-arms'].map((a) => act(bp(w), a).disabled), [true, false]);
   assert.equal(text(q(w, '.bench-why')), 'Start is off: the usage guard is reached.');
+  assert.ok(guide('board.md').includes('while the usage guard holds an arm that you picked'), 'docs/board.md lists the usage guard as a reason Start the run is off');
 });
 
 // Bug it guards: with a run going, Start was off with no word of why; Check the arms first is on all the same.
@@ -352,6 +360,7 @@ test('Plan a run, a run going: Start is off and says a run goes now, Check the a
   const w = await opened(BH.live(), 'plan');
   assert.deepEqual(['start', 'check-arms'].map((a) => act(bp(w), a).disabled), [true, false]);
   assert.equal(text(q(w, '.bench-why')), 'Start is off: a run goes now.');
+  assert.ok(guide('board.md').includes('It stays off while a run goes, with no arm picked'), 'docs/board.md lists a run going as a reason Start the run is off');
 });
 
 // Bug it guards: the Check button's read of the arms was lost (the page server did not answer). The arms read stayed as it
@@ -373,6 +382,21 @@ test('Plan a run, Check the arms first, the first read of the arms lost: the pag
   assert.equal(w.benchAsks.length, asked + 1, 'the page asked for the arms again');
   assert.match(text(q(w, '.bench-why')), /Check the arms first is off: the ticked arms are being checked\.$/);
   assert.equal(act(bp(w), 'check-arms').disabled, true, 'the arms read shows the ticked arms being checked');
+  // Bug (#1436): the guide said the Board reads the arms again "until a read answers"; it reads on while an arm is being checked, and stops when none is.
+  clockTick(w, 5000);
+  await settle(); await settle();
+  assert.equal(w.benchAsks.length, asked + 2, 'a read that answers with an arm still being checked is followed by another');
+  // The read above changed the arms' objects in place, so the arms are set back to ready here, as a finished check leaves them.
+  w.benchBody = (url) => { const b = answer(url); if (b && b.arms) b.arms.forEach((a) => { if (a.state === 'checking') a.state = 'ready'; }); return b; };
+  clockTick(w, 5000);
+  await settle(); await settle();
+  assert.equal(w.benchAsks.length, asked + 3, 'a read that shows no arm being checked is the last');
+  clockTick(w, 5000);
+  await settle(); await settle();
+  assert.equal(w.benchAsks.length, asked + 3, 'no read follows it');
+  const page = guide('board.md');
+  assert.ok(page.includes('After a check, the Board reads the arms again, so the arms show their new state, until a read answers and no arm is being checked'), 'docs/board.md says when the re-read after a check ends');
+  assert.ok(page.includes('while the arms that you picked are being checked'), 'docs/board.md lists the checking arms as a reason Check the arms first is off');
 });
 
 // Bug it guards: while the answer to Check the arms first was out, both buttons were off with no word of why.
@@ -383,4 +407,6 @@ test('Plan a run, Check the arms first sent and not answered: both buttons are o
   await settle(); await settle();
   assert.deepEqual(['start', 'check-arms'].map((a) => act(bp(w), a).disabled), [true, true]);
   assert.equal(text(q(w, '.bench-why')), 'Both buttons are off: the last action has no answer yet.');
+  // Bug (#1436): the guide gave the off reasons of Start the run and Check the arms first without the wait for an answer.
+  assert.equal(guide('board.md').split('while an action that you sent has no answer yet').length - 1, 2, 'docs/board.md gives the wait as a reason for both buttons');
 });

@@ -104,6 +104,10 @@ tenth() { # <case> <line to append at NOW-55 minutes>
 tenth quiet '{"type":"mode","mode":"normal"}'
 no_ping() { ! "$@"; }
 check "a write with no timestamp after the 10th ping does not reset the count: no 11th ping" no_ping poll quiet "$P"
+# Bug (#1436): the guide said the keepalive turns go on when usage cannot be read, with no limit; the poll above sent no
+# 11th ping, so the guide gives the limit the ping text names ("ping N of 10").
+says() { tr '\n' ' ' < "$SRC/../../docs/$1" | tr -s ' ' | grep -qF -- "$2"; }
+check "docs/foreman.md gives the limit of 10 keepalive turns in one idle spell, as no 11th ping shows" says foreman.md 'at most 10 keepalive turns in one idle spell'
 tenth real "$(printf '{"type":"user","timestamp":"%s","message":{"content":"Status?"}}' "$(TZ=UTC p_date "@$((NOW - 55 * 60))" +%Y-%m-%dT%H:%M:%S.000Z)")"
 check "a timestamped turn after the 10th ping is real activity: the pings start again" poll real "$P"
 

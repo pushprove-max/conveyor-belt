@@ -64,12 +64,13 @@ setup leaves it as it is and says so. A session keeps the cache time it started 
 role runs with another cache time, such as `5m`, the claim says so in one line. Start that session again to get the
 1-hour cache.
 
-While the Foreman is idle, the waiter sends it a short keepalive turn every 50 minutes, so the cache stays warm. Before
+While the Foreman is idle, the waiter sends it a short keepalive turn every 50 minutes, so the cache stays warm. It sends
+at most 10 keepalive turns in one idle spell: the count starts again when you use the Foreman. Before
 the next one, it reads the usage of the last keepalive turn. When the turn wrote the cache again and read none of it,
 the cache did not stay warm, so the waiter sends no more keepalive turns until the Foreman is active again. When you
 used the Foreman after the last keepalive turn, the waiter does not read that usage, and the keepalive turns go on. Each
 stop adds a line with the turn's usage to `keepalive.log` in the Foreman's folder. When the usage cannot be read, the
-keepalive turns go on.
+keepalive turns go on, up to that limit.
 
 When `/conveyor-belt:foreman` or your words make a session the Foreman, the Board opens in your default browser at
 `https://localhost:<port>/`. It opens once for each claim. A claim by the session that is already the Foreman, a
@@ -85,6 +86,9 @@ off the Board that opens when a session starts.
 `conveyor.sh foreman status` prints the state of the Foreman's projects as short plain text. Give a project's name to
 see only that project. It shows:
 
+- when a new snapshot fails, the last saved one with its age and why the new read failed, as
+  `<project>: the last snapshot, made <age> (a new one failed: <why>):`, and when no snapshot can be read or found,
+  `<project>: no snapshot (<why>)`
 - each card on the belt, one a line: its issue, step, time in that step and title
 - when the card records changed after the last snapshot was made, "as of <time>, the belt has changed since" after the
   count of cards on the belt. The cards building and the blocked cards then come from the card records and
@@ -132,6 +136,8 @@ it up:
   whole card records, the watcher reads `conveyor.sh health`. A blocked card, or a change that waits for your yes,
   then wakes the Foreman from health at that poll, and does not wait for the snapshot. With the standing kind
   `review-retry` on, a card that its review blocked gives no wake ([Standing yes](#standing-yes)).
+- A stopped process: the engine, or the process of a card, is stopped (state T in `ps`). The wake names it. Run
+  `kill -CONT` with each process ID of the tree, as the wake gives it, on the machine where the engine runs to resume it.
 - A card that is still blocked 30 minutes after its first wake: the wake says "#N has been blocked for <time>" and
   gives the reason. While the card stays blocked, the next wake comes one hour later, and then each hour. If one of
   your open questions names the card's issue (`#N`), there is no wake. A card that is retried, unblocked, shut or

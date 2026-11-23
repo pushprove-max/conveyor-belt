@@ -7,6 +7,8 @@
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
+# A page of the repository says <text> (lines joined, spaces folded). Each case file that calls it defines its own, named after the file: the bug check puts only the card's test files on main's code, where a helper in lib.sh is missing, and the runner sources the case files into one shell, where one name cannot be defined twice.
+pagesays_reuse() { tr '\n' ' ' < "$SRC/../$1" | tr -s ' ' | grep -qF -- "$2" || fail "$1 does not say \"$2\": $3"; } # <page> <text> <what the run showed>
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
@@ -212,6 +214,11 @@ t_p1lastfixed() {
   p1fixround GO
   [ "$(steps)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,fix ok,review GO,test pass,landed ok," ] && [ ! -e "$STUB/filed" ] \
     || fail "a P1 cleared by its fix round did not land with nothing filed: $(steps) $(cat "$STUB/filed" 2>&1)"
+  # Bug (#1436): the guide said a card has at most three reviews, but the run above had four: the last review's P1 got one
+  # fix round and one more review.
+  local n; n=$(wc -l < "$STUB/reviews")
+  pagesays_reuse docs/cards.md 'once more after the fix of a P1 on a last review' "the card had $n reviews"
+  pagesays_reuse docs/cards.md 'and one more the fix of a P1 on a last review' "the card had $n reviews"
 }
 
 # Done when: the P1 still holds after that fix, so the card blocks with its patch kept and files no follow-up.

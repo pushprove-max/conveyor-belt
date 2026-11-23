@@ -1016,13 +1016,14 @@ modelsettings() { # [the control record, when the caller has read it]
 }
 # Why a per-card seat (`control card`) is refused, on stdout, or nothing when it is taken: its model is one the
 # pack's models.allowed lists for the seat (the builder's list for the builder, the review's for the reviewer and the
-# judge), and its effort, when one is given, one that model's CLI takes (an OpenCode builder takes none). Fails when
-# models.allowed cannot be read.
+# judge; the review's list has the Codex models that Codex reports too, when the pack sets no models.allowed or its codex
+# list has a model in it (modelsallowed()), and the builder's does not: it reads codex-builder), and its effort, when one is
+# given, one that model's CLI takes (an OpenCode builder takes none). Fails when models.allowed cannot be read.
 cardok() { # <builder|reviewer|judge> <model> [effort]
   local a; modelsallowed a || { echo "conveyor: the pack's models.allowed cannot be read; nothing changed" >&2; return 1; }
   jq -r --arg s "$1" --arg m "$2" --arg f "${3:-}" --argjson e "$EFFORTS" "$OKMODELS"'okmodels(if $s == "builder" then "builder" else "reviewer" end) as $ok
     | ([$ok | to_entries[] | select(.value | index($m)) | .key] | first) as $g
-    | if $g == null then "\($m) is not one of the models the pack'"'"'s models.allowed lets the \($s) run: \([$ok[][]] | if . == [] then "it lists none" else "it allows " + join(", ") end)"
+    | if $g == null then "\($m) is not one of the models the pack'"'"'s models.allowed\(if $s == "builder" then "" else ", with the Codex models that Codex reports when it sets no list or its codex list has a model in it," end) lets the \($s) run: \([$ok[][]] | if . == [] then "it lists none" else "it allows " + join(", ") end)"
       elif $f == "" then empty
       elif $s == "builder" and $g == "opencode" then "an OpenCode builder takes no effort: name the model alone"
       elif ($e[$g] | index($f)) == null then "\($g) takes no effort \($f) (it takes \($e[$g] | join(", ")))" else empty end' <<<"$a"

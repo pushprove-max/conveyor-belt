@@ -448,7 +448,7 @@ under each of its `keys`:
 A figure is `null` when one of the results it counts has not kept what the figure needs. `medians`, `rates` and
 `tokensPerResolved` are `null` when no result is resolved.
 
-`bench swe show`, `history` and `results --json` show them. A result recorded before they were kept shows them as
+`bench swe show` and `results --json` show them for each result; `history` gives only the figures. A result recorded before they were kept shows them as
 `null`, which means not kept, not zero. A result kept before `lintClean`, `provesFix` or `clean` has no value for them:
 that also means not kept.
 

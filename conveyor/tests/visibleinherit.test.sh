@@ -6,6 +6,8 @@
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
+# A page of the repository says <text> (lines joined, spaces folded). Each case file that calls it defines its own, named after the file: the bug check puts only the card's test files on main's code, where a helper in lib.sh is missing, and the runner sources the case files into one shell, where one name cannot be defined twice.
+pagesays_visibleinherit() { tr '\n' ' ' < "$SRC/../$1" | tr -s ' ' | grep -qF -- "$2" || fail "$1 does not say \"$2\": $3"; } # <page> <text> <what the run showed>
 # resumed is port.test.sh's: the runner loads every case file into one shell. A change to port.test.sh runs this file
 # too, through its link in .conveyor/test-links.json.
 
@@ -39,6 +41,9 @@ t_inheritpart() {
   [ "$(st 'select(.issue == 100101 and .step == "landed") | [.sha, .yesFrom] | tojson')" = "[\"$(git -C "$R" rev-parse HEAD)\",7]" ] \
     || fail "a follow-up whose change is part of its parent's yes did not land on it, or its record does not say so: $(steps 100101)"
   grep -q 'yes is inherited' "$STUB/run1.out" && [ ! -e "$STUB/comments" ] || fail "the inherited yes was not said, or the card commented as blocked"
+  # Bug (#1436): the guides said a card waits for the yes line on its own issue, but the follow-up above landed on its parent's.
+  pagesays_visibleinherit docs/board.md 'a parent issue that it inherits the yes from (follow-ups and split slices) has one' "#100101 landed on the yes of its parent #7"
+  pagesays_visibleinherit conveyor/README.md 'or on a parent issue that it inherits the yes from (follow-ups and split slices)' "#100101 landed on the yes of its parent #7"
   [ "$(st 'select(.issue == 100101 and .step == "review") | .counts.P1' | tr '\n' ' ')" = "1 0 " ] || fail "the INHERITED line was counted as a finding: $(st 'select(.issue == 100101 and .step == "review") | .counts')"
   # The reviewer was given the parent's approval line, its condition to hold to, and its USER-VISIBLE sentence.
   grep -qx "$P" "$STUB/asked" && grep -q '^# The yes of #7$' "$STUB/asked" && grep -q 'as its review said: admins see a Pay button$' "$STUB/asked" \

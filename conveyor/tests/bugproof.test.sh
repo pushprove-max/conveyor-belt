@@ -6,6 +6,8 @@
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
+# A page of the repository says <text> (lines joined, spaces folded). Each case file that calls it defines its own, named after the file: the bug check puts only the card's test files on main's code, where a helper in lib.sh is missing, and the runner sources the case files into one shell, where one name cannot be defined twice.
+pagesays_bugproof() { tr '\n' ' ' < "$SRC/../$1" | tr -s ' ' | grep -qF -- "$2" || fail "$1 does not say \"$2\": $3"; } # <page> <text> <what the run showed>
 
 # The control record's rule "Push when a card lands" off, after setup: no case here checks a push, and the push after a
 # landing was about a seventh of a landing card's CPU (where the pack sets test.fileCommand, it runs the landing's test
@@ -307,6 +309,10 @@ t_buginlinerust() {
   grep -qxF -- '- src/lib.rs (its inline tests, with the rest of its change taken out)' "$FXWT.unfixed" && grep -q '^The run failed there (exit 1)' "$FXWT.unfixed" \
     || fail "the result does not say the inline test fails without the fix: $(cat "$FXWT.unfixed" 2>&1)"
   [ "$RC" = 0 ] || fail "the inline test that fails without the fix did not prove it (exit $RC): $BW"
+  # Bug (#1436): the guide said the check runs your test command on main's code with the inline tests; the run above ran
+  # the product file alone, through the file's runner, as it runs a test file.
+  pagesays_bugproof docs/configuration.md 'It runs each such product file alone on main'"'"'s code' "src/lib.rs was run alone on main's code: $(cat "$STUB/mainran" 2>&1 | head -n 1)"
+  ! tr '\n' ' ' < "$SRC/../docs/configuration.md" | tr -s ' ' | grep -qF 'It runs your test command on main' || fail "docs/configuration.md still says the inline test check runs your test command"
 }
 
 # #140 D1. Bug it catches: a Python doctest added to the docstring of the function a bug card fixes was no test the

@@ -56,6 +56,9 @@ serves the Board, because its requests come from a loopback address. An admin se
 
 ## Tabs and panels
 
+On a narrow screen, the row of tabs is wider than the screen and shows no scroll bar: swipe it sideways to reach the other
+tabs.
+
 - **Overview**: the panels Needs you, On the belt, Queue, Landed today, Release, Declined, Health, Lanes, Cost and Metrics. The
   tab shows the count of cards stopped for you, "Overview · 4". The browser tab's title shows the same count,
   "(4) Conveyor Board", also while the page is in a background tab. With no card stopped, the title is "Conveyor Board".
@@ -245,11 +248,15 @@ lists every project's rows, so it stays as it is.
   when there is one.
 - **Plugin problems** in Health shows when a Foreman noted a problem in Conveyor itself, in `plugin-bugs.md` in its
   folder. Each note is one row: the time, the card and what the Foreman saw. Fix the problem, or file it as an issue
-  in the repository of Conveyor. Then click **Dismiss** to remove that note from `plugin-bugs.md`. Dismiss does not file
-  an issue, and it keeps the other notes. When no note is left and no link to a filed issue shows, the pane goes away.
+  in the repository of Conveyor. Then click **Dismiss** to remove that note from `plugin-bugs.md`, unless you filed it
+  with **File on GitHub**, which removes the note. When the Board says it filed the issue but could not remove the
+  note, click **Dismiss**. Dismiss does not file an issue, and it keeps the other notes. When no
+  note is left and no link to a filed issue shows, the pane goes away.
 - To file a note, click **File on GitHub** in its row. A preview opens below the note. The title is the first clause
-  of the note. The body holds the note, the plugin version, the engine commit and the system. The card name names
-  your project, so the body shows it as `<card>`. You can change the
+  of the note. A note made only of an unchecked cause takes its title from the first clause of the cause. The body holds
+  the note, the plugin version, the engine commit and the system. The cause, when the note has one, is the last line of
+  the note in the body, as "Cause (not checked):". The card name names your project, so the body shows it as `<card>`.
+  You can change the
   title and the body. Nothing is filed until you click **File the issue**. The issue goes to the repository that
   `.claude-plugin/plugin.json` names. Click **Cancel** to close the preview. A note that names its issue, as in
   "filed as #449", is filed already, so it has no **File on GitHub**.
@@ -425,7 +432,8 @@ Your prices, added models and aliases are saved in the pack (`prices` in `.conve
 with the project. Each change has Undo.
 
 **Approve visible changes** is a switch per project, Off by default. On, a card whose change customers or staff
-will see stops until its issue has a `Visible change approved:` line. Off, the tab says "off: visible changes land
+will see stops until its issue has a `Visible change approved:` line, or a parent issue that it inherits the yes from
+(follow-ups and split slices) has one. Off, the tab says "off: visible changes land
 without your yes".
 
 **Land as** is **Main** or **Pull request**. Until you set it, it shows the pack's `push.landAs`. Main pushes the
@@ -517,6 +525,9 @@ An issue that is not being built is in Held for one of four reasons: **Held by y
 With the rule **Push on landing** off, an open issue whose card landed is not work to build. The Rules tab shows it
 as **Landed, not pushed**, and the count of open issues names it apart. "Holds keep N issues back" does not count
 it, and the row of its parent issue shows it as landed. The push closes it.
+After **Queue** or **Queue all**, the row says "Queued: this shows in about a minute." until the next snapshot has it. A row
+that you queued by removing its label says "Label removed: it goes into the queue in about a minute." instead. If
+the host refuses, the row shows the reason.
 An issue that someone outside the project opened shows **Opened by someone outside the project: release it to build
 it** in place of **Held by you** ([The control record](configuration.md#the-control-record)).
 
@@ -1064,7 +1075,8 @@ these are the test files that the review of its card named.
 
 Recent actions is closed until you open it. Its heading shows how many actions run and how many are queued. It lists
 the test actions, the Optimize issues and the cards with no GitHub issue, newest first, each with its state. A card
-with no issue shows "No issue" in place of the issue link. Click a file name in it to open the row of that file.
+with no issue shows "No issue" in place of the issue link. Click a file name in it to open the row of that file. The name of a file that Optimize removed is plain text, as that
+file has no row.
 
 Each row has a checkbox. The checkbox in the heading selects every file that the search and the filter show. With one
 file or more selected, a bar at the bottom of the screen shows how many, with Judge, Optimize, Run, Mutation check and
@@ -1189,7 +1201,7 @@ changed that step. `bench swe diff` reads the kept result of a task. A run with 
 where the result shown is that run's own, or where the two outcomes differ, shows "not kept" in place of its commits, also when no commit changed that step. With one version only, the page says
 that no version can be compared yet; with none, the verdict says "not kept".
 
-**Compare** sets any two arms, or a version of the Conveyor arm, against each other on the tasks that both graded. The
+**Compare** sets any two arms, or an older version of any Conveyor arm of the study, against each other on the tasks that both graded. The
 verdict says which one is better, when the difference is past the noise, and else how many tasks would show the
 difference. When that is more than the tasks of the set, it gives the size of the set as the number and says that the
 set has fewer, so treat the two as equal. A gap of 0 tasks is that case. With fewer than two arms that have results, or while the page has not read the two
@@ -1200,15 +1212,16 @@ runs went apart. The list shows at most 12 tasks. **Why, in short** has the mode
 `bench swe diff` read another result of a task than the one shown (the result shown is a run with `--again`'s own),
 or gave no reading, the task shows "not kept" in place of the reading. Click a flipped task to open it on **Task**.
 **Cost and time** shows the cost, the cost for each resolved task, the machine time, the tokens and the sessions of the
-two side by side.
+two side by side. With fewer than 3 shared tasks it shows only the tokens, the minutes and the sessions.
 
 **Live run** shows the run that goes now. The verdict says whether the run is on time and on budget against its
 estimate, with the tasks done, the time left at this pace, the cost so far and the usage guard: the share of the week
 that the guard has left, and the share that the rest of the run needs at the pace of its tasks so far. Both are "not
 kept" for a run from before the engine kept them. A result that the run
 reuses takes no time and costs nothing: the time left and the estimate count only the tasks that the run runs. A run
-with `--again` reuses no result, so they count each of its tasks. Four figures give the
-same. **Tasks by arm** has a row for each task and a column for each arm: resolved, unresolved, not run, waiting, or
+with `--again` reuses no result, so they count each of its tasks. Four figures give the same: the task runs done, the
+time left at this pace, the cost spent so far, and **Not run**, the number of task runs that did not run. When there are
+some, **Not run** has a chip with their causes and "tried again next run". **Tasks by arm** has a row for each task and a column for each arm: resolved, unresolved, not run, waiting, or
 the step and minutes of the work now. **Score so far** gives each arm's resolved count on the tasks that every arm
 graded, with its 95% range. A task that an arm did not run is left out for every arm. **Events** gives the last events of the run, newest first. **Stop the run** stops the
 whole run: the work in progress and the tasks that it did not reach yet. Finished results stay. After you click it,
@@ -1242,6 +1255,7 @@ the size. Three buttons are under the facts:
   - The task is not in the pinned order.
   - No arm reached the task.
   - The Conveyor arms ran the task on two engines, or on one that is not known: a run takes one engine.
+  - The Board waits for the answer to an action that you sent.
 
   When it is off, a line under the buttons says why. When the build machine refuses the run, a line under the buttons
   gives the refusal.
@@ -1266,9 +1280,11 @@ plan fits when it leaves more than the stop, and it fits whatever it uses when t
 or the arms have no guard, or, with the guard on, when no earlier run kept the share a task used), the container limits of the belt ("not kept" when they are not kept),
 and the command that the run sends. **Start the run** sends that command,
 with the engine's default settings. It stays off while a run goes, with no arm picked, while an arm that you picked is
-not ready, and while the usage guard holds an arm that you picked. **Check the arms first** runs the
-preflight of each arm that you picked and that is not ready, or of every arm that you picked when all are ready. It
-stays off with no arm picked, and while the arms that you picked are being checked. When a button is off, one line
+not ready, while the usage guard holds an arm that you picked, and while an action that you sent has no answer yet.
+**Check the arms first** runs the preflight of each arm that you picked and that is not ready, or of every arm that
+you picked when all are ready. It stays off with no arm picked, while the arms that you picked are being checked, and
+while an action that you sent has no answer yet. After a check, the Board reads the arms again, so the arms show their
+new state, until a read answers and no arm is being checked. When a button is off, one line
 under the buttons says why. The cost is an estimate: each session costs the mean of
 this project's own priced card sessions, or of those on the arm's model when the arm has a model.
 

@@ -165,8 +165,11 @@ wider than the pane.
   the test map line and the weekly limit.
 - The old-engine line and the whole-suite line, when there is one (while it runs, a second line with its counts, or the progress of the pass that runs failed cases again, when it has some), and the cards that need you, one line each.
 - **BUILD MATRIX**: on the right, the project and its slots in use against the builder cap (`bookstore · 3/4
-  slots`). One row for each card on the belt: the issue (`#486`), one column for each step (`B R F T L P`: Build,
-  Review, Fix, Test, Land, Push), its overall time (`Age`), its cost and, last, its short title (`Title`). The title
+  slots`). One row for each card on the belt: the issue (`#486`; a card with no issue shows `red <commit>`, with the
+  first 7 characters of the commit, for a fix of a red main, and `card <N>` for any other, with the number its card id ends in, or `card` when it ends in no number or in `-0` (a card that
+  the Tests page files), as in WORKER ACTIVITY and
+  LANDED TODAY), one column for each step (`B R F T L P`: Build,
+  Review, Fix, Test, Land, Push), its overall time (`Age`), its cost and, last, its short title (`Title`; a card with no issue shows its whole name there). The title
   uses the remaining width of the row, and a title that is too long ends in `…`. A step shows `▶` while it runs,
   `✓` when it is done, `✗` when it failed and `·` when the card did not get to it (Fix after a GO, too). A dim
   legend is under the table. Each project with cards on the belt has its own matrix. Each other project of the

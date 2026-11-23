@@ -380,7 +380,7 @@ window.DASH_APP.panel({
       const link = h('a', null, b.file);
       if (typeof b.url === 'string' && b.url) { link.href = b.url; link.target = '_blank'; link.rel = 'noopener'; }
       check(`Plugin problems${of}`, ctx.chip(`${b.count} noted`, 'warn'), `${b.count} plugin ${b.count === 1 ? 'problem' : 'problems'} noted in `, link).next =
-        'Read each note under Plugin problems. Then fix it, or file it as an issue in the conveyor-belt repo. Then dismiss it.';
+        'Read each note under Plugin problems. Then fix it, or file it as an issue in the conveyor-belt repo. Then click Dismiss, unless you filed it with File on GitHub, which removes the note. When the Board says it filed the issue but could not remove the note, click Dismiss.';
     });
     const pane = pluginPane(bugs, ctx);
     // Failing first (faults, then warnings, each in the order drawn), each with its next step before its output; the

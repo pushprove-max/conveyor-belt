@@ -6,6 +6,9 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { VIEW, T0, STORE, iso, clone, css, BELT3D_IDS, OVERVIEW, boot, panel, state, order, settle, deliver, next, tick, full, tabBtn, trackOf, fig, cases } from './dashboard-view.helpers.mjs';
 
+// A page of the repository (a name with no folder is a page of docs/), its bold marks taken out and its lines joined. Defined in
+// this file, not in the helpers: the bug check puts only the card's test files on main's code, where a new helper is missing.
+const guide = (name) => fs.readFileSync(new URL(`../../../${name.includes('/') ? name : `docs/${name}`}`, import.meta.url), 'utf8').replace(/\*\*/g, '').replace(/\s+/g, ' ');
 const test = cases(import.meta.url);
 
 // ---- the floor is three.js's, which jsdom cannot run; a stand-in takes each frame the panel hands it ----
@@ -176,6 +179,8 @@ test('belt3d: a card running its test files one at a time shows the file that ru
   const box = b3(w).querySelector('.b3-detail');
   assert.equal(box.querySelectorAll('.b3-six li')[3].querySelector('em').textContent, '2 min so far · 3rd run, 1 h 02 min in all');
   assert.ok(box.textContent.includes('file 2 of 3: conveyor/tests/b.test.sh, 2 min, 3 failed') && !/\b25 of 25\b|Test 25\/25/.test(box.textContent), box.textContent);
+  // Bug (#1436): the Belt 3D guide said nothing of the short name in the lane and the whole path in the tooltip and the details, as above.
+  assert.ok(guide('conveyor/README.md').includes('its lane names the file by its short name: hover over the card or click it to see the full path'), 'the guide names the short name and where the path shows');
 });
 
 // Issue 1362. Bug it catches: the details of an issue that waits on a card in its test run showing that card's file by

@@ -7,6 +7,8 @@
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
+# A page of the repository says <text> (lines joined, spaces folded). Each case file that calls it defines its own, named after the file: the bug check puts only the card's test files on main's code, where a helper in lib.sh is missing, and the runner sources the case files into one shell, where one name cannot be defined twice.
+pagesays_lintgate() { tr '\n' ' ' < "$SRC/../$1" | tr -s ' ' | grep -qF -- "$2" || fail "$1 does not say \"$2\": $3"; } # <page> <text> <what the run showed>
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
@@ -456,3 +458,18 @@ t_lintgatemergeleft() {
     || fail "the card did not block with nothing landed: $(st 'select(.step | IN("blocked", "landed")) | .reason')"
 }
 
+
+# Bug it catches (#1436): the guide said the review after the landing gate's lint fix is a last review whose NO-GO lands
+# with follow-ups or blocks on a P0, and left out that a P1 in it gets one fix round and a review of that fix: here its
+# P1 is fixed (review 3 is a GO), so the card lands with no follow-up, not with the P1 filed.
+t_lintgatemergep1() {
+  landgate "sed -i '/BAD/d' a.txt" $'[P1] a.txt:1 a wrong word\nUSER-VISIBLE: no\nVERDICT: NO-GO'
+  echo "$GO" > "$STUB/review.3"
+  gatesessions 'echo seven >> a.txt; echo BAD >> a.txt' "sed -i '/BAD/d' a.txt" 'echo fixed >> a.txt'
+  # loop: the merge onto main between the card's tests and its landing comes only from a whole card run
+  loop run > /dev/null || fail "run exited non-zero"
+  [ "$(gatesteps)" = 'lint review lint test lint fix review fix lint review lint test landed' ] && [ "$(did)" = 'build lintfix fix' ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] \
+    || fail "the P1 of the review after the lint fix did not get one fix and a review: $(gatesteps); $(did); $(wc -l < "$STUB/reviews") reviews"
+  [ "$(st 'select(.step == "landed") | .followups | length')" = 0 ] || fail "the P1 was filed as a follow-up, not fixed: $(st 'select(.step == "landed") | .followups')"
+  pagesays_lintgate docs/cards.md 'or gets one fix round if it holds a P1' "the review after the lint fix held a P1 and got a fix round and a review"
+}

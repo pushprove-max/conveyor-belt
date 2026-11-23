@@ -9,6 +9,8 @@
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
+# A page of the repository says <text> (lines joined, spaces folded). Each case file that calls it defines its own, named after the file: the bug check puts only the card's test files on main's code, where a helper in lib.sh is missing, and the runner sources the case files into one shell, where one name cannot be defined twice.
+pagesays_widerun() { tr '\n' ' ' < "$SRC/../$1" | tr -s ' ' | grep -qF -- "$2" || fail "$1 does not say \"$2\": $3"; } # <page> <text> <what the run showed>
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
@@ -87,6 +89,13 @@ t_wideoffnolist() {
   [ ! -e "$STUB/ran" ] && [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the proof run ran a test, or the check did not fail with exit 2 (exit $(cat "$T/$CASE/rc"))"
   head -n 1 "$T/$CASE/unfixed" | grep -qxF "a card runs each of its test files alone, and the pack sets no test.fileCommand, and Conveyor cannot run a.test.sh itself: it has no runner for a file of this kind; set test.fileCommand in .conveyor/project.json to a command that runs one test file" \
     || fail "the check's result does not begin with the reason: $(cat "$T/$CASE/unfixed")"
+  # Bug (#1436): the guide said a bug card gives its files to test.command, whose run covers the suite. The run above
+  # shows the check stops with exit $rc and names test.fileCommand; the guide says both.
+  local rc; rc=$(cat "$T/$CASE/rc")
+  pagesays_widerun docs/configuration.md "the check stops with exit $rc and runs no test" "the bug check with no test.fileCommand ended with exit $rc and ran no test"
+  pagesays_widerun docs/configuration.md 'runs each of the card'"'"'s test files alone, on main'"'"'s code without the fix, with `test.fileCommand`' "the bug check runs each file alone through test.fileCommand"
+  ! grep -q 'gives the card'"'"'s test files to your test command' "$SRC/../docs/configuration.md" \
+    || fail "docs/configuration.md still says the bug check gives the files to test.command, which the run above never runs"
 }
 
 # D2. Bug it catches: setup did not suggest test.fileCommand for test files that run alone as plain scripts (`node
