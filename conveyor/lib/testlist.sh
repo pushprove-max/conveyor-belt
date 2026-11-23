@@ -456,14 +456,21 @@ treediff() { # <worktree> <from> <to>
 # it is sent ALRM, its own timer's signal, so it ends the run as on its own timeout: TERM to the command's group, KILL
 # 30 s later, exit 124. It holds no descriptor of the loop's (a lock, the slot) while it runs.
 # With TEST_LATE (the bug-card check's run, bugrun()), when the run's own limit ends the run, a file the runner's logs
-# (testlogs(); its output when it wrote none) name as begun (`== <file>`) and not ended (`-- ok|FAIL <file>`, or the
-# output's line that its own `# timeout:` limit stopped it, which filecmd() writes in place of `-- FAIL`) is named
+# (testlogs(); its output when it wrote none) name as begun (`== <file>`), not ended (`-- ok|FAIL <file>`, or the
+# output's line that its own `# timeout:` limit stopped it, which filecmd() writes in place of `-- FAIL`) and not
+# stopped by its own limit (`-- timeout <file>`, filecmd(), lib/testrun.sh) is named
 # in <worktree>.late as `<seconds><TAB><file><TAB><limit>`: the seconds it ran (from the last look that did not see it
 # begun, so never fewer than it ran, and at most a look's second more), and the run's limit (TEST_TIMEOUT, scaled).
 # Bug (R332): the line held the limit as the file's seconds, so a file that began after others had used most of the
 # run's time was said to have run past its time limit; timed from the first look that saw it begun, a file that began
 # just after a look and ran to the limit at the next was said to have run 0 s. A file's own limit is its run's
-# (filecmd()).
+# (filecmd()). Bug: a file its own limit stopped gets no `-- ok|FAIL` line, so it stayed open, and the proof said the
+# run's limit stopped it though a later file hung, or ended its run (its runner logs `-- ok` before its own cleanup:
+# .conveyor/test-changed.sh). Its `-- timeout` line ends it, in whatever log order. Of the files left open, the one
+# begun last is named, by the first `== ` line of each in the logs: the runner's log `files` has the files in the
+# order they began and is read before `test-changed.log`, which logs a file's `== ` line only once it ended or was told
+# to end; named by awk's array order, or by its last `== ` line, a file begun before was named in place of the one
+# begun after it.
 testclock() { # <timeout's pid> <turn wait file> <the run's limit: TEST_TIMEOUT, scaled>
   local s=$SECONDS w wt=${2%.turnwait} f open l=() lim=${3:-${TEST_TIMEOUT:-3600}} p=$SECONDS now
   local -A at=() # at: the last look before each file was seen begun (p: the look before this one), for its own seconds
@@ -476,10 +483,11 @@ testclock() { # <timeout's pid> <turn wait file> <the run's limit: TEST_TIMEOUT,
       open=
       while IFS= read -r f; do open=$f; [ -n "${at[$f]:-}" ] || at[$f]=$p
       done < <({ cat "${l[@]}"; [ "${l[0]}" = "$wt.test" ] || grep -a '^conveyor: .* timed out: it ran past its time limit' "$wt.test"; } 2>/dev/null \
-        | awk '/^== / { o[substr($0, 4)] = 1 } /^-- ok / { delete o[substr($0, 7)] } /^-- FAIL / { delete o[substr($0, 9)] }
+        | awk '/^== / { f = substr($0, 4); o[f] = 1; if (!(f in r)) { r[f] = ++n; b[n] = f } } /^-- ok / { delete o[substr($0, 7)] }
+        /^-- FAIL / { delete o[substr($0, 9)] } /^-- timeout / { x[substr($0, 12)] = 1 }
         /^conveyor: .* timed out: it ran past its time limit, [0-9]+ s, and it was stopped there(; the limit is .*)?$/ {
           f = substr($0, 11); sub(/ timed out: it ran past its time limit, [0-9]+ s, and it was stopped there(; the limit is .*)?$/, "", f); delete o[f] }
-        END { for (f in o) print f }')
+        END { for (i = 1; i <= n; i++) if ((b[i] in o) && !(b[i] in x)) print b[i] }')
       p=$now
     fi
     w=$(cat "$2" 2>/dev/null); [[ $w =~ ^[0-9]{1,9}$ ]] || w=0

@@ -157,6 +157,51 @@ t_bugrunownlimit() {
     || fail "testclock at its 40 s limit, given logs where b.test.sh was stopped by its own limit and a.test.sh was still running, did not name a.test.sh alone in .late: $(cat "$T/$CASE/run.out")"
 }
 
+# Bug it catches: of the files the logs leave open, testclock() named whichever awk's `for (f in o)` printed last,
+# and then the one whose last `== ` line came last in the logs read in name order. test-changed.log, read after the
+# runner's `files`, logs a file's `== ` line only once it ended or was told to end, so the proof said the run's limit
+# stopped c.test.sh or b.test.sh, begun and left open before a.test.sh, though a.test.sh hung. The logs are stand-ins,
+# with no end line of c.test.sh or b.test.sh; the clock under test reads them with a stand-in sleep that sets SECONDS.
+t_bugrunlateowned() {
+  # shellcheck disable=SC2034 # FXWT is read by fx_in, a fix card's worktree; this case has none
+  local FXWT=$T/$CASE/none w=$T/$CASE/w p
+  setup '[]'
+  mkdir -p "$w.testlog" && printf '== c.test.sh\n== b.test.sh\n== a.test.sh\n' > "$w.testlog/files" \
+    && printf '== c.test.sh\n== b.test.sh\n' > "$w.testlog/test-changed.log" || fail "the fixture could not be made"
+  sleep 60 & p=$! # sleep: stands for the run that the clock ends with ALRM
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'k=0; sleep() { k=$((k + 1)); SECONDS=$((k * 10)); }
+    ( SECONDS=0; TEST_LATE=1 testclock "$p" "$w.turnwait" 20 ); unset -f sleep; cut -f2- "$w.late"'
+  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
+  [ "$(cat "$T/$CASE/run.out")" = $'a.test.sh\t20' ] \
+    || fail "testclock with the log files '== c.test.sh, == b.test.sh, == a.test.sh' and test-changed.log '== c.test.sh, == b.test.sh' (c and b left open, a hung) did not name a.test.sh, the file begun last: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches: a file its own limit stopped got no end line from the runner (filecmd()), so it stayed open, and
+# when the run's limit ended the run while the next file cleaned up after its runner had logged `-- ok` for it (as
+# .conveyor/test-changed.sh does before its EXIT cleanup), the proof said the run's limit stopped the first file.
+# The real runner runs a.test.sh (`# timeout: 1`, it hangs) then b.test.sh, which logs `== b.test.sh` and `-- ok
+# b.test.sh` to test-changed.log as that runner does, then hangs; the clock's stand-in sleep waits until b.test.sh has
+# logged them (a real run, so its point in time is polled for; wait_until calls sleep and reads SECONDS, which the
+# stand-in replaces) and then sets SECONDS past the run's limit.
+t_bugrunlateownlimit() {
+  # shellcheck disable=SC2034 # FXWT is read by fx_in, a fix card's worktree; this case has none
+  local FXWT=$T/$CASE/none d=$T/$CASE w=$T/$CASE/w
+  setup '[]'
+  mkdir -p "$w.testlog" && printf '%s\n' a.test.sh b.test.sh > "$d/list" || fail "the fixture could not be made"
+  printf '%s\n' '# timeout: 1' 'sleep 30' > "$d/a.test.sh" # sleep: a.test.sh's hang, which its own limit stops
+  # shellcheck disable=SC2016 # expanded by b.test.sh's run
+  printf '%s\n' 'printf "== b.test.sh\n-- ok b.test.sh\n" >> "$CONVEYOR_TEST_LOG/test-changed.log"; : > logged' \
+    'sleep 30' > "$d/b.test.sh" # sleep: b.test.sh's cleanup after its `-- ok` line, which the run's limit stops
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'cd "$d" || exit 1
+    CONVEYOR_LOAD_FACTOR=1 CONVEYOR_TEST_LOG=$w.testlog CONVEYOR_TEST_FILELIST=$d/list timeout 60 bash -c "$(filecmd bash files)" > "$d/out" 2>&1 & p=$!
+    sleep() { local i=0; while [ ! -e logged ] && [ $((i += 1)) -le 600 ]; do command sleep 0.1; done; SECONDS=100; }
+    ( SECONDS=0; TEST_LATE=1 testclock "$p" "$w.turnwait" 20 ); unset -f sleep; wait "$p"; echo "rc=$?"; cat "$w.late" 2>/dev/null'
+  [ "$(cat "$T/$CASE/run.out")" = rc=124 ] && [ -e "$d/logged" ] \
+    || fail "with a.test.sh stopped by its own 1 s limit and the run's limit hit after b.test.sh logged '-- ok b.test.sh', the run did not exit 124, or testclock named a file as stopped by the run's limit: $(cat "$T/$CASE/run.out" "$d/out" "$w.testlog"/* 2>&1)"
+}
+
 # Bug it catches: a runner that runs another file's cases logs them under its own name (the engine's runner,
 # conveyor/conveyor.test.sh, those of a case file), so a run whose case file passed, and which failed only for the
 # runner's own check, was read as giving no result for the case file and blocked as "gave no result" in place of

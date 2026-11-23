@@ -632,7 +632,8 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 # line (FILELIMIT), times the run's load factor (CONVEYOR_LOAD_FACTOR: loadfactor(), LOADSCALE, rounded up): past it,
 # timeout ends the file and everything it started, and the output says it timed out, and with a factor over 1, the
 # line's own seconds and the factor. Its log
-# keeps it begun and not ended, and the run, once its other files ran, exits 124, as a run that ran out of time does:
+# keeps it begun with no `-- ok|FAIL` line, and a `-- timeout <file>` line in the log alone (no reader of results reads
+# it: testclock() does, so the run's limit is never said to have stopped it), and the run, once its other files ran, exits 124, as a run that ran out of time does:
 # testfails() names it as the run's timeout, not as a failed file (which the check on main, mainred.sh verdicts(), would count as
 # main's), and the mutation check and the Board's Run action read the exit as timed out. A file with no such line has the run's limit (testTimeout: testlist.sh testclock()). When the run itself is ended
 # (TERM, as at that limit), the file's process group is ended with it. A process a file's run leaves running, in that
@@ -666,7 +667,7 @@ filecmd() { # <the pack's test.fileCommand> [files]
     '  p=' \
     '  if [ $x = 0 ]; then echo "-- ok $f" | tee -a "$l"' \
     '  elif [ $x = 124 ] && [ "$n" != 0 ]; then w=; [ "$s" = "$n" ] || w="; the limit is its # timeout: line'"'"'s $n s times the load factor $CONVEYOR_LOAD_FACTOR"' \
-    '    echo "conveyor: $f timed out: it ran past its time limit, $s s, and it was stopped there$w"; to=124' \
+    '    echo "conveyor: $f timed out: it ran past its time limit, $s s, and it was stopped there$w"; echo "-- timeout $f" >> "$l"; to=124' \
     '  else echo "-- FAIL $f" | tee -a "$l"; r=1; fi' \
     'done' 'exit ${to:-$r}'
 }
