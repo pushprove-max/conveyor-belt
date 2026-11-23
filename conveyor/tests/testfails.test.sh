@@ -40,14 +40,27 @@ void() { # <exit> [<testTimeout>]
 # line `ok <case>` with no space in its case was: a main-red fix card for a named node case always blocked with "gave
 # no result". Each is a passed case under its file, named as its failure line names it; a skipped TAP case is not,
 # nor node's line for the file itself (a run with a name filter that ran no case, as speedproof.sh splitstart() makes, prints it).
+# R389: nor is a to-do TAP case (`ok 5 - h # TODO later`): no fixture held one, so the TODO filter was not tested.
 t_testfailspassed() {
   mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
 echo "== f.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/a.log"
-printf '%s\n' '✔ a b, c (12.3ms)' 'ok 2 - d e' 'ok 3 - g # SKIP no db' '✔ f.test.mjs (43.1ms)' 'ok 4 - ./f.test.mjs'
+printf '%s\n' '✔ a b, c (12.3ms)' 'ok 2 - d e' 'ok 3 - g # SKIP no db' 'ok 5 - h # TODO later' '✔ f.test.mjs (43.1ms)' 'ok 4 - ./f.test.mjs'
 echo "-- ok f.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"
 EOF
   f=$(allfails 0 | jq -c .passcases) || fail "the passed cases could not be read"
   [ "$f" = '[{"file":"f.test.mjs","cases":["a b, c","d e"]}]' ] || fail "node's ✔ and TAP's ok lines are not the file's passed cases: $f"
+}
+# R389. Bug it catches: a to-do TAP case that fails (`not ok 2 - k # TODO later`) is expected to fail, and is no failure
+# of its file; no fixture held one, so a reader that took it for a failed case passed. The file failed on case real
+# alone.
+t_testfailstodo() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+echo "== f.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/a.log"
+printf '%s\n' 'not ok 1 - real' 'not ok 2 - k # TODO later'
+echo "-- FAIL f.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"
+EOF
+  f=$(logfails 1) || fail "the failures could not be read"
+  [ "$(jq -c '[.files[] | {file, cases: [.cases[].name]}]' <<<"$f")" = '[{"file":"f.test.mjs","cases":["real"]}]' ] || fail "a failed to-do TAP case was read as a failure of its file: $f"
 }
 # R140 of #1393 (the loop runs a node file with TAP). Bug it catches: node's TAP writes `\#` for a `#` and `\\` for a
 # `\` in a case's name, so a passed or failed case `id #413` was read as `id \#413` and matched no case of that name

@@ -157,3 +157,24 @@ t_suitekeepbox() {
   [ "$got" = '{"machine":"ssh","kept":1}' ] && jq -e --arg b "$B" '.sha == $b and .machine == "ssh" and .files == {f1: "ok", f2: "ok"}' "$T/$CASE/suites.jsonl" > /dev/null \
     || fail "suitekeep of a rerun of f1 on B over the box's line on A did not name the box: printed '$got', suites: $(cat "$T/$CASE/suites.jsonl" 2>&1)"
 }
+# R253. Bug it catches: suitekeep() named a line the box's whenever it kept a pass of a box's line, by that line's
+# machine alone. A pass here of f1 and f2 on A; a box (ssh) reruns f1 on B, keeping A's f2; a run here reruns f1 on C,
+# keeping f2, whose pass is still A's from here. C's line held no result of a box but was named ssh, so a run told to
+# run here (--machine local) passed it over for an older line, or ran the whole suite. C's line is local, and is the one
+# such a run reuses; B's names the box and the file it gave.
+t_suitekeepmixed() {
+  local g=$T/$CASE/g A B C got c
+  mkdir -p "$g" && git -C "$g" init -q && touch "$g/f1" "$g/f2" && git -C "$g" add f1 f2 \
+    && for c in A B C; do git -C "$g" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m "$c" || break; done \
+    && [ "$(git -C "$g" rev-list --count HEAD)" = 3 ] \
+    && printf 'TESTRUN files=1\n-- ok f1\n' > "$T/$CASE/wt.test" || fail "the fixture could not be made"
+  A=$(git -C "$g" rev-parse HEAD~2) B=$(git -C "$g" rev-parse HEAD~1) C=$(git -C "$g" rev-parse HEAD)
+  # clock (lib/control.sh, which needs the whole engine's setup to load) only dates the line.
+  got=$(cd "$g" && export STATE=$T/$CASE/cards.jsonl HERE=$SRC && . "$SRC/lib/session.sh" && . "$SRC/lib/fulltest.sh" && clock() { echo t2; } \
+    && SH_KIND=ssh suitekeep "$T/$CASE/wt" "$B" 0 release-prep "$(jq -cn --arg a "$A" '{sha: $a, time: "t1", by: "release-prep", machine: "local", files: {f1: "ok", f2: "ok"}}')" > /dev/null \
+    && suitekeep "$T/$CASE/wt" "$C" 0 release-prep "$(jq -c --arg b "$B" 'select(.sha == $b)' "$T/$CASE/suites.jsonl")" > /dev/null \
+    && CONVEYOR_RELEASE_MACHINE=local suitebase "$C" | jq -r .sha)
+  [ "$(jq -c '[.machine, .boxed]' "$T/$CASE/suites.jsonl" | paste -sd' ')" = '["ssh",["f1"]] ["local",[]]' ] \
+    || fail "B's line (f1 from the box) or C's (f1 rerun here, f2 kept from A's pass here) does not name where its results came from: $(cat "$T/$CASE/suites.jsonl" 2>&1)"
+  [ "$got" = "$C" ] || fail "a run told to run here on C reused '$got', not C's line, which holds no result of a box"
+}

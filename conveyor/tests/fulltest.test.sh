@@ -378,7 +378,10 @@ t_fulldead() {
 # Bug this guards (issue 1276): a marker left by a run that died (no pid in it) stayed until someone asked for the next full
 # test, so with no ask the status and the Board named that dead run as the run under way or ended. The loop's own turn
 # records the run as an error (the Foreman's wake for that end is kept, keyed by the marker's time) and removes the marker.
-# The markers are made by hand: only a marker from an older engine, or a machine that stopped, has no live process and no lock held.
+# The markers are made by hand: only a marker from an older engine, a machine that stopped, or an ask killed after it
+# wrote the marker and before its run added its pid (fulltest() writes the pid in a second step), has no pid, no live
+# process and no lock held; an ask killed as it wrote the marker (its `>` empties the file first), or a full disk, leaves
+# an empty one (t_fullreapempty).
 fullmark() { # <hours old>
   printf '%s\n' '{"since":"2026-11-15T21:33:43Z","sha":"06bf84a5880dc5e8c9ae9cb38f1565ce7b8f1da6","how":"push"}' > "$ST/fulltest.jsonl.running"
   touch -d "$1 hours ago" "$ST/fulltest.jsonl.running"
@@ -421,6 +424,39 @@ t_fullreapheld() {
   [ "$rc" = 0 ] || fail "a run with no card to pick failed: $(cat "$STUB/run.out")"
   [ -e "$ST/fulltest.jsonl.running" ] || fail "the loop removed the marker of a run that holds the lock: $(cat "$STUB/run.out")"
   [ ! -s "$ST/fulltest.jsonl" ] || fail "the loop recorded a live run as ended: $(cat "$ST/fulltest.jsonl")"
+}
+# R257. Bug it catches: fulldead() read the marker with `jq -e objects`, which fails on an empty file, so an empty marker
+# (an ask killed as it wrote it, or a full disk) with the lock free was never recorded or removed by the loop's clearing, fullreap(),
+# called here as the loop's turn calls it: it stayed for good. It is recorded as an error, and removed.
+t_fullreapempty() {
+  setup '[]'; : > "$ST/fulltest.jsonl.running"
+  fx_in fullreap
+  [ "$RC" = 0 ] && [ ! -e "$ST/fulltest.jsonl.running" ] || fail "fullreap ($RC) left an empty marker with the lock free: $(cat "$T/$CASE/run.out")"
+  [ "$(ftl '[.kind, .state, .push, .sha, (.reason | test("left an empty running marker"))]')" = '["run","error",false,null,true]' ] \
+    || fail "fullreap did not record the empty marker as an ended run: $(cat "$ST/fulltest.jsonl" 2>&1)"
+}
+# R256. Bug it catches: fullreap() holds the full test's lock while it records a dead run, and the snapshot takes a
+# marker under a held lock for a live run, so a snapshot then showed the dead run as under way. A snapshot taken while
+# the dead run's line is written (fullline() wrapped), with the lock taken and the marker in place, shows it as ended.
+t_fullreapsnap() {
+  setup '[]'; fullmark 1
+  fx_in 'eval "$(declare -f fullline | sed "1s/^fullline/ftline/")"
+    fullline() { loop snapshot --fresh > "$T/$CASE/snap"; ftline "$@"; }; fullreap'
+  [ "$RC" = 0 ] && [ -s "$T/$CASE/snap" ] || fail "fullreap ($RC) wrote no line, or the snapshot failed: $(cat "$T/$CASE/run.out")"
+  [ "$(jq -c '[.fullTest.running, [.suites[] | select(.kind == "full test") | .state]]' "$T/$CASE/snap")" = '[null,["error"]]' ] \
+    || fail "a snapshot taken while fullreap recorded the dead run did not show it as ended: $(jq -c '[.fullTest, .suites]' "$T/$CASE/snap")"
+  [ ! -e "$ST/fulltest.jsonl.running" ] && [ "$(ftl .state)" = '"error"' ] || fail "fullreap did not record and remove the dead run's marker: $(cat "$ST/fulltest.jsonl" 2>&1)"
+}
+# Bug it catches: fullreap() moved the dead run's marker aside before it wrote the run's line, and the loop and the next
+# ask look only for the marker, so a machine that stopped in between left the run recorded nowhere, for good. The stop
+# is a fullline() that ends the shell before it writes; the next turn's fullreap() then records the run and removes the marker.
+t_fullreapstop() {
+  setup '[]'; fullmark 1
+  fx_in 'fullline() { exit 7; }; fullreap'
+  [ "$RC" = 7 ] && [ ! -s "$ST/fulltest.jsonl" ] || fail "the stopped fullreap ($RC) did not stop before the line: $(cat "$T/$CASE/run.out")"
+  fx_in fullreap
+  [ "$RC" = 0 ] && [ ! -e "$ST/fulltest.jsonl.running" ] && [ "$(ftl .state)" = '"error"' ] \
+    || fail "a fullreap stopped before it wrote the dead run's line left the run recorded nowhere ($RC): $(cat "$ST/fulltest.jsonl" 2>&1) $(ls "$ST")"
 }
 
 # Bug this guards: Push now pushed while a full test run was under way (its push would race the run's own).

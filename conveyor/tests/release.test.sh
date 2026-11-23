@@ -240,6 +240,25 @@ t_relnotesother() {
   [ "$(jq -r '[.cards[] | select(.title | startswith("Release notes 1.12.0"))] | length' "$cards")" = 1 ] && grep -q 'is still under way' <<<"$out" \
     || fail "release-prep 1.12.0 after 1.13.0 did not keep its one notes card: $out; $(cat "$cards")"
 }
+# R254. Bug it catches: relnoteskept() took a notes card that had landed as done, though its commit was not pushed yet,
+# so release-prep on origin's head (no notes there yet) wrote a new draft and started a second card adding the same
+# file. Notes card c-1 landed on main, not on origin: relnoteskept() on origin's head waits on it again; on the landed
+# commit itself (the notes there) it does not.
+t_relnotesunpushed() {
+  local o n
+  setup '[]'; o=$(git -C "$R" rev-parse HEAD)
+  mkdir -p "$ST/testactions" && echo '{"cards": [{"id": "c-1", "label": "Release notes", "title": "Release notes 1.1.0: add docs/releases/1.1.0.md"}]}' > "$ST/testactions/cards.json" \
+    && mkdir -p "$R/docs/releases" && echo '# 1.1.0' > "$R/docs/releases/1.1.0.md" && git -C "$R" add docs && git -C "$R" commit -qm 'Release notes 1.1.0' \
+    && n=$(git -C "$R" rev-parse HEAD) && [ "$(git -C "$T/$CASE/origin" rev-parse refs/heads/main)" = "$o" ] \
+    && jq -cn --arg s "$n" '{card: "c-1", issue: 0, step: "landed", time: "2026-11-19T12:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: $s, reason: ""}' >> "$ST/cards.jsonl" \
+    || fail "the fixture could not be made"
+  # relnoteswait()'s RELMODE and relrec() are commands/release-prep.sh's, which this call does not load; the record is not read here.
+  fx_in "RELMODE=''; relrec() { :; }; cd '$R' && relnoteskept 1.1.0 c-1 prep $o"
+  [ "$RC" = 0 ] && grep -qF 'notes card c-1 is still under way' "$T/$CASE/run.out" \
+    || fail "relnoteskept on origin's head did not wait again on notes card c-1, landed but not pushed ($RC): $(cat "$T/$CASE/run.out")"
+  fx_in "RELMODE=''; relrec() { :; }; cd '$R' && relnoteskept 1.1.0 c-1 prep $n"
+  [ "$RC" = 1 ] || fail "relnoteskept on the commit notes card c-1 landed waits on it again ($RC): $(cat "$T/$CASE/run.out")"
+}
 # The release notes style check, then release-prep on a head with notes.
 # Bugs: the style check passes notes that name a file, an issue or a commit, so users read an engineering log; or it
 # refuses the shipped 1.0.0 notes. Each finding names its rule, so the owner knows what to change. The suite runs, and

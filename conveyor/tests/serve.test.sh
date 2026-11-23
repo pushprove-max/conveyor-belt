@@ -398,6 +398,8 @@ t_slowpush() {
   first=$(st 'select(.issue == 7 and .step == "landed") | .sha'); head=$(git -C "$R" rev-parse refs/heads/main)
   [ "$(paste -sd, "$STUB/order")" = "pick 7,start 7 $first,pick 8,pick 9,jobs 1 cards 0,run waits,end 7,start 9 $head,end 9,run ends" ] \
     || fail "the loop did not pick during a push, counted it as a card, did not join the landings made during it into one push of main's head, or did not wait for it to end: $(paste -sd, "$STUB/order")"
+  # R382: the stub writes its end line whatever git push gave; only origin's main shows the last push reached it.
+  [ "$(git -C "$T/$CASE/origin" rev-parse refs/heads/main)" = "$head" ] || fail "the last push did not bring origin's main to main's head $head: $(git -C "$T/$CASE/origin" rev-parse refs/heads/main)"
   [ "$(jq -c '[.pushing.sha, (.pushing.since | fromdate <= now), (.unpushed | length)]' "$STUB/health")" = "[\"$first\",true,3]" ] \
     || fail "health does not report the push in progress: $(jq -c '[.pushing, .unpushed]' "$STUB/health")"
   [ "$(jq -c '[.health.pushing.sha, (.belt | map(.track.label) | unique)]' "$STUB/snapshot")" = "[\"$first\",[\"pushing\"]]" ] \

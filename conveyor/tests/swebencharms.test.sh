@@ -307,7 +307,8 @@ t_swearmareaorder() {
   key() { loop bench swe history | jq -r '.arms[] | select(.name == "conveyor-rules") | .keyPrefix'; }
   setareas '{"x.py": "rules/a.md", "*.py": "rules/b.md"}'; k1=$(key); k3=$(key)
   setareas '{"*.py": "rules/b.md", "x.py": "rules/a.md"}'; k2=$(key)
-  [ -n "$k1" ] && [ "$k1" != null ] && [ "$k1" = "$k3" ] && [ "$k1" != "$k2" ] \
+  # R387: k2 is checked as k1 is, or a history with no key for the swapped order (null) would pass as a key that changed.
+  [ -n "$k1" ] && [ "$k1" != null ] && [ -n "$k2" ] && [ "$k2" != null ] && [ "$k1" = "$k3" ] && [ "$k1" != "$k2" ] \
     || fail "swapping two areas of the pack did not change the arm's results key (or the key is not stable): $k1 $k3 $k2"
 }
 

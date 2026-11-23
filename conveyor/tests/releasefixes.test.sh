@@ -242,3 +242,16 @@ t_relnotesstop() {
   [ ! -e "$STUB/full-at" ] || fail "the suite ran after the stop, when notes card $id landed"
   out=$(loop release-run stop 2>&1); [ $? = 2 ] && grep -q 'no release run is under way' <<<"$out" || fail "a second stop was not refused: $out"
 }
+# R255. Bug it catches: relstopwaiting() read a waiting record, then took the release lock; when relfixes() started the
+# run again before that (its record's restarted set), the stop's write left the record as it was, yet the stop said
+# the run no longer waits and exited 0. flock is wrapped to set restarted as the stop takes the lock: the stop fails,
+# says it stopped nothing, and the record keeps restarted, still waiting.
+t_relstoprestarted() {
+  setup '[]'; RUN=$T/$CASE/cards/release/run.json
+  mkdir -p "${RUN%/*}" && jq -cn '{kind: "release", step: "release-prep", version: "1.1.0", since: "2026-11-19T09:00:00Z", ended: "2026-11-19T10:00:00Z",
+    state: "waiting", restarted: null, reasons: [], notes: {card: "c-1", then: "prep", mode: null, machine: null}}' > "$RUN" || fail "the fixture could not be made"
+  fx_in 'RELRUN=$CARDS/release/run.json; flock() { jq -c ".restarted = \"2026-11-19T11:00:00Z\"" "$RELRUN" > "$RELRUN.x" && mv "$RELRUN.x" "$RELRUN"; command flock "$@"; }; relstopwaiting'
+  [ "$RC" = 1 ] && grep -q 'no longer waits on notes card c-1 (it started again, or another run began); nothing stopped' "$T/$CASE/run.out" \
+    || fail "the stop of a run started again as it took the lock did not fail saying it stopped nothing ($RC): $(cat "$T/$CASE/run.out")"
+  fixrec "the stop changed the record of the run started again" '.state == "waiting" and .restarted == "2026-11-19T11:00:00Z" and .reasons == []'
+}

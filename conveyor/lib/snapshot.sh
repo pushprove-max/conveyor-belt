@@ -398,9 +398,10 @@ suites() {
     fi
   fi
   # A full test's marker read before and after its lock is found free ended with no result (fulldead()): a run that
-  # ends in between removes it, and one that starts in between writes a new one.
+  # ends in between removes it, and one that starts in between writes a new one. The lock is tried shared: the loop's
+  # clearing of a dead run's marker (fullreap()) holds it shared, so only a run or an ask holds it.
   { m=$(<"$FULLTEST.running"); } 2>/dev/null; free=''
-  ! ( flock -n 9 ) 9>>"$FULLTEST.lock" 2>/dev/null || free=1
+  ! ( flock -n -s 9 ) 9>>"$FULLTEST.lock" 2>/dev/null || free=1
   if [ -z "$free" ] && fr=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null); then
     fr=$(jq -c --slurpfile p <(suiteprog "$CARDS/fulltest/wt") '{kind: "full test", version: null, step: .how, sha, since, ended: null, state: "running", moved: false, reasons: []} + (.counts // $p[0])' <<<"$fr")
   elif l=$({ [ -n "$free" ] && [ -n "$m" ] && [ "$(cat "$FULLTEST.running" 2>/dev/null)" = "$m" ] && fulldead; } \
@@ -675,10 +676,10 @@ snapshot() (
   np=$(jq -ce '.missing | arrays | map(strings) | select(length > 0) | {models: .}' "$NOPRICE" 2>/dev/null) || np=null
   # The plugin problem notes that look made for the models the built-in price table does not price (noprice()).
   pn=$(jq -ce '[.notes | arrays | .[] | strings | select(startswith("- "))]' "$NOPRICE" 2>/dev/null) || pn='[]'
-  # The full test suite (fulltest()): the run in progress, only while its lock is held (a run that was killed left its
-  # file), and the last line of its record.
+  # The full test suite (fulltest()): the run in progress, only while its lock is held by a run or an ask (a run that
+  # was killed left its file; fullreap() holds it shared, as this one tries it), and the last line of its record.
   packget test.full ft 2>/dev/null || ft=''
-  fr=null; ( flock -n 9 ) 9>>"$FULLTEST.lock" 2>/dev/null || fr=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null) || fr=null
+  fr=null; ( flock -n -s 9 ) 9>>"$FULLTEST.lock" 2>/dev/null || fr=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null) || fr=null
   ft=$({ tail -n 1 "$FULLTEST" 2>/dev/null || :; } | jq -cs --arg ft "$ft" --slurpfile r <(printf '%s' "$fr") '$r[0] as $r | {command: ($ft != ""),
       why: (if $ft == "" then "the pack names no full test suite (test.full)" else null end), running: $r, last: (map(objects) | last)}' 2>/dev/null) || ft=null
   # The whole-suite runs and main as the Release panel shows it (suites(), releasemain()).

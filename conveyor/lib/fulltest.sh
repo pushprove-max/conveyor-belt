@@ -52,12 +52,15 @@ FULL_ALONE=3
 # The line $FULLTEST keeps (fullline()) for a run that ended with no result: its $FULLTEST.running is left, and the
 # lock is free (a run removes that file before its lock goes, so its process was killed, or the machine stopped). Its
 # time is when the run last wrote that file, so the snapshot (suites()), which shows it before the next ask records
-# it, and the record name one end. Fails when no such file reads. The caller holds the lock, or found it free.
+# it, and the record name one end. An empty file (or one of white space alone) is a marker too (an ask killed as it
+# wrote it, or a full disk), recorded as one that left an empty marker: with the lock free, no run writes it. Fails
+# when no such file is there, or when it holds neither a JSON object nor nothing. The caller holds the lock, or found
+# it free.
 fulldead() {
   local m t
-  m=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null) && t=$(p_stat "$FULLTEST.running") || return 1
-  jq -c --argjson t "${t#* }" '{time: ($t | todate), kind: "run", push: (.how != "run"), sha, state: "error",
-    reason: "the run ended without a result: its process\(if .pid then " (\(.pid))" else "" end) is gone, and it left its running marker of \(.since)",
+  t=$(p_stat "$FULLTEST.running") && m=$(jq -ce 'objects' "$FULLTEST.running" 2>/dev/null || { [ -z "$(tr -d '[:space:]' < "$FULLTEST.running")" ] && echo '{}'; }) || return 1
+  jq -c --argjson t "${t#* }" '{time: ($t | todate), kind: "run", push: (.how | IN("push", "anyway")), sha, state: "error",
+    reason: "the run ended without a result: its process\(if .pid then " (\(.pid))" else "" end) is gone, and it left \(if .since then "its running marker of \(.since)" else "an empty running marker" end)",
     exit: null, cases: [], pushed: null}' <<<"$m"
 }
 # A marker whose run's process is gone, recorded as an error line (as the next ask does, below) and removed, at each turn
@@ -66,12 +69,15 @@ fulldead() {
 # for that end (the snapshot's suites, which keys it by that time) is the same one a poll before the turn saw, and a run
 # that ended between two polls still wakes it, however old the marker is: a run killed by an outage of days has its end
 # seen once, not dropped. A free lock is the proof that no run holds it; the lock is held here, so no run starts
-# meanwhile. A line that could not be written leaves the marker.
+# meanwhile. It is held shared, as the snapshot tries it: a snapshot taken meanwhile finds it free and never shows the
+# run as one under way, but as ended (fulldead()) while the marker is there. The line is written before the marker is
+# removed: a machine that stops in between leaves the marker, which the next turn records again, never a run that is
+# recorded nowhere. A line that could not be written leaves the marker.
 fullreap() {
   local lk dead
   [ -e "$FULLTEST.running" ] || return 0
   { exec {lk}>>"$FULLTEST.lock"; } 2>/dev/null || return 1
-  if flock -n "$lk" && dead=$(fulldead 2>/dev/null); then
+  if flock -n -s "$lk" && dead=$(fulldead 2>/dev/null); then
     if fullline "$dead" && rm -f "$FULLTEST.running"; then echo "conveyor: $(jq -r .reason <<<"$dead"); it is recorded as an error" >&2
     else echo "conveyor: a full test run that ended without a result could not be recorded; its marker is left" >&2; fi
   fi
@@ -105,7 +111,7 @@ suiteprog() { # <worktree>
 # Push landed (fullrun()), release-prep and release (relsuite(), commands/release-prep.sh). One line a commit, the
 # newest last: {sha, time, by (the run that made it: full test, push landed, release-prep or release), machine (where
 # it ran: local, or ssh or devbox for a release suite on a box over ssh or a devbox, lib/suitehost.sh), files: {<file>: ok or fail}}, each test file of <sha> by its result, as of the run's `-- ok|FAIL <file>` lines; a run that reused one
-# has that run's results of the files it did not run. Only a run that named a result for every file it selected (its
+# has that run's results of the files it did not run; boxed: the files whose result a box gave (suitekeep()). Only a run that named a result for every file it selected (its
 # `TESTRUN files=N` lines) is kept. The newest SUITES_KEEP commits are kept.
 SUITES=${STATE%/*}/suites.jsonl
 SUITES_KEEP=50
@@ -153,8 +159,10 @@ suitereuse() { # <worktree> <commit>
 }
 # The line of the suite run in <worktree> on <commit>, made by <by>, added to $SUITES in place of that commit's line,
 # with the files of the line it reused (<reused line>, suitereuse()) that it did not run, and only the files <commit>
-# holds; a line that keeps a pass of a box over ssh or a devbox is that machine's (machine ssh or devbox), as a run told to run here reuses
-# none of it. Prints, for the run's record, null for a whole suite, else {sha, time, ran, kept, machine}: the reused
+# holds; a line that holds a result of a box over ssh or a devbox (its boxed: the files this run ran on a box, and the
+# passes it keeps that a box gave, by the reused line's boxed, or all of its files for a box's line with none) is that
+# machine's (machine ssh or devbox), as a run told to run here reuses none of it. A run here that ran again every file
+# a box gave keeps none of a box's results: its line is local, for such a run to reuse. Prints, for the run's record, null for a whole suite, else {sha, time, ran, kept, machine}: the reused
 # line's commit, time and machine, the files rerun and the passes kept. A run that named no result for a file it
 # selected, or that failed (<exit> not 0) with no file failed, adds no line and fails.
 suitekeep() { # <worktree> <commit> <exit> <by> [reused line]
@@ -168,7 +176,9 @@ suitekeep() { # <worktree> <commit> <exit> <by> [reused line]
   jq -cn --arg s "$2" --arg t "$(clock)" --arg by "$4" --arg m "${SH_KIND:-local}" --slurpfile r <(printf '%s' "$r") --slurpfile o <(printf '%s' "${5:-null}") --rawfile tr <(git ls-tree -r --name-only "$2") '
     $r[0] as $r | $o[0] as $o | ($tr | split("\n") | map({(.): true}) | add) as $has
     | (if $o == null then {} else $o.files | with_entries(select(.value == "ok" and $has[.key] and ($r[.key] | not))) end) as $k
-    | {sha: $s, time: $t, by: $by, machine: (if ($k | length) > 0 and ($o.machine // "local") != "local" then $o.machine else $m end), files: ($k + $r | with_entries(select($has[.key])))},
+    | (if $o == null then [] else $o.boxed // (if ($o.machine // "local") != "local" then $o.files | keys else [] end) end) as $ob
+    | ([($k | keys[] | select(IN($ob[]))), (if $m != "local" then $r | keys[] else empty end)] | map(select($has[.])) | unique) as $bx
+    | {sha: $s, time: $t, by: $by, machine: (if $bx == [] then "local" elif $m != "local" then $m else $o.machine end), files: ($k + $r | with_entries(select($has[.key]))), boxed: $bx},
       (if $o == null then null else {sha: $o.sha, time: $o.time, ran: ($r | keys), kept: ($k | length), machine: $o.machine} end)' \
     | { IFS= read -r f && suiteadd "$f" && IFS= read -r f && printf '%s\n' "$f"; }
 }
@@ -491,7 +501,9 @@ relheadsrefuse() { # <commit> <file> <version>
   [ -z "$h" ] || { echo "the draft has headings that name no section of the README: $(paste -sd ';' - <<<"$h")"; return 1; }
 }
 # relnoteskept <version> <card or empty> <then> <commit>: exit 0 when the notes card <card> the last run of <version>
-# waited on is still under way (lib/testaction.sh's cards: none of it has landed, and it is not closed or blocked): the
+# waited on is still under way (lib/testaction.sh's cards: it is not closed or blocked, and none of it has landed in
+# <commit>, the remote's head: one landed and not pushed yet still adds the notes; a landed line naming no commit counts
+# as in it): the
 # run waits on it again (relnoteswait()) and writes no new draft, as the card holds the draft it adds: a second card
 # would add the same file, and a new draft would not be the text the card adds. Else exit 1, nothing done. With the
 # notes of the last run of <version>, when it waited on the card (relnoteswait()), the run goes on as it was to: a
@@ -502,7 +514,9 @@ relnoteskept() { # <version> <card or empty> <then> <commit> [<the waiting run's
   [ -n "$2" ] && ( . "$HERE/lib/testaction.sh" || exit 1
     e=$(jq -ce --arg c "$2" 'first(.cards[]? | select(.id == $c)) | {ids: ([.id, .card, (.was // [])[]] | map(select(. != null))), now: (.card // .id)}' "$TACARDS" 2>/dev/null) \
       && cs=$(stdb ask lines cards 2>/dev/null) \
-      && jq -se --argjson e "$e" 'any(.[]; (.step == "landed" and (.card | IN($e.ids[]))) or (.card == $e.now and (.step | IN("closed", "blocked")))) | not' <<<"$cs" > /dev/null ) || return 1
+      && jq -se --argjson e "$e" 'any(.[]; .card == $e.now and (.step | IN("closed", "blocked"))) | not' <<<"$cs" > /dev/null || exit 1
+    while IFS= read -r s; do [ -n "$s" ] && ! git merge-base --is-ancestor "$s" "$4" 2>/dev/null || exit 1
+    done < <(jq -r --argjson e "$e" 'select(.step == "landed" and (.card | IN($e.ids[]))) | .sha // ""' <<<"$cs") ) || return 1
   [ "$(jq -r '.then? // empty' <<<"$n" 2>/dev/null)" != release ] || t=release
   RELMODE=${RELMODE:-$(jq -r '.mode? // empty' <<<"$n" 2>/dev/null)} CONVEYOR_RELEASE_MACHINE=${CONVEYOR_RELEASE_MACHINE:-$(jq -r '.machine? // empty' <<<"$n" 2>/dev/null)} \
     relnoteswait "$1" "$2" "$t" "notes card $2 is still under way: ${4:0:12} ($REMOTE/$BRANCH) has no docs/releases/$1.md yet, and no new draft is written, as the card adds the draft it holds"
@@ -549,14 +563,19 @@ releasestop() {
 # (releasestop(), above) marks its record stopped, so relfixes() does not start the run again when the
 # card lands. The card is not closed (`conveyor.sh shut` closes it) and may still land. Only a record that waits, was not
 # started again and is still the one read, and only holding the release lock (as relfixes() does). 2: no run is under
-# way and none waits; 1: the lock is held 10 s on.
+# way and none waits; 1: the lock is held 10 s on, or the record changed before the lock was taken (relfixes() started
+# the run again, or another run began): nothing stopped.
 relstopwaiting() {
   local r s v c lk='' rc=1
   r=$(jq -ce 'select(.state == "waiting" and (.ended | type) == "string" and .restarted == null and (.notes.card | type) == "string")' "$RELRUN" 2>/dev/null) \
     || { echo "conveyor: release-run stop: no release run is under way; nothing stopped" >&2; return 2; }
   s=$(jq -r .since <<<"$r") && v=$(jq -r .version <<<"$r") && c=$(jq -r .notes.card <<<"$r") || { echo "conveyor: release-run stop: $RELRUN could not be read; nothing stopped" >&2; return 1; }
   { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null && flock -w 10 "$lk" && rc=0
-  [ $rc != 0 ] || relrec --arg s "$s" --arg t "$(clock)" 'if .since == $s and .state == "waiting" and .restarted == null then .state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"] else . end' || rc=1
+  if [ $rc = 0 ] && ! jq -e --arg s "$s" '.since == $s and .state == "waiting" and .restarted == null' "$RELRUN" > /dev/null 2>&1; then
+    exec {lk}>&-
+    echo "conveyor: release-run stop: the release run of $v no longer waits on notes card $c (it started again, or another run began); nothing stopped" >&2; return 1
+  fi
+  [ $rc != 0 ] || relrec --arg t "$(clock)" '.state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"]' || rc=1
   [ -z "$lk" ] || exec {lk}>&-
   [ $rc = 0 ] || { echo "conveyor: release-run stop: the record of release $v could not be written; the run still starts again when notes card $c lands" >&2; return 1; }
   echo "conveyor: release-run: the release run of $v no longer waits on notes card $c, and starts nothing when it lands; \`conveyor.sh shut\` closes the card"

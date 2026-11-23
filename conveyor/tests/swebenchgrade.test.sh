@@ -416,6 +416,9 @@ t_swefixed() {
   id=$(loop bench swe history | jq -r '.runs[0].id')
   [ "$(loop bench swe show "$id" | jq -c '[.tasks[].cells[0] | [.fixRounds, .findingsFixed, .timedOut]] | sort')" = '[[0,0,false],[1,3,false]]' ] \
     || fail "show does not give each task's fixRounds, findingsFixed and timedOut: $(loop bench swe show "$id" | jq -c '[.tasks[].cells[0]]')"
+  # R162: results --json projects its own fields (bench/swe.sh), apart from show's; t_swegradeold reads only its nulls.
+  out=$(loop bench swe results --json) && [ "$(jq -c '[.[].tasks[] | [.fixRounds, .findingsFixed, .timedOut]] | sort' <<<"$out")" = '[[0,0,false],[1,3,false]]' ] \
+    || fail "results --json does not give each task's measured fixRounds, findingsFixed and timedOut: $out"
 }
 t_swetimedout() {
   swe; local out
