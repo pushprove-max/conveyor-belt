@@ -185,6 +185,44 @@ t_replayrekind() {
   done
 }
 
+# Bug caught: replay gave a judge a ruling that the review's judge never read. judged() reads the declined list before
+# seatwait() waits for the judge's CLI, and the judge's seconds start after that wait, so a ruling made during the wait
+# looked older than the judge's run. The real judged() and seatwait() run: claude is off PATH, and the wait's first
+# pause (its sleep) rules on F-rk as claim wrong and puts claude back. With <first> 0, F-rk was declined as rare case
+# before the wait and the wait replaces that ruling; with 1, the wait's ruling is F-rk's first, so the judge read no
+# declined line, and replay must keep that empty list rather than fall back to the declined list.
+replayseat() { # <first>
+  local rk='[P2] a.txt:4 F-rk' want='[]' nc
+  judging "[$(issue 9 2026-01-01)]"
+  if [ "$1" = 0 ]; then
+    CONVEYOR_NOW=$(p_date 2026-11-01T00:04:20Z +%s) loop declined add c9 9 judge 'rare: needs two hosts' "$rk" 'rare case' >/dev/null \
+      || fail "declined add of F-rk on c9 as rare case failed"
+    want=$(jq -cn --arg w "- $rk (declined: rare: needs two hosts) [kind: rare case]" '[$w]')
+  fi
+  printf '%s\n' '[P2] a.txt:2 F-new' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"; echo 'F1 ACCEPT: real. Cost to every card: none' > "$STUB/judge.1"
+  # This host's report lists claude, so seatwait() waits for it; the PATH then keeps the stubs but no host's own
+  # claude, which would otherwise be found in place of the moved stub.
+  fx_in 'hostclis fresh'; [ "$RC" = 0 ] || fail "the host's CLIs report could not be written: $(cat "$T/$CASE/run.out")"
+  nc=$(tr ':' '\n' <<< "$PATH" | while IFS= read -r d; do [ "$d" != "$STUB" ] && [ -e "$d/claude" ] || printf '%s\n' "$d"; done | paste -sd: -)
+  sleep() { # seatwait()'s pause: F-rk is ruled on while the judge waits, then claude is back
+    [ "${FUNCNAME[1]:-}" = seatwait ] && [ -e "$STUB/claude.off" ] || { command sleep "$@"; return; } # sleep: any other caller's own pause, passed on as called
+    CONVEYOR_NOW=$(p_date 2026-11-01T00:05:30Z +%s) loop declined add c9 9 judge 'claim wrong: guarded' "$rk" 'claim wrong' >/dev/null \
+      && mv "$STUB/claude.off" "$STUB/claude" && echo waited >> "$STUB/waits" # stub: judging()'s own claude stub, put back on PATH as a reinstall would
+  }
+  ( export PATH=$nc; mv "$STUB/claude" "$STUB/claude.off" && judgeone 9 "$STUB/review" )
+  unset -f sleep
+  [ "$(cat "$STUB/waits" 2>/dev/null)" = waited ] && [ "$(grep -F -- "$rk" "$STUB/judge-asked" | jq -cR . | jq -cs .)" = "$want" ] \
+    || fail "the judge did not wait once for claude, or was not given F-rk's declined lines as they were before the wait ($want): $(cat "$STUB/waits" "$STUB/judge-asked" 2>&1)"
+  # The review's line, as card() writes it, a minute after the wait's ruling (00:05:30) with the judge's few seconds.
+  jq -c '{card: "c9", issue: 9, step: "review", time: "2026-11-01T00:06:00Z", tokens: {claude: 0, codex: 0}, result: "GO", sha: "", reason: "", judge}' \
+    "$T/$CASE/cards/c9.fields" >> "$ST/cards.jsonl"
+  fx_in '. "$HERE/lib/replay.sh"; replaycases 20'
+  [ "$RC" = 0 ] && [ "$(jq -c 'select(.card == "c9") | .before' "$T/$CASE/run.out")" = "$want" ] \
+    || fail "replaycases 20 does not give c9's judge the declined lines it read before F-rk's claim wrong ruling during seatwait() ($want): $(cat "$T/$CASE/run.out" "$T/$CASE/cards/c9.fields")"
+}
+t_replayseatwait() { replayseat 0; }  # a ruling replaced during the wait
+t_replayseatfirst() { replayseat 1; } # a first decline made during the wait: the judge read none
+
 # Bug caught (issue 1559): a review whose judge only sent findings to the self-heals list (judge.selfheals) is no
 # case, and a mixed one drops those rulings, so the replay never compares a self-heals ACCEPT. An OUTSIDE one is left
 # out, as every OUTSIDE ruling is.

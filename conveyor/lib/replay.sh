@@ -29,10 +29,11 @@ REPLAY_LAST=20
 # this review, "- E<n> <finding> (accepted: <reason>)", or "- E<n> <finding>" for one the judge gave no readable line
 # for (its cost null), as its judge was given them (fixedbefore(), lib/review.sh) and its line keeps them
 # (judge.back); none when no fix round of the card ran (a card built from nothing after `retry <issue> --fresh`,
-# say)}. A decline is before the judge ran when it is older than the review's
-# line less the judge's seconds: the judge's own declines are written after its call ends. A line declined again under
-# another kind (declined(), lib/followups.sh) gives the last of its rulings made before then: its earlier ones (was) and
-# its latest (made at ruled, else at time).
+# say)}. The before lines are the ones the review's judge was given, as its line keeps them (judge.before, judged()):
+# a decline made or replaced while it waited for its CLI is newer than the list it read. A line written before judged()
+# kept them gives the declines older than the review's line less the judge's seconds: the judge's own declines are
+# written after its call ends. A line declined again under another kind (declined(), lib/followups.sh) gives the last
+# of its rulings made before then: its earlier ones (was) and its latest (made at ruled, else at time).
 replaycases() { # <n>
   { stdb ask lines retried -- lines cards; } 2>/dev/null | jq -cs --argjson last "$1" --arg st "$ST" --arg repo "$REPO" \
     --slurpfile dl <(stdb ask lines declined 2>/dev/null | jq -c 'objects' 2>/dev/null) '
@@ -43,9 +44,9 @@ replaycases() { # <n>
     | sort_by(.time) | .[-$last:][] | .card as $c | .issue as $n |(.judge.sec | numbers // 0) as $sec | (.time | t | if . == null then null else . - $sec end) as $ran
     | {card: $c, issue, time, main: (.main // ""), patch: (.patch // ""),
        back: [.judge.back | arrays[] | strings],
-       before: ([$dl[] | select((.card == $c or (.issue == $n and $n != 0 and .repo == $repo)) and $ran != null)
+       before: ((.judge.before | arrays | map(strings)) // ([$dl[] | select((.card == $c or (.issue == $n and $n != 0 and .repo == $repo)) and $ran != null)
                  | .finding as $f | [(.was // [])[], {time: (.ruled // .time), why, kind}] | map(select(((.time | t) // $ran) < $ran)) | last // empty
-                 | "- \($f) (declined: \(.why)) [kind: \(.kind // "none")]"] | reduce .[] as $l ([]; if index([$l]) then . else . + [$l] end) | .[-50:]), judge: (.judge | {model, effort, sec, tokens, usage} | del(.[] | nulls)),
+                 | "- \($f) (declined: \(.why)) [kind: \(.kind // "none")]"] | reduce .[] as $l ([]; if index([$l]) then . else . + [$l] end) | .[-50:])), judge: (.judge | {model, effort, sec, tokens, usage} | del(.[] | nulls)),
        findings: ([(.judge.accepted | arrays[] | . + {accept: (.reason | tostring | test("^always accepted: a .* finding \\(the judge declined it: ") | not)}),
                    (.judge.declined | arrays[] | . + {accept: false}), (.judge.selfheals | arrays[] | select(.outside | not) | . + {accept: true})]
                   | sort_by(.n) | map({n, finding, place, accept})),

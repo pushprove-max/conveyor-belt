@@ -654,7 +654,10 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue
   rm -f "$wt.judge" "$wt.judge.marks" "$wt.judge.said" "$wt.judge.events" "$wt.judge.err" "$wt.review.new" "$wt.outside.new" "$wt.effects.new" "$wt.judge.said.new"
   # The judge's line keeps the findings of the last fix round it was given (back: fixedbefore()'s lines, with their
   # E<n> ids), which the judge replay (lib/replay.sh) gives its judge in turn: the rounds file is not kept with the records.
-  jq -ce --slurpfile j <(printf '%s' "${j:-null}") --arg b "$back" '. + {judge: ($j[0] | if $b == "" or . == null then . else . + {back: ($b | split("\n") | map(select(startswith("- "))))} end)}' <<<"$5" 2>/dev/null || printf '%s\n' "$5"
+  # It keeps the declined lines it was given too (before, [] for none): a decline made or replaced while the judge
+  # waited for its CLI (seatwait()) is newer than the list it read, so no time on the line tells which ruling it read.
+  jq -ce --slurpfile j <(printf '%s' "${j:-null}") --arg b "$back" --arg d "$before" '. + {judge: ($j[0] | if . == null then . else . + {before: ($d | split("\n") | map(select(startswith("- "))))} end
+    | if $b == "" or . == null then . else . + {back: ($b | split("\n") | map(select(startswith("- "))))} end)}' <<<"$5" 2>/dev/null || printf '%s\n' "$5"
 }
 # The P3 findings the review still holds after the judge (judged()) are handled by the control record's rule P3 (the
 # Rules tab). On, the default, each is a finding as a P2 is: it makes a NO-GO, goes to the fix round and, still open
