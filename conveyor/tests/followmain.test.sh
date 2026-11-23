@@ -156,6 +156,52 @@ t_followshim() {
   [ "$(hook)" = 'two input' ] || fail "the shim did not run the hook from the new engine: $(cat "$STUB/shim.err")"
 }
 
+# Bug (R125): the Foreman's two SessionStart hooks (hooks/hooks.json: `start --rules-apart` and `rules`) each read the
+# engine record, so a take that published between the two reads ran `rules` on the old engine and `start` on the new
+# one: the Foreman started with no rules, or with them twice. The hooks are run here as hooks.json gives them, so a
+# hook that loses its pin fails this. The second hook of a session reads the commit the first one read, whatever the
+# record says now (also when the first found none); another session, or the same one a minute later, reads the record
+# again; a folder in TMPDIR that another user made first (its name is the same for every session of this user) neither
+# turns the pin off nor names the engine.
+t_followhookpair() {
+  setup '[]'; coderepo; trap 'chmod -R u+w "$T/$CASE"' EXIT
+  tune '.plugin = {follow: "main"}'
+  local X1 X2 pins=$R/.git/conveyor-engine-pins open=$T/$CASE/open
+  pushed "cp '$SRC/../shim.sh' shim.sh && printf '#!/bin/sh\necho one \$*\n' > conveyor/foreman/foreman.sh"; X1=$NEW
+  pushed "printf '#!/bin/sh\necho two \$*\n' > conveyor/foreman/foreman.sh"; X2=$NEW
+  bash "$D/conveyor/conveyor.sh" install "$X1" >/dev/null && bash "$D/conveyor/conveyor.sh" install "$X2" >/dev/null || fail "the two commits were not installed"
+  # record <commit>: the engine record names it, its last look is now (no take starts beside the hook).
+  record() { jq -n --arg c "$1" '{commit: $c, taken: [$c]}' > "$R/.git/conveyor-engine.json"; touch "$R/.git/conveyor-engine.look"; }
+  # hook <0|1> <session> [<TMPDIR>]: the Foreman's first (0) or second (1) SessionStart hook, as hooks.json gives it, run as
+  # Claude Code runs it, with its input.
+  hook() {
+    local c; c=$(jq -r ".hooks.SessionStart[0].hooks[$1].command" "$SRC/../hooks/hooks.json")
+    echo "{\"session_id\": \"$2\"}" | TMPDIR=${3:-$T/$CASE/tmp} CLAUDE_PLUGIN_ROOT=$D CLAUDE_PROJECT_DIR=$R bash -c "$c" 2>"$STUB/shim.err"
+  }
+  record "$X1"; out=$(hook 0 s1)
+  [ "$out" = 'one start --rules-apart' ] || fail "the first Foreman hook did not run on the engine the record names: $out $(cat "$STUB/shim.err")"
+  record "$X2"; out=$(hook 1 s1)
+  [ "$out" = 'one rules' ] || fail "the second Foreman hook of the session ran on the engine the record now names, not the first one's: $out $(cat "$STUB/shim.err")"
+  out=$(hook 0 s2)
+  [ "$out" = 'two start --rules-apart' ] || fail "another session did not read the record: $out $(cat "$STUB/shim.err")"
+  # A pin over a minute old is not kept: the session's own, and the other sessions' (a folder of pins that only grows).
+  find "$pins" -type f \( -name s1 -o -name s2 \) -exec touch -t 200001010000 {} +
+  out=$(hook 1 s1)
+  [ "$out" = 'two rules' ] || fail "a pin over a minute old held the session on the old engine: $out $(cat "$STUB/shim.err")"
+  [ -z "$(find "$pins" -type f -name s2)" ] || fail "an expired pin of another session was left in the folder: $(ls -R "$pins")"
+  # The first hook found no engine in the record: the second runs on none too, though a take published between them.
+  rm "$R/.git/conveyor-engine.json"; touch "$R/.git/conveyor-engine.look"; hook 0 s3 >/dev/null
+  record "$X2"; out=$(hook 1 s3)
+  case $out in *two*|*one*) fail "the second hook ran on the engine a take published after the first found none: $out";; esac
+  # Another user made a folder in TMPDIR first, with the name that is this user's alone (as a shim that kept its pins
+  # there would name it): its pin of s4 names X1, and the engine is X2. Both hooks must still pin on the record.
+  mkdir -p "$open/conveyor-engine-pins.$(id -u)" && chmod 755 "$open/conveyor-engine-pins.$(id -u)" && printf '%s' "$X1" > "$open/conveyor-engine-pins.$(id -u)/s4"
+  record "$X2"; out=$(hook 0 s4 "$open")
+  [ "$out" = 'two start --rules-apart' ] || fail "a folder in TMPDIR made by another user set the engine of the first hook: $out $(cat "$STUB/shim.err")"
+  record "$X1"; out=$(hook 1 s4 "$open")
+  [ "$out" = 'two rules' ] || fail "a folder in TMPDIR made by another user turned the pin off for the second hook: $out $(cat "$STUB/shim.err")"
+}
+
 # Bug (#186): the install of the project's taken commit was removed (another project's prune), and every hook then ran
 # with the guards off ("the project's Conveyor commit ... is not installed") until a take by hand. The next hook takes
 # again in the foreground, which installs that commit again (main has not moved), runs on it and says so.

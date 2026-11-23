@@ -42,6 +42,31 @@ if [ -z "$commit" ] && [ -n "$(jq -r '.plugin.follow // empty' "$pack" 2>/dev/nu
   [ -n "$main" ] || off "$top is no git checkout: its engine cannot be found"
   engine() { jq -r '.commit // empty' "$main/.git/conveyor-engine.json" 2>/dev/null; }
   commit=$(engine)
+  # The hooks that set CONVEYOR_PIN (the Foreman's two SessionStart hooks, which together make its context) run on one
+  # engine: the first to read the engine record keeps its commit for the session (the session_id of its input) for a
+  # minute, as a file made with ln, which only one of them can make; each then reads it. A take that publishes
+  # between their two reads would else run `rules` on one engine and `start --rules-apart` on the other, so the
+  # Foreman starts with no rules, or with them twice. The input is read here and given back to the engine's command.
+  if [ -n "${CONVEYOR_PIN:-}" ]; then
+    input=$(cat); exec < <(printf '%s' "$input")
+    sid=$(jq -r '.session_id // empty' <<<"$input" 2>/dev/null)
+    if [[ $sid =~ ^[A-Za-z0-9_-]{1,128}$ ]]; then
+      # The pins are in the project's git folder, beside the engine record: whoever can write there can name the engine
+      # already. A folder in TMPDIR has a name that others can guess, and one made first by another user would turn the
+      # pin off (or name the engine) for every Foreman hook of this user.
+      pins=$main/.git/conveyor-engine-pins; pin=$pins/$sid
+      if mkdir -p "$pins" 2>/dev/null; then
+        # A pin over a minute old is a session's earlier start, never this one's: every such pin is removed (sessions
+        # of other ids leave theirs), never the other hook's new one.
+        find "$pins" -type f -mmin +1 -delete 2>/dev/null
+        # An engine record that names no commit is pinned too (as `none`): the second hook then also finds none, not the
+        # commit a take published between the two.
+        tmp=$(mktemp "$pin.XXXXXX") && printf '%s' "${commit:-none}" > "$tmp" && ln "$tmp" "$pin" 2>/dev/null; rm -f "$tmp"
+        pinned=$(cat "$pin" 2>/dev/null)
+        if [[ $pinned =~ ^[0-9a-f]{40}$ ]]; then commit=$pinned; elif [ "$pinned" = none ]; then commit=''; fi
+      fi
+    fi
+  fi
   # The take's output goes on stderr, as a hook's stdout is read by Claude Code; it reads nothing of the hook's stdin,
   # which is the hook's own input.
   # When this machine last looked at the plugin's main (the file's time): a take is started once a minute at most.

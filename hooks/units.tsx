@@ -273,6 +273,10 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
   ])
   if (taken) stamps ??= taken
   const f = r && r.exitCode === 0 ? parseFetch(r.stdout) : null
+  // The stamps already hold the changed records' new checksums, so the next check would not see them move: a record
+  // whose fresh snapshot did not come (the fetch failed, the host timed out, or the answer has no row for it or a null
+  // one) is given back, to be built fresh by the next fetch.
+  for (const k of fresh) if (!f?.host || f.host.rc !== 0 || !f.records.some(x => x.repo === k && !['', 'null'].includes(String(x.json).trim()))) freshFor.add(k)
   const now = await $.clock.now()
   if (f) {
     own = f.own
@@ -449,15 +453,17 @@ const checkTick = ($: EngineInterface) => {
   const cwd = main
   checkBusy = true
   void (async () => {
-    const st = feedDir ? await $.fs.stat(`${feedDir}/units-feed.json`).catch(() => undefined) : undefined
-    if (st && st.size <= MAX_DATA && (await $.clock.now()) - st.mtimeMs <= STREAM_FRESH) return
+    // Only a fresh feed file that gives a board stands in for the check: the Board writes records null before it has a
+    // snapshot (parseStream refuses it), and the host's records then move with no feed to show it.
+    const fed = await readFeed($).catch(() => null)
+    if (fed && 'board' in fed && fed.board?.snap) return
     const now = await readStamps($, cwd)
     if (!now) return
     const was = stamps
     stamps = now
     const moved = was ? [...now].filter(([k, v]) => was.get(k) !== v).map(([k]) => k) : []
-    if (!moved.length) return
     for (const k of moved) freshFor.add(k)
+    if (!freshFor.size) return
     void tick($).catch(() => undefined)
   })().catch(() => undefined).finally(() => { checkBusy = false })
 }

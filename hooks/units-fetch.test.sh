@@ -87,7 +87,7 @@ g "$M/bakery" init -q -b trunk && g "$M/bakery" commit -q --allow-empty -m start
 hostfile --arg c "$M/clone" --arg b "$M/bakery" \
   '{host: "lab", main: $c, records: [{repo: "bakery", main: $b, lanes: {fast: {worktree: "~/lane"}, research: {worktree: "~/research"}}}]}'
 RH=/r/HOME
-same 'the lanes from the host file' "$(printf 'paths\t%s/research\t%s\tbakery\nfast\tok\tlane-12\t1\t0\tBread oven timer\nhost\t\tfeed\t0' "$RH" "$RH")" \
+same 'the lanes from the host file' "$(printf 'paths\t%s/research\t%s\tbakery\nfast\tok\tlane-12\t1\t0\tBread oven timer\nforemandir\t%s/bakery/conveyor/state/foreman\nhost\t\tfeed\t0' "$RH" "$RH" "$M")" \
   "$(fetch "$M/bakery" feed)"
 
 # The Foreman line (issue 47): read from the Foreman's folder in the project's state folder (conveyor.sh state-dir),
@@ -139,6 +139,9 @@ kill -- -"$WP"; wait "$WP" 2>/dev/null
 # Foreman folder at all, and their whole output has none).
 : > "$FD/session"
 same 'D4: a Foreman folder with no role and no setup prints no line' 'no foreman line' "$(foreman)"
+# Bug it catches (R439): the folder was named only with a Foreman line, so a poll that found none left the mod with no
+# folder to watch, and a claim made after it waited for the minute's poll.
+same 'a Foreman folder with no role is still named, so the mod sees a claim made later' "$(printf 'foremandir\t%s' "$FD")" "$(fetch "$M/bakery" feed | grep '^foremandir')"
 echo '{}' > "$FD/settings.json"
 same 'a set-up Foreman whose role no session holds still prints its line' \
   "$(printf 'foreman\t\t%s\t%s\ts1\t0\t%s\t\tdown: the session'"'"'s process 77 has ended' "$WP" "$A" "$A")" "$(foreman)"

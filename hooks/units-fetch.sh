@@ -43,12 +43,15 @@ mode=${1:-}; [ $# = 0 ] || shift
 # pid holds the lock: the lock is not tried here, as a try that held it while a waiter started would make that waiter
 # stand down. A watcher is up while a child of the waiter runs its watch-<name>.sh. Nothing is started; a read writes only
 #   the waiter's end line, once, when waiter_state finds the waiter gone with no end line in waiter.log.
-# foremandir <FD> goes before it: the folder whose role mark (session) and waiter.pid the mod looks at each second
-# (hooks/units.tsx foremanTick). Mode `foreman` prints these two lines alone.
+# foremandir <FD> goes before it, and is printed in any Conveyor project (a checkout with .conveyor/project.json), with
+# no Foreman set up yet: the folder
+# whose role mark (session) and waiter.pid the mod looks at each second (hooks/units.tsx foremanTick), so a claim made
+# after a poll that found none is seen at once. Mode `foreman` prints these lines alone.
 foreman_line() {
   fd='' wstate=''
   { IFS= read -r fd; IFS= read -r wstate; } < <(export CONVEYOR_MAIN=$here
     . "${BASH_SOURCE[0]%/*}/../conveyor/foreman/lib.sh" > /dev/null 2>&1 && printf '%s\n%s\n' "$FD" "$(waiter_state)")
+  [ -z "$fd" ] || [ ! -f "$here/.conveyor/project.json" ] || printf 'foremandir\t%s\n' "$fd"
   if [ -n "$fd" ] && { [ -s "$fd/session" ] || [ -f "$fd/settings.json" ]; }; then
     mark='' wpid='' wcommit='' wsid='' live=0 watch='' w3=''
     { read -r mark _ < "$fd/session"; } 2>/dev/null
@@ -69,7 +72,6 @@ foreman_line() {
     fi
     cur=$(jq -r '.plugin.commit // empty | strings' .conveyor/project.json 2>/dev/null)
     [ -n "$cur" ] || cur=$(jq -r '.commit // empty | strings' .git/conveyor-engine.json 2>/dev/null)
-    printf 'foremandir\t%s\n' "$fd"
     printf 'foreman\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mark" "$wpid" "$wcommit" "$wsid" "$live" "$cur" "$watch" "$wstate"
   fi
 }

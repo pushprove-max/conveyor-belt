@@ -121,7 +121,7 @@ export type Push = {
   last: { at: number | null; by: string; started: boolean; why: string; sha: string; ok: boolean; ahead: number | null; check: string; log: string } | null
 }
 // own: the session's own project, whose cards carry no project name ('' or absent: none is).
-export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
+export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; order?: { repo: string; issue: number; umbrella: number | null }[]; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
@@ -260,7 +260,7 @@ const heldCounts =(skipped: unknown, holding: unknown): Record<string, number> =
   if (n > 0) out.held = n
   return out
 }
-type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
+type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; order: { repo: string; issue: number; umbrella: number | null }[]; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
 const pushOf = (repo: string, h: any): Push => {
   const r = h?.pushing, l = h?.pushLast
   return {
@@ -287,6 +287,9 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
     ],
     belt: j.belt.map((x: any): Belt => ({ ...card(x), ...timesOf(x), step: one(x.step), review: num(x.review), of: num(x.of), stepAt: time(x.stepAt), model: one(x.model) || null, tokens: num(x.tokens?.claude) === null || num(x.tokens?.codex) === null ? null : x.tokens.claude + x.tokens.codex, usd: num(x.usd), reading: x.reading === true, atEnd: x.atEnd === true, parent: parentOf(x), umbrella: umbrellaOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics), live: liveOf(x.live) })),
     queue: next && next.map((x: any): Queued => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), priority: one(x.priority), followup: x.followup === true, retried: x.retried === true, parent: parentOf(x), umbrella: umbrellaOf(x), room: one(x.room) })),
+    // queue.order is the whole pick order; queue.next stops at ten. pickCounts needs the whole to tell a waiting part from one that is ready.
+    order: (Array.isArray(j.queue.order) ? j.queue.order : []).filter((x: unknown) => x && typeof x === 'object')
+      .map((x: any) => ({ repo, issue: num(x.issue) ?? 0, umbrella: umbrellaOf(x) })),
     // A record whose loop does not give the list (from an older engine, or GitHub did not list the issues) has none.
     // A forced issue is listed here too, marked forced, though it is in the pick order (queue.order): it waits on nothing.
     waits: (Array.isArray(j.queue.waiting) ? j.queue.waiting : []).filter((x: any) => x && typeof x === 'object' && x.forced !== true)
@@ -403,6 +406,7 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
       belt: recs.flatMap(r => r.belt),
       // The records' pick orders as one list: each record's own order stands (see mergeQueues).
       queue: queues.length ? mergeQueues(queues) : null,
+      order: recs.flatMap(r => r.order),
       queueMore: queues.some(q => q.length >= 10),
       waits: recs.flatMap(r => r.waits),
       held: [...held].sort((a, b) => a[0].localeCompare(b[0])),
@@ -483,13 +487,18 @@ export const timelineText = (s: TimelineStep): string => {
   return parts.join(' · ')
 }
 // Parts joined with " · " (or `sep`) and wrapped at the width, never cut: a later field must not fall off a narrow
-// terminal. A wrapped line is indented two more under the first; only one part wider than the whole line is cut.
+// terminal. A wrapped line is indented two more under the first. A part wider than a line is broken at its ", ", then at
+// its spaces (joined by a space, as in the part); a word wider than a line is broken between characters (pieces).
 const wrapParts = (parts: string[], w: number, lead: string, sep = ' · ', style: Omit<Seg, 't'> = { d: true }): Line[] => {
   const out: Line[] = []
   let cur = ''
-  for (const p of parts) {
-    const next = cur ? `${cur}${sep}${p}` : `${lead}${p}`
+  const add = (p: string, join: string) => {
+    const next = cur ? `${cur}${join}${p}` : `${lead}${p}`
     if (cur && cols(next) > w) { out.push([{ ...style, t: cur }]); cur = `${lead}  ${p}` } else cur = next
+  }
+  for (const p of parts) {
+    if (cols(`${lead}  ${p}`) <= w) add(p, sep)
+    else p.split(', ').forEach((q, i, l) => pieces(i < l.length - 1 ? `${q},` : q, w - cols(lead) - 2).forEach((x, j) => add(x, i || j ? ' ' : sep)))
   }
   if (cur) out.push([{ ...style, t: cur }])
   return out.map(l => fitWidth(l, w))
@@ -916,9 +925,12 @@ export const beltModel = (s: State, snap: Snap, w: number, short: boolean, frame
 // An issue waited on, with why it does not move when the snapshot says: `#967 (held)`.
 const waitRef = (x: Waiting, n: number) => `#${n}${x.states[n] ? ` (${x.states[n]})` : ''}`
 // Every issue the waiting ones wait on, once each (a project's own), lowest first, with its state; the last ends in no comma.
-const waitedOn = (ws: Waiting[]) => {
+// With waiting issues in more than one project each ref names its project (`own` for the open project, whose repo is ''),
+// as two projects can wait on a #80 each.
+const waitedOn = (ws: Waiting[], own: string) => {
   const seen = new Map<string, [number, string]>()
-  for (const x of ws) for (const n of x.waitsFor) if (!seen.has(`${x.repo}#${n}`) || x.states[n]) seen.set(`${x.repo}#${n}`, [n, waitRef(x, n)])
+  const named = new Set(ws.map(x => x.repo)).size > 1
+  for (const x of ws) for (const n of x.waitsFor) if (!seen.has(`${x.repo}#${n}`) || x.states[n]) seen.set(`${x.repo}#${n}`, [n, `${named ? x.repo || own : ''}${waitRef(x, n)}`])
   return [...seen.values()].sort((a, b) => a[0] - b[0]).map(([, r], i, l) => (i < l.length - 1 ? `${r},` : r))
 }
 
@@ -999,10 +1011,15 @@ const pushLines =(s: State, snap: Snap, w: number, lead: string): Line[] => (sna
 const NEXT = 5
 // The next five issues the engine picks, numbered, the title cut to fit and the priority right-aligned. The one the
 // machine holds back says why, with the figure that held it: wrapped at its words, as the figure is last.
-const readyRows = (snap: Snap, w: number): Line[] => (snap.queue ?? []).slice(0, NEXT).flatMap((q, i): Line[] => [titled(q, [{ t: ` ${i + 1} `, d: true }],
-  [{ t: q.priority || 'P3', c: q.priority === 'P0' || q.priority === 'P1' ? C.you : undefined, d: !(q.priority === 'P0' || q.priority === 'P1') },
-    ...(q.followup || q.retried ? [{ t: ` · ${[...(q.followup ? ['follow-up'] : []), ...(q.retried ? ['retried'] : [])].join(' · ')}`, d: true }] : [])], w, false),
-  ...(q.room ? wrapParts(q.room.split(' '), w, '    ', ' ') : [])])
+// The follow-up and retried flags sit beside the priority when the title keeps 6 columns of room; else they go under the row.
+const readyRows = (snap: Snap, w: number): Line[] => (snap.queue ?? []).slice(0, NEXT).flatMap((q, i): Line[] => {
+  const prio: Seg = { t: q.priority || 'P3', c: q.priority === 'P0' || q.priority === 'P1' ? C.you : undefined, d: !(q.priority === 'P0' || q.priority === 'P1') }
+  const flags = [...(q.followup ? ['follow-up'] : []), ...(q.retried ? ['retried'] : [])].join(' · ')
+  const beside = !flags || cols(` ${i + 1} `) + cols(`${q.repo}#${q.issue} `) + (q.parent ? cols(` ↳ #${q.parent}`) : 0) + 6 + 2 + cols(`${prio.t} · ${flags}`) <= w
+  return [titled(q, [{ t: ` ${i + 1} `, d: true }], beside && flags ? [prio, { t: ` · ${flags}`, d: true }] : [prio], w, false),
+    ...(flags && !beside ? [[{ t: `    ${flags}`, d: true }] as Line] : []),
+    ...(q.room ? wrapParts(q.room.split(' '), w, '    ', ' ') : [])]
+})
 export const queueModel = (snap: Snap, w: number): Line[] => {
   const next = (snap.queue ?? []).slice(0, NEXT)
   const all = snap.queue?.length ?? 0, more = all > NEXT || snap.queueMore
@@ -1010,7 +1027,7 @@ export const queueModel = (snap: Snap, w: number): Line[] => {
     [{ t: 'QUEUE', c: C.head, b: true }, ...(next.length ? [{ t: more ? `  next ${next.length} of ${all}${snap.queueMore ? '+' : ''}` : `  ${next.length}`, d: true }] : [])],
     // A queue whose only issues wait on others is not empty: nothing can be picked, and it names what they wait on.
     ...(snap.queue === null ? [empty('not read: GitHub did not list the issues')] : next.length ? []
-      : snap.waits.length ? wrapParts(['nothing can be picked: waiting for', ...waitedOn(snap.waits)], w, '  ', ' ', { d: true })
+      : snap.waits.length ? wrapParts(['nothing can be picked: waiting for', ...waitedOn(snap.waits, snap.own ?? '')], w, '  ', ' ', { d: true })
       : [empty('the queue is empty')]),
     ...readyRows(snap, w),
     // The issues that wait on another: not in the pick order, each with what it waits for.
@@ -1087,7 +1104,7 @@ export const SUITE_SHOWN_MS = 10 * 60 * 1000
 // A suite on another machine gives minutes and seconds, as the box's steps are short, and names the machine after the commit.
 const BOX_STEP: Record<string, string> = { start: 'starting the box', setup: 'setting up', checkout: 'checking out', results: 'bringing back results' }
 const mSec = (s: number) => { const n = Math.max(0, Math.floor(s)); return `${Math.floor(n / 60)}m ${n % 60}s` }
-export const suitesModel = (s: State, snap: Snap): Line[] => (snap.suites ?? [])
+export const suitesModel = (s: State, snap: Snap, w: number): Line[] => (snap.suites ?? [])
   .filter(x => x.ended === null || s.now - x.ended < SUITE_SHOWN_MS)
   .flatMap((x): Line[] => {
     const m = x.machine
@@ -1102,7 +1119,12 @@ export const suitesModel = (s: State, snap: Snap): Line[] => (snap.suites ?? [])
     if (x.ended === null && r) {
       const progress = [...(r.done === null ? [] : [{ t: `${count(r.done, 'file')} done`, d: true }]), ...(r.failed ? [{ t: `${r.failed} failed`, c: C.bad }] : []),
         ...(r.at === null ? [] : [{ t: `moved ${fmtSec((s.now - r.at) / 1000)} ago`, d: true }])]
-      return [[{ t: what, c: C.work, b: true }, { t: ` · failed cases again: pass ${r.pass}${r.of === null ? '' : ` of ${r.of}`}`, d: true }],
+      // The pass is the line's end: when the line is wider than the pane it goes on a line of its own, and on a pane too
+      // narrow even for that, split before the pass, never cut.
+      const pass = `pass ${r.pass}${r.of === null ? '' : ` of ${r.of}`}`
+      const again = `failed cases again: ${pass}`
+      return [...(cols(`${what} · ${again}`) <= w ? [[{ t: what, c: C.work, b: true }, { t: ` · ${again}`, d: true }] as Line]
+        : [[{ t: what, c: C.work, b: true }] as Line, ...(cols(`  ${again}`) <= w ? [again] : ['failed cases again:', pass]).map((p): Line => [{ t: `  ${p}`, d: true }])]),
         ...(progress.length ? [[{ t: '  ', d: true }, ...progress.flatMap((p, i) => (i ? [{ t: ' · ', d: true }, p] : [p]))] as Line] : [])]
     }
     if (x.ended === null) {
@@ -1127,7 +1149,7 @@ const board = (s: State, snap: Snap, w: number, short: boolean, frame: number): 
   ...foremanModel(s, w),
   ...engineModel(s, w),
   ...testMapModel(s, w),
-  ...suitesModel(s, snap).map(l => (short ? fitWidth(l, w) : l)), [],
+  ...suitesModel(s, snap, w).map(l => (short ? fitWidth(l, w) : l)), [],
   ...needsModel(s, snap, w, short), [],
   ...beltModel(s, snap, w, short, frame), ...pushLines(s, snap, w, ' '), [],
   ...queueModel(snap, w), [],
@@ -1167,9 +1189,11 @@ const beltId = (b: Belt) => `${idOf(b)}${b.umbrella ? ` of #${b.umbrella}` : ''}
 // The pick order's counts, the parts of one parent issue counted as one entry: ready when any part is ready, else
 // waiting when any part waits.
 const pickCounts = (snap: Snap): { ready: number; waiting: number } => {
-  const key = (x: Ref & { umbrella: number | null }) => `${x.repo}#${x.umbrella ?? x.issue}`
+  const key = (x: { repo: string; issue: number; umbrella: number | null }) => `${x.repo}#${x.umbrella ?? x.issue}`
   const ready = new Set((snap.queue ?? []).map(key))
-  return { ready: ready.size, waiting: new Set(snap.waits.map(key).filter(k => !ready.has(k))).size }
+  // snap.queue stops at ten: a parent whose ready part is further down the order is not waiting either.
+  const inOrder = new Set([...ready, ...(snap.order ?? []).map(key)])
+  return { ready: ready.size, waiting: new Set(snap.waits.map(key).filter(k => !inOrder.has(k))).size }
 }
 
 // The step marks of the matrix, as its legend reads: a step the card did not reach, skipped (Fix after a GO) or still
@@ -1257,9 +1281,12 @@ export const activityModel = (s: State, snap: Snap, w: number, frame: number): L
 
 // PICK ORDER: the next five issues the engine picks, then the issues that wait on another, in the order the engine will
 // pick them, each with the issues it waits for; on the right, "next 5 of 7" or the count the engine can pick now. The issues it waits for wrap at each one, under the Requires
-// column: cut at the width, a row lost the last of them.
+// column: cut at the width, a row lost the last of them. One that is wider than the column is broken at its spaces.
 // The parts of one parent issue are one entry, under the Parent column: the parent's number, its parts done of all,
-// the parts in flight and its title; a part that waits is not a row of its own.
+// the parts in flight and its title; a part that waits is not a row of its own. When the ID column leaves under
+// BESIDE columns beside it (a long project name in a narrow pane), what goes beside the ID goes on lines under it,
+// indented by 2: the column would give a state or a title no room, and the width would cut it.
+const BESIDE = 12
 export const pickModel = (snap: Snap, w: number): Line[] => {
   const all = snap.queue?.length ?? 0
   const ready = snap.queue === null ? 'queue not read' : all > NEXT || snap.queueMore ? `next ${NEXT} of ${all}${snap.queueMore ? '+' : ''}` : `${all} ready`
@@ -1269,26 +1296,39 @@ export const pickModel = (snap: Snap, w: number): Line[] => {
   const waits = snap.waits.filter(x => x.umbrella === null || !pids.includes(x.repo ? `${x.repo}#${x.umbrella}` : `#${x.umbrella}`))
   const ids = waits.map(x => (x.repo ? `${x.repo}#${x.issue}` : `#${x.issue}`))
   const idW = Math.max(7, ...ids.map(cols), ...pids.map(cols))
+  const stack = w - idW - 2 < BESIDE
+  const at = stack ? 2 : idW + 2
   const requires = (x: Waiting): string[] => {
     const out: string[] = []
-    for (const r of x.waitsFor.map(n => waitRef(x, n))) {
+    // A ref wider than the column (`#967 (waiting for #3900, ... #3905)`) is broken at its spaces, not cut at the width.
+    for (const r of x.waitsFor.flatMap(n => pieces(waitRef(x, n), w - at))) {
       const last = out.at(-1)
-      if (last !== undefined && idW + 2 + cols(`${last}  ${r}`) <= w) out[out.length - 1] = `${last}  ${r}`
+      if (last !== undefined && at + cols(`${last}  ${r}`) <= w) out[out.length - 1] = `${last}  ${r}`
       else out.push(r)
     }
-    return out.length ? out : ['']
+    return out
   }
   return [
     section('PICK ORDER', ready, w),
     ...readyRows(snap, w),
-    ...(snap.umbrellas.length ? [fitWidth([{ t: `${padR('Parent', idW)}  Parts`, d: true }], w)] : []),
-    ...snap.umbrellas.map((u): Line => fitWidth([{ t: `${padR(pidOf(u), idW)}  `, c: C.name, b: true }, { t: `${u.done} of ${u.all} done` },
-      ...(u.inFlight.length ? [{ t: ` · ${u.inFlight.map(n => `#${n}`).join(', ')} in flight`, c: C.work }] : []),
-      ...(u.title ? [{ t: `  ${shortTitle(u.title)}`, c: C.name }] : [])], w)),
-    ...(waits.length ? [fitWidth([{ t: `${padR('Waiting', idW)}  Requires`, d: true }], w)]
+    ...(snap.umbrellas.length ? [fitWidth([{ t: stack ? 'Parent' : `${padR('Parent', idW)}  Parts`, d: true }], w)] : []),
+    // The title goes under Parts, on lines of its own, when the row's counts leave it no room on theirs.
+    ...snap.umbrellas.flatMap((u): Line[] => {
+      const counts = `${u.done} of ${u.all} done`, flight = u.inFlight.length ? ` · ${u.inFlight.map(n => `#${n}`).join(', ')} in flight` : ''
+      const title = u.title ? shortTitle(u.title) : ''
+      if (stack) return [fitWidth([{ t: pidOf(u), c: C.name, b: true }], w), ...pieces(`${counts}${flight}`, w - 2).map((p): Line => [{ t: `  ${p}` }]),
+        ...(title ? pieces(title, w - 2) : []).map((p): Line => [{ t: `  ${p}`, c: C.name }])]
+      const row: Seg[] = [{ t: `${padR(pidOf(u), idW)}  `, c: C.name, b: true }, { t: counts }, ...(flight ? [{ t: flight, c: C.work }] : [])]
+      if (!title || cols(plain(row)) + 2 + cols(title) <= w) return [fitWidth([...row, ...(title ? [{ t: `  ${title}`, c: C.name }] : [])], w)]
+      return [fitWidth(row, w), ...pieces(title, w - at).map((p): Line => fitWidth([{ t: `${' '.repeat(at)}${p}`, c: C.name }], w))]
+    }),
+    ...(waits.length ? [fitWidth([{ t: stack ? 'Waiting' : `${padR('Waiting', idW)}  Requires`, d: true }], w)]
       : snap.queue === null ? [empty('not read: GitHub did not list the issues')] : snap.umbrellas.length ? [] : all ? [empty('nothing waiting')] : [empty('the queue is empty')]),
-    ...waits.flatMap((x, i): Line[] => requires(x).map((r, j): Line => fitWidth([
-      { t: `${padR(j ? '' : ids[i], idW)}  `, c: C.name, b: true }, { t: r }], w))),
+    ...waits.flatMap((x, i): Line[] => {
+      const reqs = requires(x)
+      if (stack) return [fitWidth([{ t: ids[i] ?? '', c: C.name, b: true }], w), ...reqs.map((r): Line => [{ t: `  ${r}` }])]
+      return (reqs.length ? reqs : ['']).map((r, j): Line => fitWidth([{ t: `${padR(j ? '' : ids[i], idW)}  `, c: C.name, b: true }, { t: r }], w))
+    }),
   ]
 }
 
@@ -1354,7 +1394,7 @@ const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean
       ...testMapModel(s, w), fitWidth(limitLine(s), w),
     ] : []),
     ...engineModel(s, w),
-    ...suitesModel(s, snap).map(l => fitWidth(l, w)),
+    ...suitesModel(s, snap, w).map(l => fitWidth(l, w)),
     ...(snap.needs.length ? [[], ...needsModel(s, snap, w, true)] : []), [],
     ...matrixModel(s, snap, w), [],
     ...activityModel(s, snap, w, frame), [],

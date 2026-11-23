@@ -153,7 +153,18 @@ sign-in failed, shows the reason after the state (`shop paused: build: Claude Co
 The pane shows the board as tables, from top to bottom. A line that is wider than the pane is cut, unless
 this page says that it wraps. Before the first fetch answers, the pane shows `units: reading the Conveyor snapshot`.
 Some lines wrap at their spaces when they are wider than the pane. These are that message, a line about what could
-not be read, a fetch error and the snapshot age note. A word wider than the pane breaks between whole characters.
+not be read, a fetch error and the snapshot age note. These wrap too, so no number or count is cut:
+
+- The pass line of a whole-suite run that runs failed cases again goes on a line of its own. On a very narrow pane,
+  `failed cases again:` and the pass go on two lines.
+- The `ON THE BELT` head breaks inside a project's part, at its commas and then at its spaces.
+- In PICK ORDER, a parent's title goes on lines under its row when its counts leave it no room, and a dependency's
+  state under `Requires` breaks at its spaces. When a long project name leaves too little room beside the issue ID,
+  the counts, the title and the states go on lines under the ID, indented by two spaces.
+- In QUEUE, the `follow-up` and `retried` flags go on a line under the row when they leave the title no room. When
+  more than one project has waiting issues, each issue they wait for shows its project name.
+
+A word wider than the pane breaks between whole characters.
 
 - **The head**: `/units` as a filled label, the Conveyor host in bold and, on the right, `DAY SPEND` and the dollars
   today.
@@ -234,7 +245,8 @@ How fast the views follow the belt: with the live feed (below) running, a change
 is on now, all in one command (one `ssh` call when the records are on a build machine).
 When a record's checksum changes, a fetch starts at once, and that record's snapshot is built new for it
 (`conveyor.sh snapshot --fresh`), so a card started, a step, a landing or a block shows within about 5 seconds, plus
-the time that build takes. A check that finds no change fetches nothing. When a project is pinned to an older engine
+the time that build takes. If that fetch fails or brings no snapshot for the record, the next check asks for it
+again, though its checksum has not changed since. Any other check that finds no change fetches nothing. When a project is pinned to an older engine
 whose fetch script has no `stamp` mode, the mod skips this check for it.
 
 The Foreman row follows the Foreman's folder at once: each second the mod looks at the write times of its role mark

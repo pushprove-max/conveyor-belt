@@ -1511,3 +1511,58 @@ test('a waiter.pid that changes is read within a second as well', async ($, on) 
   expect(foremanReads(w).length).toBe(2)
   expect(await draw($, 'Pane')).toContain('Foreman not listening: waiter down: ended')
 })
+
+// Issue 1449 (R441). Bug it catches: the changed record was dropped from the ones to build fresh when its fetch failed,
+// and the checksums already held its new value, so no later check saw it move and the old board stayed to the minute's poll.
+// The fetch fails four ways: it does not run (exit 1), the host does not answer in time (its host line says 124, and the
+// script still exits 0), the record's snapshot comes back null, or the host answers (exit 0) with no row for the record.
+const FAILS: [string, (w: World) => void][] = [
+  ['the fetch exits with an error', w => { w.fetchRc = 1 }],
+  ['the host times out', w => { w.fetch = answer(snapshot(), 'host\tbuildbox\tssh\t124') }],
+  ['the record\'s snapshot is null', w => { w.fetch = answer('null') }],
+  ['the host answers with no row for the record', w => { w.fetch = answer(null) }],
+]
+for (const [what, fail] of FAILS) {
+  test(`with no feed, a fresh fetch that fails (${what}) is asked for again at the next check, though the record's checksum already moved`, async ($, on) => {
+    const w = world(on, 'main', answer(snapshot()))
+    let stamp = 'stamps\tlocal\nbookstore\t4294967295 0\n'
+    const base = w.run
+    w.run = (argv, cwd) => {
+      if (argv[2] !== 'stamp') return base(argv, cwd)
+      w.runs.push({ argv: [...argv], cwd })
+      return { value: { exitCode: 0, stdout: stamp, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    await start($, 'main')
+    await w.clock.settle()
+    stamp = 'stamps\tlocal\nbookstore\t3962379231 20\n'
+    fail(w)
+    await w.clock.advance(5000)
+    await w.clock.settle()
+    expect(fetches(w).map(r => r.argv.slice(2))).toEqual([[], ['fresh', 'bookstore']])
+    // The host answers again, the checksum unchanged since: the record is still asked for fresh.
+    w.fetchRc = 0
+    w.fetch = answer(snapshot({ belt: [BELT] }))
+    await w.clock.advance(5000)
+    await w.clock.settle()
+    expect(fetches(w).map(r => r.argv.slice(2))).toEqual([[], ['fresh', 'bookstore'], ['fresh', 'bookstore']])
+    expect(await draw($, 'Pane')).toContain('#3863')
+  })
+}
+
+// Issue 1449 (R443). Bug it catches: the check stood down for any fresh units-feed.json, but the Board writes
+// records null before it has a snapshot, which the mod refuses: no board came from the feed and no check ran either.
+test('with a fresh units-feed.json that holds no records, the 5 s check still runs', async ($, on) => {
+  const w = world(on, 'main', answer(snapshot()), { [FEED]: JSON.stringify({ host: 'buildbox', records: null, stream: { live: true, heardAt: ago(0), since: null, error: null } }) })
+  const base = w.run
+  w.run = (argv, cwd) => {
+    if (argv[2] !== 'stamp') return base(argv, cwd)
+    w.runs.push({ argv: [...argv], cwd })
+    return { value: { exitCode: 0, stdout: 'stamps\tlocal\nbookstore\t4294967295 0\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  }
+  await start($, 'main')
+  await w.clock.settle()
+  const before = checks(w).length
+  await w.clock.advance(5000)
+  await w.clock.settle()
+  expect(checks(w).length, 'checks after the first 5 s with a feed file whose records are null').toBeGreaterThan(before)
+})

@@ -1330,3 +1330,123 @@ test('PICK ORDER with nothing ready and nothing waiting says the queue is empty;
   const unread = paneModel(board({ queue: { next: null } }), 72, 0).map(plain).join('\n')
   expect(section(unread, 'PICK ORDER').split('\n').slice(1)).toEqual(['  not read: GitHub did not list the issues'])
 })
+
+// Issue 1449 (R427). Bug it catches: the first line of a rerun (57 columns) was cut at 56, so the pass total fell off.
+test('a rerun line wider than the pane puts the pass on a line of its own, with its total', () => {
+  const rerun = { round: 2, of: 3, case: 'x: a', since: ago(4), at: ago(3), done: 5, failed: 1, files: { done: 1, of: 2, failed: ['x'] } }
+  const lines = tableText(board({ suites: [{ ...SUITE, rerun }] }), 56).split('\n').map(l => l.trimEnd())
+  const at = lines.indexOf('release 1.2.0 · a1b2c3d')
+  expect(lines.slice(at, at + 2), `rerun lines at 56 columns: ${lines.join(' | ')}`).toEqual(['release 1.2.0 · a1b2c3d', '  failed cases again: pass 2 of 3'])
+  // Bug it catches (the same, at the narrowest pane, 32 columns): the pass line itself is 33 and was cut at its total.
+  const narrow = tableText(board({ suites: [{ ...SUITE, rerun }] }), 32).split('\n').map(l => l.trimEnd())
+  const top = narrow.indexOf('release 1.2.0 · a1b2c3d')
+  expect(narrow.slice(top, top + 3), `rerun lines at 32 columns: ${narrow.join(' | ')}`).toEqual(['release 1.2.0 · a1b2c3d', '  failed cases again:', '  pass 2 of 3'])
+})
+
+// Issue 1449 (R438). Bug it catches: the ready count came from the queue's first ten, so a parent whose ready part was
+// the eleventh counted as waiting.
+test('a parent whose ready part is past the first ten of the pick order is not counted as waiting', () => {
+  const part = { issue: 636, title: 'Ready part', priority: 'P2', followup: false, retried: false, umbrella: 647 }
+  const waiting = [{ issue: 637, title: 'Waiting part', waitsFor: [636], umbrella: 647 }]
+  const umbrellas = [{ issue: 647, title: 'Parent', parts: ['#636', '#637'], done: 0, all: 2, inFlight: [] }]
+  const s = board({ queue: { next: queued(10), order: [...queued(10), part], waiting }, open: { umbrellas } })
+  expect(paneModel(s, 72, 0).map(plain).join('\n')).toContain('\n0 ON BELT · 10+ READY · 0 WAITING · 0 NEEDS YOU\n')
+})
+
+// Issue 1449 (R436). Bug it catches: one dependency with a long state (59 columns) was cut at 56, losing its last issues.
+test('PICK ORDER breaks a long dependency state at its words at 56 columns, cutting no issue number', () => {
+  const state = 'waiting for #3900, #3901, #3902, #3903, #3904, #3905'
+  const s = board({ queue: { next: [], waiting: [{ issue: 970, title: 'Waits', waitsFor: [967], waitsOn: [{ issue: 967, state }] }] } })
+  const part = section(paneModel(s, 56, 0).map(plain).join('\n'), 'PICK ORDER')
+  expect(part).not.toContain('…')
+  expect(part.replace(/\s+/g, ' ')).toContain(`#967 (${state})`)
+})
+
+// Issue 1449 (R428). Bug it catches: a dependency one level down ("#485 (waiting for #481)") wider than the column was
+// cut at 40 columns, digits and all.
+test('PICK ORDER shows a two-level dependency whole at 40 columns, under a long project name', () => {
+  const two = state(fetched([
+    ['bookstore', snapshot()],
+    ['gadgetlab-workshop', snapshot({ queue: { next: [], waiting: [{ issue: 490, title: 'Waits', waitsFor: [485], waitsOn: [{ issue: 485, state: 'waiting for #481' }] }] } })],
+  ]))
+  const part = section(paneModel(two, 40, 0).map(plain).join('\n'), 'PICK ORDER')
+  expect(part).not.toContain('…')
+  expect(part.replace(/\s+/g, ' ')).toContain('#485 (waiting for #481)')
+  for (const l of part.split('\n')) expect(cols(l)).toBeLessThanOrEqual(40)
+})
+
+// Issue 1449 (R428, R430; the review's E11). Bug it catches: at 24 columns (the narrowest dock) the ID column of
+// `gadgetlab-workshop#490` (22 columns, 24 with its two spaces) left the dependency state and the parent's counts and
+// title no room beside it, so fitWidth cut them whole. They go on lines under the ID, indented by 2.
+test('PICK ORDER at 24 columns, under a 22-column ID, shows the dependency state, the parent\'s counts and its title whole', () => {
+  const umbrellas = [{ issue: 647, title: 'Ship the parts', parts: ['#635', '#636', '#637'], done: 1, all: 3, inFlight: [636] }]
+  const two = state(fetched([
+    ['bookstore', snapshot()],
+    ['gadgetlab-workshop', snapshot({ queue: { next: [], waiting: [{ issue: 490, title: 'Waits', waitsFor: [485], waitsOn: [{ issue: 485, state: 'waiting for #481' }] }] }, open: { umbrellas } })],
+  ]))
+  const part = section(paneModel(two, 24, 0).map(plain).join('\n'), 'PICK ORDER').split('\n').map(l => l.trimEnd())
+  const text = part.join('\n')
+  expect(text, `PICK ORDER at 24 columns: ${part.join(' | ')}`).not.toContain('…')
+  for (const l of part) expect(cols(l), `line "${l}" of PICK ORDER at 24 columns`).toBeLessThanOrEqual(24)
+  const at = part.indexOf('gadgetlab-workshop#490')
+  expect(part.slice(at, at + 3), `waiting rows at 24 columns: ${part.join(' | ')}`).toEqual(['gadgetlab-workshop#490', '  #485 (waiting for', '  #481)'])
+  const top = part.indexOf('gadgetlab-workshop#647')
+  expect(part.slice(top, top + 4), `parent rows at 24 columns: ${part.join(' | ')}`).toEqual(['gadgetlab-workshop#647', '  1 of 3 done · #636 in', '  flight', '  Ship the parts'])
+})
+
+// Issue 1449 (R430). Bug it catches: at 40 columns the row of a parent (37 columns before its title) left the title no
+// room, and it was cut to nothing.
+test('PICK ORDER puts a parent\'s title under its row at 40 columns, when the counts leave it no room', () => {
+  const umbrellas = [{ issue: 647, title: 'Ship the parts', parts: ['#635', '#636', '#637'], done: 1, all: 3, inFlight: [636] }]
+  const part = section(paneModel(board({ open: { umbrellas } }), 40, 0).map(plain).join('\n'), 'PICK ORDER').split('\n').map(l => l.trimEnd())
+  const at = part.findIndex(l => l.startsWith('#647'))
+  expect(part.slice(at, at + 2), `parent rows at 40 columns: ${part.join(' | ')}`).toEqual(['#647     1 of 3 done · #636 in flight', '         Ship the parts'])
+})
+
+// Issue 1449 (R432). Bug it catches: with one project the head is one part, which wrapParts could not split, and
+// fitWidth cut it at 40 columns, losing "not counted)".
+test('the ON THE BELT head of one project wraps at its comma at 40 columns, with "not counted)" whole', () => {
+  const s = board({ belt: [BELT[0], { ...BELT[1], step: 'landing', offCap: true }], health: { loop: true, state: 'running', building: 1, builderCap: 7 } })
+  const lines = section(tableText(s, 40), 'ON THE BELT').split('\n').slice(0, 2).map(l => l.trimEnd())
+  expect(lines, `head at 40 columns: ${lines.join(' | ')}`).toEqual(['ON THE BELT (1 of 7,', '  1 landing not counted)'])
+})
+
+// Issue 1449 (R434). Bug it catches: a project's part ("bookstore 0 of 3, 1 landing not counted") wider than 40 columns
+// with the head's lead was cut by fitWidth, hiding the landing count.
+test('the ON THE BELT head of two projects wraps inside a project at 40 columns, keeping its landing count whole', () => {
+  const two = state(fetched([
+    ['bookstore', snapshot({ belt: [{ ...BELT[0], step: 'push' }], health: { loop: true, state: 'running', building: 0, builderCap: 3 } })],
+    ['gadgetlab', snapshot({ belt: [{ ...BELT[1], card: 'c5-7', issue: 7 }], health: { loop: true, state: 'running' } })],
+  ]))
+  const lines = section(tableText(two, 40), 'ON THE BELT').split('\n').slice(0, 2).map(l => l.trimEnd())
+  expect(lines, `head at 40 columns: ${lines.join(' | ')}`).toEqual(['ON THE BELT (bookstore 0 of 3,', '  1 landing not counted · gadgetlab 1)'])
+})
+
+// Issue 1449 (R437). Bug it catches: a retried follow-up in a project with a long name (lead, ref and flags 55 columns)
+// was cut at 40, so its issue number was lost.
+test('QUEUE puts the follow-up and retried flags under a row at 40 columns when they leave the title no room, keeping the issue whole', () => {
+  const next = [{ issue: 1272, title: 'Retry me', priority: 'P2', followup: true, retried: true }]
+  const two = state(fetched([['bookstore', snapshot()], ['gadgetlab-shop', snapshot({ queue: { next } })]]))
+  const lines = section(tableText(two, 40), 'QUEUE').split('\n').map(l => l.trimEnd())
+  const at = lines.findIndex(l => l.includes('gadgetlab-shop#1272'))
+  expect(lines[at], `queue rows at 40 columns: ${lines.join(' | ')}`).toMatch(/^ 1 gadgetlab-shop#1272 .* P2$/)
+  expect(lines[at + 1]).toBe('    follow-up · retried')
+})
+
+// Issue 1449 (R435). Bug it catches: with two projects each waiting on its own #80 the summary read
+// "#80 (held), #80 (held)", naming neither project.
+test('QUEUE names each project in what the waiting issues wait on when more than one project waits', () => {
+  const waiting = [{ issue: 85, title: 'Waits', waitsFor: [80], waitsOn: [{ issue: 80, state: 'held' }] }]
+  const two = state(fetched([['bookstore', snapshot({ queue: { next: [], waiting } })], ['gadgetlab', snapshot({ queue: { next: [], waiting } })]]))
+  expect(section(tableText(two, 120), 'QUEUE')).toContain('waiting for bookstore#80 (held), gadgetlab#80 (held)')
+})
+
+// Issue 1449 (R435, review E5). Bug it catches: with the project's name added, one ref (`conveyor-belt#1449 (skipped by a
+// rule)`, 42 columns on a continuation line) was wider than a 40-column pane and had no comma to break at, so it was cut.
+test('QUEUE at 40 columns breaks a project-named dependency ref at its spaces, never cutting it', () => {
+  const [a, b] = [{ issue: 85, title: 'Waits', waitsFor: [1449], waitsOn: [{ issue: 1449, state: 'skipped by a rule' }] }, { issue: 90, title: 'Waits', waitsFor: [80], waitsOn: [{ issue: 80, state: 'held' }] }]
+  const two = state(fetched([['conveyor-belt', snapshot({ queue: { next: [], waiting: [a] } })], ['gadgetlab', snapshot({ queue: { next: [], waiting: [b] } })]]))
+  const lines = section(tableText(two, 40), 'QUEUE').split('\n').map(l => l.trimEnd())
+  expect(lines.filter(l => l.length > 40), `QUEUE lines at 40 columns: ${lines.join(' | ')}`).toEqual([])
+  expect(lines.join(' ').replace(/\s+/g, ' '), `QUEUE at 40 columns: ${lines.join(' | ')}`).toContain('gadgetlab#80 (held), conveyor-belt#1449 (skipped by a rule)')
+})
