@@ -264,7 +264,8 @@ lists every project's rows, so it stays as it is.
   a private address or another private text, the Board files nothing. The preview names each hit by its line, for
   example "body line 3: home path". Change that line and click **File the issue** again.
 - When the issue is filed, the note leaves the list and `plugin-bugs.md`, and the pane shows a link to the new issue
-  until you load the page again. If `gh` fails, the note stays, and the preview shows its error. Each
+  until you load the page again. If the Board files the issue but cannot change `plugin-bugs.md`, the note stays, and
+  the preview says so. Then click **Dismiss**. If `gh` fails, the note stays, and the preview shows its error. Each
   note is filed only from its own preview. The other notes stay as they are.
 - **Lint check** in Health counts the cards that landed with a lint command skipped because its tool is missing, as
   "2 unchecked". That command did not check their change. With no such card, the row does not show.

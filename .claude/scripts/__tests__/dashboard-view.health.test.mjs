@@ -123,6 +123,8 @@ test('Health: the plugin problems a Foreman noted are a warning row, "N plugin p
   assert.match(row.querySelector('.check-next').textContent, /filed the issue but could not remove the note, click Dismiss/);
   assert.ok(guide('board.md').includes('unless you filed it with File on GitHub, which removes the note'), 'docs/board.md says the same as the Health step');
   assert.ok(guide('board.md').includes('filed the issue but could not remove the note, click Dismiss'), 'docs/board.md names the failed removal too');
+  // Bug: the filing guide said the note always leaves the list once filed; it stays when plugin-bugs.md cannot be written. A doc has no behaviour to run, so its text is checked.
+  assert.ok(guide('board.md').includes('files the issue but cannot change `plugin-bugs.md`, the note stays, and the preview says so. Then click Dismiss'), 'docs/board.md filing guide names the kept note');
 });
 
 // Issue 1042: the owner could only read the notes in the file. Bugs it catches: no pane listing each note with its time,
