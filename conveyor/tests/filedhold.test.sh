@@ -63,6 +63,55 @@ t_filedkept() {
     || fail "after filed (command: $cmd, output: $n), #$n is not held, #100101 is, or the record no longer starts held: $(cat "$C") $out"
   ! compgen -G "$FC/conveyor/filing/kept-*" >/dev/null || fail "filed left the filing's list of held records: $(ls "$FC/conveyor/filing")"
 }
+# filedmid <command>: the pick while the filing runs, between its filing hook and its filed hook: #4 is held by the
+# owner, and the command has filed a follow-up (#$n) that GitHub lists already, so the dry pick reads both.
+# Bug caught: the loop's own hold (adopted()) passed over a follow-up, and filed held it only once the command ended,
+# so a pick in that time took it before the owner's yes. Now filing marks the record (control filing on) and the pick
+# holds it; filed then takes the mark off, and the follow-up stays held.
+filedmid() {
+  loop control hold 4 >/dev/null || fail "hold 4 was refused"
+  out=$(hook filing "$1"); [ -z "$out" ] && jq -e '.filing | numbers' "$C" >/dev/null || fail "filing (command: $1) did not mark the record: $out $(cat "$C")"
+  n=$(gh issue create --title example --body example --label conveyor-followup | grep -oE '[0-9]+$') || fail "the stub filed no issue"
+  printf '[%s,%s]' "$(issue 4 2000-01-01T00:00:00Z P2)" "$(issue "$n" 2026-06-01T00:00:00Z P2 conveyor-followup)" > "$STUB/mid.json"
+  p=$(loop pick --dry --issues "$STUB/mid.json" --state "$ST" 2>&1); [ -z "$p" ] || fail "a pick while the command (command: $1) ran took the follow-up #$n: $p"
+  out=$(hook filed "$1" "$n"$'\n')
+  jq -e --argjson n "$n" '.filing == null and (.held | index($n))' "$C" >/dev/null || fail "after filed (command: $1, output: $n) the mark stays or #$n is not held: $(cat "$C") $out"
+}
+# The owner's Held: the record already starts new issues held, which filing leaves as it is.
+t_filedmidkept() {
+  filedsetup
+  jq -c '.start = "held" | .startHeld = [{from: 4, to: null}]' "$C" > "$C.new" && mv "$C.new" "$C" || fail "the record could not be set held"
+  filedmid 'gh issue create --title example --body example --label conveyor-followup | grep -oE "[0-9]+$"'
+  [ "$(jq -r .start "$C")" = held ] || fail "filed set the owner's Held back to the queue: $(cat "$C")"
+}
+# Queue: filing sets new issues held, and filed sets them back.
+t_filedmidqueue() {
+  filedsetup
+  filedmid 'gh issue create --title example --body example --label conveyor-followup | grep -oE "[0-9]+$"'
+  [ "$(jq -r .start "$C")" = queue ] || fail "filed did not set new issues back to the queue: $(cat "$C")"
+}
+# A Queue that failed left the record listed in the filings' held list, and the owner then took its mark off and set
+# Queue by hand, as filed's block tells. Bug caught: filing passed over a listed record, so the next command ran with
+# the record in Queue and no mark, and the loop could pick the follow-up it filed. Now filing marks it and sets it held.
+t_filedmidstale() {
+  filedsetup
+  mkdir -p "$FC/conveyor/filing" && echo r > "$FC/conveyor/filing/held" || fail "the held list could not be written"
+  filedmid 'gh issue create --title example --body example --label conveyor-followup | grep -oE "[0-9]+$"'
+  [ "$(jq -r .start "$C")" = queue ] && [ ! -s "$FC/conveyor/filing/held" ] || fail "filed did not set the listed record back to the queue: $(cat "$C") $(cat "$FC/conveyor/filing/held")"
+}
+# A record pinned to an engine before the mark answers `control filing on` with a usage error (2), as here.
+# Bug caught: filing took that error as a mark set and ran the command, so that record's loop, which passes over a
+# follow-up, could pick one the command filed before the owner's yes. Now the command is refused, and the record
+# starts new issues in the queue again.
+t_filedoldengine() {
+  filedsetup
+  ASKE="[ \"\$CONVEYOR_CMD\" != 'control filing on' ] || { echo 'usage: conveyor.sh control [pause]' >&2; exit 2; }; $ASKE"
+  cmd='gh issue create --title example --body example --label conveyor-followup'
+  out=$(hook filing "$cmd")
+  jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | test("r \\(its engine has no control filing"))' <<<"$out" >/dev/null \
+    || fail "filing (command: $cmd) ran the command in a record whose engine has no mark: $out"
+  jq -e '.start == "queue" and .filing == null' "$C" >/dev/null || fail "the refused filing (command: $cmd) left the record set: $(cat "$C")"
+}
 # Bug (#1234): one issue link in the output made filed take every issue of the command as linked, so a second
 # `gh issue create` of the same command, printed as a bare number, got no warning. Here the Foreman is told.
 t_filedmixed() {

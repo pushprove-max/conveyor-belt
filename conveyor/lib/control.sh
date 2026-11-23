@@ -15,6 +15,8 @@
 # reviewAccount are null or the name of one of the host file's accounts (ACCT, above); start is where
 # new issues start, queue or held, startHeld the spans it was held ({from, to}: the newest issue number at each switch;
 # to is null for the one in force, the last), startSeen the issues this setting has had its say on: held by adopt(), or released.
+# filing is null, or the newest issue's number when the Foreman's filing hooks began a command that may file an issue
+# (`control filing on`): while it is set, adopt() holds a follow-up opened after it too.
 # depGuard is the dependency guard (true, the seed's, for a record written before it: no issue is picked while an
 # issue it depends on is open) and forced the issues `control force` lets past their open dependencies while it is
 # off (adopted() drops each once it lands or its issue closes). landAs is null (the pack's push.landAs) or the rule
@@ -72,6 +74,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
       and ([.held, .order] | all(type == "array" and all(type == "number")))
       and (.pushCheck == null or (.pushCheck | type == "boolean"))
       and (.start | IN("queue", "held")) and (.startSeen | type == "array" and all(type == "number"))
+      and (.filing == null or (.filing | type == "number"))
       and (.startHeld | type == "array" and all(type == "object" and keys == ["from", "to"] and (.from | type == "number") and (.to == null or (.to | type == "number"))))
       and ((.start == "held") == (.startHeld | length > 0 and (last.to == null)))
       and (.rules | (.never | type == "array" and all(type == "string")) and ([.P0, .P1, .P2, .P3, .followups, .push, .visible, .lint, .testissues, .foremanissues, .followupissues, .releaseissues, .splitissues] | all(type == "boolean"))
@@ -1144,7 +1147,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es bx sz top=0 p='' open=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-mode <serial|parallel> | tests-from <UTC time | clear> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | adopt since <UTC time> | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|testissues|foremanissues|followupissues|releaseissues|splitissues|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | judge rare <P0|P1|P2|P3>... | judge rare none | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-mode <serial|parallel> | tests-from <UTC time | clear> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | adopt since <UTC time> | filing <on|off> | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|testissues|foremanissues|followupissues|releaseissues|splitissues|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | judge rare <P0|P1|P2|P3>... | judge rare none | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -1217,6 +1220,21 @@ control() { # [action [arguments]]
       else [ $# != 0 ] && nums "$@" || { bad; return; }; fi
       f='. as $c | [$v[] | tonumber | select(. as $i | (IN($c.startSeen[]) | not) and ($c.startHeld | any($i > .from)))] as $n
          | .held = (.held + $n | unique) | .startSeen = (.startSeen + $n | unique)' ;;
+    # filing: the filing hooks' mark (foreman/foreman.sh filing and queue_again) while a command that may file an issue
+    # runs, in a record that starts new issues held (the hooks' Held or the owner's). on sets filing to the newest
+    # issue's number, unless another filing set it already: adopted() then holds every issue opened after it from its
+    # first sight, a follow-up too (which it otherwise passes over), so the loop cannot pick one before the command ends
+    # and filed holds it. An engine's follow-up opened then is held too. off holds every open issue opened after it that
+    # startSeen does not have, as adopted() would, and clears it; `start queue filed` does the same. When the number or
+    # the open issues cannot be read, nothing changes.
+    filing) [ $# = 1 ] && [[ $1 =~ ^(on|off)$ ]] || { bad; return; }
+      if [ "$1" = on ] && [ "$(jq -r .filing <<<"$c")" = null ]; then
+        top=$(timeout 60 gh issue list --state all --limit 1 --json number 2>/dev/null | jq -e '.[0].number // 0 | numbers') \
+          || { echo "conveyor: cannot read the newest issue number; nothing changed" >&2; return 1; }
+      elif [ "$1" = off ] && [ "$(jq -r .filing <<<"$c")" != null ]; then
+        names && open=$(openissues number 2>/dev/null | jq -ce 'arrays') || { echo "conveyor: cannot read the open issues; nothing changed" >&2; return 1; }
+      fi
+      f='if $v[0] == "off" then .filing = null else .filing //= $n end' ;;
     # release: one released is never held again by adopted(), whatever the setting or who opened it.
     release) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.held -= ($v | map(tonumber)) | .startSeen = (.startSeen + ($v | map(tonumber)) | unique)' ;;
     order) nums "$@" || { bad; return; }; f='.order = reduce ($v[] | tonumber) as $n ([]; if index($n) then . else . + [$n] end)' ;;
@@ -1339,20 +1357,23 @@ control() { # [action [arguments]]
     # Queue (foreman/foreman.sh filed, once a filing ends): it first holds every open issue opened in the span it
     # closes that startSeen does not have, a follow-up too, as adopt does with the issues named, so an issue the
     # Foreman filed is held however the command that filed it printed it (no link to it, only its number), and one
-    # released already stays released. When the open issues cannot be read, nothing changes either.
+    # released already stays released. It also ends the filing hooks' mark, as `filing off` does. When the open issues
+    # cannot be read, nothing changes either.
     start) { [ $# = 1 ] && [[ $1 =~ ^(queue|held)$ ]]; } || [ "$*" = "queue filed" ] || { bad; return; }
       if [ "$(jq -r .start <<<"$c")" != "$1" ]; then
         top=$(timeout 60 gh issue list --state all --limit 1 --json number 2>/dev/null | jq -e '.[0].number // 0 | numbers') \
           || { echo "conveyor: cannot read the newest issue number; nothing changed" >&2; return 1; }
-        [ $# = 1 ] || { names && open=$(openissues number 2>/dev/null | jq -ce 'arrays'); } \
-          || { echo "conveyor: cannot read the open issues; nothing changed" >&2; return 1; }
       fi
+      [ $# = 1 ] || { [ "$(jq -r .start <<<"$c")" = "$1" ] && [ "$(jq -r .filing <<<"$c")" = null ]; } \
+        || { names && open=$(openissues number 2>/dev/null | jq -ce 'arrays'); } || { echo "conveyor: cannot read the open issues; nothing changed" >&2; return 1; }
       f='if .start == $v[0] then . elif $v[0] == "held" then .start = "held" | .startHeld += [{from: $n, to: null}]
-         else .start = "queue" | .startHeld[(.startHeld | length) - 1].to = $n end' ;;
+         else .start = "queue" | .startHeld[(.startHeld | length) - 1].to = $n end | if $v[1] == "filed" then .filing = null else . end' ;;
     *) bad; return ;;
   esac
   new=$(jq -c --arg a "$a" --arg p "$p" --argjson n "$top" "\$ARGS.positional as \$v | $f" --args "$@" <<<"$c") && [ -n "$new" ] || return 1
-  [ -z "$open" ] || { new=$(jq -c --argjson o "$open" '.startHeld[-1] as $s | ([$o[].number | select(. > $s.from and . <= $s.to)] - .startSeen) as $h
+  # The span a Queue of the hooks closed, and the issues opened since the mark it or `filing off` clears.
+  [ -z "$open" ] || { new=$(jq -c --argjson o "$open" --argjson c "$c" '(if $c.start != .start then .startHeld[-1] else {from: 0, to: 0} end) as $s
+    | ([$o[].number | select((. > $s.from and . <= $s.to) or ($c.filing != null and . > $c.filing))] - .startSeen) as $h
     | .held = (.held + $h | unique) | .startSeen = (.startSeen + $h | unique)' <<<"$new") && [ -n "$new" ]; } || return 1
   ctlput "$c" "$new" || return 1
   # A release of an issue the record's held does not list changes nothing there: it is held for another reason, or not
@@ -1363,7 +1384,7 @@ control() { # [action [arguments]]
     done
   fi
   # A release dates only the issues the record held; an adopt, or the filing hooks' Queue, only those it held now.
-  case $a in hold) movedlocked movedhold hold "$new" "$@" ;; adopt | start) x=$(jq -r --argjson c "$c" '.held - $c.held | .[]' <<<"$new")
+  case $a in hold) movedlocked movedhold hold "$new" "$@" ;; adopt | start | filing) x=$(jq -r --argjson c "$c" '.held - $c.held | .[]' <<<"$new")
     [ -z "$x" ] || movedlocked movedhold hold "$new" $x ;; release) x=$(jq -r '.held as $h | $ARGS.positional[] | select(tonumber | IN($h[]))' --args "$@" <<<"$c")
     [ -z "$x" ] || movedlocked movedhold release "$new" $x ;; esac
   # A hold, a release and the filing hooks' own actions (adopt, start: foreman/foreman.sh filing and filed) wake the
@@ -1497,8 +1518,9 @@ movedhold() { # <hold|release> <the control record as it now stands> <issue>...
 # yes) or startSeen already has it (held once, or released), which it then joins. So an issue opened while the
 # setting is Held is held from its first sight, even when the setting is Queue again by then; one released, before
 # its first sight or after, is never held again; and one opened before the switch keeps its place. Whatever the
-# setting, an open issue opened by someone outside the project (its authorAssociation known and not INSIDE, a follow-up
-# too) joins held and startSeen the same way, until the owner releases it. pick and snapshot call it with the open issues they read.
+# setting, an open issue opened while the filing hooks' mark is set (filing, `control filing`), a follow-up too, and
+# one opened by someone outside the project (its authorAssociation known and not INSIDE, a follow-up
+# too) join held and startSeen the same way, until the owner releases it. pick and snapshot call it with the open issues they read.
 adopt() { # <open issues json>
   local c new
   c=$(ctl) && new=$(adopted "$c" "$1") && [ -n "$new" ] || return 1
@@ -1514,6 +1536,7 @@ adopted() { # <control record> <open issues json>
     || { ok=false; echo "conveyor: the landed issues cannot be read from the card records; forced and order keep every issue they list until they can" >&2; }
   jq -c --argjson c "$1" --arg fu "$FOLLOWUP" --argjson ok "$ok" --slurpfile landed <(printf '%s' "$l") "$INSIDE"'[.[] | select((.number | IN($c.startSeen[]) | not)
       and (((.labels // [] | any(.name == $fu) | not) and (.number as $i | $c.startHeld | any($i > .from and (.to == null or $i <= .to))))
+        or ($c.filing != null and .number > $c.filing)
         or (.authorAssociation | type == "string") and (inside | not))) | .number] as $n
     | map(.number) as $open
     | if $n == [] then $c else $c | .held = (.held + $n | unique) | .startSeen = (.startSeen + $n | unique) end

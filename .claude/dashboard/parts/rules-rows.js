@@ -372,9 +372,9 @@
     el.append(row('account', 'Account', 'cards started after a change', accountCtl('Account', 'account', c.account, "the build machine's own login")));
     el.append(row('review-account', 'Review account', 'Used only by Claude reviewers.', accountCtl('Review account', 'review-account', c.reviewAccount, 'the Account')));
 
-    // New issues start in: Queue (the default) or Held. A follow-up is always queued.
+    // New issues start in: Queue or Held. A follow-up is queued, unless the filing mark holds it (lib/control.sh adopted()).
     const start = c.start === 'held' ? 'held' : 'queue';
-    el.append(row('start', 'New issues start in', 'Follow-ups always enter the queue.',
+    el.append(row('start', 'New issues start in', 'Follow-ups enter the queue. A follow-up filed while a Foreman command files issues is held.',
       seg('New issues start in', choice('Queue', 'start-queue', 'New issues start in the Queue', start === 'queue', () => { if (start !== 'queue') send('start', ['queue'], null, ['start', ['held']]); }),
       choice('Held', 'start-held', 'New issues start in Held', start === 'held', () => { if (start !== 'held') send('start', ['held'], null, ['start', ['queue']]); }))));
   }

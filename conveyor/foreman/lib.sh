@@ -132,9 +132,31 @@ ends() {
     ins=$(F=$(cat "$f") awk '!d && $0 == ENVIRON["F"] { d = 1; next } 1' "$SF/in" 2>/dev/null) && printf '%s' "${ins:+$ins$'\n'}" > "$SF/in" && rm -f "$f"
   done
 }
+# mark <repo> <main>: before a command that may file an issue runs, marks the record (control filing on), so its loop
+# holds every issue opened from now on from its first sight, a follow-up too (adopted(), lib/control.sh), which it
+# otherwise passes over: else it could pick a follow-up the command filed before filed holds it. The record is listed
+# in $SF/marked, where unmark finds it. Prints why when it is not marked. An engine before the mark (the record's pin)
+# refuses it as a usage error (2): its loop reads no mark and passes over a follow-up, so that is not marked either.
+mark() {
+  local c
+  c=$(ask "$1" "$2" control filing on 2>&1) || { [ $? = 2 ] && [[ $c == *'usage: conveyor.sh control'* ]] && c="its engine has no control filing; update the engine it runs"; printf '%s\n' "${c##*$'\n'}"; return 1; }
+  grep -qxF -- "$1" "$SF/marked" 2>/dev/null || printf '%s\n' "$1" >> "$SF/marked"
+}
+# unmark: under the shared lock, once no filing is in flight (queue_again, foreman.sh), takes each listed mark off
+# (control filing off, which holds what was opened since it was set, a follow-up too). A record in $SF/held is passed
+# over: its Queue (control start queue filed) takes the mark off too. Prints each record whose mark stays, still listed.
+unmark() {
+  local repo main c left=()
+  while read -r repo; do
+    [ -n "$repo" ] && ! grep -qxF -- "$repo" "$SF/held" 2>/dev/null || continue
+    main=$(awk -F'\t' -v r="$repo" '$1 == r { print $2; exit }' <<<"$(records 2>/dev/null)")
+    [ -n "$main" ] && { c=$(ask "$repo" "$main" control filing off 2>&1) || { [ $? = 2 ] && [[ $c == *'usage: conveyor.sh control'* ]]; }; } || left+=("$repo")
+  done < <(cat "$SF/marked" 2>/dev/null)
+  if [ ${#left[@]} = 0 ]; then rm -f "$SF/marked"; else printf '%s\n' "${left[@]}" > "$SF/marked"; printf '%s\n' "${left[@]}"; fi
+}
 # kept_file: this filing's list of the records that started new issues held before it began (the owner's Held): the
 # UTC time it began on its first line, a record a line after. No filing ends that Held, so no Queue of filed's holds
-# what the command files there, and the loop's own hold passes over a follow-up (adopted(), lib/control.sh).
+# what the command files there, and once its mark is off (unmark) the loop's own hold passes over a follow-up (adopted(), lib/control.sh).
 kept_file() { printf '%s/kept-%s' "$SF" "${TID//[^A-Za-z0-9_-]/_}"; }
 # kept_put <record>...: writes the list, timed now, before the command runs: what it files is created on or after it.
 kept_put() { { jq -rn '(($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate' && printf '%s\n' "$@"; } > "$(kept_file)"; }

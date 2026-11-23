@@ -177,7 +177,8 @@ the card it waits on, the main-red record and the test log. Then it fixes the ca
 rules allow it, it makes a fix by hand. If not, it files an issue.
 
 An issue that the Foreman files is held until you say yes. While the Foreman files it, every record of the host file
-starts new issues held. After it files the issue, the Foreman holds it in the record for its GitHub repository. That
+starts new issues held, follow-ups too. If the engine of one record cannot hold a follow-up that way, the filing
+command does not run, even when it files in another project, and the Foreman is told to update that engine. After it files the issue, the Foreman holds it in the record for its GitHub repository. That
 is the record whose main checkout on this machine has a remote (`origin`, or the pack's `remote`) for that
 repository, so the record's name can be different, as when setup named it for its folder. This is also true when the
 Foreman runs in a worktree of that main checkout. The owner and the name of the repository must both agree. A main

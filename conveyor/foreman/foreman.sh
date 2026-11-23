@@ -62,14 +62,14 @@
 #   command holding `issue create` or `issue new`: gh's, or the engine's gh-write) starts held, so nothing it files is
 #   built before the owner's yes; the Foreman releases it (conveyor.sh control release) once the owner says yes. A fix
 #   issue (a `## What happens now` section or a `bug` label) with no `## Cause` section is refused first (no_cause).
-#   filing, before the command runs, sets every record whose new issues start in the queue to start them held
+#   filing, before the command runs, marks every record (conveyor.sh control filing on: its loop holds a follow-up too) and sets each whose new issues start in the queue to start them held
 #   (another project's too, as the command may file there) (conveyor.sh control start held), so an issue is held from its first sight, however long the command runs on;
 #   when a record cannot be set, or the command is to run in the background, the command is refused. filed holds every
 #   issue the command's output links (github.com/<owner>/<name>/issues/<n>) in the record whose main checkout's GitHub
 #   repository is <owner>/<name> (read on the host file's ssh host for a main not on this machine), else the record named <name> whose main's repository cannot be read, letter case aside (lib.sh record_of; filing needs no lookup,
 #   as it sets every record), unless it was released or held already (conveyor.sh control adopt; control hold in a record whose engine has no adopt), so a
 #   release given before filed runs stays, and tells the Foreman only those it holds; then it sets back to
-#   the queue each record a filing set to held, once no other filing, of any Foreman, is in flight (SF, below), which
+#   the queue each record a filing set to held, and takes each mark off (lib.sh unmark), once no other filing, of any Foreman, is in flight (SF, below), which
 #   holds every open issue opened while it was held, a follow-up too (conveyor.sh control start queue filed), so an
 #   issue the output does not link (`gh issue create ... | grep -oE '[0-9]+$'`) is held too, and one released already
 #   stays released. An output that links fewer issues than the command has `issue create` calls is told to the Foreman,
@@ -635,7 +635,7 @@ no_cause() {
 # finds a record held by another's still in flight has set nothing, and only the last filing to end starts them in the
 # queue again (queue_again). When the shared lock is not had, the command is refused.
 filing() {
-  local in recs repo main c bad=() kept=() sl
+  local in recs repo main c s bad=() kept=() sl
   in=$IN
   if foreman "$SID" && no_cause "$in"; then deny "$NO_CAUSE"; return 0; fi
   files "$in" || return 0
@@ -650,12 +650,15 @@ filing() {
   recs=$(records 2>&1) || { bad+=("every record (${recs##*$'\n'})"); recs=''; }
   while IFS=$'\t' read -r repo main; do
     [ -n "$repo" ] || continue
-    grep -qxF "$repo" "$SF/held" && continue
     c=$(ask "$repo" "$main" control 2>&1 | tail -n 1)
-    # Held already (the owner's Held): filed holds what the command files there (lib.sh kept_file).
-    [ "$(jq -r '.start // empty' <<<"$c" 2>/dev/null)" != held ] || { kept+=("$repo"); continue; }
-    if [ "$(jq -r '.start // empty' <<<"$c" 2>/dev/null)" = queue ] && c=$(ask "$repo" "$main" control start held 2>&1); then
-      printf '%s\n' "$repo" >> "$SF/held"
+    s=$(jq -r '.start // empty' <<<"$c" 2>/dev/null)
+    # Marked first, held or not, listed in $SF/held or not (one a failed Queue left listed may be unmarked by hand since):
+    # the loop's own hold passes over a follow-up while the record is not (lib.sh mark).
+    { [ "$s" = held ] || [ "$s" = queue ]; } && c=$(mark "$repo" "$main") || { bad+=("$repo (${c##*$'\n'})"); continue; }
+    # Listed (held by a filing): queue_again sets it back. Else held already (the owner's Held): filed holds what the command files there (lib.sh kept_file).
+    if grep -qxF -- "$repo" "$SF/held"; then [ "$s" = held ] && continue; elif [ "$s" = held ]; then kept+=("$repo"); continue; fi
+    if c=$(ask "$repo" "$main" control start held 2>&1); then
+      grep -qxF -- "$repo" "$SF/held" || printf '%s\n' "$repo" >> "$SF/held"
     else bad+=("$repo (${c##*$'\n'})"); fi
   done <<<"$recs"
   exec {sl}>&-
@@ -666,7 +669,7 @@ filing() {
 }
 deny() { jq -cn --arg r "$1" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'; }
 # queue_again: this filing's line is taken from $SF/in; when no other filing is in flight, every record a filing set to start
-# new issues held starts them in the queue again; those that cannot stay listed in $SF/held, and are printed. The
+# new issues held starts them in the queue again, and each mark is taken off (lib.sh unmark); those that cannot stay listed, and are printed. The
 # research lane's filer (lanes/research-file) files holding filing.lock in its folder (lanes/research-filer in the state folder, beside the lane's own and the Foreman's
 # lanes/), and relies on new issues starting held until its issue is held, whoever set them held: the Foreman's and the
 # lane's hooks start them in the queue again only once it is not filing (the filer, whose folder that is, holds the
@@ -680,7 +683,7 @@ queue_again() {
     ends
     exec {sl}>&-
   fi
-  [ -s "$SF/held" ] || return 0
+  [ -s "$SF/held" ] || [ -s "$SF/marked" ] || return 0
   fl=$(cd "$FD/.." && pwd -P)
   if [ "${CONVEYOR_LANE:-}" = research ]; then fl+=/research-filer; else fl+=/lanes/research-filer; fi
   # The filer's lock before the shared one, as the filer takes them, so neither waits on the other.
@@ -689,6 +692,7 @@ queue_again() {
   ends
   # Another filing in flight may have found them held and set nothing: it starts them in the queue again at its end.
   [ ! -s "$SF/in" ] || return 0
+  unmark
   while read -r repo; do
     main=$(awk -F'\t' -v r="$repo" '$1 == r { print $2; exit }' <<<"$(records 2>/dev/null)")
     # An engine before `control start queue filed` refuses it as a usage error (2): set Queue as it can.
@@ -743,7 +747,7 @@ filed() {
   # A record held before the filing began (lib.sh kept_file): with an output that does not link each issue, what it filed there is held.
   if [ -n "$unlinked" ]; then mapfile -t -O "${#bad[@]}" bad < <(kept_hold "$recs"); else rm -f "$(kept_file)"; fi
   if [ ${#bad[@]} != 0 ] || [ -n "$left" ]; then
-    jq -cn --arg r "${unlinked}${bad[*]:+Not held in Conveyor: ${bad[*]}. Hold each issue you filed (conveyor.sh control hold <issue>, in its record) unless the owner has said yes to it. }${left:+New issues of $left still start held: set them back (conveyor.sh control start queue, in each) unless the owner set them held.}" '{decision: "block", reason: $r}'
+    jq -cn --arg r "${unlinked}${bad[*]:+Not held in Conveyor: ${bad[*]}. Hold each issue you filed (conveyor.sh control hold <issue>, in its record) unless the owner has said yes to it. }${left:+The filing left $left as it set them: in each, take its mark off (conveyor.sh control filing off), and set new issues back to the queue (conveyor.sh control start queue) unless the owner set them held.}" '{decision: "block", reason: $r}'
   elif [ -n "$unlinked" ] || [ ${#said[@]} != 0 ] || [ ${#freed[@]} != 0 ]; then
     jq -cn --arg e "$ev" --arg c "${unlinked}${said[*]:+Held in Conveyor (${said[*]}): not built until you release it (conveyor.sh control release <issue>, in its record), which you do only once the owner has said yes to it. }${freed[*]:+Not held, as released already (${freed[*]}).}" \
       '{hookSpecificOutput: {hookEventName: $e, additionalContext: $c}}'
