@@ -89,11 +89,12 @@ has docs/releases/1.8.0.md "a file that its suite commands name, the whole suite
 # no trigger (v1.9.0:conveyor/lib/lint.sh:501). The rule for a card that changes a trigger came after 1.11.0, so only
 # the guide gives it (lintgate's t_lintgatetriggerfile). Both versions keep the pass only for the same card change
 # (the cardpatch check at the top of lintstands, v1.9.0's too): a test fix that changes the card runs lint again.
-has docs/releases/1.9.0.md "skips lint when its change is the same change that passed lint, and main changed none of its files," 'the 1.9.0 notes leave out that the pass stands only for the same change'
-has docs/cards.md "if the card's change is the same change that passed, and main changed none of the card's files," 'the guide leaves out that the pass stands only for the same change'
-has docs/releases/1.9.0.md "none of a lint command's triggers, none of the files a lint command reads for all changes, and did not change the pack's \`lint\` field." 'the 1.9.0 notes leave out the trigger reuse condition'
-has docs/cards.md "no trigger of a lint command, no file that a lint command reads for all changes" 'the guide leaves out the trigger reuse condition'
-has docs/cards.md "When the card changes a command's triggers or the pack's \`lint\` field, main must also have changed none of the files that the command reads." 'the guide leaves out the files a command reads when the card changes its triggers'
+has docs/releases/1.9.0.md "At the landing gate, a card skips lint when all of these are true:" 'the 1.9.0 notes leave out that lint is skipped only at the landing gate'
+has docs/releases/1.9.0.md "- Its change is the same change that passed lint. - Main changed none of its files." 'the 1.9.0 notes leave out that the pass stands only for the same change'
+has docs/cards.md "- The card's change is the same change that passed. - Main changed none of the card's files." 'the guide leaves out that the pass stands only for the same change'
+has docs/releases/1.9.0.md "- Main changed none of a lint command's triggers. - Main changed none of the files a lint command reads for all changes. - Main did not change the pack's \`lint\` field." 'the 1.9.0 notes leave out the trigger reuse condition'
+has docs/cards.md "- Main changed no trigger of a lint command. - Main changed no file that a lint command reads for all changes." 'the guide leaves out the trigger reuse condition'
+has docs/cards.md "- When the card changes a command's triggers or the pack's \`lint\` field, main changed none of the files that the command reads." 'the guide leaves out the files a command reads when the card changes its triggers'
 # R426 (commands/release-prep.sh relnotes): the first release's draft has no source check.
 has docs/releases/1.9.0.md 'For releases after the first, release notes check each line' 'the 1.9.0 notes promise the source check for the first release'
 [ "$fails" = 0 ] || exit 1

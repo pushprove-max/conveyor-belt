@@ -179,11 +179,17 @@ The gate runs the pack's lint commands on the staged change. The brief of the bu
 The landing gate runs the same commands each time the card is about to land: after the check that the files of a
 merge onto main still parse, and before the product checks and tests. A merge onto main can bring a finding that the
 gate before the review did not see. A pass, a missing tool and an execution error act as above.
-When the gate passed and the card is then fitted onto a newer main, the gate does not run the commands again if the
-card's change is the same change that passed, and main changed none of the card's files, no trigger of a lint
-command, no file that a lint command reads for all changes, and not the pack's `lint` field.
-When the card changes a command's triggers or the pack's `lint` field, main must also have changed none of the files
-that the command reads.
+When the gate passed and the card is then fitted onto a newer main, the gate does not run the commands again if all
+of these are true:
+
+- The card's change is the same change that passed.
+- Main changed none of the card's files.
+- Main changed no trigger of a lint command.
+- Main changed no file that a lint command reads for all changes.
+- Main did not change the pack's `lint` field.
+- When the card changes a command's triggers or the pack's `lint` field, main changed none of the files that the
+  command reads.
+
 The pass stays the card's lint result, and the card gets no new `lint` line.
 
 - A finding goes to one fix session before any test runs. Its step is `Fix <n>: lint findings`. Then the card goes to
