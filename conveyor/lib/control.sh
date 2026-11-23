@@ -419,7 +419,8 @@ progs() {
 # models`, its model catalog. OpenCode: `opencode models`, one <provider>/<model> a line. Claude Code has no command
 # that lists its models (its --model takes an alias or a full name): none. For Codex, the models its proxy route
 # offers (codexpxmodels()) are added after its own, each once, so a model the proxy serves is listed before Codex
-# reports it.
+# reports it; a second line, px, then says the list has the proxy's models (hostclis() reads it again when the route
+# is off by then).
 climodels() { # <cli>
   local list='[.models[]? | select((.visibility // "list") == "list") | .slug | strings] | select(length > 0)' own px
   case $1 in
@@ -427,7 +428,8 @@ climodels() { # <cli>
       || timeout 20 codex debug models < /dev/null 2>/dev/null | jq -ce "$list" 2>/dev/null) || own=''
       px=$(codexpxmodels) || px=''
       [ -n "$own$px" ] || return 1
-      jq -cn --argjson a "${own:-[]}" --argjson b "${px:-[]}" 'reduce ($a + $b)[] as $m ([]; if index([$m]) then . else . + [$m] end)' ;;
+      jq -cn --argjson a "${own:-[]}" --argjson b "${px:-[]}" 'reduce ($a + $b)[] as $m ([]; if index([$m]) then . else . + [$m] end)' || return 1
+      [ -z "$px" ] || echo px ;;
     opencode) timeout 20 opencode models < /dev/null 2>/dev/null | jq -Rsce '[splits("\n") | select(test("^[^/[:space:]]+/[^[:space:]]+$"))] | select(length > 0)' 2>/dev/null ;;
     *) return 1 ;;
   esac
@@ -478,13 +480,16 @@ pxon() {
 # text and those CLIs (HOST_K), so a step that asks again before it is due starts no program for it, nor does a
 # subshell or card started after.
 # CLIS's px is true when its Codex list was read while the proxy route was on (pxon()) as the read started or ended,
-# whether or not the proxy listed any model (codexpxmodels()); a CLIS with no px (one written before px was) and a
-# Codex list is taken as px true: once a role's Codex sessions no longer take the proxy, Codex is read again at the next
-# read, due or not, so a model only the proxy serves is not kept for a role on the subscription until CLI_TTL.
+# whether or not the proxy listed any model (codexpxmodels()), or when the proxy's models are in it. Codex is read
+# after every other CLI, and read again while the route is off as its read ends, when its read was not all with the
+# route off, so a role now on the subscription is never printed a model only the proxy serves. A CLIS with no px (one
+# written before px was) and a Codex list is taken as px true: once a role's Codex sessions no longer take the proxy,
+# Codex is read again at the next read, due or not, so a model only the proxy serves is not kept for a role on the
+# subscription until CLI_TTL.
 # What it printed is in HOST_R too ("" when it failed), for a caller that keeps it in its own shell (seatready).
 HOST_K=() # the key, then CLIS read as an object, when it was read (.at, whole seconds), the report and its px
 hostclis() { # [fresh | due | <cli>]
-  local c old r found=() one=${1:-} t='' a=1 k='' x px=''
+  local c old r found=() one=${1:-} t='' a=1 k='' x px='' l ci=''
   HOST_R=''
   for c in $CLINAMES; do command -v "$c" >/dev/null && k+=" $c"; done
   [ ! -e "$CLIS" ] || { a=''; { IFS= read -r -d '' t; a=$?; } 2>/dev/null <"$CLIS"; }
@@ -504,11 +509,15 @@ hostclis() { # [fresh | due | <cli>]
   # Each installed CLI and its models: read now, or "*" for those CLIS has (null when it has none).
   for c in $CLINAMES; do
     command -v "$c" >/dev/null || continue
-    if [ "$one" = fresh ] || [ "$one" = "$c" ]; then
-      # The host file can change while climodels asks the proxy: px is true when the route was on before or after.
-      [ "$c" != codex ] || ! pxon || px=true; found+=("$c" "$(climodels "$c" || echo null)"); [ "$c" != codex ] || ! pxon || px=true
+    if [ "$c" = codex ] && { [ "$one" = fresh ] || [ "$one" = codex ]; }; then ci=${#found[@]}; found+=("$c" null)
+    elif [ "$one" = fresh ] || [ "$one" = "$c" ]; then found+=("$c" "$(climodels "$c" || echo null)")
     else found+=("$c" '"*"'); fi
   done
+  # Codex last, as the host file can change while a CLI is read: px is true when the route was on as the read started
+  # or ended, or the proxy's models are in the list; such a list is read again while the route is off as it ends, so
+  # no model only the proxy serves is printed (or saved) for a role now on the subscription.
+  [ -z "$ci" ] || until px=false; ! pxon || px=true; l=$(climodels codex) || l=null
+    [[ $l != *$'\n'px ]] || { px=true; l=${l%$'\n'px}; }; found[ci + 1]=$l; pxon && px=true || [ "$px" = false ]; do :; done
   r=$(jq -cn --argjson o "$old" '$ARGS.positional as $p | [range(0; $p | length; 2) | {key: $p[.], value: ($p[. + 1] | fromjson)}
       | if .value == "*" then .value = ($o.clis[.key] // null) else . end] | from_entries' --args "${found[@]}") || return 1
   # seen: every CLI a report of this host has listed, kept when one goes (seatwait()), with the CLIs the old report's

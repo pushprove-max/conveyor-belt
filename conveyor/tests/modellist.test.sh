@@ -160,10 +160,11 @@ t_pxmodelsnopx() {
   [[ $out == 'gpt-d is not one of the models'*$'\n--- px false' ]] \
     || fail "with a saved report with no px and the reviewer on the subscription, cardok reviewer gpt-d was not refused, or Codex was not read again: $out"
 }
-# Bug (#1517): the host file could move the reviewer to the subscription while Codex's list was read through the proxy;
-# px was then saved false beside the proxy's models, so gpt-d stayed offered until CLI_TTL. Here the host file changes
-# as the proxy's list comes back (codexpxmodels() wrapped), and the saved report has px true, so the next read reads
-# Codex again and cardok refuses gpt-d.
+# Bug (#1517, and its follow-up): the host file could move the reviewer to the subscription while Codex's list was read
+# through the proxy; px was then saved false beside the proxy's models, so gpt-d stayed offered until CLI_TTL, and the
+# read that overlapped the switch still printed gpt-d to its caller, so a cardok in that shell could take it. Here the
+# host file changes as the proxy's list comes back (codexpxmodels() wrapped): the read prints, and saves, Codex's list
+# read again with the route off (no gpt-d, px false), and the same shell's cardok refuses gpt-d.
 t_pxmodelsrace() {
   local d=$T/$CASE/px out; mkdir -p "$d"
   pxstub
@@ -171,10 +172,41 @@ t_pxmodelsrace() {
   # shellcheck disable=SC2016 # expanded in the engine shell (looks)
   looks 'eval "pxasked_$(declare -f codexpxmodels)"
     codexpxmodels() { local r=0; pxasked_codexpxmodels || r=$?; jq ".codexProxy.roles.reviewer = \"subscription\"" "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/host.new" && mv "$T/$CASE/host.new" "$XDG_CONFIG_HOME/conveyor/host.json"; return "$r"; }
-    hostclis fresh >/dev/null && echo "--- px $(jq -c "[.px, .clis.codex]" "$CLIS")" && cardok reviewer gpt-d medium'
+    echo "--- printed $(hostclis fresh | jq -c .codex)" && echo "--- px $(jq -c "[.px, .clis.codex]" "$CLIS")" && cardok reviewer gpt-d medium'
   out=$(cat "$T/$CASE/out")
-  [[ $out == $'--- px [true,["gpt-b","gpt-d","gpt-a"]]\ngpt-d is not one of the models'* ]] \
-    || fail "with the reviewer moved to the subscription while the proxy's list was read, px was not saved true or cardok reviewer gpt-d was not refused: $out"
+  [[ $out == $'--- printed ["gpt-b"]\n--- px [false,["gpt-b"]]\ngpt-d is not one of the models'* ]] \
+    || fail "with the reviewer moved to the subscription while the proxy's list was read, the read printed or saved the proxy-only gpt-d, or cardok reviewer gpt-d was not refused: $out"
+}
+# Bug (follow-up of #1517): Codex was read before OpenCode, and its list printed with no route check after it, so a
+# switch of the reviewer to the subscription while `opencode models` ran (climodels opencode wrapped) printed, and
+# saved, the proxy-only gpt-d with px true. Codex is now read last: the read prints its list with the route off.
+t_pxmodelsoc() {
+  local d=$T/$CASE/px out; mkdir -p "$d"
+  pxstub
+  pxmodels "http://127.0.0.1:$(cat "$d/port")"
+  # shellcheck disable=SC2016 # expanded in the engine shell (looks)
+  looks 'eval "ocread_$(declare -f climodels)"
+    climodels() { [ "$1" != opencode ] || { jq ".codexProxy.roles.reviewer = \"subscription\"" "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/host.new" && mv "$T/$CASE/host.new" "$XDG_CONFIG_HOME/conveyor/host.json"; }; ocread_climodels "$@"; }
+    echo "--- printed $(hostclis fresh | jq -c .codex)" && echo "--- px $(jq -c "[.px, .clis.codex]" "$CLIS")"'
+  out=$(cat "$T/$CASE/out")
+  [ "$out" = $'--- printed ["gpt-b"]\n--- px [false,["gpt-b"]]' ] \
+    || fail "with the reviewer moved to the subscription while OpenCode's list was read, hostclis fresh printed or saved the proxy-only gpt-d: $out"
+}
+# Bug (follow-up of #1517): with the route off as Codex's read started, on as the proxy was asked and off again as its
+# list came back (codexpxmodels() wrapped, once), the read kept the proxy's gpt-d with px false: it was printed, and
+# later reads kept it too. A list that has the proxy's models is read again while the route is off.
+t_pxmodelsflip() {
+  local d=$T/$CASE/px out; mkdir -p "$d"
+  pxstub
+  pxmodels "http://127.0.0.1:$(cat "$d/port")" subscription
+  # shellcheck disable=SC2016 # expanded in the engine shell (looks)
+  looks 'pxrole() { jq ".codexProxy.roles.reviewer = \"$1\"" "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/host.new" && mv "$T/$CASE/host.new" "$XDG_CONFIG_HOME/conveyor/host.json"; }
+    eval "pxasked_$(declare -f codexpxmodels)"
+    codexpxmodels() { local r=0; [ ! -e "$T/$CASE/flipped" ] || { pxasked_codexpxmodels; return; }; : > "$T/$CASE/flipped"; pxrole proxy; pxasked_codexpxmodels || r=$?; pxrole subscription; return "$r"; }
+    echo "--- printed $(hostclis fresh | jq -c .codex)" && echo "--- px $(jq -c "[.px, .clis.codex]" "$CLIS")"'
+  out=$(cat "$T/$CASE/out")
+  [ "$out" = $'--- printed ["gpt-b"]\n--- px [false,["gpt-b"]]' ] && grep -q '^/v1/models ' "$d/asked" \
+    || fail "with the proxy route on only while the proxy was asked, hostclis fresh printed or saved the proxy-only gpt-d, or the proxy was not asked: $out $(cat "$d/asked" 2>&1)"
 }
 # Bug it catches: a model only the proxy serves was offered to, and taken for, a reviewer whose Codex sessions stay on
 # the subscription (the host's report has one Codex list for every role). With the reviewer on subscription, the
