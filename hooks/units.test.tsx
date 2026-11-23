@@ -37,13 +37,13 @@ const KNOWS_STAMP = 'if [ "$mode" = stamp ]; then'
 const NO_STAMP = '#!/usr/bin/env bash'
 
 // writes: the key of each of the mod's atoms written, in order.
-type World = { files: Map<string, { text: string; at: number }>; reads: string[]; writes: string[]; fetch: string; fetchRc: number; script: string; fetchCut?: boolean; boardDir: string | null; runs: { argv: string[]; cwd?: string }[]; status: (string | undefined)[]; toasts: string[]; registered: string[]; opened: string[]; clock: ReturnType<typeof mock.clock>; placed?: boolean; hold?: Promise<void>; run: (argv: readonly string[], cwd?: string) => any }
+type World = { files: Map<string, { text: string; at: number }>; reads: string[]; writes: string[]; fetch: string; fetchRc: number; fetchCut?: boolean; boardDir: string | null; runs: { argv: string[]; cwd?: string }[]; status: (string | undefined)[]; toasts: string[]; registered: string[]; opened: string[]; clock: ReturnType<typeof mock.clock>; placed?: boolean; hold?: Promise<void>; run: (argv: readonly string[], cwd?: string) => any }
 
 // env: the session's environment variables the mod reads (none set unless given).
 const world = (on: On, seat: keyof typeof SEATS, fetch: string, files: Record<string, string> = {}, installed = true, env: Record<string, string> = {}): World => {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, env)
-  const w: World = { files: new Map(), reads: [], writes: [], fetch, fetchRc: 0, script: KNOWS_STAMP, boardDir: BOARD, runs: [], status: [], toasts: [], registered: [], opened: [], clock, run: () => undefined }
+  const w: World = { files: new Map(), reads: [], writes: [], fetch, fetchRc: 0, boardDir: BOARD, runs: [], status: [], toasts: [], registered: [], opened: [], clock, run: () => undefined }
   for (const [p, text] of Object.entries(files)) w.files.set(p, { text, at: NOW - 1000 })
   if (installed) w.files.set(`${MAIN}/.conveyor/project.json`, { text: '', at: 0 })
   const [gitDir, top] = SEATS[seat]
@@ -71,8 +71,8 @@ const world = (on: On, seat: keyof typeof SEATS, fetch: string, files: Record<st
   })
   on('fs.read', (_, e) => {
     w.reads.push(e.path)
-    // The plugin's own fetch script, unless the test wrote one: w.script, its text.
-    const f = w.files.get(e.path) ?? (e.path.endsWith('/hooks/units-fetch.sh') ? { text: w.script, at: 0 } : undefined)
+    // The plugin's own fetch script, unless the test wrote one: a script that knows `stamp`.
+    const f = w.files.get(e.path) ?? (e.path.endsWith('/hooks/units-fetch.sh') ? { text: KNOWS_STAMP, at: 0 } : undefined)
     if (!f) throw new Error(`ENOENT ${e.path}`)
     return { value: f.text }
   })
@@ -393,14 +393,16 @@ test('a fetch that prints no stamps (an older install) is checked once, then onl
 // Bug it catches: with no feed, the opening fetch took the checksums (`stamp`) beside it from any fetch script; one
 // older than the check (an engine pinned before it) runs the whole snapshot for `stamp`, so two built every record's
 // snapshot at once. Its script has no `stamp`: the fetch runs alone, held here (a slow host), and no check ever runs.
-test('with no feed, a fetch script with no stamp mode (an older install) is never asked for stamps', async ($, on) => {
-  const w = world(on, 'main', answer(FULL))
-  w.script = NO_STAMP
+// The old script is the pinned install's and the plugin copy knows `stamp`: it also catches the script read from the
+// plugin copy while the fetch runs from the install.
+test('with no feed, a fetch script with no stamp mode (an older pinned install) is never asked for stamps', async ($, on) => {
+  const w = world(on, 'main', answer(FULL), { [INSTALL]: NO_STAMP }, true, { HOME })
+  w.files.set(`${MAIN}/.conveyor/project.json`, { text: JSON.stringify({ plugin: { commit: COMMIT_A } }), at: 0 })
   let release = () => {}
   w.hold = new Promise<void>(r => { release = r })
   await start($, 'main')
   await w.clock.advance(1000)
-  expect(fetches(w).length).toBe(1)
+  expect(fetches(w).map(r => r.argv[1])).toEqual([INSTALL])
   expect(checks(w).length).toBe(0)
   w.hold = undefined
   release()
