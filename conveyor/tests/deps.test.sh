@@ -217,10 +217,10 @@ t_depguard() {
 }
 # Bug (#1359): a pinned issue (control order) stayed in the record's order for ever after its issue closed or its card
 # landed, so the Rules tab listed a finished issue as pinned. adopt() takes it out, as it does a forced one, and changes
-# nothing when the open issues could not be listed (no text at all is what a failed gh read gives; a listed [] means
-# every issue closed, and clears the pins).
+# nothing when the open issues could not be listed (no text at all is what a failed gh read gives). A closed issue
+# newer than every open one is the exception: see t_adoptpinnew.
 t_adoptorder() {
-  setup "$(jq -cs . <(issue 1 2026-01-01 P1) <(issue 2 2026-01-02 P1))"
+  setup "$(jq -cs . <(issue 1 2026-01-01 P1) <(issue 2 2026-01-02 P1) <(issue 3 2026-01-03 P1))"
   C=$ST/control.json; ctl() { loop control "$@" 2>&1; }
   ctl order 1 2 >/dev/null
   fx_in 'locked adopt ""'; [ "$RC" != 0 ] && [ "$(jq -c .order "$C")" = '[1,2]' ] || fail "with no list of open issues, the pins changed: $(cat "$C")"
@@ -228,6 +228,19 @@ t_adoptorder() {
   readopen; [ "$(jq -c .order "$C")" = '[1]' ] || fail "the pin of a closed issue is still in order: $(cat "$C")"
   landed 1 >> "$ST/cards.jsonl"
   readopen; [ "$(jq -c .order "$C")" = '[]' ] || fail "the pin of an issue whose card landed is still in order: $(cat "$C")"
+}
+# Bug (#1558): the pin of an issue filed after the open list was read (#9, above every number in it) was dropped at the
+# next adopt as if it were closed, so the issue waited behind the rest. It stays, also when the list is empty (the
+# first issue filed in an empty queue); a pin inside the list's range that is not open (#2) still goes.
+t_adoptpinnew() {
+  setup "$(jq -cs . <(issue 1 2026-01-01 P1) <(issue 4 2026-01-04 P1))"
+  C=$ST/control.json; ctl() { loop control "$@" 2>&1; }
+  ctl order 2 9 >/dev/null
+  readopen; [ "$(jq -c .order "$C")" = '[9]' ] || fail "order 2 9 with #1 and #4 open: the pin of the closed #2 stayed or that of the newer #9 went: $(cat "$C")"
+  fx_in 'locked adopt "[]"'
+  [ "$RC" = 0 ] && [ "$(jq -c .order "$C")" = '[9]' ] || fail "an empty list of open issues dropped the pin of #9, filed after it was read (exit $RC): $(cat "$C")"
+  landed 9 >> "$ST/cards.jsonl"
+  readopen; [ "$(jq -c .order "$C")" = '[]' ] || fail "the pin of #9, whose card landed, is still in order: $(cat "$C")"
 }
 # Bugs: an issue that depends on #50 is picked while a follow-up filed from #50, or one filed from that
 # follow-up, is open (held here: one kept off the belt is still waited for), or not picked once each is closed (a

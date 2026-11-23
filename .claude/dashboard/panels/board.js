@@ -223,7 +223,8 @@
     else say(`Other holds also keep ${t} held: ${chipsOf(item).join(', ')}.`);
   }
   // The issue goes before `before` in the queue: the order sent is the queue up to it, and every issue the record
-  // already put first, so nothing that was ordered loses its place.
+  // already put first, so nothing that was ordered loses its place. A pin above every open issue (filed after the
+  // snapshot's list was read, so not in the queue yet) stays at the front: the engine keeps it too.
   function place(item, before) {
     const q = lanes().queue || [];
     const rest = q.filter((x) => x.issue !== item.issue);
@@ -234,7 +235,9 @@
     const last = Math.max(at, ...rest.map((x, i) => (pinned.includes(x.issue) ? i : -1)));
     // Undo puts the order back as the record had it.
     const was = pinned.map(String);
-    return send('order', rest.slice(0, last + 1).map((x) => String(x.issue)), null, null, (r) => send('order', was, null, r));
+    const listed = S.d.open && Array.isArray(S.d.open.issues) ? S.d.open.issues.map((x) => x && x.issue) : null;
+    const fresh = !listed ? [] : pinned.filter((n) => n > Math.max(0, ...listed) && !q.some((x) => x.issue === n)).map(String);
+    return send('order', fresh.concat(rest.slice(0, last + 1).map((x) => String(x.issue))), null, null, (r) => send('order', was, null, r));
   }
   function shift(item, by) {
     const q = lanes().queue || [], i = q.findIndex((x) => x.issue === item.issue), to = i + by;

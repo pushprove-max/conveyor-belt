@@ -254,6 +254,19 @@ test('the Board: a card dragged between Held and Queue, or onto a queued card, s
   assert.deepEqual([inCol(w, 'held'), inCol(w, 'queue')], [[76, 23], [20, 21, 22]], 'the snapshot replaces what the host answered');
 });
 
+// Bug (#1558): a pin of an issue filed after the open list was read (#90, above every listed number) is kept by the
+// engine, but a move in the queue sent the order without it, and the host replaced the saved order, so #90 lost its pin.
+test('the Board: a move in the queue keeps the pin of an issue newer than the open list', async () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  d.panels.board.data.control.order = [90, 21];
+  d.panels.board.data.open = { issues: [20, 21, 22].map((issue) => ({ issue })) };
+  deliver(w, d);
+  dragTo(w, bcard(w, 22), bcard(w, 20));
+  await settle();
+  assert.deepEqual(w.posts.pop(), { url: 'control', body: { action: 'order', args: ['90', '22', '20', '21'], repo: 'sample' } }, 'the order sent keeps #90 first');
+});
+
 test('the Board at phone width: Hold, Release, Move up and Move down on each card, and the arrow keys', async () => {
   const w = boot({ tab: 'control' });
   deliver(w, full());

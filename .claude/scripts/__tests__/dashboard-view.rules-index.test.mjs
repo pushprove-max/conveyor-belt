@@ -129,10 +129,25 @@ test('Rules: a pinned row shows its title; dragging the first pin onto the secon
 test('Rules: Pinned issues shows only the pins whose issue is still open in the snapshot', () => {
   const w = boot({ tab: 'rules' });
   const d = full();
-  d.panels.rules.data.control.order = [21, 98, 20];
+  d.panels.rules.data.control.order = [21, 19, 20];
   d.panels.rules.data.open = { ...d.panels.rules.data.open, issues: [20, 21, 22].map((issue) => ({ issue, title: `Open ${issue}`, labels: [] })) };
   deliver(w, d);
-  assert.deepEqual(Array.from(rulesP(w).querySelectorAll('[data-rule="order"] .rules-pin-row'), (p) => p.dataset.issue), ['21', '20'], '#98 is closed: not pinned');
+  assert.deepEqual(Array.from(rulesP(w).querySelectorAll('[data-rule="order"] .rules-pin-row'), (p) => p.dataset.issue), ['21', '20'], '#19 is below #22 and not open: closed, not pinned');
+});
+
+// Bug (#1558): the engine keeps the pin of an issue above every number in the open list (it may be newer than the list),
+// but Pinned issues hid it, and a move of another pin sent an order without it, which the host saved whole.
+test('Rules: Pinned issues shows a pin newer than the open list, and a move sends it with the others', async () => {
+  const w = boot({ tab: 'rules' });
+  const d = full();
+  d.panels.rules.data.control.order = [9, 1, 4, 3];
+  d.panels.rules.data.open = { ...d.panels.rules.data.open, issues: [1, 4].map((issue) => ({ issue, title: `Open ${issue}`, labels: [] })) };
+  w.reply = record({ order: [9, 4, 1] });
+  deliver(w, d);
+  const pins = () => Array.from(rulesP(w).querySelectorAll('[data-rule="order"] .rules-pin-row'));
+  assert.deepEqual(pins().map((p) => p.dataset.issue), ['9', '1', '4'], '#9 is above every listed issue: shown; #3 is inside the range and not open: hidden');
+  const down = await sent(w, () => pins()[1].querySelector('[data-act="pin-down"]').click());
+  assert.deepEqual(down, [{ action: 'order', args: ['9', '4', '1'], repo: 'sample' }], 'Move down for #1 keeps #9 in the order sent');
 });
 
 // Bugs: an On/Off rule's state was not the pressed part of one control, or it waited for a Save; a seat's pick was sent

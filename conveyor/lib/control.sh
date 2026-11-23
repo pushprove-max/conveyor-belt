@@ -1528,8 +1528,10 @@ adopt() { # <open issues json>
 }
 # The record with adopt's holds added, saved nowhere: adopt saves it, and `pick --dry` reads it as the record. A
 # forced issue (`control force`) leaves forced, and a pinned one (`control order`) leaves order, once a card of it has
-# landed or it is no longer open. The landed issues are read only while forced or order lists one (landedissues). When
-# they cannot be read, forced and order keep every issue they list, and stderr says so.
+# landed or it is no longer open. A pin numbered above every open issue stays: the issue may be newer than the list
+# (filed after it was read), not closed; it goes once a newer issue is open or its card has landed. The landed issues
+# are read only while forced or order lists one (landedissues). When they cannot be read, forced and order keep every
+# issue they list, and stderr says so.
 adopted() { # <control record> <open issues json>
   local l='' ok=true
   [[ $1 == *'"forced":[]'* && $1 == *'"order":[]'* ]] || l=$(landedissues 2>/dev/null) \
@@ -1538,9 +1540,10 @@ adopted() { # <control record> <open issues json>
       and (((.labels // [] | any(.name == $fu) | not) and (.number as $i | $c.startHeld | any($i > .from and (.to == null or $i <= .to))))
         or ($c.filing != null and .number > $c.filing)
         or (.authorAssociation | type == "string") and (inside | not))) | .number] as $n
-    | map(.number) as $open
+    | map(.number) as $open | ($open | max // 0) as $top
     | if $n == [] then $c else $c | .held = (.held + $n | unique) | .startSeen = (.startSeen + $n | unique) end
-    | if $ok then (.forced, .order) |= map(select(IN($open[]) and (IN($landed[]) | not))) else . end' <<<"$2"
+    | if $ok then .forced |= map(select(IN($open[]) and (IN($landed[]) | not)))
+        | .order |= map(select((IN($open[]) or . > $top) and (IN($landed[]) | not))) else . end' <<<"$2"
 }
 # What landedissues reads of each line of the card records (linesum(), lib/records.sh): the issue of a landed line.
 LANDEDLINE='fromjson? | objects | select(.step == "landed") | .issue'
