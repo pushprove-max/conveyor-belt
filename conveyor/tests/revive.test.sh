@@ -52,38 +52,44 @@ t_gonebuild() {
     || fail "the new card did not land the kept work: $(st 'select(.issue == 7) | .step' | tr '\n' ' ') $(git -C "$R" show --stat main)"
 }
 
-# The same mid-test. The test command has two files: a.test passes, and b.test, on the first run only, hangs until the
-# machine stops it. Bugs: the card picked again from the kept work runs a.test again (what the cut run had passed is
-# lost with its worktree), or is not told it passed. Its run is given `pass a.test` and runs b.test alone, as any run
-# again after a run cut short does. The build is the same edit each time, so the change tested is the same.
+# The same mid-test. The card has two test files, setup's a.test.sh and b.test.sh, each run alone through
+# test.fileCommand: a.test.sh passes, and b.test.sh, on the first run only, hangs until the machine stops it. Bugs: the
+# card picked again from the kept work runs a.test.sh again (what the cut run had passed is lost with its worktree), or
+# is not told it passed. Its run is given `pass a.test.sh` and runs b.test.sh alone, as any run again after a run cut
+# short does. The build is the same edit each time, so the change tested is the same. The stub reports only the file
+# it is given: a run that reports a file it was not given is a wide run, and its card is blocked for that.
 t_gonetest() {
   local lp c1 out
   setup "[$(issue 7 2026-01-01)]"; echo "$GO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
   echo 'grep -qx two a.txt || echo two >> a.txt' > "$STUB/build"
+  echo b > "$R/b.test.sh"; git -C "$R" add b.test.sh || fail "main's test file b.test.sh could not be staged"
+  linkset '{"a.txt": ["a.test.sh", "b.test.sh"]}'
   cat > "$STUB/test-cmd" <<'EOF'
-RR=${CONVEYOR_TEST_RERUN:-/dev/null}; n=$(( $(cat "$STUB/n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB/n"; cp "$RR" "$STUB/rerun.$n"
-for f in a.test b.test; do
-  ! grep -qxF "pass	$f" "$RR" || continue
-  echo "== $f"; echo "== $f" >> "$CONVEYOR_TEST_LOG/run.log"; echo "$n $f" >> "$STUB/ran"
-  [ "$f" = a.test ] || [ -e "$STUB/tested" ] || { : > "$STUB/tested"; exec sleep 600; } # sleep: a test the machine stops
-  echo "ok $f"; echo "-- ok $f" >> "$CONVEYOR_TEST_LOG/run.log"
-done
+n=$(( $(cat "$STUB/n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB/n"; cp "${CONVEYOR_TEST_RERUN:-/dev/null}" "$STUB/rerun.$n"
+echo "$n $CONVEYOR_TEST_FILE" >> "$STUB/ran"
+[ "$CONVEYOR_TEST_FILE" = a.test.sh ] || [ -e "$STUB/tested" ] || { : > "$STUB/tested"; exec sleep 600; } # sleep: a test the machine stops
+echo "ok $CONVEYOR_TEST_FILE"
 EOF
+  # loop: only a real card killed mid-test leaves what revive() keeps: open record, kept patch, files its run passed
   ( loop run > "$STUB/run1.out" 2>&1 ) & lp=$!
-  wait_until '[ -e "$STUB/tested" ]' || fail "#7's test run did not reach b.test: $(cat "$STUB/run1.out")"
+  # Stop it only once b.test.sh runs: then a.test.sh has passed and b.test.sh has not, the state the bugs lose.
+  wait_until '[ -e "$STUB/tested" ]' || fail "#7's test run did not reach b.test.sh:$(cat "$STUB/run1.out")"
   # shellcheck disable=SC2046 # gonestop prints one pid a line
   kill -KILL $(gonestop $lp) 2>/dev/null; wait $lp 2>/dev/null
+  [ "$(tr '\n' ' ' < "$STUB/ran")" = "1 a.test.sh 2 b.test.sh " ] || fail "the cut run did not run a.test.sh, then b.test.sh, each alone: $(cat "$STUB/ran")"
   c1=$(st 'select(.issue == 7 and .step == "picked") | .card')
   [ "$(st 'select(.issue == 7) | .of // .step' | tail -n 1)" = test ] || fail "the killed card is not left open mid-test: $(st 'select(.issue == 7)')"
+  # loop: only a whole run takes the revived card from its kept work through its test run, given the passes, to landing
   out=$(loop run 2>&1) || fail "the next run exited non-zero: $out"
   grep -qF "card $c1 had an open record and its process was gone; it is blocked, its work kept, and issue #7 is given back" <<<"$out" \
     || fail "the run did not say it took up the card: $out"
   [ "$(st 'select(.step == "worktree") | .reason')" = "resumed from the kept patch of card $c1: one session, then review" ] \
     || fail "the new card did not start from the kept work: $(st 'select(.step == "worktree")')"
-  [ "$(grep $'^pass\t' "$STUB/rerun.2" | tr '\t\n' ':|')" = "pass:a.test|" ] \
-    || fail "the new card's run was not told what the cut run had passed: $(cat "$STUB/rerun.2" 2>&1)"
-  [ "$(sed -n 's/^2 //p' "$STUB/ran" | tr '\n' ' ')" = "b.test " ] || fail "the new card's run did not run b.test alone: $(cat "$STUB/ran")"
-  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the new card did not land: $(st 'select(.issue == 7) | .step' | tr '\n' ' ')"
+  [ "$(grep $'^pass\t' "$STUB/rerun.3" | tr '\t\n' ':|')" = "pass:a.test.sh|" ] \
+    || fail "the new card's run was not told what the cut run had passed: $(cat "$STUB/rerun.3" 2>&1)"
+  [ "$(sed '1,2d' "$STUB/ran" | tr '\n' ' ')" = "3 b.test.sh " ] || fail "the new card's run did not run b.test.sh alone: $(cat "$STUB/ran")"
+  [ "$(st 'select(.step == "landed") | .issue')" = 7 ] \
+    || fail "the new card did not land: $(st 'select(.issue == 7) | .step' | tr '\n' ' ') $(st 'select(.issue == 7 and .step == "blocked") | .reason')"
 }
 
 # A card of the loop's own whose process a signal ends mid-test, the loop still running. Bugs (#390: two cards ended
