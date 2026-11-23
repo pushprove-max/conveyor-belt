@@ -182,6 +182,37 @@ t_pickneeded() {
     || fail "the owner's order did not keep #5 before the issue a waiting issue names: $out"
 }
 
+# Bug: `control order 5` put #5 first, yet the pick took every queued card with no GitHub issue ahead of it, one a turn
+# (testpick() ran before upnext()'s order list). With #5 in the order list one pick names #5; with the list empty the
+# same pick still names the card with no issue.
+t_pickorder() {
+  setup "$(jq -cs . <(issue 5 2026-01-01 P1))"
+  local out id; loop control rules foremanissues=off > /dev/null || fail "control rules foremanissues=off was refused"
+  out=$(loop card 'Make f cheaper' 'Make it cheaper.' 2>&1) || fail "card queued no card with no issue: $out"
+  # The order is held for the owner's yes, as a Foreman order is: release it so the pick may take it.
+  id=$(jq -r '.cards[0].id' "$ST/testactions/cards.json") && loop control release "$id" > /dev/null 2>&1 || fail "the queued card could not be released: $out"
+  fx_in 'locked pick "" "" "$(cat "$STUB/issues.json")"'
+  [[ $(cat "$T/$CASE/run.out") == c*-0\ 0\ false ]] || fail "with the order list empty, the pick did not take the card with no issue: $(cat "$T/$CASE/run.out")"
+  rm -f "$ST/cards.jsonl"
+  loop control order 5 > /dev/null || fail "control order 5 was refused"
+  fx_in 'locked pick "" "" "$(cat "$STUB/issues.json")"'
+  [[ $(cat "$T/$CASE/run.out") == c*-5\ 5\ false ]] \
+    || fail "with #5 in the order list, the pick did not name #5 before the card with no issue: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches: a pick that gave the order list's priority to every ready issue whenever the list is not empty. #5 is
+# ordered but held, so the list names no ready issue: the card with no issue goes before the ready #6.
+t_pickorderheld() {
+  setup "$(jq -cs . <(issue 5 2026-01-01 P1) <(issue 6 2026-01-01 P1))"
+  local out id; loop control rules foremanissues=off > /dev/null || fail "control rules foremanissues=off was refused"
+  out=$(loop card 'Make f cheaper' 'Make it cheaper.' 2>&1) || fail "card queued no card with no issue: $out"
+  id=$(jq -r '.cards[0].id' "$ST/testactions/cards.json") && loop control release "$id" > /dev/null 2>&1 || fail "the queued card could not be released: $out"
+  loop control hold 5 > /dev/null && loop control order 5 > /dev/null || fail "control hold 5 or control order 5 was refused"
+  fx_in 'locked pick "" "" "$(cat "$STUB/issues.json")"'
+  [[ $(cat "$T/$CASE/run.out") == c*-0\ 0\ false ]] \
+    || fail "with #5 ordered but held, the pick did not take the card with no issue before #6: $(cat "$T/$CASE/run.out")"
+}
+
 # Bugs: lowest priority or newest picked first; an issue with a card (open after a restart) picked again; a second
 # loop started beside a running one, so the two together pass the builder cap.
 t_pick() {

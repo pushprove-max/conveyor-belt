@@ -146,6 +146,7 @@ cardheld() { # <control record> <issue>
 }
 pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues, as asked() gives them] [the control record the reading was taken for]
   local issues=${3:-} n card l again c u m f
+  m=''
   check && c=$(ctl) || return 1
   [ -z "$issues" ] || adopt "$issues" || return 1
   [ "$(state "$c" "${2:-}")" = running ] || return 0
@@ -163,8 +164,17 @@ pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues
   # Then a card with no GitHub issue (testpick(), lib/testaction.sh), asked for at once, ahead of the queue, the same way.
   # A run limited by --only takes only the review follow-ups and split parts of the issues it names (testpick() reads ONLY).
   # It holds back a card as an issue is held: one that depends on an open issue, or has a label the owner set to never build.
-  if [ -z "${1:-}" ] && [ -s "${TACARDS:-}" ] && n=$(testpick "$issues") && [ -n "$n" ]; then echo "$n"; return 0; fi
-  u=$(upnext "$issues" "${1:-}" | jq -r '.[] | "\(.number) \(.again)"') || return 1
+  # One exception: the first issue upnext() gives is in the control record's order list (`control order`): it starts before
+  # these cards, which the loop would otherwise start one per turn ahead of it.
+  if [ -z "${1:-}" ] && [ -s "${TACARDS:-}" ]; then
+    if jq -e '.order != []' <<<"$c" >/dev/null; then
+      u=$(upnext "$issues" "" | jq -r '.[] | "\(.number) \(.again)"') || return 1
+      m=${u%%$'\n'*}
+      jq -e --argjson n "${m%% *}" '.order | index($n) != null' <<<"$c" >/dev/null 2>&1 && m=ordered || m=''
+    fi
+    if [ "$m" != ordered ] && n=$(testpick "$issues") && [ -n "$n" ]; then echo "$n"; return 0; fi
+  fi
+  [ -n "${u+x}" ] || u=$(upnext "$issues" "${1:-}" | jq -r '.[] | "\(.number) \(.again)"') || return 1
   # The first issue whose fields for its picked line read as JSON: one that does not is named in the log and skipped,
   # and the next one is taken on this same pick, so it holds back no other ready issue.
   n=''

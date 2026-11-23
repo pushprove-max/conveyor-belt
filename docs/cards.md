@@ -44,6 +44,8 @@ once with no GitHub issue. Its record is only in Conveyor. The five kinds:
 A review follow-up and a split part are follow-ups, so the Follow-ups rule in the Rules tab holds them back when it is
 Off. `conveyor.sh run --only <issue>` also runs the review follow-ups and the split parts of that issue, and the review follow-ups of those parts. A follow-up of a split part names the umbrella as its parent, so it inherits the same yes.
 
+A queued card with no GitHub issue starts before the issues. A ready issue that `conveyor.sh control order` names starts before it. A held issue stays held.
+
 Each card builds, reviews, tests and lands as any card does. No size check splits it.
 
 - **Held**: a card that a Foreman session starts (a Foreman order, a release fix card) is held until you say yes. So are the parts of a held umbrella. `conveyor.sh control release <card id>`

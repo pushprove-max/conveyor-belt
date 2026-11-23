@@ -63,6 +63,7 @@
   entry for each parent with its parts done (closed, or landed and not pushed) of all and its parts on the belt.
 - `conveyor.sh control` with no action prints the control record. Its other actions (pause, cap, order, rules, models,
   the judge, accounts, the dependency guard, the push check) are in `conveyor/README.md`, Control.
+  A ready issue that `control order` names starts before the queued cards with no GitHub issue.
 
 ## Every command `conveyor.sh` takes
 
