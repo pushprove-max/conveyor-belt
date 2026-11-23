@@ -224,7 +224,10 @@
   }
   // The issue goes before `before` in the queue: the order sent is the queue up to it, and every issue the record
   // already put first, so nothing that was ordered loses its place. A pin above every open issue (filed after the
-  // snapshot's list was read, so not in the queue yet) stays at the front: the engine keeps it too.
+  // snapshot's list was read, so not in the queue yet) is kept too, as the engine keeps it: it goes after every pin the
+  // record had above it and before every pin the record had below it, so it passes none of them. The issue moved does
+  // not set that place, as it can now be anywhere; but when it was above the newer pin and still is in that place, the
+  // newer pin stays after it.
   function place(item, before) {
     const q = lanes().queue || [];
     const rest = q.filter((x) => x.issue !== item.issue);
@@ -237,7 +240,16 @@
     const was = pinned.map(String);
     const listed = S.d.open && Array.isArray(S.d.open.issues) ? S.d.open.issues.map((x) => x && x.issue) : null;
     const fresh = !listed ? [] : pinned.filter((n) => n > Math.max(0, ...listed) && !q.some((x) => x.issue === n)).map(String);
-    return send('order', fresh.concat(rest.slice(0, last + 1).map((x) => String(x.issue))), null, null, (r) => send('order', was, null, r));
+    const out = rest.slice(0, last + 1).map((x) => String(x.issue));
+    const moved = String(item.issue), wasAt = was.indexOf(moved);
+    const kept = (m) => m !== moved && out.includes(m), placeOf = (m) => out.indexOf(m);
+    for (const n of fresh) {
+      const k = was.indexOf(n), i = out.indexOf(moved);
+      const lo = Math.max(-1, ...was.slice(0, k).filter(kept).map(placeOf)) + 1;
+      const hi = Math.min(out.length, ...was.slice(k + 1).filter(kept).map(placeOf));
+      out.splice(wasAt >= 0 && wasAt < k && i >= lo && i < hi ? i + 1 : lo, 0, n);
+    }
+    return send('order', out, null, null, (r) => send('order', was, null, r));
   }
   function shift(item, by) {
     const q = lanes().queue || [], i = q.findIndex((x) => x.issue === item.issue), to = i + by;

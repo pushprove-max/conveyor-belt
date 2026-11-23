@@ -267,6 +267,45 @@ test('the Board: a move in the queue keeps the pin of an issue newer than the op
   assert.deepEqual(w.posts.pop(), { url: 'control', body: { action: 'order', args: ['90', '22', '20', '21'], repo: 'sample' } }, 'the order sent keeps #90 first');
 });
 
+// Bug: the newer pin was put at the front of the order sent, so with saved order [20, 90, 21] a drag of #22 onto #21
+// sent 90 20 22 21, and the host saved #90 ahead of #20, against the order the user set.
+test('the Board: a move in the queue keeps a newer pin behind the pins that were above it', async () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  d.panels.board.data.control.order = [20, 90, 21];
+  d.panels.board.data.open = { issues: [20, 21, 22].map((issue) => ({ issue })) };
+  deliver(w, d);
+  dragTo(w, bcard(w, 22), bcard(w, 21));
+  await settle();
+  assert.deepEqual(w.posts.pop(), { url: 'control', body: { action: 'order', args: ['20', '90', '22', '21'], repo: 'sample' } }, 'saved order [20, 90, 21], #22 dragged onto #21: #90 stays after #20');
+});
+
+// Bug: the newer pin went just after the pin the record had above it even when that pin was the issue moved, so with
+// saved order [20, 21, 90] a drag of #21 onto #20 sent 21 90 20, and the host saved #90 ahead of #20.
+test('the Board: a move in the queue keeps a newer pin behind a pin the moved issue passes', async () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  d.panels.board.data.control.order = [20, 21, 90];
+  d.panels.board.data.open = { issues: [20, 21, 22].map((issue) => ({ issue })) };
+  deliver(w, d);
+  dragTo(w, bcard(w, 21), bcard(w, 20));
+  await settle();
+  assert.deepEqual(w.posts.pop(), { url: 'control', body: { action: 'order', args: ['21', '20', '90'], repo: 'sample' } }, 'saved order [20, 21, 90], #21 dragged onto #20: #90 stays after #20');
+});
+
+// Bug: the issue moved was never taken as a pin above the newer one, so with saved order [20, 90, 21] a drag of #20
+// onto #21, which leaves the Queue as it was, sent 90 20 21, and the host saved #90 ahead of #20.
+test('the Board: a move in the queue that keeps the moved issue in place keeps a newer pin behind it', async () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  d.panels.board.data.control.order = [20, 90, 21];
+  d.panels.board.data.open = { issues: [20, 21, 22].map((issue) => ({ issue })) };
+  deliver(w, d);
+  dragTo(w, bcard(w, 20), bcard(w, 21));
+  await settle();
+  assert.deepEqual(w.posts.pop(), { url: 'control', body: { action: 'order', args: ['20', '90', '21'], repo: 'sample' } }, 'saved order [20, 90, 21], #20 dragged onto #21: #90 stays after #20');
+});
+
 test('the Board at phone width: Hold, Release, Move up and Move down on each card, and the arrow keys', async () => {
   const w = boot({ tab: 'control' });
   deliver(w, full());
