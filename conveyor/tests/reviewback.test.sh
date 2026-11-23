@@ -95,6 +95,48 @@ t_camebackp1() {
     || fail "the review that blocked lost its answer or the first proof: $(cat "$T/$CASE/an1") $(cat "$T/$CASE/an2")"
 }
 
+# Issue 1578: from review 2 on, a NO-GO whose findings are all new P2s (each finding of review 1 fixed) ends the loop
+# (stop new-p2): the card lands and files each as a follow-up. Bugs: such a review gets another fix round, so cards
+# reach 3 to 5 reviews; the rule fires on review 1 too; with the standing yes review-followup on, the follow-up on the
+# card's own pipeline file is held for the owner.
+t_newp2() {
+  backsetup 10; tune '.pipelineFiles = ["a.txt"] | .auto.standing = ["review-followup"]'; export CONVEYOR_RULING_LOG=$T/$CASE/rulings.jsonl
+  printf '%s\n' '[P2] a.txt:1 the nit stays here' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  printf '%s\n' '[P2] a.txt:2 the fix counts one line short. Proof: line 3 reads fix2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  afterrun "$(issue 10 2026-01-01)" 'loopstop NO-GO 1 "" "" "" "" "" "$wt.review" > "$T/$CASE/stop1"; told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && pass=2' \
+    '[ "$after" != last ] || [ -n "$isfu" ] || followups c7 "$issue" "$wt.review" > "$T/$CASE/ups"'
+  [ ! -s "$T/$CASE/stop1" ] || fail "review 1 with a P2 alone ended the loop ($(cat "$T/$CASE/stop1")), with no fix round"
+  [ "$AFTER" = '{"res":"NO-GO","after":"last","last":"1","stop":"new-p2","hard":"","last0":"","isfu":"","priv":"","why":""}' ] \
+    || fail "review 2 with a new P2 alone did not end the loop: $AFTER"
+  [ "$(cat "$T/$CASE/ups" 2>&1)" = '[100101]' ] && [ "$(jq -r .title "$STUB/filed")" = '[P2] a.txt:2 the fix counts one line short. Proof: line 3 reads fix2' ] \
+    || fail "the new P2 was not filed as a follow-up: $(cat "$T/$CASE/ups" "$STUB/filed" 2>&1)"
+  [ "$(jq -c .held "$ST/control.json")" = '[]' ] || fail "the follow-up was held with review-followup on: $(jq -c .held "$ST/control.json")"
+  # The review line that carries the stop is a record the check (jq/check.jq) keeps: one it refuses is set aside.
+  local l; l=$(jq -cn '{card:"c7",issue:10,step:"review",time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"NO-GO",sha:"",reason:"",stop:"new-p2",pass:2,rounds:0}')
+  [ -z "$(jq -Rrn -f "$SRC/jq/check.jq" <<<"$l")" ] || fail "the record check refuses the review line $l: $(jq -Rrn -f "$SRC/jq/check.jq" <<<"$l")"
+}
+
+# Issue 1578: a new P1 at review 2 still gets a fix round (the new-p2 stop needs no P0 or P1). Bug: the card lands it.
+t_newp2p1() {
+  backsetup 11
+  printf '%s\n' '[P2] a.txt:1 the nit stays here' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  printf '%s\n' '[P1] a.txt:2 the fix drops the count. Proof: line 3 reads fix2' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  afterrun "$(issue 11 2026-01-01)" 'told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && pass=2'
+  [ "$AFTER" = '{"res":"NO-GO","after":"fix","last":"","stop":"","hard":"","last0":"","isfu":"","priv":"","why":""}' ] \
+    || fail "review 2 with a new P1 did not go to a fix round: $AFTER"
+}
+
+# Issue 1578: a card whose issue is a follow-up at the depth cap (Follow-up depth: 2) files no follow-up, so a new P2
+# at review 2 gets a fix round there. Bug: the card landed and the P2 went to the declined list, fixed nowhere.
+t_newp2cap() {
+  backsetup 12
+  printf '%s\n' '[P2] a.txt:1 the nit stays here' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  printf '%s\n' '[P2] a.txt:2 the fix counts one line short. Proof: line 3 reads fix2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  afterrun "$(issue 12 2026-01-01 | jq -c '.body += "\nFollow-up depth: 2"')" 'told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && pass=2'
+  [ "$AFTER" = '{"res":"NO-GO","after":"fix","last":"","stop":"","hard":"","last0":"","isfu":"","priv":"","why":""}' ] \
+    || fail "review 2 with a new P2 on a follow-up at the depth cap did not go to a fix round: $AFTER"
+}
+
 t_camebacktold() {
   backsetup 9
   # #9: a P2 finding comes back beside a new P1: a fix round follows, and its session is told it came back, with the

@@ -75,7 +75,7 @@ t_rebase() {
 # patch's file and the commit it was built on, or to change nothing else (its one review's prompt is resumeport's,
 # with no card run).
 t_portfix() {
-  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$PORTNOGO" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
+  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$PORTNOGO" | p1at2 "$i" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
   steps() { st "select(.issue == $1) | \"\(.step) \(.result) \(.reason)\"" | tr '\n' ,; }
   echo 'cp "$STUB/brief" "$STUB/brief.$(wc -l < "$STUB/sessions")"; echo two >> a.txt; '"$AGAIN" > "$STUB/build"; echo 'ONE other' > "$STUB/move"
   # loop: only a whole card run shows a last review's NO-GO, a landing conflict and the retry that ports it
@@ -110,7 +110,7 @@ t_portfix() {
 # it blocks for the owner. A NO-GO on the one review of a port (a finished loop stopped only by a landing conflict)
 # lands with follow-ups as if it were a last review, instead of being fixed and going round the loop as any card's.
 t_port() {
-  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$PORTNOGO" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
+  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$PORTNOGO" | p1at2 "$i" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
   steps() { st "select(.issue == $1) | \"\(.step) \(.result) \(.reason)\"" | tr '\n' ,; }
   echo "echo two >> a.txt; $AGAIN" > "$STUB/build"; echo 'ONE other' > "$STUB/move"
   # loop: only a whole card run shows a finished loop stopped by a landing conflict, then the port's own review
@@ -201,7 +201,8 @@ t_resumeport2() {
 # patch. The prompt of the rebuild, and of a port (rebaseprompt(), lib/card.sh, on the card's prompt as card() makes
 # it), names the patch file and the commit it was made against, and holds none of the card's diff of 3 MB.
 # Bug: a NO-GO on the review after the rebuild got a fix round. That review is a last review (afterreview(),
-# lib/card.sh): its NO-GO lands the card with its finding filed, where the same NO-GO with no rebuild is fixed.
+# lib/card.sh): its NO-GO lands the card with its finding filed, where the same NO-GO with no rebuild is fixed. Both are
+# review 1: from review 2 on, a NO-GO of new P2 findings alone ends the loop with no rebuild too (issue 1578).
 t_rebasebig() {
   local cm='rebase onto main conflicts: CONFLICT (content): Merge conflict in a.txt'
   setup "[$(issue 11 2026-01-01)]"
@@ -209,7 +210,7 @@ t_rebasebig() {
     issue=$(gh issue view 11 --json number,title,body,labels,milestone) && hdr=$(header on) && b=$(brief c1-11 "$issue" "$hdr") || exit 3
     p=$(cardprompt c1-11 "$hdr" "the card rules" "$b")
     rebaseprompt "$p" "$wt" "$cm" 0123abc > "$T/$CASE/rebuild" && rebaseprompt "$p" "$wt" "$cm" 0123abc port > "$T/$CASE/port" || exit 3
-    printf "%s\n" "$PORTNOGO2" > "$wt.review"; res=NO-GO fin="" finrev="" finend="{}" pass=2 rounds=0 tfix="" lfix="" mode="" privfix="" p1fix=""
+    printf "%s\n" "$PORTNOGO2" > "$wt.review"; res=NO-GO fin="" finrev="" finend="{}" pass=1 rounds=0 tfix="" lfix="" mode="" privfix="" p1fix=""
     for rebased in 1 ""; do afterreview; echo "$after $stop"; done > "$T/$CASE/after"'
   [ "$RC" = 0 ] || fail "the rebuild's prompt or the decision after its review could not be made (exit $RC): $(cat "$T/$CASE/run.out")"
   local f; for f in rebuild port; do
@@ -245,7 +246,7 @@ t_rebasebig() {
 # port's tests then fits it onto main with the same change, which reuses the port's pass and starts no run. It lands
 # alone, with the earlier loop's findings filed.
 t_autoport() {
-  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$PORTNOGO" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
+  setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$PORTNOGO" | p1at2 "$i" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
   steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
   echo 'echo two >> a.txt' > "$STUB/build"; echo 'ONE other' > "$STUB/move"
   echo '[ "$(wc -l < "$STUB/tests")" != 2 ] || { echo b > "$R/b.txt"; git -C "$R" add b.txt; git -C "$R" commit -qm "main adds b.txt"; }' >> "$STUB/test-cmd"

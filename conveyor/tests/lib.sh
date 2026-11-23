@@ -212,6 +212,9 @@ NOGO3=$'[P0] a.txt:1 wrong word\nb.txt:22 no mark here\n[P2] c.txt:3 a nit\nNEW 
 # A review with each finding moved to other lines (a.txt:1 becomes a.txt:<k>1): the review of round <k> in a case
 # whose rounds must not repeat a finding (one that comes back after its fix round ends the loop early).
 moved() { sed -E "s/\.txt:([0-9]+)/.txt:$1\1/g" <<<"$2"; } # <k> <review>
+# The review on stdin, as review <k> of a case whose loop runs on past review 2: from review 2 on, a NO-GO of new P2
+# findings alone ends the loop (loopstop(): new-p2), so review 2 has its first P2 made a P1 and gets a fix round.
+p1at2() { if [ "$1" = 2 ]; then awk '!d && sub(/\[P2\]/, "[P1]") { d = 1 } 1'; else cat; fi; } # <k>
 
 setup() { # <issues json>: a fresh main repo, the three stubs, one billing and one prism ruling
   export R=$T/$CASE/main STUB=$T/$CASE/stub ST

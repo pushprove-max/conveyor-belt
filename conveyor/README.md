@@ -168,7 +168,13 @@ this card, and a review with no accepted finding is a GO. When the card lands, e
 follow-up of the card, with its level and the card's issue as its parent, as a finding of a last NO-GO is; a card
 at the follow-up depth cap puts it on the declined list instead. The card's filed line names the follow-up of each
 (`outside`), and the Board shows it under the review as "Filed as a follow-up" with that issue. A line the reviewer
-itself starts with `OUTSIDE:` is a finding. One scope rule holds at every level, P0 to P3: a finding is accepted
+itself starts with `OUTSIDE:` is a finding. From the second review on (counted as for the review limit), a NO-GO
+whose findings are all new and all P2 or P3 ends the fix loop: each finding of the earlier reviews is fixed, and none
+is P0 or P1 (a finding with no level is P1). The card lands, and each harm finding is filed as a follow-up in the same
+way; a finding of another kind goes to its list. The review's line says `new-p2` as the reason that the loop ended. A
+review with a new P0 or P1, or with a finding that comes back, does not end the loop this way: the other reasons
+apply to it as before, and when none of them holds, it gets a fix round. A fix round also follows for a card at the
+follow-up depth cap, as it files no follow-up. One scope rule holds at every level, P0 to P3: a finding is accepted
 when it is inside the diff (any file and line it names is a changed line, or one of the two lines a removal sits between), or outside it because the card's change
 causes it, such as a caller the change breaks; the judge's reason names the changed line. A finding is declined only when
 its claim is wrong about the code, its proof cannot happen with what the project really runs, or its defect is already fixed

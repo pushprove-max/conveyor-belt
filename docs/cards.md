@@ -287,6 +287,12 @@ has no step. The loop ends at the first of these:
 - `land`: the card lands from a kept patch on its kept review, with no new review.
 - `repeat`: a finding comes back after its fix, and each `harm` finding of the review is P2 or P3. A `harm` P0 or P1
   that comes back blocks the card. A P0 or P1 of another kind does not (Harm or self-heals, below).
+- `new-p2`: from the second review on, a `NO-GO` whose findings are all new and all P2 or P3. Each finding of the
+  earlier reviews is fixed, and none is P0 or P1. The card lands, and each `harm` finding becomes a follow-up card. A
+  finding of another kind goes to its list (Harm or self-heals, below). A review with a new P0 or P1, or with a finding
+  that comes back, does not end the loop this way: the reasons above apply to it as before, and when none of them
+  holds, it gets a fix round. A fix round also follows for a card whose issue is a follow-up at the follow-up depth cap, as it files no follow-up. The reviews
+  are counted as for `max-reviews`.
 
 A `NO-GO` with no finding to fix, such as one that holds only an `UNPROVEN` line, blocks the card when none of the
 reasons above ends the loop at that review. The reason is

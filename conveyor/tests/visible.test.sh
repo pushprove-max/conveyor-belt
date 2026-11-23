@@ -244,7 +244,7 @@ t_unclearspaces() {
 # A NO-GO at the cap with `yes` and no approval: blocked, no follow-ups filed, findings and sentence posted.
 t_visiblecap() {
   visiblestart 20; head=$(git -C "$R" rev-parse HEAD)
-  for i in 1 2 3; do printf '%s\n' "$(moved $i '[P2] a.txt:1 wrong word')" "$YES" 'VERDICT: NO-GO' > "$STUB/review.$i"; done; runs=$(wc -l < "$STUB/tests")
+  for i in 1 2 3; do printf '%s\n' "$(moved $i '[P2] a.txt:1 wrong word' | p1at2 "$i")" "$YES" 'VERDICT: NO-GO' > "$STUB/review.$i"; done; runs=$(wc -l < "$STUB/tests")
   # loop: that the last NO-GO reaches the gate, and the gate comes before its tests and its follow-ups, is card()'s order
   loop run >/dev/null || fail "cap run exited non-zero"
   [ "$(st 'select(.issue == 20) | .step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start fix start review blocked " ] || fail "steps of a visible card at the cap: $(steps 20)"

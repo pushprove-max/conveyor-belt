@@ -98,6 +98,10 @@ test('a card shows one line a finished review: none, one, three, and one recorde
   assert.deepEqual(lines([r(1, 'NO-GO', counts(0, 1, 0, 0)), end]),
     ['Review 1: changes asked 1 P1', 'Review 2: changes asked 1 P1 Fix loop ended: review limit reached (3 reviews, 1 from earlier cards)']);
   assert.deepEqual(lines([{ ...r(1, 'GO', null), loopEnd: { stop: 'go', own: 1, rounds: 0 } }]), ['Review 1: passed Fix loop ended: the review passed (1 review)']);
+  // Issue 1578: a review 2 whose findings were all new P2s ended the loop (stop new-p2) and the card said nothing of why;
+  // the line must not say they were filed, as filing waits for the landing (a visible card can block first).
+  assert.deepEqual(lines([{ ...r(2, 'NO-GO', counts(0, 0, 1, 0)), loopEnd: { stop: 'new-p2', own: 2, rounds: 0 } }]),
+    ['Review 2: changes asked 1 P2 Fix loop ended: only new P2 or P3 findings, sent to follow-ups or lists when the card lands (2 reviews)']);
   // A landed card: its reviews, how many findings became follow-ups, and an issue GitHub did not close.
   const data = full();
   Object.assign(data.panels.landed.data.cards[0], { reviews: 3, followups: [31, 32], rounds: [r(1, 'NO-GO', counts(0, 2, 0, 0)), r(2, 'NO-GO', null), { ...r(3, 'NO-GO', counts(0, 1, 1, 0)), survived: [{ id: 'E1', rounds: 2 }], loopEnd: { stop: 'max-reviews', own: 3, rounds: 0 } }],

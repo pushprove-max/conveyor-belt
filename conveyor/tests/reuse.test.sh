@@ -49,7 +49,8 @@ t_reuseexcerpts() {
   setup "[$(issue 7 2026-01-01)]"
   echo 'case $(wc -l < "$STUB/sessions") in 1) printf "%s\n" two three >> a.txt ;; 2) sed -i "/^two$/d" a.txt ;; esac' > "$STUB/build"
   printf '%s\n' '[P2] a.txt:1 a nit. Proof: line 1 reads one' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
-  printf '%s\n' '[P2] a.txt:2 the deleted two was needed. Proof: line 2 read two before the fix' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  # A P1: a review 2 of new P2s alone ends the loop (loopstop(): new-p2), with no second fix round to reuse it.
+  printf '%s\n' '[P1] a.txt:2 the deleted two was needed. Proof: line 2 read two before the fix' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   # loop: only card()'s review loop shows a fix round, the review after it and a reused review after a second fix
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
   r=$(st 'select(.issue == 7 and .step == "review") | [(.reused // "none" | . != "none"), [.excerpts[]? | select(.at == "a.txt:2") | [.side, .lines]]] | tojson' | tail -n 2)
@@ -203,7 +204,8 @@ p1last() { # <review 4>
   sed -i 's|^cat > /dev/null; echo x >> "$STUB/reviews";|echo x >> "$STUB/reviews"; cat > "$STUB/prompt.$(wc -l < "$STUB/reviews")";|' "$STUB/codex"
   echo 'echo "fix$(wc -l < "$STUB/sessions")" >> a.txt' > "$STUB/build"
   printf '%s\n' '[P2] a.txt:1 first nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
-  printf '%s\n' '[P2] a.txt:2 second nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  # A P1: a review 2 of new P2s alone ends the loop (loopstop(): new-p2), with no third review to find the P1.
+  printf '%s\n' '[P1] a.txt:2 second nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   printf '%s\n' '[P1] a.txt:3 drops what the issue asks' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
   printf '%s\n' "$1" > "$STUB/review.4"
   # loop: only a whole card shows that the fix round and its review come before any landing.

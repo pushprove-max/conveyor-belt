@@ -42,7 +42,7 @@ t_tests() {
 t_testsland() {
   local p
   setup "[$(issue 7 2026-01-01)]"
-  for i in 1 2 3 4; do moved "$i" "${NOGO/\[P1\]/[P2]}" > "$STUB/review.$i"; done
+  for i in 1 2 3 4; do moved "$i" "${NOGO/\[P1\]/[P2]}" | p1at2 "$i" > "$STUB/review.$i"; done
   # The build adds a line and keeps the settings file it is given, as it is while the session runs; each later session
   # changes the card, so each review after it reads a new change. The first run fails, and its run again too (tests());
   # the run after the test fix passes, marking whether it came before any follow-up was filed.
@@ -79,7 +79,7 @@ EOS
 t_testsfix() {
   local head out
   setup "[$(issue 7 2026-01-01)]"
-  for i in 1 2 3 4; do moved "$i" "${NOGO/\[P1\]/[P2]}" > "$STUB/review.$i"; done
+  for i in 1 2 3 4; do moved "$i" "${NOGO/\[P1\]/[P2]}" | p1at2 "$i" > "$STUB/review.$i"; done
   # The stub writes no `-- FAIL <file>` line to the runner's log: testprogress() counts each file such lines name as a
   # file run, once however many lines name it, and gadget.test.ts is not the a.test.sh the run was given, so the
   # count of 2 stops the run (testrun.sh tests(), <worktree>.wide) before its fix round.

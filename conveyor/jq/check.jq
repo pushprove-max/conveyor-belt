@@ -89,7 +89,7 @@ def ok: . as $r | (keys - known) == need
         # Why the fix loop ended (card.sh, loopstop()), on the review that ended it and the filed line, with the
         # reviews counted then: this card's (pass) and its earlier cards' (rounds).
         and (has("stop") | not) == ((has("pass") or has("rounds")) | not)
-        and (.stop == null or ((.step | IN("review", "filed")) and (.stop | IN("go", "max-reviews", "rebased", "test-fix", "lint-fix", "land", "repeat"))
+        and (.stop == null or ((.step | IN("review", "filed")) and (.stop | IN("go", "max-reviews", "rebased", "test-fix", "lint-fix", "land", "repeat", "new-p2"))
           and ([.pass, .rounds] | all(type == "number" and . >= 0))))
         # A review's answers on the findings fix rounds were told (card.sh, donewhen.sh answers()): each its id, answer and first record.
         and (.answers // [] | type == "array" and all(.[]; type == "object" and (.id | type == "string") and (.answer | type == "string") and (.first | type == "object")))

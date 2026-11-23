@@ -67,6 +67,7 @@
     go: 'the review passed', 'max-reviews': 'review limit reached', rebased: 'one review after a landing conflict',
     'test-fix': 'one review after the test fix', 'lint-fix': 'one review after the lint fix',
     land: 'landed on the kept review', repeat: 'a fixed finding came back, all findings P2 or P3',
+    'new-p2': 'only new P2 or P3 findings, sent to follow-ups or lists when the card lands',
   };
   function loopEnd(r) {
     const e = r && r.loopEnd;
