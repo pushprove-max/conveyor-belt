@@ -402,7 +402,7 @@
   const notCard = (f) => failsOf(f).filter((x) => x.verdict !== 'card');
   // The failures Fix failures acts on: those with a cause outside a card's change, with only those cases.
   const fixable = (f) => failsOf(f).map((x) => partOf(x, ['flaky', 'main'])).filter(Boolean);
-  const KIND = { flaky: 'flaky', main: 'failed on main too', card: 'caught a card change', machine: 'a build machine fault' };
+  const KIND = { flaky: 'flaky', main: 'failed on main too', card: 'caught a card change', machine: 'a build machine fault' }; // machine (mainred.sh verdicts()): a case's own verdict only; a step's is never machine.
   const kindSaid = (v) => KIND[v] || 'no verdict on record';
   const casesSaid = (x) => (list(x.cases).filter((c) => typeof c === 'string').join(', ') || 'no case named');
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;

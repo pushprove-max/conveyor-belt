@@ -238,6 +238,15 @@
     }
     return el;
   }
+  // A failed step's cases split by each case's own verdict (caseVerdicts; a case with none has the step's), main before
+  // flaky before card, then any other: [step with those cases and that verdict]. Bug it fixes: the step's one verdict
+  // was said beside all its cases, so a card's catch showed as "failed on main too".
+  function byVerdict(x) {
+    const cv = obj(x.caseVerdicts) ? x.caseVerdicts : {}, cs = list(x.cases).filter((c) => typeof c === 'string');
+    if (!cs.length) return [x];
+    const vOf = (c) => (typeof cv[c] === 'string' ? cv[c] : x.verdict), rank = (v) => { const i = ['main', 'flaky', 'card'].indexOf(v); return i < 0 ? 3 : i; };
+    return [...new Set(cs.map(vOf))].sort((a, b) => rank(a) - rank(b)).map((v) => ({ ...x, verdict: v, cases: cs.filter((c) => vOf(c) === v) }));
+  }
   // Its failures (#188), on Overview: the card changes it caught, apart, with their cards; then each failed test step,
   // newest first: when, its kind, its card and its failing cases, a line for each verdict its cases have (partsOf()).
   // null with none.
@@ -256,7 +265,9 @@
     xs.flatMap(partsOf).forEach((x) => {
       const li = h('li', 'tests-fail');
       li.dataset.verdict = x.verdict === null ? 'none' : x.verdict;
-      li.append(h('span', 'board-from', S.ctx.when(x.time)), ' · ', h('span', 'board-label', kindSaid(x.verdict)), ' · card ', S.ctx.issueLink(x), ` · ${casesSaid(x)}`);
+      const [first, ...rest] = byVerdict(x);
+      li.append(h('span', 'board-from', S.ctx.when(x.time)), ' · ', h('span', 'board-label', kindSaid(first.verdict)), ' · card ', S.ctx.issueLink(x), ` · ${casesSaid(first)}`);
+      rest.forEach((p) => li.append('; ', h('span', 'board-label', kindSaid(p.verdict)), ` · ${casesSaid(p)}`));
       ul.append(li);
     });
     el.append(ul);

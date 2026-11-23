@@ -128,7 +128,8 @@ test('Tests failures: a step with a card case and a main case is a catch for the
   const said = 'the step with failures [mergeclean main, mergeorder card, mergewait machine]';
   assert.equal(status(w, MERGE).querySelector('.tests-caught-cards')?.textContent, 'caught 1 card change', `${said} shows its catch`);
   // Bug it guards: the Failures list labelled the step by its one verdict, so mergeorder showed under "failed on main
-  // too"; and a machine case took the step's verdict, so mergewait showed under it too.
+  // too"; and a machine case took the step's verdict, so mergewait showed under it too. mergewait's machine verdict
+  // (mainred.sh verdicts()) is said as the machine's, not as "no verdict on record".
   const items = Array.from(open(w, MERGE).querySelectorAll('.tests-fail-list > li'), (li) => `${li.dataset.verdict}: ${li.textContent.replace(/^.* · (.+? · card #510 · .+)$/, '$1')}`);
   assert.deepEqual(items, ['main: failed on main too · card #510 · mergeclean', 'card: caught a card change · card #510 · mergeorder', 'machine: a build machine fault · card #510 · mergewait'], `${said} lists each case under its own kind`);
   act(opened(w, MERGE), 'fix-failures').click();
