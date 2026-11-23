@@ -148,8 +148,10 @@ t_snapsumshort() {
 # and the check's and other summaries of the copy) and what each program it starts reads. Stubs of the programs that
 # read files note each call given the card records or the kept copy (an argument or stdin that is one of them) in
 # $D/<name>.reads; the jq one also notes each rows.jq run as `<lines of the file it reads>:<states it is given>` (`-`
-# with none) in $D/<name>.rows; a python3 notes the first line of each `since` answer the state database gives
-# (state.py: from, end, mark and the bytes of the lines it gave) in $D/<name>.since. Each runs the real program.
+# with none) in $D/<name>.rows, and the first such run after the case makes $STUB/hold waits there (it renames hold to
+# held, then waits for $STUB/go) with no lock held and the build's link to the kept copy made; a python3 notes the
+# first line of each `since` answer the state database gives (state.py: from, end, mark and the bytes of the lines it
+# gave) in $D/<name>.since. Each runs the real program.
 # snapsum_build <log name>: one build. snapsum_kept: the summary's lines now; snapsum_rows: the rows in them.
 snapsum_builds() {
   local p real
@@ -159,6 +161,8 @@ snapsum_builds() {
     # stub: a reader that notes a call given the records or the kept copy, then runs the real program (jq also notes rows.jq's input)
     { printf '#!/usr/bin/env bash\nfor a in "$@" /dev/stdin; do if [ "$a" -ef %q ] || [ "$a" -ef %q ]; then echo "%s $*" >> %q; break; fi; done\n' \
         "$ST/cards.jsonl" "$ST/cards.jsonl.copy" "$p" "$STUB/reads"
+      [ "$p" != jq ] || printf 'case "$*" in *jq/rows.jq*) if [ -e %q ] && mv %q %q 2>/dev/null; then i=0; while [ ! -e %q ] && [ $i -lt 1200 ]; do i=$((i + 1)); sleep 0.1; done; fi ;; esac\n' \
+        "$STUB/hold" "$STUB/hold" "$STUB/held" "$STUB/go"
       [ "$p" != jq ] || printf 'case "$*" in *jq/rows.jq*) s=-; for ((i = 1; i < $#; i++)); do [ "${!i}" != states ] || { j=$((i + 1)); s=$(wc -l < "${!j}"); }; done; echo "$(wc -l < "${@: -1}"):$s" >> %q ;; esac\n' "$STUB/rowsruns"
       printf 'exec %q "$@"\n' "$real"; } > "$STUB/$p" && chmod +x "$STUB/$p" || fail "the $p stub could not be made"
   done
@@ -240,6 +244,29 @@ t_snaprewrite() {
   [[ " $(cat "$D/second.rows") " == *" $(wc -l < "$ST/cards.jsonl"):0 "* ]] || fail "rows.jq was not given the whole rewritten records (each rows.jq run's lines:states: $(cat "$D/second.rows"))"
   [ "$(snapsum_rows "$two" | jq -sc '[any(.card == "c1"), any(.card == "c90")]')" = '[false,true]' ] || fail "the second build's rows keep the moved card or miss the new one: $(snapsum_rows "$two" | jq -sc 'map(.card)')"
   [ "$two" = "$(snapsum_kept)" ] || fail "the rows after the rewrite differ from a whole build's: $(diff <(echo "$two") <(snapsum_kept) | head -n 6)"
+}
+
+# Bug (#1564 review): a build reads the kept copy through its link ($STATE.copy.r<pid>), the same file. A second
+# build that adds a new line while the first still runs must write the copy anew (snapcopy()), never append in place:
+# else the running build's copy changes under it. `history` builds with no kept-snapshot lock, so it runs beside a
+# `snapshot` build, as on a host; it is held at its rows.jq run (the stub), past its copy and its check, and the
+# second build runs then. A direct call cannot show it: what is checked is the link the real snapshot() keeps.
+t_snapcopyheld() {
+  local pa l rc
+  snapsum_builds; snapsum_build first
+  snapsum_line c80 80 build 2026-03-01T14:00:00Z ok '' >> "$ST/cards.jsonl" && cp "$ST/cards.jsonl" "$D/a.records" && rm -f "$ST/history.json" \
+    && : > "$STUB/hold" || fail "the fixture's first new line could not be written"
+  ( snapsum_route && loop history > /dev/null ) & pa=$!
+  wait_until "[ -e '$STUB/held' ]" "ls '$ST'" || { touch "$STUB/go"; fail "the history build did not reach its rows.jq run"; }
+  l=$(printf '%s\n' "$ST"/cards.jsonl.copy.r*)
+  [ -f "$l" ] && [ "$l" -ef "$ST/cards.jsonl.copy" ] && cmp -s "$l" "$D/a.records" \
+    || { touch "$STUB/go"; fail "the fixture is wrong: the held build's link is not the kept copy of the records then: $l"; }
+  snapsum_line c80 80 review 2026-03-01T14:10:00Z GO '' >> "$ST/cards.jsonl"
+  ( snapsum_route && loop snapshot --fresh > /dev/null ) || { touch "$STUB/go"; fail "the second build exited non-zero"; }
+  cmp -s "$l" "$D/a.records" || { touch "$STUB/go"; fail "the held build's copy changed under it: $(diff "$D/a.records" "$l" | head -n 4)"; }
+  cmp -s "$ST/cards.jsonl.copy" "$ST/cards.jsonl" || { touch "$STUB/go"; fail "the kept copy is not the records after the second build: $(diff "$ST/cards.jsonl.copy" "$ST/cards.jsonl" | head -n 4)"; }
+  touch "$STUB/go"; wait "$pa"; rc=$?
+  [ "$rc" = 0 ] && [ ! -e "$l" ] || fail "the held build exited $rc, or left its link $l"
 }
 
 # Bug (#1564 review): the drift watch (driftof(), lib/snapshot.sh) gave bench/drift.sh the whole copy of the card
