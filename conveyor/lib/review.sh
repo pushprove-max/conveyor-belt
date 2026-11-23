@@ -245,7 +245,8 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 
 # The judge. With the control record's judge on (`control judge on`; judgeon()), a judge reads each review of a card's change that holds findings, before
 # the card acts on it: the findings, the card's staged change, the issue (the brief) and the findings already
-# declined on this issue's cards (the declined list, DECLINED, holds them). It marks each finding accepted, declined or
+# declined on this issue's cards (the declined list, DECLINED, holds them); the review after a fix round also gets the findings
+# that round was told to fix, each with the judge's earlier reason (fixedbefore()). It marks each finding accepted, declined or
 # outside (real, but not caused by the card's change), with a one-line reason, and declines a finding at any level (P0 to P3) only when its claim is wrong about the code, its proof cannot happen with what the project really runs, or its defect is already fixed on main ("rare case" is
 # no reason, except at a level the control record's judgeRare names: judgeprompt(); a P3 is not declined for being minor). A declined finding becomes a line `DECLINED:
 # <finding> (judge: <reason>)` of the review, which is no finding (NOTFINDING): it causes no fix round and no
@@ -295,6 +296,10 @@ decline it.
 A decline reason starts with its kind, then a colon and why: `claim wrong` (its claim is wrong about the code),
 `cannot happen` (its proof cannot happen with what the project really runs), `fixed` (the defect is already fixed on
 main), `rare case` (only where the rule above allows it), `not this change` or `other`.
+A finding marked `[E<n>]` is the same finding back after its fix: the reviewer found it again after a fix session changed
+the code for it. The findings that fix round was told to fix are listed before the findings, each with your earlier
+reason for accepting it (when there are any). A finding you accepted before is declined now only when the fix made it
+untrue: the reason starts with `other` and says what the fix changed (`fixed` is for a defect already fixed on main). Otherwise judge it as the code stands.
 A finding already declined (listed before the findings, each with the kind of its decline, when there are any) and
 raised again with nothing new is declined as a repeat, with the earlier kind, only when that kind is `claim wrong`,
 `cannot happen` or `fixed`, or the defect is fixed on main. When the earlier kind is `rare case`, `not this change`,
@@ -450,20 +455,33 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
   ! loginfallback "$rc" "$agent" "$1.judge.events" "$1.judge.err" || { PROXY_NOW=1 judgecall "$@"; return; }
   jq -c --arg r "the judge call failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT")), or gave no answer" '. + {failed: $r}' <<<"$f"; return 1
 }
+# The findings the last fix round of the card was told to fix, each with its id and the reason the judge gave when it
+# accepted it (the judge's line of a review record of the issue, judged(): a retried card's records too, as its fix rounds
+# come with its kept patch), as a section for the judge; nothing when no fix round has run.
+fixedbefore() { # <issue> <worktree>
+  [ -s "$2.rounds/findings.jsonl" ] || return 0
+  { stdb ask issue retried "$1" -- issue cards "$1"; } 2>/dev/null | jq -rs --argjson n "$1" --slurpfile f "$2.rounds/findings.jsonl" '
+    ([.[] | objects | select(.issue == $n and .step == "review") | {time: (.time // ""), a: [.judge.accepted[]? | objects]}] | sort_by(.time) | reverse | map(.a[]?)) as $a
+    | ([$f[] | select(.tracked | not) | .round] | max) as $m
+    | [$f[] | select(.round == $m and (.tracked | not))
+      | . as $x | "- \($x.id) \($x.line)" + (([$a[] | select(.finding == $x.line)] | first) as $j | if $j then " (accepted: \($j.reason))" else "" end)]
+    | if length == 0 then empty else "# The findings the last fix round was told to fix", .[], "" end' 2>/dev/null
+}
 # The review beside the worktree, judged: prints the review's fields, with judge (above) when the judge was asked.
 # It never fails: whatever goes wrong, the review stands as the reviewer wrote it.
 judged() { # <card> <issue> <worktree> <brief> <the review's fields>
-  local wt=$3 ja before j why f
+  local wt=$3 ja before j why f back
   ja=$(judgeon) && [ "$(verdict "$wt.review")" != none ] && grep -Evq "$NOTFINDING" "$wt.review" \
     || { printf '%s\n' "$5"; return 0; }
   # The findings already declined on this issue's cards, the last 50, each with its decline's kind (none on a line
   # that has no kind): one raised again with nothing new is declined again only after a kind JUDGE allows.
   before=$(stdb ask lines declined 2>/dev/null | jq -rR --arg c "$1" --argjson n "$2" --arg repo "$REPO" 'fromjson? | objects | select(.card == $c or (.issue == $n and $n != 0 and .repo == $repo))
     | "- \(.finding) (declined: \(.why)) [kind: \(.kind // "none")]"' 2>/dev/null | awk '!seen[$0]++' | tail -n 50)
+  back=$(fixedbefore "$2" "$wt"); [ -z "$back" ] || back+=$'\n\n'
   if ! { judgemarks "$wt" "$ja" > "$wt.judge.marks" && jq -e 'length > 0' "$wt.judge.marks" > /dev/null; } 2>/dev/null; then
     j=$(jq -cn '{failed: "the findings could not be read for the judge"}')
   elif [ -z "$before" ] || before="# Findings already declined on the cards of this issue"$'\n'"$before"$'\n\n'
-    ! j=$(judgecall "$wt" "$(judgeprompt)" "$4"$'\n\n'"$before# The findings"$'\n'"$(jq -r '.[]
+    ! j=$(judgecall "$wt" "$(judgeprompt)" "$4"$'\n\n'"$back$before# The findings"$'\n'"$(jq -r '.[]
       | "F\(.n) [\({inside: "inside the diff", outside: "outside the diff", none: "no place"}[.place])\(if .kind then "; always accepted: \(.kind)" else "" end)] \(.finding)"' "$wt.judge.marks")"); then :
   # What it said of each finding: its one decision line that parses whole, an accepted one with its reason and cost,
   # else the finding is accepted (a duplicate id, a line that cannot be read, no line). A line for no finding of the

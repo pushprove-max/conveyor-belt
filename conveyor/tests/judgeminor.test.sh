@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: the review's judge (judged()) on P3 findings, with the control record's rule P3 on and off. judging(),
+# Engine cases: the review's judge (judged()) on P3 findings, with the control record's rule P3 on and off, and on a
+# finding that came back after its fix (what the judge is told of the fix round's findings). judging(),
 # judgeone(), jf(), jr() and rev() are judge.test.sh's.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -93,4 +94,41 @@ t_minorleft() {
     || fail "the P3 left after the last review did not land with its follow-up: $(st 'select(.step | IN("review", "landed", "blocked")) | "\(.step) \(.result)"' | tr '\n' ,)"
   [ "$(jq -r '[.title, (.labels | map(.name) | join(" "))] | join(" | ")' "$STUB/filed")" = "$MINOR3 | conveyor-followup bug" ] \
     || fail "the follow-up is not the P3 finding with no priority label (P3): $(cat "$STUB/filed")"
+}
+
+# Bugs caught: the judge of the review after a fix round was given no word of the findings that round was told to fix or
+# of the reasons it accepted them with, so it ruled on a finding back after its fix as on a new one (#1379); the first
+# review's judge, with no fix round before it, was given an empty section; a retried card (c7), which resumes the kept fix
+# round of the card before it (c6, whose lines `retry` moved to the retried file), lost the reason, as only its own card
+# lines were read. Round 1's accepted finding and its record line are made as a card makes them (judgeone's fields are
+# the record's judge; findings.jsonl is rounded()'s line), with no card run.
+t_judgeback() {
+  local f='[P1] a.txt:2 wrong word. Proof: a.txt:2' wt rd
+  judging "[$(issue 7 2026-01-01)]"; wt=$T/$CASE/cards/c7; rd=$wt.rounds
+  printf '%s\n' "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  echo 'F1 ACCEPT: the word is wrong in the change. Cost to every card: none' > "$STUB/judge.1"
+  judgeone 7 -
+  ! grep -q '^# The findings the last fix round' "$STUB/judge-asked" || fail "the judge of the first review was given a fix round's findings: $(cat "$STUB/judge-asked")"
+  jq -c '{card: "c6", issue: 7, step: "review", result: "NO-GO"} + .' "$wt.fields" >> "$ST/retried.jsonl"
+  mkdir -p "$rd" && jq -cn --arg l "$f" '{round: 1, id: "E1", line: $l, level: "P1", at: "a.txt:2", words: "wrong word", key: "a.txt:2 wrong word"}' > "$rd/findings.jsonl"
+  printf '%s\n' "[P1] [E1] a.txt:2 wrong word. Proof: a.txt:2" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  echo 'F1 DECLINE: other: the fix changed the word' > "$STUB/judge.2"
+  judgeone 7 -
+  grep -qxF '# The findings the last fix round was told to fix' "$STUB/judge-asked" \
+    && grep -qxF -- "- E1 $f (accepted: the word is wrong in the change)" "$STUB/judge-asked" \
+    || fail "the judge of the second review was not given the first round's accepted finding and its reason: $(cat "$STUB/judge-asked")"
+}
+
+# Bug caught: JUDGE did not say what an [E<n>] mark means, so the judge did not know a finding was back after its fix, or
+# that one it accepted before is declined only when the fix made it untrue.
+t_judgebackmeaning() {
+  local p
+  judging "[$(issue 7 2026-01-01)]"
+  printf '%s\n' '[P1] a.txt:2 wrong word. Proof: a.txt:2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  echo 'F1 ACCEPT: it is wrong. Cost to every card: none' > "$STUB/judge.1"
+  judgeone 7 "$STUB/review"
+  p=$(tr '\n' ' ' < "$STUB/judge-asked" | tr -s ' ')
+  grep -qF 'A finding marked `[E<n>]` is the same finding back after its fix' <<<"$p" \
+    && grep -qF 'A finding you accepted before is declined now only when the fix made it untrue: the reason starts with `other` and says what the fix changed' <<<"$p" \
+    || fail "the judge's prompt does not say what [E<n>] means: $(grep -n 'E<n>\|accepted before' "$STUB/judge-asked")"
 }

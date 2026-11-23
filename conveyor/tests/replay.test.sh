@@ -104,6 +104,12 @@ t_replayjudge() {
   # told each earlier decline without its kind, which JUDGE needs to decline a repeat (#1522).
   grep -q '^# Findings already declined on the cards of this issue$' "$STUB/judged" && grep -q '^- \[P2\] a.txt:1 F-old (declined: nothing new) \[kind: claim wrong\]$' "$STUB/judged" \
     && ! grep -q '(declined: style)' "$STUB/judged" || fail "the earlier declines given to the judge: $(cat "$STUB/judged")"
+  # Bug caught: a review's judge is told the findings the fix round before it was told to fix, each with the reason it
+  # accepted it with (#1379), but the replay judge was not, so it ruled on a finding back after its fix as on a new
+  # one. c1-11 follows c1-10 on issue 9, which accepted F-five; c1-7 and c1-8 have no review before them.
+  [ "$(grep -c '^# The findings the last fix round was told to fix$' "$STUB/judged")" = 1 ] \
+    && [ "$(awk '/^== /{on = /c1-11$/} on' "$STUB/judged" | grep -cxF -- '- [P1] a.txt:1 F-five (accepted: real)')" = 1 ] \
+    || fail "the replay judge of c1-11 was not given the finding the review before it accepted, or c1-7 or c1-8 was given a section: $(grep -n 'fix round\|F-five\|^== ' "$STUB/judged")"
   [ "$(eval "$SUMS")" = "$(cat "$STUB/before")" ] || fail "the replay changed a card line, a setting or main: $(eval "$SUMS") was $(cat "$STUB/before")"
 }
 
