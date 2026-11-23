@@ -121,7 +121,22 @@ t_reservedpack() {
   [ ! -e "$T/retries" ] || fail "the watcher retried a block whose reason holds the pack's reserved word: $(cat "$T/retries")"
 }
 
-cases=(on off fails other stale health reserved reservedpack)
+# The kind on, and `auto reserved` fails on the record's host (as when the owner's profile is there but cannot be read):
+# the block wakes with its own reason, and no retry runs. Bug it catches: a block whose reserved words could not be read
+# was retried, or gave no wake, so a card the owner may reserve was queued again or left with no word; the standing
+# rule (lib/standing.sh) tells the Foreman this wake is not a failed retry.
+t_unread() {
+  fixture unread '["review-retry"]' "$REVIEW" 'exit 0'
+  CONVEYOR_FOREMAN_ASK="[ \"\$CONVEYOR_CMD\" != 'auto reserved' ] || exit 1; $CONVEYOR_FOREMAN_ASK"
+  poll || fail "no wake for a review block whose reserved words could not be read: $(cat "$T/err")"
+  # The block's line is its reason and nothing after it but the "(as of HH:MMZ)" stamp: no "; the review-retry of #7
+  # failed" and no "#7 was retried" tail, as no retry ran.
+  grep -qxE "$(sed 's/[][\.*^$()+?{}|/]/\\&/g' <<<"$BLOCKED$REVIEW")( \(as of [0-9]{2}:[0-9]{2}Z\))?" <<<"$wake" \
+    || fail "the wake does not give the block with its own reason alone: $wake"
+  [ ! -e "$T/retries" ] || fail "the watcher retried a block whose reserved words could not be read: $(cat "$T/retries")"
+}
+
+cases=(on off fails other stale health reserved reservedpack unread)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

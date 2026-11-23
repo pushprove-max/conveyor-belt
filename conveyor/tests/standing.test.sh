@@ -55,6 +55,18 @@ t_standingrelfix() {
     || fail "release-check does not tell the Foreman to write the Release fix line in each fix card: $out"
 }
 
+# Bug: when `auto reserved` fails on the card's host (an owner's profile there that cannot be read), the watcher wakes
+# the Foreman with the block's own reason and runs no retry (retryable(), foreman/lib.sh). A review-retry rule that
+# names only a failed retry and a reserved-word block lets the Foreman tell the owner a retry failed when none ran.
+t_standingretry() {
+  local out; setup '[]'
+  tune '.auto.standing = ["review-retry"]'
+  out=$(cd "$R" && loop auto standing) || fail "auto standing failed: $out"
+  out=$(grep -F -- '- review-retry: ' <<<"$out")
+  grep -qF 'a block the watcher did not retry, as it could not read auto.reserved' <<<"$out" && grep -qF 'do not say that a retry failed' <<<"$out" \
+    || fail "review-retry does not tell the Foreman of a block the watcher could not retry: $out"
+}
+
 # A card's worktree beside main, its change to the pipeline file a.txt staged, and its NO-GO review with three findings
 # on a.txt: one names only a.txt, one names lib/b.sh too (another pipeline file, not in the change), and one names only
 # a.txt but holds "security", a word of the default auto.reserved. followups()

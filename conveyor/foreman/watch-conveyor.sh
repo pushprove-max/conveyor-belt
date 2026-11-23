@@ -8,8 +8,9 @@
 # at once, in a wake of its own (poll()). The problems, each a record's own:
 #   a card waiting on the owner's yes       an issue waiting on the owner's yes before its build (health's before)
 #   a card blocked; one blocked by its review, while the standing kind review-retry is on, the watcher retries itself
-#     and wakes nothing for, unless that retry fails or its reason holds a word of auto.reserved or an item of
-#     the owner's profile, which it leaves blocked (retryable(), lib.sh, reviewretry()); a card still blocked 30 minutes after a poll
+#     and wakes nothing for, unless that retry fails, its reason holds a word of auto.reserved or an item of
+#     the owner's profile, or `auto reserved` fails on the record's host (no retry runs then), each of which it leaves
+#     blocked (retryable(), lib.sh, reviewretry()); a card still blocked 30 minutes after a poll
 #     first listed it, and once an hour after, while no open owner question names its issue (stillblocked()); of a
 #     snapshot made before the last change to the card records, only a card health still lists blocked (recheck()),
 #     its line ending "(as of <the snapshot's time>)"

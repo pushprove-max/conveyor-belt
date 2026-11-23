@@ -148,8 +148,9 @@ it up:
 - A blocked card: the wake names the reason. When the snapshot fails or is slow, as when it is made anew from the
   whole card records, the watcher reads `conveyor.sh health`. A blocked card, or a change that waits for your yes,
   then wakes the Foreman from health at that poll, and does not wait for the snapshot. With the standing kind
-  `review-retry` on, a card that its review blocked gives no wake, unless its retry fails or its reason holds a word of
-  `auto.reserved` or an item of your profile ([Standing yes](#standing-yes)).
+  `review-retry` on, a card that its review blocked gives no wake, unless its retry fails, its reason holds a word of
+  `auto.reserved` or an item of your profile, or the watcher cannot read these words on the host
+  ([Standing yes](#standing-yes)).
 - A stopped process: the engine, or the process of a card, is stopped (state T in `ps`). The wake names it. Run
   `kill -CONT` with each process ID of the tree, as the wake gives it, on the machine where the engine runs to resume it.
 - A card that is still blocked 30 minutes after its first wake: the wake says "#N has been blocked for <time> (since
@@ -378,7 +379,10 @@ asking"). The pack keeps the list as `auto.standing`. A kind works whether `/con
   the wake gives the reason of the failed retry. A card blocked for another reason wakes the Foreman as before. The
   engine does not retry a card whose block reason holds a word of `auto.reserved` (a finding tagged `[security]`, for
   example) or an item of the owner's profile. The watcher leaves that card blocked and wakes the Foreman with the
-  block's reason, and the Foreman puts the card to you.
+  block's reason, and the Foreman puts the card to you. When the watcher cannot read `auto.reserved` or your profile on
+  the host (for example, your profile is there but cannot be read), it does not retry the card. It wakes the Foreman
+  with the block's reason, and the Foreman puts the card to you. No retry ran, so the Foreman does not say that a
+  retry failed.
 
 Some steps always go to you, whatever kinds are on: new engine behaviour that you did not ask for, a design choice, a
 release that you did not ask for, and anything that `auto.reserved` holds.
