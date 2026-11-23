@@ -101,7 +101,7 @@ t_judgeoutsidefiled() {
   echo 'cat "$CONVEYOR_CARDS"/c*.reviewed > "$STUB/reviewed" 2>/dev/null' > "$STUB/judge-cmd"
   # loop: that the card lands with no fix round and files the follow-up at its landing is the whole card's run (card(), cardlanding()).
   loop run >/dev/null || fail "run exited non-zero"
-  grep -qxF '`F<n> OUTSIDE: <harm | self-heals>: <one-line reason: why it is real, and why this card'"'"'s change did not cause it>`' "$STUB/judge-asked" \
+  grep -qxF '`F<n> OUTSIDE: <harm | self-heals | cleanup | already guarded | docs drift>: <one-line reason: why it is real, and why this card'"'"'s change did not cause it>`' "$STUB/judge-asked" \
     && grep -qxF 'never a reason to decline a real finding: answer OUTSIDE for it.' "$STUB/judge-asked" \
     && ! grep -qF 'decline a `rare case` or `style` one as above' "$STUB/judge-asked" \
     && ! grep -qF 'with the reason `not about this card'"'"'s change`' "$STUB/judge-asked" \
