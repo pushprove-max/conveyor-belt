@@ -236,6 +236,30 @@ t_privnested() {
   out=$("$c" "$f"); [ "$out" = "$(for l in 4 5 6 7 8 9 10; do echo "$f:$l: home path"; done)" ] || fail "hits: $out"
 }
 
+# Bug (#1502): with privacy.mode public and a terms file the host file names but cannot be read, cardsubject() (the body
+# of a card with no GitHub issue, in its commit message) ran the check with no terms and returned the body with a
+# private term in it. It now fails and prints nothing. (t_privterms holds the same for privmask().)
+t_privsubjectterms() {
+  privsetup; local issue; issue=$(jq -cn '{number: 0, title: "Fix the failures", body: "it said Zed here", labels: []}')
+  fx_in "cardsubject c0-0 '$issue'"
+  grep -q 'it said <private term>' "$T/$CASE/run.out" || fail "cardsubject c0-0 '$issue' with a readable terms file did not mask the term (exit $RC): $(cat "$T/$CASE/run.out")"
+  jq -n --arg t "$STUB/none" '{terms: $t}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  fx_in "cardsubject c0-0 '$issue'"
+  [ "$RC" != 0 ] && ! grep -q 'it said Zed' "$T/$CASE/run.out" || fail "cardsubject c0-0 '$issue' with an unreadable terms file returned the body (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+
+# Bug (#1502): check.sh tested that the terms file was readable, then read it line by line; a file that passed the test
+# but failed to read (here a socket, which is "readable" yet cannot be opened; a path that became a directory in between
+# fails the same way) ended the term loop as the end of the file does, so the check exited 0 on a text holding a private
+# term. It exits 2 now. The same run with a terms file that reads finds the term.
+t_privtermsopen() {
+  local c=$SRC/privacy/check.sh d=$T/$CASE out; mkdir -p "$d"
+  printf 'ask Zed\n' > "$d/f"; echo 'case:Zed' > "$d/terms"
+  out=$("$c" --terms "$d/terms" "$d/f"); [ $? = 1 ] || fail "check.sh with a readable terms file did not find the term: $out"
+  python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$d/sock" || fail "no socket made"
+  out=$("$c" --terms "$d/sock" "$d/f" 2>&1); [ $? = 2 ] || fail "check.sh --terms $d/sock (readable by test, not openable) did not exit 2: $out"
+}
+
 # P5: every GitHub write the engine and the Board make goes through gh_write (conveyor.sh gh-write): a gh write
 # anywhere else in them is a fail. A gh api call is allowed only as a graphql read.
 t_ghwrite() {

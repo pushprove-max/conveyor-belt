@@ -13,6 +13,11 @@ usage() { echo "usage: check.sh [--terms <file>] [<file>...]" >&2; exit 2; }
 terms=''
 [ "${1:-}" != --terms ] || { [ $# -ge 2 ] || usage; terms=$2; shift 2; }
 [ -z "$terms" ] || { [ -r "$terms" ] && [ ! -d "$terms" ]; } || { echo "privacy: the terms file cannot be read" >&2; exit 2; }
+# The terms are read once, whole: a file that passed the test above and then fails to read (it became a directory, or
+# a read error) is an error, not a check with no terms. Bug: a loop that read the file line by line ended on the error
+# as it does at the end of the file, and the check passed.
+tbody=''
+[ -z "$terms" ] || tbody=$(cat -- "$terms") || { echo "privacy: the terms file cannot be read" >&2; exit 2; }
 
 # name<TAB>extended regular expression, matched with grep -E. An email is a hit unless it holds "noreply" or is at a
 # domain reserved for examples (example.com, example.org, example.net or a subdomain of one, RFC 2606) or is a git SSH
@@ -66,7 +71,7 @@ ta' "$1" | grep -anoE -- "$rx" | grep -vE '^[0-9]+:/(Users|home)/dev\.*([^A-Za-z
     case $t in '' | '#'*) continue ;; esac
     case $t in case:*) grep -anwF -- "${t#case:}" "$1" ;; *) grep -anwiF -- "$t" "$1" ;; esac \
       | cut -d: -f1 | while read -r l; do echo "$2:$l: private term (terms file line $n)"; done
-  done < "$terms"
+  done <<<"$tbody"
 }
 [ $# -gt 0 ] || set -- -
 for f; do

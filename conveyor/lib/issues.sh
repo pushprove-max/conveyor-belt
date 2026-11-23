@@ -626,7 +626,8 @@ gh_write() { # <gh arguments>
 # word with its string escapes decoded as well, the host's terms file. Fails when the check could not be made, as when
 # the host file names a terms file that cannot be read. A hit that only words together make (a private key header, a
 # term of two words) is printed as the shortest run of words of one line that holds it, those words with the spaces
-# between them as the text has them.
+# between them as the text has them. A second argument (any text) lets it run without a terms file it cannot read: the
+# built-in patterns only (privown()).
 privwords() {
   local a t hits terms w l rc
   local row='def row: [., ('"$UNESCAPE"')] | map(gsub("[\\n\\r]"; " ")) | join(" ");'
@@ -639,7 +640,10 @@ privwords() {
   a=${1//"$CARDS"/<cards>}; a=${a//"${STATE%/*}"/<state>}
   # A terms file the host file names that cannot be read: its terms are unknown, so the check cannot be made (as
   # gh_write holds a public write). Bug: the check ran with no terms, and a public rollout's commit carried a term.
-  terms=$(termsfile); [ -n "$terms" ] || ! termsnamed || { echo "conveyor: privacy: the host file's terms file cannot be read" >&2; return 1; }
+  # With a second argument the terms file is not used at all: one that passes termsfile() can still fail to open (a
+  # socket), and the check would fail again.
+  terms=$(termsfile); [ -z "${2:-}" ] || terms=''
+  [ -n "$terms" ] || [ -n "${2:-}" ] || ! termsnamed || { echo "conveyor: privacy: the host file's terms file cannot be read" >&2; return 1; }
   t=$(mktemp) || return 1
   # One line per word: the word, then each decoding of it (one line, its line breaks made spaces).
   jq -rn --arg a "$a" "$row"' $a | [scan("\\S+")] | unique[] | row' > "$t" && l=$(privhit) \
@@ -669,7 +673,8 @@ privwords() {
 }
 # <text>: the text as gh_write posts it, with each word the privacy check flags (privwords()) written as a neutral
 # mark of what it is (<home path>, <email>, <private term>), and a whole private key as one <token>. Fails when the
-# check could not be made.
+# check could not be made (privwords() fails too when the host file names a terms file that cannot be read, as its
+# terms are unknown; gh_write posts nothing then either). Only a public pack masks (its callers).
 privmask() {
   local w a
   w=$(privwords "$1") || return 1

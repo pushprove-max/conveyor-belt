@@ -219,7 +219,9 @@ ownonly() {
 # <worktree>: prints the first finding of its review (<worktree>.review) that quotes a word the privacy check flags
 # (privwords(), lib/issues.sh) which a line the card's staged change adds holds, the word's leading and closing marks
 # (quotes, brackets, a closing . or :) aside. Such a finding is a privacy hit in the card's own change: a follow-up
-# would land the hit on main, so the card fixes it (card.sh). Prints nothing when the check could not be made.
+# would land the hit on main, so the card fixes it (card.sh). A terms file the host file names that cannot be read does not
+# stop the check: the built-in patterns are still checked (bug: the gate was off for a home path). Prints nothing when
+# the check could not be made.
 privown() {
   local f w x added
   added=$(git -C "$1" diff --cached --no-renames -U0 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+ ') || return 0
@@ -227,7 +229,7 @@ privown() {
     while IFS=$'\t' read -r x w; do
       w=$(sed -E 's/^[^[:alnum:]/~\\]+//; s/[^[:alnum:]]+$//' <<<"$w")
       [ -z "$w" ] || [[ $added != *"$w"* ]] || { printf '%s\n' "$f"; return 0; }
-    done < <(privwords "$f" 2>/dev/null)
+    done < <(privwords "$f" 2>/dev/null || privwords "$f" builtin 2>/dev/null)
   done < <(leftovers "$1.review")
 }
 unfile() { # <parent issue> <review file> <follow-up issue>...

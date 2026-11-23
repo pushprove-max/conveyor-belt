@@ -292,6 +292,30 @@ t_privfixrun() {
     || fail "the privacy finding on the card's own line on its last review did not go to a fix round: $AFTER"
   grep -qxF "E1 [P0] a.txt:3 flags $HX/bench" "$T/$CASE/fix" || fail "the fix round is not told the privacy finding: $(cat "$T/$CASE/fix")"
 }
+# Bug (#1502): privwords() fails when the host file names a terms file that cannot be read, and privown() took that
+# for "the check could not be made" and found nothing: the privacy gate of the card's own change was off for a home path.
+# It still finds the built-in hit now, with a terms file that is missing.
+t_privownterms() {
+  setup "[$(issue 7 2026-01-01)]"; mkdir -p "$XDG_CONFIG_HOME/conveyor"
+  jq -n --arg t "$STUB/none" '{terms: $t}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  fx_wt "printf 'two\ncd %s/bench\n' '$HX' >> a.txt" b.txt b
+  printf '%s\n' "[P0] a.txt:3 flags $HX/bench" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  fx_in 'privown "$FXWT"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "[P0] a.txt:3 flags $HX/bench" ] \
+    || fail "privown with a host file naming a missing terms file ($STUB/none) did not find the home path the card adds (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+# Bug (#1502): the same with a terms file that passes the readable test but cannot be opened (a socket). The built-in
+# check was handed that file again and failed again, so privown() found nothing: it must not use the terms file at all.
+t_privownsocket() {
+  setup "[$(issue 7 2026-01-01)]"; mkdir -p "$XDG_CONFIG_HOME/conveyor"
+  python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$T/$CASE/sock" || fail "no socket made"
+  jq -n --arg t "$T/$CASE/sock" '{terms: $t}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  fx_wt "printf 'two\ncd %s/bench\n' '$HX' >> a.txt" b.txt b
+  printf '%s\n' "[P0] a.txt:3 flags $HX/bench" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  fx_in 'privown "$FXWT"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "[P0] a.txt:3 flags $HX/bench" ] \
+    || fail "privown with a host file naming a terms file that cannot be opened ($T/$CASE/sock) did not find the home path the card adds (exit $RC): $(cat "$T/$CASE/run.out")"
+}
 # Bug (#1385): once its privacy fix round was given (privfix), privown() was not asked again, so a new privacy hit on
 # the last review, on another line than the one fixed, landed on main with a follow-up. Here that round swapped the
 # home path for another ($HY, the line the change now adds) and the last NO-GO names the new line: cardfix() blocks

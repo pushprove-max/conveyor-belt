@@ -52,7 +52,7 @@ cardready() {
   # that lands from a kept patch has no review line of its own), then its Rollout trailers, each once and in the order
   # named (ROLLOUTONCE). All go on its landed line (rollout) and, in that order, at the end of the commit message as
   # Rollout lines in place of its Rollout trailers, so the push carries each one. They are no findings: nothing here
-  # holds the card. With the pack's privacy.mode public, the Rollout lines have each word the privacy check flags
+  # holds the card, but a check that cannot be made: with the pack's privacy.mode public, a terms file the host file names that cannot be read blocks it (privwords()). With the pack's privacy.mode public, the Rollout lines have each word the privacy check flags
   # masked (privmask(), lib/issues.sh), as cardsubject() masks a body: they are reviewer text, and the push checks no
   # commit message. Bug: an address a review named in its ROLLOUT line was pushed in the commit message.
   rtr=$(rollouts <(printf '%s\n' "$cmsg") Rollout) && rrev=$(rollouts "$wt.review" ROLLOUT) \

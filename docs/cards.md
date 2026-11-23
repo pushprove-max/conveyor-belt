@@ -61,7 +61,8 @@ Each card builds, reviews, tests and lands as any card does. No size check split
   and a "Fixes #12" in the text goes in as "Fixes issue 12", so the push closes no issue. When the pack's
   `privacy.mode` is public, each part of the message that the privacy check flags (a home path in test output, for
   example) goes in as a mark of what it is, such as `<home path>`. A whole private key, from its BEGIN line to its END
-  line, goes in as one `<token>` mark. **Landed today** keeps the
+  line, goes in as one `<token>` mark. If the host file names a terms file that cannot be read, the check cannot be
+  made, and the card is blocked. **Landed today** keeps the
   record of the card, and its **File on GitHub** files an issue from it
   ([Board: Done without asking](board.md#rules)).
 
@@ -402,7 +403,8 @@ writes one as a `Rollout:` line of the card's commit trailers. A rollout action 
 card, and the judge does not read it. The card's commit message has each one as a `Rollout:` line, so the push carries
 it, and the Landed today panel shows it under the card. The reviewer's steps come first, then the builder's, each in
 the order it was written. When the pack's `privacy.mode` is public, each part of these lines that the privacy check
-flags goes in as a mark of what it is, such as `<home path>`.
+flags goes in as a mark of what it is, such as `<home path>`. If the host file names a terms file that cannot be read,
+the check cannot be made. That blocks the card, not the action.
 
 A test that a card adds or changes must check its behaviour directly. Some tests run other test files or the suite
 runner, run the real loop, or poll a real process until a condition holds. Such a test needs a comment beside it that
