@@ -650,7 +650,9 @@ lintgate() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <br
   # change one of those makes is another session's, and gets a new fix at the next landing gate.
   [ -z "$land" ] || { git -C "$wt" add -A 2>/dev/null; lfix=$(cardpatch "$wt") || lfix=''; }
   checked "$c" "$n" "$wt" "$4" "$5" fix "$(jq -c --arg r "lint: $k finding(s) of the change${land:+ on main as it is now}" '. + {reason: $r}' <<<"$t")" || { rm -f "$o"; return 1; }
-  git -C "$wt" add -A 2>/dev/null
+  # A trial card's pick names the pipeline files of what the fix left (trialflag(), lib/push.sh), so the lint line below
+  # and a block line carry them, not those of the change before the fix.
+  git -C "$wt" add -A 2>/dev/null; trialflag "$wt"
   [ -z "$land" ] || { rm -f "$o"; return 2; }
   lintrun "$wt" "$base" "$c" "$o"; rc=$?; lintline "$c" "$n" "$o" $rc review
   t=$(jq -rs '[.[] | . as $c | .reported[] | "lint command \($c.n): \(.file):\(.line): \(.text)"] | .[:50][]' "$o" 2>/dev/null); k=$(jq -s '[.[].reported[]] | length' "$o" 2>/dev/null)

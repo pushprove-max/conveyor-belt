@@ -489,3 +489,21 @@ t_lintgatemergep1() {
   [ "$(st 'select(.step == "landed") | .followups | length')" = 0 ] || fail "the P1 was filed as a follow-up, not fixed: $(st 'select(.step == "landed") | .followups')"
   pagesays_lintgate docs/cards.md 'or gets one fix round if it holds a P1' "the review after the lint fix held a P1 and got a fix round and a review"
 }
+
+# Review follow-up of #1444. Bug it catches: on a trial card, the review gate wrote its lint line after its fix session
+# (the retry) with the pick that named the pipeline files of the change before the fix: a fix that took out the only
+# edit to a pipeline file left the retry's lint line, and the Board that reads the last pick, flagging the card. The
+# caller's trialflag() ran only after lintgate() returned. The first lint line names pipe.txt; the retry's names none.
+t_lintgatetrial() {
+  gatesetup '[]'
+  tune '.pipelineFiles = ["pipe.txt"]'
+  fx_wt 'echo BAD >> pipe.txt && echo two >> a.txt' pipe.txt base a.txt one
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'session() { echo lintfix >> "$STUB/did"; echo base > "$1/pipe.txt"; echo "{}"; }; checked() { :; }
+    PICK="{\"trial\":true}" PICKCARD=c7; trialflag "$FXWT"; lintgate c7 7 "$FXWT" "{}" prompt br; echo "rc=$?"'
+  [ "$(cat "$T/$CASE/run.out")" = 'rc=2' ] && [ "$(did)" = lintfix ] || fail "lintgate on c7 (pipe.txt BAD, fixed by the session) did not fix and return 2: $(cat "$T/$CASE/run.out"); $(did)"
+  # The retry line keeps its pick (.trial), with no pipeline files: a line with no pick would leave the Board on the
+  # first line's pick (jq/rows.jq reads the last pick), the warning still shown.
+  [ "$(st 'select(.step == "lint") | "\(.result):\(.pick.trial):\(.pick.pipeline // [] | join(","))"' | paste -sd' ')" = 'findings:true:pipe.txt pass:true:' ] \
+    || fail "lintgate on c7 (a fix that took out its pipe.txt edit): the lint lines do not carry the pick with the pipeline files of the change each run read: $(st 'select(.step == "lint") | "\(.result):\(.pick)"' | paste -sd' ')"
+}
