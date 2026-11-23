@@ -96,32 +96,51 @@ t_minorleft() {
     || fail "the follow-up is not the P3 finding with no priority label (P3): $(cat "$STUB/filed")"
 }
 
-# Bugs caught: the judge of the review after a fix round was given no word of the findings that round was told to fix or
-# of the reasons it accepted them with, so it ruled on a finding back after its fix as on a new one (#1379); the first
-# review's judge, with no fix round before it, was given an empty section; a retried card (c7), which resumes the kept fix
-# round of the card before it (c6, whose lines `retry` moved to the retried file), lost the reason, as only its own card
-# lines were read. Round 1's accepted finding and its record line are made as a card makes them (judgeone's fields are
-# the record's judge; findings.jsonl is rounded()'s line), with no card run.
+# Bugs caught: the first review's judge, with no fix round before it, was given an empty section; a round with no saved
+# reason (the judge of the review it fixed failed) took one from the issue's review records, here c6's in the retried
+# file, of a patch `retry --fresh` discarded. Round 1 is recorded by rounded() from the first review's numbered() ids
+# and judged fields, as cardfix() records it, with no card run; that cardfix() saves the reason is t_judgebackrun's.
 t_judgeback() {
-  local f='[P1] a.txt:2 wrong word. Proof: a.txt:2' wt rd
-  judging "[$(issue 7 2026-01-01)]"; wt=$T/$CASE/cards/c7; rd=$wt.rounds
+  local f='[P1] a.txt:2 wrong word. Proof: a.txt:2' wt
+  judging "[$(issue 7 2026-01-01)]"; wt=$T/$CASE/cards/c7
   printf '%s\n' "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
-  echo 'F1 ACCEPT: the word is wrong in the change. Cost to every card: none' > "$STUB/judge.1"
+  echo 'exit 1' > "$STUB/judge-cmd"
   judgeone 7 -
+  rm -f "$STUB/judge-cmd"
+  [ -n "$(jf 7 '.judge.failed // empty')" ] || fail "the first review's judge did not fail: $(jf 7 '.judge | tojson')"
   ! grep -q '^# The findings the last fix round' "$STUB/judge-asked" || fail "the judge of the first review was given a fix round's findings: $(cat "$STUB/judge-asked")"
-  jq -c '{card: "c6", issue: 7, step: "review", result: "NO-GO"} + .' "$wt.fields" >> "$ST/retried.jsonl"
-  mkdir -p "$rd" && jq -cn --arg l "$f" '{round: 1, id: "E1", line: $l, level: "P1", at: "a.txt:2", words: "wrong word", key: "a.txt:2 wrong word"}' > "$rd/findings.jsonl"
+  [ "$(jf 7 '.judge | has("back")')" = false ] || fail "the first review's line keeps a judge.back with no fix round before it: $(jf 7 '.judge | tojson')"
+  mkdir -p "$wt.rounds" && : > "$wt.rounds/1.diff" \
+    && ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
+      && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && ids=$(numbered "$wt") && rounded "$wt" 1 "$ids" "$(cat "$wt.fields")" ) \
+    || fail "rounded() could not record fix round 1"
+  jq -cn --arg l "$f" '{card: "c6", issue: 7, step: "review", result: "NO-GO", time: "2026-01-02T00:00:00Z",
+    judge: {accepted: [{n: 1, finding: $l, reason: "the discarded patch made it"}]}}' >> "$ST/retried.jsonl"
   printf '%s\n' "[P1] [E1] a.txt:2 wrong word. Proof: a.txt:2" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   echo 'F1 DECLINE: other: the fix changed the word' > "$STUB/judge.2"
   judgeone 7 -
-  grep -qxF '# The findings the last fix round was told to fix' "$STUB/judge-asked" \
-    && grep -qxF -- "- E1 $f (accepted: the word is wrong in the change)" "$STUB/judge-asked" \
-    || fail "the judge of the second review was not given the first round's accepted finding and its reason: $(cat "$STUB/judge-asked")"
+  grep -qxF '# The findings the last fix round was told to fix' "$STUB/judge-asked" && grep -qxF -- "- E1 $f" "$STUB/judge-asked" \
+    || fail "the judge of the second review was not given round 1's finding with no reason, when the judge of the review it fixed failed (records: c6 of a discarded patch accepted it): $(cat "$STUB/judge-asked")"
   # Bug caught: the review's line did not keep that section, so the judge replay (lib/replay.sh), with no rounds file to
-  # read, gave its judge another card's accepted findings with no E<n> ids; the first review's line keeps none.
-  jq -e --arg l "- E1 $f (accepted: the word is wrong in the change)" '.judge.back == [$l]' "$wt.fields" >/dev/null \
-    && jq -e 'select(.card == "c6") | .judge | has("back") | not' "$ST/retried.jsonl" >/dev/null \
-    || fail "judged() on c7's second review, given E1 of round 1, did not keep that line alone as judge.back, or the first review's line has one: $(jq -c .judge.back "$wt.fields"; jq -c .judge.back "$ST/retried.jsonl")"
+  # read, gave its judge another card's accepted findings with no E<n> ids.
+  jq -e --arg l "- E1 $f" '.judge.back == [$l]' "$wt.fields" >/dev/null \
+    || fail "judged() on c7's second review, given E1 of round 1, did not keep that line alone as judge.back: $(jq -c .judge.back "$wt.fields")"
+}
+
+# Bug caught: cardfix() did not give rounded() the review's line, so the fix round kept no reason and the judge of the
+# next review was told the finding with none. A whole card run, as only card() shows cardfix() passing the review's
+# line on: t_judgeback calls rounded() with the line itself.
+t_judgebackrun() {
+  local f='[P1] a.txt:2 wrong word. Proof: a.txt:2'
+  judging "[$(issue 7 2026-01-01)]"
+  printf '%s\n' "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  printf '%s\n' "[P1] [E1] $f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  echo 'F1 ACCEPT: the word is wrong in the change. Cost to every card: none' > "$STUB/judge.1"
+  echo 'F1 DECLINE: other: the fix changed the word' > "$STUB/judge.2"
+  # loop: only a card run goes through cardfix(), which records the fix round with the review's line.
+  loop run --only 7 >/dev/null || fail "run exited non-zero"
+  [ "$(wc -l < "$STUB/judges")" = 2 ] && grep -qxF -- "- E1 $f (accepted: the word is wrong in the change)" "$STUB/judge-asked" \
+    || fail "the judge of the second review was not given round 1's finding with the reason the first judge accepted it with: $(cat "$STUB/judge-asked")"
 }
 
 # Bug caught: a finding the judge gave no readable line for is kept in .judge.accepted, so the next review's judge was

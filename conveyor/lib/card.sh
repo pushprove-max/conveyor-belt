@@ -602,8 +602,8 @@ cardreview() {
 cardfix() {
   # What follows this review (afterreview()): the review line is written with why the loop ended (ended), then
   # card() blocks, lands (go, last) or gives the findings to a fix round.
-  afterreview
-  [ -z "$rline" ] || record "$c" "$n" review "$res" "$(jq -c --argjson e "$ended" '. + $e' <<<"$rline")"; rline=''
+  # rl: this review's line, whose judge's reasons go with the fix round's findings (rounded()).
+  afterreview; local rl=$rline; [ -z "$rline" ] || record "$c" "$n" review "$res" "$(jq -c --argjson e "$ended" '. + $e' <<<"$rline")"; rline=''
   # A new P0 is named first, joined to the repeated finding by "; ", each finding's text as the review wrote it (the Board splits the two at that join: app-track.js). Bug: the reason changed a proof's quoted "; [" to ";[".
   [ "$after" != hard ] || { [ -z "$last0" ] || [[ $hard == "$last0 did not hold"* ]] || hard="$last0; $hard"; block "$c" "$n" "$wt" "the fix for $hard"; return; }
   [ "$after" != p0 ] || { block "$c" "$n" "$wt" "review $pass is the last review and still holds a P0 finding, so it files no follow-up: $last0"; return; }
@@ -627,7 +627,7 @@ cardfix() {
     checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
     # This fix round's findings, with their ids, and the diff it made, for the review after it (donewhen.sh repeats(), rereview()), under a number no round in the folder has (roundno()).
     local fr; fr=$(roundno "$wt" "$((pass + rounds))"); mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$fr.diff" \
-      && rounded "$wt" "$fr" "$ids" && refix=$fr && fixtree=$old
+      && rounded "$wt" "$fr" "$ids" "$rl" && refix=$fr && fixtree=$old
     go=next; return
   fi
   go=''

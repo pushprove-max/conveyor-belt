@@ -457,16 +457,17 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
   jq -c --arg r "the judge call failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT")), or gave no answer" '. + {failed: $r}' <<<"$f"; return 1
 }
 # The findings the last fix round of the card was told to fix, each with its id and the reason the judge gave when it
-# accepted it, none when the judge gave no readable line for it (its cost is null) (the judge's line of a review record of the issue, judged(): a retried card's records too, as its fix rounds
-# come with its kept patch), as a section for the judge; nothing when no fix round has run.
-fixedbefore() { # <issue> <worktree>
-  [ -s "$2.rounds/findings.jsonl" ] || return 0
-  { stdb ask issue retried "$1" -- issue cards "$1"; } 2>/dev/null | jq -rs --argjson n "$1" --slurpfile f "$2.rounds/findings.jsonl" '
-    ([.[] | objects | select(.issue == $n and .step == "review") | {time: (.time // ""), a: [.judge.accepted[]? | objects]}] | sort_by(.time) | reverse | map(.a[]?)) as $a
-    | ([$f[] | select(.tracked | not) | .round] | max) as $m
-    | [$f[] | select(.round == $m and (.tracked | not))
-      | . as $x | "- \($x.id) \($x.line)" + (([$a[] | select(.finding == $x.line)] | first) as $j | if $j and $j.cost != null then " (accepted: \($j.reason))" else "" end)]
-    | if length == 0 then empty else "# The findings the last fix round was told to fix", .[], "" end' 2>/dev/null
+# accepted it, none when the judge gave no readable line for it (the reason findings.jsonl keeps for the review that
+# round fixed, donewhen.sh rounded(); a retried card's rounds come with its kept patch), as a section for the judge;
+# nothing when no fix round has run. The reason is never looked up in the issue's review records: a newer one can be of
+# a review after a test fix with no new round, and an older one of a patch `retry --fresh` discarded or, with issue 0,
+# of another card.
+fixedbefore() { # <worktree>
+  [ -s "$1.rounds/findings.jsonl" ] || return 0
+  jq -rs '([.[] | select(.tracked | not) | .round] | max) as $m
+    | [.[] | select(.round == $m and (.tracked | not))
+      | "- \(.id) \(.line)" + (if .reason then " (accepted: \(.reason))" else "" end)]
+    | if length == 0 then empty else "# The findings the last fix round was told to fix", .[], "" end' "$1.rounds/findings.jsonl" 2>/dev/null
 }
 # The review beside the worktree, judged: prints the review's fields, with judge (above) when the judge was asked.
 # It never fails: whatever goes wrong, the review stands as the reviewer wrote it.
@@ -478,7 +479,7 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields>
   # that has no kind): one raised again with nothing new is declined again only after a kind JUDGE allows.
   before=$(stdb ask lines declined 2>/dev/null | jq -rR --arg c "$1" --argjson n "$2" --arg repo "$REPO" 'fromjson? | objects | select(.card == $c or (.issue == $n and $n != 0 and .repo == $repo))
     | "- \(.finding) (declined: \(.why)) [kind: \(.kind // "none")]"' 2>/dev/null | awk '!seen[$0]++' | tail -n 50)
-  back=$(fixedbefore "$2" "$wt"); [ -z "$back" ] || back+=$'\n\n'
+  back=$(fixedbefore "$wt"); [ -z "$back" ] || back+=$'\n\n'
   if ! { judgemarks "$wt" "$ja" > "$wt.judge.marks" && jq -e 'length > 0' "$wt.judge.marks" > /dev/null; } 2>/dev/null; then
     j=$(jq -cn '{failed: "the findings could not be read for the judge"}')
   elif [ -z "$before" ] || before="# Findings already declined on the cards of this issue"$'\n'"$before"$'\n\n'

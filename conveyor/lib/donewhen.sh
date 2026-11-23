@@ -381,18 +381,21 @@ MOVEJQ='def files: reduce (split("\n")[]) as $l ([];
 # location and line (with its proof). Each earlier finding this round was not told (one a review said holds) is
 # followed through the round's diff too, in a record {round, id, words, tracked: true} with moved and mkey, or location
 # "needs review": its key keeps to its code, so a later finding at the line that took its place is not joined to it.
+# A finding the judge of the review it fixes accepted (in <review line>, that review's record line: judge.accepted,
+# judged()) keeps the judge's reason, as reason, for the judge of the next review (review.sh fixedbefore()).
 # The round is one no review has answered yet: <worktree>.rounds/told and answered go (cardreview() writes them,
 # resumeplan() and keptrep() read them).
-rounded() { # <worktree> <round> <numbered() lines>
+rounded() { # <worktree> <round> <numbered() lines> [<review line>]
   rm -f "$1.rounds/told" "$1.rounds/answered"; [ -n "$3" ] || return 0
-  jq -cs --argjson r "$2" --rawfile d "$1.rounds/$2.diff" --rawfile ls <(git -C "$1" ls-files) --slurpfile h <(cat "$1.rounds/findings.jsonl" 2>/dev/null) "$MOVEJQ"'
+  jq -cs --argjson r "$2" --argjson rv "${4:-null}" --rawfile d "$1.rounds/$2.diff" --rawfile ls <(git -C "$1" ls-files) --slurpfile h <(cat "$1.rounds/findings.jsonl" 2>/dev/null) "$MOVEJQ"'
     ($d | files) as $fs | ($ls | split("\n") | map(select(. != ""))) as $l | map(.id) as $ids
     | def follow($at; $w): ($at | capture("^(?<p>.*):(?<n>[0-9]+)$")) as $a | moveto($fs; $l; $a.p; ($a.n | tonumber))
         | if . == null then {location: "needs review"} else {moved: ., mkey: (. + " " + $w)} end;
     (.[] | . as $f | ([$h[] | select(.id == $f.id)] | first) as $o
       | del(.named, .seen) + {round: $r}
       + (if $f.at == "" then {mkey: $f.key} else follow($f.at; $f.words) end)
-      + (if $o == null then {} else {first: ($o | {round, at, line})} end)),
+      + (if $o == null then {} else {first: ($o | {round, at, line})} end)
+      + ([$rv.judge.accepted[]? | objects | select(.finding == $f.line and .reason != null)] | first | if . then {reason} else {} end)),
     ($h | group_by(.id)[] | last | select(.moved != null and (.id | IN($ids[]) | not))
       | {round: $r, id, words, tracked: true} + follow(.moved; .words))' <<<"$3" >> "$1.rounds/findings.jsonl"
 }
