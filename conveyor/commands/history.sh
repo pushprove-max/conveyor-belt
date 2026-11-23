@@ -23,6 +23,7 @@
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1
+. "$HERE/lib/setup.sh" || exit 1
 names || exit 1
 case $#:${2:-} in
   1:) history ;;

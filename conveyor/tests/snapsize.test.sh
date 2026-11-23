@@ -86,6 +86,8 @@ t_historysum() {
 # Bug (#530): `conveyor.sh history` on a new state (no history.json yet) takes a snapshot first, and the snapshot's
 # tests part reads the test rules (lib/testrules.sh). The history command's script (commands/history.sh) did not load
 # that file, so the first history printed shell errors (TESTRULES unset, testrulesettings not found).
+# Bug (#1550): the snapshot's health part calls timesadd() (lib/setup.sh), and the history script did not load setup.sh,
+# so the first history stopped with "timesadd: command not found" and no record.
 t_historyfirst() {
   local hist
   setup "[$(issue 1 2026-01-01)]"; mkdir -p "$ST"
