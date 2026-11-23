@@ -225,7 +225,7 @@
   // The issue goes before `before` in the queue: the order sent is the queue up to it, and every issue the record
   // already put first, so nothing that was ordered loses its place. A pin above every open issue (filed after the
   // snapshot's list was read, so not in the queue yet) is kept too, as the engine keeps it: it goes after every pin the
-  // record had above it and before every pin the record had below it, so it passes none of them. The issue moved does
+  // record had above it and before every pin the record had below it, so it moves past none of them. The issue moved does
   // not set that place, as it can now be anywhere; but when it was above the newer pin and still is in that place, the
   // newer pin stays after it.
   function place(item, before) {

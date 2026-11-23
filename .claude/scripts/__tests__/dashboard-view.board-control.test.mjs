@@ -282,7 +282,7 @@ test('the Board: a move in the queue keeps a newer pin behind the pins that were
 
 // Bug: the newer pin went just after the pin the record had above it even when that pin was the issue moved, so with
 // saved order [20, 21, 90] a drag of #21 onto #20 sent 21 90 20, and the host saved #90 ahead of #20.
-test('the Board: a move in the queue keeps a newer pin behind a pin the moved issue passes', async () => {
+test('the Board: a move in the queue keeps a newer pin behind a pin the moved issue moves past', async () => {
   const w = boot({ tab: 'control' });
   const d = full();
   d.panels.board.data.control.order = [20, 21, 90];
