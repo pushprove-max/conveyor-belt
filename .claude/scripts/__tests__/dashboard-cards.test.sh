@@ -462,12 +462,13 @@ q '.panels.rules.data | has("machine") | not' "the Rules part no longer carries 
 q '.panels.machine.data | .state == "running" and .cap == 5 and .used == 4 and (.projects | map([.repo, .state, .mode, .used, .cap])) == [["sample", "paused", "pause", 1, 3], ["widgetshop", "running", "run", 3, 2]]' \
   "one machine head: 4 of 5, the slots of both projects (3 and 2) under the machine's 10; sample's own pause leaves widgetshop and the machine running"
 q '.panels.machine.data.projects[1].order == [9]' "a project's pinned order is its own record's"
-# Issue 413: one slots figure on the page. The machine bar, the head's "On the belt" tile (the Belt part) and Belt
-# 3D's deck all read 4 of 5: the cards holding a slot (the landed card being pushed holds none) of the slots in force.
+# Issue 413: the machine bar and Belt 3D's deck give one slots figure, 4 of 5: the cards holding a machine slot (the
+# landed card being pushed holds none) of the slots in force. The Belt part ("On the belt" tile) counts against the card
+# cap; here no card waits or lands and no machine cap is under the card cap, so it reads 4 of 5 too.
 # The bug: the machine bar said 4 of 10 (the machine cap, which the projects' own 3 and 2 never reach) beside 4 of 5.
 q '[(.panels.belt3d.data.deck | [.used, .cap]), (.panels.machine.data | [.used, .cap]),
     (.panels.belt.data | [([.cards[] | select(.landed != true)] | length), .cap])] == [[4, 5], [4, 5], [4, 5]]' \
-  "the machine bar, the On the belt tile and Belt 3D's deck give one slots figure"
+  "the machine bar and Belt 3D's deck give one slots figure, and the On the belt tile agrees where no card waits or lands"
 # Bug: a judge turned off read as no judge setting at all (`false // null` is null), and the project list said
 # "judge not read" where the owner had said off. Off is off, whatever model the judge's settings still name.
 CJ=$(jq -c '.control.judgeOn = false | .modelSettings = {judge: {model: "claude-j", effort: "high"}}' <<<"$C3")
@@ -475,18 +476,20 @@ answer "$P" "$P_URL" 1794000000 "$CJ" "$C_URL" 0
 run
 q '.panels.machine.data.projects[1].models.judge == {on: false}' "a project whose judge is off says off, never not read"
 # The whole machine paused (the host file's mode): the machine says so; no project's own state is rewritten.
-# Its cap is 4 here, under the projects' 3 and 2: the slots in force are the machine's 4, everywhere on the page.
+# Its cap is 4 here, under the projects' 3 and 2: the slots in force are the machine's 4 in the machine bar and Belt
+# 3D's deck; the Belt part keeps the card cap, 5.
 MP=$(jq -c '.paused = true | .cap = 4' <<<"$MC")
 # widgetshop's 3 cards: one lands (offCap, issue 1538) and one waits on another card (health.waitingCount 1). The card cap
 # leaves out the landing card, but the machine's own cap does not: the loop sends the landing card to the machine's gate
-# (room(), conveyor/lib/run.sh) and leaves out the waiting one. So the machine, the project and Belt 3D's deck count
-# 1 + 2 slots in use: never 4 (the waiting card counted) and never 1 + 1 (the landing card left out, which showed a
-# free slot on a full machine).
+# (room(), conveyor/lib/run.sh) and leaves out the waiting one. So the machine and Belt 3D's deck count 1 + 2 slots
+# in use: never 4 (the waiting card counted) and never 1 + 1 (the landing card left out, which showed a free slot on a
+# full machine). widgetshop's project row counts its cards against its own cap (the waiting one in, the landing one
+# out): 2 too, by another count.
 answer "$(with_machine "$MP" "$P")" "$P_URL" 1794000000 "$(with_machine "$MP" "$(jq -c '.health.waitingCount = 1 | .belt[2].offCap = true' <<<"$C3")")" "$C_URL" 0
 run
 q '.panels.machine.data | .state == "paused" and (.projects | map(.state)) == ["paused", "running"]' "a paused machine is paused; each project's state stays its own record's"
 q '[.panels.machine.data.used, (.panels.machine.data.projects | map(.used)), .panels.belt3d.data.deck.used] == [3, [1, 2], 3]' \
-  "a card that only waits on another card holds no slot in the machine's, the project's and the deck's count, and a landing card (offCap) holds one"
+  "a card that only waits on another card holds no slot in the machine's and the deck's count, and a landing card (offCap) holds one; the project's row counts its cards against its own cap"
 q '[.panels.machine.data.cap, .panels.belt3d.data.deck.cap] == [4, 4]' "a machine cap under the projects' own caps together is the slots in force, the same in the machine bar and Belt 3D"
 # Bug: the Belt part (the On the belt tile, the Belt panel) paired the cards counted against the card cap with the machine's
 # cap, "2 of 1" with a project cap of 3 and a machine cap of 1; the Machine page's project row paired the machine's count

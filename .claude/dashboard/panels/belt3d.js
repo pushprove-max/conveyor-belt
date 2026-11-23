@@ -379,9 +379,10 @@
   function drawDeck() {
     const d = view.deck || {}, r = view.ro, state = str(d.state);
     txt(r.host, `CONVEYOR · ${(str(d.host) || '—').toUpperCase()}`);
-    // The slots as the head's "On the belt" tile has them, the one slots figure on the page ("5 OF 13 IN USE"): the
-    // cards holding a slot, of the slots in force, every project's (the page's project filter leaves the deck whole, as
-    // the head). The header strip's counts are not repeated here (issue 413).
+    // The slots as the machine bar has them ("5 OF 13 IN USE"): the cards holding a machine slot (a card that only
+    // waits holds none), of the slots in force, every project's (the page's project filter leaves the deck whole, as
+    // the head). The "On the belt" tile counts the cards against the card cap instead, so its figure can differ.
+    // The header strip's counts are not repeated here (issue 413).
     txt(r.slots, !num(d.used) ? 'SLOTS — IN USE' : `SLOTS ${d.used}${num(d.cap) ? ` OF ${d.cap}` : ''} IN USE`);
     txt(r.clock, `ET ${ET(Date.now(), true)}`);
     cls(r.dot, state === 'running' ? 'on' : 'off');

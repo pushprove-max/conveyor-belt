@@ -27,8 +27,8 @@
       dash: figure === 'perLandedUsd' && landed === 0 ? 'No card landed in 7 days' : 'Not priced' };
   }
   // The machine head, on every tab: the machine's one Conveyor over every project (the machine part, dashboard.sh):
-  // its state, the slots in use across all projects of the slots in force ("7 of 10", the figure the "On the belt" tile
-  // and Belt 3D's deck give: dashboard.sh, slots), today's cost across projects, and
+  // its state, the slots in use across all projects of the slots in force ("7 of 10", the figure Belt 3D's deck gives:
+  // dashboard_panels.sh, slots; the "On the belt" tile counts against the card cap instead), today's cost across projects, and
   // the one control that pauses or resumes the whole machine, "Pause all projects" (POST machine: it names no project
   // and changes no project's own record), and when paused who paused it and how to resume. With more than one project, the filter that shows one project only on every list (the one
   // project picker: the Board and the Rules show the project it picks), and the

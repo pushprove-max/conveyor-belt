@@ -184,8 +184,8 @@ PANELS_JQ='
   # host file says so), running (a loop of one of them runs), else stopped.
   def mstate: ([.[].snap.health.machine | objects][0] // null) as $m
     | if $m.unread == true then "not read" elif $m.paused == true then "paused" elif any(.[]; .snap.health.loop == true) then "running" else "stopped" end;
-  # The slots in force of the records (the record list), the one slots figure of the page (issue 413: the head, the
-  # machine bar and Belt 3D each gave their own): every project'"'"'s own cap together, and no more than the machine cap
+  # The slots in force of the records (the record list), the cap of the machine bar and of Belt 3D'"'"'s deck (issue 413:
+  # each part gave its own; the Belt part counts against cardcap): every project'"'"'s own cap together, and no more than the machine cap
   # where the host file sets one; null when neither is known.
   # cardcap is the sum of the own caps of the projects alone: the card cap, which the Belt part counts against.
   def cardcap: [.[].snap.health.builderCap | numbers] | if length == 0 then null else add end;
