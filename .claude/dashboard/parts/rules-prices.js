@@ -94,11 +94,12 @@
     return a[2] === 'add' ? `${a[3]} is ${m}` : `${a[3]} is no longer ${m}`;
   }
   // Changes of the pack's prices sent as one, with the Undo that puts back what they replace; done when all are saved.
-  function priceRun(changes, done) {
+  // saved(a), when given, is called with each change a once the host saved it (run()).
+  function priceRun(changes, done, saved) {
     let o = pricesShown();
     const undo = [];
     changes.forEach((a) => { undo.unshift(...inverse(o, a)); o = applied(o, a); });
-    return run(changes.map((a) => ['prices', a]), changes.map(priceWords).join('; '), done, undo);
+    return run(changes.map((a) => ['prices', a, ...(saved ? [() => saved(a)] : [])]),changes.map(priceWords).join('; '), done, undo);
   }
 
   function pricesSection() {
@@ -293,14 +294,10 @@
       was.filter((x) => !ed.aliases.includes(x)).forEach((x) => changes.push(['alias', m, 'remove', x]));
     }
     if (!changes.length) { S.priceEdit = null; draw(); return; }
-    // The set is the first change: the host saved it, though it refused a later change, if the run kept a new saved
-    // value for this edit's project (S.priceSaved, by repo, written by run() on each answer saved, whichever project is
-    // on screen then) that holds the prices sent. Not the prices on screen: another project can be picked meanwhile.
-    const repo = S.d.repo, before = S.priceSaved.get(repo);
-    priceRun(changes, () => { S.priceEdit = null; }).then(() => {
-      const s = S.priceSaved.get(repo);
-      if (sent && s && s !== before && same(sent, asPack(s.over[m]))) ed.base = sent;
-    });
+    // The pack holds the prices sent once the host answered that their own set is saved, though it refused a later
+    // change. Not the prices saved or shown after the run: a snapshot that came between the set's answer and a later
+    // change's holds a price set elsewhere, and another project can be picked meanwhile.
+    priceRun(changes, () => { S.priceEdit = null; }, (a) => { if (a[0] === 'set') ed.base = sent; });
   }
   // Reset names the price that clearing m gives: the fast mode of a model with your price then costs twice that
   // price, not its built-in price (use_prices in dashboard_limit.py).

@@ -258,7 +258,8 @@
   // Actions to the page's host, one after another and one batch at a time (as the Board's): while they are out the
   // controls are off. The first one refused stops the rest. what: the change in words, for the head. Every one names
   // the project on screen when they were asked for; an answer that comes after another project was picked is not shown.
-  // undo: the steps that undo these, for Undo on the line that says they were done (null: none), kept with them as the
+  // A step is [action, args], or [action, args, saved]: saved() is called once the host saved that step, whatever the
+  // later steps' answers and whichever project is on screen then. undo: the steps that undo these, for Undo on the line that says they were done (null: none), kept with them as the
   // last change here. to: the project they are for when it is not the one on screen: an Undo pressed after another
   // project was picked goes to the project the change was made in, never to the one picked since.
   function run(steps, what, done, undo, to) {
@@ -279,7 +280,7 @@
     let i = 0;
     const next = () => {
       if (i >= steps.length) return Promise.resolve(true);
-      const [action, args] = steps[i];
+      const [action, args, saved] = steps[i];
       i += 1;
       // A setting shows its new value while it is out; refused, or unanswered, the value shown before it comes back and
       // stands until a snapshot begun at or after the refusal (with no time, the next one), not one that arrived while
@@ -300,6 +301,7 @@
         moves(res.ok ? { at: res.at, rec: res.rec } : { error: `${MOVES[action]}: ${S.ctx.refusal(res.said)}` });
         if (!res.ok) { back(res.said, res.at); tell(`Not done: ${S.ctx.refusal(res.said)}${steps.length > 1 ? ` (${i - 1} of ${steps.length} sent)` : ''}`); return false; }
         put({ guessed: false });
+        if (saved) saved();
         // A model price saved shows at once (pricesSection), its Undo's too. It stands until a snapshot begun at or
         // after the answer (savedShown): the pack is not an input of the snapshot, so one kept from before the change
         // is served for a while after it. It is kept for its project (by repo), whichever project is on screen when

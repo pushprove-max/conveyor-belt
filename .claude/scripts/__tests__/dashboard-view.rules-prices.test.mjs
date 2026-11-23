@@ -310,6 +310,33 @@ test('Rules: Edit retried after a refused name and a price changed elsewhere sen
   assert.deepEqual(posted(w), [['set', 'claude-sonnet-5-5', '4', '10', '0.1'], ['name', 'claude-sonnet-5-5', 'Sonnet (proxy)']]);
 });
 
+// Bug: Save learned that its price was saved from the prices kept after the whole run, so when a snapshot with 5 set
+// elsewhere came between the set's answer and the name's, the saved name kept 5, the refused alias left the opened 4 as
+// the saved price, and a retry with the alias taken out sent 3 back over 5.
+test('Rules: Edit retried after a snapshot came between its saved price and a refused alias does not send the price again', async () => {
+  const w = open({ overrides: { 'claude-sonnet-5-5': { input: 4, output: 10, cacheRead: 0.1 } } });
+  act(rowOf(w, 'claude-sonnet-5-5'), 'price-edit').click();
+  const ed = rowOf(w, 'claude-sonnet-5-5');
+  type(act(ed, 'price-input'), '3');
+  type(act(ed, 'price-name'), 'Sonnet (proxy)');
+  type(act(ed, 'price-alias-new'), 'other/sonnet');
+  act(ed, 'price-alias-add').click();
+  const refusal = { ok: false, status: 409, text: () => Promise.resolve('conveyor: prices alias: other/sonnet is already claude-opus-5-5; nothing changed') };
+  // The second send (the name) comes after a snapshot with Sonnet 5.5 at 5 set elsewhere; the host refuses the third.
+  Object.defineProperty(w, 'reply', { configurable: true, get: () => {
+    if (w.posts.length === 2) next(w, priceAt5());
+    return w.posts.length > 2 ? refusal : null;
+  } });
+  act(rowOf(w, 'claude-sonnet-5-5'), 'price-save').click();
+  await settle(); await settle(); await settle();
+  assert.deepEqual(posted(w), [['set', 'claude-sonnet-5-5', '3', '10', '0.1'], ['name', 'claude-sonnet-5-5', 'Sonnet (proxy)'], ['alias', 'claude-sonnet-5-5', 'add', 'other/sonnet']]);
+  Object.defineProperty(w, 'reply', { configurable: true, writable: true, value: null });
+  act(rowOf(w, 'claude-sonnet-5-5'), 'price-alias-drop').click();
+  act(rowOf(w, 'claude-sonnet-5-5'), 'price-save').click();
+  await settle(); await settle();
+  assert.deepEqual(posted(w), [], 'the 3 the first Save saved is not sent over the 5 set elsewhere');
+});
+
 // Bug: Save read the prices of the project on screen after its run to learn whether the host saved the price, so with
 // another project (Sonnet 5.5 at 7 / 10 / 0.1) picked while it was sending, it did not learn that sample saved 3, and
 // a retry in sample that fixed only the name, after a snapshot showed 5 set elsewhere, sent 3 back over 5.
