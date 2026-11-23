@@ -884,6 +884,9 @@ q '.panels.needs.data | (.cards.waiting | map([.card, .repo, .title, .sentence])
   and .behind == [{repo: "sample", at: "'"$at"'"}]' "Needs you holds the cards the records hold blocked and waiting for the yes now, and names the record that is behind"
 q '.panels.belt.data | .building == 5 and .byRepo.sample.building == 4 and .byRepo.widgetshop.building == null and .behind == [{repo: "sample", at: "'"$at"'"}]' \
   "the belt counts loop.json's 4 for the record that is behind, and its cards for the one that is not, a card that lands (offCap: widgetshop's w2) left out (issue 1538)"
+# Bug: the Machine project row counted the old snapshot's one card for sample while the Belt panel said 4.
+q '.panels.machine.data.projects | map({key: .repo, value: .used}) | from_entries == {sample: 4, widgetshop: 1}' \
+  "each Machine project row counts as the Belt panel does: loop.json's 4 for the record behind, its own cards for the other"
 ) & started behind
 
 ( fresh behindgone

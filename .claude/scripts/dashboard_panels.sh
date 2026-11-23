@@ -158,7 +158,7 @@
 #           project's loop runs; stopped: none does; not read: the host's host file does not read), cap (the slots
 #           in force: every project's own cap together, no more than the machine cap), used (the cards holding a slot now, every project's together),
 #           todayUsd and todayLeftOut (as cost's), repos, projects (each project on its own: repo, state, reason, loop,
-#           mode (its control record's), cap (its own, in force), guard (its control record's weekly-limit guard) and used (its cards counted against its own cap, as belt's), needs (its cards
+#           mode (its control record's), cap (its own, in force), guard (its control record's weekly-limit guard) and used (its cards counted against its own cap, as belt's: loop.json's count while it is behind), needs (its cards
 #           blocked or waiting for the owner's yes, its issues waiting for that yes before their build, and its open
 #           decisions, each {repo, decision: its id, title: the question}), belt,
 #           queue (pick order), held, waiting (its issues waiting on an open dependency, the snapshot's queue.waiting;
@@ -549,7 +549,8 @@ PANELS_JQ='
    # null from a host file that sets none, and from a snapshot from before it said). A card holds a slot from its
    # pick to its landing, a landing card too (a landed card waiting for its push holds none), but while it only waits (idle):
    # the machine'"'"'s count (room(), conveyor/lib/run.sh), not the card cap'"'"'s (counted). That count, with the machine cap, is
-   # the machine'"'"'s figure; each project'"'"'s own row gives the cards counted against its own cap (counted).
+   # the machine'"'"'s figure; each project'"'"'s own row gives the cards counted against its own cap (counted), or, while
+   # its snapshot is behind its card records, loop.json'"'"'s count ($behind), the same figure as the Belt panel'"'"'s.
    machine: (if $R == null then {error: $cerr, data: null} else
         def used: [([.snap.belt[] | select(.landed != true)] | length) - ([.] | idle), 0] | max;
         def inforce: if type == "object" then {model: (.model // null), effort: (.effort // null)} else null end;
@@ -558,7 +559,8 @@ PANELS_JQ='
         cap: ($R | slots), used: ([$R[] | used] | add), todayUsd: ([$R[].snap.cost.today] | total),
         todayLeftOut: ([$R[].snap.cost.todayLeftOut | numbers] | add // 0), repos: [$R[].repo],
         projects: [$R[] | . as $r | .snap as $s | {repo, state: ($s.health.state // null), reason: ($s.health.reason // null), loop: $s.health.loop,
-          mode: ($s.control.mode // null), cap: ($s.health.builderCap // null), guard: ($s.control.guard // null), used: ([$s.belt[] | select(counted)] | length),
+          mode: ($s.control.mode // null), cap: ($s.health.builderCap // null), guard: ($s.control.guard // null),
+          used: (first($behind[] | select(.repo == $r.repo) | .building | numbers) // ([$s.belt[] | select(counted)] | length)),
           needs: (([$s.needsYou.waiting[], $s.needsYou.blocked[], ($s.needsYou.before | arrays | .[]), ($s.needsYou.pipeline | arrays | .[]), ($s.needsYou.farDeps | arrays | .[]) | {card, issue, name: (.name // null), title}] | few($r))
             + [$dec.decisions | arrays | .[] | select(.repo == $r.repo) | {repo, decision: .id, title: .question}]),
           belt: ([$s.belt[] | select(.landed != true) | {card, issue, name: (.name // null), title, step}] | few($r)),

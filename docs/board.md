@@ -185,7 +185,8 @@ lists every project's rows, so it stays as it is.
 - **A snapshot that is behind.** When a project's card records changed after its last snapshot was made, Needs you
   and On the belt each show "As of <time>, the belt has changed since." under what they show. Needs you then lists
   the cards that the card records hold blocked or waiting for your yes now, and On the belt counts the cards that the
-  loop builds now (none when the loop does not run).
+  loop builds now (none when the loop does not run). When **Show** is set to that project, its row in **Projects and
+  Foremen** on Control shows the same count in its "cards at once" as On the belt.
 - **A blocked card.** A blocked card shows, in this order: why it failed, in one sentence; the first finding of its
   review, the first failed test file with its first failure line, or, when a run of the project's checks failed before
   any test ran, the output of those checks; the next step; what **Fix** does, when it has Fix; then its
