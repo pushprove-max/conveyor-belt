@@ -474,13 +474,15 @@ t_healsretriedtests() {
 }
 
 # Bug (issue 1565, review of its second fix): the retried file went to jq as one argument, and Linux refuses one over
-# 128 KiB, so with a long retry history no batch card could be filed at all. 2,000 retried cards, 200 KB and more.
+# 128 KiB, so with a long retry history no batch card could be filed at all. 2,000 retried cards with card ids of the
+# real c<time>-<repo>-<issue> form: healsbatch() cuts each line to {card, issue, red}, and that cut is over 128 KiB too.
 t_healsretriedbig() {
   local out
   judging '[]'; rm -f "$ST/healssort.jsonl"
   jq -cn '{id: "h00000000r4", time: "2026-11-20T00:00:00Z", card: "c5", issue: 5, repo: "r", area: "area:engine", finding: "[P2] d.sh:4 a late line", why: "it heals", effect: "self-heals", from: "review"}' >> "$ST/selfheals.jsonl"
-  jq -cn 'range(2000) | {card: "c\(100000 + .)-\(1000 + .)", issue: (1000 + .), step: "blocked", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "blocked", sha: "", reason: "build: it failed, and this line is long enough that the file is over the limit of one argument"}' > "$ST/retried.jsonl"
-  [ "$(wc -c < "$ST/retried.jsonl")" -gt 200000 ] || fail "the retried file of this case is not over 128 KiB: $(wc -c < "$ST/retried.jsonl")"
+  jq -cn 'range(2000) | {card: "c20261101T\(100000 + .)-conveyor-belt-\(1000 + .)", issue: (1000 + .), step: "blocked", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "blocked", sha: "", reason: "build: it failed, and this line is long enough that the file is over the limit of one argument"}' > "$ST/retried.jsonl"
+  [ "$(jq -c '{card, issue, red: null}' "$ST/retried.jsonl" | sort -u | wc -c)" -gt 131072 ] \
+    || fail "the retried lines of this case, cut as healsbatch() cuts them, are not over 128 KiB, so one jq argument still takes them"
   out=$(loop heals batch area:engine 2>&1) && [ "$(heals '.batched')" = 100101 ] \
     || fail "the batch card was not filed with a retried file of $(wc -c < "$ST/retried.jsonl") bytes: $out"
 }
