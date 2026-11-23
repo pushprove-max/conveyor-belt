@@ -932,6 +932,7 @@
 {"area": "uncovered", "test": "uncovered.test.sh"}
 {"area": "uncovered", "file": "conveyor/tools/uncovered.py"}
 {"area": "testrun", "test": "uncovered.test.sh"}
+{"area": "testrun", "test": "foremanpass.test.sh"}
 {"area": "testbrief", "test": "testbrief.test.sh"}
 {"area": "testbrief", "file": "conveyor/tools/testbrief.sh"}
 {"area": "testbrief", "file": "conveyor/tools/outbrief.sh"}

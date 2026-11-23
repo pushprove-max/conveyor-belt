@@ -72,4 +72,5 @@ timedout() {
 }
 check 'one or two timed-out gh auth tokens in a row wake nothing; three wake as signed out, with why' timedout
 
-[ "$fails" = 0 ]
+[ "$fails" = 0 ] || exit 1
+echo "ok watch-gh" # the pass of the case its FAIL lines name, as the main-red proof reads it

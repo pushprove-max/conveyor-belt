@@ -166,3 +166,4 @@ check 'both pushed, #1 by metrics.cards alone: one wake' poll pushnoline
 check 'it names the commit of the landing of the day before, from metrics.cards' has pushnoline 'pushnoline: #1 landed as 100000000001: your step is due'
 
 [ "$fails" = 0 ] || { cat "$T"/*.err >&2; exit 1; }
+echo "ok watch-landed" # the pass of the case its FAIL lines name, as the main-red proof reads it

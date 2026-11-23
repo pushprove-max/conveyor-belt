@@ -53,3 +53,4 @@ check 'a card waiting the pack'"'"'s waitWake on another card wakes' poll card 5
 check 'its line names that card, its step and its last action' has card 'card: #50 has waited 5 minutes on #51 (at review, last action: codex review round 2)'
 
 [ "$fails" = 0 ] || { cat "$T"/*.err >&2; exit 1; }
+echo "ok watch-wait" # the pass of the case its FAIL lines name, as the main-red proof reads it

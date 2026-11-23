@@ -115,3 +115,4 @@ fixture open "$(red '[{"issue": 757, "state": "open"}, {"issue": 753, "state": "
 check 'a fix still open gives no wake' nope poll open
 
 [ "$fails" = 0 ] || { cat "$T"/*.err >&2; exit 1; }
+echo "ok watch-relfix" # the pass of the case its FAIL lines name, as the main-red proof reads it

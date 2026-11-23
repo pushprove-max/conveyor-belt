@@ -117,4 +117,5 @@ check "a keepalive turn that read the cache: the pings go on" poll hit "$P"
 pinged unread '"none"'
 check "a keepalive turn whose usage cannot be read: the pings go on" poll unread "$P"
 
-[ "$fails" = 0 ]
+[ "$fails" = 0 ] || exit 1
+echo "ok watch-idle" # the pass of the case its FAIL lines name, as the main-red proof reads it

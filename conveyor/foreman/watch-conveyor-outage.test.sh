@@ -61,4 +61,4 @@ read -r first last fails < "$FD/conveyor-down-gamma.txt"
 # Delta was not read, and its outage was over before the poll began: its file stays as it was.
 [ "$(cat "$FD/conveyor-down-delta.txt")" = "$((NOW - 900)) $((NOW - 181)) 5" ] \
   || fail "after TERM to the watcher during beta's longer read, before the read of delta (last failed poll 181 s before the poll), delta's outage file is not $((NOW - 900)) $((NOW - 181)) 5 as it was: $(cat "$FD/conveyor-down-delta.txt")"
-echo "ok [watch-conveyor-outage]"
+echo "ok watch-conveyor-outage"

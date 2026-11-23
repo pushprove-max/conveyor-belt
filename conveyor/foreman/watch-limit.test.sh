@@ -25,4 +25,5 @@ check 'a reading with no reset time wakes' poll "$DAY"
 check 'the same reading the same day does not wake again' nope poll $((DAY + 3600))
 check 'the same reading a day later wakes again' poll $((DAY + 86400))
 
-[ "$fails" = 0 ]
+[ "$fails" = 0 ] || exit 1
+echo "ok watch-limit" # the pass of the case its FAIL lines name, as the main-red proof reads it

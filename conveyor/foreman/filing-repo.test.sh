@@ -115,4 +115,9 @@ held_ otherworktree worktree & d=$!
     || { echo "FAIL [othername]: for the output $l, an issue was held in the record of example/first-project: $(cat "$T/calls") $out" >&2; exit 1; }
   [[ $out == *'Not held in Conveyor: 5 of another-owner/other-name'* ]] \
     || { echo "FAIL [othername]: for the output $l, the hook did not say issue 5 is not held: $out" >&2; exit 1; } ) & h=$!
-rc=0; for p in "$a" "$b" "$c" "$d" "$e" "$f" "$g" "$h"; do wait "$p" || rc=1; done; exit "$rc"
+# Each case that passed prints `ok <case>`, named as its FAIL line names it: the pass the main-red proof reads.
+rc=0
+for p in "$a norecords" "$b named" "$c othermain" "$d otherworktree" "$e nomatch" "$f owners" "$g sshowners" "$h othername"; do
+  if wait "${p%% *}"; then echo "ok ${p#* }"; else rc=1; fi
+done
+exit "$rc"

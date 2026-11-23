@@ -110,4 +110,5 @@ nohealth() {
 }
 check 'a card retried after the snapshot was made is not named blocked when health does not read' nohealth
 
-[ "$fails" = 0 ]
+[ "$fails" = 0 ] || exit 1
+echo "ok watch-recordsnewer" # the pass of the case its FAIL lines name, as the main-red proof reads it
