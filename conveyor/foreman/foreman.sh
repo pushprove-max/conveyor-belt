@@ -436,10 +436,11 @@ context() {
     [ "$i" = 1 ] && [ "$cap" -lt 0 ] && printf '%s' "$mid" > "$FD/start-rest.md.$$" && mv -f "$FD/start-rest.md.$$" "$FD/start-rest.md" || break
     mid=$(printf '\n# %s (auto'"'"'s rules and the standing kinds of routine yes) did not fit in this start (Claude Code cuts a start over 10,000 characters): Read it now, before you act.\n\nx' "$FD/start-rest.md"); mid=${mid%x}
   done
+  # The state and owner rules, then rules.md whole as rules_text prints it, each take room before the live summary when it fits (bug: 15 open decisions dropped the state, then rules.md's 10 lines).
+  st=$(context_state) lv="# $FD/rules.md (this project's Foreman rules)"; for i in $(($(printf %s "$st" | wc -c) - $(printf %s "$stl" | wc -c) + own - $(printf %s "$rdl" | wc -c))) $([ -n "$RULES_APART" ] || [ ! -s "$FD/rules.md" ] || echo $((${#lv} + 3 + $(p_stat "$FD/rules.md" | cut -d' ' -f1)))); do [ "$((cap - i))" -lt 0 ] || { cap=$((cap - i)); room=$((room - i)); }; done
   [ "$cap" -le "$LIVE_CAP" ] || cap=$LIVE_CAP; [ "$cap" -ge 0 ] || cap=0
   lv=$(LIVE_CAP=$cap live); mid+=$lv
   notes=$(context_notes $((room - $(printf '%s\n' "$lv" | wc -c) - 1))); [ -z "$notes" ] || head+=$'\n'$notes
-  st=$(context_state)
   if [ "$(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)" -gt "$((CTX_LIMIT - own))" ]; then st=$stl; fi
   left=$((CTX_LIMIT - $(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)))
   # The fixed text and the rest alone may leave no room for the owner rules: a Read line stands for them, and for this

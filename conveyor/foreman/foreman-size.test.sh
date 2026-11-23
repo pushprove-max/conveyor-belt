@@ -140,6 +140,25 @@ t_old() {
   text RULESBODY 200 > "$FD/rules.md"; st=$(hook start sA)
   [ "${#st}" -lt 10000 ] && grep -qF "Read the rest from $FD/rules.md" <<<"$(ctx <<<"$st")" || fail "a start without --rules-apart is ${#st} characters or has no Read line"
 }
+# Bug it catches: the live summary took its room (up to LIVE_CAP) before the saved state was measured, so with 15 open
+# decisions a start without --rules-apart swapped the 16 lines of state for a Read line, and once the state fit, the
+# live summary left rules.md under rules_text's 300-byte margin, so none of its 10 lines came. The live summary now yields.
+t_old_live() {
+  local st c i
+  fixture old_live; allkinds
+  text RULESBODY 10 > "$FD/rules.md"; text STATEBODY 16 > "$FD/state.md"
+  mkdir -p "$M/.claude/metrics" || fail "the ledger folder was not made"
+  for ((i = 1; i <= 15; i++)); do
+    jq -cn --arg i "$i" '{id: "d\($i)", question: ("Approve the change \($i) " + ("q" * 150)), askedAt: "2026-11-22T10:00:00Z", answeredAt: null}'
+  done > "$M/.claude/metrics/decisions.jsonl"
+  marked; st=$(hook start sA); c=$(ctx <<<"$st")
+  [ "${#st}" -lt 10000 ] || fail "a start without --rules-apart, with 15 open decisions, is ${#st} characters, not under 10000"
+  grep -qF 'open decisions (15' <<<"$c" || fail "the live summary has no open decisions, so the fixture does not fill it: $(grep -A3 'Live summary' <<<"$c" | cut -c1-200)"
+  [ "$(grep -c STATEBODY <<<"$c")" = 16 ] && ! grep -qF "Read $FD/state.md now" <<<"$c" \
+    || fail "a start without --rules-apart, with 15 open decisions in the live summary, lacks the 16 state lines: $(grep -E 'did not fit|cut at' <<<"$c" | cut -c1-200)"
+  [ "$(grep -c RULESBODY <<<"$c")" = 10 ] \
+    || fail "a start without --rules-apart, with 15 open decisions in the live summary, has $(grep -c RULESBODY <<<"$c") of the 10 rules.md lines: $(grep -E 'did not fit|cut to fit' <<<"$c" | cut -c1-200)"
+}
 
 # A project with no rules.md still gets the plugin's 11 rules on working with the owner, in the rules output, and the
 # start with them stays under the limit; the start's await-file line names the idle wake for a batch of cards.
@@ -299,7 +318,7 @@ t_words_notes_full() {
     || fail "the words hook's claim, with no room for a note, has no one line that says to Read $FD/plugin-bugs.md: $(grep -n 'plugin-bugs' <<<"$c" | cut -c1-200)"
 }
 
-cases=(fit fixed big other race old owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
+cases=(fit fixed big other race old old_live owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"
