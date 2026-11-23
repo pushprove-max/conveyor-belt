@@ -169,6 +169,50 @@ test('Needs you: a new P0 cut inside its quote by the engine is not split at the
   assert.equal(rows[0].querySelector('.finding-proof-text').textContent, p0.slice(p0.indexOf('it prints')), `the P0 proof is whole for the reason ${reason}`);
 });
 
+// Bug: the cut can also take a code span's closing backtick: the open run was read as text, so the "; [P1]" inside the
+// span looked outside quotes and the Board split there, before the cut and the real join.
+test('Needs you: a new P0 cut inside its code span by the engine is not split in the span', () => {
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  const p0 = `[P0] c.txt:1 deletes the data. Proof: it prints \`kept; [P1] ${'x'.repeat(300)}\``.slice(0, 300);
+  const reason = `the fix for ${p0}; [P1] b.txt:2 broken did not hold after 1 round`;
+  d.panels.needs.data.cards.blocked[0].reason = reason;
+  deliver(w, d);
+  const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
+  assert.deepEqual(rows.map((r) => r.querySelector('.finding-claim').textContent), ['deletes the data.', 'broken'], `one row a finding for the reason ${reason}`);
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, p0.slice(p0.indexOf('it prints')), `the P0 proof is whole for the reason ${reason}`);
+});
+
+// Bug: the '"' inside a code span before the quote was counted as a quote, so the quoted "; [P1]" looked outside quotes
+// and the Board split there, before the engine's 300-character cut and the real join.
+test('Needs you: a new P0 with a \'"\' in a code span before a cut quote is not split at the quote', () => {
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  const p0 = `[P0] c.txt:1 deletes the data. Proof: it prints \`"\` then "kept; [P1] x${'x'.repeat(300)}"`.slice(0, 300);
+  const reason = `the fix for ${p0}; [P1] b.txt:2 broken did not hold after 1 round`;
+  d.panels.needs.data.cards.blocked[0].reason = reason;
+  deliver(w, d);
+  const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
+  assert.deepEqual(rows.map((r) => r.querySelector('.finding-claim').textContent), ['deletes the data.', 'broken'], `one row a finding for the reason ${reason}`);
+  // The code span draws as a code element, without its backticks.
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, p0.slice(p0.indexOf('it prints')).replace(/`/g, ''), `the P0 proof is whole for the reason ${reason}`);
+});
+
+// Bug: each backtick flipped the code span, so two backticks each side of the '"' closed the span twice and the '"'
+// opened a quote: the quoted "; [P1]" looked outside quotes and the Board split there, before the cut.
+test('Needs you: a new P0 with a \'"\' in a two-backtick code span before a cut quote is not split at the quote', () => {
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  const p0 = `[P0] c.txt:1 deletes the data. Proof: it prints \`\`"\`\` then "kept; [P1] x${'x'.repeat(300)}"`.slice(0, 300);
+  const reason = `the fix for ${p0}; [P1] b.txt:2 broken did not hold after 1 round`;
+  d.panels.needs.data.cards.blocked[0].reason = reason;
+  deliver(w, d);
+  const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
+  assert.deepEqual(rows.map((r) => r.querySelector('.finding-claim').textContent), ['deletes the data.', 'broken'], `one row a finding for the reason ${reason}`);
+  // The text renderer draws the inner `"` as a code element and keeps the outer backticks as text.
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, p0.slice(p0.indexOf('it prints')).replace('`"`', '"'), `the P0 proof is whole for the reason ${reason}`);
+});
+
 // Bug: a single repeated finding whose proof quotes "; [P2]" drew as two rows, split there: only the engine's join of
 // a new P0 (a reason that starts with [P0]) is split at "; ".
 test('Needs you: a repeated finding whose proof quotes "; [P2]" draws as one row', () => {

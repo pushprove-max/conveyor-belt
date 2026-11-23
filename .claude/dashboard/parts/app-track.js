@@ -615,15 +615,34 @@
     const rows = h('ol', 'output-findings');
     // A repeat's block names a new P0 of its review first, joined to the repeated finding, a P0 or P1, by "; " (card.sh
     // cardfix()): the recorded reason is one line, so that join, like a new line, starts a finding's row. Only a reason
-    // that starts with the P0 has it, and only its first "; [P0]" or "; [P1]" outside quotes (an even count of '"' and
-    // of '`' before it), or right after the P0's first 300 characters (card.sh keeps no more of it, so a quote it
-    // opened may not close), is it: the findings' texts are as the review wrote them. Bugs: a proof that quoted
-    // "; [P2]" drew as a second finding, one that quoted "; [P1]" after the join as a third, and a P0 proof that quoted
-    // "; [P1]" was cut there, its rest drawn as a false finding that took the repeated P1 in its proof (also when the
-    // engine cut the P0 before its closing quote).
-    const outside = (i) => ['"', '`'].every((q) => m[1].slice(0, i).split(q).length % 2 === 1);
+    // that starts with the P0 has it, and only its first "; [P0]" or "; [P1]" outside quotes and code spans (a '"'
+    // inside a code span opens no quote; as in Markdown, a run of backticks opens a span that the next run of as many
+    // closes, and a run that none closes is text, unless a join sits at the cut below: then the cut took its closing
+    // run, and its span runs to the cut), or right after the P0's first 300 characters (card.sh keeps no more of it,
+    // so a quote or code span it opened may not close), is it: the findings' texts are as the review wrote them. Bugs:
+    // a proof that quoted "; [P2]" drew as a second finding, one that quoted "; [P1]" after the join as a third, and a
+    // P0 proof that quoted "; [P1]" was cut there, its rest drawn as a false finding that took the repeated P1 in its
+    // proof (also when the engine cut the P0 before its closing quote or backtick, and when a code span before the
+    // quote, with one backtick or more each side, held a '"').
     const atCut = (i) => [...m[1].slice(0, i)].length === 300;
     const joins = m[1].startsWith('[P0]') ? [...m[1].matchAll(/; \[P[01]\]/g)].map((x) => x.index) : [];
+    const cutAt = joins.find(atCut) ?? -1;
+    const ticks = [...m[1].matchAll(/`+/g)], spans = [];
+    for (let k = 0; k < ticks.length; k++) {
+      const e = ticks.findIndex((t, j) => j > k && t[0].length === ticks[k][0].length);
+      if (e < 0) {
+        if (ticks[k].index < cutAt) spans.push([ticks[k].index, cutAt]);
+        continue;
+      }
+      spans.push([ticks[k].index, ticks[e].index + ticks[e][0].length]);
+      k = e;
+    }
+    const inCode = (i) => spans.some(([a, b]) => i >= a && i < b);
+    const outside = (i) => {
+      let quote = false;
+      for (let j = 0; j < i; j++) if (m[1][j] === '"' && !inCode(j)) quote = !quote;
+      return !quote && !inCode(i);
+    };
     const join = joins.length ? joins.find((i) => outside(i) || atCut(i)) ?? joins[0] : -1;
     (join < 0 ? m[1] : `${m[1].slice(0, join)}\n${m[1].slice(join + 2)}`).split(/\n(?=\[P[0-3]\])/).slice(0, brief ? 1 : Infinity).forEach((t) => {
       const f = /^\[(P[0-3])\]\s*(?:\[(?:E\d+|cleanup)\]\s*)*(?:(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S))?([\s\S]*)$/.exec(t.trim());
