@@ -1,22 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
-# Up to the cap in force of cards at once, each launched and waited on here: no panes, no relay, no watcher.
-# Nothing to pick does not end the run while a card is in flight: that card may land on a NO-GO and so make its
-# follow-ups pickable. The loop asks again each time a card ends, and stops only when a pick finds nothing and no
-# card was running when that pick began. The running cards are counted before the pick, not after it: a card that
-# lands while the pick is asking, or just after, is then still followed by one more pick, which sees its follow-ups.
-# While a builder slot is free it also asks at least every POLL seconds, so an issue given back by `retry` is
-# taken without a restart and without waiting for a card to end. A retried card does not count toward max-cards:
-# once the run has used them up it still picks, but retried issues only. A pick that fails while cards are in
-# flight does not end the run under them (gh is asked far more often now): it is asked again at the next turn.
-# A run limited by --only builds every issue of its list, however many cards that
-# takes: max-cards is then how many build at once in it (never more than the cap in force), not how many it starts.
-# It goes on while an issue of the list waits on a dependency or is held (pick says `wait`) and ends once nothing of the list is
-# left to pick or waiting: each one has landed, closed or blocked, or will not be picked (it is said at the start).
-# At its start it says which of its issues depend on an open issue outside the list (they wait until that closes),
-# are in a dependency cycle, are held (it waits for their release), or will not be picked at all (excluded by a rule,
-# kept off by a label, not open).
-# `serve` is the same loop with no end and no max-cards: when nothing is in flight and no issue qualifies, or
-# the pick fails, it looks again after IDLE seconds.
+# Up to the cap in force of cards at once, each launched and waited on here: no panes, no relay, no watcher. Nothing to
+# pick does not end the run while a card is in flight: that card may land on a NO-GO and so make its follow-ups
+# pickable. The loop asks again each time a card ends, and stops only when a pick finds nothing and no card was running
+# when that pick began. The running cards are counted before the pick, not after it: a card that lands while the pick is
+# asking, or just after, is then still followed by one more pick, which sees its follow-ups. While a builder slot is
+# free it also asks at least every POLL seconds, so an issue given back by `retry` is taken without a restart and
+# without waiting for a card to end. A retried card does not count toward max-cards: once the run has used them up it
+# still picks, but retried issues only. A pick that fails while cards are in flight does not end the run under them (gh
+# is asked far more often now): it is asked again at the next turn. A run limited by --only builds every issue of its
+# list, however many cards that takes: max-cards is then how many build at once in it (never more than the cap in
+# force), not how many it starts. It goes on while an issue of the list waits on a dependency or is held (pick says
+# `wait`) and ends once nothing of the list is left to pick or waiting: each one has landed, closed or blocked, or will
+# not be picked (it is said at the start). At its start it says which of its issues depend on an open issue outside the
+# list (they wait until that closes), are in a dependency cycle, are held (it waits for their release), or will not be
+# picked at all (excluded by a rule, kept off by a label, not open). `serve` is the same loop with no end and no
+# max-cards: when nothing is in flight and no issue qualifies, or the pick fails, it looks again after IDLE seconds.
 # At the top of each turn the loop, `run` or `serve`, also sees to the push: when the last landed commit is in main
 # and origin does not have it, and no push is running, it starts one (push, above) beside the cards, at once for a
 # landing it has not tried yet and otherwise once PUSH_RETRY seconds have passed since the last try; but not while the
@@ -64,8 +62,7 @@ tree() { local k; echo "$1"; for k in $(pgrep -P "$1"); do tree "$k"; done; } # 
 # <pid>: it and every process under it, each stopped before the processes under it are looked for, so none can start
 # another unseen; KILL then ends them all, and none of them runs a handler that starts one more.
 freeze() { local k; kill -STOP "$1" 2>/dev/null; echo "$1"; for k in $(pgrep -P "$1"); do freeze "$k"; done; }
-# (stale(), samecode() and noengine(), the loop's look at whether its code is stale, are in lib/install.sh, beside
-# enginepin().)
+# (stale(), samecode() and noengine(), the loop's look at whether its code is stale, are in lib/install.sh, beside enginepin().)
 # <command...>, run under the card records' lock unless this process is stale: then "stale". A landing takes the same
 # lock, so no pick follows one that changed the pin.
 fresh() { if stale; then echo stale; else "$@"; fi; }
@@ -194,18 +191,18 @@ speedretry() {
 # card of issue 0 (a branch, land-branch: no issue to pick again).
 GONE='its process was gone: the machine or the loop stopped'
 # The worktree of a card whose process is gone, made ready for block() to keep (revive(), and run() for a card of its
-# own). Stopped in its batch's tests (batch(), rebatch()): its worktree holds the batch's changes, not its own; its
-# own goes back first, on the commit it was on, and no list of passes goes with it: the batch's run, of the batch's
-# change, writes <worktree>.rerun (batchlist()). It fails, saying so, when its change cannot be put back: the card is
-# left open, as block() would keep the batch's changes as its work and remove its own .bpatch.
+# own). Stopped in its batch's tests (batch(), rebatch()): its worktree holds the batch's changes, not its own; its own
+# goes back first, on the commit it was on; the batch run's .rerun (batchlist()) goes, and its .testlog (tests()) gets
+# a folder batch, or .lent stays where that cannot be made: block() keeps the log, and a later caller puts the change
+# back again, never keeping its passes as the card's own. It fails, saying so, when its change cannot be put back: the card is left open, as block() would keep the batch's changes as its work.
 # `retry` (endcard()) and the loop (turnended(), revive()) can end the same card at once: it holds the card's block lock (<cards>/<card>.block, block()) from its look at the worktree to its end, so no block() reads the worktree between one caller's reset and apply, sees no change, and removes the worktree and the .bpatch.
 gonewt() { # <card> <worktree> <its last step>
   local c=$1 wt=$2 f bl rc=0
   { exec {bl}>>"$CARDS/$c.block" && flock "$bl"; } 2>/dev/null || { [ -z "${bl:-}" ] || exec {bl}>&-; bl=''; }
   if [ -s "$wt.lent" ] && [ -d "$wt" ]; then
-    git -C "$wt" reset -q --hard "$(<"$wt.lent")" 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null && rm -f "$wt.lent" "$wt.rerun" || {
+    git -C "$wt" reset -q --hard "$(<"$wt.lent")" 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null && rm -f "$wt.rerun" && { [ -d "$wt.testlog" ] && ! mkdir -p "$wt.testlog/batch" 2>/dev/null || rm -f "$wt.lent"; } || {
       echo "conveyor: card $c had an open record and its process was gone mid-batch, and its change could not be put back in its worktree; it is left open: its change is the patch $wt.bpatch on commit $(<"$wt.lent")"; rc=1; }
-  elif [ "$3" = test ] && [ -d "$wt" ] && [ -d "$wt.testlog" ] && f=$(testfails "$wt.test" 137); then
+  elif [ "$3" = test ] && [ -d "$wt" ] && [ -d "$wt.testlog" ] && [ ! -d "$wt.testlog/batch" ] && f=$(testfails "$wt.test" 137); then
     rerunlist "$wt" "$(git -C "$wt" diff --cached --binary --no-renames HEAD 2>/dev/null | git hash-object --stdin)" "$f" \
       "$(git -C "$wt" rev-parse -q --verify HEAD 2>/dev/null)" "$(git -C "$wt" write-tree 2>/dev/null)" || rc=$?
   fi; [ -z "$bl" ] || exec {bl}>&-; return $rc
@@ -408,12 +405,11 @@ turnwait() {
 runends() {
   [ "$running" = 0 ] && [ -z "$serve" ] && [ -z "$pusher" ] && [ -z "$waits" ] && { [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober"; }
 }
-# The parts of a turn of the loop, called in order by run(), in run()'s own variables (the only locals of their own
-# are turnended()'s frozen and turnrestart()'s on): turnopen(), turnended(), turnside(), turncount(), turnrestart(),
-# turnask() and turnpick().
-# The turn's start, in run()'s own variables: the push that ended, the script a `serve` restarts on (new), the pack
-# (packturn()), the machine hold, the jobs that take a commit and see to a red release run's fix cards, the seats'
-# CLIs, the push, and the control record (cap, guard, pct, now and why).
+# The parts of a turn of the loop, called in order by run(), in run()'s own variables (the only locals of their own are
+# turnended()'s frozen and turnrestart()'s on): turnopen(), turnended(), turnside(), turncount(), turnrestart(),
+# turnask() and turnpick(). The turn's start, in run()'s own variables: the push that ended, the script a `serve`
+# restarts on (new), the pack (packturn()), the machine hold, the jobs that take a commit and see to a red release run's
+# fix cards, the seats' CLIs, the push, and the control record (cap, guard, pct, now and why).
 turnopen() {
   stdbkeeps # the turn's readers, and the cards it starts, find the records kept until they change (lib/records.sh)
   pushended
@@ -465,16 +461,15 @@ turnopen() {
   pct=''; [ -z "$guard" ] || pct=$(guardread "$ctl" ask | jq -r '.pct // empty')
   now=$(state "$ctl" "$pct")
 }
-# The loop's own cards that ended, or stuck, since the last turn, in run()'s own variables (mine, took, kids), then
-# the other open cards whose process is gone (revive()), and with the control record at stop, the loop's own cards.
-# A card of the loop whose process ended with no closing line (it was killed, or its shell stopped on an error) is
-# recorded blocked, so it is not left open for good and `retry` takes it. Its line and its error output
-# (<worktree>.err, kept with it) say why (cardgone()): its last step and action, and its exit status or signal.
-# One stopped mid-batch has its own change put back first (gonewt()), or is left open when it cannot be.
-# Its session, review or tests outlive it (no longer under it, they are found from the last turn's list) and
-# still use its worktree: they are ended, and gone, before block() takes the worktree away. They are stopped, all
-# under them with them, then killed: one that ignores TERM never holds the loop, and none starts another on TERM
-# that would outlive it unseen.
+# The loop's own cards that ended, or stuck, since the last turn, in run()'s own variables (mine, took, kids), then the
+# other open cards whose process is gone (revive()), and with the control record at stop, the loop's own cards. A card
+# of the loop whose process ended with no closing line (it was killed, or its shell stopped on an error) is recorded
+# blocked, so it is not left open for good and `retry` takes it. Its line and its error output (<worktree>.err, kept
+# with it) say why (cardgone()): its last step and action, and its exit status or signal. One stopped mid-batch has its
+# own change put back first (gonewt()), or is left open when it cannot be. Its session, review or tests outlive it (no
+# longer under it, they are found from the last turn's list) and still use its worktree: they are ended, and gone,
+# before block() takes the worktree away. They are stopped, all under them with them, then killed: one that ignores TERM
+# never holds the loop, and none starts another on TERM that would outlive it unseen.
 turnended() {
   local frozen=() # the processes of an ended card, stopped and then killed
   for p in "${!mine[@]}"; do
@@ -592,17 +587,16 @@ sayself() { # <commit, or ""> <checkout, or "">
     > "$SAYS.new" 2>/dev/null && mv -f "$SAYS.new" "$SAYS" || rm -f "$SAYS"
 }
 # The restart on the new code (new), at a turn where the loop's code is stale (old), in run()'s own variables; it does
-# not return.
-# Restarted as soon as the push job (if any) has ended, without waiting for the cards in flight: the new loop
-# would start a second push beside one still running, and nothing is picked meanwhile; no other push starts once
-# the restart is due (new, turnopen()), so it never waits for a push of a card that landed meanwhile. The cards carry on in
-# this same process on the code they started with (its install stays as it is) until their next step, which begins
-# on the new code where the card can switch (switchcode(), lib/card.sh), and the new loop adopts them
-# (CONVEYOR_ADOPT, with the run lock on fd 8): it counts them against the cap, keeps their claims (their process
-# lives), sees to their ends and the push as for its own, and records one whose process ends without a result as
-# blocked. A pin that is not installed ends the loop only once nothing of its own runs. A `run` ends then too.
-# They carry on only while this process does: a stop of the loop, or of the machine's Conveyor over it (its service's
-# restart too), ends them with all under it (machinestop, lib/machine.sh), and the restart's line says so (#1332).
+# not return. Restarted as soon as the push job (if any) has ended, without waiting for the cards in flight: the new
+# loop would start a second push beside one still running, and nothing is picked meanwhile; no other push starts once
+# the restart is due (new, turnopen()), so it never waits for a push of a card that landed meanwhile. The cards carry on
+# in this same process on the code they started with (its install stays as it is) until their next step, which begins on
+# the new code where the card can switch (switchcode(), lib/card.sh), and the new loop adopts them (CONVEYOR_ADOPT, with
+# the run lock on fd 8): it counts them against the cap, keeps their claims (their process lives), sees to their ends
+# and the push as for its own, and records one whose process ends without a result as blocked. A pin that is not
+# installed ends the loop only once nothing of its own runs. A `run` ends then too. They carry on only while this
+# process does: a stop of the loop, or of the machine's Conveyor over it (its service's restart too), ends them with all
+# under it (machinestop, lib/machine.sh), and the restart's line says so (#1332).
 turnrestart() {
   # The list of the last turn is kept with what runs under each card now: a card killed since then has none under it.
   held=$(for k in "${!mine[@]}"; do
