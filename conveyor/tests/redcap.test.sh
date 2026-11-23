@@ -66,3 +66,14 @@ echo two >> a.txt' > "$STUB/build"
   wait "$lp" || fail "run exited non-zero: $(cat "$STUB/run.out")"
   loop check || fail "the record check refuses a picked line with its slot beyond the cap"
 }
+
+# Issue 1581. Bug it catches: the turn gave jq the open list, bodies and all, as one argument; over 128 KiB Linux
+# refuses it, jq never started, and no seat account of an open issue was asked for while a seat was at the guard.
+# Here #13 has a 140 KiB body; the record keeps seats for #7 (open) and #8 (not open), so only 7 is named.
+t_seatissuesbig() {
+  setup "[$(issue 7 2026-11-01), $(issue 13 2026-11-04)]"
+  jq -c 'map(if .number == 13 then .body = ("x" * 143360) else . end)' "$STUB/issues.json" > "$STUB/i.new" && mv "$STUB/i.new" "$STUB/issues.json"
+  [ "$(wc -c < "$STUB/issues.json")" -gt 131072 ] || fail "the open list over 128 KiB was not made"
+  fx_in 'seatissues "{\"cards\": {\"7\": {}, \"8\": {}}}" "$(asked)"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = 7 ] || fail "with the open list over 128 KiB, the seats of open #7 were not named (exit $RC): $(cat "$T/$CASE/run.out")"
+}

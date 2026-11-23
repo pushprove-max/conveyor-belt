@@ -113,3 +113,16 @@ t_partsnoonly() {
   fx_in 'UPREC=$T/$CASE/hrec UPOLD=$T/$CASE/hold upnext "$(asked)" "" all | jq -c "map(.number)"'
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = '[5]' ] || fail "upnext without --only read the records --only grows from (exit $RC): $(cat "$T/$CASE/run.out")"
 }
+
+# Bug: umbrellas() gave jq the open list as one argument (--argjson); with the bodies (FIELDS) a list over 128 KiB
+# fails to start jq on Linux, its error went to /dev/null, and no parent was closed: eleven parents whose parts were all
+# closed stayed open. Here #13's body alone is 140 KiB; #10's parts #11 and #12 are closed, so #10 is closed.
+t_partsbig() {
+  setup "[$(issue 10 2026-11-01), $(issue 13 2026-11-04)]"
+  printf '10 11\n10 12\n' > "$STUB/subs"
+  jq -c 'map(if .number == 13 then .body = ("x" * 143360) else . end)' "$STUB/issues.json" > "$STUB/i.new" && mv "$STUB/i.new" "$STUB/issues.json"
+  [ "$(wc -c < "$STUB/issues.json")" -gt 131072 ] || fail "the open list over 128 KiB was not made"
+  fx_in 'umbrellas "$(asked)"'
+  [ "$(cat "$STUB/closed" 2>/dev/null)" = 10 ] && grep -qF '(#11, #12)' "$STUB/close-comments" \
+    || fail "with the open list over 128 KiB, the parent #10 whose parts are closed was not closed: $(cat "$STUB/closed" "$STUB/close-comments" 2>/dev/null) $(cat "$T/$CASE/run.out")"
+}

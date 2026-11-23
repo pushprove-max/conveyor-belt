@@ -622,6 +622,12 @@ turnrestart() {
 # What the turn's pick reads, in run()'s own variables: the urgent and main-red cards, whether it asks (asking) and
 # the open issues (issues), the seats' accounts, the machine's count (slotturn()), the blocked cards whose issue was
 # closed (shuts), the cards given back, and the sample of the minute.
+# The open issues (a json list) that the control record keeps seats for (`control card`), one number a line. The list
+# goes to jq as a file: with the bodies it passes 128 KiB, and Linux refuses one argument that long, so jq never started
+# (issue 1581).
+seatissues() { # <control record> <open issues, a json list>
+  jq -r --slurpfile i <(printf '%s' "$2") '$i[0] as $i | .cards // {} | keys[] | select(tonumber | IN($i[].number))' <<<"$1" 2>/dev/null
+}
 turnask() {
   # The open issues a pick reads, asked before the sample starts, so the sample reads them from ISSUES and never
   # asks GitHub itself while the pick holds the records' lock.
@@ -634,7 +640,7 @@ turnask() {
   # The accounts of the seats the record keeps for an open issue (`control card`) are asked for too, outside the lock:
   # pick holds that issue's card alone while one is at the guard (cardheld(), lib/pick.sh); the queue goes on.
   [ "$asking" != 1 ] || [ "$now" != running ] || [ -z "$guard" ] || [ -z "$issues" ] \
-    || for n in $(jq -r --argjson i "$issues" '.cards // {} | keys[] | select(tonumber | IN($i[].number))' <<<"$ctl" 2>/dev/null); do
+    || for n in $(seatissues "$ctl" "$issues"); do
       SEATCARD=$n guardread "$ctl" ask >/dev/null
     done
   # The machine's count of this project's cards (room()): those in review or in their Test step count, as the

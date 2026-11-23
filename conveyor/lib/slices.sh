@@ -359,7 +359,7 @@ umbrellas() { # <open issues, a json list>
     x=$(gh_write issue close "$n" --comment "$m" 2>&1 >/dev/null) \
       || { echo "conveyor: #$n is $([ "$k" = parts ] && echo "a parent whose parts are all closed or landed" || echo "an umbrella whose follow-ups have all landed or are already done on main"), and it could not be closed (${x:0:300}); the next turn tries again" >&2; continue; }
     locked control release "$n" >/dev/null 2>&1 || :
-  done < <(jq -rs --argjson open "$1" --arg shut "$SHUT" --arg own "$OWNSHUT" "$DEPS"'landed(.) as $done
+  done < <(jq -rs --slurpfile open <(printf '%s' "$1") --arg shut "$SHUT" --arg own "$OWNSHUT" "$DEPS"'$open[0] as $open | landed(.) as $done
     | ([.[] | select(.step == "landed" or (.step == "closed" and (.reason | IN($shut, $own) | not))) | .issue] | unique) as $landed
     | ($open[] | select((.parts // []) != [] and all(.parts[]; (.open | not) or (.number | IN($done[]))))
       | [.parts[] | select(.open and (.number | IN($done[]))) | .ref] as $l
