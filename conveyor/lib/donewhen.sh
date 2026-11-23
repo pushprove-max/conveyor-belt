@@ -390,8 +390,9 @@ MOVEJQ='def files: reduce (split("\n")[]) as $l ([];
 # resumeplan() and keptrep() read them).
 rounded() { # <worktree> <round> <numbered() lines> [<review line>]
   rm -f "$1.rounds/told" "$1.rounds/answered"; [ -n "$3" ] || return 0
-  jq -cs --argjson r "$2" --argjson rv "${4:-null}" --rawfile d "$1.rounds/$2.diff" --rawfile ls <(git -C "$1" ls-files) --slurpfile h <(cat "$1.rounds/findings.jsonl" 2>/dev/null) "$MOVEJQ"'
-    ($d | files) as $fs | ($ls | split("\n") | map(select(. != ""))) as $l | map(.id) as $ids
+  # The review line goes in by file, not as an argument: a long review's reason and tail pass Linux's 128 KiB limit for one argument.
+  jq -cs --argjson r "$2" --slurpfile rvs <(printf '%s\n' "${4:-null}") --rawfile d "$1.rounds/$2.diff" --rawfile ls <(git -C "$1" ls-files) --slurpfile h <(cat "$1.rounds/findings.jsonl" 2>/dev/null) "$MOVEJQ"'
+    $rvs[0] as $rv | ($d | files) as $fs | ($ls | split("\n") | map(select(. != ""))) as $l | map(.id) as $ids
     | def follow($at; $w): ($at | capture("^(?<p>.*):(?<n>[0-9]+)$")) as $a | moveto($fs; $l; $a.p; ($a.n | tonumber))
         | if . == null then {location: "needs review"} else {moved: ., mkey: (. + " " + $w)} end;
     (.[] | . as $f | ([$h[] | select(.id == $f.id)] | first) as $o

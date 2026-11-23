@@ -94,3 +94,16 @@ t_fidsamename() {
     '[P1] README.md:5 wrong text. Proof: still' 'seq 1 9 > README.md && mkdir sub && cp README.md sub/'
   [ "$(jq -c '[.id, .moved, .location]' "$W.rounds/findings.jsonl")" = '["E1","README.md:5",null]' ] || fail "the finding followed another file of the same name: $(cat "$W.rounds/findings.jsonl")"
 }
+
+# Bug: the review line went to jq as one argument, and a long review (its full text in both reason and tail) passed
+# Linux's 128 KiB limit for one argument, so jq could not start and the fix round kept no findings and no ids.
+t_fidlongreview() {
+  fid_round '[P1] a.txt:3 bad value. Proof: line 3' 'true' '[P1] a.txt:3 bad value. Proof: line 3 still'
+  IDS=$(fid_eng 'numbered "$W"'); : > "$W.rounds/2.diff"
+  local rv; rv=$(jq -cn --arg f '[P1] a.txt:3 bad value. Proof: line 3 still' '"[P1] a.txt:1 finding, \("x" * 650)" as $l
+    | ([limit(100; repeat($l))] | join("\n")) as $r | {reason: $r, tail: $r, judge: {accepted: [{finding: $f, reason: "the judge kept it", cost: "small"}]}}')
+  [ "${#rv}" -gt 131072 ] || fail "the review line is too short to pass the limit: ${#rv} bytes"
+  fid_eng 'rounded "$W" 2 "$IDS" "$rv"' || fail "rounded failed on a review line of ${#rv} bytes"
+  [ "$(jq -sc 'map(select(.round == 2) | [.id, .reason])' "$W.rounds/findings.jsonl")" = '[["E1","the judge kept it"]]' ] \
+    || fail "a long review's fix round kept no finding or no judge reason: $(cut -c1-300 "$W.rounds/findings.jsonl")"
+}
