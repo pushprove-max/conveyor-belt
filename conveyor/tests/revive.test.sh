@@ -353,12 +353,15 @@ t_blockretried() {
 
 # Bug (#1475): the loop and `retry` each ran gonewt() and then block() on the same card stopped mid-batch, gonewt()
 # outside any lock. One block() read the worktree between the other's reset and its apply, saw no change, and
-# removed the worktree and the .bpatch: the card was blocked with its own change lost. Here #7 is stopped running
-# #8's change (as in t_gonebatch). The first caller is held before its reset until the second's block() is about to
-# read the worktree; the second is held there until the first has reset, so it reads between the first's reset and
-# apply; the first is held at its apply until the second's gonewt() and block() have returned. Each wait is 2 s at
-# most. One blocked line is written, and its kept patch is #7's own change.
-t_gonetwice() {
+# removed the worktree and the .bpatch: the card was blocked with its own change lost. gonetwice <first> <second>
+# [<commands run first>]: #7 is stopped running #8's change (as in t_gonebatch), and two real callers of gonewt() and
+# block() (the loop's turnended() or revive(), `retry`'s unstick() and endcard()) end it side by side. The first is held
+# before its reset until the second's block() is about to read the worktree; that one is held there until the reset,
+# so it reads between the reset and the apply; the apply is held until the second's block() has returned. Each wait is
+# 2 s at most. One blocked line is written, and its kept patch is #7's own change. A first caller that stops putting
+# the change back (gonewt()) before block() is not held, so its block() keeps the batch's change and the case fails;
+# each caller is the first of one case.
+gonetwice() {
   local c=c20260101T000000-t-7 wt
   setup "[$(issue 7 2026-01-01)]"
   gonecard $c 7 1 "$(date)" test
@@ -369,53 +372,59 @@ t_gonetwice() {
   # The batch's run, cut short, passed a.test.sh on the batch's change (batch(), tests()): its output and its log.
   mkdir -p "$wt.testlog" && printf '== a.test.sh\n-- ok a.test.sh\n' | tee "$wt.test" > "$wt.testlog/1.log" || fail "no batch test log for #7"
   # waitfor <mark> [<tries>]: polls for the other caller's mark, 2 s at most (or <tries> tenths); with the lock the first
-  # caller never sees a-reads or a-done, so it waits those 2 s out and goes on. The first caller's block() waits for the
-  # second's gonewt() to return (a-gone, 30 s at most): that gonewt() then runs between the first's gonewt() and block(),
-  # with the worktree and the batch's .testlog still there, where it found no .lent and kept the batch's passes.
-  fx_in 'waitfor() { local i=0; while [ ! -e "$1" ] && [ $((i += 1)) -le "${2:-20}" ]; do sleep 0.1; done; }
-    ( git() { case "$1 ${2-} ${3-}" in
+  # caller never sees a-reads or a-done, so it waits those 2 s out and goes on. Its block() waits for the second's
+  # gonewt() to return (a-gone, 30 s at most): that gonewt() then runs between its gonewt() and block(), with the
+  # worktree and the batch's .testlog still there, where it found no .lent and kept the batch's passes. A first caller
+  # that did not reset (no b-in: it skipped gonewt()) is not held, so its block() reads the batch's change first.
+  # loopturn <card> <issue>: the loop's turn (turnended()) finds the card's process (a stand-in, ended) gone with
+  # no closing line.
+  fx_in "${3:-}"'
+    waitfor() { local i=0; while [ ! -e "$1" ] && [ $((i += 1)) -le "${2:-20}" ]; do sleep 0.1; done; }
+    loopturn() { local d now=""; : & d=$!; wait $d; local -A mine=([$d]="$1 $2") took=() ranon=() kids=(); turnended; }
+    eval "realblock() $(declare -f block | tail -n +2)"; eval "realgonewt() $(declare -f gonewt | tail -n +2)"
+    # Each caller marks its gonewt() of the card (<who>-gonewt), then its block() after it (<who>-block).
+    gonewt() { realgonewt "$@"; local r=$?; : > "$STUB/$who-gonewt"; return $r; }
+    ( who=one; git() { case "$1 ${2-} ${3-}" in
         "-C $wt reset") local r; : > "$STUB/b-in"; waitfor "$STUB/a-reads"; command git "$@"; r=$?; : > "$STUB/b-reset"; return $r ;;
         "-C $wt apply") waitfor "$STUB/a-done"; command git "$@" ;;
         *) command git "$@" ;; esac; }
-      gonewt "$c" "$CARDS/$c" test || exit 0; waitfor "$STUB/a-gone" 300; ( block "$c" 7 "$CARDS/$c" "$GONE" ) ) &
-    ( git() { [ "$1 ${2-} ${3-} ${4-}" != "-C $wt add -A" ] || { : > "$STUB/a-reads"; waitfor "$STUB/b-reset"; }; command git "$@"; }
-      waitfor "$STUB/b-in"; gonewt "$c" "$CARDS/$c" test; r=$?; : > "$STUB/a-gone"
-      [ "$r" != 0 ] || ( block "$c" 7 "$CARDS/$c" "$GONE" ); : > "$STUB/a-done" ) &
+      block() { [ ! -e "$STUB/one-gonewt" ] || : > "$STUB/one-block"; [ ! -e "$STUB/b-in" ] || waitfor "$STUB/a-gone" 300; realblock "$@"; }
+      '"$1"' ) &
+    ( who=two; git() { [ "$1 ${2-} ${3-} ${4-}" != "-C $wt add -A" ] || { : > "$STUB/a-reads"; waitfor "$STUB/b-reset"; }; command git "$@"; }
+      block() { [ ! -e "$STUB/two-gonewt" ] || : > "$STUB/two-block"; : > "$STUB/a-gone"; realblock "$@"; local r=$?; : > "$STUB/a-done"; return $r; }
+      waitfor "$STUB/b-in"; '"$2"'; : > "$STUB/a-gone"; : > "$STUB/a-done" ) &
     wait'
+  # Bug caught: a caller that skips recovery (no gonewt() or block() of the card, or block() before gonewt()) leaves
+  # the other to end the card alone, and every check below still passes: each caller must run both, in that order.
+  [ -e "$STUB/one-block" ] && [ -e "$STUB/two-block" ] \
+    || fail "$1 and $2 side by side, $c stopped mid-batch: a caller did not run gonewt() and then block() of it: $(ls "$STUB") $(cat "$T/$CASE/run.out")"
   [ "$(st "select(.card == \"$c\" and .step == \"blocked\") | .reason" | wc -l)" = 1 ] \
-    || fail "gonewt() and block() of $c, stopped mid-batch, run by two callers side by side: not one blocked line: $(st "select(.card == \"$c\") | [.step, .reason, .kept] | @tsv") $(cat "$T/$CASE/run.out")"
+    || fail "$1 and $2 side by side, $c stopped mid-batch: not one blocked line: $(st "select(.card == \"$c\") | [.step, .reason, .kept] | @tsv") $(cat "$T/$CASE/run.out")"
   [ "$(git apply --numstat "$ST/kept/$c/$c.patch" 2>/dev/null | cut -f3 | sort | tr '\n' ' ')" = "a.txt u.txt " ] \
-    || fail "gonewt() and block() of $c, stopped mid-batch with its own change in $c.bpatch, run by two callers side by side: the kept patch is not its own change: $(cat "$ST/kept/$c/$c.patch" 2>&1) $(cat "$T/$CASE/run.out")"
+    || fail "$1 and $2 side by side, $c stopped mid-batch with its own change in $c.bpatch: the kept patch is not its own change: $(cat "$ST/kept/$c/$c.patch" 2>&1) $(cat "$T/$CASE/run.out")"
   # Bug: the caller that waited found no .lent, read the batch's log as the card's own test run and kept its passes
   # under the card's own change, so the card picked again from its kept work skipped a.test.sh (resumeplan()).
   ! grep -q $'^pass\t' "$ST/kept/$c/$c.rerun" "$wt.rerun" 2>/dev/null \
-    || fail "gonewt() and block() of $c, stopped mid-batch with the batch's passing log in $c.testlog, run by two callers side by side: the batch's passes were kept as the card's own: $(cat "$ST/kept/$c/$c.rerun" "$wt.rerun" 2>&1)"
+    || fail "$1 and $2 side by side, $c stopped mid-batch with the batch's passing log in $c.testlog: the batch's passes were kept as the card's own: $(cat "$ST/kept/$c/$c.rerun" "$wt.rerun" 2>&1)"
   # Bug: gonewt() deleted the batch's .testlog, so block() had no test log to keep as the card's evidence.
   [ -s "$ST/kept/$c/$c.testlog/1.log" ] \
-    || fail "gonewt() and block() of $c, stopped mid-batch with the batch's log in $c.testlog, run by two callers side by side: the log is not kept: $(ls -R "$ST/kept/$c" 2>&1)"
+    || fail "$1 and $2 side by side, $c stopped mid-batch with the batch's log in $c.testlog: the log is not kept: $(ls -R "$ST/kept/$c" 2>&1)"
+}
+# The loop's turn is the first caller, retry the second.
+t_gonetwice() {
+  gonetwice 'loopturn $c 7' 'unstick 7'
+}
+# retry is the first caller, the loop's turn the second.
+t_goneretry() {
+  gonetwice 'unstick 7' 'loopturn $c 7'
 }
 
 # Bug: gonewt() could not make the folder batch in the batch's .testlog (the card volume full), so it deleted the
-# .testlog, and block() had no test log to keep. Here #7 is stopped mid-batch with the batch's passing log, mkdir of that
-# folder fails, and a second gonewt() runs before block(), as a waiting caller does (t_gonetwice): the log is kept, and
-# the batch's passes are not kept as the card's own (that second gonewt() found no .lent and read the log as its run).
+# .testlog, and block() had no test log to keep. Here mkdir of that folder fails, so the loop's start (revive()), the
+# first caller, leaves .lent, and retry's gonewt() runs again before block() (gonetwice): the log is kept, and the
+# batch's passes are not kept as the card's own (a second gonewt() that found no .lent read the log as its run).
 t_gonenomark() {
-  local c=c20260101T000000-t-7 wt
-  setup "[$(issue 7 2026-01-01)]"
-  gonecard $c 7 1 "$(date)" test
-  wt=$T/$CASE/cards/$c
-  git -C "$R" worktree add -q --detach "$wt" && echo two >> "$wt/a.txt" && git -C "$wt" add -A \
-    && git -C "$wt" diff --cached --binary --no-renames > "$wt.bpatch" && git -C "$wt" rev-parse HEAD > "$wt.lent" \
-    && git -C "$wt" reset -q --hard && echo eight > "$wt/m.txt" && git -C "$wt" add -A || fail "no mid-batch worktree for #7"
-  mkdir -p "$wt.testlog" && printf '== a.test.sh\n-- ok a.test.sh\n' | tee "$wt.test" > "$wt.testlog/1.log" || fail "no batch test log for #7"
-  fx_in 'mkdir() { [ "${!#}" != "$CARDS/'$c'.testlog/batch" ] || return 1; command mkdir "$@"; }
-    gonewt '$c' "$CARDS/'$c'" test && gonewt '$c' "$CARDS/'$c'" test && block '$c' 7 "$CARDS/'$c'" "$GONE"'
-  [ -s "$ST/kept/$c/$c.testlog/1.log" ] \
-    || fail "gonewt(), gonewt() and block() of $c, stopped mid-batch with the batch's log in $c.testlog, with no folder batch made: the log is not kept: $(ls -R "$ST/kept/$c" 2>&1) $(cat "$T/$CASE/run.out")"
-  ! grep -q $'^pass\t' "$ST/kept/$c/$c.rerun" "$wt.rerun" 2>/dev/null \
-    || fail "gonewt(), gonewt() and block() of $c, stopped mid-batch with the batch's passing log in $c.testlog, with no folder batch made: the batch's passes were kept as the card's own: $(cat "$ST/kept/$c/$c.rerun" "$wt.rerun" 2>&1)"
-  [ "$(git apply --numstat "$ST/kept/$c/$c.patch" 2>/dev/null | cut -f3)" = a.txt ] \
-    || fail "gonewt(), gonewt() and block() of $c, stopped mid-batch, with no folder batch made: the kept patch is not its own change: $(cat "$ST/kept/$c/$c.patch" 2>&1) $(cat "$T/$CASE/run.out")"
+  gonetwice 'revive ""' 'unstick 7' 'mkdir() { [ "${!#}" != "$CARDS/$c.testlog/batch" ] || return 1; command mkdir "$@"; }'
 }
 
 # Bug (#1457, R113): `retry` of a card whose process was gone killed nothing, so a session it had started, no longer
