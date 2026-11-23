@@ -75,6 +75,21 @@ test('a command with 0 findings of this change does not come before one with fin
     [['eslint', 'Findings: 1 of this change'], ['ruff', 'Findings: 0 of this change']]);
 });
 
+// Bug it guards (#1541): a `findings` command with a count of 0 (the findings are on lines the change did not touch)
+// showed the red chip of a failure though the step passed. Count 0 is quiet, count 2 stays red, and a result with no
+// count stays red, as the gate cannot show it passed.
+test('a Findings chip with a count of 0 is not red; a count above 0, or no count, is', () => {
+  const d = detail([{ name: 'lint', state: 'done', sec: 5, at: at(10), why: REASON, lint: [
+    { n: 1, run: SHELL, result: 'findings', sec: 1, findings: 0 },
+    { n: 2, run: RUFF, result: 'findings', sec: 1, findings: 2, reported: [{ file: 'a.py', line: 1, text: 'E1' }] },
+    { n: 3, run: 'bash .conveyor/lint-js.sh {files}', result: 'findings', sec: 1 }] }]);
+  const chip = (word) => Array.from(d.querySelectorAll('.lint-cmds .lint-cmd')).find((r) => r.querySelector('.lint-cmd-word').textContent === word).querySelector('.chip');
+  assert.equal(chip('lint-shell.sh').classList.contains('chip-bad'), false, 'count 0 is not red');
+  assert.equal(chip('lint-shell.sh').classList.contains('chip-quiet'), true, 'count 0 is quiet');
+  assert.equal(chip('ruff').classList.contains('chip-bad'), true, 'count 2 is red');
+  assert.equal(chip('lint-js.sh').classList.contains('chip-bad'), true, 'no count is red');
+});
+
 // Bug it guards (#1366): the whole command showed on hover and tap only. A keyboard reader who tabs to the name sees it
 // in the tip, and it closes when the focus leaves.
 test('keyboard focus on a command name shows the whole command', () => {

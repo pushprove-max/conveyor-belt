@@ -151,7 +151,8 @@
       show.append(h('summary', null, 'Show command'), h('code', null, c.run));
       name.append(word, show);
       const skipped = c.result.startsWith('skipped: ');
-      const res = c.result === 'findings' ? [`Findings: ${num(c.findings) ? c.findings : 0} of this change`, 'bad']
+      // A count of 0 (findings on lines the change did not touch) passes the step: quiet, as failed() above counts it. No count stays red.
+      const res = c.result === 'findings' ? [`Findings: ${num(c.findings) ? c.findings : 0} of this change`, num(c.findings) && c.findings === 0 ? 'quiet' : 'bad']
         : LINT_RESULT[c.result] || (skipped ? [`Skipped: ${c.result.slice(9)}`, 'warn'] : [c.result, 'quiet']);
       const result = h('td', 'lint-cmd-result');
       result.append(chip(res[0], res[1]));

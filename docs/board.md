@@ -805,7 +805,8 @@ issue number, as a link, and the issue title.
 - Each lint check shows in the card's steps as **lint**, with a row for each command under it: a short name (the
   script's file name, such as `lint-shell.sh`; the size check as "Size, limit 800 lines"; for an inline command, its
   first program after a guard, such as `ruff`), a chip for its result (Pass, No files, "Findings: 2 of this change",
-  Error, or "Skipped: missing <tool>" when its tool is missing) and its seconds. Hover over the name, or focus it, to see
+  Error, or "Skipped: missing <tool>" when its tool is missing) and its seconds. "Findings: 0 of this change" is grey,
+  not red: the command found problems only on lines the change did not touch, and the step passed. Hover over the name, or focus it, to see
   the whole command; "Show command" shows it on a touch screen. A command with findings of this change, or an error,
   comes first, with its findings (file, line and text, all of them) or its error under the row. When the change changed
   a trigger of a command that ran, the rows end with "Tools ran as installed". A lint check recorded without its
