@@ -383,6 +383,8 @@ was archived. `conveyor.sh bench swe runs restore <run>...` takes that mark off 
 `conveyor.sh bench swe runs delete <run>...` deletes one or more runs: the line of each run in `runs.jsonl`, its event
 log (`tails/<run>.jsonl`) and the results that it shows, with their patches and logs. A result that another run shows,
 for example a later run that reused it, or a run with `--again` on the same task, is not deleted. That run still shows it. Delete says how many results stay.
+Delete also removes the model's readings that Compare saved for the keys of the results it deletes, so a result made
+again under the same key gets a new reading.
 `bench swe history` gives each run's `shared`: each of its results that other runs show, with the IDs of those runs.
 
 A run that has not ended cannot be archived or deleted. This includes a run whose process stopped with no end

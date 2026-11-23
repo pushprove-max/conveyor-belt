@@ -124,3 +124,24 @@ t_swerunsran() {
   [ "$(loop bench swe history | jq -c '.runs | map({key: .id, value: .cols[0].ran}) | from_entries')" = "{\"$R3\":1,\"$R2\":0,\"$R1\":2}" ] \
     || fail "a col's ran counts a task not run or a reused result: $(loop bench swe history | jq -c '.runs | map([.id, .cols[0].ran])')"
 }
+
+# Bug (#1448): delete left the readings Compare kept (diff/<key A>/<key B>/<task>.txt) of the results it removed, so a
+# result made again under the same key was shown with the old reading. Four keys flip on proj__a-1 (stub-a and stub-c
+# resolve it); Compare reads each pair once (the model's reading is a counter of its calls), delete of R3 removes
+# stub-b's result, and Compare of the pairs with stub-b, as first and as second key, reads again, though stub-bx (a key
+# that only starts with stub-b) and the pairs of other keys keep their readings.
+t_swerunsdeletediff() {
+  swe; swerunsfx; local o
+  mkdir -p "$T/$CASE/bin"
+  # stub: Compare asks `claude -p` for each flipped task's reading; the stand-in answers with the count of its calls.
+  printf '#!/usr/bin/env bash\ncat > /dev/null; n=$(($(cat "%s/n" 2>/dev/null || echo 0) + 1)); echo $n > "%s/n"; echo "reading $n"\n' "$T/$CASE" "$T/$CASE" > "$T/$CASE/bin/claude" \
+    && chmod +x "$T/$CASE/bin/claude" && export PATH=$T/$CASE/bin:$PATH || fail "the model's stand-in was not made"
+  put() { mkdir -p "$B/results/$1" && jq -nc --arg a "$1" --argjson r "$2" '{task: "proj__a-1", arm: $a, key: $a, label: $a, resolved: $r, fired: true, sessions: 1, tokens: 1, minutes: 1, steps: []}' > "$B/results/$1/proj__a-1.json"; }
+  rd() { loop bench swe diff "$1" "$2" --json | jq -r '.flipped[0].reading'; }
+  put stub-b false && put stub-c true && put stub-bx false || fail "the results were not written"
+  [ "$(rd stub-a stub-b) $(rd stub-b stub-c) $(rd stub-bx stub-c) $(rd stub-a stub-bx)" = "reading 1 reading 2 reading 3 reading 4" ] || fail "Compare did not read each pair once"
+  o=$(loop bench swe runs delete "$R3" 2>&1) && [ "$o" = "conveyor: deleted $R3." ] || fail "delete of $R3 failed: $o"
+  put stub-b false || fail "the result was not made again"
+  [ "$(rd stub-a stub-b) $(rd stub-b stub-c) $(rd stub-bx stub-c) $(rd stub-a stub-bx)" = "reading 5 reading 6 reading 3 reading 4" ] \
+    || fail "after delete of $R3, Compare of stub-a stub-b and of stub-b stub-c did not read again, or one of stub-bx stub-c and stub-a stub-bx did ($(cat "$T/$CASE/n") calls)"
+}

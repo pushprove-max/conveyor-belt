@@ -83,6 +83,12 @@ t_swearmpre() {
   [ ! -d "$B/results" ] && [ -d "$SWE_FX/boxes/chk" ] || fail "a task was run, or a check's container removed, with no Docker"; rm -r "$SWE_FX/nodocker" "$B/check/stub-a.h"
   out=$(loop bench swe history 2>&1); jq -e '.runs[0] | .state == "refused" and (.cols | map(.arm) == ["solo", "conveyor"]) and .cols[1].version == "v1.5.0"
     and (.why | startswith("Docker did not answer on the build machine."))' <<<"$out" > /dev/null || fail "the run history does not keep the Docker refusal: $out"
+  # Bug (#1448): a refused run of an engine given as the commit of a release (EA, v1.0.0) was saved with no version, so the Board
+  # named it main.
+  : > "$SWE_FX/nodocker"
+  out=$(loop bench swe 1 --solo --arm conveyor --engine "$EA" 2>&1) && fail "a run started with no Docker: $out"
+  [ "$(jq -r '.state + " " + .cols[1].version' "$B/live.json")" = "refused v1.0.0" ] || fail "the refused run of the commit of v1.0.0 does not name that version: $(cat "$B/live.json")"
+  rm "$SWE_FX/nodocker"
   # The engine's own arms: every file is an arm, and none is one that can never run here (#1024: Aider and OpenHands
   # need an API key).
   out=$(CONVEYOR_BENCH_ARMS=$SRC/bench/arms loop bench swe arms 2>&1)
@@ -355,4 +361,38 @@ t_swearmdiffmodel() {
   done
   out=$(loop bench swe diff stub-mb stub-mb-m2-0123456789ab --json 2>&1) && [ "$(jq -c '[.a.version, .b.version]' <<<"$out")" = '["stub-mb (m)","Stub mb (m2)"]' ] \
     || fail "bench swe diff stub-mb stub-mb-m2-0123456789ab does not name each side's model (the builder's is m): $out"
+}
+
+# Bug (#1448): swe_tasks left err unset, so a bench folder that could not be made ended the refusal on an unbound
+# variable (under set -u) in place of its text. The folder's parent here is a file.
+t_swetasksnodir() {
+  swe; local o
+  : > "$T/$CASE/file"
+  o=$(export HERE=$SRC RTAG=x; set -u; . "$SRC/bench/swe.sh" && export SWE_DIR=$T/$CASE/file/swe SWE_SET='{"dataset":"d","revision":"r","seed":"s"}' && swe_tasks 2>&1); [ $? != 0 ] || fail "a task list was made in a folder that cannot be made: $o"
+  grep -q '^conveyor: the SWE-bench task list could not be read' <<<"$o" && ! grep -q 'unbound variable' <<<"$o" || fail "the refusal for a bench folder that cannot be made is not the list's own text: $o"
+}
+
+# Bug (#1448): a refused run of a release's commit was saved with no version, so the Board named it main, when the engine's
+# source could not be reached (git ls-remote failed) though the release was in the versions kept on this machine.
+t_swerefusedoffline() {
+  swe; local out
+  export CONVEYOR_NOW=1700000000
+  loop bench swe versions > /dev/null 2>&1 || fail "the versions were not read"
+  mv "$SWE_FX/eng.git" "$SWE_FX/eng.gone" && : > "$SWE_FX/nodocker"
+  out=$(loop bench swe 1 --solo --arm conveyor --engine "$EA" 2>&1) && fail "a run started with no Docker: $out"
+  [ "$(jq -r '.state + " " + .cols[1].version' "$B/live.json")" = "refused v1.0.0" ] || fail "the refused run of $EA, with the engine's source out of reach, does not name v1.0.0: $(cat "$B/live.json")"
+}
+
+# Bug (#1448): the refused run read only the versions this machine keeps, so a release that the default origin has and
+# this checkout has not fetched (t_sweversfetched: the snapshot's list omits it) was left unnamed and shown as main. The
+# origin is a URL no test reaches: a git in front of the path sends ls-remote to the fixture's folder.
+t_swerelnamefetched() {
+  swe; local w=$T/$CASE/eng o c
+  git clone -q "$SWE_FX/eng.git" "$w" && mkdir -p "$w/conveyor" && git -C "$w" remote set-url origin https://example.com/eng.git || fail "the checkout was not made"
+  mkdir -p "$T/$CASE/gitbin" && printf '#!/usr/bin/env bash\n[ "$1" != ls-remote ] || set -- ls-remote "$SWE_FX/eng.git" "${@:3}"\nPATH=${PATH#*gitbin:} exec git "$@"\n' > "$T/$CASE/gitbin/git" \
+    && chmod +x "$T/$CASE/gitbin/git" || fail "the git stand-in was not made"
+  swerelease v1.1.0; c=$(git -C "$SWE_FX/eng.git" rev-parse 'v1.1.0^{commit}')
+  o=$(unset CONVEYOR_BENCH_SOURCE; export HERE=$w/conveyor RTAG=x CONVEYOR_NOW=1700000000 PATH=$T/$CASE/gitbin:$PATH; . "$SRC/bench/swe.sh" \
+    && [ -z "$(swe_versionsnow | jq -r 'map(select(.name == "v1.1.0")) | first.name // ""')" ] && swe_relname "$c") \
+    && [ "$o" = v1.1.0 ] || fail "swe_relname does not name the commit $c of v1.1.0, which the origin has and the checkout has not fetched: $o"
 }

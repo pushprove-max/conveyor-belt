@@ -124,7 +124,7 @@ swe_list() { printf '%s/tasks.%s.%s.jsonl\n' "$SWE_DIR" "$1" "$(printf '%s' "$2"
 # tests) are removed first. A list whose tasks have no cmd (the test command run in the task's container) or no env
 # (the shell commands that start the task's environment there) is made again.
 swe_tasks() {
-  local rev f err; rev=$(swe_set .revision); f=$(swe_list "$rev" "$(swe_set .seed)")
+  local rev f err=''; rev=$(swe_set .revision); f=$(swe_list "$rev" "$(swe_set .seed)")
   rm -f "$SWE_DIR"/raw.*.jsonl
   [ -s "$f" ] && head -n 1 "$f" | jq -e 'has("cmd") and has("env")' > /dev/null 2>&1 && { printf '%s\n' "$f"; return; }
   # The harness's own conveyor: line (a swebench of the wrong version says which it has and which to install) is the
@@ -203,6 +203,13 @@ swe_resolve() {
     [ -n "$SWE_COMMIT" ] || { echo "conveyor: $1 is no released version, nor main, nor a full commit id" >&2; return 1; }
     [ "$1" != main ] || SWE_VERSION=$(jq -r --arg c "$SWE_COMMIT" 'map(select(.commit == $c and .name != "main")) | first.name // "main"' <<<"$vs")
   fi
+}
+# The release a full commit id is, as swe_resolve names it, for a run that ends before swe_resolve reads (a refused
+# one): read from the engine's source (swe_versions), so a tag this checkout has not fetched shows; from the versions
+# kept on this machine (swe_versionsnow) when the source cannot be reached. Prints nothing for a commit no release has.
+swe_relname() { # <commit>
+  [[ $1 =~ ^[0-9a-f]{40}$ ]] || return 0
+  { swe_versions 2>/dev/null || swe_versionsnow 2>/dev/null; } | jq -r --arg c "$1" 'map(select(.commit == $c and .name != "main")) | first.name // ""' 2>/dev/null || :
 }
 # Whether the project's usage guard is reached now (the loop's own test: state(), lib/control.sh), whatever the
 # project's mode: a paused or stopped project's guard still stands for a run of its own. The guard of an arm that is
@@ -794,10 +801,10 @@ swe_guards() { jq -r 'if .kind == "conveyor" then "conveyor" elif (.login // [] 
 # its conveyor arms naming the engine asked for; running (with its process: Stop finds it while its setup goes) or
 # refused (ended, with why).
 swe_setuprec() { # <n> <engine> <running | refused> [<why>] < the arms' JSON, one a line
-  jq -sc --arg id "$SWE_RUN" --argjson pid "$$" --argjson n "$1" --arg at "$(swe_now)" --arg e "$2" --arg s "$3" --arg w "${4:-}" --argjson set "$SWE_SET" '($e | test("^[0-9a-f]{40}$")) as $c
+  jq -sc --arg id "$SWE_RUN" --argjson pid "$$" --argjson n "$1" --arg at "$(swe_now)" --arg e "$2" --arg s "$3" --arg w "${4:-}" --arg v "${SWE_VERSION:-}" --argjson set "$SWE_SET" '($e | test("^[0-9a-f]{40}$")) as $c
     | {id: $id, arm: .[0].name, arms: map(.name), label: (map(.label // .name) | join(", ")), n: ($n * length),
        cols: map({arm: .name, key: null, label: (.label // .name), kind}
-         + (if .kind == "conveyor" then {engine: (if $c then $e else null end), version: (if $c then null else $e end)} else {} end)),
+         + (if .kind == "conveyor" then {engine: (if $c then $e else null end), version: (if $c then ($v | if . == "" then null else . end) else $e end)} else {} end)),
        set: ($set | {dataset, revision, seed}), limits: ($set | {cpus, memory, taskTimeout}), done: 0, resolved: 0, current: null, started: $at, state: $s, tasks: []}
     + if $s == "running" then {pid: $pid, active: null, seq: 1, updated: $at} else {ended: $at, why: $w} end'
 }
@@ -832,6 +839,8 @@ swe_run() { # <n> <engine> <arm>...
   # Its conveyor arms name the engine asked for. Written here, not by swe_end: no container or sandbox is this run's,
   # and the ones swe_end removes can be an arms check's.
   why=$(swe_setup 2>&1) || { echo "$why" >&2; trap - TERM INT
+    # An engine given as a commit is named by its version, as a run that started names it (swe_resolve).
+    SWE_VERSION=$(swe_relname "$eng0")
     l=$(printf '%s\n' "${specs[@]}" | swe_setuprec "$n" "$eng0" refused "${why#conveyor: }") && swe_put "$SWE_DIR/live.json" "$l" && swe_runlog "$l"; SWE_RUN=; swe_board; return 1; }
   tf=$(swe_tasks) || { swe_unstart "$prev"; return 1; }; all=$(wc -l < "$tf")
   [ "$n" -le "$all" ] || { swe_unstart "$prev"; echo "conveyor: the task list holds $all tasks: n is 1 to $all" >&2; return 2; }
@@ -1009,6 +1018,11 @@ swe_runsdo() { # archive | restore | delete <ids json>
   if [ -z "$l" ]; then rm -f "$SWE_DIR/runs.jsonl"; else swe_put "$SWE_DIR/runs.jsonl" "$l"; fi || return 1
   for p in "${gone[@]}"; do rm -f "$SWE_DIR/results/$p.json" "$SWE_DIR/results/$p.patch" "$SWE_DIR/results/$p.log"; rmdir "$SWE_DIR/results/${p%/*}" 2>/dev/null; done
   for id in $(jq -r '.[]' <<<"$ids"); do rm -f "$SWE_DIR/tails/$id.jsonl"; rm -rf "${SWE_DIR:?}/again/$id"; done
+  # The readings Compare kept (swe_diff, diff/<key A>/<key B>) of a key whose result went: a result made again under
+  # that key would be read with the old reading. A key holds no "/", so the key as A or as B is matched whole.
+  for p in $(printf '%s\n' "${gone[@]}" | sed -n 's|/.*||p' | sort -u); do
+    rm -rf "${SWE_DIR:?}/diff/$p" "$SWE_DIR"/diff/*/"$p"
+  done
   # live.json of a deleted run that ended (the last run) goes too, so Stop and the Board no longer name it.
   ! jq -e --argjson ids "$ids" '.id | IN($ids[])' "$SWE_DIR/live.json" > /dev/null 2>&1 || { rm -f "$SWE_DIR/live.json"; swe_board; }
   jq -r --argjson ids "$ids" '"conveyor: deleted \($ids | join(", "))\(if .kept > 0 then "; \(.kept) result\(if .kept > 1 then "s" else "" end) stay\(if .kept > 1 then "" else "s" end): another run shows \(if .kept > 1 then "them" else "it" end)" else "" end)."' <<<"$said"
@@ -1087,7 +1101,7 @@ swe_diff() { # <A> <B> [--json]
         | sort_by(. as $s | $o | index($s) // 99)') || steps=null
   else sm=''
   fi
-  d=$SWE_DIR/diff/$ka-$kb; mkdir -p "$d"
+  d=$SWE_DIR/diff/$ka/$kb; mkdir -p "$d"
   while IFS= read -r id; do
     fa=$(cat "$da/$id.json"); fb=$(cat "$db/$id.json")
     [ "$(jq -n --argjson a "$fa" --argjson b "$fb" '$a.resolved == $b.resolved')" = false ] || continue
