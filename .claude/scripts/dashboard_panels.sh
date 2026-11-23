@@ -672,10 +672,16 @@ republish() {
 # kept_parts -- the parts the last cycle kept (limit, decisions, lanes, foremen) into $RUN; one no cycle has kept yet
 # is "not read yet".
 kept_parts() {
-  local k e='not read yet: the collector has just started and its first cycle is still reading'
+  local k e
   for k in limit decisions lanes foremen; do
-    if [ -s "$CACHE/part-$k.json" ]; then cp "$CACHE/part-$k.json" "$RUN/$k.json" || return 1
-    else jq -cn --arg k "$k" --arg e "$e" '{limit: {limit: null}, decisions: {decisions: null, unsent: []},
-        lanes: {records: null}, foremen: {foremen: null}}[$k] + {error: $e}' > "$RUN/$k.json" || return 1; fi
+    e='not read yet: the collector has just started and its first cycle is still reading'
+    # One open of the part: the cycle replaces a part by a whole new file, so this reads the old or the new one whole,
+    # where cp fails on the swap. A part that cannot be read at all is "not read yet", as one no cycle has kept.
+    if [ -s "$CACHE/part-$k.json" ]; then
+      cat -- "$CACHE/part-$k.json" > "$RUN/$k.json" 2>/dev/null && continue
+      e='not read yet: the last cycle kept this part, but it cannot be read now'
+    fi
+    jq -cn --arg k "$k" --arg e "$e" '{limit: {limit: null}, decisions: {decisions: null, unsent: []},
+        lanes: {records: null}, foremen: {foremen: null}}[$k] + {error: $e}' > "$RUN/$k.json" || return 1
   done
 }
