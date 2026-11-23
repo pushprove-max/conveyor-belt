@@ -77,3 +77,20 @@ t_seatissuesbig() {
   fx_in 'seatissues "{\"cards\": {\"7\": {}, \"8\": {}}}" "$(asked)"'
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = 7 ] || fail "with the open list over 128 KiB, the seats of open #7 were not named (exit $RC): $(cat "$T/$CASE/run.out")"
 }
+
+# Issue 1569. Bug it catches: turnask() gave the open list, bodies and all, to the seat lookup as one argument; over
+# 128 KiB (here #13's 140 KiB body) jq did not start, and the turn never asked for the account of #10's own reviewer,
+# so pick saw no reading of it. #10's reviewer is Claude on the second account (95 %), the project's is Codex: only the
+# seat lookup reads that account, so a reading of it in the limit record shows turnask() asked for #10's seat. The
+# turn is called whole (turnask() through guardread), not seatissues() alone, which t_seatissuesbig covers. The setup
+# is reviewacctsetup's (reviewacct.test.sh): the runner sources every case file before it runs a case.
+t_turnaskbig() {
+  reviewacctsetup "[$(issue 10 2026-01-04), $(issue 13 2026-01-05)]"
+  ctl reviewer default >/dev/null; ctl review-account second >/dev/null; ctl card 10 reviewer claude-sonnet-5-5 >/dev/null
+  jq -c 'map(if .number == 13 then .body = ("x" * 143360) else . end)' "$STUB/issues.json" > "$STUB/i.new" && mv "$STUB/i.new" "$STUB/issues.json"
+  [ "$(wc -c < "$STUB/issues.json")" -gt 131072 ] || fail "the open list over 128 KiB was not made"
+  fx_in 'declare -A shuts=() mine=(); cap=1 building=0 now=running inuse=0 running=0 sampled=$SECONDS old= nopack= nocli= mhold= guard=1 waits= issues= ctl=$(ctl)
+    turnask >/dev/null 2>&1; echo "${#issues}"; ACCT=second lastread | jq -r .pct'
+  [ "$RC" = 0 ] && [ "$(tail -n 1 "$T/$CASE/run.out")" = 95 ] && [ "$(sed -n '$!p' "$T/$CASE/run.out" | tail -n 1)" -gt 131072 ] \
+    || fail "turnask() with an open list over 128 KiB did not ask for the seat of #10 (exit $RC): $(tail -c 400 "$T/$CASE/run.out")"
+}

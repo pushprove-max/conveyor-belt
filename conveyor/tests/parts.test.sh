@@ -34,12 +34,16 @@ t_partsloop() {
 # Push off (#875): the split umbrella #10, held, whose two parts #11 and #12 have each landed and are still open (a
 # landed issue stays open until the owner's push). The loop's turn (umbrellas()) closes it, with a comment that says
 # which parts landed, and releases it. Bug caught: the parent waited for its parts to close, which with push off never
-# happened, so it stayed open and held, looking like work waiting to build.
+# happened, so it stayed open and held, looking like work waiting to build. #13's body is 140 KiB, so the open list is
+# over 128 KiB too: umbrellas() gave jq that list as one argument, which fails to start jq on Linux, and no parent was
+# closed.
 t_partslanded() {
-  setup "[$(issue 10 2026-11-01), $(issue 11 2026-11-02), $(issue 12 2026-11-03)]"
+  setup "[$(issue 10 2026-11-01), $(issue 11 2026-11-02), $(issue 12 2026-11-03), $(issue 13 2026-11-04)]"
   printf '10 11\n10 12\n' > "$STUB/subs"
   jq -c '.rules.push = false | .held = [10]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   { landed 11; landed 12; } >> "$ST/cards.jsonl"
+  jq -c 'map(if .number == 13 then .body = ("x" * 143360) else . end)' "$STUB/issues.json" > "$STUB/i.new" && mv "$STUB/i.new" "$STUB/issues.json"
+  [ "$(wc -c < "$STUB/issues.json")" -gt 131072 ] || fail "the open list over 128 KiB was not made"
   fx_in 'umbrellas "$(asked)"'
   [ "$(cat "$STUB/closed" 2>/dev/null)" = 10 ] && grep -qF '(#11, #12; landed, not closed yet: #11, #12)' "$STUB/close-comments" \
     && [ "$(jq -c .held "$ST/control.json")" = '[]' ] \
