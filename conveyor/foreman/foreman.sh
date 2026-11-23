@@ -114,9 +114,9 @@ case $1 in
 esac
 MAIN=${CONVEYOR_MAIN:-$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/\.git$||')}
 CAP=5000 LIVE_CAP=1500 CTX_LIMIT=9000 RULES_LIMIT=9000
-# What the words hook adds around the claim's start (words()), in bytes: its own two lines, the claim's line and its
-# cache-time line said again, the JSON around them with the session's title, and the \ JSON writes before each newline.
-WORDS_ADD=1500
+# What the words hook adds around the claim (words()), in bytes: its two lines, the title, the \ JSON puts before each
+# newline. claim_cmd leaves it room (CLAIM_ADD), and the claim's lines, measured (bug: a guess cut the saved state).
+WORDS_ADD=300
 # --rules-apart: the start's caller sends rules.md by the rules hook, so the start leaves it out (context).
 RULES_APART=; [ "$1" = start ] && [ "${2:-}" = --rules-apart ] && RULES_APART=1
 
@@ -389,15 +389,14 @@ cleared_() {
 # resume, /clear or compact never comes here. When the Board is not running, one line says so and the Board is started
 # from this checkout (conveyor.sh board), then opened; the claim stands.
 claim_cmd() {
-  local was
-  was=$(marked)
+  local pre b was; was=$(marked)
   claim "$2" || { echo "foreman: this session could not be made the Foreman ($MARK)"; return 1; }
-  echo "This session is now the Foreman$(named): its watchers start at the end of this turn."
+  pre="This session is now the Foreman$(named): its watchers start at the end of this turn."
   # A claimed session keeps the cache time it started with; setup's settings.local.json gives a restarted one 1h.
   [ -z "${CLAUDE_CODE_PROMPT_CACHE_TTL:-}" ] || [ "$CLAUDE_CODE_PROMPT_CACHE_TTL" = 1h ] \
-    || echo "The Foreman runs with the prompt cache time $CLAUDE_CODE_PROMPT_CACHE_TTL, not 1h: a restart of this session takes the 1-hour cache from $MAIN/.claude/settings.local.json, which /conveyor-belt:setup --foreman writes."
-  [ "$was" = "$2" ] || { . "$FHERE/../../.claude/hooks/lib/board-open.sh" && board_open "$MAIN"; }
-  echo; context
+    || pre+=$'\n'"The Foreman runs with the prompt cache time $CLAUDE_CODE_PROMPT_CACHE_TTL, not 1h: a restart of this session takes the 1-hour cache from $MAIN/.claude/settings.local.json, which /conveyor-belt:setup --foreman writes."
+  [ "$was" = "$2" ] || { b=$(. "$FHERE/../../.claude/hooks/lib/board-open.sh" && board_open "$MAIN"); [ -z "$b" ] || pre+=$'\n'$b; }
+  printf '%s\n\n' "$pre"; [ -z "${CLAIM_ADD:-}" ] || CTX_LIMIT=$((CTX_LIMIT - CLAIM_ADD - $(printf '%s\n\n' "$pre" | wc -c))); context
 }
 off() {
   claim '' || { echo "foreman: Foreman mode could not be turned off ($MARK)"; return 1; }
@@ -412,14 +411,13 @@ off() {
 # This project's rules.md is not part of it when the start is called with --rules-apart (the plugin's hooks.json does):
 # the SessionStart hook `rules` sends it in an output of its own. A call without it (a claim in a running session, which
 # no SessionStart follows, or a plugin from before the rules hook) gets rules.md after the rest, cut to what the limit
-# leaves. When the whole is over the limit, state.md is swapped for one line that tells the Foreman to Read the file; when
-# the fixed text and the rest alone leave no room for the owner rules, a line that tells the Foreman to Read
-# owner-rules.md stands for them, and names rules.md in the same line when the project has one. That line comes first:
+# leaves, and its state and rules come before the rest. When the whole is over the limit, state.md is swapped for a line
+# that tells the Foreman to Read the file; when the fixed text and the rest alone leave no room for the owner rules, a
+# line that tells the Foreman to Read owner-rules.md stands for them, and names rules.md in the same line when the project has one. That line comes first:
 # the fixed text has no cap, and an output over the limit is shown as a short preview of its start, which keeps it.
 context() {
-  local head mid notes st stl left room cap lv i own=0 rd='' rdl=''
-  launcher
-  FQ=$(printf %q "$LAUNCHER")
+  local head mid mrd notes st stl left room cap lv i tiers='' own=0 res=0 rd='' rdl='' tr
+  launcher; FQ=$(printf %q "$LAUNCHER")
   # Without --rules-apart the owner rules come in this output too, so the saved state yields room for them.
   [ -n "$RULES_APART" ] || [ ! -s "$FHERE/owner-rules.md" ] || own=$(($(p_stat "$FHERE/owner-rules.md" | cut -d' ' -f1) + 1))
   # mid keeps the blank line context_mid ends with, which comes before the live summary.
@@ -427,20 +425,21 @@ context() {
   # The lines that may stand for the state and owner rules below, which the room keeps space for; after head's archive.
   stl=$(context_state_warn; context_read "$FD/state.md")
   [ "$own" = 0 ] || rdl="# $FHERE/owner-rules.md$([ ! -s "$FD/rules.md" ] || echo " and $FD/rules.md") did not fit in this start (Claude Code cuts a start over 10,000 characters): Read $([ -s "$FD/rules.md" ] && echo both || echo it) now, before you act."
-  # The live summary gets the room the rest and those two lines leave, up to LIVE_CAP, less the shortest list of unfiled
-  # plugin problems (context_notes 0); the list gets what it leaves. When that is under 0, auto's rules and the standing
-  # kinds go to start-rest.md, and a Read line stands for them. Bug: in the plugin's own repository, its standing kinds
-  # made the words hook's output over 10,000 characters with the notes and the live summary cut to nothing.
-  for i in 1 2; do
-    room=$((CTX_LIMIT - $(printf '%s\n%s%s\n%s\n\n' "$head" "$mid" "$stl" "$rdl" | wc -c))) cap=$((room - $(context_notes 0 | wc -c) - 1))
-    [ "$i" = 1 ] && [ "$cap" -lt 0 ] && printf '%s' "$mid" > "$FD/start-rest.md.$$" && mv -f "$FD/start-rest.md.$$" "$FD/start-rest.md" || break
-    mid=$(printf '\n# %s (auto'"'"'s rules and the standing kinds of routine yes) did not fit in this start (Claude Code cuts a start over 10,000 characters): Read it now, before you act.\n\nx' "$FD/start-rest.md"); mid=${mid%x}
-  done
-  # The state and owner rules, then rules.md whole as rules_text prints it, each take room before the live summary when it fits (bug: 15 open decisions dropped the state, then rules.md's 10 lines).
-  st=$(context_state) lv="# $FD/rules.md (this project's Foreman rules)"; for i in $(($(printf %s "$st" | wc -c) - $(printf %s "$stl" | wc -c) + own - $(printf %s "$rdl" | wc -c))) $([ -n "$RULES_APART" ] || [ ! -s "$FD/rules.md" ] || echo $((${#lv} + 3 + $(p_stat "$FD/rules.md" | cut -d' ' -f1)))); do [ "$((cap - i))" -lt 0 ] || { cap=$((cap - i)); room=$((room - i)); }; done
+  # Without --rules-apart, what the state and rules need beyond those lines, best first (tiers): state, owner rules and
+  # rules.md; state and owner rules; owner rules. The live summary gets what the rest, those lines and the best tier that
+  # fits (res; ctx_tier <bytes> gives its place) leave, up to LIVE_CAP, less the shortest notes list (context_notes 0). If
+  # under 0, or if a better tier then fits, auto's rules and the standing kinds go to start-rest.md, named by a Read line.
+  # Bug: the output was over 10,000 characters, or auto's rules or a full live summary swapped the state for a Read line.
+  st=$(context_state); [ -n "$RULES_APART" ] || { i=$(($([ -z "$st" ] && echo 0 || printf '%s\n' "$st" | wc -c) - $(printf '%s\n%s\n\n' "$stl" "$rdl" | wc -c))); tiers="$((i + $(rules_text "$CTX_LIMIT" | wc -c))) $((i + own))"; [ "$own" = 0 ] || tiers+=" $((own - ${#rdl} - 2))"; }
+  ctx_tier() { local t n=0; for t in $tiers; do [ "$t" -le "$1" ] && break; n=$((n + 1)); done; echo "$n"; }
+  ctx_room() { room=$((CTX_LIMIT - $(printf '%s\n%s%s\n%s\n\n' "$head" "$mid" "$stl" "$rdl" | wc -c))) cap=$((room - $(context_notes 0 | wc -c) - 1)); }
+  mrd=$(printf '\n# %s (auto'"'"'s rules and the standing kinds of routine yes) did not fit in this start (Claude Code cuts a start over 10,000 characters): Read it now, before you act.\n\nx' "$FD/start-rest.md"); mrd=${mrd%x}
+  ctx_room; if [ "$cap" -lt 0 ] || [ "$(ctx_tier $((cap + $(printf %s "$mid" | wc -c) - $(printf %s "$mrd" | wc -c))))" -lt "$(ctx_tier "$cap")" ]; then
+    printf '%s' "$mid" > "$FD/start-rest.md.$$" && mv -f "$FD/start-rest.md.$$" "$FD/start-rest.md" && mid=$mrd && ctx_room; fi
+  read -ra tr <<<"$tiers 0"; res=${tr[$(ctx_tier "$cap")]}; cap=$((cap - res))
   [ "$cap" -le "$LIVE_CAP" ] || cap=$LIVE_CAP; [ "$cap" -ge 0 ] || cap=0
   lv=$(LIVE_CAP=$cap live); mid+=$lv
-  notes=$(context_notes $((room - $(printf '%s\n' "$lv" | wc -c) - 1))); [ -z "$notes" ] || head+=$'\n'$notes
+  notes=$(context_notes $((room - res - $(printf '%s\n' "$lv" | wc -c) - 1))); [ -z "$notes" ] || head+=$'\n'$notes
   if [ "$(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)" -gt "$((CTX_LIMIT - own))" ]; then st=$stl; fi
   left=$((CTX_LIMIT - $(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)))
   # The fixed text and the rest alone may leave no room for the owner rules: a Read line stands for them, and for this
@@ -758,7 +757,7 @@ filed() {
 # prompt hook's additionalContext), and the session's name with it; any other prompt names, once, a Foreman session
 # that start did not name (title), and says nothing else.
 words() {
-  local out ttl n
+  local out ttl n rest
   inmain || return 0
   if [ -n "$WORDS" ]; then
     foreman "$SID" && [ "$(cat "$FD/titled" 2>/dev/null)" != "$SID" ] || return 0
@@ -766,11 +765,12 @@ words() {
     jq -cn --arg t "$(title)" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", sessionTitle: $t}}'
     return
   fi
-  # The start's text (context()) leaves room for what this hook adds around it, which CTX_LIMIT does not count.
-  if out=$(CTX_LIMIT=$((CTX_LIMIT - WORDS_ADD)) claim_cmd claim "$SID" 2>&1); then
-    # The claim's line on a cache time other than 1h is part of the reply, so the owner sees it.
+  if out=$(CLAIM_ADD=$WORDS_ADD claim_cmd claim "$SID" 2>&1); then
+    # The claim's line on a cache time other than 1h is part of the reply, so the owner sees it; it comes only there
+    # (bug: said again below, it took the room of the saved state).
     ttl=$(grep -m1 '^The Foreman runs with the prompt cache time ' <<<"$out") && n='these two lines' || n='this one line'
-    out="The owner asked, in words, for this session to be the Foreman, and it now is. Reply with only $n: ${out%%$'\n'*}${ttl:+$'\n'$ttl}"$'\n'"From this turn on, work by the rest of this as the Foreman."$'\n\n'"${out#*$'\n'}"
+    rest=${out#*$'\n'}; [ -z "$ttl" ] || rest=${rest#"$ttl"$'\n'}
+    out="The owner asked, in words, for this session to be the Foreman, and it now is. Reply with only $n: ${out%%$'\n'*}${ttl:+$'\n'$ttl}"$'\n'"From this turn on, work by the rest of this as the Foreman."$'\n\n'"$rest"
     jq -cn --arg c "$out" --arg t "$(title)" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c, sessionTitle: $t}}' && titled "$SID"
   else
     # A failed claim makes no Foreman, so it names no session.

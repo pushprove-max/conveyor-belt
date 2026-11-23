@@ -131,12 +131,17 @@ t_race() {
 # the limit, whole when they fit and cut at a whole line with the Read line when they do not.
 # The sample is 10 lines of rules and 16 of state with every standing kind on: the room the fixed text must leave, which
 # a sample of 4 lines each (or kinds off) hid when the fixed text grew.
+# 15 open decisions fill the live summary to its cap, as a busy project's does, and auto is on. Bug it catches: the live
+# summary took its room first, or auto's rules and the standing kinds kept theirs, so the start swapped the 16 lines of
+# state for a Read line and cut rules.md.
 t_old() {
-  local st
-  fixture old; allkinds # every kind on, as this repository's pack has them: the largest start a project makes
-  text RULESBODY 10 > "$FD/rules.md"; text STATEBODY 16 > "$FD/state.md"
-  marked; st=$(hook start sA | ctx)
+  local st out
+  oldsample old
+  marked; out=$(hook start sA); st=$(ctx <<<"$out")
   [ "$(grep -c RULESBODY <<<"$st")" = 10 ] && [ "$(grep -c STATEBODY <<<"$st")" = 16 ] || fail "a start without --rules-apart lacks the rules or the state: $(grep -E 'did not fit|cut to fit' <<<"$st")"
+  autoread "$st"
+  grep -qF 'gives the subject only' <<<"$st" && grep -q '^# Live summary' <<<"$st" && [ "${#out}" -lt 10000 ] \
+    || fail "a start without --rules-apart, with a full live summary, lacks the owner rules or the live summary, or is ${#out} characters: $(grep -E 'did not fit|cut at' <<<"$st")"
   text RULESBODY 200 > "$FD/rules.md"; st=$(hook start sA)
   [ "${#st}" -lt 10000 ] && grep -qF "Read the rest from $FD/rules.md" <<<"$(ctx <<<"$st")" || fail "a start without --rules-apart is ${#st} characters or has no Read line"
 }
@@ -189,6 +194,50 @@ t_own() {
   ! grep -qE 'did not fit|Read the rest' <<<"$st" && [ "$(grep -c STATEBODY <<<"$st")" = 16 ] && [ "$(grep -c RULESBODY <<<"$st")" = 10 ] \
     && grep -qF "$(head -n 1 "$SRC/owner-rules.md")" <<<"$st" && [ "$n" -le 9000 ] \
     || fail "this repository's own start without --rules-apart ($n bytes) does not hold the owner rules, 10 lines of rules and 16 of state: $(grep -E 'did not fit|Read the rest' <<<"$st" | cut -c1-200)"
+}
+# oldsample <case>: t_old's sample in a new fixture: every kind on, as this repository's pack has them (the largest start
+# a project makes), auto on, 15 open decisions, 10 lines of rules and 16 of state.
+oldsample() {
+  local i
+  fixture "$1"; allkinds
+  (cd "$M" && bash "$SRC/../conveyor.sh" auto on) > /dev/null || fail "auto was not turned on"
+  mkdir -p "$M/.claude/metrics" || fail "the ledger folder was not made"
+  for ((i = 1; i <= 15; i++)); do
+    jq -cn --arg i "$i" '{id: "d\($i)", question: ("Approve the change \($i) " + ("q" * 150)), askedAt: "2026-11-22T10:00:00Z", answeredAt: null}'
+  done > "$M/.claude/metrics/decisions.jsonl"
+  text RULESBODY 10 > "$FD/rules.md"; text STATEBODY 16 > "$FD/state.md"
+}
+# autoread <start text>: auto's rules are in the start, or in start-rest.md that its Read line names, so the sample has
+# auto's rules to place.
+autoread() {
+  grep -q '^# AUTO IS ON' <<<"$1" || { grep -qF "# $FD/start-rest.md (auto's rules" <<<"$1" && grep -q '^# AUTO IS ON' "$FD/start-rest.md"; } \
+    || fail "the start has auto's rules neither in it nor in start-rest.md by a Read line: $(grep -n 'AUTO\|start-rest' <<<"$1" | cut -c1-200)"
+}
+# A claim made by the owner's words (the words hook, which has no --rules-apart and a smaller limit than a start) keeps
+# the saved state, the owner rules and the ten project rules whole with t_old's sample, and its output stays under 10,000 characters. The
+# session runs with a 5-minute cache, so the claim has its longest lines (the cache-time line names the checkout).
+# Bug it catches: the live summary took the room first, the words hook kept a guessed 1,500 bytes (then 1,000) for what
+# it adds, and it said the cache-time line twice, so the claim swapped the state, and the rules, for Read lines.
+t_words_old() {
+  local out c in
+  oldsample words_old
+  marked
+  in=$(jq -cn --arg c "$M" '{session_id: "sB", prompt: "start your role", cwd: $c}')
+  out=$( (cd "$M" && CLAUDE_CODE_PROMPT_CACHE_TTL=5m bash "$SRC/foreman.sh" words) <<<"$in") || fail "the words hook failed for $in"
+  c=$(ctx <<<"$out")
+  [ "$(grep -c STATEBODY <<<"$c")" = 16 ] && [ "$(grep -c RULESBODY <<<"$c")" = 10 ] && grep -qF 'gives the subject only' <<<"$c" && [ "${#out}" -lt 10000 ] \
+    || fail "the words hook's claim for $in lacks the state, the project rules or the owner rules, or is ${#out} characters: $(grep -E 'did not fit|cut' <<<"$c" | cut -c1-200)"
+  autoread "$c"
+  [ "$(grep -c '^The Foreman runs with the prompt cache time 5m' <<<"$c")" = 1 ] \
+    || fail "the words hook's claim for $in does not say the cache-time line once: $(grep -n 'prompt cache time' <<<"$c" | cut -c1-120)"
+  # A state of 60 lines (under its cap) has no room beside the owner rules even with auto's rules moved out: it yields,
+  # and the live summary leaves the owner rules their room (bug: it took that room, so both came as Read lines).
+  text STATEBODY 60 > "$FD/state.md"
+  in=$(jq -cn --arg c "$M" '{session_id: "sC", prompt: "start your role", cwd: $c}')
+  out=$( (cd "$M" && CLAUDE_CODE_PROMPT_CACHE_TTL=5m bash "$SRC/foreman.sh" words) <<<"$in") || fail "the words hook failed for $in"
+  c=$(ctx <<<"$out")
+  grep -qF 'gives the subject only' <<<"$c" && grep -qF "Read $FD/state.md now" <<<"$c" && [ "${#out}" -lt 10000 ] \
+    || fail "the words hook's claim for $in, with 60 lines of state, lacks the owner rules or the state's Read line, or is ${#out} characters: $(grep -E 'did not fit|cut' <<<"$c" | cut -c1-200)"
 }
 
 # A project with no rules.md still gets the plugin's 11 rules on working with the owner, in the rules output, and the
@@ -349,8 +398,8 @@ t_words_notes_full() {
     || fail "the words hook's claim, with no room for a note, has no one line that says to Read $FD/plugin-bugs.md: $(grep -n 'plugin-bugs' <<<"$c" | cut -c1-200)"
 }
 
-cases=(fit fixed big other race old old_live owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
-cases=(fit fixed big other race old own owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
+cases=(fit fixed big other race old old_live words_old owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
+cases=(fit fixed big other race old own words_old owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"
