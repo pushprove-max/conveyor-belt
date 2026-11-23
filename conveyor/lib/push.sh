@@ -822,8 +822,9 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   body="Conveyor card $1 is blocked: ${reason:0:600}"; [ -z "$tail" ] || body+=$'\n\n```\n'"$shown"$'\n```'
   [ -z "$f" ] || body+=$'\n\n'"Findings of its last review:"$'\n'"${f:0:60000}"
   [ -z "$patch" ] || body+=$'\n\n'"Its work is kept as a patch: $patch. \`conveyor.sh retry $2\` starts the next card from it: applied as it is while it still applies to main, brought onto main by a session when it does not."
-  # A card that kept the body its review read (the yes, a landing conflict): a change to the issue's visible section voids the patch (resumeplan()).
-  [ -z "$patch" ] || [ ! -s "$3.body" ] || body+=" If the issue's section of what customers or staff will see changes first, the next card is built from nothing."
+  # A card that kept the body its review read (the yes, a landing conflict): a change to the issue's visible section voids the patch
+  # (resumeplan()), but a landing conflict's patch only when it must be ported: one that applies to main again gets one session and a review.
+  [ -z "$patch" ] || [ ! -s "$3.body" ] || body+=" If the issue's section of what customers or staff will see changes first$([[ $reason != "rebase onto main conflicts: "* ]] || echo ", and the patch no longer applies to main"), the next card is built from nothing."
   [ -z "$f${5:-}$patch" ] || [ "$2" = 0 ] || err=$(gh_write issue comment "$2" --body "$body" 2>&1 >/dev/null) || if [ $? = 3 ]; then
     reason="${reason:0:1100} [$([ -n "$f" ] && echo "the review's findings" || echo this) not posted on the issue: ${err:0:600}]"
   else reason="${reason:0:1100} [$([ -n "$f" ] && echo "the review's findings" || echo this) could not be posted on the issue]"; fi

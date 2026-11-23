@@ -253,8 +253,9 @@ test('Needs you: a blocked card\'s last line names the step its kind of block ta
   add('c1-26', 26, 'the session made no change and said that main already fixes the issue. The reviewer says that main does not do what the issue asks. [P1] a.txt:1 wrong word');
   add('c1-27', 27, 'push: the remote refused the branch.');
   next(w, d);
-  // Bug: the step promised the kept change on an issue rewritten since its review, which a retry builds from nothing.
-  assert.equal(step('c1-25'), "Retry: a new session brings the kept change onto main as it is now. If the issue's section of what customers or staff will see changed since the review, the new card builds the issue from nothing.", 'a landing conflict: Retry is the fix');
+  // Bug: the step promised the kept change on an issue rewritten since its review, which a retry builds from nothing;
+  // then it promised a build from nothing where the kept change applies to main again, which a retry builds on.
+  assert.equal(step('c1-25'), "Retry: a new session brings the kept change onto main as it is now. If the issue's section of what customers or staff will see changed since the review, and the kept change no longer applies to main, the new card builds the issue from nothing.", 'a landing conflict: Retry is the fix');
   // Bug: both promised kept work, which an ALREADY-DONE session, or a block before any change, does not leave.
   assert.equal(step('c1-26'), "Retry: a new session gets the reviewer's finding and builds the issue.", 'a review that rejects ALREADY-DONE is a review block, with no kept work');
   assert.match(step('c1-27'), /^Blocked because: .+\. Retry starts a new card, from the kept work if there is any\.$/, 'any other block names its reason');

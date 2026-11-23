@@ -110,6 +110,21 @@ t_keptunread() {
     || fail "a card with no conflict ran an extra session: $(st 'select(.issue == 12) | .step' | tr '\n' ' ') $(wc -l < "$STUB/sessions") sessions"
 }
 
+# The block comment, the Board's next step and docs/board.md say a landing conflict's kept patch is given up for a
+# rewritten visible section only when it no longer applies to main (t_resumeconflictrewritten: when it does not). Bug
+# it catches: they promised a build from nothing here, where the change on main that conflicted is gone and the
+# patch applies again: resumeplan() builds on it with one session and a review against the issue as it is now.
+t_keptconflictapplies() {
+  resumesetup 9
+  portkept 9 c1-9 'rebase onto main conflicts: CONFLICT (content): Merge conflict in a.txt' 'echo two >> a.txt' "$GO"
+  jq -cn '{body: "Add (a).\n\n## What customers or staff will see\nGuests see a new Pay button."}' > "$K/c1-9.body"
+  issue 9 2026-01-01 | jq -c '[.body = "Do (b) instead.\n\n## What customers or staff will see\nNothing visible changes."]' > "$STUB/issues.json"
+  loop retry 9 >/dev/null || fail "retry of #9 exited non-zero"
+  resumed 9
+  [ "$(jq -c '[.rc, .mode, .note, .staged]' <<<"$RESUMED")" = '[0,"session","resumed from the kept patch of card c1-9: one session, then review",["a.txt"]]' ] \
+    || fail "the landing-conflict patch of #9 (visible section rewritten, patch applies to main again) was not built on: $RESUMED"
+}
+
 # Bug (#93): after the owner turned a card's change down, the only way to have its next card build from nothing was
 # to move its kept folder aside by hand, and the kept patch of an earlier retry was then taken up (mode=stale). Here
 # #13 blocks twice, the second card resumed from the first's patch: `retry 13 --fresh` moves both cards' kept work to
