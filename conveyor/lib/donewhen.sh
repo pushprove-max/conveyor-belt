@@ -197,9 +197,10 @@ donewhen() { # <worktree> <issue json>
 # `OUTSIDE: <finding> (judge: <reason>)`: judged(), lib/review.sh) is, without the judge's reason, which names no D<n>
 # for it. That reason is cut off by the finding the judge's record keeps (judge.outside of the card's review lines: a
 # reused review's line has none, the line of the review it reuses has), not at a ` (judge: ` the finding itself can
-# quote; the newest review's records are tried first, each review's in the order it keeps them, so an older review's
-# record, or a later one of the same review, that renders the same line cut elsewhere is not used; a line cut inside
-# the finding keeps what it has. items is [] when no line of the card has the check.
+# quote. A record that renders the whole line is used first; only a line no record renders whole (one the reason cut)
+# takes the first record whose line starts with it. The newest review's records are tried first, each review's in the
+# order it keeps them, so a record of the same or an older review whose line only starts with this one (the line cut
+# elsewhere) is not used; a line cut inside the finding keeps what it has. items is [] when no line of the card has the check.
 dwdetail() { # <card>
   { olds; recs; } 2>/dev/null | jq -cRn --arg c "$1" '[inputs | fromjson? | objects | select(.card == $c)] as $l
     | ([$l | to_entries[] | select(.value.doneWhenItems | type == "array")] | last) as $b
@@ -210,7 +211,7 @@ dwdetail() { # <card>
     | {card: $c, items: [($b.value.doneWhenItems // [])[] | objects | .n as $n | {n, text, builder: .said,
         reviewer: (if $r == null then null elif any($r.doneWhenHolds[]?; . == $n) then "holds"
           else [$f[] | select(startswith("DECLINED:") | not) | . as $x
-            | if startswith("OUTSIDE: ") then (first($o[] | select(.w | startswith($x))) // null) as $m | if $m then $x[:($m.o | length)] else $x end else $x end
+            | if startswith("OUTSIDE: ") then (first($o[] | select(.w == $x)) // first($o[] | select(.w | startswith($x))) // null) as $m | if $m then $x[:($m.o | length)] else $x end else $x end
             | select(test("\\bD\($n)\\b"))] | if . == [] then null else join("\n") end end)}]}'
 }
 # A card's excerpts, which the snapshot leaves out: the lines each of its reviews' findings cites, as its review lines
