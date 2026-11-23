@@ -493,11 +493,12 @@ record() { # <repo> <main> <now> <await>
   # the record's host, and the act is logged there (`auto act review-retry`: standinglog). Its line then keeps only
   # its key: it wakes nothing, and is not retried again while a snapshot still lists it. A retry that fails, or an act
   # that is not logged, wakes as the block does, with why. Another block, or a main-red fix card (no issue), wakes as
-  # before.
+  # before. The retry is asked with the longer wait SLOW_S: it can take longer than the ask's first wait (#1586), and
+  # the wait ends only the ssh client, not the retry on the host, so a retry that ran would be read as a failed one.
   reviewretry() {
     local card issue out rc note
     while IFS=$'\t' read -r card issue; do
-      out=$(ask "$repo" "$main" retry "$issue" 2>&1); rc=$?
+      out=$(ASK_LIMIT=$SLOW_S ask "$repo" "$main" retry "$issue" 2>&1); rc=$?
       if [ "$rc" = 0 ]; then
         note=''; out=$(ask "$repo" "$main" auto act review-retry "retried #$issue: its card $card was blocked by its review" 2>&1) \
           || { rc=$?; note="#$issue was retried (review-retry), but the act was not logged"; }

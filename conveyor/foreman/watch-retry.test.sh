@@ -71,6 +71,15 @@ t_fails() {
     || fail "the wake does not give the block with the retry's reason: $wake"
   [ ! -s "$CONVEYOR_RULING_LOG" ] || fail "a failed retry was logged as done: $(cat "$CONVEYOR_RULING_LOG")"
 }
+# The retry takes longer than the ask's first wait (45 s) and ends well within the longer one: here the ask exits 124
+# when its wait is 45 s or less. Bug it catches (#1586): the retry ran on the host, but the 45 s wait ended it as a
+# failure, so the Foreman was woken with "the review-retry of #7 failed: exit 124" and the act was never logged.
+t_slow() {
+  fixture slow '["review-retry"]' "$REVIEW" '[ "${ASK_LIMIT:-45}" -gt 45 ] || exit 124; echo "conveyor: issue #7 is queued again"'
+  poll && fail "a retry slower than the first ask wait woke the Foreman: $wake"
+  jq -se 'length == 1 and .[0].kind == "review-retry" and (.[0].answer | contains("#7"))' "$CONVEYOR_RULING_LOG" >/dev/null \
+    || fail "a retry slower than the first ask wait was not logged as a retry: $(cat "$CONVEYOR_RULING_LOG" 2>&1) $(cat "$T/err")"
+}
 # A block that is not a review block, with the kind on: the blocked wake, and no retry.
 t_other() {
   fixture other '["review-retry"]' 'the changed tests failed again after their one fix round (exit 1); nothing landed.' 'exit 0'
@@ -136,7 +145,7 @@ t_unread() {
   [ ! -e "$T/retries" ] || fail "the watcher retried a block whose reserved words could not be read: $(cat "$T/retries")"
 }
 
-cases=(on off fails other stale health reserved reservedpack unread)
+cases=(on off fails slow other stale health reserved reservedpack unread)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
