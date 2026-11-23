@@ -175,7 +175,7 @@ mapcollect() { # <dir> <language> <tmp folder>
       # A suite whose tests failed (exit 1, pytest's and unittest's) leaves out the files its failure lines name
       # (pytest's FAILED and ERROR: mappyfailed(); unittest's FAIL: and ERROR: mappyut()), not mapped, and maps the others; any other failure,
       # or a failed run that names none, fails the build.
-      w=''; [ $rc != 1 ] || w=$(grep -E '^(FAILED|ERROR)[: ]|^FAIL: ' "$tmp/log" > "$tmp/failed"; { mappyfailed "$tmp/tests" "$tmp/failed"; mappyut "$tmp/tests" "$tmp/failed"; } | sort -u)
+      w=''; [ $rc != 1 ] || w=$({ mappyfailed "$tmp/tests" "$tmp/log"; mappyut "$tmp/tests" "$tmp/log"; } | sort -u)
       [ $rc = 0 ] || [ -n "$w" ] || { mapfail 'the suite' "$tmp"; return 1; }
       [ -z "$w" ] || { mapfile -t fl <<<"$w"; mapskip "$tmp" 'a test of it failed under coverage' "${fl[@]}"; }
       (cd "$d" && COVERAGE_FILE=$tmp/py.cov coverage json --rcfile="$tmp/rc" --show-contexts -o "$tmp/py.json") >> "$tmp/log" 2>&1 < /dev/null || { mapfail 'coverage json' "$tmp"; return 1; }
