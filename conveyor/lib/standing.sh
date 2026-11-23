@@ -40,17 +40,17 @@ standingrules() { # <run> <reserved>
   cat <<EOF
 # STANDING YES (the pack's auto.standing)
 
-The owner said yes ahead of time to the kinds of step below. Take each one without asking (but review-retry, which the watcher takes itself), also where your other rules say to wait for the owner's yes. Run each command below after \`$1\`. After each act, log it with \`auto act <kind> "<what you did, with the issue or card>"\` and tell the owner in one line of your next reply: "Done without asking (<kind>): <what>; logged as <id>."
+The owner said yes ahead of time to the kinds of step below. Take each one without asking (but review-retry, which the watcher takes itself), even where your other rules wait for the owner's yes. Run each command below after \`$1\`. After each act, log it with \`auto act <kind> "<what you did, with the issue or card>"\` and put the one line it prints in your next reply.
 EOF
   for k in "${STANDING_KINDS[@]}"; do
     jq -e --arg k "$k" 'index($k) != null' <<<"$s_" >/dev/null || continue
     case $k in
       asked-fix) echo "- asked-fix: the owner reports a problem or asks for a fix. File the issue, then release it at once (\`control release <issue>\`)." ;;
-      review-followup) echo "- review-followup: a follow-up from the review of a card the owner approved. Release it when it only finishes or corrects that card's own change. The engine itself does not hold, and logs, one whose finding names only that card's files and no word of auto.reserved: tell the owner of each in one line too." ;;
-      release-check) echo "- release-check: a check fails in a release the owner asked for (a false privacy hit, a red test file). File a fix card for each failure, with the line \`Release fix: <version>\` in its body, and release it. For a red test file, the engine starts \`release-run prep <version>\` itself once every fix card has landed; for any other check, go on with the release then." ;;
+      review-followup) echo "- review-followup: a follow-up from the review of a card the owner approved. Release it when it only finishes or corrects that card's own change. The engine itself does not hold, and logs, one whose finding names only that card's files and no word of auto.reserved: tell the owner of each too." ;;
+      release-check) echo "- release-check: a check fails in a release the owner asked for (a false privacy hit, a red test file). File a fix card for each failure, with the line \`Release fix: <version>\` in its body, and release it. Once every fix card has landed, the engine starts \`release-run prep <version>\` for a red test file; for another check, go on with the release." ;;
       fixed-block) echo "- fixed-block: a card is blocked, and a fix that landed removed the cause. Add \`Depends on: #<fix>\` to the card's issue, then run \`retry <issue> --fresh\`." ;;
-      review-retry) echo "- review-retry: a card blocked by its review (\"the fix for <finding> did not hold after <n> rounds\"). The watcher runs \`retry <issue>\` and logs the act, so you get no wake for it: you take no step for it, log nothing and tell the owner nothing of it. A wake for such a card says why its retry failed: act on that reason." ;;
+      review-retry) echo "- review-retry: a card blocked by its review (\"the fix for <finding> did not hold after <n> rounds\"). The watcher runs \`retry <issue>\` and logs it: you take no step for it, log nothing and tell the owner nothing of it. A wake for such a card is a failed retry: act on its reason." ;;
     esac
   done
-  echo "- Still ask the owner, whatever the kind: new engine behaviour (a change to how the engine builds, reviews, fixes, tests, lands or pushes that the owner did not ask for); a design choice; a release the owner did not ask for; anything about $2. When unsure, ask."
+  echo "- Still ask the owner, whatever the kind: new engine behaviour (how the engine builds, reviews, fixes, tests, lands or pushes) or a release, each one the owner did not ask for; a design choice; anything about $2. When unsure, ask."
 }

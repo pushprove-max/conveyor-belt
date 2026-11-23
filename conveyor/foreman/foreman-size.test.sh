@@ -66,8 +66,8 @@ allkinds() {
   export ENG=$SRC/../conveyor.sh CONVEYOR_FOREMAN_ASK='[[ $CONVEYOR_CMD == "auto standing "?* ]] || exit 3; cd "$CONVEYOR_MAIN" && bash "$ENG" auto standing "${CONVEYOR_CMD#auto standing }"'
 }
 # The fixed text of a start (every line up to and with the live summary's heading, the warnings left out) takes at most
-# 52% of the 10,000 characters (5,200; it is 5,052 now), with every standing kind on and the folder in its paths 19
-# characters long: the rest of the room is for the live summary, the owner's rules and the state (t_old holds that room).
+# 52% of the 10,000 characters (5,200; it is 4,923 now), with every standing kind on and the folder in its paths 19
+# characters long: the rest of the room is for the live summary, the owner's rules and the state (t_old and t_own hold that room).
 # Bug it catches: the fixed text grew with each line added to it until 10 lines of rules beside 16 of state no longer
 # fitted a start without --rules-apart, and a live start said the state "did not fit"; only t_old noticed, and its sample
 # was cut to hide it. A start with every kind on is the largest the fixed text makes, so a line added to the standing
@@ -158,6 +158,37 @@ t_old_live() {
     || fail "a start without --rules-apart, with 15 open decisions in the live summary, lacks the 16 state lines: $(grep -E 'did not fit|cut at' <<<"$c" | cut -c1-200)"
   [ "$(grep -c RULESBODY <<<"$c")" = 10 ] \
     || fail "a start without --rules-apart, with 15 open decisions in the live summary, has $(grep -c RULESBODY <<<"$c") of the 10 rules.md lines: $(grep -E 'did not fit|cut to fit' <<<"$c" | cut -c1-200)"
+}
+
+# The sample of t_old (10 lines of rules, 16 of state) fits this repository's own start without --rules-apart: its pack
+# (every standing kind on, its auto.reserved), its record's name, the plugin-home text, the state folder in the checkout
+# and the live summary of a quiet belt. The start is the real one, with no --rules-apart, so the owner rules and rules.md
+# come from context() itself. Its folder, in every path of the text, stays under the runner's TMPDIR (the share of temp
+# space it counts) and is padded to its length in a card's test slot (40 characters, as in foreman-launcher.test.sh), so
+# a shorter TMPDIR does not make the start fit when it does not fit in the slot.
+# Bug it catches (follow-up of #1536): t_old's sample fitted only a start smaller than this repository's own; here the
+# standing text and the owner rules left rules.md 4 of its 10 lines.
+t_own() {
+  local st own n B=$B
+  [ "${#B}" -ge 39 ] || B+=/$(printf '%*s' $((39 - ${#B})) '' | tr ' ' p)
+  fixture own; allkinds
+  own=$(jq -r '.repository | if type == "object" then .url else . end' "$SRC/../../.claude-plugin/plugin.json")
+  git -C "$M" remote set-url origin "git@github.com:${own#https://github.com/}.git" \
+    && jq '.plugin = {follow: "main"}' "$SRC/../../.conveyor/project.json" > "$M/.conveyor/project.json" \
+    && jq -n --arg h "$M" --arg r "${own##*/}" '{records: [{repo: $r, main: $h}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
+    || fail "the fixture of this repository's own start was not made"
+  # The state folder's own place: the checkout's conveyor/state (lib/paths.sh state-dir), not the fixture's shorter one.
+  FD=$M/conveyor/state/foreman; export CONVEYOR_FOREMAN_DIR=$FD; mkdir -p "$FD" || fail "the state folder was not made"
+  # The snapshot of a quiet belt: no card in flight, blocked or waiting, the loop running.
+  export CONVEYOR_FOREMAN_ASK='case $CONVEYOR_CMD in snapshot) echo "{\"snapshotAt\": \"2026-11-23T10:00:00Z\", \"belt\": [], \"health\": {\"loop\": true, \"state\": \"running\", \"reason\": null, \"blocked\": [], \"waiting\": []}}" ;; "auto standing "?*) cd "$CONVEYOR_MAIN" && bash "$ENG" auto standing "${CONVEYOR_CMD#auto standing }" ;; *) exit 3 ;; esac'
+  text RULESBODY 10 > "$FD/rules.md"; text STATEBODY 16 > "$FD/state.md"
+  marked; st=$(hook start sA | ctx)
+  grep -q '^Conveyor [^ ]* (snapshot as of 2026-11-23T10:00:00Z): loop running' <<<"$st" && grep -qF "this project is the plugin's own repository" <<<"$st" \
+    && grep -q -- '^- review-retry: ' <<<"$st" || fail "the start is not this repository's own (no live summary, plugin-home text or standing kinds): ${st:0:200}"
+  n=$(printf '%s\n' "$st" | wc -c)
+  ! grep -qE 'did not fit|Read the rest' <<<"$st" && [ "$(grep -c STATEBODY <<<"$st")" = 16 ] && [ "$(grep -c RULESBODY <<<"$st")" = 10 ] \
+    && grep -qF "$(head -n 1 "$SRC/owner-rules.md")" <<<"$st" && [ "$n" -le 9000 ] \
+    || fail "this repository's own start without --rules-apart ($n bytes) does not hold the owner rules, 10 lines of rules and 16 of state: $(grep -E 'did not fit|Read the rest' <<<"$st" | cut -c1-200)"
 }
 
 # A project with no rules.md still gets the plugin's 11 rules on working with the owner, in the rules output, and the
@@ -319,6 +350,7 @@ t_words_notes_full() {
 }
 
 cases=(fit fixed big other race old old_live owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
+cases=(fit fixed big other race old own owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

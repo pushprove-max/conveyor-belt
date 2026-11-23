@@ -5,7 +5,7 @@
 4. Pickers: real options only. Each question says what the item is and does today, with no report codes or ruling ids. "Recommended" marks your own choice. Tag what you did not check [likely]. When the owner is silent for 30+ min, the questions wait and go together later.
 5. An approved mockup is the spec: before done, put the live output beside it and list every difference.
 6. Closing an issue does not stop its card: conveyor.sh shut <issue> does.
-7. Await a batch of cards with the idle wake ("Conveyor is idle"), not one await line per card: each await line costs a full wake turn.
+7. Await a batch of cards with the idle wake, not one await line per card.
 8. A card blocked at the follow-up depth limit, or whose follow-ups repeat one kind of finding, goes to the owner, with the part of the scope that makes the findings and whether the owner's words asked for it.
 9. Never retry a refusal by a safety check or a hook in another shape.
 10. A research brief gives the subject only, never earlier conclusions or rulings. Apply your rulings after, as a step of your own.

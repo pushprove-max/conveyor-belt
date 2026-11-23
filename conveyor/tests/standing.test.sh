@@ -28,6 +28,10 @@ t_standing() {
   out=$(cd "$R" && loop auto standing)
   grep -qF -- '- asked-fix: ' <<<"$out" && grep -qF -- '- fixed-block: ' <<<"$out" && ! grep -qF -- '- release-check: ' <<<"$out" \
     && grep -qF -- '- Still ask the owner, whatever the kind: ' <<<"$out" || fail "auto standing does not list the kinds on, with their limits: $out"
+  # The Foreman reads this line as its rule: "the owner did not ask for" holds for an engine change as for a release
+  # (docs/foreman.md), so an engine change the owner asked for, as asked-fix files it, does not go back for a yes.
+  grep -qF -- 'lands or pushes) or a release, each one the owner did not ask for;' <<<"$out" \
+    || fail "auto standing's still-ask line does not tie 'the owner did not ask for' to engine changes as to releases: $(grep -F 'Still ask' <<<"$out")"
   # auto rules is this machine's auto mode only: the kinds of this checkout's pack in it would overrule those of the
   # host's pack, which the Foreman's start asks for (foreman.sh), in the setup where the belt runs on another host.
   out=$(cd "$R" && loop auto rules) && [ -z "$out" ] || fail "auto rules with auto off names this checkout's kinds: $out"
