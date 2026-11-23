@@ -118,11 +118,13 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    in its step 2.
 
    When the suite fails, this step runs each failed case alone three times on the same commit, as **Run full test
-   suite** does. A case that passes each time alone is flaky. It goes on the flaky-test record with the source
-   "release <version> <commit>", and it does not stop the release. When the flaky-test record has this case from
-   enough runs, Conveyor files an issue to make it stable, as it does after a full test run. When each failed case is
-   flaky, the suite passes. The status then names the flaky cases, and the Release panel lists them in its step 2. A
-   case that fails alone too stops the release, and the output gives the result of each of its runs alone.
+   suite** does. Only an engine case or a case of a node test file runs by itself: a Python or other shell test file
+   runs whole, and after a suite that timed out the whole suite runs. A case that passes each time alone is flaky. It
+   goes on the flaky-test record with the source "release <version> <commit>", and it does not stop the release. When
+   the flaky-test record has this case from enough runs, Conveyor files an issue to make it stable, as it does after a
+   full test run. When each failed case is flaky, the suite passes. The status then names the flaky cases, and the
+   Release panel lists them in its step 2. A case that fails alone too stops the release, and the output gives the
+   result of each of its runs alone.
 5. Ask the owner for a yes in chat. After the yes, run `conveyor.sh release <version>` in the main checkout, on `main`.
    It stops, and changes nothing, when one of these is true:
    - the version is not higher than the newest tag, or its tag exists,

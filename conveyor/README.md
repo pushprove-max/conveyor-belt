@@ -1269,12 +1269,14 @@ only when the branch has moved since its last run. With `test.mainAt` set in the
 the machine's local time), it runs once a day instead: the first time the loop looks after that time, when the branch
 has moved since its last run.
 
-When it fails, Conveyor runs each failed case again alone, 3 times, on the same commit. A case that passes all 3
-times goes to the flaky-test record (Flaky tests, above) and files nothing. For the cases that fail alone, Conveyor
-files one issue of the pack's second priority that names them, their failure lines and the commits since the last
-pass, and the Board lists it under Needs you until a run passes. When that text is longer than GitHub accepts, its end
-is cut, so a long list of cases can push the failure lines and the commits out of it. A later failure of the same cases adds a comment to
-that issue while it is open, and files no other. A run whose failed cases all pass alone counts as a pass.
+When it fails, Conveyor runs each failed case again alone, 3 times, on the same commit (an engine case or a case of a
+node test file runs by itself; a Python or other shell test file runs whole, and after a suite timeout the whole suite
+runs). A case that passes all 3 times goes to the flaky-test record (Flaky tests, above) and files nothing. For the
+cases that fail alone, Conveyor files one issue of the pack's second priority that names them, their failure lines and
+the commits since the last pass, and the Board lists it under Needs you until a run passes. When that text is longer
+than GitHub accepts, its end is cut, so a long list of cases can push the failure lines and the commits out of it. A
+later failure of the same cases adds a comment to that issue while it is open, and files no other. A run whose failed
+cases all pass alone counts as a pass.
 
 A run that names no failing case but prints under 90% of the `ok <case>` lines of the last run that passed does not
 pass: its issue says "ran N of about M cases" and shows the end of its output, and the last pass stays as it was.
@@ -1381,7 +1383,9 @@ Push anyway does not read the record: it pushes over the red run with no new run
 
 A red run's failed cases are each run alone three times on the same commit (the command is told, in its
 `CONVEYOR_TEST_RERUN` list, that every other file passed and which case of the file to run: a command that ignores the
-list runs its whole selection) and judged as the nightly whole test judges them:
+list runs its whole selection. `.conveyor/test-full.sh` runs only the named case of an engine case file or a node test
+file; it runs a Python or other shell test file whole, and the whole suite when the red run timed out) and judged as the
+nightly whole test judges them:
 
 - passed alone 3 of 3: flaky, an entry on the flaky-test record (source `full test <commit>`).
 - failed alone (1 or more of 3), and each run that failed timed out, was killed or failed with words of the machine or

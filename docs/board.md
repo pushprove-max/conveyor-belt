@@ -595,13 +595,14 @@ step stays to come until you press Push landed or Push now. With the rule On, a 
 "pushing" until Conveyor pushes it.
 
 **Push landed** and **Run full test suite** are on the Control tab, which shows "N landed, not pushed". Push landed runs
-the project's full test suite, the `test.full` of the pack (the project's settings, `.conveyor/project.json`), on
-main. Setup sets `test.full` to your test command in a new pack. Green, it pushes the landed commits that the run tested.
-Red, it runs each failed case alone and judges it. A case that passes alone goes on the flaky-test
-record. A case that fails in the code becomes a P1 fix card. A case that fails for the machine or the network is
-declined, with its reason. When each failed case passes alone, Push landed pushes, and the result says "Flaky".
-Else it pushes nothing. **Push anyway**, beside a red result, pushes those commits after a confirm. **Run full test
-suite** runs the suite and pushes nothing. A project with no `test.full` shows both buttons greyed
+the project's full test suite, the `test.full` of the pack (the project's settings, `.conveyor/project.json`), on main.
+Setup sets `test.full` to your test command in a new pack. Green, it pushes the landed commits that the run tested. Red,
+it runs each failed case alone and judges it. Only an engine case or a case of a node test file runs by itself: a Python
+or other shell test file runs whole, and after a suite that timed out the whole suite runs. A case that passes alone
+goes on the flaky-test record. A case that fails in the code becomes a P1 fix card. A case that fails for the machine or
+the network is declined, with its reason. When each failed case passes alone, Push landed pushes, and the result says
+"Flaky". Else it pushes nothing. **Push anyway**, beside a red result, pushes those commits after a confirm. **Run full
+test suite** runs the suite and pushes nothing. A project with no `test.full` shows both buttons greyed
 (`conveyor/README.md`, The full test suite).
 
 Push landed, Run full test suite and Release share their results for each commit. When one of them passed on the
