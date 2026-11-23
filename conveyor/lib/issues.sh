@@ -776,16 +776,16 @@ farstates() { # <open issues json>
 # depth, printed. The pick grows ONLY from the open issues alone (jq/upnext.jq, testpick(): the parts of an open one,
 # and each whose parent, its umbrella, is in ONLY), so a closed part gave no follow-up and no part of its own. Read
 # again at each turn: a part that closes during the run (landed and closed by its push) is taken in, and one moved to
-# another parent is let go. An open part is left to that pick, which reads its parent as GitHub has it then. A read
-# that fails prints nothing and fails, so ONLY stays as it is, and says so.
+# another parent is let go. An open part is left to that pick, which reads its parent as GitHub has it then. A deleted
+# issue (gh fails, its answer on stdout: the repository, the issue NOT_FOUND) has no parts, so the others are still read;
+# any other read that fails prints nothing and fails, so ONLY stays as it is, and says so.
 onlyparts() { # <the named issues json>
-  local n p i=0 walk=$1 only=$1
+  local n p r i=0 walk=$1 only=$1
   # The walk, by index: the named issues and each part found under them, open or closed, read in turn and none twice.
-  while n=$(jq -r --argjson i "$i" '.[$i] // empty' <<<"$walk") && [ -n "$n" ]; do
-    i=$((i + 1))
-    p=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -F n="$n" -f query='query onlyParts($owner: String!, $repo: String!, $n: Int!) {
-      repository(owner: $owner, name: $repo) { nameWithOwner issue(number: $n) { subIssues(first: 100) { nodes { number state repository { nameWithOwner } } } } } }' 2>/dev/null \
-      | jq -ce --argjson q "$walk" '.data.repository | .nameWithOwner as $me | [.issue.subIssues.nodes[] | select(.repository.nameWithOwner == $me and (.number | numbers | IN($q[]) | not)) | {number, state}]' 2>/dev/null) \
+  while n=$(jq -r --argjson i "$i" '.[$i] // empty' <<<"$walk") && [ -n "$n" ]; do i=$((i + 1))
+    r=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -F n="$n" -f query='query onlyParts($owner: String!, $repo: String!, $n: Int!) {
+      repository(owner: $owner, name: $repo) { nameWithOwner issue(number: $n) { subIssues(first: 100) { nodes { number state repository { nameWithOwner } } } } } }' 2>/dev/null) || :
+    p=$(jq -ce --argjson q "$walk" 'if (.errors // []) == [] then .data.repository | .nameWithOwner as $me | [.issue.subIssues.nodes[] | select(.repository.nameWithOwner == $me and (.number | numbers | IN($q[]) | not)) | {number, state}] elif (.data.repository.nameWithOwner | strings) and .data.repository.issue == null and all(.errors[]; .type == "NOT_FOUND") then [] else empty end' <<<"$r" 2>/dev/null) \
       && walk=$(jq -c --argjson p "$p" '. + [$p[].number]' <<<"$walk") \
       && only=$(jq -c --argjson p "$p" '. + [$p[] | select(.state == "CLOSED") | .number]' <<<"$only") \
       || { echo "conveyor: the parts of #$n could not be read: the run keeps the parts it read before" >&2; return 1; }

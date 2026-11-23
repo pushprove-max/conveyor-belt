@@ -29,8 +29,11 @@ case $2 in
   # awaiting-deploy labels were added.
   graphql) case "$*" in *fullDatabaseId*) n=$(printf '%s\n' "$@" | sed -n 's/^number=//p'); echo "{\"data\": {\"repository\": {\"issue\": {\"fullDatabaseId\": \"$((n + 6488700000))\"}}}}" ;;
       # One issue's sub-issues, open or closed (onlyParts, lib/issues.sh onlyparts()): its parts in $STUB/subs, a line
-      # "<parent> <part> <OPEN or CLOSED>" each.
-      *onlyParts*) n=$(printf '%s\n' "$@" | sed -n 's/^n=//p'); { cat "$STUB/subs" 2>/dev/null || :; } | jq -cRn --argjson n "$n" '[inputs | split(" ") | select(.[0] == ($n | tostring))]
+      # "<parent> <part> <OPEN or CLOSED>" each. An issue named in $STUB/deleted (one a line) gets GitHub's NOT_FOUND
+      # answer and gh's exit 1.
+      *onlyParts*) n=$(printf '%s\n' "$@" | sed -n 's/^n=//p')
+        ! grep -qx "$n" "$STUB/deleted" 2>/dev/null || { echo "{\"data\": {\"repository\": {\"nameWithOwner\": \"o/r\", \"issue\": null}}, \"errors\": [{\"type\": \"NOT_FOUND\", \"path\": [\"repository\", \"issue\"], \"message\": \"Could not resolve to an Issue with the number of $n.\"}]}"; exit 1; }
+        { cat "$STUB/subs" 2>/dev/null || :; } | jq -cRn --argjson n "$n" '[inputs | split(" ") | select(.[0] == ($n | tostring))]
         | {data: {repository: {nameWithOwner: "o/r", issue: {subIssues: {nodes: map({number: (.[1] | tonumber), state: .[2], repository: {nameWithOwner: "o/r"}})}}}}}' ;;
       *authorAssociation*) s=$(jq -cRn '[inputs | split(" ") | map(tonumber)]' "$STUB/subs" 2>/dev/null) || s='[]'
       issues | jq -c --argjson s "${s:-[]}" 'map(.number) as $open | {data: {repository: {nameWithOwner: "o/r", issues: {nodes: map(.number as $n | {number, authorAssociation: (.authorAssociation // "OWNER"),

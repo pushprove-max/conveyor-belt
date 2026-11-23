@@ -291,6 +291,7 @@
 {"area": "issues", "test": "proxyroute.test.sh"}
 {"area": "issues", "test": "testpaths.test.sh"}
 {"area": "issues", "test": "testcards.test.sh"}
+{"area": "issues", "test": "onlyparts.test.sh"}
 {"area": "issues", "file": "conveyor/lib/issues.sh"}
 {"area": "opencode", "test": "opencode.test.sh"}
 {"area": "opencode", "test": "codex.test.sh"}
