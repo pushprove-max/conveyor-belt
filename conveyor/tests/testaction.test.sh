@@ -187,6 +187,19 @@ t_tapartial() {
   [ "$out" = '[{"time":"2026-11-10T00:00:00Z","run":"the test step of card c7-12 (#12)","result":"passed"},["suite"]]' ] \
     || fail "testfacts tests/x.test.sh, its only card step naming it partial: the newest run is not that step, or the step is given a time of it: $out"
 }
+# Bug it catches (O238): a carried line's times were dated to the later step that carried them, so a card step that ran
+# the file before a release suite failed it was listed after that suite in runs, which are oldest first. The file
+# passes in c7-12's failed step at T1, fails in the release suite at T2 and is carried by the fix step at T3: T1 first.
+t_tacarrieddate() {
+  tasetup; local out
+  jq -cn '{card: "c7-12", issue: 12, step: "test", time: "2026-11-09T00:00:00Z", result: "fail", failures: {of: 1, files: [{file: "tests/y.test.sh", cases: [{name: "b"}]}], timeout: null}}' >> "$ST/cards.jsonl"
+  jq -cn '{time: "2026-11-09T12:00:00Z", how: "release", sha: "0123456789abcdef", files: {"tests/x.test.sh": {result: "fail", sec: 1, cpu: 1}}}' >> "$ST/suiteruns.jsonl"
+  jq -cn '{card: "c7-12", issue: 12, step: "test", time: "2026-11-10T00:00:00Z", result: "pass", times: {"tests/x.test.sh": 1}, carried: ["tests/x.test.sh"]}' >> "$ST/cards.jsonl"
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/testaction.sh")" \
+    && testfacts tests/x.test.sh | jq -c '.runs | map([.card // "suite", .time])')
+  [ "$out" = '[["c7-12","2026-11-09T00:00:00Z"],["suite","2026-11-09T12:00:00Z"]]' ] \
+    || fail "testfacts tests/x.test.sh did not date the carried times to the step that ran the file, before the release suite: $out"
+}
 # Bug it catches (#1036): the Tests page showed the time the test-speed survey saved in .conveyor/test-times.json as
 # the file's newest run, but Judge and Explain were given only the card runs, so they judged a time the page did not
 # show. The survey's time is one of the runs, marked survey, dated by the commit that wrote it.
@@ -467,4 +480,16 @@ t_taissuerace() {
   [ ! -s "$STUB/between" ] || fail "a pick between the issue's filing and its hold took the Foreman's issue: $(cat "$STUB/between")"
   [ "$(loop control | jq -c .held)" = '[100101]' ] || fail "the Foreman's issue is not held: $(loop control)"
   [ "$(jq -c '.labels | map(.name)' "$STUB/filed")" = '["bug","P2"]' ] || fail "the built label was not taken off the held issue: $(cat "$STUB/filed")"
+}
+# Bug it catches (O237): `conveyor.sh card` (cardnew(), a Foreman order) made its issue with no built label and held it
+# only after, so a pick in that moment could take the order before the owner's yes. The same pick as above runs there.
+t_cardnewrace() {
+  tasetup
+  fx_in 'eval "$(declare -f locked | sed "1s/^locked/reallocked/")"
+    locked() { if [ "$1 $2" = "control hold" ]; then reallocked pick "" "" "$(jq -cs "map(. + {authorAssociation: \"OWNER\"})" "$STUB/filed")" > "$STUB/between" 2>&1; fi; reallocked "$@"; }
+    cardnew "Add a Rules row" "$(printf "Make it so.\n## Cause\nNo row exists.")"'
+  [ "$RC" = 0 ] && [ -e "$STUB/between" ] || fail "card 'Add a Rules row' did not file and reach the hold (exit $RC): $(cat "$T/$CASE/run.out")"
+  [ ! -s "$STUB/between" ] || fail "a pick between the filing of card 'Add a Rules row' and its hold took it: $(cat "$STUB/between")"
+  [ "$(loop control | jq -c .held)" = '[100101]' ] || fail "the issue of card 'Add a Rules row' is not held: $(loop control)"
+  [ "$(jq -c '.labels | map(.name)' "$STUB/filed")" = '["bug","P2"]' ] || fail "the built label was not taken off the held issue of card 'Add a Rules row': $(cat "$STUB/filed")"
 }

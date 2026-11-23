@@ -196,9 +196,6 @@
 # flaky: the cases of the flaky-test record (lib/flaky.sh) with entries in the last FLAKY_DAYS days to the health
 #   record's time, most entries first: case, count (those entries), issue (the one last filed for it, else null),
 #   files (the test files the case counts for, lib/testfiles.sh caseowners: a runner's case, its case file too).
-# slowOff: the test files kept off card test steps for their CPU seconds (lib/testrun.sh slowoffs()), by file: file,
-#   issue (its "Slow test" issue, whose card's landing brings it back) and why: cpu and sec in the card run that filed
-#   it (card), last {cpu, card} (the card run before it), budget, and since.
 # testActions: the test actions (lib/testaction.sh): seat (the Tests seat, {cli, model, effort}, else null), limit
 #   (the seconds an action may run) and actions (the newest records, running and kept, and each file's newest older
 #   judge with a verdict, newest first, each with text and textCut, the end of its text: testacts()), and allowed (the
@@ -390,9 +387,10 @@ suites() {
         # only one shown with that progress; one that changed is shown with none.
         p=$(suiteprog "$CARDS/release/wt"); at=$(jq -r '.progress // empty' "$CARDS/release/wt.live" 2>/dev/null); lg=$(logmoved "$CARDS/release/wt")
         { again=$(<"$CARDS/release/run.json"); } 2>/dev/null || again=''
-        r=$(jq -c --argjson p "${p:-null}" --arg h "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
-          --arg at "$at" --arg lg "$lg" --arg again "$again" \
-          '(if .counts != null and (.rerun | type) == "object" and ([$again | fromjson? | objects | .rerun] | first) == .rerun then .rerun += ($p | {done, failed, files})
+        # The progress and the record read again go through files: a large failed suite passes the 128 KiB a single argument may hold on Linux.
+        r=$(jq -c --slurpfile p <(printf '%s' "${p:-null}") --arg h "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
+          --arg at "$at" --arg lg "$lg" --rawfile again <(printf '%s' "$again") \
+          '($p[0] // null) as $p | (if .counts != null and (.rerun | type) == "object" and ([$again | fromjson? | objects | .rerun] | first) == .rerun then .rerun += ($p | {done, failed, files})
               + {at: ([.rerun.since, $at, (if $lg == "" then null else $lg | tonumber | todate end)] | map(select(type == "string" and . != "")) | max)} else . end)
             | . + (.counts // $p) | del(.counts) | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
     fi
@@ -668,8 +666,6 @@ snapshot() (
   fl=$(jq -ce --slurpfile h "$d/health" --argjson days "$FLAKY_DAYS" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") '$h[0] as $h | '"$OWNERS"'($h.time | fromdate) as $t | [.filed | arrays | .[] | objects] as $f
     | [.entries | arrays | .[] | objects | select((.case | type) == "string" and ((.time | fromdate?) // 0) > $t - $days * 86400)] | group_by(.case)
     | map(.[0].case as $c | {case: $c, count: length, issue: ([$f[] | select(.case == $c) | .issue][-1] // null), files: ($c | caseowners)}) | sort_by(-.count, .case)' "$FLAKY" 2>/dev/null) || fl='[]'
-  # The slow-test list, from what health reads of the snapshot's copy of the card records (hrec, above).
-  so=$([ -n "$hrec" ] && slowoffs "$d/hrec" | jq -cs 'sort_by(.file)') || so='[]'
   # The last pass of the test rules, when its burst guard stopped it (testrulespass()).
   tr=$(jq -ce 'select(.on == true) | .time as $t | .burst | objects | {time: $t, matched, cap}' "$TESTRULES" 2>/dev/null) || tr=null
   # The models the belt runs or offers with no price, as serve's last look found them (noprice()).
@@ -695,11 +691,11 @@ snapshot() (
     || exit 1
   # The records of the cards with no GitHub issue (testcard(), lib/testaction.sh), by their card: body, filed and filedUrl, which a landed one shows.
   jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --argjson mt "$mt" \
-    --slurpfile tac <(jq -c '[.cards | arrays | .[] | objects | select(.card | type == "string") | {key: .card, value: {body: (.body // null), filed: (.filed // null), filedUrl: (.filedUrl // null)}}] | from_entries' "$TACARDS" 2>/dev/null || echo '{}') --slurpfile fl <(printf '%s' "$fl") --slurpfile so <(printf '%s' "$so") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson np "$np" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
+    --slurpfile tac <(jq -c '[.cards | arrays | .[] | objects | select(.card | type == "string") | {key: .card, value: {body: (.body // null), filed: (.filed // null), filedUrl: (.filedUrl // null)}}] | from_entries' "$TACARDS" 2>/dev/null || echo '{}') --slurpfile fl <(printf '%s' "$fl") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson np "$np" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --arg pef "$pef" --argjson efforts "$EFFORTS" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson pn "$pn" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg lintyes "$lintyes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
-    --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $so[0] as $so | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL$INSIDE"'
+    --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL$INSIDE"'
     def day: fromdate | strflocaltime("%Y-%m-%d");
     def usd: if length == 0 then 0 elif any(.usd == null) then null else map(.usd) | add * 10000 | round / 10000 end;
     # The totals: the dollars of the steps that are priced, and how many are left out for having no price.
@@ -1002,7 +998,6 @@ snapshot() (
        release: $rl,
        drift: $dr,
        flaky: $fl,
-       slowOff: $so,
        belt: [($c[] | select(.result == "")), ($c[] | select(.x.after != null and .x.after != "wait")) | sofar as $s | (.x.after != null) as $landed
          # The live record of a running step names it and when it began (#320): a fix session after a GO or a failed
          # test run is Fix from its own start, though the last step line of the card is still that review or test run.

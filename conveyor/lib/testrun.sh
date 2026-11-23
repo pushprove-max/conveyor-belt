@@ -36,7 +36,7 @@
 # has the runner's next line joined to its last, and could else hide its case by leaving the later file no line.
 # A case has its first such line, cut to 200 characters at a word. of is the files selected,
 # else those the logs name (null when none). timeout is null unless the run ran out of time (exit 124): then the
-# seconds it had and the last file begun and not ended (null when there is none). passed is the files the logs say
+# seconds it had (<worktree>.limit, the limit scaled by the run's load factor: testonce(); else TEST_TIMEOUT) and the last file begun and not ended (null when there is none). passed is the files the logs say
 # ended ok (tests() runs them no more on the same change); okcases, of each other file, the cases a line `ok <case>`
 # (or node's `✔ <name> (<n>ms)`, or TAP's `ok <n> - <name>`) under it says passed (a runner killed part-way runs
 # them no more); passcases, the same of each file that passed (what a batch that takes the card need not run again:
@@ -71,7 +71,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
         elif $b then .files |= (. + [$b] | unique) | (if .order[-1] | index($b) then . else .order[-1] += [$b] end) | .open[-1] += [$b]
         elif $e then .files |= (. + [$e.f] | unique) | .open[-1] -= [$e.f] | if $e.r == "FAIL" and (.failed | index($e.f) | not) then .failed += [$e.f] else . end
         elif $n then .n += ($n | tonumber) else . end)') || return 1
-  out=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | jq -cRn --arg rc "$2" --arg sec "$TEST_TIMEOUT" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") --slurpfile rec <(cat "${1%.test}.testlog"/results/* 2>/dev/null | jq -cR 'fromjson? // empty') \
+  out=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | jq -cRn --arg rc "$2" --arg sec "$(cat "${1%.test}.limit" 2>/dev/null || echo "${TEST_TIMEOUT:-}")" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") --slurpfile rec <(cat "${1%.test}.testlog"/results/* 2>/dev/null | jq -cR 'fromjson? // empty') \
     --arg rx "${FRAMERX:-}" --arg pyrx "${PYFRAMERX:-}" --arg wd "$wd" --arg wdr "$wdr" '$log[0] as $log | '"$named ${FRAMEJQ:-def frame: null; def pyend(\$l): false;} ${RECJQ:-def recs(\$r; \$l): .;} $(tapjq 2>/dev/null || printf %s 'def tapname: .; def tapyaml: .;')"'
     def cut: if length <= 200 then . else (.[0:201] | sub("\\s+\\S*$"; "")) as $w | if ($w | length) > 200 then .[0:200] else $w end end;
     def failcase: [capture("^FAIL \\[(?<c>[^\\]]+)\\]: "), (capture("^\\s*not ok [0-9]+ (- )?(?<c>.*\\S)") | tapname), capture("^\\s*✖ (?<c>.+) \\([0-9.]+ms\\)$")][0].c;
@@ -203,35 +203,6 @@ testrec() { # <worktree> <exit> <seconds>
     + if $tl[0] | type == "object" then {list: $tl[0]} else {} end
     + if $cv[0] | type == "object" then {coverage: $cv[0]} else {} end' --slurpfile tl <(cat "$1.testlist" 2>/dev/null) --slurpfile cv <(cat "$1.uncovered" 2>/dev/null)
 }
-# The slow-test record: {filed: [{file, issue, ...why}]}, the "Slow test" issue last filed for each file, by the filing
-# that the test rules replaced (lib/testrules.sh). Nothing writes it now; a file it names whose issue no card has landed
-# stays off card test steps (slowoffs()) until that card lands.
-SLOWFILED=${STATE%/*}/slow.json
-# The test files kept off card test steps for their CPU seconds (the owner, 2026-11-14): each file of $SLOWFILED whose
-# issue no card has landed yet, its entry there one a line: {file, issue} and why (cpu and sec in the card run that
-# filed it, card; last: {cpu, card}, the card run before it; budget) and since. Such a file runs only in the full suite
-# and the whole test on main (slowoff()), and comes back to card test steps when the card of its issue lands. The
-# snapshot gives what health reads of its copy of the card records (linesum(), HEALTHLINE): each line's step and issue.
-# A record that names no such file (none, as nothing writes it now) keeps none off, and the card records are not read.
-# shellcheck disable=SC2120 # the snapshot passes the lines (lib/snapshot.sh); the card steps read the database
-slowoffs() { # [<the card records' lines>]
-  jq -e '.filed | arrays | any(.[]; objects | (.file | type) == "string" and (.issue | type) == "number")' "$SLOWFILED" > /dev/null 2>&1 || return 0
-  { if [ -n "${1:-}" ]; then cat -- "$1"; else stdb ask lines cards; fi; } 2>/dev/null | jq -cRn --slurpfile s "$SLOWFILED" '[inputs | fromjson? | objects | select(.step == "landed") | .issue | numbers] as $l
-    | $s[0].filed | arrays | .[] | objects | select((.file | type) == "string" and (.issue | type) == "number" and (IN(.issue; $l[]) | not))' 2>/dev/null
-}
-# A card's run is told to keep each file slowoffs() names off (tests()): a `pass` line in its list for it (unless the
-# list has one), so a command that reads no more runs it not, and an `off<TAB><file>` line (unless the list has one),
-# which keeps it off though a `fail`, `changed` or `main` line selects it. Not the card of the file's own issue: its
-# change is what makes the file cheaper, and its run times it.
-slowoff() { # <worktree>
-  local c=${1##*/} f n add=''
-  while IFS=$'\t' read -r f n; do
-    [ "$n" != "${c##*-}" ] || continue
-    grep -qxF "pass"$'\t'"$f" "$1.rerun" 2>/dev/null || add+="pass"$'\t'"$f"$'\n'
-    grep -qxF "off"$'\t'"$f" "$1.rerun" 2>/dev/null || add+="off"$'\t'"$f"$'\n'
-  done < <(slowoffs | jq -r '[.file, .issue] | @tsv')
-  [ -z "$add" ] || printf '%s' "$add" >> "$1.rerun"
-}
 # The card's changed tests, run by the loop itself, never by a session: the pack's test.command in the worktree, under
 # the timeout, with CONVEYOR_TEST_LOG naming an empty folder for its progress logs (README.md, the live record).
 # Output in <worktree>.test; the exit is the command's (124 is the timeout).
@@ -271,7 +242,7 @@ slowoff() { # <worktree>
 # on re-run adds its cases to the flaky-test record (flakyrun()) as it ends, a batch's run (batch()) too; a run again
 # that failed adds the cases that passed in it. A card's run that passed leaves what it passed in <worktree>.passed
 # (testlist.sh passlist()). A card's run is told to keep the cases the flaky-test record keeps off card runs as passed (flakyoff()),
-# and the files kept off for their CPU seconds (slowoff()), and its run again is told the same. Any run but the full
+# and its run again is told the same. Any run but the full
 # test suite and a run alone is told to keep off the files that passed before with the same inputs (testlist.sh cacheoff()), its
 # log saying so; each run's files that passed whole go to that cache (testlist.sh cachekeep()).
 # With alone, the command is told what to run by <worktree>.rerun as the caller wrote it (fulltest()'s run of one
@@ -293,8 +264,8 @@ slowoff() { # <worktree>
 # linked to no test file runs nothing and passes, as with it set. Only the suite runs (test.full: the full test
 # suite, Push landed's and the release's; test.main: the whole test on main) run a suite command.
 # A card's run (not alone) gives test.fileCommand the tests its change touches (listcmd()), and <worktree>.testlist
-# says which (the live record's and the test line's list). Such a run that passes adds the test files of its change
-# that the test map lacks to it (mapnew(), lib/testmap.sh). A change linked to no test file runs nothing and passes,
+# says which (the live record's and the test line's list); it never makes or adds to the test map (lib/testmap.sh).
+# A change linked to no test file runs nothing and passes,
 # its output saying so (NONELINKED); and a run that reports more test files than it was given (TEST_GIVEN: watch()
 # ends it, <worktree>.wide) does not run again and fails with <worktree>.stop saying why. card() blocks a card whose
 # run left <worktree>.stop.
@@ -340,9 +311,8 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     fi
     # Those times are in <worktree>.oldtimes, apart from this run's own (<worktree>.times).
     if [ $r = 0 ]; then [ -z "$o" ] || printf '%s\n' "$o" > "$1.oldtimes"; else rm -f "$1.rerun"; fi
-    # A card's run keeps the flaky cases and the slow files off (flakyoff(), slowoff()): the full suite and the whole
-    # test on main run them.
-    [ -n "${2:-}" ] || { flakyoff "$1"; slowoff "$1"; }
+    # A card's run keeps the flaky cases off (flakyoff()): the full suite and the whole test on main run them.
+    [ -n "${2:-}" ] || flakyoff "$1"
     # It keeps off the files that passed before with the same inputs (testlist.sh cacheoff()), its log saying so (cw): not the full
     # test suite, which runs whole.
     [ "${2:-}" = test.full ] || { cw=$(cacheoff "$1"); [ -z "$cw" ] || printf '%s\n' "$cw" > "$1.testlog/cache"; }
@@ -367,7 +337,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     done
   fi
   TEST_WAIT=$((SECONDS - w)); TEST_FREE=$((SLOT_N - $(slot_used))); w=$SECONDS; t0=$(date +%s)
-  # The `off` lines (flakyoff(), slowoff()), which testlist.sh rerunlist() does not keep: given to the run again too, so it runs no
+  # The `off` lines (flakyoff()), which testlist.sh rerunlist() does not keep: given to the run again too, so it runs no
   # case or file kept off that its list would otherwise select (a case of the runner that did not finish).
   off=$(grep $'^off\t' "$1.rerun" 2>/dev/null)
   # The files its list keeps whole as passed (`pass` lines): not run. A file it runs only some cases of is run.
@@ -400,8 +370,9 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
   # (testlist.sh covkeep()) and a run again's together.
   [ -n "${2:-}" ] || uncovered "$1" "$t0"; rm -rf "$1.covfirst"
   # Of those, the files the runs before timed (<worktree>.oldtimes) and this run did not, nor ran some cases of (testlist.sh partran(): its test line names them partial): carried (testlist.sh carriedrec()).
+  # The maps and the list go to jq as files: as arguments, a big project's pass Linux's 128 KiB limit of one.
   [ -z "$kp" ] || [ ! -s "$1.oldtimes" ] || { ko=$(timed "$1" own) && ka=$(timed "$1") && kc=$(partran "$1") \
-    && jq -cn --argjson o "$ko" --argjson a "$ka" --argjson c "$kc" --arg k "$kp" '[$k | split("\n")[] | select($a[.] != null and $o[.] == null and (IN($c[]) | not))] | unique' > "$1.oldfiles"; } \
+    && jq -cn --slurpfile o <(printf '%s' "$ko") --slurpfile a <(printf '%s' "$ka") --slurpfile c <(printf '%s' "$kc") --rawfile k <(printf '%s' "$kp") '$o[0] as $o | $a[0] as $a | $c[0] as $c | [$k | split("\n")[] | select($a[.] != null and $o[.] == null and (IN($c[]) | not))] | unique' > "$1.oldfiles"; } \
     || rm -f "$1.oldfiles"
   # Given TEST_GIVEN files, a run reported more (watch() ended it, <worktree>.wide): it does not run again, and
   # <worktree>.stop says why. It names the file test.fileCommand was running then (the file on the second line of <worktree>.wide, wideeach() in lib/testlist.sh, else its last `== <file>` log line): that file ran the rest. A count not over TEST_GIVEN is of one invocation that reported more files than had begun.
@@ -424,8 +395,6 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
   # A change with no test file of its own ran linked test files (listcmd(), testcap()): its output says how many, and
   # that the run before the push runs them all. One that ran only the changed cases of its own says how many (OWNCASES).
   [ -z "$CAPNOTE" ] || printf 'conveyor: %s\n' "$CAPNOTE" >> "$1.test"
-  # A card's run that passed maps the test files its change adds or changes that the test map does not hold yet.
-  [ $rc != 0 ] || [ -n "${2:-}" ] || [ "${3:-}" = alone ] || mapnew "$1" >> "$1.test"
   return $rc
 }
 # The command of a card's run (tests()) given the list of the tests its change touches (README.md, The list of tests a
@@ -636,7 +605,7 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 # It logs each as a runner does (`== <file>`, then `-- ok <file>` or `-- FAIL <file>`, and `TESTRUN files=<n>`), so the
 # run is read as any other (testfails()); it fails when a file fails.
 # With files (a card's run, listcmd()), the files are those
-# CONVEYOR_TEST_FILES names, one a line, but for each the list keeps as passed (a `pass` line) and names in no `fail`
+# the file CONVEYOR_TEST_FILELIST names lists (testonce()), one a line, but for each the list keeps as passed (a `pass` line) and names in no `fail`
 # line (a file that passed before and failed since keeps its `pass` line beside the `fail` lines of its cases): a run
 # again after a failure runs only the files that did not pass. A list with a `changed` or `main` line (rerunsince(): a fix or main
 # changed code since those passes) keeps none: every file runs, as any of them may test that code.
@@ -661,7 +630,7 @@ filecmd() { # <the pack's test.fileCommand> [files]
       'while IFS= read -r f; do' \
       '  [ -n "$f" ] && { [ -n "$c" ] || ! grep -qxF "pass$t$f" "${CONVEYOR_TEST_RERUN:-/dev/null}" 2>/dev/null \' \
       '    || awk -F "$t" -v f="$f" "\$1 == \"fail\" && \$2 == f { e = 1 } END { exit !e }" "$CONVEYOR_TEST_RERUN"; } || continue; fs+=("$f")' \
-      'done <<< "${CONVEYOR_TEST_FILES:-}"'
+      'done < "${CONVEYOR_TEST_FILELIST:-/dev/null}"'
   else
     printf '%s\n' 'fs=() r=0; l=$CONVEYOR_TEST_LOG/files' \
       'while IFS=$'"'"'\t'"'"' read -r k f _; do' \
@@ -763,16 +732,27 @@ nopass() { # <worktree> <the run's record>
 # has), which is never a core kept for the user (slot_cpus): slot_keepwords's taskset of the cores left would undo
 # that pin, so it is put before the run only when no slot has a core to pin to.
 # CONVEYOR_TEST_TIME is the path of tools/testtime.sh, for a test command the Board's Record CPU time wrapped in it
-# (cpuplan(), lib/testfiles.sh). CONVEYOR_LOAD_FACTOR is the machine's load factor as the run starts (loadfactor()).
-# TEST_HARD, when set, is a limit in seconds that timeout itself keeps: the run ends there even while a runner of the
+# (cpuplan(), lib/testfiles.sh). CONVEYOR_LOAD_FACTOR is the machine's load factor as the run starts (loadfactor()),
+# which the run's limits are scaled by too (testclock()'s and TEST_HARD). CONVEYOR_TEST_FILELIST is the path of <worktree>.testfiles,
+# the files a card's run is given (TEST_FILES), one a line; empty with none. A file, not the list itself: one value of
+# the environment over Linux's 128 KiB limit stops the command from starting.
+# TEST_HARD, when set, is a limit in seconds (scaled, as above) that timeout itself keeps: the run ends there even while a runner of the
 # command waits for a whole-suite turn, which stops testclock's clock (the check on main, mainred.sh verdicts()).
 testonce() { # <worktree> <cmd>
-  local pid clock rc r='' t0 KEEP=()
-  [ ! -s "$1.rerun" ] || r=$1.rerun; rm -f "$1.report" "$1".report.[0-9]*
-  t0=$(date +%s); [ -n "$SLOT_CPUS" ] || slot_keepwords
+  local pid clock rc r='' t0 lf lim hard=${TEST_HARD:-0} given='' KEEP=()
+  [ ! -s "$1.rerun" ] || r=$1.rerun; rm -f "$1.report" "$1".report.[0-9]* "$1.testfiles"
+  [ -z "${TEST_FILES:-}" ] || { printf '%s\n' "$TEST_FILES" > "$1.testfiles" && given=$1.testfiles; } || return 1
+  t0=$(date +%s); lf=$(loadfactor); [ -n "$SLOT_CPUS" ] || slot_keepwords
+  # The run's limits, scaled by its load factor as each file's own is (filecmd()): the clock's, kept in <worktree>.limit
+  # for the line that says the run timed out (testfails()) and the Tests action's record, and TEST_HARD's. A Tests
+  # action's run (TALIMIT, its record: lib/testaction.sh tarunfile()) has it in its record now, while it runs.
+  lim=$(awk -v n="${TEST_TIMEOUT:-3600}" -v f="$lf" "$LOADSCALE") || lim=${TEST_TIMEOUT:-3600}
+  printf '%s\n' "$lim" > "$1.limit" || return 1
+  [ -z "${TALIMIT:-}" ] || talimit "$lim"
+  [ "$hard" = 0 ] || hard=$(awk -v n="$hard" -v f="$lf" "$LOADSCALE") || hard=$TEST_HARD
   (cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && { [ ${#REPORT_ENV[@]} = 0 ] || export "${REPORT_ENV[@]}"; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_TEST_TURNWAIT=$1.turnwait \
-    CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_LOAD_FACTOR=$(loadfactor) CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILES=${TEST_FILES:-} CONVEYOR_TEST_CASES=${TEST_CASES:-} exec "${KEEP[@]}" timeout --kill-after=30 "${TEST_HARD:-0}" bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
-  pid=$!; testclock $pid "$1.turnwait" & clock=$!
+    CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_LOAD_FACTOR=$lf CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILELIST=$given CONVEYOR_TEST_CASES=${TEST_CASES:-} exec "${KEEP[@]}" timeout --kill-after=30 "$hard" bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
+  pid=$!; testclock $pid "$1.turnwait" "$lim" & clock=$!
   watch $pid "$1.test" "$1.live" test; rc=$?
   kill $clock 2>/dev/null; wait $clock 2>/dev/null; rm -f "$1.turnwait"
   reported "$1" "$t0"

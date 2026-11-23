@@ -96,17 +96,20 @@ t_pushflakyparen() {
 # true) held the push with a reason that named no line, so it could not be read without a run again; and the hook's
 # run got no load factor to scale a time budget by. The hook prints a stack frame of its worktree's lib/a.test.sh,
 # line 3, and the file fails alone too: the push line's reason ends with that line and its text, read from the commit
-# (the push worktree is gone by then), and the hook was given CONVEYOR_LOAD_FACTOR.
+# (the push worktree is gone by then), and the hook was given CONVEYOR_LOAD_FACTOR. And (O267) git push, with the
+# hook's tests, was cut at pushTimeout unscaled, though each file's own limit in the hook is scaled: with pushTimeout 2
+# at a factor of 2, a hook of 3 s, inside its scaled 4 s, was cut at 2 s (exit 124) and wrote no factor.
 t_pushflakyat() {
-  local base l1
-  pfix; touch "$STUB/a-fails"
-  printf '%s\n' '#!/usr/bin/env bash' 'printf %s "${CONVEYOR_LOAD_FACTOR-unset}" > "$STUB/hookfactor"; cat "$STUB/hook-says" >&2' \
+  local base l1 h
+  pfix; touch "$STUB/a-fails"; tune '.tunables.pushTimeout = 2' || fail "the pack"
+  h='sleep 3; printf %s "${CONVEYOR_LOAD_FACTOR-unset}" > "$STUB/hookfactor"' # sleep: 1.5 times pushTimeout 2, inside its scaled 4 s
+  printf '%s\n' '#!/usr/bin/env bash' "$h"'; cat "$STUB/hook-says" >&2' \
     'echo "    at TestContext.<anonymous> (file://$PWD/lib/a.test.sh:3:7)" >&2; exit 1' > "$R/.git/hooks/pre-push" || fail "the hook could not be written"
-  pnow
+  CONVEYOR_LOAD_FACTOR=2 pnow
   [ "$(origin)" = "$base" ] || fail "a commit whose test file fails alone too was pushed: $(cat "$T/$CASE/push.out")"
   st 'select(.step == "push") | .reason' | grep -qxF 'conveyor: a test of the hook failed at lib/a.test.sh:3: [ ! -e "$STUB/a-fails" ]' \
     || fail "the push line's reason does not end with where the hook's test failed: $(st 'select(.step == "push") | .reason')"
-  [ "$(cat "$STUB/hookfactor" 2>&1)" = 1 ] || fail "the pre-push hook was not given the load factor (lib.sh gives the cases 1): $(cat "$STUB/hookfactor" 2>&1)"
+  [ "$(cat "$STUB/hookfactor" 2>&1)" = 2 ] || fail "pushTimeout 2 at a load factor of 2: the 3 s pre-push hook was cut before its scaled 4 s, or not given the factor 2: $(cat "$STUB/hookfactor" "$T/$CASE/push.out" 2>&1 | tail -n 5)"
 }
 
 # Done when 3, and the owner's 2026-11-20 ruling: a file recorded flaky twice within 7 days reopens the issue of its

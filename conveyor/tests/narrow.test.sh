@@ -15,14 +15,14 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Main holds lib/cartsum.js and its test lib/cartsum.test.js, lib/tax.test.js and a shared test helper
 # (test/helpers.js). The pack's test.fileCommand is $STUB/one, which adds `one:<the file it was given>` to $STUB/got,
 # a line a run; its test.command (args as test.list) is $STUB/suite-cmd, which adds the arguments it was given and
-# CONVEYOR_TEST_FILES to $STUB/got the same way, so a run of the suite command shows there (not $STUB/list-cmd, which
+# the list CONVEYOR_TEST_FILELIST names to $STUB/got the same way, so a run of the suite command shows there (not $STUB/list-cmd, which
 # the gh stub runs for its issue list: lib.sh).
 narrowsetup() {
   local f
   setup '[]'
   for f in lib/cartsum.js lib/cartsum.test.js lib/tax.test.js test/helpers.js; do mkdir -p "$R/${f%/*}" && echo x > "$R/$f"; done
   git -C "$R" add -A && git -C "$R" commit -qm files || fail "main's files could not be committed"
-  printf '%s\n' 'printf "args:%s|env:%s\n" "$*" "$(printf %s "${CONVEYOR_TEST_FILES:-}" | tr "\n" " ")" >> "$STUB/got"' > "$STUB/suite-cmd"
+  printf '%s\n' 'printf "args:%s|env:%s\n" "$*" "$(cat "${CONVEYOR_TEST_FILELIST:-/dev/null}" | tr "\n" " " | sed "s/ $//")" >> "$STUB/got"' > "$STUB/suite-cmd"
   printf '%s\n' 'echo "one:$1" >> "$STUB/got"' > "$STUB/one"
   tune '.test.list = "args" | .test.command = "bash \"$STUB/suite-cmd\"" | .test.fileCommand = "bash \"$STUB/one\""'
 }

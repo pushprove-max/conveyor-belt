@@ -100,6 +100,25 @@ t_theverrun() {
   [ "$(jq -c '[.files[] | select(.file | IN("g.test", "n.test")) | [.file, .runsOnRecord, .everRun]]' <<<"$got")" = '[["g.test",0,true],["n.test",0,false]]' ] \
     || fail "g.test, run only before the start $TH_START, is not everRun, or n.test, never run, is: $(jq -c '[.files[] | {file, runsOnRecord, everRun}]' <<<"$got")"
 }
+# Bug it catches (O239): `history test` (testolder(), the Timeline's older runs) read every run with no start filter,
+# so the Timeline brought back the runs before the start the Tests page leaves out, and c-old's carried 900 s too.
+t_tholder() {
+  local got; th_fixture
+  loop test-settings history-start "$TH_START" || fail "the start $TH_START was not saved"
+  got=$(loop history test h.test | jq -c '[.olderRuns[] | [.time, .card]]') || fail "history test h.test failed: $got"
+  jq -e --arg s "$TH_START" 'length > 0 and all(.[]; .[0] >= $s and .[1] != "c-old")' <<<"$got" > /dev/null \
+    || fail "history test h.test with the start $TH_START gives older runs before it, or c-old's carried time: $got"
+}
+# Bug it catches (O241): the landed commits of cards with a failed test step went to jq as one argument; 3,300 of them
+# (41 bytes each) pass Linux's 128 KiB limit, jq did not start, and h.test's two caught failures read as none.
+t_thmanylanded() {
+  local got; th_fixture
+  jq -cn 'range(3300) | ("c-many-\(.)" as $c | {card: $c, issue: 9, step: "test", time: "2026-11-15T00:00:00Z", result: "fail",
+      failures: {of: 1, files: [{file: "z.test", cases: []}], timeout: null}}, {card: $c, issue: 9, step: "landed", time: "2026-11-15T00:00:01Z", result: "ok",
+      sha: ("f" + ("000000000000000000000000000000000000000" + (. | tostring))[-39:])})' >> "$ST/cards.jsonl" || fail "the fixture could not be made"
+  got=$(th_as snapshot testspart 2026-11-09) || fail "testspart failed with 3300 landed failed cards: $got"
+  [ "$(th_row "$got" | jq -c .caught)" = 2 ] || fail "with 3300 landed failed cards, h.test's caught failures are not 2: $(th_row "$got" | jq -c '{caught, changedToPass}')"
+}
 # Bug it catches: with no start set the filter dropped runs (a missing setting read as a date): every run counts, as
 # before the setting existed: the 900 s runs, the survey time and the carried time are in the median (30), usual
 # (700) and run count (13), and both failed steps, flaky entries and landed failures count.

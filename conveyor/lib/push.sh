@@ -127,7 +127,7 @@ pushlast() { # <card> <issue>
   [ "$st" = false ] || rm -f "$PUSHING"
 }
 pushone() { # <card> <issue> [<commit>]
-  local wt=$CARDS/push sha out rc=0 a c n s t state round=0 before=() got=() pend=() rest=() took=$SECONDS try m want=${3:-} at la to nv='' ff=() fl='' ho=''; local -A said=()
+  local wt=$CARDS/push sha out rc=0 a c n s t state round=0 before=() got=() pend=() rest=() took=$SECONDS try m want=${3:-} at la to nv='' ff=() fl='' ho='' pf plim=''; local -A said=()
   la=$(landas) || { pwhy="the rule Land as could not be read (the pack's push.landAs or the control record)"; echo "conveyor: $pwhy; nothing pushed" >&2; return 1; }
   to=$BRANCH; [ "$la" != pr ] || to=$LANDING
   for a in "$(pushed)" "refs/remotes/$REMOTE/$BRANCH"; do
@@ -145,9 +145,11 @@ pushone() { # <card> <issue> [<commit>]
   # holds the push as before.
   # The push record's stage (pushing()) is ready while the push worktree, its dependencies and a test slot are got, then
   # hook (push, when it is pushed with no hook) for as long as git push runs, then pushed or ended as git push exits.
+  # git push and its hook run under pushTimeout times the hook's load factor (pf, plim: LOADSCALE, lib/testrun.sh).
   while :; do
   for try in 1 2; do
     rm -f "$wt.trace"
+    pf=$(loadfactor); plim=$(awk -v n="$PUSH_TIMEOUT" -v f="$pf" "$LOADSCALE") || plim=$PUSH_TIMEOUT
     # The push's output goes to its log (plog) as it comes, and is kept in out for its push line.
     rc=0; sha=$(git rev-parse "$at" 2>&1) && pushing "$sha" ready && out=$(exec 8>&-; {
       git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt"; git worktree prune
@@ -155,7 +157,7 @@ pushone() { # <card> <issue> [<commit>]
         && git worktree add -q --detach "$wt" "$sha" && deps "$wt" && cd "$wt" \
         && slot_pool && { [ -n "$SLOT_HOME" ] || { slot_first && slot_mine; }; } \
         && pushing "$sha" "$([ -z "$nv" ] && echo hook || echo push)" && {
-          env "${e[@]}" CONVEYOR_LOAD_FACTOR="$(loadfactor)" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$PUSH_TIMEOUT" git push ${nv:+"$nv"} "$REMOTE" "$sha:refs/heads/$to"
+          env "${e[@]}" CONVEYOR_LOAD_FACTOR="$pf" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$plim" git push ${nv:+"$nv"} "$REMOTE" "$sha:refs/heads/$to"
           a=$?; pushing "$sha" "$([ $a = 0 ] && echo pushed || echo ended)"; exit $a; }
     } 2>&1 < /dev/null | tee -a "${plog:-/dev/null}"; exit "${PIPESTATUS[0]}") && { [ "$la" = pr ] || echo "$sha $REMOTE $BRANCH" > "$PUSHED"; } || rc=$?
     # The remote refused the push (git's "[rejected]": its main holds a commit this one lacks): main takes the
@@ -188,7 +190,7 @@ pushone() { # <card> <issue> [<commit>]
     [ $a != check ] || pcheck=$(tail -c 20000 <<<"$out" | tr -d '\000' | jq -Rrs '[scan("(?:^|[^A-Za-z0-9_])FAILED:?[ \t]+(\\S+)")] | last[0] // "the pre-push hook" | .[0:100]')
     m=''; [ "$a" != check ] || m=$(failat "$wt" "$sha" <<<"$out" | sed 's/^/conveyor: a test of the hook failed at /')
     record "$1" "$2" push fail "$(jq -cn --arg s "$([[ $sha =~ ^[0-9a-f]{40,64}$ ]] && echo "$sha")" --argjson t "$took" --arg k "$a" --arg c "$pcheck" --arg l "${plog:-}" \
-    --arg r "exit $rc (124 is the ${PUSH_TIMEOUT}s timeout): $(tail -c 1200 <<<"${out:-$sha}" | tr -d '\000')${m:+$'\n'$m}" '{sha:$s,reason:$r,sec:$t,kind:$k}
+    --arg r "exit $rc (124 is the ${plim:-$PUSH_TIMEOUT}s timeout): $(tail -c 1200 <<<"${out:-$sha}" | tr -d '\000')${m:+$'\n'$m}" '{sha:$s,reason:$r,sec:$t,kind:$k}
       + (if $k == "check" then {check: $c} else {} end) + (if $l == "" then {} else {log: $l} end)')"; return; }
   rm -f "$wt.trace"
   # Pushed over a hook that failed under load: each pushed line says so (flaky: {files, issues}).
@@ -615,7 +617,7 @@ pushturn() {
 # ends; one its job left (the job was killed) stays, for health to show it stale, until the next push writes its own.
 pushended() { [ -z "$pusher" ] || jobs -rp | grep -qx "$pusher" || pusher=''; }
 
-tidy() { git worktree remove --force "$1" 2>/dev/null; rm -f "$1".events "$1".firsttry "$1".firsttry.new "$1".reviewed "$1".patch "$1".index "$1".msg "$1".review.new "$1".carried "$1".base "$1".live "$1".live.tmp "$1".idle "$1".nocap "$1".claim "$1".claim.new "$1".cpatch "$1".cpatch.new "$1".stack "$1".settings "$1".opencode.json "$1".donewhen "$1".unfixed "$1".covered "$1".stalled "$1".ready "$1".ready.new "$1".batch "$1".batch.new "$1".bpatch "$1".lent "$1".batchtest "$1".batchfirst "$1".batchuncovered "$1".first "$1".rerun "$1".rerun.new "$1".sharedran "$1".linted "$1".whole "$1".passed "$1".bpass "$1".oldtimes "$1".times "$1".reported "$1".report "$1".report.[0-9]* "$1".testlist "$1".uncovered "$1".slow "$1".timed "$1".cpus "$1".clocks "$1".partial "$1".oldfiles "$1".before; rm -rf "$1".rv "$1".batchtestlog "$1".covfirst "$1".checks "$1".briefs; }
+tidy() { git worktree remove --force "$1" 2>/dev/null; rm -f "$1".events "$1".firsttry "$1".firsttry.new "$1".reviewed "$1".patch "$1".index "$1".msg "$1".review.new "$1".carried "$1".base "$1".live "$1".live.tmp "$1".idle "$1".nocap "$1".claim "$1".claim.new "$1".cpatch "$1".cpatch.new "$1".stack "$1".settings "$1".opencode.json "$1".donewhen "$1".unfixed "$1".covered "$1".stalled "$1".ready "$1".ready.new "$1".batch "$1".batch.new "$1".bpatch "$1".lent "$1".batchtest "$1".batchfirst "$1".batchuncovered "$1".first "$1".rerun "$1".rerun.new "$1".sharedran "$1".linted "$1".whole "$1".passed "$1".bpass "$1".oldtimes "$1".times "$1".reported "$1".report "$1".report.[0-9]* "$1".testlist "$1".testfiles "$1".limit "$1".uncovered "$1".slow "$1".timed "$1".cpus "$1".clocks "$1".partial "$1".oldfiles "$1".before; rm -rf "$1".rv "$1".batchtestlog "$1".covfirst "$1".checks "$1".briefs; }
 # The project's own screenshots of a change that waits for the owner's yes, kept local for the Board: the images
 # (PNG, JPEG, GIF, WebP) in the worktree folder the pack's review.screenshots names, which the project's own run
 # writes (Conveyor takes none). Each is copied to <kept>/shots named by its content (git hash-object), the first

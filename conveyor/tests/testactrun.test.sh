@@ -83,10 +83,26 @@ t_tarun() {
   grep -q 'running tests/x.test.sh' "$ST/testactions/$id.txt" && [ ! -L "$ST/testactions/$id.txt" ] || fail "the output was not kept: $(ls -l "$ST/testactions")"
   [ ! -e "$T/$CASE/cards/testactions/$id" ] && [ "$(git -C "$R" worktree list | wc -l)" = 1 ] || fail "the copy of main it ran in was left: $(git -C "$R" worktree list)"
 
-  # A file that fails: its record says fail, and its output is kept.
-  echo 3 > "$STUB/tr-rc"
-  id=$(loop testaction run tests/x.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the failing run did not start: $id"
+  # A file that fails: its record says fail, and its output is kept. Bug it catches too (E9): at a load factor of 2
+  # the run's limit is 7200 s (testTimeout 3600 scaled), but the record said 3600 while it ran (the Board's Running
+  # line gave that limit), and only its end wrote 7200.
+  echo 3 > "$STUB/tr-rc"; rm -f "$STUB/tr-go" "$STUB/tr-held"
+  id=$(CONVEYOR_LOAD_FACTOR=2 loop testaction run tests/x.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the failing run did not start: $id"
+  wait_until '[ -s "$STUB/tr-held" ]' "cat '$ST/testactions/$id.err'" || fail "the failing run's test command did not start"
+  [ "$(tarec "$id" '[.state, .limit] | tojson')" = '["running",7200]' ] \
+    || fail "testaction run tests/x.test.sh at a load factor of 2: the record while it runs does not give the scaled limit 7200: $(cat "$ST/testactions/$id.json")"
+  : > "$STUB/tr-go"
   wait_until "[ \"\$(tarec $id .state)\" != running ]" "cat '$ST/testactions/$id.json' '$ST/testactions/$id.err'" || fail "the failing run did not end"
-  [ "$(tarec "$id" '[.state, .result, .cpu] | tojson')" = '["done","fail",2.25]' ] || fail "the record of a failing file does not say fail: $(cat "$ST/testactions/$id.json")"
+  [ "$(tarec "$id" '[.state, .result, .cpu, .limit] | tojson')" = '["done","fail",2.25,7200]' ] \
+    || fail "the record of a failing file run at a load factor of 2 does not say fail with the scaled limit 7200: $(cat "$ST/testactions/$id.json")"
   grep -q 'running tests/x.test.sh' "$ST/testactions/$id.txt" || fail "the failing file's output was not kept: $(cat "$ST/testactions/$id.txt")"
+
+  # Bug it catches (E9): a run that ended before it started (a suite runner, refused, so it had no scaled limit) had
+  # its limit read from an empty value: jq failed on it and the record was written empty, so the Board lost the run.
+  echo 'echo all' > "$R/tests/run.test.sh" && git -C "$R" add tests/run.test.sh && git -C "$R" commit -qm 'a suite runner' || fail "the runner could not be committed"
+  tune '.test.full = "bash tests/run.test.sh"'
+  id=$(loop testaction run tests/run.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the run of the suite runner did not start: $id"
+  wait_until "[ \"\$(tarec $id .state)\" != running ]" "cat '$ST/testactions/$id.json' '$ST/testactions/$id.err'" || fail "the run of the suite runner did not end"
+  [ "$(tarec "$id" '[.state, .file, .limit] | tojson')" = '["failed","tests/run.test.sh",3600]' ] \
+    || fail "testaction run tests/run.test.sh (the pack's test.full runs it): the record of the refused run does not say failed with its limit 3600: $(cat "$ST/testactions/$id.json")"
 }

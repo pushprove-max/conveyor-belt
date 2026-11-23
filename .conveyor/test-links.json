@@ -367,9 +367,6 @@
   "conveyor/tests/budgetkept.test.sh": [
     "conveyor/tests/snapexec.test.sh"
   ],
-  "conveyor/tests/budgetoff.test.sh": [
-    "conveyor/tests/snapexec.test.sh"
-  ],
   "conveyor/tests/budgetrun.test.sh": [
     "conveyor/tests/snapexec.test.sh"
   ],

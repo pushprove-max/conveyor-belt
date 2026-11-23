@@ -291,7 +291,7 @@ t_repaircoverage() {
 }
 # D1: the card adds a test file, d.test, which main's commit lacks, and main's harness is sound, so c.test passes there.
 # The stub fails any run given a file that is not there: it stands for a pack whose test.fileCommand runs each file
-# CONVEYOR_TEST_FILES names (this project's .conveyor/test-changed.sh --file runs only the file it is given, so it would
+# the list CONVEYOR_TEST_FILELIST names (this project's .conveyor/test-changed.sh --file runs only the file it is given, so it would
 # not fail). Bug it catches: the lane gave the control's run without the change the card's test files, so c.test's own
 # run (each file runs alone, #374) failed on d.test, and the lane took that for the control's failure and passed a
 # card whose control passes without its change. The control's runs are given none of the card's files: c.test passes, and the lane says so.
@@ -299,7 +299,7 @@ t_repairbaseline() {
   repairsetup
   local out
   echo 'harness() { return 0; }' > "$R/conveyor/lib/slots.sh" && git -C "$R" commit -qam "a sound harness" || fail "main's harness could not be mended"
-  echo 'while IFS= read -r f; do [ -z "$f" ] || [ -e "$f" ] || { echo "bash: $f: No such file or directory"; exit 1; }; done <<<"${CONVEYOR_TEST_FILES:-}"' >> "$STUB/pre"
+  echo 'while IFS= read -r f; do [ -z "$f" ] || [ -e "$f" ] || { echo "bash: $f: No such file or directory"; exit 1; }; done < "${CONVEYOR_TEST_FILELIST:-/dev/null}"' >> "$STUB/pre"
   echo '{"controls":["c.test"]}' > "$ST/machinehold.json"
   git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" && echo new > "$T/$CASE/cards/c7/d.test" && git -C "$T/$CASE/cards/c7" add d.test \
     || fail "the card's worktree could not be made"

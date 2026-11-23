@@ -8,9 +8,9 @@ HERE=$(cd "$(dirname "$0")" && pwd -P); ROOT=$(dirname "$HERE")
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 AT=@
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t${AT}example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t${AT}example.com
-# The loop's test step sets CONVEYOR_TEST_FILES (the card's changed test files) and CONVEYOR_TEST_RERUN: left set,
+# The loop's test step sets CONVEYOR_TEST_FILELIST (the file of the card's changed test files) and CONVEYOR_TEST_RERUN: left set,
 # every scratch run below would select the card's files as well as its own.
-unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILES CONVEYOR_TEST_RERUN
+unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILELIST CONVEYOR_TEST_RERUN
 # The checks are in parts (p_<name>) that run side by side, each in a scratch folder of its own (T, part below): each
 # says ok or not ok, and the lines are numbered once every part has ended, in the order the parts started.
 ok() { echo "ok - $1"; }

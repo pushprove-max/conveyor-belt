@@ -306,8 +306,8 @@ relstart() { # <command name> <version>
     elif .step == "release-prep" and .state == "failed" then {since, sha, mode, atOnce, machine, done, failed, cases, moved, reused, files, timedout, alone: (.alone // []), red: {sha, files: (.files.failed // []), cases}}
     elif .step == "release" and .state == "refused" then {since, sha, mode, atOnce, machine, done, failed, cases, reused, red, alone: (.alone // [])} else empty end' "$RELRUN" 2>/dev/null) || was=null
   # by: what started the run when it was not the owner (CONVEYOR_RELEASE_BY: "fixes landed", relfixes(), lib/fulltest.sh).
-  jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --argjson w "$was" --arg by "${CONVEYOR_RELEASE_BY:-}" \
-    '{kind: "release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, mode: null, atOnce: null, machine: null, done: 0, failed: 0, cases: [], alone: [], rerun: null, moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null, minver: null, by: (if $by == "" then null else $by end)} + $w' > "$RELRUN.new" \
+  jq -cn --arg s "$1" --arg v "$2" --arg t "$(clock)" --argjson p "${CONVEYOR_RELEASE_PID:-$$}" --slurpfile w <(printf '%s' "$was") --arg by "${CONVEYOR_RELEASE_BY:-}" \
+    '$w[0] as $w | {kind:"release", step: $s, version: $v, since: $t, ended: null, state: "running", sha: null, mode: null, atOnce: null, machine: null, done: 0, failed: 0, cases: [], alone: [], rerun: null, moved: false, reused: null, reasons: [], pid: $p, red: null, anyway: null, allowed: null, minver: null, by: (if $by == "" then null else $by end)} + $w' > "$RELRUN.new" \
     && mv -f "$RELRUN.new" "$RELRUN" && RELSTARTED=1
   # Each process the run starts carries its mark (relprocs()). The run's end ends them all: the suite's runner
   # (timeout) is a process group of its own, which a signal to this process never reaches, and each holds the release
@@ -507,11 +507,11 @@ relsuite() { # <command name> <commit>
     [ -z "$l" ] || [ "$u" != null ] || [ $rc != 0 ] || { rc=1; echo "conveyor: $n: the rerun's results could not be read, so the passes of $(jq -r '.sha[0:12]' <<<"$l") are not reused" >&2; }
   fi
   relrec --slurpfile u <(printf '%s' "$u") '.reused = $u[0]'
-  # The cases its runner named as ended; a red run whose runner named no failed case has those its output names
-  # (testfails()), each named as fulljudge() names it.
+  # The cases its runner named as ended; a red run whose runner named none has those its output names (testfails()), as
+  # fulljudge() names them. p and al go to jq as files: many failed cases pass Linux's 128 KiB limit of one argument.
   p=$(suiteprog "$wt")
-  [ $rc = 0 ] || [ "$(jq .failed <<<"$p")" != 0 ] || p=$(testfails "$wt.test" "$rc" test.full | jq -c --argjson p "$p" --arg cmd "$cmd" \
-    '$p + {cases: [.files[]? | .file as $f | if (.cases // []) == [] then $f else .cases[] | if $f == $cmd or $f == "" then .name else "\($f): \(.name)" end end] | unique}
+  [ $rc = 0 ] || [ "$(jq .failed <<<"$p")" != 0 ] || p=$(testfails "$wt.test" "$rc" test.full | jq -c --slurpfile p <(printf '%s' "$p") --arg cmd "$cmd" \
+    '$p[0] + {cases: [.files[]? | .file as $f | if (.cases // []) == [] then $f else .cases[] | if $f == $cmd or $f == "" then .name else "\($f): \(.name)" end end] | unique}
       | .failed = (.cases | length)' 2>/dev/null) || p=$(suiteprog "$wt")
   sr=$rc f='{"files":[]}'
   [ $rc = 0 ] || f=$(testfails "$wt.test" "$rc" test.full) || f='{"files":[]}'
@@ -527,23 +527,23 @@ relsuite() { # <command name> <commit>
     # Each run alone below runs in this worktree, so it clears the suite's log folder and output: the record keeps the
     # suite's counts while they run (the Release panel's progress: lib/snapshot.sh suites()), and the suite's log
     # folder and output are put aside and back, so a failed release points to the suite's output, not a run alone's.
-    relrec --argjson p "$p" '.counts = $p'
+    relrec --slurpfile p <(printf '%s' "$p") '.counts = $p[0]'
     rm -rf "$wt.suitelog" "$wt.suitetest"; mv "$wt.testlog" "$wt.suitelog" 2>/dev/null; mv "$wt.test" "$wt.suitetest" 2>/dev/null
     al=$(fulljudge "$wt" "$sha" "$cmd" "$f" "release $(jq -r .version "$RELRUN")") && jq -e 'type == "array"' <<<"$al" > /dev/null || al='[]'
     rm -rf "$wt.testlog" "$wt.test"; mv "$wt.suitelog" "$wt.testlog" 2>/dev/null; mv "$wt.suitetest" "$wt.test" 2>/dev/null
     # Every failed case flaky passes the suite: only when the cases judged are at least those its runner named as failed,
     # so a failure the output names no case of is never passed over.
-    if jq -e --argjson p "$p" 'length > 0 and length >= $p.failed and all(.verdict == "flaky")' <<<"$al" > /dev/null; then
+    if jq -e --slurpfile p <(printf '%s' "$p") 'length > 0 and length >= $p[0].failed and all(.verdict == "flaky")' <<<"$al" > /dev/null; then
       rc=0; fl=$(jq -r 'map(.case) | join(", ")' <<<"$al")
       p=$(jq -c '.failed = 0 | .cases = [] | .timedout = [] | .files.failed = []' <<<"$p")
       echo "conveyor: $n: every failed case passed alone $FULL_ALONE of $FULL_ALONE on ${sha:0:12}, so the suite passes; judged flaky: $fl"
     else
-      jq -r '.[] | "conveyor: '"$n"': \(.case): \(.verdict): runs alone \(.runs | join(", "))\(if .why then "; " + .why else "" end)"' <<<"$al" >&2
+      jq -r '.[] | "conveyor: '"$n"': \(.case): \(.verdict)\(if .line then " (\(.line))" else "" end): runs alone \(.runs | join(", "))\(if .why then "; " + .why else "" end)"' <<<"$al" >&2
     fi
   fi
   m1=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
-  relrec --argjson p "$p" --argjson mv "$([ "$m0" = "$m1" ] && echo false || echo true)" --arg st "$([ $rc = 0 ] && echo passed || echo failed)" --argjson al "$al" \
-    '. + $p | .moved = $mv | .state = $st | .alone = $al | .rerun = null | del(.counts)'
+  relrec --slurpfile p <(printf '%s' "$p") --argjson mv "$([ "$m0" = "$m1" ] && echo false || echo true)" --arg st "$([ $rc = 0 ] && echo passed || echo failed)" --slurpfile al <(printf '%s' "$al") \
+    '. + $p[0] | .moved = $mv | .state = $st | .alone = $al[0] | .rerun = null | del(.counts)'
   [ "$m0" = "$m1" ] || echo "conveyor: $n: $BRANCH moved while the suite ran, from ${m0:0:12} to ${m1:0:12}: a card landed; the suite tested ${sha:0:12}"
   # The test map is of the suite run alone here: a red one, though its failed cases then passed alone, refreshes none.
   if [ "$SH_KIND" != local ]; then :; elif [ $sr = 0 ]; then maprefresh "$wt" || :; else mapstop "$wt" "the release's whole run failed"; fi
@@ -593,7 +593,7 @@ releaseprep() { # <version>
 }
 RELBY='' RELANY='' RELALLOW=() # release [--anyway] [--allow-commit <sha>]... --by <who>: the owner's choices, and who made them
 release() { # <version>
-  local v=$1 sha last c rc out terms name t state notes=docs/releases/$1.md why=() hits=() red='' body='' known='' a f allow=() passed=()
+  local v=$1 sha last c rc out terms name t state st notes=docs/releases/$1.md why=() hits=() red='' body='' known='' a f allow=() passed=()
   local P=.claude-plugin/plugin.json M=.claude-plugin/marketplace.json tested=${CONVEYOR_RELEASE_SHA-} at=refs/remotes/$REMOTE/$BRANCH pr=''
   [ -z "${CONVEYOR_RELEASE_SHA+x}" ] || [ -n "$tested" ] || tested=none # set by the Board with no commit: nothing passed
   unset CONVEYOR_RELEASE_SHA
@@ -618,7 +618,7 @@ release() { # <version>
   fi
   [ "$(git symbolic-ref -q HEAD)" = "refs/heads/$BRANCH" ] && [ "$sha" = "$(git rev-parse -q --verify "$at^{commit}")" ] \
     || why+=("the checkout is not on $BRANCH at the head of ${at#refs/remotes/}")
-  [ -z "$(git status --porcelain --untracked-files=no)" ] || why+=("the checkout has uncommitted changes")
+  if ! st=$(git status --porcelain --untracked-files=no); then why+=("the checkout's status could not be read"); elif [ -n "$st" ]; then why+=("the checkout has uncommitted changes"); fi
   # The Board's Release (releasego()): the commit its release-prep tested. A card landed since: refused, the record
   # moved, for the owner to press Run again on the new main.
   if [ -n "$tested" ] && [ "$tested" != "$sha" ]; then
@@ -693,8 +693,8 @@ release() { # <version>
     else relsuite release "$sha" || { echo "conveyor: release: refused, nothing tagged or released: the whole suite did not pass on ${sha:0:12}" >&2; return 1; }; fi
   fi
   # The suite takes long: a checkout that moved meanwhile would tag commits no check above read.
-  [ "$(git rev-parse -q --verify HEAD)" = "$sha" ] && [ -z "$(git status --porcelain --untracked-files=no)" ] \
-    || { echo "conveyor: release: refused, nothing tagged or released: the checkout moved or changed while the suite ran" >&2; return 1; }
+  [ "$(git rev-parse -q --verify HEAD)" = "$sha" ] && st=$(git status --porcelain --untracked-files=no) && [ -z "$st" ] \
+    || { echo "conveyor: release: refused, nothing tagged or released: the checkout moved or changed while the suite ran, or its status could not be read" >&2; return 1; }
   # Merge PR release: every check passed on the head of LANDING, so the pull request is merged now, main here brought
   # to the merge (exit 3: an issue or main not brought in line after it, which the check below finds for main), and
   # the release is made on the merge, which must hold the files checked.
@@ -703,8 +703,8 @@ release() { # <version>
     [ $rc = 0 ] || [ $rc = 3 ] || { echo "conveyor: release: refused, nothing tagged or released: the landing pull request was not merged: ${out:0:600}" >&2; return 1; }
     printf '%s\n' "$out"
     t=$(git rev-parse -q --verify 'HEAD^{commit}') && git merge-base --is-ancestor "$sha" "$t" && [ "$(git rev-parse "$t^{tree}")" = "$(git rev-parse "$sha^{tree}")" ] \
-      && [ -z "$(git status --porcelain --untracked-files=no)" ] \
-      || { echo "conveyor: release: refused, nothing tagged or released: pull request #$pr is merged, but the checkout is not at a merge holding the files checked on ${sha:0:12}" >&2; return 1; }
+      && st=$(git status --porcelain --untracked-files=no) && [ -z "$st" ] \
+      || { echo "conveyor: release: refused, nothing tagged or released: pull request #$pr is merged, but the checkout is not at a merge holding the files checked on ${sha:0:12}, or its status could not be read" >&2; return 1; }
     sha=$t
   fi
   # A step that fails undoes what was made here: the tag, the commits, and the two files' changes, nothing else.

@@ -123,15 +123,14 @@ t_testmaplinkcover() {
   [ "$(cat "$T/$CASE/eng.out")" = $'{"by":"map","age":1}\ntest/a.test.js\ntest/c.test.js' ] || fail "the linked and the covering tests were not both chosen, by the map: $(cat "$T/$CASE/eng.out")"
 }
 
-# Bug it catches: a test file a card adds stayed out of the map, so a later change to what it covers did not run it.
-# The card's run that passes maps it (alone, under coverage): src/b.js now lists it beside test/b.test.js.
+# Bug it catches (O259): a card's run that passed ran each test file its change adds again under coverage and wrote
+# the map, though the map is made only by its own build and the whole runs. The new file runs once, as the card's
+# test, and the map is as it was.
 t_testmapnew() {
-  nodemain; nodemap
+  nodemain; nodemap; cp "$R/.conveyor/test-map.json" "$T/$CASE/map.before" || fail "the map could not be kept"
   maprun "printf \"const t = require('node:test'); const b = require('../src/b.js');\\nt('d', () => b());\\n\" > test/d.test.js"
-  # The first line is the test step's run; the map's run of the new file (mapnew()) goes through test.fileCommand too.
-  [ "$(head -n 1 "$STUB/got")" = test/d.test.js ] || fail "the new test was not run: $(cat "$STUB/got")"
-  mapis '.sources["src/b.js"] == ["test/b.test.js", "test/d.test.js"] and (.tests | index("test/d.test.js"))' "the new test is not in the map after its first run"
-  grep -qF 'conveyor: test map: mapped test/d.test.js on its first run' "$T/$CASE/cards/c7.test" || fail "the run did not say it mapped the new test: $(cat "$T/$CASE/cards/c7.test")"
+  [ "$(cat "$STUB/got")" = test/d.test.js ] || fail "the card that adds test/d.test.js did not run it once, alone, as its test: $(cat "$STUB/got")"
+  cmp -s "$T/$CASE/map.before" "$R/.conveyor/test-map.json" || fail "the card that adds test/d.test.js changed the map: $(cat "$R/.conveyor/test-map.json")"
 }
 
 # Bug it catches (#344): testsel() gave the made test map to jq as one argument, so a map over the system's argument
@@ -151,7 +150,7 @@ t_testmapbig() {
 }
 
 # Bug it catches (#155): a Node test file the pack's tests.patterns name but not named *.test.*, *.spec.* or under
-# __tests__/ (src/test-a.mjs, checks/one.js) never entered the map, made (mapbuild()) or added (mapnew()), as a fixed
+# __tests__/ (src/test-a.mjs, checks/one.js) never entered the map made by mapbuild(), as a fixed
 # filename filter dropped it. The map's Node tests are the pack's test files that are JS or TS files.
 t_testmapfiles() {
   setup '[]'; tune '.tests.patterns = ["src/test-*.mjs", "checks/"]'
@@ -372,11 +371,12 @@ t_testmapcovfree() {
 t_testmapother() {
   nodemain
   printf '%s\n' "import { test } from 'claude-code/testing';" "test('mod', () => {});" > "$R/test/mod.test.tsx"
+  git -C "$R" add test/mod.test.tsx && git -C "$R" commit -qm 'a mod test' || fail "the mod test could not be committed"
   printf '%s\n' 'echo "$1" >> "$STUB/ran"' 'exec node --test "$@"' > "$STUB/ran.sh"
   tune '.test.fileCommand = "bash \"$STUB/ran.sh\""'
-  mapeng 'd=$(mktemp -d) && mapcollect "$R" node "$d" test/mod.test.tsx test/a.test.js > /dev/null && cat "$d/skipped"' \
+  mapeng 'd=$(mktemp -d) && mapcollect "$R" node "$d" > /dev/null && cat "$d/skipped"' \
     || fail "the run failed: $(cat "$T/$CASE/eng.out")"
-  [ "$(cat "$STUB/ran")" = test/a.test.js ] || fail "the mod test was run, or the other was not: $(cat "$STUB/ran")"
+  [ "$(sort "$STUB/ran" | paste -sd, -)" = test/a.test.js,test/b.test.js,test/c.test.js ] || fail "the mod test was run, or the others were not: $(cat "$STUB/ran")"
   jq -e '.file == "test/mod.test.tsx" and (.why | test("claude-code/testing"))' "$T/$CASE/eng.out" > /dev/null \
     || fail "the mod test is not listed as not mapped with why: $(cat "$T/$CASE/eng.out")"
 }
@@ -525,7 +525,7 @@ t_startbrief() {
     || fail "the prompt has no list marked a starting point: $(tail -n 8 "$STUB/brief")"
   grep -qxF -e '- `fa()`: defined in lib/a.sh; called in lib/b.sh; mapped test files tests/a.test.sh' "$STUB/brief" \
     || fail "the list does not give the definer, the caller and the mapped test of fa(), or lists a comment, a page, a data row or a regex as a caller: $(tail -n 5 "$STUB/brief")"
-  grep -qxF -e '- `lib/a.sh`: named in areas.json, lib/b.sh; mapped test files tests/a.test.sh' "$STUB/brief" \
+  grep -qxF -e '- `lib/a.sh`: named in lib/b.sh, areas.json; mapped test files tests/a.test.sh' "$STUB/brief" \
     || fail "the list does not give the files that name lib/a.sh and its mapped test, or lists a comment, a page or a bare name of another file: $(tail -n 5 "$STUB/brief")"
   grep -qxF -e '- `.hid/x.sh`: named in lib/b.sh' "$STUB/brief" \
     || fail "the list does not give the file that names .hid/x.sh, a path that starts with a dot: $(tail -n 5 "$STUB/brief")"
@@ -547,10 +547,34 @@ t_startbriefvar() {
   # shellcheck disable=SC2034 # read by the command fx_in() runs
   ISSUE=$(issue 7 2026-01-01 | jq -c '.title = "Change lib/a.sh and lib/u.sh" | .body = ""')
   fx_in 'startbrief "$R" "$ISSUE"'
-  grep -qxF -e '- `lib/a.sh`: named in areas.json, cmd/run.sh, lib/b.sh; mapped test files tests/a.test.sh' "$T/$CASE/run.out" \
+  grep -qxF -e '- `lib/a.sh`: named in cmd/run.sh, lib/b.sh, areas.json; mapped test files tests/a.test.sh' "$T/$CASE/run.out" \
     || fail "the list does not give cmd/run.sh, which sources lib/a.sh through \$HERE, or lists cmd/other.sh, which sources other/a.sh: $(cat "$T/$CASE/run.out")"
   grep -qxF -e '- `lib/u.sh`: named in cmd/deep.sh, cmd/trim.sh, cmd/up.sh' "$T/$CASE/run.out" \
     || fail "the list does not give cmd/up.sh and cmd/deep.sh, which source lib/u.sh through a variable and ../, or cmd/trim.sh, through a trimmed variable: $(cat "$T/$CASE/run.out")"
+}
+
+# Bugs it catches: (O245) the files that name lib/u2.sh were cut at 12 by name, so twelve tests and a data file that
+# sort first hid cmd/run.sh and cmd/serve.sh, which source it; and, with code first, 19 commands that sort before them
+# and source it too (as 19 do conveyor/lib/control.sh) still hid them: every code file is listed, then tests, then
+# data, and only those are cut at 12. (O114) lib/own.sh sources lib/a.sh as "${BASH_SOURCE[0]%/*}/a.sh", its own
+# folder, and was not named, as another file is named a.sh; other/own.sh, the same line in other/, names other/a.sh
+# and is still not named for lib/a.sh.
+t_startbriefrank() {
+  startmain
+  mkdir -p "$R/cmd" "$R/aa" && echo : > "$R/lib/u2.sh" && for f in run serve $(seq -f 'c%02g' 19); do printf '. "$HERE/lib/u2.sh"\n' > "$R/cmd/$f.sh"; done \
+    && for i in 01 02 03 04 05 06 07 08 09 10 11 12; do echo 'x=lib/u2.sh' > "$R/aa/t$i.test.sh"; done && echo '{"f": "lib/u2.sh"}' > "$R/aa/d.json" \
+    && for d in lib other; do printf '. "${BASH_SOURCE[0]%%/*}/a.sh"\n' > "$R/$d/own.sh"; done \
+    && git -C "$R" add -A && git -C "$R" commit -qm rank || fail "the fixture could not be committed"
+  local ISSUE
+  # shellcheck disable=SC2034 # read by the command fx_in() runs
+  ISSUE=$(issue 7 2026-01-01 | jq -c '.title = "Change lib/u2.sh:1136 and lib/a.sh" | .body = ""')
+  fx_in 'startbrief "$R" "$ISSUE"'
+  grep -qF -e "- \`lib/u2.sh\`: named in $(seq -f 'cmd/c%02g.sh' 19 | tr '\n' , | sed 's/,/, /g')cmd/run.sh, cmd/serve.sh, aa/t01.test.sh, " "$T/$CASE/run.out" \
+    || fail "the brief for an issue naming lib/u2.sh:1136 does not list all 21 commands that source it, cmd/run.sh and cmd/serve.sh too, before its tests and data: $(cat "$T/$CASE/run.out")"
+  grep -qE -e '^- `lib/u2\.sh`: .*, aa/t12\.test\.sh and 1 more$' "$T/$CASE/run.out" \
+    || fail "the brief for an issue naming lib/u2.sh:1136 does not cut its 12 tests and 1 data file at 12: $(cat "$T/$CASE/run.out")"
+  grep -qxF -e '- `lib/a.sh`: named in lib/b.sh, lib/own.sh, areas.json; mapped test files tests/a.test.sh' "$T/$CASE/run.out" \
+    || fail "the brief for lib/a.sh does not name lib/own.sh, which sources it from its own folder, or names other/own.sh: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug it catches (#1321): the list of callers of an engine function was filled, in its first 12 files, by what only looks

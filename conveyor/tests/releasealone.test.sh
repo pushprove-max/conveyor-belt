@@ -67,6 +67,10 @@ t_relalonefail() {
   [ $rc = 1 ] && grep -q "statuses/$O -f state=failure" "$STUB/gh-calls" || fail "release-prep did not fail on a case that fails alone: $(cat "$T/$CASE.out")"
   jq -e '.state == "failed" and .cases == ["breaks"] and ([.alone[] | [.case, .verdict, (.runs | join(","))]] == [["breaks", "failed", "failed,failed,failed"]])' "$RUN" > /dev/null \
     || fail "the record does not carry the case's runs alone: $(cat "$RUN")"
+  # Bug (O142): release-prep's line of each case judged named no line of its failure, though the judge had it.
+  local ln; ln=$(jq -r '.alone[0].line // empty' "$RUN")
+  [ -n "$ln" ] && grep -qF "conveyor: release-prep: breaks: failed ($ln): runs alone" "$T/$CASE.out" \
+    || fail "release-prep's failure line for breaks does not name its line '$ln': $(grep 'breaks' "$T/$CASE.out")"
   [ ! -s "$ST/flaky.json" ] || [ "$(jq '.entries | length' "$ST/flaky.json")" = 0 ] || fail "a case that fails alone went on the flaky-test record: $(cat "$ST/flaky.json")"
   # Bug (#789 review): each run alone cleared the suite's output and progress, so the failed release pointed to the
   # last run alone's output, and the Release panel's count went back to that run's while they ran.

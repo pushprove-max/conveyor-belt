@@ -123,7 +123,8 @@ t_testcountfile() {
   local got w=$T/$CASE/cards/c7.live TEST_BEFORE=120
   eval "$(sed -n '/^filecmd() {/,/^}/p' "$SRC/lib/testrun.sh")"
   # shellcheck disable=SC2016 # the file command's text, expanded where it runs
-  CONVEYOR_TEST_FILES=$'t/a.test.sh\nt/b.test.sh\nt/c.test.sh' countrun "$(filecmd 'w() { case "$1" in */b.test.sh) while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done ;; esac; }; w' files)" \
+  mkdir -p "$T/$CASE" && printf '%s\n' t/a.test.sh t/b.test.sh t/c.test.sh > "$T/$CASE/files" || fail "the list"
+  CONVEYOR_TEST_FILELIST=$T/$CASE/files countrun "$(filecmd 'w() { case "$1" in */b.test.sh) while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done ;; esac; }; w' files)" \
     files.now.file '"t/b.test.sh"'
   got=$(jq -c '.files | [.run, .of, (.now.at | fromdate | type)]' "$w")
   [ "$got" = '[1,3,"number"]' ] || { : > "$STUB/go"; wait $run; fail "the live record of the second of 3 files: $(cat "$w")"; }

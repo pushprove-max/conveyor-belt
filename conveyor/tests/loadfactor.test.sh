@@ -20,7 +20,7 @@ loadrun() { # <load per core> factor | run <file>
   ( . "$SRC/lib/loadfactor.sh"; eval "$(sed -n '/^FILELIMIT=/p; /^LOADSCALE=/p; /^filecmd() {/,/^}/p' "$SRC/lib/testrun.sh")"
     unset CONVEYOR_LOAD_FACTOR; p_load() { echo "$((per * $(nproc --all)))"; }
     if [ "$2" = factor ]; then loadfactor; exit; fi
-    cd "$d" && CONVEYOR_LOAD_FACTOR=$(loadfactor) CONVEYOR_TEST_LOG=$d/log CONVEYOR_TEST_FILES=$3 bash -c "$(filecmd bash files)" > "$d/out" 2>&1 )
+    cd "$d" && echo "$3" > "$d/list" && CONVEYOR_LOAD_FACTOR=$(loadfactor) CONVEYOR_TEST_LOG=$d/log CONVEYOR_TEST_FILELIST=$d/list bash -c "$(filecmd bash files)" > "$d/out" 2>&1 )
 }
 
 # Bug it catches: a factor that is not the load per core, that falls under 1 on an idle machine (a limit cut short),
@@ -67,15 +67,69 @@ t_loadenv() {
   [ "$(cat "$w.factor")" = 2 ] || fail "the test command was not given the factor 2 in CONVEYOR_LOAD_FACTOR: $(cat "$w.factor")"
 }
 
+# testonce <worktree> <command> with LIVE, STUCK and TEST_TIMEOUT=2, at a load of LOADX (default 2) times the cores,
+# as a card's Test step runs it: the engine as serve.sh loads it, in a subshell; TEST_FILES, not exported as in the
+# engine, the lines of $T/$CASE/files. The command `files` is the run of each listed file alone with bash, as filecmd() makes it for a card.
+loadonce() {
+  # shellcheck disable=SC2034 # LIVE, STUCK, TEST_TIMEOUT and TEST_FILES are read by watch(), testclock() and testonce()
+  ( LIVE=0.2 STUCK=1200 TEST_TIMEOUT=2 TEST_FILES=$(cat "$T/$CASE/files" 2>/dev/null); unset CONVEYOR_LOAD_FACTOR; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards SLOT_HOME=$T/$CASE/slot
+    cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && reportask "$1" \
+    && p_load() { echo "$((${LOADX:-2} * $(nproc --all)))"; } && c=$2 && { [ "$c" != files ] || c=$(filecmd bash files); } && testonce "$1" "$c" )
+}
+# Bug it catches (O267): the run's clock stopped the run at testTimeout unscaled, while each file's own limit was scaled
+# by the load factor, so at a load of three times the cores a file of `# timeout: 2` that took 3 s, inside its scaled
+# 6 s, was cut at 2 s by the run (exit 124). With testTimeout 2 and a factor of 3 the run passes. Factor 3, not 2: the
+# clock counts whole seconds, and a scaled 4 s left a 3 s file too little time under a loaded test run.
+t_loadclock() {
+  local w=$T/$CASE/wt rc
+  setup '[]'; git -C "$R" worktree add -q --detach "$w" && mkdir -p "$w.testlog" || fail "the worktree"
+  printf '%s\n' '# timeout: 2' 'sleep 3' > "$w/slow.test.sh" # sleep: 1.5 times its 2 s limit and the run's
+  echo slow.test.sh > "$T/$CASE/files"; LOADX=3 loadonce "$w" files > "$T/$CASE/out" 2>&1; rc=$?
+  [ "$rc" = 0 ] || fail "testTimeout 2 at a load factor of 3: slow.test.sh (# timeout: 2, 3 s) did not pass (exit $rc): $(cat "$w.test" "$T/$CASE/out" 2>/dev/null)"
+}
+# Bug it catches (E8): the check on main keeps its limit by timeout itself (TEST_HARD, mainred.sh verdicts()), and
+# that limit was not scaled: with TEST_HARD 2 at a factor of 3, the same file, inside its scaled 6 s, was cut at 2 s.
+t_loadhard() {
+  local w=$T/$CASE/wt rc
+  setup '[]'; git -C "$R" worktree add -q --detach "$w" && mkdir -p "$w.testlog" || fail "the worktree"
+  printf '%s\n' '# timeout: 2' 'sleep 3' > "$w/slow.test.sh" # sleep: 1.5 times its 2 s limit and the run's
+  echo slow.test.sh > "$T/$CASE/files"; TEST_HARD=2 LOADX=3 loadonce "$w" files > "$T/$CASE/out" 2>&1; rc=$?
+  [ "$rc" = 0 ] || fail "TEST_HARD 2 at a load factor of 3: slow.test.sh (# timeout: 2, 3 s) did not pass (exit $rc): $(cat "$w.test" "$T/$CASE/out" 2>/dev/null)"
+}
+# Bug it catches (E9): with testTimeout 2 at a factor of 2 the run's clock stops a run at 4 s, but the line that says
+# it timed out (testfails(): timeout.sec, which the card's reason prints) said 2 s.
+t_loadsaid() {
+  local w=$T/$CASE/wt rc out
+  setup '[]'; git -C "$R" worktree add -q --detach "$w" && mkdir -p "$w.testlog" || fail "the worktree"
+  loadonce "$w" 'sleep 30' > "$T/$CASE/out" 2>&1; rc=$? # sleep: a run the clock ends at its scaled 4 s
+  [ "$rc" = 124 ] || fail "the run of 30 s under testTimeout 2 did not time out (exit $rc): $(cat "$w.test" "$T/$CASE/out" 2>/dev/null)"
+  out=$( (export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; TEST_TIMEOUT=2; cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && testfails "$w.test" 124 | jq -c .timeout) 2>&1)
+  [ "$(jq -c .sec <<<"$out" 2>/dev/null)" = 4 ] || fail "the run cut by its clock at 4 s (testTimeout 2, factor 2) says it timed out after: $out"
+}
+# Bug it catches (O253): the card's test files went to its command as one value of the environment
+# (CONVEYOR_TEST_FILES), and 4,000 paths of 40 bytes passed Linux's 128 KiB limit of one: the command did not start.
+# They go in a file (CONVEYOR_TEST_FILELIST): the command starts and reads every path.
+t_loadlist() {
+  local w=$T/$CASE/wt rc
+  setup '[]'; git -C "$R" worktree add -q --detach "$w" && mkdir -p "$w.testlog" || fail "the worktree"
+  for i in $(seq 4000); do printf 'tests/%033d.sh\n' "$i"; done > "$T/$CASE/files"
+  loadonce "$w" 'grep -c . "$CONVEYOR_TEST_FILELIST" > "$PWD.n"' > "$T/$CASE/out" 2>&1; rc=$?
+  [ "$rc" = 0 ] && [ "$(cat "$w.n" 2>/dev/null)" = 4000 ] \
+    || fail "with TEST_FILES of 4000 40-byte paths, the test command did not start and read them all (exit $rc, read $(cat "$w.n" 2>&1)): $(cat "$w.test" "$T/$CASE/out" 2>/dev/null | tail -n 5)"
+}
 # Bug it catches (#1154): the clean run that checks a failure on main and runs its controls (cleanrun(), lib/mainred.sh)
 # starts the command with `env -i` and left CONVEYOR_LOAD_FACTOR out, so a file there was held to its unscaled limit.
+# And (O267) the clean run ended its command at testTimeout unscaled, while each file's own limit was scaled: with
+# testTimeout 2 at a factor of 2, a command of 3 s, inside its scaled 4 s, was cut at 2 s (exit 124).
 t_loadclean() {
-  local w=$T/$CASE/wt out
+  local w=$T/$CASE/wt out c
   setup '[]'; git -C "$R" worktree add -q --detach "$w" || fail "the worktree"
+  c='printf %s "${CONVEYOR_LOAD_FACTOR-unset}" > "$PWD.factor"; sleep 3' # sleep: 1.5 times testTimeout 2, inside its scaled 4 s
   # shellcheck disable=SC2034 # LIVE and STUCK are read by watch(), which cleanrun() runs
-  out=$( ( LIVE=0.2 STUCK=1200 TEST_TIMEOUT=60; unset CONVEYOR_LOAD_FACTOR; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards SLOT_HOME=$T/$CASE/slot
+  out=$( ( LIVE=0.2 STUCK=1200 TEST_TIMEOUT=2; unset CONVEYOR_LOAD_FACTOR; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards SLOT_HOME=$T/$CASE/slot
     cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" \
-    && p_load() { echo "$((2 * $(nproc --all)))"; } && cleanrun "$w" 'printf %s "${CONVEYOR_LOAD_FACTOR-unset}" > "$PWD.factor"' ) 2>&1 ) \
-    || fail "the clean run failed: $out $(cat "$w.test" 2>/dev/null)"
+    && p_load() { echo "$((2 * $(nproc --all)))"; } && cleanrun "$w" "$c" ) 2>&1 ) \
+    || fail "testTimeout 2 at a load factor of 2: the clean run of a 3 s command (inside its scaled 4 s) failed: $out $(cat "$w.test" 2>/dev/null)"
   [ "$(cat "$w.factor")" = 2 ] || fail "the clean run's command was not given the factor 2 in CONVEYOR_LOAD_FACTOR: $(cat "$w.factor")"
 }

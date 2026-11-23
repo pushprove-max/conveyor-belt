@@ -213,10 +213,10 @@ printf '%s\n' '{"area": "core", "file": "conveyor/core.sh"}' '{"area": "core", "
   '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 echo one > "$R/conveyor/core.sh"; echo one > "$R/conveyor/x.sh"; printf 't_one() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"; echo 'exit 0' > "$R/conveyor/conveyor.test.sh"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" -c user.name=t -c user.email=t@example.com commit -qm init
-(cd "$R" && unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILE CONVEYOR_TEST_FILES BASH_ENV CONVEYOR_TEST_RERUN && bash .conveyor/test-changed.sh) > "$T/out" 2>&1 \
+(cd "$R" && unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILE CONVEYOR_TEST_FILELIST BASH_ENV CONVEYOR_TEST_RERUN && bash .conveyor/test-changed.sh) > "$T/out" 2>&1 \
   && ok "a run with no sleep-then-check passes" || no "a clean run failed: $(cat "$T/out")"
 printf 't_one() {\n  sleep 2; [ -e x ] || fail "no x"\n}\n' > "$R/conveyor/tests/a.test.sh"
-if (cd "$R" && unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILE CONVEYOR_TEST_FILES BASH_ENV CONVEYOR_TEST_RERUN && bash .conveyor/test-changed.sh) > "$T/out" 2>&1; then
+if (cd "$R" && unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILE CONVEYOR_TEST_FILELIST BASH_ENV CONVEYOR_TEST_RERUN && bash .conveyor/test-changed.sh) > "$T/out" 2>&1; then
   no "a run with a sleep-then-check in a test passed"
 else grep -q '^conveyor/tests/a.test.sh:2: ' "$T/out" && ok "a run with a sleep-then-check fails, naming the line" || no "the failed run does not name the line: $(cat "$T/out")"; fi
 

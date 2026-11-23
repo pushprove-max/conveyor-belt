@@ -139,35 +139,29 @@ t_rerunretry() {
   [ "$(grep -E $'^(main|changed)\t' "$STUB/rerun.5" | tr '\t\n' ':|')" = "main:z.txt|" ] || fail "the retried card was not told what main changed, and that alone: $(cat "$STUB/rerun.5")"
 }
 
-# Issue 523: c.test is kept off card runs for its CPU seconds (slowoff(): its issue #9 has not landed). Bug it
-# catches: the run again's list (testlist.sh rerunlist()) lost the `off` line, so a selection that runs what did not finish (the
-# engine's runner, .conveyor/test-changed.sh) ran the slow file again on the run again. The run again is told it too.
-t_rerunslowoff() {
-  rerunwt 'echo two >> a.txt' '1 fail flaky'
-  echo '{"filed": [{"file": "c.test", "issue": 9}]}' > "$ST/slow.json"
-  rerunstep || fail "the test step did not pass on its run again: $(ran 2)"
-  grep -qxF $'off\tc.test' "$STUB/rerun.1" || fail "the first run was not told c.test is kept off: $(cat "$STUB/rerun.1" 2>&1)"
-  [ "$(ran 2)" = flaky ] && grep -qxF $'off\tc.test' "$STUB/rerun.2" \
-    || fail "the run again was not told c.test is kept off: $(ran 2): $(cat "$STUB/rerun.2" 2>&1)"
+# Bug it catches (O258, O270): the timing maps and the kept passes went to jq as arguments, so a run again that keeps
+# 3,000 passes of 90-byte paths timed before passed Linux's 128 KiB limit of one: jq did not start, <worktree>.oldfiles
+# was removed, and the test line named none of them carried (slowrec() gave {} for the same list).
+t_rerunmanycarried() {
+  local wt=$T/$CASE/cards/c7 n
+  rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky'
+  ! rerunstep || fail "the first test step passed"
+  for i in $(seq 3000); do printf 't/%085d\n' "$i"; done > "$T/$CASE/many" || fail "the list"
+  awk '{ print "pass\t" $0 }' "$T/$CASE/many" >> "$wt.rerun" && awk '{ print "TESTRUN sec\t" $0 "\t1\t1" }' "$T/$CASE/many" >> "$wt.times" || fail "the kept passes"
+  rerunstep || fail "the step after a fix that made no edit did not pass: $(ran 3)"
+  n=$(jq 'length' "$wt.oldfiles" 2>&1); [ "$n" -ge 3000 ] 2>/dev/null || fail "a run again that keeps 3000 timed passes of 90-byte paths wrote no <worktree>.oldfiles of them: $n"
+  fx_in 'slowtests "$T/$CASE/cards/c7"; slowrec "$T/$CASE/cards/c7" | jq ".carried | length"' # as card() writes the test line
+  [ "$(cat "$T/$CASE/run.out")" -ge 3000 ] 2>/dev/null || fail "slowrec of the 3000 carried files gave no carried list: $(head -c 300 "$T/$CASE/run.out")"
 }
-
-# Bug it catches (issue 769): each card's test step read all the card records from the state store (a python3 start)
-# to match them against a slow-test record that names no file (none is written now), so a batch run of two cards
-# made two calls more and went past stdbcalls.test.sh's count under load. With no record, or one that names no file,
-# slowoffs() keeps none off and asks the store nothing; t_rerunslowoff is the record that names one.
-t_rerunslownone() {
-  # shellcheck disable=SC2034 # HERE is read by stdb(), for the folder state.py is in
-  local s=$T/$CASE/st HERE=$SRC STATE SLOWFILED CALLS=$T/$CASE/calls out r
-  STATE=$s/cards.jsonl SLOWFILED=$s/slow.json; mkdir -p "$s"
-  eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p' "$SRC/lib/records.sh")"
-  eval "$(sed -n '/^slowoffs() {/,/^}/p' "$SRC/lib/testrun.sh")"
-  python3() { echo x >> "$CALLS"; command python3 "$@"; } # each state store call, counted
-  echo '{"card":"c1","issue":9,"step":"picked","time":"2026-01-01T00:00:00Z"}' > "$STATE"
-  for r in none '{"filed": []}' '{"filed": [{"issue": 9}]}'; do
-    [ "$r" = none ] || echo "$r" > "$SLOWFILED"
-    : > "$CALLS"; out=$(slowoffs)
-    [ -z "$out" ] && [ ! -s "$CALLS" ] || fail "with the slow-test record $r, slowoffs kept '$out' off and asked the state store $(wc -l < "$CALLS") times, not 0"
-  done
+# Bug it catches (O257): nothing writes the slow-test record now, but one left from before #349 still kept c.test
+# (its issue #9 not landed) off every card's run, with a `pass` and an `off` line in the list the command reads. A card
+# that selects c.test runs it: its case three runs.
+t_rerunslowoff() {
+  rerunwt 'echo two >> a.txt'
+  echo '{"filed": [{"file": "c.test", "issue": 9}]}' > "$ST/slow.json"
+  rerunstep || fail "the test step did not pass: $(ran 1)"
+  [[ " $(ran 1) " == *' three '* ]] \
+    || fail "with slow.json naming c.test for open issue #9, the card's run did not run c.test (case three): ran $(ran 1); told $(cat "$STUB/rerun.1" 2>&1)"
 }
 
 # Bug: a run killed part-way through a file kept none of that file's cases that had passed, so the run again ran them

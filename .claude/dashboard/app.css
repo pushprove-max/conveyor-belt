@@ -413,7 +413,7 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .output-line.is-fail { color: var(--bad); font-weight: 700; }
 .output-times { color: var(--muted); font-weight: 700; }
 /* A review's output: one row per finding, the chip and sentence on a line, its place and folded proof under it. Health's
-   Flaky tests and Kept off card tests lists use the same rows: a name, its count chip and its issue. */
+   Flaky tests list uses the same rows: a name, its count chip and its issue. */
 .output-findings { margin: var(--sp-1) 0 0; padding: 0; list-style: none; color: var(--text); }
 .output-finding { padding: var(--sp-2) 0; border-top: 1px solid var(--border); min-width: 0; }
 .output-finding:first-child { border-top: 0; }

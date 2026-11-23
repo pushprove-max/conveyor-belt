@@ -147,7 +147,6 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
                         "stopped": {"title": "The engine is stopped", "reason": "A stop signal holds the engine. Run kill -CONT 1234 1235 to resume them.", "since": "'"$(ago 300)"'", "pid": 1234, "pids": [1234, 1235]}},
   "mainTest": {"issue": 15, "cases": ["alpha", "beta"], "from": "aaaa", "to": "bbbb", "since": "'"$(ago 700)"'", "exit": 1},
   "flaky": [{"case": "b.test: flaky", "count": 3, "issue": 16}, {"case": "c.test: other", "count": 1, "issue": null}],
-  "slowOff": [{"file": "s.test", "issue": 17, "cpu": 10, "budget": 8, "card": "c2-9", "last": {"cpu": 9, "card": "c2-8"}}],
   "belt": [{"card": "c3-801", "issue": 801, "title": "Rebuild the dashboard", "step": "review", "review": 2, "of": 3, "stepAt": "'"$(ago 300)"'", "model": "gpt-x", "tokens": {"claude": 10, "codex": 5}, "usd": 1.25, "seats": {"failed": "the judge timed out"}}],
   "queue": {"next": [{"issue": 20, "title": "Next up", "priority": "P1", "followup": true, "retried": false}],
     "order": [{"issue": 20, "title": "Next up", "priority": "P1", "followup": true, "retried": false}], "holding": [{"issue": 30, "title": "Held one"}],
@@ -260,8 +259,6 @@ q '[.panels.health.data.records[] | .routes | if . == null then null else [.subs
 q '[.panels.health.data.records[] | .repoUrl] == ["https://github.com/example/sample-project", "https://github.com/example/WidgetShop"]' "each health record carries its repository's address"
 # The flaky cases of each record (the snapshot's flaky): without them the Health panel has no Flaky tests line.
 q '[.panels.health.data.records[] | .flaky] == [[{case: "b.test: flaky", count: 3, issue: 16, url: "'"$PU"'/16"}, {case: "c.test: other", count: 1, issue: null, url: null}], null]' "each record's flaky cases reach the health part, an issue filed with its link; a record without the key has none"
-# Issue 457: the test files kept off card test steps (the snapshot's slowOff), with why: without them Health cannot list them.
-q '[.panels.health.data.records[] | .slowOff] == [[{file: "s.test", issue: 17, cpu: 10, budget: 8, card: "c2-9", last: {cpu: 9, card: "c2-8"}, url: "'"$PU"'/17"}], null]' "each record's test files kept off card test steps reach the health part, with why and their issue's link; a record without the key has none"
 q '.panels.landed.data.cards | map([.repo, .issue, .step, .tookSec, .reviews, .usd, .pushed]) == [["widgetshop", 4, "closed", 600, 1, 0.5, null], ["sample", 7, "landed", 2400, 2, 2.5, true]]' "landed cards, newest first, each with its reviews, cost and the seconds from the first pick-up of its work to its landing (the snapshot's totalSec, else its card id's time)"
 # Bug: the Declined panel lists one record's lines after another's, not the newest first, or loses who declined a finding and why;
 # a built or dismissed line is in the panel's lines, or lost from the rest ("Show every line"), or loses who dismissed it.

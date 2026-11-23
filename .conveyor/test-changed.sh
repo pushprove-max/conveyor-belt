@@ -1171,8 +1171,8 @@ allcases() { sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh 2>/
 casefiles() { [ -n "${1// /}" ] && grep -lE "^t_($(tr ' ' '\n' <<<"$1" | grep . | paste -sd'|' -))\(\) \{" conveyor/tests/*.test.sh; }
 pick "${changed[@]}"
 for f in "${!conly[@]}"; do echo "comment-only change: $f, no tests selected"; done | LC_ALL=C sort
-# The tests the engine chose for the change (#150): with the pack's test.list env, a card's run is given them in
-# CONVEYOR_TEST_FILES, one path a line (conveyor/lib/testrun.sh testsel(), reading .conveyor/engine-areas.json through
+# The tests the engine chose for the change (#150): a card's run is given them in the file CONVEYOR_TEST_FILELIST names
+# (conveyor/lib/testrun.sh testonce()), one path a line (testsel(), reading .conveyor/engine-areas.json through
 # conveyor/lib/testmap.sh mapread(), as a user's card reads its map); so is each one-file run (ONE) of the loop of
 # test.fileCommand (filecmd()). Each runs: an engine case file with all its
 # cases, as a test file of its own (below); another file whole. The selection above adds the tests it finds and the engine does not
@@ -1187,7 +1187,7 @@ while IFS= read -r t; do
       run[conveyor/conveyor.test.sh]=1 ;;
     *) run[$t]=1; twhole[$t]=1 ;;
   esac
-done <<<"${CONVEYOR_TEST_FILES:-}"
+done < "${CONVEYOR_TEST_FILELIST:-/dev/null}"
 # One-file mode (ONE, above): the selection is that file alone. An engine case file keeps the chosen cases it holds,
 # or all its cases when none of them is chosen or the runner was chosen whole; any other file runs whole. The cases
 # the loop names of the file (TCASES: a card's change adds or changes them, issue 414) are the chosen cases then, of
@@ -1201,7 +1201,7 @@ if [ -n "$ONE" ]; then
     cases=$(tr '\n' ' ' <<<"${c:-$own}"); run=([conveyor/conveyor.test.sh]=1)
   else
     # Any other shell test file that selects its cases as the runner does (`SEL=${CONVEYOR_SHELL_TEST_CASE...`) runs
-    # the cases TCASES names of it, as its parts, and only them: the loop lists the file (CONVEYOR_TEST_FILES, above)
+    # the cases TCASES names of it, as its parts, and only them: the loop lists the file (CONVEYOR_TEST_FILELIST, above)
     # and a pick may select it, each of which marks it whole. Else, or with none named, it runs whole. They are kept
     # in oparts, not twhole and tparts: freshen() picks again below, which marks the file whole again (issue 423).
     run=(["$ONE"]=1); cases=
@@ -1261,7 +1261,7 @@ freshen() { # <reason> <only within the change's selection: 1, or empty> <file>.
 }
 # A first run of the loop's test step (a log folder, no list) says why each file of its selection runs too: the
 # reasons of each changed file, picked one at a time (freshen); the selection is the one picked above. A first run's
-# list holds no line but what the loop keeps off (`ok`, `off` and `pass` lines: conveyor.sh flakyoff(), slowoff()); a
+# list holds no line but what the loop keeps off (`ok`, `off` and `pass` lines: conveyor.sh flakyoff()); a
 # run again's has its `change` line, a run by hand's its `fail` line. Nothing of a first run's selection "did not pass".
 first=; ! grep -qvE $'^(ok|off|pass)\t' "$RERUN" 2>/dev/null && first=1
 if [ -n "$first" ] && [ -d "${CONVEYOR_TEST_LOG:-}" ] && [ ${#full[@]} -gt 0 ]; then
@@ -1330,7 +1330,7 @@ if [ -s "$RERUN" ]; then
   done
   # Of the runner, a case the loop keeps off as flaky (an `off` line: conveyor.sh flakyoff()) does not run, though a
   # change selects it or its whole area: it is left out last, after every case above was added.
-  # A whole test file an `off` line names (one the loop keeps off for its CPU seconds: conveyor.sh slowoff()) does not
+  # A whole test file an `off` line names (one that passed before with the same inputs: conveyor.sh cacheoff()) does not
   # run either: an engine case file's cases are left out of the runner so, and any other file is not run.
   off=$(awk -F'\t' '$1 == "off" && $2 == "conveyor/conveyor.test.sh" && $3 != "" {print $3}' "$RERUN")
   while IFS=$'\t' read -r k f c; do
@@ -1369,7 +1369,7 @@ fi
 log=/dev/null; [ ! -d "${CONVEYOR_TEST_LOG:-}" ] || log=$CONVEYOR_TEST_LOG/test-changed.log
 for t in "${!linked[@]}"; do printf 'TESTRUN linked\t%s\n' "$t" >> "$log"; done
 # enginewhole: 0 when the runner's run starts every case file of the engine: no cases chosen, or a case of each (issue
-# 546: a whole run with a flaky case kept off; a file kept off whole, slowoff(), is not run so). Such a run sources
+# 546: a whole run with a flaky case kept off; a file an `off` line keeps off whole is not run so). Such a run sources
 # them all, which the hook does not see: it is a meta-runner's run (issue 584).
 enginewhole() {
   [ -n "$cases" ] || return 0

@@ -182,7 +182,8 @@ tcadd() { # <test file> <title> <body> <"held" or ""> [<label> [<labels json> [<
 # type label, as a fix issue has) is refused with no `## Cause` section, as the Foreman's filing hook refuses a fix issue.
 # With the control record's rules.foremanissues (rules.releaseissues for --release) false (the Rules tab's Cards with no
 # GitHub issue) it starts a card with no GitHub issue (tcadd()), held until the owner's yes, as an issue the Foreman files
-# is. Otherwise it files the issue, with the pack's type and last priority, and holds it. Prints what it started or filed.
+# is. Otherwise it files the issue, with the pack's type and last priority, and holds it; the issue is made with the
+# built label, which the pick skips, taken off once the hold is in the control record. Prints what it started or filed.
 cardnew() { # [--release <version>] <title> <body>
   local rule=foremanissues label='Foreman order' body='' out n u nocard
   [ "${1:-}" != --release ] || { [[ ${2:-} =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]] || { echo "usage: conveyor.sh card [--release <version>] <title> <body>" >&2; return 2; }
@@ -198,10 +199,12 @@ cardnew() { # [--release <version>] <title> <body>
     echo "conveyor: card $n is held, as it was asked for a Foreman session: release it (conveyor.sh control release $n) once the owner says yes" >&2
     echo "Card queued with no GitHub issue: ${1:0:200}"; return 0
   fi
-  out=$(gh_write issue create --title "${1:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" --body "$body" 2>&1); u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1); n=${u##*/}
+  # Made with the built label, which the pick skips, until the hold is in the control record (as testissue() does).
+  out=$(gh_write issue create --title "${1:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" --label "$BUILT" --body "$body" 2>&1); u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1); n=${u##*/}
   [ -n "$n" ] || { echo "conveyor: the issue could not be filed: $out" >&2; return 1; }
-  locked control hold "$n" > /dev/null 2>&1 && echo "conveyor: #$n is held, as it was filed for a Foreman session: release it (conveyor.sh control release $n) once the owner says yes" >&2 \
-    || echo "conveyor: #$n is filed, but could not be held: hold it (conveyor.sh control hold $n) unless the owner has said yes to it" >&2
+  if ! locked control hold "$n" > /dev/null 2>&1; then echo "conveyor: #$n is filed, but could not be held: hold it (conveyor.sh control hold $n) unless the owner has said yes to it, and take the $BUILT label off it, which the belt skips" >&2
+  elif gh_write issue edit "$n" --remove-label "$BUILT" > /dev/null 2>&1; then echo "conveyor: #$n is held, as it was filed for a Foreman session: release it (conveyor.sh control release $n) once the owner says yes" >&2
+  else echo "conveyor: #$n is held, as it was filed for a Foreman session, but the $BUILT label could not be taken off it: take it off before you release it (conveyor.sh control release $n), as the belt skips an issue with it" >&2; fi
   echo "$u"
 }
 # Takes the entry of <card id> out of the record while no card has picked it (a follow-up withdrawn: unfile()). A picked
@@ -360,6 +363,9 @@ testcardissue() { # <card>
     | {number: 0, title, body, milestone: null, labels: ((.labels // [$t, $p[-1]]) | map({name: .}))}' "$TACARDS" 2>/dev/null
 }
 taput() { printf '%s\n' "$2" > "$1.new" && mv -f "$1.new" "$1" || { rm -f "$1.new"; return 1; }; } # <file> <record>
+# A Tests action's run (TALIMIT, its record, which tarunfile() alone writes while it runs) given the limit its run has
+# once testonce() scaled it, so the Board's Running line gives that limit, not the one asked. A record it cannot read is left.
+talimit() { local r; r=$(jq -ce --argjson l "$1" 'objects | .limit = $l' "$TALIMIT" 2>/dev/null) && taput "$TALIMIT" "$r"; } # <seconds>
 testaction() { # <judge | explain | run> <test file> | stop <id>
   # An explain's --time: the time zone and Time setting of the Board that asked, which its facts' times are given in
   # (tawhen()); with none, this machine's zone and a 12-hour clock.
@@ -473,7 +479,9 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # What the session is given of <file>: {runs: each run that timed it, oldest first, the runs the Tests page shows: each
 # test line of a card, {card, issue, time} and its times, clocks (its seconds on the clock), and timed parts for
 # the file, and carried: true on a line that kept it as passed and did not run it, its times an earlier step's of the
-# same card (testlist.sh carriedrec(); a failed step saves none, so they may be the only ones of that run), and each whole-suite run of $SUITERUNS (testlist.sh suiterec()), {time, whole: true, how, cpu, sec, result}, and the time the test-speed
+# same card (testlist.sh carriedrec(); a failed step saves none, so they may be the only ones of that run), and so its
+# time that of the latest earlier line of that card that did not carry the file and is not a reused pass, as
+# startlines() dates it (its own time with no such line), and each whole-suite run of $SUITERUNS (testlist.sh suiterec()), {time, whole: true, how, cpu, sec, result}, and the time the test-speed
 # survey saved for it (testsurvey(), lib/testfiles.sh), {time, survey: true, cpu, sec}; cards: the
 # cards of the test lines, {card, issue}; flaky: the entries of the flaky-test record for it or a case of it ("<file>: <case>");
 # failures: its newest TAFAILS failed test steps (those that passed on re-run too), newest first, as the Tests page has
@@ -497,7 +505,9 @@ testfacts() { # <file>
     --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile sv <(testsurvey) \
     --slurpfile ta <(cat "$TESTACTS"/*.json 2>/dev/null | jq -cR --arg f "$1" 'fromjson? | objects | select(.action == "run" and .file == $f and (.result | strings) and (.end | strings))' 2>/dev/null) "$HISTFROM"'$fl[0] as $fl | ($su | map(fromstart($st))) as $su | ($ta | map(select($st == "" or (.end | strings) >= $st))) as $ta | ($sv[0] | map(fromstart($st))) as $sv | '"$OWNERS$FAILURE"'([inputs | fromjson? | objects | select(.step == "test")] | startlines($st)) as $ls
     | ([$ls[] | failedrun | select(any(failedfiles[]; . == $f)) | failure($f)] | sort_by(.time) | reverse | .[:$n]) as $fails
-    | [$ls[] | {card, issue, time, times: ((.times | objects | .[$f]) // null), clocks: ((.clocks | objects | .[$f]) // null), timed: ([.timed | arrays | .[] | objects | select(.file == $f)] | first), carried: (if any(.carried | arrays | .[]; . == $f) then true else null end)}
+    | def car: any(.carried | arrays | .[]; . == $f);
+      [$ls | to_entries[] | .key as $i | .value | {card, issue, time: (if car then (.card as $k | [$ls[:$i][] | select(.card == $k and .reused != true and (car | not)) | .time] | last) // .time else .time end),
+         times: ((.times | objects | .[$f]) // null), clocks: ((.clocks | objects | .[$f]) // null), timed: ([.timed | arrays | .[] | objects | select(.file == $f)] | first), carried: (if car then true else null end)}
          | select(.times != null or .clocks != null or .timed != null) | del(.[] | nulls)] as $c
     | [$su[] | . as $w | .files | objects | .[$f] | objects | {time: $w.time, whole: true, how: $w.how, cpu, sec, result} | del(.[] | nulls)] as $w
     | [$sv[] | select(.file == $f) | {time, survey: true, cpu, sec} | del(.[] | nulls)] as $v
@@ -653,7 +663,8 @@ tarun() { # <the record> <worktree> <prompt>
 # `.test.` or `.spec.`, or one the pack's own tests.patterns match, patterntest(); a helper in a __tests__ folder is not
 # one) is refused (exit 2), and nothing runs. Its record in $TESTACTS/<id>.json, as a session's: {id, action: "run", file, project, commit, start,
 # end, state (queued, running, done, stopped, failed or timed out), load (the machine's 1-minute load at the ask), limit
-# (TEST_TIMEOUT, the seconds the test run may run once it has its slot, as a card's test step), result (pass
+# (TEST_TIMEOUT, the seconds the test run may run once it has its slot, as a card's test step; once it ran, that limit
+# times the load factor as it started, the one it has, from its start: testonce(), lib/testrun.sh, talimit()), result (pass
 # or fail; null until it ends, and when it did not run), sec (the file's clock seconds as its runner timed it, else the
 # command's), cpu (the file's CPU seconds; null when its runner gave none), wait (the seconds it waited for its slot),
 # pid (while it runs) and reason (failed: why)}; <id>.txt, the command's output as it writes it, kept when it ends;
@@ -708,7 +719,7 @@ tarunfile() { # <the record> <worktree>
   ( x=$({ git -C "$MAIN" worktree add -q --detach "$wt" "$sha" && deps "$wt"; } 2>&1 < /dev/null) \
       || { printf 'the copy of %s it runs in could not be made: %s\n' "$BRANCH" "${x:0:300}" > "$wt.test"; exit 1; }
     printf 'fail\t%s\n' "$t" > "$wt.rerun"
-    tests "$wt" test.fileCommand alone; x=$?
+    TALIMIT=$f.json; tests "$wt" test.fileCommand alone; x=$? # TALIMIT: testonce() writes the scaled limit (talimit())
     printf '%s\t%s\t%s\n' "$x" "$TEST_WAIT" "$TEST_RUN" > "$wt.res" ) & tp=$!
   [ -n "$stopped" ] || wait "$tp"
   if [ -n "$stopped" ]; then
@@ -723,8 +734,9 @@ tarunfile() { # <the record> <worktree>
   # The file's own times, as its runner timed it (testlist.sh timed()).
   tm=$(timed "$wt" 2>/dev/null | jq -c --arg t "$t" '.[$t] // {}' 2>/dev/null) || tm='{}'
   { cp -f "$wt.test" "$f.txt.new" 2>/dev/null || : > "$f.txt.new"; } && mv -f "$f.txt.new" "$f.txt"
-  taput "$f.json" "$(jq -c --arg t "$(clock)" --arg s "$state" --argjson res "$res" --argjson w "$why" --argjson tm "$tm" --arg sec "$s" --arg wait "$w" \
-    '. + {end: $t, state: $s, result: $res, sec: ($tm.sec // ($sec | tonumber? // null)), cpu: ($tm.cpu // null), wait: ($wait | tonumber? // null)}
+  # limit: the scaled one testonce() kept; the asked one when the run ended before it started (no <worktree>.limit).
+  taput "$f.json" "$(jq -c --arg t "$(clock)" --arg s "$state" --argjson res "$res" --argjson w "$why" --argjson tm "$tm" --arg sec "$s" --arg wait "$w" --arg lim "$(cat "$wt.limit" 2>/dev/null)" \
+    '. + {end: $t, state: $s, result: $res, sec: ($tm.sec // ($sec | tonumber? // null)), cpu: ($tm.cpu // null), wait: ($wait | tonumber? // null), limit: (($lim | tonumber?) // .limit)}
       + (if $w == null then {} else {reason: $w} end) | del(.pid)' <<<"$r")"
   tadrop "$wt"; rm -rf "$wt".*
   taqueue # the next queued action, now that this one has ended

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Health: is the machinery running. Its part: {host: {name, reachable, error}, records | null (one per Conveyor
-// record: repoUrl (its repository's https address, else null), snapshotAt (when its kept snapshot was made, or null), loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, slowOff: [{file, issue, url, cpu, budget, card, last: {cpu, card}}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, split: {kept, wouldSplit: {cards, reviewed, go, fixes}, split} | null: the cards the rule Split large issues checked, report: {runner, format, path, env, args, option}, the pack's test.report | null, timesPlan: {kind: report | wrap | card, ...} | null (what Record test times would do), quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack), limit | null (the
+// record: repoUrl (its repository's https address, else null), snapshotAt (when its kept snapshot was made, or null), loop, state (as its control record says: a loop it stops is off, not stopped), newest, stuck, unpushed, pushError, pushFailingSince, lastPushAt, gh, diskFreeKb, cycles, flaky: [{case, count, issue, files, url}] | null, untimed: the last card test runs that recorded no test times, 0 when one did | null, split: {kept, wouldSplit: {cards, reviewed, go, fixes}, split} | null: the cards the rule Split large issues checked, report: {runner, format, path, env, args, option}, the pack's test.report | null, timesPlan: {kind: report | wrap | card, ...} | null (what Record test times would do), quarantined: [{line, field, time}] | null: the card records' lines set aside, serviceOld: {commit, refused, project} | null: the machine's Conveyor runs another commit, whose check refuses the pack), limit | null (the
 // usage-limit reading of this machine's own login: only its Codex reading and, with billing "api", its api block (the week's dollars against the weekly cap) show here), limitError,
 // limits: [{repo, account (null: the default login), uses (build, review), pct, readAt, email}] | null (the weekly limit of each account the cards run on, as the build machine's guard reads it),
 // accounts: {error, list: [{machine (null: this machine), name, email, usedPct, fiveHourPct, resetsAt, readAt (when its figures were read), error,
@@ -166,22 +166,6 @@ window.DASH_APP.panel({
             `${cases.length === 1 ? '1 case' : `${cases.length} cases`} passed only on re-run in the last 7 days`, det).next =
             'Fix each case, or the fixture under it. If a case has an issue, fix the case through that issue.';
         } else check(`Flaky tests${of}`, ctx.chip('None', 'ok'), 'no case passed only on re-run in the last 7 days');
-      }
-      // The test files a "Slow test" issue still keeps off card test steps (conveyor/lib/testrun.sh slowoffs()), each
-      // with its CPU seconds in the two card test runs that filed it, and the issue whose card brings it back. One row
-      // each (item), the figures under its name.
-      if (Array.isArray(r.slowOff)) {
-        const files = r.slowOff.filter((f) => f && typeof f.file === 'string');
-        if (files.length) {
-          const n = (x) => (typeof x === 'number' ? `${Math.round(x * 10) / 10}` : '?');
-          const det = h('details', 'output'), list = h('ul', 'output-findings slow-off-list');
-          list.append(...files.map((f) => item(r.repoUrl, f.file, f.file, 'Kept off', f,
-            `${n(f.cpu)} CPU s in ${f.card ?? 'a card'}'s test run and ${n(f.last?.cpu)} in ${f.last?.card ?? 'the one before'}'s; runs only in the full test suite until its issue lands`)));
-          det.append(h('summary', null, 'Show output'), list);
-          check(`Kept off card tests${of}`, ctx.chip(`${files.length} file${files.length === 1 ? '' : 's'}`, 'warn'),
-            `${files.length === 1 ? '1 test file' : `${files.length} test files`} kept off card test steps by a Slow test issue`, det).next =
-            'Each comes back to card test steps when the card of its Slow test issue lands: make the file cheaper there.';
-        } else check(`Kept off card tests${of}`, ctx.chip('None', 'ok'), 'every test file runs in card test steps');
       }
       // The project's last card test runs recorded no test times (untimed: how many; conveyor/lib/views.sh): its test
       // command prints no `TESTRUN sec` lines and no report of its runner was read. When setup found a runner whose report Conveyor cannot read now (report: the pack's test.report with

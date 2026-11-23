@@ -77,6 +77,23 @@ t_relnext() {
   git -C "$R" tag v1.3.0
   [ "$(relmain)" = '["v1.3.0","1.4.0",false,true]' ] || fail "with notes and plugin.json no higher than v1.3.0, not its next minor: $(relmain)"
 }
+# Bug it catches (E6): while a large failed suite's cases ran alone, suites() passed the suite's progress and the record
+# read again as one jq argument each; past Linux's 128 KiB limit of one argument jq did not start, and the Release
+# panel lost the run. Here 2,000 failed cases of 105 bytes are in both, with the release lock held as a running run holds it.
+t_relbigrun() {
+  local c=$T/$CASE/cards/release pid
+  setup '[]'
+  mkdir -p "$c/wt.testlog/cases/failed" && (cd "$c/wt.testlog/cases/failed" && for i in $(seq 2000); do : > "$(printf "case%04d-%096d" "$i" 0)"; done) \
+    && ls "$c/wt.testlog/cases/failed" | jq -Rn --arg s "$(git -C "$R" rev-parse HEAD)" '[inputs] as $c | {kind: "release", step: "release-prep",
+      version: "1.1.0", since: "2026-01-01T00:00:00Z", ended: null, state: "running", sha: $s, main: null, moved: false, reasons: [],
+      rerun: {since: "2026-01-01T00:00:01Z"}, counts: {done: 2000, failed: 2000, cases: $c}}' > "$c/run.json" || fail "the fixture could not be made"
+  [ "$(wc -c < "$c/run.json")" -gt 131072 ] || fail "the fixture's record is under 128 KiB"
+  ( exec 9>>"$c/lock"; flock 9; : > "$STUB/held"; exec sleep 120 ) & pid=$! # sleep: the running run's hold of the lock, ended below
+  wait_until '[ -e "$STUB/held" ]' || fail "the lock was not taken"
+  relsnap "the snapshot does not show the running run of 2000 failed cases with its rerun's progress" \
+    '.state == "running" and .failed == 2000 and (.cases | length) == 2000 and .rerun.failed == 2000 and .rerun.done == 2000'
+  kill "$pid" 2>/dev/null
+}
 # Bug: the Release panel says main moved only once the suite ends, so the owner waits for a whole suite whose result
 # no release can use. A card lands (main moves) while the stub suite waits; the snapshot must say moved before it ends.
 t_relmoving() {

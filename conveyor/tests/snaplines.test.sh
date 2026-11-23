@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: the running summaries of the card records and the retried file that health, the slow-test list and
-# the Tests part read in place of every line (lib/records.sh linesum, HEALTHLINE, TESTLINE), and the cards priced at
+# Engine cases: the running summaries of the card records and the retried file that health and the Tests part read in place of every line (lib/records.sh linesum, HEALTHLINE, TESTLINE), and the cards priced at
 # the last snapshot (dashboard_limit.py cardlines), with their metrics, run sums and waits (cardruns.py).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -18,7 +17,7 @@ snaplines_line() {
     '{card: $c, issue: $i, step: $s, time: $t, tokens: {claude: 1, codex: 0}, result: $r, sha: "", reason: "", repo: "r"} * $x'
 }
 
-# Bug: health, the slow-test list, the Tests part, the pricing and the final assembly read every line of the records,
+# Bug: health, the Tests part, the pricing and the final assembly read every line of the records,
 # or priced and measured every card, on each snapshot (most of the snapshot's growth with the history). Read from
 # summaries kept beside the records, brought up to date with the lines appended since (a card priced again only when
 # its line changed, an issue's metrics made again only when its cards changed), a field one of
@@ -26,8 +25,7 @@ snaplines_line() {
 # shows: here the whole snapshot from the summaries is compared with the one read from scratch. The records hold each
 # field those readers read: a dead worktree (gone), a failed test step with its cases, verdicts and output, a run
 # again, test times and clocks, a refused full run, a review's COVERED-BY line, a speed proof, a landed line with its
-# follow-ups and test edits, a failed push, a main-red card, a blocked one, issues that wait on each other (cycles) and
-# a slow file whose issue lands in the appended lines (the slow-test list).
+# follow-ups and test edits, a failed push, a main-red card, a blocked one and issues that wait on each other (cycles).
 t_snaplinessame() {
   local a b h s='a.test.sh' f m='del(.health.diskFreeKb, .health.cores, .health.ghRead, .testSlots, .snapshotAt, .snapshotAge)'
   export TZ=UTC CONVEYOR_NOW=1794918000
@@ -52,12 +50,10 @@ t_snaplinessame() {
     snaplines_line c3 0 blocked blocked 12 '{"reason": "build: failed"}'
   } > "$ST/cards.jsonl"
   { snaplines_line c0 2 picked ok 00 '{"title": "two"}'; snaplines_line c0 2 blocked blocked 01 '{"reason": "brief: failed"}'; } > "$ST/retried.jsonl"
-  jq -cn --arg s "$s" '{filed: [{file: $s, issue: 2, cpu: 9}, {file: "b.test.sh", issue: 1, cpu: 9}]}' > "$ST/slow.json"
   a=$(loop snapshot --fresh) || fail "the first snapshot exited non-zero"
-  [ "$(jq -c '.slowOff | map(.file)' <<<"$a")" = "[\"$s\"]" ] || fail "the slow file of an issue no card has landed is not kept off: $(jq -c .slowOff <<<"$a")"
   [ -s "$ST/cards.jsonl.health" ] && [ -s "$ST/cards.jsonl.tests" ] && [ -s "$ST/retried.jsonl.health" ] && [ -s "$ST/retried.jsonl.tests" ] && [ -s "$ST/cards.jsonl.priced" ] && [ -s "$ST/cards.jsonl.cardruns" ] \
     || fail "the first snapshot kept no summary of the records: $(ls "$ST")"
-  # Lines appended since: c2 tested and landed (its slow file comes back), a new card, and c3 reviewed.
+  # Lines appended since: c2 tested and landed, a new card, and c3 reviewed.
   {
     snaplines_line c2 2 test pass 13 "$(jq -cn --arg s "$s" '{times: {($s): 0.5}}')"
     snaplines_line c2 2 landed ok 14 '{"sha": "1123456789012345678901234567890123456789", "product": false}'
@@ -71,16 +67,16 @@ t_snaplinessame() {
   b=$(loop snapshot --fresh) || fail "the snapshot read from scratch exited non-zero"
   # What the fields the summaries keep give, as the lines say it (a summary that left one out would give it in both
   # snapshots alike): the dead worktree, the landed commit not pushed and the push that failed, the refused run, the
-  # cycle, the main-red card's name and blocked reason, the slow file back on card steps, and of the test file its
+  # cycle, the main-red card's name and blocked reason, and of the test file its
   # newest time, the failure the landed commit left the file as it was in (caught), each failed run (newest first:
   # the run again's first run, then the failed step) with its verdict, cases and output, and the landed test edits.
   jq -e --arg s "$s" --arg h "$h" '(.health.stuck | map(.card) | index("c4")) != null and (.health.unpushed | map(.sha)) == [$h] and .health.pushError.reason == "no network"
-      and (.health.refused | map(.card)) == ["c2"] and .health.cycles == [[7, 8]] and .slowOff == []
+      and (.health.refused | map(.card)) == ["c2"] and .health.cycles == [[7, 8]]
       and (.health.blocked | map([.card, .reason, .name])) == [["c3", "build: failed", "Main is red (abcdef012345)"]]
       and (.tests.files[] | select(.file == $s) | [.cpu, .caught, [.failures[] | [.verdict, .cases, .tail]]]) == [0.5, 1, [[null, ["one"], "first run"], ["card", ["one"], "boom"]]]
       and (.tests.edits | map(.file)) == [$s]' <<<"$a" > /dev/null \
     || fail "the snapshot does not show what the records say: $(jq -c --arg s "$s" '{stuck: .health.stuck, unpushed: .health.unpushed, pushError: .health.pushError, refused: .health.refused,
-      cycles: .health.cycles, blocked: .health.blocked, slowOff, file: (.tests.files[] | select(.file == $s) | {cpu, caught, failures}), edits: .tests.edits}' <<<"$a")"
+      cycles: .health.cycles, blocked: .health.blocked, file: (.tests.files[] | select(.file == $s) | {cpu, caught, failures}), edits: .tests.edits}' <<<"$a")"
   # The machine's own readings (free disk, cores, test slots) and the GitHub read (ghRead: with no feed, the call's own
   # time) are read anew by each snapshot.
   [ "$(jq -c "$m" <<<"$a")" = "$(jq -c "$m" <<<"$b")" ] || fail "the snapshot from the summaries differs from the one read from scratch: $(diff <(jq -S "$m" <<<"$a") <(jq -S "$m" <<<"$b") | head -n 20)"

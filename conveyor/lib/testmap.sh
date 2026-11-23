@@ -2,7 +2,7 @@
 # The test map (docs/configuration.md, The test map): which test files cover which source files, so a card's run is
 # given the tests that cover what its change touches (testsel(), lib/testrun.sh). Setup makes it (setup()), with the
 # project's own coverage tool; a whole run on main refreshes it from its own coverage when it is due (mapcovon(),
-# maprefresh()); a card's run maps the test files it adds (mapnew()).
+# maprefresh()); a card's run never makes or adds to it.
 # The made map is the file test-map.json in the pack folder (mappath()): {commit (the commit it was made on), command
 # (the pack's test.command then), language, made (when), seconds (how long the run took), tests (the test files
 # mapped), sources: {<source file>: [<test file>, ...]}, notMapped: [{file, why}] (the test files its run could not
@@ -14,8 +14,8 @@ mappath() { echo "${PACK%/*}/test-map.json"; }
 # The run that makes the map, while it runs (setup's, mapbuild(); a refresh, mapcovon() to maprefresh()), says how far
 # it is in test-map.run.json beside the map (mapprogpath()): {pid, started, done, of}: the engine process it runs in,
 # when it started (seconds since 1970), and how many of its test files have run, of how many. A run that makes the map
-# removes the file; one that fails leaves {failed: <why>} (mapend()). /units reads it (mapstate()). A card's run of the
-# test files it adds (mapnew()) writes none: MAPRUN, set by the caller, turns it on in mapcollect().
+# removes the file; one that fails leaves {failed: <why>} (mapend()). /units reads it (mapstate()). MAPRUN, set by the
+# caller, turns it on in mapcollect().
 mapprogpath() { echo "${PACK%/*}/test-map.run.json"; }
 # The file written, whole, from jq's output with <jq arguments>; with none (or jq failing), left as it was. The file
 # beside it is named by the writing process (the count of a refresh writes it too, mapcovon()).
@@ -102,12 +102,13 @@ mapone() { # <dir> <test file> <language>
   elif [ "$3" = ruby ]; then if [ -e "$1/Gemfile" ]; then echo "bundle exec rspec $q"; else echo "rspec $q"; fi
   else echo "node --test $q"; fi
 }
-# Runs <tests> (default: every test file of the language, maptests()) in <dir> under the language's coverage tool and
+# Runs every test file of the language (maptests()) in <dir> under the language's coverage tool and
 # prints what each touched, one `<test file><TAB><file>` a line (a path from the root of <dir>, any file: mapwrite()
 # keeps the tracked source files). A test file (Go: a package's) whose run fails is not mapped, and the others go on:
 # it is written to <tmp>/skipped, a line {file, why} each (why: the end of its output, mapskip()). So is a Node test
 # file whose imports show it runs only under another runner (mapother()), before it runs. It fails (its output's last
-# lines to stderr) when the tool fails, a Python suite fails, or no test file ran. The run's output is in <tmp>/log.
+# lines to stderr) when the tool fails, a Python suite fails other than by its tests (a test file whose test failed is
+# not mapped, as above), or no test file ran. The run's output is in <tmp>/log.
 # Each test file's (Go: package's) coverage is removed once its pairs are read (#1348): kept to the end of a suite of
 # 1500 files, it can fill a /tmp that has a quota, and a <tmp>/skipped cut short there cannot be saved.
 # With MAPRUN set, it says how far it is (mapstart(), mapstep()): a file at a time for Node, Ruby and Rust, a package's
@@ -127,9 +128,9 @@ mapother() { # <dir> <test file>
   grep -qE "(from|import|require\\()[[:space:]]*['\"]claude-code/testing['\"]" "$1/$2" 2>/dev/null || return 1
   echo "it imports claude-code/testing, so it runs only under Claude Code's mod test runner"
 }
-mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
-  local d=$1 lang=$2 tmp=$3 abs t n=0 k=0 ok=0 rc cmd m ts mod rx w; shift 3
-  ts=("$@"); [ $# -gt 0 ] || mapfile -t ts < <(maptests "$d" "$lang")
+mapcollect() { # <dir> <language> <tmp folder>
+  local d=$1 lang=$2 tmp=$3 abs t n=0 k=0 ok=0 rc cmd m ts mod rx w fl=()
+  mapfile -t ts < <(maptests "$d" "$lang")
   [ ${#ts[@]} -gt 0 ] || { echo "no $lang test files are tracked" >&2; return 1; }
   : > "$tmp/skipped" || return 1
   [ -z "${MAPRUN:-}" ] || mapstart ${#ts[@]}
@@ -164,19 +165,23 @@ mapcollect() { # <dir> <language> <tmp folder> [<test file>...]
       # Its output names each test file (mappyran()) even where the command is quiet (pytest -q prints only dots,
       # unittest without -v too): the last verbosity given wins.
       if [ -n "${MAPRUN:-}" ]; then case $m in '-m pytest'|'-m pytest '*) m+=' --verbosity=0' ;; '-m unittest'|'-m unittest '*) m+=' -v' ;; esac; fi
-      [ $# = 0 ] || m+=" $(printf '%q ' "${ts[@]}")"
-      printf '[run]\ndynamic_context = test_function\nrelative_files = True\n' > "$tmp/rc" || return 1
+      printf '[run]\ndynamic_context = test_function\nrelative_files = True\n' > "$tmp/rc" && printf '%s\n' "${ts[@]}" > "$tmp/tests" || return 1
       if [ -n "${MAPRUN:-}" ]; then
-        printf '%s\n' "${ts[@]}" > "$tmp/tests" || return 1
         while :; do mapstep "$(mappyran "$tmp/tests" "$tmp/log" | wc -l)"; sleep 2; done > /dev/null 2>&1 < /dev/null 8>&- &
         k=$!
       fi
       (cd "$d" && COVERAGE_FILE=$tmp/py.cov "${run[@]}" "coverage run --rcfile=$(printf %q "$tmp/rc") $m") >> "$tmp/log" 2>&1 < /dev/null; rc=$?
       [ "$k" = 0 ] || { kill "$k" 2>/dev/null; wait "$k" 2>/dev/null; rm -f "$(mapprogpath).$k"; } # and its count's file, if killed as it wrote
-      [ $rc = 0 ] || { mapfail 'the suite' "$tmp"; return 1; }
+      # A suite whose tests failed (exit 1, pytest's and unittest's) leaves out the files its failure lines name
+      # (pytest's FAILED and ERROR: mappyfailed(); unittest's FAIL: and ERROR: mappyut()), not mapped, and maps the others; any other failure,
+      # or a failed run that names none, fails the build.
+      w=''; [ $rc != 1 ] || w=$(grep -E '^(FAILED|ERROR)[: ]|^FAIL: ' "$tmp/log" > "$tmp/failed"; { mappyfailed "$tmp/tests" "$tmp/failed"; mappyut "$tmp/tests" "$tmp/failed"; } | sort -u)
+      [ $rc = 0 ] || [ -n "$w" ] || { mapfail 'the suite' "$tmp"; return 1; }
+      [ -z "$w" ] || { mapfile -t fl <<<"$w"; mapskip "$tmp" 'a test of it failed under coverage' "${fl[@]}"; }
       (cd "$d" && COVERAGE_FILE=$tmp/py.cov coverage json --rcfile="$tmp/rc" --show-contexts -o "$tmp/py.json") >> "$tmp/log" 2>&1 < /dev/null || { mapfail 'coverage json' "$tmp"; return 1; }
       [ -z "${MAPRUN:-}" ] || mapstep ${#ts[@]}
-      ok=1; mappy "$abs" "$tmp/py.json" "${ts[@]}" ;;
+      [ "${#fl[@]}" -ge ${#ts[@]} ] || ok=1
+      mappy "$abs" "$tmp/py.json" "${ts[@]}" | awk -F'\t' 'NR == FNR { x[$0]; next } !($1 in x)' <(printf '%s\n' "${fl[@]}") - ;;
     go)
       mod=$(cd "$d" && go list -m 2>>"$tmp/log") || { mapfail 'go list -m' "$tmp"; return 1; }
       # Each package that holds a test file, once: its profile is of its test files together.
@@ -229,31 +234,21 @@ mapv8() { # <dir, absolute> <folder> <test file>...
     | . as $fs | .[] | select($ts[.]) as $t | $fs[] | "\($t)\t\(.)"'
 }
 # Writes the map of <dir> from <pairs> (mapcollect()'s lines): of each test, the tracked files it touched that are not
-# test files are its sources. With no <tests>, a new map, of every test the run mapped, on <dir>'s HEAD; with
-# <tests>, the map there (mappath()) with those tests mapped again: each taken out of every source and put back where
-# the run found it, the rest of the map (its commit) kept. <not mapped> (mapcollect()'s <tmp>/skipped, or "" for none)
-# is its notMapped: with <tests>, each of them is taken out of the map's notMapped first, and one that is in <not
-# mapped> is not added to its tests (the next run of the file tries again). notMapped also names each test runner
-# (TESTRUNNERS, no test file: testpaths()) with the reason RUNNERFIX. Written beside it and moved in, so a reader never
-# sees half.
-mapwrite() { # <dir> <pairs file> <not mapped file, or ""> <language> <seconds> [<test file>...]
-  local d=$1 p=$2 nm=${3:-/dev/null} lang=$4 sec=$5 f cmd sha; shift 5
+# test files are its sources: a new map, of every test the run mapped, on <dir>'s HEAD. <not mapped> (mapcollect()'s
+# <tmp>/skipped, or "" for none) is its notMapped, which also names each test runner (TESTRUNNERS, no test file:
+# testpaths()) with the reason RUNNERFIX. Written beside it and moved in, so a reader never sees half.
+mapwrite() { # <dir> <pairs file> <not mapped file, or ""> <language> <seconds>
+  local d=$1 p=$2 nm=${3:-/dev/null} lang=$4 sec=$5 f cmd sha
   f=$(mappath); packget test.command cmd && sha=$(git -C "$d" rev-parse HEAD) || return 1
   names || return 1
   jq -n --arg rn "$TESTRUNNERS" --arg rf "$RUNNERFIX" --rawfile p "$p" --rawfile all <(git -C "$d" -c core.quotePath=false ls-files) --rawfile ts <(git -C "$d" -c core.quotePath=false ls-files | testpaths) \
-    --slurpfile old <(if [ $# -gt 0 ]; then cat "$f" 2>/dev/null; fi) --arg sha "$sha" --arg cmd "$cmd" --arg l "$lang" --argjson s "$sec" --slurpfile nm "$nm" --rawfile only <(printf '%s\n' "$@") '
+    --arg sha "$sha" --arg cmd "$cmd" --arg l "$lang" --argjson s "$sec" --slurpfile nm "$nm" '
     def ls: split("\n") | map(select(. != ""));
     (($all | ls) - ($ts | ls) | INDEX(.)) as $src
     | [$p | ls[] | split("\t") | select(length == 2 and $src[.[1]])] as $pairs
-    | ($only | ls) as $only
-    | (if $only == [] then {commit: $sha, command: $cmd, language: $l, made: (now | todate), seconds: $s, tests: [], sources: {}}
-       else ($old[0] // {commit: $sha, command: $cmd, language: $l, made: (now | todate), seconds: $s, tests: [], sources: {}})
-         | .sources |= map_values(. - $only) | .tests -= $only end)
-    | .notMapped = ([.notMapped[]? | select(.why != $rf and (.file as $f | $only | index($f) | not))] + [$nm[] | objects]
-        + [$rn | ls[] | {file: ., why: $rf}] | unique_by(.file))
-    | .tests = (.tests + (if $only == [] then [$pairs[][0]] else $only - [.notMapped[].file] end) | unique)
-    | reduce $pairs[] as $x (.; .sources[$x[1]] = ((.sources[$x[1]] // []) + [$x[0]] | unique))
-    | .sources |= with_entries(select(.value != []))' > "$f.new" && mv -f "$f.new" "$f" || { rm -f "$f.new"; return 1; }
+    | {commit: $sha, command: $cmd, language: $l, made: (now | todate), seconds: $s, tests: ([$pairs[][0]] | unique), sources: {}}
+    | .notMapped = ([$nm[] | objects] + [$rn | ls[] | {file: ., why: $rf}] | unique_by(.file))
+    | reduce $pairs[] as $x (.; .sources[$x[1]] = ((.sources[$x[1]] // []) + [$x[0]] | unique))' > "$f.new" && mv -f "$f.new" "$f" || { rm -f "$f.new"; return 1; }
 }
 # What the run that makes the map may cost, as setup asks before it: the time of the last whole-suite run recorded
 # (its files' seconds added up: suiterec(), lib/testlist.sh), or that none is recorded.
@@ -397,22 +392,6 @@ mapboard() { # <dir>
     + (if .state == "made" then {made: ($m[0].made // null), seconds: ($m[0].seconds // null), notMapped: [$m[0].notMapped[]? | {file, why}]} else {} end)
     + {tool: (if $t == "" then null else $t end), toolWhy: (if $tw == "" then null else $tw end), suiteSec: ($sec | tonumber? // null), build: $b}' <<<"$s"
 }
-# The test files of the change staged in <worktree> that the made map does not hold yet, after a card's run that
-# passed (tests()): each run alone under coverage and added to the map (mapwrite()), so the next card that changes
-# what it covers runs it. A file whose run fails is added to the map's notMapped alone (all failing, nothing is added);
-# the next run of the file tries again.
-mapnew() { # <worktree>
-  local m lang tmp ts=()
-  packget test.map m && [ -z "$m" ] && [ -s "$(mappath)" ] || return 0
-  lang=$(jq -r '.language // ""' "$(mappath)") && [ -n "$lang" ] || return 0
-  mapfile -t ts < <(comm -12 <(git -C "$1" -c core.quotePath=false diff --cached --name-only --diff-filter=AM --no-renames HEAD -- 2>/dev/null | sort) <(maptests "$1" "$lang" | sort) \
-    | grep -vxFf <(jq -r '.tests[]?' "$(mappath)") || :)
-  [ ${#ts[@]} -gt 0 ] && tmp=$(mktemp -d) || return 0
-  if mapcollect "$1" "$lang" "$tmp" "${ts[@]}" > "$tmp/pairs" 2>/dev/null && mapwrite "$1" "$tmp/pairs" "$tmp/skipped" "$lang" 0 "${ts[@]}"; then
-    echo "conveyor: test map: mapped $(printf '%s, ' "${ts[@]}" | sed 's/, $//') on its first run"
-  fi
-  rm -rf "$tmp"; return 0
-}
 # Why the made map is due to be made again at the next whole run, on stdout (exit 0), else exit 1: it was made under
 # another test command, or its commit is not in <dir>'s history, or is more commits behind <dir>'s HEAD than the
 # pack's test.mapAge. A project with no made map has none due (setup asks before the first).
@@ -492,6 +471,34 @@ mappyran() { # <tests file> <log>...
     [[ $k == *.py ]] || { k=${k%.}; k=${k//.//}.py; }
     echo "$k"
   done | sort -u
+}
+# The Python test files of <tests file> that pytest's failure lines in <log> name, one a line: `FAILED
+# tests/test_bad.py::test_x - <message>` or `ERROR tests/test_bad.py - <message>`. Only the test's id is read, up to
+# its first ::, as the message can name another file. The id's path is from pytest's root folder, so a file is named
+# when one of the two paths is the other or ends with / and the other.
+mappyfailed() { # <tests file> <log>
+  awk 'NR == FNR { f[$0]; next }
+    /^(FAILED|ERROR) / { p = $2; sub(/::.*/, "", p); lp = length(p)
+      for (t in f) { lt = length(t)
+        if (t == p || (lt > lp && substr(t, lt - lp) == "/" p) || (lp > lt && substr(p, lp - lt) == "/" t)) print t } }' "$1" "$2" | sort -u
+}
+# The Python test files of <tests file> that unittest's failure lines in <log> name, one a line: `FAIL: test_x
+# (test_bad.BadTests.test_x)` names the test's module from the folder the run started in (discover -s tests gives
+# test_bad for tests/test_bad.py), so a file is named when the longest first part of the name in the first brackets
+# is the end of its path as a module. Those brackets follow the test's own name: a subtest's line goes on with its
+# message and parameters, `FAIL: test_x (test_bad.BadTests.test_x) [m] (x=1)`, which name no module.
+# `ERROR: test_bad (unittest.loader._FailedTest...)`, a module that did not import, names it first.
+mappyut() { # <tests file> <log>
+  awk 'NR == FNR { m = $0; sub(/\.py$/, "", m); gsub("/", ".", m); f[$0] = "." m; next }
+    match($0, /^(FAIL|ERROR): [^ ()]+ \([A-Za-z_][A-Za-z0-9_.]*\)/) {
+      n = substr($0, 1, RLENGTH); sub(/^[^(]*\(/, "", n); sub(/\)$/, "", n)
+      if (n ~ /^unittest\.loader\._Failed/) n = $2
+      k = split(n, p, "."); s = ""; got = ""
+      for (i = 1; i <= k; i++) { s = s "." p[i]; o = ""
+        for (t in f) if (length(s) <= length(f[t]) && substr(f[t], length(f[t]) - length(s) + 1) == s) o = o t "\n"
+        if (o != "") got = o }
+      printf "%s", got
+    }' "$1" "$2" | sort -u
 }
 mapcovoff() {
   [ -z "${MAPTICK:-}" ] || { kill "$MAPTICK" 2>/dev/null; wait "$MAPTICK" 2>/dev/null; unset MAPTICK; }
@@ -573,6 +580,26 @@ mapread() { # <worktree> [<file>]
 briefcap() { # <lines>
   awk 'NR <= 12 { printf "%s%s", (NR > 1 ? ", " : ""), $0 } NR > 12 { n++ } END { if (n) printf " and %d more", n }' <<<"$1"
 }
+# The files of <lines> (one a line) that refer to a named file, as the brief lists them: every code file, then test
+# files (the pack's test patterns, TESTRX, a suite runner too), then data and text (JSON, YAML, TOML, CSV, text), each
+# part in the order given, with only the tests and data cut at 12 (briefcap()). The code files are the callers a
+# builder needs, and a file that many source has more than 12 of equal rank (conveyor/lib/control.sh: 30 commands).
+briefrank() { # <lines>
+  local r code
+  [ -n "${TESTRX:-}" ] || names > /dev/null 2>&1 || :
+  r=$(awk 'NR == FNR { t[$0]; next } { print (($0 in t) ? 1 : ($0 ~ /\.(json|jsonl|ya?ml|toml|csv|txt)$/) ? 2 : 0) "\t" $0 }' \
+    <({ [ -z "${TESTRX:-}" ] || grep -E -e "$TESTRX" <<<"$1"; echo; }) <(printf '%s\n' "$1") | sort -s -t$'\t' -k1,1n)
+  code=$(awk '/^0\t/ { sub(/^0\t/, ""); printf "%s%s", (n++ ? ", " : ""), $0 }' <<<"$r")
+  r=$(awk '!/^0\t/ { sub(/^[0-9]\t/, ""); print }' <<<"$r")
+  printf '%s%s' "$code" "$([ -z "$r" ] || printf '%s%s' "${code:+, }" "$(briefcap "$r")")"
+}
+# The lines (git grep -n) of the files in <path>'s own folder that name it after their own folder,
+# "${BASH_SOURCE[0]%/*}/<name>": briefref() takes no name after a variable when another tracked file has the same
+# name, and this one is <path> itself.
+briefown() { # <worktree> <path>
+  local d=${2%/*}; [ "$d" != "$2" ] || d=''
+  git -C "$1" -c core.quotePath=false grep -nIE -e "\\\$\\{BASH_SOURCE(\\[0\\])?%/\\*\\}/$(briefesc "${2##*/}")([^A-Za-z0-9_.-]|$)" -- ":(glob)${d:+$d/}*" 2>/dev/null
+}
 # The files with a line of <git grep -n output> that is code: no line of a Markdown file, and none that starts with a
 # comment mark (# // * /*), as a word in a comment is no caller. Reads the grep's lines on stdin.
 briefcode() {
@@ -637,8 +664,8 @@ startbrief() { # <worktree> <issue json>
   if [ ${#files[@]} -gt 0 ]; then
     mapfile -t files < <(git -C "$wt" ls-files -- 2>/dev/null | grep -xF -f <(printf '%s\n' "${files[@]}") | head -n 20)
     for t in "${files[@]}"; do
-      hits=$(git -C "$wt" -c core.quotePath=false grep -nIE -e "$(briefref "$wt" "$t")" -- . ':(exclude)*.md' 2>/dev/null | briefcode | grep -vxF -- "$t")
-      out=''; [ -z "$hits" ] || out="named in $(briefcap "$hits")"
+      hits=$({ git -C "$wt" -c core.quotePath=false grep -nIE -e "$(briefref "$wt" "$t")" -- . ':(exclude)*.md' 2>/dev/null; briefown "$wt" "$t"; } | briefcode | grep -vxF -- "$t")
+      out=''; [ -z "$hits" ] || out="named in $(briefrank "$hits")"
       tests=''
       [ -z "$m" ] || tests=$(jq -r --arg f "$t" '.sources | objects | .[$f] // [] | .[]' <<<"$m")
       [ -z "$tests" ] || out+="${out:+; }mapped test files $(briefcap "$tests")"

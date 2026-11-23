@@ -5,8 +5,7 @@
 # The part counts only what is on or after the test history's start (histstart(), below): each file's runs, failed
 # steps, failures, flaky entries and what they give (cpu, median, change, usual, slower); the records keep every line.
 # The snapshot's tests part, read from the card records (recs, olds: a retried card's runs count too), the pack, the
-# flaky-test record ($FLAKY), the slow-test record ($SLOWFILED), the test rules' log ($TESTRULESLOG) and the Board's
-# test issues ($TAFILED):
+# flaky-test record ($FLAKY), the slow-test record (slow.json beside the card records: {filed: [{file, issue}]}, the "Slow test" issues the test rules replaced; nothing writes it now), the test rules' log ($TESTRULESLOG) and the Board's test issues ($TAFILED):
 # settings: the pack's slowIssues (true or false), the control record's historyStart (the test history's start, a UTC
 #   time, or null), slower ({share, runs, minRuns}) and files (each file's own settings, as the pack holds them), and report (the pack's test.report, {runner, format, path, env,
 #   args, option}, null with none: the runner whose report gives a Wall only file's clock seconds, #190), and cpuTime
@@ -55,16 +54,14 @@
 #   mutation: its newest mutation check (lib/mutate.sh), {file, at, sha, seed, state, reason, of (its mutants), tried,
 #   killed, survived ([{source, line, kind, before, after}]), noresult, notMutated, end}; null when none was made;
 #   mutationPlace: its place in the mutation checks' asked list ($MUTS/asked, mutask()), 1 first; null when not asked;
-#   cases: the names of the cases a shell file (.sh, .bash) defines in main's checkout (its `t_<case>() {` lines the
-#   runner selects, not its helpers or a heredoc's lines), A to Z, [] with none; null for a file of another kind, whose
-#   cases the engine does not count; the Board's search matches them;
+#   cases: the names of the cases a file defines in main's checkout, A to Z, [] with none: a shell file's (.sh, .bash)
+#   `t_<case>() {` lines the runner selects (not its helpers or a heredoc's lines), another's by its language's row of
+#   TESTEDIT_TABLE (TABLECASES); null for a file of a kind with no row; the Board's search matches them;
 #   waits: the waits its newest judge that ended done named on WAIT lines (lib/testaction.sh tawaits()), [{case, kind,
 #   at, reason}]; null when no judge of it named waits or none (a judge from before WAIT lines were asked for);
 #   neverRun: why a file of main's checkout with no run on record never ran, when the engine can tell (neverwhy(),
-#   below), {kind, reason}; null for a file with a run, or one it cannot tell of;
-#   a file that only a Board filing names is listed too;
-# slower: the files slower than their usual, by name: each of their last slower.runs runs over usual by more than
-#   slower.share;
+#   below), {kind, reason}; null for a file with a run, or one it cannot tell of; a file that only a Board filing names is listed too;
+# slower: the files slower than their usual, by name: each of their last slower.runs runs over usual by more than slower.share;
 # edits: each entry of the landed lines' testedits (testedits(), below), newest first, with its card, issue and time;
 #   a file's newest TESTKEEP alone, so the list grows with the test files, not with the cards that land;
 # totals: files (those with CPU seconds on record), slower, and steps: the card test steps that ran in
@@ -146,6 +143,11 @@ TESTEDIT_TABLE='def table: [
    skip: "\\bt\\.(Skip|Skipf|SkipNow)\\s*\\(",
    case: "^func\\s+Test([A-Z0-9_][A-Za-z0-9_]*)?\\s*\\(",
    timeout: "\\b(time\\.After|WithTimeout)\\s*\\([^0-9)]*(?<n>[0-9][0-9_]*)"}];'
+# The cases of the files jq -Rn reads (after TESTEDIT_TABLE), each by its language's row: {<file>: [names, A to Z]}, no key for a file of a kind with no row. A name is what the quotes after its case start hold, else that start's last word.
+TABLECASES='reduce inputs as $l ({}; input_filename as $f | (first(table[] | select(any(.ext[]; . == ((($f | capture("\\.(?<x>[^./]+)$").x) // "") | ascii_downcase)))) // null) as $t
+  | if $t == null then . else .[$f] += [$l | select(test($t.case)) | (match($t.case) | .offset + .length) as $e | .[:$e] as $m | .[$e:]
+    | if ($m | test("[\"\u0027`]$")) then capture("^(?<n>(\\\\.|[^\\\\" + $m[-1:] + "])*)").n elif test("^\\s*\"") then capture("^\\s*\"(?<n>(\\\\.|[^\\\\\"])*)").n
+      else [$m | scan("[A-Za-z0-9_]+")] | last end | gsub("\\\\(?<c>.)"; .c)] end) | map_values(unique)'
 # The counts, from the file as main had it and as the card left it (the input, raw: the two joined by a NUL; nothing
 # after it for a file the card deleted) and its path ($f). Each is read as statements: a line, or an assertion line
 # with the lines after it that close its brackets, so an expected value on a line of its own is part of its assertion.
@@ -305,8 +307,7 @@ testhollow() { # <each test file of main's checkout>...
 # after a space and outside quotes), a helper's own definition and a word set alone (NAME=value) start no command; a
 # command in a heredoc or a string over several lines can be marked too. why: the comment at the end of the line,
 # else the comment lines right above it, joined; null with none: the card rule asks for a comment that says why.
-# PROXY_AWK prints a line for each mark: its file, the line number its command is on, kind, that line's text and why,
-# between tabs.
+# PROXY_AWK prints a line for each mark: its file, the line number its command is on, kind, that line's text and why, between tabs.
 # shellcheck disable=SC2016 # awk's own $0 and $(, not the shell's
 PROXY_AWK='function norm(s,  t) {
     do { t = s
@@ -434,8 +435,7 @@ testlines() {
 }
 # The runs of the test files on record, in no order, as the Tests part and testolder() read them: each card test
 # line's times and clocks ($ls) and each whole-suite run ($su), {file, cpu, sec, card, time, whole, and a whole-suite
-# run's result}; and each test edit of a landed line ($cr, the lines oldest first), newest first, with its card, issue
-# and time.
+# run's result}; and each test edit of a landed line ($cr, the lines oldest first), newest first, with its card, issue and time.
 # shellcheck disable=SC2016 # jq's variables, not the shell's
 RUNDEFS='def testruns($ls; $su): ($ls[] | . as $l | (.times | objects) as $t | ($l.clocks | objects // {}) as $k | $t + $k | keys[] as $f
         | select(($t[$f] | type) == "number" or ($k[$f] | type) == "number")
@@ -450,11 +450,11 @@ RUNDEFS='def testruns($ls; $su): ($ls[] | . as $l | (.times | objects) as $t | (
 # <file>`, GET /older of the page server): {file, olderRuns, olderEdits}, each newest first, as runs and edits have
 # them. The snapshot does not carry them, so it does not grow with every run on record (#251).
 testolder() {
-  local ln
-  ln=$(testlines) || return 1
-  printf '%s\n' "$ln" | jq -cRn --arg f "$1" --argjson keep "$TESTKEEP" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile sv <(testsurvey) "$RUNDEFS"'
-    [inputs | fromjson? | objects] | sort_by(.time) | . as $cr | map(select(.step == "test")) as $ls
-    | [testruns($ls; $su), $sv[0][] | select(.file == $f)] | sort_by(.time) as $r
+  local ln st
+  ln=$(testlines) || return 1; st=$(histstart) # as the Tests part, no run before the test history's start (HISTFROM)
+  printf '%s\n' "$ln" | jq -cRn --arg f "$1" --arg st "$st" --argjson keep "$TESTKEEP" --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile sv <(testsurvey) "$RUNDEFS$HISTFROM"'
+    [inputs | fromjson? | objects] | sort_by(.time) | . as $cr | (map(select(.step == "test")) | startlines($st)) as $ls
+    | [testruns($ls; $su), $sv[0][] | select(.file == $f) | fromstart($st)] | sort_by(.time) as $r
     | {file: $f, olderRuns: ($r[:-$keep] | reverse | map(del(.file))), olderEdits: ([alledits($cr)[] | select(.file == $f)][$keep:])}'
 }
 # The times the latest test-speed survey saved in main's .conveyor/test-times.json (lib/survey.sh), each as a run of
@@ -530,7 +530,7 @@ rawok() { if [ -f "$1" ] && [ -r "$1" ]; then printf '%s' "$1"; else printf /dev
 JSONL='def jsonl: split("\n") | map(fromjson? | objects);'
 testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   # The caller's defs and refs when it has read them (testowners: the snapshot's), else read here.
-  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru tf=() ln ch hv px out nv rp cp su sv hs
+  local si sh rn mn fs fl sf defs=${defs:-} refs=${refs:-} cs ru tf=() ln ch hv px out nv rp cp su sv hs ot=() t x
   packget test.slowIssues si test.slower.share sh test.slower.runs rn test.slower.minRuns mn test.files fs || return 1
   # The test files once, as names (tf: testhollow and testproxy take them so, with no jq of their own; the part's jq
   # reads them ended by NULs, all): main's tracked test files (testtracked(), lib/issues.sh; #1036: a project's
@@ -538,27 +538,28 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
   mapfile -d '' -t tf < <(testtracked -z 2>/dev/null)
   # The flaky and slow-filed records; a file not there is none, and starts no jq.
   { [ -s "$FLAKY" ] && fl=$(jq -ce 'objects' "$FLAKY" 2>/dev/null); } || fl='{}'
-  { [ -s "$SLOWFILED" ] && sf=$(jq -ce 'objects' "$SLOWFILED" 2>/dev/null); } || sf='{}'
+  { [ -s "${STATE%/*}/slow.json" ] && sf=$(jq -ce 'objects' "${STATE%/*}/slow.json" 2>/dev/null); } || sf='{}'
   ru=$(testrulesettings) || ru=null
   hs=$(histstart)
   hv=$(testhollow "${tf[@]}" 2>/dev/null) && [ -n "$hv" ] || hv='{}'
   px=$(testproxy "${tf[@]}" 2>/dev/null) && [ -n "$px" ] || px='{}'
   [ -n "$defs" ] && [ -n "$refs" ] || testowners
-  # The cases each shell test file of main's checkout defines, by file (the case scan, CASESCAN); the paths taken as
-  # they are, not as globs. No file, no search: git grep with no path searches the whole checkout.
-  cs='{}'
+  # The cases each test file of main's checkout defines, by file: a shell file's by the case scan (CASESCAN), another's
+  # by TABLECASES (no program runs for it with no such file); the paths taken as they are, not as globs. No file, no search: git grep with no path searches the whole checkout.
+  cs='{}'; for t in "${tf[@]}"; do [[ $t == *.sh || $t == *.bash ]] || ot+=("$t"); done
   [ ${#tf[@]} = 0 ] || cs=$(git -C "$MAIN" --literal-pathspecs grep -lzE '^t_[a-z0-9]+\(\) \{' -- "${tf[@]}" 2>/dev/null | (cd "$MAIN" && xargs -0 awk -v q="'" "$CASESCAN" 2>/dev/null) \
     | jq -cRn '[inputs | split("\t") | {f: .[0], c: .[1]}] | group_by(.f) | map({key: .[0].f, value: [.[].c] | unique}) | from_entries') || cs='{}'
+  [ ${#ot[@]} = 0 ] || ! x=$(cd "$MAIN" && printf '%s\0' "${ot[@]}" | xargs -0 jq -cRn "$TESTEDIT_TABLE$TABLECASES" 2>/dev/null | jq -cs --slurpfile cs <(printf '%s' "$cs") '$cs[0] + add') || cs=$x
   ln=$(testlines) || return 1
   su=$(rawok "$SUITERUNS")
   sv=$(testsurvey)
   # The files each landed commit of a card with a failed test step changed, by its sha: {sha: [file...]}, from one git
   # call (a commit main's checkout does not have is left out). A path is a commit's key only when it is one of the
-  # commits asked for.
+  # commits asked for, read from a file: as one argument, more than about 3,200 of them pass Linux's 128 KiB limit.
   ch=$(jq -rRn '[inputs | fromjson? | objects] | (map(select(.step == "test" and .result == "fail") | .card) | unique) as $f
       | [.[] | select(.step == "landed" and (.card | IN($f[])) and (.sha | strings | test("^[0-9a-f]{40}$"))) | .sha] | unique[]' <<<"$ln" 2>/dev/null)
   ch=$(printf '%s\n' "$ch" | git -C "$MAIN" diff-tree --stdin -r --root --name-only --no-renames -z 2>/dev/null \
-    | jq -Rsc --arg want "$ch" '($want | split("\n") | map(select(. != "") | {key: ., value: true}) | from_entries) as $w
+    | jq -Rsc --rawfile want <(printf '%s\n' "$ch") '($want | split("\n") | map(select(. != "") | {key: ., value: true}) | from_entries) as $w
       | reduce (split("\u0000")[] | select(. != "")) as $x ({k: null, m: {}}; if $w[$x] then .k = $x | .m[$x] = [] elif .k == null then . else .m[.k] += [$x] end) | .m') || ch='{}'
   out=$(printf '%s\n' "$ln" | jq -cRn --arg since "$1" --arg st "$hs" --arg si "$si" --argjson sh "$sh" --argjson rn "$rn" --slurpfile ch <(printf '%s\n' "$ch") \
     --argjson mn "$mn" --slurpfile fs <(printf '%s' "$fs") --slurpfile fl <(printf '%s' "$fl") --slurpfile sf <(printf '%s' "$sf") --argjson keep "$TESTKEEP" --argjson days "$FLAKY_DAYS" \
@@ -633,7 +634,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
            slower: ($wo | not) and $usual != null and all($c[-$rn:][]; . > $usual * (1 + $sh)), hollow: ($hv[$f] // null), proxy: ($px[$f] // null),
            mutation: ([$mu[] | select(.file == $f)] | max_by(.at) | if . == null then null
              else {file, at, sha, seed, state, reason, of: (.mutants | length), tried, killed, survived, noresult, notMutated, end} end),
-           mutationPlace: ($place[$f] // null), cases: (if $f | test("\\.(sh|bash)$") then $cs[0][$f] // [] else null end),
+           mutationPlace: ($place[$f] // null), cases: (if $f | test("\\.(sh|bash)$") then $cs[0][$f] // [] else $cs[0][$f] end),
            waits: ([$tj[] | select(.file == $f)] | max_by(.end // "") | if . == null or .waits == [] then null else .waits end)}
         | .optimize = (([$ta[] | select(.file == $f)] | unique_by(.issue)) + [$tc[] | select(.file == $f)] | sort_by(.time) | reverse | map(optimize($r)))
         | .removed = (($f | IN($all[]) | not) and any(.optimize[]; .state == "landed" and (.fix | IN("deleted", "merged")))))
@@ -660,8 +661,7 @@ testspart() { # <the first day of the 7 days, YYYY-MM-DD>
 # (testrunner(): `named`, a glob, a file or a folder) and that does not match it; load: loading it fails, the error
 # of a shell file that bash -n, a JavaScript file that node --check, or a Python file that python3 cannot parse, kept
 # by the file's content (its blob) in $TESTACTS/neverloads (nl; not a .json name, which the action records have), so a
-# file is parsed once a content; skipped: it
-# holds skip markers (the test edits' table, TESTEDIT_TABLE, an `only` mark aside), each named once.
+# file is parsed once a content; skipped: it holds skip markers (the test edits' table, TESTEDIT_TABLE, an `only` mark aside), each named once.
 neverwhy() { # <the files, a JSON list>
   local f cmd rn w pat x ld bl e l1 le sk new='' out='' nl=$TESTACTS/neverloads fs
   # The files read from the list once, for the patterns and for the loop below.

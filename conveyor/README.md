@@ -666,7 +666,7 @@ broke it, and holds the push (`lib/push.sh` `pushtests`, [Push](../docs/cards.md
 and the card is blocked with a reason that names the file that ran the rest.
 The test map (`lib/testmap.sh`, [The test map](../docs/configuration.md#the-test-map)) is read before the names: the
 tests it says cover a changed file are its tests, and a file more than half the mapped tests read runs the whole
-suite. A card's run that passes maps the test files its change adds that the map lacks; the whole test on main and
+suite. A card's run never adds to the map; the whole test on main and
 `release-prep` make the map again when it is due (`test.mapAge`, or another test command), from the coverage that the
 run collects (Node and Python), with no second run of the suite.
 
@@ -817,13 +817,8 @@ A slow test file never sends a card to its review, a fix or another test step, a
 follow-up. Conveyor files an issue about a test file only by a test
 rule (Test rules, below), behind its switch and guards. The pack's `test.slowIssues` files nothing.
 
-The issue that filing kept for each file is still in `slow.json` in the state folder. A file it names comes off card
-test steps until a card of that issue lands: each card's run is told to keep it as passed (a
-`pass<TAB><file>` line in its `CONVEYOR_TEST_RERUN` list, and an `off<TAB><file>` line, with no case, that keeps it
-off though a `fail`, `changed` or `main` line selects it). The card of the issue itself runs it, as its change is what makes the file
-cheaper. The full test suite and the whole test on main are given no such list and run it. The snapshot's `slowOff`
-lists the files kept off, with why and their issue; the Board's Health panel draws them as its "Kept off card tests"
-line. An issue a test rule files keeps no file off.
+The issue that filing kept for each file is still in `slow.json` in the state folder. The Tests page reads a file's
+issue from it. It keeps no file off card test steps.
 
 ### Changed lines no test reached
 

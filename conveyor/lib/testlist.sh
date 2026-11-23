@@ -68,10 +68,10 @@ suiterec() { # <worktree> <full | release> <commit>
 # clock only), {partial: <worktree>.partial} when it ran some cases of a file and timed none of it (partran()), and
 # carriedrec()'s part, else {}.
 slowrec() { # <worktree>
-  jq -cn --slurpfile t "$1.timed" --slurpfile c "$1.cpus" --slurpfile k "$1.clocks" --slurpfile p "$1.partial" --argjson o "$(carriedrec "$1")" '(if $t[0] | length > 0 then {timed: $t[0]} else {} end)
+  jq -cn --slurpfile t "$1.timed" --slurpfile c "$1.cpus" --slurpfile k "$1.clocks" --slurpfile p "$1.partial" --slurpfile o <(carriedrec "$1") '(if $t[0] | length > 0 then {timed: $t[0]} else {} end)
     + (if ($c[0] | length > 0) or ($k[0] | length > 0) then {times: $c[0], clocks: $k[0]} else {} end)
     + (if $p[0] | length > 0 then {partial: $p[0]} else {} end)
-    + $o' 2>/dev/null || echo '{}'
+    + $o[0]' 2>/dev/null || echo '{}'
 }
 # A card's test line's part for the files its run kept as passed and did not run, though a run before timed them
 # (<worktree>.oldfiles, tests()): {carried: [file]}, else {}. Their times on the line are the earlier run's.
@@ -131,7 +131,7 @@ cachehits() { # <worktree>
   cut -f2- "$TESTCACHE" | sort -u | cachesums "$1" | awk -F'\t' 'NR == FNR { k[$1] = 1; next } $1 in k { print $2 }' "$TESTCACHE" - | sort -u
 }
 # A run (tests(): a card's, and the whole test on main) is told to keep off each file of $TESTCACHE whose hash in its
-# worktree is a kept one: a `pass` and an `off` line for it in its list (as slowoff(): the off line keeps it off though
+# worktree is a kept one: a `pass` and an `off` line for it in its list (the off line keeps it off though
 # a `changed` or `main` line selects it, its inputs being the same), unless the list names failed cases of it. Prints
 # each such file's line for the run's log, `TESTRUN why<TAB><file><TAB>passed before with the same inputs`.
 cacheoff() { # <worktree>
@@ -430,17 +430,18 @@ treediff() { # <worktree> <from> <to>
   git -C "$1" diff --name-only --no-renames -z "$2" "$3" -- > "$1.rerun.new" 2>/dev/null && tr '\0' '\n' < "$1.rerun.new"
 }
 
-# The clock of a test run (tests()): TEST_TIMEOUT seconds of running, the seconds a runner of its command waited for
+# The clock of a test run (tests()): TEST_TIMEOUT seconds of running times the run's load factor (testonce() scales it
+# with LOADSCALE, as each file's own limit is scaled: filecmd(), lib/testrun.sh), the seconds a runner of its command waited for
 # a whole-suite turn not counted (slot_whole writes them to <turn wait file>), as the wait for its slot is not (the
 # owner, 2026-11-13: no time limit changes for the turns). timeout itself is given no limit; when the clock runs out
 # it is sent ALRM, its own timer's signal, so it ends the run as on its own timeout: TERM to the command's group, KILL
 # 30 s later, exit 124. It holds no descriptor of the loop's (a lock, the slot) while it runs.
 # With TEST_LATE (the bug-card check's run, bugrun()), when the run's own limit ends the run, a file the runner's logs
 # (testlogs(); its output when it wrote none) name as begun (`== <file>`) and not ended (`-- ok|FAIL <file>`) is named
-# in <worktree>.late as `<seconds><TAB><file>`, with that limit (TEST_TIMEOUT). A file's own limit is its run's
+# in <worktree>.late as `<seconds><TAB><file>`, with that limit (TEST_TIMEOUT, scaled). A file's own limit is its run's
 # (filecmd()).
-testclock() { # <timeout's pid> <turn wait file>
-  local s=$SECONDS w wt=${2%.turnwait} f open l=()
+testclock() { # <timeout's pid> <turn wait file> <the run's limit: TEST_TIMEOUT, scaled>
+  local s=$SECONDS w wt=${2%.turnwait} f open l=() lim=${3:-${TEST_TIMEOUT:-3600}}
   closefds
   exec </dev/null >/dev/null 2>&1
   while sleep 1; do
@@ -452,8 +453,8 @@ testclock() { # <timeout's pid> <turn wait file>
         END { for (f in o) print f }')
     fi
     w=$(cat "$2" 2>/dev/null); [[ $w =~ ^[0-9]{1,9}$ ]] || w=0
-    [ $((SECONDS - s)) -ge $((TEST_TIMEOUT + w)) ] || continue
-    [ -z "${open:-}" ] || printf '%s\t%s\n' "$TEST_TIMEOUT" "$open" > "$wt.late"
+    [ $((SECONDS - s)) -ge $((lim + w)) ] || continue
+    [ -z "${open:-}" ] || printf '%s\t%s\n' "$lim" "$open" > "$wt.late"
     kill -ALRM "$1"; return
   done
 }

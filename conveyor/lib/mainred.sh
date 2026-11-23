@@ -272,7 +272,7 @@ repairholder() {
 # each file's run that exits 0 is logged ok (filecmd()), so a harness that ends each run at once with exit 0 would pass
 # without running a case. Then the card's changed tests run in its own worktree (each alone, as its
 # test step runs them: listcmd(), and no list of earlier passes), and must pass. Each of the three runs is a clean one
-# (cleanrun()). The control runs are given none of the card's test files (CONVEYOR_TEST_FILES empty, as on main's run,
+# (cleanrun()). The control runs are given none of the card's test files (CONVEYOR_TEST_FILELIST empty, as on main's run,
 # verdicts()): a pack's test.fileCommand that runs each file that list names would fail the control's own run on a
 # file the change adds, which this commit lacks, and that failure be taken for the control's. Sets REPAIRED: what the runs showed.
 # A pass writes <worktree>.uncovered from the clean run of the card's changed tests (testlist.sh uncovered()).
@@ -321,18 +321,23 @@ repairproof() { # <card> <worktree>
 # (CONVEYOR_LOAD_FACTOR: loadfactor(), lib/loadfactor.sh) as testonce() gives it. CONVEYOR_TEST_SLOTS names the
 # worktree's own conveyor/lib/slots.sh when it has one (the engine's own repository: the harness the change may
 # repair), else the running engine's. It holds no test slot of the loop's: the runners take their own. Output in
-# <worktree>.test, progress logs in <worktree>.testlog; exit as the command's, under the test timeout.
+# <worktree>.test, progress logs in <worktree>.testlog; exit as the command's, under the test timeout times the load
+# factor (LOADSCALE, lib/testrun.sh), as testclock() scales a card's run: each file's own limit is scaled (filecmd()).
 cleanrun() { # <worktree> <command> [<list>]
-  local lib=$HERE/lib e=() v pid rs=''
+  local lib=$HERE/lib e=() v pid rs='' l='' lf lim
   [ ! -f "$1/conveyor/lib/slots.sh" ] || lib=$1/conveyor/lib
   for v in PATH HOME USER LOGNAME LANG LC_ALL TMPDIR XDG_CONFIG_HOME CONVEYOR_CARDRUN; do [ -z "${!v+x}" ] || e+=("$v=${!v}"); done
-  rm -rf "$1.testlog" "$1.report"; mkdir "$1.testlog" 2>"$1.test" || return 1
+  rm -rf "$1.testlog" "$1.report" "$1.testfiles"; mkdir "$1.testlog" 2>"$1.test" || return 1
+  # The card's files go in a file, as testonce() gives them (CONVEYOR_TEST_FILELIST), not in one value of the environment.
+  [ -z "${TEST_FILES:-}" ] || { printf '%s\n' "$TEST_FILES" > "$1.testfiles" && l=$1.testfiles; } || return 1
   # A suite runner on <list> is taken off it (testlist.sh runnersoff(), #382); a list so left with no `fail` line runs nothing.
   # The output names each, with those listcmd() took off its command's list (RUNOFF).
   [ -z "${3:-}" ] || { rs=$(runnersoff "$3"); [ -z "$rs" ] || grep -q $'^fail\t' "$3" || { runnernote "$rs" > "$1.test"; return 1; }; }
   rs=$(printf '%s\n' "${RUNOFF:-}" "$rs" | grep . | sort -u)
-  (cd "$1" && closefds && p_setsid env -i "${e[@]}" CONVEYOR_LOAD_FACTOR="$(loadfactor)" CONVEYOR_TEST_SLOTS="$lib/slots.sh" CONVEYOR_TEST_LOG="$1.testlog" CONVEYOR_TEST_RERUN="${3:-}" \
-    CONVEYOR_TEST_FILES="${TEST_FILES:-}" CONVEYOR_TEST_CASES="${TEST_CASES:-}" timeout --kill-after=30 "$TEST_TIMEOUT" bash -c "$2") > "$1.test" 2>&1 < /dev/null &
+  lf=$(loadfactor); lim=$(awk -v n="$TEST_TIMEOUT" -v f="$lf" "$LOADSCALE") || lim=$TEST_TIMEOUT
+  printf '%s\n' "$lim" > "$1.limit" || return 1 # for the line that says the run timed out (testfails()), as testonce() keeps it
+  (cd "$1" && closefds && p_setsid env -i "${e[@]}" CONVEYOR_LOAD_FACTOR="$lf" CONVEYOR_TEST_SLOTS="$lib/slots.sh" CONVEYOR_TEST_LOG="$1.testlog" CONVEYOR_TEST_RERUN="${3:-}" \
+    CONVEYOR_TEST_FILELIST="$l" CONVEYOR_TEST_CASES="${TEST_CASES:-}" timeout --kill-after=30 "$lim" bash -c "$2") > "$1.test" 2>&1 < /dev/null &
   pid=$!
   watch $pid "$1.test" "$1.live" test; v=$?; runnernote "$rs" >> "$1.test"; return $v
 }

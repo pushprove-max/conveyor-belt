@@ -475,6 +475,30 @@ t_cutsuiteat() {
   grep -qxF 'conveyor: release: failed: not ok 1 - stub (at docs/releases/1.1.0.md:1: # 1.1.0)' <<<"$out" \
     || fail "the refused release does not name the failed case with where it failed: $out"
 }
+# Bug it catches (O140): a red suite of 2,000 failed cases with names of 100 bytes made a progress object over Linux's
+# 128 KiB limit of one argument, given to jq as one: jq did not start, and the record kept none of the failed cases.
+t_cutmanyfailed() {
+  local O; cutsetup 'd=$CONVEYOR_TEST_LOG/cases/failed; mkdir -p "$d" && for i in $(seq 2000); do : > "$d/$(printf "case%04d-%096d" "$i" 0)"; done; false'
+  cutrefused 1.1.0 'the whole suite did not pass'
+  local RUN=$T/$CASE/cards/release/run.json
+  jq -e '.state == "failed" and (.cases | length) == 2000 and .failed == 2000 and (.cases[0] | length) == 105' "$RUN" > /dev/null \
+    || fail "the record of a suite of 2000 failed cases does not end failed with them: $(jq -c '{state, failed, n: (.cases | length)}' "$RUN" 2>&1)"
+  # Bug it catches (E6): release's start (relstart()) passed release-prep's failed pass of its version as one jq
+  # argument, so its record was not written and the failed run --anyway goes over was lost. relstart() is called alone.
+  jq '.step = "release-prep"' "$RUN" > "$RUN.prep" && mv "$RUN.prep" "$RUN" || fail "the fixture could not be made"
+  CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards bash -c '. "$1/conveyor.sh" state-dir > /dev/null && eval "$(sed "/^shift\$/,\$d" "$1/commands/release-prep.sh")" && relstart release 1.1.0' _ "$SRC" \
+    || fail "relstart failed"
+  jq -e '.step == "release" and .state == "running" and (.cases | length) == 2000 and (.red.cases | length) == 2000' "$RUN" > /dev/null \
+    || fail "release's start did not keep release-prep's failed pass of 2000 cases: $(jq -c '{step, state, n: (.cases | length), red: (.red.cases | length)}' "$RUN" 2>&1)"
+}
+# Bug it catches (O223): with git status failing (core.bare=true on the checkout), its empty output read as a clean
+# checkout, and the release went on. It is refused, naming the status that could not be read, with nothing tagged.
+t_cutbare() {
+  local O; cutsetup true
+  git -C "$R" config core.bare true || fail "the fixture could not be made"
+  cutrefused 1.1.0 "the checkout's status could not be read"
+  [ ! -e "$STUB/full-at" ] || fail "the suite ran for a release refused before it"
+}
 # The suite, the last check. Bugs: a release cut on a failing suite, or with the suite run on another commit than the one
 # to release; a commit made in the checkout while the suite ran (a card landed there) tagged and pushed unchecked, or
 # the run's record not saying main moved, so the Board's Release panel offers no run on the new main and shows no

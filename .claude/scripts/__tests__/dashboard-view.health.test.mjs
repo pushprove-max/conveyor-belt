@@ -83,23 +83,6 @@ test('Health: a failing push is one plain line with its output under "Show outpu
   assert.equal(host.querySelector(':scope > details.output .output-text').textContent, data.panels.health.data.host.error.trim(), 'the whole reason under Show output');
 });
 
-// Issue 457: a test file a "Slow test" issue keeps off card test steps. Bug it catches: Health did not say so, and the
-// owner could not see which file no card runs, or why. The row lists the file, both runs' CPU seconds, and the issue
-// whose card brings it back; it names no CPU budget, which no test file has (#349).
-test('Health: a test file kept off card test steps is listed with why and its issue', () => {
-  const w = page('health');
-  const data = full();
-  data.panels.health.data.records[0].slowOff = [{ file: 'conveyor/tests/s.test.sh', issue: 17, url: 'https://github.com/example/sample/issues/17',
-    cpu: 10.24, budget: 8, card: 'c2-9', last: { cpu: 9, card: 'c2-8' } }];
-  deliver(w, data);
-  const row = dd(w, 'Kept off card tests');
-  assert.match(row.textContent, /^1 file1 test file kept off card test steps by a Slow test issue/);
-  assert.equal(row.querySelector(':scope > details.output .slow-off-list').textContent,
-    "conveyor/tests/s.test.shKept off#1710.2 CPU s in c2-9's test run and 9 in c2-8's; runs only in the full test suite until its issue lands");
-  assert.doesNotMatch(row.textContent, /budget/i);
-  assert.equal(row.querySelector(':scope > details.output a.issue').href, 'https://github.com/example/sample/issues/17');
-});
-
 // Issue 139: a plugin problem a Foreman noted needs the owner, who alone can fix or file it in the plugin's repository.
 // Bug it catches: the note sat in the Foreman's folder and Health never said so. The row is a warning that says how
 // many and links the file. Bug (review): the link was file://, which a browser does not open from the https Board: it

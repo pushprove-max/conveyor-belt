@@ -274,8 +274,10 @@ factor. The factor is never less than 1 and never more than 3, so a test that be
 fails.
 
 Conveyor multiplies the time limit of a test file's `# timeout:` line by the factor. When a file runs past a
-multiplied limit, the output gives the limit of the `# timeout:` line and the factor. The time limit of a card's whole
-test run (`testTimeout`) does not change. The push check runs each file alone with `testTimeout` as its limit, and
+multiplied limit, the output gives the limit of the `# timeout:` line and the factor. Conveyor also multiplies the
+time limit of a card's whole test run (`testTimeout`) and the time limit of a push and its pre-push hook
+(`pushTimeout`) by the factor. When a card's test run goes past its multiplied limit, the reason of the card gives
+that multiplied limit. The push check runs each file alone with `testTimeout` as its limit, and
 multiplies that limit by the factor too. When a file runs past it, the reason of the held push gives the limit and the
 factor.
 
@@ -715,7 +717,9 @@ Node uses `node --test` and Ruby uses `rspec`.
 
 Setup writes the map to `.conveyor/test-map.json`, with the commit and the test command that it was made on. Setup
 then shows how many source files and test files it mapped, and how long the run took. For Node, Go, Rust and Ruby,
-if a test file fails under the run, the map does not include it, and the run continues with the other files. The map also does not include a
+if a test file fails under the run, the map does not include it, and the run continues with the other files. For
+Python, the suite runs once: the map does not include a test file that has a failed test, and it includes the other
+files. The map also does not include a
 Node test file that imports `claude-code/testing`, because that file runs only under the test runner of Claude Code.
 The map keeps a list of these files, each with the reason, and setup shows how many there are. If your language has
 no tool in the table, if the tool fails, or if no test file is mapped, setup tells you. Your cards then find their
@@ -733,7 +737,6 @@ table, or the tool is not installed, the command tells you why. When `test.map` 
 
 The map stays current in these ways:
 
-- When a card's test run passes, Conveyor maps each test file that the change adds and the map does not hold yet.
 - The whole test on main (`test.main`) and the release check (`release-prep`) make the map again when the map is due.
   The map is due when it is more commits behind than `test.mapAge`, or when it was made with another test command.
   Coverage is then on for that run: `NODE_V8_COVERAGE` for Node, and coverage.py in each Python process for Python.

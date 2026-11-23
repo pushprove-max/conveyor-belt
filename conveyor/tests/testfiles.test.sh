@@ -67,8 +67,8 @@ tf_patfiles() { # [saved]
   git -C "$R" add src scripts .claude/hooks && GIT_COMMITTER_DATE=2026-11-12T00:00:00Z git -C "$R" commit -qm tests || fail "main's test files"
 }
 # Bug it catches (#1036): the Tests page listed only *.test.* files, so a project whose tests.patterns name its tests
-# test-*.mjs saw none of them. Both test-*.mjs files are listed, beside the *.test.* files; an .mjs file's cases are
-# not counted (null, not an empty list that reads as no case), while the shell file's are; the survey's saved times
+# test-*.mjs saw none of them. Both test-*.mjs files are listed, beside the *.test.* files; an .mjs file's node:test
+# cases are named as the shell file's are (O240: they were null, so the Board's case search missed them); the survey's saved times
 # of src/test-a.mjs are its newest run, marked survey (it was said "a card" on the Board), after its five card runs
 # (two days before), and the oldest card run, which the survey's run pushed out of runs, is in testolder()'s olderRuns
 # (it was dropped from the Timeline).
@@ -78,7 +78,7 @@ t_tfpatterns() {
   [ "$(jq -c '[.files[].file] | sort' <<<"$got")" = '[".claude/hooks/x.test.sh","a.test.sh","scripts/test-b.mjs","src/test-a.mjs"]' ] \
     || fail "the files the patterns match and the *.test.* files: $(jq -c '[.files[].file]' <<<"$got")"
   [ "$(jq -c '[.files[] | {file, cases}] | sort_by(.file)' <<<"$got")" \
-    = '[{"file":".claude/hooks/x.test.sh","cases":["one"]},{"file":"a.test.sh","cases":[]},{"file":"scripts/test-b.mjs","cases":null},{"file":"src/test-a.mjs","cases":null}]' ] \
+    = '[{"file":".claude/hooks/x.test.sh","cases":["one"]},{"file":"a.test.sh","cases":[]},{"file":"scripts/test-b.mjs","cases":["a"]},{"file":"src/test-a.mjs","cases":["a"]}]' ] \
     || fail "each file's cases: $(jq -c '[.files[] | {file, cases}]' <<<"$got")"
   [ "$(jq -c '.files[] | select(.file == "src/test-a.mjs") | {cpu, survey: .runs[0], cards: [.runs[1:][].cpu], timedRuns, last: .lastRun.survey}' <<<"$got")" \
     = '{"cpu":6.25,"survey":{"cpu":6.25,"sec":7.5,"card":null,"time":"2026-11-12T00:00:00Z","whole":false,"survey":true},"cards":[5,4,3,2],"timedRuns":6,"last":true}' ] \

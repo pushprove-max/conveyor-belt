@@ -10,7 +10,7 @@ HERE=$(cd "$(dirname "$0")" && pwd -P); ROOT=$(dirname "$HERE")
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 AT=@
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t${AT}example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t${AT}example.com
-unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILE CONVEYOR_TEST_FILES BASH_ENV CONVEYOR_TEST_RERUN CONVEYOR_TEST_SLOT CONVEYOR_TEST_SLOTS CONVEYOR_TEST_POOL
+unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILE CONVEYOR_TEST_FILELIST BASH_ENV CONVEYOR_TEST_RERUN CONVEYOR_TEST_SLOT CONVEYOR_TEST_SLOTS CONVEYOR_TEST_POOL
 fails=0
 no() { echo "not ok - $1"; fails=1; }
 
@@ -47,8 +47,8 @@ echo two >> "$R/conveyor/x.sh"; echo two >> "$R/conveyor/y.sh"
 # engine's list (as filecmd() passes a card's own test files on), and <cases> as the cases the engine names of them
 # (CONVEYOR_TEST_CASES); prints the runs' notes, sorted.
 one() {
-  rm -f "$R/ran"; mkdir -p "$T/$1"
-  (cd "$R" && env CONVEYOR_TEST_LOG="$T/$1" CONVEYOR_TEST_FILES=$'conveyor/tests/a.test.sh\nconveyor/tests/b.test.sh\n'"$2" CONVEYOR_TEST_CASES="${3:-}" \
+  rm -f "$R/ran"; mkdir -p "$T/$1" && printf '%s\n' conveyor/tests/a.test.sh conveyor/tests/b.test.sh "$2" > "$T/$1.list"
+  (cd "$R" && env CONVEYOR_TEST_LOG="$T/$1" CONVEYOR_TEST_FILELIST="$T/$1.list" CONVEYOR_TEST_CASES="${3:-}" \
     bash .conveyor/test-changed.sh --file "$2") > "$T/out" 2>&1; echo $? > "$T/rc"
   LC_ALL=C sort "$R/ran" 2>/dev/null | paste -sd'|' -
 }
@@ -116,7 +116,8 @@ fc=$(jq -er '.test.fileCommand' "$HERE/project.json") || no "the pack sets no te
   # shellcheck disable=SC2034 # read by testrun.sh as it is sourced
   HERE=$ROOT/conveyor STATE=$T/state; . "$ROOT/conveyor/lib/testrun.sh"; . "$ROOT/conveyor/lib/session.sh"
   filecmd "$fc" files > "$T/fc.sh"
-  (cd "$R" && env CONVEYOR_TEST_LOG="$T/fc" CONVEYOR_TEST_FILES=$'conveyor/tests/a.test.sh\nconveyor/tests/b.test.sh\n'"$B" bash "$T/fc.sh") > "$T/fc.out" 2>&1
+  printf '%s\n' conveyor/tests/a.test.sh conveyor/tests/b.test.sh "$B" > "$T/fc.list"
+  (cd "$R" && env CONVEYOR_TEST_LOG="$T/fc" CONVEYOR_TEST_FILELIST="$T/fc.list" bash "$T/fc.sh") > "$T/fc.out" 2>&1
   echo $? > "$T/rc"; testprogress "$T/fc.out" "$T"/fc/* > "$T/fc.json"
 ) 2> /dev/null
 got=$(LC_ALL=C sort "$R/ran" 2>/dev/null | paste -sd'|' -)

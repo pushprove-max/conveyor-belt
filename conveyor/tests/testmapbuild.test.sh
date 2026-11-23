@@ -103,3 +103,43 @@ t_testmapbuildnotool() {
     || fail "the refusal does not say why: $out"
   [ ! -e "$R/.conveyor/test-map.build.json" ] || fail "a refused build left a record"
 }
+
+# mapbuild of a Python project of three test files under <test command>, whose stub coverage runs the suite, prints
+# <the run's output> (one line a file) with tests/test_bad.py failing, exits 1 as the runner does, and reports
+# contexts of all three: the map holds the two that passed, and test_bad.py is not mapped, with why.
+pyfailmap() { # <test command> <the run's output>
+  setup '[]'
+  mkdir -p "$R/src" "$R/tests" && echo x > "$R/pyproject.toml" && for f in src/a.py src/b.py tests/test_a.py tests/test_b.py tests/test_bad.py; do echo x > "$R/$f"; done
+  git -C "$R" add -A && git -C "$R" commit -qm python && printf '%s\n' "$2" > "$STUB/py-says" || fail "main's files could not be committed"
+  # stub: coverage.py, which runs the suite (one failed test) and reports the contexts each test touched
+  cat > "$STUB/coverage" <<'EOF'
+#!/usr/bin/env bash
+case $1 in
+  run) cat "$STUB/py-says"; exit 1 ;;
+  json) echo '{"files": {"src/a.py": {"contexts": {"1": ["tests.test_a.test_a", "tests.test_bad.test_x"]}}, "src/b.py": {"contexts": {"1": ["tests.test_b.test_b"]}}}}' > "${!#}" ;;
+  *) exit 2 ;;
+esac
+EOF
+  chmod +x "$STUB/coverage" && tune --arg c "$1" '.test.list = "args" | .test.command = $c' || fail "the stub"
+  mapeng 'mapbuild "$R"' || fail "mapbuild under '$1' with one failing Python test file failed (its output: $2): $(cat "$T/$CASE/eng.out")"
+  mapis '.sources == {"src/a.py": ["tests/test_a.py"], "src/b.py": ["tests/test_b.py"]} and .tests == ["tests/test_a.py", "tests/test_b.py"]
+    and ([.notMapped[] | [.file, .why]] == [["tests/test_bad.py", "a test of it failed under coverage"]])' \
+    "the map of a suite under '$1' whose tests/test_bad.py fails (its output: $2) does not map the other two and name it not mapped"
+}
+# Bug it catches (O244): one failing Python test file failed the whole map build, as the suite runs once under
+# coverage and pytest exits 1 when any test fails. pytest names the file in its FAILED line. Bug it catches too (E7):
+# the whole FAILED line was searched for test files, so a message that names a passing file left that file out too.
+t_testmappyfail() {
+  pyfailmap 'pytest -q' $'tests/test_a.py .\ntests/test_b.py .\ntests/test_bad.py F\nFAILED tests/test_bad.py::test_x - Failed: tests/test_a.py'
+}
+# Bug it catches: unittest discover -s tests names a failed test's module from that folder, test_bad, not the file's
+# path, so its failure was not matched to tests/test_bad.py and the whole build failed.
+t_testmapunitfail() {
+  pyfailmap 'python -m unittest discover -s tests' $'..F\nFAIL: test_x (test_bad.BadTests.test_x)\nFAILED (failures=1)'
+}
+# Bug it catches: a failed subtest's line ends with its message and parameters in brackets of their own,
+# `(test_bad.BadTests.test_x) [m] (x=1)`; the last brackets were read as the module, x=1 named no file, and the whole
+# build failed.
+t_testmapsubfail() {
+  pyfailmap 'python -m unittest discover -s tests' $'..F\nFAIL: test_x (test_bad.BadTests.test_x) [m (1)] (x=1)\nFAILED (failures=1)'
+}

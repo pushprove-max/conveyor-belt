@@ -8,9 +8,9 @@ HERE=$(cd "$(dirname "$0")" && pwd -P)
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 AT=@
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t${AT}example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t${AT}example.com
-# The loop's test step sets CONVEYOR_TEST_FILES (the card's changed test files) and CONVEYOR_TEST_RERUN: left set,
+# The loop's test step sets CONVEYOR_TEST_FILELIST (the file of the card's changed test files) and CONVEYOR_TEST_RERUN: left set,
 # every scratch run below would select the card's files as well as its own.
-unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILES CONVEYOR_TEST_RERUN
+unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILELIST CONVEYOR_TEST_RERUN
 # The checks are in parts (p_<name>) that run side by side, each in a scratch folder of its own (T, part below): each
 # says ok or not ok, and the lines are numbered once every part has ended, in the order the parts started.
 ok() { echo "ok - $1"; }
@@ -141,7 +141,7 @@ p_flakyoff() {
   got=$(CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun ran | sorted)
   [ "$got" = "atwo bone " ] && ok "a fix that changed an \"all\" area's file runs every case but the one kept off" || no "off case, fix of core.sh: ran '$got': $(cat "$T/out")"
 }
-# Issue 457: a test file the slow-test record names is kept off card runs (conveyor.sh slowoff():
+# Issue 457: a test file the loop keeps off whole is kept off card runs (conveyor.sh cacheoff():
 # a `pass` and an `off` line naming the file, no case). Bug it catches: the file ran on a card's run all the same, as
 # a changed file (or, of an engine case file, a change to its area or an "all" area) selected it again.
 p_slowoff() {
@@ -264,7 +264,7 @@ p_core() {
     && grep -qx 'TESTRUN whole-suite' "$T/flog/test-changed.log" \
     && ok "a first run with a flaky case kept off says why the runner ran, naming the changed file and the \"all\" area, and that it ran every case file" \
     || no "core changed, flaky case off, first run's log: ran '$got': $(cat "$T/flog/test-changed.log")"
-  # A case file kept off whole (slowoff(): an `off` line with no case) does not run: that log does not say every case file ran.
+  # A case file kept off whole (cacheoff(): an `off` line with no case) does not run: that log does not say every case file ran.
   mkdir "$T/slog"; printf 'off\tconveyor/tests/b.test.sh\n' > "$T/srerun"
   got=$(CONVEYOR_TEST_LOG=$T/slog CONVEYOR_TEST_RERUN=$T/srerun ran | sorted)
   [ "$got" = "aone atwo " ] && ! grep -q 'TESTRUN whole-suite' "$T/slog/test-changed.log" \
