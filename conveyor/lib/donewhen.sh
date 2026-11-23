@@ -197,14 +197,16 @@ donewhen() { # <worktree> <issue json>
 # `OUTSIDE: <finding> (judge: <reason>)`: judged(), lib/review.sh) is, without the judge's reason, which names no D<n>
 # for it. That reason is cut off by the finding the judge's record keeps (judge.outside of the card's review lines: a
 # reused review's line has none, the line of the review it reuses has), not at a ` (judge: ` the finding itself can
-# quote; a line cut inside the finding keeps what it has. items is [] when no line of the card has the check.
+# quote; the newest review's records are tried first, each review's in the order it keeps them, so an older review's
+# record, or a later one of the same review, that renders the same line cut elsewhere is not used; a line cut inside
+# the finding keeps what it has. items is [] when no line of the card has the check.
 dwdetail() { # <card>
   { olds; recs; } 2>/dev/null | jq -cRn --arg c "$1" '[inputs | fromjson? | objects | select(.card == $c)] as $l
     | ([$l | to_entries[] | select(.value.doneWhenItems | type == "array")] | last) as $b
     | ([$l[(($b.key // -1) + 1):][] | select(.step == "review")] | last) as $r
     | [$r.tail | strings | splits("\n")] as $t
     | ([$r.reason | strings | splits("\n") | . as $x | select(any($t[]; startswith($x)) | not)] + $t) as $f
-    | [$l[] | select(.step == "review") | .judge.outside[]? | objects | "OUTSIDE: \(.finding)" as $o | {o: $o, w: "\($o) (judge: \(.reason))"}] as $o
+    | [[$l[] | select(.step == "review")] | reverse[] | .judge.outside[]? | objects | "OUTSIDE: \(.finding)" as $o | {o: $o, w: "\($o) (judge: \(.reason))"}] as $o
     | {card: $c, items: [($b.value.doneWhenItems // [])[] | objects | .n as $n | {n, text, builder: .said,
         reviewer: (if $r == null then null elif any($r.doneWhenHolds[]?; . == $n) then "holds"
           else [$f[] | select(startswith("DECLINED:") | not) | . as $x

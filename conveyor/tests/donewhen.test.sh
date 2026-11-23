@@ -84,6 +84,12 @@ t_dwdetail() {
 {"card":"c4","issue":8,"step":"review","time":"2026-01-01T00:00:00Z","result":"NO-GO","reason":"DECLINED: [P2] D1's case c misses a rare input (judge: a rare case)\nOUTSIDE: [P2] lib/x.sh:3 an old typo (judge: outside the change, and D2 does not need it)\nOUTSIDE: [P3] lib/review.sh:483 the suffix (judge: ...) hides D1's words (judge: main has it)\n[P1] D1's evidence: c.test.sh has no case c","judge":{"outside":[{"n":2,"finding":"[P2] lib/x.sh:3 an old typo","place":"outside","reason":"outside the change, and D2 does not need it"},{"n":3,"finding":"[P3] lib/review.sh:483 the suffix (judge: ...) hides D1's words","place":"outside","reason":"main has it"}]},"doneWhenHolds":[]}
 {"card":"c4","issue":8,"step":"fix","doneWhenItems":[{"n":1,"text":"one","said":"D1 met: c.test.sh case c"},{"n":2,"text":"two","said":"D2 met: d.sh:1"}]}
 {"card":"c4","issue":8,"step":"review","result":"NO-GO","reused":"2026-01-01T00:00:00Z","reason":"DECLINED: [P2] D1's case c misses a rare input (judge: a rare case)\nOUTSIDE: [P2] lib/x.sh:3 an old typo (judge: outside the change, and D2 does not need it)\nOUTSIDE: [P3] lib/review.sh:483 the suffix (judge: ...) hides D1's words (judge: main has it)\n[P1] D1's evidence: c.test.sh has no case c","doneWhenHolds":[]}
+{"card":"c5","issue":9,"step":"build","doneWhenItems":[{"n":1,"text":"one","said":"D1 met: e.sh:1"}]}
+{"card":"c5","issue":9,"step":"review","result":"NO-GO","reason":"OUTSIDE: [P2] lib/review.sh:483 The suffix is ambiguous. (judge: the text hides D1. (judge: on main))","judge":{"outside":[{"finding":"[P2] lib/review.sh:483 The suffix is ambiguous.","reason":"the text hides D1. (judge: on main)"}]},"doneWhenHolds":[]}
+{"card":"c5","issue":9,"step":"fix","doneWhenItems":[{"n":1,"text":"one","said":"D1 met: e.sh:1"}]}
+{"card":"c5","issue":9,"step":"review","result":"NO-GO","reason":"OUTSIDE: [P2] lib/review.sh:483 The suffix is ambiguous. (judge: the text hides D1. (judge: on main)","judge":{"outside":[{"finding":"[P2] lib/review.sh:483 The suffix is ambiguous. (judge: the text hides D1.","reason":"on main"}]},"doneWhenHolds":[]}
+{"card":"c6","issue":10,"step":"build","doneWhenItems":[{"n":1,"text":"one","said":"D1 met: e.sh:1"}]}
+{"card":"c6","issue":10,"step":"review","result":"NO-GO","reason":"OUTSIDE: [P2] lib/review.sh:483 The suffix is ambiguous. (judge: the text hides D1. (judge: on main)","judge":{"outside":[{"finding":"[P2] lib/review.sh:483 The suffix is ambiguous. (judge: the text hides D1.","reason":"on main"},{"finding":"[P2] lib/review.sh:483 The suffix is ambiguous.","reason":"the text hides D1. (judge: on main)"}]},"doneWhenHolds":[]}
 EOF
   # c3's last check has no review after it: the review of the build before it is not its answer.
   [ "$(loop history donewhen c3 | jq -c .items)" = '[{"n":1,"text":"one","builder":"D1 met: new","reviewer":null}]' ] \
@@ -92,6 +98,14 @@ EOF
     || fail "history donewhen did not pair the last check with the review after it: $(loop history donewhen c1)"
   [ "$(loop history donewhen c4 | jq -c '.items | map(.reviewer)')" = "[\"OUTSIDE: [P3] lib/review.sh:483 the suffix (judge: ...) hides D1's words\\n[P1] D1's evidence: c.test.sh has no case c\",null]" ] \
     || fail "history donewhen gave the judge's words (a DECLINED line, or the reason on an OUTSIDE line, which alone names D2) as the reviewer's answer, or cut an OUTSIDE finding at the '(judge: ' it quotes: $(loop history donewhen c4)"
+  # c5 (review E8 of the follow-up): its older review's judge record renders a line that starts with the latest's
+  # OUTSIDE line, but cut before ` (judge: the text hides D1.`; the latest review's own record keeps D1 in the finding.
+  [ "$(loop history donewhen c5 | jq -c '.items | map(.reviewer)')" = '["OUTSIDE: [P2] lib/review.sh:483 The suffix is ambiguous. (judge: the text hides D1."]' ] \
+    || fail "history donewhen cut the latest review's OUTSIDE line by an older review's judge record, losing D1: $(loop history donewhen c5)"
+  # c6 (review E1): c5's two records in one review, the one that keeps D1 first: reversing every record, not the
+  # reviews, tried the second first and cut D1.
+  [ "$(loop history donewhen c6 | jq -c '.items | map(.reviewer)')" = '["OUTSIDE: [P2] lib/review.sh:483 The suffix is ambiguous. (judge: the text hides D1."]' ] \
+    || fail "history donewhen tried a review's judge records out of their order and cut D1: $(loop history donewhen c6)"
   [ "$(loop history donewhen c9)" = '{"card":"c9","items":[]}' ] || fail "a card with no check is not an empty list: $(loop history donewhen c9)"
 }
 
