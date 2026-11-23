@@ -120,13 +120,16 @@ BOXREC='.machine = {kind: "ssh", name: "box.example.com", target: "tester@box.ex
 # box (hostssh).
 # Bug: the stop then said the run was stopped (exit 0), while its suite on the box, sent no stop, still ran: it fails and
 # says the box's suite is not stopped.
+# Bug: it then said that suite goes on until it ends, while the next run's checkout on the same box (hostcheckout(),
+# lib/suitehost.sh) stops it: it says that checkout can stop it.
 t_relpartstopversion() {
   setup '[]'; fakerun "$BOXREC"
   # shellcheck disable=SC2016 # expanded in the run's shell
   partrun 'kill() { [ "$1" != -0 ] || jq ".pid = 1 | .since = \"2099-01-01T00:00:00Z\" | .version = \"1.2.0\"" "$RELRUN" > "$RELRUN.new" && mv "$RELRUN.new" "$RELRUN"; builtin kill "$@"; }' \
     'hostssh() { printf "%s\n" "$1" >> "$STUB/hostssh"; }' 'releasestop'
   builtin kill "$FAKE" 2>/dev/null
-  [ "$RC" = 1 ] && grep -q "the release run of 1.1.0 is stopped, but not its suite's run on box.example.com" "$T/$CASE/run.out" && jq -e '.version == "1.2.0" and .ended == null and .machine.step == "run"' "$RUN" > /dev/null \
+  [ "$RC" = 1 ] && grep -q "the release run of 1.1.0 is stopped, but not its suite's run on box.example.com" "$T/$CASE/run.out" \
+    && grep -qF "goes on until it ends, or until a release run's checkout on box.example.com stops it" "$T/$CASE/run.out" && jq -e '.version == "1.2.0" and .ended == null and .machine.step == "run"' "$RUN" > /dev/null \
     && [ ! -e "$STUB/hostssh" ] \
     || fail "the stop did not name 1.1.0, the run it stopped, did not fail saying its box's suite was not stopped, changed the next run's record, or sent a stop to the next run's box (exit $RC; box commands: $(cat "$STUB/hostssh" 2>/dev/null)): $(cat "$T/$CASE/run.out") $(cat "$RUN")"
 }

@@ -566,7 +566,7 @@ releasestop() {
   [ $rc = 0 ] || jq -e --argjson p "$p" --arg s "$s" '.pid != $p or .since != $s' "$RELRUN" > /dev/null 2>&1 || { echo "conveyor: release-run stop: the run is stopped, but a process of it still holds $CARDS/release/lock; release-prep and release are refused until it ends${b:+, and the suite of the run on $b is not stopped}" >&2; return 1; }
   # No stop sent to the box (no lock, or the record was by then another run's): the run that took the lock may run its
   # own suite there, which a stop could end, so the stopped run's suite may still run there.
-  [ -z "$b" ] || [ $hs != 2 ] || { echo "conveyor: release-run stop: the release run of $v is stopped, but not its suite's run on $b: a release run started next took $CARDS/release/lock and may run its own suite there; the suite's run of $v there goes on until it ends" >&2; return 1; }
+  [ -z "$b" ] || [ $hs != 2 ] || { echo "conveyor: release-run stop: the release run of $v is stopped, but not its suite's run on $b: a release run started next took $CARDS/release/lock and may run its own suite there; the suite's run of $v there goes on until it ends, or until a release run's checkout on $b stops it" >&2; return 1; }
   echo "conveyor: release-run: the release run of $v is stopped"
 }
 # A release-prep of another version that waits on its notes card (relnoteswait()) is the one record relfixes() starts
