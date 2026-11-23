@@ -145,17 +145,17 @@ pushone() { # <card> <issue> [<commit>]
   # holds the push as before.
   # The push record's stage (pushing()) is ready while the push worktree, its dependencies and a test slot are got, then
   # hook (push, when it is pushed with no hook) for as long as git push runs, then pushed or ended as git push exits.
-  # git push and its hook run under pushTimeout times the hook's load factor (pf, plim: LOADSCALE, lib/testrun.sh).
+  # git push and its hook run under pushTimeout times the hook's load factor (pf, plim: LOADSCALE, lib/testrun.sh), read
+  # once the test slot is held, not before a wait for it; plim comes back from the subshell in $wt.limit.
   while :; do
   for try in 1 2; do
-    rm -f "$wt.trace"
-    pf=$(loadfactor); plim=$(awk -v n="$PUSH_TIMEOUT" -v f="$pf" "$LOADSCALE") || plim=$PUSH_TIMEOUT
+    rm -f "$wt.trace" "$wt.limit"
     # The push's output goes to its log (plog) as it comes, and is kept in out for its push line.
     rc=0; sha=$(git rev-parse "$at" 2>&1) && pushing "$sha" ready && out=$(exec 8>&-; {
       git worktree remove --force "$wt" 2>/dev/null; rm -rf "$wt"; git worktree prune
       packget push.env e && mapfile -d '' -t e < <(jq -j 'to_entries[] | "\(.key)=\(.value)\u0000"' <<<"$e") \
         && git worktree add -q --detach "$wt" "$sha" && deps "$wt" && cd "$wt" \
-        && slot_pool && { [ -n "$SLOT_HOME" ] || { slot_first && slot_mine; }; } \
+        && slot_pool && { [ -n "$SLOT_HOME" ] || { slot_first && slot_mine; }; } && { pf=$(loadfactor); plim=$(awk -v n="$PUSH_TIMEOUT" -v f="$pf" "$LOADSCALE") || plim=$PUSH_TIMEOUT; echo "$plim" > "$wt.limit"; } \
         && pushing "$sha" "$([ -z "$nv" ] && echo hook || echo push)" && {
           env "${e[@]}" CONVEYOR_LOAD_FACTOR="$pf" GIT_TRACE2_EVENT="$wt.trace" timeout --kill-after=30 "$plim" git push ${nv:+"$nv"} "$REMOTE" "$sha:refs/heads/$to"
           a=$?; pushing "$sha" "$([ $a = 0 ] && echo pushed || echo ended)"; exit $a; }
@@ -168,7 +168,7 @@ pushone() { # <card> <issue> [<commit>]
     [ $rc != 0 ] && [ $try = 1 ] && [ "$la" != pr ] && [ -z "$nv" ] && grep -qF '[rejected]' <<<"$out"; a=$?
     [ $a != 0 ] || [ -z "$want" ] || { out+=$'\n'"$REMOTE/$BRANCH holds a commit ${sha:0:12} lacks: a merge with it is a commit the full test run did not test, so nothing is pushed"; a=1; }
     [ $a != 0 ] || m=$(theirs "$sha" "$wt") || { out+=$'\n'"the remote's commits were not merged into main: ${m:0:600}"; a=1; }
-    git worktree remove --force "$wt" 2>/dev/null
+    git worktree remove --force "$wt" 2>/dev/null; plim=$(cat "$wt.limit" 2>/dev/null) || plim=''; rm -f "$wt.limit"
     [ $a = 0 ] || break
     # Main is the merge with the remote's commits now (remerge()): a tree the run before the push has not run on, so it
     # runs there (pushtests()) before the merge is pushed, and a file that fails on it holds the push as on main's commit.

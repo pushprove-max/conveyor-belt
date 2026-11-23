@@ -58,3 +58,36 @@ t_pushslot() {
   wait_until '[ "$(wc -l < "$d/order")" = 3 ]' || fail "the waiting units did not take the slots once they came free: $(cat "$d/order")"
   wait
 }
+
+# Review of #1432. Bug it catches: a push read the machine's load (loadfactor()) before it waited for a test slot
+# (slot_first), and ran its pre-push hook with that factor and time limit, though the load had changed during the wait.
+# A pool of 1, its slot held; the push waits at load 0 (factor 1), the load goes to 2 per core, then the slot is given
+# back. With pushTimeout 2 the hook must get the factor 2 and its scaled 4 s: it lives past 3 s (not cut at the 2 s read
+# before the wait), is cut before it ends at 4.5 s (a limit of 5 s or more lets it end and the push land), and the push
+# line's reason names the 4 s limit the hook ran under (the limit the subshell hands back in $wt.limit), not 2 s.
+t_pushslotload() {
+  local d=$T/$CASE/run P=$T/$CASE/slots sha hook
+  export XDG_CONFIG_HOME=$T/$CASE/config
+  mkdir -p "$d" "$XDG_CONFIG_HOME/conveyor" && echo "{\"testSlots\": 1, \"testSlotsDir\": \"$P\"}" > "$XDG_CONFIG_HOME/conveyor/host.json"
+  setup '[]'; tune '.tunables.pushTimeout = 2' || fail "the pack"
+  hook='#!/usr/bin/env bash\nprintf %%s "${CONVEYOR_LOAD_FACTOR-unset}" > %q/hookfactor\nsleep 3\n: > %q/past3\nsleep 1.5\n' # sleep: past pushTimeout 2, then past its scaled 4 s
+  printf "$hook" "$d" "$d" > "$R/.git/hooks/pre-push" && chmod +x "$R/.git/hooks/pre-push" || fail "the hook could not be written"
+  mkdir -p "$P"; : >> "$P/1"; echo 0 > "$d/load"
+  flock "$P/1" bash -c 'until [ -e "$0" ]; do sleep 0.05; done' "$d/free1" &
+  wait_until '! flock -n "$P/1" true' || fail "the slot was not held"
+  echo x > "$R/n.txt"; git -C "$R" add -A; git -C "$R" commit -qm next; sha=$(git -C "$R" rev-parse HEAD)
+  # The loop's shell, as in t_pushslot, with the machine's load (p_load) read from $d/load.
+  # shellcheck disable=SC2034 # HERE is read by the lines of conveyor.sh and commands/run.sh run by the eval
+  ( HERE=$SRC; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; unset CONVEYOR_TEST_SLOT CONVEYOR_LOAD_FACTOR
+    eval "$(sed -n '/^\. "\$HERE\/lib\/portable.sh"/,/^\. "\$HERE\/lib\/records.sh"/p' "$SRC/conveyor.sh")"
+    eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
+    p_load() { cat "$d/load"; }
+    names || exit 1; push c1-1 1 ) > "$d/push.out" 2>&1 &
+  wait_until 'compgen -G "$P/first/[0-9]*" >/dev/null' "cat '$d/push.out'" || fail "the push did not wait for a test slot"
+  echo "$((2 * $(nproc --all)))" > "$d/load"; : > "$d/free1"
+  wait
+  [ "$(cat "$d/hookfactor" 2>&1)" = 2 ] && [ -e "$d/past3" ] || fail "the load went from 0 to 2 per core while the push waited for its slot: its hook was cut at the 2 s limit read before the wait, or not given the factor 2: $(cat "$d/hookfactor" "$d/push.out" 2>&1 | tail -n 5)"
+  [ "$(git -C "$T/$CASE/origin" rev-parse main 2>/dev/null)" != "$sha" ] || fail "the 4.5 s hook ran to its end and the push landed: its limit was over the scaled 4 s"
+  st 'select(.step == "push" and .result == "fail") | .reason' | grep -qF 'exit 124 (124 is the 4s timeout)' \
+    || fail "the push line does not say the push was cut at the scaled 4 s limit: $(st 'select(.step == "push")' | tail -c 600)"
+}
