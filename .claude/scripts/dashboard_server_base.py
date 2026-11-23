@@ -89,6 +89,7 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or build of a declined finding (the Declined panel's "File as issue": the id of its line in the record's declined list),
 # or dismiss of declined findings (its "Dismiss" and "Dismiss all shown": the ids of their lines),
 # or heals batch of an area's entries of the self-heals list (its Self-heals list's "File a batch card": the area, - for none),
+# or heals docs of an area's entries of the docs list (its Docs list's "File a docs sweep card": the area, - for none),
 # or depends (the Board's "Depends on…": `conveyor.sh control depends`, which writes the issue's Depends on: line on GitHub),
 # or card (a card's Settings: `conveyor.sh control card`, one issue's own builder, reviewer or judge; and its Pick for
 # me, `control card <issue> pick`, whose answer is the judge's settings, changing nothing),

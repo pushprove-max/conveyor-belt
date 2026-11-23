@@ -17,7 +17,8 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
 1. Read the Claude pricing page and the OpenAI pricing page again. Update the Board's built-in model prices (`PRICES`
    and `LONG_PRICES` in `.claude/scripts/dashboard_limit.py`) to match them, with the date you read them in the
    comment above the table. Commit the change on `main`.
-2. On the build machine, run `conveyor.sh release-prep <version>`. A model writes a draft of the release notes in
+2. On the build machine, run `conveyor.sh release-prep <version>`. First it files one docs sweep card for each area
+   of the docs list that has entries ([Harm or self-heals](cards.md#harm-or-self-heals)). A model writes a draft of the release notes in
    the [release notes style](#release-notes). It reads the issues that landed since the last tag, their
    titles and text, and the commit subjects. When the project has no release tag yet, the draft lists no changes:
    it is an overview of what the project does, in sections by area, from the README and the pages in `docs/`, and

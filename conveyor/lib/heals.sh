@@ -1,20 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
-# The self-heals list (SELFHEALS, lib/paths.sh), fixed in batches, and the sort of the work filed before the list
-# existed. The judge sorts each finding by what its failure does, never by how likely it is (HARMRULE, lib/review.sh):
-# a harm finding is built at once, as a follow-up; a self-heals one goes to the list (healsadd(), lib/followups.sh).
-# The list is fixed one area at a time: healsbatch() files one audit card with an area's entries as its scope.
+# The self-heals list (SELFHEALS, lib/paths.sh) and the docs list (DOCSDRIFT), fixed in batches, and the sort of the
+# work filed before the lists existed. The judge sorts each finding by what its failure does, never by how likely it
+# is (HARMRULE, lib/review.sh): a harm finding is built at once, as a follow-up; a self-heals, cleanup or already
+# guarded one goes to the self-heals list, and a docs drift one to the docs list (healsadd(), lib/followups.sh).
+# Each list is fixed one area at a time: healsbatch() files one card with an area's entries as its scope.
 
 # `conveyor.sh heals batch <area | ->` (the Board's Self-heals panel, "File a batch card"): one audit card for the
-# entries of the list in <area> (an area label; - for the entries with none) that no batch card holds yet and whose
-# card has ended (below), with them as its scope. With the control record's rules.followupissues false it is a card with no GitHub issue (tcput(),
+# entries of the self-heals list in <area> (an area label; - for the entries with none) that no batch card holds yet
+# and whose card has ended (below), with them as its scope. With docs (`conveyor.sh heals docs <area | ->`, the
+# Board's "File a docs sweep card", and release-prep: healsdocs()), one docs sweep card for the entries of the docs
+# list in <area>. With the control record's rules.followupissues false it is a card with no GitHub issue (tcput(),
 # lib/testaction.sh, under the cards lock, taken before the list's), as a review follow-up is; else an issue. Either way
-# it has the pack's type and last priority and the area's label, and no follow-up depth: it is a first card, whose own review fixes its findings. Each entry it
-# holds keeps its issue number or card id (batched), so a second ask files none for them. The list's lock is held from
-# the reading of the entries to their mark: two asks at once file one card. Exit 2 when the area has no open entry
-# whose card has ended.
-healsbatch() { # <area | ->
-  [ $# = 1 ] && [[ -n $1 && $1 != *$'\n'* ]] || { echo "usage: conveyor.sh heals batch <area | ->" >&2; return 2; }
-  local a=$1; [ "$a" != - ] || a=''
+# it has the pack's last priority and the area's label, and no follow-up depth: it is a first card, whose own review
+# fixes its findings. A batch card with a self-heals entry has the pack's type label (a bug card: its fix has a test
+# that fails on main); one of cleanup and already guarded entries alone, and a docs sweep card, has none, as a cleanup
+# follow-up has none (followups()): no test can fail on main for them. The card's text tells it to check that the guard
+# each already-guarded entry names still holds, and to fix one whose guard no longer does with a test; only a card of
+# cleanup entries alone has the Cleanup: line, under which a change to what the code does is a finding. Each entry it
+# holds keeps its issue number or card id (batched), so a second ask files none for them.
+# The list's lock is held from the reading of the entries to their mark: two asks at once file one card. Exit 2 when
+# the area has no open entry whose card has ended.
+healsbatch() { # <area | -> [docs]
+  [[ $# -le 2 && ${2:-docs} = docs && -n $1 && $1 != *$'\n'* ]] || { echo "usage: conveyor.sh heals batch <area | -> | heals docs <area | ->" >&2; return 2; }
+  local a=$1 lf=$SELFHEALS what='self-heals list' kind='Self-heals batch' tl='' rc; [ "$a" != - ] || a=''
+  [ -z "${2:-}" ] || lf=$DOCSDRIFT what='docs list' kind='Docs sweep'
   ( # A card with no GitHub issue is added to the Tests page's record (tcput()): that lock is taken before the list's, the
     # order testpick() and its retry take them in. Taken the other way round, each waits for the other with no end,
     # until the pick's time limit (lockedfor(), lib/records.sh) or the Board's call limit stops one.
@@ -57,25 +66,47 @@ healsbatch() { # <area | ->
       || { echo "conveyor: the card records could not be read; nothing filed" >&2; exit 1; }
     es=$(jq -cs --arg a "$a" --slurpfile b <(printf '%s\n' "$busy") --slurpfile tc <(printf '%s\n' "$tac") \
       'map(objects | select((.area // "") == $a and .batched == null)) | map(.card as $c | . + {wait: (([$c, ((first($tc[0][] | select((.was // []) | index($c))) | .card) // $c)]
-        | any(IN($b[0].cards[]))) or (.from == "review" and (.issue | IN($b[0].issues[]))))})' "$SELFHEALS" 2>/dev/null) || es='[]'
+        | any(IN($b[0].cards[]))) or (.from == "review" and (.issue | IN($b[0].issues[]))))})' "$lf" 2>/dev/null) || es='[]'
     w=$(jq 'map(select(.wait)) | length' <<<"$es"); es=$(jq -c 'map(select(.wait | not) | del(.wait))' <<<"$es")
     k=$(jq length <<<"$es")
-    [ "$k" -gt 0 ] || { echo "conveyor: the self-heals list holds no open entry in ${a:-no area}$([ "$w" = 0 ] || echo " whose card has ended ($w wait for theirs to land or close)"); nothing filed" >&2; exit 2; }
-    title="Self-heals batch: $k finding$([ "$k" = 1 ] || echo s) of ${a:-no area}"
-    body=$(jq -r --arg a "${a:-no area}" '"Conveyor'"'"'s self-heals list holds the findings below, of \($a). The judge sorted each as self-heals: its failure heals itself (a card waits longer, a step runs again, text the next poll corrects, extra work with no wrong result). Fix them together in this card. Check each one against main first: fix one that still holds, with a test that fails without the fix; name in the reply one that is already fixed or no longer true, and why.\n\n## Findings\n"
-      + (map("- \(.finding)\n  - From: card \(.card), issue #\(.issue). The judge: \(.why) (list entry \(.id))") | join("\n"))' <<<"$es")
+    [ "$k" -gt 0 ] || { echo "conveyor: the $what holds no open entry in ${a:-no area}$([ "$w" = 0 ] || echo " whose card has ended ($w wait for theirs to land or close)"); nothing filed" >&2; exit 2; }
+    title="$kind: $k finding$([ "$k" = 1 ] || echo s) of ${a:-no area}"
+    # The type label only for a batch with a self-heals entry (above); an entry with no effect was written as self-heals.
+    t=''; [ "$lf" = "$DOCSDRIFT" ] || ! jq -e 'any(.[]; (.effect // "self-heals") == "self-heals")' <<<"$es" >/dev/null || t=$TYPE
+    if [ "$lf" = "$DOCSDRIFT" ]; then
+      body="Conveyor's docs list holds the findings below, of ${a:-no area}. The judge sorted each as docs drift: a guide or README omits or misdescribes what the code does correctly. Make the docs match what users see, in this card. Check each one against main first: fix one that still holds; name in the reply one that is already fixed or no longer true, and why. Change no code."
+    else
+      body="Conveyor's self-heals list holds the findings below, of ${a:-no area}. The judge sorted each by what its failure does, its kind under it: self-heals (its failure heals itself: a card waits longer, a step runs again, text the next poll corrects, extra work with no wrong result), cleanup (its fix changes no behaviour) or already guarded (another check, which its reason names as file:line, already stops the bad outcome). Fix them together in this card. Check each one against main first: fix one that still holds, a self-heals one with a test that fails without the fix; name in the reply one that is already fixed or no longer true, and why. For an already-guarded one, check first that the check its reason names still stops the outcome: when it no longer does, the finding is harm, so fix it here with a test that fails without the fix."
+      # The Cleanup: line (a change to what the code does is a finding: REVIEWER, lib/prompts.sh) only when every entry is
+      # cleanup: an already-guarded entry whose guard no longer holds asks for such a change.
+      ! jq -e 'all(.[]; .effect == "cleanup")' <<<"$es" >/dev/null \
+        || body+=$'\nCleanup: each finding here is cleanup, so no test has to fail on main for it. The change must keep what the code does: the review judges that it does.'
+    fi
+    body+=$'\n\n## Findings\n'$(jq -r 'map("- \(.finding)\n  - Kind: \(.effect // "self-heals"). From: card \(.card), issue #\(.issue). The judge: \(.why) (list entry \(.id))") | join("\n")' <<<"$es")
     prio=$(jq -r '.[-1] // empty' <<<"$PRIOS")
     if [ "$noissue" = 1 ]; then
-      num=$(tcput "" "$title" "$body" "" "Self-heals batch: ${a:-no area}" "$(jq -cn '$ARGS.positional' --args "$TYPE" ${prio:+"$prio"} ${a:+"$a"})") || exit 1
+      num=$(tcput "" "$title" "$body" "" "$kind: ${a:-no area}" "$(jq -cn '$ARGS.positional' --args ${t:+"$t"} ${prio:+"$prio"} ${a:+"$a"})") || exit 1
     else
       pm=''; packget privacy.mode pm || { echo "conveyor: the pack's privacy mode could not be read; nothing filed" >&2; exit 1; }
       [ "$pm" != public ] || body=$(privmask "$body") || { echo "conveyor: the privacy check could not be made; nothing filed" >&2; exit 1; }
-      out=$(gh_write issue create --title "$title" --label "$TYPE" ${prio:+--label "$prio"} ${a:+--label "$a"} --body "$body" 2>&1) \
-        && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] || { echo "conveyor: the batch card was not filed: ${out:0:400}" >&2; exit 1; }
+      out=$(gh_write issue create --title "$title" ${t:+--label "$t"} ${prio:+--label "$prio"} ${a:+--label "$a"} --body "$body" 2>&1) \
+        && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] || { echo "conveyor: the $kind card was not filed: ${out:0:400}" >&2; exit 1; }
     fi
-    jq -c --argjson ids "$(jq -c 'map(.id)' <<<"$es")" --arg b "$num" 'if type == "object" and (.id | IN($ids[])) then .batched = ($b | tonumber? // $b) else . end' "$SELFHEALS" > "$SELFHEALS.new" \
-      && mv -f "$SELFHEALS.new" "$SELFHEALS" || { rm -f "$SELFHEALS.new"; echo "conveyor: the batch card $num is filed, but the list could not mark its entries" >&2; exit 1; }
-    echo "conveyor: filed $num with $k finding$([ "$k" = 1 ] || echo s) of ${a:-no area}" ) 9>>"$SELFHEALS.lock"
+    jq -c --argjson ids "$(jq -c 'map(.id)' <<<"$es")" --arg b "$num" 'if type == "object" and (.id | IN($ids[])) then .batched = ($b | tonumber? // $b) else . end' "$lf" > "$lf.new" \
+      && mv -f "$lf.new" "$lf" || { rm -f "$lf.new"; echo "conveyor: the $kind card $num is filed, but the list could not mark its entries" >&2; exit 1; }
+    echo "conveyor: filed $num with $k finding$([ "$k" = 1 ] || echo s) of ${a:-no area}" ) 9>>"$lf.lock"
+  rc=$?; [ -z "$tl" ] || exec {tl}>&-
+  return $rc
+}
+# release-prep (commands/release-prep.sh), before the suite: one docs sweep card (healsbatch() docs) for each area of
+# the docs list with an open entry, so the docs match what users see in the release. An area whose entries all wait
+# for their card (exit 2) files none. Prints what it filed; fails when a card could not be filed, the others filed.
+healsdocs() {
+  local a rc=0
+  while IFS= read -r a; do
+    healsbatch "${a:--}" docs 2>&1; case $? in 0|2) ;; *) rc=1 ;; esac
+  done < <(jq -r 'objects | select(.batched == null) | .area // ""' "$DOCSDRIFT" 2>/dev/null | sort -u)
+  return $rc
 }
 
 # What the sort's judge is told (healssort()), then the findings, numbered.
@@ -85,7 +116,10 @@ as a follow-up card or an issue, before the rule below existed. Read the code ea
 worktree (main), when you need it to tell what its failure does. Do not run tests or builds, and change nothing.' "$HARMRULE" \
     'Answer with exactly one line for each finding, in order, and no other line:
 `F<n> HARM: <one-line reason>`
-`F<n> SELF-HEALS: <one-line reason>`'
+`F<n> SELF-HEALS: <one-line reason>`
+`F<n> CLEANUP: <one-line reason>`
+`F<n> ALREADY GUARDED: <one-line reason that names the check as file:line>`
+`F<n> DOCS DRIFT: <one-line reason>`'
 }
 # jq: a finding of an issue of many is a body line `- **<id> [P<n>] ...` (ispart) and the indented lines under it,
 # its line $s of the body's lines $l; partend is the line after them, partof its text as the judge is given it.
@@ -127,8 +161,8 @@ healsitems() { # <the open issues json>
         end' <<<"$1"
   } | jq -c -s 'to_entries | map(.value + {n: (.key + 1)}) | .[]'
 }
-# The findings of issues that a sort moved to the self-heals list, {issue, finding} a line.
-healslisted() { jq -c 'objects | select(.from == "sort") | {issue, finding}' "$SELFHEALS" 2>/dev/null || :; }
+# The findings of issues that a sort moved to the self-heals list or the docs list, {issue, finding} a line.
+healslisted() { cat "$SELFHEALS" "$DOCSDRIFT" 2>/dev/null | jq -c 'objects | select(.from == "sort") | {issue, finding}' 2>/dev/null || :; }
 # The open issues held now, as a JSON list: the control record's held with the holds adopted() adds to it for these
 # issues (a span of startHeld, the filing mark, an author outside the project), as pick reads them. Fails when the
 # control record cannot be read: then no issue may be sorted.
@@ -137,10 +171,11 @@ healsheld() { # <the open issues json>
 }
 # The judge's kind of each item with a finding (healsitems() in <folder>/items): its answer read into <folder>/rulings, {n, effect,
 # why} a line, one for each item it gave exactly one readable line; an item it gave none is harm (healsapply()). A
-# finding whose Proof says it was seen in real logs or records is harm whatever it said (SEENRX, lib/followups.sh).
+# finding whose Proof says it was seen in real logs or records is harm whatever it said (SEENRX, lib/followups.sh), as
+# is an already-guarded one whose reason names no check found at a file:line of main (guardless(), lib/followups.sh).
 # Prints the judge's fields (judgecall(), lib/review.sh); fails, printing them with failed, when it gave no answer.
 healsjudge() { # <folder>
-  local j x rc ACCT RACCT
+  local j x rc ACCT RACCT bad
   mapfile -t x < <(SEATCARD='' cardaccts "$(ctl 2>/dev/null)")
   # shellcheck disable=SC2034 # ACCT and RACCT are read by judgecall() in lib/review.sh: the accounts a card started now would use
   ACCT=${x[0]-} RACCT=${x[1]-}
@@ -148,21 +183,29 @@ healsjudge() { # <folder>
   j=$(CALLSTEP=sort CALLACT='the judge sorts the queued follow-ups and open finding issues' judgecall "$1/wt" "$(healsprompt)" \
     "# The findings"$'\n'"$(jq -r 'select((.finding // "") | test("[^[:space:]]")) | "F\(.n) [\(if .kind == "card" then "card " + .id else "issue #\(.issue)" end)] \(.finding)"' "$1/items")"); rc=$?
   [ $rc != 0 ] || jq -cRn --slurpfile i <(jq -c . "$1/items") --arg seen "$SEENRX" '[inputs | gsub("^([[:space:]`*-]|[0-9]+[.)])+|[[:space:]`*]+$"; "")
-      | capture("^F(?<n>[0-9]+) (?<e>HARM|SELF-HEALS):[[:space:]]*(?<r>.*[^[:space:]].*)$"; "i") | .n |= tonumber] | group_by(.n) | map(select(length == 1) | .[0])[]
+      | capture("^F(?<n>[0-9]+) (?<e>HARM|SELF-HEALS|CLEANUP|ALREADY[ -]GUARDED|DOCS[ -]DRIFT):[[:space:]]*(?<r>.*[^[:space:]].*)$"; "i") | .n |= tonumber
+      | .e |= (ascii_downcase | sub("-"; " ") | sub("^self heals$"; "self-heals"))] | group_by(.n) | map(select(length == 1) | .[0])[]
     | .n as $n | (first($i[] | select(.n == $n)) // null) as $x | select($x != null)
-    | ((.e | ascii_downcase) == "self-heals" and ($x.finding | test($seen; "i"))) as $seenit
-    | {n: $n, effect: (if $seenit then "harm" else .e | ascii_downcase end), why: (.r + if $seenit then " (its Proof says it was seen in real logs or records, so it is harm)" else "" end)}' \
+    | (.e != "harm" and ($x.finding | test($seen; "i"))) as $seenit
+    | {n: $n, effect: (if $seenit then "harm" else .e end), why: (.r + if $seenit then " (its Proof says it was seen in real logs or records, so it is harm)" else "" end)}' \
     "$1/wt.judge" > "$1/rulings" 2>/dev/null || : > "$1/rulings"
+  # An already-guarded ruling whose guard is not found in main's worktree, read before it goes, is harm; a check that
+  # cannot be made keeps no ruling, so each item stays, as harm.
+  bad=$(jq -r 'select(.effect == "already guarded") | [.n, .why] | map(tostring | gsub("[[:space:]]+"; " ")) | join("\t")' "$1/rulings" 2>/dev/null | guardless "$1/wt") \
+    || { bad='[]'; : > "$1/rulings"; }
+  [ "$bad" = '[]' ] || { jq -c --argjson b "$bad" --arg w "$GUARDLESS" 'if .n | IN($b[]) then .effect = "harm" | .why += $w else . end' "$1/rulings" > "$1/rulings.new" \
+    && mv -f "$1/rulings.new" "$1/rulings" || : > "$1/rulings"; }
   git -C "$MAIN" worktree remove --force "$1/wt" >/dev/null 2>&1
   printf '%s\n' "$j"; return $rc
 }
 # Each item of <folder>/items given its kind (<folder>/rulings; with none, or with no finding text, it is harm). A harm
-# item stays as it is. A self-heals one goes to the list first (healsadd(), from: sort), so it is never lost, then: a
+# item stays as it is. One of a kind kept off the belt (self-heals, cleanup, already guarded or docs drift) goes to the
+# list of its kind first (healsadd(), from: sort), so it is never lost, then: a
 # card leaves the queue (tcdrop(); one a card picked meanwhile is built, and its line says so); a one-finding issue is
 # read again once its entry is written, just before its close (healssame()): one changed, closed or held since the
 # judge read it stays open and its entry leaves the list (healsdrop()); else it is closed as not planned, with a
 # comment that names its list entry (healsclose(): one changed as it closed is opened again, and its entry leaves the
-# list too). The self-heals findings of an issue of many go to the list with one comment on the issue (healsmove()).
+# list too). Such findings of an issue of many go to their lists with one comment on the issue (healsmove()).
 # The sort never edits an issue's body. An issue held now (healsheld(), read again after the judge: a hold added while it
 # read stays) is left as it is. Writes the log's items to <folder>/log, one JSON line each (healslog()), and for each
 # issue of many, {issue, moved, closed, done, note}.
@@ -178,22 +221,22 @@ healsapply() { # <folder>
     if [[ $f != *[![:space:]]* ]]; then e=harm why='it holds no finding text, so it stays, as harm'
     elif [ -z "$e" ]; then e=harm why='the judge gave no line for it that could be read, so it stays, as harm'; fi
     entry='' note='' ok=true
-    if [ "$e" = self-heals ] && [ "$k" != card ] && ! jq -e --argjson i "$iss" 'arrays | index($i) == null' <<<"$h" >/dev/null 2>&1; then
+    if [ "$e" != harm ] && [ "$k" != card ] && ! jq -e --argjson i "$iss" 'arrays | index($i) == null' <<<"$h" >/dev/null 2>&1; then
       ok=false note='it is held now, or its holds could not be read, so it stays as it is'
-    elif [ "$e" = self-heals ] && [ "$k" = part ]; then
-      parts+=("$(jq -c --arg why "$why" '. + {why: $why}' <<<"$it")"); continue
-    elif [ "$e" = self-heals ]; then
-      if ! entry=$(healsadd "$from" "$iss" "$a" "$why" "$f" sort); then entry='' ok=false note='the self-heals list could not be written, so it stays'
+    elif [ "$e" != harm ] && [ "$k" = part ]; then
+      parts+=("$(jq -c --arg why "$why" --arg e "$e" '. + {why: $why, effect: $e}' <<<"$it")"); continue
+    elif [ "$e" != harm ]; then
+      if ! entry=$(healsadd "$from" "$iss" "$a" "$why" "$f" sort "$e"); then entry='' ok=false note='its list could not be written, so it stays'
       elif [ "$k" = card ]; then
         tcdrop "$id"; ! jq -e --arg c "$id" 'any(.cards[]?; .id == $c)' "$TACARDS" >/dev/null 2>&1 || { ok=false note='a card picked it before it could leave the queue, so it is built'; }
       elif ! healssame "$1" "$iss"; then
         ok=false note='it was changed, closed or held on GitHub after the judge read it, or could not be read again, so it stays as it is'
-        healsdrop "$entry" || note+=', and its entry could not leave the self-heals list'
+        healsdrop "$entry" || note+=', and its entry could not leave its list'
         entry=''
       elif ! healsclose "$iss" "$(jq -c --argjson n "$iss" 'first(.[] | select(.number == $n))' "$1/issues")" \
-          "Conveyor sorted this finding by what its failure does: the judge found that it heals itself. It is now entry $entry of the self-heals list, which a batch card of its area fixes with the others, so this issue is closed."; then
+          "Conveyor sorted this finding by what its failure does: the judge sorted it as $e. It is now entry $entry of the $(healswhat "$e"), which a $(healscard "$e") of its area fixes with the others, so this issue is closed."; then
         ok=false note='it could not be closed, or it changed as it was closed and was opened again, so it stays'
-        healsdrop "$entry" || note+=', and its entry could not leave the self-heals list'
+        healsdrop "$entry" || note+=', and its entry could not leave its list'
         entry=''
       fi
     fi
@@ -237,15 +280,21 @@ healssame() { # <folder> <issue>
   cur=$(healsnow "$2") && jq -e --argjson n "$2" --slurpfile w "$1/issues" 'first($w[0][] | select(.number == $n)) as $o
       | .title == $o.title and (.body // "") == ($o.body // "")' <<<"$cur" >/dev/null 2>&1
 }
-# The entry <id> a sort wrote to the self-heals list (healsadd(), from: sort) for a finding it then left where it was
-# (healsapply(), healsmove()): taken off the list, so the finding is not both in its issue and on the list. An entry
-# a batch card holds already stays. Fails when the list cannot be written again.
+# The entry <id> a sort wrote to the self-heals list or the docs list (healsadd(), from: sort; a d id is the docs
+# list's) for a finding it then left where it was (healsapply(), healsmove()): taken off the list, so the finding is
+# not both in its issue and on the list. An entry a batch card holds already stays. Fails when the list cannot be
+# written again.
 healsdrop() { # <entry id>
+  local f=$SELFHEALS; [[ $1 != d* ]] || f=$DOCSDRIFT
   ( flock 9 || exit 1
-    jq -c --arg id "$1" 'select(type != "object" or .id != $id or .from != "sort" or .batched != null)' "$SELFHEALS" > "$SELFHEALS.new" \
-      && mv -f "$SELFHEALS.new" "$SELFHEALS" || { rm -f "$SELFHEALS.new"; exit 1; } ) 9>>"$SELFHEALS.lock"
+    jq -c --arg id "$1" 'select(type != "object" or .id != $id or .from != "sort" or .batched != null)' "$f" > "$f.new" \
+      && mv -f "$f.new" "$f" || { rm -f "$f.new"; exit 1; } ) 9>>"$f.lock"
 }
-# The self-heals findings of each issue of many (healsapply(): each its item, a JSON line with the judge's why). The
+# <kind>: the name of its list, and of the card that fixes an area's entries of that list (healsbatch()).
+healswhat() { if [ "$1" = 'docs drift' ]; then echo 'docs list'; else echo 'self-heals list'; fi; }
+healscard() { if [ "$1" = 'docs drift' ]; then echo 'docs sweep card'; else echo 'batch card'; fi; }
+# The findings of each issue of many that the judge sorted as a kind kept off the belt (healsapply(): each its item, a
+# JSON line with the judge's why and kind, effect; each goes to the list of its kind). The
 # issue is read again first (healsnow()): one closed or held meanwhile is left as it is. A finding moves only when the
 # body still holds it as the judge read it (its first line, head, with the lines under it: partof()); one changed or no
 # longer there stays in the issue and off the list. Each one that moves goes to the list (healsadd()). The body is
@@ -255,20 +304,20 @@ healsdrop() { # <entry id>
 # leave the list (healsdrop()), so a finding is on the list only when its issue says so. Prints a log line for each
 # finding (healslog()) and {issue, moved (the entries), closed, done, note} for each issue.
 healsmove() { # <part item>...
-  local iss cur p entry f why msg note ok closed hit left logs
+  local iss cur p entry f why e msg note ok closed hit left logs
   for iss in $(printf '%s\n' "$@" | jq -r .issue | sort -un); do
     note='' ok=true closed=false hit='' logs=''
     cur=$(healsnow "$iss") || cur=''
     while IFS= read -r p; do
-      f=$(jq -r .finding <<<"$p") why=$(jq -r .why <<<"$p") entry=''
-      if [ -z "$cur" ]; then logs+=$(healslog part '' "$iss" "$f" self-heals "$why" '' false 'its issue could not be read again, is closed or is held now, so it stays in the issue')$'\n'
+      f=$(jq -r .finding <<<"$p") why=$(jq -r .why <<<"$p") e=$(jq -r '.effect // "self-heals"' <<<"$p") entry=''
+      if [ -z "$cur" ]; then logs+=$(healslog part '' "$iss" "$f" "$e" "$why" '' false 'its issue could not be read again, is closed or is held now, so it stays in the issue')$'\n'
       elif ! jq -e --argjson c "$cur" "$HEALSPART"'.head as $h | .finding as $f | ($c.body // "" | split("\n")) as $l
           | any(range($l | length); $l[.] == $h and partof($l; .) == $f)' <<<"$p" >/dev/null 2>&1; then
-        logs+=$(healslog part '' "$iss" "$f" self-heals "$why" '' false 'it was changed or removed in the issue while the judge read it, so it stays')$'\n'
-      elif ! entry=$(healsadd "$(jq -r .from <<<"$p")" "$iss" "$(jq -r '.area // ""' <<<"$p")" "$why" "$f" sort); then
-        logs+=$(healslog part '' "$iss" "$f" self-heals "$why" '' false 'the self-heals list could not be written, so it stays in the issue')$'\n'
+        logs+=$(healslog part '' "$iss" "$f" "$e" "$why" '' false 'it was changed or removed in the issue while the judge read it, so it stays')$'\n'
+      elif ! entry=$(healsadd "$(jq -r .from <<<"$p")" "$iss" "$(jq -r '.area // ""' <<<"$p")" "$why" "$f" sort "$e"); then
+        logs+=$(healslog part '' "$iss" "$f" "$e" "$why" '' false 'its list could not be written, so it stays in the issue')$'\n'
       else
-        logs+=$(healslog part '' "$iss" "$f" self-heals "$why" "$entry" true '')$'\n'; hit+=$(jq -c --arg e "$entry" '{fid, entry: $e}' <<<"$p")$'\n'
+        logs+=$(healslog part '' "$iss" "$f" "$e" "$why" "$entry" true '')$'\n'; hit+=$(jq -c --arg e "$entry" '{fid, entry: $e}' <<<"$p")$'\n'
       fi
     done < <(printf '%s\n' "$@" | jq -c --argjson i "$iss" 'select(.issue == $i)')
     hit=$(printf '%s' "$hit" | jq -cs .)
@@ -277,14 +326,14 @@ healsmove() { # <part item>...
       # How many findings of the body are not on the list: this sort's or an earlier one's.
       left=$(jq -n --argjson c "$cur" --argjson i "$iss" --slurpfile ls <(healslisted) "$HEALSPART$HEALSONE"'($c.body // "" | split("\n")) as $l
         | [range($l | length) | select($l[.] | ispart) | {issue: $i, finding: (partof($l; .) | one)} | select(IN($ls[]) | not)] | length') || left=''
-      msg="Conveyor sorted the findings of this issue by what their failure does. The judge found that these heal themselves, so they moved to the self-heals list, which a batch card of their area fixes: $(jq -r 'map("\(.fid) as \(.entry)") | join(", ")' <<<"$hit")."
+      msg="Conveyor sorted the findings of this issue by what their failure does. The judge sorted these as no harm, so they moved to the self-heals list (self-heals, cleanup and already guarded), which a batch card of their area fixes, or to the docs list (docs drift, an entry that starts with d), which a docs sweep card of their area fixes: $(jq -r 'map("\(.fid) as \(.entry)") | join(", ")' <<<"$hit")."
       if [ "$left" = 0 ]; then
         if healsclose "$iss" "$cur" "$msg Every finding of this issue is on the list now, so it is closed. Its body is left as it was."; then closed=true
         else ok=false note='every finding of it is on the list, but it could not be closed, or it changed as it was closed and was opened again, so its findings stay in it'; fi
       elif ! gh_write issue comment "$iss" --body "$msg Its other findings stay in this issue. Its body is left as it was." >/dev/null 2>&1; then
         ok=false note='the comment that names the entries could not be posted, so its findings stay in it'
       fi
-      [ "$ok" = true ] || while IFS= read -r entry; do healsdrop "$entry" || note+=", and entry $entry could not leave the self-heals list"; done < <(jq -r '.[].entry' <<<"$hit")
+      [ "$ok" = true ] || while IFS= read -r entry; do healsdrop "$entry" || note+=", and entry $entry could not leave its list"; done < <(jq -r '.[].entry' <<<"$hit")
     fi
     # The findings' lines, each that moved given as left in the issue when its issue's comment or close failed.
     printf '%s' "$logs" | jq -c --argjson d "$ok" 'if $d or .entry == null then . else del(.entry) + {done: false, note: "its issue could not be told, so it stays in the issue"} end'
@@ -330,6 +379,6 @@ healssort() {
     && printf '%s\n' "$out" >> "$HEALSSORT"; rc=$?
   rm -r -f -- "$w"; exec {fd}>&-
   [ $rc = 0 ] || { echo "conveyor: the sort ran, but its line could not be written to $HEALSSORT" >&2; return 1; }
-  jq -r '"conveyor: sorted \(.items | map(select(.moved == null)) | length) item(s): \(.items | map(select(.effect == "self-heals" and .done)) | length) moved to the self-heals list"
+  jq -r '"conveyor: sorted \(.items | map(select(.moved == null)) | length) item(s): \(.items | map(select((.effect | IN("self-heals", "cleanup", "already guarded")) and .done)) | length) moved to the self-heals list, \(.items | map(select(.effect == "docs drift" and .done)) | length) to the docs list"
     + (if .judge.failed then "; the judge failed (\(.judge.failed)), so each stays, as harm" else "" end)' <<<"$out"
 }

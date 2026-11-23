@@ -277,21 +277,31 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 # accepted (a line that names an unknown finding is dropped). An answer that is not read whole leaves the judge's line
 # with failed, decided (the findings decided from it) and raw (its last 2,000 characters).
 # Each accepted or outside finding also has its kind, effect (HARMRULE): what its failure does, never how likely it
-# is. The reason starts with `harm:` or `self-heals:`; a reason with neither leaves effect out, and such a finding is
-# harm, so nothing is lost. A self-heals finding whose Proof says it was seen in real logs or records is harm
-# (SEENRX, lib/followups.sh), its reason saying so. A self-heals finding outside the change, and on a follow-up card
-# (its issue's body has a "Follow-up depth: N" line, N 1 or more: followups()) an accepted self-heals one, is written
-# to the self-heals list (healsadd(), lib/followups.sh) in place of a follow-up or a fix round: it becomes a line
-# `SELFHEALS: <finding> (judge: self-heals: <reason>)` of the review, no finding (NOTFINDING), in the line's
-# selfheals. An always-accepted kind is never moved. On a card that is no follow-up, an accepted self-heals finding is
+# is. The reason starts with `harm:`, `self-heals:`, `cleanup:`, `already guarded:` or `docs drift:`; a reason with
+# none leaves effect out, and such a finding is harm, so nothing is lost. A finding of another kind than harm whose
+# Proof says it was seen in real logs or records is harm (SEENRX, lib/followups.sh), its reason saying so; so is an
+# already-guarded one whose reason names no check found at a file:line of the worktree (guardless(), lib/followups.sh).
+# A finding of a kind kept off the belt (LISTKINDS) outside the change, and on a follow-up card (its issue's body has
+# a "Follow-up depth: N" line, N 1 or more: followups()) an accepted one, is written to its list (healsadd(),
+# lib/followups.sh: the self-heals list, or the docs list for docs drift) in place of a follow-up or a fix round: it
+# becomes a line `SELFHEALS: <finding> (judge: <kind>: <reason>)` of the review, no finding (NOTFINDING), in the line's
+# selfheals. On a card that is no follow-up, an accepted finding of a kind kept off the belt inside the change is
 # fixed in the card's fix rounds as before; its effect goes to <worktree>.effects ({finding, effect, reason} a line,
-# the last ruling of a finding kept), which followups() reads should it be left at the last review. The list keeps
-# the last ruling too: a finding an earlier round put there that this round does not leaves it (healsunput()).
+# the last ruling of a finding kept), which afterreview() (lib/card.sh) reads at the last review, where it blocks no
+# card, and followups() should it be left there. A finding of an always-accepted kind is harm whatever kind its
+# reason gives, its reason saying so: it is never moved, and it blocks a card at its last review as any harm finding
+# does. The lists keep the last ruling too: a finding an earlier round put on one that this round does not leaves it
+# (healsunput()).
 HARMRULE='Sort each finding you accept or mark outside by what its failure does, never by how likely it is:
 - harm: data is lost or written wrong (card records, issues, kept work); wrong code lands or pushes, or a check
-  passes that should fail; the belt or a card gets stuck and nothing recovers it without a person.
+  passes that should fail; the belt or a card gets stuck and nothing recovers it without a person; a stop that
+  nobody is told of; private text is published; a security hole.
 - self-heals: the failure heals itself (a card waits longer, a step runs again, a slot is briefly over its cap);
   wrong or missing text that the next poll or turn corrects; extra work or cost, with no wrong result.
+- cleanup: its fix changes no behaviour: an unused variable, a redundant check, a misleading name, a stale comment.
+- already guarded: the finding is real, but another check in the code already stops the bad outcome; it names a
+  missing second guard, not an open hole. The reason names that check as file:line; with none, it is harm.
+- docs drift: a guide or README omits or misdescribes what the code does correctly.
 A finding whose Proof says it was seen in real logs or records is harm, even when it heals itself. When you cannot
 tell, it is harm.'
 JUDGE='You are the judge of a code review. A reviewer read the staged change in this worktree (`git diff --cached`)
@@ -330,11 +340,12 @@ input or timing.
 A finding marked `always accepted` is of a kind the project always accepts: answer ACCEPT for it. It is accepted
 whatever you answer, so its line always ends with its `Cost to every card:`.
 '"$HARMRULE"'
-The reason of an ACCEPT or an OUTSIDE starts with that kind, `harm` or `self-heals`, then a colon.
+The reason of an ACCEPT or an OUTSIDE starts with that kind, `harm`, `self-heals`, `cleanup`, `already guarded` or
+`docs drift`, then a colon.
 Answer with exactly one line for each finding, in order, and no other line:
-`F<n> ACCEPT: <harm | self-heals>: <one-line reason>. Cost to every card: <any run, wait, retry or gate the fix would add to every card, or none>`
+`F<n> ACCEPT: <harm | self-heals | cleanup | already guarded | docs drift>: <one-line reason>. Cost to every card: <any run, wait, retry or gate the fix would add to every card, or none>`
 `F<n> DECLINE: <kind>: <one-line reason>`
-`F<n> OUTSIDE: <harm | self-heals>: <one-line reason: why it is real, and why this card'"'"'s change did not cause it>`
+`F<n> OUTSIDE: <harm | self-heals | cleanup | already guarded | docs drift>: <one-line reason: why it is real, and why this card'"'"'s change did not cause it>`
 A reason that names another finding by its number quotes that finding'"'"'s file and line beside it, as
 `F1 (src/a.js:12)`, so the reason reads on its own.
 '"$STE"
@@ -491,29 +502,43 @@ fixedbefore() { # <worktree>
       | "- \(.id) \(.line)" + (if .reason then " (accepted: \(.reason))" else "" end)]
     | if length == 0 then empty else "# The findings the last fix round was told to fix", .[], "" end' "$1.rounds/findings.jsonl" 2>/dev/null
 }
-# Each finding of the judge's decisions (<the decisions file>, judged()) marked heals is written to the self-heals list
+# The judge's already-guarded rulings in <worktree>.judge.said whose reason names no check found at a file:line of the
+# worktree (guardless(), lib/followups.sh) become harm: the reason says so, and the finding goes to no list. Fails
+# only when the file cannot be read or written again.
+guardsaid() { # <worktree>
+  local bad
+  bad=$(jq -r '.d[] | select(.effect == "already guarded") | [.n, .reason] | map(tostring | gsub("[[:space:]]+"; " ")) | join("\t")' "$1.judge.said" | guardless "$1") || return 1
+  [ "$bad" != '[]' ] || return 0
+  jq -c --argjson b "$bad" --arg w "$GUARDLESS" '.d |= map(if .n | IN($b[]) then .effect = "harm" | .reason += $w | del(.heals) else . end)' "$1.judge.said" > "$1.judge.said.new" \
+    && mv -f "$1.judge.said.new" "$1.judge.said"
+}
+# Each finding of the judge's decisions (<the decisions file>, judged()) marked heals is written to the list of its kind
 # (healsadd(), lib/followups.sh), as a finding of <card> and <issue> in <area>. One whose entry cannot be written loses
 # its mark and its kind, so it stays a finding with no kind (fixed or filed as harm is) and is not lost. Fails only when the file cannot be written again.
 healsput() { # <card> <issue> <area> <the decisions file>
-  local n why f keep=()
-  while IFS=$'\t' read -r n why f; do
-    healsadd "$1" "$2" "$3" "$why" "$f" review >/dev/null || { keep+=("$n"); echo "conveyor: card $1: a self-heals finding could not be written to the self-heals list, so it stays a finding: ${f:0:200}" >&2; }
-  done < <(jq -r '.d[] | select(.heals) | [.n, .reason, .finding] | map(tostring | gsub("[[:space:]]+"; " ")) | join("\t")' "$4")
+  local n e why f keep=()
+  while IFS=$'\t' read -r n e why f; do
+    healsadd "$1" "$2" "$3" "$why" "$f" review "$e" >/dev/null || { keep+=("$n"); echo "conveyor: card $1: a $e finding could not be written to its list, so it stays a finding: ${f:0:200}" >&2; }
+  done < <(jq -r '.d[] | select(.heals) | [.n, .effect, .reason, .finding] | map(tostring | gsub("[[:space:]]+"; " ")) | join("\t")' "$4")
   [ ${#keep[@]} = 0 ] || { jq -c '($ARGS.positional | map(tonumber)) as $k | .d |= map(if .n | IN($k[]) then del(.heals, .effect) else . end)' --args "${keep[@]}" "$4" > "$4.new" && mv -f "$4.new" "$4"; }
 }
-# The entries an earlier review of <card> wrote to the self-heals list (from: review) for the findings of the judge's
-# decisions (<the decisions file>) that this round does not send there; with all, for each of its findings (its
-# review stands as the reviewer wrote it). The last ruling of a finding stands, as in <worktree>.outside: one the judge
-# now rules harm, gives no kind, finds in the change or declines leaves the list, so it is never both on the list and
-# fixed or filed. An entry a batch card holds stays. Fails when the list cannot be written again.
+# The entries an earlier review of <card> wrote to the self-heals list or the docs list (from: review) for the findings
+# of the judge's decisions (<the decisions file>) that this round does not send to that list; with all, for each of its
+# findings (its review stands as the reviewer wrote it). The last ruling of a finding stands, as in
+# <worktree>.outside: one the judge now rules harm, gives no kind, finds in the change, declines or sends to the other
+# list leaves the list, so it is never on two lists, or both on one and fixed or filed. An entry a batch card holds
+# stays. Fails when a list cannot be written again.
 healsunput() { # <card> <the decisions file> [all]
-  local gone
-  grep -qF "\"card\":$(jq -cn --arg c "$1" '$c')," "$SELFHEALS" 2>/dev/null || return 0
-  gone=$(jq -c --arg all "${3:-}" "$HEALSONE"'[.d[] | select($all != "" or (.heals | not)) | .finding | one]' "$2" 2>/dev/null) || return 1
-  [ "$gone" != '[]' ] || return 0
-  ( flock 9 || exit 1
-    jq -c --arg c "$1" --argjson g "$gone" 'select(type != "object" or .card != $c or .from != "review" or .batched != null or (.finding | IN($g[]) | not))' "$SELFHEALS" > "$SELFHEALS.new" \
-      && mv -f "$SELFHEALS.new" "$SELFHEALS" || { rm -f "$SELFHEALS.new"; exit 1; } ) 9>>"$SELFHEALS.lock"
+  local gone f
+  for f in "$SELFHEALS" "$DOCSDRIFT"; do
+    grep -qF "\"card\":$(jq -cn --arg c "$1" '$c')," "$f" 2>/dev/null || continue
+    gone=$(jq -c --arg all "${3:-}" --arg docs "$([ "$f" = "$DOCSDRIFT" ] && echo 1)" "$HEALSONE"'[.d[]
+      | select($all != "" or (.heals | not) or ((.effect == "docs drift") != ($docs != ""))) | .finding | one]' "$2" 2>/dev/null) || return 1
+    [ "$gone" != '[]' ] || continue
+    ( flock 9 || exit 1
+      jq -c --arg c "$1" --argjson g "$gone" 'select(type != "object" or .card != $c or .from != "review" or .batched != null or (.finding | IN($g[]) | not))' "$f" > "$f.new" \
+        && mv -f "$f.new" "$f" || { rm -f "$f.new"; exit 1; } ) 9>>"$f.lock" || return 1
+  done
 }
 # The review of <worktree> stands as the reviewer wrote it (no judge, or a judge that failed: judged()), so no earlier
 # round's ruling of its findings holds: each finding's kind leaves <worktree>.effects (with none, followups() files it
@@ -548,8 +573,8 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue
   # What it said of each finding: its one decision line that parses whole, an accepted one with its reason and cost,
   # else the finding is accepted (a duplicate id, a line that cannot be read, no line). A line for no finding of the
   # review is dropped. A line's bullet or list number (`- `, `1. `, `1) `) is not read. None read at all fails the answer. An always-accepted kind beats a decline and an OUTSIDE.
-  # An ACCEPT or OUTSIDE reason's leading `harm:` or `self-heals:` is its effect, taken off the reason (HARMRULE);
-  # heals marks the self-heals ones that go to the list (above).
+  # An ACCEPT or OUTSIDE reason's leading kind (`harm:`, `self-heals:`, `cleanup:`, `already guarded:` or `docs drift:`)
+  # is its effect, taken off the reason (HARMRULE); heals marks the ones that go to a list (above).
   elif ! jq -cn --slurpfile m "$wt.judge.marks" --rawfile a "$wt.judge" --arg seen "$SEENRX" --arg fu "$fu" 'def rx: "^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE|OUTSIDE):[[:space:]]*(?<r>.*[^[:space:]].*)$";
       ($a | split("\n") | map(gsub("^([[:space:]`*-]|[0-9]+[.)])+|[[:space:]`*]+$"; "") | select(test("^F[0-9]+")))) as $said
       | ($said | map(capture(rx))) as $all
@@ -558,10 +583,13 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue
         | ((if ($d | length) == 1 and all($bad[]; . != $x.n) then $d[0] as $d
           | ($d.r | capture("^(?<r>.*?)[[:space:].;|,-]*Cost to every card:[[:space:]]*(?<c>.*[^[:space:]].*)$") // {r: $d.r, c: null}) as $rc
           | (if $d.d == "ACCEPT" then $rc.r elif $d.d == "OUTSIDE" then $d.r else "" end
-            | capture("^(?<e>harm|self-heals)[[:space:]]*:[[:space:]]*(?<r>.*[^[:space:]].*)$"; "i") // null) as $ek
-          | ($ek != null and ($ek.e | ascii_downcase) == "self-heals" and ($x.finding | test($seen; "i"))) as $seenit
-          | (if $ek == null then null elif $seenit then "harm" else $ek.e | ascii_downcase end) as $e
-          | (if $ek == null then null elif $seenit then $ek.r + " (its Proof says it was seen in real logs or records, so it is harm)" else $ek.r end) as $er
+            | capture("^(?<e>harm|self-heals|cleanup|already[ -]guarded|docs[ -]drift)[[:space:]]*:[[:space:]]*(?<r>.*[^[:space:]].*)$"; "i") // null
+            | if . == null then null else .e |= (ascii_downcase | sub("^already-"; "already ") | sub("^docs-"; "docs ")) end) as $ek
+          | ($ek != null and $ek.e != "harm" and ($x.finding | test($seen; "i"))) as $seenit
+          | ($ek != null and $ek.e != "harm" and $x.kind != null) as $always
+          | (if $ek == null then null elif $seenit or $always then "harm" else $ek.e end) as $e
+          | (if $ek == null then null elif $seenit then $ek.r + " (its Proof says it was seen in real logs or records, so it is harm)"
+             elif $always then $ek.r + " (it is a \($x.kind) finding, a kind the project always accepts, so it is harm)" else $ek.r end) as $er
           | if ($d.d == "ACCEPT" or $x.kind != null) and ($rc.c == null or $rc.r == "") then null
             else {n: $x.n, finding: $x.finding, place: $x.place}
               + (if $d.d == "ACCEPT" then {accept: true, reason: ($er // $rc.r), cost: $rc.c}
@@ -569,25 +597,25 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue
                  elif $d.d == "OUTSIDE" then {accept: false, outside: true, reason: ($er // $d.r)}
                  else {accept: false, outside: false, reason: $d.r} + (($d.r | capture("^(?<k>claim wrong|cannot happen|fixed|rare case|not this change|other):"; "i") | {kind: (.k | ascii_downcase)}) // {}) end)
               + (if $e == null then {} else {effect: $e} end)
-              + (if $e == "self-heals" and $x.kind == null and ($d.d == "OUTSIDE" or $fu != "") then {heals: true} else {} end) end
+              + (if $e != null and $e != "harm" and $x.kind == null and ($d.d == "OUTSIDE" or $fu != "") then {heals: true} else {} end) end
           else null end)
           // {n: $x.n, finding: $x.finding, place: $x.place, accept: true, undecided: true, reason: "the judge gave no line for this finding that could be read", cost: null}))) as $s
       | if all($s[]; .undecided) then error("none") else {whole: (all($s[]; .undecided | not) and ($all | length) == ($said | length) and ($said | length) == ($s | length)), d: $s} end' > "$wt.judge.said" 2>/dev/null; then
     j=$(jq -c --rawfile r "$wt.judge" '. + {failed: "the answer of the judge holds no decision line that could be read", decided: 0, raw: ($r | .[-2000:])}' <<<"$j"); stood=1
-  elif ! healsput "$1" "$2" "$area" "$wt.judge.said"; then
+  elif ! guardsaid "$wt" || ! healsput "$1" "$2" "$area" "$wt.judge.said"; then
     # The review stands as the reviewer wrote it, each finding a finding: none stays on the list (healsnone(), below).
     j=$(jq -cn '{failed: "the findings for the self-heals list could not be sorted from the answer of the judge"}'); stood=1
-  # The review with each declined finding as a DECLINED line, each outside one as an OUTSIDE line and each one for the
-  # self-heals list as a SELFHEALS line; with no finding left, its verdict is GO.
+  # The review with each declined finding as a DECLINED line, each outside one as an OUTSIDE line and each one for a
+  # list (the self-heals list or the docs list) as a SELFHEALS line; with no finding left, its verdict is GO.
   elif ! { jq -rRn --slurpfile d "$wt.judge.said" '($d[0].d | map(select((.accept | not) or .heals))) as $no | ($d[0].d | all((.accept | not) or .heals)) as $go
       | inputs | . as $l | gsub("^[[:space:]]+|[[:space:]]+$"; "") as $s | ([$no[] | select(.finding == $s)] | first) as $x
-      | if $x then "\(if $x.heals then "SELFHEALS" elif $x.outside then "OUTSIDE" else "DECLINED" end): \($s) (judge: \(if $x.heals then "self-heals: " else "" end)\($x.reason))"
+      | if $x then "\(if $x.heals then "SELFHEALS" elif $x.outside then "OUTSIDE" else "DECLINED" end): \($s) (judge: \(if $x.heals then "\($x.effect): " else "" end)\($x.reason))"
         elif $go and startswith("VERDICT:") then "VERDICT: GO" else $l end' "$wt.review" > "$wt.review.new" \
       && mv -f "$wt.review.new" "$wt.review"; } 2>/dev/null; then
     j=$(jq -c '. + {failed: "the review could not be written again with what the judge declined"}' <<<"$j"); stood=1
   else
-    # A finding this round does not send to the self-heals list leaves it, as an earlier round put it there (healsunput()).
-    healsunput "$1" "$wt.judge.said" || echo "conveyor: cannot take the findings of $1 that the judge no longer sorts as self-heals off the self-heals list" >&2
+    # A finding this round does not send to a list leaves it, as an earlier round put it there (healsunput()).
+    healsunput "$1" "$wt.judge.said" || echo "conveyor: cannot take the findings of $1 that the judge no longer sorts for a list off that list" >&2
     # Each declined finding goes to the declined list (declined()), with its kind when its reason starts with one.
     while IFS=$'\t' read -r why f kind; do
       declined "$1" "$2" judge "$why" "$f" ${kind:+"$kind"} || echo "conveyor: cannot write the declined findings of $1 to the declined list" >&2
@@ -598,7 +626,7 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue
     # holds already (an entry of this card with batched, healsbatch(), lib/heals.sh) leaves it too: the batch card fixes
     # it, so a later harm ruling files no second card for it.
     { [ ! -s "$wt.outside" ] && ! jq -e 'any(.d[]; .outside and (.heals | not))' "$wt.judge.said" >/dev/null 2>&1; } \
-      || { { cat "$wt.outside" 2>/dev/null; jq -c --arg c "$1" --slurpfile b <(jq -c 'objects | select(.batched != null) | {card, finding}' "$SELFHEALS" 2>/dev/null || :) \
+      || { { cat "$wt.outside" 2>/dev/null; jq -c --arg c "$1" --slurpfile b <(cat "$SELFHEALS" "$DOCSDRIFT" 2>/dev/null | jq -c 'objects | select(.batched != null) | {card, finding}' 2>/dev/null || :) \
           "$HEALSONE"'.d[] | {finding, reason, keep: (.outside and (.heals | not) and ({card: $c, finding: (.finding | one)} | IN($b[]) | not))} + if .effect then {effect} else {} end' "$wt.judge.said"; } \
         | jq -cs 'reduce .[] as $x ({}; .[$x.finding] = $x) | .[] | select(.keep != false) | del(.keep)' > "$wt.outside.new" && mv -f "$wt.outside.new" "$wt.outside"; } \
       || echo "conveyor: cannot write the findings of $1 that the judge found outside its change to $wt.outside" >&2

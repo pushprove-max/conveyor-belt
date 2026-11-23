@@ -530,8 +530,8 @@ rollouts() { # <file> <prefix>
 # off (minor()): it is listed only, holds no verdict, causes no fix round and is never filed, but it is counted
 # (donewhen.sh counts()). An `OUTSIDE:` line is a finding the judge found real but not caused by the card's change
 # (judged()): it holds no verdict and causes no fix round, and it is filed as a follow-up when the card lands
-# (followups(), from <worktree>.outside). A `SELFHEALS:` line is a self-heals finding the judge wrote to the
-# self-heals list (judged()): it holds no verdict, causes no fix round and is never filed. Only the engine writes these
+# (followups(), from <worktree>.outside). A `SELFHEALS:` line is a finding of a kind kept off the belt that the judge
+# wrote to the self-heals list or the docs list (judged()): it holds no verdict, causes no fix round and is never filed. Only the engine writes these
 # lines: a line the reviewer starts so is a finding (review()).
 # The lines a review's record line (reason) and a blocked card's comment leave out: the NEW CARD, UNPROVEN,
 # DECLINED, MINOR, OUTSIDE, SELFHEALS and COVERED-BY lines stay there, so the dashboard's review text shows them, and the Tests page the

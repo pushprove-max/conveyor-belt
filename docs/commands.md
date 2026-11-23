@@ -181,13 +181,15 @@ Declined findings:
 - `declined dismiss [--by <who>] <id>...` hides lines from the Board's panel. The reviewer is still told not to raise
   them when their kind allows that.
 
-The self-heals list ([Harm or self-heals](cards.md#harm-or-self-heals)):
+The self-heals list and the docs list ([Harm or self-heals](cards.md#harm-or-self-heals)):
 
-- `heals batch <area | ->` files one card with the area's open entries as its scope. `-` takes the entries with no
-  area. An entry whose card has not landed or closed waits. With no entry ready in the area, it files nothing and
-  exits 2.
-- `heals sort` sorts the queued follow-up cards and the open finding issues: `harm` stays, and `self-heals` goes to
-  the list.
+- `heals batch <area | ->` files one card with the area's open entries of the self-heals list as its scope. `-` takes
+  the entries with no area. An entry whose card has not landed or closed waits. With no entry ready in the area, it
+  files nothing and exits 2.
+- `heals docs <area | ->` files one docs sweep card with the area's open entries of the docs list, in the same way.
+  `release-prep` files one for each area that has entries, before it runs the suite.
+- `heals sort` sorts the queued follow-up cards and the open finding issues: `harm` stays, `docs drift` goes to the
+  docs list, and `self-heals`, `cleanup` and `already guarded` go to the self-heals list.
 
 Lanes and the Foreman:
 

@@ -175,8 +175,9 @@
 #   dismissed ({time, by}) when it has them: the panel's "Show every line" shows them.
 # selfheals: the self-heals list (SELFHEALS) as the Declined panel's Self-heals list shows it (healssnap()): entries,
 #   every line no batch card holds yet (each one a batch card would file), newest first, each as its line is; areas,
-#   [{area (null for none), count}] of those lines, the most first; sorted, the last sort of the queued follow-ups (HEALSSORT): {time, ended, items (how many it
-#   sorted), moved (how many went to the list), failed (the judge's failure, when it failed)}, null when none ran.
+#   [{area (null for none), count}] of those lines, the most first; docs, the docs list (DOCSDRIFT) as {entries, areas}
+#   alike; sorted, the last sort of the queued follow-ups (HEALSSORT): {time, ended, items (how many it
+#   sorted), moved (how many went to a list), failed (the judge's failure, when it failed)}, null when none ran.
 # branches: the cards land-branch made that landed or closed, on any day (landed and cost.cards drop a card after
 #   today and after the 7 days; a lane left as it was still has to be told its change landed): card, issue,
 #   title, step, time. Only the newest of those that share an issue and a title, so a branch landed again is one row;
@@ -535,11 +536,13 @@ snaprows() { # <records file> <kept> <to>
 }
 # The self-heals list and the last sort as the snapshot gives them (selfheals, above).
 healssnap() {
-  jq -cn --slurpfile e <(jq -c 'objects' "$SELFHEALS" 2>/dev/null) --slurpfile s <({ tail -n 1 "$HEALSSORT" 2>/dev/null || :; } | jq -c 'objects' 2>/dev/null) \
-    '($e | map(select(.batched == null)) | sort_by(.time) | reverse) as $o
-    | {entries: $o, areas: ($o | group_by(.area) | map({area: .[0].area, count: length}) | sort_by(-.count)),
+  jq -cn --slurpfile e <(jq -c 'objects' "$SELFHEALS" 2>/dev/null) --slurpfile d <(jq -c 'objects' "$DOCSDRIFT" 2>/dev/null) \
+    --slurpfile s <({ tail -n 1 "$HEALSSORT" 2>/dev/null || :; } | jq -c 'objects' 2>/dev/null) \
+    'def open: map(select(.batched == null)) | sort_by(.time) | reverse; def areas: group_by(.area) | map({area: .[0].area, count: length}) | sort_by(-.count);
+    ($e | open) as $o | ($d | open) as $do
+    | {entries: $o, areas: ($o | areas), docs: {entries: $do, areas: ($do | areas)},
        sorted: ($s[0] // null | if . == null then null else {time, ended, items: ([.items[]? | select(.moved == null)] | length),
-         moved: ([.items[]? | select(.effect == "self-heals" and .done)] | length)} + (if .judge.failed then {failed: .judge.failed} else {} end) end)}'
+         moved: ([.items[]? | select((.effect // "harm") != "harm" and .done)] | length)} + (if .judge.failed then {failed: .judge.failed} else {} end) end)}'
 }
 snapshot() (
   next=null; held=null; built=null; queue=null; yes=$YES

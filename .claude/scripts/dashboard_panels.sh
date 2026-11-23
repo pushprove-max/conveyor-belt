@@ -61,7 +61,8 @@
 #           round and findings (the review the judge declined it in and that review's findings as the judge numbered
 #           them, [{n, finding}], else null), as the snapshot's declined gives them; rest: every other line, so, as its declinedRest gives them;
 #           heals: each record's self-heals list, {repo, repoUrl, sorted (its last sort of the queued follow-ups, or null), areas
-#           ([{area, count}]), entries (each with repo, repoUrl, id, time, card, issue, url, area, finding, why, effect)}, as its selfheals gives it.
+#           ([{area, count}]), entries (each with repo, repoUrl, id, time, card, issue, url, area, finding, why, effect),
+#           docs (its docs list, {areas, entries} alike)}, as its selfheals gives it.
 #   health  host {name, reachable, error}, records (each record's steered (the host answer's), repoUrl (its repository's https
 #           address, else null), snapshotAt (when the build of its kept snapshot began, null from a snapshot
 #           without it), loop, state (running, paused, stopped, as
@@ -407,7 +408,8 @@ PANELS_JQ='
         | {repo, repoUrl: ($r.repoUrl // null), id, time, card, issue, name: (.name // null), url, finding, by, why, built: (.built // null), dismissed: (.dismissed // null), round: (.round // null), findings: (.findings // null)}) | sort_by(.time) | reverse))
         # heals: the self-heals list of each record that has one (the snapshot'"'"'s selfheals), its entries tagged.
         + {heals: [$R[] | . as $r | .snap.selfheals | objects | {repo: $r.repo, repoUrl: ($r.repoUrl // null), sorted: (.sorted // null), areas: (.areas // []),
-            entries: [.entries[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null)}]}]}} end),
+            entries: [.entries[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null)}],
+            docs: (.docs | objects | {areas: (.areas // []), entries: [.entries[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null)}]}) // {areas: [], entries: []}}]}} end),
    # Belt 3D: the belt, Needs you, the queue (next, held, waiting) and Landed today as above, each card with what its
    # lane, bay and details show.
    belt3d: (if $R == null then {error: $cerr, data: null} else

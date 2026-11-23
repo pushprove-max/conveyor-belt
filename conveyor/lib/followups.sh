@@ -4,9 +4,10 @@
 # card's change (an OUTSIDE answer, judged(): <worktree>.outside), after the review's, whatever the last verdict; its
 # body says so and gives the judge's reason, and each goes to <worktree>.outfiled as {finding, issue} (issue: the
 # number, or the card id of a follow-up card) for the filed line. Prints the new issue numbers as a JSON array.
-# A finding its judge last sorted as self-heals (HARMRULE, lib/review.sh) is never filed: it goes to the self-heals
-# list (healsadd()), and a review whose findings all went there files nothing and prints []. Each follow-up's body
-# names the finding's kind and the judge's reason ("Kind:"); a finding with no kind is harm.
+# A finding its judge last sorted as self-heals, cleanup, already guarded or docs drift (HARMRULE, lib/review.sh) is
+# never filed: it goes to the self-heals list or the docs list (healsadd()), and a review whose findings all went there
+# files nothing and prints []. Each follow-up's body names the finding's kind and the judge's reason ("Kind:"); a
+# finding with no kind is harm.
 # With the control record's rules.followupissues false (the Rules tab's Cards with no GitHub issue: Review follow-ups On)
 # each finding becomes a card with no GitHub issue instead (tcadd(), lib/testaction.sh), its body the issue's, naming its
 # parent, and a `Depends on:` line with the parent card's id, so it is picked only once the parent has landed. A card on a finding that names a pipeline file is held as the issue is (`control release <card id>`). None is
@@ -167,12 +168,19 @@ fudepth() {
 FUCAP="its issue is a follow-up at the depth cap of $MAX_DEPTH, so no deeper follow-up is filed" # the reason of a finding declined at the cap
 leftovers() { grep -Ev "$NOTFINDING" "$1" 2>/dev/null | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk '!seen[$0]++'; } # <review file>: its finding lines, each once
 # <review file>: the findings followups() files, in its order: the review's finding lines (leftovers()), then the
-# findings of <worktree>.outside that are not among them, each once; none the judge last sorted as self-heals
-# (healsleft()), which go to the self-heals list instead.
+# findings of <worktree>.outside that are not among them, each once; none the judge last sorted as a kind kept off the
+# belt (healsleft()), which go to their list instead.
 tofile() { { leftovers "$1"; jq -r '.finding' "${1%.review}.outside" 2>/dev/null; } | awk 'NF && !seen[$0]++' | grep -vxF -f <(healsleft "$1"); }
-# <review file>: the findings the judge of a card that is no follow-up accepted and last sorted as self-heals
-# (<worktree>.effects, judged()), each once: its fix rounds fixed none of them when the review holds one still.
-healsleft() { jq -r 'select(.effect == "self-heals") | .finding' "${1%.review}.effects" 2>/dev/null; }
+# <review file>: the findings the judge of a card that is no follow-up accepted and last sorted as a kind kept off the
+# belt (LISTKINDS; <worktree>.effects, judged()), each once: its fix rounds fixed none of them when the review holds one still.
+healsleft() { jq -r --argjson k "$LISTKINDS" 'select(.effect | IN($k[])) | .finding' "${1%.review}.effects" 2>/dev/null; }
+# The findings on stdin, JSON lines with line (donewhen.sh findings(), repeats()), that are harm: all but those the judge
+# of <worktree>'s review last sorted as a kind kept off the belt (<worktree>.effects, healsleft()). A finding with no kind
+# is harm. Only a harm finding blocks a card at its last review (afterreview(), loopstop(), lib/card.sh): the others go to
+# their list as it lands (followups()).
+harmonly() { # <worktree>
+  jq -c --slurpfile e <(jq -c 'objects' "$1.effects" 2>/dev/null || :) --argjson k "$LISTKINDS" '. as $f | select(any($e[]; .finding == $f.line and (.effect | IN($k[]))) | not)'
+}
 # <review file>: why a last NO-GO with no finding line files nothing, with the reviewer's own line (its first UNPROVEN
 # line, else its VERDICT line, as afterreview() quotes one), cut at 200 characters.
 nofiling() { local w; w=$(grep -m1 '^UNPROVEN:' "$1" || grep -m1 '^VERDICT:' "$1"); echo "the last review said NO-GO and named no finding to file${w:+: ${w:0:200}}"; }
@@ -251,14 +259,15 @@ followups() { # <card> <issue json> <review file>
   [ "$n" != 0 ] || n=$(tcparent "$1")
   mapfile -t found < <(tofile "$3")
   rm -f "$fc" "$ofc"; [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" != false ] || nocard=1
-  # A finding of the last review the judge sorted as self-heals goes to the self-heals list (healsadd()), not to a
-  # follow-up: the card's own issue, its area. One that cannot be written there lands nothing, so it is not lost.
-  while IFS=$'\t' read -r why f; do
-    healsadd "$1" "$(jq -r .number <<<"$2")" "$area" "$why" "$f" review >/dev/null \
-      || { echo "a self-heals finding could not be written to the self-heals list, so nothing landed (finding: ${f:0:200})"; return 1; }
+  # A finding of the last review the judge sorted as a kind kept off the belt goes to its list (healsadd()), not to a
+  # follow-up: the card's own issue, its area, and the card that lands it. At the last review it no longer blocks the
+  # card, whatever its level (afterreview(), lib/card.sh). One that cannot be written there lands nothing, so it is not lost.
+  while IFS=$'\t' read -r ek why f; do
+    healsadd "$1" "$(jq -r .number <<<"$2")" "$area" "$why" "$f" review "$ek" >/dev/null \
+      || { echo "a $ek finding could not be written to its list, so nothing landed (finding: ${f:0:200})"; return 1; }
     healed=$((healed + 1))
-  done < <(leftovers "$3" | jq -rR --slurpfile e <(jq -c 'select(.effect == "self-heals")' "${3%.review}.effects" 2>/dev/null) \
-    '. as $f | first($e[] | select(.finding == $f)) | [.reason, .finding] | map(gsub("[[:space:]]+"; " ")) | join("\t")')
+  done < <(leftovers "$3" | jq -rR --slurpfile e <(jq -c --argjson k "$LISTKINDS" 'select(.effect | IN($k[]))' "${3%.review}.effects" 2>/dev/null) \
+    '. as $f | first($e[] | select(.finding == $f)) | [.effect, .reason, .finding] | map(gsub("[[:space:]]+"; " ")) | join("\t")')
   [ ${#found[@]} != 0 ] || { [ "$healed" = 0 ] || { echo '[]'; return 0; }; nofiling "$3"; return 1; }
   for f in "${found[@]}"; do
     # The finding's level, P0 to P3 (P1 when it names none), is the pack's priority at that place, or its last one.
@@ -339,20 +348,52 @@ Follow-up depth: $((depth + 1))"
 SEENRX='proof:.*\b(seen|observed)\b[^.]*\b(logs?|records?)\b'
 # jq: the one line a finding or a reason is kept as on the self-heals list, which healsunput() (lib/review.sh) matches.
 HEALSONE='def one: gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; "");'
-# A finding sorted as self-heals goes to the self-heals list (SELFHEALS, lib/paths.sh) in place of a follow-up or a
-# fix round, once: its id names the card and the finding, and the same one written again changes nothing. The finding
-# and the reason are each one line. Prints the entry's id. Callers: judged() (lib/review.sh, from: review),
-# followups() (a finding left at a first card's last review) and healssort() (lib/heals.sh, from: sort).
-healsadd() { # <card> <issue> <area | ""> <why> <finding> <review | sort>
-  local l id
-  [[ $# = 6 && $2 =~ ^[0-9]+$ && $1 == *[![:space:]]* && $4 == *[![:space:]]* && $5 == *[![:space:]]* && $6 =~ ^(review|sort)$ ]] || return 2
-  l=$(jq -cn --arg c "$1" --argjson n "$2" --arg a "$3" --arg why "$4" --arg f "$5" --arg from "$6" --arg repo "$REPO" \
+# The judge's kinds that keep a finding off the belt (HARMRULE, lib/review.sh), as a JSON list: self-heals, cleanup and
+# already guarded go to the self-heals list, docs drift to the docs list (healsfile()). Any other kind, or none, is harm.
+LISTKINDS='["self-heals", "cleanup", "already guarded", "docs drift"]'
+healsfile() { if [ "$1" = 'docs drift' ]; then printf '%s\n' "$DOCSDRIFT"; else printf '%s\n' "$SELFHEALS"; fi; } # <kind>: its list
+# Whether <reason> names, as file:line, a line of <worktree> that holds text: the check an already-guarded finding names
+# as the one that stops its outcome. A path that leaves the worktree (a leading / or a .. part) names none. An
+# already-guarded ruling whose reason names no such line is harm (guardless()).
+guardat() { # <worktree> <reason>
+  local w f l
+  while IFS= read -r w; do
+    f=${w%:*} l=$((10#${w##*:})) f=${f#./}
+    [[ $f != /* && /$f/ != */../* && $l -ge 1 ]] && [ -f "$1/$f" ] && sed -n "${l}p" "$1/$f" 2>/dev/null | grep -q '[^[:space:]]' && return 0
+  done < <(grep -oE '[A-Za-z0-9_./-]+:[0-9]{1,9}' <<<"$2")
+  return 1
+}
+# The rulings read from stdin, "<n>\t<reason>" a line, of already-guarded findings: prints the JSON list of the n whose
+# reason names no guard found in <worktree> (guardat()). judged() (lib/review.sh) and healsjudge() (lib/heals.sh) rule them harm.
+guardless() { # <worktree>
+  local n r
+  while IFS=$'\t' read -r n r; do guardat "$1" "$r" || printf '%s\n' "$n"; done | jq -cs 'map(tonumber? // empty)'
+}
+# The reason a guardless already-guarded ruling gets added, as it becomes harm.
+# shellcheck disable=SC2034 # read by guardsaid() (lib/review.sh) and healsjudge() (lib/heals.sh)
+GUARDLESS=' (it names no check found at a file:line of the code that stops the outcome, so it is harm)'
+# A finding sorted as self-heals, cleanup or already guarded goes to the self-heals list (SELFHEALS, lib/paths.sh), and
+# one sorted as docs drift to the docs list (DOCSDRIFT), in place of a follow-up or a fix round, once: its id names the
+# card and the finding (h for the self-heals list, d for the docs list), and the same one written again adds no line:
+# an entry no batch card holds yet takes its kind and reason (a later ruling, as cleanup then already guarded, stands),
+# and one a batch card holds stays as it is. The finding and the reason are each one line; effect is its kind (self-heals when not given). Prints the
+# entry's id. Callers: judged() (lib/review.sh, from: review), followups() (a finding left at a first card's last
+# review) and healssort() (lib/heals.sh, from: sort).
+healsadd() { # <card> <issue> <area | ""> <why> <finding> <review | sort> [<kind>]
+  local l id e=${7:-self-heals} f
+  [[ $# -le 7 && $2 =~ ^[0-9]+$ && $1 == *[![:space:]]* && $4 == *[![:space:]]* && $5 == *[![:space:]]* && $6 =~ ^(review|sort)$ ]] \
+    && jq -e --arg e "$e" 'index($e) != null' <<<"$LISTKINDS" >/dev/null || return 2
+  f=$(healsfile "$e")
+  l=$(jq -cn --arg c "$1" --argjson n "$2" --arg a "$3" --arg why "$4" --arg f "$5" --arg from "$6" --arg repo "$REPO" --arg e "$e" \
     "$HEALSONE"'
-    {card: $c, issue: $n, repo: $repo, area: (if $a == "" then null else $a end), finding: ($f | one), why: ($why | one), effect: "self-heals", from: $from}') \
-    && id=h$(jq -j '.card, "\n", .finding' <<<"$l" | git hash-object --stdin | cut -c1-12) && [ ${#id} = 13 ] || return 1
+    {card: $c, issue: $n, repo: $repo, area: (if $a == "" then null else $a end), finding: ($f | one), why: ($why | one), effect: $e, from: $from}') \
+    && id=$([ "$f" = "$DOCSDRIFT" ] && echo d || echo h)$(jq -j '.card, "\n", .finding' <<<"$l" | git hash-object --stdin | cut -c1-12) && [ ${#id} = 13 ] || return 1
   ( flock 9 || exit 1
-    grep -qF "{\"id\":\"$id\"," "$SELFHEALS" 2>/dev/null && exit 0
-    jq -c --arg id "$id" --arg t "$(clock)" '{id: $id, time: $t} + .' <<<"$l" >> "$SELFHEALS" ) 9>>"$SELFHEALS.lock" || return 1
+    if grep -qF "{\"id\":\"$id\"," "$f" 2>/dev/null; then
+      # The last ruling stands: an entry no batch card holds yet takes the later kind and reason, and keeps the rest.
+      jq -c --arg id "$id" --argjson l "$l" 'if type == "object" and .id == $id and .batched == null then .effect = $l.effect | .why = $l.why else . end' "$f" > "$f.new" \
+        && mv -f "$f.new" "$f" || { rm -f "$f.new"; exit 1; }
+    else jq -c --arg id "$id" --arg t "$(clock)" '{id: $id, time: $t} + .' <<<"$l" >> "$f"; fi ) 9>>"$f.lock" || return 1
   printf '%s\n' "$id"
 }
 # The ids the batch card <card> of <issue> may be known by on the self-heals list (batched: its issue number, or for a
@@ -362,30 +403,35 @@ healsids() { # <card> <issue>
   [ -z "$1" ] || tc=$(jq -r --arg c "$1" 'first(.cards[]? | select(.card == $c or .id == $c or ((.was // []) | index($c)))) | .id // empty' "$TACARDS" 2>/dev/null) || tc=''
   jq -cn --arg c "$1" --arg tc "$tc" --argjson n "$2" '[(if $n != 0 then $n else empty end), ($c, $tc | select(. != ""))]'
 }
-# The entries of the self-heals list that the batch card <card> of <issue> holds (healsids()), given back to the list:
-# shut() calls it when it closes that card before it lands, so the next batch card of their area holds them. Each keeps
-# the batch cards it was given back by (freed), which healstake() reads. Fails when the list cannot be written.
+# The entries of the self-heals list and the docs list that the batch card or docs sweep card <card> of <issue> holds
+# (healsids()), given back to their list: shut() calls it when it closes that card before it lands, so the next card
+# of their area holds them. Each keeps the cards it was given back by (freed), which healstake() reads. Fails when a
+# list cannot be written.
 healsfree() { # <card> <issue>
-  local ids
-  grep -qF '"batched":' "$SELFHEALS" 2>/dev/null || return 0
-  ids=$(healsids "$1" "$2") || return 1
-  ( flock 9 || exit 1
-    jq -c --argjson ids "$ids" 'if type == "object" and .batched != null and (.batched | IN($ids[])) then .freed = ((.freed // []) + [.batched] | unique) | del(.batched) else . end' \
-      "$SELFHEALS" > "$SELFHEALS.new" && mv -f "$SELFHEALS.new" "$SELFHEALS" || { rm -f "$SELFHEALS.new"; exit 1; } ) 9>>"$SELFHEALS.lock"
+  local ids f
+  for f in "$SELFHEALS" "$DOCSDRIFT"; do
+    grep -qF '"batched":' "$f" 2>/dev/null || continue
+    ids=$(healsids "$1" "$2") || return 1
+    ( flock 9 || exit 1
+      jq -c --argjson ids "$ids" 'if type == "object" and .batched != null and (.batched | IN($ids[])) then .freed = ((.freed // []) + [.batched] | unique) | del(.batched) else . end' \
+        "$f" > "$f.new" && mv -f "$f.new" "$f" || { rm -f "$f.new"; exit 1; } ) 9>>"$f.lock" || return 1
+  done
 }
-# `retry` of a batch card that shut() gave its entries back for (healsfree()): the card builds its scope again, so it
-# holds those entries again (batched). When another batch card holds one of them now, the retry is refused (exit 3,
-# nothing changed): both cards would fix the same findings. retry() calls it before it gives the card back. Fails
-# when the list cannot be read or written.
+# `retry` of a batch card or docs sweep card that shut() gave its entries back for (healsfree()): the card builds its
+# scope again, so it holds those entries again (batched). When another card holds one of them now, the retry is
+# refused (exit 3, nothing changed): both cards would fix the same findings. A card holds the entries of one list
+# only. retry() calls it before it gives the card back. Fails when a list cannot be read or written.
 healstake() { # <card> <issue>
-  local ids
-  grep -qF '"freed":' "$SELFHEALS" 2>/dev/null || return 0
-  ids=$(healsids "$1" "$2") || return 1
-  ( flock 9 || exit 1
-    other=$(jq -rs --argjson ids "$ids" '[.[] | objects | select(any(.freed[]?; IN($ids[])) and .batched != null and (.batched | IN($ids[]) | not)) | .batched | tostring] | unique | join(", ")' "$SELFHEALS") || exit 1
-    [ -z "$other" ] || { echo "conveyor: the self-heals findings of this batch card are held by the batch card $other now; nothing changed" >&2; exit 3; }
-    jq -c --argjson ids "$ids" 'if type == "object" and .batched == null and any(.freed[]?; IN($ids[])) then .batched = first(.freed[] | select(IN($ids[]))) else . end' \
-      "$SELFHEALS" > "$SELFHEALS.new" && mv -f "$SELFHEALS.new" "$SELFHEALS" || { rm -f "$SELFHEALS.new"; exit 1; } ) 9>>"$SELFHEALS.lock"
+  local ids f
+  for f in "$SELFHEALS" "$DOCSDRIFT"; do
+    grep -qF '"freed":' "$f" 2>/dev/null || continue
+    ids=$(healsids "$1" "$2") || return 1
+    ( flock 9 || exit 1
+      other=$(jq -rs --argjson ids "$ids" '[.[] | objects | select(any(.freed[]?; IN($ids[])) and .batched != null and (.batched | IN($ids[]) | not)) | .batched | tostring] | unique | join(", ")' "$f") || exit 1
+      [ -z "$other" ] || { echo "conveyor: the findings of this card are held by the batch card $other now; nothing changed" >&2; exit 3; }
+      jq -c --argjson ids "$ids" 'if type == "object" and .batched == null and any(.freed[]?; IN($ids[])) then .batched = first(.freed[] | select(IN($ids[]))) else . end' \
+        "$f" > "$f.new" && mv -f "$f.new" "$f" || { rm -f "$f.new"; exit 1; } ) 9>>"$f.lock" || return
+  done
 }
 # A finding that is not built goes to the declined list (DECLINED), once: declined again for the same card (the
 # reviewer raised it again in a later round), it is the line it has (id names the card and the finding). Declined again

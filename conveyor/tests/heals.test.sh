@@ -33,7 +33,7 @@ t_healsfollowup() {
   printf '%s\n' 'F1 ACCEPT: self-heals: the next turn picks it up. Cost to every card: none' 'F2 ACCEPT: harm: the line is lost. Cost to every card: none' \
     'F3 ACCEPT: self-heals: the slot frees at the next turn. Cost to every card: none' 'F4 OUTSIDE: self-heals: the next poll corrects it, and b.txt is not the change'"'"'s' > "$STUB/judge.1"
   JUDGEISSUE=$is judgeone 7 "$STUB/review" fix
-  grep -qF 'The reason of an ACCEPT or an OUTSIDE starts with that kind, `harm` or `self-heals`' "$STUB/judge-asked" || fail "the judge is not asked for each finding's kind: $(cat "$STUB/judge-asked")"
+  grep -qF 'The reason of an ACCEPT or an OUTSIDE starts with that kind, `harm`, `self-heals`, `cleanup`, `already guarded` or' "$STUB/judge-asked" || fail "the judge is not asked for each finding's kind: $(cat "$STUB/judge-asked")"
   grep -qxF "SELFHEALS: $slow (judge: self-heals: the next turn picks it up)" <(jr 7) && grep -qxF "SELFHEALS: $stale (judge: self-heals: the next poll corrects it, and b.txt is not the change's)" <(jr 7) \
     && grep -qxF "$lost" <(jr 7) && grep -qxF "$seen" <(jr 7) || fail "the self-heals findings of a follow-up card's review are not SELFHEALS lines, or a harm one is: $(jr 7)"
   [ "$(jf 7 .verdict)" = NO-GO ] && [ "$(grep -c '^E[0-9]' "$T/$CASE/cards/c7.fix")" = 2 ] && grep -qF "$lost" "$T/$CASE/cards/c7.fix" && grep -qF "$seen" "$T/$CASE/cards/c7.fix" \
@@ -136,7 +136,7 @@ t_healsbrief() {
   echo 'cp "$STUB/brief" "$STUB/build.brief"; echo two >> a.txt' > "$STUB/build"
   # loop: only a whole card shows the prompt card() gives its build session, which no function of it makes alone
   loop run --only 9 1 > "$T/$CASE/run.log" 2>&1 || fail "run of #9 exited non-zero: $(tail -n 20 "$T/$CASE/run.log")"
-  grep -qx '# Findings of this issue that are on the self-heals list' "$STUB/build.brief" && grep -qF "$moved (list entry $e)" "$STUB/build.brief" \
+  grep -qx '# Findings of this issue that are on the self-heals list or the docs list' "$STUB/build.brief" && grep -qF "$moved (list entry $e)" "$STUB/build.brief" \
     || fail "the build session of #9 is not given its moved finding out of its scope, with its list entry $e: $(cat "$STUB/build.brief" 2>&1)"
 }
 
@@ -270,7 +270,7 @@ EOF
     || fail "the second sort sent the moved findings of #23 to the judge again, or commented on #23 again: $(grep '^F' "$STUB/judge-asked") $(cat "$STUB/comments")"
   # The brief of #23's card (healsbrief(), lib/issues.sh) puts its moved findings out of its scope.
   fx_in 'healsbrief 23'
-  grep -qx '# Findings of this issue that are on the self-heals list' "$T/$CASE/run.out" && grep -qF "R1 [P2] \`a.sh:1\`: the wait is one turn longer - How: the turn waits. (list entry $e1)" "$T/$CASE/run.out" \
+  grep -qx '# Findings of this issue that are on the self-heals list or the docs list' "$T/$CASE/run.out" && grep -qF "R1 [P2] \`a.sh:1\`: the wait is one turn longer - How: the turn waits. (list entry $e1)" "$T/$CASE/run.out" \
     && grep -qF "(list entry $e3)" "$T/$CASE/run.out" && ! grep -qF 'loses a line' "$T/$CASE/run.out" \
     || fail "healsbrief 23 does not put R1 and R3 out of the card's scope with their entries, or names R2: $(cat "$T/$CASE/run.out")"
 }

@@ -120,6 +120,11 @@ the button shows the new count and you must click two times again. A new line ch
 It changes the count of **Dismiss all shown** only if the panel shows the new line. The lines leave the panel and its count. **Show every line** still shows
 them, marked Dismissed.
 
+Above its lines, the Declined panel shows the Self-heals list and the Docs list
+([Harm or self-heals](cards.md#harm-or-self-heals)). Each list shows its areas, each with its entries and their kinds.
+**File a batch card** on an area of the Self-heals list files one card for its entries. **File a docs sweep card** on
+an area of the Docs list files one docs sweep card for its entries. Click the button, then click it again.
+
 **File as issue** on a Declined line files the finding as an issue, and Conveyor builds it in its turn. Click it, then
 click it again. If you do not click it again in 5 s, it shows **File as issue** again and the next click only asks
 again.

@@ -200,16 +200,22 @@ The judge also gives each finding that it accepts or marks outside a kind, from 
 how likely it is. `harm`: data is lost or written wrong, wrong code lands or pushes, a check passes that should fail,
 or the belt or a card gets stuck and only a person can free it. `self-heals`: the failure heals itself (a longer wait,
 a step run again, a slot over its cap for a short time), text that the next poll or turn corrects, or extra work or cost
-with no wrong result. A finding whose Proof says that it was seen in real logs or records is `harm`, and so is a
-finding with no kind. The record line keeps the kind of each finding as `effect`. A `harm` finding is filed as a
-follow-up as before, and the follow-up's body names its kind and the judge's reason in a `Kind:` line. A `self-heals`
-finding outside the change, and on a follow-up card a `self-heals` finding in the change, goes to the self-heals list
-(`selfheals.jsonl` of the state folder): it becomes a `SELFHEALS:` line of the review, with no fix round and no
+with no wrong result. `cleanup`: the fix changes nothing that the code does. `already guarded`: another check, which
+the reason names as `file:line`, already stops the bad result. `docs drift`: a guide or README leaves out, or
+describes wrongly, what the code does correctly. A finding whose Proof says that it was seen in real logs or records
+is `harm`, and so is a finding with no kind, and an `already guarded` finding whose `file:line` is not a line of the
+code. The record line keeps the kind of each finding as `effect`. A `harm` finding is filed as a
+follow-up as before, and the follow-up's body names its kind and the judge's reason in a `Kind:` line. A finding of
+another kind outside the change, and on a follow-up card such a finding in the change, goes to the self-heals list
+(`selfheals.jsonl` of the state folder), or to the docs list for `docs drift` (`docsdrift.jsonl`, whose entries never
+expire): it becomes a `SELFHEALS:` line of the review, with no fix round and no
 follow-up, and the review's record line holds it in `judge.selfheals`. A card that is not a follow-up still fixes its
-in-scope `self-heals` findings in its fix rounds; one still open after the last review goes to the list. A line that
+in-scope findings of every kind in its fix rounds; one still open after the last review goes to its list, and at
+that review only a `harm` P0 or P1 (or one with no kind) blocks the card. A line that
 the reviewer itself starts with `SELFHEALS:` is a finding. `conveyor.sh heals batch <area>` (the Board's "File a batch
 card", `-` for the entries with no area) files one card that holds an area's open entries as its scope, and marks them
-with that card. An entry whose card has not landed or closed waits for a later batch card. A batch card shut before
+with that card. `conveyor.sh heals docs <area>` (the Board's "File a docs sweep card") does the same with the docs
+list, and `release-prep` runs it for each area with entries before the suite. An entry whose card has not landed or closed waits for a later batch card. A batch card shut before
 it lands gives its entries back, and `retry` of it takes them again, or is refused when another batch card holds them.
 When the judge fails, the review stays as the reviewer wrote it, and its findings keep no kind from an earlier round. `conveyor.sh heals sort` sorts the queued follow-up cards and the open finding issues by the same rule
 (docs/cards.md, Harm or self-heals). The loop (`run` or `serve`) runs it by itself and picks no card until

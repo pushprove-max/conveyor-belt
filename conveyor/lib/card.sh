@@ -144,7 +144,7 @@ fixprompt() { # <card prompt> <the findings, each led by its id, and what follow
 # Why a review ends the fix loop, the first that holds: go (a GO), max-reviews (it is review MAX_REVIEWS, counting the
 # rounds a retried card carries), rebased (the one review after a landing conflict), test-fix (after the one test fix),
 # lint-fix (after the landing gate's lint fix), land (the kept review of a kept patch landed with no review), repeat (a
-# NO-GO that repeats a fixed finding, every finding P2 or P3). Prints nothing when a fix round follows.
+# NO-GO that repeats a fixed finding, each P0 or P1 of it a repeat, so of a kind kept off the belt: afterreview()). Prints nothing when a fix round follows.
 loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix> <mode> <donewhen.sh repeats() lines> <review file>
   if [ "$1" = GO ]; then echo go
   elif [ "$2" -ge "$MAX_REVIEWS" ]; then echo max-reviews
@@ -152,7 +152,7 @@ loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix>
   elif [ -n "$4" ]; then echo test-fix
   elif [ -n "$5" ]; then echo lint-fix
   elif [ "$6" = land ]; then echo land
-  elif [ -n "$7" ] && [ "$(counts "$8" | jq '.P0 + .P1')" = 0 ]; then echo repeat
+  elif [ -n "$7" ] && [ "$(findings "$8" | jq -s --slurpfile r <(jq -c '.line' <<<"$7") 'map(select((.level == "P0" or .level == "P1") and (.line | IN($r[]) | not))) | length')" = 0 ]; then echo repeat
   fi
 }
 testfixprompt() { # <card prompt> <worktree> <the test run's exit> [the failures json of testfails(), as cardfailed() read them]
@@ -211,9 +211,9 @@ afterreview() {
   # loop as any card's.
   last=''; [ "$fin" != NO-GO ] || [ "$res" != GO ] || { earlier=$finrev; earlyend=$finend; }; fin=''
   # A NO-GO that repeats a finding a fix round was told to fix (donewhen.sh repeats()) spends no more rounds on it: when every
-  # finding of the review is P2 or P3 this is the last review; when a repeated one is P0 or P1 the card blocks.
+  # P0 or P1 finding of the review is such a repeat this is the last review (loopstop()); when a repeated harm one is P0 or P1 the card blocks. Here and below, a finding of a kind kept off the belt (harmonly(), lib/followups.sh) blocks no card: it goes to its list as the card lands.
   rep=''; [ "$res" != NO-GO ] || rep=$(repeats "$wt")
-  hard=$(jq -rs 'map(select(.level == "P0" or .level == "P1")) | first // empty | "\(.line[:300]) did not hold after \(.rounds) round\(if .rounds == 1 then "" else "s" end)"' <<<"$rep")
+  hard=$(harmonly "$wt" <<<"$rep" | jq -rs 'map(select(.level == "P0" or .level == "P1")) | first // empty | "\(.line[:300]) did not hold after \(.rounds) round\(if .rounds == 1 then "" else "s" end)"')
   # A last NO-GO with a finding that is a privacy hit in the card's own change (privown(), lib/followups.sh) gets
   # one more fix round, once a card (privfix); a hit found again after that round blocks the card (after priv): a
   # follow-up would land the hit on main. Bugs: it was filed as a follow-up the privacy check refused; after its round, a new hit landed.
@@ -227,9 +227,9 @@ afterreview() {
   if [ -z "$hard" ]; then
     stop=$(loopstop "$res" "$((pass + rounds))" "$rebased" "$tfix" "$lfix" "$mode" "$rep" "$wt.review")
     [ -z "$stop" ] || [ "$res" = GO ] || ! priv=$(privown "$wt") || [ -z "$priv" ] || [ -n "$privfix" ] || stop=''
-    [ -z "$stop" ] || [ "$res" = GO ] || last0=$(findings "$wt.review" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]')
-    [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$last0" ] || p1=$(findings "$wt.review" | jq -rs 'map(select(.level == "P1")) | first // empty | .line[:300]'); [ -z "$p1" ] || [ -n "$p1fix" ] || stop=''
-  else last0=$(findings "$wt.review" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]'); fi
+    [ -z "$stop" ] || [ "$res" = GO ] || last0=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]')
+    [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$last0" ] || p1=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P1")) | first // empty | .line[:300]'); [ -z "$p1" ] || [ -n "$p1fix" ] || stop=''
+  else last0=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]'); fi
   # The review line, and the filed line after it, say why the loop ended: stop, with pass and rounds as they are here.
   ended=$(jq -cn --arg s "$stop" --argjson p "$pass" --argjson r "$rounds" 'if $s == "" then {} else {stop: $s, pass: $p, rounds: $r} end')
   if [ -n "$hard" ]; then after=hard

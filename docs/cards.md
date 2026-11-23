@@ -199,8 +199,8 @@ of these are true:
 The pass stays the card's lint result, and the card gets no new `lint` line.
 
 - A finding goes to one fix session before any test runs. Its step is `Fix <n>: lint findings`. Then the card goes to
-  a review, and that review is its last review: a `NO-GO` lands with follow-ups, blocks if it holds a P0, or gets one fix
-  round if it holds a P1 ([When the fix loop ends](#when-the-fix-loop-ends)). The gate before that review does not
+  a review, and that review is its last review: a `NO-GO` lands with follow-ups, blocks if it holds a `harm` P0, or gets
+  one fix round if it holds a `harm` P1 ([When the fix loop ends](#when-the-fix-loop-ends)). The gate before that review does not
   run again on the fixed change.
 - At the next landing gate, a finding that is still there blocks the card with the reason
   `lint: <n> findings left after its fix session; nothing landed`. If a different session (a test fix, for example)
@@ -282,8 +282,8 @@ has no step. The loop ends at the first of these:
 - `test-fix`: the one review after the fix of failed tests.
 - `lint-fix`: the one review after the fix of lint findings at the landing gate.
 - `land`: the card lands from a kept patch on its kept review, with no new review.
-- `repeat`: a finding comes back after its fix, and each finding of the review is P2 or P3. A P0 or P1 that comes
-  back blocks the card.
+- `repeat`: a finding comes back after its fix, and each `harm` finding of the review is P2 or P3. A `harm` P0 or P1
+  that comes back blocks the card. A P0 or P1 of another kind does not (Harm or self-heals, below).
 
 A `NO-GO` with no finding to fix, such as one that holds only an `UNPROVEN` line, blocks the card when none of the
 reasons above ends the loop at that review. The reason is
@@ -295,7 +295,8 @@ last review is a `NO-GO` that holds a P1 finding, the card also gets one fix ses
 fix alone. If that review still holds a P1, the card blocks and files no follow-up, as it does for a P1 that comes back
 after its fix. The findings that are still open when the loop ends become follow-ups. If the last review is a `NO-GO`
 that holds a P0 finding, the card does not land and files no follow-ups. It blocks, and the reason names the P0. The
-card's work and reviews are kept, so you can retry it. The review that ends the loop and the `filed` step
+card's work and reviews are kept, so you can retry it. These P0 and P1 rules apply to `harm` findings, and to findings
+with no kind. A P0 or P1 of another kind lands with the card and goes to its list (Harm or self-heals, below). The review that ends the loop and the `filed` step
 record the reason as `stop`, with `pass` (the reviews of this card) and `rounds` (the reviews of earlier cards). On the
 Board, that review shows "Fix loop ended:" and the reason.
 
@@ -315,8 +316,8 @@ A real defect that the card's change did not cause is never declined for that. T
 gets no fix round for it and lands as its other findings let it. When the card lands, the finding is filed as a
 follow-up of the card, with its level and the card's issue as its parent, as a finding of a last `NO-GO` is. The
 Board shows such a finding as "Filed as a follow-up" with its issue, and as "To be filed as a follow-up" until the card
-lands. An `OUTSIDE` finding that the judge sorts as `self-heals` is not filed. It goes to the self-heals list (Harm or
-self-heals, below).
+lands. An `OUTSIDE` finding that the judge sorts as another kind than `harm` is not filed. It goes to the self-heals
+list or the docs list (Harm or self-heals, below).
 
 ### Harm or self-heals
 
@@ -324,18 +325,30 @@ The judge gives each finding that it accepts or marks `OUTSIDE` a kind. The kind
 about how likely the failure is:
 
 - `harm`: data is lost or written wrong (card records, issues, kept work). Wrong code lands or pushes, or a check
-  passes that should fail. The belt or a card gets stuck, and only a person can free it.
+  passes that should fail. The belt or a card gets stuck, and only a person can free it. A step stops and nobody is
+  told. Private text is published, or a security hole opens.
 - `self-heals`: the failure heals itself. A card waits longer, a step runs again, or a slot is over its cap for a short
   time. Wrong or missing text is corrected at the next poll or turn. Extra work or cost gives no wrong result.
+- `cleanup`: the fix changes nothing that the code does. Examples are an unused variable, a check that another check
+  repeats, a name that misleads, or a comment that is out of date.
+- `already guarded`: the finding is real, but another check in the code already stops the bad result. The finding
+  asks for a second guard, not for a fix of an open hole. The judge's reason names that check as `file:line`.
+- `docs drift`: a guide or README leaves out, or describes wrongly, what the code does correctly.
 
 A finding whose Proof says that it was seen in real logs or records is `harm`, also when it heals itself. A finding
-with no kind is `harm`, so nothing is lost.
+with no kind is `harm`, so nothing is lost. An `already guarded` finding is `harm` when its reason names no
+`file:line`, or when that line is not in the code. A finding of a kind that the project always accepts is `harm`,
+whatever kind the judge gives it.
 
 - A `harm` finding gets its follow-up at once.
-- A `self-heals` finding goes to the self-heals list, and no follow-up is filed for it. On a follow-up card, it also
-  gets no fix round. The review shows it as a `SELFHEALS:` line, with the judge's reason.
+- A `self-heals`, `cleanup` or `already guarded` finding goes to the self-heals list with its kind. A `docs drift`
+  finding goes to the docs list. No follow-up is filed for them. On a follow-up card, they also get no fix round. The
+  review shows each one as a `SELFHEALS:` line, with its kind and the judge's reason.
 - The first review of a card that is not a follow-up still fixes all of its in-scope findings in the card's fix
-  rounds. If a `self-heals` finding is still open after the last review, it goes to the list.
+  rounds, of every kind. If such a finding is still open after the last review, it goes to its list.
+- At the last review, a P0 or P1 in the card's own change stops the card only when it is `harm`. A P0 or P1 of
+  another kind does not stop it: the card lands, and the finding goes to its list with that card. A finding with no
+  kind is `harm`, so it still stops the card.
 
 A follow-up's body has a `Kind:` line, with the kind and the judge's reason. In a card's steps on the Board, each
 review finding that the judge gave a kind shows it, and an accepted one also shows the judge's reason. When a later
@@ -349,19 +362,31 @@ scope. An entry whose card has not landed or closed waits for the next batch car
 card's change. If you shut a batch card before it lands (`conveyor.sh shut`), its entries go back to the list for the
 next batch card. `conveyor.sh retry` of that card takes them again, and is refused when another batch card holds
 them. A later review that rules an entry of a batch card `harm` files no second card for it.
-When the sort moves findings of an audit issue to the list, the issue's body still names them. The card of that issue
+When the sort moves findings of an audit issue to the self-heals list or the docs list, the issue's body still names them. The card of that issue
 is told that they are out of its scope.
 Nothing on the list needs you until you file the card. The Foreman's status gives the count and does not report the
 list as something to do.
+A batch card tells its builder to check each `already guarded` entry first. When the check that its reason names no
+longer stops the bad result, the entry is `harm`, and the batch card fixes it with a test.
+A batch card that holds only `cleanup` and `already guarded` entries has no bug label, as a `cleanup` follow-up has
+none: no test can fail on main for them. Only a batch card that holds only `cleanup` entries has a `Cleanup:` line,
+so its review reports a change to what the code does.
+
+The docs list is fixed in the same way, one docs sweep card for each area, so that the docs match what users see. An
+entry of the docs list never expires. On the Board's Declined panel, the Docs list shows each area with its entries,
+and "File a docs sweep card" files one card that has the area's entries as its scope. `conveyor.sh release-prep`
+also files one docs sweep card for each area that has entries, before it runs the suite. A docs sweep card has no bug
+label. If you shut a docs sweep card before it lands, its entries go back to the docs list, as a batch card's do.
 
 `conveyor.sh heals sort` sorts the work that was filed before this rule, with the same judge. The loop runs it by
 itself, with `run` and `serve` alike, and picks no card until a sort has run. When the open issues cannot be read,
 the sort changes nothing and the loop tries again at a later turn. The sort reads each queued follow-up card that no
 card has picked, also a held one, and each open issue that is one review finding (a `[P0]` to `[P3]` title with a
-Proof). It also reads each finding of an open audit issue that holds many findings. A `harm` item stays. A
-`self-heals` card leaves the queue, and its finding goes to the list. A `self-heals` issue is closed with a comment
-that names its list entry. In an audit issue, the `self-heals` findings go to the list, and the sort posts one
-comment on the issue that names them and their entries. The issue closes, with that comment, when all of its findings
+Proof). It also reads each finding of an open audit issue that holds many findings. The sort uses the same kinds as
+the review's judge. A `harm` item stays. An item of another kind goes to its list: the docs list for `docs drift`,
+else the self-heals list. Such a card leaves the queue. Such an issue is closed with a comment that names its list
+entry. In an audit issue, such findings go to their lists, and the sort posts one comment on the issue that names
+them and their entries. The issue closes, with that comment, when all of its findings
 are on the list. The sort never changes the body of an issue. If the comment or the close fails, the findings stay
 in the issue and leave the list. The sort reads each issue again just before it comments on it or closes it. A
 finding whose text changed while the judge read it stays as it is. An issue that changes as it is closed is opened
@@ -388,14 +413,15 @@ card's reviewer reads that section and does not raise what it lists.
 
 ## Declined findings and follow-ups
 
-Every finding that is declined is a line of the Declined list, with who declined it and why. A `self-heals` finding
-is not declined: it is on the self-heals list (Harm or self-heals, above). The Board's Declined
+Every finding that is declined is a line of the Declined list, with who declined it and why. A finding that the judge
+sorts as another kind than `harm` is not declined: it is on the self-heals list or the docs list (Harm or self-heals,
+above). The Board's Declined
 panel lists them, and "File as issue" files one as an issue (`conveyor/README.md`, Declined findings). A line's reason
 is in its own block under the finding, led by "Why the judge declined it" or "Why the code declined it". Each sentence
 starts a new line, code shows in a code font, and a file and line in it opens that line on GitHub.
 
 Findings still open after the last review become follow-up issues, which become cards of their own. A finding that the
-judge sorted as `self-heals` goes to the self-heals list instead (Harm or self-heals, above). Each follow-up's
+judge sorted as another kind than `harm` goes to its list instead (Harm or self-heals, above). Each follow-up's
 body says how deep it is, as the line `Follow-up depth: N`: 1 for a follow-up of a first card, 2 for a follow-up of
 a follow-up. Follow-ups go two levels deep. A card whose issue is at depth 2 files no follow-ups: its leftover findings
 go to the Declined list, and the reason names the cap. A follow-up that changes one of the pack's `pipelineFiles` is filed held.

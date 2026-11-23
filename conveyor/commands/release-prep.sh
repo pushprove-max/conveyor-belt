@@ -570,12 +570,12 @@ releaseprep() { # <version>
   was=$(jq -r --arg v "$v" 'select(.step == "release-prep" and (.state | IN("waiting", "stopped")) and .version == $v) | .notes.card // empty' "$RELRUN" 2>/dev/null) wn=$(jq -c --arg v "$v" 'select(.step == "release-prep" and .state == "waiting" and .version == $v) | .notes | objects' "$RELRUN" 2>/dev/null) # the last run's notes card (waiting, or stopped while it waited: relstopwaiting()), and the notes of a run that waits on it (relnoteskept()), before relstart()
   [ -n "$was" ] || was=$( . "$HERE/lib/testaction.sh" && jq -r --arg v "$v" '[.cards[]? | select(.label == "Release notes" and (.title | startswith("Release notes \($v): ")))] | last | .id // empty' "$TACARDS" 2>/dev/null) # another version's run in between leaves the record naming that run's card: the newest notes card of $v is then its one
   relstart release-prep "$v" || return 1
-  # The commit `release` releases is the remote's head of the branch, and the tags are the remote's; with Merge PR
-  # release, the head of LANDING (relhead(), lib/push.sh), which relfixes() (lib/fulltest.sh) reads too.
+  # The commit `release` releases is the remote's head of the branch, and the tags are the remote's; with Merge PR release, the head of LANDING (relhead(), lib/push.sh), which relfixes() (lib/fulltest.sh) reads too.
   sha=$(relhead) || { echo "conveyor: release-prep: $REMOTE/$BRANCH could not be read; nothing run" >&2; return 1; }
   [ "$sha" = "$(git rev-parse -q --verify "refs/remotes/$REMOTE/$BRANCH^{commit}")" ] \
     || echo "conveyor: release-prep: the suite runs on $REMOTE/$LANDING (${sha:0:12}), which release merges before it tags"
   last=$(lasttag)
+  ( . "$HERE/lib/testaction.sh" && . "$HERE/lib/heals.sh" && healsdocs ) || echo "conveyor: release-prep: a docs sweep card could not be filed; its entries stay on the docs list" >&2 # before the suite, one docs sweep card for each area of the docs list with entries (healsdocs(), lib/heals.sh), so the docs match what users see
   # `release` releases the remote's head and reads the status of that commit, so the suite runs only on a head that
   # holds the notes, in the notes style: a status posted on another commit is on one the release does not use.
   if [ -n "$(git show "$sha:docs/releases/$v.md" 2>/dev/null | tr -d '[:space:]')" ]; then

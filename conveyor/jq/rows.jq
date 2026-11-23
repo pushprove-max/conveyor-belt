@@ -96,7 +96,7 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                stop: (if .step != "blocked" then null else .reason | if startswith($nodeps) then "deps" elif startswith("worktree:") then "worktree" elif startswith("brief:") then "brief" elif startswith($yes) or startswith($lintyes) then "yes" else null end end),
                # A review's judge: {ran: true, accepted, declined, outside (how many findings it accepted, declined and found
                # outside the card's change, filed as follow-ups; outside only when it found any), selfheals (how many it wrote to
-               # the self-heals list, only when any), kinds (each accepted or outside finding the judge gave a kind, {finding,
+               # the self-heals list or the docs list, only when any), kinds (each accepted or outside finding the judge gave a kind, {finding,
                # effect, reason, outside: true for an outside one}, only when any: the Board shows the kind on its row), go
                # (the review's GO came from the judge accepting no finding)}; {ran: false, why} for a review it did not
                # read: its call failed or its answer was not read (why says), the review ended with no verdict or held
@@ -106,7 +106,7 @@ map(select(.step != "push")) | group_by(.card) | map(. as $all
                    + (.judge.outside // [] | length | if . > 0 then {outside: .} else {} end)
                    + (.judge.selfheals // [] | length | if . > 0 then {selfheals: .} else {} end)
                    + ([(.judge.accepted[] | objects | {finding, effect, reason}), (.judge.outside // [] | .[]? | objects | {finding, effect, reason, outside: true})]
-                     | map(select(.effect | IN("harm", "self-heals"))) | if . == [] then {} else {kinds: .} end)
+                     | map(select(.effect | IN("harm", "self-heals", "cleanup", "already guarded", "docs drift"))) | if . == [] then {} else {kinds: .} end)
                  elif .judge.failed then {ran: false, why: .judge.failed}
                  elif .result | IN("GO", "NO-GO") | not then {ran: false, why: "the review did not end with a verdict"}
                  elif .reason // "" | split("\n") | any(test("^(NEW CARD|UNPROVEN|DECLINED):|^[[:space:]]*$") | not) then {ran: false, why: "the judge is off"}

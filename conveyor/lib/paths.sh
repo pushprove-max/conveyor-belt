@@ -151,12 +151,18 @@ SAYS=${STATE%/*}/loop.json
 # built after all, and dismissed ({time, by}) once it was dismissed from the Board's panel (declined(), declinedbuild(),
 # declineddismiss()).
 DECLINED=${STATE%/*}/declined.jsonl
-# The self-heals list: every finding the judge sorted as self-heals that is not built on its own (healsadd(),
-# lib/followups.sh), one line each: {id, time, card (the card it came from, or #<issue> for an issue with no card
-# named), issue, repo, area (the area label, or null), finding, why (the judge's reason), effect: "self-heals", from:
-# review or sort}, and batched (the issue number or card id of the batch card filed for it: healsbatch(), lib/heals.sh).
+# The self-heals list: every finding the judge sorted as self-heals, cleanup or already guarded that is not built on
+# its own (healsadd(), lib/followups.sh), one line each: {id, time, card (the card it came from, or #<issue> for an
+# issue with no card named), issue, repo, area (the area label, or null), finding, why (the judge's reason), effect
+# (its kind: self-heals, cleanup or already guarded), from: review or sort}, and batched (the issue number or card id of
+# the batch card filed for it: healsbatch(), lib/heals.sh).
 # shellcheck disable=SC2034 # read by lib/followups.sh, lib/heals.sh and lib/snapshot.sh, which conveyor.sh sources beside this file
 SELFHEALS=${STATE%/*}/selfheals.jsonl
+# The docs list: every finding the judge sorted as docs drift, its lines as the self-heals list's (effect: docs drift).
+# No entry expires: a docs sweep card of its area (healsbatch() docs, lib/heals.sh) holds it, filed from the Board or
+# by release-prep.
+# shellcheck disable=SC2034 # read by lib/followups.sh, lib/heals.sh and lib/snapshot.sh, which conveyor.sh sources beside this file
+DOCSDRIFT=${STATE%/*}/docsdrift.jsonl
 # Each sort of the queued follow-up cards and open finding issues (healssort(), lib/heals.sh), one line a run: {time,
 # ended, judge: {model, failed} as judgecall() printed it, items: [{card or issue, finding, effect, why, entry, done}]}.
 # shellcheck disable=SC2034 # read by lib/heals.sh, lib/run.sh and lib/snapshot.sh, which conveyor.sh sources beside this file

@@ -70,11 +70,15 @@ a parent ([Issues](docs/commands.md#issues)).
 
 The judge gives each review finding a kind, by what its failure does. A `harm` finding loses data or writes it
 wrong, lands wrong code, or leaves the belt stuck until a person acts. A `self-heals` finding heals itself: a card
-waits longer, a step runs again, or the next poll corrects a text. A finding that was seen in real logs or records
-is `harm`, also when it heals itself. A card's fix rounds fix the findings in its
-change. A `harm` finding outside the change becomes a follow-up card at once. A `self-heals` finding outside the
-change, or in a follow-up card, goes to the self-heals list. On the Board, you file one card for an area, and that
-card fixes all of the area's entries ([Harm or self-heals](docs/cards.md#harm-or-self-heals)).
+waits longer, a step runs again, or the next poll corrects a text. A `cleanup` finding changes nothing that the code
+does. An `already guarded` finding names a second guard, and another check already stops the bad result. A
+`docs drift` finding is a guide or README that does not match what the code does. A finding that was seen in real logs
+or records is `harm`, also when it heals itself. A card's fix rounds fix the findings in its
+change. At the last review, only a `harm` finding in the change stops the card. A `harm` finding outside the change
+becomes a follow-up card at once. A finding of another kind outside the change, in a follow-up card, or still open at
+the last review goes to the self-heals list, or to the docs list for `docs drift`. On the Board, you file one card for
+an area, and that card fixes all of the area's entries. A release files one docs sweep card for each area of the
+docs list ([Harm or self-heals](docs/cards.md#harm-or-self-heals)).
 
 ## The Board
 

@@ -179,7 +179,9 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
     {"id": "d0000000000dd", "time": "'"$TODAY_ISO"'T08:50:00Z", "card": "c3-801", "issue": 801, "finding": "[P3] d.txt:4 a word", "by": "judge", "why": "taste", "repo": "sample", "dismissed": {"time": "'"$TODAY_ISO"'T09:00:00Z", "by": "Board user owner"}}],
   "selfheals": {"entries": [{"id": "h0123456789ab", "time": "'"$TODAY_ISO"'T08:30:00Z", "card": "c3-801", "issue": 801, "repo": "sample", "area": "area:engine",
     "finding": "[P2] a.sh:3 a slow poll", "why": "the next turn picks it up", "effect": "self-heals", "from": "review"}],
-    "areas": [{"area": "area:engine", "count": 1}], "sorted": {"time": "'"$TODAY_ISO"'T07:00:00Z", "ended": "'"$TODAY_ISO"'T07:01:00Z", "items": 2, "moved": 1}},
+    "areas": [{"area": "area:engine", "count": 1}], "sorted": {"time": "'"$TODAY_ISO"'T07:00:00Z", "ended": "'"$TODAY_ISO"'T07:01:00Z", "items": 2, "moved": 1},
+    "docs": {"entries": [{"id": "d0123456789ab", "time": "'"$TODAY_ISO"'T08:40:00Z", "card": "c3-801", "issue": 801, "repo": "sample", "area": "area:board",
+      "finding": "[P3] docs/board.md:9 omits the docs list", "why": "the page omits it", "effect": "docs drift", "from": "review"}], "areas": [{"area": "area:board", "count": 1}]}},
   "landedCount": 1, "landedUsd": 41.5,
   "landed": [{"card": "c'"$TODAY"'T080000-7", "issue": 7, "title": "Landed one", "step": "landed", "time": "'"$TODAY_ISO"'T08:30:00Z", "usd": 2.5, "reviews": 2, "followups": [31], "sha": "abc", "pushed": true, "start": "'"$TODAY_ISO"'T07:00:00Z", "totalSec": 2400}],
   "pushedCards": [{"card": "c0-6", "issue": 6, "time": "'"$(date -u -d yesterday +%F)"'T23:00:00Z", "day": "'"$(date +%F)"'"},
@@ -277,6 +279,11 @@ q '.panels.declined.data.rest | map([.repo, .id, .url, .built, .dismissed]) == [
 q '.panels.declined.data.heals | map([.repo, .repoUrl, .areas, .sorted.moved, (.entries | map([.id, .url, .area, .finding, .why, .effect]))]) == [["sample", "https://github.com/example/sample-project",
   [{area: "area:engine", count: 1}], 1, [["h0123456789ab", "'"$PU"'/801", "area:engine", "[P2] a.sh:3 a slow poll", "the next turn picks it up", "self-heals"]]]]' \
   "the self-heals list of the record that has one, with its areas, its last sort and its entries"
+# Issue 1563: the docs list of a record reaches the Declined part beside its self-heals list, so the Board shows it
+# and files an area's docs sweep card on the right record. Bug it catches: the docs list left out of the panel's data.
+q '.panels.declined.data.heals | map(.docs | [.areas, (.entries | map([.id, .url, .area, .finding, .effect]))]) == [[[{area: "area:board", count: 1}],
+  [["d0123456789ab", "'"$PU"'/801", "area:board", "[P3] docs/board.md:9 omits the docs list", "docs drift"]]]]' \
+  "the docs list of the record that has one, with its areas and its entries"
 # Metrics' tiles and charts: each record's 7 days before, its days and today's slots, as its snapshot gives them.
 q '.panels.metrics.data.records | map([.repo, .prev, .days, .slots]) == [["sample", {cards: 2, landed: 1}, [{day: "2026-11-09", landed: 1, blocked: 0}], [{hour: 9, slots: 1.5, cap: 3}]], ["widgetshop", null, null, null]]' \
   "metrics carries each record's 7 days before, its days and its slots by hour; a record without them has null"

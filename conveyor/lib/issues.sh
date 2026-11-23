@@ -81,7 +81,7 @@ retry() { # <issue, or the card id of a main-red fix card or a Tests page card> 
       done
     done
   fi
-  # A shut self-heals batch card takes its entries back, or is refused if another batch card has one (healstake()).
+  # A shut self-heals batch card or docs sweep card takes its entries back, or is refused if another card has one (healstake()).
   if [ "$k" = '.issue == $n' ]; then healstake "" "$1"; else healstake "$1" 0; fi || return 1
   # The blocked line carries when the owner gave the card back (retriedAt): the wait ends there, not at the next pick.
   MOVETAG='if .step == "blocked" and .retriedAt == null then . + {retriedAt: $at} + (if $why == "" then {} else {retriedWhy: $why} end) else . end' \
@@ -146,8 +146,8 @@ shut() { # <closed issue numbers, a json array, or a card id: of a card of an is
   while read -r c n b o; do
     l=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$([ "$o" = own ] && echo "$OWNSHUT" || echo "$SHUT")" '{reason: $r}')") && append "$l" || return 1
     found=1
-    # A self-heals batch card shut before it lands gives its entries back to the list (healsfree(), lib/followups.sh).
-    healsfree "$c" "$n" || echo "conveyor: card $c was shut, but the self-heals entries it holds could not be given back to the list" >&2
+    # A self-heals batch card or docs sweep card shut before it lands gives its entries back to their list (healsfree(), lib/followups.sh).
+    healsfree "$c" "$n" || echo "conveyor: card $c was shut, but the list entries it holds could not be given back to their list" >&2
     # A land-branch card of issue 0 is no main-red fix card: `retry <card id>` refuses it, so no retry is named.
     if [ "$b" = branch ]; then echo "conveyor: card $c was shut $([ "$o" = own ] && echo "by the owner" || echo "while it was blocked"); the card is closed, its kept work where it was, and its branch left as it is"
     elif [ "$o" = own ]; then echo "conveyor: card $c was shut by the owner; the card is closed, its kept work where it was, and \`retry $([ "$n" = 0 ] && echo "$c" || echo "$n")\` takes it again"
@@ -323,13 +323,14 @@ carried() { # <issue> <worktree>
     printf '%s\n\n## The list above is cut short: it is too long for this brief\nThe whole list could not be written to %s. The rest is in the .review and .withdrawn files of the blocked cards of this issue, in the folders under %s: read them before you change anything.\n' "$head" "$2.carried" "$ST/kept"
   fi
 }
-# What the brief of an issue's card says of the findings of the issue that a sort moved to the self-heals list
-# (healsmove(), lib/heals.sh, from: sort): the body still holds them, as the sort never edits a body, but a batch card
-# fixes them. The builder, the reviewer and the judge read the same brief, so none of them holds the card to them.
+# What the brief of an issue's card says of the findings of the issue that a sort moved to the self-heals list or the
+# docs list (healsmove(), lib/heals.sh, from: sort): the body still holds them, as the sort never edits a body, but a
+# batch card or a docs sweep card fixes them. The builder, the reviewer and the judge read the same brief, so none of
+# them holds the card to them.
 healsbrief() { # <issue>
-  jq -rs --argjson n "$1" --arg repo "$REPO" 'map(objects | select(.from == "sort" and .issue == $n and (.repo // $repo) == $repo)) | select(length > 0)
-    | "# Findings of this issue that are on the self-heals list\nThe sort moved the findings below from this issue to the self-heals list, and said so in a comment on the issue. A batch card of their area fixes them, so they are out of this card'"'"'s scope, whatever the issue'"'"'s body or its Done when says: do not fix them here, and a Done-when line is met without them. Name them in the reply as moved.\n"
-      + (map("- \(.finding) (list entry \(.id))") | join("\n"))' "$SELFHEALS" 2>/dev/null || :
+  cat "$SELFHEALS" "$DOCSDRIFT" 2>/dev/null | jq -rs --argjson n "$1" --arg repo "$REPO" 'map(objects | select(.from == "sort" and .issue == $n and (.repo // $repo) == $repo)) | select(length > 0)
+    | "# Findings of this issue that are on the self-heals list or the docs list\nThe sort moved the findings below from this issue to the self-heals list, or to the docs list (an entry that starts with d), and said so in a comment on the issue. A batch card or a docs sweep card of their area fixes them, so they are out of this card'"'"'s scope, whatever the issue'"'"'s body or its Done when says: do not fix them here, and a Done-when line is met without them. Name them in the reply as moved.\n"
+      + (map("- \(.finding) (list entry \(.id))") | join("\n"))' 2>/dev/null || :
 }
 
 # The follow-ups withdrawn for an issue, as GitHub holds them, one line each: `#<follow-up> <its finding>`. Such a

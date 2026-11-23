@@ -112,11 +112,26 @@ test('a finding the judge wrote to the self-heals list shows its chip and the ju
   const { row } = shown({ name: 'review 1 (GO)', output: `SELFHEALS: ${HEAL} (judge: self-heals: the next poll corrects it.)`, judge: { ran: true, accepted: 0, declined: 0, selfheals: 1, go: true } });
   const item = Array.from(row().querySelectorAll('.timeline > li.tl-item')).find((li) => li.querySelector('.tl-label').textContent.startsWith('Review'));
   const finding = item.querySelector(':scope > .review-findings > .output-finding');
-  assert.equal(item.querySelector(':scope > .tl-review .judged').textContent, 'judge: 0 accepted, 0 declined, 1 to the self-heals list');
+  assert.equal(item.querySelector(':scope > .tl-review .judged').textContent, 'judge: 0 accepted, 0 declined, 1 to the self-heals or docs list');
   assert.deepEqual(Array.from(finding.querySelectorAll('.finding-head > .chip'), (c) => c.textContent), ['P2', 'Self-heals list']);
   assert.equal(finding.classList.contains('is-declined'), false, 'it is not drawn as declined');
   assert.equal(finding.querySelector('.why-block .why-label').textContent, 'Why the judge sorted it as self-heals');
   assert.equal(finding.querySelector('.why-block .why-text').textContent, 'self-heals: the next poll corrects it.', "the judge's kind and reason");
+});
+
+// Bug it guards (#1563): a docs drift finding the judge wrote to the docs list showed the "Self-heals list" chip and
+// "Why the judge sorted it as self-heals", so the Board named the wrong list and kind; an accepted cleanup finding
+// had no kind chip.
+test('a finding the judge wrote to the docs list shows the Docs list chip and its kind, and an accepted cleanup one its kind', () => {
+  const DOC = '[P3] docs/board.md:9 The page omits the docs list. Proof: docs/board.md:9';
+  const CLEAN = '[P3] .claude/dashboard/panels/belt.js:3 The name tmp says nothing. Proof: .claude/dashboard/panels/belt.js:3';
+  const { row } = shown({ name: 'review 1 (NO-GO)', output: `SELFHEALS: ${DOC} (judge: docs drift: the page says less than the code does.)\n${CLEAN}`,
+    judge: { ran: true, accepted: 1, declined: 0, selfheals: 1, kinds: [{ finding: CLEAN, effect: 'cleanup', reason: 'a name, no behaviour' }] } });
+  const item = Array.from(row().querySelectorAll('.timeline > li.tl-item')).find((li) => li.querySelector('.tl-label').textContent.startsWith('Review'));
+  const [doc, clean] = item.querySelectorAll(':scope > .review-findings > .output-finding');
+  assert.deepEqual(Array.from(doc.querySelectorAll('.finding-head > .chip'), (c) => c.textContent), ['P3', 'Docs list']);
+  assert.equal(doc.querySelector('.why-block .why-label').textContent, 'Why the judge sorted it as docs drift');
+  assert.deepEqual(Array.from(clean.querySelectorAll('.finding-head > .chip'), (c) => c.textContent), ['P3', 'Cleanup']);
 });
 
 // Bug it guards (#1559): a card's review steps showed the kind and reason of a self-heals finding alone: an accepted

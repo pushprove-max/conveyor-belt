@@ -80,7 +80,7 @@
   const reviewChip = (r) => chip(`Review ${r && num(r.round) ? r.round : '?'}: ${verdictSaid(r && r.verdict)}`, r && r.verdict === 'GO' ? 'ok' : 'warn');
   // What the judge made of a review (its judge, as the snapshot gives it): "judge: N accepted, M declined", and ", K
   // outside the change" when it found K outside the card's change (each filed as a follow-up when the card lands: its
-  // row says when it is), and ", S to the self-heals list" when it wrote S there; "passed (the judge declined all M)" for a GO that came from
+  // row says when it is), and ", S to the self-heals or docs list" when it wrote S there; "passed (the judge declined all M)" for a GO that came from
   // the judge declining every finding. The declined count is a button:
   // it opens that card's lines in the panel that lists the declined findings, the module with declinedOf (the address
   // parameter that cuts it to one card's lines). null, so no judge line, for a review the judge did not read (ran not
@@ -101,7 +101,7 @@
       return b;
     };
     if (j.go === true && !o && !s) el.append('passed (the judge ', open(`declined all ${m}`), ')');
-    else el.append(`judge: ${a} accepted, `, open(`${m} declined`), o ? `, ${o} outside the change` : '', s ? `, ${s} to the self-heals list` : '');
+    else el.append(`judge: ${a} accepted, `, open(`${m} declined`), o ? `, ${o} outside the change` : '', s ? `, ${s} to the self-heals or docs list` : '');
     return el;
   }
   // The end of the output a blocked card failed on (its line's tail), shown under its sentence: closed under "Show
@@ -233,14 +233,19 @@
   // A finding the judge found real but not caused by the card's change (review.sh judged()): "OUTSIDE: <finding> (judge:
   // <reason>)". It is filed as a follow-up of the card when the card lands, never declined.
   const OUTSIDE = /^OUTSIDE:\s*(\[P[0-3]\].*?) \(judge: ([\s\S]*)\)\s*$/;
-  // A finding the judge sorted as self-heals and wrote to the self-heals list (review.sh judged()): "SELFHEALS:
-  // <finding> (judge: self-heals: <reason>)". No fix round and no follow-up: a batch card of its area fixes it.
+  // A finding the judge sorted as a kind kept off the belt and wrote to its list (review.sh judged()): "SELFHEALS:
+  // <finding> (judge: <kind>: <reason>)", the kind self-heals, cleanup or already guarded (the self-heals list) or docs
+  // drift (the docs list). No fix round and no follow-up: a batch card, or a docs sweep card, of its area fixes it.
   const SELFHEALS = /^SELFHEALS:\s*(\[P[0-3]\].*?) \(judge: ([\s\S]*)\)\s*$/;
+  // The judge's kinds (review.sh HARMRULE), each with its chip's text.
+  const KINDS = { harm: 'Harm', 'self-heals': 'Self-heals', cleanup: 'Cleanup', 'already guarded': 'Already guarded', 'docs drift': 'Docs drift' };
+  // A SELFHEALS line's kind: its reason's first word or words, self-heals when it names none (a line written before the other kinds).
+  const healKind = (heal) => (/^(self-heals|cleanup|already guarded|docs drift):/.exec(heal[2]) || [null, 'self-heals'])[1];
   // A review line's judge mark (findingRows): its SELFHEALS, OUTSIDE or DECLINED match (heal, out, no: the one it has,
   // the others null), that match (judged, null for a line with no mark) and the title of the judge's reason (why).
   function judgedLine(text) {
     const heal = SELFHEALS.exec(text), out = heal ? null : OUTSIDE.exec(text), no = heal || out ? null : DECLINED.exec(text);
-    const why = heal ? 'Why the judge sorted it as self-heals' : out ? 'Why the judge found it outside the change' : 'Why the judge declined it';
+    const why = heal ? `Why the judge sorted it as ${healKind(heal)}` : out ? 'Why the judge found it outside the change' : 'Why the judge declined it';
     return { heal, out, no, judged: heal || out || no, why };
   }
   // A review's findings as rows, in their order: the priority chip (P0 and P1 warn, P2 and P3 quiet) and the sentence
@@ -252,7 +257,7 @@
   // that review read them (reviewedLines). filed: the follow-up of each finding the judge found outside the change, a
   // Map from the finding (as the card's filed line has it) to its issue number or follow-up card id; a finding it does
   // not hold is still to be filed. judge: the review's judge as the snapshot gives it (rows.jq): each finding of its
-  // kinds (one it accepted or found outside the change, with its kind, harm or self-heals) has a chip of that kind, and
+  // kinds (one it accepted or found outside the change, with its kind: KINDS) has a chip of that kind, and
   // an accepted one the judge's reason under it as well (an outside one has its reason in its line).
   function findingRows(folded, repoUrl, card, repo, review, filed, judge) {
     const list = h('ol', 'output-findings');
@@ -261,7 +266,7 @@
     // The filed findings folded as the review's lines are, so a worktree path in one reads as in the row.
     const ups = new Map(filed instanceof Map ? Array.from(filed, ([f, n]) => [foldLines(f, card)[0].text, n]) : []);
     const kinds = (o) => new Map((judge && Array.isArray(judge.kinds) ? judge.kinds : [])
-      .filter((x) => x && typeof x.finding === 'string' && x.finding.trim() && (x.effect === 'harm' || x.effect === 'self-heals') && (x.outside === true) === o)
+      .filter((x) => x && typeof x.finding === 'string' && x.finding.trim() && Object.hasOwn(KINDS, x.effect) && (x.outside === true) === o)
       .map((x) => [foldLines(x.finding.trim(), card)[0].text, x]));
     const accepted = kinds(false), outside = kinds(true);
     folded.forEach((x) => {
@@ -295,10 +300,11 @@
     return list;
   }
   // A finding's chips before its sentence (findingRows): its priority (P0 and P1 warn, P2 and P3 quiet), "Self-heals
-  // list" for one the judge wrote to that list (heal) or else its judgeChips, and the kind the judge gave it, if any.
+  // list" or "Docs list" for one the judge wrote to that list (heal) or else its judgeChips, and the kind the judge
+  // gave it, if any (KINDS).
   function findingChips(p, heal, no, out, kind, ups, repoUrl) {
-    const marks = heal ? [chip('Self-heals list', 'quiet')] : judgeChips(no, out, ups, repoUrl);
-    const kinds = kind ? [chip(kind.effect === 'harm' ? 'Harm' : 'Self-heals', 'quiet')] : [];
+    const marks = heal ? [chip(healKind(heal) === 'docs drift' ? 'Docs list' : 'Self-heals list', 'quiet')] : judgeChips(no, out, ups, repoUrl);
+    const kinds = kind ? [chip(KINDS[kind.effect], 'quiet')] : [];
     return [chip(p, p === 'P0' || p === 'P1' ? 'warn' : 'quiet'), ...marks, ...kinds];
   }
   // The judge's reason for the kind it gave a finding with no judge mark in its line (findingRows), or null when the

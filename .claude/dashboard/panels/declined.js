@@ -16,7 +16,8 @@
 // whom, when), filed, or more than 7 days old. A review's declined count (ctx.judged, on a card's review steps) opens
 // the panel on that card's lines alone, every one of them (?declined=<card>), with a note that says so, a button to
 // every line and one back to the list. A dismissed, built or old line is greyed and tagged Dismissed, Built or Expired.
-// Above the lines, on the panel's own list, the Self-heals list (healsEl, below) with each area's "File a batch card".
+// Above the lines, on the panel's own list, the Self-heals list (healsEl, below) with each area's "File a batch card",
+// and the Docs list with each area's "File a docs sweep card".
 (() => {
   const WHO = { code: 'the code', judge: 'the judge', owner: 'the owner' };
   const DISMISS_MAX = 400; // the most ids POST /control dismiss takes in one request (dashboard_server.py control_ok)
@@ -204,45 +205,63 @@
   // judge's reason) and "File a batch card", which a second click confirms (it costs a build): POST /control heals
   // batch <area> (- for the entries with no area) with the project's repository, and the host files one card with the
   // area's entries as its scope. Its answer stays under the button (healsSaid). Under the heading, when the sort of
-  // the queued follow-ups last ran, or that it has not run.
-  const healsSaid = new Map(); // `${repo}:${area}` -> the host's answer, through every redraw
-  const healsOf = (d) => (Array.isArray(d.heals) ? d.heals : []).filter((x) => x && ((x.entries || []).length || x.sorted));
-  const healsEl = (d, ctx) => {
-    const h = ctx.h, lists = healsOf(d);
-    if (!lists.length) return [];
-    const all = lists.reduce((n, x) => n + (x.entries || []).length, 0);
-    const box = h('section', 'heals');
-    box.dataset.part = 'heals';
-    box.append(h('h3', 'heals-title', `Self-heals list (${all})`),
-      h('p', 'row-meta', 'Findings whose failure heals itself (a longer wait, a step run again, text the next poll corrects). No follow-up builds them one by one: file an area\'s batch card when you choose. Nothing here needs you now.'));
-    lists.forEach((x) => {
-      const s = x.sorted, sorted = h('p', 'row-meta heals-sorted');
-      if (lists.length > 1) sorted.append(ctx.tag(x.repo));
-      if (s && s.time) sorted.append(h('span', null, `The sort of the queued follow-ups ran, and moved ${s.moved} of ${s.items} to this list${s.failed ? ` (its judge failed: ${s.failed})` : ''}:`), ctx.since(s.time, ' ago'));
-      else sorted.append(h('span', null, 'The sort of the queued follow-ups has not run yet.'));
-      box.append(sorted);
-      // The snapshot sends every entry no batch card holds; the areas come in its order (areas: the most entries first).
-      const byArea = new Map((x.areas || []).filter((y) => y && y.count > 0).map((y) => [y.area || '', []]));
-      (x.entries || []).forEach((e) => { const a = e.area || ''; byArea.set(a, (byArea.get(a) || []).concat(e)); });
-      byArea.forEach((es, a) => { if (!es.length) byArea.delete(a); });
-      byArea.forEach((es, a) => box.append(healsArea(ctx, x, a, es, lists.length > 1)));
-    });
-    return [box];
+  // the queued follow-ups last ran, or that it has not run. The self-heals list holds the cleanup and already-guarded
+  // findings too, each with its kind. Under it, the Docs list (each project's selfheals.docs): the findings the judge
+  // sorted as docs drift. No entry expires; each area has "File a docs sweep card" (POST /control heals docs <area>),
+  // and a release files one for each area with entries.
+  const healsSaid = new Map(); // `${kind}:${repo}:${area}` -> the host's answer, through every redraw
+  const docsOf = (x) => ((x.docs && x.docs.entries) || []);
+  const healsOf = (d) => (Array.isArray(d.heals) ? d.heals : []).filter((x) => x && ((x.entries || []).length || x.sorted || docsOf(x).length));
+  // A list's entries by area, the areas in the snapshot's order (areas: the most entries first), none left empty.
+  const byAreas = (areas, entries) => {
+    const m = new Map((areas || []).filter((y) => y && y.count > 0).map((y) => [y.area || '', []]));
+    (entries || []).forEach((e) => { const a = e.area || ''; m.set(a, (m.get(a) || []).concat(e)); });
+    m.forEach((es, a) => { if (!es.length) m.delete(a); });
+    return m;
   };
-  // One area of a project's list (healsEl): its name, count and "File a batch card", then its entries; each entry
-  // names its project when the Board shows more than one (many).
-  const healsArea = (ctx, x, a, es, many) => {
-    const h = ctx.h, k = `${x.repo}:${a}`, n = es.length;
+  const healsEl = (d, ctx) => {
+    const h = ctx.h, lists = healsOf(d).filter((x) => (x.entries || []).length || x.sorted), docs = healsOf(d).filter((x) => docsOf(x).length);
+    const out = [];
+    if (lists.length) {
+      const all = lists.reduce((n, x) => n + (x.entries || []).length, 0);
+      const box = h('section', 'heals');
+      box.dataset.part = 'heals';
+      box.append(h('h3', 'heals-title', `Self-heals list (${all})`),
+        h('p', 'row-meta', 'Findings whose failure heals itself (a longer wait, a step run again, text the next poll corrects), cleanup with no change to what the code does, and findings another check already guards. No follow-up builds them one by one: file an area\'s batch card when you choose. Nothing here needs you now.'));
+      lists.forEach((x) => {
+        const s = x.sorted, sorted = h('p', 'row-meta heals-sorted');
+        if (lists.length > 1) sorted.append(ctx.tag(x.repo));
+        if (s && s.time) sorted.append(h('span', null, `The sort of the queued follow-ups ran, and moved ${s.moved} of ${s.items} to the lists${s.failed ? ` (its judge failed: ${s.failed})` : ''}:`), ctx.since(s.time, ' ago'));
+        else sorted.append(h('span', null, 'The sort of the queued follow-ups has not run yet.'));
+        box.append(sorted);
+        byAreas(x.areas, x.entries).forEach((es, a) => box.append(healsArea(ctx, x, a, es, lists.length > 1, false)));
+      });
+      out.push(box);
+    }
+    if (docs.length) {
+      const box = h('section', 'heals heals-docs');
+      box.dataset.part = 'docs';
+      box.append(h('h3', 'heals-title', `Docs list (${docs.reduce((n, x) => n + docsOf(x).length, 0)})`),
+        h('p', 'row-meta', 'Guides and READMEs that omit or misdescribe what the code does. No entry expires: file an area\'s docs sweep card when you choose. A release files one for each area with entries.'));
+      docs.forEach((x) => byAreas(x.docs.areas, docsOf(x)).forEach((es, a) => box.append(healsArea(ctx, x, a, es, docs.length > 1, true))));
+      out.push(box);
+    }
+    return out;
+  };
+  // One area of a project's list (healsEl): its name, count and "File a batch card" (with docs, "File a docs sweep
+  // card"), then its entries; each entry names its project when the Board shows more than one (many).
+  const healsArea = (ctx, x, a, es, many, docs) => {
+    const h = ctx.h, k = `${docs ? 'docs' : 'batch'}:${x.repo}:${a}`, n = es.length;
     const area = h('div', 'heals-area');
     area.dataset.area = a;
     const head = h('p', 'row-main'), note = h('span', 'answer-note');
     note.setAttribute('aria-live', 'polite');
     note.textContent = healsSaid.get(k) || '';
-    const b = h('button', 'btn', 'File a batch card');
-    b.type = 'button'; b.dataset.act = 'heals-batch';
+    const b = h('button', 'btn', docs ? 'File a docs sweep card' : 'File a batch card');
+    b.type = 'button'; b.dataset.act = docs ? 'heals-docs' : 'heals-batch';
     ctx.twice(b, 'spend', `Click again to file one card with these ${n === 1 ? 'one finding' : `${n} findings`}`, () => {
       b.disabled = true; note.textContent = 'Sending…';
-      ctx.post('control', { action: 'heals', args: ['batch', a || '-'], repo: x.repo })
+      ctx.post('control', { action: 'heals', args: [docs ? 'docs' : 'batch', a || '-'], repo: x.repo })
         .then(answer, noAnswer)
         .then((r) => { healsSaid.set(k, r.ok ? `Filed: ${r.said}. The list leaves these entries in about a minute.` : `Not filed: ${r.said}`); b.disabled = false; ctx.redraw(); });
     });
