@@ -128,19 +128,25 @@ t_judgeback() {
 }
 
 # Bug caught: cardfix() did not give rounded() the review's line, so the fix round kept no reason and the judge of the
-# next review was told the finding with none. A whole card run, as only card() shows cardfix() passing the review's
-# line on: t_judgeback calls rounded() with the line itself.
+# next review was told the finding with none. The review is judged (judgeone) and cardfix() is called on its line as
+# card() holds it (rline), its fix session stubbed; the next review is then judged, and its judge must be told the reason.
 t_judgebackrun() {
   local f='[P1] a.txt:2 wrong word. Proof: a.txt:2'
-  judging "[$(issue 7 2026-01-01)]"
+  judging "[$(issue 7 2026-01-01)]"; FXWT=$T/$CASE/cards/c7
   printf '%s\n' "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
-  printf '%s\n' "[P1] [E1] $f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   echo 'F1 ACCEPT: the word is wrong in the change. Cost to every card: none' > "$STUB/judge.1"
+  judgeone 7 -
+  afterrun "$(issue 7 2026-01-01)" '' \
+    'c=c7 n=7 rline=$(cat "$wt.fields") fixed=0 sprompt="" br="" rep=""; session() { (cd "$1" && echo fix2 >> a.txt); }; checked() { :; }
+     cardfix; echo "$go $refix" > "$T/$CASE/fix"'
+  [ "$(cat "$T/$CASE/fix")" = 'next 1' ] || fail "cardfix() on c7's judged NO-GO ($f) did not go to fix round 1: $(cat "$T/$CASE/fix" "$T/$CASE/run.out" 2>&1)"
+  jq -e --arg l "$f" -s 'map(select(.round == 1 and .line == $l)) | length == 1 and .[0].reason == "the word is wrong in the change"' "$FXWT.rounds/findings.jsonl" >/dev/null \
+    || fail "cardfix() on c7's review line (judge accepted $f: the word is wrong in the change) did not keep that reason with fix round 1's finding: $(cat "$FXWT.rounds/findings.jsonl" 2>&1)"
+  printf '%s\n' "[P1] [E1] $f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   echo 'F1 DECLINE: other: the fix changed the word' > "$STUB/judge.2"
-  # loop: only a card run goes through cardfix(), which records the fix round with the review's line.
-  loop run --only 7 >/dev/null || fail "run exited non-zero"
-  [ "$(wc -l < "$STUB/judges")" = 2 ] && grep -qxF -- "- E1 $f (accepted: the word is wrong in the change)" "$STUB/judge-asked" \
-    || fail "the judge of the second review was not given round 1's finding with the reason the first judge accepted it with: $(cat "$STUB/judge-asked")"
+  judgeone 7 -
+  grep -qxF -- "- E1 $f (accepted: the word is wrong in the change)" "$STUB/judge-asked" \
+    || fail "the judge of c7's second review ([P1] [E1] $f), after cardfix() recorded round 1, was not given E1 with the reason the first judge accepted it with: $(cat "$STUB/judge-asked")"
 }
 
 # Bug caught: a finding the judge gave no readable line for is kept in .judge.accepted, so the next review's judge was
