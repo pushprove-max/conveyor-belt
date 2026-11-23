@@ -92,7 +92,8 @@
     return el;
   }
   // The diff (`bench swe diff --json`) of two results keys, once read. It is asked for once for a pair while the Board is
-  // open (K.B.diffs): each reading in it is a model call for a task with none saved, so a redraw uses what it has, and a
+  // open (K.B.diffs), and again once a run is deleted (panels/bench.js empties K.B.diffs: a new run can reuse its results
+  // key): each reading in it is a model call for a task with none saved, so a redraw uses what it has, and a
   // diff that failed (no answer, or a flipped task with no reading: `diff` saves none then) stays missing until the Board
   // starts again, or, for Compare, until the pickers change (change: K.B.cmp.n, which Compare passes) once more. Versions
   // asks for one at a time (alone): each answer draws the page, which asks for the next. Nothing here draws before the answer.

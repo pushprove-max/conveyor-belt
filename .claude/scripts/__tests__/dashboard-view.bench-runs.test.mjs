@@ -4,7 +4,7 @@
 // restore | delete <id>...`; an archived run leaves the figures and stays in the run history, marked; Delete takes one
 // confirm that names the runs; a run that has not ended has both off. Shared setup: dashboard-view.helpers.mjs (BH).
 import assert from 'node:assert/strict';
-import { boot, settle, act, cases, BH } from './dashboard-view.helpers.mjs';
+import { boot, settle, act, next, full, cases, BH } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const { bp, page, OLDS, STUDY } = BH;
@@ -97,6 +97,46 @@ test('Scoreboard run history: Delete of two runs ticked takes one confirm that n
   await settle(); await settle();
   assert.equal(text(page(w).querySelector('.bench-history .bench-said')), `Deleted ${a}, ${b}; 1 result stays: another run shows it.`);
   assert.deepEqual(Array.from(page(w).querySelectorAll('.bench-history tbody tr'), (r) => r.dataset.run), [STUDY, ...OLDS.slice(0, 3).map(([, id]) => id), BH.ARCHIVED]);
+});
+
+// Bug it guards: Compare kept the diff of a pair while the Board was open, through a Delete of the run whose results it
+// read, so a new run under the same results key showed the deleted run's reading. After a Delete, Compare asks again.
+test('Scoreboard run history: after a Delete, Compare asks for the diff of a pair it read before', async () => {
+  const set = BH.study(), w = await opened(set, 'compare');
+  const diffs = () => w.posts.splice(0).map((p) => p.body.args).filter((a) => a[0] === 'diff');
+  assert.equal(diffs().length, 1, 'Compare asks for its pair once');
+  BH.go(w, 'score'); BH.go(w, 'compare'); await settle(); await settle();
+  assert.deepEqual(diffs(), [], 'a second draw of the pair asks for nothing');
+  BH.go(w, 'score');
+  tick(w, V14);
+  const del = act(page(w).querySelector('.bench-history .bench-selbar'), 'delete-runs');
+  del.click(); w.reply = BH.reply(`conveyor: deleted ${V14}.`); del.click();
+  set.hist.runs = set.hist.runs.filter((r) => r.id !== V14);
+  await settle(); await settle();
+  BH.go(w, 'compare'); await settle(); await settle();
+  assert.equal(diffs().length, 1, 'the pair read before the Delete is asked for again');
+});
+
+// Bug it guards: a run deleted on the build machine (`bench swe runs delete`, not the Board's Delete) left Compare's
+// diffs kept, so a new run under the same results key showed the deleted run's reading. A history read that finds a
+// run gone asks again; one that finds every run still there asks for nothing.
+test('Compare: a history read with a run gone from the build machine asks for the diff again', async () => {
+  const set = BH.study(), w = await opened(set, 'compare');
+  const diffs = () => w.posts.splice(0).map((p) => p.body.args).filter((a) => a[0] === 'diff');
+  assert.equal(diffs().length, 1, 'Compare asks for its pair once');
+  const reread = async (guard) => {
+    const d = full();
+    Object.assign(d.panels.bench.data.bench, { live: set.live, versions: set.versions });
+    Object.assign(d.panels.bench.data, { drift: set.drift, guard });
+    next(w, d);
+    await settle(); await settle();
+  };
+  await reread(1);
+  assert.deepEqual(diffs(), [], 'a history read with every run still there asks for nothing');
+  // A new object, as each read of the server's history is: the Board's kept history must not change with it.
+  set.hist = { ...set.hist, runs: set.hist.runs.filter((r) => r.id !== V14) };
+  await reread(2);
+  assert.equal(diffs().length, 1, `the history read without ${V14} asks for the pair again`);
 });
 
 // Bug it guards: a run that has not ended (its process may still write its results) could be archived or deleted. With a

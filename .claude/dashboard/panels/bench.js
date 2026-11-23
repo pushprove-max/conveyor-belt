@@ -27,7 +27,7 @@
     task: null,         // the task the Task page shows (null: the first shared task)
     sel: [],            // the runs ticked in the run history
     cmp: { a: '', b: '', n: 0 },   // Compare's two sides, and how many times they changed (a diff that failed is asked again once after a change)
-    diffs: new Map(),   // each pair of results keys' diff (`bench swe diff`), asked once while the Board is open (parts/bench-versions.js)
+    diffs: new Map(),   // each pair of results keys' diff (`bench swe diff`), asked once while the Board is open, all asked again once a run is deleted (parts/bench-versions.js)
     plan: null,         // Plan a run: the question, the tasks and the arms ticked
     by: 'all',          // what the Task map is coloured by
     folds: new Set(),   // the folds opened (fold), by their key, so a redraw keeps them open
@@ -266,7 +266,14 @@
     if (typeof repo !== 'string' || (!again && was && was.repo === repo && (was.busy || was.stamp === stamp))) return;
     const o = { repo, stamp, busy: true, data: was && was.repo === repo ? was.data : null, error: null };
     B.hist = o;
-    getJSON(`bench?repo=${encodeURIComponent(repo)}`).then((x) => { if (obj(x)) { o.data = x; B.checks = false; } else o.error = 'the answer did not read'; },
+    getJSON(`bench?repo=${encodeURIComponent(repo)}`).then((x) => {
+      if (!obj(x)) { o.error = 'the answer did not read'; return; }
+      // A run gone from the history was deleted (on the build machine, too): a new run can write its results under its
+      // results key, so a diff kept from before is of results gone.
+      const ids = new Set(list(x.runs).filter(obj).map((r) => r.id));
+      if (list(o.data && o.data.runs).some((r) => obj(r) && !ids.has(r.id))) B.diffs = new Map();
+      o.data = x; B.checks = false;
+    },
       (e) => { o.error = e && e.message ? e.message : 'no answer'; }).then(() => { o.busy = false; o.read = B.ctx.now(); if (B.hist === o) draw(); });
   }
   // A run's tasks: read once, and again while it is the run in progress and the snapshot says it moved on.
@@ -449,6 +456,8 @@
         ids.forEach((id) => B.runs.delete(`${B.repo}|${id}`));
         // The page does not ask for a run just deleted before the history is read again.
         if (hist()) hist().runs = allRuns().filter((r) => !ids.includes(r.id));
+        // A new run can write its results under a deleted run's results key: a diff kept from before is of results gone.
+        B.diffs = new Map();
       }
       readHist(true);
     });
