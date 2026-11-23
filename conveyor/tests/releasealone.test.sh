@@ -109,6 +109,20 @@ t_relalonepass() {
   [ "$got" = 'null /,1 /,null p1/p1,2 /,null p2/p2,3 /,null p3/p3' ] \
     || fail "fulljudge on a release's failed case x named a pass beside another pass's logs, or left one named (round logs.test/testlog, each write): $got"
 }
+# Bug it catches (O140): release-prep saves the red suite's counts in its record before it runs each failed case alone
+# (the Release panel's progress); given to jq as one argument, counts over Linux's 128 KiB limit were not saved. Three
+# failed cases with names of 45,001 bytes make counts of over 135 KB in 9 passes alone, not thousands (each case's
+# unit holds the whole name twice, as case and name, with its line cut to 200 characters, so it stays under the
+# limit); each run alone notes the saved counts' failed and name lengths in $STUB/counts.
+t_relalonebig() {
+  local O RUN rc
+  runsetup "if [ -n \"\${CONVEYOR_TEST_RERUN:-}\" ]; then jq -c '[.counts.failed, (.counts.cases | map(length))]' '$T/$CASE/cards/release/run.json' >> \"\$STUB/counts\"
+    else for c in a b c; do printf 'FAIL [%s%045000d]: off\n' \"\$c\" 0; done; false; fi"
+  loop release-prep 1.1.0 > "$T/$CASE.out" 2>&1; rc=$?
+  [ "$(sort -u "$STUB/counts" 2>&1)" = '[3,[45001,45001,45001]]' ] && [ "$(wc -l < "$STUB/counts")" = 9 ] \
+    || fail "the record did not keep the suite's counts of 3 failed cases (over 128 KiB) while they ran alone: $(head -c 2000 "$STUB/counts" 2>&1)"
+  [ $rc = 0 ] || fail "release-prep failed on three cases that pass alone: $(head -c 2000 "$T/$CASE.out")"
+}
 # Bug (#1248): the test command's exit removes wt.live, and with none the snapshot took the rerun's start as its last
 # move while it still counted the files the logs show done: a pass that had just finished a file looked as if it had not
 # moved since it began. The record here is a pass begun in 2020 with one file done in the logs and no wt.live; the last
