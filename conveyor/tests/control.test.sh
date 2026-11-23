@@ -313,6 +313,15 @@ t_controlkept() {
   esac
   [ "$(jq -c '.rules | {P0, P1, P2, P3, followups, push, visible, split}' <<<"$CTL_V")" = "$want" ] \
     || fail "conveyor/README.md's rule defaults paragraph claims $want for a record saved before its rules, but it reads $(jq -c .rules <<<"$CTL_V")"
+  # The Split entry in the rules list names its own default ("It is on by default"); it must say what the record reads
+  # too. Bug caught: that entry gave another default ("It is `shadow` by default") and the case still passed, as it
+  # read only the paragraph above. The whole entry is read, its indented continuation lines joined, so a sentence
+  # that wraps onto the next line is still found.
+  local entry
+  entry=$(awk 'p && !/^  / {exit} /^- `split`:/ {p = 1} p' "$SRC/README.md" | tr -s ' \n' '  ' \
+    | sed -n 's/.*It is `\{0,1\}\([a-z]*\)`\{0,1\} by default.*/\1/p')
+  [ "$entry" = "$(jq -r .rules.split <<<"$CTL_V")" ] \
+    || fail "conveyor/README.md's Split entry says its default is '$entry', but a record that leaves it out reads $(jq -r .rules.split <<<"$CTL_V")"
   # Split is on for a record that leaves it out (above); a project that set shadow keeps it. Bug caught: the new
   # default overrides a project's own setting, so its large issues start to be split without its choice.
   echo '{"rules":{"split":"shadow"}}' > "$CONTROL"
