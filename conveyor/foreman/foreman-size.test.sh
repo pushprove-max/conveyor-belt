@@ -194,7 +194,70 @@ t_words_rules() {
     || fail "no Read line naming owner-rules.md and rules.md in the first 2000 characters of the claim's ${#c}: ${c:0:400}"
 }
 
-cases=(fit big other race old owner owner_whole owner_mid owner_mid_rules words_rules)
+# Bug it catches (review of #1461): in the plugin's own repository the start lists each unfiled plugin problem of
+# plugin-bugs.md with its filed line, and the list had no cap: with 30 notes the start's output was 22,000 characters.
+# It is under 10,000, with the WARNING line, the first note whole with its filed line, and a line that says to Read
+# plugin-bugs.md for the rest. (The words hook leaves the test pack no room for a note: words_notes_full has its case.)
+t_notes() {
+  local out c i own
+  fixture notes
+  own=$(jq -r '.repository | if type == "object" then .url else . end' "$SRC/../../.claude-plugin/plugin.json")
+  git -C "$M" remote set-url origin "git@github.com:${own#https://github.com/}.git" || fail "the origin was not set"
+  for ((i = 1; i <= 30; i++)); do
+    printf -- '- 2026-11-22T10:%02d:00Z · card c20261122T100000-alpha-%d · the price of a model is not in models.json, it should be there to count the cost, card c20261122T100000-alpha-%d, evidence ~/cards/c20261122T100000-alpha-%d.err · evidence: ~/cards/c20261122T100000-alpha-%d.err\n' "$i" "$i" "$i" "$i" "$i"
+  done > "$FD/plugin-bugs.md"
+  marked
+  out=$(hook start sA --rules-apart); c=$(ctx <<<"$out")
+  [ "${#out}" -lt 10000 ] || fail "the start's output, with 30 unfiled plugin problems in plugin-bugs.md, is ${#out} characters, not under 10000"
+  grep -q '^# WARNING: plugin problems noted' <<<"$c" && grep -qxF '  Plugin problem (for the conveyor-belt repo): the price of a model is not in models.json, it should be there to count the cost, card c20261122T100000-alpha-1, evidence ~/cards/c20261122T100000-alpha-1.err, filed as #<n>' <<<"$c" \
+    || fail "the start, with 30 unfiled plugin problems, does not list the first one with its filed line: ${c:0:400}"
+  grep -qE "^# [0-9]+ more such notes did not fit in this start .*Read $FD/plugin-bugs.md now" <<<"$c" \
+    || fail "the start, with 30 unfiled plugin problems, has no line that says to Read $FD/plugin-bugs.md for the rest"
+}
+
+# Bug it catches (review of the fix above): in the plugin's own checkout the pack's standing kinds and a full live
+# summary leave the notes no room, yet the two notice lines were added all the same, and the live summary had no cap
+# but its own, so the words hook's output was over 10,000 characters even with no note at all. With this repository's
+# own pack, its standing kinds read, 15 open decisions and 30 notes, the output is under 10,000, and one short line that
+# says to Read plugin-bugs.md stands for all the notes. And as those leave no room for a note, auto's rules and the
+# standing kinds are saved to start-rest.md, which a Read line names (bug: the output was over 10,000 with no note).
+# And (E3 of that review): the line that may stand for the saved state was made before the start's archive ran, so a
+# state.md of only DONE items over its cap, which the archive empties, still got "over its cap: trim it" and a Read line,
+# here where the start is full and the owner rules do not fit.
+t_words_notes_full() {
+  local out c i own
+  fixture words_notes_full
+  own=$(jq -r '.repository | if type == "object" then .url else . end' "$SRC/../../.claude-plugin/plugin.json")
+  git -C "$M" remote set-url origin "git@github.com:${own#https://github.com/}.git" || fail "the origin was not set"
+  jq '.plugin = {follow: "main"}' "$SRC/../../.conveyor/project.json" > "$M/.conveyor/project.json" || fail "the pack was not copied"
+  for ((i = 1; i <= 30; i++)); do
+    printf -- '- 2026-11-22T10:%02d:00Z · card c20261122T100000-alpha-%d · the price of a model is not in models.json, card c20261122T100000-alpha-%d, evidence ~/cards/c20261122T100000-alpha-%d.err · evidence: ~/cards/c20261122T100000-alpha-%d.err\n' "$i" "$i" "$i" "$i" "$i"
+  done > "$FD/plugin-bugs.md"
+  mkdir -p "$M/.claude/metrics" || fail "the ledger folder was not made"
+  for ((i = 1; i <= 15; i++)); do
+    jq -cn --arg i "$i" '{id: "d\($i)", question: ("Approve the change \($i) " + ("q" * 150)), askedAt: "2026-11-22T10:00:00Z", answeredAt: null}'
+  done > "$M/.claude/metrics/decisions.jsonl"
+  # The standing kinds are read from this checkout's engine, as the real record's are; the snapshot cannot be read.
+  export CONVEYOR_FOREMAN_ASK='case $CONVEYOR_CMD in "auto standing "*) cd "$CONVEYOR_MAIN" && bash "$ENGINE" auto standing "${CONVEYOR_CMD#auto standing }" ;; *) exit 3 ;; esac'
+  export ENGINE=$SRC/../conveyor.sh
+  marked
+  # After the claim of sA, whose start would archive it first.
+  for ((i = 1; i <= 80; i++)); do printf -- '- DONE 2026-11-22 10:%02d ET: card %d landed, its issue closed and its await line removed\n' "$((i % 60))" "$i"; done > "$FD/state.md"
+  [ "$(wc -c < "$FD/state.md")" -gt 5000 ] || fail "the fixture's state.md is not over its 5000-byte cap"
+  out=$(jq -cn --arg c "$M" '{session_id: "sB", prompt: "you are the foreman", cwd: $c}' | (cd "$M" && bash "$SRC/foreman.sh" words)) || fail "the words hook failed"
+  c=$(ctx <<<"$out")
+  grep -qF '# STANDING YES' "$FD/start-rest.md" || fail "start-rest.md has no standing kinds, so the fixture does not test the real pack: $(head -c 400 "$FD/start-rest.md" 2>&1)"
+  grep -qxF "# $FD/start-rest.md (auto's rules and the standing kinds of routine yes) did not fit in this start (Claude Code cuts a start over 10,000 characters): Read it now, before you act." <<<"$c" \
+    || fail "the words hook's claim, with no room for the standing kinds, has no line that says to Read $FD/start-rest.md: $(grep -n 'STANDING\|start-rest' <<<"$c" | cut -c1-200)"
+  [ ! -s "$FD/state.md" ] || fail "the start did not archive the DONE items of state.md: $(head -c 200 "$FD/state.md")"
+  ! grep -E "state\.md is [0-9]+ bytes, over its|Read $FD/state\.md now" <<<"$c" \
+    || fail "the words hook's claim, for a state.md of DONE items only that the start archived, still says to trim or Read it"
+  [ "${#out}" -lt 10000 ] || fail "the words hook's output, with the plugin's own pack, a full live summary and 30 unfiled plugin problems, is ${#out} characters, not under 10000"
+  grep -qxF "# WARNING: 30 plugin problems noted in $FD/plugin-bugs.md have no issue number yet, and did not fit in this start: Read it now, and for each one search this repository's issues for one that reports it, file it only when none does, then say its line in the form above with that issue's number." <<<"$c" \
+    || fail "the words hook's claim, with no room for a note, has no one line that says to Read $FD/plugin-bugs.md: $(grep -n 'plugin-bugs' <<<"$c" | cut -c1-200)"
+}
+
+cases=(fit big other race old owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

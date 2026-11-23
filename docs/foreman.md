@@ -24,7 +24,11 @@ ends the role but leaves the name.
 
 Claude Code keeps the output of a hook over 10,000 characters out of the session. So the Foreman's start sends its text
 in two outputs, each kept short. The first holds the fixed text, the rules of auto mode, the standing kinds of routine,
-the live summary and the saved state. When the saved state does not fit with the rest, the start leaves it out and
+the live summary and the saved state. The live summary gets only the room that the text before it leaves, and is cut
+at a whole line. Run `conveyor.sh foreman status` for the full status of the cards. The Board's Needs you panel shows
+all open decisions. When the rules of auto mode and the standing kinds leave no room for the live summary, the start
+puts them in `start-rest.md` in the Foreman's folder. One line in their place tells the Foreman to read that file now.
+When the saved state does not fit with the rest, the start leaves it out and
 has one line in its place that tells the Foreman to read that file now, with its path. The second, a SessionStart
 hook of its own, holds the project's `rules.md` from the Foreman's folder, and only in the Foreman's session: any other
 session gets no rules. A `rules.md` that is too long for its output is cut at a whole line, and the last line names
@@ -224,7 +228,9 @@ problem that the Foreman finds in Conveyor itself always needs you. Who files it
   `Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what it expected>[, cause not checked: <what the Foreman thinks the cause is>], card <card>, evidence <path>, filed as #<n>`
 
   If the line has no issue number, the Foreman cannot end its reply. It gets the reason and files the issue. When the
-  Foreman starts, it gets a list of each entry in `plugin-bugs.md` that has no issue number. For each entry, it first looks for an issue that already reports the problem, such as
+  Foreman starts, it gets a list of the entries in `plugin-bugs.md` that have no issue number. The list holds only the
+  entries that fit in the start. A line after them tells the Foreman to read `plugin-bugs.md` for the rest. When no
+  entry fits, one line in place of the list tells it to read that file. For each entry, it first looks for an issue that already reports the problem, such as
   one that you filed, and uses that issue's number. It files only the entries that no issue reports.
 
 The line says what the Foreman saw: the command or step, what it did and what the Foreman expected. A cause that the

@@ -405,30 +405,45 @@ off() {
 
 # context: the start's text, under CTX_LIMIT bytes (Claude Code keeps a hook's output over 10,000 characters out of the
 # context and gives the session a short preview only). It is made in three parts: the fixed text with its warnings, the
-# rest (auto's rules, the standing kinds, the live summary) and the saved state. This project's rules.md is not part of
-# it when the start is called with --rules-apart (the plugin's hooks.json does): the SessionStart hook `rules` sends it in
-# an output of its own. A call without it (a claim in a running session, which no SessionStart follows, or a plugin from
-# before the rules hook) gets rules.md after the rest, cut to what the limit leaves. When the whole is over the limit,
-# state.md is swapped for one line that tells the Foreman to Read the file; when the fixed text and the rest alone leave
-# no room for the owner rules, a line that tells the Foreman to Read owner-rules.md stands for them, and names rules.md
-# in the same line when the project has one. That line comes first: the fixed text and the rest have no cap, and an
-# output over the limit is shown as a short preview of its start, which keeps it.
+# rest (auto's rules, the standing kinds, the live summary) and the saved state. The live summary and the fixed text's
+# list of unfiled plugin problems (context_notes) share the room the others leave; when auto's rules and the standing
+# kinds leave them none, those go to $FD/start-rest.md, and a line that tells the Foreman to Read it stands for them.
+# This project's rules.md is not part of it when the start is called with --rules-apart (the plugin's hooks.json does):
+# the SessionStart hook `rules` sends it in an output of its own. A call without it (a claim in a running session, which
+# no SessionStart follows, or a plugin from before the rules hook) gets rules.md after the rest, cut to what the limit
+# leaves. When the whole is over the limit, state.md is swapped for one line that tells the Foreman to Read the file; when
+# the fixed text and the rest alone leave no room for the owner rules, a line that tells the Foreman to Read
+# owner-rules.md stands for them, and names rules.md in the same line when the project has one. That line comes first:
+# the fixed text has no cap, and an output over the limit is shown as a short preview of its start, which keeps it.
 context() {
-  local head mid st left own=0 rd=''
+  local head mid notes st stl left room cap lv i own=0 rd='' rdl=''
   launcher
   FQ=$(printf %q "$LAUNCHER")
   # Without --rules-apart the owner rules come in this output too, so the saved state yields room for them.
   [ -n "$RULES_APART" ] || [ ! -s "$FHERE/owner-rules.md" ] || own=$(($(p_stat "$FHERE/owner-rules.md" | cut -d' ' -f1) + 1))
-  head=$(context_head) mid=$(context_mid) st=$(context_state)
-  if [ "$(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)" -gt "$((CTX_LIMIT - own))" ]; then st=$(context_state_warn; context_read "$FD/state.md"); fi
+  # mid keeps the blank line context_mid ends with, which comes before the live summary.
+  head=$(context_head) mid=$(context_mid; printf x); mid=${mid%x}
+  # The lines that may stand for the state and owner rules below, which the room keeps space for; after head's archive.
+  stl=$(context_state_warn; context_read "$FD/state.md")
+  [ "$own" = 0 ] || rdl="# $FHERE/owner-rules.md$([ ! -s "$FD/rules.md" ] || echo " and $FD/rules.md") did not fit in this start (Claude Code cuts a start over 10,000 characters): Read $([ -s "$FD/rules.md" ] && echo both || echo it) now, before you act."
+  # The live summary gets the room the rest and those two lines leave, up to LIVE_CAP, less the shortest list of unfiled
+  # plugin problems (context_notes 0); the list gets what it leaves. When that is under 0, auto's rules and the standing
+  # kinds go to start-rest.md, and a Read line stands for them. Bug: in the plugin's own repository, its standing kinds
+  # made the words hook's output over 10,000 characters with the notes and the live summary cut to nothing.
+  for i in 1 2; do
+    room=$((CTX_LIMIT - $(printf '%s\n%s%s\n%s\n\n' "$head" "$mid" "$stl" "$rdl" | wc -c))) cap=$((room - $(context_notes 0 | wc -c) - 1))
+    [ "$i" = 1 ] && [ "$cap" -lt 0 ] && printf '%s' "$mid" > "$FD/start-rest.md.$$" && mv -f "$FD/start-rest.md.$$" "$FD/start-rest.md" || break
+    mid=$(printf '\n# %s (auto'"'"'s rules and the standing kinds of routine yes) did not fit in this start (Claude Code cuts a start over 10,000 characters): Read it now, before you act.\n\nx' "$FD/start-rest.md"); mid=${mid%x}
+  done
+  [ "$cap" -le "$LIVE_CAP" ] || cap=$LIVE_CAP; [ "$cap" -ge 0 ] || cap=0
+  lv=$(LIVE_CAP=$cap live); mid+=$lv
+  notes=$(context_notes $((room - $(printf '%s\n' "$lv" | wc -c) - 1))); [ -z "$notes" ] || head+=$'\n'$notes
+  st=$(context_state)
+  if [ "$(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)" -gt "$((CTX_LIMIT - own))" ]; then st=$stl; fi
   left=$((CTX_LIMIT - $(printf '%s\n%s\n%s\n' "$head" "$mid" "$st" | wc -c)))
   # The fixed text and the rest alone may leave no room for the owner rules: a Read line stands for them, and for this
   # project's rules.md too when it has text (rules_text, which would name it, is not reached), never a start over the limit.
-  if [ -z "$RULES_APART" ] && [ "$own" -gt 0 ] && [ "$left" -lt "$own" ]; then
-    if [ -s "$FD/rules.md" ]; then rd=$(printf '# %s and %s did not fit in this start (Claude Code cuts a start over 10,000 characters): Read both now, before you act.' "$FHERE/owner-rules.md" "$FD/rules.md")
-    else rd=$(printf '# %s did not fit in this start (Claude Code cuts a start over 10,000 characters): Read it now, before you act.' "$FHERE/owner-rules.md"); fi
-    printf '%s\n\n' "$rd"
-  fi
+  if [ "$own" -gt 0 ] && [ "$left" -lt "$own" ]; then rd=$rdl; printf '%s\n\n' "$rd"; fi
   printf '%s\n' "$head"
   printf '%s\n' "$mid"
   [ -z "$st" ] || printf '%s\n' "$st"
@@ -443,12 +458,11 @@ context_read() {
 }
 
 context_head() {
-  local err n plug home='' s=$FD/state.md
+  local err plug s=$FD/state.md
   # A plugin problem: in the plugin's own repository (plugin_home) the Foreman files it there itself, as any issue it
   # files, and its line names the issue (stop.sh refuses one that does not); elsewhere the owner files it.
   plug="# A suspected defect in Conveyor itself always needs the owner (only they can fix or file it in the plugin's repository): say it on its own line, \"Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>\", where a cause you checked in the code or the logs goes in <what it did> with where you checked it, and a cause you did not check goes in the cause not checked part; it is noted in $FD/plugin-bugs.md."
   if plugin_home; then
-    home=1
     plug="# A suspected defect in Conveyor itself: this project is the plugin's own repository, so file it here at once, as any issue you file (it starts held until the owner says yes), and say it on its own line with the issue's number, \"Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>, filed as #<n>\", where a cause you checked in the code or the logs goes in <what it did> with where you checked it, and a cause you did not check goes in the cause not checked part; it is noted in $FD/plugin-bugs.md."
   fi
   cat <<EOF
@@ -467,25 +481,35 @@ $plug
 # To be woken when one card's issue lands, append its number to $FD/await-<project>.txt, <project> being the one it is in (append only; never rewrite it). For a batch of cards do not: the idle wake ("Conveyor is idle") awaits the batch, and each await line costs a full wake turn.
 # Your saved state is $s: keep it current, under $CAP bytes; begin the line of a finished item with "- DONE" (for example "- DONE 2026-11-21 08:20 ET: ...") and it is archived at the next start.
 EOF
-  # There, each noted plugin problem that names no issue (no "filed as #<n>"), so an older one is not lost, with the
-  # line that marks it filed: in the form, its own text (between its card and its evidence) with the note's card and
-  # evidence fields after it, unless the text already ends with them (a note saved from a line in the form), which
-  # stop.sh matches exactly.
-  if [ -n "$home" ] && n=$(grep '^- ' "$FD/plugin-bugs.md" 2>/dev/null | grep -viE '[ ,;]filed as #[1-9][0-9]*[[:space:]]*\.? · evidence: ') && [ -n "$n" ]; then
-    echo "# WARNING: plugin problems noted in $FD/plugin-bugs.md with no issue number yet: for each one, first search this repository's issues, open and closed, for one that already reports it (the owner may have filed it); file it now only when none does. Then say the line under it with that issue's number, word for word, so the entry is marked filed."
-    local l t f re='^- [^ ]* · card ([^ ]*) · (.*) · evidence: (.*)$'
-    while IFS= read -r l; do
-      t=$l
-      if [[ $l =~ $re ]]; then
-        t=${BASH_REMATCH[2]} f=", card ${BASH_REMATCH[1]}, evidence ${BASH_REMATCH[3]}"
-        [[ $t == *"$f" ]] || t+=$f
-      fi
-      printf '%s\n  Plugin problem (for the conveyor-belt repo): %s, filed as #<n>\n' "$l" "$t"
-    done <<<"$n"
-  fi
   # An empty state.md still runs archive: only archive reports a late write kept beside it.
   [ ! -e "$s" ] || err=$(python3 -I "$FHERE/archive.py" "$s" 2>&1) \
     || echo "# WARNING: the DONE items of $s were not archived: ${err##*$'\n'}"
+}
+
+# context_notes <room>: in the plugin's own repository (plugin_home), each noted plugin problem that names no issue
+# (no "filed as #<n>"), so an older one is not lost, with the line that marks it filed: in the form, its own text
+# (between its card and its evidence) with the note's card and evidence fields after it, unless the text already ends
+# with them (a note saved from a line in the form), which stop.sh matches exactly. All of it, notices too, is kept in
+# <room> bytes: whole notes that fit, then a line to Read the file for the rest (bug: 30 notes made the words hook's
+# output 22,000 characters); with no room for one note, one short line to Read it (bug: the notices alone went over).
+context_notes() {
+  local n l t f row warn mfmt more out='' all=0 shown=0 re='^- [^ ]* · card ([^ ]*) · (.*) · evidence: (.*)$'
+  plugin_home && n=$(grep '^- ' "$FD/plugin-bugs.md" 2>/dev/null | grep -viE '[ ,;]filed as #[1-9][0-9]*[[:space:]]*\.? · evidence: ') && [ -n "$n" ] || return 0
+  all=$(grep -c '' <<<"$n")
+  warn="# WARNING: plugin problems noted in $FD/plugin-bugs.md with no issue number yet: for each one, first search this repository's issues, open and closed, for one that already reports it (the owner may have filed it); file it now only when none does. Then say the line under it with that issue's number, word for word, so the entry is marked filed."
+  mfmt="# %s more such notes did not fit in this start (Claude Code cuts a start over 10,000 characters): Read %s now. For each note in it with no \"filed as #<n>\", the line to say is \"Plugin problem (for the conveyor-belt repo): <its text>, card <its card>, evidence <its evidence>, filed as #<n>\", with the note's text, card and evidence word for word (no card and evidence a second time when its text already ends with them).\n"
+  more=$(printf "$mfmt" "$all" "$FD/plugin-bugs.md") # with all notes' count: the real line is never longer
+  while IFS= read -r l; do
+    t=$l
+    [[ ! $l =~ $re ]] || { t=${BASH_REMATCH[2]} f=", card ${BASH_REMATCH[1]}, evidence ${BASH_REMATCH[3]}"; [[ $t == *"$f" ]] || t+=$f; }
+    row=$(printf '%s\n  Plugin problem (for the conveyor-belt repo): %s, filed as #<n>' "$l" "$t")
+    # The last note needs no "more" line after it; any other leaves room for one.
+    [ "$(printf '%s\n%s%s\n%s' "$warn" "$out" "$row" "$([ "$((shown + 1))" = "$all" ] || printf '%s\n' "$more")" | wc -c)" -le "$1" ] || break
+    out+=$row$'\n' shown=$((shown + 1))
+  done <<<"$n"
+  [ "$shown" != 0 ] || { echo "# WARNING: $all plugin problems noted in $FD/plugin-bugs.md have no issue number yet, and did not fit in this start: Read it now, and for each one search this repository's issues for one that reports it, file it only when none does, then say its line in the form above with that issue's number."; return 0; }
+  printf '%s\n%s' "$warn" "$out"
+  [ "$shown" = "$all" ] || printf "$mfmt" "$((all - shown))" "$FD/plugin-bugs.md"
 }
 
 # rules (SessionStart, beside start): the Foreman session's project (or group) rules, $FD/rules.md, as an output of their
@@ -529,8 +553,8 @@ context_mid() {
   done < <(mine 2>/dev/null)
   # The project runs an old engine here, and why (`conveyor.sh take stale`, from this install: no remote is read).
   err=$(bash "$FHERE/../conveyor.sh" take stale 2>/dev/null) && [ -n "$err" ] && echo "# WARNING: $err"
+  # The live summary follows, after this blank line: context() makes it, with the room this text leaves.
   echo
-  live
 }
 
 # context_state_warn: the warning for a saved state over its cap; nothing for one that fits. A start that swaps the
