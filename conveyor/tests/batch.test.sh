@@ -453,3 +453,42 @@ t_batchcoverage() {
   bout 'taken: ["7.txt","8.txt"]' || fail "#8's test line does not carry the coverage of the run that judged it: $(grep '^taken' "$T/$CASE/run.out")"
   bout 'norun: null' || fail "a test step that ran nothing kept the coverage of the run before: $(grep '^norun' "$T/$CASE/run.out")"
 }
+
+# Bug (#1574): gather(), stackto() and settle() gave jq the card's claim, the other claims and the wait as arguments
+# (--argjson); over 128 KiB Linux refuses to start jq, so a card whose claim holds 2,000 long paths could not make a
+# batch, be stacked, or wait. BIGP is 2,000 paths of about 80 bytes (over 160 KiB as JSON).
+BIGP='[range(2000) | "big/\(. + 100000)" + ("x" * 70)]'
+# <n>: card <n>'s claim with the 2,000 paths added.
+bigclaim() { jq -c "(.paths += $BIGP)" "$CARDS/c$1-$1.claim" > "$CARDS/c$1-$1.claim.new" && mv "$CARDS/c$1-$1.claim.new" "$CARDS/c$1-$1.claim" \
+  && [ "$(wc -c < "$CARDS/c$1-$1.claim")" -gt 131072 ] || fail "the claim of card $1 over 128 KiB was not made"; }
+# Bug it catches: gather() passed #7's claim (--argjson me), #8's with the other claims (--argjson o) and the batch
+# (--argjson a) as arguments, so with claims over 128 KiB it made no batch and #7 landed alone.
+t_batchbiggather() {
+  bmain; border '[7]'
+  bwt 7 'sed -i 1s/.*/seven/ a.txt' 300 true; bwt 8 'echo eight >> a.txt' 100
+  bigclaim 7; bigclaim 8
+  bfx "$BGATHER"
+  bout 'gather: c7-7 c8-8' && [ "$(jq -c '.paths | length' "$CARDS/c7-7.claim")" = 2001 ] \
+    || fail "#7, with claims of 2,001 paths for itself and #8, did not make the batch of both: $(cut -c1-300 "$T/$CASE/run.out")"
+}
+# Bug it catches: stackto() passed the wait of claim() (--argjson w) as an argument, so a wait that names 2,000 long
+# paths could not stack #6 on #7, which holds them.
+t_batchbigstack() {
+  bmain; border '[7]'; issue 6 2025-12-31 > "$STUB/issue.6"
+  bwt 6 ':'; bwt 7 'sed -i 1s/.*/seven/ a.txt' 300 true
+  bfx 'w=$(jq -cn "{on: \"c7-7\", paths: $BIGP}"); [ "${#w}" -gt 131072 ] || exit 8
+    stackto c6-6 "$CARDS/c6-6" "$w" "$(cat "$STUB/issue.6")" > "$STUB/base"; echo "stack: $?"'
+  bout 'stack: 0' && [ "$(jq -r .on "$CARDS/c6-6.stack")" = c7-7 ] \
+    || fail "#6 was not stacked on #7 for a wait that names 2,000 long paths: $RC $(cut -c1-300 "$T/$CASE/run.out")"
+}
+# Bug it catches: settle() passed the wait of claim() (--argjson w) as an argument to the jq that makes the live record,
+# so a card told to wait on 2,000 long paths wrote no live record (the Board and `health` saw no wait).
+t_batchbigsettle() {
+  bmain; bwt 7 ':'
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'W=$CARDS/c7-7; LIVE=0.1 waitsec=0 mainsec=0 parsecheck="" behind="[]"
+    claim() { jq -cn "{on: \"c8-8\", paths: $BIGP}"; }; stackto() { return 1; }; turnfree() { :; }; began() { :; }
+    stdb() { [ -z "$waited" ] || exit 0; }
+    ( settle c7-7 7 "$W" prompt land "{}" > /dev/null ); jq -c ".waits.paths | length" "$W.live"'
+  [ "$(cat "$T/$CASE/run.out")" = 2000 ] || fail "settle() wrote no live record for a wait on 2,000 long paths: $RC $(cut -c1-300 "$T/$CASE/run.out")"
+}

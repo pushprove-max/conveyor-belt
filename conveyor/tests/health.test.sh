@@ -328,6 +328,24 @@ t_stoppedengine() {
   h=$(CONVEYOR_NOW=$((now + 150)) loop health | jq -c '[.loop, .stuck, .engineStopped]'); kill "$c" "$e"
   [ "$h" = '[true,[],null]' ] || fail "a card under a running engine is stuck, or the engine reads as stopped: $h"
 }
+# Bug (#1574): a card waiting on 2,000 shared paths of about 80 bytes writes a live record over 128 KiB (settle()), and
+# health and the snapshot gave all the live records to jq as one argument (--argjson live). Linux refuses to start jq
+# over 128 KiB in one argument, so `health` failed and `snapshot` stopped: the Board stopped refreshing. The card is
+# still read as waiting, on #11.
+t_waitbig() {
+  local now h; setup '[]'; now=$(date +%s); mkdir -p "$ST" "$T/$CASE/cards"
+  for s in picked start; do
+    jq -cn --argjson t "$now" --arg s "$s" \
+      '{card:"c9-9",issue:9,step:$s,time:($t | todate),tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""} + (if $s == "start" then {of:"land"} else {title:"t",created:"2026-01-01T00:00:00Z"} end)' >> "$ST/cards.jsonl"
+  done
+  jq -cn --argjson t "$now" '{step: "land", at: ($t | todate), last: ($t | todate), turns: 0, waited: {before: 0, behind: ["c11-11"]},
+    waits: {on: "c11-11", paths: [range(2000) | "big/\(. + 100000)" + ("x" * 70)]}}' > "$T/$CASE/cards/c9-9.live"
+  [ "$(wc -c < "$T/$CASE/cards/c9-9.live")" -gt 131072 ] || fail "the live record over 128 KiB was not made"
+  h=$(CONVEYOR_NOW=$now loop health 2>&1) && [ "$(jq -c '.waitingOnCard | map(.card)' <<<"$h")" = '["c9-9"]' ] \
+    || fail "health failed or did not read the card as waiting, for a live record over 128 KiB: $(cut -c1-300 <<<"$h")"
+  h=$(CONVEYOR_NOW=$now loop snapshot --fresh 2>/dev/null) && [ "$(jq -c '[.belt[] | select(.card == "c9-9") | .waitsOn.card]' <<<"$h" 2>/dev/null)" = '["c11-11"]' ] \
+    || fail "snapshot failed or lost the wait of a card whose live record is over 128 KiB: $(cut -c1-300 <<<"$h")"
+}
 # Issue 1106: an engine held by a stop signal was named by `foreman status` alone; the Board's Needs you said
 # nothing, so the belt stood still for minutes until the owner looked. A stand-in for `serve` (holding the loop's
 # lock, its pid in loop.json) and the process under it are stopped, and health first reads them so at <now>: 30 s on,

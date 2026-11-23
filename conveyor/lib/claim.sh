@@ -338,7 +338,7 @@ giveway() { # <card> <worktree> [fixing|fix]; under the lock
 stackto() { # <card> <worktree> <claim()'s wait> <issue json>
   local h n id s d b rc o
   # This runs at each turn of a wait (settle()): H, when the issue names H's in no `Depends on:` line, from one jq (#1542).
-  h=$(jq -r --argjson w "$3" "$DEPS"'. as $i | $w.on | strings | select(test("-[0-9]+$")) | select((sub(".*-"; "") | tonumber) as $h | $i | needs | index($h) | not)' <<<"$4" 2>/dev/null) \
+  h=$(jq -r --slurpfile w <(printf '%s' "$3") "$DEPS"'. as $i | $w[0].on | strings | select(test("-[0-9]+$")) | select((sub(".*-"; "") | tonumber) as $h | $i | needs | index($h) | not)' <<<"$4" 2>/dev/null) \
     && [ -n "$h" ] && [[ ${1##*-} =~ ^[0-9]+$ ]] && packget landBatch n && [ "$n" -gt 1 ] || return 1
   if ! readysince "$CARDS/$h" >/dev/null; then
     o=$(ctl 2>/dev/null) || o=null
@@ -423,8 +423,8 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       # It names too (waited) what the card waited before this wait (before: the seconds of its waits that ended) and
       # every card it has waited on, in order (behind), so `health` can say when all its waits together pass WAIT_LIMIT.
       # One jq for both (#595): the list on its first line, then the live record; a list that does not read is none.
-      t=''; { IFS= read -r behind && IFS= read -r t; } < <(jq -cn --argjson w "$w" --arg at "$waited" --arg s "$5" --argjson wb "$wb" --arg bh "$behind" '
-        ([$bh | try fromjson catch null | arrays] | first // [] | if index($w.on) then . else . + [$w.on] end) as $bh
+      t=''; { IFS= read -r behind && IFS= read -r t; } < <(jq -cn --slurpfile wf <(printf '%s' "$w") --arg at "$waited" --arg s "$5" --argjson wb "$wb" --arg bh "$behind" '
+        $wf[0] as $w | ([$bh | try fromjson catch null | arrays] | first // [] | if index($w.on) then . else . + [$w.on] end) as $bh
         | $bh, {step: $s, at: $at, last: (now | todate), turns: 0, waits: ($w | {on, paths}), waited: {before: $wb, behind: $bh},
         action: (if $w.turn then "queued for the next batch: card \($w.on) has the landing turn" else "waiting on card \($w.on), which changes the same files: \($w.paths | join(", "))" end)}' 2>/dev/null) || behind='[]'
       [ -z "$t" ] || { printf '%s\n' "$t" > "$3.live.tmp" && mv -f "$3.live.tmp" "$3.live"; } 2>/dev/null
@@ -704,8 +704,8 @@ gather() { # <card> <worktree> <the card's pid>; under the lock: prints the batc
         | select((.pid | type) == "number" and (.paths | type) == "array") | "\(.pid) \(. + {card: $c, ready: $x, taken: $t, stack: $s} | tojson)"' "$r.claim" 2>/dev/null) || continue
       [ -z "$r" ] || ! kill -0 "${r%% *}" 2>/dev/null || printf '%s\n' "${r#* }"
     done | jq -sc .) && x=$(jq -c --arg c "$1" --slurpfile r "$2.ready" '{card: $c, paths, ready: $r[0]}' "$2.claim") || return 1
-  all=$(stdb ask lines cards | jq -cn --argjson o "$o" --argjson me "$x" --argjson ord "$ord" --argjson max "$max" '
-      def meets($a; $b): ($a - ($a - $b)) != [];
+  all=$(stdb ask lines cards | jq -cn --slurpfile os <(printf '%s' "$o") --slurpfile mes <(printf '%s' "$x") --argjson ord "$ord" --argjson max "$max" '
+      $os[0] as $o | $mes[0] as $me | def meets($a; $b): ($a - ($a - $b)) != [];
       def rank: .ready.issue as $i | ($ord | index($i)) // ($ord | length);
       [inputs | select(.step | IN("landed", "closed", "blocked")) | .card] as $ended
       | [$o[] | select(.card | IN($ended[]) | not)] as $o | [$o[] | select(.held == true) | .paths[]] as $held
@@ -718,7 +718,7 @@ gather() { # <card> <worktree> <the card's pid>; under the lock: prints the batc
       | select(.b != []) | ([$me] + .b) as $in
       | {paths: (.p | unique), cards: ($in | sort_by([(.stack as $s | $in | any(.card == $s)), rank, .ready.since]) | map(.card))}') || return 1
   [ -n "$all" ] || return 0
-  jq -c --argjson a "$all" '.paths = $a.paths' "$2.claim" > "$2.claim.new" && mv -f "$2.claim.new" "$2.claim" && mapfile -t bc < <(jq -r '.cards[]' <<<"$all") || return 1
+  jq -c --slurpfile a <(printf '%s' "$all") '.paths = $a[0].paths' "$2.claim" > "$2.claim.new" && mv -f "$2.claim.new" "$2.claim" && mapfile -t bc < <(jq -r '.cards[]' <<<"$all") || return 1
   # The change that claim keeps is now the batch's: each card's staged change on main, in the batch's order, so a card
   # whose change applies with the whole batch does not wait on it (together()). A card whose change does not apply on
   # those before it is left out, as the batch's test run leaves it out (batch()).
