@@ -17,7 +17,7 @@
 #   that the judge declined, so its own ruling is a decline. Built from nothing after c1-6, its judge was given no
 #   findings of a fix round before it (no back).
 # - c1-9 (issue 9): no landed commit and no kept patch, so it has no diff and is skipped.
-# - c1-10: a judge that failed, which ruled on nothing.
+# - c1-10: a review the record marks as failed, with F-five accepted and F-eight undecided (no readable decision).
 # - c1-11 (issue 9, landed as the same commit as c1-7): F1 accepted; the replay judge's call on it fails. Its judge
 #   was given the finding E2 (F-eight) of the card's own fix round before it (back), not c1-10's F-five.
 # - c1-12 (issue 9, landed as the same commit, but its review read the change of c1-8): skipped.
