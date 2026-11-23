@@ -29,7 +29,8 @@ t_budgetbigrec() {
 # first run, and the runs after it keep its pass and do not run it again. The run after the fix runs f.test but times it
 # not, as the runner does a file it is given some cases of (case_times(), lib.sh).
 t_budgetfix() {
-  budgetfixsetup; echo 'echo two >> a.txt; echo 5 9 > s.test; [ ! -e "$STUB/built" ] || touch "$STUB/fixed"; touch "$STUB/built"' > "$STUB/build"
+  budgetfixsetup; echo 'if [ -e "$STUB/built" ]; then touch "$STUB/fixed"; else echo two >> a.txt; echo 5 9 > s.test; fi; touch "$STUB/built"' > "$STUB/build"
+  # loop: only a whole card run has a test step, a fix session and the test step after it share the run's list of passes
   loop run --only 7 1 > /dev/null 2>&1 || fail "run exited non-zero"
   # Runs 1 and 2 are the first and its run again, 3 the run after the fix of f.test, which keeps s.test's pass.
   [ "$(tr '\n' ' ' < "$STUB/ran")" = "1 " ] || fail "s.test did not run in the first run alone: $(tr '\n' ' ' < "$STUB/ran")"
@@ -48,7 +49,8 @@ t_budgetfix() {
 # Bug caught (#341): a run after a fix session that failed again said nothing of s.test, which it kept as passed and
 # did not run, so the test judge could not tell that the step before it was the one that ran s.test.
 t_budgetfixfail() {
-  budgetfixsetup; echo 'echo two >> a.txt; echo 5 9 > s.test' > "$STUB/build"
+  budgetfixsetup; echo '[ -e "$STUB/built" ] || { echo two >> a.txt; echo 5 9 > s.test; }; touch "$STUB/built"' > "$STUB/build"
+  # loop: only a whole card run has a test step fail again after a fix session, with the run's list kept between them
   loop run --only 7 1 > /dev/null 2>&1
   [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test fail," ] \
     || fail "f.test did not fail before and after the fix: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
@@ -57,15 +59,22 @@ t_budgetfixfail() {
   [ -z "$(jq -Rn -f "$SRC/jq/check.jq" < "$ST/cards.jsonl")" ] || fail "the record check refuses a line"
 }
 # Card 7 and its test command (budgetfix, budgetfixfail): s.test, which the build writes, passes and is timed unless
-# the run's list keeps it as passed; f.test fails, and is timed, until the build touches $STUB/fixed.
+# the run's list keeps it as passed; f.test fails, and is timed, until the build touches $STUB/fixed. Both are test
+# files (tests.patterns): the build adds s.test, which runs whole and so brings f.test, which main commits and the
+# links give it (listcmd(), lib/testrun.sh). The run gives the stub each file alone (CONVEYOR_TEST_FILE) and it reports
+# only that one, a run counted ($STUB/runs) at its first file (CONVEYOR_TEST_N): a stub given one file that reports
+# others is a run of files it was not given, which watch() (lib/session.sh) stops, and the card is blocked untested
+# (#1545). The fix session edits nothing in the worktree: a fix that changes a file runs every file again (filecmd(),
+# lib/testrun.sh), so only a run after a fix with no edit keeps s.test's pass.
 budgetfixsetup() {
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
+  echo f > "$R/f.test"; git -C "$R" add f.test || fail "main's test file f.test could not be staged"
+  tune '.tests.patterns = ["*.test"]'; linkset '{"s.test": ["f.test"]}'
   cat > "$STUB/test-cmd" <<'EOF'
-L=$CONVEYOR_TEST_LOG/r.log; echo x >> "$STUB/runs"
-if [ -f s.test ] && ! grep -qxF "pass	s.test" "${CONVEYOR_TEST_RERUN:-/dev/null}"; then
-  wc -l < "$STUB/runs" >> "$STUB/ran"; printf '== s.test\n-- ok s.test\nTESTRUN sec\ts.test\t%s\t%s\n' $(tail -n 1 s.test) >> "$L"
-fi
-echo '== f.test' >> "$L"
-if [ -e "$STUB/fixed" ]; then echo 'ok c'; echo '-- ok f.test' >> "$L"; else printf 'TESTRUN sec\tf.test\t1\t1\n' >> "$L"; echo 'FAIL [c]: wrong'; echo '-- FAIL f.test' >> "$L"; exit 1; fi
+L=$CONVEYOR_TEST_LOG/r.log; [ "${CONVEYOR_TEST_N:-1}" != 1 ] || echo x >> "$STUB/runs"
+echo "== $CONVEYOR_TEST_FILE" >> "$L"
+if [ "$CONVEYOR_TEST_FILE" = s.test ]; then
+  wc -l < "$STUB/runs" >> "$STUB/ran"; printf -- '-- ok s.test\nTESTRUN sec\ts.test\t%s\t%s\n' $(tail -n 1 s.test) >> "$L"
+elif [ -e "$STUB/fixed" ]; then echo 'ok c'; echo '-- ok f.test' >> "$L"; else printf 'TESTRUN sec\tf.test\t1\t1\n' >> "$L"; echo 'FAIL [c]: wrong'; echo '-- FAIL f.test' >> "$L"; exit 1; fi
 EOF
 }
