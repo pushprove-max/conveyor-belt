@@ -557,8 +557,13 @@ record() { # <repo> <main> <now> <await>
     # Its last failed poll, timed at the poll's start here, saved as soon as the first read fails: a waiter that stops
     # the watcher during health, the longer read or what follows counts this failed poll. poll() times it later: before
     # a wake it puts during the poll and at the poll's end once every record is read (downend), and when a waiter
-    # stops the watcher mid-poll (stopped). A longer read that reads removes it, as the outage is over.
-    echo "$first $now $fails" > "$down"
+    # stops the watcher mid-poll (stopped). A longer read that reads removes it, as the outage is over. A new outage's
+    # file is saved only once the last outage's reported unreachable key is dropped from $SEEN: a stop before the
+    # poll's end would leave that key, and the next failed poll, seeing this outage go on, would keep it reported and
+    # never wake on this outage.
+    if [ -z "$goes" ] && [ -e "$SEEN" ] && grep -qxF "$repo/unreachable" "$SEEN"; then
+      awk -v k="$repo/unreachable" '$0 != k' "$SEEN" > "$SEEN.tmp" && mv "$SEEN.tmp" "$SEEN"
+    fi && echo "$first $now $fails" > "$down"
     if readhealth; then
       used=health
       hnew=$(awk -F'\t' -v p="$repo/" '!cur { seen[$0]; next } $1 != "" && !((p $1) in seen)' "$SEEN" cur=1 - <<<"$hcur")
@@ -698,13 +703,16 @@ poll() { # 0 when a wake was put in pending; 2 when one was due but the session'
     done <<<"$failed"
   }
   # A waiter that stops the watcher mid-poll (a stop that relays a wake or takes over a held waiter: TERM to its
-  # process group) ends the poll before its downend: each record whose outage file is still there is timed then, as
-  # the poll ends there. That is each record failed so far, and each one in an outage whose read is under way or not
-  # made yet: its outage is not over, and its last failed poll's time, kept from an earlier poll, can be over 3
+  # process group) ends the poll before its downend: each record whose outage file is still there, with a last failed
+  # poll at most three polls before this poll's start, is timed then, as the poll ends there. That is each record
+  # failed so far, and each one in an outage whose read is under way or not made yet: its outage is not over, and its last failed poll's time, kept from an earlier poll, can be over 3
   # minutes old by now, after slow reads of the records before it, so the next watcher's poll would start a new one.
-  # A file whose last failed poll was over three polls before this poll began holds an outage that was over then
-  # (record()'s own test): it is left as it is, so the next failed read starts a new outage, whose unreachable wake
-  # comes once that outage has failed polls enough, and its old reported key is not kept.
+  # A file whose last failed poll ended over three polls before this poll's start holds an outage that is over
+  # (record()'s own test): one this poll's record() would start again as new, the stop having come before it saved the
+  # new one (during the first read, or before the last outage's unreachable key was dropped). It is left as it is, so
+  # the next failed read starts the new outage, whose unreachable wake comes once that outage has failed polls enough,
+  # and its old reported key is not kept: timed now, the old outage would go on and keep its key, and the new one never
+  # woke.
   stopped() {
     local r f a l c
     while IFS=$'\t' read -r r _; do
