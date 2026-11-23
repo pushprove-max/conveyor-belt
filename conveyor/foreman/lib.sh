@@ -20,12 +20,12 @@ HOSTF=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json
 LAUNCHER=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/foreman.sh
 # launcher: makes LAUNCHER when it is missing or differs from this engine's text, as the start runs it. The file is made
 # beside its place and moved in, so a run of it never reads half of it. A pack with no plugin key (the plugin's own
-# checkout) runs the checkout's own engine, as ask does.
+# checkout) runs the checkout's own engine, as ask does. A text that could not be written whole (a full disk) is
+# never moved in: the launcher there stays, and the failure is the return status, which context says in the start.
 launcher() {
-  local t
-  t=$(mktemp "$LAUNCHER.XXXXXX" 2>/dev/null) || { mkdir -p "${LAUNCHER%/*}" && t=$(mktemp "$LAUNCHER.XXXXXX"); } \
-    || { echo "foreman: $LAUNCHER cannot be made: the start's foreman.sh command will not run" >&2; return 1; }
-  cat > "$t" <<'EOF'
+  local t bad="foreman: $LAUNCHER cannot be made new: the start's foreman.sh command may not run, or runs the launcher already there"
+  t=$(mktemp "$LAUNCHER.XXXXXX" 2>/dev/null) || { mkdir -p "${LAUNCHER%/*}" && t=$(mktemp "$LAUNCHER.XXXXXX"); } || { echo "$bad" >&2; return 1; }
+  cat > "$t" <<'EOF' || { rm -f "$t"; echo "$bad" >&2; return 1; }
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Conveyor's Foreman command (written by the Foreman's start): runs foreman.sh of the engine this project runs.
@@ -45,7 +45,7 @@ fi
 CONVEYOR_MAIN=$main exec bash "$e" "$@"
 EOF
   if cmp -s "$t" "$LAUNCHER"; then rm -f "$t"; else chmod 755 "$t" && mv "$t" "$LAUNCHER" \
-    || { rm -f "$t"; echo "foreman: $LAUNCHER cannot be made: the start's foreman.sh command will not run" >&2; return 1; }; fi
+    || { rm -f "$t"; echo "$bad" >&2; return 1; }; fi
 }
 # The main checkout this runs for: the launcher's CONVEYOR_MAIN, else the checkout the session runs in, exported so
 # the Foreman's folder and every watcher are this checkout's in a session started any way.

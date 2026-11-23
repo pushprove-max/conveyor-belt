@@ -92,7 +92,24 @@ t_engine() {
   grep -qF 'is not installed' <<<"$out" || fail "no message that the engine is not installed: $out"
 }
 
-cases=(text engine)
+# Bug caught (#1445): the launcher's text was moved in after a write that failed part way (cat's status was not read),
+# so a cut launcher replaced the whole one; and the start said nothing of a launcher it could not make.
+t_unwritten() {
+  local out rc
+  fixture unwritten
+  start > /dev/null; cp "$L" "$T/whole"
+  # A write that stops part way, as on a full disk: cat writes the first 40 bytes and fails.
+  out=$( . "$SRC/lib.sh" && cat() { head -c 40; return 1; } && LAUNCHER=$L launcher 2>&1 ); rc=$?
+  [ "$rc" != 0 ] && cmp -s "$L" "$T/whole" && [ -z "$(find "$T/data/conveyor" -maxdepth 1 -name 'foreman.sh.*')" ] \
+    || fail "a launcher write that failed part way (exit $rc: $out) replaced the launcher, or left its temporary file: $(head -c 200 "$L"); $(ls "$T/data/conveyor")"
+  # The launcher's folder cannot be written: the start says the launcher could not be made, and still prints.
+  chmod a-w "$T/data/conveyor"; out=$(start); chmod u+w "$T/data/conveyor"
+  grep -qxF "# WARNING: foreman: $L cannot be made new: the start's foreman.sh command may not run, or runs the launcher already there" <<<"$out" \
+    && grep -qF -- '# STANDING YES' <<<"$out" \
+    || fail "the start, with $L's folder not writable, does not say the launcher could not be made: $(head -c 600 <<<"$out")"
+}
+
+cases=(text engine unwritten)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

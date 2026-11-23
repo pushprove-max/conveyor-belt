@@ -416,12 +416,12 @@ off() {
 # line that tells the Foreman to Read owner-rules.md stands for them, and names rules.md in the same line when the project has one. That line comes first:
 # the fixed text has no cap, and an output over the limit is shown as a short preview of its start, which keeps it.
 context() {
-  local head mid mrd notes st stl left room cap lv lcut i tiers='' own=0 res=0 rd='' rdl='' tr
-  launcher; FQ=$(printf %q "$LAUNCHER")
+  local head mid mrd notes st stl left room cap lv lcut i tiers='' own=0 res=0 rd='' rdl='' tr lw=''
+  lw=$(launcher 2>&1) || lw="# WARNING: ${lw##*$'\n'}"; FQ=$(printf %q "$LAUNCHER") # a launcher not made: the start says so first
   # Without --rules-apart the owner rules come in this output too, so the saved state yields room for them.
   [ -n "$RULES_APART" ] || [ ! -s "$FHERE/owner-rules.md" ] || own=$(($(p_stat "$FHERE/owner-rules.md" | cut -d' ' -f1) + 1))
   # mid keeps the blank line context_mid ends with, which comes before the live summary.
-  head=$(context_head) mid=$(context_mid; printf x); mid=${mid%x}
+  head=$lw${lw:+$'\n'}$(context_head) mid=$(context_mid; printf x); mid=${mid%x}
   # The lines that may stand for the state and owner rules below, which the room keeps space for; after head's archive.
   stl=$(context_state_warn; context_read "$FD/state.md")
   [ "$own" = 0 ] || rdl="# $FHERE/owner-rules.md$([ ! -s "$FD/rules.md" ] || echo " and $FD/rules.md") did not fit in this start (Claude Code cuts a start over 10,000 characters): Read $([ -s "$FD/rules.md" ] && echo both || echo it) now, before you act."
