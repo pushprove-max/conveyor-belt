@@ -385,14 +385,21 @@ t_swerefusedoffline() {
 
 # Bug (#1448): the refused run read only the versions this machine keeps, so a release that the default origin has and
 # this checkout has not fetched (t_sweversfetched: the snapshot's list omits it) was left unnamed and shown as main. The
-# origin is a URL no test reaches: a git in front of the path sends ls-remote to the fixture's folder.
+# origin is a URL no test reaches: git rewrites it (insteadOf, which holds whichever git is first on PATH, as the
+# engine puts Homebrew's bin first on macOS) to a file that points git at the fixture, not a folder, as remote get-url
+# shows the rewrite and a folder source is read without the origin. The run is the
+# engine's own, from a copy of it in the checkout (the default source is the origin of the checkout the engine is in),
+# so the case fails when swe_run names the refused run's engine by another list than swe_relname's.
 t_swerelnamefetched() {
   swe; local w=$T/$CASE/eng o c
-  git clone -q "$SWE_FX/eng.git" "$w" && mkdir -p "$w/conveyor" && git -C "$w" remote set-url origin https://example.com/eng.git || fail "the checkout was not made"
-  mkdir -p "$T/$CASE/gitbin" && printf '#!/usr/bin/env bash\n[ "$1" != ls-remote ] || set -- ls-remote "$SWE_FX/eng.git" "${@:3}"\nPATH=${PATH#*gitbin:} exec git "$@"\n' > "$T/$CASE/gitbin/git" \
-    && chmod +x "$T/$CASE/gitbin/git" || fail "the git stand-in was not made"
-  swerelease v1.1.0; c=$(git -C "$SWE_FX/eng.git" rev-parse 'v1.1.0^{commit}')
-  o=$(unset CONVEYOR_BENCH_SOURCE; export HERE=$w/conveyor RTAG=x CONVEYOR_NOW=1700000000 PATH=$T/$CASE/gitbin:$PATH; . "$SRC/bench/swe.sh" \
-    && [ -z "$(swe_versionsnow | jq -r 'map(select(.name == "v1.1.0")) | first.name // ""')" ] && swe_relname "$c") \
-    && [ "$o" = v1.1.0 ] || fail "swe_relname does not name the commit $c of v1.1.0, which the origin has and the checkout has not fetched: $o"
+  git clone -q "$SWE_FX/eng.git" "$w" && cp -a "$SRC" "$w/engine" && git -C "$w" remote set-url origin https://example.com/eng.git || fail "the checkout was not made"
+  printf 'gitdir: %s\n' "$SWE_FX/eng.git" > "$T/$CASE/eng.gitfile" || fail "the origin's stand-in was not made"
+  swerelease v1.1.0; c=$(git -C "$SWE_FX/eng.git" rev-parse 'v1.1.0^{commit}'); : > "$SWE_FX/nodocker"
+  o=$(unset CONVEYOR_BENCH_SOURCE; export HERE=$w/engine RTAG=x CONVEYOR_NOW=1700000000; . "$SRC/bench/swe.sh" && swe_versionsnow | jq -r 'map(select(.name == "v1.1.0")) | first.name // ""') \
+    && [ -z "$o" ] || fail "the versions kept on this machine name v1.1.0 before the run, so the case cannot tell the two lists apart: $o"
+  o=$(unset CONVEYOR_BENCH_SOURCE; export CONVEYOR_NOW=1700000000 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.file://$T/$CASE/eng.gitfile.insteadOf \
+    GIT_CONFIG_VALUE_0=https://example.com/eng.git CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    bash "$w/engine/conveyor.sh" bench swe 1 --solo --arm conveyor --engine "$c" 2>&1) && fail "a run started with no Docker: $o"
+  [ "$(jq -r '.state + " " + .cols[1].version' "$B/live.json")" = "refused v1.1.0" ] \
+    || fail "the refused run of $c, the commit of v1.1.0, which the origin has and the checkout has not fetched, does not name v1.1.0: $(cat "$B/live.json")"
 }
