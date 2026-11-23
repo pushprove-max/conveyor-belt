@@ -387,7 +387,9 @@ t_needsmainlate() {
 # Bug (review E3): askkeep() wrote the kept text in place, so the file was empty from the open until the write, and an
 # `auto decide` that read it then saw no text and answered the cut question. What must stay true: auto decide (the other
 # reader) reads the whole text or none. The loop's pass (needsask, the writer) keeps the text again for the decision in
-# the ledger; its printf is paused after the file is opened, auto decide runs there, and the decision must still wait.
+# the ledger; its printf is paused after it has written the first 300 characters, before the reserved path, and auto
+# decide runs there: the decision must still wait. The pause writes part of the text, not none: a file written in place
+# and still empty is taken as missing, and auto decide holds for that too, so only a part shows an in-place write.
 t_needsautokeep() {
   local pad
   setup "[$(issue 7 2026-01-01)]"; nainit 7
@@ -398,7 +400,8 @@ t_needsautokeep() {
   naauto on
   # shellcheck disable=SC2016 # run by fx_in's eval, in the engine's shell
   fx_in 'printf() { if [ "$1" = %s ] && [[ ${2-} == *"__tests__/ away" ]] && [ ! -e "$T/$CASE/paused" ]; then
-      : > "$T/$CASE/paused"; loop auto decide > "$T/$CASE/decide.out" 2>&1; fi; builtin printf "$@"; }; needsask'
+      : > "$T/$CASE/paused"; builtin printf %s "${2:0:300}"; loop auto decide > "$T/$CASE/decide.out" 2>&1
+      builtin printf %s "${2:300}"; return; fi; builtin printf "$@"; }; needsask'
   [ "$RC" = 0 ] && [ -e "$T/$CASE/paused" ] || fail "needsask exited $RC, or it did not keep the block reason again: $(cat "$T/$CASE/run.out")"
   [ "$(nadec c0-7 | jq .answeredAt)" = null ] && ! naretried c0-7 \
     || fail "auto decide, run while needsask kept the block reason again, answered the decision whose reason names .claude/scripts/__tests__/ past the cut: $(nadec c0-7) $(cat "$T/$CASE/decide.out")"
