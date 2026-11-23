@@ -131,43 +131,50 @@ grep -qF "cwd=$M foreman=1 ttl=1h" <<<"$out" || fail "claude did not start in th
 grep -qF '# Live summary' <<<"$out" || fail "the session got no live summary: $out"
 # Bug (#11): the Foreman checked status by hand in 4 to 6 shell calls, ran short commands in the background and read
 # images it was not asked to, each call re-reading the whole conversation. Its rules say how to keep calls few.
-grep -qF '# Check status with conveyor.sh foreman status, not your own snapshot reads.' <<<"$out" \
-  && grep -qF '# Run a command that ends in under 2 minutes in the foreground; put several checks into one command; start a background command only for a long run.' <<<"$out" \
-  && grep -qF '# Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs to see it.' <<<"$out" \
+grep -qF '# Check status with conveyor.sh foreman status, not your own snapshot reads;' <<<"$out" \
+  && grep -qF 'Run a command that ends in under 2 minutes in the foreground, several checks in one command; start a background command only for a long run.' <<<"$out" \
+  && grep -qF 'Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs it.' <<<"$out" \
   || fail "the Foreman's start context lacks the three lean-habit rules: $out"
+# The rules for a release's suite, a pack not committed and a card that waits are not in the start (they took the room
+# the owner's rules and the saved state need): the start gives the command that prints them, and the checks below read its
+# output beside the start's. Bug it catches: a start that drops the command, or a command that prints nothing, loses them.
+grep -qE 'run [^ ]*foreman\.sh procedures and follow what it prints before you run conveyor\.sh release-run' <<<"$out" \
+  && grep -qF 'on a wake that a card waits for main to change or on another card' <<<"$out" \
+  || fail "the Foreman's start context does not name the command that prints its procedures: $out"
+out+=$'\n'$(cd "$M" && bash "$SRC/foreman.sh" procedures) || fail "foreman.sh procedures failed"
 # Bug (#187): the Foreman listed a git command for the owner to commit the pack. Its rules put the question by the picker.
 grep -qF 'ask the owner by the picker "Commit the Conveyor pack (.conveyor/project.json) on <default branch> now?"' <<<"$out" \
   && grep -qF 'on yes run conveyor.sh setup pack-commit yes' <<<"$out" \
   || fail "the Foreman's start context does not ask the owner by the picker to commit the pack: $out"
 # Bug (#791): the Foreman started a release's suite with no mode, so it ran one by one whatever the owner wanted. Its
 # rules tell it to ask the owner by the picker for the mode before release-run prep or release-run, and to pass it.
-grep -qF '# A release'"'"'s suite: before you run conveyor.sh release-run prep <version> or release-run <version>, ask the owner by the picker "Run the test files one by one or in parallel?"' <<<"$out" \
+grep -qF 'A release'"'"'s suite: before you run conveyor.sh release-run prep <version> or release-run <version>, ask the owner by the picker "Run the test files one by one or in parallel?"' <<<"$out" \
   && grep -qF 'pass the answer last in the command: --serial for one by one, --parallel for in parallel.' <<<"$out" \
   || fail "the Foreman's start context does not tell it to ask the owner for the suite's mode and pass it: $out"
 # Bug (#1174): the parallel option did not say how many files run at once, so the owner chose it blind; then it named
 # the number of this machine's own record, wrong for a release on the build host or of another project. It names the
 # number release-run atonce prints where the release's project runs (t_relatonce checks that command). The rules are
 # text the Foreman's model reads, so their text is the behaviour here.
-grep -qF '"In parallel (<n> at once)" (faster' <<<"$out" \
-  && grep -qF "<n> is the number $XDG_DATA_HOME/conveyor/foreman.sh ask <project> release-run atonce prints for the release's project" <<<"$out" \
+grep -qF '"In parallel (<n> at once)" (faster, more load, the belt slower meanwhile)' <<<"$out" \
+  && grep -qF "<n> is the number ask <project> release-run atonce prints for the release's project" <<<"$out" \
   || fail "the Foreman's release question does not name, in its parallel option, the number release-run atonce prints for the release's project: $out"
 # Bug (R193): with the machine question too, the option quoted the rule's machine's number alone; each number is named with its machine, one not printed (a devbox's) left out.
-grep -qF '"In parallel (<n> at once on <the rule'"'"'s machine>, <m> on this machine)", where <m> is what that command prints with --machine local added; leave out a machine whose command prints no number (a devbox'"'"'s is read only when a run leases it).' <<<"$out" || fail "the Foreman's release question does not name each machine beside its number, leaving out one with no number: $out"
+grep -qF '"In parallel (<n> at once on <the rule'"'"'s machine>, <m> on this machine)", <m> being the number ask <project> release-run atonce --machine local prints (leave out a machine that prints none)' <<<"$out" || fail "the Foreman's release question does not name each machine beside its number, leaving out one with no number: $out"
 # Bug (#1364): the release question put no mode first, so the owner chose against the project's rule each time. It marks
 # the rule's mode (suiteMode, in the record `ask <project> control` prints) Recommended. The rules are text the
 # Foreman's model reads, so their text is the behaviour here.
-grep -qF "Mark the option of the rule's mode Recommended, as the rule's choice: the suiteMode in the JSON $XDG_DATA_HOME/conveyor/foreman.sh ask <project> control prints" <<<"$out" \
+grep -qF "Mark the option of the rule's mode Recommended: the suiteMode in the JSON ask <project> control prints" <<<"$out" \
   || fail "the Foreman's release question does not mark the rule's suiteMode Recommended: $out"
 # Bug (#1271): the release question did not offer the rule's machine, so a suite set for a Devbox could not be run here
 # for one release, or the owner did not know where it ran. The rules are text the Foreman's model reads, so their text is
 # the behaviour here.
-grep -qF 'Ask a second question in the same picker call, "Run the suite on which machine?"' <<<"$out" \
-  && grep -qF 'first the rule'"'"'s machine by that name (marked Recommended, as the rule'"'"'s choice), then "This machine (the belt is slower meanwhile)"' <<<"$out" \
-  && grep -qF 'When the owner answers This machine, add --machine local as the very last words of the command' <<<"$out" \
+grep -qF 'ask a second question in the same picker call, "Run the suite on which machine?"' <<<"$out" \
+  && grep -qF 'with the rule'"'"'s machine by that name (Recommended), then "This machine (the belt is slower meanwhile)"' <<<"$out" \
+  && grep -qF 'On This machine, add --machine local as the very last words of the command' <<<"$out" \
   || fail "the Foreman's release question does not ask which machine the suite runs on, with the rule's machine first and --machine local for This machine: $out"
 # Bug (#220): on a wake for a waiting card the Foreman only reported it, and cards waited for hours. Its rules tell it
 # to find the cause and fix it.
-grep -qF '# A wake that a card has waited (or is still waiting) for main to change, or on another card: do not only report it. Find why it waits' <<<"$out" \
+grep -qF 'A wake that a card has waited (or is still waiting) for main to change, or on another card: do not only report it. Find why it waits' <<<"$out" \
   && grep -qF 'Then fix the cause: a hand fix when the belt is blocked and the owner'"'"'s rules allow it, otherwise file the issue.' <<<"$out" \
   || fail "the Foreman's start context does not tell it to find and fix why a card waits: $out"
 grep -qF "alpha waiting on the owner's yes: #12" <<<"$out" && grep -qF "beta waiting on the owner's yes: #19" <<<"$out" \

@@ -46,17 +46,32 @@ t_text() {
   st=$(start)
   grep -qF -- '# STANDING YES' <<<"$st" || fail "the start has no standing kinds: $st"
   [ -x "$L" ] || fail "the start did not make $L"
-  # Eight places: four in the fixed text (the filing line's `testissue`, the release suite line's `release-run`,
-  # `control` and `suite-machine`), one in the standing text all kinds share (the `auto act` line), and one in each of asked-fix,
-  # release-check and fixed-block (review-followup and review-retry name no command). The command is counted with its
-  # path alone too, so a start that grows or drops a command does not pass on its own copy.
+  # Two places that run `ask`: the filing line's `testissue`, which also says that each `ask <project>` below it (the
+  # procedures' `release-run atonce`, `control` and `suite-machine`) starts with that path, and one in the standing text
+  # all kinds share (the line that gives the command each kind's commands follow); and a third, the command that prints
+  # the procedures. The command is counted with its path alone too, so a start that grows or drops a command does not
+  # pass on its own copy.
   n=$(grep -oF "$L ask" <<<"$st" | wc -l)
+  proc=$(cd "$M" && bash "$SRC/foreman.sh" procedures) || fail "foreman.sh procedures failed"
+  # Bug it catches (a trim of the fixed text): it dropped where a command runs, so the Foreman released an issue, or
+  # committed a pack, in the current project and not the project that owns it; and the path in front of the `ask <project>`
+  # commands of the release suite line, so a Foreman that read them ran a command that does not exist. The rules are text
+  # the Foreman's model reads, so their text is the behaviour here.
+  grep -qF "release it (conveyor.sh control release <issue>, in that issue's project record) only once the owner has said yes" <<<"$st" \
+    && grep -qF 'in that checkout run conveyor.sh setup pack-commit;' <<<"$proc" \
+    && grep -qF 'on no the same with no; say what it printed' <<<"$proc" \
+    && grep -qF "with $L ask <project> testissue <test file> <title> <body> (each ask <project> below starts with that path too)" <<<"$st" \
+    && grep -qF 'Each `ask <project> ...` below is run as the start gives it' <<<"$proc" \
+    && grep -qF 'the JSON ask <project> control prints' <<<"$proc" \
+    && grep -qF 'the JSON ask <project> suite-machine check --json prints' <<<"$proc" \
+    && grep -qF "run $L procedures and follow what it prints" <<<"$st" \
+    || fail "the start lost where a command runs or the command in front of one (filing, procedures, pack-commit, control, suite-machine): $(grep -E '^# (Filing|Three procedures)' <<<"$st" | cut -c1-400)"
   # The line that sends the Foreman to the plugin's owner-rules.md (a start over its limit, as this one is with the long
   # fixture paths) names the plugin's folder, not a command, so it is left out of the folder check below.
-  [ "$n" -eq 8 ] && [ "$(grep -oF "$L" <<<"$st" | wc -l)" -eq 8 ] || fail "the start names $L ask $n times, not the 8 places the versioned path was in: $st"
+  [ "$n" -eq 2 ] && [ "$(grep -oF "$L" <<<"$st" | wc -l)" -eq 3 ] || fail "the start names $L ask $n times, not the 2 places the versioned path was in, or $L not 3 times with its procedures command: $st"
   ! grep -qE 'versions/|foreman/foreman\.sh|bash [^ ]*foreman\.sh' <<<"$st" && ! grep -vF 'owner-rules.md did not fit' <<<"$st" | grep -qF "$SRC" || fail "the start names a version-folder path: $(grep -E 'versions/|foreman/foreman\.sh|bash [^ ]*foreman\.sh' <<<"$st" | head -3)"
   # Today's text names `bash <data>/conveyor/versions/<commit>/conveyor/foreman/foreman.sh` where it now names $L: the
-  # start, with the 8 commands put back, is longer by the paths removed (each over 60 characters).
+  # start, with the 2 commands put back, is longer by the paths removed (each over 60 characters).
   old=${st//"$L ask"/"bash $XDG_DATA_HOME/conveyor/versions/$v/conveyor/foreman/foreman.sh ask"}
   [ $((${#old} - ${#st})) -ge $((n * 60)) ] || fail "the start is ${#st} characters, only $((${#old} - ${#st})) shorter than with the versioned path in its $n places"
 }

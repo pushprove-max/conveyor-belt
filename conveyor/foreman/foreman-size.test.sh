@@ -57,12 +57,42 @@ t_fit() {
   grep -qF 'so the issue starts held there too (rules.testissues false: a held card, released by its card ID)' <<<"$st" \
     || fail "the start text does not say how to release testissue's held card when test issues are off: $st"
 }
+# allkinds: every standing kind on, as in this repository's pack. The ask seam runs only `auto standing`, as
+# foreman-standing.test.sh does.
+allkinds() {
+  local k='["asked-fix", "review-followup", "release-check", "fixed-block", "review-retry"]'
+  jq --argjson k "$k" '.auto.standing = $k' "$M/.conveyor/project.json" > "$T/pack.json" && mv "$T/pack.json" "$M/.conveyor/project.json" \
+    || fail "the pack with every standing kind was not made"
+  export ENG=$SRC/../conveyor.sh CONVEYOR_FOREMAN_ASK='[[ $CONVEYOR_CMD == "auto standing "?* ]] || exit 3; cd "$CONVEYOR_MAIN" && bash "$ENG" auto standing "${CONVEYOR_CMD#auto standing }"'
+}
+# The fixed text of a start (every line up to and with the live summary's heading, the warnings left out) takes at most
+# 52% of the 10,000 characters (5,200; it is 5,052 now), with every standing kind on and the folder in its paths 19
+# characters long: the rest of the room is for the live summary, the owner's rules and the state (t_old holds that room).
+# Bug it catches: the fixed text grew with each line added to it until 10 lines of rules beside 16 of state no longer
+# fitted a start without --rules-apart, and a live start said the state "did not fit"; only t_old noticed, and its sample
+# was cut to hide it. A start with every kind on is the largest the fixed text makes, so a line added to the standing
+# rules counts here too.
+t_fixed() {
+  local st n
+  fixture fixed; allkinds
+  marked; st=$(hook start sA --rules-apart | ctx)
+  grep -q '^# STANDING YES' <<<"$st" && grep -q -- '^- review-retry: ' <<<"$st" || fail "the start has no standing rules (a fixed text so long that they were saved to $FD/start-rest.md, a file that $([ -s "$FD/start-rest.md" ] && echo exists || echo does not exist), leaves them no room): ${st:0:200}"
+  grep -q '^# Foreman mode: you are' <<<"$st" && grep -q '^# Live summary' <<<"$st" || fail "the start has no fixed text or no live summary: ${st:0:200}"
+  # The fixture's folder ($B, under the runner's TMPDIR) is in every path of the text: it is swapped for a path of a set
+  # length, so the count is the same under any TMPDIR, and counts the paths (the text names them many times).
+  st=${st//"$B"//tmp/tmp.XXXXXXXXXX}
+  n=$(awk '!/^# WARNING/ { print } /^# Live summary/ { exit }' <<<"$st" | wc -c)
+  [ "$n" -le 5200 ] || fail "the fixed text of a start with every standing kind on is $n characters, over 52% of the 10,000 a start may have"
+}
 # A rules.md of 12000 bytes and a state.md over the limit: the rules output is under 10,000 characters, cut at a whole
 # line, with a line that names the file and says to Read the rest; the start is under the limit too, with the fixed
 # text whole and a Read line for the state, and no rules in it.
 t_big() {
   local st ru last
   fixture big
+  # Every standing kind is on: the fixed text is trimmed, so a state of 6,100 bytes (over the cap's 5,000) fits a start of
+  # the test pack on its own, and the state has no room only beside the standing kinds of this repository's pack.
+  allkinds
   text RULESBODY 200 > "$FD/rules.md"; text STATEBODY 100 > "$FD/state.md"
   marked; st=$(hook start sA --rules-apart); ru=$(hook rules sA)
   [ "${#ru}" -lt 10000 ] || fail "the rules output is ${#ru} characters, not under 10000"
@@ -99,14 +129,14 @@ t_race() {
 # Bug: a plugin from before the rules hook calls start with no --rules-apart and has no rules hook, so a start that
 # always left rules.md out gave that session no project rules at all. Without the flag the rules come in the start, under
 # the limit, whole when they fit and cut at a whole line with the Read line when they do not.
+# The sample is 10 lines of rules and 16 of state with every standing kind on: the room the fixed text must leave, which
+# a sample of 4 lines each (or kinds off) hid when the fixed text grew.
 t_old() {
   local st
-  fixture old
-  # Small files that fit: without --rules-apart the fixed text and the owner rules take most of the limit, so a few
-  # lines of each leave room as the fixed text grows (10 lines of rules beside 16 of state no longer fitted).
-  text RULESBODY 4 > "$FD/rules.md"; text STATEBODY 4 > "$FD/state.md"
+  fixture old; allkinds # every kind on, as this repository's pack has them: the largest start a project makes
+  text RULESBODY 10 > "$FD/rules.md"; text STATEBODY 16 > "$FD/state.md"
   marked; st=$(hook start sA | ctx)
-  [ "$(grep -c RULESBODY <<<"$st")" = 4 ] && [ "$(grep -c STATEBODY <<<"$st")" = 4 ] || fail "a start without --rules-apart lacks the rules or the state: $(grep -E 'did not fit|cut to fit' <<<"$st")"
+  [ "$(grep -c RULESBODY <<<"$st")" = 10 ] && [ "$(grep -c STATEBODY <<<"$st")" = 16 ] || fail "a start without --rules-apart lacks the rules or the state: $(grep -E 'did not fit|cut to fit' <<<"$st")"
   text RULESBODY 200 > "$FD/rules.md"; st=$(hook start sA)
   [ "${#st}" -lt 10000 ] && grep -qF "Read the rest from $FD/rules.md" <<<"$(ctx <<<"$st")" || fail "a start without --rules-apart is ${#st} characters or has no Read line"
 }
@@ -238,6 +268,10 @@ t_words_notes_full() {
   own=$(jq -r '.repository | if type == "object" then .url else . end' "$SRC/../../.claude-plugin/plugin.json")
   git -C "$M" remote set-url origin "git@github.com:${own#https://github.com/}.git" || fail "the origin was not set"
   jq '.plugin = {follow: "main"}' "$SRC/../../.conveyor/project.json" > "$M/.conveyor/project.json" || fail "the pack was not copied"
+  # A second project with a long name: the start's fixed text is trimmed, so the pack's standing kinds alone no longer
+  # leave a live summary and the notes no room, which is what this case needs (the name is in the start several times).
+  jq -n --arg h "$M" --arg n "$(printf 'r%.0s' {1..1500})" '{records: [{repo: "alpha", main: $h}, {repo: $n, main: ($h + "/gone")}], foreman: {groups: [["alpha", $n]]}}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
+    || fail "the host file with a long project name was not made"
   for ((i = 1; i <= 30; i++)); do
     printf -- '- 2026-11-22T10:%02d:00Z · card c20261122T100000-alpha-%d · the price of a model is not in models.json, card c20261122T100000-alpha-%d, evidence ~/cards/c20261122T100000-alpha-%d.err · evidence: ~/cards/c20261122T100000-alpha-%d.err\n' "$i" "$i" "$i" "$i" "$i"
   done > "$FD/plugin-bugs.md"
@@ -265,7 +299,7 @@ t_words_notes_full() {
     || fail "the words hook's claim, with no room for a note, has no one line that says to Read $FD/plugin-bugs.md: $(grep -n 'plugin-bugs' <<<"$c" | cut -c1-200)"
 }
 
-cases=(fit big other race old owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
+cases=(fit fixed big other race old owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

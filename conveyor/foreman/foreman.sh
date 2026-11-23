@@ -78,10 +78,10 @@
 #   research lane (lanes/research.sh) runs these two as well, with CONVEYOR_LANE=research and its own folder as $FD, so an issue it files starts held too.
 set -uo pipefail
 case ${1:-} in
-  setup | launch | start | rules | words | live | filing | filed | off) ;;
+  setup | launch | start | rules | words | live | filing | filed | off | procedures) ;;
   claim) [ $# = 2 ] && [[ $2 =~ ^[A-Za-z0-9-]+$ ]] || { echo "usage: foreman.sh claim <session id>" >&2; exit 2; } ;;
   ask) [ $# -ge 3 ] && [[ $2 =~ ^[A-Za-z0-9._-]+$ ]] || { echo "usage: foreman.sh ask <repo> <command> [<argument>...]" >&2; exit 2; } ;;
-  *) echo "usage: foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | ask <repo> <command> [<argument>...] | off | start | rules | words | live | filing | filed" >&2; exit 2 ;;
+  *) echo "usage: foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | ask <repo> <command> [<argument>...] | off | start | rules | words | live | filing | filed | procedures" >&2; exit 2 ;;
 esac
 # A hook's input, and the session it names.
 case $1 in start | rules | words | filing | filed) IN=$(cat); SID=$(jq -r '.session_id // empty | strings' <<<"$IN" 2>/dev/null) ;; esac
@@ -192,7 +192,7 @@ OPEN='def one: tostring | gsub("\\s+"; " ") | .[0:160];
 live() {
   local tmp i line used=0 need=0 cutting='' cut="[live summary cut at $LIVE_CAP bytes]" lines=() must=() pids=() recs repo main rc out led
   tmp=$(mktemp -d) || { echo "# Live summary unavailable: no temp folder"; return 0; }
-  lines+=("# Live summary (built at startup from Conveyor's snapshot and the decision ledger; never saved)")
+  lines+=("# Live summary (built at startup; never saved)")
   recs=$(mine 2>"$tmp/recs.err") || { must+=("${#lines[@]}"); lines+=("Conveyor: unavailable: $(why 1 "$tmp/recs.err")"); }
   i=0
   while IFS=$'\t' read -r repo main; do
@@ -452,6 +452,9 @@ context() {
   rules_text "$left"
 }
 
+# procedures: procedures.md, which the start names by this command (the launcher's path), not by the file's (a version folder).
+procedures() { cat "$FHERE/procedures.md"; }
+
 # context_read <file>: the line that stands for a file part that did not fit; nothing for a file with no text.
 context_read() {
   [ -s "$1" ] || return 0
@@ -462,25 +465,21 @@ context_head() {
   local err plug s=$FD/state.md
   # A plugin problem: in the plugin's own repository (plugin_home) the Foreman files it there itself, as any issue it
   # files, and its line names the issue (stop.sh refuses one that does not); elsewhere the owner files it.
-  plug="# A suspected defect in Conveyor itself always needs the owner (only they can fix or file it in the plugin's repository): say it on its own line, \"Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>\", where a cause you checked in the code or the logs goes in <what it did> with where you checked it, and a cause you did not check goes in the cause not checked part; it is noted in $FD/plugin-bugs.md."
+  plug="# A suspected defect in Conveyor itself needs the owner (only they can fix or file it in the plugin's repository): say it on its own line, \"Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>\"; a cause you checked goes in <what it did> with where you checked it."
   if plugin_home; then
-    plug="# A suspected defect in Conveyor itself: this project is the plugin's own repository, so file it here at once, as any issue you file (it starts held until the owner says yes), and say it on its own line with the issue's number, \"Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>, filed as #<n>\", where a cause you checked in the code or the logs goes in <what it did> with where you checked it, and a cause you did not check goes in the cause not checked part; it is noted in $FD/plugin-bugs.md."
+    plug="# A suspected defect in Conveyor itself: this project is the plugin's own repository, so file it here at once (held until the owner says yes) and say it on its own line with the issue's number, \"Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>, filed as #<n>\"; a cause you checked goes in <what it did> with where you checked it."
   fi
   cat <<EOF
-# Foreman mode: you are $NAME, the Foreman of this project. You file issues as cards, watch Conveyor, clear blocked cards and take every decision to the owner; you never answer for the owner, and you build no code yourself: the cards do.
-# You are the Foreman of $(mine 2>/dev/null | cut -f1 | paste -sd' ' - | sed 's/ /, /g; s/^$/this project/') only: every other project has its own Foreman. Never read or change another project's Foreman folder, saved state or memory.
-# Filing: file issues only in your own projects; an issue you file starts held (the filing hooks hold it in Conveyor, in its record); release it (conveyor.sh control release <issue>, in that record) only once the owner has said yes to it. File an issue about a test file with $FQ ask <project> testissue <test file> <title> <body>: it runs where the record is, as the Foreman, so the issue starts held there too (rules.testissues false: a held card, released by its card ID). An order from the owner, or a release's fix card (card --release <version>): ask <project> card <title> <body>, held.
+# Foreman mode: you are $NAME, the Foreman of this project. You file issues as cards, watch Conveyor, clear blocked cards and take every decision to the owner; you never answer for the owner or build code.
+# You are the Foreman of $(mine 2>/dev/null | cut -f1 | paste -sd' ' - | sed 's/ /, /g; s/^$/this project/') only; never read or change another project's Foreman folder, saved state or memory.
+# Filing: file issues only in your own projects, held; release it (conveyor.sh control release <issue>, in that issue's project record) only once the owner has said yes. File an issue about a test file with $FQ ask <project> testissue <test file> <title> <body> (each ask <project> below starts with that path too): it runs where the record is, so the issue starts held there too (rules.testissues false: a held card, released by its card ID). An order from the owner, or a release's fix card (card --release <version>): ask <project> card <title> <body>, held.
 # Questions to the owner go only by the picker (AskUserQuestion), never as a question in your reply.
-# The pack not committed: in a project's main checkout, run conveyor.sh setup pack-commit (it checks the pack and the exempt files of its size entries itself, and prints ok: when they are committed), and when it prints an ask: line, ask the owner by the picker "Commit the Conveyor pack (.conveyor/project.json) on <default branch> now?" (yes / no), with the change it printed; on yes run conveyor.sh setup pack-commit yes, on no conveyor.sh setup pack-commit no, and say what it printed. Never list a git command for the owner to run.
-# A release's suite: before you run conveyor.sh release-run prep <version> or release-run <version>, ask the owner by the picker "Run the test files one by one or in parallel?" with two options, "One by one" (slower, the least load) and "In parallel (<n> at once)" (faster, more load on the build machine, the belt slower meanwhile), and pass the answer last in the command: --serial for one by one, --parallel for in parallel. <n> is the number $FQ ask <project> release-run atonce prints for the release's project (the most test files at once where its suite runs); when it prints no number, the option is "In parallel". With the machine question below, name each number's machine, as "In parallel (<n> at once on <the rule's machine>, <m> on this machine)", where <m> is what that command prints with --machine local added; leave out a machine whose command prints no number (a devbox's is read only when a run leases it). Mark the option of the rule's mode Recommended, as the rule's choice: the suiteMode in the JSON $FQ ask <project> control prints ("One by one" when it has none). Ask a second question in the same picker call, "Run the suite on which machine?", unless the machine the rule names is this one: that machine is the name in the JSON $FQ ask <project> suite-machine check --json prints ("this machine" when the rule runs it here). Its options: first the rule's machine by that name (marked Recommended, as the rule's choice), then "This machine (the belt is slower meanwhile)". When the owner answers This machine, add --machine local as the very last words of the command, after the mode.
-# A wake (a watcher's message) gets a reply that says only what needs the owner, and the "Done without asking" line for each act taken since your last reply; when neither is owed, reply with the one word Idle.
-# A wake that a card has waited (or is still waiting) for main to change, or on another card: do not only report it. Find why it waits: read the waited-on card's log (<card>.out, .err and .test beside its worktree in the cards folder), the main-red record (mainred.json in the folder conveyor.sh state-dir prints) and the test log (<card>.testlog). Then fix the cause: a hand fix when the belt is blocked and the owner's rules allow it, otherwise file the issue.
+# Three procedures: run $FQ procedures and follow what it prints before you run conveyor.sh release-run (a release's suite), when the pack is not committed (in a project's main checkout, conveyor.sh setup pack-commit checks the pack and the exempt files of its size entries itself, and prints ok: when they are committed), and on a wake that a card waits for main to change or on another card.
+# A wake (a watcher's message) gets a reply of what needs the owner and the "Done without asking" line for each act since your last reply; when neither is owed, reply Idle.
 $plug
-# Check status with conveyor.sh foreman status, not your own snapshot reads. A wake already names what changed: a landed card's commit, a blocked card's reason, a suite run's result and failed cases.
-# Run a command that ends in under 2 minutes in the foreground; put several checks into one command; start a background command only for a long run.
-# Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs to see it.
-# To be woken when one card's issue lands, append its number to $FD/await-<project>.txt, <project> being the one it is in (append only; never rewrite it). For a batch of cards do not: the idle wake ("Conveyor is idle") awaits the batch, and each await line costs a full wake turn.
-# Your saved state is $s: keep it current, its open lines under $CAP bytes; begin the line of a finished item with "- DONE" (for example "- DONE 2026-11-21 08:20 ET: ...") and it is archived at the next start.
+# Check status with conveyor.sh foreman status, not your own snapshot reads; a wake already names what changed. Run a command that ends in under 2 minutes in the foreground, several checks in one command; start a background command only for a long run. Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs it.
+# To be woken when one card's issue lands, append its number to $FD/await-<project>.txt (append only). For a batch do not: the idle wake ("Conveyor is idle") awaits it; each await line costs a wake turn.
+# Your saved state is $s: keep it current, its open lines under $CAP bytes; begin the line of a finished item with "- DONE" and it is archived at the next start.
 EOF
   # An empty state.md still runs archive: only archive reports a late write kept beside it.
   [ ! -e "$s" ] || err=$(python3 -I "$FHERE/archive.py" "$s" 2>&1) \
@@ -572,7 +571,7 @@ context_state() {
   local s=$FD/state.md n
   [ -s "$s" ] || return 0
   echo
-  echo "# $s (your saved state; keep it current)"
+  echo "# $s (your saved state)"
   n=$(context_state_warn)
   if [ -z "$n" ]; then cat "$s"; return 0; fi
   echo "$n"

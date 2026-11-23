@@ -79,16 +79,21 @@ t_unread() {
 # lib.sh ask, its engine the one the record's install runs), not this checkout, whose pack has the kind off.
 # Bug it catches: the rules named the host's engine path with no way to the host, so the Foreman, on its own machine,
 # ran them against its own checkout: refused there, or logged in the wrong project.
+# And the start must still tell the Foreman to log an act: the command that logs it is read from the start's own words
+# (a start that dropped the instruction, or its `auto act <kind>` form, leaves nothing to run).
 t_act() {
-  local out run c=0123456789abcdef0123456789abcdef01234567
+  local out run act c=0123456789abcdef0123456789abcdef01234567
   fixture act '["asked-fix"]'; out=$(start)
-  run=$(sed -n 's/.*log it with `\(.*\) auto act <kind> .*/\1/p' <<<"$out")
+  run=$(sed -n 's/.*Run each command below after `\([^`]*\)`\..*/\1/p' <<<"$out")
+  act=$(sed -n 's/.*After each act, log it with `\(auto act <kind> [^`]*\)`.*/\1/p' <<<"$out")
   [[ $run == *"$XDG_DATA_HOME/conveyor/foreman.sh ask alpha"* ]] || fail "the start's act command does not reach the record alpha: $out"
+  [ -n "$act" ] || fail "the start does not tell the Foreman to log an act with auto act <kind>: $out"
   mkdir -p "$XDG_DATA_HOME/conveyor/versions/$c" && ln -s "$SRC/.." "$XDG_DATA_HOME/conveyor/versions/$c/conveyor" \
     && jq -n --arg c "$c" '{commit: $c}' | tee "$M/.git/conveyor-engine.json" > "$H/.git/conveyor-engine.json" || fail "the record's install was not made"
   export CONVEYOR_RULING_LOG=$T/rulings.jsonl
-  out=$(cd "$T" && unset CONVEYOR_FOREMAN_ASK && eval "$run auto act asked-fix 'filed #12 as the owner asked'" 2>&1) \
-    && [ "$(jq -r .answer "$CONVEYOR_RULING_LOG")" = 'filed #12 as the owner asked' ] || fail "the start's act command did not log the act in the record: $out"
+  out=$(cd "$T" && unset CONVEYOR_FOREMAN_ASK && eval "$run ${act//<kind>/asked-fix}" 2>&1) \
+    && [ "$(jq -r .kind "$CONVEYOR_RULING_LOG")" = asked-fix ] && [ "$(jq -r .answer "$CONVEYOR_RULING_LOG")" = '<what you did, with the issue or card>' ] \
+    || fail "the start's act command ($run ${act//<kind>/asked-fix}) did not log the act in the record: $out"
 }
 
 cases=(askedfix reviewfollowup releasecheck fixedblock reviewretry none unread act)
