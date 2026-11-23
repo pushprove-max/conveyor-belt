@@ -136,7 +136,9 @@ t_healsbrief() {
   echo 'cp "$STUB/brief" "$STUB/build.brief"; echo two >> a.txt' > "$STUB/build"
   # loop: only a whole card shows the prompt card() gives its build session, which no function of it makes alone
   loop run --only 9 1 > "$T/$CASE/run.log" 2>&1 || fail "run of #9 exited non-zero: $(tail -n 20 "$T/$CASE/run.log")"
+  # The scope line is checked too: the header and the finding alone pass with the brief leaving the finding in scope.
   grep -qx '# Findings of this issue that are on the self-heals list or the docs list' "$STUB/build.brief" && grep -qF "$moved (list entry $e)" "$STUB/build.brief" \
+    && grep -qF "so they are out of this card's scope, whatever the issue's body or its Done when says:" "$STUB/build.brief" \
     || fail "the build session of #9 is not given its moved finding out of its scope, with its list entry $e: $(cat "$STUB/build.brief" 2>&1)"
 }
 
@@ -273,6 +275,7 @@ EOF
   fx_in 'healsbrief 23'
   grep -qx '# Findings of this issue that are on the self-heals list or the docs list' "$T/$CASE/run.out" && grep -qF "R1 [P2] \`a.sh:1\`: the wait is one turn longer - How: the turn waits. (list entry $e1)" "$T/$CASE/run.out" \
     && grep -qF "(list entry $e3)" "$T/$CASE/run.out" && ! grep -qF 'loses a line' "$T/$CASE/run.out" \
+    && grep -qF "so they are out of this card's scope, whatever the issue's body or its Done when says:" "$T/$CASE/run.out" \
     || fail "healsbrief 23 does not put R1 and R3 out of the card's scope with their entries, or names R2: $(cat "$T/$CASE/run.out")"
 }
 
