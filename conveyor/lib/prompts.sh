@@ -542,7 +542,10 @@ UNRECORDED=${NOTFINDING/NEW CARD|UNPROVEN|DECLINED|MINOR|OUTSIDE|SELFHEALS|COVER
 # (donewhen.sh fixlines()).
 FIX='# Reviewer findings: fix these findings, and every other place in this change that makes the same mistake; nothing else
 An `UNPROVEN:` line is not a finding: change nothing for it. Each finding starts with its id (E1, E2 and so on):
-the review after this fix names the finding by that id.'
+the review after this fix names the finding by that id.
+A finding about the order of operations (a lock, a retry, a snapshot, a merge decision, two commands at once): name what
+must stay true and the other reader or writer, then make the test force that one to act at the weak point through the real
+caller, and assert the stored state or the outside action, never after a sleep.'
 # The Done-when check (donewhen.sh donewhen(), checked()): what the one fix session after a failed check is told, after the brief;
 # the failed items follow it. And what the review is told beside the card's D<n> lines.
 DWFIX='# The Done-when check failed: fix these items, and end your reply with the whole `## Done when` section again

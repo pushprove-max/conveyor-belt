@@ -11,8 +11,9 @@ rc=0
 bullets() { awk '/^- /{if (b != "") print b; b=$0; next} /^  /{if (b != "") {sub(/^ +/, ""); b=b " " $0}; next} {if (b != "") print b; b=""} END{if (b != "") print b}' "$1"; }
 # rule <file> <rule's words> <words of its reason or number>...: one bullet of <file> holds them all.
 rule() {
-  local f=$1 b; shift
-  b=$(bullets "$ROOT/$f" | grep -F -- "$1")
+  local f=$1 b p=$ROOT/$1; shift
+  [[ $f != /* ]] || p=$f
+  b=$(bullets "$p" | grep -F -- "$1")
   [ "$(grep -c . <<<"$b")" = 1 ] || { echo "not ok - $f: no single rule \"$1\""; rc=1; return; }
   shift
   for w; do
@@ -31,4 +32,20 @@ done
 # card again puts a fix in the suite's runner the issue did not name and the next release runs every test file.
 rule .conveyor/card-rules.md 'only when its issue names that file or setting' '`.conveyor/test-full.sh`' \
   '`conveyor/conveyor.test.sh`' "pack's \`test\` settings" 'next release run every test file' 'why no other place works' 'P2 finding'
+# Issue #1577. Bug it catches: the timing rule dropped from the builder's rules or from the fix prompt, so a lock, retry,
+# snapshot or merge change is again tested only by a helper or a sleep that passes while the real command stays racy.
+# It reads the text the engine hands a card, not the source files: cardrules() must append this project's rules, and
+# fixprompt() must append FIX, or a card never sees the rule.
+T=$(mktemp -d) && trap 'rm -rf "$T"' EXIT
+( export CONVEYOR_MAIN=$ROOT CONVEYOR_CARDS=$T/cards; . "$ROOT/conveyor/conveyor.sh" state-dir > /dev/null \
+  && eval "$(grep '^\. "\$HERE/lib/' "$ROOT/conveyor/commands/run.sh")" \
+  && cardrules '{"title": "t", "body": ""}' > "$T/rules" && fixprompt CARD 'E1 a finding' > "$T/fix" ) 2>&1 \
+  || { echo 'not ok - the card rules or the fix prompt could not be made'; exit 1; }
+rule "$T/rules" 'A build or fix that changes a lock, a retry, a snapshot or a merge decision' \
+  'names what must stay true and the other reader or writer' 'forces that one to act at the weak point through the real caller' \
+  'pause the idle merge after its last rule read, change the rule, resume, and assert no merge was asked' \
+  'asserts the stored state or the outside action, never after a sleep'
+# The fix prompt's rule is one sentence: each instruction of it must stay, in its order.
+tr '\n' ' ' < "$T/fix" | tr -s ' ' | grep -qF 'name what must stay true and the other reader or writer, then make the test force that one to act at the weak point through the real caller, and assert the stored state or the outside action, never after a sleep' \
+  || { echo 'not ok - the fix prompt fixprompt() returns has no timing rule with all its instructions'; rc=1; }
 exit $rc

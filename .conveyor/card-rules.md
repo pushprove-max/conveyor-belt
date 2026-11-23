@@ -11,6 +11,11 @@
 - A test encodes why the behaviour matters and fails if the behaviour breaks; never weaken an existing test to pass.
 - A new engine test case goes in the area file it belongs to under `conveyor/tests/`, or a new file there; never in
   the runner, `conveyor/conveyor.test.sh`. No case file over 600 lines.
+- A build or fix that changes a lock, a retry, a snapshot or a merge decision names what must stay true and the other
+  reader or writer, and its test forces that one to act at the weak point through the real caller: for example, pause
+  the idle merge after its last rule read, change the rule, resume, and assert no merge was asked. The test asserts the
+  stored state or the outside action, never after a sleep, and never by forcing the order inside a helper: the real
+  command can stay racy while such a test passes.
 - No wrapper that only runs other tests again: the test run already runs them, so it proves nothing and doubles their
   time (#357 removed two, 31 s of every run cut).
 - A case that runs several fixtures one after another is split into one case per fixture: the runner runs cases side
