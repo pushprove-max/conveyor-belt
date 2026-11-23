@@ -19,11 +19,11 @@ R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
 cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "a", "file": "conveyor/x.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 printf 't_aone() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"; echo 'echo one' > "$R/conveyor/x.sh"
-(cd "$ROOT" && git ls-files -z "$D" .claude/dashboard/panels .claude/dashboard/app.css | tar -cf - --null -T -) | tar -xf - -C "$R" || { echo "not ok - the Board files could not be copied"; exit 1; }
-# This checkout's links of the page's stylesheet alone (.conveyor/test-links.json), so the links of the other files
-# changed below do not add to their lists.
-jq '{".claude/dashboard/app.css": .[".claude/dashboard/app.css"]}' "$HERE/test-links.json" > "$R/.conveyor/test-links.json" \
-  || { echo "not ok - the stylesheet's test links could not be read"; exit 1; }
+(cd "$ROOT" && git ls-files -z "$D" .claude/dashboard/panels .claude/dashboard/app.css .claude/dashboard/app.js | tar -cf - --null -T -) | tar -xf - -C "$R" || { echo "not ok - the Board files could not be copied"; exit 1; }
+# This checkout's links of the page's stylesheet and app.js alone (.conveyor/test-links.json), so the links of the
+# other files changed below do not add to their lists.
+jq '{".claude/dashboard/app.css": .[".claude/dashboard/app.css"], ".claude/dashboard/app.js": .[".claude/dashboard/app.js"]}' \
+  "$HERE/test-links.json" > "$R/.conveyor/test-links.json" || { echo "not ok - the page's test links could not be read"; exit 1; }
 # Tests no list names: a new one that imports the fixture and draws Landed is selected by both rules; one that only
 # names the fixture and the panel's file, or a panel whose id starts with landed, is selected by neither.
 printf "import { boot, panel } from './dashboard-view.helpers.mjs';\nconst l = (w) => panel(w, 'landed');\n" > "$R/$D/zz-new.test.mjs"
@@ -76,5 +76,12 @@ done
 got=$(listed .claude/dashboard/app.css 'font-size: var(--fs-sm);' 'font-size: 13px;')
 has "$got" dashboard-view.page-live.test.mjs \
   || no "a font size of 13px in app.css does not list dashboard-view.page-live.test.mjs: $(tr '\n' ' ' <<<"$got")"
+
+# Bug: a focus call without preventScroll in app.js did not list the focus test, the test that checks every focus call
+# in .claude/dashboard, as no rule reads that test as app.js's, and main went red for it. Any code change to app.js
+# is enough: the list does not read what the change is.
+got=$(listed .claude/dashboard/app.js)
+has "$got" dashboard-view.focus.test.mjs \
+  || no "a code change to app.js does not list dashboard-view.focus.test.mjs: $(tr '\n' ' ' <<<"$got")"
 
 [ ! -s "$T/notok" ] && echo "ok - a change to the Board's fixture or a panel lists the test files that import it or draw it" || exit 1

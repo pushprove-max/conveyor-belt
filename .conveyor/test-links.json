@@ -109,6 +109,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   ".claude/dashboard/app.js": [
+    ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     "conveyor/tests/snapexec.test.sh"
   ],
   ".claude/dashboard/panels/belt.js": [
