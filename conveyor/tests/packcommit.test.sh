@@ -70,8 +70,10 @@ t_packcommitcustom() {
   out=$(loop setup pack-commit yes) || fail "yes failed: $out"
   echo more >> "$R/docs/big-files.txt"
   out=$(loop setup pack-commit) && grep -q '^ask:' <<<"$out" && grep -q 'docs/big-files.txt' <<<"$out" || fail "a changed exempt file at a custom path was not asked: $out"
-  grep -q 'conveyor.sh" setup pack-commit' "$SRC/../commands/setup.md" && grep -q 'conveyor.sh setup pack-commit' "$SRC/foreman/foreman.sh" \
-    || fail "setup.md or the Foreman's rules no longer run setup pack-commit, the only check that reads the exempt paths from the pack"
+  # The bare call (closed by its backtick, or followed by its note), not the `pack-commit yes` and `no` calls of the
+  # owner's answer: those are in both texts too, so a looser pattern passes with the check itself gone (E5 of #1450).
+  grep -qF 'conveyor.sh" setup pack-commit`' "$SRC/../commands/setup.md" && grep -qF 'conveyor.sh setup pack-commit (' "$SRC/foreman/foreman.sh" \
+    || fail "setup.md or the Foreman's rules no longer run setup pack-commit with no answer, the only check that reads the exempt paths from the pack"
   ! grep -q 'status --porcelain' "$SRC/../commands/setup.md" "$SRC/foreman/foreman.sh" || fail "setup.md or the Foreman's rules gate the pack's question on a git status of fixed paths: $(grep -n 'status --porcelain' "$SRC/../commands/setup.md" "$SRC/foreman/foreman.sh" | cut -c1-200)"
 }
 
