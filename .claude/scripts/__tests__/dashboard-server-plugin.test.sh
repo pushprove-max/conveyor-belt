@@ -98,8 +98,9 @@ check('no_temp_left', sorted(os.listdir(os.path.dirname(NOTES))) == ['noprice.lo
 check('runs_no_gh', not os.path.exists(os.path.join(T, 'gh-ran')), 'gh was run')
 # Bug (R83): the Dismiss rewrote the file from the copy it had read with no lock, so a price note serve appended
 # between that read and the replace was lost for good (noprice-noted then stops any later note). Here serve's append,
-# made as noprice() makes it (under noprice.lock beside the file), starts just before the Dismiss replaces the file;
-# it is given half a second to finish first, as it does when the Dismiss takes no lock.
+# made as noprice() makes it (under noprice.lock beside the file), starts just before the Dismiss replaces the file.
+# Without the lock the append is waited for to its end (no timing guess), so the replace always loses it; with the
+# lock held the append cannot start, and it lands after the replace.
 P = '- 2026-11-20T09:30:00Z · card - · No built-in price for gpt-new-9: the belt runs or offers this Codex model · evidence: -'
 
 
@@ -115,8 +116,15 @@ real_replace, appender = os.replace, threading.Thread(target=noprice_append)
 
 def replace_late(src, dst):
     if dst == NOTES and appender.ident is None:  # the first replace only
-        appender.start()
-        appender.join(0.5)
+        with open(os.path.join(os.path.dirname(NOTES), 'noprice.lock'), 'a') as probe:
+            try:
+                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held = False
+            except BlockingIOError:
+                held = True
+        threading.Thread.start(appender)
+        if not held:  # the Dismiss takes no lock: the append finishes before the replace, however slow it is
+            appender.join(30)
     return real_replace(src, dst)
 
 
