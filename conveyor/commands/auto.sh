@@ -35,9 +35,10 @@
 #   and kept as <state folder>/auto/rulings.jsonl, in place of the last ones sent: decide reads them beside this
 #   machine's ruling log. The row of the owner's profile items sent with them ({source: "profile", held}) is kept in
 #   the same file, and decide holds those items as it holds the profile's (lib/standing.sh profileheld).
-# - send: while auto is on or narrow, the owner's rulings and profile items sent again to each host whose last send
-#   (hostrulings) carried other profile items, so an item the owner adds to the profile holds there before the
-#   Foreman's next `auto decide`. The Foreman's Stop hook runs it (foreman/stop.sh state) at the end of each turn.
+# - send: the owner's rulings and profile items sent again to each host whose last send (hostrulings) carried other
+#   profile items, so an item the owner adds to the profile holds there before the Foreman's next `auto decide`, and
+#   an item they take out stops holding there, whether auto is on or off: the watcher's review-retry asks the host's
+#   `auto reserved` in both. The Foreman's Stop hook runs it (foreman/stop.sh state) at the end of each turn.
 #   Fails, each host not reached named on stderr (hostrulings), when the items were not sent to a host or the profile
 #   cannot be read; a host not reached is sent them again at the next run, as its last send still carries the old items.
 # The owner's way of deciding is read from the project's ruling log (.claude/hooks/lib/rulings.sh rulings_log: every
@@ -208,7 +209,8 @@ EOF
       && mv "$AD/rulings.$$.new" "$AD/rulings.jsonl" || { rm -f "$AD/rulings.$$.new"; die "the rulings of the owner's machine could not be kept in $AD/rulings.jsonl"; }
     echo "auto: $(jq -nR '[inputs | fromjson | select(.source == "ask")] | length' "$AD/rulings.jsonl") ruling(s) and $(jq -nR '[inputs | fromjson | select(.source == "profile") | .held[]] | unique | length' "$AD/rulings.jsonl") item(s) of the owner's profile from the owner's machine kept in $AD/rulings.jsonl" ;;
   send)
-    [ -n "$m" ] || exit 0
+    # Not only while auto is on: the host's watcher holds review blocks by the items it last got (`auto reserved`,
+    # foreman/lib.sh retryable()) whatever the mode, so an item the owner takes out must stop holding there too.
     h=$(profileheld) || die "the owner's profile could not be read, so it was not sent to the hosts"
     # A host not reached keeps deciding by the items it last got, so the caller (the Stop hook) is told: it fails.
     rc=0

@@ -310,6 +310,20 @@ t_autohoststop() {
     || fail "stop.sh state, given $in twice once the host was up, did not send the host \"Retry keeping the work\" exactly once: $(cat "$SENT" 2>&1)"
 }
 
+# Bug (#1571, review): `auto send` did nothing while auto was off, so an item the owner took out of the profile after
+# auto off stayed in the host's rulings.jsonl, and the watcher there (foreman/lib.sh retryable(), by `auto reserved`)
+# kept holding the review blocks the owner's standing review-retry must retry. The send after auto off carries [].
+t_autohostoff() {
+  local out; autohost
+  export CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" != "auto rulings" ] || cat >> "$SENT"; echo "auto ON: until off."'
+  mkdir -p "$ST/foreman" && printf '%s\n' '## Never decide; ask' '- did not hold after' > "$ST/foreman/owner-way.md"
+  out=$(cd "$R" && loop auto on 2>&1 && loop auto off 2>&1) || fail "auto on or off failed: $out"
+  rm "$ST/foreman/owner-way.md"
+  out=$(cd "$R" && loop auto send 2>&1) || fail "auto send, with auto off and the profile item \"did not hold after\" removed, failed: $out"
+  [ "$(jq -sc 'map(select(.source == "profile") | .held)' "$SENT" 2>&1)" = '[["did not hold after"],[]]' ] \
+    || fail "auto send, with auto off and the profile item \"did not hold after\" removed, did not send the host []: $(cat "$SENT" 2>&1)"
+}
+
 # Bug (#1571): on the build host, whose Foreman's folder has no owner-way.md, profileheld read [], so decide answered a
 # question the owner's profile holds. The owner's machine sent the item "Docs fix" with the ruling x-1 (which gave the
 # recommended answer to d-docs before): decide there leaves d-docs for the owner, naming the item.
