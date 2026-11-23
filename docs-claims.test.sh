@@ -62,10 +62,11 @@ has docs/releases/1.11.0.md "The cards can change different files. A batch holds
 has docs/releases/1.11.0.md 'the batch runs that file again on main before it lands, once for each change of that card.' 'the 1.11.0 batch line promises a second run whenever a landing shares a file'
 # R409 (lib/mainred.sh mainprobe() and mainkeep(): a run is kept only when its controls pass, a file that timed out is
 # not kept, and a card takes a kept file only at the same dependencies and with each control it needs run beside it;
-# tests/mainredproof.test.sh t_mainreddepsnew, t_mainredmachinefixed, t_mainredcontrol). The bullet's line must be the
+# tests/mainredproof.test.sh t_mainreddepsnew, t_mainredmachinefixed, t_mainredcontrol); a file that main deleted
+# does not run (mainprobe() leaves it out before the kept results are read; t_mainwaitgone). The bullet's line must be the
 # text whole, from its dash to its end, and the bullet must end there, so a word put in, such as a "no", or a sentence
 # added that says the opposite, on the bullet's line or on a line below that continues it, fails.
-line docs/releases/1.11.0.md "- At a red commit, cards that wait on the same test file can share one run of it. A card uses an earlier run of a test file at that commit only when the file ended in time in that run, the installed dependencies are the same, and each control test (the pack's \`test.control\`) that the card needs ran and passed in that run. Else the card runs that test file at that commit itself. A waiting card wakes only when main's state changes." 'the 1.11.0 notes share a run of a file that timed out, ran at other dependencies, or did not run and pass each control the card needs'
+line docs/releases/1.11.0.md "- At a red commit, cards that wait on the same test file can share one run of it. A card uses an earlier run of a test file at that commit only when the file ended in time in that run, the installed dependencies are the same, and each control test (the pack's \`test.control\`) that the card needs ran and passed in that run. Else the card runs that test file at that commit itself. A test file that main deleted does not run. A waiting card wakes only when main's state changes." 'the 1.11.0 notes share a run of a file that timed out, ran at other dependencies, or did not run and pass each control the card needs, or promise a run of a test file that main deleted'
 # R124 (lib/session.sh): no session ID in the output, no resume.
 has docs/releases/1.11.0.md 'when its output names one, and else started again from nothing' 'the 1.11.0 notes resume with no session ID'
 # R411 (tests/narrow.test.sh t_narrowownwhole).
