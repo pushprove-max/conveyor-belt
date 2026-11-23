@@ -554,6 +554,11 @@ record() { # <repo> <main> <now> <await>
   if [ "$rc" != 0 ]; then
     if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then outcome=slow; else outcome=failed; fi
     used=none fails=$((fails + 1))
+    # Its last failed poll, timed at the poll's start here, saved as soon as the first read fails: a waiter that stops
+    # the watcher during health, the longer read or what follows counts this failed poll. poll() times it later: before
+    # a wake it puts during the poll and at the poll's end once every record is read (downend), and when a waiter
+    # stops the watcher mid-poll (stopped). A longer read that reads removes it, as the outage is over.
+    echo "$first $now $fails" > "$down"
     if readhealth; then
       used=health
       hnew=$(awk -F'\t' -v p="$repo/" '!cur { seen[$0]; next } $1 != "" && !((p $1) in seen)' "$SEEN" cur=1 - <<<"$hcur")
@@ -600,9 +605,6 @@ record() { # <repo> <main> <now> <await>
     grep -qxF "$repo/idle" "$SEEN" || rm -f "$idle"
     grep -qxF "$repo/ghreach" "$SEEN" || rm -f "$ghreach"
     grep -qxF "$repo/gh" "$SEEN" || rm -f "$ghout"
-    # Its last failed poll, timed at the poll's start here; poll() times it later (downend): before a wake it puts
-    # during the poll, and at the poll's end once every record is read.
-    echo "$first $now $fails" > "$down"
     # Its reported keys stay reported (no text: a key already reported is never printed again). When health read, its
     # blocked, waiting and before entries are this poll's (hcur): one it no longer lists is dropped, so it wakes again
     # when it comes back. The unreachable key is this poll's only when the longer read was made; a poll that woke on
@@ -695,6 +697,20 @@ poll() { # 0 when a wake was put in pending; 2 when one was due but the session'
       [ -n "$f" ] && read -r a _ c 2>/dev/null < "$f" && echo "$a $((now + EPOCHSECONDS - p0)) $c" > "$f"
     done <<<"$failed"
   }
+  # A waiter that stops the watcher mid-poll (a stop that relays a wake or takes over a held waiter: TERM to its
+  # process group) ends the poll before its downend: each record whose outage file is still there is timed then, as
+  # the poll ends there. That is each record failed so far, and each one in an outage whose read is under way or not
+  # made yet: its outage is not over, and its last failed poll's time, kept from an earlier poll, can be over 3
+  # minutes old by now, after slow reads of the records before it, so the next watcher's poll would start a new one.
+  stopped() {
+    local r f a c
+    while IFS=$'\t' read -r r _; do
+      f=$FD/conveyor-down-$r.txt
+      read -r a _ c 2>/dev/null < "$f" && echo "$a $((now + EPOCHSECONDS - p0)) $c" > "$f"
+    done <<<"$RECS"
+    exit 143
+  }
+  trap stopped TERM
   while IFS=$'\t' read -r repo main; do
     # [issue, its lines in await-<repo>.txt] for each awaited issue of the record past what was dropped: the count is
     # in its landed key, so an issue awaited again after its wake is a new key.
@@ -744,7 +760,7 @@ poll() { # 0 when a wake was put in pending; 2 when one was due but the session'
 utc() { TZ=UTC0 printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$1"; }
 while :; do
   t0=$EPOCHSECONDS; : > "$POLLF"
-  poll; rc=$?
+  poll; rc=$?; trap - TERM
   # The poll log (PLOG): one line a poll, so a late wake can be told from the logs: its start, end, seconds taken,
   # each record's outcome (record()) and whether it woke. Past PLOG_MAX lines it keeps the newest half.
   t1=$EPOCHSECONDS
