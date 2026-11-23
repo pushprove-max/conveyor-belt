@@ -105,7 +105,8 @@ aged; [ "$(state)" = "down: the session's process $SP has ended" ] || fail "the 
 # stop) holds in a waiter that listens during a turn: it is kept as a wake for that turn's end.
 t_downheld() {
 fixture downheld
-check "echo \$\$ >> $T/starts"$'\n'"echo \$\$ >> $T/long; sleep 600" # sleep: a watcher that finds nothing
+# The watcher that dies exits 1: a held waiter takes an exit 0 for a wake put (R210), as a real watcher exits 0 only so.
+check "echo \$\$ >> $T/starts; exit 1"$'\n'"echo \$\$ >> $T/long; sleep 600" # sleep: a watcher that finds nothing
 h=$(wpid)
 wait_until '[ "$(logged "is down until the next stop")" = 1 ]' || fail "a watcher that died 4 times was not set down: $(cat "$FD/waiter.log")"
 [ "$(wc -l < "$T/starts")" = 4 ] && kill -0 "$h" 2>/dev/null || fail "the down watcher started $(wc -l < "$T/starts") times, or the waiter ended"

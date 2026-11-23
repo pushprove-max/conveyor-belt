@@ -162,7 +162,8 @@ cards() {
 # first read it stopped, own: {pid, since, pids} when of is "engine" and the card's own process is stopped too, pids
 # when of is "card": that process and each stopped one under it, which a SIGCONT must each reach}, on every
 # stuck entry of such a card) (step
-# waiting and waitsOn for a card waiting on a same-file card, never the landing it waits to begin), and
+# waiting and waitsOn for a card waiting on a same-file card, never the landing it waits to begin; late: true on one
+# whose process is gone or that is past its limit, so stuck whatever a stop says), and
 # every open card that has waited STUCK seconds on a same-file card that is not alive (not on the belt, or its process
 # gone: the wait never ends) (step waiting, since: when
 # the wait began, waitsOn: that card's {card, issue, state}, as the belt's), every open card whose session (build,
@@ -197,7 +198,9 @@ cards() {
 # controls, cases}): the machine hold while it stands (machinehold(), lib/mainred.sh: the loop picks no card), else
 # null, for the Foreman's watcher; landingPr ({number, url, merge, cards}): the open pull request of Land as pr as
 # GitHub last showed it ($LANDPR, prstate() and prsync(), lib/push.sh), with how many cards its pushed lines name and its last merge (a merge
-# GitHub refused gives the reason), for the Board's Merge and the Foreman; null with none open. Every object of it that names a main-red fix card
+# GitHub refused gives the reason), for the Board's Merge and the Foreman; null with none open; landingMerged ({number,
+# merged, issues}): the last landing pull request Conveyor merged ($LANDPR's merged, until a new one is opened), with
+# the issues its pushed lines name, for the Foreman's watcher, else null. Every object of it that names a main-red fix card
 # (card) also has name, "Main is red (<commit>)", as rows.jq names it, and so does a Tests page card ("Tests page:
 # <file>"): the card has no issue (issue 0) to be shown by.
 # A bad line is set aside first (check()); records that still do not check give no record: the reason and exit 1.
@@ -449,7 +452,7 @@ health() {
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson ghr "$ghr" --arg ghwhy "$ghwhy" --arg ghread "$GHREAD" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson stopped "$stopped" --argjson live "${lv:-{\}}" --argjson proof "$(proofs)" --argjson testout "$(testouts)" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" --arg lintyes "$LINTYES" \
     --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson force "$(inforce "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson pushlast "$pl" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
-    --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) --rawfile carry <(printf '%s\n' "$carry") "$UNTIMED$SPLITM"'
+    --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge}' "$LANDPR" 2>/dev/null) --slurpfile lm <(jq -c 'objects | select(.merged != null and (.number | type) == "number") | {number, merged}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) --rawfile carry <(printf '%s\n' "$carry") "$UNTIMED$SPLITM"'
     (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
     | ([.[], $old[] | select(.step == "picked") | if (.mainRed | type) == "string" then {key: .card, value: "Main is red (\(.mainRed[0:12]))"}
@@ -493,9 +496,11 @@ health() {
        blocked: ($b | map(select(.reason | startswith($yes) or startswith($lintyes) | not))), waiting: ($b | map(select(.reason | startswith($yes) or startswith($lintyes)))),
        stuck: ($c | map(select(.end == null) | . + {since: ([.last.time, .out // ""] | max)}
            # A session (build, fix, rebase) that says nothing is listed after SESSION_STUCK, when that is sooner.
-           | select((.card | IN($gone[])) or $stopped.cards[.card] or $now - (.since | fromdate) >= (if .last.step == "start" and (.last.of | IN("build", "fix", "rebase")) then [$stuck, $sstuck] | min else $stuck end))
+           | ((.card | IN($gone[])) or $now - (.since | fromdate) >= (if .last.step == "start" and (.last.of | IN("build", "fix", "rebase")) then [$stuck, $sstuck] | min else $stuck end)) as $late
+           | select($late or $stopped.cards[.card])
          | ($live[.card].waits.on // null) as $h
-         | {card, issue, step: (if $h then "waiting" else .last | if .step == "start" then .of else .step end end), since} + (if $h then {waitsOn: holder($h)} else {} end))
+         | {card, issue, step: (if $h then "waiting" else .last | if .step == "start" then .of else .step end end), since} + (if $h then {waitsOn: holder($h)} else {} end)
+           + (if $late then {late: true} else {} end))
          # A step the engine ended for making no progress, run once more (watch()): stuck since its progress stopped,
          # for as long as the run after it goes on.
          | . + [$c[] | select(.end == null and (.card | IN($gone[]) | not)) | $live[.card] as $v
@@ -527,7 +532,9 @@ health() {
        untimed: untimed, split: splitm([.[], $old[]]),
        unchecked: ([group_by(.card)[] | select(any(.step == "landed")) | map(select(.step == "lint")) | last | select(.skipped == true)] | length), report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold, machineHold: ($mh[0] // null),
        landingPr: ([.[] | select(.step == "pushed" and (.pr | type) == "number") | {pr, card}] as $pp
-         | $lp[0] // null | if . == null then null else . + {cards: ([$pp[] | select(.pr == $lp[0].number) | .card] | unique | length)} end)}
+         | $lp[0] // null | if . == null then null else . + {cards: ([$pp[] | select(.pr == $lp[0].number) | .card] | unique | length)} end),
+       landingMerged: ([.[] | select(.step == "pushed" and (.pr | type) == "number" and .pr == $lm[0].number) | .issue | numbers] as $mi
+         | $lm[0] // null | if . == null then null else . + {issues: ($mi | unique)} end)}
     | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$hd/rec"
   rc=$?; rm -rf "$hd"; return $rc
 }

@@ -157,16 +157,22 @@ t_tcblock() {
 }
 
 # Bug it catches: the record of the Tests page's cards kept only its newest 200 cards, so a card the Tests page had
-# said was queued was dropped before the loop picked it. The record holds one card not picked yet, the oldest, and 201
-# picked ones; a new card drops only the oldest picked one.
+# said was queued was dropped before the loop picked it. The record holds one card not picked yet, the oldest, and 203
+# picked ones; a new card drops only the oldest picked one past the newest 200 whose work is on main, c1 (landed).
+# Bug caught (R141): the trim dropped c2, blocked, so `retry c2` moved its lines out and the pick had no entry to
+# start it again from: it left Needs you with no new card. Kept: not landed.
+# Bug caught (R136): the trim dropped c3, landed after deleting its test file (its bugproof speed fix "deleted"), the
+# only source of that file's removed mark, so the Tests page showed the deleted file again. Kept.
 t_tctrim() {
   setup '[]'; mkdir -p "$ST/testactions"
   jq -cn '{cards: ([{file: "p.test.sh", title: "Optimize the test file p.test.sh", body: "b", time: "2026-11-01T00:00:00Z", card: null}]
-    + [range(1; 202) | {file: "d.test.sh", title: "t", body: "b", time: "2026-11-01T00:00:00Z", card: "c\(.)"}])}' > "$ST/testactions/cards.json"
-  fx_in 'testcard n.test.sh "Optimize the test file n.test.sh" "Make it cheaper."'
+    + [range(1; 204) | {file: "d.test.sh", title: "t", body: "b", time: "2026-11-01T00:00:00Z", card: "c\(.)"}])}' > "$ST/testactions/cards.json"
+  fx_in 'append "$(line c1 0 landed ok)" && append "$(line c2 0 blocked blocked "{\"reason\":\"build: it failed\"}")" \
+    && append "$(line c3 0 bugproof ok "{\"speed\":{\"fix\":\"deleted\"}}")" && append "$(line c3 0 landed ok)" \
+    && testcard n.test.sh "Optimize the test file n.test.sh" "Make it cheaper."'
   [ "$RC" = 0 ] || fail "testcard n.test.sh failed: $(cat "$T/$CASE/run.out")"
-  [ "$(jq -c '[(.cards | length), .cards[0].file, .cards[1].card, .cards[-2].card, .cards[-1].file, .cards[-1].card]' "$ST/testactions/cards.json")" = '[202,"p.test.sh","c2","c201","n.test.sh",null]' ] \
-    || fail "testcard n.test.sh with a card not picked and 201 picked ones did not keep each card not picked and drop only the oldest picked: $(jq -c '[.cards[] | [.file, .card]] | .[:3] + .[-3:]' "$ST/testactions/cards.json")"
+  [ "$(jq -c '[(.cards | length), .cards[0].file, .cards[1].card, .cards[2].card, .cards[3].card, .cards[-2].card, .cards[-1].file, .cards[-1].card]' "$ST/testactions/cards.json")" = '[204,"p.test.sh","c2","c3","c4","c203","n.test.sh",null]' ] \
+    || fail "testcard n.test.sh with a card not picked and 203 picked ones (c1 landed, c2 blocked, c3 landed deleting its file) did not keep each card not picked, c2 and c3, and drop only c1: $(jq -c '[.cards[] | [.file, .card]] | .[:5] + .[-3:]' "$ST/testactions/cards.json")"
 }
 
 # D1, landing. Bugs it catches: a card with no issue landed under "Closes #0", or its landing or push asked GitHub to
@@ -486,6 +492,39 @@ t_nipart() {
   [ -z "$(cat "$T/$CASE/run.out")" ] || fail "a run limited to #9 took the follow-up card $id of #8: $(cat "$T/$CASE/run.out")"
   fx_in "ONLY='[7]' "'locked testpick "$(jq -c . "$STUB/issues.json")"'
   [ "$(cat "$T/$CASE/run.out")" = "$id 0 false" ] || fail "a run limited to #7 did not take the follow-up card $id of its part #8: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug caught (R120): run --only 7, #7 closed, skipped the follow-up card of its closed part #8: --only grew from open
+# issues' parts alone. Bug caught: the parts were read at the run's start alone, so #8, open then and closed by its push,
+# was lost. turnask() (run()'s variables it reads set here) reads them again (the gh stub's $STUB/subs) at each turn.
+t_nipartclosed() {
+  setup "[$(issue 9 2026-01-01)]"
+  local id
+  echo '7 8 OPEN' > "$STUB/subs"
+  fx_in 'tcadd "" "Finding" "Body." "" "Review follow-up of #8" "[\"follow-up\"]" 8 > /dev/null'
+  id=$(jq -r '.cards[0].id' "$(nicards)")
+  fx_in "ONLY='[7]' ONLYNAMED='[7]'; "'declare -A shuts=() mine=(); cap=1 building=0 now=running inuse=0 running=0 sampled=$SECONDS old= nopack= nocli= mhold= guard= waits= issues= ctl=null
+    turnask >/dev/null 2>&1; echo "$ONLY"; echo "7 8 CLOSED" > "$STUB/subs"; turnask >/dev/null 2>&1; echo "$ONLY" && locked testpick "$(jq -c . "$STUB/issues.json")"'
+  [ "$(cat "$T/$CASE/run.out")" = $'[7]\n[7,8]\n'"$id 0 false" ] \
+    || fail "a run limited to the closed #7, its part #8 open and then closed, did not give [7] and then [7,8] and take the follow-up card $id of #8: $(cat "$T/$CASE/run.out")"
+}
+# Bug caught: onlyparts() put #7's open part #8 in ONLY at the run's start, so once the owner moved #8 to another
+# parent (#5) the pick still took it. An open part is taken by its parent as the pick reads it (umbrella): ONLY stays
+# [7], #8 under #5 is not taken, and under #7 (closed, so it has no parts list) it is; so is the follow-up card of #8
+# (testpick()), only under #7. Bug caught: closed #8 (open part #9) put in ONLY stayed once moved under #5; read again, it goes.
+t_nipartmoved() {
+  setup "[$(issue 9 2026-01-01)]"
+  local id
+  echo '7 8 OPEN' > "$STUB/subs"; issue 9 2026-01-01 | jq -c '[. + {umbrella: 8}]' > "$STUB/sub.json"
+  issue 8 2026-01-01 | jq -c '[. + {umbrella: 5}]' > "$STUB/moved.json" && issue 8 2026-01-01 | jq -c '[. + {umbrella: 7}]' > "$STUB/under.json"
+  fx_in 'tcadd "" "Finding" "Body." "" "Review follow-up of #8" "[\"follow-up\"]" 8 > /dev/null'
+  id=$(jq -r '.cards[0].id' "$(nicards)")
+  fx_in 'ONLY=$(onlyparts "[7]") && echo "$ONLY" && upnext "$(cat "$STUB/moved.json")" | jq -c "[.[].number]" && upnext "$(cat "$STUB/under.json")" | jq -c "[.[].number]" \
+    && echo "moved: $(locked testpick "$(cat "$STUB/moved.json")")" && echo "under: $(locked testpick "$(cat "$STUB/under.json")")" \
+    && echo "7 8 CLOSED" > "$STUB/subs" && ONLY=$(onlyparts "[7]") && upnext "$(cat "$STUB/sub.json")" | jq -c "[.[].number]" \
+    && echo "5 8 CLOSED" > "$STUB/subs" && ONLY=$(onlyparts "[7]") && echo "$ONLY" && upnext "$(cat "$STUB/sub.json")" | jq -c "[.[].number]"'
+  [ "$(cat "$T/$CASE/run.out")" = $'[7]\n[]\n[8]\nmoved: \nunder: '"$id 0 false"$'\n[9]\n[7]\n[]' ] \
+    || fail "with ONLY [7] and its open part #8 moved under #5, then under #7, and then #8 closed (its part #9) under #7 and moved under #5, onlyparts, the pick and testpick did not give [7], [] and [8], the card $id only under #7, then [9], [7] and []: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug it catches: a review follow-up of a split part (a card of issue 0) was filed as a follow-up of "#0": a run limited to the

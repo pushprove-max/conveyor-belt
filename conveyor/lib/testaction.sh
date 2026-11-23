@@ -146,8 +146,9 @@ testissue() { # <test file> <title> <body>
 # wait on it before it is picked: testpick()), card, null until the loop picks it (testpick()), held (true until
 # `control release <id>`: testrelease()), was (the cards of it given back, oldest first) and filed and filedUrl (the
 # issue File on GitHub filed from it: cardissue()). One writer at a time (a lock of its own). It keeps every card not
-# picked yet and the newest 200 picked ones (card() reads a picked card's record while it builds, and the Board's
-# Landed today shows a landed one's). Prints that the card is queued; one held also says on stderr how to release it.
+# picked yet, the newest 200 picked ones (card() reads a picked card's record while it builds, and the Board's Landed
+# today shows a landed one's) and the older ones tcadd() keeps. Prints that the card is queued; one held also says on
+# stderr how to release it.
 TACARDS=$TESTACTS/cards.json
 testcard() { # <test file> <title> <body> [held [<why it is held>]]
   local id
@@ -161,17 +162,24 @@ testcard() { # <test file> <title> <body> [held [<why it is held>]]
 # (testcardissue()), the pack's type and last priority when none; <parent> the issue a review follow-up or a split part
 # follows up (parent in the entry: a run limited by --only to that issue takes the card, testpick()). Prints the card's id.
 tcadd() { # <test file> <title> <body> <"held" or ""> [<label> [<labels json> [<parent issue>]]]
-  local lock rec id
+  local lock rec id drop
   mkdir -p "$TESTACTS" 2>/dev/null
   { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the record of the Tests page's cards could not be locked; no card started" >&2; return 1; }
   rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) || rec='[]'
   id=$(tcfree "$rec")
+  # The picked cards the trim may drop (none with the records unread): those whose work is on main (TADONE), but one whose
+  # proof deleted or merged its test file (bugproof speed.fix), the only source of its removed mark (testspart()). A card
+  # blocked, open or given back (`retry`) keeps its entry, which the loop picks it again by (testpick()).
+  drop=$({ stdb ask issue cards 0 || echo '"unread"'; } | jq -cn --arg shut "$SHUT" --arg own "$OWNSHUT" '[inputs] | if any(.[]; . == "unread") then {}
+    else [.[] | objects | select((.card | type) == "string")] | group_by(.card)
+      | map(select(any(.[]; '"$TADONE"') and (any(.[]; .step == "bugproof" and (.speed.fix? | IN("deleted", "merged"))) | not)) | {key: .[0].card, value: true}) | from_entries end' 2>/dev/null) || drop='{}'
   # The record goes to jq on its input: Linux refuses an argument over 128 KiB.
-  jq -c --arg f "$1" --arg t "${2:0:200}" --arg b "$3" --arg at "$(clock)" --arg id "$id" --arg held "${4:-}" --arg label "${5:-}" --arg labels "${6:-}" --arg parent "${7:-}" \
+  jq -c --arg f "$1" --arg t "${2:0:200}" --arg b "$3" --arg at "$(clock)" --arg id "$id" --arg held "${4:-}" --arg label "${5:-}" --arg labels "${6:-}" --arg parent "${7:-}" --argjson drop "$drop" \
     '. + [{file: (if $f == "" then null else $f end), title: $t, body: $b, time: $at, id: $id, card: null}
       + (if $held == "held" then {held: true} else {} end) + (if $label == "" then {} else {label: $label} end) + (if $labels == "" then {} else {labels: ($labels | fromjson)} end)
       + (if $parent == "" then {} else {parent: ($parent | tonumber)} end)]
-    | ([to_entries[] | select(.value.card != null) | .key] | .[:-200]) as $old | {cards: [to_entries[] | select(.key | IN($old[]) | not) | .value]}' <<<"$rec" > "$TACARDS.new" \
+    | ([to_entries[] | select(.value.card != null) | .key] | .[:-200]) as $old
+    | {cards: [to_entries[] | select((.key | IN($old[])) and $drop[.value.card] == true | not) | .value]}' <<<"$rec" > "$TACARDS.new" \
     && mv -f "$TACARDS.new" "$TACARDS" || { rm -f "$TACARDS.new"; exec {lock}>&-; echo "conveyor: the record of the Tests page's cards could not be written; no card started" >&2; return 1; }
   exec {lock}>&-
   echo "$id"
@@ -245,7 +253,7 @@ TCRETRY='retried once with its kept work: a card with no GitHub issue is tried a
 # on from there (testpick(), umbrellas()).
 TADONE='(.step == "landed" or (.step == "closed" and ((.reason // "") | IN($shut, $own) | not)))'
 # A run limited by --only (ONLY, a json list of issues) takes only the cards that follow up one of them (parent: a review follow-up
-# or a split part), as it takes their issues': an issue it names grows to its GitHub parts and the follow-ups of its cards, as
+# or a split part), as it takes their issues': an issue it names grows to its GitHub parts (an open parent's, and each open issue whose umbrella it is) and the follow-ups of its cards, as
 # upnext() grows it (jq/upnext.jq), so a follow-up of a part of a named umbrella is taken; with the Follow-ups rule off (rules.followups false) no follow-up card or split part
 # is taken, as no follow-up issue is (jq/upnext.jq): a card is one by its follow-up label.
 testpick() { # <the open issues json>
@@ -257,7 +265,7 @@ testpick() { # <the open issues json>
   fuoff=$(jq -r 'if .rules.followups == false then true else false end' <<<"$c" 2>/dev/null) || fuoff=false
   never=$(jq -c '.rules.never // []' <<<"$c" 2>/dev/null) || never='[]'
   open=$(jq -c 'map(.number)' <<<"${1:-[]}" 2>/dev/null) || open='[]'
-  parts=$(jq -c 'map(select((.parts // []) != []) | {key: (.number | tostring), value: [.parts[] | .number | numbers]}) | from_entries' <<<"${1:-[]}" 2>/dev/null) || parts='{}'
+  parts=$(jq -c '[(.[] | select((.parts // []) != []) | {k: .number, v: [.parts[] | .number | numbers]}), (.[] | select(.umbrella | numbers) | {k: .umbrella, v: [.number]})] | group_by(.k) | map({key: (.[0].k | tostring), value: (map(.v[]) | unique)}) | from_entries' <<<"${1:-[]}" 2>/dev/null) || parts='{}'
   # The unheld cards not picked yet are read as an issue is: the state of each issue of another repository their `Depends on:` lines name is asked now (farstates()).
   # A card given back (card set, its lines gone) is picked again, so it is asked as one not picked yet is; one that landed is not picked again, so it is not asked.
   have=$(stdb ask issue cards 0) || h=0

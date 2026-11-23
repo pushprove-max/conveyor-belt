@@ -84,6 +84,19 @@ jq -c '.health.unpushed = [] | .health.landingPr = {number: 41, url: null, merge
 check 'once pushed, the landing pull request not merged wakes again' poll bymerge 1
 check 'that wake names the pull request and the Merge it needs' \
   has bymerge 'landing pull request #41 is not merged, and the rule Merge PR is button: press Merge on the Board'"'"'s Control tab'
+# Bug caught (R214): once the landing pull request was merged, with the loop stopped (relfixes() runs only in the
+# loop), the wake said the commit the suite runs on did not hold each fix card's commit, though the merge put it there.
+# Health shows the merge as it does after `conveyor.sh pr merge`: landingPr null (open ones only), landingMerged set.
+jq -c '.health.landingPr = null | .health.landingMerged = {number: 41, merged: "2026-11-17T08:30:00Z", issues: [753]} | .health.loop = false' "$T/bymerge.json" > "$T/bymerge.new" && mv "$T/bymerge.new" "$T/bymerge.json"
+check 'the landing pull request merged, with no loop, wakes again' poll bymerge 2
+check 'that wake says it is merged and the loop must start, not that the fixes are missing' \
+  has bymerge 'landing pull request #41 is merged, and release-prep starts again only at the loop'"'"'s next look at its fixes: no loop is running, so start the loop'
+check 'that wake does not say the commit lacks the fixes' nope has bymerge 'does not hold each fix card'
+# Bug caught: #41 merged before the suite failed, and the fix (#753) pushed straight to main after Land as was set to
+# main: landingMerged still named #41, and the wake said #41 was merged as though it held the fix.
+jq -c '.health.landingMerged.issues = [700]' "$T/bymerge.json" > "$T/bymerge.new" && mv "$T/bymerge.new" "$T/bymerge.json"
+check 'a merged pull request that carried no fix card wakes with the wait reason' poll bymerge 3
+check 'that wake does not name #41, which never held the fix' nope has bymerge '#41'
 
 # The same hold with a card still on the belt ends by itself when the card lands: no wake.
 fixture busy "$(red '[{"issue": 753, "state": "landed"}]')" '[{"card": "c60", "issue": 60, "step": "build"}]'

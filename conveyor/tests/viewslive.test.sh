@@ -55,7 +55,8 @@ t_livebuild() { livestart; lines picked worktree deps brief start:build
   [ "$(snap '.belt[0] | [.usd, .reading, .tokens.claude, .live.lastOutputAt, .track.detailAt, .track.at]')" = '[null,false,0,null,5,0]' ] || fail "a session that has said nothing: $(snap '.belt[0]')"
   # Health asks 4 s after the step began (the clock seam, CONVEYOR_NOW): the session, silent since its start, is past the limit.
   at=$(jq -n --arg t "${d}T00:04:00Z" '$t | fromdate + 4')
-  [ "$(CONVEYOR_NOW=$at tuned '.tunables.stuck = 3' loop health | jq -c '.stuck | map([.issue, .step])')" = '[[7,"build"]]' ] || fail "a session silent past the limit is not stuck: $(CONVEYOR_NOW=$at tuned '.tunables.stuck = 3' loop health)"
+  # late (R135): stuck past its limit, so the Foreman's status keeps it once a stopped engine runs again.
+  [ "$(CONVEYOR_NOW=$at tuned '.tunables.stuck = 3' loop health | jq -c '.stuck | map([.issue, .step, .late])')" = '[[7,"build",true]]' ] || fail "a session silent past the limit is not stuck, or not late: $(CONVEYOR_NOW=$at tuned '.tunables.stuck = 3' loop health)"
   # Its stream: two answers, the first as two events with one id, then a call of a tool.
   answer() { echo "{\"type\":\"assistant\",\"message\":{\"id\":\"$1\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0}}}"; }
   { echo '{"type":"system","subtype":"init"}'; answer m1; answer m1; echo '{"type":"user"}'; answer m2

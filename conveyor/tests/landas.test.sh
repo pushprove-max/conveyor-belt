@@ -160,6 +160,9 @@ t_prbutton() {
     || fail "main here is not origin's default branch after the merge: $out"
   [ "$(cat "$STUB/closed" 2>/dev/null)" = 1 ] || fail "issue 1, still open after the merge, was not closed: $(cat "$STUB/closed" 2>&1)"
   [ "$(loop health | jq -c .landingPr)" = null ] || fail "the merged pull request is still shown open: $(loop health | jq -c .landingPr)"
+  # R214: the Foreman's watcher tells a merged landing pull request by landingMerged, as landingPr drops it, and cites
+  # it only for the issues it carried (#1, whose pushed line names it).
+  [ "$(loop health | jq -c '[.landingMerged.number, .landingMerged.issues]')" = '[7,[1]]' ] || fail "health does not name the merged pull request and the issue it carried: $(loop health | jq -c .landingMerged)"
   la_land 2; la_eng push c2 2 || fail "the push after the merge failed"
   [ "$(la_prst 8)" = OPEN ] && [ "$(la_prst 7)" = MERGED ] || fail "the push after the merge opened no new pull request: $(cat "$STUB/pr-calls")"
   [ "$(jq -r .body "$STUB/pr.8" | grep -o '^Closes #[0-9]*' | paste -sd ' ')" = 'Closes #2' ] || fail "the new pull request does not hold only the card landed since: $(jq -r .body "$STUB/pr.8")"

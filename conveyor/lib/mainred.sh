@@ -621,7 +621,8 @@ mainwait() { # <worktree> <main's commit> <case>...
 # so one fix session follows) or nothing (another exit, 0 when they pass: the tests run). Called as
 # `testroute verdicts <mainred.sh verdicts() json>`, for a test run that failed, it prints machine (the machine is at fault
 # and no failure is the card's: the repair lane, then the machine hold), main (every failure is main's: the wait for
-# main) or nothing (a failure is the card's). For that failure, called as `testroute <worktree>`, it prints nothing
+# main) or nothing (a failure is the card's, or no verdict was read: verdicts() failed and the list is empty, and the
+# failure is then taken as the card's). For that failure, called as `testroute <worktree>`, it prints nothing
 # (the repair lane passed this test step: repaired), moved (main moved since the card's commit, and it was not
 # fitted onto main yet: tmain), block (the tests failed again after their one test-fix round: tfix) or fix (that
 # round). It reads card()'s repaired, tmain and tfix (bash's dynamic scope).

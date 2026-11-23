@@ -317,8 +317,9 @@ t_stoppedengine() {
   [ -n "$c" ] || fail "the stand-in's card process did not start"
   jq -cn --argjson p "$e" --arg t "$(p_started "$e")" '{pid: $p, started: $t}' > "$ST/loop.json"
   stoppedcard "$c" "$now"; kill -STOP "$e" "$w"
-  h=$(CONVEYOR_NOW=$((now + 30)) loop health >/dev/null; CONVEYOR_NOW=$((now + 90)) loop health | jq -c '[.loop, (.stuck | map([.issue, .step, .stopped])), .engineStopped]')
-  [ "$h" = "[true,[[1,\"build\",{\"pid\":$e,\"of\":\"engine\",\"since\":\"$s\"}]],{\"pid\":$e,\"since\":\"$s\",\"pids\":[$e,$w]}]" ] \
+  # late null (R135): stuck for the stop alone, so the Foreman's status drops it once the engine runs again.
+  h=$(CONVEYOR_NOW=$((now + 30)) loop health >/dev/null; CONVEYOR_NOW=$((now + 90)) loop health | jq -c '[.loop, (.stuck | map([.issue, .step, .stopped, .late])), .engineStopped]')
+  [ "$h" = "[true,[[1,\"build\",{\"pid\":$e,\"of\":\"engine\",\"since\":\"$s\"},null]],{\"pid\":$e,\"since\":\"$s\",\"pids\":[$e,$w]}]" ] \
     || { kill -CONT "$w" "$e"; kill "$c" "$e"; fail "a card under a stopped engine, or the engine with each stopped process under it, is not named so at once, since it was first read stopped: $h"; }
   kill -STOP "$c"; h=$(CONVEYOR_NOW=$((now + 150)) loop health | jq -c '[(.stuck | map(.stopped)), .engineStopped.pids]'); kill -CONT "$c" "$w" "$e"
   t2=$(jq -rn --argjson t $((now + 150)) '$t | todate'); u=$(printf '%s\n' "$w" "$c" | sort -n | paste -sd, -)

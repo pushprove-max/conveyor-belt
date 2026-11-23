@@ -179,6 +179,8 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
           | ((($snap.control | objects | .landAs) // $snap.packLandAs) == "pr"
               and (($snap.control | objects | .prMerge) // $snap.packPrMerge) == "button") as $bymerge
           | ([$snap.health.landingPr | objects | select(.merged == null and .closed == null) | .number | numbers][0]) as $pr
+          # landingMerged: the last landing pull request merged (landingPr drops it), named only if it carried each fix.
+          | ([$snap.health.landingMerged | objects | select(.issues | arrays | . as $in | all($fx[]; .issue | IN($in[]))) | .number | numbers][0]) as $merged
           | (if .restarted != null then select($now - (.restarted | fromdate? // $now) >= 2 * $poll)
               | ["restart", "release-prep was started again at \(.restarted), but no run began: run `conveyor.sh release-run prep \($v)`"]
             elif ($snap.belt | arrays | length) > 0 then empty
@@ -186,6 +188,8 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
               + (if $bymerge then ", then Merge there, as the rule Land as is pr and the rule Merge PR is button: the suite runs on the branch the landing pull request goes into" else "" end)]
             elif $owed then empty
             elif $bymerge and $pr != null then ["merge", "landing pull request #\($pr) is not merged, and the rule Merge PR is button: press Merge on the Board'"'"'s Control tab"]
+            elif $merged != null then ["merged", "landing pull request #\($merged) is merged, and release-prep starts again only at the loop'"'"'s next look at its fixes"
+              + (if $snap.health.loop == true then "" else ": no loop is running, so start the loop" end)]
             else ["wait", "the commit the suite runs on does not hold each fix card'"'"'s commit yet (a landing pull request not merged, or the remote not read)"] end) as [$tag, $why]
           | ["relfix:\($v):\(.since):\($tag)", "release fixes landed", "", "every fix card of release \($v)'"'"'s failed suite has landed (\($all)), but release-prep \($v) did not start again: \($why)"]
         else $fx[] | select(.state == "closed")
@@ -410,14 +414,15 @@ if [ "${1:-}" = --status ]; then
     # The engine the snapshot names stopped (health engineStopped), read again now as ps shows it on the machine the
     # snapshot came from (#1107): a snapshot made before a SIGCONT, minutes old, still names it stopped. One that runs
     # or has ended is no longer a stopped engine, and a card it held is no longer held by it (one whose own process is
-    # stopped stays, as that stop; one with an overdue test, a wait or a retry stays as that). A state that does not
+    # stopped stays, as that stop; one with an overdue test, a wait or a retry stays as that, and so does one stuck
+    # before the stop, its process gone or silent past its limit: health's late). A state that does not
     # read changes nothing.
     eng=''
     if IFS=$'\t' read -r ep es < <(jq -r '.health.engineStopped | objects | select(.pid | numbers) | [.pid, .since // "an unknown time"] | @tsv' <<<"$rec" 2>/dev/null) \
       && [[ $ep =~ ^[0-9]+$ ]] && st=$(engstate "$ep") && [[ $st != T* ]] \
       && r2=$(jq -c '.health.stuck |= map(if .stopped.of? == "engine" then
           ((.stopped.own | objects | select(.pid | numbers) | {pid, since, pids, of: "card"}) // null) as $o
-          | if $o then .stopped = $o elif (.cases | type) == "array" or (.waitedOn | type) == "array" or .did != null then del(.stopped) else empty end
+          | if $o then .stopped = $o elif (.cases | type) == "array" or (.waitedOn | type) == "array" or .did != null or .late == true then del(.stopped) else empty end
         else . end)
         | .health.engineStopped = null' <<<"$rec" 2>/dev/null); then
       eng="$repo: the engine (pid $ep) $([ -n "$st" ] && echo "runs (state $st now)" || echo "has ended"); the snapshot had it stopped since $es"
@@ -442,7 +447,7 @@ while IFS=$'\t' read -r r _; do touch "$FD/await-$r.txt" "$FD/await-done-$r.txt"
 record() { # <repo> <main> <now> <await>
   local repo=$1 main=$2 now=$3 await=$4 rec cur first last err held
   local down=$FD/conveyor-down-$repo.txt idle=$FD/conveyor-idle-$repo.txt ghreach=$FD/conveyor-ghreach-$repo.txt ghout=$FD/conveyor-ghout-$repo.txt stuckf=$FD/conveyor-stuck-$repo.txt errf=$FD/conveyor-watch-$repo.err
-  local histf=$FD/conveyor-history-$repo.json
+  local histf=$FD/conveyor-history-$repo.json reading=$FD/conveyor-reading-$repo.txt
   # The history is asked for only when an awaited issue is not pushed by the snapshot alone, or is pushed with no
   # commit in it (below); one that does not read
   # is left out (null), and the next poll asks again. It goes to jq in a file: a busy day's history is over the
@@ -468,9 +473,10 @@ record() { # <repo> <main> <now> <await>
   # and before entries and needs no snapshot. hcur: those problems, as PROBLEMS gives them; nonzero when health does not read.
   # A card review-retry gives back (retryable) is left out: it wakes nothing, and the next poll whose snapshot reads
   # retries it (reviewretry).
-  readhealth() {
+  readhealth() { # nobefore: set when health's before is null (gh did not list the open issues)
     local h all skip
     h=$(ask "$repo" "$main" health 2>>"$errf") \
+    && nobefore=$(jq -r 'if .before == null then 1 else "" end' <<<"$h" 2>>"$errf") \
     && all=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson poll "$POLL" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "{health: .} | $PROBLEMS" <<<"$h" 2>>"$errf") \
     && hcur=$(awk -F'\t' '$1 ~ /^(blocked|waiting|before):/' <<<"$all") || return
     skip=$(retryable "$h" .blocked | cut -f1)
@@ -547,11 +553,16 @@ record() { # <repo> <main> <now> <await>
   # fast (stopped, its host down) fails the second read as fast, so its wake is not later; one that hangs wakes up to
   # SLOW_S seconds later. Before it, health is read (readhealth); when health lists a problem not reported yet, the
   # longer read waits for the next poll, so that wake is not SLOW_S seconds late, and the record is not called
-  # unreachable at this poll. The poll's outcome for the poll log: ok, slow (stopped at its wait) or failed, and the
-  # read it used (snapshot, health or none).
-  local hcur="" hnew="" tried="" rc outcome=ok used=snapshot
-  readsnap "${ASK_LIMIT:-45}"; rc=$?
-  if [ "$rc" != 0 ]; then
+  # unreachable at this poll. The poll's outcome for the poll log: ok, slow (stopped at its wait), failed or skipped
+  # (below), and the read it used (snapshot, health or none).
+  # A snapshot read leaves $reading while it runs: a stop (each Stop stops the watchers) cut it short, and a read begun
+  # again from zero never reached health with a Stop every 45 s. With $reading there, health is read first: a
+  # problem it lists not reported yet wakes at once, the snapshot skipped until the next poll.
+  local hcur="" hnew="" tried="" nobefore="" rc outcome=ok used=snapshot
+  ! [ -e "$reading" ] || ! readhealth || { hnew=$(awk -F'\t' -v p="$repo/" '!cur { seen[$0]; next } $1 != "" && !((p $1) in seen)' "$SEEN" cur=1 - <<<"$hcur"); }
+  if [ -n "$hnew" ]; then rc=1 outcome=skipped used=health
+  else touch "$reading" 2>/dev/null; readsnap "${ASK_LIMIT:-45}"; rc=$?; rm -f "$reading"; fi
+  if [ "$rc" != 0 ] && [ "$outcome" != skipped ]; then
     if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then outcome=slow; else outcome=failed; fi
     used=none fails=$((fails + 1))
     # Its last failed poll, timed at the poll's start here, saved as soon as the first read fails: a waiter that stops
@@ -564,19 +575,22 @@ record() { # <repo> <main> <now> <await>
     if [ -z "$goes" ] && [ -e "$SEEN" ] && grep -qxF "$repo/unreachable" "$SEEN"; then
       awk -v k="$repo/unreachable" '$0 != k' "$SEEN" > "$SEEN.tmp" && mv "$SEEN.tmp" "$SEEN"
     fi && echo "$first $now $fails" > "$down"
+    # Read again even when health was read first: a card that blocked during the failed snapshot read wakes now.
     if readhealth; then
       used=health
       hnew=$(awk -F'\t' -v p="$repo/" '!cur { seen[$0]; next } $1 != "" && !((p $1) in seen)' "$SEEN" cur=1 - <<<"$hcur")
     fi
     # Unreachable only from the third failed poll in a row on (#715: most outages cleared on the poll after the first).
     if [ -z "$hnew" ] && [ "$fails" -ge 3 ] && [ $((now - first)) -ge "$DOWN_S" ]; then
-      tried=1; readsnap "$SLOW_S"; rc=$?
+      tried=1; touch "$reading" 2>/dev/null; readsnap "$SLOW_S"; rc=$?; rm -f "$reading"
       [ "$rc" != 0 ] || { outcome=slow used=snapshot; }
     fi
   fi
   printf '%s: %s, read %s\n' "$repo" "$outcome" "$used" >> "$POLLF"
   if [ "$rc" = 0 ]; then
     rm -f "$down"
+    # Health's before is null when gh did not list the open issues (views.sh): its reported before: keys stay reported.
+    ! jq -e '.health | objects | .before == null' <<<"$rec" >/dev/null 2>&1 || cur+=$'\n'$(awk -v p="$repo/" 'index($0, p "before:") == 1 { print substr($0, length(p) + 1) "\t\t\t" }' "$SEEN")
     # Idle is a problem only on the second poll in a row that lists it ($idle marks the first); GitHub not reached
     # and gh signed out only on the third (#715: most cleared on the poll after the first). $ghreach and $ghout hold
     # how many polls in a row listed them, 1 or 2, and the GitHub read of the last (health ghRead, ghok()'s GHREAD): a
@@ -614,8 +628,9 @@ record() { # <repo> <main> <now> <await>
     # blocked, waiting and before entries are this poll's (hcur): one it no longer lists is dropped, so it wakes again
     # when it comes back. The unreachable key is this poll's only when the longer read was made; a poll that woke on
     # health in its place keeps it reported while the same outage goes on, so that outage is not reported again at the
-    # next failed read. A new outage drops it, so its own failed longer read is reported.
-    cur=$(awk -v p="$repo/" -v h="$used" -v t="$tried" -v g="$goes" 'index($0, p) == 1 && ($0 != p "unreachable" || (t == "" && g != "")) && !(h == "health" && substr($0, length(p) + 1) ~ /^(blocked|waiting|before):/) { print substr($0, length(p) + 1) "\t\t\t" }' "$SEEN")
+    # next failed read. A new outage drops it, so its own failed longer read is reported. A health whose before is null
+    # (nobefore) lists no before entry, so those keys stay reported.
+    cur=$(awk -v p="$repo/" -v h="$used" -v t="$tried" -v g="$goes" -v nb="$nobefore" 'index($0, p) == 1 && ($0 != p "unreachable" || (t == "" && g != "")) && !(h == "health" && (substr($0, length(p) + 1) ~ /^(blocked|waiting):/ || (nb == "" && substr($0, length(p) + 1) ~ /^before:/))) { print substr($0, length(p) + 1) "\t\t\t" }' "$SEEN")
     [ -z "$hcur" ] || cur+=$'\n'$hcur
     # Health lists every blocked card, as a snapshot does, so a block it lists is timed and reminded of as well.
     [ "$used" != health ] || stillblocked

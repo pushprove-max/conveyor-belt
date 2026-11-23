@@ -27,8 +27,9 @@
 # left running, and this hook ends.
 # waiter.log, in the Foreman's folder, has a line when a waiter starts and when it ends, with why (lib.sh
 # waiter_state reads it); a waiter killed with no chance to write leaves its start line last.
-# The watchers: watch-conveyor.sh, watch-limit.sh, watch-alerts.sh, watch-idle.sh. One that exits with nothing put
-# died: it is started again after 5 s, up to 3 times an hour each; past that one WATCHER DOWN wake names it, and it is
+# The watchers: watch-conveyor.sh, watch-limit.sh, watch-alerts.sh, watch-idle.sh. Each exits 0 only once it put a
+# wake (a held waiter tells a wake by that exit alone); one that exits with nothing put died: it is started again
+# after 5 s, up to 3 times an hour each; past that one WATCHER DOWN wake names it, and it is
 # not started again until the next stop (a held waiter leaves it out too: CONVEYOR_FOREMAN_DOWN).
 # The hook is ended at its 86400 s timeout, and nothing would start it again in a day with no wake: after 23 hours
 # with nothing it wakes the session with one renew line.
@@ -270,10 +271,7 @@ start() { # <name>: in its own process group, so stopping it stops its sleep too
   p_execsid bash -c "${CMD[$1]}" > /dev/null 2>&1 7>&- & PID[$1]=$!
   local w; for w in "${!PID[@]}"; do printf '%s %s\n' "${PID[$w]}" "$(started "${PID[$w]}")"; done > "$FD/watchers.pid"
 }
-# wakes: how many wakes are pending. A held waiter delivers none, so a watcher that exits as their count grows put one.
-wakes() { local f n=0; for f in "$PENDING"/*.wake; do [ -f "$f" ] && n=$((n + 1)); done; echo "$n"; }
 for w in "${!CMD[@]}"; do start "$w"; done
-had=$(wakes)
 renew=${CONVEYOR_FOREMAN_RENEW:-82800} look=${CONVEYOR_FOREMAN_LOOK:-60}
 # The renew time, an epoch: a waiter that took a moved one's place (below) keeps that one's, as the hook it runs in
 # is the same, ended at the same timeout. A held waiter runs in no hook, so it has none.
@@ -288,7 +286,7 @@ while :; do
     deliver; why="$why (the renew)"; stop_all; handoff; exit 2
   fi
   sleep "$(( left < look ? left : look ))" 7>&- & sp=$!
-  ended=''; wait -n -p ended "${PID[@]}" "$sp"; kill "$sp" 2>/dev/null
+  ended=''; wait -n -p ended "${PID[@]}" "$sp"; st=$?; kill "$sp" 2>/dev/null
   [ "$MODE" = --held ] || ! deliver || { stop_all; handoff; exit 2; }
   # The install moved: the watchers stop, and the waiter of the new install takes this one's place (its exec 7>>
   # closes this waiter.lock, so its flock takes it; a held one keeps its fd 7), with this one's renew time.
@@ -305,14 +303,21 @@ while :; do
     why="its install $FROM is gone; the wake waits in pending for the next stop"; stop_all; exit 0
   fi
   for w in "${!PID[@]}"; do
-    [ "${PID[$w]}" = "${ended:-}" ] || continue
-    # A held waiter's watcher that put a wake is started again: the wake waits in pending for the next stop.
-    if [ "$MODE" = --held ] && [ "$(wakes)" -gt "$had" ]; then had=$(wakes); sleep 5 7>&-; start "$w"; continue; fi
+    # The watcher `wait -n` named, and each other one whose process is gone: one that exited while this loop did not
+    # wait (in the 5 s before a restart, below) a bash before 5.3 takes off its job table as the next job starts, so
+    # `wait -n` never names it; `wait` on its pid gives its kept status (lib/session.sh run()).
+    if [ "${PID[$w]}" = "${ended:-}" ]; then ws=$st
+    elif ! kill -0 "${PID[$w]}" 2>/dev/null; then wait "${PID[$w]}" 2>/dev/null; ws=$?
+    else continue; fi
+    # A held waiter's watcher that put a wake is started again: the wake waits in pending for the next stop. It is
+    # told by its own exit (0: a watcher exits 0 once it put a wake), not by the count of pending wakes, which another
+    # watcher's wake or one put before the start makes grow (R210).
+    if [ "$MODE" = --held ] && [ "$ws" = 0 ]; then sleep 5 7>&-; start "$w"; continue; fi
     now=$(date +%s); kept=()
     for t in ${TRIES[$w]:-}; do [ $((now - t)) -ge 3600 ] || kept+=("$t"); done
     if [ ${#kept[@]} -ge 3 ]; then
       echo "WATCHER DOWN: $w exited with nothing to report 4 times in an hour; it is not started again until the next stop" | pending_put
-      if [ "$MODE" = --held ]; then unset 'PID[$w]'; had=$(wakes); log "$w is down until the next stop"; continue; fi
+      if [ "$MODE" = --held ]; then unset 'PID[$w]'; log "$w is down until the next stop"; continue; fi
       deliver; why="$why (WATCHER DOWN: $w)"; stop_all; handoff "$w"; exit 2
     fi
     TRIES[$w]="${kept[*]} $now"

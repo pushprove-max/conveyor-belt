@@ -18,7 +18,9 @@
     | . as $is | (if $only == null then null else
         ($cards | map(.followups //= (if .issue | IN($done[]) then .grown.filed else null end))
           + [$retried[] | select(.grown.filed and (.issue | IN($done[]))) | {issue, followups: .grown.filed}]) as $upc
-        | def withparts: . as $o | . + [$is[] | select(.number | IN($o[])) | (.parts // [])[] | .number | numbers] | unique;
+        # An open issue whose parent (umbrella, as GitHub has it now) is in it: a part of a closed one (lib/issues.sh onlyparts()).
+        | def withparts: . as $o | . + [$is[] | select(.number | IN($o[])) | (.parts // [])[] | .number | numbers]
+            + [$is[] | select(.umbrella | numbers | IN($o[])) | .number] | unique;
           def grow: . as $o | (ups($upc; $o) | withparts) as $n | if $n == ($o | unique) then $n else $n | grow end;
           $only | grow end) as $only
     | ($retried | map(.issue) | unique) as $again

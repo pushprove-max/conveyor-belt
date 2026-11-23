@@ -148,7 +148,9 @@ snapprint() {
 # (its reason starts with YES or LINTYES, yesforms() with the pack's owner.name: block(), lib/card.sh) is in waiting
 # instead, as views.sh splits health's, with its sentence: the reason after that start; building, waitingCount and
 # running, the running loop's count at its last turn (loop.json, run(): running is every card of it in progress, in
-# review and in its Test step too), null when no process of that loop lives; landed, the
+# review and in its Test step too), and each card in progress (on the kept belt and not landed, or in started) that
+# loop.json's cards do not name, picked at or after loop.json's last write (turncount() writes it before the turn's
+# pick, and again only when it changes), null when no process of that loop lives; landed, the
 # count of landed cards on the belt for their push, which no loop count holds: those the kept snapshot's belt has
 # landed with no closing line since, and, unless the rule "Push when a card lands" is off, each card whose last
 # closing line since is landed (a card pushed since leaves it, though the belt keeps it until its issue closes), but
@@ -165,12 +167,12 @@ snapprint() {
 # the owner turned the rule on is counted.
 # Only the lines since are read whole: a line's first "time" field is its own (line(), lib/records.sh).
 recordsnow() { # <snapshotAt> [<counts>]
-  local p b=null YES LINTYES o c=/dev/null
+  local p at b=null YES LINTYES o c=/dev/null
   [ ! -s "$CONTROL" ] || c=$CONTROL
   o=$(jq -er '.owner.name | strings' "$MAIN/.conveyor/project.json" 2>/dev/null) || return 1
   yesforms "$o"
-  p=$(jq -r '.pid | numbers' "$SAYS" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null \
-    && b=$(jq -c '{building: (.building | numbers), waiting: (.waiting | numbers), running: (.running | numbers), cards: [.cards | arrays | .[] | strings]}' "$SAYS" 2>/dev/null) \
+  p=$(jq -r '.pid | numbers' "$SAYS" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null && at=$(p_stat "$SAYS") \
+    && b=$(jq -c --argjson at "${at#* }" '{building: (.building | numbers), waiting: (.waiting | numbers), running: (.running | numbers), cards: [.cards | arrays | .[] | strings], at: $at}' "$SAYS" 2>/dev/null) \
     && [ -n "$b" ] || b=null
   LC_ALL=C awk -v t="\"time\":\"$1\"" -v f="${2:-}" 'BEGIN { if (f != "") { while ((r = (getline l < f)) > 0) { j = index(l, "\t"); k[substr(l, j + 1)] = substr(l, 1, j - 1) + 0 }; if (r < 0) f = "" } }
     { c = ""; if (f != "" && match($0, /^\{"card":"[^"]*"/)) { c = substr($0, 10, RLENGTH - 10); s[c]++ }
@@ -206,7 +208,13 @@ recordsnow() { # <snapshotAt> [<counts>]
                 step: (if $l == null then "brief" elif $l.step == "brief" then "build" elif $l.step | IN("build", "fix", "rebase") then "review"
                   elif $l.step == "test" then (if $l.result == "fail" then "fix" else "landing" end)
                   elif $l.result == "GO" then "tests" elif $l.result == "NO-GO" then "fix" else "review" end),
-                stepAt: last.time, landed: false, fromRecords: true}])}'
+                stepAt: last.time, landed: false, fromRecords: true}])}
+      # loop.json is written before its turn picks, and again only when it changes: a card in progress that its cards
+      # do not name, picked at or after its last write (its mtime, at), is in progress too, on the kept belt or started.
+      | if (.running | type) == "number" then .running += ([
+          ([$s.belt | arrays | .[] | objects | select(.landed != true and (.card | type) == "string" and $have[.card] != null and $ended[.card] == null) | {card, t: .pickedAt}]
+            + [.started[] | .card as $c | {card: $c, t: ([$new[] | select(.card == $c and .step == "picked") | .time] | last)}])
+          | unique_by(.card)[] | select((.card | IN($loop.cards[]) | not) and ((.t | fromdate?) // 0) >= $loop.at)] | length) else . end'
 }
 if [ -z "$fresh" ] && [ -s "$KEPT" ]; then
   if snapdue; then

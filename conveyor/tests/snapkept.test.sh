@@ -329,8 +329,52 @@ t_snapkeptkeptlanded() {
   snapkept_new
   exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
   out=$(loop snapshot) || fail "the reader exited non-zero"
+  # c9 was picked before loop.json was written, which does not name it: not this loop's card (t_snapkeptpicked).
   jq -e '.recordsNewer == true and .recordsNow.running == 1 and .recordsNow.landed == 0' <<<"$out" > /dev/null \
     || fail "with the kept belt showing c2 landed, loop.json (running 1, cards [c2]) and c9's newer line, the reader does not count c2 once: $(jq -c '{recordsNewer, recordsNow}' <<<"$out")"
+  exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
+}
+
+# Bug caught (R220): loop.json is written before its turn picks, so a card picked in that turn (c9, picked since the
+# kept snapshot) was in neither its running nor its cards, and the Foreman's status read "0 on the belt now" while it
+# built. running counts a card of started that loop.json's cards do not name, picked at or after loop.json's last
+# write (10:05:30 here; c9 at 10:06, c2 and c3 on the kept belt before it), and only once when they name it.
+snapkept_says() { # <running> <cards>: a live loop.json, last written at 10:05:30
+  jq -cn --argjson p "$$" --argjson r "$1" --argjson c "$2" '{pid: $p, state: "running", building: $r, waiting: 0, running: $r, cards: $c}' > "$ST/loop.json" \
+    && TZ=UTC touch -t 202611171005.30 "$ST/loop.json" || fail "loop.json could not be written"
+}
+t_snapkeptpicked() {
+  local out lk
+  snapkept_setup
+  snapkept_quiet 20
+  snapkept_says 0 '[]'
+  snapkept_new
+  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  out=$(loop snapshot) || fail "the reader exited non-zero"
+  jq -e '.recordsNow.running == 1 and (.recordsNow.started | map(.card)) == ["c9"]' <<<"$out" > /dev/null \
+    || fail "with loop.json (running 0, cards []) and c9 picked since, running is not 1: $(jq -c .recordsNow <<<"$out")"
+  snapkept_says 1 '["c9"]'
+  out=$(loop snapshot) || fail "the reader exited non-zero"
+  jq -e '.recordsNow.running == 1' <<<"$out" > /dev/null \
+    || fail "with loop.json (running 1, cards [c9]) and c9 picked since, c9 is not counted once: $(jq -c .recordsNow <<<"$out")"
+  exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
+}
+
+# Bug caught: the kept snapshot was built after c9's picked line, so c9 is on its belt and not in started; a later
+# line of c9 makes the records newer, and running stayed loop.json's 0, so the status read "0 on the belt now" while
+# c9 built. A kept belt card not landed, picked after loop.json's last write and not in its cards, is counted.
+t_snapkeptonbelt() {
+  local out lk
+  snapkept_setup
+  snapkept_new; loop snapshot --fresh > /dev/null || fail "the snapshot with c9 exited non-zero"
+  jq -e '.belt | map(.card) | index("c9")' "$ST/snapshot.json" > /dev/null || fail "the kept snapshot does not hold c9: $(jq -c '.belt | map(.card)' "$ST/snapshot.json")"
+  snapkept_quiet 20
+  snapkept_says 0 '[]'
+  snapkept_line c9 3 worktree ok 07 >> "$ST/cards.jsonl"
+  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  out=$(loop snapshot) || fail "the reader exited non-zero"
+  jq -e '.recordsNewer == true and .recordsNow.started == [] and .recordsNow.running == 1' <<<"$out" > /dev/null \
+    || fail "with c9 on the kept belt, picked after loop.json (running 0, cards []) and with a newer line, running is not 1: $(jq -c '{recordsNewer, recordsNow}' <<<"$out")"
   exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
 }
 

@@ -630,7 +630,7 @@ turnask() {
   # While a session's API-side error is fresh (session()), no card is picked: its session would meet the same outage.
   asking=''; if { [ "$building" -lt "$cap" ] || [ -n "$urgent" ] || [ -n "$red" ]; } && [ -z "$old" ] && [ -z "$nopack" ] && [ -z "$nocli" ] && [ -z "$mhold" ]; then
     if apifresh; then waits=1; else asking=1; [ "$now" != running ] || issues=$(asked) || asking=failed; fi
-  fi
+    [ "$asking" != 1 ] || [ "$now" != running ] || [ -z "${ONLYNAMED:-}" ] || ! t=$(onlyparts "$ONLYNAMED") || ONLY=$t; fi # --only's closed parts, read again as they close or move
   # The accounts of the seats the record keeps for an open issue (`control card`) are asked for too, outside the lock:
   # pick holds that issue's card alone while one is at the guard (cardheld(), lib/pick.sh); the queue goes on.
   [ "$asking" != 1 ] || [ "$now" != running ] || [ -z "$guard" ] || [ -z "$issues" ] \
@@ -742,7 +742,7 @@ run() { # [max-cards] [serve]
   trap 'nudged=1; [ -z "${timer:-}" ] || kill "$timer" 2>/dev/null' URG
   speedretry
   [ -n "$OWN" ] || [ -z "$RAN" ] || FOLLOW=$serve
-  if [ -n "$ONLY" ] && [ -z "$serve" ]; then [ "$left" -le 0 ] || lim=$left; left=-1; onlyreport; fi
+  if [ -n "$ONLY" ] && [ -z "$serve" ]; then [ "$left" -le 0 ] || lim=$left; left=-1; onlyreport; ONLYNAMED=$ONLY; fi
   while :; do
     turnopen
     turnended

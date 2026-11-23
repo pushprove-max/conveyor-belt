@@ -302,7 +302,8 @@ cardfailed() {
   route=$(testroute verdicts "$t")
   record "$c" "$n" test "$([ "$route" = machine ] && echo held || echo fail)" "$(failline "$wt" "$rc" "$sec" "${out:-null}" "$t" "$cr")"
   testrulespass > /dev/null
-  # A failure that is the card's: whether main moved, and the fix round, are read after the test rules ran.
+  # A failure that is the card's, or one whose verdicts could not be read (the empty list above), taken as the card's:
+  # whether main moved, and the fix round, are read after the test rules ran.
   [ -n "$route" ] || route=$(testroute "$wt")
   # Main is red: every failure the run again left fails on main too. The card waits in its test step, holding no
   # files (no fix session, no block) until main changes; then it is fitted onto main and tested again, as a card
