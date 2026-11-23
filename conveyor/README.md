@@ -1710,8 +1710,9 @@ A review finding that is not built is one line of `declined.jsonl` in the state 
 `issue`, `finding`, `by` (who declined it: `code`, `judge` or `owner`), `why`, `kind` and `repo`. `kind` is the kind
 of the reason: `claim wrong`, `cannot happen`, `fixed`, `rare case`, `not this change` or `other`. A line has no
 `kind` when its reason has none. A finding declined again for the same card is the line it already has. With
-another kind, or with no kind after one, that line takes the new `kind`, `why` and `by`, and keeps its `id`, `time`,
-`built` and `dismissed`. The owner
+another kind, or with no kind after one, that line takes the new `kind`, `why` and `by`, keeps its `id`, `time`,
+`built` and `dismissed`, and gets two more fields: `ruled`, the time of the new ruling, and `was`, the rulings it
+replaced (`time`, `by`, `why` and `kind`), oldest first. The owner
 declines one by hand with `conveyor.sh declined add <card> <issue> owner <why> <finding> [<kind>]`.
 
 The Board's Declined panel lists the lines of every project that are not dismissed, not built and at most 7 days old,

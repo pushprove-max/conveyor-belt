@@ -145,6 +145,27 @@ t_replaylong() {
     || fail "the estimate of 45 reviews: $RC $(head -c 2000 "$T/$CASE/run.out")"
 }
 
+# Bug caught: a finding declined on issue 9 as a rare case (00:04:20), then as claim wrong (00:05:30), then as other
+# (00:08:00), was given to a replay judge with a ruling that judge never saw, or without the one it did: c1-9's judge
+# (ran 00:04:55) must get rare case, c1-11's (00:06:55) claim wrong and c1-12's (00:08:55) other. declined() kept the
+# first time on the rewritten line, or dated the claim-wrong ruling it moved into was with the first ruling's time
+# (only a third ruling moves a replaced ruling there), or the replay left out the current ruling of a line ruled again.
+t_replayrekind() {
+  replaysetup
+  CONVEYOR_NOW=$(p_date 2026-11-01T00:04:20Z +%s) loop declined add c1-9 9 judge 'rare: needs two hosts' '[P2] a.txt:4 F-rk' 'rare case' \
+    && CONVEYOR_NOW=$(p_date 2026-11-01T00:05:30Z +%s) loop declined add c1-9 9 judge 'claim wrong: guarded' '[P2] a.txt:4 F-rk' 'claim wrong' \
+    && CONVEYOR_NOW=$(p_date 2026-11-01T00:08:00Z +%s) loop declined add c1-9 9 judge 'other: style' '[P2] a.txt:4 F-rk' 'other' \
+    || fail "declined add of F-rk on c1-9 as rare case at 00:04:20, claim wrong at 00:05:30, then other at 00:08:00, failed"
+  fx_in '. "$HERE/lib/replay.sh"; replaycases 20'
+  local c want got
+  for c in 'c1-9|rare: needs two hosts|rare case' 'c1-11|claim wrong: guarded|claim wrong' 'c1-12|other: style|other'; do
+    IFS='|' read -r c want got <<<"$c"; want="- [P2] a.txt:4 F-rk (declined: $want) [kind: $got]"
+    got=$(jq -r --arg c "$c" 'select(.card == $c) | .before[]' "$T/$CASE/run.out" | grep F-rk)
+    [ "$RC" = 0 ] && [ "$got" = "$want" ] \
+      || fail "replaycases 20, after F-rk was declined on issue 9 as rare case, claim wrong, then other: $c's earlier declines give '$got', not '$want': $(cat "$T/$CASE/run.out" "$ST/declined.jsonl")"
+  done
+}
+
 # Bug caught: the Board was not given the last replay (the snapshot's cost.replay), was given every call's usage
 # with it, or was given only the first 50 findings where the rulings differ. The snapshot reads the last line of the
 # replays file.

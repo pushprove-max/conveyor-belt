@@ -143,7 +143,9 @@ CONTROL=${STATE%/*}/control.json  # the control record; the snapshot reads its o
 # picks nothing.
 SAYS=${STATE%/*}/loop.json
 # The declined list: every review finding that is not built, one line each: {id, time, card, issue, finding, by (who
-# declined it: code, judge or owner), why, repo}, built (the issue filed for it) once the owner asked for it to be
+# declined it: code, judge or owner), why, kind (when the reason has one), repo}, ruled (when the latest ruling was
+# made) and was (the rulings it replaced: [{time, by, why, kind}], oldest first) once it was declined under another
+# kind, built (the issue filed for it) once the owner asked for it to be
 # built after all, and dismissed ({time, by}) once it was dismissed from the Board's panel (declined(), declinedbuild(),
 # declineddismiss()).
 DECLINED=${STATE%/*}/declined.jsonl

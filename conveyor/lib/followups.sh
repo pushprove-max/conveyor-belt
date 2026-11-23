@@ -315,8 +315,11 @@ Follow-up depth: $((depth + 1))"
 # reviewer raised it again in a later round), it is the line it has (id names the card and the finding). Declined again
 # with another kind (or none after one), that line takes the later kind, its reason and who declined it, and keeps the rest (time,
 # built, dismissed), so donotraise() reads the later kind and the Board has one row, and one "File as issue", for the
-# finding. Bug: each kind was a line of its own, so the finding could be filed twice, and filing one row left the other
-# on the do-not-raise list. The review's judge (judged()) and `conveyor.sh declined add` are its callers. The finding
+# finding. The line keeps when the later ruling was made (ruled) and the rulings it replaced (was: [{time, by, why,
+# kind}], oldest first), so a replay (replaycases(), lib/replay.sh) gives a judge only the ruling made before it ran.
+# Bug: the line kept only the first time, so a replay gave an earlier judge a later kind and reason. Bug: each kind
+# was a line of its own, so the finding could be filed twice, and filing one row left the other on the do-not-raise
+# list. The review's judge (judged()) and `conveyor.sh declined add` are its callers. The finding
 # and the reason are each one line; kind, when given, is the kind of the reason (JUDGE in review.sh), which donotraise()
 # reads. Bug: a declined finding left no trace, and the next review raised it again.
 declined() { # <card> <issue> <code | judge | owner> <why> <finding> [<kind>]
@@ -324,15 +327,20 @@ declined() { # <card> <issue> <code | judge | owner> <why> <finding> [<kind>]
   [[ $# =~ ^[56]$ && $2 =~ ^[0-9]+$ && $3 =~ ^(code|judge|owner)$ && $1 == *[![:space:]]* && $4 == *[![:space:]]* && $5 == *[![:space:]]* ]] \
     && [[ $# = 5 || $6 =~ ^(claim wrong|cannot happen|fixed|rare case|not this change|other)$ ]] \
     || { echo "usage: conveyor.sh declined add <card> <issue> <code | judge | owner> <why> <finding> [claim wrong | cannot happen | fixed | rare case | not this change | other]" >&2; return 2; }
-  l=$(jq -cn --arg t "$(clock)" --arg c "$1" --argjson n "$2" --arg by "$3" --arg why "$4" --arg f "$5" --arg kind "${6:-}" --arg repo "$REPO" \
-    'def one: gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; ""); {time: $t, card: $c, issue: $n, finding: ($f | one), by: $by, why: ($why | one)}
+  l=$(jq -cn --arg c "$1" --argjson n "$2" --arg by "$3" --arg why "$4" --arg f "$5" --arg kind "${6:-}" --arg repo "$REPO" \
+    'def one: gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; ""); {card: $c, issue: $n, finding: ($f | one), by: $by, why: ($why | one)}
       + (if $kind == "" then {} else {kind: $kind} end) + {repo: $repo}') \
     && id=d$(jq -j '.card, "\n", .finding' <<<"$l" | git hash-object --stdin | cut -c1-12) && [ ${#id} = 13 ] || return 1
+  # The time is read once the lock is held, so a ruling is never dated before a writer that held the lock (a
+  # `declined build` on its GitHub calls) let it be saved. Bug: dated before the wait, a replay gave a judge that read
+  # the list during the wait the ruling it had not seen.
   ( flock 9 || exit 1
+    l=$(jq -c --arg t "$(clock)" '{time: $t} + .' <<<"$l") || exit 1
     old=$(stdb ask lines declined 2>/dev/null | jq -c --arg id "$id" 'objects | select(.id == $id)' 2>/dev/null | head -n 1)
     [ -n "$old" ] || { jq -c --arg id "$id" '{id: $id} + .' <<<"$l" | stdb append declined; exit; }
     [ "$(jq -r '.kind // ""' <<<"$old")" != "${6:-}" ] || exit 0
-    stdb ask lines declined | jq -c --arg id "$id" --argjson l "$l" 'if .id == $id then del(.kind) + ($l | {by, why} + if .kind then {kind} else {} end) else . end' > "$DECLINED.new" \
+    stdb ask lines declined | jq -c --arg id "$id" --argjson l "$l" 'if .id == $id then ((.was // []) + [{time: (.ruled // .time), by, why} + if .kind then {kind} else {} end]) as $w
+      | del(.kind) + ($l | {by, why} + if .kind then {kind} else {} end) + {ruled: $l.time, was: $w} else . end' > "$DECLINED.new" \
       && stdb rewrite declined < "$DECLINED.new" && rm -f "$DECLINED.new" || { rm -f "$DECLINED.new"; exit 1; } ) 9>>"$DECLINED.lock"
 }
 # "File as issue" on the Board's Declined panel: the owner wants a declined finding built after all. It is filed as an
