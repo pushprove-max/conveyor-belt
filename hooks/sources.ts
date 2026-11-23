@@ -773,8 +773,9 @@ const loopText = (snap: Snap): string => snap.loops
 // counted` for a card that lands or has landed, in Push, the one kind on the belt that takes no slot. With more than
 // one project, each project's count after its name: `bakery 1 of 3 · gadgetlab 1`; a project whose loop gives no cap has its count on the belt only. None when the belt is empty and no
 // loop gives a cap. While the snapshot is behind, the count is loop.json's now (now), 0 when it gives none (no loop
-// process lives, or the loop has not counted a turn yet), as the Board counts it: the kept belt can still hold a card's
-// old row beside the cards started since, which would count it twice, and its rows outlive the loop.
+// process lives, or the loop has not counted a turn yet): the kept belt can still hold a card's old row beside the cards
+// started since, which would count it twice, and its rows outlive the loop. The Board counts it so only while the
+// snapshot is behind its card records (recordsNewer), not when only loop.json is newer.
 const beltCounts = (snap: Snap): string[] => {
   const capped = (l: Loop) => (l.behind ? l.now : l.building) !== null && l.cap !== null
   const one = (l: Loop) => {
