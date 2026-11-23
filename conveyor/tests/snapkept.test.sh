@@ -487,3 +487,20 @@ t_snapkeptloop() {
     || fail "the status of a snapshot older than loop.json did not give loop.json's count: $out $(jq -c '{recordsNewer, recordsNow}' "$T/$CASE/snap")"
   loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
 }
+
+# Bug (#1583): with no loop.json (the loop does not run on this machine), a snapshot behind newer card records gave
+# recordsNow.building as null, a count no reader could read, and /units took it in place of the snapshot's own. The
+# counts read from loop.json (building, waitingCount, running) are left out; the rest of recordsNow is still given.
+# t_snapkeptnow keeps the count read from a live loop's loop.json.
+t_snapkeptnoloop() {
+  local lk out
+  snapkept_setup
+  rm -f "$ST/loop.json"; snapkept_quiet 20; snapkept_new
+  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  out=$(loop snapshot) || fail "the reader with no loop.json exited non-zero"
+  exec {lk}>&-
+  jq -e '.recordsNewer == true and (.recordsNow | type == "object" and (.started | map(.card)) == ["c9"]
+      and (has("building") or has("waitingCount") or has("running") | not))' <<<"$out" > /dev/null \
+    || fail "with no loop.json and c9 picked since, the reader gave a loop count it cannot read: $(jq -c '{recordsNewer, recordsNow}' <<<"$out")"
+  loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
+}

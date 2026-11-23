@@ -153,7 +153,8 @@ snapprint() {
 # running, the running loop's count at its last turn (loop.json, run(): running is every card of it in progress, in
 # review and in its Test step too), and each card in progress (on the kept belt and not landed, or in started) that
 # loop.json's cards do not name, picked at or after loop.json's last write (turncount() writes it before the turn's
-# pick, and again only when it changes), null when no process of that loop lives; landed, the
+# pick, and again only when it changes), null when no process of that loop lives, and left out when there is no
+# loop.json (the loop does not run on this machine, so there is no count of it here to read); landed, the
 # count of landed cards on the belt for their push, which no loop count holds: those the kept snapshot's belt has
 # landed with no closing line since, and, unless the rule "Push when a card lands" is off, each card whose last
 # closing line since is landed (a card pushed since leaves it, though the belt keeps it until its issue closes), but
@@ -170,8 +171,9 @@ snapprint() {
 # the owner turned the rule on is counted.
 # Only the lines since are read whole: a line's first "time" field is its own (line(), lib/records.sh).
 recordsnow() { # <snapshotAt> [<counts>]
-  local p at b=null YES LINTYES o c=/dev/null
+  local p at b=null YES LINTYES o c=/dev/null here=true
   [ ! -s "$CONTROL" ] || c=$CONTROL
+  [ -e "$SAYS" ] || here=false
   o=$(jq -er '.owner.name | strings' "$MAIN/.conveyor/project.json" 2>/dev/null) || return 1
   yesforms "$o"
   p=$(jq -r '.pid | numbers' "$SAYS" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null && at=$(p_stat "$SAYS") \
@@ -180,7 +182,7 @@ recordsnow() { # <snapshotAt> [<counts>]
   LC_ALL=C awk -v t="\"time\":\"$1\"" -v f="${2:-}" 'BEGIN { if (f != "") { while ((r = (getline l < f)) > 0) { j = index(l, "\t"); k[substr(l, j + 1)] = substr(l, 1, j - 1) + 0 }; if (r < 0) f = "" } }
     { c = ""; if (f != "" && match($0, /^\{"card":"[^"]*"/)) { c = substr($0, 10, RLENGTH - 10); s[c]++ }
       i = index($0, "\"time\":\""); if ((c != "" && s[c] > k[c]) || (i && substr($0, i, length(t)) >= t)) print }' "$STATE" \
-    | jq -cnR --slurpfile k "$KEPT" --argjson loop "$b" --arg yes "$YES" --arg lintyes "$LINTYES" --rawfile ids <(LC_ALL=C grep -o '^{"card":"[^"]*"' "$STATE") \
+    | jq -cnR --slurpfile k "$KEPT" --argjson loop "$b" --argjson here "$here" --arg yes "$YES" --arg lintyes "$LINTYES" --rawfile ids <(LC_ALL=C grep -o '^{"card":"[^"]*"' "$STATE") \
       --rawfile ctl "$c" --slurpfile d "$HERE/lib/control-defaults.json" '
       ($ids | split("\n") | map(select(. != "") | .[9:-1]) | INDEX(.)) as $have
       | [inputs | fromjson? | objects | select((.card | type) == "string" and (.time | type) == "string")] as $new
@@ -217,7 +219,9 @@ recordsnow() { # <snapshotAt> [<counts>]
       | if (.running | type) == "number" then .running += ([
           ([$s.belt | arrays | .[] | objects | select(.landed != true and (.card | type) == "string" and $have[.card] != null and $ended[.card] == null) | {card, t: .pickedAt}]
             + [.started[] | .card as $c | {card: $c, t: ([$new[] | select(.card == $c and .step == "picked") | .time] | last)}])
-          | unique_by(.card)[] | select((.card | IN($loop.cards[]) | not) and ((.t | fromdate?) // 0) >= $loop.at)] | length) else . end'
+          | unique_by(.card)[] | select((.card | IN($loop.cards[]) | not) and ((.t | fromdate?) // 0) >= $loop.at)] | length) else . end
+      # With no loop.json the loop does not run on this machine: its counts are not here to read, so none is given.
+      | if $here then . else del(.building, .waitingCount, .running) end'
 }
 if [ -z "$fresh" ] && [ -s "$KEPT" ]; then
   if snapdue; then
