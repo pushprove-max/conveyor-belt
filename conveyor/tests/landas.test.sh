@@ -59,7 +59,8 @@ la_land() { # <n> [<fix rounds>]
 # .cross true is a fork's: listed by its branch name, as GitHub lists it, with isCrossRepository true); a list is
 # newest first (highest number first), as gh lists them; every
 # pr call is logged in $STUB/pr-calls. A merge (gh pr merge <n> --merge) makes GitHub's merge commit on origin's
-# main, of it and the head branch, unless $STUB/merge-refuse holds the reason GitHub gives.
+# main, of it and the head branch, unless $STUB/merge-refuse holds the reason GitHub gives; $STUB/merge-then, when
+# there is one, is sourced after a merge.
 la_prstub() {
   mv "$STUB/gh" "$STUB/gh.issues"
   echo "$T/$CASE/origin" > "$STUB/origin"
@@ -74,7 +75,8 @@ case $c in
     o=$(cat "$STUB/origin"); export GIT_AUTHOR_NAME=gh GIT_AUTHOR_EMAIL=gh@example.com GIT_COMMITTER_NAME=gh GIT_COMMITTER_EMAIL=gh@example.com
     hd=$(git -C "$o" rev-parse "refs/heads/$(jq -r .head "$STUB/pr.$n")") && bs=refs/heads/$(jq -r .base "$STUB/pr.$n") \
       && m=$(git -C "$o" commit-tree "$hd^{tree}" -p "$bs" -p "$hd" -m "Merge pull request #$n") && git -C "$o" update-ref "$bs" "$m" || exit 1
-    jq '.state = "MERGED"' "$STUB/pr.$n" > "$STUB/pr.new" && mv "$STUB/pr.new" "$STUB/pr.$n" ;;
+    jq '.state = "MERGED"' "$STUB/pr.$n" > "$STUB/pr.new" && mv "$STUB/pr.new" "$STUB/pr.$n"
+    [ ! -e "$STUB/merge-then" ] || . "$STUB/merge-then" ;;
   create) n=$((7 + $(cat "$STUB"/pr.* 2>/dev/null | jq -s length)))
     jq -n --argjson n "$n" --arg h "$h" --arg b "$b" --arg t "$t" --arg y "$y" '{number: $n, head: $h, base: $b, title: $t, body: $y, state: "OPEN"}' > "$STUB/pr.$n"
     echo "https://github.com/o/r/pull/$n" ;;
@@ -299,6 +301,35 @@ t_pridledocs() {
 # commit is the last one posted on it.
 t_prrelease() {
   local out t m l
+  la_prrelsetup
+  l=$(git -C "$T/$CASE/origin" rev-parse refs/heads/conveyor/landing)
+  out=$(loop release-prep 1.1.0 2>&1) && [ "$(cat "$STUB/full-at" 2>/dev/null)" = "$l" ] || fail "release-prep did not run the suite on conveyor/landing ($l): $out"
+  rm -f "$STUB/full-at"
+  out=$(loop release 1.0.0 2>&1) && fail "a release of 1.0.0, whose tag exists, was not refused: $out"
+  grep -qF 'the tag v1.0.0 already exists' <<<"$out" && [ "$(la_prst 7)" = OPEN ] || fail "a refused release merged the pull request: $out"
+  out=$(loop release 1.1.0 2>&1) || fail "the release was refused: $out"
+  [ "$(la_prst 7)" = MERGED ] || fail "release did not merge the pull request: $out"
+  [ ! -e "$STUB/full-at" ] || fail "release ran the suite again on the merge, though release-prep passed on the same files: $out"
+  m=$(git -C "$T/$CASE/origin" log --format=%H --grep='^Merge pull request #7' main) && t=$(git -C "$T/$CASE/origin" rev-parse 'v1.1.0^{commit}' 2>/dev/null) \
+    && [ -n "$m" ] && git -C "$T/$CASE/origin" merge-base --is-ancestor "$m" "$t" && [ "$(git -C "$T/$CASE/origin" show "$t:f1.txt")" = 1 ] \
+    || fail "the tag v1.1.0 is not on the merge of the pull request, with card 1's change: $out"
+}
+# Bug it catches (O223): after the merge of the landing pull request, a git status that failed (core.bare=true on the
+# checkout, set by the merge stub) read as a clean checkout, and the release went on to tag. It is refused by the check
+# after the merge, naming the status that could not be read, with nothing tagged or released.
+t_prreleasebare() {
+  local out
+  la_prrelsetup
+  echo 'git -C "$R" config core.bare true' > "$STUB/merge-then" || fail "the fixture could not be made"
+  out=$(loop release 1.1.0 2>&1); [ $? = 1 ] || fail "the release with a status that could not be read after the merge was not refused: $out"
+  [ "$(la_prst 7)" = MERGED ] && grep -qF 'refused, nothing tagged or released: pull request #7 is merged, but the checkout is not at a merge holding the files checked' <<<"$out" \
+    && grep -qF 'or its status could not be read' <<<"$out" || fail "the refusal is not the check after the merge: $out"
+  [ -z "$(git -C "$R" tag -l v1.1.0)" ] && [ -z "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] && ! grep -q '^release' "$STUB/gh-calls" 2>/dev/null \
+    || fail "the refused release tagged or released: $(git -C "$R" tag -l) $(cat "$STUB/gh-calls" 2>&1)"
+}
+# The fixture of a Merge PR release: the pack sets pr and Merge PR release, main holds plugin.json (p, 1.0.0) tagged
+# v1.0.0 and notes for 1.1.0, and card 1 is pushed into pull request #7. gh posts a commit status as GitHub does.
+la_prrelsetup() {
   setup '[]'; la_prstub
   printf '%s\n' '#!/usr/bin/env bash' 'case $1 in release) echo "$*" >> "$STUB/gh-calls" ;; issue) echo "{\"state\":\"CLOSED\"}" ;;' \
     '  api) if [ "$2" = -X ]; then echo "$*" >> "$STUB/gh-calls"; else s=${2#*/commits/}; s=${s%%/*}' \
@@ -311,15 +342,4 @@ t_prrelease() {
     && git -C "$R" push -q origin main v1.0.0 || fail "the fixture could not be made"
   loop control pr-merge release > /dev/null || fail "control pr-merge release was refused"
   la_land 1; la_eng push c1 1 || fail "the push failed"
-  l=$(git -C "$T/$CASE/origin" rev-parse refs/heads/conveyor/landing)
-  out=$(loop release-prep 1.1.0 2>&1) && [ "$(cat "$STUB/full-at" 2>/dev/null)" = "$l" ] || fail "release-prep did not run the suite on conveyor/landing ($l): $out"
-  rm -f "$STUB/full-at"
-  out=$(loop release 1.0.0 2>&1) && fail "a release of 1.0.0, whose tag exists, was not refused: $out"
-  grep -qF 'the tag v1.0.0 already exists' <<<"$out" && [ "$(la_prst 7)" = OPEN ] || fail "a refused release merged the pull request: $out"
-  out=$(loop release 1.1.0 2>&1) || fail "the release was refused: $out"
-  [ "$(la_prst 7)" = MERGED ] || fail "release did not merge the pull request: $out"
-  [ ! -e "$STUB/full-at" ] || fail "release ran the suite again on the merge, though release-prep passed on the same files: $out"
-  m=$(git -C "$T/$CASE/origin" log --format=%H --grep='^Merge pull request #7' main) && t=$(git -C "$T/$CASE/origin" rev-parse 'v1.1.0^{commit}' 2>/dev/null) \
-    && [ -n "$m" ] && git -C "$T/$CASE/origin" merge-base --is-ancestor "$m" "$t" && [ "$(git -C "$T/$CASE/origin" show "$t:f1.txt")" = 1 ] \
-    || fail "the tag v1.1.0 is not on the merge of the pull request, with card 1's change: $out"
 }

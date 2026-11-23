@@ -492,12 +492,18 @@ t_cutmanyfailed() {
     || fail "release's start did not keep release-prep's failed pass of 2000 cases: $(jq -c '{step, state, n: (.cases | length), red: (.red.cases | length)}' "$RUN" 2>&1)"
 }
 # Bug it catches (O223): with git status failing (core.bare=true on the checkout), its empty output read as a clean
-# checkout, and the release went on. It is refused, naming the status that could not be read, with nothing tagged.
+# checkout, and the release went on. It is refused, naming the status that could not be read, with nothing tagged:
+# by the check before the suite, then (the suite making the status fail as it ends) by the check after the suite.
+# The check after the merge of a landing pull request is t_prreleasebare in landas.test.sh.
 t_cutbare() {
   local O; cutsetup true
   git -C "$R" config core.bare true || fail "the fixture could not be made"
   cutrefused 1.1.0 "the checkout's status could not be read"
   [ ! -e "$STUB/full-at" ] || fail "the suite ran for a release refused before it"
+  git -C "$R" config core.bare false && printf 'git rev-parse HEAD > "$STUB/full-at"\n%s\n' 'git -C "$R" config core.bare true' > "$STUB/full-cmd" \
+    || fail "the fixture could not be made"
+  cutrefused 1.1.0 'the checkout moved or changed while the suite ran, or its status could not be read'
+  [ "$(cat "$STUB/full-at" 2>/dev/null)" = "$O" ] || fail "the suite did not run on the commit to release, so the check after it was not reached"
 }
 # The suite, the last check. Bugs: a release cut on a failing suite, or with the suite run on another commit than the one
 # to release; a commit made in the checkout while the suite ran (a card landed there) tagged and pushed unchecked, or
