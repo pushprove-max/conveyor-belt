@@ -81,10 +81,11 @@ t_reusechanged() {
   # The review copies the fix diff its prompt names, so the case reads what that file held.
   echo 'f=$(sed -n "s/^The file \(.*\.diff\)$/\1/p" "$STUB/prompt.$(wc -l < "$STUB/reviews")"); [ -z "$f" ] || cp "$f" "$STUB/fixdiff"' > "$STUB/review-cmd"
   # #7: the fix session (the second) changes the change, so the review runs; a finding is declined on this card and one
-  # on another card meanwhile.
+  # on another card meanwhile. This card's is of a kind donotraise() lists (`cannot happen`); a line with no kind is
+  # left out of the "Do not raise these" section.
   cat > "$STUB/build" <<'EOF'
 k=$(wc -l < "$STUB/sessions"); echo "fix$k" >> a.txt
-[ "$k" != 2 ] || printf '%s\n' "{\"id\":\"d1\",\"card\":\"${PWD##*/}\",\"issue\":7,\"finding\":\"[P2] b.txt:2 a nit\",\"by\":\"judge\",\"why\":\"its proof needs a stub built to misbehave\",\"repo\":\"r\"}" \
+[ "$k" != 2 ] || printf '%s\n' "{\"id\":\"d1\",\"card\":\"${PWD##*/}\",\"issue\":7,\"finding\":\"[P2] b.txt:2 a nit\",\"by\":\"judge\",\"why\":\"its proof needs a stub built to misbehave\",\"kind\":\"cannot happen\",\"repo\":\"r\"}" \
   '{"id":"d2","card":"c0-9","issue":9,"finding":"[P2] z.txt:9 of another card","by":"judge","why":"not about this card","repo":"r"}' >> "$ST/declined.jsonl"
 EOF
   printf '%s\n' '[P1] a.txt:1 wrong word' '[P2] c.txt:3 a nit' 'UNPROVEN: maybe d.txt:4' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
@@ -119,7 +120,8 @@ EOF
     && grep -q '^Review the fix of the last review.s findings, not the whole staged change' "$STUB/prompt.2" \
     || fail "the review after the fix was asked to review the whole staged change: $(head -n 3 "$STUB/prompt.2")"
   # A review of the fix alone is still a review of a change: it is told what not to raise (the declined findings).
-  grep -q '^# Do not raise these' "$STUB/prompt.2" || fail "the review of the fix alone was not told what not to raise"
+  grep -q '^# Do not raise these' "$STUB/prompt.2" && grep -qxF -- '- its proof needs a stub built to misbehave (the finding: [P2] b.txt:2 a nit)' "$STUB/prompt.2" \
+    || fail "the review of the fix alone was not told what not to raise"
   # The section is part of the brief, after the issue, not of the instructions before it.
   [ "$(grep -n -m1 'body of 7' "$STUB/prompt.2" | cut -d: -f1)" -lt "$(grep -n -m1 '^# This review follows a fix' "$STUB/prompt.2" | cut -d: -f1)" ] \
     || fail "the re-review section is not in the review's brief"
