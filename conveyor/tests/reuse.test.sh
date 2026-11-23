@@ -24,6 +24,7 @@ t_reusesame() {
   # #7: a P2 NO-GO: the reused review repeats it after its fix round, every finding P2, so it is the last review and
   # the card lands, filing the finding.
   printf '%s\n' '[P2] a.txt:1 a nit. Proof: line 2 reads two' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  # loop: only card()'s review loop shows a fix round that changed nothing reusing the review, then the test and landing
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
   [ "$(steps 7)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,test pass,landed ok," ] \
     || fail "the reused NO-GO did not end the loop as the review's NO-GO would: $(steps 7)"
@@ -62,6 +63,7 @@ t_reuseblock() {
   setup "[$(issue 8 2026-01-02)]"; steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
   echo '[ "$(wc -l < "$STUB/sessions")" != 1 ] || echo two >> a.txt' > "$STUB/build"; head=$(git -C "$R" rev-parse HEAD)
   echo "$NOGO" > "$STUB/review.1"
+  # loop: only card()'s review loop shows a reused NO-GO counted as a round and the card blocked, with nothing landed or filed
   loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
   [ "$(steps 8)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,blocked blocked," ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
     && [ "$(st 'select(.issue == 8 and .step == "blocked") | .reason')" = 'the fix for [P1] a.txt:1 wrong word did not hold after 1 round' ] \
@@ -90,6 +92,7 @@ k=$(wc -l < "$STUB/sessions"); echo "fix$k" >> a.txt
 EOF
   printf '%s\n' '[P1] a.txt:1 wrong word' '[P2] c.txt:3 a nit' 'UNPROVEN: maybe d.txt:4' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   printf '%s\n' 'EARLIER: E1 holds' 'EARLIER: E2 holds' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.2"
+  # loop: only card()'s review loop shows the fix session's changed change reviewed again, with the prompt rereview() gave it
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
   [ "$(steps 7)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review GO,test pass,landed ok," ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] \
     || fail "a changed staged change was not reviewed again: $(steps 7) $(wc -l < "$STUB/reviews") reviews"
@@ -138,6 +141,7 @@ t_reusewhole() {
   sed -i 's|^cat > /dev/null; echo x >> "$STUB/reviews";|echo x >> "$STUB/reviews"; cat > "$STUB/prompt.$(wc -l < "$STUB/reviews")";|' "$STUB/codex"
   echo 'echo fix >> a.txt; [ "$(wc -l < "$STUB/sessions")" = 1 ] || echo more >> a.txt' > "$STUB/build"
   echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
+  # loop: only card()'s review loop shows a fix over the rereviewWhole share given a whole-change review
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
   [ "$(wc -l < "$STUB/reviews")" = 2 ] || fail "the change was not reviewed after its fix: $(wc -l < "$STUB/reviews") reviews"
   i=$(tr '\n' ' ' < "$STUB/prompt.2")
@@ -157,6 +161,7 @@ else echo moved > "$R/m.txt"; git -C "$R" add m.txt; git -C "$R" commit -qm move
   git diff --cached --binary > "$STUB/p"; git reset -q --hard; git checkout -q --detach "$(git -C "$R" rev-parse HEAD)"; git apply --index "$STUB/p"; fi
 EOF
   moved 1 "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
+  # loop: only card()'s review loop shows a fix that only moved main reviewed again, then the test and landing
   loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
   [ "$(steps 8)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review GO,test pass,landed ok," ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] \
     || fail "the same change on a moved main was not reviewed again: $(steps 8) $(wc -l < "$STUB/reviews") reviews"
