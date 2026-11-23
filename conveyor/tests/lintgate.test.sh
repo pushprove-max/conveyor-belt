@@ -229,13 +229,27 @@ t_lintgatetriggerexclude() {
 # Bug (R420): the pages said lint runs before each review, but the review gate does not run on the change the landing
 # gate's lint fix left (lintgate's lfix) while no other session changes it. Each page that says when lint runs names that
 # exception and its condition. Text check: a doc page has no behaviour to run.
+# Bug: the check matched the exception's subject and reason apart, and missed the pages' second account of it and the
+# sentence on when the gate comes back, so a page that said the review gate does run on that change (`has a lint gate`,
+# `does run`), or stays off after another session's change, still passed. It also missed README's `with no gate run
+# after it` on the fix session. Each statement is matched on its own clause, with its `no` or `not` in the pattern, so a
+# page that turns one round fails; a wording that keeps the rule (`has a lint gate` for `has its lint gate`) passes.
 t_lintgatedocs() {
-  local p d
-  for p in docs/cards.md docs/configuration.md conveyor/README.md; do
+  local e p s d
+  for e in 'docs/cards.md|review of the change (that|the) (lint )?fix left (has|gets) no lint gate' \
+    'docs/cards.md|because the landing gate checks' \
+    'docs/cards.md|another session changes it( again)?, the next review (has|gets) (a|an|the|its) lint gate' \
+    'docs/cards.md|gate before (that|this|the) review does not run( again)? on the (fixed )?change' \
+    'docs/configuration.md|while no other session changes it, no lint command runs before (that|this|the) review' \
+    'docs/configuration.md|because the landing gate checks' \
+    'conveyor/README.md|while no other session changes it, it has no (review |lint )?gate' \
+    'conveyor/README.md|because the landing gate checks' \
+    'conveyor/README.md|reply is, with no ([a-z]+ )?gate runs? after it' \
+    'conveyor/README.md|review gate of (that|this|the) pass does not run on the change the fix left'; do
+    p=${e%%|*} s=${e#*|}
     d=$(tr '\n' ' ' < "$SRC/../$p" | tr -s ' ')
-    grep -qE 'the change that (a fix of lint findings at the landing gate|the landing gate.s lint fix|fix) left' <<<"$d" \
-      && grep -qE '(no other session changes it|another session changes it again)' <<<"$d" && grep -qF 'because the landing gate checks' <<<"$d" \
-      || fail "$p does not say that the review of the change the landing gate's lint fix left, while no other session changes it, has no lint gate before it"
+    grep -qiE -- "$s" <<<"$d" \
+      || fail "$p does not say that the review of the change the landing gate's lint fix left has no lint gate until another session changes it; no match for: $s"
   done
 }
 # Bug it catches: a lint pass standing on a main that changed one of the card's files. Lint runs again, as before.
