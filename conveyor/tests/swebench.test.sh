@@ -270,6 +270,17 @@ t_sweversurl() {
     || fail "a source that cannot be reached dropped the last list read: $o"
 }
 
+# Bug (#1479): a source that could not be read took the last list kept, whatever source it came from, and saved it
+# under its own key; the list of another source then showed as this one's in the next hour. The fork's list is read
+# by swe_versions; then a source that does not exist is read in the same hour, and must not take that list.
+t_sweversother() {
+  swe; local o
+  o=$(export HERE=$SRC RTAG=x CONVEYOR_BENCH_SOURCE=$SWE_FX/eng.git CONVEYOR_NOW=1700000000; . "$SRC/bench/swe.sh" && swe_versions | jq -c 'map(.name)') \
+    && [ "$o" = '["main","v1.0.0"]' ] || fail "the first source's versions were not read: $o"
+  o=$(export HERE=$SRC RTAG=x CONVEYOR_BENCH_SOURCE=file://$T/$CASE/none.git CONVEYOR_NOW=1700000000; . "$SRC/bench/swe.sh" && swe_versionsnow; jq -c '.versions' "$SWE_DIR/versions.json")
+  [ "$o" = null ] || fail "a source that cannot be read took the list of another source: $o"
+}
+
 # Bug: the dataset's rows an earlier harness kept (raw.<revision>.jsonl, with the reference fixes and hidden tests)
 # stayed in the state folder, readable by a card's sessions, when the task list of that revision was already made.
 t_sweoldraw() {

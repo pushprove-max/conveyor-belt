@@ -168,7 +168,7 @@ swe_vkey() { printf '%s %s\n' "$1" "$(jq -rn '(($ENV.CONVEYOR_NOW // "" | tonumb
 # source (this engine checkout's origin) from this checkout's release tags and origin/main, as it last fetched them.
 # The default source's list that swe_versions read this hour (versions.json's key is the key now) is used in place of
 # the checkout's; its tags read in an earlier hour are added to the checkout's, as a tag stays. A source named by URL is read again (swe_versions) only when versions.json's key is not the key now (swe_vkey:
-# another source or hour); a read that fails keeps the last list under the key now, so a source that cannot be
+# another source or hour); a read that fails keeps the last list of that same source (never another's) under the key now, so a source that cannot be
 # reached is not asked again on each snapshot. Prints nothing when no list can be read.
 swe_versionsnow() {
   local src g m l vs k pre='' own=''; src=$(swe_src) && [ -n "$src" ] || return 1; g=${src#file://} m=refs/heads/main
@@ -188,7 +188,7 @@ swe_versionsnow() {
   vs=$(jq -c --arg k "$k" 'select(.key == $k) | .versions | arrays // null' "$SWE_DIR/versions.json" 2>/dev/null) || vs=''
   if [ -n "$vs" ]; then [ "$vs" != null ] && printf '%s\n' "$vs"; return; fi
   vs=$(swe_versions 2>/dev/null) && { printf '%s\n' "$vs"; return; }
-  vs=$(jq -c '.versions | arrays' "$SWE_DIR/versions.json" 2>/dev/null) || vs=''
+  vs=$(jq -c --arg s "$src " 'select(.key | strings | startswith($s)) | .versions | arrays' "$SWE_DIR/versions.json" 2>/dev/null) || vs=''
   { mkdir -p "$SWE_DIR" && swe_put "$SWE_DIR/versions.json" "$(jq -nc --arg k "$k" --argjson v "${vs:-null}" '{key: $k, versions: $v}')"; } 2>/dev/null || :
   [ -n "$vs" ] && printf '%s\n' "$vs"
 }
