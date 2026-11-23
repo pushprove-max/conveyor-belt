@@ -179,6 +179,17 @@ _, issue_body = ds.note_issue('- 2026-11-22T09:00:00Z · card #12 · the fix cov
 check('issue_card_kept', 'the fix covers #12 and #13' in issue_body and '<card>' not in issue_body, issue_body)
 _, id_body = ds.note_issue('- 2026-11-22T09:00:00Z · card c20261122T090000-sample-7 · see c20261122T090000-sample-7 · evidence: -')
 check('card_id_hidden', id_body.startswith('see <card>\n\n') and 'sample' not in id_body, id_body)
+# Bug caught: only the card field's id was hidden, so a note whose field is '-', or whose text compares a second card,
+# gave that card's id, and with it the project's name, in the report. Every card id the note says is <card>; a file
+# named for a card keeps its extension.
+_, dash_body = ds.note_issue('- 2026-11-22T09:00:00Z · card - · compare card c20261118T045400-alpha-6, status shows the wrong count · evidence: -')
+check('other_card_hidden_no_field', 'alpha' not in dash_body and dash_body.startswith('compare card <card>, status'), dash_body)
+_, two_body = ds.note_issue('- 2026-11-22T09:00:00Z · card c20261118T045400-alpha-7 · compare card c20261118T045400-alpha-6 with ~/cards/c20261118T045400-alpha-7.err · evidence: ~/cards/c20261118T045400-alpha-7.err')
+check('other_card_hidden', 'alpha' not in two_body and two_body.startswith('compare card <card> with ~/cards/<card>.err\n'), two_body)
+# Bug caught: a card id that ends a sentence ('see <id>.') was not hidden, as the stop after it is a character a card id
+# may hold: the project's name was in the title and the body. A project name with a '-' in it is hidden whole.
+stop_title, stop_body = ds.note_issue('- 2026-11-22T09:00:00Z · card c20261122T090000-sample-7 · see c20261122T090000-sample-7. Then c20261122T090000-big-sample-8. · evidence: -')
+check('card_id_stop_hidden', 'sample' not in stop_title + stop_body and stop_body.startswith('see <card>. Then <card>.\n'), (stop_title, stop_body))
 # Bug (#1351): the body gave the evidence path twice, once in the note's text and again as ' · evidence: <path>'. The body
 # has the path once: in the text when the text names it, else as its own line 'Evidence: <path>'.
 _, named = ds.note_issue('- 2026-11-22T09:00:00Z · card - · setup fails, evidence ~/logs/setup.log (line 4) · evidence: ~/logs/setup.log')
@@ -191,11 +202,11 @@ check('evidence_line_once', unnamed.startswith('setup fails\nEvidence: ~/logs/se
 # 'cause not checked:' part is its own body line 'Cause (not checked): <text>', once; a note without one has no such line.
 cause_title, cause_body = ds.note_issue('- 2026-11-22T09:00:00Z · card - · setup fails, cause not checked: the cache, maybe, is stale, card c20261122T090000-sample-7, evidence ~/logs/setup.log · evidence: ~/logs/setup.log')
 check('cause_line_once', cause_body.count('Cause (not checked): the cache, maybe, is stale\n') == 1 and cause_body.count('Cause (not checked)') == 1
-      and cause_body.startswith('setup fails, card c20261122T090000-sample-7, evidence ~/logs/setup.log\n') and cause_title == 'setup fails', (cause_title, cause_body))
+      and cause_body.startswith('setup fails, card <card>, evidence ~/logs/setup.log\n') and cause_title == 'setup fails', (cause_title, cause_body))
 # Bug (review of #1357): the cause ended at any ', card ' or ', evidence ', so words of the guess ('card lookups use old
 # data') were left in the report's text as fact. Only a card id or an evidence path ends it.
 _, words_body = ds.note_issue('- 2026-11-22T09:00:00Z · card - · setup fails, cause not checked: the cache is stale, card lookups use old data, evidence the log, card c20261122T090000-sample-7, evidence ~/logs/setup.log · evidence: ~/logs/setup.log')
-check('cause_keeps_card_words', words_body.startswith('setup fails, card c20261122T090000-sample-7, evidence ~/logs/setup.log\n')
+check('cause_keeps_card_words', words_body.startswith('setup fails, card <card>, evidence ~/logs/setup.log\n')
       and words_body.count('Cause (not checked): the cache is stale, card lookups use old data, evidence the log\n') == 1, words_body)
 # Bug (review of #1357): empty fields ('card -, evidence -') after the cause were part of it: the report's cause line read
 # 'the cache is stale, card -, evidence -'. A '-' is a field's empty value and ends the cause like an id or a path.

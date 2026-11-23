@@ -208,9 +208,13 @@ ACK=$(mktemp) || { why='no temporary file could be made'; exit 0; }
 # (Claude Code's /restart runs the new program in the same process; issue 594). Such a waiter can never wake the
 # session, so it ends, its wake left pending: the next hook of the session starts a waiter, and the next stop delivers.
 # SIGPIPE is ignored for that write, as Claude Code's hooks have it, so the waiter sees the failed write and says why.
+# A blocked card a pending wake names that was retried (blocked again since or not), landed or shut since it was put
+# is taken out of it first (lib.sh pending_fresh): a retry run in the turn would otherwise come back as a blocked wake
+# at its stop, with its old reason.
 deliver() {
   : > "$ACK"
   live
+  pending_fresh
   local text; text=$(pending_run "$ACK") || return 1
   trap '' TERM HUP INT PIPE
   printf '%s\n' "$text" >&2 || { why="its hook's stderr takes no wake (the session no longer reads it); the wake waits in pending for the next hook's waiter"; stop_all; exit 0; }

@@ -315,14 +315,18 @@ NOTE_LINE = re.compile(r'- (?P<at>\S+) · card (?P<card>\S+) · (?P<text>.*)')  
 # The note's guessed cause (foreman/stop.sh's "cause not checked: <text>" part): it ends at the card, evidence or filed part, each in its own shape, a card id or "-", a path or "-" (so a cause that says ", card lookups" goes on).
 NOTE_CAUSE = globals()['re'].compile(r'(?:, |^)cause not checked: (?P<cause>.*?)(?=, card (?:(?:c[0-9]{8}T[0-9]{6}-|<card>)\S*|-)(?:, |$)|, evidence (?:\S*/\S*|-)(?:, |$)|, filed as #|$)', globals()['re'].I)  # re is the base part's, as CARD is
 NOTE_FILED = globals()['re'].compile(r'[\s,;]filed as #[1-9][0-9]*\s*\.? · evidence: ', globals()['re'].I)  # re is the base part's, as above
+# Any card id a note's text or evidence names (its card field's, or another card's, or a card's evidence file name): it
+# ends at its last '-<issue or lane>' part, so a file's extension (c...-alpha-7.err) and the stop that ends a sentence
+# (see c...-alpha-7.) stay out of it.
+NOTE_CARDS = globals()['re'].compile(r'(?<![A-Za-z0-9])c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*?-[A-Za-z0-9]+(?=\.[A-Za-z]+\b|[._-]*(?:[^A-Za-z0-9._-]|$))')  # re as above
 
 
 def note_issue(line):
     """The issue a Plugin problems note proposes, as (title, body): the title is the note's first clause (its text before
     the first ' · ', cut at the first , ; : or . that ends a clause); the body is the note, then the plugin's version,
-    the engine commit and the system of the checkout this Board runs from. The card id stays out: it names a project,
-    so each time the note's text says it (its finding, its evidence path) it is <card> in the body. A card field that is
-    no card id (an issue number, in a note written before the field took card ids only) names no project and stays.
+    the engine commit and the system of the checkout this Board runs from. Card ids stay out: one names a project, so
+    each card id the note's text or evidence says (its own card's, another card it compares, a card's evidence file
+    name), whatever its card field is, is <card> in the body. An issue number names no project and stays.
     The note's ' · evidence: <path>' part (the last one, as foreman/stop.sh reads it) is not in the body as it is: the
     body has the text alone when the text already names the path (or the part is '-' or not there), else the text and
     a line 'Evidence: <path>'. The note's 'cause not checked: <text>' part is not in the text: the body has it as its
@@ -333,8 +337,7 @@ def note_issue(line):
     if not sep:
         text, evidence = evidence, ''
     evidence = evidence.strip()
-    if m and globals()['CARD'].fullmatch(m.group('card')):  # CARD is the base part's, as REDCARD is above
-        text, evidence = text.replace(m.group('card'), '<card>'), evidence.replace(m.group('card'), '<card>')
+    text, evidence = NOTE_CARDS.sub('<card>', text), NOTE_CARDS.sub('<card>', evidence)
     cause = NOTE_CAUSE.search(text)
     claim = text
     if cause:

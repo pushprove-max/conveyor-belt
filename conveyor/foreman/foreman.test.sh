@@ -82,22 +82,24 @@ board() { # <usedPct>
 }
 
 # The cases setup, launch and archive run one after another: each goes on from the Foreman the one before it left.
-t_setup() {
-CASE=setup
-CONVEYOR_MAIN=$M bash "$SRC/foreman.sh" setup > "$T/setup.out" 2>&1 || fail "setup failed: $(cat "$T/setup.out")"
-[ -f "$FD/state.md" ] || fail "no state file in $FD"
-S=$FD/settings.json
-jq -e '.env.CONVEYOR_FOREMAN == "1" and .env.CLAUDE_CODE_PROMPT_CACHE_TTL == "1h" and .env.CONVEYOR_FOREMAN_DIR == $fd' --arg fd "$FD" "$S" >/dev/null \
-  || fail "the settings do not set Foreman mode, its folder and the 1-hour cache: $(cat "$S")"
-# The Foreman's hooks are the plugin's own, so a session started any way (claude --continue, an IDE) runs them; the
-# launcher's settings hold none, or its session would run each twice.
-P=$SRC/../../hooks/hooks.json
+# runs <hooks.json> <event> <command end>: a hook of that event runs the command on every source or Bash call. A hook in
+# a group with a matcher runs only for that matcher: a SessionStart group's "startup" leaves out a resume, /clear and
+# compact, so every event but a ToolUse one (where Bash is the matcher the hook needs) has none.
+runs() {
+  jq -e --arg e "$2" --arg h "$3" '[.hooks[$e][]? | select(.matcher == null or (($e | test("ToolUse")) and .matcher == "Bash")) | .hooks[].command | endswith($h)] | any' "$1" >/dev/null
+}
+# plugin_hooks: the Foreman's hooks are the plugin's own, so a session started any way (claude --continue, an IDE) runs
+# them; the launcher's settings hold none, or its session would run each twice (t_setup checks that).
+plugin_hooks() {
+local P=$SRC/../../hooks/hooks.json h s
+# Bug caught: the check held only the ToolUse events to a matcher, so a "startup" matcher on the rules hook passed.
+jq '.hooks.SessionStart[0].matcher = "startup"' "$P" > "$T/startup.json" && ! runs "$T/startup.json" SessionStart 'shim.sh conveyor/foreman/foreman.sh rules || true' \
+  || fail "the check passes a rules hook that runs only at startup: $(jq -c '.hooks.SessionStart' "$T/startup.json")"
 # filing and filed go through filing-hook.sh, which runs the shim only for a command that files an issue (issue 610).
 for h in 'SessionStart foreman.sh start --rules-apart' 'SessionStart foreman.sh rules || true' 'Stop stop.sh state' 'Stop stop.sh reply' 'Stop waiter.sh' 'PreToolUse filing-hook.sh filing' 'PostToolUse filing-hook.sh filed' 'PostToolUseFailure filing-hook.sh filed' \
   'UserPromptSubmit waiter.sh --check' 'PostToolUse waiter.sh --check'; do # issue 215: a dead waiter is started again by the session's next prompt or tool call
   s="shim.sh conveyor/foreman/${h#* }"; [[ ${h#* } != filing-hook.sh* ]] || s="}\"/conveyor/foreman/${h#* }"
-  jq -e --arg e "${h%% *}" --arg h "$s" '[.hooks[$e][]? | select(($e | test("ToolUse") | not) or .matcher == "Bash" or .matcher == null) | .hooks[].command | endswith($h)] | any' "$P" >/dev/null \
-    || fail "no plugin hook runs $h"
+  runs "$P" "${h%% *}" "$s" || fail "no plugin hook runs $h on every source or Bash call"
 done
 jq -e '[.hooks.Stop[].hooks[] | select(.command | endswith("waiter.sh")) | .asyncRewake] == [true]' "$P" >/dev/null || fail "the waiter does not wake the session"
 # Issue 1172: a session started or resumed with no one typing runs no turn, so only SessionStart can start its waiter.
@@ -105,6 +107,15 @@ jq -e '[.hooks.Stop[].hooks[] | select(.command | endswith("waiter.sh")) | .asyn
 # usage error on stderr, which asyncRewake sends to the session as a wake.
 jq -e '[.hooks.SessionStart[] | select(.matcher == null) | .hooks[] | select(.command | test("CONVEYOR_WAITER_START=1 .*shim\\.sh conveyor/foreman/waiter\\.sh$")) | .asyncRewake] == [true]' "$P" >/dev/null \
   || fail "no SessionStart hook of every source starts the waiter that can wake the session: $(jq -c '.hooks.SessionStart' "$P")"
+}
+t_setup() {
+CASE=setup
+CONVEYOR_MAIN=$M bash "$SRC/foreman.sh" setup > "$T/setup.out" 2>&1 || fail "setup failed: $(cat "$T/setup.out")"
+[ -f "$FD/state.md" ] || fail "no state file in $FD"
+S=$FD/settings.json
+jq -e '.env.CONVEYOR_FOREMAN == "1" and .env.CLAUDE_CODE_PROMPT_CACHE_TTL == "1h" and .env.CONVEYOR_FOREMAN_DIR == $fd' --arg fd "$FD" "$S" >/dev/null \
+  || fail "the settings do not set Foreman mode, its folder and the 1-hour cache: $(cat "$S")"
+plugin_hooks
 jq -e 'has("hooks") | not' "$S" >/dev/null || fail "the launcher's settings repeat the plugin's hooks: $(cat "$S")"
 grep -q '2 record' "$T/setup.out" || fail "setup does not say it watches both records: $(cat "$T/setup.out")"
 echo '- my note' >> "$FD/state.md"; cp "$S" "$T/first.json"
@@ -186,13 +197,14 @@ grep -qF 'begin the line of a finished item with "- DONE"' <<<"$out" || fail "th
 t_wake() {
 CASE=wake
 ready
-# Three items waiting on the owner and one blocked, across two projects.
+# Three items waiting on the owner and one blocked, across two projects. Alpha's, read while beta is still to be read,
+# wake as soon as alpha is read, in a wake of their own; beta's go in the poll's last wake.
 mkdir -p "$T/ask"; snap '[12,15]' '[7]' > "$T/ask/alpha"; snap '[19]' '[]' > "$T/ask/beta"
 bash "$SRC/watch-conveyor.sh" --once || fail "no wake for four new items"
 w=$(cat "$FD"/pending/*.wake)
-[ "$(head -n 1 <<<"$w")" = "Conveyor: alpha: needs the owner's yes: #12 #15; blocked: #7 | beta: needs the owner's yes: #19" ] \
-  || fail "the first line does not name every issue under its kind and project: $(head -n 1 <<<"$w")"
-[ "$(wc -l <<<"$w")" = 5 ] || fail "not one line per item: $w"
+[ "$(grep '^Conveyor: ' <<<"$w" | sort)" = "Conveyor: alpha: needs the owner's yes: #12 #15; blocked: #7"$'\n'"Conveyor: beta: needs the owner's yes: #19" ] \
+  || fail "the first lines do not name every issue under its kind and project: $(grep '^Conveyor: ' <<<"$w")"
+[ "$(wc -l <<<"$w")" = 6 ] || fail "not one line per item under each wake's first line: $w"
 for l in "alpha: #12 needs" "alpha: #15 needs" "alpha: #7 is blocked" "beta: #19 needs"; do grep -qF "$l" <<<"$w" || fail "no line for $l: $w"; done
 bash "$SRC/watch-conveyor.sh" --once && fail "items already reported woke again"
 # An issue waiting for the owner's yes before its build (health's before) wakes as one waiting on the owner.

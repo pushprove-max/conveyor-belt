@@ -77,31 +77,78 @@ repo_name() {
 # and name alike (case aside). A record whose main is on another host (its belt runs there) is read from the checkout
 # this runs for (ledger). There the Foreman files a plugin problem itself (stop.sh, context).
 plugin_home() {
-  local want repo main r u
-  # slug_ <address>: "owner/name" of git@host:owner/name.git or https://host/owner/name, lower case.
-  slug_() { local s=${1%/} n; s=${s%.git}; s=${s//:/\/}; [[ $s == */*/* ]] || return 1; n=${s##*/}; s=${s%/*}; s="${s##*/}/$n"
-    [[ ${s,,} =~ ^[a-z0-9._-]+/[a-z0-9._-]+$ ]] && printf '%s' "${s,,}"; }
-  want=$(slug_ "$(jq -r '.repository | if type == "object" then .url else . end | strings' "$FHERE/../../.claude-plugin/plugin.json" 2>/dev/null)") \
+  local want repo main
+  want=$(slug_of "$(jq -r '.repository | if type == "object" then .url else . end | strings' "$FHERE/../../.claude-plugin/plugin.json" 2>/dev/null)") \
     && [ -n "$want" ] || return 1
   while IFS=$'\t' read -r repo main; do
     [ -n "$main" ] && main=$(ledger "$repo" "$main") || continue
-    r=$(jq -r '.remote // "origin" | strings' "$main/.conveyor/project.json" 2>/dev/null) && [ -n "$r" ] || r=origin
-    u=$(git -C "$main" remote get-url -- "$r" 2>/dev/null) || continue
-    [ "$(slug_ "$u")" = "$want" ] && return 0
+    [ "$(repo_slug "$main")" = "$want" ] && return 0
   done < <(mine 2>/dev/null)
   return 1
 }
-# record_of <name> <records>: the record, "<repo> TAB <main>" as records prints them, that holds an issue of the
-# GitHub repository <name>: the first whose main checkout, a folder on this machine, has <name> for its repository
-# (repo_name; a worktree of it, as the checkout a hook runs in may be, shares its remotes); else the one named <name>
-# (so a record whose main is not on this machine is still found by its name). Letter case aside, as GitHub prints a
-# repository's name in its own case. Empty when none is.
+# slug_of <address>: "owner/name" of git@host:owner/name.git or https://host/owner/name, lower case; nonzero for none.
+slug_of() { local s=${1%/} n; s=${s%.git}; s=${s//:/\/}; [[ $s == */*/* ]] || return 1; n=${s##*/}; s=${s%/*}; s="${s##*/}/$n"
+  [[ ${s,,} =~ ^[a-z0-9._-]+/[a-z0-9._-]+$ ]] && printf '%s' "${s,,}"; }
+# repo_slug <checkout>: slug_of the remote its pack names (.remote, default origin); nonzero when there is none.
+repo_slug() {
+  local r u
+  r=$(jq -r '.remote // "origin" | strings' "$1/.conveyor/project.json" 2>/dev/null) && [ -n "$r" ] || r=origin
+  u=$(git -C "$1" remote get-url -- "$r" 2>/dev/null) && slug_of "$u"
+}
+# host_slug <main>: repo_slug of a main checkout on the host file's ssh target (the host ask runs commands on);
+# nonzero when the host file names none, or the host does not answer within 10 s.
+host_slug() {
+  local t c u
+  t=$(host_ssh) && [ -n "$t" ] || return 1
+  printf -v c 'cd %q || exit 1; r=$(jq -r %q .conveyor/project.json 2>/dev/null); git remote get-url -- "${r:-origin}"' "$1" '.remote // "origin" | strings'
+  u=$(timeout -k 2 10 ssh -o BatchMode=yes -o ConnectTimeout=5 "$t" "$c" < /dev/null 2>/dev/null) && slug_of "$u"
+}
+# record_of <owner/name> <records>: the record, "<repo> TAB <main>" as records prints them, that holds an issue of the
+# GitHub repository <owner/name>: the first whose main checkout has that repository, owner and name (repo_slug of a
+# checkout on this machine, a worktree of it, as the checkout a hook runs in may be, sharing its remotes; else
+# host_slug, read on the host its belt runs on); else the one named <name> (so a record whose main cannot be read either way is
+# still found by its name), unless its main has another repository (another owner's of that name, or another name):
+# that is another project. Letter case aside, as GitHub prints a repository's name in its own case. Empty when none is.
 record_of() {
-  local rec main r n=${1,,}
+  local rec main s n=${1,,} other=()
   while IFS=$'\t' read -r rec main; do
-    [ -n "$main" ] && [ -d "$main" ] && r=$(repo_name "$main") && [ "${r,,}" = "$n" ] && { printf '%s\t%s\n' "$rec" "$main"; return 0; }
+    [ -n "$main" ] || continue
+    # A folder here with no checkout in it (as an empty folder at a path of the belt's host is) is read on the host.
+    s=''; [ ! -e "$main/.git" ] || s=$(repo_slug "$main"); [ -n "$s" ] || s=$(host_slug "$main") || continue
+    [ "$s" != "$n" ] || { printf '%s\t%s\n' "$rec" "$main"; return 0; }
+    other+=("$rec")
   done <<<"$2"
-  awk -F'\t' -v r="$n" 'tolower($1) == r { print; exit }' <<<"$2"
+  awk -F'\t' -v r="${n#*/}" -v o="$(printf '%s\n' "${other[@]}")" 'BEGIN { k = split(o, x, "\n"); for (i = 1; i <= k; i++) skip[x[i]] = 1 }
+    tolower($1) == r && !($1 in skip) { print; exit }' <<<"$2"
+}
+# The filing hooks' shared state (foreman.sh filing and filed), in the folder of filings SF, for the Bash call TID.
+# ends: under the shared lock, each filing's end left in $SF/ended takes its line from $SF/in.
+ends() {
+  local f ins
+  for f in "$SF"/ended/*; do
+    [ -f "$f" ] || continue
+    ins=$(F=$(cat "$f") awk '!d && $0 == ENVIRON["F"] { d = 1; next } 1' "$SF/in" 2>/dev/null) && printf '%s' "${ins:+$ins$'\n'}" > "$SF/in" && rm -f "$f"
+  done
+}
+# kept_file: this filing's list of the records that started new issues held before it began (the owner's Held): the
+# UTC time it began on its first line, a record a line after. No filing ends that Held, so no Queue of filed's holds
+# what the command files there, and the loop's own hold passes over a follow-up (adopted(), lib/control.sh).
+kept_file() { printf '%s/kept-%s' "$SF" "${TID//[^A-Za-z0-9_-]/_}"; }
+# kept_put <record>...: writes the list, timed now, before the command runs: what it files is created on or after it.
+kept_put() { { jq -rn '(($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate' && printf '%s\n' "$@"; } > "$(kept_file)"; }
+# kept_hold <records, as records prints them>: in each record of the list, every open issue opened since the filing
+# began is held (control adopt since); prints a line for each record where it was not. The list is removed.
+kept_hold() {
+  local k t repo main c kr=()
+  k=$(kept_file)
+  if [ -s "$k" ]; then
+    { IFS= read -r t; mapfile -t kr; } < "$k"
+    for repo in "${kr[@]}"; do
+      main=$(awk -F'\t' -v r="$repo" '$1 == r { print $2; exit }' <<<"$1")
+      c='no record of that name'; [ -n "$main" ] && c=$(ask "$repo" "$main" control adopt since "$t" 2>&1) || printf '%s\n' "the issues filed in $repo since $t (${c##*$'\n'})"
+    done
+  fi
+  rm -f "$k"
 }
 # ledger <repo> <main>: the checkout whose decision ledger (.claude/metrics/decisions.jsonl) a record's open decisions
 # are read from: its main when that is a checkout on this machine (it has .git: an empty folder at a path of the
@@ -301,6 +348,56 @@ pending_run() {
   done
   [ "$n" -gt 0 ]
 }
+# pending_fresh: before a stop relays the pending wakes, each blocked card a wake names (its "<repo>: <ref> is blocked
+# since" or "has been blocked for" line, or its "not yet reported: blocked <ref>" line) that its record no longer holds
+# blocked as the line says, as `conveyor.sh health` reads it now (retried, landed or shut since the watcher put the
+# wake, or retried and blocked again: a line whose since, or whose reason, is not health's), is
+# taken out, its ref with it from the blocked parts of the wake's first line; a wake left with no other line is
+# removed. A record whose health does not read, or gives no blocked list, keeps its lines.
+pending_fresh() {
+  local f repos repo main now='{}' h n t
+  repos=$(cat "$PENDING"/*.wake 2>/dev/null | sed -nE 's/^([A-Za-z0-9._-]+): (.+ is blocked since |.+ has been blocked for |not yet reported: blocked ).*/\1/p' | sort -u)
+  [ -n "$repos" ] || return 0
+  while IFS= read -r repo; do
+    # mine first: a checkout no record names is watched as its own, named for its folder, and is in no record.
+    main=$({ mine; records; } 2>/dev/null | awk -F'\t' -v r="$repo" '$1 == r { print $2; exit }')
+    [ -n "$main" ] && h=$(ASK_LIMIT=10 ask "$repo" "$main" health 2>/dev/null) \
+      && n=$(jq -ce --arg r "$repo" --argjson h "$h" '($h | objects | .blocked | arrays) as $b
+        | .[$r] = [$b[] | objects | {ref: ((.name | strings) // "#\(.issue)"), since, why: (.reason | tostring | gsub("\\s+"; " ") | .[0:240])}]' <<<"$now" 2>/dev/null) \
+      && now=$n
+  done <<<"$repos"
+  [ "$now" != '{}' ] || return 0
+  for f in "$PENDING"/*.wake; do
+    [ -f "$f" ] || continue
+    t=$(jq -Rrs --argjson now "$now" "$FRESH" "$f" 2>/dev/null) || continue
+    if [ -z "$t" ]; then rm -f "$f"; elif [ "$t" != "$(cat "$f")" ]; then printf '%s\n' "$t" > "$f.tmp" && mv -f "$f.tmp" "$f"; fi
+  done
+}
+# The wake (raw text) without the blocked cards $now (each repo's blocked cards, of the repos read: ref, since and the
+# reason as the watcher's line gives it) no longer holds. A line's reason is health's whole, but for the time of an
+# older snapshot the watcher may put after it (watch-conveyor.sh $asof) and the note of a review-retry that failed
+# after that (reviewretry): an old reason with a note that the new one has not is another block. A line whose
+# review-retry worked but was not logged (its note "was retried (review-retry), but the act was not logged") is no
+# block's line: the card was retried, and the line reports that its act is not in the log, which no later read undoes.
+FRESH='def card: [capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>.+?) is blocked since (?<t>[0-9T:-]+Z): (?<why>.*)$"),
+    capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>.+?) has been blocked for [0-9hm]+ \\(since (?<t>[0-9T:-]+Z)\\): (?<why>.*)$"),
+    capture("^(?<r>[A-Za-z0-9._-]+): not yet reported: blocked (?<ref>.+)$")] | first
+  | select(. != null and (.why == null or (.why | test("; #[0-9]+ was retried \\(review-retry\\), but the act was not logged: ") | not))) | . as $c
+  | select($now[$c.r] != null and (any($now[$c.r][]; . as $i | $i.ref == $c.ref and ($c.t == null or $i.since == $c.t)
+      and ($c.why == null or ($c.why | sub("; the review-retry of #[0-9]+ failed: [\\s\\S]*$"; "")
+        | sub(" \\(as of [0-9]{2}:[0-9]{2}Z\\)$"; "")) == $i.why)) | not));
+  split("\n") | (if .[-1] == "" then .[:-1] else . end) as $l
+  | [$l[1:][] | card] as $g
+  | if $g == [] then $l | join("\n")
+    else [$l[1:][] | select([card] == [])] as $keep
+      | if $keep == [] then ""
+        else ($l[0] | if startswith("Conveyor: ") then "Conveyor: " + (ltrimstr("Conveyor: ") | split(" | ") | map(index(": ") as $i
+            | if $i == null then . else .[:$i] as $r | (.[$i + 2:] | split("; ") | map(index(": ") as $j
+                | if $j != null and (.[:$j] | IN("blocked", "still blocked")) then .[:$j] as $k
+                  | (reduce ($g[] | select(.r == $r) | .ref) as $x (" \(.[$j + 2:]) "; split(" \($x) ") | join(" ")) | ltrimstr(" ") | rtrimstr(" "))
+                  | if . == "" then empty else "\($k): \(.)" end
+                else . end)) as $s | if $s == [] then empty else "\($r): \($s | join("; "))" end end) | join(" | "))
+          else . end) as $h | [$h] + $keep | join("\n") end end'
 # stop_key <transcript>: the uuid of the transcript's last assistant entry (the reply that stops), which names one stop:
 # every Stop hook of that stop reads the same, a later stop of the session a newer one. Empty with none.
 stop_key() {

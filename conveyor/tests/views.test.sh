@@ -135,8 +135,10 @@ t_snapshotdeploy() { snapshotstart
   ! grep -qx junk "$S/cards.jsonl" && [ "$(jq -sc 'map(.record)' "$S/quarantined.jsonl")" = '["junk"]' ] || fail "the snapshot did not set the bad line aside: $(cat "$S/quarantined.jsonl" 2>&1)"
 }
 # #4042: card 12, landed 10 days ago, is in pushedCards once its push is recorded today (t_snapshot: not before).
+# It carries its landed commit: landed holds today's landings only, so without it the Foreman's wake for an issue landed
+# on an earlier day and pushed today named no commit.
 t_snapshotpushed() { snapshotstart; card 12 "$d" 'pushed:ok:{"sha":"abd","sec":5,"head":"abd"}'
-  [ "$(loop snapshot --fresh | jq -c '.pushedCards | map(select(.card == "c12"))')" = "[{\"card\":\"c12\",\"issue\":12,\"time\":\"${d}T00:00:00Z\",\"day\":\"$d\"}]" ] \
+  [ "$(loop snapshot --fresh | jq -c '.pushedCards | map(select(.card == "c12"))')" = "[{\"card\":\"c12\",\"issue\":12,\"sha\":\"abd\",\"time\":\"${d}T00:00:00Z\",\"day\":\"$d\"}]" ] \
     || fail "a card landed 10 days ago and pushed today is not in pushedCards: $(loop snapshot --fresh | jq -c .pushedCards)"
 }
 # A card's steps keep what the owner reads there: a NO-GO review its findings, and the blocked line its sentence and

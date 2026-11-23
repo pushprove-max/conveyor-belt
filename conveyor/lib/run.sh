@@ -377,9 +377,11 @@ shutopen() { # <issue | card id>
   done
 }
 # run()'s cards in progress (running), set in run()'s own variables: its jobs less the push (pusher) and the other
-# jobs beside the cards, and the cards it took over (took). A push so leaves its builder slot free.
+# jobs beside the cards, and the cards it took over (took). A push so leaves its builder slot free. runcards: the card
+# ids of those it counts, one a line, from the same read of the jobs: one whose job ended, not yet reaped, is in neither.
 cardsrun() {
-  running=$(($(jobs -rp | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${prober:-0}" -e "${merger:-0}" -e "${fixer:-0}" -e "${asker:-0}") + ${#took[@]}))
+  local j p; j=$(jobs -rp); runcards=''; for p in "${!mine[@]}"; do { [[ -v took[$p] ]] || grep -qxF -- "$p" <<<"$j"; } && runcards+=${mine[$p]%% *}$'\n'; done
+  running=$(($(printf '%s' "$j" | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${prober:-0}" -e "${merger:-0}" -e "${fixer:-0}" -e "${asker:-0}") + ${#took[@]}))
 }
 # The wait that ends a turn, in run()'s own variables: until the turn's timer, one of the loop's cards (mine), the
 # push (pusher) or the machine hold's look (prober, which runends() waits for) ends, at once when one of them has
@@ -576,10 +578,11 @@ turncount() {
   [ -z "$why" ] || [ -z "$old" ] || why+="; the loop $([ -n "$serve" ] && echo "restarts on the $([ -n "$FOLLOW" ] && echo "checkout's new code" || echo "project's Conveyor commit") once its push is done" || echo "ends once its cards and push are done")"
   # building: the cards counted against the cap, and waiting: those left out of the machine's count as they only wait
   # (health()); reviewing and testing: those in their review (with the judge) or test step and not waiting (offcap());
-  # running: every card of the loop in progress, waiting or not, in whatever step (the Foreman's count on the belt).
+  # running: every card of the loop in progress, waiting or not, in whatever step (the Foreman's count on the belt);
+  # cards: their card ids (cardsrun()), so the snapshot tells one landed since this turn from one landed before it.
   say=$(jq -cn --argjson p "$$" --arg t "$self" --arg s "$now" --arg r "$why" --arg c "$RAN" --arg h "$([ -n "$OWN" ] || echo "$HERE")" --argjson b "$building" --argjson w "$idles" \
-    --argjson rv "$rev" --argjson ts "$tst" --argjson n "$running" \
-    '{pid: $p, started: $t, state: $s, reason: (if $r == "" then null else $r end), commit: (if $c == "" then null else $c end), checkout: (if $h == "" then null else $h end), building: $b, waiting: $w, reviewing: $rv, testing: $ts, running: $n}')
+    --argjson rv "$rev" --argjson ts "$tst" --argjson n "$running" --arg cs "$runcards" \
+    '{pid: $p, started: $t, state: $s, reason: (if $r == "" then null else $r end), commit: (if $c == "" then null else $c end), checkout: (if $h == "" then null else $h end), building: $b, waiting: $w, reviewing: $rv, testing: $ts, running: $n, cards: ($cs | split("\n") | map(select(. != "")) | sort)}')
   [ "$say" = "$said" ] || { printf '%s\n' "$say" > "$SAYS.new" && mv -f "$SAYS.new" "$SAYS" && said=$say; }
 }
 # What the loop says of itself (SAYS) outside a turn (turncount()): its process and the commit a card of it reads as
@@ -701,7 +704,7 @@ turnpick() {
 }
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
-  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000 nudged=''
+  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000 nudged='' runcards=''
   local mhold htold='' prober='' htried=-1000000 gone gs merger='' gtried=-1000000 fixer='' rtried=-1000000 asker='' atried=-1000000
   local inuse # the machine's count of the turn (turncount())
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;

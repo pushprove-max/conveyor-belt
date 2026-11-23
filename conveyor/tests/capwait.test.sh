@@ -119,6 +119,10 @@ t_capsteps() {
   cwpicked 17 && fail "#17 was picked while #15 was in its review with the cap at 1: the review was left out of the count"
   # Bug: the Foreman's count on the belt (running, foreman/watch-conveyor.sh) left out the card in review.
   [ "$(cwsteps)" = "1 1 1" ] || fail "loop.json does not give 1 building (#15, in its review), 1 in review and 1 card in all: $(cat "$ST/loop.json")"
+  # Bug: with no card ids in loop.json, the snapshot could not tell a card that landed since the loop's turn, still
+  # in running, from one landed before it, and counted it twice (commands/snapshot.sh recordsnow()).
+  [ "$(jq -r '[.cards[] | sub(".*-"; "")] | join(" ")' "$ST/loop.json" 2>/dev/null)" = "15" ] \
+    || fail "loop.json does not name the card of #15 it counts: $(cat "$ST/loop.json")"
   ungate review15
   wait_until '[ -e "$STUB/building17" ]' 'cat "$STUB/run.out"' || fail "#17 was not picked once #15 had ended"
   capwaitend
@@ -194,4 +198,23 @@ t_captestslots() {
   ungate go15
   wait_until '[ -e "$STUB/intests17" ]' 'cat "$STUB/run.out"' || fail "#17's tests did not run once #15's had ended"
   capwaitend
+}
+
+# Bug caught: loop.json's cards were every card the loop still held (mine), and running only those whose job was
+# live, so a card that had landed and ended before the count, not yet reaped, was in cards with running 0; the
+# snapshot then left it out of landed too (commands/snapshot.sh recordsnow()), and the Foreman's status read "0 on the
+# belt now". The card ids named are those running counts: here a card that builds and one taken over, not the one ended.
+t_runcards() {
+  eval "$(sed -n '/^cardsrun() {/,/^}/p' "$SRC/lib/run.sh")"
+  declare -f cardsrun >/dev/null || fail "no cardsrun() in lib/run.sh"
+  local got
+  # In a subshell: its job table holds only the cards' stand-ins, not the case runner's jobs, as run()'s holds its own.
+  # The other jobs beside the cards (pusher and the rest) are unset, as when none runs.
+  got=$(local -A mine=() took=(); local running runcards p
+    sleep 30 & mine[$!]='c1-1 1'; p=$! # sleep: a card that still builds
+    ( exit 0 ) & mine[$!]='c2-2 2'; wait "$!" # a card whose job has ended
+    mine[999999999]='c3-3 3' took[999999999]=x # a card an earlier loop started, taken over
+    cardsrun; echo "$running of ${#mine[@]} held (${#took[@]} taken over): $(printf '%s' "$runcards" | sort | paste -sd' ')"; kill "$p"; wait "$p" 2>/dev/null)
+  [ "$got" = '2 of 3 held (1 taken over): c1-1 c3-3' ] \
+    || fail "for a card that builds (c1-1), one whose job ended (c2-2) and one taken over (c3-3), running and the cards named are '$got', not '2 of 3 held (1 taken over): c1-1 c3-3'"
 }

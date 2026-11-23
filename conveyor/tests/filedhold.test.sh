@@ -46,6 +46,23 @@ t_filedbare() {
   # rules to the open issues it reads (adopted() and upnext.jq, which leave a follow-up eligible), not only the held list.
   loop run >/dev/null 2>&1; [ "$(st 'select(.step == "picked") | .issue' | tr '\n' ' ')" = "4 " ] || fail "picks after the filing: $(st 'select(.step == "picked") | .issue')"
 }
+# Bug caught: filing passed over a record that already started new issues held (the owner's Held), so no Queue of
+# filed's held what the command filed there; with no link in the output, filed held nothing, and the follow-up, which
+# the loop's own hold (adopted()) passes over, was built before the owner's yes. filed now holds every issue opened
+# there since the filing began, and leaves an engine follow-up opened before it as it was.
+t_filedkept() {
+  filedsetup
+  jq -c '.start = "held" | .startHeld = [{from: 4, to: null}]' "$C" > "$C.new" && mv "$C.new" "$C" || fail "the record could not be set held"
+  jq -cn '{number: 100101, title: "f", body: "f", milestone: null, createdAt: "2026-05-01T00:00:00Z", labels: [{name: "conveyor-followup"}]}' >> "$STUB/filed"
+  cmd='n=$(gh issue create --title example --body example --label conveyor-followup | grep -oE "[0-9]+$"); echo "$n"'
+  # The filing begins 2026-06-01T00:00:00Z, after the engine's follow-up and before the stub's date for what it files.
+  out=$(CONVEYOR_NOW=1780272000 hook filing "$cmd"); [ -z "$out" ] || fail "filing in a held record printed: $out (command: $cmd)"
+  n=$(gh issue create --title example --body example --label conveyor-followup | grep -oE '[0-9]+$') || fail "the stub filed no issue"
+  out=$(hook filed "$cmd" "$n"$'\n')
+  jq -e --argjson n "$n" '.start == "held" and (.held | index($n)) and (.held | index(100101) | not)' "$C" >/dev/null \
+    || fail "after filed (command: $cmd, output: $n), #$n is not held, #100101 is, or the record no longer starts held: $(cat "$C") $out"
+  ! compgen -G "$FC/conveyor/filing/kept-*" >/dev/null || fail "filed left the filing's list of held records: $(ls "$FC/conveyor/filing")"
+}
 # Bug (#1234): one issue link in the output made filed take every issue of the command as linked, so a second
 # `gh issue create` of the same command, printed as a bare number, got no warning. Here the Foreman is told.
 t_filedmixed() {
@@ -87,7 +104,8 @@ t_filedblock() {
   hook filing "$cmd" >/dev/null
   o="https://github.com/o/other/issues/9"
   out=$(hook filed "$cmd" "$o"$'\n'"7"$'\n')
-  jq -e '.decision == "block" and (.reason | test("Not held in Conveyor.*9 of other") and test("no link for each issue.*control hold"))' <<<"$out" >/dev/null \
+  # The issue is named with its owner and repository: two owners' repositories of one name are two projects.
+  jq -e '.decision == "block" and (.reason | test("Not held in Conveyor.*9 of o/other") and test("no link for each issue.*control hold"))' <<<"$out" >/dev/null \
     || fail "filed's block did not carry the unlinked-issue warning (command: $cmd, output: $o and 7): $out"
 }
 # With the links in the output, the issue filed is still held, and one the owner released before filed ran (the

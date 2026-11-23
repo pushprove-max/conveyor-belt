@@ -1144,7 +1144,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es bx sz top=0 p='' open=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-mode <serial|parallel> | tests-from <UTC time | clear> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|testissues|foremanissues|followupissues|releaseissues|splitissues|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | judge rare <P0|P1|P2|P3>... | judge rare none | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-mode <serial|parallel> | tests-from <UTC time | clear> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | adopt since <UTC time> | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|testissues|foremanissues|followupissues|releaseissues|splitissues|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | judge rare <P0|P1|P2|P3>... | judge rare none | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -1205,7 +1205,16 @@ control() { # [action [arguments]]
     # startHeld began, whether or not it has ended (the owner may select Queue while a command files several), that
     # startSeen does not have yet, whatever its labels (adopted() also passes over a follow-up). One released already,
     # even a moment after it was filed, or held once, is left as it is, so a release is never undone.
-    adopt) [ $# != 0 ] && nums "$@" || { bad; return; }
+    # `adopt since <UTC time>`: the same for every open issue created at or after that second (the filing hooks' hold
+    # in a record that started new issues held before the filing began, when the command's output links no issue): a
+    # follow-up filed then too, which adopted() passes over. createdAt is in whole seconds, so an issue opened in that
+    # second just before the filing is held too; one opened earlier, as an engine's follow-up, is left as it is.
+    adopt) if [ "${1:-}" = since ]; then
+        [ $# = 2 ] && [[ $2 =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || { bad; return; }
+        names && x=$(openissues number,createdAt) && x=$(jq -er --arg t "$2" 'arrays | [.[] | select(.createdAt >= $t) | .number] | join(" ")' <<<"$x") \
+          || { echo "conveyor: cannot read the open issues; nothing changed" >&2; return 1; }
+        local -a ids; read -ra ids <<<"$x"; set -- "${ids[@]}"
+      else [ $# != 0 ] && nums "$@" || { bad; return; }; fi
       f='. as $c | [$v[] | tonumber | select(. as $i | (IN($c.startSeen[]) | not) and ($c.startHeld | any($i > .from)))] as $n
          | .held = (.held + $n | unique) | .startSeen = (.startSeen + $n | unique)' ;;
     # release: one released is never held again by adopted(), whatever the setting or who opened it.

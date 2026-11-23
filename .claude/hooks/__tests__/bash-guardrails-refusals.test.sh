@@ -337,6 +337,8 @@ done
 HUNT_SID="guardrails-hunt-$$"
 HUNT_HOME=$(mktemp -d)
 printf '{"mcpServers":{"serena":{}}}\n' > "$HUNT_HOME/.claude.json"
+# The serena markers stay at their fixed /tmp paths, outside the TMPDIR the test runner measures: the hook reads them
+# only there (caller_hunt in bash-guardrails.sh, which takes no TMPDIR). The trap removes them.
 trap 'rm -rf "$MAIN_TMP" "$HUNT_HOME" /tmp/claude-serena-tracker-$HUNT_SID* /tmp/claude-caller-hunt-$HUNT_SID* /tmp/claude-serena-down-$HUNT_SID*' EXIT
 hunt() { # <session suffix> <command> -- prints hint, quiet, or rc=<n>
   [ "$ON" = 1 ] || return 0

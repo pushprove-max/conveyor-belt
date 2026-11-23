@@ -140,6 +140,9 @@ t_metricstotals() {
   [ "$(q '[.metrics.steps[] | .card] | sort')" = '["c1","c2","c3","c4","c6"]' ] || fail "the cards of the steps: $(q .metrics.steps)"
   [ "$(q '.metrics.steps[] | select(.card == "c4") | [.issue, .steps]')" = "[4,[{\"step\":\"build\",\"time\":\"${d}T04:10:00Z\"},{\"step\":\"review\",\"time\":\"${d}T04:15:00Z\",\"writes\":{\"model\":\"claude-sonnet-5-5\",\"write\":11,\"write1h\":0},\"judgeWrites\":{\"model\":\"claude-haiku-5-5\",\"write\":7,\"write1h\":3}}]]" ] \
     || fail "card 4's steps: $(q '.metrics.steps[] | select(.card == "c4")')"
+  # Each card's landed commit: the Foreman's watcher names a pushed landing's commit from it while the push has no
+  # pushed line yet, and a landing of an earlier day is in landed no more (watch-conveyor.sh). Bug: it was not there.
+  [ "$(q '[.metrics.cards[] | select(.card | IN("c1", "c2")) | .sha] | sort')" = '["s1","s2"]' ] || fail "the landed commits of cards 1 and 2: $(q '[.metrics.cards[] | {card, sha}]')"
   [ "$(q '.metrics.cards[] | select(.card == "c2") | .metrics.limit')" = '{"before":80,"after":1,"used":null}' ] || fail "a limit reset during card 2: $(q '.metrics.cards[] | select(.card == "c2") | .metrics.limit')"
   # No null cost: the old build (fresh tokens only, no split, no model) is not guessed at. It is left out of the
   # figures, counted, and says why; every other step, Codex reviews and the failed fix among them, is priced.

@@ -335,10 +335,12 @@ blocks "git commit -m 'never run \`git reset --hard\` here'"
 GS_S="" GS_T="" F="" FT="" B="" OUTSIDE=""
 if [ "$ON" = 1 ]; then
   GS_S=gs-s-$$ GS_T=gs-t-$$
-  F=/tmp/claude-session-$GS_S FT=/tmp/claude-session-$GS_T
-  B=$(mktemp -d "${TMPDIR:-/tmp}"/gs-b.XXXXXX); OUTSIDE=$(mktemp -d /var/tmp/gs-out.XXXXXX)
+  # Every folder is in $B, under ${TMPDIR:-/tmp}: the test runner gives each file a TMPDIR of its own and measures only
+  # that (share_run, .conveyor/test-share.sh). The hook reads no session folder, so none needs a fixed /tmp path.
+  B=$(mktemp -d "${TMPDIR:-/tmp}"/gs-b.XXXXXX); OUTSIDE=$(mktemp -d "$B/gs-out.XXXXXX")
+  F=$B/claude-session-$GS_S FT=$B/claude-session-$GS_T
   mkdir -p "$F" "$FT"
-  trap 'rm -rf "$F" "$FT" "/tmp/claude-session-gs-s2-$$" "/tmp/claude-session-gs-s3-$$" "$B" "$OUTSIDE"' EXIT
+  trap 'rm -rf "$B"' EXIT
   G() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$B/repo" "$@"; }
   git init -q "$B/repo" && git init -q "$B/sub" && G config user.email t@t && G config user.name t \
     && git -C "$B/sub" -c user.email=t@t -c user.name=t commit -q --allow-empty -m sub \
@@ -360,7 +362,7 @@ gs_case() { GS_WANT+="$1=$3 "; if [ "$2" = "$3" ]; then GS_GOT+="$1=$2 "; else G
 
 # Orderings. S's own clean worktree: passes, in every spelling of its path.
 gs_add "$F/own" HEAD
-[ -d /private/tmp ] && GS_ALIAS=0 || GS_ALIAS=2 # the /private/tmp form exists on a Mac only
+[ -d "/private$F/own" ] && GS_ALIAS=0 || GS_ALIAS=2 # the /private form of a temp folder exists on a Mac only
 gs_case own "$(gs_remove "$GS_S" "$F/own")" 0
 gs_case own-short-f "$(gs_remove "$GS_S" "$F/own" -f)" 0
 gs_case own-trailing-slash "$(gs_remove "$GS_S" "$F/own/")" 0
@@ -387,8 +389,8 @@ gs_case old-after-step "$( [ "$ON" = 1 ] || exit 0
 gs_case delayed-replaced "$(gs_remove "$GS_S" "$F/rw7")" 2
 gs_case t-edits-kept "$( [ "$ON" = 1 ] || exit 0; cat "$FT/w/f" "$F/foreign/f" "$F/rw/f" "$F/rw7/f" | grep -c t-edit)" 4
 # Each piece of state taken away, or one change made, blocks.
-GS_S2=gs-s2-$$; gs_add "/tmp/claude-session-$GS_S2/w" HEAD; [ "$ON" = 1 ] && rm -rf "/tmp/claude-session-$GS_S2"
-gs_case folder-gone "$(gs_remove "$GS_S2" "/tmp/claude-session-$GS_S2/w")" 2
+GS_S2=gs-s2-$$; gs_add "$B/claude-session-$GS_S2/w" HEAD; [ "$ON" = 1 ] && rm -rf "$B/claude-session-$GS_S2"
+gs_case folder-gone "$(gs_remove "$GS_S2" "$B/claude-session-$GS_S2/w")" 2
 gs_add "$F/nogit" HEAD; [ "$ON" = 1 ] && rm -f "$F/nogit/.git"
 gs_case not-a-worktree "$(gs_remove "$GS_S" "$F/nogit")" 2
 gs_add "$F/n" HEAD
@@ -409,8 +411,8 @@ gs_case submodule-hidden-by-config "$( [ "$ON" = 1 ] || exit 0
   G config diff.ignoreSubmodules all; gs_remove "$GS_S" "$F/sm"; G config --unset diff.ignoreSubmodules)" 2
 gs_add "$B/out" HEAD; [ "$ON" = 1 ] && ln -s "$B/out" "$F/l"
 gs_case symlink-out-of-folder "$(gs_remove "$GS_S" "$F/l")" 0
-GS_S3=gs-s3-$$; [ "$ON" = 1 ] && mkdir -p "$B/s3" && ln -s "$B/s3" "/tmp/claude-session-$GS_S3"; gs_add "$B/s3/w" HEAD
-gs_case folder-is-a-symlink "$(gs_remove "$GS_S3" "/tmp/claude-session-$GS_S3/w")" 0
+GS_S3=gs-s3-$$; [ "$ON" = 1 ] && mkdir -p "$B/s3" && ln -s "$B/s3" "$B/claude-session-$GS_S3"; gs_add "$B/s3/w" HEAD
+gs_case folder-is-a-symlink "$(gs_remove "$GS_S3" "$B/claude-session-$GS_S3/w")" 0
 gs_add "$F/b" HEAD; [ "$ON" = 1 ] && mkdir -p "$F/z"
 gs_case dotdot "$(gs_remove "$GS_S" "$F/z/../b")" 2
 gs_case two-paths "$(gs_remove "$GS_S" "$F/own $F/a")" 2
@@ -422,8 +424,6 @@ check "clean_worktree_force_remove_passes: a forced remove passes for a clean wo
 gs_add "$B/x" HEAD
 check "clean_worktree_force_remove_passes: a clean worktree outside any session folder passes" 0 "$(gs_remove "$GS_S" "$B/x")"
 check "a remove without --force is not screened" 0 "$(gs_remove "$GS_S" "$B/x" "")"
-gs_add "$OUTSIDE/w8" HEAD
-check "clean_worktree_force_remove_passes: a clean worktree outside /tmp passes" 0 "$(gs_remove "$GS_S" "$OUTSIDE/w8")"
 gs_add "$OUTSIDE/w9" HEAD; gs_edit "$OUTSIDE/w9"
 check "clean_worktree_force_remove_passes: a dirty worktree outside any session folder still blocks" 2 "$(gs_remove "$GS_S" "$OUTSIDE/w9")"
 

@@ -178,8 +178,9 @@
 #   the newest SNAPKEEP of those rows, newest first, and past them the newest row of each lane's change (lanekeys), so a
 #   lane left as it was is told its change landed however many land after it.
 # pushedCards: every card whose commit was pushed on a day of the 7 days to today, whenever it landed (metrics.cards
-#   and landed go by the landing): card, issue, time (the push), day (the push's day on this host, as day above). The Foreman's watcher wakes on an awaited issue's push
-#   from it (#4042). It holds the newest PUSHKEEP of them, by the push: the watcher looks once a minute, and reads
+#   and landed go by the landing): card, issue, sha (its landed commit), time (the push), day (the push's day on this host, as day above). The Foreman's watcher wakes on an awaited issue's push
+#   from it (#4042), and names its commit from sha: landed holds only today's landings (metrics.cards' sha, each card's
+#   landed commit, names it while the push is in no pushed line yet). It holds the newest PUSHKEEP of them, by the push: the watcher looks once a minute, and reads
 #   HISTORY for an awaited issue that is in neither this list nor metrics.cards.
 # The lists that grow with every card that lands are cut to their newest SNAPKEEP, so a snapshot read every second
 # stays the same size however many cards land (README.md says its bound): landed, metrics.cards, cost.cards,
@@ -1041,7 +1042,7 @@ snapshot() (
        branches: ([$c[] | select(.x.branch != null and (.step | IN("landed", "closed")) and .x.blockedAt == null)] | group_by([.issue, .title])
          | map(max_by(.x.endAt) | {card, issue, title, step, time: .x.endAt})),
        pushedCards: [$c[] | (.x.log | map(select(.step == "pushed")) | last) as $p | select($p != null and ($p.time | day) >= $since)
-         | {card, issue, time: $p.time, day: ($p.time | day)}],
+         | {card, issue, sha, time: $p.time, day: ($p.time | day)}],
        health: $h,
        testSlots: $ts,
        cost: (($steps | map(select((.time | day) == $day))) as $td | [$week[] | .card] as $wk
@@ -1090,7 +1091,7 @@ snapshot() (
          slots: ([$smp[] | select((.time | day) == $day) | . + {hour: (.time | fromdate | strflocaltime("%H") | tonumber)}] | group_by(.hour)
            | map({hour: .[0].hour, slots: ([.[].slots] | add / length | r3), cap: ([.[].cap | numbers] | max)})),
          cards: ([$all[0][] | select((.x.endAt // .stepAt | day) >= $since)
-           | {card, issue, title, state: (if .x.retried then "retried" elif .result == "" then "on the belt" else .step end), at: (.x.endAt // .stepAt), metrics}]
+           | {card, issue, title, state: (if .x.retried then "retried" elif .result == "" then "on the belt" else .step end), at: (.x.endAt // .stepAt), sha, metrics}]
            | sort_by(.at) | reverse)}, cols: $cols} + $cr
     # Every object naming a main-red fix card (card) carries its name (rows.jq), as in health: it has no issue.
     | ([$all[0][] | select(.name) | {key: .card, value: .name}] | from_entries) as $nm

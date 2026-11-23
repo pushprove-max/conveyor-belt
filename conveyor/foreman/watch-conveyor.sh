@@ -4,7 +4,8 @@
 # Foreman's own record, or each record of its group (lib.sh mine), never another project's, for `conveyor.sh
 # snapshot` (lib.sh ask), or, when that read fails or is slow, `conveyor.sh health` for the blocked, waiting and
 # before entries (record()), and, on any NEW problem, puts one wake in pending and
-# exits. The problems, each a record's own:
+# exits; a card newly blocked or waiting on the owner's yes in a record read while another is still to be read wakes
+# at once, in a wake of its own (poll()). The problems, each a record's own:
 #   a card waiting on the owner's yes       an issue waiting on the owner's yes before its build (health's before)
 #   a card blocked; one blocked by its review, while the standing kind review-retry is on, the watcher retries itself
 #     and wakes nothing for, unless that retry fails (reviewretry()); a card still blocked 30 minutes after a poll
@@ -101,7 +102,9 @@ PUSHED='def pushed($hist): [.health.unpushed | arrays | .[] | objects | .card] a
 REF='def ref: (.name | strings) // "#\(.issue)";'
 # A snapshot's problems, one per line: <key> TAB <kind> TAB <issue numbers, "#n" by spaces> TAB <text>. Fails for
 # anything but a snapshot holding a health record. idle is a candidate here: record() reports it on its second poll.
-# An awaited issue that landed names its commit (the snapshot's or the history's landed line of it); a whole-suite run
+# An awaited issue that landed names its commit (the snapshot's or the history's landed, pushedCards or metrics.cards
+# line of it: a landing of an earlier day pushed today is in landed no more, and in pushedCards only once the engine
+# writes its pushed line, which can come after metrics.cards reads it pushed); a whole-suite run
 # that ended (snapshot suites) is one item, its line as the status command prints it, the failed cases named.
 # The command that resumes a stopped process health names ({pid, pids}): a SIGCONT to each stopped process of its
 # tree (pids), as one sent to it alone leaves those under it, the builder among them, stopped.
@@ -148,7 +151,8 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
         - [$snap.health.blocked | arrays | .[] | objects | .issue | numbers]) as $flying
       | (if ($flying | length) > 0 then "held landing" else "landed" end) as $kind
       | ($await[] | select(.[0] | IN($pushed[])) | .[0] as $i
-        | (first($snap, ($hist[0] | objects) | .landed | arrays | .[] | objects | select(.issue == $i) | .sha | strings | select(. != "")) // "") as $sha
+        | (first($snap, ($hist[0] | objects) | .landed, .pushedCards, .metrics.cards | arrays | .[] | objects | select(.issue == $i and (.state | IN(null, "landed")))
+            | .sha | strings | select(. != "")) // "") as $sha
         | ["landed:\(.[0]):\(.[1])", $kind, "#\(.[0])", "#\(.[0]) landed\(if $sha == "" then "" else " as \($sha[0:12])" end): your step is due"]),
         ([$await[] | select(.[0] | IN($pushed[])) | "landed:\(.[0]):\(.[1])"] as $fresh
         | $ARGS.named.kept // [] | .[] | select(.key | IN($fresh[]) | not) | [.key, $kind, .issues, .text])),
@@ -263,11 +267,16 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
 
 # unreported <now>: of the problem lines on stdin (<repo> TAB <key> TAB <kind> TAB <issues> TAB <text>), each card
 # blocked since two polls or more before <now> that no session has got: no wake was put for it (its key is not in
-# conveyor-reported.txt: no watcher ran), or its wake is still in pending (no live session took it). One line each,
-# "<repo>: not yet reported: blocked <the card: #N, or a main-red fix card's name>".
+# conveyor-reported.txt: no watcher ran), or its wake is still in pending (no live session took it), or was relayed at
+# the stop sent-stop names, which stop.sh refused (refused-stops): the waiter relays that wake again (waiter.sh). One
+# line each, "<repo>: not yet reported: blocked <the card: #N, or a main-red fix card's name>".
 unreported() {
+  local pend k=''
+  pend=$(cat "$PENDING"/*.wake 2>/dev/null)
+  { read -r k < "$FD/sent-stop"; } 2>/dev/null
+  [ -z "$k" ] || ! grep -qxF -- "$k" "$REFUSED" 2>/dev/null || pend+=$'\n'$(cat "$PENDING"/*.wake.sent-* 2>/dev/null)
   jq -rRs --argjson now "$1" --argjson poll "$POLL" --arg seen "$(cat "$SEEN" 2>/dev/null)" \
-    --arg pend "$(cat "$PENDING"/*.wake 2>/dev/null)" '($seen | split("\n")) as $seen | ($pend | split("\n")) as $pend
+    --arg pend "$pend" '($seen | split("\n")) as $seen | ($pend | split("\n")) as $pend
     | split("\n")[] | select(. != "") | split("\t") | select(.[2] == "blocked") | .[0] as $repo | .[4] as $text
     | ($text | capture(" is blocked since (?<t>[0-9T:-]+Z):") | .t | fromdate? // empty) as $t
     | select($now - $t >= 2 * $poll and (("\($repo)/\(.[1])" | IN($seen[]) | not) or ("\($repo): \($text)" | IN($pend[]))))
@@ -427,7 +436,8 @@ record() { # <repo> <main> <now> <await>
   local repo=$1 main=$2 now=$3 await=$4 rec cur first last err held
   local down=$FD/conveyor-down-$repo.txt idle=$FD/conveyor-idle-$repo.txt ghreach=$FD/conveyor-ghreach-$repo.txt ghout=$FD/conveyor-ghout-$repo.txt stuckf=$FD/conveyor-stuck-$repo.txt errf=$FD/conveyor-watch-$repo.err
   local histf=$FD/conveyor-history-$repo.json
-  # The history is asked for only when an awaited issue is not pushed by the snapshot alone; one that does not read
+  # The history is asked for only when an awaited issue is not pushed by the snapshot alone, or is pushed with no
+  # commit in it (below); one that does not read
   # is left out (null), and the next poll asks again. It goes to jq in a file: a busy day's history is over the
   # 128 KB a single argument may hold (#544). kept: this record's held landings kept in conveyor-held.txt
   # (holdlandings()), for PROBLEMS to make again those the read no longer lists; none when the history was asked for
@@ -436,7 +446,10 @@ record() { # <repo> <main> <now> <await>
     local kept='[]'
     rec=$(ASK_LIMIT=$1 ask "$repo" "$main" snapshot 2>"$errf") || return
     ! jq -e objects <<<"$rec" >/dev/null 2>&1 || { keepsnap "$repo" "$rec"; rec=$(recheck "$repo" "$main" "$rec"); }
-    if jq -e --argjson await "$await" "${PUSHED}"'pushed(null) as $p | any($await[]; .[0] | IN($p[]) | not)' <<<"$rec" >/dev/null 2>&1; then
+    # So is it when an awaited issue pushed has no commit in the snapshot's landings (today's only), pushedCards or
+    # metrics.cards (their newest only): its wake names the commit the history holds.
+    if jq -e --argjson await "$await" "${PUSHED}"'pushed(null) as $p | [.landed, .pushedCards, .metrics.cards | arrays | .[] | objects | select((.sha | strings | . != "") and (.state | IN(null, "landed"))) | .issue] as $l
+        | any($await[]; .[0] | (IN($p[]) | not) or (IN($l[]) | not))' <<<"$rec" >/dev/null 2>&1; then
       ASK_LIMIT=$1 ask "$repo" "$main" history 2>>"$errf" | jq -ce objects > "$histf" 2>>"$errf" || { echo null > "$histf"; kept=''; }
     else echo null > "$histf"; fi
     [ -z "$kept" ] || [ ! -e "$HELDF" ] || kept=$(awk -F'\t' -v r="$repo" 'NR > 1 && $1 == r' "$HELDF" \
@@ -509,13 +522,13 @@ record() { # <repo> <main> <now> <await>
       | ($first["\($card)\t\($b.t)"] // $now) as $f
       | "S\t\($card)\t\($b.t)\t\($f)",
         (($now - $f - 1800) as $e | select($e >= 0 and ("\($repo)/blocked:\($card)" | IN($seen[]))) | ($e / 3600 | floor) as $n
-          | (if $ref | IN($asked[]) then "" else "\($ref) has been blocked for \($now - ($b.t | fromdate? // $f) | took): \($b.why)" end) as $text
+          | (if $ref | IN($asked[]) then "" else "\($ref) has been blocked for \($now - ($b.t | fromdate? // $f) | took) (since \($b.t)): \($b.why)" end) as $text
           | "R\tstillblocked:\($card):\($b.t):\($n)\tstill blocked\t\($ref)\t\($text)")' <<<"$cur" 2>>"$errf") || return 0
     awk -F'\t' -v OFS='\t' '$1 == "S" { print $2, $3, $4 }' <<<"$out" > "$blockf.tmp" && mv "$blockf.tmp" "$blockf"
     cur+=$'\n'$(awk -F'\t' -v OFS='\t' '$1 == "R" { print $2, $3, $4, $5 }' <<<"$out")
   }
-  # The outage so far ($down: its first failed poll, its last and how many failed in a row): a gap of more than three
-  # polls since the last failed one is a new outage, timed from now. goes: set when the last failed poll's outage goes
+  # The outage so far ($down: its first failed poll, the end of its last and how many failed in a row): a gap of more
+  # than three polls since the last failed one ended is a new outage, timed from now. goes: set when the last failed poll's outage goes
   # on, so its reported unreachable key is still this outage's.
   local fails
   read -r first last fails 2>/dev/null < "$down" || first=
@@ -580,6 +593,8 @@ record() { # <repo> <main> <now> <await>
     grep -qxF "$repo/idle" "$SEEN" || rm -f "$idle"
     grep -qxF "$repo/ghreach" "$SEEN" || rm -f "$ghreach"
     grep -qxF "$repo/gh" "$SEEN" || rm -f "$ghout"
+    # Its last failed poll, timed at the poll's start here; poll() times it later (downend): before a wake it puts
+    # during the poll, and at the poll's end once every record is read.
     echo "$first $now $fails" > "$down"
     # Its reported keys stay reported (no text: a key already reported is never printed again). When health read, its
     # blocked, waiting and before entries are this poll's (hcur): one it no longer lists is dropped, so it wakes again
@@ -614,7 +629,9 @@ wake() {
 }
 
 # The landings held (record(): "held landing" rows) wait for the last awaited issue in flight to land and wake in one. They
-# go at once when another new wake of the Conveyor watcher, from any project, goes in the same poll, or when the waiter
+# go at once when another new wake of the Conveyor watcher, from any project, goes in the same poll (an early one of
+# poll() too: it carries those of the records read before it, and those of the records read after it go in the poll's
+# last wake), or when the waiter
 # has restarted since they were first held. Only a fresh row from a landing's own project's snapshot goes: a project whose
 # snapshot did not read makes no held row, so its stored landing stays held, even when a new block from its health, or a
 # wake of another project, goes in that poll.
@@ -625,20 +642,27 @@ wake() {
 # holdlandings() only reads the file: it sets cur (the held rows left out, or made plain "landed" rows) and hnew (what the
 # file holds next). poll() writes hnew once the wake is in pending, so a wake that is not put (the session's process has
 # ended, pending not written) leaves the file as it was and the next poll sends the same landings.
+heldtext() { # the rows on stdin, each landing with no commit named given the text conveyor-held.txt keeps for it
+  [ -e "$HELDF" ] || { cat; return 0; }
+  awk -F'\t' -v OFS='\t' 'FILENAME == ARGV[1] { t[$1 FS $2] = $5; next }
+    $2 ~ /^landed:/ && ($3 == "held landing" || $3 == "landed") && $5 !~ / landed as / && (($1 FS $2) in t) { $5 = t[$1 FS $2] } { print }' <(tail -n +2 "$HELDF") -
+}
 holdlandings() {
   local wp=- who old='' stored='' held left
   hnew=''
   if [ -e "$HELDF" ]; then
     old=$(head -n 1 "$HELDF"); stored=$(tail -n +2 "$HELDF")
-    cur=$(awk -F'\t' -v OFS='\t' 'FILENAME == ARGV[1] { t[$1 FS $2] = $5; next }
-      $2 ~ /^landed:/ && ($3 == "held landing" || $3 == "landed") && $5 !~ / landed as / && (($1 FS $2) in t) { $5 = t[$1 FS $2] } { print }' <(printf '%s\n' "$stored") - <<<"$cur")
+    cur=$(heldtext <<<"$cur")
   fi
   left=$(awk -F'\t' 'FILENAME == ARGV[1] { k[$1 FS $2]; next } !(($1 FS $2) in k)' <(printf '%s\n' "$cur") <(printf '%s\n' "$stored"))
   held=$(awk -F'\t' '$3 == "held landing"' <<<"$cur")
   [ -n "$held" ] || { hnew=$(heldrows "$old" "$left"); return 0; }
   { read -r wp _ < "$FD/waiter.pid"; } 2>/dev/null
   who=${wp:--}; : "${old:=$who}"
-  if [ "$old" != "$who" ] || awk -F'\t' '!cur { seen[$0]; next } $3 != "held landing" && $2 != "" && !(($1 "/" $2) in seen) && $5 != ""' "$SEEN" cur=1 - <<<"$cur" | grep -q .; then
+  # A problem woken earlier in this poll (poll()'s sent, already marked reported) is new here too: the landings held
+  # of the records read after it go now.
+  if [ "$old" != "$who" ] || awk -F'\t' 'FILENAME == ARGV[1] { s[$1 "/" $2]; next } !cur { if (!($0 in s)) seen[$0]; next }
+      $3 != "held landing" && $2 != "" && !(($1 "/" $2) in seen) && $5 != ""' <(printf '%s' "$sent") "$SEEN" cur=1 - <<<"$cur" | grep -q .; then
     cur=$(awk -F'\t' -v OFS='\t' '$3 == "held landing" { $3 = "landed" } { print }' <<<"$cur"); hnew=$(heldrows "$old" "$left")
   else cur=$(awk -F'\t' '$3 != "held landing"' <<<"$cur"); hnew=$(heldrows "$old" "$held"$'\n'"$left"); fi
 }
@@ -652,21 +676,49 @@ heldsave() { # the file holds hnew, or is removed when hnew is empty
 }
 
 poll() { # 0 when a wake was put in pending; 2 when one was due but the session's process has ended
-  local now=${CONVEYOR_FOREMAN_NOW:-$(date +%s)} cur='' new late await repo main df hnew
+  local now=${CONVEYOR_FOREMAN_NOW:-$(date +%s)} p0=$EPOCHSECONDS cur='' new late await repo main df dl hnew one soon sent='' n=0 all failed=''
+  all=$(grep -c . <<<"$RECS")
+  # Each record that failed this poll so far (failed: record() saved the poll's start as its last failed poll) has it
+  # timed now, at the poll's end and before a wake put during the poll: a failed poll with the longer read, of that
+  # record or of any other read after it, takes over 3 minutes, so a gap timed from an earlier point made the next
+  # poll start a new outage, woken again; and a waiter that relays a wake put during the poll stops the watcher there.
+  downend() {
+    local f a c
+    while IFS= read -r f; do
+      [ -n "$f" ] && read -r a _ c 2>/dev/null < "$f" && echo "$a $((now + EPOCHSECONDS - p0)) $c" > "$f"
+    done <<<"$failed"
+  }
   while IFS=$'\t' read -r repo main; do
     # [issue, its lines in await-<repo>.txt] for each awaited issue of the record past what was dropped: the count is
     # in its landed key, so an issue awaited again after its wake is a new key.
     await=$(awk 'FILENAME == ARGV[1] { done[$1] = $2; next } /^[1-9][0-9]*$/ { n[$0]++ }
       END { for (i in n) if (n[i] > done[i] + 0) print "[" i "," n[i] "]" }' "$FD/await-done-$repo.txt" "$FD/await-$repo.txt" | jq -sc sort)
-    cur+=$(record "$repo" "$main" "$now" "$await")$'\n'
+    one=$(record "$repo" "$main" "$now" "$await"); cur+=$one$'\n'; n=$((n + 1))
+    df=$FD/conveyor-down-$repo.txt; read -r _ dl _ 2>/dev/null < "$df" && [ "$dl" = "$now" ] && failed+=$df$'\n'
+    # Another record is still to be read, which can take minutes (a slow snapshot, health, then the longer read): a
+    # card of this one newly blocked or waiting for the owner's yes wakes now, in a wake of its own, marked reported.
+    [ "$n" -lt "$all" ] || continue
+    soon=$(awk -F'\t' '!cur { seen[$0]; next } $2 != "" && !(($1 "/" $2) in seen) && $5 != "" && ($3 == "blocked" || $3 == "needs the owner'"'"'s yes")' "$SEEN" cur=1 - <<<"$one")
+    [ -n "$soon" ] || continue
+    [ -z "${CONVEYOR_FOREMAN_SESSION_PID:-}" ] || kill -0 "$CONVEYOR_FOREMAN_SESSION_PID" 2>/dev/null || return 2
+    # The landings held of the records read so far go in it too, as they go with any wake: a live waiter can relay
+    # this wake and stop the watcher before the poll ends, and their key would then stay unreported with no new
+    # problem left to send them with. For the same stop, each record failed so far is timed now (downend).
+    downend
+    soon+=$'\n'$(awk -F'\t' -v OFS='\t' '!cur { seen[$0]; next } $3 == "held landing" && $2 != "" && !(($1 "/" $2) in seen) && $5 != "" { $3 = "landed"; print }' \
+      "$SEEN" cur=1 - <<<"$cur" | heldtext)
+    soon=$(grep . <<<"$soon")
+    wake <<<"$soon" | pending_put && awk -F'\t' '{ print $1 "/" $2 }' <<<"$soon" >> "$SEEN" || return 1
+    sent+=$soon$'\n'
   done <<<"$RECS"
+  downend
   holdlandings || return 1
   new=$(awk -F'\t' '!cur { seen[$0]; next } $2 != "" && !(($1 "/" $2) in seen) && $5 != ""' "$SEEN" cur=1 - <<<"$cur")
   # A new wake also names each blocked card an earlier wake holds that no session has got (unreported): the new
-  # problems are this wake's own, so they are left out of that list.
+  # problems are this wake's own, and those woken earlier in this poll (sent) are just put, so both are left out.
   if [ -n "$new" ]; then
     [ -z "${CONVEYOR_FOREMAN_SESSION_PID:-}" ] || kill -0 "$CONVEYOR_FOREMAN_SESSION_PID" 2>/dev/null || return 2
-    late=$(awk -F'\t' '!cur { n[$1 FS $2]; next } !(($1 FS $2) in n)' - cur=1 <<<"$new" <(printf '%s' "$cur") | unreported "$now")
+    late=$(awk -F'\t' '!cur { n[$1 FS $2]; next } !(($1 FS $2) in n)' - cur=1 <<<"$new"$'\n'"$sent" <(printf '%s' "$cur") | unreported "$now")
     { wake <<<"$new"; [ -z "$late" ] || printf '%s\n' "$late"; } | pending_put || return 1
   fi
   awk -F'\t' '$2 != "" { print $1 "/" $2 }' <<<"$cur" > "$SEEN.tmp" && mv "$SEEN.tmp" "$SEEN" || return 1
@@ -679,7 +731,7 @@ poll() { # 0 when a wake was put in pending; 2 when one was due but the session'
       END { for (i in l) if (l[i] + 0 > d[i] + 0) d[i] = l[i]; for (i in d) print i, d[i] }' "$SEEN" "$df" > "$df.tmp" \
       && mv "$df.tmp" "$df" || return 1
   done <<<"$RECS"
-  [ -n "$new" ]
+  [ -n "$new" ] || [ -n "$sent" ]
 }
 
 utc() { TZ=UTC0 printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$1"; }

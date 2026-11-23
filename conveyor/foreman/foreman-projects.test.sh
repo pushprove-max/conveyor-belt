@@ -31,6 +31,7 @@ trap 'kill $CONVEYOR_FOREMAN_SESSION_PID; rm -rf "$B" "$TERMS"' EXIT
 # from this temporary folder, in no checkout: an engine call that names no fixture checkout runs for none.
 cd "$B" || exit 1
 fail() { echo "FAIL [$CASE]: $*" >&2; exit 1; }
+at() { local d=$1; shift; (cd "$d" && "$@"); } # <folder> <command...>: the command run in that folder
 # What the Foreman's launcher exports (foreman.sh launch), and Claude Code's CLAUDE_PROJECT_DIR, name the real main
 # checkout and its Foreman; the loop also runs with CONVEYOR_MAIN set (machine.sh), so its cards inherit it. A case
 # that sets none of its own would run for that checkout: t_setup's launch (conveyor.sh foreman) would launch for it.
@@ -153,7 +154,6 @@ host '[]'
 FA=$ST/foreman FB=$T/beta/conveyor/state/foreman FG=$T/delta/conveyor/state/foreman
 mkdir -p "$T/ask3"; snap '[]' '[50]' > "$T/ask3/alpha"; snap '[]' '[]' > "$T/ask3/beta"; snap '[]' '[]' > "$T/ask3/delta"
 export CONVEYOR_FOREMAN_ASK="echo \$CONVEYOR_REPO >> $T/asked; case \$CONVEYOR_CMD in snapshot) cat $T/ask3/\$CONVEYOR_REPO ;; *) exit 3 ;; esac"
-at() { local d=$1; shift; (cd "$d" && "$@"); }
 out=$(at "$T/beta" bash "$SRC/foreman.sh" setup 2>&1) || fail "setup in beta failed: $out"
 grep -q '1 record' <<<"$out" && jq -e --arg fd "$FB" '.env.CONVEYOR_FOREMAN_DIR == $fd' "$FB/settings.json" >/dev/null \
   || fail "setup in beta did not set up beta's own Foreman in beta's state folder: $out"
@@ -417,7 +417,6 @@ open() { # <folder> <session> [<source>]: the hook as Claude Code runs it at the
   sess "$2" "${3:-startup}" | (cd "$1" && CLAUDE_PROJECT_DIR=$1 bash -c "$hook")
 }
 mark() { cut -d' ' -f1 "$FD/session" 2>/dev/null; }
-at() { local d=$1; shift; (cd "$d" && "$@"); }
 t_auto_skip() {
 CASE=auto-skip
 autohost

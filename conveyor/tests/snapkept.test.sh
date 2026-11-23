@@ -298,6 +298,23 @@ t_snapkeptnow() {
   exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the reads exited non-zero"
 }
 
+# Bug caught: loop.json, written at the loop's last turn, still counts a card that landed after it as running, and
+# landed counted that card too, so the Foreman's status read "2 on the belt now" for one card. A card loop.json's
+# cards name is left to running; one landed before its turn, as in t_snapkeptnow, is counted in landed. c2 lands in
+# the second loop.json is written (or the one before): a test of the two times could not tell which came first.
+t_snapkeptlanding() {
+  local out now
+  snapkept_setup
+  snapkept_quiet 20
+  now=$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' -1)
+  jq -cn --argjson p "$$" '{pid: $p, state: "running", building: 1, waiting: 0, running: 1, cards: ["c2"]}' > "$ST/loop.json"
+  snapkept_line c2 2 landed ok 09 "{\"time\": \"$now\", \"sha\": \"abd\", \"product\": false}" >> "$ST/cards.jsonl"
+  out=$(loop snapshot) || fail "the reader exited non-zero"
+  jq -e '.recordsNewer == true and .recordsNow.running == 1 and .recordsNow.landed == 0' <<<"$out" > /dev/null \
+    || fail "with loop.json (running 1, cards [c2]) written in the second c2 landed, $now, the reader does not count c2 once: $(jq -c '{recordsNewer, recordsNow}' <<<"$out")"
+  loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
+}
+
 # Bug (#1334): the snapshot read the open issues only from the stream's copy, which `watch` asks of GitHub once a
 # minute, so an issue the loop's own list (issues.json, asked of GitHub before each pick) already held waited up to that
 # minute to show in Queue. Here the stream's copy holds #1 to #3 and the loop's list, written after the kept snapshot,

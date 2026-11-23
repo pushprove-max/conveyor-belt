@@ -513,7 +513,30 @@ echo new > "$FD/started"
 up "$bp" || fail "CONVEYOR_WAITER_START=1 waiter.sh (input $in, no CONVEYOR_FOREMAN) started no waiter once foreman.sh start ended: $(cat "$FD/waiter.log" 2>/dev/null)"
 }
 
-cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed resumed slowsid noreader stopover reclaim checkquiet startwake startother startlive startover startheld startclaim startadopt)
+# Bugs caught: a watcher put a wake for #7, #8 and #9 blocked during a turn, `conveyor.sh retry 7` and `retry 9` ran in
+# that turn, and the stop relayed the wake as written: the Foreman acted on #7 and #9 again. #7's retry blocked again,
+# for another reason, before the stop: a wake kept while health still listed #7 relayed its old reason. A reminder of
+# #10, whose first block carried the note that the findings could not be posted on the issue, was kept when #10's retry
+# blocked for the same reason without that note: the old reason was read as the start of the new one. The stop reads
+# the record's health first (CONVEYOR_FOREMAN_ASK: #7 blocked since a later time, #8 as the wake says, its line marked
+# with the time of an older snapshot, #9 gone, #10 for the reason alone since the time its reminder names, so only its
+# reason tells the new block from the old) and relays the wake with #8 alone. pending_fresh's other cases are in
+# waiter-fresh.test.sh.
+t_retried() {
+fixture retried; mkdir -p "$FD/pending" "$XDG_CONFIG_HOME/conveyor" "$T/alpha"
+jq -n --arg m "$T/alpha" '{records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+printf '%s\n' 'Conveyor: alpha: blocked: #7 #8; still blocked: #9 #10; landed: #3' 'alpha: #7 is blocked since 2026-11-19T09:58:00Z: tests failed' \
+  'alpha: #8 is blocked since 2026-11-19T09:59:00Z: review said no (as of 09:59Z)' 'alpha: #9 has been blocked for 2h0m (since 2026-11-19T08:00:00Z): the build failed' \
+  'alpha: #10 has been blocked for 30m (since 2026-11-19T09:30:00Z): tests failed [this could not be posted on the issue]' \
+  'alpha: #3 landed as abc: your step is due' > "$FD/pending/20261119T100000Z-1-a.wake"
+CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" = health ] || exit 3; echo "{\"blocked\": [{\"card\": \"c7b\", \"issue\": 7, \"since\": \"2026-11-19T10:05:00Z\", \"reason\": \"the review found a flaw\"},
+  {\"card\": \"c8\", \"issue\": 8, \"since\": \"2026-11-19T09:59:00Z\", \"reason\": \"review said no\"},
+  {\"card\": \"c10b\", \"issue\": 10, \"since\": \"2026-11-19T09:30:00Z\", \"reason\": \"tests failed\"}]}"' stop; rc=$?
+[ "$rc" = 2 ] && [ "$(cat "$T/wake")" = $'Conveyor: alpha: blocked: #8; landed: #3\nalpha: #8 is blocked since 2026-11-19T09:59:00Z: review said no (as of 09:59Z)\nalpha: #3 landed as abc: your step is due' ] \
+  || fail "for a wake of #7, #8 and #9 blocked and #10 still blocked for 'tests failed [this could not be posted on the issue]', and health holding #8 as the wake says, #7 blocked again since 10:05 for another reason, #9 not at all and #10 for 'tests failed' alone since 09:30, the stop did not relay the wake with #8 alone (exit $rc): $(cat "$T/wake")"
+}
+
+cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed resumed slowsid noreader stopover reclaim checkquiet startwake startother startlive startover startheld startclaim startadopt retried)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

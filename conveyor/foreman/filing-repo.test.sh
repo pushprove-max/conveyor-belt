@@ -65,7 +65,54 @@ held_ otherworktree worktree & d=$!
 ( out=$(other_ nomatch https://github.com/example/folder-name https://github.com/example/other-name/issues/5) || { echo "FAIL [nomatch]: the fixture was not made: $out" >&2; exit 1; }
   [ ! -s "$B/nomatch/calls" ] || ! grep -qE 'control (adopt|hold)' "$B/nomatch/calls" || { echo "FAIL [nomatch]: an issue was held in a record not of example/other-name: $(cat "$B/nomatch/calls")" >&2; exit 1; }
   r=$(jq -r '.reason // empty' <<<"$out" 2>/dev/null)
-  [[ $r == *'Not held in Conveyor: 5 of other-name: no record of '*'is for other-name; it looked at Folder-Name (main '"$B/nomatch/Folder-Name"')'* \
+  [[ $r == *'Not held in Conveyor: 5 of example/other-name: no record of '*'is for example/other-name; it looked at Folder-Name (main '"$B/nomatch/Folder-Name"')'* \
     && $r == *'Set the "main" of its record in '*'or run conveyor.sh setup in that checkout'* ]] \
     || { echo "FAIL [nomatch]: the message does not name the repository, the records and the fix: $out" >&2; exit 1; } ) & e=$!
-rc=0; for p in "$a" "$b" "$c" "$d" "$e"; do wait "$p" || rc=1; done; exit "$rc"
+# D6: two records whose mains' repositories share a name under two owners, example/other-name first. Bug caught: the
+# owner was dropped from the link and the remotes, so an issue of another-owner/other-name was held in the first.
+( T=$B/owners; export XDG_CONFIG_HOME=$T/config HOME=$T/home
+  { mkdir -p "$XDG_CONFIG_HOME/conveyor/filing" "$HOME" "$T/fd" && git init -q "$T/first" && git -C "$T/first" remote add origin https://github.com/example/other-name \
+    && git init -q "$T/second" && git -C "$T/second" remote add origin git@github.com:another-owner/other-name.git \
+    && jq -n --arg a "$T/first" --arg b "$T/second" '{records: [{repo: "first", main: $a}, {repo: "second", main: $b}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"; } >&2 \
+    || { echo "FAIL [owners]: the fixture was not made" >&2; exit 1; }
+  l=https://github.com/another-owner/other-name/issues/5
+  out=$(jq -cn --arg l "$l" '{session_id: "s1", tool_use_id: "x", hook_event_name: "PostToolUse", tool_input: {command: "gh issue create --title example --body example"},
+      tool_response: {stdout: "\($l)\n", stderr: ""}}' \
+    | (cd "$T/first" && CONVEYOR_MAIN=$T/first CONVEYOR_LANE=research CONVEYOR_FOREMAN_DIR=$T/fd \
+        CONVEYOR_FOREMAN_ASK="echo \"\$CONVEYOR_REPO \$CONVEYOR_MAIN \$CONVEYOR_CMD\" >> $T/calls; echo '{\"held\":[5]}'" bash "$SRC/foreman.sh" filed) 2>&1)
+  [ "$(cat "$T/calls" 2>/dev/null)" = "second $T/second control adopt 5" ] \
+    || { echo "FAIL [owners]: for the output $l, the record calls were not one adopt of 5 in second: $(cat "$T/calls" 2>/dev/null) $out" >&2; exit 1; } ) & f=$!
+# The same two repositories with both mains on the host file's ssh host, the record of example/other-name named
+# other-name; the first main's path is no folder on this machine, the second's an empty folder. Bugs caught: a main not
+# on this machine was passed over, and then a main whose path was a folder here with no checkout in it, so the record
+# named other-name was taken by its name and the issue of another-owner/other-name was held there, or none held it.
+( T=$B/sshowners; export XDG_CONFIG_HOME=$T/config HOME=$T/home
+  { mkdir -p "$XDG_CONFIG_HOME/conveyor/filing" "$HOME" "$T/fd" "$T/bin" "$T/host/second" && git init -q "$T/real/first" && git -C "$T/real/first" remote add origin https://github.com/example/other-name \
+    && git init -q "$T/real/second" && git -C "$T/real/second" remote add origin git@github.com:another-owner/other-name.git \
+    && jq -n --arg a "$T/host/first" --arg b "$T/host/second" '{ssh: "example-host", records: [{repo: "other-name", main: $a}, {repo: "second", main: $b}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
+    && printf '#!/usr/bin/env bash\nh=%q r=%q c=${*: -1}; exec bash -c "${c//"$h"/"$r"}"\n' "$T/host" "$T/real" > "$T/bin/ssh" && chmod +x "$T/bin/ssh"; } >&2 \
+    || { echo "FAIL [sshowners]: the fixture was not made" >&2; exit 1; } # ssh: the host, its command run here with the host's paths read from real
+  l=https://github.com/another-owner/other-name/issues/5
+  out=$(jq -cn --arg l "$l" '{session_id: "s1", tool_use_id: "x", hook_event_name: "PostToolUse", tool_input: {command: "gh issue create --title example --body example"},
+      tool_response: {stdout: "\($l)\n", stderr: ""}}' \
+    | (cd "$T/real/first" && PATH=$T/bin:$PATH CONVEYOR_MAIN=$T/real/first CONVEYOR_LANE=research CONVEYOR_FOREMAN_DIR=$T/fd \
+        CONVEYOR_FOREMAN_ASK="echo \"\$CONVEYOR_REPO \$CONVEYOR_MAIN \$CONVEYOR_CMD\" >> $T/calls; echo '{\"held\":[5]}'" bash "$SRC/foreman.sh" filed) 2>&1)
+  [ "$(cat "$T/calls" 2>/dev/null)" = "second $T/host/second control adopt 5" ] \
+    || { echo "FAIL [sshowners]: for the output $l, with both mains on the ssh host (the second's path an empty folder here), the record calls were not one adopt of 5 in second: $(cat "$T/calls" 2>/dev/null) $out" >&2; exit 1; } ) & g=$!
+# A record named other-name whose main's remote is example/first-project, and no record of another-owner/other-name.
+# Bug caught: the record was taken by its name, as only a remote of that name under another owner was passed over, so
+# an issue of another-owner/other-name was held in example/first-project's record.
+( T=$B/othername; export XDG_CONFIG_HOME=$T/config HOME=$T/home
+  { mkdir -p "$XDG_CONFIG_HOME/conveyor/filing" "$HOME" "$T/fd" && git init -q "$T/first" && git -C "$T/first" remote add origin https://github.com/example/first-project \
+    && jq -n --arg a "$T/first" '{records: [{repo: "other-name", main: $a}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"; } >&2 \
+    || { echo "FAIL [othername]: the fixture was not made" >&2; exit 1; }
+  l=https://github.com/another-owner/other-name/issues/5
+  out=$(jq -cn --arg l "$l" '{session_id: "s1", tool_use_id: "x", hook_event_name: "PostToolUse", tool_input: {command: "gh issue create --title example --body example"},
+      tool_response: {stdout: "\($l)\n", stderr: ""}}' \
+    | (cd "$T/first" && CONVEYOR_MAIN=$T/first CONVEYOR_LANE=research CONVEYOR_FOREMAN_DIR=$T/fd \
+        CONVEYOR_FOREMAN_ASK="echo \"\$CONVEYOR_REPO \$CONVEYOR_MAIN \$CONVEYOR_CMD\" >> $T/calls; echo '{\"held\":[5]}'" bash "$SRC/foreman.sh" filed) 2>&1)
+  ! grep -qE 'control (adopt|hold)' "$T/calls" 2>/dev/null \
+    || { echo "FAIL [othername]: for the output $l, an issue was held in the record of example/first-project: $(cat "$T/calls") $out" >&2; exit 1; }
+  [[ $out == *'Not held in Conveyor: 5 of another-owner/other-name'* ]] \
+    || { echo "FAIL [othername]: for the output $l, the hook did not say issue 5 is not held: $out" >&2; exit 1; } ) & h=$!
+rc=0; for p in "$a" "$b" "$c" "$d" "$e" "$f" "$g" "$h"; do wait "$p" || rc=1; done; exit "$rc"

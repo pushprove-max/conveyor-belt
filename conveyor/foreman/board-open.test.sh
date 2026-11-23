@@ -12,7 +12,9 @@ B=$(mktemp -d) || exit 1
 LSN=''
 trap 'kill $LSN $(cat "$B"/*/server 2>/dev/null) 2>/dev/null; rm -rf "$B"' EXIT
 cd "$B" || exit 1
-unset CONVEYOR_FOREMAN CONVEYOR_FOREMAN_LAUNCH CONVEYOR_CARD CONVEYOR_LANE CLAUDE_CONFIG_DIR CLAUDE_PROJECT_DIR CLAUDE_PLUGIN_OPTION_boardAutoOpen
+# A card session runs with CLAUDE_CODE_PROMPT_CACHE_TTL=5m (card-settings.json): the claim would print its cache
+# warning as line 2, where t_down and t_fresh read the Board line.
+unset CONVEYOR_FOREMAN CONVEYOR_FOREMAN_LAUNCH CONVEYOR_CARD CONVEYOR_LANE CLAUDE_CONFIG_DIR CLAUDE_PROJECT_DIR CLAUDE_PLUGIN_OPTION_boardAutoOpen CLAUDE_CODE_PROMPT_CACHE_TTL
 # Records cannot be asked here: the live summary says so, which the claim's context prints all the same.
 export CONVEYOR_FOREMAN_ASK='exit 3'
 mkdir -p "$B/bin"

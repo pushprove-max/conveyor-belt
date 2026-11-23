@@ -24,7 +24,7 @@ fixture() { # <repo> <issue>...
 # and the issues blocked; a jq filter after them changes it.
 snap() { # <repo> <belt issues> <pushed issues> <blocked issues> [<jq filter>]
   jq -n --argjson belt "[${2:-}]" --argjson pushed "[${3:-}]" --argjson blocked "[${4:-}]" '{queue: {next: [{issue: 99}]}, open: {held: []}, suites: [],
-    belt: [$belt[] | {card: "c\(.)", issue: ., step: "build"}], pushedCards: [$pushed[] | {card: "c\(.)", issue: .}],
+    belt: [$belt[] | {card: "c\(.)", issue: ., step: "build"}], pushedCards: [$pushed[] | {card: "c\(.)", issue: ., sha: "\(. + 100000000000 | tostring)abcdef"}],
     landed: [$pushed[] | {card: "c\(.)", issue: ., sha: "\(. + 100000000000 | tostring)abcdef"}],
     health: {time: "2026-11-17T08:00:00Z", loop: true, gh: true, stuck: [], waiting: [], pushFailingSince: null,
       blocked: [$blocked[] | {card: "c\(.)", issue: ., since: "2026-11-17T07:00:00Z", reason: "the review found a flaw"}]}} | '"${5:-.}" > "$T/$1.json"
@@ -91,7 +91,8 @@ check 'the wake names it and its commit' has restart 'restart: #1 landed as 1000
 fixture later 1 2
 snap later 2 1
 check 'a landing held on its day: no wake' nope poll later
-snap later '' '1, 2' '' 'del(.landed[] | select(.issue == 1))'
+# #1's push names no commit either, so only the commit saved while it was held can name it.
+snap later '' '1, 2' '' 'del(.landed[] | select(.issue == 1)) | del(.pushedCards[] | select(.issue == 1) | .sha)'
 check 'the batch ends on a later day: one wake' poll later
 check 'it still names the commit of the landing of the day before' has later 'later: #1 landed as 100000000001: your step is due'
 check 'and the commit of the last landing' has later 'later: #2 landed as 100000000002: your step is due'
@@ -139,12 +140,29 @@ check 'and the last landing' has agedheld 'agedheld: #2 landed as 100000000002: 
 fixture gone 1 2
 snap gone 2 1
 check 'a landing held on its day: no wake' nope poll gone
-snap gone '' '1, 2' '' 'del(.landed[] | select(.issue == 1))'
+snap gone '' '1, 2' '' 'del(.landed[] | select(.issue == 1)) | del(.pushedCards[] | select(.issue == 1) | .sha)'
 true & dead=$!; wait "$dead"
 CONVEYOR_FOREMAN_SESSION_PID=$dead poll gone 2>/dev/null
 check 'the batch ends on a later day while the session has ended: no wake put' nope compgen -G "$T/gone.fd/pending/*.wake"
 check 'the next waiter sends one wake' poll gone
 check 'it still names the commit of the landing of the day before' has gone 'gone: #1 landed as 100000000001: your step is due'
 check 'and the commit of the last landing' has gone 'gone: #2 landed as 100000000002: your step is due'
+
+# Bug it catches: #1 landed the day before with push off and was pushed today, with #2, which landed today: today's
+# snapshot lists #1 pushed but not among its landings (today's only, in the history too), so the batch's wake named no
+# commit for #1. Its pushedCards entry holds the commit.
+fixture pushlater 1 2
+snap pushlater '' '1, 2' '' 'del(.landed[] | select(.issue == 1))'
+check 'both pushed: one wake' poll pushlater
+check 'it names the commit of the landing of the day before, from pushedCards' has pushlater 'pushlater: #1 landed as 100000000001: your step is due'
+
+# Bug it catches: the same push, read while metrics.cards already showed #1 pushed (landed, not in health's unpushed)
+# and the engine had not yet written its pushed line: #1 was in neither landed nor pushedCards, here or in the history,
+# so the wake named no commit for it. Its metrics.cards row holds the commit.
+fixture pushnoline 1 2
+snap pushnoline '' '1, 2' '' 'del(.landed[] | select(.issue == 1)) | del(.pushedCards[] | select(.issue == 1))
+  | .metrics.cards = [{card: "c1", issue: 1, state: "landed", sha: "100000000001abcdef"}]'
+check 'both pushed, #1 by metrics.cards alone: one wake' poll pushnoline
+check 'it names the commit of the landing of the day before, from metrics.cards' has pushnoline 'pushnoline: #1 landed as 100000000001: your step is due'
 
 [ "$fails" = 0 ] || { cat "$T"/*.err >&2; exit 1; }

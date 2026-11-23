@@ -190,6 +190,22 @@ t_issuecard() {
     || fail "for the reply '$reply' the note's card field is not - or its text lost an issue number: $(cat "$FD/plugin-bugs.md" 2>&1)"
 }
 
+# Bugs caught: the note's card was the first card-shaped word of the line, so an evidence file named before the card
+# field gave c...-alpha-7.err, and the Board then blanked that file name to <card> and left the bare card id; and the
+# first "card <id>" words, so a description that compares another card ("compare card c...-alpha-6") gave that card.
+t_cardfield() {
+  fixture cardfield https://github.com/example/alpha
+  line='Plugin problem (for the conveyor-belt repo): compare card c20261118T045400-alpha-6 with ~/cards/c20261118T045400-alpha-7.err, the card never ends, card c20261118T045400-alpha-7, evidence ~/cards/x.log'
+  out=$(turn u1 "$line"); [ -z "$out" ] || fail "the plugin problem '$line' was refused: $out"
+  grep -qE '^- [^ ]+ · card c20261118T045400-alpha-7 · ' "$FD/plugin-bugs.md" \
+    || fail "for the plugin problem '$line' the note's card is not c20261118T045400-alpha-7: $(cat "$FD/plugin-bugs.md" 2>&1)"
+  # Bug caught: a card field of "-" (no card) was passed over as no field, so the card the description compares was taken.
+  line='Plugin problem (for the conveyor-belt repo): compare card c20261118T045400-alpha-6, status shows the wrong count, status should show one card, card -, evidence -'
+  out=$(turn u2 "$line"); [ -z "$out" ] || fail "the plugin problem '$line' was refused: $out"
+  grep -qE '^- [^ ]+ · card - · compare card c20261118T045400-alpha-6, status shows the wrong count' "$FD/plugin-bugs.md" \
+    || fail "for the plugin problem '$line' the note's card is not -: $(cat "$FD/plugin-bugs.md" 2>&1)"
+}
+
 # Bug (#1357): the refusal of a [likely] line was fooled by deleting the tag, which left an unmarked guess in the
 # report. A line may carry "cause not checked: <text>" before its card and evidence: it passes and is noted whole, with
 # its card and evidence fields read from the rest of the line (not from the cause).

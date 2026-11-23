@@ -151,7 +151,8 @@ snapprint() {
 # review and in its Test step too), null when no process of that loop lives; landed, the
 # count of landed cards on the belt for their push, which no loop count holds: those the kept snapshot's belt has
 # landed with no closing line since, and, unless the rule "Push when a card lands" is off, each card whose last
-# closing line since is landed (a card pushed since leaves it, though the belt keeps it until its issue closes); started,
+# closing line since is landed (a card pushed since leaves it, though the belt keeps it until its issue closes), but
+# for one loop.json's cards still name: running counts it until the loop's next turn; started,
 # each card picked since that the kept belt does not hold, with no closing line since and still in the records, as a
 # belt card {card, issue, name, title, step (from its last step line, as rows.jq names it, roughly), stepAt, landed
 # false, fromRecords true: it is in no full build yet, so it has no track, model or cost}. Nothing is
@@ -169,7 +170,8 @@ recordsnow() { # <snapshotAt> [<counts>]
   o=$(jq -er '.owner.name | strings' "$MAIN/.conveyor/project.json" 2>/dev/null) || return 1
   yesforms "$o"
   p=$(jq -r '.pid | numbers' "$SAYS" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null \
-    && b=$(jq -c '{building: (.building | numbers), waiting: (.waiting | numbers), running: (.running | numbers)}' "$SAYS" 2>/dev/null) && [ -n "$b" ] || b=null
+    && b=$(jq -c '{building: (.building | numbers), waiting: (.waiting | numbers), running: (.running | numbers), cards: [.cards | arrays | .[] | strings]}' "$SAYS" 2>/dev/null) \
+    && [ -n "$b" ] || b=null
   LC_ALL=C awk -v t="\"time\":\"$1\"" -v f="${2:-}" 'BEGIN { if (f != "") { while ((r = (getline l < f)) > 0) { j = index(l, "\t"); k[substr(l, j + 1)] = substr(l, 1, j - 1) + 0 }; if (r < 0) f = "" } }
     { c = ""; if (f != "" && match($0, /^\{"card":"[^"]*"/)) { c = substr($0, 10, RLENGTH - 10); s[c]++ }
       i = index($0, "\"time\":\""); if ((c != "" && s[c] > k[c]) || (i && substr($0, i, length(t)) >= t)) print }' "$STATE" \
@@ -195,7 +197,7 @@ recordsnow() { # <snapshotAt> [<counts>]
         {blocked: [$all[] | select(yes | not)], waiting: [$all[] | select(yes) | . + {sentence: (.reason | if startswith($lintyes) then ltrimstr($lintyes) else ltrimstr($yes) end)}],
          building: $loop.building, waitingCount: $loop.waiting, running: $loop.running,
          landed: ([$s.belt | arrays | .[] | objects | select(.landed == true and (.card | type) == "string" and $have[.card] != null and $ended[.card] == null) | .card]
-           + (if $push == false then [] else [$ends[] | select(.step == "landed") | .card] end) | unique | length),
+           + (if $push == false then [] else [$ends[] | select(.step == "landed" and (.card | IN($loop.cards // [] | .[]) | not)) | .card] end) | unique | length),
          started: (([$s.belt | arrays | .[] | objects | .card | strings] | INDEX(.)) as $onbelt
            | [$new | group_by(.card)[] | select(any(.step == "picked") and $have[.[0].card] != null and $onbelt[.[0].card] == null and $ended[.[0].card] == null)
              | (map(select(.step | IN("brief", "build", "fix", "rebase", "review", "test"))) | last) as $l

@@ -302,6 +302,67 @@ CONVEYOR_FOREMAN_NOW=$((NOW + 180)) poll || fail "no wake for the new outage on 
 grep -qF 'alpha: no snapshot for 3 minutes' "$FD"/pending/*.wake || fail "the wake does not name the new outage: $(cat "$FD"/pending/*.wake)"
 }
 
+# Bug caught: a failed poll that makes the longer read takes over 3 minutes, so the next poll started more than three
+# polls (180 s) after the saved start of the last one: each such poll began a new outage, dropped its reported
+# unreachable key, and the same outage woke the Foreman again a few polls later. The reads here fail after 2 s each,
+# so a poll with the longer read takes 4 s or more, and the next starts 183 s after it began: 179 s or less after its end.
+t_outageslow() {
+CASE=outageslow; fixture outageslow; mkdir -p "$FD"
+export CONVEYOR_FOREMAN_ASK="[ \"\$CONVEYOR_CMD\" = health ] && exit 1; sleep 2; echo 'conveyor: no snapshot' >&2; exit 1" # sleep: a slow failed read, the time the poll's end is timed by
+echo "$((NOW - 600)) $((NOW - 60)) 3" > "$FD/conveyor-down-alpha.txt"; echo alpha/unreachable > "$FD/conveyor-reported.txt"
+poll && fail "the outage, already reported, woke again: $(cat "$FD"/pending/*.wake)"
+CONVEYOR_FOREMAN_NOW=$((NOW + 183)) poll && fail "the outage, already reported, woke again 183 s on: $(cat "$FD"/pending/*.wake)"
+read -r first _ fails < "$FD/conveyor-down-alpha.txt"
+[ "$first" = $((NOW - 600)) ] && [ "$fails" = 5 ] && grep -qxF alpha/unreachable "$FD/conveyor-reported.txt" \
+  || fail "a poll 183 s after the start of a 4 s failed poll began a new outage: $(cat "$FD/conveyor-down-alpha.txt"; cat "$FD/conveyor-reported.txt")"
+}
+
+# Two records: alpha, read first, whose reads fail at once, and beta, whose reads fail after 2 s each. Bug caught:
+# alpha's failed poll was timed at the end of its own read, before beta's longer read made the poll as long, so with
+# the next poll 183 s after the start of a 4 s poll, alpha began a new outage and its reported unreachable key was
+# dropped, though alpha never came back. Both are timed at the poll's end: neither begins a new outage.
+t_outageother() {
+CASE=outageother; fixture outageother; mkdir -p "$FD"
+git init -q "$T/beta" && mkdir -p "$T/beta/.conveyor" && echo '{}' > "$T/beta/.conveyor/project.json" \
+  && jq -n --arg s "$T/state" --arg a "$M" --arg b "$T/beta" '{stateDir: $s, records: [{repo: "alpha", main: $a}, {repo: "beta", main: $b}],
+    foreman: {groups: [["alpha", "beta"]]}}' > "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the fixture was not made"
+export CONVEYOR_FOREMAN_ASK="[ \"\$CONVEYOR_CMD\" = health ] && exit 1; [ \"\$CONVEYOR_REPO\" = alpha ] || sleep 2; echo 'conveyor: no snapshot' >&2; exit 1" # sleep: beta's slow failed read, which makes the poll as long
+for r in alpha beta; do echo "$((NOW - 600)) $((NOW - 60)) 3" > "$FD/conveyor-down-$r.txt"; echo "$r/unreachable" >> "$FD/conveyor-reported.txt"; done
+poll && fail "the outages, already reported, woke again: $(cat "$FD"/pending/*.wake)"
+CONVEYOR_FOREMAN_NOW=$((NOW + 183)) poll && fail "the outages, already reported, woke again 183 s on: $(cat "$FD"/pending/*.wake)"
+local r
+for r in alpha beta; do
+  read -r first _ fails < "$FD/conveyor-down-$r.txt"
+  [ "$first" = $((NOW - 600)) ] && [ "$fails" = 5 ] && grep -qxF "$r/unreachable" "$FD/conveyor-reported.txt" \
+    || fail "$r, in a poll whose second record's failed read took 4 s, began a new outage at the next poll 183 s after that poll's start: $(cat "$FD/conveyor-down-$r.txt"; cat "$FD/conveyor-reported.txt")"
+done
+}
+
+# Three records: alpha, in an outage already reported, whose reads fail after 2 s each; beta with a card newly
+# blocked, which wakes before gamma is read; gamma, whose snapshot stub copies alpha's outage file as it stands then:
+# what a waiter that relays beta's wake and stops the watcher during gamma's read leaves. Bug caught: alpha's failed
+# poll was timed at the poll's start until the poll's end, which a stopped watcher never reaches, so the next poll,
+# 183 s after this one's start, began a new outage and woke the Foreman on it again. Timed at beta's wake (4 s or more
+# after the start), it is under 180 s before that poll.
+t_outagestop() {
+CASE=outagestop; fixture outagestop; mkdir -p "$FD"
+local r
+for r in beta gamma; do git init -q "$T/$r" && mkdir -p "$T/$r/.conveyor" && echo '{}' > "$T/$r/.conveyor/project.json" || fail "the fixture was not made"; done
+jq -n --arg s "$T/state" --arg a "$M" --arg b "$T/beta" --arg g "$T/gamma" '{stateDir: $s, records: [{repo: "alpha", main: $a}, {repo: "beta", main: $b}, {repo: "gamma", main: $g}],
+    foreman: {groups: [["alpha", "beta", "gamma"]]}}' > "$XDG_CONFIG_HOME/conveyor/host.json" && snap . && mv "$T/snap" "$T/gsnap" \
+  && snap '.health.blocked = [{card: "c4", issue: 4, since: "2026-11-15T11:58:00Z", reason: "the review found a flaw"}]' || fail "the fixture was not made"
+export CONVEYOR_FOREMAN_ASK="case \$CONVEYOR_REPO:\$CONVEYOR_CMD in beta:snapshot) cat $T/snap ;; beta:health) jq -c .health $T/snap ;;
+  gamma:snapshot) cp $FD/conveyor-down-alpha.txt $T/downseen; cat $T/gsnap ;; gamma:health) jq -c .health $T/gsnap ;;
+  alpha:health) exit 1 ;; alpha:*) sleep 2; echo 'conveyor: no snapshot' >&2; exit 1 ;; *) exit 3 ;; esac" # sleep: alpha's slow failed reads, which make the poll as long
+echo "$((NOW - 600)) $((NOW - 60)) 3" > "$FD/conveyor-down-alpha.txt"; echo alpha/unreachable > "$FD/conveyor-reported.txt"
+poll || fail "beta's newly blocked #4 woke nothing: $(cat "$T/err")"
+grep -qxF 'beta: #4 is blocked since 2026-11-15T11:58:00Z: the review found a flaw' "$FD"/pending/*.wake || fail "no wake names beta's #4: $(cat "$FD"/pending/*.wake)"
+local last
+read -r first last fails < "$T/downseen"
+[ "$first" = $((NOW - 600)) ] && [ "$fails" = 4 ] && [ "$last" -ge $((NOW + 4)) ] \
+  || fail "alpha's outage file, as it stood after beta's wake was put (first, last failed poll timed at its end, fails), is not $((NOW - 600)) $((NOW + 4)) or later, 4: $(cat "$T/downseen")"
+}
+
 # Issue 357: each poll writes one line to the poll log: its start, end, time taken, each record's outcome and the read
 # it used; the log keeps to its limit. Bug it catches: nothing told how long each poll took, so a late wake could not
 # be explained from the logs.
@@ -338,6 +399,22 @@ w=$(cat "$(find "$FD/pending" -name '*.wake' ! -name "${old##*/}")")
 grep -qxF 'alpha: #5 is blocked since 2026-11-15T11:00:00Z: tests failed twice' <<<"$w" || fail "the wake does not name #5: $w"
 [ "$(grep 'not yet reported' <<<"$w")" = 'alpha: not yet reported: blocked #8' ] \
   || fail "the wake does not name the pending #8 alone as not yet reported: $w"
+}
+
+# Bug caught: a wake relayed at a stop that stop.sh refused is kept as <wake>.sent-<session>.<pid>, its key reported,
+# and the waiter relays it again later; the status read only pending/*.wake, so it left that card out meanwhile. A
+# wake relayed at a stop that was not refused reached the session: its card is not named.
+t_unrepsent() {
+CASE=unrepsent; fixture unrepsent; mkdir -p "$FD/pending"
+snap '.health.blocked = [{card: "c9", issue: 9, since: "2026-11-15T11:00:00Z", reason: "tests failed twice"}]'
+echo alpha/blocked:c9 > "$FD/conveyor-reported.txt"
+printf '%s\n' 'Conveyor: alpha: blocked: #9' 'alpha: #9 is blocked since 2026-11-15T11:00:00Z: tests failed twice' > "$FD/pending/20261115T110000Z-1-x.wake.sent-S.42"
+echo k1 > "$FD/sent-stop"; echo k1 > "$FD/refused-stops"
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+grep -qx 'not yet reported: blocked #9' <<<"$out" || fail "with the wake of #9 relayed at the refused stop k1, the status does not name #9 as not yet reported: $out"
+echo k2 > "$FD/sent-stop"
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+! grep -q 'not yet reported' <<<"$out" || fail "with the wake of #9 relayed at the stop k2, not refused, the status names it as not yet reported: $out"
 }
 
 # Issue 1029: `serve` and all under it were stopped by a stop signal (state T), and the wake said only "#N is stuck:
@@ -456,7 +533,7 @@ watcher: last poll ended 2026-11-15T11:59:47Z, took 47 s (alpha: slow, read heal
 waiter: listening" ] || fail "ask alpha foreman status (host devhost, live waiter $wp) did not give this Foreman's watcher and waiter: $out"
 }
 
-cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake polllog unreported stopped resumed resumedhost askhost)
+cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog unreported unrepsent stopped resumed resumedhost askhost)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

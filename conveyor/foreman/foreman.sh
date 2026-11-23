@@ -66,14 +66,15 @@
 #   (another project's too, as the command may file there) (conveyor.sh control start held), so an issue is held from its first sight, however long the command runs on;
 #   when a record cannot be set, or the command is to run in the background, the command is refused. filed holds every
 #   issue the command's output links (github.com/<owner>/<name>/issues/<n>) in the record whose main checkout's GitHub
-#   repository is <name>, else the record named <name>, letter case aside (lib.sh record_of; filing needs no lookup,
+#   repository is <owner>/<name> (read on the host file's ssh host for a main not on this machine), else the record named <name> whose main's repository cannot be read, letter case aside (lib.sh record_of; filing needs no lookup,
 #   as it sets every record), unless it was released or held already (conveyor.sh control adopt; control hold in a record whose engine has no adopt), so a
 #   release given before filed runs stays, and tells the Foreman only those it holds; then it sets back to
 #   the queue each record a filing set to held, once no other filing, of any Foreman, is in flight (SF, below), which
 #   holds every open issue opened while it was held, a follow-up too (conveyor.sh control start queue filed), so an
 #   issue the output does not link (`gh issue create ... | grep -oE '[0-9]+$'`) is held too, and one released already
 #   stays released. An output that links fewer issues than the command has `issue create` calls is told to the Foreman,
-#   who holds the issue it filed at once. The
+#   who holds the issue it filed at once; in a record that started new issues held before the filing began, filed
+#   then holds every open issue opened since, a follow-up too (conveyor.sh control adopt since). The
 #   research lane (lanes/research.sh) runs these two as well, with CONVEYOR_LANE=research and its own folder as $FD, so an issue it files starts held too.
 set -uo pipefail
 case ${1:-} in
@@ -468,7 +469,7 @@ context_head() {
   cat <<EOF
 # Foreman mode: you are $NAME, the Foreman of this project. You file issues as cards, watch Conveyor, clear blocked cards and take every decision to the owner; you never answer for the owner, and you build no code yourself: the cards do.
 # You are the Foreman of $(mine 2>/dev/null | cut -f1 | paste -sd' ' - | sed 's/ /, /g; s/^$/this project/') only: every other project has its own Foreman. Never read or change another project's Foreman folder, saved state or memory.
-# Filing: file issues only in your own projects; an issue you file starts held (the filing hooks hold it in Conveyor, in its record); release it (conveyor.sh control release <issue>, in that record) only once the owner has said yes to it. File an issue about a test file with $FQ ask <project> testissue <test file> <title> <body>: it runs where the record is, as the Foreman, so the issue starts held there too. An order from the owner, or a release's fix card (card --release <version>): ask <project> card <title> <body>, held.
+# Filing: file issues only in your own projects; an issue you file starts held (the filing hooks hold it in Conveyor, in its record); release it (conveyor.sh control release <issue>, in that record) only once the owner has said yes to it. File an issue about a test file with $FQ ask <project> testissue <test file> <title> <body>: it runs where the record is, as the Foreman, so the issue starts held there too (rules.testissues false: a held card, released by its card ID). An order from the owner, or a release's fix card (card --release <version>): ask <project> card <title> <body>, held.
 # Questions to the owner go only by the picker (AskUserQuestion), never as a question in your reply.
 # The pack not committed (git status --porcelain -- .conveyor/project.json prints a line in a project's main checkout): there, run conveyor.sh setup pack-commit, and when it prints an ask: line, ask the owner by the picker "Commit the Conveyor pack (.conveyor/project.json) on <default branch> now?" (yes / no), with the change it printed; on yes run conveyor.sh setup pack-commit yes, on no conveyor.sh setup pack-commit no, and say what it printed. Never list a git command for the owner to run.
 # A release's suite: before you run conveyor.sh release-run prep <version> or release-run <version>, ask the owner by the picker "Run the test files one by one or in parallel?" with two options, "One by one" (slower, the least load) and "In parallel (<n> at once)" (faster, more load on the build machine, the belt slower meanwhile), and pass the answer last in the command: --serial for one by one, --parallel for in parallel. <n> is the number $FQ ask <project> release-run atonce prints for the release's project: the most test files its parallel suite runs at once, where it runs; when it prints no number, the option is "In parallel". When you also ask the machine question below, the number of the rule's machine is not the number of this machine: name the machine beside each number in the option, as "In parallel (<n> at once on <the rule's machine>, <m> on this machine)", where <m> is the number $FQ ask <project> release-run atonce --machine local prints; leave out the part of a machine whose command prints no number (a devbox's is read only when a run leases it), as "In parallel (<m> at once on this machine)". Mark the option of the rule's mode Recommended, as the rule's choice: the suiteMode in the JSON $FQ ask <project> control prints (serial: "One by one"; parallel: "In parallel"; none: "One by one"). Ask a second question in the same picker call, "Run the suite on which machine?", unless the machine the rule names is this one: that machine is the name in the JSON $FQ ask <project> suite-machine check --json prints, and its name is "this machine" when the suite runs here by the rule. Its options: first the rule's machine by that name (marked Recommended, as the rule's choice), then "This machine (the belt is slower meanwhile)". When the owner answers This machine, add --machine local as the very last words of the command, after the mode; for the other answer add nothing.
@@ -479,7 +480,7 @@ $plug
 # Run a command that ends in under 2 minutes in the foreground; put several checks into one command; start a background command only for a long run.
 # Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs to see it.
 # To be woken when one card's issue lands, append its number to $FD/await-<project>.txt, <project> being the one it is in (append only; never rewrite it). For a batch of cards do not: the idle wake ("Conveyor is idle") awaits the batch, and each await line costs a full wake turn.
-# Your saved state is $s: keep it current, under $CAP bytes; begin the line of a finished item with "- DONE" (for example "- DONE 2026-11-21 08:20 ET: ...") and it is archived at the next start.
+# Your saved state is $s: keep it current, its open lines under $CAP bytes; begin the line of a finished item with "- DONE" (for example "- DONE 2026-11-21 08:20 ET: ...") and it is archived at the next start.
 EOF
   # An empty state.md still runs archive: only archive reports a late write kept beside it.
   [ ! -e "$s" ] || err=$(python3 -I "$FHERE/archive.py" "$s" 2>&1) \
@@ -634,7 +635,7 @@ no_cause() {
 # finds a record held by another's still in flight has set nothing, and only the last filing to end starts them in the
 # queue again (queue_again). When the shared lock is not had, the command is refused.
 filing() {
-  local in recs repo main c bad=() sl
+  local in recs repo main c bad=() kept=() sl
   in=$IN
   if foreman "$SID" && no_cause "$in"; then deny "$NO_CAUSE"; return 0; fi
   files "$in" || return 0
@@ -651,12 +652,14 @@ filing() {
     [ -n "$repo" ] || continue
     grep -qxF "$repo" "$SF/held" && continue
     c=$(ask "$repo" "$main" control 2>&1 | tail -n 1)
-    [ "$(jq -r '.start // empty' <<<"$c" 2>/dev/null)" != held ] || continue
+    # Held already (the owner's Held): filed holds what the command files there (lib.sh kept_file).
+    [ "$(jq -r '.start // empty' <<<"$c" 2>/dev/null)" != held ] || { kept+=("$repo"); continue; }
     if [ "$(jq -r '.start // empty' <<<"$c" 2>/dev/null)" = queue ] && c=$(ask "$repo" "$main" control start held 2>&1); then
       printf '%s\n' "$repo" >> "$SF/held"
     else bad+=("$repo (${c##*$'\n'})"); fi
   done <<<"$recs"
   exec {sl}>&-
+  [ ${#kept[@]} = 0 ] || [ ${#bad[@]} != 0 ] || kept_put "${kept[@]}" || bad+=("${kept[*]} (the list $(kept_file) could not be written)")
   [ ${#bad[@]} != 0 ] || return 0
   queue_again > /dev/null # the command does not run; only the refusal is printed
   deny "Not run: new issues could not be set to start held in ${bad[*]}, so an issue you file there could be built before the owner's yes. Try again; if it fails again, tell the owner."
@@ -695,31 +698,22 @@ queue_again() {
   if [ ${#left[@]} = 0 ]; then : > "$SF/held"; else printf '%s\n' "${left[@]}" | tee "$SF/held"; fi
 }
 
-# ends: under the shared lock, each filing's end left in $SF/ended takes its line from $SF/in.
-ends() {
-  local f ins
-  for f in "$SF"/ended/*; do
-    [ -f "$f" ] || continue
-    ins=$(F=$(cat "$f") awk '!d && $0 == ENVIRON["F"] { d = 1; next } 1' "$SF/in" 2>/dev/null) && printf '%s' "${ins:+$ins$'\n'}" > "$SF/in" && rm -f "$f"
-  done
-}
-
 filed() {
-  local in ev recs gh repo main c rc h r n nums left made unlinked='' said=() freed=() bad=()
+  local in ev recs gh repo main c='' rc h r n nums left made unlinked='' said=() freed=() bad=()
   in=$IN
   files "$in" || return 0
   ev=$(jq -r '.hook_event_name // "PostToolUse"' <<<"$in")
   recs=$(records 2>&1) || { bad+=("any issue you filed (${recs##*$'\n'})"); recs=''; }
-  # Every issue linked, as "<name> <n>", each once.
+  # Every issue linked, as "<owner>/<name> <n>", each once: two owners' repositories of one name are two projects.
   n=$(jq -r '[.tool_response, .error] | map(select(. != null) | if type == "object" then [.stdout, .stderr] | map(strings) | join("\n") else tostring end) | join("\n")' <<<"$in" 2>/dev/null \
-    | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/issues/[1-9][0-9]*' | awk -F/ '{ print $3, $5 }' | sort -u)
+    | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/issues/[1-9][0-9]*' | awk -F/ '{ print $2 "/" $3, $5 }' | sort -u)
   while read -r gh nums; do
     [ -n "$gh" ] && [ -n "$recs" ] || continue
     nums=$(awk -v r="$gh" '$1 == r { print $2 }' <<<"$n" | paste -sd' ' -)
     # The record is found by its main checkout's GitHub repository, else by its name: a record (or the folder a host
     # file with no records names it for) may be named apart from its repository.
     repo='' main=''; IFS=$'\t' read -r repo main < <(record_of "$gh" "$recs")
-    if [ -z "$main" ]; then bad+=("${nums// /, } of $gh: no record of $HOSTF is for $gh; it looked at $(awk -F'\t' '{ printf "%s%s (main %s)", (NR > 1 ? ", " : ""), $1, $2 }' <<<"$recs"), and none has a main checkout on this machine whose remote (origin, or its pack's remote) is $gh, nor is named $gh. Set the \"main\" of its record in $HOSTF to its main checkout on this machine, or run conveyor.sh setup in that checkout")
+    if [ -z "$main" ]; then bad+=("${nums// /, } of $gh: no record of $HOSTF is for $gh; it looked at $(awk -F'\t' '{ printf "%s%s (main %s)", (NR > 1 ? ", " : ""), $1, $2 }' <<<"$recs"), and none has a main checkout, on this machine or the host file's ssh host, whose remote (origin, or its pack's remote) is $gh, nor is named ${gh#*/}. Set the \"main\" of its record in $HOSTF to its main checkout on this machine, or run conveyor.sh setup in that checkout")
     else
       c=$(ask "$repo" "$main" control adopt $nums 2>&1); rc=$?
       # An engine before `control adopt` (a record's pack pins its own) refuses it as a usage error (2): hold them.
@@ -746,6 +740,8 @@ filed() {
   if [ -z "$n" ] || [ "$made" -gt "$(wc -l <<<"$n")" ]; then
     unlinked="The output of the command shows no link for each issue it filed, so Conveyor cannot tell which issue it filed: hold each issue it filed now (conveyor.sh control hold <issue>, in its record) unless the owner has said yes to it. "
   fi
+  # A record held before the filing began (lib.sh kept_file): with an output that does not link each issue, what it filed there is held.
+  if [ -n "$unlinked" ]; then mapfile -t -O "${#bad[@]}" bad < <(kept_hold "$recs"); else rm -f "$(kept_file)"; fi
   if [ ${#bad[@]} != 0 ] || [ -n "$left" ]; then
     jq -cn --arg r "${unlinked}${bad[*]:+Not held in Conveyor: ${bad[*]}. Hold each issue you filed (conveyor.sh control hold <issue>, in its record) unless the owner has said yes to it. }${left:+New issues of $left still start held: set them back (conveyor.sh control start queue, in each) unless the owner set them held.}" '{decision: "block", reason: $r}'
   elif [ -n "$unlinked" ] || [ ${#said[@]} != 0 ] || [ ${#freed[@]} != 0 ]; then

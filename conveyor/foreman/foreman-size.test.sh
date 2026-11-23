@@ -48,6 +48,14 @@ t_fit() {
   [ "$(grep -c RULESBODY <<<"$ru")" = 98 ] && ! grep -q RULESBODY <<<"$st" || fail "the rules are not whole in the rules output only"
   [ "$(grep -c STATEBODY <<<"$st")" = 16 ] && ! grep -q STATEBODY <<<"$ru" || fail "the state is not whole in the start output only"
   ! grep -qE 'did not fit|Read .* now' <<<"$st$ru" || fail "an output that fits has a Read line: $(grep -E 'did not fit' <<<"$st$ru")"
+  # Bug caught: the start text said the whole state.md stays under the cap, while stop.sh counts its open lines only, so
+  # a Foreman cut finished items it could have marked done. The docs page is checked as text, as no behaviour reads it.
+  grep -qF 'keep it current, its open lines under 5000 bytes' <<<"$st" || fail "the start text does not say the cap counts open lines only: $st"
+  grep -qF 'The cap on the saved state counts only its open lines, not the `- DONE` items.' "$SRC/../../docs/foreman.md" || fail "docs/foreman.md does not say the cap counts open lines only"
+  # Bug caught: with rules.testissues false, testissue makes a held card with no issue, and the start text gave only
+  # `control release <issue>`, so the Foreman had no number to release it by.
+  grep -qF 'so the issue starts held there too (rules.testissues false: a held card, released by its card ID)' <<<"$st" \
+    || fail "the start text does not say how to release testissue's held card when test issues are off: $st"
 }
 # A rules.md of 12000 bytes and a state.md over the limit: the rules output is under 10,000 characters, cut at a whole
 # line, with a line that names the file and says to Read the rest; the start is under the limit too, with the fixed

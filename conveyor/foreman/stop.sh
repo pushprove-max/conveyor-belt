@@ -136,7 +136,13 @@ while IFS= read -r l; do
     what=$seen; UNFILED+=("$what")
   fi
   ! grep -qF -- " · $seen · evidence: " "$NOTES" 2>/dev/null || continue
-  card=$(grep -oE '\bc[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*[A-Za-z0-9]' <<<"$BASE" | head -n 1)
+  # The card of the "card <card>" field, a part of its own between commas (the last such part: the fields end the
+  # line), none when that field is "card -"; with no such field, the first card id that is no file's name (after a /
+  # or ending in an extension): the text before the fields may name another card ("compare card <card>") or a card's
+  # evidence file, ~/cards/<card>.err.
+  card='' field=''; IFS=, read -ra parts <<<"$BASE"
+  for x in "${parts[@]}"; do [[ $x =~ ^[[:space:]]*card[[:space:]]+(-|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*[A-Za-z0-9])[[:space:]]*$ ]] && field=1 card=${BASH_REMATCH[1]#-}; done
+  [ -n "$field" ] || card=$(grep -oE '(^|[^/])\bc[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*[A-Za-z0-9]' <<<"$BASE" | grep -oE 'c[0-9]{8}T[0-9]{6}-.*' | grep -vE '\.[A-Za-z]+$' | head -n 1)
   ev=$(grep -oE "(~|\.{1,2})?/[^[:space:],;()'\"\`]+|[A-Za-z0-9._-]+/[^[:space:],;()'\"\`]+" <<<"$BASE" | head -n 1); ev=${ev%.}
   # In the plugin's own repository (plugin_home) a filed line takes the place of the first note that names no issue
   # and says the same thing: its own text (the line the start-up list gives for it), or that text with its own card

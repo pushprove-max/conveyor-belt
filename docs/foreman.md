@@ -22,6 +22,12 @@ several projects uses the name of the first one. A session that takes the role w
 name when you send your next message. A session that is not the Foreman gets no name from Conveyor. `/conveyor-belt:foreman off`
 ends the role but leaves the name.
 
+The Foreman keeps its saved state in `state.md`, in the Foreman's folder (`foreman` in the folder that
+`conveyor.sh state-dir` prints). The line of a finished item starts with `- DONE`, and the next start moves those
+items to an archive file. The cap on the saved state counts only its open lines, not the `- DONE` items. When the open
+lines go over the cap, the first try to end the turn is refused, with a request to mark the finished items and make
+the rest shorter. The next try ends the turn.
+
 Claude Code keeps the output of a hook over 10,000 characters out of the session. So the Foreman's start sends its text
 in two outputs, each kept short. The first holds the fixed text, the rules of auto mode, the standing kinds of routine,
 the live summary and the saved state. The live summary gets only the room that the text before it leaves, and is cut
@@ -142,8 +148,8 @@ it up:
   `review-retry` on, a card that its review blocked gives no wake ([Standing yes](#standing-yes)).
 - A stopped process: the engine, or the process of a card, is stopped (state T in `ps`). The wake names it. Run
   `kill -CONT` with each process ID of the tree, as the wake gives it, on the machine where the engine runs to resume it.
-- A card that is still blocked 30 minutes after its first wake: the wake says "#N has been blocked for <time>" and
-  gives the reason. While the card stays blocked, the next wake comes one hour later, and then each hour. If one of
+- A card that is still blocked 30 minutes after its first wake: the wake says "#N has been blocked for <time> (since
+  <time>)" and gives the reason. While the card stays blocked, the next wake comes one hour later, and then each hour. If one of
   your open questions names the card's issue (`#N`), there is no wake. A card that is retried, unblocked, shut or
   landed gives no more of these wakes.
 - gh is signed out, GitHub does not answer, or the project gives no snapshot: the wake comes only when three polls in
@@ -174,8 +180,10 @@ An issue that the Foreman files is held until you say yes. While the Foreman fil
 starts new issues held. After it files the issue, the Foreman holds it in the record for its GitHub repository. That
 is the record whose main checkout on this machine has a remote (`origin`, or the pack's `remote`) for that
 repository, so the record's name can be different, as when setup named it for its folder. This is also true when the
-Foreman runs in a worktree of that main checkout. If no record has such a main checkout, it is the record with the
-name of the repository. Letter case does not count. If no record
+Foreman runs in a worktree of that main checkout. The owner and the name of the repository must both agree. A main
+checkout that is not on this machine is read over `ssh` on the host that the host file's `ssh` names. If no record has
+such a main checkout, it is the record with the name of the repository, unless its main checkout is for another
+repository. Letter case does not count. If no record
 is for the repository, the Foreman tells you the repository, the records it looked at, and the fix: set the `main` of
 the project's record in the host file to its main checkout on this machine, or run `conveyor.sh setup` in that
 checkout.
