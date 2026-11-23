@@ -497,10 +497,13 @@ testlinks() { # <card> <worktree>
 # the check changes nothing, as the rename names the file from the folder the engine is in, not through the path
 # (issue 1488). testlinks() reaches this write too, so the check is here. mv -T (GNU mv, first on PATH on macOS too:
 # p_path()) replaces a test-links.json that is a symlink to a folder, and does not move the new file into that folder.
-linkput() { # <worktree>
-  ( w=$(cd -P -- "$1" && pwd -P) && t=$(mktemp "$w.links.XXXXXX") || exit 1
-    { cd -P -- "$w/.conveyor" && [ "$(pwd -P)" = "$w/.conveyor" ] && cat > "$t" && mv -fT -- "$t" test-links.json; } \
-      || { rm -f -- "$t"; exit 1; } )
+# With rm, it deletes the file in place of a write, from inside the same checked folder: linksonly() deletes it so, and
+# a swap of .conveyor after its check does not make it delete a test-links.json outside the worktree.
+linkput() { # <worktree> [rm]
+  ( w=$(cd -P -- "$1" && pwd -P) && cd -P -- "$w/.conveyor" && [ "$(pwd -P)" = "$w/.conveyor" ] || exit 1
+    [ "${2:-}" != rm ] || { rm -f -- test-links.json; exit; }
+    t=$(mktemp "$w.links.XXXXXX") || exit 1
+    { cat > "$t" && mv -fT -- "$t" test-links.json; } || { rm -f -- "$t"; exit 1; } )
 }
 # Whether the staged change of main-red fix card <card>'s worktree is only the links testlinks() stages (issue 323):
 # its session made no change of its own. The links are staged again from main's copy of the file, with the links its
@@ -509,15 +512,15 @@ linkput() { # <worktree>
 # one lacks. So a case added to its entry during the build, whose links the new file has and the staged one not, still
 # leaves the change links-only (R132), and a link the session took out does not. When the check fails, the staged
 # file and STAGEDLINKS are put back as they were. The session wrote the worktree: a .conveyor that is a symlink is not
-# taken, and each write is renamed into place (linkput()), so no write follows a symlink or hard link the session left
-# there to a file outside the worktree.
+# taken, and each write is renamed into place, and the delete made, from inside the checked .conveyor (linkput()), so
+# no write or delete follows a symlink or hard link the session left there to a file outside the worktree.
 linksonly() { # <card> <worktree>
   local f=.conveyor/test-links.json b h e
   declare -gA STAGEDLINKS; e=${STAGEDLINKS[$2]-}
   [ -n "$e" ] && [ "$(git -C "$2" diff --cached --name-only --no-renames HEAD 2>/dev/null)" = "$f" ] && [ ! -L "$2/.conveyor" ] && [ -d "$2/.conveyor" ] \
     && b=$(git -C "$2" rev-parse -q --verify ":$f") || return 1
   unset 'STAGEDLINKS[$2]' # so testlinks() stages each link of the entry again
-  if h=$(git -C "$2" show "HEAD:$f" 2>/dev/null); then printf '%s\n' "$h" | linkput "$2"; else h='{}'; rm -f "$2/$f"; fi \
+  if h=$(git -C "$2" show "HEAD:$f" 2>/dev/null); then printf '%s\n' "$h" | linkput "$2"; else h='{}'; linkput "$2" rm; fi \
     && git -C "$2" add -A -- "$f" && testlinks "$1" "$2" \
     && jq -en --slurpfile s <(git -C "$2" cat-file blob "$b") --slurpfile n <(git -C "$2" cat-file blob ":$f" 2>/dev/null || echo '{}') \
       --slurpfile e <(printf '%s' "$e") --slurpfile h <(printf '%s' "$h") '
