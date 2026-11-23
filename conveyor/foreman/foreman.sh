@@ -404,10 +404,10 @@ off() {
 }
 
 # context: the start's text, under CTX_LIMIT bytes (Claude Code keeps a hook's output over 10,000 characters out of the
-# context and gives the session a short preview only). It is made in three parts: the fixed text with its warnings, the
-# rest (auto's rules, the standing kinds, the live summary) and the saved state. The live summary and the fixed text's
-# list of unfiled plugin problems (context_notes) share the room the others leave; when auto's rules and the standing
-# kinds leave them none, those go to $FD/start-rest.md, and a line that tells the Foreman to Read it stands for them.
+# context and gives a short preview). Its parts: the fixed text with its warnings, the rest (auto's rules, the standing
+# kinds, the live summary) and the saved state. The live summary and the unfiled plugin problems (context_notes) share
+# the room the others leave; when auto's rules and the standing kinds leave them none, or (without --rules-apart) when
+# that lets more state and rules fit, those go to $FD/start-rest.md, and a line to Read it stands for them.
 # This project's rules.md is not part of it when the start is called with --rules-apart (the plugin's hooks.json does):
 # the SessionStart hook `rules` sends it in an output of its own. A call without it (a claim in a running session, which
 # no SessionStart follows, or a plugin from before the rules hook) gets rules.md after the rest, cut to what the limit

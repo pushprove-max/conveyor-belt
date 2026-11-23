@@ -35,7 +35,8 @@ at a whole line. Run `conveyor.sh foreman status` for the full status of the car
 all open decisions. The start does not hold the Foreman's steps for a release's suite, a pack that is not committed
 and a card that waits for main. It names a command that prints them, and the Foreman runs it when one of them comes
 up. When the rules of auto mode and the standing kinds leave no room for the live summary, the start
-puts them in `start-rest.md` in the Foreman's folder. One line in their place tells the Foreman to read that file now.
+puts them in `start-rest.md` in the Foreman's folder. A start or claim that also holds the rules does the same when
+this gives room for more of the saved state and rules. One line in their place tells the Foreman to read that file now.
 When the saved state does not fit with the rest, the start leaves it out and
 has one line in its place that tells the Foreman to read that file now, with its path. The second, a SessionStart
 hook of its own, holds the project's `rules.md` from the Foreman's folder, and only in the Foreman's session: any other
