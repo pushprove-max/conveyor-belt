@@ -142,6 +142,33 @@ test('Needs you: a repeat block that names a new P0 first draws the P0 and the r
   assert.equal(rows[1].querySelector('.finding-proof-text').textContent, 'it prints "a; [P1] b"', `the P1 proof is whole for the reason ${reason}`);
 });
 
+// Bug: a new P0 whose proof quotes "; [P1]" (as the review wrote it) was split at that quote: its proof was cut there,
+// and the quote's rest drew as a false P1 row that held the repeated P1 in its proof. The join is the one outside quotes.
+test('Needs you: a new P0 whose proof quotes "; [P1]" is not split at the quote', () => {
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  const reason = 'the fix for [P0] c.txt:1 deletes the data. Proof: it prints "kept; [P1] x"; [P1] b.txt:2 broken did not hold after 1 round';
+  d.panels.needs.data.cards.blocked[0].reason = reason;
+  deliver(w, d);
+  const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
+  assert.deepEqual(rows.map((r) => r.querySelector('.finding-claim').textContent), ['deletes the data.', 'broken'], `one row a finding for the reason ${reason}`);
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, 'it prints "kept; [P1] x"', `the P0 proof is whole for the reason ${reason}`);
+});
+
+// Bug: card.sh keeps only a P0's first 300 characters, so a long quote in its proof can lose its closing '"': every
+// "; [P1]" then sat inside the open quote, and the Board split at the quoted one. The join right after the cut is it.
+test('Needs you: a new P0 cut inside its quote by the engine is not split at the quote', () => {
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  const p0 = `[P0] c.txt:1 deletes the data. Proof: it prints "kept; [P1] ${'x'.repeat(300)}"`.slice(0, 300);
+  const reason = `the fix for ${p0}; [P1] b.txt:2 broken did not hold after 1 round`;
+  d.panels.needs.data.cards.blocked[0].reason = reason;
+  deliver(w, d);
+  const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
+  assert.deepEqual(rows.map((r) => r.querySelector('.finding-claim').textContent), ['deletes the data.', 'broken'], `one row a finding for the reason ${reason}`);
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, p0.slice(p0.indexOf('it prints')), `the P0 proof is whole for the reason ${reason}`);
+});
+
 // Bug: a single repeated finding whose proof quotes "; [P2]" drew as two rows, split there: only the engine's join of
 // a new P0 (a reason that starts with [P0]) is split at "; ".
 test('Needs you: a repeated finding whose proof quotes "; [P2]" draws as one row', () => {
