@@ -105,16 +105,22 @@ olds() { if [ "$READ_OLD" = "$RETRIED" ] && [ -z "${DRYPICK:-}" ]; then stdb ask
 # rewrote the file, shorter, or grown past the offset again since. Health, the Tests part and the slow-test list read
 # every line of the records whole on each snapshot, and grew with the history. A file not grown since costs two
 # programs (cksum and cat), and an empty file none (its output is empty; the summary is left as it is): the snapshot
-# is read again and again (t_snapexec counts its programs).
+# is read again and again (t_snapexec counts its programs). The snapshot's copy of the card records (READ, with its
+# lineage and size in READG: snapcopy(), lib/snapshot.sh) is not read to sum it: its first bytes are the summary's
+# while the lineage, kept in place of the sum, is the same, and only the bytes up to that size are read. That summary
+# is kept in <kept>.copy, apart from the one of a reader of the records with no lineage (`conveyor.sh health`, `history
+# test`): each wrote over the other's, and the snapshot after such a reader read the whole copy again.
 linesum() { # <records file> <kept> <to> <filter>
-  local k r cs size h o s n=0
+  local k r cs size h o s n=0 g=''
   if [ -f "$1" ] && [ ! -s "$1" ]; then : > "$3"; return; fi
   printf -v k '%q' "$4"
-  r=$(cksum < "$1") && cs=${r%% *} size=${r##* } && [[ $size =~ ^[0-9]+$ ]] || return 1
+  [ -z "${READG:-}" ] || [ "$1" != "$READ" ] || g=${READG% *} size=${READG#* }
+  if [[ $g == g* ]]; then cs=$g; set -- "$1" "$2.copy" "$3" "$4"; else g=''; r=$(cksum < "$1") && cs=${r%% *} size=${r##* }; fi
+  [[ $size =~ ^[0-9]+$ ]] || return 1
   # One open of the summary, its line and the rest read from it: a reader running beside this one may put a newer
   # summary in its place meanwhile.
   { read -r o s h && [ "$h" = "$k" ] && [[ $o =~ ^[0-9]+$ ]] && [ "$o" -le "$size" ] \
-      && if [ "$o" = "$size" ]; then [ "$s" = "$cs" ]; else [ "$(head -c "$o" "$1" | cksum)" = "$s $o" ]; fi \
+      && if [ -n "$g" ] || [ "$o" = "$size" ]; then [ "$s" = "$cs" ]; else [ "$(head -c "$o" "$1" | cksum)" = "$s $o" ]; fi \
       && cat > "$3" && n=$o; } 2>/dev/null < "$2"
   [ "$n" -gt 0 ] || : > "$3" || return 1
   [ "$n" -lt "$size" ] || return 0

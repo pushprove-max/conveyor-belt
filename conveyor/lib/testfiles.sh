@@ -425,11 +425,11 @@ HISTFROM='def fromstart($s): select($s == "" or ((.time | strings) >= $s));
       | .h[$c] += [{t: $l.time, c: $cf, p: ($l.partial | if type == "array" then . else [] end), r: ($l.reused == true)}])).out end;'
 histstart() { ctl 2>/dev/null | jq -r '.testsFrom // ""' 2>/dev/null || :; }
 # The retried lines, then the card records, as the Tests part reads them (TESTLINE), each from its summary (linesum());
-# nothing when they cannot be read.
+# nothing when they cannot be read. The snapshot's copy (READG, snapcopy()) is summed in place: copied, it was read whole.
 testlines() {
-  local td
-  td=$(mktemp -d) || return 1
-  { olds > "$td/old" && recs > "$td/rec" && linesum "$td/old" "$RETRIED.tests" "$td/o" "$TESTLINE" && linesum "$td/rec" "$STATE.tests" "$td/r" "$TESTLINE" \
+  local td rec
+  td=$(mktemp -d) || return 1; if [ -n "${READG:-}" ]; then rec=$READ; else rec=$td/rec; fi
+  { olds > "$td/old" && { [ "$rec" = "$READ" ] || recs > "$rec"; } && linesum "$td/old" "$RETRIED.tests" "$td/o" "$TESTLINE" && linesum "$rec" "$STATE.tests" "$td/r" "$TESTLINE" \
       && cat "$td/o" "$td/r"; } 2>/dev/null
   rm -rf "$td"
 }

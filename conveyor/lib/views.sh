@@ -30,14 +30,16 @@
 # A line the check refuses (jq/check.jq names the field it refused) is set aside, not read: quarantine() moves it out
 # of the card records to $QUARANTINE, under the records' lock (taken here, for LOCKLIMIT seconds at most, unless the
 # caller holds it: LOCKHELD), and health names it until the owner deals with it. A copy a reader holds (READ, not STATE: whole(), the snapshot)
-# drops the same lines. The check then reads the rest again; a line still refused after three tries stops the reader.
+# drops the same lines, and the copy's lineage (READG: the snapshot's copy is then no longer the one it keeps,
+# snapcopy()). The check then reads the rest again; a line still refused after three tries
+# stops the reader.
 check() {
   local rc
   for _ in 1 2 3; do
     checkpart; rc=$?
     [ $rc = 3 ] || return $rc
     if [ -n "${LOCKHELD:-}" ]; then quarantine; else lockedfor "the set-aside of a bad line" quarantine; fi || return 1
-    [ "$READ" = "$STATE" ] || dropbad "$READ" || return 1
+    [ "$READ" = "$STATE" ] || { dropbad "$READ" && READG=''; } || return 1
   done
   echo "conveyor: $READ still holds a line that is not a whole record of a known step after it was set aside; stopping" >&2
   return 1
@@ -66,12 +68,17 @@ quarantine() {
   while IFS=$'\t' read -r l f; do echo "conveyor: $STATE line $l is not a whole record of a known step (the check refused $f); it is set aside in $QUARANTINE" >&2; done <<<"$bad"
 }
 # 3: a whole line the check refuses.
+# A copy with a lineage (the snapshot's: READG, `<lineage> <bytes>`, snapcopy(), lib/snapshot.sh) is not read to sum
+# it: its first bytes are the ones checked while the lineage is the same. What checked of it is kept apart
+# ($STATE.copy.checked, the lineage in place of the sum), so a check of the records themselves and one of the copy,
+# each in turn, never make the other read the whole file again.
 checkpart() (
   flock 5 || exit 1
-  n=0; l=0; sum=''
-  { read -r n l sum < "$STATE.checked"; } 2>/dev/null
-  size=$(($(wc -c < "$READ"))) || exit 1
-  [[ "$n,$l" =~ ^[0-9]+,[0-9]+$ ]] && [ "$n" -le "$size" ] && [ "$(head -c "$n" "$READ" | cksum)" = "$sum" ] || { n=0; l=0; }
+  n=0; l=0; sum=''; g=${READG:-}; size=${g#* }; g=${g% *}; cf=$STATE.checked
+  if [[ $g == g* && $size =~ ^[0-9]+$ ]]; then cf=$STATE.copy.checked; else g=''; size=$(($(wc -c < "$READ"))) || exit 1; fi
+  { read -r n l sum < "$cf"; } 2>/dev/null
+  [[ "$n,$l" =~ ^[0-9]+,[0-9]+$ ]] && [ "$n" -le "$size" ] \
+    && if [ -n "$g" ]; then [ "$sum" = "$g" ]; else [ "$(head -c "$n" "$READ" | cksum)" = "$sum" ]; fi || { n=0; l=0; }
   [ "$size" -gt "$n" ] || exit 0
   new() { tail -c +$((n + 1)) "$READ" | head -c $((size - n)); }
   # A last line with no newline is not read, so neither passed nor failed: the check does not hold the records' lock,
@@ -82,7 +89,7 @@ checkpart() (
   [ "$size" -gt "$n" ] || exit 0
   bad=$(new | jq -Rrn -f "$HERE/jq/check.jq" | head -n 1)
   [ -z "$bad" ] || exit 3
-  { echo "$size $((l + lines)) $(head -c "$size" "$READ" | cksum)" > "$STATE.checked.new" && mv -f "$STATE.checked.new" "$STATE.checked"; } 2>/dev/null
+  { echo "$size $((l + lines)) ${g:-$(head -c "$size" "$READ" | cksum)}" > "$cf.new" && mv -f "$cf.new" "$cf"; } 2>/dev/null
   exit 0
 ) 5>>"$STATE.checked.lock"
 
@@ -126,8 +133,12 @@ whole() {
 # many follow-ups a filed line names, reason: why an issue line failed, stop: on a blocked line, what its reason says of where the card stopped (worktree,
 # deps, brief: the steps with no start line; yes: it waits for the owner's yes and failed nothing), took: the seconds since
 # the card's line before it, which for a step with a start line is the time the step ran).
-rows() { # [records file: the retried file's lines are card records too]
-  jq -cs --argjson max "$MAX_REVIEWS" --arg nodeps "$NODEPS" --arg yes "$YES" --arg lintyes "$LINTYES" --arg shut "$SHUT" --arg ownshut "$OWNSHUT" -f "$HERE/jq/rows.jq" "${1:-$READ}"
+# A second argument names a file of card states (rows.jq: what a card's row needs of the lines it read; snaprows(),
+# lib/snapshot.sh, keeps them): the first file then holds the lines past the ones each state read, and the answer is
+# [row, state] of each card that file names.
+rows() { # [records file: the retried file's lines are card records too] [file of card states]
+  local states=${2:-}
+  jq -cs --argjson max "$MAX_REVIEWS" --arg nodeps "$NODEPS" --arg yes "$YES" --arg lintyes "$LINTYES" --arg shut "$SHUT" --arg ownshut "$OWNSHUT" ${states:+--slurpfile states "$states"} -f "$HERE/jq/rows.jq" "${1:-$READ}"
 }
 cards() {
   local out models url n t titles='{}'

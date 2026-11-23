@@ -73,9 +73,10 @@ snapask() { # <since> [nowait]
 # (watch.py SNAPSHOT_LIMIT) left its marker, and nothing else removes it. kill -0 is a builtin, so a build with no
 # such marker runs no program more. It also fails for a pid it may not signal (another user's): that call, with its
 # marker gone, builds its own after this one.
-# KEPTREAD holds how many lines each card had in the card records as the kept snapshot's build began (`<count>\t<card>`,
-# one card a line), put in place after the rename and dated then, so it is newer than the snapshot it goes with
-# (recordsnow reads it): a card's line past its count came after that build began, whatever time it was stamped with.
+# KEPTREAD holds how many lines each card had in the copy of the card records the kept snapshot's build took
+# (`<count>\t<card>`, one card a line: snapcopy keeps them with its copy, so a build never reads the whole records to
+# count them), put in place after the rename and dated then, so it is newer than the snapshot it goes with
+# (recordsnow reads it): a card's line past its count came after that build's copy, whatever time it was stamped with.
 # A line that waited for the records' lock was stamped before the build began and appended after the build copied the
 # records, so its time alone left it out of both. Counts, not the records' size: a rewrite (retry or stop, moveout();
 # quarantine(), lib/views.sh) takes lines out before a line appended late, which a size then put before it, and
@@ -88,8 +89,7 @@ snapkeep() {
     p=${a#"$KEPT".}; p=${p%.asked}
     [[ $p =~ ^[0-9]+$ ]] && ! kill -0 "$p" 2>/dev/null && rm -f -- "$a"
   done
-  : > "$KEPT.at" && { LC_ALL=C awk 'match($0, /^\{"card":"[^"]*"/) { n[substr($0, 10, RLENGTH - 10)]++ } END { for (c in n) print n[c] "\t" c }' \
-    "$STATE" > "$c" 2>/dev/null || rm -f "$c"; } && snapshot > "$n" && [ -s "$n" ] && touch -r "$KEPT.at" "$n" && mv -f "$n" "$KEPT"; rc=$?
+  : > "$KEPT.at" && SNAPCOUNTS=$c snapshot > "$n" && [ -s "$n" ] && touch -r "$KEPT.at" "$n" && mv -f "$n" "$KEPT"; rc=$?
   # A count that could not be taken leaves the last one, now older than the kept snapshot: recordsnow takes none.
   if [ "$rc" = 0 ]; then [ ! -e "$c" ] || { mv -f "$c" "$KEPTREAD" && touch "$KEPTREAD"; } 2>/dev/null || :; else rm -f "$n" "$c"; fi
   return "$rc"

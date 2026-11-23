@@ -21,11 +21,11 @@ snapsum_engine() {
   # set by the engine's yesforms(), taken from lib/records.sh
   HERE=$SRC
   mkdir -p "$ST" "$D/d" && : > "$D/rows" && : >> "$ST/cards.jsonl" && : >> "$ST/retried.jsonl" || fail "the case's folders could not be made"
-  eval "$(sed -n '/^snaprows() {/,/^}/p' "$SRC/lib/snapshot.sh"; sed -n '/^rows() {/,/^}/p' "$SRC/lib/views.sh" | sed '1s/^rows()/snapsum_realrows()/'
+  eval "$(sed -n '/^snaprows() {/,/^}/p; /^ROWKEY=/p; /^ROWLINE=/p' "$SRC/lib/snapshot.sh"; sed -n '/^rows() {/,/^}/p' "$SRC/lib/views.sh" | sed '1s/^rows()/snapsum_realrows()/'
     sed -n '/^yesforms() {/,/^}/p' "$SRC/lib/records.sh"; grep -hE '^(MAX_REVIEWS|NODEPS|SHUT|OWNSHUT)=' "$SRC/lib/"{paths,push,issues}.sh)"
   declare -F yesforms > /dev/null && yesforms "the owner"
   # Bug (#1012): snaprows() reads LINTYES (#259); with it not set, the cases stopped on an unbound variable.
-  declare -F snaprows snapsum_realrows > /dev/null && [ -n "$MAX_REVIEWS" ] && [ -n "$NODEPS" ] && [ -n "$SHUT" ] && [ -n "${OWNSHUT:-}" ] && [ -n "${LINTYES:-}" ] || fail "snaprows, rows or their settings were not found in the engine"
+  declare -F snaprows snapsum_realrows > /dev/null && [ -n "${ROWKEY:-}" ] && [ -n "${ROWLINE:-}" ] && [ -n "$MAX_REVIEWS" ] && [ -n "$NODEPS" ] && [ -n "$SHUT" ] && [ -n "${OWNSHUT:-}" ] && [ -n "${LINTYES:-}" ] || fail "snaprows, rows or their settings were not found in the engine"
   rows() { echo "${1##*/} $(wc -l < "$1")" >> "$D/rows"; snapsum_realrows "$@"; }
 }
 snapsum_snap() { snaprows "$ST/$1" "$ST/$1.rows" "$D/d/$2" || fail "snaprows failed on $1"; } # <records file name> <rows|old>
@@ -87,8 +87,9 @@ t_snapsum() {
   : > "$D/rows"; snapsum_snap cards.jsonl rows; two=$(cat "$D/d/rows")
   [ "$(snapsum_offset "$ST/cards.jsonl")" = "$(wc -c < "$ST/cards.jsonl")" ] && [ "$(($(wc -c < "$ST/cards.jsonl") - size))" = "$(snapsum_line c80 80 build 2026-03-01T14:00:00Z ok '' | wc -c)" ] \
     || fail "the summary's offset did not move by the new line alone: $size, then $(snapsum_offset "$ST/cards.jsonl")"
-  # rows.jq read the four lines of c80 alone, never the 399 of the file.
-  [ "$(cat "$D/rows")" = "rows.lines 4" ] || fail "the second snapshot did not make the row of the new line's card alone: $(tr '\n' ' ' < "$D/rows")"
+  # rows.jq read the new line alone (#1564: c80's three older lines are the summary's, never searched for in the
+  # file), never the 399 of the file.
+  [ "$(cat "$D/rows")" = "rows.lines 1" ] || fail "the second snapshot did not make the row of the new line's card from that line alone: $(tr '\n' ' ' < "$D/rows")"
   # Built, c80 is at its review (it was at its build).
   [ "$(jq -c 'map(select(.card == "c80") | .step)' <<<"$two")" = '["review"]' ] || fail "the rows do not show the new line: $(jq -c 'map(select(.card == "c80"))' <<<"$two")"
   # The same rows, and the same summary, as made from the whole file.
@@ -97,6 +98,20 @@ t_snapsum() {
   [ "$(snapsum_ran cards.jsonl)" = 1 ] || fail "with no summary, the rows were not made from the whole file: $(tr '\n' ' ' < "$D/rows")"
   [ "$two" = "$(cat "$D/d/rows")" ] || fail "the rows from the summary differ from the ones from the whole file: $(diff <(jq . <<<"$two") <(jq . "$D/d/rows") | head -n 20)"
   cmp -s "$D/kept.rows" "$ST/cards.jsonl.rows" || fail "the summary brought up to date differs from one made from the whole file: $(diff "$D/kept.rows" "$ST/cards.jsonl.rows" | head -n 5)"
+}
+
+# Bug (#1564 review): a failed push appends a push line alone (pushone(), lib/push.sh), which names no row's card. The
+# file of the cards the new lines name was then empty, and the summary's split of its kept rows took every row as a
+# name: each was dropped, and the Board showed an empty belt. The rows after a push line are the ones before it.
+t_snappushonly() {
+  local one
+  snapsum_engine; snapsum_history80
+  snapsum_snap cards.jsonl rows; one=$(cat "$D/d/rows")
+  [ "$(jq length <<<"$one")" = 80 ] || fail "the fixture's rows are not its 80 cards: $(jq -c 'map(.card)' <<<"$one")"
+  printf '{"card":"c79","issue":79,"step":"push","time":"2026-03-01T14:00:00Z","result":"fail","sha":"abc79","kind":"transport","reason":"no network","repo":"r"}\n' >> "$ST/cards.jsonl"
+  snapsum_snap cards.jsonl rows
+  [ "$(snapsum_offset "$ST/cards.jsonl")" = "$(wc -c < "$ST/cards.jsonl")" ] || fail "the summary did not read the push line: offset $(snapsum_offset "$ST/cards.jsonl")"
+  [ "$(cat "$D/d/rows")" = "$one" ] || fail "the rows after a push line alone differ from the ones before it: $(jq -c 'map(.card)' "$D/d/rows")"
 }
 
 # Bug (#531): a summary of a file rewritten since (`retry` moves a card's lines out of the card records) read on from
@@ -128,21 +143,121 @@ t_snapsumshort() {
     || fail "the rows of the rewritten file hold a moved card or miss a new one: $(jq -c 'map([.card, .step])' "$D/d/rows")"
 }
 
-# Bug (#1335): a snapshot build read the card records whole each time, so its time grew with every card ever run. A
-# whole `loop snapshot`, with a jq that notes each run of rows.jq and the lines it was given (a whole build is what
-# a direct call to snaprows(), as t_snapsum makes, cannot show: the summary that snapshot() keeps between two builds,
-# $STATE.rows): the first build reads the 398 lines of the 80 cards, the second, after one line of a new card, reads
-# that line alone, never the older ones.
-t_snapbuilds() {
-  local first second
+# The whole-build cases run `loop snapshot`: what a direct call to snaprows(), as t_snapsum makes, cannot show is
+# what snapshot() keeps between two builds (its copy of the card records, $STATE.copy, the rows' summary, $STATE.rows,
+# and the check's and other summaries of the copy) and what each program it starts reads. Stubs of the programs that
+# read files note each call given the card records or the kept copy (an argument or stdin that is one of them) in
+# $D/<name>.reads; the jq one also notes each rows.jq run as `<lines of the file it reads>:<states it is given>` (`-`
+# with none) in $D/<name>.rows; a python3 notes the first line of each `since` answer the state database gives
+# (state.py: from, end, mark and the bytes of the lines it gave) in $D/<name>.since. Each runs the real program.
+# snapsum_build <log name>: one build. snapsum_kept: the summary's lines now; snapsum_rows: the rows in them.
+snapsum_builds() {
+  local p real
   setup "[$(issue 1 2026-01-01)]"; mkdir -p "$ST"; D=$T/$CASE; snapsum_history80
-  # stub: a jq that logs the lines of the file each rows.jq run reads (its last argument), then runs the real jq
-  printf '#!/usr/bin/env bash\ncase "$*" in *jq/rows.jq*) echo "$(wc -l < "${@: -1}")" >> "$STUB/rowsruns" ;; esac\nexec %q "$@"\n' "$(command -v jq)" > "$STUB/jq" && chmod +x "$STUB/jq"
-  : > "$STUB/rowsruns"; loop snapshot --fresh > /dev/null || fail "the first build exited non-zero"
-  first=$(paste -sd' ' "$STUB/rowsruns")
-  snapsum_line c81 81 picked 2026-03-02T00:00:00Z ok '' >> "$ST/cards.jsonl"
-  : > "$STUB/rowsruns"; loop snapshot --fresh > /dev/null || fail "the second build exited non-zero"
-  second=$(paste -sd' ' "$STUB/rowsruns"); rm -f "$STUB/jq"
-  [[ " $first " == *" 398 "* ]] || fail "the first build did not read the whole records (lines of each rows.jq run: $first)"
-  [ "$second" = 1 ] || fail "the second build read other than the one new line (lines of each rows.jq run: $second)"
+  for p in awk cat cksum cp cut grep head sed sort tail jq; do
+    real=$(command -v "$p") || fail "no $p to wrap"
+    # stub: a reader that notes a call given the records or the kept copy, then runs the real program (jq also notes rows.jq's input)
+    { printf '#!/usr/bin/env bash\nfor a in "$@" /dev/stdin; do if [ "$a" -ef %q ] || [ "$a" -ef %q ]; then echo "%s $*" >> %q; break; fi; done\n' \
+        "$ST/cards.jsonl" "$ST/cards.jsonl.copy" "$p" "$STUB/reads"
+      [ "$p" != jq ] || printf 'case "$*" in *jq/rows.jq*) s=-; for ((i = 1; i < $#; i++)); do [ "${!i}" != states ] || { j=$((i + 1)); s=$(wc -l < "${!j}"); }; done; echo "$(wc -l < "${@: -1}"):$s" >> %q ;; esac\n' "$STUB/rowsruns"
+      printf 'exec %q "$@"\n' "$real"; } > "$STUB/$p" && chmod +x "$STUB/$p" || fail "the $p stub could not be made"
+  done
+  # stub: a python3 that runs the real one, then logs the first line of the answer it wrote for a `since` question
+  printf '#!/usr/bin/env bash\n%q "$@"; rc=$?; o=\nfor a in "$@"; do case $a in --) o= ;; since) [ -z "$o" ] || head -n 1 "$o" >> "$STUB/since" ;; esac; [ "$p" != -o ] || o=$a; p=$a; done\nexit $rc\n' \
+    "$(command -v python3)" > "$STUB/python3" && chmod +x "$STUB/python3" || fail "the python3 stub could not be made"
+}
+# Bug (#1564 review): on macOS p_path puts Homebrew's programs (python3, jq, the GNU tools) ahead of $STUB on PATH, so
+# the stubs never ran there and the cases saw no `since` answer. Each stub is also an exported function of its name,
+# which the engine's bash runs before any program on PATH.
+snapsum_route() {
+  local p
+  for p in awk cat cksum cp cut grep head sed sort tail jq python3; do eval "$p() { $(printf %q "$STUB/$p") \"\$@\"; }; export -f $p" || return 1; done
+}
+snapsum_build() {
+  : > "$STUB/rowsruns"; : > "$STUB/since"; : > "$STUB/reads"; ( snapsum_route && loop snapshot --fresh > /dev/null ) || fail "the $1 build exited non-zero"
+  paste -sd' ' "$STUB/rowsruns" > "$D/$1.rows"; cp "$STUB/since" "$D/$1.since"; cp "$STUB/reads" "$D/$1.reads"
+}
+snapsum_kept() { tail -n +2 "$ST/cards.jsonl.rows"; }
+snapsum_rows() { cut -f2 <<<"$1"; }
+
+# Bug (#1335, #1564): a snapshot build copied the whole card records from the state database each time, checksummed
+# the copy, counted each card's lines in the records, searched the copy for the older lines of each card a new line
+# names, and rows.jq read all of them: its time grew with every card ever run (31,612 lines, 34 MB, and the Board
+# minutes behind). The first build reads the 398 lines of the 80 cards; the second, after one more line of c80 (three
+# lines before it), reads that line alone: the database gives its bytes alone, no program reads the records or the
+# kept copy but from past the bytes read before, and rows.jq is given that line and c80's state alone. Its rows, and
+# the line counts of the cards (snapshot.json.records), are the ones a whole build makes.
+# Bugs (#1564 review): the new line is a landed one, as a card's end is: the drift watch, made again when a card starts
+# or ends, was given the whole copy. And `conveyor.sh history test` and `health` run between the builds, as the Board
+# and the owner run them: each wrote its summary of the records over the snapshot's, which then read the whole copy.
+t_snapbuilds() {
+  local size one two bad nl dk
+  snapsum_builds; snapsum_build first; size=$(wc -c < "$ST/cards.jsonl")
+  dk=$(head -n 1 "$ST/cards.jsonl.drift") || fail "the first build kept no drift watch: $(ls "$ST" | tr '\n' ' ')"
+  rm -f "$ST/cards.jsonl.tests" "$ST/cards.jsonl.health"
+  loop history test a.test.sh > /dev/null && loop health > /dev/null && [ -s "$ST/cards.jsonl.tests" ] && [ -s "$ST/cards.jsonl.health" ] \
+    || fail "\`history test a.test.sh\` and \`health\` did not run or kept no summary of the records: $(ls "$ST" | tr '\n' ' ')"
+  # A landed line names its commit and whether it changed the product (jq/check.jq).
+  nl=$(snapsum_line c80 80 landed 2026-03-01T14:00:00Z ok '' | jq -c '.sha = "abc80" | .product = false') && printf '%s\n' "$nl" >> "$ST/cards.jsonl" \
+    || fail "the landed line could not be written"
+  snapsum_build second; two=$(snapsum_kept)
+  # Bug (#1564 review): with a retried file that holds no worktree or end line, the drift watch's key failed
+  # (pipefail) and the watch was never made. The landed line makes it again, on a new key.
+  [ "$(head -n 1 "$ST/cards.jsonl.drift")" != "$dk" ] || fail "the second build did not make the drift watch again after the landed line (key $dk)"
+  [ "$(grep -cxF $'4\tc80' "$ST/snapshot.json.records")" = 1 ] && [ "$(grep -cxF $'5\tc1' "$ST/snapshot.json.records")" = 1 ] && [ "$(wc -l < "$ST/snapshot.json.records")" = 80 ] \
+    || fail "the second build's line counts are not the records' (4 of c80, 5 of c1, 80 cards): $(sort -k2 "$ST/snapshot.json.records" | tail -n 3 | tr '\t\n' ': ')"
+  # A whole build of the same records: no summary kept.
+  rm -f "$ST/cards.jsonl.rows"; snapsum_build whole
+  [[ " $(cat "$D/first.rows") " == *" 398:0 "* ]] || fail "the first build did not read the whole records (each rows.jq run's lines:states: $(cat "$D/first.rows"))"
+  # The stubs see a whole read: the first build checks the whole copy (a tail from its first byte).
+  grep -q '^tail -c +1 ' "$D/first.reads" || fail "the stubs did not see the first build read the whole copy: $(head -n 5 "$D/first.reads")"
+  [ "$(cat "$D/second.rows")" = 1:1 ] || fail "the second build gave rows.jq other than the one new line and its card's state (each rows.jq run's lines:states: $(cat "$D/second.rows"))"
+  one=$(printf '%s\n' "$nl" | wc -c)
+  [ "$(cut -d' ' -f1,4 "$D/second.since")" = "$size $one" ] \
+    || fail "the second build read other than the new line's $one bytes past byte $size of the records (the database's answer: $(cat "$D/second.since"))"
+  bad=$(grep -vE "^tail -c \+$((size + 1)) " "$D/second.reads")
+  [ -z "$bad" ] && [ -s "$D/second.reads" ] || fail "the second build read the records or the kept copy other than past byte $size: ${bad:-nothing read}"
+  [[ " $(cat "$D/whole.rows") " == *" 399:0 "* ]] || fail "the reference build was not a whole one (each rows.jq run's lines:states: $(cat "$D/whole.rows"))"
+  [ "$(snapsum_rows "$two" | jq -r 'select(.card == "c80") | .step')" = landed ] || fail "the second build's rows do not show c80's new line: $(grep '"c80"' <<<"$two" | cut -f2)"
+  [ "$two" = "$(snapsum_kept)" ] || fail "the rows of the second build differ from a whole build's: $(diff <(echo "$two") <(snapsum_kept) | head -n 6)"
+}
+
+# Bug (#1564): a copy and a summary kept from before a rewrite of the card records (`retry` moves a card's lines
+# out, a bad line is set aside) are not the records' first bytes any more, and reading on past their end would keep
+# the moved card and lose or garble lines. In place, as the state database rewrites the file, with lines added past
+# the old end since: the next build reads the whole records, and its rows are a whole build's.
+t_snaprewrite() {
+  local size two t
+  snapsum_builds; snapsum_build first; size=$(wc -c < "$ST/cards.jsonl")
+  grep -v '"card":"c1"' "$ST/cards.jsonl" > "$D/rest" && cat "$D/rest" > "$ST/cards.jsonl" || fail "the fixture's rewrite failed"
+  for t in 0 1 2 3 4 5 6 7 8 9; do snapsum_line c90 90 picked "2026-03-01T15:0${t}:00Z" ok '' >> "$ST/cards.jsonl"; done
+  [ "$(wc -c < "$ST/cards.jsonl")" -gt "$size" ] || fail "the fixture is wrong: the rewritten records are not longer than the first build's"
+  snapsum_build second; two=$(snapsum_kept)
+  cmp -s "$ST/cards.jsonl.copy" "$ST/cards.jsonl" || fail "the kept copy is not the rewritten records: $(diff "$ST/cards.jsonl.copy" "$ST/cards.jsonl" | head -n 4)"
+  rm -f "$ST/cards.jsonl.rows"; snapsum_build whole
+  [ "$(cut -d' ' -f1,4 "$D/second.since")" = "0 $(wc -c < "$ST/cards.jsonl")" ] \
+    || fail "the second build did not read the whole rewritten records (the database's answer: $(cat "$D/second.since"))"
+  [[ " $(cat "$D/second.rows") " == *" $(wc -l < "$ST/cards.jsonl"):0 "* ]] || fail "rows.jq was not given the whole rewritten records (each rows.jq run's lines:states: $(cat "$D/second.rows"))"
+  [ "$(snapsum_rows "$two" | jq -sc '[any(.card == "c1"), any(.card == "c90")]')" = '[false,true]' ] || fail "the second build's rows keep the moved card or miss the new one: $(snapsum_rows "$two" | jq -sc 'map(.card)')"
+  [ "$two" = "$(snapsum_kept)" ] || fail "the rows after the rewrite differ from a whole build's: $(diff <(echo "$two") <(snapsum_kept) | head -n 6)"
+}
+
+# Bug (#1564 review): the drift watch (driftof(), lib/snapshot.sh) gave bench/drift.sh the whole copy of the card
+# records each time a card started or ended. It gives what drift.sh reads of each line (DRIFTIN) instead, and the
+# answer must be the one the whole lines give: four cards on two engine commits, with tokens, reviews, fixes, waits, a
+# blocked card, a card still running and fields drift.sh does not read.
+t_snapdriftin() {
+  local f whole cut
+  eval "$(sed -n "/^DRIFTIN='/,/'\$/p" "$SRC/lib/snapshot.sh")"; [ -n "${DRIFTIN:-}" ] || fail "DRIFTIN was not found in lib/snapshot.sh"
+  f=$T/$CASE.jsonl
+  jq -cn 'range(1; 6) as $i | ("2026-03-01T00:00:00Z" | fromdate) + $i * 3600 as $t
+    | [["picked", {}], ["worktree", {engine: (if $i < 3 then "aaaa1111" else "bbbb2222" end), pid: 9}], ["review", {reason: "P1 x"}], ["fix", {}],
+       ["review", {}], (if $i == 5 then empty elif $i == 4 then ["blocked", {waitSec: 120}] else ["landed", {waitSec: ($i * 60), sha: "abc"}] end)]
+    | to_entries[] | {card: "c\($i)", issue: $i, step: .value[0], time: ($t + .key * 300 | todate), tokens: {claude: ($i * 10 + .key), codex: .key}, result: "ok"} + .value[1]' > "$f" \
+    || fail "the fixture could not be made"
+  whole=$("$SRC/bench/drift.sh" --json "$f") && cut=$(jq -cR "$DRIFTIN" "$f" | "$SRC/bench/drift.sh" --json /dev/stdin) \
+    || fail "drift.sh failed on the fixture or on what DRIFTIN keeps of it: ${cut:-$whole}"
+  jq -e '.before.cards == 2 and .after.cards == 2 and .after.blocked == 1 and .before.waits > 0 and .before.fixes == 1' <<<"$whole" > /dev/null \
+    || fail "the fixture does not give two groups with tokens, fixes and waits: $whole"
+  [ "$cut" = "$whole" ] || fail "drift.sh's answer from DRIFTIN's lines differs from the one from the whole lines: $cut against $whole"
 }

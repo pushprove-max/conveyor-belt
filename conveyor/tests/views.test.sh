@@ -197,7 +197,8 @@ latestart() {
 t_snapshotlate() { latestart
   # The hooks below are exported bash functions, not programs on PATH: on macOS p_path puts Homebrew's python3 and df
   # first on PATH, so a stub there is never run; the engine's bash runs a function of that name before any program.
-  out=$(python3() { command python3 "$@"; local rc=$?; case "$*" in *state.py*" -o "*" lines cards -- "*) [ -e "$STUB/was-late" ] || { cat "$STUB/late" >> "$ST/cards.jsonl"; : > "$STUB/was-late"; } ;; esac; return $rc; }
+  # The copy is the state database's answer to `since cards` (snapcopy(), lib/snapshot.sh).
+  out=$(python3() { command python3 "$@"; local rc=$?; case "$*" in *state.py*" -o "*" since cards "*) [ -e "$STUB/was-late" ] || { cat "$STUB/late" >> "$ST/cards.jsonl"; : > "$STUB/was-late"; } ;; esac; return $rc; }
     export -f python3; loop snapshot --fresh 2>/dev/null) || fail "snapshot exited non-zero when a card landed as it was built"
   [ -e "$STUB/was-late" ] || fail "the late landing's hook never ran in the snapshot"
   grep -q '"card":"c5".*"landed"' "$S/cards.jsonl" || fail "the test's late landing was not written"

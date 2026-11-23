@@ -444,13 +444,22 @@ releasemain() {
 # The drift watch of the snapshot's copy of the records (bench/drift.sh --json), else null. It reads the worktree lines
 # (the engine commits, in order) and the cards that ended, and a card writes no line that it reads after its end line:
 # it is kept in $STATE.drift beside the sum of the worktree and end lines (landed, closed, blocked) it was made of, and
-# made again only when they changed.
+# made again only when they changed. Those lines of the copy, and what drift.sh reads of each line of it (DRIFTIN:
+# the fields it reads, a tenth of the line's size), come from summaries of it kept beside the records
+# ($STATE.driftlines and $STATE.driftin, linesum(), lib/records.sh): a search of the whole copy for them, and
+# drift.sh given the whole copy each time a card started or ended, read the whole history.
+DRIFTLINE='select(test("\"step\":\"(worktree|landed|closed|blocked)\""))'
+DRIFTIN='select(. != "") | fromjson | objects | select((.card | type) == "string") | {card, step, time, tokens}
+  + if .step == "worktree" then {engine} elif .step | IN("landed", "closed", "blocked") then {waitSec} else {} end'
 driftof() { # <scratch folder>
   local k v='' ok=''
-  k=$(grep -hE '"step":"(worktree|landed|closed|blocked)"' -- "$1/${STATE##*/}" "$1/${RETRIED##*/}" 2>/dev/null | cksum) || { echo null; return; }
+  linesum "$READ" "$STATE.driftlines" "$1/driftlines" "$DRIFTLINE" 2>/dev/null || { echo null; return; }
+  # A retried file with no such line is no failure (grep's 1, which pipefail passes on).
+  k=$({ printf '%s\n' "$(<"$1/driftlines")"; grep -hE '"step":"(worktree|landed|closed|blocked)"' -- "$1/${RETRIED##*/}" || [ $? = 1 ]; } 2>/dev/null | cksum) || { echo null; return; }
   { read -r ok && read -r v; } 2>/dev/null < "$STATE.drift" || :
   if [ "$ok" = "$k" ] && [[ $v == null || $v == \{* ]]; then printf '%s\n' "$v"; return; fi
-  v=$(cat -- "$1/${STATE##*/}" "$1/${RETRIED##*/}" 2>/dev/null | "$HERE/bench/drift.sh" --json /dev/stdin 2>/dev/null) || v=null
+  linesum "$READ" "$STATE.driftin" "$1/driftin" "$DRIFTIN" 2>/dev/null || { echo null; return; }
+  v=$(cat -- "$1/driftin" "$1/${RETRIED##*/}" 2>/dev/null | "$HERE/bench/drift.sh" --json /dev/stdin 2>/dev/null) || v=null
   { printf '%s\n%s\n' "$k" "$v" > "$STATE.drift.$$" && mv -f "$STATE.drift.$$" "$STATE.drift"; } 2>/dev/null || rm -f "$STATE.drift.$$"
   printf '%s\n' "$v"
 }
@@ -474,25 +483,68 @@ checkrun() { # <scratch folder>; prints {} when the pack names no progress comma
 # the loop's cards hold that lock for seconds at a time on a busy host, and every snapshot waited for it. The copy is
 # taken under the lock a rewrite of the records holds (moveout), so no card is in both files or in neither, and only
 # the whole lines of the records are read (check() says why). 3 when the copy was taken and the hold could not be saved.
+# The copy of the card records is made from one the snapshot keeps between builds ($STATE.copy): the state database
+# gives the lines added since the last build alone (`since`, state.py), or all of them when the records were rewritten
+# since (a retry, a line set aside) or no copy is kept. Copying the whole records on each build read 30,000 lines for
+# one new line. $STATE.copy.at holds `<end> <mark> <lineage> <bytes>`: what to ask next time, a name that changes at
+# each whole copy (within one lineage the copy only grows, so the summaries of it are kept: snaprows, linesum and the
+# check), and the copy's size. It is removed while the copy changes: a build stopped then leaves none, and the next
+# copies the whole records. This build's copy is the kept one, never copied again: a hard link to it
+# ($STATE.copy.r<the snapshot's pid>, removed when the snapshot ends; a copy of it where no hard link can be made),
+# and a note in the scratch folder ($d/lineage) of `<lineage> <bytes>` of it. The lines a later build adds go to the
+# kept copy in place, unless a build still running reads it (its link is to the same file): the copy is then written
+# anew under its name, and that build's link keeps the lines it read. $STATE.copy.counts holds how many lines each
+# card has in the copy (`<count>\t<card>`, as RECCOUNT counts them): with SNAPCOUNTS set (snapkeep), they are written
+# there too.
 snapcopy() { # [<open issues json>]
-  local rc=0 c CTL_V
+  local rc=0 c CTL_V r=$STATE.copy.r$BASHPID
   [ -z "${1:-}" ] || { ctlread 2>/dev/null && c=$CTL_V && [ "$(adopted "$c" "$1" 2>/dev/null)" = "$c" ]; } \
     || lockedfor "the snapshot's adopt" adopt "$1" || rc=3
   # The copy, and what the snapshot reads of the records past their rows, are the state database's answers to one
   # call (state.py), read at one time: the pushes, the cards waiting for the owner's yes (yes), the samples and the
   # declined list.
-  ( flock 5 && stdb ask -o "$d/${STATE##*/}" lines cards -- -o "$d/${RETRIED##*/}" lines retried -- -o "$d/pushes" pushes \
-      -- -o "$d/yes" yes "$YES" "$ST" -- -o "$d/samples" samples -- -o "$d/${DECLINED##*/}" lines declined ) 5>>"$STATE.checked.lock" \
+  ( flock 5 || exit 1
+    k=$STATE.copy e=0 m=- g='' b=0 w=''
+    { read -r e m g b < "$k.at"; } 2>/dev/null
+    [ -f "$k" ] && [ -f "$k.counts" ] && [[ $e =~ ^[0-9]+$ && $b =~ ^[0-9]+$ && $g == g* ]] || e=0 b=0
+    stdb ask -o "$d/since" since cards "$e" "$m" -- -o "$d/${RETRIED##*/}" lines retried -- -o "$d/pushes" pushes \
+      -- -o "$d/yes" yes "$YES" "$ST" -- -o "$d/samples" samples -- -o "$d/${DECLINED##*/}" lines declined || exit 1
+    read -r f e m n < "$d/since" && [[ $f =~ ^[0-9]+$ && $n =~ ^[0-9]+$ ]] || exit 1
+    # The links of builds that ended (their process gone) are removed, with what the check left beside one (dropbad's
+    # <copy>.kept); one of a build still running to the kept copy as it is means that build reads it (w).
+    for l in "$k".r*; do
+      p=${l##*.r}; p=${p%.kept}; [[ $p =~ ^[0-9]+$ ]] && [ "$l" != "$r" ] || continue
+      if kill -0 "$p" 2>/dev/null; then [ ! "$l" -ef "$k" ] || w=1; else rm -f -- "$l"; fi
+    done
+    [ "$f" != 0 ] || g=g${EPOCHREALTIME//[!0-9]/}-$BASHPID b=0
+    if [ "$f" = 0 ] || [ "$n" != 0 ]; then
+      tail -n +2 "$d/since" > "$d/new" && rm -f -- "$k.at" "$k.new" || exit 1
+      if [ "$f" = 0 ]; then o=/dev/null; cp -- "$d/new" "$k.new"
+      elif [ -n "$w" ]; then o=$k.counts; cp -- "$k" "$k.new" && cat -- "$d/new" >> "$k.new"
+      else o=$k.counts; cat -- "$d/new" >> "$k"; fi && { [ ! -e "$k.new" ] || mv -f -- "$k.new" "$k"; } \
+        && LC_ALL=C awk "$RECCOUNT" "$o" "$d/new" > "$k.counts.new" && mv -f -- "$k.counts.new" "$k.counts" \
+        && b=$((b + n)) && printf '%s %s %s %s\n' "$e" "$m" "$g" "$b" > "$k.at.$$" && mv -f -- "$k.at.$$" "$k.at" || exit 1
+    fi
+    # The counts are read by the shell: a program more on each build (t_snapexec) for a file of one line a card.
+    { [ -z "${SNAPCOUNTS:-}" ] || if [ -s "$k.counts" ]; then printf '%s\n' "$(<"$k.counts")"; fi > "$SNAPCOUNTS" || rm -f -- "$SNAPCOUNTS"; } \
+      && { ln -f -- "$k" "$r" 2>/dev/null || cp -- "$k" "$r"; } && printf '%s %s\n' "$g" "$b" > "$d/lineage" ) 5>>"$STATE.checked.lock" \
     && { [ ! -e "$CONTROL" ] || cp -- "$CONTROL" "$d/control.json"; } && return $rc
 }
+# How many lines each card has in the files given (`<count>\t<card>`, one card a line), a first file of such counts
+# added in: a line counts for the card its text begins with ({"card":"<card>").
+RECCOUNT='FILENAME == ARGV[1] {split($0, f, "\t"); n[f[2]] += f[1]; next}
+  match($0, /^\{"card":"[^"]*"/) {n[substr($0, 10, RLENGTH - 10)]++} END {for (c in n) print n[c] "\t" c}'
 # The rows of a records file of the copy, written to <to>, from a running summary of the file kept beside it (<kept>):
 # a line `<key> <offset> <sum>` (key: rows.jq and what rows() passes it; offset: how many of the file's bytes the
-# summary has read; sum: their cksum), then each card's row, one a line, in card order (as rows() gives them). A
-# snapshot parses only the lines past the offset: each card they name has its row made anew from its own lines (rows.jq
-# makes a card's row from that card's lines alone), found by a fixed-string search for its name, and every other row is
-# kept. The summary is made anew from the whole file when it is missing, has another key, or its bytes are no longer
-# the file's first bytes: `retry` rewrote the card records, shorter, or grown past the offset again since. Making
-# every row from the whole file, on each line the loop wrote, was a fifth of a snapshot's work and grew every day.
+# summary has read; sum: their cksum, or the copy's lineage when the caller gives one: snapcopy), then a line for each
+# card, in card order: `<the card as JSON> TAB <its row> TAB <its state>` (the state rows.jq folded its lines into:
+# what the row needs of them). A snapshot parses only the lines past the offset: rows.jq makes the row of each card
+# they name from its kept state and those lines alone, and every other row is kept. Searching the whole file for the
+# older lines of those cards, and giving them to rows.jq, read the whole history on each build. The summary is made
+# anew from the whole file when it is missing, has another key, or its bytes are no longer the file's first bytes:
+# `retry` rewrote the card records, shorter, or grown past the offset again since. With a lineage, the copy's first
+# bytes are the summary's while the lineage is the same, and the file is not read to check them. Making every row from
+# the whole file, on each line the loop wrote, was a fifth of a snapshot's work and grew every day.
 # A summary made anew from a whole file that is not empty is said on stderr first, before that long work: card
 # records rewritten (a retry, as `control resume` makes for the cards a sign-in failure blocked) or a new engine
 # leave it to be made anew, and on a long history the snapshot then runs past a reader's wait (the Foreman's 45 s),
@@ -503,16 +555,18 @@ snapcopy() { # [<open issues json>]
 # main-red fix card. It read every line of the records whole on each snapshot (#398).
 JUDGEDLINE='select(. != "") | fromjson | objects | select(.step == "review" or (.step == "picked" and (.mainRed | type) == "string"))
   | {card, step} + if .step == "picked" then {mainRed} else {judge: (.judge | if type == "object" then {accepted, declined} else . end)} end'
-snaprows() { # <records file> <kept> <to>
-  local k r cs size h1 h2 o s n=-1 src=$1 rf=$3.rows skip=0
+snaprows() { # <records file> <kept> <to> [<lineage> <size>]
   # The key is the same for both files of one snapshot: worked out once, in the snapshot's shell (SNAPROWS_K).
   [ -n "${SNAPROWS_K:-}" ] || SNAPROWS_K=$({ cksum < "$HERE/jq/rows.jq" && printf '%s\n' "$MAX_REVIEWS" "$NODEPS" "$YES" "$LINTYES" "$SHUT" "$OWNSHUT"; } | cksum) || return 1
-  # The file's sum and size from one cksum: a file not grown since the summary needs no other program to check it.
-  k=$SNAPROWS_K && r=$(cksum < "$1") && cs=${r%% *} size=${r##* } && [[ $size =~ ^[0-9]+$ ]] || return 1
+  local k=$SNAPROWS_K r cs size h1 h2 o s n=-1 g=${4:-} rf=$3.rows skip=0
+  # With a lineage, the caller gives the copy's size; else the file's sum and size come from one cksum: a file not
+  # grown since the summary needs no other program to check it.
+  if [ -n "$g" ]; then size=${5:-} cs=$g; else r=$(cksum < "$1") && cs=${r%% *} size=${r##* }; fi
+  [[ $size =~ ^[0-9]+$ ]] || return 1
   # Read from a copy: a snapshot running beside this one may put a newer summary in its place meanwhile.
   cp -- "$2" "$3.sum" 2>/dev/null || : > "$3.sum"
   { read -r h1 h2 o s && [ "$h1 $h2" = "$k" ] && [[ $o =~ ^[0-9]+$ ]] && [ "$o" -le "$size" ] \
-      && if [ "$o" = "$size" ]; then [ "$s" = "$cs" ]; else [ "$(head -c "$o" "$1" | cksum)" = "$s $o" ]; fi; } < "$3.sum" && n=$o
+      && if [ -n "$g" ] || [ "$o" = "$size" ]; then [ "$s" = "$cs" ]; else [ "$(head -c "$o" "$1" | cksum)" = "$s $o" ]; fi; } < "$3.sum" && n=$o
   # Not grown: the rows are the summary's, past its first line.
   if [ "$n" = "$size" ]; then rf=$3.sum skip=1
   else
@@ -520,20 +574,26 @@ snaprows() { # <records file> <kept> <to>
       if [ -s "$3.sum" ]; then echo "conveyor: the snapshot is being made anew from the whole card records (a retry or a resume rewrote them, or the engine changed); this one takes longer" >&2
       else echo "conveyor: the snapshot is being made from the whole card records (no summary of them is kept yet); this one takes longer" >&2; fi
     fi
-    : > "$3.kept"
     if [ "$n" -ge 0 ]; then
-      # The cards the new lines name (as JSON strings), their lines, and the kept rows of the other cards. A row line
-      # begins {"card":<name>, so its first comma ends the name.
-      tail -c +$((n + 1)) "$1" | jq -c .card | sort -u > "$3.ids" \
-        && grep -F -f "$3.ids" "$1" | jq -c --slurpfile t "$3.ids" 'select(.card | IN($t[]))' > "$3.lines" \
-        && sed 's/^/{"card":/; s/$/,/' "$3.ids" | awk 'NR == FNR {t[$0]; next} FNR > 1 && !(substr($0, 1, index($0, ",")) in t)' - "$3.sum" > "$3.kept" || return 1
-      src=$3.lines
+      # The new lines (the bytes up to the size alone), the cards they name, the kept state of each (none for a new
+      # card) and the kept lines of the other cards. The names are read before the summary (getline): a file of none
+      # (the new lines were pushes alone, which no row reads) names no card, and every kept line stays.
+      tail -c +$((n + 1)) "$1" | head -c $((size - n)) > "$3.lines" && jq -rR "$ROWKEY" "$3.lines" > "$3.ids" \
+        && awk -F'\t' -v ids="$3.ids" -v st="$3.states" 'BEGIN {while ((getline l < ids) > 0) t[l]; printf "" > st}
+             FNR > 1 {if ($1 in t) print $3 > st; else print}' "$3.sum" > "$3.kept" \
+        && rows "$3.lines" "$3.states" | jq -r "$ROWLINE" | cat "$3.kept" - | LC_ALL=C sort -s -t$'\t' -k1,1 > "$3.rows" || return 1
+    else
+      rows "$1" /dev/null | jq -r "$ROWLINE" | LC_ALL=C sort -s -t$'\t' -k1,1 > "$3.rows" || return 1
     fi
-    rows "$src" | jq -c '.[]' | cat "$3.kept" - | LC_ALL=C sort -s -t, -k1,1 > "$3.rows" || return 1
     { printf '%s %s %s\n' "$k" "$size" "$cs" && cat "$3.rows"; } > "$2.$$" 2>/dev/null && mv -f "$2.$$" "$2" || rm -f "$2.$$"
   fi
-  awk -v s="$skip" 'BEGIN {printf "["} NR > s + 1 {printf ","} NR > s {printf "%s", $0} END {print "]"}' "$rf" > "$3"
+  awk -F'\t' -v s="$skip" 'BEGIN {printf "["} NR > s + 1 {printf ","} NR > s {printf "%s", $2} END {print "]"}' "$rf" > "$3"
 }
+# The card of each line of a records file on stdin that is no push, as JSON: the first field of its card's line in
+# the summary (snaprows).
+ROWKEY='select(. != "") | fromjson | select(.step != "push") | .card | tojson'
+# Each [row, state] rows() gives with states, as its card's line in the summary (snaprows).
+ROWLINE='.[] | "\(.[1].k | tojson)\t\(.[0] | tojson)\t\(.[1] | tojson)"'
 # The self-heals list and the last sort as the snapshot gives them (selfheals, above).
 healssnap() {
   jq -cn --slurpfile e <(jq -c 'objects' "$SELFHEALS" 2>/dev/null) --slurpfile d <(jq -c 'objects' "$DOCSDRIFT" 2>/dev/null) \
@@ -550,8 +610,9 @@ snapshot() (
   # A stop (TERM, INT, HUP) ends the snapshot once the command it runs has ended. A reader's timeout sends TERM to the
   # whole process group; one that comes as the shell starts a command reaches the shell after the fork and never the
   # new command. With no trap of its own, the shell then runs the EXIT trap at once, and the scratch folder is removed
-  # under that command (cardruns.py failed with FileNotFoundError on cardruns.jq, #359).
-  d=$(mktemp -d) || exit 1; trap 'rm -rf "$d"' EXIT; trap 'exit 143' TERM INT HUP
+  # under that command (cardruns.py failed with FileNotFoundError on cardruns.jq, #359). The link to the kept copy of
+  # the card records that snapcopy made goes with it.
+  d=$(mktemp -d) || exit 1; trap 'rm -rf -- "$d" "$STATE.copy.r$BASHPID"' EXIT; trap 'exit 143' TERM INT HUP
   # The issues first: a new one is held (adopt) before the copy, so the snapshot never shows it in the queue. When
   # its hold cannot be saved, the issues are not known: a new issue is never shown queued when it is not held.
   # The loop's own list (ISSUES, asked of GitHub before each pick, a shut card's issue taken out: run.sh) is read in
@@ -560,7 +621,10 @@ snapshot() (
   if [ -n "$GITHUB" ] && [ -s "$ISSUES" ] && [ "$ISSUES" -nt "$GITHUB/issues" ]; then issues=$(<"$ISSUES")
   else issues=$(openissues "$FIELDS" 2>/dev/null) || issues=''; fi
   snapcopy "$issues"; case $? in 0) ;; 3) issues='' ;; *) echo "conveyor: cannot copy the card records" >&2; exit 1 ;; esac
-  READ=$d/${STATE##*/}; READ_OLD=$d/${RETRIED##*/}; CONTROL=$d/control.json; LIVEJSON=$(live); : "${LIVEJSON:={\}}"
+  # READ is the kept copy of the card records (snapcopy's link) and READG its lineage and size, which the check, the
+  # rows and the summaries of READ (linesum(), lib/records.sh) read in place of a sum of the whole copy.
+  READ=$STATE.copy.r$BASHPID; READ_OLD=$d/${RETRIED##*/}; CONTROL=$d/control.json; LIVEJSON=$(live); : "${LIVEJSON:={\}}"
+  { read -r READG < "$d/lineage"; } 2>/dev/null || READG=''
   # The control record read once, in this shell: the readers below (health's among them) find it kept (ctlread).
   if ctlread 2>/dev/null; then control=$CTL_V; else control=null; fi
   # A plain assignment inside the subshell, never a prefix on the call: a prefix would put the whole issue list in the
@@ -568,8 +632,10 @@ snapshot() (
   # The rows before health: health's summaries of the records go stale with the rows' one, and snaprows says so first.
   # The check before the rows: a line that does not check is set aside (and dropped from READ) before rows.jq reads it,
   # else one bad line stops the snapshot (#290). READ is this snapshot's own copy, so health need not check it again.
+  # The copy's lineage and size (READG) go to the rows unless the check dropped a line from the copy (it empties
+  # READG): it is then no longer the copy kept, and the rows are checked against the copy's bytes instead.
   # shellcheck disable=SC2034 # READCHECKED is read by health (lib/views.sh), which conveyor.sh sources beside this file
-  check && READCHECKED=1 && snaprows "$READ" "$STATE.rows" "$d/rows" || exit 1
+  check && READCHECKED=1 && snaprows "$READ" "$STATE.rows" "$d/rows" "${READG% *}" "${READG#* }" || exit 1
   # The machine's test-slot pool (lib/slots.sh slot_pool) read once, in this shell: health's cores and the slots in
   # use below read it. SLOTSREAD says it was read.
   SLOTSREAD=''; ! slot_pool >/dev/null 2>&1 || SLOTSREAD=1

@@ -27,6 +27,12 @@ Usage: state.py <state folder> <command> ...
                             lines go to its -o file, else to stdout, in order.
 Questions (cards is the card records, retried the lines `retry` took out of them):
   lines <table>             every whole line of the table, as in its file
+  since <table> <size> <mark>
+                            a line `<from> <end> <mark> <bytes>`, then the whole lines of the table's file from byte
+                            <from> to byte <end>: <from> is <size> when the file's first <size> bytes still have that
+                            mark (lines were only added since), else 0 (the file was rewritten, or <size> is 0: every
+                            line); <end> and the new <mark> are the part the table holds now, to ask with next time;
+                            <bytes> is how many bytes the lines after the first line take
   issue <table> <issue>     the table's lines of that issue
   tail <table> <n>          the table's last n lines
   card <card>               the card's lines in the card records
@@ -51,7 +57,7 @@ from datetime import datetime
 
 TABLES = {"cards": "cards.jsonl", "retried": "retried.jsonl", "declined": "declined.jsonl",
           "samples": "samples.jsonl", "limit": "limit.jsonl"}
-QUESTIONS = {"lines": 1, "issue": 2, "tail": 2, "card": 1, "last": 1, "lastreview": 1, "ended": 1, "tested": 1, "pushes": 0, "yes": 2,
+QUESTIONS = {"lines": 1, "since": 3, "issue": 2, "tail": 2, "card": 1, "last": 1, "lastreview": 1, "ended": 1, "tested": 1, "pushes": 0, "yes": 2,
              "samples": 0, "limit": 1}
 
 
@@ -249,6 +255,28 @@ def dumps(o):
     return json.dumps(o, ensure_ascii=False, separators=(",", ":"))
 
 
+def since(db, folder, a):
+    """The answer to `since <table> <size> <mark>` (see the usage), from the table's file itself: the table was
+    brought up to date with it in this transaction (sync), an append adds only past <end>, and a rewrite through this
+    database waits for that transaction, so the file's first <end> bytes are the table's lines. A reader that keeps what it read before asks for the rest
+    alone, and is told when its part was rewritten (mark, as sync tells it)."""
+    t, size, mk = a
+    if t not in TABLES or not size.isdigit():
+        fail(f"not a table, a size and a mark: {' '.join(a)}")
+    end, sm = db.execute("SELECT size, sum FROM files WHERE name = ?", (t,)).fetchone()
+    start = int(size)
+    try:
+        with open(os.path.join(folder, TABLES[t]), "rb") as f:
+            if not (0 < start <= end and mark(f, start) == mk):
+                start = 0
+            f.seek(start)
+            data = f.read(end - start)
+    except FileNotFoundError:
+        start, data = 0, b""
+    lines = data.decode("utf-8", "replace").split("\n")[:-1]
+    return [f"{start} {end} {sm} {len(''.join(l + chr(10) for l in lines).encode('utf-8'))}"] + lines
+
+
 def answer(db, q, a):
     one = lambda sql, *p: [r[0] for r in db.execute(sql, p)]
     if q == "lines":
@@ -321,11 +349,11 @@ def ask(folder, argv):
     # The tables the questions read, and no other: each is brought up to date with its file.
     need = set()
     for _, q, a in asks:
-        need |= set(a[:1]) if q in ("lines", "issue", "tail") else {"pushes": {"cards", "retried"}, "samples": {"samples"},
+        need |= set(a[:1]) if q in ("lines", "since", "issue", "tail") else {"pushes": {"cards", "retried"}, "samples": {"samples"},
                                                  "limit": {"limit"}}.get(q, {"cards"})
     # Every answer is read in the transaction that brought the tables up to date: one reading for all.
     db = opened(folder, sorted(t for t in need if t in TABLES))
-    texts = [(out, "".join(l + "\n" for l in answer(db, q, a))) for out, q, a in asks]
+    texts = [(out, "".join(l + "\n" for l in (since(db, folder, a) if q == "since" else answer(db, q, a)))) for out, q, a in asks]
     # The lock is let go before any answer is written: a reader of one call's pipe may wait on another call (two
     # process substitutions of one jq), and a call that held the lock while its pipe was full would hold that other
     # call back until its lock wait ran out.

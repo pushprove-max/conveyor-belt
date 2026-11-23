@@ -51,7 +51,8 @@ t_snaplinessame() {
   } > "$ST/cards.jsonl"
   { snaplines_line c0 2 picked ok 00 '{"title": "two"}'; snaplines_line c0 2 blocked blocked 01 '{"reason": "brief: failed"}'; } > "$ST/retried.jsonl"
   a=$(loop snapshot --fresh) || fail "the first snapshot exited non-zero"
-  [ -s "$ST/cards.jsonl.health" ] && [ -s "$ST/cards.jsonl.tests" ] && [ -s "$ST/retried.jsonl.health" ] && [ -s "$ST/retried.jsonl.tests" ] && [ -s "$ST/cards.jsonl.priced" ] && [ -s "$ST/cards.jsonl.cardruns" ] \
+  # The snapshot's summaries of its copy of the card records are kept apart (<kept>.copy: linesum(), lib/records.sh).
+  [ -s "$ST/cards.jsonl.health.copy" ] && [ -s "$ST/cards.jsonl.tests.copy" ] && [ -s "$ST/retried.jsonl.health" ] && [ -s "$ST/retried.jsonl.tests" ] && [ -s "$ST/cards.jsonl.priced" ] && [ -s "$ST/cards.jsonl.cardruns" ] \
     || fail "the first snapshot kept no summary of the records: $(ls "$ST")"
   # Lines appended since: c2 tested and landed, a new card, and c3 reviewed.
   {
@@ -62,8 +63,8 @@ t_snaplinessame() {
     snaplines_line c3 0 review GO 17 '{"reason": "COVERED-BY: a.test.sh: the case", "model": "claude-opus-5-5", "usage": {"input": 1000000, "write": 0, "read": 0, "output": 0}}'
   } >> "$ST/cards.jsonl"
   a=$(loop snapshot --fresh) || fail "the snapshot from the summaries exited non-zero"
-  [ "$(head -n 1 "$ST/cards.jsonl.health" | cut -d' ' -f1)" = "$(wc -c < "$ST/cards.jsonl")" ] || fail "the health summary was not brought up to the records' end"
-  rm -f "$ST"/*.jsonl.health "$ST"/*.jsonl.tests "$ST"/*.jsonl.rows "$ST"/*.jsonl.priced "$ST"/*.jsonl.cardruns "$ST"/*.jsonl.judged
+  [ "$(head -n 1 "$ST/cards.jsonl.health.copy" | cut -d' ' -f1)" = "$(wc -c < "$ST/cards.jsonl")" ] || fail "the health summary was not brought up to the records' end"
+  rm -f "$ST"/*.jsonl.health "$ST"/*.jsonl.tests "$ST"/*.jsonl.rows "$ST"/*.jsonl.priced "$ST"/*.jsonl.cardruns "$ST"/*.jsonl.judged "$ST"/*.jsonl.*.copy
   b=$(loop snapshot --fresh) || fail "the snapshot read from scratch exited non-zero"
   # What the fields the summaries keep give, as the lines say it (a summary that left one out would give it in both
   # snapshots alike): the dead worktree, the landed commit not pushed and the push that failed, the refused run, the
