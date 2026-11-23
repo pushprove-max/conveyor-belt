@@ -39,7 +39,8 @@ rev() { st "select(.issue == $1 and .step == \"review\") | $2"; } # <issue> <jq 
 # <worktree>.fields, with the verdict and counts the card's review line takes from the review after minor(), as
 # card() does; the review it leaves is <worktree>.review, and with fix, for a NO-GO, what its fix round is told, as
 # card() gives it (donewhen.sh numbered(), fixlines()), is <worktree>.fix. JUDGEISSUE, when set, is the issue's JSON
-# that card() gives the judge (whether the card is a review follow-up, and its area). Called again on the same issue, it keeps the worktree
+# that card() gives the judge (whether the card is a review follow-up, and its area). JUDGEWRAP, when set, is run in the
+# engine shell before the review (a case's change to an engine function there). Called again on the same issue, it keeps the worktree
 # and judges the next review there, as card() judges a card's next review. No case here runs a whole card; the
 # snapshot of judged reviews over a fix round is judgesnap.test.sh's.
 judgeone() { # <issue> <review file | -> [fix]
@@ -47,7 +48,7 @@ judgeone() { # <issue> <review file | -> [fix]
   mkdir -p "$T/$CASE/cards" && { [ -d "$wt" ] || { git -C "$R" worktree add -q --detach "$wt" && (cd "$wt" && . "$STUB/build") && git -C "$wt" add -A; }; } \
     && { [ "$2" = - ] || cp "$2" "$wt.review"; } || fail "the worktree of c$1 could not be made"
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
-    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && { [ "$2" != - ] || review "$wt" "body of $1" > /dev/null; } \
+    && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && eval "${JUDGEWRAP:-}" && { [ "$2" != - ] || review "$wt" "body of $1" > /dev/null; } \
     && f=$(judged "c$1" "$1" "$wt" "body of $1" '{}' "${JUDGEISSUE:-}") && minor "$wt" \
     && jq -c --arg v "$(verdict "$wt.review")" --argjson k "$(counts "$wt.review")" '. + {verdict: $v, counts: $k}' <<<"$f" > "$wt.fields" \
     && { [ "${3:-}" != fix ] || [ "$(verdict "$wt.review")" != NO-GO ] || { ids=$(numbered "$wt") && fixlines "$wt" "$ids" > "$wt.fix"; }; } ) \
@@ -296,9 +297,17 @@ t_judgeaccept() {
   [ "$(jf 7 '.judge.accepted[0] | [.reason, .cost] | join(" | ")')" = "the word is wrong for every reader | one more test run" ] && [ "$(jf 7 '.counts | tojson')" = '{"P0":0,"P1":1,"P2":0,"P3":0}' ] \
     || fail "the accepted finding's reason and cost are not recorded, or the declined one is counted: $(jf 7 '[.judge, .counts] | tojson')"
   # The second review of the same card (judgeone keeps its worktree): its judge is the issue's second.
-  judgeone 7 "$STUB/review.2"
+  # The clock reads $STUB/now, which the judge's wait for its CLI (seatwait(), the real one run after) moves on from
+  # 00:05:00 to 00:06:55, as a ruling made during that wait would be dated.
+  echo 2026-11-01T00:05:00Z > "$STUB/now"
+  JUDGEWRAP='clock() { cat "$STUB/now"; }; eval "realseatwait$(declare -f seatwait | tail -n +2 | sed "1s/^/() /")"
+    seatwait() { echo 2026-11-01T00:06:55Z > "$STUB/now"; realseatwait "$@"; }' judgeone 7 "$STUB/review.2"
   [ "$(jf 7 '[.verdict, (.judge.declined | length)] | join(" ")')" = "GO 1" ] || fail "a review whose one finding the judge declined is not a GO: $(jr 7)"
   grep -qxF -- '- [P2] a.txt:2 a nit (declined: a matter of taste) [kind: none]' "$STUB/judge-asked" || fail "the second judge was not given the finding declined before on this issue"
+  # Bug caught: the judge's line did not keep when its declined list was read (judge.read), so the judge replay
+  # (lib/replay.sh) guessed it from the judge's seconds, which leave out the wait for its CLI; or it kept a time taken
+  # after that wait (00:06:55), when the judge was given a list read before it.
+  [ "$(jf 7 .judge.read)" = 2026-11-01T00:05:00Z ] || fail "judged() on c7's second review (review.2, clock at 2026-11-01T00:05:00Z, moved to 00:06:55Z by seatwait()) does not keep when it read the declined list: $(jf 7 .judge)"
   [ "$(jq -r '"\(.by): \(.finding)"' "$ST/declined.jsonl" | tr '\n' ,)" = 'judge: [P2] a.txt:2 a nit,judge: [P1] a.txt:12 another word,' ] \
     || fail "the declined list does not hold the declined findings alone, each once: $(cat "$ST/declined.jsonl" 2>&1)"
 }

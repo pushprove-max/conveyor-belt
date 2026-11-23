@@ -257,7 +257,7 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 # longer outside, or goes to the self-heals list, leaves it): when the card lands, followups() files each as a follow-up of the
 # card, as a NO-GO finding is filed. The review's record line holds judge: {model, effort, sec,
 # tokens, usage, accepted: [{n, finding, place, reason, cost, effect}], declined: [{n, finding, place, reason, kind (when its reason starts with one)}], outside: [{n, finding, place, reason, effect}],
-# selfheals: [{n, finding, place, reason, effect, cost (an accepted one's), outside (true for an OUTSIDE one)}] (below), back: the lines of the fix round's findings it was given, when it was given any}; n is the
+# selfheals: [{n, finding, place, reason, effect, cost (an accepted one's), outside (true for an OUTSIDE one)}] (below), back: the lines of the fix round's findings it was given, when it was given any, read: when the declined list it was given was read}; n is the
 # finding's number as the judge was given it (its F<n>), and cost is what the judge wrote after "Cost to every card:",
 # which every accepted finding the judge decided has: cost is null on a finding the judge gave no line for that could
 # be read, which is kept in accepted for the fix round but is not accepted.
@@ -560,16 +560,16 @@ healsnone() { # <card> <worktree>
 # The review beside the worktree, judged: prints the review's fields, with judge (above) when the judge was asked.
 # It never fails: whatever goes wrong, the review stands as the reviewer wrote it.
 judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue json>]
-  local wt=$3 ja before j why f back fu area stood=''
+  local wt=$3 ja before readat j why f back fu area stood=''
   ja=$(judgeon) && [ "$(verdict "$wt.review")" != none ] && grep -Evq "$NOTFINDING" "$wt.review" \
     || { healsnone "$1" "$wt" || echo "conveyor: cannot take the kinds an earlier judge gave the findings of $1 away" >&2; printf '%s\n' "$5"; return 0; }
   # fu: the card is a review follow-up (its issue's "Follow-up depth: N", N 1 or more); area: its issue's area label,
   # which its self-heals list entries keep.
   fu=$(jq -r '[.body // "" | match("(?:^|\n)Follow-up depth: ([0-9]{1,3})[ \t\r]*(?=\n|$)") | .captures[0].string | tonumber][0] // 0 | if . > 0 then "1" else "" end' <<<"${6:-null}" 2>/dev/null) || fu=''
   area=$(jq -r --arg p "$AREA" '.labels // [] | map(.name | select(startswith($p))) | .[0] // empty' <<<"${6:-null}" 2>/dev/null) || area=''
-  # The findings already declined on this issue's cards, the last 50, each with its decline's kind (none on a line
-  # that has no kind): one raised again with nothing new is declined again only after a kind JUDGE allows.
-  before=$(stdb ask lines declined 2>/dev/null | jq -rR --arg c "$1" --argjson n "$2" --arg repo "$REPO" 'fromjson? | objects | select(.card == $c or (.issue == $n and $n != 0 and .repo == $repo))
+  # The findings already declined on this issue's cards, the last 50, each with its decline's kind (none on a line that
+  # has no kind): one raised again with nothing new is declined again only after a kind JUDGE allows. readat: its time.
+  readat=$(clock); before=$(stdb ask lines declined 2>/dev/null | jq -rR --arg c "$1" --argjson n "$2" --arg repo "$REPO" 'fromjson? | objects | select(.card == $c or (.issue == $n and $n != 0 and .repo == $repo))
     | "- \(.finding) (declined: \(.why)) [kind: \(.kind // "none")]"' 2>/dev/null | awk '!seen[$0]++' | tail -n 50)
   back=$(fixedbefore "$wt"); [ -z "$back" ] || back+=$'\n\n'
   if ! { judgemarks "$wt" "$ja" > "$wt.judge.marks" && jq -e 'length > 0' "$wt.judge.marks" > /dev/null; } 2>/dev/null; then
@@ -654,9 +654,9 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue
   rm -f "$wt.judge" "$wt.judge.marks" "$wt.judge.said" "$wt.judge.events" "$wt.judge.err" "$wt.review.new" "$wt.outside.new" "$wt.effects.new" "$wt.judge.said.new"
   # The judge's line keeps the findings of the last fix round it was given (back: fixedbefore()'s lines, with their
   # E<n> ids), which the judge replay (lib/replay.sh) gives its judge in turn: the rounds file is not kept with the records.
-  # It keeps the declined lines it was given too (before, [] for none): a decline made or replaced while the judge
-  # waited for its CLI (seatwait()) is newer than the list it read, so no time on the line tells which ruling it read.
-  jq -ce --slurpfile j <(printf '%s' "${j:-null}") --arg b "$back" --arg d "$before" '. + {judge: ($j[0] | if . == null then . else . + {before: ($d | split("\n") | map(select(startswith("- "))))} end
+  # It keeps the declined lines it was given (before, [] for none) and when it read them (read, before seatwait()): a
+  # decline made or replaced while the judge waited for its CLI is newer than the list it read, and replay leaves it out.
+  jq -ce --slurpfile j <(printf '%s' "${j:-null}") --arg b "$back" --arg d "$before" --arg rd "$readat" '. + {judge: ($j[0] | if . == null then . else . + {before: ($d | split("\n") | map(select(startswith("- ")))), read: $rd} end
     | if $b == "" or . == null then . else . + {back: ($b | split("\n") | map(select(startswith("- "))))} end)}' <<<"$5" 2>/dev/null || printf '%s\n' "$5"
 }
 # The P3 findings the review still holds after the judge (judged()) are handled by the control record's rule P3 (the

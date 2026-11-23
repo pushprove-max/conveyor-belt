@@ -31,9 +31,12 @@ REPLAY_LAST=20
 # (judge.back); none when no fix round of the card ran (a card built from nothing after `retry <issue> --fresh`,
 # say)}. The before lines are the ones the review's judge was given, as its line keeps them (judge.before, judged()):
 # a decline made or replaced while it waited for its CLI is newer than the list it read. A line written before judged()
-# kept them gives the declines older than the review's line less the judge's seconds: the judge's own declines are
-# written after its call ends. A line declined again under another kind (declined(), lib/followups.sh) gives the last
-# of its rulings made before then: its earlier ones (was) and its latest (made at ruled, else at time).
+# kept them gives the declines older than the time its review read the declined list (judge.read, judged()), before the
+# wait for the judge's CLI: the judge's seconds leave that wait out, and the judge's own declines are written after its
+# call ends. A line with no judge.read either (one written before judged() kept it) takes its time less the judge's
+# seconds, which can let in a ruling made during that wait. A line declined again under another kind (declined(),
+# lib/followups.sh) gives the last of its rulings made before then: its earlier ones (was) and its latest (made at
+# ruled, else at time).
 replaycases() { # <n>
   { stdb ask lines retried -- lines cards; } 2>/dev/null | jq -cs --argjson last "$1" --arg st "$ST" --arg repo "$REPO" \
     --slurpfile dl <(stdb ask lines declined 2>/dev/null | jq -c 'objects' 2>/dev/null) '
@@ -41,7 +44,8 @@ replaycases() { # <n>
     map(objects) as $all
     | [$all[] | select(.step == "review" and (.judge | type) == "object" and .judge.failed == null
         and ([.judge.accepted, .judge.declined, (.judge.selfheals | arrays | map(select(.outside | not))) | arrays[]] | length) > 0)]
-    | sort_by(.time) | .[-$last:][] | .card as $c | .issue as $n |(.judge.sec | numbers // 0) as $sec | (.time | t | if . == null then null else . - $sec end) as $ran
+    | sort_by(.time) | .[-$last:][] | .card as $c | .issue as $n | (.judge.sec | numbers // 0) as $sec
+    | ((.judge.read | t) // (.time | t | if . == null then null else . - $sec end)) as $ran
     | {card: $c, issue, time, main: (.main // ""), patch: (.patch // ""),
        back: [.judge.back | arrays[] | strings],
        before: ((.judge.before | arrays | map(strings)) // ([$dl[] | select((.card == $c or (.issue == $n and $n != 0 and .repo == $repo)) and $ran != null)

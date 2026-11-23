@@ -21,7 +21,8 @@
 # - c1-11 (issue 9, landed as the same commit as c1-7): F1 accepted; the replay judge's call on it fails. Its judge
 #   was given the finding E2 (F-eight) of the card's own fix round before it (back), not c1-10's F-five.
 # - c1-12 (issue 9, landed as the same commit, but its review read the change of c1-8): skipped.
-# Each review line keeps the patch-id of the change it read; c1-7 has a decline of an earlier round and its own.
+# Each review line keeps the patch-id of the change it read, and when it read the declined list (judge.read: its time
+# less its judge's 5 s); c1-7 has a decline of an earlier round and its own.
 # The replay judge is claude-haiku-5-5, allowed for the review here: 1M input tokens a call cost $0.10.
 replaysetup() {
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-01),$(issue 9 2026-01-01)]"
@@ -37,12 +38,13 @@ replaysetup() {
   rline() { # <card> <issue> <minute> <patch> <judge json> [<file>]
     jq -cn --arg c "$1" --argjson i "$2" --arg t "2026-11-01T00:0$3:00Z" --arg m "$base" --arg p "$4" --argjson j "$5" --argjson u "$U" \
       '{card: $c, issue: $i, step: "review", time: $t, tokens: {claude: 0, codex: 0}, result: "GO", sha: "", reason: "", main: $m, patch: $p,
-        judge: ({model: "claude-sonnet-5-5", effort: "medium", sec: 5, tokens: {claude: 1000000, codex: 0}, usage: $u} + $j)}' >> "${6:-$ST/cards.jsonl}"
+        judge: ({model: "claude-sonnet-5-5", effort: "medium", sec: 5, tokens: {claude: 1000000, codex: 0}, usage: $u,
+          read: ($t | fromdateiso8601 - 5 | todate)} + $j)}' >> "${6:-$ST/cards.jsonl}"
   }
   landed() { jq -cn --arg c "$1" --argjson i "$2" --arg t "$3" --arg s "$sha" '{card: $c, issue: $i, step: "landed", time: $t, tokens: {claude: 0, codex: 0}, result: "ok", sha: $s, reason: ""}' >> "$ST/cards.jsonl"; } # <card> <issue> <time>
   rline c1-7 7 1 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:2 F-one","place":"inside","reason":"real","cost":"none"}],"declined":[{"n":2,"finding":"[P2] a.txt:1 F-two","place":"outside","reason":"style"}]}'
   landed c1-7 7 2026-11-01T00:02:00Z
-  # c1-7's declines: one of an earlier round, before its judge ran (00:00:55, the review's line less its 5 s), which
+  # c1-7's declines: one of an earlier round, before its judge ran (00:00:55, when its review read the list), which
   # the replay judge is given, and the one its judge declined (written after its call), which it is not.
   printf '%s\n' '{"id":"d000000000001","time":"2026-11-01T00:00:30Z","card":"c1-7","issue":7,"finding":"[P2] a.txt:1 F-old","by":"judge","why":"nothing new","kind":"claim wrong","repo":"r"}' \
     '{"id":"d000000000002","time":"2026-11-01T00:00:58Z","card":"c1-7","issue":7,"finding":"[P2] a.txt:1 F-two","by":"judge","why":"style","repo":"r"}' >> "$ST/declined.jsonl"
@@ -169,15 +171,21 @@ t_replaylong() {
 # (ran 00:04:55) must get rare case, c1-11's (00:06:55) claim wrong and c1-12's (00:08:55) other. declined() kept the
 # first time on the rewritten line, or dated the claim-wrong ruling it moved into was with the first ruling's time
 # (only a third ruling moves a replaced ruling there), or the replay left out the current ruling of a line ruled again.
+# Bug caught: c1-13's review read the list at 00:05:00, then waited for its judge's CLI (seatwait()) until 00:06:55; the
+# replay took the judge's start from its line's time less its seconds, so it gave claim wrong, made during the wait.
+# Bug caught: c1-14's line was written before judged() kept judge.read; the replay gave it no earlier declines, not
+# the claim wrong of before its line's time less its judge's 5 s (00:06:55).
 t_replayrekind() {
   replaysetup
+  base=$B0 rline c1-13 9 7 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:2 F-wait","place":"inside","reason":"real","cost":"none"}],"declined":[],"read":"2026-11-01T00:05:00Z"}'
+  base=$B0 rline c1-14 9 7 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:2 F-old-line","place":"inside","reason":"real","cost":"none"}],"declined":[],"read":null}'
   CONVEYOR_NOW=$(p_date 2026-11-01T00:04:20Z +%s) loop declined add c1-9 9 judge 'rare: needs two hosts' '[P2] a.txt:4 F-rk' 'rare case' \
     && CONVEYOR_NOW=$(p_date 2026-11-01T00:05:30Z +%s) loop declined add c1-9 9 judge 'claim wrong: guarded' '[P2] a.txt:4 F-rk' 'claim wrong' \
     && CONVEYOR_NOW=$(p_date 2026-11-01T00:08:00Z +%s) loop declined add c1-9 9 judge 'other: style' '[P2] a.txt:4 F-rk' 'other' \
     || fail "declined add of F-rk on c1-9 as rare case at 00:04:20, claim wrong at 00:05:30, then other at 00:08:00, failed"
   fx_in '. "$HERE/lib/replay.sh"; replaycases 20'
   local c want got
-  for c in 'c1-9|rare: needs two hosts|rare case' 'c1-11|claim wrong: guarded|claim wrong' 'c1-12|other: style|other'; do
+  for c in 'c1-9|rare: needs two hosts|rare case' 'c1-11|claim wrong: guarded|claim wrong' 'c1-12|other: style|other' 'c1-13|rare: needs two hosts|rare case' 'c1-14|claim wrong: guarded|claim wrong'; do
     IFS='|' read -r c want got <<<"$c"; want="- [P2] a.txt:4 F-rk (declined: $want) [kind: $got]"
     got=$(jq -r --arg c "$c" 'select(.card == $c) | .before[]' "$T/$CASE/run.out" | grep F-rk)
     [ "$RC" = 0 ] && [ "$got" = "$want" ] \
