@@ -246,7 +246,7 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 # The judge. With the control record's judge on (`control judge on`; judgeon()), a judge reads each review of a card's change that holds findings, before
 # the card acts on it: the findings, the card's staged change, the issue (the brief) and the findings already
 # declined on this issue's cards (the declined list, DECLINED, holds them); the review after a fix round also gets the findings
-# that round was told to fix, each with the judge's earlier reason (fixedbefore()). It marks each finding accepted, declined or
+# that round was told to fix, each with the judge's earlier reason when the judge gave a readable line for it (fixedbefore()). It marks each finding accepted, declined or
 # outside (real, but not caused by the card's change), with a one-line reason, and declines a finding at any level (P0 to P3) only when its claim is wrong about the code, its proof cannot happen with what the project really runs, or its defect is already fixed on main ("rare case" is
 # no reason, except at a level the control record's judgeRare names: judgeprompt(); a P3 is not declined for being minor). A declined finding becomes a line `DECLINED:
 # <finding> (judge: <reason>)` of the review, which is no finding (NOTFINDING): it causes no fix round and no
@@ -257,7 +257,8 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
 # card, as a NO-GO finding is filed. The review's record line holds judge: {model, effort, sec,
 # tokens, usage, accepted: [{n, finding, place, reason, cost}], declined: [{n, finding, place, reason, kind (when its reason starts with one)}], outside: [{n, finding, place, reason}], back: the lines of the fix round's findings it was given, when it was given any}; n is the
 # finding's number as the judge was given it (its F<n>), and cost is what the judge wrote after "Cost to every card:",
-# which every accepted finding has.
+# which every accepted finding the judge decided has: cost is null on a finding the judge gave no line for that could
+# be read, which is kept in accepted for the fix round but is not accepted.
 # Each finding reaches the judge marked with its place: inside the card's diff (any file:line it names, a path under the worktree read as one in it, is a
 # line the staged change adds or changes, or one of the two lines a removal sits between, or its file is one the
 # change deletes or changes as binary), outside it (an unchanged line beside a changed one too), or none (it
@@ -298,7 +299,7 @@ A decline reason starts with its kind, then a colon and why: `claim wrong` (its 
 main), `rare case` (only where the rule above allows it), `not this change` or `other`.
 A finding marked `[E<n>]` is the same finding back after its fix: the reviewer found it again after a fix session changed
 the code for it. The findings that fix round was told to fix are listed before the findings, each with your earlier
-reason for accepting it (when there are any). A finding you accepted before is declined now only when the fix made it
+reason for accepting it when you gave one that could be read (when there are any). A finding you accepted before is declined now only when the fix made it
 untrue: the reason starts with `other` and says what the fix changed (`fixed` is for a defect already fixed on main). Otherwise judge it as the code stands.
 A finding already declined (listed before the findings, each with the kind of its decline, when there are any) and
 raised again with nothing new is declined as a repeat, with the earlier kind, only when that kind is `claim wrong`,
@@ -456,7 +457,7 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
   jq -c --arg r "the judge call failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT")), or gave no answer" '. + {failed: $r}' <<<"$f"; return 1
 }
 # The findings the last fix round of the card was told to fix, each with its id and the reason the judge gave when it
-# accepted it (the judge's line of a review record of the issue, judged(): a retried card's records too, as its fix rounds
+# accepted it, none when the judge gave no readable line for it (its cost is null) (the judge's line of a review record of the issue, judged(): a retried card's records too, as its fix rounds
 # come with its kept patch), as a section for the judge; nothing when no fix round has run.
 fixedbefore() { # <issue> <worktree>
   [ -s "$2.rounds/findings.jsonl" ] || return 0
@@ -464,7 +465,7 @@ fixedbefore() { # <issue> <worktree>
     ([.[] | objects | select(.issue == $n and .step == "review") | {time: (.time // ""), a: [.judge.accepted[]? | objects]}] | sort_by(.time) | reverse | map(.a[]?)) as $a
     | ([$f[] | select(.tracked | not) | .round] | max) as $m
     | [$f[] | select(.round == $m and (.tracked | not))
-      | . as $x | "- \($x.id) \($x.line)" + (([$a[] | select(.finding == $x.line)] | first) as $j | if $j then " (accepted: \($j.reason))" else "" end)]
+      | . as $x | "- \($x.id) \($x.line)" + (([$a[] | select(.finding == $x.line)] | first) as $j | if $j and $j.cost != null then " (accepted: \($j.reason))" else "" end)]
     | if length == 0 then empty else "# The findings the last fix round was told to fix", .[], "" end' 2>/dev/null
 }
 # The review beside the worktree, judged: prints the review's fields, with judge (above) when the judge was asked.

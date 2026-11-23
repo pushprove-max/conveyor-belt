@@ -50,8 +50,8 @@ replaysetup() {
   base=$sha rline c1-8 8 3 "$P8" '{"accepted":[{"n":1,"finding":"[P1][security] a.txt:3 F-three","place":"inside","reason":"always accepted: a security finding (the judge declined it: weak)","cost":"none"}],"declined":[]}' "$ST/retried.jsonl"
   jq -cn '{card: "c1-8", issue: 8, step: "blocked", time: "2026-11-01T00:04:00Z", tokens: {claude: 0, codex: 0}, result: "blocked", sha: "", reason: "tests failed", kept: "kept/c1-8"}' >> "$ST/retried.jsonl"
   rline c1-9 9 5 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:1 F-four","place":"inside","reason":"real","cost":"none"}],"declined":[]}'
-  rline c1-10 9 6 "$P7" '{"failed":"the judge call failed","accepted":[{"n":1,"finding":"[P1] a.txt:1 F-five","place":"inside","reason":"real","cost":"none"}]}'
-  rline c1-11 9 7 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:2 F-six","place":"inside","reason":"real","cost":"none"}],"declined":[],"back":["- E2 [P1] a.txt:1 F-eight (accepted: real)"]}'
+  rline c1-10 9 6 "$P7" '{"failed":"the judge call failed","accepted":[{"n":1,"finding":"[P1] a.txt:1 F-five","place":"inside","reason":"real","cost":"none"},{"n":2,"finding":"[P1] a.txt:1 F-eight","place":"inside","reason":"the judge gave no line for this finding that could be read","cost":null}]}'
+  rline c1-11 9 7 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:2 F-six","place":"inside","reason":"real","cost":"none"}],"declined":[],"back":["- E2 [P1] a.txt:1 F-eight"]}'
   landed c1-11 9 2026-11-01T00:08:00Z
   # c1-12: its review read another change (P8) than the commit that landed after a fix round, so it is skipped.
   rline c1-12 9 9 "$P8" '{"accepted":[{"n":1,"finding":"[P1] a.txt:2 F-seven","place":"inside","reason":"real","cost":"none"}],"declined":[]}'
@@ -115,9 +115,14 @@ t_replayjudge() {
   # nothing), and was given them without their E<n> ids. c1-11's own line keeps the section its judge was given (E2,
   # F-eight); c1-7 and c1-8 have none, and c1-8 must not fall back to c1-6's F-nine, accepted before it on issue 8.
   [ "$(grep -c '^# The findings the last fix round was told to fix$' "$STUB/judged")" = 1 ] \
-    && [ "$(awk '/^== /{on = /c1-11$/} on' "$STUB/judged" | grep -cxF -- '- E2 [P1] a.txt:1 F-eight (accepted: real)')" = 1 ] \
+    && [ "$(awk '/^== /{on = /c1-11$/} on' "$STUB/judged" | grep -cxF -- '- E2 [P1] a.txt:1 F-eight')" = 1 ] \
     && ! grep -q 'F-five\|F-nine' "$STUB/judged" \
     || fail "the replay judge of c1-11 was not given the section its review's judge was given (E2 F-eight), was given c1-10's F-five or c1-6's F-nine, or c1-7 or c1-8 was given a section: $(grep -n 'fix round\|F-five\|F-nine\|F-eight\|^== ' "$STUB/judged")"
+  # Bug caught: F-eight, which c1-10's judge gave no readable line for (kept in accepted with cost null), reached the
+  # replay judge labelled as accepted, with "the judge gave no line ... could be read" as the reason, though the fix
+  # round before c1-11 was told to fix it with no label, as the live review lists it (fixedbefore(), lib/review.sh).
+  ! grep -q 'F-eight (accepted' "$STUB/judged" \
+    || fail "the replay judge of c1-11 was given F-eight, undecided in c1-10, with an acceptance label: $(grep -n 'F-eight\|^== ' "$STUB/judged")"
   [ "$(eval "$SUMS")" = "$(cat "$STUB/before")" ] || fail "the replay changed a card line, a setting or main: $(eval "$SUMS") was $(cat "$STUB/before")"
 }
 

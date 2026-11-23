@@ -124,6 +124,27 @@ t_judgeback() {
     || fail "judged() on c7's second review, given E1 of round 1, did not keep that line alone as judge.back, or the first review's line has one: $(jq -c .judge.back "$wt.fields"; jq -c .judge.back "$ST/retried.jsonl")"
 }
 
+# Bug caught: a finding the judge gave no readable line for is kept in .judge.accepted, so the next review's judge was
+# told "(accepted: the judge gave no line for this finding that could be read)", as if the judge had accepted it.
+# Round 1's judge answers F1 only; F2 is undecided (cost null). Made as t_judgeback makes its round, with no card run.
+t_judgebackundecided() {
+  local f1='[P1] a.txt:2 wrong word. Proof: a.txt:2' f2='[P1] b.txt:3 wrong name. Proof: b.txt:3' wt rd
+  judging "[$(issue 7 2026-01-01)]"; wt=$T/$CASE/cards/c7; rd=$wt.rounds
+  printf '%s\n' "$f1" "$f2" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  echo 'F1 ACCEPT: the word is wrong in the change. Cost to every card: none' > "$STUB/judge.1"
+  judgeone 7 -
+  # The record keeps F2 in accepted with cost null and no other mark, as records already written do: the label rests on cost.
+  jq -e '.judge.accepted | map(select(.n == 2)) | length == 1 and .[0].cost == null and (.[0] | has("undecided") | not)' "$wt.fields" >/dev/null \
+    || fail "the review record does not keep F2, which the judge gave no line for, in accepted with cost null: $(jq -c .judge "$wt.fields")"
+  jq -c '{card: "c7", issue: 7, step: "review", result: "NO-GO"} + .' "$wt.fields" >> "$ST/cards.jsonl"
+  mkdir -p "$rd" && jq -cn --arg a "$f1" --arg b "$f2" '{round: 1, id: "E1", line: $a}, {round: 1, id: "E2", line: $b}' > "$rd/findings.jsonl"
+  printf '%s\n' "[P1] [E1] $f1" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
+  echo 'F1 DECLINE: other: the fix changed the word' > "$STUB/judge.2"
+  judgeone 7 -
+  grep -qxF -- "- E1 $f1 (accepted: the word is wrong in the change)" "$STUB/judge-asked" && grep -qxF -- "- E2 $f2" "$STUB/judge-asked" \
+    || fail "the judge given round 1's findings (review.1: F1 accepted, F2 with no line) did not get F1 accepted and F2 with no label: $(grep '^- E' "$STUB/judge-asked")"
+}
+
 # Bug caught: JUDGE did not say what an [E<n>] mark means, so the judge did not know a finding was back after its fix, or
 # that one it accepted before is declined only when the fix made it untrue.
 t_judgebackmeaning() {

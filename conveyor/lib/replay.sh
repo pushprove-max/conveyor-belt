@@ -25,9 +25,10 @@ REPLAY_LAST=20
 # commit or "", kept: the kept patch's path or "", patch: the patch-id of the change its review read or "", before:
 # the lines of the findings already declined on the card or its issue before its judge ran ("- <finding> (declined:
 # <why>) [kind: <kind, or none>]", the last 50, as judged() gives them), back: the findings of the fix round before
-# this review, "- E<n> <finding> (accepted: <reason>)", as its judge was given them (fixedbefore(), lib/review.sh) and
-# its line keeps them (judge.back); none when no fix round of the card ran (a card built from nothing after `retry
-# <issue> --fresh`, say)}. A decline is before the judge ran when it is older than the review's
+# this review, "- E<n> <finding> (accepted: <reason>)", or "- E<n> <finding>" for one the judge gave no readable line
+# for (its cost null), as its judge was given them (fixedbefore(), lib/review.sh) and its line keeps them
+# (judge.back); none when no fix round of the card ran (a card built from nothing after `retry <issue> --fresh`,
+# say)}. A decline is before the judge ran when it is older than the review's
 # line less the judge's seconds: the judge's own declines are written after its call ends. A line declined again under
 # another kind (declined(), lib/followups.sh) gives the last of its rulings made before then: its earlier ones (was) and
 # its latest (made at ruled, else at time).
@@ -133,7 +134,7 @@ replay() { # judge <model> [<effort>] [--last <n>] [--estimate]
     printf '%s\n' "$k" > "$d/case"
     # The findings declined on the issue's cards before the recorded judge ran, given as judged() gives them.
     before=$(jq -r '.before | arrays | if length > 0 then "# Findings already declined on the cards of this issue\n\(join("\n"))" else empty end' <<<"$k")
-    # The findings the fix round before the review was told to fix, with the judge's earlier reasons, as judged() gives them.
+    # The findings the fix round before the review was told to fix, with the judge's earlier reason for each it gave a readable line for, as judged() gives them.
     back=$(jq -r '.back | arrays | if length > 0 then "# The findings the last fix round was told to fix\n\(join("\n"))" else empty end' <<<"$k")
     out=$(CALLSEAT=$s CALLSTEP=replay CALLACT="the replay judge reads the findings of $(jq -r .card <<<"$k")" judgecall "$d/wt" "$jp" "$brief"$'\n\n'"${back:+$back$'\n\n'}${before:+$before$'\n\n'}# The findings"$'\n'"$(jq -r '.findings
       | to_entries[] | "F\(.key + 1) [\({inside: "inside the diff", outside: "outside the diff"}[.value.place] // "no place")] \(.value.finding)"' <<<"$k")") && f=ok || f=''
