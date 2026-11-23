@@ -41,9 +41,10 @@ def use_prices(prices):
     with prices is priced at them, in place of the cost OpenCode reports (card_costs).
     name is the model's display name, which the Board shows over its own (display). aliases are other model IDs that mean the model (a proxy's or another
     provider's ID for it): a request or step with one is priced as the model (canon). An alias that is a model itself,
-    priced by the table or named in the pack, is left out: an alias never re-prices a model."""
+    priced by the table or named in the pack, is left out: an alias never re-prices a model. A pack alias with
+    the ID of a built-in alias replaces that one."""
     num = lambda x: not isinstance(x, bool) and isinstance(x, (int, float)) and x >= 0
-    entries = prices if isinstance(prices, dict) else {}
+    entries, pack = prices if isinstance(prices, dict) else {}, {}
     for m, p in sorted(entries.items()):
         if not m or not isinstance(p, dict):
             continue
@@ -53,7 +54,9 @@ def use_prices(prices):
             OVERRIDDEN.add(m)
         for a in p.get("aliases") if isinstance(p.get("aliases"), list) else []:
             if isinstance(a, str) and a and a != m:
-                ALIASES.setdefault(a, m)
+                pack.setdefault(a, m)
+    # The pack's alias wins over a built-in alias of the same ID: prices.sh saves it with no error, so the pack means it.
+    globals()['ALIASES'].update(pack)  # dashboard_limit.py's, run in this namespace: globals() names it for a linter
     for a in [a for a in ALIASES if a in PRICES or a in entries]:
         del ALIASES[a]
     for m in OVERRIDDEN:

@@ -21,9 +21,10 @@ T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/out" "$T/auth" "$T/bin" "$T/fm"
 # A gh that keeps each call's arguments and the --body-file it was given (gh_write's copy of the body) and answers the
-# issue's URL in the --repo it was given, or fails while gh-fail is there.
+# issue's URL in the --repo it was given, or fails while gh-fail is there. While gh-hold is there, each call leaves a
+# gh-started.<pid> mark and waits (to 30 s) until gh-hold is gone: a slow GitHub the test lets go of.
 # stub: it leaves a mark when run, so the case can show Dismiss never runs it, which the shared stub cannot show.
-printf '#!/usr/bin/env bash\nT=%q\ntouch "$T/gh-ran"\n[ ! -e "$T/gh-fail" ] || { echo "HTTP 401: Bad credentials" >&2; exit 1; }\nprintf "%%s\\n" "$@" > "$T/gh-args"; echo call >> "$T/gh-calls"\nwhile [ $# -gt 0 ]; do [ "$1" != --repo ] || r=$2; [ "$1" != --body-file ] || cat -- "$2" > "$T/gh-body"; shift; done\necho "https://github.com/$r/issues/77"\n' "$T" > "$T/bin/gh"; chmod +x "$T/bin/gh"
+printf '#!/usr/bin/env bash\nT=%q\ntouch "$T/gh-ran"\n[ ! -e "$T/gh-hold" ] || { touch "$T/gh-started.$$"; i=0; while [ -e "$T/gh-hold" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i + 1)); done; }\n[ ! -e "$T/gh-fail" ] || { echo "HTTP 401: Bad credentials" >&2; exit 1; }\nprintf "%%s\\n" "$@" > "$T/gh-args"; echo call >> "$T/gh-calls"\nwhile [ $# -gt 0 ]; do [ "$1" != --repo ] || r=$2; [ "$1" != --body-file ] || cat -- "$2" > "$T/gh-body"; shift; done\necho "https://github.com/$r/issues/77"\n' "$T" > "$T/bin/gh"; chmod +x "$T/bin/gh" # sleep: the stub's poll for gh-hold to go, a slow GitHub the test ends
 # The Board files through conveyor.sh gh-write on its checkout (CONVEYOR_MAIN, here $T), which reads that checkout's pack.
 mkdir -p "$T/.conveyor" && cp "$HERE/../../../.conveyor/project.json" "$T/.conveyor/"
 PATH=$T/bin:$PATH CONVEYOR_DASHBOARD_AUTH=$T/auth/dashboard-auth.json CONVEYOR_RULING_LOG=$T/rulings.jsonl XDG_CONFIG_HOME=$T/config \
@@ -280,6 +281,69 @@ with open(os.path.join(T, 'config', 'conveyor', 'host.json'), 'w') as f:
 got, said = call('/plugin-file', {'file': NOTES, 'line': A, 'title': 'setup never sets linkFromMain', 'body': 'a\n'})
 check('unread_host_file_refused', got == 500 and 'the host file does not read' in said
       and text(os.path.join(T, 'gh-calls')) == 'call\n' and text(NOTES) == HEAD + A + '\n' + C + '\n', (got, said))
+os.remove(os.path.join(T, 'config', 'conveyor', 'host.json'))
+
+# Bug (R114): two tabs that File one note at once both found it in the file and both filed it, as the check that the
+# note is there, the gh call and the removal were held by no lock (the server answers each request on its own
+# thread). The first File's gh is held until the second request has asked for the note's lock (note_hold()), or,
+# with no lock, has started a gh call of its own: no timing guess either way. Then one gh call files it, and the
+# other File finds the note gone (409).
+D = '- 2026-11-20T09:40:00Z · card - · a note filed from two tabs · evidence: -'
+E = '- 2026-11-20T09:50:00Z · card - · another note in the same file · evidence: -'
+with open(NOTES, 'w') as f:
+    f.write(HEAD + D + '\n' + E + '\n')
+os.remove(os.path.join(T, 'gh-calls'))
+open(os.path.join(T, 'gh-hold'), 'w').close()
+real_hold, asked, holds = getattr(ds, 'note_hold', None), threading.Event(), [0]
+
+
+def hold_seen(*k):
+    holds[0] += 1
+    if holds[0] == 2:
+        asked.set()
+    return real_hold(*k)
+
+
+def started():
+    return len([x for x in os.listdir(T) if x.startswith('gh-started.')])
+
+
+def until(ok):
+    for _ in range(600):
+        if ok():
+            return True
+        asked.wait(0.05)
+    return False
+
+
+ds.note_hold, tabs = hold_seen, {}
+two = [threading.Thread(target=lambda k: tabs.__setitem__(k, call('/plugin-file', {'file': NOTES, 'line': D, 'title': 'a note filed from two tabs', 'body': 'd\n'})), args=(k,)) for k in (1, 2)]
+err, sys.stderr = sys.stderr, io.StringIO()
+two[0].start()
+first = until(lambda: started() == 1)
+two[1].start()
+second = until(lambda: asked.is_set() or started() == 2)
+# Bug (E2 of the review): the lock was the file's, so while D's gh call was held, a Preview or Dismiss of another note
+# in the same file waited for it. Each runs on its own thread while D's gh is still held; a join that times out is a
+# request still waiting on D's filing (it would wait until gh-hold is removed below).
+other = {}
+others = [threading.Thread(target=lambda a: other.__setitem__(a, call('/plugin-' + a, {'file': NOTES, 'line': E})), args=(a,))
+          for a in ('preview', 'dismiss')]
+for t in others:
+    t.start()
+    t.join(10)  # both within the 30 s the stub holds D's gh call: a request held by D's filing is still waiting
+apart = (started() == 1 and [other.get(a, (None,))[0] for a in ('preview', 'dismiss')] == [200, 200]
+         and E not in text(NOTES) and D in text(NOTES),
+         'Preview then Dismiss of %r while File of %r waits on gh: replies %r, file %r' % (E, D, dict(other), text(NOTES)))
+os.remove(os.path.join(T, 'gh-hold'))
+for t in two + others:
+    t.join(30)
+sys.stderr = err
+ds.note_hold = real_hold
+check('other_note_not_held_by_filing', *apart)
+check('two_tabs_file_once', first and second and text(os.path.join(T, 'gh-calls')) == 'call\n'
+      and sorted(s for s, _ in tabs.values()) == [200, 409] and D not in text(NOTES),
+      'File of %r from two tabs at once: replies %r, gh calls %r, file %r' % (D, tabs, text(os.path.join(T, 'gh-calls')), text(NOTES)))
 srv.shutdown()
 print('PASS: dashboard-server-plugin (%d checks)' % passed[0])
 EOF

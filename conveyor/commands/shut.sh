@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # `conveyor.sh shut <issue | card id>`: the Board's Close, once it has closed the issue: its blocked card is shut now
 # (shut(), lib/issues.sh), not at the loop's next turn, which a stopped loop never takes, so it leaves Needs you at once.
-# Also the owner's stop of an open card. It prints what it did; when it did nothing, it says why and exits 1.
+# Also the owner's stop of an open card. It prints what it did; when an issue has no card for it to shut, it says why
+# and exits 4, a code of its own: a failure (the records not locked, not read or not written) exits 1 or another
+# code, and the Board's Close takes 4 alone as no failure (control_script(), dashboard_server_control.py).
 # Sourced by conveyor.sh.
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/views.sh" || exit 1
@@ -28,10 +30,10 @@ own=$(sed -n 's/^conveyor: card \([^ ]*\) was open .*/\1/p' <<<"$ended" | jq -Rs
 if [[ $2 =~ ^[0-9]+$ ]]; then closed=$(locked shut "[$2]" "$own") || exit 1; else locked shut "$2" "$own"; exit; fi
 [ -z "$closed" ] || echo "$closed"
 [ -z "$ended$closed" ] || exit 0
-# Nothing shut: why is said, and the exit is 1.
+# Nothing shut: why is said, and the exit is 4.
 why=$(stdb ask issue cards "$2" | jq -rs --argjson n "$2" --arg shut "$SHUT" --arg own "$OWNSHUT" 'map(select(.issue == $n))
   | if length == 0 then "has no card"
     elif any(.step | IN("landed", "pushed")) or any(.step == "closed" and (.reason | IN($shut, $own) | not)) then "has a card that landed, or that closed it as already fixed"
     elif any(.step == "closed") then "has a card that was shut already: `conveyor.sh retry \($n)` takes it again"
     else "has no open card that shut can stop and no blocked card" end') || exit 1
-echo "conveyor: issue #$2 $why; nothing changed" >&2; exit 1
+echo "conveyor: issue #$2 $why; nothing changed" >&2; exit 4

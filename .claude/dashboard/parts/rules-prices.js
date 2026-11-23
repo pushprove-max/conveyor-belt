@@ -123,11 +123,12 @@
     const over = pricesShown(), names = p.names && typeof p.names === 'object' ? p.names : {};
     const built = new Map(list(p.builtIn).filter((x) => x && typeof x.model === 'string').map((x) => [x.model, x]));
     const nameOf = (m) => (over[m] && typeof over[m].name === 'string' && over[m].name) || (typeof names[m] === 'string' && names[m]) || m;
-    // The model each other ID means (the built-in aliases, then the pack's, as dashboard_limit.py use_prices takes
-    // them; one the pack names as a model of its own is no alias); the model an ID is priced as (with no date or [1m] on it).
-    const aliasTo = new Map();
+    // The model each other ID means (the built-in aliases, then the pack's over them, as dashboard_limit.py use_prices
+    // takes them: the first pack model by ID wins an alias two name; one the pack names as a model of its own is no
+    // alias); the model an ID is priced as (with no date or [1m] on it).
+    const aliasTo = new Map(), packed = new Set();
     Object.entries(p.aliases && typeof p.aliases === 'object' ? p.aliases : {}).forEach(([x, m]) => { if (typeof m === 'string' && !Object.hasOwn(over, x)) aliasTo.set(x, m); });
-    Object.keys(over).forEach((m) => list(over[m] && over[m].aliases).forEach((x) => { if (typeof x === 'string' && !aliasTo.has(x)) aliasTo.set(x, m); }));
+    Object.keys(over).sort().forEach((m) => list(over[m] && over[m].aliases).forEach((x) => { if (typeof x === 'string' && !packed.has(x)) { packed.add(x); aliasTo.set(x, m); } }));
     const canon = (id) => { const b = String(id).replace(/\[[^\]]*\]$/, '').replace(/-\d{8}$/, ''); return aliasTo.get(b) || b; };
     // The models: each built-in one (its fast mode is its second line) and each the pack prices or adds.
     const isModel = (m) => built.has(m) || priced(over[m]) || !!(over[m] && over[m].provider);

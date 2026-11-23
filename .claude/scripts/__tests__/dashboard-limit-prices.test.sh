@@ -33,6 +33,14 @@ print(json.dumps([d.price(r) for r in ([0, 'proxy/sonnet', 1000000, 0, 0, 0, 0],
   [0, 'my-model', 0, 1000000, 0, 0, 0], [0, 'my-model', 0, 0, 1000000, 0, 0], [0, 'proxy/other', 1000000, 0, 0, 0, 0])]))")
 [ "$got" = '[2.0, 4.0, 4.0, 3.0, 2.0, null]' ] || fail "the aliased and added request prices: $got"
 
+# A pack alias with the ID of a built-in alias: gpt-daybreak-blue-latest named by the pack for gpt-6.1-sol prices a
+# 100K-input request at gpt-6.1-sol's $2 a million ($0.20), not the built-in alias's gpt-5.6-sol at $4 ($0.40). Bug
+# caught (R112): the built-in alias silently won, though prices.sh saved the pack's alias with no error.
+got=$(python3 -c "import sys, json; sys.path.insert(0, '${LIM%/*}'); import dashboard_limit as d
+d.use_prices({'gpt-6.1-sol': {'aliases': ['gpt-daybreak-blue-latest']}})
+print(json.dumps([d.canon('gpt-daybreak-blue-latest'), d.price([0, 'gpt-daybreak-blue-latest', 100000, 0, 0, 0, 0])]))")
+[ "$got" = '["gpt-6.1-sol", 0.2]' ] || fail "the pack alias gpt-daybreak-blue-latest for gpt-6.1-sol: $got"
+
 # The gpt-6.2 rows, short and over 272K input, standard and fast, each a published price (not an estimate).
 # Sol: $2 in, $0.10 cached, $10 out; long $4 in, $0.20 cached. Astra: $8 in, $0.40 cached, $40 out; long $16 in,
 # $0.80 cached (twice the short rate, as OpenAI publishes), $60 out; fast twice each. Bugs caught: a review on 6.2

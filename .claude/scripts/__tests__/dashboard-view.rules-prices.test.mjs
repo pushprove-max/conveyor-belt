@@ -459,6 +459,19 @@ test('Rules: the research lane model is in use, with its mark', () => {
   assert.deepEqual(chips(r), ['research lane']);
 });
 
+// Bug (R112): the pack's alias gpt-daybreak-blue-latest for gpt-6.1-sol, which dashboard_limit.py use_prices prices
+// as gpt-6.1-sol, still read as the built-in alias's gpt-5.6-sol here, so the reviewer's mark went on that row.
+test('Rules: a pack alias with the ID of a built-in alias marks the pack\'s model in use', () => {
+  const w = boot({ tab: 'rules' });
+  const d = full();
+  d.panels.rules.data.prices = { ...JSON.parse(JSON.stringify(PRICES)), aliases: { 'gpt-daybreak-blue-latest': 'gpt-5.6-sol' } };
+  d.panels.rules.data.prices.builtIn.push(row('gpt-5.6-sol', 4, 20, 0.4));
+  d.panels.rules.data.prices.overrides['gpt-6.1-sol'] = { aliases: ['gpt-daybreak-blue-latest'] };
+  d.panels.rules.data.modelSettings.reviewer.model = 'gpt-daybreak-blue-latest';
+  deliver(w, d);
+  assert.deepEqual([chips(rowOf(w, 'gpt-6.1-sol')), chips(rowOf(w, 'gpt-5.6-sol'))], [['reviewer'], []]);
+});
+
 // Bug: the page head covered the section as it scrolled. jsdom has no layout, so this reads the rule that keeps a part
 // the page scrolls to below the head.
 test('Board: a part the page scrolls to stops below the page head', () => {

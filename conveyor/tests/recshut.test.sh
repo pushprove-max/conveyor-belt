@@ -131,16 +131,17 @@ t_shutturn() {
 
 # The Board's Close shuts the card itself (`shut`), with no turn of the loop: a stopped loop would leave it under
 # Needs you for good. Bug: #8's card stays blocked until a loop runs, or shut touches the records of an issue with
-# no blocked card. A case of its own on a main of its own, beside t_shut. shut that shuts nothing says why and exits 1
-# (#1030): bugs, it said nothing and exited 0 for #9, which has no card, or shut #10, whose card landed.
+# no blocked card. A case of its own on a main of its own, beside t_shut. shut that shuts nothing says why and exits 4
+# (#1030): bugs, it said nothing and exited 0 for #9, which has no card, or shut #10, whose card landed; or it exited
+# 1, the code of a failure, which the Board's Close cannot tell from one (t_shutlocked).
 t_shutboard() {
   local c8=c0-8 out
   setup "[$(issue 8 2026-02-01)]"; shutrec 8
   jq -cn '{card:"c0-10",issue:10,time:"2026-01-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""} | (. + {step:"picked"}), (. + {step:"landed",sha:"abc1234",product:true})' >> "$ST/cards.jsonl"
   before=$(cat "$ST/cards.jsonl"); out=$(loop shut 9 2>&1); RC=$?
-  [ "$RC" = 1 ] && grep -qF 'issue #9 has no card; nothing changed' <<<"$out" || fail "shut of #9, which has no card, did not say so and exit 1 (exit $RC): $out"
+  [ "$RC" = 4 ] && grep -qF 'issue #9 has no card; nothing changed' <<<"$out" || fail "shut of #9, which has no card, did not say so and exit 4 (exit $RC): $out"
   out=$(loop shut 10 2>&1); RC=$?
-  [ "$RC" = 1 ] && grep -qF 'issue #10 has a card that landed' <<<"$out" || fail "shut of #10, whose card landed, was not refused with why (exit $RC): $out"
+  [ "$RC" = 4 ] && grep -qF 'issue #10 has a card that landed' <<<"$out" || fail "shut of #10, whose card landed, was not refused with why (exit $RC): $out"
   [ "$(cat "$ST/cards.jsonl")" = "$before" ] || fail "shut 9 or shut 10 changed the card records"
   loop shut 8 >/dev/null || fail "shut 8 exited non-zero"
   [ "$(loop health | jq -c '.blocked | map(.issue) | index(8)')" = null ] && [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue) | index(8)')" = null ] \
@@ -148,6 +149,22 @@ t_shutboard() {
   [ "$(st "select(.card == \"$c8\") | [.step, .reason] | join(\"|\")" | tail -n 1)" = 'closed|the issue was closed by hand while the card was blocked' ] \
     || fail "no closed line says #8 was shut: $(grep "$c8" "$ST/cards.jsonl")"
   loop check || fail "the records do not check after shut"
+}
+
+# shut of a blocked card whose records cannot be locked (R115): $STATE.checked.lock is not writable, so shut's check
+# cannot take its lock. Bug: shut exited with the code of "shut nothing" (1 then, 4 now, t_shutboard), which the
+# Board's Close takes as no failure (control_script(), dashboard_server_control.py), so it answered success though
+# #8's card stays blocked under Needs you. The Board's side is close_shows_a_shut_that_could_not_lock
+# (dashboard-server.test.sh).
+t_shutlocked() {
+  setup "[$(issue 8 2026-02-01)]"; shutrec 8
+  local lock=$ST/cards.jsonl.checked.lock before out RC
+  touch "$lock" && chmod 444 "$lock" || fail "the unwritable lock file"
+  [ ! -w "$lock" ] || { echo "SKIP: t_shutlocked: this user writes a file of mode 444 (root)"; return 0; }
+  before=$(cat "$ST/cards.jsonl")
+  out=$(loop shut 8 2>&1); RC=$?
+  [ "$RC" != 0 ] && [ "$RC" != 4 ] || fail "shut 8 with an unwritable $lock exited $RC, the code of a shut that worked or shut nothing: $out"
+  [ "$(cat "$ST/cards.jsonl")" = "$before" ] || fail "the failed shut 8 with an unwritable $lock changed the card records: $out"
 }
 
 # The owner's stop (`shut`, #1030) is known by the cards shut ended, not by the reason of their blocked line. Bugs:

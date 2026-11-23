@@ -10,6 +10,20 @@ def notes_lock(path):
     return open(globals()['os'].path.join(globals()['os'].path.dirname(path), 'noprice.lock'), 'a')
 
 
+NOTE_HOLDS = {}  # a plugin-bugs.md path and note line, and the lock of the File and Dismiss requests on it (note_hold())
+
+
+def note_hold(path, line):
+    """The lock a File or Dismiss of the note line in path holds from its check that the note is there, through gh's
+    filing, to the note's removal: the server answers each request on a thread of its own, so a second tab's File of
+    the same note would find it still there and file it again. It is one note's, so a slow filing holds up no request
+    on another note, and a Preview, which changes nothing, takes none. It is this process's own (serve takes no part
+    in it): a gh call can take GH_LIMIT, and noprice.lock, which serve's appends wait on, is held only for the removal.
+    dict.setdefault is one step under the interpreter's lock, so two threads get the same lock."""
+    # threading is the base part's, run in this namespace: globals() names it where a linter reads this file alone.
+    return NOTE_HOLDS.setdefault((path, line), globals()['threading'].Lock())
+
+
 class Pages:
     """Handler's methods that serve the page's files and the login, and take POST /time, the plugin notes and POST
     /restart; Handler holds the rest and its class settings. Handler puts Pages before SimpleHTTPRequestHandler, so
@@ -362,6 +376,16 @@ class Pages:
         path = body['file']
         if path not in files:
             return self.reply(409, 'the Board did not read plugin problems from that file; nothing was changed')
+        if act == 'preview':
+            return self.note_act(act, body, path, user)
+        # One File or Dismiss of the note at a time, from the check that it is there to its removal (note_hold()): a
+        # second File of the note waits, then finds it gone (409), so it is filed once.
+        with note_hold(path, body['line']):
+            return self.note_act(act, body, path, user)
+
+    def note_act(self, act, body, path, user):
+        """plugin_note()'s work on the note line body['line'] of path, checked already; a File or Dismiss runs it
+        under note_hold()."""
         try:
             with open(path, encoding='utf-8') as f:
                 held = any(x.rstrip('\n') == body['line'] for x in f)
@@ -380,29 +404,44 @@ class Pages:
             return self.reply(200, json.dumps({'title': title, 'body': text, 'repo': repo}))
         url = None
         if act == 'file':
-            try:
-                repo, hits = plugin_repo(), privacy_hits(body['title'], body['body'])
-            except ValueError as e:
-                return self.reply(500, 'nothing was filed: %s' % e)
-            if hits:
-                return self.reply(422, 'nothing was filed: the privacy check found %s' % '; '.join(hits))
-            try:
-                main = board_main()
-            except ValueError as e:
-                return self.reply(500, 'nothing was filed: %s' % e)
-            try:
-                r = subprocess.run(['bash', os.path.join(PLUGIN_ROOT, 'conveyor', 'conveyor.sh'), 'gh-write', 'issue', 'create',
-                                    '--repo', repo, '--title', body['title'], '--body-file', '-'],
-                                   cwd=main, env=dict(os.environ, CONVEYOR_MAIN=main), input=body['body'],
-                                   capture_output=True, text=True, timeout=GH_LIMIT)
-            except (OSError, subprocess.SubprocessError) as e:
-                return self.reply(502, 'nothing was filed: the issue could not be created: %s' % (getattr(e, 'strerror', None) or e))
-            url = next((x for x in reversed(r.stdout.split())
-                        if re.fullmatch(r'https://github\.com/%s/issues/[0-9]+' % re.escape(repo), x, re.I)), None)
-            if r.returncode or not url:
-                said = (r.stderr.strip() or r.stdout.strip() or 'exit %d' % r.returncode).splitlines()[-1]
-                return self.reply(502, 'nothing was filed: the issue could not be created: %s' % said)
-            print('dashboard: plugin problem filed as %s by %s from %s' % (url, user, self.client_address[0]), file=sys.stderr, flush=True)
+            url = self.note_file(body, user)
+            if not url:
+                return None  # note_file() replied why nothing was filed
+        return self.note_remove(body, path, url, user)
+
+    def note_file(self, body, user):
+        """note_act()'s filing of the issue body names: the new issue's link, or None once it has replied why nothing
+        was filed."""
+        # The base and control parts' names, run in this namespace: globals() names them where a linter reads this file alone.
+        os, re, subprocess, sys, plugin_repo, privacy_hits, board_main, PLUGIN_ROOT, GH_LIMIT = (globals()[n] for n in (
+            'os', 're', 'subprocess', 'sys', 'plugin_repo', 'privacy_hits', 'board_main', 'PLUGIN_ROOT', 'GH_LIMIT'))
+        try:
+            repo, hits = plugin_repo(), privacy_hits(body['title'], body['body'])
+        except ValueError as e:
+            return self.reply(500, f'nothing was filed: {e}')
+        if hits:
+            return self.reply(422, 'nothing was filed: the privacy check found ' + '; '.join(hits))
+        try:
+            main = board_main()
+        except ValueError as e:
+            return self.reply(500, f'nothing was filed: {e}')
+        try:
+            r = subprocess.run(['bash', os.path.join(PLUGIN_ROOT, 'conveyor', 'conveyor.sh'), 'gh-write', 'issue', 'create',
+                                '--repo', repo, '--title', body['title'], '--body-file', '-'],
+                               cwd=main, env=dict(os.environ, CONVEYOR_MAIN=main), input=body['body'],
+                               capture_output=True, text=True, timeout=GH_LIMIT)
+        except (OSError, subprocess.SubprocessError) as e:
+            return self.reply(502, f"nothing was filed: the issue could not be created: {getattr(e, 'strerror', None) or e}")
+        url = next((x for x in reversed(r.stdout.split())
+                    if re.fullmatch(rf'https://github\.com/{re.escape(repo)}/issues/[0-9]+', x, re.I)), None)
+        if r.returncode or not url:
+            said = (r.stderr.strip() or r.stdout.strip() or f'exit {r.returncode}').splitlines()[-1]
+            return self.reply(502, f'nothing was filed: the issue could not be created: {said}')
+        print(f'dashboard: plugin problem filed as {url} by {user} from {self.client_address[0]}', file=sys.stderr, flush=True)
+        return url
+
+    def note_remove(self, body, path, url, user):
+        """note_act()'s removal of the note line body['line'] from path, once dismissed or filed as url."""
         # Read again: gh may have taken a while, and the Foreman may have noted another problem since. The read, the
         # edit and the replace hold the lock serve's price notes are appended under (noprice(), lib/control.sh:
         # noprice.lock beside the file), so a note appended meanwhile is not lost under the Board's older copy.
