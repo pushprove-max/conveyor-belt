@@ -208,6 +208,62 @@ t_unblocksnap() {
   [ "$(jq -cS '.["8"]' "$ST/moved.json")" = "$(jq -cS '.["8"]' "$STUB/moved.was")" ] || fail "#8, no longer held, lost its Queue entry or its time: $(cat "$ST/moved.json")"
 }
 
+# The cases below give movedsaw() the sight of a snapshot whose copy of the control record saw P3 #9 in Held, at <saw>,
+# with your hold alone (<alone>: true) or with the P3 rule (false), and with a label or dependency (<other>: true; false
+# when left out), and run `control` at the times it names.
+rulesaw() { # <saw> <alone> [<other>]
+  jq -cn --argjson a "$2" --argjson x "${3:-false}" '{"9": {col: "held", other: $x, alone: $a, by: {labels: [], fu: false, p: "P3"}}}' > "$STUB/cols.json"
+  fx_in 'movedlocked movedsaw "$(cat "$STUB/cols.json")" '"$1"'T00:00:00Z'
+  [ "$RC" = 0 ] || fail "movedsaw of P3 #9 at $1 exited $RC: $(cat "$T/$CASE/run.out")"
+}
+ruleon() { local t=$1; shift; CONVEYOR_NOW=$(date -u -d "$t" +%s) loop "$@" >/dev/null; }
+
+# Bug (follow-up of #1472): a snapshot's copy saw the new P3 #9 held by start-in-Held alone; then `control rules P3=off`
+# and `control release 9` came before it dated its sight. #9 stays in Held by the rule, but the sight was not written
+# (alone, no longer held), so the next snapshot dated #9 later than its first sight.
+t_rulesnap() {
+  setup '[]'
+  jq -c '.held = [9]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  ruleon 2026-10-02 control rules P3=off; ruleon 2026-10-02 control release 9
+  rulesaw 2026-10-01 true; rulesaw 2026-10-03 false
+  [ "$(jq -c '.["9"] | [.col, .at, .left]' "$ST/moved.json")" = '["held","2026-10-01T00:00:00Z",null]' ] \
+    || fail "#9, released after P3=off and so in Held all along, is not held since the sight at 2026-10-01: $(cat "$ST/moved.json")"
+}
+
+# Bug (E1): the entry the filing hook's adopt wrote (`control hold` writes the same: no `by`) let a release after
+# `control rules P3=off` mark #9 as gone from Held, so the next snapshot dated it anew, though the rule kept it there.
+t_ruleadopt() {
+  setup '[]'
+  ruleon 2026-10-01 control hold 9
+  ruleon 2026-10-03 control rules P3=off; ruleon 2026-10-03 control release 9
+  rulesaw 2026-10-02 true; rulesaw 2026-10-04 false
+  [ "$(jq -c '.["9"] | [.col, .at, .left]' "$ST/moved.json")" = '["held","2026-10-01T00:00:00Z",null]' ] \
+    || fail "#9, held at 2026-10-01 and released after P3=off, lost its Held time: $(cat "$ST/moved.json")"
+}
+
+# Bug (E3): a snapshot's copy saw the new P3 #9 held by start-in-Held and a label (awaiting-deploy), with P3 on; a
+# `control release 9` before it dated its sight wrote a release with no column, which took the place of the sight and
+# was then dropped, so the next snapshot dated #9 later, though the label kept it in Held all along.
+t_rulelabel() {
+  setup '[]'
+  jq -c '.held = [9]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  ruleon 2026-10-02 control release 9
+  rulesaw 2026-10-01 false true; rulesaw 2026-10-03 false true
+  [ "$(jq -c '.["9"] | [.col, .at, .left]' "$ST/moved.json")" = '["held","2026-10-01T00:00:00Z",null]' ] \
+    || fail "#9, released while a label kept it in Held, is not held since the sight at 2026-10-01: $(cat "$ST/moved.json")"
+}
+
+# Bug (E2): `control release 9` with the P3 rule on sends #9 to Queue; `control rules P3=off` after it brings #9 back.
+# A sight from a copy taken before both kept its first Held time, so the two stays in Held counted as one.
+t_rulelater() {
+  setup '[]'
+  jq -c '.held = [9]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  ruleon 2026-10-02 control release 9; ruleon 2026-10-02 control rules P3=off
+  rulesaw 2026-10-01 true; rulesaw 2026-10-03 false
+  [ "$(jq -c '.["9"] | [.col, .at]' "$ST/moved.json")" = '["held","2026-10-03T00:00:00Z"]' ] \
+    || fail "#9, released and back in Held by P3=off after the sight at 2026-10-01, keeps a Held time from before it left: $(cat "$ST/moved.json")"
+}
+
 # Bug (#1472): a release that came while a snapshot ran, after its copy of the control record, took the Held time of
 # #9 away: #9 stays in Held (a P3 rule is off), but the snapshot dated no entry for it, and the next snapshot gave it
 # its own time. #8 (held by your hold alone, then released) gets no entry for a Held it left. This runs the snapshot

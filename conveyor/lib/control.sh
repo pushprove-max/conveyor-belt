@@ -1490,6 +1490,9 @@ movedwrite() { printf '%s\n' "$1" > "$MOVED.$$" && mv -f "$MOVED.$$" "$MOVED" ||
 # inside the records' lock, a snapshot alone; nothing takes the records' lock while it holds this one. A call made
 # while this shell holds it already (movedheld's `control hold`) runs in that lock: a second flock would wait for ever.
 movedlocked() { if [ -n "${MOVED_IN:-}" ]; then ( "$@" ); else ( flock 3 && MOVED_IN=1 && "$@" ) 3>>"$MOVED.lock"; fi; }
+# An issue's moved.json entry or snapshot sight ({by: {labels, fu, p}}) that a rule of the control record <c> excludes.
+RULED='def ruled($c): .by != null and ((.by.labels | any(IN($c.rules.never[])))
+  or (if .by.fu then $c.rules.followups | not else $c.rules[.by.p] == false end));'
 # Under moved.json's lock: moved.json with the columns a snapshot saw ({"<issue>": {col, other, alone, by}}) when it listed the issues
 # (<saw>); prints the times of this sight. An issue in the column it was in keeps its time; one released from Held (left) and seen in Queue
 # came there when it was released; one in another column, seen for the first time, or released and seen back in
@@ -1501,26 +1504,37 @@ movedlocked() { if [ -n "${MOVED_IN:-}" ]; then ( "$@" ); else ( flock 3 && MOVE
 # An issue the snapshot saw in Held with your hold as the only reason (alone), which the control record no longer holds,
 # is not dated: its entry stays as it is, so a hold taken back after the copy (a refused `unblock`) is not written as a
 # move to Held. One that a rule or something else keeps in Held is dated, whatever happened to your hold.
+# A release of an entry with no `by` (rules: the rules it saw) did not move an issue the snapshot saw in Held with
+# something besides your hold and the rules (other: a label, a dependency) or that those rules exclude: the entry loses
+# that left (one with no column goes), and the issue counts as held, so a label, or a rule turned off before the
+# release, keeps its Held time. A rule turned off after the release brings it back to Held: that entry keeps its left.
+# An entry with no column (a release before the first sight) is not kept.
 movedsaw() { # <cols json> <saw>
-  local m sight gone; m=$(movedread)
-  gone=$(jq -c --argjson o "$1" '(.held // []) as $h | [$o | to_entries[] | select(.value.alone and (.key | tonumber | IN($h[]) | not)) | .key]' "${STATE%/*}/control.json" 2>/dev/null) || gone='[]'
+  local m sight gone stay; m=$(movedread)
+  stay=$(jq -c --argjson o "$1" "$RULED"'[to_entries[] | .key as $k | select(.value.left != null and .value.rules != null and $o[$k].col == "held")
+      | .value.rules as $r | select($o[$k] | .other or ruled({rules: $r})) | $k]' <<<"$m") \
+    && m=$(jq -c --argjson s "$stay" 'reduce $s[] as $k (.; if .[$k].col == null then del(.[$k]) else .[$k] |= del(.left, .rules) end)' <<<"$m") || return 1
+  gone=$(jq -c --argjson o "$1" --argjson s "$stay" '(.held // []) as $h | [$o | to_entries[]
+      | select(.value.alone and (.key | tonumber | IN($h[]) | not) and (.key | IN($s[]) | not)) | .key]' "${STATE%/*}/control.json" 2>/dev/null) || gone='[]'
   sight=$(jq -c --argjson o "$1" --arg t "$2" '. as $m | $o | with_entries(.key as $k | .value as $s
       | .value = ($m[$k] | {col: $s.col, other: $s.other, by: $s.by, seen: $t, at: (if .col == $s.col and .left == null then .at
           elif .col == "held" and .left != null and $s.col == "queue" then .left else $t end)}))' <<<"$m") \
     && movedwrite "$(jq -c --argjson s "$sight" --arg t "$2" --argjson g "$gone" '. as $m | ($s + with_entries(select(.value.seen >= $t)))
-      | reduce $g[] as $k (.; .[$k] = $m[$k]) | with_entries(select(.value != null))' <<<"$m")" && printf '%s\n' "$sight"
+      | reduce $g[] as $k (.; .[$k] = $m[$k]) | with_entries(select(.value.col != null))' <<<"$m")" && printf '%s\n' "$sight"
 }
 # Under moved.json's lock: `control hold` dates each issue in Held from now, unless it was there already and not released
 # since; `control release` marks when it left, unless the last snapshot saw something besides your hold and the rules
 # keep it in Held, or a rule of the record as it now stands excludes it (a rule turned on since that snapshot no longer
 # keeps it), so a hold before the next snapshot dates it anew only when it had left. A hold keeps what the snapshot
-# read of the issue (by, other), so a rule turned off before its release still keeps it in Held.
+# read of the issue (by, other), so a rule turned off before its release still keeps it in Held. A release of an issue
+# with no `by` (no entry yet, or one a hold wrote) cannot judge the rules or what else holds it: it marks left and keeps
+# the rules it saw, and the next snapshot judges both by what it saw (movedsaw()).
 movedhold() { # <hold|release> <the control record as it now stands> <issue>...
   local m new a=$1 c=$2; shift 2; m=$(movedread)
-  new=$(jq -c --arg a "$a" --argjson c "$c" --arg t "$(clock)" 'def ruled: .by != null and ((.by.labels | any(IN($c.rules.never[])))
-      or (if .by.fu then $c.rules.followups | not else $c.rules[.by.p] == false end));
-    reduce $ARGS.positional[] as $k (.; .[$k] |= if $a == "release" then (if . == null or .other or ruled then . else . + {left: $t, seen: $t} end)
-      elif .col == "held" and .left == null then .seen = $t else . + {col: "held", at: $t, seen: $t} | del(.left) end) | with_entries(select(.value != null))' --args "$@" <<<"$m") \
+  new=$(jq -c --arg a "$a" --argjson c "$c" --arg t "$(clock)" "$RULED"'
+    reduce $ARGS.positional[] as $k (.; .[$k] |= if $a == "release" then (if .other or ruled($c) then . else . + {left: $t, seen: $t}
+        + if .by == null then {rules: $c.rules} else {} end end)
+      elif .col == "held" and .left == null then .seen = $t else . + {col: "held", at: $t, seen: $t} | del(.left, .rules) end) | with_entries(select(.value != null))' --args "$@" <<<"$m") \
     && movedwrite "$new" || echo "conveyor: cannot write $MOVED; Held's time for $* is dated by the next snapshot" >&2
 }
 # Under moved.json's lock: `control hold <issue>`, and the issue's entry in moved.json just before it (JSON, null for
