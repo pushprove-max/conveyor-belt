@@ -51,6 +51,23 @@ printf '## What happens now\nIt breaks.\n' > "$T/fix.md"
 refused "gh issue create --title x --body-file - < $T/fix.md"
 refused "gh issue create --title x -F - <$T/fix.md"
 passes "gh issue create --title x --body-file - < $T/body.md"
+# Bug (#1518): the redirect was the first `<` anywhere, so a `<` in the title named the wrong file ('redirection'), and a
+# file name with a space was cut at the space ('fix'): both passed without the body being read.
+printf '## What happens now\nIt breaks.\n' > "$T/fix notes.md"
+refused "gh issue create --title 'Handle < redirection' --body-file - < $T/fix.md"
+refused "gh issue create --title \"it's <b>\" --body-file - < $T/fix.md"
+refused "gh issue create --title x --body-file - < '$T/fix notes.md'"
+refused "gh issue create --title x --body-file - < \"$T/fix notes.md\""
+passes "gh issue create --title 'Handle < redirection' --body-file - < $T/body.md"
+# Bug (#1518): a backslash was read as a plain character: an escaped quote in a title ended the quote early, so a `<`
+# after it was missed, and `fix\ notes.md` was cut at the space and kept its backslash.
+refused "gh issue create --title \"Fix \\\"quote < x\" --body-file - < $T/fix.md"
+refused "gh issue create --title x --body-file - < $T/fix\\ notes.md"
+passes "gh issue create --title \"Fix \\\"quote < x\" --body-file - < $T/body.md"
+# Bug (#1518): a file name of an unquoted part and a quoted part (`dir/'fix notes.md'`) was cut after the unquoted part
+# (`dir/`), so the body was not read.
+refused "gh issue create --title x --body-file - < $T/'fix notes.md'"
+refused "gh issue create --title x --body-file - < $T/\"fix notes.md\""
 }
 
 # Bug (#1405): the headings were found anywhere in the text, so '### Cause' counted as a Cause section and a sentence

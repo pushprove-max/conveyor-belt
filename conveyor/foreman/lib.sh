@@ -447,3 +447,63 @@ refused_put() { # <key>
   [ -n "${1:-}" ] || return 0
   { mkdir -p "$FD" && printf '%s\n' "$1" >> "$REFUSED" && tail -n 20 "$REFUSED" > "$REFUSED.$$" && mv -f "$REFUSED.$$" "$REFUSED"; } 2>/dev/null
 }
+# stdin_file <command>: the file the command's first `< file` redirect names, as the shell reads the name, printed; 1 when
+# there is none. A `<` inside quotes (a title) is no redirect, nor is `<<`, `<<<`, `<(`, `<&` or `<>`. The name is any run
+# of unquoted, quoted and backslash-escaped parts (`./'fix notes.md'`, `fix\ notes.md`), and ends at an unquoted space
+# or one of `<>|;&(`.
+stdin_file() {
+  local s=$1 n=${#1} i=0 c d q='' w='' st=scan # st: scan (no redirect yet), gap (after `<`), word (the name is being read)
+  while ((i < n)); do
+    c=${s:i:1}
+    i=$((i + 1))
+    if [ "$q" = "'" ]; then # a single quote keeps every character as it is
+      if [ "$c" = "'" ]; then q=; elif [ $st = word ]; then w+=$c; fi
+      continue
+    fi
+    if [ "$c" = '\' ]; then # unquoted: keeps the next character; in double quotes: only before $ ` " \ (as bash does)
+      d=${s:i:1}
+      i=$((i + 1))
+      if [ $st = word ]; then
+        if [ "$q" = '"' ]; then case $d in '$' | '`' | '"' | '\') ;; *) w+=$c ;; esac; fi
+        w+=$d
+      fi
+      continue
+    fi
+    if [ "$q" = '"' ]; then
+      if [ "$c" = '"' ]; then q=; elif [ $st = word ]; then w+=$c; fi
+      continue
+    fi
+    case $c in "'" | '"')
+      q=$c
+      [ $st != gap ] || st=word
+      continue
+      ;;
+    esac
+    case $st in
+      scan)
+        [ "$c" = '<' ] || continue
+        d=${s:i:1}
+        while [ "$d" = '<' ]; do # `<<` and `<<<` read no file
+          i=$((i + 1))
+          d=${s:i:1}
+          c='<<'
+        done
+        case $c$d in '<&' | '<>' | '<(' | '<<'*) ;; *) st=gap ;; esac
+        continue
+        ;;
+      gap)
+        case $c in [[:space:]]) continue ;; esac
+        st=word
+        ;;
+    esac
+    case $c in
+      [[:space:]] | '<' | '>' | '|' | ';' | '&' | '(')
+        [ -z "$w" ] || break
+        st=scan
+        ;;
+      *) w+=$c ;;
+    esac
+  done
+  [ -n "$w" ] || return 1
+  printf '%s\n' "$w"
+}

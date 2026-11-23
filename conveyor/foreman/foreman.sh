@@ -615,8 +615,8 @@ no_cause() {
   [[ $t =~ (^|[[:space:];\&|])ask[[:space:]]+[^[:space:]]+[[:space:]]+testissue([[:space:]]|$) ]] && ti=1
   files "$1" || [ "$ti" = 1 ] || return 1
   if [[ $cmd =~ (--body-file|-F)[[:space:]=]+[\"\']?([^[:space:]\"\']+) ]] && f=${BASH_REMATCH[2]}; then
-    # `--body-file -` reads the body from stdin: a `< file` redirect names that file.
-    [ "$f" != - ] || { [[ $cmd =~ (^|[^<])\<[[:space:]]*[\"\']?([^[:space:]\"\'\<\>\|\;\&\(]+) ]] && f=${BASH_REMATCH[2]}; }
+    # `--body-file -` reads the body from stdin: a `< file` redirect names that file (stdin_file in lib.sh).
+    [ "$f" != - ] || f=$(stdin_file "$cmd") || f=-
     [ ! -f "$f" ] || cmd+=$'\n'$(cat "$f" 2>/dev/null)
   fi
   # A heading is its line whole, exactly two hashes, at a line start (up to three spaces before them, as Markdown
