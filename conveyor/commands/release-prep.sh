@@ -342,6 +342,7 @@ relsig() { # <exit code>
 # no mark, so another reap at the same time (the stop's, the run's own end's) does not find it as a process of the run.
 # The mark is looked for in the environment ps prints after a process's arguments (a second ps, after the first, gives
 # the arguments to cut off), so a process given it as an argument is none; one that ran another program between the two is read whole.
+# ps joins its entries with spaces, so one is kept only when the mark is an entry of its own (p_envhas).
 relprocs() { # <pid> <mark> [<pid left out>]
   local t e c me=$BASHPID x=${3:-$$}
   unset CONVEYOR_RELEASE_RUN # in this command substitution's subshell alone
@@ -352,7 +353,8 @@ relprocs() { # <pid> <mark> [<pid left out>]
     awk -v k=" CONVEYOR_RELEASE_RUN=$2 " -v me="$me" -v x="$x" 'FNR == NR { p = $1; sub(/^[[:space:]]*[0-9]+[[:space:]]+/, ""); g[p] = $0; next }
       $1 != me && $1 != x && $2 != me { p = $1; l = $0; sub(/^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+/, "", l)
         if ((p in g) && substr(l, 1, length(g[p])) == g[p]) l = substr(l, length(g[p]) + 1)
-        if (index(l " ", k)) print p }' <(printf '%s\n' "$c") - <<<"$e"; } | sort -u
+        if (index(l " ", k)) print p }' <(printf '%s\n' "$c") - <<<"$e" \
+      | while read -r p; do ! p_envhas "$p" "CONVEYOR_RELEASE_RUN=$2" || echo "$p"; done; } | sort -u
 }
 # A release run ended (relprocs()'s arguments): each of its processes told to end, then killed 10 s later if they
 # have not, and killed again while one is left (one started meanwhile, or one still ending), for up to 2 s. Its sleeps

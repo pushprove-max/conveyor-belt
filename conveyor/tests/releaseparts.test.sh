@@ -54,6 +54,24 @@ t_relpartmark() {
     || fail "relprocs did not find only the process with the mark in its environment ($b), not the one with it as an argument ($a): $(cat "$T/$CASE/run.out")"
 }
 
+# Bug: ps joins a process's environment entries with spaces, so a process whose other variable's value held
+# " CONVEYOR_RELEASE_RUN=<mark> " read as one of the run's, and a stop or the run's end signalled it. Each entry is now
+# read apart from the others (p_envhas: /proc on Linux, the kernel's sysctl on macOS), so it is left out.
+t_relpartmarkvalue() {
+  setup '[]'
+  local ls=()
+  # shellcheck disable=SC2016 # expanded in the run's shell
+  ls+=('m=4243$$; env -u CONVEYOR_RELEASE_RUN OTHER="x CONVEYOR_RELEASE_RUN=$m y" sleep 60 & a=$!; CONVEYOR_RELEASE_RUN=$m sleep 60 & b=$!') # sleep: an unrelated process (the mark inside another variable's value) and a process of the run (the mark an entry of its own), which the case ends
+  # shellcheck disable=SC2016 # expanded in the run's shell
+  ls+=('for i in $(seq 100); do ps -o args= -p "$a" | grep -q "^sleep" && ps -o args= -p "$b" | grep -q "^sleep" && break; sleep 0.1; done') # sleep: until both run their programs, which only ps shows
+  # shellcheck disable=SC2016 # expanded in the run's shell
+  ls+=('out=$(relprocs 2147483646 "$m"); kill "$a" "$b"; echo "a=$a b=$b"; echo "found=$(paste -sd" " - <<<"$out")"')
+  partrun "${ls[@]}"
+  local a b; a=$(sed -n 's/^a=\([0-9]*\) b=.*/\1/p' "$T/$CASE/run.out"); b=$(sed -n 's/^a=[0-9]* b=\([0-9]*\)$/\1/p' "$T/$CASE/run.out")
+  [ -n "$a" ] && [ -n "$b" ] && grep -qx "found=$b" "$T/$CASE/run.out" \
+    || fail "relprocs did not find only the process with the mark as an entry of its own ($b), not the one with it inside OTHER's value ($a): $(cat "$T/$CASE/run.out")"
+}
+
 # Bug (R176): a stop while `claude plugin validate` ran left the plugin unpacked for it in the temporary folder: the
 # stop's trap exits once validate returns, before the rm after it. The stand-in validate notes the folder it is given
 # and sleeps until the case ends it, as a stop's reap does; the run then exits 143 and the folder is gone.

@@ -174,6 +174,31 @@ p_cwds() {
   else find /proc/[0-9]*/cwd -maxdepth 0 -printf '%h\t%l\n' 2>/dev/null | sed 's|^/proc/||'; fi
 }
 
+# 0 when <pid>'s environment, as it started, holds the entry <name>=<value> whole, 1 when it does not or cannot be read
+# (the process is gone, or another user's). Each entry is read apart from the others, as ps joins them with spaces, so
+# that a value holding " <name>=<value>" reads as that entry too. On macOS the kernel gives them (sysctl
+# KERN_PROCARGS2: argc, the program's path, NUL bytes, then each argument and each entry ended by a NUL byte), into a
+# buffer of kern.argmax bytes, as ps sizes its own: the kernel refuses a bigger one (EINVAL).
+p_envhas() { # <pid> <name>=<value>
+  local v
+  if p_darwin; then
+    # shellcheck disable=SC2016 # perl's variables
+    perl -e 'my ($p, $w) = @ARGV; my $m = "\0" x 4; my $ml = pack("Q", 4);
+      syscall(202, pack("i2", 1, 8), 2, $m, $ml, 0, 0) == 0 or exit 1; # 1, 8: CTL_KERN, KERN_ARGMAX
+      my $n = unpack("i", $m); $n > 0 or exit 1; my $b = "\0" x $n; my $l = pack("Q", $n);
+      syscall(202, pack("i3", 1, 49, $p), 3, $b, $l, 0, 0) == 0 or exit 1; # 202: sysctl; 1, 49: CTL_KERN, KERN_PROCARGS2
+      $b = substr($b, 0, unpack("Q", $l)); my $c = unpack("i", $b); my $i = index($b, "\0", 4); $i >= 0 or exit 1;
+      $i++ while $i < length($b) && substr($b, $i, 1) eq "\0";
+      for (1 .. $c) { my $j = index($b, "\0", $i); $j >= 0 or exit 1; $i = $j + 1 }
+      while ($i < length $b) { my $j = index($b, "\0", $i); $j = length $b if $j < 0; my $v = substr($b, $i, $j - $i);
+        last if $v eq ""; exit 0 if $v eq $w; $i = $j + 1 }
+      exit 1' "$1" "$2" 2>/dev/null
+    return
+  fi
+  while IFS= read -r -d '' v; do [ "$v" != "$2" ] || return 0; done 2>/dev/null < "/proc/$1/environ"
+  return 1
+}
+
 # What <name> was in <pid>'s environment when it started (nothing when it was not set). Fails when the environment
 # cannot be read: the process is gone, or another user's.
 p_env() { # <pid> <name>
