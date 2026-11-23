@@ -354,7 +354,8 @@
     "conveyor/tests/opencode.test.sh",
     "conveyor/tests/port.test.sh",
     "conveyor/tests/proxyroute.test.sh",
-    "conveyor/tests/snapexec.test.sh"
+    "conveyor/tests/snapexec.test.sh",
+    "conveyor/tests/testruns.test.sh"
   ],
   "conveyor/lib/testrun.sh": [
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
@@ -368,7 +369,8 @@
     "conveyor/tests/opencode.test.sh",
     "conveyor/tests/port.test.sh",
     "conveyor/tests/proxyroute.test.sh",
-    "conveyor/tests/snapexec.test.sh"
+    "conveyor/tests/snapexec.test.sh",
+    "conveyor/tests/testruns.test.sh"
   ],
   "conveyor/lib/views.sh": [
     ".claude/scripts/__tests__/dashboard.test.sh",
@@ -392,7 +394,8 @@
   ],
   "conveyor/tests/bugproof.test.sh": [
     "conveyor/tests/snapexec.test.sh",
-    "conveyor/tests/speedproof.test.sh"
+    "conveyor/tests/speedproof.test.sh",
+    "conveyor/tests/testruns.test.sh"
   ],
   "conveyor/tests/cardrules.test.sh": [
     "conveyor/tests/snapexec.test.sh"

@@ -1,7 +1,10 @@
 # check() in views.sh: every line that is not one whole record of a known step, as `<line number> TAB <field>`: the
 # field the check refused (one not in the list below, a required one missing, or the first whose value it refuses),
 # "(not JSON)", "(not an object)", or "step" when only the fields together are refused for that step.
-def fails: type == "object" and keys == ["files", "of", "timeout"] and (.of | . == null or type == "number")
+# A test run's failures (testfails(), lib/testrun.sh); stopped, only of a run that timed out: the files begun and not
+# ended (testaction.sh testfacts() reads it).
+def fails: type == "object" and (keys - ["stopped"]) == ["files", "of", "timeout"] and (.of | . == null or type == "number")
+  and (.stopped // [] | type == "array" and all(type == "string"))
   and (.files | type == "array" and all((.file | type == "string") and (.cases | type == "array" and all(keys == ["line", "name"] and all(type == "string")))))
   and (.timeout | . == null or (type == "object" and keys == ["file", "sec"]));
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
