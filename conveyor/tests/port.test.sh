@@ -44,7 +44,7 @@ conflicted() {
   fx_in 'cd "$R" || exit 3; n='"$1"' c=c7 br="" wt=$CARDS/c7
     issue=$(gh issue view "$n" --json number,title,body,labels,milestone) || exit 3
     sprompt="the card prompt"
-    was="" res=GO ended="{}" rebased="" ported="" ups="" dec="" left="" tfix="" caught="" pass=1 rounds=0 docs="" docpass="" kept="" parsecheck="" fin="" finend="{}" kp="" why="" old="" err=""
+    was="" res=GO ended="{}" rebased="" ported="" ups="" dec="" left="" tfix="" caught="" pass=1 rounds=0 last="" docs="" docpass="" kept="" parsecheck="" fin="" finend="{}" kp="" why="" old="" err=""
     land1() { git -C "$wt" add -A && git -C "$wt" diff --cached --binary --no-renames > "$wt.patch"; t="rebase onto main conflicts: CONFLICT (content): Merge conflict in a.txt"; }
     outcome() { jq -cn --arg go "$go" --arg r "$rebased" --arg p "$ported" --arg pc "$parsecheck" --arg k "$kept" --argjson pass "$pass" \
       "{go: \$go, rebased: \$r, ported: \$p, parsecheck: \$pc, kept: \$k, pass: \$pass}" >> "$T/$CASE/outcome"; }
@@ -86,8 +86,10 @@ t_portfix() {
   k=$(st 'select(.issue == 8 and .step == "blocked") | "\($ENV.ST)/\(.kept)"'); old=$(st 'select(.issue == 8 and .step == "blocked") | .card')
   [ "$(sed -n 2p "$k/$old.withdrawn")" = '#100102 [P2] b.txt:22 no mark here' ] && [ -s "$k/$old.patch" ] || fail "the withdrawn findings or the patch are not in the kept folder: $(ls "$k")"
   echo "$GO" > "$STUB/review.5"; echo "$GO" > "$STUB/review.6"
-  # The third run fails, and its run again too (tests()), so the test fix starts.
-  echo 'echo x >> "$STUB/tests"; case $(wc -l < "$STUB/tests") in 3|4) echo "FAIL widget.test.ts"; printf "%s\n" "== widget.test.ts" "-- FAIL widget.test.ts" >> "$CONVEYOR_TEST_LOG/run.log"; exit 1 ;; esac' > "$STUB/test-cmd"
+  # The third run fails, and its run again too (tests()), so the test fix starts. It exits 1, so filecmd()
+  # (lib/testrun.sh) reports a.test.sh failed, the one file test.fileCommand is given: a failure it reported in another file would be a run of files it was not given
+  # (session.sh watch()), which stops the run and blocks the card before any test fix.
+  echo 'echo x >> "$STUB/tests"; case $(wc -l < "$STUB/tests") in 3|4) exit 1 ;; esac' > "$STUB/test-cmd"
   s=$(($(wc -l < "$STUB/sessions") + 1))
   # The bug is after the resume, in the port's test fix, its second GO and the landing that files the earlier loop's findings.
   # loop: only the card's own steps show the port's brief, its review, test fix, second GO and landing
@@ -223,7 +225,8 @@ t_rebasebig() {
   # A last review's NO-GO, its three follow-ups filed, whose landing conflicts: landconflict() ports it (no rebuild)
   # and withdraws them; the port's own last NO-GO files three more, its landing conflicts again, and the card blocks
   # with those withdrawn too.
-  conflicted 11 'printf "%s\n" "$PORTNOGO2" > "$wt.review"; res=NO-GO
+  # last=1 as afterreview() (lib/card.sh) sets it on a last NO-GO: landconflict() rebuilds a card without it.
+  conflicted 11 'printf "%s\n" "$PORTNOGO2" > "$wt.review"; res=NO-GO last=1
     for u in "[100101,100102,100103]" "[100104,100105,100106]"; do ups=$u; land1; go=end; landconflict; outcome; done'
   [ "$OUTCOME" = '{"go":"next","rebased":"","ported":"1","parsecheck":"1","kept":"","pass":0}
 {"go":"end","rebased":"","ported":"1","parsecheck":"1","kept":"","pass":0}' ] \
