@@ -7,7 +7,8 @@
 . "$HERE/lib/control.sh" || exit 1
 . "$HERE/lib/issues.sh" || exit 1
 # A resume puts back the cards a sign-in failure blocked (signinback()): retry reads the records (check()), once
-# (startonce()).
+# (startonce()), and gives a shut self-heals batch card its entries back (healstake(), lib/followups.sh).
+. "$HERE/lib/followups.sh" || exit 1
 . "$HERE/lib/views.sh" || exit 1
 . "$HERE/lib/session.sh" || exit 1
 . "$HERE/lib/pick.sh" || exit 1

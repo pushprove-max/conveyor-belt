@@ -142,6 +142,9 @@ seed() {
   mkdir -p "$ST"
   echo '{"mode":"run","cap":5,"guard":null,"held":[],"order":[],"rules":{"P0":true,"P1":true,"P2":true,"followups":true,"push":true,"visible":true,"split":"off","never":[]},"model":{"model":"m","effort":"medium"},"reviewer":{"model":"x","effort":"medium"},"judge":null,"judgeOn":false,"start":"queue","startHeld":[],"startSeen":[]}' \
     > "$ST/control.json"
+  # The sort of the work filed before the self-heals list, logged as run: a loop picks nothing before one is
+  # (healsonce(), lib/heals.sh). The cases of the sort (heals.test.sh) remove it.
+  echo '{"time":"2026-01-01T00:00:00Z","ended":"2026-01-01T00:00:00Z","judge":null,"items":[]}' > "$ST/healssort.jsonl"
 }
 # The loop's turns, for a check that something did not happen: a case waits for turns the loop takes, not for seconds
 # in which a busy machine's loop may have taken none. watchturns (after setup, before the loop starts) has every loop

@@ -386,7 +386,7 @@ cardopen() {
   rules=$(cardrules "$issue") || { block "$c" "$n" "$wt" "brief: ${rules:0:400}"; return; }
   err=$(cardsettings "$wt.settings" 2>&1) || { block "$c" "$n" "$wt" "brief: the engine could not make the card settings from $CARD_SETTINGS and the hooks.json of the pack: ${err:0:400}"; return; }
   [ -z "$br" ] || b+=$'\n\n# This card skipped the build\nIts change is the change of branch '"$br"$' against main. It is already in this worktree, staged: review that change, or fix what you are told to fix in it. Do not build it again.'
-  [ "$n" = 0 ] || { more=$(carried "$n" "$wt"); [ -z "$more" ] || b+=$'\n\n'"$more"; }
+  [ "$n" = 0 ] || for more in "$(carried "$n" "$wt")" "$(healsbrief "$n")"; do [ -z "$more" ] || b+=$'\n\n'"$more"; done
   # A follow-up whose parent (or an issue up its chain) has the owner's yes: the brief says so, and the reviewer
   # is asked whether this change stays inside that yes.
   [ -z "$inh" ] || { b+=$'\n\n'"$(inherited_brief "$inh")"; rv=$REVIEW$'\n\n'$INHERIT; }
@@ -569,8 +569,8 @@ cardreview() {
       redbrief "$c" "$n" "$br"; t="the engine could not write the re-review section"; { [ -z "$refix" ] || more+=$'\n\n'"$(rereview "$c" "$wt" "$refix" "$rr")"; } \
         && t=$(reviewed "$wt" "$sprompt$more" "$ins"); rc=$?; rm -f "$wt.port"
       [ $rc = 0 ] || { block "$c" "$n" "$wt" "review $pass: $t"; return; }
-      # The judge (judged()): a finding it declines is no finding from here on, and a review left with none is a GO. While it runs, <worktree>.reviewed holds the review's fields (its usage; began() drops it), as a bench reads its cost (SWE_LIVES).
-      redbrief "$c" "$n" "$br"; printf '%s\n' "$t" > "$wt.reviewed"; t=$(judged "$c" "$n" "$wt" "$sprompt" "$t")
+      # The judge (judged()): a finding it declines is no finding from here on, and a review left with none is a GO; the issue tells it whether the card is a follow-up, and its area. While it runs, <worktree>.reviewed holds the review's fields (its usage; began() drops it), as a bench reads its cost (SWE_LIVES).
+      redbrief "$c" "$n" "$br"; printf '%s\n' "$t" > "$wt.reviewed"; t=$(judged "$c" "$n" "$wt" "$sprompt" "$t" "$issue")
       # The P3 findings it leaves, with the rule P3 off, are listed only (minor()).
       minor "$wt"
     fi
@@ -591,7 +591,7 @@ cardreview() {
     # The line is written once the loop's end is known (stop, below); a review with no verdict blocks with it here. Its tail, the review's recorded lines (no USER-VISIBLE or VERDICT line; their last 60, TAIL in records.sh), as the reason is cut at 1500 characters: on a NO-GO, and on a GO with an OUTSIDE line, which the Board lists.
     rline=$(grep -Ev "$UNRECORDED" "$wt.review" | jq -cRs --arg res "$res" --argjson t "$t" --arg v "$vis" --argjson k "$(counts "$wt.review")" --arg p "$cpid" --arg m "$chead" --arg s "$cseen" --argjson sv "${sv:-[]}" --argjson an "${an:-[]}" \
       --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" --argjson ex "${ex:-[]}" \
-      'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" or ($r | test("(^|\n)OUTSIDE: ")) then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')
+      'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" or ($r | test("(^|\n)(OUTSIDE|SELFHEALS): ")) then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')
     [ -n "$rline" ] || rline='{}' # the grep finds no line in a review of only unrecorded lines: that is no failure
     [ "$res" != none ] || { record "$c" "$n" review "$res" "$rline"; block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
   fi
@@ -641,7 +641,7 @@ cardfix() {
 # issue's section of what customers or staff will see changed since its review (keptway() build, below): that card is built from nothing.
 # It reads card()'s n, br, wt, issue, vrule, heldto and inh, and sets its from, fromk, was, mode (land, review,
 # session, port, stale, or none: built from nothing), note, fin, finend, pro and rounds, and the files
-# beside the worktree that come with the kept patch (review, rerun, trailers, covered, stabilised, outside, rounds). It fails, with the
+# beside the worktree that come with the kept patch (review, rerun, trailers, covered, stabilised, outside, effects, rounds). It fails, with the
 # reason in err, when the card must block: a kept patch it could not take out again, or retried lines it could not read (cardtree() has checked the new worktree holds no staged change).
 resumeplan() {
   local prev d t rev='' kw='' crev='[]' # rev: the kept review prior() found; kw: keptway()'s answer for a kept patch; crev: the review lines of the kept-patch chain this card carries (pro and rounds are read from them)
@@ -671,8 +671,8 @@ resumeplan() {
         mode=stale; note="the kept patch of card $from cannot be read: built from nothing"
       fi
       # Its commit trailers, the COVERED-BY lines of its replies (speedproof.sh hollowproof()) and their STABILISED lines (speedproof.sh stabilised()) come with its patch (a card that
-      # lands from it has no session to write them again, its deleted hollow cases are checked again on them, and a fix whose reply names no cause keeps them); so do, whatever the patch, the findings its judge found outside its change (judged()), which this card files when it lands.
-      [ "$mode" = stale ] || for t in trailers covered stabilised; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done; cp "$fromk/$from.outside" "$wt.outside" 2>/dev/null || cp "$CARDS/$from.outside" "$wt.outside" 2>/dev/null || :
+      # lands from it has no session to write them again, its deleted hollow cases are checked again on them, and a fix whose reply names no cause keeps them); so do, whatever the patch, the findings its judge found outside its change and the kinds it gave the findings (judged()), which this card files when it lands.
+      [ "$mode" = stale ] || for t in trailers covered stabilised; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done; for t in outside effects; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null || :; done
     fi
   fi
   # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it stopped for the yes, or on a landing conflict). A body changed

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 60
 # The Foreman's status (watch-conveyor.sh --status) and wakes on a blocked card no session has got yet: its "not yet
-# reported" lines. Split from status.test.sh, which shares the fixture below, to keep each file under 600 lines.
+# reported" lines; and its self-heals line, which is never something to act on. Split from status.test.sh, which shares the fixture below, to keep each file under 600 lines.
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 B=$(mktemp -d); trap 'rm -rf "$B"' EXIT
@@ -125,7 +125,23 @@ w=$(cat "$(find "$FD/pending" -name '*.wake' ! -name 20261115T110000Z-1-p.wake)"
   || fail "a poll of a snapshot made at 11:55Z, with the pending wake '$w8' and the wake '$w9' relayed at the refused stop k1, gave a wake that does not name #8 and #9 as not yet reported: $w"
 }
 
-cases=(unreported unrepsent unrepasof unrepretry unrepsentasof)
+# Issue 1559: the self-heals list waits for the batch cards of its areas, filed from the Board: the status gives its
+# count and when the sort of the queued follow-ups ran, and never a "needs you" for it. Bug it catches: an entry of the
+# list reported as work for the owner, or the sort's time missing from the status.
+t_selfheals() {
+CASE=selfheals; fixture selfheals
+snap '.selfheals = {entries: [{id: "h0123456789ab", area: "area:engine", finding: "[P2] a.sh:3 a slow poll"}, {id: "h0123456789ac", area: null, finding: "[P3] b.sh:1 a stale line"}],
+  areas: [{area: "area:engine", count: 1}, {area: null, count: 1}], sorted: {time: "2026-11-15T11:00:00Z", ended: "2026-11-15T11:02:00Z", items: 3, moved: 1}}'
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+grep -qxF 'self-heals list: 2 finding(s) for the batch cards of their areas, filed from the Board (nothing to act on now); the sort of the queued follow-ups ran at 2026-11-15T11:00:00Z and moved 1 of 3' <<<"$out" \
+  || fail "the status of a snapshot with 2 self-heals entries and a sort does not give their count and the sort's time: $out"
+! grep -q '^needs you' <<<"$out" || fail "the status of a snapshot with only self-heals entries reports something that needs you: $out"
+snap '.selfheals = {entries: [], areas: [], sorted: null}'
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+! grep -q 'self-heals' <<<"$out" || fail "the status of a snapshot with an empty list and no sort has a self-heals line: $out"
+}
+
+cases=(unreported unrepsent unrepasof unrepretry unrepsentasof selfheals)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

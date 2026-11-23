@@ -181,6 +181,14 @@ Declined findings:
 - `declined dismiss [--by <who>] <id>...` hides lines from the Board's panel. The reviewer is still told not to raise
   them when their kind allows that.
 
+The self-heals list ([Harm or self-heals](cards.md#harm-or-self-heals)):
+
+- `heals batch <area | ->` files one card with the area's open entries as its scope. `-` takes the entries with no
+  area. An entry whose card has not landed or closed waits. With no entry ready in the area, it files nothing and
+  exits 2.
+- `heals sort` sorts the queued follow-up cards and the open finding issues: `harm` stays, and `self-heals` goes to
+  the list.
+
 Lanes and the Foreman:
 
 - `lane fast create | review | land | reset [--drop <sha>]` and `lane research create` ([Lanes](lanes.md)).

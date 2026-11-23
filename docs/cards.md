@@ -315,7 +315,61 @@ A real defect that the card's change did not cause is never declined for that. T
 gets no fix round for it and lands as its other findings let it. When the card lands, the finding is filed as a
 follow-up of the card, with its level and the card's issue as its parent, as a finding of a last `NO-GO` is. The
 Board shows such a finding as "Filed as a follow-up" with its issue, and as "To be filed as a follow-up" until the card
-lands.
+lands. An `OUTSIDE` finding that the judge sorts as `self-heals` is not filed. It goes to the self-heals list (Harm or
+self-heals, below).
+
+### Harm or self-heals
+
+The judge gives each finding that it accepts or marks `OUTSIDE` a kind. The kind is about what the failure does, not
+about how likely the failure is:
+
+- `harm`: data is lost or written wrong (card records, issues, kept work). Wrong code lands or pushes, or a check
+  passes that should fail. The belt or a card gets stuck, and only a person can free it.
+- `self-heals`: the failure heals itself. A card waits longer, a step runs again, or a slot is over its cap for a short
+  time. Wrong or missing text is corrected at the next poll or turn. Extra work or cost gives no wrong result.
+
+A finding whose Proof says that it was seen in real logs or records is `harm`, also when it heals itself. A finding
+with no kind is `harm`, so nothing is lost.
+
+- A `harm` finding gets its follow-up at once.
+- A `self-heals` finding goes to the self-heals list, and no follow-up is filed for it. On a follow-up card, it also
+  gets no fix round. The review shows it as a `SELFHEALS:` line, with the judge's reason.
+- The first review of a card that is not a follow-up still fixes all of its in-scope findings in the card's fix
+  rounds. If a `self-heals` finding is still open after the last review, it goes to the list.
+
+A follow-up's body has a `Kind:` line, with the kind and the judge's reason. In a card's steps on the Board, each
+review finding that the judge gave a kind shows it, and an accepted one also shows the judge's reason. When a later
+review of the card rules on a finding again, the later ruling counts. A finding that it sends to the list is not also
+filed as a follow-up. A finding on the list that it rules `harm`, or gives no kind, leaves the list. When the judge
+fails, the review stays as the reviewer wrote it: each of its findings has no kind, so it is `harm`.
+
+The list is fixed in batches, one card for each area. On the Board's Declined panel, the Self-heals list shows each
+area with all of its entries and their count. "File a batch card" files one card that has the area's entries as its
+scope. An entry whose card has not landed or closed waits for the next batch card: the code it names is only in that
+card's change. If you shut a batch card before it lands (`conveyor.sh shut`), its entries go back to the list for the
+next batch card. `conveyor.sh retry` of that card takes them again, and is refused when another batch card holds
+them. A later review that rules an entry of a batch card `harm` files no second card for it.
+When the sort moves findings of an audit issue to the list, the issue's body still names them. The card of that issue
+is told that they are out of its scope.
+Nothing on the list needs you until you file the card. The Foreman's status gives the count and does not report the
+list as something to do.
+
+`conveyor.sh heals sort` sorts the work that was filed before this rule, with the same judge. The loop runs it by
+itself, with `run` and `serve` alike, and picks no card until a sort has run. When the open issues cannot be read,
+the sort changes nothing and the loop tries again at a later turn. The sort reads each queued follow-up card that no
+card has picked, also a held one, and each open issue that is one review finding (a `[P0]` to `[P3]` title with a
+Proof). It also reads each finding of an open audit issue that holds many findings. A `harm` item stays. A
+`self-heals` card leaves the queue, and its finding goes to the list. A `self-heals` issue is closed with a comment
+that names its list entry. In an audit issue, the `self-heals` findings go to the list, and the sort posts one
+comment on the issue that names them and their entries. The issue closes, with that comment, when all of its findings
+are on the list. The sort never changes the body of an issue. If the comment or the close fails, the findings stay
+in the issue and leave the list. The sort reads each issue again just before it comments on it or closes it. A
+finding whose text changed while the judge read it stays as it is. An issue that changes as it is closed is opened
+again, and its finding leaves the list. A card or issue that the judge cannot read stays, as `harm`. The sort does not
+read an issue that is held, that is not a finding (a feature, a Board change, a bug you reported), or that has a card
+that did not land or close, such as a card on the belt or a blocked card. It does not read a follow-up that has a
+`Kind:` line: the judge already gave it its kind. An issue that is held while the judge reads stays as it is. The
+Board and the Foreman's status say when the sort ran.
 
 A change can need a step when you deploy it: a migration before the deploy, a new environment value or a flag. The
 reviewer writes this step as a `ROLLOUT:` line: the action, what fails without it, and its file and line. The builder
@@ -334,12 +388,14 @@ card's reviewer reads that section and does not raise what it lists.
 
 ## Declined findings and follow-ups
 
-Every finding that is not built is a line of the Declined list, with who declined it and why. The Board's Declined
+Every finding that is declined is a line of the Declined list, with who declined it and why. A `self-heals` finding
+is not declined: it is on the self-heals list (Harm or self-heals, above). The Board's Declined
 panel lists them, and "File as issue" files one as an issue (`conveyor/README.md`, Declined findings). A line's reason
 is in its own block under the finding, led by "Why the judge declined it" or "Why the code declined it". Each sentence
 starts a new line, code shows in a code font, and a file and line in it opens that line on GitHub.
 
-Findings still open after the last review become follow-up issues, which become cards of their own. Each follow-up's
+Findings still open after the last review become follow-up issues, which become cards of their own. A finding that the
+judge sorted as `self-heals` goes to the self-heals list instead (Harm or self-heals, above). Each follow-up's
 body says how deep it is, as the line `Follow-up depth: N`: 1 for a follow-up of a first card, 2 for a follow-up of
 a follow-up. Follow-ups go two levels deep. A card whose issue is at depth 2 files no follow-ups: its leftover findings
 go to the Declined list, and the reason names the cap. A follow-up that changes one of the pack's `pipelineFiles` is filed held.

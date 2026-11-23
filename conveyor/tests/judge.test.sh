@@ -38,7 +38,8 @@ rev() { st "select(.issue == $1 and .step == \"review\") | $2"; } # <issue> <jq 
 # its prompt in $STUB/asked), and the engine shell is made as `conveyor.sh run` makes one. What judged() prints is in
 # <worktree>.fields, with the verdict and counts the card's review line takes from the review after minor(), as
 # card() does; the review it leaves is <worktree>.review, and with fix, for a NO-GO, what its fix round is told, as
-# card() gives it (donewhen.sh numbered(), fixlines()), is <worktree>.fix. Called again on the same issue, it keeps the worktree
+# card() gives it (donewhen.sh numbered(), fixlines()), is <worktree>.fix. JUDGEISSUE, when set, is the issue's JSON
+# that card() gives the judge (whether the card is a review follow-up, and its area). Called again on the same issue, it keeps the worktree
 # and judges the next review there, as card() judges a card's next review. No case here runs a whole card; the
 # snapshot of judged reviews over a fix round is judgesnap.test.sh's.
 judgeone() { # <issue> <review file | -> [fix]
@@ -47,7 +48,7 @@ judgeone() { # <issue> <review file | -> [fix]
     && { [ "$2" = - ] || cp "$2" "$wt.review"; } || fail "the worktree of c$1 could not be made"
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null \
     && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names && { [ "$2" != - ] || review "$wt" "body of $1" > /dev/null; } \
-    && f=$(judged "c$1" "$1" "$wt" "body of $1" '{}') && minor "$wt" \
+    && f=$(judged "c$1" "$1" "$wt" "body of $1" '{}' "${JUDGEISSUE:-}") && minor "$wt" \
     && jq -c --arg v "$(verdict "$wt.review")" --argjson k "$(counts "$wt.review")" '. + {verdict: $v, counts: $k}' <<<"$f" > "$wt.fields" \
     && { [ "${3:-}" != fix ] || [ "$(verdict "$wt.review")" != NO-GO ] || { ids=$(numbered "$wt") && fixlines "$wt" "$ids" > "$wt.fix"; }; } ) \
     || fail "review() or judged() on c$1 failed"
@@ -100,7 +101,7 @@ t_judgeoutsidefiled() {
   echo 'cat "$CONVEYOR_CARDS"/c*.reviewed > "$STUB/reviewed" 2>/dev/null' > "$STUB/judge-cmd"
   # loop: that the card lands with no fix round and files the follow-up at its landing is the whole card's run (card(), cardlanding()).
   loop run >/dev/null || fail "run exited non-zero"
-  grep -qxF '`F<n> OUTSIDE: <one-line reason: why it is real, and why this card'"'"'s change did not cause it>`' "$STUB/judge-asked" \
+  grep -qxF '`F<n> OUTSIDE: <harm | self-heals>: <one-line reason: why it is real, and why this card'"'"'s change did not cause it>`' "$STUB/judge-asked" \
     && grep -qxF 'never a reason to decline a real finding: answer OUTSIDE for it.' "$STUB/judge-asked" \
     && ! grep -qF 'decline a `rare case` or `style` one as above' "$STUB/judge-asked" \
     && ! grep -qF 'with the reason `not about this card'"'"'s change`' "$STUB/judge-asked" \

@@ -112,6 +112,7 @@ cmd github github.sh -
 cmd main-test main-test.sh -
 cmd survey survey.sh -
 cmd declined declined.sh -
+cmd heals heals.sh 'heals sort | heals batch <area | ->'
 cmd testmap testmap.sh 'testmap [build | stop]'
 unset -f cmd
 [ -n "$CMD_RUN" ] || { echo "usage: conveyor.sh $CMD_USAGE" >&2; exit 2; }

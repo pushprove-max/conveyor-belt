@@ -80,7 +80,7 @@
   const reviewChip = (r) => chip(`Review ${r && num(r.round) ? r.round : '?'}: ${verdictSaid(r && r.verdict)}`, r && r.verdict === 'GO' ? 'ok' : 'warn');
   // What the judge made of a review (its judge, as the snapshot gives it): "judge: N accepted, M declined", and ", K
   // outside the change" when it found K outside the card's change (each filed as a follow-up when the card lands: its
-  // row says when it is); "passed (the judge declined all M)" for a GO that came from
+  // row says when it is), and ", S to the self-heals list" when it wrote S there; "passed (the judge declined all M)" for a GO that came from
   // the judge declining every finding. The declined count is a button:
   // it opens that card's lines in the panel that lists the declined findings, the module with declinedOf (the address
   // parameter that cuts it to one card's lines). null, so no judge line, for a review the judge did not read (ran not
@@ -89,7 +89,7 @@
     const j = r && r.judge;
     if (!j || typeof j !== 'object' || j.ran !== true) return null;
     const el = h('span', 'judged');
-    const a = num(j.accepted) ? j.accepted : 0, m = num(j.declined) ? j.declined : 0, o = num(j.outside) ? j.outside : 0;
+    const a = num(j.accepted) ? j.accepted : 0, m = num(j.declined) ? j.declined : 0, o = num(j.outside) ? j.outside : 0, s = num(j.selfheals) ? j.selfheals : 0;
     const lines = Array.from(modules.values()).find((x) => typeof x.declinedOf === 'string' && x.declinedOf);
     const open = (text) => {
       if (!m || !lines || typeof card !== 'string' || !card) return text;
@@ -100,8 +100,8 @@
       b.addEventListener('click', () => { params({ [lines.declinedOf]: card }); redrawAll(); goTo(lines.id); });
       return b;
     };
-    if (j.go === true && !o) el.append('passed (the judge ', open(`declined all ${m}`), ')');
-    else el.append(`judge: ${a} accepted, `, open(`${m} declined`), o ? `, ${o} outside the change` : '');
+    if (j.go === true && !o && !s) el.append('passed (the judge ', open(`declined all ${m}`), ')');
+    else el.append(`judge: ${a} accepted, `, open(`${m} declined`), o ? `, ${o} outside the change` : '', s ? `, ${s} to the self-heals list` : '');
     return el;
   }
   // The end of the output a blocked card failed on (its line's tail), shown under its sentence: closed under "Show
@@ -233,6 +233,16 @@
   // A finding the judge found real but not caused by the card's change (review.sh judged()): "OUTSIDE: <finding> (judge:
   // <reason>)". It is filed as a follow-up of the card when the card lands, never declined.
   const OUTSIDE = /^OUTSIDE:\s*(\[P[0-3]\].*?) \(judge: ([\s\S]*)\)\s*$/;
+  // A finding the judge sorted as self-heals and wrote to the self-heals list (review.sh judged()): "SELFHEALS:
+  // <finding> (judge: self-heals: <reason>)". No fix round and no follow-up: a batch card of its area fixes it.
+  const SELFHEALS = /^SELFHEALS:\s*(\[P[0-3]\].*?) \(judge: ([\s\S]*)\)\s*$/;
+  // A review line's judge mark (findingRows): its SELFHEALS, OUTSIDE or DECLINED match (heal, out, no: the one it has,
+  // the others null), that match (judged, null for a line with no mark) and the title of the judge's reason (why).
+  function judgedLine(text) {
+    const heal = SELFHEALS.exec(text), out = heal ? null : OUTSIDE.exec(text), no = heal || out ? null : DECLINED.exec(text);
+    const why = heal ? 'Why the judge sorted it as self-heals' : out ? 'Why the judge found it outside the change' : 'Why the judge declined it';
+    return { heal, out, no, judged: heal || out || no, why };
+  }
   // A review's findings as rows, in their order: the priority chip (P0 and P1 warn, P2 and P3 quiet) and the sentence
   // in bold on one line, the place (path:line) under it as a link to that line, and the part after "Proof:" folded
   // under a closed "Proof:" toggle. Code spans and file paths in the sentence and proof are drawn as fill draws them,
@@ -241,16 +251,22 @@
   // its record), the place has a closed "Reviewed lines" toggle under it: opened, it shows the lines the place cites as
   // that review read them (reviewedLines). filed: the follow-up of each finding the judge found outside the change, a
   // Map from the finding (as the card's filed line has it) to its issue number or follow-up card id; a finding it does
-  // not hold is still to be filed.
-  function findingRows(folded, repoUrl, card, repo, review, filed) {
+  // not hold is still to be filed. judge: the review's judge as the snapshot gives it (rows.jq): each finding of its
+  // kinds (one it accepted or found outside the change, with its kind, harm or self-heals) has a chip of that kind, and
+  // an accepted one the judge's reason under it as well (an outside one has its reason in its line).
+  function findingRows(folded, repoUrl, card, repo, review, filed, judge) {
     const list = h('ol', 'output-findings');
     const known = new Set(folded.flatMap((x) => pathsIn(x.text)));
     const lines = [card, repo, review].every((s) => typeof s === 'string' && s) ? reviewedLines(repo, card, review) : null;
     // The filed findings folded as the review's lines are, so a worktree path in one reads as in the row.
     const ups = new Map(filed instanceof Map ? Array.from(filed, ([f, n]) => [foldLines(f, card)[0].text, n]) : []);
+    const kinds = (o) => new Map((judge && Array.isArray(judge.kinds) ? judge.kinds : [])
+      .filter((x) => x && typeof x.finding === 'string' && x.finding.trim() && (x.effect === 'harm' || x.effect === 'self-heals') && (x.outside === true) === o)
+      .map((x) => [foldLines(x.finding.trim(), card)[0].text, x]));
+    const accepted = kinds(false), outside = kinds(true);
     folded.forEach((x) => {
       if (!x.text.trim()) return;
-      const out = OUTSIDE.exec(x.text), no = out ? null : DECLINED.exec(x.text), judged = out || no;
+      const { heal, out, no, judged, why } = judgedLine(x.text);
       const row = h('li', 'output-finding'), m = FINDING.exec(judged ? judged[1] : x.text), times = x.n > 1 ? ` ×${x.n}` : '';
       if (!m) { row.append(h('p', 'finding-text', x.text + times)); list.append(row); return; }
       let rest = m[2];
@@ -261,7 +277,8 @@
       const head = h('div', 'finding-head'), said = h('p', 'finding-text');
       said.append(fill(h('strong', 'finding-claim'), sentence, repoUrl, known, 'finding'));
       if (times) said.append(times);
-      head.append(chip(m[1], m[1] === 'P0' || m[1] === 'P1' ? 'warn' : 'quiet'), ...judgeChips(no, out, ups, repoUrl), said);
+      const kind = judged ? (out ? outside.get(out[1].trim()) : null) : accepted.get(x.text.trim());
+      head.append(...findingChips(m[1], heal, no, out, kind, ups, repoUrl), said);
       row.append(head);
       if (at) { const p = h('p', 'finding-at'); p.append(codeEl(repoUrl, at[1], known, 'finding-at-link').el); row.append(p); }
       if (at && lines) row.append(lines(at[1]));
@@ -271,10 +288,24 @@
         row.append(fold);
       }
       if (no) row.classList.add('is-declined');
-      if (judged) row.append(judgeWhy(out ? 'Why the judge found it outside the change' : 'Why the judge declined it', judged[2], repoUrl, known));
+      const reason = judged ? judgeWhy(why, judged[2], repoUrl, known) : kindWhy(kind, repoUrl, known);
+      if (reason) row.append(reason);
       list.append(row);
     });
     return list;
+  }
+  // A finding's chips before its sentence (findingRows): its priority (P0 and P1 warn, P2 and P3 quiet), "Self-heals
+  // list" for one the judge wrote to that list (heal) or else its judgeChips, and the kind the judge gave it, if any.
+  function findingChips(p, heal, no, out, kind, ups, repoUrl) {
+    const marks = heal ? [chip('Self-heals list', 'quiet')] : judgeChips(no, out, ups, repoUrl);
+    const kinds = kind ? [chip(kind.effect === 'harm' ? 'Harm' : 'Self-heals', 'quiet')] : [];
+    return [chip(p, p === 'P0' || p === 'P1' ? 'warn' : 'quiet'), ...marks, ...kinds];
+  }
+  // The judge's reason for the kind it gave a finding with no judge mark in its line (findingRows), or null when the
+  // judge gave it no kind or no reason.
+  function kindWhy(kind, repoUrl, known) {
+    if (!kind || typeof kind.reason !== 'string' || !kind.reason.trim()) return null;
+    return judgeWhy(`Why the judge sorted it as ${kind.effect}`, kind.reason, repoUrl, known);
   }
   // The chips after a finding's priority (findingRows): "Declined" for a declined finding (no); for one the judge found
   // outside the change (out, its OUTSIDE match), "Filed as a follow-up" and its follow-up (from ups: an issue number,
@@ -429,17 +460,19 @@
   }
   // A review's findings as one list of rows, accepted and declined alike (findingRows), for the step that shows its
   // output as plain text (output with raw); null when the output holds no finding. was: the list this one replaces in a
-  // redraw: the same output, with the same follow-ups filed (filed, as findingRows takes it), keeps it, so its open toggles stay open.
-  function reviewList(tail, card, was, repoUrl, repo, reviewAt, filed) {
+  // redraw: the same output, with the same follow-ups filed (filed, as findingRows takes it) and the same judge's record
+  // (judge, as findingRows takes it), keeps it, so its open toggles stay open.
+  function reviewList(tail, card, was, repoUrl, repo, reviewAt, filed, judge) {
     if (typeof tail !== 'string' || !tail.trim()) return null;
-    const ups = JSON.stringify(filed instanceof Map ? Array.from(filed) : []);
-    if (was && was.dataset.text === tail && was.dataset.card === String(card) && was.dataset.filed === ups) return was;
+    const ups = JSON.stringify(filed instanceof Map ? Array.from(filed) : []), judged = JSON.stringify(judge ?? null);
+    if (was && was.dataset.text === tail && was.dataset.card === String(card) && was.dataset.filed === ups && was.dataset.judge === judged) return was;
     const folded = foldLines(tail, card);
-    if (!folded.some((x) => FINDING.test(x.text) || DECLINED.test(x.text) || OUTSIDE.test(x.text))) return null;
-    const list = findingRows(folded, repoUrl, card, repo, reviewAt, filed);
+    if (!folded.some((x) => FINDING.test(x.text) || DECLINED.test(x.text) || OUTSIDE.test(x.text) || SELFHEALS.test(x.text))) return null;
+    const list = findingRows(folded, repoUrl, card, repo, reviewAt, filed, judge);
     list.classList.add('review-findings');
     list.dataset.text = tail;
     list.dataset.filed = ups;
+    list.dataset.judge = judged;
     list.dataset.card = String(card);
     return list;
   }

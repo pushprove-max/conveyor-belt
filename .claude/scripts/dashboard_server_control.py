@@ -104,6 +104,8 @@ def control_ok(body):
         return n == 1 and DECLINED_ID.fullmatch(v[0]) is not None
     if a == 'dismiss':  # declined findings, by their lines' ids ("Dismiss", "Dismiss all shown"); as many as fit the body
         return 1 <= n <= 400 and all(DECLINED_ID.fullmatch(x) for x in v)
+    if a == 'heals':  # the Self-heals list's "File a batch card": an area's label, or - for the entries with none
+        return n == 2 and v[0] == 'batch' and (v[1] == '-' or globals()['LABEL'].fullmatch(v[1]) is not None)  # the base part's
     if a in ('approve', 'decline'):  # the issue, then a condition (approve) or a reason (decline), if any
         return 1 <= n <= 2 and ISSUE.fullmatch(v[0]) is not None and (n == 1 or said_ok(v[1]))
     if a == 'unlabel':  # the issue and the labels that hold it back
@@ -452,7 +454,8 @@ def control_script(action, args, main, today, record=None, user=None):
     the record holds it no more either; the reply is the record. close ("Close" on a blocked card of Needs you, or on a pipeline change
     held there, once the owner confirmed it) closes the issue with a comment that says so, then shuts its blocked card, if any (conveyor.sh shut). build files a declined finding of the record's list
     as an ordinary issue (conveyor.sh declined build: once, however often it is asked); dismiss marks lines of that list
-    dismissed by the Board user, so they leave the Declined panel (conveyor.sh declined dismiss). record is the checkout of the record the action
+    dismissed by the Board user, so they leave the Declined panel (conveyor.sh declined dismiss); heals batch files one
+    card with an area's entries of the self-heals list as its scope (conveyor.sh heals batch). record is the checkout of the record the action
     is for: every action runs on its Conveyor record (and approve, decline and unlabel in its GitHub repository), never
     main's unless it is main's.
     The script itself is always main's, as dashboard.sh runs it for every record. Every GitHub write goes through its
@@ -486,6 +489,8 @@ def control_script(action, args, main, today, record=None, user=None):
         return '%s declined build %s' % (conv, q(args[0]))
     if action == 'dismiss':
         return '%s declined dismiss --by %s %s' % (conv, q('Board user %s' % user), ' '.join(q(x) for x in args))
+    if action == 'heals':
+        return f'{conv} heals batch {q(args[1])}'
     if action == 'full-test':
         # The run goes on on the host after the answer (conveyor.sh full-test starts it and returns); a push over a red
         # suite names the red run the confirm showed and is logged under the Board user who confirmed it.

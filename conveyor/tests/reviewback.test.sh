@@ -169,14 +169,19 @@ t_retryrounds() {
 # Bug (#1424): a blocked card's findings that its judge found outside its change (<worktree>.outside, judged()) were
 # not kept with its patch, or its retry did not take them back: a retry that lands from the kept patch with no review
 # (as after the owner's yes) then files no follow-up for them.
+# Bug (#1559): the same for the kinds its judge gave the findings (<worktree>.effects, judged()): a retry lost them,
+# and its filing then filed a self-heals finding as harm.
 t_retryoutside() {
   local o='{"finding":"[P2] b.txt:1 stale line. Proof: cat b.txt","reason":"real, and the change did not touch b.txt"}'
+  local e='{"finding":"[P2] a.txt:1 slow poll. Proof: cat a.txt","effect":"self-heals","reason":"the next poll reads it"}'
   setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' b.txt base
-  keptblock 7 1 'fix: the session failed' "echo '$o' > \"\$wt.outside\""
-  [ "$(cat "$K/c7.outside" 2>&1)" = "$o" ] || fail "block() did not keep the outside findings with the patch: $(ls "$K" 2>&1)"
-  resumed 7 'cat "$wt.outside" > "$T/$CASE/outside"'
-  [ "$(jq -c '[.mode, (.beside | index("outside") != null)]' <<<"$RESUMED")" = '["session",true]' ] && [ "$(cat "$T/$CASE/outside")" = "$o" ] \
-    || fail "the retried card did not take back the outside findings beside its worktree: $RESUMED $(cat "$T/$CASE/outside" 2>&1)"
+  keptblock 7 1 'fix: the session failed' "echo '$o' > \"\$wt.outside\"; echo '$e' > \"\$wt.effects\""
+  [ "$(cat "$K/c7.outside" 2>&1)" = "$o" ] && [ "$(cat "$K/c7.effects" 2>&1)" = "$e" ] \
+    || fail "block() did not keep the outside findings and the findings' kinds with the patch: $(ls "$K" 2>&1)"
+  resumed 7 'cat "$wt.outside" > "$T/$CASE/outside"; cat "$wt.effects" > "$T/$CASE/effects"'
+  [ "$(jq -c '[.mode, (.beside | index("outside") != null), (.beside | index("effects") != null)]' <<<"$RESUMED")" = '["session",true,true]' ] \
+    && [ "$(cat "$T/$CASE/outside")" = "$o" ] && [ "$(cat "$T/$CASE/effects")" = "$e" ] \
+    || fail "the retried card did not take back the outside findings and the findings' kinds beside its worktree: $RESUMED $(cat "$T/$CASE/outside" "$T/$CASE/effects" 2>&1)"
 }
 
 # Bug: a blocked stabilise card's STABILISED lines (<worktree>.stabilised, speedproof.sh stabilised()) were not kept

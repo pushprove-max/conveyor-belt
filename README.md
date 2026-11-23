@@ -66,6 +66,16 @@ Each part has its own number and its own card. Conveyor never builds the parent.
 Conveyor closes the parent with a comment that names them. `conveyor.sh parts <parent> <issue>...` attaches issues to
 a parent ([Issues](docs/commands.md#issues)).
 
+## Review findings
+
+The judge gives each review finding a kind, by what its failure does. A `harm` finding loses data or writes it
+wrong, lands wrong code, or leaves the belt stuck until a person acts. A `self-heals` finding heals itself: a card
+waits longer, a step runs again, or the next poll corrects a text. A finding that was seen in real logs or records
+is `harm`, also when it heals itself. A card's fix rounds fix the findings in its
+change. A `harm` finding outside the change becomes a follow-up card at once. A `self-heals` finding outside the
+change, or in a follow-up card, goes to the self-heals list. On the Board, you file one card for an area, and that
+card fixes all of the area's entries ([Harm or self-heals](docs/cards.md#harm-or-self-heals)).
+
 ## The Board
 
 The Board is a local web page that shows the belt: what needs you, the cards and their steps, what landed and what

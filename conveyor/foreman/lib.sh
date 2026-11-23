@@ -314,6 +314,18 @@ waiter_state() {
   echo "down: ${line#* * ended: }"
 }
 
+# healsdef: prints the jq def healsline, the Foreman status's self-heals line (watch-conveyor.sh STATUS), of a
+# snapshot's selfheals (snapshot.sh): its count, and when the sort of the queued follow-ups ran; none when the list is
+# empty and no sort ran. The list is no one's work now (an area's batch card, filed from the Board, fixes it), so the
+# line is never a "needs you".
+healsdef() {
+  printf '%s' 'def healsline: ([.areas[]?.count | numbers] | add // 0) as $n | select($n > 0 or .sorted != null)
+  | "self-heals list: \($n) finding(s) for the batch cards of their areas, filed from the Board (nothing to act on now)"
+    + (if .sorted then "; the sort of the queued follow-ups ran at \(.sorted.time) and moved \(.sorted.moved) of \(.sorted.items)"
+         + (if .sorted.failed then " (its judge failed: \(.sorted.failed))" else "" end)
+       else "; the sort of the queued follow-ups has not run" end);'
+}
+
 # status_tail: the last two lines of the Foreman's status, read from this machine's Foreman folder: the watcher's last
 # poll (conveyor-polls.log) and the waiter (waiter_state).
 status_tail() {

@@ -149,6 +149,16 @@ SAYS=${STATE%/*}/loop.json
 # built after all, and dismissed ({time, by}) once it was dismissed from the Board's panel (declined(), declinedbuild(),
 # declineddismiss()).
 DECLINED=${STATE%/*}/declined.jsonl
+# The self-heals list: every finding the judge sorted as self-heals that is not built on its own (healsadd(),
+# lib/followups.sh), one line each: {id, time, card (the card it came from, or #<issue> for an issue with no card
+# named), issue, repo, area (the area label, or null), finding, why (the judge's reason), effect: "self-heals", from:
+# review or sort}, and batched (the issue number or card id of the batch card filed for it: healsbatch(), lib/heals.sh).
+# shellcheck disable=SC2034 # read by lib/followups.sh, lib/heals.sh and lib/snapshot.sh, which conveyor.sh sources beside this file
+SELFHEALS=${STATE%/*}/selfheals.jsonl
+# Each sort of the queued follow-up cards and open finding issues (healssort(), lib/heals.sh), one line a run: {time,
+# ended, judge: {model, failed} as judgecall() printed it, items: [{card or issue, finding, effect, why, entry, done}]}.
+# shellcheck disable=SC2034 # read by lib/heals.sh, lib/run.sh and lib/snapshot.sh, which conveyor.sh sources beside this file
+HEALSSORT=${STATE%/*}/healssort.jsonl
 # Where each open issue was last seen and since when: {"<issue>": {col: held, queue or belt, at, seen, other, by}}; seen
 # is when that was known, other that the snapshot saw something besides your hold or a rule keep it in Held, by what a
 # rule of the control record reads of it (labels, fu: a follow-up, p: its priority), and left when `control release`

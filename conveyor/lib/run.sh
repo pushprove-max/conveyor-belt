@@ -381,11 +381,11 @@ shutopen() { # <issue | card id>
 # ids of those it counts, one a line, from the same read of the jobs: one whose job ended, not yet reaped, is in neither.
 cardsrun() {
   local j p; j=$(jobs -rp); runcards=''; for p in "${!mine[@]}"; do { [[ -v took[$p] ]] || grep -qxF -- "$p" <<<"$j"; } && runcards+=${mine[$p]%% *}$'\n'; done
-  running=$(($(printf '%s' "$j" | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${prober:-0}" -e "${merger:-0}" -e "${fixer:-0}" -e "${asker:-0}") + ${#took[@]}))
+  running=$(($(printf '%s' "$j" | grep -cvx -e "${pusher:-0}" -e "${tester:-0}" -e "${taker:-0}" -e "${muter:-0}" -e "${sorter:-0}" -e "${prober:-0}" -e "${merger:-0}" -e "${fixer:-0}" -e "${asker:-0}") + ${#took[@]}))
 }
 # The wait that ends a turn, in run()'s own variables: until the turn's timer, one of the loop's cards (mine), the
-# push (pusher) or the machine hold's look (prober, which runends() waits for) ends, at once when one of them has
-# ended already. The other jobs beside the cards (take, relfixes, needsask, maintest, mutnext, idlemerge) never end it:
+# push (pusher), the machine hold's look (prober, which runends() waits for) or the sort the pick waits for (sorter,
+# healsonce()) ends, at once when one has ended already. The other jobs (take, relfixes, needsask, maintest, mutnext, idlemerge) never end it:
 # relfixes, started every IDLE seconds, ended during each turn, so a bare `wait -n` returned at once and the loop ran
 # turn after turn with no wait (issue 881). A job named that ended before is waited no more: bash keeps its status,
 # and a wait on it returns at once at every turn. The prober is named only while it runs, as nothing clears it (the
@@ -399,7 +399,7 @@ turnwait() {
   local j=() p
   [ -z "${nudged:-}" ] || { nudged=''; return 0; }
   [ -z "$pusher" ] || j+=("$pusher")
-  [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober" || j+=("$prober")
+  for p in "$prober" "${sorter:-}"; do [ -z "$p" ] || ! jobs -rp | grep -qx "$p" || j+=("$p"); done
   for p in "${j[@]}" "${!mine[@]}"; do kill -0 "$p" 2>/dev/null || return 0; done
   wait -n "$timer" "${j[@]}" "${!mine[@]}" 2>/dev/null; nudged=''
 }
@@ -627,9 +627,9 @@ turnask() {
   # asks GitHub itself while the pick holds the records' lock.
   urgent=''; [ "$cap" -le 0 ] || urgent=$(urgent) || urgent=''
   red=''; [ "$cap" -le 0 ] || [ "$building" -lt "$cap" ] || red=$(redfix "$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done)") || red=''
-  # While a session's API-side error is fresh (session()), no card is picked: its session would meet the same outage.
+  # No card is picked while a session's API-side error is fresh (session(): its session would meet the same outage), nor before the sort (healsonce()).
   asking=''; if { [ "$building" -lt "$cap" ] || [ -n "$urgent" ] || [ -n "$red" ]; } && [ -z "$old" ] && [ -z "$nopack" ] && [ -z "$nocli" ] && [ -z "$mhold" ]; then
-    if apifresh; then waits=1; else asking=1; [ "$now" != running ] || issues=$(asked) || asking=failed; fi
+    if apifresh || ! healsonce; then waits=1; else asking=1; [ "$now" != running ] || issues=$(asked) || asking=failed; fi
     [ "$asking" != 1 ] || [ "$now" != running ] || [ -z "${ONLYNAMED:-}" ] || ! t=$(onlyparts "$ONLYNAMED") || ONLY=$t; fi # --only's closed parts, read again as they close or move
   # The accounts of the seats the record keeps for an open issue (`control card`) are asked for too, outside the lock:
   # pick holds that issue's card alone while one is at the guard (cardheld(), lib/pick.sh); the queue goes on.
@@ -707,7 +707,7 @@ turnpick() {
 }
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
-  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' utried=-1000000 nudged='' runcards=''
+  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' sorter='' utried=-1000000 nudged='' runcards=''
   local mhold htold='' prober='' htried=-1000000 gone gs merger='' gtried=-1000000 fixer='' rtried=-1000000 asker='' atried=-1000000
   local inuse # the machine's count of the turn (turncount())
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;

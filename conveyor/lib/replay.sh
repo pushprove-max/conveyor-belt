@@ -7,7 +7,8 @@
 # besides the state database (state.db, state.py), which every read of the records through stdb() brings up to date.
 # The cases are the newest <n> review lines (REPLAY_LAST when --last is not given) of the card records and the
 # retried lines whose judge ruled (judge.accepted and judge.declined, judged(), lib/review.sh; a judge that failed
-# ruled on nothing). A finding of a kind the project always accepts counts as the judge's own answer, which its reason
+# ruled on nothing). A finding it accepted and sent to the self-heals list (judge.selfheals, not an OUTSIDE one: no
+# OUTSIDE ruling is replayed) counts as accepted. A finding of a kind the project always accepts counts as the judge's own answer, which its reason
 # keeps. The diff of a case is the card's change as the records keep it (the commit of its landed line, else the
 # kept patch of its blocked line) on the commit its review sat on (main). That is the change as it ended: it is the
 # one the judge read only when its patch-id (cardpatch(), lib/claim.sh) is the one the review line keeps (patch). A
@@ -38,7 +39,7 @@ replaycases() { # <n>
     def t: try (sub("\\.[0-9]+"; "") | fromdateiso8601) catch null;
     map(objects) as $all
     | [$all[] | select(.step == "review" and (.judge | type) == "object" and .judge.failed == null
-        and ([.judge.accepted, .judge.declined | arrays[]] | length) > 0)]
+        and ([.judge.accepted, .judge.declined, (.judge.selfheals | arrays | map(select(.outside | not))) | arrays[]] | length) > 0)]
     | sort_by(.time) | .[-$last:][] | .card as $c | .issue as $n |(.judge.sec | numbers // 0) as $sec | (.time | t | if . == null then null else . - $sec end) as $ran
     | {card: $c, issue, time, main: (.main // ""), patch: (.patch // ""),
        back: [.judge.back | arrays[] | strings],
@@ -46,7 +47,8 @@ replaycases() { # <n>
                  | .finding as $f | [(.was // [])[], {time: (.ruled // .time), why, kind}] | map(select(((.time | t) // $ran) < $ran)) | last // empty
                  | "- \($f) (declined: \(.why)) [kind: \(.kind // "none")]"] | reduce .[] as $l ([]; if index([$l]) then . else . + [$l] end) | .[-50:]), judge: (.judge | {model, effort, sec, tokens, usage} | del(.[] | nulls)),
        findings: ([(.judge.accepted | arrays[] | . + {accept: (.reason | tostring | test("^always accepted: a .* finding \\(the judge declined it: ") | not)}),
-                   (.judge.declined | arrays[] | . + {accept: false})] | sort_by(.n) | map({n, finding, place, accept})),
+                   (.judge.declined | arrays[] | . + {accept: false}), (.judge.selfheals | arrays[] | select(.outside | not) | . + {accept: true})]
+                  | sort_by(.n) | map({n, finding, place, accept})),
        sha: ([$all[] | select(.card == $c and .step == "landed" and (.sha // "") != "") | .sha] | last // ""),
        kept: ([$all[] | select(.card == $c and .step == "blocked" and (.kept // "") != "") | "\($st)/\(.kept)/\($c).patch"] | last // "")}'
 }

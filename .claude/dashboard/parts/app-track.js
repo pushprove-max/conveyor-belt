@@ -452,7 +452,7 @@
     // A review's findings are one list of rows under the bar; its Show output keeps the review's text as written.
     const review = /^review \d/.test(s.name);
     const was = review && at.mine ? Array.from(at.mine.querySelectorAll('.review-findings')).find((x) => x.dataset.step === step) : null;
-    const rows = review ? reviewList(s.output, at.card, was, at.repoUrl, at.repo, s.at, at.filed) : null;
+    const rows = review ? reviewList(s.output, at.card, was, at.repoUrl, at.repo, s.at, at.filed, s.judge) : null;
     if (rows) { rows.dataset.step = step; els.push(rows); }
     const out = output(s.output, at.card, s.name === 'tests failed' ? 'Show full output' : null, old, at.repoUrl, at.repo, review ? s.at : null, Boolean(rows));
     if (out) { out.dataset.step = step; els.push(out); }

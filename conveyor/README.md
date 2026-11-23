@@ -193,6 +193,26 @@ such a decline starts with "rare case". At each other level, "rare case" is no r
 `conveyor.sh control judge rare none` clears the levels. The default is none: the judge declines no finding as a rare
 case. A word that is not a level is refused, and the setting does not change.
 
+The judge also gives each finding that it accepts or marks outside a kind, from what its failure does, never from
+how likely it is. `harm`: data is lost or written wrong, wrong code lands or pushes, a check passes that should fail,
+or the belt or a card gets stuck and only a person can free it. `self-heals`: the failure heals itself (a longer wait,
+a step run again, a slot over its cap for a short time), text that the next poll or turn corrects, or extra work or cost
+with no wrong result. A finding whose Proof says that it was seen in real logs or records is `harm`, and so is a
+finding with no kind. The record line keeps the kind of each finding as `effect`. A `harm` finding is filed as a
+follow-up as before, and the follow-up's body names its kind and the judge's reason in a `Kind:` line. A `self-heals`
+finding outside the change, and on a follow-up card a `self-heals` finding in the change, goes to the self-heals list
+(`selfheals.jsonl` of the state folder): it becomes a `SELFHEALS:` line of the review, with no fix round and no
+follow-up, and the review's record line holds it in `judge.selfheals`. A card that is not a follow-up still fixes its
+in-scope `self-heals` findings in its fix rounds; one still open after the last review goes to the list. A line that
+the reviewer itself starts with `SELFHEALS:` is a finding. `conveyor.sh heals batch <area>` (the Board's "File a batch
+card", `-` for the entries with no area) files one card that holds an area's open entries as its scope, and marks them
+with that card. An entry whose card has not landed or closed waits for a later batch card. A batch card shut before
+it lands gives its entries back, and `retry` of it takes them again, or is refused when another batch card holds them.
+When the judge fails, the review stays as the reviewer wrote it, and its findings keep no kind from an earlier round. `conveyor.sh heals sort` sorts the queued follow-up cards and the open finding issues by the same rule
+(docs/cards.md, Harm or self-heals). The loop (`run` or `serve`) runs it by itself and picks no card until
+`healssort.jsonl` of the state folder logs a sort. That file logs each run with each item, its kind and the judge's
+reason. A sort that cannot read the open issues logs nothing, so the loop tries again.
+
 `conveyor.sh control judge <cli> <model> [effort]` names the judge (a CLI installed on the host, the reviewer's too,
 and any model, listed by that CLI or not: docs/configuration.md, Models); a judge set to the reviewer's CLI is used, of the same
 family as the reviewer. `conveyor.sh control judge default` leaves it to the first model of another CLI than the

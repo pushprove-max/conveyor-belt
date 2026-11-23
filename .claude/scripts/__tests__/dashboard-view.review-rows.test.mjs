@@ -105,6 +105,38 @@ test('a finding the judge found outside the change shows as filed as a follow-up
   assert.match(link.getAttribute('href') || '', /\/issues\/100101$/, 'and links it');
 });
 
+// Bug it guards (#1559): a finding the judge wrote to the self-heals list showed as a plain line, with no word of
+// where it went or of the judge's kind and reason, and the judge line said "passed (the judge declined all 0)".
+test('a finding the judge wrote to the self-heals list shows its chip and the judge\'s reason, and the judge line counts it', () => {
+  const HEAL = '[P2] .claude/dashboard/panels/belt.js:12 The count is one turn late. Proof: open the Belt as a card lands.';
+  const { row } = shown({ name: 'review 1 (GO)', output: `SELFHEALS: ${HEAL} (judge: self-heals: the next poll corrects it.)`, judge: { ran: true, accepted: 0, declined: 0, selfheals: 1, go: true } });
+  const item = Array.from(row().querySelectorAll('.timeline > li.tl-item')).find((li) => li.querySelector('.tl-label').textContent.startsWith('Review'));
+  const finding = item.querySelector(':scope > .review-findings > .output-finding');
+  assert.equal(item.querySelector(':scope > .tl-review .judged').textContent, 'judge: 0 accepted, 0 declined, 1 to the self-heals list');
+  assert.deepEqual(Array.from(finding.querySelectorAll('.finding-head > .chip'), (c) => c.textContent), ['P2', 'Self-heals list']);
+  assert.equal(finding.classList.contains('is-declined'), false, 'it is not drawn as declined');
+  assert.equal(finding.querySelector('.why-block .why-label').textContent, 'Why the judge sorted it as self-heals');
+  assert.equal(finding.querySelector('.why-block .why-text').textContent, 'self-heals: the next poll corrects it.', "the judge's kind and reason");
+});
+
+// Bug it guards (#1559): a card's review steps showed the kind and reason of a self-heals finding alone: an accepted
+// finding's row named neither its kind nor the judge's reason, and an outside harm finding's row did not name its kind.
+// An outside finding is a harm one: judged() sends an outside self-heals one to the list (judge.selfheals), never to
+// an OUTSIDE row.
+test('an accepted finding shows the judge\'s kind and reason, and an outside one its kind', () => {
+  const ACC = '[P1] .claude/dashboard/panels/belt.js:20 The record line is dropped. Proof: land two cards at once.';
+  const OUT = '[P2] .claude/dashboard/panels/belt.js:40 A card record line is written twice. Proof: open the Belt as a card ends.';
+  const { row } = shown({ output: `${ACC}\nOUTSIDE: ${OUT} (judge: the record is written wrong; the card did not change belt.js.)`,
+    judge: { ran: true, accepted: 1, declined: 0, outside: 1, go: false, kinds: [{ finding: ACC, effect: 'harm', reason: 'a card record line is lost.' },
+      { finding: OUT, effect: 'harm', reason: 'the record is written wrong; the card did not change belt.js.', outside: true }] } });
+  const item = Array.from(row().querySelectorAll('.timeline > li.tl-item')).find((li) => li.querySelector('.tl-label').textContent.startsWith('Review'));
+  const [acc, out] = item.querySelectorAll(':scope > .review-findings > .output-finding');
+  assert.deepEqual(Array.from(acc.querySelectorAll('.finding-head > .chip'), (c) => c.textContent), ['P1', 'Harm'], "the accepted finding's kind");
+  assert.equal(acc.querySelector('.why-block .why-label').textContent, 'Why the judge sorted it as harm');
+  assert.equal(acc.querySelector('.why-block .why-text').textContent, 'a card record line is lost.', "the judge's reason");
+  assert.deepEqual(Array.from(out.querySelectorAll('.finding-head > .chip'), (c) => c.textContent), ['P2', 'To be filed as a follow-up', 'Harm'], "the outside finding's kind");
+});
+
 // Bug it guards (#1424): a retry that lands from a kept patch (after a yes) writes no review of its own and files the
 // outside findings of the review it kept, so the filed line is on the retry and the review on its earlier attempt;
 // that review's row still said "To be filed as a follow-up" after the filing.

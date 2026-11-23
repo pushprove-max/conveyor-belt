@@ -197,7 +197,7 @@
                       elif $l.step == "test" and $l.list != null then $l.list.why else null end),
                     # A GO review's findings too when the judge found one outside the card's change (an OUTSIDE line of its tail, rows.jq).
                     output: (if $l.step == "blocked" or ($l.step == "test" and $l.result != "pass") or ($l.step == "review" and $l.result == "NO-GO") then $l.tail
-                      elif $l.step == "review" and ($l.tail // "" | test("(^|\n)OUTSIDE: ")) then $l.tail else null end),
+                      elif $l.step == "review" and ($l.tail // "" | test("(^|\n)(OUTSIDE|SELFHEALS): ")) then $l.tail else null end),
                     failures: (if $l.step == "test" and $l.result != "pass" then $l.failures else null end),
                     # A test run's changed lines no test reached, from its coverage report (uncovered(), testlist.sh).
                     coverage: (if $l.step == "test" then $l.coverage else null end),

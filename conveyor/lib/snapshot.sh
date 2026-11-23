@@ -63,7 +63,8 @@
 # reviews (of a belt card and of a landed one): its finished reviews in order: round, verdict (GO, NO-GO, or none),
 #   counts (the findings by level; null for a review recorded before they were counted), sec, fixed (a fix round
 #   followed it), and judge, what the judge (judged()) made of it: {ran: true, accepted, declined, outside (how many findings of
-#   each; outside: found outside the card's change, filed as follow-ups, only when it found any), go (its GO came from the judge accepting no finding)}, or {ran: false, why} for a review the judge did
+#   each; outside: found outside the card's change, filed as follow-ups, only when it found any; selfheals: written to
+#   the self-heals list, only when it wrote any), go (its GO came from the judge accepting no finding)}, or {ran: false, why} for a review the judge did
 #   not read (its call failed, the judge is off, or the review held no finding or no verdict). survived: the findings
 #   of a NO-GO that came back after a fix round told to fix them, each {id, rounds: how many fix rounds}, else [].
 #   loopEnd: on the review that ended the fix loop, {stop: why (card.sh loopstop()), own: the card's own reviews (the record's pass), rounds}, else null.
@@ -172,6 +173,10 @@
 #   the judge numbered them, [{n, finding}]; both null when they are not found in the card's records).
 # declinedRest: every other line of the list, newest first, as its line is, with built (the issue filed for it) or
 #   dismissed ({time, by}) when it has them: the panel's "Show every line" shows them.
+# selfheals: the self-heals list (SELFHEALS) as the Declined panel's Self-heals list shows it (healssnap()): entries,
+#   every line no batch card holds yet (each one a batch card would file), newest first, each as its line is; areas,
+#   [{area (null for none), count}] of those lines, the most first; sorted, the last sort of the queued follow-ups (HEALSSORT): {time, ended, items (how many it
+#   sorted), moved (how many went to the list), failed (the judge's failure, when it failed)}, null when none ran.
 # branches: the cards land-branch made that landed or closed, on any day (landed and cost.cards drop a card after
 #   today and after the 7 days; a lane left as it was still has to be told its change landed): card, issue,
 #   title, step, time. Only the newest of those that share an issue and a title, so a branch landed again is one row;
@@ -527,6 +532,14 @@ snaprows() { # <records file> <kept> <to>
     { printf '%s %s %s\n' "$k" "$size" "$cs" && cat "$3.rows"; } > "$2.$$" 2>/dev/null && mv -f "$2.$$" "$2" || rm -f "$2.$$"
   fi
   awk -v s="$skip" 'BEGIN {printf "["} NR > s + 1 {printf ","} NR > s {printf "%s", $0} END {print "]"}' "$rf" > "$3"
+}
+# The self-heals list and the last sort as the snapshot gives them (selfheals, above).
+healssnap() {
+  jq -cn --slurpfile e <(jq -c 'objects' "$SELFHEALS" 2>/dev/null) --slurpfile s <({ tail -n 1 "$HEALSSORT" 2>/dev/null || :; } | jq -c 'objects' 2>/dev/null) \
+    '($e | map(select(.batched == null)) | sort_by(.time) | reverse) as $o
+    | {entries: $o, areas: ($o | group_by(.area) | map({area: .[0].area, count: length}) | sort_by(-.count)),
+       sorted: ($s[0] // null | if . == null then null else {time, ended, items: ([.items[]? | select(.moved == null)] | length),
+         moved: ([.items[]? | select(.effect == "self-heals" and .done)] | length)} + (if .judge.failed then {failed: .judge.failed} else {} end) end)}'
 }
 snapshot() (
   next=null; held=null; built=null; queue=null; yes=$YES
@@ -1151,8 +1164,8 @@ snapshot() (
     bk=$(. "$HERE/bench/swe.sh" && swe_solokey "$(swe_solomodel)") || bk=''
     jq -c --arg bk "$bk" "$bf"' | if $bk == "" then . else .soloKey = $bk end' "$ST/bench/swe/board.json" > "$d/bench.new" 2>/dev/null && [ -s "$d/bench.new" ] && mv -f "$d/bench.new" "$d/bench"
   fi
-  jq -c --slurpfile bn "$d/bench" --argjson bv "$bv" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --slurpfile ta <(testacts) --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" --argjson pc "$pc" --argjson lc "$lc" \
-    --slurpfile rp <({ tail -n 1 "$REPLAYS" 2>/dev/null || :; } | jq -c 'objects' 2>/dev/null) '$ta[0] as $ta | del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .prices = $pr[0] | .standing = $sk | .pushCheck = $pc | .lintCommands = $lc
+  jq -c --slurpfile bn "$d/bench" --argjson bv "$bv" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --slurpfile sh <(healssnap) --slurpfile ta <(testacts) --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" --argjson pc "$pc" --argjson lc "$lc" \
+    --slurpfile rp <({ tail -n 1 "$REPLAYS" 2>/dev/null || :; } | jq -c 'objects' 2>/dev/null) '$ta[0] as $ta | del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .selfheals = $sh[0] | .prices = $pr[0] | .standing = $sk | .pushCheck = $pc | .lintCommands = $lc
     | .cost.replay = ($rp[0] // null | if . == null then null else del(.calls) end)
     | .testActions = {seat: (.control // {} | .tests // null), limit: $tl, actions: $ta, allowed: ((.modelSettings | objects | .builder.allowed) // null)} | .tests = $tp[0] | .testMap = $tm[0] | .bench = ($bn[0] | if $bv == null then . else (objects // {}) | .versions = $bv end) | def since: . + {since: $mv[.issue | tostring].at};
     if $mv == null then . else (.queue.order, .queue.holding, .queue.waiting) |= (if . == null then null else map(since) end) | .open.held |= map(since) end

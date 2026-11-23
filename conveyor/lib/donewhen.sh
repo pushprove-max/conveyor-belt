@@ -411,10 +411,10 @@ roundno() { # <worktree> <pass + rounds>
   done
   echo "$r"
 }
-# The review beside the worktree as its fix session is told it (FIX): every line but the DECLINED, MINOR, OUTSIDE and ROLLOUT
+# The review beside the worktree as its fix session is told it (FIX): every line but the DECLINED, MINOR, OUTSIDE, SELFHEALS and ROLLOUT
 # ones (a rollout action is no defect, rollouts()), each finding led by its id (<numbered() lines>).
 fixlines() { # <worktree> <numbered() lines>
-  grep -Ev "^(DECLINED|MINOR|OUTSIDE):|^ROLLOUT: $ROLLOUT" "$1.review" | jq -Rr --slurpfile n <(printf '%s\n' "$2") '($n | map({key: .line, value: .id}) | from_entries) as $m
+  grep -Ev "^(DECLINED|MINOR|OUTSIDE|SELFHEALS):|^ROLLOUT: $ROLLOUT" "$1.review" | jq -Rr --slurpfile n <(printf '%s\n' "$2") '($n | map({key: .line, value: .id}) | from_entries) as $m
     | (sub("^\\s+"; "") | sub("\\s+$"; "")) as $t | if $t != "" and $m[$t] then "\($m[$t]) \(.)" else . end'
 }
 # The findings of the review beside the worktree that a fix round was already told to fix (numbered(): the same id),

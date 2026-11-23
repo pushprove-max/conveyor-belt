@@ -300,15 +300,14 @@ unreported() {
 # now (loop.json's cards and the landed cards not yet pushed, recordsNow) with "the snapshot, as of <snapshotAt>, is behind the card records", and while the loop runs its cards
 # against the cap, loop.json's count now while the snapshot is behind (recordsNow, commands/snapshot.sh); then, when the
 # snapshot names the engine stopped and ps no longer shows it stopped, "the engine (pid <n>) runs" or "has ended"; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
-# cards waiting on other issues and the held issues as issue numbers, the whole-suite run under way (else the last one
-# that ended), then every problem a wake names (the blocked cards as NOWBLOCKED gives them), the push failing at once, the suite that ended left out (its line is
-# above), and a release-prep started again by its landed fixes (it needs no one), each "needs you: <text>", then each card unreported names, "not yet reported: blocked #N". A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
+# cards waiting on other issues and the held issues as issue numbers, the self-heals list's line (lib.sh healsdef), the whole-suite run under way (else the last one that ended),
+# then every problem a wake names (the blocked cards as NOWBLOCKED gives them), the push failing at once, the suite that ended left out (its line is above), and a release-prep started again by its landed fixes (it needs no one), each "needs you: <text>", then each card unreported names, "not yet reported: blocked #N". A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
 # never empty and one line (the last the engine said: of a stack trace, its error); when one read before (keepsnap),
 # "<repo>: the last snapshot, made <age> ago (a new one failed: <why>):" in its place, and that snapshot's lines as above. <project> names one
 # record of mine; with none, every one of them. Then the watcher's last poll, from
 # the poll log: "watcher: last poll ended <time>, took <n> s (<outcomes>)", or "watcher: no poll logged yet". Last, the Foreman's
 # waiter: "waiter: listening", "waiter: starting again" or "waiter: down: <why>" (lib.sh status_tail).
-STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
+STATUS=$SUITE$REF$(healsdef)'def num: if type == "number" then "#\(.)" else tostring end;
   # A split issue (its parts, and its last card closed) is held by Conveyor until its parts finish; a release of it would
   # build nothing (the Board gives it no Queue), so its own hold adds no text and the split reason says what it waits for.
   # A parent with parts and no closed card is not split: its hold is the owner'"'"'s, and shows as such.
@@ -343,6 +342,7 @@ STATUS=$SUITE$REF'def num: if type == "number" then "#\(.)" else tostring end;
   # Each held issue with what holds it and the step that clears it, from its reasons (snapshot.sh, open.held); none: the number alone.
   (.open.held | arrays | select(length > 0) | "held: " + (map(objects | . as $h | (($h.reasons | arrays | map(objects | heldwhy($h)) | join("; ")) // "") as $w
     | ($h.issue | num) + (if $w == "" then "" else " (\($w))" end)) | join(" "))),
+  (.selfheals | objects | healsline), # never a "needs you" (lib.sh healsdef)
   ([.suites | arrays | .[] | objects] as $s | ($s | map(select(.ended == null))) as $run
     | if $run != [] then $run[] | suiteline($now)
       else $s | map(select(.ended != null)) | max_by(.ended) | objects | "last " + suiteline($now) end)'

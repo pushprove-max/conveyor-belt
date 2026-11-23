@@ -177,6 +177,9 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
   "declined": [{"id": "d0123456789ab", "time": "'"$TODAY_ISO"'T08:40:00Z", "card": "c3-801", "issue": 801, "finding": "[P1] b.txt:2 no mark here", "by": "judge", "why": "its proof needs a stub built to misbehave", "repo": "sample"}],
   "declinedRest": [{"id": "dba9876543210", "time": "'"$TODAY_ISO"'T07:10:00Z", "card": "c0-6", "issue": 6, "finding": "[P2] a.txt:1 wrong word", "by": "code", "why": "follow-up of a follow-up", "repo": "sample", "built": 90},
     {"id": "d0000000000dd", "time": "'"$TODAY_ISO"'T08:50:00Z", "card": "c3-801", "issue": 801, "finding": "[P3] d.txt:4 a word", "by": "judge", "why": "taste", "repo": "sample", "dismissed": {"time": "'"$TODAY_ISO"'T09:00:00Z", "by": "Board user owner"}}],
+  "selfheals": {"entries": [{"id": "h0123456789ab", "time": "'"$TODAY_ISO"'T08:30:00Z", "card": "c3-801", "issue": 801, "repo": "sample", "area": "area:engine",
+    "finding": "[P2] a.sh:3 a slow poll", "why": "the next turn picks it up", "effect": "self-heals", "from": "review"}],
+    "areas": [{"area": "area:engine", "count": 1}], "sorted": {"time": "'"$TODAY_ISO"'T07:00:00Z", "ended": "'"$TODAY_ISO"'T07:01:00Z", "items": 2, "moved": 1}},
   "landedCount": 1, "landedUsd": 41.5,
   "landed": [{"card": "c'"$TODAY"'T080000-7", "issue": 7, "title": "Landed one", "step": "landed", "time": "'"$TODAY_ISO"'T08:30:00Z", "usd": 2.5, "reviews": 2, "followups": [31], "sha": "abc", "pushed": true, "start": "'"$TODAY_ISO"'T07:00:00Z", "totalSec": 2400}],
   "pushedCards": [{"card": "c0-6", "issue": 6, "time": "'"$(date -u -d yesterday +%F)"'T23:00:00Z", "day": "'"$(date +%F)"'"},
@@ -269,6 +272,11 @@ q '.panels.declined.data.lines | map([.repo, .repoUrl, .id, .issue, .name, .url,
   "the declined findings the panel shows, of every record, newest first, each with who declined it and why"
 q '.panels.declined.data.rest | map([.repo, .id, .url, .built, .dismissed]) == [["sample", "d0000000000dd", "'"$PU"'/801", null, {time: "'"$TODAY_ISO"'T09:00:00Z", by: "Board user owner"}],
   ["sample", "dba9876543210", "'"$PU"'/6", 90, null]]' "the rest, newest first: the dismissed line with who dismissed it and when, and the built line with its issue"
+# Issue 1559: the self-heals list of each record that has one reaches the Declined part, its entries with their
+# repository and issue link, so the Board shows them and files an area's batch card on the right record.
+q '.panels.declined.data.heals | map([.repo, .repoUrl, .areas, .sorted.moved, (.entries | map([.id, .url, .area, .finding, .why, .effect]))]) == [["sample", "https://github.com/example/sample-project",
+  [{area: "area:engine", count: 1}], 1, [["h0123456789ab", "'"$PU"'/801", "area:engine", "[P2] a.sh:3 a slow poll", "the next turn picks it up", "self-heals"]]]]' \
+  "the self-heals list of the record that has one, with its areas, its last sort and its entries"
 # Metrics' tiles and charts: each record's 7 days before, its days and today's slots, as its snapshot gives them.
 q '.panels.metrics.data.records | map([.repo, .prev, .days, .slots]) == [["sample", {cards: 2, landed: 1}, [{day: "2026-11-09", landed: 1, blocked: 0}], [{hour: 9, slots: 1.5, cap: 3}]], ["widgetshop", null, null, null]]' \
   "metrics carries each record's 7 days before, its days and its slots by hour; a record without them has null"

@@ -185,6 +185,19 @@ t_replayrekind() {
   done
 }
 
+# Bug caught (issue 1559): a review whose judge only sent findings to the self-heals list (judge.selfheals) is no
+# case, and a mixed one drops those rulings, so the replay never compares a self-heals ACCEPT. An OUTSIDE one is left
+# out, as every OUTSIDE ruling is.
+t_replayheals() {
+  setup '[]'
+  jq -cn '{card: "c1-20", issue: 20, step: "review", time: "2026-11-01T00:10:00Z", result: "GO", judge: {model: "m", sec: 1, selfheals: [
+    {n: 1, finding: "[P2] a.txt:1 F-heal", place: "inside", reason: "the next turn", effect: "self-heals", cost: "none"},
+    {n: 2, finding: "[P2] b.txt:1 F-out", place: "outside", reason: "not the change", effect: "self-heals", outside: true}]}}' >> "$ST/cards.jsonl"
+  fx_in '. "$HERE/lib/replay.sh"; replaycases 20'
+  [ "$RC" = 0 ] && [ "$(jq -c 'select(.card == "c1-20") | .findings' "$T/$CASE/run.out")" = '[{"n":1,"finding":"[P2] a.txt:1 F-heal","place":"inside","accept":true}]' ] \
+    || fail "replaycases 20 does not give c1-20's self-heals ACCEPT as an accepted finding alone: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug caught: the Board was not given the last replay (the snapshot's cost.replay), was given every call's usage
 # with it, or was given only the first 50 findings where the rulings differ. The snapshot reads the last line of the
 # replays file.

@@ -162,7 +162,7 @@ q '.panels.machine.data | .host == "devbox" and .state == "running" and .cap == 
   "a machine with nothing on it: no card holds a slot (a measured 0), with no machine cap the slots in force are both projects' 6, and each project is there on its own"
 q '.panels.landed.data.cards == [] and .panels.landed.data.day == "'"$DAY"'"' "nothing landed is an empty list for today"
 q '.panels.cost.data.cards | .todayUsd == 0 and .weekUsd == 0 and .perLandedUsd == null and .perCard == [] and .unpricedSteps == 0' "no spend is a measured 0, and no landed card has no average"
-q '.panels.declined == {error: null, data: {lines: [], rest: []}}' "no declined finding (a snapshot from before it carried the list, too) is an empty list, not a failed part"
+q '.panels.declined == {error: null, data: {lines: [], rest: [], heals: []}}' "no declined finding and no self-heals list (a snapshot from before it carried them, too) is an empty list, not a failed part"
 q '.panels.health.data | .host == {name: "devbox", local: false, reachable: true, error: null} and (.records | length) == 2 and (has("cpuCap") | not)' "the host answered: reachable, both records, and no CPU cap (dropped)"
 q '.panels.health.data.records | .[0].lastPushAt == (1794000000 | todate) and .[1].lastPushAt == null and all(.[]; .loop == true and .gh == true)' "each record carries its last push; none recorded is null"
 # Issue 410. Bug it catches: the collector dropped ghReached, so the Board showed no warning when gh was signed in and

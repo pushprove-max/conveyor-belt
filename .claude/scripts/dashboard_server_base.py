@@ -88,6 +88,7 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # a blocked card's Fix), unblock (a blocked card's Hold: `conveyor.sh unblock <issue> --hold`) or close of a card,
 # or build of a declined finding (the Declined panel's "File as issue": the id of its line in the record's declined list),
 # or dismiss of declined findings (its "Dismiss" and "Dismiss all shown": the ids of their lines),
+# or heals batch of an area's entries of the self-heals list (its Self-heals list's "File a batch card": the area, - for none),
 # or depends (the Board's "Depends on…": `conveyor.sh control depends`, which writes the issue's Depends on: line on GitHub),
 # or card (a card's Settings: `conveyor.sh control card`, one issue's own builder, reviewer or judge; and its Pick for
 # me, `control card <issue> pick`, whose answer is the judge's settings, changing nothing),
@@ -241,7 +242,7 @@ def bench_spec_ok(name, x):
 # panel gets the record and not a 504 while GitHub is slow; raise it with that timeout.
 DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as conveyor.sh's declined() names it
 # depends reads the open issues and writes the issue's body, each through gh (the write under gh-write's 60 s timeout).
-CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'unblock': 60, 'close': 60,'start': 90, 'build': 60, 'depends': 120,
+CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'unblock': 60, 'close': 60,'start': 90, 'build': 60, 'heals': 60, 'depends': 120,
                    'testaction': 60, 'testmap': 60, 'test-close': 60, 'test-issue': 60, 'card-issue': 150,  # card-issue files and closes, each under gh-write's 60 s; testaction and testmap stop wait up to 40 s for the end
                    'suite-machine-check': 240,  # an ssh box's check waits for its connect, then its facts; a devbox's, for its login, its list and a box leased and given back
                    'replay': 60,  # the judge replay's estimate reads every review line of the records
