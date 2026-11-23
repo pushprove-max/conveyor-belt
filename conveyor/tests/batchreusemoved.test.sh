@@ -166,9 +166,26 @@ t_marksharedpassed() {
   setup '[]'; fx_wt 'echo seven >> a.txt' b.txt base
   git -C "$R" worktree add -q --detach "$T/$CASE/cards/c8" main && echo eight > "$T/$CASE/cards/c8/c.txt" && git -C "$T/$CASE/cards/c8" add -A || fail "c8's change"
   fx_in 'printf "%s\n" "{\"units\": [\"s.test.sh\\tt_s\"]}" | tee "$FXWT.bpass" > "$CARDS/c8.bpass"
-    sharers=(c7 c8); sharedown=(s.test.sh s.test.sh); mates=(c7 c9); apart=""; markshared c7 "$FXWT"; [ -s "$FXWT.sharedran" ] && [ ! -e "$CARDS/c8.sharedran" ] || exit 3
-    rm -f "$FXWT.sharedran"; mates=(c8); apart=1; markshared c7 "$FXWT"; [ ! -e "$FXWT.sharedran" ] && [ -s "$CARDS/c8.sharedran" ] || exit 4'
+    sharers=(c7 c8); sharedown=(s.test.sh s.test.sh); mates=(c7 c9); apart=""; markshared c7 "$FXWT" 0; [ -s "$FXWT.sharedran" ] && [ ! -e "$CARDS/c8.sharedran" ] || exit 3
+    rm -f "$FXWT.sharedran"; mates=(c8); apart=1; markshared c7 "$FXWT" 0; [ ! -e "$FXWT.sharedran" ] && [ -s "$CARDS/c8.sharedran" ] || exit 4'
   [ "$RC" = 0 ] || fail "a card that did not pass the run again was marked as run again, or one that passed was not (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches: the run again for the shared files split, c8 passing and the card c7 failing (batch() exit 1), and
+# cardtest() skipped markshared(), so c8 went back to its own test step and ran its shared files a third time. c8, a
+# mate that passed, is marked with its change's patch-id; c7 is not, though its .bpass holds the file. cardtest() is
+# called as card() calls it, as in t_batchrerunshared, with rebatch() exit 4 and batch() exit 1.
+t_marksharedleadfail() {
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo seven >> a.txt' b.txt base
+  git -C "$R" worktree add -q --detach "$T/$CASE/cards/c8" main && echo eight > "$T/$CASE/cards/c8/c.txt" && git -C "$T/$CASE/cards/c8" add -A || fail "c8's change"
+  fx_in 'cardpatch "$CARDS/c8" > "$T/$CASE/patch8" || exit 3
+    c=c7 n=7 wt=$FXWT issue="{}" sprompt="" br="" parsecheck="" tmain="" away="" apart="" me=$$ cmsg=x mates=(c7 c8)
+    lintgate() { return 0; }; checks() { :; }; treecheck() { :; }; testedhere() { return 0; }; sharedtests() { return 1; }; landedsince() { :; }
+    gather() { return 1; }; rebatch() { sharers=(c7 c8); sharedown=(s.test.sh s.test.sh); return 4; }; fives() { :; }; land() { :; }; turntake() { :; }
+    batch() { printf "%s\n" "{\"units\": [\"s.test.sh\\tt_s\"]}" | tee "$wt.bpass" > "$CARDS/c8.bpass"; return 1; }
+    cardtest; [ "$rc" = 1 ] || exit 5; [ -s "$CARDS/c8.sharedran" ] || exit 3; [ ! -e "$FXWT.sharedran" ] || exit 4'
+  [ "$RC" = 0 ] && cmp -s "$T/$CASE/patch8" "$T/$CASE/cards/c8.sharedran" \
+    || fail "cardtest, rebatch() exit 4 and batch() exit 1 (c7 failed, c8 passed, both sharing s.test.sh): c8 was not marked with its change (exit 3), c7 was marked (exit 4) or the run did not fail (exit 5): exit $RC, $(cat "$T/$CASE/run.out")"
 }
 
 # Bug it catches: the run again for the shared files ran only the test file c8's change edits (testrun.sh listcmd()
@@ -178,7 +195,7 @@ t_marksharedunrun() {
   setup '[]'; fx_wt 'echo seven >> a.txt' b.txt base
   git -C "$R" worktree add -q --detach "$T/$CASE/cards/c8" main && echo eight > "$T/$CASE/cards/c8/c.txt" && git -C "$T/$CASE/cards/c8" add -A || fail "c8's change"
   fx_in 'printf "%s\n" "{\"units\": [\"m.test.sh\\tt_m\"]}" | tee "$FXWT.bpass" > "$CARDS/c8.bpass"
-    sharers=(c7 c8); sharedown=(p.test.sh m.test.sh); mates=(c7 c8); apart=""; markshared c7 "$FXWT"; [ ! -e "$FXWT.sharedran" ] && [ -s "$CARDS/c8.sharedran" ] || exit 3'
+    sharers=(c7 c8); sharedown=(p.test.sh m.test.sh); mates=(c7 c8); apart=""; markshared c7 "$FXWT" 0; [ ! -e "$FXWT.sharedran" ] && [ -s "$CARDS/c8.sharedran" ] || exit 3'
   [ "$RC" = 0 ] || fail "a card whose shared test file did not run in the run again was marked as run again, or one whose file ran was not (exit $RC): $(cat "$T/$CASE/run.out")"
 }
 

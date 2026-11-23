@@ -956,17 +956,17 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
 # to be tested again, the worktree as it was; 2 when the card's change could not be put back in its worktree; 3 for a
 # red run (above); 4 when it is for the shared test files (its passes dropped), run as 3 is (card() marks .sharedran then,
 # for the cards of sharers alone: those whose own change shares a test file with main's change, sharedtests()).
-# markshared(): that run passed, so it is the one run again of their shared files (<worktree>.sharedran, card()) for
-# each card of sharers that passed in it, by its own change's patch-id: the card's, while its worktree holds the batch
-# (.lent), bpid()'s. The cards that passed are batch()'s mates, and the card unless it was apart; and each of its
-# shared files (sharedown, the same place in it as the card in sharers) is a file of the units that run passed with it
-# (<worktree>.bpass). Bugs: a card the run's split found red was marked from the card's pass, and its next run again
+# markshared(): that run is the one run again of their shared files (<worktree>.sharedran, card()) for each card of
+# sharers that passed in it, by its own change's patch-id: the card's, while its worktree holds the batch (.lent),
+# bpid()'s. The cards that passed are batch()'s mates, and the card when its run's exit (batch()'s) is 0 and it was not
+# apart; and each of its shared files (sharedown, the same place in it as the card in sharers) is a file of the units
+# that run passed with it (<worktree>.bpass). Bugs: a card the run's split found red was marked from the card's pass, and its next run again
 # was skipped; a run that ran only the test files a card of it edits (testrun.sh listcmd()) marked another card whose
-# shared file it never ran.
-markshared() { # <card> <worktree>
+# shared file it never ran; a mate that passed was not marked when the card failed, so its next run again ran them.
+markshared() { # <card> <worktree> <the exit of the card's run>
   local i x w f ran
   for i in "${!sharers[@]}"; do x=${sharers[i]}; w=$CARDS/$x; [ "$x" != "$1" ] || w=$2
-    if [ "$x" = "$1" ]; then [ -z "$apart" ] || continue; elif [[ " ${mates[*]} " != *" $x "* ]]; then continue; fi
+    if [ "$x" = "$1" ]; then [ -z "$apart" ] && [ "$3" = 0 ] || continue; elif [[ " ${mates[*]} " != *" $x "* ]]; then continue; fi
     ran=$(jq -r '.units[]? | strings | split("\t")[0]' "$w.bpass" 2>/dev/null) || continue
     while IFS= read -r f; do grep -qxF -- "$f" <<<"$ran" || continue 2; done < <(grep . <<<"${sharedown[i]:-}" || echo '(none)')
     if [ "$x" = "$1" ] && [ -s "$2.lent" ]; then bpid "$2"; else cardpatch "$w"; fi > "$w.sharedran" || rm -f "$w.sharedran"; done
