@@ -664,8 +664,9 @@ A card never runs the suite command (`test.command`, `test.full`). Each run of a
 of its list alone, one process a file, through `test.fileCommand`: the card's test step, the run again after a
 failure, the bug-card check, the run on main, the main-red check, the checks of Fix hollow cases, Fix the waiting,
 Make it run alone and the speed-up cards, the mutation check and `testaction run`. Each process has the file's own
-time limit (its `# timeout: <seconds>` line, else `testTimeout`). When the file runs past it, Conveyor stops the file
-and every process it started, and the file fails. The `# timeout:` limit is multiplied by the run's load factor, the
+time limit, its `# timeout: <seconds>` line, if it has one. When the file runs past it, Conveyor stops the file
+and every process it started, and the file fails. A file with no such line has no limit of its own: the `testTimeout`
+setting limits the whole run, shared by all its files. The `# timeout:` limit is multiplied by the run's load factor, the
 1-minute load average per core, never less than 1 and never more than 3, rounded up to whole seconds. Each run gets
 the factor in `CONVEYOR_LOAD_FACTOR`, and the line that says a file timed out gives the factor when it is over 1
 ([configuration.md](../docs/configuration.md#the-load-factor)). With no `test.fileCommand`, Conveyor runs each file with the runner
@@ -1201,9 +1202,11 @@ patterns>); set tests.patterns in .conveyor/project.json" in its place. When the
 `test.fileCommand`, with no second build session and no review. When the project's test files run alone as plain
 scripts, setup suggests `node`, `bash` or `python3` as `test.fileCommand`. A failed run counts only when a test failed in it: when the runner writes its logs, they must name a
 file that failed (a runner that stops the run with no test failing proves nothing). Each test file keeps its own time
-limit there, its `# timeout: <seconds>` line among the comments it starts with; a file with no such line has the
-`testTimeout` setting's. When the runner's logs show a file begun and not ended past its limit, the run is stopped,
-the file is named as timed out, and it counts as failing without the fix: the result says so. A failed run whose logs give no
+limit there, its `# timeout: <seconds>` line among the comments it starts with; a file with no such line has no limit
+of its own. The `testTimeout` setting limits the whole run, not each file, so the files before it can use most of
+that time. When a file runs past its own limit, it is stopped and named as timed out. When the run's limit stops the
+run, the runner's logs name the file begun and not ended, and the result says that the run's limit stopped it. Either
+way the file counts as failing without the fix. A failed run whose logs give no
 result for one of the test files (no pass and no fail of it) proves nothing either way, so it runs once more. When
 that run gives no result for it either, the card is blocked with "the proof run on main gave no result for <file>:
 <the run's last lines>", with no second build session and no review. The review is shown the check's
