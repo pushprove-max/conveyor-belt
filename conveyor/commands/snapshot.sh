@@ -152,7 +152,7 @@ snapprint() {
 # count of landed cards on the belt for their push, which no loop count holds: those the kept snapshot's belt has
 # landed with no closing line since, and, unless the rule "Push when a card lands" is off, each card whose last
 # closing line since is landed (a card pushed since leaves it, though the belt keeps it until its issue closes), but
-# for one loop.json's cards still name: running counts it until the loop's next turn; started,
+# for one loop.json's cards still name, in either list: running counts it until the loop's next turn; started,
 # each card picked since that the kept belt does not hold, with no closing line since and still in the records, as a
 # belt card {card, issue, name, title, step (from its last step line, as rows.jq names it, roughly), stepAt, landed
 # false, fromRecords true: it is in no full build yet, so it has no track, model or cost}. Nothing is
@@ -197,7 +197,8 @@ recordsnow() { # <snapshotAt> [<counts>]
         {blocked: [$all[] | select(yes | not)], waiting: [$all[] | select(yes) | . + {sentence: (.reason | if startswith($lintyes) then ltrimstr($lintyes) else ltrimstr($yes) end)}],
          building: $loop.building, waitingCount: $loop.waiting, running: $loop.running,
          landed: ([$s.belt | arrays | .[] | objects | select(.landed == true and (.card | type) == "string" and $have[.card] != null and $ended[.card] == null) | .card]
-           + (if $push == false then [] else [$ends[] | select(.step == "landed" and (.card | IN($loop.cards // [] | .[]) | not)) | .card] end) | unique | length),
+           + (if $push == false then [] else [$ends[] | select(.step == "landed") | .card] end)
+           | map(select(IN($loop.cards // [] | .[]) | not)) | unique | length),
          started: (([$s.belt | arrays | .[] | objects | .card | strings] | INDEX(.)) as $onbelt
            | [$new | group_by(.card)[] | select(any(.step == "picked") and $have[.[0].card] != null and $onbelt[.[0].card] == null and $ended[.[0].card] == null)
              | (map(select(.step | IN("brief", "build", "fix", "rebase", "review", "test"))) | last) as $l

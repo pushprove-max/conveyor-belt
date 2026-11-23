@@ -315,6 +315,25 @@ t_snapkeptlanding() {
   loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
 }
 
+# Bug caught: the kept snapshot's belt already shows c2 landed and waiting for its push, loop.json still names c2, and
+# another card (c9) writes a newer record: landed counted c2 from the kept belt and running counted it too, so the
+# status read two cards on the belt for one. A card loop.json's cards name is left to running in both lists. The kept
+# lock is held while it reads, so the writer the due snapshot starts cannot replace the kept one under the read.
+t_snapkeptkeptlanded() {
+  local out lk
+  snapkept_setup
+  jq -c '.belt |= map(if .card == "c2" then .landed = true else . end)' "$ST/snapshot.json" > "$T/$CASE/kept" && mv "$T/$CASE/kept" "$ST/snapshot.json" \
+    || fail "the kept snapshot could not be set"
+  snapkept_quiet 20
+  jq -cn --argjson p "$$" '{pid: $p, state: "running", building: 0, waiting: 0, running: 1, cards: ["c2"]}' > "$ST/loop.json"
+  snapkept_new
+  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  out=$(loop snapshot) || fail "the reader exited non-zero"
+  jq -e '.recordsNewer == true and .recordsNow.running == 1 and .recordsNow.landed == 0' <<<"$out" > /dev/null \
+    || fail "with the kept belt showing c2 landed, loop.json (running 1, cards [c2]) and c9's newer line, the reader does not count c2 once: $(jq -c '{recordsNewer, recordsNow}' <<<"$out")"
+  exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
+}
+
 # Bug (#1334): the snapshot read the open issues only from the stream's copy, which `watch` asks of GitHub once a
 # minute, so an issue the loop's own list (issues.json, asked of GitHub before each pick) already held waited up to that
 # minute to show in Queue. Here the stream's copy holds #1 to #3 and the loop's list, written after the kept snapshot,
