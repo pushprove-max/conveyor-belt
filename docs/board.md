@@ -1108,8 +1108,9 @@ not need a test that fails on main. The card must do what the judge's verdict in
 pass in fewer CPU seconds than the median of the last runs that the issue lists, else the card is blocked with a reason
 that names the verdict and both numbers (`conveyor/README.md`, Bug cards: the new tests fail without the fix). For the
 verdict stabilise, the file may cost as much as those runs, and the build's reply must name the cause of each flaky
-case and how the change removes it. For the verdict merge, a file that takes in another test file may cost as much as
-those runs plus that file's median. When the file goes into another test file, that file must pass with the change
+case and how the change removes it. For the verdict merge, a file that takes in another test file runs with the
+change, together with each other test file that the change keeps. These files may cost as much as they cost without
+the change, run with the test files that the change removes. When the file goes into another test file, that file must pass with the change
 and may cost as much as it did without the change plus the median of the last runs of the file it takes in, else the
 card is blocked with a reason that names the failure or both numbers. Each file of a split must pass, and the files' CPU seconds summed must be at most the old file's plus a
 start-up allowance for each new file. For a delete or a merge, the review names the

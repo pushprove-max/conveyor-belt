@@ -22,7 +22,8 @@ ovissue() { # <verdict>
 # speedproof.sh optproof() called as card() calls it, on card c7 of the issue ovissue() writes for <verdict>, whose change runs
 # <change> in its worktree on main, where f.test.sh (`echo slow`) has a median of 4 CPU s on record (whole-suite runs of
 # 3, 4 and 5) and g.test.sh one of 2. The build's reply is <reply>. Each run under cards/mainrun/ names the case relstop of each file its list
-# names as passed and times it at <cpu> CPU s, noting the file in $STUB/mainran. Main also has each <file> <content>
+# names as passed and times it at <cpu> CPU s (at N for a file, as it is in that run, with a line `# cpu N`; the run fails at a file with a line `# fail`),
+# noting the file in $STUB/mainran. Main also has each <file> <content>
 # pair given. The issue's body ends with the lines of $OVLINES, if set. The check's exit is in $RC and the first line
 # of what the review is shown in $WHY.
 ovrun() { # <verdict> <change> <cpu> <reply> [<file> <content>]...
@@ -36,7 +37,9 @@ ovrun() { # <verdict> <change> <cpu> <reply> [<file> <content>]...
   cat > "$STUB/mainrun-cmd" <<'EOF'
 while IFS=$'\t' read -r k f; do
   [ "$k" = fail ] || continue; echo "$f" >> "$STUB/mainran"
-  printf '== %s\nok relstop\n-- ok %s\n' "$f" "$f"; printf 'TESTRUN sec\t%s\t1\t%s\n' "$f" "$(cat "$STUB/cpu")" >> "$CONVEYOR_TEST_LOG/r"
+  c=$(sed -n 's/^# cpu //p' "$f" 2>/dev/null | tail -n 1)
+  printf '== %s\nok relstop\n-- ok %s\n' "$f" "$f"; printf 'TESTRUN sec\t%s\t1\t%s\n' "$f" "${c:-$(cat "$STUB/cpu")}" >> "$CONVEYOR_TEST_LOG/r"
+  ! grep -qx '# fail' "$f" 2>/dev/null || exit 1
 done < "$CONVEYOR_TEST_RERUN"
 EOF
   fx_wt "$2" f.test.sh 'echo slow' "${@:5}"
@@ -232,14 +235,43 @@ t_optdeletemerge() {
   ovshape delete 'rm f.test.sh; echo more >> g.test.sh' 'the verdict is delete, and the change also changes test files, as a merge does: g.test.sh'
 }
 
-# Bug it catches: a "merge" card that merges g.test.sh (2 CPU s on record) into the file is held to the file's recent
-# runs alone (22), as a speed up, and blocked though the two files together cost no more than before. At 24 CPU s, the
-# two figures summed, it passes.
+# Bug it catches: a "merge" card that merges g.test.sh into the file is held to the file's figure alone, as a speed
+# up, and blocked though the two files together cost no more than before. f.test.sh (10 CPU s on main) takes in
+# g.test.sh, which takes 6 CPU s on main, not its 2 on record (#1573): at 16 CPU s, what the two took apart on main's
+# code, it passes; a check that adds g.test.sh's median on record (12 CPU s) blocks it.
 t_optmergeinto() {
-  ovrun merge 'echo merged > f.test.sh; rm g.test.sh' 24 'Done.' g.test.sh 'echo other'
-  [ "$RC" = 0 ] || fail "a merge into the file, as dear as the two files' figures together, was blocked: $WHY"
-  grep -qF 'it passed in 24 CPU s, not more than the median of its recent runs plus the median on record of g.test.sh, 24 CPU s.' "$FXWT.unfixed" \
+  ovrun merge 'printf "%s\n" merged "# cpu 16" > f.test.sh; rm g.test.sh' 1 'Done.' f.test.sh '# cpu 10' g.test.sh '# cpu 6'
+  [ "$RC" = 0 ] || fail "a merge into the file, as dear as the two files apart, was blocked: $WHY $(cat "$T/$CASE/run.out")"
+  grep -qF "it passed in 16 CPU s, not more than what f.test.sh, g.test.sh took run alone on main's code without the change, summed, 16 CPU s." "$FXWT.unfixed" \
     || fail "the review is not shown the summed figure: $(cat "$FXWT.unfixed")"
+}
+
+# #1573 Bug it catches: a merge into the file was held to the file's recent runs (median 22 CPU s) plus g.test.sh's
+# median on record (2), not to what the two cost on main's code, and f.test.sh was never run without the change. Here
+# they take 10 and 2 CPU s on main's code, so a merged f.test.sh at 20 CPU s (under the 24 of the records) is slower.
+t_optmergeintostale() {
+  ovrun merge 'printf "%s\n" merged "# cpu 20" > f.test.sh; rm g.test.sh' 1 'Done.' f.test.sh '# cpu 10' g.test.sh '# cpu 2'
+  [ "$RC" != 0 ] && [ "$WHY" = "the merge costs more than the files apart: f.test.sh take 20 CPU s with the change, over the 12 CPU s that f.test.sh, g.test.sh took without it, run alone on main's code at $(git -C "$R" rev-parse HEAD)" ] \
+    || fail "a merge slower than the files apart on main's code passed on the figures on record: exit $RC, $WHY"
+  [ "$(st 'select(.step == "bugproof") | "\(.result) \(.speed.before) \(.speed.after)"')" = 'fail 12 20' ] || fail "the bugproof line: $(st 'select(.step == "bugproof")')"
+}
+
+# #1573 Bug it catches: a merge into the file that also changes h.test.sh ran only f.test.sh, so h.test.sh could grow
+# from 5 to 40 CPU s unchecked. h.test.sh runs with f.test.sh on both sides, and the merge is blocked.
+t_optmergeintoother() {
+  ovrun merge 'echo merged >> f.test.sh; echo "# cpu 40" >> h.test.sh; rm g.test.sh' 1 'Done.' f.test.sh '# cpu 10' g.test.sh '# cpu 2' h.test.sh '# cpu 5'
+  [ "$RC" != 0 ] && [ "$WHY" = "the merge costs more than the files apart: f.test.sh, h.test.sh take 50 CPU s with the change, over the 17 CPU s that f.test.sh, h.test.sh, g.test.sh took without it, run alone on main's code at $(git -C "$R" rev-parse HEAD)" ] \
+    || fail "a merge that makes another test file it changes dearer passed: exit $RC, $WHY"
+}
+
+# #1573 Bug it catches: the files of a merge into the file fail run alone on main's code, so there is no figure without
+# the change; the check must name that failure, not compare the merge with an empty figure. The review is shown the
+# output of that failing run (it ran g.test.sh), not of the passing run with the change, which has no g.test.sh.
+t_optmergeintomainfail() {
+  ovrun merge 'printf "%s\n" merged "# cpu 12" > f.test.sh; rm g.test.sh' 1 'Done.' f.test.sh '# cpu 10' g.test.sh "$(printf '%s\n' '# cpu 2' '# fail')"
+  [ "$RC" != 0 ] && [ "$WHY" = "the test files of the merge, f.test.sh, g.test.sh, fail run alone on main's code at $(git -C "$R" rev-parse HEAD) without the change" ] \
+    || fail "a merge whose files fail on main's code was not blocked naming that run: exit $RC, $WHY"
+  grep -qx '== g.test.sh' "$FXWT.unfixed" || fail "the block does not show the output of the failing run without the change: $(cat "$FXWT.unfixed")"
 }
 
 # Bug it catches (#778): a Rewrite as a direct check card, its issue as the Tests page files it (its title, no verdict

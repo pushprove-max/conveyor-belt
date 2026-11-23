@@ -3,8 +3,8 @@
 # timeout: 300
 # Engine cases: the speed-up check (speedproof.sh speedproof()) and the Optimize check (speedproof.sh optproof()) of a card filed from the Tests
 # page. The file is held to the median of the recent runs its issue lists, else to its median on record (speedproof.sh recentcpu());
-# when the issue's verdict is merge, a change that keeps the file adds to that figure the median on record of each
-# test file the change removes (a change with no verdict adds none). A change that keeps
+# when the issue's verdict is merge, a change that keeps the file and removes other test files is held instead to what
+# the file and the test files the change changes or removes took, run alone without the change (a change with no verdict is not). A change that keeps
 # its file must make it faster than that figure (for a stabilise or merge verdict, no slower), and the files of a
 # split, summed, may take that figure plus a start-up allowance for each file it adds. A change that deletes the file
 # is not timed: a delete's review is asked for the tests that cover its cases. One that merges it into another test
@@ -128,7 +128,7 @@ t_optkeep() {
   # flagged a merge the engine passes at the file's figure plus the merged file's (t_optmergeinto). The whole rule is
   # matched, so a second, unconditional "less than that figure" limit for a kept file also fails it. The review's
   # prompt (OPTREVIEW, which card() gives the review of an Optimize card) is text with no behaviour to run, so it is read.
-  tr '\n' ' ' < "$T/$CASE/optreview" | grep -qF 'A file kept must cost less than that figure, or than the slowest of the recent runs the issue lists; for stabilise, no more than it; and, when another test file is merged into it, no more than that figure plus the median on record of each test file merged into it. The files of a split' \
+  tr '\n' ' ' < "$T/$CASE/optreview" | grep -qF 'A file kept must cost less than that figure, or than the slowest of the recent runs the issue lists; for stabilise, no more than it; and, when another test file is merged into it, no more, with the test files the change keeps, than they and each test file merged into it took run alone without the change. The files of a split' \
     || fail "the review is not told one limit for a kept file, with the limit of a merge into it"
   # The match above is of a substring: a second limit elsewhere in the prompt (#1435) is caught by a count of the rule.
   [ "$(tr '\n' ' ' < "$T/$CASE/optreview" | grep -oF 'A file kept must cost' | wc -l)" = 1 ] \

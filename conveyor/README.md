@@ -1251,8 +1251,8 @@ what the verdict asks, else the card is blocked with a reason that names the ver
   reply gives a line for a case again, that line replaces the build's line for the case.
 - split: the change changes or removes the file and adds test files.
 - merge: the change removes the file and changes another test file, or changes the file and removes another test
-  file. It adds no test file. When the file stays, it must cost no more than its recent runs plus the median on record
-  of each test file merged into it.
+  file. It adds no test file. When the file stays, it and the other test files that the change keeps run alone with
+  the change. They must cost no more than they cost without the change, run with each test file merged into the file.
 - delete: the change removes the file and adds or changes no other test file.
 
 Then the check depends on what the change does:
