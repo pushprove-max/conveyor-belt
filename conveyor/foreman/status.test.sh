@@ -437,6 +437,21 @@ grep -qx 'not yet reported: blocked #7' <<<"$out" \
   || fail "with the wake 'alpha: #7 is blocked since 2026-11-15T11:00:00Z: its tests failed (as of 11:29Z)' relayed at the refused stop k1, the status does not name #7 as not yet reported: $out"
 }
 
+# Bug caught: a review-retry that failed (reviewretry()) adds "; the review-retry of #N failed: <error>" to the block's
+# wake line, after any "(as of HH:MMZ)"; the status compared the whole wake line with the plain block line, so a wake
+# relayed at a refused stop that carried the note left the card out of "not yet reported".
+t_unrepretry() {
+CASE=unrepretry; fixture unrepretry; mkdir -p "$FD/pending"
+snap '.health.blocked = [{card: "c7", issue: 7, since: "2026-11-15T11:00:00Z", reason: "its tests failed"}]'
+echo alpha/blocked:c7 > "$FD/conveyor-reported.txt"
+w='alpha: #7 is blocked since 2026-11-15T11:00:00Z: its tests failed (as of 11:29Z); the review-retry of #7 failed: #7 is still ending'
+printf '%s\n' 'Conveyor: alpha: blocked: #7' "$w" > "$FD/pending/20261115T113000Z-1-x.wake.sent-S.42"
+echo k1 > "$FD/sent-stop"; echo k1 > "$FD/refused-stops"
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+grep -qx 'not yet reported: blocked #7' <<<"$out" \
+  || fail "with the wake '$w' relayed at the refused stop k1, the status does not name #7 as not yet reported: $out"
+}
+
 # Issue 1029: `serve` and all under it were stopped by a stop signal (state T), and the wake said only "#N is stuck:
 # no new step and no output", with no cause and no way out. A stopped engine health reads (engineStopped) is one item,
 # naming the card it holds, and a stuck card whose own process health reads as stopped (stopped: {pid, of, since}) is
@@ -553,7 +568,7 @@ watcher: last poll ended 2026-11-15T11:59:47Z, took 47 s (alpha: slow, read heal
 waiter: listening" ] || fail "ask alpha foreman status (host devhost, live waiter $wp) did not give this Foreman's watcher and waiter: $out"
 }
 
-cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog unreported unrepsent unrepasof stopped resumed resumedhost askhost)
+cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog unreported unrepsent unrepasof unrepretry stopped resumed resumedhost askhost)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
