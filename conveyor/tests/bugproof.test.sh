@@ -447,6 +447,50 @@ t_buginlineshared() {
   [ ! -e "$T/$CASE/cards/mainrun" ] || fail "the shared-lines check left a run's folder: $(ls "$T/$CASE/cards/mainrun")"
 }
 
+# R337. Bug it catches: a } inside a Rust string (or a character literal) closed the #[test] block mid-line, so the
+# rest of that line was code beside a test, the line was marked shared (S) and inlinesplit() refused (exit 3), though
+# the fix is in another fn. inlinesplit() is called on its own (bugproof.sh holds only definitions) on a repo whose
+# main has f() returning 1, its change the fix (2) and a test whose lines hold "}", '}' and a // comment with a quote.
+t_buginlinestring() {
+  local w=$T/$CASE/r out rc
+  mkdir -p "$w/src" && git -C "$w" init -q && printf 'pub fn f() -> i32 {\n    1\n}\n' > "$w/src/lib.rs" \
+    && git -C "$w" add . && git -C "$w" -c user.name=t -c user.email=t@example.com commit -qm main || fail "the repo"
+  printf '%s\n' 'pub fn f() -> i32 {' '    2' '}' '#[test]' 'fn two() { assert_eq!(f(), 2); let _ = ("}", '"'}'"'); // the "a } quote' \
+    '    assert_ne!(f().to_string(), "}"); }' > "$w/src/lib.rs" && git -C "$w" add src/lib.rs || fail "the change"
+  out=$(. "$SRC/lib/bugproof.sh" && inlinesplit "$w" src/lib.rs '{"start": "#\\[(cfg\\(test\\)|([A-Za-z_]+::)?test)\\]", "end": "braces"}'); rc=$?
+  [ "$rc" = 0 ] && [ "$out" = "$(printf '%s\n' 'pub fn f() -> i32 {' '    1' '}' '#[test]' 'fn two() { assert_eq!(f(), 2); let _ = ("}", '"'}'"'); // the "a } quote' \
+    '    assert_ne!(f().to_string(), "}"); }')" ] \
+    || fail "inlinesplit on src/lib.rs, a #[test] fn holding \"}\" and '}' and the fix in f(), exited $rc (not 0) or did not take the fix out alone: $out"
+}
+
+# R337 (E5). Bug it catches: a raw string was read as a plain one, so in r"\" the backslash escaped the closing quote,
+# the string ran on to the end of the file, and f() below the #[test] fn, which the change fixes, was marked test code:
+# inlinesplit() kept the fix in the file it runs on main. r#"}"# (a } and a quote inside) must not close the fn either.
+t_buginlineraw() {
+  local w=$T/$CASE/r out rc
+  mkdir -p "$w/src" && git -C "$w" init -q && printf '%s\n' '#[test]' 'fn two() {' '    let _ = r"\";' '}' 'pub fn f() -> i32 {' '    1' '}' > "$w/src/lib.rs" \
+    && git -C "$w" add . && git -C "$w" -c user.name=t -c user.email=t@example.com commit -qm main || fail "the repo"
+  printf '%s\n' '#[test]' 'fn two() {' '    let _ = r"\"; let _ = r#"a "} b"#;' '    assert_eq!(f(), 2);' '}' 'pub fn f() -> i32 {' '    2' '}' > "$w/src/lib.rs" \
+    && git -C "$w" add src/lib.rs || fail "the change"
+  out=$(. "$SRC/lib/bugproof.sh" && inlinesplit "$w" src/lib.rs '{"start": "#\\[(cfg\\(test\\)|([A-Za-z_]+::)?test)\\]", "end": "braces"}'); rc=$?
+  [ "$rc" = 0 ] && [ "$out" = "$(printf '%s\n' '#[test]' 'fn two() {' '    let _ = r"\"; let _ = r#"a "} b"#;' '    assert_eq!(f(), 2);' '}' 'pub fn f() -> i32 {' '    1' '}')" ] \
+    || fail "inlinesplit on src/lib.rs, a #[test] fn holding r\"\\\" and r#\"a \"} b\"# above the fix in f(), exited $rc (not 0) or did not take the fix out: $out"
+}
+
+# R337 (E9). Bug it catches: a quote in a /* */ comment opened a string that ran to the end of the file, so f() below
+# the #[test] fn, which the change fixes, was marked test code and inlinesplit() kept the fix in the file it runs on
+# main. A nested comment (/* a /* b */ "} */) must not end at its first */ either.
+t_buginlinecomment() {
+  local w=$T/$CASE/r out rc
+  mkdir -p "$w/src" && git -C "$w" init -q && printf '%s\n' '#[test]' 'fn two() {' '    /* The delimiter is " */' '    assert_eq!(f(), 1);' '}' 'pub fn f() -> i32 {' '    1' '}' > "$w/src/lib.rs" \
+    && git -C "$w" add . && git -C "$w" -c user.name=t -c user.email=t@example.com commit -qm main || fail "the repo"
+  printf '%s\n' '#[test]' 'fn two() {' '    /* The delimiter is " */ /* a /* b */ "} */' '    assert_eq!(f(), 2);' '}' 'pub fn f() -> i32 {' '    2' '}' > "$w/src/lib.rs" \
+    && git -C "$w" add src/lib.rs || fail "the change"
+  out=$(. "$SRC/lib/bugproof.sh" && inlinesplit "$w" src/lib.rs '{"start": "#\\[(cfg\\(test\\)|([A-Za-z_]+::)?test)\\]", "end": "braces"}'); rc=$?
+  [ "$rc" = 0 ] && [ "$out" = "$(printf '%s\n' '#[test]' 'fn two() {' '    /* The delimiter is " */ /* a /* b */ "} */' '    assert_eq!(f(), 2);' '}' 'pub fn f() -> i32 {' '    1' '}')" ] \
+    || fail "inlinesplit on src/lib.rs, a #[test] fn holding /* The delimiter is \" */ and /* a /* b */ \"} */ above the fix in f(), exited $rc (not 0) or did not take the fix out: $out"
+}
+
 # bugwt() on a change that only rewords a comment of s.sh (`# an old word` becomes `# a new word`), on a main that holds
 # s.sh and w.test.sh holding <test>; its issue's body is <body>. The run on main runs each file its CONVEYOR_TEST_RERUN
 # list names as `fail`; with none, it selects nothing (its log says files=0), as a runner does for a comment-only

@@ -250,6 +250,21 @@ t_shutopen() {
   wait $p7 $p8 2>/dev/null; return 0
 }
 
+# Bug (R182): `shut 7` exited 0 when it could not end #7's card: gonewt() left it open (its batch change, the patch
+# .bpatch, cannot be put back: apply --index refuses it), saying so on stdout, and shut took those words for a card it
+# ended. It exits 1, and the card stays open.
+t_shutleft() {
+  local gone out rc c7=c20260101T000000-t-7
+  setup "[$(issue 7 2026-01-01)]"
+  sleep 0 & gone=$!; wait $gone # sleep: a stand-in for #7's process, ended
+  gonecard $c7 7 $gone "$(date)"; wtchange $c7
+  git -C "$T/$CASE/cards/$c7" rev-parse HEAD > "$T/$CASE/cards/$c7.lent" && echo 'not a patch' > "$T/$CASE/cards/$c7.bpatch"
+  out=$(loop shut 7 2>&1); rc=$?
+  [ "$rc" = 1 ] && grep -qF "card $c7 had an open record and its process was gone mid-batch, and its change could not be put back in its worktree; it is left open" <<<"$out" \
+    || fail "shut 7, its card left open as its batch change could not be put back, exited $rc (not 1) or did not say so: $out"
+  [ -z "$(st "select(.card == \"$c7\" and (.step == \"blocked\" or .step == \"closed\"))")" ] || fail "shut 7 ended the card it said was left open: $(st "select(.card == \"$c7\")")"
+}
+
 # Bug (#1030): the command `shut 7` knew its own stop only by the reason of the card's blocked line. When the loop
 # blocked #7 first, with its own reason, as shut stopped its process, the card closed as "closed by hand while it was
 # blocked", not as shut by the owner, and a turn gave the open #7 back. Here the loop's blocked line is written as shut

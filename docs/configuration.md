@@ -357,7 +357,8 @@ its own pick. Fix cards that have no issue get no pick. Code puts the card in a 
 The group is the two words, for example "small docs". The choice is the project's builder (Builder on the Rules tab),
 or the challenger on a trial (below).
 When you set the builder of a card (`conveyor.sh control card <issue> builder <model>`), the choice is your setting,
-and the pick says that you chose it. Each step line of the card from then on, up to its end, has a `pick` field:
+and the pick says that you chose it. If `models.allowed` no longer has the model of your setting, the card does not
+use your setting, and the pick says `auto`. Each step line of the card from then on, up to its end, has a `pick` field:
 `group`, `choice` (model and effort), `by` (`owner` or `auto`), `trial` and `mode`. A card that starts again for the same issue, after a retry
 or a stop, keeps the group and trial of the pick that the issue had. Its choice is the builder that it builds on
 now: the project's builder or your setting for the card, the challenger on a trial or of a promoted group, or with the rule On the judge's builder.

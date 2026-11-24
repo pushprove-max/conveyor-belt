@@ -708,7 +708,7 @@ cliwords() { # <text>
 # the cause is the login (expired: its words say expired, refresh, revoked or refused; else not set), else empty.
 # NOSTART_SIGNIN, when the cause is the login: the sign-in failure (expired, was refused or is missing) and what to
 # run, for the pause (signinstop()); NOSTART_START then has signin: true, so a resume puts the card back
-# (signinback()). Else empty.
+# (signinback(), which alone puts back a card of issue 0: no check session does). Else empty.
 nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <model> <builder|reviewer|fix|testFix> <account, "" for the default login> <worktree>
   local raw words cause todo n p px c=${9##*/}
   NOSTART_LOGIN='' NOSTART_SIGNIN=''
@@ -751,7 +751,7 @@ nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <mode
   else cause="the $5 CLI stopped before any work"; todo="fix what its words below say"; fi
   # A card's worktree is named by its card id, c<time>-<project>-<issue> (pick()); a lane's preview is not a card.
   n=${c##*-}; [[ $n =~ ^[1-9][0-9]*$ ]] || n=$c
-  if ! startonce "$n"; then [[ ! $c =~ ^c[0-9]{8}T[0-9]{6}- ]] || todo+=", then retry the card (conveyor.sh retry $n, or Retry on the Board)"
+  if ! startonce "$n" || { [ -z "$NOSTART_SIGNIN" ] && [ "$n" = "$c" ]; }; then [[ ! $c =~ ^c[0-9]{8}T[0-9]{6}- ]] || todo+=", then retry the card (conveyor.sh retry $n, or Retry on the Board)"
   elif [ -n "$NOSTART_SIGNIN" ]; then todo+=". The card is put back once by itself on resume"
   else todo+=". The card is put back once by itself when a check session on the $7's CLI and model starts"; fi
   NOSTART_WHY="$cause ($(exitsaid "$1" 0)): $todo"$'\n'"${words:-(the $5 CLI wrote nothing)}"
@@ -761,11 +761,11 @@ nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <mode
 # After nostart(), for a step that runs nowhere else (no fallback route, or the fallback's own sign-in failed too): a
 # sign-in failure pauses the loop with the step and its reason (signinpause()), as every card would meet it.
 signinstop() { [ -z "$NOSTART_SIGNIN" ] || locked signinpause "$1: $NOSTART_SIGNIN" || true; } # <step>
-# Whether an issue's card blocked by a session that never began its work (nostart()) is still put back by itself
-# (startagain()): an issue, not a main-red fix card (issue 0), none of whose earlier cards was put back so.
-startonce() { # <issue>
-  [[ $1 =~ ^[1-9][0-9]*$ ]] || return 1
-  ! stdb ask issue retried "$1" 2>/dev/null | jq -e 'select(.step == "blocked" and (.spent.start | type) == "object")' >/dev/null 2>&1
+# Whether a card blocked by a session that never began its work (nostart()) is still put back by itself (startagain(), signinback()): an issue none of whose cards was put back so,
+# or a main-red fix card (issue 0, by its id) none of whose cards for the same main commit (mainRed: redpick() gives each its own id) was put back so, nor the card itself; never another card of issue 0 (a Tests page card, whose retry testpick() limits).
+startonce() { # <issue, or the card id of a main-red fix card>
+  local n=$1 s=''; [[ $1 =~ ^[1-9][0-9]*$ ]] || { [[ $1 =~ ^c[0-9]{8}T[0-9]{6}-.*-0$ ]] && n=0 && s=$(stdb ask card "$1" 2>/dev/null | jq -rs 'map(.mainRed? | strings) | first // empty' 2>/dev/null) && [ -n "$s" ]; } || return 1
+  ! stdb ask issue retried "$n" 2>/dev/null | jq -se --arg c "$1" --arg s "$s" 'group_by(.card)[] | select(.[0].issue != 0 or .[0].card == $c or any(.[]; .mainRed? == $s)) | .[] | select(.step == "blocked" and (.spent.start | type) == "object")' >/dev/null 2>&1
 }
 # What a check session runs on (startcheck()) for a session that never began its work (nostart()): the CLI and model
 # its seat is set to now, so one the owner changed after the block is the one checked, on the account it ran on (none

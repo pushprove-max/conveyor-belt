@@ -58,6 +58,14 @@ t_pickowner() {
   fx_in 'SEATCARD=7; PICK=""; modelpick c1-7 7 2>/dev/null; jq -c "del(.asked)" <<<"$PICK"; seat builder | jq -c "{model, effort}"'
   [ "$(cat "$T/$CASE/run.out")" = $'{"group":"small docs","choice":{"model":"m2","effort":"high"},"by":"owner","trial":false,"mode":"shadow"}\n{"model":"m2","effort":"high"}' ] \
     || fail "the pick of a card the owner set the builder of is not by owner on m2 high, or the card's builder moved: $(cat "$T/$CASE/run.out")"
+  # Bug caught (R276): with m2 taken off the pack's allowed models, seat() passes the owner's builder over and the card
+  # builds on the project's, but the pick still said by owner, as it read the record's setting alone; or, with the
+  # project's builder (named with its CLI, so it stands) on the same m2 high, as it compared the setting to that seat.
+  loop control model claude m2 high >/dev/null || fail "control model was refused"
+  tune '.models.allowed.claude -= ["m2"]'
+  fx_in 'SEATCARD=7; PICK=""; modelpick c1-7 7 2>/dev/null; jq -c "del(.asked)" <<<"$PICK"'
+  [ "$(cat "$T/$CASE/run.out")" = '{"group":"small docs","choice":{"model":"m2","effort":"high"},"by":"auto","trial":false,"mode":"shadow"}' ] \
+    || fail "the pick of a card whose owner's builder the pack no longer allows is not by auto on the project's m2 high: $(cat "$T/$CASE/run.out")"
 }
 
 # Bugs caught (#828): with pick=on an eligible card whose issue number is in the 1-in-5 share did not build on the

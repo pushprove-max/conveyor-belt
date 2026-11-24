@@ -65,7 +65,7 @@ PICKLADDER='[{"model":"claude-sonnet-5-5","effort":"medium"},{"model":"claude-so
 PICKELIGIBLE='def eligible($c): IN("small docs", "small code") or (startswith("medium ") and ($c.picks[.] | objects) != null);'
 # shellcheck disable=SC2034 # PICK, PICKCARD, PICKSEAT and PICKSEATS are card()'s, read by line() in lib/records.sh and seat() in lib/control.sh
 modelpick() { # <card> <issue>: sets card()'s PICK, PICKCARD and PICKSEAT
-  local c=${CARDCTL:-} rule old b by=auto issue size t1 t2 t3 t4 pipe group back bk PICKHOLD=''
+  local c=${CARDCTL:-} rule old a b by=auto issue size t1 t2 t3 t4 pipe group back bk PICKHOLD=''
   [ -n "$c" ] || c=$(ctl 2>/dev/null) || return 0
   rule=$(jq -r '.rules.pick // "off"' <<<"$c" 2>/dev/null)
   [ "$rule" = shadow ] || [ "$rule" = on ] || return 0
@@ -81,7 +81,12 @@ modelpick() { # <card> <issue>: sets card()'s PICK, PICKCARD and PICKSEAT
     elif [ "$bk" != 2 ]; then echo "conveyor: card $1: the rule Pick settings could not be set to shadow" >&2; rule=shadow; fi
   fi
   b=$(seat builder "$c" | jq -c '{model, effort}') && [ -n "$b" ] || { echo "conveyor: card $1: no builder to record in its pick" >&2; return 0; }
-  ! jq -e --arg n "$2" '.cards[$n].builder | objects' <<<"$c" >/dev/null 2>&1 || by=owner
+  # The owner's builder for the issue counts only when the pack allows its model the builder: one it no longer allows is
+  # passed over (percard(), seat()), and the card builds on the project's, or on the pick's (a project builder of the
+  # same model does not make it the owner's).
+  modelsallowed a 2>/dev/null || a=null
+  ! jq -e --arg n "$2" --argjson c "$c" "$OKMODELS"'$c.cards[$n].builder | objects | .model as $m | [$a | okmodels("builder")[][]] | index($m) != null' \
+    --argjson a "$a" -n >/dev/null 2>&1 || by=owner
   old=$({ stdb ask issue retried "$2" -- issue cards "$2"; } 2>/dev/null | jq -cs --argjson n "$2" \
     '[.[] | objects | select(.issue == $n and (.pick | type) == "object")] as $l
     | ($l | sort_by(.time) | last | .pick // empty) + {hold: any($l[]; .step == "blocked" and .pick.trial == true)}' 2>/dev/null)

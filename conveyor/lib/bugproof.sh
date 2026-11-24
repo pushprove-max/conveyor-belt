@@ -16,7 +16,11 @@ inlinekinds() { # <worktree>
 # Each line of a file (stdin) as T (in a test block of the kind IS, IE, IH: start, end and has), N (not in one) or S (in
 # one, and holding code outside it: before its start or after its end). A block starts at IS's match; with IE
 # "braces" it ends where the brackets opened after the start close, or at a ; before any opens; else it ends at IE's
-# match. A block none of whose lines match IH (when set) is no test. Brackets inside strings are counted too.
+# match. A block none of whose lines match IH (when set) is no test. With "braces", a bracket or ; inside a string
+# ("...", its escapes kept, over more than one line too), a character literal ('}', '\u{7d}'), a // comment or a /* */
+# comment (nested ones too, over more than one line, a quote in it opening no string) is not counted:
+# assert_eq!(f(), "}"); does not close the block (R337). A raw string (r"...", r#"..."#, br"...") ends only at
+# a quote followed by as many # as it opened with; a backslash in it escapes nothing: r"\" is one whole string.
 # shellcheck disable=SC2016 # awk's own $0 and fields
 INLINEMARKS='BEGIN { s = ENVIRON["IS"]; e = ENVIRON["IE"]; h = ENVIRON["IH"]; br = (e == "braces") }
 function shut(last, tail,   i, t) {
@@ -27,13 +31,23 @@ function shut(last, tail,   i, t) {
 { c[NR] = "N"
   if (!inb) {
     if (!match($0, s)) next
-    inb = 1; b = NR; hit = 0; d = 0; op = 0
+    inb = 1; b = NR; hit = 0; d = 0; op = 0; q = 0; rq = 0; cm = 0
     lead = (substr($0, 1, RSTART - 1) ~ /[^[:space:]]/); rest = substr($0, RSTART + RLENGTH)
   } else rest = $0
   if (h != "" && $0 ~ h) hit = 1
   if (br) {
     for (i = 1; i <= length(rest); i++) {
       ch = substr(rest, i, 1)
+      if (rq) { if (ch == "\"" && substr(rest, i + 1, rh) == hs) { rq = 0; i += rh } continue }
+      if (q) { if (ch == "\\") i++; else if (ch == "\"") q = 0; continue }
+      if (cm) { if (ch == "/" && substr(rest, i + 1, 1) == "*") { cm++; i++ } else if (ch == "*" && substr(rest, i + 1, 1) == "/") { cm--; i++ } continue }
+      if (ch == "/" && substr(rest, i + 1, 1) == "*") { cm = 1; i++; continue }
+      if (ch == "r" && (substr(rest, i - 1, 1) !~ /[A-Za-z0-9_]/ || substr(rest, i - 2, 2) ~ /^[^A-Za-z0-9_]?b$/) && match(substr(rest, i + 1), /^#*"/)) {
+        rq = 1; rh = RLENGTH - 1; hs = substr(rest, i + 1, rh); i += RLENGTH; continue }
+      if (ch == "\"") { q = 1; continue }
+      if (ch == "/" && substr(rest, i + 1, 1) == "/") break
+      if (ch == "\047" && substr(rest, i + 1, 1) == "\\" && (j = index(substr(rest, i + 3), "\047"))) { i += j + 2; continue }
+      if (ch == "\047" && substr(rest, i + 2, 1) == "\047") { i += 2; continue }
       if (ch == "{") { d++; op = 1 } else if (ch == "}") d--
       if ((op && d <= 0) || (ch == ";" && !op)) { t = substr(rest, i + 1); shut(NR, t ~ /[^[:space:]]/ && t !~ /^[[:space:]]*\/\//); next }
     }

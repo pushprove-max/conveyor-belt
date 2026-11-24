@@ -350,9 +350,9 @@ unstick() { # <issue>
 # started again (unless a signal had stopped it before). A database call of the card's (state.py) is let finish: it
 # starts no other, and stopped, it would hold the database's write transaction, so the reads here would wait for it
 # until they time out. Bug (issue 1385): shut read the step, the card then began filing, and shut ended it with a slice
-# filed. Prints a line for each card it ended; a card left is said on stderr, as is one whose records cannot be read.
+# filed. Prints a line for each card it ended; a card left in its land or filing step is said on stderr, as is one whose records cannot be read. Fails (1), the others ended, when endcard() could not end one: gonewt() left it open, saying so on stdout, among the lines of the cards ended.
 shutopen() { # <issue | card id>
-  local c n p q s t how k w
+  local c n p q s t how k w rc=0
   [ -n "${NAMED:-}" ] || names || return 1
   if [[ $1 =~ ^[0-9]+$ ]]; then c=$(stdb ask issue cards "$1" 2>/dev/null | jq -r '.card' 2>/dev/null | sort -u)
   else c=$1; fi
@@ -369,9 +369,9 @@ shutopen() { # <issue | card id>
     [ -n "$s" ] || { [ "$how" != running ] || [ -z "$k" ] || kill -CONT $k 2>/dev/null; continue; }
     [ "$how" != gone ] || p=''
     { printf '%s %s\n' "$$" "$(p_started $$)" > "$CARDS/$c.shut"; } 2>/dev/null # shut's from before the kill till blocked: revive() leaves it
-    endcard "$c" "$n" "$p" "$s" "$OWNSHUT" && echo "conveyor: card $c was open in its $s step ($([ "$how" = gone ] && echo "its process gone" || echo "its process $how, now ended")); it is blocked, its work kept"
+    if endcard "$c" "$n" "$p" "$s" "$OWNSHUT"; then echo "conveyor: card $c was open in its $s step ($([ "$how" = gone ] && echo "its process gone" || echo "its process $how, now ended")); it is blocked, its work kept"; else rc=1; fi
     rm -f "$CARDS/$c.shut"
-  done
+  done; return $rc
 }
 # run()'s cards in progress (running), set in run()'s own variables: its jobs less the push (pusher) and the other
 # jobs beside the cards, and the cards it took over (took). A push so leaves its builder slot free. runcards: the card

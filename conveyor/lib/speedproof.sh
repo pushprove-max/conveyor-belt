@@ -185,11 +185,11 @@ SPEEDCHECK=7
 # The failures of speedproof()'s run (exit <exit>, read by testfails() from <worktree>.test) of test files other than
 # <file run>...: the run also runs the test files the change selects (a Board test file's links,
 # .conveyor/test-links.json), and a failure of one of them is not the run's own file's (#602). Prints them, each file
-# with its failing cases and each case's first line. A file the main-red record holds red (mainred.sh redlisted(): the file, or
-# `<file>: <case>`) is named as main's failure; so is one that fails the same way on the commit the card was built on
-# (its HEAD): the change is taken out of the worktree again and the other files the record does not hold run alone
-# there, a file being main's when each of its failing cases fails there too (a file with no case named: when it fails
-# there). Prints nothing when no other file failed. Fails (1) when another file failed and none of <file run>... did.
+# with its failing cases and each case's first line. Each failing case gets its own verdict (R329): one the main-red
+# record holds red (mainred.sh redlisted(): `<file>: <case>`, or the file for a file failing naming no case) is named
+# as main's failure; so is one that fails on the commit the card was built on too (its HEAD): the change is taken out
+# of the worktree again and the files with a case the record does not hold run alone there. The rest are the change's.
+# Prints nothing when no other file failed. Fails (1) when another file failed and none of <file run>... did.
 speedothers() { # <worktree> <exit> <file run>...
   local t o cmd='' x f u=() m main=() base=() b='' brc
   packget test.command cmd 2>/dev/null || cmd=''
@@ -198,26 +198,26 @@ speedothers() { # <worktree> <exit> <file run>...
   o=$(jq -c --arg cmd "$cmd" '[.files[]?, (.timeout.file // empty | {file: ., cases: []})] | unique_by(.file)
     | map(select(.file != "" and .file != $cmd and (.file | IN($ARGS.positional[]) | not)))' --args "${@:3}" <<<"$t") || return 0
   [ "$o" != '[]' ] || return 0
+  # Each failing case on its own (`<file>: <case>`, or the file naming none): a file with one the record lacks runs on base.
   while IFS= read -r f; do
-    mapfile -t u < <(jq -r --arg f "$f" '.[] | select(.file == $f) | $f, (.cases[]?.name | "\($f): \(.)")' <<<"$o")
-    if redlisted "${u[@]}"; then main+=("$f"); else base+=("$f"); fi
+    mapfile -t u < <(jq -r --arg f "$f" '.[] | select(.file == $f) | if (.cases // []) == [] then $f else .cases[].name | "\($f): \(.)" end' <<<"$o")
+    m=''; for x in "${u[@]}"; do if redlisted "$x"; then main+=("$x"); else m=1; fi; done; [ -z "$m" ] || base+=("$f")
   done < <(jq -r '.[].file' <<<"$o")
   if [ ${#base[@]} -gt 0 ] && git -C "$1" diff --cached --binary --no-renames HEAD | git -C "$1" apply -R --index > /dev/null 2>&1; then
     printf 'fail\t%s\n' "${base[@]}" > "$1.rerun"; tests "$1" test.fileCommand alone > /dev/null 2>&1; brc=$?
     [ "$brc" = 0 ] || b=$(testfails "$1.test" "$brc" 2>/dev/null | jq -ce objects) || b=''
   fi
-  x=''
-  while IFS= read -r f; do
-    m=''
-    if printf '%s\n' "${main[@]}" | grep -qxF -- "$f"; then m=" (main's failure, not the change's: the main-red record holds it)"
-    elif [ -n "$b" ] && jq -e --arg f "$f" --argjson o "$o" '[.files[]? | select(.file == $f)] as $bf | [$bf[].cases[]?.name] as $bc
-      | [$o[] | select(.file == $f) | .cases[]?.name] | if . == [] then $bf != [] else all(.[]; IN($bc[])) end' <<<"$b" > /dev/null 2>&1; then
-      m=" (main's failure, not the change's: it fails on the commit the card was built on too)"
-    fi
-    x+=${x:+; }$(jq -r --arg f "$f" --arg m "$m" '.[] | select(.file == $f)
-      | "\($f) fails\($m)" + (.cases | if . == [] then "" else ", " + (map("case `\(.name)`: \(.line)") | join(", ")) end)' <<<"$o")
-  done < <(jq -r '.[].file' <<<"$o")
-  printf '%s\n' "$x"
+  # A case is main's when the record holds it, or else when it fails on the base commit too (a file naming no case:
+  # when the file fails there). A file whose cases all have one verdict says it once; else each case says its own.
+  jq -r --argjson m "$(jq -cn '$ARGS.positional' --args "${main[@]}")" --argjson b "${b:-null}" \
+    --arg r " (main's failure, not the change's: the main-red record holds it)" \
+    --arg s " (main's failure, not the change's: it fails on the commit the card was built on too)" \
+    'def lab($v): {r: $r, s: $s}[$v] // "";
+    map(.file as $f | [$b.files[]? | select(.file == $f)] as $bf | [$bf[].cases[]?.name] as $bc
+      | if (.cases // []) == [] then "\($f) fails\(lab(if $f | IN($m[]) then "r" elif $bf != [] then "s" else "" end))"
+        else (.cases | map(. + {v: (if "\($f): \(.name)" | IN($m[]) then "r" elif .name | IN($bc[]) then "s" else "" end)})) as $cs
+        | if ($cs | map(.v) | unique | length) == 1 then "\($f) fails\(lab($cs[0].v)), " + ($cs | map("case `\(.name)`: \(.line)") | join(", "))
+          else "\($f) fails, " + ($cs | map("case `\(.name)`\(lab(.v)): \(.line)") | join(", ")) end end) | join("; ")' <<<"$o"
   jq -e '[.files[]?.file, .timeout.file?] | any(.[]; IN($ARGS.positional[]))' --args "${@:3}" <<<"$t" > /dev/null
 }
 # The check of a speed-up card (card(): a bug card whose issue speedfile() names a test file), in place of the bug-card

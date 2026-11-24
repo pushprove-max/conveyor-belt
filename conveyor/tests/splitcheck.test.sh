@@ -190,6 +190,50 @@ t_speedownfail() {
   [ "$RC" != 0 ] && [ "$WHY" = 'the file f.test.sh fails with the change (exit 1)' ] || fail "the optimized file's own failure was not named: exit $RC, $WHY"
 }
 
+# R329. Bug it catches: g.test.sh fails two cases, one the main-red record holds (snapcase) and a new one (newcase):
+# speedothers() named the whole file main's, as one listed case was enough, and the new failure was not the change's.
+# Called as speedproof() calls it, on a run's output and log; the worktree is no checkout, so nothing runs again.
+t_speedotherone() {
+  local w=$T/$CASE/w
+  setup '[]'; mkdir -p "$w" "$w.testlog"
+  jq -cn '{reds: [{sha: "abc", cases: [{case: "g.test.sh: snapcase", file: "g.test.sh", by: "c1", files: ["g.test.sh"], last: ""}], card: null}]}' > "$ST/mainred.json"
+  printf '== g.test.sh\nFAIL [snapcase]: the snapshot differs\nFAIL [newcase]: it broke\n-- FAIL g.test.sh\n' > "$w.test"
+  printf '== g.test.sh\n-- FAIL g.test.sh\n' > "$w.testlog/r"
+  fx_in "speedothers '$w' 1 f.test.sh 2>/dev/null" # stderr: git's words on the worktree that is no checkout
+  [ "$(cat "$T/$CASE/run.out")" = 'g.test.sh fails, case `snapcase` (main'"'"'s failure, not the change'"'"'s: the main-red record holds it): FAIL [snapcase]: the snapshot differs, case `newcase`: FAIL [newcase]: it broke' ] \
+    || fail "speedothers on g.test.sh failing snapcase (held by the main-red record) and newcase (not held) did not name snapcase alone main's: $(cat "$T/$CASE/run.out")"
+}
+
+# R329 (E8). Bug it catches: as in t_speedotherone, and newcase fails on the commit the card was built on too: a
+# verdict for the whole file (every case held, or every case failing there) named neither case main's, as snapcase
+# passed there. Each case is main's for its own reason. The worktree is a checkout with a staged change, so the change
+# is taken out; tests() stands in for the run there, which fails newcase alone.
+t_speedotherboth() {
+  local w=$T/$CASE/w
+  setup '[]'; git -C "$R" worktree add -q --detach "$w" && echo x > "$w/a" && git -C "$w" add a || fail "the card's worktree"
+  mkdir -p "$w.testlog"
+  jq -cn '{reds: [{sha: "abc", cases: [{case: "g.test.sh: snapcase", file: "g.test.sh", by: "c1", files: ["g.test.sh"], last: ""}], card: null}]}' > "$ST/mainred.json"
+  printf '== g.test.sh\nFAIL [snapcase]: the snapshot differs\nFAIL [newcase]: it broke\n-- FAIL g.test.sh\n' > "$w.test"
+  printf '== g.test.sh\n-- FAIL g.test.sh\n' > "$w.testlog/r"
+  fx_in "tests() { [ ! -e \"\$1/a\" ] || return 9; printf '== g.test.sh\nFAIL [newcase]: it broke\n-- FAIL g.test.sh\n' > \"\$1.test\"; return 1; }; speedothers '$w' 1 f.test.sh"
+  [ "$(cat "$T/$CASE/run.out")" = 'g.test.sh fails, case `snapcase` (main'"'"'s failure, not the change'"'"'s: the main-red record holds it): FAIL [snapcase]: the snapshot differs, case `newcase` (main'"'"'s failure, not the change'"'"'s: it fails on the commit the card was built on too): FAIL [newcase]: it broke' ] \
+    || fail "speedothers on g.test.sh failing snapcase (held by the main-red record) and newcase (failing on the base commit too) did not name each main's: $(cat "$T/$CASE/run.out")"
+}
+
+# R329. Bug it catches: the main-red record holds g.test.sh itself, naming no case (a run on main that timed out in
+# it), and the run fails a new case there: speedothers() named the file main's, as the file was listed, so a file-level
+# entry hid the change's new failure. Called as t_speedotherone calls it.
+t_speedotherfile() {
+  local w=$T/$CASE/w
+  setup '[]'; mkdir -p "$w" "$w.testlog"
+  jq -cn '{reds: [{sha: "abc", cases: [{case: "g.test.sh", file: "g.test.sh", by: "c1", files: ["g.test.sh"], last: ""}], card: null}]}' > "$ST/mainred.json"
+  printf '== g.test.sh\nFAIL [newcase]: it broke\n-- FAIL g.test.sh\n' > "$w.test"
+  printf '== g.test.sh\n-- FAIL g.test.sh\n' > "$w.testlog/r"
+  fx_in "speedothers '$w' 1 f.test.sh 2>/dev/null" # stderr: git's words on the worktree that is no checkout
+  [ "$(cat "$T/$CASE/run.out")" = 'g.test.sh fails, case `newcase`: FAIL [newcase]: it broke' ] \
+    || fail "speedothers on g.test.sh failing newcase, with the main-red record holding the file alone, named it main's: $(cat "$T/$CASE/run.out")"
+}
+
 # #602, #740. Bug it catches: with g.test.sh failing on the commit the card was built on too and no entry in the
 # main-red record (as snapexec.test.sh failed on #585's base), a check that lets g.test.sh fail runs it again on that
 # commit (speedproof.sh speedothers()). With f.test.sh run alone, nothing fails: the check makes one run, with the change.

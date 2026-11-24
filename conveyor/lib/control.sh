@@ -193,16 +193,19 @@ FIXSEAT='def fixseat($c; $k; $b): ($c // {})[$k] as $o
 declare -gA SEAT_V=(); SEAT_K=''
 seat() { # <builder|reviewer|judge|fix|testFix> [the control record, when the caller has read it]
   local a c=${2:-} x CTL_V n=${SEATCARD:-}; [ -n "$c" ] || { if ctlread 2>/dev/null; then c=$CTL_V; else c=null; fi; }
+  modelsallowed a || return 1
   # A trial card (PICKSEAT, card()'s: picktrial(), lib/modelpick.sh) builds on the rule's challenger, and a card of the
   # rule On on the judge's builder (pickjudge()), as if the record set it for the issue's builder, until the owner sets
-  # one for the issue (that always wins); its other seats are the record's.
-  [ -z "${PICKSEAT:-}" ] || [ -z "$n" ] || c=$(jq -c --arg n "$n" --argjson p "$PICKSEAT" '.cards[$n].builder //= $p' <<<"$c") || return 1
+  # one for the issue (that always wins) whose model the pack allows the seat: one percard() would pass over is put
+  # aside, so the card runs on the seat its pick records. Its other seats are the record's.
+  local own="$OKMODELS"'def own($s): . != null and .model != null and (.model as $m | [$a | okmodels($s)[][]] | index($m)) != null;'
+  [ -z "${PICKSEAT:-}" ] || [ -z "$n" ] || c=$(jq -c --arg n "$n" --argjson p "$PICKSEAT" --argjson a "$a" "$own"'.cards[$n].builder |= (if own("builder") then . else $p end)' <<<"$c") || return 1
   # So does a card's reviewer or judge that the owner promoted from a replay result, or the judge picked (PICKSEATS:
   # pickseats(), pickjudge()).
-  [ -z "${PICKSEATS:-}" ] || [ -z "$n" ] || c=$(jq -c --arg n "$n" --argjson p "$PICKSEATS" 'reduce ($p | to_entries[]) as $e (.; .cards[$n][$e.key] //= $e.value)' <<<"$c") || return 1
+  [ -z "${PICKSEATS:-}" ] || [ -z "$n" ] || c=$(jq -c --arg n "$n" --argjson p "$PICKSEATS" --argjson a "$a" "$own"'reduce ($p | to_entries[]) as $e (.;
+    .cards[$n][$e.key] |= (if own(if $e.key == "builder" then "builder" else "reviewer" end) then . else $e.value end))' <<<"$c") || return 1
   # A record with no key "<issue>" keeps no seats for the card: the project's, worked out (and kept) once for all cards.
   [[ $c == *"\"$n\":"* ]] || n=''
-  modelsallowed a || return 1
   if [ "$SEAT_K" != "$n"$'\037'"$c"$'\037'"$a" ]; then
     # Each seat on its own (try): one that fails to work out is none, as it was read alone.
     mapfile -d '' -t x < <(jq -j --argjson c0 "$c" --arg n "$n" --argjson e "$EFFORTS" "$SEATNOW$JUDGENOW$PERCARD$FIXSEAT"'percard($c0; $n) as $c

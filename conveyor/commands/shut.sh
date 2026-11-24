@@ -23,12 +23,14 @@
 # ended and the card blocked with its work kept, outside the lock (shutopen(), lib/run.sh), so it is shut as a blocked
 # card is. A main-red fix card, or a land-branch card of issue 0, which has no issue, is shut by its card id; so is
 # any other card. The cards it ended are passed to shut() by id, so each is closed as the owner's stop even when the
-# loop blocked it first, with its own reason, once its process was killed.
+# loop blocked it first, with its own reason, once its process was killed. A card it could not end (shutopen() fails:
+# left open, as its words say) makes it exit 1, once the others are shut.
 [[ ${2:-} =~ ^(c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-[0-9]+|[0-9]+)$ ]] || { echo "usage: conveyor.sh shut <issue | card id>" >&2; exit 2; }
-ended=$(shutopen "$2"); [ -z "$ended" ] || echo "$ended"
+left=0; ended=$(shutopen "$2") || left=1; [ -z "$ended" ] || echo "$ended"
 own=$(sed -n 's/^conveyor: card \([^ ]*\) was open .*/\1/p' <<<"$ended" | jq -Rsc 'split("\n") - [""]') || exit 1
-if [[ $2 =~ ^[0-9]+$ ]]; then closed=$(locked shut "[$2]" "$own") || exit 1; else locked shut "$2" "$own"; exit; fi
+if [[ $2 =~ ^[0-9]+$ ]]; then closed=$(locked shut "[$2]" "$own") || exit 1; else locked shut "$2" "$own" || exit; exit $left; fi
 [ -z "$closed" ] || echo "$closed"
+[ "$left" = 0 ] || exit 1
 [ -z "$ended$closed" ] || exit 0
 # Nothing shut: why is said, and the exit is 4.
 why=$(stdb ask issue cards "$2" | jq -rs --argjson n "$2" --arg shut "$SHUT" --arg own "$OWNSHUT" 'map(select(.issue == $n))

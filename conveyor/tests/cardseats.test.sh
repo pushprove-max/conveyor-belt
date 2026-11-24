@@ -386,6 +386,14 @@ t_pickjudgeowner() {
     PICK=''; PICKCARD=''; PICKSEAT=''; PICKSEATS=''; SEATCARD=10; modelpick c3-10 10 2>/dev/null; seat builder | jq -r '\"\(.model) \(.effort)\"'; record c3-10 10 deps ok"
   [ "$(cat "$T/$CASE/run.out")" = 'm medium' ] || fail "the second retry of a blocked trial did not build on the project's builder: $(cat "$T/$CASE/run.out")"
   recok "$ST/cards.jsonl" "a trial card's pick, and its retry's"
+  # Bug (R276): with #7's builder m2 and reviewer x2 taken off the pack's allowed models, the pick recorded the judge's
+  # builder (Sonnet 5.5 at high), but seat() kept the owner's settings over the judge's seats and percard() passed them
+  # over, so the card ran on the project's builder (m medium) and reviewer (x medium), not the ones its pick names.
+  tune '.models.allowed.claude -= ["m2"] | .models.allowed.codex -= ["x2"]'
+  pjask 'claude-sonnet-5-5 high' 'x low' 'j2 low'
+  fx_in "N=7; $PJ; jq -c '[.by, .choice]' <<<\"\$PICK\""
+  [ "$(sed -n '2,5p' "$T/$CASE/run.out" | paste -sd,)" = 'claude-sonnet-5-5 high,x low,j2 high,["auto",{"model":"claude-sonnet-5-5","effort":"high"}]' ] \
+    || fail "the card whose owner's builder and reviewer the pack no longer allows did not run on the judge's seats its pick records: $(cat "$T/$CASE/run.out")"
 }
 
 # Bugs (#1056, #1067): with a builder list of the Codex model cb alone, at minimal, issue 10's trial card built on the

@@ -426,7 +426,7 @@ EOT
 # the card is put back once, at the resume of the loop its sign-in failure paused, and only once.
 # The cases below call nostart() on a session's output files and block the card as card() does (nsblk), then put it
 # back as the loop does: signinback() at `control resume`, startagain() (startnow(), startcheck()) at a turn.
-# nsblk <card>: in the engine shell (fx_in), nostart() of a claude build session of issue 7 on the model m that exited
+# nsblk <card> [issue, 7 if not given]: in the engine shell (fx_in), nostart() of a claude build session of the issue on the model m that exited
 # 1 with <card>.out and <card>.err in the cards folder, its fields (turns, tokens) read from <card>.out with
 # SESSIONREAD as session() reads them and calls it, and the card blocked with its reason (block(), lib/push.sh), its
 # spent holding the start nostart() set, as session() writes it.
@@ -434,7 +434,7 @@ nsblk() {
   local w=$CARDS/$1 f
   f=$(jq -cRn --arg m m --arg e "" --argjson s 2 "$SESSIONREAD" "$w.out" 2>/dev/null | tail -n 1)
   nostart 1 "$f" "$w.out" "$w.err" claude m builder "" "$w" || { echo "nostart: not a session that never began, on $1: $f"; return 1; }
-  jq -cn --argjson s "$NOSTART_START" '{step: "build", start: $s}' > "$w.spent" && block "$1" 7 "$w" "build: $NOSTART_WHY"
+  jq -cn --argjson s "$NOSTART_START" '{step: "build", start: $s}' > "$w.spent" && block "$1" "${2:-7}" "$w" "build: $NOSTART_WHY"
 }
 # nsagain: startagain() at a turn of the loop, issue 7 open.
 nsagain() { fx_in 'startagain "[{\"number\": 7}]"'; }
@@ -494,4 +494,37 @@ t_nostartmodel() {
   nsagain
   grep -qE -- '--model m2( |$)' "$STUB/checks" && ! grep -qE -- '--model m( |$)' "$STUB/checks" && [ -s "$ST/retried.jsonl" ] \
     || fail "the check session did not run on the model set now, or the card was not put back: $(cat "$STUB/checks")"
+}
+# Bug: a main-red fix card (issue 0) blocked by a sign-in failure was never put back at the resume: startonce()
+# refused issue 0, and retry takes no issue 0. It is put back by its card id, once.
+t_nostartred() {
+  setup '[]'; mkdir -p "$T/$CASE/cards"; c=c20260101T000000-p-0
+  landed 0 | jq -c --arg c "$c" '.card = $c | .step = "picked" | .mainRed = "abc1234"' >> "$ST/cards.jsonl"
+  echo '{"type":"result","is_error":true,"result":"Not logged in · Please run /login","num_turns":1}' > "$T/$CASE/cards/$c.out"; : > "$T/$CASE/cards/$c.err"
+  fx_in "nsblk $c 0"; [ "$RC" = 0 ] || fail "the main-red card was not blocked: $(cat "$T/$CASE/run.out")"
+  st 'select(.step == "blocked") | .reason' | grep -q 'The card is put back once by itself on resume$' \
+    || fail "the main-red card's reason does not say a resume puts it back: $(st 'select(.step == "blocked") | .reason')"
+  nsback
+  [ "$(jq -r 'select(.step == "blocked") | .card' "$ST/retried.jsonl" 2>/dev/null)" = "$c" ] && ! st 'select(.step == "blocked")' | grep -q . \
+    || fail "the main-red card blocked by a sign-in failure was not put back at the resume: $(cat "$T/$CASE/run.out")"
+  # Bug (E4): the retry of the same main commit's fix comes back as a new card (redpick() gives it its own id), and it
+  # blocked so too was put back at a second resume, as the once-only check read the new id alone, not its mainRed.
+  c2=c20260101T000100-p-0
+  landed 0 | jq -c --arg c "$c2" '.card = $c | .step = "picked" | .mainRed = "abc1234"' >> "$ST/cards.jsonl"
+  echo '{"type":"result","is_error":true,"result":"Not logged in · Please run /login","num_turns":1}' > "$T/$CASE/cards/$c2.out"; : > "$T/$CASE/cards/$c2.err"
+  fx_in "nsblk $c2 0"; [ "$RC" = 0 ] || fail "the second main-red card was not blocked: $(cat "$T/$CASE/run.out")"
+  nsback
+  [ "$(jq -c 'select(.step == "blocked")' "$ST/retried.jsonl" | wc -l)" = 1 ] && [ "$(st "select(.step == \"blocked\") | .card")" = "$c2" ] \
+    || fail "the second fix card of main's commit abc1234 was put back at a second resume: $(cat "$T/$CASE/run.out")"
+  # Bug (E7): a Tests page card (issue 0, no mainRed), whose one retry testpick() gives, blocked by a sign-in failure
+  # was put back at the resume too, a retry beyond testpick()'s; it says to retry it by hand and stays blocked.
+  c3=c20260101T000200-p-0
+  landed 0 | jq -c --arg c "$c3" '.card = $c | .step = "picked" | .testFile = "t.test.sh"' >> "$ST/cards.jsonl"
+  echo '{"type":"result","is_error":true,"result":"Not logged in · Please run /login","num_turns":1}' > "$T/$CASE/cards/$c3.out"; : > "$T/$CASE/cards/$c3.err"
+  fx_in "nsblk $c3 0"; [ "$RC" = 0 ] || fail "the Tests page card was not blocked: $(cat "$T/$CASE/run.out")"
+  st "select(.card == \"$c3\" and .step == \"blocked\") | .reason" | grep -qF "then retry the card (conveyor.sh retry $c3, or Retry on the Board)" \
+    || fail "the Tests page card's reason does not say to retry it: $(st "select(.card == \"$c3\" and .step == \"blocked\") | .reason")"
+  nsback
+  [ "$(jq -c 'select(.step == "blocked")' "$ST/retried.jsonl" | wc -l)" = 1 ] && st "select(.card == \"$c3\" and .step == \"blocked\")" | grep -q . \
+    || fail "the Tests page card blocked by a sign-in failure was put back at the resume: $(cat "$T/$CASE/run.out")"
 }
