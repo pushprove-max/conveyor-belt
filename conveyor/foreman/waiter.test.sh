@@ -337,6 +337,19 @@ WAIT_CEILING=6 wait_until "! kill -0 $s 2>/dev/null" || { kill -KILL "$s" "$(cut
 flock -n "$FD/waiter.lock" true || fail "waiter.lock is still held after the waiter exited"
 }
 
+# Issue 1507. Bug: a TERM after start() forks a watcher and before `PID[$1]=$!` found no pid to stop, and stop_all's
+# `wait` with no pid waited for that watcher, which runs until stopped: the waiter held waiter.lock. No outside timing
+# lands a TERM in that gap, so a DEBUG trap (from BASH_ENV, set -T so it runs in start) sends it there, once.
+t_forkterm() {
+fixture forkterm
+printf '%s\n' 'set -T' "trap '[[ \$BASH_COMMAND == \"PID[\\\$1]=\\\$!\" ]] && mkdir \"$T/termed\" 2>/dev/null && kill -TERM \$\$' DEBUG" > "$T/env.sh" || fail "the BASH_ENV file was not made"
+echo '{}' | BASH_ENV=$T/env.sh CONVEYOR_FOREMAN_WATCHERS=$W bash "$SRC/waiter.sh" > /dev/null 2>&1 & s=$!
+wait_until '[ -d "$T/termed" ]' || fail "the TERM was not sent between the watcher's fork and its PID entry"
+WAIT_CEILING=6 wait_until "! kill -0 $s 2>/dev/null" || { kill -KILL "$s"; pkill -KILL -F "$T/starts" 2>/dev/null; fail "the waiter did not exit within 6 s of a TERM between its watcher's fork and its PID entry: $(cat "$FD/waiter.log")"; }
+flock -n "$FD/waiter.lock" true || fail "waiter.lock is still held after the waiter exited"
+w=$(cat "$T/starts" 2>/dev/null); [ -z "$w" ] || ! kill -0 "$w" 2>/dev/null || { kill -KILL "$w"; fail "the watcher $w runs on after its waiter stopped"; }
+}
+
 # Issue 594: Claude Code's /restart runs the new program in the same process, which no longer reads the Stop hook it
 # ran before. reader: a stop's waiter (SW) whose stderr is a pipe read by RP, which unread ends as the restart does;
 # SIGPIPE is ignored, as Claude Code's hooks have it (with it not ignored, the write would kill the waiter).
@@ -537,7 +550,7 @@ CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" = health ] || exit 3; echo "{\"blocked\"
   || fail "for a wake of #7, #8 and #9 blocked and #10 still blocked for 'tests failed [this could not be posted on the issue]', and health holding #8 as the wake says, #7 blocked again since 10:05 for another reason, #9 not at all and #10 for 'tests failed' alone since 09:30, the stop did not relay the wake with #8 alone (exit $rc): $(cat "$T/wake")"
 }
 
-cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed resumed slowsid noreader stopover reclaim checkquiet startwake startother startlive startover startheld startclaim startadopt retried)
+cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed resumed slowsid forkterm noreader stopover reclaim checkquiet startwake startother startlive startover startheld startclaim startadopt retried)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

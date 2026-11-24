@@ -268,8 +268,14 @@ else
   for w in watch-conveyor.sh watch-limit.sh watch-alerts.sh watch-idle.sh; do down "$w" || CMD[$w]="bash $(printf %q "$FHERE/$w")"; done
 fi
 start() { # <name>: in its own process group, so stopping it stops its sleep too; without the lock
+  # A TERM between the fork and `PID[$1]=$!` would find no pid to stop, and stop_all's wait would wait for that
+  # watcher, which runs until stopped, holding waiter.lock: it is noted then, and acted on once PID names the watcher.
+  local w got=''
+  trap 'got=1' TERM HUP INT
   p_execsid bash -c "${CMD[$1]}" > /dev/null 2>&1 7>&- & PID[$1]=$!
-  local w; for w in "${!PID[@]}"; do printf '%s %s\n' "${PID[$w]}" "$(started "${PID[$w]}")"; done > "$FD/watchers.pid"
+  trap onterm TERM HUP INT
+  [ -z "$got" ] || onterm
+  for w in "${!PID[@]}"; do printf '%s %s\n' "${PID[$w]}" "$(started "${PID[$w]}")"; done > "$FD/watchers.pid"
 }
 for w in "${!CMD[@]}"; do start "$w"; done
 renew=${CONVEYOR_FOREMAN_RENEW:-82800} look=${CONVEYOR_FOREMAN_LOOK:-60}
