@@ -60,6 +60,24 @@ got=$(priced 2026-10-24T00:00:00Z)
 want='["c3",8.0,[6.0,"gpt-6.1-sol","the median of 1 review step priced at gpt-6.1-sol since 2026-11-21",null],[2.0,"gpt-6.1-sol","the tokens it counted, at its model'"'"'s price",null]]'
 got=$(priced 2026-11-21T00:00:00Z)
 [ "$got" = "$want"$'\n'"$c4"$'\n'"${c9/SINCE/2026-11-21}"$'\n'"$c7"$'\n'"${c11/SINCE/2026-11-21}"$'\n'"$c12" ] || fail "the cards of $T/all priced from the kept summary since 2026-11-21: $got"
+# Bug caught: a Claude review was priced at the model it asked for, never at the models its stats said ran it. r1's
+# review asked for Sonnet ($2 a million input tokens) and ran on Opus ($4): $4, not $2. r2's retry asked for Opus, and
+# its first try (alsoUsed, as BOTHTRIES keeps it) asked for Sonnet and ran on Opus: $8, both tries at Opus, not $6.
+# Bug caught: an unread review with no token counted took the median of the model it asked for, not of the one its
+# stats said ran it. r3 asked for Sonnet and ran on Opus: r1's $4, the Opus review median, not unpriced.
+# Bug caught: the models seen (the Rules tab's list) left out the models an earlier try kept in alsoUsed ran. r4's
+# retry asked for Opus and ran on Sonnet; its first try asked for Sonnet and ran on Opus: Opus counts 4 sessions (r1 to
+# r4), not 3. Sonnet counts only r4, the one review that ran on it.
+runon='{"since": "2026-10-24T00:00:00Z", "cards": [
+{"card":"r1","steps":[{"step":"review","time":"2026-11-22T00:00:00Z","model":"claude-sonnet-5-5","usage":{"input":1000000},"stats":{"byModel":{"claude-opus-5-5":{"input":1000000}}}}]},
+{"card":"r2","steps":[{"step":"review","time":"2026-11-22T00:01:00Z","model":"claude-opus-5-5","unread":"the first attempt ran on another model (claude-sonnet-5-5): one model cannot price both","usage":{"input":1000000},"stats":{"byModel":{"claude-opus-5-5":{"input":1000000}}},"alsoUsed":[{"model":"claude-sonnet-5-5","usage":{"input":1000000},"stats":{"byModel":{"claude-opus-5-5":{"input":1000000}}}}]}]},
+{"card":"r3","steps":[{"step":"review","time":"2026-11-22T00:02:00Z","model":"claude-sonnet-5-5","unread":"no usage","stats":{"byModel":{"claude-opus-5-5":{}}}}]},
+{"card":"r4","steps":[{"step":"review","time":"2026-11-22T00:03:00Z","model":"claude-opus-5-5","unread":"the first attempt ran on another model (claude-sonnet-5-5): one model cannot price both","usage":{"input":1000000},"stats":{"byModel":{"claude-sonnet-5-5":{"input":1000000}}},"alsoUsed":[{"model":"claude-sonnet-5-5","usage":{"input":1000000},"stats":{"byModel":{"claude-opus-5-5":{"input":1000000}}}}]}]}]}'
+got=$(python3 -c "import sys, json; sys.path.insert(0, '${LIM%/*}'); import dashboard_limit as d
+c = d.card_costs(json.loads(sys.argv[1]))
+print(json.dumps([[x['card'], x['usd'], [[s['pricedAs'], s['pricedBy']] for s in x['steps']]] for x in c['cards']] + [[[x['model'], x['sessions']] for x in c['seen']]]))" "$runon")
+want='[["r1", 4.0, [["claude-opus-5-5", {"claude-opus-5-5": {"usd": 4.0, "tokens": 1000000}}]]], ["r2", 8.0, [["claude-opus-5-5", {"claude-opus-5-5": {"usd": 8.0, "tokens": 2000000}}]]], ["r3", 4.0, [["claude-opus-5-5", {"claude-opus-5-5": {"usd": 4.0, "tokens": 0}}]]], ["r4", 6.0, [["claude-opus-5-5", {"claude-sonnet-5-5": {"usd": 2.0, "tokens": 1000000}, "claude-opus-5-5": {"usd": 4.0, "tokens": 1000000}}]]], [["claude-opus-5-5", 4], ["claude-sonnet-5-5", 1]]]'
+[ "$got" = "$want" ] || fail "reviews that asked for Sonnet and ran on Opus ($runon), priced: $got"
 # A benchmark trial's cost (work) counts an estimate as unpriced: a trial's known cost is never part guessed.
 got=$(jq -c '{steps: .steps, live: null, prices: {}}' <<<'{"steps":[{"step":"review","model":"gpt-6.1-sol","usage":{"input":1000000}},{"step":"review","model":"gpt-6.1-sol","unread":"part","usage":{"input":1000000}}]}' \
   | python3 "$LIM" work | jq -c '[.usd, .state, .unpriced]')

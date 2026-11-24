@@ -257,8 +257,8 @@ def card_costs(part, lines=None, kept=None, dest=None):
     def step_usd(step, models):
         """usd() of the step, with an unread step's alsoUsed ([{model, usage}]: what an earlier try on another model
         counted, or one that named other models that ran it: TRYFOLD, conveyor/lib/session.sh) added, each priced as
-        usd() prices a step of its kind: a build's at the models that try said ran it (its stats), else the model it
-        asked for; a review's, as every review, at the model it asked for. So its estimate holds every token counted;
+        usd() prices every step, a review's as a build's: at the models that try said ran it (its stats), else the
+        model it asked for. So its estimate holds every token counted;
         the model priced at is then the one that cost most."""
         also = step.get("alsoUsed") if unread(step) and isinstance(step.get("alsoUsed"), list) else []
         also = [a for a in also if isinstance(a, dict) and counted(a.get("usage"))]
@@ -281,7 +281,7 @@ def card_costs(part, lines=None, kept=None, dest=None):
     def usd(step, models):
         """(dollars, the model priced at, why it is unpriced, {model: {usd, tokens}}); dollars None when the step
         cannot be priced. models: the models in force, for a running step only (None for a finished one)."""
-        u, r = step.get("usage"), ran(step) if step.get("step") != "review" else None
+        u, r = step.get("usage"), ran(step)
         if step.get("step") == "test":
             return 0, None, None, None
         # An unread step with tokens counted goes on, priced at them (an estimate: priced() marks it); with none, it
@@ -375,7 +375,9 @@ def card_costs(part, lines=None, kept=None, dest=None):
         models = card.get("models") if isinstance(card.get("models"), dict) else {}
         for s in steps:
             if s.get("step") != "test" and isinstance(s.get("time"), str):
-                xs = sorted({x for x in ((s.get("step") != "review" and ran(s)) or [s.get("model")]) if isinstance(x, str) and x})
+                # Each try's models: an earlier try kept in alsoUsed (TRYFOLD) ran the step too.
+                tries = [s, *(a for a in (s.get("alsoUsed") if isinstance(s.get("alsoUsed"), list) else []) if isinstance(a, dict))]
+                xs = sorted({x for t in tries for x in (ran(t) or [t.get("model")]) if isinstance(x, str) and x})
                 if xs:
                     uses.append([s["time"], xs, s["route"] if isinstance(s.get("route"), str) and s["route"] else None])
             s["usd"], m, why, by = step_usd(s, None)
@@ -413,12 +415,16 @@ def card_costs(part, lines=None, kept=None, dest=None):
 
     def estimate_rest(card, med):
         """The card's unread steps with no token counted priced, in place, at the median of med for their model and
-        kind, marked as an estimate; one with no median stays unpriced. Its usd is summed again. The key is the model
-        its priced steps are under (usd()): the price row, through an alias; a model OpenCode ran
+        kind, marked as an estimate; one with no median stays unpriced. Its usd is summed again. Its model is the one
+        its stats say ran it, when they name one (as exact() keeps the samples), else the one it asked for. The key is
+        the model its priced steps are under (usd()): the price row, through an alias; a model OpenCode ran
         (opencode:<provider>/<model>) with no price row is priced at the dollars OpenCode reported, and is its own key."""
         steps = [s for s in card.get("steps") or [] if isinstance(s, dict)]
         for s in steps:
-            m = model(s, None) if s["usd"] is None and unread(s) and none_counted(s) else None
+            if s["usd"] is not None or not unread(s) or not none_counted(s):
+                continue
+            r = ran(s)
+            m = next(iter(r)) if r and len(r) == 1 else model(s, None)
             k = known(m) or (m if isinstance(m, str) and m.startswith("opencode:") else None)
             if k is None or (k, s.get("step")) not in med:
                 continue

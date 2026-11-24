@@ -21,8 +21,8 @@
 # says so: the step is priced as an estimate, from the tokens counted, never as exact). The usage counted is kept: one
 # attempt's alone when the other's is unknown, and that of an attempt on another model, or one that named other models
 # that ran it, in alsoUsed ([{model, usage, stats}], stats the models that attempt said ran it, when it said: TRYFOLD,
-# lib/session.sh). The price table prices a build's attempt (a stalled build's, session1()) at those models; a review's,
-# as every review step, at the model it asked for. An OpenCode review's
+# lib/session.sh). The price table prices each attempt, a review's as a build's (a stalled build's, session1()), at
+# those models. An OpenCode review's
 # cost (usage.cost) is the sum when both attempts report one, else none. A second failure fails with both
 # reasons, side by side on its first line (block() keeps that line as the reason), the second's output after it; the
 # first's is in firstTry. A review that answered, GO or NO-GO, never runs again.
