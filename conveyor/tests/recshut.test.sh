@@ -146,6 +146,8 @@ t_shutboard() {
   # The Board's Close closed #8 on GitHub before its shut, and says so (--closed): so its card is shut as closed, and a
   # turn gives it back once opened. Bug (#1635): with no --closed read, it was shut as the owner's, given back by no turn.
   loop shut 8 --closed >/dev/null || fail "shut 8 --closed exited non-zero"
+  # Bug: shut, here or for #9 and #10 above, asked GitHub whether an issue is closed, so a slow GitHub delayed the Board's Close.
+  [ ! -e "$STUB/closed-viewed" ] || fail "shut 9, shut 10 or shut 8 --closed asked GitHub whether an issue is closed: $(tr '\n' ' ' < "$STUB/closed-viewed")"
   [ "$(loop health | jq -c '.blocked | map(.issue) | index(8)')" = null ] && [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue) | index(8)')" = null ] \
     || fail "#8 is still under Needs you after shut 8: $(loop health | jq -c '[.blocked, .waiting]')"
   [ "$(st "select(.card == \"$c8\") | [.step, .reason] | join(\"|\")" | tail -n 1)" = 'closed|the issue was closed by hand while the card was blocked' ] \
@@ -191,6 +193,8 @@ t_shutnoanswer() {
   setup "[$(issue 8 2026-02-01)]"; shutrec 8
   : > "$STUB/closed-fail"
   out=$(loop shut 8 2>&1) || fail "shut 8, with no answer from GitHub, exited non-zero: $out"
+  # Bug: shut asked GitHub and waited for an answer it then ignored, so a GitHub that does not answer delayed it.
+  [ ! -e "$STUB/closed-viewed" ] || fail "shut 8, with no answer from GitHub, still asked GitHub whether #8 is closed: $(tr '\n' ' ' < "$STUB/closed-viewed")"
   [ "$(st "select(.card == \"$c8\") | [.step, .reason] | join(\"|\")" | tail -n 1)" = 'closed|shut by the owner' ] && ! grep -qF 'was closed while' <<<"$out" \
     || fail "shut 8, with no answer from GitHub, did not close $c8 as shut by the owner, or said #8 was closed: $out $(grep "$c8" "$ST/cards.jsonl" | tail -n 1)"
 }
