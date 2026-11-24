@@ -503,7 +503,8 @@ t_newoutageoldhealth() { newoutagepass health; }
 # minutes. Two timed-out runs of three files (b passes, a fails, c is begun and not ended), one with 30000 noise lines
 # between its lines and before a's stack frame, one without: both give the same result (files, cases, passed, failed,
 # timeout), b is passed and c is the timeout file, the failing case still has its place (`at`) with the noise before
-# its frame, and no noise line reaches the jq (what reached it is recorded, not a time).
+# its frame, and the jq gets only the lines it acts on: no noise line and no YAML line of the failed case (what reached
+# it is recorded, not a time).
 t_testfailsnoise() {
   mkdir -p "$T/$CASE/wt" && printf '%s\n' 'line one' 'line two' 'line three' 'line four' > "$T/$CASE/wt/a.test.mjs" || fail "the stub test file could not be made"
   local clean noisy
@@ -528,5 +529,11 @@ EOF
   [ "$noisy" = "$clean" ] || fail "30000 noise lines changed the result: clean $clean, noisy $noisy"
   [ "$(command jq -c '[.passed, .timeout.file]' <<<"$clean")" = '[["b.test.mjs"],"c.test.mjs"]' ] || fail "b is not the passed file or c the timeout file: $clean"
   [[ $clean == *'(at a.test.mjs:3: line three)'* ]] || fail "the failing case has no place: $clean"
-  ! grep -q '^wait:' "$T/$CASE/seen" || fail "a noise line reached the jq of testfails(): $(grep -c '^wait:' "$T/$CASE/seen") of $(wc -l < "$T/$CASE/seen") lines (cmd: $(head -c 300 "$T/$CASE/cmd"))"
+  # The jq gets the lines it acts on and no other: not a noise line, and not the YAML lines (`  actual: 1`, `  stack: |-`)
+  # of the failed case, which it does not use either.
+  local want
+  want=$(printf '%s\n' '== b.test.mjs' 'ok 1 - fine' '== a.test.mjs' 'ok 1 - first' 'not ok 2 - second' '  ---' \
+    "    at Context.<anonymous> ($T/$CASE/wt/a.test.mjs:3:7)" '  ...' 'ok 3 - third' '== c.test.mjs')
+  [ "$(cat "$T/$CASE/seen")" = "$want" ] \
+    || fail "the jq of testfails() was given lines other than those it acts on (cmd: $(head -c 300 "$T/$CASE/cmd")): want $(printf '%q' "$want"), got $(head -c 600 "$T/$CASE/seen" | tr '\n' '|')"
 }
