@@ -548,15 +548,17 @@ mapstop() { # <worktree> <why>
 # test file of that name), {"area": <name>, "tests": "all"} (every source of the area is shared), {"area": <name>,
 # "why": <text>} and {"outside": <path>} (a file no area needs). A map that cannot be read, a line of none of these
 # kinds, or a test it names that is no tracked test file, fails it (exit 1, the reason on stdout). Given <file>, a map
-# of the project's own is read from it in place of the worktree's (testsel(): the map at the change's base).
-mapread() { # <worktree> [<file>]
+# of the project's own is read from it in place of the worktree's (testsel(): the map at the change's base); given
+# <commit> too, a test it names is one tracked at that commit, not in the worktree's index: a map read as another
+# commit has it names that commit's tests, and a test the card's change deletes would else fail the whole map.
+mapread() { # <worktree> [<file> [<commit>]]
   local m f out age=null sha
   packget test.map m || { echo "the pack's test.map could not be read"; return 1; }
   case $m in off) return 0 ;; '') f=$(mappath); [ -s "$f" ] || return 0 ;; *) f=${2:-$1/$m} ;; esac
   if [ -z "$m" ]; then
     sha=$(jq -r '.commit // ""' "$f" 2>/dev/null) && [ -n "$sha" ] && age=$(git -C "$1" rev-list --count "$sha..HEAD" 2>/dev/null) || age=null
   fi
-  out=$(jq -cs --rawfile ts <(git -C "$1" -c core.quotePath=false ls-files 2>/dev/null | testpaths) --argjson age "$age" --arg f "${m:-$f}" '
+  out=$(jq -cs --rawfile ts <(if [ -n "${3:-}" ]; then git -C "$1" -c core.quotePath=false ls-tree -r --full-tree --name-only "$3"; else git -C "$1" -c core.quotePath=false ls-files; fi 2>/dev/null | testpaths) --argjson age "$age" --arg f "${m:-$f}" '
     ($ts | split("\n") | map(select(. != ""))) as $ts
     | def tfile: if contains("/") then . else . as $n | [$ts[] | select(split("/")[-1] == $n)]
         | if length == 1 then .[0] else error("\($f): \($n) is named, but there is no one tracked test file of that name") end end;

@@ -78,6 +78,27 @@ t_runnermap() {
   [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/other.test.mjs\none:tests/runner.test.mjs' ] \
     || fail "the map's change was not given the tests of both areas (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
+# Bug it catches: testsel() read the map at the change's base against the card's index, so a card that deletes
+# tests/other.test.mjs, which that map names by file name alone, made the base map unreadable, and src/a.js, whose
+# test the card changes from runner.test.mjs to new.test.mjs, was given new.test.mjs alone. It is given both. The
+# change is given as two commits (a landing's own change, pushtests()), the worktree on the second, so the deleted
+# test is in neither its index nor its HEAD: a base map read against either fails, one read against the base does not.
+t_runnermapdeleted() {
+  local wt=$T/$CASE/cards/c7 out b
+  rnsetup
+  mkdir -p "$R/src" && echo x > "$R/src/a.js" && printf '%s\n' '{"area": "a", "file": "src/a.js"}' '{"area": "a", "test": "runner.test.mjs"}' \
+    '{"area": "b", "test": "other.test.mjs"}' > "$R/areas.json" && git -C "$R" add -A && git -C "$R" commit -qm map && b=$(git -C "$R" rev-parse HEAD) \
+    || fail "main's map could not be committed"
+  tune '.test.map = "areas.json"'
+  git -C "$R" worktree add -q --detach "$wt" && git -C "$wt" rm -q tests/other.test.mjs && echo x > "$wt/tests/new.test.mjs" \
+    && printf '%s\n' '{"area": "a", "file": "src/a.js"}' '{"area": "a", "test": "new.test.mjs"}' > "$wt/areas.json" && git -C "$wt" add -A \
+    && git -C "$wt" commit -qm change || fail "the change could not be committed"
+  out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names \
+      && testsel "$wt" narrow "$b" "$(git -C "$wt" rev-parse HEAD)" | tail -n +2 | sort ) 2>&1)
+  [ "$out" = $'tests/new.test.mjs\ntests/runner.test.mjs' ] \
+    || fail "testsel <c7 on the change> narrow <map's commit> <the change: tests/other.test.mjs deleted, src/a.js's test runner.test.mjs changed to new.test.mjs in areas.json>: not both tests: $out"
+}
 
 # D3, D4. Bug it catches: a stop on the release's run, which runs the whole suite. tests() with test.full, as the full
 # test suite and release-prep run it, reports 3 test files, given none: it runs to its end and passes.

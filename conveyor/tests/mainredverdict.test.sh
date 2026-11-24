@@ -58,6 +58,24 @@ t_mainredcontrolchanged() {
   [ "$(jq -c .cases "$ST/machinehold.json" 2>/dev/null)" = '["b.test: two"]' ] \
     || fail "the machine hold does not hold b.test: two alone: $(cat "$ST/machinehold.json" 2>&1)"
 }
+# Bug it catches: mainchanged() read main's area map against the card worktree's index, so a card whose staged change
+# deletes b.test, which main's map names by file name alone, made the whole map unreadable: the link of lib/x.sh to
+# a.test was lost, and a.test broken by landing bad through lib/x.sh was not main's. Card c8 is based on main before
+# b.test came, so b.test is in neither its index nor its HEAD: a map read against either fails, one read against main's
+# commit does not. mainchanged() itself is called.
+t_mainchangeddeleted() {
+  local s b w=$T/$CASE/cards/c8 out
+  mrshared; b=$(git -C "$R" rev-parse HEAD); tune '.test.map = "areas.json" | .tests.patterns = ["*.test"]'
+  mkdir -p "$R/lib" && echo 't_two() { :; }' > "$R/b.test" \
+    && printf '%s\n' '{"area": "x", "file": "lib/x.sh"}' '{"area": "x", "test": "a.test"}' '{"area": "y", "test": "b.test"}' > "$R/areas.json" \
+    && git -C "$R" add b.test areas.json && git -C "$R" commit -qm 'b.test and the map' || fail "main's b.test and map could not be committed"
+  mrland l1 1 '{"a.test": 1}' || fail "landing l1 could not be made"
+  echo x > "$R/lib/x.sh" && git -C "$R" add lib/x.sh && git -C "$R" commit -qm bad && s=$(git -C "$R" rev-parse HEAD) \
+    && eng "append \"\$(line bad 2 landed ok '{\"sha\": \"$s\"}')\"" || fail "landing bad could not be made"
+  git -C "$R" worktree add -q --detach "$w" "$b" || fail "card c8's worktree could not be made on main before b.test"
+  out=$(eng "mainchanged a.test $s \"\$CONVEYOR_CARDS/c8\" one && echo changed" 2>&1)
+  [ "$out" = changed ] || fail "mainchanged a.test $s <c8, on main before b.test> one, main's areas.json linking lib/x.sh (changed by bad) to a.test: not changed: $out"
+}
 
 # Bug (#1594, E6): a card's files run side by side, so the time limit stops several at once. testfails() lists them
 # all in stopped, but timeout names only the last: verdicts() read timeout alone, so c.test, stopped beside d.test,

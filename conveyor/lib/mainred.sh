@@ -503,13 +503,13 @@ brokeby() { # <test file> <main's commit> [<the file its run named the case unde
 # landing whose card's test step ran <case> (brokeby(): since; a landing that ran only other cases of the file does
 # not count) changed the file, or a file the test map links to it
 # (mapread(): the files mapped to it and the files the map shares with most tests; a map the project keeps is read as
-# main's commit has it, not as the card's change has it). Fails when no landing in brokeby()'s depth ran the case, as
+# main's commit has it, with main's commit's tests, not as the card's change has them). Fails when no landing in brokeby()'s depth ran the case, as
 # when it last passed on main is then not known.
 mainchanged() { # <test file> <main's commit> <worktree> [<case>]
   local since m fs=()
   since=$(brokeby "$1" "$2" "$1" "${4:-}" 2>/dev/null | jq -re '.since | strings | select(. != "")' 2>/dev/null) || return 1
   packget test.map m 2>/dev/null || m=off
-  mapfile -t fs < <(case $m in off | '') mapread "$3" ;; *) mapread "$3" <(git show "$2:$m" 2>/dev/null) ;; esac 2>/dev/null \
+  mapfile -t fs < <(case $m in off | '') mapread "$3" ;; *) mapread "$3" <(git show "$2:$m" 2>/dev/null) "$2" ;; esac 2>/dev/null \
     | jq -r --arg f "$1" '[(.sources | objects | to_entries[] | select(any(.value[]?; . == $f)) | .key), (.shared | arrays | .[] | strings)] | unique[]' 2>/dev/null)
   [ -n "$(git --literal-pathspecs diff --name-only --no-renames "$since" "$2" -- "$1" "${fs[@]}" 2>/dev/null)" ]
 }

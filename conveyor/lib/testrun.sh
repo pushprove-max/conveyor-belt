@@ -565,7 +565,7 @@ testsel() { # <worktree> [narrow] [<from commit> <to commit>]
   # so each source whose tests it changes selects its tests on both sides, as a selector of the changed tests runs them.
   if [ "${2:-}" = narrow ] && packget test.map mp 2>/dev/null && [ -n "$mp" ] && [ "$mp" != off ] \
     && git -C "$1" -c core.quotePath=false diff --name-only --no-renames "${d[@]}" -- 2>/dev/null | grep -qxF -- "$mp"; then
-    om=$(mapread "$1" <(git -C "$1" show "${3:-HEAD}:$mp" 2>/dev/null)) && [ -n "$om" ] || om=null
+    om=$(mapread "$1" <(git -C "$1" show "${3:-HEAD}:$mp" 2>/dev/null) "${3:-HEAD}") && [ -n "$om" ] || om=null
   else mp=''; fi
   # The test runners the change touches (TESTRUNNERS: no test files, testpaths()), and of each the test files that name it
   # (by its file name: those that import or run it).
