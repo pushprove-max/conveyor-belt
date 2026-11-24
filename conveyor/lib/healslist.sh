@@ -17,11 +17,12 @@
 # batch waits for that card to end) and, when $l gives them, takes its kind, reason and finding (the text the listing has now: a
 # sort counts the findings its issue still holds against the entries' text; an entry of a sort that a review sees again keeps the
 # finding the sort stored, as healsitems() (lib/heals.sh) reads that text). A sighting names the entries that are as close to its
-# finding as any are (tier): with its own text (exk) first, then with its text but for the level marks (its line numbers kept:
-# lkey), then with its text but for the line numbers (key); the entries of a nearer tier hide those of a farther one.
+# finding as any are (tier): with its own text (exk) first, then with its text but for the level marks, backticks and the colon
+# after a place (its line numbers kept: lkey), then with its text but for the line numbers (key); the entries of a nearer tier hide those of a farther one.
 HEALSSAME="$HEALSONE"'def exk: one | sub("(?i)[.:;]* (- how|proof):.*$"; "");
   def rno: first(exk | capture("^(?<r>R[0-9]+) ") | .r) // null;
-  def lkey: exk | sub("^R[0-9]+ "; "") | sub("^(\\[[^\\]]*\\] ?)+"; "") | gsub("`"; "") | sub("[.:;]+$"; "");
+  def lkey: exk | sub("^R[0-9]+ "; "") | sub("^(\\[[^\\]]*\\] ?)+"; "") | gsub("`"; "")
+    | gsub("(?<p>[A-Za-z0-9_./-]+:[0-9]+(-[0-9]+)?)(?![0-9A-Za-z]):"; "\(.p)") | sub("[.:;]+$"; "");
   def key: exk | sub("^R[0-9]+ "; "") | sub("^(\\[[^\\]]*\\] ?)+"; "") | gsub("`"; "")
     | gsub("(?<f>[A-Za-z0-9_./-]+):[0-9]+(-[0-9]+)?(?![0-9A-Za-z]):?"; "\(.f)") | sub("[.:;]+$"; "");
   def same($d): type == "object" and (.id == $id or ($l.effect != "docs drift" and .batched == null and ($l.effect == null or $d or .card != $l.card or (.finding | exk) == ($l.finding | exk)) and (.finding | key) == ($l.finding | key)

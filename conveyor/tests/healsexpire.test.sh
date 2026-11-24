@@ -426,6 +426,13 @@ t_healssortrnumber() {
   b=$(cat "$T/$CASE/run.out")
   [ "$RC" = 0 ] && [ "$a" != "$b" ] && [ "$(hids "$ST/selfheals.jsonl")" = "$b" ] && [ "$(hids "$ST/healsdropped.jsonl")" = "$a" ] \
     || fail "R4 at a.sh:2 took the expired entry of R1 at a.sh:1 (rc $RC; $a, $b): $(cat "$T/$CASE/run.out" "$ST/selfheals.jsonl" "$ST/healsdropped.jsonl" 2>&1)"
+  # A review lists R1's finding at a.sh:1 in its own wording (no backticks, no colon after the place): the expired R1 takes
+  # it, not the live R4 at a.sh:2. Bug it catches: lkey kept the colon after the audit's place, so the line-exact tier missed
+  # R1 and the line-blind one took the first live entry, R4.
+  hrun 'healsadd c3-11 11 area:engine w "[P2] a.sh:1 the wait is one turn longer. Proof: a.sh:1" review self-heals'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "$a" ] && [ "$(hids "$ST/selfheals.jsonl")" = "$b $a" ] && [ ! -s "$ST/healsdropped.jsonl" ] \
+    && [ "$(jq -r 'select(.id == "'"$b"'") | .card' "$ST/selfheals.jsonl")" = '#23' ] \
+    || fail "a review's [P2] a.sh:1 finding did not take the expired R1 at a.sh:1 back beside the live R4 at a.sh:2 (rc $RC; $a, $b): $(cat "$T/$CASE/run.out" "$ST/selfheals.jsonl" "$ST/healsdropped.jsonl" 2>&1)"
 }
 
 # A review lists a finding an audit's sort stored (with the audit's number, backticks and How) after that entry expired.
