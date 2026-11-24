@@ -1518,13 +1518,17 @@ const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean
   const bugs: Seg | null = s.pluginBugs ? { t: `! ${count(s.pluginBugs.n, 'plugin problem')}`, c: C.you, b: true } : null
   // The day's spend, the widest form that leaves the head room and the `/units` label and host whole beside it
   // (spread() drops a right part too wide, and cuts the left for the rest): with its label, then the dollars and the
-  // gap in full alone, then the short form (`$4.10+`) with and without the label.
+  // gap in full alone, then the short form (`$4.10+`) with and without the label. None where even the short form would
+  // cut the host (at 24 columns, ` /units  buildbox` and `$4.50+` need 25): the head is the label and the host alone.
   const spends: Line[] = [dayDollars(snap) ?? 'partial', dayDollars(snap, true) ?? 'partial'].flatMap(t => [[{ t: 'DAY SPEND ', d: true }, { t, c: C.cost, b: true }], [{ t, c: C.cost, b: true }]])
   const head: Line = [{ t: ' /units ', c: C.head, b: true, i: true }, { t: ' ' }, { t: s.host, b: true }]
-  const spend = fitting(spends, w, head)
-  // Where only the short form fits, the day's known dollars and gap go on a line of their own under the head (gapRow).
-  const dayGap = snap.todayUsd !== null && (snap.todayLeftOut ?? 0) > 0 && plain(spend) !== dayDollars(snap) && plain(spend) !== `DAY SPEND ${dayDollars(snap)}`
-    ? [gapRow(snap.todayUsd, snap.todayLeftOut ?? 0, (snap.todayEstimate ?? 0) > 0, 1, w)] : []
+  const spend = spends.find(r => cols(plain(r)) + 3 <= w && cols(plain(head)) + cols(plain(r)) + 2 <= w) ?? null
+  // Where only the short form fits, or none, the day's dollars, and the known dollars and gap, go on a line of their own
+  // under the head (gapRow).
+  const full = spend !== null && (plain(spend) === (dayDollars(snap) ?? 'partial') || plain(spend) === `DAY SPEND ${dayDollars(snap) ?? 'partial'}`)
+  const dayGap = full ? [] : snap.todayUsd !== null && (snap.todayLeftOut ?? 0) > 0
+    ? [gapRow(snap.todayUsd, snap.todayLeftOut ?? 0, (snap.todayEstimate ?? 0) > 0, 1, w)]
+    : spend === null ? [fitWidth([{ t: ' ' }, { t: dayDollars(snap) ?? 'partial', c: C.cost, b: true }], w)] : []
   const lanes = lanesModel(s)
   return [
     spread(head, spend, w),

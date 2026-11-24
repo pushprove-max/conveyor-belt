@@ -196,7 +196,8 @@ A word wider than the pane breaks between whole characters.
 - **The head**: `/units` as a filled label, the Conveyor host in bold and, on the right, `DAY SPEND` and the dollars
   today. The label and the host are not cut for the dollars. When the pane is too narrow for all of it, the dollars
   show without `DAY SPEND`. When it is narrower still, a gap shows as `+` after the dollars (`$4.10+`), and the
-  dollars and the gap go on a line under the head.
+  dollars and the gap go on a line under the head. When `$4.10+` does not fit next to the host, the dollars show only
+  on the line under the head.
 - **The count band**, between two rules: `4 ON BELT · 0 READY · 5 WAITING · 0 NEEDS YOU`. `READY` counts the issues
   that the loop can pick now. `WAITING` counts the issues that wait on another card.
   When the line is wider than the pane, the dots lose their spaces. When it is still too wide, the band wraps to two

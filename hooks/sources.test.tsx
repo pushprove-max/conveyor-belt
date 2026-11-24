@@ -1065,9 +1065,20 @@ test('the pane at 24 columns: the day\'s and a card\'s gap are given whole, neve
   const gap = { usd: null, usdKnown: 4.1, notPriced: 1 }
   const lines = paneModel(board({ belt: [{ ...BELT[1], ...gap }], cost: { today: 4.5, todayLeftOut: 2 } }), 24, 0).map(plain)
   for (const l of lines) expect(cols(l)).toBeLessThanOrEqual(24)
-  // The head gives `$4.50+` and the matrix has no room for its Cost column at this width: each line under them gives it whole.
+  // The matrix has no room for its Cost column at this width: each line under the head and the row gives it whole.
   expect(lines).toContainEqual(expect.stringMatching(/^ *\$4\.50 \+ 2 not priced$/))
   expect(lines).toContainEqual(expect.stringMatching(/^ *\$4\.10 \+ 1 not priced$/))
+})
+
+// #1585 review (E30). Bug it catches: at 24 columns ` /units  buildbox` and `$4.50+` need 25 columns, so spread()
+// cut the head to ` /units  buildb…` for the dollars. The head keeps the label and the host whole, and the day's
+// dollars go on the line under it: with the gap, and alone when there is none (`$4.50` beside a host of 10 columns).
+test('the pane at 24 columns: the head keeps the host whole, the day\'s dollars on the line under it', () => {
+  for (const [host, cost, under] of [['buildbox', { today: 4.5, todayLeftOut: 2 }, /^ \$4\.50 \+ 2 not priced$/], ['buildbox-1', { today: 4.5 }, /^ \$4\.50$/]] as const) {
+    const lines = paneModel(board({ cost }, { host }), 24, 0).map(plain)
+    expect(lines[0], `the head at 24 columns, host ${host}, cost ${JSON.stringify(cost)}`).toBe(` /units  ${host}`)
+    expect(lines[1], `the line under the head, host ${host}, cost ${JSON.stringify(cost)}`).toMatch(under)
+  }
 })
 
 // #1585 review (E13). Bug it catches: at 24 columns the matrix row of `#3864` with `~$4.12` needs 26 columns, so its
