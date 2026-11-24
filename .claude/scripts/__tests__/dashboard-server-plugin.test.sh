@@ -7,7 +7,7 @@
 # POST /plugin-preview and /plugin-file (issue 1043): File on GitHub. Bugs each case catches: a preview whose title is
 # not the note's first clause, or whose body lacks the note, version, commit or system, or names the card's project;
 # an issue filed in another repository than plugin.json names, or with other text than the owner's edits; a title or
-# body with a home path or a private address that reached gh, or a refusal that did not name the hit; a failed gh call
+# body with a home path that reached gh, a private address refused or changed, or a refusal that did not name the hit; a failed gh call
 # that removed the note; a filing that removed or filed the other note too; a note that names its issue filed again;
 # a host file that does not read taken as no terms file.
 # The server runs in this process, over plain HTTP: what is checked is the handler, not TLS. Its requests come from
@@ -233,10 +233,11 @@ check('cause_only_guide', '\nCause (not checked): ' + whole_title + '\n' in whol
       and 'takes its title from the first clause of the cause' in GUIDE and 'as "Cause (not checked):"' in GUIDE, (GUIDE.find('takes its title'), whole_body))
 check('no_cause_no_line', 'Cause' not in named and 'Cause' not in unnamed, (named, unnamed))
 check('preview_writes_nothing', text(NOTES) == WHOLE and not os.path.exists(os.path.join(T, 'gh-ran')), text(NOTES))
-# Built in parts, so this file holds no home path or private address itself.
+# Built in parts, so this file holds no home path or private address itself. Bug (#1648): the private address in the
+# title was a hit too, so a filing that named one was refused; only the home path is named, and the filing below keeps it.
 HOMEPATH, PRIVATE = '/ho' + 'me/someone/notes.txt', '10.' + '1.2.3'
 got, said = call('/plugin-file', {'file': NOTES, 'line': B, 'title': 'npm ci on ' + PRIVATE, 'body': 'first\nsee ' + HOMEPATH + '\n'})
-check('privacy_refused', got == 422 and 'the title: private address' in said and 'body line 2: home path' in said
+check('privacy_refused', got == 422 and 'the title' not in said and 'body line 2: home path' in said
       and HOMEPATH not in said and PRIVATE not in said, (got, said))
 check('privacy_before_gh', not os.path.exists(os.path.join(T, 'gh-ran')) and text(NOTES) == WHOLE, text(NOTES))
 open(os.path.join(T, 'gh-fail'), 'w').close()
@@ -244,14 +245,14 @@ got, said = call('/plugin-file', {'file': NOTES, 'line': B, 'title': 'npm ci run
 check('gh_failed_keeps_note', got == 502 and 'HTTP 401: Bad credentials' in said and text(NOTES) == WHOLE, (got, said, text(NOTES)))
 os.remove(os.path.join(T, 'gh-fail'))
 os.remove(os.path.join(T, 'gh-ran'))
-got, said = call('/plugin-file', {'file': NOTES, 'line': B, 'title': 'npm ci runs twice in setup', 'body': 'edited body\n'})
+got, said = call('/plugin-file', {'file': NOTES, 'line': B, 'title': 'npm ci runs twice in setup on ' + PRIVATE, 'body': 'edited body\n'})
 URL = 'https://github.com/%s/issues/77' % REPO
 check('files_the_edits', got == 200 and said == URL, (got, said))
 with open(os.path.join(T, 'gh-args')) as f:
     args = f.read().splitlines()
 # Bug (#1064): the Board ran gh itself, outside the engine's privacy gate. gh_write hands gh the body as a file it
 # keeps under <state>/privacy, never the Board's standard input.
-check('gh_issue_create', args[:-1] == ['issue', 'create', '--repo', REPO, '--title', 'npm ci runs twice in setup', '--body-file']
+check('gh_issue_create', args[:-1] == ['issue', 'create', '--repo', REPO, '--title', 'npm ci runs twice in setup on ' + PRIVATE, '--body-file']
       and args[-1].startswith(os.path.join(T, 'conveyor', 'state', 'privacy') + os.sep), args)
 check('gh_body', text(os.path.join(T, 'gh-body')) == 'edited body\n', text(os.path.join(T, 'gh-body')))
 check('removes_that_note_alone', text(NOTES) == HEAD + A + '\n', text(NOTES))

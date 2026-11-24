@@ -276,7 +276,7 @@ lists every project's rows, so it stays as it is.
   `.claude-plugin/plugin.json` names. Click **Cancel** to close the preview. A note that names its issue, as in
   "filed as #449", is filed already, so it has no **File on GitHub**.
 - Before the Board files the issue, `conveyor/privacy/check.sh` reads the title and the body. If it finds a home path,
-  a private address or another private text, the Board files nothing. The preview names each hit by its line, for
+  an email or another private text, the Board files nothing. The preview names each hit by its line, for
   example "body line 3: home path". Change that line and click **File the issue** again.
 - When the issue is filed, the note leaves the list and `plugin-bugs.md`, and the pane shows a link to the new issue
   until you load the page again. If the Board files the issue but cannot change `plugin-bugs.md`, the note stays, and

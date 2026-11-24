@@ -32,27 +32,30 @@ t_relanyway() {
   [ ! -e "$STUB/runs" ] && [ -z "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] && ! grep -q '^release' "$STUB/gh-calls" 2>/dev/null || fail "the refused --anyway ran the suite or released"
 
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] && grep -q "statuses/$O -f state=failure" "$STUB/gh-calls" || fail "release-prep did not fail on the red suite: $out"
-  # Bug: --by goes into the published release notes unchecked, so a private address in it is made public. (The address
-  # is put together here, so this file holds none itself.)
-  local a=10.0; out=$(loop release 1.1.0 --anyway --by "$a.0.1" 2>&1); [ $? = 1 ] && grep -q "refused, nothing tagged or released: --anyway: the privacy check finds something in --by" <<<"$out" \
-    && grep -q 'private address' <<<"$out" && ! grep -qF "$a.0.1" <<<"$out" || fail "a private address in --by was not refused before the release: $out"
+  # Bug: --by goes into the published release notes unchecked, so a home path in it is made public. (The home path and
+  # the address below are put together here, so this file holds none itself.)
+  local hp=/ho"me/someone" by="the owner on 10.0.0".1
+  out=$(loop release 1.1.0 --anyway --by "$hp" 2>&1); [ $? = 1 ] && grep -q "refused, nothing tagged or released: --anyway: the privacy check finds something in --by" <<<"$out" \
+    && grep -q 'home path' <<<"$out" && ! grep -qF "$hp" <<<"$out" || fail "a home path in --by ($hp) was not refused before the release: $out"
   [ -z "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] && ! grep -q '^release' "$STUB/gh-calls" || fail "the refused --by was tagged or released"
   # Bug (#821): the release refused over release-prep's failed suite lost that suite's mode, while step 2 shows it.
   jq -e '.state == "refused" and .mode == "serial"' "$RUN" > /dev/null || fail "the refused release lost the failed suite's mode: $(cat "$RUN")"
-  out=$(loop release 1.1.0 --anyway --by 'the owner' 2>&1) || fail "--anyway over the red run of the head was refused: $out"
-  grep -qF "1.1.0 goes out over the failed suite on ${O:0:12}, by the owner; failed files: a.test; failed cases: breaks" <<<"$out" \
+  # Bug (#1648): a private address in --by was refused as a privacy hit, though it is none; the release goes out
+  # with --by as written, in its output, record and notes.
+  out=$(loop release 1.1.0 --anyway --by "$by" 2>&1) || fail "--anyway over the red run of the head, --by $by, was refused: $out"
+  grep -qF "1.1.0 goes out over the failed suite on ${O:0:12}, by $by; failed files: a.test; failed cases: breaks" <<<"$out" \
     || fail "release did not print the failed files and cases before it went: $out"
   [ "$(wc -l < "$STUB/runs")" = 1 ] || fail "the suite ran again: $(wc -l < "$STUB/runs") runs"
   [ "$(grep -c statuses "$STUB/gh-calls")" = 1 ] && ! grep -q 'state=success' "$STUB/gh-calls" && grep -q '"state":"failure"' "$STUB/statuses" \
     || fail "a status other than release-prep's failure was posted: $(cat "$STUB/gh-calls")"
   [ -n "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] && grep -q '^release create v1.1.0 --verify-tag ' "$STUB/gh-calls" || fail "v1.1.0 was not tagged and released: $out"
-  jq -e --arg o "$O" '.state == "released" and .anyway == {sha: $o, files: ["a.test"], cases: ["breaks"], by: "the owner"}' "$RUN" > /dev/null \
+  jq -e --arg o "$O" --arg by "$by" '.state == "released" and .anyway == {sha: $o, files: ["a.test"], cases: ["breaks"], by: $by}' "$RUN" > /dev/null \
     || fail "the release's record does not say it went over the failed suite, by whom, with what: $(cat "$RUN")"
   [ "$(head -n "$(wc -l < "$R/docs/releases/1.1.0.md")" "$STUB/body")" = "$(cat "$R/docs/releases/1.1.0.md")" ] \
     && [ "$(tail -n +"$(($(wc -l < "$R/docs/releases/1.1.0.md") + 1))" "$STUB/body")" = "
 ## Known test failures
 
-1.1.0 was released over a failed suite by the owner: the whole suite failed on ${O:0:12}.
+1.1.0 was released over a failed suite by $by: the whole suite failed on ${O:0:12}.
 
 Failed files:
 
