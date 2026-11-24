@@ -41,22 +41,29 @@ t_mainredtimeoutmain() { mrtimeout timeout; }
 # files; then landing bad changed lib/x.sh, which the pack's test map (areas.json, as main has it) links to a.test.
 # a.test: one is main's, and its main-red entry names bad; b.test: two, whose file and mapped file lib/y.sh did not
 # change since l1, is still the machine's, and the hold holds it alone.
+# Follow-up (review): each case is judged from the landing that last ran that case (mainchanged() gives brokeby() the
+# case). Landing l2, after bad, ran a.test's case three alone (ranCases), so a.test: three last passed after bad and is
+# the machine's, while a.test: one, in the same file, last passed on l1 and is main's. Bug it catches: with the case
+# dropped, both cases of a.test get one landing to judge from, so one of the two gets the wrong verdict.
 t_mainredcontrolchanged() {
-  local s v='{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]},{"file":"b.test","cases":[{"name":"two","line":1}]}]}'
+  local s v='{"files":[{"file":"a.test","cases":[{"name":"one","line":1},{"name":"three","line":2}]},{"file":"b.test","cases":[{"name":"two","line":1}]}]}'
   mrshared; tune '.test.control = ["c.test"] | .test.map = "areas.json"'; : > "$STUB/broken"
-  mkdir -p "$R/lib" && echo 't_two() { false; }' > "$R/b.test" && echo y > "$R/lib/y.sh" \
+  mkdir -p "$R/lib" && echo 't_three() { false; }' >> "$R/a.test" && echo 't_two() { false; }' > "$R/b.test" && echo y > "$R/lib/y.sh" \
     && echo '{"lib/x.sh": ["a.test"], "lib/y.sh": ["b.test"]}' > "$R/areas.json" \
-    && git -C "$R" add b.test lib/y.sh areas.json && git -C "$R" commit -qm 'b.test and the map' || fail "main's b.test and map could not be committed"
+    && git -C "$R" add a.test b.test lib/y.sh areas.json && git -C "$R" commit -qm 'b.test and the map' || fail "main's b.test and map could not be committed"
   mrland l1 1 '{"a.test": 1, "b.test": 1}' || fail "landing l1 could not be made"
   echo x > "$R/lib/x.sh" && git -C "$R" add lib/x.sh && git -C "$R" commit -qm bad && s=$(git -C "$R" rev-parse HEAD) \
     && eng "append \"\$(line bad 2 landed ok '{\"sha\": \"$s\"}')\"" || fail "landing bad could not be made"
+  echo l2 > "$R/l2.txt" && git -C "$R" add l2.txt && git -C "$R" commit -qm l2 && s=$(git -C "$R" rev-parse HEAD) \
+    && eng "append \"\$(line l2 3 test pass '{\"times\": {\"a.test\": 1}, \"ranCases\": {\"a.test\": [\"three\"]}}')\" && append \"\$(line l2 3 landed ok '{\"sha\": \"$s\"}')\"" \
+    || fail "landing l2 could not be made"
   mrv c8 "$v"
-  [ "$(jq -c .verdicts "$STUB/v.c8")" = '[{"case":"a.test: one","verdict":"main"},{"case":"b.test: two","verdict":"machine"}]' ] \
-    || fail "card c8 failing $v with the control c.test failing on main, after bad changed lib/x.sh (mapped to a.test): not main for a.test: one and machine for b.test: two: $(cat "$STUB/v.c8" "$STUB/v.c8.err")"
+  [ "$(jq -c .verdicts "$STUB/v.c8")" = '[{"case":"a.test: one","verdict":"main"},{"case":"a.test: three","verdict":"machine"},{"case":"b.test: two","verdict":"machine"}]' ] \
+    || fail "card c8 failing $v with the control c.test failing on main, after bad changed lib/x.sh (mapped to a.test) and l2 ran a.test: three alone: not main for a.test: one and machine for a.test: three and b.test: two: $(cat "$STUB/v.c8" "$STUB/v.c8.err")"
   [ "$(jq -c '[.reds[].cases[] | [.case, .landing.card]]' "$ST/mainred.json" 2>/dev/null)" = '[["a.test: one","bad"]]' ] \
     || fail "the main-red record does not hold a.test: one alone with the landing bad: $(cat "$ST/mainred.json" 2>&1)"
-  [ "$(jq -c .cases "$ST/machinehold.json" 2>/dev/null)" = '["b.test: two"]' ] \
-    || fail "the machine hold does not hold b.test: two alone: $(cat "$ST/machinehold.json" 2>&1)"
+  [ "$(jq -c .cases "$ST/machinehold.json" 2>/dev/null)" = '["a.test: three","b.test: two"]' ] \
+    || fail "the machine hold does not hold a.test: three and b.test: two alone: $(cat "$ST/machinehold.json" 2>&1)"
 }
 # Bug it catches: mainchanged() read main's area map against the card worktree's index, so a card whose staged change
 # deletes b.test, which main's map names by file name alone, made the whole map unreadable: the link of lib/x.sh to
