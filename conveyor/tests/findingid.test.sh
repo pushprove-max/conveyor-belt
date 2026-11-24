@@ -107,3 +107,28 @@ t_fidlongreview() {
   [ "$(jq -sc 'map(select(.round == 2) | [.id, .reason])' "$W.rounds/findings.jsonl")" = '[["E1","the judge kept it"]]' ] \
     || fail "a long review's fix round kept no finding or no judge reason: $(cut -c1-300 "$W.rounds/findings.jsonl")"
 }
+
+# Bug (#1590): a fix session was told nothing of what a returned finding means, so each fix made the same guess
+# narrower and the reviewer found the next, narrower case. The fix session's prompt (fixprompt(), card.sh) carries the
+# rule (FIXBACK) when the engine's repeats() lists a finding that came back, and not when every finding is new. The
+# findings are the lines fixlines() gives the session, from a real review beside a worktree; no card runs.
+t_fidbackrule() {
+  setup "[$(issue 7 2026-01-01)]"
+  fid_round $'[P2] a.txt:5 a nit here\n[P1] a.txt:9 another bug' 'echo more >> a.txt' $'[P2] [E1] a.txt:6 The name still reads badly. Proof: line 6\n[P1] a.txt:12 a new bug'
+  local back fresh brep frep
+  back=$(fid_eng 'fixlines "$W" "$(numbered "$W")"'); brep=$(fid_eng 'repeats "$W"')
+  [ "$(jq -r .id <<<"$brep")" = E1 ] || fail "the engine did not list E1 as a finding that came back: $brep"
+
+  grep -qx 'E1 \[P2\] \[E1\] a.txt:6 .*' <<<"$back" || fail "the returned finding is not led by its id: $back"
+  printf '%s\n' '[P1] a.txt:12 a new bug' 'VERDICT: NO-GO' > "$W.review"
+  fresh=$(fid_eng 'fixlines "$W" "$(numbered "$W")"'); frep=$(fid_eng 'repeats "$W"')
+  grep -qx 'E3 \[P1\] a.txt:12 a new bug' <<<"$fresh" || fail "the new finding is not led by its own id: $fresh"
+  BACK=$back FRESH=$fresh BREP=$brep FREP=$frep fx_in 'fixprompt "" "$BACK" "$BREP" > "$T/$CASE/back"; fixprompt "" "$FRESH" "$FREP" > "$T/$CASE/fresh"'; [ "$RC" = 0 ] || fail "the prompts could not be made (exit $RC): $(cat "$T/$CASE/run.out")"
+  # Each line of the rule is checked: the order to not narrow the guess, both actions it allows, and the reply it asks for.
+  local l
+  for l in 'Do not make the same guess' 'Either record the fact where it is written, so the reader no longer has to infer it' \
+    'take the safe path (ask again, refuse, or keep both)' 'Say in your reply which of the two the fix did.'; do
+    grep -qF "$l" "$T/$CASE/back" || fail "a fix session given a returned finding is not told '$l': $(cat "$T/$CASE/back")"
+  done
+  ! grep -qF 'Do not make the same guess' "$T/$CASE/fresh" || fail "a fix session given only new findings is told the returned-finding rule: $(cat "$T/$CASE/fresh")"
+}

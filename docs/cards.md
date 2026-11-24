@@ -316,6 +316,12 @@ its place. A declined finding causes no fix and no follow-up (`conveyor/README.m
 the judge also gets the findings that the round was told to fix, each with the reason that the judge gave when it
 accepted it.
 
+A fix session gets each finding with its `E<n>` ID. When the review finds a finding again after a fix round for it, its
+earlier fix did not hold. The session is then told one more rule: do not make the same guess narrower. It must record the fact where it is
+written, so that the reader does not have to infer it. When the code cannot tell, it takes the safe path: ask again,
+refuse, or keep both. The session says in its reply which of the two it did. A fix session whose findings are all new
+does not get this rule.
+
 A finding that a test does not check what its name, its comment or the issue's Done-when says it checks is a real
 defect, not "only a test gap".
 

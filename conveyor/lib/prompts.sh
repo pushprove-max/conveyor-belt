@@ -546,6 +546,12 @@ the review after this fix names the finding by that id.
 A finding about the order of operations (a lock, a retry, a snapshot, a merge decision, two commands at once): name what
 must stay true and the other reader or writer, then make the test force that one to act at the weak point through the real
 caller, and assert the stored state or the outside action, never after a sleep.'
+# Added to FIX (card.sh fixprompt()) only when the review found a finding again that an earlier fix round was told to fix
+# (donewhen.sh repeats()): its earlier fix did not hold.
+# shellcheck disable=SC2034 # used in lib/card.sh
+FIXBACK='A finding came back after a fix round for it (the brief below says which): its earlier fix did not hold. Do not make the same guess
+narrower. Either record the fact where it is written, so the reader no longer has to infer it, or, when the code cannot
+tell, take the safe path (ask again, refuse, or keep both). Say in your reply which of the two the fix did.'
 # The Done-when check (donewhen.sh donewhen(), checked()): what the one fix session after a failed check is told, after the brief;
 # the failed items follow it. And what the review is told beside the card's D<n> lines.
 DWFIX='# The Done-when check failed: fix these items, and end your reply with the whole `## Done when` section again
