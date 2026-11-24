@@ -29,3 +29,9 @@ for f in conveyor/lib/testrules.sh conveyor/commands/test-settings.sh; do
   jq -e --arg f "$f" --arg t conveyor/tests/testhistory.test.sh '.sources[$f] // [] | index($t)' <<< "$got" > /dev/null \
     && echo "ok - a change to $f runs testhistory.test.sh" || { echo "not ok - a change to $f does not run testhistory.test.sh"; exit 1; }
 done
+# Bug it catches: mainredhold.test.sh runs settle() of the claim library and turnpick()/cardrun() of the run library,
+# but the map listed it under neither area, so a card changing only one of those files did not run it.
+for f in conveyor/lib/claim.sh conveyor/lib/run.sh; do
+  jq -e --arg f "$f" --arg t conveyor/tests/mainredhold.test.sh '.sources[$f] // [] | index($t)' <<< "$got" > /dev/null \
+    && echo "ok - a change to $f runs mainredhold.test.sh" || { echo "not ok - a change to $f does not run mainredhold.test.sh"; exit 1; }
+done
