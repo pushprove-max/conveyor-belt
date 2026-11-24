@@ -431,7 +431,9 @@ test('Plan a run, one run of both guards on one login: the share used is spread 
 // shared: true) priced each trial from Conveyor's start alone over its 100 trials: 1 / 100, the plan's 900 trials of both
 // guards 9%, and 31 - 9 left over the stop 20, so the plan fit. And each guard took its own start (Conveyor 32, Claude 40,
 // read apart before the login was shared): 1 / 300 a trial, 3%, and the plan fit. The pool's one start is 40: 9 / 300 a
-// trial, 27%, and 31 - 27 is under the stop 20.
+// trial, 27%, and 31 - 27 is under the stop 20. A pool that leaves out the agent trials (9 / 100 a trial) is under the
+// stop as well at 900 trials, so the plan of 150 tasks (200 trials) tells them apart: 9 / 300 needs 6% and fits; 9 / 100
+// needs 18%, and 31 - 18 is under the stop 20.
 test('Plan a run, a run whose login became shared during it: the pool is measured from one start, over the trials of both', async () => {
   const set = BH.study();
   set.hist.weekLeft = { conveyor: 31, agent: 31, shared: true, stop: 20 };
@@ -440,6 +442,8 @@ test('Plan a run, a run whose login became shared during it: the pool is measure
   const w = await opened(set, 'plan');
   const n = act(bp(w), 'plan-n'); n.value = '500'; n.dispatchEvent(new w.Event('input'));
   assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1], 'would reach the guard; the run stops there', '900 trials of both guards at 9 / 300 a trial: 27% of 31, stop 20');
+  n.value = '150'; n.dispatchEvent(new w.Event('input'));
+  assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1], 'fits in the week left', '200 trials of both guards at 9 / 300 a trial: 6% of 31, stop 20 (9 / 100, the Conveyor trials alone, needs 18%)');
 });
 
 // Bug it guards (#1223): a run from before the engine kept the share of the week left gave the chip nothing to say: it said
