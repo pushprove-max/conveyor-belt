@@ -385,7 +385,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
   if [ -s "$1.wide" ]; then
     wb=''; { read -r wn; read -r f; read -r wb; } < "$1.wide"; [ -n "$f" ] || f=$(sed -n 's/^== //p' "$1.testlog/files" 2>/dev/null | tail -n 1)
     if [[ $wb == 'begun '* ]]; then narrowstop "the test command, given $TEST_GIVEN test file(s), reported $f $wn times, though its run began it ${wb#begun } time(s): another file, run alone by test.fileCommand, ran it too, so its run was stopped" > "$1.stop"
-    elif [ -n "$f" ] && [ "$wn" -le "$TEST_GIVEN" ] 2>/dev/null; then narrowstop "the test command, given $TEST_GIVEN test file(s) one at a time, reported $wn test files before it had begun them all: $f, run alone by test.fileCommand, ran test files it is not given, so its run was stopped" > "$1.stop"
+    elif [ -n "$f" ] && [ "$wn" -le "$TEST_GIVEN" ] 2>/dev/null; then narrowstop "the test command, given $TEST_GIVEN test file(s), reported $wn test files before it had begun them all: $f, run alone by test.fileCommand, ran test files it is not given, so its run was stopped" > "$1.stop"
     elif [ -n "$f" ]; then narrowstop "the test command, given $TEST_GIVEN test file(s), reported $wn test files: $f, run alone by test.fileCommand, ran test files it is not given, so its run was stopped" > "$1.stop"
     else narrowstop "the test command, given $TEST_GIVEN test file(s), reported $wn test files: it runs test files it is not given, so its run was stopped" > "$1.stop"; fi
     cat "$1.stop" >> "$1.test"; [ -n "$SLOT_HOME" ] || slot_free; slot_unask; return 1

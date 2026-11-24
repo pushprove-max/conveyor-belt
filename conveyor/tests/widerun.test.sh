@@ -66,7 +66,7 @@ t_wideeach() {
   wideproof 'for f in a b; do echo "-- ok $f.test.sh" >> "$CONVEYOR_TEST_LOG/inner"; done; sleep 30; :' two # sleep: a long invocation, which the stop cuts
   lim=$(loadlimit 25 30) # under the first invocation's 30 s
   [ $((SECONDS - s)) -lt "$lim" ] && [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the invocation given a.test.sh that ran both files was not stopped, or the check did not fail with exit 2 (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s; limit $lim s: 25 s times the load factor $CASE_LOAD)"
-  head -n 1 "$T/$CASE/unfixed" | grep -qE '^a card runs each of its test files alone, and the test command, given 2 test file\(s\) one at a time, reported 2 test files before it had begun them all: a\.test\.sh, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' \
+  head -n 1 "$T/$CASE/unfixed" | grep -qE '^a card runs each of its test files alone, and the test command, given 2 test file\(s\), reported 2 test files before it had begun them all: a\.test\.sh, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' \
     || fail "the check's result does not begin with the reason naming a.test.sh: $(cat "$T/$CASE/unfixed")"
 }
 
@@ -77,7 +77,7 @@ t_wideeach() {
 t_wideeachfast() {
   wideproof 'for f in a b; do echo "-- ok $f.test.sh" >> "$CONVEYOR_TEST_LOG/inner"; done; :' two
   [ "$(cat "$T/$CASE/rc")" = 2 ] || fail "the check of a run whose first invocation reported both files and ended did not fail with exit 2 (exit $(cat "$T/$CASE/rc")): $(head -n 3 "$T/$CASE/unfixed")"
-  head -n 1 "$T/$CASE/unfixed" | grep -qE '^a card runs each of its test files alone, and the test command, given 2 test file\(s\) one at a time, reported 2 test files before it had begun them all: a\.test\.sh, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' \
+  head -n 1 "$T/$CASE/unfixed" | grep -qE '^a card runs each of its test files alone, and the test command, given 2 test file\(s\), reported 2 test files before it had begun them all: a\.test\.sh, run alone by test\.fileCommand, ran test files it is not given, so its run was stopped; ' \
     || fail "the check's result does not begin with the reason naming a.test.sh: $(cat "$T/$CASE/unfixed")"
 }
 
