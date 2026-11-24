@@ -158,6 +158,23 @@ t_reviewkeepfull() {
   [ -s "$CODEX_HOME/sessions/d/rollout-1-th1.jsonl" ] && ! grep -qE 'its events are kept in|its words below|kept events' "$T/$CASE/run.out" \
     || fail "a failed review that could not be kept lost its session file, or named an events file, or sent staff to words that are not there: $(ls "$CODEX_HOME/sessions/d") $(cat "$T/$CASE/run.out")"
 }
+# Bug: an err file that could not be copied (a full disk) made reviewkeep() print no note, though the events file was
+# already kept: the reason did not name it, and nostartsaid() said the CLI's words could not be kept. A read-only err
+# already in the kept folder stands in for the full disk; the events copy before it works.
+# Bug: nostartsaid() then sent staff to the kept err file for the CLI's words, though the err (where Codex may write them
+# alone) was not kept.
+t_reviewkeeperr() {
+  setup '[]'; local w=$T/$CASE/c11-11 k=$ST/kept/c11-11
+  echo '{"type":"error"}' > "$w.events"; echo 'stderr' > "$w.err"
+  mkdir -p "$k"; : > "$k/c11-11.review.err"; chmod a-w "$k/c11-11.review.err"
+  fx_in "n=\$(reviewkeep '$w' ''); echo \"rc \$?\"; NOSTART_WHY='fix what its words below say' nostartsaid \"\$n\""
+  chmod u+w "$k/c11-11.review.err" 2>/dev/null
+  grep -qx 'rc 1' "$T/$CASE/run.out" && grep -qF '; its events are kept in c11-11.review.events' "$T/$CASE/run.out" && grep -qF '"error"' "$k/c11-11.review.events" \
+    || fail "reviewkeep $w '' with an err that could not be copied did not fail with 1 and name the kept events file: $(cat "$T/$CASE/run.out")"
+  grep -qF 'fix what its words in the kept events file (its err could not be kept) say; its events are kept in c11-11.review.events' "$T/$CASE/run.out" \
+    && ! grep -qF 'events or err file' "$T/$CASE/run.out" \
+    || fail "nostartsaid on reviewkeep's note, its err not kept, named the kept err file for the words: $(cat "$T/$CASE/run.out")"
+}
 # Bug: a review that stalled twice replaced its reason with one that dropped the kept events file's name (reviewed(), the
 # second stall). Its own review() is stood in for by one that stalls with the reason codexreview() gives.
 t_reviewkeepstall() {

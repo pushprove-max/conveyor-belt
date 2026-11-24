@@ -92,14 +92,18 @@ review() { # <worktree> <brief> [instructions, in place of REVIEW]
 }
 # A failed Codex review's events, err and session file, copied to the card's kept folder ($ST/kept/<card>) as
 # <card>.review.events, .err and .session (<card>.review-2.events and so on for a later review). Prints "; its events are
-# kept in <name>" with the events file's name in that folder, or nothing when its events or err could not be kept (a reason
+# kept in <name>" with the events file's name in that folder, or nothing when its events could not be kept (a reason
 # that names the events file may point at the err file beside it: nostartsaid()). Fails when any of the three could not be
 # copied: the caller then leaves the session file where Codex wrote it, as the only copy.
 reviewkeep() { # <worktree> <session file, or "">
   local c=${1##*/} d n=1 b rc=0
   d=$ST/kept/$c; b=$c.review; while [ -e "$d/$b.events" ]; do n=$((n + 1)); b=$c.review-$n; done
-  mkdir -p "$d" 2>/dev/null && cp "$1.events" "$d/$b.events" 2>/dev/null && cp "$1.err" "$d/$b.err" 2>/dev/null \
-    || { echo "conveyor: card $c: a failed review's events or err could not be kept in $d" >&2; return 1; }
+  mkdir -p "$d" 2>/dev/null && cp "$1.events" "$d/$b.events" 2>/dev/null \
+    || { echo "conveyor: card $c: a failed review's events could not be kept in $d" >&2; return 1; }
+  # Bug: the err copy was in the events copy's chain, so an err that could not be copied (a full disk) dropped the note
+  # of an events file already kept, and nostartsaid() said the words could not be kept. A part copy is removed: no err in
+  # the kept folder tells nostartsaid() that the err was not kept.
+  cp "$1.err" "$d/$b.err" 2>/dev/null || { rm -f "$d/$b.err"; echo "conveyor: card $c: a failed review's err could not be kept in $d" >&2; rc=1; }
   [ -z "$2" ] || cp "$2" "$d/$b.session" 2>/dev/null || { echo "conveyor: card $c: a failed review's session file could not be kept in $d" >&2; rc=1; }
   printf '; its events are kept in %s' "$b.events"; return $rc
 }
@@ -112,10 +116,12 @@ keptnote() { # <reason text>
 }
 # nostart()'s reason (NOSTART_WHY) with no word of the CLI's: its first line alone, naming the kept events or err file
 # (reviewkeep()) where it pointed at "its words below": the CLI's words are in its events, or in its err when it wrote them
-# to stderr alone. With no note (nothing was kept) it says the words could not be kept, not that they are below.
+# to stderr alone. With no note (nothing was kept) it says the words could not be kept, not that they are below. With no
+# err beside the kept events file (its copy failed), it says the err could not be kept: the words may be only there.
 nostartsaid() { # <reviewkeep()'s note>
-  local w=${NOSTART_WHY%%$'\n'*} where='its words, which could not be kept,'
+  local w=${NOSTART_WHY%%$'\n'*} where='its words, which could not be kept,' n=${1##*; its events are kept in }
   [ -z "$1" ] || where='its words in the kept events or err file'
+  [ -z "$1" ] || [ -e "$ST/kept/${n%.review*}/${n%.events}.err" ] || where='its words in the kept events file (its err could not be kept)'
   printf '%s%s' "${w//its words below/$where}" "$1"
 }
 codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex review, ending as review() says
