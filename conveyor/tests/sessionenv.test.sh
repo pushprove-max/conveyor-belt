@@ -49,3 +49,25 @@ EOF
   done
   [[ $a != *WebFetch* && $a != *WebSearch* ]] || fail "the builder is not given WebFetch or WebSearch: $a"
 }
+
+# The rule Only the Test step runs tests reaches the card's command guard as CONVEYOR_TESTSTEPONLY, which builder()
+# sets from the record the card started on (CARDCTL). Bugs it catches: with the rule on, the guard was not told, so the
+# session's test commands still ran; or a 1 the loop's own shell inherited reached a card whose rule is off.
+t_sessionteststep() {
+  local out
+  setup "[$(issue 7 2026-01-01)]"
+  # stub: one line per call, the rule the session was given; any call answers one result line.
+  cat > "$STUB/claude" <<'EOF'
+#!/usr/bin/env bash
+cat > /dev/null; echo "${CONVEYOR_TESTSTEPONLY:-unset}" >> "$STUB/calls"
+echo '{"type":"result","is_error":false,"result":"done","num_turns":1,"usage":{"input_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":2}}'
+EOF
+  chmod +x "$STUB/claude"; mkdir -p "$T/$CASE/cards"
+  out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards CONVEYOR_TESTSTEPONLY=1
+    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names || exit 1
+    w=$CARDS/c7 && git -C "$MAIN" worktree add -q --detach "$w" || exit 1
+    ( CARDCTL='{"rules": {"teststeponly": false}}' builder "$w" brief m medium "" claude )
+    ( CARDCTL='{"rules": {"teststeponly": true}}' builder "$w" brief m medium "" claude ) ) 2>&1 )
+  [ "$(paste -sd ' ' "$STUB/calls" 2>/dev/null)" = '0 1' ] \
+    || fail "the builder sessions (rule off, then on) were not given CONVEYOR_TESTSTEPONLY 0 then 1: $(cat "$STUB/calls" 2>&1) $out"
+}

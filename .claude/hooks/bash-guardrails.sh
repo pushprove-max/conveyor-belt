@@ -1009,6 +1009,15 @@ if [ -n "${CONVEYOR_CARD:-}" ] && WR_PACK=$(cat "${CLAUDE_PROJECT_DIR:-.}/.conve
       node) printf '%s\n' "${WR_W[@]}" | grep -qx -- '--test' && WR_TESTS=1 ;;
       python|python3|npx|pnpx|bunx|yarn|pnpm) case "${WR_ARGS[0]:-}" in pytest|vitest|jest) WR_TESTS=1 ;; esac ;;
     esac
+    # The rule Only the Test step runs tests on (CONVEYOR_TESTSTEPONLY=1, set by conveyor/lib/session.sh builder()
+    # from teststeponly(), lib/prompts.sh): a card's session runs no test at all, a named case or file included. A
+    # test command is one of those above, or one of the pack's own (WR_PACKRUN, test.wholeCommands).
+    if [ "${CONVEYOR_TESTSTEPONLY:-}" = 1 ]; then
+      WR_ONE=$WR_TESTS
+      for WR_C in "${WR_PACKRUN[@]}" "${WR_WHOLE[@]}"; do [ "$WR_ONE" = 1 ] || ! wr_cmd "$WR_HEAD" "$WR_C" || WR_ONE=1; done
+      [ "$WR_ONE" = 0 ] || { echo "BLOCKED: ${WR_HEAD##*/} runs tests. The rule Only the Test step runs tests is on: a card's session runs no tests, the Test step runs the tests the change touches after the session.
+Instead: read the last Test step's result, the file <worktree>.test beside this worktree (none yet when no Test step has run)." >&2; exit 2; }
+    fi
     [ "$WR_TESTS" = 0 ] || [ "$WR_SB" = 1 ] || WR_PLAIN=1
     for WR_C in "${WR_PACKRUN[@]}"; do wr_cmd "$WR_HEAD" "$WR_C" && [ "$WR_SB" = 0 ] && WR_PLAIN=1; done
     [ "$WR_ST" = 0 ] || WR_TESTS=1

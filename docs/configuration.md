@@ -256,7 +256,8 @@ or rebase session gets do not tell the session to run tests. Conveyor leaves out
 starts with the line `Your own test runs, in a build or fix session:`. This applies to `conveyor/rules/card-core.md`,
 to your `.conveyor/card-rules.md` and to your area rule files. In place of these paragraphs, the rules say that the
 Test step runs the tests, and that the session reads the result of the last Test step. That result is in the file
-`<worktree>.test` beside the card's worktree. Put your own rules about test runs in a paragraph that starts with
+`<worktree>.test` beside the card's worktree. The card's command guard also refuses each test command that the
+session gives: a named case, the changed tests or a named test file. Put your own rules about test runs in a paragraph that starts with
 that line. When the rule is off, a session gets the rules as the files hold them. The Rules tab's row in Capacity
 sets the rule, as do `conveyor.sh control rules teststeponly=on` and `teststeponly=off`.
 
