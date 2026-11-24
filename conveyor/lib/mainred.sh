@@ -164,7 +164,7 @@ mainprobe() { # <name> <units, json> <units no control is taken from, json> <oth
   [ -z "$rc" ] || m=$(jq -cn --arg sha "$sha" --argjson s "$s" --argjson rc "$rc" '{sha: $sha, sec: $s, exit: $rc}')
 }
 # Keeps in $MAINPROBE, under a lock of its own, the results of mainprobe()'s run of <units> (its sha, dk, hits, ctl,
-# mf): those of a file cachehits() names or that ran out of time are not kept. Results at main's kept commit and
+# mf): those of a file cachehits() names or that ran out of time (testfails() timeout and stopped) are not kept. Results at main's kept commit and
 # dependency state are added to the kept ones; those of another commit or state replace them only while it is main's commit.
 mainkeep() { # <name> <units, json>
   local k
@@ -172,7 +172,7 @@ mainkeep() { # <name> <units, json>
   jq -cn --slurpfile o <(jq -ce objects "$MAINPROBE" 2>/dev/null) --arg s "$sha" --arg d "${dk-}" --arg now "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" \
     --slurpfile u <(printf '%s' "$2") --slurpfile h <(printf '%s' "$hits") --slurpfile c <(printf '%s' "$ctl") --slurpfile m <(printf '%s' "$mf") \
     '($o[0] // {}) as $o | $h[0] as $h | $m[0] as $m
-      | ([$u[0][].file] | unique - $h - [$m.timeout.file // empty] | map({key: ., value: {ctl: $c[0], res: (. as $f | first($m.files[]? | select(.file == $f)) // null)}}) | from_entries) as $new
+      | ([$u[0][].file] | unique - $h - ($m.stopped // []) - [$m.timeout.file // empty] | map({key: ., value: {ctl: $c[0], res: (. as $f | first($m.files[]? | select(.file == $f)) // null)}}) | from_entries) as $new
       | if $o.sha == $s and $o.deps == $d then $o | .files += $new elif $s == $now then {sha: $s, deps: $d, hits: $h, files: $new} else empty end' > "$MAINPROBE.new" \
     && { [ ! -s "$MAINPROBE.new" ] || mv -f "$MAINPROBE.new" "$MAINPROBE"; } || echo "conveyor: card $1: its run on main could not be kept for the other cards" >&2
   rm -f "$MAINPROBE.new"; exec {k}>&-
@@ -374,7 +374,7 @@ redrun() { # <worktree> <cases json>
   local own=false; ! testlogs "$1" | grep -qvxF "$1.testlog/files" || own=true # a log of the runner's own, beside filecmd()'s
   jq -c --slurpfile t <(printf '%s' "$t") --argjson rc "$rc" --argjson own "$own" '$t[0] as $t | def of($x): . == $x.file or ($x.case != "" and IN($x.files[]?; .));
     map(. as $c | . + {verdict: (if $t == null then (if $rc == 0 then "pass" else "fail" end)
-    elif any($t.files[]?; (.file | of($c)) and ($c.case == "" or ($own | not) or any(.cases[]?; .name == $c.case))) or $t.timeout.file? == $c.file then "fail"
+    elif any($t.files[]?; (.file | of($c)) and ($c.case == "" or ($own | not) or any(.cases[]?; .name == $c.case))) or $t.timeout.file? == $c.file or IN(($t.stopped? // [])[]; $c.file) then "fail"
     elif (($c.case == "" or ($own | not)) and any($t.passed[]?; . == $c.file)) or any(($t.okcases // []) + ($t.passcases // []) | .[]; (.file | of($c)) and any(.cases[]?; . == $c.case)) then "pass"
     else "none" end)})' <<<"$2"
 }

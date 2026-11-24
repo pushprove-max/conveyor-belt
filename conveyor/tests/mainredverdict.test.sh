@@ -49,6 +49,29 @@ t_mainredstopped() {
     || fail "with c.test and d.test both stopped by the time limit, each did not get main's verdict: $out: $(cat "$STUB/redlist" 2>&1)"
 }
 
+# Bug (E6, follow-up of #1594): main's run stopped c.test and d.test at their time limits (testfails() stopped; timeout
+# names only d.test). mainkeep() left out only timeout's file, so it kept c.test as passed on main (res null), and the
+# next card's probe took that result and did not run c.test there. Only a.test, which ended, is kept.
+t_mainkeepstopped() {
+  local mf='{"files":[],"timeout":{"sec":1,"file":"d.test"},"stopped":["c.test","d.test"]}' u='[{"file":"a.test","case":null},{"file":"c.test","case":null},{"file":"d.test","case":null}]' out
+  mrshared
+  out=$(eng 'rm -f "$MAINPROBE"; sha='"$s"' dk="" hits="[]" ctl="[]" mf='"'$mf'"'; mainkeep c7 '"'$u'"'; jq -c ".files | keys" "$MAINPROBE"' 2>&1)
+  [ "$out" = '["a.test"]' ] || fail "mainkeep of units $u after main's run $mf kept files other than a.test: $out"
+}
+
+# Bug (E6, follow-up of #1594): redrun() read timeout alone, so of two files the time limit stopped (testfails()
+# stopped), the one timeout did not name got the verdict none, not fail. The stand-in tests() ends as a time-out does
+# (124) and testfails() names both files stopped: each file's verdict is fail.
+t_redrunstopped() {
+  local got c='[{"name":"c.test","file":"c.test","files":[],"case":""},{"name":"d.test","file":"d.test","files":[],"case":""}]'
+  mkdir -p "$T/$CASE"
+  got=$( cd "$T/$CASE" && eval "$(sed -n '/^redrun() {/,/^}/p' "$SRC/lib/mainred.sh")"
+    names() { :; }; tests() { mkdir -p "$1.testlog" && : > "$1.testlog/a.log"; return 124; }; testlogs() { echo "$1.testlog/a.log"; }
+    testfails() { echo '{"files":[],"timeout":{"sec":1,"file":"d.test"},"stopped":["c.test","d.test"]}'; }
+    redrun "$T/$CASE/wt" "$c" | jq -c 'map(.verdict)' ) || fail "redrun() did not run: $got"
+  [ "$got" = '["fail","fail"]' ] || fail "redrun of $c, with testfails() naming c.test and d.test stopped, did not fail both: $got"
+}
+
 # bkinit <text of tests/x.test.sh>: the case's repository, with that test file. bkland <card> <issue> <the rest of its
 # test line, as JSON>: a landing of that card that changes lib/a.sh, with its test line and landed line in the case's
 # card records. bkblame <case>: the card brokeby() blames for <case> of tests/x.test.sh at HEAD, as brokeby() reads them.
