@@ -632,8 +632,9 @@ test('an earlier attempt blocked by a cut finding keeps the last word its review
   const line = (head, tail) => `${head} Proof: ${'x '.repeat(150)}`.slice(0, 300 - tail.length - 1).trimEnd().padEnd(299 - tail.length, 'x') + ` ${tail}`;
   const check = line('[P1] [E1] conveyor/bench/a.sh:584 A running session meets the wait check.', 'The same check'), calls = line('[P0] conveyor/lib/a.sh:12 The rule fires.', 'the reason calls');
   const halfWord = line('[P1] [E1] conveyor/lib/b.sh:9 A slot is freed.', 'it acce');
-  const said = [`${check} accepts an idle field.`, `${calls} the finding a gap.`, `${halfWord}pts it.`, '[P2] c.txt:3 other'];
-  for (const l of [check, calls, halfWord]) assert.equal([...l].length, 300, `the fixture's cut is 300 characters: ${l}`);
+  const notice = line('[P2] conveyor/lib/c.sh:4 The hold ends.', 'with no notice'), span = line('[P2] conveyor/lib/d.sh:7 The pack is read.', 'from `.inputs`');
+  const said = [`${check} accepts an idle field.`, `${calls} the finding a gap.`, `${halfWord}pts it.`, `${notice}.`, `${span}, then more.`, '[P2] c.txt:3 other'];
+  for (const l of [check, calls, halfWord, notice, span]) assert.equal([...l].length, 300, `the fixture's cut is 300 characters: ${l}`);
   // As in the saved cases, review 1 holds another finding and the blocking one is in review 2: a Board that reads only
   // the first review drops the word.
   const records = [{ name: 'review 1 (NO-GO)', state: 'done', sec: 30, at: iso(T0 - 2700000), output: '[P2] d.txt:1 an earlier finding' },
@@ -647,6 +648,15 @@ test('an earlier attempt blocked by a cut finding keeps the last word its review
   prior.reason = `review 2 is the last review and still holds a P0 finding, so it files no follow-up: ${calls}`;
   next(w, data);
   assert.ok(proof().endsWith('x the reason calls…'), `the last review's form keeps "calls": ${proof().slice(-30)} for ${prior.reason}`);
+  // A cut before closing marks keeps the word or code span whole ("notice." and "`.inputs`,"): a check that takes only
+  // a space after the cut as whole dropped "notice" and the closed `.inputs` span. The "notice" line ends at its ".", as
+  // in the saved case, so a check that wants a space after the marks drops it too.
+  prior.reason = `the fix for ${notice} did not hold after 1 round`;
+  next(w, data);
+  assert.ok(proof().endsWith('x with no notice…'), `a word before "." stays whole: ${proof().slice(-30)} for ${prior.reason}`);
+  prior.reason = `the fix for ${span} did not hold after 1 round`;
+  next(w, data);
+  assert.ok(proof().endsWith('x from .inputs…'), `a closed code span before "," stays whole: ${proof().slice(-30)} for ${prior.reason}`);
   // The record also shows a half word as half: "acce" of "accepts" goes.
   prior.reason = `the fix for ${halfWord} did not hold after 1 round`;
   next(w, data);
