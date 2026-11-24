@@ -106,6 +106,14 @@ refused "gh issue create --label bug --body \$'  ~~~\n ## Cause\n~~~'"
 refused "gh issue create --label bug --body \$'~~~\n~~~\"\n ## Cause\n~~~'"
 # A `<<` inside a quoted title is no here-document: the body's written \n are still line breaks, so its fence is read.
 refused "gh issue create --label bug --title 'Fix << handling' --body \$'~~~\n ## Cause\n~~~'"
+# Bug: a fence after the quote of a title ('~~~ handling') opened a block that never closed, so the body's real Cause
+# and What happens now were hidden and a valid fix was refused. A quoted text that closes on its line holds no block.
+passes "gh issue create --label bug --title '~~~ handling' --body \$'## What happens now\nThe form fails.\n## Cause\nThe cache is stale.'"
+# Bug: a written \n in that title became a line break before the scan, so its quote closed on the next line and the
+# block it opened hid the body's Cause. The block ends at the title's closing quote, not at its line.
+passes "gh issue create --label bug --title '~~~ followed by \\n' --body \$'## What happens now\nThe form fails.\n## Cause\nThe cache is stale.'"
+# After such a title closes, the rest of its line is read again: a body fence there still hides the Cause inside it.
+refused "gh issue create --label bug --title '~~~ x\\n' --body \$'~~~\n## Cause\n~~~'"
 # A `\\n` in an inline body is a backslash and an n: it makes no fence that hides a real Cause heading.
 passes "gh issue create --label bug --body \$'The form prints \\\\n~~~ as text.\n## Cause\nThe cache is stale.'"
 # A backtick opener with a backtick in its info string is no fence, so the heading after it counts.

@@ -15,33 +15,49 @@ NO_CAUSE='Not run: a fix issue needs a "## Cause" section, and this one has none
 # or tildes, up to three spaces before them; an opener of backticks has no backtick after them (Markdown). The block ends
 # at a line of that fence character at least as often with nothing after it, or at the end of the text. With <inline> 1
 # (text written in a shell quote, as `--body '...'`) a fence may also follow the quote that opens the body (and up to three
-# spaces), and a closing fence may be followed by the closing quote, where the text goes on after it: <quote> is that
-# quote, or empty for either. With <inline> 0 (a here-document or a body file, whose text is Markdown as written) a quote
-# is no part of a fence.
+# spaces); that block also ends where its quote closes (the next quote of that kind with no backslash before it), and a
+# closing fence may be followed by the closing quote, where the text goes on after it: <quote> is that quote, or empty
+# for either. With <inline> 0 (a here-document or a body file, whose text is Markdown as written) a quote is no part of
+# a fence.
 unfenced() {
   awk -v inline="$1" -v bq="$2" -v q="'" -v dq='"' '
     function strip(x) { sub(/^[ ]?[ ]?[ ]?/, "", x); return x }
     function isq(c) { return bq == "" ? (c == q || c == dq) : c == bq }
-    # fence: the line from its fence, or "" when none starts in it
+    # fence: the line from its fence, or "" when none starts in it; fq is the quote the fence follows, or "" for none
     function fence(line,   c, i) {
-      c = strip(line)
+      fq = ""; c = strip(line)
       if (c ~ /^[`~]/) return c
       if (inline == 1)
         for (i = 1; i < length(line); i++)
-          if (isq(substr(line, i, 1)) && (i == 1 || substr(line, i - 1, 1) ~ /[ \t$]/) && strip(substr(line, i + 1)) ~ /^[`~]/)
-            return strip(substr(line, i + 1))
+          if (isq(substr(line, i, 1)) && (i == 1 || substr(line, i - 1, 1) ~ /[ \t$]/) && strip(substr(line, i + 1)) ~ /^[`~]/) {
+            fq = substr(line, i, 1); return strip(substr(line, i + 1)) }
       return "" }
-    open == "" {
-      c = fence($0); ch = substr(c, 1, 1); k = 0
-      while (ch != "" && substr(c, k + 1, 1) == ch) k++
-      if (k >= 3 && !(ch == "`" && index(substr(c, k + 1), "`"))) { open = ch; n = k; next }
-      print; next }
+    # qend: where the first quote <cq> with no backslash before it is in <s>, or 0 when none is
+    function qend(s, cq,   i) {
+      for (i = 1; i <= length(s); i++)
+        if (substr(s, i, 1) == "\\") i++
+        else if (substr(s, i, 1) == cq) return i
+      return 0 }
     {
-      c = strip($0); k = 0
-      while (substr(c, k + 1, 1) == open) k++
-      r = substr(c, k + 1); sub(/^[ \t]*/, "", r)
-      if (k >= n && r == "") open = ""
-      else if (k >= n && inline == 1 && isq(substr(r, 1, 1))) { open = ""; print r } }' <<<"$3"
+      line = $0
+      while (1) {
+        if (open == "") {
+          c = fence(line); ch = substr(c, 1, 1); k = 0
+          while (ch != "" && substr(c, k + 1, 1) == ch) k++
+          if (!(k >= 3 && !(ch == "`" && index(substr(c, k + 1), "`")))) { print line; next }
+          open = ch; n = k; oq = fq
+          # A block after a quote can end on its own line (a title of ~~~ and a word): read on after the fence.
+          if (oq == "") next
+          line = substr(c, k + 1); continue }
+        c = strip(line); k = 0
+        while (substr(c, k + 1, 1) == open) k++
+        r = substr(c, k + 1); sub(/^[ \t]*/, "", r)
+        if (k >= n && r == "") { open = ""; next }
+        if (k >= n && inline == 1 && isq(substr(r, 1, 1))) { open = ""; print r; next }
+        # The quote that the block follows ends its text, so the block ends there too: a title whose written \n became a
+        # line break ends at its closing quote, not at its line. The rest of the line is read again from that quote.
+        if (oq == "" || !(j = qend(line, oq))) next
+        open = ""; line = substr(line, j) } }' <<<"$3"
 }
 no_cause() {
   local cmd f t ti=0 fc=
