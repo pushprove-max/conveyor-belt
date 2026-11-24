@@ -152,25 +152,40 @@ no_cause() {
   # allows): after a newline or the quote that opens the body, so '### Cause' and a mention of
   # '## What happens now' in a sentence are no heading.
   # A line inside a fenced code block (``` or ~~~) is no heading: the headings are read from the text without its fences.
-  local hs=$'(^|\n|["\'])[ ]{0,3}##[[:space:]]+' he=$'[ \t]*(\n|$)' hc c=$cmd inl=1 bq='' hd=$'<<-?[ ]*[\'"]?[A-Za-z_][A-Za-z_0-9]*[\'"]?[ ]*\\)*[ ]*\n'
+  local hs=$'(^|\n|["\'])[ ]{0,3}##[[:space:]]+' he=$'[ \t]*(\n|$)' hc='' hd=$'<<-?[ ]*[\'"]?[A-Za-z_][A-Za-z_0-9]*[\'"]?[ ]*\\)*[ ]*\n'
   # A command with a here-document (`<<WORD` ending its line) holds its body as written: `\n` there is text, and a quote
   # ends nothing; so does a body file (read apart from the command). In an inline body a written `\n` in a `$'...'` quote
   # is a line break; elsewhere it is a backslash and an n, which starts or ends no fence and starts no heading (breaks);
   # `\\n` is a backslash and an n. The quote that opens the body is the one that closes it.
-  if [[ $cmd =~ $hd ]]; then inl=0
+  if [[ $cmd =~ $hd ]]; then hc=$(unfenced 0 "" "$cmd")
   else
     # `ask <project> testissue <test file> <title> <body>` has no --body (a `--body` in its text is text): its body is
     # the word after the title. A word is parts with no unquoted space: $'...', '...', "...", a \-escaped character
-    # or a bare one. The last group is the quote that opens the body.
+    # or a bare one. The last group is the quote that opens the body. The words before `ask` or `--body` are matched
+    # whole from the command start (pre), so an `ask ... testissue` or a `--body "` written inside a quote (a gh title)
+    # is text: the body quote comes from the real `--body`.
     local w="((\\\$'([^'\\\\]|\\\\.)*'|'[^']*'|\"([^\"\\\\]|\\\\.)*\"|\\\\.|\\\$[^'\"[:space:]\\\\]|[^[:space:]'\"\\\\\$])+)"
-    if [ "$ti" = 1 ]; then
-      [[ ! $j =~ (^|[[:space:];\&|])ask[[:space:]]+${w}[[:space:]]+[\"\']?testissue[\"\']?[[:space:]]+${w}[[:space:]]+${w}[[:space:]]+\$?([\'\"]) ]] \
-        || bq=${BASH_REMATCH[-1]}
-    else [[ $j =~ (^|[[:space:]])(--body|-b)[[:space:]=]+\$?([\"\']) ]] && bq=${BASH_REMATCH[3]}
-    fi
-    c=$(breaks "$cmd")
+    local pre="^(([[:space:];&|]|${w})*[[:space:];&|])?" rest=$j n at r i e qs=() ats=()
+    local ask="ask[[:space:]]+${w}[[:space:]]+[\"\']?testissue[\"\']?[[:space:]]+${w}[[:space:]]+${w}[[:space:]]+"
+    # A command that files more than one issue has a body quote for each: the longest match finds the last body, and
+    # the text before it is searched again. Each body is read from its `--body` (or `ask`) word with its own quote, so
+    # one body's quote is never used to read another's fences. at: where that word starts in cmd, as j has no line
+    # continuations (each is two characters fewer in j).
+    while [[ $rest =~ ${pre}(${ask}|(--body|-b)[[:space:]=]+)\$?([\'\"]) ]]; do
+      n=${#BASH_REMATCH[1]}; qs=("${BASH_REMATCH[-1]}" "${qs[@]}"); rest=${rest:0:n}
+      at=$n; r=${cmd:0:at}; r=${r//$'\\\n'/}
+      while [ "${#r}" -lt "$n" ]; do at=$((at + n - ${#r})); r=${cmd:0:at}; r=${r//$'\\\n'/}; done
+      ats=("$at" "${ats[@]}")
+    done
+    # The text before the first body is read with it; with no body quote found, either quote may open the body.
+    [ "${#qs[@]}" -gt 0 ] || qs=('')
+    ats[0]=0
+    for i in "${!qs[@]}"; do
+      e=${ats[i + 1]:-${#cmd}}
+      hc+=$(unfenced 1 "${qs[i]}" "$(breaks "${cmd:ats[i]:e - ats[i]}")")$'\n'
+    done
   fi
-  hc=$(unfenced "$inl" "$bq" "$c"); hc=${hc//$'\002'/\\n}
+  hc=${hc//$'\002'/\\n}
   [ -z "$fc" ] || hc+=$'\n'$(unfenced 0 "" "$fc")
   [[ $hc =~ ${hs}Cause${he} ]] && return 1
   [[ $hc =~ ${hs}What\ happens\ now${he} || $ti = 1 ]] && return 0

@@ -187,6 +187,26 @@ passes "$(body $'## What happens now\n- First example.\n-  Second example.\n\n  
 refused "$(body $'## What happens now\n1.     Example output\n\n   More of the item.\n2. ~~~\n   ## Cause\n   ~~~')"
 }
 
+# The quote that opens a gh body comes from the real `--body`: an `ask ... testissue` or a `--body "` in the title is text.
+t_quote() {
+case_ quote
+# Bug (#1510 review): `ask ... testissue` in a gh title was read as the command, so `--body` was skipped: no body quote
+# was set and `~~~"` closed the fence; in the second, the title's `'c'` set it to `'`, so the `"~~~` fence was none.
+refused "gh issue create --label bug --title 'Fix ask conveyor-belt testissue' --body \$'~~~\n~~~\"\n ## Cause\n~~~'"
+refused "gh issue create --label bug --title \"Fix ask p testissue a b 'c'\" --body \"~~~
+ ## Cause
+~~~\""
+# Bug (review E1): a `--body "` inside the title set the body quote to `"`, so the `$'...'` body's fence was not read.
+refused "gh issue create --label bug --title 'Document ask conveyor-belt testissue and the --body \"flag\"' --body \$'~~~\n ## Cause\n~~~'"
+# Bug (review E2): in a command that files two issues, the last body's quote (`"`) was used for both, so the first
+# body's `$'~~~` fence was none and its ` ## Cause` counted; the same with an `ask ... testissue` body's quote, and
+# line continuations before the second issue's words.
+refused "gh issue create --label bug --title Fix --body \$'~~~\n ## Cause\n~~~'; gh issue create --title Docs --body \"Summary\""
+refused "gh issue create --label bug --title Fix \\
+--body \$'~~~\n ## Cause\n~~~'; \\
+foreman.sh ask alpha testissue conveyor/x.test.sh Slow \"Summary\""
+}
+
 # unfenced <inline> <quote> <text> keeps what is outside the fences and reads on after each block ends.
 t_fence() {
 CASE=fence
@@ -287,6 +307,7 @@ grep -qxF conveyor/foreman/filing-cause.test.sh <(tail -n +2 "$W/list") \
 }
 
 cases=(what heading list fence bug new linked)
+cases=(what heading quote fence bug new linked)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"
