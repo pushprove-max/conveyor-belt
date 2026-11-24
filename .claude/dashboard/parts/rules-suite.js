@@ -173,6 +173,18 @@
     el.append(row('failfast', name, "a card's test step ends at its first failed case and names the test files it did not run; a release runs every case",
       seg(name, fOn, fOff), note));
   }
+  // Only the Test step runs tests: the record's rules.teststeponly (`control rules teststeponly=on|off`). Off (the
+  // default), a session's card rules say how it runs its own tests; On, they say the Test step runs them and the session
+  // reads the last Test step's result. A record without it is drawn disabled.
+  function rulesTestStepOnly(el, r) {
+    const h = S.ctx.h, on = r.teststeponly === true, known = typeof r.teststeponly === 'boolean', name = 'Only the Test step runs tests';
+    const tOn = choice('On', 'teststeponly-on', `${name}: on`, on, () => { if (!on) send('rules', ['teststeponly=on'], null, ['rules', ['teststeponly=off']]); });
+    const tOff = choice('Off', 'teststeponly-off', `${name}: off`, !on, () => { if (on) send('rules', ['teststeponly=off'], null, ['rules', ['teststeponly=on']]); });
+    tOn.disabled = tOff.disabled = !known;
+    const note = !known ? h('span', 'board-from', 'needs a newer Conveyor') : on ? h('span', 'board-from', "on: a session reads the last Test step's result") : null;
+    el.append(row('teststeponly', name, "a card's sessions do not run tests; the Test step runs them",
+      seg(name, tOn, tOff), note));
+  }
   // A radio of the choice, labelled with its name and what it means.
   function kindRadio(k, name, what, shown, pick) {
     const h = S.ctx.h, lab = h('label', 'rules-suite-kind'), i = h('input');
@@ -222,6 +234,6 @@
   }
   window.DASH_APP.part('rules-suite', function (shared) {
     ({ S, num, send, button, post, row, draw, choice, seg } = shared);
-    return { rulesSuite, rulesMode, rulesFailFast, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
+    return { rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
   });
 })();

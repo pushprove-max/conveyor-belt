@@ -242,9 +242,21 @@ build any condition it gives. Whether a visible change is approved is never your
 water down a change because the issue has no such line. Build what the issue and the findings ask; Conveyor stops the
 card after review when it needs the owner'"'"'s yes, and keeps the work.'
 }
+# The rule Only the Test step runs tests (rules.teststeponly of the control record the card started on, CARDCTL, else
+# the one in force): off by default, and off when the record cannot be read.
+teststeponly() { [ "$(jq -r '.rules.teststeponly' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>/dev/null)" = true ]; }
+# The first line of a paragraph of card rules that tells a session how to run tests (rules/card-core.md, and a pack's
+# own in its card-rules.md or an area rule file), and the paragraph given once in place of all of them with the rule
+# Only the Test step runs tests on (cardrules()). <worktree>.test is the last Test step's output (testrun.sh).
+TESTRUNS='Your own test runs, in a build or fix session:'
+TESTSTEP='The tests, in a build or fix session:
+- Do not run tests. The Test step selects the test files the change touches and runs them after the session. It also runs a failed file on main to find out whether the failure was there before.
+- To know whether the tests pass, read the last Test step'"'"'s result: the file `<worktree>.test` beside this worktree (for the worktree `<dir>/<card>`, the file `<dir>/<card>.test`). When there is no such file, no Test step has run yet.'
 # The card rules (plan section 10): the core rules, then the pack's card-rules.md, then each area rule file the pack's
 # areas map, by path glob, to a path the issue's title or body names, in the pack's order. The pack's files are read
-# from main's checkout, as the pack is; a pack with no card-rules.md adds none. On failure, prints why.
+# from main's checkout, as the pack is; a pack with no card-rules.md adds none. With the rule Only the Test step runs
+# tests on (teststeponly()), each paragraph that starts with the line TESTRUNS (up to its next empty line) is left out,
+# and TESTSTEP stands in place of the first; off, the rules are the files' text. On failure, prints why.
 cardrules() { # <issue json>
   local r t a g f x ps
   r=$(cat "$RULES" 2>/dev/null) && [ -n "${r//[[:space:]]/}" ] || { echo "the card rules file $RULES is missing or empty; a card never builds without it"; return 1; }
@@ -259,6 +271,8 @@ cardrules() { # <issue json>
       r+=$'\n\n'$t; break
     done
   done < <([ -z "$a" ] || jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$a")
+  ! teststeponly || r=$(H=$TESTRUNS T=$TESTSTEP awk '$0 == ENVIRON["H"] { skip = 1; if (!done++) print ENVIRON["T"]; next } skip && !NF { skip = 0 } !skip' <<<"$r") \
+    || { echo "the card rules could not be made for the rule Only the Test step runs tests"; return 1; }
   printf '%s' "$r"
 }
 # The card's settings file (plan section 10), written to <file>: the generic card settings, with the hooks of the

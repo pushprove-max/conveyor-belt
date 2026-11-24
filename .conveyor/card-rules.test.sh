@@ -48,4 +48,15 @@ rule "$T/rules" 'A build or fix that changes a lock, a retry, a snapshot or a me
 # The fix prompt's rule is one sentence: each instruction of it must stay, in its order.
 tr '\n' ' ' < "$T/fix" | tr -s ' ' | grep -qF 'name what must stay true and the other reader or writer, then make the test force that one to act at the weak point through the real caller, and assert the stored state or the outside action, never after a sleep' \
   || { echo 'not ok - the fix prompt fixprompt() returns has no timing rule with all its instructions'; rc=1; }
+# The rule Only the Test step runs tests on (rules.teststeponly). Bug it catches: this project's own lines that tell a
+# session to run its cases and test-changed.sh sit outside the paragraph cardrules() leaves out with the rule on, so a
+# session is still told to run tests.
+( export CONVEYOR_MAIN=$ROOT CONVEYOR_CARDS=$T/cards CARDCTL='{"rules": {"teststeponly": true}}'; . "$ROOT/conveyor/conveyor.sh" state-dir > /dev/null \
+  && eval "$(grep '^\. "\$HERE/lib/' "$ROOT/conveyor/commands/run.sh")" && cardrules '{"title": "t", "body": ""}' > "$T/rules.on" ) 2>&1 \
+  || { echo 'not ok - the card rules could not be made with the rule Only the Test step runs tests on'; exit 1; }
+for w in 'conveyor/conveyor.test.sh <case>' '.conveyor/test-changed.sh` at most once' 'Your own test runs'; do
+  ! grep -qF -- "$w" "$T/rules.on" || { echo "not ok - with the rule Only the Test step runs tests on, this project's card rules still hold \"$w\""; rc=1; }
+done
+grep -qF "read the last Test step's result" "$T/rules.on" \
+  || { echo "not ok - with the rule Only the Test step runs tests on, this project's card rules do not say to read the last Test step's result"; rc=1; }
 exit $rc

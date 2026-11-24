@@ -387,7 +387,10 @@ one control, and the value in force is the selected part.
    ([Where the suite runs](releases.md#where-the-suite-runs)). **Stop a card's tests at the first failure** is On
    by default. On, a card's test step ends at its first failed case, and the step names the test files that did not
    run. Off, the step runs every case that it selects. A release runs every case with either setting
-   ([Which tests a card runs](configuration.md#which-tests-a-card-runs)). **Reserved cores**
+   ([Which tests a card runs](configuration.md#which-tests-a-card-runs)). **Only the Test step runs tests** is Off
+   by default. On, the rules that a card's sessions get do not tell them to run tests. The rules say that the Test
+   step runs the tests, and that a session reads the result of the last Test step. Off, the sessions get the usual
+   rules and run the tests of their change. **Reserved cores**
    shows the cores that card work does not use. You set them in the host file
    ([Reserved cores](configuration.md#cores-kept-for-you)). The row also links to the Tests page, which holds the test
    limits.

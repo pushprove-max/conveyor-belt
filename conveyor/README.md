@@ -60,6 +60,10 @@ its own, and the Board's Rules tab sets them in its Judge row.
   file, so the cases after the failed one run too; its cases that passed run again too, unless the test command
   leaves out the cases that its `CONVEYOR_TEST_RERUN` list names as passed. Off, the step runs every case that it
   selects. A release's suite runs every case with either setting.
+- `teststeponly`: the rule Only the Test step runs tests, off by default. On, the card rules of each session leave out
+  each paragraph that starts with the line `Your own test runs, in a build or fix session:`. In their place, the rules
+  say that the Test step runs the tests and that a session reads the last Test step's result. Off, the card rules are
+  the text of their files.
 - `split`: the rule Split large issues, `off`, `shadow` or `on`. It is on by default (`conveyor.sh control rules split=<off|shadow|on>`).
   Before a card builds, code measures its issue against the pack's `split` limits; an issue that reaches
   one goes to the judge one time, which answers keep or 2 or 3 slices. Shadow records the verdict on the card's

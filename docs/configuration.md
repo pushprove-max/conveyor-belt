@@ -251,6 +251,15 @@ after the failed one run too. The cases of that file that passed run again too, 
 out one case of a file. When the rule is off, the card runs every case that it selects. A release's suite runs every case with either setting. The Rules tab's row in
 Capacity sets the rule, as do `conveyor.sh control rules failfast=off` and `failfast=on`.
 
+The rule **Only the Test step runs tests** is off in a new project. When it is on, the card rules that a build, fix
+or rebase session gets do not tell the session to run tests. Conveyor leaves out each paragraph of the rules that
+starts with the line `Your own test runs, in a build or fix session:`. This applies to `conveyor/rules/card-core.md`,
+to your `.conveyor/card-rules.md` and to your area rule files. In place of these paragraphs, the rules say that the
+Test step runs the tests, and that the session reads the result of the last Test step. That result is in the file
+`<worktree>.test` beside the card's worktree. Put your own rules about test runs in a paragraph that starts with
+that line. When the rule is off, a session gets the rules as the files hold them. The Rules tab's row in Capacity
+sets the rule, as do `conveyor.sh control rules teststeponly=on` and `teststeponly=off`.
+
 When a run fails, the card runs again only the files that did not pass. After a fix session that changed the card's
 change, every file of its list runs again. A test file with a failed case in the run before the fix can also run
 again, though the fix did not change it. This occurs when the card's change links the file to a changed file.

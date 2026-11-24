@@ -73,6 +73,30 @@ t_contextrules() {
     || fail "the core card rules do not tell a session to batch many similar actions into one script: $s"
 }
 
+# The rule Only the Test step runs tests (rules.teststeponly, set by `control rules`). Bug it catches: with the rule on,
+# a session's rules still told it to run its cases (the core's paragraph or a project's own), so it spent its turns on
+# the runs the Test step makes anyway; or the rule, off by default, changed the rules a session gets.
+t_teststeponly() {
+  local head='Your own test runs, in a build or fix session:' core own
+  setup "[]"
+  # The project's own test-run paragraph, between two of its other rules.
+  printf '\n%s\n- PACK-TEST-RUN: run `bash t.sh <case>`.\n  PACK-TEST-RUN-WRAP.\n\n- PACK-AFTER: kept.\n' "$head" >> "$R/.conveyor/card-rules.md"
+  core=$(cat "$SRC/rules/card-core.md"); own=$(cat "$R/.conveyor/card-rules.md")
+  grep -qxF "$head" <<<"$core" || fail "the core card rules have no paragraph that starts: $head"
+  fx_in 'cardrules "{\"title\": \"t\", \"body\": \"\"}" > "$T/$CASE/rules.off"'; [ "$RC" = 0 ] || fail "the card rules could not be made: $(cat "$T/$CASE/run.out")"
+  [ "$(cat "$T/$CASE/rules.off")" = "$core"$'\n\n'"$own" ] || fail "with the rule off (the default), the rules are not the files' text: $(cat "$T/$CASE/rules.off")"
+  loop control rules teststeponly=on > /dev/null && [ "$(loop control | jq -c .rules.teststeponly)" = true ] \
+    || fail "control rules teststeponly=on did not set the rule on: $(loop control | jq -c .rules)"
+  fx_in 'cardrules "{\"title\": \"t\", \"body\": \"\"}" > "$T/$CASE/rules.on"'; [ "$RC" = 0 ] || fail "the card rules could not be made with the rule on: $(cat "$T/$CASE/run.out")"
+  local r; r=$(cat "$T/$CASE/rules.on")
+  ! grep -qF -e "$head" -e 'conveyor/conveyor.test.sh <case>' -e 'Run only the cases the change adds' -e PACK-TEST-RUN <<<"$r" \
+    || fail "with the rule on, the rules still tell a session to run tests: $r"
+  [ "$(grep -cxF 'The tests, in a build or fix session:' <<<"$r")" = 1 ] && grep -qF "read the last Test step's result: the file \`<worktree>.test\`" <<<"$r" \
+    || fail "with the rule on, the rules do not say once that the Test step runs the tests and where its result is: $r"
+  grep -qF '`testbrief.sh -- <command>`' <<<"$r" && grep -qxF -- '- PACK-AFTER: kept.' <<<"$r" && grep -qxF -- '- PACK-CARD-RULE: the test pack'"'"'s own rule, given to every card after the core rules.' <<<"$r" \
+    || fail "with the rule on, a rule after a test-run paragraph was left out too: $r"
+}
+
 # Bug: the first rule forbade "error handling the issue does not ask for", so builders left out the handling the
 # reviewer then asked for, and the builder was never told the review's angles, so most first reviews were a no-go. The
 # core rules let the changed code have the handling it needs and ask one read of the staged change on the review's

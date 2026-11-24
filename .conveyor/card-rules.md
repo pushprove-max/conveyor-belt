@@ -23,12 +23,6 @@
 - A case that proves one engine function calls that function; a whole card run is kept for what only a whole card
   proves: a card run pays for the loop, its sessions and waits (`testfails` 76% cut, #362; `testrec` 89%, #371).
 - These three rules, with their measurements, are also in `conveyor/tests/speed/README.md`.
-- In a build or fix session, run the cases you added or changed and the existing cases that cover the code you changed.
-  Chosen engine cases: `timeout 240 bash conveyor/conveyor.test.sh <case> [<case> ...]` (the case is the name after
-  `t_`); a Board test by its own file under `.claude/scripts/__tests__/` (`bash`, `node --test` or `python3` on it).
-- Run `.conveyor/test-changed.sh` at most once in a session, and only when the change touches code shared across areas
-  of the engine. Do not run the whole `conveyor/conveyor.test.sh`: the Test step
-  runs what the change touches before the card lands.
 - A card changes the suite's runner `.conveyor/test-full.sh`, the engine's runner `conveyor/conveyor.test.sh` or the
   pack's `test` settings only when its issue names that file or setting: such a change makes the next release run
   every test file, not only the files that changed or failed (`conveyor/commands/release-prep.sh`). When the card must
@@ -45,3 +39,11 @@
 - No browser tests, by the owner's order of 2026-11-14: no test starts a real or headless browser (Chromium, Chrome,
   playwright, puppeteer), and no Done-when asks for one. The Board's layout is not tested; its tests use jsdom.
   `.conveyor/no-browser-tests.sh` fails any test run that adds one.
+
+Your own test runs, in a build or fix session:
+- In a build or fix session, run the cases you added or changed and the existing cases that cover the code you changed.
+  Chosen engine cases: `timeout 240 bash conveyor/conveyor.test.sh <case> [<case> ...]` (the case is the name after
+  `t_`); a Board test by its own file under `.claude/scripts/__tests__/` (`bash`, `node --test` or `python3` on it).
+- Run `.conveyor/test-changed.sh` at most once in a session, and only when the change touches code shared across areas
+  of the engine. Do not run the whole `conveyor/conveyor.test.sh`: the Test step
+  runs what the change touches before the card lands.
