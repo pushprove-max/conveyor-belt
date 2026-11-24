@@ -158,6 +158,15 @@ refused "$(body $'## What happens now\nThe form prints an example.\n\n- ~~~\n\tE
 passes "$(body $'## What happens now\nThe form prints this line:\n2. ~~~\n   ## Cause\nThe cache is stale.')"
 refused "$(body $'## What happens now\nThe form prints this line:\n1. ~~~\n   ## Cause\n   ~~~')"
 refused "$(body $'## What happens now\n1. It breaks.\n2. ~~~\n   ## Cause\n   ~~~')"
+# Bug (#1510 follow-up): a fence on the line after a list marker, indented past the item's text, was read with only
+# three spaces cut, so it was no fence and the `## Cause` in the item's code block counted.
+refused "$(body $'## What happens now\nThe form prints an example.\n\n- Example:\n    ~~~\n  ## Cause\n    ~~~')"
+# Bug (E1 of the follow-up): a fence indented less than a nested item ended it but also lost the outer item, so the
+# fence, in the outer item, was no fence and the `## Cause` in its block counted.
+refused "$(body $'## What happens now\nThe form prints an example.\n\n- Outer:\n  1. Inner:\n    ~~~\n  ## Cause\n    ~~~')"
+# Bug (E2 of the follow-up): a thematic break did not end the list, so an indented code line after it was read as a
+# fence in the item and hid the real `## Cause` heading.
+passes "$(body $'## What happens now\nThe form fails.\n\n- Example\n***\n\n    ~~~\n  ## Cause\nThe cache is stale.')"
 }
 
 # unfenced <inline> <quote> <text> keeps what is outside the fences and reads on after each block ends.
@@ -187,6 +196,12 @@ o=$(unfenced 0 "" $'- ~~~\n\tx\n  y\n  ~~~\nb') || fail "unfenced failed"
 # A line indented less than the item ends the item and its block: the text from it on is read.
 o=$(unfenced 0 "" $'- ```\n  x\nb\n- c') || fail "unfenced failed"
 [ "$o" = $'b\n- c' ] || fail "a line indented less than the list item did not end its block; got: $o"
+# Bug (#1510 follow-up): a fence on a later line of a list item is read after the item's indent, so it hides its block.
+o=$(unfenced 0 "" $'- Example:\n    ~~~\n  x\n    ~~~\nb') || fail "unfenced failed"
+[ "$o" = $'- Example:\nb' ] || fail "a fence on the line after a list marker was not read after the item's indent; got: $o"
+# A paragraph after a blank line, indented less than the item, ends it: a fence 4 columns in after that is no fence.
+o=$(unfenced 0 "" $'- a\n\nb\n    ~~~\nx') || fail "unfenced failed"
+[ "$o" = $'- a\n\nb\n    ~~~\nx' ] || fail "a list item went on past a paragraph that ended it; got: $o"
 }
 
 # D2: a `bug` label makes it a fix issue, whatever its body. `testissue` files with the pack's type label (`bug` here),

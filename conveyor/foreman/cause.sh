@@ -20,7 +20,9 @@ NO_CAUSE='Not run: a fix issue needs a "## Cause" section, and this one has none
 # for either. With <inline> 0 (a here-document or a body file, whose text is Markdown as written) a quote is no part of
 # a fence. A fence may follow list markers (`- `, `* `, `+ `, `1. `, `1) `, nested too); its block then holds the lines
 # indented at least as far as the item's text (blank lines too), and a line indented less ends it, as it ends the item.
-# Its closing fence is read after that indent. A tab indents to the next multiple of four columns. An ordered marker that
+# Its closing fence is read after that indent. A fence on a later line of the item, indented at least as far as its text,
+# is in the item in the same way, and in the outer item when it is indented less than a nested one. A thematic break
+# (`***`) ends the list. A tab indents to the next multiple of four columns. An ordered marker that
 # does not start at 1 is no list marker on a line that goes on a paragraph (outside a list), as such a list cannot
 # interrupt the paragraph.
 unfenced() {
@@ -36,17 +38,35 @@ unfenced() {
       return substr("   ", 1, v - w) substr(x, i) }
     # item: x without its list markers; W is the width they take (0 when none), the indent of the item text. With
     # <para> 1 x goes on a paragraph, so a first ordered marker that does not start at 1 is none.
+    # M[1..nm] is the width each marker takes with those before it (the indent of each nested item text).
     function item(x, para,   m) {
-      W = 0
+      W = nm = 0
       while (match(x, /^[ ]?[ ]?[ ]?([-*+]|[0-9]+[.)])[ ][ ]?[ ]?[ ]?/)) {
         m = substr(x, 1, RLENGTH)
         if (!W && para && m ~ /^[ ]*[0-9]/ && m !~ /^[ ]*0*1[.)]/) break
-        W += RLENGTH; x = substr(x, RLENGTH + 1) }
+        W += RLENGTH; M[++nm] = W; x = substr(x, RLENGTH + 1) }
       return W ? x : strip(x) }
+    # lazy: 1 when x (a line indented less than the item it would be in, without the indent of the items it is in) goes
+    # on the paragraph of the line before: it is no fence, heading, thematic break (`***`, `---`, `___`) or list item.
+    function lazy(x,   y) {
+      if (!P) return 0
+      x = strip(x); y = x; gsub(/[ \t]/, "", y)
+      if (x ~ /^([`~]|#[#]?[#]?[#]?[#]?[#]?([ \t]|$))/ || y ~ /^(\*\*\*+|---+|___+)$/) return 0
+      item(x, 0); return !W }
     # fence: the line from its fence, or "" when none starts in it; fq is the quote the fence follows, or "" for none; W is
-    # the indent of the list item it is in (of the line start when none)
-    function fence(line,   c, i, w) {
-      fq = ""; c = item(line, P && !L); w = W
+    # the indent of the list item it is in (of the line start when none). S[1..ns] are the indents of the text of the open
+    # list items, outer first: a line is in each item it is indented at least as far as, so it is read after the indent of
+    # the last of them (a fence on a later line of an item is in the item too). A line indented less than an item that is
+    # no paragraph text going on (after a blank line, or a fence, heading, thematic break or list item) ends that item.
+    function fence(line,   c, i, k, w) {
+      fq = ""; k = ns
+      if (line !~ /^[ \t]*$/) {
+        while (k > 0 && S[k] > col(line)) k--
+        if (k < ns && !lazy(cut(line, S[k] + 0))) ns = k }
+      w = k ? S[k] : 0
+      c = item(w ? cut(line, w) : line, P && !L); W += w
+      for (i = 1; i <= nm; i++) S[++ns] = w + M[i]
+      w = W
       if (c ~ /^[`~]/) return c
       if (inline == 1)
         for (i = 1; i < length(line); i++)
