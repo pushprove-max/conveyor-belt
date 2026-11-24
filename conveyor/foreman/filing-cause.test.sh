@@ -132,6 +132,9 @@ passes "gh issue create --label bug --title '~~~ handling' --body \$'## What hap
 passes "gh issue create --label bug --title '~~~ followed by \\n' --body \$'## What happens now\nThe form fails.\n## Cause\nThe cache is stale.'"
 # After such a title closes, the rest of its line is read again: a body fence there still hides the Cause inside it.
 refused "gh issue create --label bug --title '~~~ x\\n' --body \$'~~~\n## Cause\n~~~'"
+# Bug: the rest of an opener after a quote was read as a closing fence, so `~~~ ~~~` (a tilde fence whose info string
+# is ~~~) closed its own block and the Cause inside it counted. Only the closing quote ends the block on that line.
+refused "gh issue create --label bug --title 'Fix the form' --body \$'~~~ ~~~\n## Cause\nThe cache is stale.\n~~~'"
 # A `\\n` in an inline body is a backslash and an n: it makes no fence that hides a real Cause heading.
 passes "gh issue create --label bug --body \$'The form prints \\\\n~~~ as text.\n## Cause\nThe cache is stale.'"
 # Bug: a `\n` in a plain single quote is a backslash and an n to bash, but it was read as a line break, so `~~~ as

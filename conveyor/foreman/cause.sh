@@ -76,9 +76,10 @@ unfenced() {
             if (inline != 1 && $0 ~ /<<-?[ ]*["\047]?[A-Za-z_][A-Za-z_0-9]*["\047]?[ ]*\)*[ ]*$/) P = 0
             print line; next }
           open = ch; n = k; oq = fq; P = 0; if (W) L = 1
-          # A block after a quote can end on its own line (a title of ~~~ and a word): read on after the fence.
-          if (oq == "") next
-          line = substr(c, k + 1); continue }
+          # A block after a quote can end on its own line (a title of ~~~ and a word), at its closing quote: read on from
+          # that quote. The rest of the opening line is its info string, never a closing fence (`~~~ ~~~` stays open).
+          if (oq == "" || !(j = qend(substr(c, k + 1), oq))) next
+          open = ""; line = substr(substr(c, k + 1), j); continue }
         c = strip(cut(line, W)); k = 0
         while (substr(c, k + 1, 1) == open) k++
         r = substr(c, k + 1); sub(/^[ \t]*/, "", r)
