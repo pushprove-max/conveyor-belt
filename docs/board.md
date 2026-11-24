@@ -1346,6 +1346,9 @@ the list is for.
 - **Title line**: on the right, a pill gives the days an entry stays on the list unseen, "An entry leaves after N
   days unseen". The days are the Rules setting **Self-heals expiry**, and **Rules › Self-heals** opens it. Under them,
   the time when the Board read the list. When a read fails, the tab keeps the last list and that time.
+- **What is a self-heal?**: under the title, closed until you click it. It says what a self-heal is, which kinds go
+  to a follow-up card and which come to this list, why an entry gets no fix round, when an entry leaves the list, and
+  why a finding seen in real logs is harm. A link opens [Harm or self-heals](cards.md#harm-or-self-heals).
 - **Tiles**: **On the list**, with the issues and audits the entries come from. **Ready to batch**: the areas with 10
   entries or more. **Seen again, last 7 days**: a sighting starts the days of an entry again. **Leave in 7 days**: the
   entries that leave the list in 7 days or less. They stay in the dropped entries. **Moved up to harm, 30 days**: the entries moved up in the last 30 days, also those that a review found again later.

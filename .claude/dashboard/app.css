@@ -1604,6 +1604,10 @@ html.b3-filling, html.b3-filling body { overflow: hidden; }
 .sh-head-main { flex: 1 1 420px; min-width: 0; }
 .sh-title { font-size: var(--fs-xl); }
 .sh-lede { color: var(--muted); font-size: var(--fs-sm); max-width: 70ch; margin-top: var(--sp-1); }
+.sh-about { margin-top: var(--sp-2); max-width: 70ch; font-size: var(--fs-sm); }
+.sh-about > summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.sh-about-list { margin: var(--sp-2) 0 0; padding-left: var(--sp-5); display: grid; gap: var(--sp-1); }
+.sh-about-more { margin-top: var(--sp-2); }
 .sh-head-side { display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; gap: var(--sp-2); }
 .sh-pill { display: inline-flex; padding: 2px var(--sp-3); border-radius: 999px; background: var(--quiet-bg); color: var(--quiet); font-size: var(--fs-xs); font-weight: 650; }
 .sh-read { flex-basis: 100%; color: var(--muted); font-size: var(--fs-xs); }

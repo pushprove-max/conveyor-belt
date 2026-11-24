@@ -115,6 +115,46 @@ test('Self-heals: the tab after Benchmarks draws the title line, the tiles, the 
   assert.ok(setting && !setting.hidden && !setting.closest('.rules-set').hidden, 'Rules › Self-heals shows the Self-heals expiry setting');
 });
 
+// Bugs (issue 1622): the page said in one line what the list holds, so a reader could not tell what a self-heal is, why
+// its findings get no card or when an entry leaves; the part, once opened, closed again at the next snapshot.
+test('Self-heals: "What is a self-heal?" is closed at first, opens on a click with each rule, and stays open through a redraw', async () => {
+  const { w } = open({ days: 21 });
+  const about = q(w, '.sh-head details.sh-about');
+  assert.ok(about, 'the part is under the title line');
+  assert.equal(about.querySelector('summary').textContent, 'What is a self-heal?');
+  assert.equal(about.open, false, 'closed at first, so the list stays at the top');
+  about.querySelector('summary').click();
+  await settle();
+  assert.equal(about.open, true, 'a click opens it');
+  const said = Object.fromEntries(Array.from(about.querySelectorAll('li[data-about]'), (li) => [li.dataset.about, li.textContent]));
+  const has = (k, ...parts) => parts.forEach((x) => assert.ok(said[k] && said[k].includes(x), `the ${k} point says "${x}": ${said[k]}`));
+  has('what', 'a failure that fixes itself', 'a card waits longer', 'a step runs again', 'corrected at the next poll or turn', 'Nothing stays broken');
+  has('harm', 'gets a follow-up card at once', 'data is lost or written wrong', 'wrong code lands or pushes', 'a check passes that should fail',
+    'stuck until a person frees it', 'nobody is told', 'private text is published', 'a security hole');
+  has('kinds', 'Self-heals', 'Cleanup, when the fix changes nothing that the code does', 'Already guarded, when another check already stops the bad result');
+  has('round', 'does not stop a card', 'no fix round', 'A batch card, filed from this page, fixes the entries of an area together');
+  has('drop', 'nobody fixes, files in a batch card or sees again for 21 days leaves the list', 'the Rules setting Self-heals expiry', 'dropped entries keep');
+  has('logs', 'seen in real logs or records is harm, also when it heals itself', 'A finding with no kind is harm');
+  const link = about.querySelector('.sh-about-more a');
+  assert.equal(link.textContent, 'Harm or self-heals');
+  assert.equal(link.href, 'https://github.com/pushprove-max/conveyor-belt/blob/main/docs/cards.md#harm-or-self-heals', "the link goes to this project's guide rules");
+  // Bug it catches: a snapshot drew the page again and took the keyboard focus off the guide link or the summary.
+  link.focus();
+  const later = full();
+  later.panels.declined.data.heals = heals({ days: 22 });
+  next(w, later);
+  const again = q(w, '.sh-head details.sh-about');
+  assert.notEqual(again, about, 'the next snapshot draws the part again');
+  assert.ok(again.querySelector('li[data-about="drop"]').textContent.includes('22 days'), 'with the days of the new snapshot');
+  assert.equal(again.open, true, 'the next snapshot keeps it open');
+  assert.equal(w.document.activeElement, again.querySelector('.sh-about-more a'), 'bug: the snapshot took the focus off the guide link');
+  again.querySelector('summary').focus();
+  const last = full();
+  last.panels.declined.data.heals = heals({ days: 23 });
+  next(w, last);
+  assert.equal(w.document.activeElement, q(w, '.sh-head details.sh-about summary'), 'bug: the snapshot took the focus off the summary');
+});
+
 // Bugs: a chip, the sort or the search showed rows of another kind, order or text; a chip's count was not of its kind.
 test('Self-heals: the filter chips for all seven kinds, the sort and the search pick and order the rows', () => {
   const { w } = open();

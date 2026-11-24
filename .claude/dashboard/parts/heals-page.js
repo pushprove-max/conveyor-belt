@@ -2,7 +2,8 @@
 // The Self-heals tab (issue 1562): the self-heals list of each project on a page of its own, after Benchmarks, drawn
 // from the Declined part's heals (panels/declined.js registers it). Its parts, top to bottom:
 //   the title line, with the days an entry stays unseen (the Rules setting healsdays, as the record gives it) and a link
-//     to that setting, and when the list was read (kept through a failed read, with the list it read then);
+//     to that setting, and when the list was read (kept through a failed read, with the list it read then); under the
+//     title, "What is a self-heal?", closed at first (aboutEl, issue 1622);
 //   five tiles: on the list, areas ready to batch (READY entries or more), seen again in the last 7 days, leaving in
 //     SOON days or less, and moved up to harm in the last 30 days (the dropped record's harm entries, and the
 //     entries back on the list whose expired mark is a move up to harm);
@@ -33,10 +34,11 @@
     ['docs', /\b(docs?|comments?|readme|guide)\b/i]];
   const SORTS = [['leaves', 'Leaves soonest'], ['newest', 'Newest'], ['seen', 'Seen most'], ['area', 'Area']];
   const NOT_READ = 'not read';
+  const CARDS_DOC = 'https://github.com/pushprove-max/conveyor-belt/blob/main/docs/cards.md#harm-or-self-heals';
   // What the owner did here, through every redraw: the search, sort, kind chip, the row shown in the detail panel, the
   // rows checked, the entries moved or dropped here (gone: hidden until a snapshot no longer lists them), the last
   // answer of the host (note) and whether the dropped entries are open. sheet: the batch sheet open, else null.
-  const S = { q: '', sort: 'leaves', kind: 'all', sel: null, checked: new Set(), gone: new Set(), note: '', dropOpen: false, busy: false, ctx: null, m: null, at: null, el: null, sheet: null };
+  const S = { q: '', sort: 'leaves', kind: 'all', sel: null, checked: new Set(), gone: new Set(), note: '', dropOpen: false, aboutOpen: false, busy: false, ctx: null, m: null, at: null, el: null, sheet: null };
   const list = (v) => (Array.isArray(v) ? v : []);
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const plural = (k, one, many) => `${k} ${k === 1 ? one : many}`;
@@ -130,10 +132,32 @@
   }
 
   // ---- the title line and the tiles ----
+  // "What is a self-heal?" (issue 1622): closed at first, so the list stays at the top; S.aboutOpen keeps it open
+  // through each redraw. Its words follow docs/cards.md, "Harm or self-heals". days: the Rules setting, else null.
+  function aboutEl(days) {
+    const box = h('details', 'sh-about'), sum = h('summary', null, 'What is a self-heal?');
+    sum.dataset.focus = 'about';
+    box.open = S.aboutOpen;
+    box.addEventListener('toggle', () => { S.aboutOpen = box.open; });
+    const ul = h('ul', 'sh-about-list');
+    [['what', 'A self-heal is a failure that fixes itself: a card waits longer, a step runs again, or wrong text is corrected at the next poll or turn. Nothing stays broken.'],
+      ['harm', 'The judge sorts each review finding that it accepts by what its failure does. A harm finding gets a follow-up card at once. Harm is: data is lost or written wrong, wrong code lands or pushes, a check passes that should fail, the belt is stuck until a person frees it, a step stops and nobody is told, private text is published, or a security hole opens.'],
+      ['kinds', 'Three kinds come to this list: Self-heals; Cleanup, when the fix changes nothing that the code does; and Already guarded, when another check already stops the bad result.'],
+      ['round', 'A finding on this list does not stop a card and gets no fix round. A batch card, filed from this page, fixes the entries of an area together.'],
+      ['drop', `An entry that nobody fixes, files in a batch card or sees again for ${days ? `${days} days` : 'the days of the setting'} leaves the list. The days are the Rules setting Self-heals expiry. The dropped entries keep each entry that leaves.`],
+      ['logs', 'A finding seen in real logs or records is harm, also when it heals itself. A finding with no kind is harm.'],
+    ].forEach(([k, text]) => { const li = h('li', null, text); li.dataset.about = k; ul.append(li); });
+    const more = h('p', 'sh-about-more'), a = h('a', null, 'Harm or self-heals');
+    a.href = CARDS_DOC; a.dataset.focus = 'about-link'; a.target = '_blank'; a.rel = 'noopener';
+    more.append('The full rules: ', a, ' in docs/cards.md.');
+    box.append(sum, ul, more);
+    return box;
+  }
   function headEl(m) {
     const ctx = S.ctx, box = h('div', 'sh-head'), side = h('div', 'sh-head-side'), days = daysSaid(m);
     const title = h('div', 'sh-head-main');
     title.append(h('h3', 'sh-title', 'Self-heals list'), h('p', 'sh-lede', 'Real findings whose failure heals by itself: a card waits longer, a step runs again, or text is wrong until the next turn. Conveyor does not build them one by one. Fix them in a batch card for each area, or move one up to harm when it shows up in real logs.'));
+    title.append(aboutEl(days));
     const pill = h('span', 'sh-pill', days ? `An entry leaves after ${days} days unseen` : `Days an entry stays: ${NOT_READ}`);
     const link = h('a', 'btn btn-quiet sh-rules', 'Rules › Self-heals');
     link.href = ctx.panelHref('rules');
@@ -263,10 +287,11 @@
     return li;
   }
   // The control that has the focus (its data-focus), and the focus given back to the control drawn in its place: a row,
-  // a chip or the Dropped button that the owner works from the keyboard keeps the focus when the list is drawn again.
-  const focusOf = () => { const a = document.activeElement; return a && a.dataset && a.closest('.sh-entries') ? a.dataset.focus || null : null; };
+  // a chip, the Dropped button, or the summary or guide link of "What is a self-heal?" that the owner works from the
+  // keyboard keeps the focus when the list or the page is drawn again.
+  const focusOf = () => { const a = document.activeElement; return a && a.dataset && a.closest('.sh-entries, .sh-about') ? a.dataset.focus || null : null; };
   const refocus = (k) => {
-    const el = k && Array.from(S.parts.root.querySelectorAll('[data-focus]')).find((x) => x.dataset.focus === k);
+    const el = k && Array.from(S.el.querySelectorAll('[data-focus]')).find((x) => x.dataset.focus === k);
     if (el && document.activeElement !== el) el.focus({ preventScroll: true });
   };
   function drawEntries() {
