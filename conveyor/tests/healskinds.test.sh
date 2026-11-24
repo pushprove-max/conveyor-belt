@@ -178,6 +178,20 @@ t_kindssort() {
     || fail "the batch card of a cleanup entry alone has the bug label or no Cleanup: line: $(sed -n 2p "$STUB/filed")"
 }
 
+# Bug (issue 1626): docs/cards.md tells a user no way to file a review finding by hand that the sort reads, so a
+# finding filed without the `[Pn]` title is not sorted and nothing says why. The page's filing sentence must exist, and
+# an issue filed as it says (its tag and its marker read from the page) must be read by healsitems() as one finding.
+t_kindsfiling() {
+  local s tag mark is
+  s=$(tr '\n' ' ' < "$SRC/../docs/cards.md" | tr -s ' ' | grep -o 'To file a review finding by hand so that the sort reads it, [^.]*\.')
+  tag=$(grep -o 'start the title with `\[P0\]` to `\[P3\]`' <<<"$s" | grep -o '\[P3\]') mark=$(grep -o 'include a `[A-Za-z]*:` line' <<<"$s" | grep -o '[A-Za-z]*:')
+  [ -n "$tag" ] && [ -n "$mark" ] || fail "docs/cards.md has no sentence that tells a user to file a finding with a [P0] to [P3] title and a Proof: line: '$s'"
+  is=$(hissue 41 "$tag a.txt:1 the poll waits one turn more" "Where: a.txt:1"$'\n'"$mark a.txt:1" area:engine)
+  setup "[$is]"; fx_in "healsitems '[$is]'"
+  [ "$RC" = 0 ] && [ "$(jq -sc 'map([.kind, .issue])' "$T/$CASE/run.out")" = '[["issue",41]]' ] \
+    || fail "healsitems() does not read issue 41, filed as docs/cards.md says ('$s'), as one finding: rc $RC, $(cat "$T/$CASE/run.out")"
+}
+
 # Bugs (issue 1563): release-prep files no docs sweep card, so a release goes out with docs that do not match what
 # users see; it files one with an area's entries mixed with another's (area:engine's entry is ready too, so a sweep
 # with no area filter holds both), files one for entries a docs sweep card holds already, or files one after the

@@ -428,6 +428,7 @@ held, and each issue that is open at setup is held. Thus the first loop builds n
 of the project. Setup and `conveyor.sh doctor` say
 "N open issues held; release one with `conveyor.sh control release <issue>` or on the Board". To let new issues go into the Queue by themselves, run `conveyor.sh control start queue`.
 A second setup does not change the record ([The control record](configuration.md#the-control-record)).
+To file a review finding by hand so that the self-heals sort reads it, see [Harm or self-heals](cards.md#harm-or-self-heals).
 
 Each project keeps its own pack, pin, checkout, state folder, control record, issue repo and push. Its cards folder is
 `conveyor-cards` beside its checkout, or `conveyor-cards-<repo>` when another project shares that folder

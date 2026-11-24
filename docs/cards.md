@@ -413,7 +413,8 @@ label. If you shut a docs sweep card before it lands, its entries go back to the
 itself, with `run` and `serve` alike, and picks no card until a sort has run. When the open issues cannot be read,
 the sort changes nothing and the loop tries again at a later turn. The sort reads each queued follow-up card that no
 card has picked, also a held one, and each open issue that is one review finding (a `[P0]` to `[P3]` title with a
-Proof). It also reads each finding of an open audit issue that holds many findings. The sort uses the same kinds as
+Proof). To file a review finding by hand so that the sort reads it, start the title with `[P0]` to `[P3]` and
+include a `Proof:` line. The sort also reads each finding of an open audit issue that holds many findings. The sort uses the same kinds as
 the review's judge. A `harm` item stays. An item of another kind goes to its list: the docs list for `docs drift`,
 else the self-heals list. Such a card leaves the queue. Such an issue is closed with a comment that names its list
 entry. In an audit issue, such findings go to their lists, and the sort posts one comment on the issue that names
