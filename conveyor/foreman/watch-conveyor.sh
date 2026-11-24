@@ -241,15 +241,15 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     # host, as a remote belt'"'"'s pack is not on this machine; 10 when it gives none) on another card (health waitingOnCard) or
     # for main to change (its live action, mainred.sh mainwait(); the snapshot'"'"'s belt live.at is when that wait
     # began): what it waits on, with that card'"'"'s step and last action, or, for main, each main-red fix card open or
-    # blocked. Its key holds the wait'"'"'s start and how many times $wake it has lasted, so each wait wakes once, and
-    # again ("still waiting") after each further $wake minutes.
+    # blocked, named "Main is red (<commit>)" (red: not a named follow-up or Tests page card). Its key holds the wait'"'"'s
+    # start and how many times $wake it has lasted, so each wait wakes once, and again after each further $wake minutes.
     (.blocked as $hb | (($snap.waitWake | numbers | select(. >= 1)) // 10) as $wake
       | def about($h): ($h | ref) as $r | ([$snap.belt | arrays | .[] | objects | select(.card == $h.card)] | first) as $b
           | ([$hb[] | select(.card == $h.card)] | first) as $x
           | if $b then "\($r) (at \($b.step), last action: \($b.live.action // "none"))"
             elif $x then "\($r) (blocked: \($x.reason))" else "\($r) (\($h.state // "gone"))" end;
-      ([$snap.belt | arrays | .[] | objects | select((.name | strings) and (.landed | not)) | about(.)]
-        + [$hb[] | select(.name | strings) | about(.)]
+      def red: .name | strings | startswith("Main is red (");
+      ([$snap.belt | arrays | .[] | objects | select(red and (.landed | not)) | about(.)] + [$hb[] | select(red) | about(.)]
         | if . == [] then "no main-red fix card is open" else "main-red fix card " + join(", ") end) as $reds
       | ((.waitingOnCard | arrays | .[] | objects | {c: ., since, on: about(.waitsOn | objects)}),
          ($snap.belt | arrays | .[] | objects | select(.live.action | strings | startswith("waiting for main to change"))

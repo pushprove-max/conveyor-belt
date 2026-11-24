@@ -43,6 +43,20 @@ check 'the same wait 20 minutes on gives "still waiting"' poll main 20
 check 'its line says still waiting' has main 'main: #44 is still waiting, 20 minutes now, on main to change'
 check 'the still-waiting wake is not repeated' nope poll main 25
 
+# Bug: the wake called every named card a main-red fix card, so a card waiting for main named a blocked review
+# follow-up (health blocked) and an open Tests page card (belt) as main's fix. Only "Main is red (<commit>)" is one,
+# and a blocked one (health blocked, not on the belt) is still named.
+fixture follow "$(jq -cn --arg at "$AT" '{queue: {next: []}, health: ('"$HEALTH"' | .blocked = [{card: "cfu", issue: 0, name: "Review follow-up of #7", reason: "review failed", since: $at},
+  {card: "cmr", issue: 0, name: "Main is red (fedcba987654)", reason: "tests failed", since: $at}]), belt: [
+  {card: "c45", issue: 45, step: "tests", live: {action: "waiting for main to change: serve fail on main at 0123456789ab too", at: $at}},
+  {card: "ctp", issue: 0, name: "Tests page: a.test.sh", step: "build", landed: false, live: null}]}')" '{}'
+check 'a wait for main beside a blocked follow-up and a Tests page card wakes' poll follow 10
+check 'its line names the blocked main-red fix card only, not the follow-up nor the Tests page card' \
+  has follow 'follow: #45 has waited 10 minutes on main to change (serve fail on main at 0123456789ab too); main-red fix card Main is red (fedcba987654) (blocked: tests failed)'
+# Only #45's wait line: the wake also holds the blocked follow-up's own "is blocked" line, which is right.
+check 'the wait line names neither the follow-up nor the Tests page card' \
+  nope grep -qE '#45 has waited .*(Review follow-up|Tests page)' "$T/follow.wake"
+
 # A card waiting at its claim on a same-file card (health waitingOnCard) since $AT, that card in review; the belt's
 # pack sets foreman.waitWake to 5 minutes, which the snapshot gives (the belt may be on another host, its pack not
 # on this machine: the pack here sets none).
