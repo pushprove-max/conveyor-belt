@@ -351,15 +351,30 @@ growcheck() { # <card> <issue> <worktree> <issue json> <the sessions' prompt>: 0
 # umbrella of a split (a split line with filed slices) whose slices each have a landed line, or a closed line (main
 # already does it: ALREADY-DONE) that is not a shut one (SHUT: the owner closed it by hand; OWNSHUT: the owner shut the card).
 # The slices that are cards with no GitHub issue (the split line's cards) count the same, by their card's records (TADONE).
+# A card counts as landed only while its landed commit is on main (refs/heads/$BRANCH): with push off, the pack's
+# defaultBranch changed to a branch without it leaves its parent open. A landed commit git no longer has (pruned once
+# its branch went) is not on main either.
 umbrellas() { # <open issues, a json list>
-  local k n s x m
+  local k n s x m b cs ids miss off
+  b=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || { echo "conveyor: main ($BRANCH) could not be read; no parent is closed this turn" >&2; return 0; }
+  cs=$(turncards) || return 0
+  ids=$(jq -r 'select(.step == "landed") | .sha | strings | select(test("^([0-9a-f]{40}|[0-9a-f]{64})$"))' <<<"$cs" | sort -u)
+  # The landed commits that main does not hold: those git does not have, and those one rev-list finds off main (it
+  # prints whole ids, as a landed line holds).
+  miss=$([ -z "$ids" ] || git cat-file --batch-check='%(objectname) %(objecttype)' <<<"$ids" | awk '$NF != "commit" {print $1}') || return 0
+  off=$({ grep -vxF -f <(printf '%s\n' "$miss") <<<"$ids" || :; } | git rev-list --stdin "^$b") || return 0
+  off=$(printf '%s\n%s' "$miss" "$off")
   while IFS=$'\t' read -r k n s; do
     if [ "$k" = parts ]; then m="Conveyor: each part of this issue is closed or landed ($s), so this issue is closed too."
     else m="Conveyor: the last follow-up of this issue is done ($s), so each of its Done-when items is built."; fi
     x=$(gh_write issue close "$n" --comment "$m" 2>&1 >/dev/null) \
       || { echo "conveyor: #$n is $([ "$k" = parts ] && echo "a parent whose parts are all closed or landed" || echo "an umbrella whose follow-ups have all landed or are already done on main"), and it could not be closed (${x:0:300}); the next turn tries again" >&2; continue; }
     locked control release "$n" >/dev/null 2>&1 || :
-  done < <(jq -rs --slurpfile open <(printf '%s' "$1") --arg shut "$SHUT" --arg own "$OWNSHUT" "$DEPS"'$open[0] as $open | landed(.) as $done
+  done < <(jq -rs --slurpfile open <(printf '%s' "$1") --rawfile off <(printf '%s' "$off") --arg shut "$SHUT" --arg own "$OWNSHUT" "$DEPS"'$open[0] as $open
+    # A card whose landed commit main does not hold: its landed and pushed lines are left out.
+    | ($off | split("\n") - [""]) as $off | ([.[] | select(.step == "landed" and (.sha | IN($off[]))) | .card] | unique) as $offc
+    | map(select((.step | IN("landed", "pushed")) and (.card | IN($offc[])) | not))
+    | landed(.) as $done
     | ([.[] | select(.step == "landed" or (.step == "closed" and (.reason | IN($shut, $own) | not))) | .issue] | unique) as $landed
     | ($open[] | select((.parts // []) != [] and all(.parts[]; (.open | not) or (.number | IN($done[]))))
       | [.parts[] | select(.open and (.number | IN($done[]))) | .ref] as $l
@@ -369,7 +384,7 @@ umbrellas() { # <open issues, a json list>
       ([.[] | select('"$TADONE"') | .card] | unique) as $lc
       | ([.[] | select(.step == "split" and (.split.cards | type) == "array" and .split.cards != [] and (.issue | IN($open[] | select((.parts // []) == []) | .number)))]
       | group_by(.issue)[] | last | select(all(.split.cards[]; . as $d | any($tac[0][]? | select(.id == $d) | .id, .card, (.was // [])[]; IN($lc[])))) | "split\t\(.issue)\t\(.split.cards | join(", "))")' \
-    --slurpfile tac <([ ! -s "${TACARDS:-}" ] || jq -c '.cards | arrays' "$TACARDS" 2>/dev/null) < <(turncards) 2>/dev/null)
+    --slurpfile tac <([ ! -s "${TACARDS:-}" ] || jq -c '.cards | arrays' "$TACARDS" 2>/dev/null) <<<"$cs" 2>/dev/null)
 }
 # The issues given attached to <parent> as its GitHub sub-issues (its parts): GitHub takes each one's id, not its
 # number. The id is read through graphql (privacy.test.sh's ghwrite refuses a REST call outside gh_write in lib/)

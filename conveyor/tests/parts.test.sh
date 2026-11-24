@@ -50,6 +50,43 @@ t_partslanded() {
     || fail "the parent whose parts both landed was not closed and released with push off: $(cat "$STUB/closed" "$STUB/close-comments" 2>/dev/null) $(jq -c .held "$ST/control.json") $(cat "$T/$CASE/run.out")"
 }
 
+# Push off: parts #11 and #12 of #10 each landed a commit on main; then the pack's defaultBranch is set to the branch
+# old, made before both. Bug caught (R126): umbrellas() counted any landed line, so #10 was closed though main (old)
+# holds neither part. Set back to main, which holds both, the turn closes #10.
+t_partsoffmain() {
+  local a b
+  setup "[$(issue 10 2026-11-01), $(issue 11 2026-11-02), $(issue 12 2026-11-03)]"
+  printf '10 11\n10 12\n' > "$STUB/subs"
+  jq -c '.rules.push = false | .held = [10]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  git -C "$R" branch old && git -C "$R" commit -q --allow-empty -m 'part 11' && a=$(git -C "$R" rev-parse HEAD) \
+    && git -C "$R" commit -q --allow-empty -m 'part 12' && b=$(git -C "$R" rev-parse HEAD) || fail "main's commits of the parts"
+  { landed 11 | jq -c --arg s "$a" '.sha = $s'; landed 12 | jq -c --arg s "$b" '.sha = $s'; } >> "$ST/cards.jsonl"
+  tune '.defaultBranch = "old"'
+  fx_in 'umbrellas "$(asked)"'
+  [ ! -e "$STUB/closed" ] && [ "$(jq -c .held "$ST/control.json")" = '[10]' ] \
+    || fail "umbrellas with defaultBranch old (lacking $a and $b) closed or released the parent #10: $(cat "$STUB/closed" 2>/dev/null) $(jq -c .held "$ST/control.json") $(cat "$T/$CASE/run.out")"
+  tune '.defaultBranch = "main"'
+  fx_in 'umbrellas "$(asked)"'
+  [ "$(cat "$STUB/closed" 2>/dev/null)" = 10 ] \
+    || fail "umbrellas with defaultBranch main (holding $a and $b) did not close the parent #10: $(cat "$STUB/closed" 2>/dev/null) $(cat "$T/$CASE/run.out")"
+}
+
+# Push off: parts #11 and #12 of #10 each landed a commit that no branch holds any more, and git pruned both (as
+# after the branch they were on was removed). Bug caught: umbrellas() asked rev-list --ignore-missing, which leaves
+# out a commit git does not have, so both parts counted as landed on main and #10 was closed.
+t_partspruned() {
+  local a b
+  setup "[$(issue 10 2026-11-01), $(issue 11 2026-11-02), $(issue 12 2026-11-03)]"
+  printf '10 11\n10 12\n' > "$STUB/subs"
+  jq -c '.rules.push = false | .held = [10]' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  a=$(git -C "$R" commit-tree 'HEAD^{tree}' -p HEAD -m 'part 11') && b=$(git -C "$R" commit-tree 'HEAD^{tree}' -p "$a" -m 'part 12') \
+    && git -C "$R" prune --expire=now && ! git -C "$R" cat-file -e "$b^{commit}" 2>/dev/null || fail "the parts' pruned commits"
+  { landed 11 | jq -c --arg s "$a" '.sha = $s'; landed 12 | jq -c --arg s "$b" '.sha = $s'; } >> "$ST/cards.jsonl"
+  fx_in 'umbrellas "$(asked)"'
+  [ ! -e "$STUB/closed" ] && [ "$(jq -c .held "$ST/control.json")" = '[10]' ] \
+    || fail "umbrellas with the parts' landed commits $a and $b pruned closed or released the parent #10: $(cat "$STUB/closed" 2>/dev/null) $(jq -c .held "$ST/control.json") $(cat "$T/$CASE/run.out")"
+}
+
 # Push off (#875): #30's card landed and its commit is not pushed, so the issue is still open. The snapshot shows it as
 # landed, not pushed: its held reason says so, the split counts it apart (not held by a rule, not on the belt), the
 # queue does not list it, and its parent #40 counts it as a part done. Push on, it is on the belt, pushing, as before.

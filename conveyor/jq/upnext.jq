@@ -5,6 +5,9 @@
     | map(.number) as $open | graph($cards) as $g | (if $all == "" then [] else cyclesof($g) | add // [] end) as $cyc
     | landed($cards) as $done | ($cards | map(select(.followups))) as $fc
     | ($cards | map(select(.step == "landed") | .followups // [] | .[])) as $ready
+    # The issues whose card is filing the slices of their split now: its newest line is the start of file (splitcheck(),
+    # lib/slices.sh), written before the first slice is created; the split line comes once each is held or placed.
+    | (reduce ($cards[] | select(.issue | type == "number")) as $l ({}; .[$l.issue | tostring] = ($l.step == "start" and $l.of == "file"))) as $filing
     # --only takes the slices of a split for size too (a grown line's filed, growcheck()), with those of a card `retry`
     # gave back (approved(): a parent blocked for the owner's yes), whose grown line is in $retried; they are no
     # followups for waits(), as each such slice depends on its parent, and would wait on itself. They are taken only once
@@ -34,6 +37,8 @@
       | select((.parts // []) == [])
       | select($mode != "retried" or (.number | IN($again[])))
       | select(($l | index($fu) | not) or (.number | IN($ready[])) or (.body // "" | test("^Follow-up to #[0-9]+ \\(Conveyor card ") | not))
+      # A slice of a split still being filed: not yet held or placed as its parent is (splitplace()), so not picked.
+      | select(.body // "" | [capture("^Follow-up of #(?<p>[0-9]+): slice ") | .p] | any($filing[.] == true) | not)
       | . + {later: ($l | index($fu) | not), p: level($l; $prio), rank: rank($l; $prio), again: (.number | IN($again[])),
              waits: waitsof($fc; $open; $done), before: ($ctl.rules.visible != false and before($area; $np)), stuck: ($all != "" and (reach($g; .number) | any(IN($cyc[]))))})
     # forced: `control force` lets it past its open dependencies, only while the dependency guard is off.

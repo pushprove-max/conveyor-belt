@@ -432,7 +432,8 @@ conditional() { # <issue json>
 }
 # A follow-up inherits its parent's yes. A follow-up Conveyor filed (its body opens "Follow-up
 # to #N (Conveyor card ", or, a slice of a split, "Follow-up of #N: slice ") with no approval line of its own reads up its chain, up to MAX_DEPTH + 1 issues, for the
-# first issue whose body has one, and prints {from, line, section, sentence}: that issue, its approval line, its section
+# first issue whose body has one, and prints {from, line, section, sentence}: that issue, its last approval line (the
+# owner's newest yes: the Board adds one at the end of the body, its condition with it), its section
 # headed `## What customers or staff will see` ("" when none: a split parent's card ends before any review, so it has no review sentence), and the
 # USER-VISIBLE sentence of its last review that gave one (the card records; "" when none is there). Nothing when the
 # issue has its own line, is no follow-up, no issue up its chain has a line, or GitHub does not answer.
@@ -445,7 +446,7 @@ inherit() { # <issue json>
     [ -n "$p" ] || return 0
     i=$((i + 1))
     j=$(timeout 60 gh issue view "$p" --json number,body 2>/dev/null) && body=$(jq -er '.body // ""' <<<"$j" 2>/dev/null) || return 0
-    l=$(grep -m 1 '^Visible change approved:' <<<"$body" | tr -d '\r')
+    l=$(grep '^Visible change approved:' <<<"$body" | tail -n 1 | tr -d '\r')
     [ -z "$l" ] || break
   done
   [ -n "$l" ] || return 0

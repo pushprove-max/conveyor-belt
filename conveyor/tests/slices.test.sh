@@ -69,9 +69,11 @@ t_slicesshadow() {
 # Done-when item, and the check ends its card closed (1), before any build (card() then removes its worktree). Bug
 # caught: a split issue was also built whole.
 t_sliceson() {
-  YES='Visible change approved: yes, 2026-11-02; condition: only for admins'
+  # Two yeses: the first plain, the newest (the Board adds it at the end of the body) with a condition.
+  OLDYES='Visible change approved: yes, 2026-11-01'
+  YES='Visible change approved: yes, 2026-11-02; condition: staff only'
   SEEN='The Save button reads Keep.'
-  slices on "$SPLIT2" "[$(big 7 P1 | jq -c --arg l "$YES" --arg c "$SEEN" '.body |= sub("src/app.sh\\."; "src/app.sh and .claude/x.js.\n\n## What customers or staff will see\n" + $c + "\n\n" + $l)')]"
+  slices on "$SPLIT2" "[$(big 7 P1 | jq -c --arg o "$OLDYES" --arg l "$YES" --arg c "$SEEN" '.body |= sub("src/app.sh\\."; "src/app.sh and .claude/x.js.\n\n## What customers or staff will see\n" + $c + "\n\n" + $o) + "\n\n" + $l')]"
   mkdir -p "$R/.claude" && echo 'hidden split' > "$R/.claude/x.js" && git -C "$R" add .claude && git -C "$R" commit -qm hidden || fail "main's .claude/x.js"
   fx_in 'splitcheck c1-7 7'
   # Bug caught: a path in a hidden directory was not read as a file, so the judge never saw it.
@@ -105,6 +107,8 @@ t_sliceson() {
   fx_in 'inherited_brief "$(inherit "$(jq -sc ".[0]" "$STUB/filed")")"'
   grep -q '^# The yes of #7$' "$T/$CASE/run.out" && grep -qxF "$YES" "$T/$CASE/run.out" && grep -q '^That yes gives a condition' "$T/$CASE/run.out" \
     || fail "a slice does not inherit its parent's approval line and its condition: $(cat "$T/$CASE/run.out")"
+  # Bug caught (R102): inherit() took the parent's first approval line, so the slice lost the newest yes and its condition.
+  ! grep -qxF "$OLDYES" "$T/$CASE/run.out" || fail "a slice inherits its parent's first approval line, not the newest one: $(cat "$T/$CASE/run.out")"
   grep -qxF "$SEEN" "$T/$CASE/run.out" && ! grep -q 'not recorded' "$T/$CASE/run.out" \
     || fail "a slice's brief lacks what its parent's section says customers or staff will see: $(cat "$T/$CASE/run.out")"
   # Bug caught: a run limited by --only to the parent left its slices out (the run reads its set through followups).
@@ -127,6 +131,28 @@ t_slicesreleased() {
   # #8 is not open, so the slices stand first; #9, older and in the order after them, waits.
   touch "$STUB/list-filed"; fx_in 'locked pick "" "" "$(asked)"'
   [ "$RC" = 0 ] && [ "$(cut -d' ' -f2 "$T/$CASE/run.out")" = 100101 ] || fail "the loop did not pick the first slice #100101 (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+
+# On, #7 split while the loop picks: slice 1 (#100101) is on GitHub and in the open list, and the create of slice 2
+# waits until a pick has run. Bug caught (R123): the pick took #100101 (a follow-up stands first) before the split held
+# or placed it as its parent is. Once the split line is written, the next pick takes it.
+t_slicesfiling() {
+  local bg
+  slices on "$SPLIT2" "[$(big 7), $(issue 9 2026-10-01)]"; touch "$STUB/list-filed"
+  cat > "$STUB/create-cmd" <<'EOF'
+[ "$n" != 100102 ] || { : > "$STUB/filing"; while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done; } # sleep: until the case has run its pick
+EOF
+  # The split runs in a process of its own, as a card does, and waits in the create of slice 2: the pick must run in
+  # that gap, after slice 1 is filed, which a direct call one after the other cannot give.
+  fx_in 'splitcheck c1-7 7' & bg=$!
+  wait_until '[ -e "$STUB/filing" ]' || fail "the split did not reach the create of slice 2: $(cat "$STUB/filed" 2>/dev/null)"
+  fx_in 'locked pick "" "" "$(asked)" > "$T/$CASE/pick.out"'
+  : > "$STUB/go"; wait "$bg"
+  [ "$RC" = 0 ] && [ "$(cut -d' ' -f2 "$T/$CASE/pick.out")" = 9 ] \
+    || fail "a pick while slice 2 of #7 was being filed did not take #9 over slice 1 #100101 (exit $RC): $(cat "$T/$CASE/pick.out" "$T/$CASE/run.out")"
+  [ "$(st 'select(.step == "split") | .split.filed | @json')" = '[100101,100102]' ] || fail "the split did not file both slices: $(cat "$ST/cards.jsonl")"
+  fx_in 'locked pick "" "" "$(asked)"'
+  [ "$RC" = 0 ] && [ "$(cut -d' ' -f2 "$T/$CASE/run.out")" = 100101 ] || fail "the pick after the split did not take slice 1 #100101 (exit $RC): $(cat "$T/$CASE/run.out")"
 }
 
 # On, a held parent: its slices start held too, and the split line says so. (A parent is held between its pick and
