@@ -15,6 +15,12 @@
 . "${BASH_SOURCE[0]%/*}/failat.sh" || return 1
 . "${BASH_SOURCE[0]%/*}/loadfactor.sh" || return 1
 . "${BASH_SOURCE[0]%/*}/fileeach.sh" || return 1
+# Only the lines the jq of testfails() acts on reach it, so a log of millions of lines of noise (a loop, a stuck retry)
+# costs it no more than the same output without them: a `== ` line, a result line (`FAIL [`, `ok`, `not ok`, `✔`,
+# `✖`), the `---` of a TAP block (only straight after a result line, as tapyaml reads it) and its `...`, a stack frame
+# (JavaScript: a path, a line and a column at the end; Python: `File "/`) and the first line with no indent after a
+# Python frame (its exception). A kept line is read as it would be in the whole output; the lines left out change none
+# of its state.
 # What a failed test run says went wrong: the failing test files, never the passing ones or their `ok` lines. Which
 # files ran and which failed is read from the logs the runner wrote (testlogs), never from the output, where a test's
 # own lines could pass for the runner's: `== <file>` as a file begins (the whole line: a name may have spaces),
@@ -62,8 +68,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
   # `== ` line of the output is of the longest of all the run's files: one that names again a file that is done goes
   # back, and is never the beginning of a later file whose name its name begins with.
   named='def named($fs): . as $r | [$fs[] | select(. as $f | $r == $f or ($r | startswith($f + " ")))] | max_by(length);'
-  mapfile -t logs < <(testlogs "${1%.test}")
-  [ ! -d "${1%.test}.testlog" ] || packget "${3:-test.command}" cmd 2>/dev/null || cmd=''
+  mapfile -t logs < <(testlogs "${1%.test}"); [ ! -d "${1%.test}.testlog" ] || packget "${3:-test.command}" cmd 2>/dev/null || cmd=''
   # Each log begins on a line of its own: a log that ends without a newline would else join the next log's mark.
   log=$(for log in "${logs[@]}"; do printf '\n\001\n'; cat "$log" 2>/dev/null; done | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\000\r' | jq -cRn "$named"'
     reduce inputs as $l ({n: null, files: [], order: [], failed: [], open: []};
@@ -74,7 +79,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
         elif $b then .files |= (. + [$b] | unique) | (if .order[-1] | index($b) then . else .order[-1] += [$b] end) | .open[-1] += [$b]
         elif $e then .files |= (. + [$e.f] | unique) | .open[-1] -= [$e.f] | if $e.r == "FAIL" and (.failed | index($e.f) | not) then .failed += [$e.f] else . end
         elif $n then .n += ($n | tonumber) else . end)') || return 1
-  out=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | jq -cRn --arg rc "$2" --arg sec "$(cat "${1%.test}.limit" 2>/dev/null || echo "${TEST_TIMEOUT:-}")" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") --slurpfile rec <(cat "${1%.test}.testlog"/results/* 2>/dev/null | jq -cR 'fromjson? // empty') \
+  out=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | awk '{ k = /== / || /^[[:space:]]*(not ok |ok |✔|✖)/ || /^FAIL \[/ || /^ *[.][.][.]$/ || (/^ *---$/ && prev ~ /^ *(not )?ok /) || /\/[^():]*:[0-9]+:[0-9]+\)?([[:space:]]*[{])?[[:space:]]*$/ || /^[[:space:]]*File "\//; if (py && /^[^[:space:]]/ && !/^Traceback /) { k = 1; py = 0 }; if (/^[[:space:]]*File "\//) py = 1; prev = $0; if (k) print }' | jq -cRn --arg rc "$2" --arg sec "$(cat "${1%.test}.limit" 2>/dev/null || echo "${TEST_TIMEOUT:-}")" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") --slurpfile rec <(cat "${1%.test}.testlog"/results/* 2>/dev/null | jq -cR 'fromjson? // empty') \
     --arg rx "${FRAMERX:-}" --arg pyrx "${PYFRAMERX:-}" --arg wd "$wd" --arg wdr "$wdr" '$log[0] as $log | '"$named ${FRAMEJQ:-def frame: null; def pyend(\$l): false;} ${RECJQ:-def recs(\$r; \$l): .;} $(tapjq 2>/dev/null || printf %s 'def tapname: .; def tapyaml: .;')"'
     def cut: if length <= 200 then . else (.[0:201] | sub("\\s+\\S*$"; "")) as $w | if ($w | length) > 200 then .[0:200] else $w end end;
     def failcase: [capture("^FAIL \\[(?<c>[^\\]]+)\\]: "), (capture("^\\s*not ok [0-9]+ (- )?(?<c>.*\\S)") | tapname), capture("^\\s*✖ (?<c>.+) \\([0-9.]+ms\\)$")][0].c;

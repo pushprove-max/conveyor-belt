@@ -498,3 +498,35 @@ newoutagepass() { # <the one read whose stage passes: snapshot or health>
 }
 t_newoutageoldsnapshot() { newoutagepass snapshot; }
 t_newoutageoldhealth() { newoutagepass health; }
+# #1609. Bug it catches: the jq of testfails() was given every line of a test's output, and its time and memory grew with
+# the line count: a test that printed 22 million lines (a stuck retry) stalled the card's read of its result for 27+
+# minutes. Two timed-out runs of three files (b passes, a fails, c is begun and not ended), one with 30000 noise lines
+# between its lines and before a's stack frame, one without: both give the same result (files, cases, passed, failed,
+# timeout), b is passed and c is the timeout file, the failing case still has its place (`at`) with the noise before
+# its frame, and no noise line reaches the jq (what reached it is recorded, not a time).
+t_testfailsnoise() {
+  mkdir -p "$T/$CASE/wt" && printf '%s\n' 'line one' 'line two' 'line three' 'line four' > "$T/$CASE/wt/a.test.mjs" || fail "the stub test file could not be made"
+  local clean noisy
+  cat > "$T/$CASE/cmd" <<'EOF'
+noise() { [ -z "$NOISE" ] || seq 1 30000 | sed 's/^/wait: pid /; s/$/ is not a child of this shell/'; }
+echo "== b.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/b.log"
+echo 'ok 1 - fine'; noise
+echo "-- ok b.test.mjs" >> "$CONVEYOR_TEST_LOG/b.log"
+echo "== a.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/a.log"
+echo 'ok 1 - first'; noise
+echo 'not ok 2 - second'; echo '  ---'; echo '  actual: 1'; echo '  stack: |-'; noise
+echo "    at Context.<anonymous> ($PWD/wt/a.test.mjs:3:7)"; echo '  ...'; noise
+echo 'ok 3 - third'; noise
+echo "-- FAIL a.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"
+echo "== c.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/c.log"
+noise; exit 124
+EOF
+  clean=$(allfails 124) || fail "the clean output could not be read"
+  rm -rf "${T:?}/${CASE:?}/wt.testlog"
+  jq() { case "$*" in *"--arg rc"*) tee -a "$T/$CASE/seen" | command jq "$@" ;; *) command jq "$@" ;; esac; } # the output's reader: what it is given is recorded
+  noisy=$(NOISE=1 allfails 124); unset -f jq
+  [ "$noisy" = "$clean" ] || fail "30000 noise lines changed the result: clean $clean, noisy $noisy"
+  [ "$(command jq -c '[.passed, .timeout.file]' <<<"$clean")" = '[["b.test.mjs"],"c.test.mjs"]' ] || fail "b is not the passed file or c the timeout file: $clean"
+  [[ $clean == *'(at a.test.mjs:3: line three)'* ]] || fail "the failing case has no place: $clean"
+  ! grep -q '^wait:' "$T/$CASE/seen" || fail "a noise line reached the jq of testfails(): $(grep -c '^wait:' "$T/$CASE/seen") of $(wc -l < "$T/$CASE/seen") lines (cmd: $(head -c 300 "$T/$CASE/cmd"))"
+}
