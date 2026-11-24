@@ -267,6 +267,14 @@ needs. `any`, the default, takes any proof that can be reproduced. `real` asks f
 runs: its real config, commands and inputs. A finding with no such proof becomes an `UNPROVEN:` line, which never
 holds the verdict. A security finding needs only a proof that can be reproduced.
 
+A Claude review or judge can read and search the files, but it cannot edit them. When ast-grep is installed
+([Setup](setup.md)), it can also run `cb-ast run -p '<pattern>' -l <language>`, an ast-grep search that cannot
+write. Its shell refuses every other command that writes: `rm`, `touch`, `bash -c`, an ast-grep option that writes, a
+command chained to `cb-ast`, a redirection of its output, a command substitution and an environment prefix. Claude
+Code's own read-only commands, such as `git status` and `ls`, can run. A finding's `Class search:` line can then be a
+`cb-ast run` search when the mistake is in code that ast-grep reads, and is an `rg` search otherwise. Without
+ast-grep, the review has no shell, and its `Class search:` lines are `rg` searches.
+
 A review after a fix gets the findings that the fix was told to fix and the findings declined so far as `claim wrong`,
 `cannot happen` or `fixed`. It says for each earlier finding whether the fix holds. It raises one of those declined
 findings again only with a new, concrete reason.

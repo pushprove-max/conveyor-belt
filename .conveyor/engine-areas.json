@@ -365,6 +365,7 @@
 {"area": "review", "test": "acctpaths.test.sh"}
 {"area": "review", "test": "reviewacct.test.sh"}
 {"area": "review", "test": "reviewacctown.test.sh"}
+{"area": "review", "test": "reviewast.test.sh"}
 {"area": "review", "file": "conveyor/lib/review.sh"}
 {"area": "review", "file": "conveyor/rules/ste80.md"}
 {"area": "review", "file": "conveyor/rules/ste80-LICENSE"}

@@ -45,6 +45,9 @@ $(rereview "c$n" "$w" 1)" && { reviewed "$w" "$b"; echo "rc=$? $(verdict "$w.rev
 # hooks, without the staged change or AGENTS.md, or with AGENTS.md twice; a write that gets through is left in the
 # worktree; health does not name it.
 t_claudereview() {
+  # No ast-grep installed (the Board's virtualenv in an empty data folder of the case), whatever this machine has: the
+  # review keeps Read, Grep and Glob and no shell (reviewtools()).
+  export XDG_DATA_HOME=$T/$CASE/data
   setup "[$(issue 7 2026-01-01)]"
   echo 'AGENTS-RULES-MARK' > "$R/AGENTS.md"; git -C "$R" add AGENTS.md; git -C "$R" commit -qm agents
   tune --slurpfile real "$SRC/lib/test-pack.json" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"]'; seatset reviewer gpt-6.1-sol
