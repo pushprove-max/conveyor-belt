@@ -641,7 +641,7 @@ HEALSEVERY='if .every and any(.d[]; .accept and (.heals | not)) then .d |= map(i
 # findings (its review stands as the reviewer wrote it). The last ruling of a finding stands, as in
 # <worktree>.outside: one the judge now rules harm, gives no kind, finds in the change, declines or sends to the other
 # list leaves the list, so it is never on two lists, or both on one and fixed or filed. An entry a batch card holds
-# stays. Fails when a list cannot be written again.
+# stays; one that was taken back from the dropped record goes back to it. Fails when a list cannot be written again.
 healsunput() { # <card> <the decisions file> [all]
   local gone f
   for f in "$SELFHEALS" "$DOCSDRIFT"; do
@@ -650,6 +650,11 @@ healsunput() { # <card> <the decisions file> [all]
       | select($all != "" or (.heals | not) or ((.effect == "docs drift") != ($docs != ""))) | .finding | one]' "$2" 2>/dev/null) || return 1
     [ "$gone" != '[]' ] || continue
     ( flock 9 || exit 1
+      # An entry a review took back from the dropped record (healsagain(), lib/healslist.sh) goes back to it as it
+      # expired, as healsdrop() (lib/heals.sh) does, written before the list is: a failure between the two leaves it
+      # in both, never in neither.
+      [ "$f" != "$SELFHEALS" ] || jq -c --arg c "$1" --argjson g "$gone" 'select(type == "object" and .card == $c and .from == "review" and .batched == null
+        and (.finding | IN($g[])) and .expired != null) | .dropped = .expired | del(.expired)' "$f" >> "$HEALSDROPPED" || exit 1
       jq -c --arg c "$1" --argjson g "$gone" 'select(type != "object" or .card != $c or .from != "review" or .batched != null or (.finding | IN($g[]) | not))' "$f" > "$f.new" \
         && mv -f "$f.new" "$f" || { rm -f "$f.new"; exit 1; } ) 9>>"$f.lock" || return 1
   done

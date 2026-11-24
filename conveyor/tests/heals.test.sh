@@ -63,10 +63,14 @@ t_healsfollowup() {
 # so it is both on the list and filed as a follow-up; an earlier self-heals ruling outlives a later ruling with no kind,
 # so a finding with no kind, which is harm, stays on the list and is never fixed; a listed finding a later review rules
 # harm stays on the list, so it is both listed and filed. Three reviews of one card.
+# Bug (issue 1624): the outside finding has an entry that expired from an earlier card; the second review takes it back
+# from the dropped record, and the third review's harm ruling deleted it, so its expiry was in neither file.
 t_healslast() {
   local out='[P1] b.txt:1 stale text in b. Proof: b.txt:1' acc='[P2] a.txt:2 a check passes that should fail. Proof: a.txt:2' is
   is=$(issue 8 2026-01-01 P1 area:engine)
   judging "[$is]"
+  jq -cn --arg f "$out" '{id: "h-gone", card: "c1-7", issue: 7, area: "area:engine", finding: $f, why: "w", effect: "self-heals", from: "review",
+    time: "2026-01-01T00:00:00Z", dropped: {time: "2026-02-01T00:00:00Z", why: "expired"}}' > "$ST/healsdropped.jsonl"
   printf '%s\n' "$out" "$acc" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   printf '%s\n' 'F1 OUTSIDE: harm: b is written wrong, and b.txt is not the change'"'"'s' 'F2 ACCEPT: self-heals: the next run passes. Cost to every card: none' > "$STUB/judge.1"
   printf '%s\n' 'F1 OUTSIDE: self-heals: the next poll corrects b, and b.txt is not the change'"'"'s' 'F2 ACCEPT: the check is wrong. Cost to every card: none' > "$STUB/judge.2"
@@ -78,12 +82,15 @@ t_healslast() {
   fx_in 'tofile "$T/$CASE/cards/c8.review"'
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "$acc" ] && [ -z "$(jq -r --arg f "$acc" 'select(.finding == $f) | .id' "$ST/selfheals.jsonl" 2>/dev/null)" ] \
     || fail "after the second review, the findings to file are not the accepted one with no kind alone (the outside one is on the list), or the one with no kind stayed on the list: $(cat "$T/$CASE/run.out" "$T/$CASE/cards/c8.outside" "$ST/selfheals.jsonl" 2>&1)"
-  [ "$(jq -r --arg f "$out" 'select(.finding == $f) | .from' "$ST/selfheals.jsonl" 2>/dev/null)" = review ] || fail "the outside finding the second review sorted as self-heals is not on the list: $(cat "$ST/selfheals.jsonl" 2>&1)"
+  [ "$(jq -r --arg f "$out" 'select(.finding == $f) | [.id, .from, .expired.time] | join(" ")' "$ST/selfheals.jsonl" 2>/dev/null)" = 'h-gone review 2026-02-01T00:00:00Z' ] && [ ! -s "$ST/healsdropped.jsonl" ] \
+    || fail "the outside finding the second review sorted as self-heals did not take its expired entry back to the list: $(cat "$ST/selfheals.jsonl" "$ST/healsdropped.jsonl" 2>&1)"
   JUDGEISSUE=$is judgeone 8 "$STUB/review" fix
   fx_in 'tofile "$T/$CASE/cards/c8.review"'
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "$acc"$'\n'"$out" ] && [ -z "$(jq -r --arg f "$out" 'select(.finding == $f) | .id' "$ST/selfheals.jsonl" 2>/dev/null)" ] \
     && jq -e --arg f "$out" 'select(.finding == $f and .effect == "harm")' "$T/$CASE/cards/c8.outside" >/dev/null \
     || fail "after the third review ruled the listed outside finding harm, it is not among the findings to file as harm, or is still on the list:$(cat "$T/$CASE/run.out" "$ST/selfheals.jsonl" "$T/$CASE/cards/c8.outside" 2>&1)"
+  [ "$(jq -c '[.id, .finding, .dropped, .expired]' "$ST/healsdropped.jsonl" 2>&1)" = "$(jq -cn --arg f "$out" '["h-gone", $f, {time: "2026-02-01T00:00:00Z", why: "expired"}, null]')" ] \
+    || fail "the entry the second review took back from the dropped record was lost when the third review ruled it harm, not put back as it expired: $(cat "$ST/selfheals.jsonl" "$ST/healsdropped.jsonl" 2>&1)"
 }
 
 # Bugs (issue 1559): a finding a batch card holds already, which a later review of its card rules harm, stays outside
