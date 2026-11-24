@@ -473,9 +473,16 @@ exit 1
 EOT
   # loop: the card must be stopped by `control stop` through the loop, which ends it before stopped() and clean() run.
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$cd; exec timeout 120 bash "$SRC/conveyor.sh" serve > "$STUB/serve.out" 2>&1 ) & pid=$!; SERVEPID=$pid; trap 'kill "$SERVEPID" 2>/dev/null' EXIT
-  # <card>.spent is removed as each try starts and written as it fails: with try <n> made, try <n> has ended.
-  until { [ -s "$STUB/calls" ] && [ "$(wc -l < "$STUB/calls")" = "$1" ] && compgen -G "$cd/*.spent" >/dev/null; } || ! kill -0 $pid 2>/dev/null; do sleep 0.1; done
-  card=$(st 'select(.step == "picked") | .card'); [ -n "$card" ] && [ -s "$cd/$card.spent" ] || fail "serve did not make try $1 of the build: $(cat "$STUB/serve.out")"
+  # The stop comes only once apitries() has begun try <n>'s wait: session1() writes <card>.spent before apitries()
+  # reads the refusal, so a stop then lands before the wait's stop path runs. <card>.spent is removed as each try
+  # starts and written as it fails, after watch() writes that try's own live record; apitries() then writes its
+  # "trying again" live record just before it sleeps. With try <n> made, <card>.spent there and that record, try <n>'s
+  # wait has begun (not try <n>-1's: its record was written over by try <n>'s watch() before <card>.spent was).
+  until { [ -s "$STUB/calls" ] && [ "$(wc -l < "$STUB/calls")" = "$1" ] && compgen -G "$cd/*.spent" >/dev/null \
+    && jq -se 'any(.action | strings | test("^waiting: the model API refused \\(.*\\); trying again at "))' "$cd"/*.live >/dev/null 2>&1; } \
+    || ! kill -0 $pid 2>/dev/null; do sleep 0.1; done
+  card=$(st 'select(.step == "picked") | .card'); [ -n "$card" ] && [ -s "$cd/$card.spent" ] && jq -e '.action | test("trying again at ")' "$cd/$card.live" >/dev/null 2>&1 \
+    || fail "serve did not begin the wait after try $1 of the build: $(cat "$STUB/serve.out")"
   loop control stop >/dev/null
   until [ -n "$(jq -r --arg c "$card" 'select(.card == $c and .step == "build") | .card' "$ST/retried.jsonl" 2>/dev/null)" ] || ! kill -0 $pid 2>/dev/null; do sleep 0.1; done
   kill $pid; wait $pid 2>/dev/null
