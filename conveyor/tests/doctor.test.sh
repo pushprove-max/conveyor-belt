@@ -127,6 +127,9 @@ t_doctoruntimed() {
   # the one doctor run checks every warning.)
   # Issue 347. Bug caught: a host file that still sets the removed steer got no word that it does nothing, so its
   # owner still thinks card work yields to them. Doctor says so once, in one line.
+  # Bug: with no ast-grep in the Board's virtualenv, doctor said nothing of it, or failed (named it missing) when it is
+  # optional. Here nothing else is missing, so doctor must still pass, and it warns with the command that installs it.
+  rm "$XDG_DATA_HOME/conveyor/board-venv/bin/ast-grep" || fail "the virtualenv's ast-grep was not removed"
   local H=$XDG_CONFIG_HOME/conveyor/host.json
   jq '.maxLoad = 2 | .minFreeMemMB = 1000 | .pressure = {strained: {cpu: 1}} | .steer = false' "$H" > "$T/$CASE/h" && mv "$T/$CASE/h" "$H" || fail "the host file was not rewritten"
   out=$(cd "$S" && bash "$X" doctor 2>&1) || fail "doctor failed over test times or the old machine-room settings: $out"
@@ -138,6 +141,8 @@ t_doctoruntimed() {
   [ "$(grep -c 'steer' <<<"$out")" = 1 ] \
     && grep -qxF "warning: the host file $H sets steer, which no longer does anything: card sessions, reviews and test runs run at normal priority; remove it" <<<"$out" \
     || fail "doctor did not say once that the host file's steer does nothing: $out"
+  grep -qxF "warning: ast-grep is not in the Board's virtualenv $XDG_DATA_HOME/conveyor/board-venv, so sessions search code by text only; fix: run /conveyor-belt:setup, which installs it there" <<<"$out" \
+    && ! grep -q '^missing: ast-grep' <<<"$out" || fail "doctor did not warn of the missing ast-grep with its fix: $out"
 }
 t_doctormissing() {
   local X out; doctordone
@@ -145,7 +150,7 @@ t_doctormissing() {
   # reviewer is Codex's gpt-6.1-sol on a host with no Codex: the seat that cannot start (#593 below).
   jq '.models.allowed = {claude: ["claude-opus-5-5"], codex: ["gpt-6.1-sol"], "claude-reviewer": ["claude-opus-5-5"]}' "$S/.conveyor/project.json" > "$T/$CASE/p" \
     && mv "$T/$CASE/p" "$S/.conveyor/project.json" || fail "the pack was not rewritten"
-  rm "$T/$CASE/terms" "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" "$XDG_DATA_HOME/conveyor/board-venv/bin/ast-grep"; : > "$G/out"; uninstalled; echo segno > "$G/nopkg"
+  rm "$T/$CASE/terms" "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"; : > "$G/out"; uninstalled; echo segno > "$G/nopkg"
   local gone=d791d168d791d168d791d168d791d168d791d168; mkdir -p "$XDG_CONFIG_HOME/systemd/user" \
     && printf '[Service]\nExecStart="/bin/bash" "%s" serve\n' "$V/$gone/conveyor/conveyor.sh" > "$XDG_CONFIG_HOME/systemd/user/conveyor-gone-1.service"
   # The host file's one record is another checkout of the same folder name (setup adds no second record of a name).
@@ -173,10 +178,6 @@ t_doctormissing() {
     || fail "doctor did not name why the Board cannot read the host file's record: $out"
   grep -qx "missing: segno, for the Board, in its virtualenv $XDG_DATA_HOME/conveyor/board-venv; fix: run /conveyor-belt:setup, which installs it there" <<<"$out" \
     && grep -q "^ok: pyotp, in the Board's virtualenv " <<<"$out" || fail "doctor did not name the Board's missing package with its fix: $out"
-  # Bug: with no ast-grep in the Board's virtualenv, doctor said nothing of it, or named it missing (a failure) when
-  # it is optional. It warns, with the setup command that installs it.
-  grep -qxF "warning: ast-grep is not in the Board's virtualenv $XDG_DATA_HOME/conveyor/board-venv, so sessions search code by text only; fix: run /conveyor-belt:setup, which installs it there" <<<"$out" \
-    && ! grep -q '^missing: ast-grep' <<<"$out" || fail "doctor did not warn of the missing ast-grep with its fix: $out"
   rm "$G/nopkg"
   # Bug caught (#573): a service named an install that prune had removed, so a restart or a reboot would not start
   # its loop, and doctor said nothing.
