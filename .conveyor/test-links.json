@@ -981,5 +981,8 @@
     "conveyor/foreman/foreman-size.test.sh",
     "conveyor/foreman/foreman-standing.test.sh",
     "conveyor/foreman/foreman.test.sh"
+  ],
+  "conveyor/tests/healsact.test.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
   ]
 }

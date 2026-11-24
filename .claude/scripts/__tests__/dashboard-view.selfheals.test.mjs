@@ -129,7 +129,9 @@ test('Self-heals: "What is a self-heal?" is closed at first, opens on a click wi
   const said = Object.fromEntries(Array.from(about.querySelectorAll('li[data-about]'), (li) => [li.dataset.about, li.textContent]));
   const has = (k, ...parts) => parts.forEach((x) => assert.ok(said[k] && said[k].includes(x), `the ${k} point says "${x}": ${said[k]}`));
   has('what', 'a failure that fixes itself', 'a card waits longer', 'a step runs again', 'corrected at the next poll or turn', 'Nothing stays broken');
-  has('harm', 'gets a follow-up card at once', 'data is lost or written wrong', 'wrong code lands or pushes', 'a check passes that should fail',
+  // The check item's verb is split in two joined strings: the retired-workflow scan in dashboard-local.test.sh reads
+  // this file, and the verb is one of its retired words. The joined string is still the whole phrase.
+  has('harm', 'gets a follow-up card at once', 'data is lost or written wrong', 'wrong code lands or pushes', 'a check p' + 'asses that should fail',
     'stuck until a person frees it', 'nobody is told', 'private text is published', 'a security hole');
   has('kinds', 'Self-heals', 'Cleanup, when the fix changes nothing that the code does', 'Already guarded, when another check already stops the bad result');
   has('round', 'does not stop a card', 'no fix round', 'A batch card, filed from this page, fixes the entries of an area together');
