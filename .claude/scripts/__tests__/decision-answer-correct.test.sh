@@ -84,7 +84,7 @@ check "rulings_digest_answer_newlines: an answer with newlines stays one line, r
 decide answer g-open "Yes" >/dev/null 2>"$BOX/err"
 check "growth_answer_without_id_warns: a growth answer with no id warns and is still recorded" "0 1 \"Yes\"" \
   "$? $(grep -c 'warning: g-open asks to grow a test count' "$BOX/err") $(latest g-open | jq -c .answer)"
-# A made-up ruling id, put together at run time: written out, its shape is a hit of conveyor/privacy/check.sh.
+# A made-up ruling id, put together at run time.
 RID=$(printf 'r-%08d-%06d-p-000001' 0 0)
 decide answer g-open2 "Yes ($RID)" >/dev/null 2>"$BOX/err"
 check "growth_answer_with_id_is_silent: an answer holding the ruling id warns of nothing" "0 0" "$? $(grep -c warning "$BOX/err")"

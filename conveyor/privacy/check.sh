@@ -33,7 +33,6 @@ tbody=''
 PATTERNS=$'email\t[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}
 private address\t(^|[^0-9.])(10\\.[0-9]{1,3}|192\\.168|172\\.(1[6-9]|2[0-9]|3[01]))\\.[0-9]{1,3}\\.[0-9]{1,3}($|[^0-9])
 home path\t/(Users|home)/[^./[:space:]][^/[:space:]]*
-ruling id\tr-[0-9]{8}-[0-9]{6}-
 token\t(gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|(^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'
 
 T=$(mktemp) || exit 2; trap 'rm -f "$T"' EXIT

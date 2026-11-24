@@ -171,9 +171,15 @@ t_privcheck() {
   printf 'case:Zed\n# a note\n\nann\nnowhere\n' > "$d/terms"
   out=$("$c" --terms "$d/terms" "$d/f"); [ $? = 1 ] || fail "hits did not exit 1"
   [ "$out" = "$(printf '%s\n' "$d/f:2: email" "$d/f:20: email" "$d/f:21: email" "$d/f:4: private address" "$d/f:5: private address" "$d/f:6: private address" \
-    "$d/f:8: home path" "$d/f:9: home path" "$d/f:22: home path" "$d/f:10: ruling id" "$d/f:11: token" "$d/f:12: private term (terms file line 1)" \
+    "$d/f:8: home path" "$d/f:9: home path" "$d/f:22: home path" "$d/f:11: token" "$d/f:12: private term (terms file line 1)" \
     "$d/f:15: private term (terms file line 4)")" ] || fail "hits: $out"
   [ "$(echo clean | "$c")" = '' ] && echo clean | "$c" || fail "a clean text is a hit"
+  # Bug (#1647): a ruling id (line 10 above) was a hit, so an issue text or a commit that cited a ruling was refused,
+  # though the id is no key and resolves to nothing outside the git-ignored log. A file and an issue text (stdin)
+  # that hold a ruling id and nothing else private pass.
+  printf 'Per ruling r-%s-000000-p, keep it.\n' "$day" > "$d/rid"
+  out=$("$c" --terms "$d/terms" "$d/rid") || fail "a file holding a ruling id ($(cat "$d/rid")) is a hit: $out"
+  out=$(printf 'Cites r-%s-123456-xyz.\n' "$day" | "$c" --terms "$d/terms") || fail "an issue text holding a ruling id is a hit: $out"
   printf 'a\0b\n%s\n' "$H/user/x" > "$d/nul"; [ "$("$c" "$d/nul")" = "$d/nul:2: home path" ] || fail "a file holding a NUL was not checked"
   # Bug (#131): the release was refused on a test's fake home <case>/home/.claude, read as a user's home. A folder after
   # /home/ or /Users/ that starts with a dot is no user's (1, 3); a user's path is still a hit, with a dot folder in it (2) or not (4).
