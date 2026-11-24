@@ -1333,6 +1333,38 @@ test('WORKER ACTIVITY: a card in its Test step shows a bar of its tests done of 
   expect(narrow.startsWith('◐ #3865  ▰') && cols(narrow) <= 30).toBe(true)
 })
 
+// Issue 1598. Bug it catches: a card that waits for the landing turn showed the engine's live text, "waiting for card
+// c20261124T015216-conveyor-belt-0 to land first: ...", cut off at the pane's edge, so no one could tell which card it
+// waited for. It names that card by its ID in the tables: `fu #1590` for a review follow-up, `#1533` for an issue,
+// `red 19e3b6e` for a main-red fix card; a card id holds none of those. Other live text is unchanged. A card queued
+// for the next batch at its claim names the card that has the turn the same way. The live text streams between
+// snapshots, so when the turn passes to another card the snapshot's waitsOn can still name the one before: then the
+// engine's text stays, not the wrong card's ID.
+test('WORKER ACTIVITY and the belt name the card that has the landing turn by its short ID, not its card id', () => {
+  const wait = (card: string) => ({ action: `waiting for card ${card} to land first: it has the landing turn, as its batch or its run again of the shared test files lands first`, turns: 0, lastOutputAt: ago(0) })
+  const fu = 'c20261124T015216-bookstore-0', red = 'c20261124T015300-bookstore-0'
+  const s = board({ belt: [
+    { ...BELT[1], card: 'c8-1531', issue: 1531, step: 'land', live: wait(fu), waitsOn: { card: fu, issue: 0, state: 'tests', name: 'Review follow-up of #1590' } },
+    { ...BELT[1], card: 'c9-1585', issue: 1585, step: 'land', live: wait('c10-1533'), waitsOn: { card: 'c10-1533', issue: 1533, state: 'tests' } },
+    { ...BELT[1], card: 'c11-1589', issue: 1589, step: 'land', live: wait(red), waitsOn: { card: red, issue: 0, state: 'tests', name: 'Main is red (19e3b6e4f5a6)' } },
+    // An older snapshot with no waitsOn keeps the engine's text.
+    { ...BELT[1], card: 'c12-1592', issue: 1592, step: 'land', live: wait(fu) },
+    { ...BELT[1], card: 'c13-1593', issue: 1593, step: 'build', live: { action: `queued for the next batch: card c10-1533 has the landing turn`, turns: 0, lastOutputAt: ago(0) }, waitsOn: { card: 'c10-1533', issue: 1533, state: 'tests' } },
+    // The turn passed from c10-1533 to c14-1594 after the snapshot: waitsOn still names c10-1533.
+    { ...BELT[1], card: 'c15-1595', issue: 1595, step: 'land', live: wait('c14-1594'), waitsOn: { card: 'c10-1533', issue: 1533, state: 'tests' } },
+  ] })
+  const rows = activityModel(s, s.snap!, 80, 0).map(plain)
+  expect(rows[1]).toMatch(/^◐ #1531  waiting for fu #1590 to land \(landing turn\)/)
+  expect(rows[2]).toMatch(/^◐ #1585  waiting for #1533 to land \(landing turn\)/)
+  expect(rows[3]).toMatch(/^◐ #1589  waiting for red 19e3b6e to land \(landing turn\)/)
+  expect(rows[4], 'no waitsOn: the engine text').toMatch(/^◐ #1592  waiting for card c20261124T015216/)
+  expect(rows[5], 'queued for the next batch').toMatch(/^◐ #1593  queued for the next batch: #1533 has the landing turn/)
+  expect(rows[6], 'stale waitsOn: not the card that had the turn before').toMatch(/^◐ #1595  waiting for card c14-1594 to land first/)
+  for (const r of [...rows.slice(1, 4), rows[5]]) expect(r, 'no card id').not.toMatch(/c20261124T|c10-1533/)
+  const belt = tableText(s, 100)
+  expect(belt, 'the belt\'s live line too').toMatch(/now waiting for fu #1590 to land \(landing turn\)/)
+})
+
 // Issue 1272. Bug it catches: the pane's PICK ORDER named no ready issue, only a count, so with every slot full the
 // issues waiting for a slot were named nowhere. It lists the next five in pick order, as /units' QUEUE does.
 test('PICK ORDER lists the next five ready issues of two projects, numbered, with their priorities, above the Waiting table', () => {

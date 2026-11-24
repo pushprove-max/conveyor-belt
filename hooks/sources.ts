@@ -73,7 +73,7 @@ export type Track = { steps: Step[]; at: number | null; label: string; since: nu
 // tokens: the card's fresh tokens so far, both seats together (null when the snapshot does not give them).
 // live: the running step as it streams: what it is doing now, its turns so far and when it last printed.
 export type Live = { action: string; turns: number | null; lastOutputAt: number | null }
-export type Belt = Card & Times & { step: string; review: number | null; of: number | null; stepAt: number | null; model: string | null; tokens: number | null; usd: number | null; reading: boolean; atEnd: boolean; parent: number | null; umbrella: number | null; reviews: Review[]; track: Track | null; metrics: Metrics | null; live: Live | null }
+export type Belt = Card & Times & { step: string; review: number | null; of: number | null; stepAt: number | null; model: string | null; tokens: number | null; usd: number | null; reading: boolean; atEnd: boolean; parent: number | null; umbrella: number | null; reviews: Review[]; track: Track | null; metrics: Metrics | null; live: Live | null; waitsOn: Card | null }
 // room: why the machine holds it back ("waiting for a machine slot: ..."), "" when it does not.
 export type Queued = Ref & { priority: string; followup: boolean; retried: boolean; parent: number | null; umbrella: number | null; room: string }
 // An open issue that depends on one still open: not picked until each of waitsFor has closed. states: why each of
@@ -285,7 +285,7 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
       ...j.needsYou.waiting.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: true, text: one(x.sentence), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
       ...j.needsYou.blocked.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: false, text: one(x.reason), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
     ],
-    belt: j.belt.map((x: any): Belt => ({ ...card(x), ...timesOf(x), step: one(x.step), review: num(x.review), of: num(x.of), stepAt: time(x.stepAt), model: one(x.model) || null, tokens: num(x.tokens?.claude) === null || num(x.tokens?.codex) === null ? null : x.tokens.claude + x.tokens.codex, usd: num(x.usd), reading: x.reading === true, atEnd: x.atEnd === true, parent: parentOf(x), umbrella: umbrellaOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics), live: liveOf(x.live) })),
+    belt: j.belt.map((x: any): Belt => ({ ...card(x), ...timesOf(x), step: one(x.step), review: num(x.review), of: num(x.of), stepAt: time(x.stepAt), model: one(x.model) || null, tokens: num(x.tokens?.claude) === null || num(x.tokens?.codex) === null ? null : x.tokens.claude + x.tokens.codex, usd: num(x.usd), reading: x.reading === true, atEnd: x.atEnd === true, parent: parentOf(x), umbrella: umbrellaOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics), live: liveOf(x.live), waitsOn: x.waitsOn && typeof x.waitsOn === 'object' && one(x.waitsOn.card) ? card(x.waitsOn) : null })),
     queue: next && next.map((x: any): Queued => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), priority: one(x.priority), followup: x.followup === true, retried: x.retried === true, parent: parentOf(x), umbrella: umbrellaOf(x), room: one(x.room) })),
     // queue.order is the whole pick order; queue.next stops at ten. pickCounts needs the whole to tell a waiting part from one that is ready.
     order: (Array.isArray(j.queue.order) ? j.queue.order : []).filter((x: unknown) => x && typeof x === 'object')
@@ -891,6 +891,16 @@ const verdicts = (rs: Review[]): Seg[][] => rs.map(r => {
   return [{ t: rs.length > 1 ? `R${r.round} ` : '', d: true }, { t: r.verdict || 'no verdict', c: r.verdict === 'GO' ? C.ok : C.you }, ...(f ? [{ t: ` ${f}`, c: C.you }] : [])]
 })
 
+// A card that waits for the landing turn, as the card that has it: by that card's ID in the tables (idOf: `#1590`,
+// `fu #1590`, `red 19e3b6e`), not by the card id the engine's live text holds: at its land step (landwait(),
+// lib/claim.sh) or queued for the next batch at its claim. Only when that card id is the snapshot's waitsOn: the live
+// text streams in between snapshots, so waitsOn can still name the card that had the turn before. "" for any other
+// live text.
+const turnWait = (b: Belt): string => {
+  const m = /^(?:waiting for card (\S+) to land first\b|queued for the next batch: card (\S+) has the landing turn\b)/.exec(b.live?.action ?? '')
+  if (!m || !b.waitsOn || (m[1] ?? m[2]) !== b.waitsOn.card) return ''
+  return m[1] ? `waiting for ${idOf(b.waitsOn)} to land (landing turn)` : `queued for the next batch: ${idOf(b.waitsOn)} has the landing turn`
+}
 // The running step's live fields: `    now Bash: npm test · 3 turns · last output 4s ago`. None when it streams nothing.
 // The Test step runs no model, so in place of its turns it shows how far the tests are: the file that runs now and its
 // time on it, `file 2 of 3: conveyor/tests/b.test.sh, 4m, 2 failed` (#433: the cases of the files that ended are no
@@ -906,7 +916,7 @@ const liveLine = (b: Belt, now: number, w: number): Line[] => {
     : files ? `${files.run}${files.of === null ? '' : ` of ${files.of}`} test files${files.over ? ` · ${count(files.over, 'more file')} than selected` : ''}` : ''
   // The Test step's list: the changed tests (how many files) or the whole suite.
   const list = t?.at !== 3 || !t.list ? '' : t.list.mode === 'changed' ? `changed: ${count(t.list.files, 'file')}` : 'whole suite'
-  const parts = [l.action ? `now ${l.action}` : '', list, progress, ago ? `last output ${ago} ago` : ''].filter(Boolean)
+  const parts = [l.action ? `now ${turnWait(b) || l.action}` : '', list, progress, ago ? `last output ${ago} ago` : ''].filter(Boolean)
   return [fitWidth([{ t: `    ${parts.join(' · ')}`, d: true }], w)]
 }
 
@@ -1296,7 +1306,7 @@ export const activityModel = (s: State, snap: Snap, w: number, frame: number): L
   ...(snap.belt.length ? [] : [empty('nothing on the belt')]),
   ...snap.belt.map((b): Line => {
     const m = /^([A-Za-z][\w.-]*): ([\s\S]*)$/.exec(b.live?.action ?? '')
-    const what = m ? shortCommand(m[2], b.card) : b.live?.action ? shortCommand(b.live.action, b.card) : stepOf(b)
+    const what = turnWait(b) || (m ? shortCommand(m[2], b.card) : b.live?.action ? shortCommand(b.live.action, b.card) : stepOf(b))
     const tests = b.track?.at === 3 ? b.track.tests : null
     const shown: Line = tests ? [...gauge(tests.of ? (100 * tests.done) / tests.of : 0), { t: ` ${tests.done}/${tests.of}${tests.failed ? ` · ${tests.failed} failed` : ''}` }] : [{ t: what }]
     const at = b.track?.since ?? b.stepAt
