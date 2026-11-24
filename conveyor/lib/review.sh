@@ -65,7 +65,7 @@ reviewed() { # <worktree> <brief> [instructions]: prints and fails as review() d
   [ ! -e "$1.stalled" ] || n=$((n + 1))
   s=$(jq -ce objects "$1.spent" 2>/dev/null) || s='{"step":"review"}'
   jq -c --argjson f "$x" --argjson n "$n" "$BOTHTRIES"' | if $n > 0 then .stalls = $n else . end' <<<"$s" > "$1.spent"
-  [ "$n" != 2 ] || { echo "stalled twice at review: no progress since $(<"$1.stalled")"; return 1; }
+  [ "$n" != 2 ] || { echo "stalled twice at review: no progress since $(<"$1.stalled")$(keptnote "$u")"; return 1; }
   r=$(jq -r .reason <<<"$x"); printf '%s\n' "${r%%$'\n'*}; run again after ${REVIEW_PAUSE}s: $u"; return 1
 }
 review() { # <worktree> <brief> [instructions, in place of REVIEW]
@@ -90,8 +90,36 @@ review() { # <worktree> <brief> [instructions, in place of REVIEW]
     || { sed -E 's/^((DECLINED|MINOR|OUTSIDE|SELFHEALS):[[:space:]]*)+//' "$1.review" > "$1.review.new" && mv -f "$1.review.new" "$1.review"; } || { echo "the review could not be read"; return 1; }
   return $rc
 }
+# A failed Codex review's events, err and session file, copied to the card's kept folder ($ST/kept/<card>) as
+# <card>.review.events, .err and .session (<card>.review-2.events and so on for a later review). Prints "; its events are
+# kept in <name>" with the events file's name in that folder, or nothing when its events or err could not be kept (a reason
+# that names the events file may point at the err file beside it: nostartsaid()). Fails when any of the three could not be
+# copied: the caller then leaves the session file where Codex wrote it, as the only copy.
+reviewkeep() { # <worktree> <session file, or "">
+  local c=${1##*/} d n=1 b rc=0
+  d=$ST/kept/$c; b=$c.review; while [ -e "$d/$b.events" ]; do n=$((n + 1)); b=$c.review-$n; done
+  mkdir -p "$d" 2>/dev/null && cp "$1.events" "$d/$b.events" 2>/dev/null && cp "$1.err" "$d/$b.err" 2>/dev/null \
+    || { echo "conveyor: card $c: a failed review's events or err could not be kept in $d" >&2; return 1; }
+  [ -z "$2" ] || cp "$2" "$d/$b.session" 2>/dev/null || { echo "conveyor: card $c: a failed review's session file could not be kept in $d" >&2; rc=1; }
+  printf '; its events are kept in %s' "$b.events"; return $rc
+}
+# The note reviewkeep() printed (its last "; its events are kept in <name>") in a reason <text>, for a reason that replaces
+# the review's own (a stall, or the API's refusal at each try): prints it, or nothing.
+keptnote() { # <reason text>
+  local n=${1##*; its events are kept in }
+  [ "$n" != "$1" ] || return 0
+  n=${n%%[;[:space:]]*}; printf '; its events are kept in %s' "$n"
+}
+# nostart()'s reason (NOSTART_WHY) with no word of the CLI's: its first line alone, naming the kept events or err file
+# (reviewkeep()) where it pointed at "its words below": the CLI's words are in its events, or in its err when it wrote them
+# to stderr alone. With no note (nothing was kept) it says the words could not be kept, not that they are below.
+nostartsaid() { # <reviewkeep()'s note>
+  local w=${NOSTART_WHY%%$'\n'*} where='its words, which could not be kept,'
+  [ -z "$1" ] || where='its words in the kept events or err file'
+  printf '%s%s' "${w//its words below/$where}" "$1"
+}
 codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex review, ending as review() says
-  local model=$4 effort=$5 rc roll s sec f run='' no=''
+  local model=$4 effort=$5 rc roll s sec f run='' no='' kn=''
   rm -f "$1.review.new"; sec=$SECONDS; codexsb read-only
   (cd "$1" && codexargs && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json "${CODEX_SB[@]}" "${CODEX_PX[@]}" -m "$model" \
     -c "model_reasoning_effort=\"$effort\"" -o "$1.review.new" - <<<"$3"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
@@ -99,15 +127,19 @@ codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex 
   # With no Codex sandbox (codexsb()), a write the review made is undone: the worktree is put back to the change it was given.
   [ "${CODEX_SB[0]}" = -s ] || { git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq; } || { echo "the worktree could not be put back after the review"; return 1; }
   # The running total its session file holds: the tokens of a review that ended before its turn did.
-  roll=$(rollout "$1.events"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }
+  roll=$(rollout "$1.events"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); }
   # Its seconds and, from its stream, its turns (turns completed) and its tool calls by kind (the items that
   # are not a message or reasoning).
   f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" --argjson run "${run:-null}" "$REVIEWREAD" "$1.events" 2>/dev/null | tail -n 1) \
     && [ -n "$f" ] || f=''
   if [ $rc = 0 ] && [ -s "$1.review.new" ] && mv -f "$1.review.new" "$1.review"; then
+    rm -f "$roll"
     [ -n "$f" ] && jq -e '.stats.turns > 0' <<<"$f" >/dev/null && routed "$f" codex && return 0
     s="review reported no token usage"; [ "$(verdict "$1.review")" != none ] || no=2
-  else s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))"$'\n'"$(tail -n 60 "$1.err")"
+  else
+    # Its events, err and session file are kept, and the reason names the events file only: Codex's own words (which can
+    # hold a credential in a URL) are never copied into a reason, as a reason goes to a GitHub comment.
+    if kn=$(reviewkeep "$1" "$roll"); then rm -f "$roll"; fi; s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))$kn"
     [ "$(verdict "$1.review.new" 2>/dev/null)" != none ] || no=2; fi
   # A review that failed still spent its tokens and seconds: block() records them. One whose usage cannot be read
   # is recorded all the same, with its model, effort, seconds and stats and unread (why), so it is counted
@@ -123,14 +155,14 @@ codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex 
   # with the proxy as the reviewer's fallback, runs again at once through the proxy (proxyfallback()).
   if [ "$no" = 2 ] && nostart "$rc" "$f" "$1.events" "$1.err" codex "$model" reviewer "" "$1"; then
     if proxyfallback codex; then
-      s=$NOSTART_WHY; f=$(PROXY_NOW=1 codexreview "$@"); no=$?
+      s=$(nostartsaid "$kn"); f=$(PROXY_NOW=1 codexreview "$@"); no=$?
       [ $no != 0 ] || { printf '%s\n' "$f"; return 0; }
       bothsaid "$s" "$f"; return $no
     fi
-    signinstop review; s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f")
+    signinstop review; s=$(nostartsaid "$kn"); f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f")
   fi
   jq -c '{step: "review"} + .' <<<"$f" > "$1.spent"
-  [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")"; no=2; }
+  [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")$kn"; no=2; }
   echo "$s"; return "${no:-1}"
 }
 # The prompt of a review with no shell (claudereview, opencodereview): its instructions, then where to read what a

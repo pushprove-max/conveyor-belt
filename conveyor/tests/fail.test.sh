@@ -30,7 +30,12 @@ t_fail() {
   echo '{ echo "FAIL schema mismatch"; printf "a%.0s" {1..300}; echo; } >&2; exit 3' > "$STUB/review-cmd"
   flcard 9 'echo two >> a.txt'; flfail 9 review
   st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -q 'review 1: .*exit 3' || fail "failed review not blocked with its exit: $(cat "$T/$CASE/run.out")"
-  st 'select(.issue == 9 and .step == "blocked") | .tail' | grep -qx 'FAIL schema mismatch' || fail "a failed review's errors lost their failing line: $(st 'select(.issue == 9 and .step == "blocked") | .tail')"
+  # The reviewer's own words never reach a reason (it goes to a GitHub comment): its err is kept, the reason names the events file.
+  # Bug: it said its words were in the kept events file, which is empty when the CLI wrote them to stderr alone, as here.
+  [ "$(st 'select(.issue == 9 and .step == "blocked") | .tail')" = null ] && grep -qx 'FAIL schema mismatch' "$ST"/kept/c9-9/c9-9.review.err \
+    && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -qF 'what its words in the kept events or err file say' \
+    && st 'select(.issue == 9 and .step == "blocked") | .reason' | grep -qF 'its events are kept in c9-9.review.events' \
+    || fail "a failed review's errors are in the blocked line, or not kept: $(st 'select(.issue == 9 and .step == "blocked") | [.reason, .tail]') $(ls "$ST"/kept/c9-9)"
   echo 'exec sleep 30' > "$STUB/review-cmd" # sleep: a review that hangs, cut by reviewTimeout
   flcard 10 'echo two >> a.txt'; tuned '.tunables.reviewTimeout = 1' flfail 10 review
   # The reason names the timeout, as the build's does (#1435: a reason with no timeout text passed).
@@ -67,13 +72,13 @@ t_reviewretry() {
   setup '[]'
   # Twice with no verdict: the card blocks at its first review round, with both reasons and both attempts' spending
   # (flfail: reviewed() and block() as card() runs them; t_fail shows such a card failed at review 1 on the Board).
-  # The second attempt fails otherwise, with more output than the line keeps: the reason still names both failures.
+  # The second attempt fails otherwise, with much output: the reason still names both failures, and that output is kept.
   : > "$STUB/reviews"
   echo '[ "$(wc -l < "$STUB/reviews")" = 1 ] && exit 3; seq 1 70 >&2; exit 4' > "$STUB/review-cmd"
   flcard 8 'echo two >> a.txt'; flfail 8 review
   [ "$(wc -l < "$STUB/reviews")" = 2 ] && st 'select(.issue == 8 and .step == "blocked") | .reason' \
     | grep -q '^review 1: the codex CLI stopped before any work (exit 3): .*run again after 0s: the codex CLI stopped before any work (exit 4): ' \
-    && [ "$(st 'select(.issue == 8 and .step == "blocked") | .tail | split("\n") | last')" = 70 ] \
+    && [ "$(st 'select(.issue == 8 and .step == "blocked") | .tail')" = null ] && [ "$(tail -n 1 "$ST"/kept/c8-8/c8-8.review-2.err)" = 70 ] \
     || fail "two failed reviews did not block with both reasons and the second's output: $(st 'select(.issue == 8)') $(cat "$T/$CASE/run.out")"
   recok "$ST/cards.jsonl" "a card that failed its review twice"
   [ "$(st 'select(.issue == 8 and .step == "blocked") | [.spent.step, (.spent.firstTry.reason | test("exit 3")), (.spent.firstTry.spent.sec | type)] | tojson')" = '["review",true,"number"]' ] \
@@ -118,6 +123,63 @@ flreview() {
   fx_in 'w=$CARDS/c$FLN-$FLN; cd "$R" && t=$(reviewed "$w" "Build the issue."); rc=$?; printf "%s\n" "$t" | tr "\n" " "; echo; echo "reviewed: $rc $(verdict "$w.review")"'
 }
 
+# Bug: a failed Codex review left no trace of why: its events (holding Codex's error event), its err and its session
+# file went with the card, and the reason held only the exit status, so the cause of a run of failed reviews could not be
+# read. Its files are kept in the card's kept folder, and the reason names the events file but never copies Codex's words
+# (a credential in a URL of them would reach the GitHub comment of the block).
+t_reviewkeep() {
+  setup '[]'; flcard 11 'echo two >> a.txt'; echo "$GO" > "$STUB/review.2"
+  # shellcheck disable=SC2016 # expanded in the codex stub
+  # The review's session file (rollout(), lib/session.sh), named by the thread its events open with.
+  export CODEX_HOME=$T/$CASE/codex; mkdir -p "$CODEX_HOME/sessions/d"
+  echo '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":1}}}}' > "$CODEX_HOME/sessions/d/rollout-1-th1.jsonl"
+  echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { echo "{\"type\":\"thread.started\",\"thread_id\":\"th1\"}"; echo "{\"type\":\"error\",\"message\":\"failed to connect to https://demo:pw123@example.com/\"}"; echo "stderr: https://demo:pw123@example.com/" >&2; exit 1; }' > "$STUB/review-cmd"
+  flreview 11; rm "$STUB/review-cmd"
+  local k=$ST/kept/c11-11 r
+  r=$(head -n 1 "$T/$CASE/run.out")
+  grep -qF 'pw123@example.com' "$k/c11-11.review.events" && grep -qF 'pw123@example.com' "$k/c11-11.review.err" \
+    || fail "the failed review's events or err were not kept in $k: $(ls "$k" 2>&1)"
+  # Bug: the session file was deleted without a copy in the kept folder.
+  grep -qF token_count "$k/c11-11.review.session" && [ ! -e "$CODEX_HOME/sessions/d/rollout-1-th1.jsonl" ] \
+    || fail "the failed review's session file was not moved to $k: $(ls "$k" 2>&1) $(ls "$CODEX_HOME/sessions/d")"
+  [[ $r == *'review failed (exit 1); its events are kept in c11-11.review.events'* ]] && [[ $r != *pw123* && $r != *example.com* ]] \
+    || fail "the reason does not name the kept events file, or copies Codex's words: $r"
+  [ ! -e "$k/c11-11.review-2.events" ] || fail "the review that answered GO kept its events: $(ls "$k")"
+}
+# Bug: a kept folder that cannot be written lost the evidence: the failed review's session file was deleted all the same,
+# and its reason named an events file that was not there.
+t_reviewkeepfull() {
+  setup '[]'; flcard 11 'echo two >> a.txt'; echo "$GO" > "$STUB/review.2"
+  export CODEX_HOME=$T/$CASE/codex; mkdir -p "$CODEX_HOME/sessions/d"
+  echo '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":1}}}}' > "$CODEX_HOME/sessions/d/rollout-1-th1.jsonl"
+  # shellcheck disable=SC2016 # expanded in the codex stub
+  echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { echo "{\"type\":\"thread.started\",\"thread_id\":\"th1\"}"; exit 1; }' > "$STUB/review-cmd"
+  mkdir -p "$ST/kept"; chmod a-w "$ST/kept"; flreview 11; chmod u+w "$ST/kept"; rm "$STUB/review-cmd"
+  [ -s "$CODEX_HOME/sessions/d/rollout-1-th1.jsonl" ] && ! grep -qE 'its events are kept in|its words below|kept events' "$T/$CASE/run.out" \
+    || fail "a failed review that could not be kept lost its session file, or named an events file, or sent staff to words that are not there: $(ls "$CODEX_HOME/sessions/d") $(cat "$T/$CASE/run.out")"
+}
+# Bug: a review that stalled twice replaced its reason with one that dropped the kept events file's name (reviewed(), the
+# second stall). Its own review() is stood in for by one that stalls with the reason codexreview() gives.
+t_reviewkeepstall() {
+  setup '[]'; flcard 11 'echo two >> a.txt'; FLN=11
+  fx_in 'w=$CARDS/c$FLN-$FLN; REVIEW_PAUSE=0; review() { date -u +%FT%TZ > "$1.stalled"; echo "stalled at review: no progress since T; its events are kept in c11-11.review-2.events"; return 2; }; reviewed "$w" "Build the issue." | head -n 1 > "$T/$CASE/run.out"'
+  [[ $(cat "$T/$CASE/run.out") == 'stalled twice at review: no progress since '*'; its events are kept in c11-11.review-2.events' ]] \
+    || fail "the reason of a review that stalled twice lost the kept events file: $(cat "$T/$CASE/run.out")"
+}
+# Bug: as t_reviewkeep, for a failed review that did its work (it spent tokens): its reason is the plain "review failed",
+# which held the last 60 lines of Codex's stderr.
+t_reviewkeepwork() {
+  setup '[]'; flcard 11 'echo two >> a.txt'; echo "$GO" > "$STUB/review.2"
+  # shellcheck disable=SC2016 # expanded in the codex stub
+  echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { echo "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":100,\"cached_input_tokens\":60,\"output_tokens\":7}}"; echo "stderr: https://demo:pw123@example.com/" >&2; exit 1; }' > "$STUB/review-cmd"
+  flreview 11; rm "$STUB/review-cmd"
+  local k=$ST/kept/c11-11 r
+  r=$(head -n 1 "$T/$CASE/run.out")
+  grep -qF 'pw123@example.com' "$k/c11-11.review.err" && grep -qF turn.completed "$k/c11-11.review.events" \
+    || fail "the failed review's events or err were not kept in $k: $(ls "$k" 2>&1)"
+  [[ $r == *'review failed (exit 1); its events are kept in c11-11.review.events'* ]] && [[ $r != *pw123* && $r != *example.com* ]] \
+    || fail "the reason does not name the kept events file, or copies Codex's words: $r"
+}
 # Bugs: a review that answers both ways, or says GO beside an open finding (in the asked format or any other, here
 # numbered), lands as a clean GO; a review that says GO twice (once mid-way, once at the end) blocks as having no
 # clear verdict. Read as the engine reads a review (followups.sh's verdict()): a review with no clear verdict blocks

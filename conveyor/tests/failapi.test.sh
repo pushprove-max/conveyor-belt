@@ -152,12 +152,15 @@ t_apicodexrefused() {
   # One review record with the refused tries' tokens (47 each) and no first attempt: it was never a review without a verdict.
   [ "$(head -n 1 "$T/$CASE/run.out" | jq -c '[.tokens.codex, .firstTry]')" = '[141,null]' ] \
     || fail "the review's record lost the refused tries' tokens, or holds a first attempt: $(cat "$T/$CASE/run.out")"
-  # Refused at every try, in Codex's own words for it: the review fails after the fifth, naming the error.
+  # Refused at every try, in Codex's own words for it: the review fails after the fifth, with the status and the kept events file.
+  # Bug: the reason copied Codex's words (the last 60 lines of its error), and a password in a URL of them went to the GitHub
+  # comment of the block; it names the events file kept for the last try instead and holds none of Codex's words.
   echo 99 > "$STUB/refuse"; : > "$STUB/reviews"; rm -f "$ST/apierror"
-  REFUSAL='exceeded retry limit, last status: 429 Too Many Requests' apicall "$cxreview"
+  REFUSAL='exceeded retry limit, last status: 429 Too Many Requests at https://demo:pw123@example.com/' apicall "$cxreview"
   [ "$(wc -l < "$STUB/reviews")" = 5 ] || fail "a Codex review the API kept refusing ran $(wc -l < "$STUB/reviews") times, not 5"
-  [[ $(tail -n 1 "$T/$CASE/run.out") == "rc=1 "* ]] && head -n 1 "$T/$CASE/run.out" | grep -q '^the model API refused (429) at each of 5 tries' \
-    && grep -qF 'exceeded retry limit, last status: 429' "$T/$CASE/run.out" || fail "the review the API kept refusing did not fail naming the error in Codex's words: $(cat "$T/$CASE/run.out")"
+  [[ $(tail -n 1 "$T/$CASE/run.out") == "rc=1 "* ]] && head -n 1 "$T/$CASE/run.out" | grep -qE '^the model API refused \(429\) at each of 5 tries.* apart; its events are kept in .*\.review(-[0-9]+)?\.events$' \
+    && ! grep -qE 'pw123|example\.com|exceeded retry limit' "$T/$CASE/run.out" || fail "the review the API kept refusing did not fail naming the kept events file alone, with no word of Codex's: $(cat "$T/$CASE/run.out")"
+  grep -qF 'pw123@example.com' "$ST/kept/${FXWT##*/}/$(head -n 1 "$T/$CASE/run.out" | sed 's/.*kept in //')" || fail "the events file the reason names was not kept, or lacks Codex's error: $(ls "$ST/kept/${FXWT##*/}" 2>&1)"
   [ "$(jq -r .tokens.codex "$FXWT.spent")" = 235 ] || fail "the five refused tries' tokens are not in what the failed review used: $(cat "$FXWT.spent")"
   # A review that wrote its NO-GO before the API refused it answered: run again, a GO could replace that NO-GO.
   : > "$STUB/reviews"; printf '%s\n' "$NOGO" > "$STUB/review.1"; printf '%s\n' "$GO" > "$STUB/review.2"
@@ -170,13 +173,13 @@ t_apicodexrefused() {
   jq -e numbers "$ST/apierror" >/dev/null 2>&1 || fail "a Codex review refused by the API after its verdict did not mark the API error"
   # A refusal Codex prints in plain words is read as one (t_apiwords).
   # Bug: a refusal Codex wrote to stderr alone, its stream empty, was read as no API error either. Refused so at every
-  # try, the review runs 5 times and fails naming the error, with the words stderr held.
+  # try, the review runs 5 times and fails naming the status and the kept events file, with no word of Codex's.
   : > "$STUB/reviews"; rm -f "$ST/apierror"
-  echo 'echo "API Error: 429" >&2; exit 1' > "$STUB/review-cmd"
+  echo 'echo "API Error: 429 https://demo:pw123@example.com/" >&2; exit 1' > "$STUB/review-cmd"
   apicall "$cxreview"
   [ "$(wc -l < "$STUB/reviews")" = 5 ] && jq -e numbers "$ST/apierror" >/dev/null 2>&1 || fail "a Codex review refused on stderr ran $(wc -l < "$STUB/reviews") times, not 5, or marked no API error"
-  tr '\n' ' ' < "$T/$CASE/run.out" | grep -q '^the model API refused (429) at each of 5 tries.*API Error: 429' \
-    || fail "the review whose stderr said the API refused did not fail naming the error: $(cat "$T/$CASE/run.out")"
+  head -n 1 "$T/$CASE/run.out" | grep -qE '^the model API refused \(429\) at each of 5 tries.* apart; its events are kept in .*\.events$' && ! grep -qE 'pw123|API Error: 429' "$T/$CASE/run.out" \
+    || fail "the review whose stderr said the API refused did not fail naming the status and the kept events file alone: $(cat "$T/$CASE/run.out")"
 }
 # Bug: a Claude review the API refused was run again once only, as a review without a verdict is, then blocked its
 # card; and a refused try whose usage could not be read left a line that looked whole, so part of a step was priced as
