@@ -493,19 +493,19 @@ record() { # <repo> <main> <now> <await>
     [ -z "$skip" ] || hcur=$(awk -F'\t' 'FILENAME == ARGV[1] { s["blocked:" $0]; next } !($1 in s)' <(printf '%s\n' "$skip") - <<<"$hcur")
     return 0
   }
-  # The standing kind review-retry: each card retryable (lib.sh) gives back is given back with `conveyor.sh retry <issue>` on
-  # the record's host, marked as review-retry's (CONVEYOR_REVIEWRETRY), so a later card of the issue is not given back
-  # (the host's retry refuses one whose issue review-retry gave back since this snapshot, again(), commands/retry.sh: it
-  # wakes as a failed retry), and the act is logged there (`auto act review-retry`: standinglog). Its line then keeps only
-  # its key: it wakes nothing, and is not retried again while a snapshot still lists it. A retry that fails, or an act
-  # that is not logged, wakes as the block does, with why. Another block, or a main-red fix card (no issue), wakes as
-  # before. The retry is asked with the longer wait SLOW_S: it can take longer than the ask's first wait (#1586), and
-  # the wait ends only the ssh client, not the retry on the host, so a retry that ran would be read as a failed one.
+  # The standing kind review-retry: each card retryable (lib.sh) gives back is given back with `conveyor.sh retry <issue>`
+  # on the record's host, marked as review-retry's (CONVEYOR_REVIEWRETRY, the card), so a later card of the issue is not
+  # given back (the host's retry refuses one whose issue review-retry gave back since this snapshot, again(),
+  # commands/retry.sh: it wakes as a failed retry; this same card given back so, by needsretry() there, is status 3: done
+  # and logged), and the act is logged there (`auto act review-retry`: standinglog). Its line then keeps only its key: it
+  # wakes nothing, and is not retried again while a snapshot lists it. A failed retry or unlogged act wakes as the block
+  # does, with why; so does any other block. The longer wait SLOW_S (#1586): a wait ends the ssh client, not the retry.
   reviewretry() {
     local card issue out rc note
     while IFS=$'\t' read -r card issue; do
-      out=$(CONVEYOR_REVIEWRETRY=1 ASK_LIMIT=$SLOW_S ask "$repo" "$main" retry "$issue" 2>&1); rc=$?
-      if [ "$rc" = 0 ]; then
+      out=$(CONVEYOR_REVIEWRETRY=$card ASK_LIMIT=$SLOW_S ask "$repo" "$main" retry "$issue" 2>&1); rc=$?
+      if [ "$rc" = 3 ] && [[ $out == *"review-retry already gave back card $card of issue #$issue;"* ]]; then note=''
+      elif [ "$rc" = 0 ]; then
         note=''; out=$(ask "$repo" "$main" auto act review-retry "retried #$issue: its card $card was blocked by its review" 2>&1) \
           || { rc=$?; note="#$issue was retried (review-retry), but the act was not logged"; }
       else note="the review-retry of #$issue failed"; fi

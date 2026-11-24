@@ -341,7 +341,7 @@ status_tail() {
 # the host file's ssh target when it names one, else on this machine. testissue runs with the Foreman's mark,
 # CONVEYOR_FOREMAN=1, so it holds the issue it files: the engine on the host, or of another project of the group,
 # cannot see this machine's mark file. ask adds the mark to no other command: a session one starts (a card's) would
-# claim the role. CONVEYOR_REVIEWRETRY, when set (reviewretry(), watch-conveyor.sh), goes to the command too: the
+# claim the role. CONVEYOR_REVIEWRETRY, when set (reviewretry(), watch-conveyor.sh: the card), goes to the command too: the
 # host's `retry` marks its retry as review-retry's (commands/retry.sh). `retry` runs with CONVEYOR_RETRYBY=foreman, so
 # the host does not take a Foreman's retry (a standing rule's, fixed-block) for the owner's own. A command run on this
 # machine still inherits the Foreman session's own environment, mark included.
@@ -354,7 +354,7 @@ host_ssh() { # the host file's ssh target, empty when it names none (or one that
 ask() {
   local cmd fm=
   [ "$3" != testissue ] || fm='CONVEYOR_FOREMAN=1 '
-  [ -z "${CONVEYOR_REVIEWRETRY:-}" ] || fm+='CONVEYOR_REVIEWRETRY=1 '
+  [ -z "${CONVEYOR_REVIEWRETRY:-}" ] || fm+="CONVEYOR_REVIEWRETRY=$(printf %q "$CONVEYOR_REVIEWRETRY") "
   [ "$3" != retry ] || fm+='CONVEYOR_RETRYBY=foreman '
   if [ -n "${CONVEYOR_FOREMAN_ASK:-}" ]; then CONVEYOR_REPO=$1 CONVEYOR_MAIN=$2 CONVEYOR_CMD="${*:3}" bash -c "$CONVEYOR_FOREMAN_ASK" < "${ASK_IN:-/dev/null}"; return; fi
   # A pin names a version folder, so only a full commit id may (as the shim requires): anything else could name a

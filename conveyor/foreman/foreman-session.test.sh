@@ -343,17 +343,18 @@ for c in testissue health; do out=$(env -u CONVEYOR_FOREMAN -u CONVEYOR_FOREMAN_
 [ "$(cat "$T/marks")" = $'testissue mark=1\nhealth mark=' ] || fail "the Foreman's mark did not reach testissue alone: $(cat "$T/marks")"
 # Bug caught (#1589): over ssh the host's command has none of this machine's environment, so the watcher's
 # CONVEYOR_REVIEWRETRY must be in the command itself, or the host's retry is not marked as review-retry's and the
-# issue is given back again with no end. A Foreman's own retry (a standing rule's, fixed-block) reaches the host as
+# issue is given back again with no end. Its value is the card review-retry gives back (#1601: the host's retry tells
+# that card, already given back by the engine, from a failure), so it reaches the host whole. A Foreman's own retry (a standing rule's, fixed-block) reaches the host as
 # the Foreman's (CONVEYOR_RETRYBY): with no mark the host takes it for the owner's own retry, which lets review-retry give
 # the issue back once more. The host file names an ssh target; the ssh stub runs the command here in an
 # empty environment, as the host would.
 cp "$XDG_CONFIG_HOME/conveyor/host.json" "$T/h0" && jq '.ssh = "example-host"' "$T/h0" > "$XDG_CONFIG_HOME/conveyor/host.json" && mkdir -p "$T/bin" \
   && printf '#!/usr/bin/env bash\nexec env -i PATH="$PATH" HOME="$HOME" XDG_DATA_HOME="$XDG_DATA_HOME" bash -c "${*: -1}"\n' > "$T/bin/ssh" && chmod +x "$T/bin/ssh" \
   && printf '#!/usr/bin/env bash\necho "$1 reviewretry=${CONVEYOR_REVIEWRETRY:-} by=${CONVEYOR_RETRYBY:-}"\n' > "$XDG_DATA_HOME/conveyor/versions/$PIN2/conveyor/conveyor.sh" || fail "the ssh fixture was not made"
-for rr in 1 ''; do env -u CONVEYOR_FOREMAN_ASK PATH="$T/bin:$PATH" CONVEYOR_REVIEWRETRY=$rr CONVEYOR_FOREMAN_DIR="$FD" bash -c '. "$1/lib.sh" && ask gamma "$2" retry 7' _ "$SRC" "$T/gamma" 2>&1; done > "$T/marks"
+for rr in c7 ''; do env -u CONVEYOR_FOREMAN_ASK PATH="$T/bin:$PATH" CONVEYOR_REVIEWRETRY=$rr CONVEYOR_FOREMAN_DIR="$FD" bash -c '. "$1/lib.sh" && ask gamma "$2" retry 7' _ "$SRC" "$T/gamma" 2>&1; done > "$T/marks"
 mv "$T/h0" "$XDG_CONFIG_HOME/conveyor/host.json"
-[ "$(cat "$T/marks")" = $'retry reviewretry=1 by=foreman\nretry reviewretry= by=foreman' ] \
-  || fail "ask gamma retry 7 over ssh, run with CONVEYOR_REVIEWRETRY=1 and then with none, did not reach the host marked as review-retry's and the Foreman's: $(cat "$T/marks")"
+[ "$(cat "$T/marks")" = $'retry reviewretry=c7 by=foreman\nretry reviewretry= by=foreman' ] \
+  || fail "ask gamma retry 7 over ssh, run with CONVEYOR_REVIEWRETRY=c7 and then with none, did not reach the host marked as review-retry's and the Foreman's: $(cat "$T/marks")"
 for pin in ../escape "../escape/../versions/$PIN2" "${PIN2^^}" 7; do
   jq -n --arg p "$pin" '{plugin: {commit: $p}}' > "$T/gamma/.conveyor/project.json"
   out=$(askg 2>&1) \

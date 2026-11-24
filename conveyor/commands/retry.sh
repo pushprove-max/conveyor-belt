@@ -67,9 +67,13 @@ again() { # <issue | card id> [fresh]
   # The standing review-retry's retry (RETRYBY review-retry) gives an issue back once (reviewretried(), lib/views.sh),
   # read here under the lock: the watcher picks its card from a snapshot that can be older than a review-retry the
   # engine ran (needsretry()), or the other way round, and would then give back a later card of the issue.
+  # The card it was asked to give back (CONVEYOR_REVIEWRETRY holds its card id) already given back by review-retry: the
+  # other of its two runners came first. Nothing failed, and the act is logged once, by that one: status 3, which both
+  # read as done. Bug (#1601): it failed, and the watcher woke the Foreman with a failed retry of a card building again.
   if [ "$RETRYBY" = review-retry ] && [[ $1 =~ ^[0-9]+$ ]]; then
     c=$({ stdb ask issue cards "$1" && stdb ask issue retried "$1"; } | jq -rs --argjson n "$1" "$REVIEWAGAIN"'retrylines([]) as $all | reviewretried($n; $all) | .card // ""') \
       || { echo "conveyor: the card records of issue #$1 could not be read; nothing changed" >&2; return 1; }
+    [ -z "$c" ] || [ "$c" != "$CONVEYOR_REVIEWRETRY" ] || { echo "conveyor: review-retry already gave back card $c of issue #$1; nothing changed" >&2; return 3; }
     [ -z "$c" ] || { echo "conveyor: review-retry already gave issue #$1 back once (its card $c was blocked by its review), and neither the owner's retry nor a landed card came after; nothing changed: it waits for the owner" >&2; return 1; }
   fi
   # landable() closes the card's decision before retry() moves the card's lines, so no answer of the owner is written
@@ -90,7 +94,7 @@ again() { # <issue | card id> [fresh]
 # blocked with its work kept, outside the lock (unstick(), lib/run.sh): retry then takes it as a blocked card.
 [[ ! $2 =~ ^[0-9]+$ ]] || unstick "$2"
 # Who runs this retry, kept as the blocked line's retriedBy (retry(), lib/issues.sh): review-retry for the standing
-# review-retry's (CONVEYOR_REVIEWRETRY: the watcher's, over ssh too, and needsretry()'s); review-land for needsland()'s
+# review-retry's (CONVEYOR_REVIEWRETRY, the card id it gives back: the watcher's, over ssh too, and needsretry()'s); review-land for needsland()'s
 # (CONVEYOR_REVIEWLAND); CONVEYOR_RETRYBY when set
 # (needsask()'s answer to a decision, lib/needsask.sh; a Foreman's command, foreman/lib.sh ask()). Else the owner's
 # (the command line, the Board's Retry and Fix): only the owner's own retry lets review-retry give the issue back once

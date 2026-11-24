@@ -277,9 +277,10 @@ needsauto() {
 # (CONVEYOR_REVIEWRETRY, commands/retry.sh), and each issue is given back once: a later card of the issue, blocked by
 # its review again (reviewretried(), REVIEWAGAIN, lib/views.sh), is not given back: needsland() lands it while auto is
 # on (full), else needsask() puts it to the owner with both block reasons. Each card is tried once ($ST/auto/review-retry.cards): one whose retry failed stays blocked,
-# and needsask() puts it to the owner.
+# and needsask() puts it to the owner. The watcher can give the card back between this read and this retry: `retry`
+# then says so with status 3 (again(), commands/retry.sh), and that is no failure, and no second act to log.
 needsretry() {
-  local cs old c n out res
+  local cs old c n out res rc
   jq -e 'select(.scope == "full" or .scope == "narrow")' "$ST/auto/mode.json" >/dev/null 2>&1 && standingon review-retry || return 0
   cs=$(stdb ask lines cards) && old=$(stdb ask lines retried) || { echo "conveyor: the card records could not be read; no card was given back by review-retry" >&2; return 0; }
   # A block reason that holds a word of the pack's auto.reserved (a finding tagged [security], say) or an item of the
@@ -288,8 +289,10 @@ needsretry() {
   while IFS=$'\t' read -r c n; do
     ! grep -qxF -- "$c" "$ST/auto/review-retry.cards" 2>/dev/null || continue
     printf '%s\n' "$c" >> "$ST/auto/review-retry.cards" || continue
-    if out=$(CONVEYOR_REVIEWRETRY=1 bash "$HERE/conveyor.sh" retry "$n" < /dev/null 2>&1); then
+    out=$(CONVEYOR_REVIEWRETRY=$c bash "$HERE/conveyor.sh" retry "$n" < /dev/null 2>&1); rc=$?
+    if [ "$rc" = 0 ]; then
       bash "$HERE/conveyor.sh" auto act review-retry "retried #$n: its card $c was blocked by its review" < /dev/null 2>&1 | sed 's/^/conveyor: /' >&2
+    elif [ "$rc" = 3 ] && [[ $out == *"review-retry already gave back card $c of issue #$n;"* ]]; then :
     else echo "conveyor: the review-retry of #$n (card $c) failed, so it waits for the owner: ${out//$'\n'/ }" >&2; fi
   done < <(jq -rs --argjson r "$res" --arg rb "$REVIEWBLOCK" --slurpfile old <(printf '%s' "$old") "$REVIEWAGAIN"'retrylines($old) as $all
     | group_by(.card)[] | select(all(.step != "pushed")) | map(select(.step | IN("landed", "closed", "blocked"))) | last

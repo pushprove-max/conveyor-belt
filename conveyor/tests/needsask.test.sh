@@ -558,9 +558,9 @@ t_needsretryissue() {
     || fail "the second block is not open in Needs you with both whole block reasons and its kept patch: $d $(cat "$T/$CASE/run.out")"
   grep -qF 'end; [P1] a.txt:1 drops the last line did not hold after 1 round' "$ST/auto/asked/blocked-c1-7.txt" \
     || fail "the whole text of the second block's question is not kept: $(cat "$ST/auto/asked/blocked-c1-7.txt" 2>&1)"
-  # The watcher's review-retry of #7 as the host runs it (CONVEYOR_REVIEWRETRY), chosen from a snapshot made before the
+  # The watcher's review-retry of #7 as the host runs it (CONVEYOR_REVIEWRETRY, its card c1-7), chosen from a snapshot made before the
   # engine gave #7 back: it reaches the host only now, with c1-7 blocked.
-  out=$(CONVEYOR_REVIEWRETRY=1 loop retry 7 2>&1) && fail "a late review-retry of #7 was not refused: $out"
+  out=$(CONVEYOR_REVIEWRETRY=c1-7 loop retry 7 2>&1) && fail "a late review-retry of #7 was not refused: $out"
   grep -qF 'review-retry already gave issue #7 back once (its card c0-7' <<<"$out" && ! naretried c1-7 \
     || fail "a late review-retry of #7 gave c1-7 back, or did not say why it was refused: $out"
   grep -qF -- '- blocked-c1-7: ' "$AUTOLOG" && grep -qF 'review-retry already gave this issue back once' "$AUTOLOG" \

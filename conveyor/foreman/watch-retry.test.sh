@@ -146,14 +146,14 @@ t_unread() {
 }
 
 # Review-retry gives an issue back once. The first review block of #7 (card c7) is retried, marked as review-retry's
-# (CONVEYOR_REVIEWRETRY, so the host's retry keeps it: commands/retry.sh); the card that retry started (c8, which
+# (CONVEYOR_REVIEWRETRY, its card c7, so the host's retry keeps it: commands/retry.sh); the card that retry started (c8, which
 # health marks reviewRetried), blocked by its review again on a narrower finding, is not retried: it wakes as a block,
 # for the owner. Bug it catches (#1589): the watcher remembered the card, not the issue, so each new card of the issue
 # was given back again, with no end.
 t_again() {
   fixture again '["review-retry"]' "$REVIEW" 'echo "conveyor: issue #7 is queued again"'
   poll && fail "the first review block woke the Foreman: $wake"
-  [ "$(cat "$T/retries" 2>/dev/null)" = 'retry 7' ] && [ "$(cat "$T/marks")" = 1 ] \
+  [ "$(cat "$T/retries" 2>/dev/null)" = 'retry 7' ] && [ "$(cat "$T/marks")" = c7 ] \
     || fail "the first block of #7 was not retried as review-retry's: $(cat "$T/retries" "$T/marks" "$T/err" 2>/dev/null)"
   jq -c --arg r "${REVIEW/did not hold/(the quoted name now) did not hold}" '.health.blocked = [{card: "c8", issue: 7, since: "2026-11-19T10:30:00Z", reason: $r, reviewRetried: true}]' \
     "$T/snap" > "$T/snap.new" && mv "$T/snap.new" "$T/snap" || fail "the snapshot of the second block was not made"
