@@ -397,6 +397,29 @@ t_nopricekept() {
   # One build after the lock is let go: a writer the reads started finds nothing due, so none builds after the case.
   exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the reads exited non-zero"
 }
+# Bug it catches: a kept snapshot an older engine built has no snapshot.json.notes, so the first read after an upgrade
+# gave its notes as they were, one stop.sh had marked filed since among them, and a Board on another machine added it
+# to its notes to file again. With no snapshot.json.notes the kept notes are left out. Read as t_nopricekept does:
+# a build holds the kept lock, so the reader prints the kept snapshot.
+t_nopricekeptold() {
+  local n out at lk
+  setup '[]'; unset CONVEYOR_NOPRICE_CMD; n=$ST/foreman/plugin-bugs.md
+  tune '.models.allowed.claude += ["claude-new-9"]'
+  loop control model claude claude-new-9 >/dev/null || fail "the builder's seat was not set"
+  looks noprice
+  at=$(loop snapshot --fresh | jq -r .snapshotAt) || fail "no snapshot"
+  jq -e '.priceNotes | length > 0' "$ST/snapshot.json" >/dev/null || fail "the build holds no note: $(jq -c .priceNotes "$ST/snapshot.json")"
+  # The older engine wrote no snapshot.json.notes.
+  rm -f "$ST/snapshot.json.notes"
+  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  sed 's/ · evidence: -$/ filed as #12 · evidence: -/' "$n" > "$n.new" && mv "$n.new" "$n" && grep -q 'filed as #12' "$n" \
+    || fail "the note was not marked filed: $(cat "$n" 2>&1)"
+  touch "$ST/cards.jsonl"
+  out=$(loop snapshot | jq -c '[.snapshotAt, .recordsNewer, .priceNotes]')
+  [ "$out" = "$(jq -cn --arg at "$at" '[$at, true, []]')" ] \
+    || fail "the kept snapshot an older engine built (no snapshot.json.notes), read while a build runs, gives a note filed after its build ($(grep '^- ' "$n")): $out"
+  exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
+}
 # Bug: a project with no judge (a Claude-only one: the judge needs another CLI than the reviewer's) listed no model at
 # all, as the judge's seat, unset, failed the look.
 t_nopricenojudge() {

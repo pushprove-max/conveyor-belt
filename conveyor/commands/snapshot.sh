@@ -142,10 +142,12 @@ snapprint() {
   # shown in Queue and on the belt at once. The kept priceNotes are left out ([]) when the plugin-bugs.md they were
   # read from (KEPT.notes) changed after the build began: stop.sh can have marked one filed, or the Board's File or
   # Dismiss taken it out, and a Board on another machine would add it to its own notes again. The next build gives
-  # them as the file holds them then. One program more, only while there is one of the two.
+  # them as the file holds them then. With no KEPT.notes (a kept snapshot an older engine built, or one whose file
+  # could not be written), what they were read from is not known, so they are left out as for a changed file. One
+  # program more, only while there is one of the two.
   local jf='.' pf=''
-  { read -r pf < "$KEPT.notes"; } 2>/dev/null || pf=''
-  [ -z "$pf" ] || [ ! "$pf" -nt "$KEPT" ] || jf='.priceNotes = []'
+  if { read -r pf < "$KEPT.notes"; } 2>/dev/null; then [ -z "$pf" ] || [ ! "$pf" -nt "$KEPT" ] || jf='.priceNotes = []'
+  else jf='.priceNotes = []'; fi
   [[ $r != *'"started":[{'* ]] || jf+=' | [$r.started[].issue | numbers | select(. > 0)] as $n
       | .belt = (.belt // []) + $r.started
       | (.queue | objects | (.next, .order, .waiting) | arrays) |= map(select((.issue | IN($n[])) | not))'
