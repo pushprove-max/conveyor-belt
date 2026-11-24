@@ -504,3 +504,57 @@ t_snapkeptnoloop() {
     || fail "with no loop.json and c9 picked since, the reader gave a loop count it cannot read: $(jq -c '{recordsNewer, recordsNow}' <<<"$out")"
   loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
 }
+
+# The Board's panels (panels(), .claude/scripts/dashboard_panels.sh) from the snapshot <file> as one record's read, the
+# parts beside it (limit, decisions, lanes, Foremen) none: the Board's own jq program, not the page server.
+snapkept_board() { # <file>
+  ( export HERE=$SRC/../.claude/scripts RUN=$T/$CASE/board OUT=$T/$CASE/board NOW; NOW=$(date +%s)
+    iso() { (export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$1"); }
+    mkdir -p "$RUN" && . "$HERE/dashboard_panels.sh" || exit 1
+    jq -c '{host: "h", local: true, reachable: true, error: null, records: [{repo: "alpha", snap: ., steered: true, repoUrl: null, lastPushAt: null, readAt: .snapshotAt}]}' "$1" > "$RUN/conveyor.json" \
+      && echo '{"limit": null}' > "$RUN/limit.json" && echo '{"decisions": null, "unsent": []}' > "$RUN/decisions.json" \
+      && echo '{"records": []}' > "$RUN/lanes.json" && echo '{"foremen": null}' > "$RUN/foremen.json" && panels ) 2>&1
+}
+# Bug (#1633): a card stopped for the owner's yes (c5, issue 3), then `retry 3 --fresh` and a new card of the issue
+# picked by the loop's pick before the kept snapshot was built again: the reader added the new card to the belt but
+# kept issue 3 among the held issues ("card blocked: retry" on the Foreman's status) and c5 in Needs you, so the owner
+# saw a card that was building as blocked and needing them. Bug: the held count (open.split, the Board's "held"
+# total) still counted issue 3 once it left the held list. Bug: a land-branch card of issue 1, picked beside c7 of
+# issue 1 still stopped for the yes, took c7 out of Needs you, which the next build lists again. The kept lock is held
+# from the retry on, as a build that takes minutes leaves the kept snapshot behind.
+t_snapkeptretried() {
+  local lk out st c9 c8 n
+  snapkept_setup
+  { snapkept_line c5 3 picked ok 04 '{"title": "three"}'
+    snapkept_line c5 3 blocked blocked 05 '{"reason": "visible to customers or staff: needs Dana'"'"'s yes: a new button"}'
+    snapkept_line c7 1 picked ok 06 '{"title": "one again"}'
+    snapkept_line c7 1 blocked blocked 07 '{"reason": "visible to customers or staff: needs Dana'"'"'s yes: a new page"}'; } >> "$ST/cards.jsonl"
+  loop snapshot --fresh > /dev/null || fail "the snapshot with c5 and c7 blocked exited non-zero"
+  jq -e '(.needsYou.waiting | map(.card) | index("c5") and index("c7")) and any(.open.held[]; .issue == 3 and any(.reasons[]; .kind == "card" and .step == "blocked"))' \
+    "$ST/snapshot.json" > /dev/null || fail "the kept snapshot does not hold c5 and c7 waiting for the yes and issue 3 held by c5: $(jq -c '{w: .needsYou.waiting, h: .open.held}' "$ST/snapshot.json")"
+  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  loop retry 3 --fresh > "$T/$CASE/retry.out" 2>&1 || fail "retry 3 --fresh exited non-zero: $(cat "$T/$CASE/retry.out")"
+  snapkept_quiet 20
+  # The new card of issue 3 as the loop starts it (pick(), lib/pick.sh, given issue 3 alone as the open issues), then
+  # a land-branch card of issue 1 (pickbranch(), lib/lane.sh), which c7, blocked, does not stop.
+  fx_in 'locked pick "" "" "$(jq -c "map(select(.number == 3))" "$STUB/issues.json")" && locked pickbranch one-again 1 "one again" "$(git -C "$R" rev-parse HEAD)"'
+  { read -r c9 n _ && [ "$n" = 3 ] && read -r c8 && [ -n "$c8" ]; } < "$T/$CASE/run.out" || fail "the pick of issue 3 or the land-branch card of issue 1 failed: $(cat "$T/$CASE/run.out")"
+  out=$(loop snapshot) || fail "the reader exited non-zero"
+  exec {lk}>&-
+  printf '%s\n' "$out" > "$T/$CASE/snap"
+  jq -e --arg c9 "$c9" --arg c8 "$c8" '(.belt | map(.card) | index($c9) and index($c8)) and all(.open.held[]; .issue != 3)
+      and (.open | .split.you + .split.labelOrRule + .split.landed == (.held | length))
+      and (.needsYou.waiting | map(.card) | index("c7") and (index("c5") | not))' <<<"$out" > /dev/null \
+    || fail "after retry 3 --fresh, $c9 of issue 3 picked and $c8 of issue 1 begun, the reader has issue 3 held, a held count that is not the held list's, or c5 in Needs you or c7 not: $(jq -c '{belt: [.belt[].card], w: .needsYou.waiting, h: .open.held, s: .open.split}' <<<"$out")"
+  # The Board's Needs you, built from that read as the Board builds it: its waiting and blocked cards, and every kind
+  # it lists (entries).
+  snapkept_board "$T/$CASE/snap" > "$T/$CASE/panels" || fail "the Board's panels did not build: $(cat "$T/$CASE/panels")"
+  jq -e '.panels.needs.data | ([.cards.waiting[], .cards.blocked[], (.entries[] | .[]) | select(.issue == 3)] == [])
+      and (.cards.waiting | map(.card) | index("c7"))' "$T/$CASE/panels" > /dev/null \
+    || fail "after retry 3 --fresh and $c9 of issue 3 picked, the Board's Needs you lists issue 3 or not c7: $(jq -c '.panels.needs.data | {cards, entries}' "$T/$CASE/panels")"
+  mkdir -p "$T/$CASE/config/conveyor" && jq -n --arg m "$R" '{records: [{repo: "alpha", main: $m}]}' > "$T/$CASE/config/conveyor/host.json" || fail "the host file could not be written"
+  st=$(XDG_CONFIG_HOME=$T/$CASE/config CONVEYOR_FOREMAN_DIR=$T/$CASE/foreman CONVEYOR_MAIN=$R CONVEYOR_FOREMAN_ASK="cat $T/$CASE/snap" bash "$SRC/foreman/watch-conveyor.sh" --status 2>&1)
+  grep -q '^  #3 ' <<<"$st" && ! grep -qE '#3 \(card blocked|needs you: .*#3\b' <<<"$st" \
+    || fail "after retry 3 --fresh and $c9 of issue 3 picked, foreman status lists #3 off the belt, blocked or needing the owner: $st"
+  loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
+}

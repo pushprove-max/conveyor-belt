@@ -139,9 +139,15 @@ snapprint() {
   now=${EPOCHREALTIME/[.,]/}; now=$((10#$now / 1000)); m=$((now > m ? now - m : 0))
   printf '{"snapshotAt":"%s","snapshotAge":%d.%03d,"recordsNewer":%s,%s' "$at" $((m / 1000)) $((m % 1000)) "$newer" "$rn"
   # A card started since joins the belt (recordsNow's started) and its issue leaves the queue's lists, so it is not
-  # shown in Queue and on the belt at once. The kept priceNotes are left out ([]) when the plugin-bugs.md they were
-  # read from (KEPT.notes) changed after the build began: stop.sh can have marked one filed, or the Board's File or
-  # Dismiss taken it out, and a Board on another machine would add it to its own notes again. The next build gives
+  # shown in Queue and on the belt at once. Its issue leaves the held issues (open.held), and the count of the split it
+  # was held in goes to the belt's (open.split, the Board's held total), as a build lists no issue on the belt as held.
+  # A card of its issue in Needs you (needsYou waiting and blocked, but for the push item, which names a landing not
+  # pushed) leaves it when the records now hold it neither blocked nor waiting (recordsNow): retry took its lines out.
+  # One the records still hold stays: a land-branch card can start beside a blocked card of its issue (pickbranch(),
+  # lib/lane.sh). #1633: a retried issue building read "card blocked: retry" in the Foreman's status and stayed in
+  # Needs you until the next build. The kept priceNotes are left out
+  # ([]) when the plugin-bugs.md they were read from (KEPT.notes) changed after the build began: stop.sh can have
+  # marked one filed, or the Board's File or Dismiss taken it out, and a Board on another machine would add it to its own notes again. The next build gives
   # them as the file holds them then. With no KEPT.notes (a kept snapshot an older engine built, or one whose file
   # could not be written), what they were read from is not known, so they are left out as for a changed file. One
   # program more, only while there is one of the two.
@@ -150,7 +156,14 @@ snapprint() {
   else jf='.priceNotes = []'; fi
   [[ $r != *'"started":[{'* ]] || jf+=' | [$r.started[].issue | numbers | select(. > 0)] as $n
       | .belt = (.belt // []) + $r.started
-      | (.queue | objects | (.next, .order, .waiting) | arrays) |= map(select((.issue | IN($n[])) | not))'
+      | (.queue | objects | (.next, .order, .waiting) | arrays) |= map(select((.issue | IN($n[])) | not))
+      | (.open | objects | select(.held | type == "array")) |= ([.held[] | select(.issue | IN($n[]))] as $g
+          | .held -= $g
+          | ($g | map(select((.reasons | map(.kind) | unique) == ["you"])) | length) as $you
+          | ($g | map(select(any(.reasons[]; .notPushed == true))) | length) as $np
+          | if (.split | type) == "object" then .split |= (.you -= $you | .landed -= $np | .labelOrRule -= (($g | length) - $you - $np) | .belt += ($g | length)) else . end)
+      | ([$r.blocked, $r.waiting | arrays | .[].card | strings]) as $now
+      | (.needsYou | objects | (.waiting, .blocked) | arrays) |= map(select(.push == true or (.issue | IN($n[]) | not) or (.card | IN($now[]))))'
   if [ "$jf" != . ]; then jq -c --argjson r "${r:-null}" "$jf" "$KEPT" | tail -c +2
   else tail -c +2 "$KEPT"; fi
 }
