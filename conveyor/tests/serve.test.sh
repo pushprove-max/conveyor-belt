@@ -448,6 +448,44 @@ EOF
     || fail "the run exited before its final push cleared: $(st 'select(.step == "pushed") | "\(.card) \(.head)"' | tr '\n' ,)"; loopend
 }
 
+# Bug (#1610): the loop started no push for 36 minutes while 4 cards landed, and health showed no push error: none ran
+# and none failed. No condition of pushturn() held it: a step of the loop's turn ran all that time (turnended():
+# endcard() and gonewt() read a stuck card's 1.88 GB test log with testfails(), #1609), so no turn reached pushturn().
+# A landing owed for three turns with no push started is health's pushWaits, with what holds it: a loop whose last turn
+# (pushheld()) is older than three turns (a turn here is 2 s, the idle tunable), or the condition three turns in a row
+# of pushturn() held it for (here a release run under way). pw <now>: [issue, held, turns] of pushWaits on that clock,
+# with the run lock held as a running loop holds it; turnat: the time of the loop's last turn.
+# Also bugs: a failed push of an older landing hid the wait of #11, also when it failed after #11 landed (#10's, below);
+# a push a release run held (push() refused it) was said to have failed, or, once a Push now was refused after it
+# (nowrefused(), lib/fulltest.sh, which writes pushLast too), to wait on what refused the Push now.
+t_pushwait() {
+  local a l s t out want
+  servesetup; tune '.tunables += {poll: 1, idle: 2}'
+  pw() { { flock 9 && CONVEYOR_NOW=$1 loop health 9>&-; } 9>>"$ST/cards.jsonl.run" | jq -c '.pushWaits | if . then [.issue, .held, .turns] else . end'; }
+  turnat() { jq -r '.at | fromdate' "$ST/pushwait"; }
+  serveeng "$SRC" 'pushstub; pushturn' && [ "$(jq -c '[.sha, .held, .turns]' "$ST/pushwait")" = '[null,null,0]' ] \
+    || fail "a turn with no push owed did not record that none waits: $(cat "$ST/pushwait" 2>&1)"
+  a=$(turnat)
+  echo 10 > "$R/f10.txt" && git -C "$R" add f10.txt && git -C "$R" commit -qm 10 && s=$(git -C "$R" rev-parse HEAD) || fail "#10 did not land"
+  c10() { jq -cn --arg s "$s" --argjson d "$1" --argjson x "$2" '{card: "c10", issue: 10, tokens: {claude: 0, codex: 0}, sha: $s, reason: "", time: (now - $d | todate)} + $x' >> "$ST/cards.jsonl"; } # <seconds ago> <json>
+  c10 1 '{"step": "landed", "result": "ok", "product": false}' || fail "#10's landed line was not written"
+  serveeng "$SRC" 'stubland 11' || fail "card 11 did not land"; l=$(st 'select(.step == "landed") | .time | fromdate' | head -1)
+  c10 0 '{"step": "push", "result": "fail", "reason": "the remote refused it"}' || fail "#10's failed push line was not written"
+  [ "$(pw $((l + 5)))" = null ] || fail "health says a push waits 5 s after the oldest landing, under three turns: $(pw $((l + 5)))"
+  [ "$(pw $((a + 5)))" = null ] || fail "health says a push waits 5 s after the loop's last turn, under three turns: $(pw $((a + 5)))"
+  t=$((l > a ? l : a))
+  [ "$(pw $((t + 7)))" = "[11,\"the loop has made no turn since $(jq -r .at "$ST/pushwait"): a step of its turn has not ended\",null]" ] \
+    || fail "health does not say the push of #11 waits on a loop that made no turn since before it landed, with #10's push failed after it: $(pw $((t + 7)))"
+  # A release run holds RELHOLD (relhold()) here on fd 7: the first turn's push, the real push(), does not start. Its
+  # job is found ended as the next turn's top finds it (pushended()); then a Push now is refused.
+  out=$(serveeng "$SRC" 'nopack="" new="" pusher="" tried="" triedat=0 PUSH_RETRY=600; exec 7>>"$RELHOLD" && flock -x 7 || exit 1
+    pushturn > /dev/null 2>&1; wait "$pusher"; pushended; jq -c "[.started, .why]" "$PUSHLAST"; nowrefused "a full test run is under way" quiet
+    pushturn; pushturn; pw "$(turnat)"; pushturn; pw "$(turnat)"')
+  want="its last push did not start: a release run is under way, so nothing is pushed until it ends; the next try waits for the pack's pushRetry time"
+  [ "$out" = "$(printf '[false,"%s"]\nnull\n[11,"%s",3]' "a release run is under way, so nothing is pushed until it ends" "$want")" ] \
+    || fail "health did not say, after three turns and not two, that the push of #11 waits on the release run its last push met, with a Push now refused after it: $out"
+}
+
 # Bugs: the health record misses a blocked card, a card waiting on the owner's yes, an open card with no new step,
 # a landed commit that is not pushed or its push error; lists a pushed commit, a fresh card or an old push error as a
 # problem; says a loop runs when none does (or the other way), or that gh is signed in when it is not.

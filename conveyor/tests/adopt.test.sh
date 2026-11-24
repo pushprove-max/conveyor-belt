@@ -117,6 +117,56 @@ t_adopt() {
     || fail "a push started beside another or with the restart due, or the new loop did not push #5: $out $(cat "$STUB/pushcalls")"
 }
 
+# Bug (#1610): after a restart on new code with cards in flight, the loop pushed the landing owed at the restart, and
+# then no landing for 36 minutes. No condition of the push turn (pushturn()) held it: the loop made no turn, as one step
+# of its turn (turnended(): endcard() and gonewt() read a stuck card's 1.88 GB test log with testfails(), #1609) ran all
+# that time; t_pushwait has health show such a wait. Here the sequence of that night: the loop on $A, with card #7 in
+# flight, pushes #5 (the real push(); the pin moves to $B as it starts, so the restart is due while the push job runs);
+# its next turn restarts, the new loop's first turn finds no push owed, #11 lands at that turn's wait, and the new
+# loop's next turn must start the push of #11. The restart is the real one: run()'s exec of $BASH, here $STUB/newbash,
+# which execs bash on $B's own conveyor.sh serve, so that entry point must take the handoff: card #7's stand-in shares
+# the loop's fd 8, so a new loop that drops CONVEYOR_ADOPT opens the run file anew, finds the run lock held and ends,
+# and the new loop's loop.json must count #7. The new loop's waits run $STUB/at (atturn(): watchturns' sleep is an
+# exported function, so the new bash runs it too; exit 1 keeps it for the next wait): the first lands #11, the second
+# kills the loop, so a push of #11 is one the turn after its landing started.
+t_adoptpush() {
+  local out rc p7 j
+  adoptsetup '[]'; watchturns; tune '.tunables += {poll: 1, idle: 1}'
+  echo 5 > "$R/f5.txt" && git -C "$R" add f5.txt && git -C "$R" commit -qm 5 && adoptrec c-5 5 picked \
+    && adoptrec c-5 5 landed "$(jq -cn --arg s "$(git -C "$R" rev-parse HEAD)" '{sha: $s, product: false}')" || fail "#5 did not land"
+  cat > "$STUB/at" <<EOF || fail "no at script"
+if [ ! -e '$STUB/at.landed' ]; then
+  echo 11 > '$R/f11.txt' && git -C '$R' add f11.txt && git -C '$R' commit -qm 11 && jq -cn --arg s "\$(git -C '$R' rev-parse HEAD)" \\
+    '{card: "c-11", issue: 11, time: (now | todate), tokens: {claude: 0, codex: 0}, result: "ok", reason: ""} | (. + {step: "picked", sha: ""}), (. + {step: "landed", sha: \$s, product: false})' \\
+    >> '$ST/cards.jsonl' && : > '$STUB/at.landed'
+  exit 1
+fi
+echo waited > '$STUB/newwait'; kill -KILL @PID@
+EOF
+  # newbash is bash, not sh: dash drops the exported sleep function from the environment it passes on. Its pid is the
+  # new loop's (exec).
+  printf '%s\n' "#!$BASH" "echo \$\$ > '$STUB/newpid'; sed \"s/@PID@/\$\$/\" '$STUB/at' > '$TURNS.at'" "exec '$BASH' \"\$@\"" > "$STUB/newbash" \
+    && chmod +x "$STUB/newbash" || fail "no newbash"
+  # The output goes to a file: the jobs the killed loop leaves (its push) would hold a $(...) open until they end. The
+  # loop runs beside the case, which polls for the new loop's second wait (newwait), so a loop that never gets there
+  # fails the case (and is killed) rather than holding it.
+  # loop: only the real entry point shows the handoff (run()'s exec of conveyor.sh serve), and the push the new loop
+  # started outlives it, no child of this shell, so the case polls that push's record ($PUSHLAST, written as it ends).
+  { standin & p7=$!; kids=$p7; adoptcard c-7 7 "$p7" review
+    CONVEYOR_ADOPT="$p7 c-7 7 $A" adoptrun "$V/$A/conveyor" "BASH=\$STUB/newbash; eval \"realpush() \$(declare -f push | tail -n +2)\"
+      push() { tune --arg c '$B' '.plugin.commit = \$c'; realpush \"\$@\"; }; run '' serve" > "$STUB/run.out" 2>&1 & j=$!; } 8>>"$ST/cards.jsonl.run"
+  wait_until "[ -s '$STUB/newwait' ]" || { kill -KILL "$(cat "$STUB/newpid" 2>/dev/null)" "$j" 2>/dev/null; pkill -KILL -P "$j"
+    fail "the loop did not restart, or the new loop did not wait twice: $(cat "$STUB/run.out")"; }
+  wait "$j"; rc=$?; out=$(cat "$STUB/run.out")
+  [ "$rc" = 137 ] && grep -qF 'conveyor: restarting on the new code; 1 cards in flight' <<<"$out" \
+    || fail "the loop on $A did not restart with card #7, or the new loop was not ended at its second wait ($rc): $out"
+  [ "$(jq -c '[.pid, .commit, .cards]' "$ST/loop.json")" = "[$(cat "$STUB/newpid"),\"$B\",[\"c-7\"]]" ] \
+    || fail "the new loop on $B did not take card #7 handed over (CONVEYOR_ADOPT=$p7 c-7 7 $A): $(cat "$ST/loop.json") $out"
+  wait_until "jq -e '.card == \"c-11\"' '$ST/pushlast' > /dev/null 2>&1" || fail "the new loop's turn after #11 landed started no push of it: $out"
+  [ "$(jq -c '[.by, .started, .ok]' "$ST/pushlast")" = '["loop",true,true]' ] && [ "$(st 'select(.step == "pushed") | .card' | paste -sd' ')" = 'c-5 c-11' ] \
+    && kill -0 "$p7" || fail "the pushes of #5 and #11 did not both go to origin, or the restart ended card #7: $(cat "$ST/pushlast") $out"
+}
+
 # Bugs: a second restart says the cards it adopts again run the code of the loop before it; a card killed while
 # adopted stays open for good and `retry` refuses it, or its review goes on in a worktree taken away (also when it is
 # killed at a restart), or a process under it that ignores TERM holds the loop for good, or one it starts on TERM

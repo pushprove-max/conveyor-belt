@@ -319,6 +319,8 @@ PUSHED=${STATE%/*}/pushed         # the last push that worked: "<commit> <remote
 # push() and pushing(), lib/push.sh.
 PUSHING=${STATE%/*}/pushing       # the push in progress: {pid, since, sha}, while the loop's push job runs
 # shellcheck disable=SC2034 # read by lib/push.sh and lib/views.sh, which conveyor.sh sources beside this file
+PUSHWAIT=${STATE%/*}/pushwait     # the loop's word on its push at its last turn (pushheld(), lib/push.sh)
+# shellcheck disable=SC2034 # read by lib/push.sh and lib/views.sh, which conveyor.sh sources beside this file
 LANDPR=${STATE%/*}/landingpr.json # the pull request of Land as pr and its last merge (prstate(), lib/push.sh)
 MAINTEST=${STATE%/*}/maintest.json # the whole test on main (maintest()): its last run, its last pass and what fails now
 # shellcheck disable=SC2034 # read by lib/mainred.sh and lib/views.sh, which conveyor.sh sources beside this file

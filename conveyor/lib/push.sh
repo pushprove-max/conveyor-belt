@@ -679,14 +679,47 @@ owed() {
 # push running (pusher) and no restart due (new), the owed push (owed) is started beside the cards as a job, its pid
 # in pusher, at once when it is not the one last tried (tried), else once PUSH_RETRY seconds have passed since that
 # try (triedat); never while it failed its check on main's commit (checkheld()). The turn goes on at once either way.
+# An owed push that it does not start, with no push running, is held: pushheld() records why, at every turn. A last
+# try that did not start (triedwhy, pushended(): a release run under way, the push lock) is named as that, not as a
+# failure. With the pack unread no push is held: health reads the same pack and fails, saying why (commands/health.sh).
 pushturn() {
-  [ -z "$nopack" ] && [ -z "$pusher" ] && [ -z "$new" ] && owed=$(owed) && { [ "$owed" != "$tried" ] || [ $((SECONDS - triedat)) -ge "$PUSH_RETRY" ]; } || return 0
-  tried=$owed; triedat=$SECONDS; read -r c n _ <<<"$owed"
-  checkheld || { push "$c" "$n" & pusher=$!; }
+  local why=''
+  if [ -z "$pusher" ] && [ -z "$nopack" ] && owed=$(owed 2>/dev/null); then
+    if [ -n "$new" ]; then why='the loop restarts on new code first, and the new loop starts the push'
+    elif [ "$owed" = "$tried" ] && [ $((SECONDS - triedat)) -lt "$PUSH_RETRY" ]; then
+      if [ -n "${triedwhy:-}" ]; then why="its last push did not start: $triedwhy; the next try waits for the pack's pushRetry time"
+      else why="its last push failed; the next try waits for the pack's pushRetry time"; fi
+    else
+      tried=$owed; triedat=$SECONDS; triedwhy=''; read -r c n _ <<<"$owed"
+      if checkheld; then why="its last push failed its check on main's commit; no push starts until main moves"; else push "$c" "$n" & pusher=$!; fi
+    fi
+  fi
+  pushheld "$why"
+}
+# The loop's word on its push at each turn, for health() (lib/views.sh), kept between turns in the loop shell's
+# heldsha and heldn (globals: a restart's exec starts them again):
+# PUSHWAIT holds {pid, at: the turn's time, sha: the owed commit that no push started (owed), held: <why>, turns: the
+# turns in a row that held that commit}, sha and held null and turns 0 when no push waits. Health reads at too: a
+# loop whose turn has not ended (a step of the turn that does not return) writes no new at, and starts no push.
+pushheld() { # <why, or "" when no push is held>
+  local s=''
+  [ -z "$1" ] || s=${owed##* }
+  if [ -n "$s" ] && [ "$s" = "${heldsha:-}" ]; then heldn=$((${heldn:-0} + 1)); elif [ -n "$s" ]; then heldn=1; else heldn=0; fi
+  heldsha=$s
+  jq -cn --argjson p "$$" --arg s "$s" --arg h "$1" --argjson n "$heldn" \
+    '{pid: $p, at: (now | todate), sha: (if $s == "" then null else $s end), held: (if $h == "" then null else $h end), turns: $n}' \
+    > "$PUSHWAIT.new" 2>/dev/null && mv -f "$PUSHWAIT.new" "$PUSHWAIT" 2>/dev/null || rm -f "$PUSHWAIT.new"
 }
 # A turn's check that the push job (pusher) has ended: then no push runs. push() clears its record ($PUSHING) as it
 # ends; one its job left (the job was killed) stays, for health to show it stale, until the next push writes its own.
-pushended() { [ -z "$pusher" ] || jobs -rp | grep -qx "$pusher" || pusher=''; }
+# As the job is found ended, the loop keeps why that push did not start (triedwhy, a global as heldsha is: empty when it
+# started), read from the result it wrote ($PUSHLAST, by loop, of the card tried) at once: a Push now refused later
+# writes its own result there, with its own why.
+pushended() {
+  [ -z "$pusher" ] || jobs -rp | grep -qx "$pusher" && return 0
+  pusher=''
+  triedwhy=$(jq -r --arg c "${tried%% *}" 'select(.by == "loop" and .card == $c and .started == false) | .why // empty' "$PUSHLAST" 2>/dev/null) || triedwhy=''
+}
 
 tidy() { git worktree remove --force "$1" 2>/dev/null; rm -f "$1".events "$1".firsttry "$1".firsttry.new "$1".reviewed "$1".patch "$1".index "$1".msg "$1".review.new "$1".carried "$1".base "$1".live "$1".live.tmp "$1".idle "$1".nocap "$1".capheld "$1".claim "$1".claim.new "$1".cpatch "$1".cpatch.new "$1".stack "$1".settings "$1".opencode.json "$1".donewhen "$1".unfixed "$1".out.unpriced "$1".covered "$1".stabilised "$1".stalled "$1".ready "$1".ready.new "$1".ready.new.[0-9]* "$1".ready.lock "$1".batch "$1".batch.new "$1".bpatch "$1".lent "$1".batchtest "$1".batchfirst "$1".batchuncovered "$1".batchnoresult "$1".first "$1".rerun "$1".rerun.new "$1".sharedran "$1".linted "$1".whole "$1".passed "$1".bpass "$1".oldtimes "$1".times "$1".reported "$1".report "$1".report.[0-9]* "$1".testlist "$1".testfiles "$1".limit "$1".uncovered "$1".slow "$1".timed "$1".cpus "$1".clocks "$1".partial "$1".oldfiles "$1".before; rm -rf "$1".rv "$1".batchtestlog "$1".covfirst "$1".checks "$1".briefs; }
 # The project's own screenshots of a change that waits for the owner's yes, kept local for the Board: the images
