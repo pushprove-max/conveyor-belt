@@ -191,6 +191,19 @@ owncases() { # <worktree> <file>
     END { if (whole || !ih) exit 1; for (c in hit) { print c; m++ }; exit m ? 0 : 1 }') || return 1
   LC_ALL=C sort <<<"$c"
 }
+# Whether <file>, a test file of the card's own change that its run again shares with main's change (SHAREDRUN:
+# listcmd()), keeps the cases the change adds or changes (owncases()), not running whole: when the pack sets
+# test.changed, no other of <the card's test files> links to it (.conveyor/test-links.json) and <worktree>.rerun does not
+# name it failed with no case (unshare() kept its pass). The command runs of main's change only the cases both changes
+# select, which are among those (#1591). Bug (#1591): its cases were dropped, so the command ran every case of the file.
+sharedkeep() { # <worktree> <file> <the card's test files>...
+  local w=$1 f=$2 tc=''
+  shift 2
+  grep -qxF -- "$f" <<<"${SHAREDRUN:-}" && packget test.changed tc 2>/dev/null && [ -n "$tc" ] \
+    && ! jq -e --arg f "$f" '. as $m | [$ARGS.positional[] as $k | select($k != $f) | $m[$k][]? | select(. == $f)] != []' \
+      --args "$@" < "$w/.conveyor/test-links.json" >/dev/null 2>&1 \
+    && ! awk -F'\t' -v f="$f" '$1 == "fail" && $2 == f && $3 == "" { x = 1 } END { exit !x }' "$w.rerun" 2>/dev/null
+}
 # Why <command> cannot be given a list of test files in the form test.list <form> names (the run before a push,
 # pushtests(), lib/push.sh): no test.list, none, placeholder with no `{files}` in the command, or args with a command
 # that already names the test files its runner runs (testrunner()). Nothing when it can (runner: pushtests() says).

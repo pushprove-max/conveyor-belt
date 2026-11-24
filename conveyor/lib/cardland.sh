@@ -88,8 +88,9 @@ cardready() {
   # both sides; a clean three-way merge onto main is the change that passed, settle(), and so is one a session changed
   # only in documentation files, settle() and the rebuild marking it tested again), and when the cards landed since
   # its last run touch a test file its change touches too (sharedtests(): two changes that passed apart can fail
-  # together, #334), once for the change it holds: after that run passed it lands on it (#447). That run keeps the passes of the run before but those of the shared
-  # files, which it runs whole (unshare()), its list naming what main changed (rerunsince()); a failure there goes to
+  # together, #334), once for the change it holds: after that run passed it lands on it (#447). That run keeps the passes of the run before, its list naming what main
+  # changed (rerunsince()): with the pack's test.changed, the command runs the cases both changes select; with none, the
+  # shared files lose their passes and run whole (unshare()). A failure there goes to
   # the card's fix, as main alone passes it.
   # Batches: after a GO it is ready to land once its own checks and tests pass (tested()), and a batch may take it
   # while it waits (gather()); one with follow-ups to file lands on its own. Holding its files on main as it is now,
@@ -225,7 +226,7 @@ cardtest() {
     go=next; return
   fi
   [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)
-  sec=$SECONDS; rc=0; ran=''; own=''; apart=''; queued=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"
+  sec=$SECONDS; rc=0; ran=''; own=''; apart=''; queued=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; BATCHMAIN=''; BATCHFROM=''; rm -f "$wt.stop"
   # The times its own run took go on its test line (testlist.sh slowtests()); only a test rule files an issue about a test
   # file (testrulespass(), after the test line is recorded).
   testedhere "$wt" || own=1
@@ -250,7 +251,7 @@ cardtest() {
   fi
   # Main moved during its batch's run: the batch lands on that run when it still stands there (rebatch()). A
   # product check that fails on its change there is a red run: the batch is run again there, as batch() does one.
-  # That run (4: for the shared files, its passes dropped; its list holds its sharers' shared files, sharedown as SHAREDRUN, testrun.sh listcmd()) is their run again for each card that shares one and passed in it, the card failing or not (markshared(); bugs: a third run; a mate that passed went back to its own test step unmarked when the card failed; a red run's, 3, can reuse every pass).
+  # That run (4: for the shared files, its passes dropped, or with the pack's test.changed kept and main's change on its list, rebatch() mainsince(); its list holds its sharers' shared files, sharedown as SHAREDRUN, testrun.sh listcmd()) is their run again for each card that shares one and passed in it, the card failing or not (markshared(); bugs: a third run; a mate that passed went back to its own test step unmarked when the card failed; a red run's, 3, can reuse every pass).
   back=''
   if [ ${#mates[@]} != 0 ]; then
     rebatch "$c" "$wt"; t=$?

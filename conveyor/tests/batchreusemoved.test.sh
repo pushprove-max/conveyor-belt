@@ -118,9 +118,8 @@ t_sharedrunlist() {
 # c8, on main as it was (old), changes lib/claim.sh, which the test map (map.json) gives lib/a.test.sh; lib/opt.test.sh
 # is lib/speed.sh's. Main then runs <main's change> (old to new). W holds new with c8's change, as rebatch() and
 # stalepass() have the batch's worktree. run.out holds what sharedtests() prints for <asked> (c8, or c7: W itself) asked
-# with W, and its exit. With <lone> 1, c8 is asked as card() asks it: alone, its change moved onto main as it is now;
-# with own, it is asked with W for its own change's files alone (rebatch()'s sharers).
-mateshared() { # <main's change: commands run in main> [<asked>] [<lone>: 1 or own]
+# with W, and its exit. With <lone> 1, c8 is asked as card() asks it: alone, its change moved onto main as it is now.
+mateshared() { # <main's change: commands run in main> [<asked>] [<lone>: 1]
   setup '[]'; tune '.test.map = "map.json"'; mkdir -p "$R/lib" "$T/$CASE/cards"
   echo '{"lib/claim.sh": ["lib/a.test.sh"], "lib/speed.sh": ["lib/opt.test.sh"]}' > "$R/map.json"
   for f in claim.sh speed.sh a.test.sh opt.test.sh; do echo x > "$R/lib/$f"; done
@@ -151,7 +150,7 @@ t_matesharedmap() {
 }
 
 # Bug it catches: c8's batch passes (.bpass units) held lib/opt.test.sh, which the batch ran for c7, so main's change
-# to that file alone counted as shared with c8 and ran the batch again. Of .bpass, c8's own units (by) count.
+# to that file alone counted as shared with c8 and ran the batch again. No pass counts, only what c8's change selects.
 t_matesharedbpass() {
   mateshared 'echo z >> lib/opt.test.sh && printf "%s\n" "{\"units\": [\"lib/a.test.sh\", \"lib/opt.test.sh\"], \"by\": {\"c7\": [\"lib/opt.test.sh\"], \"c8\": [\"lib/a.test.sh\"]}}" > "$CARDS/c8.bpass"'
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = 'exit 1' ] \
@@ -160,16 +159,16 @@ t_matesharedbpass() {
 
 # Bug it catches: a batch run's pass of lib/opt.test.sh, a test main linked to another card's change during the run, was
 # given to c8 too (batchpass(): no card's own selection had it), so main's next change to that file made c8 a sharer
-# (rebatch()), and the run again used up c8's: its own change (lib/claim.sh) selects lib/a.test.sh alone. Asked for its
-# own change's files, c8 shares none.
+# (rebatch()), and the run again used up c8's: its own change (lib/claim.sh) selects lib/a.test.sh alone. Its own units
+# of that pass (by) do not count either: c8 shares none.
 t_matesharedown() {
-  mateshared 'echo z >> lib/opt.test.sh && printf "%s\n" "{\"units\": [\"lib/opt.test.sh\"], \"by\": {\"c7\": [\"lib/opt.test.sh\"], \"c8\": [\"lib/opt.test.sh\"]}}" > "$CARDS/c8.bpass"' c8 own
+  mateshared 'echo z >> lib/opt.test.sh && printf "%s\n" "{\"units\": [\"lib/opt.test.sh\"], \"by\": {\"c7\": [\"lib/opt.test.sh\"], \"c8\": [\"lib/opt.test.sh\"]}}" > "$CARDS/c8.bpass"' c8
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = 'exit 1' ] \
     || fail "main's change to lib/opt.test.sh, which c8's own change does not select, was shared with c8's own change through a batch pass: exit $RC, $(cat "$T/$CASE/run.out")"
 }
 
 # Bug it catches: as t_matesharedbpass, with c8 asked as its own test step asks (card(): no batch worktree), which
-# read every unit of .bpass: c8 ran its tests again for c7's file. Of .bpass, c8's own units (by) count there too.
+# read every unit of .bpass: c8 ran its tests again for c7's file. No pass counts there either.
 t_matesharedbpasslone() {
   mateshared 'echo z >> lib/opt.test.sh && printf "%s\n" "{\"units\": [\"lib/a.test.sh\", \"lib/opt.test.sh\"], \"by\": {\"c7\": [\"lib/opt.test.sh\"], \"c8\": [\"lib/a.test.sh\"]}}" > "$CARDS/c8.bpass"' c8 1
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = 'exit 1' ] \
@@ -222,11 +221,15 @@ t_marksharedunrun() {
 # s.test.sh is shared with each card of <shares> asked alone, and with the batch asked whole when one card shares it.
 # run.out holds rebatch's exit, the batch's cards after it and the cards it found sharing a file (sharers); with
 # <passed> 1, then the units each card selects (by) of a batch run that passes those cases and t_new, a case main
-# added to 7.test.sh during the run (batchpass()). A card of <by a pass> shares it through a batch pass alone: asked
-# for its own change's files (sharedtests() own), it shares none.
-rebatchmarked() { # <shares: the cards' numbers, e.g. "7 8"> <marked: numbers> [<passed>] [<by a pass: numbers>]
+# added to 7.test.sh during the run (batchpass()). A card of <by a pass> shares it through a batch pass alone: as
+# sharedtests() counts no pass, only what a change selects (#1591), it shares none. With <changed> 1, the pack sets
+# test.changed, and the batch's run again follows (batch(), its tests() stubbed): run.out then holds its exit and the
+# list its run is given, its lines but change, base and tree (its `from` commit, when main's commit before the landing,
+# as `before`), or the error of reading it when no run was started.
+rebatchmarked() { # <shares: the cards' numbers, e.g. "7 8"> <marked: numbers> [<passed>] [<by a pass: numbers>] [<changed>]
   local n
   setup '[]'; mkdir -p "$T/$CASE/cards"; for n in $1; do : > "$T/$CASE/s$n"; done; for n in ${4:-}; do : > "$T/$CASE/p$n"; done
+  [ -z "${5:-}" ] || tune '.test.changed = "sel.sh"'
   for n in 7 8; do git -C "$R" worktree add -q --detach "$T/$CASE/cards/c$n" main && echo "$n" > "$T/$CASE/cards/c$n/$n.txt" && git -C "$T/$CASE/cards/c$n" add -A \
     && git -C "$T/$CASE/cards/c$n" diff --cached --binary --no-renames > "$T/$CASE/cards/c$n.bpatch" || fail "the change of card $n"; done
   fx_in 'cd "$R" || exit 9; W=$CARDS/c7
@@ -235,9 +238,11 @@ rebatchmarked() { # <shares: the cards' numbers, e.g. "7 8"> <marked: numbers> [
     echo other > other.txt && git add other.txt && git commit -qm "another card" || exit 9
     lintbatch() { return 0; }; checks() { :; }
     sharedtests() { if [ $# = 2 ]; then ls "$T/$CASE"/s[78] >/dev/null 2>&1 || return 1; elif [ ! -e "$T/$CASE/s${1##*/c}" ]; then return 1
-      elif [ "${5:-}" = own ] && [ -e "$T/$CASE/p${1##*/c}" ]; then return 1; fi; echo s.test.sh; }
+      elif [ -e "$T/$CASE/p${1##*/c}" ]; then return 1; fi; echo s.test.sh; }
     mates=(c7 c8); rebatch c7 "$W"; echo "rebatch: $? mates=${mates[*]} sharers=${sharers[*]}"
-    [ -z "'"${3:-}"'" ] || { batchpass c7 "$W" "[\"7.test.sh\\tt_7\", \"7.test.sh\\tt_new\", \"8.test.sh\\tt_8\"]" 3 c7 c8; echo "by: $(jq -c .by "$W.bpass")"; }'
+    [ -z "'"${3:-}"'" ] || { batchpass c7 "$W" "[\"7.test.sh\\tt_7\", \"7.test.sh\\tt_new\", \"8.test.sh\\tt_8\"]" 3 c7 c8; echo "by: $(jq -c .by "$W.bpass")"; }
+    [ -z "'"${5:-}"'" ] || { tests() { grep -Ev "^(change|base|tree)	" "$W.rerun" | sed "s/^from	$(git -C "$R" rev-parse main^)\$/from	before/" | tr "\t\n" ":|" > "$T/$CASE/list"; : > "$W.test"; TEST_WAIT=0 TEST_RUN=0 TEST_FREE=0 TEST_REFUSED=""; }
+      batch c7 "$W" "${mates[@]}"; echo "batch: $? list: $(cat "$T/$CASE/list" 2>&1) kept: ${TEST_BATCH:-none}"; }'
 }
 
 # Bug it catches (#447): after that run again, main moved before the batch landed (land() STALE), and rebatch() found
@@ -299,4 +304,18 @@ t_rebatchpassmarked() {
   rebatchmarked '7 8' 7 '' 8
   grep -qx 'rebatch: 0 mates=c7 c8 sharers=' "$T/$CASE/run.out" \
     || fail "a batch whose only unmarked share was another card's batch pass was run again: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (#1591 review): with the pack's test.changed, a batch run again for c7's shared file still dropped
+# every card's passes, so its list named each card's files `changed` and the run ran every test they select, those
+# main's change does not select too. Each card keeps its pass, and main's change (other.txt) is a `main` line, from
+# which the command runs the tests both select; then (review) the list named no `from` commit, so the command could not
+# read which cases main changed and ran each file whole: the list names main's commit before the landing. And: with
+# every pass kept, batch() ran no case (batchkeep()'s all), so the shared file never ran on main as it is (#334): main's
+# change under them starts the run. And (review): the test line's kept count (TEST_BATCH) was batchkeep()'s, every case
+# of the passes kept, those the command ran again for main's change too: the command's own count stands.
+t_rebatchkeepmain() {
+  rebatchmarked 7 '' '' '' 1
+  grep -qx 'rebatch: 4 mates=c7 c8 sharers=c7' "$T/$CASE/run.out" && grep -qx 'batch: 0 list: from:before|pass:7.test.sh|pass:8.test.sh|main:other.txt| kept: none' "$T/$CASE/run.out" \
+    || fail "a batch run again with test.changed did not run with each card's pass kept and main's change other.txt named, or its kept count was batchkeep()'s: $(tr '\n' ' ' < "$T/$CASE/run.out")"
 }

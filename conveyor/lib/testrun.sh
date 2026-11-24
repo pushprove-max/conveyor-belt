@@ -429,8 +429,8 @@ listcmd() { # <worktree> [report args]
   mapfile -t fs < <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames --diff-filter=AM HEAD -- 2>/dev/null | testpaths \
     | jq -Rr "$SHAREDJQ"'select(. != "" and (shared | not))')
   # A run again of the test files a card's change shares with main's (SHAREDRUN, one a line, those still there: card()'s
-  # sharedtests(); its batch's, rebatch()'s sharedown) runs each whole, on the list or not, past the cap: bug, a change
-  # with a test file of its own listed only that one, and the shared file it also links never ran, yet the card landed.
+  # sharedtests(); its batch's, rebatch()'s sharedown) gives each to the command, its cases as the list says (unshare()),
+  # past the cap: bug, a change with a test file of its own listed only that one, and the shared file never ran.
   mapfile -t sh < <(grep . <<<"${SHAREDRUN:-}" | sort -u | while IFS= read -r f; do [ ! -f "$1/$f" ] || printf '%s\n' "$f"; done)
   CAPLEFT=0; CAPNOTE=''
   if [ ${#fs[@]} != 0 ]; then by='{"by":"own","age":null}'
@@ -445,12 +445,12 @@ listcmd() { # <worktree> [report args]
     # links to it, those still there, each run whole: they call its helpers (#1000), or a change that needed this file
     # changed broke them before (a Foreman title case and the start's size cases). One already on the list with only its
     # changed cases runs whole too, as a case it did not change can call them; a link of a file to itself is no reason.
-    # The shared files of a run again (sh) are added the same way.
+    # The shared files of a run again (sh) are added the same way, but one that keeps its cases (testlist.sh sharedkeep()).
     mapfile -t lk < <({ jq -r '. as $m | $ARGS.positional[] as $k | $m[$k] | arrays[] | strings | select(. != $k)' \
       --args "${fs[@]}" < "$1/.conveyor/test-links.json" 2>/dev/null; [ ${#sh[@]} = 0 ] || printf '%s\n' "${sh[@]}"; } | sort -u)
     for f in "${lk[@]}"; do
       [ -n "$f" ] && [ -f "$1/$f" ] || continue
-      if printf '%s\n' "${fs[@]}" | grep -qxF -- "$f"; then
+      if printf '%s\n' "${fs[@]}" | grep -qxF -- "$f"; then ! sharedkeep "$1" "$f" "${fs[@]}" || continue
         TEST_CASES=$(awk -F'\t' -v f="$f" '$1 != f' <<<"$TEST_CASES"); TEST_CASES=${TEST_CASES:+$TEST_CASES$'\n'}
       else fs+=("$f"); fi
     done

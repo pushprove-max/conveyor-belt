@@ -651,8 +651,10 @@ ended ok (`-- ok <file>`, below), `ok<TAB><file><TAB><case>` for each case of a 
 line `ok <case>` says it passed (a file killed part-way), and `fail<TAB><file><TAB><case>` for each case that failed.
 A command that reads it runs no file it lists as passed; of a file it names passed cases of, the rest of its cases;
 of a file it names only failed cases of, only those cases; a file it does not name (one that failed naming no case, never finished or never
-began) runs whole. A file that passed, but that main changed what it tests since then, has a `fail<TAB><file>` line
-and a `shared<TAB><file>` line: it runs whole, and the log can say it passed before. After a session changed the staged change, the file also has a line `changed<TAB><file>` for each
+began) runs whole. A file that passed, but that main changed what it tests since then, keeps its `pass` line when the
+pack sets `test.changed`: the `main<TAB><file>` lines (below) make the command run the tests that both changes select. When the
+pack does not set `test.changed`, the file has a `fail<TAB><file>` line and a `shared<TAB><file>` line: it runs whole,
+and the log can say it passed before. After a session changed the staged change, the file also has a line `changed<TAB><file>` for each
 file the session changed: the command runs the tests it selects for those files too, whether or not they passed, and
 says in its log how many cases of its selection it kept as passed and did not run (`TESTRUN kept=<n>`; the test line's
 `selected.kept`). Of a file that ran again in that run, a case that failed is no longer listed as passed, and the
@@ -1724,7 +1726,9 @@ the run and its changes still apply, in its order, to main as it is now: the lin
 again on the batch's combined change there before it lands, and a lint finding or execution error or a check that fails
 is a red run: the batch is run again there and split, and the card that breaks it goes to its fix, or leaves the batch
 for its lint, as above. When the cards that landed meanwhile touch a test file the batch touches too,
-the batch is tested again on main as it is now before it lands. A card of it whose
+the batch is tested again on main as it is now before it lands. When the pack sets `test.changed`, that run keeps
+the passes of its cards, and runs only the tests that both the batch's change and the landed change select. When it
+does not, that run runs every test that the cards' changes select. A card of it whose
 change no longer applies to main leaves the batch and is fitted afterwards; the others land. A batch
 that does not land for another reason sends that card to its tests again, alone, before it lands alone. A card whose change does not apply on top of the
 earlier ones, the card whose turn it is too, leaves the batch and is fitted afterwards, as a waiting card is. A card with follow-ups to file lands on
@@ -1754,8 +1758,11 @@ and tests ran (while it was away, during its tests or before its landing), its c
 When it applies there unchanged, or merges there three-way with no conflict (the same added and removed lines; only the
 lines around them moved), its product checks run again and it lands on the tests it already passed; a change a
 session had to rework to fit is reviewed and tested again (not one it changed only in documentation files), and one whose test files were merged keeping both sides is
-tested again. When the cards that landed since its tests ran touch a test file its change touches too, those tests
-run again on main as it is now before it lands: two changes that each passed alone can fail together. A failure there
+tested again. When the cards that landed since its tests ran select a test file that its change selects too, its
+tests run again on main as it is now before it lands: two changes that each passed alone can fail together. A test
+file counts for a landed card when that card's change selected it, not when it ran only because main moved. When the
+pack sets `test.changed`, only the tests that both changes select run again, of the engine's runner the cases. When
+it does not, each such test file runs again whole. A failure there
 goes to the card's fix, and the card does not land. These tests run again once for each change. When they pass and more
 cards land on the same test files before the card lands, the card lands with no second run. Its log line names the
 cards that landed since. If the change no longer applies to main, it is fitted onto main as before. A failure of the

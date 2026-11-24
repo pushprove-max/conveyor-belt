@@ -199,6 +199,110 @@ t_mergeunshare() {
     || fail "with no list of shared files, the files that passed are not each named shared: $(cat "$w.rerun")"
 }
 
+# With the pack's test.changed set, unshare() leaves the list as it is: tests() adds main's change as `main` lines,
+# from which the command runs the cases both changes select (#1591; t_mainmovedcases runs it through card()). Bug it
+# catches: a list with no tree line, or a base (b1) that cannot be compared with HEAD, gets no `main` line from
+# tests(), so left as it is the shared file would not run again at all: there it is named failed, to run whole, as with
+# no test.changed. Each of the two is checked apart, so neither check of unshare() can go unnoticed.
+t_mergeunsharechanged() {
+  eval "$(sed -n '/^unshare() {/,/^}/p' "$SRC/lib/claim.sh")"
+  local w=$T/$CASE/w l=$'change\tx\nbase\tb0\ntree\tt0\npass\ta\npass\tb\n'
+  packget() { printf -v "$2" '%s' sel.sh; }; treediff() { [ "$2" = b0 ] && [ "$3" = HEAD ]; }
+  mkdir -p "$T/$CASE"; printf '%s' "$l" > "$w.rerun"
+  unshare "$w" a
+  [ "$(cat "$w.rerun")" = "${l%$'\n'}" ] || fail "with test.changed, the shared file a lost its pass: $(cat "$w.rerun")"
+  printf '%s' "$l" | grep -v '^tree' > "$w.rerun"
+  unshare "$w" a
+  [ "$(sort "$w.rerun" | tr '\t\n' ':|')" = "base:b0|change:x|fail:a|pass:b|shared:a|" ] \
+    || fail "with test.changed and no tree line, the shared file a was not named failed to run whole: $(cat "$w.rerun")"
+  printf '%s' "${l/b0/b1}" > "$w.rerun"
+  unshare "$w" a
+  [ "$(sort "$w.rerun" | tr '\t\n' ':|')" = "base:b1|change:x|fail:a|pass:b|shared:a|tree:t0|" ] \
+    || fail "with test.changed and a base (b1) that cannot be compared with HEAD, the shared file a was not named failed to run whole: $(cat "$w.rerun")"
+}
+
+# Main moves under card c7 (#7) after its tests passed (#1591). The pack sets test.changed: its test command reads the
+# list's `main` lines. The links are <links>; c7 makes <c7's change>, by default adding `eight` to lib/rows.sh. Its
+# tests passed on m0, its list (c7.rerun) as a run leaves it: lib/view.test.sh passed. Card c8 lands, adding <c8's line>
+# to lib/panel.sh (its commit and landed line), and c7's change is brought onto main as it is now. lib/view.test.sh
+# (<its text> on main) by default fails when lib/rows.sh holds `eight` and lib/panel.sh holds `landed`: the two changes
+# fail together (#334). $STUB/test-cmd stands for the project's command: it adds each file it is given to
+# $STUB/given, keeps the list it got in $STUB/list, and runs the file unless the list keeps it as passed and names no
+# `main` line, adding to $STUB/ran `<file> <case>` for each of the file's cases it runs: those CONVEYOR_TEST_CASES
+# names of it, else all its t_ cases. Of main's change it runs only those, as the project's command runs of it only
+# the cases the change's own selection holds (.conveyor/test-changed-rerun.test.sh tests that rule).
+mainmoved() { # <links json> <c8's line> [<c7's change> [<lib/view.test.sh text>]]
+  local v='! { grep -qx eight lib/rows.sh && grep -qx landed lib/panel.sh; }'
+  setup "[$(issue 7 2026-01-01)]"; tune '.test.changed = "sel.sh"'; mkdir -p "$R/lib"; linkset "$1"
+  fx_wt "${3:-echo eight >> lib/rows.sh}" lib/panel.sh panel lib/rows.sh rows lib/other.test.sh 'exit 0' lib/x.test.sh 'exit 0' \
+    lib/y.test.sh 'exit 0' lib/w.test.sh 'exit 0' lib/view.test.sh "${4:-$v}"
+  m0=$(git -C "$R" rev-parse main)
+  printf 'change\t%s\nbase\t%s\ntree\t%s\npass\tlib/view.test.sh\n' "$(git -C "$FXWT" diff --cached --binary --no-renames HEAD | git hash-object --stdin)" \
+    "$m0" "$(git -C "$FXWT" write-tree)" > "$FXWT.rerun"
+  echo "$2" >> "$R/lib/panel.sh"; git -C "$R" commit -qam "title 8 (#8)" || fail "#8 could not land"
+  landed 8 | jq -c --arg s "$(git -C "$R" rev-parse main)" '.card = "c8-8" | .sha = $s' >> "$ST/cards.jsonl"
+  git -C "$FXWT" diff --cached --binary --no-renames > "$FXWT.patch" && git -C "$FXWT" reset -q --hard main \
+    && git -C "$FXWT" apply --index "$FXWT.patch" || fail "c7's change could not be brought onto main as it is now"
+  cat > "$STUB/test-cmd" <<'EOF'
+f=$CONVEYOR_TEST_FILE; echo "$f" >> "$STUB/given"; cp "$CONVEYOR_TEST_RERUN" "$STUB/list"
+if grep -q "^main	" "$CONVEYOR_TEST_RERUN" || ! grep -qxF "pass	$f" "$CONVEYOR_TEST_RERUN"; then
+  cs=$(printf '%s\n' "${CONVEYOR_TEST_CASES:-}" | awk -F'\t' -v f="$f" '$1 == f { print $2 }'); [ -n "$cs" ] || cs=$(sed -n 's/^t_\([a-z]*\)() {.*/\1/p' "$f")
+  for c in $cs; do echo "$f $c" >> "$STUB/ran"; done; bash "$f"
+fi
+EOF
+}
+# card()'s test step (cardtest()) on c7, as card() calls it, with the real sharedtests(), unshare() and tests(): the
+# lint gate, checks, batches and the landing turn stubbed; c7's change is the one that passed (testedhere()). run.out
+# ends with the run's exit.
+mainmovedtest() {
+  fx_in 'c=c7 n=7 wt=$FXWT issue="{}" sprompt="" br="" parsecheck="" tmain="" away="" apart="" me=$$ cmsg=x mates=()
+    lintgate() { return 0; }; checks() { :; }; treecheck() { :; }; testedhere() { return 0; }; gather() { return 1; }; turntake() { :; }
+    cardtest; echo "rc $rc"'
+}
+
+# Bug it catches (#334, kept with #1591's narrower run again): c7 and c8 each pass alone, and lib/view.test.sh, which
+# both changes select, fails with both on main. With no file named failed in c7's list, its run again on main as it
+# is now still gives the command that file with main's change named, so the pair fails before c7 lands.
+t_mainmovedpair() {
+  mainmoved '{"lib/rows.sh": ["lib/view.test.sh"], "lib/panel.sh": ["lib/view.test.sh"]}' landed; mainmovedtest
+  [ "$(tail -n 1 "$T/$CASE/run.out")" != "rc 0" ] && grep -qx lib/view.test.sh "$STUB/given" \
+    || fail "c7 and c8, which fail together in lib/view.test.sh, did not fail c7's run again before it landed: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (#1591): a run again on a main that moved named each shared file failed with no case, so the command
+# ran it whole: card #1533's selection was 14 to 20 files and its run again 135. And (#1591 review) the run again
+# took the card's own cases off a shared file of its own (listcmd()), so the command ran every case of it. c7 changes
+# the case t_a of lib/view.test.sh, which holds t_a, t_b and t_c: its own selection is t_a. c8's change to lib/panel.sh
+# selects lib/view.test.sh, whole, and lib/other.test.sh, which c7's does not. c7's run again keeps its pass of
+# lib/view.test.sh, names main's change (`main` line) and is given t_a alone of it: t_a runs, not t_b or t_c, and
+# lib/other.test.sh is not given.
+t_mainmovedcases() {
+  mainmoved '{"lib/panel.sh": ["lib/view.test.sh", "lib/other.test.sh"]}' other \
+    'printf "t_a() {\n  echo a2\n}\nt_b() {\n  echo b\n}\nt_c() {\n  echo c\n}\n" > lib/view.test.sh' $'t_a() {\n  echo a\n}\nt_b() {\n  echo b\n}\nt_c() {\n  echo c\n}'
+  mainmovedtest
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "rc 0" ] && [ "$(sort -u "$STUB/given" | tr '\n' ' ')" = "lib/view.test.sh " ] \
+    || fail "c7's run again was not given lib/view.test.sh alone (given: $(cat "$STUB/given" 2>&1)): $(cat "$T/$CASE/run.out")"
+  [ "$(cat "$STUB/ran" 2>&1)" = 'lib/view.test.sh a' ] \
+    || fail "c7's run again, its own selection t_a of lib/view.test.sh, ran other cases of it (ran: $(cat "$STUB/ran" 2>&1)): $(cat "$T/$CASE/run.out")"
+  grep -qx $'pass\tlib/view.test.sh' "$STUB/list" && grep -qx $'main\tlib/panel.sh' "$STUB/list" && ! grep -q $'^fail\t' "$STUB/list" \
+    || fail "c7's run again was not given its pass of lib/view.test.sh and main's change, or named a file failed to run it whole: $(cat "$STUB/list" 2>&1)"
+}
+
+# Bug it catches (#1591): the shared list grew with each move of main. c7's own passes held lib/x.test.sh, which it ran
+# once only because main moved, and c8's test line names lib/y.test.sh only because main moved under c8 (its reason
+# `main changed`, its time): both counted as shared, so they ran again. c8's line naming lib/w.test.sh with the reason
+# `the card changed` is c8's own selection, which the links do not give: it still counts.
+t_mainmovedgrow() {
+  mainmoved '{"lib/rows.sh": ["lib/view.test.sh", "lib/y.test.sh", "lib/w.test.sh"], "lib/panel.sh": ["lib/view.test.sh", "lib/x.test.sh"]}' other
+  jq -cn '{units: ["lib/view.test.sh", "lib/x.test.sh"], tested: true}' > "$FXWT.ready"
+  jq -cn '{card: "c8-8", issue: 8, step: "test", result: "pass", times: {"lib/y.test.sh": 2},
+    why: {"lib/view.test.sh": ["the card changed lib/panel.sh"], "lib/w.test.sh": ["the card changed lib/panel.sh"],
+      "lib/y.test.sh": ["main changed lib/z.sh"]}}' >> "$ST/cards.jsonl"
+  fx_in 't=$(sharedtests "$FXWT" "'"$m0"'"); echo "$? $t"'
+  [ "$(tr '\n' ' ' < "$T/$CASE/run.out")" = "0 lib/view.test.sh lib/w.test.sh " ] \
+    || fail "sharedtests() of c7 after c8 landed is not lib/view.test.sh and lib/w.test.sh alone: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug (#451: #415's merge, which git called clean, left a test file with two openings and one end, and only its test
 # step, minutes later, found the file no longer parsed; a broken file that no selected test loads would have landed).
 # A clean three-way merge: a.test.mjs holds a test turned off in a block comment; #7 rewrites a line inside it to open a

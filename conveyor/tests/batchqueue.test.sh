@@ -106,6 +106,44 @@ t_batchqueuestale() {
     || fail "stalepass c8 $R c7 did not drop c7's pass for the landing on its test file alone: $(cat "$T/$CASE/run.out")"
 }
 
+# Bug it catches (#1591 review): as t_batchqueuestale's landing on lib/panel.sh, with the pack's test.changed:
+# stalepass() still dropped c7's pass, so the batch's list named c7's files `changed` and its run ran every test they
+# select. c7 keeps its pass, and the batch's list (batchlist()) names main's change, lib/panel.sh, as a `main` line,
+# from which the command runs the cases both changes select. And (review): the list named no `from` commit, so the
+# command could not read which cases main changed and ran the file whole: its `from` is c7's base.
+t_batchqueuestalemain() {
+  stalemain ''
+  [ "$RC" = 0 ] && [ "$(tr '\t\n' ':,' < "$T/$CASE/run.out")" = '["lib/view.test.sh"] kept,from:c7base,pass:lib/view.test.sh,main:a.txt,main:lib/panel.sh,' ] \
+    || fail "stalepass c8 $R c7 with test.changed, after landings on lib/panel.sh and a.txt, did not keep c7's pass and put main's change, from c7's base, on the batch's list: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (#1591 review): the batch already keeps passes of runs on the later commit `mid` (rebatch()), and c7's
+# tests ran on its older base. The list's one `from` was the older of the two, so a case main changed after it and
+# changed back before HEAD read as unchanged, and a pass on `mid` of the changed case stood. c7 loses its pass, as with
+# no test.changed, and the `from` stays `mid`.
+t_batchqueuestalefrom() {
+  stalemain 1
+  [ "$RC" = 0 ] && [ "$(tr '\t\n' ':,' < "$T/$CASE/run.out")" = 'null gone,from:mid,pass:lib/view.test.sh,main:a.txt,' ] \
+    || fail "stalepass c8 $R c7 with test.changed, after the batch kept passes on mid, kept c7's pass from its older base, or the list's from is not mid: $(cat "$T/$CASE/run.out")"
+}
+
+# t_batchqueuestale's c7 with the pack's test.changed: lib/panel.sh lands (to `mid`), then a.txt (HEAD); with <first> 1
+# the batch first keeps passes of runs on `mid` (mainsince()). Then stalepass() for c7, and the list batchlist() writes
+# for a pass of lib/view.test.sh kept (its lines but change, base and tree), after c7's units and whether its .bpass is
+# left, in run.out.
+stalemain() { # <first: 1 or empty>
+  setup '[]'; tune '.test.changed = "sel.sh"'; mkdir -p "$R/lib"; linkset '{"lib/panel.sh": ["lib/view.test.sh"], "lib/rows.sh": ["lib/view.test.sh"]}'
+  fx_wt 'echo eight >> lib/rows.sh' lib/panel.sh panel lib/rows.sh rows lib/view.test.sh case1
+  fx_in 'b=$(git -C "$FXWT" rev-parse HEAD); printf "base\t%s\n" "$b" > "$FXWT.rerun"
+    echo "{\"issue\":7,\"tested\":true,\"units\":[\"lib/view.test.sh\"],\"cases\":1}" > "$FXWT.ready"; echo "{}" > "$FXWT.bpass"
+    echo landed >> "$R/lib/panel.sh" && git -C "$R" commit -qam "lib/panel.sh lands" || exit 3
+    echo a > "$R/a.txt" && git -C "$R" add a.txt && git -C "$R" commit -qm "a.txt lands" && m=$(git -C "$R" rev-parse HEAD^) || exit 3
+    BATCHMAIN=""; BATCHFROM=""; [ -z "'"$1"'" ] || mainsince "$R" "$m" HEAD || exit 4
+    stalepass c8 "$R" c7; echo "$(jq -c .units "$FXWT.ready") $([ -e "$FXWT.bpass" ] && echo kept || echo gone)"
+    batchlist "$R" "{\"keep\": [\"lib/view.test.sh\"], \"changed\": [], \"units\": [\"lib/view.test.sh\"]}" \
+      && grep -v "^change\|^base\|^tree" "$R.rerun" | sed "s/$b/c7base/; s/$m/mid/"'
+}
+
 # Bug it catches (R239): a queued card's settle() brings its waitSec up to date in <worktree>.ready while the batch
 # card's stalepass() takes the card's passes out of the same file, in another process. Unlocked, settle()'s rewrite read
 # the file first and wrote it after, so the units stalepass() removed came back and batchkeep() kept the stale pass.
