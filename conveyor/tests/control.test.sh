@@ -250,7 +250,7 @@ t_heldclose() {
   [ "$(loop snapshot --fresh | jq -c '.needsYou.pipeline | map(.issue)')" = '[41]' ] || fail "the held follow-up is not in Needs you: $(loop snapshot --fresh | jq -c .needsYou.pipeline)"
   touch "$ST/cards.jsonl"; before=$(cat "$ST/cards.jsonl")
   # shut exits 4 when it shuts nothing, which the Board's close takes as no failure (dashboard_server_control.py).
-  loop gh-write issue close 41 --comment "Closed from the Board's Needs you list." >/dev/null && { loop shut 41 >/dev/null 2>&1 || [ $? = 4 ]; } || fail "the Board's close of #41, which has no card, exited non-zero"
+  loop gh-write issue close 41 --comment "Closed from the Board's Needs you list." >/dev/null && { loop shut 41 --closed >/dev/null 2>&1 || [ $? = 4 ]; } || fail "the Board's close of #41, which has no card, exited non-zero"
   [ "$(cat "$STUB/closed")" = 41 ] && [ "$(cat "$STUB/close-comments")" = "--comment Closed from the Board's Needs you list." ] \
     || fail "#41 was not closed with the Board's comment: $(cat "$STUB/closed" "$STUB/close-comments" 2>&1)"
   [ "$(cat "$ST/cards.jsonl")" = "$before" ] || fail "the close of #41 changed the card records, though #41 has no card"

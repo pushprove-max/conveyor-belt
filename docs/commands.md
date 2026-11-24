@@ -98,7 +98,7 @@ The loop:
 Cards:
 
 - `parts <parent> <issue>...` attaches the issues as GitHub sub-issues of the parent ([Issues](#issues)).
-- `retry <issue>` gives a blocked card back; with `--fresh`, its next card builds from nothing. `shut <issue>` stops an open card and shuts it, or shuts a blocked card whose issue was closed. `unblock <issue> --hold` holds a
+- `retry <issue>` gives a blocked card back; with `--fresh`, its next card builds from nothing. `shut <issue>` stops an open card and shuts it, or shuts a blocked card, with the reason "shut by the owner": the loop does not pick the issue again until you run `retry <issue>`. The Board's Close closes the issue, then runs `shut <issue> --closed`: the loop picks the issue again after it is opened again. `unblock <issue> --hold` holds a
   blocked card's issue and keeps its work. A main-red fix
   card has no issue. It shows as "Main is red (<commit>)". A card from the Tests page with the Rules tab's Tests page
   actions On (Cards with no GitHub issue) has no issue too. It shows as "Tests page: <file>". For these cards, use

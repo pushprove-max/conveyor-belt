@@ -494,12 +494,14 @@ def control_script(action, args, main, today, record=None, user=None):
         # the card back, and the loop can pick the closed issue again. A pipeline change held there has no card: shut
         # leaves the records as they are and exits 4 (it shut nothing), which is no failure of the Close, and the
         # closed issue leaves the snapshot's list of open held follow-ups. Any other failure of shut (exit 1 when the
-        # records could not be locked, read or written) fails the Close, so the Board shows it.
+        # records could not be locked, read or written) fails the Close, so the Board shows it. shut is told the issue
+        # was closed (--closed): without it, shut takes the card as the owner's, and no turn gives it back once the
+        # issue is opened again.
         # A main-red fix card has no issue to close: it is shut alone, by its card id.
         if REDCARD.fullmatch(args[0]):
             return '%s shut %s' % (conv, q(args[0]))
         said, n = q("Closed from the Board's Needs you list."), q(args[0])
-        return f'cd {q(record or main)} || exit 1; {conv} gh-write issue close {n} --comment {said} >/dev/null && {{ {conv} shut {n} || [ $? = 4 ]; }}'
+        return f'cd {q(record or main)} || exit 1; {conv} gh-write issue close {n} --comment {said} >/dev/null && {{ {conv} shut {n} --closed || [ $? = 4 ]; }}'
     if action == 'suite-machine-check':
         # The check's JSON line is the answer. It exits 1 when a need is missing, which is the answer too; with no
         # output (the rule cannot be read) the command's own error is the answer.

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-# `conveyor.sh shut <issue | card id>`: the Board's Close, once it has closed the issue: its blocked card is shut now
-# (shut(), lib/issues.sh), not at the loop's next turn, which a stopped loop never takes, so it leaves Needs you at once.
-# Also the owner's stop of an open card. It prints what it did; when an issue has no card for it to shut, it says why
-# and exits 4, a code of its own: a failure (the records not locked, not read or not written) exits 1 or another
+# `conveyor.sh shut <issue [--closed] | card id>`: the Board's Close (with --closed), once it has closed the issue: its
+# blocked card is shut now (shut(), lib/issues.sh), not at the loop's next turn, which a stopped loop never takes, so it
+# leaves Needs you at once. Also the owner's stop of an open card or a blocked one. It prints what it did; when an issue
+# has no card for it to shut, it says why and exits 4, a code of its own: a failure (the records not locked, not read or not written) exits 1 or another
 # code, and the Board's Close takes 4 alone as no failure (control_script(), dashboard_server_control.py).
 # Sourced by conveyor.sh.
 . "$HERE/lib/prompts.sh" || exit 1
@@ -25,7 +25,8 @@
 # any other card. The cards it ended are passed to shut() by id, so each is closed as the owner's stop even when the
 # loop blocked it first, with its own reason, once its process was killed. A card it could not end (shutopen() fails:
 # left open, as its words say) makes it exit 1, once the others are shut.
-[[ ${2:-} =~ ^(c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-[0-9]+|[0-9]+)$ ]] || { echo "usage: conveyor.sh shut <issue | card id>" >&2; exit 2; }
+[[ ${2:-} =~ ^(c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-[0-9]+|[0-9]+)$ ]] && { [ $# = 2 ] || { [ $# = 3 ] && [ "$3" = --closed ] && [[ $2 =~ ^[0-9]+$ ]]; }; } \
+  || { echo "usage: conveyor.sh shut <issue [--closed] | card id>" >&2; exit 2; }
 # A card with no GitHub issue that is not picked yet has no card lines to shut: it is taken off the record, so the loop never picks it (testcardact(), lib/testcardact.sh).
 if [[ $2 =~ -0$ ]]; then
   . "$HERE/lib/testaction.sh" || exit 1
@@ -34,6 +35,12 @@ if [[ $2 =~ -0$ ]]; then
 fi
 left=0; ended=$(shutopen "$2") || left=1; [ -z "$ended" ] || echo "$ended"
 own=$(sed -n 's/^conveyor: card \([^ ]*\) was open .*/\1/p' <<<"$ended" | jq -Rsc 'split("\n") - [""]') || exit 1
+# A blocked card of an issue, named by the issue or by its card id, is the owner's shut too (#1635): closed as SHUT, the
+# loop would pick the still open issue again and build it on a new card. The Board's Close, which closes the issue on
+# GitHub first, passes --closed: its blocked card is shut as SHUT, so a turn gives it back once the issue is opened
+# again. Neither asks GitHub, so a late or missing answer from GitHub cannot change how the card is shut.
+n=$2; [[ $2 =~ ^[0-9]+$ ]] || n=${2##*-}
+[ "$n" = 0 ] || [ "${3:-}" = --closed ] || own=$(stdb ask issue cards "$n" | jq -cs --argjson own "$own" '$own + map(.card) | unique') || exit 1
 if [[ $2 =~ ^[0-9]+$ ]]; then closed=$(locked shut "[$2]" "$own") || exit 1; else locked shut "$2" "$own" || exit; exit $left; fi
 [ -z "$closed" ] || echo "$closed"
 [ "$left" = 0 ] || exit 1

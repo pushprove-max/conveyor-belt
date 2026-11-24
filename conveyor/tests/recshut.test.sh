@@ -143,12 +143,56 @@ t_shutboard() {
   out=$(loop shut 10 2>&1); RC=$?
   [ "$RC" = 4 ] && grep -qF 'issue #10 has a card that landed' <<<"$out" || fail "shut of #10, whose card landed, was not refused with why (exit $RC): $out"
   [ "$(cat "$ST/cards.jsonl")" = "$before" ] || fail "shut 9 or shut 10 changed the card records"
-  loop shut 8 >/dev/null || fail "shut 8 exited non-zero"
+  # The Board's Close closed #8 on GitHub before its shut, and says so (--closed): so its card is shut as closed, and a
+  # turn gives it back once opened. Bug (#1635): with no --closed read, it was shut as the owner's, given back by no turn.
+  loop shut 8 --closed >/dev/null || fail "shut 8 --closed exited non-zero"
   [ "$(loop health | jq -c '.blocked | map(.issue) | index(8)')" = null ] && [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue) | index(8)')" = null ] \
     || fail "#8 is still under Needs you after shut 8: $(loop health | jq -c '[.blocked, .waiting]')"
   [ "$(st "select(.card == \"$c8\") | [.step, .reason] | join(\"|\")" | tail -n 1)" = 'closed|the issue was closed by hand while the card was blocked' ] \
     || fail "no closed line says #8 was shut: $(grep "$c8" "$ST/cards.jsonl")"
   loop check || fail "the records do not check after shut"
+}
+
+# Bug (#1635): `shut 8` on the blocked card of #8, which is still open on GitHub, closed the card as "the issue was closed
+# by hand", said "issue #8 was closed", and the next turn picked the open #8 and built it again on a new card. It is
+# the owner's shut: the card closes as shut by the owner, no turn picks #8, and `retry 8` takes it again.
+t_shutblocked() {
+  local c8=c0-8 out
+  setup "$(jq -cs . <(issue 8 2026-02-01) <(issue 9 2026-03-01))"; shutrec 8
+  out=$(loop shut 8 2>&1) || fail "shut 8 exited non-zero: $out"
+  grep -qF "card $c8 was shut by the owner; the card is closed, its kept work where it was, and \`retry 8\` takes it again" <<<"$out" \
+    && ! grep -qF 'was closed while' <<<"$out" || fail "shut 8, of the blocked card of the open #8, did not say the owner shut it, or said #8 was closed: $out"
+  [ "$(st "select(.card == \"$c8\") | [.step, .reason] | join(\"|\")" | tail -n 1)" = 'closed|shut by the owner' ] \
+    || fail "shut 8, of the blocked card of the open #8, did not close it as shut by the owner: $(grep "$c8" "$ST/cards.jsonl")"
+  # #9 is open too: the turn picking it shows the turn reached its pick, so a turn that ended early cannot pass for one that left #8 alone.
+  # loop: only a whole turn shows both of the ways a turn takes an open issue again, reopened() and pick, leave #8 alone.
+  loop run 1 > "$T/$CASE/run.out" 2>&1 || fail "the turn after shut 8 exited non-zero: $(tail -n 20 "$T/$CASE/run.out")"
+  [ -n "$(st 'select(.issue == 9 and .step == "picked") | .card')" ] || fail "the turn after shut 8 picked nothing, so it did not show #8 is left alone: $(tail -n 20 "$T/$CASE/run.out")"
+  [ "$(st 'select(.issue == 8) | .card' | sort -u)" = "$c8" ] || fail "after shut 8, a turn took the open #8 again: $(st 'select(.issue == 8) | "\(.card) \(.step)"' | tr '\n' ,)"
+  out=$(loop retry 8 2>&1) || fail "retry 8, after shut 8, exited non-zero: $out"
+  grep -qF 'issue #8 can be picked again' <<<"$out" && [ -z "$(st "select(.card == \"$c8\")")" ] || fail "retry 8 did not take #8 again after shut 8: $out"
+}
+
+# Bug (#1635): `shut <card id>` of the blocked card of the open #8 closed it as "the issue was closed by hand", so the
+# turn's reopened() gave the open #8 back and built it again. Named by its card id, it is the owner's shut as by its issue.
+t_shutblockedid() {
+  local c8=c20260201T000000-x-8 out
+  setup "[$(issue 8 2026-02-01)]"; shutrec 8
+  out=$(jq -c --arg c "$c8" 'if .card == "c0-8" then .card = $c else . end' "$ST/cards.jsonl") && printf '%s\n' "$out" > "$ST/cards.jsonl"
+  out=$(loop shut "$c8" 2>&1) || fail "shut $c8 exited non-zero: $out"
+  grep -qF "card $c8 was shut by the owner" <<<"$out" && [ "$(st "select(.card == \"$c8\") | [.step, .reason] | join(\"|\")" | tail -n 1)" = 'closed|shut by the owner' ] \
+    || fail "shut $c8, the blocked card of the open #8, did not close it as shut by the owner: $out $(grep "$c8" "$ST/cards.jsonl")"
+}
+
+# Bug (#1635): `shut 8` asked GitHub whether #8 was open, and with no answer (a timeout) shut the blocked card of the
+# open #8 as of a closed issue, so a turn gave #8 back once GitHub answered. The owner's shut needs no answer from GitHub.
+t_shutnoanswer() {
+  local c8=c0-8 out
+  setup "[$(issue 8 2026-02-01)]"; shutrec 8
+  : > "$STUB/closed-fail"
+  out=$(loop shut 8 2>&1) || fail "shut 8, with no answer from GitHub, exited non-zero: $out"
+  [ "$(st "select(.card == \"$c8\") | [.step, .reason] | join(\"|\")" | tail -n 1)" = 'closed|shut by the owner' ] && ! grep -qF 'was closed while' <<<"$out" \
+    || fail "shut 8, with no answer from GitHub, did not close $c8 as shut by the owner, or said #8 was closed: $out $(grep "$c8" "$ST/cards.jsonl" | tail -n 1)"
 }
 
 # shut of a blocked card whose records cannot be locked (R115): $STATE.checked.lock is not writable, so shut's check

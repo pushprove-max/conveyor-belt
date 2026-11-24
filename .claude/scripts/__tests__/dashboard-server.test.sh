@@ -830,16 +830,18 @@ done
 # comment that says where, in the record's repository, then its card shut at once (conveyor.sh shut), so it leaves
 # Needs you though the loop is stopped. Bug: the button reaches no command, or gh without the gate; it leaves the
 # card blocked until a loop turn that a stopped loop never takes; or it also retries the card, which gives it back, so the loop can pick the closed issue from an open list asked before it closed.
+# Bug (#1635): shut is not told the issue was closed (--closed), so it shuts the card as the owner's, and no turn
+# gives it back once the issue is opened again.
 fresh_control
 [ "$(ctl "$(act close 13)")" = 200 ] && [ "$(cat "$F/gh-writes")" = "issue close 13 --comment Closed from the Board's Needs you list." ] \
-  && [ "$(cat "$F/gh-calls")" = "$(cat "$F/gh-writes")" ] && [ "$(cat "$F/gh-pwd")" = "$HM" ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM shut 13" ] \
+  && [ "$(cat "$F/gh-calls")" = "$(cat "$F/gh-writes")" ] && [ "$(cat "$F/gh-pwd")" = "$HM" ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM shut 13 --closed" ] \
   && grep -q 'issue #13 was closed' "$M/ctl.out" \
   || fail "close_reaches_gh_write_issue_close: answered '$(cat "$M/ctl.out")', wrote '$(cat "$F/gh-writes" 2>&1)', ran '$(calls)'"
 # Close on a pipeline change held there: its issue has no card, so shut shuts nothing and exits 4 (#1030). Bugs: the
 # Board answers that as a failed Close, though GitHub closed the issue; or it hides a shut that failed, with exit 1
 # too (R115: shut's records could not be locked, which the Board took as "shut nothing").
 fresh_control; touch "$F/shut-none"
-[ "$(ctl "$(act close 41)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM shut 41" ] \
+[ "$(ctl "$(act close 41)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM shut 41 --closed" ] \
   || fail "close_of_an_issue_with_no_card_is_no_failure: answered '$(cat "$M/ctl.out")', ran '$(calls)'"
 fresh_control; touch "$F/shut-fails"
 [ "$(ctl "$(act close 41)")" != 200 ] || fail "close_shows_a_shut_that_failed: answered '$(cat "$M/ctl.out")', ran '$(calls)'"
