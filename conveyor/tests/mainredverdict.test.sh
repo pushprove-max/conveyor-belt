@@ -80,6 +80,9 @@ t_mainchangeddeleted() {
   echo x > "$R/lib/x.sh" && git -C "$R" add lib/x.sh && git -C "$R" commit -qm bad && s=$(git -C "$R" rev-parse HEAD) \
     && eng "append \"\$(line bad 2 landed ok '{\"sha\": \"$s\"}')\"" || fail "landing bad could not be made"
   git -C "$R" worktree add -q --detach "$w" "$b" || fail "card c8's worktree could not be made on main before b.test"
+  # Main moves on past $s and deletes b.test: a map read with main's HEAD tests in place of $s's cannot name b.test,
+  # so the case fails unless the given commit is read.
+  git -C "$R" rm -q b.test && git -C "$R" commit -qm later || fail "main's later commit could not be made"
   out=$(eng "mainchanged a.test $s \"\$CONVEYOR_CARDS/c8\" one && echo changed" 2>&1)
   [ "$out" = changed ] || fail "mainchanged a.test $s <c8, on main before b.test> one, main's areas.json linking lib/x.sh (changed by bad) to a.test: not changed: $out"
 }

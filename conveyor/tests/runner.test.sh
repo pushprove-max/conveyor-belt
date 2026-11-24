@@ -93,6 +93,9 @@ t_runnermapdeleted() {
   git -C "$R" worktree add -q --detach "$wt" && git -C "$wt" rm -q tests/other.test.mjs && echo x > "$wt/tests/new.test.mjs" \
     && printf '%s\n' '{"area": "a", "file": "src/a.js"}' '{"area": "a", "test": "new.test.mjs"}' > "$wt/areas.json" && git -C "$wt" add -A \
     && git -C "$wt" commit -qm change || fail "the change could not be committed"
+  # Main moves on past the base and deletes tests/runner.test.mjs: a base map read with main's HEAD tests in place of
+  # the base's cannot name runner.test.mjs, so the case fails unless the given base commit is read.
+  git -C "$R" rm -q tests/runner.test.mjs && git -C "$R" commit -qm later || fail "main's later commit could not be made"
   out=$( ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
     . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names \
       && testsel "$wt" narrow "$b" "$(git -C "$wt" rev-parse HEAD)" | tail -n +2 | sort ) 2>&1)
