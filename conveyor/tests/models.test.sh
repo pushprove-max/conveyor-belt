@@ -97,7 +97,8 @@ echo pwned > a.txt; echo pwned > z.txt
 [ ! -f "$STUB/keep-live" ] || { i=0; while [ ! -s "$PWD.live" ] && [ $i -lt 100 ]; do i=$((i + 1)); sleep 0.05; done; cp "$PWD.live" "$STUB/live.$n"; }
 f=$(grep -o 'the file [^ ]*staged\.diff' "$STUB/asked" | cut -d' ' -f3); cp "$f" "$STUB/staged.$n" 2>/dev/null
 f=$(grep -o 'are in the folder [^ ]*/rounds' "$STUB/asked" | cut -d' ' -f5); [ -z "$f" ] || cp "$f/1.diff" "$STUB/fix.$n"
-[ ! -f "$STUB/review-bare" ] || { rm "$STUB/review-bare"; echo '{"type":"result","is_error":false,"result":"Review interrupted"}'; exit 0; }
+[ ! -f "$STUB/review-nostart" ] || { rm "$STUB/review-nostart"; echo 'stderr: stopped before any work' >&2; exit 1; }
+[ ! -f "$STUB/review-bare" ] || { rm "$STUB/review-bare"; echo 'stderr: bare' >&2; echo '{"type":"result","is_error":false,"result":"Review interrupted"}'; exit 0; }
 [ ! -f "$STUB/review-part" ] || { rm "$STUB/review-part"; echo '{"type":"result","is_error":false,"result":"x","usage":{"input_tokens":100,"cache_creation_input_tokens":50,"cache_read_input_tokens":1000,"output_tokens":7}}'
   echo '{"type":"result","is_error":false,"result":"Review interrupted"}'; exit 0; }
 echo '{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"a.txt"}}],"usage":{"input_tokens":100,"cache_creation_input_tokens":50,"cache_read_input_tokens":1000,"output_tokens":7}}}'
@@ -138,7 +139,7 @@ t_claudeexit() {
   claude_reviewer "[$(issue 9 2026-01-03)]"
   echo "$NOGO" > "$STUB/review.1"; : > "$STUB/review-exit"
   out=$(rvcall 9)
-  [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(head -n 1 <<<"$out")" = 'review failed (exit 3)' ] && [ "$(tail -n 1 <<<"$out")" = 'rc=1 none' ] \
+  [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(head -n 1 <<<"$out")" = 'review failed (exit 3); its events are kept in c9.review.events' ] && [ "$(tail -n 1 <<<"$out")" = 'rc=1 none' ] \
     || fail "a Claude review that gave its NO-GO and then exited non-zero was run again: $out"
 }
 t_claudebare() {
@@ -146,8 +147,21 @@ t_claudebare() {
   # An answer that ends cleanly with neither a verdict nor token usage is no verdict: it runs once more.
   echo "$GO" > "$STUB/review.2"; : > "$STUB/review-bare"
   out=$(rvcall 10)
-  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(head -n 1 <<<"$out" | jq -r .firstTry.reason)" = "review reported no token usage" ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \
-    || fail "a Claude answer with no verdict and no usage was not run again: $out"
+  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(head -n 1 <<<"$out" | jq -r .firstTry.reason)" = "review reported no token usage; its events are kept in c10.review.events" ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \
+    || fail "a Claude answer with no verdict and no usage was not run again, or its reason names no kept events file: $out"
+  # Bug: reviewed() removed the first attempt's events and the retry wrote its err again, so why it failed was lost.
+  grep -q 'Review interrupted' "$ST/kept/c10/c10.review.events" && grep -qx 'stderr: bare' "$ST/kept/c10/c10.review.err" \
+    || fail "the events or err of a Claude review that reported no token usage were not kept: $(ls "$ST/kept/c10" 2>&1)"
+}
+# Bug: a Claude review that exited before any work took nostart()'s reason alone, which does not name the kept events file.
+t_claudenostart() {
+  claude_reviewer "[$(issue 15 2026-01-09)]"
+  echo "$GO" > "$STUB/review.2"; : > "$STUB/review-nostart"
+  out=$(rvcall 15)
+  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \
+    && [ "$(head -n 1 <<<"$out" | jq -r .firstTry.reason)" = 'the claude CLI stopped before any work (exit 1): fix what its words below say; its events are kept in c15.review.events'$'\n''stderr: stopped before any work' ] \
+    || fail "a Claude review that stopped before any work was not run again, or its reason does not name the kept events file above its words: $out"
+  grep -qx 'stderr: stopped before any work' "$ST/kept/c15/c15.review.err" || fail "the err of a Claude review that stopped before any work was not kept: $(ls "$ST/kept/c15" 2>&1)"
 }
 t_claudepart() {
   claude_reviewer "[$(issue 11 2026-01-05)]"
@@ -187,6 +201,7 @@ printf '%s\n' "$PWD" "$OPENCODE_CONFIG_CONTENT" "${OPENCODE_DISABLE_PROJECT_CONF
 f=$(grep -o 'the file [^ ]*staged\.diff' "$STUB/oc-asked" | cut -d' ' -f3); cp "$f" "$STUB/oc-staged.$n" 2>/dev/null
 echo pwned > a.txt
 step() { jq -cn --argjson c "$1" --argjson t "$2" '{type: "step_finish", timestamp: 1, sessionID: "s", part: {type: "step-finish", reason: "stop", cost: $c, tokens: $t}}'; }
+[ ! -e "$STUB/oc-nostart" ] || { rm "$STUB/oc-nostart"; echo 'stderr: stopped before any step' >&2; exit 1; }
 echo '{"type":"step_start","timestamp":1,"sessionID":"s","part":{"type":"step-start"}}'
 echo '{"type":"text","timestamp":1,"sessionID":"s","part":{"type":"text","text":"I read the change first."}}'
 echo '{"type":"tool_use","timestamp":1,"sessionID":"s","part":{"type":"tool","tool":"read","state":{"status":"completed"}}}'
@@ -195,8 +210,9 @@ step 0.25 '{"input":100,"output":5,"reasoning":3,"cache":{"read":1000,"write":50
 [ "$n" != 1 ] || for i in $(seq 1200); do [ -e "$STUB/go" ] && break; sleep 0.1; done
 [ ! -e "$STUB/refuse-api" ] || { rm "$STUB/refuse-api"; echo 'API Error: 429 Too Many Requests' >&2; exit 1; }
 echo '{"type":"step_start","timestamp":2,"sessionID":"s","part":{"type":"step-start"}}'
-[ -f "$STUB/review.$n" ] || exit 1
+[ -f "$STUB/review.$n" ] || { echo "stderr: no answer $n" >&2; exit 1; }
 jq -cn --rawfile r "$STUB/review.$n" '{type: "text", timestamp: 2, sessionID: "s", part: {type: "text", text: $r}}'
+[ ! -e "$STUB/oc-part" ] || { rm "$STUB/oc-part"; echo 'stderr: part usage' >&2; step 0.5 '{"input":20}'; exit 0; }
 step 0.5 '{"input":20,"output":7,"reasoning":0,"cache":{"read":500,"write":0}}'
 EOF
   chmod +x "$STUB/opencode"; printf '#!/usr/bin/env bash\n[ "${1:-}" != debug ] || exit 1\ntouch "$STUB/codex-ran"; exit 1\n' > "$STUB/codex"
@@ -278,6 +294,38 @@ t_opencoderetry() {
   out=$(PATH=$nooc rvcall 9)
   [ "$(wc -l < "$STUB/oc-runs")" = 4 ] && grep -q 'the reviewer is set to opencode prov/vendor/m-1, and opencode is not installed on this host' <<<"$out" && [ "$(tail -n 1 <<<"$out")" = 'rc=1 none' ] \
     && [ "$(grep -cx seatwait "$TURNS")" = 4 ] || fail "a review with no opencode on the host did not fail naming it after reading the host again four times: $out $(cat "$TURNS")"
+}
+# Bug: an OpenCode review that failed with no verdict lost its events and err: reviewed() removed the events, and the
+# run again wrote its err again, so why the first attempt failed could not be read.
+t_opencodekept() {
+  opencode_reviewer; : > "$STUB/go" # no live record to wait for
+  echo "$GO" > "$STUB/review.2" # no review.1: the first attempt exits 1 after one step, with no answer
+  out=$(rvcall 12)
+  [ "$(wc -l < "$STUB/oc-runs")" = 2 ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \
+    && [ "$(head -n 1 <<<"$out" | jq -r '.firstTry.reason | split("\n")[0]')" = 'review failed (exit 1); its events are kept in c12.review.events' ] \
+    || fail "a failed OpenCode review was not run again, or its reason names no kept events file on its first line: $out"
+  grep -q step_finish "$ST/kept/c12/c12.review.events" && grep -qx 'stderr: no answer 1' "$ST/kept/c12/c12.review.err" \
+    || fail "the events or err of a failed OpenCode review were not kept: $(ls "$ST/kept/c12" 2>&1)"
+}
+# Bug: an OpenCode review that ended with no whole token usage lost its events and err as a failed one did (above).
+t_opencodeunread() {
+  opencode_reviewer; : > "$STUB/go" # no live record to wait for
+  echo 'Review interrupted' > "$STUB/review.1"; : > "$STUB/oc-part"; echo "$GO" > "$STUB/review.2"
+  out=$(rvcall 13)
+  [ "$(wc -l < "$STUB/oc-runs")" = 2 ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \
+    && [ "$(head -n 1 <<<"$out" | jq -r .firstTry.reason)" = 'review reported no token usage; its events are kept in c13.review.events' ] \
+    || fail "an OpenCode review with no whole usage was not run again, or its reason names no kept events file: $out"
+  grep -q 'Review interrupted' "$ST/kept/c13/c13.review.events" && grep -qx 'stderr: part usage' "$ST/kept/c13/c13.review.err" \
+    || fail "the events or err of an OpenCode review with no whole usage were not kept: $(ls "$ST/kept/c13" 2>&1)"
+}
+# Bug: an OpenCode review that exited before any work took nostart()'s reason alone, which does not name the kept events file.
+t_opencodenostart() {
+  opencode_reviewer; : > "$STUB/go" # no live record to wait for
+  : > "$STUB/oc-nostart"; echo "$GO" > "$STUB/review.2"
+  out=$(rvcall 14)
+  [ "$(wc -l < "$STUB/oc-runs")" = 2 ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \
+    && [ "$(head -n 1 <<<"$out" | jq -r .firstTry.reason)" = 'the opencode CLI stopped before any work (exit 1): fix what its words below say; its events are kept in c14.review.events'$'\n''stderr: stopped before any step' ] \
+    || fail "an OpenCode review that stopped before any work was not run again, or its reason does not name the kept events file above its words: $out"
 }
 # Bug: the review step's record() (lib/card.sh) drops or misplaces the cost OpenCode reported, so a landed card's
 # timeline shows its review unpriced. A whole card run: t_opencodereview writes the review lines itself, so only a

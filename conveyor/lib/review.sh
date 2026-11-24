@@ -96,7 +96,7 @@ review() { # <worktree> <brief> [instructions, in place of REVIEW]
     || { sed -E 's/^((DECLINED|MINOR|OUTSIDE|SELFHEALS):[[:space:]]*)+//' "$1.review" > "$1.review.new" && mv -f "$1.review.new" "$1.review"; } || { echo "the review could not be read"; return 1; }
   return $rc
 }
-# A failed Codex review's events, err and session file, copied to the card's kept folder ($ST/kept/<card>) as
+# A failed review's events, err and session file (a Codex review's alone has one), copied to the card's kept folder ($ST/kept/<card>) as
 # <card>.review.events, .err and .session (<card>.review-2.events and so on for a later review). Prints "; its events are
 # kept in <name>" with the events file's name in that folder, or nothing when its events could not be kept (a reason
 # that names the events file may point at the err file beside it: nostartsaid()). Fails when any of the three could not be
@@ -119,6 +119,12 @@ keptnote() { # <reason text>
   local n=${1##*; its events are kept in }
   [ "$n" != "$1" ] || return 0
   n=${n%%[;[:space:]]*}; printf '; its events are kept in %s' "$n"
+}
+# nostart()'s reason (NOSTART_WHY) with reviewkeep()'s note at the end of its first line, the CLI's words below it, for a
+# Claude or OpenCode review (a Codex review's reason holds none of its words: nostartsaid()). Bug: the reason was
+# NOSTART_WHY alone, so it no longer named the kept events file.
+nostartkept() { # <reviewkeep()'s note>
+  printf '%s%s\n%s' "${NOSTART_WHY%%$'\n'*}" "$1" "${NOSTART_WHY#*$'\n'}"
 }
 # nostart()'s reason (NOSTART_WHY) with no word of the CLI's: its first line alone, naming the kept events or err file
 # (reviewkeep()) where it pointed at "its words below": the CLI's words are in its events, or in its err when it wrote them
@@ -223,7 +229,7 @@ ocrun() { # <worktree> <opencode:provider/model> <effort>
 # text of its last step that wrote any (OPENCODEANSWER). It runs read-only (ocrun()); should a write get through all
 # the same, the worktree is put back to the change review() was given. With no opencode on PATH it fails, saying so.
 opencodereview() { # <worktree> <brief> <instructions> <model> <effort>
-  local rc sec f s p no=''
+  local rc sec f s p no='' kn=''
   command -v opencode >/dev/null || { echo "the reviewer is the OpenCode model $4, and OpenCode (opencode) is not on PATH: install it (npm install -g opencode-ai) and sign in to its providers (opencode auth login), or set another reviewer (conveyor.sh control reviewer)"; return 1; }
   p=$(noshell "$1" "$2" "$3") || { echo "$p"; return 1; }
   sec=$SECONDS
@@ -234,18 +240,19 @@ opencodereview() { # <worktree> <brief> <instructions> <model> <effort>
   jq -e objects <<<"$f" >/dev/null 2>&1 || f=$(jq -cn --arg m "$4" --arg e "$5" --argjson s "$sec" '{model: $m, effort: $e, sec: $s, unread: "the review output could not be read"}')
   if [ $rc = 0 ] && jq -Rrn "$OPENCODEANSWER" "$1.events" > "$1.review.new" 2>/dev/null && [ -s "$1.review.new" ] && mv -f "$1.review.new" "$1.review"; then
     jq -e 'has("tokens")' <<<"$f" >/dev/null && printf '%s\n' "$f" && return 0
-    s="review reported no token usage"; [ "$(verdict "$1.review")" != none ] || no=2
+    # Its events and err are kept as a failed Codex review's are (reviewkeep()): a run again overwrites both.
+    kn=$(reviewkeep "$1" ""); s="review reported no token usage$kn"; [ "$(verdict "$1.review")" != none ] || no=2
   else
     # Its error events say why it ended (a provider's refusal, a model it does not know); its stderr, what else it said.
-    s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))"$'\n'"$( { jq -Rrn '[inputs | fromjson? // empty | objects | select(.type == "error")
+    kn=$(reviewkeep "$1" ""); s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))$kn"$'\n'"$( { jq -Rrn '[inputs | fromjson? // empty | objects | select(.type == "error")
       | .error | (.data.message? // .message? // .name? // tostring) | strings] | .[-5:][]' "$1.events" 2>/dev/null; tail -n 60 "$1.err"; } )"
     jq -Rrn "$OPENCODEANSWER" "$1.events" > "$1.review.new" 2>/dev/null
     [ "$(verdict "$1.review.new")" != none ] || no=2; fi
   # A review that never began its work, and wrote no verdict (no: 2), says why (nostart()).
   [ "$no" != 2 ] || ! nostart "$rc" "$f" "$1.events" "$1.err" opencode "$4" reviewer "" "$1" \
-    || { signinstop review; s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f"); }
+    || { signinstop review; s=$(nostartkept "$kn"); f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f"); }
   jq -c '{step: "review"} + .' <<<"$f" > "$1.spent"
-  [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")"; no=2; }
+  [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")$kn"; no=2; }
   echo "$s"; return "${no:-1}"
 }
 # One Claude review (a backup when Codex usage runs out), called by review() and ending as it does: the same
@@ -257,7 +264,7 @@ opencodereview() { # <worktree> <brief> <instructions> <model> <effort>
 # in a folder beside the worktree, given to it alone. Codex reads AGENTS.md by itself; this review is given the
 # worktree's, once, in its prompt, so both review against the same rules.
 claudereview() { # <worktree> <brief> <instructions> <model> <effort>
-  local rc sec f s p d no=''
+  local rc sec f s p d no='' kn=''
   # The card's review account, else its builder's.
   d=$(acctenv "${RACCT:-$ACCT}") || { echo "$d"; return 1; }
   p=$(noshell "$1" "$2" "$3") || { echo "$p"; return 1; }
@@ -277,8 +284,9 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
     && [ -s "$1.review.new" ] && mv -f "$1.review.new" "$1.review"; then
     routedone 1
     jq -e 'has("tokens")' <<<"$f" >/dev/null && jq -c 'del(.ok)' <<<"$f" && return 0
-    s="review reported no token usage"; [ "$(verdict "$1.review")" != none ] || no=2
-  else s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))"$'\n'"$(tail -n 60 "$1.err")"
+    # Its events and err are kept as a failed Codex review's are (reviewkeep()): a run again overwrites both.
+    kn=$(reviewkeep "$1" ""); s="review reported no token usage$kn"; [ "$(verdict "$1.review")" != none ] || no=2
+  else kn=$(reviewkeep "$1" ""); s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))$kn"$'\n'"$(tail -n 60 "$1.err")"
     jq -Rrn '[inputs | fromjson? // empty | objects | select(.type == "result")] | last | .result | strings | sub("\\s+$"; "")' "$1.events" > "$1.review.new" 2>/dev/null
     [ "$(verdict "$1.review.new")" != none ] || no=2; fi
   # A review that never began its work, and wrote no verdict (no: 2), says why (nostart()). One whose subscription
@@ -286,14 +294,14 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
   if [ "$no" = 2 ] && nostart "$rc" "$f" "$1.events" "$1.err" claude "$4" reviewer "${RACCT:-$ACCT}" "$1"; then
     routedone 0
     if proxyfallback; then
-      s=$NOSTART_WHY; f=$(PROXY_NOW=1 claudereview "$@"); no=$?
+      s=$(nostartkept "$kn"); f=$(PROXY_NOW=1 claudereview "$@"); no=$?
       [ $no != 0 ] || { printf '%s\n' "$f"; return 0; }
       bothsaid "$s" "$f"; return $no
     fi
-    signinstop review; s=$NOSTART_WHY; f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f")
+    signinstop review; s=$(nostartkept "$kn"); f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f")
   else routedone 1; fi
   jq -c '{step: "review"} + del(.ok)' <<<"$f" > "$1.spent"
-  [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")"; no=2; }
+  [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")$kn"; no=2; }
   echo "$s"; return "${no:-1}"
 }
 
