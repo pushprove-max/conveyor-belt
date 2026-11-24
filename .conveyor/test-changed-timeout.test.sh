@@ -43,38 +43,43 @@ key=$(git -C "$R" rev-parse HEAD)-$(. "$ROOT/conveyor/lib/donewhen.sh" && treeof
 # so the limit is the file's 8 s (times the load factor) and the KILL comes 10 s after it.
 # Why many real runs, not one: the bug needs the TERM to reach the run just after its `wait` took the worker's exit,
 # within microseconds, and nothing outside bash can force that order. A worker that is asleep at the TERM wakes as late
-# as the run does (about one run in twenty hits it); with the stand-in case busy on a CPU, the worker ends first about
-# one run in five. Twenty-four runs side by side, each on a copy of the scratch repo, then miss it about one time in 150
-# without the fix, in the time of one; the busy case's low priority keeps the other runs' starts within the limit.
+# as the run does (about one run in twenty hits it); with the stand-in case busy on a CPU, the worker ends first in 6
+# to 9 runs of 24 with a bare `wait` in eend(). One round of 24 then missed it about one time in 150, and the test passed
+# with the bug. So the runs go in rounds of N side by side, each run on a copy of the scratch repo, until NEED of them
+# got to their case (.git/aone) before the limit: at one run in five, all 60 miss it about one time in 650,000. A test
+# with fewer in MAXR rounds fails, as its runs could not show the bug. The busy case's low priority keeps the other
+# runs' starts within the limit.
 # Each output is cut at 20 MB (ulimit -f): a run that writes the error again and again ends there.
-N=24
-for k in $(seq 1 $N); do
-  cp -a "$R" "$T/r$k" && mkdir -p "$T/log$k/checks" && echo conveyor/tests/a.test.sh > "$T/list$k" \
-    && cp "$T/checks.out" "$T/log$k/checks/$key.out" && cp "$T/checks.rc" "$T/log$k/checks/$key.rc" || { no "the copy $k of the scratch repo"; break; }
-  # fileeach() ends with exit: its own subshell.
-  ( ( cd "$T/r$k" && . "$ROOT/conveyor/lib/fileeach.sh" && eval "$(grep -E '^(FILELIMIT|LOADSCALE)=' "$ROOT/conveyor/lib/testrun.sh")" \
-      && export CONVEYOR_TEST_LOG=$T/log$k CONVEYOR_TEST_FILELIST=$T/list$k && ulimit -f 20480 \
-      && fileeach one "bash .conveyor/test-changed.sh --file" "$FILELIMIT" "$LOADSCALE" "$T/log$k/files" conveyor/tests/a.test.sh )
-    echo $? > "$T/rc$k" ) > "$T/out$k" 2>&1 &
+N=24 NEED=60 MAXR=5 began=0 round=0
+while [ "$began" -lt $NEED ] && [ $round -lt $MAXR ] && [ $fails = 0 ]; do
+  ks=$(seq $((round * N + 1)) $((round * N + N))); round=$((round + 1))
+  for k in $ks; do
+    cp -a "$R" "$T/r$k" && mkdir -p "$T/log$k/checks" && echo conveyor/tests/a.test.sh > "$T/list$k" \
+      && cp "$T/checks.out" "$T/log$k/checks/$key.out" && cp "$T/checks.rc" "$T/log$k/checks/$key.rc" || { no "the copy $k of the scratch repo"; break; }
+    # fileeach() ends with exit: its own subshell.
+    ( ( cd "$T/r$k" && . "$ROOT/conveyor/lib/fileeach.sh" && eval "$(grep -E '^(FILELIMIT|LOADSCALE)=' "$ROOT/conveyor/lib/testrun.sh")" \
+        && export CONVEYOR_TEST_LOG=$T/log$k CONVEYOR_TEST_FILELIST=$T/list$k && ulimit -f 20480 \
+        && fileeach one "bash .conveyor/test-changed.sh --file" "$FILELIMIT" "$LOADSCALE" "$T/log$k/files" conveyor/tests/a.test.sh )
+      echo $? > "$T/rc$k" ) > "$T/out$k" 2>&1 &
+  done
+  wait
+  for k in $ks; do
+    o=$T/out$k l=$T/log$k; rc=$(cat "$T/rc$k" 2>/dev/null)
+    grep -q 'their result is kept' "$o" || no "the one-file run $k ran the checks again, not the kept ones of its tree $key: $(head -c 1000 "$o")"
+    # A run ended at the KILL exits 137 (timeout's), which fileeach() logs as `-- FAIL`: the timeout line, and the run's
+    # exit 124, say it ended on its TERM, within the kill time.
+    grep -qxF -- '-- timeout conveyor/tests/a.test.sh' "$l/files" && [ "$rc" = 124 ] \
+      || no "the one-file run $k past its time limit did not end on its TERM: exit $rc: $(head -c 1000 "$l/files"): $(head -c 1000 "$o")"
+    n=$(grep -c 'not a child' "$o")
+    [ "$n" = 0 ] || no "the one-file run $k past its time limit wrote $n 'not a child' lines: $(grep -m 3 'not a child' "$o")"
+    [ -e "$T/r$k/.git/aone" ] || continue
+    began=$((began + 1))
+    grep -qxF '== conveyor/tests/a.test.sh (cases: aone atwo)' "$o" && grep -qxF 'ok aone' "$o" \
+      && grep -qxF '== conveyor/tests/a.test.sh' "$l/test-changed.log" && ! grep -q '^-- ' "$l/test-changed.log" \
+      || no "the one-file run $k past its time limit lost the case that passed before it: $(head -c 1000 "$o"): $(head -c 1000 "$l/test-changed.log")"
+  done
 done
-wait
-began=0
-for k in $(seq 1 $N); do
-  o=$T/out$k l=$T/log$k; rc=$(cat "$T/rc$k" 2>/dev/null)
-  grep -q 'their result is kept' "$o" || no "the one-file run $k ran the checks again, not the kept ones of its tree $key: $(head -c 1000 "$o")"
-  # A run ended at the KILL exits 137 (timeout's), which fileeach() logs as `-- FAIL`: the timeout line, and the run's
-  # exit 124, say it ended on its TERM, within the kill time.
-  grep -qxF -- '-- timeout conveyor/tests/a.test.sh' "$l/files" && [ "$rc" = 124 ] \
-    || no "the one-file run $k past its time limit did not end on its TERM: exit $rc: $(head -c 1000 "$l/files"): $(head -c 1000 "$o")"
-  n=$(grep -c 'not a child' "$o")
-  [ "$n" = 0 ] || no "the one-file run $k past its time limit wrote $n 'not a child' lines: $(grep -m 3 'not a child' "$o")"
-  [ -e "$T/r$k/.git/aone" ] || continue
-  began=$((began + 1))
-  grep -qxF '== conveyor/tests/a.test.sh (cases: aone atwo)' "$o" && grep -qxF 'ok aone' "$o" \
-    && grep -qxF '== conveyor/tests/a.test.sh' "$l/test-changed.log" && ! grep -q '^-- ' "$l/test-changed.log" \
-    || no "the one-file run $k past its time limit lost the case that passed before it: $(head -c 1000 "$o"): $(head -c 1000 "$l/test-changed.log")"
-done
-# With no run at its case at the TERM, no worker was there to end, and the runs showed nothing of the bug.
-[ "$began" -gt 0 ] || no "none of the $N one-file runs got to its case (.git/aone) within the 8 s limit: $(head -c 1000 "$T/out1")"
+# Too few runs at their case at the TERM could all have missed the race: a pass would then show nothing of the bug.
+[ $fails = 1 ] || [ "$began" -ge $NEED ] || no "only $began of $((round * N)) one-file runs got to their case (.git/aone) within the 8 s limit, in $round rounds; $NEED are needed: $(head -c 1000 "$T/out1")"
 
 [ $fails = 0 ] && echo "ok - test-changed's one-file run past its time limit ends on its TERM" || exit 1
