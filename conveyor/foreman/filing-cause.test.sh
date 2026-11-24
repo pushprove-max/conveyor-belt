@@ -35,7 +35,7 @@ case_ what
 refused "$(body $'## What happens now\nThe pane shows no board.')"
 refused "foreman.sh ask alpha testissue conveyor/x.test.sh 'Slow' '## What happens now
 It is slow.'"
-refused "gh issue create --title 'Fix it' --body '## What happens now\nIt breaks.\n## Causes\nnone'"
+refused "gh issue create --title 'Fix it' --body \$'## What happens now\nIt breaks.\n## Causes\nnone'"
 passes "$(body $'## What happens now\nThe pane shows no board.\n## Cause\nThe file is never trimmed.')"
 passes "foreman.sh ask alpha testissue conveyor/x.test.sh 'Slow' '## What happens now
 It is slow.
@@ -78,7 +78,7 @@ refused "gh issue create --title x --body-file - < $T/\"fix notes.md\""
 t_heading() {
 case_ heading
 refused "$(body $'## What happens now\nIt breaks.\n### Cause\nThe file is never trimmed.')"
-refused "gh issue create --title 'Fix it' --body '## What happens now\nIt breaks.\n### Cause\nnone'"
+refused "gh issue create --title 'Fix it' --body \$'## What happens now\nIt breaks.\n### Cause\nnone'"
 passes "$(body $'A fix issue has a \'## What happens now\' section, and the form should say so.')"
 passes "gh issue create --title 'Form' --body 'Each fix has a \`## What happens now\` section.'"
 # Bug (#1405 review): a heading with up to three spaces before it is still a Markdown heading; it was not seen, so a
@@ -137,6 +137,10 @@ passes "gh issue create --label bug --body \$'The form prints \\\\n~~~ as text.\
 # Bug: a `\n` in a plain single quote is a backslash and an n to bash, but it was read as a line break, so `~~~ as
 # text.'` opened a fence that hid the real Cause heading of the `$'...'` part after it, and a valid fix was refused.
 passes "gh issue create --label bug --body 'The form prints \\n~~~ as text.'\$'\\n## Cause\\nThe cache is stale.'"
+# Bug: that mark was turned back into a line break before the headings were read, so a `\n## Cause\n` written in a
+# plain or double-quoted body (one line of text to gh) counted as a Cause heading and a fix with no Cause passed.
+refused "gh issue create --title 'Fix the form' --label bug --body 'The form prints \\n~~~\\n## Cause\\n~~~ as text.'"
+refused "gh issue create --title 'Fix the form' --label bug --body \"The form prints \\n## Cause\\n as text.\""
 # A backtick opener with a backtick in its info string is no fence, so the heading after it counts.
 passes "$(body $'## What happens now\nThe form prints this line:\n``` `name`\n## Cause\nThe cache is stale.')"
 # Bug (#1510 review): a fence after a list marker was no fence, so the indented `## Cause` in the item's code block
