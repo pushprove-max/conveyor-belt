@@ -158,8 +158,9 @@ t_livegated() { livestart
   held build '.action == "Bash: npm test"'
   [ "$(snap '.belt[0] | [.step, .live.action, .tokens.claude, .usd, .model, .effort]')" = '["build","Bash: npm test",1000000,2,"claude-sonnet-5-5","medium"]' ] || fail "the snapshot of a held build: $(snap '.belt[0]')"
   letgo; held review '.usage.input == 600000'
-  # Its dollars are its running total's beside the build's recorded line (0.0002): that of the stub's result.
-  [ "$(snap '.belt[0] | [.step, .tokens.codex, .usd, .done.usd, .model, .effort]')" = '["review",600500,1.2452,0.0002,"gpt-6.1-sol","medium"]' ] || fail "the snapshot of a held review: $(snap '.belt[0]')"
+  # Its dollars are its running total's beside the build's recorded line (0.0002): that of the stub's result. The
+  # dollars known count the running step's too (#1585: /units shows them when a step has no price).
+  [ "$(snap '.belt[0] | [.step, .tokens.codex, .usd, .done.usd, .model, .effort, .usdKnown, .notPriced, .estimate]')" = '["review",600500,1.2452,0.0002,"gpt-6.1-sol","medium",1.2452,0,false]' ] || fail "the snapshot of a held review: $(snap '.belt[0]')"
   letgo; wait $run || fail "the run exited non-zero: $(cat "$T/$CASE/loop.out")"
   [ ! -e "$f" ] || fail "the review that ended left its session file"
 }

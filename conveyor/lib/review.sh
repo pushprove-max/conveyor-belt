@@ -17,20 +17,26 @@
 # most often a passing fault of the reviewer's network: the same review runs once more, after REVIEW_PAUSE, before the
 # card blocks. The failed attempt is no review line of its own (the Board counts review lines as review rounds): it is
 # firstTry, {reason, spent}, on the line after it, the review's or the blocked one's spent, whose tokens and usage hold
-# both attempts' (when the first's usage is unknown or only part of it, or the seat's model changed between them, unread
-# says so: one model prices the step's usage, so it is unpriced, never underpriced); an OpenCode review's
+# both attempts' (when the usage of one is unknown or only part of it, or the seat's model changed between them, unread
+# says so: the step is priced as an estimate, from the tokens counted, never as exact). The usage counted is kept: one
+# attempt's alone when the other's is unknown, and that of an attempt on another model, or one that named other models
+# that ran it, in alsoUsed ([{model, usage, stats}], stats the models that attempt said ran it, when it said: TRYFOLD,
+# lib/session.sh). The price table prices a build's attempt (a stalled build's, session1()) at those models; a review's,
+# as every review step, at the model it asked for. An OpenCode review's
 # cost (usage.cost) is the sum when both attempts report one, else none. A second failure fails with both
 # reasons, side by side on its first line (block() keeps that line as the reason), the second's output after it; the
 # first's is in firstTry. A review that answered, GO or NO-GO, never runs again.
 # A review's record with its failed first attempt $f ({reason, spent}) folded in, as reviewed() and stopped() write it.
-BOTHTRIES='def add2(a; b): [a, b] | map(. // {} | to_entries[]) | reduce .[] as $e ({}; .[$e.key] += $e.value);
-  . + {firstTry: $f} | .tokens = add2(.tokens; $f.spent.tokens)
+BOTHTRIES="$TRYFOLD"'
+  . + {firstTry: $f} | .tokens = add2(.tokens; $f.spent.tokens) | .alsoUsed = ((.alsoUsed // []) + ($f.spent.alsoUsed // []))
   | if $f.spent.model != null and $f.spent.model != .model then
       .unread //= "the first attempt ran on another model (\($f.spent.model)): one model cannot price both"
-    elif (.usage | type) == "object" and ($f.spent.usage | type) == "object" then
-      .usage.cost as $c | .usage = (add2(.usage; $f.spent.usage) | if [$c, $f.spent.usage.cost] | all(type == "number") then . else del(.cost) end)
+      | if ($f.spent.usage | type) == "object" then .alsoUsed += [also($f.spent)] else . end
+    elif (.usage | type) == "object" and ($f.spent.usage | type) == "object" then fold($f.spent)
       | if $f.spent.unread then .unread //= $f.spent.unread else . end
-    else .unread //= ($f.spent.unread // "the token usage of the first attempt could not be read") end'
+    elif ($f.spent.usage | type) == "object" then took($f.spent) | .unread //= ($f.spent.unread // "the token usage of the last attempt could not be read")
+    else .unread //= ($f.spent.unread // "the token usage of the first attempt could not be read") end
+  | if .alsoUsed == [] then del(.alsoUsed) else . end'
 # A review that would read what the card's last review read is not run again. Each review line holds the card's staged
 # change (patch, as cardpatch() gives it), the main commit the card sits on (main) and the hash of what the review is
 # shown beside the diff, its commit trailers and D<n> lines (seen). When a review is due and all three
@@ -139,24 +145,27 @@ codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex 
   watch $! "$1.events" "$1.live" review "$model" "" "$effort"; rc=$?; sec=$((SECONDS - sec))
   # With no Codex sandbox (codexsb()), a write the review made is undone: the worktree is put back to the change it was given.
   [ "${CODEX_SB[0]}" = -s ] || { git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq; } || { echo "the worktree could not be put back after the review"; return 1; }
-  # The running total its session file holds: the tokens of a review that ended before its turn did.
+  # The running total its session file holds: the tokens of a review that ended before its turn did. With none there,
+  # the last total its live record was given from that file while it ran (WATCHED, liveusage()), as stopped() reads it.
   roll=$(rollout "$1.events"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); }
+  [ -n "$run" ] || run=$(liveusage)
   # Its seconds and, from its stream, its turns (turns completed) and its tool calls by kind (the items that
   # are not a message or reasoning).
   f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" --argjson run "${run:-null}" "$REVIEWREAD" "$1.events" 2>/dev/null | tail -n 1) \
     && [ -n "$f" ] || f=''
   if [ $rc = 0 ] && [ -s "$1.review.new" ] && mv -f "$1.review.new" "$1.review"; then
-    rm -f "$roll"
-    [ -n "$f" ] && jq -e '.stats.turns > 0' <<<"$f" >/dev/null && routed "$f" codex && return 0
-    s="review reported no token usage"; [ "$(verdict "$1.review")" != none ] || no=2
+    if [ -n "$f" ] && jq -e '.stats.turns > 0' <<<"$f" >/dev/null; then rm -f "$roll"; routed "$f" codex && return 0; fi
+    # One that reported no token usage keeps its files as a failed one does (below), so why can be read.
+    if kn=$(reviewkeep "$1" "$roll"); then rm -f "$roll"; fi; s="review reported no token usage$kn"
+    [ "$(verdict "$1.review")" != none ] || no=2
   else
     # Its events, err and session file are kept, and the reason names the events file only: Codex's own words (which can
     # hold a credential in a URL) are never copied into a reason, as a reason goes to a GitHub comment.
     if kn=$(reviewkeep "$1" "$roll"); then rm -f "$roll"; fi; s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))$kn"
     [ "$(verdict "$1.review.new" 2>/dev/null)" != none ] || no=2; fi
   # A review that failed still spent its tokens and seconds: block() records them. One whose usage cannot be read
-  # is recorded all the same, with its model, effort, seconds and stats and unread (why), so it is counted
-  # among the unpriced steps instead of left out.
+  # is recorded all the same, with its model, effort, seconds and stats and unread (why), so it is priced as an
+  # estimate (the median of its model's reviews), or counted among the unpriced steps, instead of left out.
   [ -n "$f" ] || f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" '[inputs | fromjson? // empty] as $all
     | ([$all[] | select(.type == "item.completed") | .item.type // "item"]) as $it
     | {model: $m, effort: $e, sec: $s, unread: (if ($all | length) == 0 then "the review output holds no event" else "the review output holds no token usage" end),

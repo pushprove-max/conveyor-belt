@@ -97,17 +97,22 @@ t_reviewretry() {
   [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(flout)" = "reviewed: 0 GO" ] && [ "$(head -n 1 "$T/$CASE/run.out" | jq -r .firstTry.reason)" = "the review ended without one clear verdict" ] \
     || fail "an answer with no verdict was not run again: $(cat "$T/$CASE/run.out")"
   # The same, the answer's events holding no usage either: it runs once more.
-  echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { echo "Review interrupted" > "$out"; exit 0; }' > "$STUB/review-cmd"; flreview 11; rm "$STUB/review-cmd"
-  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(flout)" = "reviewed: 0 GO" ] && [ "$(head -n 1 "$T/$CASE/run.out" | jq -r .firstTry.reason)" = "review reported no token usage" ] \
-    || fail "an answer with no verdict and no usage was not run again: $(cat "$T/$CASE/run.out")"
+  echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { echo "Review interrupted" > "$out"; echo "stderr: no usage" >&2; exit 0; }' > "$STUB/review-cmd"; flreview 11; rm "$STUB/review-cmd"
+  local r k; r=$(head -n 1 "$T/$CASE/run.out" | jq -r .firstTry.reason); k=${r##*; its events are kept in }
+  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(flout)" = "reviewed: 0 GO" ] && [[ $r == 'review reported no token usage; its events are kept in c11-11.review'*.events ]] \
+    || fail "an answer with no verdict and no usage was not run again, or its reason names no kept events file: $(cat "$T/$CASE/run.out")"
+  # Bug (#1585): a review whose token usage could not be read lost its events and err with the card, so why it read
+  # none could not be checked: they are kept, as a failed review's are.
+  [ -e "$ST/kept/c11-11/$k" ] && grep -qx 'stderr: no usage' "$ST/kept/c11-11/${k%.events}.err" \
+    || fail "the events or err of a review that reported no token usage were not kept as $k: $(ls "$ST/kept/c11-11" 2>&1)"
   # A NO-GO is a verdict: that review runs once, and the fix goes to the next review (port.test.sh t_autoport: three
   # NO-GOs and a GO are four reviews).
   # A review that wrote its NO-GO and then exited non-zero gave a verdict: it is not run again.
   echo "$NOGO" > "$STUB/review.1"; echo 'cat "$STUB/review.1" > "$out"; exit 3' > "$STUB/review-cmd"; flreview 11; rm "$STUB/review-cmd"
   [ "$(wc -l < "$STUB/reviews")" = 1 ] && [[ $(flout) == "reviewed: 1 "* ]] && head -n 1 "$T/$CASE/run.out" | grep -q '^review failed (exit 3)' \
     || fail "a review that wrote a verdict and exited non-zero was run again: $(wc -l < "$STUB/reviews") reviews, $(cat "$T/$CASE/run.out")"
-  # The reviewer's model changed between the attempts: one model cannot price both attempts' usage, so the step is
-  # unpriced, never priced whole at the second's model.
+  # The reviewer's model changed between the attempts: one model cannot price both attempts' usage, so the step says
+  # unread (an estimate, each attempt's count at its own model: t_triesusage), never priced whole at the second's model.
   echo "$GO" > "$STUB/review.2"
   echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { jq -c ".reviewer.model = \"gpt-6-astra\"" "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"; exit 3; }' > "$STUB/review-cmd"
   flreview 11; rm "$STUB/review-cmd"
@@ -208,6 +213,29 @@ t_reviewkeepwork() {
     || fail "the failed review's events or err were not kept in $k: $(ls "$k" 2>&1)"
   [[ $r == *'review failed (exit 1); its events are kept in c11-11.review.events'* ]] && [[ $r != *pw123* && $r != *example.com* ]] \
     || fail "the reason does not name the kept events file, or copies Codex's words: $r"
+}
+# Bug (#1585): a Codex review that timed out before its turn completed, its session file then holding no total, was
+# recorded unread though its live record had been given the running total while it ran: the merged review step was
+# unpriced. It takes that last total, as stopped() does. The first try writes its session file, waits until watch()
+# has put that total on its live record (a direct check cannot show watch()'s last record reaching codexreview(), as
+# the live file is gone when the review ends), removes the file and ends as a timeout does (exit 124).
+t_reviewliveusage() {
+  setup '[]'; flcard 12 'echo two >> a.txt'; echo "$GO" > "$STUB/review.2"
+  export CODEX_HOME=$T/$CASE/codex; mkdir -p "$CODEX_HOME/sessions/d"
+  # shellcheck disable=SC2016 # expanded in the codex stub
+  echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { s=$CODEX_HOME/sessions/d/rollout-1-th2.jsonl; echo "{\"type\":\"thread.started\",\"thread_id\":\"th2\"}"
+    echo "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":5000,\"cached_input_tokens\":3000,\"output_tokens\":400}}}}" > "$s"
+    i=0; until grep -q "\"usage\"" "$PWD.live" 2>/dev/null || [ $i -ge 150 ]; do sleep 0.1; i=$((i + 1)); done; rm -f "$s"; exit 124; }' > "$STUB/review-cmd" # sleep: in the stub, until watch() on its own timer has read the session file into the live record
+  flreview 12; rm "$STUB/review-cmd"
+  local out p
+  out=$(head -n 1 "$T/$CASE/run.out")
+  # Both tries' tokens: the first's 2000 fresh, 3000 cached and 400 out, the second's (the stub's usage) 40, 60 and 7.
+  [ "$(flout)" = "reviewed: 0 GO" ] && [ "$(jq -c '[.firstTry.spent.usage, .firstTry.spent.unread, .usage, .unread]' <<<"$out")" = '[{"input":2000,"read":3000,"output":400},null,{"input":2040,"read":3060,"output":407},null]' ] \
+    || fail "a review that timed out with no total in its session file did not take its live record's last total: $(cat "$T/$CASE/run.out")"
+  # The review step is priced, at its whole count: not left out, and no estimate.
+  p=$(jq -c '{cards: [{steps: [{step: "review"} + .]}], prices: {x: {input: 1, output: 1, cacheRead: 0.1}}}' <<<"$out" \
+    | python3 "$SRC/../.claude/scripts/dashboard_limit.py" cards | jq -c '.cards[0].steps[0] | [.usd, .estimate, .unpriced]')
+  [ "$p" = '[0.0028,null,null]' ] || fail "the review step of that review is not priced at its tokens: $p"
 }
 # Bugs: a review that answers both ways, or says GO beside an open finding (in the asked format or any other, here
 # numbered), lands as a clean GO; a review that says GO twice (once mid-way, once at the end) blocks as having no

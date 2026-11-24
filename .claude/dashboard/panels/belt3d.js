@@ -92,7 +92,7 @@
     const add = (c) => { const k = keyOf(c); if (seen.has(k)) return; seen.add(k); cards.push(Object.assign(c, { key: k, from: c.card && num(c.issue) && c.issue > 0 ? `${c.repo}#${c.issue}` : null })); };
     const landed = arr(d.landed), landedKeys = new Set(landed.map((c) => `${c.repo}:${c.card}`));
     const reviews = (v) => arr(v).map((r, i) => ({ round: num(r.round) ? r.round : i + 1, verdict: str(r.verdict), counts: r.counts && typeof r.counts === 'object' ? r.counts : null }));
-    const base = (x, kind) => ({ repo: str(x.repo), card: str(x.card), issue: x.issue, name: str(x.name), title: str(x.title), url: x.url, kind, reviews: reviews(x.reviews), usd: num(x.usd) ? x.usd : null });
+    const base = (x, kind) => ({ repo: str(x.repo), card: str(x.card), issue: x.issue, name: str(x.name), title: str(x.title), url: x.url, kind, reviews: reviews(x.reviews), usd: num(x.usd) ? x.usd : null, estimate: x.estimate === true });
     arr(d.belt).forEach((x) => {
       // A card landed today is in the Just-landed bay; one landed on an earlier day, its push or the close of its issue
       // still to go through, keeps its lane.
@@ -467,7 +467,7 @@
     // Releasing it is needed, not enough: an open issue it depends on, or a rule that skips it, still keeps it back.
     if (c.kind === 'held') parts.push(h('h3', null, 'Held'), h('p', null, 'Held on the Board. Conveyor does not pick it until someone releases it.'),
       ...c.waitsFor.map((n) => { const d = find(c, n); return h('p', null, `Waits on ${ref(n)}${d ? ` ${d.title} (${status(d)})` : ''}`); }));
-    if (c.usd !== null) parts.push(h('p', 'b3-meta', `Cost so far ${ctx.money(c.usd)}${c.kind === 'run' && c.turns !== null && c.turns !== undefined ? ` · ${c.turns} turns in this step` : ''}`));
+    if (c.usd !== null) parts.push(h('p', 'b3-meta', `Cost so far ${ctx.money(c.usd, c.estimate)}${c.kind === 'run' && c.turns !== null && c.turns !== undefined ? ` · ${c.turns} turns in this step` : ''}`));
     // The × stays: the text is redrawn as the card's time runs, and a × drawn anew between its press and its release
     // lost the click (the browser gives it to the element pressed, then gone), so the details did not close.
     while (view.close.nextSibling) view.close.nextSibling.remove();

@@ -174,8 +174,8 @@
         // The cost is the same node from one change to the next: the dollars are drawn again only when they changed (so
         // they count on from the figure shown), the tokens' text is set in place.
         const cost = meta.lastChild;
-        if (redo(cost, [c.card, c.reading, c.atEnd, c.usd])) {
-          if (c.reading) cost.replaceChildren(ctx.number(`usd:${c.card}`, c.usd, ctx.money), h('span'));
+        if (redo(cost, [c.card, c.reading, c.atEnd, c.usd, c.estimate === true])) {
+          if (c.reading) cost.replaceChildren(ctx.number(`usd:${c.card}`, c.usd, (v) => ctx.money(v, c.estimate === true)), h('span'));
           else cost.replaceChildren(c.atEnd === true ? 'cost shown when the step ends' : 'no reading yet');
         }
         if (c.reading) {

@@ -107,6 +107,7 @@ rollout() { # <a review's events file>; prints the session file of that review, 
   id=$(grep -m 1 '"thread.started"' "$1" 2>/dev/null) && id=$(jq -r '.thread_id // empty' <<<"$id" 2>/dev/null) && [[ $id =~ ^[0-9A-Za-z-]+$ ]] || return 0
   find "${CODEX_HOME:-$HOME/.codex}/sessions" -type f -name "rollout-*-$id.jsonl" 2>/dev/null | head -n 1
 }
+liveusage() { { if [ $# = 0 ]; then printf '%s' "${WATCHED:-}"; else cat "$1"; fi; } 2>/dev/null | jq -c '.usage | objects | select((.input | type) == "number" and (.output | type) == "number") | {input_tokens: (.input + (.read // 0)), cached_input_tokens: (.read // 0), output_tokens: .output}' 2>/dev/null; } # [live file]: the running total watch() last gave a Codex review's live record from its session file (that live file's, else WATCHED: the last record of the live file watch() just removed), as that file writes it: what a review that ended before its turn did spent, when its session file then holds none; nothing when the record holds no usage
 # A build, fix, rebase or review that makes no progress for STUCK seconds is ended: no new output line (its live
 # record's `last`), no file of its worktree changed and no new commit there (holds(), asked only once the output has
 # been quiet that long, so a session's files cost nothing while it talks). Output is a whole new line, and of a Codex
@@ -256,7 +257,7 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
   done
   # A run given TEST_GIVEN files that ended between two looks (a fast runner that ran more and exited) is counted once more, whole, and file by file (wideeach()): over the count, it is a wide run all the same.
   [ "$4" != test ] || [ -z "${TEST_GIVEN:-}" ] || [ -e "$wt.wide" ] || wideeach "$wt" "$wk" > /dev/null || { mapfile -t logs < <(testlogs "$wt"); wn=$(testprogress "$f" "${logs[@]}" | jq -r --argjson st "$st" '[.run + (.over // 0), .of // $st.list.files // 0] | max' 2>/dev/null); ! [[ $wn =~ ^[0-9]+$ ]] || [ "$wn" -le "$TEST_GIVEN" ] || echo "$wn" > "$wt.wide"; }
-  rm -f "$out" "$out.tmp"; return $rc
+  WATCHED=$st; rm -f "$out" "$out.tmp"; return $rc # WATCHED: the last record of the live file, which goes now, for liveusage() in the caller's shell (codexreview()); empty when none was written
 }
 
 # What a session's output (stream-json, one event a line) says of it, as the fields of its line, and ok:
@@ -356,11 +357,9 @@ stopped() { # <card> <issue>
     review:opencode:*) [ -s "$wt.events" ] || return 0
       f=$(jq -cRn --arg m "$m" --arg e "$e" --argjson s "${s:-0}" "$OCREVIEWREAD" "$wt.events" 2>/dev/null | tail -n 1 | jq -c 'del(.effort)' 2>/dev/null) ;;
     review:*) [ -s "$wt.events" ] || return 0
-      # A review stopped before its turn completed has no usage in its events: its running total is the one its
-      # session file holds (as review() reads it), else the last one the live file was given from it.
+      # A review stopped before its turn completed: its running total from its session file (as review() reads it), else its live file's.
       roll=$(rollout "$wt.events"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }
-      [ -n "$run" ] || run=$(jq -c '.usage | objects | select((.input | type) == "number" and (.output | type) == "number")
-          | {input_tokens: (.input + (.read // 0)), cached_input_tokens: (.read // 0), output_tokens: .output}' "$wt.live" 2>/dev/null)
+      [ -n "$run" ] || run=$(liveusage "$wt.live")
       f=$(jq -cRn --arg m "$m" --arg e "$e" --argjson s "${s:-0}" --argjson run "${run:-null}" "$REVIEWREAD" "$wt.events" 2>/dev/null | tail -n 1 | jq -c 'del(.effort)' 2>/dev/null) ;;
     *) return 0 ;;
   esac; fi
@@ -404,16 +403,17 @@ APIERROR=$APISAID'
       // (if test("overloaded"; "i") then "overloaded" elif test("ECONNRESET|connection (reset|error)|socket hang up"; "i") then "connection reset" else empty end)) end'
 APIERR=${STATE%/*}/apierror
 apifresh() { [ -e "$APIERR" ] && jq -en --slurpfile u "$APIERR" '($u[0] | numbers) > now' >/dev/null 2>&1; }
+TRYFOLD=$(<"$HERE/jq/tryfold.jq") # the jq defs the two folds of a step's tries share: APIFOLD, below, and BOTHTRIES (lib/review.sh, sourced after this file)
 # A step's fields with those of the tries the API refused before it ($p) folded in. As with a review's two attempts
 # (BOTHTRIES): when a refused try's usage is unknown or only part of it, or it ran on another model, unread says so,
-# so the step is unpriced, never underpriced. An OpenCode cost (usage.cost) is the sum when both report one, else left out. A resumed try (session1()) leaves it resumed.
-APIFOLD='def add2(a; b): [a, b] | map(. // {} | to_entries[]) | reduce .[] as $e ({}; .[$e.key] += $e.value);
-  .sec += $p.sec | (if .tokens != null or $p.tokens != null then .tokens = add2(.tokens; $p.tokens) else . end) | (if $p.resumed then .resumed = $p.resumed else . end)
-  | if $p.model != null and $p.model != .model then .unread //= "a try the model API refused ran on another model (\($p.model)): one model cannot price both"
-    elif (.usage | type) == "object" and ($p.usage | type) == "object" then
-      .usage.cost as $c | .usage = (add2(.usage; $p.usage) | if [$c, $p.usage.cost] | all(type == "number") then . else del(.cost) end)
+# so the step is priced as an estimate, never as exact; the usage counted is kept (one try's alone when the other's is unknown, with its split; a try's on another model in alsoUsed, with its split: TRYFOLD). An OpenCode cost (usage.cost) is the sum when both report one, else left out. A resumed try (session1()) leaves it resumed.
+APIFOLD="$TRYFOLD"'
+  .sec += $p.sec | (if .tokens != null or $p.tokens != null then .tokens = add2(.tokens; $p.tokens) else . end) | (if $p.resumed then .resumed = $p.resumed else . end) | .alsoUsed = ((.alsoUsed // []) + ($p.alsoUsed // []))
+  | if $p.model != null and $p.model != .model then .unread //= "a try the model API refused ran on another model (\($p.model)): one model cannot price both" | if ($p.usage | type) == "object" then .alsoUsed += [also($p)] else . end
+    elif (.usage | type) == "object" and ($p.usage | type) == "object" then fold($p)
       | if $p.unread then .unread //= $p.unread else . end
-    else .unread //= ($p.unread // "the token usage of a try the model API refused could not be read") end'
+    elif ($p.usage | type) == "object" then took($p) | .unread //= ($p.unread // "the token usage of the try after the one the model API refused could not be read")
+    else .unread //= ($p.unread // "the token usage of a try the model API refused could not be read") end | if .alsoUsed == [] then del(.alsoUsed) else . end'
 # One session, a build's or a review's (<command ...>: it prints and fails as session1() does, its output in
 # <output file>, what a failed one used in <worktree>.spent), run again while the API refuses it, as said above.
 # apihold: a card picked before the error starts no session, Claude's or Codex's, while it is fresh either: it waits

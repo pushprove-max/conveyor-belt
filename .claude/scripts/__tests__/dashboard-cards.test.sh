@@ -312,7 +312,7 @@ q '.panels.board.data | [(.building | map(.issue)), (.review | map([.issue, .rev
   == [[], [[801, 2, 3]], [[12, "Staff see a new button."]], [[13, "tests failed twice"]], [[7, 2.5, 2]]]' "the Board's Building, Review, Needs you and Landed today are this record's cards alone"
 # Bug (#524): the snapshot's landed holds only the day's newest cards, so the Board's Today figure counted and priced
 # those alone: it takes the whole day's count and cost from the snapshot (landedCount, landedUsd).
-q '.panels.board.data.today == {landed: 1, usd: 41.5}' "the Board's Today figure is the snapshot's whole day, not its landed list"
+q '.panels.board.data.today == {landed: 1, usd: 41.5, estimate: false}' "the Board's Today figure is the snapshot's whole day, not its landed list"
 # Bug: Control's blocked card had no track and no reviews, so it could not lead with the tests that failed or the
 # NO-GO reviews (app.js failure()), as Needs you does from the same card.
 q '.panels.board.data.blocked[0] | .track.records[0].failures.files[0].cases[0].name == "adds up" and (.reviews | map(.verdict)) == ["NO-GO"]' \
@@ -534,11 +534,12 @@ PM=$(jq -c '.metrics.week = {landed: 2, leadSec: {p50: 200, p90: 300}} | .metric
 CM=$(jq -c '.metrics = {week: {landed: 1, leadSec: {p50: 500, p90: 500}}, cards: [{card: "c6-1", issue: 1, state: "landed", metrics: {leadSec: 500}}, {card: "c6-2", issue: 2, state: "blocked", metrics: {leadSec: null}}]}' <<<"$C")
 answer "$PM" "$P_URL" 1794000000 "$CM" "$C_URL" 0
 run
-q '.panels.metrics.data.compare == {projects: [{repo: "sample", landed: 2, leadSec: 200, usd: 10, usdLeftOut: 0}, {repo: "widgetshop", landed: 1, leadSec: 500, usd: 4, usdLeftOut: 0}], machine: {landed: 3, leadSec: 300, usd: 14, usdLeftOut: 0}}' \
+q '.panels.metrics.data.compare == {projects: [{repo: "sample", landed: 2, leadSec: 200, usd: 10, usdLeftOut: 0, usdEstimate: 0}, {repo: "widgetshop", landed: 1, leadSec: 500, usd: 4, usdLeftOut: 0, usdEstimate: 0}],
+  machine: {landed: 3, leadSec: 300, usd: 14, usdLeftOut: 0, usdEstimate: 0}}' \
   "metrics: each project and the machine side by side, the machine's time to land over every landed card"
 answer "$PM" "$P_URL" 1794000000 "$(jq -c '.cost.week = null' <<<"$C")" "$C_URL" 0
 run
-q '.panels.metrics.data.compare.machine == {landed: null, leadSec: null, usd: null, usdLeftOut: 0}' "a project that measured nothing, or has an unpriced week, leaves the machine's figure unknown, never the sum of the rest"
+q '.panels.metrics.data.compare.machine == {landed: null, leadSec: null, usd: null, usdLeftOut: 0, usdEstimate: 0}' "a project that measured nothing, or has an unpriced week, leaves the machine's figure unknown, never the sum of the rest"
 # Bug: the machine's median left out a card whose issue was already fixed (closed), which each project's own median
 # counts as landed: one project with a landed card (100) and a closed one (300) said 200 for the project and 100 for
 # the machine. A card closed while it was blocked landed nothing: it has no time to land, and counts in neither.
@@ -555,8 +556,10 @@ q '.panels.metrics.data.compare | (.projects | map(.usdLeftOut)) == [3, 1] and .
 q '.panels.machine.data.projects | map(.todayLeftOut) == [2, 0]' "a project section's cost today names the steps it leaves out"
 # Bug: Cost filtered to one project had nothing but the sums of every project to show: each project's own figures
 # come beside them.
-q '.panels.cost.data.cards.byRepo == {sample: {todayUsd: 3.75, weekUsd: 10, perLandedUsd: 2.5, landedAfter: {"1": 0, "2": 1, "3": 0, more: 0}, unpricedSteps: 0, todayLeftOut: 2, weekLeftOut: 3, perLandedLeftOut: 0},
-  widgetshop: {todayUsd: 0.5, weekUsd: 4, perLandedUsd: 0.5, landedAfter: {"1": 3, "2": 0, "3": 0, more: 0}, unpricedSteps: 1, todayLeftOut: 0, weekLeftOut: 1, perLandedLeftOut: 0}}' \
+q '.panels.cost.data.cards.byRepo == {sample: {todayUsd: 3.75, weekUsd: 10, perLandedUsd: 2.5, landedAfter: {"1": 0, "2": 1, "3": 0, more: 0}, unpricedSteps: 0, todayLeftOut: 2, weekLeftOut: 3, perLandedLeftOut: 0,
+    todayEstimate: 0, weekEstimate: 0, perLandedEstimate: 0},
+  widgetshop: {todayUsd: 0.5, weekUsd: 4, perLandedUsd: 0.5, landedAfter: {"1": 3, "2": 0, "3": 0, more: 0}, unpricedSteps: 1, todayLeftOut: 0, weekLeftOut: 1, perLandedLeftOut: 0,
+    todayEstimate: 0, weekEstimate: 0, perLandedEstimate: 0}}' \
   "cost carries each project's own figures beside the sums, for the page filtered to one project"
 # Bug: a project's section counted only its blocked and waiting cards as Needs you: an issue waiting for the owner's
 # yes before its build was left out, so the section said "Needs you (0)" while the Needs you panel listed it.
@@ -822,7 +825,7 @@ run
 q '.panels.board.data | .checkRuns == [{error: "check run: progress unreadable: jq: parse error", repo: "sample"}] and .repo == "sample" and (.review | length) == 1' "an unreadable check run is said, and the rest of the Board is still there"
 q '.panels.cost.data.cards | .todayUsd == 4.25 and .weekUsd == 14 and .perLandedUsd == 1 and .landedAfter == {"1": 3, "2": 1, "3": 0, more: 0} and .unpricedSteps == 1' "cost sums both records; the average per landed card weighs each record by the cards it landed"
 q '.panels.cost.data.cards.perCard | map([.repo, .issue, .state, .todayUsd, .weekUsd]) == [["sample", 801, "on the belt", 1.25, 1.25], ["sample", 6, "landed", 0, 6.25], ["sample", 13, "blocked", 2.5, null], ["widgetshop", 4, "retried", 0.5, 0.5]]' "per card, the 7 days: a card landed on an earlier day and a blocked one are rows too, and an unpriced sum stays null"
-q '.panels.cost.data.cards.perCard | (.[1] | .url == "'"$PU"'/6" and .title == "Landed days ago") and (.[3].url == "'"$CU"'/4") and (.[0] | keys) == ["card", "issue", "repo", "runs", "state", "title", "todayUsd", "url", "weekUsd"]' "a per-card cost row names its repo and links to that repo's issue"
+q '.panels.cost.data.cards.perCard | (.[1] | .url == "'"$PU"'/6" and .title == "Landed days ago") and (.[3].url == "'"$CU"'/4") and (.[0] | keys) == ["card", "issue", "repo", "runs", "state", "title", "todayEstimate", "todayUsd", "url", "weekEstimate", "weekUsd"]' "a per-card cost row names its repo and links to that repo's issue"
 # Bug: the rule Pick settings' rows of each record did not reach the Cost panel, or lost which project they are of.
 q '.panels.cost.data.cards.picks | map([.repo, .group, .usd]) == [["sample", "small docs", 5], ["widgetshop", "small code", null]]' "each record's pick rows reach the Cost panel with its repo"
 # Bug: a dropped challenger or a flagged trial card did not reach the Cost panel, lost its project, or a record from
@@ -839,6 +842,24 @@ answer "$(jq -c '.cost += {todayLeftOut: 0, weekLeftOut: 0, perLandedLeftOut: 0,
 run
 q '.panels.cost.data.cards | .todayLeftOut == 1 and .weekLeftOut == 2 and .perLandedLeftOut == 1
   and .unpriced == [{repo: "widgetshop", card: "c8-4", issue: 4, url: "'"$CU"'/4", step: "build", time: "2026-11-09T01:00:00Z", why: "no model recorded"}]' "the steps the figures leave out are counted and named, each with why and its link"
+) & PIECES+=($!)
+( setup machine-5; cards_fixture
+# Bug (#1585): a step priced as an estimate (its usage read in part, or not at all) reached the page as exact dollars:
+# the parts dropped the snapshot's estimate marks, so Today, 7 days, Per landed card, a card's row, a Review card
+# and the rest showed `$x` with no `~`. Each part keeps the mark of the figure it carries.
+PE=$(jq -c '.belt[0].estimate = true | .landed[0].estimate = true | .landedEstimate = 1 | .needsYou.blocked[0].metrics.estimate = true
+  | .cost += {todayEstimate: 1, weekEstimate: 2, perLandedEstimate: 1} | .cost.cards[0] += {todayEstimate: 1, weekEstimate: 1}' <<<"$P")
+answer "$PE" "$P_URL" 1794000000 "$(jq -c '.cost += {weekEstimate: 1}' <<<"$C")" "$C_URL" 0
+run
+q '.panels.board.data | [(.review | map([.issue, .estimate])), (.landed | map([.issue, .estimate])), .today.estimate] == [[[801, true]], [[7, true]], true]' \
+  "the Board's Review and Landed cards and its Today figure keep their estimate marks"
+q '[(.panels.belt.data.cards | map([.issue, .estimate == true])), (.panels.belt3d.data | (.belt | map([.issue, .estimate])), (.needs | map([.issue, .estimate])), (.landed | map([.issue, .estimate])))]
+  == [[[801, true], [5, false]], [[801, true], [5, false]], [[12, false], [13, true]], [[4, false], [7, true]]]' "the Belt and Belt 3D cards keep their estimate marks"
+q '.panels.cost.data.cards | [.todayEstimate, .weekEstimate, .perLandedEstimate, .byRepo.sample.weekEstimate, .byRepo.widgetshop.weekEstimate,
+  (.perCard | map(select(.repo == "sample") | [.issue, .todayEstimate, .weekEstimate]))] == [1, 3, 1, 2, 1, [[801, 1, 1], [6, 0, 0], [13, 0, 0]]]' \
+  "Cost's three figures, each project's and each card's row carry how many of their steps are estimates"
+q '[(.panels.metrics.data.compare | (.projects | map(.usdEstimate)), .machine.usdEstimate), (.panels.machine.data | .todayEstimate, (.projects | map(.todayEstimate)))]
+  == [[2, 1], 3, 1, [1, 0]]' "the side-by-side cost and the machine's cost today carry their estimates"
 ) & PIECES+=($!)
 pieces
 ) & started machine

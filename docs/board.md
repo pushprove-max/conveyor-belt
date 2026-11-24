@@ -431,7 +431,12 @@ the built-in price. Your price wins over the built-in price for every prompt siz
 the day. Fast mode then costs twice your price, until you give it a price of its own with **Edit :fast**.
 **Reset :fast** takes that price off: fast mode costs twice your price again, or the built-in price when the model
 has no price of yours. The button shows that price. A step priced from your price says "priced from your
-override" on its cost line.
+override" on its cost line. A step whose tokens could not be read in full can get an estimate
+([Estimates and gaps](units.md#estimates-and-gaps)). The Board counts it with the priced steps, and puts `~` before
+each cost that includes an estimate (`~$4.12`): the head tiles, Cost, Metrics, the Board's cards and its Today figure,
+Landed, the Belt and a project's cost today. Metrics also tells how the estimate was made on the step's cost line. A step that gets no
+estimate, because its model has no price or no step of its kind with an exact price ran on its model in the last 30
+days, has no price.
 
 **+ Add model** adds a model that the Board does not know: its ID as sessions report it, a display name, a provider,
 and its prices. "Same price as…" copies the prices of a known model. An added model is priced like a built-in one, has

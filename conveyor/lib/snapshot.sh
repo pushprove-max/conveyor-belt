@@ -55,7 +55,9 @@
 #   gaveWayFixing (it gave that turn up for the fix of its failed tests), review (the number of
 #   the review in progress, else null; it can pass `of`, the 3 of the review rule, after a landing conflict or a test
 #   fix), stepAt (when the step began: its live record's at while it runs), model (the one running the step: a session's or a review's, else null), effort (the effort that model runs at, from the step's live record; null when it names none),
-#   tokens (fresh, so far) and usd so far: the finished steps and the live record of the running one. reading is
+#   tokens (fresh, so far) and usd so far: the finished steps and the live record of the running one; usdKnown, the
+#   dollars of those that are priced, and notPriced, how many are not (usd is null while one is not); estimate, true
+#   when a step is priced as an estimate (the price table's estimate: its usage was read only in part, or not at all, and then it is the median of its model's steps of its kind). reading is
 #   false, and usd null, while neither a finished session or review nor the live record holds a token: "no reading
 #   yet", never $0; atEnd is true when, in that time, the running Claude session's answers all report usage 0 (a route
 #   that streams none): "cost shown when the step ends". live is {turns, lastOutputAt, action, at} of the running step (at: when its live record began; for a
@@ -157,7 +159,8 @@
 # awaitingDeploy: the open issues labelled awaiting-deploy (built, waiting for the owner's deploy), apart from next and
 #   from held, which never count them: issue, title, since (when the label was last added; null when GitHub did not
 #   say), lowest number first. null when gh cannot list the issues.
-# landed: the cards that landed today, or closed their issue as already fixed (step says which), newest first: usd, reviews, the
+# landed: the cards that landed today, or closed their issue as already fixed (step says which), newest first: usd
+#   (with usdKnown, notPriced and estimate, as a belt card's), reviews, the
 #   follow-up issues filed, rounds (the reviews list above; reviews is their number), fixes (its fix rounds: every fix line,
 #   a fix after a failed Done-when check or failed tests too), track, and pushed (false while health lists its commit as unpushed; null for a closed card,
 #   which has no commit), batch (the cards it landed with in one batch, itself among them, in order; null when it landed alone),
@@ -166,7 +169,8 @@
 #   filed and filedUrl once File on GitHub filed an issue from it (cardissue()).
 #   Its usd, reviews and fixes, and a belt card's usd and tokens, are of every run of its issue (a card `retry` or a
 #   new pick restarted: the runs below, at metrics); rounds and track are of its own run.
-#   landedCount: how many there are, and landedUsd their usd added up (null when one has none); landed holds the
+#   landedCount: how many there are, and landedUsd their usd added up (null when one has none), landedEstimate how
+#   many of them have a step priced as an estimate; landed holds the
 #   newest SNAPKEEP of them (below), and any older one still on the belt.
 # declined: the lines of the declined list (DECLINED) the Board's Declined panel shows: not dismissed, not built and at
 #   most 7 days old; newest first, each as its line is: id, time, card, issue, finding, by, why, repo (and name, a
@@ -228,15 +232,16 @@
 #   to the retried file among them (the money was spent; such a card is in no other part of the record); over the
 #   cards that landed in those 7 days, perLanded (their average usd, each the dollars of every run of its issue) and
 #   landedAfter (how many landed after 1, 2, 3 and more reviews of their own run). today, week and perLanded are the dollars of the steps that are priced: todayLeftOut,
-#   weekLeftOut and perLandedLeftOut count the steps each leaves out for having no price, unpricedSteps is
+#   weekLeftOut and perLandedLeftOut count the steps each leaves out for having no price, todayEstimate,
+#   weekEstimate and perLandedEstimate the steps of each priced as an estimate, unpricedSteps is
 #   the 7 days' count and unpriced lists those steps ({card, issue, step, time, why}); all three figures are null
 #   only when the price table cannot be run. cards, one row for every card with a step that ended in the 7
 #   days, the one worked on last first: card, issue, title, state (on the belt, blocked, landed, closed or retried)
-#   and its usd of today and of the 7 days. A card landed or blocked on an earlier day is in it, so is a retried one.
+#   and its usd of today and of the 7 days, with todayEstimate and weekEstimate (its steps of each priced as an estimate). A card landed or blocked on an earlier day is in it, so is a retried one.
 #   A card restarted is one row, of its newest run: runs (how many), its usd those of every run's steps. picks: the
 #   cards the rule Pick settings picked, on any day, one row a group and builder choice ({group, model, effort,
-#   cards, landed, usd, firstTry, reviews, open}; a card's earlier runs count with it; usd null when a step of them
-#   has no price). trials: {dropped: [{group, model, effort, cards}], flagged: [{card, issue, group, files}]}, the
+#   cards, landed, usd, estimate, firstTry, reviews, open}; a card's earlier runs count with it; usd null when a step of them
+#   has no price, estimate how many of them are priced as an estimate). trials: {dropped: [{group, model, effort, cards}], flagged: [{card, issue, group, files}]}, the
 #   groups whose trial challenger two blocked trial cards dropped, and the trial cards whose change touches pipeline files;
 #   groups: each group that had trial or promoted cards, {group, model, effort (the challenger), decision and decidedAt (the
 #   owner's, `control pick`, else null), trial, default and promoted ({cards, landed, ended, usd, perLanded}), due, over, and back while over: the rule's reason to go back to shadow},
@@ -268,19 +273,21 @@ SNAPKEEP=20 PUSHKEEP=100
 # as its test line names it; null for none), depth, followups (how
 # many it filed), diff ({files, added, removed}), limit ({before, after, used}: weekly limit percent; used is null
 # when the limit reset during the card), usd (null when
-# a step is unpriced), tokens, unpriced (how many of its steps have no price) and timeline: each finished step with
+# a step is unpriced), tokens, unpriced (how many of its steps have no price), usdKnown (the dollars of those that are
+# priced), estimate (true when one is priced as an estimate) and timeline: each finished step with
 # its time, seconds, tokens, dollars, model (the one it was priced at, else the one its line names), effort,
 # findings, tests, session stats, unpriced (why it has no price, null when it has one) and, on a step priced from
-# the pack's prices, override (true) and, on a review whose reviewer or judge wrote cache, writes and judgeWrites (each
+# the pack's prices, override (true), on one priced as an estimate, estimate (how it was made), and, on a review whose reviewer or judge wrote cache, writes and judgeWrites (each
 # {model, write, write1h}: the cache write tokens of its session, which keeps no transcript). A reading that was not
 # taken is null: a session whose usage could not be read has tokens null, not 0. runSec (pick-up to end, or to now),
 # fixes and testRuns (its fix and test lines). runs: how many runs of its issue the card's figures add up (the cards
 # of the issue since it last landed or closed, with the retried ones, to this one): with more than one, usd, tokens,
-# unpriced, each step's seconds, runSec, reviews, fixes and testRuns are their sums (usd and tokens null when a run's
-# is), and thisRun holds the card's own; queueSec, leadSec, cycleSec and the rest stay its own.
+# unpriced, usdKnown, each step's seconds, runSec, reviews, fixes and testRuns are their sums (usd and tokens null when a run's
+# is; estimate when a run's is), and thisRun holds the card's own; queueSec, leadSec, cycleSec and the rest stay its own.
 # The snapshot's metrics: today, week (the 7 days to today) and prev (the 7 days before those) as totals() gives them;
 # days, each of the 7 days oldest first ({day, landed, blocked, cycleSec: its median, firstReviewPass, perLandedUsd: null
-# when a step of the day's landed cards is unpriced, so a part cost is never drawn as the whole});
+# when a step of the day's landed cards is unpriced or priced as an estimate, so a part cost is never drawn as the
+# whole, nor an estimate as exact});
 # slots, today's samples by local hour ({hour, slots: the mean in use, cap}); cards, each card of the 7 days; and
 # steps, each card with a step that ended in the last 25 h ({card, issue, name when it has one, steps: those steps'
 # {step, time, writes, judgeWrites}}), not cut at SNAPKEEP as cards is: the Board's cache-write alert names the card step of each
@@ -312,14 +319,15 @@ CARDRUNS='. as $cs
         | from_entries) as $runsOf
     | def runsum(f): [.[] | f] | if any(. == null) then null else add end;
       def secsum(f): [.[] | f | numbers] | if length == 0 then null else add end;
-      def own: {usd, tokens, unpriced, buildSec, reviewSec, fixSec, testSec, rebuildSec, landSec, runSec, reviews, fixes, testRuns};
+      def own: {usd, tokens, unpriced, usdKnown, estimate, buildSec, reviewSec, fixSec, testSec, rebuildSec, landSec, runSec, reviews, fixes, testRuns};
     $all[0][] | ($runsOf[.card] // [.]) as $r | .runSteps = [$r[].steps[]] | .runReviews = ($r | map(.reviews) | add)
       | .runFixes = ($r | map(.metrics.fixes) | add)
       | if ($r | length) < 2 then .metrics.runs = 1
         else .usd = ($r | runsum(.usd) | if . == null then null else . * 10000 | round / 10000 end)
           | .x.tokens = {claude: ($r | map(.x.tokens.claude // 0) | add), codex: ($r | map(.x.tokens.codex // 0) | add)}
           | .metrics += {runs: ($r | length), thisRun: (.metrics | own), usd, tokens: ($r | runsum(.metrics.tokens)),
-              unpriced: ($r | map(.metrics.unpriced) | add), buildSec: ($r | secsum(.metrics.buildSec)), reviewSec: ($r | secsum(.metrics.reviewSec)),
+              unpriced: ($r | map(.metrics.unpriced) | add), usdKnown: ($r | map(.metrics.usdKnown // 0) | add * 10000 | round / 10000),
+              estimate: any($r[]; .metrics.estimate == true), buildSec: ($r | secsum(.metrics.buildSec)), reviewSec: ($r | secsum(.metrics.reviewSec)),
               fixSec: ($r | secsum(.metrics.fixSec)), testSec: ($r | secsum(.metrics.testSec)), rebuildSec: ($r | secsum(.metrics.rebuildSec)),
               landSec: ($r | secsum(.metrics.landSec)), runSec: ($r | secsum(.metrics.runSec)), reviews: ($r | map(.metrics.reviews) | add),
               fixes: .runFixes, testRuns: ($r | map(.metrics.testRuns) | add)} end
@@ -887,6 +895,11 @@ snapshot() (
     # The totals: the dollars of the steps that are priced, and how many are left out for having no price.
     def priced: [.[].usd | numbers] | add // 0 | . * 10000 | round / 10000;
     def leftout: map(select(.usd == null)) | length;
+    # And how many of the priced ones are priced as an estimate: a figure with one is shown as an estimate (~$4.12).
+    def estimated: map(select(.estimate != null)) | length;
+    # The dollars of a card beside its usd, which is null while a step of its runs has no price: usdKnown, the dollars of
+    # the steps that are priced; notPriced, how many are not; estimate, whether one is priced as an estimate.
+    def gap: .runSteps | {usdKnown: priced, notPriced: leftout, estimate: any(.[]; .estimate != null)};
     # The seats of a card (seats, above): the pick of the Judge (the asked of its pick) with the mode of the pick and
     # run, the seats the card runs on that the rule set (pickpromote(), picktrial(), pickseats(), pickjudge(),
     # lib/modelpick.sh), each {model, effort, by}: by card (the owner set the builder), trial (the challenger of the
@@ -912,7 +925,9 @@ snapshot() (
       | {reading: $reading, atEnd: (($reading | not) and $card.live.zero == true),
          tokens: (.x.tokens | if $u == null then . elif $card.live.step == "review" and ($card.live.model // "" | startswith("claude-") | not) then .codex +=$u.input + $u.output
            else .claude += $u.input + ($u.write // 0) + ($u.write1h // 0) + $u.output end),
-         usd: (if ($reading | not) or .usd == null or ($u != null and .live.usd == null) then null else (.usd + (.live.usd // 0)) * 10000 | round / 10000 end)};
+         usd: (if ($reading | not) or .usd == null or ($u != null and .live.usd == null) then null else (.usd + (.live.usd // 0)) * 10000 | round / 10000 end)}
+      # The running step counts as a step priced, or one not, once it holds a usage.
+      + (gap | .usdKnown = ((.usdKnown + ($card.live.usd // 0)) * 10000 | round / 10000) | .notPriced += (if $u != null and $card.live.usd == null then 1 else 0 end));
     '"$TRACK"'
     '"$METRICS"'
     $hs[0] as $h
@@ -1093,7 +1108,7 @@ snapshot() (
     # is here when it had a trial or a promoted card, so a group promoted before any trial gets its cost check too; its
     # challenger is the choice of its trial or promoted runs (a retry of a trial card builds on the default).
     # Each side: cards, landed, ended (landed, closed or blocked, and not given
-    # back), usd (null when a step has no price) and perLanded (usd / landed: null with none landed, or usd null).
+    # back), usd (null when a step has no price, or is priced as an estimate: a guess never decides over) and perLanded (usd / landed: null with none landed, or usd null).
     # due: when the tenth trial card ended after the last decision of the owner (of all of them, before the first), while the
     # owner has not promoted or dropped the challenger; else null. over: in a group promoted now (also while its next
     # challenger is on trial), promoted cards of the choice promoted now cost more per landed card than default cards (modelpick() then sets the rule to shadow, with back, the Needs you line, as its reason).
@@ -1105,7 +1120,8 @@ snapshot() (
            challenger: $chc,
            landed: ((.step | IN("landed", "closed")) and .x.blockedAt == null), ended: (.result != "" and (.x.retried | not)),
            # Not the spend of a run on another challenger (one the owner replaced before a retry): it does not count for this one.
-           end: .x.endAt, usd: ([$rs[] | select((.x.pick | objects | (.trial == true or .promoted == true) and [.choice.model, .choice.effort] != [$chc.model, $chc.effort]) // false | not) | .steps[]] | usd)}]
+           end: .x.endAt, usd: ([$rs[] | select((.x.pick | objects | (.trial == true or .promoted == true) and [.choice.model, .choice.effort] != [$chc.model, $chc.effort]) // false | not) | .steps[]
+             | if .estimate != null then .usd = null else . end] | usd)}]
       | group_by(.group) | map(select(any(.[]; .trial or .promoted)))
       | map(.[0].group as $g | ($control // {} | .picks // {} | .[$g // ""]) as $d
         # A group whose next challenger the owner put on trial (`control pick <group> next`) has it as its challenger,
@@ -1202,11 +1218,12 @@ snapshot() (
              | {card: $w, issue: ($r.issue // ($w | capture("-(?<n>[0-9]+)$").n | tonumber? ) // null),
                 state: (if $r == null then "gone" elif $r.x.retried then "queued" elif $r.result == "" then $r.x.at else $r.step end)} end) as $won
          | {card, issue, title, step: $step, waitsOn: $won, gaveWay: (if $landed then null else .gaveWay end), gaveWayFixing: (.gaveWayFixing and ($landed | not)), review: (if $step == "review" then .x.review // (.reviews + 1) else null end), of: $max, stepAt: $stepAt, landed: $landed, offCap: (.offCap == true and ($landed | not)),
-         model: (.live.model // {build: $m.claude, fix: $m.claude, review: $m.codex}[$step] // null), effort: (if .live.model then .live.effort // null else null end), tokens: $s.tokens, usd: $s.usd, reading: $s.reading, atEnd: $s.atEnd,
+         model: (.live.model // {build: $m.claude, fix: $m.claude, review: $m.codex}[$step] // null), effort: (if .live.model then .live.effort // null else null end), tokens: $s.tokens, usd: $s.usd, usdKnown: $s.usdKnown, notPriced: $s.notPriced, estimate: $s.estimate, reading: $s.reading, atEnd: $s.atEnd,
          # A proof run gives what it does now, "waiting for a test slot (2 of 2 in use)" while the slots are full (testrun.sh).
          live: (if .live then {turns: .live.turns, lastOutputAt: .live.last, action: (.live.action // null), at: (.live.at // null)}
            elif .proof then {turns: 0, lastOutputAt: null, action: (.proof.action // null), at: (.proof.at // null)} else null end),
-         done: {tokens: .x.tokens, usd, reading: (.steps | any(.step != "test")), step: (.x.log | last | if .step == "start" then .of else null end)},
+         # What the live stream (watch.py lay()) adds the running step to: the figures of the finished steps, with their known dollars and gap.
+         done: ({tokens: .x.tokens, usd} + gap + {reading: (.steps | any(.step != "test")), step: (.x.log | last | if .step == "start" then .of else null end)}),
          # The step that runs now after a stall (stalled, in the live record) has no line yet: its stall is counted here.
          parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: seatsof, stalls: (.x.stalls + (if .live.stalled then 1 else 0 end)),
          beyond: (if $landed then null else .x.beyond end)} + umbrella + times],
@@ -1226,7 +1243,7 @@ snapshot() (
        waitWake: $ww,
        forecast: forecast,
        awaitingDeploy: $built,
-       landed: [$week | sort_by(.x.endAt) | reverse[] | select((.x.endAt | day) == $day) | {card, issue, title, step, time: .x.endAt, usd, reviews: .runReviews, followups: .x.followups,
+       landed: [$week | sort_by(.x.endAt) | reverse[] | select((.x.endAt | day) == $day) | {card, issue, title, step, time: .x.endAt, usd} + gap + {reviews: .runReviews, followups: .x.followups,
          parent: parent, rounds: reviews, fixes: .runFixes, track: track($max; $perr), sha, pushed: (if .step == "closed" then null else (.sha | IN($un[]) | not) end), metrics, doneWhen: .x.doneWhen, split: .x.split, seats: seatsof, stalls: .x.stalls, batch: .x.batch, rollout: .x.rollout} + times
          + (if .issue == 0 then $tac[0][.card] // {} else {} end)],
        branches: ([$c[] | select(.x.branch != null and (.step | IN("landed", "closed")) and .x.blockedAt == null)] | group_by([.issue, .title])
@@ -1237,8 +1254,9 @@ snapshot() (
        testSlots: $ts,
        cost: (($steps | map(select((.time | day) == $day))) as $td | [$week[] | .card] as $wk
          | [$all[0][] | select(.card | IN($wk[])) | .runSteps[]] as $ws | {
-         today: (if $priced then $td | priced else null end), todayLeftOut: ($td | leftout), week: (if $priced then $steps | priced else null end), weekLeftOut: ($steps | leftout),
+         today: (if $priced then $td | priced else null end), todayLeftOut: ($td | leftout), todayEstimate: ($td | estimated), week: (if $priced then $steps | priced else null end), weekLeftOut: ($steps | leftout), weekEstimate: ($steps | estimated),
          perLanded: ($week | if length == 0 or ($priced | not) then null else length as $n | $ws | priced / $n * 10000 | round / 10000 end), perLandedLeftOut: ($ws | leftout),
+         perLandedEstimate: ($ws | estimated),
          landedAfter: ($week | {"1": (map(select(.reviews == 1)) | length), "2": (map(select(.reviews == 2)) | length),
            "3": (map(select(.reviews == 3)) | length), more: (map(select(.reviews > 3)) | length)}),
          unpricedSteps: ($steps | leftout),
@@ -1246,7 +1264,8 @@ snapshot() (
            | {card: $k.card, issue: $k.issue, step, time, why: (.unpriced // "the price table could not be run")}],
          cards: ([$all[0][] | select(.card | IN($later[]) | not) | [.runSteps[] | select((.time | day) >= $since)] as $s | select($s | length > 0)
              | {card, issue, title, state: (if .x.retried then "retried" elif .result == "" then "on the belt" else .step end), runs: .metrics.runs,
-                today: ($s | map(select((.time | day) == $day)) | usd), week: ($s | usd), last: ($s | map(.time) | max)}]
+                today: ($s | map(select((.time | day) == $day)) | usd), week: ($s | usd), last: ($s | map(.time) | max),
+                todayEstimate: ($s | map(select((.time | day) == $day)) | estimated), weekEstimate: ($s | estimated)}]
            | sort_by(.last) | reverse | map(del(.last))),
          # The cards the rule Pick settings picked (x.pick, rows.jq), by group and builder choice, on any day: one a
          # card that no later run of its issue follows, with the newest pick of its runs (an earlier run, blocked with
@@ -1258,6 +1277,7 @@ snapshot() (
              | select($p != null) | .pick = $p] | group_by(.pick | [.group, .choice.model, .choice.effort])
            | map(.[0].pick as $p | map(select((.step | IN("landed", "closed")) and .x.blockedAt == null)) as $l
              | {group: $p.group, model: $p.choice.model, effort: $p.choice.effort, cards: length, landed: ($l | length), usd: ([.[].runSteps[]] | usd),
+                estimate: ([.[].runSteps[]] | estimated),
                 firstTry: ($l | map(select(.metrics.runs == 1)) | length), reviews: ($l | map(.runReviews) | add // 0),
                 open: (map(select((.x.retried | not) and (.result == "" or .step == "blocked"))) | length)})),
          # The trials of the rule Pick settings (picktrial(), lib/modelpick.sh), of every card on any day: dropped, a
@@ -1277,7 +1297,7 @@ snapshot() (
            [$pu[] | select((.time | day) >= $prev and (.time | day) < $since)]; $every; $waits; $t0p; $t0w),
          days: [range(6; -1; -1) as $k | ($t0d + 43200 - $k * 86400 | strflocaltime("%Y-%m-%d")) as $dd
            | totals([$all[0][] | select(.x.endAt != null and (.x.endAt | day) == $dd)]; []; []; $every; []; 0; 0)
-           | {day: $dd, landed, blocked, cycleSec: .cycleSec.p50, firstReviewPass, perLandedUsd: (.perLanded | if . == null or .leftOut > 0 then null else .usd end)}],
+           | {day: $dd, landed, blocked, cycleSec: .cycleSec.p50, firstReviewPass, perLandedUsd: (.perLanded | if . == null or .leftOut > 0 or .estimate > 0 then null else .usd end)}],
          slots: ([$smp[] | select((.time | day) == $day) | . + {hour: (.time | fromdate | strflocaltime("%H") | tonumber)}] | group_by(.hour)
            | map({hour: .[0].hour, slots: ([.[].slots] | add / length | r3), cap: ([.[].cap | numbers] | max)})),
          cards: ([$all[0][] | select((.x.endAt // .stepAt | day) >= $since)
@@ -1364,6 +1384,7 @@ snapshot() (
         | {step, time} + ({writes, judgeWrites} | with_entries(select(.value != null)))]} + (if .name then {name} else {} end) | select(.steps != [])]
     | .historySum = (if $hs == "" then null else $hs end)
     | .landedUsd = (if all(.landed[]; .usd | type == "number") then [.landed[].usd] | add // 0 else null end)
+    | .landedEstimate = ([.landed[] | select(.estimate == true)] | length)
     | [.belt[] | select(.landed == true) | .card] as $on
     | .landed |= [to_entries[] | select(.key < $k or (.value.card | IN($on[]))) | .value]
     | (.metrics.cards, .cost.cards, .cost.unpriced, .declinedRest) |= .[:$k]

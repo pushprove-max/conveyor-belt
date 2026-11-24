@@ -70,7 +70,7 @@
     name.append(ctx.tag(p.repo));
     const slots = h('span', 'project-slots', `${num(p.used) ? p.used : '—'}${num(p.cap) ? ` of ${p.cap}` : ''} cards at once`);
     head.append(name, ctx.chip(p.state ? cap1(p.state) : 'State not read', STATE[p.state] || 'warn'), slots,
-      h('span', null, `${p.landedToday} landed today`), h('span', 'num', `${ctx.money(p.todayUsd)} today${num(p.todayLeftOut) && p.todayLeftOut > 0 ? ` (${p.todayLeftOut} ${p.todayLeftOut === 1 ? 'step has' : 'steps have'} no price)` : ''}`));
+      h('span', null, `${p.landedToday} landed today`), h('span', 'num', `${ctx.money(p.todayUsd, num(p.todayEstimate) && p.todayEstimate > 0)} today${num(p.todayLeftOut) && p.todayLeftOut > 0 ? ` (${p.todayLeftOut} ${p.todayLeftOut === 1 ? 'step has' : 'steps have'} no price)` : ''}`));
     li.append(head);
     // Paused or stopped: who did it and how to start it again, in one line.
     const why = ctx.pausedSaid(p.state, p.repo, p.guard, p.reason);

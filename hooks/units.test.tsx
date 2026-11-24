@@ -270,7 +270,8 @@ test('the pane draws at a dock body narrower than 40 columns, at the width it is
   await units($)
   const pane = await draw($, 'Pane', { title: 'Conveyor', isFocused: false, placement: 'dock', bodyColumns: 32 })
   // The head row is padded to the pane width and ends at the day's spend: its length is the width the pane drew at.
-  expect(pane.match(/^.*?DAY SPEND \$\d+\.\d\d/)?.[0]).toHaveLength(32)
+  // At 32 columns the spend has no DAY SPEND label: the label would leave `/units` and the host no room to show whole.
+  expect(pane.match(/^ \/units  buildbox +\$\d+\.\d\d/)?.[0], `the head at 32 columns: ${pane.slice(0, 40)}`).toHaveLength(32)
 })
 
 // Bug it catches: before the first fetch answers, the pane drew its 36-column waiting line whole in a 32-column dock

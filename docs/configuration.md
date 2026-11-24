@@ -505,7 +505,8 @@ It does this also for a group that you promote before it has trial cards.
 When the promoted cards cost more for each landed card, Conveyor sets the rule to Shadow. **Needs you** then shows
 a line with the two costs. The line stays until you set the rule again. Before you set it to On again, choose
 `keep` or `drop` for the group, because the same costs set the rule to Shadow again. Conveyor uses the costs that the Board
-showed last. It compares only the promoted cards of the challenger that is promoted now.
+showed last. It compares only the promoted cards of the challenger that is promoted now. A cost that is an estimate
+([Estimates and gaps](units.md#estimates-and-gaps)) is not used: a side with such a cost has no cost to compare.
 
 When the next challenger has trials, `keep` and `drop` keep the promoted challenger. The line then tells you to
 choose `promote`, which builds on the next challenger in its place, or `drop` two times, which stops the trials and

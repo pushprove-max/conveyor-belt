@@ -40,7 +40,8 @@
 // modelSettings, limit, held, queue (room on the one the machine holds back: why, as "waiting for a machine slot: ..."), skipped, waits (issues waiting on another, with waitsFor), issuesError,
 // building, review, waiting, blocked, landed (the day's newest; each with batch: the cards it landed with, itself among them | null;
 // each card with seats: the seats the rule Pick settings gave it | null),
-// today ({landed, usd}: every card of the day, counted and its usd added up, null when one has none), open ({count, split, held: each with its reasons, umbrellas: each open parent with its parts} | null),
+// today ({landed, usd, estimate}: every card of the day, counted and its usd added up, null when one has none;
+// estimate true when a step of them is priced as an estimate, as a card's own estimate: its dollars then have `~`), open ({count, split, held: each with its reasons, umbrellas: each open parent with its parts} | null),
 // unpushed (the landed cards origin lacks | null), fullTest (command, why, running, last | null), and checkRuns
 // (only when a pack names checks.progress: each record's {repo, error}, or its run with repo, counts, done, all and leftSec;
 // with repo null too, when the Board shows those runs under "No loop to steer"), areaPrefix, repos (every project on
@@ -333,7 +334,7 @@
     const day = d.today || {}, n = num(day.landed);
     const today = h('div', 'board-ctl board-today');
     today.dataset.figure = 'today';
-    today.append(h('span', 'board-label', 'Today'), h('span', 'board-value', n === null ? 'not read' : `${n} landed`), cx(LOOP).number('board-usd', num(day.usd), S.ctx.money));
+    today.append(h('span', 'board-label', 'Today'), h('span', 'board-value', n === null ? 'not read' : `${n} landed`), cx(LOOP).number('board-usd', num(day.usd), (v) => S.ctx.money(v, day.estimate === true)));
     el.append(today);
     return el;
   }

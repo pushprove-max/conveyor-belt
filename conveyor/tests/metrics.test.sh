@@ -118,7 +118,7 @@ t_metricstotals() {
   # The snapshot is taken late in the fixture's day, so its steps are all past whatever the hour the test runs at.
   out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot of the fixture exited non-zero"
   q() { jq -c "$1" <<<"$out"; }
-  [ "$(q '.metrics.today | del(.waitMaxSec, .pushes)')" = '{"cards":4,"landed":2,"blocked":2,"leadSec":{"p50":7110,"p90":8460},"cycleSec":{"p50":1710,"p90":2160},"firstReviewPass":0.667,"findingsPerCard":1,"followupRate":0.5,"blockRate":0.5,"blocks":{"timeout":1,"visible change":1},"rebuildRate":0,"testFailures":{"card":0,"main":0,"flaky":0,"mainSec":0},"perLanded":{"usd":4.5,"leftOut":0,"tokens":2250000,"tokensLeftOut":0,"byModel":{"claude-sonnet-5-5":{"usd":3,"leftOut":0,"tokens":1500000,"tokensLeftOut":0},"gpt-6.1-sol":{"usd":1.5,"leftOut":0,"tokens":750000,"tokensLeftOut":0}}},"limitPerCard":2,"loop":{"samples":4,"utilisation":0.438,"slotsMax":4,"idleSec":60,"idleUnreadSec":0,"heldSec":60},"host":{"loadMax":4.5,"memUsedMaxKb":1000,"diskFreeMinKb":8996}}' ] \
+  [ "$(q '.metrics.today | del(.waitMaxSec, .pushes)')" = '{"cards":4,"landed":2,"blocked":2,"leadSec":{"p50":7110,"p90":8460},"cycleSec":{"p50":1710,"p90":2160},"firstReviewPass":0.667,"findingsPerCard":1,"followupRate":0.5,"blockRate":0.5,"blocks":{"timeout":1,"visible change":1},"rebuildRate":0,"testFailures":{"card":0,"main":0,"flaky":0,"mainSec":0},"perLanded":{"usd":4.5,"leftOut":0,"estimate":0,"tokens":2250000,"tokensLeftOut":0,"byModel":{"claude-sonnet-5-5":{"usd":3,"leftOut":0,"estimate":0,"tokens":1500000,"tokensLeftOut":0},"gpt-6.1-sol":{"usd":1.5,"leftOut":0,"estimate":0,"tokens":750000,"tokensLeftOut":0}}},"limitPerCard":2,"loop":{"samples":4,"utilisation":0.438,"slotsMax":4,"idleSec":60,"idleUnreadSec":0,"heldSec":60},"host":{"loadMax":4.5,"memUsedMaxKb":1000,"diskFreeMinKb":8996}}' ] \
     || fail "today's totals: $(q '.metrics.today')"
   # Waiting on the owner: the blocked cards, each from its end to the snapshot's time, clipped to the window: card 5,
   # blocked yesterday, counts from midnight today and from its end in the 7 days.
@@ -296,10 +296,14 @@ t_metricsunread() {
   [ "$(jq -c '[(.landed[0].metrics.timeline[0] | [.step, .tokens, .usd, .unpriced]), .landed[0].metrics.tokens, (.cost.unpriced | map(.why))]' <<<"$out")" \
     = '[["build",null,null,"its token usage could not be read: the session output holds no token usage"],null,["its token usage could not be read: the session output holds no token usage"]]' ] \
     || fail "the unread build in the snapshot: $(jq -c '[.landed[0].metrics, .cost]' <<<"$out")"
+  # Bug (#1585): /units read a bare "cost partial" for such a card: it shows the dollars known and the steps not priced.
+  [ "$(jq -c '.landed[0] | [.usd, .usdKnown, .notPriced, .estimate]' <<<"$out")" = '[null,0,1,false]' ] \
+    || fail "the landed card with an unpriced step does not give its known dollars and the gap: $(jq -c '.landed[0]' <<<"$out")"
 }
 
 # A session of two results, the second's usage unreadable: the usage read is kept, but the step says unread, so
-# its tokens show as missing and it is unpriced, never priced as whole. Each model's 1-hour cache writes are read
+# its tokens show as missing and it is priced at them as an estimate, marked so (#1585: it was unpriced, and its card
+# had no dollars at all), never as whole. Each model's 1-hour cache writes are read
 # from that model's answers. The output is read as the loop reads a session's (SESSIONREAD, lib/session.sh), and the
 # line it gives is a landed card's build; t_metricsunread runs the session itself (watch()) on an unread usage.
 t_metricspartial() {
@@ -318,11 +322,57 @@ EOF
     = '[true,"1 of 2 results hold no readable token usage, so the usage recorded is only part of it",{"input":10,"write":200,"write1h":300,"read":0,"output":2},{"claude-opus-5-5":{"input":5,"write":400,"read":0,"output":1,"write1h":300},"claude-sonnet-5-5":{"input":5,"write":100,"read":0,"output":1,"write1h":0}}]' ] \
     || fail "the partly read build: $f"
   f=$(jq -c 'del(.ok) | del(.effort)' <<<"$f")
-  l 1 01:00 picked ok '{"title":"T1"}'; l 1 01:10 build ok "$f"; l 1 01:30 landed ok '{"sha":"s1","product":false}'
+  # A fix whose own try read no usage after a refused try that asked for claude-sonnet-5-5, ran on claude-haiku-5-5
+  # (its stats) and counted 1M input tokens (APIFOLD's alsoUsed): its line keeps that count to the price table, $0.10
+  # at Haiku's rate (#1585 review: it was left out; then priced at the model asked for, not the one that ran it).
+  l 1 01:00 picked ok '{"title":"T1"}'; l 1 01:10 build ok "$f"
+  l 1 01:20 fix ok '{"model":"claude-opus-5-5","unread":"a try the model API refused ran on another model (claude-sonnet-5-5): one model cannot price both","alsoUsed":[{"model":"claude-sonnet-5-5","usage":{"input":1000000},"stats":{"byModel":{"claude-haiku-5-5":{"input":1000000,"write":0,"read":0,"output":0}}}}]}'
+  l 1 01:30 landed ok '{"sha":"s1","product":false}'
   recok "$S/cards.jsonl" "a partly read build"
   out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot exited non-zero"
-  [ "$(jq -c '.landed[0].metrics | [(.timeline[0] | [.tokens, .usd]), .tokens]' <<<"$out")" = '[[null,null],null]' ] \
-    || fail "the partly read build is shown as whole: $(jq -c '.landed[0].metrics' <<<"$out")"
+  # The tokens it counted, each model's at that model's rate in the built-in table: $0.0032; each step says it is an
+  # estimate, and the card's metrics give the dollars known and the mark (/units's NEEDS YOU and timelines read them).
+  [ "$(jq -c '.landed[0].metrics | [(.timeline[0] | [.tokens, .usd, .estimate]), (.timeline[1] | [.usd, .model, .estimate]), .tokens, .usdKnown, .estimate]' <<<"$out")" \
+    = '[[null,0.0032,"the tokens it counted, at its model'"'"'s price"],[0.1,"claude-haiku-5-5","the tokens it counted, at its model'"'"'s price"],null,0.1032,true]' ] \
+    || fail "the partly read build or fix is shown as whole, or not priced at what it counted: $(jq -c '.landed[0].metrics' <<<"$out")"
+  # /units reads the mark from the landed card and from today's cost (hooks/sources.ts).
+  [ "$(jq -c '[(.landed[0] | [.usd, .usdKnown, .notPriced, .estimate]), .cost.today, .cost.todayLeftOut, .cost.todayEstimate]' <<<"$out")" = '[[0.1032,0.1032,0,true],0.1032,0,2]' ] \
+    || fail "the estimate is not marked on the landed card or today's cost: $(jq -c '[.landed[0], .cost]' <<<"$out")"
+  # Bug (#1585 review): no other total that holds them said so, so each read as exact dollars. Each counts its steps
+  # priced as an estimate (what a view reads to mark the total): the 7 days, per landed card, the card's row of Cost, the day's landed cards, and the
+  # metrics per landed card and by model (the build ran on two models, the fix on a third).
+  [ "$(jq -c '[.cost.weekEstimate, .cost.perLandedEstimate, (.cost.cards[0] | [.todayEstimate, .weekEstimate]), .landedEstimate,
+      (.metrics.week.perLanded | .estimate, (.byModel | map_values(.estimate)))]' <<<"$out")" \
+    = '[2,2,[2,2],1,2,{"claude-haiku-5-5":1,"claude-opus-5-5":1,"claude-sonnet-5-5":1}]' ] \
+    || fail "a total that holds an estimate does not count it: $(jq -c '[.cost, .landedEstimate, .metrics.week.perLanded]' <<<"$out")"
+  # Bug (#1585 review): the day's point in the cost sparkline drew its estimate as exact dollars, and the week's change
+  # compared them. A day whose landed card holds an estimate has no value there.
+  [ "$(jq -c '.metrics.days[-1] | [.day, .landed, .perLandedUsd]' <<<"$out")" = "[\"$d\",1,null]" ] \
+    || fail "a day with an estimated step drawn as measured: $(jq -c '.metrics.days' <<<"$out")"
+  # Bug (#1585 review): by model, the tokens a partly read step counted were added to each model's average as a whole
+  # reading; they are left out (tokensLeftOut), as they are of the overall average.
+  [ "$(jq -c '.metrics.week.perLanded.byModel | map_values([.tokens, .tokensLeftOut])' <<<"$out")" \
+    = '{"claude-haiku-5-5":[0,1],"claude-opus-5-5":[0,1],"claude-sonnet-5-5":[0,1]}' ] \
+    || fail "a model's tokens count a partly read step as whole: $(jq -c '.metrics.week.perLanded.byModel' <<<"$out")"
+}
+
+# Bug caught (#1585 review): a review line written before BOTHTRIES kept a first try's count (alsoUsed, or the usage
+# when the retry read none) holds that count only in firstTry.spent, and the snapshot dropped it, so the step's
+# estimate left those tokens out (no estimate at all, as here, with no exact review to take a median of). Card 1's
+# review retried on claude-opus-5-5 after a try on claude-haiku-5-5 that counted 1M input tokens ($0.10 at Haiku's
+# rate); card 2 blocked on a review whose retry read nothing after a try that counted 2M ($0.20).
+t_metricsoldtry() {
+  export TZ=UTC; setup '[]'; S=$ST; mkdir -p "$S"; d=$(date -u +%F); y=$d; now=$(date -u -d "${d}T23:59:00Z" +%s)
+  l 1 01:00 picked ok '{"title":"T1"}'
+  l 1 01:10 review GO '{"model":"claude-opus-5-5","unread":"the first attempt ran on another model (claude-haiku-5-5): one model cannot price both","firstTry":{"reason":"review failed (exit 124)","spent":{"step":"review","model":"claude-haiku-5-5","usage":{"input":1000000}}}}'
+  l 1 01:30 landed ok '{"sha":"s1","product":false}'
+  l 2 02:00 picked ok '{"title":"T2"}'
+  l 2 02:10 blocked blocked '{"reason":"review failed (exit 124)","spent":{"step":"review","model":"claude-haiku-5-5","sec":60,"unread":"the token usage of the first attempt could not be read","firstTry":{"reason":"review failed (exit 124)","spent":{"step":"review","model":"claude-haiku-5-5","usage":{"input":2000000}}}}}'
+  recok "$S/cards.jsonl" "review lines written before BOTHTRIES kept a first try's count"
+  out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot exited non-zero"
+  [ "$(jq -c '[.landed[0].metrics.timeline[0], .needsYou.blocked[0].metrics.timeline[0]] | map([.usd, .model, .estimate])' <<<"$out")" \
+    = '[[0.1,"claude-haiku-5-5","the tokens it counted, at its model'"'"'s price"],[0.2,"claude-haiku-5-5","the tokens it counted, at its model'"'"'s price"]]' ] \
+    || fail "an old review's first try count ($S/cards.jsonl) is left out of its estimate: $(jq -c '[.landed[0].metrics.timeline, .needsYou.blocked[0].metrics.timeline]' <<<"$out")"
 }
 
 # A session cut off by the time limit ends with an answer Claude Code names <synthetic> (no model answered it). Bug
@@ -361,7 +411,7 @@ t_metricsbymodel() {
   recok "$S/cards.jsonl" "the two-model fixture"
   out=$(loop snapshot --fresh) || fail "snapshot of the two-model fixture exited non-zero"
   [ "$(jq -c '.metrics.week.perLanded' <<<"$out")" \
-    = '{"usd":16.5,"leftOut":1,"tokens":4000000,"tokensLeftOut":1,"byModel":{"claude-opus-5-5":{"usd":12,"leftOut":0,"tokens":2000000,"tokensLeftOut":0},"claude-sonnet-5-5":{"usd":4.5,"leftOut":1,"tokens":2000000,"tokensLeftOut":1}}}' ] \
+    = '{"usd":16.5,"leftOut":1,"estimate":0,"tokens":4000000,"tokensLeftOut":1,"byModel":{"claude-opus-5-5":{"usd":12,"leftOut":0,"estimate":0,"tokens":2000000,"tokensLeftOut":0},"claude-sonnet-5-5":{"usd":4.5,"leftOut":1,"estimate":0,"tokens":2000000,"tokensLeftOut":1}}}' ] \
     || fail "the totals by model: $(jq -c '.metrics.week.perLanded' <<<"$out")"
   # Its day in the sparkline: with a step unpriced the day's cost is only part of it, so it has no value, never $16.50.
   [ "$(jq -c '.metrics.days[-2] | [.day, .landed, .perLandedUsd]' <<<"$out")" = "[\"$y\",1,null]" ] \

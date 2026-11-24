@@ -336,6 +336,7 @@
 {"area": "session", "test": "proxyroute.test.sh"}
 {"area": "session", "test": "reserve.test.sh"}
 {"area": "session", "file": "conveyor/lib/session.sh"}
+{"area": "session", "file": "conveyor/jq/tryfold.jq"}
 {"area": "review", "test": "review.test.sh"}
 {"area": "review", "test": "reviewback.test.sh"}
 {"area": "review", "test": "donewhen.test.sh"}

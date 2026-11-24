@@ -3,7 +3,9 @@
 // sessions | null, sessionsError}. cards is {todayUsd, weekUsd, perLandedUsd, landedAfter, unpricedSteps, perCard: [each
 // card worked on in the 7 days, landed, blocked or still on the belt, with its todayUsd and weekUsd; a restarted card is
 // one row with runs, its dollars every run's] | null when the
-// host gave no such rows, todayLeftOut, weekLeftOut, perLandedLeftOut, unpriced: [{repo, card, issue, step, time, why}],
+// host gave no such rows, todayLeftOut, weekLeftOut, perLandedLeftOut, todayEstimate, weekEstimate, perLandedEstimate
+// (the priced steps of each figure priced as an estimate: the figure, and a card row's, then has `~`; a pick row's
+// estimate the same), unpriced: [{repo, card, issue, step, time, why}],
 // picks: [the rule Pick settings' cards, one row a group and builder choice: {repo, group, model, effort, cards, landed,
 // usd (null when a step has no price), firstTry, reviews, open}] | null, trials: {dropped: [{repo, group, model, effort,
 // cards}], flagged: [{repo, card, issue, group, files}]} (none from an older host), replays: [each project whose engine
@@ -128,15 +130,17 @@ window.DASH_APP.panel({
   error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read Cost', message)); },
   render(el, d, ctx) {
     const h = ctx.h, out = [];
-    const figure = (key, label, value) => {
+    // est: how many of the figure's priced steps are priced as an estimate (the figure then has `~`).
+    const figure = (key, label, value, est) => {
       const f = h('div', 'figure');
       f.dataset.figure = key;
-      f.append(ctx.number(key, value, ctx.money), h('span', 'figure-label', label));
+      f.append(ctx.number(key, value, (v) => ctx.money(v, est > 0)), h('span', 'figure-label', label));
       return f;
     };
     if (d.cards) {
       const c = d.cards, figures = h('div', 'figures');
-      figures.append(figure('today', 'Cards today', c.todayUsd), figure('week', 'Cards, last 7 days', c.weekUsd), figure('per', 'Per landed card (7 days)', c.perLandedUsd));
+      figures.append(figure('today', 'Cards today', c.todayUsd, c.todayEstimate), figure('week', 'Cards, last 7 days', c.weekUsd, c.weekEstimate),
+        figure('per', 'Per landed card (7 days)', c.perLandedUsd, c.perLandedEstimate));
       out.push(figures);
       const after = Object.entries(c.landedAfter || {}).filter(([, n]) => n > 0)
         .map(([k, n]) => `${n} after ${k === 'more' ? 'more than 3' : k} ${k === '1' ? 'review' : 'reviews'}`);
@@ -170,7 +174,7 @@ window.DASH_APP.panel({
           head.append(ctx.tag(x.repo), ctx.issueLink(x), h('span', 'title', x.title || 'untitled'), ctx.chip(chip[0], chip[1]));
           // A restarted card is one row: its dollars are every run's.
           if (typeof x.runs === 'number' && x.runs > 1) head.append(h('span', null, `${x.runs} runs`));
-          head.append(h('span', 'num', `${ctx.money(x.todayUsd)} today`), h('span', 'num', `${ctx.money(x.weekUsd)} in 7 days`));
+          head.append(h('span', 'num', `${ctx.money(x.todayUsd, x.todayEstimate > 0)} today`), h('span', 'num', `${ctx.money(x.weekUsd, x.weekEstimate > 0)} in 7 days`));
           li.replaceChildren(head);
         };
         // The costliest in the 7 days first; one not priced last. Sorted by project, the costliest first in each project.
@@ -190,7 +194,7 @@ window.DASH_APP.panel({
         c.picks.forEach((x) => {
           const tr = h('tr');
           tr.dataset.group = x.group;
-          const spend = x.usd === null ? 'unknown: a step has no price' : x.landed > 0 ? ctx.money(x.usd / x.landed) : 'none landed';
+          const spend = x.usd === null ? 'unknown: a step has no price' : x.landed > 0 ? ctx.money(x.usd / x.landed, x.estimate > 0) : 'none landed';
           [x.repo, x.group, `${ctx.modelName(x.model)}${x.effort ? ` ${x.effort}` : ''}`, String(x.cards), spend, share(x.firstTry, x.landed),
             x.landed > 0 ? (x.reviews / x.landed).toFixed(2) : 'none landed', String(x.open)].forEach((v) => tr.append(h('td', null, v)));
           t.append(tr);

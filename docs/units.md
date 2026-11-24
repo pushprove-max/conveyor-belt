@@ -15,14 +15,17 @@ This list is what `/units` prints. The pane shows the same board in a different 
 how. No time is estimated from past cards: only what was measured is shown. A figure is never cut: figures are
 right-aligned and the title is what gives way.
 
-- A head, two lines: `CONVEYOR`, dollars today and the Conveyor host (`● buildbox`); then the weekly limit with its
-  reset (`weekly limit 94% · resets 1d 18h`) and the counts on the belt and queued. While the loop runs with a builder
+- A head: `CONVEYOR`, dollars today and the Conveyor host (`● buildbox`; when the view is too narrow for
+  both, the host gives way, and when it is narrower still, a gap shows as `+` after the dollars); then the weekly limit with its
+  reset (`weekly limit 94% · resets 1d 18h`) and the counts on the belt and queued. In a narrow view, the dollars
+  today or their gap can take a line of their own between these two lines
+  ([Estimates and gaps](#estimates-and-gaps)). While the loop runs with a builder
   cap, the `ON THE BELT` head gives the cards on the belt and the cap. It also gives a card that lands or has landed,
   which the cap does not count (`ON THE BELT (2 of 7, 1 landing not counted)`). When the snapshot is older than the
   card records or the loop's own count, the head gives the count the loop gives now. When the loop gives no count, the
   head gives the snapshot's count, or else the cards on the belt that the cap counts. The Board uses the loop's count only when the snapshot is older than the card records. With more than
   one project, each project's count follows its name (`ON THE BELT (bakery 1 of 3 · gadgetlab 1)`). In `/units` a
-  third line gives how many findings the review's judge declined today (`judge declined 3 findings today`), from the
+  dim line under the head gives how many findings the review's judge declined today (`judge declined 3 findings today`), from the
   snapshot's declined list (its `declined` and `declinedRest` lines by the judge, by this machine's day, each line
   once).
 - **The Foreman**, under the head: `Foreman listening`, or `Foreman not listening` with the reason (`not the Foreman
@@ -83,7 +86,9 @@ right-aligned and the title is what gives way.
      when it is not today), its overall time so far (from its pick-up, never the time it sat queued; a card resumed
      from a kept patch counts the earlier card's time and shows its first start) and its cost (`no reading yet` before
      any token is read, never $0; `cost shown when the step ends` when the running session's route reports no token
-     use until the step ends; `cost partial` when a step has no price).
+     use until the step ends). A `~` before the dollars (`~$4.12`) marks an estimate (see "Estimates and gaps" below).
+     When a step has no price, the cost is the dollars that are known and the gap: `$4.10 + 1 step not priced`. When
+     the line has no room for that, the cost shows as `$4.10+`, and the dollars and the gap go on a line under it.
   2. The six steps Build, Review, Fix, Test, Land, Push as one track: done `✓` with a filled join `━━`, the step in
      progress lit `▶`, to come dim, skipped `–` (Fix after a GO), failed `✗` in red. Where the width has room, a
      done step adds the time it took (`✓ Build 16m`) and a step that ran more than once its count (`Review 2 of 3`,
@@ -126,7 +131,8 @@ right-aligned and the title is what gives way.
   recent cards, and `+N more` for the rest. Per card the time it landed, `✓`, the issue and short
   title, the last verdict and its round (`NO-GO r3`), and its cost (`pushing` while the push runs, `Landed, waiting for Push landed` with that rule Off, `not pushed`,
   `issue open` when GitHub did not close it); beneath, when it was picked up, its overall time to the landing and the
-  follow-ups it filed (`↳ 3 follow-ups: #13 #14 #15`).
+  follow-ups it filed (`↳ 3 follow-ups: #13 #14 #15`). A cost with a gap that has no room on its line shows as
+  `$4.10+`, with the dollars and the gap on a line under it.
 - **The measurements of a card**, in `/units` under each card that needs you, the same fields as the Board's per-card
   detail, less two that only the Board shows (what the card waited on in the queue, with the time under each cause,
   and the card whose landing broke main), in two lines: where its time went (`lead`, `cycle`, `queued`, `slot wait`, `build`, `review`, `fix`,
@@ -134,7 +140,7 @@ right-aligned and the title is what gives way.
   level, reviews, rebuilds, retries, follow-up depth, follow-ups filed, weekly limit points, tokens, dollars, and why
   it is blocked, for example `proof check` or `session failed`), then one line a finished step (its seconds, tokens, dollars, model, findings, tests and the
   session's own stats; a step with no price says why, `not priced: no model recorded`). A reading that was not taken
-  reads `missing`, never 0; a snapshot from before the measurements shows none of these lines. Not in the pane. The header's `today` is the priced steps' dollars, with `+ N steps not priced` when some are left out.
+  reads `missing`, never 0; a snapshot from before the measurements shows none of these lines. Not in the pane. The header's `today` is the priced steps' dollars, with `+ N steps not priced` when some are left out, and `~` before them when one of them is an estimate.
 - **FAST LANE**: the lane's open change (commits ahead of the default branch, uncommitted files) and its card: on the
   belt with its step, needing you, landed, or not landed.
 - **RESEARCH LANE**: working or idle, with the time of its last activity.
@@ -147,6 +153,27 @@ project's name.
 A loop that is not picking says so after `CONVEYOR` in the header (`shop paused`, `shop stopped`, `shop paused by guard`, `shop: no loop process`), from the snapshot's health, so
 `conveyor.sh control pause` or `stop` shows there; a running loop adds nothing. A loop that paused itself, after a
 sign-in failed, shows the reason after the state (`shop paused: build: Claude Code's own sign-in expired; ...`).
+
+### Estimates and gaps
+
+A card's cost is the sum of the costs of its steps. Each step is priced from the tokens it used, at the price of its
+model. Sometimes the tokens of a step cannot be read in full, for example when a review times out before its turn
+ends. Such a step gets an estimate, and `/units` puts `~` before the dollars (`~$4.12`):
+
+- When the step counted some of its tokens, the estimate is those tokens at the price of the model that used them. The
+  real cost can be higher.
+- When the step counted no tokens, the estimate is the median cost of the steps of the same kind (build, review, fix)
+  that ran on the same model in the last 30 days and have an exact price. A step with an estimate, or with no price,
+  is not one of them.
+
+Some of these steps cannot get an estimate: their model has no price, or no step of their kind with an exact price ran
+on their model in those 30 days. A step that counted some tokens never gets the median: when its model has no price,
+it gets no estimate. Such a step has no price. The card then shows the dollars of its priced steps and the gap:
+`$4.10 + 1 step not priced`. Those dollars do not include the steps with no price. The header's `today` and the `LANDED TODAY`
+heading show the day in the same way. When the header's `today` has no room beside `CONVEYOR` and the state of a loop
+that is not picking, it shows as `today $4.10+`, and the dollars and the gap go on a line under it. When `today $4.10+`
+has no room there either, `today` and its dollars go on a line of their own under `CONVEYOR`. In a pane too
+narrow for that text, it shows as `$4.10 + 1 not priced`.
 
 ## The pane
 
@@ -167,7 +194,9 @@ not be read, a fetch error and the snapshot age note. These wrap too, so no numb
 A word wider than the pane breaks between whole characters.
 
 - **The head**: `/units` as a filled label, the Conveyor host in bold and, on the right, `DAY SPEND` and the dollars
-  today.
+  today. The label and the host are not cut for the dollars. When the pane is too narrow for all of it, the dollars
+  show without `DAY SPEND`. When it is narrower still, a gap shows as `+` after the dollars (`$4.10+`), and the
+  dollars and the gap go on a line under the head.
 - **The count band**, between two rules: `4 ON BELT · 0 READY · 5 WAITING · 0 NEEDS YOU`. `READY` counts the issues
   that the loop can pick now. `WAITING` counts the issues that wait on another card.
   When the line is wider than the pane, the dots lose their spaces. When it is still too wide, the band wraps to two
@@ -189,8 +218,11 @@ A word wider than the pane breaks between whole characters.
   uses the remaining width of the row, and a title that is too long ends in `…`. A step shows `▶` while it runs,
   `✓` when it is done, `✗` when it failed and `·` when the card did not get to it (Fix after a GO, too). A dim
   legend is under the table. Each project with cards on the belt has its own matrix. Each other project of the
-  machine has one dim line with its name and slots. When the row does not fit, the `Age` column is not shown. When
-  fewer than 6 columns are left after the cost, the title is not shown.
+  machine has one dim line with its name and slots. `Cost` is shown when the ID, the steps and
+  `Cost` fit in the row, and `Age` only when the row has room for it after that. A row too narrow for `Cost` shows
+  no `Cost`, and still shows `Age` when `Age` fits. When fewer than 6 columns are left after the other columns, the title is not shown. When a step of the card has no price, its
+  cost shows as `$4.10+`, and the line under the row shows the dollars and the gap: `$4.10 + 1 step not priced`.
+  When `Cost` is not shown, the cost of each card goes on the line under its row.
 - **WORKER ACTIVITY**: one line for each card: its mark, its issue and the command that runs now, made short. A path
   in the card's worktree shows as `worktree` (`cd worktree/x && git add -A`), and any other path shows only its last
   part. On the right: the tool (`Bash`) and the time the step started. A card that runs no command shows its step.
@@ -214,7 +246,9 @@ A word wider than the pane breaks between whole characters.
 - **LANDED TODAY · 20**: the count of every card landed today; on the right, `5 most recent of 20`. One row for each of the five most recent cards: the time
   it landed, the issue, the last verdict and its round (`✓ GO r2`), its overall time and its cost (or `pushing`,
   `issue open` or `not pushed`). A card that still waits shows `waiting` there, and what it waits for (such as
-  `Landed, waiting for Push landed`) on the line under its row.
+  `Landed, waiting for Push landed`) on the line under its row. A card with a step that has no price shows `$4.10+`
+  as its cost, and `$4.10 + 1 step not priced` on the line under its row. When the row does not fit with its cost,
+  the `Cost` column is not shown, and the cost (or what shows in its place) goes on the line under the row.
 - The Fast and Research lanes, and the lines about what could not be read. A line about what could not be read wraps
   at its spaces. A word wider than the line breaks between whole characters.
 
@@ -321,8 +355,8 @@ A snapshot that cannot be read is one plain note in every view, and nothing from
 In the pane, a note that is wider than the pane goes on to more lines at its spaces. A word wider than the pane, such
 as a long host file path, breaks between whole characters. The Foreman line still shows under it.
 
-Smaller gaps are named where they are: `weekly limit not read`, `today partial` and `cost partial` (a step could not be
-priced: never a part sum), `QUEUE` `not read: GitHub did not list the issues`, and under the board `units: the <record> snapshot cannot be read` when one record of several fails. A Board feed
+Smaller gaps are named where they are: `weekly limit not read`, `today partial` and `cost partial` (a project's
+snapshot could not be read, or its prices could not be worked out, so no dollars are known), `QUEUE` `not read: GitHub did not list the issues`, and under the board `units: the <record> snapshot cannot be read` when one record of several fails. A Board feed
 (`units-feed.json`) over the 4 MiB cap (shown as 4.2 MB; the engine refuses a larger read), or a limit file
 (`limit.json`) over 16384 bytes, is not read, nor tried again each second, and a line under the board names its size
 and the cap; with no board, that line comes first in the note every view draws.

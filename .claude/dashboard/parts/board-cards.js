@@ -460,7 +460,7 @@
     const prog = col === 'building' && item.step === 'tests' ? ctx.testProgress({ files: item.files, tests: item.tests }) : null;
     meta.append(behind || h('span', null, col === 'review' ? `review ${item.review || '?'} of ${item.of || 3}`
       : (item.step === 'waiting' ? waitsOn(item.waitsOn) : (STEP[item.step] || item.step || 'in progress')) + (prog ? `, ${prog}` : '')), ctx.since(item.stepAt, ''),
-      h('span', null, item.reading === false ? (item.atEnd === true ? 'cost shown when the step ends' : 'no reading yet') : ctx.money(item.usd)));
+      h('span', null, item.reading === false ? (item.atEnd === true ? 'cost shown when the step ends' : 'no reading yet') : ctx.money(item.usd, item.estimate === true)));
     return meta;
   }
   // A card in Building or Review (card).
@@ -475,7 +475,7 @@
   // The line of a landed card: its reviews and cost, or why it was closed with no build.
   function landedMeta(item) {
     const r = num(item.reviews);
-    return S.ctx.h('p', 'row-meta', item.step === 'closed' ? (splitFiled(item).length ? 'split, not built' : 'already fixed') : `${r === null ? '?' : r} review${r === 1 ? '' : 's'} · ${S.ctx.money(item.usd)}`);
+    return S.ctx.h('p', 'row-meta', item.step === 'closed' ? (splitFiled(item).length ? 'split, not built' : 'already fixed') : `${r === null ? '?' : r} review${r === 1 ? '' : 's'} · ${S.ctx.money(item.usd, item.estimate === true)}`);
   }
   // What a card has under its own lines (card): its Done-when check, stalls and split, and its seats.
   function cardFoot(el, col, item) {

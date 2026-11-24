@@ -49,7 +49,8 @@
       const h = ctx.h, out = [];
       const sec = (v) => (num(v) ? ctx.dur(v) : NONE);
       const spread = (x) => (x && num(x.p50) ? `${ctx.dur(x.p50)} (90th: ${ctx.dur(x.p90)})` : NONE);
-      const money = (v) => (num(v) ? ctx.money(v) : NONE);
+      // est: the figure holds a step priced as an estimate (a count of them, or true): it has `~`.
+      const money = (v, est) => (num(v) ? ctx.money(v, Boolean(est)) : NONE);
       // Why a card waited in the queue (the seconds under each cause the loop's samples named for its issue),
       // and the card whose landing turned main red.
       const waitAndBreak = (m) => {
@@ -71,7 +72,7 @@
       };
       const byModel = (t) => {
         const m = Object.entries((t && t.perLanded && t.perLanded.byModel) || {});
-        return m.length ? m.map(([k, v]) => `${ctx.modelName(k)} ${money(v.usd)}${left(v.leftOut)}, ${tokens(v.tokens)} tokens${unreadOut(v.tokensLeftOut)}`).join('; ') : NONE;
+        return m.length ? m.map(([k, v]) => `${ctx.modelName(k)} ${money(v.usd, v.estimate)}${left(v.leftOut)}, ${tokens(v.tokens)} tokens${unreadOut(v.tokensLeftOut)}`).join('; ') : NONE;
       };
       const ROWS = [
         ['Cards ended', (t) => (t ? `${t.cards} (${t.landed} landed, ${t.blocked} blocked)` : NONE)],
@@ -87,7 +88,7 @@
           const f = t && t.testFailures;
           return f ? `${f.card} the card's (to fix), ${f.main} failing on main too (waited), ${f.flaky} flaky; ${sec(f.mainSec)} running them on main` : NONE;
         }],
-        ['Per landed card', (t) => (t && t.perLanded ? `${money(t.perLanded.usd)}${left(t.perLanded.leftOut)}, ${tokens(t.perLanded.tokens)} tokens${unreadOut(t.perLanded.tokensLeftOut)}` : NONE)],
+        ['Per landed card', (t) => (t && t.perLanded ? `${money(t.perLanded.usd, t.perLanded.estimate)}${left(t.perLanded.leftOut)}, ${tokens(t.perLanded.tokens)} tokens${unreadOut(t.perLanded.tokensLeftOut)}` : NONE)],
         ['Per landed card, by model', (t) => byModel(t)],
         ['Waiting on the owner', (t) => sec(t && t.waitMaxSec)],
         ['Weekly limit per card', (t) => (t && num(t.limitPerCard) ? `${t.limitPerCard} pts` : NONE)],
@@ -160,9 +161,10 @@
             spark(col('cycleSec'), 'Cycle time', ctx.dur), change(cyc && cyc.p50, p.cycleSec && p.cycleSec.p50, 'down', ctx.dur)),
           tile('go', 'Passed first review', num(w.firstReviewPass) ? pct(w.firstReviewPass) : null, null,
             spark(col('firstReviewPass'), 'Passed first review', pct), change(w.firstReviewPass, p.firstReviewPass, 'up', pts)),
-          tile('cost', 'Cost per landed card', usd ? ctx.money(usd.usd) : null, usd && usd.leftOut > 0 ? left(usd.leftOut).trim() : null,
-            spark(col('perLandedUsd'), 'Cost per landed card', ctx.money), change(usd && !(usd.leftOut > 0) ? usd.usd : null,
-              p.perLanded && !(p.perLanded.leftOut > 0) ? p.perLanded.usd : null, 'down', ctx.money)));
+          // An estimate is no exact cost either: it has `~`, and no change is drawn from it (as the days' perLandedUsd).
+          tile('cost', 'Cost per landed card', usd ? ctx.money(usd.usd, usd.estimate > 0) : null, usd && usd.leftOut > 0 ? left(usd.leftOut).trim() : null,
+            spark(col('perLandedUsd'), 'Cost per landed card', ctx.money), change(usd && !(usd.leftOut > 0) && !(usd.estimate > 0) ? usd.usd : null,
+              p.perLanded && !(p.perLanded.leftOut > 0) && !(p.perLanded.estimate > 0) ? p.perLanded.usd : null, 'down', ctx.money)));
         return box;
       }
 
@@ -242,12 +244,12 @@
           .map(([k, x]) => [ctx.modelName(k), x]);
         if (!m.length) return figure('models', 'Cost per landed card, by model', none());
         const W = 300, row = 22, H = m.length * row, x0 = 140, room = 100, most = Math.max(...m.map(([, x]) => x.usd)) || 1;
-        const svg = chart(`Cost per landed card by model: ${m.map(([k, x]) => `${k} ${ctx.money(x.usd)}`).join(', ')}`, W, H);
+        const svg = chart(`Cost per landed card by model: ${m.map(([k, x]) => `${k} ${ctx.money(x.usd, x.estimate > 0)}`).join(', ')}`, W, H);
         m.forEach(([k, x], i) => {
-          const y = i * row, bw = Math.max(2, (x.usd * room) / most), g = s('g', { class: 'bar' }, tip(`${k}: ${ctx.money(x.usd)} a landed card${left(x.leftOut)}`));
+          const y = i * row, bw = Math.max(2, (x.usd * room) / most), g = s('g', { class: 'bar' }, tip(`${k}: ${ctx.money(x.usd, x.estimate > 0)} a landed card${left(x.leftOut)}`));
           g.append(s('text', { x: x0 - 6, y: y + 15, class: 'tick', 'text-anchor': 'end' }, k.length > 22 ? `${k.slice(0, 21)}…` : k));
           g.append(s('rect', { x: x0, y: y + 4, width: bw, height: row - 8, rx: 3, class: 'fill-s1' }));
-          g.append(s('text', { x: x0 + bw + 6, y: y + 15, class: 'tick value' }, ctx.money(x.usd)));
+          g.append(s('text', { x: x0 + bw + 6, y: y + 15, class: 'tick value' }, ctx.money(x.usd, x.estimate > 0)));
           svg.append(g);
         });
         return figure('models', 'Cost per landed card, by model', svg);
@@ -305,7 +307,7 @@
           tr.dataset.project = r.project === null ? '' : String(r.project);
           if (r.project === null) name.textContent = ctx.machine === 'the build machine' ? 'Build machine' : 'This machine'; else name.append(ctx.tag(r.project));
           const cell = (v) => h('td', v === NONE ? 'unknown' : null, v);
-          tr.append(name, cell(num(r.landed) ? String(r.landed) : NONE), cell(sec(r.leadSec)), cell(num(r.usd) ? `${money(r.usd)}${left(r.usdLeftOut)}` : NONE));
+          tr.append(name, cell(num(r.landed) ? String(r.landed) : NONE), cell(sec(r.leadSec)), cell(num(r.usd) ? `${money(r.usd, r.usdEstimate > 0)}${left(r.usdLeftOut)}` : NONE));
           body.append(tr);
         });
         t.append(thead, body);
@@ -360,7 +362,7 @@
           det.addEventListener('toggle', () => { if (det.open) open.add(key); else open.delete(key); });
           const sum = h('summary', 'row-main');
           sum.append(ctx.tag(c.repo), ctx.issueLink(c), h('span', 'title', c.title || 'untitled'), ctx.chip(c.state || 'unknown', c.state === 'blocked' ? 'warn' : 'quiet'),
-            h('span', 'num', money(m.usd)));
+            h('span', 'num', money(m.usd, m.estimate === true)));
           const meta = h('p', 'row-meta');
           const diff = m.diff ? `${m.diff.files} files, +${m.diff.added} −${m.diff.removed}` : `diff ${NONE}`;
           const lim = m.limit && num(m.limit.used) ? `${m.limit.used} pts of the weekly limit` : `weekly limit ${NONE}`;
@@ -374,7 +376,7 @@
           // A restarted card's figures above are those of every run of its issue; its own are "this run".
           if (num(m.runs) && m.runs > 1 && m.thisRun) {
             const t = m.thisRun;
-            meta.append(h('span', null, `${m.runs} runs, ${sec(m.runSec)} in all`), h('span', null, `this run: ${money(t.usd)}, ${sec(t.runSec)}, building ${sec(t.buildSec)}, in review ${sec(t.reviewSec)}, `
+            meta.append(h('span', null, `${m.runs} runs, ${sec(m.runSec)} in all`), h('span', null, `this run: ${money(t.usd, t.estimate === true)}, ${sec(t.runSec)}, building ${sec(t.buildSec)}, in review ${sec(t.reviewSec)}, `
               + `fixing ${sec(t.fixSec)}, in tests ${sec(t.testSec)}, ${tokens(t.tokens)} tokens, ${int(t.reviews)} reviews, ${int(t.fixes)} fixes, ${int(t.testRuns)} test runs`));
           }
           if (m.blockClass) meta.append(ctx.chip(`blocked: ${m.blockClass}`, 'warn'));
@@ -384,7 +386,7 @@
             const t = h('li', null);
             // A review's verdict in words ("review: changes asked"), never its code.
             const result = st.step === 'review' && /^(NO-)?GO$/.test(st.result) ? `: ${ctx.verdictSaid(st.result)}` : st.result && st.result !== 'ok' ? ` ${st.result}` : '';
-            const parts = [st.step + result, sec(st.sec), `${tokens(st.tokens)} tokens`, num(st.usd) ? `${ctx.money(st.usd)}${st.override === true ? ' (priced from your override)' : ''}` : `not priced: ${st.unpriced || 'no reason given'}`];
+            const parts = [st.step + result, sec(st.sec), `${tokens(st.tokens)} tokens`, num(st.usd) ? `${ctx.money(st.usd, Boolean(st.estimate))}${st.override === true ? ' (priced from your override)' : ''}${st.estimate ? ` (an estimate: ${st.estimate})` : ''}` : `not priced: ${st.unpriced || 'no reason given'}`];
             // '<model> at <effort>', as the Board says it elsewhere (a card's seats).
             if (st.model) parts.push(ctx.modelName(st.model) + (st.effort ? ` at ${st.effort}` : ''));
             // The route of a Claude session when a proxy is set (route): through the proxy, or on the subscription login.

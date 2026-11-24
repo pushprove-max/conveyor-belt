@@ -219,6 +219,8 @@ test('a release suite on this machine, or from a snapshot with no machine, has n
 test('the head gives today\'s priced dollars and how many steps they leave out', () => {
   const text = tableText(board({ cost: { today: 4.5, todayLeftOut: 2 } }), 80)
   expect(text.split('\n')[0]).toMatch(/^CONVEYOR +today \$4\.50 \+ 2 steps not priced  ● buildbox$/)
+  // Bug (#1585): a step priced as an estimate (its usage read only in part) read as exact; its day is marked ~.
+  expect(tableText(board({ cost: { today: 4.12, todayLeftOut: 0, todayEstimate: 1 } }), 80).split('\n')[0]).toMatch(/^CONVEYOR +today ~\$4\.12  ● buildbox$/)
 })
 
 test('NEEDS YOU lists a card waiting for a yes before a blocked one, each with its whole reason on its own line', () => {
@@ -533,12 +535,16 @@ test('/units shows how many findings the judge declined today', () => {
   expect(tableText(board(), 80).split('\n').slice(0, 4)).toEqual([expect.stringMatching(/^CONVEYOR/), expect.stringMatching(/^weekly limit/), 'judge declined no findings today', ''])
 })
 
-test('a card with no token read yet says no reading yet, never $0; one with a step not priced reads cost partial', () => {
+test('a card with no token read yet says no reading yet, never $0; one with a step not priced gives the dollars known and the gap', () => {
   expect(beltCard({ usd: null, reading: false })[0]).toMatch(/ · no reading yet$/)
   expect(beltCard({ usd: 0, reading: false })[0]).toMatch(/ · no reading yet$/)
   // Bug (#391): a build whose route streams every answer with usage 0 read "no reading yet" for its whole step.
   expect(beltCard({ usd: null, reading: false, atEnd: true }, 90)[0]).toMatch(/ · cost shown when the step ends$/)
   expect(beltCard({ usd: 0.5, reading: true })[0]).toMatch(/ · \$0\.50$/)
+  // Bug (#1585): a card with a step not priced read a bare "cost partial", with no dollars, for good.
+  expect(beltCard({ usd: null, usdKnown: 4.1, notPriced: 1, reading: true }, 90)[0]).toMatch(/ · \$4\.10 \+ 1 step not priced$/)
+  expect(beltCard({ usd: 4.12, usdKnown: 4.12, notPriced: 0, estimate: true, reading: true })[0]).toMatch(/ · ~\$4\.12$/)
+  // A snapshot that gives no dollars known (the price table could not be run) is partial, never $0.
   expect(beltCard({ usd: null, reading: true })[0]).toMatch(/ · cost partial$/)
 })
 
@@ -730,6 +736,11 @@ test('a card shows its measurements under it, a reading not taken reads missing,
   const need = section(tableText(board({ needsYou: { waiting: [], blocked: [{ ...BLOCKED, metrics: old }] } }), 400), 'NEEDS YOU')
   expect(need).toMatch(/lead missing/)
   expect(need).toMatch(/diff missing · findings missing · reviews 2 · rebuilds 0 · retries 1 · depth missing · follow-ups 0 · limit missing · 3\.0M tokens · cost partial: 1 step not priced · blocked: timeout/)
+  // Bug caught (#1585 review): NEEDS YOU hid the known dollars of a card with a step not priced, and showed an
+  // estimate as exact.
+  const needOf = (m: object) => section(tableText(board({ needsYou: { waiting: [], blocked: [{ ...BLOCKED, metrics: m }] } }), 400), 'NEEDS YOU')
+  expect(needOf({ ...old, usdKnown: 4.1 })).toMatch(/ · 3\.0M tokens · \$4\.10 \+ 1 step not priced · blocked: timeout/)
+  expect(needOf({ ...M, usdKnown: 6, estimate: true })).toMatch(/ · 3\.0M tokens · ~\$6\.00$/m)
   expect(need).not.toMatch(/lead 0|depth 0|limit 0/)
   expect(tableText(board({ landed: LANDED }), 400)).not.toMatch(/lead |missing/)
 })
@@ -758,6 +769,9 @@ test('a card shows its step timeline, and its measurements wrap at a narrow widt
   const unpriced = [{ ...timeline[0], usd: null, tokens: null, unpriced: 'its token usage could not be read: the session output holds no token usage' }]
   expect(section(tableText(blocked({ ...M, usd: null, unpriced: 1, timeline: unpriced }), 400), 'NEEDS YOU'))
     .toContain('      build · 10m · missing tokens · not priced: its token usage could not be read: the session output holds no token usage · claude-opus-5-5 medium')
+  // Bug caught (#1585 review): a step priced as an estimate read as exact in the timeline.
+  const estimated = [{ ...timeline[0], tokens: null, estimate: 'the tokens it counted, at its model\'s price' }]
+  expect(section(tableText(blocked({ ...M, timeline: estimated }), 400), 'NEEDS YOU')).toContain('      build · 10m · missing tokens · ~$2.00 · claude-opus-5-5 medium')
   const narrow = section(tableText(blocked(M), 80), 'NEEDS YOU')
   expect(narrow.split('\n').every(l => l.length <= 80)).toBe(true)
   expect(narrow.split('\n').filter(l => l.startsWith('    ') && !l.includes('blocked:')).join('\n')).not.toContain('…')
@@ -787,6 +801,13 @@ test('LANDED TODAY gives the time, the last verdict and its round, the cost or p
   ])
   // A day not all priced: the heading's cost is partial, never the sum of the rest.
   expect(section(tableText(board({ landed: LANDED, cost: { today: null } }), 62), 'LANDED TODAY').split('\n')[0]).toBe('LANDED TODAY  3 · cost partial')
+  // Bug (#1585): a landed card with a step not priced read "cost partial"; one priced as an estimate read as exact.
+  // The heading's day gives the steps it leaves out too.
+  const est = section(tableText(board({ landed: [{ ...LANDED[0], usd: null, usdKnown: 4.1, notPriced: 1 }, { ...LANDED[2], usd: 0.4, estimate: true }],
+    cost: { today: 4.5, todayLeftOut: 1, todayEstimate: 1 } }), 90), 'LANDED TODAY').split('\n')
+  expect(est[0]).toBe('LANDED TODAY  2 · ~$4.50 + 1 step not priced')
+  expect(est[1]).toMatch(/#3862 One snapshot record .* \$4\.10 \+ 1 step not priced$/)
+  expect(est.find(l => l.includes('#3858'))).toMatch(/already fixed  ~\$0\.40$/)
 })
 
 // The owner read "pushing" on a landed card, with push off and nothing pushed, as a push against the rule. With push
@@ -1009,6 +1030,98 @@ test('the pane at 60 columns: a landed card waiting for Push landed leaves the o
   expect(lines.find(l => l.includes('#3862'))).toMatch(/ \$4\.21$/)
   expect(lines.find(l => l.includes('#3860'))).toMatch(/ waiting$/)
   expect(lines).toContainEqual(expect.stringMatching(/^ +Landed, waiting for Push landed$/))
+})
+
+// #1585 review. Bugs it catches: in a 32-column pane, `DAY SPEND $4.10 + 1 step not priced` (35 columns) did not fit
+// the head, which then dropped the day's spend; and a card's known dollars and gap (25 columns) in the shared Cost
+// column of BUILD MATRIX and LANDED TODAY widened every row, so the pane cut the cards' costs off. The column gives
+// `$4.10+`, and the dollars and the gap in full go on a line of their own under the row. LANDED TODAY is read at 48
+// columns: its rows are 45 wide with `$4.10+` in Cost, 64 with the whole text there. And (E30) `$4.50 + 1 step not
+// priced` on the head's right left five columns for its left, which showed ` /un…`: the head keeps `/units` and the
+// host whole beside `$4.50+`, and the day's dollars and gap go on the line under it.
+test('the pane at 32 and 48 columns: a step not priced keeps the day\'s spend and the cards\' dollars, the gap on a line of its own', () => {
+  const gap = { usd: null, usdKnown: 4.1, notPriced: 1 }
+  const s = board({ belt: [{ ...BELT[1], ...gap }], landed: [{ ...LANDED[0], ...gap }, LANDED[2]], cost: { today: 4.5, todayLeftOut: 1 } })
+  const narrow = paneModel(s, 32, 0).map(plain)
+  for (const l of narrow) expect(cols(l)).toBeLessThanOrEqual(32)
+  expect(narrow[0], `the head at 32 columns: ${narrow[0]}`).toMatch(new RegExp(`^ /units  ${s.host} +\\$4\\.50\\+$`))
+  expect(narrow[1]).toMatch(/^ +\$4\.50 \+ 1 step not priced$/)
+  expect(paneModel(s, 100, 0).map(plain)[0]).toMatch(/ DAY SPEND \$4\.50 \+ 1 step not priced$/)
+  // The matrix's heading is cut at 32 columns, so its row is found in the whole pane.
+  const at = narrow.findIndex(l => l.startsWith('#3864'))
+  expect(narrow[at]).toMatch(/ \$4\.10\+$/)
+  expect(narrow[at + 1]).toMatch(/^ +\$4\.10 \+ 1 step not priced$/)
+  const landed = section(paneModel(s, 48, 0).map(plain).join('\n'), 'LANDED TODAY').split('\n')
+  for (const l of landed) expect(cols(l)).toBeLessThanOrEqual(48)
+  const row = landed.findIndex(l => l.includes('#3862'))
+  expect(landed[row]).toMatch(/ \$4\.10\+$/)
+  expect(landed[row + 1]).toMatch(/^ +\$4\.10 \+ 1 step not priced$/)
+  expect(landed.find(l => l.includes('#3858'))).toMatch(/ \$0\.40$/)
+})
+
+// #1585 review. Bugs it catches: at 24 columns, the narrowest pane, a card's `$4.10 + 1 step not priced` (25 columns)
+// was cut on its line under the row, and the head gave the day as `$4.10+` alone, with no count of the steps not priced.
+test('the pane at 24 columns: the day\'s and a card\'s gap are given whole, never cut', () => {
+  const gap = { usd: null, usdKnown: 4.1, notPriced: 1 }
+  const lines = paneModel(board({ belt: [{ ...BELT[1], ...gap }], cost: { today: 4.5, todayLeftOut: 2 } }), 24, 0).map(plain)
+  for (const l of lines) expect(cols(l)).toBeLessThanOrEqual(24)
+  // The head gives `$4.50+` and the matrix has no room for its Cost column at this width: each line under them gives it whole.
+  expect(lines).toContainEqual(expect.stringMatching(/^ *\$4\.50 \+ 2 not priced$/))
+  expect(lines).toContainEqual(expect.stringMatching(/^ *\$4\.10 \+ 1 not priced$/))
+})
+
+// #1585 review (E13). Bug it catches: at 24 columns the matrix row of `#3864` with `~$4.12` needs 26 columns, so its
+// Cost was cut, and a card with no gap had no line under its row to give it whole; the Landed table cut its Cost column
+// the same way. With no room for the column, each card's dollars go on the line under its row.
+test('the pane at 24 columns: a card\'s estimated dollars, on the belt and landed, are given whole on a line under its row', () => {
+  const est = { usd: 4.12, usdKnown: 4.12, notPriced: 0, estimate: true }
+  const lines = paneModel(board({ belt: [{ ...BELT[1], ...est }], landed: [{ ...LANDED[0], ...est }] }), 24, 0).map(plain)
+  for (const l of lines) expect(cols(l), `line "${l}" at 24 columns`).toBeLessThanOrEqual(24)
+  for (const id of ['#3864', '#3862']) {
+    const at = lines.findIndex(l => l.includes(id))
+    expect(lines[at + 1], `the line under the row of ${id}: ${lines.join(' | ')}`).toMatch(/^ +~\$4\.12$/)
+  }
+})
+
+// #1585 review. Bugs it catches: at 40 columns the full view's head, `today $4.50 + 2 steps not priced  ● buildbox`
+// (44 columns), was too wide for spread(), which dropped the day's dollars; a belt or landed row whose times or verdict
+// and the card's known dollars and gap were too wide lost the card's cost the same way. The head keeps the day's
+// dollars, as `$4.50+` beside CONVEYOR whole, and the gap in full on the line under it; a row gives `$4.10+`, and the
+// dollars and the gap in full on a line under it.
+// #1585 review (E22). Bug it also catches: a row took the widest cost form spread() kept, which cut the left to make
+// room: the landed row `GO r1  $4.10 + 1 step not priced` (32 columns) left 6 for the time, check mark and issue, so
+// `#3862` was cut; at 45 columns the belt row's times and `$4.10 + 1 step not priced` (42 columns) left 1 for `#3864`.
+// Each row keeps its issue whole, with the short form of its cost beside it.
+test('the full view at 40 columns: a step not priced keeps the day\'s spend, each card\'s dollars and issue, the gap in full', () => {
+  const gap = { usd: null, usdKnown: 4.1, notPriced: 1 }
+  const s = board({ belt: [{ ...BELT[1], ...TIMES, ...gap }], landed: [{ ...LANDED[0], ...gap, rounds: [{ round: 1, verdict: 'GO' }] }], cost: { today: 4.5, todayLeftOut: 2 } })
+  const text = tableText(s, 40)
+  expect(text.split('\n').filter(l => cols(l) > 40)).toEqual([])
+  // The head keeps CONVEYOR whole: the day's short form beside it, its known dollars and gap whole on the line under it.
+  expect(text.split('\n').slice(0, 2)).toEqual([expect.stringMatching(/^CONVEYOR +today \$4\.50\+  ● buildbox$/), expect.stringMatching(/^ +\$4\.50 \+ 2 steps not priced$/)])
+  // Each section has one card: its row is the line after the heading.
+  const rows = (t: string, name: string) => section(t, name).split('\n').slice(1, 3)
+  const under = expect.stringMatching(/^ +\$4\.10 \+ 1 step not priced$/)
+  expect(rows(text, 'ON THE BELT')).toEqual([expect.stringMatching(/^ #3864 .* \$4\.10\+$/), under])
+  expect(rows(tableText(s, 45), 'ON THE BELT')).toEqual([expect.stringMatching(/^ #3864 .* \$4\.10\+$/), under])
+  expect(rows(text, 'LANDED TODAY')).toEqual([expect.stringMatching(/ ✓ #3862 .*GO r1  \$4\.10\+$/), under])
+})
+
+// #1585 review. Bug it catches: the head took the widest day's cost that fit the line on its own, so at 42 columns
+// `today $4.50 + 2 steps not priced` left 8 columns for `CONVEYOR · bookstore paused`, and the paused loop did not show.
+// The loop's state stays whole beside the day's short form; the day's known dollars and gap go on the line under it.
+test('the head at 42 columns keeps a paused loop whole beside a day with steps not priced', () => {
+  const lines = tableText(board({ health: { loop: true, state: 'paused' }, cost: { today: 4.5, todayLeftOut: 2 } }), 42).split('\n')
+  expect(lines.slice(0, 2), `the head at 42 columns: ${lines.slice(0, 2).join(' | ')}`)
+    .toEqual([expect.stringMatching(/^CONVEYOR · bookstore paused +today \$4\.50\+$/), expect.stringMatching(/^ +\$4\.50 \+ 2 steps not priced$/)])
+})
+// #1585 review. Bug it catches: when not even the short form (`today $4.50+`) fit beside a long paused loop, the head
+// kept it there anyway, and `CONVEYOR · conveyor-belt paused` (31 columns) was cut to 26 at 40 columns. The loop stays
+// whole; the day's dollars go on a line of their own under it.
+test('the head at 40 columns moves the day under a paused loop that leaves no room for it', () => {
+  const lines = tableText(state(fetched([['conveyor-belt', snapshot({ health: { loop: true, state: 'paused' }, cost: { today: 4.5, todayLeftOut: 2 } })]])), 40).split('\n')
+  expect(lines.slice(0, 2).map(l => l.trimEnd()), `the head at 40 columns: ${lines.slice(0, 2).join(' | ')}`)
+    .toEqual(['CONVEYOR · conveyor-belt paused', expect.stringMatching(/^ +today \$4\.50 \+ 2 steps not priced$/)])
 })
 
 // Issue 603. Bug it catches: on a wide pane the title column kept a width of its own (or sat before the steps) and

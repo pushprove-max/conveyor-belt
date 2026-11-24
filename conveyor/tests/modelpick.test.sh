@@ -258,7 +258,7 @@ t_picktable() {
   pline c1-8 8 'small code' landed ok '{"sha":"abd","product":false}'
   pline c1-9 9 '' picked; pline c1-9 9 'small code' build ok "$B"
   PF=$S/retried.jsonl; pline c1-10 10 '' picked; pline c1-10 10 'small code' build ok "$B"; pline c1-10 10 'small code' blocked blocked '{"reason":"tests failed"}'; unset PF
-  [ "$(loop snapshot | jq -c '.cost.picks')" = '[{"group":"small code","model":"claude-sonnet-5-5","effort":"medium","cards":3,"landed":1,"usd":null,"firstTry":1,"reviews":1,"open":1},{"group":"small docs","model":"claude-sonnet-5-5","effort":"medium","cards":1,"landed":1,"usd":5,"firstTry":0,"reviews":1,"open":0}]' ] \
+  [ "$(loop snapshot | jq -c '.cost.picks')" = '[{"group":"small code","model":"claude-sonnet-5-5","effort":"medium","cards":3,"landed":1,"usd":null,"estimate":0,"firstTry":1,"reviews":1,"open":1},{"group":"small docs","model":"claude-sonnet-5-5","effort":"medium","cards":1,"landed":1,"usd":5,"estimate":0,"firstTry":0,"reviews":1,"open":0}]' ] \
     || fail "the snapshot's picks by group and builder: $(loop snapshot | jq -c '.cost.picks')"
 }
 
@@ -423,6 +423,25 @@ t_pickback() {
   CONVEYOR_NOW=$(($(date +%s) + 100)) loop control pick small docs promote >/dev/null || fail "control pick small docs promote was refused"
   fx_in 'SEATCARD=21; PICK=""; PICKSEAT=""; modelpick c1-21 21 2>/dev/null; jq -c "[.mode, .choice.model]" <<<"$PICK"'
   [ "$(cat "$T/$CASE/run.out")" = '["on","claude-sonnet-5-5"]' ] || fail "a snapshot built before the owner's new promote set the rule back: $(cat "$T/$CASE/run.out"); $(jq -c .rules.pick "$ST/control.json")"
+}
+
+# Bug caught (#1585 review): a step priced as an estimate counted as a measured cost in the cost check of the promoted
+# choice, so a guess could set Pick settings back to Shadow. The promoted card's one build read only part of its usage
+# (unread): it is priced at the tokens it counted, $4 (the picks table shows it), more than the $2 default card. The
+# promoted side has no measured dollars, nothing is over, and the card picked keeps the rule on.
+t_pickestimate() {
+  setup "[$(issue 21 2026-01-01 | jq -c '.body = "Fix a typo in docs/guide.md."')]"
+  tune '.models.allowed.claude += ["claude-sonnet-5-5"]'
+  loop control rules pick=on >/dev/null && loop control pick small docs promote >/dev/null || fail "control rules pick=on or control pick was refused"
+  pl c3-201 201 picked promoted
+  pl c3-201 201 build promoted ok '{"tokens":{"claude":1000000,"codex":0},"usage":{"input":1000000,"write":0,"write1h":0,"read":0,"output":0},"model":"claude-opus-5-5","unread":"1 of 2 results hold no readable token usage"}'
+  pl c3-201 201 landed promoted ok '{"sha":"s201","product":false}'; pcard c1-301 301 default claude-sonnet-5-5 landed
+  # The picks row counts its step priced as an estimate, the default row none.
+  local got; got=$(loop snapshot --fresh | jq -c '[(.cost.picks | map([.model, .usd, .estimate])), (.cost.trials.groups | map([.promoted.cards, .promoted.usd, .default.perLanded, .over]))]')
+  [ "$got" = '[[["claude-sonnet-5-5",4,1],["m",2,0]],[[1,null,2,false]]]' ] || fail "the promoted card priced as an estimate ($ST/cards.jsonl) counted in the cost check, or its pick row does not count it: $got"
+  fx_in 'SEATCARD=21; PICK=""; PICKSEAT=""; modelpick c1-21 21 2>/dev/null; jq -r .mode <<<"$PICK"'
+  [ "$(jq -r .rules.pick "$ST/control.json") $(cat "$T/$CASE/run.out")" = 'on on' ] \
+    || fail "an estimate set the rule back to shadow: rules.pick and the card's mode: $(jq -c '[.rules.pick, .pickBack]' "$ST/control.json") $(cat "$T/$CASE/run.out")"
 }
 
 # Bugs caught (#766): a card of a medium group in the share was a trial before the owner added the group, or was not

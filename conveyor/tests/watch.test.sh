@@ -131,6 +131,23 @@ t_watchproof() {
   kill $pid; wait $pid 2>/dev/null; :
 }
 
+# Bug (#1585 review): the live stream laid a running step over a card's dollars (usd) but not over its known dollars
+# and its gap (usdKnown, notPriced), so /units kept the last snapshot's figures for the whole step: a priced fix after
+# a build with no price added nothing to "$0.00 + 1 step not priced". The stream's lay() is called on the snapshot's
+# own done and the live record, with no stream run, and must give what the snapshot gives for the same running step.
+t_watchgap() {
+  local s l
+  watchstart; rec c1 1 build '{"unread":"the session output holds no token usage","model":"claude-sonnet-5-5"}'; rec c1 1 start '{"of":"fix"}'
+  jq -cn --arg t "$(date -u +%FT%TZ)" '{step: "fix", at: $t, last: $t, turns: 1, model: "claude-sonnet-5-5",
+    usage: {input: 1000000, write: 0, write1h: 0, read: 0, output: 0}}' > "$CD/c1.live"
+  s=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
+  [ "$(jq -c '.belt[0] | [.usd, .usdKnown, .notPriced]' <<<"$s")" = '[null,2,1]' ] || fail "the snapshot of a priced fix after a build with no price: $(jq -c '.belt[0]' <<<"$s")"
+  l=$(python3 -I -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import watch
+s = json.loads(sys.argv[3]); l = watch.Stream.lay(json.load(open(sys.argv[2])), s["belt"][0]["done"], s["health"]["models"])
+print(json.dumps([int(v) if isinstance(v, float) and v.is_integer() else v for v in (l["usd"], l["usdKnown"], l["notPriced"])], separators=(",", ":")))' "$SRC" "$CD/c1.live" "$s")
+  [ "$l" = '[null,2,1]' ] || fail "the live stream over done $(jq -c '.belt[0].done' <<<"$s") and live $(cat "$CD/c1.live") gave [usd, usdKnown, notPriced] $l, not the snapshot's [null,2,1]"
+}
+
 # A stream that connects (or reconnects) while GitHub is slow: a record appended at once is not held up by the
 # wait for GitHub's first answer. That wait is longer than the stream lasts, so a record held up by it never comes;
 # and the record is written at the stream's first beat, which says the stream is looking for changes.

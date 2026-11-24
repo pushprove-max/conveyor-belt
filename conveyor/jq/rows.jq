@@ -117,18 +117,30 @@ def logline($i; $pt): {step, of, result, time, counts, created, sec: (if .step =
                # A grown line (growcheck(), lib/slices.sh): the files of the change before, and after the split (On).
                grown: (if .step == "grown" then {files: .grown.files, after: (.grown.after // null)} else null end),
                took: (if $i == 0 then null else (.time | fromdate) - ($pt | fromdate) end)} | with_entries(select(.value != null));
+# A review record of a line written before BOTHTRIES kept what a failed first try counted: that try's usage was only in
+# firstTry.spent when it ran on another model or the retry read none. It is taken from there as BOTHTRIES now keeps it
+# (alsoUsed, or the usage), so the step's estimate holds it. A record BOTHTRIES now writes has it already: left as it is.
+def firstused: (.firstTry.spent // {}) as $f
+      | if ($f.usage | type) != "object" or .alsoUsed != null then .
+        elif $f.model != null and $f.model != .model
+          then .alsoUsed = [{model: $f.model, usage: $f.usage} + ($f.stats // {} | {byModel, models} | with_entries(select(.value != null)) | if . == {} then {} else {stats: .} end)]
+        # The first try's usage with its own models (as TRYFOLD's took(), lib/session.sh): never priced at the retry's.
+        elif (.usage | type) != "object" then .usage = $f.usage | ($f.stats // {} | {byModel, models} | with_entries(select(.value != null))) as $s
+          | if .stats == null and $s == {} then . else .stats = ((.stats // {}) | del(.byModel, .models)) + $s end
+        else . end;
 # A step of a line that is no mark and not the card's first such line: $pt is the time of the one before it.
-def stepline($pt): {step, time, sec: ((.time | fromdate) - ($pt | fromdate)), tokens, usage} + (if .model then {model} else {} end)
+def stepline($pt): firstused | {step, time, sec: ((.time | fromdate) - ($pt | fromdate)), tokens, usage} + (if .model then {model} else {} end)
       # judgeWrites: the cache writes of a review's judge session (the review line's judge), {model, write, write1h},
       # when it wrote any. A Claude judge keeps no transcript (--no-session-persistence), so its line is their one record.
-      + ({result, effort, counts, tests, stats, unread, ran: .sec, route,
+      # alsoUsed: the usage an earlier try on another model counted (BOTHTRIES, APIFOLD), priced at its own model.
+      + ({result, effort, counts, tests, stats, unread, alsoUsed, ran: .sec, route,
           judgeWrites: (.judge | if type == "object" and (.usage | type) == "object" and ((.usage.write | numbers // 0) + (.usage.write1h | numbers // 0)) > 0
             then {model, write: (.usage.write | numbers // 0), write1h: (.usage.write1h | numbers // 0)} else null end)} | with_entries(select(.value != null)));
 # The session or review a blocked line says failed (spent): a step like the others, result fail.
-def spentline($pt): .spent as $sp
+def spentline($pt): (.spent | firstused) as $sp
       | {step: $sp.step, time, sec: ((.time | fromdate) - ($pt | fromdate)), tokens: {claude: ($sp.tokens.claude // 0), codex: ($sp.tokens.codex // 0)},
          usage: $sp.usage} + (if $sp.model then {model: $sp.model} else {} end)
-      + ({result: "fail", effort: $sp.effort, stats: $sp.stats, unread: $sp.unread, ran: $sp.sec, route: $sp.route} | with_entries(select(.value != null)));
+      + ({result: "fail", effort: $sp.effort, stats: $sp.stats, unread: $sp.unread, alsoUsed: $sp.alsoUsed, ran: $sp.sec, route: $sp.route} | with_entries(select(.value != null)));
 # The state of card $k before its first line. k: the card; an, at: how many lines it has, the last one's time; log: the
 # log; le, lc, lb: the last closing line or push (endline), the last landed or closed line, the last blocked line's
 # time. Of the lines that are no mark: n, gt: how many, the last one's time; first: the first one; l: the last one that

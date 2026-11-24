@@ -19,11 +19,14 @@
   // A cost figure with steps left out for want of a price says so: never a bare low figure. A cost that was read and is
   // null was not priced (the price table could not be run), or, per landed card, no card landed in the 7 days
   // (snapshot.sh, perLanded): its dash says which, not that it was not read.
-  function cost(c, figure, leftOut, ctx) {
+  // A figure that holds steps priced as an estimate (estimate: how many) has `~` and says so on hover.
+  function cost(c, figure, leftOut, estimate, ctx) {
     if (!c) return { value: null };
     const left = n(c[leftOut]) !== null ? c[leftOut] : n(c.unpricedSteps) || 0;
+    const est = n(c[estimate]) || 0;
     const landed = c.landedAfter && typeof c.landedAfter === 'object' ? Object.values(c.landedAfter).reduce((s, v) => s + (n(v) || 0), 0) : null;
-    return { value: n(c[figure]), fmt: ctx.money, left: left > 0 ? `${plural(left, 'step has', 'steps have')} no price` : null,
+    return { value: n(c[figure]), fmt: (v) => ctx.money(v, est > 0), left: left > 0 ? `${plural(left, 'step has', 'steps have')} no price` : null,
+      said: est > 0 ? `${plural(est, 'step is', 'steps are')} an estimate` : null,
       dash: figure === 'perLandedUsd' && landed === 0 ? 'No card landed in 7 days' : 'Not priced' };
   }
   // The machine head, on every tab: the machine's one Conveyor over every project (the machine part, dashboard.sh):
@@ -42,7 +45,7 @@
     if (sent && sent.state !== d.state) sent = null;
     // "Build machine" only when one is set up; on one machine Conveyor runs on this one (#112).
     const where = ctx.answerer === 'the build machine' ? 'Build machine' : 'This machine';
-    const key = JSON.stringify([d.host, where, d.state, d.cap, d.used, d.todayUsd, d.todayLeftOut, repos, ctx.project(), ctx.sorted(), sent && sent.text]);
+    const key = JSON.stringify([d.host, where, d.state, d.cap, d.used, d.todayUsd, d.todayLeftOut, d.todayEstimate, repos, ctx.project(), ctx.sorted(), sent && sent.text]);
     if (el.dataset.key === key) return;
     const held = el.contains(el.ownerDocument.activeElement) ? el.ownerDocument.activeElement.dataset.act : null;
     el.dataset.key = key;
@@ -52,7 +55,7 @@
     const slots = h('span', 'machine-slots'), cost = h('span', 'machine-cost');
     slots.append(h('strong', null, n(d.used) === null ? '—' : n(d.cap) !== null ? `${d.used} of ${d.cap}` : String(d.used)),
       h('span', null, n(d.cap) !== null ? ' cards at once' : ' cards at once, no limit for the machine'));
-    cost.append(h('strong', null, n(d.todayUsd) === null ? 'not priced' : ctx.money(d.todayUsd)),
+    cost.append(h('strong', null, n(d.todayUsd) === null ? 'not priced' : ctx.money(d.todayUsd, n(d.todayEstimate) > 0)),
       h('span', null, n(d.todayLeftOut) > 0 ? ` today, every project (${plural(d.todayLeftOut, 'step has', 'steps have')} no price)` : ' today, every project'));
     // On a phone (app.css) the head is this one line until a tap opens the rest; wider, the line is not shown.
     const fold = h('button', 'machine-fold'), act = h('span', 'machine-fold-act');
@@ -111,11 +114,11 @@
     machine: { part: 'machine', draw: machine },
     tiles: [
       { key: 'today', label: 'Today', panel: 'cost',
-        read: (part, ctx) => cost(part('cost') && part('cost').cards, 'todayUsd', 'todayLeftOut', ctx) },
+        read: (part, ctx) => cost(part('cost') && part('cost').cards, 'todayUsd', 'todayLeftOut', 'todayEstimate', ctx) },
       { key: 'week', label: '7 days', panel: 'cost', drop: 1,
-        read: (part, ctx) => cost(part('cost') && part('cost').cards, 'weekUsd', 'weekLeftOut', ctx) },
+        read: (part, ctx) => cost(part('cost') && part('cost').cards, 'weekUsd', 'weekLeftOut', 'weekEstimate', ctx) },
       { key: 'per', label: 'Per landed card', panel: 'cost', drop: 2,
-        read: (part, ctx) => cost(part('cost') && part('cost').cards, 'perLandedUsd', 'perLandedLeftOut', ctx) },
+        read: (part, ctx) => cost(part('cost') && part('cost').cards, 'perLandedUsd', 'perLandedLeftOut', 'perLandedEstimate', ctx) },
       // Cards on the belt of the card cap (the Belt part's cap: dashboard_panels.sh, cardcap), in any step and waiting
       // or not; a card that lands (offCap), or has landed and waits for its push, does not count against the card cap
       // (belt.js), though a landing card still holds a machine slot.

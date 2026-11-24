@@ -310,7 +310,9 @@ EOT
   apicall 'HOME='"$h"'; session "$FXWT" "Build the issue."; echo "rc=$?"'
   grep -qx rc=0 "$T/$CASE/run.out" && [ "$(grep -c -- '--resume 0aa1-b2 ' "$STUB/sessions")" = 1 ] \
     || fail "a build refused once did not resume and end well: $(cat "$STUB/sessions") $(cat "$T/$CASE/run.out")"
-  [ "$(head -n 1 "$T/$CASE/run.out" | jq -c '[.usage, (.unread | type)]')" = '[null,"string"]' ] \
+  # The step keeps the refused try's own usage (APIFOLD: priced from it as an estimate, #1585) and says unread: read
+  # from the transcript, which holds the refused try too, the resumed try would count its 40 output tokens twice (80).
+  [ "$(head -n 1 "$T/$CASE/run.out" | jq -c '[.usage.output, (.unread | type)]')" = '[40,"string"]' ] \
     || fail "the resumed try's usage was read from a transcript that holds the refused try too: $(head -n 1 "$T/$CASE/run.out")"
 }
 
@@ -335,4 +337,62 @@ EOT
   # Its 40 output tokens are counted (with the refused try's 1); the stalled try's output holds none, which unread still says.
   [ "$(grep -m 1 '^{' "$T/$CASE/run.out" | jq -c '.usage.output')" = 41 ] \
     || fail "the fresh try's usage, in its own transcript only, was not read: $(grep -m 1 '^{' "$T/$CASE/run.out")"
+}
+# Bug caught (#1585 review): a retry left the tokens one try counted out of the step's usage, so the pricer gave a step
+# with tokens counted a median, or left out what a try on another model counted. Both folds, BOTHTRIES (a review's two
+# attempts) and APIFOLD (the tries the model API refused), keep them: the counted usage when the step's own try read
+# none, and a try's on another model (x) in alsoUsed, priced at that model. Bug caught (#1585 review): that try's
+# own word on the model that ran it (stats.byModel, y) was dropped, so its tokens were priced at the model it asked for.
+t_triesusage() {
+  setup '[]'
+  local d=$T/$CASE/folds u='{"input":10,"read":0,"output":1}' b='{"byModel":{"y":{"input":10,"write":0,"read":0,"output":1}}}'; mkdir -p "$d"
+  echo '{"model":"m","sec":1,"unread":"none read"}' > "$d/none"; echo "{\"model\":\"m\",\"sec\":1,\"usage\":$u}" > "$d/m"
+  echo "{\"model\":\"x\",\"sec\":1,\"usage\":$u,\"stats\":{\"turns\":1,\"byModel\":$(jq -c .byModel <<<"$b")}}" > "$d/x"
+  # shellcheck disable=SC2016 # expanded in the engine shell
+  fx_in 'for t in none:m m:x; do s=$(cat "'"$d"'/${t#*:}")
+      jq -c --argjson f "{\"spent\": $s}" "$BOTHTRIES | [.usage, .unread, .alsoUsed]" "'"$d"'/${t%:*}"; jq -c --argjson p "$s" "$APIFOLD | [.usage, .unread, .alsoUsed]" "'"$d"'/${t%:*}"; done'
+  [ "$(cat "$T/$CASE/run.out")" = "[$u,\"none read\",null]
+[$u,\"none read\",null]
+[$u,\"the first attempt ran on another model (x): one model cannot price both\",[{\"model\":\"x\",\"usage\":$u,\"stats\":$b}]]
+[$u,\"a try the model API refused ran on another model (x): one model cannot price both\",[{\"model\":\"x\",\"usage\":$u,\"stats\":$b}]]" ] \
+    || fail "the folds of a step whose own try read no usage ($d/none beside $d/m) and of one beside a try on another model ($d/m beside $d/x): $(cat "$T/$CASE/run.out")"
+}
+# Bug caught (#1585 review): two tries asked of one model added their usage and kept only the last try's split by model
+# (stats.byModel), so the price table priced the first try's tokens at the models the last one named (a refused try
+# that ran on y, its retry on z: all at z). Both folds keep each try's tokens with the models it named (TRYFOLD): the
+# two splits added (b beside a); the usage added at the one model a names, beside a try that names none (c); a try
+# that names z with no split beside a, apart in alsoUsed, with unread (d); and the split of the try whose usage is
+# taken when the other read none (none beside a).
+t_triessplit() {
+  setup '[]'
+  local d=$T/$CASE/folds u='{"input":10,"read":0,"output":1}' y='{"input":10,"write":0,"read":0,"output":1}' w; mkdir -p "$d"
+  echo "{\"model\":\"m\",\"sec\":1,\"usage\":$u,\"stats\":{\"byModel\":{\"y\":$y}}}" > "$d/a"
+  echo "{\"model\":\"m\",\"sec\":1,\"usage\":$u,\"stats\":{\"turns\":1,\"byModel\":{\"z\":$y}}}" > "$d/b"
+  echo "{\"model\":\"m\",\"sec\":1,\"usage\":$u}" > "$d/c"
+  echo "{\"model\":\"m\",\"sec\":1,\"usage\":$u,\"stats\":{\"models\":[\"z\"]}}" > "$d/d"
+  echo '{"model":"m","sec":1,"unread":"none read","stats":{"turns":2,"byModel":{"z":{"input":0}}}}' > "$d/none"
+  # shellcheck disable=SC2016 # expanded in the engine shell
+  fx_in 'for t in b c d none; do s=$(cat "'"$d"'/a")
+      jq -c --argjson f "{\"spent\": $s}" "$BOTHTRIES | [.usage, .stats, .unread, .alsoUsed]" "'"$d"'/$t"; jq -c --argjson p "$s" "$APIFOLD | [.usage, .stats, .unread, .alsoUsed]" "'"$d"'/$t"; done'
+  w="[{\"input\":20,\"read\":0,\"output\":2},{\"turns\":1,\"byModel\":{\"z\":$y,\"y\":$y},\"models\":[\"y\",\"z\"]},null,null]
+[{\"input\":20,\"read\":0,\"output\":2},{\"byModel\":{\"y\":{\"input\":20,\"write\":0,\"read\":0,\"output\":2}},\"models\":[\"y\"]},null,null]
+[$u,{\"models\":[\"z\"]},\"a try named other models that ran it (y) than the other (z): one split cannot price both\",[{\"model\":\"m\",\"usage\":$u,\"stats\":{\"byModel\":{\"y\":$y}}}]]
+[$u,{\"turns\":2,\"byModel\":{\"y\":$y}},\"none read\",null]"
+  # Each line twice: BOTHTRIES's, then APIFOLD's.
+  [ "$(cat "$T/$CASE/run.out")" = "$(sed p <<<"$w")" ] \
+    || fail "the folds of $d/a, a try that named y as the model that ran it, beside $d/b (z), $d/c (none named), $d/d (z, no split) and $d/none (no usage read): $(cat "$T/$CASE/run.out")"
+}
+# Bug caught (#1585 review): a try with usage and no split (1, 100 input tokens) folded beside one split on y (2)
+# added its usage only; a third try split on z (3) then made the split two models, which the price table prices from
+# the split alone, so the first try's 100 tokens were left out of the cost. The split keeps every try's tokens.
+t_triesthird() {
+  setup '[]'
+  local d=$T/$CASE/folds; mkdir -p "$d"
+  echo '{"model":"m","sec":1,"usage":{"input":100,"write":0,"write1h":0,"read":0,"output":0}}' > "$d/1"
+  echo '{"model":"m","sec":1,"usage":{"input":100,"write":0,"read":0,"output":0},"stats":{"byModel":{"y":{"input":100,"write":0,"read":0,"output":0}}}}' > "$d/2"
+  echo '{"model":"m","sec":1,"usage":{"input":100,"write":0,"read":0,"output":0},"stats":{"byModel":{"z":{"input":100,"write":0,"read":0,"output":0}}}}' > "$d/3"
+  # shellcheck disable=SC2016 # expanded in the engine shell
+  fx_in 'p=$(jq -c --argjson p "$(cat "'"$d"'/1")" "$APIFOLD" "'"$d"'/2"); jq -c --argjson p "$p" "$APIFOLD | [.usage.input, (.stats.byModel | map_values(.input)), .unread]" "'"$d"'/3"'
+  [ "$(cat "$T/$CASE/run.out")" = '[300,{"z":100,"y":200},null]' ] \
+    || fail "APIFOLD of $d/1 (usage alone), then $d/2 (split on y), then $d/3 (split on z): the split must hold all 300 input tokens: $(cat "$T/$CASE/run.out")"
 }

@@ -33,14 +33,17 @@ export type Metrics = {
   fixSec: number | null; testSec: number | null; landSec: number | null; pushSec: number | null; waitMaxSec: number | null
   diff: { files: number; added: number; removed: number } | null; findings: Record<(typeof LEVELS)[number], number> | null; limitUsed: number | null
   reviews: number | null; rebuilds: number | null; retries: number | null; depth: number | null; followups: number | null; blockClass: string | null
-  // usd is null when a step has no price (unpriced: how many; each step of the timeline says why).
-  tokens: number | null; usd: number | null; unpriced: number | null; timeline: TimelineStep[]
+  // usd is null when a step has no price (unpriced: how many; each step of the timeline says why); usdKnown, the
+  // dollars of those that are priced (null from a snapshot that does not give them); estimate, true when one is an estimate.
+  tokens: number | null; usd: number | null; unpriced: number | null; usdKnown: number | null; estimate: boolean; timeline: TimelineStep[]
 }
 // One finished step of a card, as the dashboard's detail shows it: seconds, tokens, dollars, the model it was priced
 // at, findings (a review), test counts (a test run) and the session's own account (turns, API seconds, tool calls,
 // refused calls, cache hits, the models that ran). unpriced: why it has no price (null when it has one).
 export type TimelineStep = {
   step: string; result: string; sec: number | null; tokens: number | null; usd: number | null; model: string | null; effort: string | null; unpriced: string | null
+  // estimate: true when its dollars are an estimate (its usage was read only in part, or not at all).
+  estimate: boolean
   counts: Record<(typeof LEVELS)[number], number> | null
   tests: { files: number | null; total: number | null; passed: number | null; failed: number | null; skipped: number | null } | null
   stats: { turns: number | null; apiSec: number | null; tools: Record<string, number> | null; refused: number | null; cacheHit: number | null; models: string[] | null } | null
@@ -73,7 +76,11 @@ export type Track = { steps: Step[]; at: number | null; label: string; since: nu
 // tokens: the card's fresh tokens so far, both seats together (null when the snapshot does not give them).
 // live: the running step as it streams: what it is doing now, its turns so far and when it last printed.
 export type Live = { action: string; turns: number | null; lastOutputAt: number | null }
-export type Belt = Card & Times & { step: string; review: number | null; of: number | null; stepAt: number | null; model: string | null; tokens: number | null; usd: number | null; reading: boolean; atEnd: boolean; parent: number | null; umbrella: number | null; reviews: Review[]; track: Track | null; metrics: Metrics | null; live: Live | null; waitsOn: Card | null }
+// A card's dollars: usd, null while a step of it has no price; usdKnown, the dollars of its steps that are priced, and
+// notPriced, how many are not (null and 0 from a snapshot that does not give them); estimate, true when a step is
+// priced as an estimate (its usage was read only in part, or not at all).
+export type Priced = { usd: number | null; usdKnown: number | null; notPriced: number; estimate: boolean }
+export type Belt = Card & Times & Priced & { step: string; review: number | null; of: number | null; stepAt: number | null; model: string | null; tokens: number | null; reading: boolean; atEnd: boolean; parent: number | null; umbrella: number | null; reviews: Review[]; track: Track | null; metrics: Metrics | null; live: Live | null; waitsOn: Card | null }
 // room: why the machine holds it back ("waiting for a machine slot: ..."), "" when it does not.
 export type Queued = Ref & { priority: string; followup: boolean; retried: boolean; parent: number | null; umbrella: number | null; room: string }
 // An open issue that depends on one still open: not picked until each of waitsFor has closed. states: why each of
@@ -87,10 +94,10 @@ export type Deploy = Ref & { since: number | null }
 // push: the state of its Push step (now while the push runs, failed when it failed or GitHub left the issue open).
 // waits: what it waits for while no step of it runs (its track's label with at null: with push off, "Landed, waiting
 // for Push landed"), else null.
-export type Landed = Card & Times & { closed: boolean; at: number | null; usd: number | null; reviews: number; rounds: Review[]; followups: number[]; pushed: boolean | null; issueOpen: boolean; parent: number | null; push: Step['state'] | null; waits: string | null; metrics: Metrics | null }
+export type Landed = Card & Times & Priced & { closed: boolean; at: number | null; reviews: number; rounds: Review[]; followups: number[]; pushed: boolean | null; issueOpen: boolean; parent: number | null; push: Step['state'] | null; waits: string | null; metrics: Metrics | null }
 // queue is null when no record's queue was read (gh did not list the issues); queueMore: a record gave its full ten,
-// so more may wait behind them. todayUsd is the dollars of today's priced steps, and todayLeftOut how many
-// steps of today it leaves out for having no price; todayUsd is null when a record was not read or its price table
+// so more may wait behind them. todayUsd is the dollars of today's priced steps, todayLeftOut how many
+// steps of today it leaves out for having no price and todayEstimate how many of it are priced as an estimate; todayUsd is null when a record was not read or its price table
 // could not be run. waits: the issues that wait on another, every record's.
 // loops: each record's loop as its control record makes it: running, paused, stopped, "paused by guard"
 // or "control record unreadable" ("" when the snapshot does not say), reason: why it picks nothing ("" when the
@@ -121,7 +128,7 @@ export type Push = {
   last: { at: number | null; by: string; started: boolean; why: string; sha: string; ok: boolean; ahead: number | null; check: string; log: string } | null
 }
 // own: the session's own project, whose cards carry no project name ('' or absent: none is).
-export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; order?: { repo: string; issue: number; umbrella: number | null }[]; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
+export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; order?: { repo: string; issue: number; umbrella: number | null }[]; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; todayEstimate?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
@@ -198,13 +205,13 @@ export const metricsOf = (v: any): Metrics | null => {
     diff: d && typeof d === 'object' && [d.files, d.added, d.removed].every(x => num(x) !== null) ? { files: d.files, added: d.added, removed: d.removed } : null,
     findings: f && typeof f === 'object' && LEVELS.every(k => num(f[k]) !== null) ? { P0: f.P0, P1: f.P1, P2: f.P2, P3: f.P3 } : null,
     limitUsed: num(v.limit?.used), reviews: num(v.reviews), rebuilds: num(v.rebuilds), retries: num(v.retries), depth: num(v.depth), followups: num(v.followups),
-    blockClass: one(v.blockClass) || null, tokens: num(v.tokens), usd: num(v.usd), unpriced: num(v.unpriced),
+    blockClass: one(v.blockClass) || null, tokens: num(v.tokens), usd: num(v.usd), unpriced: num(v.unpriced), usdKnown: num(v.usdKnown), estimate: v.estimate === true,
     timeline: (Array.isArray(v.timeline) ? v.timeline : []).filter((x: any) => x && typeof x === 'object').map((x: any): TimelineStep => {
       const t = x.tests && typeof x.tests === 'object' ? x.tests : null, st = x.stats && typeof x.stats === 'object' ? x.stats : null, c = x.counts
       const tools = st && st.tools && typeof st.tools === 'object' ? Object.fromEntries(Object.entries(st.tools).filter((e): e is [string, number] => num(e[1]) !== null)) : null
       return {
         step: one(x.step), result: one(x.result), sec: num(x.sec), tokens: num(x.tokens), usd: num(x.usd), model: one(x.model) || null, effort: one(x.effort) || null,
-        unpriced: one(x.unpriced) || null,
+        unpriced: one(x.unpriced) || null, estimate: num(x.usd) !== null && !!one(x.estimate),
         counts: c && typeof c === 'object' && LEVELS.every(k => num(c[k]) !== null) ? { P0: c.P0, P1: c.P1, P2: c.P2, P3: c.P3 } : null,
         tests: t && { files: num(t.files), total: num(t.total), passed: num(t.passed), failed: num(t.failed), skipped: num(t.skipped) },
         stats: st && { turns: num(st.turns), apiSec: num(st.apiSec), tools, refused: num(st.refused), cacheHit: num(st.cacheHit),
@@ -233,6 +240,7 @@ const parentOf = (x: any) => { const n = num(x.parent); return n !== null && n >
 // The parent issue of a part (the snapshot's umbrella: the issue it is a GitHub sub-issue of); null for one that is no part.
 const umbrellaOf = (x: any) => { const n = num(x.umbrella); return n !== null && n > 0 ? n : null }
 
+const pricedOf = (x: any): Priced => ({ usd: num(x.usd), usdKnown: num(x.usdKnown), notPriced: num(x.notPriced) ?? 0, estimate: x.estimate === true })
 const liveOf = (v: any): Live | null => (v && typeof v === 'object' ? { action: one(v.action), turns: num(v.turns), lastOutputAt: time(v.lastOutputAt) } : null)
 
 // The records' queues as one list. Each queue is already in the engine's pick order (a pinned issue can stand ahead of a
@@ -260,7 +268,7 @@ const heldCounts =(skipped: unknown, holding: unknown): Record<string, number> =
   if (n > 0) out.held = n
   return out
 }
-type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; order: { repo: string; issue: number; umbrella: number | null }[]; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
+type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; order: { repo: string; issue: number; umbrella: number | null }[]; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; todayEstimate: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
 const pushOf = (repo: string, h: any): Push => {
   const r = h?.pushing, l = h?.pushLast
   return {
@@ -285,7 +293,7 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
       ...j.needsYou.waiting.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: true, text: one(x.sentence), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
       ...j.needsYou.blocked.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: false, text: one(x.reason), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
     ],
-    belt: j.belt.map((x: any): Belt => ({ ...card(x), ...timesOf(x), step: one(x.step), review: num(x.review), of: num(x.of), stepAt: time(x.stepAt), model: one(x.model) || null, tokens: num(x.tokens?.claude) === null || num(x.tokens?.codex) === null ? null : x.tokens.claude + x.tokens.codex, usd: num(x.usd), reading: x.reading === true, atEnd: x.atEnd === true, parent: parentOf(x), umbrella: umbrellaOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics), live: liveOf(x.live), waitsOn: x.waitsOn && typeof x.waitsOn === 'object' && one(x.waitsOn.card) ? card(x.waitsOn) : null })),
+    belt: j.belt.map((x: any): Belt => ({ ...card(x), ...timesOf(x), step: one(x.step), review: num(x.review), of: num(x.of), stepAt: time(x.stepAt), model: one(x.model) || null, tokens: num(x.tokens?.claude) === null || num(x.tokens?.codex) === null ? null : x.tokens.claude + x.tokens.codex, ...pricedOf(x), reading: x.reading === true, atEnd: x.atEnd === true, parent: parentOf(x), umbrella: umbrellaOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics), live: liveOf(x.live), waitsOn: x.waitsOn && typeof x.waitsOn === 'object' && one(x.waitsOn.card) ? card(x.waitsOn) : null })),
     queue: next && next.map((x: any): Queued => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), priority: one(x.priority), followup: x.followup === true, retried: x.retried === true, parent: parentOf(x), umbrella: umbrellaOf(x), room: one(x.room) })),
     // queue.order is the whole pick order; queue.next stops at ten. pickCounts needs the whole to tell a waiting part from one that is ready.
     order: (Array.isArray(j.queue.order) ? j.queue.order : []).filter((x: unknown) => x && typeof x === 'object')
@@ -303,7 +311,7 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
     landed: j.landed.map((x: any): Landed => {
       const t = trackOf(x.track)
       return {
-        ...card(x), ...timesOf(x), closed: x.step === 'closed', at: time(x.time), usd: num(x.usd), reviews: num(x.reviews) ?? 0, rounds: reviewsOf(x.rounds),
+        ...card(x), ...timesOf(x), closed: x.step === 'closed', at: time(x.time), ...pricedOf(x), reviews: num(x.reviews) ?? 0, rounds: reviewsOf(x.rounds),
         issueOpen: t?.steps[5].state === 'failed' && (t.reason ?? '').startsWith('GitHub did not close the issue'), push: t ? t.steps[5].state : null, waits: t && t.at === null && t.label ? t.label : null, parent: parentOf(x),
         followups: Array.isArray(x.followups) ? x.followups.filter((n: unknown): n is number => num(n) !== null) : [], pushed: typeof x.pushed === 'boolean' ? x.pushed : null,
         metrics: metricsOf(x.metrics),
@@ -315,6 +323,7 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
     todayUsd: num(j.cost.today),
     // A snapshot from an older engine has no count: its today is null whenever a step was unpriced.
     todayLeftOut: num(j.cost.todayLeftOut) ?? 0,
+    todayEstimate: num(j.cost.todayEstimate) ?? 0,
     // The declined list's lines by the judge: those the Board's panel shows (declined) and the dismissed or built ones
     // (declinedRest), for a finding dismissed since was still declined.
     judgeDeclined: [j.declined, j.declinedRest].flatMap(l => (Array.isArray(l) ? l : []))
@@ -418,6 +427,7 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
       // A record that was not read spent an unknown amount today, so the total is partial, like an unpriced step.
       todayUsd: recs.length < read.length || recs.some(r => r.todayUsd === null) ? null : Math.round(recs.reduce((n, r) => n + (r.todayUsd as number), 0) * 100) / 100,
       todayLeftOut: recs.reduce((n, r) => n + (r.todayLeftOut ?? 0), 0),
+      todayEstimate: recs.reduce((n, r) => n + (r.todayEstimate ?? 0), 0),
       // Records that keep their state under one folder share a declined list, so a line is counted once by its id.
       judgeDeclined: [...new Map(recs.flatMap(r => r.judgeDeclined).map((d, i) => [d.id || `#${i}`, d.at])).values()],
       suites: recs.flatMap(r => r.suites),
@@ -471,9 +481,36 @@ export const nameOf = (c: Ref) => (c.issue || c.name ? `${ref(c)}${titleOf(c) ? 
 // past the rule's count (after a landing conflict or a test fix) is named by its number alone.
 export const stepOf = (b: Belt) => b.track?.label || (b.step === 'review' && b.review ? `review ${b.review}${b.of && b.review <= b.of ? ` of ${b.of}` : ''}` : b.step || 'step unknown')
 const whatOf = (n: Need) => (n.yes ? `your yes: ${n.text || 'a visible change'}` : `blocked: ${n.text || 'no reason recorded'}`)
-// A card with a step that could not be priced reads "cost partial", never the sum of the priced steps.
-const cost = (v: number | null): Seg => (v === null ? { t: 'cost partial', c: C.cost } : { t: usd(v), c: C.cost })
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+// Dollars priced, `~` before them when a step is priced as an estimate, and the steps left out for having no price
+// after them: `$4.12`, `~$4.12`, `$4.10 + 1 step not priced`. The priced part is never shown as the whole. short, for
+// a narrow column, gives the gap as `+` alone (`$4.10+`); the caller shows the whole text where there is room for it.
+const priceText = (v: number, gap: number, estimate: boolean, short = false) =>
+  `${estimate ? '~' : ''}${usd(v)}${!gap ? '' : short ? '+' : ` + ${count(gap, 'step')} not priced`}`
+// A card's dollars as priceText gives them; null when a step has no price and the snapshot gives no known dollars.
+const cardDollars = (p: Priced, short = false): string | null => (p.usd !== null ? priceText(p.usd, 0, p.estimate)
+  : p.usdKnown !== null && p.notPriced > 0 ? priceText(p.usdKnown, p.notPriced, p.estimate, short) : null)
+const cost = (p: Priced, short = false): Seg => ({ t: cardDollars(p, short) ?? 'cost partial', c: C.cost })
+// The known dollars and the gap on a line of their own, from column `at`, or further left where the text would not
+// fit there: in full, else as `$4.10 + 1 not priced` where the full text is wider than the pane. Never cut.
+const gapRow = (v: number, gap: number, estimate: boolean, at: number, w: number): Line => {
+  const full = priceText(v, gap, estimate), t = cols(full) <= w || !gap ? full : `${estimate ? '~' : ''}${usd(v)} + ${gap} not priced`
+  return fitWidth([{ t: ' '.repeat(Math.max(0, Math.min(at, w - cols(t)))) }, { t, c: C.cost }], w)
+}
+// Under a table row whose Cost column gives the short form (`$4.10+`): the known dollars and the gap (gapRow); nothing
+// when the card has no gap.
+const gapLine = (p: Priced, at: number, w: number): Line[] => (p.usd === null && p.usdKnown !== null && p.notPriced > 0
+  ? [gapRow(p.usdKnown, p.notPriced, p.estimate, at, w)] : [])
+// Under a table row in a pane too narrow for its Cost column: the card's dollars (`~$4.12`), or the known dollars and
+// the gap, as gapRow gives them; `cost partial` when the snapshot gives no dollars known.
+const dollarsLine = (p: Priced, at: number, w: number): Line[] => {
+  if (p.usd !== null) return [gapRow(p.usd, 0, p.estimate, at, w)]
+  const gap = gapLine(p, at, w)
+  return gap.length ? gap : [fitWidth([{ t: ' '.repeat(at) }, cost(p)], w)]
+}
+// The day's dollars: those of its priced steps, as priceText gives them; "partial" when a record was not read.
+const dayDollars = (snap: Snap, short = false): string | null =>
+  (snap.todayUsd === null ? null : priceText(snap.todayUsd, snap.todayLeftOut ?? 0, (snap.todayEstimate ?? 0) > 0, short))
 // A card's measurements, as the dashboard's per-card detail gives them, in two lines: where its time went,
 // then what it made and cost. A reading that was not taken reads "missing", never 0. [] for a snapshot without them.
 export const metricsText = (m: Metrics | null): string[] => {
@@ -486,17 +523,18 @@ export const metricsText = (m: Metrics | null): string[] => {
       `fix ${sec(m.fixSec)}`, `tests ${sec(m.testSec)}`, `landing ${sec(m.landSec)}`, `to push ${sec(m.pushSec)}`, `waiting on you ${sec(m.waitMaxSec)}`].join(' · '),
     [m.diff ? `${count(m.diff.files, 'file')} +${m.diff.added} −${m.diff.removed}` : 'diff missing', `findings ${found}`, `reviews ${n(m.reviews)}`, `rebuilds ${n(m.rebuilds)}`,
       `retries ${n(m.retries)}`, `depth ${n(m.depth)}`, `follow-ups ${n(m.followups)}`, `limit ${m.limitUsed === null ? 'missing' : `${m.limitUsed} pts`}`,
-      `${m.tokens === null ? 'missing' : tokens(m.tokens)} tokens`, m.usd !== null ? usd(m.usd) : m.unpriced ? `cost partial: ${count(m.unpriced, 'step')} not priced` : 'cost missing',
+      `${m.tokens === null ? 'missing' : tokens(m.tokens)} tokens`,
+      cardDollars({ usd: m.usd, usdKnown: m.usdKnown, notPriced: m.unpriced ?? 0, estimate: m.estimate }) ?? (m.unpriced ? `cost partial: ${count(m.unpriced, 'step')} not priced` : 'cost missing'),
       ...(m.blockClass ? [`blocked: ${m.blockClass}`] : [])].join(' · '),
   ]
 }
 // One step of a card's timeline: `build · 10m · 1.0M tokens · $2.00 · claude-sonnet-5-5 high · turns 3 · API 3s ·
 // tools Bash 2, Read 1 · refused 1 · cache hits 97% · ran claude-opus-5-5`; a review adds its findings, a test run its
-// counts. A reading that was not taken reads "missing".
+// counts. A reading that was not taken reads "missing"; dollars that are an estimate read `~$2.00`.
 export const timelineText = (s: TimelineStep): string => {
   const n = (v: number | null) => (v === null ? 'missing' : String(v))
   const parts = [`${s.step}${s.result && s.result !== 'ok' ? ` ${s.result}` : ''}`, s.sec === null ? 'missing' : fmtStep(s.sec),
-    `${s.tokens === null ? 'missing' : tokens(s.tokens)} tokens`, s.usd !== null ? usd(s.usd) : `not priced: ${s.unpriced || 'no reason given'}`]
+    `${s.tokens === null ? 'missing' : tokens(s.tokens)} tokens`, s.usd !== null ? priceText(s.usd, 0, s.estimate) : `not priced: ${s.unpriced || 'no reason given'}`]
   if (s.model) parts.push(s.model + (s.effort ? ` ${s.effort}` : ''))
   if (s.counts) parts.push(`findings ${LEVELS.filter(k => s.counts![k] > 0).map(k => `${s.counts![k]} ${k}`).join(', ') || 'none'}`)
   if (s.tests) parts.push(`tests ${n(s.tests.passed)} passed, ${n(s.tests.failed)} failed, ${n(s.tests.skipped)} skipped of ${n(s.tests.total)} (${n(s.tests.files)} files)`)
@@ -795,8 +833,12 @@ const item = (mark: Seg, name: Seg, details: Seg[], right: Seg[], w: number): Li
   return spread([mark, { t: ' ' }, ...fitWidth([name], Math.max(8, w - fixed)), ...details], right.length ? right : null, w)
 }
 
-const todaySeg = (snap: Snap): Seg => (snap.todayUsd === null ? { t: 'today partial', c: C.cost }
-  : { t: `today ${usd(snap.todayUsd)}${snap.todayLeftOut ? ` + ${count(snap.todayLeftOut, 'step')} not priced` : ''}`, c: C.cost, b: true })
+const todaySeg = (snap: Snap, short = false): Seg => { const d = dayDollars(snap, short); return d === null ? { t: 'today partial', c: C.cost } : { t: `today ${d}`, c: C.cost, b: true } }
+// The first of the right parts given, widest first, that spread() keeps at w columns (it drops one wider than w - 3)
+// and that leaves the left part given beside it whole (spread() cuts the left to make room for the right: at 40
+// columns, `today $4.50 + 2 steps not priced` cut `CONVEYOR · shop paused` to six columns); the last when none is.
+const fitting = (rights: Seg[][], w: number, left: Line = []): Seg[] =>
+  rights.find(r => cols(plain(r)) + 3 <= w && cols(plain(left)) + cols(plain(r)) + 2 <= w) ?? (rights.at(-1) as Seg[])
 // A loop that is not picking, as its control record makes it: `shop paused`, `shop: no loop process`.
 // Nothing while every loop runs.
 const loopText = (snap: Snap): string => snap.loops
@@ -831,8 +873,8 @@ const beltHead = (snap: Snap, w: number): Line[] => {
 }
 const loopSegs = (snap: Snap): Seg[] => (loopText(snap) ? [{ t: ' · ' }, { t: loopText(snap), c: C.you, b: true }] : [])
 
-// The head, two lines: CONVEYOR, today's cost and the host; then the weekly limit with its reset, and
-// the counts on the belt and queued.
+// The head: CONVEYOR, today's cost and the host (the cost on a line of its own, or its gap on one, when the width
+// is short: headerModel); then the weekly limit with its reset, and the counts on the belt and queued.
 const queuedText = (snap: Snap) => (snap.queue === null ? 'queue not read' : `${snap.queue.length}${snap.queueMore ? '+' : ''} queued`)
 const limitLine = (s: State): Line => {
   const r = s.limit ? resetIn(s.limit.resetsAt, s.now) : ''
@@ -841,9 +883,22 @@ const limitLine = (s: State): Line => {
 }
 export const headerModel = (s: State, snap: Snap, w: number): Line[] => {
   const limit = limitLine(s)
+  // A board is only drawn from a snapshot the host just gave: the host named here answered. The day's dollars stay where
+  // the host and they do not both fit beside CONVEYOR and a loop that is not picking (spread() drops a right part that
+  // is too wide): alone, then in the short form (`$4.10+`) with the host and alone. When not even that fits beside them,
+  // the day's dollars go on a line of their own under them, so a paused loop is never cut. With the short form, the
+  // day's known dollars and gap go whole on a line of their own under it (gapRow), as in the pane.
+  const host: Seg[] = [{ t: '  ' }, { t: '●', c: C.ok }, { t: ` ${s.host}` }]
+  const left: Line = [{ t: 'CONVEYOR', c: C.head, b: true }, ...loopSegs(snap)]
+  const beside = fitting([[todaySeg(snap), ...host], [todaySeg(snap)], [todaySeg(snap, true), ...host], [todaySeg(snap, true)]], w, left)
+  const fits = cols(plain(beside)) + 3 <= w && cols(plain(left)) + cols(plain(beside)) + 2 <= w
+  const day = fits ? beside : fitting([[todaySeg(snap)], [todaySeg(snap, true)]], w)
+  const dayGap = snap.todayUsd !== null && (snap.todayLeftOut ?? 0) > 0 && !plain(day).startsWith(`today ${dayDollars(snap)}`)
+    ? [gapRow(snap.todayUsd, snap.todayLeftOut ?? 0, (snap.todayEstimate ?? 0) > 0, w, w)] : []
   return [
-    // A board is only drawn from a snapshot the host just gave: the host named here answered.
-    spread([{ t: 'CONVEYOR', c: C.head, b: true }, ...loopSegs(snap)], [todaySeg(snap), { t: '  ' }, { t: '●', c: C.ok }, { t: ` ${s.host}` }], w),
+    spread(left, fits ? day : null, w),
+    ...(fits ? [] : [spread([], day, w)]),
+    ...dayGap,
     spread(limit, [{ t: `${snap.belt.length} on belt · ${queuedText(snap)}`, d: true }], w),
   ]
 }
@@ -873,18 +928,27 @@ export const needsModel = (s: State, snap: Snap, w: number, short: boolean): Lin
   }),
 ] : [[{ t: 'NEEDS YOU', c: C.head, b: true }, { t: '  nothing', d: true }]]
 
+// A card's reference on its row (titled): `repo#12 `, or its name.
+const refText = (c: Ref) => (c.issue ? `${c.repo}#${c.issue} ` : c.name ? `${named(c)} ` : '')
+// The first of the right parts given, widest first, that leaves a card's row (titled) its lead and reference whole
+// beside it; the last when none does. fitting() counts no left part, and spread() cuts the left to make room for the
+// right: at 40 columns, `GO r1  $4.10 + 1 step not priced` left 6 columns for the time, check mark and issue.
+const fittingBeside = (c: Ref, lead: Seg[], rights: Seg[][], w: number): Seg[] => {
+  const keep = cols(plain(lead)) + cols(refText(c))
+  return rights.find(r => keep + cols(plain(r)) + 2 <= w) ?? (rights.at(-1) as Seg[])
+}
 // A card's issue and short title in bold with what it came from ("↳ #12"), the figures on the right whole: the
 // title is what gives way.
 const titled = (c: Ref & { parent: number | null }, lead: Seg[], right: Seg[], w: number, bold = true): Line => {
-  const ref: Seg = { t: c.issue ? `${c.repo}#${c.issue} ` : c.name ? `${named(c)} ` : '', c: C.name, b: bold }
+  const ref: Seg = { t: refText(c), c: C.name, b: bold }
   const parent: Seg[] = c.parent ? [{ t: ` ↳ #${c.parent}`, d: true }] : []
   const fixed = cols(plain(lead)) + cols(ref.t) + cols(plain(parent)) + (right.length ? cols(plain(right)) + 2 : 0)
   const title = fitWidth([{ t: kindOf(c)?.title || shortTitle(c.title) || (c.issue ? '' : 'a branch with no issue'), c: C.name, b: bold }], Math.max(6, w - fixed))
   return spread([...lead, ref, ...title, ...parent], right.length ? right : null, w)
 }
 // A card's cost so far: its dollars, "no reading yet" before any token is read ("cost shown when the step ends" when the
-// running session's route reports no usage until then), "cost partial" with a step not priced.
-const costOf = (b: Belt): Seg => (!b.reading ? { t: b.atEnd ? 'cost shown when the step ends' : 'no reading yet', d: true } : cost(b.usd))
+// running session's route reports no usage until then), with a step not priced the known dollars and the gap (cost()).
+const costOf = (b: Belt): Seg => (!b.reading ? { t: b.atEnd ? 'cost shown when the step ends' : 'no reading yet', d: true } : cost(b))
 // The finished reviews on one line: one round as its verdict and counts, several each as R1, R2, ...
 const verdicts = (rs: Review[]): Seg[][] => rs.map(r => {
   const f = findingsOf(r, ' ')
@@ -932,7 +996,10 @@ export const beltModel = (s: State, snap: Snap, w: number, short: boolean, frame
   ...(snap.belt.length ? [] : [empty('the belt is empty')]),
   ...snap.belt.flatMap((b, i): Line[] => {
     const all = overallOf(b, s.now)
-    const right: Seg[] = [...(b.start !== null ? [{ t: `${whenOf(b.start, s.now)} · `, d: true }] : []), ...(all !== null ? [{ t: `${fmtSec(all)} · `, d: true }] : []), costOf(b)]
+    const times: Seg[] = [...(b.start !== null ? [{ t: `${whenOf(b.start, s.now)} · `, d: true }] : []), ...(all !== null ? [{ t: `${fmtSec(all)} · `, d: true }] : [])]
+    // Where the cost in full does not fit beside the issue, it is `$4.10+`, its known dollars and gap under the row.
+    const right = fittingBeside(b, [{ t: ' ' }], [[...times, costOf(b)], ...(b.reading ? [[...times, cost(b, true)], [cost(b, true)]] : [])], w)
+    const gap = right.at(-1)?.t === costOf(b).t ? [] : gapLine(b, 3, w)
     const t = b.track
     const rv = t?.steps[1]
     // The review round in progress, or the one just reviewed while it is fixed; past the reviews, none.
@@ -949,6 +1016,7 @@ export const beltModel = (s: State, snap: Snap, w: number, short: boolean, frame
     return [
       ...(i ? [[] as Line] : []),
       titled(b, [{ t: ' ' }], right, w),
+      ...gap,
       ...(t ? trackLines(t, w) : [[{ t: ` ${workMark(frame)} ${stepOf(b)}`, c: C.work }] as Line]),
       ...(t || b.reviews.length ? [third] : []),
       ...(short ? [] : judgeLine(b.reviews, w, '   ')),
@@ -1099,25 +1167,31 @@ export const deployModel = (s: State, snap: Snap, w: number): Line[] => [
 // push runs, what it waits for while no step runs: "Landed, waiting for Push landed" with push off); beneath, when it was picked up and its overall time to the landing, and the follow-ups it filed.
 export const landedModel = (s: State, snap: Snap, w: number, short: boolean): Line[] => {
   const shown = short ? snap.landed.slice(0, NEXT) : snap.landed
-  // The day's cost is today's priced steps (the head's figure), not the lifetime cost of the cards that landed today.
-  const total = snap.todayUsd
+  // The day's cost is today's priced steps (the head's figure), not the lifetime cost of the cards that landed today;
+  // its gap in the short form (`$4.10+`) where the whole text does not fit (the head gives it whole).
+  const heading = (short: boolean): Line => [{ t: 'LANDED TODAY', c: C.head, b: true },
+    ...(snap.landed.length ? [{ t: `  ${snap.landedCount} · `, d: true }, { t: dayDollars(snap, short) ?? 'cost partial', c: C.cost }] : [])]
   const pad = '         '
   return [
-    [{ t: 'LANDED TODAY', c: C.head, b: true }, ...(snap.landed.length ? [{ t: `  ${snap.landedCount} · `, d: true }, cost(total)] : [])],
+    cols(plain(heading(false))) <= w ? heading(false) : heading(true),
     ...(snap.landed.length ? [] : [empty('nothing landed today')]),
     ...shown.flatMap((l): Line[] => {
       const last = l.rounds.at(-1)
       const verdict: Seg[] = l.closed ? [{ t: 'already fixed', d: true }]
         : last ? [{ t: last.verdict || 'no verdict', c: last.verdict === 'GO' ? C.ok : C.you }, { t: ` r${last.round}`, d: true }]
           : [{ t: count(l.reviews, 'review'), d: true }]
-      const state: Seg = l.push === 'now' ? { t: 'pushing', c: C.you } : l.issueOpen ? { t: 'issue open', c: C.you } : l.waits ? { t: l.waits, c: C.you }
-        : l.push === 'failed' || l.pushed === false ? { t: 'not pushed', c: C.you } : cost(l.usd)
+      const state: Seg | null = l.push === 'now' ? { t: 'pushing', c: C.you } : l.issueOpen ? { t: 'issue open', c: C.you } : l.waits ? { t: l.waits, c: C.you }
+        : l.push === 'failed' || l.pushed === false ? { t: 'not pushed', c: C.you } : null
       const lead: Seg[] = [{ t: ` ${l.at ? clockOf(l.at) : 'time?'} `, d: true }, { t: '✓ ', c: C.ok }]
+      // Its cost where it fits in full beside the issue, else `$4.10+` with its known dollars and gap under the row.
+      const right = fittingBeside(l, lead, state ? [[...verdict, { t: '  ' }, state]]
+        : [[...verdict, { t: '  ' }, cost(l)], [...verdict, { t: '  ' }, cost(l, true)], [cost(l, true)]], w)
+      const gap = state || right.at(-1)?.t === cost(l).t ? [] : gapLine(l, pad.length, w)
       const all = overallOf(l, s.now)
       const under = [...(l.start !== null ? [`started ${whenOf(l.start, s.now)}`] : []), ...(all !== null ? [`${fmtSec(all)} overall`] : []),
         ...(l.followups.length ? [`↳ ${count(l.followups.length, 'follow-up')}: ${l.followups.map(n => `#${n}`).join(' ')}`] : []),
         ...(!short && judgeText(l.rounds) ? [judgeText(l.rounds)] : [])]
-      return [titled(l, lead, [...verdict, { t: '  ' }, state], w, false), ...(under.length ? wrapParts(under, w, pad) : [])]
+      return [titled(l, lead, right, w, false), ...gap, ...(under.length ? wrapParts(under, w, pad) : [])]
     }),
     ...(snap.landedCount > shown.length ? [empty(`+${snap.landedCount - shown.length} more`)] : []),
   ]
@@ -1249,31 +1323,35 @@ const slotsOf = (l: Loop) => {
 
 // One project's matrix: ID, a column a step (headed by its first letter), Age, Cost and last the title, which takes
 // the rest of the row's width at any pane width (#603). Age goes first when the row does not fit; the title is left
-// out when fewer than 6 columns are left after Cost.
+// out when fewer than 6 columns are left after Cost. A card with a step not priced has `$4.10+` in Cost, and its known
+// dollars and the gap in full on a line under its row: in the shared column they widened every row, and a narrow pane
+// cut the costs off. Where the row with its Cost column is wider than the pane even without Age, the column is left
+// out and each card's dollars go on the line under its row in full (dollarsLine), so a cost is never cut.
 const matrixTable = (s: State, cards: Belt[], w: number): Line[] => {
   const rows = cards.map(b => {
     const all = overallOf(b, s.now)
-    return { b, id: beltId(b), age: all === null ? '–' : fmtSec(all), cost: !b.reading ? '–' : b.usd === null ? 'partial' : usd(b.usd) }
+    return { b, id: beltId(b), age: all === null ? '–' : fmtSec(all), cost: !b.reading ? '–' : cardDollars(b, true) ?? 'partial' }
   })
   const idW = Math.max(2, ...rows.map(r => cols(r.id))), ageW = Math.max(3, ...rows.map(r => cols(r.age))), costW = Math.max(4, ...rows.map(r => cols(r.cost)))
   const stepsW = STEP_NAMES.length * 2 - 1
-  const noAge = idW + 2 + stepsW + 2 + costW
+  const costCol = idW + 2 + stepsW + 2 + costW <= w
+  const noAge = idW + 2 + stepsW + (costCol ? 2 + costW : 0)
   const age = noAge + 2 + ageW <= w
   const fixed = noAge + (age ? 2 + ageW : 0)
   const titleW = w - fixed - 2 >= 6 ? w - fixed - 2 : 0
-  const head = `${padR('ID', idW)}  ${STEP_NAMES.map(n => n[0]).join(' ')}  ${age ? `${padL('Age', ageW)}  ` : ''}${padL('Cost', costW)}${titleW ? '  Title' : ''}`
+  const head = `${padR('ID', idW)}  ${STEP_NAMES.map(n => n[0]).join(' ')}${age ? `  ${padL('Age', ageW)}` : ''}${costCol ? `  ${padL('Cost', costW)}` : ''}${titleW ? '  Title' : ''}`
   // The card's own name (no project name: the heading has it) goes before its title.
   const text = (b: Belt) => kindOf(b)?.title || [b.issue ? '' : b.name, shortTitle(b.title)].filter(Boolean).join(' ') || (b.issue ? '' : 'a branch with no issue')
   const title = (b: Belt): Line => [{ t: '  ' }, ...fitWidth([{ t: text(b), c: C.name }], titleW)]
   return [
     fitWidth([{ t: head, d: true }], w),
-    ...rows.map((r): Line => fitWidth([
+    ...rows.flatMap((r): Line[] => [fitWidth([
       { t: padR(r.id, idW), c: C.name, b: true }, { t: '  ' },
-      ...statesOf(r.b).flatMap((st, i) => [...(i ? [{ t: ' ' }] : []), MARK[st]]), { t: '  ' },
-      ...(age ? [{ t: `${padL(r.age, ageW)}  `, d: true }] : []),
-      { t: padL(r.cost, costW), c: C.cost },
+      ...statesOf(r.b).flatMap((st, i) => [...(i ? [{ t: ' ' }] : []), MARK[st]]),
+      ...(age ? [{ t: `  ${padL(r.age, ageW)}`, d: true }] : []),
+      ...(costCol ? [{ t: '  ' }, { t: padL(r.cost, costW), c: C.cost }] : []),
       ...(titleW ? title(r.b) : []),
-    ], w)),
+    ], w), ...(!r.b.reading ? [] : costCol ? gapLine(r.b, idW + 2, w) : dollarsLine(r.b, idW + 2, w))]),
     fitWidth([{ t: '▶ running · pending ✓ done ✗ failed', d: true }], w),
   ]
 }
@@ -1386,7 +1464,8 @@ export const pickModel = (snap: Snap, w: number): Line[] => {
 // LANDED TODAY: the five most recent, a row each: the clock time it landed, the issue, the last verdict and its round,
 // its overall time and its cost (or that it still waits), right-aligned. What it waits for (a track label such as
 // "Landed, waiting for Push landed") goes on a line of its own under its row: in the shared Cost column it widened
-// every row, and a narrow pane cut the other cards' costs off.
+// every row, and a narrow pane cut the other cards' costs off. So do the known dollars and the gap of a card with a step
+// not priced, `$4.10+` in Cost (matrixTable()).
 export const landedTable = (s: State, snap: Snap, w: number): Line[] => {
   const shown = snap.landed.slice(0, NEXT)
   const rows = shown.map(l => {
@@ -1394,19 +1473,29 @@ export const landedTable = (s: State, snap: Snap, w: number): Line[] => {
     const verdict: Seg = l.closed ? { t: 'already fixed', d: true } : last ? { t: `✓ ${last.verdict || 'no verdict'} r${last.round}`, c: last.verdict === 'GO' ? C.ok : C.you }
       : { t: count(l.reviews, 'review'), d: true }
     const waits = l.push !== 'now' && !l.issueOpen && l.waits ? l.waits : null
-    const state: Seg = l.push === 'now' ? { t: 'pushing', c: C.you } : l.issueOpen ? { t: 'issue open', c: C.you } : waits ? { t: 'waiting', c: C.you }
-      : l.push === 'failed' || l.pushed === false ? { t: 'not pushed', c: C.you } : cost(l.usd)
+    const state: Seg | null = l.push === 'now' ? { t: 'pushing', c: C.you } : l.issueOpen ? { t: 'issue open', c: C.you } : waits ? { t: 'waiting', c: C.you }
+      : l.push === 'failed' || l.pushed === false ? { t: 'not pushed', c: C.you } : null
     const all = overallOf(l, s.now)
-    return { at: l.at ? clockOf(l.at) : 'time?', id: l.issue ? ref(l) : idOf(l), verdict, total: all === null ? '–' : fmtSec(all), state, waits }
+    return { at: l.at ? clockOf(l.at) : 'time?', id: l.issue ? ref(l) : idOf(l), verdict, total: all === null ? '–' : fmtSec(all), state: state ?? cost(l, true),
+      waits, priced: state ? null : l }
   })
   const W = (h: string, f: (r: (typeof rows)[number]) => string) => Math.max(cols(h), ...rows.map(r => cols(f(r))))
   const aW = W('Landed', r => r.at), iW = W('Issue', r => r.id), vW = W('Verdict', r => r.verdict.t), tW = W('Total', r => r.total), cW = W('Cost', r => r.state.t)
+  // A pane too narrow for the whole row leaves the Cost column out: the card's cost, or what it waits for, goes on the
+  // line under its row in full (dollarsLine), so it is never the part cut off.
+  const costCol = aW + iW + vW + tW + cW + 8 <= w
+  const under = (r: (typeof rows)[number]): Line[] => {
+    const waits = r.waits ? [fitWidth([{ t: `${' '.repeat(aW + 2)}` }, { t: r.waits, c: C.you }], w)] : []
+    if (costCol) return [...waits, ...(r.priced ? gapLine(r.priced, aW + 2, w) : [])]
+    return [...(r.priced ? dollarsLine(r.priced, aW + 2, w) : [fitWidth([{ t: ' '.repeat(aW + 2) }, r.state], w)]), ...waits]
+  }
   return [
     section(`LANDED TODAY · ${snap.landedCount}`, snap.landed.length ? `${shown.length} most recent of ${snap.landedCount}` : '', w),
-    ...(rows.length ? [fitWidth([{ t: `${padR('Landed', aW)}  ${padR('Issue', iW)}  ${padR('Verdict', vW)}  ${padL('Total', tW)}  ${padL('Cost', cW)}`, d: true }], w)] : [empty('nothing landed today')]),
+    ...(rows.length ? [fitWidth([{ t: `${padR('Landed', aW)}  ${padR('Issue', iW)}  ${padR('Verdict', vW)}  ${padL('Total', tW)}${costCol ? `  ${padL('Cost', cW)}` : ''}`, d: true }], w)]
+      : [empty('nothing landed today')]),
     ...rows.flatMap((r): Line[] => [fitWidth([{ t: `${padR(r.at, aW)}  `, d: true }, { t: `${padR(r.id, iW)}  `, c: C.name, b: true }, { ...r.verdict, t: `${padR(r.verdict.t, vW)}  ` },
-      { t: `${padL(r.total, tW)}  `, d: true }, { ...r.state, t: padL(r.state.t, cW) }], w),
-      ...(r.waits ? [fitWidth([{ t: `${' '.repeat(aW + 2)}` }, { t: r.waits, c: C.you }], w)] : [])]),
+      { t: padL(r.total, tW), d: true }, ...(costCol ? [{ t: '  ' }, { ...r.state, t: padL(r.state.t, cW) }] : [])], w),
+      ...under(r)]),
   ]
 }
 
@@ -1427,11 +1516,19 @@ const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean
   const status: Seg[] = [...(s.foreman ? [{ t: foremanText(s.foreman), c: s.foreman.ok ? C.ok : C.you, b: !s.foreman.ok }] : []), ...loopSegs(snap)]
   if (!s.foreman && status.length) status.shift()
   const bugs: Seg | null = s.pluginBugs ? { t: `! ${count(s.pluginBugs.n, 'plugin problem')}`, c: C.you, b: true } : null
-  const spend: Seg = snap.todayUsd === null ? { t: 'partial', c: C.cost, b: true }
-    : { t: `${usd(snap.todayUsd)}${snap.todayLeftOut ? ` + ${count(snap.todayLeftOut, 'step')} not priced` : ''}`, c: C.cost, b: true }
+  // The day's spend, the widest form that leaves the head room and the `/units` label and host whole beside it
+  // (spread() drops a right part too wide, and cuts the left for the rest): with its label, then the dollars and the
+  // gap in full alone, then the short form (`$4.10+`) with and without the label.
+  const spends: Line[] = [dayDollars(snap) ?? 'partial', dayDollars(snap, true) ?? 'partial'].flatMap(t => [[{ t: 'DAY SPEND ', d: true }, { t, c: C.cost, b: true }], [{ t, c: C.cost, b: true }]])
+  const head: Line = [{ t: ' /units ', c: C.head, b: true, i: true }, { t: ' ' }, { t: s.host, b: true }]
+  const spend = fitting(spends, w, head)
+  // Where only the short form fits, the day's known dollars and gap go on a line of their own under the head (gapRow).
+  const dayGap = snap.todayUsd !== null && (snap.todayLeftOut ?? 0) > 0 && plain(spend) !== dayDollars(snap) && plain(spend) !== `DAY SPEND ${dayDollars(snap)}`
+    ? [gapRow(snap.todayUsd, snap.todayLeftOut ?? 0, (snap.todayEstimate ?? 0) > 0, 1, w)] : []
   const lanes = lanesModel(s)
   return [
-    spread([{ t: ' /units ', c: C.head, b: true, i: true }, { t: ' ' }, { t: s.host, b: true }], [{ t: 'DAY SPEND ', d: true }, spend], w),
+    spread(head, spend, w),
+    ...dayGap,
     rule(w),
     ...countBand([{ t: `${snap.belt.length} ON BELT`, b: true }, { t: `${ready} READY`, b: true }, { t: `${counts.waiting} WAITING`, b: true },
       { t: `${snap.needs.length} NEEDS YOU`, b: true, ...(snap.needs.length ? { c: C.you } : {}) }], w),

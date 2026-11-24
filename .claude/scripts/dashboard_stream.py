@@ -92,7 +92,7 @@ def config(main):
     return (got['host'], got['main'], [(r['repo'], r['main']) for r in got['records']], got['target'], got['engine']), None
 
 
-FIGURES = ('tokens', 'usd', 'reading')   # a live card's figures: its counts, and whether its usage is read yet
+FIGURES = ('tokens', 'usd', 'usdKnown', 'notPriced', 'reading')   # a live card's figures: its counts, and whether its usage is read yet
 LIVE_FIGURES = ('turns', 'lastOutputAt')  # the same, in its `live`: its reply count and the time of its last output
 
 
@@ -291,7 +291,8 @@ class Feed:
             if o is None:
                 b['live'] = None  # its step ended after the snapshot; the next snapshot has the step's line
                 continue
-            b.update(tokens=o.get('tokens'), usd=o.get('usd'), reading=o.get('reading'), atEnd=o.get('atEnd') is True, live=o.get('live'))
+            b.update(tokens=o.get('tokens'), usd=o.get('usd'), usdKnown=o.get('usdKnown'), notPriced=o.get('notPriced'), reading=o.get('reading'),
+                     atEnd=o.get('atEnd') is True, live=o.get('live'))
             if isinstance(o.get('files'), dict) and isinstance(b.get('track'), dict):
                 b['track']['files'] = o['files']
         return snap

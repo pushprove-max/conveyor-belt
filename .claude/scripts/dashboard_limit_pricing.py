@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # A part of dashboard_limit.py, run in its namespace (run_part()), not a module of its own: the pack's prices put
 # over the price table, a request's price, the cards' and a benchmark trial's costs, and the week's cost.
+import json  # dashboard_limit.py imports it; named here so a linter reading this file alone finds it
 
 
 def canon(m):
@@ -185,8 +186,11 @@ def card_costs(part, lines=None, kept=None, dest=None):
     Each priced step also has pricedBy, {model: {usd, tokens}}: what each model that ran it cost and used, so the
     totals by model split a session that ran on two models between them.
 
-    A step whose line says unread is unpriced even when it keeps a usage: that usage is only part of what
-    the session used.
+    A step whose line says unread (its usage was read only in part, or not at all) is priced as an estimate, marked
+    so (estimate: how it was made), never exactly: the tokens it counted at its model's price; with no token counted,
+    the median dollars of the steps of its kind (build, review ...) priced exactly at its model from `since` on (the
+    last 30 days, as the snapshot gives it), when there are any (estimate_rest). With no `since`, or no such step, it
+    stays unpriced.
 
     A session OpenCode ran (model opencode:<provider>/<model>) is priced at the dollars OpenCode reported for it
     (usage.cost, the sum of its calls' costs): no list price here names its model, and none is guessed. One whose usage
@@ -234,13 +238,55 @@ def card_costs(part, lines=None, kept=None, dest=None):
     def split(n, p):
         return (n[0] * p[0] + n[1] * write_rate(p) + n[2] * p[0] * 2 + n[3] * p[2] + n[4] * p[1]) / 1e6
 
+    def unread(step):
+        return isinstance(step.get("unread"), str) and step["unread"] != ""
+
+    def total(steps):
+        return None if any(s["usd"] is None for s in steps) else round(sum(s["usd"] for s in steps), 4)
+
+    def counted(u):
+        return any(nums(u, ("input", "write", "write1h", "read", "output")) or ())
+
+    def none_counted(step):
+        """True when the step counted no token, of its own or in alsoUsed: only such a step takes a median
+        (estimate_rest). One that counted some and still has no price (its model has none, OpenCode reported no cost)
+        stays unpriced: a median would put a guess in place of the tokens it did count."""
+        also = step.get("alsoUsed") if isinstance(step.get("alsoUsed"), list) else []
+        return not counted(step.get("usage")) and not any(isinstance(a, dict) and counted(a.get("usage")) for a in also)
+
+    def step_usd(step, models):
+        """usd() of the step, with an unread step's alsoUsed ([{model, usage}]: what an earlier try on another model
+        counted, or one that named other models that ran it: TRYFOLD, conveyor/lib/session.sh) added, each priced as
+        usd() prices a step of its kind: a build's at the models that try said ran it (its stats), else the model it
+        asked for; a review's, as every review, at the model it asked for. So its estimate holds every token counted;
+        the model priced at is then the one that cost most."""
+        also = step.get("alsoUsed") if unread(step) and isinstance(step.get("alsoUsed"), list) else []
+        also = [a for a in also if isinstance(a, dict) and counted(a.get("usage"))]
+        if not also:
+            return usd(step, models)
+        d, m, why, by = usd(step, models) if counted(step.get("usage")) else (0, None, None, {})
+        if d is None:
+            return d, m, why, by
+        by = by or {}
+        for a in also:
+            x = usd({"step": step.get("step"), "model": a.get("model"), "usage": a.get("usage"), "stats": a.get("stats")}, None)
+            if x[0] is None:
+                return x
+            d = round(d + x[0], 4)
+            for k, v in x[3].items():
+                p = by.setdefault(k, {"usd": 0, "tokens": 0})
+                p["usd"], p["tokens"] = round(p["usd"] + v["usd"], 4), p["tokens"] + v["tokens"]
+        return d, max(by, key=lambda k: by[k]["usd"]), None, by
+
     def usd(step, models):
         """(dollars, the model priced at, why it is unpriced, {model: {usd, tokens}}); dollars None when the step
         cannot be priced. models: the models in force, for a running step only (None for a finished one)."""
         u, r = step.get("usage"), ran(step) if step.get("step") != "review" else None
         if step.get("step") == "test":
             return 0, None, None, None
-        if isinstance(step.get("unread"), str) and step["unread"]:
+        # An unread step with tokens counted goes on, priced at them (an estimate: priced() marks it); with none, it
+        # waits for estimate_rest.
+        if unread(step) and not counted(u):
             return None, None, f"its token usage could not be read: {step['unread'][:200]}", None
         if u is None:
             return None, None, "no token split recorded (a step recorded before the split was)", None
@@ -305,10 +351,26 @@ def card_costs(part, lines=None, kept=None, dest=None):
     part["names"] = {m: display(m) for m in [*table, *(pack if isinstance(pack, dict) else {})] if m}
     since, seen = part.pop("since", None), {}
 
+    def exact(s, m):
+        """The step, priced at m, marked as an estimate when its usage was not read. Returns its [time, m, its kind,
+        its dollars] when it was priced exactly on m alone and counted tokens, for medians(); None when it was not.
+        A step that ran on more models is no sample of m (its dollars hold the others'), nor is one of no token (a
+        review that reused an earlier one's answer is priced at $0)."""
+        s.pop("estimate", None)
+        by = s.get("pricedBy") or {}
+        if s["usd"] is not None and unread(s):
+            s["estimate"] = "the tokens it counted, at its model's price"
+        elif s["usd"] is not None and m is not None and list(by) == [m] and by[m]["tokens"] > 0 and s.get("step") != "test" \
+                and isinstance(s.get("time"), str):
+            return [s["time"], m, s.get("step"), s["usd"]]
+        return None
+
     def priced(card):
-        """The card priced, in place. Returns what seen counts of it: each step's [time, the models it ran, its route
-        or None], of every time (count() keeps those of since or later)."""
-        uses = []
+        """The card priced, in place. Returns {uses: what seen counts of it: each step's [time, the models it ran, its
+        route or None], of every time (count() keeps those of since or later); costs: each step priced exactly, [time,
+        the model it was priced at, its kind, its dollars], what estimate_rest takes its medians from; rest: whether a
+        step of it waits for estimate_rest}."""
+        uses, costs = [], []
         steps = [s for s in card.get("steps") or [] if isinstance(s, dict)]
         models = card.get("models") if isinstance(card.get("models"), dict) else {}
         for s in steps:
@@ -316,7 +378,7 @@ def card_costs(part, lines=None, kept=None, dest=None):
                 xs = sorted({x for x in ((s.get("step") != "review" and ran(s)) or [s.get("model")]) if isinstance(x, str) and x})
                 if xs:
                     uses.append([s["time"], xs, s["route"] if isinstance(s.get("route"), str) and s["route"] else None])
-            s["usd"], m, why, by = usd(s, None)
+            s["usd"], m, why, by = step_usd(s, None)
             s.pop("pricedAs", None)
             s.pop("pricedBy", None)
             s.pop("unpriced", None)
@@ -329,10 +391,42 @@ def card_costs(part, lines=None, kept=None, dest=None):
                 s["override"] = True
             if why:
                 s["unpriced"] = why
-        card["usd"] = None if any(s["usd"] is None for s in steps) else round(sum(s["usd"] for s in steps), 4)
+            c = exact(s, m)
+            if c:
+                costs.append(c)
+        card["usd"] = total(steps)
         if isinstance(card.get("live"), dict):
             card["live"]["usd"] = usd(card["live"], models)[0]
-        return uses
+        return {"uses": uses, "costs": costs, "rest": any(s["usd"] is None and unread(s) and none_counted(s) for s in steps)}
+
+    def medians(costs):
+        """{(model, kind): (how many, their median dollars)} of the steps priced exactly from since on."""
+        by = {}
+        for t, m, k, d in costs:
+            if t >= since:
+                by.setdefault((m, k), []).append(d)
+        out = {}
+        for key, ds in by.items():
+            ds, h = sorted(ds), len(ds) // 2
+            out[key] = (len(ds), round(ds[h] if len(ds) % 2 else (ds[h - 1] + ds[h]) / 2, 4))
+        return out
+
+    def estimate_rest(card, med):
+        """The card's unread steps with no token counted priced, in place, at the median of med for their model and
+        kind, marked as an estimate; one with no median stays unpriced. Its usd is summed again. The key is the model
+        its priced steps are under (usd()): the price row, through an alias; a model OpenCode ran
+        (opencode:<provider>/<model>) with no price row is priced at the dollars OpenCode reported, and is its own key."""
+        steps = [s for s in card.get("steps") or [] if isinstance(s, dict)]
+        for s in steps:
+            m = model(s, None) if s["usd"] is None and unread(s) and none_counted(s) else None
+            k = known(m) or (m if isinstance(m, str) and m.startswith("opencode:") else None)
+            if k is None or (k, s.get("step")) not in med:
+                continue
+            n, d = med[(k, s.get("step"))]
+            s["usd"], s["pricedAs"], s["pricedBy"] = d, k, {k: {"usd": d, "tokens": 0}}
+            s["estimate"] = f"the median of {n} {s.get('step')} step{'' if n == 1 else 's'} priced at {k} since {since[:10]}"
+            s.pop("unpriced", None)
+        card["usd"] = total(steps)
 
     def count(uses):
         for t, xs, r in uses:
@@ -342,13 +436,19 @@ def card_costs(part, lines=None, kept=None, dest=None):
                     seen[x] = (k + 1, ways | ({r} if r else set()))
 
     if lines is None:
-        for card in part["cards"]:
-            count(priced(card))
+        got = [(card, priced(card)) for card in part["cards"]]
+        for _, g in got:
+            count(g["uses"])
+        if isinstance(since, str):
+            med = medians([c for _, g in got for c in g["costs"]])
+            for card, g in got:
+                if g["rest"]:
+                    estimate_rest(card, med)
     else:
         # A card's line priced before, under the same prices and this same script (its own text and its parts',
         # PARTS), is taken from <kept> as it was priced: only the cards whose line is new or changed are read and
         # priced. The summary is a line `<key> <sha256 of the rest>`, then a line `<sha256 of the card's line>\t<the
-        # card priced>\t<what seen counts of it>` for each card of the last call; any other summary is not used.
+        # card priced>\t<what priced() returned of it>` for each card of the last call; any other summary is not used.
         code = b"".join(open(p, "rb").read() for p in (__file__, *PARTS))
         key = hashlib.sha256(json.dumps([pack, hashlib.sha256(code).hexdigest()], sort_keys=True).encode()).hexdigest()
         was = {}
@@ -361,7 +461,7 @@ def card_costs(part, lines=None, kept=None, dest=None):
                     was[h] = (p, json.loads(u))
         except (OSError, ValueError):
             was = {}
-        now, out, had = {}, [], len(was)
+        now, out, hs, had = {}, [], [], len(was)
         with open(lines, "rb") as f:
             for ln in f:
                 ln = ln.rstrip(b"\n")
@@ -374,7 +474,17 @@ def card_costs(part, lines=None, kept=None, dest=None):
                     was[h] = (json.dumps(card, separators=(",", ":")), uses)
                 now[h] = was[h]
                 out.append(was[h][0])
-                count(was[h][1])
+                hs.append(h)
+                count(was[h][1]["uses"])
+        # The estimates from the medians are made at each call, over the kept pricing: the medians move with the steps
+        # of the last 30 days, so a card priced by one is never kept so.
+        if isinstance(since, str):
+            med = medians([c for _, g in now.values() for c in g["costs"]])
+            for i, (p, g) in enumerate(now[h] for h in hs):
+                if g["rest"]:
+                    card = json.loads(p)
+                    estimate_rest(card, med)
+                    out[i] = json.dumps(card, separators=(",", ":"))
         with open(dest, "w", encoding="utf-8") as f:
             f.write("".join(o + "\n" for o in out))
         # The summary is written again only when a card's line is new, changed or gone (or the summary was not used),
@@ -417,6 +527,11 @@ def work_cost(part):
     if isinstance(live, dict):
         steps.append({"step": live.get("step"), "model": live.get("model"), "usage": None if live.get("zero") is True else live.get("usage")})
     card_costs({"cards": [{"steps": steps}], "prices": part.get("prices")})
+    # A step priced as an estimate (its usage read only in part) is no known cost of a trial: it counts as unpriced.
+    for s in steps:
+        if s.get("estimate"):
+            s["usd"] = None
+            s.pop("pricedBy", None)
     got = [s["usd"] for s in steps if s.get("usd") is not None]
     n = len(steps) - len(got)
     basis = {m: dict(zip(PRICE_KEYS + ("cacheWrite",), list(PRICES[m][:3]) + [write_rate(PRICES[m])]))

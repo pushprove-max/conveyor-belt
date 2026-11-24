@@ -41,7 +41,8 @@ window.DASH_APP.panel({
     const h = ctx.h;
     const total = d.cards.some((c) => typeof c.usd !== 'number') ? null : d.cards.reduce((a, c) => a + c.usd, 0);
     const sum = h('p', 'foot');
-    sum.append(h('span', null, `${d.cards.length} ${d.cards.length === 1 ? 'card' : 'cards'}, `), ctx.number('total', total, ctx.money), h('span', null, ' at list prices'));
+    const est = d.cards.some((c) => c.estimate === true);
+    sum.append(h('span', null, `${d.cards.length} ${d.cards.length === 1 ? 'card' : 'cards'}, `), ctx.number('total', total, (v) => ctx.money(v, est)), h('span', null, ' at list prices'));
     const per = new Map();
     d.cards.forEach((c) => {
       const t = per.get(c.repo) || { accepted: 0, declined: 0, fixes: 0 };
@@ -114,7 +115,7 @@ window.DASH_APP.panel({
       const took = ctx.dur(c.tookSec);
       // When it was picked up and its overall time to the landing; then when it landed.
       meta.append(ctx.tag(c.repo),h('span', null, c.start ? `started ${ctx.when(c.start)}` : 'start not read'), took ? ctx.earlierTip(h('span', null, `${took} overall`), c.earlier) : h('span', null, 'overall time not read'),
-        h('span', null, `landed ${ctx.clock(c.time)}`), h('span', null, `${c.reviews} ${c.reviews === 1 ? 'review' : 'reviews'}`), h('span', 'num', ctx.money(c.usd)));
+        h('span', null, `landed ${ctx.clock(c.time)}`), h('span', null, `${c.reviews} ${c.reviews === 1 ? 'review' : 'reviews'}`), h('span', 'num', ctx.money(c.usd, c.estimate === true)));
       if (Array.isArray(c.followups) && c.followups.length) meta.append(h('span', null, `follow-ups ${c.followups.map((n) => `#${n}`).join(' ')}`));
       parts.push(head, meta);
       if (c.issue === 0 && typeof c.body === 'string') parts.push(record(c));

@@ -109,12 +109,12 @@ t_snapshot() { snapshotstart
   # The time, free disk and GitHub read (ghRead: with no feed, the call's own time) are read again by each call; timesPlan is
   # added by the snapshot only (cputime.test.sh checks it).
   [ "$(q '.health | del(.time, .diskFreeKb, .ghRead, .timesPlan)')" = "$(loop health | jq -c 'del(.time, .diskFreeKb, .ghRead)')" ] || fail "health is not the health record"
-  [ "$(q '.cost | del(.cards)')" = '{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":5.25,"perLandedLeftOut":0,"landedAfter":{"1":2,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[],"picks":[],"trials":{"dropped":[],"flagged":[],"groups":[]},"replay":null}' ] || fail "cost: $(q .cost)"
+  [ "$(q '.cost | del(.cards)')" = '{"today":31,"todayLeftOut":0,"todayEstimate":0,"week":37,"weekLeftOut":0,"weekEstimate":0,"perLanded":5.25,"perLandedLeftOut":0,"perLandedEstimate":0,"landedAfter":{"1":2,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[],"picks":[],"trials":{"dropped":[],"flagged":[],"groups":[]},"replay":null}' ] || fail "cost: $(q .cost)"
   # Per card, the 7 days: a card landed on an earlier day (11) and the blocked ones (7, 8) are rows; one with no step
   # ended (1, 2) or last worked on before the 7 days (12) is not. The rows add up to the totals.
   [ "$(q '.cost.cards | map("\(.issue) \(.state) \(.today) \(.week)") | sort | join(", ")')" \
     = '"10 landed 9 9, 11 landed 0 6, 13 closed 3 3, 3 on the belt 2 2, 4 on the belt 3 3, 5 on the belt 3 3, 6 on the belt 3 3, 7 blocked 3 3, 8 blocked 2 2, 9 landed 3 3"' ] \
-    && [ "$(q '.cost.cards | [.[0].card, .[-1].card, (map(.today) | add), (map(.week) | add), (.[0] | keys_unsorted)]')" = '["c10","c11",31,37,["card","issue","title","state","runs","today","week"]]' ] \
+    && [ "$(q '.cost.cards | [.[0].card, .[-1].card, (map(.today) | add), (map(.week) | add), (.[0] | keys_unsorted)]')" = '["c10","c11",31,37,["card","issue","title","state","runs","today","week","todayEstimate","weekEstimate"]]' ] \
     || fail "cost per card: $(q .cost.cards)"
 }
 # GitHub does not say when: the same list, every since null. No issue carries the label: an empty list.
@@ -211,7 +211,7 @@ t_snapshotlate() { latestart
   loop retry 8 >/dev/null || fail "retry of the blocked #8 failed"; # what the snapshot had said when health read the free disk (df), in the build: gh is asked before the build begins
   out=$(df() { { grep -c "made anew" "$STUB/err" || :; } >> "$STUB/said"; command df "$@"; }; export -f df; loop snapshot --fresh 2>"$STUB/err") || fail "snapshot after a retry exited non-zero"; [ "$(sort -u "$STUB/said")" = 1 ] || fail "the snapshot after a retry rewrote the card records did not say it is made anew before health's long work, so a reader that stops it waits with no reason (#282): $(tr '\n' ' ' < "$STUB/said"), $(cat "$STUB/err")"
   [ "$(q '[(.cost | del(.cards)), .needsYou.blocked, (.health.blocked | length), ([.belt[], .landed[]] | map(.card) | index("c8")), (.cost.cards[] | select(.card == "c8") | [.state, .today, .week])]')" \
-    = '[{"today":31,"todayLeftOut":0,"week":37,"weekLeftOut":0,"perLanded":4.8,"perLandedLeftOut":0,"landedAfter":{"1":3,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[],"picks":[],"trials":{"dropped":[],"flagged":[],"groups":[]},"replay":null},[],0,null,["retried",2,2]]' ] || fail "a retried card's spend left the totals, or the card is still shown: $out"
+    = '[{"today":31,"todayLeftOut":0,"todayEstimate":0,"week":37,"weekLeftOut":0,"weekEstimate":0,"perLanded":4.8,"perLandedLeftOut":0,"perLandedEstimate":0,"landedAfter":{"1":3,"2":1,"3":1,"more":0},"unpricedSteps":0,"unpriced":[],"picks":[],"trials":{"dropped":[],"flagged":[],"groups":[]},"replay":null},[],0,null,["retried",2,2]]' ] || fail "a retried card's spend left the totals, or the card is still shown: $out"
   # The rest of a landed card's track. Cards 10 and 5 landed and are not at origin: both are on the belt, pushing.
   [ "$(after)" = '[["c10","push",14,"pushing","nt","n",null],["c5","push",14,"pushing","nt","n",null]]' ] || fail "two landed cards waiting for their push: $(after)"
 }

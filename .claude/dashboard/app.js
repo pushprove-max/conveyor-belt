@@ -122,9 +122,10 @@
     const hm = `${h24 ? v.hour.padStart(2, '0') : v.hour}:${v.minute}${seconds ? `:${v.second}` : ''}${h24 ? '' : ` ${v.dayPeriod}`}`;
     return [date && day, time && hm].filter(Boolean).join(', ');
   }
-  function money(v) {
+  // est: the figure holds a step priced as an estimate (a step whose usage was read in part or not at all): it has `~`.
+  function money(v, est) {
     if (typeof v !== 'number' || !Number.isFinite(v)) return 'not priced';
-    return `$${v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+    return `${est ? '~' : ''}$${v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
   }
   // The Time and Date set in Customize, as one text.
   function form() { const p = prefs || prefsOf(stored()); return `${p.time} ${p.date}`; }

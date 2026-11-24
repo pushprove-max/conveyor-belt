@@ -83,8 +83,9 @@
 #   lanes   records: for each record of the host file, its repo, fast (branch, commits ahead of main, landing: the
 #           card of that record that lands them) and research (branch, run); a lane the record does not name is null.
 #   cost    todayUsd, weekUsd, perLandedUsd (the priced steps' dollars), todayLeftOut, weekLeftOut, perLandedLeftOut (the
-#           steps each leaves out for having no price), unpriced (those of the 7 days, each with why), landedAfter,
-#           unpricedSteps, cards (today's, each with its usd; a restarted card's row with runs, its dollars every run's),
+#           steps each leaves out for having no price), todayEstimate, weekEstimate, perLandedEstimate (the priced steps of
+#           each priced as an estimate), unpriced (those of the 7 days, each with why), landedAfter,
+#           unpricedSteps, cards (today's, each with its usd, todayEstimate and weekEstimate; a restarted card's row with runs, its dollars every run's),
 #           picks (the rule Pick settings' cards by group and builder choice, each row with its repo), trials
 #           ({dropped, flagged}: the rule's dropped challengers and flagged trial cards, each with its repo), replays (each
 #           record's last judge replay study and its judge settings, of an engine that runs the study), sessions
@@ -168,6 +169,9 @@
 #           null when the snapshot does not list them), order (the issues its record pins), rules, models ({builder, reviewer}: model and
 #           effort in force; judge: {on: false}, or {on: true, model, effort} in force, null when its record does not
 #           read), landedToday, todayUsd, todayLeftOut) and foremen (as foremen() gives them, with foremenError).
+#   A card's usd in belt, belt3d and board has estimate beside it (true when one of its steps is priced as an
+#   estimate), as does board's today; machine's todayUsd has todayEstimate and metrics' compare usd has usdEstimate
+#   (how many of the priced steps are estimates). The page marks such a figure as an estimate.
 #   belt, belt3d, queue and cost's cards also carry byRepo ({repo: the fields that are one project's}: belt's cap and building, queue's held,
 #   belt3d's queue while the queue of all is unknown,
 #   cost's figures), which the
@@ -270,13 +274,13 @@ PANELS_JQ='
        # A card that landed on an earlier day and is still on the belt (its push or the close of its issue has not
        # gone through) is in Building with its Push step: Landed today holds only the cards of this day.
        building: [$s.belt[] | select((.landed != true and .step != "review") or (.landed == true and (.card as $c | $today | index($c) | not)))
-         | {card, issue, name: (.name // null), title, step, waitsOn: (.waitsOn // null), gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, pickedAt: (.pickedAt // null), files: (.track.files // null), tests: (.track.tests // null), usd, reading, atEnd: (.atEnd == true),reason: (.track.reason // null), stays: stays, doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
-       review: [$s.belt[] | select(.landed != true and .step == "review") | {card, issue, name: (.name // null), title, review, of, gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, usd, reading, atEnd: (.atEnd == true),stays: stays, doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
+         | {card, issue, name: (.name // null), title, step, waitsOn: (.waitsOn // null), gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, pickedAt: (.pickedAt // null), files: (.track.files // null), tests: (.track.tests // null), usd, estimate: (.estimate == true), reading, atEnd: (.atEnd == true),reason: (.track.reason // null), stays: stays, doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
+       review: [$s.belt[] | select(.landed != true and .step == "review") | {card, issue, name: (.name // null), title, review, of, gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, usd, estimate: (.estimate == true), reading, atEnd: (.atEnd == true),stays: stays, doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
        waiting: [$s.needsYou.waiting[] | {card, issue, name: (.name // null), title, sentence, since, doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0)}] | few($r),
        # Its track and reviews too: the card leads with why it failed (the tests that failed, the NO-GO reviews), as in Needs you.
        blocked: [$s.needsYou.blocked[] | {card, issue, name: (.name // null), title, reason, tail, since, track: (.track // null), reviews: (.reviews // null), doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0)}] | few($r),
-       landed: [$s.landed[] | {card, issue, name: (.name // null), title, step, time, usd, reviews, batch: (.batch // null), doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0)}] | few($r),
-       today: {landed: $s.landedCount, usd: $s.landedUsd},
+       landed: [$s.landed[] | {card, issue, name: (.name // null), title, step, time, usd, estimate: (.estimate == true), reviews, batch: (.batch // null), doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0)}] | few($r),
+       today: {landed: $s.landedCount, usd: $s.landedUsd, estimate: (($s.landedEstimate // 0) > 0)},
        unpushed: ($s.health.unpushed // null | if . == null then null else map({card, issue, name: (.name // null), since}) | few($r) end), fullTest: ($s.fullTest // null),
        landingPr: ($s.health.landingPr // null), pushing: ($s.health.pushing // null), pushLast: ($s.health.pushLast // null),
        open: openOf($r)};
@@ -427,15 +431,15 @@ PANELS_JQ='
         # The track of a belt card has its records too, each step it took and when (name and at alone), so its lane
         # shows when it went back a step; a fix the Done-when check on a reply started is marked (replyCheck), as it is
         # part of the step of the session it checks, not a step back from Fix (track.jq).
-        belt: [$belt[] | {repo, card, issue, name: (.name // null), title, url, step, stepAt, landed: (.landed == true), waitsOn: (.waitsOn // null), usd,
+        belt: [$belt[] | {repo, card, issue, name: (.name // null), title, url, step, stepAt, landed: (.landed == true), waitsOn: (.waitsOn // null), usd, estimate: (.estimate == true),
           turns: (.live.turns? // null), reviews: (.reviews | rounds),
           track: (.track | if type == "object" then track3 + {records: [.records | arrays | .[] | objects | {name, at: (.at // null)}
             + (if (.reason | type) == "string" and (.reason | startswith("the Done-when check failed")) then {replyCheck: true} else {} end)]} else null end)}],
         queue: (if any($R[]; .snap.queue.next == null) then null
           else $R | map(. as $r | .snap | queue3($r)) | {next: map(.next[]), held: map(.held[]), waiting: map(.waiting[])} end),
         needs: ([$waiting[] | . + {kind: "waiting", reason: "Visible change: \(.sentence // "no sentence")"}] + [$blocked[] | . + {kind: "blocked"}]
-          | map({repo, card, issue, name: (.name // null), title, url, kind, reason, since, reviews: (.reviews | rounds), usd: (.metrics.usd // null), track: (.track | track3)})),
-        landed: [$landed[] | {repo, card, issue, name: (.name // null), title, url, time, usd, reviews: (.rounds | rounds), track: (.track | track3)}],
+          | map({repo, card, issue, name: (.name // null), title, url, kind, reason, since, reviews: (.reviews | rounds), usd: (.metrics.usd // null), estimate: (.metrics.estimate == true), track: (.track | track3)})),
+        landed: [$landed[] | {repo, card, issue, name: (.name // null), title, url, time, usd, estimate: (.estimate == true), reviews: (.rounds | rounds), track: (.track | track3)}],
         # What the deck behind the floor reads out: the host, its machine state (as the machine part has it) and the
         # slots as the machine bar has them: the cards holding one of the machine'"'"'s (a landing card does; a card landed and
         # waiting for its push holds none, nor does a card that only waits: idle) and the slots in force.
@@ -464,15 +468,20 @@ PANELS_JQ='
            # (null from a snapshot from before it said so: there a figure with an unpriced step is null instead).
            todayLeftOut: ([$R[].snap.cost.todayLeftOut | numbers] | add // 0), weekLeftOut: ([$R[].snap.cost.weekLeftOut | numbers] | add // 0),
            perLandedLeftOut: ([$R[].snap.cost.perLandedLeftOut | numbers] | add // 0),
+           # How many of the priced steps of each figure are priced as an estimate: the figure is then shown as one.
+           todayEstimate: ([$R[].snap.cost.todayEstimate | numbers] | add // 0), weekEstimate: ([$R[].snap.cost.weekEstimate | numbers] | add // 0),
+           perLandedEstimate: ([$R[].snap.cost.perLandedEstimate | numbers] | add // 0),
            # The figures of each project on its own, shown in place of the sums when the page is filtered to one project.
            byRepo: ($R | map({key: .repo, value: (.snap.cost | {todayUsd: .today, weekUsd: .week, perLandedUsd: .perLanded, landedAfter, unpricedSteps,
-             todayLeftOut: (.todayLeftOut | numbers // 0), weekLeftOut: (.weekLeftOut | numbers // 0), perLandedLeftOut: (.perLandedLeftOut | numbers // 0)})}) | from_entries),
+             todayLeftOut: (.todayLeftOut | numbers // 0), weekLeftOut: (.weekLeftOut | numbers // 0), perLandedLeftOut: (.perLandedLeftOut | numbers // 0),
+             todayEstimate: (.todayEstimate | numbers // 0), weekEstimate: (.weekEstimate | numbers // 0), perLandedEstimate: (.perLandedEstimate | numbers // 0)})}) | from_entries),
            unpriced: (if any($R[]; .snap.cost.unpriced | type != "array") then null
              else [$R[] as $r | $r.snap.cost.unpriced[] | tag($r) | {repo, card, issue, url, step, time, why} + (if .name then {name} else {} end)] end),
            # Every card with a step in the 7 days, the rows of each record in its own order (the one worked on last
            # first); null when the snapshot of a record is from before it carried the rows.
            perCard: (if any($R[]; .snap.cost.cards | type != "array") then null
-             else [$R[] as $r | $r.snap.cost.cards[] | tag($r) | {repo, card, issue, title, url, state, runs, todayUsd: .today, weekUsd: .week} + (if .name then {name} else {} end)] end),
+             else [$R[] as $r | $r.snap.cost.cards[] | tag($r) | {repo, card, issue, title, url, state, runs, todayUsd: .today, weekUsd: .week,
+               todayEstimate: (.todayEstimate | numbers // 0), weekEstimate: (.weekEstimate | numbers // 0)} + (if .name then {name} else {} end)] end),
            # The cards of the rule Pick settings by group and builder choice, the rows of each record with its repo; null when the
            # snapshot of a record is from before it carried them.
            picks: (if any($R[]; .snap.cost.picks | type != "array") then null else [$R[] as $r | $r.snap.cost.picks[] | {repo: $r.repo} + .] end),
@@ -545,12 +554,13 @@ PANELS_JQ='
         # median of each project; one closed while blocked has no time to land), never a mean of their medians; null when
         # a record gave no cards. usd is the dollars of the priced steps, usdLeftOut the steps it leaves out (weekLeftOut of cost).
         compare: {projects: [$R[] | {repo, landed: (.snap.metrics.week.landed // null), leadSec: (.snap.metrics.week.leadSec.p50 // null), usd: .snap.cost.week,
-            usdLeftOut: (.snap.cost.weekLeftOut | numbers // 0)}],
+            usdLeftOut: (.snap.cost.weekLeftOut | numbers // 0), usdEstimate: (.snap.cost.weekEstimate | numbers // 0)}],
           machine: {landed: ([$R[].snap.metrics.week.landed] | if any(. == null) then null else add end),
               leadSec: (if any($R[]; .snap.metrics.cards | type != "array") then null
                 else [$R[].snap.metrics.cards[] | select(.state | IN("landed", "closed")) | .metrics.leadSec | numbers] | sort
                   | if length == 0 then null else (.[(length - 1) / 2 | floor] + .[length / 2 | floor]) / 2 | round end end),
-              usd: ([$R[].snap.cost.week] | total), usdLeftOut: ([$R[].snap.cost.weekLeftOut | numbers] | add // 0)}}}} end),
+              usd: ([$R[].snap.cost.week] | total), usdLeftOut: ([$R[].snap.cost.weekLeftOut | numbers] | add // 0),
+              usdEstimate: ([$R[].snap.cost.weekEstimate | numbers] | add // 0)}}}} end),
    # The one Conveyor of the machine over every project, each project on its own, and each Foreman. The settings of
    # the machine are those of the host file on the host, as the health of every record names them (health.machine;
    # null from a host file that sets none, and from a snapshot from before it said). A card holds a slot from its
@@ -564,7 +574,7 @@ PANELS_JQ='
       {error: null, data: {host: $conv.host,
         state: ($R | mstate),
         cap: ($R | slots), used: ([$R[] | used] | add), todayUsd: ([$R[].snap.cost.today] | total),
-        todayLeftOut: ([$R[].snap.cost.todayLeftOut | numbers] | add // 0), repos: [$R[].repo],
+        todayLeftOut: ([$R[].snap.cost.todayLeftOut | numbers] | add // 0), todayEstimate: ([$R[].snap.cost.todayEstimate | numbers] | add // 0), repos: [$R[].repo],
         projects: [$R[] | . as $r | .snap as $s | {repo, state: ($s.health.state // null), reason: ($s.health.reason // null), loop: $s.health.loop,
           mode: ($s.control.mode // null), cap: ($s.health.builderCap // null), guard: ($s.control.guard // null),
           used: (first($behind[] | select(.repo == $r.repo) | .building | numbers) // ([$s.belt[] | select(counted)] | length)),
@@ -578,7 +588,8 @@ PANELS_JQ='
           models: ($s.modelSettings | if type == "object" then {builder: (.builder | inforce), reviewer: (.reviewer | inforce),
             judge: ($s.control.judgeOn | if . == true then {on: true} + (($s.modelSettings.judge | inforce) // {model: null, effort: null})
               elif . == false then {on: false} else null end)} else null end),
-          landedToday: $s.landedCount, todayUsd: $s.cost.today, todayLeftOut: ($s.cost.todayLeftOut | numbers // 0)}],
+          landedToday: $s.landedCount, todayUsd: $s.cost.today, todayLeftOut: ($s.cost.todayLeftOut | numbers // 0),
+          todayEstimate: ($s.cost.todayEstimate | numbers // 0)}],
         foremen: $fm.foremen, foremenError: $fm.error}} end)}'
 
 # stream_conv -- the live feed's Conveyor part: stream.json, when dashboard_stream.py wrote it in the last

@@ -54,6 +54,17 @@ class UnitsFeed(unittest.TestCase):
                 self.assertEqual(read(out, 'units-feed.json')[1]['records'], records, f'records {records!r} changed in the units feed')
 
 
+class LiveGap(unittest.TestCase):
+    """Bug (#1585 review): a live line laid a running step's dollars over a belt card but not its known dollars and its
+    gap, so /units showed the snapshot's "$0.00 + 1 step not priced" for the whole of a priced fix after such a step."""
+
+    def test_a_live_line_gives_the_card_its_known_dollars_and_gap(self):
+        snap = {'belt': [{'card': 'c1', 'usd': None, 'usdKnown': 0, 'notPriced': 1, 'estimate': False}]}
+        over = {'c1': {'tokens': {'claude': 1000000, 'codex': 0}, 'usd': None, 'usdKnown': 2, 'notPriced': 1, 'reading': True, 'atEnd': False, 'live': {}}}
+        b = ds.Feed.merged({'snap': snap, 'overlay': over})['belt'][0]
+        self.assertEqual([b['usd'], b['usdKnown'], b['notPriced']], [None, 2, 1], f'the live line {over!r} over the belt {snap!r} gave {b!r}')
+
+
 class ReadAt(unittest.TestCase):
     """Bug (R14): a snapshot's readAt was the line's arrival less its took, so a line that came late over ssh was dated
     after the start of the snapshot it holds, and a release reply between the two read as older than that snapshot."""

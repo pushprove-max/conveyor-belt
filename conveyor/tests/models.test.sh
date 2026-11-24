@@ -151,8 +151,8 @@ t_claudebare() {
 }
 t_claudepart() {
   claude_reviewer "[$(issue 11 2026-01-05)]"
-  # A first attempt whose usage is only part of what it used (one of its results holds none) leaves the step unpriced,
-  # though the retry's usage is whole: merged, it would be priced under what it cost.
+  # A first attempt whose usage is only part of what it used (one of its results holds none) leaves the step unread,
+  # though the retry's usage is whole: it is priced at the tokens counted as an estimate, never as the exact cost.
   echo "$GO" > "$STUB/review.2"; : > "$STUB/review-part"
   out=$(rvcall 11)
   [ "$(head -n 1 <<<"$out" | jq -c '[.tokens.claude, (.unread | test("1 of 2 results"))]')" = '[314,true]' ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \

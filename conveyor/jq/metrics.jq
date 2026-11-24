@@ -58,9 +58,13 @@
            then ($lim.after - $lim.before) * 100 | round / 100 else null end)}),
          usd: $c.usd, tokens: (if any($c.steps[]; .unread != null) then null else [$c.steps[] | (.tokens.claude // 0) + (.tokens.codex // 0)] | add // 0 end),
          unpriced: ([$c.steps[] | select(.usd == null)] | length),
+         # usdKnown: the dollars of the steps that are priced (what /units shows beside the steps not priced);
+         # estimate: whether one of them is priced as an estimate.
+         usdKnown: ([$c.steps[].usd | numbers] | add // 0 | . * 10000 | round / 10000), estimate: any($c.steps[]; .estimate != null),
          timeline: [$c.steps[] | {step, result, time, sec: (.ran // .sec),
            tokens: (if .unread != null then null else (.tokens.claude // 0) + (.tokens.codex // 0) end), usd,
            model: (.pricedAs // .model), effort, counts, tests, stats, unpriced: (.unpriced // null)} + (if .override == true then {override: true} else {} end)
+           + (if .usd != null and .estimate != null then {estimate} else {} end)
            # The cache writes of a review's reviewer (writes) and judge (judgeWrites), {model, write, write1h}, when they
            # wrote any: a Claude reviewer or judge keeps no transcript (--no-session-persistence), so the cache-write
            # alert reads them here.
@@ -95,15 +99,18 @@
        # timeline of its card), so a figure with steps left out is never read as complete. The tokens are those of
        # the steps whose usage was read; tokensLeftOut counts the steps whose usage was not (unread: their tokens are
        # missing, not 0). By model, a priced step is split between the models that ran it (pricedBy); an unpriced
-       # one counts under the model its line names.
+       # one counts under the model its line names. estimate counts the priced steps priced as an estimate (the figure
+       # is then shown as one).
        perLanded: (if ($l | length) == 0 then null else ($l | length) as $n | {
          usd: ([$ls[].usd | numbers] | add // 0 | . / $n * 10000 | round / 10000), leftOut: ([$ls[] | select(.usd == null)] | length),
+         estimate: ([$ls[] | select(.usd != null and .estimate != null)] | length),
          tokens: (([$ls[] | select(.unread == null) | tok] | add // 0) / $n | round), tokensLeftOut: ([$ls[] | select(.unread != null)] | length),
-         byModel: ([$ls[] | select(.step != "test")
-             | if (.pricedBy | type) == "object" then .pricedBy | to_entries[] | {m: .key, usd: .value.usd, tokens: .value.tokens}
-               else {m: (.pricedAs // .model // "no model"), usd: null, tokens: (if .unread != null then null else tok end)} end]
+         byModel: ([$ls[] | select(.step != "test") | (.usd != null and .estimate != null) as $e | (.unread != null) as $u
+             # An unread step's tokens are only part of what it used: left out of its model's tokens, as of the total's.
+             | if (.pricedBy | type) == "object" then .pricedBy | to_entries[] | {m: .key, usd: .value.usd, tokens: (if $u then null else .value.tokens end), e: $e}
+               else {m: (.pricedAs // .model // "no model"), usd: null, tokens: (if .unread != null then null else tok end), e: false} end]
            | group_by(.m) | map({key: .[0].m, value: {
-           usd: ([.[].usd | numbers] | add // 0 | . / $n * 10000 | round / 10000), leftOut: (map(select(.usd == null)) | length),
+           usd: ([.[].usd | numbers] | add // 0 | . / $n * 10000 | round / 10000), leftOut: (map(select(.usd == null)) | length), estimate: (map(select(.e)) | length),
            tokens: ([.[].tokens | numbers] | add // 0 | . / $n | round), tokensLeftOut: (map(select(.tokens == null)) | length)}}) | from_entries)} end),
        waitMaxSec: ([$waits[] | [([.from, $t0] | max), ([.to, $t1] | min)] | select(.[1] > .[0]) | .[1] - .[0]] | add // 0),
        limitPerCard: ([$cs[].metrics.limit.used | numbers] | med),

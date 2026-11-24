@@ -39,7 +39,7 @@
        else {tokens: {claude: ($u.input_tokens + $u.cache_creation_input_tokens + $u.output_tokens)},
          usage: {input: $u.input_tokens, write: ($u.cache_creation_input_tokens - $u.h), write1h: $u.h, read: $u.cache_read_input_tokens, output: $u.output_tokens}}
          # A result whose usage cannot be read beside one that can: the usage kept is part of what the session used,
-         # so the step is said unread (its tokens missing, unpriced) and keeps the part it has.
+         # so the step is said unread (its tokens missing, priced at that part as an estimate) and keeps the part it has.
          + (if $bad > 0 then {unread: "\($bad) of \($rs | length) results hold no readable token usage, so the usage recorded is only part of it"} else {} end) end)
     + {stats: (try {
         turns: ([$rs[].num_turns | numbers] | if length == 0 then null else add end),

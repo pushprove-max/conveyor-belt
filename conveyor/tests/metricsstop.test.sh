@@ -140,6 +140,9 @@ t_metricsruns() {
   export TZ=UTC; setup '[]'; S=$ST; mkdir -p "$S"; d=$(date -u +%F); now=$(date -u -d "${d}T23:59:00Z" +%s); restartedruns
   [ "$(jq -c '.belt[] | select(.issue == 9) | [.card, .usd, (.metrics | .usd, .reviews, .buildSec, .runs, .thisRun.usd, .thisRun.reviews, .thisRun.buildSec)]' <<<"$out")" \
     = '["c10",2,2,3,500,2,0.8,1,200]' ] || fail "the restarted card's figures: $(jq -c '.belt' <<<"$out")"
+  # The dollars known (#1585: /units shows them beside a step not priced) are both runs' too, thisRun its own.
+  [ "$(jq -c '.belt[] | select(.issue == 9) | .metrics | [.usdKnown, .thisRun.usdKnown, .estimate]' <<<"$out")" = '[2,0.8,false]' ] \
+    || fail "the restarted card's known dollars: $(jq -c '.belt[] | select(.issue == 9) | .metrics' <<<"$out")"
   # Bug: the fix of the first run was in no count the card showed: fixes are those of both runs, thisRun its own.
   [ "$(jq -c '.belt[] | select(.issue == 9) | [.metrics.fixes, .metrics.thisRun.fixes, .priorSec, (.earlier | length)]' <<<"$out")" = '[1,0,1260,1]' ] \
     || fail "the restarted card's fixes and earlier run: $(jq -c '.belt' <<<"$out")"

@@ -224,7 +224,9 @@
     // A count moves through whole numbers only: the motion's in-between values are never shown as fractions.
     const known = num(r.value), fmt = typeof r.fmt === 'function' ? r.fmt : (v) => String(Math.round(v));
     const text = known ? fmt(r.value) : DASH;
-    if (app.headView.nums.get(t.spec.key) !== (known ? r.value : null) || t.value.textContent === '') {
+    // A figure whose words change with its value the same (a cost that becomes an estimate: `~`) is drawn again too.
+    if (app.headView.nums.get(t.spec.key) !== (known ? r.value : null) || t.value.textContent === '' || t.shown !== text) {
+      t.shown = text;
       // The fit below measures the figure the count starts from; one that lands wider is fitted again when it lands.
       // With no motion the count lands at once, before the other tiles are written: the fit at the end measures it.
       t.value.replaceChildren(counter(app.headView.nums, t.spec.key, known ? r.value : null, (v) => (num(v) ? fmt(v) : DASH), () => { if (!drawingHead) refit(); }));
