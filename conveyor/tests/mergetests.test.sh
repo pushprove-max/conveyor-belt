@@ -230,11 +230,12 @@ t_mergeunsharechanged() {
 # $STUB/given, keeps the list it got in $STUB/list, and runs the file unless the list keeps it as passed and names no
 # `main` line, adding to $STUB/ran `<file> <case>` for each of the file's cases it runs: those CONVEYOR_TEST_CASES
 # names of it, else all its t_ cases. Of main's change it runs only those, as the project's command runs of it only
-# the cases the change's own selection holds (.conveyor/test-changed-rerun.test.sh tests that rule).
-mainmoved() { # <links json> <c8's line> [<c7's change> [<lib/view.test.sh text>]]
+# the cases the change's own selection holds (.conveyor/test-changed-rerun.test.sh tests that rule). Asked for its selection
+# (CONVEYOR_TEST_LIST), it lists the files it is given but those $STUB/unselected names.
+mainmoved() { # <links json> <c8's line> [<c7's change> [<lib/view.test.sh text> [<lib/other.test.sh text>]]]
   local v='! { grep -qx eight lib/rows.sh && grep -qx landed lib/panel.sh; }'
   setup "[$(issue 7 2026-01-01)]"; tune '.test.changed = "sel.sh"'; mkdir -p "$R/lib"; linkset "$1"
-  fx_wt "${3:-echo eight >> lib/rows.sh}" lib/panel.sh panel lib/rows.sh rows lib/other.test.sh 'exit 0' lib/x.test.sh 'exit 0' \
+  fx_wt "${3:-echo eight >> lib/rows.sh}" lib/panel.sh panel lib/rows.sh rows lib/other.test.sh "${5:-exit 0}" lib/x.test.sh 'exit 0' \
     lib/y.test.sh 'exit 0' lib/w.test.sh 'exit 0' lib/view.test.sh "${4:-$v}"
   m0=$(git -C "$R" rev-parse main)
   printf 'change\t%s\nbase\t%s\ntree\t%s\npass\tlib/view.test.sh\n' "$(git -C "$FXWT" diff --cached --binary --no-renames HEAD | git hash-object --stdin)" \
@@ -244,6 +245,8 @@ mainmoved() { # <links json> <c8's line> [<c7's change> [<lib/view.test.sh text>
   git -C "$FXWT" diff --cached --binary --no-renames > "$FXWT.patch" && git -C "$FXWT" reset -q --hard main \
     && git -C "$FXWT" apply --index "$FXWT.patch" || fail "c7's change could not be brought onto main as it is now"
   cat > "$STUB/test-cmd" <<'EOF'
+# Asked for its selection (CONVEYOR_TEST_LIST: runfiles()), it lists the files it is given, but those $STUB/unselected names.
+[ -z "${CONVEYOR_TEST_LIST:-}" ] || { [ -d "${CONVEYOR_TEST_LOG:-}" ] && echo "log cases=${CONVEYOR_TEST_CASES-unset}" > "$STUB/selenv"; grep -vxFf <(cat "$STUB/unselected" 2>/dev/null) "$CONVEYOR_TEST_FILELIST" > "$CONVEYOR_TEST_LIST"; exit 0; }
 f=$CONVEYOR_TEST_FILE; echo "$f" >> "$STUB/given"; cp "$CONVEYOR_TEST_RERUN" "$STUB/list"
 if grep -q "^main	" "$CONVEYOR_TEST_RERUN" || ! grep -qxF "pass	$f" "$CONVEYOR_TEST_RERUN"; then
   cs=$(printf '%s\n' "${CONVEYOR_TEST_CASES:-}" | awk -F'\t' -v f="$f" '$1 == f { print $2 }'); [ -n "$cs" ] || cs=$(sed -n 's/^t_\([a-z]*\)() {.*/\1/p' "$f")
@@ -286,6 +289,48 @@ t_mainmovedcases() {
     || fail "c7's run again, its own selection t_a of lib/view.test.sh, ran other cases of it (ran: $(cat "$STUB/ran" 2>&1)): $(cat "$T/$CASE/run.out")"
   grep -qx $'pass\tlib/view.test.sh' "$STUB/list" && grep -qx $'main\tlib/panel.sh' "$STUB/list" && ! grep -q $'^fail\t' "$STUB/list" \
     || fail "c7's run again was not given its pass of lib/view.test.sh and main's change, or named a file failed to run it whole: $(cat "$STUB/list" 2>&1)"
+}
+
+# Bug it catches (#1595): after main moved, a card's run started every file of its list, though the move selected no case of
+# a file that had passed: each start of the file command paid its set-up and ran no case (1,001 of 1,804 such starts, about
+# 5 s each). c7's list holds lib/view.test.sh and lib/other.test.sh, both passed. The links give both files to c8's
+# lib/panel.sh, and the stub for the project's command ($STUB/unselected) selects nothing of lib/other.test.sh, as the real
+# command does when main's change touches no case of it. The file command is started for lib/view.test.sh alone; the step
+# passes, and lib/other.test.sh keeps its pass.
+t_mainmovedunselected() {
+  mainmoved '{"lib/rows.sh": ["lib/view.test.sh", "lib/other.test.sh"], "lib/panel.sh": ["lib/view.test.sh", "lib/other.test.sh"]}' other; printf 'pass\tlib/other.test.sh\n' >> "$FXWT.rerun"
+  echo lib/other.test.sh > "$STUB/unselected"; mainmovedtest
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "rc 0" ] && [ "$(sort -u "$STUB/given" | tr '\n' ' ')" = "lib/view.test.sh " ] \
+    || fail "c7's run again after main moved was not given lib/view.test.sh alone, or did not pass (given: $(cat "$STUB/given" 2>&1)): $(cat "$T/$CASE/run.out")"
+  grep -qxF $'pass\tlib/other.test.sh' "$FXWT.rerun" || fail "lib/other.test.sh, not started, lost its pass: $(cat "$FXWT.rerun" 2>&1)"
+  # The selection was given the run's log folder (it logs the cases it keeps of the file it leaves out there, which the test
+  # record sums) and the cases the card names (a case outside them is no reason to start a file).
+  [ -f "$STUB/selenv" ] && [ "$(cat "$STUB/selenv")" != "log cases=unset" ] || fail "the selection was given no log folder, or no CONVEYOR_TEST_CASES: $(cat "$STUB/selenv" 2>&1)"
+}
+
+# Bug it catches (#1595): the list of files the move selects was read as the files to skip, or dropped a file it names. With
+# the same list, main's change now selects lib/other.test.sh too: it is started beside lib/view.test.sh, and each runs its
+# cases (lib/other.test.sh holds t_a and t_b, lib/view.test.sh t_a): the file names alone cannot show a started file that ran none.
+t_mainmovedselected() {
+  mainmoved '{"lib/rows.sh": ["lib/view.test.sh", "lib/other.test.sh"], "lib/panel.sh": ["lib/view.test.sh", "lib/other.test.sh"]}' other '' \
+    $'t_a() {\n  :\n}' $'t_a() {\n  :\n}\nt_b() {\n  :\n}'; printf 'pass\tlib/other.test.sh\n' >> "$FXWT.rerun"
+  mainmovedtest
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "rc 0" ] && [ "$(sort -u "$STUB/given" | tr '\n' ' ')" = "lib/other.test.sh lib/view.test.sh " ] \
+    || fail "c7's run again after main moved was not given both files its move selects, or did not pass (given: $(cat "$STUB/given" 2>&1)): $(cat "$T/$CASE/run.out")"
+  [ "$(sort "$STUB/ran" | tr '\n' '|')" = 'lib/other.test.sh a|lib/other.test.sh b|lib/view.test.sh a|' ] \
+    || fail "the two files c7's run again was given did not run their cases (ran: $(cat "$STUB/ran" 2>&1)): $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (#1595, review): only a file with a `pass` line was left out when the move selected nothing of it. c7's
+# list holds lib/other.test.sh with no `pass` and no `fail` line, only the `ok` and `off` lines of its one case t_b (kept off as
+# flaky, flakyoff()), as after a fix that edits only that case; the selection names nothing of it (the case is off), and
+# the file command was still started for it and ran no case. It is not started; lib/view.test.sh, passed, is.
+t_mainmovedoff() {
+  mainmoved '{"lib/rows.sh": ["lib/view.test.sh", "lib/other.test.sh"], "lib/panel.sh": ["lib/view.test.sh", "lib/other.test.sh"]}' other '' '' $'t_b() {\n  :\n}'
+  printf 'ok\tlib/other.test.sh\tb\noff\tlib/other.test.sh\tb\n' >> "$FXWT.rerun"
+  echo lib/other.test.sh > "$STUB/unselected"; mainmovedtest
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "rc 0" ] && [ "$(sort -u "$STUB/given" | tr '\n' ' ')" = "lib/view.test.sh " ] \
+    || fail "c7's run again was started for lib/other.test.sh, of which only an ok and an off line were kept, or did not pass (given: $(cat "$STUB/given" 2>&1)): $(cat "$T/$CASE/run.out")"
 }
 
 # Bug it catches (#1591): the shared list grew with each move of main. c7's own passes held lib/x.test.sh, which it ran

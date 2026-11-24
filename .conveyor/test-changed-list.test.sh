@@ -25,7 +25,9 @@ echo 'echo runner >> "$(dirname "$0")/../ran"' > "$R/conveyor/conveyor.test.sh"
 echo 'echo s >> "$(dirname "$0")/../ran"' > "$R/lib/s.test.sh"
 for f in conveyor/core.sh conveyor/x.sh conveyor/y.sh lib/s.sh; do echo 'echo one' > "$R/$f"; done
 echo '{"test": {"files": {"conveyor/conveyor.test.sh": {"wholeOnly": true}}}}' > "$R/.conveyor/project.json"
-echo ran > "$R/.gitignore"
+printf '%s\n' ran linted > "$R/.gitignore"
+# The test lint of the scratch repo only notes that a check ran (the list makes none: below).
+echo 'echo linted >> "$(dirname "$0")/../linted"' > "$R/.conveyor/test-lint.sh"
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init
 # listed <changed file>...: each file changed, the list made; prints it on one line. The change is undone after.
 listed() {
@@ -61,5 +63,32 @@ printf 'fail\tconveyor/tests/speed/lib-notes.md\t\n' > "$T/rerun"
 got=$(CONVEYOR_TEST_RERUN=$T/rerun listed lib/s.sh)
 [ "$got" = "lib/s.test.sh " ] || no "a document a run again's list named as not passed was selected: '$got'"
 rm -rf "$R/conveyor/tests/speed"
+# #1595. The card's list names a passed case file with one case (conveyor/tests/c.test.sh, t_cone: CONVEYOR_TEST_CASES), and
+# main's change since the list's `from` commit edits the file's other case, t_ctwo. Bugs it catches: (1) the list named the
+# file because t_ctwo is chosen, though the file's own run is limited to t_cone, which passed: the loop started the file and it
+# ran no case; (2) the list ran the checks of the tree, which the loop has run for it; (3) the cases kept of a file the list
+# leaves out were not logged (`TESTRUN kept=`), so the test record lost them.
+printf 't_cone() {\n  :\n}\nt_ctwo() {\n  :\n}\n' > "$R/conveyor/tests/c.test.sh"
+git -C "$R" add -A && git -C "$R" commit -qm c
+FROM=$(git -C "$R" rev-parse HEAD)
+printf 't_cone() {\n  :\n}\nt_ctwo() {\n  : edited\n}\n' > "$R/conveyor/tests/c.test.sh" && git -C "$R" commit -qam main
+echo conveyor/tests/c.test.sh > "$T/given"
+printf 'pass\tconveyor/tests/c.test.sh\nmain\tconveyor/tests/c.test.sh\nfrom\t%s\n' "$FROM" > "$T/rerun"
+# listwith <case of c.test.sh the card names>: the list the loop asks for, with the log folder $T/log; prints it on one line.
+listwith() {
+  rm -rf "$T/log" "$T/list"; mkdir "$T/log"
+  (cd "$R" && CONVEYOR_TEST_LIST=$T/list CONVEYOR_TEST_RERUN=$T/rerun CONVEYOR_TEST_FILELIST=$T/given CONVEYOR_TEST_LOG=$T/log \
+    CONVEYOR_TEST_CASES=$(printf 'conveyor/tests/c.test.sh\t%s' "$1") bash .conveyor/test-changed.sh) > "$T/out" 2>&1 || no "the listing failed: $(cat "$T/out")"
+  tr '\n' ' ' < "$T/list" 2>/dev/null
+}
+got=$(listwith cone)
+[ -z "$got" ] || no "main's change to t_ctwo listed the file the card runs only t_cone of, which passed: '$got'"
+grep -qx 'TESTRUN kept=1' "$T/log/test-changed.log" || no "the one case kept of the file left out was not logged: $(cat "$T/log/test-changed.log" 2>&1)"
+[ ! -e "$R/linted" ] || no "the list ran the checks of the tree"
+# A list names files, not cases: that the file it names runs its selected cases is test-changed-one.test.sh's (one-file mode) and,
+# through a card's run, conveyor/tests/mergetests.test.sh t_mainmovedselected's.
+got=$(listwith ctwo)
+[ "$got" = "conveyor/tests/c.test.sh " ] || no "main's change to t_ctwo did not list the file the card runs t_ctwo of: '$got'"
+! grep -q 'TESTRUN kept' "$T/log/test-changed.log" 2>/dev/null || no "a file the list names was counted as kept: $(cat "$T/log/test-changed.log")"
 
 [ $fails = 0 ] && echo "ok - test-changed list" || exit 1

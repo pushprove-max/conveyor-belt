@@ -117,9 +117,19 @@ if [ "${1:-}" = --file ]; then
   done
 fi
 RERUN=${CONVEYOR_TEST_RERUN:-}; unset CONVEYOR_TEST_RERUN
+RERUN0=$RERUN
 # The cases the loop names of the test files it gives (conveyor/lib/testlist.sh owncases(): `<file><TAB><case>` lines),
 # read in one-file mode (below); unset, as the list is, so no test this runs reads the loop's.
 TCASES=${CONVEYOR_TEST_CASES:-}; unset CONVEYOR_TEST_CASES
+# onecases <engine case file> <chosen cases, words>: the cases of that file a run of it alone runs, one a line: the chosen
+# ones it holds, else all its cases, and of those the cases the loop names of it (TCASES) when it names any. Fails with none.
+onecases() {
+  local own c k
+  own=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$1" | sort -u); [ -n "$own" ] || return 1
+  c=; [ -z "$2" ] || c=$(tr ' ' '\n' <<<"$2" | grep -xF -f <(echo "$own"))
+  k=$(awk -F'\t' -v f="$1" '$1 == f {print $2}' <<<"$TCASES" | grep -xF -f <(echo "$own")) && c=$k
+  printf '%s\n' "${c:-$own}"
+}
 # Each engine case file runs as its own test file (issue 214, below), so the list names its cases under it; a list
 # written before that names them under the runner, conveyor/conveyor.test.sh. Both are read as one: the selection
 # below picks the engine's cases as the runner's, and runs each case file of them on its own. An `ok`, `off` or
@@ -424,7 +434,9 @@ treekey() {
 [ "${1:-}" != --checks ] || { checks; exit; }
 rc=0; ck=
 if [ -n "$ONE" ] && [ -d "${CONVEYOR_TEST_LOG:-}" ] && tk=$(treekey); then ck=$CONVEYOR_TEST_LOG/checks/$tk; fi
-if [ -n "$ck" ] && [ -s "$ck.rc" ] && [ -f "$ck.out" ]; then
+# The list of the selection (CONVEYOR_TEST_LIST) runs no test and ends with exit 0 whatever the checks say: it makes none.
+if [ -n "${CONVEYOR_TEST_LIST:-}" ]; then :
+elif [ -n "$ck" ] && [ -s "$ck.rc" ] && [ -f "$ck.out" ]; then
   cat "$ck.out"; echo "test-changed: the checks of this tree ran before this one-file run of this step (an earlier one, or the loop's test.checkCommand): their result is kept"
   [ "$(cat "$ck.rc")" = 0 ] || rc=1
 elif [ -n "$ck" ] && mkdir -p "${ck%/*}" && co=$(mktemp "$ck.XXXXXX"); then
@@ -1170,6 +1182,15 @@ elif [ ${#area[@]} -gt 0 ] || [ ${#ccase[@]} -gt 0 ]; then
 fi
 }
 allcases() { sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh 2>/dev/null | sort -u; }
+filecases() { cat "$@" 2>/dev/null | grep -cE '^[[:space:]]*((test|it)\(|def test_)'; } # <node, python or plugin test files>
+shellcases() { # <shell test files>
+  local f c s=0
+  for f; do
+    c=$(grep -cE '^t_[a-z0-9_]+\(\) *\{|^[[:space:]]*check[a-z_]* |(^|[;&|{][[:space:]]*)ok "' "$f" 2>/dev/null)
+    s=$((s + (${c:-0} > 0 ? c : 1)))
+  done
+  echo $s
+}
 # casefiles <cases>: the engine case files that hold any of the cases (words), one a line.
 casefiles() { [ -n "${1// /}" ] && grep -lE "^t_($(tr ' ' '\n' <<<"$1" | grep . | paste -sd'|' -))\(\) \{" conveyor/tests/*.test.sh; }
 pick "${changed[@]}"
@@ -1185,8 +1206,16 @@ while IFS= read -r t; do
   case $t in
     '') ;;
     conveyor/tests/*.test.sh)
-      [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || [ -n "$cases" ] || continue
-      cases=$({ tr ' ' '\n' <<<"$cases"; sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$t"; } | grep . | sort -u | tr '\n' ' ')
+      # The list of the selection (CONVEYOR_TEST_LIST) of a card's run: of each engine case file only the cases a run of it alone
+      # runs (onecases), as every case of the runner is explicit, so a case of the file the loop did not name is no reason to start it.
+      if [ -n "${CONVEYOR_TEST_LIST:-}" ]; then
+        [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || [ -n "$cases" ] || cases=$(allcases)
+        add=$(onecases "$t" "") || continue
+        cases=$({ tr ' ' '\n' <<<"$cases" | grep -vxF -f <(comm -23 <(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$t" | sort -u) <(sort -u <<<"$add")); echo "$add"; } | grep . | sort -u | tr '\n' ' ')
+      else
+        [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || [ -n "$cases" ] || continue
+        cases=$({ tr ' ' '\n' <<<"$cases"; sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$t"; } | grep . | sort -u | tr '\n' ' ')
+      fi
       run[conveyor/conveyor.test.sh]=1 ;;
     *) run[$t]=1; twhole[$t]=1 ;;
   esac
@@ -1197,11 +1226,8 @@ done < "${CONVEYOR_TEST_FILELIST:-/dev/null}"
 # an engine case file and of a shell test file that selects its cases (below).
 if [ -n "$ONE" ]; then
   if [[ $ONE == conveyor/tests/*.test.sh && $ONE != conveyor/tests/*/* ]]; then
-    own=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$ONE" | sort -u)
-    [ -n "$own" ] || { echo "test-changed: --file: $ONE holds no t_ case" >&2; exit 1; }
-    c=; [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || [ -z "$cases" ] || c=$(tr ' ' '\n' <<<"$cases" | grep -xF -f <(echo "$own"))
-    k=$(awk -F'\t' -v f="$ONE" '$1 == f {print $2}' <<<"$TCASES" | grep -xF -f <(echo "$own")) && c=$k
-    cases=$(tr '\n' ' ' <<<"${c:-$own}"); run=([conveyor/conveyor.test.sh]=1)
+    c=$(onecases "$ONE" "${run[conveyor/conveyor.test.sh]:+$cases}") || { echo "test-changed: --file: $ONE holds no t_ case" >&2; exit 1; }
+    cases=$(tr '\n' ' ' <<<"$c"); run=([conveyor/conveyor.test.sh]=1)
   else
     # Any other shell test file that selects its cases as the runner does (`SEL=${CONVEYOR_SHELL_TEST_CASE...`) runs
     # the cases TCASES names of it, as its parts, and only them: the loop lists the file (CONVEYOR_TEST_FILELIST, above)
@@ -1372,6 +1398,21 @@ if [ -n "${CONVEYOR_TEST_LIST:-}" ]; then
     elif [ -z "$cases" ]; then echo "$t"; printf '%s\n' conveyor/tests/*.test.sh
     else grep -lE "^t_($(tr ' ' '\n' <<<"$cases" | grep . | paste -sd'|' -))\(\) \{" conveyor/tests/*.test.sh; fi
   done | LC_ALL=C sort -u > "$CONVEYOR_TEST_LIST" || exit 1
+  # Of the files the loop gave (CONVEYOR_TEST_FILELIST) that the list keeps as passed (a `pass` line, no `fail` line) and does not
+  # name, the loop starts none: the cases a run of each alone would count as kept (below) are logged here, once.
+  if [ -s "$RERUN0" ] && [ -d "${CONVEYOR_TEST_LOG:-}" ]; then
+    kc=0
+    while IFS= read -r t; do
+      [ -n "$t" ] && [ -f "$t" ] && ! grep -qxF -- "$t" "$CONVEYOR_TEST_LIST" \
+        && awk -F'\t' -v f="$t" '$2 == f { if ($1 == "pass") p = 1; else if ($1 == "fail") x = 1 } END { exit !(p && !x) }' "$RERUN0" || continue
+      case $t in
+        conveyor/tests/*.test.sh) kc=$((kc + $(onecases "$t" "$fullcases" | grep -c .))) ;;
+        *.mjs|*.py|*.ts|*.tsx) kc=$((kc + $(filecases "$t"))) ;;
+        *) kc=$((kc + $(shellcases "$t"))) ;;
+      esac
+    done < "${CONVEYOR_TEST_FILELIST:-/dev/null}"
+    [ "$kc" = 0 ] || echo "TESTRUN kept=$kc" >> "$CONVEYOR_TEST_LOG/test-changed.log"
+  fi
   exit 0
 fi
 # The loop's test step reads which files ran and which failed from a log in the folder it names (conveyor.sh
@@ -1429,15 +1470,6 @@ fi
 # them (it runs as one case).
 nf=$(git ls-files -co --exclude-standard '*.test.sh' '*.test.mjs' '*.test.py' '*.test.ts' '*.test.tsx' | grep -vcx conveyor/conveyor.test.sh)
 nc=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh 2>/dev/null | sort -u | wc -l)
-filecases() { cat "$@" 2>/dev/null | grep -cE '^[[:space:]]*((test|it)\(|def test_)'; } # <node, python or plugin test files>
-shellcases() { # <shell test files>
-  local f c s=0
-  for f; do
-    c=$(grep -cE '^t_[a-z0-9_]+\(\) *\{|^[[:space:]]*check[a-z_]* |(^|[;&|{][[:space:]]*)ok "' "$f" 2>/dev/null)
-    s=$((s + (${c:-0} > 0 ? c : 1)))
-  done
-  echo $s
-}
 # fparts <test file>: the parts it runs of a file that is no engine case file, comma-separated (CONVEYOR_SHELL_TEST_CASE):
 # those the coverage map selected (covof) when nothing selected it whole, or those the one-file mode runs of it
 # (oparts); none when it runs whole. A file run with parts counts one case a part, not all its cases (issue 1439).

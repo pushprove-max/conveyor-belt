@@ -260,7 +260,8 @@ testrec() { # <worktree> <exit> <seconds>
 # runs), and TEST_REFUSED, "refused full run: <why>", goes on its test line as refused (testrec()), which health lists
 # for the Foreman's watcher (views.sh).
 # The field test.fileCommand runs one test file: the run (filecmd()) gives it each file its list names `fail`, each
-# in a process of its own. A card never runs the suite command (test.command): its own run (no field) and every run
+# in a process of its own. A card never runs the suite command (test.command) to run tests (runfiles() runs it only to list the
+# files to start, and it runs none): its own run (no field) and every run
 # of a card's files (the fix round's run again, the bug-card check, the run on main, the main-red check, the proofs,
 # the mutation check and the test actions: test.fileCommand alone) are per file. With no test.fileCommand set, each
 # file runs with Conveyor's own runner (testlist.sh ownrunner(): lib/filerun.sh), and on a check of main (TEST_PACKONLY) with the
@@ -346,6 +347,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
   off=$(grep $'^off\t' "$1.rerun" 2>/dev/null)
   # The files its list keeps whole as passed (`pass` lines): not run. A file it runs only some cases of is run.
   kp=$(awk -F'\t' '$1 == "pass" {print $2}' "$1.rerun" 2>/dev/null)
+  runfiles "$1"
   testonce "$1" "$cmd"; rc=$?; cachekeep "$1"; runnernote "$RUNOFF" >> "$1.test"
   if [ ! -s "$1.wide" ] && [ $rc != 0 ] && [ -n "$p" ] && f=$(testfails "$1.test" "$rc") && f=$(nopass "$1" "$f") && rerunlist "$1" "$p" "$f" "$b" "$t" \
     && { [ -z "$off" ] || printf '%s\n' "$off" >> "$1.rerun"; }; then
@@ -632,7 +634,9 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 # the file CONVEYOR_TEST_FILELIST names lists (testonce()), one a line, but for each the list keeps as passed (a `pass` line) and names in no `fail`
 # line (a file that passed before and failed since keeps its `pass` line beside the `fail` lines of its cases): a run
 # again after a failure runs only the files that did not pass. A list with a `changed` or `main` line (rerunsince(): a fix or main
-# changed code since those passes) keeps none: every file runs, as any of them may test that code.
+# changed code since those passes) keeps none: every file it is given runs, as any of them may test that code; tests() gives it
+# the files of the card's list but those the list keeps something of (a `pass`, `ok` or `off` line) and that the pack's test.changed
+# command selects nothing of (testlist.sh runfiles()).
 # The command holds fileeach()'s own text, so it needs no file of the engine's where it runs.
 filecmd() { # <the pack's test.fileCommand> [files]
   local q m=one; q=$(printf %q "$1")

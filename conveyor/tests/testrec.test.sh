@@ -58,6 +58,25 @@ t_testrecnothing() {
   e=$(refused "$l"); [ -z "$e" ] || fail "$e"
 }
 
+# Bug it catches (#1595, review): a run again that started no file (the selection named none of the files its list kept as
+# passed) logs only `TESTRUN kept=<n>`, no `TESTRUN cases=` line; passlist() then wrote cases: null, so a batch that takes the card
+# (batchkeep()) counted none of the n cases it kept. The list keeps lib/a.test.sh as passed, and the run kept 3 cases: the card's
+# .passed says 3 cases, and still lib/a.test.sh as its unit. With no log line of either, the runner says no count: null.
+t_passlistkept() {
+  local w=$T/$CASE/wt; mkdir -p "$w.testlog"; : > "$w.test"; printf 'pass\tlib/a.test.sh\n' > "$w.rerun"
+  # passlisted <the run's log text>: passlist() of the worktree, as the loop calls it, over a run whose log holds that text.
+  passlisted() {
+    printf '%s\n' "$1" > "$w.testlog/test-changed.log"
+    ( eval "$(sed -n '/^passlist() {/,/^}/p' "$SRC/lib/testlist.sh"; sed -n '/^testrec() {/,/^}/p;/^testfails() {/,/^}/p' "$SRC/lib/testrun.sh"
+        sed -n '/^testcounts() {/,/^}/p' "$SRC/lib/records.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh")"
+      passlist "$w" ) || fail "passlist() failed for the run with the log: $1"
+  }
+  passlisted $'TESTRUN files=0\nTESTRUN kept=3'
+  jq -e '.cases == 3 and .units == ["lib/a.test.sh"]' "$w.passed" >/dev/null || fail "a run that kept 3 cases and ran none was not recorded as 3 cases passed, lib/a.test.sh its unit: $(cat "$w.passed")"
+  passlisted 'TESTRUN files=0'
+  jq -e '.cases == null' "$w.passed" >/dev/null || fail "a run whose runner says no case count was given one: $(cat "$w.passed")"
+}
+
 # Issue 517: a test line said why a file ran only on a run again, and a reader counted files to tell whether a step ran
 # every engine case file. A first run's log gives the reasons of each file it ran and says it ran the whole engine
 # test (`TESTRUN whole-suite`): its line has them in why and wholeSuite. A run of chosen cases has why, no wholeSuite.

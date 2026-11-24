@@ -447,7 +447,7 @@ passlist() { # <worktree>
     jq -r '((.passcases + .okcases)[] | .file as $f | .cases[] | "\($f)\t\(.)"), (.passed - [.passcases[].file])[]' <<<"$f"
   } | jq -cRn --slurpfile x <(testrec "$1" 0 0) '$x[0] as $x | [inputs | select(. != "")] | unique as $u | [$u[] | select(contains("\t") | not)] as $w
     | {units: [$u[] | select((contains("\t") | not) or (split("\t")[0] | IN($w[]) | not))],
-       cases: (if $x.selected.cases == null then null else $x.selected.cases + ($x.selected.kept // 0) end)}' > "$1.passed"
+       cases: (if $x.selected.cases == null and $x.selected.kept == null then null else ($x.selected.cases // 0) + ($x.selected.kept // 0) end)}' > "$1.passed"
 }
 # Whether the card of a worktree has a test line in the records: a run of its tests ended before (tests()).
 testedbefore() { # <worktree>
@@ -469,6 +469,28 @@ failsleft() { # <worktree>
   done <<<"$fs"
   [ "$n" = "$TEST_GIVEN" ] || { jq -c --argjson n "$TEST_GIVEN" '.files = $n' "$1.testlist" > "$1.testlist.new" && mv -f "$1.testlist.new" "$1.testlist"; } \
     || rm -f "$1.testlist.new"
+}
+# A card's run (tests()) after a session changed the change or main moved (the list has a `changed` or `main` line): of its
+# files (TEST_FILES), the ones the list keeps something of (a `pass` line, or an `ok` or `off` line: a case that passed in a run
+# killed part-way, or one kept off as flaky; no `fail` line) and that the changed-tests command (test.command) selects no case of
+# are not started: each start of test.fileCommand costs its set-up and runs no case, and what the list kept stands.
+# The command lists, in CONVEYOR_TEST_LIST, the test files whose cases it selects for the list (CONVEYOR_TEST_FILELIST,
+# CONVEYOR_TEST_RERUN) and the cases the card named of each (CONVEYOR_TEST_CASES, as a start of a file gets them), as
+# suitereuse() asks it; and it logs the cases it keeps of the files it leaves out in CONVEYOR_TEST_LOG, which testrec() sums.
+# Only a pack that sets test.changed (the command reads `changed` and `main` lines) is asked; with none, or when the command
+# fails or writes no list, every file is started; a list that names none of them starts none of those the list kept something of.
+# A file the list holds no line of is always started, so a file the command cannot select (an engine case file with no case) fails in its own run.
+runfiles() { # <worktree>
+  local cmd tc
+  grep -qE $'^(changed|main)\t' "$1.rerun" 2>/dev/null && [ -n "${TEST_FILES:-}" ] && packget test.changed tc && [ -n "$tc" ] \
+    && packget test.command cmd && [ -n "$cmd" ] || return 0
+  rm -f "$1.runsel"; printf '%s\n' "$TEST_FILES" > "$1.runfiles" \
+    && (cd "$1" && CONVEYOR_TEST_LIST=$1.runsel CONVEYOR_TEST_RERUN=$1.rerun CONVEYOR_TEST_FILELIST=$1.runfiles CONVEYOR_TEST_CASES=${TEST_CASES:-} CONVEYOR_TEST_LOG=$1.testlog \
+      timeout 300 bash -c "$cmd" > "$1.runsel.out" 2>&1 < /dev/null 8>&-) \
+    && [ -f "$1.runsel" ] && TEST_FILES=$(awk -F'\t' 'FILENAME == ARGV[1] { sel[$0] = 1; next }
+      FILENAME == ARGV[2] { if ($1 == "pass" || $1 == "ok" || $1 == "off") p[$2] = 1; else if ($1 == "fail") f[$2] = 1; next }
+      !(($0 in p) && !($0 in f) && !($0 in sel))' "$1.runsel" "$1.rerun" "$1.runfiles")
+  rm -f "$1.runsel" "$1.runsel.out" "$1.runfiles"; return 0
 }
 # The files that differ between two trees or commits, one a line (read NUL-separated: a name with spaces is whole).
 treediff() { # <worktree> <from> <to>

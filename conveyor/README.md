@@ -671,7 +671,12 @@ pack does not set `test.changed`, the file has a `fail<TAB><file>` line and a `s
 and the log can say it passed before. After a session changed the staged change, the file also has a line `changed<TAB><file>` for each
 file the session changed: the command runs the tests it selects for those files too, whether or not they passed, and
 says in its log how many cases of its selection it kept as passed and did not run (`TESTRUN kept=<n>`; the test line's
-`selected.kept`). Of a file that ran again in that run, a case that failed is no longer listed as passed, and the
+`selected.kept`). When the pack sets `test.changed` and the list has a `changed` or `main` line, the step first runs
+`test.command` once with `CONVEYOR_TEST_LIST` (the file it writes the selected test files to, one a line),
+`CONVEYOR_TEST_RERUN`, `CONVEYOR_TEST_FILELIST` and `CONVEYOR_TEST_CASES` (the cases the card named of each file, as
+a start of a file gets them) and `CONVEYOR_TEST_LOG`. A pack's script that gets `CONVEYOR_TEST_LIST` runs no test and no
+check, and logs the cases it keeps of the files it leaves out as `TESTRUN kept=<n>`. The step does not start a file
+that the list keeps something of (a `pass`, `ok` or `off` line) and that this selection names no case of. Of a file that ran again in that run, a case that failed is no longer listed as passed, and the
 cases it did not run stay listed as they were: a file listed as passed keeps its `pass` line beside its new `fail`
 lines, and of such a file the command runs those failed cases alone. A file that failed naming no case or never
 finished in that run (its time ran out) loses only what it had of the cases the run selected of it, when the command's
@@ -691,7 +696,8 @@ filter runs no case, Conveyor's own runner writes the line `{"file": "<file>"}` 
 
 ### The list of tests a card's run is given
 
-A card never runs the suite command (`test.command`, `test.full`). Each run of a card's tests runs each test file
+A card never runs the suite command (`test.command`, `test.full`) to run tests; the one run of `test.command` that only
+lists the files to start is described above, with the test command. Each run of a card's tests runs each test file
 of its list alone, one process a file, through `test.fileCommand`: the card's test step, the run again after a
 failure, the bug-card check, the run on main, the main-red check, the checks of Fix hollow cases, Fix the waiting,
 Make it run alone and the speed-up cards, the mutation check and `testaction run`. Each process has the file's own
