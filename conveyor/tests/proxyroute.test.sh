@@ -131,18 +131,7 @@ t_proxyapi() {
 # Each role takes its own route: the builder set to the proxy runs through it at once; the Claude reviewer, set to the
 # proxy as its fallback, runs on the subscription first, and when that login fails runs again through the proxy.
 t_proxyreview() {
-  pxsetup; tune --slurpfile real "$SRC/lib/test-pack.json" --arg b "$PXURL" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"]
-    | .models.claudeProxy = {baseUrl: $b, roles: {builder: "proxy", reviewer: "fallback"}}'
-  loop control reviewer claude claude-opus-5-5 >/dev/null || fail "a Claude reviewer was not set"
-  cat > "$STUB/claude" <<'EOF'
-#!/usr/bin/env bash
-cat > /dev/null
-case " $* " in *" --tools "*) ;; *) echo "${ANTHROPIC_BASE_URL:-subscription}" >> "$STUB/builds"; echo two >> a.txt
-  echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'; exit 0 ;; esac
-echo "${ANTHROPIC_BASE_URL:-subscription} ${ANTHROPIC_AUTH_TOKEN:-}" >> "$STUB/reviews"
-[ -n "${ANTHROPIC_BASE_URL:-}" ] || { echo '{"type":"result","is_error":true,"result":"OAuth session expired and could not be refreshed","num_turns":1}'; exit 1; }
-jq -cn --arg r "$GO" '{type: "result", is_error: false, result: $r, num_turns: 2, usage: {input_tokens: 100, cache_creation_input_tokens: 50, cache_read_input_tokens: 1000, output_tokens: 7}}'
-EOF
+  pxreviewsetup
   # The review call alone (review(), which card() reaches through reviewed()) of the build's staged change; its fields
   # in $T/$CASE/review.
   export GO; pxeng "$PXBUILD"' && git -C "$w" add -A && r=$(review "$w" brief) && printf "%s\n" "$r" > "$CARDS/../review"'; pxbuilt 0
@@ -150,6 +139,37 @@ EOF
   [ "$(cat "$STUB/reviews")" = "subscription "$'\n'"$PXURL no-key" ] || fail "the review did not run again through the proxy: $(cat "$STUB/reviews") $(cat "$T/$CASE/out")"
   [ "$(jq -r .route "$T/$CASE/build") $(jq -r .route "$T/$CASE/review" 2>&1)" = 'proxy proxy' ] \
     || fail "the build's and the review's fields do not both say the proxy: $(cat "$T/$CASE/build" "$T/$CASE/review" 2>&1)"
+}
+# Bug: a regression could put the subscription try's reason back to nostart()'s own (NOSTART_WHY), which names no kept
+# file, when the proxy fallback failed too: the reason then said the words were below while the review's events had
+# been moved to the kept folder, and no case failed. The subscription part of the reason names its kept events file.
+t_proxyreviewboth() {
+  pxreviewsetup; touch "$STUB/proxybad"
+  export GO; pxeng "$PXBUILD"' && git -C "$w" add -A && { r=$(review "$w" brief); echo $? > "$CARDS/../reviewrc"; printf "%s\n" "$r" > "$CARDS/../review"; }'; pxbuilt 0
+  [ "$(cat "$STUB/reviews")" = "subscription "$'\n'"$PXURL no-key" ] || fail "the review did not run again through the proxy: $(cat "$STUB/reviews") $(cat "$T/$CASE/out")"
+  [ "$(cat "$T/$CASE/reviewrc")" != 0 ] || fail "a review that failed on both routes ended with exit 0: $(cat "$T/$CASE/review")"
+  local c=c20260101T000000-r-7; local k=$c.review.events
+  head -n 1 "$T/$CASE/review" | grep -q "on the subscription login, .*; its events are kept in $k; through the proxy, " \
+    || fail "the reason of a review failed on both routes does not name the subscription try's kept $k: $(cat "$T/$CASE/review")"
+  grep -qF 'OAuth session expired' "$ST/kept/$c/$k" || fail "the kept $k does not hold the subscription's words: $(cat "$ST/kept/$c/$k" 2>&1)"
+}
+# A Claude reviewer set to the proxy as its fallback, on an expired subscription login, and a builder set to the proxy.
+# Through the proxy the review gives $GO, unless $STUB/proxybad is there, when the proxy refuses its key.
+pxreviewsetup() {
+  pxsetup; tune --slurpfile real "$SRC/lib/test-pack.json" --arg b "$PXURL" '.models.allowed = $real[0].models.allowed | .models.allowed.claude += ["m"]
+    | .models.claudeProxy = {baseUrl: $b, roles: {builder: "proxy", reviewer: "fallback"}}'
+  loop control reviewer claude claude-opus-5-5 >/dev/null || fail "a Claude reviewer was not set"
+  # stub: a review that fails on the expired login and, with proxybad, through the proxy too.
+  cat > "$STUB/claude" <<'EOF'
+#!/usr/bin/env bash
+cat > /dev/null
+case " $* " in *" --tools "*) ;; *) echo "${ANTHROPIC_BASE_URL:-subscription}" >> "$STUB/builds"; echo two >> a.txt
+  echo '{"type":"result","is_error":false,"usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":999,"output_tokens":5}}'; exit 0 ;; esac
+echo "${ANTHROPIC_BASE_URL:-subscription} ${ANTHROPIC_AUTH_TOKEN:-}" >> "$STUB/reviews"
+[ -n "${ANTHROPIC_BASE_URL:-}" ] || { echo '{"type":"result","is_error":true,"result":"OAuth session expired and could not be refreshed","num_turns":1}'; exit 1; }
+[ ! -e "$STUB/proxybad" ] || { echo '{"type":"result","is_error":true,"result":"Invalid API key · Please run /login","num_turns":1}'; exit 1; }
+jq -cn --arg r "$GO" '{type: "result", is_error: false, result: $r, num_turns: 2, usage: {input_tokens: 100, cache_creation_input_tokens: 50, cache_read_input_tokens: 1000, output_tokens: 7}}'
+EOF
 }
 # Bug: after a session worked through the proxy, the proxy stopped; the next session failed on the connection, which
 # is no login cause, and Health still showed the proxy working. Any stop before work through the proxy shows it failing.
