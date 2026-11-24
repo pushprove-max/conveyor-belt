@@ -455,7 +455,7 @@ pending_fresh() {
     main=$({ mine; records; } 2>/dev/null | awk -F'\t' -v r="$repo" '$1 == r { print $2; exit }')
     [ -n "$main" ] && h=$(ASK_LIMIT=10 ask "$repo" "$main" health 2>/dev/null) \
       && n=$(jq -ce --arg r "$repo" --argjson h "$h" '($h | objects | .blocked | arrays) as $b
-        | .[$r] = [$b[] | objects | {ref: ((.name | strings) // "#\(.issue)"), since, why: (.reason | tostring | gsub("\\s+"; " ") | .[0:240])}]' <<<"$now" 2>/dev/null) \
+        | .[$r] = [$b[] | objects | {ref: ((.name | strings) // "#\(.issue)"), card, since, why: (.reason | tostring | gsub("\\s+"; " ") | .[0:240])}]' <<<"$now" 2>/dev/null) \
       && now=$n
   done <<<"$repos"
   [ "$now" != '{}' ] || return 0
@@ -471,11 +471,17 @@ pending_fresh() {
 # after that (reviewretry): an old reason with a note that the new one has not is another block. A line whose
 # review-retry worked but was not logged (its note "was retried (review-retry), but the act was not logged") is no
 # block's line: the card was retried, and the line reports that its act is not in the log, which no later read undoes.
-FRESH='def card: [capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>.+?) is blocked since (?<t>[0-9T:-]+Z): (?<why>.*)$"),
-    capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>.+?) has been blocked for [0-9hm]+ \\(since (?<t>[0-9T:-]+Z)\\): (?<why>.*)$"),
-    capture("^(?<r>[A-Za-z0-9._-]+): not yet reported: blocked (?<ref>.+)$")] | first
+# A card named by its name has its card id after it, "<name> (card <id>)" (watch-conveyor.sh who): the follow-ups of
+# one issue share a name, so such a line is health's card of that id alone. A line with no id matches by its ref. In
+# the first line, a card taken out with no id takes out its ref; one with its id takes out one of its ref's names, in
+# the part its line is of ("blocked" or "still blocked"; a "not yet reported" line, either): the follow-ups of one issue
+# are each named there by their shared name.
+FRESH='def line: [(capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>.+?)(?: \\(card (?<id>[A-Za-z0-9._-]+)\\))? is blocked since (?<t>[0-9T:-]+Z): (?<why>.*)$") | .k = "blocked"),
+    (capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>.+?)(?: \\(card (?<id>[A-Za-z0-9._-]+)\\))? has been blocked for [0-9hm]+ \\(since (?<t>[0-9T:-]+Z)\\): (?<why>.*)$") | .k = "still blocked"),
+    capture("^(?<r>[A-Za-z0-9._-]+): not yet reported: blocked (?<ref>.+?)(?: \\(card (?<id>[A-Za-z0-9._-]+)\\))?$")] | first;
+  def card: line
   | select(. != null and (.why == null or (.why | test("; #[0-9]+ was retried \\(review-retry\\), but the act was not logged: ") | not))) | . as $c
-  | select($now[$c.r] != null and (any($now[$c.r][]; . as $i | $i.ref == $c.ref and ($c.t == null or $i.since == $c.t)
+  | select($now[$c.r] != null and (any($now[$c.r][]; . as $i | $i.ref == $c.ref and ($c.id == null or $i.card == $c.id) and ($c.t == null or $i.since == $c.t)
       and ($c.why == null or ($c.why | sub("; the review-retry of #[0-9]+ failed: [\\s\\S]*$"; "")
         | sub(" \\(as of [0-9]{2}:[0-9]{2}Z\\)$"; "")) == $i.why)) | not));
   split("\n") | (if .[-1] == "" then .[:-1] else . end) as $l
@@ -486,7 +492,9 @@ FRESH='def card: [capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>.+?) is blocked since 
         else ($l[0] | if startswith("Conveyor: ") then "Conveyor: " + (ltrimstr("Conveyor: ") | split(" | ") | map(index(": ") as $i
             | if $i == null then . else .[:$i] as $r | (.[$i + 2:] | split("; ") | map(index(": ") as $j
                 | if $j != null and (.[:$j] | IN("blocked", "still blocked")) then .[:$j] as $k
-                  | (reduce ($g[] | select(.r == $r) | .ref) as $x (" \(.[$j + 2:]) "; split(" \($x) ") | join(" ")) | ltrimstr(" ") | rtrimstr(" "))
+                  | (reduce ($g | map(select(.r == $r and (.id == null or .k == null or .k == $k))) | unique_by([.ref, .id])[]) as $x (" \(.[$j + 2:]) ";
+                      split(" \($x.ref) ") | if $x.id == null or length == 1 then join(" ") else .[0] + " " + (.[1:] | join(" \($x.ref) ")) end)
+                    | ltrimstr(" ") | rtrimstr(" "))
                   | if . == "" then empty else "\($k): \(.)" end
                 else . end)) as $s | if $s == [] then empty else "\($r): \($s | join("; "))" end end) | join(" | "))
           else . end) as $h | [$h] + $keep | join("\n") end end'

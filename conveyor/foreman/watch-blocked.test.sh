@@ -131,7 +131,22 @@ t_heldearly() {
   [ "$(cat "$FD"/pending/*.wake | grep -cF 'alpha: #1 landed')" = 1 ] || fail "#1's landing was not woken once: $(cat "$FD"/pending/*.wake)"
 }
 
-cases=(remind question retried health slowother heldearly)
+# Two review follow-ups of #7 (no issue of their own, one name) blocked: the reminder 30 minutes on names each by its
+# card id. Bug it catches (#1660): the reminder named each by the shared name alone, so the waiter (lib.sh FRESH) could
+# not tell them apart, and a stop kept or took out the reminder of the one by the record of the other.
+t_remindfollowups() {
+  fixture remindfollowups; block 2026-11-19T09:58:00Z \
+    && jq -c '.health.blocked |= [.[0] | (.issue = 0 | .name = "Review follow-up of #7") | (.card = "c1"), (.card = "c2")]' "$T/snap" > "$T/a" \
+    && mv "$T/a" "$T/snap" || fail "the fixture was not made"
+  poll 0 || fail "no wake for the blocks: $(cat "$T/err")"
+  poll 30 || fail "no second wake for the follow-ups still blocked 30 minutes after their report: $(cat "$T/err")"
+  local c; for c in c1 c2; do
+    grep -qF "alpha: Review follow-up of #7 (card $c) has been blocked for 32m (since 2026-11-19T09:58:00Z): $REASON" <<<"$wake" \
+      || fail "the reminder for follow-ups c1 and c2 of #7 blocked does not name $c by its card id: $wake"
+  done
+}
+
+cases=(remind question retried health slowother heldearly remindfollowups)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

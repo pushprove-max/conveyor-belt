@@ -148,7 +148,7 @@ snap ".health.blocked = [$red + {since: \"2026-11-15T11:58:00Z\", reason: \"test
 poll || fail "a blocked main-red card woke nothing: $(cat "$T/err")"
 w=$(cat "$FD"/pending/*.wake)
 grep -qxF 'Conveyor: alpha: blocked: Main is red (0123456789ab)' <<<"$w" || fail "the wake's first line does not name the card: $w"
-grep -qxF 'alpha: Main is red (0123456789ab) is blocked since 2026-11-15T11:58:00Z: tests failed twice' <<<"$w" || fail "the wake does not name the card: $w"
+grep -qxF 'alpha: Main is red (0123456789ab) (card c20261115T110000-alpha-0) is blocked since 2026-11-15T11:58:00Z: tests failed twice' <<<"$w" || fail "the wake does not name the card: $w"
 ! grep -qF '#0' <<<"$w" || fail "the wake calls the main-red card #0: $w"
 }
 

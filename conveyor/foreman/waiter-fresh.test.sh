@@ -87,7 +87,25 @@ local out; out=$(bash -c '. "$1/lib.sh" && pending_run "$2"' _ "$SRC" "$T/ack")
 [ "$out" = "$w" ] || fail "for the kept wake of 'Review follow-up of #7' blocked, pending_run did not relay it: $out"
 }
 
-cases=(freshnolist freshretrynote freshreminder freshown freshnoissue)
+# Bug caught (#1660): two follow-ups of one issue share their name, here blocked at the same time for the same reason;
+# c1 was retried since, and health lists c2 alone. Matched by name, c2 kept c1's lines as if fresh. Each line names its
+# card id (watch-conveyor.sh who), in each of the three forms (blocked, still blocked, not yet reported): c1's lines go
+# and c2's stay. The first line names the shared name once a card: it loses one name in each part, c1's (with all of
+# them gone, c2 was not named there), and the stop relays the wake.
+t_freshfollowups() {
+fixture freshfollowups alpha
+local f='Review follow-up of #7' l=' is blocked since 2026-11-19T09:58:00Z: tests failed' r=' has been blocked for 32m (since 2026-11-19T09:58:00Z): tests failed'
+printf '%s\n' "Conveyor: alpha: blocked: $f $f; still blocked: $f $f" "alpha: $f (card c1)$l" "alpha: $f (card c2)$l" "alpha: $f (card c1)$r" \
+  "alpha: $f (card c2)$r" "alpha: not yet reported: blocked $f (card c1)" "alpha: not yet reported: blocked $f (card c2)" > "$FD/pending/$WAKE"
+CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" = health ] || exit 3; echo "{\"blocked\": [{\"card\": \"c2\", \"issue\": 0, \"name\": \"Review follow-up of #7\", \"since\": \"2026-11-19T09:58:00Z\", \"reason\": \"tests failed\"}]}"' fresh
+local w; w=$(printf '%s\n' "Conveyor: alpha: blocked: $f; still blocked: $f" "alpha: $f (card c2)$l" "alpha: $f (card c2)$r" "alpha: not yet reported: blocked $f (card c2)")
+[ "$(wake)" = "$w" ] \
+  || fail "for a wake of follow-ups c1 and c2 of #7 (each blocked, still blocked and not yet reported) and health holding c2 alone blocked, pending_fresh did not keep c2's lines and name alone: $(wake)"
+local out; out=$(bash -c '. "$1/lib.sh" && pending_run "$2"' _ "$SRC" "$T/ack")
+[ "$out" = "$w" ] || fail "for the kept wake of follow-up c2 of #7 blocked, pending_run did not relay it: $out"
+}
+
+cases=(freshnolist freshretrynote freshreminder freshown freshnoissue freshfollowups)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

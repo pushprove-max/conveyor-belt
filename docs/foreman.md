@@ -124,7 +124,8 @@ see only that project. It shows:
 - each item that needs you, one a line: a blocked card with its reason, a change that waits for your yes, a push
   error and a problem of the engine
 - `not yet reported: blocked #N` for each card blocked for two polls or more that the Foreman has not got in a wake.
-  The next wake names it too.
+  The next wake names it too. A card with no issue shows its name and its card ID, for example
+  `not yet reported: blocked Review follow-up of #7 (card <id>)`.
 - the watcher's last poll: when it ended and how long it took, with what it read for each project
 - last, the Foreman's waiter: `waiter: listening`, `waiter: starting again` or `waiter: down: <why>`
 
@@ -159,7 +160,8 @@ it up:
 - A stopped process: the engine, or the process of a card, is stopped (state T in `ps`). The wake names it. Run
   `kill -CONT` with each process ID of the tree, as the wake gives it, on the machine where the engine runs to resume it.
 - A card that is still blocked 30 minutes after its first wake: the wake says "#N has been blocked for <time> (since
-  <time>)" and gives the reason. While the card stays blocked, the next wake comes one hour later, and then each hour. If one of
+  <time>)" and gives the reason. A card with no issue shows its name and its card ID in place of "#N", for example
+  "Review follow-up of #7 (card <id>)". While the card stays blocked, the next wake comes one hour later, and then each hour. If one of
   your open questions names the card's issue (`#N`), there is no wake. A card that is retried, unblocked, shut or
   landed gives no more of these wakes.
 - gh is signed out, GitHub does not answer, or the project gives no snapshot: the wake comes only when three polls in

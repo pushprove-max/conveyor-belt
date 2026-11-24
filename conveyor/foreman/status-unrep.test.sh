@@ -141,7 +141,22 @@ out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the
 ! grep -q 'self-heals' <<<"$out" || fail "the status of a snapshot with an empty list and no sort has a self-heals line: $out"
 }
 
-cases=(unreported unrepsent unrepasof unrepretry unrepsentasof selfheals)
+# Bug caught (#1660): two follow-ups of one issue share their name, here blocked at the same time for the same reason,
+# so their lines were the same: the pending wake of c2 made c1, reported and delivered, look not yet reported. Their
+# lines carry the card id now, and the status names c2 alone.
+t_unrepfollowups() {
+CASE=unrepfollowups; fixture unrepfollowups; mkdir -p "$FD/pending"
+f() { echo "{card: \"$1\", issue: 0, name: \"Review follow-up of #7\", since: \"2026-11-15T11:00:00Z\", reason: \"tests failed twice\"}"; }
+snap ".health.blocked = [$(f c1), $(f c2)]"
+printf '%s\n' alpha/blocked:c1 alpha/blocked:c2 > "$FD/conveyor-reported.txt"
+printf '%s\n' 'Conveyor: alpha: blocked: Review follow-up of #7' \
+  'alpha: Review follow-up of #7 (card c2) is blocked since 2026-11-15T11:00:00Z: tests failed twice' > "$FD/pending/20261115T110000Z-1-old.wake"
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+[ "$(grep '^not yet reported: ' <<<"$out")" = 'not yet reported: blocked Review follow-up of #7 (card c2)' ] \
+  || fail "with follow-ups c1 (reported, delivered) and c2 (its wake pending) of #7 blocked, the status does not name c2 alone as not yet reported: $out"
+}
+
+cases=(unreported unrepsent unrepasof unrepretry unrepsentasof selfheals unrepfollowups)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
