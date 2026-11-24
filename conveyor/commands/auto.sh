@@ -249,13 +249,16 @@ EOF
     w=$(way) d=0 k=0
     # put <text>: the text added to the log just before its "## Waiting for the owner" heading (the end of "## Decisions").
     put() { P=$1 awk '/^## Waiting for the owner$/ && !done { printf "%s\n\n", ENVIRON["P"]; done = 1 } { print }' "$log" > "$log.new" && mv "$log.new" "$log" || die "the log $log could not be written"; }
-    # hold <id> <question> <why>: the decision listed for the owner, once (the section is the log's last). Its id and
+    # hold <id> <question> <why>: the decision listed for the owner, once (the section is the log's last): a decision asked
+    # again under its id gets its line written again in place, so the log shows the question the owner has now. Its id and
     # its count of ledger rows ("<id> <count>") go to <log>.seen, a line each, once: a decision asked again or reopened
     # keeps its id, and in the same second its whole row too (decision.sh stamps whole seconds), but the ledger only
     # grows, a row for each ask, answer and reopen. The engine's needsauto() (lib/needsask.sh) runs a pass for an open
     # decision whose line no pass wrote.
     hold() { local s
-      grep -qF -- "- $1: " "$log" || printf -- '- %s: %s (%s)\n' "$1" "$2" "$3" >> "$log" || die "the log $log could not be written"; k=$((k + 1))
+      P="- $1: " L=$(printf -- '- %s: %s (%s)' "$1" "$2" "$3") awk '/^## / { on = ($0 == "## Waiting for the owner") }
+        on && index($0, ENVIRON["P"]) == 1 { if (!done) print ENVIRON["L"]; done = 1; next } { print } END { if (!done) print ENVIRON["L"] }' \
+        "$log" > "$log.new" && mv "$log.new" "$log" || die "the log $log could not be written"; k=$((k + 1))
       s=$(jq -r --argjson c "$cnt" '"\(.id | gsub("[\r\n]+"; " ")) \($c[.id] // 0)"' <<<"$row") \
         && { grep -qxF -- "$s" "$log.seen" 2>/dev/null || printf '%s\n' "$s" >> "$log.seen"; } || die "the file $log.seen could not be written"; }
     while IFS= read -r row; do

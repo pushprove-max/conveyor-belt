@@ -193,6 +193,21 @@ t_autoprofileheldn() { autoprofileheld narrow; }
 
 # Bug it catches: the Foreman's watcher had no way to read what waits for the owner on a record's host, so it retried review
 # blocks the owner reserves. `auto reserved` gives the pack's auto.reserved words and the profile's items as one JSON list.
+# Bug: hold() wrote a decision's line only when the log had none for its id, so d-flag, held, then asked again under its
+# id with a new question that is still reserved, kept the old question under "Waiting for the owner": the owner read a
+# question nobody asks any more.
+t_autoreheld() {
+  local out log; autoledger
+  out=$(cd "$R" && loop auto on && loop auto decide) || fail "decide failed: $out"
+  log=$(jq -r .log "$ST/auto/mode.json")
+  jq -c 'select(.id == "d-flag") | .question = "Add a new feature flag for imports?" | .askedAt = "2026-11-15T11:00:00Z"' "$LEDGER" > "$T/$CASE/reask" \
+    && cat "$T/$CASE/reask" >> "$LEDGER" || fail "d-flag was not asked again"
+  out=$(cd "$R" && loop auto decide) || fail "the second decide failed: $out"
+  awk '/^## Waiting for the owner$/ { on = 1; next } on && /^- d-flag: /' "$log" > "$T/$CASE/held"
+  [ "$(answer d-flag)" = open ] && [ "$(cat "$T/$CASE/held")" = '- d-flag: Add a new feature flag for imports? (reserved: feature flag)' ] \
+    || fail "after auto decide on d-flag asked again as 'Add a new feature flag for imports?', the d-flag lines under Waiting for the owner are not the new question alone: $(cat "$log")"
+}
+
 t_autoreserved() {
   local out; setup '[]'; mkdir -p "$ST/foreman"
   printf '%s\n' '## Hard lines' '- no tracking' >"$ST/foreman/owner-way.md"
