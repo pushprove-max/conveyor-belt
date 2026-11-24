@@ -405,19 +405,21 @@ prmergerule() { local d x; packget push.prMerge d && x=$(ctl 2>/dev/null) && x=$
 # closed, each with an issue line, and $LANDPR says merged: the next push opens a new pull request (landpr()). A merge
 # GitHub refuses (checks, conflicts) leaves the pull request open, and $LANDPR's merge gives GitHub's reason. Exit 2: no
 # pull request is open; 1: refused, or it could not be asked; 3: merged, but main or an issue was not brought in line
-# after it (said on stderr).
+# after it (said on stderr). Idle's merge is not asked, and exit is 0, when idle no longer holds just before it (mergecall()).
 prmerge() { # <who>
   local lk rc
   { exec {lk}>>"$PUSHED.lock"; } 2>/dev/null && flock "$lk" || { echo "conveyor: the push lock could not be taken; nothing merged" >&2; return 1; }
   mergeone "$@" {lk}>&-; rc=$?; exec {lk}>&-; return $rc
 }
 mergeone() { # <who>
-  local n out sha m c i st rc=0
+  local n out sha m mc c i st rc=0
   out=$(landingprs) && n=$(jq -er '.[0].number // 0 | numbers' <<<"$out" 2>/dev/null) \
     || { echo "conveyor: the open pull request from $LANDING could not be read: ${out:0:600}" >&2; return 1; }
   [ "$n" != 0 ] || { echo "conveyor: no pull request from $LANDING into $BRANCH is open; nothing merged" >&2; return 2; }
   sha=$(pushed) || sha=''
-  if ! out=$(gh_write pr merge "$n" --merge 2>&1 < /dev/null); then
+  out=$(mergecall "$1" "$n" 2>&1 < /dev/null); mc=$?
+  [ "$mc" != 4 ] || return 0
+  if [ "$mc" != 0 ]; then
     prstate "$n" '.merge = {time: $t, by: $w, sha: $s, result: "refused", reason: $r}' --arg w "$1" --arg s "$sha" --arg r "$(tail -c 1200 <<<"${out:-gh gave no reason}")"
     echo "conveyor: GitHub refused the merge of pull request #$n, which stays open: ${out:0:600}" >&2; return 1
   fi
@@ -431,6 +433,27 @@ mergeone() { # <who>
       echo "conveyor: issue #$i was not closed after the merge: ${out:0:600}" >&2; fi
   done < <(stdb ask lines cards 2>/dev/null | jq -rs --argjson n "$n" 'map(select(.step == "pushed" and .pr == $n and .issue != 0)) | unique_by(.card) | .[] | "\(.card) \(.issue)"')
   return $rc
+}
+# GitHub's merge of pull request <n> for <who>. For idle, the rule, Land as, the card records and the queue are read
+# again after gh_write()'s privacy check, under the card records lock, which is held until gh has ended (idlegate()):
+# `control` (the rule, a hold, a release) and the pick take that lock, so each one either ends before that read, and
+# stops the merge, or waits until GitHub's answer. A gh that has started can still be sending the merge, so the lock is
+# kept over gh's wait, to gh_write()'s time limit: with every card closed, no card waits on it. The open issues are those read before (IDLEOPEN, idlenow()). The merge runs under the push lock
+# (prmerge(), idlemerge()), and idle's under the release hold too. Exit 4: idle no longer holds, or the lock could not
+# be taken, and nothing was asked; any failure of the merge itself is 1, as gh's own exit 4 (sign-in needed) must read
+# as a refusal.
+mergecall() { # <who> <pull request>
+  local gate='' held=''
+  [ "$1" != idle ] || gate=idlegate
+  GHGATE=$gate gh_write pr merge "$2" --merge && return 0
+  [ -z "$held" ] || return 4
+  return 1
+}
+# gh_write()'s GHGATE for idle's merge: the card records lock, left in GHGATEFD, and idle holds still under it
+# (idlerule(), idlequeue()); else held, of mergecall(), is set.
+idlegate() {
+  { exec {GHGATEFD}>>"$STATE"; } 2>/dev/null && flock "$GHGATEFD" && idlerule && idlequeue && return 0
+  held=1; return 1
 }
 # Origin's default branch, fetched with the pack's push.env: prints its commit, or why it could not be had.
 prfetch() {
@@ -459,7 +482,8 @@ prff() { # <origin's default branch, fetched>
 # linked to every landing in it (those since origin's default branch, fetched now), each alone, once a commit
 # ($PUSHED.prtested). A run that fails goes to the main-fix card as a push's does and holds the merge until main moves
 # (checkheld()); a merge GitHub refused is not asked again of the same commit. The rule and the belt are read again
-# after that run, which takes minutes: a card the loop picked meanwhile, or the rule changed, holds the merge.
+# after that run, which takes minutes, and once more just before GitHub's merge (mergecall()): a card the loop picked
+# meanwhile, or the rule changed, holds the merge.
 # Nothing merges while a release run is under way (relhold(), below): the next idle look tries again.
 idlemerge() {
   local lk rc hk
@@ -472,14 +496,20 @@ idlemerge() {
 }
 # Merge PR idle holds now: the rule is idle, Land as pr, every card in the card records is closed (filed, landed,
 # closed or blocked), and no open issue waits to be picked (upnext(), lib/pick.sh: one released while the run before
-# the merge ran has no card yet). Open issues that cannot be read hold the merge too.
+# the merge ran has no card yet). Open issues that cannot be read hold the merge too. The open issues read are kept in
+# IDLEOPEN, for the read again before the merge (mergecall()).
 idlenow() {
-  local issues
+  idlerule || return 1
+  IDLEOPEN=$(openissues "$FIELDS" 2>/dev/null) && idlequeue
+}
+# The rule, Land as and the card records of idlenow(), with no call to GitHub.
+idlerule() {
   [ "$(prmergerule 2>/dev/null)" = idle ] && [ "$(landas 2>/dev/null)" = pr ] || return 1
   stdb ask lines cards 2>/dev/null | jq -se 'map(select(.step | IN("push", "pushed", "issue", "bugproof") | not)) | group_by(.card)
-    | all(.[]; any(.[]; .step | IN("filed", "landed", "closed", "blocked")))' > /dev/null || return 1
-  issues=$(openissues "$FIELDS" 2>/dev/null) && upnext "$issues" 2>/dev/null | jq -e 'length == 0' > /dev/null
+    | all(.[]; any(.[]; .step | IN("filed", "landed", "closed", "blocked")))' > /dev/null
 }
+# No issue of IDLEOPEN waits to be picked, as the control record has it now.
+idlequeue() { upnext "$IDLEOPEN" 2>/dev/null | jq -e 'length == 0' > /dev/null; }
 idleone() {
   local sha c n x
   sha=$(pushed) && [ -n "$sha" ] && jq -e --arg s "$sha" '.merged == null and .closed == null and (.merge.result == "refused" and .merge.sha == $s | not)' "$LANDPR" > /dev/null 2>&1 || return 0

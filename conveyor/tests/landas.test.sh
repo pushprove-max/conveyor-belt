@@ -59,8 +59,9 @@ la_land() { # <n> [<fix rounds>]
 # .cross true is a fork's: listed by its branch name, as GitHub lists it, with isCrossRepository true); a list is
 # newest first (highest number first), as gh lists them; a view gives its state, with a mergedAt once merged; every
 # pr call is logged in $STUB/pr-calls. A merge (gh pr merge <n> --merge) makes GitHub's merge commit on origin's
-# main, of it and the head branch, unless $STUB/merge-refuse holds the reason GitHub gives; $STUB/merge-then, when
-# there is one, is sourced after a merge.
+# main, of it and the head branch, unless $STUB/merge-refuse holds the reason GitHub gives (gh then exits with the
+# status $STUB/merge-exit holds, or 1); $STUB/merge-first, when there is one, is sourced before a merge, and
+# $STUB/merge-then after one.
 la_prstub() {
   mv "$STUB/gh" "$STUB/gh.issues"
   echo "$T/$CASE/origin" > "$STUB/origin"
@@ -71,7 +72,8 @@ echo "$*" >> "$STUB/pr-calls"; c=$2; n=''; [ "$c" != edit ] && [ "$c" != merge ]
 while [ $# -gt 0 ]; do case $1 in --head) h=$2 ;; --base) b=$2 ;; --title) t=$2 ;; --body) y=$2 ;; --merge) shift; continue ;; esac; shift 2; done
 case $c in
   list) cat "$STUB"/pr.* 2>/dev/null | jq -cs --arg h "$h" --arg b "$b" '[.[] | select(.head == $h and .base == $b and .state == "OPEN")] | sort_by(-.number) | [.[] | {number, url: "https://github.com/o/r/pull/\(.number)", isCrossRepository: (.cross // false)}]' ;;
-  merge) [ ! -e "$STUB/merge-refuse" ] || { cat "$STUB/merge-refuse" >&2; exit 1; }
+  merge) [ ! -e "$STUB/merge-first" ] || . "$STUB/merge-first"
+    [ ! -e "$STUB/merge-refuse" ] || { cat "$STUB/merge-refuse" >&2; exit "$(cat "$STUB/merge-exit" 2>/dev/null || echo 1)"; }
     o=$(cat "$STUB/origin"); export GIT_AUTHOR_NAME=gh GIT_AUTHOR_EMAIL=gh@example.com GIT_COMMITTER_NAME=gh GIT_COMMITTER_EMAIL=gh@example.com
     hd=$(git -C "$o" rev-parse "refs/heads/$(jq -r .head "$STUB/pr.$n")") && bs=refs/heads/$(jq -r .base "$STUB/pr.$n") \
       && m=$(git -C "$o" commit-tree "$hd^{tree}" -p "$bs" -p "$hd" -m "Merge pull request #$n") && git -C "$o" update-ref "$bs" "$m" || exit 1
@@ -216,6 +218,12 @@ t_prrefused() {
   tune '.push.landAs = "pr"'
   la_land 1; la_eng push c1 1 || fail "the push failed"
   echo OPEN > "$STUB/state.1"; h=$(git -C "$R" rev-parse main)
+  # Issue 1496. Bug it catches: gh's exit 4 (sign-in needed) read as the idle merge's "idle no longer holds, nothing
+  # asked" (mergecall()), so `pr merge` and the release's merge said done, with no refusal kept, though nothing merged.
+  echo 'To get started with GitHub CLI, please run: gh auth login' > "$STUB/merge-refuse"; echo 4 > "$STUB/merge-exit"
+  out=$(la_nofull pr merge 2>&1); [ $? = 1 ] && grep -qF 'gh auth login' <<<"$out" || fail "pr merge, with gh pr merge exiting 4, did not fail with gh's reason: $out"
+  [ "$(jq -r .merge.result "$(la_rec eval 'echo "$LANDPR"')")" = refused ] || fail "pr merge, with gh pr merge exiting 4, kept no refusal"
+  rm -f "$STUB/merge-exit"
   echo 'Pull request is not mergeable: the base branch policy prohibits the merge' > "$STUB/merge-refuse"
   out=$(la_nofull pr merge 2>&1); [ $? = 1 ] && grep -qF 'the base branch policy prohibits the merge' <<<"$out" || fail "the refused merge did not fail with GitHub's reason: $out"
   [ "$(la_prst 7)" = OPEN ] && [ "$(git -C "$R" rev-parse main)" = "$h" ] && [ ! -e "$STUB/closed" ] || fail "a refused merge moved main or closed an issue"
@@ -303,6 +311,69 @@ t_pridlerelease() {
   [ "$(cat "$STUB/ran" 2>&1)" = lib/m.test.js ] && [ ! -e "$STUB/during" ] || fail "the push run did not run, or #3 was not released during it: $(cat "$STUB/ran" 2>&1)"
   [ "$(la_prst 7)" = OPEN ] || fail "the pull request merged though #3 was released, and waits to be picked, while its push run ran"
 }
+# idlemerge(), with $STUB/gate-then run once as gh_write()'s privacy check reads the host's terms file (termsfile()):
+# after the idle merge's last calls to GitHub (the open issues, the open pull request), and before gh starts.
+la_idlegh() {
+  la_eng eval 'eval "la_$(declare -f termsfile)"
+    termsfile() { [ ! -e "$STUB/gate-then" ] || { bash "$STUB/gate-then" > /dev/null; rm -f "$STUB/gate-then"; }; la_termsfile; }
+    idlemerge'
+}
+# Issue 1496. Bug it catches: Merge PR idle read the rule and the card records before its last calls to GitHub (the
+# open issues, then the open pull request) and before gh_write()'s privacy check, and merged after them with no read
+# again, so it merged though the owner set Merge PR to button, a card was picked, or a held issue was released,
+# meanwhile. Each is done here as the merge's privacy check runs (la_idlegh()), the last step before gh; the idle look
+# after, with none, merges (none was kept as refused). The release is the case only the queue's read again
+# (idlequeue()) stops: the rule and the card records are as before it.
+t_pridlelast() {
+  setup "[$(issue 1 2026-01-01),$(issue 3 2026-01-01)]"; la_prstub
+  tune '.push.check = true | .push.landAs = "pr" | del(.test.fileCommand, .test.list)'
+  loop control pr-merge idle > /dev/null && loop control hold 3 > /dev/null || fail "control pr-merge idle or control hold 3 was refused"
+  la_land 1; la_eng push c1 1 || fail "the push failed"
+  printf '%s\n' "CONVEYOR_MAIN='$R' CONVEYOR_CARDS='$T/$CASE/cards' bash '$SRC/conveyor.sh' control pr-merge button > /dev/null" > "$STUB/gate-then"
+  la_idlegh
+  [ ! -e "$STUB/gate-then" ] || fail "the idle merge did not reach the merge's privacy check"
+  [ "$(la_prst 7)" = OPEN ] || fail "the pull request merged though Merge PR was set to button during the merge's privacy check"
+  loop control pr-merge idle > /dev/null || fail "control pr-merge idle was refused"
+  { declare -p SRC R T CASE && declare -f la_rec && echo "la_rec record c9 9 picked ok '{}'"; } > "$STUB/gate-then"
+  la_idlegh
+  [ ! -e "$STUB/gate-then" ] && [ "$(la_rec stdb ask lines cards | jq -s 'any(.card == "c9")')" = true ] \
+    || fail "the idle merge did not reach the merge's privacy check, or card 9 was not picked during it"
+  [ "$(la_prst 7)" = OPEN ] || fail "the pull request merged though card 9 was picked during the merge's privacy check"
+  la_rec record c9 9 closed ok '{}' || fail "card 9's line could not be written"
+  printf '%s\n' "CONVEYOR_MAIN='$R' CONVEYOR_CARDS='$T/$CASE/cards' bash '$SRC/conveyor.sh' control release 3 > /dev/null" > "$STUB/gate-then"
+  la_idlegh
+  [ ! -e "$STUB/gate-then" ] || fail "the idle merge did not reach the merge's privacy check"
+  [ "$(la_prst 7)" = OPEN ] || fail "the pull request merged though #3 was released, and waits to be picked, during the merge's privacy check"
+  loop control hold 3 > /dev/null || fail "control hold 3 was refused"
+  la_eng idlemerge
+  [ "$(la_prst 7)" = MERGED ] || fail "the pull request did not merge once the rule was idle again and the belt was empty"
+}
+# Issue 1496. Bug it catches: the idle merge's read again just before gh (idlegate()) took no lock, or let it go
+# before gh ended (as soon as the read was done, or once gh was forked), so `control pr-merge button`, or a pick, that
+# ended after that read while gh still sent the merge was not seen: the pull request merged though the owner's change
+# was said done first. The command runs inside gh's merge ($STUB/merge-first), once, under `timeout 4`: a real process
+# given time, as only a wait shows it waits for the card records lock while gh runs, and does not get in first. Its
+# change is not made when the time limit ends it.
+la_idlegate() { # <rule | pick>
+  local rc cmd
+  setup "[$(issue 1 2026-01-01),$(issue 3 2026-01-01)]"; la_prstub
+  tune '.push.check = true | .push.landAs = "pr" | del(.test.fileCommand, .test.list)'
+  loop control pr-merge idle > /dev/null && loop control hold 3 > /dev/null || fail "control pr-merge idle or control hold 3 was refused"
+  la_land 1; la_eng push c1 1 || fail "the push failed"
+  if [ "$1" = rule ]; then cmd="CONVEYOR_MAIN='$R' CONVEYOR_CARDS='$T/$CASE/cards' bash '$SRC/conveyor.sh' control pr-merge button"
+    printf '%s\n' "$cmd" > "$STUB/gate-in"
+  else cmd="la_rec record c9 9 picked ok '{}'"
+    { declare -p SRC R T CASE && declare -f la_rec && echo "$cmd"; } > "$STUB/gate-in" || fail "the pick's script could not be written"
+  fi
+  echo 'timeout 4 bash "$STUB/gate-in" > "$STUB/gate-out" 2>&1; echo $? > "$STUB/gate-rc"; rm -f "$STUB/merge-first"' > "$STUB/merge-first"
+  la_eng idlemerge
+  rc=$(cat "$STUB/gate-rc" 2>/dev/null) || fail "the idle merge did not ask gh for the merge"
+  [ "$rc" != 0 ] || fail "it ended while gh sent the idle merge, and the pull request is $(la_prst 7): $cmd"
+  [ "$rc" = 124 ] && [ "$(la_prst 7)" = MERGED ] \
+    || fail "it did not wait for gh to end (exit $rc: $(head -c 300 "$STUB/gate-out")), or the merge was not made (pull request $(la_prst 7)): $cmd"
+}
+t_pridlegaterule() { la_idlegate rule; }
+t_pridlegatepick() { la_idlegate pick; }
 # Bug it catches (#463): the pages said Merge PR idle always runs the linked test files before it merges, but
 # pushtests() runs none with the push check off (push.check), so a reader took an untested merge for a tested one.
 # A text check: the claim is in the docs, with no behaviour of its own to run (t_pridle runs the merge itself). The

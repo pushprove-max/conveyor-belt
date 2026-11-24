@@ -567,8 +567,8 @@ termsfile() {
 }
 # Whether the host file may name a terms file: 1 only when there is no host file or it is one object with no terms.
 termsnamed() { [ -e "$HOST" ] && ! jq -se 'length == 1 and (.[0] | type == "object" and (.terms // "") == "")' "$HOST" >/dev/null 2>&1; }
-gh_write() { # <gh arguments>
-  local a st d h mode terms hits rc pre src v fld i c w want='' n=0 args=() val cmd ended=''
+gh_write() { # <gh arguments>; GHGATE: a command run after the privacy check, just before gh: when it fails, exit 1, nothing posted; a lock it leaves in GHGATEFD is held until gh has ended (gh does not inherit it)
+  local a st d h mode terms hits rc pre src v fld i c w want='' n=0 args=() val cmd ended='' GHGATEFD=''
   val=$(ghvalue "$@"); cmd=$(ghcmd "$@")
   st=${STATE%/*}; d=$st/privacy; h=$d/$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM.txt
   mkdir -p "$d" && : > "$h" && packget privacy.mode mode || { echo "conveyor: privacy: the check could not be made; nothing posted" >&2; return 3; }
@@ -618,9 +618,9 @@ gh_write() { # <gh arguments>
   if [ -n "$hits" ] && [ "$mode" = public ]; then
     rm -f "$h".body.*; echo "conveyor: privacy: nothing posted; the text is kept at <state>/privacy/${h##*/}: $hits" >&2; return 3
   fi
+  [ -z "${GHGATE:-}" ] || "$GHGATE" || { [ -z "$GHGATEFD" ] || exec {GHGATEFD}>&-; rm -f "$h" "$h".body.*; return 1; }
   [ -z "$hits" ] || echo "conveyor: privacy warning (the pack's privacy.mode is private, so it was posted): gh ${args[*]:0:3}: $hits" >&"$LOGFD"
-  timeout 60 gh "${args[@]}"; rc=$?
-  rm -f "$h" "$h".body.*; return $rc
+  if [ -n "$GHGATEFD" ]; then timeout 60 gh "${args[@]}" {GHGATEFD}>&-; rc=$?; exec {GHGATEFD}>&-; else timeout 60 gh "${args[@]}"; rc=$?; fi; rm -f "$h" "$h".body.*; return $rc
 }
 # <text>: each word of the text (a run of characters that are not spaces) the privacy check flags, once, as
 # "<the hit's name>\t<word>"; the check reads the text as gh_write does: the <cards> and <state> folders so named, each
