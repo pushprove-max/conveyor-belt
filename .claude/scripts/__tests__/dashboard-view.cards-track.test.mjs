@@ -525,3 +525,79 @@ test('a retried card keeps "Every step" and its earlier attempt open when its ca
   assert.equal(b.dataset.card, 'c3-63');
   assert.equal(b.open, false, 'the attempt that was the card itself starts closed');
 });
+
+// Bug (#1540): an earlier attempt blocked by a review finding showed the whole finding as its closed line, cut in
+// the middle of its sentence ("... did not"), so what happened and when did not read at a glance. The line is short
+// ("blocked: the fix did not hold after 1 round"); the finding opens under it, with its file as a link.
+test('an earlier attempt blocked by a long finding says how it ended in short text and keeps the finding readable', () => {
+  const w = boot();
+  const data = full();
+  const claim = 'A card still frees a slot while it reruns checks after main moves.';
+  // The reason as card.sh writes it: the finding cut to its first 300 characters, here inside the code span `cardtest()`,
+  // then " did not hold after 1 round".
+  let head = `[P1] [E1] conveyor/lib/a.sh:169 ${claim} Proof: A \`STALE\` result sends the card back to `;
+  while ([...head].length < 292) head += 'more ';
+  const cut = `${head}\`cardtest()\` and the rest of the proof`.slice(0, 300);
+  assert.match(cut, /`c\w*$/, 'the engine\'s cut ends inside a code span, in a word');
+  const reason = `the fix for ${cut} did not hold after 1 round`;
+  const prior = { card: 'c3-60', start: iso(T0 - 3600000), end: iso(T0 - 2400000), sec: 2640, reason, track: trackOf('++++!.', '', { at: null, since: null }) };
+  Object.assign(data.panels.belt.data.cards[0], timesOf(T0, 2640), { earlier: [prior] });
+  deliver(w, data);
+  const det = openEvery(w, panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.track-detail'));
+  const old = det.querySelector(':scope > details.tl-earlier');
+  assert.equal(old.querySelector('summary').textContent, 'Earlier attempt: 11:00 AM to 11:20 AM, 44 min, blocked: the fix did not hold after 1 round');
+  const why = old.querySelector(':scope > .why-block');
+  assert.ok(why, 'the finding is under the line');
+  assert.equal(why.querySelector('.finding-claim').textContent, claim);
+  const at = why.querySelector('.finding-at a');
+  assert.equal(at.textContent, 'conveyor/lib/a.sh:169');
+  assert.equal(at.href, 'https://github.com/example/sample-project/blob/HEAD/conveyor/lib/a.sh#L169', 'the finding\'s file is a link to its line');
+  assert.ok(why.querySelector('.finding-proof-text code'), 'the backticks of the proof are drawn as code');
+  // The half word and its open code span are gone: the proof ends at its last whole word, with "…".
+  const proofText = why.querySelector('.finding-proof-text').textContent;
+  assert.ok(proofText.endsWith('more…'), `the proof ends at a whole word: ${proofText.slice(-30)}`);
+  assert.doesNotMatch(why.textContent, /`|cardt/, 'no open backtick and no part of the cut word');
+  // Bug (review of #1540): a cut at a space inside an open code span left two spaces before " did not hold", the pattern
+  // took both, the finding came out 299 characters and was drawn with its open backtick.
+  const filler = (to) => `[P1] conveyor/lib/a.sh:169 ${claim} Proof: A result sends the card back to ${'x '.repeat(200)}`.slice(0, to);
+  const spaced = `${filler(283)} \`cardtest() and `;
+  assert.equal([...spaced].length, 300, 'the engine cut after a space inside the open code span');
+  Object.assign(prior, { reason: `the fix for ${spaced} did not hold after 1 round` });
+  next(w, data);
+  const open = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.tl-earlier > .why-block');
+  assert.ok(open.querySelector('.finding-proof-text').textContent.endsWith('x…'), open.textContent);
+  assert.doesNotMatch(open.textContent, /`|cardtest/, 'no open backtick, no part of the open span');
+  // Bug (review of #1540): a finding whose 300th character closes a code span lost that whole span and its link.
+  const span = '`conveyor/tests/a.test.sh:75`', closed = `${filler(299 - span.length)} ${span}`;
+  assert.equal([...closed].length, 300, 'the engine cut right after a closed code span');
+  Object.assign(prior, { reason: `the fix for ${closed} did not hold after 1 round` });
+  next(w, data);
+  const kept = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.tl-earlier > .why-block .finding-proof-text');
+  assert.ok(kept.textContent.endsWith('conveyor/tests/a.test.sh:75…'), `the closed span stays: ${kept.textContent.slice(-40)}`);
+  const keptLink = kept.querySelector('a');
+  assert.ok(kept.querySelector('a code, code a'), 'its code span is drawn as code with a link');
+  assert.equal(keptLink.href, 'https://github.com/example/sample-project/blob/HEAD/conveyor/tests/a.test.sh#L75', 'the link opens the span\'s file at its line');
+  // Bug (review of #1540): a block of the last review ("review 2 is the last review and still holds a P0 finding, so it
+  // files no follow-up: [P0] ...") took the long form: the closed line held the finding and its raw backticks.
+  Object.assign(prior, { reason: `review 2 is the last review and still holds a P0 finding, so it files no follow-up: [P0] conveyor/lib/a.sh:622 \`--again\` overwrites the earlier result. Proof: Run \`a --again\`.` });
+  next(w, data);
+  const lastRev = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.tl-earlier');
+  assert.equal(lastRev.querySelector('summary').textContent, 'Earlier attempt: 11:00 AM to 11:20 AM, 44 min, blocked: the last review still holds a P0 finding');
+  assert.equal(lastRev.querySelector(':scope > .why-block .finding-at a').textContent, 'conveyor/lib/a.sh:622');
+  assert.ok(lastRev.querySelector(':scope > .why-block .finding-claim code'), 'the finding is under the line, its backticks drawn as code');
+  // Bug (review of #1540): a note after the block (the issue comment was refused, push.sh) kept the reason from matching
+  // the block form, so the line fell back to the long text and the finding row was lost. The finding and the short
+  // line stay; the note is under them.
+  Object.assign(prior, { reason: `${reason} [the review's findings not posted on the issue: GitHub said no]` });
+  next(w, data);
+  const noted = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.tl-earlier');
+  assert.equal(noted.querySelector('summary').textContent, 'Earlier attempt: 11:00 AM to 11:20 AM, 44 min, blocked: the fix did not hold after 1 round');
+  assert.equal(noted.querySelector(':scope > .why-block .finding-claim').textContent, claim);
+  assert.match(noted.querySelector(':scope > .why-block').textContent, /GitHub said no\]$/);
+  // A reason with no review finding in it, too long for one line, is cut at a sentence; the whole reason is under it.
+  Object.assign(prior, { reason: `tests failed in the second run. ${'x '.repeat(100)}end` });
+  next(w, data);
+  const again = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.tl-earlier');
+  assert.ok(again.querySelector('summary').textContent.endsWith(', ended: tests failed in the second run.'), again.querySelector('summary').textContent);
+  assert.match(again.querySelector(':scope > .why-block').textContent, /end$/);
+});

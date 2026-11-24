@@ -859,21 +859,24 @@ snapshot() (
     # resumes: start is the first of them, priorSec their seconds from pick-up to end), and totalSec, pick-up to the
     # end (a card on the belt adds the time since its own pick-up). The time it sat queued is not counted.
     # earlier: those earlier cards, the first first, each {card, start, end, sec (the seconds priorSec counts of it),
-    # reason (why it ended, cut to 300 characters), track}, so the step view shows the steps priorSec counts.
+    # reason (why it ended, whole to 800 characters, else its first and last 400 cut at a word, joined by " … ": a reason
+    # says what happened at its end, as the block "did not hold after <n> round(s)" does), track}, so the step view shows
+    # the steps priorSec counts.
     | ($all[0] | map({key: .card, value: {s: .startedAt, e: .x.endAt, from: .x.from}}) | from_entries) as $byCard
     | ([$all[0][] | .x.from | strings]) as $froms
     | ($all[0] | map(select(.card | IN($froms[])) | {key: .card, value: .}) | from_entries) as $rowOf
     | def secOf($p): if $p.e == null then 0 else ([($p.e | fromdate) - ($p.s | fromdate), 0] | max) end;
+      def reasonOf: (.reason // "") | if length <= 800 then . else (.[0:400] | sub("\\s+\\S*$"; "")) + " … " + (.[-400:] | sub("^\\S*\\s+"; "")) end;
       def chain($f; $k): if $f == null or $k > 20 or $byCard[$f] == null then {sec: 0, start: null, earlier: []}
         else $byCard[$f] as $p | chain($p.from; $k + 1) as $r
           | {sec: ($r.sec + secOf($p)), start: ($r.start // $p.s),
-             earlier: ($r.earlier + [$rowOf[$f] | {card, start: .startedAt, end: .x.endAt, sec: secOf($p), reason: ((.reason // "")[0:300]), track: track($max; null)}])} end;
+             earlier: ($r.earlier + [$rowOf[$f] | {card, start: .startedAt, end: .x.endAt, sec: secOf($p), reason: reasonOf, track: track($max; null)}])} end;
       # The earlier runs of a restarted card ($runsOf) are earlier cards too, each once: its overall time and "Every step" hold them.
       def times: . as $c | chain(.x.from; 0) as $r | ($r.earlier | map(.card)) as $seen
         | [($runsOf[.card] // [])[:-1][] | select(.card | IN($seen[]) | not)] as $more
         | ($r.sec + ([$more[] | secOf({s: .startedAt, e: .x.endAt})] | add // 0)) as $prior
         | {start: ([$r.start, $more[].startedAt, $c.startedAt] | map(strings) | min), pickedAt: .startedAt, priorSec: $prior,
-           earlier: ($r.earlier + [$more[] | {card, start: .startedAt, end: .x.endAt, sec: secOf({s: .startedAt, e: .x.endAt}), reason: ((.reason // "")[0:300]), track: track($max; null)}]
+           earlier: ($r.earlier + [$more[] | {card, start: .startedAt, end: .x.endAt, sec: secOf({s: .startedAt, e: .x.endAt}), reason: reasonOf, track: track($max; null)}]
              | sort_by(.start)),
            totalSec: (if .x.endAt == null then null else $prior + ([(.x.endAt | fromdate) - (.startedAt | fromdate), 0] | max) end)};
     # A follow-up names the card it came from: the issue whose landed line lists it (/units shows "↳ #N").

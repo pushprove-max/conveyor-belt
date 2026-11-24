@@ -87,7 +87,13 @@ t_track() {
   card 47 picked worktree deps 'blocked:blocked:{"reason":"brief: gh issue view failed"}'
   # A card resumed from the kept patch of a blocked card counts that card's time, shows its first start and gives that card's steps (earlier, #545):
   # card 60 ran 7 minutes and was blocked; card 61 took its patch up and landed 11 minutes after its own pick-up.
-  card 60 picked worktree deps brief b - - 'blocked:blocked:{"reason":"build: session failed (exit 1)"}'
+  # Bug (#1540): the snapshot cut an earlier attempt's reason to 300 characters, so a review block's end ("did not hold
+  # after 1 round") was lost, and a longer reason was cut in the middle of a word. Card 60's reason is a block of that
+  # form (a finding of 300 characters), then a long note (push.sh's note on the issue): over 800 characters, its
+  # first 400 (the block, whole) and its last 400 stay, each cut at a word, joined by " … ": the end of a reason is
+  # what happened, so a cut that keeps only the start loses it.
+  words=$(printf 'word%02d ' $(seq 1 99)); finding="[P1] [E1] a.sh:1 ${words:0:283}"; blk="the fix for $finding did not hold after 1 round"
+  card 60 picked worktree deps brief b - - "blocked:blocked:{\"reason\":\"$blk [the review's findings not posted on the issue: $words]\"}"
   card 61 picked 'worktree:ok:{"reason":"resumed from the kept patch of card c60: one session, then review"}' deps brief b build r "review:GO:$Z" t test:pass l 'landed:ok:{"sha":"abg","product":false}'
   card 62 picked worktree deps brief b build r
   # #1079: a push that went on over a pre-push hook that failed naming a test file that passed alone.
@@ -224,7 +230,8 @@ EOF
 47 [null,"!....."]
 EOF
   [ "$(jq -c '.needsYou.blocked[] | select(.card == "c41") | .reviews | map([.round, .verdict, .fixed])' <<<"$out")" = '[[1,"NO-GO",true]]' ] || fail "a blocked card's reviews: $(jq -c '.needsYou.blocked[] | select(.card == "c41") | .reviews' <<<"$out")"
-  [ "$(jq -c '.landed[] | select(.card == "c61") | [.start[11:16], .pickedAt[11:16], .priorSec, .totalSec, (.earlier | map([.card, .sec, .reason, .track.steps[0].state]))]' <<<"$out")" = '["00:00","00:00",420,1080,[["c60",420,"build: session failed (exit 1)","failed"]]]' ] \
+  [ "$(jq -c '.landed[] | select(.card == "c61") | [.start[11:16], .pickedAt[11:16], .priorSec, .totalSec, (.earlier | map([.card, .sec, .track.steps[0].state]))]' <<<"$out")" = '["00:00","00:00",420,1080,[["c60",420,"failed"]]]' ] \
+    && rs=$(jq -r '.landed[] | select(.card == "c61") | .earlier[0].reason' <<<"$out") && [[ $rs == "$blk ["* && $rs == *" … word"* && $rs == *" word99 ]" && ${#rs} -le 805 ]] \
     && [ "$(jq -c '.belt[] | select(.card == "c62") | [.start, .pickedAt, .priorSec, .totalSec, .earlier] | [.[0] == .[1], .[2], .[3], .[4]]' <<<"$out")" = '[true,0,null,[]]' ] \
     || fail "start and overall time: $(jq -c '[.landed[], .belt[]] | map(select(.card == "c61" or .card == "c62") | {card, start, pickedAt, priorSec, totalSec, earlier})' <<<"$out")"
   # Bug (#874): a card started from a kept patch did not say so on the Board or in /units: its start line's reason is

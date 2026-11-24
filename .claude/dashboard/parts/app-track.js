@@ -332,8 +332,9 @@
     return el;
   }
   // earlier: the earlier cards of the same work (the snapshot's earlier, the first first), each above the steps as one
-  // closed line, "Earlier attempt: <start> to <end>, <time>, ended: <reason>", opening to its own steps: the card's
-  // overall time counts their seconds, so the steps it is made of are all here.
+  // closed line, "Earlier attempt: <start> to <end>, <time>, ended: <reason>" (a review block: "blocked: the fix did not
+  // hold after <n> rounds"; "blocked: the last review still holds a P0 finding"; any reason longer than its first sentence is cut to it), opening to the reason in full
+  // and its own steps: the card's overall time counts their seconds, so the steps it is made of are all here.
   // repoUrl: the card's repository (repoOf), in which its review findings' file paths link to their lines; repo: its
   // record, whose findings' places open the lines the review read (output). filed: the follow-ups filed for the findings
   // the judge found outside a card's change (filedOf); an earlier attempt's line is given its later cards' too, as a
@@ -373,7 +374,23 @@
       if (prior) d.open = false;
       d.classList.add('tl-earlier');
       d.hidden = false;
-      d.firstChild.textContent = `Earlier attempt: ${when(e.start)} to ${when(e.end)}, ${num(e.sec) ? took(e.sec) : 'time not read'}, ended: ${typeof e.reason === 'string' && e.reason ? e.reason : 'no reason recorded'}`;
+      const full = typeof e.reason === 'string' ? e.reason.trim() : '';
+      // A review block, "the fix for [P1] ... did not hold after 1 round", may carry a note after it in brackets (the
+      // finding's comment on the issue was refused): the note is not part of the finding. The other review block, "review
+      // 2 is the last review and still holds a P0 finding, so it files no follow-up: [P0] ...", is the finding after the colon.
+      const block = /^(the fix for \[P[0-3]\][\s\S]*?\s+did not hold after (\d+) (rounds?))(\s+\[[\s\S]*)?$/.exec(full);
+      const last = block ? null : /^review \d+ is the last review and (still holds [^:]*?), so it files no follow-up: (\[P[0-3]\][\s\S]*)$/.exec(full);
+      const end = block ? `blocked: the fix did not hold after ${block[2]} ${block[3]}` : last ? `blocked: the last review ${last[1]}` : `ended: ${full ? first(full) : 'no reason recorded'}`;
+      d.firstChild.textContent = `Earlier attempt: ${when(e.start)} to ${when(e.end)}, ${num(e.sec) ? took(e.sec) : 'time not read'}, ${end}`;
+      // What the short line leaves out opens above the steps: a review block's finding, as the Declined panel draws it
+      // (level, linked place, claim, proof) and its note, or any other reason in full.
+      const known = new Set(pathsIn(full));
+      const body = block ? reviewWhy(block[1], repoUrl, known, false, true) : last ? findingRows(last[2], '', repoUrl, known, false, true) : full && first(full) !== full ? clipped(full, repoUrl, known) : null;
+      if (body) {
+        const why = whyBlock(block || last ? 'Why it blocked' : 'Why it ended', body);
+        if (block && block[4]) why.append(fill(h('div', 'why-text why-full'), block[4].trim(), repoUrl, known, 'why'));
+        d.firstChild.after(why);
+      }
       return d;
     });
   }
@@ -659,12 +676,32 @@
     };
     return joins.find((i) => outside(i) || atCut(i)) ?? -1;
   }
-  function reviewWhy(full, repoUrl, known, brief) {
-    const m = /^the fix for (\[P[0-3]\][\s\S]*?)\s+did not hold after \d+ rounds?$/.exec(full);
-    if (!m) return null;
-    const rows = h('ol', 'output-findings'), join = joinAt(m[1]);
-    (join < 0 ? m[1] : `${m[1].slice(0, join)}\n${m[1].slice(join + 2)}`).split(/\n(?=\[P[0-3]\])/).slice(0, brief ? 1 : Infinity).forEach((t) => {
-      const f = /^\[(P[0-3])\]\s*(?:\[(?:E\d+|cleanup)\]\s*)*(?:(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S))?([\s\S]*)$/.exec(t.trim());
+  // wholeWords(t): a finding of exactly 300 characters (with the spaces the cut left before " did not hold") is one card.sh
+  // cut (joinAt), maybe inside a word or a code span: it ends at its last whole word, outside any open span, then "…". A
+  // last word that ends in a closing backtick is whole, as is a cut at a space. Any other finding is as it came. The cut
+  // gives no sign of a word it left whole at the 300th character, so that last word goes too: it may be half a word.
+  function wholeWords(t) {
+    if ([...t].length !== 300) return t;
+    let end = /\S$/.test(t) && !t.endsWith('`') ? t.replace(/\S+$/, '') : t;
+    const ticks = [...end.matchAll(/`+/g)];
+    for (let k = 0; k < ticks.length; k++) {
+      const e = ticks.findIndex((x, j) => j > k && x[0].length === ticks[k][0].length);
+      if (e < 0) { end = end.slice(0, ticks[k].index); break; }
+      k = e;
+    }
+    return `${end.trimEnd()}…`;
+  }
+  // tidy: the finding cut by the engine is drawn by wholeWords (the earlier attempt's line); the other panels draw it as cut.
+  function reviewWhy(full, repoUrl, known, brief, tidy) {
+    // m[2]: the spaces the finding itself ended with, before the one space card.sh writes: they count in its 300 characters.
+    const m = /^the fix for (\[P[0-3]\][\s\S]*?)(\s*)\sdid not hold after \d+ rounds?$/.exec(full);
+    return m ? findingRows(m[1], m[2], repoUrl, known, brief, tidy) : null;
+  }
+  // The rows of the findings in text, a review block's (cut by card.sh); spaces: those its last finding ended with.
+  function findingRows(text, spaces, repoUrl, known, brief, tidy) {
+    const rows = h('ol', 'output-findings'), join = joinAt(text);
+    (join < 0 ? text : `${text.slice(0, join)}\n${text.slice(join + 2)}`).split(/\n(?=\[P[0-3]\])/).slice(0, brief ? 1 : Infinity).forEach((t, i, parts) => {
+      const f = /^\[(P[0-3])\]\s*(?:\[(?:E\d+|cleanup)\]\s*)*(?:(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S))?([\s\S]*)$/.exec((tidy ? wholeWords(i === parts.length - 1 ? t + spaces : t) : t).trim());
       if (!f) return;
       const { at: cut, label } = proofAt(f[3]), claim = (cut < 0 ? f[3] : f[3].slice(0, cut)).trim(), proof = cut < 0 ? '' : f[3].slice(cut + label.length).trim();
       const row = h('li', 'output-finding'), head = h('div', 'finding-head'), said = h('p', 'finding-text');

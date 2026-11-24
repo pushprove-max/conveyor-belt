@@ -116,12 +116,15 @@ t_metricsstoppause() {
 # batchreuse.test.sh's helper (issue 607).
 restartedruns() { # [landed]
   # shellcheck disable=SC2034 # y is read by l(), defined in metrics.test.sh
-  local y=$d B='{"usage":{"write":0,"write1h":0,"read":0,"output":0},"model":"claude-sonnet-5-5"}' V='{"usage":{"read":0,"output":0},"counts":{"P0":0,"P1":0,"P2":0,"P3":0},"model":"gpt-6.1-sol"}'
+  local y=$d blk B='{"usage":{"write":0,"write1h":0,"read":0,"output":0},"model":"claude-sonnet-5-5"}' V='{"usage":{"read":0,"output":0},"counts":{"P0":0,"P1":0,"P2":0,"P3":0},"model":"gpt-6.1-sol"}'
   seatset model claude-sonnet-5-5; seatset reviewer gpt-6.1-sol
   tk() { jq -c --argjson n "$1" --arg k "$2" '.tokens = {claude: 0, codex: 0} | .tokens[$k] = $n | .usage.input = $n' <<<"$3"; }
   l 9 01:00 picked ok '{"title":"T9"}'; l 9 01:00 start ok '{"of":"build"}'; l 9 01:05 build ok "$(tk 400000 claude "$B")"
   l 9 01:10 review NO-GO "$(tk 100000 codex "$V")"; l 9 01:15 fix ok "$(tk 0 claude "$B")"; l 9 01:20 review NO-GO "$(tk 100000 codex "$V")"
-  l 9 01:21 blocked blocked "{\"reason\":\"review 2: no answer\",\"retriedAt\":\"${d}T01:30:00Z\"}"
+  # The block's reason as card.sh writes it: "the fix for ", the finding cut to 300 characters, " did not hold after 1 round":
+  # 339 characters, more than the 300 the snapshot once kept of an earlier run's reason, so its end was lost (#1540).
+  blk="the fix for [P1] a.sh:1 $(printf 'word%02d ' $(seq 1 60))"; blk="${blk:0:312} did not hold after 1 round"
+  l 9 01:21 blocked blocked "$(jq -nc --arg r "$blk" --arg t "${d}T01:30:00Z" '{reason: $r, retriedAt: $t}')"
   mv "$S/cards.jsonl" "$S/retried.jsonl"; : > "$S/cards.jsonl"
   l 9 02:00 picked ok '{"title":"T9","card":"c10"}'; l 9 02:00 start ok '{"card":"c10","of":"build"}'
   l 9 02:00 build ok "$(tk 300000 claude "$B" | jq -c --arg t "${d}T02:03:20Z" '. + {card: "c10", time: $t}')"
@@ -140,6 +143,9 @@ t_metricsruns() {
   # Bug: the fix of the first run was in no count the card showed: fixes are those of both runs, thisRun its own.
   [ "$(jq -c '.belt[] | select(.issue == 9) | [.metrics.fixes, .metrics.thisRun.fixes, .priorSec, (.earlier | length)]' <<<"$out")" = '[1,0,1260,1]' ] \
     || fail "the restarted card's fixes and earlier run: $(jq -c '.belt' <<<"$out")"
+  # Bug (#1540): the first run's reason, from the retried file, was cut to 300 characters: "did not hold after 1 round" was lost.
+  [ "$(jq -c '.belt[] | select(.issue == 9) | .earlier[0].reason | [length, startswith("the fix for [P1] a.sh:1 word01"), endswith(" did not hold after 1 round")]' <<<"$out")" = '[339,true,true]' ] \
+    || fail "the earlier run's reason lost its end: $(jq -c '.belt[] | select(.issue == 9) | .earlier' <<<"$out")"
 }
 
 # Bugs: the landed card's cost row, and the per-landed averages, left out its first run's $1.20; or the week's total
