@@ -96,12 +96,25 @@ cmd_approved() {
 # the spans (the reader git-safety.sh uses): a one-word
 # span stays the word it is, a span of several words becomes $QUOTED.
 # Commands that only carry text; none runs a quoted word given to it.
-SENDERS='gh|git[[:space:]]+(commit|tag|notes|status|log|diff|show|add)|echo|printf|cat|rg|grep|(bash[[:space:]]+)?[^[:space:]]*decision\.sh'
+SENDERS='gh|git[[:space:]]+(commit|tag|notes|status|log|diff|show|add)|echo|printf|cat|rg|grep'
+# decision.sh carries text too, but a script path names any file: one the call, or an earlier call, wrote under that
+# name could run an install. So a run of it counts as a sender only when the file it names, read from the payload's
+# cwd, has the bytes of this plugin's own decision.sh, and the line runs nothing else and writes no file (no `>`):
+# another command could write the file, or a `cd` could change where it is read from. A path it cannot read (a
+# variable) is no sender: the line is read whole, a false block at worst.
+DECISION_RUN='^[[:space:]]*(bash[[:space:]]+)?([^[:space:]]*decision\.sh)([[:space:]]|$)'
+real_decision() { # <path as written> -- true when it names a file with the bytes of this plugin's decision.sh
+  local f=$1 d
+  case "$f" in \~/*) f=$HOME${f#\~} ;; *'$'*|*'`'*|\~*) return 1 ;; esac
+  d=$(echo "$INPUT" | jq -r '.cwd // empty'); d=${d:-${CLAUDE_PROJECT_DIR:-$PWD}}
+  [[ $f == /* ]] || f=$d/$f
+  [ -f "$f" ] && cmp -s "$f" "${BASH_SOURCE[0]%/*}/../scripts/decision.sh"
+}
 # Commands that may stand beside a note (ran, below): none runs a file or reads its input as commands.
 NOTE_OK='mkdir|cd|ls|wc|head|tail|exit|true'
 . "${BASH_SOURCE[0]%/*}/lib/strip-quoted.sh" 2>/dev/null || true
 ran() {
-  local M=$'\x01' CODE SEG NOTES=""
+  local M=$'\x01' CODE SEG NOTES="" DEC="" OTHER=""
   # Whether anything can run a word is asked of the reader's own output, never
   # of the raw text: it alone knows which `<<` opens a here-document, so one
   # named in a comment or a quoted string hides no line after it. What
@@ -119,10 +132,18 @@ ran() {
   if [[ $CODE != *'`'* && $CODE != *'$('* ]] && ! grep -qE "<<-?[[:space:]]*[^[:space:]$M<-]" <<<"${CODE//<<</ }"; then
     CODE=$(sed -E "s/$M([^[:space:]$M])/\1/g; s/$M/ \$QUOTED /g" <<<"$CODE")
     while IFS= read -r SEG; do
-      [[ $SEG =~ ^[[:space:]]*$ || $SEG =~ ^[[:space:]]*($SENDERS)([[:space:]]|$) ]] && continue
+      [[ $SEG =~ ^[[:space:]]*$ ]] && continue
+      if [[ $SEG =~ $DECISION_RUN ]]; then
+        real_decision "${BASH_REMATCH[2]}" || { whole "$1"; return; }
+        DEC=1; continue
+      fi
+      OTHER=1
+      [[ $SEG =~ ^[[:space:]]*($SENDERS)([[:space:]]|$) ]] && continue
       [[ $SEG =~ ^[[:space:]]*($NOTE_OK)([[:space:]]|$) ]] || { whole "$1"; return; }
       NOTES=1
     done < <(sed -E 's/[0-9]*[<>]&[0-9-]*//g; s/&&|\|\||[;|&()]/\n/g' <<<"$CODE")
+    # A `>` that is not a copy to a numbered stream (`>&2`) writes a file, `>&file` too.
+    [ -z "$DEC" ] || { [ -z "$OTHER" ] && ! grep -qE '>([^&]|&[^0-9-]|$)' <<<"$CODE"; } || { whole "$1"; return; }
     [ -n "$NOTES" ] || { printf '%s' "$CODE"; return; }
     whole "$(strip_quoted "$1" "$M" "" "$SENDERS")"; return
   fi

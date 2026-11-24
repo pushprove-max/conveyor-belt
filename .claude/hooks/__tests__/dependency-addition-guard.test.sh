@@ -264,9 +264,24 @@ mkdir -p "$TMP/shared/root-modules" "$TMP/shared/web-modules" "$WTX/web" "$WTX/i
 ln -s "$TMP/shared/root-modules" "$WTX/node_modules"
 ln -s "$TMP/shared/web-modules" "$WTX/web/node_modules"
 ln -s "$TMP/shared/gone" "$TMP/broken/node_modules"
+mkdir -p "$WTX/.claude/scripts" && cp "${HOOK%/*}/../scripts/decision.sh" "$WTX/.claude/scripts/"
 check "message_naming_npm_ci_passes: a comment, a decision or a search that only names the install is text; a chained real install blocks" "0 0 0 2" \
   "$(for c in "gh issue comment 1 --body 'run npm ci in the main checkout'" "bash .claude/scripts/decision.sh answer d1 'main runs npm ci'" \
     "rg -n 'npm ci' docs" "bash .claude/scripts/decision.sh answer d1 'x'; npm ci"; do run "$(bash_p "$c" "$WTX")"; done | paste -sd' ' -)"
+FROM_HOME=\~/wt/.claude/scripts/decision.sh
+check "the plugin's decision.sh named from the home folder is a sender: $FROM_HOME answer d1 'npm ci'" 0 \
+  "$(HOME=$TMP run "$(bash_p "$FROM_HOME answer d1 'npm ci'" "$WTX")")"
+# Bug: any path ending in decision.sh was a sender, so a script of that name that this call or an earlier one wrote
+# ran with its install unread. Only a file with the bytes of the plugin's decision.sh, on a line that runs nothing
+# else and writes no file, is a sender.
+printf 'npm ci\n' > "$TMP/decision.sh"
+for C in "bash $TMP/decision.sh answer d1 'npm ci'" "$(printf "cat > %s <<'EOF'\nnpm ci\nEOF\nbash %s" "$TMP/decision.sh" "$TMP/decision.sh")" \
+  "$(printf "cat > .claude/scripts/decision.sh <<'EOF'\nnpm ci\nEOF\nbash .claude/scripts/decision.sh answer d1 x")" \
+  "bash .claude/scripts/decision.sh answer d1 'npm ci' > .claude/scripts/decision.sh; bash .claude/scripts/decision.sh" \
+  "bash .claude/scripts/decision.sh answer d1 'npm ci' >&.claude/scripts/decision.sh; bash .claude/scripts/decision.sh" \
+  "bash \$D/decision.sh answer d1 'npm ci'"; do
+  check "a decision.sh that is not the plugin's own, or that the call can change, is read whole: $C" 2 "$(run "$(bash_p "$C" "$WTX")")"
+done
 check "npm ci through a linked node_modules blocks" 2 "$(run "$(bash_p "npm ci" "$WTX")")"
 check "approval cannot carry npm ci through a link" 2 "$(run "$(bash_p "CONVEYOR_DEP_APPROVED=1 npm ci" "$WTX")")"
 check "cd web && npm ci through web's link blocks" 2 "$(run "$(bash_p "cd web && npm ci" "$WTX")")"
