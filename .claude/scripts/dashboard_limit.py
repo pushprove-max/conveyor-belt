@@ -29,7 +29,8 @@
   dashboard_limit.py cardlines <cards-file> <kept> <priced-file>  < {prices, since, research}
       The same, for the cards of <cards-file>, one a line (conveyor.sh snapshot): the priced cards go to
       <priced-file>, one a line, and the rest of the part to stdout. <kept> is a summary of the cards priced last
-      time: a card whose line has not changed since is not priced again (card_costs).
+      time: a card whose line has not changed since is not priced again (card_costs). <kept>.lanes keeps the
+      research lane's transcripts read last time: one not changed since is not read again (lane_models).
   dashboard_limit.py work  < {steps: [...], live, prices}
       A benchmark trial's sessions priced the same way, as one figure that says whether it is whole (work_cost).
   dashboard_limit.py unpriced  < {prices, models: [...]}

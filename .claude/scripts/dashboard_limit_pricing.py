@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # A part of dashboard_limit.py, run in its namespace (run_part()), not a module of its own: the pack's prices put
 # over the price table, a request's price, the cards' and a benchmark trial's costs, and the week's cost.
-import json  # dashboard_limit.py imports it; named here so a linter reading this file alone finds it
+import hashlib  # dashboard_limit.py imports these; named here so a linter reading this file alone finds them
+import json
+import os
 
 
 def canon(m):
@@ -95,7 +97,7 @@ def price(row):
     return (i * inp + w5 * write_rate(p) + w1 * inp * 2 + r * read + o * out) / 1e6 + sum(advisors)
 
 
-def lane_models(projects, worktree, since):
+def lane_models(projects, worktree, since, kept=None):
     """{model ID: the sessions that ran it} of the Claude Code sessions run in `worktree` (a research lane, whose
     sessions are no card's step) from `since` (epoch) on, read from their transcripts under `projects` (Claude Code's
     projects folder: one folder a working folder, its path with each other character than a letter or a digit as -,
@@ -104,36 +106,105 @@ def lane_models(projects, worktree, since):
     works in the worktree later is filed under that folder, so every folder is read. A line counts only when its own
     cwd is the worktree or inside it; one that does not hold the worktree's path as JSON writes it is not parsed.
     "<synthetic>" is no model: Claude Code writes it on a message no model answered. A file that cannot be read
-    counts nothing."""
+    counts nothing.
+
+    With `kept` (a file), each transcript's counted lines are kept there under its path, modification time and size,
+    and under the worktree and this script's code: a transcript as it was at the last call is not read again. A
+    missing, unreadable or other key's file keeps nothing, and every transcript is read."""
     if not isinstance(projects, str) or not isinstance(worktree, str) or not worktree.startswith("/") or since is None:
         return {}
     wt = json.dumps(worktree.rstrip("/"), ensure_ascii=False)[1:-1].encode("utf-8", "replace")
-    out = {}
+    key = lanes_key(worktree) if kept else None
+    was = lanes_kept(kept, key) if kept else {}
+    # now: {path: [mtime_ns, size, [[model, session, line time], ...]]} of the transcripts of this call. The line
+    # time is kept, not the test against `since`: since moves at each call, so a line drops out when it is too old.
+    now, out = {}, {}
     for root, _, files in os.walk(projects):
         for name in files:
             path = os.path.join(root, name)
             try:
-                if not name.endswith(".jsonl") or os.stat(path).st_mtime < since:
+                st = os.stat(path) if name.endswith(".jsonl") else None
+                if st is None or st.st_mtime < since:
                     continue
-                with open(path, "rb") as f:
-                    for line in f:
-                        if b'"model"' not in line or wt not in line:
-                            continue
-                        try:
-                            r = json.loads(line)
-                        except ValueError:
-                            continue
-                        if not isinstance(r, dict):
-                            continue
-                        msg = r.get("message")
-                        m = msg.get("model") if isinstance(msg, dict) else None
-                        if r.get("type") != "assistant" or not isinstance(m, str) or m in ("", "<synthetic>") \
-                                or (epoch(r.get("timestamp")) or 0) < since or not under(r.get("cwd"), [worktree]):
-                            continue
-                        out.setdefault(m, set()).add(r.get("sessionId") if isinstance(r.get("sessionId"), str) else path)
+                old = was.get(path)  # lanes_kept() let in only [mtime_ns, size, hits] entries
+                # A file that can no longer be read counts nothing, as in a full read: chmod keeps its time and size,
+                # so a kept entry is reused only while the file can be read; else lane_hits() raises OSError.
+                same = old is not None and old[:2] == [st.st_mtime_ns, st.st_size] and os.access(path, os.R_OK)
+                now[path] = old if same else [st.st_mtime_ns, st.st_size, lane_hits(path, wt, worktree)]
             except OSError:
                 continue
+            for m, s, t in now[path][2]:
+                if t >= since:
+                    out.setdefault(m, set()).add(s)
+    if kept and now != was:
+        lanes_keep(kept, key, now)
     return {m: len(s) for m, s in out.items()}
+
+
+def lanes_keep(kept, key, files):
+    """lane_models' transcripts written to `kept` under `key`, through a file of its own and one rename, as card_costs
+    writes <kept>: a call beside this one never reads half of it. A write that fails leaves no file of its own."""
+    tmp = f"{kept}.{os.getpid()}"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"key": key, "files": files}, f, separators=(",", ":"))
+        os.replace(tmp, kept)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def lanes_key(worktree):
+    """The key of lane_models' kept file: the worktree and the code of this script and its parts, as card_costs keys
+    its own, so a change to how a line is counted reads every transcript again."""
+    code = hashlib.sha256()
+    for p in (__file__, *globals()["PARTS"]):  # dashboard_limit.py's, run in this namespace: globals() names it for a linter
+        with open(p, "rb") as f:
+            code.update(f.read())
+    return hashlib.sha256(json.dumps([worktree, code.hexdigest()]).encode()).hexdigest()
+
+
+def lanes_kept(kept, key):
+    """The transcripts lane_models kept in `kept` under `key` ({path: [mtime_ns, size, hits]}); {} when the file is
+    missing, cannot be read, has another key, or holds an entry of another shape: every transcript is then read."""
+    try:
+        with open(kept, encoding="utf-8") as f:
+            k = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    files = k.get("files") if isinstance(k, dict) and k.get("key") == key else None
+    ok = isinstance(files, dict) and all(
+        isinstance(v, list) and len(v) == 3 and isinstance(v[2], list)
+        and all(isinstance(h, list) and len(h) == 3 and isinstance(h[0], str) and isinstance(h[1], str)
+                and isinstance(h[2], (int, float)) for h in v[2])
+        for v in files.values())
+    return files if ok else {}
+
+
+def lane_hits(path, wt, worktree):
+    """[[model, session, line time (epoch, 0 when none)], ...] of the lines of one transcript that lane_models counts,
+    with no test of the time: the caller tests it against its `since`. Raises OSError when the file cannot be read."""
+    epoch, under = globals()["epoch"], globals()["under"]  # dashboard_limit.py's parts', run in this namespace
+    hits = []
+    with open(path, "rb") as f:
+        for line in f:
+            if b'"model"' not in line or wt not in line:
+                continue
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            msg = r.get("message") if isinstance(r, dict) else None
+            m = msg.get("model") if isinstance(msg, dict) else None
+            # m first: a line that is no JSON object has no model, so r.get is never asked of it.
+            if not isinstance(m, str) or m in ("", "<synthetic>") or r.get("type") != "assistant" \
+                    or not under(r.get("cwd"), [worktree]):
+                continue
+            hits.append([m, r.get("sessionId") if isinstance(r.get("sessionId"), str) else path,
+                         epoch(r.get("timestamp")) or 0])
+    return hits
 
 
 def known(m):
@@ -207,7 +278,8 @@ def card_costs(part, lines=None, kept=None, dest=None):
     used first. The part's `research` ({worktree, projects}: the research lane's folder and Claude Code's projects
     folder), taken out of the part, adds the model IDs its sessions ran from that time on (lane_models), one session
     each: they are no card's step. An ID only they ran has lane: true, as the belt never runs it: the Board counts its
-    sessions, and does not list it as a model with no price.
+    sessions, and does not list it as a model with no price. With <kept>, the transcripts read are kept in
+    <kept>.lanes, so the next call reads only the ones new or changed (lane_models).
     """
 
     def ran(step):
@@ -509,7 +581,9 @@ def card_costs(part, lines=None, kept=None, dest=None):
                     pass
     research, steps = part.pop("research", None), set(seen)
     if isinstance(since, str) and isinstance(research, dict):
-        for x, n in lane_models(research.get("projects"), research.get("worktree"), epoch(since)).items():
+        start = globals()["epoch"](since)  # dashboard_limit_usage.py's, run in this namespace: globals() names it for a linter
+        for x, n in lane_models(research.get("projects"), research.get("worktree"), start,
+                                f"{kept}.lanes" if kept else None).items():
             k, ways = seen.get(x, (0, set()))
             seen[x] = (k + n, ways)
     if isinstance(since, str):
