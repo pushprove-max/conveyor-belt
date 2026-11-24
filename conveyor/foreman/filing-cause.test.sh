@@ -100,6 +100,10 @@ refused "$(body $'## What happens now\nThe form drops the heading.\n```md\n```"\
 passes "$(body $'## What happens now\nThe form prints \\n~~~ as text.\n## Cause\nThe cache is stale.')"
 printf '## What happens now\nIt prints \\n```\\n as text.\n## Cause\nThe cache is stale.\n' > "$T/fenced.md"
 passes "gh issue create --title 'Fix it' --body-file $T/fenced.md"
+# A body file is read without its fences too (#1510 review): read with them, a `## Cause` inside its code block would
+# count as the heading and a fix with no Cause section would pass.
+printf '## What happens now\nThe form drops the heading.\n\n~~~md\n## Cause\n~~~\n' > "$T/hidden.md"
+refused "gh issue create --title 'Fix it' --body-file $T/hidden.md"
 # Up to three spaces may stand between the quote that opens the body and its fence.
 refused "gh issue create --label bug --body \$'  ~~~\n ## Cause\n~~~'"
 # A double quote inside a single-quoted body ends no fence: the heading after it is still inside the block.
