@@ -927,5 +927,8 @@
   ],
   "conveyor/foreman/watch-retry.test.sh": [
     "conveyor/tests/port.test.sh"
+  ],
+  "conveyor/tests/lintyes.test.sh": [
+    "conveyor/tests/fail.test.sh"
   ]
 }
