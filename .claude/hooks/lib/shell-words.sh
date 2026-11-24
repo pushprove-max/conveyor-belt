@@ -69,7 +69,10 @@ load_words() {
   while [ ${#WORDS[@]} -gt 0 ]; do
     WORDS[0]=${WORDS[0]#"${WORDS[0]%%[!({]*}"}
     case "${WORDS[0]}" in
-      ''|do|then|else|elif|if|while|until|'!'|time) WORDS=("${WORDS[@]:1}") ;;
+      ''|do|then|else|elif|if|while|until|'!') WORDS=("${WORDS[@]:1}") ;;
+      # Bash's `time` keyword takes `-p`, then `--`: neither is the command.
+      time) WORDS=("${WORDS[@]:1}"); [ "${WORDS[0]-}" = -p ] && WORDS=("${WORDS[@]:1}")
+            [ "${WORDS[0]-}" = -- ] && WORDS=("${WORDS[@]:1}") ;;
       *) break ;;
     esac
   done

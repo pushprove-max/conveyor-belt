@@ -186,6 +186,7 @@ load_segments "$CMD" SEG
 # at run time (`$(...)`, a bare variable) passes; widen when one shows up.
 src_path() { # $1 = a path word, quotes allowed
   local P=${1//[\'\"]/} V
+  case "$P" in /*|\~/*|\$*) ;; *) [ -n "${ENV_DIR-}" ] && P=$ENV_DIR/$P ;; esac # env -C ENV_DIR (unwrap)
   case "$P" in '~/'*) P=$HOME/${P#\~/} ;; esac
   case "$P" in /*) P=$(realpath -m -- "$P") ;; *) [[ /$P/ == */../* ]] && P=$(realpath -m -- "$P") ;; esac
   if [[ $P =~ ^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/ ]]; then
@@ -224,6 +225,90 @@ script_head() {
   done
   case "${1##*/}" in python|python3|python3.*|node) SH_ARGS=("${@:2}"); return 0 ;; esac
   return 1
+}
+# WORDS = the words GNU env -S makes of its string. Outside single quotes `\_` ends a word (a space inside double
+# quotes) and `\c` ends the string; inside them only `\\` and `\'` are escapes, so `\'` does not close the quote.
+# A `#` where a word would start opens a comment.
+env_split() {
+  local t=$1 w='' q='' have=0 c n
+  WORDS=()
+  while [ -n "$t" ]; do
+    c=${t:0:1} n=${t:1:1} t=${t:1}
+    if [ "$c" = '\' ] && { [ "$q" != "'" ] || [[ $n == [\'\\] ]]; }; then
+      t=${t:1}
+      case "$n" in
+        _) if [ "$q" = '"' ]; then w+=' ' have=1; elif [ "$have" = 1 ]; then WORDS+=("$w"); w='' have=0; fi ;;
+        c) break ;;
+        f) w+=$'\f' have=1 ;; n) w+=$'\n' have=1 ;; r) w+=$'\r' have=1 ;; t) w+=$'\t' have=1 ;; v) w+=$'\v' have=1 ;;
+        *) w+=$n have=1 ;;
+      esac
+      continue
+    fi
+    if [ -n "$q" ]; then
+      if [ "$c" = "$q" ]; then q=''; else w+=$c; fi
+      continue
+    fi
+    case "$c" in
+      "'"|'"') q=$c have=1 ;;
+      ' '|$'\t'|$'\n'|$'\v'|$'\f'|$'\r') [ "$have" = 1 ] && WORDS+=("$w"); w='' have=0 ;;
+      '#') if [ "$have" = 1 ]; then w+=$c; else break; fi ;;
+      *) w+=$c have=1 ;;
+    esac
+  done
+  [ "$have" = 1 ] && WORDS+=("$w")
+  return 0
+}
+# WRAP = the words less the command-prefix wrappers in front that run the rest as a command: env (its NAME=value
+# words, and its -S string split into words), command, exec, nice, nohup, timeout and its duration, time, stdbuf,
+# each with its options. `env sed -i` writes as `sed -i` does. A wrapper not listed is left as the command.
+# `command -v`/`-V` only looks a name up, so nothing is left. ENV_DIR = the folder `env -C` runs the command in
+# (src_path reads a relative target from there); the caller empties it before each segment.
+unwrap() {
+  WRAP=("$@"); local w o s l c rest val f base
+  while [ ${#WRAP[@]} -gt 0 ]; do
+    w=${WRAP[0]##*/}
+    case "$w" in # s = short options that take a value (macOS env -P too), l = long ones
+      env) s=uCSaP l='unset|chdir|split-string|argv0' ;;
+      command|nohup) s='' l='' ;;
+      exec) s=a l='' ;;
+      nice) s=n l=adjustment ;;
+      timeout) s=sk l='signal|kill-after' ;;
+      time) s=fo l='format|output' ;;
+      stdbuf) s=ioe l='input|output|error' ;;
+      *) return 0 ;;
+    esac
+    WRAP=("${WRAP[@]:1}") base=${ENV_DIR-}
+    while [[ ${WRAP[0]-} == -?* ]]; do
+      o=${WRAP[0]} val='' c=''; WRAP=("${WRAP[@]:1}")
+      [ "$o" = -- ] && break
+      if [[ $o == --* ]]; then
+        o=${o#--}
+        # GNU takes a unique start of a long option name for the name: `--ch DIR` is --chdir.
+        [ -n "${o%%=*}" ] && for f in ${l//|/ }; do [[ $f == "${o%%=*}"* ]] && c=$f; done
+        if [[ $o == *=* ]]; then val=${o#*=}
+        elif [ -n "$c" ]; then val=${WRAP[0]-}; WRAP=("${WRAP[@]:1}"); fi
+      else
+        rest=${o#-}
+        while [ -n "$rest" ]; do
+          c=${rest:0:1} rest=${rest:1}
+          [ "$w" = command ] && [[ $c == [vV] ]] && { WRAP=(); return 0; }
+          [[ $s == *"$c"* ]] || { c=''; continue; }
+          if [ -n "$rest" ]; then val=$rest; else val=${WRAP[0]-}; WRAP=("${WRAP[@]:1}"); fi
+          break
+        done
+      fi
+      # env -S 'sed -i ...' runs the words of its string, then the words after it.
+      [ "$w" = env ] && [[ $c == S || $c == split-string ]] && { env_split "$val"; WRAP=("${WORDS[@]}" "${WRAP[@]}"); }
+      # env -C DIR runs the command in DIR; a relative DIR is under the folder this env runs in (base). GNU env keeps
+      # only its last -C, so a later -C of the same env replaces an earlier one; a nested env's -C is under it.
+      [ "$w" = env ] && [[ $c == C || $c == chdir ]] && { val=${val//[\'\"]/}; case "$val" in /*|\~/*|\$*) ENV_DIR=$val ;; *) ENV_DIR=${base:+$base/}$val ;; esac; }
+    done
+    # GNU env reads one bare `-` after its options (after `--` too) as -i, never as the command.
+    [ "$w" = env ] && [ "${WRAP[0]-}" = - ] && WRAP=("${WRAP[@]:1}")
+    # GNU and macOS env read every word with a `=` as an assignment, whatever the name holds (`A.B=1`).
+    [ "$w" = env ] && while [[ ${WRAP[0]-} == *=* ]]; do WRAP=("${WRAP[@]:1}"); done
+    [ "$w" = timeout ] && [ ${#WRAP[@]} -gt 0 ] && WRAP=("${WRAP[@]:1}")
+  done
 }
 # A runner reads its program from stdin only with no -c/-e/-m/-p and no script
 # file (or `-`); `python3 -c "...stdin.read()"` reads the heredoc as data.
@@ -281,7 +366,7 @@ done <<<"$CMD"
 RD_RE='^[0-9&]?>>?[|]?(.*)$' # a redirect's target. Shell text only: heredoc bodies, quoted or escaped `>` are data.
 mapfile -d '' SH_SEGS < <(split_search_segments "$SHELL_TEXT" '\0')
 for i in "${!SH_SEGS[@]}"; do
-  SEG=${SH_SEGS[i]}
+  SEG=${SH_SEGS[i]} ENV_DIR=''
   script_head "${SEG:1}" && SCRIPT+=${SEG:1}$'\n'
   # One left-to-right pass, escape pairs before quotes: `\\>` keeps its redirect, `\'` opens no quote.
   # A data `>` becomes `_`, never nothing: deleting it turned `"\>"` into `"\"`, whose escaped quote swallowed a later redirect.
@@ -294,10 +379,11 @@ for i in "${!SH_SEGS[@]}"; do
   fi
   load_words "${SEG:1}"; set -- "${WORDS[@]}"
   while [ $# -gt 0 ] && [[ ${1-} == *=* && ${1-} != */* ]]; do shift; done
+  unwrap "$@"; set -- "${WRAP[@]}"
   # A copy onto a source file skips the same hooks as a redirect does: tee writes
   # every operand, the others the -t folder or else the last of two operands.
   # Not followed: dd, rsync, ln, an archive unpacked or a patch applied over the
-  # tree, and a copy behind a wrapper (env, sudo).
+  # tree, and a copy behind a wrapper unwrap does not know (sudo).
   case "${1##*/}" in cp|mv|install|tee)
     HEAD=${1##*/} OPS=() DIR="" SKIP=0; shift
     for W in "$@"; do
@@ -328,6 +414,7 @@ for i in "${!SH_SEGS[@]}"; do
     xargs) shift; while [[ ${1-} == -* ]]; do [[ $1 == -[IdEnPLsa] ]] && shift; shift; done
            for ((J=i; J>0; J--)); do [ "${SH_SEGS[J]:0:1}" = 1 ] || break; mapfile -t -O ${#TGT[@]} TGT < <(seg_words "${SH_SEGS[J-1]:1}" | awk 'NR==1 { r = g = $0 ~ /(^|\/)(rg|e?grep)$/; next } s { s = 0; next } r && (match($0, /^-[A-Za-dg-z]*[ef]/) || /^--(regexp|file)(=|$)/) { g = 0; s = RLENGTH == length($0) || /^--(regexp|file)$/; next } r && /^--(files|type-list)$/ { g = 0 } /^-/ { next } { o[++n] = $0 } END { for (k = 1 + g; k <= n; k++) print o[k] "/" }'); done ;;
   esac
+  unwrap "$@"; set -- "${WRAP[@]}" # find -exec env sed -i, xargs nice sed -i
   case "${1##*/}" in
     sed) CODE_FLAGS=ef ;;
     perl) CODE_FLAGS=eE ;;
@@ -357,6 +444,7 @@ for i in "${!SH_SEGS[@]}"; do
     src_path "$W" && write_block "$W"
   done
 done
+ENV_DIR='' # the last segment's env -C folder is not the inline scripts' folder
 if [ -n "$SCRIPT" ]; then
   # A write's target is judged as written when literal; a variable by its literal
   # assignments; anything else by every quoted path the script names.

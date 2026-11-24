@@ -116,7 +116,7 @@ w "tee to a scratch log passes" 0 'npm run lint 2>&1 | tee /tmp/lint.log'
 w "mv between scratch files passes" 0 'mv /tmp/a /tmp/b'
 # Stated limits, pinned as today's behaviour.
 w "stated limit: dd onto a source file is not followed" 0 'dd if=/tmp/x of=src/a.ts'
-w "stated limit: a copy behind a wrapper is not followed" 0 'sudo cp /tmp/x src/a.ts'
+w "stated limit: a copy behind sudo is not followed" 0 'sudo cp /tmp/x src/a.ts'
 # A scratch fixture outside every checkout is no source file, whatever its
 # folders are called: the rule refused a fake ~/.claude tree under /tmp.
 check "a write under /tmp passes though a folder there is named .claude" 0 \
@@ -399,6 +399,63 @@ SEAT=run_hook
     check "path_wrapped_destination_judged_as_written: $P(p).write_text with p='src/a.ts' is refused ($SEAT)" 2 \
       "$($SEAT "$(json "python3 -c \"import pathlib; p='src/a.ts'; $P(p).write_text('x')\"")")"
   done
+
+# A command-prefix wrapper hid the writer: the check read `env` or `nice` as the command, so `env sed -i` on a source
+# file passed. Each wrapper, with its options and values, is now judged as the command behind it.
+u() { check "wrapper: $1" "$2" "$(run_hook "$(json "$3")")"; }
+u "env sed -i is refused" 2 "env sed -i 's/a/b/' src/x.ts"
+u "env with NAME=value and -u NAME before perl -pi is refused" 2 "env -u HOME FOO=1 perl -pi -e 's/a/b/' src/x.ts"
+u "env -S with the writer in its string is refused" 2 "env -S 'sed -i s/a/b/' src/x.ts"
+u "nice sed -i is refused" 2 "nice sed -i 's/a/b/' src/x.ts"
+u "nice -n 5: the value is not the command" 2 "nice -n 5 sed -i 's/a/b/' src/x.ts"
+u "timeout 5 perl -pi is refused" 2 "timeout 5 perl -pi -e 's/a/b/' src/x.ts"
+u "timeout -k 2 -s KILL 5: the values and the duration are not the command" 2 "timeout -k 2 -s KILL 5 sed -i 's/a/b/' src/x.ts"
+u "command sed -i is refused" 2 "command sed -i 's/a/b/' src/x.ts"
+u "nohup exec stdbuf -oL sed -i, wrappers stacked, is refused" 2 "nohup exec stdbuf -oL sed -i 's/a/b/' src/x.ts"
+u "/usr/bin/time -o FILE sed -i is refused" 2 "/usr/bin/time -o /tmp/t sed -i 's/a/b/' src/x.ts"
+u "env cp onto a hook is refused" 2 'env cp /tmp/x.sh .claude/hooks/x.sh'
+u "find -exec env sed -i is refused" 2 "find src -name '*.ts' -exec env sed -i 's/a/b/' {} +"
+u "xargs nice sed -i is refused" 2 "rg -l foo src | xargs nice sed -i 's/a/b/'"
+u "env sed -i under /tmp passes" 0 "env sed -i 's/a/b/' /tmp/conveyor/x"
+u "env ls passes" 0 'env ls src'
+u "timeout 5 git status passes" 0 'timeout 5 git status'
+u "env sed -n on a source path is a read and passes" 0 "env sed -n '1p' src/x.ts"
+# GNU env reads a bare `-` as -i: the check kept `-` as the command name, so the sed behind it passed.
+u "env - sed -i, the bare - option, is refused" 2 "env - sed -i 's/a/b/' src/x.ts"
+# GNU env -S splits its string at an unquoted \_: the check read `sed_-i_s/a/b/` as one command name and passed it.
+u "env -S with \\_ between the writer's words is refused" 2 "env -S 'sed\\_-i\\_s/a/b/' src/x.ts"
+# GNU env drops a bare `-` after `--` too: the check kept it as the command name, so the sed behind it passed.
+u "env -- - sed -i is refused" 2 "env -- - sed -i 's/a/b/' src/x.ts"
+# Inside single quotes GNU env -S keeps \' as data: the check closed the quote there, glued -i into one quoted word
+# with the \_ after the real close, and passed the sed.
+u "env -S with \\' in single quotes before \\_-i is refused" 2 "env -S \"sed 'x\\''\\_-i s/a/b/\" src/x.ts"
+# Bash's `time -p` keyword: the word reader dropped `time` and left `-p` as the command, so the sed behind it passed.
+u "time -p sed -i is refused" 2 "time -p sed -i 's/a/b/' src/x.ts"
+# Bash's `time -p --`: the word reader dropped `time` and `-p` but left `--` as the command, so the sed passed.
+u "time -p -- sed -i is refused" 2 "time -p -- sed -i 's/a/b/' src/x.ts"
+# macOS env -P takes a folder: the check read /usr/bin as the command, so the sed behind it passed.
+u "env -P DIR sed -i is refused" 2 "env -P /usr/bin sed -i 's/a/b/' src/x.ts"
+# GNU env takes `--unse` for --unset: the check read HOME, its value, as the command.
+u "env --unse NAME, an abbreviated long option, is refused" 2 "env --unse HOME sed -i 's/a/b/' src/x.ts"
+# `--split` for --split-string: the check did not split the string, so `sed -i` in it passed.
+u "env --split, abbreviated -S, is refused" 2 "env --split 'sed -i s/a/b/' src/x.ts"
+# env sets A.B=1 though it is no shell name: the check read it as the command.
+u "env A.B=1 sed -i is refused" 2 "env A.B=1 sed -i 's/a/b/' src/x.ts"
+# env -C /tmp runs sed in /tmp, so src/x.ts is /tmp/src/x.ts, scratch: the check judged it as the repo's source file.
+u "env -C /tmp sed -i on a relative path passes" 0 "env -C /tmp sed -i 's/a/b/' src/x.ts"
+# The env -C folder belongs to its own segment: kept, it would make the next segment's source write pass.
+u "env -C /tmp does not carry to the next command" 2 "env -C /tmp true; sed -i 's/a/b/' src/x.ts"
+# GNU env keeps only its last -C, so sed runs in ./src: the check joined src to /tmp and passed a source write.
+u "env -C /tmp -C src: the last -C replaces the first" 2 "env -C /tmp -C src sed -i 's/a/b/' x.ts"
+# command -v only names what tee is: the check read tee as the command and the hook as its target.
+u "command -v -- tee on a hook path is a lookup and passes" 0 'command -v -- tee .claude/hooks/bash-guardrails.sh'
+# No check in this hook judges ast-grep yet, so its verdict is the same with or without env whatever unwrap does. What
+# this check owes the ast-grep rule is the unwrapped command: before, `env FOO=1 ast-grep run -U` was read as `env`.
+if [ "$ON" = 1 ]; then # HOOK is `true` outside part 2: reading it there finds no unwrap
+  eval "$(sed -n '/^env_split() {/,/^}/p;/^unwrap() {/,/^}/p' "$HOOK")"
+  unwrap env FOO=1 ast-grep run -p a -r b -U src
+fi
+check "wrapper: env FOO=1 ast-grep run -p a -r b -U src unwraps to the ast-grep command" "ast-grep run -p a -r b -U src" "${WRAP[*]}"
 
 part 3
 # guard-python-copy-class: two NO-GOs were one class, a copy or move destination the
