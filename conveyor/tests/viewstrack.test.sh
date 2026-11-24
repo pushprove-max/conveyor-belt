@@ -91,7 +91,9 @@ t_track() {
   # after 1 round") was lost, and a longer reason was cut in the middle of a word. Card 60's reason is a block of that
   # form (a finding of 300 characters), then a long note (push.sh's note on the issue): over 800 characters, its
   # first 400 (the block, whole) and its last 400 stay, each cut at a word, joined by " … ": the end of a reason is
-  # what happened, so a cut that keeps only the start loses it.
+  # what happened, so a cut that keeps only the start loses it. Every word of the note is "word" and two digits, so
+  # $whole fails when either cut leaves part of a word beside " … " (the first 400 characters end inside "word02").
+  whole=' word[0-9]{2} … word[0-9]{2} '
   words=$(printf 'word%02d ' $(seq 1 99)); finding="[P1] [E1] a.sh:1 ${words:0:283}"; blk="the fix for $finding did not hold after 1 round"
   card 60 picked worktree deps brief b - - "blocked:blocked:{\"reason\":\"$blk [the review's findings not posted on the issue: $words]\"}"
   card 61 picked 'worktree:ok:{"reason":"resumed from the kept patch of card c60: one session, then review"}' deps brief b build r "review:GO:$Z" t test:pass l 'landed:ok:{"sha":"abg","product":false}'
@@ -236,7 +238,7 @@ EOF
 EOF
   [ "$(jq -c '.needsYou.blocked[] | select(.card == "c41") | .reviews | map([.round, .verdict, .fixed])' <<<"$out")" = '[[1,"NO-GO",true]]' ] || fail "a blocked card's reviews: $(jq -c '.needsYou.blocked[] | select(.card == "c41") | .reviews' <<<"$out")"
   [ "$(jq -c '.landed[] | select(.card == "c61") | [.start[11:16], .pickedAt[11:16], .priorSec, .totalSec, (.earlier | map([.card, .sec, .track.steps[0].state]))]' <<<"$out")" = '["00:00","00:00",420,1080,[["c60",420,"failed"]]]' ] \
-    && rs=$(jq -r '.landed[] | select(.card == "c61") | .earlier[0].reason' <<<"$out") && [[ $rs == "$blk ["* && $rs == *" … word"* && $rs == *" word99 ]" && ${#rs} -le 805 ]] \
+    && rs=$(jq -r '.landed[] | select(.card == "c61") | .earlier[0].reason' <<<"$out") && [[ $rs == "$blk ["* && $rs == *" … word"* && $rs =~ $whole && $rs == *" word99 ]" && ${#rs} -le 805 ]] \
     && [ "$(jq -c '.belt[] | select(.card == "c62") | [.start, .pickedAt, .priorSec, .totalSec, .earlier] | [.[0] == .[1], .[2], .[3], .[4]]' <<<"$out")" = '[true,0,null,[]]' ] \
     || fail "start and overall time: $(jq -c '[.landed[], .belt[]] | map(select(.card == "c61" or .card == "c62") | {card, start, pickedAt, priorSec, totalSec, earlier})' <<<"$out")"
   [ "$(jq -c --arg b "$blk" '.belt[] | select(.card == "c65") | .earlier | map([.card, .reason == $b, .retried])' <<<"$out")" = '[["c64",true,"retried once with its kept work"]]' ] \
