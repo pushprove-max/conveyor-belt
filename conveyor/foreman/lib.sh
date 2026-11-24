@@ -352,7 +352,7 @@ host_ssh() { # the host file's ssh target, empty when it names none (or one that
   jq -er '.ssh | select(type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._@-]*$"))' "$HOSTF" 2>/dev/null || :
 }
 ask() {
-  local cmd target fm=
+  local cmd fm=
   [ "$3" != testissue ] || fm='CONVEYOR_FOREMAN=1 '
   [ -z "${CONVEYOR_REVIEWRETRY:-}" ] || fm+='CONVEYOR_REVIEWRETRY=1 '
   [ "$3" != retry ] || fm+='CONVEYOR_RETRYBY=foreman '
@@ -363,10 +363,35 @@ ask() {
   printf -v cmd 'cd %q && if jq -e ".plugin == null" .conveyor/project.json >/dev/null 2>&1; then e=$PWD/conveyor/conveyor.sh; else p=$(if jq -e .plugin.follow .conveyor/project.json >/dev/null 2>&1; then jq -er %q .git/conveyor-engine.json; else jq -er %q .conveyor/project.json; fi) && e=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions/$p/conveyor/conveyor.sh; fi && %sCONVEYOR_MAIN=%q bash "$e"' \
     "$2" '.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' '.plugin.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' "$fm" "$2"
   printf -v cmd '%s%s' "$cmd" "$(printf ' %q' "${@:3}")"
+  case $3 in card | testissue) askfiling "$1" "$cmd" ;; *) askrun "$cmd" ;; esac
+}
+askrun() { # <command>: run where the record is, stopped at the ask limit (exit 124, or 137 once killed)
+  local target
   target=$(host_ssh)
   if [ -n "$target" ]; then
-    timeout -k 2 "${ASK_LIMIT:-45}" ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$cmd" < "${ASK_IN:-/dev/null}"
-  else timeout -k 2 "${ASK_LIMIT:-45}" bash -c "$cmd" < "${ASK_IN:-/dev/null}"; fi
+    timeout -k 2 "${ASK_LIMIT:-45}" ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$1" < "${ASK_IN:-/dev/null}"
+  else timeout -k 2 "${ASK_LIMIT:-45}" bash -c "$1" < "${ASK_IN:-/dev/null}"; fi
+}
+# A filing ask (card, testissue) prints its issue's link as soon as the issue is made, before it holds it in the record
+# (cardnew(), testissue(), lib/testaction.sh), and ends 0 once it has printed it. Its limit is the ask limit and GHWAIT
+# more, gh_write()'s own limit on gh (lib/issues.sh): stopped while gh waits on GitHub, the issue could be made with no
+# link printed. Failed after the link (stopped at its limit, or the ssh connection lost: 255), the issue is made: the
+# ask prints the link, says the hold may not be in, and ends 0, so the Foreman does not file it again. Stopped, or the
+# connection lost, before the link, it says to look for the issue before it is filed again.
+GHWAIT=60
+askfiling() { # <repo> <command>
+  local out rc u how lim=$((${ASK_LIMIT:-45} + GHWAIT))
+  out=$(ASK_LIMIT=$lim askrun "$2"); rc=$?
+  [ -z "$out" ] || printf '%s\n' "$out"
+  [ "$rc" != 0 ] || return 0
+  case $rc in 124 | 137) how="was stopped at its $lim-second limit" ;; 255) how='lost its connection to the host' ;; *) how="ended $rc" ;; esac
+  u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1)
+  if [ -n "$u" ]; then
+    echo "foreman: the filing $how after it filed $u: do not file it again. Its hold may not be in: hold it (foreman.sh ask $1 control hold ${u##*/}) unless the owner has said yes, and take its built label off" >&2
+    return 0
+  fi
+  case $rc in 124 | 137 | 255) echo "foreman: the filing $how before it printed an issue link: look for the issue in $1 before you file it again" >&2 ;; esac
+  return "$rc"
 }
 
 # retryable <record> <jq path to its blocked list>: "<card> TAB <issue>" for each card the standing kind review-retry

@@ -223,6 +223,12 @@ card of a red release suite, the Foreman runs `foreman.sh ask <project> card --r
 **Release fix cards** decides the same way for it: On, the card has no GitHub issue, and Conveyor reads its
 `Release fix: <version>` line and starts the suite again once each fix card has landed and its change is in the commit
 the suite tests. Off, the command files a fix issue, and it refuses a body with no `## Cause` section in the same way.
+When `card` or `testissue` is stopped at its time limit, or loses its connection to the host, after it filed the
+issue, it still prints the issue's link and ends with success, and it tells the Foreman not to file the issue again.
+The hold can be missing then: the Foreman holds the issue with `foreman.sh ask <project> control hold <issue>`, unless
+you said yes to it, and takes the built label off it. When it is stopped or loses its connection before it printed a
+link, or GitHub did not answer in time, the Foreman looks for the issue in the project before it files again: GitHub
+can make the issue and still not answer.
 **Review follow-ups** and **Split parts** are
 for the cards that Conveyor files itself, so the Foreman does nothing for them; see
 [Cards with no GitHub issue](cards.md#cards-with-no-github-issue).

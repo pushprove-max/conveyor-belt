@@ -114,8 +114,17 @@ TAEXPLAIN="Explain the slowdown of one test file of this project. From its recor
 # start held too: the owner asked for the card on the Board. One asked for a Foreman session (foreman.sh ask
 # <project> testissue) starts held, as the Foreman's issue would: it is not built before the owner's yes.
 TAFILED=$TESTACTS/filed.jsonl
+# ghunfiled <what> <gh_write's exit> <gh's output>: says a filing printed no link. gh stopped at gh_write()'s time limit
+# (124, or 137 once killed) may have had the issue made on GitHub with its answer lost: it is looked for before it is
+# filed again (askfiling(), foreman/lib.sh, is stopped later than gh, so this is what the Foreman reads).
+ghunfiled() {
+  case $2 in
+    124 | 137) echo "conveyor: gh was stopped at its time limit before it printed a link: GitHub may have made $1 all the same: look for it in GitHub before you file it again: $3" >&2 ;;
+    *) echo "conveyor: $1 could not be filed: $3" >&2 ;;
+  esac
+}
 testissue() { # <test file> <title> <body>
-  local out n s='' why='' c fm=''
+  local out n s='' why='' c fm='' rc
   [ $# = 3 ] && [[ -n ${2//[[:space:]]/} && $2 != *$'\n'* && -n ${3//[[:space:]]/} ]] || { echo "usage: conveyor.sh testissue <test file> <title> <body>" >&2; return 2; }
   [[ -n $1 && $1 != /* && /$1/ != */../* && /$1/ != */./* && $1 != *$'\n'* ]] && [ "$(git -C "$MAIN" cat-file -t "refs/heads/$BRANCH:$1" 2>/dev/null)" = blob ] \
     || { echo "conveyor: $1 is not a file of $BRANCH; nothing filed" >&2; return 2; }
@@ -126,8 +135,9 @@ testissue() { # <test file> <title> <body>
   else case $(jq -r '.start // empty' <<<"$c" 2>/dev/null) in queue) ;; held) why='new issues start held' ;; *) why='the control record cannot be read' ;; esac; fi
   if [ "$(jq -r '.rules.testissues' <<<"$c" 2>/dev/null)" = false ]; then testcard "$@" "${fm:+held}"; return; fi
   # An issue to be held is made with the built label, which the pick skips, until the hold is in the control record.
-  out=$(gh_write issue create --title "${2:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" ${why:+--label "$BUILT"} --body "$3" 2>&1); n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1); n=${n##*/}
-  [ -n "$n" ] || { echo "conveyor: the issue about $1 could not be filed: $out" >&2; return 1; }
+  out=$(gh_write issue create --title "${2:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" ${why:+--label "$BUILT"} --body "$3" 2>&1); rc=$?; n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1); n=${n##*/}
+  [ -n "$n" ] || { ghunfiled "the issue about $1" "$rc" "$out"; return 1; }
+  grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1 # at once, as cardnew() prints it
   jq -cn --arg t "$(clock)" --arg f "$1" --argjson n "$n" '{time: $t, event: "filed", file: $f, issue: $n}' >> "$TAFILED" \
     || echo "conveyor: #$n is filed, but its record could not be written: the row of $1 does not show it" >&2
   if [ -n "$why" ]; then
@@ -135,7 +145,6 @@ testissue() { # <test file> <title> <body>
     elif gh_write issue edit "$n" --remove-label "$BUILT" > /dev/null 2>&1; then echo "conveyor: #$n is held, as $why: release it (conveyor.sh control release $n) once the owner says yes" >&2
     else echo "conveyor: #$n is held, as $why, but the $BUILT label could not be taken off it: take it off before you release it (conveyor.sh control release $n), as the belt skips an issue with it" >&2; fi
   fi
-  grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1
 }
 # A card with no GitHub issue (testissue() with rules.testissues false, #1330; a Foreman order, a review follow-up, a release
 # fix card or a split part with its rule false: cardnew(), followups(), splitcards()), a card of issue 0 as a main-red fix
@@ -193,7 +202,7 @@ tcput() { local rec id drop; rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/nu
 # is. Otherwise it files the issue, with the pack's type and last priority, and holds it; the issue is made with the
 # built label, which the pick skips, taken off once the hold is in the control record. Prints what it started or filed.
 cardnew() { # [--release <version>] <title> <body>
-  local rule=foremanissues label='Foreman order' body='' out n u nocard
+  local rule=foremanissues label='Foreman order' body='' out n u nocard rc
   [ "${1:-}" != --release ] || { [[ ${2:-} =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]] || { echo "usage: conveyor.sh card [--release <version>] <title> <body>" >&2; return 2; }
     rule=releaseissues label='Release fix'; body=$'\n\nRelease fix: '$2; shift 2; }
   [ $# = 2 ] && [[ -n ${1//[[:space:]]/} && $1 != *$'\n'* && -n ${2//[[:space:]]/} ]] || { echo "usage: conveyor.sh card [--release <version>] <title> <body>" >&2; return 2; }
@@ -208,12 +217,12 @@ cardnew() { # [--release <version>] <title> <body>
     echo "Card queued with no GitHub issue: ${1:0:200}"; return 0
   fi
   # Made with the built label, which the pick skips, until the hold is in the control record (as testissue() does).
-  out=$(gh_write issue create --title "${1:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" --label "$BUILT" --body "$body" 2>&1); u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1); n=${u##*/}
-  [ -n "$n" ] || { echo "conveyor: the issue could not be filed: $out" >&2; return 1; }
+  out=$(gh_write issue create --title "${1:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" --label "$BUILT" --body "$body" 2>&1); rc=$?; u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1); n=${u##*/}
+  [ -n "$n" ] || { ghunfiled "the issue" "$rc" "$out"; return 1; }
+  echo "$u" # at once: an ask stopped at its limit while the hold waits still has the link (askfiling(), foreman/lib.sh)
   if ! locked control hold "$n" > /dev/null 2>&1; then echo "conveyor: #$n is filed, but could not be held: hold it (conveyor.sh control hold $n) unless the owner has said yes to it, and take the $BUILT label off it, which the belt skips" >&2
   elif gh_write issue edit "$n" --remove-label "$BUILT" > /dev/null 2>&1; then echo "conveyor: #$n is held, as it was filed for a Foreman session: release it (conveyor.sh control release $n) once the owner says yes" >&2
   else echo "conveyor: #$n is held, as it was filed for a Foreman session, but the $BUILT label could not be taken off it: take it off before you release it (conveyor.sh control release $n), as the belt skips an issue with it" >&2; fi
-  echo "$u"
 }
 # Takes the entry of <card id> out of the record while no card has picked it (a follow-up withdrawn: unfile()). A picked
 # one stays: its card is on the belt. One writer at a time, as tcadd() is.

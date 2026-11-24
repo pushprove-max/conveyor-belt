@@ -688,6 +688,7 @@
 {"area": "card", "test": "slices.test.sh"}
 {"area": "control", "test": "slices.test.sh"}
 {"area": "testaction", "test": "testaction.test.sh"}
+{"area": "testaction", "test": "askfiling.test.sh"}
 {"area": "testaction", "test": "fixcheck.test.sh"}
 {"area": "testaction", "test": "testactqueue.test.sh"}
 {"area": "testaction", "test": "testactstop.test.sh"}

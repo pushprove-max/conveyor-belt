@@ -533,3 +533,20 @@ t_cardnewrace() {
   [ "$(loop control | jq -c .held)" = '[100101]' ] || fail "the issue of card 'Add a Rules row' is not held: $(loop control)"
   [ "$(jq -c '.labels | map(.name)' "$STUB/filed")" = '["bug","P2"]' ] || fail "the built label was not taken off the held issue of card 'Add a Rules row': $(cat "$STUB/filed")"
 }
+# The Foreman's filing ask over these (#1637) is in askfiling.test.sh.
+# Bug these catch (#1637): gh stopped at gh_write()'s time limit (exit 124) can have had the issue made on GitHub with
+# its answer lost; `card` and `testissue` said only "could not be filed", so the Foreman filed it again.
+t_cardghstop() {
+  tasetup
+  echo 'exit 124' > "$STUB/create-cmd" # stands for gh_write()'s timeout, which ends gh with 124
+  fx_in 'cardnew "Add a Rules row" "$(printf "Make it so.\n## Cause\nNo row exists.")"'
+  [ "$RC" = 1 ] && grep -qF 'look for it in GitHub before you file it again' "$T/$CASE/run.out" \
+    || fail "card 'Add a Rules row' with gh stopped at its limit does not say the issue may be filed (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+t_taissueghstop() {
+  tasetup
+  echo 'exit 124' > "$STUB/create-cmd" # stands for gh_write()'s timeout, which ends gh with 124
+  fx_in 'testissue tests/x.test.sh "Speed up tests/x.test.sh" "Measured: 12 CPU s."'
+  [ "$RC" = 1 ] && grep -qF 'look for it in GitHub before you file it again' "$T/$CASE/run.out" \
+    || fail "testissue tests/x.test.sh with gh stopped at its limit does not say the issue may be filed (exit $RC): $(cat "$T/$CASE/run.out")"
+}
