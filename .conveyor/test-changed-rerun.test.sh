@@ -408,6 +408,20 @@ mainmap() {
   printf 'lib/w.test.sh\n' > "$T/files"
   CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun CONVEYOR_TEST_FILELIST=$T/files ran | sorted
 }
+# fileran <file>: the one-file run (--file) the loop gives each file of its list, on mainmap's change and `from`. The
+# list is the one the loop keeps of a one-file run of an engine case file: the case file listed and passed, and each of
+# its cases an `ok` line of the runner, with no runner-wide `pass` (which would skip the `ok` filter this checks).
+fileran() {
+  local from; from=$(awk -F'\t' '$1 == "from" {print $2}' "$T/rerun")
+  { printf 'change\tabc\nfrom\t%s\npass\t%s\n' "$from" "$1"
+    sed -n 's/^t_\([a-z0-9]*\)() {.*/ok\tconveyor\/conveyor.test.sh\t\1/p' "$R/$1"
+    printf 'main\t.conveyor/engine-areas.json\n'; } > "$T/rerun"
+  printf '%s\n' "$1" > "$T/files"
+  rm -f "$R/ran"
+  (cd "$R" && CONVEYOR_TEST_N=1 CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun CONVEYOR_TEST_FILELIST=$T/files \
+    bash .conveyor/test-changed.sh --file "$1") > "$T/out" 2>&1
+  ranlines "$R/ran" | sorted
+}
 # Main adds a line for y2.jq (area b) to the map; the card changes x.sh (area a). Only the map's own tests run: the
 # cases of area b are not in the card's selection, and area a's entry did not change.
 p_mapmainother() {
@@ -429,12 +443,22 @@ p_mapmainother() {
   got=$(ranlines "$R/ran" | sorted)
   [ "$got" = "MAPTEST " ] && ok "a one-file run of the map's own test, after main changed the map, runs it" \
     || no "--file .conveyor/test-changed.test.sh after main changed the map: ran '$got': $(cat "$T/out")"
+  # Catches a one-file run of an engine case file (the loop's own mode) that runs its cases again though main's map
+  # change left their area's entry as it was: the map comparison picks them, as in a whole run.
+  got=$(fileran conveyor/tests/a.test.sh)
+  [ -z "$got" ] && ok "a one-file run of an engine case file whose area's map entry main left as it was runs none of its cases" \
+    || no "--file conveyor/tests/a.test.sh after main added y2.jq to area b: ran '$got': $(cat "$T/out")"
 }
 # Main adds a file to area a's entry, the area of the file the card changes: that entry's cases run (a is a's case file).
 p_mapmainentry() {
   got=$(mainmap conveyor/x2.sh '.areas.a.files += ["conveyor/x2.sh"]')
   [ "$got" = "MAPTEST aone atwo " ] && ok "main changed the map entry of the area of a file the card changes: that entry's cases run" \
     || no "main added x2.sh to area a: ran '$got': $(cat "$T/out")"
+  # Catches a one-file run of an engine case file (the loop's own mode: the selection holds only the runner with that
+  # file's cases) that skips the map comparison: main changed its area's entry, so its cases run again.
+  got=$(fileran conveyor/tests/a.test.sh)
+  [ "$got" = "aone atwo " ] && ok "a one-file run of an engine case file whose area's map entry main changed runs its cases" \
+    || no "--file conveyor/tests/a.test.sh after main added x2.sh to area a: ran '$got': $(cat "$T/out")"
 }
 
 for p in rerun mainrun mainwhole nodecases flakyoff slowoff killed fixengine fixtest mainmoved sharedwhy fixpassed \
