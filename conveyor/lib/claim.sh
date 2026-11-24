@@ -437,7 +437,11 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       # marked (stackred) and waits on, untested; it runs them again where it goes next (fitted onto main once that card
       # landed or failed its tests).
       [ -z "$parsecheck" ] || [ ! -e "$3.stack" ] || ! parses "$3" >/dev/null 2>&1 || parsecheck=''
-      if [ -z "$parsecheck" ] && [ -e "$3.ready" ] && ! jq -e '.tested == true or .alone == true or .stackred == true' "$3.ready" >/dev/null 2>&1 && packget landBatch b && [ "$b" -gt 1 ]; then
+      # Not while main is red at its commit, nor while its worktree is on a commit the main-red record holds an entry for
+      # (mainred.sh redhere()): main may have moved past that commit while the card waited, and the run would fail there on
+      # the old failure, before the fit onto main below. As in its test step (cardland.sh mainredhold()), it waits on.
+      if [ -z "$parsecheck" ] && [ -e "$3.ready" ] && ! jq -e '.tested == true or .alone == true or .stackred == true' "$3.ready" >/dev/null 2>&1 && packget landBatch b && [ "$b" -gt 1 ] \
+        && ! redhere "$1" >/dev/null && ! redhere "$1" "$3" >/dev/null; then
         # Its wait so far may have lent its slot under the cap to a held card (capowed(), lib/cardland.sh).
         rm -f "$3.idle" "$3.nocap"; capowed "$1" "$2" "$3" "$5"
         # The gate for a waiting card first (lintwait(), lib/lint.sh): a finding or an execution error removes

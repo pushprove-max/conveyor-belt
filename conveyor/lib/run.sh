@@ -236,9 +236,9 @@ revive() { # <the loop's own cards, one a line>
 # <cards>/<card>.exit when it ends (128 + N when signal N killed it), so the loop can say why a card that wrote no
 # closing line ended (cardgone()). LOOPCARD marks it as the loop's: a step whose seat's CLI stays gone waits for the
 # loop to start it again (seatwait(), cliwake()). CONVEYOR_CARDRUN marks what it starts, for retry and shut (leftin()).
-cardrun() { # <card> <issue>
-  # shellcheck disable=SC2034 # LOOPCARD is read by seatwait() in lib/control.sh
-  ( LOOPCARD=1; export CONVEYOR_CARDRUN=$1; card "$1" "$2" ); echo $? > "$CARDS/$1.exit"
+cardrun() { # <card> <issue> <picks the loop has left: below 0 for no limit, which marks the card LOOPFIX (redhere(): only that loop is sure to start the main-red fix card)>
+  # shellcheck disable=SC2034 # LOOPCARD is read by seatwait() in lib/control.sh, LOOPFIX by redhere() in lib/mainred.sh
+  ( LOOPCARD=1; [ "${3:--1}" -ge 0 ] || LOOPFIX=1; export CONVEYOR_CARDRUN=$1; card "$1" "$2" ); echo $? > "$CARDS/$1.exit"
 }
 # The Conveyor commit a card of the loop runs now: the one its last switch to new code named on its start line
 # (began(), lib/card.sh), else the one it started on (took, or ranon: run()).
@@ -701,7 +701,7 @@ turnpick() {
   # The pick may have written the control record (adopt()): read again in this shell, so the card starts with it kept
   # and does not check it again at each of its reads (#1542).
   local CTL_V; ctlread 2>/dev/null || :
-  CARDCTL=$ctl cardrun "$c" "$n" & mine[$!]="$c $n"; ranon[$!]=$RAN
+  CARDCTL=$ctl cardrun "$c" "$n" "$left" & mine[$!]="$c $n"; ranon[$!]=$RAN
   [ "$again" = true ] || left=$((left - 1)); started=$((started + 1))
   return 1
 }

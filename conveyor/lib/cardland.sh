@@ -225,7 +225,7 @@ cardtest() {
     checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$(jq -c '. + {reason: "the project'"'"'s checks failed (test.checkCommand)"}' <<<"$t")" || return
     go=next; return
   fi
-  [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)
+  mainredhold; rc=$?; [ $rc = 9 ] || return $rc; [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null) # main red: the step waits (mainredhold())
   sec=$SECONDS; rc=0; ran=''; own=''; apart=''; queued=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; BATCHMAIN=''; BATCHFROM=''; rm -f "$wt.stop"
   # The times its own run took go on its test line (testlist.sh slowtests()); only a test rule files an issue about a test
   # file (testrulespass(), after the test line is recorded).
@@ -282,6 +282,28 @@ cardtest() {
 # mainwaited() (card.sh) adds a wait for main: the landed line's waitSec counts it, so the drift watch does not count it as work.
 holdwaited() { # <worktree> [lane]
   local hw=$SECONDS; holdwait "$@"; mainsec=$((mainsec + SECONDS - hw)); }
+# Main is red at its commit as the card's test step starts (mainred.sh redhere()): its tests, and a batch's, would fail
+# on main's own failure and run again on main, so none starts. As after a failed run whose failures are all main's
+# (cardfailed()), the card waits, holding no files, until main changes (redholdwait(); its seconds go to mainsec, as
+# mainwaited() does), then is fitted onto main and tested again. Its ready file stays, with any pass it holds: the card
+# keeps its place in batching, and a pass of its tests after the wait is marked on that file (tested()). Its worktree is
+# still on the red commit while it waits on a claim, but settle() runs no test of the card there (the commit has an entry in the
+# main-red record: redhere()), so it is fitted onto main first. A card that cannot give its files way (giveway(): it did so
+# GIVEWAY times) does not wait: the main-red fix card may need them, and both would wait. Returns 9 when the step goes on
+# (main is not red, or the card does not wait); else sets go and returns as cardfailed() does.
+mainredhold() {
+  local mwon rc hw
+  mapfile -t mwon < <(redhere "$c") && [ ${#mwon[@]} -gt 1 ] || return 9
+  locked giveway "$c" "$wt" || ! jq -e '.held == true' "$wt.claim" >/dev/null 2>&1 || return 9
+  echo "conveyor: card $c: main is red at ${mwon[0]:0:12} (${mwon[*]:1}): its tests do not start; it waits for main to change"
+  hw=$SECONDS; redholdwait "$wt" "$c"; mainsec=$((mainsec + SECONDS - hw))
+  unmate; away=''; caught=''
+  redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
+  [ $rc != 1 ] || return 1
+  [ $rc != 3 ] || { go=landed; return 0; } # a batch landed it
+  [ $rc = 0 ] || [ $rc = 4 ] || { rm -f "$wt.ready"; locked giveway "$c" "$wt"; go=next; return 0; }
+  go=again; return 0
+}
 # A test run that failed (rc). go: again (the test step again: no result, a wait for main or the machine, or main
 # moved), next (its one fix round, or a fit onto main that went back) or landed; '' when the repair lane passed it.
 cardfailed() {

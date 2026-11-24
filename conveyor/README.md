@@ -588,7 +588,19 @@ failure gets a verdict:
   mode), and its log says so (`TESTRUN linked<TAB><test file><TAB><changed file>`); a link to a test file that no
   longer exists is dropped. When every failure is main's, the card neither goes to fix nor blocks: it gives way and waits in its
   Test step, its live record saying so, until main is at another commit; then it is fitted onto main as it is now
-  and its test step runs again (the same change keeps its passes, so the cases that failed run again). Those cards
+  and its test step runs again (the same change keeps its passes, so the cases that failed run again). A card that
+  reaches its Test step while the main-red record holds main's commit, with its fix card not landed or closed, starts
+  no test run, its own or a batch's: it waits in the same way, with the same live record, until main is at a commit
+  the record holds no such entry for. It is then fitted onto main as it is now, and its tests start. A pass it holds
+  for its change is kept, and so is its place in a batch. A card that waits at a file claim for another card runs no
+  test of its own while its worktree is on a commit that the record holds an entry for, even when main has moved past
+  that commit: it is fitted onto main first. A card with no GitHub issue (a branch's, a Tests page card) waits as any
+  card does. A card that has given way as many times as it may (it keeps its files) does not wait, so it cannot hold up
+  the fix card; its tests start. Only a card that a loop with no limit on its picks started (`conveyor.sh serve`, or
+  `conveyor.sh run` with no number) waits. A card of `conveyor.sh land-branch` (it may land the repair itself), and a
+  card of a run limited with a number or with `--only` (it may start no fix card), start their tests. Its other steps
+  (build, review, fix, lint) do not wait, and a main-red fix card (a card that an entry of the record names) runs its
+  tests at once. Those cards
   count against the cap while they wait (Control, above), so the
   loop starts a main-red fix card even with the project's cap reached: it takes one slot beyond the cap, one such card at a time, and the slot ends with it. The machine's cap
   and pause apply as to any card. The Board shows that card as "beyond the cap: main is red".

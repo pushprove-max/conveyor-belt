@@ -593,6 +593,41 @@ redlisted() { # <case>...
     < <(jq -r --args '.reds[]? | select(any(.cases[]?; .case | IN($ARGS.positional[]))) | .card // ""' "$@" < "$MAINRED" 2>/dev/null)
   return 1
 }
+# Whether main is red as a card starts its tests: the main-red record holds an entry for main's commit now whose fix
+# card is not landed or closed (redopen()). Prints main's commit, then each case of that entry, one a line; fails when
+# main is not red. With a worktree as the second argument, it asks about the commit that worktree is on (its base, which
+# main may have moved past): the record holds an entry for it, its fix card landed or not, as a test run on it fails there still.
+# Three kinds of card never wait on main. A main-red fix card (an entry of the record names it, of any
+# commit) tests its own fix, and another fix card's wait on it could hold both for good (the card cap bars a fix card
+# from the slot beyond it, run.sh redfix()); other cards of issue 0 (a branch's, a Tests page card's) wait as any card.
+# A run limited by --only (ONLY) starts no fix card (pick.sh, run.sh redfix()), so no card of it waits for one. Nor does a
+# card that a loop with no limit on its picks does not run (LOOPFIX, set by run.sh cardrun()): `land-branch` runs no loop
+# and may land the very repair, and a run of a number of cards may have spent its picks (run.sh turnpick()), so each
+# would wait for a fix card that is never started.
+redhere() { # <the card's id> [<a worktree>]
+  local sha out now
+  [ -n "${LOOPFIX:-}" ] && [ -z "${ONLY:-}" ] && [ -s "$MAINRED" ] || return 1
+  ! jq -e --arg c "$1" 'any(.reds[]?; .card == $c)' "$MAINRED" >/dev/null 2>&1 || return 1
+  now=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) || return 1
+  sha=$now; [ -z "${2:-}" ] || sha=$(git -C "$2" rev-parse -q --verify HEAD 2>/dev/null) || return 1
+  out=$(jq -r --arg s "$sha" '[.reds[]? | select(.sha == $s)] | first // empty | (.card // ""), (.cases[].case)' "$MAINRED" 2>/dev/null) || return 1
+  [ "$(wc -l <<<"$out")" -gt 1 ] && { [ "$sha" != "$now" ] || redopen "$(head -n 1 <<<"$out")"; } || return 1
+  printf '%s\n' "$sha"; tail -n +2 <<<"$out"
+}
+# A card waits here, in its test step, for main to change as long as main is red at its commit (redhere()): it ends when
+# main is at a commit the record holds no open entry for, the very state in which a card that reaches its test step starts
+# its tests. No run on main: the entry is its word. Its live record says so and is brought up to date as it waits;
+# <worktree>.idle stands meanwhile, as in mainwait().
+redholdwait() { # <worktree> <the card's id>
+  local at out; at=$(date -u +%FT%TZ)
+  while out=$(redhere "$2"); do
+    jq -cn --arg at "$at" --arg s "$(head -n 1 <<<"$out")" --arg c "$(tail -n +2 <<<"$out" | jq -Rrs 'rtrimstr("\n") | split("\n") | join(", ")')" \
+      '{step: "test", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null,
+        action: "waiting for main to change: \($c) fail on main at \($s[0:12]) too"}' > "$1.live.tmp" 2>/dev/null && mv -f "$1.live.tmp" "$1.live"
+    : > "$1.idle"; sleep "$LIVE"
+  done
+  rm -f "$1.live" "$1.idle"
+}
 # A card whose every failure is main's (verdicts()) waits in its test step until main's state changes: main is at
 # another commit than <main's commit>, and the run on main there (mainprobe(), one for every card waiting there,
 # issue 1313) does not fail each of <case>... as main's (verdicts(): a case `<file>: <name>`, or a file failing naming
