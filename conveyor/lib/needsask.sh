@@ -127,9 +127,10 @@ rlreopen() {
 #     or released by hand) is asked again, under the same id, once the issue is held and open again.
 #   - An open decision whose issue is no longer held (released by hand), or is closed, is answered NEEDSMAIN_GONE.
 #   - A decision answered NEEDSMAIN_RELEASE whose issue is still held and open has the step taken: the issue goes first in
-#     the control record's `order`, then is released, as `control order` and `control release` do; the release is the
-#     engine's (CONVEYOR_RELEASEBY decision): the ledger does not say whether the owner or auto gave the answer, so
-#     foreman status never credits the owner with it. The decision's id and
+#     the control record's `order`, then is released, as `control order` and `control release` do. An answer
+#     decision.sh marked as the owner's (answer --by owner: the Board's) makes it the owner's release, dated in `released`
+#     (foreman status: "you released it"); any other (`auto decide`'s, or one that names no one) makes it the engine's
+#     (CONVEYOR_RELEASEBY decision), so the owner is never credited with auto's pick. The decision's id and
 #     its asking number (MAINASKS) are then written to the file $ST/mainred-released, and that answer is read no more, so
 #     a later hold of the issue is not released again by the old answer; the answer itself is left as the owner gave it.
 #     The same decision asked again (reopened, or asked again as above) has a new asking number, so its answer is read,
@@ -153,7 +154,7 @@ mainclose() { local dec=$HERE/../.claude/scripts/decision.sh
 }
 needsmain() {
   local dec=$HERE/../.claude/scripts/decision.sh led=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl}
-  local c rows='[]' n cases id ans asked opts e st q why rest=()
+  local c rows='[]' mk lines n cases id ans asked opts e st q why by rb rest=()
   c=$(ctl) || { echo "conveyor: the control record could not be read; no held issue was put to the owner" >&2; return 1; }
   [ ! -e "$led" ] || rows=$(CONVEYOR_MAIN=$MAIN bash "$dec" list) || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
   # A short run (a run that skipped cases) files an issue too, but names no test that fails: left out.
@@ -219,7 +220,16 @@ needsmain() {
       || { echo "conveyor: $ST/mainred-released could not be rewritten" >&2; return 1; }
     rows=$(jq -cs "$MAINASKS"'asks' "$led") || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
   fi
-  while IFS=$'\x1f' read -r id ans asked k; do
+  # The rows decision.sh marked as the owner's answers (answer --by owner, the Board's), from the mark file beside the
+  # ledger. jq reads the file itself (--slurpfile): as one argument, a long history of marks passes the length an argument
+  # may have (128 KiB on Linux), and no decision is read.
+  mk=${led%.jsonl}.answeredby.jsonl; [ -e "$mk" ] || mk=/dev/null
+  lines=$(jq -r --slurpfile m "$mk" '[$m[] | select(.by == "owner") | .row] as $o | .[] | last
+    | (del(._k) as $r | if any($o[]; . == $r) then "owner" else "" end) as $by
+    | [.id, (.answer // ""), .askedAt, ._k, $by] | map(tostring) | join("\u001f")' <<<"$rows") \
+    || { echo "conveyor: the decision ledger $led or $mk could not be read; no mainred decision is read in this pass" >&2; return 1; }
+  while IFS=$'\x1f' read -r id ans asked k by; do
+    [ -n "$id" ] || continue # no decision: the one empty line of an empty list
     # An answer that names no step (leave it held, closed, done) is left as it is.
     [ -z "$ans" ] || [ "$ans" = "$NEEDSMAIN_RELEASE" ] || continue
     n=${id#mainred-}
@@ -232,10 +242,12 @@ needsmain() {
       OPEN) [ "$ans" = "$NEEDSMAIN_RELEASE" ] || continue
         echo "conveyor: decision $id is answered \"$ans\": order $n first, release $n" >&2
         mapfile -t rest < <(jq -r --argjson n "$n" '.order[] | select(. != $n)' <<<"$c")
-        bash "$HERE/conveyor.sh" control order "$n" "${rest[@]}" > /dev/null < /dev/null && CONVEYOR_RELEASEBY=decision bash "$HERE/conveyor.sh" control release "$n" > /dev/null < /dev/null \
+        # The owner's answer (its row marked owner) is the owner's release, dated; any other is the engine's.
+        rb=decision; [ "$by" != owner ] || rb=''
+        bash "$HERE/conveyor.sh" control order "$n" "${rest[@]}" > /dev/null < /dev/null && CONVEYOR_RELEASEBY=$rb bash "$HERE/conveyor.sh" control release "$n" > /dev/null < /dev/null \
           && echo "$id $k" >> "$ST/mainred-released" ;;
     esac
-  done < <(jq -r '.[] | last | [.id, (.answer // ""), .askedAt, ._k] | map(tostring) | join("\u001f")' <<<"$rows")
+  done <<<"$lines"
   return 0
 }
 

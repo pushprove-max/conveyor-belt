@@ -602,10 +602,11 @@ class Handler(Pages, http.server.SimpleHTTPRequestHandler):
         if kept and kept.get('askedAt') == body['askedAt'] and kept.get('answer') == body['answer'] and self.resend(kept, env):
             return
         # An argument list, no shell. --asked-at: decision.sh refuses a decision re-asked or reopened since the page
-        # read it, and one already answered; this write can do nothing else to the ledger.
+        # read it, and one already answered; this write can do nothing else to the ledger. --by owner: decision.sh marks the
+        # row as the owner's (not `auto decide`'s, which names no one), so needsmain() dates the release it asks for.
         try:
             run = run_script(['bash', os.path.join(HERE, 'decision.sh'), 'answer', body['id'], body['answer'],
-                              '--asked-at', body['askedAt']], 15, env)
+                              '--asked-at', body['askedAt'], '--by', 'owner'], 15, env)
         except subprocess.TimeoutExpired:
             return self.reply(500, 'decision.sh did not finish in 15 s; the answer may not be recorded')
         if run.returncode != 0:

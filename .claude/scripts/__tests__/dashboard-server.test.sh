@@ -309,7 +309,11 @@ jq -e 'select(.id == "d-ship") | .answer == "next week"' <(tail -1 "$L2") >/dev/
 pass=$((pass + 1))
 send 200 answer_is_recorded POST /answer "$(ans d-ship 'ship Monday' "$ASKED")" $J "$U" "$H"
 grep -qx 'recorded, ruling r-[0-9]\{8\}-[0-9]\{6\}-1-[0-9a-f]\{6\} logged' "$M/send.out" || fail "answer_is_recorded: reply is '$(cat "$M/send.out")'"
-jq -e 'select(.id == "d-ship") | .answer == "ship Monday" and .answeredAt != null' <(tail -1 "$L") >/dev/null || fail "answer_is_recorded: $(tail -1 "$L")"
+# The row marked owner (decisions.answeredby.jsonl): needsmain() dates a release the owner asked for on the Board; a row
+# with no mark is auto's or unknown.
+jq -e 'select(.id == "d-ship") | .answer == "ship Monday" and .answeredAt != null' <(tail -1 "$L") >/dev/null \
+  && jq -se --argjson r "$(tail -1 "$L")" 'map(select(.row == $r)) | map(.by) == ["owner"]' "${L%.jsonl}.answeredby.jsonl" >/dev/null \
+  || fail "answer_is_recorded (as the owner's): POST /answer $(ans d-ship 'ship Monday' "$ASKED") left $(tail -1 "$L") marked $(cat "${L%.jsonl}.answeredby.jsonl" 2>&1)"
 jq -se 'length == 1 and (.[0] | (.id | test("^r-[0-9]{8}-[0-9]{6}-1-[0-9a-f]{6}$")) and .source == "dashboard" and .pick == "dashboard" and .user == "max"
   and .question == "Ship it?" and .answer == "ship Monday" and .session == null and .cwd == null and .annotations == null
   and (.utc | test("^[0-9-]{10}T[0-9:]{8}Z$")) and (.et | test(" E[DS]T$")))' "$M/rulings.jsonl" >/dev/null \

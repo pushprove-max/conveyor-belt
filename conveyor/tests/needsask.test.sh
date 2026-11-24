@@ -120,8 +120,9 @@ mmain() {
 nmain() { fx_in needsmain; [ "$RC" = 0 ] || fail "needsmain exited $RC: $(cat "$T/$CASE/run.out")"; }
 # mdec <issue>: the ledger's latest snapshot of the issue's decision, as one JSON line.
 mdec() { jq -cs --arg id "mainred-$1" 'map(select(.id == $id)) | last // empty' "$CONVEYOR_LEDGER" 2>/dev/null; }
-# manswer <issue> <answer>: the owner's answer, as the Board records it.
-manswer() { bash "$SRC/../.claude/scripts/decision.sh" answer "mainred-$1" "$2" > /dev/null || fail "the answer $2 to mainred-$1 was not recorded"; }
+# manswer <issue> <answer> [--by owner]: an answer that names no one, as `auto decide` records it; with --by owner, as
+# the Board records the owner's.
+manswer() { bash "$SRC/../.claude/scripts/decision.sh" answer "mainred-$1" "$2" "${@:3}" > /dev/null || fail "the answer $2 to mainred-$1 was not recorded"; }
 
 # Bug (#1167): an issue the nightly whole test filed for a test that fails on main stayed held until the owner released
 # it by hand, and no ledger decision held it, so `auto decide` had nothing to decide. One pass puts one open decision in
@@ -140,8 +141,8 @@ t_needsmain() {
 
 # Bug (#1167): the answer did nothing, so the owner's pick was carried out by hand. Answered "Release it, first in the
 # order", the next pass releases #7 and puts it first in `order`, before #8 that was first. Read again, the answer
-# changes nothing more. Bug (#1627): the release dated #7 as the owner's (released), though auto may have given the
-# answer and the ledger does not say who did, so foreman status could credit the owner for auto's pick.
+# changes nothing more. Bug (#1627): the release dated #7 as the owner's (released), though the answer names no one
+# (auto's are so), so foreman status could credit the owner for auto's pick.
 t_needsrelease() {
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"; mmain 7
   nmain; manswer 7 'Release it, first in the order'

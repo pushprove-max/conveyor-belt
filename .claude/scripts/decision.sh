@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # decision.sh add <id> <question> <proposedDefault> <source> [--options '<JSON array>'] [--reask <what is new>] [--unit <unit>]
-#           | answer <id> <answer> [--asked-at <askedAt> | --correct]
+#           | answer <id> <answer> [--asked-at <askedAt> | --correct] [--by <who>]
 #           | reopen <id> | list | rulings <term>... | growth <unit> <ruling-id> <subject> +<n>...
 #           | digest [<YYYY-MM-DD>] [--no-picks | --picks <ledger>...]
 # digest: the owner's day's page; dashboard.sh writes it beside data.js.
 # answer and answer --correct record the answer in the ledger and do nothing else: no answer is delivered to any pane
 # or session. The Foreman session and the dashboard read answers from the ledger.
+# --by <who>: who gave the answer (the Board's /answer gives `owner`), kept as a line {"by": <who>, "row": <the row it
+# wrote>} in the mark file beside the ledger (<ledger without .jsonl>.answeredby.jsonl), not in the row: an engine of
+# an older version, which refuses a row with a key it does not know, still reads the ledger. A mark names only the row
+# it was written with, so an answer without --by (a correction too) and a reopen, which write new rows, name no one,
+# and a row never credits someone with an answer they did not give. needsmain() (conveyor/lib/needsask.sh) dates a
+# release as the owner's only for a row marked `owner`.
 # add with no --unit records the live unit its id names (Decision 44).
 # growth <unit> <ruling-id> <subject> +<n>...: main records a test-count raise under the owner's grant (Decision 34). It
 # appends an answered row, `Unit <unit>: may it grow <subject> +<n>, ...?` answered `Yes (<ruling-id>)`, the row
@@ -42,7 +48,7 @@
 # Test seams: CONVEYOR_MAIN; XDG_CONFIG_HOME (where the host file is); CONVEYOR_RULING_LOG.
 set -uo pipefail
 DIGEST_USAGE='digest [<YYYY-MM-DD>] [--no-picks | --picks <ledger>...]'
-USAGE="usage: decision.sh add <id> <question> <proposedDefault> <source> [--options '<JSON array>'] [--reask <what is new>] [--unit <unit>] | answer <id> <answer> [--asked-at <askedAt> | --correct] | reopen <id> | list | rulings <term>... | growth <unit> <ruling-id> <subject> +<n>... | $DIGEST_USAGE
+USAGE="usage: decision.sh add <id> <question> <proposedDefault> <source> [--options '<JSON array>'] [--reask <what is new>] [--unit <unit>] | answer <id> <answer> [--asked-at <askedAt> | --correct] [--by <who>] | reopen <id> | list | rulings <term>... | growth <unit> <ruling-id> <subject> +<n>... | $DIGEST_USAGE
 answer (and --correct) records the answer in the ledger only; it is delivered to no pane or session."
 case ${1:-} in
   --help|-h) printf '%s\nexample: decision.sh add push-sample-project-abc123 "Push 3 commits?" "yes" "main, 2026-10-19"\n' "$USAGE"; exit 0 ;;
@@ -97,6 +103,13 @@ fold() {
 }
 
 append() { printf '%s\n' "$1" >> "$L" || die "could not append to $L"; printf '%s\n' "$1"; }
+# answered <by> <row>: append the answered row, after the mark that names who gave it (none for an empty <by>). The mark
+# goes first: a reader between the two writes finds a mark for no row, never the owner's row with no mark.
+answered() {
+  [ -z "$1" ] || printf '%s\n' "$(jq -c --arg by "$1" '{by: $by, row: .}' <<<"$2")" >> "${L%.jsonl}.answeredby.jsonl" \
+    || die "could not append to ${L%.jsonl}.answeredby.jsonl"
+  append "$2"
+}
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # Same question: equal once case, punctuation and spacing are dropped, or a
@@ -218,13 +231,14 @@ case "${1:-}" in
     # --asked-at: answer only the snapshot the caller read. A hook that read
     # its open rows before a reopen must not close the reopened ask.
     # ponytail: whole-second stamps; a reopen in the ask's own second passes.
-    asked="" correct=0
+    asked="" correct=0 by=""
     [ $# -ge 3 ] || usage
     i=4
     while [ $i -le $# ]; do
       case ${!i} in
         --asked-at) j=$((i + 1)); [ $j -le $# ] && [ $correct = 0 ] || usage; asked=${!j}; i=$((i + 2)) ;;
         --correct) [ -z "$asked" ] || usage; correct=1; i=$((i + 1)) ;;
+        --by) j=$((i + 1)); [ $j -le $# ] && [[ ${!j} =~ ^[a-z][a-z0-9-]{0,31}$ ]] || usage; by=${!j}; i=$((i + 2)) ;;
         *) usage ;;
       esac
     done
@@ -236,7 +250,7 @@ case "${1:-}" in
     # --correct: a mis-recorded answer is replaced; the old one stays in history with who and when.
     if [ $correct = 1 ]; then
       jq -e '.answeredAt != null' <<<"$prev" >/dev/null || die "decision $2 is not answered yet; answer it without --correct"
-      append "$(jq -c --arg a "$3" --arg at "$(now)" --arg who "${USER:-unknown}" \
+      answered "$by" "$(jq -c --arg a "$3" --arg at "$(now)" --arg who "${USER:-unknown}" \
         '.history = ((.history // []) + [{who: $who, at: $at, answer: .answer}]) | .answer = $a' <<<"$prev")"
       exit $?
     fi
@@ -246,7 +260,7 @@ case "${1:-}" in
     # A growth grant is read by its ruling id; an answer without one grants nothing, so say so now, never refuse.
     ! jq -e --arg a "$3" '(.question | test("\\bgrow\\b.*[+][0-9]"; "i")) and ($a | test("r-[0-9]{8}-[0-9]{6}-[0-9a-z]+-[0-9a-z]+") | not)' <<<"$prev" >/dev/null \
       || echo "decision: warning: $2 asks to grow a test count and the answer holds no ruling id (r-YYYYMMDD-HHMMSS-...), so new-test-count.sh will read it as no grant" >&2
-    append "$(jq -c --arg a "$3" --arg at "$(now)" '.answeredAt = $at | .answer = $a' <<<"$prev")" ;;
+    answered "$by" "$(jq -c --arg a "$3" --arg at "$(now)" '.answeredAt = $at | .answer = $a' <<<"$prev")" ;;
   reopen)
     # reopen <id>: the owner's answer was not theirs (an Orca banner closed a
     # chat ask). The fresh askedAt keeps a prompt that arrived before the

@@ -40,6 +40,23 @@ decide answer d-open yes --correct >/dev/null 2>"$BOX/err"
 check "--correct on an open decision refuses: there is nothing to correct" "1 1 null" \
   "$? $(grep -c 'not answered yet' "$BOX/err") $(latest d-open | jq -c .answer)"
 
+# needsmain() dates a main-red release as the owner's only when a mark names the decision's latest row as the owner's
+# (--by owner, the Board's). Bugs caught: no mark, so the owner's release was never dated; a correction or a reopen that
+# kept the owner's mark (or a correction --by owner that lost it) credits the owner with an answer someone else gave,
+# or with none; and the mark written into the row, which an engine of an older version refuses as a malformed ledger.
+# whoby <id>: the mark of the decision's latest row, or null.
+whoby() { jq -cs --argjson r "$(latest "$1")" 'map(select(.row == $r) | .by) | last' "$BOX/.claude/metrics/decisions.answeredby.jsonl"; }
+# The fence of the previous engine's decision.sh: the keys it takes in a row.
+OLDKEYS='keys - ["history","options","unit"] == ["answer","answeredAt","askedAt","id","proposedDefault","question","source"]'
+decide answer d-open yes --asked-at 2026-10-15T10:00:00Z --by owner >/dev/null 2>&1
+by="$? $(whoby d-open) $(jq -s "all(.[]; $OLDKEYS)" "$L")"; decide list >/dev/null 2>&1; by="$by $?"
+decide answer d-open no --correct >/dev/null 2>&1; by="$by $(whoby d-open)"
+decide answer d-open yes --correct --by owner >/dev/null 2>&1; by="$by $(whoby d-open) $(latest d-open | jq -c .answer)"
+decide reopen d-open >/dev/null 2>&1; by="$by $(whoby d-open)"
+decide answer d-open yes --by 'Owner X' >/dev/null 2>&1; by="$by $? $(latest d-open | jq -c .answer)"
+check "answer_by_owner: --by owner marks the row (the row keeps the old keys, list reads it), a correction without it drops the mark, one with it marks the corrected row, a reopen drops it, a bad name refuses" \
+  '0 "owner" true 0 null "owner" "yes" null 1 null' "$by"
+
 # The plan author reads the owner's earlier answers before asking again. Bug caught: a question they already answered was
 # written into a plan because nothing showed the author the log at that point.
 RL=$BOX/rulings.jsonl

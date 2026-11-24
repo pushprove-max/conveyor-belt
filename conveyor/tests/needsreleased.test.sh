@@ -118,6 +118,33 @@ t_needsoldcorrect() {
   naputback "a correction to release in the second of the old engine's release of #9"
 }
 
+# Bug it catches (follow-up of #1627): the owner answered mainred-7 "Release it, first in the order" on the Board, and
+# the release was the engine's, so `released` had no date for #7 and foreman status gave no sign of the owner's act. The
+# Board's answer says the owner gave it (--by owner): #7 is released, first in the order, and dated as the owner's.
+t_needsownerrelease() {
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"; mmain 7
+  nmain; manswer 7 'Release it, first in the order' --by owner; nmain
+  jq -e '.held == [] and .order == [7,8] and (.released | keys == ["7"] and (.["7"] | test("^[0-9-]{10}T[0-9:]{8}Z$")))' "$ST/control.json" > /dev/null \
+    || fail "mainred-7, answered \"Release it, first in the order\" by the owner ($(mdec 7), marked $(cat "${CONVEYOR_LEDGER%.jsonl}.answeredby.jsonl" 2>&1)), did not release #7 first in the order dated as the owner's: $(cat "$ST/control.json") $(cat "$T/$CASE/run.out")"
+}
+
+# Bugs it catches (follow-up of #1627, E3 and E4): the owner answered mainred-8 on the Board (--by owner), the mark file
+# holds a long history of the owner's Board answers (over 128 KiB, the length one argument may have on Linux), and
+# `auto decide` answered mainred-7 "Release it, first in the order". With the marks given to jq as one argument, no
+# decision was read and #7 stayed held; with any owner mark taken as a mark of this answer, auto's release of #7 was
+# dated as the owner's. #7 is released, first in the order, with no date; #8 stays held.
+t_needsmarkedother() {
+  local mk
+  setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"; mmain 7 8
+  nmain; manswer 8 'Leave it held' --by owner; mk=${CONVEYOR_LEDGER%.jsonl}.answeredby.jsonl
+  jq -c 'range(800) as $i | .row.answeredAt = "2025-01-01T00:00:00Z" | .row.question += " (\($i))"' "$mk" > "$T/$CASE/pad" \
+    && cat "$T/$CASE/pad" >> "$mk" && [ "$(jq -cs '[.[].row]' "$mk" | wc -c)" -gt 131072 ] \
+    || fail "the owner's marks in $mk were not over 128 KiB: $(wc -c < "$mk")"
+  manswer 7 'Release it, first in the order'; nmain
+  jq -e '.held == [8] and .order == [7,8] and .released == {}' "$ST/control.json" > /dev/null \
+    || fail "mainred-7, answered \"Release it, first in the order\" by auto ($(mdec 7)), with $(wc -l < "$mk") owner marks of other answers, did not release #7 first in the order undated, with #8 held: $(cat "$ST/control.json") $(cat "$T/$CASE/run.out")"
+}
+
 # Bug it catches (R282): when #7 closed, the pass answered mainred-7 as gone; reopened on GitHub and still held, #7 got no
 # new decision, as the id was in the ledger, so it stayed held with nothing put to the owner.
 t_needsmainreopen() {
