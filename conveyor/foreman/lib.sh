@@ -372,10 +372,11 @@ askrun() { # <command>: run where the record is, stopped at the ask limit (exit 
     timeout -k 2 "${ASK_LIMIT:-45}" ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$1" < "${ASK_IN:-/dev/null}"
   else timeout -k 2 "${ASK_LIMIT:-45}" bash -c "$1" < "${ASK_IN:-/dev/null}"; fi
 }
-# A filing ask (card, testissue) prints its issue's link as soon as the issue is made, before it holds it in the record
-# (cardnew(), testissue(), lib/testaction.sh), and ends 0 once it has printed it. Its limit is the ask limit and GHWAIT
-# more, gh_write()'s own limit on gh (lib/issues.sh): stopped while gh waits on GitHub, the issue could be made with no
-# link printed. Failed after the link (stopped at its limit, or the ssh connection lost: 255), the issue is made: the
+# A filing ask (card, testissue) prints its issue's link alone on a line as soon as the issue is made, before it holds it
+# in the record (cardnew(), testissue(), lib/testaction.sh), and ends 0 once it has printed it. Only such a line is the
+# filed issue: a card queued with no GitHub issue prints its title, which can name another issue's link. Its limit is
+# the ask limit and GHWAIT more, gh_write()'s own limit on gh (lib/issues.sh): stopped while gh waits on GitHub, the
+# issue could be made with no link printed. Failed after the link (stopped at its limit, or the ssh connection lost: 255), the issue is made: the
 # ask prints the link, says the hold may not be in, and ends 0, so the Foreman does not file it again. Stopped, or the
 # connection lost, before the link, it says to look for the issue before it is filed again.
 GHWAIT=60
@@ -385,7 +386,7 @@ askfiling() { # <repo> <command>
   [ -z "$out" ] || printf '%s\n' "$out"
   [ "$rc" != 0 ] || return 0
   case $rc in 124 | 137) how="was stopped at its $lim-second limit" ;; 255) how='lost its connection to the host' ;; *) how="ended $rc" ;; esac
-  u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1)
+  u=$(grep -xE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1) # a line that is the link alone: a title can end in one
   if [ -n "$u" ]; then
     echo "foreman: the filing $how after it filed $u: do not file it again. Its hold may not be in: hold it (foreman.sh ask $1 control hold ${u##*/}) unless the owner has said yes, and take its built label off" >&2
     return 0

@@ -88,6 +88,17 @@ t_cardasksshafter() {
   grep -qF 'lost its connection to the host after it filed' "$STUB/ask.err" \
     || fail "ask alpha card 'Add a Rules row' over a lost ssh connection does not say the issue was filed: $(cat "$STUB/ask.err")"
 }
+# Bug this catches (an ssh record): with Foreman orders set to make cards with no GitHub issue, the engine prints the
+# card's title; a title that ended in a parent issue's link, with the connection then lost, was taken for a filed issue,
+# and the Foreman was told to hold that parent issue.
+t_cardasksshtitle() {
+  local a=(card "Fix the row of https://github.com/o/alpha/issues/77" "Make it so.")
+  tassh after; tasetup
+  loop control rules foremanissues=off > /dev/null || fail "control rules foremanissues=off was refused"
+  taask 10 0 - "${a[@]}"
+  [ "$rc" = 255 ] && ! grep -qF 'after it filed' "$STUB/ask.err" && ! grep -qF 'control hold 77' "$STUB/ask.err" \
+    || fail "ask alpha ${a[*]:0:2} with no GitHub issue, over a lost ssh connection, took the title's link for a filed issue (exit $rc): $out $(cat "$STUB/ask.err")"
+}
 # Bug this catches (an ssh record): the connection lost before a link came ended the ask 255 with no word that GitHub
 # may have made the issue.
 t_cardasksshbefore() {
