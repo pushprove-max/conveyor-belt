@@ -110,7 +110,15 @@ no_cause() {
   # but `\\n` is a backslash and an n; the quote that opens the body is the one that closes it.
   if [[ $cmd =~ $hd ]]; then inl=0
   else
-    [[ $cmd =~ (^|[[:space:]])(--body|-b)[[:space:]=]+\$?([\"\']) ]] && bq=${BASH_REMATCH[3]}
+    # `ask <project> testissue <test file> <title> <body>` has no --body (a `--body` in its text is text): its body is
+    # the word after the title. A word is parts with no unquoted space: $'...', '...', "...", a \-escaped character
+    # or a bare one. The last group is the quote that opens the body.
+    local w="((\\\$'([^'\\\\]|\\\\.)*'|'[^']*'|\"([^\"\\\\]|\\\\.)*\"|\\\\.|\\\$[^'\"[:space:]\\\\]|[^[:space:]'\"\\\\\$])+)"
+    if [ "$ti" = 1 ]; then
+      [[ ! $cmd =~ (^|[[:space:];\&|])ask[[:space:]]+${w}[[:space:]]+[\"\']?testissue[\"\']?[[:space:]]+${w}[[:space:]]+${w}[[:space:]]+\$?([\'\"]) ]] \
+        || bq=${BASH_REMATCH[-1]}
+    else [[ $cmd =~ (^|[[:space:]])(--body|-b)[[:space:]=]+\$?([\"\']) ]] && bq=${BASH_REMATCH[3]}
+    fi
     c=${cmd//\\\\/$'\001'}; c=${c//\\n/$'\n'}; c=${c//$'\001'/\\\\}
   fi
   hc=$(unfenced "$inl" "$bq" "$c")

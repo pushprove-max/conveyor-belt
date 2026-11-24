@@ -104,6 +104,12 @@ passes "gh issue create --title 'Fix it' --body-file $T/fenced.md"
 refused "gh issue create --label bug --body \$'  ~~~\n ## Cause\n~~~'"
 # A double quote inside a single-quoted body ends no fence: the heading after it is still inside the block.
 refused "gh issue create --label bug --body \$'~~~\n~~~\"\n ## Cause\n~~~'"
+# Bug (#1510 review): `testissue` has no --body, so either quote ended its fence and this hidden heading counted.
+refused "foreman.sh ask alpha testissue conveyor/x.test.sh 'Slow tests' \$'~~~\n~~~\"\n ## Cause\n~~~'"
+# Bug: a `--body "` written in a testissue body's text set the body quote, so `~~~"` closed the fence again.
+refused "foreman.sh ask alpha testissue conveyor/x.test.sh 'Slow tests' \$'The runner logs --body \"missing\".\n~~~\n~~~\"\n ## Cause\n~~~'"
+# Bug: a title with a backslash-escaped space split into two words, so the body quote was never found.
+refused "foreman.sh ask alpha testissue conveyor/x.test.sh Slow\\ tests \$'~~~\n~~~\"\n ## Cause\n~~~'"
 # A `<<` inside a quoted title is no here-document: the body's written \n are still line breaks, so its fence is read.
 refused "gh issue create --label bug --title 'Fix << handling' --body \$'~~~\n ## Cause\n~~~'"
 # Bug: a fence after the quote of a title ('~~~ handling') opened a block that never closed, so the body's real Cause
