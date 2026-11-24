@@ -124,6 +124,29 @@ t_givewayback() {
     || fail "#7 did not claim a.txt once #8 landed: $w $(cat "$CARDS/c7-7.claim")"
 }
 
+# Bug: a card that gave its files way to wait for main to change (giveway() red, from cardfailed() or mainredhold())
+# never claims again during that wait, yet a card that was not ready (ready()) waited for it as for a holder: the
+# main-red fix card, its change clashing with main, waited on it, and nothing freed either. #7 holds a.txt and gives
+# way red; main then changes line 1, so #8's change (line 1 too) no longer applies: #8 still claims a.txt. Given way
+# for another reason, #7 is still waited for. Bug: a card already away (given way for its review's fix, so no settle()
+# since) that then waits for main kept its claim unmarked (giveway() red returned first), and #8 waited on it for good.
+t_givewayred() {
+  gwcards 7 8; gwchg 7 8s/.*/seven-8/; gwchg 8 1s/.*/eight/
+  gwclaim 7 '"held":true,"gave":3'; gwclaim 8 '"held":false,"passed":false'
+  gweng giveway c7-7 "$CARDS/c7-7" red && [ "$(gwc 7 '[.held, .away, .red]')" = '[false,true,true]' ] \
+    || fail "#7 did not give way red to wait for main: $(cat "$CARDS/c7-7.claim")"
+  sed -i 1s/.*/main/ "$R/a.txt" && git -C "$R" commit -qam "main changes the first line" || fail "main did not move"
+  w=$(gweng claim c8-8 "$CARDS/c8-8" $$) && [ -z "$w" ] && [ "$(gwc 8 .held)" = true ] \
+    || fail "#8, not ready, waited on #7, away to wait for main: $w $(cat "$CARDS/c8-8.claim")"
+  gwclaim 7 '"held":false,"away":true,"gave":1,"for":[],"to":null'; gwclaim 8 '"held":false,"passed":false'
+  w=$(gweng claim c8-8 "$CARDS/c8-8" $$) && [ "$(jq -r .on <<<"$w")" = c7-7 ] || fail "#8, not ready, did not wait on #7, away to be fitted: $w"
+  ! gweng giveway c7-7 "$CARDS/c7-7" red && [ "$(gwc 7 '[.held, .away, .red]')" = '[false,true,true]' ] \
+    || fail "#7, already away, was not marked red to wait for main: $(cat "$CARDS/c7-7.claim")"
+  gwclaim 8 '"held":false,"passed":false'
+  w=$(gweng claim c8-8 "$CARDS/c8-8" $$) && [ -z "$w" ] && [ "$(gwc 8 .held)" = true ] \
+    || fail "#8, not ready, waited on #7, already away and then waiting for main: $w $(cat "$CARDS/c8-8.claim")"
+}
+
 # The owner (2026-11-13): a change that passed its tests and still applies to a main that moved is not tested again.
 # #7's tests pass (tested()) and main gets b.txt, which #7 does not touch, during them (test) or after them (land):
 # settle() fits #7 onto that main with no session and no second review (exit 0, not 2), its tests stand there

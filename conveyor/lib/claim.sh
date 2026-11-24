@@ -35,8 +35,8 @@
 # the lock. A waiting card holds nothing, so two cards never wait on
 # each other. A card that gave way (giveway(): away) holds nothing and waits for no card until it claims the files
 # again: a card that is ready (ready()) goes past it, and one that is not waits for it as for a holder until it is
-# back at its claim (back). Back there and waiting, it waits too for the cards it gave way to (for) that are ready
-# and have not yet claimed the files, and stays away. Its claims keep its count of give-ways (gave). The card that
+# back at its claim (back), unless it gave way to wait for main to change (red). Back there and waiting, it waits too
+# for the cards it gave way to (for) that are ready and have not yet claimed the files, and stays away. Its claims keep its count of give-ways (gave). The card that
 # claims the files of one that gave way is named on it (to: its issue), for the Board and its live record (watch()).
 # A card a batch took (<worktree>.batch: by) waits on the card whose batch it is, which holds its files (gather()),
 # even when it became ready first: going past that card would make land() refuse the batch (PASSED).
@@ -80,15 +80,15 @@ claim() { # <card> <worktree> <the card's pid>; under the lock
     fi
     ready "$2" || notready=1
     # One jq (#595) for the three steps, its first line: the cards whose change applies with this one left out; then,
-    # when this card is not ready and a card away (not back) shares its files, each card away and not back held, and
-    # those back left out; else every card away left out. Then each card left that shares its files, "<held> <card>".
+    # when this card is not ready and a card away (not back, nor red: waiting for main, which the main-red fix card
+    # changes) shares its files, each such card held, the others away left out; else every card away left out. Then each card left that shares its files, "<held> <card>".
     # Ready, it does not wait behind a waiting card that shares its files and is not ready (it may wait on a card away):
     # unready, one a line. When the tests of each passed (rdy: "<card>\t<since>" lines, readysince()), for which goes first.
     { IFS= read -r others && while read -r t o; do
         [ $notready = 1 ] || [ "$t" = true ] || [ ! -d "$CARDS/$o" ] || ready "$CARDS/$o" || unready+=$o$'\n'
         ! t=$(readysince "$CARDS/$o") || rdy+=$o$'\t'$t$'\n'
       done; } < <(jq -rc --argjson a "$apart" --slurpfile m <(printf '%s' "$mine") --argjson n "$notready" '$m[0] as $m | map(select(.card | IN($a[]) | not))
-      | if $n == 1 and any(.[]; .away == true and .back != true and (.paths - (.paths - $m)) != []) then map(if .away != true then . elif .back != true then .held = true else empty end)
+      | if $n == 1 and any(.[]; .away == true and .back != true and .red != true and (.paths - (.paths - $m)) != []) then map(if .away != true then . elif .back != true and .red != true then .held = true else empty end)
         else map(select(.away != true)) end
       | ., (.[] | select((.paths - (.paths - $m)) != []) | "\(.held == true) \(.card)")' <<<"$others")
     [ -n "$others" ] || return 1
@@ -300,13 +300,18 @@ docsonly() { # <patch of its change, by its absolute path> <id>
 # it holds nothing to give. fixing marks a give-way for the
 # fix of the card's failed tests, for the Board; fix one for the fix of its review's findings. red gives way to wait for
 # main to change while main is red (cardland.sh mainredhold(), cardfailed()): not capped, as the card cannot land until
-# main changes and the main-red fix card may need its files: a claim kept then has both wait for good.
+# main changes and the main-red fix card may need its files: a claim kept then has both wait for good. Its claim is
+# marked red until it is back, so a card that is not ready does not wait for it either (claim()).
 GIVEWAY=3
 giveway() { # <card> <worktree> [fixing|fix|red]; under the lock
   local o f='[]' s=false
   [ "${3:-}" != red ] || s=true
   # Gone back for a fit, a review, a fix or a run again, it lands next no more: its landing turn ends (turnon()).
   turnfree "$1"
+  # A claim already away (given way to be fitted, reviewed or fixed: no settle() since) is marked red for the wait too.
+  if [ "$s" = true ] && jq -e '.away == true' "$2.claim" >/dev/null 2>&1; then
+    jq -c '.red = true' "$2.claim" > "$2.claim.new" && mv -f "$2.claim.new" "$2.claim"; return 1
+  fi
   # A card stacked on this one (stackto()) goes on once this one gives way for a fix round (claim()): that give-way is
   # not capped, and a claim already away (given way to be fitted, reviewed or tested again) is marked for that round.
   if [ "${3:-red}" != red ] && jq -e --arg c "$1" 'select(.on == $c)' "$CARDS"/*.stack >/dev/null 2>&1; then
@@ -322,7 +327,7 @@ giveway() { # <card> <worktree> [fixing|fix|red]; under the lock
       and (.paths - (.paths - $me[0].paths)) != []' "$o" >/dev/null 2>&1 && kill -0 "$(jq -r .pid "$o")" 2>/dev/null || continue
     f=$(jq -c --arg c "$(basename "$o" .claim)" '. + [$c]' <<<"$f")
   done
-  jq -c --argjson f "$f" --arg x "${3:-}" '{pid, paths, held: false, away: true, gave: ((.gave // 0) + 1), for: $f, to: null, fixing: ($x == "fixing"), fix: ($x == "fix")}' "$2.claim" > "$2.claim.new" && mv -f "$2.claim.new" "$2.claim"
+  jq -c --argjson f "$f" --arg x "${3:-}" '{pid, paths, held: false, away: true, gave: ((.gave // 0) + 1), for: $f, to: null, fixing: ($x == "fixing"), fix: ($x == "fix"), red: ($x == "red")}' "$2.claim" > "$2.claim.new" && mv -f "$2.claim.new" "$2.claim"
 }
 
 # Stacking (the owner, 2026-11-17: a card waited 4 hours on a holder that looped through its fixes). With batches on
