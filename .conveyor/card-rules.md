@@ -1,8 +1,8 @@
 # Conveyor Belt project rules
 
 - This repository will be public. Never write a person's name, an email that is not a GitHub noreply address, a home
-  path, a private host name or address, a private issue number from another repository, or a ruling id into code,
-  comments, tests, fixtures, docs or commit messages. Test fixtures use example.com addresses, $HOME-relative paths and 192.0.2.x (TEST-NET) addresses.
+  path, a private issue number from another repository, or a ruling id into code, comments, tests, fixtures, docs or
+  commit messages. Test fixtures use example.com addresses and $HOME-relative paths.
 - The plugin is generic: no host-project names (a host project's name, its env names, paths or labels) outside docs that name a
   project only as an example.
 - bash 5.1 + jq for the engine, Python 3 standard library for the Board unless a card names a pinned library; macOS and

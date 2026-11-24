@@ -30,8 +30,8 @@ two files, not here.
 
 These points cost the most when missed:
 
-- The repository is public. A name, a non-noreply email, a home path or a private host in any file fails the privacy
-  check (`conveyor/privacy/check.sh`). Fixtures use example.com, `$HOME`-relative paths and 192.0.2.x.
+- The repository is public. A name, a non-noreply email or a home path in any file fails the privacy check
+  (`conveyor/privacy/check.sh`). Fixtures use example.com and `$HOME`-relative paths.
 - The plugin runs in other people's projects. No host project's names, paths or labels in code.
 - The owner approves every change to how the engine builds, reviews, fixes, tests, lands or pushes (the pack's
   `pipelineFiles`). Change those files only where the issue asks for it.

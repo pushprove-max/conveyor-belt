@@ -59,4 +59,17 @@ for w in 'conveyor/conveyor.test.sh <case>' '.conveyor/test-changed.sh` at most 
 done
 grep -qF "read the last Test step's result" "$T/rules.on" \
   || { echo "not ok - with the rule Only the Test step runs tests on, this project's card rules do not say to read the last Test step's result"; rc=1; }
+# Issue #1649. Bug it catches: the public-repository rule in the card rules or in CLAUDE.md still tells every card to
+# keep private hosts and addresses out and to use 192.0.2.x in fixtures, which the privacy check no longer asks (#1648),
+# or loses one of the items that stay (names, emails, home paths, example.com, $HOME-relative paths).
+rule .conveyor/card-rules.md 'This repository will be public.' "a person's name" 'GitHub noreply address' 'home path' \
+  'private issue number from another repository' 'ruling id' 'example.com' '$HOME-relative paths'
+rule CLAUDE.md 'The repository is public.' 'A name' 'non-noreply email' 'home path' '`conveyor/privacy/check.sh`' \
+  'example.com' '`$HOME`-relative paths'
+for f in .conveyor/card-rules.md CLAUDE.md; do
+  b=$(bullets "$ROOT/$f" | grep -E -- '^- (This|The) repository (will be|is) public\.')
+  for w in 'private host' 'host name or address' '192.0.2'; do
+    ! grep -qiF -- "$w" <<<"$b" || { echo "not ok - $f: the public-repository rule still holds \"$w\": $b"; rc=1; }
+  done
+done
 exit $rc
