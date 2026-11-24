@@ -290,6 +290,17 @@ Each test run gets the factor in the environment variable `CONVEYOR_LOAD_FACTOR`
 test that checks a time budget of its own can multiply its budget by this value. A run that starts inside another
 test run keeps the factor of that run.
 
+## Self-heals expiry
+
+The rule `healsdays` sets how many days an entry of the Self-heals list can go unfixed and unseen
+before it leaves the list. The number is from 1 to 3650, and 30 at first. `conveyor.sh control rules healsdays=<days>` sets it, and so does the row **Self-heals expiry** on the Rules tab.
+
+An entry that a batch card holds does not expire. An entry that nobody has seen again for that many days moves to a record
+of expired entries, with the date and the reason `expired`. A finding that the judge sorts to the list again later takes its entry back from the record. A finding seen again
+while its entry is on the list is of the card that saw it: the next batch card of its area waits until that card lands or
+closes. An entry that a shut batch card gave back counts its days from that day. An entry with no date of its own is dated
+when Conveyor first checks the list, so it stays for the whole number of days. Conveyor checks the list at each turn of its loop.
+
 ## Split large issues
 
 The rule **Split large issues** on the Rules tab sets what Conveyor does with a large issue before it builds it. It

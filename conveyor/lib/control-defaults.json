@@ -20,6 +20,7 @@
     "followupissues": true,
     "releaseissues": true,
     "splitissues": true,
+    "healsdays": 30,
     "never": []
   },
   "model": {

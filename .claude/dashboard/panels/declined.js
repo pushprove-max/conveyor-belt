@@ -211,7 +211,9 @@
   // and a release files one for each area with entries.
   const healsSaid = new Map(); // `${kind}:${repo}:${area}` -> the host's answer, through every redraw
   const docsOf = (x) => ((x.docs && x.docs.entries) || []);
-  const healsOf = (d) => (Array.isArray(d.heals) ? d.heals : []).filter((x) => x && ((x.entries || []).length || x.sorted || docsOf(x).length));
+  const droppedOf = (x) => (Array.isArray(x.dropped) ? x.dropped : []);
+  const droppedOpen = new Set(); // the repos whose "Expired from the list" is open, through every redraw
+  const healsOf = (d) => (Array.isArray(d.heals) ? d.heals : []).filter((x) => x && ((x.entries || []).length || x.sorted || docsOf(x).length || droppedOf(x).length));
   // A list's entries by area, the areas in the snapshot's order (areas: the most entries first), none left empty.
   const byAreas = (areas, entries) => {
     const m = new Map((areas || []).filter((y) => y && y.count > 0).map((y) => [y.area || '', []]));
@@ -220,7 +222,7 @@
     return m;
   };
   const healsEl = (d, ctx) => {
-    const h = ctx.h, lists = healsOf(d).filter((x) => (x.entries || []).length || x.sorted), docs = healsOf(d).filter((x) => docsOf(x).length);
+    const h = ctx.h, lists = healsOf(d).filter((x) => (x.entries || []).length || x.sorted || droppedOf(x).length), docs = healsOf(d).filter((x) => docsOf(x).length);
     const out = [];
     if (lists.length) {
       const all = lists.reduce((n, x) => n + (x.entries || []).length, 0);
@@ -235,6 +237,7 @@
         else sorted.append(h('span', null, 'The sort of the queued follow-ups has not run yet.'));
         box.append(sorted);
         byAreas(x.areas, x.entries).forEach((es, a) => box.append(healsArea(ctx, x, a, es, lists.length > 1, false)));
+        if (droppedOf(x).length) box.append(healsDropped(ctx, x, lists.length > 1));
       });
       out.push(box);
     }
@@ -247,6 +250,24 @@
       out.push(box);
     }
     return out;
+  };
+  // The entries that expired off a project's list (no fix, batch card or sighting for the days its rule sets), the latest
+  // first, kept in a record: the finding, its card and when it expired, and when it was seen again after that, if it was.
+  // A list the user opened stays open when new data draws the panel again (droppedOpen).
+  const healsDropped = (ctx, x, many) => {
+    const h = ctx.h, box = h('details', 'heals-dropped'), ul = h('ul', 'rows heals-rows');
+    box.open = droppedOpen.has(x.repo);
+    box.addEventListener('toggle', () => { if (box.open) droppedOpen.add(x.repo); else droppedOpen.delete(x.repo); });
+    box.append(h('summary', null, `${many ? `${x.repo}: ` : ''}Expired from the list (${droppedOf(x).length})`), ul);
+    droppedOf(x).forEach((e) => {
+      const li = h('li', 'row'), meta = h('p', 'row-meta'), at = e.dropped && e.dropped.time;
+      meta.append(h('span', null, `from card ${e.card} `), ctx.issueLink(e), ' expired ');
+      if (at) meta.append(ctx.since(at, ' ago'));
+      if (e.seen && at && e.seen > at) meta.append(' and was seen again ', ctx.since(e.seen, ' ago'));
+      li.append(h('div', 'row-main', e.finding), meta);
+      ul.append(li);
+    });
+    return box;
   };
   // One area of a project's list (healsEl): its name, count and "File a batch card" (with docs, "File a docs sweep
   // card"), then its entries; each entry names its project when the Board shows more than one (many).

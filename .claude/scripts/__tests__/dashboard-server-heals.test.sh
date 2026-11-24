@@ -36,5 +36,12 @@ check('runs_heals_batch_on_the_record', cmd.startswith('CONVEYOR_MAIN=/r ') and 
 # The Docs list's "File a docs sweep card" (#1563): bug it catches, the docs sweep filed as a self-heals batch card.
 cmd = ds.control_script('heals', ['docs', 'area:engine'], '/m', '2026-11-23', '/r', 'u')
 check('runs_heals_docs_on_the_record', cmd.startswith('CONVEYOR_MAIN=/r ') and cmd.endswith(' heals docs area:engine'), cmd)
+# The Rules tab's "Self-heals expiry" (#1561): bug it catches, `rules healsdays=10` refused as no rule, or a value that is no whole number
+# (shell text, a sign, a leading zero, a fraction) let through to the host's shell.
+rules = lambda args: ds.control_ok({'action': 'rules', 'args': args, 'repo': 'project'})
+for args in (['healsdays=10'], ['healsdays=3650'], ['healsdays=1']):
+    check('takes_rules_%s' % args[0], rules(args), args)
+for args in (['healsdays='], ['healsdays=0'], ['healsdays=010'], ['healsdays=-1'], ['healsdays=1.5'], ['healsdays=1;id'], ['healsdays=10000']):
+    check('refuses_rules_%s' % args[0], not rules(args), args)
 print('dashboard-server-heals: %d passed' % passed)
 EOF

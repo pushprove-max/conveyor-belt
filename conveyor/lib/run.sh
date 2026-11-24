@@ -623,8 +623,8 @@ seatissues() { # <control record> <open issues, a json list>
   jq -r --slurpfile i <(printf '%s' "$2") '$i[0] as $i | .cards // {} | keys[] | select(tonumber | IN($i[].number))' <<<"$1" 2>/dev/null
 }
 turnask() {
-  # The open issues a pick reads, asked before the sample starts, so the sample reads them from ISSUES and never
-  # asks GitHub itself while the pick holds the records' lock.
+  healsexpire # an entry of the self-heals list that nobody fixed or saw again leaves it at every turn, whether or not this turn can pick
+  # The open issues a pick reads, asked before the sample starts, so the sample reads them from ISSUES, never from GitHub under the records' lock.
   urgent=''; [ "$cap" -le 0 ] || urgent=$(urgent) || urgent=''
   red=''; [ "$cap" -le 0 ] || [ "$building" -lt "$cap" ] || red=$(redfix "$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done)") || red=''
   # No card is picked while a session's API-side error is fresh (session(): its session would meet the same outage), nor before the sort (healsonce()).

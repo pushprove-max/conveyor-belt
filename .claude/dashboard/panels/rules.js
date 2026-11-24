@@ -98,7 +98,7 @@
   const SETS = [
     ['models', 'Models', 'Three seats for each card.', ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account']],
     ['capacity', 'Capacity', 'Build slots and machine limits.', ['cap', 'guard', 'atonce', 'suite-mode', 'suite', 'cores']],
-    ['picking', 'Picking', 'Choose which issues enter the belt.', ['build', 'never', 'start', 'dep-guard', 'split', 'pick']],
+    ['picking', 'Picking', 'Choose which issues enter the belt.', ['build', 'never', 'start', 'dep-guard', 'split', 'pick', 'healsdays']],
     ['landing', 'Landing and push', 'Decide how finished cards reach the repository.', ['push', 'land-as', 'pr-merge', 'push-check', 'lint', 'visible']],
     ['standing', 'Done without asking', 'Choose when the Foreman can act on your behalf.', STANDING.map(([k]) => `standing-${k}`).concat([NOISSUE])],
     ['order', 'Issue order', 'Inspect held issues and set the order of pinned work.', ['held', 'order']],
@@ -197,7 +197,7 @@
     if (!c) return null;
     const r = c.rules && typeof c.rules === 'object' ? c.rules : {};
     if (action === 'rules') {
-      return ['rules', a.map((x) => { const k = String(x).split('=')[0]; return `${k}=${isArea(k) ? (list(r.never).includes(k) ? 'off' : 'on') : r[k] === false ? 'off' : 'on'}`; })];
+      return ['rules', a.map((x) => { const k = String(x).split('=')[0]; if (k === 'healsdays') return `${k}=${num(r.healsdays) === null ? 30 : r.healsdays}`; return `${k}=${isArea(k) ? (list(r.never).includes(k) ? 'off' : 'on') : r[k] === false ? 'off' : 'on'}`; })];
     }
     if (action === 'atonce') return num(c.suiteAtOnce) === null ? null : ['atonce', [String(c.suiteAtOnce)]];
     if (action === 'suite-mode') return ['suite-mode', [c.suiteMode === 'parallel' ? 'parallel' : 'serial']];

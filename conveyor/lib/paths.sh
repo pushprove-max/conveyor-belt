@@ -155,11 +155,16 @@ DECLINED=${STATE%/*}/declined.jsonl
 # its own (healsadd(), lib/followups.sh), one line each: {id, time, card (the card it came from, or #<issue> for an
 # issue with no card named), issue, repo, area (the area label, or null), finding, why (the judge's reason), effect
 # (its kind: self-heals, cleanup or already guarded), from: review or sort}, and batched (the issue number or card id of
-# the batch card filed for it: healsbatch(), lib/heals.sh).
+# the batch card filed for it: healsbatch(), lib/heals.sh), and seen (when the finding was last seen again, healsadd()).
 # shellcheck disable=SC2034 # read by lib/followups.sh, lib/heals.sh and lib/snapshot.sh, which conveyor.sh sources beside this file
 SELFHEALS=${STATE%/*}/selfheals.jsonl
+# The entries that left the self-heals list because nobody fixed or saw them again for the rules.healsdays days
+# (healsexpire(), lib/heals.sh): each is its list line with dropped: {time, why: expired}. Kept, not erased: the same
+# finding found again takes its line back to the list (healsadd(), lib/followups.sh). Written under the list's lock.
+# shellcheck disable=SC2034 # read by lib/followups.sh and lib/heals.sh, which conveyor.sh sources beside this file
+HEALSDROPPED=${STATE%/*}/healsdropped.jsonl
 # The docs list: every finding the judge sorted as docs drift, its lines as the self-heals list's (effect: docs drift).
-# No entry expires: a docs sweep card of its area (healsbatch() docs, lib/heals.sh) holds it, filed from the Board or
+# No entry expires (healsexpire() reads the self-heals list alone): a docs sweep card of its area (healsbatch() docs, lib/heals.sh) holds it, filed from the Board or
 # by release-prep.
 # shellcheck disable=SC2034 # read by lib/followups.sh, lib/heals.sh and lib/snapshot.sh, which conveyor.sh sources beside this file
 DOCSDRIFT=${STATE%/*}/docsdrift.jsonl

@@ -388,7 +388,13 @@ card's change. If you shut a batch card before it lands (`conveyor.sh shut`), it
 next batch card. `conveyor.sh retry` of that card takes them again, and is refused when another batch card holds
 them. A later review that rules an entry of a batch card `harm` files no second card for it.
 When the sort moves findings of an audit issue to the self-heals list or the docs list, the issue's body still names them. The card of that issue
-is told that they are out of its scope.
+is told that they are out of its scope, also after they expire (below).
+An entry that no batch card holds and that nobody fixes or sees again leaves the self-heals list after the days of the rule
+`healsdays` (`conveyor.sh control rules healsdays=<days>`; [Self-heals expiry](configuration.md#self-heals-expiry)). A finding is seen again when the judge rules the same
+finding on a later card (its Proof aside), or rules it `harm` because its Proof names the logs: that starts the days over, and
+the entry is then of that card, so the next batch card waits for it. An entry that leaves is kept, with the date and the reason
+`expired`. The Self-heals list on the Declined panel shows these entries under "Expired from the list", and the Rules tab sets the days. A finding that the judge sorts to the list again takes its entry back. An entry
+that a shut batch card gave back counts its days from that day, like any other. The docs list has no expiry.
 Nothing on the list needs you until you file the card. The Foreman's status gives the count and does not report the
 list as something to do.
 A batch card tells its builder to check each `already guarded` entry first. When the check that its reason names no

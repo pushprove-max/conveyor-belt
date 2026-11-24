@@ -169,8 +169,9 @@ healsitems() { # <the open issues json>
         end' <<<"$1"
   } | jq -c -s 'to_entries | map(.value + {n: (.key + 1)}) | .[]'
 }
-# The findings of issues that a sort moved to the self-heals list or the docs list, {issue, finding} a line.
-healslisted() { cat "$SELFHEALS" "$DOCSDRIFT" 2>/dev/null | jq -c 'objects | select(.from == "sort") | {issue, finding}' 2>/dev/null || :; }
+# The findings of issues that a sort moved to the self-heals list or the docs list, {issue, finding} a line, those that
+# expired off the self-heals list too (HEALSDROPPED): the issue's body still holds them, and they are not sorted again.
+healslisted() { cat "$SELFHEALS" "$HEALSDROPPED" "$DOCSDRIFT" 2>/dev/null | jq -c 'objects | select(.from == "sort") | {issue, finding}' 2>/dev/null || :; }
 # The open issues held now, as a JSON list: the control record's held with the holds adopted() adds to it for these
 # issues (a span of startHeld, the filing mark, an author outside the project), as pick reads them. Fails when the
 # control record cannot be read: then no issue may be sorted.
@@ -227,7 +228,8 @@ healsapply() { # <folder>
     e=$(jq -r --argjson n "$n" 'select(.n == $n) | .effect' "$1/rulings" 2>/dev/null | head -n 1)
     why=$(jq -r --argjson n "$n" 'select(.n == $n) | .why' "$1/rulings" 2>/dev/null | head -n 1)
     if [[ $f != *[![:space:]]* ]]; then e=harm why='it holds no finding text, so it stays, as harm'
-    elif [ -z "$e" ]; then e=harm why='the judge gave no line for it that could be read, so it stays, as harm'; fi
+    elif [ -z "$e" ]; then e=harm why='the judge gave no line for it that could be read, so it stays, as harm'
+    elif [ "$e" = harm ]; then healsseen "$from" "$iss" "$f" || echo "conveyor: the self-heals list could not be told that issue $iss's finding was seen again" >&2; fi
     entry='' note='' ok=true
     if [ "$e" != harm ] && [ "$k" != card ] && ! jq -e --argjson i "$iss" 'arrays | index($i) == null' <<<"$h" >/dev/null 2>&1; then
       ok=false note='it is held now, or its holds could not be read, so it stays as it is'
@@ -290,11 +292,14 @@ healssame() { # <folder> <issue>
 }
 # The entry <id> a sort wrote to the self-heals list or the docs list (healsadd(), from: sort; a d id is the docs
 # list's) for a finding it then left where it was (healsapply(), healsmove()): taken off the list, so the finding is
-# not both in its issue and on the list. An entry a batch card holds already stays. Fails when the list cannot be
-# written again.
+# not both in its issue and on the list. An entry a batch card holds already stays; one that was taken back from the
+# dropped record goes back to it. Fails when the list cannot be written again.
 healsdrop() { # <entry id>
   local f=$SELFHEALS; [[ $1 != d* ]] || f=$DOCSDRIFT
   ( flock 9 || exit 1
+    # An entry that came back from the dropped record (healsagain(), lib/followups.sh) goes back to it as it expired, written
+    # before the list is, so a failure between the two leaves it in both, never in neither.
+    [ "$f" != "$SELFHEALS" ] || jq -c --arg id "$1" 'select(type == "object" and .id == $id and .from == "sort" and .batched == null and .expired != null) | .dropped = .expired | del(.expired)' "$f" >> "$HEALSDROPPED" || exit 1
     jq -c --arg id "$1" 'select(type != "object" or .id != $id or .from != "sort" or .batched != null)' "$f" > "$f.new" \
       && mv -f "$f.new" "$f" || { rm -f "$f.new"; exit 1; } ) 9>>"$f.lock"
 }
@@ -336,7 +341,7 @@ healsmove() { # <part item>...
         | [range($l | length) | select($l[.] | ispart) | {issue: $i, finding: (partof($l; .) | one)} | select(IN($ls[]) | not)] | length') || left=''
       msg="Conveyor sorted the findings of this issue by what their failure does. The judge sorted these as no harm, so they moved to the self-heals list (self-heals, cleanup and already guarded), which a batch card of their area fixes, or to the docs list (docs drift, an entry that starts with d), which a docs sweep card of their area fixes: $(jq -r 'map("\(.fid) as \(.entry)") | join(", ")' <<<"$hit")."
       if [ "$left" = 0 ]; then
-        if healsclose "$iss" "$cur" "$msg Every finding of this issue is on the list now, so it is closed. Its body is left as it was."; then closed=true
+        if healsclose "$iss" "$cur" "$msg Every finding of this issue is on the list or has expired from it now, so it is closed. Its body is left as it was."; then closed=true
         else ok=false note='every finding of it is on the list, but it could not be closed, or it changed as it was closed and was opened again, so its findings stay in it'; fi
       elif ! gh_write issue comment "$iss" --body "$msg Its other findings stay in this issue. Its body is left as it was." >/dev/null 2>&1; then
         ok=false note='the comment that names the entries could not be posted, so its findings stay in it'
@@ -356,6 +361,30 @@ healsmove() { # <part item>...
 # (HEALSTRIED, this process's): a sort that could log nothing (the open issues or the holds could not be read) is tried
 # again. The owner runs it again by hand.
 HEALSTRIED=-1000000
+# An entry of the self-heals list that no batch card holds and that was not seen again (healsadd() and healsseen(),
+# lib/followups.sh) for rules.healsdays days leaves the list for HEALSDROPPED, with dropped: {time, why: expired}. Its days
+# count from its seen, else its time; one with neither (written before the list was dated) is dated now (seen), so it stays
+# this run. One a shut batch card gave back (freed, healsfree()) counts its days from the give-back, and expires as the rest
+# do; a retry of that card (healstake()) after that takes it back from HEALSDROPPED. The docs list never expires. Both files change under the list's lock, as healsadd()
+# takes it: an entry seen again in the meantime stays. A turn that finds the lock held checks nothing and tries at the next. The dropped lines are written before the list is, so a failure
+# between the two leaves an entry in both, never in neither. turnask() (lib/run.sh) calls it at each turn, so it says
+# on stderr when it could not check the list.
+healsexpire() { healsexpiry || { echo "conveyor: the self-heals list could not be checked for expired entries" >&2; return 1; }; }
+healsexpiry() {
+  local f=$SELFHEALS
+  [ -s "$f" ] || return 0
+  # Neither the age nor the time is read before the lock is held, so an age saved while this waited is the one used. A
+  # list locked by another writer (healsbatch() holds it across its GitHub calls) is left to the next turn: the loop never waits on it.
+  ( flock -n 9 || exit 0
+    days=$(ctl 2>/dev/null | jq -r '.rules.healsdays // empty') && [ -n "$days" ] && t=$(clock) || exit 1
+    q='def lastat: try ((.seen // .time) | fromdateiso8601) catch null; def open: type == "object" and .batched == null;'
+    jq -c --arg t "$t" --argjson days "$days" "$q"'select(open and lastat != null and lastat + $days * 86400 <= ($t | fromdateiso8601))
+      | . + {dropped: {time: $t, why: "expired"}} | del(.expired)' "$f" > "$f.drop" \
+      && jq -c --arg t "$t" --argjson days "$days" "$q"'if open and lastat == null then .seen = $t
+        elif open and lastat + $days * 86400 <= ($t | fromdateiso8601) then empty else . end' "$f" > "$f.new" \
+      && { [ ! -s "$f.drop" ] || cat "$f.drop" >> "$HEALSDROPPED"; } && { cmp -s "$f" "$f.new" || mv -f "$f.new" "$f"; }
+    rc=$?; rm -f "$f.new" "$f.drop"; exit $rc ) 9>>"$f.lock"
+}
 healsonce() {
   [ ! -s "$HEALSSORT" ] || return 0
   { [ -n "${sorter:-}" ] && jobs -rp | grep -qx "$sorter"; } || [ $((SECONDS - HEALSTRIED)) -lt 60 ] \

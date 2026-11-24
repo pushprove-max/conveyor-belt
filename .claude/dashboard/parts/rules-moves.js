@@ -66,7 +66,7 @@
   // The words of each action's change (words), from its args a.
   const seatWords = (a, action) => `${action === 'model' ? 'builder' : 'reviewer'} ${a[0] === 'default' ? 'back to the default' : a.join(' ')}`;
   const accountWords = (a, action) => `${action === 'account' ? 'account' : 'review account'} ${a.length ? a[0] : 'back to the default'}`;
-  const RULE_WORDS = { followups: 'Follow-ups', push: 'Push on landing', visible: 'Approve visible changes', lint: 'Lint check', split: 'Split large issues', pick: 'Pick settings' };
+  const RULE_WORDS = { followups: 'Follow-ups', push: 'Push on landing', visible: 'Approve visible changes', lint: 'Lint check', split: 'Split large issues', pick: 'Pick settings', healsdays: 'Self-heals expiry days' };
   // The five switches of Cards with no GitHub issue (the record's rules.testissues, foremanissues, followupissues, releaseissues and
   // splitissues): each kind is On while its rule is off.
   const NOISSUE_WORDS = { testissues: 'Tests page actions', foremanissues: 'Foreman orders', followupissues: 'Review follow-ups', releaseissues: 'Release fix cards', splitissues: 'Split parts' };
@@ -153,11 +153,12 @@
     a.forEach((x) => {
       const [key, o] = String(x).split('=');
       if (key === 'split' || key === 'pick') { r.rules[key] = o; return; } // Split large issues and Pick settings keep their word: off, shadow or on
+      if (key === 'healsdays') { r.rules[key] = Number(o); return; } // the days an entry of the Self-heals list may go unfixed and unseen
       if (!isArea(key)) { r.rules[key] = o === 'on'; return; }
       const never = list(r.rules.never).filter((y) => y !== key);
       r.rules.never = o === 'off' ? never.concat([key]) : never;
     });
-    return [r, isArea(k) ? 'never' : ['push', 'visible', 'lint', 'testissues', 'foremanissues', 'followupissues', 'releaseissues', 'splitissues', 'split', 'pick'].includes(k) ? k : 'build'];
+    return [r, isArea(k) ? 'never' : ['push', 'visible', 'lint', 'testissues', 'foremanissues', 'followupissues', 'releaseissues', 'splitissues', 'split', 'pick', 'healsdays'].includes(k) ? k : 'build'];
   }
   // A setting as the record would hold it once the host takes it, and the row it is in; null for an action that is
   // not one setting (release, order, unpin...): those show when the host answers.
@@ -393,11 +394,18 @@
     if (!steps.length) { draw(); say('You cannot queue anything in this group from here.'); return; }
     run(steps, `queued ${plural(free.length + labelled.length, 'issue', 'issues')} of ${g.name}`);
   }
+  // Self-heals expiry: the days an entry of the Self-heals list may go unfixed, unfiled and unseen before it leaves the list
+  // (the record's rules.healsdays, 1 to 3650). An engine whose record has none is sent none. Undo sends the days it had (undoOf).
+  function rulesHeals(el, r) {
+    const days = num(r.healsdays), to = (n) => () => send('rules', [`healsdays=${n}`]);
+    el.append(row('healsdays', 'Self-heals expiry', 'days an entry of the Self-heals list can go unfixed and unseen before it leaves the list',
+      days === null ? S.ctx.h('span', 'board-from', 'needs a newer Conveyor') : stepper('self-heals expiry days', String(days), to(days - 1), to(days + 1), days > 1, days < 3650)));
+  }
   window.DASH_APP.part('rules-moves', function (shared) {
     ({ AREA, RELEASE_MAX, STANDING, ARM_MS, BUILDS, S, ONB, OB, num, list, ctl, plural, prio, pre, isArea,
       areaName, PRMERGE, undoOf, say, run, button, priceWords, draw } = shared);
     return { MOVES, moveOf, moveMark, readOf, moveJudge, moveNote, words, guessed, tabLine, post, send, undoSkips,
       undoLabel, undoAsk, guarded, choice, seg, judgeRare, pickList, stepper, row, wouldSkip, skipWords, fieldLabel, areaWould,
-      held, unlisted, heldUnknown, groups, labelMark, matches, arm, queueOne, queueAll };
+      held, unlisted, heldUnknown, groups, labelMark, matches, arm, queueOne, queueAll, rulesHeals };
   });
 })();

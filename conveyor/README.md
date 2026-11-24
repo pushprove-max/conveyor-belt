@@ -81,8 +81,10 @@ its own, and the Board's Rules tab sets them in its Judge row.
   reviewer or judge from a replay result (`control pick <reviewer|judge> promote <model>`). When the
   promoted cards of a group cost more for each landed card than its default cards, the rule goes back to Shadow
   ([Pick settings](../docs/configuration.md#pick-settings)).
+- `healsdays`: the days an entry of the self-heals list can go unfixed and unseen before it leaves the list, a whole
+  number from 1 to 3650 (`conveyor.sh control rules healsdays=<days>`; [Self-heals expiry](../docs/configuration.md#self-heals-expiry)).
 
-Every rule is on by default, except `push` and `visible`, which are off, and `pick`, which is `off`. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
+Every rule is on by default, except `push` and `visible`, which are off, `pick`, which is `off`, and `healsdays`, which is a number of days, 30 at first. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
 that skips it. A record saved before a rule existed reads that rule at its default.
 
 `conveyor.sh control land-as main|pr` sets Land as (`landAs` in the record; null, the default, is the pack's
@@ -240,6 +242,10 @@ When the judge fails, the review stays as the reviewer wrote it, and its finding
 (docs/cards.md, Harm or self-heals). The loop (`run` or `serve`) runs it by itself and picks no card until
 `healssort.jsonl` of the state folder logs a sort. That file logs each run with each item, its kind and the judge's
 reason. A sort that cannot read the open issues logs nothing, so the loop tries again.
+An entry of the self-heals list that no batch card holds, and that nobody saw again, leaves the list after the days of the Rules setting `healsdays`
+(`conveyor.sh control rules healsdays=<1-3650>`). A finding is seen again when the judge rules the same finding, its Proof aside, of a later card (`harm` for its Proof's logs too), or the sort does: the entry is then of that card.
+The entry moves to `healsdropped.jsonl` of the state folder with the date it left and the reason `expired`. A finding that the sort or a review sorts to the list again later takes its entry back from there. An entry with no date is dated at the loop's next check, so it stays for the age.
+An entry that a shut batch card gave back counts its days from that day, and the docs list never expires. The loop checks the list at each turn.
 
 `conveyor.sh control judge <cli> <model> [effort]` names the judge (a CLI installed on the host, the reviewer's too,
 and any model, listed by that CLI or not: docs/configuration.md, Models); a judge set to the reviewer's CLI is used, of the same

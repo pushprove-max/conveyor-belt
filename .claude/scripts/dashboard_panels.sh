@@ -413,7 +413,8 @@ PANELS_JQ='
         # heals: the self-heals list of each record that has one (the snapshot'"'"'s selfheals), its entries tagged.
         + {heals: [$R[] | . as $r | .snap.selfheals | objects | {repo: $r.repo, repoUrl: ($r.repoUrl // null), sorted: (.sorted // null), areas: (.areas // []),
             entries: [.entries[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null)}],
-            docs: (.docs | objects | {areas: (.areas // []), entries: [.entries[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null)}]}) // {areas: [], entries: []}}]}} end),
+            docs: (.docs | objects | {areas: (.areas // []), entries: [.entries[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null)}]}) // {areas: [], entries: []},
+            dropped: [.dropped[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null), dropped: (.dropped // null), seen: (.seen // null)}]}]}} end),
    # Belt 3D: the belt, Needs you, the queue (next, held, waiting) and Landed today as above, each card with what its
    # lane, bay and details show.
    belt3d: (if $R == null then {error: $cerr, data: null} else

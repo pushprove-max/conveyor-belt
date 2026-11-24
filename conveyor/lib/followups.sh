@@ -436,7 +436,9 @@ GUARDLESS=' (it names no check found at a file:line of the code that stops the o
 # one sorted as docs drift to the docs list (DOCSDRIFT), in place of a follow-up or a fix round, once: its id names the
 # card and the finding (h for the self-heals list, d for the docs list), and the same one written again adds no line:
 # an entry no batch card holds yet takes its kind and reason (a later ruling, as cleanup then already guarded, stands),
-# and one a batch card holds stays as it is. The finding and the reason are each one line; effect is its kind (self-heals when not given). Prints the
+# and one a batch card holds stays as it is. On the self-heals list the same finding of a later card is that entry too,
+# and one found again after it expired takes its line back from HEALSDROPPED; either way the entry is seen now, and
+# the id printed is the entry's own. The finding and the reason are each one line; effect is its kind (self-heals when not given). Prints the
 # entry's id. Callers: judged() (lib/review.sh, from: review), followups() (a finding left at a first card's last
 # review) and healssort() (lib/heals.sh, from: sort).
 healsadd() { # <card> <issue> <area | ""> <why> <finding> <review | sort> [<kind>]
@@ -449,13 +451,15 @@ healsadd() { # <card> <issue> <area | ""> <why> <finding> <review | sort> [<kind
     {card: $c, issue: $n, repo: $repo, area: (if $a == "" then null else $a end), finding: ($f | one), why: ($why | one), effect: $e, from: $from}') \
     && id=$([ "$f" = "$DOCSDRIFT" ] && echo d || echo h)$(jq -j '.card, "\n", .finding' <<<"$l" | git hash-object --stdin | cut -c1-12) && [ ${#id} = 13 ] || return 1
   ( flock 9 || exit 1
-    if grep -qF "{\"id\":\"$id\"," "$f" 2>/dev/null; then
-      # The last ruling stands: an entry no batch card holds yet takes the later kind and reason, and keeps the rest.
-      jq -c --arg id "$id" --argjson l "$l" 'if type == "object" and .id == $id and .batched == null then .effect = $l.effect | .why = $l.why else . end' "$f" > "$f.new" \
-        && mv -f "$f.new" "$f" || { rm -f "$f.new"; exit 1; }
-    else jq -c --arg id "$id" --arg t "$(clock)" '{id: $id, time: $t} + .' <<<"$l" >> "$f"; fi ) 9>>"$f.lock" || return 1
-  printf '%s\n' "$id"
+    t=$(clock) || exit 1
+    rid=$(healsagain "$f" "$id" "$l" "$t" 1); case $? in
+      0) ;;
+      3) rid=$id; jq -c --arg id "$id" --arg t "$t" '{id: $id, time: $t} + .' <<<"$l" >> "$f" || exit 1 ;;
+      *) exit 1 ;;
+    esac
+    printf '%s\n' "$rid" ) 9>>"$f.lock" || return 1
 }
+. "$HERE/lib/healslist.sh" || exit 1 # how a sighting finds its entry (HEALSSAME, healsagain(), healsseen()); after HEALSONE, which it reads as it is sourced
 # The ids the batch card <card> of <issue> may be known by on the self-heals list (batched: its issue number, or for a
 # card with no GitHub issue its Tests page id, healsbatch(), lib/heals.sh), as a JSON list. <card> may be empty.
 healsids() { # <card> <issue>
@@ -465,7 +469,8 @@ healsids() { # <card> <issue>
 }
 # The entries of the self-heals list and the docs list that the batch card or docs sweep card <card> of <issue> holds
 # (healsids()), given back to their list: shut() calls it when it closes that card before it lands, so the next card
-# of their area holds them. Each keeps the cards it was given back by (freed), which healstake() reads. Fails when a
+# of their area holds them. Each keeps the cards it was given back by (freed), which healstake() reads, and counts its days
+# to expire (healsexpire(), lib/heals.sh) from now (seen). Fails when a
 # list cannot be written.
 healsfree() { # <card> <issue>
   local ids f
@@ -473,22 +478,29 @@ healsfree() { # <card> <issue>
     grep -qF '"batched":' "$f" 2>/dev/null || continue
     ids=$(healsids "$1" "$2") || return 1
     ( flock 9 || exit 1
-      jq -c --argjson ids "$ids" 'if type == "object" and .batched != null and (.batched | IN($ids[])) then .freed = ((.freed // []) + [.batched] | unique) | del(.batched) else . end' \
+      jq -c --argjson ids "$ids" --arg t "$(clock)" 'if type == "object" and .batched != null and (.batched | IN($ids[])) then .freed = ((.freed // []) + [.batched] | unique) | del(.batched) | .seen = $t else . end' \
         "$f" > "$f.new" && mv -f "$f.new" "$f" || { rm -f "$f.new"; exit 1; } ) 9>>"$f.lock" || return 1
   done
 }
 # `retry` of a batch card or docs sweep card that shut() gave its entries back for (healsfree()): the card builds its
 # scope again, so it holds those entries again (batched). When another card holds one of them now, the retry is
 # refused (exit 3, nothing changed): both cards would fix the same findings. A card holds the entries of one list
-# only. retry() calls it before it gives the card back. Fails when a list cannot be read or written.
+# only. An entry of the self-heals list that expired (healsexpire(), lib/heals.sh) since the card gave it back comes back from
+# HEALSDROPPED first, so the card holds it and no review lists it again for a second batch card. retry() calls it before it gives the
+# card back. Fails when a list cannot be read or written.
 healstake() { # <card> <issue>
-  local ids f
+  local ids f d
   for f in "$SELFHEALS" "$DOCSDRIFT"; do
-    grep -qF '"freed":' "$f" 2>/dev/null || continue
+    d=$HEALSDROPPED; [ "$f" = "$SELFHEALS" ] || d=/dev/null
+    grep -qF '"freed":' "$f" "$d" 2>/dev/null || continue
     ids=$(healsids "$1" "$2") || return 1
     ( flock 9 || exit 1
       other=$(jq -rs --argjson ids "$ids" '[.[] | objects | select(any(.freed[]?; IN($ids[])) and .batched != null and (.batched | IN($ids[]) | not)) | .batched | tostring] | unique | join(", ")' "$f") || exit 1
       [ -z "$other" ] || { echo "conveyor: the findings of this card are held by the batch card $other now; nothing changed" >&2; exit 3; }
+      if grep -qF '"freed":' "$d" 2>/dev/null; then
+        jq -c --argjson ids "$ids" 'select(type == "object" and any(.freed[]?; IN($ids[]))) | .expired = .dropped | del(.dropped)' "$d" >> "$f" \
+          && jq -c --argjson ids "$ids" 'select(type != "object" or (any(.freed[]?; IN($ids[])) | not))' "$d" > "$d.new" && mv -f "$d.new" "$d" || { rm -f "$d.new"; exit 1; }
+      fi
       jq -c --argjson ids "$ids" 'if type == "object" and .batched == null and any(.freed[]?; IN($ids[])) then .batched = first(.freed[] | select(IN($ids[]))) else . end' \
         "$f" > "$f.new" && mv -f "$f.new" "$f" || { rm -f "$f.new"; exit 1; } ) 9>>"$f.lock" || return
   done

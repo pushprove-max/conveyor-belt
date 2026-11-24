@@ -329,9 +329,9 @@ carried() { # <issue> <worktree>
 # batch card or a docs sweep card fixes them. The builder, the reviewer and the judge read the same brief, so none of
 # them holds the card to them.
 healsbrief() { # <issue>
-  cat "$SELFHEALS" "$DOCSDRIFT" 2>/dev/null | jq -rs --argjson n "$1" --arg repo "$REPO" 'map(objects | select(.from == "sort" and .issue == $n and (.repo // $repo) == $repo)) | select(length > 0)
-    | "# Findings of this issue that are on the self-heals list or the docs list\nThe sort moved the findings below from this issue to the self-heals list, or to the docs list (an entry that starts with d), and said so in a comment on the issue. A batch card or a docs sweep card of their area fixes them, so they are out of this card'"'"'s scope, whatever the issue'"'"'s body or its Done when says: do not fix them here, and a Done-when line is met without them. Name them in the reply as moved.\n"
-      + (map("- \(.finding) (list entry \(.id))") | join("\n"))' 2>/dev/null || :
+  cat "$SELFHEALS" "$HEALSDROPPED" "$DOCSDRIFT" 2>/dev/null | jq -rs --argjson n "$1" --arg repo "$REPO" 'map(objects | select(.from == "sort" and .issue == $n and (.repo // $repo) == $repo)) | select(length > 0)
+    | "# Findings of this issue that are on the self-heals list or the docs list\nThe sort moved the findings below from this issue to the self-heals list, or to the docs list (an entry that starts with d), and said so in a comment on the issue. A batch card or a docs sweep card of their area fixes them, so they are out of this card'"'"'s scope, whatever the issue'"'"'s body or its Done when says: do not fix them here, and a Done-when line is met without them. Name them in the reply as moved. An entry marked expired left the list unfixed; it stays out of this card'"'"'s scope too.\n"
+      + (map("- \(.finding) (list entry \(.id)\(if .dropped then ", expired" else "" end))") | join("\n"))' 2>/dev/null || :
 }
 
 # The follow-ups withdrawn for an issue, as GitHub holds them, one line each: `#<follow-up> <its finding>`. Such a

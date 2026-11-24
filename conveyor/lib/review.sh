@@ -621,6 +621,15 @@ healsput() { # <card> <issue> <area> <the decisions file>
   done < <(jq -r '.d[] | select(.heals) | [.n, .effect, .reason, .finding] | map(tostring | gsub("[[:space:]]+"; " ")) | join("\t")' "$4")
   [ ${#keep[@]} = 0 ] || { jq -c '($ARGS.positional | map(tonumber)) as $k | .d |= map(if .n | IN($k[]) then del(.heals, .effect) else . end) | '"$HEALSEVERY" "$4" --args "${keep[@]}" > "$4.new" && mv -f "$4.new" "$4"; }
 }
+# Each finding of the judge's decisions (<the decisions file>) that goes to no list but is accepted, or found outside the
+# change (harm, as one seen in real logs is), and that an entry of the self-heals list names too, is
+# seen again on <card> of <issue>: the entry's days to expire start over (healsseen(), lib/followups.sh). Fails when the
+# decisions or the list cannot be read or written.
+healsseenput() { # <card> <issue> <the decisions file>
+  local s fs=()
+  s=$(jq -r '.d[] | select((.accept or .outside) and (.heals | not)) | .finding | gsub("[[:space:]]+"; " ")' "$3") || return 1
+  [ -z "$s" ] || { mapfile -t fs <<<"$s"; healsseen "$1" "$2" "${fs[@]}"; }
+}
 # On a card that is no follow-up, the judge's parser (judged()) marks heals each accepted finding of a review whose
 # accepted findings are each of a kind kept off the belt (LISTKINDS), and marks the decisions every. When one of them
 # becomes harm (guardsaid()) or loses its kind (its list entry could not be written: healsput()), the review gives a fix
@@ -721,7 +730,7 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue
     j=$(jq -c '. + {failed: "the review could not be written again with what the judge declined"}' <<<"$j"); stood=1
   else
     # A finding this round does not send to a list leaves it, as an earlier round put it there (healsunput()).
-    healsunput "$1" "$wt.judge.said" || echo "conveyor: cannot take the findings of $1 that the judge no longer sorts for a list off that list" >&2
+    healsunput "$1" "$wt.judge.said" || echo "conveyor: cannot take the findings of $1 that the judge no longer sorts for a list off that list" >&2; healsseenput "$1" "$2" "$wt.judge.said" || echo "conveyor: cannot tell the self-heals list which of the findings of $1 were seen again" >&2
     # Each declined finding goes to the declined list (declined()), with its kind when its reason starts with one.
     while IFS=$'\t' read -r why f kind; do
       declined "$1" "$2" judge "$why" "$f" ${kind:+"$kind"} || echo "conveyor: cannot write the declined findings of $1 to the declined list" >&2

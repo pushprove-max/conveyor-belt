@@ -2,7 +2,7 @@
 // The Declined panel's Self-heals list (issue 1559): the findings the judge sorted as self-heals, by area, each area
 // with "File a batch card". Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
-import { T0, iso, boot, panel, deliver, full, settle, P, cases } from './dashboard-view.helpers.mjs';
+import { T0, iso, boot, panel, deliver, next, full, settle, P, cases } from './dashboard-view.helpers.mjs';
 
 const test = cases(import.meta.url);
 const REPO = 'https://github.com/example/sample-project';
@@ -64,6 +64,35 @@ test('Declined: with no declined line, the panel still shows the Self-heals list
   assert.equal(panel(w, 'declined').dataset.state, 'ready');
   assert.equal(box(w).querySelector('.heals-title').textContent, 'Self-heals list (3)');
   assert.equal(box(w).querySelector('.heals-sorted').textContent, 'The sort of the queued follow-ups has not run yet.');
+});
+
+// Bug it catches (issue 1561): the Board kept no trace of an entry that expired off the list, so the owner could not see
+// what dropped; with expired entries and no live one the panel showed the empty state.
+test('Declined: the Self-heals list shows the entries that expired, with when, and when one was seen again', () => {
+  const w = boot();
+  const data = full();
+  data.panels.declined.data.lines = [];
+  data.panels.declined.data.rest = [];
+  const gone = (over) => entry({ id: 'h0000000000dd', finding: '[P2] lib/a.sh:9 an old wait', dropped: { time: iso(T0 - 86400000), why: 'expired' }, ...over });
+  data.panels.declined.data.heals = [{ repo: 'sample', repoUrl: REPO, sorted: null, areas: [], entries: [], dropped: [gone(), gone({ id: 'h0000000000ee', seen: iso(T0 - 3600000) })] }];
+  deliver(w, data);
+  assert.equal(panel(w, 'declined').dataset.state, 'ready', 'a project with expired entries alone is not empty');
+  const rows = Array.from(box(w).querySelectorAll('.heals-dropped .row'));
+  assert.equal(box(w).querySelector('.heals-dropped summary').textContent, 'Expired from the list (2)');
+  assert.equal(rows[0].querySelector('.row-main').textContent, '[P2] lib/a.sh:9 an old wait');
+  assert.match(rows[0].querySelector('.row-meta').textContent, /^from card c3-63 #63 expired /);
+  assert.equal(rows[0].querySelector('time.since')?.dateTime, iso(T0 - 86400000), 'when it expired');
+  assert.equal(rows[0].textContent.includes('seen again'), false, 'an entry nobody saw again says nothing of it');
+  assert.match(rows[1].querySelector('.row-meta').textContent, /and was seen again /);
+  // Bug it catches: new data drew the panel again and closed the expired list the owner had open.
+  const list = box(w).querySelector('.heals-dropped');
+  assert.equal(list.open, false, 'the expired list starts closed');
+  list.open = true;
+  list.dispatchEvent(new w.Event('toggle'));
+  data.panels.declined.data.heals[0].dropped.unshift(gone({ id: 'h0000000000ff' }));
+  next(w, data);
+  assert.equal(box(w).querySelector('.heals-dropped summary').textContent, 'Expired from the list (3)', 'the new data was drawn');
+  assert.equal(box(w).querySelector('.heals-dropped').open, true, 'the expired list the owner opened stays open');
 });
 
 // Bugs (issue 1563): the docs list is not on the Board, so a docs drift finding leaves the belt with no trace and no
