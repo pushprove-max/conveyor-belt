@@ -204,7 +204,7 @@ flakyrun() { # <worktree> [testfails() of the run again, when it failed]
 # Of a first run's record ({exit, failures}, tests()), the units that did not pass in it ($l: testfails() of the run
 # again) passed in the run again: its file passed, or (a case) the case printed ok. Each as notpassed() names it.
 PASSEDAGAIN='def passedagain($l): if ($l | type) != "object" then [] else
-  [.failures.files[] | .file as $f | if .cases == [] then [$f, null] else .cases[] | [$f, .name] end] + [.failures.timeout.file // empty | [., null]]
+  [.failures.files[] | .file as $f | if .cases == [] then [$f, null] else .cases[] | [$f, .name] end] + [(.failures.stopped // [])[], (.failures.timeout.file // empty) | [., null]]
   | unique | map(select(. as [$f, $c] | IN($l.passed[]?; $f) or ($c != null and any(($l.okcases + $l.passcases)[]?; .file == $f and IN(.cases[]; $c)))))
   | map(if .[1] == null then .[0] else "\(.[0]): \(.[1])" end) end;'
 # The cases the flaky-test record keeps off card test steps (the owner, 2026-11-14): each case it names as

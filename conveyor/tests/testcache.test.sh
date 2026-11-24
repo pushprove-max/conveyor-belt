@@ -60,7 +60,7 @@ t_testcacheskip() {
 t_testcacheinput() {
   cachesetup
   cachestep c8 'echo three >> a.txt' || fail "the second card's test step failed: $(cat "$T/$CASE/c8.out" "$T/$CASE/cards/c8.test" 2>&1)"
-  [ "$(sed -n 's/^c8 //p' "$STUB/ran" | tr '\n' ' ')" = "a.test.sh b.test.sh " ] \
+  [ "$(sed -n 's/^c8 //p' "$STUB/ran" | sort | tr '\n' ' ')" = "a.test.sh b.test.sh " ] \
     || fail "the second card did not run a.test.sh after its input changed: $(cat "$STUB/ran")"
   [ ! -e "$T/$CASE/cards/c8.testlog/cache" ] || fail "the run's log says a file was kept off: $(cat "$T/$CASE/cards/c8.testlog/cache")"
 }

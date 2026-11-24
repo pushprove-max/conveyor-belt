@@ -121,7 +121,7 @@ t_testcountwide() {
 t_testcountfile() {
   # shellcheck disable=SC2034 # TEST_BEFORE is read by watch() (lib/session.sh), which countrun runs
   local got w=$T/$CASE/cards/c7.live TEST_BEFORE=120
-  eval "$(sed -n '/^filecmd() {/,/^}/p' "$SRC/lib/testrun.sh")"
+  . "$SRC/lib/fileeach.sh"; eval "$(sed -n '/^filecmd() {/,/^}/p' "$SRC/lib/testrun.sh")"
   # shellcheck disable=SC2016 # the file command's text, expanded where it runs
   mkdir -p "$T/$CASE" && printf '%s\n' t/a.test.sh t/b.test.sh t/c.test.sh > "$T/$CASE/files" || fail "the list"
   CONVEYOR_TEST_FILELIST=$T/$CASE/files countrun "$(filecmd 'w() { case "$1" in */b.test.sh) while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done ;; esac; }; w' files)" \

@@ -181,7 +181,10 @@ lines of its own, then retry the card.
 ## Which tests a card runs
 
 A card never runs the whole suite. It runs each of its test files alone with the pack's `test.fileCommand`. Conveyor
-adds the path of the file at the end of the command. The suite command (`test.full`) runs when you click Push landed or
+adds the path of the file at the end of the command. The files run at the same time, each on a test slot of its own:
+a file uses the slot of the card's test run when no other file of the card uses it, else a free slot of the pool. A card never
+runs more files at once than it holds slots. A file waits until a slot is free. The output shows each file whole, in
+the order of the card's list. When the time limit of the run stops it, Conveyor stops every file that runs. The suite command (`test.full`) runs when you click Push landed or
 Run full test suite on the Control tab, and in a release. These do not always run every file. When the suite passed
 on the same commit, no test runs. After a suite run on an earlier commit, the files that failed there run again, and
 so do the files that the commits since then add or change, and the files that `test.command` picks for those changes.

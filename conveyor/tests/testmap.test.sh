@@ -98,7 +98,7 @@ t_testmapnode() {
 t_testmapshared() {
   nodemain; nodemap
   maprun 'echo "// more" >> src/util.js'
-  [ "$(cat "$STUB/got")" = $'test/a.test.js\ntest/b.test.js\ntest/c.test.js' ] || fail "a change to the shared helper did not run each test that reads it alone: $(cat "$STUB/got")"
+  [ "$(sort "$STUB/got")" = $'test/a.test.js\ntest/b.test.js\ntest/c.test.js' ] || fail "a change to the shared helper did not run each test that reads it alone: $(cat "$STUB/got")"
   [ "$(cat "$T/$CASE/list")" = '{"mode":"changed","files":3,"by":"map","age":0}' ] || fail "the test line does not say the map chose: $(cat "$T/$CASE/list")"
 }
 

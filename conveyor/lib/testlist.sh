@@ -290,8 +290,14 @@ nofilecmd() { # <worktree> <file>...
 # other log up to the size its `=@ <bytes> <log>` line gives. Each k after the first and after <read> (how many a
 # call before read) is read once. The first that is over writes <worktree>.wide, the count, then the file that ran
 # just before it on a second line; fails when none is, and prints how many it has read.
+# A card's run starts its files side by side (fileeach() side, lib/fileeach.sh), so a file can begin before the one
+# begun ahead of it reports it, and a file whose run ran another file of the list is over at no begin. A runner names
+# a file once a run of it, in one of its logs (as testfails() and suiteprog() read them): a file the logs other than
+# `files` name (`-- ok|FAIL <file>`), all of them together, more times than the run began it (its `== <file>` lines in
+# `files`) was run by another file's run too, whether that run wrote to the same log or to one of its own. That writes
+# <worktree>.wide too: how many times the logs named it, the file, then `begun <n>`, the times the run began it.
 wideeach() { # <worktree> [read]
-  local lg=$1.testlog/files k=0 line pre='' fs=() i n d prev='' rc=1
+  local lg=$1.testlog/files k=0 line pre='' fs=() i n d prev='' rc=1 ls=()
   [ -s "$lg" ] || { echo "${2:-0}"; return 1; }
   while IFS= read -r line; do
     case $line in
@@ -307,6 +313,13 @@ wideeach() { # <worktree> [read]
     esac
     pre+=$line$'\n'
   done < "$lg"
+  [ $rc = 0 ] || mapfile -t ls < <(find "$1.testlog" -maxdepth 1 -type f ! -name files 2>/dev/null | sort)
+  if [ ${#ls[@]} -gt 0 ] && line=$(awk 'FNR == 1 { n++ } { gsub(/\033\[[0-9;]*m/, "") }
+      n == 1 { if (sub(/^== +/, "")) { sub(/[ \r]+$/, ""); if ($0 != "") b[$0]++ }; next }
+      /^-- (ok|FAIL) / { k = $0; sub(/^-- (ok|FAIL) +/, "", k); sub(/[ \r]+$/, "", k); while (sub(/ +[0-9][0-9.]*m?s$/, "", k)) ;
+        if ((k in b) && ++c[k] > b[k]) { printf "%d\n%s\nbegun %d\n", c[k], k, b[k]; exit } }' "$lg" "${ls[@]}" 2>/dev/null) && [ -n "$line" ]; then
+    printf '%s\n' "$line" > "$1.wide"; rc=0
+  fi
   [ $rc = 0 ] || echo "$k"; return $rc
 }
 # One run of the bug-card check in <worktree>: the files <file>... each alone through test.fileCommand, each a `fail`

@@ -17,7 +17,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 loadrun() { # <load per core> factor | run <file>
   local d=$T/$CASE per=$1
   mkdir -p "$d/log"
-  ( . "$SRC/lib/loadfactor.sh"; eval "$(sed -n '/^FILELIMIT=/p; /^LOADSCALE=/p; /^filecmd() {/,/^}/p' "$SRC/lib/testrun.sh")"
+  ( . "$SRC/lib/loadfactor.sh"; . "$SRC/lib/fileeach.sh"; eval "$(sed -n '/^FILELIMIT=/p; /^LOADSCALE=/p; /^filecmd() {/,/^}/p' "$SRC/lib/testrun.sh")"
     unset CONVEYOR_LOAD_FACTOR; p_load() { echo "$((per * $(nproc --all)))"; }
     if [ "$2" = factor ]; then loadfactor; exit; fi
     cd "$d" && echo "$3" > "$d/list" && CONVEYOR_LOAD_FACTOR=$(loadfactor) CONVEYOR_TEST_LOG=$d/log CONVEYOR_TEST_FILELIST=$d/list bash -c "$(filecmd bash files)" > "$d/out" 2>&1 )

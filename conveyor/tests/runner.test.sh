@@ -75,7 +75,7 @@ t_runnermap() {
     '{"area": "b", "test": "tests/other.test.mjs"}' > "$R/areas.json" && git -C "$R" add -A && git -C "$R" commit -qm map || fail "main's map could not be committed"
   tune '.test.map = "areas.json"'
   rnrun 'jq -c "if .file then .area = \"b\" else . end" areas.json > m.new && mv m.new areas.json'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:tests/other.test.mjs\none:tests/runner.test.mjs' ] \
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/other.test.mjs\none:tests/runner.test.mjs' ] \
     || fail "the map's change was not given the tests of both areas (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
 

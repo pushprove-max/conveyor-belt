@@ -468,6 +468,7 @@ The engine runs the test step from `lib/testrun.sh`. These files hold its parts:
 - `lib/donewhen.sh`: the project's checks, the commit trailers, the Done-when check and the review findings.
 - `lib/failat.sh`: where a test failed, read from the stack traces in its output.
 - `lib/loadfactor.sh`: the load factor that a run's time limits grow by.
+- `lib/fileeach.sh`: the run of a card's test files, each alone, side by side on the test slots.
 
 Each run of a card's changed tests writes one `test` line to the card records, `pass` or `fail`, holding:
 

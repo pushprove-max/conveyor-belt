@@ -63,12 +63,16 @@ if ! grep -qxF "$t" <<<"$fresh"; then
 fi
 for c in $cs; do echo "ok $c"; ran="$ran $c"; k=$((k + 1)); done
 f=${f%%"$f"}; c=${PWD##*-}
-# Two cards' runs can go side by side (#7's run alone and #9's, in batchreuseagain): one writer at a time, and a later
-# file adds its cases to its own card's last line, not to the file's last line, which can be the other card's.
+# Two cards' runs can go side by side (#7's run alone and #9's, in batchreuseagain), and a card's own files run side
+# by side too, ending in any order (#1594, E7: file 2 taking the lock before file 1 found no line of its run and
+# dropped its cases): one writer at a time. The run's first file to take the lock adds its line, and keeps the line's
+# number in a folder of the run's log folder (no log: the run reads only the files there, and makes the folder new each
+# run); each file keeps its cases there by its place in the run, and the line is made again from them in that order.
 until mkdir "$STUB/runs.lock" 2>/dev/null; do sleep 0.05; done
-if [ "${CONVEYOR_TEST_N:-1}" = 1 ]; then echo "$c$ran" >> "$STUB/runs"
-else awk -v c="$c" -v r="$ran" '{ l[NR] = $0; if ($1 == c) n = NR } END { for (i = 1; i <= NR; i++) print l[i] (i == n ? r : "") }' \
-  "$STUB/runs" > "$STUB/runs.new" && mv "$STUB/runs.new" "$STUB/runs"; fi
+d=$CONVEYOR_TEST_LOG/stub-runs; mkdir -p "$d"; printf '%s' "$ran" > "$d/${CONVEYOR_TEST_N:-1}"
+[ -s "$d/line" ] || { echo "$c" >> "$STUB/runs"; wc -l < "$STUB/runs" > "$d/line"; }
+awk -v n="$(cat "$d/line")" -v r="$c$(for p in $(ls "$d" | grep -x '[0-9]*' | sort -n); do cat "$d/$p"; done)" '{ print (NR == n ? r : $0) }' \
+  "$STUB/runs" > "$STUB/runs.new" && mv "$STUB/runs.new" "$STUB/runs"
 rmdir "$STUB/runs.lock"
 echo "TESTRUN cases=$k" >> "$L"; [ "$RR" = /dev/null ] || echo "TESTRUN kept=$kept" >> "$L"
 EOF

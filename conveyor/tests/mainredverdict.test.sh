@@ -35,6 +35,20 @@ mrtimeout() { # <fail | timeout>
 t_mainredtimeout() { mrtimeout fail; }
 t_mainredtimeoutmain() { mrtimeout timeout; }
 
+# Bug (#1594, E6): a card's files run side by side, so the time limit stops several at once. testfails() lists them
+# all in stopped, but timeout names only the last: verdicts() read timeout alone, so c.test, stopped beside d.test,
+# never ran on main and got no verdict, and main's red went unrecorded for it.
+t_mainredstopped() {
+  redrunner ''
+  local w=$T/$CASE/cards/c7 out
+  printf 't_two() { false; }\n' > "$R/c.test" && printf 't_three() { false; }\n' > "$R/d.test" && git -C "$R" add c.test d.test \
+    && git -C "$R" commit -qm tests && git -C "$R" worktree add -q --detach "$w" || fail "the card's worktree could not be made"
+  out=$(eng 'TEST_TIMEOUT=1; TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts c7 "$CONVEYOR_CARDS/c7" '"'"'{"files":[],"timeout":{"sec":1,"file":"d.test"},"stopped":["c.test","d.test"]}'"'"' | jq -c .verdicts') \
+    || fail "verdicts failed: $out"
+  [ "$out" = '[{"case":"c.test","verdict":"main"},{"case":"d.test","verdict":"main"}]' ] \
+    || fail "with c.test and d.test both stopped by the time limit, each did not get main's verdict: $out: $(cat "$STUB/redlist" 2>&1)"
+}
+
 # bkinit <text of tests/x.test.sh>: the case's repository, with that test file. bkland <card> <issue> <the rest of its
 # test line, as JSON>: a landing of that card that changes lib/a.sh, with its test line and landed line in the case's
 # card records. bkblame <case>: the card brokeby() blames for <case> of tests/x.test.sh at HEAD, as brokeby() reads them.

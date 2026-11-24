@@ -32,6 +32,21 @@ t_flakyrerun() {
   [ "$(flakyfiled)" = 0 ] || fail "one card's entries filed an issue: $(cat "$STUB/filed")"
 }
 
+# Bug (#1594, E6): a card's files run side by side, so the time limit stops several at once. testfails() lists them
+# all in stopped, but timeout names only the last: flakyrun() read timeout alone, so b.test, stopped beside c.test,
+# got no entry. Each stopped file gets one, both from the first run alone (notpassed) and from a run again that
+# passed them (passedagain).
+t_flakyrunstopped() {
+  setup '[]'
+  local w=$T/$CASE/cards/c20260101T000000-repo-7 v=$T/$CASE/cards/c20260101T000000-repo-8
+  mkdir -p "${w%/*}"
+  jq -cn '{exit: 124, failures: {files: [], timeout: {sec: 1, file: "c.test"}, stopped: ["b.test", "c.test"]}}' | tee "$v.first" > "$w.first"
+  ( STATE=$ST/cards.jsonl; . "$SRC/lib/flaky.sh"; eval "$(sed -n '/^clock() {/p' "$SRC/lib/control.sh"; sed -n "/^NOTPASSED=/,/unique;'\$/p" "$SRC/lib/testrun.sh")"
+    flakyrun "$w" && flakyrun "$v" '{"passed":["b.test","c.test"],"okcases":[],"passcases":[]}' ) || fail "flakyrun failed"
+  [ "$(fl '[.entries[] | [.case, .issue] | join(" ")] | join("|")')" = 'b.test 7|c.test 7|b.test 8|c.test 8' ] \
+    || fail "two files stopped by the time limit did not get one entry each, from the first run and the run again: $(cat "$ST/flaky.json" 2>&1)"
+}
+
 # Bug (O196): flakyrun() gave jq the run again's testfails() as one argument (--argjson); over 128 KiB (here 900 cases
 # still failing, of 200-byte names) Linux refuses to start jq, and `|| return 0` recorded nothing. b.test's flaky
 # passed in the run again: its entry is recorded; c.test's three did not pass, and has none.

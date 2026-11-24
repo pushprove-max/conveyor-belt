@@ -219,7 +219,9 @@ t_slotwholeclock() {
   echo '. "$CONVEYOR_TEST_SLOTS"; slot_pool && slot_whole && echo x >> "$STUB/tests"' > "$STUB/test-cmd"
   wholerun A; wholerun B
   wait_until "[ -e '$d/A.on' ] && [ -e '$d/B.on' ]" || fail "two whole-suite runs did not both get a turn"
-  ( i=0; until grep -qs 'this one waits for its turn' "$d/cards"/*.test || [ $i -ge 600 ]; do i=$((i + 1)); sleep 0.1; done
+  # The wait is said in the file's own log (<worktree>.testlog/files.out/<n>, fileeach(), lib/fileeach.sh) while the
+  # file runs, and in the card's output only once it has ended.
+  ( i=0; until grep -qs 'this one waits for its turn' "$d/cards"/*.test "$d/cards"/*.testlog/files.out/* || [ $i -ge 600 ]; do i=$((i + 1)); sleep 0.1; done
     [ $i -lt 600 ] && : > "$STUB/waited"; sleep 5; : > "$d/A.go" ) & h=$! # sleep: the turns are held past the card's test timeout (3 s), the time the case is about
   teststep "$d/cards/c7" > "$d/step.out" 2>&1; rc=$?
   : > "$d/A.go"; : > "$d/B.go"; wait

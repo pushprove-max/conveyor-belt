@@ -85,7 +85,7 @@ t_narrowdocs() {
   # The fixture ignores .conveyor/: the links and the map are the worktree's, and not part of the change.
   narrowrun 'mkdir -p .conveyor && echo '"'"'{"docs/guide.md": ["lib/tax.test.js"]}'"'"' > .conveyor/test-links.json \
     && echo '"'"'{"docs/guide.md": ["lib/cartsum.test.js"]}'"'"' > .conveyor/map.json && echo y >> docs/guide.md'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:lib/cartsum.test.js\none:lib/tax.test.js' ] \
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:lib/cartsum.test.js\none:lib/tax.test.js' ] \
     || fail "the document's linked and mapped test files were not run (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
 
@@ -98,7 +98,7 @@ t_narrowfixrun() {
   # The fixture ignores .conveyor/: the links are the worktree's, and not part of the change.
   narrowrun 'mkdir -p .conveyor && echo '"'"'{"lib/cartsum.js": ["lib/cartsum.test.js", "lib/tax.test.js"]}'"'"' > .conveyor/test-links.json && echo y >> lib/cartsum.js' \
     '' 'rm -f "$STUB/got"; touch "$STUB/fixed"; echo z >> lib/cartsum.js'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:lib/cartsum.test.js\none:lib/tax.test.js' ] \
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:lib/cartsum.test.js\none:lib/tax.test.js' ] \
     || fail "the run after the fix did not run both linked files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
 
@@ -124,7 +124,7 @@ t_narrowrerun() {
   printf '%s\n' 'echo "one:$1" >> "$STUB/got"; [ "$1" != lib/tax.test.js ] || [ -e "$STUB/once" ] || { touch "$STUB/once"; exit 1; }' > "$STUB/one"
   # The fixture ignores .conveyor/: the links are the worktree's, and not part of the change.
   narrowrun 'mkdir -p .conveyor && echo '"'"'{"lib/cartsum.js": ["lib/cartsum.test.js", "lib/tax.test.js"]}'"'"' > .conveyor/test-links.json && echo y >> lib/cartsum.js'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:lib/cartsum.test.js\none:lib/tax.test.js\none:lib/tax.test.js' ] \
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:lib/cartsum.test.js\none:lib/tax.test.js\none:lib/tax.test.js' ] \
     || fail "the run again did not run the failed file alone (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
 
@@ -228,7 +228,7 @@ t_narrowown() {
 # was read as a shared setup file, so the card ran 5 linked files in place of its own two.
 t_narrowownsetup() {
   caprun 40 lib/card.sh 'mkdir -p tests && echo y >> tests/setup.test.sh && echo y >> tests/setupservice.test.sh'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:tests/setup.test.sh\none:tests/setupservice.test.sh' ] \
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/setup.test.sh\none:tests/setupservice.test.sh' ] \
     && [ "$(jq -c .list "$T/$CASE/cards/c7.rec")" = '{"mode":"changed","files":2,"by":"own"}' ] \
     || fail "the card did not run only its own setup test files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" "$T/$CASE/cards/c7.rec" 2>&1)"
 }
@@ -267,7 +267,7 @@ t_narrowowncases() {
   ownrun "ownedit tests/a.test.sh '^  echo 1\$' '  echo 11' && printf '%s\n' '' '# b three.' 't_bthree() {' '  echo 3' '}' >> tests/b.test.sh \
     && ownedit tests/c.test.sh '^# c two[.]\$' '# c two, said again.'"
   local note='the card ran 3 changed cases of 3 test files'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:tests/a.test.sh|aone\none:tests/b.test.sh|bthree\none:tests/c.test.sh|ctwo' ] \
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/a.test.sh|aone\none:tests/b.test.sh|bthree\none:tests/c.test.sh|ctwo' ] \
     || fail "the card did not run only its three changed cases (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   [ "$(jq -c '.list | [.files, .cases, .why]' "$T/$CASE/cards/c7.rec")" = '[3,[{"file":"tests/a.test.sh","case":"aone"},{"file":"tests/b.test.sh","case":"bthree"},{"file":"tests/c.test.sh","case":"ctwo"}],"'"$note"'"]' ] \
     && grep -qxF "conveyor: $note" "$T/$CASE/cards/c7.test" || fail "the test line does not name the cases it ran: $(cat "$T/$CASE/cards/c7.rec" "$T/$CASE/cards/c7.test")"
@@ -281,7 +281,7 @@ t_narrowowncases() {
 t_narrowownwhole() {
   ownrun "ownedit tests/a.test.sh 'echo a;' 'echo A;' && ownedit tests/a.test.sh '^  echo 1\$' '  echo 11' && ownedit tests/b.test.sh '^  echo 2\$' '  echo 22' \
     && printf '%s\n' 't_done() {' '  echo d' '}' > tests/d.test.sh"
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:tests/a.test.sh|\none:tests/b.test.sh|btwo\none:tests/d.test.sh|' ] \
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/a.test.sh|\none:tests/b.test.sh|btwo\none:tests/d.test.sh|' ] \
     || fail "the changed helper's file or the new file did not run whole (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   [ "$(jq -c '.list | [.files, .cases, .why]' "$T/$CASE/cards/c7.rec")" = '[3,[{"file":"tests/b.test.sh","case":"btwo"}],"the card ran 1 changed case of 1 test file, and 2 test files whole"]' ] \
     || fail "the test line's list: $(cat "$T/$CASE/cards/c7.rec")"
@@ -322,7 +322,9 @@ t_narrowcap() {
   caprun 120 lib/cartsum.js '' '{"card":"c1","issue":1,"step":"test","time":"2026-11-10T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"t100.test.js","cases":[]}],"timeout":null}}' \
     '{"card":"c2","issue":2,"step":"test","time":"2026-11-12T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"t090.test.js","cases":[]}],"timeout":null}}'
   local note='the change adds or changes no test file, so the card ran 5 of the 120 test files linked to it, those that failed most recently first. The run before the push runs all of them.'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = "$(printf 'one:%s\n' t090.test.js t100.test.js t001.test.js t002.test.js t003.test.js)" ] \
+  # The files start in the list's order (their `== ` lines in the run's log), and side by side each writes when it runs.
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = "$(printf 'one:%s\n' t001.test.js t002.test.js t003.test.js t090.test.js t100.test.js)" ] \
+    && [ "$(sed -n 's/^== //p' "$T/$CASE/cards/c7.testlog/files" 2>&1)" = "$(printf '%s\n' t090.test.js t100.test.js t001.test.js t002.test.js t003.test.js)" ] \
     || fail "the card did not run 5 files alone, the recently failed first (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   [ "$(jq -r '.list | "\(.files) \(.left) \(.why)"' "$T/$CASE/cards/c7.rec")" = "5 115 $note" ] && grep -qxF "conveyor: $note" "$T/$CASE/cards/c7.test" \
     || fail "the test step does not say what it ran: $(cat "$T/$CASE/cards/c7.rec" "$T/$CASE/cards/c7.test")"
@@ -339,7 +341,7 @@ trackwhy() {
 # Bug it catches: the cap left files out under the limit. 3 linked files all run, and the list names none left out.
 t_narrowcapunder() {
   caprun 3 lib/cartsum.js
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = "$(printf 'one:t%03d.test.js\n' 1 2 3)" ] \
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = "$(printf 'one:t%03d.test.js\n' 1 2 3)" ] \
     || fail "the card did not run its 3 linked files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   [ "$(jq -c '.list | [.files, .left, .why]' "$T/$CASE/cards/c7.rec")" = '[3,null,null]' ] \
     || fail "a run under the limit names files left out: $(cat "$T/$CASE/cards/c7.rec")"
@@ -362,7 +364,7 @@ t_narrowshared() {
 # in name order; it says 5 of 120, and 1 more because main changed it.
 t_narrowsharedcap() {
   SHAREDRUN=t110.test.js caprun 120 lib/cartsum.js
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = "$(printf 'one:t%03d.test.js\n' 1 2 3 4 5 110)" ] \
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = "$(printf 'one:t%03d.test.js\n' 1 2 3 4 5 110)" ] \
     || fail "SHAREDRUN t110.test.js: the shared file past the cap did not run (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   [ "$(jq -r '.list | "\(.files) \(.left)"' "$T/$CASE/cards/c7.rec")" = '6 114' ] \
     && grep -qF 'card ran 5 of the 120 test files linked to it, those that failed most recently first. The run before the push runs all of them. It also ran 1 more of the linked files, because cards that landed on main changed them.' "$T/$CASE/cards/c7.test" \
@@ -465,7 +467,7 @@ t_narrowfiletimeout() {
   # limit with words after it was not read, and the file had the run's limit alone.
   narrowrun 'printf "%s\n" "# timeout: 1 -- a note after the limit" > a.test.sh && echo y > b.test.sh'
   lim=$(loadlimit 30 300) # under the file's 300 s hang
-  [ $((SECONDS - s)) -lt "$lim" ] && [ "$(cat "$T/$CASE/rc")" != 0 ] && [ "$(cat "$STUB/got" 2>&1)" = $'one:a.test.sh\none:b.test.sh\none:a.test.sh' ] \
+  [ $((SECONDS - s)) -lt "$lim" ] && [ "$(cat "$T/$CASE/rc")" != 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:a.test.sh\none:a.test.sh\none:b.test.sh' ] \
     || fail "the hanging file was not stopped at its limit, or the next file did not run (exit $(cat "$T/$CASE/rc"), $((SECONDS - s))s; limit $lim s: 30 s times the load factor $CASE_LOAD): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   # E3 of #374's review. Bug it catches: the timed-out file was logged as a failed file and the run exited 1, so the
   # check on main counted a timeout there as main's failure, and the mutation check and the Board's Run action, which

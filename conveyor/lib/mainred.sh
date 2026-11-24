@@ -42,9 +42,10 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   local sha='' u um nt m=null mf=null k fst v c f b cmd='' hits='[]' ctl='[]' cf='[]' chg
   packget test.command cmd test.control ctl 2>/dev/null || { cmd=''; ctl='[]'; }
   # The units that still did not pass, each {file, case}: case null for a file that failed naming no case or ran out of
-  # time. The test command itself with no case (testfails()'s name for a run that logged no file) is none: it names no test.
+  # time (each file the time limit stopped: testfails() stopped; timeout names only the last). The test command itself
+  # with no case (testfails()'s name for a run that logged no file) is none: it names no test.
   u=$(jq -c --arg cmd "$cmd" '[.files[] | .file as $f | if .cases == [] then {file: $f, case: null} else .cases[] | {file: $f, case: .name} end]
-    + [.timeout.file // empty | {file: ., case: null}] | unique | map(select(.case != null or .file != $cmd))' <<<"$3" 2>/dev/null) || u='[]'
+    + [(.stopped // [])[], (.timeout.file // empty) | {file: ., case: null}] | unique | map(select(.case != null or .file != $cmd))' <<<"$3" 2>/dev/null) || u='[]'
   # The files the card's own change (staged) adds (issue 323): main has no such file, so it cannot run there. Such a
   # unit is the card's (card) and does not run on main. When the change cannot be read, no unit runs on main: each is
   # the card's.
@@ -59,18 +60,19 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   if [ "$um" != '[]' ]; then
     # The other files of the card's runs (those of its last run, and those its own list names): main's run names them passed.
     k=$(jq -c --rawfile k <(awk -F'\t' '$1 == "pass" || $1 == "ok" || $1 == "fail" {print $2}' "$2.rerun" 2>/dev/null) \
-      '[.passed[]?, .files[]?.file, .okcases[]?.file, .passcases[]?.file, (.timeout.file // empty), ($k | split("\n")[] | select(. != ""))] | unique' <<<"$3") || k='[]'
+      '[.passed[]?, .files[]?.file, .okcases[]?.file, .passcases[]?.file, (.stopped // [])[], (.timeout.file // empty), ($k | split("\n")[] | select(. != ""))] | unique' <<<"$3") || k='[]'
     mainprobe "${2##*/}" "$um" "$u" "$k" "$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null)" || :
   fi
   fst=$(jq -ce objects "$2.first" 2>/dev/null) || fst=null
   v=$(jq -cn --slurpfile u <(printf '%s' "$u") --slurpfile um <(printf '%s' "$um") --slurpfile m <(printf '%s' "${mf:-null}") --slurpfile l <(printf '%s' "${3:-null}") \
     --slurpfile fst <(printf '%s' "$fst") --slurpfile h <(printf '%s' "$hits") --slurpfile ctl <(printf '%s' "${ctl:-[]}") --slurpfile cf <(printf '%s' "$cf") --argjson nt "$nt" \
-    '$u[0] as $u | $um[0] as $um | $m[0] as $m | $l[0] as $l | $fst[0] as $fst | $h[0] as $h | $ctl[0] as $ctl | $cf[0] as $cf | '"$NOTPASSED$PASSEDAGAIN"'
+    '$u[0] as $u | $um[0] as $um | $m[0] as $m | $l[0] as $l | $fst[0] as $fst | $h[0] as $h | $ctl[0] as $ctl | $cf[0] as $cf
+    | [($l.stopped? // [])[], ($l.timeout.file? // empty)] as $lt | [($m.stopped? // [])[], ($m.timeout.file? // empty)] as $mt | '"$NOTPASSED$PASSEDAGAIN"'
     [($fst | select(. != null) | passedagain($l)[] | {case: ., verdict: "flaky"}),
      ($u[] | . as $x | {case: (if .case == null then .file else "\(.file): \(.case)" end), file,
        # A file the card ran out of time in names no case: main failing it with any case, or running out of time there, is main red.
-       verdict: (if $m != null and ($x | IN($um[])) and (any($m.files[]?; .file == $x.file and (if $x.case == null then .cases == [] or $x.file == ($l.timeout.file? // null)
-           else any(.cases[]; .name == $x.case) end)) or ($x.case == null and $x.file == ($l.timeout.file? // null) and $x.file == ($m.timeout.file? // null)))
+       verdict: (if $m != null and ($x | IN($um[])) and (any($m.files[]?; .file == $x.file and (if $x.case == null then .cases == [] or ($x.file | IN($lt[]))
+           else any(.cases[]; .name == $x.case) end)) or ($x.case == null and ($x.file | IN($lt[])) and ($x.file | IN($mt[]))))
          then (if ($x.file | IN($h[]) | not) and ($ctl == [] or $ctl - $cf != []) then "main" else "machine" end) else "card" end)}
        + if $x.file | IN($nt[]) then {why: "no test file: a selection error"} else {} end)]') || v='[]'
   while IFS=$'\t' read -r c f; do mainred "$1" "$c" "$f" "$sha" || :; done < <(jq -r '.[] | select(.verdict == "main") | [.case, .file] | @tsv' <<<"$v")

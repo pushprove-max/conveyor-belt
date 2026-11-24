@@ -53,7 +53,9 @@ These points cost the most when missed:
   `conveyor/conveyor.test.sh`. A new engine file gets one line in `.conveyor/engine-areas.json`, or the map check
   fails.
 - Each area file is a test file of its own. A card's Test step runs each area file it selects in its own process
-  and test slot, with only its chosen cases (the runner given that file's cases), side by side with the others. Its
+  and test slot, with only its chosen cases (the runner given that file's cases), side by side with the others
+  (`conveyor/lib/fileeach.sh`): never more files at once than the slots it holds, and a file with no free slot waits
+  for one. Its output prints each file whole, in the list's order. Its
   result, failures, flaky entries and CPU time name the area file: the case relpass is
   reported under `conveyor/tests/release.test.sh`.
   `bash` on one area file (as `bash conveyor/tests/release.test.sh`) runs it by hand. `conveyor/conveyor.test.sh` runs every case: the
