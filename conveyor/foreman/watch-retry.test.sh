@@ -19,7 +19,7 @@ fail() { echo "FAIL [watch-retry-$CASE]: $*" >&2; exit 1; }
 # auto.standing <kinds> (a json list), its snapshot with card c7 of issue 7 blocked for <block reason> and the standing
 # <snapshot kinds> (default <kinds>: a kept snapshot can list kinds from before the pack changed). The ask seam (lib.sh
 # ask): the snapshot is $T/snap, or times out (exit 124) while $T/slow is there; health is the snapshot's; `retry <n>`
-# is listed in $T/retries, then does <what the retry does>; `auto standing`, `auto reserved` and `auto act review-retry <what>` run the
+# is listed in $T/retries, with the CONVEYOR_REVIEWRETRY it was run with in $T/marks, then does <what the retry does>; `auto standing`, `auto reserved` and `auto act review-retry <what>` run the
 # engine on alpha's main, as on its host, the act into the ruling log $T/rulings.jsonl; any other ask fails.
 fixture() {
   CASE=$1 T=$B/$1
@@ -33,7 +33,7 @@ fixture() {
         blocked: [{card: "c7", issue: 7, since: "2026-11-19T09:58:00Z", reason: $r}], pushError: null, pushFailingSince: null}}' > "$T/snap" \
     || fail "the fixture was not made"
   export CONVEYOR_FOREMAN_ASK="case \$CONVEYOR_CMD in snapshot) [ ! -e $T/slow ] || exit 124; cat $T/snap ;; health) jq -c .health $T/snap ;;
-    'retry '*) echo \"\$CONVEYOR_CMD\" >> $T/retries; $4 ;; 'auto standing'|'auto reserved') cd \"\$CONVEYOR_MAIN\" && bash \"\$ENG\" auto \"\${CONVEYOR_CMD#auto }\" ;;
+    'retry '*) echo \"\$CONVEYOR_CMD\" >> $T/retries; echo \"\${CONVEYOR_REVIEWRETRY:-}\" >> $T/marks; $4 ;; 'auto standing'|'auto reserved') cd \"\$CONVEYOR_MAIN\" && bash \"\$ENG\" auto \"\${CONVEYOR_CMD#auto }\" ;;
     'auto act review-retry '*) cd \"\$CONVEYOR_MAIN\" && bash \"\$ENG\" auto act review-retry \"\${CONVEYOR_CMD#auto act review-retry }\" ;; *) exit 3 ;; esac"
 }
 # One poll; 0 with a wake put, which $wake holds.
@@ -145,7 +145,25 @@ t_unread() {
   [ ! -e "$T/retries" ] || fail "the watcher retried a block whose reserved words could not be read: $(cat "$T/retries")"
 }
 
-cases=(on off fails slow other stale health reserved reservedpack unread)
+# Review-retry gives an issue back once. The first review block of #7 (card c7) is retried, marked as review-retry's
+# (CONVEYOR_REVIEWRETRY, so the host's retry keeps it: commands/retry.sh); the card that retry started (c8, which
+# health marks reviewRetried), blocked by its review again on a narrower finding, is not retried: it wakes as a block,
+# for the owner. Bug it catches (#1589): the watcher remembered the card, not the issue, so each new card of the issue
+# was given back again, with no end.
+t_again() {
+  fixture again '["review-retry"]' "$REVIEW" 'echo "conveyor: issue #7 is queued again"'
+  poll && fail "the first review block woke the Foreman: $wake"
+  [ "$(cat "$T/retries" 2>/dev/null)" = 'retry 7' ] && [ "$(cat "$T/marks")" = 1 ] \
+    || fail "the first block of #7 was not retried as review-retry's: $(cat "$T/retries" "$T/marks" "$T/err" 2>/dev/null)"
+  jq -c --arg r "${REVIEW/did not hold/(the quoted name now) did not hold}" '.health.blocked = [{card: "c8", issue: 7, since: "2026-11-19T10:30:00Z", reason: $r, reviewRetried: true}]' \
+    "$T/snap" > "$T/snap.new" && mv "$T/snap.new" "$T/snap" || fail "the snapshot of the second block was not made"
+  poll || fail "no wake for the second review block of #7: $(cat "$T/err")"
+  grep -qF "alpha: #7 is blocked since 2026-11-19T10:30:00Z: ${REVIEW/did not hold/(the quoted name now) did not hold}" <<<"$wake" \
+    || fail "the wake does not name the second block: $wake"
+  [ "$(wc -l < "$T/retries")" = 1 ] || fail "review-retry gave #7 back a second time: $(cat "$T/retries")"
+}
+
+cases=(on off fails slow other stale health reserved reservedpack unread again)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

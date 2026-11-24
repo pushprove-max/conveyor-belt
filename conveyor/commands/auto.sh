@@ -269,6 +269,9 @@ EOF
       # Split on the unit separator, not on a tab: read joins tabs in a row, so an empty field would move the rest.
       IFS=$'\x1f' read -r id q def asked opts < <(jq -r 'def one: gsub("[\r\n\u001f]+"; " "); [.id, (.question | one), (.proposedDefault | one), .askedAt,
         ((.options // []) | map(one) | join("; "))] | join("\u001f")' <<<"$row")
+      # A card blocked by its review after review-retry gave its issue back once (RRAGAIN, lib/needsask.sh needsask) is the owner's:
+      # review-retry gives an issue back once, so no pass answers it with a second retry.
+      if [[ $id == blocked-* && $q == *") $RRAGAIN, its work kept in "* ]]; then hold "$id" "$q" "review-retry already gave this issue back once"; continue; fi
       # Reserved: a word or phrase of the pack's list, or an item of the owner's profile, in the question, the
       # recommended option or an option. A question the engine cut (lib/needsask.sh askcut) names only the items held when
       # it was put, so its whole text, kept in $AD/asked/<id>.txt, is read too: an item held since then is past the cut.

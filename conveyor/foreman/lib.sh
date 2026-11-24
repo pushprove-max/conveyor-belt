@@ -341,7 +341,10 @@ status_tail() {
 # the host file's ssh target when it names one, else on this machine. testissue runs with the Foreman's mark,
 # CONVEYOR_FOREMAN=1, so it holds the issue it files: the engine on the host, or of another project of the group,
 # cannot see this machine's mark file. ask adds the mark to no other command: a session one starts (a card's) would
-# claim the role. A command run on this machine still inherits the Foreman session's own environment, mark included.
+# claim the role. CONVEYOR_REVIEWRETRY, when set (reviewretry(), watch-conveyor.sh), goes to the command too: the
+# host's `retry` marks its retry as review-retry's (commands/retry.sh). `retry` runs with CONVEYOR_RETRYBY=foreman, so
+# the host does not take a Foreman's retry (a standing rule's, fixed-block) for the owner's own. A command run on this
+# machine still inherits the Foreman session's own environment, mark included.
 # The command reads nothing, unless ASK_IN names a file: the command then reads that file (`auto rulings`).
 # CONVEYOR_FOREMAN_ASK, when set, runs in its place with CONVEYOR_REPO, CONVEYOR_MAIN and CONVEYOR_CMD (the command
 # and its arguments, space-separated) set (the tests' seam).
@@ -351,6 +354,8 @@ host_ssh() { # the host file's ssh target, empty when it names none (or one that
 ask() {
   local cmd target fm=
   [ "$3" != testissue ] || fm='CONVEYOR_FOREMAN=1 '
+  [ -z "${CONVEYOR_REVIEWRETRY:-}" ] || fm+='CONVEYOR_REVIEWRETRY=1 '
+  [ "$3" != retry ] || fm+='CONVEYOR_RETRYBY=foreman '
   if [ -n "${CONVEYOR_FOREMAN_ASK:-}" ]; then CONVEYOR_REPO=$1 CONVEYOR_MAIN=$2 CONVEYOR_CMD="${*:3}" bash -c "$CONVEYOR_FOREMAN_ASK" < "${ASK_IN:-/dev/null}"; return; fi
   # A pin names a version folder, so only a full commit id may (as the shim requires): anything else could name a
   # path outside versions/. A pack that follows the plugin's main runs that machine's current engine (as the shim). A
@@ -367,13 +372,15 @@ ask() {
 # retryable <record> <jq path to its blocked list>: "<card> TAB <issue>" for each card the standing kind review-retry
 # (lib/standing.sh) gives back: blocked by its review (card.sh: "the fix for [P1] ... did not hold after <n> rounds",
 # as the Board's reviewWhy reads it, with any notes block() adds after it in brackets, lib/push.sh), with an issue,
-# whose reason holds no word of `conveyor.sh auto reserved` (case-insensitive), and not reported yet. None unless the
+# whose reason holds no word of `conveyor.sh auto reserved` (case-insensitive), and not reported yet. Not a card that
+# came after a review-retry of its issue (health's reviewRetried, lib/views.sh): review-retry gives an issue back once, and the second
+# block waits for the owner, who has it in Needs you (lib/needsask.sh needsask). None unless the
 # kind is on in the pack now, as `conveyor.sh auto standing` on the record's host reads it: a kept snapshot's standing
 # can be from before the owner turned it off, and health has none. Called by watch-conveyor.sh with its $repo, $main,
 # $errf and $SEEN.
 retryable() {
   local c st res held
-  c=$(jq -r "$2"' | arrays | .[] | objects | select((.issue | numbers) > 0 and (.reason | strings
+  c=$(jq -r "$2"' | arrays | .[] | objects | select((.issue | numbers) > 0 and .reviewRetried != true and (.reason | strings
     | test("\\Athe fix for \\[P[0-3]\\][\\s\\S]* did not hold after [0-9]+ rounds?( \\[[\\s\\S]*\\])?\\z"))) | "\(.card)\t\(.issue)"' <<<"$1" 2>/dev/null \
     | awk -F'\t' -v p="$repo/blocked:" 'FILENAME == ARGV[1] { s[$0]; next } !((p $1) in s)' "$SEEN" -)
   [ -n "$c" ] && st=$(ask "$repo" "$main" auto standing 2>>"${errf:-/dev/null}") && grep -q '^- review-retry:' <<<"$st" || return 0

@@ -36,8 +36,8 @@ Some pack settings that this site names:
   fix you asked for is filed and queued at once), `review-followup` (a follow-up that only finishes or corrects the
   change of a card you approved is queued), `release-check` (a failed check in a release you asked for gets one fix
   card, then the release goes on), `fixed-block` (a card blocked by a cause that a landed fix removed waits on that
-  fix and is tried again) and `review-retry` (a card blocked by its review is tried again, with no wake of the
-  Foreman). Setup writes the list empty, so each kind is off until you turn it on in the Rules tab
+  fix and is tried again) and `review-retry` (a card blocked by its review is tried again, one time for each issue, with no wake
+  of the Foreman). Setup writes the list empty, so each kind is off until you turn it on in the Rules tab
   ([Foreman](foreman.md#standing-yes)).
 - `test.full`: the full test suite, which "Push landed" runs. Setup sets it to your test command. `test.main`: the whole test on main. `test.mainAt`: a time of day, `"HH:MM"` in the machine's local time, after which the whole test on main runs once a day; unset, it runs at most once an hour. `test.survey`: the monthly test-speed survey.
   `test.firstSurvey`: the answer to setup's survey question.

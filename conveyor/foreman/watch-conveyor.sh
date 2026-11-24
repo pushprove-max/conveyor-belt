@@ -9,7 +9,8 @@
 #   a card waiting on the owner's yes       an issue waiting on the owner's yes before its build (health's before)
 #   a card blocked; one blocked by its review, while the standing kind review-retry is on, the watcher retries itself
 #     and wakes nothing for, unless that retry fails, its reason holds a word of auto.reserved or an item of
-#     the owner's profile, or `auto reserved` fails on the record's host (no retry runs then), each of which it leaves
+#     the owner's profile, `auto reserved` fails on the record's host (no retry runs then), or its card came after an
+#     earlier review-retry of its issue (an issue is given back once), each of which it leaves
 #     blocked (retryable(), lib.sh, reviewretry()); a card still blocked 30 minutes after a poll
 #     first listed it, and once an hour after, while no open owner question names its issue (stillblocked()); of a
 #     snapshot made before the last change to the card records, only a card health still lists blocked (recheck()),
@@ -490,7 +491,9 @@ record() { # <repo> <main> <now> <await>
     return 0
   }
   # The standing kind review-retry: each card retryable (lib.sh) gives back is given back with `conveyor.sh retry <issue>` on
-  # the record's host, and the act is logged there (`auto act review-retry`: standinglog). Its line then keeps only
+  # the record's host, marked as review-retry's (CONVEYOR_REVIEWRETRY), so a later card of the issue is not given back
+  # (the host's retry refuses one whose issue review-retry gave back since this snapshot, again(), commands/retry.sh: it
+  # wakes as a failed retry), and the act is logged there (`auto act review-retry`: standinglog). Its line then keeps only
   # its key: it wakes nothing, and is not retried again while a snapshot still lists it. A retry that fails, or an act
   # that is not logged, wakes as the block does, with why. Another block, or a main-red fix card (no issue), wakes as
   # before. The retry is asked with the longer wait SLOW_S: it can take longer than the ask's first wait (#1586), and
@@ -498,7 +501,7 @@ record() { # <repo> <main> <now> <await>
   reviewretry() {
     local card issue out rc note
     while IFS=$'\t' read -r card issue; do
-      out=$(ASK_LIMIT=$SLOW_S ask "$repo" "$main" retry "$issue" 2>&1); rc=$?
+      out=$(CONVEYOR_REVIEWRETRY=1 ASK_LIMIT=$SLOW_S ask "$repo" "$main" retry "$issue" 2>&1); rc=$?
       if [ "$rc" = 0 ]; then
         note=''; out=$(ask "$repo" "$main" auto act review-retry "retried #$issue: its card $card was blocked by its review" 2>&1) \
           || { rc=$?; note="#$issue was retried (review-retry), but the act was not logged"; }

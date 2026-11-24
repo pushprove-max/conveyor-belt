@@ -148,9 +148,9 @@ it up:
 - A blocked card: the wake names the reason. When the snapshot fails or is slow, as when it is made anew from the
   whole card records, the watcher reads `conveyor.sh health`. A blocked card, or a change that waits for your yes,
   then wakes the Foreman from health at that poll, and does not wait for the snapshot. With the standing kind
-  `review-retry` on, a card that its review blocked gives no wake, unless its retry fails, its reason holds a word of
-  `auto.reserved` or an item of your profile, or the watcher cannot read these words on the host
-  ([Standing yes](#standing-yes)).
+  `review-retry` on, a card that its review blocked gives no wake, unless its retry fails, `review-retry` already
+  retried its issue one time, its reason holds a word of `auto.reserved` or an item of your profile, or the watcher
+  cannot read these words on the host ([Standing yes](#standing-yes)).
 - A stopped process: the engine, or the process of a card, is stopped (state T in `ps`). The wake names it. Run
   `kill -CONT` with each process ID of the tree, as the wake gives it, on the machine where the engine runs to resume it.
 - A card that is still blocked 30 minutes after its first wake: the wake says "#N has been blocked for <time> (since
@@ -388,6 +388,12 @@ asking"). The pack keeps the list as `auto.standing`. A kind works whether `/con
   the host (for example, your profile is there but cannot be read), it does not retry the card. It wakes the Foreman
   with the block's reason, and the Foreman puts the card to you. No retry ran, so the Foreman does not say that a
   retry failed.
+  `review-retry` retries an issue one time. When the review blocks a later card of the issue, the watcher and the
+  engine do not retry it. The card goes to you in Needs you, with the two block reasons and the kept patch, and auto
+  does not answer it with a retry. Your own `retry` of the issue (Retry or Fix on the Board, or your answer to that
+  card in Needs you), or a card of the issue that lands, lets `review-retry` retry the issue one more time. Other
+  retries do not: a retry by the Foreman, Hold on the Board, an issue that is opened again or gets your yes, or an
+  answer that auto can give.
 
 Some steps always go to you, whatever kinds are on: new engine behaviour that you did not ask for, a design choice, a
 release that you did not ask for, and anything that `auto.reserved` holds.

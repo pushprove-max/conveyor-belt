@@ -160,7 +160,7 @@ cards() {
 # for now when set: the tests' clock); loop (a `run` or `serve` holds this
 # checkout's loop lock; asking takes that lock for an instant); commit (the Conveyor commit that loop started on, as
 # its loop.json names it; null with no loop, or one that names none); newest (the time of the last line in the records);
-# blocked (card, issue, reason, since) and, apart from those, waiting: the cards blocked for the owner's yes to a visible
+# blocked (card, issue, reason, since; reviewRetried: true on a card that came after review-retry gave its issue back) and, apart from those, waiting: the cards blocked for the owner's yes to a visible
 # change or a lint policy change; stuck (card, issue, step: the last one recorded or begun, since): every open card with neither a new line
 # nor, from the step it is running, any output (its live record's `last`, which a card waiting at its claim brings up
 # to date each poll, and a session its `progress`: a file or commit of its worktree, watch(); a test run's, its start and
@@ -334,9 +334,30 @@ SPLITM='def splitm($all): [$all | group_by(.card)[] | select(any(.step == "split
 # (DEPS) and the issues before their build (SEE) take of a line, and none other: a line's tail, review and token counts
 # were most of the bytes it read. A test line's times only as whether they are an object (untimed).
 HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, followups} + if .step == "worktree" then {pid, started}
-    elif .step == "blocked" then {reason} elif .step == "landed" then {sha} elif .step == "push" then {sha, reason, kind, check, log} elif .step == "pushed" then {pr, flaky}
+    elif .step == "blocked" then {reason, retriedAt, retriedBy} elif .step == "landed" then {sha} elif .step == "push" then {sha, reason, kind, check, log} elif .step == "pushed" then {pr, flaky}
     elif .step == "picked" then {mainRed} elif .step == "lint" then {skipped: any(.lint.commands[]?; .result | strings | startswith("skipped"))} elif .step == "test" then {refused, reused, ended, selected, times: (if (.times | type) == "object" then {} else null end)}
     else {} end'
+# Who gave a blocked card back is kept as its line's retriedBy (retry(), lib/issues.sh): `conveyor.sh retry` sets it
+# (commands/retry.sh), review-retry for the standing review-retry's (needsretry(), lib/needsask.sh, and the Foreman's
+# watcher, reviewretry(), foreman/watch-conveyor.sh, set CONVEYOR_REVIEWRETRY), owner for the owner's own.
+# REVIEWBLOCK: the block reason review-retry takes, a card blocked by its review ("the fix for [P1] ... did not hold
+# after <n> rounds", card.sh, with any notes block() adds after it in brackets, lib/push.sh), as a jq regex.
+# REVIEWAGAIN, a jq def: reviewretried($n; $lines) is the blocked line review-retry last gave back of issue $n, among
+# $lines (its card records and its retried lines), or null. It counts only a review-retry after the owner's own last
+# retry of the issue (retriedBy owner) and after the issue's last landed or pushed line: either resets it. Any other
+# give-back (a reopened or approved issue, a sign-in back, the Board's Hold, a Foreman's command, an answer auto decide
+# may have given) records no owner, so it is no reset. A card of the issue blocked now with such a line came after
+# that retry, so review-retry has already given the issue back once: its block goes to the owner (needsask()) and is
+# not given back (health's reviewRetried, and `retry` itself refuses it under the lock: again(), commands/retry.sh).
+# retrylines($old): the lines of the records (.) and of the retried file ($old) that reviewretried() reads, and no other,
+# as it reads them again for each blocked card.
+# shellcheck disable=SC2034 # REVIEWBLOCK is read by needsretry() and needsask() in lib/needsask.sh
+REVIEWBLOCK='\Athe fix for \[P[0-3]\][\s\S]* did not hold after [0-9]+ rounds?( \[[\s\S]*\])?\z'
+REVIEWAGAIN='def retrylines($old): [.[], $old[] | select(.step | IN("blocked", "landed", "pushed"))];
+  def reviewretried($n; $l): ([$l[] | select(.issue == $n and (.step | IN("landed", "pushed"))) | .time] | max // "") as $land
+  | [$l[] | select(.issue == $n and .step == "blocked" and (.retriedAt | type) == "string" and .retriedAt > $land)] as $r
+  | ([$r[] | select(.retriedBy == "owner") | .retriedAt] | max // "") as $own
+  | [$r[] | select(.retriedAt > $own and .retriedBy == "review-retry")] | max_by(.retriedAt);'
 # When health first read each stopped process of the "<pid> TAB <started> TAB <card>" lines on stdin stopped, as ps
 # gives no time a process stopped: <now> for one not read so before. $STATE.stopped keeps "<pid> TAB <started> TAB
 # <epoch>" for those still stopped, so a stop is dated from the first reading of it, not from the card's last output.
@@ -470,7 +491,7 @@ health() {
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson ghr "$ghr" --arg ghwhy "$ghwhy" --arg ghread "$GHREAD" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson stopped "$stopped" --slurpfile livef <(printf '%s' "${lv:-{\}}") --argjson proof "$(proofs)" --argjson testout "$(testouts)" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" --arg lintyes "$LINTYES" \
     --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson force "$(inforce "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson pushlast "$pl" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
-    --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge}' "$LANDPR" 2>/dev/null) --slurpfile lm <(jq -c 'objects | select(.merged != null and (.number | type) == "number") | {number, merged}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) --rawfile carry <(printf '%s\n' "$carry") "$UNTIMED$SPLITM"'
+    --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge}' "$LANDPR" 2>/dev/null) --slurpfile lm <(jq -c 'objects | select(.merged != null and (.number | type) == "number") | {number, merged}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) --rawfile carry <(printf '%s\n' "$carry") "$UNTIMED$SPLITM$REVIEWAGAIN"'
     $livef[0] as $live | (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
     | ([.[], $old[] | select(.step == "picked") | if (.mainRed | type) == "string" then {key: .card, value: "Main is red (\(.mainRed[0:12]))"}
@@ -490,7 +511,11 @@ health() {
            out: (last as $l | [($live[.[0].card] | select(. != null and $l.step == "start" and $l.of == .step)), ($proof[.[0].card] | select(. != null and $l.step != "start")),
              ($testout[.[0].card] | select(. != null and $l.step == "start" and $l.of == "test") | {last: .})
              | [.last, .progress] | map(strings) | max | strings] | max)}] as $c
-    | ($c | map(select(.end.step == "blocked") | {card, issue, reason: .end.reason, since: .end.time})) as $b
+    # reviewRetried: the card came after review-retry gave its issue back (reviewretried(), above),
+    # so review-retry gives it back no more (foreman/lib.sh retryable()).
+    | retrylines($old) as $all
+    | ($c | map(select(.end.step == "blocked") | {card, issue, reason: .end.reason, since: .end.time}
+        + (if (.issue | numbers) > 0 and reviewretried(.issue; $all) != null then {reviewRetried: true} else {} end))) as $b
     # The card a card waits on, its issue and where it is: its step on the belt, blocked, landed, closed, queued (`retry`
     # gave its issue back) or gone (in no record).
     | def holder($h): ([$c[] | select(.card == $h)] | first) as $r | ([$old[] | select(.card == $h)] | first) as $o

@@ -70,6 +70,14 @@ t_standingretry() {
     || fail "review-retry does not tell the Foreman of a block the watcher could not retry: $out"
   grep -qF 'was retried (review-retry), but the act was not logged' <<<"$out" && grep -qF 'do not say that the retry failed' <<<"$out" \
     || fail "review-retry calls a retry that worked but was not logged a failed retry: $out"
+  # Bug (#1589): the watcher gives an issue back once and leaves its second review block blocked, with no note; a
+  # rule that does not name that wake lets the Foreman retry it by hand, or tell the owner a retry failed. The rule is
+  # the Foreman's instruction text, so its words are what can be checked. The engine gives the issue back too while
+  # the watcher is down, and the host refuses the watcher's late retry of a second block: the rule names both.
+  grep -qF 'a second such block of an issue that review-retry already gave back once (the watcher, or the engine while the watcher was down)' <<<"$out" \
+    && grep -qF 'one that says review-retry already gave the issue back once is such a second block' <<<"$out" \
+    && grep -qF 'Ask the owner for the last three, do not retry them' <<<"$out" \
+    || fail "review-retry does not tell the Foreman to leave an issue's second review block to the owner: $out"
 }
 
 # A card's worktree beside main, its change to the pipeline file a.txt staged, and its NO-GO review with three findings

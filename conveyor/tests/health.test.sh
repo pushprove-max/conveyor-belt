@@ -533,3 +533,25 @@ t_healthunchecked() {
   done >> "$ST/cards.jsonl"
   [ "$(loop health | jq -c .unchecked)" = 1 ] || fail "health does not count the one card that landed with a skipped lint command: $(loop health 2>&1 | jq -c .unchecked)"
 }
+
+# Bug caught (#1589): the Foreman's watcher gave back every card blocked by its review, the card a review-retry had
+# started too, so an issue whose fix did not hold was retried with no end. Health marks reviewRetried on the blocked
+# card that a review-retry of its issue started (`retry` with CONVEYOR_REVIEWRETRY, as the watcher runs it), and no
+# longer once a card of the issue lands after that retry. Only the owner's own retry (#8: `retry` on the command line)
+# resets it (review: any give-back did): not the Board's Hold (#9, then released) nor a Foreman's retry (#10, which
+# foreman/lib.sh ask() marks so).
+t_healthreviewretried() {
+  local n h; setup '[]'
+  hrblock() { landed "$1" | jq -c --arg c "$2" '.card = $c | (.step = "picked"), (.step = "blocked" | .result = "blocked"
+    | .reason = "the fix for [P1] a.txt:1 drops the line did not hold after 1 round")' >> "$ST/cards.jsonl"; }
+  for n in 7 8 9 10; do hrblock "$n" "c0-$n"; CONVEYOR_REVIEWRETRY=1 loop retry "$n" > /dev/null 2>&1 || fail "the review-retry of #$n failed"; hrblock "$n" "c1-$n"; done
+  loop retry 8 > /dev/null 2>&1 && loop unblock 9 --hold > /dev/null 2>&1 && loop control release 9 > /dev/null 2>&1 \
+    && CONVEYOR_RETRYBY=foreman loop retry 10 > /dev/null 2>&1 || fail "the second give-backs of #8, #9 and #10 failed"
+  for n in 8 9 10; do hrblock "$n" "c2-$n"; done
+  h=$(loop health | jq -cS '.blocked | map({key: .card, value: (.reviewRetried // false)}) | from_entries')
+  [ "$h" = '{"c1-7":true,"c2-10":true,"c2-8":false,"c2-9":true}' ] \
+    || fail "health does not mark the cards after a review-retry with no owner's retry since, and only those: $h"
+  landed 7 | jq -c '.card = "c2-7" | .time = "2099-01-01T00:00:00Z"' >> "$ST/cards.jsonl"
+  h=$(loop health | jq -c '[.blocked[] | select(.issue == 7 and .reviewRetried)]')
+  [ "$h" = '[]' ] || fail "health still marks a card of #7 after a card of #7 landed: $h"
+}

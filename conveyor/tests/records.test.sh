@@ -384,12 +384,13 @@ t_retrywait() {
   loop retry 7 >/dev/null || fail "retry of the blocked #7 exited non-zero"
   fx_in 'locked pick retried "" "$(asked)"; locked pick retried "" "$(asked)"'
   [ "$RC" = 0 ] && [ "$(cut -d' ' -f2- "$T/$CASE/run.out")" = '7 true' ] || fail "a run with its max-cards used up did not pick the retried #7 alone, as a retried card (exit $RC): $(cat "$T/$CASE/run.out")"
-  [ "$(jq -c 'del(.retriedAt)' "$S/retried.jsonl")" = "$old" ] && [ -n "$old" ] && ! grep -q "\"card\":\"$card\"" "$S/cards.jsonl" || fail "the blocked card's lines were not moved whole to the retried file"
+  [ "$(jq -c 'del(.retriedAt, .retriedBy)' "$S/retried.jsonl")" = "$old" ] && [ -n "$old" ] && ! grep -q "\"card\":\"$card\"" "$S/cards.jsonl" || fail "the blocked card's lines were not moved whole to the retried file"
   grep -q '"issue":8,' "$S/cards.jsonl" && grep -q '"issue":9,' "$S/cards.jsonl" || fail "retry took another issue's lines"
-  # The blocked line carries when the owner gave the card back: the wait ends there, not at the next pick.
-  [ "$(jq -r 'select(.step == "blocked") | .retriedAt | fromdate | now - . < 60' "$S/retried.jsonl")" = true ] \
-    && [ "$(jq -c 'select(.step != "blocked") | .retriedAt' "$S/retried.jsonl" | sort -u)" = null ] \
-    || fail "the retried blocked line does not say when it was retried: $(cat "$S/retried.jsonl")"
+  # The blocked line carries when the owner gave the card back: the wait ends there, not at the next pick. It also
+  # says the owner gave it back (retriedBy owner), which lets review-retry give the issue back once more (reviewretried()).
+  [ "$(jq -r 'select(.step == "blocked") | (.retriedAt | fromdate | now - . < 60) and .retriedBy == "owner"' "$S/retried.jsonl")" = true ] \
+    && [ "$(jq -c 'select(.step != "blocked") | [.retriedAt, .retriedBy]' "$S/retried.jsonl" | sort -u)" = '[null,null]' ] \
+    || fail "the retried blocked line does not say when it was retried, or that the owner retried it: $(cat "$S/retried.jsonl")"
   loop check || fail "the records do not check after a retry"
 }
 

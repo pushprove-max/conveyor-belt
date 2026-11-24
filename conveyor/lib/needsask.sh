@@ -7,12 +7,16 @@
 # the cards.
 #   - Each card blocked with a kept patch (an issue's card, not one stopped for the owner's yes) that has no decision yet
 #     gets one, id `blocked-<card>`, once: its recommended option is NEEDSASK_RETRY, the others NEEDSASK_FRESH and
-#     NEEDSASK_HELD.
+#     NEEDSASK_HELD. A card blocked by its review after review-retry gave its issue back (reviewretried(), lib/views.sh) is
+#     asked as RRAGAIN (lib/standing.sh) says, with its kept patch and both block reasons, this one and the one
+#     review-retry gave back: auto decide leaves that decision to the owner.
 #   - An open decision whose card is no longer blocked with its kept patch (retried or shut by hand, or landed some other
 #     way) is answered NEEDSASK_GONE: a closed decision names no step, so it is never taken later.
 #   - A decision answered NEEDSASK_RETRY or NEEDSASK_FRESH whose card is still blocked has the step taken, as
 #     `conveyor.sh retry <issue>` (with --fresh for the second) does; the card then leaves the blocked cards, so a
-#     later pass takes no second step. NEEDSASK_HELD takes none.
+#     later pass takes no second step. NEEDSASK_HELD takes none. The retry is the owner's own (CONVEYOR_RETRYBY owner,
+#     commands/retry.sh), which lets review-retry give the issue back once more, only for a question asked as RRAGAIN
+#     says: auto decide never answers one (commands/auto.sh). Another answer may be auto decide's (decision).
 # Test seam: CONVEYOR_LEDGER (decision.sh's).
 NEEDSASK_RETRY='Retry keeping the work' NEEDSASK_FRESH='Fresh retry' NEEDSASK_HELD='Leave it held'
 NEEDSASK_GONE='Closed: the card is no longer blocked with its work kept'
@@ -43,14 +47,17 @@ askkeep() {
 }
 needsask() {
   local dec=$HERE/../.claude/scripts/decision.sh led=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl}
-  local cs rows='[]' c n k r e id ans asked opts q
+  local cs old rows='[]' c n k r r1 e id ans asked by opts q h
   local -A issue=()
   # The cards blocked now: a card's last closing line is a blocked one, so a card retried (its lines moved to the
   # retried file), shut or landed is not here. Not a card of a main-red fix (issue 0), nor one stopped for the owner's yes.
-  cs=$(stdb ask lines cards) || { echo "conveyor: the card records could not be read; no blocked card was put to the owner" >&2; return 1; }
+  cs=$(stdb ask lines cards) && old=$(stdb ask lines retried) || { echo "conveyor: the card records could not be read; no blocked card was put to the owner" >&2; return 1; }
   [ ! -e "$led" ] || rows=$(CONVEYOR_MAIN=$MAIN bash "$dec" list) || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
-  while IFS=$'\t' read -r c n k r; do
+  while IFS=$'\t' read -r c n k r r1; do
     [ -s "$ST/$k/$c.patch" ] && issue[$c]=$n || continue
+    # r1: the block review-retry gave back, when this card came after that retry: both reasons are asked.
+    h="Card $c (#$n) is blocked with its work kept:"
+    [ -z "$r1" ] || { h="Card $c (#$n) $RRAGAIN, its work kept in $ST/$k/$c.patch:"; r="this block: $r; the block review-retry gave back: $r1"; }
     if jq -e --arg id "blocked-$c" 'any(.[]; .id == $id)' <<<"$rows" >/dev/null; then
       askkeep "blocked-$c" "$r" || echo "conveyor: the whole block reason of decision blocked-$c could not be kept in $ST/auto/asked" >&2
       continue
@@ -58,18 +65,25 @@ needsask() {
     # --reask: decision.sh refuses as a repeat a question like one answered in the last 24 hours (the issue's earlier
     # card, retried by hand): this card is a new one, and its id is the check that it is put once.
     opts=$(jq -cn --arg a "$NEEDSASK_RETRY" --arg b "$NEEDSASK_FRESH" --arg c "$NEEDSASK_HELD" '[$a, $b, $c]')
-    q=$(askcut "blocked-$c" "$r") || { echo "conveyor: decision blocked-$c was not put to the owner: the whole block reason could not be kept in $ST/auto/asked" >&2; continue; }
-    e=$(CONVEYOR_MAIN=$MAIN bash "$dec" add "blocked-$c" "Card $c (#$n) is blocked with its work kept: $q. What should the engine do with it?" \
+    # The two reasons after a review-retry are asked whole, not cut (askcut()): card.sh names a new P0 before the
+    # finding whose fix did not hold, so a cut can drop that finding. auto decide holds such a question whatever it holds.
+    if [ -n "$r1" ]; then askkeep "blocked-$c" "$r" && q=$r; else q=$(askcut "blocked-$c" "$r"); fi \
+      || { echo "conveyor: decision blocked-$c was not put to the owner: the whole block reason could not be kept in $ST/auto/asked" >&2; continue; }
+    e=$(CONVEYOR_MAIN=$MAIN bash "$dec" add "blocked-$c" "$h $q. What should the engine do with it?" \
       "$NEEDSASK_RETRY" "conveyor engine: card $c blocked" --options "$opts" --reask "a new card, $c, is blocked" 2>&1 >/dev/null) \
       && echo "conveyor: card $c (#$n) is blocked with its work kept: put to the owner as decision blocked-$c" >&2 \
       || echo "conveyor: decision blocked-$c could not be put to the owner: ${e//$'\n'/ }" >&2
-  done < <(jq -rs --arg yes "$YES" --arg lintyes "$LINTYES" 'group_by(.card)[] | select(all(.step != "pushed"))
+  done < <(jq -rs --arg yes "$YES" --arg lintyes "$LINTYES" --arg rb "$REVIEWBLOCK" --slurpfile old <(printf '%s' "$old") "$REVIEWAGAIN"'retrylines($old) as $all
+    | group_by(.card)[] | select(all(.step != "pushed"))
     | map(select(.step | IN("landed", "closed", "blocked"))) | last | select(. != null and .step == "blocked" and .issue > 0 and (.kept // "") != ""
-      and ((.reason // "") | startswith($yes) or startswith($lintyes) | not)) | [.card, .issue, .kept, ((.reason // "") | gsub("\\s+"; " "))] | @tsv' <<<"$cs")
+      and ((.reason // "") | startswith($yes) or startswith($lintyes) | not))
+    | [.card, .issue, .kept, ((.reason // "") | gsub("\\s+"; " ")),
+       (if (.reason // "" | test($rb)) then reviewretried(.issue; $all).reason // "" | gsub("\\s+"; " ") else "" end)] | @tsv' <<<"$cs")
   [ -e "$led" ] || return 0
   rows=$(CONVEYOR_MAIN=$MAIN bash "$dec" list) || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
   # Split on the unit separator, not on a tab: read joins tabs, so an empty answer would move the asking time into it.
-  while IFS=$'\x1f' read -r id ans asked; do
+  # by: owner for a question auto decide holds as RRAGAIN's (its own test, commands/auto.sh), else decision.
+  while IFS=$'\x1f' read -r id ans asked by; do
     c=${id#blocked-}
     if [ -z "$ans" ] && [ -z "${issue[$c]:-}" ]; then
       CONVEYOR_MAIN=$MAIN bash "$dec" answer "$id" "$NEEDSASK_GONE" --asked-at "$asked" >/dev/null 2>&1 \
@@ -77,12 +91,13 @@ needsask() {
     elif [ -n "${issue[$c]:-}" ]; then
       case $ans in
         "$NEEDSASK_RETRY") echo "conveyor: decision $id is answered \"$ans\": retry ${issue[$c]}" >&2
-          bash "$HERE/conveyor.sh" retry "${issue[$c]}" < /dev/null ;;
+          CONVEYOR_RETRYBY=$by bash "$HERE/conveyor.sh" retry "${issue[$c]}" < /dev/null ;;
         "$NEEDSASK_FRESH") echo "conveyor: decision $id is answered \"$ans\": retry ${issue[$c]} --fresh" >&2
-          bash "$HERE/conveyor.sh" retry "${issue[$c]}" --fresh < /dev/null ;;
+          CONVEYOR_RETRYBY=$by bash "$HERE/conveyor.sh" retry "${issue[$c]}" --fresh < /dev/null ;;
       esac
     fi
-  done < <(jq -r '.[] | select(.id | startswith("blocked-")) | [.id, (.answer // ""), .askedAt] | join("\u001f")' <<<"$rows")
+  done < <(jq -r --arg rr ") $RRAGAIN, its work kept in " '.[] | select(.id | startswith("blocked-"))
+    | [.id, (.answer // ""), .askedAt, (if .question | gsub("[\r\n\u001f]+"; " ") | contains($rr) then "owner" else "decision" end)] | join("\u001f")' <<<"$rows")
   return 0
 }
 
@@ -226,25 +241,29 @@ needsauto() {
 # card blocked by its review (the reason the watcher reads: "the fix for [P1] ... did not hold after <n> rounds", with
 # any notes after it in brackets), and whose reason holds no word of the pack's auto.reserved and no item of the owner's
 # profile (lib/standing.sh heldlist: that one waits for the owner), is given back with `conveyor.sh retry <issue>`, and
-# the act is logged by `conveyor.sh auto act review-retry`, as the watcher logs it. Each card is tried once ($ST/auto/review-retry.cards): one whose retry
-# failed stays blocked, and needsask() puts it to the owner.
+# the act is logged by `conveyor.sh auto act review-retry`, as the watcher logs it. The retry is marked as review-retry's
+# (CONVEYOR_REVIEWRETRY, commands/retry.sh), and each issue is given back once: a later card of the issue, blocked by
+# its review again (reviewretried(), REVIEWAGAIN, lib/views.sh), is not given back, and needsask() puts it to the owner
+# with both block reasons. Each card is tried once ($ST/auto/review-retry.cards): one whose retry failed stays blocked,
+# and needsask() puts it to the owner.
 needsretry() {
-  local cs c n out res
+  local cs old c n out res
   jq -e 'select(.scope == "full" or .scope == "narrow")' "$ST/auto/mode.json" >/dev/null 2>&1 && standingon review-retry || return 0
-  cs=$(stdb ask lines cards) || { echo "conveyor: the card records could not be read; no card was given back by review-retry" >&2; return 0; }
+  cs=$(stdb ask lines cards) && old=$(stdb ask lines retried) || { echo "conveyor: the card records could not be read; no card was given back by review-retry" >&2; return 0; }
   # A block reason that holds a word of the pack's auto.reserved (a finding tagged [security], say) or an item of the
   # owner's profile waits for the owner.
   heldlist res || { echo "conveyor: the pack's auto.reserved or the owner's profile could not be read; no card was given back by review-retry" >&2; return 0; }
   while IFS=$'\t' read -r c n; do
     ! grep -qxF -- "$c" "$ST/auto/review-retry.cards" 2>/dev/null || continue
     printf '%s\n' "$c" >> "$ST/auto/review-retry.cards" || continue
-    if out=$(bash "$HERE/conveyor.sh" retry "$n" < /dev/null 2>&1); then
+    if out=$(CONVEYOR_REVIEWRETRY=1 bash "$HERE/conveyor.sh" retry "$n" < /dev/null 2>&1); then
       bash "$HERE/conveyor.sh" auto act review-retry "retried #$n: its card $c was blocked by its review" < /dev/null 2>&1 | sed 's/^/conveyor: /' >&2
     else echo "conveyor: the review-retry of #$n (card $c) failed, so it waits for the owner: ${out//$'\n'/ }" >&2; fi
-  done < <(jq -rs --argjson r "$res" 'group_by(.card)[] | select(all(.step != "pushed")) | map(select(.step | IN("landed", "closed", "blocked"))) | last
-    | select(. != null and .step == "blocked" and (.issue | numbers) > 0 and (.reason | strings
-      | test("\\Athe fix for \\[P[0-3]\\][\\s\\S]* did not hold after [0-9]+ rounds?( \\[[\\s\\S]*\\])?\\z"))
-      and ((.reason | ascii_downcase) as $t | all($r[]; . as $w | $t | contains($w | ascii_downcase) | not))) | "\(.card)\t\(.issue)"' <<<"$cs")
+  done < <(jq -rs --argjson r "$res" --arg rb "$REVIEWBLOCK" --slurpfile old <(printf '%s' "$old") "$REVIEWAGAIN"'retrylines($old) as $all
+    | group_by(.card)[] | select(all(.step != "pushed")) | map(select(.step | IN("landed", "closed", "blocked"))) | last
+    | select(. != null and .step == "blocked" and (.issue | numbers) > 0 and (.reason | strings | test($rb))
+      and ((.reason | ascii_downcase) as $t | all($r[]; . as $w | $t | contains($w | ascii_downcase) | not))
+      and reviewretried(.issue; $all) == null) | "\(.card)\t\(.issue)"' <<<"$cs")
 }
 # needsjob: the loop's job beside the cards: the standing review-retry, the items put to the owner, the auto pass, and,
 # when it ran, the steps its answers name at once (a second needsask and needsmain), not a turn later.

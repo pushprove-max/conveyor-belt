@@ -19,6 +19,8 @@ test('Rules: each standing kind is On or Off as the pack says, and a click sends
   assert.equal(pressed(w, 'standing-asked-fix-on'), 'true');
   assert.equal(pressed(w, 'standing-fixed-block-off'), 'true');
   assert.ok(rulesP(w).querySelector('[data-rule="standing-fixed-block"]').textContent.includes('off: the Foreman asks you first'));
+  // Bug (#1589): the review-retry row said every review block is tried again, but an issue is tried again one time.
+  assert.match(rulesP(w).querySelector('[data-rule="standing-review-retry"]').textContent, /tried again one time for each issue.*the next block comes to you/);
   assert.deepEqual(await sent(w, () => act(rulesP(w), 'standing-fixed-block-on').click()), [{ action: 'standing', args: ['fixed-block', 'on'], repo: 'sample' }]);
   assert.equal(pressed(w, 'standing-fixed-block-on'), 'true', 'the kind saved shows as on before the next snapshot');
   assert.deepEqual(await sent(w, () => act(rulesP(w), 'standing-asked-fix-off').click()), [{ action: 'standing', args: ['asked-fix', 'off'], repo: 'sample' }]);

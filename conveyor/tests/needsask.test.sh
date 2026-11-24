@@ -522,3 +522,69 @@ t_needsautoreopen() {
   [ "$RC" = 0 ] && grep -qx 'x-1 3' "$AUTOLOG.seen" \
     || fail "x-1, held, then answered and reopened in the second it was asked, got no auto pass ($RC): $(cat "$CONVEYOR_LEDGER") $(cat "$AUTOLOG.seen" 2>&1) $(cat "$T/$CASE/run.out")"
 }
+
+# narecard <card> <issue> <finding> [<reason>]: the card the last retry of <issue> started, blocked by its review on
+# <finding> (the fix did not hold after one round), or for <reason> when given, its work kept as the first card's.
+narecard() {
+  mkdir -p "$ST/kept/$1" && cp "$ST/kept/c0-$2/c0-$2.patch" "$ST/kept/$1/$1.patch" || fail "the kept patch of $1"
+  landed "$2" | jq -c --arg c "$1" --arg f "$3" --arg r "${4:-}" '.card = $c | (.step = "picked"), (.step = "blocked" | .result = "blocked"
+    | .reason = (if $r == "" then "the fix for \($f) did not hold after 1 round" else $r end) | .kept = "kept/\($c)")' >> "$ST/cards.jsonl"
+}
+# Bug (#1589): review-retry remembered the card, not the issue, and each retry is a new card, so an issue whose fix did
+# not hold came back on a narrower finding each time and was given back again with no end. Its first review block is
+# given back once, marked as review-retry's in retriedBy, not retriedWhy (the Board shows retriedWhy after the reason,
+# which then hid the block's finding). The card that retry started, blocked by its review again, is not: it is open in
+# Needs you with both block reasons and its kept patch, and the auto pass of the same job (auto on) leaves it to the
+# owner, with no retry. That block names a new P0 before the P1 whose fix did not hold (card.sh), so a cut of its
+# reason dropped the P1: both reasons are asked whole. A review-retry that comes late (the watcher's, from a snapshot
+# made before the engine's retry) is refused by `retry` itself and gives the second card back to no one. The owner's
+# answer to that decision is the owner's own retry, which resets the count: the next card's review block is given back.
+t_needsretryissue() {
+  local d out p0; p0="[P0] b.txt:2 deletes the file. Proof: $(printf 'step %s, ' {1..30})end"
+  setup "[$(issue 7 2026-01-01)]"; nainit 7; nareview
+  najob
+  naretried c0-7 && [ "$(jq -c 'select(.card == "c0-7" and .step == "blocked") | [.retriedBy, .retriedWhy]' "$ST/retried.jsonl")" = '["review-retry",null]' ] \
+    || fail "the first review block of #7 was not given back as review-retry's: $(cat "$T/$CASE/run.out") $(cat "$ST/retried.jsonl" 2>&1)"
+  narecard c1-7 7 "$p0; [P1] a.txt:1 drops the last line"
+  najob
+  ! naretried c1-7 || fail "review-retry gave #7 back a second time: $(cat "$T/$CASE/run.out")"
+  [ "$(jq -sc '[.[] | select(.kind == "review-retry")] | length' "$CONVEYOR_RULING_LOG")" = 1 ] \
+    || fail "review-retry was logged more than once for #7: $(cat "$CONVEYOR_RULING_LOG")"
+  d=$(nadec c1-7)
+  jq -e --arg p0 "$p0" '.answeredAt == null and (.question | contains("this block: the fix for \($p0); [P1] a.txt:1 drops the last line did not hold after 1 round; the block review-retry gave back: the fix for [P1] a.txt:1 drops the line did not hold after 3 rounds")
+    and contains("/kept/c1-7/c1-7.patch"))' <<<"$d" >/dev/null \
+    || fail "the second block is not open in Needs you with both whole block reasons and its kept patch: $d $(cat "$T/$CASE/run.out")"
+  grep -qF 'end; [P1] a.txt:1 drops the last line did not hold after 1 round' "$ST/auto/asked/blocked-c1-7.txt" \
+    || fail "the whole text of the second block's question is not kept: $(cat "$ST/auto/asked/blocked-c1-7.txt" 2>&1)"
+  # The watcher's review-retry of #7 as the host runs it (CONVEYOR_REVIEWRETRY), chosen from a snapshot made before the
+  # engine gave #7 back: it reaches the host only now, with c1-7 blocked.
+  out=$(CONVEYOR_REVIEWRETRY=1 loop retry 7 2>&1) && fail "a late review-retry of #7 was not refused: $out"
+  grep -qF 'review-retry already gave issue #7 back once (its card c0-7' <<<"$out" && ! naretried c1-7 \
+    || fail "a late review-retry of #7 gave c1-7 back, or did not say why it was refused: $out"
+  grep -qF -- '- blocked-c1-7: ' "$AUTOLOG" && grep -qF 'review-retry already gave this issue back once' "$AUTOLOG" \
+    || fail "the auto pass did not leave the second block to the owner: $(cat "$AUTOLOG")"
+  nanswer c1-7 'Retry keeping the work'; najob
+  [ "$(jq -r 'select(.card == "c1-7" and .step == "blocked") | .retriedBy' "$ST/retried.jsonl" 2>/dev/null)" = owner ] \
+    || fail "the owner's answer to blocked-c1-7 did not retry #7 as the owner's own: $(cat "$T/$CASE/run.out" "$ST/retried.jsonl")"
+  narecard c2-7 7 '[P1] a.txt:1 drops the first line'
+  najob
+  naretried c2-7 || fail "after the owner's answer, the next review block of #7 was not given back: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug (#1589, review): a retry the engine ran itself counted as the owner's own, which resets review-retry's count of an
+# issue. With auto on, #7's first review block is given back by review-retry; its next card is blocked for another
+# reason, which the auto pass answers with the recommended retry (needsask() takes it, not as the owner's: retriedBy
+# decision); the card after that is blocked by its review again. It is not given back: it is open in Needs you.
+t_needsretryauto() {
+  setup "[$(issue 7 2026-01-01)]"; nainit 7; nareview
+  najob
+  naretried c0-7 || fail "the first review block of #7 was not given back: $(cat "$T/$CASE/run.out")"
+  narecard c1-7 7 '' 'review: review 2 is the last review, and it found [P2] a.txt:1'
+  najob
+  [ "$(jq -r 'select(.card == "c1-7" and .step == "blocked") | .retriedBy' "$ST/retried.jsonl" 2>/dev/null)" = decision ] \
+    || fail "the auto pass's answer did not retry c1-7 as a decision's, not the owner's: $(cat "$T/$CASE/run.out" "$ST/retried.jsonl")"
+  narecard c2-7 7 '[P1] a.txt:1 drops the first line'
+  najob
+  ! naretried c2-7 || fail "after the auto pass's retry, review-retry gave #7 back a second time: $(cat "$T/$CASE/run.out")"
+  jq -e '.answeredAt == null' <<<"$(nadec c2-7)" >/dev/null || fail "the second review block of #7 is not open in Needs you: $(nadec c2-7)"
+}
