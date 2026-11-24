@@ -570,7 +570,7 @@ cardreview() {
         && t=$(reviewed "$wt" "$sprompt$more" "$ins"); rc=$?; rm -f "$wt.port"
       [ $rc = 0 ] || { block "$c" "$n" "$wt" "review $pass: $t"; return; }
       # The judge (judged()): a finding it declines is no finding from here on, and a review left with none is a GO; the issue tells it whether the card is a follow-up, and its area. While it runs, <worktree>.reviewed holds the review's fields (its usage; began() drops it), as a bench reads its cost (SWE_LIVES).
-      redbrief "$c" "$n" "$br"; printf '%s\n' "$t" > "$wt.reviewed"; t=$(judged "$c" "$n" "$wt" "$sprompt" "$t" "$issue")
+      redbrief "$c" "$n" "$br"; printf '%s\n' "$t" > "$wt.reviewed"; t=$(judged "$c" "$n" "$wt" "$sprompt" "$t" "$issue" "$fixtree")
       # The P3 findings it leaves, with the rule P3 off, are listed only (minor()).
       minor "$wt"
     fi

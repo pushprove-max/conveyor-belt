@@ -353,8 +353,10 @@ tell, it is harm.'
 JUDGE='You are the judge of a code review. A reviewer read the staged change in this worktree (`git diff --cached`)
 against the issue below and wrote the findings at the end of this message, numbered F1, F2 and so on. Decide for
 each finding whether it counts: accept it, decline it, or mark it outside. Read the change and the code it touches;
-do not run tests or builds and change nothing. When you cannot tell yet whether a claim is right or a proof can
-happen, read the code until you can: doubt alone is no reason to decline.
+do not run tests or builds and change nothing. Each finding is followed by the lines it cites, with a few around them,
+and the staged change is given whole when it is small; read the rest of the change and the code by your tools. When
+you cannot tell yet whether a claim is right or a proof can happen, read the code until you can: doubt alone is no
+reason to decline.
 Each finding is marked with its place: `inside the diff` (its file and line are in the staged change), `outside the
 diff` (they are not) or `no place` (it names no file and line).
 Answer OUTSIDE for a real defect that this card'"'"'s change did not cause: code the card neither changed nor broke.
@@ -394,7 +396,9 @@ Answer with exactly one line for each finding, in order, and no other line:
 `F<n> OUTSIDE: <harm | self-heals | cleanup | already guarded | docs drift>: <one-line reason: why it is real, and why this card'"'"'s change did not cause it>`
 A reason that names another finding by its number quotes that finding'"'"'s file and line beside it, as
 `F1 (src/a.js:12)`, so the reason reads on its own.
-'"$STE"
+Write each reason in plain, short sentences: one idea in a sentence, common words, the active voice, no filler, no
+praise and no hedging. Keep the form that these instructions give each line. Do not change the names of files,
+commands, settings and functions.'
 # JUDGE as the judge is given it: <rare> is its decline rule, by the control record's judgeRare (`control judge rare
 # <level>...`, `control judge rare none`): with no level (the default, or a record that cannot be read), "rare case" is
 # no reason to decline at any level; else it is one at the levels named, and at those only.
@@ -445,12 +449,13 @@ judgemarks() { # <worktree> <the always-accepted kinds, a JSON array>
 # when the cited lines, read as that tree's, take in lines the staged tree no longer has (git diff -U0 of that tree and
 # the staged one): a citation of a line the change, or the fix, deleted keeps that line, beside the staged one when
 # the staged file has a line at that number. A path that is not one in the repository (it starts with /, or has a . or
-# .. part) gives nothing, as does a line that no tree has. Bounded: EXCERPTS excerpts, EXCERPTLINES lines each, each
+# .. part) gives nothing, as does a line that no tree has. Bounded: EXCERPTS excerpts, EXCERPTLINES cited lines each (with
+# the fourth argument, that many lines more before and after them, from the first line that exists), each
 # line cut to 300 characters. Prints a JSON array, [{at (the file and line as cited), side, from (the first line),
 # lines}]; which review kept it is its line's (exdetail(), lib/donewhen.sh).
 EXCERPTS=20 EXCERPTLINES=20
-excerpts() { # <worktree> [<the tree before the fix round the review follows>]
-  local new old fix=${2:-} p a b at side t got del kept out='[]'
+excerpts() { # <worktree> [<the tree before the fix round the review follows> [<the findings file, <worktree>.review when not given> [<lines kept before and after the cited ones, 0 when not given>]]]]
+  local new old fix=${2:-} p a b at side t got del kept ra rb c=${4:-0} out='[]'
   new=$(git -C "$1" write-tree 2>/dev/null) || { echo '[]'; return 0; }
   old=$(git -C "$1" rev-parse -q --verify 'HEAD^{tree}' 2>/dev/null)
   while IFS=$'\t' read -r p a b; do
@@ -473,11 +478,12 @@ excerpts() { # <worktree> [<the tree before the fix round the review follows>]
         [ "$del" = 1 ] || continue
       fi
       # awk reads to the end: one that stopped early would end git with SIGPIPE, which pipefail reads as a failure.
-      got=$(git -C "$1" cat-file blob "$t:$p" | awk -v a="$a" -v b="$b" 'NR >= a && NR <= b' | jq -Rnc '[inputs | .[0:300]]') || got='[]'
+      ra=$((a > c ? a - c : 1)); rb=$((b + c))
+      got=$(git -C "$1" cat-file blob "$t:$p" | awk -v a="$ra" -v b="$rb" 'NR >= a && NR <= b' | jq -Rnc '[inputs | .[0:300]]') || got='[]'
       [ "$got" = '[]' ] || [ "$(jq length <<<"$out")" -ge "$EXCERPTS" ] \
-        || { kept=1; out=$(jq -c --arg at "$at" --arg s "$side" --argjson a "$a" --argjson l "$got" '. + [{at: $at, side: $s, from: $a, lines: $l}]' <<<"$out"); }
+        || { kept=1; out=$(jq -c --arg at "$at" --arg s "$side" --argjson a "$ra" --argjson l "$got" '. + [{at: $at, side: $s, from: $a, lines: $l}]' <<<"$out"); }
     done
-  done < <(sed -E 's/^(DECLINED|OUTSIDE|SELFHEALS):[[:space:]]*//' "$1.review" 2>/dev/null | grep -Ev "$NOTFINDING" | jq -Rr --arg wt "$1/" --arg real "$(cd "$1" && pwd -P)/" \
+  done < <(sed -E 's/^(DECLINED|OUTSIDE|SELFHEALS):[[:space:]]*//' "${3:-$1.review}" 2>/dev/null | grep -Ev "$NOTFINDING" | jq -Rr --arg wt "$1/" --arg real "$(cd "$1" && pwd -P)/" \
     'split($wt) | join("") | split($real) | join("") | [scan("([A-Za-z0-9_./-]+):([0-9]{1,9})(?:[-–]([0-9]{1,9}))?")] | first // empty
       | [(.[0] | ltrimstr("./")), .[1], (.[2] // "")] | @tsv' | awk '!seen[$0]++')
   printf '%s\n' "$out"
@@ -499,8 +505,8 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
   if [ "$agent" = claude ]; then
     # The card's review account, else its builder's; with no shell, the staged change is a file given to it alone.
     d=$(acctenv "${RACCT:-$ACCT}") || { jq -cn --arg r "$d" '{failed: $r}'; return 1; }
-    rm -rf "$1.rv"; mkdir "$1.rv" && git -C "$1" diff --cached > "$1.rv/staged.diff" && cp "$STE80" "$1.rv/ste80.md" || { jq -cn '{failed: "the staged change or the writing method could not be written for the judge"}'; return 1; }
-    p=$2$'\n\n'"You have no shell: the staged change (\`git diff --cached\`) is the file $1.rv/staged.diff. Read it there, in parts if it is large. The file $STE80 is the file $1.rv/ste80.md: read it there."
+    rm -rf "$1.rv"; mkdir "$1.rv" && git -C "$1" diff --cached > "$1.rv/staged.diff" || { jq -cn '{failed: "the staged change could not be written for the judge"}'; return 1; }
+    p=$2$'\n\n'"You have no shell: the staged change (\`git diff --cached\`) is the file $1.rv/staged.diff. Read it there, in parts if it is large."
     (cd "$1" && proxyenv && cacheenv && acctrun "$d" && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$model" --effort "$effort" --permission-mode default --tools Read,Grep,Glob \
       --setting-sources "" --strict-mcp-config --add-dir "$1.rv" --no-session-persistence --output-format stream-json --verbose \
       <<<"$p"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
@@ -513,8 +519,8 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
   elif [ "$agent" = opencode ]; then
     # Run as an OpenCode review is (ocrun()), with the staged change a file given to it alone.
     command -v opencode >/dev/null || { jq -cn --arg m "$model" '{model: $m, failed: "the judge is the OpenCode model \($m), and OpenCode (opencode) is not on PATH"}'; return 1; }
-    rm -rf "$1.rv"; mkdir "$1.rv" && git -C "$1" diff --cached > "$1.rv/staged.diff" && cp "$STE80" "$1.rv/ste80.md" || { jq -cn '{failed: "the staged change or the writing method could not be written for the judge"}'; return 1; }
-    p=$2$'\n\n'"You have no shell: the staged change (\`git diff --cached\`) is the file $1.rv/staged.diff. Read it there, in parts if it is large. The file $STE80 is the file $1.rv/ste80.md: read it there."
+    rm -rf "$1.rv"; mkdir "$1.rv" && git -C "$1" diff --cached > "$1.rv/staged.diff" || { jq -cn '{failed: "the staged change could not be written for the judge"}'; return 1; }
+    p=$2$'\n\n'"You have no shell: the staged change (\`git diff --cached\`) is the file $1.rv/staged.diff. Read it there, in parts if it is large."
     (ocrun "$1" "$model" "$effort" <<<"$p"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
     [ $rc != 0 ] || jq -Rrn "$OPENCODEANSWER" "$1.judge.events" > "$1.judge" 2>/dev/null || rc=1
     git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq || rc=1
@@ -534,6 +540,24 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
   # Its login failed and the proxy is the reviewer's fallback: asked again at once through the proxy.
   ! loginfallback "$rc" "$agent" "$1.judge.events" "$1.judge.err" || { PROXY_NOW=1 judgecall "$@"; return; }
   jq -c --arg r "the judge call failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT")), or gave no answer" '. + {failed: $r}' <<<"$f"; return 1
+}
+# The judge's message from its findings on (judged()): the whole staged change when it is under JUDGEDIFFLINES lines, then
+# each finding of <worktree>.judge.marks with the lines it cites (excerpts(), as the Board shows them): the judge reads
+# the rest of the diff (its file) and the code by its tools. A finding with no lines that can be read has none beside it.
+# Each finding's lines come with JUDGECONTEXT lines before and after them, and, when <the tree before the last fix round>
+# is given, the lines that fix deleted too, as the Board shows them. The replay (replay.sh) writes the marks file it reads.
+JUDGEDIFFLINES=400 JUDGECONTEXT=3
+judgefindings() { # <worktree> [<the tree before the last fix round>]
+  local d m f ex
+  d=$(git -C "$1" diff --cached 2>/dev/null) || d=''
+  [ -z "$d" ] || [ "$(wc -l <<<"$d")" -ge "$JUDGEDIFFLINES" ] || printf '# The staged change (git diff --cached)\n%s\n\n' "$d"
+  echo '# The findings'
+  while IFS= read -r m; do
+    jq -r '"F\(.n) [\({inside: "inside the diff", outside: "outside the diff", none: "no place"}[.place])\(if .kind then "; always accepted: \(.kind)" else "" end)] \(.finding)"' <<<"$m"
+    f=$(jq -r .finding <<<"$m")
+    ex=$(excerpts "$1" "${2:-}" <(printf '%s\n' "$f") "$JUDGECONTEXT") || ex='[]'
+    jq -r '.[] | .from as $f | "  Lines at \(.at) (\({new: "the staged change", old: "the code before the change", fix: "the code before the last fix round"}[.side])):", (.lines | to_entries[] | "    \($f + .key): \(.value)")' <<<"$ex"
+  done < <(jq -c '.[]' "$1.judge.marks")
 }
 # The findings the last fix round of the card was told to fix, each with its id and the reason the judge gave when it
 # accepted it, none when the judge gave no readable line for it (the reason findings.jsonl keeps for the review that
@@ -604,7 +628,7 @@ healsnone() { # <card> <worktree>
 }
 # The review beside the worktree, judged: prints the review's fields, with judge (above) when the judge was asked.
 # It never fails: whatever goes wrong, the review stands as the reviewer wrote it.
-judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue json>]
+judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue json> [<the tree before the last fix round>]]
   local wt=$3 ja before readat j why f back fu area stood=''
   ja=$(judgeon) && [ "$(verdict "$wt.review")" != none ] && grep -Evq "$NOTFINDING" "$wt.review" \
     || { healsnone "$1" "$wt" || echo "conveyor: cannot take the kinds an earlier judge gave the findings of $1 away" >&2; printf '%s\n' "$5"; return 0; }
@@ -620,8 +644,7 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue
   if ! { judgemarks "$wt" "$ja" > "$wt.judge.marks" && jq -e 'length > 0' "$wt.judge.marks" > /dev/null; } 2>/dev/null; then
     j=$(jq -cn '{failed: "the findings could not be read for the judge"}'); stood=1
   elif [ -z "$before" ] || before="# Findings already declined on the cards of this issue"$'\n'"$before"$'\n\n'
-    ! j=$(judgecall "$wt" "$(judgeprompt)" "$4"$'\n\n'"$back$before# The findings"$'\n'"$(jq -r '.[]
-      | "F\(.n) [\({inside: "inside the diff", outside: "outside the diff", none: "no place"}[.place])\(if .kind then "; always accepted: \(.kind)" else "" end)] \(.finding)"' "$wt.judge.marks")"); then stood=1
+    ! j=$(judgecall "$wt" "$(judgeprompt)" "$4"$'\n\n'"$back$before$(judgefindings "$wt" "${7:-}")"); then stood=1
   # What it said of each finding: its one decision line that parses whole, an accepted one with its reason and cost,
   # else the finding is accepted (a duplicate id, a line that cannot be read, no line). A line for no finding of the
   # review is dropped. A line's bullet or list number (`- `, `1. `, `1) `) is not read. None read at all fails the answer. An always-accepted kind beats a decline and an OUTSIDE.

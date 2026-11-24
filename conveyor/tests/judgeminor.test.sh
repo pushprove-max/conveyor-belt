@@ -3,7 +3,7 @@
 # timeout: 300
 # Engine cases: the review's judge (judged()) on P3 findings, with the control record's rule P3 on and off, and on a
 # finding that came back after its fix (what the judge is told of the fix round's findings). judging(),
-# judgeone(), jf(), jr() and rev() are judge.test.sh's.
+# judgeone(), jf(), jr() and rev() are judge.test.sh's. It also holds what the judge's message and folder hold.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -187,4 +187,41 @@ t_judgebackmeaning() {
   grep -qF 'A finding marked `[E<n>]` is the same finding back after its fix' <<<"$p" \
     && grep -qF 'A finding you accepted before is declined now only when the fix made it untrue: the reason starts with `other` and says what the fix changed' <<<"$p" \
     || fail "the judge's prompt does not say what [E<n>] means: $(grep -n 'E<n>\|accepted before' "$STUB/judge-asked")"
+}
+
+# What the judge's message and folder hold (#1381). Bugs: the judge is given a copy of the writing method (ste80.md) it
+# never needs for one-line reasons; a finding (each one, not only the first) is not followed by the lines it cites with
+# those around them, so the judge reads each by a tool call; a small staged change is not in the message whole (or a
+# big one is, which costs every call its whole size). A stub Claude judge lists its read-only folder (the one --add-dir
+# names) when it is called; the message is $STUB/judge-asked.
+judgeinline() { # <the build's shell>: a card with two findings judged, one inside the diff and one outside, with the build as given
+  local wt=$T/$CASE/cards/c7 want
+  judging "[$(issue 7 2026-01-01)]"
+  echo "$1" > "$STUB/build"
+  printf '%s\n' '[P1] a.txt:2 wrong word. Proof: a.txt:2' '[P2] b.txt:1 stale line. Proof: b.txt:1' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  printf '%s\n' 'F1 DECLINE: claim wrong: no' 'F2 DECLINE: claim wrong: no' > "$STUB/judge.1"
+  echo 'while [ $# -gt 0 ]; do [ "$1" != --add-dir ] || ls "$2" > "$STUB/rv-list"; shift; done' > "$STUB/judge-cmd"
+  judgeone 7 "$STUB/review"
+  [ "$(cat "$STUB/rv-list")" = staged.diff ] && ! grep -qi 'ste80' "$STUB/judge-asked" \
+    || fail "the judge's folder holds more than the staged diff, or its message names the writing method: $(cat "$STUB/rv-list") $(grep -ci ste80 "$STUB/judge-asked")"
+  # Each finding is followed by its cited line and those around it: a.txt's whole staged file (line 1 is near line 2).
+  want="# The findings
+F1 [inside the diff] [P1] a.txt:2 wrong word. Proof: a.txt:2
+  Lines at a.txt:2 (the staged change):
+$(git -C "$wt" show :a.txt | awk '{ printf "    %d: %s\n", NR, $0 }')
+F2 [outside the diff] [P2] b.txt:1 stale line. Proof: b.txt:1
+  Lines at b.txt:1 (the staged change):
+    1: b"
+  [ "$(git -C "$wt" show :a.txt | wc -l)" -ge 2 ] && [ "$(sed -n '/^# The findings$/,$p' "$STUB/judge-asked")" = "$want" ] \
+    || fail "the judge's message does not give each finding the lines it cites and those near them: $(sed -n '/^# The findings$/,$p' "$STUB/judge-asked")"
+}
+t_judgeinlinesmall() {
+  judgeinline 'echo two >> a.txt'
+  [ "$(awk '/^# The findings$/ { exit } /^# The staged change/ { on = 1 } on' "$STUB/judge-asked")" = "# The staged change (git diff --cached)"$'\n'"$(git -C "$T/$CASE/cards/c7" diff --cached)" ] \
+    || fail "a staged change under 400 lines is not in the judge's message whole: $(grep -c . "$STUB/judge-asked") lines"
+}
+t_judgeinlinebig() {
+  judgeinline 'echo two >> a.txt; seq 1 450 > big.txt'
+  ! grep -qF '# The staged change' "$STUB/judge-asked" && ! grep -qF 'diff --git' "$STUB/judge-asked" && ! grep -qxF '+450' "$STUB/judge-asked" \
+    || fail "a staged change of over 400 lines is in the judge's message"
 }

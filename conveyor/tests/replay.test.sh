@@ -97,6 +97,17 @@ t_replayjudge() {
   grep -q '^+three$' "$STUB/judged" && grep -q '^+four$' "$STUB/judged" && grep -q '^F1 \[inside the diff\] \[P1\] a.txt:2 F-one$' "$STUB/judged" \
     && grep -q '^F2 \[outside the diff\] \[P2\] a.txt:1 F-two$' "$STUB/judged" && grep -q '^#7 title 7$' "$STUB/judged" \
     || fail "the judge was not given each case's diff, issue and findings: $(cat "$STUB/judged")"
+  # Bug caught (#1381): the replay judge's prompt says each finding is followed by the lines it cites and a small staged
+  # change is in the message, but replay sent the finding text alone, so it judged with less than the live judge has.
+  [ "$(awk '/^== /{on = /c1-7$/} on' "$STUB/judged" | sed -n '/^F1 /,/^F2 /p')" = 'F1 [inside the diff] [P1] a.txt:2 F-one
+  Lines at a.txt:2 (the staged change):
+    1: one
+    2: l2
+    3: l3
+    4: l4
+    5: l5
+F2 [outside the diff] [P2] a.txt:1 F-two' ] && awk '/^== /{on = /c1-7$/} on' "$STUB/judged" | grep -qxF '# The staged change (git diff --cached)' \
+    || fail "the replay judge was not given the lines each finding cites, or the small staged change: $(awk '/^== /{on = /c1-7$/} on' "$STUB/judged")"
   [ "$(grep -cF 'really runs, its defect is already fixed on main, or, at P2 only, it is a rare case' "$STUB/judge-prompt")" = 3 ] \
     || fail "a replay judge's prompt does not hold the record's rare-case level P2: $(grep -n -i 'rare case' "$STUB/judge-prompt")"
   # Bug caught: c1-7's landed commit was staged on its parent, a later main than its review read, so the judge saw

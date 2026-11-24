@@ -285,9 +285,10 @@ cardsettings() { # <file>
     else error("\($h) is not {\"hooks\": {<event>: [...]}}") end' --arg h "$h" "$CARD_SETTINGS" > "$1"
 }
 # The writing method: the pinned copy of the STE80 Humanizer in this engine (rules/ste80.md, its licence beside it).
-# STE is the one block the reviewer (REVIEWT) and the judge (JUDGE, review.sh) are both given, so the findings, the
-# judge's reasons and the issue bodies made of them read plainly on the Board. A session with no shell reads its copy
-# of the file in the folder beside the worktree (noshell(), review.sh). The block holds no single quote.
+# STE is the block the reviewer (REVIEWT) is given, so the findings and the issue bodies made of them read plainly on
+# the Board. The judge writes one-line reasons and is given a few lines of its own (JUDGE, review.sh), not this file.
+# A session with no shell reads its copy of the file in the folder beside the worktree (noshell(), review.sh). The
+# block holds no single quote.
 STE80=$HERE/rules/ste80.md
 STE='Write all the text that you write by the method in the file '"$STE80"' (STE80 Humanizer). Apply both
 of its passes: Pass 1 removes the signs of AI writing, and Pass 2 rebuilds each sentence 80% of the way to

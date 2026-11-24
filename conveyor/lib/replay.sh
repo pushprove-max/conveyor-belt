@@ -143,8 +143,9 @@ replay() { # judge <model> [<effort>] [--last <n>] [--estimate]
     before=$(jq -r '.before | arrays | if length > 0 then "# Findings already declined on the cards of this issue\n\(join("\n"))" else empty end' <<<"$k")
     # The findings the fix round before the review was told to fix, with the judge's earlier reason for each it gave a readable line for, as judged() gives them.
     back=$(jq -r '.back | arrays | if length > 0 then "# The findings the last fix round was told to fix\n\(join("\n"))" else empty end' <<<"$k")
-    out=$(CALLSEAT=$s CALLSTEP=replay CALLACT="the replay judge reads the findings of $(jq -r .card <<<"$k")" judgecall "$d/wt" "$jp" "$brief"$'\n\n'"${back:+$back$'\n\n'}${before:+$before$'\n\n'}# The findings"$'\n'"$(jq -r '.findings
-      | to_entries[] | "F\(.key + 1) [\({inside: "inside the diff", outside: "outside the diff"}[.value.place] // "no place")] \(.value.finding)"' <<<"$k")") && f=ok || f=''
+    # The findings as judged() gives them (judgefindings(): the small staged change, the lines each finding cites), from the marks file it reads.
+    jq -c '[.findings | to_entries[] | {n: (.key + 1), place: (.value.place | if . == "inside" or . == "outside" then . else "none" end), finding: .value.finding}]' <<<"$k" > "$d/wt.judge.marks"
+    out=$(CALLSEAT=$s CALLSTEP=replay CALLACT="the replay judge reads the findings of $(jq -r .card <<<"$k")" judgecall "$d/wt" "$jp" "$brief"$'\n\n'"${back:+$back$'\n\n'}${before:+$before$'\n\n'}$(judgefindings "$d/wt")") && f=ok || f=''
     jq -e objects <<<"$out" >/dev/null 2>&1 || out='{"failed": "the judge call printed no fields"}'
     ans='[]'; [ -z "$f" ] || ans=$(jq -cRn '[inputs | gsub("^[[:space:]`*-]+|[[:space:]`*]+$"; "") | capture("^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE):[[:space:]]*(?<r>.*)$")]' "$d/wt.judge" 2>/dev/null) || ans='[]'
     jq -c --slurpfile k "$d/case" '$k[0] as $k | {card: $k.card, issue: $k.issue} + ({model, effort, sec, tokens, usage, failed} | del(.[] | nulls))' <<<"$out" >> "$w/calls"

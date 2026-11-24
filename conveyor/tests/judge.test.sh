@@ -163,16 +163,15 @@ t_judgedecline() {
   jr 7 | grep -qxF "DECLINED: $f (judge: the proof needs a stub built to misbehave)" && [ "$(jf 7 '.counts | add')" = 0 ] \
     || fail "the review's text does not show the declined finding with its reason, or it is counted as a finding: $(jr 7)"
   grep -qxF "F1 [inside the diff] $f" "$STUB/judge-asked" && grep -q '^body of 7$' "$STUB/judge-asked" || fail "the judge was not given the finding marked as inside the diff, or the issue"
-  # Bug (#534): the findings and the judge's reasons the Board shows were asked for by the old ASD-STE100 rule list,
-  # not by the pinned STE80 Humanizer. Each prompt names the engine's own rules/ste80.md, a file that is there and the
-  # same as this checkout's, asks for both passes, and holds none of the old rules.
-  local a s
-  for a in "$STUB/asked" "$STUB/judge-asked"; do
-    s=$(grep -o 'by the method in the file [^ ]*/rules/ste80\.md (STE80 Humanizer)' "$a") && s=${s#by the method in the file } && s=${s% (STE80 Humanizer)} \
-      && cmp -s "$s" "$SRC/rules/ste80.md" && grep -qF 'Apply both' "$a" && ! grep -qF 'Use common, simple words that have one meaning each' "$a" \
-      && ! grep -qF 'Write a sentence that tells the reader to do something in 20 words or fewer' "$a" \
-      || fail "${a##*/}: the prompt does not name the engine's rules/ste80.md and its two passes, or still holds the old STE rules: $(grep -c 'ste80\|Use common, simple words' "$a")"
-  done
+  # Bug (#534): the findings were asked for by the old ASD-STE100 rule list, not by the pinned STE80 Humanizer: the review's
+  # prompt names the engine's rules/ste80.md (there, and the same as this checkout's), asks for both passes, holds none of
+  # the old rules. The judge's reasons are one line each: its prompt has its own writing rules, no copy of the method (#1381).
+  local a=$STUB/asked s
+  s=$(grep -o 'by the method in the file [^ ]*/rules/ste80\.md (STE80 Humanizer)' "$a") && s=${s#by the method in the file } && s=${s% (STE80 Humanizer)} \
+    && cmp -s "$s" "$SRC/rules/ste80.md" && grep -qF 'Apply both' "$a" && ! grep -qF 'Use common, simple words that have one meaning each' "$a" \
+    && ! grep -qF 'Write a sentence that tells the reader to do something in 20 words or fewer' "$a" \
+    && ! grep -qi 'ste80' "$STUB/judge-asked" && grep -qF 'Write each reason in plain, short sentences' "$STUB/judge-asked" \
+    || fail "the review's prompt does not name rules/ste80.md and its two passes, holds the old STE rules, or the judge's prompt names the method or lacks its own rules: $(grep -ci ste80 "$a" "$STUB/judge-asked")"
   # The reviewer is Codex's x: the judge is the first Claude model the pack lists for the review.
   [ "$(jf 7 .judge.model)" = claude-opus-5-5 ] && grep -q -- '--model claude-opus-5-5 ' "$STUB/judges" && [ "$(jf 7 .judge.tokens.claude)" = 5 ] \
     || fail "the judge did not run on a model of another family than the reviewer's, or what it used is not recorded: $(jf 7 '.judge | tojson')"
