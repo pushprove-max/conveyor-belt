@@ -85,6 +85,50 @@ passes "gh issue create --title 'Form' --body 'Each fix has a \`## What happens 
 # fix with an indented Cause was refused and one with an indented What happens now passed with no Cause.
 refused "$(body $'  ## What happens now\nIt breaks.')"
 passes "$(body $'## What happens now\nIt breaks.\n  ## Cause\nThe file grows.')"
+# Bug (#1510): a `## Cause` line inside a fenced code block counted as the heading, so a fix with no Cause section
+# passed. A real heading after the block still counts, and a fence of tildes or one closed by the body's quote also ends.
+refused "$(body $'## What happens now\nThe form drops the heading.\n\n```md\n ## Cause\n```')"
+refused "$(body $'## What happens now\nIt breaks.\n~~~\n## Cause\n~~~')"
+refused "gh issue create --title 'Fix it' --body '## What happens now\nIt breaks.\n\`\`\`\n## Cause\n\`\`\`'"
+passes "$(body $'## What happens now\nIt breaks.\n```md\n## Cause\n```\n## Cause\nThe file grows.')"
+passes "$(body $'## What happens now\nIt breaks.\n````\n```\n````\n## Cause\nThe file grows.')"
+# A fence that opens on the line of the command (right after the quote that opens the body) hides its heading too.
+refused "gh issue create --label bug --body \$'\`\`\`md\n ## Cause\n\`\`\`'"
+# In a here-document a quote ends no fence: the text after "```\"" is still inside the block (Markdown: a closing fence has no text after it).
+refused "$(body $'## What happens now\nThe form drops the heading.\n```md\n```"\n ## Cause\n```')"
+# In a here-document or a body file a written \n is text, not a line break: it makes no fence that hides a real heading.
+passes "$(body $'## What happens now\nThe form prints \\n~~~ as text.\n## Cause\nThe cache is stale.')"
+printf '## What happens now\nIt prints \\n```\\n as text.\n## Cause\nThe cache is stale.\n' > "$T/fenced.md"
+passes "gh issue create --title 'Fix it' --body-file $T/fenced.md"
+# Up to three spaces may stand between the quote that opens the body and its fence.
+refused "gh issue create --label bug --body \$'  ~~~\n ## Cause\n~~~'"
+# A double quote inside a single-quoted body ends no fence: the heading after it is still inside the block.
+refused "gh issue create --label bug --body \$'~~~\n~~~\"\n ## Cause\n~~~'"
+# A `<<` inside a quoted title is no here-document: the body's written \n are still line breaks, so its fence is read.
+refused "gh issue create --label bug --title 'Fix << handling' --body \$'~~~\n ## Cause\n~~~'"
+# A `\\n` in an inline body is a backslash and an n: it makes no fence that hides a real Cause heading.
+passes "gh issue create --label bug --body \$'The form prints \\\\n~~~ as text.\n## Cause\nThe cache is stale.'"
+# A backtick opener with a backtick in its info string is no fence, so the heading after it counts.
+passes "$(body $'## What happens now\nThe form prints this line:\n``` `name`\n## Cause\nThe cache is stale.')"
+}
+
+# unfenced <inline> <quote> <text> keeps what is outside the fences and reads on after each block ends.
+t_fence() {
+CASE=fence
+. "$SRC/cause.sh"
+local o
+o=$(unfenced 0 "" $'a\n~~~\nx\n~~~\nb\nc') || fail "unfenced failed"
+[ "$o" = $'a\nb\nc' ] || fail "text after a closing tilde fence was not read on; got: $o"
+o=$(unfenced 1 "" $'a\n```\nx\n```\nb') || fail "unfenced failed"
+[ "$o" = $'a\nb' ] || fail "text after a closing backtick fence was not read on; got: $o"
+o=$(unfenced 1 "'" $'x $\'```md\ny\n```\'\nafter') || fail "unfenced failed"
+[ "$o" = $'\'\nafter' ] || fail "an inline body's closing quote did not end the block, or its opener was not found; got: $o"
+o=$(unfenced 0 "" $'a\n```\nx\n```"\ny\n```\nz') || fail "unfenced failed"
+[ "$o" = $'a\nz' ] || fail "a here-document fence was closed by a quote, or not by the real fence; got: $o"
+o=$(unfenced 1 "'" $'x $\'~~~\n~~~"\nz\n~~~\'\nafter') || fail "unfenced failed"
+[ "$o" = $'\'\nafter' ] || fail "a double quote ended a block of a single-quoted body; got: $o"
+o=$(unfenced 0 "" $'a\n``` `x`\nb') || fail "unfenced failed"
+[ "$o" = $'a\n``` `x`\nb' ] || fail "a backtick opener with a backtick in its info string hid text; got: $o"
 }
 
 # D2: a `bug` label makes it a fix issue, whatever its body. `testissue` files with the pack's type label (`bug` here),
@@ -148,7 +192,7 @@ grep -qxF conveyor/foreman/filing-cause.test.sh <(tail -n +2 "$W/list") \
   || fail "the cap leaves files out of the list of a card that changes only no_cause in $f, so its records can drop conveyor/foreman/filing-cause.test.sh; left out: $(head -1 "$W/list"), list: $(tail -n +2 "$W/list" | tr '\n' ' ')"
 }
 
-cases=(what heading bug new linked)
+cases=(what heading fence bug new linked)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

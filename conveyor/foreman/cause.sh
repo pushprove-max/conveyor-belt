@@ -11,8 +11,40 @@
 # written in the command, as files is: its text is not judged, and a body made by an expansion is not seen.
 # shellcheck disable=SC2034 # NO_CAUSE is read in foreman.sh filing
 NO_CAUSE='Not run: a fix issue needs a "## Cause" section, and this one has none. Name the source of the problem, not only what the reader sees. The section holds three things. First, where the bad data or behaviour comes from and why it is there at all. Second, a place in the code that already solves the same problem, or that none was found. Third, what the reader sees when the data is stale or missing. Add the section and file it again.'
+# unfenced <inline> <quote> <text>: the text without its fenced code blocks. A fence is a line of three or more backticks
+# or tildes, up to three spaces before them; an opener of backticks has no backtick after them (Markdown). The block ends
+# at a line of that fence character at least as often with nothing after it, or at the end of the text. With <inline> 1
+# (text written in a shell quote, as `--body '...'`) a fence may also follow the quote that opens the body (and up to three
+# spaces), and a closing fence may be followed by the closing quote, where the text goes on after it: <quote> is that
+# quote, or empty for either. With <inline> 0 (a here-document or a body file, whose text is Markdown as written) a quote
+# is no part of a fence.
+unfenced() {
+  awk -v inline="$1" -v bq="$2" -v q="'" -v dq='"' '
+    function strip(x) { sub(/^[ ]?[ ]?[ ]?/, "", x); return x }
+    function isq(c) { return bq == "" ? (c == q || c == dq) : c == bq }
+    # fence: the line from its fence, or "" when none starts in it
+    function fence(line,   c, i) {
+      c = strip(line)
+      if (c ~ /^[`~]/) return c
+      if (inline == 1)
+        for (i = 1; i < length(line); i++)
+          if (isq(substr(line, i, 1)) && (i == 1 || substr(line, i - 1, 1) ~ /[ \t$]/) && strip(substr(line, i + 1)) ~ /^[`~]/)
+            return strip(substr(line, i + 1))
+      return "" }
+    open == "" {
+      c = fence($0); ch = substr(c, 1, 1); k = 0
+      while (ch != "" && substr(c, k + 1, 1) == ch) k++
+      if (k >= 3 && !(ch == "`" && index(substr(c, k + 1), "`"))) { open = ch; n = k; next }
+      print; next }
+    {
+      c = strip($0); k = 0
+      while (substr(c, k + 1, 1) == open) k++
+      r = substr(c, k + 1); sub(/^[ \t]*/, "", r)
+      if (k >= n && r == "") open = ""
+      else if (k >= n && inline == 1 && isq(substr(r, 1, 1))) { open = ""; print r } }' <<<"$3"
+}
 no_cause() {
-  local cmd f t ti=0
+  local cmd f t ti=0 fc=
   cmd=$(jq -r '.tool_input.command // ""' <<<"$1" 2>/dev/null) || return 1
   t=${cmd//[\"\']/}
   [[ $t =~ (^|[[:space:];\&|])ask[[:space:]]+[^[:space:]]+[[:space:]]+testissue([[:space:]]|$) ]] && ti=1
@@ -20,13 +52,24 @@ no_cause() {
   if [[ $cmd =~ (--body-file|-F)[[:space:]=]+[\"\']?([^[:space:]\"\']+) ]] && f=${BASH_REMATCH[2]}; then
     # `--body-file -` reads the body from stdin: a `< file` redirect names that file (stdin_file in lib.sh).
     [ "$f" != - ] || f=$(stdin_file "$cmd") || f=-
-    [ ! -f "$f" ] || cmd+=$'\n'$(cat "$f" 2>/dev/null)
+    [ ! -f "$f" ] || fc=$(cat "$f" 2>/dev/null)
   fi
   # A heading is its line whole, exactly two hashes, at a line start (up to three spaces before them, as Markdown
   # allows): after a newline (or a written \n) or the quote that opens the body, so '### Cause' and a mention of
   # '## What happens now' in a sentence are no heading.
-  local hs=$'(^|\n|\\\\n|[\"\'])[ ]{0,3}##[[:space:]]+' he=$'[ \t]*(\n|\\\\n|$)'
-  [[ $cmd =~ ${hs}Cause${he} ]] && return 1
-  [[ $cmd =~ ${hs}What\ happens\ now${he} || $ti = 1 ]] && return 0
+  # A line inside a fenced code block (``` or ~~~) is no heading: the headings are read from the text without its fences.
+  local hs=$'(^|\n|["\'])[ ]{0,3}##[[:space:]]+' he=$'[ \t]*(\n|$)' hc c=$cmd inl=1 bq='' hd=$'<<-?[ ]*[\'"]?[A-Za-z_][A-Za-z_0-9]*[\'"]?[ ]*\\)*[ ]*\n'
+  # A command with a here-document (`<<WORD` ending its line) holds its body as written: `\n` there is text, and a quote
+  # ends nothing; so does a body file (read apart from the command). In an inline body a written `\n` is a line break,
+  # but `\\n` is a backslash and an n; the quote that opens the body is the one that closes it.
+  if [[ $cmd =~ $hd ]]; then inl=0
+  else
+    [[ $cmd =~ (^|[[:space:]])(--body|-b)[[:space:]=]+\$?([\"\']) ]] && bq=${BASH_REMATCH[3]}
+    c=${cmd//\\\\/$'\001'}; c=${c//\\n/$'\n'}; c=${c//$'\001'/\\\\}
+  fi
+  hc=$(unfenced "$inl" "$bq" "$c")
+  [ -z "$fc" ] || hc+=$'\n'$(unfenced 0 "" "$fc")
+  [[ $hc =~ ${hs}Cause${he} ]] && return 1
+  [[ $hc =~ ${hs}What\ happens\ now${he} || $ti = 1 ]] && return 0
   grep -qiE "(^|[[:space:]])(--label|-l)(=|[[:space:]]+)?[\"']?([^[:space:]\"']*,)?bug([,\"'[:space:]]|\$)" <<<"$cmd"
 }
