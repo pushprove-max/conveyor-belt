@@ -96,6 +96,31 @@ t_healsharmlock() {
     || fail "a heals drop or heals harm of h00000000a1 asked while its card was being filed filed it again or dropped it: $(cat "$STUB/filed" "$ST/healsdropped.jsonl" 2>&1)"
 }
 
+# Bug: "Move up to harm" of a finding on a pipeline file asked for its hold (`control hold`, the records' lock) with the
+# list's lock still held, while `retry` of a shut batch card takes the records' lock and then the list's (healstake(),
+# lib/followups.sh): each waited for the other. The retry of #90 (h00000000a1 is freed by it) starts inside gh's issue
+# create ($STUB/create-cmd), between the list's read and its write, under `timeout 5`: a real process, as only a wait
+# shows the two do not deadlock. The create waits (polls, at most 5 s) until the retry holds the records' lock: retry
+# takes it once, in `locked again`, and keeps it until it has the list's lock, so the hold is asked behind it. The
+# retry's own output goes to /dev/null: the promotion reads gh's output to its end, so an open pipe would stall it.
+# The wait's result is kept in $STUB/retry-locked and checked: gh files the issue even when the wait gives up, so a
+# retry that started late (after the promotion had ended) would otherwise pass without the two ever meeting.
+t_healsharmretry() {
+  local out
+  setup '[]'; actlist; pipeentry
+  landed 90 | jq -c '.card = "c90" | (.step = "picked"), (.step = "blocked" | .result = "blocked" | .reason = "build: it failed")' >> "$ST/cards.jsonl"
+  # shellcheck disable=SC2016 # expanded when gh sources it
+  printf '%s\n' 'rm -f "$STUB/create-cmd"' \
+    "(timeout 5 env CONVEYOR_MAIN='$R' CONVEYOR_CARDS='$T/$CASE/cards' bash '$SRC/conveyor.sh' retry 90 > '$STUB/retry-out' 2>&1; echo \$? > '$STUB/retry-rc') 9>&- > /dev/null 2>&1 &" \
+    ". '$SRC/tests/wait.sh'; WAIT_CEILING=5 wait_until \"! flock -n '$ST/cards.jsonl' true\"; echo \$? > '$STUB/retry-locked'" > "$STUB/create-cmd"
+  out=$(timeout 20 env CONVEYOR_MAIN="$R" CONVEYOR_CARDS="$T/$CASE/cards" bash "$SRC/conveyor.sh" heals harm h00000000a4 2>&1) || fail "heals harm h00000000a4 failed: $out"
+  wait_until '[ -s "$STUB/retry-rc" ]' # the retry's exit, written as it ends
+  [ "$(cat "$STUB/retry-locked" 2>&1)" = 0 ] || fail "heals harm h00000000a4: gh's issue create never saw the retry 90 hold the records' lock (wait exit $(cat "$STUB/retry-locked" 2>&1)), so the two did not meet: $out $(cat "$STUB/retry-out" 2>&1)"
+  [ "$(cat "$STUB/retry-rc" 2>&1)" = 0 ] && [ "$(loop control | jq -c .held)" = '[100101]' ] \
+    && [ "$(jq -rs 'map(select(.id == "h00000000a1") | .batched) | join(" ")' "$ST/selfheals.jsonl")" = 90 ] \
+    || fail "heals harm h00000000a4 (a pipeline finding, so it asks control hold) and a retry 90 that holds the records' lock waited for each other, or one did not do its work (retry exit $(cat "$STUB/retry-rc" 2>&1)): $out $(cat "$STUB/retry-out" 2>&1) held $(loop control | jq -c .held) $(cat "$ST/selfheals.jsonl")"
+}
+
 # Bugs: "Drop now" erased the entry (no trace of it), left it on the list, or dropped some entries of an ask that named
 # one it could not drop; a dropped finding a review lists again stayed dropped, so it was lost.
 t_healsdrop() {
