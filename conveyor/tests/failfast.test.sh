@@ -199,3 +199,42 @@ t_failfasttimeout() {
   [ "$(jq -c '[.timeout.file, .stopped, .notRun, .passed]' "$d/fails")" = '["a.test.sh",["a.test.sh"],["b.test.sh"],[]]' ] \
     || fail "the run's result does not blame the timeout on a.test.sh alone and name b.test.sh as not run: $(cat "$d/fails") $(cat "$w.test")"
 }
+
+# Bug it catches (#1629): a card's run of files learned of a failed engine case only once the case's file ended, but
+# the case's keeper writes its status before it ends what the case left (case_end, lib.sh), so the other files
+# started cases through that cleanup. a.test.sh's runner runs fxbad, which fails and leaves a process that ignores
+# TERM, so its cleanup takes 3 s; b.test.sh's runner runs fxwait, which ends 1.5 s after fxbad failed, then fxlate on
+# the same slot (a pool of two, one a file). The run ends b.test.sh before fxlate starts, and names fxbad as failed and
+# b.test.sh as not run. The runners of a fixture engine (fxengine(), gitfence.test.sh) are run whole: only their run
+# shows when a file's runner tells the run of files of a failed case, and which cases the other one starts.
+t_failfastcleanup() {
+  local d=$T/$CASE w=$T/$CASE/wt n=t_ rc bad wt
+  sidewt 2
+  bad="${n}fxbad() { ( trap '' TERM; exec sleep 30 ) & : > '$d/bad'; echo 'FAIL [fxbad]: broken'; return 1; }" # sleep: a leftover that ignores TERM, so the case's cleanup takes 3 s
+  wt="${n}fxwait() { local i=0; while [ ! -e '$d/bad' ] && [ \$i -lt $(loadlimit 300) ]; do i=\$((i + 1)); sleep 0.05; done; sleep 1.5; }" # sleep: fxwait ends inside fxbad's 3 s cleanup
+  fxengine "$d" "$bad
+$wt
+${n}fxlate() { : > '$d/late'; }"
+  echo "{\"testSlots\": 2, \"testSlotsDir\": \"$d/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json" || fail "the pool of two"
+  echo "CONVEYOR_SHELL_TEST_CASE=fxbad exec bash '$d/src/conveyor.test.sh'" > "$w/a.test.sh"
+  echo "CONVEYOR_SHELL_TEST_CASE='fxwait fxlate' exec bash '$d/src/conveyor.test.sh'" > "$w/b.test.sh"
+  SIDEFAST=1 SIDELIMIT=60 siderun a.test.sh b.test.sh > "$d/out" 2>&1; rc=$?
+  [ "$rc" != 0 ] || fail "the run with fxbad failing passed: $(cat "$d/out" "$w.test")"
+  [ ! -e "$d/late" ] || fail "b.test.sh started fxlate after a.test.sh's fxbad failed, while fxbad's cleanup ran: $(cat "$w.test")"
+  [ "$(jq -c '[(.files | map([.file, (.cases | map(.name))])), .notRun]' "$d/fails")" = '[[["a.test.sh",["fxbad"]]],["b.test.sh"]]' ] \
+    || fail "the run does not name a.test.sh's fxbad as failed and b.test.sh as not run: $(cat "$d/fails") $(cat "$w.test")"
+  [ ! -e "$w.testlog/files.out" ] || fail "the run left its files' output folder, with: $(ls -A "$w.testlog/files.out")"
+}
+
+# Bug it catches (#1629): a run stopped by a file's failed mark (CONVEYOR_TEST_RED, lib/fileeach.sh) passed when that
+# file then passed, though it ended the other file and named it not run. a.test.sh makes its mark and passes once
+# b.test.sh has begun; b.test.sh runs until the stop ends it. The run fails.
+t_failfastmarkpass() {
+  local d=$T/$CASE w=$T/$CASE/wt rc
+  sidewt 2
+  echo "i=0; while [ ! -e '$d/b-start' ] && [ \$i -lt $(loadlimit 200) ]; do i=\$((i + 1)); sleep 0.05; done; : > \"\$CONVEYOR_TEST_RED\"; sleep 1; echo 'ok one'" > "$w/a.test.sh" # sleep: a.test.sh passes after the run read its mark
+  echo ": > '$d/b-start'; sleep 120" > "$w/b.test.sh" # sleep: b.test.sh runs on until the stop ends it
+  SIDEFAST=1 SIDELIMIT=60 siderun a.test.sh b.test.sh > "$d/out" 2>&1; rc=$?
+  [ "$rc" != 0 ] || fail "the run that a.test.sh's failed mark stopped passed when a.test.sh passed: $(cat "$d/out" "$w.test")"
+  [ "$(jq -c '.notRun' "$d/fails")" = '["b.test.sh"]' ] || fail "the run did not name b.test.sh as not run: $(cat "$d/fails") $(cat "$w.test")"
+}

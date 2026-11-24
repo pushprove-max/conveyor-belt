@@ -34,6 +34,8 @@ t_testcountbad() { [ -z "${CONVEYOR_TESTCOUNT_PROBE:-}" ] || fail "made to fail,
 # case run as the runner runs each (run_case, with the loop's test log folder), whose own inner case fails, is named
 # alone, as passed. Apart from t_testcountrunner, whose runner ran it as a probe: the inner case's keeper made that
 # run the file's longest.
+# Bug it catches (#1629, review): the inner case's keeper made the run's failed mark (CASE_RED, case_keep) that the
+# outer case's keeper was given, so a card's run of files that stops at its first failure stopped on a case that passed.
 t_testcountinner() {
   local d=$T/$CASE
   mkdir -p "$d/log"
@@ -42,10 +44,11 @@ t_testcountinner() {
     [ "$(cat "$T/testcountinner/in/testcount_inner.rc")" = 1 ] || fail "the case inside did not run and fail"
   }
   t_testcount_inner() { exit 1; }
-  ( export CONVEYOR_TEST_LOG=$d/log; CASE=testcount_outer; run_case ) > "$d/out" 2>&1
+  ( export CONVEYOR_TEST_LOG=$d/log CASE_RED=$d/red; CASE=testcount_outer; run_case ) > "$d/out" 2>&1
   grep -qx 'ok testcount_outer' "$d/out" || fail "the case that ran a case of its own did not pass: $(cat "$d/out")"
   [ "$(cd "$d/log/cases" && find . -type f | sort | tr '\n' ' ')" = './ok/testcount_outer ' ] \
     || fail "a case run inside a case is named in the run's records: $(cd "$d/log/cases" && find . | sort | tr '\n' ' ')"
+  [ ! -e "$d/red" ] || fail "the failed inner case made the run's failed mark of the case that passed: $(cat "$d/out")"
 }
 
 # Bug (#35): releaserun.test.sh defined reusesetup(), the name of batchreuse.test.sh's fixture. The runner loads every

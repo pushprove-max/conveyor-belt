@@ -44,14 +44,21 @@
 # running is ended as at the run's end (its output printed with no end line), and each file not run or not finished is
 # logged `-- notrun <file>` (testfails() notRun) and named in the output as not run, never as passed. Each file's command
 # gets the mark too, so a runner of cases (conveyor/conveyor.test.sh) stops at its first failed case as well.
+# On slots, each file's command is also given CONVEYOR_TEST_RED, a full path of its own (<log>.out/<n>.red, red): a
+# runner of cases makes that file as soon as a case fails, before it ends what the case left (case_keep,
+# conveyor/tests/lib.sh). The run reads it as that file's failure, as it reads a file's failed exit: no further file
+# starts, and each other file still running is ended then, not once the failed file has ended. The file that made it
+# is not ended: it ends on its own, and its exit and output say what failed. A run so stopped fails, though that file
+# then passes, as files were not run.
 fileeach() { # <side|one> <test.fileCommand> <FILELIMIT> <LOADSCALE> <log> [file...]
-  local fc=$2 fl=$3 ls=$4 l=$5 o=$5.out f g n s i=0 nx=1 r=0 to='' sl='' ff='' fast=''
+  local fc=$2 fl=$3 ls=$4 l=$5 o=$5.out f g n s i=0 nx=1 r=0 to='' sl='' ff='' fast='' red=''
   local -A job=()
   local -a fs=("${@:6}") ex=() fn=() fsec=()
   echo "TESTRUN files=${#fs[@]}" >> "$l"
   [ "$1" != side ] || [ "${CONVEYOR_TEST_FAILFAST:-}" != 1 ] || fast=1
   # shellcheck source=/dev/null
   if [ "$1" = side ] && [ -n "${CONVEYOR_TEST_SLOTS:-}" ] && . "$CONVEYOR_TEST_SLOTS" && slot_pool; then sl=1; mkdir -p "$o" || exit 1; fi
+  [ -z "$fast" ] || [ -z "$sl" ] || { red=$(cd "$o" && pwd -P) || exit 1; rm -f "$red"/*.red; }
   # The end of file <pid>'s run, its exit <x> (K: it was ended with the run; N: the first failure ended it), for
   # fe_shown: its process logged it. A failure of a fast run is its first failure (ff).
   fe_ended() { # <pid> <x>
@@ -59,13 +66,13 @@ fileeach() { # <side|one> <test.fileCommand> <FILELIMIT> <LOADSCALE> <log> [file
     [ -z "$fast" ] || [ "$2" = 0 ] || [ "$2" = K ] || [ "$2" = N ] || ff=1
   }
   # The first failure of a fast run: each file still running is ended (its own trap ends its group) and, as each
-  # file not begun, logged as not run.
+  # file not begun, logged as not run. A file that made its failed mark (CONVEYOR_TEST_RED) is waited for, not ended.
   fe_halt() {
-    local q x k
-    for q in "${!job[@]}"; do kill -TERM "$q" 2>/dev/null; done
+    local q x k; local -A kept=()
+    for q in "${!job[@]}"; do if [ -n "$red" ] && [ -e "$red/${job[$q]}.red" ]; then kept[$q]=1; else kill -TERM "$q" 2>/dev/null; fi; done
     for q in "${!job[@]}"; do
       k=${job[$q]}; wait "$q"; x=$?
-      [ "$x" != 143 ] || { x=N; echo "-- notrun ${fs[k - 1]}" >> "$l"; }
+      [ -n "${kept[$q]:-}" ] || [ "$x" != 143 ] || { x=N; echo "-- notrun ${fs[k - 1]}" >> "$l"; }
       fe_ended "$q" "$x"
     done
     for ((k = 1; k <= ${#fs[@]}; k++)); do
@@ -78,7 +85,7 @@ fileeach() { # <side|one> <test.fileCommand> <FILELIMIT> <LOADSCALE> <log> [file
     local f x w
     while [ -n "${ex[nx]+x}" ]; do
       f=${fs[nx - 1]}; x=${ex[nx]}
-      [ -z "$sl" ] || [ "$x" = S ] || { echo "== $f"; cat "$o/$nx" 2>/dev/null; rm -f "$o/$nx"; }
+      [ -z "$sl" ] || [ "$x" = S ] || { echo "== $f"; cat "$o/$nx" 2>/dev/null; rm -f "$o/$nx" "$o/$nx.red"; }
       if [ "$x" = K ]; then :; elif [ "$x" = 0 ]; then echo "-- ok $f"
       elif [ "$x" = N ]; then echo "conveyor: $f did not finish, and is not run: the run stopped at its first failure"
       elif [ "$x" = S ]; then echo "conveyor: $f is not run: the run stopped at its first failure"
@@ -88,10 +95,11 @@ fileeach() { # <side|one> <test.fileCommand> <FILELIMIT> <LOADSCALE> <log> [file
       nx=$((nx + 1))
     done
   }
-  # Each file that has ended, logged, then printed as fe_shown prints it.
+  # Each file that has ended, logged, then printed as fe_shown prints it. A file's failed mark is a failure (ff).
   fe_reap() {
     local q
     for q in "${!job[@]}"; do kill -0 "$q" 2>/dev/null || { wait "$q"; fe_ended "$q" $?; }; done
+    [ -z "$red" ] || for q in "${!job[@]}"; do [ ! -e "$red/${job[$q]}.red" ] || ff=1; done
     fe_shown
   }
   # True once a fast run has failed, each file that ended read first (fe_reap).
@@ -122,7 +130,7 @@ fileeach() { # <side|one> <test.fileCommand> <FILELIMIT> <LOADSCALE> <log> [file
     # shellcheck disable=SC2030,SC2031 # p is the subshell's own
     ( p=''; trap '[ -z "$p" ] || { kill -TERM "$p" 2>/dev/null; wait "$p" 2>/dev/null; }; exit 143' TERM
       [ -z "$sl" ] || { exec > "$o/$i" 2>&1; slot_mine; }
-      CONVEYOR_TEST_FILE=$f CONVEYOR_TEST_N=$i timeout --kill-after=10 "$s" bash -c "$fc"' "$CONVEYOR_TEST_FILE"' < /dev/null & p=$!
+      CONVEYOR_TEST_FILE=$f CONVEYOR_TEST_N=$i CONVEYOR_TEST_RED=${red:+$red/$i.red} timeout --kill-after=10 "$s" bash -c "$fc"' "$CONVEYOR_TEST_FILE"' < /dev/null & p=$!
       wait "$p"; x=$?
       if pgrep -g "$p" > /dev/null 2>&1; then
         ( for ((d = 3; d < 256; d++)); do [ "$d" = "${SLOT_FD:-}" ] || [ "$d" = "${SLOT_CAPFD:-}" ] || eval "exec $d>&-"; done
@@ -140,5 +148,5 @@ fileeach() { # <side|one> <test.fileCommand> <FILELIMIT> <LOADSCALE> <log> [file
   while [ ${#job[@]} -gt 0 ]; do fe_reap; [ -z "$ff" ] || fe_halt; [ ${#job[@]} = 0 ] || { sleep 0.2; } 2> /dev/null; done
   [ -z "$ff" ] || fe_halt
   fe_shown; [ -z "$sl" ] || rmdir "$o" 2>/dev/null
-  exit "${to:-$r}"
+  [ -z "$ff" ] || [ -n "$to" ] || r=1; exit "${to:-$r}" # a stopped run fails, though a marked file passed
 }

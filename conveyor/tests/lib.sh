@@ -22,6 +22,9 @@ export CONVEYOR_TEST_POOL=$SLOT_N:$SLOT_DIR
 # A run kept to one slot (CONVEYOR_TEST_ONESLOT) keeps this runner's cases on its slot (slot_pool read it): the loops
 # the cases run take slots as any other run does.
 unset CONVEYOR_TEST_ONESLOT
+# The file a case's keeper makes as soon as its case fails (case_keep), in a card's run of files that stops at its
+# first failure (CONVEYOR_TEST_RED, lib/fileeach.sh). The runner's own, not its cases' (case_keep unsets it for the case): a case's own run fails on purpose.
+CASE_RED=${CONVEYOR_TEST_RED:-}; unset CONVEYOR_TEST_RED
 # A run inside a Conveyor card inherits the loop's own environment. CARDCTL is the loop's control record (run.sh hands
 # it to each card): a case's card read the belt's rules for its own (with the belt's "visible changes need the owner's
 # yes" off, t_branchvisible's card landed).
@@ -409,12 +412,13 @@ case_keep() {
       command sleep 0.5
     done; kill -TERM $$ ) > /dev/null 2>&1 & watch=$!
   # Without the runner's test log: a case that runs a case of its own (run_case: t_machineleft) is one case of the run,
-  # and its inner one is not named in the run's records (cases/, conveyor.sh watch()).
+  # and its inner one is not named in the run's records (cases/, conveyor.sh watch()). Without the run's failed mark
+  # (CASE_RED) too: a failure its inner case is made to have is not its file's.
   # Each case has a host file folder of its own: a case that wrote its host file into one the cases shared (t_codexbuild:
   # a pool of one slot, testSlotsDir its own) gave every case's loop after it that pool, which held no slot of theirs,
   # and each card's test step waited for that one slot, "1 of 1 in use", for ever (the owner, 2026-11-14).
   # It starts in its own folder, never the runner's, which may be a checkout (gitfence, above).
-  set -m; ( set +m; export "${CASE_MARK?}" XDG_CONFIG_HOME=$T/$CASE/config; unset CONVEYOR_TEST_LOG
+  set -m; ( set +m; export "${CASE_MARK?}" XDG_CONFIG_HOME=$T/$CASE/config; unset CONVEYOR_TEST_LOG CASE_RED
     { mkdir -p "$T/$CASE" && cd "$T/$CASE"; } || { echo "FAIL [$CASE]: the case's folder $T/$CASE could not be made" >&2; exit 1; }
     "t_$CASE" ) > "$T/$CASE.out" 2>&1 & p=$!; set +m
   # Its limit (CASE_LIMIT: its file's `# timeout:` line, run_case): past it, the case's group is told to end and
@@ -428,6 +432,8 @@ case_keep() {
   local own="its file's # timeout: line"; [ "$CASE_LIMIT" = "$CASE_OWN" ] || own+=", $CASE_OWN s, times the load factor $CASE_LOAD"
   [ ! -e "$T/$CASE.late" ] || { rc=124; echo "FAIL [$CASE]: timed out after $CASE_LIMIT s ($own); the case and its process group were stopped" >> "$T/$CASE.out"; }
   echo "$rc" > "$T/$CASE.rc"
+  # A failed case's mark for the run of files (CASE_RED), made now: the cleanup below can take seconds.
+  [ "$rc" = 0 ] || [ -z "${CASE_RED:-}" ] || : 2> /dev/null > "$CASE_RED"
   kill "$watch" 2>/dev/null; wait "$watch" 2>/dev/null
   case_end "$p"; exit 0
 }
