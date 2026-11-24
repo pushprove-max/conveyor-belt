@@ -264,3 +264,27 @@ t_clibatchlanded() {
   [ "$(tail -n 1 "$STUB/eng.out")" = "building=1 inuse=0" ] \
     || fail "a card whose batch has landed, asleep at its claim, was not left out of the cap's count and the machine's count (c7 landed, c8 not, both idle: building=1 inuse=0 expected): $(cat "$STUB/eng.out")"
 }
+
+# Bug it catches (R245): hostclis() wrote the new host's report to "$CLIS.$$", and $$ is the same in every card's
+# subshell, so two cards reading the CLIs at once shared that file: the second card's write emptied it, and the first
+# card's mv then made CLIS that empty file. Here card A (a subshell) writes its report and stops at its mv; card B (a
+# second subshell of the same shell, so the same $$) opens its own report for writing and stops before it writes; A's
+# mv then runs. The CLIS that mv makes must hold A's report. The two stop through mv and jq stubs in their own subshells:
+# no other way holds each call at its point in the real hostclis().
+t_clisparallel() {
+  clisetup "[$(issue 7 2026-01-01)]"
+  export PATH; PATH=$(on claude)
+  mkfifo "$T/$CASE/atmv" "$T/$CASE/opened" "$T/$CASE/moved" || fail "the case's fifos were not made"
+  # shellcheck disable=SC2016 # expanded in the engine shell (fx_in)
+  fx_in 'f=$T/$CASE
+    ( mv() { if [ "$1" = -f ] && [ "${3:-}" = "$CLIS" ]; then echo > "$f/atmv"; read -r < "$f/opened"; command mv "$@"; local r=$?
+          if [ -s "$CLIS" ]; then echo full; else echo empty; fi > "$f/published"; echo > "$f/moved"; return $r; fi; command mv "$@"; }
+      hostclis fresh > /dev/null ) &
+    read -r < "$f/atmv"
+    ( jq() { case "$*" in *"at: (now | floor)"*) echo > "$f/opened"; read -r < "$f/moved" ;; esac; command jq "$@"; }
+      hostclis fresh > /dev/null ) &
+    wait'
+  [ "$(cat "$T/$CASE/published" 2>&1)" = full ] \
+    || fail "with two hostclis fresh calls of one \$\$ (card A at its mv, card B with its report opened for writing), A's mv made CLIS an empty file: $(cat "$T/$CASE/published" 2>&1) $(cat "$T/$CASE/run.out")"
+  jq -e '.clis == {claude: null}' "$ST/clis.json" > /dev/null || fail "after the two hostclis fresh calls, CLIS is not the host's report: $(cat "$ST/clis.json" 2>&1)"
+}

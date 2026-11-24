@@ -467,3 +467,54 @@ t_needsretryonce() {
   najob
   ! grep -q 'review-retry of #7' "$T/$CASE/run.out" || fail "a second job tried the failed review-retry of #7 again: $(cat "$T/$CASE/run.out")"
 }
+
+# naback <id>: the ledger's rows of the decision get an asking time long before the case: decision.sh's times are whole
+# seconds, and a decision asked again in the second of its first asking keeps that time, so a case could not tell them apart.
+naback() { jq -c --arg id "$1" 'if .id == $id then .askedAt = "2026-01-01T00:00:00Z" else . end' "$CONVEYOR_LEDGER" > "$T/$CASE/led.new" \
+  && mv "$T/$CASE/led.new" "$CONVEYOR_LEDGER" || fail "the asking time of $1 was not set back"; }
+
+# Bug it catches (R280): needsauto() took a decision its log listed by id as seen, so x-1, held for the owner (it names
+# "delete", the default auto.reserved), answered, then asked again under the same id with nothing reserved, ran no auto
+# pass, and stayed open until the Foreman ran one. The first pass is the Foreman's `auto decide`, not the engine's: the
+# engine kept the asking time only of the ones its own look found listed, so it took the second asking as the seen one.
+t_needsautoreask() {
+  local d=$SRC/../.claude/scripts/decision.sh out
+  setup '[]'; export CONVEYOR_LEDGER=$T/$CASE/decisions.jsonl; mkdir -p "$ST"; naauto on
+  bash "$d" add x-1 'Delete the old table?' yes 'a test' > /dev/null && naback x-1 || fail "x-1 was not asked"
+  out=$(loop auto decide 2>&1) && grep -q '^- x-1: .*(reserved: delete)$' "$AUTOLOG" \
+    || fail "the Foreman's auto decide did not hold x-1 ($out): $(cat "$AUTOLOG")"
+  bash "$d" answer x-1 no > /dev/null && bash "$d" add x-1 'Keep the new table?' yes 'a test' --reask 'asked again' > /dev/null || fail "x-1 was not asked again"
+  fx_in needsauto
+  [ "$RC" = 0 ] && [ "$(jq -cs 'map(select(.id == "x-1")) | last | .answer' "$CONVEYOR_LEDGER")" = '"yes"' ] \
+    || fail "x-1, asked again under the id the log lists, was not decided by the auto pass ($RC): $(cat "$CONVEYOR_LEDGER") $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (R280 fix): <log>.seen kept a held decision's id and asking time, and decision.sh stamps whole seconds,
+# so x-1, held for the owner, then asked again by the picker under its id in the same second (the hook's re-ask) with
+# nothing reserved, matched the line of the first asking: needsauto() ran no pass, and x-1 stayed open.
+t_needsautosame() {
+  setup '[]'; export CONVEYOR_LEDGER=$T/$CASE/decisions.jsonl; mkdir -p "$ST"; naauto on
+  bash "$SRC/../.claude/scripts/decision.sh" add x-1 'Delete the old table?' yes AskUserQuestion > /dev/null || fail "x-1 was not asked"
+  loop auto decide > /dev/null 2>&1 && grep -q '^- x-1: .*(reserved: delete)$' "$AUTOLOG" || fail "auto decide did not hold x-1: $(cat "$AUTOLOG")"
+  # The re-ask decision.sh appends, its asking time the first one's (the same second).
+  jq -c 'select(.id == "x-1") | .question = "Keep the new table?" | .source = "AskUserQuestion; re-ask: picker repeats x-2"' "$CONVEYOR_LEDGER" > "$T/$CASE/reask" \
+    && cat "$T/$CASE/reask" >> "$CONVEYOR_LEDGER" || fail "x-1 was not asked again"
+  fx_in needsauto
+  [ "$RC" = 0 ] && [ "$(jq -cs 'map(select(.id == "x-1")) | last | .answer' "$CONVEYOR_LEDGER")" = '"yes"' ] \
+    || fail "x-1, held, then asked again in the same second with nothing reserved, was not decided by the auto pass ($RC): $(cat "$CONVEYOR_LEDGER") $(cat "$AUTOLOG.seen") $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (R280 fix): <log>.seen kept a held decision's whole row, and decision.sh's reopen writes the row again
+# with an asking time of whole seconds, so x-1, held for the owner, then answered and reopened in the second it was
+# asked, had the row of its first asking: needsauto() ran no pass for the reopened decision.
+t_needsautoreopen() {
+  local d=$SRC/../.claude/scripts/decision.sh
+  setup '[]'; export CONVEYOR_LEDGER=$T/$CASE/decisions.jsonl; mkdir -p "$ST"; naauto on
+  bash "$d" add x-1 'Delete the old table?' yes 'a test' > /dev/null && naback x-1 || fail "x-1 was not asked"
+  loop auto decide > /dev/null 2>&1 && grep -q '^- x-1: .*(reserved: delete)$' "$AUTOLOG" || fail "auto decide did not hold x-1: $(cat "$AUTOLOG")"
+  # naback again: the reopen in the asking's own second, so its row is the first asking's row.
+  bash "$d" answer x-1 no > /dev/null && bash "$d" reopen x-1 > /dev/null && naback x-1 || fail "x-1 was not answered and reopened"
+  fx_in needsauto
+  [ "$RC" = 0 ] && grep -qx 'x-1 3' "$AUTOLOG.seen" \
+    || fail "x-1, held, then answered and reopened in the second it was asked, got no auto pass ($RC): $(cat "$CONVEYOR_LEDGER") $(cat "$AUTOLOG.seen" 2>&1) $(cat "$T/$CASE/run.out")"
+}

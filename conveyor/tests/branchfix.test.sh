@@ -14,12 +14,15 @@ t_branchfix() {
   # A NO-GO gets a fix session, then a new review. The branch is named as the engine names a card of issue #7 (its
   # card id): the card is #7's and the commit closes it. Bug (issue 601): taking no number from a branch's name would
   # land it as issue 0.
-  lane c20260101T000000-main-7 c.txt sea; echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
+  lane c20260101T000000-main-7 c.txt sea; echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; m=$(git -C "$R" rev-parse main)
   out=$(loop land-branch c20260101T000000-main-7) || fail "a branch whose second review is a GO did not land: $out"
   c=$(newest); count "1 2 1"
   [ "$(steps "$c")" = "picked worktree deps brief start review start fix start review start test start landed " ] &&[ "$(st "select(.card == \"$c\" and .step == \"review\") | .result" | tr '\n' ' ')" = "NO-GO GO " ] \
     || fail "a NO-GO was not followed by a fix session and a new review: $(steps "$c")"
-  [ "$(st "select(.card == \"$c\" and .step == \"picked\") | [.issue, .branch, .title] | join(\"|\")")" = "7|c20260101T000000-main-7|title 7" ] || fail "the card is not issue #7's"
+  # Bug (R314 fix, E13): the picked line kept no main commit, so Needs you read what the card was picked to land from
+  # main's reflog, by whole seconds. It keeps main's commit the branch was weighed against (base).
+  [ "$(st "select(.card == \"$c\" and .step == \"picked\") | [.issue, .branch, .title, .base] | join(\"|\")")" = "7|c20260101T000000-main-7|title 7|$m" ] \
+    || fail "the card is not issue #7's, or its picked line does not keep main's commit $m: $(st "select(.card == \"$c\" and .step == \"picked\")")"
   grep -q '# Issue #7: title 7' "$STUB/brief" && grep -q '# This card skipped the build' "$STUB/brief" && grep -q 'wrong word' "$STUB/brief" || fail "the fix session was not handed the issue, the skipped build and the findings"
   git -C "$R" log -1 --format=%B main | grep -q 'feat(billing): title 7 (#7)' && [ "$(git -C "$R" show --name-only --format= main | tr '\n' ' ')" = "a.txt c.txt " ] \
     || fail "the landed commit is not the branch's change plus the fix, under the issue's name: $(git -C "$R" show --name-only --format=%s main | tr '\n' ' ')"

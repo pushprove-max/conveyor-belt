@@ -231,7 +231,7 @@ EOF
     # The pack's auto.reserved and the owner's profile (owner-way.md): its "Never decide; ask" and "Hard lines" items.
     heldlist RES || die "the pack's auto.reserved or the owner's profile could not be read"
     L=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl}
-    open='[]' seen=
+    open='[]' seen='' cnt='{}'
     # A blocked-card decision's key: its issue and the first 200 characters of its block reason, digits as N (the card id and the
     # timings in a reason differ on each block of one issue, and the engine cut the reason at 300 characters before the digits
     # changed its length, so its end differs). seen: the keys of the blocked-card decisions already answered with the recommended
@@ -239,6 +239,9 @@ EOF
     bkey='def bkey: (.question // "") | (capture("\\(#(?<n>[0-9]+)\\) is blocked with its work kept: (?<r>.*)\\. What should the engine do with it\\?\\z")? // empty)
       | "\(.n) \(.r | gsub("[0-9]+(\\.[0-9]+)?"; "N") | .[:200])";'
     if [ -e "$L" ]; then
+      # Each decision's count of ledger rows (hold()), read before the rows: a row added between the two reads then
+      # gives a count lower than the row's, never one a later asking will have.
+      cnt=$(jq -cs 'group_by(.id) | map({key: .[0].id, value: length}) | from_entries' "$L") || die "the ledger $L could not be read"
       all=$(CONVEYOR_MAIN=$MAIN bash "$DECISION" list) || die "the ledger $L could not be read"
       open=$(jq -c '[.[] | select(.answeredAt == null)]' <<<"$all") || die "the ledger $L could not be read"
       seen=$(jq -r "$bkey"'.[] | select(.answeredAt != null and (.id | startswith("blocked-")) and .answer == .proposedDefault) | bkey' <<<"$all") || die "the ledger $L could not be read"
@@ -246,8 +249,15 @@ EOF
     w=$(way) d=0 k=0
     # put <text>: the text added to the log just before its "## Waiting for the owner" heading (the end of "## Decisions").
     put() { P=$1 awk '/^## Waiting for the owner$/ && !done { printf "%s\n\n", ENVIRON["P"]; done = 1 } { print }' "$log" > "$log.new" && mv "$log.new" "$log" || die "the log $log could not be written"; }
-    # hold <id> <question> <why>: the decision listed for the owner, once (the section is the log's last).
-    hold() { grep -qF -- "- $1: " "$log" || printf -- '- %s: %s (%s)\n' "$1" "$2" "$3" >> "$log" || die "the log $log could not be written"; k=$((k + 1)); }
+    # hold <id> <question> <why>: the decision listed for the owner, once (the section is the log's last). Its id and
+    # its count of ledger rows ("<id> <count>") go to <log>.seen, a line each, once: a decision asked again or reopened
+    # keeps its id, and in the same second its whole row too (decision.sh stamps whole seconds), but the ledger only
+    # grows, a row for each ask, answer and reopen. The engine's needsauto() (lib/needsask.sh) runs a pass for an open
+    # decision whose line no pass wrote.
+    hold() { local s
+      grep -qF -- "- $1: " "$log" || printf -- '- %s: %s (%s)\n' "$1" "$2" "$3" >> "$log" || die "the log $log could not be written"; k=$((k + 1))
+      s=$(jq -r --argjson c "$cnt" '"\(.id | gsub("[\r\n]+"; " ")) \($c[.id] // 0)"' <<<"$row") \
+        && { grep -qxF -- "$s" "$log.seen" 2>/dev/null || printf '%s\n' "$s" >> "$log.seen"; } || die "the file $log.seen could not be written"; }
     while IFS= read -r row; do
       # Split on the unit separator, not on a tab: read joins tabs in a row, so an empty field would move the rest.
       IFS=$'\x1f' read -r id q def asked opts < <(jq -r 'def one: gsub("[\r\n\u001f]+"; " "); [.id, (.question | one), (.proposedDefault | one), .askedAt,

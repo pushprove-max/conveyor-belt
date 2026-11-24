@@ -7,9 +7,10 @@ branchissue() { # <branch> <tip>
     '{number: 0, title: ($t[0:200]), body: "No issue: this card lands the change of branch \($b) against main. The commit messages of the branch say what the change is for:\n\n\($m | sub("\n+$"; ""))", labels: [], milestone: null}'
 }
 
-# Under the lock: the picked line of a land-branch card. Prints the card id. An issue with an open card is refused:
-# that card (in flight in the loop, or stopped mid-card) is building the same issue.
-pickbranch() { # <branch> <issue> <title>
+# Under the lock: the picked line of a land-branch card, with main's commit the branch was weighed against (base: Needs
+# you reads from it what the card was picked to land, branchon(), lib/snapshot.sh). Prints the card id. An issue with
+# an open card is refused: that card (in flight in the loop, or stopped mid-card) is building the same issue.
+pickbranch() { # <branch> <issue> <title> <main's commit>
   local card l
   check || return 1
   [ "$2" = 0 ] || ! stdb ask issue cards "$2" | jq -es --argjson n "$2" 'map(select(.issue == $n)) | group_by(.card) | any(all(.step | IN("landed", "closed", "blocked") | not))' >/dev/null \
@@ -17,7 +18,7 @@ pickbranch() { # <branch> <issue> <title>
   # A card id is its second, its project and its issue: a second landing in the same second (every branch that names no issue is
   # issue 0) waits for the next one, so no two cards share their lines.
   while card="c$(date -u +%Y%m%dT%H%M%S)-$CTAG-$2"; [ -n "$(stdb ask card "$card")" ]; do sleep 1; done
-  l=$(line "$card" "$2" picked ok "$(jq -cn --arg t "${3:0:200}" --arg b "$1" '{title:$t,branch:$b}')") && append "$l" && echo "$card"
+  l=$(line "$card" "$2" picked ok "$(jq -cn --arg t "${3:0:200}" --arg b "$1" --arg m "$4" '{title:$t,branch:$b,base:$m}')") && append "$l" && echo "$card"
 }
 
 # One branch landed as one card (the rule is in README.md). Everything that can be refused is refused before
@@ -26,26 +27,28 @@ pickbranch() { # <branch> <issue> <title>
 # project (c<time>-<project>-<issue>), else 0: a number elsewhere in a name (hand/snapexec-290) is no issue, as the
 # engine would review the branch against that issue and could close it.
 landbranch() { # <branch>
-  local br=$1 tip n title c end
+  local br=$1 tip n title c end m
   # A branch name only: revision syntax (fast-lane~0, @{-1}) names no branch.
   [ "$br" != "$BRANCH" ] && git check-ref-format "refs/heads/$br" && tip=$(git rev-parse -q --verify "refs/heads/$br^{commit}") \
     || { echo "conveyor: no branch $br to land" >&2; return 2; }
+  # main is read once too: the checks below and the picked line's base are of the same commit.
+  m=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || { echo "conveyor: no branch $BRANCH to land on" >&2; return 2; }
   # The fast lane's change lands on the owner's command alone, under whatever name it is asked for: its branch, or
   # any branch that holds the change of any of its tips (lanetips, lanein), the lane's own branch renamed included.
   if [ "$br" = "$LANEBR" ] || { while read -r n; do lanein "$tip" "$n" && break; done < <(lanetips | sort -u); [ -n "$n" ]; }; then
     owneronly land || return 2
   fi
   # Its stdout alone: the first line is the tree id, so a warning on stderr must not come ahead of it.
-  end=$(git merge-tree --write-tree "refs/heads/$BRANCH" "$tip") \
+  end=$(git merge-tree --write-tree "$m" "$tip") \
     || { echo "conveyor: branch $br does not merge into main as it stands; rebase it on main first. Nothing recorded: $(tail -n +2 <<<"$end" | head -c 600)" >&2; return 1; }
-  [ "$(head -n 1 <<<"$end")" != "$(git rev-parse "refs/heads/$BRANCH^{tree}")" ] || { echo "conveyor: nothing to land: branch $br holds no change against main"; return 0; }
+  [ "$(head -n 1 <<<"$end")" != "$(git rev-parse "$m^{tree}")" ] || { echo "conveyor: nothing to land: branch $br holds no change against main"; return 0; }
   n=0; ! [[ $br =~ ^c[0-9]{8}T[0-9]{6}-"$CTAG"-([1-9][0-9]{0,8})$ ]] || n=${BASH_REMATCH[1]}
   if [ "$n" = 0 ]; then title=$(git log --reverse --format=%s "refs/heads/$BRANCH..$tip" | head -n 1)
   else title=$(timeout 60 gh issue view "$n" --json title | jq -er .title) \
     || { echo "conveyor: branch $br lands as issue #$n, which cannot be read; nothing recorded" >&2; return 1; }
   fi
   c=$(codexready) || { echo "conveyor: $c; nothing recorded" >&2; return 1; }
-  c=$(locked pickbranch "$br" "$n" "$title") || return 1
+  c=$(locked pickbranch "$br" "$n" "$title" "$m") || return 1
   # Each process the card starts carries its mark, as a card of the loop's does (cardrun(), lib/run.sh): a review left
   # running when this shell is gone is ended by retry or shut before its worktree is taken (leftin()).
   CONVEYOR_CARDRUN=$c card "$c" "$n" "$br" "$tip"

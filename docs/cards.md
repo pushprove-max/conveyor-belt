@@ -12,9 +12,11 @@ retry or shut the card by hand first, the loop closes the decision and takes no 
 A card stopped for your yes, and a main-red fix card, are not put as decisions.
 
 When the nightly whole test files an issue for a test that fails on main and the issue is held, the held issue also shows
-as an open decision, once. The recommended option is "Release it, first in the order": the loop puts the issue first in
+as an open decision. The recommended option is "Release it, first in the order": the loop puts the issue first in
 the `order` list and releases it. "Leave it held" changes nothing. If you release the issue by hand, or close it, the
-loop closes the decision.
+loop closes the decision. If the issue is then held and open again, the decision opens again.
+After an engine upgrade, the engine may not know if an older engine already acted on your answer. Then the issue stays
+held, and the decision opens again with no recommended option. Auto mode does not answer it.
 
 ## Cards with no GitHub issue
 

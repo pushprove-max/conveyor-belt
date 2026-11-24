@@ -8,7 +8,7 @@ def fails: type == "object" and (keys - ["stopped"]) == ["files", "of", "timeout
   and (.files | type == "array" and all((.file | type == "string") and (.cases | type == "array" and all(keys == ["line", "name"] and all(type == "string")))))
   and (.timeout | . == null or (type == "object" and keys == ["file", "sec"]));
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
-def known: ["product", "title", "usage", "kept", "leftover", "followups", "outside", "sec", "visible", "branch", "created", "counts", "of", "model", "effort",
+def known: ["product", "title", "usage", "kept", "leftover", "followups", "outside", "sec", "visible", "branch", "base", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "excerpts", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
   "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "partial", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "noIssue", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "pick", "lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed", "port"];
 def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown", "lint", "seats"];
@@ -48,7 +48,7 @@ def ok: . as $r | (keys - known) == need
         # review line of a GO of the whole change that named none (card()).
         and (.rollout == null or ((.step | IN("review", "landed")) and (.step == "review" or (.rollout | length > 0))
           and (.rollout | type == "array" and all(type == "object" and keys == ["action", "fails", "place"] and all(type == "string")))))
-        and (.visible // "" | type == "string") and (.branch // "" | type == "string") and (.mainRed // "" | type == "string")
+        and (.visible // "" | type == "string") and (.branch // "" | type == "string") and (.base // "" | type == "string") and (.mainRed // "" | type == "string")
         # testFile: a Tests page card's picked line names its test file (testpick(), lib/testaction.sh).
         and (.testFile == null or (.step == "picked" and (.testFile | type == "string")))
         # noIssue: the picked line of another card with no GitHub issue (a Foreman order, a review follow-up, a release fix card or a split part) names what the Board shows it as.

@@ -37,7 +37,7 @@ def row: . as $s | $s.first as $f | $s.r as $r | $s.l as $l
              endAt: ($end.time // null), retriedAt: ($end.retriedAt // null), retriedWhy: ($end.retriedWhy // null),
              # When a card whose issue was closed while it was blocked, or that the owner shut (shut()), was blocked,
              # else null: from then to its end it waited on the owner, and none of that time is a landing's.
-             blockedAt: (if $end.step == "closed" and ($end.reason | IN($shut, $ownshut)) then $s.lb else null end), followups: ($end.followups // []), rollout: ($end.rollout // []), branch: ($f.branch // null),
+             blockedAt: (if $end.step == "closed" and ($end.reason | IN($shut, $ownshut)) then $s.lb else null end), followups: ($end.followups // []), rollout: ($end.rollout // []), branch: ($f.branch // null), base: ($f.base // null),
              diff: ($end.diff // null), paths: ($end.paths // null), batch: ($end.batch // null), depth: $s.dep,
              # The blocked card whose kept patch this card resumes (named by its first worktree line), else null.
              from: ($s.wt | .reason // "" | select(test("built from nothing") | not)
@@ -145,7 +145,7 @@ def fold($x): .an as $i | .at as $pt | .gt as $gt | ($x.step | IN("start", "file
       | if $x.step | IN("landed", "closed") then .lc = ($x | endline) else . end
       | if $x.step == "blocked" then .lb = $x.time else . end
       | if $mark then . else
-          (if .n == 0 then .first = ($x | {card, issue, mainRed, testFile, noIssue, title, time, branch, beyond})
+          (if .n == 0 then .first = ($x | {card, issue, mainRed, testFile, noIssue, title, time, branch, base, beyond})
            elif $x.step | IN("seats", "build", "review", "test", "fix", "rebase") then .s1 += [$x | stepline($gt)]
            elif $x.step == "blocked" and ($x.spent | type) == "object" then .s2 += [$x | spentline($gt)] else . end)
           | .n += 1 | .gt = $x.time

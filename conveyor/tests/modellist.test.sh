@@ -326,6 +326,25 @@ t_nopricegroup() {
   ! grep -q 'No built-in price for claude-new-9: ' "$n" || fail "a note filed or dismissed on the Board was noted again: $(cat "$n")"
   [ "$(jq -c .noted "$ST/noprice.json")" = '["claude-new-9"]' ] || fail "a model another project noted is not on noted: $(cat "$ST/noprice.json")"
 }
+# Bug it catches (R316): the snapshot gave the notes as noprice.json kept them, not as plugin-bugs.md holds them now, so
+# a note the Foreman filed (stop.sh puts "filed as #<n>" at its end) was still given, and a Board on another machine
+# added it there as a note to file again. Marked filed, the note is given no more; marked as stop.sh accepts it with a
+# tab before "filed as" and a tab and a period after the number too (the first fixes read a space, comma or semicolon
+# alone before it and spaces alone after it, so gave that note still, E14). Bug too: a Foreman outside the plugin's
+# own repository files the note as a row of its own (stop.sh) and leaves the note as it was, which the snapshot still
+# gave: a note for a model a filed line names is not given either.
+t_nopricefiled() {
+  local n out tab
+  setup '[]'; unset CONVEYOR_NOPRICE_CMD; n=$ST/foreman/plugin-bugs.md; tab=$(printf '\t')
+  tune '.models.allowed.claude += ["claude-new-9"]'
+  loop control model claude claude-new-9 >/dev/null || fail "the builder's seat was not set"
+  looks noprice
+  grep '^- ' "$n" | sed "s/ · evidence: -\$/${tab}filed as #12$tab. · evidence: -/" > "$n.new" && cat "$n.new" >> "$n" \
+    && grep -q "^- .* No built-in price for claude-new-9: .*${tab}filed as #12$tab\\. · evidence: -\$" "$n" \
+    && [ "$(grep -c 'No built-in price for claude-new-9: ' "$n")" = 2 ] || fail "the note's filed copy was not added after it: $(cat "$n" 2>&1)"
+  out=$(loop snapshot --fresh | jq -c .priceNotes)
+  [ "$out" = '[]' ] || fail "the snapshot gives a note plugin-bugs.md has as filed, or a note whose filed copy it holds ($(grep '^- ' "$n")): $out"
+}
 # Bug: a project with no judge (a Claude-only one: the judge needs another CLI than the reviewer's) listed no model at
 # all, as the judge's seat, unset, failed the look.
 t_nopricenojudge() {

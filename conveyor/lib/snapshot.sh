@@ -26,8 +26,8 @@
 #   group whose tenth trial card ended, {group, title, reason, since, time (since again: the Foreman watcher keys it on time), trial, default}, cost.trials.groups' due; and,
 #   while the control record holds pickBack, the rule's own return to shadow, {group: null, title, reason, since, time}).
 #   priceNotes, beside it, is each plugin problem note serve's look made for a model the built-in price table does
-#   not price, as noprice() wrote it in the Foreman's plugin-bugs.md ([] for none): a Board on another machine than the
-#   belt adds it to the Foreman's folder there (.claude/scripts/dashboard.sh foremen()).
+#   not price, as the Foreman's plugin-bugs.md holds it now, less one filed since ([] for none): a Board on another
+#   machine than the belt adds it to the Foreman's folder there (.claude/scripts/dashboard.sh foremen()).
 #   mainTest, beside it, is the failure of the whole test on main that stands (maintest(): issue, cases, from, to,
 #   since, exit), null when its last run passed or none ran, when the pack names no test.main, or when its issue is
 #   known closed. fullTest is the full test suite of the Board (fulltest()): command (the pack names test.full), why
@@ -604,6 +604,66 @@ healssnap() {
        sorted: ($s[0] // null | if . == null then null else {time, ended, items: ([.items[]? | select(.moved == null)] | length),
          moved: ([.items[]? | select((.effect // "harm") != "harm" and .done)] | length)} + (if .judge.failed then {failed: .judge.failed} else {} end) end)}'
 }
+# branchon <tip> <base> <scratch folder>: whether main, whose history holds <tip>, still holds the change of the branch
+# at <tip>. The change is what landing <tip> on <base> adds to it: <base> is main's commit the card was picked against
+# (the picked line's base, landbranch()), which took the change to land that, the merge of the two (git merge-tree,
+# here <land>), so a part of <tip> main had already, in another commit, is not part of it. A base git no longer has, or
+# the two do not merge: not said to be on main (a card with no base is read against its kept patch's base: below). A file the change
+# moved is read at its new name (only the lines it changed there are its own), its old name as one it took out. Else main still
+# holds the change when what main changed since <land> (git diff -U0, by line of <land>'s files, a file main moved
+# read at the name it had there) removes no line the change added, and adds back no line the change took out beside
+# where it took it out (from the line before the hunk's new lines to the line after them; a line main changes there is
+# not put back unless it is one of those), takes out no file the change changed (a file moved with so much of it
+# changed that git does not pair the two names is read as one taken out), and moves no file to the name of one the
+# change took out. A file whose content the change changed holds while main has not made it a binary file or changed
+# what such a file holds since (a file the change only moved, or whose mode alone it set, has no content of the
+# change's), and a file whose mode it set (made, took out, or gave a new mode) while main has not changed its mode
+# since. Each check that cannot run says the change is not on main.
+branchon() {
+  local l
+  [[ $2 =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] && l=$(git merge-tree --write-tree "$2^{commit}" "$1" 2>/dev/null) && l=${l%%$'\n'*} && [ -n "$l" ] \
+    && git diff -U0 -M --no-ext-diff --no-textconv --no-color --src-prefix=a/ --dst-prefix=b/ "$2^{commit}" "$l" > "$3/onmain.br" 2>/dev/null \
+    && git diff -U0 -M --no-ext-diff --no-textconv --no-color --src-prefix=a/ --dst-prefix=b/ "$l" "refs/heads/$BRANCH" > "$3/onmain.mn" 2>/dev/null || return 1
+  # Per file (its diff --git line; a file the branch moved under the key of its new name, from its rename to line, and
+  # its old name as one the branch took out), the branch's added ranges (lo, hi) and, per hunk that took lines out, the lines it
+  # took out (gone), the places after a line of <land> where they were (p0 to p1) and whether the branch changed
+  # it as a binary file (bin); then each file of main's since
+  # <land>, under the key of its name in <land> (key(), from its rename from line), its header read whole before hdr()
+  # weighs a deletion or a mode change (git writes the mode lines before the rename lines), then each hunk against
+  # them, its added lines read before done() weighs it.
+  awk 'function hunk(   o, n) { split(substr($2, 2), o, ","); split(substr($3, 2), n, ",")
+         A = o[1] + 0; B = (2 in o) ? o[2] + 0 : 1; C = n[1] + 0; D = (2 in n) ? n[2] + 0 : 1 }
+    function done(   i, j, s0, s1) { if (!inh || D == 0) return
+      s0 = (B == 0) ? A : A - 1; s1 = A + B - (B == 0 ? 0 : 1)
+      for (i = 1; i <= nr[k]; i++) if (s0 <= p1[k, i] && s1 >= p0[k, i]) for (j = 1; j <= nadd; j++) if ((k, i, add[j]) in gone) bad = 1 }
+    function key(p) { return (p ~ /^"/) ? "diff --git \"a/" substr(p, 2) " \"b/" substr(p, 2) : "diff --git a/" p " b/" p }
+    function hdr() { if (hd && (k in seen) && (dl || (mk && (k in mode)))) bad = 1; hd = 0 }
+    FNR == 1 { inh = 0; nadd = 0 }
+    FILENAME == ARGV[1] && /^diff --git / { k = $0; seen[k] = 1; inh = 0; next }
+    FILENAME == ARGV[1] && !inh && /^(old mode|new mode|new file mode|deleted file mode) / { mode[k] = 1; next }
+    FILENAME == ARGV[1] && !inh && /^rename from / { o = key(substr($0, 13)); seen[o] = 1; mode[o] = 1; next }
+    FILENAME == ARGV[1] && !inh && /^rename to / { o = key(substr($0, 11)); seen[o] = 1; if (k in mode) mode[o] = 1; k = o; next }
+    FILENAME == ARGV[1] && !inh && /^Binary files / { bin[k] = 1; next }
+    FILENAME == ARGV[1] && /^@@ / { hunk(); inh = 1
+      if (D > 0) { na[k]++; lo[k, na[k]] = C; hi[k, na[k]] = C + D - 1 }
+      if (B > 0) { nr[k]++; p0[k, nr[k]] = (D > 0) ? C - 1 : C; p1[k, nr[k]] = (D > 0) ? C + D - 1 : C }
+      next }
+    FILENAME == ARGV[1] && inh && /^-/ { gone[k, nr[k], substr($0, 2)] = 1; next }
+    FILENAME == ARGV[1] { next }
+    /^diff --git / { done(); hdr(); k = $0; hd = 1; mk = 0; dl = 0; inh = 0; nadd = 0; next }
+    hd && /^rename from / { k = key(substr($0, 13)); next }
+    hd && /^rename to / { if (key(substr($0, 11)) in mode) bad = 1; next }
+    hd && /^(old mode|new mode|new file mode) / { mk = 1; next }
+    hd && /^deleted file mode / { dl = 1; next }
+    hd && /^(Binary files |@@ )/ { hdr() }
+    !(k in seen) { next }
+    !inh && /^Binary files / { if ((k in bin) || na[k] || nr[k]) bad = 1; next }
+    /^@@ / { done(); hunk(); inh = 1; nadd = 0
+      if (B > 0) for (i = 1; i <= na[k]; i++) if (A <= hi[k, i] && A + B - 1 >= lo[k, i]) bad = 1
+      next }
+    inh && /^\+/ { add[++nadd] = substr($0, 2) }
+    END { done(); hdr(); exit bad }' "$3/onmain.br" "$3/onmain.mn"
+}
 snapshot() (
   next=null; held=null; built=null; queue=null; yes=$YES
   lintyes=$LINTYES
@@ -729,12 +789,24 @@ snapshot() (
   done < "$d/yes" | jq -cs 'add // {}' > "$d/shots" 2>/dev/null || echo '{}' > "$d/shots"
   # Each blocked land-branch card of issue 0 whose branch's change is already on main (another card landed the same
   # change): the branch merged into main gives main's own tree, as landbranch() finds "nothing to land". Needs you says
-  # it can be shut. The cards come from the rows (rows.jq: step is the closing step, x.branch the picked line's
-  # branch), and a branch that is gone is not said to be on main.
-  mtree=$(git rev-parse -q --verify "refs/heads/$BRANCH^{tree}" 2>/dev/null) || mtree=''
-  { [ -n "$mtree" ] && jq -r '.[] | select(.issue == 0 and .step == "blocked" and (.x.branch | type) == "string") | [.card, .x.branch] | @tsv' "$d/rows" 2>/dev/null; } \
-    | while IFS=$'\t' read -r c b; do
-        if t=$(git merge-tree --write-tree "refs/heads/$BRANCH" "refs/heads/$b" 2>/dev/null) && [ "${t%%$'\n'*}" = "$mtree" ]; then printf '%s\n' "$c"; fi
+  # it can be shut. A branch whose tip main's history holds merges into main's tree whatever main did since (a revert
+  # of its change too): main must still hold its change (branchon(), from main's commit the card was picked against).
+  # A card picked by an engine that kept no such commit (no base) is read against the commit block() kept beside its
+  # kept patch (<kept>/<card>.base: main's commit the card's worktree was on, the branch's change staged on it), as
+  # the records name it, never one guessed from main's history: with neither, it is not said to be on main, unless the
+  # tip is main's own tip (main's tree is then the tip's own).
+  # The cards come from the rows (rows.jq: step is the closing step, x.branch and x.base the picked line's branch and
+  # main's commit, kept the kept patch's folder, kept/<card> in the state folder), and a branch that is gone is not said to be on main. The fields are
+  # split on the unit separator, not on a tab: read joins tabs, so an empty field would move the rest.
+  mc=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) && mtree=$(git rev-parse -q --verify "$mc^{tree}" 2>/dev/null) || mtree=''
+  { [ -n "$mtree" ] && jq -r '.[] | select(.issue == 0 and .step == "blocked" and (.x.branch | type) == "string")
+      | [.card, .x.branch, (.x.base | strings // ""), (.kept | strings // "")] | join("\u001f")' "$d/rows" 2>/dev/null; } \
+    | while IFS=$'\x1f' read -r c b base k; do
+        tip=$(git rev-parse -q --verify "refs/heads/$b^{commit}" 2>/dev/null) || continue
+        if git merge-base --is-ancestor "$tip" "$mc" 2>/dev/null; then
+          [ -n "$base" ] || [ -z "$k" ] || base=$(cat -- "$ST/$k/$c.base" 2>/dev/null) || base=''
+          if [ "$tip" = "$mc" ] || { [ -n "$base" ] && branchon "$tip" "$base" "$d"; }; then printf '%s\n' "$c"; fi
+        elif t=$(git merge-tree --write-tree "$mc" "$tip" 2>/dev/null) && [ "${t%%$'\n'*}" = "$mtree" ]; then printf '%s\n' "$c"; fi
       done | jq -Rcs 'split("\n") | map(select(. != ""))' > "$d/onmain" 2>/dev/null || echo '[]' > "$d/onmain"
   # Today and the 7 days are reckoned from the health record's time (CONVEYOR_NOW when set), as now is.
   # Each of the three days with its midnight's epoch (t0d, t0w, t0p), from one date program: day by bash's own printf.
@@ -758,8 +830,19 @@ snapshot() (
   tr=$(jq -ce 'select(.on == true) | .time as $t | .burst | objects | {time: $t, matched, cap}' "$TESTRULES" 2>/dev/null) || tr=null
   # The models the belt runs or offers with no price, as serve's last look found them (noprice()).
   np=$(jq -ce '.missing | arrays | map(strings) | select(length > 0) | {models: .}' "$NOPRICE" 2>/dev/null) || np=null
-  # The plugin problem notes that look made for the models the built-in price table does not price (noprice()).
-  pn=$(jq -ce '[.notes | arrays | .[] | strings | select(startswith("- "))]' "$NOPRICE" 2>/dev/null) || pn='[]'
+  # The plugin problem notes that look made for the models the built-in price table does not price (noprice()), as the
+  # Foreman's plugin-bugs.md (foremandir()) holds them now: a note filed since (stop.sh puts "filed as #<n>" at its
+  # end, after whatever its FILED takes before it: a comma, a semicolon, white space or none) or taken out (the Board's File and Dismiss) is not given, so no Board adds it again.
+  # Nor is a note for a model a filed line names: outside the plugin's own repository stop.sh adds the filed line as a
+  # row of its own and leaves the note it files as it was.
+  pn='[]'
+  if pnm=$(jq -ce '[.notes | arrays | .[] | strings | select(startswith("- ")) | capture(" · No built-in price for (?<m>[^ :]+): ").m]' "$NOPRICE" 2>/dev/null) \
+    && [ "$pnm" != '[]' ] && pnf=$(foremandir); then
+    pn=$({ grep '^- ' "$pnf/plugin-bugs.md" 2>/dev/null || true; } | jq -Rcs --argjson m "$pnm" 'def mod: capture(" · No built-in price for (?<m>[^ :]+): ").m // null;
+      def filed: test("filed as #[1-9][0-9]*[[:space:]]*\\.? · evidence: "; "i");
+      [splits("\n") | select(startswith("- "))] as $l | [$l[] | select(filed) | mod | strings] as $f
+      | [$l[] | select(filed | not) | select(mod as $x | $x != null and ($m | index([$x]) != null) and ($f | index([$x]) == null))]') || pn='[]'
+  fi
   # The full test suite (fulltest()): the run in progress, only while its lock is held by a run or an ask (a run that
   # was killed left its file; fullreap() holds it shared, as this one tries it), and the last line of its record.
   packget test.full ft 2>/dev/null || ft=''

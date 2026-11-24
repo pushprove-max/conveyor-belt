@@ -198,6 +198,8 @@ t_shutbranch() {
     && git -C "$R" switch -q - && echo two >> "$R/a.txt" && git -C "$R" diff > "$ST/kept/$c/$c.patch" && git -C "$R" reset -q --hard \
     || fail "the branches and the kept patch of $c"
   tip=$(git -C "$R" rev-parse hand/one)
+  # Bug (R314 fix): the picked lines are an older engine's, with no base (main's commit the card was picked against),
+  # and Needs you said no such card was on main, though main holds hand/one's change.
   jq -cn --arg c "$c" --arg b "$b" --arg o "$o" --arg k "kept/$c" '{issue:0,time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}
     | (. + {card:$c,step:"picked",title:"hand one",branch:"hand/one"}), (. + {card:$c,step:"blocked",result:"blocked",reason:"NO-GO: review 1.",kept:$k}),
       (. + {card:$b,step:"picked",title:"hand two",branch:"hand/two"}), (. + {card:$b,step:"blocked",result:"blocked",reason:"NO-GO: review 1."}),

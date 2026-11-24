@@ -90,15 +90,25 @@ needsask() {
 # the record $MAINTEST names it in `filed`) that the control record holds and GitHub has open. needsmain() looks once, as
 # needsask() does.
 #   - Each such issue with no decision yet gets one, id `mainred-<issue>`, once: its recommended option is
-#     NEEDSMAIN_RELEASE, the other NEEDSMAIN_HELD.
+#     NEEDSMAIN_RELEASE, the other NEEDSMAIN_HELD. One whose decision was answered NEEDSMAIN_GONE (the issue was closed,
+#     or released by hand) is asked again, under the same id, once the issue is held and open again.
 #   - An open decision whose issue is no longer held (released by hand), or is closed, is answered NEEDSMAIN_GONE.
 #   - A decision answered NEEDSMAIN_RELEASE whose issue is still held and open has the step taken: the issue goes first in
-#     the control record's `order`, then is released, as `control order` and `control release` do. The issue is then
-#     written to the file $ST/mainred-released, and the answer is read no more, so a later hold of the issue is not
-#     released again by the old answer; the answer itself is left as the owner gave it. NEEDSMAIN_HELD takes no step.
+#     the control record's `order`, then is released, as `control order` and `control release` do. The decision's id and
+#     its asking number (MAINASKS) are then written to the file $ST/mainred-released, and that answer is read no more, so
+#     a later hold of the issue is not released again by the old answer; the answer itself is left as the owner gave it.
+#     The same decision asked again (reopened, or asked again as above) has a new asking number, so its answer is read,
+#     in the asking's own second too.
+#     NEEDSMAIN_HELD takes no step.
 # Test seam: CONVEYOR_LEDGER (decision.sh's).
 NEEDSMAIN_RELEASE='Release it, first in the order' NEEDSMAIN_HELD='Leave it held'
 NEEDSMAIN_GONE='Closed: the issue is no longer held and open'
+# MAINASKS, a jq def put before a filter: asks gives each mainred decision's ledger rows (the ledger only grows; each
+# asking, decision.sh's add and reopen, writes one row with no answer, and each answer and correction one with its
+# answer), in the order written, each with _k: the number of its asking (1 for the first). Two askings in one second
+# have two numbers, where their askedAt, whole seconds, can be the same.
+MAINASKS='def asks: [.[] | select(.id | type == "string" and startswith("mainred-"))] | group_by(.id)
+  | map(reduce .[] as $r ({k: 0, a: []}; .k += (if $r.answeredAt == null then 1 else 0 end) | .a += [$r + {_k: .k}]) | .a); '
 # mainstate <issue>: GitHub's state of the issue, OPEN or CLOSED; nothing for an issue it cannot read.
 mainstate() { timeout 20 gh issue view "$1" --json state 2>/dev/null | jq -r '.state // ""' 2>/dev/null; }
 # mainclose <id> <asked> <answer> <text>: a decision with no answer is answered <text>; one with <answer> has it replaced by <text>.
@@ -108,31 +118,77 @@ mainclose() { local dec=$HERE/../.claude/scripts/decision.sh
 }
 needsmain() {
   local dec=$HERE/../.claude/scripts/decision.sh led=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl}
-  local c rows='[]' n cases id ans asked opts e st q rest=()
+  local c rows='[]' n cases id ans asked opts e st q why rest=()
   c=$(ctl) || { echo "conveyor: the control record could not be read; no held issue was put to the owner" >&2; return 1; }
   [ ! -e "$led" ] || rows=$(CONVEYOR_MAIN=$MAIN bash "$dec" list) || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
   # A short run (a run that skipped cases) files an issue too, but names no test that fails: left out.
   while IFS=$'\t' read -r n cases; do
-    if jq -e --arg id "mainred-$n" 'any(.[]; .id == $id)' <<<"$rows" >/dev/null; then
+    # A decision the engine closed as gone (NEEDSMAIN_GONE) is asked again: its issue is held and open again.
+    if jq -e --arg id "mainred-$n" --arg gone "$NEEDSMAIN_GONE" 'any(.[]; .id == $id and .answer != $gone)' <<<"$rows" >/dev/null; then
       askkeep "mainred-$n" "$cases" || echo "conveyor: the whole list of tests of decision mainred-$n could not be kept in $ST/auto/asked" >&2
       continue
     fi
     [ "$(mainstate "$n")" = OPEN ] || continue
+    why="a new issue, #$n, is held"; ! jq -e --arg id "mainred-$n" 'any(.[]; .id == $id)' <<<"$rows" >/dev/null || why="issue #$n is held and open again"
     opts=$(jq -cn --arg a "$NEEDSMAIN_RELEASE" --arg b "$NEEDSMAIN_HELD" '[$a, $b]')
     q=$(askcut "mainred-$n" "$cases") || { echo "conveyor: decision mainred-$n was not put to the owner: its whole list of tests could not be kept in $ST/auto/asked" >&2; continue; }
     e=$(CONVEYOR_MAIN=$MAIN bash "$dec" add "mainred-$n" "Issue #$n was filed by the nightly whole test for a test that fails on main ($q), and the engine holds it. What should the engine do with it?" \
-      "$NEEDSMAIN_RELEASE" "conveyor engine: issue #$n held" --options "$opts" --reask "a new issue, #$n, is held" 2>&1 >/dev/null) \
+      "$NEEDSMAIN_RELEASE" "conveyor engine: issue #$n held" --options "$opts" --reask "$why" 2>&1 >/dev/null) \
       && echo "conveyor: issue #$n, filed by the nightly whole test, is held: put to the owner as decision mainred-$n" >&2 \
       || echo "conveyor: decision mainred-$n could not be put to the owner: ${e//$'\n'/ }" >&2
   done < <(jq -r --slurpfile m <(cat "$MAINTEST" 2>/dev/null; true) '.held as $h | ($m | .[0] // {} | .filed // [])[]
     | select(.issue | IN($h[])) | select((.cases | length) > 0 and (.cases[0] | startswith("a short run") | not)) | [.issue, (.cases | join(", "))] | @tsv' <<<"$c")
   [ -e "$led" ] || return 0
-  rows=$(CONVEYOR_MAIN=$MAIN bash "$dec" list) || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
-  while IFS=$'\x1f' read -r id ans asked; do
+  # A line that names the issue alone was written by an engine that did not keep which asking it released for. That
+  # engine released the issue once, for the asking of mainred-<issue> that stood answered NEEDSMAIN_RELEASE when it
+  # looked, and read no answer of that decision after. The line becomes a line of each asking ever answered so (a ledger
+  # row of that asking with that answer: the ledger keeps every row, a corrected answer too), so no answer that engine
+  # may have taken releases the issue again. No time is read to tell which one it took: the file's and the ledger's are
+  # whole seconds, and the ledger can be written on another machine. When the decision's last asking is one of two or
+  # more so answered, the records fit two histories that need different acts (that engine took an earlier one, and the
+  # last one's answer is unread; or it took the last one), so that asking gets the line "ask <id> <asking number>" in
+  # place of its own: its answer is not read, and the decision is put to the owner again (below). All such lines at
+  # once: one rewrite.
+  if grep -qx '[0-9][0-9]*' "$ST/mainred-released" 2>/dev/null; then
+    { q=$(jq -rs --arg r "$NEEDSMAIN_RELEASE" --rawfile old "$ST/mainred-released" "$MAINASKS"'
+           [$old | splits("\n") | select(test("^[0-9]+$")) | "mainred-" + .] as $ids
+           | asks[] | select(.[0].id | IN($ids[])) | .[0].id as $id | last._k as $l
+           | ([.[] | select(.answer == $r) | ._k] | unique) as $a | (($a | length) > 1 and ($l | IN($a[]))) as $two
+           | ($a[] | select($two and . == $l | not) | "\($id) \(.)"), (select($two) | "ask \($id) \($l)")' "$led") \
+      && { grep -vx '[0-9][0-9]*' "$ST/mainred-released"; sed '/^$/d' <<<"$q"; } > "$ST/mainred-released.new" \
+      && mv -f "$ST/mainred-released.new" "$ST/mainred-released"; } \
+      || { echo "conveyor: the old lines of $ST/mainred-released could not be rewritten; no mainred decision is read in this pass" >&2; return 1; }
+  fi
+  # decision.sh's read of the whole ledger, which fails on a row it does not take, then the rows read again by
+  # MAINASKS, which numbers each asking.
+  CONVEYOR_MAIN=$MAIN bash "$dec" list > /dev/null && rows=$(jq -cs "$MAINASKS"'asks' "$led") \
+    || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
+  # Each "ask <id> <asking number>" line: while that asking, answered, is still the decision's last (the line keeps its
+  # answer from being read, below), the decision is asked again under its id, a new open asking whose answer is read
+  # as any other, in the same second too. The owner's answers stay in the ledger, and the question names the latest. It
+  # has no recommended option, so the auto pass (`auto decide`) leaves it to the owner. The line goes once the decision
+  # has another asking (this one, or the owner's reopen); a line whose asking failed stays, for the next pass.
+  if grep -q '^ask ' "$ST/mainred-released" 2>/dev/null; then
+    e=''
+    while read -r _ id asked; do
+      st='' ans=''; IFS=$'\x1f' read -r st ans < <(jq -r --arg id "$id" '.[] | last | select(.id == $id and .answeredAt != null)
+        | [._k, (.answer // "no answer" | gsub("[\r\n\u001f]+"; " "))] | map(tostring) | join("\u001f")' <<<"$rows")
+      [ "$st" = "$asked" ] || continue
+      n=${id#mainred-}; opts=$(jq -cn --arg a "$NEEDSMAIN_RELEASE" --arg b "$NEEDSMAIN_HELD" '[$a, $b]')
+      if CONVEYOR_MAIN=$MAIN bash "$dec" add "$id" "An older engine released issue #$n once on an answer to this decision, and its records do not show which answer. Your latest answer was \"$ans\": the engine cannot tell whether it was acted on, so it takes no step until you answer. What should the engine do with the issue?" \
+        none "conveyor engine: issue #$n held" --options "$opts" --reask "an older engine's records do not show which answer it acted on" > /dev/null; then
+        echo "conveyor: decision $id is put to the owner again: an older engine's line in $ST/mainred-released does not show which of its answers was acted on" >&2
+      else echo "conveyor: decision $id could not be put to the owner again" >&2; e+="ask $id $asked"$'\n'; fi
+    done < <(grep '^ask ' "$ST/mainred-released")
+    { grep -v '^ask ' "$ST/mainred-released"; printf %s "$e"; } > "$ST/mainred-released.new" && mv -f "$ST/mainred-released.new" "$ST/mainred-released" \
+      || { echo "conveyor: $ST/mainred-released could not be rewritten" >&2; return 1; }
+    rows=$(jq -cs "$MAINASKS"'asks' "$led") || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
+  fi
+  while IFS=$'\x1f' read -r id ans asked k; do
     # An answer that names no step (leave it held, closed, done) is left as it is.
     [ -z "$ans" ] || [ "$ans" = "$NEEDSMAIN_RELEASE" ] || continue
     n=${id#mainred-}
-    ! grep -qx "$n" "$ST/mainred-released" 2>/dev/null || continue
+    ! grep -qxF -e "$id $k" -e "ask $id $k" "$ST/mainred-released" 2>/dev/null || continue
     # The record as it stands now: an earlier release of this pass has moved `order`.
     c=$(ctl) || { echo "conveyor: the control record could not be read; decision $id waits" >&2; return 1; }
     if jq -e --argjson n "$n" '.held | index($n) | not' <<<"$c" >/dev/null; then st=CLOSED; else st=$(mainstate "$n"); fi
@@ -142,23 +198,26 @@ needsmain() {
         echo "conveyor: decision $id is answered \"$ans\": order $n first, release $n" >&2
         mapfile -t rest < <(jq -r --argjson n "$n" '.order[] | select(. != $n)' <<<"$c")
         bash "$HERE/conveyor.sh" control order "$n" "${rest[@]}" > /dev/null < /dev/null && bash "$HERE/conveyor.sh" control release "$n" > /dev/null < /dev/null \
-          && echo "$n" >> "$ST/mainred-released" ;;
+          && echo "$id $k" >> "$ST/mainred-released" ;;
     esac
-  done < <(jq -r '.[] | select(.id | startswith("mainred-")) | [.id, (.answer // ""), .askedAt] | join("\u001f")' <<<"$rows")
+  done < <(jq -r '.[] | last | [.id, (.answer // ""), .askedAt, ._k] | map(tostring) | join("\u001f")' <<<"$rows")
   return 0
 }
 
 # The auto pass on the machine that has the record: while /conveyor-belt:auto is on or narrow in this state folder
 # (commands/auto.sh, $ST/auto/mode.json), the engine decides as the Foreman's `auto decide` would, so auto goes on when the
 # Foreman session is not running or the owner's machine is off. needsauto() runs `conveyor.sh auto decide` (its rules, its
-# log, its lock) once when the ledger holds an open decision its log does not list yet (a new one: a decided one is no
-# longer open, and each one left is listed under "Waiting for the owner"), and fails when it did not run it.
+# log, its lock) once when the ledger holds an open decision no pass has left for the owner as it stands (a new one,
+# or one asked again or reopened under its id, in the same second too: a decided one is no longer open, and each pass
+# writes the id and the count of ledger rows of each one it leaves to <log>.seen, whoever runs it; the ledger only
+# grows), and fails when it did not run it. The open decisions and their counts come from one read of the ledger, so a
+# count is never older than the row it goes with.
 # Test seam: CONVEYOR_LEDGER (decision.sh's).
 needsauto() {
-  local dec=$HERE/../.claude/scripts/decision.sh led=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl} log id new=
+  local led=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl} log row new=
   log=$(jq -re 'select(.scope == "full" or .scope == "narrow") | .log | strings' "$ST/auto/mode.json" 2>/dev/null) && [ -f "$log" ] && [ -e "$led" ] || return 1
-  while IFS= read -r id; do grep -qF -- "- $id: " "$log" || { new=1; break; }; done \
-    < <(CONVEYOR_MAIN=$MAIN bash "$dec" list 2>/dev/null | jq -r '.[] | select(.answeredAt == null) | .id | gsub("[\r\n]+"; " ")' 2>/dev/null)
+  while IFS= read -r row; do grep -qxF -- "$row" "$log.seen" 2>/dev/null || { new=1; break; }; done \
+    < <(jq -rs 'group_by(.id)[] | select(last.answeredAt == null) | "\(.[0].id | gsub("[\r\n]+"; " ")) \(length)"' "$led" 2>/dev/null)
   [ -n "$new" ] || return 1
   bash "$HERE/conveyor.sh" auto decide < /dev/null | sed 's/^/conveyor: /' >&2
 }

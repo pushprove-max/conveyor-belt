@@ -275,7 +275,8 @@ modelsallowed() { # <variable>
 # whatever the loop's turns or restarts ($NOPRICE's noted), the projects of its group (a note in that file counts) and
 # a note filed or dismissed since (that folder's noprice-noted).
 # Each such note's line, or the line another project of the group noted, is kept too ($NOPRICE's notes): the snapshot
-# gives them (priceNotes), so a Board on another machine than the belt adds them to the Foreman's folder it reads.
+# reads the models they name, and gives the notes for them as the Foreman's plugin-bugs.md holds them now (priceNotes),
+# so a Board on another machine than the belt adds them to the Foreman's folder it reads.
 # The
 # models: those of the models.allowed in force (modelsallowed(), the list the Board's "Offered with no price" takes:
 # the pack's when it sets one, with the host's Codex models added to a codex list it has with a model in it), and those
@@ -495,7 +496,7 @@ pxon() {
 # What it printed is in HOST_R too ("" when it failed), for a caller that keeps it in its own shell (seatready).
 HOST_K=() # the key, then CLIS read as an object, when it was read (.at, whole seconds), the report and its px
 hostclis() { # [fresh | due | <cli>]
-  local c old r found=() one=${1:-} t='' a=1 k='' x px='' l ci=''
+  local c old r found=() one=${1:-} t='' a=1 k='' x px='' l ci='' tmp
   HOST_R=''
   for c in $CLINAMES; do command -v "$c" >/dev/null && k+=" $c"; done
   [ ! -e "$CLIS" ] || { a=''; { IFS= read -r -d '' t; a=$?; } 2>/dev/null <"$CLIS"; }
@@ -530,9 +531,14 @@ hostclis() { # [fresh | due | <cli>]
   # clis has, before one is taken out of it (a report written before seen was has only them). A CLI that clis has as
   # null there is not counted: engines up to v1.9 wrote null for a CLI not installed. One CLI read that is not
   # installed is taken out of clis, not written there as installed with no list.
-  if [ "$one" = fresh ]; then jq -cn --argjson r "$r" --argjson o "$old" --arg px "$px" '{at: (now | floor), clis: $r, px: ($px == "true"), seen: ([($o.seen | arrays | .[] | strings), ($o.clis | objects | with_entries(select(.value != null)) | keys[]), ($r | keys[])] | unique)}' > "$CLIS.$$"
-  elif [ -n "$one" ]; then jq -c --arg c "$one" --argjson r "$r" --arg px "$px" '.seen = ([(.seen | arrays | .[] | strings), (.clis | objects | with_entries(select(.value != null)) | keys[]), ($r | keys[])] | unique) | if $r | has($c) then .clis[$c] = $r[$c] else del(.clis[$c]) end | if $px == "" then . else .px = ($px == "true") end' <<<"$old" > "$CLIS.$$"; fi
-  [ ! -e "$CLIS.$$" ] || mv -f "$CLIS.$$" "$CLIS" || rm -f "$CLIS.$$"
+  # The new report is written to a file of its own (mktemp), then moved over CLIS: the cards' subshells share $$, so a
+  # name made from it was one file for two cards, and one card's mv could make CLIS the file the other had just emptied.
+  # A report jq could not write is not moved.
+  if tmp=$(mktemp "$CLIS.XXXXXX" 2>/dev/null); then
+    if [ "$one" = fresh ]; then jq -cn --argjson r "$r" --argjson o "$old" --arg px "$px" '{at: (now | floor), clis: $r, px: ($px == "true"), seen: ([($o.seen | arrays | .[] | strings), ($o.clis | objects | with_entries(select(.value != null)) | keys[]), ($r | keys[])] | unique)}' > "$tmp"
+    else jq -c --arg c "$one" --argjson r "$r" --arg px "$px" '.seen = ([(.seen | arrays | .[] | strings), (.clis | objects | with_entries(select(.value != null)) | keys[]), ($r | keys[])] | unique) | if $r | has($c) then .clis[$c] = $r[$c] else del(.clis[$c]) end | if $px == "" then . else .px = ($px == "true") end' <<<"$old" > "$tmp"; fi \
+      && mv -f "$tmp" "$CLIS" || rm -f "$tmp"
+  fi
   HOST_R=$r; printf '%s\n' "$r"
 }
 # Whether a seat ({model, effort, agent}) can start on this host: its CLI is installed (MISSING; a model the CLI

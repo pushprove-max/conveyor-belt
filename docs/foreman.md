@@ -335,7 +335,9 @@ asks the host about the record over ssh. Open decisions for that record come fro
   which gives the card back as `conveyor.sh retry <issue>` does. Auto retries an issue once for one block reason: when
   the issue is blocked again for the same reason after that retry, auto leaves it under "Waiting for the owner". A retry you pick yourself counts when you chose "Retry keeping the work", and does not count when you chose "Fresh retry". An issue that the nightly whole test filed for a test
   that fails on main, and the engine holds: the recommended step is "Release it, first in the order". On `narrow`, auto
-  decides one only when you gave that answer to the same question before. Auto leaves either one under "Waiting for the owner"
+  decides one only when you gave that answer to the same question before. After an engine upgrade, the engine can ask
+  this decision again with no recommended step, when it cannot tell if an older engine acted on your answer. Auto
+  does not decide that one: it stays under "Waiting for the owner". Auto leaves either one under "Waiting for the owner"
   when its text holds a word of `auto.reserved`, such as `delete`. A card stopped for your yes, and a main-red fix
   card, are not decisions, so auto does not touch them.
 - Auto goes on deciding on the build machine (the host that has the card record) while your machine is off or the
