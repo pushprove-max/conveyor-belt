@@ -25,8 +25,9 @@ cardready() {
   yesfrom='' ph='' pf=''
   if lintrule; then
     pb=$fromk/$from.body; [ -n "$from" ] && [ -e "$pb" ] || pb=$CARDS/$from.body
-    # The places of the diff are widened at least as far as in the hash the owner approved (lintpolicy()).
-    ph=''; [ -z "$from" ] || ph=$(jq -r '.policy // "" | split(" ")[1] // ""' "$pb" 2>/dev/null) || ph=''
+    # The places of the diff are widened at least as far as in the hash the owner approved (lintpolicy()): all after
+    # its hash, as a path in its widths can hold a space.
+    ph=''; [ -z "$from" ] || ph=$(jq -r '.policy // "" | index(" ") as $i | if $i then .[$i + 1:] else "" end' "$pb" 2>/dev/null) || ph=''
     { packget lint pf && pf=$(lintpolicy "$wt" "$(git -C "$wt" rev-parse HEAD)" "$pf" "$ph"); } || { block "$c" "$n" "$wt" "lint: the engine could not read the lint policy files that the change changes, so nothing landed"; return; }
     ph=${pf%%$'\n'*}; pf=$(tail -n +2 <<<"$pf" | jq -Rrs 'split("\n") | map(select(. != "")) | join(", ")')
     [ -z "$pf" ] || [ -z "$from" ] || ! lintyes "$issue" "$pb" "$ph" || { echo "conveyor: card $c: its lint policy change is the one $OWNER approved"; pf=''; }

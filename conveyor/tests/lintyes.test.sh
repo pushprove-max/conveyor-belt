@@ -34,8 +34,8 @@ t_lintpolicylisted() {
   fx_wt 'echo c.sh >> .size-exempt && echo new > .lintrc && echo "{\"lint\": {\"commands\": []}}" > .conveyor/project.json && git add -f .conveyor/project.json' \
     .size-exempt a.sh .lintrc old
   policyof
-  [ "$(sed -n '2,$p' "$T/$CASE/run.out" | paste -sd' ')" = '.conveyor/project.json .lintrc .size-exempt' ] && [[ $(head -n 1 "$T/$CASE/run.out") =~ ^[0-9a-f]{40,64}\ [0-9]+$ ]] \
-    || fail "the policy files or their hash and width were not listed: $(cat "$T/$CASE/run.out")"
+  [ "$(sed -n '2,$p' "$T/$CASE/run.out" | paste -sd' ')" = '.conveyor/project.json .lintrc .size-exempt' ] && [[ $(head -n 1 "$T/$CASE/run.out") =~ ^[0-9a-f]{40,64}\ \{\"\.lintrc\":[0-9]+,\"\.size-exempt\":[0-9]+\}$ ]] \
+    || fail "the policy files or their hash and widths (one for each of .lintrc and .size-exempt, by path) were not listed: $(cat "$T/$CASE/run.out")"
 }
 # Bug (R268): a policy file whose name holds a newline was read as two paths, neither of them the file, so its diff was
 # hashed as empty: the hash stayed the same when the file changed, and an owner's yes to one content covered another.
@@ -133,6 +133,24 @@ t_lintpolicycopy() {
   [ -n "$h1" ] && [ "$(head -n 1 "$T/$CASE/run.out")" != "$h1" ] \
     || fail "the .lintrc edit 'rule 30' -> 'rule 20' of line 4, and of line 1 (a copy main added above it), both hashed $h1"
 }
+# Bug (issue 1575): every policy file was hashed at the widest width any one file needed, so a file with no repeated
+# lines was hashed with the lines next to its edit, and a main edit of one of them asked for the owner's yes again.
+# Each file keeps its own width, by its path: with the widths kept in order, a file a retry adds before the others
+# (.alint) took .lintrc's width 1, and was hashed with its own neighbour lines again. A kept width of one number (an
+# approval kept before then) is every file's, as that approval hashed every file at it.
+t_lintpolicywidths() {
+  local p h
+  setup '[]'
+  p=$(jq -c '.policy += [".alint"]' <<<"$POLICY")
+  fx_wt 'printf "a\ndone\n# why\nb\ndone\nc\n" > .lintrc && printf "x\ny\nz\nv\nw\n" > .size-exempt && printf "k\nl\nm\nn\n" > .alint' \
+    .lintrc "$(printf 'a\ndone\nb\ndone\nc')" .size-exempt "$(printf 'x\ny\nz\nw')" .alint "$(printf 'k\nl\nn')"
+  fx_in "lintpolicy \"\$FXWT\" \"\$(git -C \"\$FXWT\" rev-parse HEAD)\" '$p' '{\".lintrc\":1,\".size-exempt\":0}'"; h=$(head -n 1 "$T/$CASE/run.out")
+  [ "$RC" = 0 ] && [ "${h#* }" = '{".alint":0,".lintrc":1,".size-exempt":0}' ] \
+    || fail "the kept widths {\".lintrc\":1,\".size-exempt\":0} with .alint added gave the widths '${h#* }', not .alint 0 (exit $RC)"
+  fx_in "lintpolicy \"\$FXWT\" \"\$(git -C \"\$FXWT\" rev-parse HEAD)\" '$p' 1"; h=$(head -n 1 "$T/$CASE/run.out")
+  [ "$RC" = 0 ] && [ "${h#* }" = '{".alint":1,".lintrc":1,".size-exempt":1}' ] \
+    || fail "the kept width 1 (an approval kept before each file had its own) did not widen every file: '${h#* }' (exit $RC)"
+}
 
 # Card #7 on a main whose pack makes .lintrc lint policy, with a lint command that passes: its build runs <build>
 # and notes `build` in $STUB/did; review 1 is <review> (a GO by default).
@@ -175,6 +193,32 @@ t_lintyes() {
   loop run > /dev/null || fail "the run after the approval line exited non-zero"
   yeslanded && [ "$(yesdid)" = build ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(git -C "$R" show HEAD:.lintrc)" = strict ] \
     || fail "the approved policy change did not land its kept patch with no build and no review: $(yesdid); $(yessteps)"
+}
+# Bug (issue 1575): every policy file was hashed at the one width the widest needed. .lintrc's edit after a repeated
+# `done` needs width 1, so .size-exempt's added line was hashed with its neighbour `y`: when main edited `y` after the
+# stop, cardready() hashed the approved change another way and asked for the yes again. The stop keeps each file's
+# width by its path, and cardready() hashes each file at least at it: main also made the other `done` unique, so
+# .lintrc kept its width only through the kept widths.
+t_lintyeswidths() {
+  # The build adds its lines in place, so the session that brings the kept patch onto main (main's edit is in the
+  # patch's context lines) keeps main's edits.
+  yessetup 'awk '\''NR == 2 { print; print "# why"; next } 1'\'' .lintrc > .l && mv .l .lintrc
+    awk '\''NR == 3 { print; print "v"; next } 1'\'' .size-exempt > .s && mv .s .size-exempt'
+  tune '.lint.policy = [".lintrc", ".size-exempt"]'
+  printf 'a\ndone\nb\ndone\nc\n' > "$R/.lintrc" && printf 'x\ny\nz\nw\n' > "$R/.size-exempt" \
+    && git -C "$R" add .lintrc .size-exempt && git -C "$R" commit -qm "policy files" || fail "main's policy files"
+  # loop: the stop, its kept widths, main's edit, the approval line and the landing through cardready() are turns of a card's path
+  loop run > /dev/null || fail "run exited non-zero"
+  [ "$(blocks)" = "lint policy: needs Dana's yes: it changes lint policy: .lintrc, .size-exempt" ] \
+    && jq -e '.policy | test(" [{]\".lintrc\":1,\".size-exempt\":0[}]$")' "$ST"/kept/*/*.body > /dev/null \
+    || fail "the stop did not keep the widths .lintrc 1 and .size-exempt 0: $(blocks); $(cat "$ST"/kept/*/*.body 2>&1)"
+  printf 'a\ndone\nb\ndone # end\nc\n' > "$R/.lintrc" && printf 'x\ny # main\nz\nw\n' > "$R/.size-exempt" \
+    && git -C "$R" commit -qam "main edits y and the other done" || fail "main's edits"
+  approve
+  # loop: as above, the turn that finds the approval line lands the kept patch on the newer main
+  loop run > /dev/null || fail "the run after the approval line exited non-zero"
+  yeslanded && [ "$(blocks | wc -l)" = 1 ] && [ "$(git -C "$R" show HEAD:.size-exempt)" = "$(printf 'x\ny # main\nz\nv\nw')" ] \
+    || fail "after main edited .size-exempt's y and .lintrc's other done, the approved change did not land: $(blocks | paste -sd'|'); $(yessteps)"
 }
 # Bug: a yes covers more than the policy diff it was given for: a session after the yes (the issue's ask changed, so
 # the kept patch gets one) edits .lintrc again, and the card lands on the old yes. It stops again.

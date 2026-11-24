@@ -484,17 +484,17 @@ lintline() { # <card> <issue> <output file> <lintrun's exit> <review|land|wait>
 lintrule() { [ "$(jq -r '.rules.lint' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>/dev/null)" != false ]; }
 
 # The lint policy that <worktree>'s staged change changes from <base>: the hash of that policy diff (each file's as
-# lintpolicyhunks writes it, so a kept patch on a newer main mostly hashes the same) and the width of the places it
-# names, `<hash> <width>`, then its paths, one a line: each
+# lintpolicyhunks writes it, so a kept patch on a newer main mostly hashes the same) and the width of each file's
+# places, by its path, `<hash> {"<path>": <width>, ...}` (one-line JSON), then its paths, one a line: each
 # file that the lint.policy pathspecs of <lint field> (main's pack's) match, and .conveyor/project.json when its lint
 # field changed (lintfield). A change that only removes lines from an exempt file (one that the files of a `ratchet: false`
 # command match) only tightens, so it is left out. Nothing when no path is left. Fails when the change cannot be read.
-# Paths are read whole, NUL-separated, so a name with a newline is one path. Each place is widened to one width, at
-# least <least width> (the width of the hash it is checked against, so a main that left only one copy of an approved
-# place's lines does not drop its context lines and change the hash).
-lintpolicy() { # <worktree> <base> <lint field> [<least width>]
-  local a f p ix t h i w=0 lw=${4:-0}
-  local -a ps xs ns fs=()
+# Paths are read whole, NUL-separated, so a name with a newline is one path. Each file's places are widened to one
+# width, at least that file's in <least widths> (the hash's it is checked against, so a main that left only one copy
+# of an approved place's lines does not drop its context lines and change the hash), 0 for a file it does not name. A
+# number is every file's: an approval kept before each file had its own width hashed every file at that one.
+lintpolicy() { # <worktree> <base> <lint field> [<least widths>]
+  local a f p ix t h i k w lw=${4:-}; local -a ps xs ns fs=() lws ws=()
   local -A ex=()
   mapfile -d '' -t ps < <(jq -j '(.policy // [])[] + "\u0000"' <<<"${3:-null}")
   if [ ${#ps[@]} != 0 ]; then
@@ -519,12 +519,16 @@ lintpolicy() { # <worktree> <base> <lint field> [<least width>]
   ix=$(git -C "$1" rev-parse --path-format=absolute --git-path index) || return 1
   lintfield "$1" "$ix" "$2" && f=.conveyor/project.json || f=''
   [ ${#fs[@]} != 0 ] || [ -n "$f" ] || return 0
-  [[ $lw =~ ^[0-9]{1,6}$ ]] || lw=0
-  # The width: the widest any place needs to be told apart in <base>, and no less than <least width>.
-  for p in "${fs[@]}"; do i=$(lintpolicyhunks "$1" "$2" "$p" "$lw") || return 1; i=${i##*$'\n'}; [ "$i" -le "$w" ] || w=$i; done
-  [ "$lw" -le "$w" ] || w=$lw
-  h=$({ for p in "${fs[@]}"; do lintpolicyhunks "$1" "$2" "$p" "$w" || exit 1; done
+  # Each file's width (by path: a file a retry adds must not take another's): the widest its places need to be told
+  # apart in <base>, and no less than its <least width>. One width for all hashed the lines next to an edit (#1575).
+  mapfile -t lws < <(jq -rn --arg lw "$lw" '($lw | try fromjson catch null) as $o | $ARGS.positional[] as $p
+    | if ($o | type) == "number" then $o elif ($o | type) == "object" then ($o[$p] // 0) else 0 end' --args "${fs[@]}")
+  for k in "${!fs[@]}"; do w=${lws[$k]:-0}; [[ $w =~ ^[0-9]{1,6}$ ]] || w=0
+    i=$(lintpolicyhunks "$1" "$2" "${fs[$k]}" "$w") || return 1; i=${i##*$'\n'}; [ "$i" -le "$w" ] || w=$i; ws+=("$w")
+  done
+  h=$({ for k in "${!fs[@]}"; do lintpolicyhunks "$1" "$2" "${fs[$k]}" "${ws[$k]}" || exit 1; done
     [ -z "$f" ] || git -C "$1" show ":$f" | jq -c .lint; } | git -C "$1" hash-object --stdin) && [ -n "$h" ] || return 1
+  w=$(jq -cn '$ARGS.positional | (length / 2) as $n | [range($n) as $i | {(.[$i]): (.[$i + $n] | tonumber)}] | add // {}' --args "${fs[@]}" "${ws[@]}") || return 1
   printf '%s %s\n' "$h" "$w"; printf '%s\0' "${fs[@]}" ${f:+"$f"} | sort -zu | tr '\0' '\n'
 }
 # <worktree>'s staged diff of <path> from <base>, written the same for the same edit on a newer main where it can be
@@ -561,13 +565,12 @@ lintpolicyhunks() { # <worktree> <base> <path> <width>
   rm -f "$o" "$d"
   return $rc
 }
-# Whether the owner's yes covers the policy diff hashed <hash> (lintpolicy()'s `<hash> <width>`, its places widened at
-# least as far as the kept one's): the card that stopped for it kept that hash in its
-# <kept body file> (policy), and the issue now holds more approval lines than that body did. A yes covers one diff:
-# a change to a policy file after it gives another hash.
+# Whether the owner's yes covers the policy diff hashed <hash> (lintpolicy()'s `<hash> <widths>`; the hashes alone are
+# compared): the card that stopped for it kept that hash in its <kept body file> (policy), and the issue now holds more
+# approval lines than that body did. A yes covers one diff: a change to a policy file after it gives another hash.
 lintyes() { # <issue json> <kept body file> <hash>
   [ -n "$3" ] && jq -en --argjson now "$1" --slurpfile was "$2" --arg h "$3" "$SEE"'
-    ($was[0] | objects) as $w | $w.policy == $h and ($now | approvals) > ($w | approvals)' >/dev/null 2>&1
+    ($was[0] | objects) as $w | ($w.policy | split(" ")[0]) == ($h | split(" ")[0]) and ($now | approvals) > ($w | approvals)' >/dev/null 2>&1
 }
 # The brief's # Lint section, with the rule Lint check on and a pack that sets lint commands; nothing otherwise.
 lintbrief() {
