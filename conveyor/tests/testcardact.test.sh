@@ -90,6 +90,33 @@ t_tclock() {
   [ "$(jq -c '[.cards[] | [.file, (.held // false)]]' "$ST/testactions/cards.json")" = '[["g.test.sh",false]]' ] || fail "the record is not as the three commands leave it: $(cat "$ST/testactions/cards.json")"
 }
 
+# Bug it catches (#1579 follow-up): a pick (testpick(), lib/testaction.sh) that does not take the lock hold, release and
+# shut take. The real pick is paused after it read the record (at farstates(), its next step). There this shell asks
+# for that lock (the one t_tclock shows hold, release and shut wait for) with `flock -n`, which does not wait: it must
+# be refused, as the pick holds it. With no lock in the pick it is given, at once and on any runner, and the case fails
+# there; a hold timed against a limit could instead read the record late, after the pick's write, and pass. Then
+# `control hold` of the card the pick is about to take runs, the pick goes on, and the hold, once it has the lock,
+# refuses that card. The pause and the hold's end are waited for as files, as each is in another process.
+t_tcpicklock() {
+  tkcards; local d=$T/$CASE p rc lk
+  ( fx_in 'eval "$(declare -f farstates | sed "1s/^farstates /tkfar0 /")"
+    farstates() { if [ "${FUNCNAME[1]}" = testpick ]; then : > "'"$d"'/paused"; until [ -e "'"$d"'/go" ]; do sleep 0.1; done; fi; tkfar0 "$@"; } # sleep: the paused pick waits for the case to let it go
+    locked pick "" "" "[]"'; echo "$RC" > "$d/pick.rc" ) & p=$!
+  wait_until "[ -e '$d/paused' ]" || fail "the pick did not reach its read of the record"
+  exec {lk}>>"$ST/testactions/cards.json.lock"
+  if flock -n "$lk"; then exec {lk}>&-; : > "$d/go"; wait "$p"; fail "the lock of the record was free while the pick held its read of the record: hold, release and shut do not wait for the pick"; fi
+  exec {lk}>&-
+  ( loop control hold "$TKF" > "$d/hold.out" 2>&1; echo $? > "$d/hold.rc" ) &
+  : > "$d/go"; wait "$p"
+  wait_until "[ -s '$d/hold.rc' ]" || fail "control hold $TKF did not end once the pick let go of the lock: $(cat "$d/hold.out")"
+  rc=$(cat "$d/hold.rc")
+  [ "$(cat "$d/pick.rc")" = 0 ] && [ "$(cat "$d/run.out")" = "$TKF 0 false" ] || fail "the paused pick did not take $TKF: $(cat "$d/run.out")"
+  [ "$rc" = 2 ] && [[ $(cat "$d/hold.out") == *"$TKF is not a card with no GitHub issue that is waiting to be picked"* ]] \
+    || fail "control hold $TKF, run while the pick held the record, ended $rc, not 2 with a refusal of the card the pick took:$(cat "$d/hold.out")"
+  [ "$(jq -c --arg c "$TKF" '[.cards[] | select(.id == $c) | [.card != null, (.held // false)]]' "$ST/testactions/cards.json")" = '[[true,false]]' ] \
+    || fail "after the pick and control hold $TKF, its entry is not picked and unheld: $(cat "$ST/testactions/cards.json")"
+}
+
 # Bug it catches (#1579): `control hold` and `control release` of card ids only returned before the wake `control` sends
 # (wakeloop(), lib/control.sh), so a loop asleep on its idle timer picked the released card only when the timer ended.
 # The stand-in loop counts each URG it is sent; the wait is a poll, as the signal arrives from another process.
