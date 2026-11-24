@@ -53,14 +53,15 @@
 # log is one file, named by the command (test.command): its cases are that file's, and a timeout is in it. An output
 # that is no run's (norun(): no log folder) names no file. notRun, only when there is one, is each file a card's run
 # that stopped at its first failure did not run or did not finish (`-- notrun <file>` log lines: fileeach()): none of
-# timeout, stopped or passed names it, as the stop ended it, not a limit, and it did not pass.
+# timeout, stopped or passed names it, as the stop ended it, not a limit, and it did not pass. host, only when there
+# is one: each file logged `TESTRUN host<TAB><file><TAB><why>` (not started for want of room), no other field's (#1662).
 # A case's line ends with where it failed, ` (at <file>:<line>: <that line's text>)`, when a stack trace follows a
 # failure line of the case in the output: its place in a file of the worktree (<worktree>.test's <worktree>, outside
 # node_modules; FRAMEJQ: a JavaScript stack's first frame there, a Python traceback's last), the text read there
 # (wtline()), trimmed and cut to 120 characters. A failed file whose failure names no case (python3 on a unittest
 # file) has at, `<file>:<line>: <text>`, of the first stack after its `== ` line that no case took. So a failure that
 # prints no message of its own (node's assert.ok(false) under TAP: only actual and expected) still shows the assertion.
-testfails() { # <test output file> <exit> [the pack's field of the run's command: test.command]; prints {of, files: [{file, cases: [{name, line}], at}], timeout, passed, okcases: [{file, cases}], passcases: [{file, cases}], notRun}
+testfails() { # <test output file> <exit> [the pack's field of the run's command: test.command]; prints {of, files: [{file, cases: [{name, line}], at}], timeout, passed, okcases: [{file, cases}], passcases: [{file, cases}], notRun, host}
   local logs=() log cmd='' named out wd=${1%.test} wdr=''
   [ -d "$wd" ] && wd=$(cd "$wd" && pwd) && wdr=$(cd "$wd" && pwd -P) || wd=''
   # A file's name may have spaces, at its end too, and words may follow it on a line that is not its beginning in the
@@ -73,14 +74,14 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
   mapfile -t logs < <(testlogs "${1%.test}"); [ ! -d "${1%.test}.testlog" ] || packget "${3:-test.command}" cmd 2>/dev/null || cmd=''
   # Each log begins on a line of its own: a log that ends without a newline would else join the next log's mark.
   log=$(for log in "${logs[@]}"; do printf '\n\001\n'; cat "$log" 2>/dev/null; done | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\000\r' | jq -cRn "$named"'
-    reduce inputs as $l ({n: null, files: [], order: [], failed: [], open: [], notrun: []};
-      . as $s | ([$l | capture("^== (?<f>.*\\S.*)")][0].f) as $b | ([$l | capture("^-- notrun (?<f>.*\\S.*)")][0].f) as $x
+    (reduce inputs as $l ({n: null, files: [], order: [], failed: [], open: [], notrun: [], host: []};
+      . as $s | ([$l | capture("^== (?<f>.*\\S.*)")][0].f) as $b | ([$l | capture("^-- notrun (?<f>.*\\S.*)")][0].f) as $x | ([$l | capture("^TESTRUN host\t(?<f>[^\t]*\\S[^\t]*)\t")][0].f) as $hf
       | ([$l | capture("^-- (?<r>ok|FAIL) (?<f>.*\\S.*)") | .f |= (named($s.open[-1]) // (sub("^ +"; "") | named($s.open[-1]) // named($s.order[-1]) // sub(" .*"; "")))][0]) as $e
       | ([$l | capture("^TESTRUN files=(?<n>[0-9]+)")][0].n) as $n
       | if $l == "\u0001" then .order += [[]] | .open += [[]]
         elif $b then .files |= (. + [$b] | unique) | (if .order[-1] | index($b) then . else .order[-1] += [$b] end) | .open[-1] += [$b]
         elif $e then .files |= (. + [$e.f] | unique) | .open[-1] -= [$e.f] | if $e.r == "FAIL" and (.failed | index($e.f) | not) then .failed += [$e.f] else . end
-        elif $x then .notrun |= (. + [$x] | unique) elif $n then .n += ($n | tonumber) else . end)') || return 1
+        elif $x then .notrun |= (. + [$x] | unique) elif $hf then .host |= (. + [$hf] | unique) elif $n then .n += ($n | tonumber) else . end) | .failed -= .host | .notrun -= .host)') || return 1
   out=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | awk '{ k = /== / || /^[[:space:]]*(not ok |ok |✔|✖)/ || /^FAIL \[/ || /^ *[.][.][.]$/ || (/^ *---$/ && prev ~ /^ *(not )?ok /) || /\/[^():]*:[0-9]+:[0-9]+\)?([[:space:]]*[{])?[[:space:]]*$/ || /^[[:space:]]*File "\//; if (py && /^[^[:space:]]/ && !/^Traceback /) { k = 1; py = 0 }; if (/^[[:space:]]*File "\//) py = 1; prev = $0; if (k) print }' | jq -cRn --arg rc "$2" --arg sec "$(cat "${1%.test}.limit" 2>/dev/null || echo "${TEST_TIMEOUT:-}")" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") --slurpfile rec <(cat "${1%.test}.testlog"/results/* 2>/dev/null | jq -cR 'fromjson? // empty') \
     --arg rx "${FRAMERX:-}" --arg pyrx "${PYFRAMERX:-}" --arg wd "$wd" --arg wdr "$wdr" '$log[0] as $log | '"$named ${FRAMEJQ:-def frame: null; def pyend(\$l): false;} ${RECJQ:-def recs(\$r; \$l): .;} $(tapjq 2>/dev/null || printf %s 'def tapname: .; def tapyaml: .;')"'
     def cut: if length <= 200 then . else (.[0:201] | sub("\\s+\\S*$"; "")) as $w | if ($w | length) > 200 then .[0:200] else $w end end;
@@ -148,14 +149,14 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
             | .files |= map(if .file == $file and (any(.cases[]; .name == $c) | not) and ($c == $file or ($c | endswith("/" + $file)) or ($file | endswith("/" + $c)) | not) then .cases += [{name: $c, line: ($l | sub("^\\s+"; "") | cut)}] else . end))
         else . end)
       | reduce $hs[$k][] as [$r, $i] (.; .seen["\($r) \($i)"] = $k | if $i > .at[$r] then .cur = $log.order[$r][$i] | .at[$r] = $i else . end))
-    | recs($rec; $log) | .files |= ([.[] | select(.file != "") | .cases[].name] as $fc | map(if .file == "" then .cases |= map(select(IN(.name; $fc[]) | not)) else . end) | map(select(.file != "" or .cases != []))) | (($log.open | flatten) - $log.notrun) as $open | ($log.files - $log.failed - $open - $log.notrun) as $passed | .files as $fs
+    | recs($rec; $log) | .files |= ([.[] | select(.file != "") | .cases[].name] as $fc | map(if .file == "" then .cases |= map(select(IN(.name; $fc[]) | not)) else . end) | map(select(.file != "" or .cases != []))) | (($log.open | flatten) - $log.notrun - $log.host) as $open | ($log.files - $log.failed - $open - $log.notrun - $log.host) as $passed | .files as $fs
     | {of: ($log.n // ($log.files | length | if . == 0 then null else . end)),
        files: (.files | map((.cases |= map(. + if $at[.name] then {at: $at[.name]} else {} end)) + if .cases == [] and $fat[.file] then {at: $fat[.file]} else {} end)),
        timeout: (if $rc == "124" then {sec: ($sec | tonumber? // $sec), file: ($only // ($open | last))} else null end),
        passed: $passed,
        okcases: [.oks | to_entries[] | .key as $f | select(IN($passed[]; $f) | not)
          | {file: $f, cases: ((.value | unique) - [$fs[] | select(.file == $f) | .cases[].name])} | select(.cases != [])],
-       passcases: [.oks | to_entries[] | select(IN($passed[]; .key)) | {file: .key, cases: (.value | unique)}]} + (if $rc == "124" then {stopped: (if $only then [$only] else $open | unique end)} else {} end) + (if $log.notrun == [] then {} else {notRun: $log.notrun} end)') || return 1
+       passcases: [.oks | to_entries[] | select(IN($passed[]; .key)) | {file: .key, cases: (.value | unique)}]} + (if $rc == "124" then {stopped: (if $only then [$only] else $open | unique end)} else {} end) + (if $log.notrun == [] then {} else {notRun: $log.notrun} end) + (if $log.host == [] then {} else {host: $log.host} end)') || return 1
   [[ $out == *'"at":['* ]] || { printf '%s\n' "$out"; return 0; }
   atsource "$wd" <<<"$out"
 }
@@ -366,7 +367,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     # Its output's end (the last 60 lines, as a failed test line's tail, card()) goes with them: the run again
     # overwrites <worktree>.test, and a pass on re-run is the only record of the flaky failure (FAILURE, testfiles.sh).
     jq -c --argjson rc "$rc" --rawfile t <(tail -n 60 "$1.test" 2>/dev/null | tr -d '\000') \
-      '{exit: $rc, failures: del(.passed, .okcases, .passcases)} + ($t | sub("\n+$"; "") | if . == "" then {} else {tail: .} end)' <<<"$f" > "$1.first"
+      '{exit: $rc, failures: del(.passed, .okcases, .passcases, .host)} + ($t | sub("\n+$"; "") | if . == "" then {} else {tail: .} end)' <<<"$f" > "$1.first"
     # The files the first run timed, which the run again does not run, after those of the runs before it (testlist.sh slowtests()), and its `TESTRUN case` lines (.oldfiles, below).
     mapfile -t l < <(testlogs "$1"); { cat "$1.reported"; [ ${#l[@]} = 0 ] || grep -h -e '^TESTRUN sec' -e $'^TESTRUN case\t' "${l[@]}"; } >> "$1.times" 2>/dev/null
     # The first run's coverage report, which the run again may write over: kept (testlist.sh covkeep()) for uncovered(), in the same file.
@@ -700,22 +701,21 @@ noresult() { # <worktree> <exit> <file>...
 # over 128: the service stopping or restarting), or its time ran out with no test file begun and not ended (the runner
 # itself, not a test, ran out of time), or its runner wrote logs that name nothing it ran (no `TESTRUN`, `== ` or `-- `
 # line), or its only failure is the test command itself (testfails()'s name for a run that logged no file, when its
-# output names no failing case either): the command names no test. The loop's own file in the log folder (cache:
-# testlist.sh cacheoff()) is none of the runner's. Or it passed with a file whose filter ran no case (nocases():
-# tests() wrote <worktree>.noresult and made its exit 1). Prints why; fails when the run passed or gave a result.
+# output names no failing case either), or a host problem kept each failed file from starting (hostonly()). Or it
+# passed with a file whose filter ran no case (nocases(): <worktree>.noresult). Prints why; fails on a result.
 voidrun() { # <worktree> <exit>
-  local l=() f cmd
+  local l=() f cmd h
   [ "$2" != 0 ] || return 1
   [ "$2" -le 128 ] || { echo "exit $2: the run was killed by a signal"; return 0; }
   [ ! -s "$1.noresult" ] || { cat "$1.noresult"; return 0; }
-  mapfile -t l < <(testlogs "$1" | grep -v '/cache$')
+  mapfile -t l < <(testlogs "$1" | grep -v '/cache$') # the loop's own file there (cacheoff()) is none of the runner's
   if [ "$2" = 124 ]; then
     f=$(testfails "$1.test" 124 | jq -r '.timeout.file // empty' 2>/dev/null)
     [ -n "$f" ] && [ ${#l[@]} -gt 0 ] && grep -qxF -- "== $f" "${l[@]}" 2>/dev/null \
       || { echo "exit 124: the run's time ran out with no test file running"; return 0; }
   fi
-  [ ${#l[@]} -gt 0 ] && ! grep -qE '^(TESTRUN |== |-- )' "${l[@]}" 2>/dev/null \
-    && { echo "exit $2: the runner's logs name no test it ran"; return 0; }
+  [ ${#l[@]} -gt 0 ] && ! grep -qE '^(TESTRUN |== |-- )' "${l[@]}" 2>/dev/null && { echo "exit $2: the runner's logs name no test it ran"; return 0; }
+  [ ${#l[@]} -eq 0 ] || ! h=$(hostonly "${l[@]}") || { echo "exit $2: a problem of the host, not of a test: $h"; return 0; }
   # Logs that name tests it ran are a result: the command failed on a check of its own (a lint, shellcheck, a map
   # check), which its output says and a fix session can act on (#195 was blocked three times for its own warnings).
   [ ${#l[@]} -eq 0 ] || return 1

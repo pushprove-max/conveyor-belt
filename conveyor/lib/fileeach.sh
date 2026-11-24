@@ -26,7 +26,9 @@
 # ends. one (a run of a list's `fail` lines), or a run that cannot read the slots (no CONVEYOR_TEST_SLOTS, or
 # slot_pool fails): each file runs once the one before it has ended, its output straight to the run's.
 # Each file runs in a process group of its own (timeout's), with the file's own time limit, its `# timeout: <seconds>`
-# line (FILELIMIT), times the run's load factor (CONVEYOR_LOAD_FACTOR: loadfactor(), LOADSCALE, rounded up): past it,
+# line (FILELIMIT), times the run's load factor (CONVEYOR_LOAD_FACTOR: loadfactor(), LOADSCALE, rounded up), and the
+# file's command gets the epoch second that limit ends at in CONVEYOR_TEST_END (empty with no such line), so a wait of
+# its own (as a runner's wait for room in the temp space) can end before it: past it,
 # timeout ends the file and everything it started, and the output says it timed out, and with a factor over 1, the
 # line's own seconds and the factor. Its log keeps it begun with no `-- ok|FAIL` line, and a `-- timeout <file>` line
 # in the log alone (no reader of results reads it: testclock() does, so the run's limit is never said to have stopped
@@ -40,7 +42,8 @@
 # group, that holds no descriptor it inherited but the file's slot, stays while the file's group has one, so the
 # file's slot, and the home slot, stay taken until it has ended.
 # With CONVEYOR_TEST_FAILFAST=1 (side only: a card's run with the rule Stop a card's tests at the first failure on,
-# filecmd() fast), the first file that fails (or times out) ends the run: no further file starts, each file still
+# filecmd() fast), the first file that fails (or times out; not one its runner did not start for a problem of the host,
+# fe_ended) ends the run: no further file starts, each file still
 # running is ended as at the run's end (its output printed with no end line), and each file not run or not finished is
 # logged `-- notrun <file>` (testfails() notRun) and named in the output as not run, never as passed. Each file's command
 # gets the mark too, so a runner of cases (conveyor/conveyor.test.sh) stops at its first failed case as well.
@@ -60,10 +63,10 @@ fileeach() { # <side|one> <test.fileCommand> <FILELIMIT> <LOADSCALE> <log> [file
   if [ "$1" = side ] && [ -n "${CONVEYOR_TEST_SLOTS:-}" ] && . "$CONVEYOR_TEST_SLOTS" && slot_pool; then sl=1; mkdir -p "$o" || exit 1; fi
   [ -z "$fast" ] || [ -z "$sl" ] || { red=$(cd "$o" && pwd -P) || exit 1; rm -f "$red"/*.red; }
   # The end of file <pid>'s run, its exit <x> (K: it was ended with the run; N: the first failure ended it), for
-  # fe_shown: its process logged it. A failure of a fast run is its first failure (ff).
+  # fe_shown: its process logged it. A failure of a fast run is its first failure (ff), not a file logged not started (TESTRUN host).
   fe_ended() { # <pid> <x>
     local k=${job[$1]}; ex[k]=$2; unset "job[$1]"
-    [ -z "$fast" ] || [ "$2" = 0 ] || [ "$2" = K ] || [ "$2" = N ] || ff=1
+    [ -z "$fast" ] || [ "$2" = 0 ] || [ "$2" = K ] || [ "$2" = N ] || grep -qsF "TESTRUN host"$'\t'"${fs[k - 1]}"$'\t' "${l%/*}"/* || ff=1
   }
   # The first failure of a fast run: each file still running is ended (its own trap ends its group) and, as each
   # file not begun, logged as not run. A file that made its failed mark (CONVEYOR_TEST_RED) is waited for, not ended.
@@ -130,7 +133,7 @@ fileeach() { # <side|one> <test.fileCommand> <FILELIMIT> <LOADSCALE> <log> [file
     # shellcheck disable=SC2030,SC2031 # p is the subshell's own
     ( p=''; trap '[ -z "$p" ] || { kill -TERM "$p" 2>/dev/null; wait "$p" 2>/dev/null; }; exit 143' TERM
       [ -z "$sl" ] || { exec > "$o/$i" 2>&1; slot_mine; }
-      CONVEYOR_TEST_FILE=$f CONVEYOR_TEST_N=$i CONVEYOR_TEST_RED=${red:+$red/$i.red} timeout --kill-after=10 "$s" bash -c "$fc"' "$CONVEYOR_TEST_FILE"' < /dev/null & p=$!
+      CONVEYOR_TEST_FILE=$f CONVEYOR_TEST_N=$i CONVEYOR_TEST_RED=${red:+$red/$i.red} CONVEYOR_TEST_END=$([ "$s" = 0 ] || echo $((EPOCHSECONDS + s))) timeout --kill-after=10 "$s" bash -c "$fc"' "$CONVEYOR_TEST_FILE"' < /dev/null & p=$!
       wait "$p"; x=$?
       if pgrep -g "$p" > /dev/null 2>&1; then
         ( for ((d = 3; d < 256; d++)); do [ "$d" = "${SLOT_FD:-}" ] || [ "$d" = "${SLOT_CAPFD:-}" ] || eval "exec $d>&-"; done

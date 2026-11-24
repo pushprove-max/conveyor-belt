@@ -7,14 +7,19 @@
 # docs/setup.md) fails alone, with the reason: the other files and the belt keep their space. Writes in the checkout
 # count to the share too, once the file has ended (share_run). A file starts only when
 # the space holds a share for it beside the shares of the files that run there, in this run or in another one
-# (share_noroom, share_take), and it waits for one that runs to end, or fails.
+# (share_noroom, share_take), and it waits for one that runs to end, or for room up to the host file's testTmpWaitSec
+# when none runs, or fails.
 
-# share_init <folder>: SHARE (the share in MB), LIMKB (in KB), SPACE (the mount point of the space <folder> is in) and
-# SHARE_DIR (below); when the host file's testTmpMB is not a whole number of MB from 1, it prints why and fails.
+# share_init <folder>: SHARE (the share in MB), LIMKB (in KB), SHARE_WAIT (the host file's testTmpWaitSec, 300 when
+# unset: share_take), SPACE (the mount point of the space <folder> is in) and SHARE_DIR (below); when the host file's
+# testTmpMB is not a whole number of MB from 1, or its testTmpWaitSec not a whole number of seconds, it prints why and
+# fails.
 share_init() {
   local host=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json
-  SHARE=2048; [ ! -e "$host" ] || SHARE=$(jq -r '.testTmpMB // 2048' "$host" 2>/dev/null)
+  SHARE=2048; SHARE_WAIT=300
+  [ ! -e "$host" ] || { SHARE=$(jq -r '.testTmpMB // 2048' "$host" 2>/dev/null); SHARE_WAIT=$(jq -r '.testTmpWaitSec // 300' "$host" 2>/dev/null); }
   [[ $SHARE =~ ^[1-9][0-9]{0,6}$ ]] || { echo "the host file's testTmpMB ($host) is '$SHARE', or the file cannot be read: it must be a whole number of MB from 1"; return 1; }
+  [[ $SHARE_WAIT =~ ^(0|[1-9][0-9]{0,6})$ ]] || { echo "the host file's testTmpWaitSec ($host) is '$SHARE_WAIT', or the file cannot be read: it must be a whole number of seconds"; return 1; }
   LIMKB=$((SHARE * 1024))
   SPACE=$(df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print $NF }'); SPACE=${SPACE:-$1}
   # The shares folder (share_others): shares/ in the machine's test slots' folder (conveyor/lib/slots.sh,
@@ -92,12 +97,28 @@ share_noroom() {
 # (share_others) that this shell holds an flock on through SHARE_FD, named in SHARE_RES; what the file starts inherits
 # the descriptor, so the share is held until the last of them ends. The room, beside the shares the other files hold
 # there, of this run or of another, is checked and the share taken under the folder's lock, so two runs never both
-# take the last room. While there is no room and a file holds a share there, it waits for one to end; with none, it
-# fails, and SHARE_WHY says why. With no shares folder it only checks the room.
+# take the last room. While there is no room and a file holds a share there, it waits for one to end (up to half the
+# time left under a file's own time limit, below); with none, it waits for room (share_roomwait) up to SHARE_WAIT
+# seconds (less under that limit too), or not at all once a file of the same run did not start
+# for want of room (a <folder>.noroom beside <temp folder>: share_run), as the room did not come back for that one. It
+# fails when there is still none, and SHARE_WHY says why. With no shares folder it only checks the room, and waits for
+# it the same way.
 share_take() {
-  local d=${SHARE_DIR:-} l f o
-  SHARE_RES=''
-  if [ -z "$d" ]; then SHARE_WHY=$(share_noroom "$1" 0) && return 1; return 0; fi
+  local d=${SHARE_DIR:-} l f o w=${SHARE_WAIT:-0} end note=1 left fend=''
+  SHARE_RES=''; SHARE_NOROOM=''
+  ! compgen -G "${1%/*}/*.noroom" > /dev/null || { w=0; note=''; }
+  # Under a time limit of the file's own (CONVEYOR_TEST_END: the engine's fileeach()), each wait takes at most half the
+  # time left (fend), so the file ends as a host problem, not at that limit as a test that ran out of time: the wait
+  # for the shares of other files too (Bug #1662: another run held its share past the limit of a file that waited).
+  if [[ ${CONVEYOR_TEST_END:-} =~ ^[0-9]+$ ]]; then
+    left=$(((CONVEYOR_TEST_END - EPOCHSECONDS) / 2)); [ "$left" -ge 0 ] || left=0; [ "$left" -ge "$w" ] || w=$left
+    fend=$((SECONDS + left))
+  fi
+  end=$((SECONDS + w))
+  if [ -z "$d" ]; then
+    while SHARE_WHY=$(share_noroom "$1" 0); do share_roomwait "$1" "$end" "$note" || return 1; done
+    return 0
+  fi
   mkdir -p "$d" 2>/dev/null || { SHARE_WHY="the shares folder $d could not be made"; return 1; }
   while :; do
     { exec {l}>> "$d/lock" && flock -w 60 "$l"; } 2>/dev/null || { SHARE_WHY="the lock of the shares folder $d could not be taken"; return 1; }
@@ -111,9 +132,37 @@ share_take() {
       exec {l}>&-; return 0
     fi
     exec {l}>&-
-    [ "$o" != 0 ] || return 1
-    sleep 0.5
+    if [ "$o" = 0 ]; then share_roomwait "$1" "$end" "$note" || return 1
+    elif [ -n "$fend" ] && [ "$SECONDS" -ge "$fend" ]; then SHARE_NOROOM=1; [ -z "$note" ] || SHARE_WHY+=$(share_quotanote "$1"); return 1
+    else sleep 0.5; fi
   done
+}
+
+# share_roomwait <folder> <end> <note>: after share_take found no room under <folder> and no file holding a share
+# there to wait for, waits 1 s for room while SECONDS is before <end>. Space taken by something other than a test file
+# (Bug #1662: the user's own old files, another program) can go meanwhile. Fails at <end>: SHARE_NOROOM is then 1 (no
+# room in the temp space, a host problem, not a failed test), and, with a <note> (1: the run's first file that did not
+# start so, share_take), SHARE_WHY ends with share_quotanote, whatever the wait was (testTmpWaitSec 0 too); the run's
+# later files give none, so the user's folders are read once. Fails at once, as before, when the free space cannot be
+# read (SHARE_WHY says so), with no SHARE_NOROOM.
+share_roomwait() {
+  share_free "$1" > /dev/null || return 1
+  [ "$SECONDS" -ge "$2" ] || { sleep 1; return 0; }
+  SHARE_NOROOM=1; [ -z "$3" ] || SHARE_WHY+=$(share_quotanote "$1"); return 1
+}
+
+# share_quotanote <folder>: when what is left of this user's quota on the space <folder> is in (share_quota) is less
+# than the space's free blocks (df), so the quota is the room that is missing, prints a note for the reason that says
+# so and names the user's 5 biggest folders at the top of the space (SPACE), so the owner sees what to clear: the
+# user's own files fill the quota, and they do not go by themselves. Prints nothing else.
+share_quotanote() {
+  local f q b
+  f=$(df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print $4 }'); q=$(share_quota "$1") || return 0
+  [[ $f =~ ^[0-9]+$ ]] && [[ $q =~ ^[0-9]+$ ]] && [ "$q" -lt "$f" ] || return 0
+  b=$(find "$SPACE" -mindepth 1 -maxdepth 1 -type d -user "$(id -u)" -exec du -sk {} + 2>/dev/null | sort -rn | head -n 5 \
+    | awk -F'\t' '{ printf "%s%s (%d MB)", (NR > 1 ? ", " : ""), $2, $1 / 1024 }')
+  [ -z "$b" ] || b=", and the user's biggest folders there are $b"
+  echo "; the room missing is this user's quota on $SPACE ($((q / 1024)) MB left of it), not the space ($((f / 1024)) MB free): the user's own files there fill it$b"
 }
 
 # share_guard <temp folder> <pid file> <mark>: stops the test file that <pid file> names once its temp folder holds its
@@ -144,14 +193,16 @@ share_guard() {
 # checkout ($PWD) and the folder hold its share together, or one new file there is at the size limit: these are seen
 # only once the command has ended, and a file run beside it in a parallel suite that wrote them while it ran fails it
 # too, as nothing tells which file wrote them. The command starts only once its share is taken (share_take, which
-# waits for room): when it cannot be, `<label> did not start: <why>` and exit 1. A TERM, INT or HUP to it is passed to
+# waits for room): when it cannot be, `<label> did not start: <why>` and exit 1, and when that is for want of room
+# (share_take's SHARE_NOROOM: a host problem, not a failed test) <folder>.noroom holds the line too, for the caller to
+# tell such a file from one that failed. A TERM, INT or HUP to it is passed to
 # the command, and the folder is still removed; a run stopped with KILL leaves the folder to its caller's own temp
 # folder, which <folder> is in. It runs in a subshell of its own, so its traps are not its caller's.
 share_run() (
   local label=$1 ft=$2 g c='' k st o f pr; shift 2
   mkdir "$ft" || { echo "$label did not start: its temp folder $ft could not be made"; return 1; }
   trap 'rm -rf "$ft"; exit 143' TERM INT HUP
-  share_take "$ft" || { echo "$label did not start: $SHARE_WHY"; rm -rf "$ft"; return 1; }
+  share_take "$ft" || { echo "$label did not start: $SHARE_WHY"; [ -z "$SHARE_NOROOM" ] || echo "$label did not start: $SHARE_WHY" > "$ft.noroom"; rm -rf "$ft"; return 1; }
   trap '[ -z "$c" ] || kill -TERM "$c" 2>/dev/null' TERM INT HUP
   share_guard "$ft" "$ft.pid" "$ft.over" > /dev/null 2>&1 < /dev/null & g=$!
   ( echo "$BASHPID" > "$ft.pid"; ulimit -f "$LIMKB" 2>/dev/null; export TMPDIR=$ft

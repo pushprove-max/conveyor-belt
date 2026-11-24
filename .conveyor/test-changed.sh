@@ -1604,7 +1604,8 @@ trap 'chmod -R u+w "$o.tmp" 2>/dev/null; rm -rf "$o" "$o".* "${rlist:-}"' EXIT
 # heading and the lines under it. A file with a `(fail)` line there, or with no `(pass)` line (it did not run), fails.
 # That run has a share of the temp space for each plugin test file, and its own TMPDIR, $o.tmp/p (share_run): under
 # the share of its first file, the files' writes together failed it, or left the later files' parts cut off (#1394).
-# When it did not start or wrote past its share, each file fails with the reason.
+# When it did not start or wrote past its share, each file fails with the reason; when it did not start for want of
+# room ($o.tmp/p.noroom), each file did not run, a host problem (below).
 plugintest() { # <test file>
   local n p='test-changed: the plugin test run'
   if [ ! -s "$o.plugin" ]; then
@@ -1620,10 +1621,11 @@ plugintest() { # <test file>
   grep -q '^(pass)' "$o.part" && ! grep -q '^(fail)' "$o.part"
 }
 # One test file's command, run one at a time after the engine case files (below), with its share of the temp space
-# and its own TMPDIR, $o.tmp/f (share_run); it waits for room for its share, or fails with the reason.
+# and its own TMPDIR, $o.tmp/f<n> (share_run; n: fk, the file's place in the run, below); it waits for room for its
+# share, or fails with the reason ($o.tmp/f<n>.noroom when that is want of room: a host problem, below).
 fshare() { # <test file> <command>...
   local t=$1; shift
-  share_run "test-changed: $t" "$o.tmp/f" "$@"
+  share_run "test-changed: $t" "$o.tmp/f$fk" "$@"
 }
 # failstop [--in <line>] <command>...: runs it, its output and errors to this run's output. With FAILFAST (a card's
 # run that stops at its first failure), it ends the command and all it started (its own process group) at the first
@@ -1742,9 +1744,11 @@ eend() {
 }
 trap eend TERM INT HUP
 # One that starts waits for one that runs to end while the space cannot hold a share for each (share_noroom), and for
-# the files of other runs while they hold theirs (share_run); with none running and still no room, it fails without
-# running, with the reason. erun: the pid of each still running.
-declare -A erun=()
+# the files of other runs while they hold theirs, or for room up to the host file's testTmpWaitSec while none does
+# (share_run, share_take); with still no room, it does not run, with the reason, and $o.tmp/e<n>.noroom (enr) says so:
+# a host problem, not a failed test (below). Once one did not start so, the run's next files do not wait again.
+# erun: the pid of each still running.
+declare -A erun=() enr=()
 # One that ended: its exit in erc. One that ended before this wait began is not among the jobs a bash before 5.3 waits
 # for with `wait -n` (p is left unset): its exit is asked for by itself, as test-full.sh reap() does.
 ereap() {
@@ -1760,13 +1764,11 @@ ereap() {
 }
 k=0
 for t in $(printf '%s\n' "${!ecases[@]}" | LC_ALL=C sort); do
-  k=$((k + 1)); eout[$t]=$o.e$k
+  k=$((k + 1)); eout[$t]=$o.e$k; enr[$t]=$o.tmp/e$k.noroom
   # In a subshell ($(...)), not under a redirect: a TERM then runs eend with this run's own output, not /dev/null.
   while [ ${#erun[@]} -gt 0 ] && nr=$(share_noroom "$o.tmp" ${#erun[@]}); do
     ereap
   done
-  # While files of other runs hold their shares there, it starts, and share_run waits for room (share_take).
-  if nr=$(share_noroom "$o.tmp" 0) && [ "$(share_others "$o.tmp")" = 0 ]; then echo "test-changed: $t did not start: $nr" > "$o.e$k"; erc[$t]=1; continue; fi
   for c in ${ecases[$t]}; do printf 'TESTRUN case\t%s\t%s\n' "$t" "$c" >> "$log"; done
   [ -z "$slots" ] || slot_take
   ( [ -z "$slots" ] || slot_mine
@@ -1778,8 +1780,11 @@ done
 for p in "${!erun[@]}"; do wait "$p"; erc[${erun[$p]}]=$?; done
 # The engine case files first, as they ran, then each other file.
 mapfile -t order < <(for t in "${!run[@]}"; do if [ -n "${ecases[$t]:-}" ]; then printf '0\t%s\n' "$t"; else printf '1\t%s\n' "$t"; fi; done | LC_ALL=C sort | cut -f2-)
+fk=0
 for t in "${order[@]}"; do
-  r=ok; echo "== $t" >> "$log"
+  # nr: the file share_run leaves when the file did not start for want of room in the temp space (enr above; fshare's,
+  # or the plugin test run's for a plugin test file).
+  fk=$((fk + 1)); r=ok; nr=$o.tmp/f$fk.noroom; echo "== $t" >> "$log"
   # Why it runs (the step's record, conveyor.sh testrec()): one line a reason.
   printf '%s' "${why[$t]:-}" | awk -v t="$t" 'length { printf "TESTRUN why\t%s\t%s\n", t, $0 }' >> "$log"
   # Its mark and the meta-runner hook (header above), and its card mode when the pack gives it one (issue 584).
@@ -1808,7 +1813,7 @@ for t in "${order[@]}"; do
     rm -f "$o.times"; marked "$t" || r=FAIL; metaran "$t" || r=FAIL
   elif [ -n "${ecases[$t]:-}" ]; then
     # An engine case file run on its own (above), with its chosen cases.
-    shown[$t]=1; echo "== $t (cases: ${ecases[$t]})"; cat "${eout[$t]}"; [ "${erc[$t]}" = 0 ] || r=FAIL
+    shown[$t]=1; nr=${enr[$t]}; echo "== $t (cases: ${ecases[$t]})"; cat "${eout[$t]}"; [ "${erc[$t]}" = 0 ] || r=FAIL
     # Its time when it ran every case it has, timed by the runner (the sums of its cases' clock and CPU seconds, as
     # they run at once), for the times the loop records of a test file (conveyor/README.md, The test step).
     [ ! -s "${eout[$t]}.times" ] || awk -F'\t' 'NF == 3 { printf "TESTRUN sec\tconveyor/tests/%s\t%s\t%s\n", $1, $2, $3 }' "${eout[$t]}.times" >> "$log"
@@ -1823,7 +1828,7 @@ for t in "${order[@]}"; do
     # run that never ends keeps the passes of its other cases (testlist.sh rerunlist()).
     p=$(fparts "$t")
     [ -z "$p" ] || tr , '\n' <<<"$p" | grep . | while IFS= read -r c; do printf 'TESTRUN case\t%s\t%s\n' "$t" "$c"; done >> "$log"
-    echo "== $t${p:+ (parts: $p)}"; s=${EPOCHREALTIME/,/.}; times > "$o.cpu"
+    echo "== $t${p:+ (parts: $p)}"; s=${EPOCHREALTIME/,/.}; times > "$o.cpu"; [[ $t != *.ts && $t != *.tsx ]] || nr=$o.tmp/p.noroom
     # A meta-runner runs in its card mode (the pack's test.files cardMode, mk above): its own checks, with a stub in
     # place of the files it starts.
     case $t in
@@ -1841,9 +1846,16 @@ for t in "${order[@]}"; do
     [ -n "$p" ] || printf 'TESTRUN sec\t%s\t%s\t%s\n' "$t" "$(awk -v a="$s" -v b="${EPOCHREALTIME/,/.}" 'BEGIN { printf "%.1f", b - a }')" \
       "$(awk 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }
         NR == 2 || NR == 4 { n[NR] = c($1) + c($2) } END { printf "%.1f", n[4] - n[2] }' "$o.cpu")" >> "$log"
-    ended "$t" $r "$o" "$p"
+    [ -s "$nr" ] || ended "$t" $r "$o" "$p"
   fi
-  echo "-- $r $t" >> "$log"; [ $r = ok ] || rc=1
+  # Bug #1662: a file that did not start for want of room in the temp space failed, and the engine marked main red on
+  # it. It is a host problem, not a failed test: logged `TESTRUN host<TAB><file><TAB><why>` and `-- notrun <file>`
+  # (the engine's voidrun(): a run with no result), and the next files do not wait for room again.
+  if [ -s "$nr" ]; then
+    printf 'TESTRUN host\t%s\t%s\n' "$t" "$(head -n 1 "$nr")" >> "$log"; echo "-- notrun $t" >> "$log"; rc=1
+  else
+    echo "-- $r $t" >> "$log"; [ $r = ok ] || rc=1
+  fi
 done
 [ ${#run[@]} -gt 0 ] || echo "no test touches this change"
 exit $rc

@@ -238,3 +238,22 @@ t_failfastmarkpass() {
   [ "$rc" != 0 ] || fail "the run that a.test.sh's failed mark stopped passed when a.test.sh passed: $(cat "$d/out" "$w.test")"
   [ "$(jq -c '.notRun' "$d/fails")" = '["b.test.sh"]' ] || fail "the run did not name b.test.sh as not run: $(cat "$d/fails") $(cat "$w.test")"
 }
+
+# Issue 1662 (E7, review). Bug it catches: a file its runner did not start for want of room in the temp space (its
+# runner logs `TESTRUN host<TAB><file><TAB><why>` and exits 1, as .conveyor/test-changed.sh does) was the run's first
+# failure, so the run ended b.test.sh, which could finish, and named it not run. h.test.sh is refused so once b.test.sh
+# has begun; b.test.sh ends 2 s (times the load factor) after that: it finishes and passes, and h.test.sh is named as a host problem alone.
+t_failfasthost() {
+  local d=$T/$CASE w=$T/$CASE/wt rc
+  sidewt 2
+  printf '%s\n' "i=0; while [ ! -e '$d/b-start' ] && [ \$i -lt $(loadlimit 200) ]; do i=\$((i + 1)); sleep 0.05; done" \
+    'printf "TESTRUN host\th.test.sh\tno room\n" >> "$CONVEYOR_TEST_LOG/test-changed.log"; echo "test-changed: h.test.sh did not start: no room"' \
+    ": > '$d/h-done'; exit 1" > "$w/h.test.sh"
+  printf '%s\n' ": > '$d/b-start'; i=0; while [ ! -e '$d/h-done' ] && [ \$i -lt $(loadlimit 200) ]; do i=\$((i + 1)); sleep 0.05; done" \
+    "sleep $(loadlimit 2); : > '$d/late'; echo 'ok one'" > "$w/b.test.sh" # sleep: b.test.sh ends past the run's read of h.test.sh's exit, so a stop then would end it first
+  SIDEFAST=1 SIDELIMIT=60 siderun h.test.sh b.test.sh > "$d/out" 2>&1; rc=$?
+  [ "$rc" != 0 ] || fail "the run with h.test.sh not started for want of room passed, so no Test step reads it as a host problem: $(cat "$d/out" "$w.test")"
+  [ -e "$d/late" ] || fail "with the rule on, the run ended b.test.sh after h.test.sh's runner logged it not started for want of room (TESTRUN host): $(cat "$w.test")"
+  [ "$(jq -c '[.notRun, .passed, .host, (.files | map(.file))]' "$d/fails")" = '[null,["b.test.sh"],["h.test.sh"],[]]' ] \
+    || fail "the run with h.test.sh not started for want of room (TESTRUN host) does not name b.test.sh as passed and h.test.sh as host alone: $(cat "$d/fails") $(cat "$w.test")"
+}

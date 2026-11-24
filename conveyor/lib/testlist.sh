@@ -588,3 +588,14 @@ mainlinks() { # <worktree> <the commit last tested on>
     | jq -Rr --slurpfile m <(cat "$1/.conveyor/test-links.json" 2>/dev/null || echo '{}') '$m[0]["main:" + .] | arrays[] | strings' 2>/dev/null \
     | sort -u | while IFS= read -r f; do [ ! -f "$1/$f" ] || printf '%s\n' "$f"; done
 }
+# A run's logs <log>... that name a file the runner did not start for a problem of the host, as no room in the temp
+# space (a line `TESTRUN host<TAB><file><TAB><why>`), and no failed test: each file logged `-- FAIL` or `-- timeout` is
+# such a file (a test.fileCommand run, fileeach(), logs `-- FAIL` for the runner's failed exit on it). Prints the first
+# why; fails when no file is such a file, or a test failed. Bug #1662: such a file was a failed test, so it ran on main,
+# failed there for the same want of room, and main was marked red with nothing to fix (voidrun(), lib/testrun.sh).
+hostonly() { # <log>...
+  local h
+  h=$(grep -h $'^TESTRUN host\t' "$@" 2>/dev/null | cut -f2-) && [ -n "$h" ] || return 1
+  ! grep -hE '^-- (FAIL|timeout) ' "$@" 2>/dev/null | cut -d' ' -f3- | grep -qvxF -f <(cut -f1 <<<"$h") || return 1
+  h=$(head -n 1 <<<"$h"); printf '%s\n' "${h#*$'\t'}"
+}

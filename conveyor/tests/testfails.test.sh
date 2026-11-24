@@ -32,7 +32,7 @@ allfails() { # <exit> [<testTimeout>]
 # Why the card's run allfails() last ran gave no result, given its exit and the step's timeout (voidrun()); fails
 # when the run gave a result.
 void() { # <exit> [<testTimeout>]
-  ( eval "$(sed -n '/^voidrun() {/,/^}/p; /^testfails() {/,/^}/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh")"
+  ( eval "$(sed -n '/^voidrun() {/,/^}/p; /^testfails() {/,/^}/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh"; sed -n '/^hostonly() {/,/^}/p' "$SRC/lib/testlist.sh")"
     packget() { [ -n "${PACKCMD:-}" ] && printf -v "$2" '%s' "$PACKCMD"; }
     TEST_TIMEOUT=${2:-600} voidrun "$T/$CASE/wt" "$1" )
 }

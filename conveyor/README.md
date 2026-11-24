@@ -558,7 +558,11 @@ run's as well as a run again's, says why each file ran in `why`, `{"<file>": [re
 A test step whose run gives no result proves nothing. This is a run that a signal stopped (for example, the service
 stopped or restarted), a run whose time ran out with no test file running, or a run that wrote logs in
 `CONVEYOR_TEST_LOG` that name no test (no `TESTRUN`, `== ` or `-- ` line). It is also a failed run that logged no
-test file and whose output names no failing case, so its only failure is the test command itself. A card's run that
+test file and whose output names no failing case, so its only failure is the test command itself. It is also a failed
+run that logged the line `TESTRUN host<TAB><file><TAB><why>`, where each file that the logs give as `-- FAIL` or
+`-- timeout` has such a line: the runner did not start that file because of a problem of the host, such as no room in
+the temp space, so no test failed. The reason is the first such why. When another file of the run failed, the run
+has a result, but a file with such a line is not a failed file, so it does not run on main. A card's run that
 passes is also a run with no result when its list names cases of a file, the file's runner writes case records (see
 below), and no record is of that file: the filter ran no case. Nothing of a run with no result goes to main, to
 `mainred.json`, to a wait for main or to a fix session. The step's `test` line has the reason `no result: <why>`, and

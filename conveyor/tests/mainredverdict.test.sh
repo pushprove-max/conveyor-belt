@@ -111,6 +111,20 @@ t_mainkeepstopped() {
   [ "$out" = '["a.test"]' ] || fail "mainkeep of units $u after main's run $mf kept files other than a.test: $out"
 }
 
+# Issue 1662 (E6, review). Bug it catches: card c7's run of a.test on main did not start for want of room in the temp
+# space (its runner logged `TESTRUN host<TAB>a.test<TAB><why>`), and mainkeep() kept a.test as passed on main (res
+# null), so card c8's probe at the same commit, once room came back, took that pass and did not run a.test there: a
+# red main went unseen. c8 runs a.test on main and gets main's verdict.
+t_mainkeephost() {
+  local s fl='{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]}]}'
+  mrshared; : > "$STUB/noroom"
+  { echo '[ ! -e "$STUB/noroom" ] || { printf "== a.test\nTESTRUN host\ta.test\tno room\n-- notrun a.test\n" >> "$CONVEYOR_TEST_LOG/r"; exit 1; }'
+    cat "$STUB/mainrun-cmd"; } > "$STUB/cmd.new" && mv "$STUB/cmd.new" "$STUB/mainrun-cmd" || fail "main's run could not be refused room"
+  mrv c7 "$fl"; rm -f "$STUB/noroom"; mrv c8 "$fl"
+  [ "$(tr '\n' ' ' < "$STUB/mainruns" 2>/dev/null)" = 'a.test ' ] && [ "$(jq -c .verdicts "$STUB/v.c8")" = '[{"case":"a.test: one","verdict":"main"}]' ] \
+    || fail "card c8, failing $fl after c7's run of a.test on main did not start for want of room (TESTRUN host), did not run a.test there and get main: runs $(cat "$STUB/mainruns" 2>&1); $(cat "$STUB/v.c8" "$STUB/v.c8.err")"
+}
+
 # Issue 1639 (E2, review). Bug it catches: the results of a run on main were kept by main's commit and dependency
 # folders alone, so after an engine update a card at the same commit read a result that the older engine's testfails()
 # had read (a node load failure kept with its file's path as its case), and as its own run now names no case for that

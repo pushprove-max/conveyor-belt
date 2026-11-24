@@ -36,10 +36,18 @@ t_loadfactor() {
 
 # Done when 1. Bug it catches: on a machine loaded to twice its cores, a test file that took 1.5 times its own limit
 # (# timeout: 2, 3 s) was stopped and failed the run, though it only ran slower.
+# Issue 1662, the same run: the file's command is given the end of its scaled limit (4 s on) in
+# CONVEYOR_TEST_END, so its runner's wait for room in the temp space (.conveyor/test-share.sh share_take) ends before
+# that limit stops it as a test that ran out of time.
 t_loadslow() {
-  printf '%s\n' '# timeout: 2' 'sleep 3' > "$T/$CASE/slow.test.sh" # sleep: 1.5 times its 2 s limit
+  local e=()
+  printf '%s\n' '# timeout: 2' "echo \"\$CONVEYOR_TEST_END \$EPOCHSECONDS\" > $(printf %q "$T/$CASE/end")" 'sleep 3' > "$T/$CASE/slow.test.sh" # sleep: 1.5 times its 2 s limit
   loadrun 2 run slow.test.sh || fail "a file 1.5 times over its limit, at a load of twice the cores, failed (exit $?): $(cat "$T/$CASE/out")"
   grep -qxF -- '-- ok slow.test.sh' "$T/$CASE/out" || fail "the file is not named as passed: $(cat "$T/$CASE/out")"
+  read -r -a e < "$T/$CASE/end" 2>/dev/null
+  # 3 to 4 s left as it starts (its start can cross a second): the unscaled 2 s limit leaves 2 at most.
+  [ ${#e[@]} = 2 ] && [ $((e[0] - e[1])) -ge 3 ] && [ $((e[0] - e[1])) -le 4 ] \
+    || fail "a file with a 4 s scaled limit was not given the epoch second it ends at in CONVEYOR_TEST_END (it saw '${e[*]}': the end, then its own clock)"
 }
 
 # Done when 1. Bug it catches: the factor let a file 4 times over its limit pass, or its failure did not say the

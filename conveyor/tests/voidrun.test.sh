@@ -112,3 +112,46 @@ t_voidnocasefail() {
   [ "$(ran 2)" = one ] && ! grep -qxF $'pass\tc.test' "$w.rerun" && grep -qxF $'fail\tc.test\tthree' "$w.rerun" \
     || fail "after a run again that failed and ran no case of c.test (ran: $(ran 2)), the list does not keep c.test's case three to run: $(tr '\t\n' ':|' < "$w.rerun" 2>&1)"
 }
+
+# Issue 1662. Bug it catches: a card's run whose runner did not start its file for want of room in the temp space was
+# a failed run, so the file ran on main, failed there for the same want of room, and main was marked red (a main-red
+# card that found nothing to fix). The runner logs such a file as `TESTRUN host<TAB><file><TAB><why>` and
+# `-- notrun <file>` (.conveyor/test-changed.sh): voidrun() takes the run as one with no result, naming the why, so
+# nothing of it goes to main or to a main-red card (t_voidrun: a run with no result goes to neither). The logs are
+# those of a run through test.fileCommand (fileeach(), as this repository's pack runs its files): its own log `files`
+# has `-- FAIL h.test.sh` for the runner's failed exit, which must not count as a failed test (a check that read it so made it one). A run that
+# also failed a file is not taken so: that failure is a result. Its failures (testfails(), what verdicts() runs on
+# main) name the file that failed alone: with h.test.sh among them, main's run of it did not start for the same want
+# of room, and main was marked red on it (the bug of the blocked card for this issue). h.test.sh is not passed either.
+t_voidhost() {
+  local w=$T/$CASE/wt got why='test-changed: h.test.sh did not start: 7800 MB is free to this user under /tmp, and it needs 8192 MB there'
+  mkdir -p "$w.testlog" && printf '%s\n' 'TESTRUN files=1' '== h.test.sh' '-- FAIL h.test.sh' > "$w.testlog/files" \
+    && printf '%s\n' '== h.test.sh' "TESTRUN host"$'\t'"h.test.sh"$'\t'"$why" '-- notrun h.test.sh' > "$w.testlog/test-changed.log" \
+    || fail "the run's logs could not be made"
+  vr() { ( eval "$(sed -n '/^voidrun() {/,/^}/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh"; sed -n '/^hostonly() {/,/^}/p' "$SRC/lib/testlist.sh")"; voidrun "$w" "$1" ); }
+  got=$(vr 1) && [ "$got" = "exit 1: a problem of the host, not of a test: $why" ] \
+    || fail "a run whose only file did not start for want of room (logs: $(cat "$w.testlog"/* | tr '\t\n' ':|')) was not taken as a run with no result naming why: '$got'"
+  printf '%s\n' '== f.test.sh' '-- FAIL f.test.sh' >> "$w.testlog/files"
+  ! got=$(vr 1) || fail "a run with a file that did not start for want of room and a file that failed (logs: $(cat "$w.testlog"/* | tr '\t\n' ':|')) was taken as a run with no result: '$got'"
+  : > "$w.test"
+  got=$( ( eval "$(sed -n '/^testfails() {/,/^}/p; /^RECJQ=/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh"; sed -n '/^tapjq() {/p' "$SRC/lib/failat.sh")"
+    packget() { return 1; }; testfails "$w.test" 1 | jq -c '{files: [.files[].file], passed, notRun}' ) )
+  [ "$got" = '{"files":["f.test.sh"],"passed":[],"notRun":null}' ] \
+    || fail "the failures of a run with h.test.sh not started for want of room and f.test.sh failed (logs: $(cat "$w.testlog"/* | tr '\t\n' ':|')) are not f.test.sh alone, with h.test.sh neither passed nor stopped at a first failure: $got"
+}
+
+# Issue 1662 (E5, review). Bug it catches: in a run (exit 124) where a.test.sh ran past its limit and the runner did
+# not start h.test.sh for want of room, the runner's log keeps h.test.sh's `== ` line with no end line (it logs
+# `-- notrun`), so testfails() named h.test.sh among the files stopped by the time limit, and as the run's timeout:
+# verdicts() then ran it on main, where it did not start for the same want of room. a.test.sh alone is stopped and
+# the timeout's file; h.test.sh is named only as a host problem (host), which mainkeep() reads.
+t_voidhosttimeout() {
+  local w=$T/$CASE/wt got
+  mkdir -p "$w.testlog" && printf '%s\n' 'TESTRUN files=2' '== a.test.sh' '-- timeout a.test.sh' '== h.test.sh' '-- FAIL h.test.sh' > "$w.testlog/files" \
+    && printf '%s\n' '== a.test.sh' '== h.test.sh' "TESTRUN host"$'\t'"h.test.sh"$'\t'"no room" '-- notrun h.test.sh' > "$w.testlog/test-changed.log" \
+    && : > "$w.test" || fail "the run's logs could not be made"
+  got=$( ( eval "$(sed -n '/^testfails() {/,/^}/p; /^RECJQ=/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh"; sed -n '/^tapjq() {/p' "$SRC/lib/failat.sh")"
+    packget() { return 1; }; TEST_TIMEOUT=60 testfails "$w.test" 124 | jq -c '{timeout: .timeout.file, stopped, files: [.files[].file], passed, host}' ) )
+  [ "$got" = '{"timeout":"a.test.sh","stopped":["a.test.sh"],"files":[],"passed":[],"host":["h.test.sh"]}' ] \
+    || fail "the failures of a run that timed out in a.test.sh with h.test.sh not started for want of room (logs: $(cat "$w.testlog"/* | tr '\t\n' ':|')) do not name a.test.sh alone as stopped and h.test.sh as host: $got"
+}

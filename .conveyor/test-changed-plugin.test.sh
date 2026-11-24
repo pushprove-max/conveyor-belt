@@ -78,6 +78,20 @@ p_share() {
     || no "a 1 MB share, the plugin run writing 600 KB for each of two files: '$got', runs $(runs), exit $(cat "$T/rc"): $(cat "$T/out")"
 }
 
-for p in source perfile missing share; do part "$p"; done
+# Bug #1662: the plugin run did not start for want of room in the temp space, each plugin test file failed on it, and
+# the engine marked main red on hooks/units.test.tsx. With no room for the run's shares and no wait for room
+# (testTmpWaitSec 0), the runner does not start, and each file is a host problem, not a failed test: `-- notrun` and a
+# `TESTRUN host` line with the reason (the engine's voidrun(): a run with no result). No slots library (so no shares
+# folder): the shares the machine's other runs hold would make it wait for them.
+p_noroom() {
+  mkdir -p "$T/config/conveyor" && echo '{"testTmpMB": 9999999, "testTmpWaitSec": 0}' > "$T/config/conveyor/host.json"
+  got=$(CONVEYOR_TEST_SLOTS=$T/noslots XDG_CONFIG_HOME=$T/config run "$PASS" hooks/a.test.tsx hooks/b.test.tsx)
+  [ "$got" = "-- notrun hooks/a.test.tsx|-- notrun hooks/b.test.tsx" ] && [ "$(cat "$T/rc")" = 1 ] && [ ! -e "$R/runs" ] \
+    && [ "$(grep -c $'^TESTRUN host\thooks/[ab]\\.test\\.tsx\ttest-changed: the plugin test run (claude plugin test, a share for each of its 2 test files) did not start: [0-9]* MB is free' "$R/log/test-changed.log")" = 2 ] \
+    && ok "a plugin run that did not start for want of room makes each plugin test file a host problem, not a failure" \
+    || no "no room for the plugin run's shares: '$got', runs $(runs 2>&1), exit $(cat "$T/rc"): $(cat "$R/log/test-changed.log" "$T/out")"
+}
+
+for p in source perfile missing share noroom; do part "$p"; done
 wait
 for p in "${PARTS[@]}"; do cat "$T/$p.res"; grep -q '^ok' "$T/$p.res" || echo "not ok - part $p checked nothing"; done | awk '{ sub(/^ok -/, "ok " NR " -"); sub(/^not ok -/, "not ok " NR " -"); print } /^not ok/ { f = 1 } END { exit f }'
