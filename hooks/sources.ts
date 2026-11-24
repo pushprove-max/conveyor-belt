@@ -1314,10 +1314,14 @@ export const activityModel = (s: State, snap: Snap, w: number, frame: number): L
     const shown: Line = tests ? [...gauge(tests.of ? (100 * tests.done) / tests.of : 0), { t: ` ${tests.done}/${tests.of}${tests.failed ? ` · ${tests.failed} failed` : ''}` }] : [{ t: what }]
     const at = b.track?.since ?? b.stepAt
     let right = [m?.[1] ?? '', at === null ? '' : clockOf(at)].filter(Boolean).join(' · ')
-    const left: Line = [{ t: `${workMark(frame)} `, c: C.work }, { t: `${beltId(b)}  `, c: C.name, b: true }, ...shown]
     // A card that waits for the landing turn drops the clock when the clock would cut the ID of the card that has the
-    // turn: spread() gives the text w - clock - 2 columns, and the cut text ends in `…`.
-    if (wait && b.waitsOn && cols(`${workMark(frame)} ${beltId(b)}  ${idOf(b.waitsOn)}`) + 1 > w - cols(right) - 2) right = ''
+    // turn: spread() gives the text w - clock - 2 columns, and the cut text ends in `…`. When that ID is still cut with
+    // no clock, a part drops its parent (`#1596 of #1600` reads `#1596`).
+    let own = beltId(b)
+    const need = (id: string) => (b.waitsOn ? cols(`${workMark(frame)} ${id}  ${idOf(b.waitsOn)}`) + 1 : 0)
+    if (wait && need(own) > w - cols(right) - 2) right = ''
+    if (wait && need(own) > w) own = idOf(b)
+    const left: Line = [{ t: `${workMark(frame)} `, c: C.work }, { t: `${own}  `, c: C.name, b: true }, ...shown]
     return spread(left, right ? { t: right, d: true } : null, w)
   }),
 ]

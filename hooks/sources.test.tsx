@@ -1354,6 +1354,9 @@ test('WORKER ACTIVITY and the belt name the card that has the landing turn by it
     { ...BELT[1], card: 'c15-1595', issue: 1595, step: 'land', live: wait('c14-1594'), waitsOn: { card: 'c10-1533', issue: 1533, state: 'tests' } },
     // A part of a parent issue: its own ID, `#1596 of #1600`, leaves the wait text the fewest columns.
     { ...BELT[1], card: 'c16-1596', issue: 1596, umbrella: 1600, step: 'build', live: { action: `queued for the next batch: card c10-1533 has the landing turn`, turns: 0, lastOutputAt: ago(0) }, waitsOn: { card: 'c10-1533', issue: 1533, state: 'tests' } },
+    // Parts that wait on a holder with a longer ID, `fu #1590`, in both wait messages.
+    { ...BELT[1], card: 'c17-1597', issue: 1597, umbrella: 1600, step: 'land', live: wait(fu), waitsOn: { card: fu, issue: 0, state: 'tests', name: 'Review follow-up of #1590' } },
+    { ...BELT[1], card: 'c18-1598', issue: 1598, umbrella: 1600, step: 'build', live: { action: `queued for the next batch: card ${fu} has the landing turn`, turns: 0, lastOutputAt: ago(0) }, waitsOn: { card: fu, issue: 0, state: 'tests', name: 'Review follow-up of #1590' } },
   ] })
   const rows = activityModel(s, s.snap!, 80, 0).map(plain)
   expect(rows[1]).toMatch(/^◐ #1531  fu #1590 lands first \(landing turn\)/)
@@ -1366,8 +1369,9 @@ test('WORKER ACTIVITY and the belt name the card that has the landing turn by it
   // Follow-ups of that issue. Bug they catch: the wait text put the holder's ID after a lead-in (`queued for the next
   // batch: `, then `queued: `), and spread() cut the text before the clock on the right, so a narrow pane showed
   // `queued: #15…` at 40 columns for `#1596 of #1600`, and `queu…` at 24 columns for `#1593`. At 40 columns the ID
-  // and the clock both fit; at 24 the clock gives way to the ID.
-  const waits = [[1, 'fu #1590'], [2, '#1533'], [3, 'red 19e3b6e'], [5, '#1533'], [7, '#1533']] as const
+  // and the clock both fit; at 24 the clock gives way to the ID. A part waiting on `fu #1590` still showed
+  // `◐ #1596 of #1600  fu #1…` at 24 columns with no clock: there its parent gives way too, at 40 it stays.
+  const waits = [[1, 'fu #1590'], [2, '#1533'], [3, 'red 19e3b6e'], [5, '#1533'], [7, '#1533'], [8, 'fu #1590'], [9, 'fu #1590']] as const
   for (const [w, clock] of [[40, ' \\d+:\\d\\d [AP]M$'], [24, '']] as const) {
     const narrow = activityModel(s, s.snap!, w, 0).map(plain)
     for (const [i, id] of waits) {
@@ -1375,6 +1379,7 @@ test('WORKER ACTIVITY and the belt name the card that has the landing turn by it
       expect(r, `row ${i} at ${w} columns: ${r}`).toMatch(new RegExp(`^◐ #15\\d\\d( of #1600)?  ${id}( |…|$).*${clock}`))
       expect(cols(r), `row ${i} at ${w} columns: ${r}`).toBeLessThanOrEqual(w)
     }
+    for (const i of [8, 9]) expect(narrow[i], `part row ${i} at ${w} columns`).toMatch(w === 40 ? /^◐ #159\d of #1600  fu #1590 / : /^◐ #159\d  fu #1590( |…|$)/)
   }
   const belt = tableText(s, 100)
   expect(belt, 'the belt\'s live line too').toMatch(/now fu #1590 lands first \(landing turn\)/)
