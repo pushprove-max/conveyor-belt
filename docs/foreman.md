@@ -390,7 +390,14 @@ asking"). The pack keeps the list as `auto.standing`. A kind works whether `/con
   retry failed.
   `review-retry` retries an issue one time. When the review blocks a later card of the issue, the watcher and the
   engine do not retry it. The card goes to you in Needs you, with the two block reasons and the kept patch, and auto
-  does not answer it with a retry. Your own `retry` of the issue (Retry or Fix on the Board, or your answer to that
+  does not answer it with a retry. While auto is `on` (not `narrow`), the engine lands that card instead, one time for
+  each issue. The next card of the issue starts from the kept patch and goes through its tests and its landing as any
+  card does. A test that fails still stops it. Each finding of its last review becomes a follow-up. The finding that
+  blocked the card is not held, also when it names a pipeline file, unless the finding holds a word of
+  `auto.reserved` or an item of your profile. The engine logs this step in the ruling log, as a
+  `review-retry` step, and in auto's log with the decisions that auto made for you. These still go to you: a block
+  reason that names a P0 finding, a word of `auto.reserved` or an item of your profile; an issue at the follow-up
+  depth cap; and a card that you answered in Needs you. Your own `retry` of the issue (Retry or Fix on the Board, or your answer to that
   card in Needs you), or a card of the issue that lands, lets `review-retry` retry the issue one more time. Other
   retries do not: a retry by the Foreman, Hold on the Board, an issue that is opened again or gets your yes, or an
   answer that auto can give.
@@ -403,4 +410,5 @@ on the host that runs its belt, where the Board turns them on or off. The comman
 run on that host, for that project. `conveyor.sh auto standing` is different: it reads the pack of the checkout where
 you run it, not the pack on the host. Each step
 taken under a kind goes into the ruling log with its kind (source `standing`). For each kind but `review-retry`, the
-Foreman then tells you about it in one line.
+Foreman then tells you about it in one line. A landing by `review-retry` while auto is on is in auto's log, so
+`auto status`, the auto band and the Foreman's account of what auto did show it.

@@ -374,7 +374,8 @@ ask() {
 # as the Board's reviewWhy reads it, with any notes block() adds after it in brackets, lib/push.sh), with an issue,
 # whose reason holds no word of `conveyor.sh auto reserved` (case-insensitive), and not reported yet. Not a card that
 # came after a review-retry of its issue (health's reviewRetried, lib/views.sh): review-retry gives an issue back once, and the second
-# block waits for the owner, who has it in Needs you (lib/needsask.sh needsask). None unless the
+# block waits for the owner, who has it in Needs you (lib/needsask.sh needsask), or the engine lands it while auto is on
+# (needsland()). None unless the
 # kind is on in the pack now, as `conveyor.sh auto standing` on the record's host reads it: a kept snapshot's standing
 # can be from before the owner turned it off, and health has none. Called by watch-conveyor.sh with its $repo, $main,
 # $errf and $SEEN.

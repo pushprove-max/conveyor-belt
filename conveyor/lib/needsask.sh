@@ -2,14 +2,16 @@
 # The engine's needs-you items as open decisions in the owner's decision ledger (.claude/scripts/decision.sh), and the
 # step an answer names, sourced by the loop (commands/run.sh). Two kinds: a card blocked with its work kept (needsask()),
 # and a held issue of the nightly whole test (needsmain(), below); and the auto pass that answers them while auto is on
-# (needsauto(), at the end), with the standing review-retry (needsretry()). The loop runs them as one job (needsjob()).
+# (needsauto(), at the end), with the standing review-retry (needsretry()) and the landing of a card blocked by its
+# review again (needsland()). The loop runs them as one job (needsjob()).
 # needsask() looks at the card records and the ledger once. The loop (`serve`) calls it every IDLE seconds, a job beside
 # the cards.
 #   - Each card blocked with a kept patch (an issue's card, not one stopped for the owner's yes) that has no decision yet
 #     gets one, id `blocked-<card>`, once: its recommended option is NEEDSASK_RETRY, the others NEEDSASK_FRESH and
 #     NEEDSASK_HELD. A card blocked by its review after review-retry gave its issue back (reviewretried(), lib/views.sh) is
 #     asked as RRAGAIN (lib/standing.sh) says, with its kept patch and both block reasons, this one and the one
-#     review-retry gave back: auto decide leaves that decision to the owner.
+#     review-retry gave back: auto decide leaves that decision to the owner. While auto is on (full), needsland() lands
+#     such a card first (below), unless it waits for the owner there too.
 #   - An open decision whose card is no longer blocked with its kept patch (retried or shut by hand, or landed some other
 #     way) is answered NEEDSASK_GONE: a closed decision names no step, so it is never taken later.
 #   - A decision answered NEEDSASK_RETRY or NEEDSASK_FRESH whose card is still blocked has the step taken, as
@@ -244,8 +246,8 @@ needsauto() {
 # profile (lib/standing.sh heldlist: that one waits for the owner), is given back with `conveyor.sh retry <issue>`, and
 # the act is logged by `conveyor.sh auto act review-retry`, as the watcher logs it. The retry is marked as review-retry's
 # (CONVEYOR_REVIEWRETRY, commands/retry.sh), and each issue is given back once: a later card of the issue, blocked by
-# its review again (reviewretried(), REVIEWAGAIN, lib/views.sh), is not given back, and needsask() puts it to the owner
-# with both block reasons. Each card is tried once ($ST/auto/review-retry.cards): one whose retry failed stays blocked,
+# its review again (reviewretried(), REVIEWAGAIN, lib/views.sh), is not given back: needsland() lands it while auto is
+# on (full), else needsask() puts it to the owner with both block reasons. Each card is tried once ($ST/auto/review-retry.cards): one whose retry failed stays blocked,
 # and needsask() puts it to the owner.
 needsretry() {
   local cs old c n out res
@@ -266,6 +268,49 @@ needsretry() {
       and ((.reason | ascii_downcase) as $t | all($r[]; . as $w | $t | contains($w | ascii_downcase) | not))
       and reviewretried(.issue; $all) == null) | "\(.card)\t\(.issue)"' <<<"$cs")
 }
-# needsjob: the loop's job beside the cards: the standing review-retry, the items put to the owner, the auto pass, and,
-# when it ran, the steps its answers name at once (a second needsask and needsmain), not a turn later.
-needsjob() { needsretry; needsask; needsmain; ! needsauto || { needsask; needsmain; }; }
+# While auto is on (scope full, not narrow) with review-retry on, the owner's standing order for a card blocked by its
+# review again after review-retry gave its issue back once (reviewretried(), lib/views.sh): land it, and make its
+# finding a follow-up. needsland() gives such a card back with `conveyor.sh retry <issue>`, marked as review-land's
+# (CONVEYOR_REVIEWLAND), which checks the same and more under the lock (landable(), commands/retry.sh: not at the
+# follow-up depth cap, nor a card whose decision the owner answered), and logs the act with `conveyor.sh auto act
+# review-retry` and in auto's log (rlput()). Its next card lands the kept patch on its kept review, through the card's
+# own tests and landing, and files that review's findings as follow-ups (resumeplan(), afterreview(), lib/card.sh); a
+# red test blocks it. Each issue is landed so once (reviewlanded()): a later review block of it goes to the owner. Not
+# a block whose reason names a P0 or holds a word of the pack's auto.reserved or an item of the owner's profile
+# (landable(), lib/views.sh): those wait for the owner, put to them by needsask(). Each card is tried once
+# ($ST/auto/review-land.cards), as in needsretry().
+needsland() {
+  local cs old c n r out res
+  jq -e 'select(.scope == "full")' "$ST/auto/mode.json" >/dev/null 2>&1 && standingon review-retry || return 0
+  cs=$(stdb ask lines cards) && old=$(stdb ask lines retried) || { echo "conveyor: the card records could not be read; no card blocked by its review again was landed" >&2; return 0; }
+  heldlist res || { echo "conveyor: the pack's auto.reserved or the owner's profile could not be read; no card blocked by its review again was landed" >&2; return 0; }
+  while IFS=$'\t' read -r c n r; do
+    ! grep -qxF -- "$c" "$ST/auto/review-land.cards" 2>/dev/null || continue
+    printf '%s\n' "$c" >> "$ST/auto/review-land.cards" || continue
+    if out=$(CONVEYOR_REVIEWLAND=1 bash "$HERE/conveyor.sh" retry "$n" < /dev/null 2>&1); then
+      bash "$HERE/conveyor.sh" auto act review-retry "gave #$n back to land: its card $c was blocked by its review again after review-retry gave it back once; its next card lands the kept patch only once its tests pass, and then files the review's findings as follow-ups" < /dev/null 2>&1 | sed 's/^/conveyor: /' >&2
+      rlput "$(printf '### %s review-land #%s: card %s given back to land\n- **Question:** Card %s (#%s) %s: %s\n- **Picked:** give it back. Its next card lands the kept patch only once its tests pass, and then files each finding of its review as a follow-up.\n- **Why:** the standing order of the owner while auto is on (the standing kind review-retry). A test that fails blocks that card, and nothing lands.\n- **Reversible:** yes, until that card lands. A change that lands stays on main until a later card changes it.\n' \
+        "$(date +%H:%M)" "$n" "$c" "$c" "$n" "$RRAGAIN" "${r:0:600}")" || echo "conveyor: the step that gave #$n (card $c) back to land could not be written to auto's log" >&2
+    else echo "conveyor: #$n (card $c, blocked by its review again) was not given back to land, so it waits for the owner: ${out//$'\n'/ }" >&2; fi
+  done < <(jq -rs --argjson r "$res" --arg rb "$REVIEWBLOCK" --slurpfile old <(printf '%s' "$old") "$REVIEWAGAIN"'retrylines($old) as $all
+    | group_by(.card)[] | select(all(.step != "pushed")) | map(select(.step | IN("landed", "closed", "blocked"))) | last
+    | select(. != null and .step == "blocked" and (.issue | numbers) > 0 and (.kept // "") != "" and landable($r; $rb)
+      and reviewretried(.issue; $all) != null and (reviewlanded(.issue; $all) | not)) | "\(.card)\t\(.issue)\t\(.reason | gsub("[\t\r\n]+"; " "))"' <<<"$cs")
+}
+# rlput <text>: an entry of needsland() at the end of "## Decisions" in auto's log (the mode's log, commands/auto.sh),
+# where the owner reads what auto did for them: `auto status`, the band's count and the Foreman's account of it. Written
+# under the lock auto decide holds while it rewrites that log ($ST/auto/decide.lock), to a new file, then renamed. Its
+# "## Summary" is made again with the entry counted (autosum(), lib/standing.sh). Bug: it still said "(nothing yet)".
+rlput() {
+  local log lk rc=1
+  log=$(jq -re '.log | strings' "$ST/auto/mode.json" 2>/dev/null) && [ -f "$log" ] || return 1
+  { exec {lk}>>"$ST/auto/decide.lock"; } 2>/dev/null || return 1
+  flock -w 120 "$lk" && P=$1 awk '/^## Waiting for the owner$/ && !done { printf "%s\n\n", ENVIRON["P"]; done = 1 } { print }' "$log" > "$log.$$.put" \
+    && autosum "$log.$$.put" > "$log.$$.new" && mv "$log.$$.new" "$log" && rc=0
+  rm -f "$log.$$.put" "$log.$$.new"; exec {lk}>&-
+  return "$rc"
+}
+# needsjob: the loop's job beside the cards: the standing review-retry and the landing of a second review block, the
+# items put to the owner, the auto pass, and, when it ran, the steps its answers name at once (a second needsask and
+# needsmain), not a turn later.
+needsjob() { needsretry; needsland; needsask; needsmain; ! needsauto || { needsask; needsmain; }; }

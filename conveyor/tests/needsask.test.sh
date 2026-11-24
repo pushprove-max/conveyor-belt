@@ -574,7 +574,8 @@ t_needsretryissue() {
 # Bug (#1589, review): a retry the engine ran itself counted as the owner's own, which resets review-retry's count of an
 # issue. With auto on, #7's first review block is given back by review-retry; its next card is blocked for another
 # reason, which the auto pass answers with the recommended retry (needsask() takes it, not as the owner's: retriedBy
-# decision); the card after that is blocked by its review again. It is not given back: it is open in Needs you.
+# decision); the card after that is blocked by its review again. It is not given back by review-retry: with auto on,
+# the engine's retry of it is review-land's (#1612), which lands it.
 t_needsretryauto() {
   setup "[$(issue 7 2026-01-01)]"; nainit 7; nareview
   najob
@@ -585,6 +586,6 @@ t_needsretryauto() {
     || fail "the auto pass's answer did not retry c1-7 as a decision's, not the owner's: $(cat "$T/$CASE/run.out" "$ST/retried.jsonl")"
   narecard c2-7 7 '[P1] a.txt:1 drops the first line'
   najob
-  ! naretried c2-7 || fail "after the auto pass's retry, review-retry gave #7 back a second time: $(cat "$T/$CASE/run.out")"
-  jq -e '.answeredAt == null' <<<"$(nadec c2-7)" >/dev/null || fail "the second review block of #7 is not open in Needs you: $(nadec c2-7)"
+  [ "$(jq -r 'select(.card == "c2-7" and .step == "blocked") | .retriedBy' "$ST/retried.jsonl" 2>/dev/null)" = review-land ] \
+    || fail "after the auto pass's retry, the second review block of #7 was given back by review-retry, or not by review-land: $(cat "$T/$CASE/run.out" "$ST/retried.jsonl")"
 }

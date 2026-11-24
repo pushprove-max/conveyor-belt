@@ -29,6 +29,9 @@
 # With the pack's standing kind review-followup on (auto.standing, lib/standing.sh), such a finding that names only
 # files of the card's own change (ownonly()) is not held: it only finishes or corrects the change the owner approved.
 # Its release is logged in the ruling log, source "standing", kind review-followup; one that cannot be logged is held.
+# Nor is the finding whose fix did not hold on a card the engine lands by the owner's standing order (rlfind, a retry
+# by review-land: lib/needsask.sh needsland()), which logs that landing itself, unless the whole finding holds a word
+# of auto.reserved or an item of the owner's profile: that one is held.
 # The whole test on main (the pack's test.main; a pack that names none has none): a card's test step runs only the
 # tests of what the card touched, so the whole test is run here instead, by `serve` beside its cards and never by a
 # card: no card waits on it. A run is due when main is at another commit than the last run's and the last try began
@@ -287,9 +290,20 @@ unfile() { # <parent issue> <review file> <follow-up issue>...
   done < "${r%.review}.fucards"
   rm -f "${r%.review}.fucards"
 }
+# rlpick <finding> <cost> <held>: what followups() does with the finding whose fix did not hold on a card the owner's
+# standing order lands (rlfind, its block reason's part: resumeplan(), lib/card.sh; landable(), commands/retry.sh), on a
+# pipeline file (<cost> not empty). "rl" when the whole finding holds nothing of <held> (heldlist(), lib/standing.sh):
+# its follow-up is filed released, and its issue released too, as a filing mark (`control filing on`) would hold it at
+# its first sight (adopted(), lib/control.sh). "hold" when it holds something: held, even when review-followup would
+# free it. Nothing for another finding. Bugs: the block reason keeps only the finding's first 300 characters, so a
+# reserved word after them was released; and free reads auto.reserved alone, so a profile item was released through it.
+rlpick() {
+  [ -n "$2" ] && [ -n "${rlfind:-}" ] && [[ $1 == "$rlfind"* ]] || return 0
+  if [ "$(jq --arg f "$1" 'any(.[]; . as $w | $f | ascii_downcase | contains($w | ascii_downcase))' <<<"$3" 2>/dev/null)" = false ]; then echo rl; else echo hold; fi
+}
 followups() { # <card> <issue json> <review file>
-  local f mark where out num n nums=() more=() found=() pipe cost own='' free res pm g masked depth kind clean body area nocard='' fc=${3%.review}.fucards
-  local why ofc=${3%.review}.outfiled ek healed=0
+  local f mark where out num n nums=() more=() found=() pipe cost own='' free rl held='' res pm g masked depth kind clean body area nocard='' fc=${3%.review}.fucards
+  local why ofc=${3%.review}.outfiled ek healed=0; [ -z "${rlfind:-}" ] || heldlist held || held='' # what waits for the owner, read for the finding of a retry by review-land (rl, below); none read holds it
   depth=$(fudepth "$2") && [[ $depth =~ ^[0-9]+$ ]] || { echo "cannot read the parent issue's follow-up depth"; return 1; }
   packget pipelineFiles pipe || { echo "cannot read the pack's pipeline files"; return 1; }
   packget privacy.mode pm || { echo "cannot read the pack's privacy mode"; return 1; }
@@ -333,6 +347,7 @@ followups() { # <card> <issue json> <review file>
     free=''; [ -z "$cost" ] || [ -z "$own" ] \
       || [ "$(jq --arg f "$f" 'any(.[]; . as $w | $f | ascii_downcase | contains($w | ascii_downcase))' <<<"$res" 2>/dev/null)" != false ] \
       || free=$(ownonly "$f" "${3%.review}")
+    rl=$(rlpick "$f" "$cost" "$held"); [ "$rl" != hold ] || free=''; [ "$rl" = rl ] || rl='' # the finding of a retry by review-land, released or held
     cost=${cost:+$'\nCost to every card: not assessed'}
     # A finding the reviewer marks [cleanup] (REVIEWT: its fix changes no behaviour, as a comment, dead code or a
     # redundant check) is filed without the pack's type label, so its card skips the bug-card check (card.sh): no test
@@ -369,7 +384,7 @@ Follow-up depth: $((depth + 1))"
       [ -z "$free" ] || standinglog review-followup "a follow-up card of #$n (card $1) was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''
       # Its parent's card is filed before it lands: the card waits on that id, as an issue waits on its parent's landed line (jq/upnext.jq).
       # It keeps its parent's area label, as the follow-up issue does (more), so an area set to Never build holds it too.
-      num=$(tcadd "" "$(futitle "$g")" "$body"$'\n'"Depends on: $1" "$([ -z "$cost" ] || [ -n "$free" ] || echo held)" "Review follow-up of #$n" "$(jq -cn '$ARGS.positional' --args "$FOLLOWUP" ${kind:+"$kind"} ${mark:+"$mark"} ${area:+"$area"})" "$n") \
+      num=$(tcadd "" "$(futitle "$g")" "$body"$'\n'"Depends on: $1" "$([ -z "$cost" ] || [ -n "$free$rl" ] || echo held)" "Review follow-up of #$n" "$(jq -cn '$ARGS.positional' --args "$FOLLOWUP" ${kind:+"$kind"} ${mark:+"$mark"} ${area:+"$area"})" "$n") \
         && printf '%s\t%s\n' "$num" "$f" >> "$fc" && { [ -z "$why" ] || jq -cn --arg f "$f" --arg i "$num" '{finding: $f, issue: $i}' >> "$ofc"; } || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): its card could not be started"; return 1; }
       continue
     fi
@@ -379,8 +394,10 @@ Follow-up depth: $((depth + 1))"
     [ -z "$why" ] || jq -cn --arg f "$f" --argjson i "$num" '{finding: $f, issue: $i}' >> "$ofc" \
       || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up #$num filed, but the engine could not note it as an outside finding's, so nothing landed (finding: ${f:0:200})"; return 1; }
     [ -z "$free" ] || standinglog review-followup "#$num, a follow-up of #$n (card $1), was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''
-    [ -z "$cost" ] || [ -n "$free" ] || out=$(locked control hold "$num" 2>&1 >/dev/null) \
+    [ -z "$cost" ] || [ -n "$free$rl" ] || out=$(locked control hold "$num" 2>&1 >/dev/null) \
       || { unfile "$n" "$3" "${nums[@]}"; echo "a follow-up that changes a pipeline file could not be held, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
+    [ -z "$rl" ] || out=$(locked control release "$num" 2>&1 >/dev/null) \
+      || { unfile "$n" "$3" "${nums[@]}"; echo "the follow-up of the finding that blocked the card could not be released, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
   done
   jq -cn '$ARGS.positional | map(tonumber)' --args "${nums[@]}"
 }

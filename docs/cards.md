@@ -451,7 +451,9 @@ judge sorted as another kind than `harm` goes to its list instead (Harm or self-
 body says how deep it is, as the line `Follow-up depth: N`: 1 for a follow-up of a first card, 2 for a follow-up of
 a follow-up. Follow-ups go two levels deep. A card whose issue is at depth 2 files no follow-ups: its leftover findings
 go to the Declined list, and the reason names the cap. A follow-up that changes one of the pack's `pipelineFiles` is filed held.
-It builds only once you release it.
+It builds only once you release it. There is one exception: when auto is on and the engine lands a card that its review
+blocked a second time, the follow-up of the finding that blocked the card is not held. If that finding holds a word of
+`auto.reserved` or an item of your profile, it is held (`docs/foreman.md`, `review-retry`).
 
 A finding whose fix changes no behaviour, such as a comment, dead code or a redundant check, has the mark `[cleanup]`
 after its level, as `[P3][cleanup] file:line what`. Its follow-up is a cleanup, not a bug: it does not get the pack's

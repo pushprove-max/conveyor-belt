@@ -241,8 +241,8 @@ moveout() { # <jq test> <jq arguments>...
   rm -f "$STATE.moved" "$STATE.rest"
 }
 
-# The kept work of the issue's blocked cards that `retry` gave back, as {card, kept, reason, review}: the last card
-# that holds a kept patch (card is "" when none does), and the last kept review, which may be a later card's.
+# The kept work of the issue's blocked cards that `retry` gave back, as {card, kept, reason, by, review}: the last card
+# that holds a kept patch (card is "" when none does), who gave it back (its retriedBy; "" when a later card was given back since), and the last kept review, which may be a later card's.
 # Nothing when there is neither. Not simply the last blocked card: a retry that blocks before it takes up the kept
 # work (its worktree could not be made, its dependencies not linked) keeps nothing, and the work is still there.
 # A review that block() could not move into the kept folder is still beside the card's worktree, whether or not the
@@ -250,17 +250,17 @@ moveout() { # <jq test> <jq arguments>...
 # Of issue 0 (no issue), only the cards named count, those given back of a card with no GitHub issue (testcardwas(),
 # lib/testaction.sh); with none named, there is nothing.
 prior() { # <issue> [cards of issue 0, one a line]
-  local l k c patch='' rev=''
+  local l k c patch='' rev='' last=''
   [ "$1" != 0 ] || [ -n "${2:-}" ] || return 0
   while IFS= read -r l; do
-    k=$(jq -r .kept <<<"$l"); c=$(jq -r .card <<<"$l")
+    k=$(jq -r .kept <<<"$l"); c=$(jq -r .card <<<"$l"); last=$c
     [ -z "$k" ] || [ ! -f "$k/$c.patch" ] || [ ! -s "$k/$c.patch" ] || patch=$l
     if [ -f "$CARDS/$c.review" ] && [ -s "$CARDS/$c.review" ]; then rev=$CARDS/$c.review
     elif [ -n "$k" ] && [ -f "$k/$c.review" ] && [ -s "$k/$c.review" ]; then rev=$k/$c.review; fi
   done < <(jq -c --argjson n "$1" --arg st "$ST" --arg cs "${2:-}" '($cs | split("\n") | map(select(. != ""))) as $cs | select(.issue == $n and .step == "blocked" and ($n != 0 or (.card | IN($cs[]))))
-    | {card, kept: (.kept // "" | if . == "" then . else $st + "/" + . end), reason}' < <(stdb ask issue retried "$1" 2>/dev/null) 2>/dev/null)
+    | {card, kept: (.kept // "" | if . == "" then . else $st + "/" + . end), reason, by: (.retriedBy // "")}' < <(stdb ask issue retried "$1" 2>/dev/null) 2>/dev/null)
   [ -n "$patch$rev" ] || return 0
-  jq -cn --argjson p "${patch:-null}" --arg r "$rev" '{card: ($p.card // ""), kept: ($p.kept // ""), reason: ($p.reason // ""), review: $r}'
+  jq -cn --argjson p "${patch:-null}" --arg r "$rev" --arg l "$last" '{card: ($p.card // ""), kept: ($p.kept // ""), reason: ($p.reason // ""), by: (if $p.card == $l then $p.by // "" else "" end), review: $r}'
 }
 # Whether the kept patch of prior() ($1) is one card() would land with no build and no review: its card stopped for
 # the owner's yes (YES or LINTYES) after a review of that patch (the kept review is that card's own) that gave a

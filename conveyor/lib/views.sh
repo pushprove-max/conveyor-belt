@@ -347,8 +347,14 @@ HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, f
 # retry of the issue (retriedBy owner) and after the issue's last landed or pushed line: either resets it. Any other
 # give-back (a reopened or approved issue, a sign-in back, the Board's Hold, a Foreman's command, an answer auto decide
 # may have given) records no owner, so it is no reset. A card of the issue blocked now with such a line came after
-# that retry, so review-retry has already given the issue back once: its block goes to the owner (needsask()) and is
-# not given back (health's reviewRetried, and `retry` itself refuses it under the lock: again(), commands/retry.sh).
+# that retry, so review-retry has already given the issue back once: its block goes to the owner (needsask()), or is
+# landed while auto is on (below), and is not given back (health's reviewRetried, and `retry` itself refuses it under the lock: again(), commands/retry.sh).
+# While auto is on (full), such a block is landed instead (needsland(), lib/needsask.sh: a retry by review-land, as
+# retriedBy): reviewlanded($n; $lines) is true once that retry gave back a card of issue $n after review-retry's, and
+# the engine lands the issue that way once (a later review block goes to the owner). landable($r; $rb): a blocked line
+# whose reason review-land may take (needsland() and landable(), commands/retry.sh, read it the same): a review block
+# ($rb, REVIEWBLOCK) that names no P0 (card.sh names a new P0 first, and a follow-up would land it on main), with no
+# word or item of $r, the pack's auto.reserved and the owner's profile (heldlist(), lib/standing.sh), in any case.
 # retrylines($old): the lines of the records (.) and of the retried file ($old) that reviewretried() reads, and no other,
 # as it reads them again for each blocked card.
 # shellcheck disable=SC2034 # REVIEWBLOCK is read by needsretry() and needsask() in lib/needsask.sh
@@ -357,7 +363,11 @@ REVIEWAGAIN='def retrylines($old): [.[], $old[] | select(.step | IN("blocked", "
   def reviewretried($n; $l): ([$l[] | select(.issue == $n and (.step | IN("landed", "pushed"))) | .time] | max // "") as $land
   | [$l[] | select(.issue == $n and .step == "blocked" and (.retriedAt | type) == "string" and .retriedAt > $land)] as $r
   | ([$r[] | select(.retriedBy == "owner") | .retriedAt] | max // "") as $own
-  | [$r[] | select(.retriedAt > $own and .retriedBy == "review-retry")] | max_by(.retriedAt);'
+  | [$r[] | select(.retriedAt > $own and .retriedBy == "review-retry")] | max_by(.retriedAt);
+  def reviewlanded($n; $l): reviewretried($n; $l) as $g | $g != null
+  and any($l[]; .issue == $n and .step == "blocked" and .retriedBy == "review-land" and (.retriedAt | type) == "string" and .retriedAt > $g.retriedAt);
+  def landable($r; $rb): (.reason | strings | test($rb)) and (.reason | startswith("the fix for [P0]") | not)
+  and ((.reason | ascii_downcase) as $t | all($r[]; . as $w | $t | contains($w | ascii_downcase) | not));'
 # When health first read each stopped process of the "<pid> TAB <started> TAB <card>" lines on stdin stopped, as ps
 # gives no time a process stopped: <now> for one not read so before. $STATE.stopped keeps "<pid> TAB <started> TAB
 # <epoch>" for those still stopped, so a stop is dated from the first reading of it, not from the card's last output.

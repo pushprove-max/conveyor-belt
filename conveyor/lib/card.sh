@@ -18,8 +18,7 @@ began() { # <card> <issue> <what begins>
   record "$1" "$2" start ok "{\"of\":\"$3\"$e}"
 }
 # The form of the files a card saves for its steps (<worktree>.review, .test, .ready, .rerun and the rest): a commit
-# whose code cannot read the files that the code before it saved raises it, and a running card then keeps its old
-# code (switchcode()).
+# whose code cannot read the files that the code before it saved raises it, and a running card then keeps its old code (switchcode()).
 STEPFILES=1
 # A card the loop runs, at the start of each step (began()): when the loop runs a newer Conveyor commit than the card
 # (loop.json; a loop that takes a commit stays the same process, as run() restarts by exec, so its pid is the card's
@@ -34,8 +33,7 @@ STEPFILES=1
 # switch gets them too. The rules and header are the ones card() made (its rules and hdr: began() runs only under
 # card()). A function that is running (card(), the step of card() it is in, and settle() or began() under it) goes on
 # in its old body to its end, as bash runs it: so the card keeps its old code, and says why once, when the new code
-# changes one of them, reads another form of step files (STEPFILES), or its files do not load or do not make the
-# card's rules, header and settings.
+# changes one of them, reads another form of step files (STEPFILES), or its files do not load or do not make the card's rules, header and settings.
 # shellcheck disable=SC2034 # CONVEYOR_MAIN and NAMED: read by paths.sh and names() (lib/prompts.sh)
 switchcode() { # <card> <the step it begins>
   local s p d v old why='' tmp f i k o=() nv=()
@@ -159,8 +157,7 @@ testfixprompt() { # <card prompt> <worktree> <the test run's exit> [the failures
   # Each failing case with its file and the place it failed, first. A case's line ends with ` (at <file>:<line>: <text>)`
   # when the output gave a stack; a shell case gives none, so its place is the line of its t_<name>() in its file, or, in a
   # standalone test file with no such function, the first line that names the case as `[<name>]` or in quotes (where it
-  # prints its FAIL, or hands its name to the check that does). A failed file that names no case has its own at. Then the
-  # raw end of the output, under its own heading.
+  # prints its FAIL, or hands its name to the check that does). A failed file that names no case has its own at. Then the raw end of the output, under its own heading.
   while IFS=$'\037' read -r file name line; do
     [ -n "$file" ] || continue
     if [ -n "$name" ] && [[ $line != *" (at "* ]] && n=$(awk -v p="t_$name() {" -v q="[$name]" -v s="'$name'" -v d="\"$name\"" 'index($0, p) == 1 { print NR; t = 1; exit } !m && (index($0, q) || index($0, s) || index($0, d)) { m = NR } END { if (!t && m) print m }' "$2/$file" 2>/dev/null) && [ -n "$n" ]; then line+=" (at $file:$n)"; fi
@@ -206,11 +203,11 @@ failline() { # <worktree> <exit> <seconds> <failures json, or null> <verdicts js
 afterreview() {
   local d
   # A GO on the review of a port lands with the earlier loop's outcome: after its last NO-GO, that review's
-  # findings are filed again, whatever the reviews after a test fix say. A NO-GO on it is fixed and goes round the
-  # loop as any card's.
+  # findings are filed again, whatever the reviews after a test fix say. A NO-GO on it is fixed and goes round the loop as any card's.
   last=''; [ "$fin" != NO-GO ] || [ "$res" != GO ] || { earlier=$finrev; earlyend=$finend; }; fin=''
+  [ -z "${rlrev:-}" ] || [ "$mode" = land ] || earlier=$rlrev # A retry by review-land files its kept review's findings (rlrev, resumeplan()) whatever a later review says: each review after that one (mode no longer land) carries it as the earlier loop's last NO-GO. Bug: a GO after a test fix, or after the fix of a port's own finding, dropped the finding that blocked the card.
   # A NO-GO that repeats a finding a fix round was told to fix (donewhen.sh repeats()) spends no more rounds on it: when every
-  # P0 or P1 finding of the review is such a repeat this is the last review (loopstop()); when a repeated harm one is P0 or P1 the card blocks. Here and below, a finding of a kind kept off the belt (harmonly(), lib/followups.sh) blocks no card: it goes to its list as the card lands.
+  # P0 or P1 finding of the review is such a repeat this is the last review (loopstop()); when a repeated harm one is P0 or P1 the card blocks. Here and below, a finding of a kind kept off the belt (harmonly(), lib/followups.sh) blocks no card: it goes to its list as the card lands. The kept review of a retry by review-land (rland, mode land, no fix rounds carried) gives its P1 no fix round (p1, below): the owner's standing order lands it, the P1 filed as a follow-up. Its P0 still blocks (p0).
   rep=''; [ "$res" != NO-GO ] || rep=$(repeats "$wt")
   hard=$(harmonly "$wt" <<<"$rep" | jq -rs 'map(select(.level == "P0" or .level == "P1")) | first // empty | "\(.line[:300]) did not hold after \(.rounds) round\(if .rounds == 1 then "" else "s" end)"')
   # A last NO-GO with a finding that is a privacy hit in the card's own change (privown(), lib/followups.sh) gets
@@ -228,7 +225,7 @@ afterreview() {
     [ "$stop" != new-p2 ] || { d=$(fudepth "$issue") && [ "$d" -lt "$MAX_DEPTH" ]; } || stop='' # a card at the follow-up depth cap files none: it gets the fix round (bug: its P2s landed, declined)
     [ -z "$stop" ] || [ "$res" = GO ] || ! priv=$(privown "$wt") || [ -z "$priv" ] || [ -n "$privfix" ] || stop=''
     [ -z "$stop" ] || [ "$res" = GO ] || last0=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]')
-    [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$last0" ] || p1=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P1")) | first // empty | .line[:300]'); [ -z "$p1" ] || [ -n "$p1fix" ] || stop=''
+    [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$last0" ] || [ "$mode:${rland:-}" = land:1 ] || p1=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P1")) | first // empty | .line[:300]'); [ -z "$p1" ] || [ -n "$p1fix" ] || stop=''
   else last0=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]'); fi
   # The review line, and the filed line after it, say why the loop ended: stop, with pass and rounds as they are here.
   ended=$(jq -cn --arg s "$stop" --argjson p "$pass" --argjson r "$rounds" 'if $s == "" then {} else {stop: $s, pass: $p, rounds: $r} end')
@@ -285,7 +282,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local rline='' ended='{}' stop='' finend='{}' earlyend='' fe # rline, ended, stop: a review's line before it is written, and why the loop ended (loopstop()); finend, earlyend, fe: why the loop of a port's kept review ended, and the stop the filed line carries
   local lfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh)
   local fixtree='' rtree='' # fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts()); rtree: the one the last review read, which a reused review reads again
-  local after # what follows a review (afterreview())
+  local after rland='' rlrev='' rlfind='' # after: what follows a review (afterreview()); rland: the card lands its kept patch on its kept review, a retry by review-land's (resumeplan()); rlrev: that kept review; rlfind: the finding its block names
   local priv privfix='' p1 p1fix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given; p1: the P1 finding that gets one fix round, p1fix: that round was given
   local fixed=0 # fixed: the fix sessions this card has run, review fixes and test fixes; the second and every later one runs one effort level up (session1())
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
@@ -637,7 +634,7 @@ cardfix() {
 # a branch, nor a main-red fix card, which `retry` gives back built from nothing): the last kept review of its blocked cards comes along (its findings go in the brief,
 # and stay kept if this card blocks before a review of its own), and the last kept patch is applied when it still
 # applies. No build and no review only when that review is the review of that patch: both kept by the same card
-# (in its kept folder, or beside its worktree when it could not be moved there).
+# (in its kept folder, or beside its worktree when it could not be moved there). So for a retry by review-land (rland: needsland(), lib/needsask.sh, of a card blocked by its review again after review-retry gave its issue back once): it lands on that kept review (afterreview() files its findings), or, when it no longer applies, a session ports it and one review reads that port, as after a landing conflict.
 # A patch that no longer applies is still used: its session brings it onto main. Only one git cannot parse is given up, or one whose
 # issue's section of what customers or staff will see changed since its review (keptway() build, below): that card is built from nothing.
 # It reads card()'s n, br, wt, issue, vrule, heldto and inh, and sets its from, fromk, was, mode (land, review,
@@ -649,6 +646,7 @@ resumeplan() {
   if [ -z "$br" ] && prev=$(prior "$n" "$([ "$n" != 0 ] || testcardwas "$c")") && [ -n "$prev" ]; then
     from=$(jq -r .card <<<"$prev"); fromk=$(jq -r .kept <<<"$prev"); was=$(jq -r .reason <<<"$prev"); rev=$(jq -r .review <<<"$prev")
     [ -z "$rev" ] || cp "$rev" "$wt.review"
+    rland=''; [ "$(jq -r '.by // ""' <<<"$prev")" != review-land ] || ! { [ "$rev" = "$fromk/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } || [ "$(verdict "$wt.review")" = none ] || rland=1
     if [ -n "$from" ]; then
       if git -C "$wt" apply --index "$fromk/$from.patch" 2>/dev/null; then
         # What the tests of the blocked card had passed (block(); revive() for a card whose process was gone): its run
@@ -656,11 +654,12 @@ resumeplan() {
         cp "$fromk/$from.rerun" "$wt.rerun" 2>/dev/null || :
         mode=session; note="resumed from the kept patch of card $from: one session, then review"
         ! yeskept "$prev" || { mode=land; note="landing from the kept patch of card $from: no build and no review"; }
+        [ -z "$rland" ] || { mode=land; note="landing from the kept patch of card $from, blocked by its review again after review-retry: no build and no review, its review's findings filed as follow-ups"; }
       elif [ -r "$fromk/$from.patch" ] && git apply --numstat "$fromk/$from.patch" >/dev/null 2>&1; then
         mode=port; note="the kept patch of card $from no longer applies to main: one session brings it onto main, then review"
         # Its loop finished: only a landing conflict blocked it, and the kept review is the review of that
-        # patch (a GO, or a last NO-GO whose follow-ups were filed). One review of the port alone, then tests and landing.
-        if [[ $was == "rebase onto main conflicts: "* ]] && { [ "$rev" = "$fromk/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } \
+        # patch (a GO, or a last NO-GO whose follow-ups were filed); or a retry by review-land. One review of the port alone, then tests and landing.
+        if { [[ $was == "rebase onto main conflicts: "* ]] || [ -n "$rland" ]; } && { [ "$rev" = "$fromk/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } \
           && [ -s "$wt.review" ] && fin=$(verdict "$wt.review") && [ "$fin" != none ]; then
           note="the kept patch of card $from finished its review loop and no longer applies to main: one session brings it onto main, then one review of that port alone"
           # finend: why that loop ended, for the filed line: from the blocked card's last NO-GO review that ended a loop,
@@ -678,8 +677,8 @@ resumeplan() {
   fi
   # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it stopped for the yes, or on a landing conflict). A body changed
   # since: the patch is built on and reviewed against the issue as it is now. A section of what customers or staff will see changed since: the issue asks for another change, built from
-  # nothing, a port too (bug: it ported the refused change); the old block reason (was) goes too, so its own landing conflict gets its port (landconflict(); bug: it was skipped).
-  if { [ "$mode" = land ] || [ "$mode" = port ]; } && [ -n "$issue" ]; then
+  # nothing, a port too (bug: it ported the refused change); the old block reason (was) goes too, so its own landing conflict gets its port (landconflict(); bug: it was skipped). Not for a retry by review-land: its card kept no body, and the owner's standing order lands it.
+  if { [ "$mode" = land ] || [ "$mode" = port ]; } && [ -n "$issue" ] && [ -z "${rland:-}" ]; then
     d=$fromk/$from.body; [ -e "$d" ] || d=$CARDS/$from.body
     kw=$(keptway "$issue" "$d")
     case $mode:$kw in
@@ -703,6 +702,7 @@ resumeplan() {
   # have grown to cover the change; only a kept "part" lands unreviewed.
   [ "$mode" != land ] || [ -z "$inh" ] || [ "$(inheritance "$wt.review")" = part ] \
     || { mode=review; note="reviewing the kept patch of card $from: is its visible change part of the yes of #$(jq -r .from <<<"$inh")? No build"; }
+  if [ -n "${rland:-}" ] && [[ $mode =~ ^(land|port|review|session)$ ]]; then rlrev=$(cat "$wt.review") || rlrev=''; rlfind=${was#the fix for }; rlfind=${rlfind% did not hold after *}; else rland=''; fi # A retry by review-land that carries its kept patch keeps the kept review (rlrev, afterreview()) and the finding its block names (rlfind, "the fix for <finding> did not hold after ...": followups() files it released); one built from nothing is no such retry.
   # pro: the rollout actions of the retried cards whose kept patch this card carries ($from, the one whose kept patch that one resumed, and so on back to one built from nothing):
   # `retry` moved their review lines out, and a new review replaces the kept one, so its landing reads them (ro, cardready()): the newest review line with a rollout, one that
   # names any or a GO of the whole change or of the fix alone ([] when it names none). Bugs: a patch `retry --fresh` discarded brought its action back; so did a NO-GO's that its card's GO replaced,

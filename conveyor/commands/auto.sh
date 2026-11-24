@@ -57,10 +57,6 @@ AD=$ST/auto MODE=$ST/auto/mode.json LAST=$ST/auto/last.json DECISION=$HERE/../.c
 die() { echo "conveyor: auto: $*" >&2; exit 1; }
 # The mode while on, as JSON: {scope, since, log}; fails while off.
 mode() { jq -ce 'select(type == "object" and (.scope == "full" or .scope == "narrow") and (.since | type == "string") and (.log | type == "string"))' "$MODE" 2>/dev/null; }
-# <log>: its decisions, the entries under "## Decisions", an entry whose answer could not be recorded left out.
-logged() { awk '/^## / { on = ($0 == "## Decisions") } on && /^### / { n++ } on && /^- \*\*Recorded:\*\* no/ { n-- } END { print n + 0 }' "$1" 2>/dev/null || echo 0; }
-# <log>: the entries under "## Waiting for the owner": a "- <id>: " line, or a "### " entry with its "- **...**" lines.
-waiting() { awk '/^## / { on = ($0 == "## Waiting for the owner") } on && (/^### / || (/^- / && !/^- \*\*/)) { n++ } END { print n + 0 }' "$1" 2>/dev/null || echo 0; }
 m=$(mode) || m=''
 if [ -n "$m" ]; then IFS=$'\t' read -r scope since log < <(jq -r '[.scope, .since, .log] | @tsv' <<<"$m"); fi
 RL=$(rulingslog) || RL=''
@@ -157,16 +153,16 @@ case $2 in
     tohosts "$2" ;;
   off)
     [ -n "$m" ] || { echo "auto is already off."; tohosts off; exit 0; }
-    n=$(logged "$log") h=$(waiting "$log")
+    n=$(autologged "$log") h=$(autowaiting "$log")
     printf '\n---\nauto turned off at %s.\n' "$(date '+%F %H:%M')" >> "$log"
     jq -n --argjson n "$n" '{count: $n}' > "$LAST" && rm -f "$MODE" || die "the mode $MODE could not be ended"
     echo "auto OFF after $n decided, $h waiting for the owner: decisions go back to the owner. Log: $log"
     tohosts off ;;
   status)
-    if [ -n "$m" ]; then echo "auto is $([ "$scope" = full ] && echo ON || echo NARROW) since $since: $(logged "$log") decision(s). Log: $log"
+    if [ -n "$m" ]; then echo "auto is $([ "$scope" = full ] && echo ON || echo NARROW) since $since: $(autologged "$log") decision(s). Log: $log"
     else echo "auto is OFF. Use /conveyor-belt:auto on, /conveyor-belt:auto narrow or /conveyor-belt:auto off."; fi ;;
   band)
-    if [ -n "$m" ]; then jq -cn --arg s "$scope" --arg t "$since" --argjson n "$(logged "$log")" '{scope: $s, since: $t, count: $n}'
+    if [ -n "$m" ]; then jq -cn --arg s "$scope" --arg t "$since" --argjson n "$(autologged "$log")" '{scope: $s, since: $t, count: $n}'
     else jq -cn --argjson n "$(jq -r '.count // 0 | numbers' "$LAST" 2>/dev/null || echo 0)" '{scope: "off", since: null, count: $n}'; fi ;;
   rules)
     [ -n "$m" ] || exit 0
@@ -325,9 +321,6 @@ EOF
       else put "- **Recorded:** no, so it still waits for the owner: ${e//$'\n'/ }"; hold "$id" "$q" "the answer could not be recorded"; fi
     done < <(jq -c '.[]' <<<"$open")
     # The summary, made again from the log: its decisions and the lines waiting for the owner.
-    n=$(logged "$log") h=$(waiting "$log")
-    S="Decided for the owner: $n. Waiting for the owner: $h. Last pass: $(date '+%F %H:%M')." awk '
-      /^## Summary$/ { print; print ""; print ENVIRON["S"]; print ""; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$log" > "$log.new" && mv "$log.new" "$log" \
-      || die "the log $log could not be written"
+    autosum "$log" > "$log.new" && mv "$log.new" "$log" || die "the log $log could not be written"
     echo "auto: decided $d, left $k for the owner. Log: $log" ;;
 esac

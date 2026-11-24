@@ -13,7 +13,8 @@
 # Test seam: CONVEYOR_RULING_LOG (the ruling log).
 STANDING_KINDS=(asked-fix review-followup release-check fixed-block review-retry)
 # How the decision of a card blocked by its review, after review-retry gave its issue back once, says so
-# (needsask(), lib/needsask.sh): auto decide leaves such a decision to the owner (commands/auto.sh).
+# (needsask(), lib/needsask.sh): auto decide leaves such a decision to the owner (commands/auto.sh). While auto is on
+# (full), the engine lands such a card before it is asked (needsland(), lib/needsask.sh).
 # shellcheck disable=SC2034 # RRAGAIN is read by needsask() in lib/needsask.sh and by commands/auto.sh
 RRAGAIN='is blocked by its review again, after review-retry gave its issue back once'
 # The ruling log's path (.claude/hooks/lib/rulings.sh rulings_log, of main's checkout); fails when it cannot be named.
@@ -55,6 +56,17 @@ heldlist() {
   packget auto.reserved h_ && p_=$(profileheld) && h_=$(jq -c --argjson p "$p_" '. + $p' <<<"$h_") || return 1
   printf -v "$1" %s "$h_"
 }
+# auto's log (the mode's log, commands/auto.sh). autologged <log>: its decisions, the entries under "## Decisions", an
+# entry whose answer could not be recorded left out. autowaiting <log>: the entries under "## Waiting for the owner": a
+# "- <id>: " line, or a "### " entry with its "- **...**" lines. autosum <log>: the log, printed with its "## Summary"
+# made again from those two, as auto decide and needsland() (rlput(), lib/needsask.sh) leave it after each entry.
+autologged() { awk '/^## / { on = ($0 == "## Decisions") } on && /^### / { n++ } on && /^- \*\*Recorded:\*\* no/ { n-- } END { print n + 0 }' "$1" 2>/dev/null || echo 0; }
+autowaiting() { awk '/^## / { on = ($0 == "## Waiting for the owner") } on && (/^### / || (/^- / && !/^- \*\*/)) { n++ } END { print n + 0 }' "$1" 2>/dev/null || echo 0; }
+autosum() {
+  local n h; n=$(autologged "$1") h=$(autowaiting "$1")
+  S="Decided for the owner: $n. Waiting for the owner: $h. Last pass: $(date '+%F %H:%M')." awk '
+    /^## Summary$/ { print; print ""; print ENVIRON["S"]; print ""; skip = 1; next } skip && /^## / { skip = 0 } !skip { print }' "$1"
+}
 standingon() { # <kind>: 0 when the pack turns that kind on
   local s_; packget auto.standing s_ && jq -e --arg k "$1" 'index($k) != null' <<<"$s_" >/dev/null
 }
@@ -91,7 +103,7 @@ EOF
       review-followup) echo "- review-followup: a follow-up from the review of a card the owner approved. Release it when it only finishes or corrects that card's own change. The engine itself does not hold, and logs, one whose finding names only that card's files and no word of auto.reserved: tell the owner of each too." ;;
       release-check) echo "- release-check: a check fails in a release the owner asked for (a false privacy hit, a red test file). File a fix card for each failure, with the line \`Release fix: <version>\` in its body, and release it. Once every fix card has landed, the engine starts \`release-run prep <version>\` for a red test file; for another check, go on with the release." ;;
       fixed-block) echo "- fixed-block: a card is blocked, and a fix that landed removed the cause. Add \`Depends on: #<fix>\` to the card's issue, then run \`retry <issue> --fresh\`." ;;
-      review-retry) echo "- review-retry: a card blocked by its review (\"the fix for <finding> did not hold after <n> rounds\"). The watcher runs \`retry <issue>\` once for each issue and logs it: you take no step for it, log nothing and tell the owner nothing of it. A wake for such a card is a failed retry; a retry that worked but that the watcher could not log (\"was retried (review-retry), but the act was not logged\"); a block whose reason holds a word of auto.reserved or an item of the owner's profile, which the watcher leaves blocked for the owner; a block the watcher did not retry, as it could not read auto.reserved or the owner's profile on the card's host; or a second such block of an issue that review-retry already gave back once (the watcher, or the engine while the watcher was down), which waits for the owner in Needs you with both block reasons. Act on the reason of a failed retry; one that says review-retry already gave the issue back once is such a second block. For a retry that was not logged, log it with \`auto act review-retry\` and do not say that the retry failed. Ask the owner for the last three, do not retry them, and do not say that a retry failed: no retry ran." ;;
+      review-retry) echo "- review-retry: a card blocked by its review (\"the fix for <finding> did not hold after <n> rounds\"). The watcher runs \`retry <issue>\` once for each issue and logs it: you take no step for it, log nothing and tell the owner nothing of it. A wake for such a card is a failed retry; a retry that worked but that the watcher could not log (\"was retried (review-retry), but the act was not logged\"); a block whose reason holds a word of auto.reserved or an item of the owner's profile, which the watcher leaves blocked for the owner; a block the watcher did not retry, as it could not read auto.reserved or the owner's profile on the card's host; or a second such block of an issue that review-retry already gave back once (the watcher, or the engine while the watcher was down), which waits for the owner in Needs you with both block reasons (while auto is on, the engine lands it instead, once for each issue, files its findings as follow-ups and logs that act). Act on the reason of a failed retry; one that says review-retry already gave the issue back once is such a second block. For a retry that was not logged, log it with \`auto act review-retry\` and do not say that the retry failed. Ask the owner for the last three, do not retry them, and do not say that a retry failed: no retry ran." ;;
     esac
   done
   echo "- Still ask the owner, whatever the kind: new engine behaviour (how the engine builds, reviews, fixes, tests, lands or pushes) or a release, each one the owner did not ask for; a design choice; anything about $2. When unsure, ask."
