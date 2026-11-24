@@ -204,34 +204,33 @@ write_block() {
 Instead: make this change with the Edit tool, not a shell write." >&2
   exit 2
 }
-# SCRIPT = only the python/node invocations and their heredoc bodies. Scanning
+# SCRIPTS[d<folder>] = only the python/node invocations and their heredoc bodies that run in <folder> (`env -C`,
+# '' for the shell's own), so a relative path is judged from its own script's folder only. Scanning
 # the whole command refused `echo "open('src/x', 'w')"` beside any node call,
 # and no retry could clear it.
 # A heredoc body is script when the declaring segment, or a segment piped
 # after it on that line, runs python/node; the rest is split as one text so a
 # multi-line quote holds.
-# ponytail: knows `env`, `command`, `exec`, `nice`, `nohup`, `stdbuf`, `time`, `timeout`, `sudo`
-# wrappers only (a bare number is timeout's duration). Add one when it shows up.
+# ponytail: knows the wrappers unwrap knows, and `sudo` with its options. Add one when it shows up.
+# SH_DIR = the folder `env -C` runs the script in (unwrap's ENV_DIR), '' for none; the caller's ENV_DIR is kept, as
+# a redirect on the segment is the shell's, in the shell's folder.
 script_head() {
-  local w='' h
+  local h ENV_DIR=''
+  SH_DIR=''
   load_words "$1"; set -- "${WORDS[@]}"
   while [ $# -gt 0 ]; do
     [[ ${1-} =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && { shift; continue; }
     # A wrapper called by path (`/usr/bin/nohup`) is the same wrapper; an option keeps its slashes (`--chdir=/tmp`).
     h=${1-}; [[ $h == -* ]] || h=${h##*/}
     case "$h" in
-      env|command|exec|nice|nohup|stdbuf|time|timeout|sudo|[0-9]*) w=$h; shift ;;
-      -u|-g|-n|-k|-s|-a|--adjustment|--signal|--kill-after) [ $# -ge 2 ] || return 1; shift 2 ;;
-      # stdbuf's mode can be the next word (`-o L`); env -i and sudo -i take no value.
-      -i|-o|-e) if [ "$w" = stdbuf ]; then [ $# -ge 2 ] || return 1; shift 2; else shift; fi ;;
-      # GNU stdbuf reads a unique start of a long name as the name: `--out L` is `--output L`.
-      --?*) if [ "$w" = stdbuf ] && [[ $h != *=* ]] && [[ input == "${h#--}"* || output == "${h#--}"* || error == "${h#--}"* ]]; then
-          [ $# -ge 2 ] || return 1; shift 2
-        else shift; fi ;;
+      env|command|exec|nice|nohup|stdbuf|time|timeout) unwrap "$@"; set -- "${WRAP[@]}" ;;
+      sudo) shift ;;
+      -u|-g|-h|-p|-C|-D|-R|-T|-U|--user|--group|--host|--prompt|--close-from|--chdir|--chroot|--command-timeout|--other-user) [ $# -ge 2 ] || return 1; shift 2 ;;
       -*) shift ;;
       *) break ;;
     esac
   done
+  SH_DIR=$ENV_DIR
   case "${1##*/}" in python|python3|python3.*|node) SH_ARGS=("${@:2}"); return 0 ;; esac
   return 1
 }
@@ -355,10 +354,11 @@ heredoc_delim() { # $1 = a segment
   done
   return 1
 }
-SCRIPT="" SHELL_TEXT="" DELIM="" KEEP=0
+declare -A SCRIPTS=()
+SHELL_TEXT="" DELIM="" KEEP_DIRS=() # KEEP_DIRS = the folders of the pipe's runners; the body is judged from each
 while IFS= read -r LINE; do
   if [ -n "$DELIM" ]; then
-    if [ "$(sed 's/^[[:space:]]*//' <<<"$LINE")" = "$DELIM" ]; then DELIM=""; else [ "$KEEP" = 1 ] && SCRIPT+=$LINE$'\n'; fi
+    if [ "$(sed 's/^[[:space:]]*//' <<<"$LINE")" = "$DELIM" ]; then DELIM=""; else for D in "${KEEP_DIRS[@]}"; do SCRIPTS[d$D]+=$LINE$'\n'; done; fi
     continue
   fi
   SHELL_TEXT+=$LINE$'\n'
@@ -366,17 +366,18 @@ while IFS= read -r LINE; do
   while IFS= read -r SEG; do
     if [ "$PIPED" = 1 ]; then
       [ "${SEG:0:1}" = 1 ] || PIPED=0
-      [ "$PIPED" = 1 ] && stdin_runner "${SEG:1}" && KEEP=1
+      # Each runner in the pipe can run the body: a stage before it can copy the body to its stdin, in any folder.
+      [ "$PIPED" = 1 ] && stdin_runner "${SEG:1}" && KEEP_DIRS+=("$SH_DIR")
     fi
     heredoc_delim "${SEG:1}" || continue
-    KEEP=0 PIPED=1; script_head "${SEG:1}" && KEEP=1
+    KEEP_DIRS=() PIPED=1; script_head "${SEG:1}" && KEEP_DIRS=("$SH_DIR")
   done < <(split_search_segments "$LINE")
 done <<<"$CMD"
 RD_RE='^[0-9&]?>>?[|]?(.*)$' # a redirect's target. Shell text only: heredoc bodies, quoted or escaped `>` are data.
 mapfile -d '' SH_SEGS < <(split_search_segments "$SHELL_TEXT" '\0')
 for i in "${!SH_SEGS[@]}"; do
   SEG=${SH_SEGS[i]} ENV_DIR=''
-  script_head "${SEG:1}" && SCRIPT+=${SEG:1}$'\n'
+  script_head "${SEG:1}" && SCRIPTS[d$SH_DIR]+=${SEG:1}$'\n'
   # One left-to-right pass, escape pairs before quotes: `\\>` keeps its redirect, `\'` opens no quote.
   # A data `>` becomes `_`, never nothing: deleting it turned `"\>"` into `"\"`, whose escaped quote swallowed a later redirect.
   # A segment with no `>` has no redirect, so perl is not started for it.
@@ -453,8 +454,8 @@ for i in "${!SH_SEGS[@]}"; do
     src_path "$W" && write_block "$W"
   done
 done
-ENV_DIR='' # the last segment's env -C folder is not the inline scripts' folder
-if [ -n "$SCRIPT" ]; then
+# $SCRIPT = the scripts that run in the folder $ENV_DIR; a relative path they write is judged from there.
+script_check() {
   # A write's target is judged as written when literal; a variable by its literal
   # assignments; anything else by every quoted path the script names.
   # A move or copy (os.replace/rename, shutil.copy*/copytree/move, fs renameSync/copyFileSync) is judged on
@@ -498,7 +499,9 @@ Instead: cp <source> /tmp/<name>" >&2
     | sed -E "s/^[^(]*\(${PY_ARG},[[:space:]]*/MV /; s/[[:space:]]+\$//"
     grep -oE "(Path\([^)]*\)|[A-Za-z_][A-Za-z0-9_]*)\.open\([[:space:]]*(mode[[:space:]]*=[[:space:]]*)?['\"][rbt]*[wax+]|open\([[:space:]]*[^,)]+,[[:space:]]*(mode[[:space:]]*=[[:space:]]*)?['\"][rbt]*[wax+]|(Path\([^)]*\)|[A-Za-z_][A-Za-z0-9_]*)\.write_(text|bytes)\(|(writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream)\([[:space:]]*[^,)]+" <<<"$SCRIPT" \
     | sed -E 's/\.open\(.*$//; s/^open\([[:space:]]*([^,)]+),.*/\1/; s/\.write_(text|bytes)\($//; s/^[A-Za-z]+\([[:space:]]*//; s/[[:space:]]+$//')
-fi
+}
+for K in "${!SCRIPTS[@]}"; do SCRIPT=${SCRIPTS[$K]} ENV_DIR=${K#d}; script_check; done
+ENV_DIR=''
 
 # Point a caller hunt at serena's reference lookup: one cut ran 38 rg
 # searches and no find_referencing_symbols call (2026-09-18). A HINT, not a
