@@ -1328,6 +1328,10 @@ if [ -s "$RERUN" ]; then
       awk -F'\t' '$1 == "fail" && $3 == "" && $2 ~ /^conveyor\/tests\/[^\/]+[.]test[.]sh$/ {print $2}' "$RERUN" \
         | while IFS= read -r f; do [ ! -f "$f" ] || sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$f"; done; } \
     | grep -Fxf <(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' conveyor/tests/*.test.sh) | sort -u | tr '\n' ' ')
+  # One-file mode (ONE) runs that file's cases alone: of these, its own. Another file's (a whole-file `fail` line of a
+  # file that failed before any case passed: a run that stops at its first failure) would take the place of its
+  # selection, then be left out with that file below, and the file passed with none of its cases run.
+  [ -z "$ONE" ] || again=$(tr ' ' '\n' <<<"$again" | grep -xFf <(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$ONE") | tr '\n' ' ')
   # A file the list names failed cases of runs though no change selects it: the loop runs a card's failing cases on
   # main (mainred.sh verdicts()), where nothing changed. Of the engine's runner, only when a case it names is one; of
   # a node test file, those cases alone (only, below). A `fail` line naming no case (a file that failed naming none, or
