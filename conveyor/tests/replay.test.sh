@@ -62,13 +62,15 @@ replaysetup() {
   SUMS='cat "$ST/cards.jsonl" "$ST/retried.jsonl" "$ST/declined.jsonl" "$ST/control.json" "$R/.conveyor/project.json" | cksum; git -C "$R" rev-parse HEAD; git -C "$R" status --porcelain; git -C "$R" worktree list | wc -l'
   eval "$SUMS" > "$STUB/before"
 }
-# The stub judge: it keeps the staged change and what it was given ($STUB/judged), answers the findings of c1-7 with
-# F1 ACCEPT and F2 ACCEPT (so F2 differs from the recorded decline), the one of c1-8 with a DECLINE (as its judge
-# did), and fails on c1-11 (a timeout) with the usage the call had used, as judgecall() prints it.
+# The stub judge: it keeps the staged change and what it was given ($STUB/judged) and c1-7's whole staged diff
+# ($STUB/c1-7.diff), answers the findings of c1-7 with F1 ACCEPT and F2 ACCEPT (so F2 differs from the recorded
+# decline), the one of c1-8 with a DECLINE (as its judge did), and fails on c1-11 (a timeout) with the usage the call
+# had used, as judgecall() prints it.
 STUBJUDGE='judgecall() {
   { echo "== $CALLACT"; git -C "$1" diff --cached | grep "^+[a-z]\|^@@"; printf "%s\n" "$3"; } >> "$STUB/judged"; printf "%s\n" "$2" >> "$STUB/judge-prompt"
   case $CALLACT in
-    *c1-7) printf "%s\n" "F1 ACCEPT: real. Cost to every card: none" "F2 ACCEPT: the change causes it. Cost to every card: none" > "$1.judge"
+    *c1-7) git -C "$1" diff --cached > "$STUB/c1-7.diff"
+      printf "%s\n" "F1 ACCEPT: real. Cost to every card: none" "F2 ACCEPT: the change causes it. Cost to every card: none" > "$1.judge"
       echo "{\"model\":\"claude-haiku-5-5\",\"effort\":\"low\",\"sec\":3,\"usage\":$U}" ;;
     *c1-8) echo "F1 DECLINE: weak" > "$1.judge"; echo "{\"model\":\"claude-haiku-5-5\",\"effort\":\"low\",\"sec\":3,\"usage\":$U}" ;;
     *) echo "{\"model\":\"claude-haiku-5-5\",\"effort\":\"low\",\"sec\":9,\"usage\":$U,\"failed\":\"the judge call failed (timeout)\"}"; return 1 ;;
@@ -99,14 +101,26 @@ t_replayjudge() {
     || fail "the judge was not given each case's diff, issue and findings: $(cat "$STUB/judged")"
   # Bug caught (#1381): the replay judge's prompt says each finding is followed by the lines it cites and a small staged
   # change is in the message, but replay sent the finding text alone, so it judged with less than the live judge has.
-  [ "$(awk '/^== /{on = /c1-7$/} on' "$STUB/judged" | sed -n '/^F1 /,/^F2 /p')" = 'F1 [inside the diff] [P1] a.txt:2 F-one
+  # The message is checked from the diff heading to its end: the diff's own lines and the last finding's (F2) lines
+  # too, so an empty inline diff or a finding with no lines beside it fails here. The diff is the one the stub read
+  # from c1-7's replay worktree; it must hold the "three" line, so an empty one cannot match itself.
+  grep -qx '+three' "$STUB/c1-7.diff" && [ "$(awk '/^== /{on = /c1-7$/} on' "$STUB/judged" | sed -n '/^# The staged change /,$p')" = '# The staged change (git diff --cached)
+'"$(cat "$STUB/c1-7.diff")"'
+
+# The findings
+F1 [inside the diff] [P1] a.txt:2 F-one
   Lines at a.txt:2 (the staged change):
     1: one
     2: l2
     3: l3
     4: l4
     5: l5
-F2 [outside the diff] [P2] a.txt:1 F-two' ] && awk '/^== /{on = /c1-7$/} on' "$STUB/judged" | grep -qxF '# The staged change (git diff --cached)' \
+F2 [outside the diff] [P2] a.txt:1 F-two
+  Lines at a.txt:1 (the staged change):
+    1: one
+    2: l2
+    3: l3
+    4: l4' ] \
     || fail "the replay judge was not given the lines each finding cites, or the small staged change: $(awk '/^== /{on = /c1-7$/} on' "$STUB/judged")"
   [ "$(grep -cF 'really runs, its defect is already fixed on main, or, at P2 only, it is a rare case' "$STUB/judge-prompt")" = 3 ] \
     || fail "a replay judge's prompt does not hold the record's rare-case level P2: $(grep -n -i 'rare case' "$STUB/judge-prompt")"
