@@ -499,7 +499,8 @@ t_lintgatemergep1() {
   [ "$(gatesteps)" = 'lint review lint test lint fix review fix lint review lint test landed' ] && [ "$(did)" = 'build lintfix fix' ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] \
     || fail "the P1 of the review after the lint fix did not get one fix and a review: $(gatesteps); $(did); $(wc -l < "$STUB/reviews") reviews"
   [ "$(st 'select(.step == "landed") | .followups | length')" = 0 ] || fail "the P1 was filed as a follow-up, not fixed: $(st 'select(.step == "landed") | .followups')"
-  pagesays_lintgate docs/cards.md 'or gets one fix round if it holds a P1' "the review after the lint fix held a P1 and got a fix round and a review"
+  # The P1 has no kind, so it is `harm` (docs/cards.md, "A finding with no kind is `harm`").
+  pagesays_lintgate docs/cards.md 'or gets one fix round if it holds a `harm` P1' "the review after the lint fix held a P1 with no kind (so harm) and got a fix round and a review"
 }
 
 # Review follow-up of #1444. Bug it catches: on a trial card, the review gate wrote its lint line after its fix session
