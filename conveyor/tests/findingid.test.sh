@@ -70,6 +70,15 @@ t_fidreplaced() {
   [ -z "$(fid_eng 'repeats "$W"')" ] && [ "$(fid_eng 'numbered "$W"' | jq -r .id)" = E2 ] || fail "a finding on the replaced line was joined to the earlier one"
 }
 
+# Bug: findings() read the id mark from the whole line, so a new finding whose text or proof quoted [E1] took E1's
+# id: repeats() listed it as one that came back, and the fix session was told so (again(), FIXBACK). The id mark is
+# only the one in the marks the line starts with.
+t_fidproofquote() {
+  fid_round '[P2] a.txt:1 a nit. Proof: line 1' 'true' '[P2] a.txt:3 The output quotes [E1]. Proof: line 3 shows [E1]'
+  [ -z "$(fid_eng 'repeats "$W"')" ] && [ "$(fid_eng 'numbered "$W"' | jq -r '[.id, .seen] | join(" ")')" = 'E2 false' ] \
+    || fail "a new finding that quotes [E1] in its text and proof was taken as E1 back: $(fid_eng 'numbered "$W"')"
+}
+
 # Bugs: a review's answers (a finding again, or `EARLIER: E1 holds`) were kept beside the first proof only when
 # another fix ran; and a finding the review said holds kept its key from the round before, so when the next fix
 # replaced its line, a later finding there, about other code, was joined to it.

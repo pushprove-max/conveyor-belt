@@ -322,13 +322,15 @@ counts() { # <review file>
 # on, given when it is first recorded and kept by every later finding that is the same one (numbered()). A finding's
 # key is the first file:line it names (at) and its first six words (words), lower case, letters and digits only,
 # leaving out its level mark, an id mark ([E3]), that file:line and any proof after `Proof:`. named is the id its
-# id mark names, else null.
+# id mark names, else null. The id mark is read only in the marks the line starts with (its level mark, any kind mark
+# and then its id, as REREVIEW asks): an [E1] later in its text or proof is a quote, not its id, so a new finding that
+# quotes [E1] is no repeat of E1.
 findings() { # <review file>: one JSON line per finding, {line, level, at, named, words, key}
   grep -Ev "$NOTFINDING" "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk 'NF && !seen[$0]++' | jq -cR '. as $f
     | ([scan("[A-Za-z0-9_./-]+:[0-9]+")] | first // "") as $w
     | (gsub("\\[P[0-3]\\]|\\[E[0-9]+\\]"; "") | if $w == "" then . else index($w) as $i | .[:$i] + .[$i + ($w | length):] end
          | split("Proof:")[0] | ascii_downcase | [scan("[a-z0-9]+")] | .[:6] | join(" ")) as $k
-    | {line: $f, level: (capture("\\[(?<p>P[0-3])\\]").p // "P1"), at: $w, named: (capture("\\[(?<e>E[0-9]+)\\]").e // null), words: $k, key: ($w + " " + $k)}'
+    | {line: $f, level: (capture("\\[(?<p>P[0-3])\\]").p // "P1"), at: $w, named: (capture("^(?<m>(\\[[^\\]]*\\][[:space:]]*)*)").m | capture("\\[(?<e>E[0-9]+)\\]").e // null), words: $k, key: ($w + " " + $k)}'
 }
 # The findings of the review beside the worktree, each with its id (findings() lines with id and seen). A finding
 # keeps the id of an earlier one (seen true) when its id mark names a recorded id, or when its key is the moved key
