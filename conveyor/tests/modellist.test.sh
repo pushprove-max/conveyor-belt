@@ -373,18 +373,39 @@ t_nopricetaken() {
 # Bug it catches: a reader is given the kept snapshot while a new one builds (commands/snapshot.sh), and that one still
 # held a note stop.sh had marked filed since, so a Board on another machine added it to its notes to file again. The
 # kept notes are given while plugin-bugs.md is as the build read it, and none once it changed after. What must stay
-# true: no reader gets a note filed after the kept snapshot's build began. The other writer is the background build: a
-# build holds the kept lock here (as snapkept.test.sh does) and a record line changes, so the reader is due a build,
-# starts its own writer, which finds the lock held, and the reader prints the kept snapshot while the build runs.
+# true: no reader gets a note filed after the kept snapshot's build began. The other writer is the background build,
+# which writes snapshot.json.notes (snapshot(), lib/snapshot.sh) before it renames its snapshot into place: a record
+# line changes, the reader starts the real writer, and a sitecustomize on PYTHONPATH holds that build at cardruns.py,
+# after it wrote snapshot.json.notes and before its rename. Both reads are made there, so a build that empties or drops
+# that file while it runs gives the reader the filed note. Bugs (E1 of two reviews): the case held the kept lock
+# itself, so the writer never reached that write and the reads ran with no build under way; and a python3 shim on PATH
+# never ran on macOS, where p_path (lib/portable.sh) puts Homebrew's python3 ahead of it, so the case never saw held.
 t_nopricekept() {
-  local n out at lk
+  local n out at t py=$T/$CASE/py
   setup '[]'; unset CONVEYOR_NOPRICE_CMD; n=$ST/foreman/plugin-bugs.md
   tune '.models.allowed.claude += ["claude-new-9"]'
   loop control model claude claude-new-9 >/dev/null || fail "the builder's seat was not set"
   looks noprice
-  at=$(loop snapshot --fresh | jq -r .snapshotAt) || fail "no snapshot"
-  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  loop snapshot --fresh > /dev/null || fail "no snapshot"
+  # The kept snapshot dated 10 s back (plugin-bugs.md 20 s, as its build read it), so the writer waits no SNAPGAP.
+  printf -v t '%(%Y%m%d%H%M.%S)T' $(($(date +%s) - 20)); touch -t "$t" "$n" || fail "plugin-bugs.md could not be dated"
+  printf -v t '%(%Y%m%d%H%M.%S)T' $(($(date +%s) - 10)); touch -t "$t" "$ST/snapshot.json" "$ST/snapshot.json.at" || fail "the kept snapshot could not be dated"
+  at=$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$(p_mtimes "$ST/snapshot.json" | cut -d' ' -f1)")
+  mkdir -p "$py" && cat > "$py/sitecustomize.py" <<'PY' || fail "the sitecustomize could not be written"
+import os, sys, time
+if sys.argv[0].endswith("cardruns.py"):
+    open(os.environ["NOPRICE_HELD"], "w").close()
+    for _ in range(300):
+        if os.path.exists(os.environ["NOPRICE_GO"]):
+            break
+        time.sleep(0.1)  # sleep: the pause between two looks for go, which the case makes after its reads
+PY
   touch "$ST/cards.jsonl"
+  NOPRICE_HELD=$T/$CASE/held NOPRICE_GO=$T/$CASE/go PYTHONPATH=$py loop snapshot > /dev/null \
+    || fail "the reader that starts the writer exited non-zero"
+  # wait: the write under test is made by the reader's background writer, in its own process, which no function call
+  # can hold mid-build, so the case polls until that build reached cardruns.py
+  wait_until "[ -e '$T/$CASE/held' ]" || fail "the writer the reader started did not reach cardruns.py"
   out=$(loop snapshot | jq -c '[.snapshotAt, .recordsNewer, .priceNotes]')
   [ "$out" = "$(grep '^- ' "$n" | jq -Rsc --arg at "$at" '[$at, true, [splits("\n") | select(. != "")]]')" ] \
     || fail "the kept snapshot, read while a build runs and plugin-bugs.md unchanged since its build, does not give the note it holds: $out"
@@ -393,9 +414,9 @@ t_nopricekept() {
     || fail "the note was not marked filed: $(cat "$n" 2>&1)"
   out=$(loop snapshot | jq -c '[.snapshotAt, .recordsNewer, .priceNotes]')
   [ "$out" = "$(jq -cn --arg at "$at" '[$at, true, []]')" ] \
-    || fail "the kept snapshot, read while a build runs, gives a note filed after its build ($(grep '^- ' "$n")): $out"
-  # One build after the lock is let go: a writer the reads started finds nothing due, so none builds after the case.
-  exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the reads exited non-zero"
+    || fail "the kept snapshot, read while a build runs (snapshot.json.notes: $(cat "$ST/snapshot.json.notes" 2>&1)), gives a note filed after its build ($(grep '^- ' "$n")): $out"
+  # The held build let go; the --fresh call waits for its lock, so no build runs after the case.
+  : > "$T/$CASE/go"; loop snapshot --fresh > /dev/null || fail "the snapshot after the reads exited non-zero"
 }
 # Bug it catches: a kept snapshot an older engine built has no snapshot.json.notes, so the first read after an upgrade
 # gave its notes as they were, one stop.sh had marked filed since among them, and a Board on another machine added it
