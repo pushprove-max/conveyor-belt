@@ -153,6 +153,9 @@ refused "gh issue create --label bug --body \$'1. \`\`\`\n   ## Cause\n   \`\`\`
 passes "$(body $'## What happens now\nIt breaks.\n- ~~~\n  x\n## Cause\nThe cache is stale.')"
 # Bug (E1): a tab-indented line in the item's block ended it, so the `## Cause` after it counted.
 refused "$(body $'## What happens now\nThe form prints an example.\n\n- ~~~\n\tExample output\n  ## Cause\n  ~~~')"
+# Bug (#1510 review): a tab after the item indent was kept before the closing fence, so `  \t~~~` (two columns past the
+# indent) did not close the block, the real `## Cause` after it was hidden and a valid fix was refused.
+passes "$(body $'## What happens now\n- ~~~\n  Example output\n  \t~~~\n  ## Cause\n  The cache is stale.')"
 # Bug (E2): an ordered list that starts at 2 cannot interrupt a paragraph, so `2. ~~~` there is text, not a fence,
 # and the heading after it counts; one that starts at 1 can, and hides it; so can a later item of a list.
 passes "$(body $'## What happens now\nThe form prints this line:\n2. ~~~\n   ## Cause\nThe cache is stale.')"
@@ -193,6 +196,9 @@ o=$(unfenced 0 "" $'a\n- * ~~~\n    x\n\n    y\n    ~~~\n    z\nb') || fail "unf
 # Bug (E1): a tab counted as no indent, so a tab-indented line in the item ended its block early.
 o=$(unfenced 0 "" $'- ~~~\n\tx\n  y\n  ~~~\nb') || fail "unfenced failed"
 [ "$o" = $'b' ] || fail "a tab-indented line ended the block of its list item; got: $o"
+# A fence four columns past the item indent (`  \t` then two spaces) is code in the block, not its closing fence.
+o=$(unfenced 0 "" $'- ~~~\n  \t  ~~~\n  x\n  ~~~\nb') || fail "unfenced failed"
+[ "$o" = $'b' ] || fail "a fence four columns past the item indent closed its block; got: $o"
 # A line indented less than the item ends the item and its block: the text from it on is read.
 o=$(unfenced 0 "" $'- ```\n  x\nb\n- c') || fail "unfenced failed"
 [ "$o" = $'b\n- c' ] || fail "a line indented less than the list item did not end its block; got: $o"

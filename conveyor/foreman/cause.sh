@@ -100,7 +100,8 @@ unfenced() {
           # that quote. The rest of the opening line is its info string, never a closing fence (`~~~ ~~~` stays open).
           if (oq == "" || !(j = qend(substr(c, k + 1), oq))) next
           open = ""; line = substr(substr(c, k + 1), j); continue }
-        c = strip(cut(line, W)); k = 0
+        # A closing fence is up to three columns past the item indent, tabs counted to their column.
+        c = line; if (col(line) - W < 4) sub(/^[ \t]*/, "", c); k = 0
         while (substr(c, k + 1, 1) == open) k++
         r = substr(c, k + 1); sub(/^[ \t]*/, "", r)
         if (k >= n && r == "") { open = ""; next }
