@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: the work done under the card records' lock is bounded: adopted() reads the landed issues from their
-# running summary, a set-aside of a bad line, and a pick that holds the lock past its limit (lockedfor, lib/records.sh) is stopped.
+# running summary, a set-aside of a bad line, and a pick or the snapshot's adopt that holds the lock past its limit (lockedfor, lib/records.sh) is stopped.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -71,4 +71,24 @@ t_checklimit() {
   grep -q '^check: 1 after \([0-9]\|1[0-9]\) s$' <<<"$out" || fail "check() was not stopped at the lock's limit, or did not fail: $out"
   grep -q "conveyor: the set-aside of a bad line ran out of time: it held the card records' lock for over 2 s" <<<"$out" || fail "the log does not say the set-aside ran out of time: $out"
   grep -q '^lock: free$' <<<"$out" || fail "the card records' lock was still held after the set-aside was stopped: $out"
+}
+
+# Bug it catches (#1489): t_locklimit stops the pick's `lockedfor pick`, but the snapshot holds the same lock for its
+# adopt of new issues (snapcopy(), lib/snapshot.sh) under its own step name, and no case ran it: dropping `lockedfor`
+# from that line left every timeout assertion passing. Here adopt's jq never ends: snapcopy() must stop it at the
+# limit (2 s here), say the snapshot's adopt ran out of time, return 3 (the copy was taken, the hold was not saved) and
+# leave the lock free.
+t_snaplimit() {
+  setup "[$(issue 7 2026-01-01)]"
+  # The jq runs at full CPU far longer than the limit; its own timeout (100 s) only keeps it from running on after the
+  # case when the stop fails. The control record holds every issue from #0 on and has not seen #7 (startSeen), so adopted()
+  # differs from it and snapcopy() runs the adopt instead of skipping it as done.
+  fx_in '. "$SRC/lib/snapshot.sh" && LOCKLIMIT=2 && eval "$(declare -f adopt | sed "1s/^adopt /realadopt /")"
+    adopt() { timeout 100 jq -n "last(range(1e15))"; realadopt "$@"; }
+    echo "{\"start\":\"held\",\"startHeld\":[{\"from\":0,\"to\":null}]}" > "$CONTROL"; d=$T/$CASE/scratch; mkdir -p "$d"; s=$SECONDS; snapcopy "$(cat "$STUB/issues.json")" 2>&1; echo "snapcopy: $? after $((SECONDS - s)) s"
+    flock -n "$STATE" true && echo "lock: free"'
+  local out; out=$(cat "$T/$CASE/run.out")
+  grep -q '^snapcopy: 3 after \([0-9]\|1[0-9]\) s$' <<<"$out" || fail "the snapshot's adopt was not stopped at the lock's limit, or snapcopy() did not return 3: $out"
+  grep -q "conveyor: the snapshot's adopt ran out of time: it held the card records' lock for over 2 s" <<<"$out" || fail "the log does not say the snapshot's adopt ran out of time: $out"
+  grep -q '^lock: free$' <<<"$out" || fail "the card records' lock was still held after the snapshot's adopt was stopped: $out"
 }
