@@ -28,12 +28,13 @@ def row: . as $s | $s.first as $f | $s.r as $r | $s.l as $l
          # seats: the judge's call of the rule Pick settings before the card (pickjudge(), lib/modelpick.sh), priced as a step of its own.
          # The sessions and reviews (stepline), then the ones a blocked line says failed (spentline).
          steps: ($s.s1 + $s.s2),
-         # A card the loop retried itself (retriedWhy, retry()) says why after its reason: the Board's earlier attempt shows it.
+         # A card the loop retried itself (retriedWhy, retry()) says why after its reason; x.retriedWhy holds that note
+         # alone, so the snapshot's earlier attempt can keep it out of the reason it parses (lib/snapshot.sh reasonOf).
          result: ($end.result // ""), sha: ($end.sha // ""), reason: (($end.reason // "") + ($end.retriedWhy // "" | if . == "" then "" else "; " + . end)), tail: ($end.tail // ""), kept: ($end.kept // ""),
          x: {at: (if $at == "picked" then "brief" elif $at == "landing" and $l.step != "test" then "tests" else $at end),
              review: (if $at == "review" then $r + 1 else null end),
              tokens: {claude: $s.tc, codex: $s.tx},
-             endAt: ($end.time // null), retriedAt: ($end.retriedAt // null),
+             endAt: ($end.time // null), retriedAt: ($end.retriedAt // null), retriedWhy: ($end.retriedWhy // null),
              # When a card whose issue was closed while it was blocked, or that the owner shut (shut()), was blocked,
              # else null: from then to its end it waited on the owner, and none of that time is a landing's.
              blockedAt: (if $end.step == "closed" and ($end.reason | IN($shut, $ownshut)) then $s.lb else null end), followups: ($end.followups // []), rollout: ($end.rollout // []), branch: ($f.branch // null),

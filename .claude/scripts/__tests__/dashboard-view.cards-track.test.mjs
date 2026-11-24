@@ -594,6 +594,27 @@ test('an earlier attempt blocked by a long finding says how it ended in short te
   assert.equal(noted.querySelector('summary').textContent, 'Earlier attempt: 11:00 AM to 11:20 AM, 44 min, blocked: the fix did not hold after 1 round');
   assert.equal(noted.querySelector(':scope > .why-block .finding-claim').textContent, claim);
   assert.match(noted.querySelector(':scope > .why-block').textContent, /GitHub said no\]$/);
+  // Bug (review of #1540): the note of a card the loop retried itself was part of the reason, so the last review's
+  // finding was no longer 300 characters, its cut word stayed ("If St; retried once ..."), and a "the fix for" block
+  // lost its short line. The snapshot gives the note apart (retried): the finding ends at a whole word, the note under it.
+  // As the engine writes it (card.sh, the P1 form after the fix round), cut in plain words, outside any code span.
+  const prose = `${filler(294)} If St`;
+  assert.equal([...prose].length, 300, 'the engine cut the finding at 300 characters, inside the word "Stays"');
+  const lastCut = `review 2 is the last review and still holds a P1 finding after its one fix round, so it files no follow-up: ${prose}`;
+  Object.assign(prior, { reason: lastCut, retried: 'retried once with its kept work' });
+  next(w, data);
+  const retried = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.tl-earlier');
+  assert.equal(retried.querySelector('summary').textContent, 'Earlier attempt: 11:00 AM to 11:20 AM, 44 min, blocked: the last review still holds a P1 finding after its one fix round', lastCut);
+  const proof = retried.querySelector(':scope > .why-block .finding-proof-text').textContent;
+  assert.ok(proof.endsWith('x x If…'),`the cut word is gone (${proof.slice(-20)}): ${lastCut}`);
+  assert.doesNotMatch(proof, /St\b|retried/, `no half word, no retry note in the proof: ${lastCut}`);
+  assert.match(retried.querySelector(':scope > .why-block').textContent, /…retried once with its kept work$/, lastCut);
+  Object.assign(prior, { reason, retried: 'retried once with its kept work' });
+  next(w, data);
+  const retriedFix = panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.tl-earlier');
+  assert.equal(retriedFix.querySelector('summary').textContent, 'Earlier attempt: 11:00 AM to 11:20 AM, 44 min, blocked: the fix did not hold after 1 round', reason);
+  assert.match(retriedFix.querySelector(':scope > .why-block').textContent, /more…retried once with its kept work$/, reason);
+  delete prior.retried;
   // A reason with no review finding in it, too long for one line, is cut at a sentence; the whole reason is under it.
   Object.assign(prior, { reason: `tests failed in the second run. ${'x '.repeat(100)}end` });
   next(w, data);

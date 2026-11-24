@@ -96,6 +96,11 @@ t_track() {
   card 60 picked worktree deps brief b - - "blocked:blocked:{\"reason\":\"$blk [the review's findings not posted on the issue: $words]\"}"
   card 61 picked 'worktree:ok:{"reason":"resumed from the kept patch of card c60: one session, then review"}' deps brief b build r "review:GO:$Z" t test:pass l 'landed:ok:{"sha":"abg","product":false}'
   card 62 picked worktree deps brief b build r
+  # Bug (review of #1540): the row adds "; <retriedWhy>" to the reason of a card the loop retried itself, and the
+  # earlier attempt took it as the end of the block's finding, so the Board drew "If St; retried ..." in its proof.
+  # Card 64's block finding is cut at 300 characters; the earlier attempt keeps the reason without the note, the note apart.
+  card 64 picked worktree deps brief b - - "blocked:blocked:{\"reason\":\"$blk\",\"retriedWhy\":\"retried once with its kept work\"}"
+  card 65 picked 'worktree:ok:{"reason":"resumed from the kept patch of card c64: one session, then review"}' deps brief b build r
   # #1079: a push that went on over a pre-push hook that failed naming a test file that passed alone.
   card 63 $pre "review:GO:$Z" t test:pass l 'landed:ok:{"sha":"abh","product":false}' 'pushed:ok:{"flaky":{"files":["lib/a.test.sh"],"issues":[5]}}' issue
   # One snapshot of the cards above, and one jq a card: one after each group and one a line took the case 6 s more.
@@ -234,6 +239,8 @@ EOF
     && rs=$(jq -r '.landed[] | select(.card == "c61") | .earlier[0].reason' <<<"$out") && [[ $rs == "$blk ["* && $rs == *" … word"* && $rs == *" word99 ]" && ${#rs} -le 805 ]] \
     && [ "$(jq -c '.belt[] | select(.card == "c62") | [.start, .pickedAt, .priorSec, .totalSec, .earlier] | [.[0] == .[1], .[2], .[3], .[4]]' <<<"$out")" = '[true,0,null,[]]' ] \
     || fail "start and overall time: $(jq -c '[.landed[], .belt[]] | map(select(.card == "c61" or .card == "c62") | {card, start, pickedAt, priorSec, totalSec, earlier})' <<<"$out")"
+  [ "$(jq -c --arg b "$blk" '.belt[] | select(.card == "c65") | .earlier | map([.card, .reason == $b, .retried])' <<<"$out")" = '[["c64",true,"retried once with its kept work"]]' ] \
+    || fail "an earlier attempt the loop retried kept its retry note in the reason: $(jq -c '.belt[] | select(.card == "c65") | .earlier | map({card, reason, retried})' <<<"$out")"
   # Bug (#874): a card started from a kept patch did not say so on the Board or in /units: its start line's reason is
   # the track's kept and the why of its "worktree ready" step; a card that started on main alone has neither.
   [ "$(jq -c '[.landed[], .belt[]] | map(select(.card == "c61" or .card == "c62") | [.card, .track.kept, (.track.records[] | select(.name == "worktree ready") | .why)])' <<<"$out")" \

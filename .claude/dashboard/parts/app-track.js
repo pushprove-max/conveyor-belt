@@ -374,25 +374,40 @@
       if (prior) d.open = false;
       d.classList.add('tl-earlier');
       d.hidden = false;
-      const full = typeof e.reason === 'string' ? e.reason.trim() : '';
-      // A review block, "the fix for [P1] ... did not hold after 1 round", may carry a note after it in brackets (the
-      // finding's comment on the issue was refused): the note is not part of the finding. The other review block, "review
-      // 2 is the last review and still holds a P0 finding, so it files no follow-up: [P0] ...", is the finding after the colon.
-      const block = /^(the fix for \[P[0-3]\][\s\S]*?\s+did not hold after (\d+) (rounds?))(\s+\[[\s\S]*)?$/.exec(full);
-      const last = block ? null : /^review \d+ is the last review and (still holds [^:]*?), so it files no follow-up: (\[P[0-3]\][\s\S]*)$/.exec(full);
+      const r = earlierReason(e);
+      const { block, last, full } = r;
       const end = block ? `blocked: the fix did not hold after ${block[2]} ${block[3]}` : last ? `blocked: the last review ${last[1]}` : `ended: ${full ? first(full) : 'no reason recorded'}`;
       d.firstChild.textContent = `Earlier attempt: ${when(e.start)} to ${when(e.end)}, ${num(e.sec) ? took(e.sec) : 'time not read'}, ${end}`;
-      // What the short line leaves out opens above the steps: a review block's finding, as the Declined panel draws it
-      // (level, linked place, claim, proof) and its note, or any other reason in full.
-      const known = new Set(pathsIn(full));
-      const body = block ? reviewWhy(block[1], repoUrl, known, false, true) : last ? findingRows(last[2], '', repoUrl, known, false, true) : full && first(full) !== full ? clipped(full, repoUrl, known) : null;
-      if (body) {
-        const why = whyBlock(block || last ? 'Why it blocked' : 'Why it ended', body);
-        if (block && block[4]) why.append(fill(h('div', 'why-text why-full'), block[4].trim(), repoUrl, known, 'why'));
-        d.firstChild.after(why);
-      }
+      const why = earlierWhy(r, repoUrl);
+      if (why) d.firstChild.after(why);
       return d;
     });
+  }
+  // An earlier attempt's reason (earlierLines), read as one of the two review blocks or as any other reason. retried:
+  // why the loop retried the card itself (snapshot.sh earlier), kept out of the reason: inside a review block it would
+  // be read as the end of the finding. Any other reason shows it after a "; ", as its row does.
+  function earlierReason(e) {
+    const bare = typeof e.reason === 'string' ? e.reason.trim() : '';
+    const retried = typeof e.retried === 'string' ? e.retried.trim() : '';
+    // A review block, "the fix for [P1] ... did not hold after 1 round", may carry a note after it in brackets (the
+    // finding's comment on the issue was refused): the note is not part of the finding. The other review block, "review
+    // 2 is the last review and still holds a P0 finding, so it files no follow-up: [P0] ...", is the finding after the colon.
+    const block = /^(the fix for \[P[0-3]\][\s\S]*?\s+did not hold after (\d+) (rounds?))(\s+\[[\s\S]*)?$/.exec(bare);
+    const last = block ? null : /^review \d+ is the last review and (still holds [^:]*?), so it files no follow-up: (\[P[0-3]\][\s\S]*)$/.exec(bare);
+    const full = block || last || !retried ? bare : bare ? `${bare}; ${retried}` : retried;
+    return { block, last, retried, full };
+  }
+  // What an earlier attempt's short line leaves out (earlierReason's r), to open above its steps, else null: a review
+  // block's finding, as the Declined panel draws it (level, linked place, claim, proof), its note and the retry note,
+  // or any other reason in full.
+  function earlierWhy({ block, last, retried, full }, repoUrl) {
+    const known = new Set(pathsIn(full));
+    const body = block ? reviewWhy(block[1], repoUrl, known, false, true) : last ? findingRows(last[2], '', repoUrl, known, false, true) : full && first(full) !== full ? clipped(full, repoUrl, known) : null;
+    if (!body) return null;
+    const why = whyBlock(block || last ? 'Why it blocked' : 'Why it ended', body);
+    if (block && block[4]) why.append(fill(h('div', 'why-text why-full'), block[4].trim(), repoUrl, known, 'why'));
+    if ((block || last) && retried) why.append(fill(h('div', 'why-text why-full'), retried, repoUrl, known, 'why'));
+    return why;
   }
   // The follow-ups filed for the findings the judge found outside a card's change (a filed line's outside) in the
   // tracks given, the first first: a Map from the finding to its issue number or follow-up card id, the last filing's.
