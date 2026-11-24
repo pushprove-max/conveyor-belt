@@ -895,11 +895,12 @@ const verdicts = (rs: Review[]): Seg[][] => rs.map(r => {
 // `fu #1590`, `red 19e3b6e`), not by the card id the engine's live text holds: at its land step (landwait(),
 // lib/claim.sh) or queued for the next batch at its claim. Only when that card id is the snapshot's waitsOn: the live
 // text streams in between snapshots, so waitsOn can still name the card that had the turn before. "" for any other
-// live text.
+// live text. The ID comes first: WORKER ACTIVITY cuts the text before the clock on the right, and at 40 columns a row
+// of a part (`#1593 of #1600`) leaves about 11 columns of it.
 const turnWait = (b: Belt): string => {
   const m = /^(?:waiting for card (\S+) to land first\b|queued for the next batch: card (\S+) has the landing turn\b)/.exec(b.live?.action ?? '')
   if (!m || !b.waitsOn || (m[1] ?? m[2]) !== b.waitsOn.card) return ''
-  return m[1] ? `waiting for ${idOf(b.waitsOn)} to land (landing turn)` : `queued for the next batch: ${idOf(b.waitsOn)} has the landing turn`
+  return m[1] ? `${idOf(b.waitsOn)} lands first (landing turn)` : `${idOf(b.waitsOn)} has the landing turn (next batch)`
 }
 // The running step's live fields: `    now Bash: npm test · 3 turns · last output 4s ago`. None when it streams nothing.
 // The Test step runs no model, so in place of its turns it shows how far the tests are: the file that runs now and its
@@ -1299,19 +1300,25 @@ export const shortCommand = (cmd: string, card: string): string => {
   return inTree.replace(new RegExp(`(^|[\\s'"=(])(~?/${PATH_END}+)`, 'g'), (_, pre: string, p: string) => `${pre}${p.replace(/\/+$/, '').split('/').pop() || p}`)
 }
 // WORKER ACTIVITY: a line a card, its mark (it turns with `motion`), its ID and its live command made short; on the
-// right the tool and when the step started. A card that streams no command shows its step. A card in its Test step
+// right the tool and when the step started. A card that streams no command shows its step. A card that waits for the
+// landing turn shows the ID of the card that has it (turnWait). A card in its Test step
 // whose track gives test counts shows, in place of the command, a bar of its tests done of all: `▰▰▰▰▰▰▰▰▱▱ 72/89 · 3 failed`.
 export const activityModel = (s: State, snap: Snap, w: number, frame: number): Line[] => [
   section('WORKER ACTIVITY', '', w),
   ...(snap.belt.length ? [] : [empty('nothing on the belt')]),
   ...snap.belt.map((b): Line => {
     const m = /^([A-Za-z][\w.-]*): ([\s\S]*)$/.exec(b.live?.action ?? '')
-    const what = turnWait(b) || (m ? shortCommand(m[2], b.card) : b.live?.action ? shortCommand(b.live.action, b.card) : stepOf(b))
+    const wait = turnWait(b)
+    const what = wait || (m ? shortCommand(m[2], b.card) : b.live?.action ? shortCommand(b.live.action, b.card) : stepOf(b))
     const tests = b.track?.at === 3 ? b.track.tests : null
     const shown: Line = tests ? [...gauge(tests.of ? (100 * tests.done) / tests.of : 0), { t: ` ${tests.done}/${tests.of}${tests.failed ? ` · ${tests.failed} failed` : ''}` }] : [{ t: what }]
     const at = b.track?.since ?? b.stepAt
-    const right = [m?.[1] ?? '', at === null ? '' : clockOf(at)].filter(Boolean).join(' · ')
-    return spread([{ t: `${workMark(frame)} `, c: C.work }, { t: `${beltId(b)}  `, c: C.name, b: true }, ...shown], right ? { t: right, d: true } : null, w)
+    let right = [m?.[1] ?? '', at === null ? '' : clockOf(at)].filter(Boolean).join(' · ')
+    const left: Line = [{ t: `${workMark(frame)} `, c: C.work }, { t: `${beltId(b)}  `, c: C.name, b: true }, ...shown]
+    // A card that waits for the landing turn drops the clock when the clock would cut the ID of the card that has the
+    // turn: spread() gives the text w - clock - 2 columns, and the cut text ends in `…`.
+    if (wait && b.waitsOn && cols(`${workMark(frame)} ${beltId(b)}  ${idOf(b.waitsOn)}`) + 1 > w - cols(right) - 2) right = ''
+    return spread(left, right ? { t: right, d: true } : null, w)
   }),
 ]
 

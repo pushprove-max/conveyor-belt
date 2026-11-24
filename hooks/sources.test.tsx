@@ -1352,17 +1352,32 @@ test('WORKER ACTIVITY and the belt name the card that has the landing turn by it
     { ...BELT[1], card: 'c13-1593', issue: 1593, step: 'build', live: { action: `queued for the next batch: card c10-1533 has the landing turn`, turns: 0, lastOutputAt: ago(0) }, waitsOn: { card: 'c10-1533', issue: 1533, state: 'tests' } },
     // The turn passed from c10-1533 to c14-1594 after the snapshot: waitsOn still names c10-1533.
     { ...BELT[1], card: 'c15-1595', issue: 1595, step: 'land', live: wait('c14-1594'), waitsOn: { card: 'c10-1533', issue: 1533, state: 'tests' } },
+    // A part of a parent issue: its own ID, `#1596 of #1600`, leaves the wait text the fewest columns.
+    { ...BELT[1], card: 'c16-1596', issue: 1596, umbrella: 1600, step: 'build', live: { action: `queued for the next batch: card c10-1533 has the landing turn`, turns: 0, lastOutputAt: ago(0) }, waitsOn: { card: 'c10-1533', issue: 1533, state: 'tests' } },
   ] })
   const rows = activityModel(s, s.snap!, 80, 0).map(plain)
-  expect(rows[1]).toMatch(/^◐ #1531  waiting for fu #1590 to land \(landing turn\)/)
-  expect(rows[2]).toMatch(/^◐ #1585  waiting for #1533 to land \(landing turn\)/)
-  expect(rows[3]).toMatch(/^◐ #1589  waiting for red 19e3b6e to land \(landing turn\)/)
+  expect(rows[1]).toMatch(/^◐ #1531  fu #1590 lands first \(landing turn\)/)
+  expect(rows[2]).toMatch(/^◐ #1585  #1533 lands first \(landing turn\)/)
+  expect(rows[3]).toMatch(/^◐ #1589  red 19e3b6e lands first \(landing turn\)/)
   expect(rows[4], 'no waitsOn: the engine text').toMatch(/^◐ #1592  waiting for card c20261124T015216/)
-  expect(rows[5], 'queued for the next batch').toMatch(/^◐ #1593  queued for the next batch: #1533 has the landing turn/)
+  expect(rows[5], 'queued for the next batch').toMatch(/^◐ #1593  #1533 has the landing turn \(next batch\)/)
   expect(rows[6], 'stale waitsOn: not the card that had the turn before').toMatch(/^◐ #1595  waiting for card c14-1594 to land first/)
-  for (const r of [...rows.slice(1, 4), rows[5]]) expect(r, 'no card id').not.toMatch(/c20261124T|c10-1533/)
+  for (const r of [...rows.slice(1, 4), rows[5], rows[7]]) expect(r, 'no card id').not.toMatch(/c20261124T|c10-1533/)
+  // Follow-ups of that issue. Bug they catch: the wait text put the holder's ID after a lead-in (`queued for the next
+  // batch: `, then `queued: `), and spread() cut the text before the clock on the right, so a narrow pane showed
+  // `queued: #15…` at 40 columns for `#1596 of #1600`, and `queu…` at 24 columns for `#1593`. At 40 columns the ID
+  // and the clock both fit; at 24 the clock gives way to the ID.
+  const waits = [[1, 'fu #1590'], [2, '#1533'], [3, 'red 19e3b6e'], [5, '#1533'], [7, '#1533']] as const
+  for (const [w, clock] of [[40, ' \\d+:\\d\\d [AP]M$'], [24, '']] as const) {
+    const narrow = activityModel(s, s.snap!, w, 0).map(plain)
+    for (const [i, id] of waits) {
+      const r = narrow[i] ?? ''
+      expect(r, `row ${i} at ${w} columns: ${r}`).toMatch(new RegExp(`^◐ #15\\d\\d( of #1600)?  ${id}( |…|$).*${clock}`))
+      expect(cols(r), `row ${i} at ${w} columns: ${r}`).toBeLessThanOrEqual(w)
+    }
+  }
   const belt = tableText(s, 100)
-  expect(belt, 'the belt\'s live line too').toMatch(/now waiting for fu #1590 to land \(landing turn\)/)
+  expect(belt, 'the belt\'s live line too').toMatch(/now fu #1590 lands first \(landing turn\)/)
 })
 
 // Issue 1272. Bug it catches: the pane's PICK ORDER named no ready issue, only a count, so with every slot full the
