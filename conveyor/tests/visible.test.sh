@@ -146,6 +146,53 @@ t_visibleapproved() {
     || fail "the approved #8 did not land from its kept patch with no second review: $(steps 8)"
   [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue)')" = '[]' ] || fail "Needs you still lists the approved #8: $(loop snapshot --fresh | jq -c .needsYou)"
 }
+# Bug (R92): a card an engine before #349 stopped for the yes to a budget of its own for its test file (the yes form,
+# then "a budget of its own for the test file ", #7, its patch kept as its build changed the file), blocked for it
+# ("the build changed nothing and proposes a budget of its own for the test file ", #9, no patch) or blocked as the
+# owner's yes to it gave a condition (#10) waited for a yes to a stop that no longer exists, under Needs you. The turn's
+# approved() gives each back with no approval line, though #7 and #10 were blocked after #349 landed: a project runs an
+# older release until it upgrades. #8, a visible change whose words start as the old stop's did, its patch lost (a full
+# disk at block()), was given back so once already (its retried line has the mark approved() writes, retriedWhy): it
+# now waits for the yes, its body unchanged, and is not built again at each turn. #11, as #8 but with the owner's
+# approval line added since its stop, is given back for that yes (bug: the mark made approved() skip it before it
+# compared the bodies, so it stayed blocked after the yes). #10's first stop, the old yes form
+# that an older engine's retry moved to the retried file before the conditional block, has no such mark: it does not
+# stop #10 from being given back. approved() is called with the open list as a turn calls it, and the real retry.
+t_visibleoldownbudget() {
+  local o open why="retried: a budget of its own for a test file no longer needs the owner's yes"
+  open=$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-01-01) <(issue 9 2026-01-01) <(issue 10 2026-01-01) \
+    <(issue 11 2026-01-01 | jq -c '.body += "\n\nVisible change approved: Dana 2026-01-02 (yes)\n"'))
+  setup "$open"; mkdir -p "$ST/kept/c0-7" "$ST/kept/c0-8" "$ST/kept/c0-11" && issue 11 2026-01-01 > "$ST/kept/c0-11/c0-11.body" \
+    && issue 7 2026-01-01 > "$ST/kept/c0-7/c0-7.body" && echo 'diff --git a/f.test.sh b/f.test.sh' > "$ST/kept/c0-7/c0-7.patch" \
+    && issue 8 2026-01-01 > "$ST/kept/c0-8/c0-8.body" || fail "the kept bodies and patch"
+  o=$(jq -r .owner.name "$R/.conveyor/project.json")
+  landed 8 | jq -c --arg o "$o" '(.step = "picked" | .card = "c1-8"), (.step = "blocked" | .card = "c1-8" | .result = "blocked"
+    | .reason = "visible to customers or staff: needs \($o)'\''s yes: a budget of its own for the test file f.test.sh: 9 CPU s: appears on the Tests page" | .retriedWhy = $why)' --arg why "$why" >> "$ST/retried.jsonl"
+  landed 11 | jq -c --arg o "$o" '(.step = "picked" | .card = "c1-11"), (.step = "blocked" | .card = "c1-11" | .result = "blocked"
+    | .reason = "visible to customers or staff: needs \($o)'\''s yes: a budget of its own for the test file f.test.sh: 9 CPU s: appears on the Tests page" | .retriedWhy = $why)' --arg why "$why" >> "$ST/retried.jsonl"
+  landed 10 | jq -c --arg o "$o" '(.step = "picked" | .card = "c1-10"), (.step = "blocked" | .card = "c1-10" | .result = "blocked" | .kept = "kept/c1-10" | .retriedAt = "2026-11-20T00:00:00Z"
+    | .reason = "visible to customers or staff: needs \($o)'\''s yes: a budget of its own for the test file f.test.sh: 9 CPU s: each case starts a whole loop")' >> "$ST/retried.jsonl"
+  { landed 7 | jq -c --arg o "$o" '(.step = "picked" | .time = "2026-11-20T00:00:00Z"), (.step = "blocked" | .result = "blocked" | .kept = "kept/c0-7" | .time = "2026-11-20T00:01:00Z"
+      | .reason = "visible to customers or staff: needs \($o)'\''s yes: a budget of its own for the test file f.test.sh: 9 CPU s: each case starts a whole loop")'
+    landed 8 | jq -c --arg o "$o" '(.step = "picked" | .time = "2026-11-20T00:00:00Z"), (.step = "blocked" | .result = "blocked" | .kept = "kept/c0-8" | .time = "2026-11-20T00:01:00Z"
+      | .reason = "visible to customers or staff: needs \($o)'\''s yes: a budget of its own for the test file f.test.sh: 9 CPU s: appears on the Tests page")'
+    landed 11 | jq -c --arg o "$o" '(.step = "picked" | .time = "2026-11-20T00:00:00Z"), (.step = "blocked" | .result = "blocked" | .kept = "kept/c0-11" | .time = "2026-11-20T00:01:00Z"
+      | .reason = "visible to customers or staff: needs \($o)'\''s yes: a budget of its own for the test file f.test.sh: 9 CPU s: appears on the Tests page")'
+    landed 9 | jq -c '(.step = "picked"), (.step = "blocked" | .result = "blocked"
+      | .reason = "the build changed nothing and proposes a budget of its own for the test file f.test.sh: 9 CPU s: each case starts a whole loop To accept it, set that budget on the Board'\''s Tests page (conveyor.sh test-settings file-budget f.test.sh 9) and shut the issue")'
+    landed 10 | jq -c --arg o "$o" '(.step = "picked" | .time = "2026-11-20T00:00:00Z"), (.step = "blocked" | .result = "blocked" | .time = "2026-11-20T00:01:00Z"
+      | .reason = "\($o)'\''s yes to a budget of its own for f.test.sh, 9 CPU s, gives a condition, and a build that changed nothing has nothing to hold to it, so no budget was set")'; } >> "$ST/cards.jsonl"
+  printf '%s' "$open" > "$T/$CASE/open.json"
+  fx_in 'approved "$(cat "$T/$CASE/open.json")"'
+  [ "$(jq -r .card "$ST/retried.jsonl" 2>/dev/null | sort -u | tr '\n' ' ')" = 'c0-10 c0-11 c0-7 c0-9 c1-10 c1-11 c1-8 ' ] && ! grep -qE '"card":"c0-(7|9|10|11)"' "$ST/cards.jsonl" \
+    || fail "approved() on open #7, #9, #10 and #11 (#11: #8's case with an approval line added since its kept body; the old own-budget stops, #7 and #10 blocked after #349, #7's patch kept, #10's first old stop in its retried lines with no mark) and #8 (a visible change worded as one, given back so once already, its patch lost), with no approval line: #7, #9 or #10 was not given back, or #8 was again, or #11 was not given back for its approval line (exit $RC): $(cat "$ST/retried.jsonl" 2>&1) $(cat "$T/$CASE/run.out")"
+  # The mark is what makes the next turn leave them: without it each would be built again at every turn.
+  [ "$(jq -r --arg why "$why" 'select(.step == "blocked" and .retriedWhy == $why and (.card | IN("c0-7", "c0-9", "c0-10"))) | .card' "$ST/retried.jsonl" | sort | tr '\n' ' ')" = 'c0-10 c0-7 c0-9 ' ] \
+    || fail "approved() on open #7, #9 and #10: their moved blocked lines do not carry retriedWhy \"$why\": $(cat "$ST/retried.jsonl")"
+  # #11 went back for the owner's yes, not for the old stop: a mark on it would say it never needed the yes.
+  [ "$(jq -r 'select(.step == "blocked" and .card == "c0-11") | .retriedWhy // "none"' "$ST/retried.jsonl")" = none ] \
+    || fail "approved() on open #11 (approval line added since its kept body): its moved blocked line carries the old own-budget mark: $(cat "$ST/retried.jsonl")"
+}
 # Bug: with the rule "visible changes need the owner's yes" turned off after a card stopped for the yes, retry says
 # the next card stops again for the yes, though it lands from the kept patch with no build and no review.
 t_retryoff() {

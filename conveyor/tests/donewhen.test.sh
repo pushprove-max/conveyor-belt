@@ -192,12 +192,17 @@ t_asksreply() {
   local w=$T/$CASE/w q
   git -C "$R" worktree add -q --detach "$w" && echo earlier >> "$w/a.txt" && git -C "$w" add -A || fail "the worktree could not be made"
   # shellcheck disable=SC2034 # STATE is read by the sourced lib/testrun.sh (SUITERUNS=${STATE%/*}/...)
-  q=$( ( STATE=$ST/cards.jsonl; . "$SRC/lib/testrun.sh"
+  # asks() reads the reply with lastreply() (lib/followups.sh), which the engine sources beside lib/testrun.sh.
+  # shellcheck source=/dev/null
+  q=$( ( STATE=$ST/cards.jsonl; . "$SRC/lib/testrun.sh"; . <(sed -n '/^lastreply() {/,/^}/p' "$SRC/lib/followups.sh")
     treeof "$w" > "$w.before" || exit 1 # session() keeps this before each session: here, with the earlier change staged
     jq -cn '{type: "item.completed", item: {type: "agent_message", text: "I changed nothing.\n\nWhich file should I edit?"}}' > "$w.out"; asks "$w" || echo 'codex: none'
     jq -cn '{type: "step_start"}, {type: "text", part: {text: "I changed nothing.\n\nWhich file, a.txt or b.txt?"}}, {type: "step_finish"}' > "$w.out"; asks "$w" || echo 'opencode: none'
+    # R19: one step whose reply is in two text parts: the question is both parts, not the last part alone.
+    jq -cn '{type: "step_start"}, {type: "text", part: {text: "Should I edit a.txt"}}, {type: "text", part: {text: "or b.txt?"}}, {type: "step_finish"}' > "$w.out"; asks "$w" || echo 'opencode parts: none'
     echo more >> "$w/a.txt"; ! asks "$w" || echo 'asked after a change' ) ) || fail "asks() could not be run"
-  [ "$q" = $'Which file should I edit?\nWhich file, a.txt or b.txt?' ] || fail "asks() did not read a Codex and an OpenCode question past an earlier change, or read one after a change: $q"
+  [ "$q" = $'Which file should I edit?\nWhich file, a.txt or b.txt?\nShould I edit a.txt or b.txt?' ] \
+    || fail "asks() did not read a Codex and an OpenCode question past an earlier change, read an OpenCode step's last text part alone, or read one after a change: $q"
 }
 
 # Bug: a rebuild after a landing conflict goes to review unchecked, with the build's D<n> lines.

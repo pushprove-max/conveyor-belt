@@ -142,14 +142,21 @@ nostartsaid() { # <reviewkeep()'s note> <worktree>
       "${w//its words below/its words}" "${2##*/}" "${k:+$k in }"
   else printf '%s' "$w"; fi
 }
+# A worktree put back after a Codex review or judge run with no Codex sandbox (codexsb()): its index read back from
+# <tree>, the one it was given (everything is staged before a review), so a file the run staged is unstaged too; then
+# its files made to match that index, and each file it added removed. git restore and clean alone kept a staged file.
+cxputback() { # <worktree> <tree>
+  [ -n "$2" ] && git -C "$1" read-tree --reset "$2" && git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq
+}
 codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex review, ending as review() says
-  local model=$4 effort=$5 rc roll s sec f run='' no='' kn=''
+  local model=$4 effort=$5 rc roll s sec f run='' no='' kn='' t=''
   rm -f "$1.review.new"; sec=$SECONDS; codexsb read-only
+  [ "${CODEX_SB[0]}" = -s ] || t=$(git -C "$1" write-tree) || { echo "the staged change could not be read before the review"; return 1; }
   (cd "$1" && codexargs && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json "${CODEX_SB[@]}" "${CODEX_PX[@]}" -m "$model" \
     -c "model_reasoning_effort=\"$effort\"" -o "$1.review.new" - <<<"$3"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
   watch $! "$1.events" "$1.live" review "$model" "" "$effort"; rc=$?; sec=$((SECONDS - sec))
   # With no Codex sandbox (codexsb()), a write the review made is undone: the worktree is put back to the change it was given.
-  [ "${CODEX_SB[0]}" = -s ] || { git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq; } || { echo "the worktree could not be put back after the review"; return 1; }
+  [ "${CODEX_SB[0]}" = -s ] || cxputback "$1" "$t" || { echo "the worktree could not be put back after the review"; return 1; }
   # The running total its session file holds: the tokens of a review that ended before its turn did. With none there,
   # the last total its live record was given from that file while it ran (WATCHED, liveusage()), as stopped() reads it.
   roll=$(rollout "$1.events"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); }
@@ -516,7 +523,7 @@ excerpts() { # <worktree> [<the tree before the fix round the review follows> [<
 # seat() prints it, with CALLSTEP and CALLACT the step and action its live record shows.
 judgecall() { # <worktree> <instructions> <the brief and the findings>
   # shellcheck disable=SC2034 # PROXY_ROLE is read by proxyroute() in lib/control.sh
-  local s=${CALLSEAT:-} model effort agent d p rc sec f='' roll run='' PROXY_ROLE=reviewer # the review's route (proxyroute())
+  local s=${CALLSEAT:-} model effort agent d p rc sec f='' roll run='' t='' PROXY_ROLE=reviewer # the review's route (proxyroute())
   [ -n "$s" ] || s=$(judgeseat) || { jq -cn '{failed: "the control record names no judge, and the pack allows the review no model of another family than the reviewer runs on"}'; return 1; }
   jqget "$s" model model effort effort agent agent || model='' effort='' agent=''
   d=$(seatwait judge "$s" "$1" "${CALLSTEP:-review}") || { jq -cn --arg m "$model" --arg r "$d" '{model: $m, failed: $r}'; return 1; } # the CLI the seat names, never another; one gone for a moment is waited for
@@ -549,10 +556,11 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
   else
     model=$(codexmodel "$model") || { jq -cn --arg r "$model" '{failed: $r}'; return 1; }
     codexsb read-only
+    [ "${CODEX_SB[0]}" = -s ] || t=$(git -C "$1" write-tree) || { jq -cn '{failed: "the staged change could not be read before the judge"}'; return 1; }
     (cd "$1" && codexargs && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json "${CODEX_SB[@]}" "${CODEX_PX[@]}" -m "$model" \
       -c "model_reasoning_effort=\"$effort\"" -o "$1.judge" - <<<"$2"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec))
     # With no Codex sandbox (codexsb()), the worktree is put back after the judge, as after an OpenCode one.
-    [ "${CODEX_SB[0]}" = -s ] || { git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq; } || rc=1
+    [ "${CODEX_SB[0]}" = -s ] || cxputback "$1" "$t" || rc=1
     roll=$(rollout "$1.judge.events"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }
     f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" --argjson run "${run:-null}" "$REVIEWREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c --arg m "$model" '{model, effort, sec, tokens, usage, stats} | if .stats then .stats.models = [$m] else . end' 2>/dev/null)
   fi

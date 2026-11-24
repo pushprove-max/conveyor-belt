@@ -82,17 +82,25 @@ t_contractusagecodexreview() {
     || fail "the review's usage is not the codex stub's: $(cat "$T/$CASE/out")"
 }
 # A Codex review run alone, as t_contractusagecodexreview runs one, with the stub's arguments kept in $STUB/codex-args.
+# The worktree holds the build's change, built.txt, staged as a review is given it; the stub's review writes wrote.txt
+# and stages new.txt; the worktree's files and its staged files are printed after.
 cxreview() { # [NAME=value: the review's environment]
-  cread 'sed -i "2a printf \"%s\\\\n\" \"\$*\" >> \"\$STUB/codex-args\"" "$STUB/codex" && echo GO > "$STUB/review.1" && echo "echo x > wrote.txt" > "$STUB/review-cmd" && w=$CONVEYOR_CARDS/c7 && git -C "$R" worktree add -q --detach "$w" \
-    && '"$*"' REVIEW_TIMEOUT=60 codexreview "$w" brief instructions cx-1 low > /dev/null && cat "$STUB/codex-args" && ls "$w"'
+  cread 'sed -i "2a printf \"%s\\\\n\" \"\$*\" >> \"\$STUB/codex-args\"" "$STUB/codex" && echo GO > "$STUB/review.1" && echo "echo x > wrote.txt; echo y > new.txt; git add new.txt" > "$STUB/review-cmd" && w=$CONVEYOR_CARDS/c7 && git -C "$R" worktree add -q --detach "$w" \
+    && echo built > "$w/built.txt" && git -C "$w" add built.txt && '"$*"' REVIEW_TIMEOUT=60 codexreview "$w" brief instructions cx-1 low > /dev/null && cat "$STUB/codex-args" && ls "$w" && git -C "$w" diff --cached --name-only | sed "s/^/staged: /"'
 }
 # Bug: in a benchmark's task container Codex's own sandbox cannot start a command, so a review run with -s read-only
 # there read nothing and blocked the card; one run with none must not leave a write of its own in the worktree.
+# Bug (R110): a new file the review staged was left in the index, as git restore and clean put back only the files,
+# so the card's change took in a file its build never made; the put back must keep the build's staged built.txt, not
+# go back to the last commit.
 t_cxreviewbox() {
   cxreview CONVEYOR_BENCH_BOX=1 || fail "the review failed: $(cat "$T/$CASE/out")"
   grep -q -- '^exec --json --dangerously-bypass-approvals-and-sandbox ' "$T/$CASE/out" && ! grep -q -- ' -s ' "$T/$CASE/out" \
     || fail "the review in a benchmark's container kept Codex's sandbox: $(cat "$T/$CASE/out")"
   ! grep -q '^wrote.txt$' "$T/$CASE/out" || fail "the unsandboxed review's write was left in the worktree: $(cat "$T/$CASE/out")"
+  ! grep -q 'new.txt$' "$T/$CASE/out" || fail "the file the unsandboxed review staged was left in the index or the worktree: $(cat "$T/$CASE/out")"
+  grep -qx 'built.txt' "$T/$CASE/out" && grep -qx 'staged: built.txt' "$T/$CASE/out" \
+    || fail "the build's staged built.txt was lost when the worktree was put back after the unsandboxed review: $(cat "$T/$CASE/out")"
 }
 # Bug: a Codex build in a benchmark's task container (the arm whose builder is Codex) ran in Codex's own sandbox
 # (-s workspace-write), which cannot start a command there, so it could change no file.
@@ -102,17 +110,22 @@ t_cxbuildbox() {
   grep -q -- '^exec --json --dangerously-bypass-approvals-and-sandbox -C ' "$STUB/codex-args" && ! grep -q -- ' -s ' "$STUB/codex-args" \
     || fail "the build in a benchmark's container kept Codex's sandbox: $(cat "$STUB/codex-args" 2>&1)"
 }
-# Bug: a Codex judge in a benchmark's task container kept Codex's own sandbox, or left a write of its own in the worktree.
+# Bug: a Codex judge in a benchmark's task container kept Codex's own sandbox, or left a write of its own in the worktree;
+# a new file it staged was left in the index (R110, as the review's in t_cxreviewbox), or the build's staged built.txt
+# was lost when it was put back.
 t_cxjudgebox() {
   cread 'sed -i "2a printf \"%s\\\\n\" \"\$*\" >> \"\$STUB/codex-args\"" "$STUB/codex" && echo "F1 DECLINE: no" > "$STUB/review.1" \
-    && echo "echo x > wrote.txt" > "$STUB/review-cmd" && w=$CONVEYOR_CARDS/c7 && git -C "$R" worktree add -q --detach "$w" \
-    && CALLSEAT="{\"agent\":\"codex\",\"model\":\"x\",\"effort\":\"low\"}" CONVEYOR_BENCH_BOX=1 REVIEW_TIMEOUT=60 judgecall "$w" instructions findings > /dev/null \
-    && cat "$STUB/codex-args" && ls "$w" && jq -c "{judgelive: {model, effort}}" "$w.live"' || fail "the judge failed: $(cat "$T/$CASE/out")"
+    && echo "echo x > wrote.txt; echo y > new.txt; git add new.txt" > "$STUB/review-cmd" && w=$CONVEYOR_CARDS/c7 && git -C "$R" worktree add -q --detach "$w" \
+    && echo built > "$w/built.txt" && git -C "$w" add built.txt && CALLSEAT="{\"agent\":\"codex\",\"model\":\"x\",\"effort\":\"low\"}" CONVEYOR_BENCH_BOX=1 REVIEW_TIMEOUT=60 judgecall "$w" instructions findings > /dev/null \
+    && cat "$STUB/codex-args" && ls "$w" && git -C "$w" diff --cached --name-only | sed "s/^/staged: /" && jq -c "{judgelive: {model, effort}}" "$w.live"' || fail "the judge failed: $(cat "$T/$CASE/out")"
   grep -q -- '^exec --json --dangerously-bypass-approvals-and-sandbox ' "$T/$CASE/out" && ! grep -q -- ' -s ' "$T/$CASE/out" \
     || fail "the judge in a benchmark's container kept Codex's sandbox: $(cat "$T/$CASE/out")"
   # Issue 1085: the judge's live record names the effort it runs at, which the Board shows beside its model.
   grep -qx '{"judgelive":{"model":"x","effort":"low"}}' "$T/$CASE/out" || fail "the judge's live record lost its effort: $(cat "$T/$CASE/out")"
   ! grep -q '^wrote.txt$' "$T/$CASE/out" || fail "the unsandboxed judge's write was left in the worktree: $(cat "$T/$CASE/out")"
+  ! grep -q 'new.txt$' "$T/$CASE/out" || fail "the file the unsandboxed judge staged was left in the index or the worktree: $(cat "$T/$CASE/out")"
+  grep -qx 'built.txt' "$T/$CASE/out" && grep -qx 'staged: built.txt' "$T/$CASE/out" \
+    || fail "the build's staged built.txt was lost when the worktree was put back after the unsandboxed judge: $(cat "$T/$CASE/out")"
 }
 # Bug: a review outside a benchmark's container ran without Codex's read-only sandbox.
 t_cxreviewsandbox() {

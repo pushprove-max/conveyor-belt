@@ -177,20 +177,20 @@ reopened() { # <open issues, a json list>
 }
 # At a turn of the loop, outside the lock: an issue of the open list given whose newest card stopped for the owner's
 # yes (to a visible change, YES, or to a lint policy change, LINTYES) is given back with `retry` (under the lock) once its body, as the list has it, holds more approval lines than
-# the body that card's review read (the .body file it kept: keptway()): a line added after the stop. The next card
-# then takes up the kept patch as `retry` would have it. A card that kept no body is left for `retry`.
+# the body that card's review read (the .body file it kept: keptway()): a line added after the stop. The next card then takes up the kept patch as `retry` would have it. A card that kept no body is left for `retry`. A card an engine before #349 stopped for a budget of its own for its test file (OLDOWN: that stop is gone) is given back with no approval line, its patch kept or not, whenever it was blocked: a project upgrades after #349 lands. Once only: an issue that approved() gave back so before (a retried blocked line with OLDOWNWHY as its retriedWhy) already waits for the yes, given back as above once its body holds a new approval line, as this engine writes no such stop and a visible change worded as one must not be built again at each turn. An old block that an older engine's retry moved to the retried file (the stop an approval with a condition followed) has no such mark and does not count. OLDOWN: a reason such an engine wrote: `<the yes form, or "the build changed nothing and proposes ">a budget of its own for the test file <file>: <CPU s> CPU s: `, `<owner>'s yes to a budget of its own for <file>, <CPU s> CPU s, gives a condition, ` or `the owner's yes to a budget of its own for <file> could not be saved in the pack: `.
+OLDOWN='def oldown($yes): . as $r | any(($yes, "the build changed nothing and proposes ") + "a budget of its own for the test file "; . as $p | $r | startswith($p) and (.[($p | length):] | test("^\\S+: [0-9.]+ CPU s: "))) or test("^.+'"'"'s yes to a budget of its own for \\S+, [0-9.]+ CPU s, gives a condition, ") or test("^the owner'"'"'s yes to a budget of its own for \\S+ could not be saved in the pack: "); '
+OLDOWNWHY='retried: a budget of its own for a test file no longer needs the owner'"'"'s yes'
 approved() { # <open issues, a json list>
-  local n c k
-  [ -n "${YES:-}" ] || return 0
-  while read -r n c k; do
-    jq -en --slurpfile open <(printf '%s' "$1") --argjson n "$n" --slurpfile was "$ST/$k/$c.body" "$SEE"'
-      ($open[0] | map(select(.number == $n)) | first) as $now | $now != null and ($was[0] | type) == "object"
-      and ($now | approvals) > ($was[0] | approvals)' >/dev/null 2>&1 || continue
-    { locked retry "$n"; stdbkeeps; } || true
-  done < <(jq -rs --arg yes "$YES" --arg lintyes "$LINTYES" --slurpfile open <(printf '%s' "$1") '$open[0] as $open | map(select(.step != "push")) | group_by(.issue)[]
+  local n c k o r w; [ -n "${YES:-}" ] || return 0
+  while read -r n c k o; do
+    w=''; if [ "$o" = old ]; then r=$(stdb ask issue retried "$n" 2>/dev/null) && ! jq -se --arg why "$OLDOWNWHY" 'any(.[]; .step == "blocked" and .retriedWhy == $why)' <<<"$r" >/dev/null 2>&1 && w=$OLDOWNWHY; fi
+    [ -n "$w" ] || { [ "$k" != - ] && jq -en --slurpfile open <(printf '%s' "$1") --argjson n "$n" --slurpfile was "$ST/$k/$c.body" "$SEE"' ($open[0] | map(select(.number == $n)) | first) as $now | $now != null and ($was[0] | type) == "object" and ($now | approvals) > ($was[0] | approvals)' >/dev/null 2>&1; } || continue
+    { RETRYWHY=$w locked retry "$n"; stdbkeeps; } || true
+  done < <(jq -rs --arg yes "$YES" --arg lintyes "$LINTYES" --slurpfile open <(printf '%s' "$1") "$OLDOWN"'$open[0] as $open | map(select(.step != "push")) | group_by(.issue)[]
     | select((.[0].issue | IN($open[].number)) and all(.step != "landed" and .step != "pushed" and .step != "closed"))
-    | group_by(.card) | max_by(.[0].time) | map(select(.step == "blocked")) | last | select(. != null)
-    | select((.reason | startswith($yes) or startswith($lintyes)) and (.kept // "") != "") | "\(.issue) \(.card) \(.kept)"' < <(turncards) 2>/dev/null)
+    | group_by(.card) | max_by(.[0].time) | map(select(.step == "blocked")) | last | select(. != null) | (.reason // "") as $r
+    | ($r | oldown($yes)) as $o | select($o or (($r | startswith($yes) or startswith($lintyes)) and (.kept // "") != ""))
+    | "\(.issue) \(.card) \(if (.kept // "") == "" then "-" else .kept end) \(if $o then "old" else "-" end)"' < <(turncards) 2>/dev/null)
 }
 # At a turn of the loop, outside the lock: an issue of the open list given whose newest card was blocked by a session
 # or review that never began its work (nostart(): its spent names the seat, CLI, model and account it ran on) is given

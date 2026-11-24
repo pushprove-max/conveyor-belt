@@ -274,15 +274,13 @@ treeof() { # <worktree>
 # kept before it (<worktree>.before), so a fix whose earlier change is still staged counts too. The question is the
 # reply's last paragraph, on one line, cut to 1000 characters, when it ends with a question mark (quote, bracket or
 # emphasis marks after it aside). The reply is the last text of the session's stream: a Claude result, a Codex
-# agent_message or an OpenCode text part. Fails when the session made a change, its tree before is not known, or the
-# reply does not end with a question.
+# agent_message or the text an OpenCode step wrote (its text parts, in order, one a line, as lastreply() reads it: a
+# step can write its reply in more than one part). Fails when the session made a change, its tree before is not known,
+# or the reply does not end with a question.
 asks() { # <worktree>
   local q b
   b=$(cat "$1.before" 2>/dev/null) && [ -n "$b" ] && [ "$(treeof "$1" 2>/dev/null)" = "$b" ] || return 1
-  q=$(jq -Rrjn '[inputs | fromjson? // empty | objects | if .type == "result" then .result
-      elif .type == "item.completed" and .item.type? == "agent_message" then .item.text elif .type == "text" then .part.text? else empty end
-      | strings | select(test("\\S"))] | last // ""' "$1.out" 2>/dev/null \
-    | awk 'NF == 0 { b = 1; next } { $1 = $1; p = (b || p == "") ? $0 : p " " $0; b = 0 } END { print p }')
+  q=$(lastreply "$1.out" whole | awk 'NF == 0 { b = 1; next } { $1 = $1; p = (b || p == "") ? $0 : p " " $0; b = 0 } END { print p }')
   [[ $q =~ \?[\"\'\)\*_\`]*$ ]] || return 1
   printf '%s\n' "${q:0:1000}"
 }
