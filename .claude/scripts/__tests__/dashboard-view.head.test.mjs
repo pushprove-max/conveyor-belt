@@ -168,7 +168,7 @@ test('the account page has the Board\'s head: the name, the tiles, the status ma
   Object.defineProperty(w.document, 'hidden', { get: () => false });  // jsdom's page is hidden: this one is in view
   w.eval(read('app.js')); w.eval(read('head.js')); bootFiles(w);
   assert.deepEqual(Array.from(w.document.querySelectorAll('#tabs a.tab'), (a) => [a.textContent, a.getAttribute('href')]),
-    [['Overview', 'index.html?tab=overview'], ['3D View', 'index.html?tab=belt3d'], ['Control', 'index.html?tab=control'], ['Rules', 'index.html?tab=rules'], ['Tests', 'index.html?tab=tests'], ['Benchmarks', 'index.html?tab=bench']]);
+    [['Overview', 'index.html?tab=overview'], ['3D View', 'index.html?tab=belt3d'], ['Control', 'index.html?tab=control'], ['Rules', 'index.html?tab=rules'], ['Tests', 'index.html?tab=tests'], ['Benchmarks', 'index.html?tab=bench'], ['Self-heals', 'index.html?tab=selfheals']]);
   assert.equal(w.document.querySelectorAll('#stats > .stat').length, 7, 'the seven tiles');
   assert.equal(w.document.querySelector('#stats .stat[data-stat="needs"]').getAttribute('href'), 'index.html?tab=overview#panel-needs', 'a tile opens its panel on the Board');
   assert.equal(w.document.getElementById('status').textContent, 'Loading', 'the status mark');

@@ -16,8 +16,11 @@
   const SEEN_KEY = 'conveyor-board-seen';     // the "Needs you" items already shown once
   const TIME_SENT_KEY = 'conveyor-board-time-sent';  // set once this browser has sent a Time to the server
   // Overview first, with 3D View, the one to look at rather than act on, beside it (#87); then Control and Rules; then
-  // Tests, the test files and the test limits (#520); then Benchmarks, the SWE-bench runs and their arms (#326).
-  const TABS = [['overview', 'Overview'], ['belt3d', '3D View'], ['control', 'Control'], ['rules', 'Rules'], ['tests', 'Tests'], ['bench', 'Benchmarks']];
+  // Tests, the test files and the test limits (#520); then Benchmarks, the SWE-bench runs and their arms (#326); then
+  // Self-heals, the self-heals list (#1562).
+  const TABS = [['overview', 'Overview'], ['belt3d', '3D View'], ['control', 'Control'], ['rules', 'Rules'], ['tests', 'Tests'], ['bench', 'Benchmarks'], ['selfheals', 'Self-heals']];
+  // A tab whose count is not of things that need the owner: what its count is of, for the tab's spoken name.
+  const COUNTED = { selfheals: (n) => `${n} ${n === 1 ? 'entry' : 'entries'} on the list` };
   const SIZES = ['small', 'wide', 'full'];
   const DENSITIES = ['comfortable', 'compact'];
   const THEMES = ['system', 'light', 'dark'];
@@ -322,7 +325,7 @@
       // Part of the tab's words, "Overview · 4", so the count is read on every tab.
       count.textContent = n ? `· ${n}` : '';
       count.hidden = !n;
-      b.setAttribute('aria-label', n ? `${name}: ${n} ${n === 1 ? 'thing needs' : 'things need'} attention` : name);
+      b.setAttribute('aria-label', !n ? name : COUNTED[t] ? `${name}: ${COUNTED[t](n)}` : `${name}: ${n} ${n === 1 ? 'thing needs' : 'things need'} attention`);
     });
     grid.setAttribute('role', 'tabpanel');
     grid.setAttribute('aria-labelledby', `tab-${tab}`);

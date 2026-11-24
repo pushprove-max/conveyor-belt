@@ -74,11 +74,13 @@ test('Declined: the Self-heals list shows the entries that expired, with when, a
   data.panels.declined.data.lines = [];
   data.panels.declined.data.rest = [];
   const gone = (over) => entry({ id: 'h0000000000dd', finding: '[P2] lib/a.sh:9 an old wait', dropped: { time: iso(T0 - 86400000), why: 'expired' }, ...over });
-  data.panels.declined.data.heals = [{ repo: 'sample', repoUrl: REPO, sorted: null, areas: [], entries: [], dropped: [gone(), gone({ id: 'h0000000000ee', seen: iso(T0 - 3600000) })] }];
+  // Bug it catches (issue 1562): entries the owner dropped or moved up to harm on the Self-heals tab were listed here as expired.
+  const byOwner = [gone({ id: 'h0000000000f1', dropped: { time: iso(T0), why: 'harm', filed: 812 } }), gone({ id: 'h0000000000f2', dropped: { time: iso(T0), why: 'dropped' } })];
+  data.panels.declined.data.heals = [{ repo: 'sample', repoUrl: REPO, sorted: null, areas: [], entries: [], dropped: [gone(), gone({ id: 'h0000000000ee', seen: iso(T0 - 3600000) }), ...byOwner] }];
   deliver(w, data);
   assert.equal(panel(w, 'declined').dataset.state, 'ready', 'a project with expired entries alone is not empty');
   const rows = Array.from(box(w).querySelectorAll('.heals-dropped .row'));
-  assert.equal(box(w).querySelector('.heals-dropped summary').textContent, 'Expired from the list (2)');
+  assert.equal(box(w).querySelector('.heals-dropped summary').textContent, 'Expired from the list (2)', 'the expired entries alone');
   assert.equal(rows[0].querySelector('.row-main').textContent, '[P2] lib/a.sh:9 an old wait');
   assert.match(rows[0].querySelector('.row-meta').textContent, /^from card c3-63 #63 expired /);
   assert.equal(rows[0].querySelector('time.since')?.dateTime, iso(T0 - 86400000), 'when it expired');

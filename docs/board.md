@@ -75,6 +75,8 @@ tabs.
   where you did it.
 - **Tests**: the project's test files.
 - **Benchmarks**: the project's SWE-bench runs and their arms ([Benchmarks tab](#benchmarks-tab)).
+- **Self-heals**: the Self-heals list of each project on a page of its own ([Self-heals tab](#self-heals-tab)). The
+  tab shows the count of entries on the list, "Self-heals · 5".
 
 Keys on the page:
 
@@ -1329,6 +1331,43 @@ the agent reports no split by kind. A cost marked "partial" is a subtotal: only 
 the figure is not the whole cost of the run. The run history and the table of a finished run show both marks. "Not
 priced" means that a session has no usage that can be priced. Runs from before costs were recorded are not priced,
 never $0.
+
+## Self-heals tab
+
+The Self-heals tab shows the Self-heals list ([Harm or self-heals](cards.md#harm-or-self-heals)): real findings
+whose failure heals by itself. A card waits longer, a step runs again, or text is wrong until the next turn. Conveyor
+does not build them one by one. A batch card fixes the entries of an area together. With no entry, the tab says what
+the list is for.
+
+- **Title line**: on the right, a pill gives the days an entry stays on the list unseen, "An entry leaves after N
+  days unseen". The days are the Rules setting **Self-heals expiry**, and **Rules › Self-heals** opens it. Under them,
+  the time when the Board read the list. When a read fails, the tab keeps the last list and that time.
+- **Tiles**: **On the list**, with the issues and audits the entries come from. **Ready to batch**: the areas with 10
+  entries or more. **Seen again, last 7 days**: a sighting starts the days of an entry again. **Leave in 7 days**: the
+  entries that leave the list in 7 days or less. They stay in the dropped entries. **Moved up to harm, 30 days**: the entries moved up in the last 30 days, also those that a review found again later.
+- **By area**: a card for each area, with the area's group and name, its count, and an age bar in three parts of the
+  days. The legend gives each part's days. A screen reader reads the count of each part. The card also shows the
+  kinds of its entries with their counts, and "Ready to batch" at 10 entries or more, else "N more to batch".
+- **Entries**: a search (finding, file or card), **Sort** (**Leaves soonest**, **Newest**, **Seen most**, **Area**)
+  and a filter chip for each kind with its count: **Waits longer**, **Runs again**, **Text fixes itself**, **Extra
+  work only**, **Docs or comment**, **Cleanup** and **Already guarded**. **All** shows every entry. Each row shows the
+  finding's level, its title, its kind, its file and line, its area, the issue it was found on (the card, for a card
+  with no GitHub issue) and, when it was seen again, "seen N×". At the right, a ring and "N d left" show the days left. They are amber at 7 days or less. Under
+  the list, "Showing N of M" and **Dropped entries (M)**, which opens the M entries that left the list, each with
+  why it left: expired after the days unseen, dropped by you, or moved up to harm.
+- **Detail panel**: click a row to show it beside the list. On a phone the panel is under the list. It shows the
+  level, the kind, the days left, the area, the review that found it, the file (a link to the line), how often it
+  was seen again, the judge's reason (**Why it self-heals**), the guard for an Already guarded entry (**Guarded by**),
+  the **Proof** and the entry's history.
+- **Move up to harm**: use it when the finding shows up in real logs or records. Click it, then click it again. The
+  entry gets its own follow-up card at once and leaves the list. A card whose finding names a pipeline file is held
+  for your yes, as a review follow-up is. **Drop now** takes the entry off the list now, and it
+  stays in the dropped entries. Click it, then click it again. Check rows to act on many: the bar "N selected" has
+  **Move up to harm** and **Clear**.
+- **Docs**: the Docs list by area. Its entries do not expire, so they have no ring.
+
+The kind of a Cleanup or Already guarded entry is the judge's. For a self-heals entry, the Board reads the kind from
+the judge's reason. A reason that names no kind, or an entry with no date, shows "not read".
 
 ## Accounts
 

@@ -152,7 +152,7 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
     "order": [{"issue": 20, "title": "Next up", "priority": "P1", "followup": true, "retried": false}], "holding": [{"issue": 30, "title": "Held one"}],
     "skipped": [{"issue": 31, "title": "Infra one", "rule": "area:infra"}],
     "waiting": [{"issue": 32, "title": "Second half", "priority": "P2", "followup": false, "retried": false, "created": "2026-11-01T00:00:00Z", "waitsFor": [20]}]},
-  "control": {"mode": "pause", "cap": null, "guard": 90, "held": [30], "order": [], "rules": {"P0": true, "P1": true, "P2": true, "followups": true, "never": ["area:infra"]}, "model": null, "reviewer": null, "judgeOn": true, "suiteMachine": {"kind": "ssh", "target": "dev@192.0.2.7", "dir": "~/suite"}},
+  "control": {"mode": "pause", "cap": null, "guard": 90, "held": [30], "order": [], "rules": {"P0": true, "P1": true, "P2": true, "followups": true, "never": ["area:infra"], "healsdays": 30}, "model": null, "reviewer": null, "judgeOn": true, "suiteMachine": {"kind": "ssh", "target": "dev@192.0.2.7", "dir": "~/suite"}},
   "modelSettings": {"builder": {"model": "claude-x", "effort": "medium", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-x"], "efforts": ["low"]},
     "judge": {"model": "claude-j", "effort": "high", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-j"], "efforts": ["high"], "default": "claude-j"}},
   "prices": {"seen": []}, "areaPrefix": "team/", "packLandAs": "pr", "packPrMerge": "idle", "packPick": {"lists": {"builder": {"claude-x": {"min": "medium", "max": "high"}}}, "efforts": {"claude": ["low", "medium", "high"]}}, "standing": ["asked-fix"], "pushCheck": false, "lintCommands": [{"run": "shellcheck {files}", "files": ["*.sh"]}], "snapshotAt": "2026-11-05T00:00:02Z",
@@ -178,7 +178,8 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
   "declinedRest": [{"id": "dba9876543210", "time": "'"$TODAY_ISO"'T07:10:00Z", "card": "c0-6", "issue": 6, "finding": "[P2] a.txt:1 wrong word", "by": "code", "why": "follow-up of a follow-up", "repo": "sample", "built": 90},
     {"id": "d0000000000dd", "time": "'"$TODAY_ISO"'T08:50:00Z", "card": "c3-801", "issue": 801, "finding": "[P3] d.txt:4 a word", "by": "judge", "why": "taste", "repo": "sample", "dismissed": {"time": "'"$TODAY_ISO"'T09:00:00Z", "by": "Board user owner"}}],
   "selfheals": {"entries": [{"id": "h0123456789ab", "time": "'"$TODAY_ISO"'T08:30:00Z", "card": "c3-801", "issue": 801, "repo": "sample", "area": "area:engine",
-    "finding": "[P2] a.sh:3 a slow poll", "why": "the next turn picks it up", "effect": "self-heals", "from": "review"}],
+    "finding": "[P2] a.sh:3 a slow poll", "why": "the next turn picks it up", "effect": "self-heals", "from": "review", "seen": "'"$TODAY_ISO"'T08:45:00Z", "sightings": 2,
+    "expired": {"time": "2026-11-02T00:00:00Z", "why": "harm", "filed": 812}}],
     "dropped": [{"id": "h0000000000dd", "time": "2026-10-01T00:00:00Z", "card": "c3-700", "issue": 700, "repo": "sample", "area": "area:engine",
       "finding": "[P2] a.sh:9 an old wait", "why": "a longer wait", "effect": "self-heals", "from": "review", "dropped": {"time": "2026-11-01T00:00:00Z", "why": "expired"}}],
     "areas": [{"area": "area:engine", "count": 1}], "sorted": {"time": "'"$TODAY_ISO"'T07:00:00Z", "ended": "'"$TODAY_ISO"'T07:01:00Z", "items": 2, "moved": 1},
@@ -281,6 +282,11 @@ q '.panels.declined.data.rest | map([.repo, .id, .url, .built, .dismissed]) == [
 q '.panels.declined.data.heals | map([.repo, .repoUrl, .areas, .sorted.moved, (.entries | map([.id, .url, .area, .finding, .why, .effect]))]) == [["sample", "https://github.com/example/sample-project",
   [{area: "area:engine", count: 1}], 1, [["h0123456789ab", "'"$PU"'/801", "area:engine", "[P2] a.sh:3 a slow poll", "the next turn picks it up", "self-heals"]]]]' \
   "the self-heals list of the record that has one, with its areas, its last sort and its entries"
+# The Self-heals page: each entry's sighting count, last sighting and source, and the record's days an entry stays.
+# Bug it catches: the part left them out, so the page could show neither "seen N×" nor the days left; nor the move up
+# to harm an entry had before a review listed it again (expired), so the page's harm tile lost it.
+q '.panels.declined.data.heals | map([.days, (.entries | map([.from, .seen, .sightings, .expired.why]))]) == [[30, [["review", "'"$TODAY_ISO"'T08:45:00Z", 2, "harm"]]]]' \
+  "the self-heals list with the record's healsdays and each entry's source, last sighting, sightings and earlier move up to harm"
 # Issue 1561: the entries that expired off the list reach the Declined part with their dates. Bug it catches: the panel's
 # data left out the snapshot's selfheals.dropped, so the Board could not show what expired.
 q '.panels.declined.data.heals | map(.dropped | map([.id, .url, .finding, .dropped.why, .dropped.time, .seen])) == [[["h0000000000dd", "'"$PU"'/700", "[P2] a.sh:9 an old wait", "expired", "2026-11-01T00:00:00Z", null]]]' \

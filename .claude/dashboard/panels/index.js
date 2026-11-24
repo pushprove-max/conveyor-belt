@@ -6,4 +6,5 @@ window.DASH_PANELS = ['machine', 'board','rules', 'needs', 'belt', 'belt3d', 'te
 window.DASH_PARTS = ['parts/board-filters.js', 'parts/board-push.js', 'parts/board-cards.js',
   'parts/rules-prices.js', 'parts/rules-moves.js', 'parts/rules-suite.js', 'parts/rules-rows.js', 'parts/rules-produce.js', 'parts/rules-setup.js',
   'parts/tests-mutation.js', 'parts/tests-actions.js', 'parts/tests-rows.js',
-  'parts/bench-score.js', 'parts/bench-versions.js', 'parts/bench-run.js', 'parts/bench-plan.js'];
+  'parts/bench-score.js', 'parts/bench-versions.js', 'parts/bench-run.js', 'parts/bench-plan.js',
+  'parts/heals-page.js'];

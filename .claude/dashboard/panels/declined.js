@@ -211,7 +211,9 @@
   // and a release files one for each area with entries.
   const healsSaid = new Map(); // `${kind}:${repo}:${area}` -> the host's answer, through every redraw
   const docsOf = (x) => ((x.docs && x.docs.entries) || []);
-  const droppedOf = (x) => (Array.isArray(x.dropped) ? x.dropped : []);
+  // The entries that expired: the dropped record also holds those the owner dropped or moved up to harm on the
+  // Self-heals tab, which shows them with their reason.
+  const droppedOf = (x) => (Array.isArray(x.dropped) ? x.dropped : []).filter((e) => !e.dropped || e.dropped.why === 'expired');
   const droppedOpen = new Set(); // the repos whose "Expired from the list" is open, through every redraw
   const healsOf = (d) => (Array.isArray(d.heals) ? d.heals : []).filter((x) => x && ((x.entries || []).length || x.sorted || docsOf(x).length || droppedOf(x).length));
   // A list's entries by area, the areas in the snapshot's order (areas: the most entries first), none left empty.
@@ -475,4 +477,6 @@
       if (moved) ctx.redraw();
     },
   });
+  // The Self-heals tab's page, drawn from this panel's part (parts/heals-page.js).
+  window.DASH_APP.panel(window.DASH_APP.use('heals-page', {}));
 })();

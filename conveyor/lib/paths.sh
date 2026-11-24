@@ -155,11 +155,13 @@ DECLINED=${STATE%/*}/declined.jsonl
 # its own (healsadd(), lib/followups.sh), one line each: {id, time, card (the card it came from, or #<issue> for an
 # issue with no card named), issue, repo, area (the area label, or null), finding, why (the judge's reason), effect
 # (its kind: self-heals, cleanup or already guarded), from: review or sort}, and batched (the issue number or card id of
-# the batch card filed for it: healsbatch(), lib/heals.sh), and seen (when the finding was last seen again, healsadd()).
+# the batch card filed for it: healsbatch(), lib/heals.sh), and seen (when the finding was last seen again, healsadd())
+# and sightings (how many times it was seen again, healsagain(), lib/healslist.sh).
 # shellcheck disable=SC2034 # read by lib/followups.sh, lib/heals.sh and lib/snapshot.sh, which conveyor.sh sources beside this file
 SELFHEALS=${STATE%/*}/selfheals.jsonl
 # The entries that left the self-heals list because nobody fixed or saw them again for the rules.healsdays days
-# (healsexpire(), lib/heals.sh): each is its list line with dropped: {time, why: expired}. Kept, not erased: the same
+# (healsexpire(), lib/heals.sh), or that the owner dropped or moved up to harm (healsdiscard(), healsharm()): each is its
+# list line with dropped: {time, why: expired, dropped or harm, and filed (the card a harm one was filed as)}. Kept, not erased: the same
 # finding found again takes its line back to the list (healsadd(), lib/followups.sh). Written under the list's lock.
 # shellcheck disable=SC2034 # read by lib/followups.sh and lib/heals.sh, which conveyor.sh sources beside this file
 HEALSDROPPED=${STATE%/*}/healsdropped.jsonl

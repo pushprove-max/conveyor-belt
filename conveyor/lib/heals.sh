@@ -5,6 +5,27 @@
 # guarded one goes to the self-heals list, and a docs drift one to the docs list (healsadd(), lib/followups.sh).
 # Each list is fixed one area at a time: healsbatch() files one card with an area's entries as its scope.
 
+# The locks a card is filed under from a list (healsbatch(), healsharm()), in the subshell that holds the list's lock
+# file open as fd 9. A card with no GitHub issue is added to the Tests page's record (tcput()): that lock is taken before
+# the list's, the order testpick() and its retry take them in. Taken the other way round, each waits for the other with
+# no end, until the pick's time limit (lockedfor(), lib/records.sh) or the Board's call limit stops one.
+# The rule is read again under the list's lock, as the owner can turn it off while this ask waits for that lock: an
+# issue filed on the old rule cannot be taken back. Turned off while the cards lock is not held, the list's lock is
+# let go, the cards lock taken first, and the rule read again. Sets noissue (1: file a card with no GitHub issue) and
+# tl (the cards lock's fd, else empty); fails, saying so, when the cards lock cannot be taken.
+healslocks() {
+  noissue=0 tl=''
+  while :; do
+    if [ -z "$tl" ] && [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" = false ]; then
+      mkdir -p "$TESTACTS" 2>/dev/null
+      { exec {tl}>>"$TACARDS.lock"; } 2>/dev/null && flock "$tl" || { echo "conveyor: the record of the Tests page's cards could not be locked; nothing filed" >&2; return 1; }
+    fi
+    flock 9 || return 1
+    [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" = false ] || break
+    [ -z "$tl" ] || { noissue=1; break; }
+    flock -u 9
+  done
+}
 # `conveyor.sh heals batch <area | ->` (the Board's Self-heals panel, "File a batch card"): one audit card for the
 # entries of the self-heals list in <area> (an area label; - for the entries with none) that no batch card holds yet
 # and whose card has ended (below), with them as its scope. With docs (`conveyor.sh heals docs <area | ->`, the
@@ -24,23 +45,7 @@ healsbatch() { # <area | -> [docs]
   [[ $# -le 2 && ${2:-docs} = docs && -n $1 && $1 != *$'\n'* ]] || { echo "usage: conveyor.sh heals batch <area | -> | heals docs <area | ->" >&2; return 2; }
   local a=$1 lf=$SELFHEALS what='self-heals list' kind='Self-heals batch' tl='' rc; [ "$a" != - ] || a=''
   [ -z "${2:-}" ] || lf=$DOCSDRIFT what='docs list' kind='Docs sweep'
-  ( # A card with no GitHub issue is added to the Tests page's record (tcput()): that lock is taken before the list's, the
-    # order testpick() and its retry take them in. Taken the other way round, each waits for the other with no end,
-    # until the pick's time limit (lockedfor(), lib/records.sh) or the Board's call limit stops one.
-    # The rule is read again under the list's lock, as the owner can turn it off while this ask waits for that lock: an
-    # issue filed on the old rule cannot be taken back. Turned off while the cards lock is not held, the list's lock is
-    # let go, the cards lock taken first, and the rule read again.
-    noissue=0 tl=''
-    while :; do
-      if [ -z "$tl" ] && [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" = false ]; then
-        mkdir -p "$TESTACTS" 2>/dev/null
-        { exec {tl}>>"$TACARDS.lock"; } 2>/dev/null && flock "$tl" || { echo "conveyor: the record of the Tests page's cards could not be locked; nothing filed" >&2; exit 1; }
-      fi
-      flock 9 || exit 1
-      [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" = false ] || break
-      [ -z "$tl" ] || { noissue=1; break; }
-      flock -u 9
-    done
+  ( healslocks || exit 1
     # The cards that have not ended (no landed or closed line: in flight or blocked) and their issues. An entry of such a
     # card waits, as does one a review wrote (from: review) on an issue with such a card (a retry's new card): the code
     # its finding names is only in that card's change, so a batch card built on main now finds nothing to fix. It goes
@@ -105,6 +110,95 @@ healsbatch() { # <area | -> [docs]
     echo "conveyor: filed $num with $k finding$([ "$k" = 1 ] || echo s) of ${a:-no area}" ) 9>>"$lf.lock"
   rc=$?; [ -z "$tl" ] || exec {tl}>&-
   return $rc
+}
+# The ids given that are not open entries of the self-heals list (none such, or one a batch card holds), one line;
+# empty when each is. Fails when the list cannot be read. The caller holds the list's lock.
+healsmissing() { # <id>...
+  { cat "$SELFHEALS" 2>/dev/null || :; } | jq -rn '[inputs | objects | select(.batched == null) | .id] as $have | $ARGS.positional - $have | join(" ")' --args "$@"
+}
+# Entries <ids> (a JSON list) of the self-heals list leave it for the dropped record (HEALSDROPPED), each with dropped
+# {time, why: <why>} and, for one moved up to harm, filed (its card's issue number or id). Its freed goes, so a retry of
+# the batch card that gave it back (healstake(), lib/followups.sh) does not take it back to the list. The dropped lines
+# are written before the list is, as healsexpiry() writes them: a failure between the two leaves an entry in both, never
+# in neither. The caller holds the list's lock.
+healsgone() { # <ids json> <why> [<filed>]
+  local f=$SELFHEALS t
+  t=$(clock) || return 1
+  jq -c --argjson ids "$1" --arg t "$t" --arg why "$2" --arg n "${3:-}" 'select(type == "object" and (.id | IN($ids[])) and .batched == null)
+    | del(.freed, .expired) + {dropped: ({time: $t, why: $why} + if $n == "" then {} else {filed: ($n | tonumber? // $n)} end)}' "$f" >> "$HEALSDROPPED" \
+    && jq -c --argjson ids "$1" 'select(type != "object" or (.id | IN($ids[]) | not) or .batched != null)' "$f" > "$f.new" && mv -f "$f.new" "$f" \
+    || { rm -f "$f.new"; return 1; }
+}
+# `conveyor.sh heals drop <id>...` (the Board's Self-heals page, "Drop now"): the owner takes entries off the self-heals
+# list before their days run out. Each leaves for the dropped record with dropped {time, why: dropped}, kept there as an
+# expired one is: the same finding listed again takes its line back (healsadd(), lib/followups.sh). When an id is not an
+# open entry of the list (none such, or one a batch card holds), nothing is dropped (exit 2).
+healsdiscard() { # <id>...
+  [ $# -ge 1 ] && ! printf '%s\n' "$@" | grep -qvE '^h[0-9A-Za-z-]{1,40}$' || { echo "usage: conveyor.sh heals drop <id>..." >&2; return 2; }
+  ( flock 9 || exit 1
+    miss=$(healsmissing "$@") || { echo "conveyor: the self-heals list could not be read; nothing dropped" >&2; exit 1; }
+    [ -z "$miss" ] || { echo "conveyor: the self-heals list has no open entry $miss; nothing dropped" >&2; exit 2; }
+    healsgone "$(jq -cn '$ARGS.positional' --args "$@")" dropped || { echo "conveyor: the self-heals list could not be written; nothing dropped" >&2; exit 1; }
+    echo "conveyor: dropped $# entr$([ $# = 1 ] && echo y || echo ies) from the self-heals list" ) 9>>"$SELFHEALS.lock"
+}
+# `conveyor.sh heals harm <id>...` (the Board's Self-heals page, "Move up to harm"): the owner saw the finding of each
+# entry <id> of the self-heals list in real logs or records, so it is harm and gets its own follow-up card at once, as
+# followups() files a harm finding: the pack's follow-up label, its type label (none for a cleanup entry), the priority
+# of the finding's [P<n>] (P1 when it names none) and the entry's area label; with rules.followupissues false a card
+# with no GitHub issue (the locks of healslocks()). Each entry then leaves the list for the dropped record (healsgone(),
+# why: harm, filed: the card), so it is neither on the list nor lost; it is marked right after its own card is filed, so
+# a failure on a later entry leaves none filed twice. When an id is not an open entry of the list, nothing is filed (exit 2).
+# A finding that names one of the pack's pipelineFiles (onpipeline(), lib/followups.sh) is filed held, as followups()
+# files one, with its "Cost to every card:" line: a card with no GitHub issue held as it is made; an issue made with the
+# built label, which the pick skips, then held in the control record and the label taken off (healsholdnow()).
+healsharm() { # <id>...
+  [ $# -ge 1 ] && ! printf '%s\n' "$@" | grep -qvE '^h[0-9A-Za-z-]{1,40}$' || { echo "usage: conveyor.sh heals harm <id>..." >&2; return 2; }
+  local tl='' rc
+  ( hold=(); trap 'healsholdnow "${hold[@]}"' EXIT
+    healslocks || exit 1
+    miss=$(healsmissing "$@") || { echo "conveyor: the self-heals list could not be read; nothing filed" >&2; exit 1; }
+    [ -z "$miss" ] || { echo "conveyor: the self-heals list has no open entry $miss; nothing filed" >&2; exit 2; }
+    pm=''; [ "$noissue" = 1 ] || packget privacy.mode pm || { echo "conveyor: the pack's privacy mode could not be read; nothing filed" >&2; exit 1; }
+    pipe=''; packget pipelineFiles pipe || { echo "conveyor: the pack's pipeline files could not be read; nothing filed" >&2; exit 1; }
+    for id; do
+      e=$(jq -c --arg id "$id" 'select(type == "object" and .id == $id)' "$SELFHEALS" | head -n 1) && f=$(jq -r .finding <<<"$e") && g=$f \
+        || { echo "conveyor: entry $id could not be read; it is not filed" >&2; exit 1; }
+      [ "$pm" != public ] || g=$(privmask "$f") || { echo "conveyor: the privacy check could not be made; entry $id is not filed" >&2; exit 1; }
+      mark=$(grep -oE '\[P[0-3]\]' <<<"$f" | head -n 1 | tr -d '[]P'); where=$(grep -oE '[^[:space:]]+:[0-9]+' <<<"$g" | head -n 1)
+      mark=$(jq -r --argjson i "${mark:-1}" 'if $i == 3 and length < 4 then "" else .[[$i, length - 1] | min] end' <<<"$PRIOS")
+      t=$TYPE; [ "$(jq -r .effect <<<"$e")" != cleanup ] || t=''
+      a=$(jq -r '.area // empty' <<<"$e")
+      cost=$(onpipeline "$f" <<<"$pipe") || { echo "conveyor: whether entry $id names a pipeline file could not be told; it is not filed" >&2; exit 1; }
+      body=$(jq -r --arg w "${where:-the finding names no file:line}" '"Conveyor'"'"'s self-heals list held the finding below. The owner moved it up to harm on the Board: it shows up in real logs or records, so it is fixed in a card of its own.\n\nFinding: \(.finding)\nWhere: \($w)\nKind: harm (moved up from the self-heals list, where the judge had sorted it as \(.effect // "self-heals"): \(.why))\nFrom: card \(.card), issue #\(.issue) (list entry \(.id))"' <<<"$e") \
+        || { echo "conveyor: entry $id could not be read; it is not filed" >&2; exit 1; }
+      [ "$pm" != public ] || body=$(privmask "$body") || { echo "conveyor: the privacy check could not be made; entry $id is not filed" >&2; exit 1; }
+      [ -z "$cost" ] || body+=$'\nCost to every card: not assessed'
+      if [ "$noissue" = 1 ]; then
+        num=$(tcput "" "$(futitle "$g")" "$body" "${cost:+held}" "Self-heals moved up to harm" "$(jq -cn '$ARGS.positional' --args "$FOLLOWUP" ${t:+"$t"} ${mark:+"$mark"} ${a:+"$a"})") || exit 1
+      else
+        out=$(gh_write issue create --title "$(futitle "$g")" --label "$FOLLOWUP" ${t:+--label "$t"} ${mark:+--label "$mark"} ${a:+--label "$a"} ${cost:+--label "$BUILT"} --body "$body" 2>&1) \
+          && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] || { echo "conveyor: entry $id was not filed: ${out:0:400}" >&2; exit 1; }
+        [ -z "$cost" ] || hold+=("$num")
+      fi
+      healsgone "$(jq -cn '[$ARGS.positional[0]]' --args "$id")" harm "$num" || { echo "conveyor: entry $id is filed as $num, but it could not leave the self-heals list" >&2; exit 1; }
+      echo "conveyor: entry $id moved up to harm: filed $num"
+    done ) 9>>"$SELFHEALS.lock"
+  rc=$?; [ -z "$tl" ] || exec {tl}>&-
+  return $rc
+}
+# On the exit of healsharm()'s subshell, whatever ended it: each issue <n> it filed with the built label is held in the
+# control record (`control hold`), then the label taken off. The list's lock and the cards lock are let go first: `retry`
+# takes the records' lock before the list's (healstake(), lib/followups.sh), so a hold asked under the list's lock could
+# wait for that retry while it waits for this list. Keeps the subshell's exit status, else 1 when an issue is left unheld.
+healsholdnow() { # <n>...
+  local rc=$? n
+  flock -u 9 2>/dev/null; [ -z "${tl:-}" ] || flock -u "$tl" 2>/dev/null
+  for n; do
+    if ! locked control hold "$n" > /dev/null 2>&1; then rc=1; echo "conveyor: #$n is filed, but could not be held (its finding names a pipeline file): hold it (conveyor.sh control hold $n) unless the owner has said yes to it, and take the $BUILT label off it, which the belt skips" >&2
+    elif gh_write issue edit "$n" --remove-label "$BUILT" > /dev/null 2>&1; then echo "conveyor: #$n is held, as its finding names a pipeline file: release it (conveyor.sh control release $n) once the owner says yes"
+    else rc=1; echo "conveyor: #$n is held, as its finding names a pipeline file, but the $BUILT label could not be taken off it: take it off before you release it (conveyor.sh control release $n), as the belt skips an issue with it" >&2; fi
+  done
+  exit "$rc"
 }
 # release-prep (commands/release-prep.sh), before the suite: one docs sweep card (healsbatch() docs) for each area of
 # the docs list with an open entry, so the docs match what users see in the release. An area whose entries all wait

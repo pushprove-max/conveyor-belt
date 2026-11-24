@@ -61,7 +61,9 @@
 #           round and findings (the review the judge declined it in and that review's findings as the judge numbered
 #           them, [{n, finding}], else null), as the snapshot's declined gives them; rest: every other line, so, as its declinedRest gives them;
 #           heals: each record's self-heals list, {repo, repoUrl, sorted (its last sort of the queued follow-ups, or null), areas
-#           ([{area, count}]), entries (each with repo, repoUrl, id, time, card, issue, url, area, finding, why, effect),
+#           ([{area, count}]), days (its rules.healsdays, or null), entries (each with repo, repoUrl, id, time, card, issue, url,
+#           area, finding, why, effect, from, seen, sightings, expired (the dropped mark it had before a sighting took it
+#           back to the list); docs entries without the last four),
 #           docs (its docs list, {areas, entries} alike)}, as its selfheals gives it.
 #   health  host {name, reachable, error}, records (each record's steered (the host answer's), repoUrl (its repository's https
 #           address, else null), snapshotAt (when the build of its kept snapshot began, null from a snapshot
@@ -411,8 +413,11 @@ PANELS_JQ='
         | $R | map(. as $r | .snap[$k] | arrays | .[] | objects | tag($r)
         | {repo, repoUrl: ($r.repoUrl // null), id, time, card, issue, name: (.name // null), url, finding, by, why, built: (.built // null), dismissed: (.dismissed // null), round: (.round // null), findings: (.findings // null)}) | sort_by(.time) | reverse))
         # heals: the self-heals list of each record that has one (the snapshot'"'"'s selfheals), its entries tagged.
+        # days: the rules.healsdays of the record, the days an entry stays unseen before it leaves the list (null when it has none).
         + {heals: [$R[] | . as $r | .snap.selfheals | objects | {repo: $r.repo, repoUrl: ($r.repoUrl // null), sorted: (.sorted // null), areas: (.areas // []),
-            entries: [.entries[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null)}],
+            days: ($r.snap.control.rules.healsdays // null),
+            entries: [.entries[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null),
+              from: (.from // null), seen: (.seen // null), sightings: (.sightings // null), expired: (.expired // null)}],
             docs: (.docs | objects | {areas: (.areas // []), entries: [.entries[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null)}]}) // {areas: [], entries: []},
             dropped: [.dropped[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null), dropped: (.dropped // null), seen: (.seen // null)}]}]}} end),
    # Belt 3D: the belt, Needs you, the queue (next, held, waiting) and Landed today as above, each card with what its

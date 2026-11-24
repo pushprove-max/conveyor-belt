@@ -105,6 +105,8 @@ def control_ok(body):
     if a == 'dismiss':  # declined findings, by their lines' ids ("Dismiss", "Dismiss all shown"); as many as fit the body
         return 1 <= n <= 400 and all(DECLINED_ID.fullmatch(x) for x in v)
     if a == 'heals':  # the Self-heals list's "File a batch card" (batch), the Docs list's "File a docs sweep card" (docs): an area's label, or - for the entries with none
+        if n >= 2 and v[0] in ('harm', 'drop'):  # the Self-heals page's "Move up to harm" (one card each: at most HEALS_HARM_MAX) and "Drop now": entry ids
+            return n - 1 <= (globals()['HEALS_HARM_MAX'] if v[0] == 'harm' else 400) and all(globals()['HEALS_ID'].fullmatch(x) for x in v[1:])  # the base part's
         return n == 2 and v[0] in ('batch', 'docs') and (v[1] == '-' or globals()['LABEL'].fullmatch(v[1]) is not None)  # the base part's
     if a in ('approve', 'decline'):  # the issue, then a condition (approve) or a reason (decline), if any
         return 1 <= n <= 2 and ISSUE.fullmatch(v[0]) is not None and (n == 1 or said_ok(v[1]))
@@ -456,7 +458,9 @@ def control_script(action, args, main, today, record=None, user=None):
     as an ordinary issue (conveyor.sh declined build: once, however often it is asked); dismiss marks lines of that list
     dismissed by the Board user, so they leave the Declined panel (conveyor.sh declined dismiss); heals batch files one
     card with an area's entries of the self-heals list as its scope (conveyor.sh heals batch), and heals docs one docs
-    sweep card with an area's entries of the docs list (conveyor.sh heals docs). record is the checkout of the record the action
+    sweep card with an area's entries of the docs list (conveyor.sh heals docs); heals harm files each entry of the
+    self-heals list named as its own follow-up and takes it off the list, heals drop takes them off (conveyor.sh heals
+    harm, heals drop). record is the checkout of the record the action
     is for: every action runs on its Conveyor record (and approve, decline and unlabel in its GitHub repository), never
     main's unless it is main's.
     The script itself is always main's, as dashboard.sh runs it for every record. Every GitHub write goes through its
@@ -492,7 +496,8 @@ def control_script(action, args, main, today, record=None, user=None):
     if action == 'dismiss':
         return '%s declined dismiss --by %s %s' % (conv, q('Board user %s' % user), ' '.join(q(x) for x in args))
     if action == 'heals':
-        return f'{conv} heals {"docs" if args[0] == "docs" else "batch"} {q(args[1])}'
+        sub = args[0] if args[0] in ('docs', 'harm', 'drop') else 'batch'
+        return f'{conv} heals {sub} ' + ' '.join(q(x) for x in args[1:])
     if action == 'full-test':
         # The run goes on on the host after the answer (conveyor.sh full-test starts it and returns); a push over a red
         # suite names the red run the confirm showed and is logged under the Board user who confirmed it.

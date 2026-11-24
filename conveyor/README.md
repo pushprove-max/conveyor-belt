@@ -244,6 +244,9 @@ card", `-` for the entries with no area) files one card that holds an area's ope
 with that card. `conveyor.sh heals docs <area>` (the Board's "File a docs sweep card") does the same with the docs
 list, and `release-prep` runs it for each area with entries before the suite. An entry whose card has not landed or closed waits for a later batch card. A batch card shut before
 it lands gives its entries back, and `retry` of it takes them again, or is refused when another batch card holds them.
+`conveyor.sh heals harm <id>...` (the Board's "Move up to harm") files each entry as its own follow-up at once, and
+`conveyor.sh heals drop <id>...` (the Board's "Drop now") takes entries off the list. Either way the entry goes to
+the record of dropped entries with why it left, and each entry counts its sightings.
 When the judge fails, the review stays as the reviewer wrote it, and its findings keep no kind from an earlier round. `conveyor.sh heals sort` sorts the queued follow-up cards and the open finding issues by the same rule
 (docs/cards.md, Harm or self-heals). The loop (`run` or `serve`) runs it by itself and picks no card until
 `healssort.jsonl` of the state folder logs a sort. That file logs each run with each item, its kind and the judge's

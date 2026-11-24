@@ -36,6 +36,19 @@ check('runs_heals_batch_on_the_record', cmd.startswith('CONVEYOR_MAIN=/r ') and 
 # The Docs list's "File a docs sweep card" (#1563): bug it catches, the docs sweep filed as a self-heals batch card.
 cmd = ds.control_script('heals', ['docs', 'area:engine'], '/m', '2026-11-23', '/r', 'u')
 check('runs_heals_docs_on_the_record', cmd.startswith('CONVEYOR_MAIN=/r ') and cmd.endswith(' heals docs area:engine'), cmd)
+# The Self-heals page's "Move up to harm" and "Drop now": entry ids of the list, at most 10 for harm (one card each,
+# within the call's time limit). Bug each catches: the buttons refused, an id that is shell text or another list's let
+# through, a harm of more entries than the call can file in its time, or the action run as a batch.
+H1, H2 = 'h0123456789ab', 'hba9876543210'
+for args in (['harm', H1], ['harm', H1, H2], ['harm'] + ['h%012x' % i for i in range(10)], ['drop', H1], ['drop'] + ['h%012x' % i for i in range(400)]):
+    check('takes_heals_%s_%d' % (args[0], len(args) - 1), ok(args), args[:3])
+for args in (['harm'], ['drop'], ['harm', 'd0123456789ab'], ['harm', 'h0123;id'], ['drop', H1 + 'x'], ['drop', '-'], ['harm', 'area:engine'],
+             ['harm'] + ['h%012x' % i for i in range(11)], ['drop'] + ['h%012x' % i for i in range(401)]):
+    check('refuses_heals_%s_%s' % (args[0], len(args) - 1), not ok(args), args[:3])
+cmd = ds.control_script('heals', ['harm', H1, H2], '/m', '2026-11-23', '/r', 'u')
+check('runs_heals_harm_on_the_record', cmd.startswith('CONVEYOR_MAIN=/r ') and cmd.endswith(' heals harm %s %s' % (H1, H2)), cmd)
+cmd = ds.control_script('heals', ['drop', H1], '/m', '2026-11-23', '/r', 'u')
+check('runs_heals_drop_on_the_record', cmd.startswith('CONVEYOR_MAIN=/r ') and cmd.endswith(' heals drop %s' % H1), cmd)
 # The Rules tab's "Self-heals expiry" (#1561): bug it catches, `rules healsdays=10` refused as no rule, or a value that is no whole number
 # (shell text, a sign, a leading zero, a fraction) let through to the host's shell.
 rules = lambda args: ds.control_ok({'action': 'rules', 'args': args, 'repo': 'project'})

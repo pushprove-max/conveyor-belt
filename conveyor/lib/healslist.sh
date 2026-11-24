@@ -13,7 +13,7 @@
 # alone: two findings of one card that differ in their line numbers only are two findings; an entry another card saw is that
 # card's now; in the record of expired entries (same(true)) one card's finding may have moved, so its line numbers need not
 # match), and for a sort of the same issue, an entry of a sort alone; and what a sighting at time $t does to such an entry
-# (again): it is seen now, and, as no batch card holds it, it is of the card that saw it (and, from a review, of its issue: heals
+# (again): it is seen now, one more time (sightings, which the Board's Self-heals page shows as "seen N×"), and, as no batch card holds it, it is of the card that saw it (and, from a review, of its issue: heals
 # batch waits for that card to end) and, when $l gives them, takes its kind, reason and finding (the text the listing has now: a
 # sort counts the findings its issue still holds against the entries' text; an entry of a sort that a review sees again keeps the
 # finding the sort stored, as healsitems() (lib/heals.sh) reads that text). A sighting names the entries that are as close to its
@@ -30,7 +30,7 @@ HEALSSAME="$HEALSONE"'def exk: one | sub("(?i)[.:;]* (- how|proof):.*$"; "");
     and (.repo // $l.repo) == $l.repo and ($l.from != "sort" or (.from == "sort" and .issue == $l.issue))));
   def same: same(false);
   def tier($x): if $x == 2 then (.finding | exk) == ($l.finding | exk) elif $x == 1 then (.finding | lkey) == ($l.finding | lkey) else true end;
-  def again: .seen = $t | if .batched == null then .card = $l.card | (if .from == "review" then .issue = $l.issue else . end)
+  def again: .seen = $t | .sightings = (.sightings // 0) + 1 | if .batched == null then .card = $l.card | (if .from == "review" then .issue = $l.issue else . end)
     | (if $l.effect then .effect = $l.effect | .why = $l.why | (if .from == "sort" and $l.from != "sort" then . else .finding = $l.finding end) else . end) else . end;'
 # The id of the first entry of <list> that a sighting names (HEALSSAME; <dropped> true for the record of expired entries)
 # and that is of <tier> or nearer: 2, its finding text as the sighting has it (its Proof and How aside, its line numbers
@@ -63,7 +63,7 @@ healsagain() { # <list> <id | ""> <the sighting: JSON> <time> <restore: 1 | 0>
   fi
   if [ -n "$drid" ]; then
     if [ "$5" = 0 ]; then
-      jq -c --arg id "$2" --argjson l "$3" --arg t "$4" --argjson x "$x" "$HEALSSAME"'if same(true) and tier($x) then .seen = $t else . end' "$HEALSDROPPED" > "$HEALSDROPPED.new" \
+      jq -c --arg id "$2" --argjson l "$3" --arg t "$4" --argjson x "$x" "$HEALSSAME"'if same(true) and tier($x) then .seen = $t | .sightings = (.sightings // 0) + 1 else . end' "$HEALSDROPPED" > "$HEALSDROPPED.new" \
         && mv -f "$HEALSDROPPED.new" "$HEALSDROPPED" || { rm -f "$HEALSDROPPED.new"; return 1; }
     else
       jq -ce --arg id "$2" --arg rid "$drid" --argjson l "$3" --arg t "$4" "$HEALSSAME"'first(select(type == "object" and .id == $rid) | .expired = .dropped | del(.dropped) | again)' "$HEALSDROPPED" >> "$f" \

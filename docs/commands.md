@@ -189,6 +189,11 @@ The self-heals list and the docs list ([Harm or self-heals](cards.md#harm-or-sel
   files nothing and exits 2.
 - `heals docs <area | ->` files one docs sweep card with the area's open entries of the docs list, in the same way.
   `release-prep` files one for each area that has entries, before it runs the suite.
+- `heals harm <id>...` moves entries of the self-heals list up to harm: each gets its own follow-up card at once and
+  leaves the list. Use it when a finding shows up in real logs or records. A card whose finding names a pipeline
+  file is held until you release it.
+- `heals drop <id>...` takes entries off the self-heals list now. Each is kept with the dropped entries, and comes
+  back when a review finds it again.
 - `heals sort` sorts the queued follow-up cards and the open finding issues: `harm` stays, `docs drift` goes to the
   docs list, and `self-heals`, `cleanup` and `already guarded` go to the self-heals list.
 

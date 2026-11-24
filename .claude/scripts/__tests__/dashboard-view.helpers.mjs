@@ -158,8 +158,10 @@ export const BELT3D_IDS = ['belt3d'];
 export const TESTS_IDS = family('tests');
 export const TESTS_SIZES = { tests: 'full', 'tests-settings': 'full' };
 export const BENCH_IDS = ['bench'];
+// The Self-heals tab's page, drawn from the Declined part (not a file of the panel list).
+export const SELFHEALS_IDS = ['selfheals'];
 export const TAB = (id) => (CONTROL_IDS.includes(id) ? 'control' : RULES_IDS.includes(id) ? 'rules' : BELT3D_IDS.includes(id) ? 'belt3d' : TESTS_IDS.includes(id) ? 'tests'
-  : BENCH_IDS.includes(id) ? 'bench' : 'overview');
+  : BENCH_IDS.includes(id) ? 'bench' : SELFHEALS_IDS.includes(id) ? 'selfheals' : 'overview');
 export const OVERVIEW = LIST.filter((id) => TAB(id) === 'overview');
 
 // boot.js in page `w`, as a browser runs it: each file it adds runs in its order and then has its load event, which

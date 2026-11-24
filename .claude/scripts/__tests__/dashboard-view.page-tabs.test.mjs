@@ -62,13 +62,14 @@ test('the tab in view is in the address and survives a reload; Back goes to the 
 // #520: Tests, the fifth, after Rules. #326: Benchmarks, the sixth, after Tests (the approved plan put it on a tab of
 // its own; it was built as a small part of the Tests page).
 // #87: the 3D tab is named 3D View and sits next to Overview; this fails while it is named Belt 3D or comes after Rules.
-test('the tabs are Overview, 3D View, Control, Rules, Tests and Benchmarks, reached by keyboard, saying which one is selected; Overview counts Needs you, Rules a paused loop', () => {
+// #1562: Self-heals, the seventh, after Benchmarks.
+test('the tabs are Overview, 3D View, Control, Rules, Tests, Benchmarks and Self-heals, reached by keyboard, saying which one is selected; Overview counts Needs you, Rules a paused loop', () => {
   const w = boot();
   deliver(w, full());
   const list = w.document.querySelector('#tabs [role="tablist"]');
   assert.ok(list);
   const words = (b) => [b.querySelector('.tab-name').textContent, b.querySelector('.tab-count').textContent].filter(Boolean).join(' ');
-  assert.deepEqual(Array.from(list.querySelectorAll('[role="tab"]'), (b) => [words(b), b.tabIndex, b.getAttribute('aria-controls')]), [['Overview · 2', 0, 'grid'], ['3D View', -1, 'grid'], ['Control', -1, 'grid'], ['Rules', -1, 'grid'], ['Tests', -1, 'grid'], ['Benchmarks', -1, 'grid']]);
+  assert.deepEqual(Array.from(list.querySelectorAll('[role="tab"]'), (b) => [words(b), b.tabIndex, b.getAttribute('aria-controls')]), [['Overview · 2', 0, 'grid'], ['3D View', -1, 'grid'], ['Control', -1, 'grid'], ['Rules', -1, 'grid'], ['Tests', -1, 'grid'], ['Benchmarks', -1, 'grid'], ['Self-heals', -1, 'grid']]);
   assert.equal(fig(w, 'needs'), '2', 'the count is the Needs you tile\'s');
   assert.equal(tabBtn(w, 'overview').getAttribute('aria-label'), 'Overview: 2 things need attention');
   tabBtn(w, 'overview').focus();
@@ -91,10 +92,13 @@ test('the tabs are Overview, 3D View, Control, Rules, Tests and Benchmarks, reac
   assert.equal(w.document.activeElement, tabBtn(w, 'bench'));
   assert.deepEqual(order(w), BENCH_IDS);
   key(w, tabBtn(w, 'bench'), 'ArrowRight');
+  assert.equal(w.document.activeElement, tabBtn(w, 'selfheals'));
+  assert.deepEqual(order(w), ['selfheals']);
+  key(w, tabBtn(w, 'selfheals'), 'ArrowRight');
   assert.equal(w.document.activeElement, tabBtn(w, 'overview'), 'the arrows go round');
   key(w, tabBtn(w, 'overview'), 'End');
-  assert.equal(w.document.activeElement, tabBtn(w, 'bench'));
-  key(w, tabBtn(w, 'bench'), 'Home');
+  assert.equal(w.document.activeElement, tabBtn(w, 'selfheals'));
+  key(w, tabBtn(w, 'selfheals'), 'Home');
   assert.deepEqual(order(w), OVERVIEW);
   const none = full();
   none.panels.needs.data.cards.waiting = []; none.panels.needs.data.cards.blocked = [];
