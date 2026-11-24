@@ -85,6 +85,30 @@ p_mem() {
   else awk '/^MemTotal:/ {t = $2} /^MemAvailable:/ {a = $2} END {if (t) printf "%d %d", t - a, t}' /proc/meminfo 2>/dev/null; fi
 }
 
+# <path> made absolute, as GNU `realpath -m` makes it (no part need exist). Stock macOS realpath has no -m and prints
+# nothing, so without GNU coreutils first on PATH the path is walked part by part from $PWD: `.` dropped, each
+# symlink that exists replaced by its target (as GNU does, so `..` after a link leaves the link's target), `..`
+# taking off the last part. After 40 links a link is kept as written. Never empty.
+p_realpath() { # <path>
+  local r p part out='' t n=0
+  r=$(realpath -m -- "$1" 2>/dev/null) && [ -n "$r" ] && { printf '%s\n' "$r"; return 0; }
+  p=$1
+  [ "${p#/}" != "$p" ] || p=$PWD/$p
+  while [ -n "$p" ]; do
+    part=${p%%/*}
+    if [ "$part" = "$p" ]; then p=''; else p=${p#*/}; fi
+    case $part in '' | .) continue ;; ..) out=${out%/*}; continue ;; esac
+    # The `x` keeps a target's own trailing newlines, which $() would strip; only readlink's one newline goes.
+    if [ -L "$out/$part" ] && [ $((n += 1)) -le 40 ] && t=$(readlink -- "$out/$part" && printf x) \
+      && t=${t%x} && t=${t%$'\n'} && [ -n "$t" ]; then
+      [ "${t#/}" = "$t" ] || out=''
+      p=$t${p:+/$p}
+    else
+      out=$out/$part
+    fi
+  done
+  printf '%s\n' "${out:-/}"
+}
 # "<size> <mtime epoch>" of each file, one line each; a file that is not there gives no line.
 p_stat() { stat -c '%s %Y' "$@" 2>/dev/null; } # <file>...
 # "<mtime epoch> <path>" of each file, one line each; a file that is not there gives no line.

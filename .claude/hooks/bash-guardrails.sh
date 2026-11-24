@@ -22,6 +22,10 @@ CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 # Without the helper no end word is checked and every bare node --test would pass.
 type strip_quoted >/dev/null 2>&1 || { echo "BLOCKED: ${BASH_SOURCE[0]##*/} could not load .claude/hooks/lib/strip-quoted.sh, so it cannot screen this command. Restore it (git checkout .claude/hooks/lib/strip-quoted.sh) and retry.
 Instead: git checkout .claude/hooks/lib/strip-quoted.sh, then run the command again." >&2; exit 2; }
+# p_realpath resolves a path the same way on macOS without GNU coreutils; without it a source path would read as empty.
+. "${BASH_SOURCE[0]%/*}/../../conveyor/lib/portable.sh" 2>/dev/null
+type p_realpath >/dev/null 2>&1 || { echo "BLOCKED: ${BASH_SOURCE[0]##*/} could not load conveyor/lib/portable.sh, so it cannot judge a path. Restore it (git checkout conveyor/lib/portable.sh) and retry.
+Instead: git checkout conveyor/lib/portable.sh, then run the command again." >&2; exit 2; }
 # The one fence for the rewrite that replaces the call's text (an unbounded search): the replacement must
 # run exactly what the call would. Any `$`, backtick, backslash, newline or process substitution in the RAW text,
 # quoted or not, refuses it (each can run or reshape something the replacement drops). The rest is read only through
@@ -188,7 +192,7 @@ src_path() { # $1 = a path word, quotes allowed
   local P=${1//[\'\"]/} V
   case "$P" in /*|\~/*|\$*) ;; *) [ -n "${ENV_DIR-}" ] && P=$ENV_DIR/$P ;; esac # env -C ENV_DIR (unwrap)
   case "$P" in '~/'*) P=$HOME/${P#\~/} ;; esac
-  case "$P" in /*) P=$(realpath -m -- "$P") ;; *) [[ /$P/ == */../* ]] && P=$(realpath -m -- "$P") ;; esac
+  case "$P" in /*) P=$(p_realpath "$P") ;; *) [[ /$P/ == */../* ]] && P=$(p_realpath "$P") ;; esac
   if [[ $P =~ ^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/ ]]; then
     V="(^|[^A-Za-z0-9_])${BASH_REMATCH[1]}="
     [ "$(grep -oE "$V" <<<"$CMD" | wc -l)" -eq 1 ] && grep -qE "$V\"?\\\$\(mktemp[[:space:])]" <<<"$CMD" && return 1
@@ -557,7 +561,7 @@ root_like() { # $1 = normalized absolute path
   local P=$1 R Q=${1%/*}
   [ "$P" = / ] && return 0
   # Home holds every checkout even when this one lives elsewhere (a Mac /tmp checkout).
-  [ "$P" = "$(realpath -m -- "$HOME")" ] && return 0
+  [ "$P" = "$(p_realpath "$HOME")" ] && return 0
   case "$Q" in *[*?[{]*) return 0 ;; esac
   # A bare wildcard is every entry of its folder: as wide as that folder.
   case "${P##*/}" in *[!*?]*) ;; *) root_like "${Q:-/}"; return ;; esac
@@ -596,7 +600,7 @@ search_bounded() {
     /*) P=$OP ;;
     *) [ -n "$SEARCH_BASE" ] || return 1; P=$SEARCH_BASE/$OP ;;
   esac
-  P=$(realpath -m -- "$P" 2>/dev/null) || return 1
+  P=$(p_realpath "$P")
   # Scratch space is where logs live (G4): an absolute /tmp path is never an unbounded search, whatever sits in it.
   # Unless this session's own checkout lives under scratch (a /tmp checkout, a test fixture): then a glob or a parent
   # of the checkout would pass, so the root test below judges every path.
@@ -606,7 +610,7 @@ search_bounded() {
   esac
   root_like "$P" && return 1
   case "$P" in *[*?[]*)
-    while IFS= read -r M; do root_like "$(realpath -m -- "$M")" && return 1; done < <(compgen -G "$P")
+    while IFS= read -r M; do root_like "$(p_realpath "$M")" && return 1; done < <(compgen -G "$P")
   esac
   return 0
 }
@@ -761,8 +765,8 @@ for i in "${!SRCH_TEXT[@]}"; do
       ''|'~') NEW_BASE=$HOME ;;
       '~/'*) NEW_BASE=$HOME/${1#'~/'} ;;
       -*|*'$'*|*'`'*) SEARCH_BASE=""; continue ;;
-      /*) NEW_BASE=$(realpath -m -- "$1") ;;
-      *) [ -n "$SEARCH_BASE" ] && NEW_BASE=$(realpath -m -- "$SEARCH_BASE/$1") ;;
+      /*) NEW_BASE=$(p_realpath "$1") ;;
+      *) [ -n "$SEARCH_BASE" ] && NEW_BASE=$(p_realpath "$SEARCH_BASE/$1") ;;
     esac
     [ -n "$NEW_BASE" ] && [ -d "$NEW_BASE" ] && SEARCH_BASE=$NEW_BASE
     continue
