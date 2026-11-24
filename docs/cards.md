@@ -29,8 +29,9 @@ once with no GitHub issue. Its record is only in Conveyor. The five kinds:
 - **Foreman orders**: a change that you order the Foreman to make. The Foreman runs
   `foreman.sh ask <project> card <title> <body>`. The Board shows the card as "Foreman order".
 - **Review follow-ups**: a finding that the review of a card files as a follow-up. The text of the card names its
-  parent. The Board shows it as "Review follow-up of #<parent>". The card waits until its parent card has landed. A
-  finding that names a file of the pipeline is held as its issue would be. If its parent card does not land, the
+  parent. The Board shows it as "Review follow-up of #<parent>". If the parent card has no GitHub issue, the Board
+  shows the branch of the parent card or its card ID in place of "#<parent>". The card waits until its parent card
+  has landed. A finding that names a file of the pipeline is held as its issue would be. If its parent card does not land, the
   follow-up is taken back, and the finding goes in the brief of the next card of the parent. A follow-up inherits the
   yes that the owner gave to its parent for a visible change.
 - **Release fix cards**: the fix card for a red test file of a release suite. Its text has the line

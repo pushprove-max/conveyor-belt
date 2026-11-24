@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: how a review follow-up is filed (lib/followups.sh): which findings are held for the owner, which are
-# privacy hits of the card's own change, and the follow-up's title.
+# privacy hits of the card's own change, the follow-up's title, and how it names its parent.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -20,6 +20,35 @@ t_fupipeunder() {
   for f in '__conveyor/lib/__' '__conveyor/conveyor.sh__'; do
     [ "$(onpipeline "$f" <<<"$p")" = 1 ] || fail "onpipeline '$f' with the pipelineFiles $p did not print 1"
   done
+}
+
+# #1661: the follow-up card of a card with no GitHub issue and no parent issue names its parent by the branch a
+# land-branch card landed (its picked line), else by its card id. Bug: its label read "Review follow-up of #" and its
+# body "Follow-up to # (Conveyor card ...)", naming no parent. fuparent <branch or ""> <name it must have>.
+fuparent() {
+  local c=c20261101T000000-main-0
+  setup "[$(issue 7 2026-01-01)]"; loop control rules followupissues=off > /dev/null || fail "control rules followupissues=off was refused"
+  printf '%s\n' '[P2] a.txt:1 the word is wrong' 'VERDICT: NO-GO' > "$STUB/r.review"
+  jq -cn --arg b "$1" '{title: "t"} + if $b == "" then {} else {branch: $b} end' > "$STUB/picked.json" \
+    && jq -cn '{number: 0, title: "t", body: "b", labels: [], milestone: null}' > "$STUB/parent.json" || fail "the fixture's JSON could not be written"
+  fx_in 'append "$(line '"$c"' 0 picked ok "$(cat "$STUB/picked.json")")" && followups '"$c"' "$(cat "$STUB/parent.json")" "$STUB/r.review"'
+  [ "$RC" = 0 ] && [ "$(jq -c '.cards[0] | [.label, (.body | split("\n")[0] | startswith("Follow-up to '"$2"' (Conveyor card '"$c"')."))]' "$ST/testactions/cards.json")" = "[\"Review follow-up of $2\",true]" ] \
+    || fail "followups of card $c (issue 0, picked line branch '${1:-none}') did not name its parent '$2' in the label and body (exit $RC): $(cat "$T/$CASE/run.out") $(cat "$ST/testactions/cards.json" 2>&1)"
+}
+t_fuparentbranch() { fuparent hand/fix hand/fix; }
+t_fuparentcard() { fuparent '' c20261101T000000-main-0; }
+# A follow-up filed as a GitHub issue (followupissues on) keeps "Follow-up to #<n> (Conveyor card": the picker's wait for
+# its parent to land (jq/upnext.jq) and Needs you (snapshot.sh) match only that form. Bug: it read "Follow-up to hand/fix",
+# so the picker could take it before its parent landed.
+t_fuparentissue() {
+  local c=c20261101T000000-main-0
+  setup "[$(issue 7 2026-01-01)]"
+  printf '%s\n' '[P2] a.txt:1 the word is wrong' 'VERDICT: NO-GO' > "$STUB/r.review"
+  jq -cn '{title: "t", branch: "hand/fix"}' > "$STUB/picked.json" \
+    && jq -cn '{number: 0, title: "t", body: "b", labels: [], milestone: null}' > "$STUB/parent.json" || fail "the fixture's JSON could not be written"
+  fx_in 'append "$(line '"$c"' 0 picked ok "$(cat "$STUB/picked.json")")" && followups '"$c"' "$(cat "$STUB/parent.json")" "$STUB/r.review"'
+  [ "$RC" = 0 ] && jq -e -s 'length == 1 and (.[0].body | test("^Follow-up to #[0-9]+ \\(Conveyor card c20261101T000000-main-0\\)"))' "$STUB/filed" > /dev/null \
+    || fail "followups of card $c (issue 0, picked line branch hand/fix, follow-up issues on) did not file one issue whose body starts 'Follow-up to #<n> (Conveyor card $c)' (exit $RC): $(cat "$T/$CASE/run.out") $(cat "$STUB/filed" 2>&1)"
 }
 
 # Bug: a finding on the card's own file that also names a new file in a tracked folder (conveyor/lib/newguard: no

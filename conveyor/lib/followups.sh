@@ -302,7 +302,7 @@ rlpick() {
   if [ "$(jq --arg f "$1" 'any(.[]; . as $w | $f | ascii_downcase | contains($w | ascii_downcase))' <<<"$3" 2>/dev/null)" = false ]; then echo rl; else echo hold; fi
 }
 followups() { # <card> <issue json> <review file>
-  local f mark where out num n nums=() more=() found=() pipe cost own='' free rl held='' res pm g masked depth kind clean body area nocard='' fc=${3%.review}.fucards
+  local f mark where out num n pn nums=() more=() found=() pipe cost own='' free rl held='' res pm g masked depth kind clean body area nocard='' fc=${3%.review}.fucards
   local why ofc=${3%.review}.outfiled ek healed=0; [ -z "${rlfind:-}" ] || heldlist held || held='' # what waits for the owner, read for the finding of a retry by review-land (rl, below); none read holds it
   depth=$(fudepth "$2") && [[ $depth =~ ^[0-9]+$ ]] || { echo "cannot read the parent issue's follow-up depth"; return 1; }
   packget pipelineFiles pipe || { echo "cannot read the pack's pipeline files"; return 1; }
@@ -311,11 +311,11 @@ followups() { # <card> <issue json> <review file>
   area=$(jq -r --arg p "$AREA" '.labels | map(.name | select(startswith($p))) | .[0] // empty' <<<"$2") || { echo "cannot read the parent issue's labels"; return 1; }
   n=$(jq -r .number <<<"$2") && mapfile -t more < <(jq -r --arg p "$AREA" '(.labels | map(.name | select(startswith($p))) | .[0] // empty | "--label", .),
     (.milestone.title // empty | "--milestone", .)' <<<"$2") || { echo "cannot read the parent issue's labels and milestone"; return 1; }
-  # The parent of a card with no GitHub issue (issue 0) is the issue that card follows up, if it follows one up: its follow-ups
-  # are the follow-ups of that issue (a run limited by --only to it takes them, and the follow-up's brief reaches its yes).
-  [ "$n" != 0 ] || n=$(tcparent "$1")
+  # Issue 0's parent is the issue its card follows up, if any (--only takes its follow-ups). pn names it in a follow-up card: #<issue>, else the branch,
+  # else the card id (bug: "Review follow-up of #"); a follow-up issue keeps "Follow-up to #<n>", the only form jq/upnext.jq and snapshot.sh read.
+  [ "$n" != 0 ] || n=$(tcparent "$1"); [[ $n =~ ^[1-9][0-9]*$ ]] && pn="#$n" || pn=$(stdb ask card "$1" 2>/dev/null | jq -rn 'first(inputs | objects | select(.step == "picked") | .branch | strings) // empty' 2>/dev/null); pn=${pn:-$1}
   mapfile -t found < <(tofile "$3")
-  rm -f "$fc" "$ofc"; [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" != false ] || nocard=1
+  rm -f "$fc" "$ofc"; [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" != false ] || nocard=1; [ -n "$nocard" ] || pn="#$n"
   # A finding of the last review the judge sorted as a kind kept off the belt goes to its list (healsadd()), not to a
   # follow-up: the card's own issue, its area, and the card that lands it. At the last review it no longer blocks the
   # card, whatever its level (afterreview(), lib/card.sh). One that cannot be written there lands nothing, so it is not lost.
@@ -368,10 +368,10 @@ followups() { # <card> <issue json> <review file>
     [ "$pm" != public ] || ek=$(privmask "$ek") \
       || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed: the privacy check could not be made (finding: ${f:0:200})"; return 1; }
     if [ -n "$why" ]; then
-      body="Follow-up to #$n (Conveyor card $1). The judge of that card's review found the finding below real, but not caused by that card's change: $why
+      body="Follow-up to $pn (Conveyor card $1). The judge of that card's review found the finding below real, but not caused by that card's change: $why
 The card landed without a fix for it. Fix it in this issue."
     else
-      body="Follow-up to #$n (Conveyor card $1). The last review of that card said NO-GO. The card landed without a fix for the finding below. Fix it in this issue."
+      body="Follow-up to $pn (Conveyor card $1). The last review of that card said NO-GO. The card landed without a fix for the finding below. Fix it in this issue."
     fi
     body+="
 
@@ -381,10 +381,10 @@ Kind: $ek$clean$cost$masked
 Follow-up depth: $((depth + 1))"
     if [ -n "$nocard" ]; then
       # The standing yes is logged before the card exists (it has no id yet); one that cannot be logged is held, as an issue is.
-      [ -z "$free" ] || standinglog review-followup "a follow-up card of #$n (card $1) was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''
+      [ -z "$free" ] || standinglog review-followup "a follow-up card of $pn (card $1) was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''
       # Its parent's card is filed before it lands: the card waits on that id, as an issue waits on its parent's landed line (jq/upnext.jq).
       # It keeps its parent's area label, as the follow-up issue does (more), so an area set to Never build holds it too.
-      num=$(tcadd "" "$(futitle "$g")" "$body"$'\n'"Depends on: $1" "$([ -z "$cost" ] || [ -n "$free$rl" ] || echo held)" "Review follow-up of #$n" "$(jq -cn '$ARGS.positional' --args "$FOLLOWUP" ${kind:+"$kind"} ${mark:+"$mark"} ${area:+"$area"})" "$n") \
+      num=$(tcadd "" "$(futitle "$g")" "$body"$'\n'"Depends on: $1" "$([ -z "$cost" ] || [ -n "$free$rl" ] || echo held)" "Review follow-up of $pn" "$(jq -cn '$ARGS.positional' --args "$FOLLOWUP" ${kind:+"$kind"} ${mark:+"$mark"} ${area:+"$area"})" "$n") \
         && printf '%s\t%s\n' "$num" "$f" >> "$fc" && { [ -z "$why" ] || jq -cn --arg f "$f" --arg i "$num" '{finding: $f, issue: $i}' >> "$ofc"; } || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): its card could not be started"; return 1; }
       continue
     fi
@@ -393,7 +393,7 @@ Follow-up depth: $((depth + 1))"
     nums+=("$num")
     [ -z "$why" ] || jq -cn --arg f "$f" --argjson i "$num" '{finding: $f, issue: $i}' >> "$ofc" \
       || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up #$num filed, but the engine could not note it as an outside finding's, so nothing landed (finding: ${f:0:200})"; return 1; }
-    [ -z "$free" ] || standinglog review-followup "#$num, a follow-up of #$n (card $1), was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''
+    [ -z "$free" ] || standinglog review-followup "#$num, a follow-up of $pn (card $1), was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''
     [ -z "$cost" ] || [ -n "$free$rl" ] || out=$(locked control hold "$num" 2>&1 >/dev/null) \
       || { unfile "$n" "$3" "${nums[@]}"; echo "a follow-up that changes a pipeline file could not be held, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
     [ -z "$rl" ] || out=$(CONVEYOR_RELEASEBY=follow-up locked control release "$num" 2>&1 >/dev/null) \
