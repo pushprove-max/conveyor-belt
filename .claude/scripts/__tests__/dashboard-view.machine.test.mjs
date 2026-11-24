@@ -389,18 +389,22 @@ test('the machine: a project\'s Needs you names its open decisions beside its is
   assert.match(said(section(w, 'widgetshop').querySelector('[data-list="Needs you"]')), /Needs you \(2\).*#41.*decision: Take card payments from Monday\?/);
 });
 
-// Issue 204: a card that only waits on another card holds no slot, so the Belt panel's count leaves it out as the On the
-// belt tile does, and filtered to one project it leaves out that project's own. Bug it catches: the panel counted every
-// card on the belt, so with cap 1, one card building and one waiting, the tile said 1 of 1 and the panel 2 of 1.
-test('the belt: its count leaves out the cards that only wait on another card, each project its own', () => {
+// Issue 1538: the cap counts every card on the belt but a landing one, a card that waits on another card too, so the
+// Belt panel counts as the On the belt tile does, and filtered to one project it counts that project's cards against
+// its own cap. Bug it catches: the panel took the part's waiting count off its figure, so the owner saw fewer cards
+// against the cap than the belt held; or, filtered, it counted every project's cards. The part still carries waiting
+// here, as an older Board's does.
+test('the belt: its count holds every card on the belt, a waiting one too, each project its own', () => {
   const d = two();
+  // widgetshop's second card waits on its first, so a count that drops the cards with step 'waiting' fails here.
+  Object.assign(d.panels.belt.data.cards.find((c) => c.card === 'c4-6'), { step: 'waiting', waitsOn: { card: 'c4-5', issue: 5, state: 'building' } });
   Object.assign(d.panels.belt.data, { waiting: 1, byRepo: { sample: { cap: 3, waiting: 0 }, widgetshop: { cap: 5, waiting: 1 } } });
   const w = boot();
   deliver(w, d);
   const count = () => panel(w, 'belt').querySelector('.panel-count').textContent;
-  assert.equal(count(), '2 of 8', 'three cards, one waiting: two hold a slot');
+  assert.equal(count(), '3 of 8', 'three cards, one waiting: all three count');
   choose(w, act(head(w), 'project'), 'widgetshop');
-  assert.equal(count(), '1 of 5', 'widgetshop: two cards, its one waiting card left out');
+  assert.equal(count(), '2 of 5', 'widgetshop: its two cards, the waiting one too, of its own cap');
   choose(w, act(head(w), 'project'), 'sample');
-  assert.equal(count(), '1 of 3', 'sample: another project\'s waiting card is not taken off its count');
+  assert.equal(count(), '1 of 3', 'sample: its one card of its own cap, no other project\'s card counted');
 });

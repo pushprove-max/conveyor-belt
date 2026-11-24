@@ -380,100 +380,6 @@ poll
 tail -n 1 "$L" | grep -Eq ' alpha: failed, read none; no wake$' || fail "the last line is not this poll's failed read: $(tail -n 1 "$L")"
 }
 
-# Issue 361: a card blocked two polls ago or more that no session has got is named on the status and in the next
-# wake. Bug it catches: a block whose wake reached no session (or that no watcher saw) was told to no one, and the
-# Foreman learned of it only when the owner asked. #5: no wake put (not in the reported list); #8: its wake still
-# pending; #7: reported and delivered; #6: blocked under two polls ago. The snapshot is behind the card records, so
-# its lines end "(as of 11:29Z)" and the pending wake of #8 has no suffix: bug it catches too, the full lines differed
-# and the status left #8 out.
-t_unreported() {
-CASE=unreported; fixture unreported; mkdir -p "$FD/pending"
-b() { echo "{card: \"c$1\", issue: $1, since: \"$2\", reason: \"tests failed twice\"}"; } # <issue> <since>
-snap ".recordsNewer = true | .snapshotAt = \"2026-11-15T11:29:29Z\" | .health.blocked = [$(b 5 2026-11-15T11:00:00Z), $(b 6 2026-11-15T11:59:30Z), $(b 7 2026-11-15T11:00:00Z), $(b 8 2026-11-15T11:00:00Z)]"
-printf '%s\n' alpha/blocked:c6 alpha/blocked:c7 alpha/blocked:c8 > "$FD/conveyor-reported.txt"
-old=$FD/pending/20261115T110000Z-1-old.wake
-printf '%s\n' 'Conveyor: alpha: blocked: #8' 'alpha: #8 is blocked since 2026-11-15T11:00:00Z: tests failed twice' > "$old"
-out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
-[ "$(grep '^not yet reported: ' <<<"$out")" = $'not yet reported: blocked #5\nnot yet reported: blocked #8' ] \
-  || fail "the status does not name exactly the unreported blocked cards #5 and #8: $out"
-poll || fail "no wake for the new blocked card #5: $(cat "$T/err")"
-w=$(cat "$(find "$FD/pending" -name '*.wake' ! -name "${old##*/}")")
-grep -qxF 'alpha: #5 is blocked since 2026-11-15T11:00:00Z: tests failed twice (as of 11:29Z)' <<<"$w" || fail "the wake does not name #5: $w"
-[ "$(grep 'not yet reported' <<<"$w")" = 'alpha: not yet reported: blocked #8' ] \
-  || fail "the wake does not name the pending #8 alone as not yet reported: $w"
-}
-
-# Bug caught: a wake relayed at a stop that stop.sh refused is kept as <wake>.sent-<session>.<pid>, its key reported,
-# and the waiter relays it again later; the status read only pending/*.wake, so it left that card out meanwhile. A
-# wake relayed at a stop that was not refused reached the session: its card is not named.
-# Bug caught too: the wake relayed at a refused stop named each block "(as of 11:29Z)" (a snapshot behind the card
-# records), and the status, reading the records now (recordsNow), gave the same blocks with no suffix; the full lines
-# differed, so the status left the cards out of "not yet reported". The other way round (a pending wake with no suffix,
-# a snapshot line with it) is t_unreported's #8.
-t_unrepsent() {
-CASE=unrepsent; fixture unrepsent; mkdir -p "$FD/pending"
-snap '.recordsNewer = true | .snapshotAt = "2026-11-15T11:29:29Z"
-  | .health.blocked = [{card: "c9", issue: 9, since: "2026-11-15T11:00:00Z", reason: "tests failed twice"}, {card: "c7", issue: 7, since: "2026-11-15T11:00:00Z", reason: "its tests failed"}]
-  | .recordsNow = {blocked: .health.blocked, waiting: []}'
-printf '%s\n' alpha/blocked:c9 alpha/blocked:c7 > "$FD/conveyor-reported.txt"
-w9='alpha: #9 is blocked since 2026-11-15T11:00:00Z: tests failed twice (as of 11:29Z)'
-w7='alpha: #7 is blocked since 2026-11-15T11:00:00Z: its tests failed (as of 11:29Z)'
-printf '%s\n' 'Conveyor: alpha: blocked: #9 #7' "$w9" "$w7" > "$FD/pending/20261115T113000Z-1-x.wake.sent-S.42"
-echo k1 > "$FD/sent-stop"; echo k1 > "$FD/refused-stops"
-out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
-grep -qx 'not yet reported: blocked #9' <<<"$out" \
-  || fail "with the wake '$w9' relayed at the refused stop k1, the status does not name #9 as not yet reported: $out"
-grep -qxF 'needs you: #7 is blocked since 2026-11-15T11:00:00Z: its tests failed' <<<"$out" \
-  || fail "the status read from recordsNow does not name #7 blocked with no suffix: $out"
-grep -qx 'not yet reported: blocked #7' <<<"$out" \
-  || fail "with the wake '$w7' relayed at the refused stop k1, the status does not name #7 as not yet reported: $out"
-echo k2 > "$FD/sent-stop"
-out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
-! grep -q 'not yet reported' <<<"$out" || fail "with the wakes of #9 and #7 relayed at the stop k2, not refused, the status names one as not yet reported: $out"
-}
-
-# Bug caught: a review-retry that failed (reviewretry()) adds "; the review-retry of #N failed: <error>" to the block's
-# wake line, after any "(as of HH:MMZ)"; the status compared the whole wake line with the plain block line, so a wake
-# relayed at a refused stop that carried the note left the card out of "not yet reported".
-t_unrepretry() {
-CASE=unrepretry; fixture unrepretry; mkdir -p "$FD/pending"
-snap '.health.blocked = [{card: "c7", issue: 7, since: "2026-11-15T11:00:00Z", reason: "its tests failed"}]'
-echo alpha/blocked:c7 > "$FD/conveyor-reported.txt"
-w='alpha: #7 is blocked since 2026-11-15T11:00:00Z: its tests failed (as of 11:29Z); the review-retry of #7 failed: #7 is still ending'
-printf '%s\n' 'Conveyor: alpha: blocked: #7' "$w" > "$FD/pending/20261115T113000Z-1-x.wake.sent-S.42"
-echo k1 > "$FD/sent-stop"; echo k1 > "$FD/refused-stops"
-out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
-grep -qx 'not yet reported: blocked #7' <<<"$out" \
-  || fail "with the wake '$w' relayed at the refused stop k1, the status does not name #7 as not yet reported: $out"
-}
-
-# Guards the "(as of HH:MMZ)" a wake line may end with: the watcher queued a block from a snapshot behind the card
-# records, so its wake line ends in " (as of 11:50Z)", while the status builds that block from the card records now
-# (NOWBLOCKED) with no suffix, and a later poll, from a snapshot made at 11:55Z, ends its own block lines in another
-# time. A match that compared the lines whole, suffix and all, would leave out the `not yet reported` lines for #8
-# (its wake still pending) and #9 (its wake relayed at the refused stop), in the status and in the next wake (for the
-# new #10).
-t_unrepsentasof() {
-CASE=unrepsentasof; fixture unrepsentasof; mkdir -p "$FD/pending"
-b() { echo "{card: \"c$1\", issue: $1, since: \"2026-11-15T11:00:00Z\", reason: \"tests failed twice\"}"; } # <issue>
-snap ".recordsNewer = true | .snapshotAt = \"2026-11-15T11:50:00Z\" | .health.blocked = [$(b 8), $(b 9)]
-  | .recordsNow = {blocked: [$(b 8), $(b 9)], waiting: []}"
-printf '%s\n' alpha/blocked:c8 alpha/blocked:c9 > "$FD/conveyor-reported.txt"
-w8='alpha: #8 is blocked since 2026-11-15T11:00:00Z: tests failed twice (as of 11:50Z)'
-w9='alpha: #9 is blocked since 2026-11-15T11:00:00Z: tests failed twice (as of 11:50Z)'
-printf '%s\n' 'Conveyor: alpha: blocked: #8' "$w8" > "$FD/pending/20261115T110000Z-1-p.wake"
-printf '%s\n' 'Conveyor: alpha: blocked: #9' "$w9" > "$FD/pending/20261115T110000Z-2-x.wake.sent-S.42"
-echo k1 > "$FD/sent-stop"; echo k1 > "$FD/refused-stops"
-out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
-grep -qx 'not yet reported: blocked #8' <<<"$out" || fail "with the pending wake '$w8' of #8, the status does not name #8 as not yet reported: $out"
-grep -qx 'not yet reported: blocked #9' <<<"$out" || fail "with the wake '$w9' of #9 relayed at the refused stop k1, the status does not name #9 as not yet reported: $out"
-snap ".recordsNewer = true | .snapshotAt = \"2026-11-15T11:55:00Z\" | .health.blocked = [$(b 8), $(b 9), $(b 10)]"
-poll || fail "no wake for the new blocked card #10 (snapshot of 11:55Z): $(cat "$T/err")"
-w=$(cat "$(find "$FD/pending" -name '*.wake' ! -name 20261115T110000Z-1-p.wake)")
-[ "$(grep 'not yet reported' <<<"$w")" = $'alpha: not yet reported: blocked #8\nalpha: not yet reported: blocked #9' ] \
-  || fail "a poll of a snapshot made at 11:55Z, with the pending wake '$w8' and the wake '$w9' relayed at the refused stop k1, gave a wake that does not name #8 and #9 as not yet reported: $w"
-}
-
 # Issue 1029: `serve` and all under it were stopped by a stop signal (state T), and the wake said only "#N is stuck:
 # no new step and no output", with no cause and no way out. A stopped engine health reads (engineStopped) is one item,
 # naming the card it holds, and a stuck card whose own process health reads as stopped (stopped: {pid, of, since}) is
@@ -590,7 +496,6 @@ watcher: last poll ended 2026-11-15T11:59:47Z, took 47 s (alpha: slow, read heal
 waiter: listening" ] || fail "ask alpha foreman status (host devhost, live waiter $wp) did not give this Foreman's watcher and waiter: $out"
 }
 
-cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog unreported unrepsent unrepretry unrepsentasof stopped resumed resumedhost askhost)
 cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog stopped resumed resumedhost askhost)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }

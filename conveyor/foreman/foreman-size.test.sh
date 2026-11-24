@@ -417,8 +417,7 @@ t_words_notes_full() {
     || fail "the words hook's claim, with no room for a note, has no one line that says to Read $FD/plugin-bugs.md: $(grep -n 'plugin-bugs' <<<"$c" | cut -c1-200)"
 }
 
-cases=(fit fixed big other race old old_live words_old owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
-cases=(fit fixed big other race old own old_gap words_old owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
+cases=(fit fixed big other race old old_live own old_gap words_old owner owner_whole owner_mid owner_mid_rules words_rules notes words_notes_full)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

@@ -342,7 +342,9 @@ test('Plan a run, 2 runs of 1 task: the arm table shows the mockup\'s states, bo
   assert.equal(text(q(w, '.bench-why')), 'Start is off: no arm is ticked. Check the arms first is off: no arm is ticked.');
   // Bug (#1436): the guide lists each reason a Plan a run button is off; a reason the page shows and the guide leaves out is the gap.
   assert.ok(guide('board.md').includes('with no arm picked, while an arm that you picked is not ready, while the usage guard holds an arm that you picked, and while an action'), 'docs/board.md lists the reasons Start the run is off');
-  assert.ok(guide('board.md').includes('It stays off with no arm picked, while the arms that you picked are being checked, and while an action'), 'docs/board.md lists the reasons Check the arms first is off');
+  // The button is off with no arm picked, when every picked arm is being checked (checkWhy and toCheck: bench-plan.js), so
+  // the guide says "all", and while an action has no answer (K.B.busy).
+  assert.ok(guide('board.md').includes('It stays off with no arm picked, while all the arms that you picked are being checked, and while an action'), 'docs/board.md lists the reasons Check the arms first is off');
 });
 
 // Bug it guards: with the usage guard reached, Start was off with no word of why.
@@ -396,7 +398,7 @@ test('Plan a run, Check the arms first, the first read of the arms lost: the pag
   assert.equal(w.benchAsks.length, asked + 3, 'no read follows it');
   const page = guide('board.md');
   assert.ok(page.includes('After a check, the Board reads the arms again, so the arms show their new state, until a read answers and no arm is being checked'), 'docs/board.md says when the re-read after a check ends');
-  assert.ok(page.includes('while the arms that you picked are being checked'), 'docs/board.md lists the checking arms as a reason Check the arms first is off');
+  assert.ok(page.includes('while all the arms that you picked are being checked'), 'docs/board.md lists the checking arms as a reason Check the arms first is off');
 });
 
 // Bug it guards: while the answer to Check the arms first was out, both buttons were off with no word of why.

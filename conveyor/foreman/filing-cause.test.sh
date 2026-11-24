@@ -306,8 +306,7 @@ grep -qxF conveyor/foreman/filing-cause.test.sh <(tail -n +2 "$W/list") \
   || fail "the cap leaves files out of the list of a card that changes only no_cause in $f, so its records can drop conveyor/foreman/filing-cause.test.sh; left out: $(head -1 "$W/list"), list: $(tail -n +2 "$W/list" | tr '\n' ' ')"
 }
 
-cases=(what heading list fence bug new linked)
-cases=(what heading quote fence bug new linked)
+cases=(what heading list quote fence bug new linked)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"
