@@ -151,6 +151,31 @@ t_lintpolicywidths() {
   [ "$RC" = 0 ] && [ "${h#* }" = '{".alint":1,".lintrc":1,".size-exempt":1}' ] \
     || fail "the kept width 1 (an approval kept before each file had its own) did not widen every file: '${h#* }' (exit $RC)"
 }
+# Bug (issue 1575 follow-up): an approval kept before each file had its own width holds `<hash> 1`, while cardready()
+# now gets `<hash> {"<path>":1,...}` from lintpolicy() for the same diff (every file at the kept width 1). lintyes()
+# compared the whole records, so that old approval matched no hash again and the card stopped for a second yes. The
+# hashes alone are compared: the old record with a later approval line covers the same diff, and one with another
+# hash does not.
+t_lintyeslegacy() {
+  local h
+  setup '[]'
+  fx_wt 'echo strict > .lintrc' .lintrc old
+  approve
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'h=$(lintpolicy "$FXWT" "$(git -C "$FXWT" rev-parse HEAD)" '"'$POLICY'"' 1) && h=$(head -n 1 <<<"$h") && [ -n "$h" ] || exit 7
+    echo "hash: $h"
+    jq -cn --arg p "${h%% *} 1" "{body: \"body of 7\", policy: \$p}" > "$STUB/old.body"
+    jq -cn --arg p "0000000000000000000000000000000000000000 1" "{body: \"body of 7\", policy: \$p}" > "$STUB/other.body"
+    i=$(jq -c ".[0]" "$STUB/issues.json")
+    lintyes "$i" "$STUB/old.body" "$h"; echo "same: $?"
+    lintyes "$i" "$STUB/other.body" "$h"; echo "other: $?"'
+  h=$(sed -n 's/^hash: //p' "$T/$CASE/run.out")
+  [ "${h#* }" = '{".lintrc":1}' ] || fail "lintpolicy with the kept width 1 did not give .lintrc the width 1: '$h' (exit $RC): $(cat "$T/$CASE/run.out")"
+  grep -qx 'same: 0' "$T/$CASE/run.out" \
+    || fail "the approval kept as '${h%% *} 1' did not cover the same diff, now '$h': $(cat "$T/$CASE/run.out")"
+  grep -qx 'other: 1' "$T/$CASE/run.out" \
+    || fail "an approval kept as '0000000000000000000000000000000000000000 1' covered the diff '$h': $(cat "$T/$CASE/run.out")"
+}
 
 # Card #7 on a main whose pack makes .lintrc lint policy, with a lint command that passes: its build runs <build>
 # and notes `build` in $STUB/did; review 1 is <review> (a GO by default).
