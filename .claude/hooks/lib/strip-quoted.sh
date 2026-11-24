@@ -71,7 +71,8 @@ strip_quoted() {
         elif [ "$CHAR" = '`' ]; then _strip_keep_span; OUT+=$CHAR
         else SPAN+=$CHAR
         fi ;;
-      comment) [ "$CHAR" = $'\n' ] && { MODE=code; OUT+=$CHAR; } ;;
+      # A comment after `<<EOF` ends at the newline as code does, so a here-document begun on its line opens there.
+      comment) [ "$CHAR" = $'\n' ] && { MODE=code; OUT+=$CHAR; [ -z "$TAG" ] || { MODE=heredoc; LINE=""; }; } ;;
       heredoc)
         if [ "$CHAR" = $'\n' ]; then
           # Where bash ends it: the end word alone, after tabs only under `<<-`.

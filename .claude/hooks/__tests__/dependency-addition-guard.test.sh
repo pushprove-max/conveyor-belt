@@ -505,6 +505,12 @@ for C in "$(printf "mkdir -p /tmp/d && cat > /tmp/d/x.md <<'EOF'\na note\nEOF\np
   "$(printf "mkdir /tmp/d; cat <<'EOF'; bash <<'E2'\nnote\nEOF\n%s lodash\nE2" "$INSTALL")" "$(printf "mkdir /tmp/d; cat <<EOF\n%s lodash\nEOF" "$INSTALL")"; do
   check "an install beside a quoted note on a line with other commands still blocks: $C" 2 "$(run "$(bash_p "$C")")"
 done
+# A comment after the opener: the comment ended at the newline in code mode, so the body was read as code and
+# "pip install into" was refused. The end word still closes the note, so an install after it blocks.
+C=$(printf "mkdir -p /tmp/d && cat > /tmp/d/x.md <<'EOF' # write the note\nsetup's pip install into the virtualenv\nEOF")
+check "a quoted note with a comment after its opener passes: $C" 0 "$(run "$(bash_p "$C" "$WTX")")"
+C=$(printf "mkdir -p /tmp/d && cat > /tmp/d/x.md <<'EOF' # write the note\na note\nEOF\npip install requests")
+check "an install after a quoted note with a comment after its opener blocks: $C" 2 "$(run "$(bash_p "$C" "$WTX")")"
 # An end word that is not plain never reaches this guard: bash-guardrails.sh
 # refuses the command, so this guard reads no odd end word. Every form review
 # found that hid an install after the note:
