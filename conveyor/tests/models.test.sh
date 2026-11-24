@@ -139,12 +139,13 @@ t_claudeexit() {
   claude_reviewer "[$(issue 9 2026-01-03)]"
   echo "$NOGO" > "$STUB/review.1"; : > "$STUB/review-exit"
   out=$(rvcall 9)
+  # Its events are kept (reviewkeep()), and the reason names them.
   [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(head -n 1 <<<"$out")" = 'review failed (exit 3); its events are kept in c9.review.events' ] && [ "$(tail -n 1 <<<"$out")" = 'rc=1 none' ] \
     || fail "a Claude review that gave its NO-GO and then exited non-zero was run again: $out"
 }
 t_claudebare() {
   claude_reviewer "[$(issue 10 2026-01-04)]"
-  # An answer that ends cleanly with neither a verdict nor token usage is no verdict: it runs once more.
+  # An answer that ends cleanly with neither a verdict nor token usage is no verdict: it runs once more. Its events are kept (reviewkeep()).
   echo "$GO" > "$STUB/review.2"; : > "$STUB/review-bare"
   out=$(rvcall 10)
   [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(head -n 1 <<<"$out" | jq -r .firstTry.reason)" = "review reported no token usage; its events are kept in c10.review.events" ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \

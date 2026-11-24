@@ -240,7 +240,7 @@ opencodereview() { # <worktree> <brief> <instructions> <model> <effort>
   jq -e objects <<<"$f" >/dev/null 2>&1 || f=$(jq -cn --arg m "$4" --arg e "$5" --argjson s "$sec" '{model: $m, effort: $e, sec: $s, unread: "the review output could not be read"}')
   if [ $rc = 0 ] && jq -Rrn "$OPENCODEANSWER" "$1.events" > "$1.review.new" 2>/dev/null && [ -s "$1.review.new" ] && mv -f "$1.review.new" "$1.review"; then
     jq -e 'has("tokens")' <<<"$f" >/dev/null && printf '%s\n' "$f" && return 0
-    # Its events and err are kept as a failed Codex review's are (reviewkeep()): a run again overwrites both.
+    # One that reported no token usage, or failed (below), keeps its events and err as a failed Codex review's are (reviewkeep()): a run again overwrites both; clean() removes them with the card.
     kn=$(reviewkeep "$1" ""); s="review reported no token usage$kn"; [ "$(verdict "$1.review")" != none ] || no=2
   else
     # Its error events say why it ended (a provider's refusal, a model it does not know); its stderr, what else it said.
@@ -284,7 +284,7 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
     && [ -s "$1.review.new" ] && mv -f "$1.review.new" "$1.review"; then
     routedone 1
     jq -e 'has("tokens")' <<<"$f" >/dev/null && jq -c 'del(.ok)' <<<"$f" && return 0
-    # Its events and err are kept as a failed Codex review's are (reviewkeep()): a run again overwrites both.
+    # One that reported no token usage, or failed (below), keeps its events and err as a failed Codex review's are (reviewkeep()): a run again overwrites both; clean() removes them with the card.
     kn=$(reviewkeep "$1" ""); s="review reported no token usage$kn"; [ "$(verdict "$1.review")" != none ] || no=2
   else kn=$(reviewkeep "$1" ""); s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))$kn"$'\n'"$(tail -n 60 "$1.err")"
     jq -Rrn '[inputs | fromjson? // empty | objects | select(.type == "result")] | last | .result | strings | sub("\\s+$"; "")' "$1.events" > "$1.review.new" 2>/dev/null

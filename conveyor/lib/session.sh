@@ -328,9 +328,9 @@ OPENCODEANSWER='[inputs | fromjson? // empty | objects | select(.type == "step_s
 # A card that `control stop` ended with a session or review running: what that one used so far is written as
 # a line of its step, result stopped (its model the one the live file names, its seconds from its start line), so
 # it is priced and counted when the card's lines move to the retried file. Called by the loop before the worktree
-# goes; a line that cannot be written is said, and the stop goes on. A build, fix or rebase whose output holds no usage yet is read from its transcript (transcribed()), on the account its worktree line names (the loop's own ACCT is the default), and one still with no price keeps its output (outkeep()), as a session's line does. A line with no usage read still names the model, so the Board can price it at that model's median (estimate_rest()).
+# goes; a line that cannot be written is said, and the stop goes on. A build, fix or rebase whose output holds no usage yet is read from its transcript (transcribed()), on the account its worktree line names (the loop's own ACCT is the default), and one still with no price keeps its output (outkeep()), as a session's line does; a review still with no price keeps its events and err (reviewkeep()). A line with no usage read still names the model, so the Board can price it at that model's median (estimate_rest()).
 stopped() { # <card> <issue>
-  local wt=$CARDS/$1 last of o f m e s x roll run='' ft=$CARDS/$1.firsttry
+  local wt=$CARDS/$1 last of o f m e s x roll run='' kn='' ft=$CARDS/$1.firsttry
   last=$(stdb ask last "$1" 2>/dev/null)
   [ "$(jq -r '.step' <<<"${last:-null}" 2>/dev/null)" = start ] || return 0
   # shellcheck disable=SC2034 # PICK and PICKCARD are read by line() in lib/records.sh
@@ -365,9 +365,9 @@ stopped() { # <card> <issue>
   esac; fi
   [ -n "$f" ] || f=$(jq -cn --argjson s "${s:-0}" --arg m "$m" '{model: $m, sec: $s, unread: "the output of the stopped session could not be read"}')
   [ -n "$m" ] || f=$(jq -c 'del(.model)' <<<"$f")
-  # Stopped while a review ran again: the failed first attempt (reviewed()) is on the line, its tokens counted.
-  [ "$of" != review ] || ! x=$(jq -ce objects "$ft" 2>/dev/null) || f=$(jq -c --argjson f "$x" "$BOTHTRIES" <<<"$f")
-  f=$(line "$1" "$2" "$of" stopped "$(jq -c '. + {reason: "stopped by control stop while it ran"}' <<<"$f")") && locked append "$f" && { outkeep "$1" "$of" "$f" || :; } \
+  # Stopped while a review ran again: the failed first attempt (reviewed()) is on the line, its tokens counted. A review still with no price then keeps its events and err, which clean() removes next (reviewkeep(); outkeep() keeps no review's): its reason names them.
+  [ "$of" != review ] || { { ! x=$(jq -ce objects "$ft" 2>/dev/null) || f=$(jq -c --argjson f "$x" "$BOTHTRIES" <<<"$f"); }; [ ! -e "$wt.events" ] || ! jq -e '(.usage | type) != "object" or (.unread | type) == "string"' <<<"$f" >/dev/null 2>&1 || kn=$(reviewkeep "$wt" ""); }
+  f=$(line "$1" "$2" "$of" stopped "$(jq -c --arg k "$kn" '. + {reason: ("stopped by control stop while it ran" + $k)}' <<<"$f")") && locked append "$f" && { outkeep "$1" "$of" "$f" || :; } \
     || echo "conveyor: card $1 was stopped, but what its $of used could not be written to the card records" >&2
 }
 # One headless session with the safety hooks only and no subagents; model and effort are read at each launch
