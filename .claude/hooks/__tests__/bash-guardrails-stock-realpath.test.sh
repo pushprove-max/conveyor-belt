@@ -18,12 +18,17 @@ printf '%s\n' '#!/usr/bin/env bash' "echo called >> '$STUB/calls'" \
   'echo "realpath stub: only -m is modelled" >&2; exit 1' > "$STUB/realpath"
 chmod +x "$STUB/realpath"
 
-# A link in scratch space to this checkout: GNU realpath -m follows it, so the fallback must too.
-LINK=$STUB/card
+# The write cases name a checkout outside scratch space, never $ROOT: a checkout under /tmp is scratch to the write
+# check by policy, so there $ROOT/src/x.ts passes and those cases would fail on a hook that is right. The write check
+# reads only the path, so the folder need not exist.
+SRC=/stock-realpath-checkout
+# Links in scratch space to a checkout: GNU realpath -m follows them, so the fallback must too.
+LINK=$STUB/card SRCLINK=$STUB/src-card
 ln -s "$ROOT" "$LINK"
+ln -s "$SRC" "$SRCLINK"
 # A link to a link whose name ends in a newline: $(readlink) strips that newline, names no link, and the path
 # reads as scratch.
-ln -s "$ROOT" "$STUB/nl"$'\n'
+ln -s "$SRC" "$STUB/nl"$'\n'
 ln -s "$STUB/nl"$'\n' "$STUB/via-nl"
 # A home folder reached by a link: a search of it is a search of every checkout under it.
 ln -s "$ROOT/conveyor" "$STUB/home"
@@ -36,14 +41,15 @@ run() { # <expected exit> <why> <command> [<HOME>]; the hook runs in the checkou
     | (cd "$ROOT" && HOME=${4:-$HOME} PATH=$STUB:$PATH bash "$HOOK" >/dev/null 2>&1) || RC=$?
   [ "$RC" -eq "$1" ] || { echo "FAIL: $2: exit $RC, wanted $1, for: $3$(said)" >&2; FAILED=1; }
 }
-run 2 "an absolute source path passed the write check" "sed -i s/a/b/ $ROOT/src/x.ts"
+run 2 "an absolute source path passed the write check" "sed -i s/a/b/ $SRC/src/x.ts"
 # The text resolve must fold `..`: the path starts with /tmp but names the checkout's src folder.
 run 2 "an absolute source path through /tmp/.. passed the write check" "sed -i s/a/b/ /tmp/..$ROOT/src/x.ts"
 # The relative arm resolves a path with `..` too: an empty answer there reads as no source folder and passes.
 run 2 "a relative source path with .. passed the write check" "sed -i s/a/b/ conveyor/../src/x.ts"
+run 2 "an absolute source path through /tmp/.. passed the write check" "sed -i s/a/b/ /tmp/..$SRC/src/x.ts"
 run 0 "a scratch path was refused" "sed -i s/a/b/ /tmp/x.ts"
 # Read as text, the link's path is under scratch space and passes; resolved, it is the checkout's src folder.
-run 2 "a source path through a scratch symlink passed the write check" "sed -i s/a/b/ $LINK/src/x.ts"
+run 2 "a source path through a scratch symlink passed the write check" "sed -i s/a/b/ $SRCLINK/src/x.ts"
 # The search check resolves paths too: a bounded folder must still pass, and the checkout reached by a link must not.
 run 2 "a source path through a link to a newline-named link passed the write check" "sed -i s/a/b/ $STUB/via-nl/src/x.ts"
 run 0 "a search of one checkout folder was refused" "grep -rn foo $ROOT/conveyor/lib | head"
