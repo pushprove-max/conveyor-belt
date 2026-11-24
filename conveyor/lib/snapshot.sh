@@ -27,7 +27,9 @@
 #   while the control record holds pickBack, the rule's own return to shadow, {group: null, title, reason, since, time}).
 #   priceNotes, beside it, is each plugin problem note serve's look made for a model the built-in price table does
 #   not price, as the Foreman's plugin-bugs.md holds it now, less one filed since ([] for none): a Board on another
-#   machine than the belt adds it to the Foreman's folder there (.claude/scripts/dashboard.sh foremen()).
+#   machine than the belt adds it to the Foreman's folder there (.claude/scripts/dashboard.sh foremen()). priceFiled
+#   is each model a filed note of that form there names, or whose note the Board there filed or dismissed, whatever
+#   project of the group noted it ([] for none): that Board takes out its unfiled copy of the note.
 #   mainTest, beside it, is the failure of the whole test on main that stands (maintest(): issue, cases, from, to,
 #   since, exit), null when its last run passed or none ran, when the pack names no test.main, or when its issue is
 #   known closed. fullTest is the full test suite of the Board (fulltest()): command (the pack names test.full), why
@@ -834,14 +836,23 @@ snapshot() (
   # Foreman's plugin-bugs.md (foremandir()) holds them now: a note filed since (stop.sh puts "filed as #<n>" at its
   # end, after whatever its FILED takes before it: a comma, a semicolon, white space or none) or taken out (the Board's File and Dismiss) is not given, so no Board adds it again.
   # Nor is a note for a model a filed line names: outside the plugin's own repository stop.sh adds the filed line as a
-  # row of its own and leaves the note it files as it was.
-  pn='[]'
-  if pnm=$(jq -ce '[.notes | arrays | .[] | strings | select(startswith("- ")) | capture(" · No built-in price for (?<m>[^ :]+): ").m]' "$NOPRICE" 2>/dev/null) \
-    && [ "$pnm" != '[]' ] && pnf=$(foremandir); then
-    pn=$({ grep '^- ' "$pnf/plugin-bugs.md" 2>/dev/null || true; } | jq -Rcs --argjson m "$pnm" 'def mod: capture(" · No built-in price for (?<m>[^ :]+): ").m // null;
+  # row of its own and leaves the note it files as it was. Each model a filed line there names is given too (priceFiled),
+  # whatever project of the group noted it, and even when $NOPRICE names none (that project may have left the group), so
+  # a Board on another machine takes out its copy of a note filed here: a note no longer given is not filed for that.
+  # So is each model the folder's noprice-noted lists (noprice() puts each model it notes there) with no open note there:
+  # the Board's File and Dismiss take the note out of plugin-bugs.md and leave no filed line.
+  pn='{"notes":[],"filed":[]}'
+  pnm=$(jq -ce '[.notes | arrays | .[] | strings | select(startswith("- ")) | capture(" · No built-in price for (?<m>[^ :]+): ").m]' "$NOPRICE" 2>/dev/null) \
+    || pnm='[]'
+  if pnf=$(foremandir) && { [ -s "$pnf/plugin-bugs.md" ] || [ -s "$pnf/noprice-noted" ]; }; then
+    pn=$({ grep '^- ' "$pnf/plugin-bugs.md" 2>/dev/null || true; } | jq -Rcs --argjson m "$pnm" --arg k "$(cat "$pnf/noprice-noted" 2>/dev/null)" \
+      'def mod: capture(" · No built-in price for (?<m>[^ :]+): ").m // null;
       def filed: test("filed as #[1-9][0-9]*[[:space:]]*\\.? · evidence: "; "i");
       [splits("\n") | select(startswith("- "))] as $l | [$l[] | select(filed) | mod | strings] as $f
-      | [$l[] | select(filed | not) | select(mod as $x | $x != null and ($m | index([$x]) != null) and ($f | index([$x]) == null))]') || pn='[]'
+      | [$l[] | select(filed | not) | mod | strings] as $o
+      | {notes: [$l[] | select(filed | not) | select(mod as $x | $x != null and ($m | index([$x]) != null) and ($f | index([$x]) == null))],
+         filed: ($f + [$k | splits("\n") | select(test("^(claude|gpt)-[A-Za-z0-9._\\[\\]-]+$")) | select(. as $x | $o | index([$x]) == null)] | unique)}') \
+      || pn='{"notes":[],"filed":[]}'
   fi
   # The full test suite (fulltest()): the run in progress, only while its lock is held by a run or an ask (a run that
   # was killed left its file; fullreap() holds it shared, as this one tries it), and the last line of its record.
@@ -1168,7 +1179,8 @@ snapshot() (
                  line: ([$i.body // "" | splits("\r?\n") | select({body: .} | farneeds | index([$r]) != null)] | first // "" | sub("^\\s+"; "") | .[0:300])}]
            | sort_by(.issue) end)},
        mainTest: $mt[0],
-       priceNotes: $pn,
+       priceNotes: $pn.notes,
+       priceFiled: $pn.filed,
        fullTest: $ft,
        suites: $su,
        release: $rl,

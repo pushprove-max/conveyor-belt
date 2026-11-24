@@ -342,8 +342,33 @@ t_nopricefiled() {
   grep '^- ' "$n" | sed "s/ · evidence: -\$/${tab}filed as #12$tab. · evidence: -/" > "$n.new" && cat "$n.new" >> "$n" \
     && grep -q "^- .* No built-in price for claude-new-9: .*${tab}filed as #12$tab\\. · evidence: -\$" "$n" \
     && [ "$(grep -c 'No built-in price for claude-new-9: ' "$n")" = 2 ] || fail "the note's filed copy was not added after it: $(cat "$n" 2>&1)"
-  out=$(loop snapshot --fresh | jq -c .priceNotes)
-  [ "$out" = '[]' ] || fail "the snapshot gives a note plugin-bugs.md has as filed, or a note whose filed copy it holds ($(grep '^- ' "$n")): $out"
+  out=$(loop snapshot --fresh | jq -c '[.priceNotes, .priceFiled]')
+  [ "$(jq -c '.[0]' <<<"$out")" = '[]' ] || fail "the snapshot gives a note plugin-bugs.md has as filed, or a note whose filed copy it holds ($(grep '^- ' "$n")): $out"
+  # Bug: the snapshot did not say the note was filed, so a Board on another machine that had copied it could only
+  # guess from its absence, and kept or dropped its copy wrongly. It names the filed model once (priceFiled).
+  [ "$(jq -c '.[1]' <<<"$out")" = '["claude-new-9"]' ] || fail "priceFiled does not name the model filed once ($(grep '^- ' "$n")): $out"
+  # Bug (E2): priceFiled named only the models this project's noprice.json notes, so a note another project of the
+  # group made, filed after that project left the group, was named by no snapshot, and the Board kept its copy.
+  jq '.notes = []' "$ST/noprice.json" > "$ST/np.new" && mv "$ST/np.new" "$ST/noprice.json" || fail "noprice.json was not emptied"
+  out=$(loop snapshot --fresh | jq -c .priceFiled)
+  [ "$out" = '["claude-new-9"]' ] || fail "with noprice.json naming no note, priceFiled does not name the model filed ($(grep '^- ' "$n")): $out"
+}
+# Bug it catches (E3): the Board's File and Dismiss on the build host take the note out of plugin-bugs.md and leave no
+# filed line, so priceFiled named nothing and a Board on another machine kept offering its copy. A model noprice-noted
+# lists with no open note left is named; one whose note is still open is not.
+t_nopricetaken() {
+  local n out
+  setup '[]'; unset CONVEYOR_NOPRICE_CMD; n=$ST/foreman/plugin-bugs.md
+  tune '.models.allowed.claude += ["claude-new-9"]'
+  loop control model claude claude-new-9 >/dev/null || fail "the builder's seat was not set"
+  looks noprice
+  grep -qxF claude-new-9 "$ST/foreman/noprice-noted" || fail "noprice-noted does not list the model noted: $(cat "$ST/foreman/noprice-noted" 2>&1)"
+  out=$(loop snapshot --fresh | jq -c .priceFiled)
+  [ "$out" = '[]' ] || fail "priceFiled names a model whose note is still open ($(grep '^- ' "$n")): $out"
+  # What the Board's note_remove() leaves after File or Dismiss: the note line gone, nothing put in its place.
+  grep -v 'No built-in price for claude-new-9: ' "$n" > "$n.new"; mv "$n.new" "$n"
+  out=$(loop snapshot --fresh | jq -c '[.priceNotes, .priceFiled]')
+  [ "$out" = '[[],["claude-new-9"]]' ] || fail "with the note dismissed on the host (plugin-bugs.md: $(cat "$n")), [priceNotes, priceFiled] is $out"
 }
 # Bug: a project with no judge (a Claude-only one: the judge needs another CLI than the reviewer's) listed no model at
 # all, as the judge's seat, unset, failed the look.

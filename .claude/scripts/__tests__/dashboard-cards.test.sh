@@ -674,6 +674,25 @@ grep -vxF -- "$FD" "$SN" > "$SN.new" && mv "$SN.new" "$SN"
 answer "$(snap "$(jq -cn --arg n "$PN" '{priceNotes: [$n]}')")" "$P_URL" 1794000000 "$(snap)" "$C_URL" 0
 run
 [ "$(grep -c -xF -- "$PN" "$SN")" = 1 ] || fail "a note taken out came back in a snapshot and was not added again: $(cat "$SN")"
+# The notes left here are taken out, so the ones below are counted alone.
+grep -v '^- ' "$SN" > "$SN.new" && mv "$SN.new" "$SN"
+# Bug: a note added here and then filed on the host (its snapshot names the model in priceFiled) stayed here, and
+# Plugin problems kept offering to file it again. A note filed here stays.
+PN6=${PN//new-9/new-6} PN5=${PN//new-9/new-5}
+answer "$(snap "$(jq -cn --arg a "$PN6" --arg b "$PN5" '{priceNotes: [$a, $b]}')")" "$P_URL" 1794000000 "$(snap)" "$C_URL" 0
+run
+sed -i "s/new-5: .*/new-5: x filed as #12 · evidence: -/" "$SN"
+# Bug (E1): a snapshot that only stops giving a note (the project that noted it left the group, so the host reads
+# another folder, where the note is not) took the copy here out, though the note is still open on the host. A snapshot
+# that gives priceFiled tells filed notes apart, so only a note it names as filed is taken out.
+answer "$(snap '{"priceNotes": [], "priceFiled": []}')" "$P_URL" 1794000000 "$(snap)" "$C_URL" 0
+run
+grep -qxF -- "$PN6" "$SN" || fail "a snapshot that no longer gives the note for claude-new-6, and names it not filed, took it out: $(cat "$SN")"
+answer "$(snap '{"priceNotes": [], "priceFiled": ["claude-new-6", "claude-new-5"]}')" "$P_URL" 1794000000 "$(snap)" "$C_URL" 0
+run
+[ "$(grep -c '^- ' "$SN")" = 1 ] && grep -q 'new-5: x filed as #12' "$SN" \
+  || fail "with priceFiled naming both models, the unfiled note added here is not taken out, or the one filed here is: $(cat "$SN")"
+q '.panels.health.data.pluginBugs | map([.repo, (.notes | length)]) == [["sample", 1]]' "Plugin problems still shows a note filed on the host"
 # Bug (R10): with the Board's checkout and the build machine's at the same path, the record's main exists here too, and
 # the host's note was never added: the import ran only for a main not on this machine. ssh names the host.
 mkdir -p "$T/same/conveyor/state/foreman"

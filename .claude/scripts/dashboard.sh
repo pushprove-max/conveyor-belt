@@ -424,7 +424,8 @@ lanes() {
 # note the snapshot of one of the Foreman's projects gives (priceNotes, in <conveyor part>) is added to the folder read
 # here, under the lock the loop takes. Once a model: price-notes.txt in the folder lists the models added, so a note
 # dismissed or filed here does not come back; and none for a model a note in the file already names. A note so added
-# that the snapshots of all the Foreman's projects no longer give (filed or taken out on the host) is taken out here.
+# whose model a snapshot names as filed or dismissed on the host (priceFiled) is taken out here, unless filed here;
+# while no snapshot gives priceFiled, one the snapshots of all the Foreman's projects no longer give is.
 # checkout_of <repo> [<ledger>]: the main checkout on this machine whose remote the pack names (.remote, default
 # origin) has that repository's name as the last part of its address (lib.sh's repo_name), looked for in the
 # checkout holding the record's ledger, then in the folders beside the Board's own checkout. Nonzero when none has.
@@ -486,14 +487,18 @@ foremen() { # <conveyor part>
         printf '%s\n' "$m" >> "$dir/price-notes.txt"
       done < <(jq -r --argjson p "$projects" '.records | arrays | .[] | objects | select(.repo | IN($p[])) | .snap.priceNotes | arrays | .[] | strings
           | select((contains("\n") or contains("\r") | not) and test("^- [^ ]+ · card - · No built-in price for (claude|gpt)-[A-Za-z0-9._\\[\\]-]+: "))' "$1" 2>/dev/null)
-      # A copy the snapshots of all the Foreman's projects no longer give (the host filed or took it out) is taken out.
+      # A copy not filed here goes when a snapshot names its model as filed or dismissed on the host (priceFiled). While
+      # no snapshot gives priceFiled, one the snapshots of all the Foreman's projects no longer give goes instead: a note
+      # they only stop giving may still be open on the host (the project that noted it left the group).
       cur=$(jq -ce --argjson p "$projects" '[.records | arrays | .[] | objects | select(.repo | IN($p[]))]
-          | select(length > 0 and all(.snap.priceNotes | type == "array")) | [.[].snap.priceNotes[] | strings]' "$1" 2>/dev/null) || exit 0
+          | select(length > 0 and all(.snap.priceNotes | type == "array")) | {n: [.[].snap.priceNotes[] | strings],
+            f: any(.[]; .snap.priceFiled | type == "array"), g: [.[].snap.priceFiled | arrays | .[] | strings]}' "$1" 2>/dev/null) || exit 0
       b=$dir/plugin-bugs.md k=$dir/price-notes.txt
       [ -s "$b" ] && [ -s "$k" ] || exit 0
       gone=$(jq -Rnc --argjson c "$cur" --rawfile k "$k" '($k | split("\n")) as $k | [inputs
           | select(test("^- [^ ]+ · card - · No built-in price for [^ :]+: ") and (test("filed as #"; "i") | not))
-          | {l: ., m: capture(" · No built-in price for (?<m>[^ :]+): ").m} | select(. as $o | ($c | index([$o.l]) == null) and ($k | index([$o.m]) != null))]' "$b") || exit 1
+          | {l: ., m: capture(" · No built-in price for (?<m>[^ :]+): ").m} | select(. as $o | ($k | index([$o.m]) != null)
+            and if $c.f then $c.g | index([$o.m]) != null else $c.n | index([$o.l]) == null end)]' "$b") || exit 1
       [ "$gone" != '[]' ] || exit 0
       # Its model leaves price-notes.txt too, so the note comes back when a snapshot gives it again (a group of the
       # Foreman's split for a time, and the note was in a project's snapshot this folder did not read). Each file is
