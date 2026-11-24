@@ -236,12 +236,14 @@ t_reviewlandfiling() {
     || fail "followups() with rlfind '$f' and filing on: its follow-up #$num is held at its next sight ($(cat "$T/$CASE/held" 2>&1), exit $RC): $(cat "$T/$CASE/run.out")"
 }
 # The retry by review-land reads the owner's answer to the card's decision, then moves the card's lines. What must stay
-# true: no answer of the owner is written between the two, as the card would be given back over it. The other writer
-# is the Board's answer (decision.sh answer): the stub of python3 runs it when retry asks the state helper to move the
-# lines, after that read, and says whether it has to wait for the ledger's lock (waits) or can write at once (done).
-# Bug guarded (#1612, review): the ledger's lock was free between the two. And the GitHub read of the issue's follow-up
-# depth ran under the records' lock, which every card's record write waits on: the gh stub notes whether that lock
-# was free (free) or held (held) when it was asked.
+# true: no answer of the owner is saved once that read let the card be given back, as needsask() takes no step for the
+# answer to a card no longer blocked, and the card would land over it. The other writer is the Board's answer
+# (decision.sh answer): the stub of python3 runs it when retry asks the state helper to move the lines, after that read
+# (it waits for that answer unless a lock the retry holds keeps it waiting).
+# Bug guarded (#1612, review, and its follow-up): the answer "Leave it held" was saved after the retry, on a card that
+# then landed; the retry now closes the decision first, so that answer is refused. And the GitHub read of the issue's
+# follow-up depth ran under the records' lock, which every card's record write waits on: the gh stub notes whether that
+# lock was free (free) or held (held) when it was asked.
 t_reviewlandlocks() {
   rlblocked '[P1] a.txt:2 drops the line' narrow
   rljob
@@ -264,11 +266,53 @@ EOF
   chmod +x "$STUB/gh" "$STUB/python3" && : > "$STUB/race" || fail "the stubs"
   CONVEYOR_REVIEWLAND=1 loop retry 7 > "$T/$CASE/retry.out" 2>&1 || fail "\`CONVEYOR_REVIEWLAND=1 conveyor.sh retry 7\` was refused: $(cat "$T/$CASE/retry.out")"
   flock -w 60 "$STUB/answering" true || fail "the owner's answer to blocked-c1-7 did not end within 60 s of the retry's end"
-  [ "$(cat "$STUB/raced" 2>/dev/null)" = waits ] && [ "$(rlby c1-7)" = review-land ] \
-    && jq -se 'map(select(.id == "blocked-c1-7")) | last | .answer == "Leave it held"' "$CONVEYOR_LEDGER" >/dev/null \
-    || fail "the owner's answer to blocked-c1-7, given as \`CONVEYOR_REVIEWLAND=1 conveyor.sh retry 7\` moved c1-7's lines, $(cat "$STUB/raced" 2>/dev/null) (not waits), or c1-7 was not given back, or the answer was lost: $(cat "$STUB/answer.out" "$T/$CASE/retry.out" 2>&1)"
+  [ "$(rlby c1-7)" = review-land ] && grep -q 'already answered' "$STUB/answer.out" \
+    && jq -se 'map(select(.id == "blocked-c1-7")) | last | .answer | startswith("Closed: review-land")' "$CONVEYOR_LEDGER" >/dev/null \
+    || fail "\`decision.sh answer blocked-c1-7 'Leave it held'\`, given as \`CONVEYOR_REVIEWLAND=1 conveyor.sh retry 7\` moved c1-7's lines, was not refused, or c1-7 was not given back, or its decision was not closed as review-land's: $(cat "$STUB/answer.out" "$T/$CASE/retry.out" 2>&1; jq -sc 'map(select(.id == "blocked-c1-7")) | last' "$CONVEYOR_LEDGER")"
   [ -s "$STUB/ghlock" ] && ! grep -qx held "$STUB/ghlock" \
     || fail "\`CONVEYOR_REVIEWLAND=1 conveyor.sh retry 7\` asked GitHub for #7 under the records' lock, or not at all: $(cat "$STUB/ghlock" 2>&1)"
+}
+# The retry by review-land closes the card's decision before it moves the card's lines; a move that then fails leaves
+# the card blocked, so its decision must be open again, or no one is asked about it (needsask() asks once a card).
+# Bug guarded (follow-up of #1612): the closed decision stayed closed on a card still blocked.
+t_reviewlandreopen() {
+  rlblocked '[P1] a.txt:2 drops the line' narrow
+  rljob
+  loop auto off > /dev/null 2>&1 && loop auto on > /dev/null 2>&1 || fail "auto off, then on, was refused"
+  # stub: the state helper fails to write the moved lines to the retried file (the records stay as they were), a
+  # failure the real one gives only on a broken disk
+  printf '#!/usr/bin/env bash\n[[ " $* " != *" append retried "* ]] || exit 1\nexec %q "$@"\n' "$(command -v python3)" > "$STUB/python3" && chmod +x "$STUB/python3" || fail "the python3 stub"
+  CONVEYOR_REVIEWLAND=1 loop retry 7 > "$T/$CASE/retry.out" 2>&1 && fail "\`CONVEYOR_REVIEWLAND=1 conveyor.sh retry 7\` passed with its lines not moved: $(cat "$T/$CASE/retry.out")"
+  [ "$(rlby c1-7)" = '' ] && jq -se 'map(select(.id == "blocked-c1-7")) | last | .answeredAt == null' "$CONVEYOR_LEDGER" >/dev/null \
+    || fail "after \`CONVEYOR_REVIEWLAND=1 conveyor.sh retry 7\` failed to move c1-7's lines, c1-7 was given back or decision blocked-c1-7 was left closed: $(cat "$T/$CASE/retry.out"; jq -sc 'map(select(.id == "blocked-c1-7")) | last' "$CONVEYOR_LEDGER")"
+}
+# A restart that stops the loop inside needsland()'s retry by review-land, after landable() closed decision
+# blocked-c1-7 and before c1-7's lines moved, leaves c1-7 blocked: the next pass reopens its decision. Bug guarded
+# (follow-up of #1612, review): needsask() saw the decision as asked, and needsland() tries each card once, so c1-7
+# stayed blocked with no open decision.
+t_reviewlandrestart() {
+  rlblocked '[P1] a.txt:2 drops the line' narrow
+  rljob
+  loop auto off > /dev/null 2>&1 && loop auto on > /dev/null 2>&1 || fail "auto off, then on, was refused"
+  # stub: as the retry moves c1-7's lines, the state helper kills every process from itself up to this case's shell,
+  # as a restart of the loop's service does: no step of the engine can stop its own process
+  echo "$BASHPID" > "$STUB/stop"
+  { printf '#!/usr/bin/env bash\nreal=%q stop=%q\n' "$(command -v python3)" "$(cat "$STUB/stop")"; cat <<'EOF'; } > "$STUB/python3"
+if [[ " $* " == *' append retried '* ]]; then
+  p=$PPID ps=()
+  while [ -n "$p" ] && [ "$p" != "$stop" ] && [ "$p" -gt 1 ]; do ps+=("$p"); p=$(ps -o ppid= -p "$p" | tr -d ' '); done
+  kill -KILL "${ps[@]}"; exit 1
+fi
+exec "$real" "$@"
+EOF
+  chmod +x "$STUB/python3" || fail "the python3 stub"
+  fx_in needsjob
+  [ "$RC" = 137 ] && jq -se 'map(select(.id == "blocked-c1-7")) | last | .answer | startswith("Closed: review-land")' "$CONVEYOR_LEDGER" >/dev/null \
+    || fail "the stopped needsjob (exit $RC) did not stop inside the retry by review-land of #7, after decision blocked-c1-7 was closed: $(cat "$T/$CASE/run.out"; jq -sc 'map(select(.id == "blocked-c1-7")) | last' "$CONVEYOR_LEDGER")"
+  rm -f "$STUB/python3"
+  rljob
+  [ "$(rlby c1-7)" = '' ] && jq -se 'map(select(.id == "blocked-c1-7")) | last | .answeredAt == null' "$CONVEYOR_LEDGER" >/dev/null \
+    || fail "after a restart stopped \`CONVEYOR_REVIEWLAND=1 conveyor.sh retry 7\` between the close of decision blocked-c1-7 and the move of c1-7's lines, the next needsjob gave c1-7 back or left blocked-c1-7 closed: $(cat "$T/$CASE/run.out"; jq -sc 'map(select(.id == "blocked-c1-7")) | last' "$CONVEYOR_LEDGER")"
 }
 # Bug guarded (#1612, review): no case read what the card of a retry by review-land keeps when the kept patch no longer
 # applies to main (resumeplan(), mode port): the kept review (rlrev), which afterreview() files after the port's own

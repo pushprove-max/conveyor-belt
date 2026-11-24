@@ -28,8 +28,9 @@
 # reason names no P0 and no word or item of auto.reserved or the owner's profile (landable(), lib/views.sh); its issue
 # is under the follow-up depth cap, as at the cap its finding could not be filed (fudepth(), lib/followups.sh: RLDEPTH,
 # read from GitHub before the lock); and the owner gave its decision (needsask()'s blocked-<card>) in the ledger RLLED
-# no answer: that answer is theirs, never overridden. Not a fresh retry, which drops the kept patch. Its next card lands
-# the kept patch (resumeplan(), lib/card.sh). Prints why not and fails, or prints nothing.
+# no answer: that answer is theirs, never overridden; that open decision is then closed (below). Not a fresh retry,
+# which drops the kept patch. Its next card lands the kept patch (resumeplan(), lib/card.sh). Prints why not and fails,
+# or prints the id of the decision it closed, or nothing.
 landable() { # <issue> [fresh]
   local c r_ rows='[]'
   [[ $1 =~ ^[0-9]+$ ]] && [ -z "${2:-}" ] || { echo "a retry by review-land takes an issue number, and no --fresh"; return 1; }
@@ -48,11 +49,19 @@ landable() { # <issue> [fresh]
   [ ! -e "$RLLED" ] || rows=$(CONVEYOR_MAIN=$MAIN bash "$HERE/../.claude/scripts/decision.sh" list) || { echo "the decision ledger $RLLED could not be read"; return 1; }
   ! jq -e --arg id "blocked-$c" 'any(.[]; .id == $id and (.answer // "") != "")' <<<"$rows" >/dev/null \
     || { echo "the owner answered decision blocked-$c, so the engine takes that answer"; return 1; }
+  # The open decision is answered RLCLOSED before the card is given back: decision.sh answer writes one answer only, so
+  # the owner's answer, when it came first, refuses this retry, and when it comes after, is refused. Bug: the decision
+  # stayed open, and needsask() takes no step for an answer to a card no longer blocked, so the card landed over the
+  # owner's "Leave it held". Prints the decision's id for again() to reopen if the retry then fails.
+  jq -e --arg id "blocked-$c" 'any(.[]; .id == $id)' <<<"$rows" >/dev/null || return 0
+  r_=$(CONVEYOR_MAIN=$MAIN bash "$HERE/../.claude/scripts/decision.sh" answer "blocked-$c" "$RLCLOSED" 2>&1 >/dev/null) \
+    || { echo "decision blocked-$c could not be closed (the owner may have answered it): ${r_//$'\n'/ }"; return 1; }
+  echo "blocked-$c"
 }
 # A held issue (setup holds every open one) would stay off the belt once its card is given back: the owner's retry
 # releases it too, under the same lock, once the retry is done. A refused retry leaves the hold as it was.
 again() { # <issue | card id> [fresh]
-  local held=false c lk
+  local held=false c
   [[ ! $1 =~ ^[0-9]+$ ]] || held=$(ctl | jq -r --argjson n "$1" '.held | index($n) != null') \
     || { echo "conveyor: cannot read the control record; nothing changed" >&2; return 1; }
   # The standing review-retry's retry (RETRYBY review-retry) gives an issue back once (reviewretried(), lib/views.sh),
@@ -63,15 +72,15 @@ again() { # <issue | card id> [fresh]
       || { echo "conveyor: the card records of issue #$1 could not be read; nothing changed" >&2; return 1; }
     [ -z "$c" ] || { echo "conveyor: review-retry already gave issue #$1 back once (its card $c was blocked by its review), and neither the owner's retry nor a landed card came after; nothing changed: it waits for the owner" >&2; return 1; }
   fi
-  # The ledger's read lock is held from landable()'s read of the owner's answer until retry() has moved the card's lines
-  # (it ends with this lock's subshell): the owner's answer (decision.sh answer, the Board's) waits for it. Bug: an
-  # answer written between the two let the card be given back over it.
+  # landable() closes the card's decision before retry() moves the card's lines, so no answer of the owner is written
+  # between the two (the Board's answer is refused as already answered). A retry that then fails reopens the decision,
+  # so the card that stays blocked is asked again; one stopped first (a restart) leaves that to needsask() (rlreopen()).
+  c=''
   if [ "$RETRYBY" = review-land ]; then
-    [ ! -e "$RLLED" ] || { exec {lk}<"$RLLED" && flock -s -w 120 "$lk"; } \
-      || { echo "conveyor: the decision ledger $RLLED could not be locked; nothing changed: it waits for the owner" >&2; return 1; }
     c=$(landable "$@") || { echo "conveyor: $c; nothing changed: it waits for the owner" >&2; return 1; }
   fi
-  retry "$@" || return 1
+  retry "$@" || { [ -z "$c" ] || CONVEYOR_MAIN=$MAIN bash "$HERE/../.claude/scripts/decision.sh" reopen "$c" >/dev/null \
+    || echo "conveyor: decision $c could not be reopened; reopen it with \`decision.sh reopen $c\`" >&2; return 1; }
   [ "$held" = true ] || return 0
   control release "$1" >/dev/null || { echo "conveyor: issue #$1 is held; release it with \`conveyor.sh control release $1\`" >&2; return 1; }
   echo "conveyor: issue #$1 was held; it is released, so the loop picks it again"

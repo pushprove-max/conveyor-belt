@@ -17,6 +17,11 @@ STANDING_KINDS=(asked-fix review-followup release-check fixed-block review-retry
 # (full), the engine lands such a card before it is asked (needsland(), lib/needsask.sh).
 # shellcheck disable=SC2034 # RRAGAIN is read by needsask() in lib/needsask.sh and by commands/auto.sh
 RRAGAIN='is blocked by its review again, after review-retry gave its issue back once'
+# The answer a retry by review-land (landable(), commands/retry.sh) gives the card's open decision blocked-<card> before it
+# gives the card back. needsask() (lib/needsask.sh) reopens a decision so closed whose card is still blocked: that retry
+# ended before it moved the card's lines.
+# shellcheck disable=SC2034 # RLCLOSED is read by commands/retry.sh and lib/needsask.sh
+RLCLOSED='Closed: review-land gave the card back to land, the standing order of the owner while auto is on'
 # The ruling log's path (.claude/hooks/lib/rulings.sh rulings_log, of main's checkout); fails when it cannot be named.
 rulingslog() { [ -z "${CONVEYOR_RULING_LOG:-}" ] || { echo "$CONVEYOR_RULING_LOG"; return; }; CONVEYOR_MAIN=$MAIN bash -c '. "$1" && rulings_log' _ "$HERE/../.claude/hooks/lib/rulings.sh"; }
 # The owner's written profile of how they decide (owner-way.md, in the folder foreman/lib.sh FD names): its path when

@@ -19,6 +19,9 @@
 #     later pass takes no second step. NEEDSASK_HELD takes none. The retry is the owner's own (CONVEYOR_RETRYBY owner,
 #     commands/retry.sh), which lets review-retry give the issue back once more, only for a question asked as RRAGAIN
 #     says: auto decide never answers one (commands/auto.sh). Another answer may be auto decide's (decision).
+#   - A decision answered RLCLOSED (lib/standing.sh) whose card is still blocked is reopened (rlreopen()): the retry by
+#     review-land that closed it ended before it moved the card's lines (a restart stopped it), and needsland() tries
+#     each card once, so the card would stay blocked with no one asked.
 # Test seam: CONVEYOR_LEDGER (decision.sh's).
 NEEDSASK_RETRY='Retry keeping the work' NEEDSASK_FRESH='Fresh retry' NEEDSASK_HELD='Leave it held'
 NEEDSASK_GONE='Closed: the card is no longer blocked with its work kept'
@@ -97,11 +100,23 @@ needsask() {
           CONVEYOR_RETRYBY=$by bash "$HERE/conveyor.sh" retry "${issue[$c]}" < /dev/null ;;
         "$NEEDSASK_FRESH") echo "conveyor: decision $id is answered \"$ans\": retry ${issue[$c]} --fresh" >&2
           CONVEYOR_RETRYBY=$by bash "$HERE/conveyor.sh" retry "${issue[$c]}" --fresh < /dev/null ;;
+        "$RLCLOSED") locked rlreopen "$id" "$c" "${issue[$c]}" ;;
       esac
     fi
   done < <(jq -r --arg rr ") $RRAGAIN, its work kept in " '.[] | select(.id | startswith("blocked-"))
     | [.id, (.answer // ""), .askedAt, (if .question | gsub("[\r\n\u001f]+"; " ") | contains($rr) then "owner" else "decision" end)] | join("\u001f")' <<<"$rows")
   return 0
+}
+# rlreopen <id> <card> <issue>, under the records' lock: decision <id>, closed RLCLOSED, is reopened when <card>'s last
+# closing line is still a blocked one. The retry by review-land closes the decision and moves the card's lines under
+# that same lock (again(), commands/retry.sh), so a card blocked here was not given back: that retry was stopped
+# between the two. Bug guarded: a restart there left the card blocked with its decision closed, and no one was asked.
+rlreopen() {
+  local e
+  stdb ask issue cards "$3" | jq -se --arg c "$2" 'map(select(.card == $c and (.step | IN("landed", "closed", "blocked")))) | last | .step == "blocked"' >/dev/null || return 0
+  e=$(CONVEYOR_MAIN=$MAIN bash "$HERE/../.claude/scripts/decision.sh" reopen "$1" 2>&1 >/dev/null) \
+    && echo "conveyor: decision $1 is open again: the retry by review-land that closed it did not give card $2 back" >&2 \
+    || echo "conveyor: decision $1 could not be reopened: ${e//$'\n'/ }" >&2
 }
 
 # The second kind: an issue the nightly whole test filed for a test that fails on main (maintest(), lib/followups.sh;
