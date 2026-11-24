@@ -552,13 +552,20 @@ mapstop() { # <worktree> <why>
 # <commit> too, a test it names is one tracked at that commit, not in the worktree's index: a map read as another
 # commit has it names that commit's tests, and a test the card's change deletes would else fail the whole map.
 mapread() { # <worktree> [<file> [<commit>]]
-  local m f out age=null sha
+  local m f out age=null sha bare=1 mt in
   packget test.map m || { echo "the pack's test.map could not be read"; return 1; }
   case $m in off) return 0 ;; '') f=$(mappath); [ -s "$f" ] || return 0 ;; *) f=${2:-$1/$m} ;; esac
   if [ -z "$m" ]; then
     sha=$(jq -r '.commit // ""' "$f" 2>/dev/null) && [ -n "$sha" ] && age=$(git -C "$1" rev-list --count "$sha..HEAD" 2>/dev/null) || age=null
   fi
-  out=$(jq -cs --rawfile ts <(if [ -n "${3:-}" ]; then git -C "$1" -c core.quotePath=false ls-tree -r --full-tree --name-only "$3"; else git -C "$1" -c core.quotePath=false ls-files; fi 2>/dev/null | testpaths) --argjson age "$age" --arg f "${m:-$f}" '
+  # The tracked test files, through testpaths() and so names() and the runner list (runnerfiles(), lib/prompts.sh), are
+  # read only when a line of areas names a test by its name alone (tfile), as a runner is no test file of that name: no
+  # other map needs them (#1650). The map is read once, as <file> can be a pipe (the map at <commit>, by git show) that
+  # a second read finds empty; a file that cannot be read is left to jq, for its error.
+  in=$f
+  mt=$(cat -- "$f" 2> /dev/null) && in=/dev/stdin
+  jq -ne 'any(inputs; type == "object" and (.test | type) == "string" and (.test | contains("/") | not))' "$in" <<<"$mt" > /dev/null 2>&1 || bare=''
+  out=$(jq -cs --rawfile ts <([ -z "$bare" ] || if [ -n "${3:-}" ]; then git -C "$1" -c core.quotePath=false ls-tree -r --full-tree --name-only "$3"; else git -C "$1" -c core.quotePath=false ls-files; fi 2>/dev/null | testpaths) --argjson age "$age" --arg f "${m:-$f}" '
     ($ts | split("\n") | map(select(. != ""))) as $ts
     | def tfile: if contains("/") then . else . as $n | [$ts[] | select(split("/")[-1] == $n)]
         | if length == 1 then .[0] else error("\($f): \($n) is named, but there is no one tracked test file of that name") end end;
@@ -573,7 +580,7 @@ mapread() { # <worktree> [<file> [<commit>]]
        | {sources: (reduce (.[] | .tests as $t | .files[] | [., $t]) as [$s, $t] ({}; .[$s] = ((.[$s] // []) + $t | unique)) | with_entries(select(.value != []))),
           tests: ([.[].tests[]] | unique), all: [.[] | select(.all) | .files[]]} end)
     | (.tests | length) as $n
-    | {by: "map", age: $age, sources: .sources, shared: (.all + [.sources | to_entries[] | select((.value | length) * 2 > $n) | .key] | unique)}' "$f" 2>&1) \
+    | {by: "map", age: $age, sources: .sources, shared: (.all + [.sources | to_entries[] | select((.value | length) * 2 > $n) | .key] | unique)}' "$in" <<<"$mt" 2>&1) \
     || { out=${out#jq: error (at *): }; echo "${out:-$f: the test map cannot be read}"; return 1; }
   printf '%s\n' "$out"
 }

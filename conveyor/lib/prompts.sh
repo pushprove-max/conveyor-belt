@@ -124,58 +124,71 @@ names() {
 # it runs every test.
 # shellcheck disable=SC2034 # used in lib/testrun.sh and lib/testmap.sh
 RUNNERFIX='the test runner, not a test'
+# runnerfiles()'s words, in one awk pass (#1650: a bash loop over each word took about 5 s of every snapshot): each word
+# a line, once. Reads the commands from ENVIRON (RF_W1 to RF_W4), main's checkout (RF_MAIN), whether it has a package.json
+# (RF_PJ), and on stdin that file's scripts, "<name>\t<text>" a line, each line of a text joined by ";".
+RUNNERAWK='
+function qadd(m, t) { nq++; qm[nq] = m; qt[nq] = t }
+# A shell script <w> names, read once, whose commands start files too: a .sh file, or one whose first line names sh or bash.
+function script(w,   p, l, r, t) {
+  if (("F:" w) in seen) return
+  p = ENVIRON["RF_MAIN"] "/" w; r = (getline l < p)
+  if (r < 0 || (w !~ /\.sh$/ && !(r > 0 && l ~ "^#!.*[/ ](ba)?sh([[:space:]]|$)"))) { close(p); return }
+  seen["F:" w] = 1; t = ""
+  while (r > 0) { sub(/(^|[[:space:]])#.*/, "", l); t = t l "\n"; r = (getline l < p) }
+  close(p); qadd("F", t)
+}
+# The package script <s> runs, once.
+function pscript(s) { if (s in seen) return; seen[s] = 1; if (s in ps && ps[s] != "") qadd("W", ps[s]) }
+# Each command of <c> (split at && || ; | and parentheses, and lines), word by word. <m>: W, a command whose every word
+# counts; F, the text of a shell script, where only the first word of each command counts.
+function words(m, c,   ns, sg, k, s, ws, n, i, j, w, r, nr) {
+  gsub(/&&/, "\n", c); gsub(/\|\|/, "\n", c); gsub(/[;|()]/, "\n", c); ns = split(c, sg, "\n")
+  for (k = 1; k <= ns; k++) {
+    s = sg[k]; sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); if (s == "") continue
+    n = split(s, ws, /[ \t]+/)
+    if (m == "F") {
+      # A script command: its first word after the env settings, wrappers, the program that runs the file and the
+      # duration of timeout.
+      if (ws[1] ~ /^#/) continue
+      for (i = 1; i <= n && (ws[i] in wrap || ws[i] ~ /^([A-Za-z_].*=|-)/ || ws[i] ~ /^[0-9.]+[smhd]?$/); i++) ;
+      if (i <= n) { ws[1] = ws[i]; n = 1 } else n = 0
+    }
+    for (j = 1; j <= n; j++) {
+      w = ws[j]; gsub("[\"\047]", "", w); if (w ~ /^-.*=/) sub(/^[^=]*=/, "", w); sub(/^\.\//, "", w)
+      if (w == "" || w ~ "^[-/]" || w ~ /[$*?]/) continue
+      if (!(w in said)) { said[w] = 1; print w }
+      script(w)
+    }
+    # The package script it runs: its first word after the env settings is the package manager, and of the words
+    # after that which are no options, the first names the script (test or t: test; run or run-script: the next).
+    for (i = 1; i <= n && ws[i] ~ /^[A-Za-z_].*=/; i++) ;
+    if (i > n || ws[i] !~ /^(npm|pnpm|yarn|bun)$/) continue
+    nr = 0; for (j = i + 1; j <= n; j++) if (ws[j] !~ /^-/) r[++nr] = ws[j]
+    w = nr ? r[1] : ""; if (w == "run" || w == "run-script") w = nr > 1 ? r[2] : ""; else if (w == "t") w = "test"
+    if (w != "" && ENVIRON["RF_PJ"] != "") { pscript("pre" w); pscript(w); pscript("post" w) }
+  }
+}
+{ i = index($0, "\t"); if (i) ps[substr($0, 1, i - 1)] = substr($0, i + 1) }
+END {
+  split("exec env command nohup time timeout then do else ! bash sh zsh dash node python python3", l, " ")
+  for (i in l) wrap[l[i]] = 1
+  for (i = 1; i <= 4; i++) qadd("W", ENVIRON["RF_W" i])
+  # Up to three files or scripts deep.
+  for (d = 0; d < 4 && nq; d++) {
+    n = nq; nq = 0; for (k = 1; k <= n; k++) { m[k] = qm[k]; t[k] = qt[k] }
+    for (k = 1; k <= n; k++) words(m[k], t[k])
+  }
+}'
 runnerfiles() {
-  local c a b e mc ws w s r q=() n=() seen=' ' d=0 i cs=() pj=$MAIN/package.json m
+  local c a b e mc w cs=() pj=$MAIN/package.json p=''
   packget test.command c test.full a test.main mc test.fileCommand b test.wholeCommands e 2>/dev/null || return 0
-  # Each to read: W, a command whose every word counts; F, a shell script's text, whose commands' first words count.
-  q=("W$c" "W$a" "W$mc" "W$b")
   # The schema's default, [], names none: no jq for it.
   [ "${e:-[]}" = '[]' ] || while IFS= read -r w; do [ -z "$w" ] || cs+=("${w#./}"); done < <(jq -r '.[]? | strings' <<<"$e" 2>/dev/null)
-  while [ ${#q[@]} != 0 ] && [ $d -lt 4 ]; do
-    n=("${q[@]}"); q=(); d=$((d + 1))
-    for c in "${n[@]}"; do
-      m=${c:0:1}; c=${c:1}
-      # Each command of it (split at && || ; | and parentheses, and lines), word by word.
-      c=${c//'&&'/$'\n'}; c=${c//'||'/$'\n'}; c=${c//[;|()]/$'\n'}
-      while IFS= read -r s; do
-        read -ra ws <<<"$s"; [ ${#ws[@]} != 0 ] || continue
-        if [ "$m" = F ]; then
-          # A script's command: its first word after the env settings, wrappers and the program that runs the file.
-          [[ ${ws[0]} != \#* ]] || continue
-          i=0
-          while [ $i -lt ${#ws[@]} ]; do
-            case ${ws[i]} in
-              [A-Za-z_]*=*|exec|env|command|nohup|time|timeout|then|do|else|'!'|bash|sh|zsh|dash|node|python|python3|-*) ;;
-              # timeout's duration.
-              *) [[ ${ws[i]} =~ ^[0-9.]+[smhd]?$ ]] || break ;;
-            esac
-            i=$((i + 1))
-          done
-          ws=("${ws[@]:i:1}")
-        fi
-        for w in "${ws[@]}"; do
-          w=${w//[\"\']/}; [[ $w != -*=* ]] || w=${w#*=}; w=${w#./}
-          [ -n "$w" ] && [[ $w != -* && $w != *[\$*?]* && $w != /* ]] || continue
-          cs+=("$w")
-          # A shell script it names, read once, whose commands start files too.
-          [[ $seen != *" F:$w "* ]] && [ -f "$MAIN/$w" ] || continue
-          [[ $w == *.sh ]] || head -n 1 "$MAIN/$w" 2>/dev/null | grep -qE '^#!.*[/ ](ba)?sh([[:space:]]|$)' || continue
-          seen+="F:$w "; q+=("F$(sed -E 's/(^|[[:space:]])#.*//' "$MAIN/$w")")
-        done
-        # The package script it runs: its first word after the env settings is the package manager, and of the words
-        # after that which are no options, the first names the script (test or t: test; run or run-script: the next).
-        i=0; while [ $i -lt ${#ws[@]} ] && [[ ${ws[i]} == [A-Za-z_]*=* ]]; do i=$((i + 1)); done
-        case ${ws[i]:-} in npm|pnpm|yarn|bun) ;; *) continue ;; esac
-        r=(); for w in "${ws[@]:i+1}"; do [[ $w == -* ]] || r+=("$w"); done
-        w=${r[0]:-}; case $w in run|run-script) w=${r[1]:-} ;; t) w='test' ;; esac
-        [ -n "$w" ] && [ -f "$pj" ] || continue
-        for s in "pre$w" "$w" "post$w"; do
-          [[ $seen != *" $s "* ]] || continue; seen+="$s "
-          s=$(jq -r --arg s "$s" '.scripts[$s] // empty | strings' "$pj" 2>/dev/null) && [ -n "$s" ] && q+=("W$s")
-        done
-      done <<<"$c"
-    done
-  done
+  [ ! -f "$pj" ] || p=1
+  mapfile -t -O "${#cs[@]}" cs < <(if [ -n "$p" ]; then jq -r '.scripts | objects | to_entries[]
+      | select((.value | type) == "string" and (.key | test("^[^\t\n]+$"))) | "\(.key)\t\(.value | gsub("\n"; ";"))"' "$pj" 2>/dev/null; fi \
+    | LC_ALL=C RF_MAIN=$MAIN RF_PJ=$p RF_W1=$c RF_W2=$a RF_W3=$mc RF_W4=$b awk "$RUNNERAWK")
   [ ${#cs[@]} != 0 ] || return 0
   # Each tracked file a word names, once, in git's order (by bytes, as LC_ALL=C sort's); a word that names a folder
   # lists the files under it, which are no file a word names. By the shell, not sort and grep: names() runs this in
