@@ -62,8 +62,9 @@ t_packcommitexempt() {
 # Bug (R144 of #1450): step 3 of setup.md asked for the pack only when git status of .conveyor/project.json and the
 # fixed path .conveyor/size-exempt.txt printed a line, so a change to an exempt file at another path alone was never
 # put to the owner, and the Foreman's rule looked at the pack alone. Both now run pack-commit, which reads the exempt
-# paths from the pack. setup.md is instructions to a Claude session, so no behaviour of it can run here: the case
-# runs pack-commit with a custom exempt path, and reads the two texts for the call to it and for the old gates.
+# paths from the pack; the Foreman's step lives in procedures.md, where #1606 found the gate back. setup.md and
+# procedures.md are instructions to a Claude session, so no behaviour of them can run here: the case runs pack-commit
+# with a custom exempt path, and reads the texts (with foreman.sh, which names the procedures) for the call and gates.
 t_packcommitcustom() {
   packsetup; local out
   tune '.lint = {commands: [{files: ["*.txt"], size: {file: 3, exempt: "docs/big-files.txt"}}]}' && mkdir -p "$R/docs" && echo big.txt > "$R/docs/big-files.txt" || fail "the fixture was not made"
@@ -72,9 +73,9 @@ t_packcommitcustom() {
   out=$(loop setup pack-commit) && grep -q '^ask:' <<<"$out" && grep -q 'docs/big-files.txt' <<<"$out" || fail "a changed exempt file at a custom path was not asked: $out"
   # The bare call (closed by its backtick, or followed by its note), not the `pack-commit yes` and `no` calls of the
   # owner's answer: those are in both texts too, so a looser pattern passes with the check itself gone (E5 of #1450).
-  grep -qF 'conveyor.sh" setup pack-commit`' "$SRC/../commands/setup.md" && grep -qF 'conveyor.sh setup pack-commit (' "$SRC/foreman/foreman.sh" \
+  grep -qF 'conveyor.sh" setup pack-commit`' "$SRC/../commands/setup.md" && grep -qF 'conveyor.sh setup pack-commit (' "$SRC/foreman/procedures.md" \
     || fail "setup.md or the Foreman's rules no longer run setup pack-commit with no answer, the only check that reads the exempt paths from the pack"
-  ! grep -q 'status --porcelain' "$SRC/../commands/setup.md" "$SRC/foreman/foreman.sh" || fail "setup.md or the Foreman's rules gate the pack's question on a git status of fixed paths: $(grep -n 'status --porcelain' "$SRC/../commands/setup.md" "$SRC/foreman/foreman.sh" | cut -c1-200)"
+  ! grep -q 'status --porcelain' "$SRC/../commands/setup.md" "$SRC/foreman/foreman.sh" "$SRC/foreman/procedures.md" || fail "setup.md or the Foreman's rules gate the pack's question on a git status of fixed paths: $(grep -n 'status --porcelain' "$SRC/../commands/setup.md" "$SRC/foreman/foreman.sh" "$SRC/foreman/procedures.md" | cut -c1-200)"
 }
 
 # Bug (E2 of #1157): a size entry whose exempt file is on no disk and in no commit (the docs allow it) went to git add,
