@@ -89,7 +89,7 @@ passes "$(body $'## What happens now\nIt breaks.\n  ## Cause\nThe file grows.')"
 # passed. A real heading after the block still counts, and a fence of tildes or one closed by the body's quote also ends.
 refused "$(body $'## What happens now\nThe form drops the heading.\n\n```md\n ## Cause\n```')"
 refused "$(body $'## What happens now\nIt breaks.\n~~~\n## Cause\n~~~')"
-refused "gh issue create --title 'Fix it' --body '## What happens now\nIt breaks.\n\`\`\`\n## Cause\n\`\`\`'"
+refused "gh issue create --title 'Fix it' --body \$'## What happens now\nIt breaks.\n\`\`\`\n## Cause\n\`\`\`'"
 passes "$(body $'## What happens now\nIt breaks.\n```md\n## Cause\n```\n## Cause\nThe file grows.')"
 passes "$(body $'## What happens now\nIt breaks.\n````\n```\n````\n## Cause\nThe file grows.')"
 # A fence that opens on the line of the command (right after the quote that opens the body) hides its heading too.
@@ -122,6 +122,9 @@ passes "gh issue create --label bug --title '~~~ followed by \\n' --body \$'## W
 refused "gh issue create --label bug --title '~~~ x\\n' --body \$'~~~\n## Cause\n~~~'"
 # A `\\n` in an inline body is a backslash and an n: it makes no fence that hides a real Cause heading.
 passes "gh issue create --label bug --body \$'The form prints \\\\n~~~ as text.\n## Cause\nThe cache is stale.'"
+# Bug: a `\n` in a plain single quote is a backslash and an n to bash, but it was read as a line break, so `~~~ as
+# text.'` opened a fence that hid the real Cause heading of the `$'...'` part after it, and a valid fix was refused.
+passes "gh issue create --label bug --body 'The form prints \\n~~~ as text.'\$'\\n## Cause\\nThe cache is stale.'"
 # A backtick opener with a backtick in its info string is no fence, so the heading after it counts.
 passes "$(body $'## What happens now\nThe form prints this line:\n``` `name`\n## Cause\nThe cache is stale.')"
 # Bug (#1510 review): a fence after a list marker was no fence, so the indented `## Cause` in the item's code block

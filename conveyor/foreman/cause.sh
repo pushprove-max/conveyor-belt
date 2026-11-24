@@ -89,6 +89,23 @@ unfenced() {
         if (oq == "" || !(j = qend(line, oq))) next
         open = ""; line = substr(line, j) } }' <<<"$3"
 }
+# breaks <command>: the command with each written `\n` read as bash reads it. In a `$'...'` quote bash makes it a line
+# break, so it is one here. Elsewhere (a plain or double quote, or no quote) it stays a backslash and an n, and is
+# marked with a \002 byte: no fence starts or ends at it, but no_cause still reads a heading after it. `\\` is a
+# backslash and the next character, so `\\n` is no break and no mark.
+breaks() {
+  awk '{ s = s (NR > 1 ? "\n" : "") $0 }
+    END {
+      for (i = 1; i <= length(s); i++) {
+        ch = substr(s, i, 1); nx = substr(s, i + 1, 1)
+        if (ch == "\\" && nx == "n") { o = o (m == "a" ? "\n" : "\002"); i++; continue }
+        # In a plain single quote only `\\` is a pair: a backslash before the closing quote leaves the quote to end it.
+        if (ch == "\\" && (m != "s" || nx == "\\")) { o = o ch nx; i++; continue }
+        o = o ch
+        if (m == "") { if (ch == "\"") m = "d"; else if (ch == q) m = (substr(s, i - 1, 1) == "$" ? "a" : "s") }
+        else if ((m == "d" && ch == "\"") || (m != "d" && ch == q)) m = "" }
+      printf "%s", o }' q="'" <<<"$1"
+}
 no_cause() {
   local cmd f t ti=0 fc=
   cmd=$(jq -r '.tool_input.command // ""' <<<"$1" 2>/dev/null) || return 1
@@ -106,8 +123,9 @@ no_cause() {
   # A line inside a fenced code block (``` or ~~~) is no heading: the headings are read from the text without its fences.
   local hs=$'(^|\n|["\'])[ ]{0,3}##[[:space:]]+' he=$'[ \t]*(\n|$)' hc c=$cmd inl=1 bq='' hd=$'<<-?[ ]*[\'"]?[A-Za-z_][A-Za-z_0-9]*[\'"]?[ ]*\\)*[ ]*\n'
   # A command with a here-document (`<<WORD` ending its line) holds its body as written: `\n` there is text, and a quote
-  # ends nothing; so does a body file (read apart from the command). In an inline body a written `\n` is a line break,
-  # but `\\n` is a backslash and an n; the quote that opens the body is the one that closes it.
+  # ends nothing; so does a body file (read apart from the command). In an inline body a written `\n` in a `$'...'` quote
+  # is a line break; elsewhere it starts or ends no fence, but a heading after it still counts (breaks); `\\n` is a
+  # backslash and an n. The quote that opens the body is the one that closes it.
   if [[ $cmd =~ $hd ]]; then inl=0
   else
     # `ask <project> testissue <test file> <title> <body>` has no --body (a `--body` in its text is text): its body is
@@ -119,9 +137,9 @@ no_cause() {
         || bq=${BASH_REMATCH[-1]}
     else [[ $cmd =~ (^|[[:space:]])(--body|-b)[[:space:]=]+\$?([\"\']) ]] && bq=${BASH_REMATCH[3]}
     fi
-    c=${cmd//\\\\/$'\001'}; c=${c//\\n/$'\n'}; c=${c//$'\001'/\\\\}
+    c=$(breaks "$cmd")
   fi
-  hc=$(unfenced "$inl" "$bq" "$c")
+  hc=$(unfenced "$inl" "$bq" "$c"); hc=${hc//$'\002'/$'\n'}
   [ -z "$fc" ] || hc+=$'\n'$(unfenced 0 "" "$fc")
   [[ $hc =~ ${hs}Cause${he} ]] && return 1
   [[ $hc =~ ${hs}What\ happens\ now${he} || $ti = 1 ]] && return 0
