@@ -197,6 +197,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   ".conveyor/test-changed-rerun.test.sh": [
+    "conveyor/tests/judge.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   ".conveyor/test-changed-text.test.sh": [

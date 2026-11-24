@@ -354,8 +354,8 @@ t_judgemarksany() {
   printf '1\n2\n3\n' > "$w/a.txt"; printf 'x\n' > "$w/b.txt"; git -C "$w" add . && git -C "$w" -c user.name=t -c user.email=t@example.com commit -qm base || fail "the base commit failed"
   printf '1\n2\nchanged\n' > "$w/a.txt"; git -C "$w" add a.txt
   printf '%s\n' '[P1] b.txt:1 reads a.txt:3 that the change broke' '[P1] b.txt:1 and a.txt:1 two unchanged lines' '[P1] b.txt:1 alone' '[P1] no place' > "$w.review"
-  # shellcheck disable=SC2034 # STE is read by the sourced lib/review.sh
-  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE=''; . "$SRC/lib/review.sh"; judgemarks "$w" '[]')
+  # shellcheck disable=SC2034 # STE and TRYFOLD (lib/session.sh's) are read by the sourced lib/review.sh
+  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; judgemarks "$w" '[]')
   [ "$(jq -c 'map(.place)' <<<"$m")" = '["inside","outside","outside","none"]' ] || fail "a finding whose second citation is a changed line was not marked inside, or another was: $m"
 }
 
@@ -364,8 +364,8 @@ t_judgemarksany() {
 t_judgeidmark() {
   local w=$T/$CASE/w m; mkdir -p "$w" && git -C "$w" init -q || fail "the worktree could not be made"
   printf '%s\n' '[P1] [E2][security] a.txt:2 exposed token' '[P1][security] [E3] a.txt:3 exposed key' '[P1] a.txt:4 plain' > "$w.review"
-  # shellcheck disable=SC2034 # STE is read by the sourced lib/review.sh
-  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE=''; . "$SRC/lib/review.sh"; judgemarks "$w" '["security"]')
+  # shellcheck disable=SC2034 # STE and TRYFOLD (lib/session.sh's) are read by the sourced lib/review.sh
+  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; judgemarks "$w" '["security"]')
   [ "$(jq -c 'map(.kind)' <<<"$m")" = '["security","security",null]' ] || fail "a finding with an id mark lost its always-accepted kind: $m"
 }
 

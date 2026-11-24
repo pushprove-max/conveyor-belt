@@ -30,8 +30,8 @@ t_excerpts() {
     '[P2] long.txt:45-80 too wide' '[P2] long.txt:51 long line' '[P2] a.txt:9 no such line' '[P1] mid.txt:2 the deleted m2 was needed' \
     '[P3] big.txt:1 early' '[P1] f.txt:2 the fix deleted f2' 'NEW CARD: a.txt:1 is stale' 'VERDICT: NO-GO' > "$w.review"
   # pipefail, as the loop runs with it.
-  # shellcheck disable=SC2034 # STE is read by the sourced lib/review.sh
-  x=$(set -o pipefail; eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE=''; . "$SRC/lib/review.sh"; excerpts "$w" "$fx")
+  # shellcheck disable=SC2034 # STE and TRYFOLD (lib/session.sh's) are read by the sourced lib/review.sh
+  x=$(set -o pipefail; eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; excerpts "$w" "$fx")
   [ "$(jq -c '.[0]' <<<"$x")" = '{"at":"a.txt:2","side":"new","from":2,"lines":["TWO"]}' ] \
     || fail "the cited line is not the staged one, with its side: $x"
   [ "$(jq -c '.[2] | [.at, .side, .lines]' <<<"$x")" = '["gone.txt:2","old",["old2"]]' ] || fail "a deleted file's line is not kept from the old side: $x"
@@ -46,21 +46,21 @@ t_excerpts() {
     || fail "a path outside the repository, a line no tree has or a line that is no finding gave lines, or a changed line lost its old side: $x"
   # A range wider than EXCERPTLINES keeps that many lines.
   printf '%s\n' '[P2] long.txt:1-50 all of it' > "$w.review"
-  # shellcheck disable=SC2034 # STE is read by the sourced lib/review.sh
-  x=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE=''; . "$SRC/lib/review.sh"; excerpts "$w")
+  # shellcheck disable=SC2034 # STE and TRYFOLD (lib/session.sh's) are read by the sourced lib/review.sh
+  x=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; excerpts "$w")
   [ "$(jq -c '.[0].lines | length' <<<"$x")" = 20 ] || fail "a wide range is kept whole: $x"
   # A finding the judge declined is a DECLINED line (judge step); the Board lists it with its Reviewed lines, so they are
   # kept as for an accepted finding, from the finding's place, never from one the judge's reason names.
   printf '%s\n' '[P1] a.txt:1 kept' 'DECLINED: [P2] mid.txt:2 declined (judge: rare, see long.txt:3)' > "$w.review"
-  # shellcheck disable=SC2034 # STE is read by the sourced lib/review.sh
-  x=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE=''; . "$SRC/lib/review.sh"; excerpts "$w")
+  # shellcheck disable=SC2034 # STE and TRYFOLD (lib/session.sh's) are read by the sourced lib/review.sh
+  x=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; excerpts "$w")
   [ "$(jq -c '[.[].at] | unique' <<<"$x")" = '["a.txt:1","mid.txt:2"]' ] \
     || fail "a declined finding's lines are not kept (a DECLINED line was read as no finding), for the review: $(cat "$w.review"): $x"
   # Bugs caught (#1381): the lines beside each finding in the judge's message (judgefindings()) left out the lines near
   # the cited one, and, with the tree before the last fix round, the cited line that fix deleted (f2).
   echo '[{"n":1,"place":"inside","finding":"[P1] f.txt:2 the fix deleted f2"},{"n":2,"place":"inside","finding":"[P1] a.txt:2 wrong case"}]' > "$w.judge.marks"
-  # shellcheck disable=SC2034 # STE is read by the sourced lib/review.sh
-  x=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE=''; . "$SRC/lib/review.sh"; judgefindings "$w" "$fx")
+  # shellcheck disable=SC2034 # STE and TRYFOLD (lib/session.sh's) are read by the sourced lib/review.sh
+  x=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; judgefindings "$w" "$fx")
   [ "$(awk '/^F2 /{ exit } /^F1 /{ on = 1 } on' <<<"$x")" = 'F1 [inside the diff] [P1] f.txt:2 the fix deleted f2
   Lines at f.txt:2 (the staged change):
     1: f1
