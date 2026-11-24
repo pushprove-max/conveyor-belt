@@ -116,13 +116,19 @@ keptnote() { # <reason text>
 }
 # nostart()'s reason (NOSTART_WHY) with no word of the CLI's: its first line alone, naming the kept events or err file
 # (reviewkeep()) where it pointed at "its words below": the CLI's words are in its events, or in its err when it wrote them
-# to stderr alone. With no note (nothing was kept) it says the words could not be kept, not that they are below. With no
-# err beside the kept events file (its copy failed), it says the err could not be kept: the words may be only there.
-nostartsaid() { # <reviewkeep()'s note>
-  local w=${NOSTART_WHY%%$'\n'*} where='its words, which could not be kept,' n=${1##*; its events are kept in }
-  [ -z "$1" ] || where='its words in the kept events or err file'
-  [ -z "$1" ] || [ -e "$ST/kept/${n%.review*}/${n%.events}.err" ] || where='its words in the kept events file (its err could not be kept)'
-  printf '%s%s' "${w//its words below/$where}" "$1"
+# to stderr alone. With no note (nothing was kept) it names the card's kept folder that could not hold them and, as the
+# folder to make writable, the nearest one of it, kept or the state folder that is there, so staff have a step they can take.
+# With no err beside the kept events file (its copy failed), it says the err could not be kept: the words may be only there.
+nostartsaid() { # <reviewkeep()'s note> <worktree>
+  local w=${NOSTART_WHY%%$'\n'*} k=kept/${2##*/} n=${1##*; its events are kept in } where='its words in the kept events or err file'
+  if [ -n "$1" ]; then
+    [ -e "$ST/kept/${n%.review*}/${n%.events}.err" ] || where='its words in the kept events file (its err could not be kept)'
+    printf '%s%s' "${w//its words below/$where}" "$1"
+  elif [[ $w == *'its words below'* ]]; then
+    [ -d "$ST/$k" ] || k=kept; [ -d "$ST/$k" ] || k=''
+    printf '%s; its words could not be kept in kept/%s in the state folder: make %sthe state folder writable, so that the next try keeps them' \
+      "${w//its words below/its words}" "${2##*/}" "${k:+$k in }"
+  else printf '%s' "$w"; fi
 }
 codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex review, ending as review() says
   local model=$4 effort=$5 rc roll s sec f run='' no='' kn=''
@@ -161,11 +167,11 @@ codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex 
   # with the proxy as the reviewer's fallback, runs again at once through the proxy (proxyfallback()).
   if [ "$no" = 2 ] && nostart "$rc" "$f" "$1.events" "$1.err" codex "$model" reviewer "" "$1"; then
     if proxyfallback codex; then
-      s=$(nostartsaid "$kn"); f=$(PROXY_NOW=1 codexreview "$@"); no=$?
+      s=$(nostartsaid "$kn" "$1"); f=$(PROXY_NOW=1 codexreview "$@"); no=$?
       [ $no != 0 ] || { printf '%s\n' "$f"; return 0; }
       bothsaid "$s" "$f"; return $no
     fi
-    signinstop review; s=$(nostartsaid "$kn"); f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f")
+    signinstop review; s=$(nostartsaid "$kn" "$1"); f=$(jq -c --argjson s "$NOSTART_START" '. + {start: $s}' <<<"$f")
   fi
   jq -c '{step: "review"} + .' <<<"$f" > "$1.spent"
   [ ! -e "$1.stalled" ] || { s="stalled at review: no progress since $(<"$1.stalled")$kn"; no=2; }

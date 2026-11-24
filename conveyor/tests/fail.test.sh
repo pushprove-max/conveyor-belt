@@ -175,6 +175,18 @@ t_reviewkeeperr() {
     && ! grep -qF 'events or err file' "$T/$CASE/run.out" \
     || fail "nostartsaid on reviewkeep's note, its err not kept, named the kept err file for the words: $(cat "$T/$CASE/run.out")"
 }
+# Bug: a review that never began its work (nostart()), whose words could not be kept, told staff to "fix what its words,
+# which could not be kept, say": a step they cannot take, with no place to read the words and no way to get them. Then it
+# sent staff to make kept/c11-11 writable when only kept was there (t_reviewkeepfull's unwritable kept folder): a folder
+# that does not exist. The second call, once kept/c11-11 is there, names that folder.
+t_reviewkeepfullsaid() {
+  setup '[]'; mkdir -p "$ST/kept"
+  fx_in 'NOSTART_WHY="the codex CLI stopped before any work (exit 1): fix what its words below say"$'"'"'\n'"'"'"pw123@example.com"
+    nostartsaid "" "$CARDS/c11-11"; echo; mkdir "$ST/kept/c11-11"; nostartsaid "" "$CARDS/c11-11"'
+  local s='the codex CLI stopped before any work (exit 1): fix what its words say; its words could not be kept in kept/c11-11 in the state folder: make'
+  [ "$(cat "$T/$CASE/run.out")" = "$s kept in the state folder writable, so that the next try keeps them"$'\n'"$s kept/c11-11 in the state folder writable, so that the next try keeps them" ] \
+    || fail "a review whose words could not be kept sent staff to a folder that is not there, or to none, for nostartsaid \"\" c11-11 with kept alone, then with kept/c11-11: $(cat "$T/$CASE/run.out")"
+}
 # Bug: a review that stalled twice replaced its reason with one that dropped the kept events file's name (reviewed(), the
 # second stall). Its own review() is stood in for by one that stalls with the reason codexreview() gives.
 t_reviewkeepstall() {
