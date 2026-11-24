@@ -38,16 +38,18 @@ class CacheMode(unittest.TestCase):
         with open(self.cache, 'w') as f:
             f.write('{}')
         os.chmod(self.cache, 0o664)
-        # Bug caught: a <cache>.<pid> an interrupted earlier write left at 0664 keeps its mode through O_CREAT, and the
-        # rename makes it the cache: the writer must narrow the file it opens, not only a file it creates.
-        left = f'{self.cache}.{os.getpid()}'
-        open(left, 'w').close()
-        os.chmod(left, 0o664)
+        # The writer cases start with no <cache>.<pid>, as a fresh Board run does: the writer must create it.
+        self.left = f'{self.cache}.{os.getpid()}'
         self.umask = os.umask(0o002)  # the build host's umask: new files are 0664 unless the writer narrows them
 
     def tearDown(self):
         os.umask(self.umask)
         self.tmp.cleanup()
+
+    def assertFresh(self, what):
+        # Bug caught: every writer case once opened a <cache>.<pid> setUp() had made, so a private_open() that cannot
+        # create the file (no O_CREAT: FileNotFoundError on a fresh run) passed them all.
+        self.assertFalse(os.path.exists(self.left), f'{what}: {self.left} exists before the write')
 
     def assertPrivate(self, what, field=None):
         # `field`: the part of the written cache that must hold the fixture's session id as a value (not a file name
@@ -60,10 +62,16 @@ class CacheMode(unittest.TestCase):
         self.assertEqual(mode, 0o600, f'{what} left {self.cache} with mode {oct(mode)} under umask 0002')
 
     def test_requests_cache(self):
+        self.assertFresh('requests()')
         d.requests(self.src, self.cache, SINCE, NOW)
         self.assertPrivate('requests()', 'session')
 
-    def test_codex_requests_cache(self):
+    def leave_tmp(self):
+        # A <cache>.<pid> an interrupted earlier write left at 0664.
+        open(self.left, 'w').close()
+        os.chmod(self.left, 0o664)
+
+    def codex_session(self):
         # Bug caught: a Claude transcript gave codex_requests() no response, so its session map stayed empty and the
         # case passed on the file name s1.jsonl alone. A Codex session file: one response, its file name the session.
         os.unlink(os.path.join(self.src, 's.jsonl'))
@@ -72,12 +80,36 @@ class CacheMode(unittest.TestCase):
             f.write(json.dumps({'type': 'token_usage_record',
                                 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(NOW - 60)),
                                 'payload': {'response_id': 'r1', 'usage': {'input_tokens': 1, 'output_tokens': 1}}}) + '\n')
+
+    def test_codex_requests_cache(self):
+        self.codex_session()
+        self.assertFresh('codex_requests()')
         d.codex_requests([self.src], self.cache, SINCE, NOW)
         self.assertPrivate('codex_requests()', 'session')
 
     def test_lane_models_kept(self):
+        self.assertFresh('lane_models()')
         d.lane_models(self.src, self.lane, SINCE, self.cache)
         self.assertPrivate('lane_models()', 'files')
+
+    # Bug caught: a <cache>.<pid> an interrupted earlier write left at 0664 keeps its mode through O_CREAT, and the
+    # rename makes it the cache: each writer must narrow the file it opens, not only a file it creates. One case per
+    # writer, as each opens its own temporary file and could set the mode only when it creates it.
+    def test_requests_leftover_tmp(self):
+        self.leave_tmp()
+        d.requests(self.src, self.cache, SINCE, NOW)
+        self.assertPrivate('requests() over a <cache>.<pid> left at 0664', 'session')
+
+    def test_codex_requests_leftover_tmp(self):
+        self.codex_session()
+        self.leave_tmp()
+        d.codex_requests([self.src], self.cache, SINCE, NOW)
+        self.assertPrivate('codex_requests() over a <cache>.<pid> left at 0664', 'session')
+
+    def test_lane_models_leftover_tmp(self):
+        self.leave_tmp()
+        d.lane_models(self.src, self.lane, SINCE, self.cache)
+        self.assertPrivate('lane_models() over a <cache>.<pid> left at 0664', 'files')
 
     # Bug caught: a call that returns before it writes the cache (nothing to read, nothing new) left a cache an earlier
     # version wrote at 0664 readable by others.
