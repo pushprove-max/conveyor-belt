@@ -1077,7 +1077,7 @@ covof() {
 # The tests of the changed files <file>...: into run (test files), area (engine case files) and all (the whole engine
 # test), then (but in textonly's pick) pick's cases (the engine runner's cases, none for all of them) and run[the runner].
 pick() {
-local f t s named stem dir cov cpart helpers of
+local f t s named stem dir cov cpart helpers of nmap
 [ -n "$NOTEXT" ] || npart=()
 for f; do
   # A change to its comment and blank lines alone: no test, its linked ones and itself, a test file, too (commentonly).
@@ -1102,8 +1102,11 @@ for f; do
     # not list at HEAD, and each one of an area whose files changed (in the map now, else at HEAD). "all", or a map either side
     # that cannot be read (none at HEAD, or a line that is not one of its shapes: AREAS), runs the whole engine test.
     for t in $MAPTESTS; do [ ! -f "$t" ] || run[$t]=1; done
-    if [ -n "$AMAP" ] && named=$(git show "HEAD:$MAP" 2>/dev/null) && named=$(jq -cs "$AREAS" <<<"$named" 2>/dev/null) \
-      && named=$(jq -rn --argjson o "$named" --argjson n "$AMAP" '($o.areas + $n.areas) | keys[] as $k
+    # With MAPOLD (freshen: main changed the map) the two maps are MAPOLD's and HEAD's: the card's own map change, if any,
+    # is not main's.
+    nmap=$AMAP; [ -z "${MAPOLD:-}" ] || nmap=$(git show "HEAD:$MAP" 2>/dev/null | jq -cs "$AREAS" 2>/dev/null) || nmap=
+    if [ -n "$nmap" ] && named=$(git show "${MAPOLD:-HEAD}:$MAP" 2>/dev/null) && named=$(jq -cs "$AREAS" <<<"$named" 2>/dev/null) \
+      && named=$(jq -rn --argjson o "$named" --argjson n "$nmap" '($o.areas + $n.areas) | keys[] as $k
         | (($n.areas[$k].tests | arrays) - ($o.areas[$k].tests | arrays // []))[],
           (select($o.areas[$k].files != $n.areas[$k].files)
             | ($n.areas[$k] // $o.areas[$k]).tests | if . == "all" then "all\t\($k)" else .[] end)' 2>/dev/null); then
@@ -1228,16 +1231,23 @@ freshen() { # <reason> <only within the change's selection: 1, or empty> <file>.
   if [ -n "$o" ]; then TXFROM=$(awk -F'\t' '$1 == "from" {print $2; exit}' "$RERUN"); TXTO=HEAD; else TXFROM=HEAD; TXTO=; fi
   for f; do
     run=(); area=(); ccase=(); allby=(); all=
-    # The map as main changed it is the one at HEAD, so which case files it names anew cannot be told: every case of
-    # the runner the change selects runs, and the map's own tests (MAPTESTS).
-    if [ -n "$o" ] && [ "$f" = "$MAP" ]; then
+    # The map as main changed it: the map at the list's `from` commit (TXFROM) against HEAD's, as pick() reads a card's
+    # own change of it, so the entries that changed run where the change's selection holds them, as for any file main
+    # changed, and the map's own tests (MAPTESTS) run though the list omits them (below; not in a one-file run, which runs
+    # its file alone: a map test the list names runs there). A map that cannot be compared (no
+    # `from` line, or a map either side that cannot be read) is "all": every case of the runner the change selects runs.
+    if [ -n "$o" ] && [ "$f" = "$MAP" ] && [ -n "$TXFROM" ]; then MAPOLD=$TXFROM pick "$f"
+    elif [ -n "$o" ] && [ "$f" = "$MAP" ]; then
       run[conveyor/conveyor.test.sh]=1; cases=
       for t in $MAPTESTS; do [ ! -f "$t" ] || run[$t]=1; done
     else pick "$f"; fi
     for t in "${!run[@]}"; do
       c=$cases
       if [ -n "$o" ]; then
-        [ -n "${full[$t]:-}" ] || continue
+        # A test the selection does not hold is left out, but the map's own tests when main changed the map: they run
+        # though the card's list omits them. Not in a one-file run (ONE): it runs its file alone, and the loop stops a
+        # run that starts a file beyond its list.
+        [ -n "${full[$t]:-}" ] || { [ -z "$ONE" ] && [ "$f" = "$MAP" ] && [[ " $MAPTESTS " == *" $t "* ]]; } || continue
         if [ "$t" = conveyor/conveyor.test.sh ] && [ -n "$fullcases" ]; then
           if [ -z "$c" ]; then c=$fullcases
           else c=$(comm -12 <(tr ' ' '\n' <<<"$c" | grep . | sort -u) <(tr ' ' '\n' <<<"$fullcases" | grep . | sort -u) | tr '\n' ' ')

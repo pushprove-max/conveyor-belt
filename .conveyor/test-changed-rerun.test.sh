@@ -213,8 +213,8 @@ p_mainmoved() {
     || no "main changed core.sh: ran '$got': $(cat "$T/out")"
   [ "$(sed -n 's/^TESTRUN why\t//p' "$T/mlog/test-changed.log" | sort | tr '\t\n' ':|')" = "conveyor/tests/a.test.sh:did not pass|conveyor/tests/a.test.sh:main changed conveyor/core.sh|" ] \
     && ok "its log gives each reason a file ran, under the case file of those cases" || no "why lines: $(cat "$T/mlog/test-changed.log")"
-  # Main changed the map: the map at HEAD is main's, so the case files it named anew (one now covering the change's
-  # x.sh) cannot be told from it, and the runner's cases the change selects run though they passed.
+  # Main changed the map and the list has no `from` line: the map before main's change cannot be read, so which case
+  # files it named anew cannot be told, and the runner's cases the change selects run though they passed.
   printf 'change\tabc\npass\tlib/w.test.sh\npass\tconveyor/conveyor.test.sh\nmain\t.conveyor/engine-areas.json\n' > "$T/rerun"
   got=$(CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun ran | sorted)
   [ "$got" = "aone atwo " ] && ok "after main changed the map, the runner's cases the change selects run again" || no "main changed the map: ran '$got': $(cat "$T/out")"
@@ -391,8 +391,54 @@ p_linked() {
     || no "lib/c.sh changed: ran '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
 }
 
+# Bug (#1597): main changed the map, and the run after it ran every case of the runner the change selects, the map's
+# own tests and all, though main changed one entry. mainmap: main's commit changes the map (the jq program $2 on
+# the scratch map, naming the new file $1) and adds a map test stub; the card's change (wchange) is not committed; the list names main's
+# commit as `from` (the HEAD before it) and says the change's runner cases and test files passed. The card's list
+# (CONVEYOR_TEST_FILELIST, as the loop gives it) holds only the card's own test file, not the map test stub: bug, the
+# stub ran only when the list named it, so a card that changed one other test file never ran the map's own tests.
+mainmap() {
+  local from; from=$(git -C "$R" rev-parse HEAD)
+  echo one > "$R/$1"
+  jq "$2" "$T/map" | lines > "$R/.conveyor/engine-areas.json"
+  echo 'echo MAPTEST >> "$(dirname "$0")/../ran"' > "$R/.conveyor/test-changed.test.sh"
+  git -C "$R" add .conveyor "$1" && git -C "$R" commit -qm "main moves the map"
+  wchange
+  printf 'change\tabc\nfrom\t%s\npass\tlib/w.test.sh\npass\t.conveyor/test-changed.test.sh\npass\tconveyor/conveyor.test.sh\nmain\t.conveyor/engine-areas.json\n' "$from" > "$T/rerun"
+  printf 'lib/w.test.sh\n' > "$T/files"
+  CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun CONVEYOR_TEST_FILELIST=$T/files ran | sorted
+}
+# Main adds a line for y2.jq (area b) to the map; the card changes x.sh (area a). Only the map's own tests run: the
+# cases of area b are not in the card's selection, and area a's entry did not change.
+p_mapmainother() {
+  got=$(mainmap conveyor/y2.jq '.areas.b.files += ["conveyor/y2.jq"]')
+  [ "$got" = "MAPTEST " ] && ok "main added a map line for a file the card does not change: the map's own tests run, no other engine file" \
+    || no "main added y2.jq to area b: ran '$got': $(cat "$T/out")"
+  # Catches a one-file run (the loop's call: test.fileCommand, once for each file of the card's list) that starts the map's
+  # own tests beside its file: the loop stops a run that starts a file beyond its list (conveyor/lib/session.sh, wide).
+  grep -v $'^pass\tlib/w.test.sh' "$T/rerun" > "$T/rerun1"; rm -f "$R/ran"
+  (cd "$R" && CONVEYOR_TEST_N=1 CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun1 bash .conveyor/test-changed.sh --file lib/w.test.sh) > "$T/out" 2>&1
+  got=$(ranlines "$R/ran" | sorted)
+  [ "$got" = "w " ] && ok "a one-file run, after main changed the map, runs only the file it was given" \
+    || no "--file lib/w.test.sh after main changed the map: ran '$got': $(cat "$T/out")"
+  # Catches a one-file run of the map's own test, which the loop gives once main changed the map (listcmd(): the link
+  # "main:<map>"), that left it out as a test the card's selection does not hold: the test's own run did nothing.
+  printf 'lib/w.test.sh\n.conveyor/test-changed.test.sh\n' > "$T/files2"; rm -f "$R/ran"
+  (cd "$R" && CONVEYOR_TEST_N=2 CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun1 CONVEYOR_TEST_FILELIST=$T/files2 \
+    bash .conveyor/test-changed.sh --file .conveyor/test-changed.test.sh) > "$T/out" 2>&1
+  got=$(ranlines "$R/ran" | sorted)
+  [ "$got" = "MAPTEST " ] && ok "a one-file run of the map's own test, after main changed the map, runs it" \
+    || no "--file .conveyor/test-changed.test.sh after main changed the map: ran '$got': $(cat "$T/out")"
+}
+# Main adds a file to area a's entry, the area of the file the card changes: that entry's cases run (a is a's case file).
+p_mapmainentry() {
+  got=$(mainmap conveyor/x2.sh '.areas.a.files += ["conveyor/x2.sh"]')
+  [ "$got" = "MAPTEST aone atwo " ] && ok "main changed the map entry of the area of a file the card changes: that entry's cases run" \
+    || no "main added x2.sh to area a: ran '$got': $(cat "$T/out")"
+}
+
 for p in rerun mainrun mainwhole nodecases flakyoff slowoff killed fixengine fixtest mainmoved sharedwhy fixpassed \
-  core firstwhy handrun noarea why unlisted cover linked; do part "$p"; done
+  core firstwhy handrun noarea why unlisted cover linked mapmainother mapmainentry; do part "$p"; done
 wait
 for p in "${PARTS[@]}"; do
   cat "$T/$p.res"

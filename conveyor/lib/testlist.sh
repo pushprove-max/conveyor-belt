@@ -557,3 +557,12 @@ rerunsince() { # <worktree> <the staged change's id> <HEAD> <tree>
     grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun"; awk 'length { print "changed\t" $0 }' <<<"$ch"; awk 'length { print "main\t" $0 }' <<<"$m"; } > "$1.rerun.new" \
     && mv -f "$1.rerun.new" "$1.rerun"
 }
+# The test files a card's run again adds to its list on a main that moved (listcmd(): MAINFROM is the commit its list was
+# tested on): the ones .conveyor/test-links.json gives under "main:<file>" for each <file> main changed since, those
+# still there, each run whole. A file main changed whose tests no change of the card selects (the pack's map, whose own
+# tests run when main changes it) would otherwise never run on a list of one-file runs.
+mainlinks() { # <worktree> <the commit last tested on>
+  git -C "$1" -c core.quotePath=false diff --name-only --no-renames "$2" HEAD -- 2>/dev/null \
+    | jq -Rr --slurpfile m <(cat "$1/.conveyor/test-links.json" 2>/dev/null || echo '{}') '$m[0]["main:" + .] | arrays[] | strings' 2>/dev/null \
+    | sort -u | while IFS= read -r f; do [ ! -f "$1/$f" ] || printf '%s\n' "$f"; done
+}

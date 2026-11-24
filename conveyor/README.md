@@ -587,7 +587,8 @@ failure gets a verdict:
   those links in `.conveyor/test-links.json` (`{"<changed file>": ["<test file>", ...]}`), so they land with its fix.
   From then on, a card that changes a linked file runs its linked test files too (a whole-only file in its card
   mode), and its log says so (`TESTRUN linked<TAB><test file><TAB><changed file>`); a link to a test file that no
-  longer exists is dropped. When every failure is main's, the card neither goes to fix nor blocks: it gives way and waits in its
+  longer exists is dropped. A key `main:<file>` in the same file names test files that a card's run again adds to its
+  list when main changed `<file>` since the card last ran. When every failure is main's, the card neither goes to fix nor blocks: it gives way and waits in its
   Test step, its live record saying so, until main is at another commit; then it is fitted onto main as it is now
   and its test step runs again (the same change keeps its passes, so the cases that failed run again). A card that
   reaches its Test step while the main-red record holds main's commit, with its fix card not landed or closed, starts

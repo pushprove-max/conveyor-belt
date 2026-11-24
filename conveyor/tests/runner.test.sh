@@ -157,3 +157,50 @@ t_runnerlist() {
   [ "$(cat "$T/$CASE/got" 2>&1)" = "1|conveyor/tests/a.test.sh|conveyor/conveyor.test.sh" ] \
     || fail "the map's list kept the runner: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
 }
+
+# Bug it catches (#1597): a card's run again after main changed a file whose tests no change of the card selects (the
+# project's map, whose own tests run then) was given only the card's own files, so each one-file run never started those
+# tests. With main's change to map.json since the last run (MAINFROM), the project's link "main:map.json" adds its test
+# file to the list, once; a change to another file adds none, nor does a run with no earlier commit.
+t_runnermainlink() {
+  rdsetup '.test.fileCommand = "bash \"$STUB/one\""'
+  local wt=$T/$CASE/cards/c7 old new
+  old=$(git -C "$wt" rev-parse HEAD) || fail "the card's commit could not be read"
+  mkdir -p "$wt/.conveyor" && echo '{"main:map.json": ["conveyor/tests/b.test.sh", "conveyor/tests/gone.test.sh"]}' > "$wt/.conveyor/test-links.json" \
+    && echo '{}' > "$wt/map.json" && git -C "$wt" add -f .conveyor map.json && git -C "$wt" commit -qm "main moves the map" \
+    && new=$(git -C "$wt" rev-parse HEAD) && echo y > "$wt/other.txt" && git -C "$wt" add other.txt && git -C "$wt" commit -qm "main moves on" \
+    || fail "main's changes could not be committed"
+  rdrun 'testsel() { printf "%s\n" "{\"by\": \"own\"}" conveyor/tests/a.test.sh; }
+    n=0; for from in "'"$old"'" "" "'"$new"'"; do n=$((n + 1)); MAINFROM=$from listcmd "$wt" && echo "$n:$(echo $TEST_FILES)" >> "$T/$CASE/got"; done'
+  [ "$(cat "$T/$CASE/got" 2>&1)" = $'1:conveyor/tests/a.test.sh conveyor/tests/b.test.sh\n2:conveyor/tests/a.test.sh\n3:conveyor/tests/a.test.sh' ] \
+    || fail "main's change to the map did not add its linked test file once, and only then: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+}
+
+# Main moved the project's map (map.json) since the card's list was made; the project's link "main:map.json" names
+# tests/runner.test.mjs, which no change of the card selects. The card changed tests/other.test.mjs. The card's test step
+# (tests(), as card() runs it) is given the list in <shape>: "card", its list made on the commit before (`base` is that
+# commit), or "batch", its list made on the new HEAD (batchlist(): `base` is HEAD, `from` the commit before).
+rnmain() { # <card|batch>
+  rnsetup
+  local c0 c1 wt=$T/$CASE/cards/c7 b f=''
+  c0=$(git -C "$R" rev-parse HEAD) || fail "main's commit could not be read"
+  mkdir -p "$R/.conveyor" && echo '{"main:map.json": ["tests/runner.test.mjs"]}' > "$R/.conveyor/test-links.json" && echo '{}' > "$R/map.json" \
+    && git -C "$R" add -f .conveyor map.json && git -C "$R" commit -qm "main moves the map" && c1=$(git -C "$R" rev-parse HEAD) || fail "main's map change could not be committed"
+  if [ "$1" = card ]; then b=$c0; else b=$c1; f="printf 'from\\t%s\\n' $c0 >> $wt.rerun"; fi
+  # The list is written with the card's staged change (its id and tree), the worktree on <base> while it is made.
+  rnrun "git checkout -q --detach $b && echo y >> tests/other.test.mjs && git add -A && p=\$(git diff --cached --binary --no-renames HEAD | git hash-object --stdin) \
+    && printf 'change\\t%s\\nbase\\t%s\\ntree\\t%s\\n' \$p $b \$(git write-tree) > $wt.rerun && git checkout -q --detach $c1 && ${f:-:}"
+}
+# Bug it catches (#1597 review): tests() gave listcmd() the list's `base` as the commit last tested on, which for a batch's
+# list is the new HEAD: main's change compared HEAD with itself, and the card's run left out the map's own test.
+t_runnermainbatch() {
+  rnmain batch
+  [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/other.test.mjs\none:tests/runner.test.mjs' ] \
+    || fail "the batch's run, after main changed the map, did not run its file and the map's test (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+}
+# Bug it catches (#1597 review): a card's own list, made on the commit before, read main's change from the wrong commit.
+t_runnermaincard() {
+  rnmain card
+  [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/other.test.mjs\none:tests/runner.test.mjs' ] \
+    || fail "the card's run, after main changed the map, did not run its file and the map's test (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+}

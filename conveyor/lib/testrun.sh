@@ -274,13 +274,13 @@ testrec() { # <worktree> <exit> <seconds>
 # ends it, <worktree>.wide) does not run again and fails with <worktree>.stop saying why. card() blocks a card whose
 # run left <worktree>.stop.
 tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alone]
-  local cmd at rc r p='' b='' t='' f o l=() wn wb w=$SECONDS t0 ob mw off kp ko ka kc cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-}
+  local cmd at rc r p='' b='' t='' f o l=() wn wb w=$SECONDS t0 ob mf mw off kp ko ka kc cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-}
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide" "$1.noresult"
   # The files the run before timed (testlist.sh timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
-  # The commit the last run's list was tested on, and a merge in doubt (<worktree>.whole: card(), settle()), before
-  # either goes.
-  ob=$(sed -n 's/^base\t//p' "$1.rerun" 2>/dev/null); mw=$(cat "$1.whole" 2>/dev/null); rm -f "$1.whole"
+  # The commit the last run's list was tested on (ob: its `base`; mf, for main's change, its `from` when it has one, as a batch's
+  # list made on the new HEAD has: batchlist()), and a merge in doubt (<worktree>.whole: card(), settle()), before either goes.
+  ob=$(sed -n 's/^base\t//p' "$1.rerun" 2>/dev/null); mf=$(sed -n 's/^from\t//p' "$1.rerun" 2>/dev/null | head -n 1); mf=${mf:-$ob}; mw=$(cat "$1.whole" 2>/dev/null); rm -f "$1.whole"
   rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.oldtimes" "$1.oldfiles" "$1.times" "$1.reported" "$1.uncovered" "$1.covfirst"; { mkdir "$1.testlog" && checkskept "$1" && packget "${2:-test.fileCommand}" cmd && slot_pool; } 2>"$1.test" || return 1
   if [ "${2:-}" = test.fileCommand ]; then
     [ -n "$cmd" ] || cmd=$(mapfile -t l < <(awk -F'\t' '$1 == "fail" && $2 != "" && !s[$2]++ { print $2 }' "$1.rerun" 2>/dev/null)
@@ -292,7 +292,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
   # its own report (reportask() files).
   REPORT_ENV=(); REPORT_ARGS=''; if [ -z "${2:-}" ]; then reportask "$1" files; elif [ "$2" = test.full ]; then reportask "$1"; [ -z "$REPORT_ARGS" ] || cmd="$cmd $REPORT_ARGS"; fi
   if [ -z "${2:-}" ] && [ "${3:-}" != alone ]; then
-    listcmd "$1" "$REPORT_ARGS" 2>"$1.test" || { [ ! -s "$1.stop" ] || cat "$1.stop" >> "$1.test"; return 1; }
+    MAINFROM=$mf listcmd "$1" "$REPORT_ARGS" 2>"$1.test" || { [ ! -s "$1.stop" ] || cat "$1.stop" >> "$1.test"; return 1; }
     cmd=$LISTCMD
     # No test file linked to the change: nothing runs, and its output says so.
     [ -z "$LISTNONE" ] || { printf 'conveyor: %s\n' "$NONELINKED" > "$1.test"; runnernote "$RUNOFF" >> "$1.test"; TEST_WAIT=0; TEST_RUN=0; return 0; }
@@ -421,8 +421,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
 listcmd() { # <worktree> [report args]
   local s fs=() by fc rn='' f c nf=0 nw=0 lk=() sh=() ns=0
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
-  # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only
-  # while it is not set.
+  # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only while it is not set.
   # A suite runner (SUITERUNNERS) is on no list (#382): testpaths() leaves each off the card's own files, and
   # testlist.sh runnersout() off those the map and the links give; RUNOFF names those, which tests() names in its output.
   names > /dev/null 2>&1 || :
@@ -486,6 +485,7 @@ listcmd() { # <worktree> [report args]
     [ ${#lk[@]} = 0 ] || [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/$((${#lk[@]} - CAPLEFT - ns))}; CAPNOTE=${CAPNOTE//'<all>'/${#lk[@]}}
       [ $ns = 0 ] || CAPNOTE+=${SHAREDLINKED//'<k>'/$ns}; }
   fi
+  [ -z "${MAINFROM:-}" ] || [ ${#fs[@]} = 0 ] || while IFS= read -r f; do printf '%s\n' "${fs[@]}" | grep -qxF -- "$f" || fs+=("$f"); done < <(mainlinks "$1" "$MAINFROM")
   # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.
   [ -z "${TESTRUNNERS:-}" ] || rn=$(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | grep -xF -f <(printf '%s\n' "$TESTRUNNERS")) || rn=''
   jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" --argjson l "$CAPLEFT" --arg c "$CAPNOTE" --arg rn "$rn" --arg rf "$RUNNERFIX" --arg cs "$TEST_CASES" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
