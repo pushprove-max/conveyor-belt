@@ -39,6 +39,8 @@ run() { # <expected exit> <why> <command> [<HOME>]; the hook runs in the checkou
 run 2 "an absolute source path passed the write check" "sed -i s/a/b/ $ROOT/src/x.ts"
 # The text resolve must fold `..`: the path starts with /tmp but names the checkout's src folder.
 run 2 "an absolute source path through /tmp/.. passed the write check" "sed -i s/a/b/ /tmp/..$ROOT/src/x.ts"
+# The relative arm resolves a path with `..` too: an empty answer there reads as no source folder and passes.
+run 2 "a relative source path with .. passed the write check" "sed -i s/a/b/ conveyor/../src/x.ts"
 run 0 "a scratch path was refused" "sed -i s/a/b/ /tmp/x.ts"
 # Read as text, the link's path is under scratch space and passes; resolved, it is the checkout's src folder.
 run 2 "a source path through a scratch symlink passed the write check" "sed -i s/a/b/ $LINK/src/x.ts"
