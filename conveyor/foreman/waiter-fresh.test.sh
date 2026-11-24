@@ -73,7 +73,21 @@ CONVEYOR_MAIN=$T/alpha CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_REPO $CONVEYOR_CMD" = 
   || fail "for a wake of alpha's #7 blocked, run from checkout alpha with records of beta alone and alpha's health giving nothing blocked, pending_fresh kept the wake: $(wake)"
 }
 
-cases=(freshnolist freshretrynote freshreminder freshown)
+# Bug caught (#1658): a blocked card with no issue (a review follow-up) is named in the wake by its name, and health
+# gave it none (its ref #0), so pending_fresh deleted the wake unseen. Health names it now (health.test.sh
+# t_healthnoissuename): the wake stays and the stop relays it (pending_run).
+t_freshnoissue() {
+fixture freshnoissue alpha
+local w=$'Conveyor: alpha: blocked: Review follow-up of #7\nalpha: Review follow-up of #7 is blocked since 2026-11-19T09:58:00Z: tests failed'
+printf '%s\n' "$w" > "$FD/pending/$WAKE"
+CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" = health ] || exit 3; echo "{\"blocked\": [{\"card\": \"c1\", \"issue\": 0, \"name\": \"Review follow-up of #7\", \"since\": \"2026-11-19T09:58:00Z\", \"reason\": \"tests failed\"}]}"' fresh
+[ "$(wake)" = "$w" ] \
+  || fail "for a wake of 'Review follow-up of #7' blocked and health naming that card blocked as the wake says, pending_fresh changed the wake: $(wake)"
+local out; out=$(bash -c '. "$1/lib.sh" && pending_run "$2"' _ "$SRC" "$T/ack")
+[ "$out" = "$w" ] || fail "for the kept wake of 'Review follow-up of #7' blocked, pending_run did not relay it: $out"
+}
+
+cases=(freshnolist freshretrynote freshreminder freshown freshnoissue)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

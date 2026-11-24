@@ -555,3 +555,16 @@ t_healthreviewretried() {
   h=$(loop health | jq -c '[.blocked[] | select(.issue == 7 and .reviewRetried)]')
   [ "$h" = '[]' ] || fail "health still marks a card of #7 after a card of #7 landed: $h"
 }
+
+# Bug (#1658): health read of a picked line its mainRed alone (HEALTHLINE, lib/views.sh), so a blocked card with no
+# issue (a review follow-up, named by noIssue; a Tests-page card, by testFile) had no name, its ref was #0, and the
+# Foreman's waiter (pending_fresh, foreman/lib.sh) deleted its wake unseen.
+t_healthnoissuename() {
+  local h; setup '[]'
+  jq -cn '{card: "c1-0", noIssue: "Review follow-up of #7"}, {card: "c2-0", testFile: "a.test.sh"}
+    | {issue: 0, time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: "", title: "t", created: "2026-11-01T00:00:00Z"} + .
+    | (. + {step: "picked"}), (del(.noIssue, .testFile) + {step: "blocked", result: "blocked", reason: "tests failed"})' >> "$ST/cards.jsonl"
+  h=$(loop health | jq -c '.blocked | map({key: .card, value: .name}) | from_entries')
+  [ "$h" = '{"c1-0":"Review follow-up of #7","c2-0":"Tests page: a.test.sh"}' ] \
+    || fail "for a blocked card picked with noIssue 'Review follow-up of #7' and one picked with testFile a.test.sh, health does not name them so: $h"
+}
