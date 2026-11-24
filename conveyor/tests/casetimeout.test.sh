@@ -41,6 +41,26 @@ t_casetimeout() {
   [ "$got" = '{"cases":["fxhang"],"timedout":["fxhang"]}' ] || fail "the run's progress does not name the case as timed out: $got"
 }
 
+# #1618. Bugs it catches, each more time for every case of every run: run_case handed the case's keeper (case_keep)
+# the functions of every case of every file, 3.5 MB to read, of which it runs one; and the keeper's watcher, ended as
+# its case ended, left its sleep running, on Linux the keeper's child (its subreaper), so case_end found that sleep,
+# ended it and looked again before the case was reported. A case run by run_case as the runner runs one has its own
+# function and the shared ones, and not another case's; as it leaves nothing, its keeper has nothing to end.
+t_casekeep() {
+  local d=$T/$CASE; mkdir -p "$d/in"
+  # What case_end would end, with each one's command as case_end found it.
+  ( T=$d/in; CASE=keep_one; case_end() { local k; for k in $(case_left "$1"); do echo "$k $(ps -o args= -p "$k")"; done > "$T/left"; }; run_case ) > "$d/report" 2>&1
+  [ "$(cat "$d/in/keep_one.rc" 2>/dev/null)" = 0 ] && [ -e "$d/in/left" ] \
+    || fail "the case inside failed, or did not end through its keeper: $(cat "$d/report")"
+  [ ! -s "$d/in/left" ] || fail "a case that left nothing left its keeper processes to end: $(cat "$d/in/left")"
+}
+# The case inside t_casekeep: it leaves nothing, and fails when it lacks its own function or a shared one (fail(),
+# case_left()), or has t_casetimeout, another case's.
+t_keep_one() {
+  declare -F t_keep_one fail case_left > /dev/null || { echo "FAIL: its own function or a shared one is missing"; exit 1; }
+  ! declare -F t_casetimeout > /dev/null || { echo "FAIL: it was given t_casetimeout, another case's function"; exit 1; }
+}
+
 # Bug it catches (#1084): on a busy machine a case 1.5 times past its file's limit failed the run, though it only ran
 # slower. The runner itself runs, as in t_casetimeout: the limit under test is the runner's own keeper's, which no
 # call of one function shows. With the load factor 2 a full run gives it (CONVEYOR_LOAD_FACTOR) and two slots, a case

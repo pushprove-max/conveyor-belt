@@ -133,7 +133,11 @@ q() { json | jq -e "$1" >/dev/null || fail "$2 (jq: $1; data: $(json | jq -c '.p
 PARTS=()
 started() { PARTS+=("$1:$!"); } # <part>, after its ( ... ) &
 
-( fresh contract; limit_read
+# Its four pieces (the panels, the accounts, the limit panel's reading, the live feed) side by side: one after another,
+# their 11 collects and 2 publishes took some 8 s, the most of any part. The panels and the live feed check no usage
+# reading (the live feed writes the one it checks), so they keep the stub and their collects skip the slow read.
+( fresh contract
+(
 # --- the data contract: one part per panel of the page, under the panel's id ---
 quiet
 run
@@ -185,6 +189,8 @@ done
 ! grep -qE 'cpu-cap|scaling_max_freq' "$T/ssh-calls" || fail "the host command still asks for the CPU cap: $(cat "$T/ssh-calls")"
 q '.panels.health.data.stream | .live == false and (.heardAt | fromdateiso8601) > 0 and (.error | test("live feed is not running"))' \
   "with no live feed, the cycle's own read is marked as no live one, with when it was read"
+) & PIECES+=($!)
+( setup contract-2; limit_read
 
 # --- every Claude account: the host's two, each with its own figures and what it is used for (widgetshop's control
 # record names the second; sample names none, so it runs on the default login), beside this machine's. Reviews
@@ -259,6 +265,8 @@ mv "$T/ssh-accounts.kept" "$T/ssh-accounts"
 grep -qF "user@devbox python3 '/srv/main'/.claude/scripts/dashboard_limit.py accounts" "$T/ssh-accounts-calls" || fail "the host's accounts are not read over ssh to its target: $(cat "$T/ssh-accounts-calls")"
 : > "$T/ssh-accounts-calls"; quiet; run
 [ ! -s "$T/ssh-accounts-calls" ] || fail "the host's accounts were read again inside the TTL: $(cat "$T/ssh-accounts-calls")"
+) & PIECES+=($!)
+( setup contract-3; limit_read; mkdir -p "$OUT/cache"
 # #623: the limit panel shows the account the cards run on, as the build machine's guard read it, never this machine's
 # own login. Bug it catches: this machine's ~/.claude.json still named the old account B (92%) after the build machine
 # moved to account A (3%), and the panel showed B. Here this machine's login is B; sample's cards run on the build
@@ -278,8 +286,8 @@ q '.panels.health.data | .limits == [{repo: "sample", account: null, uses: ["bui
   "the limit panel has each account the cards run on, with the build machine's reading and login, not this machine's 92% of account B"
 q '.panels.board.data.limit == {pct: 3, from: "loop"} and .panels.board.data.others.widgetshop.limit == {pct: 40, from: "loop"}' \
   "a record with no guard reading shows its accounts' highest reading, never this machine's own login's"
-rm -f "$T/userhome/.claude.json" "$OUT/cache/claude-usage"; quiet
-
+) & PIECES+=($!)
+( setup contract-4; mkdir -p "$OUT"; quiet
 # --- the live feed: a fresh stream.json is Conveyor's part, and no host is asked; --publish builds data.js
 # again from it and the parts the last cycle kept, with no slow read at all ---
 feed() { # <live true|false> <belt card> -- stream.json as dashboard_stream.py writes it
@@ -329,6 +337,8 @@ run
 [ -s "$T/ssh-calls" ] || fail "a stream.json the feed no longer writes was taken for a live one"
 q '.panels.health.data.stream.live == false and (.panels.health.data.stream.error | test("live feed has stopped"))' "a stopped feed is said to be stopped"
 rm "$OUT/stream.json"
+) & PIECES+=($!)
+pieces
 ) & started contract
 
 # --- --history (#524): the snapshot holds only the newest of each list that grows with landed cards; GET /history

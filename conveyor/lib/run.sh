@@ -304,7 +304,7 @@ stuckwhy() { # <step> <gone | stopped | stuck>
 leftin() { # <card>
   local c p d up=' ' q=$BASHPID
   c=$(cd "$CARDS" 2>/dev/null && pwd -P) || return 0
-  while [[ $q =~ ^[0-9]+$ ]] && [ "$q" -gt 1 ]; do up+="$q "; q=$(ps -o ppid= -p "$q" 2>/dev/null) || break; q=${q//[[:space:]]/}; done
+  up+=$(LC_ALL=C ps -A -o pid= -o ppid= 2>/dev/null | awk -v q="$q" '{ pp[$1] = $2 } END { while (q > 1 && (q in pp) && n++ < 10000) { printf "%s ", q; q = pp[q] } }') # one ps: one a level cost the end of each try session.sh runs about 0.6 s, 20 levels deep
   p_cwds | while IFS=$'\t' read -r p d; do
     d=${d% (deleted)}; [[ $up != *" $p "* ]] && [[ $d == "$c/$1" || $d == "$c/$1"[/.]* || $d == "$c/mainrun/$1" || $d == "$c/mainrun/$1"[/.]* ]] && [ "$(p_env "$p" CONVEYOR_CARDRUN)" = "$1" ] && echo "$p"
   done; return 0

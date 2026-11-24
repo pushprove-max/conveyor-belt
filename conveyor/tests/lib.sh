@@ -309,7 +309,8 @@ landed() { # <issue> [follow-ups json]: the landed line of an earlier card for t
 # the case starts, on the slot's core (slot_mine): it comes back when the last of them has ended, each however it ends.
 # A process the case leaves that closed the slot's descriptor still keeps the slot: a process started before the case
 # holds it until the case and all it left have ended (slot_watch), so it does whenever and however this process ends.
-# The case runs in a shell of its own, given this one's variables, functions and options down a pipe.
+# The case runs in a shell of its own, given this one's variables, functions (but the other cases') and options down a
+# pipe.
 # That shell is the case's keeper (case_keep): it starts the case, writes its exit status, and then ends every
 # process the case left before the case is reported (case_end): a loop a case started in the background
 # (`conveyor.sh machine`, `serve`, `run`) and did not stop, its exit trap not run, wrote on for hours to a file of the
@@ -344,7 +345,10 @@ for s in signal.SIGPIPE, signal.SIGXFSZ:
     if not ign >> (s - 1) & 1: signal.signal(s, signal.SIG_DFL)
 os.execvp(sys.argv[2], sys.argv[2:])' "$BASHPID")
   trap 'trap "" TERM INT HUP; [ -z "$k" ] || { kill -TERM -- "-$k" 2>/dev/null; wait "$k"; }; exit 143' TERM INT HUP
-  exec {s}< <(declare -p; declare -f; set +o)
+  # Every function but the other cases (t_<name> of a case file, which no case calls): with all 2,400 of them, the
+  # keeper read 3.5 MB, some 0.17 s of every case.
+  # shellcheck disable=SC2046 # function names are single words
+  exec {s}< <(declare -p; declare -f $(compgen -A function | awk -v c="t_$CASE" '$0 == c || $0 !~ /^t_[a-z0-9]+$/'); set +o)
   t0=${EPOCHREALTIME//[!0-9]/}; times > "$T/$CASE.cpu"
   # 2>/dev/null: the variables that are the shell's own, and read-only, refuse to be set again.
   set -m; ( set +m; echo "$BASHPID" >&"$w"; exec "${sub[@]}" bash -c '. "/dev/fd/$1" 2>/dev/null; eval "exec $1<&-"; case_keep' "$0" "$s" ) > "$T/$CASE.keeper" 2>&1 < /dev/null & k=$!; set +m
@@ -404,12 +408,15 @@ case_cpu() { # <file>
 }
 # The keeper of one case (run_case), in a shell of its own. The case is a process group of its own (what it starts in
 # the background stays in it), with the case's mark in its environment. A watcher tells the keeper to end when the
-# worker that started it is gone.
+# worker that started it is gone. Ended, the watcher ends its sleep first: one left behind was the keeper's child on
+# Linux, so case_end found it, ended it and looked again, some 0.2 s more for every case.
 case_keep() {
   local p='' watch timer='' rc
   trap 'trap "" TERM INT HUP; [ -z "$p" ] || case_end "$p"; exit 143' TERM INT HUP
-  ( while kill -0 "$CASE_WORKER" 2>/dev/null; do
-      command sleep 0.5
+  # Its jobs, not the last sleep's pid: a TERM can come after a sleep starts and before its pid is kept.
+  ( trap 'kill $(jobs -p) 2>/dev/null; wait; exit 0' TERM
+    while kill -0 "$CASE_WORKER" 2>/dev/null; do
+      command sleep 0.5 & wait $! # sleep: the gap between looks at the worker, which tells no one when it ends
     done; kill -TERM $$ ) > /dev/null 2>&1 & watch=$!
   # Without the runner's test log: a case that runs a case of its own (run_case: t_machineleft) is one case of the run,
   # and its inner one is not named in the run's records (cases/, conveyor.sh watch()). Without the run's failed mark

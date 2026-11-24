@@ -58,9 +58,8 @@ t_inheritpart() {
   recok "$ST/cards.jsonl" "a follow-up that landed on its parent's yes (its landed line with yesFrom)"
 }
 # The follow-up of a follow-up, as it stops and is retried: from #100101 landed, as the case above leaves it (its
-# landed line; its change on main is not its to need). It keeps the name conveyor.slowest gives it, so the runner starts
-# it first. The follow-up of a parent with no yes is the case after it: one after another, the four runs of the two
-# were one case of 16 to 18 s.
+# landed line; its change on main is not its to need). The follow-up of a parent with no yes is the case after it: one
+# after another, the four runs of the two were one case of 16 to 18 s.
 t_inherit() {
   inheritstart
   # #100104, a follow-up of #100101 (no line) of #7: the chain is read up to #7. Its change goes beyond that yes: it stops,

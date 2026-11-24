@@ -178,6 +178,28 @@ t_stallleft() {
   wait_until "! ps -o stat= -p $bg | grep -qv Z" "ps -o pid=,stat=,args= -p $bg" \
     || { kill "$bg" 2>/dev/null; fail "the test the build left running in its worktree under timeout outlived the session"; }
 }
+# #1618. Bug it catches: leftin() (lib/run.sh), which the end of each try of a session that session.sh runs calls,
+# found the processes it runs under with one ps a level, some 20 under a card's test step: about 0.6 s of each such
+# try in every case that runs a card.
+# It reads them from one ps, and still names only what the card left running: here a process with the card's mark in
+# its worktree, and not the shell that runs the shell it is called from, which has the mark and sits there too.
+t_leftinoneps() {
+  # shellcheck disable=SC2034 # FXWT is read by fx_in, a fix card's worktree; this case has none
+  local FXWT=$T/$CASE/none left out
+  setup '[]'; mkdir -p "$T/$CASE/cards/c7"
+  # A ps that notes each call, then runs the real one.
+  printf '#!/usr/bin/env bash\necho "$*" >> "%s/ps-calls"\nexec %q "$@"\n' "$STUB" "$(command -v ps)" > "$STUB/ps"; chmod +x "$STUB/ps"
+  # The shell leftin runs in, out of the worktree (what it starts is in no card's folder), under a parent shell in the
+  # worktree that waits for it (the `true` after it).
+  printf '%s\n' 'bash -c "cd / && leftin c7"; true' > "$STUB/caller"
+  ( cd "$T/$CASE/cards/c7" && CONVEYOR_CARDRUN=c7 exec sleep 600 ) & left=$! # sleep: a process the card left running in its worktree
+  fx_in 'cd "$CARDS/c7" || exit 3; export CARDS CONVEYOR_CARDRUN=c7; export -f leftin p_cwds p_env p_darwin; bash "$STUB/caller"'
+  out=$(cat "$T/$CASE/run.out"); kill "$left" 2>/dev/null; wait "$left" 2>/dev/null
+  [ "$RC" = 0 ] && [ "$out" = "$left" ] \
+    || fail "leftin c7, called under a shell with c7's mark in its worktree, did not name only the process c7 left there ($left), exit $RC: $out"
+  [ "$(grep -c ppid "$STUB/ps-calls" 2>/dev/null)" = 1 ] \
+    || fail "leftin c7, called under a shell with c7's mark in its worktree, did not run ps once for the processes it runs under: $(cat "$STUB/ps-calls" 2>&1)"
+}
 # R287. Bug it catches: a build that stalled with no price to read and ran again kept the second try's output (each
 # try writes <card>.out anew), though its line is unpriced by the first try (BOTHTRIES): the output of the try with no
 # usage was lost. The build session alone, as card() calls it, then its line as record() writes it.
