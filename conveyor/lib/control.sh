@@ -318,7 +318,7 @@ noprice() {
 }
 # noprice()'s look, under its lock.
 noprice_() {
-  local a c p r ms rs k miss gaps m n u l out x y cli ran since st notes rc=0 noted=() lines=()
+  local a c p q r ms rs k miss gaps m n u l out x y cli ran since st notes rc=0 noted=() lines=()
   while IFS=$'\t' read -r n m; do
     out=$(gh_write issue close "$n" --comment "Conveyor no longer files an issue for a model with no price: the price now shows on the Board. While the belt runs or offers \`$m\` with no price, the Board lists it under Rules, Model prices, and Needs you counts it until its price is added there." 2>&1 </dev/null) \
       || { echo "conveyor: #$n, the issue for the price of $m, could not be closed: ${out:0:300}" >&2; rc=1; continue; }
@@ -360,10 +360,13 @@ noprice_() {
   [ "$k" != "$NOPRICE_K" ] || return $rc
   # miss: the models with no price, the pack's prices put over the built-in table (what the Board lists). gaps: the
   # models run that the built-in table alone does not price: a pack's price for one leaves the table's gap.
-  miss=$(jq -cn --argjson m "$ms" --argjson p "${p:-null}" '{prices: $p, models: $m}' \
-      | timeout 30 bash -c "$NOPRICE_CMD" 2>/dev/null 7>&- 8>&-) && miss=$(jq -ce 'arrays | map(strings | select(. != ""))' <<<"$miss" 2>/dev/null) || return 1
-  gaps=$(jq -cn --argjson m "$rs" '{prices: null, models: $m}' \
-      | timeout 30 bash -c "$NOPRICE_CMD" 2>/dev/null 7>&- 8>&-) && gaps=$(jq -ce 'arrays | map(strings | select(. != ""))' <<<"$gaps" 2>/dev/null) || return 1
+  # The check reads its input from a here-string, not a pipe: a check that ends without reading it (one that fails to
+  # start) left jq writing into a closed pipe, and with SIGPIPE ignored (the loop under systemd) jq wrote "Broken pipe"
+  # into the loop's output.
+  q=$(jq -cn --argjson m "$ms" --argjson p "${p:-null}" '{prices: $p, models: $m}') \
+    && miss=$(timeout 30 bash -c "$NOPRICE_CMD" <<<"$q" 2>/dev/null 7>&- 8>&-) && miss=$(jq -ce 'arrays | map(strings | select(. != ""))' <<<"$miss" 2>/dev/null) || return 1
+  q=$(jq -cn --argjson m "$rs" '{prices: null, models: $m}') \
+    && gaps=$(timeout 30 bash -c "$NOPRICE_CMD" <<<"$q" 2>/dev/null 7>&- 8>&-) && gaps=$(jq -ce 'arrays | map(strings | select(. != ""))' <<<"$gaps" 2>/dev/null) || return 1
   st=$(jq -ce 'objects' "$NOPRICE" 2>/dev/null) || st='{}'
   # A Claude or Codex model run with no built-in price and no note yet: one plugin problem each, in stop.sh's form,
   # under the header stop.sh writes, in the Foreman's folder (foremandir()). Only an ID of the built-in table's form is

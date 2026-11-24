@@ -249,6 +249,28 @@ looks() { # <commands>
 }
 # The models the last look found with no price, as a JSON list.
 missing() { jq -c .missing "$ST/noprice.json" 2>&1; }
+# Bug: the look piped the models into the price check (NOPRICE_CMD). A check that ended without reading them (the
+# tests' `false`, or a python that failed to start) left jq writing into a closed pipe, and with SIGPIPE ignored, as
+# the loop runs under systemd (IgnoreSIGPIPE), jq wrote "writing output failed: Broken pipe" into the loop's output:
+# machinesame (machineend.test.sh) failed on that line when the machine was busy. Here the check ends at once and jq
+# writes the models half a second later, as on a busy machine. The look runs the check twice (miss, then gaps): one
+# case for each, as the first check failing returns before the second runs.
+pipelook() { # <NOPRICE_CMD>
+  local real; real=$(command -v jq) || fail "no jq"
+  setup '[]'; mkdir -p "$T/$CASE/bin"
+  # stub: jq that waits before it writes the price check's input ({prices: ...}), so the check has ended by then.
+  printf '#!/usr/bin/env bash\ncase "$*" in *"{prices: "*) sleep 0.5;; esac\nexec %q "$@"\n' "$real" > "$T/$CASE/bin/jq" # sleep: the check must have ended before jq writes, and the look offers no hook to wait on
+  chmod +x "$T/$CASE/bin/jq"
+  looks "PATH=$(printf %q "$T/$CASE/bin"):\$PATH; trap '' PIPE; NOPRICE_CMD=$(printf %q "$1"); noprice || :"
+  ! grep -q 'Broken pipe' "$T/$CASE/out" || fail "the price check '$1', which does not read its input, made the look write: $(cat "$T/$CASE/out")"
+}
+# The first check (miss) ends without reading its input.
+t_nopricepipe() { pipelook 'exit 1'; }
+# The first check reads its input and answers; the second (gaps) ends without reading its input.
+t_nopricepipegaps() {
+  pipelook "[ -e $(printf %q "$T/$CASE/once") ] && exit 1; touch $(printf %q "$T/$CASE/once"); cat > /dev/null; echo '[]'"
+  [ -e "$T/$CASE/once" ] || fail "the first price check did not run, so the second was not reached"
+}
 # Bug (#1074): the look filed a held "Model price missing" issue in the project's own repository for each model with
 # no price (26 in one morning in one project), though a gap in Conveyor's price table is no work of the project. With
 # the builder's seat on a Claude model with no price, no issue is filed, the snapshot gives Needs you the model, and
