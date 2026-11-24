@@ -110,6 +110,14 @@ refused "foreman.sh ask alpha testissue conveyor/x.test.sh 'Slow tests' \$'~~~\n
 refused "foreman.sh ask alpha testissue conveyor/x.test.sh 'Slow tests' \$'The runner logs --body \"missing\".\n~~~\n~~~\"\n ## Cause\n~~~'"
 # Bug: a title with a backslash-escaped space split into two words, so the body quote was never found.
 refused "foreman.sh ask alpha testissue conveyor/x.test.sh Slow\\ tests \$'~~~\n~~~\"\n ## Cause\n~~~'"
+# Bug: a line continuation (backslash, newline) before the body or its --body broke the word match, so the body quote
+# was never found and `~~~"` closed the fence; before `testissue` it hid that the command files an issue at all.
+refused "foreman.sh ask alpha testissue conveyor/x.test.sh 'Slow tests' \\
+\$'~~~\n~~~\"\n ## Cause\n~~~'"
+refused "gh issue create --label bug --body \\
+\$'~~~\n~~~\"\n ## Cause\n~~~'"
+refused "foreman.sh ask alpha \\
+testissue conveyor/x.test.sh 'Slow tests' 'It is slow.'"
 # A `<<` inside a quoted title is no here-document: the body's written \n are still line breaks, so its fence is read.
 refused "gh issue create --label bug --title 'Fix << handling' --body \$'~~~\n ## Cause\n~~~'"
 # Bug: a fence after the quote of a title ('~~~ handling') opened a block that never closed, so the body's real Cause

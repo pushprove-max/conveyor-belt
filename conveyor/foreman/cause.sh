@@ -109,7 +109,10 @@ breaks() {
 no_cause() {
   local cmd f t ti=0 fc=
   cmd=$(jq -r '.tool_input.command // ""' <<<"$1" 2>/dev/null) || return 1
-  t=${cmd//[\"\']/}
+  # j: the command with its line continuations (a backslash before a newline) taken out, as Bash reads its words; the
+  # words are matched in it, the body text in cmd as written.
+  local j=${cmd//$'\\\n'/}
+  t=${j//[\"\']/}
   [[ $t =~ (^|[[:space:];\&|])ask[[:space:]]+[^[:space:]]+[[:space:]]+testissue([[:space:]]|$) ]] && ti=1
   files "$1" || [ "$ti" = 1 ] || return 1
   if [[ $cmd =~ (--body-file|-F)[[:space:]=]+[\"\']?([^[:space:]\"\']+) ]] && f=${BASH_REMATCH[2]}; then
@@ -133,9 +136,9 @@ no_cause() {
     # or a bare one. The last group is the quote that opens the body.
     local w="((\\\$'([^'\\\\]|\\\\.)*'|'[^']*'|\"([^\"\\\\]|\\\\.)*\"|\\\\.|\\\$[^'\"[:space:]\\\\]|[^[:space:]'\"\\\\\$])+)"
     if [ "$ti" = 1 ]; then
-      [[ ! $cmd =~ (^|[[:space:];\&|])ask[[:space:]]+${w}[[:space:]]+[\"\']?testissue[\"\']?[[:space:]]+${w}[[:space:]]+${w}[[:space:]]+\$?([\'\"]) ]] \
+      [[ ! $j =~ (^|[[:space:];\&|])ask[[:space:]]+${w}[[:space:]]+[\"\']?testissue[\"\']?[[:space:]]+${w}[[:space:]]+${w}[[:space:]]+\$?([\'\"]) ]] \
         || bq=${BASH_REMATCH[-1]}
-    else [[ $cmd =~ (^|[[:space:]])(--body|-b)[[:space:]=]+\$?([\"\']) ]] && bq=${BASH_REMATCH[3]}
+    else [[ $j =~ (^|[[:space:]])(--body|-b)[[:space:]=]+\$?([\"\']) ]] && bq=${BASH_REMATCH[3]}
     fi
     c=$(breaks "$cmd")
   fi
