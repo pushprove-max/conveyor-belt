@@ -472,7 +472,7 @@ apitries() { # <worktree> <step> <output file> <command ...>
 session() { # <worktree> <prompt> [step: build (when none is given), fix or rebase] [seat: builder (the default), fix or testFix] [up]
   local p=$2; newtexts p
   treeof "$1" > "$1.before" 2>/dev/null || rm -f "$1.before"; rm -f "$1.out.first" "$1.out.first-"* "$1.out.unpriced"
-  apitries "$1" "${3:-build}" "$1.out" session1 "$1" "$p" "${@:3}"; local rc=$?; replyout "$1"; return $rc # replyout: the draft reply precheck left out, out of the change (lib/donewhen.sh)
+  apitries "$1" "${3:-build}" "$1.out" session1 "$1" "$p" "${@:3}"; local rc=$?; rm -f "$1.out.unpriced"; replyout "$1"; return $rc # replyout: the draft reply precheck left out, out of the change (lib/donewhen.sh). <worktree>.out.unpriced marks one try for apitries() and session1() alone: removed here, as a blocked card keeps the worktree's other files and clean() (lib/push.sh) does not run for it
 }
 # The texts of a card's prompts that its old code made, each with the one the new code makes in its place, in the
 # order of its switches (switchcode(), lib/card.sh); newtexts() puts the new ones in a prompt, in that order.
