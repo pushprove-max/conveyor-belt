@@ -92,6 +92,31 @@ p_noroom() {
     || no "no room for the plugin run's shares: '$got', runs $(runs 2>&1), exit $(cat "$T/rc"): $(cat "$R/log/test-changed.log" "$T/out")"
 }
 
-for p in source perfile missing share noroom; do part "$p"; done
+# Bug (review of #1662): when the plugin run's temp folder could not be made (a full /tmp, or one out of inodes, where
+# no .noroom file can be written either), each plugin test file failed. A mkdir shim on PATH fails for that folder
+# alone: the runner does not start, and each file is a host problem (the second one too, though the first one's run
+# output was kept for it before).
+p_nodir() {
+  mkdir -p "$T/nd" && printf '#!/usr/bin/env bash\ncase $1 in */*.tmp/p) echo "mkdir: No space left on device" >&2; exit 1 ;; esac\nexec %q "$@"\n' "$(command -v mkdir)" > "$T/nd/mkdir" && chmod +x "$T/nd/mkdir"
+  got=$(PATH=$T/nd:$PATH run "$PASS" hooks/a.test.tsx hooks/b.test.tsx)
+  [ "$got" = "-- notrun hooks/a.test.tsx|-- notrun hooks/b.test.tsx" ] && [ "$(cat "$T/rc")" = 1 ] && [ ! -e "$R/runs" ] \
+    && [ "$(grep -c $'^TESTRUN host\thooks/[ab]\\.test\\.tsx\ttest-changed: hooks/[ab]\\.test\\.tsx did not start: its temp folder, output file or pipe could not be made$' "$R/log/test-changed.log")" = 2 ] \
+    && ok "a plugin run whose temp folder could not be made makes each plugin test file a host problem, not a failure" \
+    || no "no temp folder for the plugin run: '$got', runs $(runs 2>&1), exit $(cat "$T/rc"): $(cat "$R/log/test-changed.log" "$T/out")"
+}
+
+# Bug (review of #1662): the same when the plugin run's output file $o.plugin could not be made. The mkdir shim, as it
+# makes the step's $o.tmp, puts a link to a missing folder in $o.plugin's place, so the first open of it fails: the
+# first file is a host problem, and the run is not kept as made, so the second file runs it again, and passes.
+p_noout() {
+  mkdir -p "$T/no" && printf '#!/usr/bin/env bash\ncase $1 in */tmp.*.tmp) %q "$1" && ln -s "$1/gone/out" "${1%%.tmp}.plugin"; exit ;; esac\nexec %q "$@"\n' "$(command -v mkdir)" "$(command -v mkdir)" > "$T/no/mkdir" && chmod +x "$T/no/mkdir"
+  got=$(PATH=$T/no:$PATH run "$PASS" hooks/a.test.tsx hooks/b.test.tsx)
+  [ "$got" = "-- notrun hooks/a.test.tsx|-- ok hooks/b.test.tsx" ] && [ "$(cat "$T/rc")" = 1 ] && [ "$(runs)" = 1 ] \
+    && grep -q $'^TESTRUN host\thooks/a\\.test\\.tsx\ttest-changed: hooks/a\\.test\\.tsx did not start: ' "$R/log/test-changed.log" \
+    && ok "a plugin run whose output file could not be made makes the file a host problem, and the next file runs it again" \
+    || no "no output file for the plugin run (hooks/a.test.tsx and hooks/b.test.tsx changed): '$got', runs $(runs 2>&1), exit $(cat "$T/rc"): $(cat "$R/log/test-changed.log" "$T/out")"
+}
+
+for p in source perfile missing share noroom nodir noout; do part "$p"; done
 wait
 for p in "${PARTS[@]}"; do cat "$T/$p.res"; grep -q '^ok' "$T/$p.res" || echo "not ok - part $p checked nothing"; done | awk '{ sub(/^ok -/, "ok " NR " -"); sub(/^not ok -/, "not ok " NR " -"); print } /^not ok/ { f = 1 } END { exit f }'

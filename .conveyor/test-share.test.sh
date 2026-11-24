@@ -71,5 +71,21 @@ got=$(LIMKB=$((df * 2)) SHARE=1 SPACE=$T/space SHARE_DIR=$T/shares SHARE_WAIT=60
   || no "share_take $T/f, with no room, another run's share held in $T/shares and a file limit ending at $e, did not give up for want of room before that limit: '$got'"
 exec {hf}>&-
 
-[ "$fails" = 0 ] && echo "ok - the room check takes the lesser of the free space and the user's quota left, a want of quota names the biggest folders, and the wait for room ends before the file's own limit"
+# Bug (review of #1662): a file whose temp folder could not be made (a full /tmp, or one out of inodes) exited 1, as a
+# failed test does, and with no .noroom file (none can be written there either) the card's test step logged it as
+# failed. share_run exits SHARE_NOSTART (75) with the reason; a folder whose parent is gone stands in for the space.
+got=$(SHARE_DIR='' share_run lbl "$T/gone/ft" true 2>/dev/null); rc=$?
+[ "$rc" = 75 ] && [ "$got" = "lbl did not start: its temp folder $T/gone/ft could not be made" ] \
+  || no "share_run lbl $T/gone/ft true, whose folder cannot be made, exited $rc, not 75, or printed no reason: '$got'"
+# Bug (review of #1662): the same when no room was found and its .noroom file could not be written (the space out of
+# inodes): share_run exited 1, a failed test to the caller. A folder in the .noroom file's place stands in for that.
+mkdir -p "$T/nr.noroom"
+got=$(LIMKB=$((df * 2)) SPACE=$T/space SHARE_DIR='' SHARE_WAIT=0 share_run lbl "$T/nr" true 2>/dev/null); rc=$?
+[ "$rc" = 75 ] && [[ $got == "lbl did not start: "* ]] && [ ! -e "$T/nr" ] \
+  || no "share_run lbl $T/nr true, with no room ($((df * 2)) KB asked, $df KB free) and no $T/nr.noroom to be written, exited $rc, not 75, or printed no reason: '$got'"
+# A command's own exit 75 is 1, so no test file that ran is read as one that did not start.
+SHARE_DIR='' share_run lbl "$T/ft75" bash -c 'exit 75' > /dev/null 2>&1; rc=$?
+[ "$rc" = 1 ] || no "share_run lbl $T/ft75 bash -c 'exit 75' exited $rc, not 1: a test's own 75 reads as a file that did not start"
+
+[ "$fails" = 0 ] && echo "ok - the room check takes the lesser of the free space and the user's quota left, a want of quota names the biggest folders, and the wait for room ends before the file's own limit; a file whose temp folder cannot be made did not start"
 exit $fails

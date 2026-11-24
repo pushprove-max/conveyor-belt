@@ -195,20 +195,25 @@ share_guard() {
 # too, as nothing tells which file wrote them. The command starts only once its share is taken (share_take, which
 # waits for room): when it cannot be, `<label> did not start: <why>` and exit 1, and when that is for want of room
 # (share_take's SHARE_NOROOM: a host problem, not a failed test) <folder>.noroom holds the line too, for the caller to
-# tell such a file from one that failed. A TERM, INT or HUP to it is passed to
-# the command, and the folder is still removed; a run stopped with KILL leaves the folder to its caller's own temp
-# folder, which <folder> is in. It runs in a subshell of its own, so its traps are not its caller's.
+# tell such a file from one that failed. When <folder> or that .noroom file cannot be made (a full space, or one out
+# of inodes), `<label> did not start: ...` and exit SHARE_NOSTART (75), for the caller to
+# tell such a file from one that failed: no command's exit is 75 here, as a command's own 75 is 1. A TERM, INT or HUP
+# to it is passed to the command, and the folder is still removed; a run stopped with KILL leaves the folder to its
+# caller's own temp folder, which <folder> is in. It runs in a subshell of its own, so its traps are not its caller's.
+SHARE_NOSTART=75
 share_run() (
   local label=$1 ft=$2 g c='' k st o f pr; shift 2
-  mkdir "$ft" || { echo "$label did not start: its temp folder $ft could not be made"; return 1; }
+  mkdir "$ft" || { echo "$label did not start: its temp folder $ft could not be made"; return "$SHARE_NOSTART"; }
   trap 'rm -rf "$ft"; exit 143' TERM INT HUP
-  share_take "$ft" || { echo "$label did not start: $SHARE_WHY"; [ -z "$SHARE_NOROOM" ] || echo "$label did not start: $SHARE_WHY" > "$ft.noroom"; rm -rf "$ft"; return 1; }
+  share_take "$ft" || { echo "$label did not start: $SHARE_WHY"; rm -rf "$ft"; [ -z "$SHARE_NOROOM" ] && return 1
+    { echo "$label did not start: $SHARE_WHY" > "$ft.noroom"; } 2>/dev/null && return 1; return "$SHARE_NOSTART"; }
   trap '[ -z "$c" ] || kill -TERM "$c" 2>/dev/null' TERM INT HUP
   share_guard "$ft" "$ft.pid" "$ft.over" > /dev/null 2>&1 < /dev/null & g=$!
   ( echo "$BASHPID" > "$ft.pid"; ulimit -f "$LIMKB" 2>/dev/null; export TMPDIR=$ft
     if [ "$(type -t "$1")" = function ]; then "$@"; else exec "$@"; fi ) & c=$!
   # A wait a signal cut short is waited again until the command has ended.
   while wait "$c"; st=$?; kill -0 "$c" 2>/dev/null; do :; done
+  [ "$st" != "$SHARE_NOSTART" ] || st=1
   kill "$g" 2>/dev/null; wait "$g" 2>/dev/null
   k=$(du -sk "$ft" 2>/dev/null | cut -f1); [ ! -s "$ft.over" ] || read -r k < "$ft.over"
   # The files new in the checkout ($PWD, its .git and the folder <folder> is in left out) since the command started:

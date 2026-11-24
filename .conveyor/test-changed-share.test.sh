@@ -110,12 +110,56 @@ w=$?
 [ $w = 0 ] && grep -qxF -- '-- ok conveyor/tests/a.test.sh' "$T/wait.log/test-changed.log" && grep -qxF -- '-- ok conveyor/tests/b.test.sh' "$T/wait.log/test-changed.log" \
   || no "with a wait -n that left its pid unset, the step (exit $w) did not run both engine case files: $(cat "$T/wait.out")"
 
+# hostonly <name> <exit>: each of the 4 files is logged not run for a host problem (`-- notrun` and `TESTRUN host`, the
+# engine's voidrun()), none failed, and the step exited 1.
+hostonly() {
+  local f L=$T/$1.log/test-changed.log
+  [ "$2" = 1 ] || no "$1: the step exited $2, not 1: $(cat "$T/$1.out")"
+  ! grep -q '^-- FAIL ' "$L" || no "$1: a file that never started was logged as failed: $(cat "$L" "$T/$1.out")"
+  for f in conveyor/tests/a.test.sh conveyor/tests/b.test.sh lib/big.test.sh lib/fine.test.sh; do
+    grep -qxF -- "-- notrun $f" "$L" && grep -q "^TESTRUN host	${f//./\\.}	test-changed: " "$L" \
+      || no "$1: $f, which never started, was not logged as not run for a host problem: $(cat "$L")"
+  done
+}
+
+# Bug (review of #1662): a file whose temp folder, output file or pipe could not be made (a full /tmp, or one out of
+# inodes) exited 1, and the step logged it `-- FAIL`, a failed test, where no .noroom file could be written to say
+# otherwise. Shims on PATH stand in for the full space, each at one file (FAILFAST on, so failstop makes a pipe):
+# mkdir fails for a.test.sh's temp folder (e1, the engine case files' path) and lib/fine.test.sh's (f4, the other
+# files'), and makes b.test.sh's output file ($o.e2) a folder when it makes the step's $o.tmp; mkfifo fails for the
+# first pipe, lib/big.test.sh's. Each is a host problem, and none ran. The real step: only its run reads each exit.
+mkdir -p "$T/nd.bin" "$T/nd.log" "$T/nd.tmp" "$T/nd.config/conveyor" && echo '{"testTmpMB": 4}' > "$T/nd.config/conveyor/host.json"
+printf '#!/usr/bin/env bash\ncase $1 in\n  %q/*.tmp) %q "$1" && %q "${1%%.tmp}.e2"; exit ;;\n  %q/*.tmp/e1|%q/*.tmp/f4) echo "mkdir: No space left on device" >&2; exit 1 ;;\nesac\nexec %q "$@"\n' \
+  "$T/nd.tmp" "$(command -v mkdir)" "$(command -v mkdir)" "$T/nd.tmp" "$T/nd.tmp" "$(command -v mkdir)" > "$T/nd.bin/mkdir"
+printf '#!/usr/bin/env bash\n[ -e %q ] || { : > %q; echo "mkfifo: No space left on device" >&2; exit 1; }\nexec %q "$@"\n' \
+  "$T/nd.fifo1" "$T/nd.fifo1" "$(command -v mkfifo)" > "$T/nd.bin/mkfifo"
+chmod +x "$T/nd.bin/mkdir" "$T/nd.bin/mkfifo"; rm -f "$R"/dirs/*
+(cd "$R" && env PATH="$T/nd.bin:$PATH" CONVEYOR_TEST_FAILFAST=1 CONVEYOR_TEST_LOG="$T/nd.log" XDG_CONFIG_HOME="$T/nd.config" TMPDIR="$T/nd.tmp" \
+  timeout 120 bash .conveyor/test-changed.sh) > "$T/nd.out" 2>&1
+hostonly nd $?
+[ -e "$T/nd.fifo1" ] && [ -z "$(ls -A "$R/dirs")" ] || no "nd: the shims did not act, or a file ran: $(ls -A "$R/dirs") $(cat "$T/nd.out")"
+
+# Bug (review of #1662): the same before any file, when the step's own temp folder $o.tmp (nt) or its file $o.why (nw:
+# the mkdir shim makes a folder in its place) could not be made: the step exited 1 with no line for its files.
+mkdir -p "$T/ns.bin" "$T/nt.log" "$T/nt.tmp" "$T/nw.log" "$T/nw.tmp"
+printf '#!/usr/bin/env bash\ncase $1 in\n  %q/*.tmp) echo "mkdir: No space left on device" >&2; exit 1 ;;\n  %q/*.tmp) %q "$1" && %q "${1%%.tmp}.why"; exit ;;\nesac\nexec %q "$@"\n' \
+  "$T/nt.tmp" "$T/nw.tmp" "$(command -v mkdir)" "$(command -v mkdir)" "$(command -v mkdir)" > "$T/ns.bin/mkdir" && chmod +x "$T/ns.bin/mkdir"
+for n in nt:folder nw:file; do
+  (cd "$R" && env PATH="$T/ns.bin:$PATH" CONVEYOR_TEST_LOG="$T/${n%:*}.log" TMPDIR="$T/${n%:*}.tmp" timeout 120 bash .conveyor/test-changed.sh) > "$T/${n%:*}.out" 2>&1
+  hostonly "${n%:*}" $?
+  grep -qE "^test-changed: the test files' temp ${n#*:} .* could not be made; nothing run$" "$T/${n%:*}.out" \
+    || no "${n%:*}: with no temp ${n#*:} for the step to make, it did not give that reason: $(cat "$T/${n%:*}.out")"
+done
+
 # Bug: when the step's own temp file could not be made (a full /tmp), its name was empty, and the cleanup at its end
 # removed "$o".*, that is .* in the checkout: .git, .conveyor and every other hidden file. Last, as that bug removes them.
+# Bug (review of #1662): the step then logged no line for its files, and the engine took each for a failed test.
+mkdir -p "$T/gone.log"
 (cd "$R" && env CONVEYOR_TEST_LOG="$T/gone.log" TMPDIR="$T/gone" timeout 120 bash .conveyor/test-changed.sh) > "$T/gone.out" 2>&1
 g=$?
-[ $g = 1 ] && grep -qxF "test-changed: no temp file could be made in $T/gone; nothing run" "$T/gone.out" \
+grep -qxF "test-changed: no temp file could be made in $T/gone; nothing run" "$T/gone.out" \
   || no "with no temp file to be made in TMPDIR, the step exited $g without the reason: $(cat "$T/gone.out")"
+hostonly gone $g
 [ -d "$R/.git" ] && [ -d "$R/.conveyor" ] && [ -e "$R/.gitignore" ] || no "with no temp file to be made in TMPDIR, the step removed hidden files of its checkout: $(ls -A "$R")"
 
 [ $fails = 0 ] && echo "ok - the card's test step runs each test file with its share of the temp space and a temp folder of its own" || exit 1

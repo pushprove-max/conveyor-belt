@@ -1589,15 +1589,30 @@ nodecases() { # <node test file>
     if [ "$k" = ok ] || [ "$k" = off ]; then nargs+=("--test-skip-pattern=$p"); elif [ "$k" = fail ] && [ -n "${only[$1]:-}" ]; then nargs+=("--test-name-pattern=$p"); fi
   done < "$RERUN"
 }
-# No temp file (a full /tmp): it stops before the trap, as an empty $o would make "$o".* every hidden file here.
-o=$(mktemp) && [ -n "$o" ] || { echo "test-changed: no temp file could be made in ${TMPDIR:-/tmp}; nothing run"; exit 1; }
+# nostart <why>: no file of the run starts, as its temp file or folder could not be made (a full /tmp, or one out of
+# inodes). Bug: the run ended failed with no line for its files, and the engine took each for a failed test (fileeach()
+# logged `-- FAIL`). It is a host problem, as a file that did not start for want of room (below): each file is logged
+# `TESTRUN host<TAB><file><TAB><why>` and `-- notrun <file>`, and the run ends failed.
+nostart() {
+  local t
+  for t in $(printf '%s\n' "${!run[@]}" | LC_ALL=C sort); do
+    { echo "== $t"; printf 'TESTRUN host\t%s\t%s\n' "$t" "$1"; echo "-- notrun $t"; } >> "$log"
+  done
+  echo "$1; nothing run"; exit 1
+}
+# No temp file: it stops before the trap, as an empty $o would make "$o".* every hidden file here.
+o=$(mktemp) && [ -n "$o" ] || nostart "test-changed: no temp file could be made in ${TMPDIR:-/tmp}"
 trap 'chmod -R u+w "$o.tmp" 2>/dev/null; rm -rf "$o" "$o".* "${rlist:-}"' EXIT
 # Each test file runs with a share of the temp space and a TMPDIR of its own in $o.tmp, removed when it ends, and
 # with $o.tmp when this run ends (share_run, .conveyor/test-share.sh, as the full suite runs them): a file that writes
 # past its share fails alone, and one starts only when the space holds its share (#1238).
+mkdir "$o.tmp" || nostart "test-changed: the test files' temp folder $o.tmp could not be made"
 # shellcheck source=.conveyor/test-share.sh
-. "${BASH_SOURCE[0]%/*}/test-share.sh" && mkdir "$o.tmp" && share_init "$o.tmp" > "$o.why" \
-  || { echo "test-changed: the test files' temp space could not be set up (${BASH_SOURCE[0]%/*}/test-share.sh, $o.tmp): $(cat "$o.why" 2>/dev/null); nothing run"; exit 1; }
+. "${BASH_SOURCE[0]%/*}/test-share.sh" || { echo "test-changed: ${BASH_SOURCE[0]%/*}/test-share.sh could not be read; nothing run"; exit 1; }
+# A $o.why that could not be made (the same full space) is a host problem too; a share_init that failed, a bad host file.
+{ : > "$o.why"; } 2>/dev/null || nostart "test-changed: the test files' temp file $o.why could not be made"
+share_init "$o.tmp" > "$o.why" || {
+  echo "test-changed: the test files' temp space could not be set up (${BASH_SOURCE[0]%/*}/test-share.sh, $o.tmp): $(cat "$o.why" 2>/dev/null); nothing run"; exit 1; }
 # A Claude Code plugin test file (*.test.ts, *.test.tsx: the /units mod's, in hooks/) runs under Claude Code's own
 # runner, `claude plugin test` on the plugin, which runs every such file of the plugin in one run. So it runs once, at
 # the first such file, and a file's result is its own part of that run's output: its `<file>:`
@@ -1605,15 +1620,19 @@ trap 'chmod -R u+w "$o.tmp" 2>/dev/null; rm -rf "$o" "$o".* "${rlist:-}"' EXIT
 # That run has a share of the temp space for each plugin test file, and its own TMPDIR, $o.tmp/p (share_run): under
 # the share of its first file, the files' writes together failed it, or left the later files' parts cut off (#1394).
 # When it did not start or wrote past its share, each file fails with the reason; when it did not start for want of
-# room ($o.tmp/p.noroom), each file did not run, a host problem (below).
+# room ($o.tmp/p.noroom, or the exit SHARE_NOSTART when its temp folder or output file could not be made: it returns
+# that exit, and the next plugin test file tries the run again), each file did not run, a host problem (below).
 plugintest() { # <test file>
-  local n p='test-changed: the plugin test run'
+  local n s=0 p='test-changed: the plugin test run'
   if [ ! -s "$o.plugin" ]; then
     n=$(git ls-files -co --exclude-standard '*.test.ts' '*.test.tsx' | grep -c .)
     # With FAILFAST, the run ends at the first failed case of this file (failstop --in): a failed case of another
     # file is that file's to report.
-    ( LIMKB=$((LIMKB * (n > 1 ? n : 1)))
-      failstop --in "$1:" share_run "$p (claude plugin test, a share for each of its $n test files)" "$o.tmp/p" env "${mk[@]}" claude plugin test . ) > "$o.plugin" 2>&1
+    # Its output file is opened inside, so one that cannot be made is SHARE_NOSTART too.
+    ( exec > "$o.plugin" 2>&1 || exit "$SHARE_NOSTART"; LIMKB=$((LIMKB * (n > 1 ? n : 1)))
+      failstop --in "$1:" share_run "$p (claude plugin test, a share for each of its $n test files)" "$o.tmp/p" env "${mk[@]}" claude plugin test . ) || s=$?
+    # A run that did not start is not kept: the next plugin test file tries it again.
+    [ "$s" != "$SHARE_NOSTART" ] || { cat "$o.plugin" 2>/dev/null; rm -f "$o.plugin"; return "$s"; }
   fi
   awk -v f="$1:" -v p="$p (" 'index($0, p) == 1 { next } $0 == f { on = 1; next } on && /^[^ (].*:$/ { exit } on' "$o.plugin" > "$o.part"
   cat "$o.part"
@@ -1657,7 +1676,8 @@ failstop() (
   p='' s='' in='' on=1 f=$o.ff fx='^FAIL( \[[^]]+\])?: ' nx='^[[:space:]]*not ok ' kx='# *(TODO|SKIP)' px='^\(fail\) ' hx='^[^ (].*:$'
   [ "$1" != --in ] || { in=$2; on=''; shift 2; }
   trap '[ -z "$p" ] || { fsend "$p"; wait "$p" 2>/dev/null; }; exit 143' TERM INT HUP
-  rm -f "$f"; mkfifo "$f" || exit 1
+  # A fifo that cannot be made (a temp space out of inodes): the command did not start, as share_run says it so.
+  rm -f "$f"; mkfifo "$f" || { echo "test-changed: the file did not start: its pipe $f could not be made"; exit "$SHARE_NOSTART"; }
   set -m; "$@" > "$f" 2>&1 & p=$!; set +m
   while IFS= read -r l || [ -n "$l" ]; do
     printf '%s\n' "$l"
@@ -1771,9 +1791,12 @@ for t in $(printf '%s\n' "${!ecases[@]}" | LC_ALL=C sort); do
   done
   for c in ${ecases[$t]}; do printf 'TESTRUN case\t%s\t%s\n' "$t" "$c" >> "$log"; done
   [ -z "$slots" ] || slot_take
-  ( [ -z "$slots" ] || slot_mine
+  # Its output file is opened inside, so one that cannot be made (a temp space out of inodes) is SHARE_NOSTART, a file
+  # that did not start, as share_run's folder is.
+  ( exec > "$o.e$k" 2>&1 || exit "$SHARE_NOSTART"
+    [ -z "$slots" ] || slot_mine
     share_run "test-changed: $t" "$o.tmp/e$k" env CONVEYOR_TEST_FILE="$t" BASH_ENV="$o.hook" CONVEYOR_TEST_TIMES="$o.e$k.times" \
-      CONVEYOR_SHELL_TEST_CASE="${ecases[$t]}" ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} bash conveyor/conveyor.test.sh ) > "$o.e$k" 2>&1 < /dev/null &
+      CONVEYOR_SHELL_TEST_CASE="${ecases[$t]}" ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} bash conveyor/conveyor.test.sh ) < /dev/null &
   epid[$t]=$!; erun[$!]=$t
   [ -z "$slots" ] || slot_free
 done
@@ -1783,8 +1806,9 @@ mapfile -t order < <(for t in "${!run[@]}"; do if [ -n "${ecases[$t]:-}" ]; then
 fk=0
 for t in "${order[@]}"; do
   # nr: the file share_run leaves when the file did not start for want of room in the temp space (enr above; fshare's,
-  # or the plugin test run's for a plugin test file).
-  fk=$((fk + 1)); r=ok; nr=$o.tmp/f$fk.noroom; echo "== $t" >> "$log"
+  # or the plugin test run's for a plugin test file); ns: set when its run exited SHARE_NOSTART, as it does when its temp
+  # folder (share_run), its output file or its pipe (failstop) could not be made: a space where nr cannot be written.
+  fk=$((fk + 1)); r=ok; ns=; nr=$o.tmp/f$fk.noroom; echo "== $t" >> "$log"
   # Why it runs (the step's record, conveyor.sh testrec()): one line a reason.
   printf '%s' "${why[$t]:-}" | awk -v t="$t" 'length { printf "TESTRUN why\t%s\t%s\n", t, $0 }' >> "$log"
   # Its mark and the meta-runner hook (header above), and its card mode when the pack gives it one (issue 584).
@@ -1801,11 +1825,11 @@ for t in "${order[@]}"; do
       # Every case file of the engine still runs when the list holds a case of each (enginewhole): the step's record
       # says so as below.
       [ -z "$w" ] || echo "TESTRUN whole-suite" >> "$log"
-      echo "== $t (cases: $cases)"; fshare "$t" env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" CONVEYOR_SHELL_TEST_CASE="$cases" ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} bash "$t" || r=FAIL
+      echo "== $t (cases: $cases)"; fshare "$t" env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" CONVEYOR_SHELL_TEST_CASE="$cases" ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} bash "$t" || { [ $? != "$SHARE_NOSTART" ] || ns=1; r=FAIL; }
     else
       # Every case file of the engine runs: the step's record says so in one field (testrec(): wholeSuite).
       echo "TESTRUN whole-suite" >> "$log"
-      echo "== $t"; fshare "$t" env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} bash "$t" || r=FAIL
+      echo "== $t"; fshare "$t" env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} bash "$t" || { [ $? != "$SHARE_NOSTART" ] || ns=1; r=FAIL; }
     fi
     # Each case file whose every case it ran, timed by the runner (the sums of its cases' clock and CPU seconds, as
     # they run at once), for the times the loop records of a test file (conveyor/README.md, The test step).
@@ -1813,7 +1837,8 @@ for t in "${order[@]}"; do
     rm -f "$o.times"; marked "$t" || r=FAIL; metaran "$t" || r=FAIL
   elif [ -n "${ecases[$t]:-}" ]; then
     # An engine case file run on its own (above), with its chosen cases.
-    shown[$t]=1; nr=${enr[$t]}; echo "== $t (cases: ${ecases[$t]})"; cat "${eout[$t]}"; [ "${erc[$t]}" = 0 ] || r=FAIL
+    shown[$t]=1; nr=${enr[$t]}; echo "== $t (cases: ${ecases[$t]})"; cat "${eout[$t]}" 2>/dev/null; [ "${erc[$t]}" = 0 ] || r=FAIL
+    [ "${erc[$t]}" != "$SHARE_NOSTART" ] || ns=1
     # Its time when it ran every case it has, timed by the runner (the sums of its cases' clock and CPU seconds, as
     # they run at once), for the times the loop records of a test file (conveyor/README.md, The test step).
     [ ! -s "${eout[$t]}.times" ] || awk -F'\t' 'NF == 3 { printf "TESTRUN sec\tconveyor/tests/%s\t%s\t%s\n", $1, $2, $3 }' "${eout[$t]}.times" >> "$log"
@@ -1838,7 +1863,7 @@ for t in "${order[@]}"; do
       # An engine case file's run with no case (nocase, above): a selection of a blank, which the file keeps (it gives
       # the runner all its cases only when none is set) and in which the runner finds no case.
       *) failstop fshare "$t" env "${mk[@]}" ${p:+"CONVEYOR_SHELL_TEST_CASE=$p"} ${nocase[$t]:+"CONVEYOR_SHELL_TEST_CASE= "} bash "$t" ;;
-    esac 2>&1 | tee "$o"; [ "${PIPESTATUS[0]}" = 0 ] || r=FAIL
+    esac 2>&1 | tee "$o"; st=${PIPESTATUS[0]}; [ "$st" = 0 ] || r=FAIL; [ "$st" != "$SHARE_NOSTART" ] || ns=1
     marked "$t" || r=FAIL; metaran "$t" || r=FAIL
     times >> "$o.cpu"
     # Its own time and CPU seconds, for the times the loop records of a test file (conveyor/README.md, The test step); not
@@ -1846,13 +1871,15 @@ for t in "${order[@]}"; do
     [ -n "$p" ] || printf 'TESTRUN sec\t%s\t%s\t%s\n' "$t" "$(awk -v a="$s" -v b="${EPOCHREALTIME/,/.}" 'BEGIN { printf "%.1f", b - a }')" \
       "$(awk 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }
         NR == 2 || NR == 4 { n[NR] = c($1) + c($2) } END { printf "%.1f", n[4] - n[2] }' "$o.cpu")" >> "$log"
-    [ -s "$nr" ] || ended "$t" $r "$o" "$p"
+    [ -s "$nr" ] || [ -n "$ns" ] || ended "$t" $r "$o" "$p"
   fi
   # Bug #1662: a file that did not start for want of room in the temp space failed, and the engine marked main red on
   # it. It is a host problem, not a failed test: logged `TESTRUN host<TAB><file><TAB><why>` and `-- notrun <file>`
-  # (the engine's voidrun(): a run with no result), and the next files do not wait for room again.
-  if [ -s "$nr" ]; then
-    printf 'TESTRUN host\t%s\t%s\n' "$t" "$(head -n 1 "$nr")" >> "$log"; echo "-- notrun $t" >> "$log"; rc=1
+  # (the engine's voidrun(): a run with no result), and the next files do not wait for room again. The same when its
+  # temp folder, output file or pipe could not be made (ns).
+  if [ -s "$nr" ] || [ -n "$ns" ]; then
+    hw=$(head -n 1 "$nr" 2>/dev/null); hw=${hw:-test-changed: $t did not start: its temp folder, output file or pipe could not be made}
+    printf 'TESTRUN host\t%s\t%s\n' "$t" "$hw" >> "$log"; echo "-- notrun $t" >> "$log"; rc=1
   else
     echo "-- $r $t" >> "$log"; [ $r = ok ] || rc=1
   fi
