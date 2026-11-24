@@ -210,15 +210,24 @@ Instead: make this change with the Edit tool, not a shell write." >&2
 # A heredoc body is script when the declaring segment, or a segment piped
 # after it on that line, runs python/node; the rest is split as one text so a
 # multi-line quote holds.
-# ponytail: knows `env`, `command`, `exec`, `nice`, `time`, `timeout`, `sudo`
+# ponytail: knows `env`, `command`, `exec`, `nice`, `nohup`, `stdbuf`, `time`, `timeout`, `sudo`
 # wrappers only (a bare number is timeout's duration). Add one when it shows up.
 script_head() {
+  local w='' h
   load_words "$1"; set -- "${WORDS[@]}"
   while [ $# -gt 0 ]; do
     [[ ${1-} =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && { shift; continue; }
-    case "${1-}" in
-      env|command|exec|nice|time|timeout|sudo|[0-9]*) shift ;;
+    # A wrapper called by path (`/usr/bin/nohup`) is the same wrapper; an option keeps its slashes (`--chdir=/tmp`).
+    h=${1-}; [[ $h == -* ]] || h=${h##*/}
+    case "$h" in
+      env|command|exec|nice|nohup|stdbuf|time|timeout|sudo|[0-9]*) w=$h; shift ;;
       -u|-g|-n|-k|-s|-a|--adjustment|--signal|--kill-after) [ $# -ge 2 ] || return 1; shift 2 ;;
+      # stdbuf's mode can be the next word (`-o L`); env -i and sudo -i take no value.
+      -i|-o|-e) if [ "$w" = stdbuf ]; then [ $# -ge 2 ] || return 1; shift 2; else shift; fi ;;
+      # GNU stdbuf reads a unique start of a long name as the name: `--out L` is `--output L`.
+      --?*) if [ "$w" = stdbuf ] && [[ $h != *=* ]] && [[ input == "${h#--}"* || output == "${h#--}"* || error == "${h#--}"* ]]; then
+          [ $# -ge 2 ] || return 1; shift 2
+        else shift; fi ;;
       -*) shift ;;
       *) break ;;
     esac
