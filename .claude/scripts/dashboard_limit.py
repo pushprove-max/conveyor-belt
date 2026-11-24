@@ -92,6 +92,28 @@ def run_part(path):
         exec(compile(f.read(), path, "exec"), globals())
 
 
+def private_open(path):
+    """`path` opened to write text that only its owner can read (0600), whatever the umask: the caches that name
+    transcript paths, working folders and session ids sit where other local users can reach them. fchmod also
+    narrows a file of that name an earlier run left with a wider mode."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        return os.fdopen(fd, "w", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def private_mode(path):
+    """A cache at `path` an earlier version left readable by others narrowed to 0600, for a call that returns before
+    it writes the cache again (private_open). A missing file, or one this user cannot change, is left as it is."""
+    try:
+        os.chmod(path, 0o600)
+    except (OSError, TypeError):
+        pass
+
+
 run_part(PARTS[0])
 
 

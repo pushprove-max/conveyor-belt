@@ -56,6 +56,8 @@ def requests(projects, cache_path, since, now, roots=None, places=None):
         if places is not None:
             places[:] = [(where.get(k), sess.get(k)) for k in keys]
         return [seen[k] for k in keys]
+    # A call that returns the cache unchanged writes no file: an older one left readable by others is narrowed here.
+    globals()["private_mode"](cache_path)
     if not os.path.isdir(projects):
         return None
     try:
@@ -131,7 +133,9 @@ def requests(projects, cache_path, since, now, roots=None, places=None):
     seen = {k: v for k, v in seen.items() if v[0] >= now - 2 * WEEK}
     missing = {p for p in missing if not gone(p)}  # gone since: it spent nothing unseen
     tmp = f"{cache_path}.{os.getpid()}"
-    with open(tmp, "w") as f:
+    # The cache names transcripts, working folders and session ids: only its owner reads it. dashboard_limit.py's,
+    # run in this namespace: globals() names it for a linter.
+    with globals()["private_open"](tmp) as f:
         # json.dumps, not json.dump: same text through the C encoder. This file reaches 50 MB.
         f.write(json.dumps({"version": 8, "offsets": live, "requests": seen, "cwd": {k: where.get(k) for k in seen},
                             "session": {k: sess.get(k) for k in seen}, "side": {k: side.get(k, False) for k in seen},
@@ -335,6 +339,7 @@ def codex_requests(sessions_dirs, cache_path, since, now, missed=None, roots=Non
     must not call the week complete. One that has gone since it was listed spent nothing unseen.
     """
     missed = [] if missed is None else missed
+    globals()["private_mode"](cache_path)  # as requests(): an early return writes no file
     def absent(d):  # only a folder that is not there is skipped: one that cannot be searched is walked, so onerror reports it
         try:
             os.stat(d)
@@ -430,7 +435,7 @@ def codex_requests(sessions_dirs, cache_path, since, now, missed=None, roots=Non
     seen = {k: v for k, v in seen.items() if v[0] >= now - 2 * WEEK}
     missing = {p for p in missing if not gone(p)}  # gone since: it spent nothing unseen
     tmp = f"{cache_path}.{os.getpid()}"
-    with open(tmp, "w") as f:
+    with globals()["private_open"](tmp) as f:  # as requests(): the cache names session files, folders and ids
         f.write(json.dumps({"version": 6, "files": live, "requests": seen, "cwd": {k: where.get(k) for k in seen},
                             "session": {k: sess.get(k) for k in seen},
                             "unread": sorted(missing), "complete": not missing, "covered": covered(held, since, now), "cycle": now}))

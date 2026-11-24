@@ -143,10 +143,11 @@ def lane_models(projects, worktree, since, kept=None):
 
 def lanes_keep(kept, key, files):
     """lane_models' transcripts written to `kept` under `key`, through a file of its own and one rename, as card_costs
-    writes <kept>: a call beside this one never reads half of it. A write that fails leaves no file of its own."""
+    writes <kept>: a call beside this one never reads half of it. A write that fails leaves no file of its own. The
+    file names transcripts, so only its owner can read it (private_open)."""
     tmp = f"{kept}.{os.getpid()}"
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        with globals()["private_open"](tmp) as f:  # dashboard_limit.py's, run in this namespace: globals() names it for a linter
             json.dump({"key": key, "files": files}, f, separators=(",", ":"))
         os.replace(tmp, kept)
     except OSError:
@@ -580,6 +581,11 @@ def card_costs(part, lines=None, kept=None, dest=None):
                 except OSError:
                     pass
     research, steps = part.pop("research", None), set(seen)
+    if kept:
+        # <kept>.lanes names transcripts: lane_models writes it only when something is new, and a part with no research
+        # lane (the host record dropped it) never calls it, so a file an earlier version left readable by others is
+        # narrowed here, for every snapshot.
+        globals()["private_mode"](f"{kept}.lanes")
     if isinstance(since, str) and isinstance(research, dict):
         start = globals()["epoch"](since)  # dashboard_limit_usage.py's, run in this namespace: globals() names it for a linter
         for x, n in lane_models(research.get("projects"), research.get("worktree"), start,
