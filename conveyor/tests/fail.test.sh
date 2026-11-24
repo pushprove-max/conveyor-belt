@@ -162,7 +162,7 @@ t_reviewkeepfull() {
 # already kept: the reason did not name it, and nostartsaid() said the CLI's words could not be kept. A read-only err
 # already in the kept folder stands in for the full disk; the events copy before it works.
 # Bug: nostartsaid() then sent staff to the kept err file for the CLI's words, though the err (where Codex may write them
-# alone) was not kept.
+# alone) was not kept; and then to the kept events file alone, which may not hold words Codex wrote to stderr only.
 t_reviewkeeperr() {
   setup '[]'; local w=$T/$CASE/c11-11 k=$ST/kept/c11-11
   echo '{"type":"error"}' > "$w.events"; echo 'stderr' > "$w.err"
@@ -171,9 +171,9 @@ t_reviewkeeperr() {
   chmod u+w "$k/c11-11.review.err" 2>/dev/null
   grep -qx 'rc 1' "$T/$CASE/run.out" && grep -qF '; its events are kept in c11-11.review.events' "$T/$CASE/run.out" && grep -qF '"error"' "$k/c11-11.review.events" \
     || fail "reviewkeep $w '' with an err that could not be copied did not fail with 1 and name the kept events file: $(cat "$T/$CASE/run.out")"
-  grep -qF 'fix what its words in the kept events file (its err could not be kept) say; its events are kept in c11-11.review.events' "$T/$CASE/run.out" \
+  grep -qF 'fix what its words, in the kept events file or only in its err that could not be kept, say; its events are kept in c11-11.review.events' "$T/$CASE/run.out" \
     && ! grep -qF 'events or err file' "$T/$CASE/run.out" \
-    || fail "nostartsaid on reviewkeep's note, its err not kept, named the kept err file for the words: $(cat "$T/$CASE/run.out")"
+    || fail "nostartsaid on reviewkeep's note, its err not kept, named a kept file alone for the words: $(cat "$T/$CASE/run.out")"
 }
 # Bug: a review that never began its work (nostart()), whose words could not be kept, told staff to "fix what its words,
 # which could not be kept, say": a step they cannot take, with no place to read the words and no way to get them. Then it

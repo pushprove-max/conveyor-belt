@@ -118,11 +118,12 @@ keptnote() { # <reason text>
 # (reviewkeep()) where it pointed at "its words below": the CLI's words are in its events, or in its err when it wrote them
 # to stderr alone. With no note (nothing was kept) it names the card's kept folder that could not hold them and, as the
 # folder to make writable, the nearest one of it, kept or the state folder that is there, so staff have a step they can take.
-# With no err beside the kept events file (its copy failed), it says the err could not be kept: the words may be only there.
+# With no err beside the kept events file (its copy failed), it says the words are in the kept events file or only in the err
+# that could not be kept: Codex can write a settings error to stderr alone, so the events file may not hold them.
 nostartsaid() { # <reviewkeep()'s note> <worktree>
   local w=${NOSTART_WHY%%$'\n'*} k=kept/${2##*/} n=${1##*; its events are kept in } where='its words in the kept events or err file'
   if [ -n "$1" ]; then
-    [ -e "$ST/kept/${n%.review*}/${n%.events}.err" ] || where='its words in the kept events file (its err could not be kept)'
+    [ -e "$ST/kept/${n%.review*}/${n%.events}.err" ] || where='its words, in the kept events file or only in its err that could not be kept,'
     printf '%s%s' "${w//its words below/$where}" "$1"
   elif [[ $w == *'its words below'* ]]; then
     [ -d "$ST/$k" ] || k=kept; [ -d "$ST/$k" ] || k=''
