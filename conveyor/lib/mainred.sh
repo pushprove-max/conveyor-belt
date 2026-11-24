@@ -96,17 +96,20 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   # older was made (fixed on main and broken again while the older one's card stays blocked). While that card is open,
   # mainred() adds no entry for the case or (when another failure made one) adds it to the entry of main's commit with
   # no landing, as brokeby() searches TESTLINK_DEPTH commits only. An older entry's landing is the cause only while the
-  # case did not pass on main after it: when brokeby() names a later landing (the one after the last landing whose card
-  # ran the case's file, so passed it, and that one is after the older entry's landing), the case was fixed and broken
-  # again, and that later landing is named. An entry whose fix card landed or closed is not read: its landing broke the
-  # case before, not on this commit (a case fixed and broken again).
+  # case did not pass on main after it: brokeby() searches every commit of main after the older entry's landing, not
+  # only its last TESTLINK_DEPTH (issue 1611: more landings than that after the case passed again left the first break
+  # named), and when a landing there ran the case's file, so passed it, the case was fixed and broken again: the
+  # landing after it is named; when no landing is after it, that case names none and the next case's entry is read (a
+  # case with no known cause does not hide another case's known one). A landing not in main's commit's history is not
+  # searched from (the search would read most of main): its own landing stays named. An entry whose fix card landed or
+  # closed is not read: its landing broke the case before, not on this commit (a case fixed and broken again).
   b=''
   while IFS=$'\x1f' read -r c ls lc f tf tk; do
     if [ "$c" != $'\x1e' ]; then
       redopen "$c" || continue
       bb=''
-      [ -z "$tf" ] || bb=$(brokeby "$tf" "$sha" "$f" "$tk" 2>/dev/null | jq -r '"\(.sha) \(.card)"' 2>/dev/null) || bb=''
-      [ -z "$bb" ] || [ "${bb%% *}" = "$ls" ] || ! git merge-base --is-ancestor "$ls" "${bb%% *}" 2>/dev/null || lc=${bb#* }
+      [ -z "$tf" ] || ! git merge-base --is-ancestor "$ls" "$sha" 2>/dev/null || bb=$(brokeby "$tf" "$sha" "$f" "$tk" "$ls" 2>/dev/null | jq -r '"\(.sha // "") \(.card // "")"' 2>/dev/null) || bb=''
+      case $bb in '') ;; ' ') continue ;; *) lc=${bb#* } ;; esac
     fi
     b=$lc; break
   done < <(jq -r --arg s "$sha" --slurpfile v <(printf '%s' "$v") '[$v[0][] | select(.verdict == "main") | .case] as $mc | (.reds // [])
@@ -479,8 +482,11 @@ mainred() { # <card> <case> <its file> <main's commit> [<the landing that broke 
 # landing after that one. Prints {sha, card, issue, links: {<each file that landing changed>: [<test file>]}, since:
 # <the commit of the landing that ran <case>, or the whole file when no case is given>}; fails
 # when no landing ran the file in the last TESTLINK_DEPTH commits (when it last passed is not known) or none is after it.
+# Given <after>, a commit of main, it searches every commit after <after> in place of the last TESTLINK_DEPTH (verdicts():
+# did the case pass on main after an older break's landing, however many commits ago), and when a landing ran the file
+# but none is after it, prints {since} alone (the case passed on main after <after>, and no landing broke it).
 TESTLINK_DEPTH=500
-brokeby() { # <test file> <main's commit> [<the file its run named the case under> <case>]
+brokeby() { # <test file> <main's commit> [<the file its run named the case under> <case> [<after>]]
   local l s by='' ran='' card iss rn
   # The runners the test file names (a case file runs itself through its runner): a run before issue 214 named the
   # cases it ran of the engine's case files under their runner, conveyor/conveyor.test.sh.
@@ -494,8 +500,9 @@ brokeby() { # <test file> <main's commit> [<the file its run named the case unde
     s=$(grep -m 1 "^$s " <<<"$l") || continue
     if [ "${s##* }" = true ]; then ran=${s%% *}; break; fi
     by=$s
-  done < <(git rev-list -n "$TESTLINK_DEPTH" "$2" 2>/dev/null)
-  [ -n "$ran" ] && [ -n "$by" ] || return 1
+  done < <(if [ -n "${5:-}" ]; then git rev-list "$5..$2"; else git rev-list -n "$TESTLINK_DEPTH" "$2"; fi 2>/dev/null)
+  [ -n "$ran" ] || return 1
+  [ -n "$by" ] || { [ -n "${5:-}" ] || return 1; jq -cn --arg r "$ran" '{since: $r}'; return; }
   read -r s card iss _ <<<"$by"
   landingof "$s" "$card" "$iss" "$1" | jq -c --arg r "$ran" '. + {since: $r}'
 }

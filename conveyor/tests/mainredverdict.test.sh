@@ -143,27 +143,57 @@ t_redrunstopped() {
 # named old, though the case passed on main after old's landing and broke again: landings on main after old's are
 # fixed (its test line ran b.test, so passed it) and new (which did not run it). Again: brokeMain is new, as brokeby()
 # finds it, and the record still holds the old entry alone.
+# Issue 1611. Bug it catches (deep): brokeby() searched only the last TESTLINK_DEPTH commits of main, so with that
+# many landings after new (each changing nothing and running no test) it did not reach fixed, and verdicts() named
+# old, the first break's landing. brokeMain is new. Bug it catches (unknown): after fixed (which ran b.test, so passed
+# it) no landing is on main, only a commit pushed by hand, and verdicts() named old. brokeMain is none: no landing
+# broke the case, and old's landing did not.
+# E1 (review). Bug it catches (two): old broke b.test: flaky and c.test: three (one entry, cold open), fixed ran
+# b.test alone, then a commit pushed by hand broke flaky again; both fail. verdicts() stopped at flaky, whose cause is
+# not known, and named none, though no landing after old's ran c.test, so old still broke three. brokeMain is old.
 mrland() { # <card> <issue> [<its test line's times, as JSON>]: a landing of <card> on main, with its test and landed lines
   local s t=${3:-'{}'}
   echo "$1" > "$R/$1.txt" && git -C "$R" add "$1.txt" && git -C "$R" commit -qm "$1" && s=$(git -C "$R" rev-parse HEAD) \
     && eng "append \"\$(line $1 $2 test pass '{\"times\": $t}')\" && append \"\$(line $1 $2 landed ok '{\"sha\": \"$s\"}')\""
 }
-mrblame() { # <cold's last step> <brokeMain, as JSON> <entries the record then holds> [head | newer | again]
-  rerunsetup '1 fail flaky' '2 fail flaky' 'main fail flaky'; rerunfiles
-  local v fl='{"of":null,"files":[{"file":"b.test","cases":[{"name":"flaky","line":"1"}]}],"timeout":null}'
-  jq -cn '{reds: [{sha: "1111111111111111111111111111111111111111", card: "cold", cases: [{case: "b.test: flaky", file: "b.test", by: "c1", files: ["b.test"], last: "",
-    landing: {sha: "2222222222222222222222222222222222222222", card: "old", issue: 1}}]}]}' > "$ST/mainred.json" || fail "the old entry could not be written"
+# TESTLINK_DEPTH landings on main (mainred.sh's own value), each changing nothing, running no test and with its landed line.
+mrdeep() {
+  local n s i
+  n=$(sed -n 's/^TESTLINK_DEPTH=\([0-9][0-9]*\)$/\1/p' "$SRC/lib/mainred.sh") && [ -n "$n" ] && s=$(git -C "$R" rev-parse HEAD) || return 1
+  for ((i = 1; i <= n; i++)); do
+    printf 'commit refs/heads/main\ncommitter u <u@example.com> 1700000000 +0000\ndata 1\nu\n'
+    [ "$i" -gt 1 ] || printf 'from %s\n' "$s"
+    printf '\n'
+  done | git -C "$R" fast-import --quiet || return 1
+  ( export MRDEEP=$n; eng 'git rev-list -n "$MRDEEP" HEAD | jq -cRn --arg repo "$REPO" "[inputs] | to_entries[] | {card: \"u\(.key)\", issue: (1000 + .key),
+    step: \"landed\", time: (now | todate), tokens: {claude: 0, codex: 0}, result: \"ok\", sha: .value, reason: \"\", repo: \$repo}" | stdb append cards' )
+}
+mrblame() { # <cold's last step> <brokeMain, as JSON> <entries the record then holds> [head | newer | again | deep | unknown | two]
+  local v fl='{"of":null,"files":[{"file":"b.test","cases":[{"name":"flaky","line":"1"}]}],"timeout":null}' vs='"main"' c3=()
+  [ "${4:-}" != two ] || { c3=('1 fail three' '2 fail three' 'main fail three'); vs='"main","main"'
+    fl='{"of":null,"files":[{"file":"b.test","cases":[{"name":"flaky","line":"1"}]},{"file":"c.test","cases":[{"name":"three","line":"1"}]}],"timeout":null}'; }
+  rerunsetup '1 fail flaky' '2 fail flaky' 'main fail flaky' "${c3[@]}"; rerunfiles
+  jq -cn --arg two "${4:-}" '{reds: [{sha: "1111111111111111111111111111111111111111", card: "cold", cases: ([{case: "b.test: flaky", file: "b.test", by: "c1", files: ["b.test"], last: ""}]
+    + if $two == "two" then [{case: "c.test: three", file: "c.test", by: "c1", files: ["c.test"], last: ""}] else [] end
+    | map(. + {landing: {sha: "2222222222222222222222222222222222222222", card: "old", issue: 1}}))}]}' > "$ST/mainred.json" || fail "the old entry could not be written"
   [ "${4:-}" != head ] || { jq -c --arg s "$(git -C "$R" rev-parse refs/heads/main)" '.reds += [{sha: $s, card: null, cases: [{case: "c.test: other", file: "c.test", by: "c2", files: ["c.test"], last: ""}]}]' \
     "$ST/mainred.json" > "$ST/mainred.new" && mv "$ST/mainred.new" "$ST/mainred.json"; } || fail "the entry of main's commit could not be written"
   [ "${4:-}" != newer ] || { jq -c '.reds += [{sha: "3333333333333333333333333333333333333333", card: "cnew", cases: [{case: "c.test: other", file: "c.test", by: "c2", files: ["c.test"], last: ""},
     {case: "b.test: flaky", file: "b.test", by: "c3", files: ["b.test"], last: "", landing: {sha: "4444444444444444444444444444444444444444", card: "new", issue: 2}}]}]' \
     "$ST/mainred.json" > "$ST/mainred.new" && mv "$ST/mainred.new" "$ST/mainred.json" && eng 'append "$(line cnew 0 picked ok)"'; } || fail "the newer entry could not be written"
-  [ "${4:-}" != again ] || { mrland old 1 && jq -c --arg s "$(git -C "$R" rev-parse HEAD)" '.reds[0].cases[0].landing.sha = $s' "$ST/mainred.json" > "$ST/mainred.new" \
-    && mv "$ST/mainred.new" "$ST/mainred.json" && mrland fixed 2 '{"b.test": 1}' && mrland new 3; } || fail "the landings on main could not be made"
+  case ${4:-} in again | deep | unknown | two)
+    { mrland old 1 && jq -c --arg s "$(git -C "$R" rev-parse HEAD)" '.reds[0].cases[].landing.sha = $s' "$ST/mainred.json" > "$ST/mainred.new" \
+      && mv "$ST/mainred.new" "$ST/mainred.json" && mrland fixed 2 '{"b.test": 1}'; } || fail "the landings on main could not be made"
+    case $4 in
+      again) mrland new 3 ;;
+      deep) mrland new 3 && mrdeep ;;
+      unknown | two) echo hand > "$R/hand.txt" && git -C "$R" add hand.txt && git -C "$R" commit -qm hand ;;
+    esac || fail "the commits on main after fixed could not be made" ;;
+  esac
   eng 'append "$(line cold 0 '"$1"' ok)"' || fail "card cold's line could not be written"
   git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" && rerunedit 'echo two >> a.txt' || fail "the card's worktree could not be made"
   v=$(mrverdicts "$fl") || fail "verdicts failed: $v"
-  [ "$(jq -c '[.verdicts[].verdict, .brokeMain]' <<<"$v")" = "[\"main\",$2]" ] && [ "$(jq '.reds | length' "$ST/mainred.json")" = "$3" ] \
+  [ "$(jq -c '[.verdicts[].verdict, .brokeMain]' <<<"$v")" = "[$vs,$2]" ] && [ "$(jq '.reds | length' "$ST/mainred.json")" = "$3" ] \
     || fail "given b.test: flaky failing on main with fix card cold $1, verdicts() did not name $2 in brokeMain, or the record does not hold $3 entries: $v: $(cat "$ST/mainred.json" 2>&1)"
 }
 t_mainredblameold() { mrblame closed null 2; }
@@ -171,6 +201,9 @@ t_mainredblameopen() { mrblame picked '"old"' 1; }
 t_mainredblamehead() { mrblame picked '"old"' 2 head; }
 t_mainredblamenewer() { mrblame picked '"new"' 2 newer; }
 t_mainredblameagain() { mrblame picked '"new"' 1 again; }
+t_mainredblamedeep() { mrblame picked '"new"' 1 deep; }
+t_mainredblameunknown() { mrblame picked null 1 unknown; }
+t_mainredblametwo() { mrblame picked '"old"' 1 two; }
 
 # bkinit <text of tests/x.test.sh>: the case's repository, with that test file. bkland <card> <issue> <the rest of its
 # test line, as JSON>: a landing of that card that changes lib/a.sh, with its test line and landed line in the case's
