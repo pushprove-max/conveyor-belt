@@ -18,38 +18,68 @@ NO_CAUSE='Not run: a fix issue needs a "## Cause" section, and this one has none
 # spaces); that block also ends where its quote closes (the next quote of that kind with no backslash before it), and a
 # closing fence may be followed by the closing quote, where the text goes on after it: <quote> is that quote, or empty
 # for either. With <inline> 0 (a here-document or a body file, whose text is Markdown as written) a quote is no part of
-# a fence.
+# a fence. A fence may follow list markers (`- `, `* `, `+ `, `1. `, `1) `, nested too); its block then holds the lines
+# indented at least as far as the item's text (blank lines too), and a line indented less ends it, as it ends the item.
+# Its closing fence is read after that indent. A tab indents to the next multiple of four columns. An ordered marker that
+# does not start at 1 is no list marker on a line that goes on a paragraph (outside a list), as such a list cannot
+# interrupt the paragraph.
 unfenced() {
   awk -v inline="$1" -v bq="$2" -v q="'" -v dq='"' '
     function strip(x) { sub(/^[ ]?[ ]?[ ]?/, "", x); return x }
     function isq(c) { return bq == "" ? (c == q || c == dq) : c == bq }
-    # fence: the line from its fence, or "" when none starts in it; fq is the quote the fence follows, or "" for none
-    function fence(line,   c, i) {
-      fq = ""; c = strip(line)
+    function tab(v, ch) { return ch == " " ? v + 1 : v + 4 - v % 4 }
+    # col: the column of the first character of x that is not a space or a tab
+    function col(x,   i, v) { for (i = 1; substr(x, i, 1) ~ /^[ \t]$/; i++) v = tab(v, substr(x, i, 1)); return v + 0 }
+    # cut: x without w columns of its indent (a tab that goes past them leaves its rest as spaces)
+    function cut(x, w,   i, v) {
+      for (i = 1; v < w && substr(x, i, 1) ~ /^[ \t]$/; i++) v = tab(v, substr(x, i, 1))
+      return substr("   ", 1, v - w) substr(x, i) }
+    # item: x without its list markers; W is the width they take (0 when none), the indent of the item text. With
+    # <para> 1 x goes on a paragraph, so a first ordered marker that does not start at 1 is none.
+    function item(x, para,   m) {
+      W = 0
+      while (match(x, /^[ ]?[ ]?[ ]?([-*+]|[0-9]+[.)])[ ][ ]?[ ]?[ ]?/)) {
+        m = substr(x, 1, RLENGTH)
+        if (!W && para && m ~ /^[ ]*[0-9]/ && m !~ /^[ ]*0*1[.)]/) break
+        W += RLENGTH; x = substr(x, RLENGTH + 1) }
+      return W ? x : strip(x) }
+    # fence: the line from its fence, or "" when none starts in it; fq is the quote the fence follows, or "" for none; W is
+    # the indent of the list item it is in (of the line start when none)
+    function fence(line,   c, i, w) {
+      fq = ""; c = item(line, P && !L); w = W
       if (c ~ /^[`~]/) return c
       if (inline == 1)
         for (i = 1; i < length(line); i++)
-          if (isq(substr(line, i, 1)) && (i == 1 || substr(line, i - 1, 1) ~ /[ \t$]/) && strip(substr(line, i + 1)) ~ /^[`~]/) {
-            fq = substr(line, i, 1); return strip(substr(line, i + 1)) }
-      return "" }
+          if (isq(substr(line, i, 1)) && (i == 1 || substr(line, i - 1, 1) ~ /[ \t$]/) && (c = item(substr(line, i + 1), 0)) ~ /^[`~]/) {
+            fq = substr(line, i, 1); return c }
+      W = w; return "" }
     # qend: where the first quote <cq> with no backslash before it is in <s>, or 0 when none is
     function qend(s, cq,   i) {
       for (i = 1; i <= length(s); i++)
         if (substr(s, i, 1) == "\\") i++
         else if (substr(s, i, 1) == cq) return i
       return 0 }
+    # A line indented less than the list item of an open fence ends the item, and its block with it.
+    open != "" && W > 0 && $0 !~ /^[ \t]*$/ && col($0) < W { open = "" }
     {
       line = $0
       while (1) {
         if (open == "") {
           c = fence(line); ch = substr(c, 1, 1); k = 0
           while (ch != "" && substr(c, k + 1, 1) == ch) k++
-          if (!(k >= 3 && !(ch == "`" && index(substr(c, k + 1), "`")))) { print line; next }
-          open = ch; n = k; oq = fq
+          if (!(k >= 3 && !(ch == "`" && index(substr(c, k + 1), "`")))) {
+            # P: the line before goes on a paragraph; L: that paragraph is in a list.
+            if ($0 ~ /^[ \t]*$/ || $0 ~ /^[ ]?[ ]?[ ]?#[#]?[#]?[#]?[#]?[#]?([ \t]|$)/) P = 0
+            else if (W) P = L = 1
+            else { if (!P && col($0) == 0) L = 0; P = 1 }
+            # The line that opens a here-document ends the command text: the body starts a new paragraph.
+            if (inline != 1 && $0 ~ /<<-?[ ]*["\047]?[A-Za-z_][A-Za-z_0-9]*["\047]?[ ]*\)*[ ]*$/) P = 0
+            print line; next }
+          open = ch; n = k; oq = fq; P = 0; if (W) L = 1
           # A block after a quote can end on its own line (a title of ~~~ and a word): read on after the fence.
           if (oq == "") next
           line = substr(c, k + 1); continue }
-        c = strip(line); k = 0
+        c = strip(cut(line, W)); k = 0
         while (substr(c, k + 1, 1) == open) k++
         r = substr(c, k + 1); sub(/^[ \t]*/, "", r)
         if (k >= n && r == "") { open = ""; next }

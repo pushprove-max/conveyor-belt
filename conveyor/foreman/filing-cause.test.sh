@@ -118,6 +118,18 @@ refused "gh issue create --label bug --title '~~~ x\\n' --body \$'~~~\n## Cause\
 passes "gh issue create --label bug --body \$'The form prints \\\\n~~~ as text.\n## Cause\nThe cache is stale.'"
 # A backtick opener with a backtick in its info string is no fence, so the heading after it counts.
 passes "$(body $'## What happens now\nThe form prints this line:\n``` `name`\n## Cause\nThe cache is stale.')"
+# Bug (#1510 review): a fence after a list marker was no fence, so the indented `## Cause` in the item's code block
+# counted as the heading and a fix with no Cause section passed. A heading after the item still counts.
+refused "$(body $'## What happens now\nThe form prints an example.\n\n- ~~~\n  ## Cause\n  ~~~')"
+refused "gh issue create --label bug --body \$'1. \`\`\`\n   ## Cause\n   \`\`\`'"
+passes "$(body $'## What happens now\nIt breaks.\n- ~~~\n  x\n## Cause\nThe cache is stale.')"
+# Bug (E1): a tab-indented line in the item's block ended it, so the `## Cause` after it counted.
+refused "$(body $'## What happens now\nThe form prints an example.\n\n- ~~~\n\tExample output\n  ## Cause\n  ~~~')"
+# Bug (E2): an ordered list that starts at 2 cannot interrupt a paragraph, so `2. ~~~` there is text, not a fence,
+# and the heading after it counts; one that starts at 1 can, and hides it; so can a later item of a list.
+passes "$(body $'## What happens now\nThe form prints this line:\n2. ~~~\n   ## Cause\nThe cache is stale.')"
+refused "$(body $'## What happens now\nThe form prints this line:\n1. ~~~\n   ## Cause\n   ~~~')"
+refused "$(body $'## What happens now\n1. It breaks.\n2. ~~~\n   ## Cause\n   ~~~')"
 }
 
 # unfenced <inline> <quote> <text> keeps what is outside the fences and reads on after each block ends.
@@ -137,6 +149,16 @@ o=$(unfenced 1 "'" $'x $\'~~~\n~~~"\nz\n~~~\'\nafter') || fail "unfenced failed"
 [ "$o" = $'\'\nafter' ] || fail "a double quote ended a block of a single-quoted body; got: $o"
 o=$(unfenced 0 "" $'a\n``` `x`\nb') || fail "unfenced failed"
 [ "$o" = $'a\n``` `x`\nb' ] || fail "a backtick opener with a backtick in its info string hid text; got: $o"
+# A fence in a (nested) list item closes at its fence read after the item's indent, and a blank line stays inside it.
+# The line `    z` after the closing fence is still in the item: it is read only if that fence closed the block.
+o=$(unfenced 0 "" $'a\n- * ~~~\n    x\n\n    y\n    ~~~\n    z\nb') || fail "unfenced failed"
+[ "$o" = $'a\n    z\nb' ] || fail "a fence in a nested list item was not hidden, or not closed after the item's indent; got: $o"
+# Bug (E1): a tab counted as no indent, so a tab-indented line in the item ended its block early.
+o=$(unfenced 0 "" $'- ~~~\n\tx\n  y\n  ~~~\nb') || fail "unfenced failed"
+[ "$o" = $'b' ] || fail "a tab-indented line ended the block of its list item; got: $o"
+# A line indented less than the item ends the item and its block: the text from it on is read.
+o=$(unfenced 0 "" $'- ```\n  x\nb\n- c') || fail "unfenced failed"
+[ "$o" = $'b\n- c' ] || fail "a line indented less than the list item did not end its block; got: $o"
 }
 
 # D2: a `bug` label makes it a fix issue, whatever its body. `testissue` files with the pack's type label (`bug` here),
