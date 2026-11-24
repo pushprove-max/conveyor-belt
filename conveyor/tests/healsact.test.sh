@@ -174,6 +174,18 @@ t_healsbatchqueue() {
     || fail "after heals batch area:engine --queue ... with new issues held, #100101 was held or not picked (pick: $p): $out $(loop control)"
 }
 
+# Bug: with rules.followupissues off, File held started the batch card with no GitHub issue unheld (healsbatch() did
+# not pass --held to tcput(), lib/heals.sh), so the loop built a card the owner filed held; or File and queue held it.
+t_healsbatchheldnoissue() {
+  local out
+  setup '[]'; actlist
+  loop control rules followupissues=off > /dev/null || fail "control rules followupissues=off was refused"
+  out=$(loop heals batch area:engine --held h00000000a1 2>&1) && out+=$(loop heals batch area:engine --queue h00000000a2 2>&1) \
+    || fail "heals batch area:engine --held h00000000a1, then --queue h00000000a2, with followupissues off failed: $out"
+  [ ! -e "$STUB/filed" ] && [ "$(jq -c '[.cards[] | [.label, .held]]' "$ST/testactions/cards.json" 2>&1)" = '[["Self-heals batch: area:engine",true],["Self-heals batch: area:engine",null]]' ] \
+    || fail "heals batch area:engine --held h00000000a1 with followupissues off did not start its card held with no GitHub issue, or --queue h00000000a2 started its card held: $out $(cat "$STUB/filed" "$ST/testactions/cards.json" 2>&1)"
+}
+
 # Bug: a docs sweep from the Board's sheet filed every entry of its area, also the one the owner left out, which left
 # the docs list unfixed.
 t_healsdocssheet() {
