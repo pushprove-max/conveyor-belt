@@ -3,7 +3,7 @@
 # timeout: 120
 # Engine cases: a held issue of the nightly whole test (needsmain(), lib/needsask.sh) released once for each asking of
 # its decision answered "Release it, first in the order", reopened or asked again, and the lines of $ST/mainred-released
-# an older engine wrote. Their own file, to keep needsask.test.sh under the 600 lines a case file may have. The helpers
+# an older engine wrote; and a blocked card's question keeping the backslashes of its block reasons. Their own file, to keep needsask.test.sh under the 600 lines a case file may have. The helpers
 # are needsask.test.sh's (mmain, nmain, mdec, manswer, naback).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -127,4 +127,19 @@ t_needsmainreopen() {
   echo OPEN > "$STUB/state.7"; nmain
   jq -e '.answeredAt == null and .answer == null and .proposedDefault == "Release it, first in the order"' <<<"$(mdec 7)" > /dev/null \
     || fail "#7, reopened on GitHub and held, has no open decision: $(mdec 7) $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (#1589 review): needsask() read its rows from @tsv, which writes each backslash as two, and `read -r`
+# keeps both, so a block reason quoting `\n` reached Needs you as `\\n`, in this block and in the one review-retry gave
+# back. #7's first review block, given back by review-retry, and its next card's block both quote a backslash: the
+# question has each once.
+t_needsaskslash() {
+  local d; setup "[$(issue 7 2026-01-01)]"; nainit 7
+  jq -c 'select(.card == "c0-7") | if .step == "blocked" then .reason = "the fix for [P1] a.txt:1 drops the \\n escape did not hold after 3 rounds"
+    | .retriedAt = "2026-11-02T00:00:00Z" | .retriedBy = "review-retry" else . end' "$ST/cards.jsonl" > "$ST/retried.jsonl" && : > "$ST/cards.jsonl" \
+    || fail "c0-7 was not given back as review-retry does"
+  narecard c1-7 7 '[P1] a.txt:2 splits on \t'; nask
+  d=$(nadec c1-7)
+  jq -e '.question | contains("splits on \\t did not hold") and contains("drops the \\n escape did not hold") and (contains("\\\\") | not)' <<<"$d" > /dev/null \
+    || fail "the block reasons of c1-7 (finding '[P1] a.txt:2 splits on \\t') and of c0-7 (finding 'drops the \\n escape') are not asked with each backslash once: $d $(cat "$T/$CASE/run.out")"
 }

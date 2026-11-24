@@ -55,7 +55,8 @@ needsask() {
   [ ! -e "$led" ] || rows=$(CONVEYOR_MAIN=$MAIN bash "$dec" list) || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
   while IFS=$'\t' read -r c n k r r1; do
     [ -s "$ST/$k/$c.patch" ] && issue[$c]=$n || continue
-    # r1: the block review-retry gave back, when this card came after that retry: both reasons are asked.
+    # r1: the block review-retry gave back, when this card came after that retry: both reasons are asked. The row is
+    # joined with tabs, not @tsv: the reasons hold no tab or line break (gsub below), and @tsv doubles each backslash.
     h="Card $c (#$n) is blocked with its work kept:"
     [ -z "$r1" ] || { h="Card $c (#$n) $RRAGAIN, its work kept in $ST/$k/$c.patch:"; r="this block: $r; the block review-retry gave back: $r1"; }
     if jq -e --arg id "blocked-$c" 'any(.[]; .id == $id)' <<<"$rows" >/dev/null; then
@@ -78,7 +79,7 @@ needsask() {
     | map(select(.step | IN("landed", "closed", "blocked"))) | last | select(. != null and .step == "blocked" and .issue > 0 and (.kept // "") != ""
       and ((.reason // "") | startswith($yes) or startswith($lintyes) | not))
     | [.card, .issue, .kept, ((.reason // "") | gsub("\\s+"; " ")),
-       (if (.reason // "" | test($rb)) then reviewretried(.issue; $all).reason // "" | gsub("\\s+"; " ") else "" end)] | @tsv' <<<"$cs")
+       (if (.reason // "" | test($rb)) then reviewretried(.issue; $all).reason // "" | gsub("\\s+"; " ") else "" end)] | map(tostring) | join("\t")' <<<"$cs")
   [ -e "$led" ] || return 0
   rows=$(CONVEYOR_MAIN=$MAIN bash "$dec" list) || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
   # Split on the unit separator, not on a tab: read joins tabs, so an empty answer would move the asking time into it.
