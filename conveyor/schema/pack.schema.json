@@ -438,7 +438,7 @@
       }
     },
     "tunables": {
-      "description": "The loop's timings, in seconds (waitLimitMin: in minutes).",
+      "description": "The loop's timings, in seconds (waitLimitMin: in minutes), and its free disk floor (minFreeDiskGb: in GB).",
       "type": "object",
       "default": {},
       "additionalProperties": false,
@@ -462,7 +462,8 @@
         "sessionTestSlots": { "description": "A test run started inside a card's build, fix or rebase session holds at most this many of the machine's test slots at once. The loop's own test step keeps its share.", "type": "integer", "minimum": 1, "default": 2 },
         "limitTtl": { "description": "The weekly limit reading is asked for again once the last asking is this old (0: at every asking).", "type": "integer", "minimum": 0, "default": 300 },
         "limitOld": { "description": "A weekly limit reading older than this is no reading.", "type": "integer", "minimum": 1, "default": 1800 },
-        "testActionTimeout": { "description": "A test action's session (conveyor.sh testaction) is ended once it has run this long, and its record says timed out.", "type": "integer", "minimum": 1, "default": 900 }
+        "testActionTimeout": { "description": "A test action's session (conveyor.sh testaction) is ended once it has run this long, and its record says timed out.", "type": "integer", "minimum": 1, "default": 900 },
+        "minFreeDiskGb": { "description": "No new card starts while the free disk of the card folder is under this many GB; cards in flight go on, and a free space that does not read pauses nothing. 0: no floor.", "type": "number", "minimum": 0, "default": 3 }
       }
     }
   }

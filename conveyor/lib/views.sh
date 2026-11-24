@@ -230,7 +230,8 @@ cards() {
 # <file>"): the card has no issue (issue 0) to be shown by.
 # A bad line is set aside first (check()); records that still do not check give no record: the reason and exit 1.
 # It also says what the control record makes of the loop: state (running, paused, stopped, "paused by guard":
-# the weekly limit reading is at or over the guard, or "control record unreadable"; a loop that is not running picks
+# the weekly limit reading is at or over the guard, "paused: free disk <n> GB under the <floor> GB floor": the card
+# folder's free space is under tunables.minFreeDiskGb (state(), lib/control.sh), or "control record unreadable"; a loop that is not running picks
 # nothing, whatever `loop` says of there being one; the running loop's own "control record unreadable" stands over
 # this code's reading) and reason (why the record is unreadable, or, paused by a sign-in failure, that failure and what
 # to run: the record's signin; null otherwise), guard: at (the guard's percent, null for none), reading and
@@ -450,7 +451,10 @@ health() {
       (.engine |= if . then tree else . end) | .cards |= map_values(if .of == "card" then tree else . end | if .own then .own |= tree else . end)' <<<"$stopped") \
     || { rm -rf "$hd"; return 1; }
   fi
-  st=$(state "$c" "$(jq -r '.pct // empty' <<<"$r")")
+  # One free space reading for the state and the Disk row (diskFreeKb), so the two never differ.
+  free=$(diskfree) || free=''
+  st=$(state "$c" "$(jq -r '.pct // empty' <<<"$r")" "$free")
+  [ -n "$free" ] || free=null
   # A loop a sign-in failure paused (signinpause()) says why, and what to run.
   [ "$st" != paused ] || why=$(jq -r '.signin // ""' <<<"$c")
   if [ "$loop" = true ] && said=$(jq -ce 'select(.state == "control record unreadable" and (.pid | type == "number")) | {pid, reason}' "$SAYS" 2>/dev/null) \
@@ -476,7 +480,6 @@ health() {
   if ghok; then gh=true; ghreach && ghr=true || ghr=false; else ghwhy=$GHWHY; fi
   # The card the machine holds back (room()), while the loop runs: {issue, reason, since}.
   rm=null; [ "$loop" != true ] || rm=$(jq -ce 'select((.issue | type == "number") and (.reason | type == "string"))' "$ROOMF" 2>/dev/null) || rm=null
-  free=''; { read -r _ && read -r _ _ _ free _; } 2>/dev/null < <(df -Pk "$CARDS" 2>/dev/null) || :; [[ $free =~ ^[0-9]+$ ]] || free=null
   mc=$(mhost); mc=${mc:-null}
   # The cores kept for the user (the host file's reserveCores, lib/slots.sh slot_reserved) and the test-slot pool's
   # size on the cores left (null when the pool cannot be read), or why this machine cannot keep cores, for the Rules tab.

@@ -293,7 +293,7 @@ sample() { # <slots in use> <cap> <loop state> [the machine hold, while one stan
         | select(.value != null)] | from_entries | select(. != {})' <<<"$line" 2>/dev/null) || w=''
   fi
   load=$(p_load); mem=$(p_mem)
-  disk=$(df -Pk "$CARDS" 2>/dev/null | awk 'NR == 2 {print $4}')
+  disk=$(diskfree) || disk=''
   jq -cn --argjson s "$1" --argjson c "${2:-null}" --arg st "$3" --arg l "$load" --arg m "$mem" --arg d "$disk" --arg q "$queued" --argjson w "${w:-null}" '
     def n: tonumber? // null;
     {time: (now | todate), slots: $s, cap: $c, state: $st, queued: ($q | n), load: ($l | n), memUsedKb: ($m | split(" ")[0] | n), memTotalKb: ($m | split(" ")[1] // "" | n),

@@ -90,6 +90,7 @@
 {"area": "control", "test": "opencode.test.sh"}
 {"area": "control", "test": "codex.test.sh"}
 {"area": "control", "test": "control.test.sh"}
+{"area": "control", "test": "diskfloor.test.sh"}
 {"area": "control", "test": "filedhold.test.sh"}
 {"area": "control", "test": "narrow.test.sh"}
 {"area": "control", "test": "clis.test.sh"}

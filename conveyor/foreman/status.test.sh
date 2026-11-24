@@ -496,7 +496,19 @@ watcher: last poll ended 2026-11-15T11:59:47Z, took 47 s (alpha: slow, read heal
 waiter: listening" ] || fail "ask alpha foreman status (host devhost, live waiter $wp) did not give this Foreman's watcher and waiter: $out"
 }
 
-cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog stopped resumed resumedhost askhost)
+# Issue 1655. Bug it catches: the loop started no new card while the card folder's free disk was under the floor, and
+# the status said nothing of why. Health's state names the pause; the status shows it, and shows nothing for running.
+t_diskfloor() {
+CASE=diskfloor; fixture diskfloor
+snap '.health.state = "paused: free disk 2.5 GB under the 3 GB floor"'
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+grep -qxF 'loop: paused: free disk 2.5 GB under the 3 GB floor' <<<"$out" || fail "health state 'paused: free disk 2.5 GB under the 3 GB floor': no pause line in: $out"
+snap '.health.state = "running"'
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+! grep -q '^loop: ' <<<"$out" || fail "health state 'running': a pause line in: $out"
+}
+
+cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog stopped resumed resumedhost askhost diskfloor)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

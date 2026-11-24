@@ -308,7 +308,7 @@ unreported() {
 # snapshot, with no wake put and nothing marked reported: the belt (its count, "as of <snapshotAt>, the belt has
 # changed since" when the card records changed after the snapshot was made, or, while the loop runs then, the count
 # now (loop.json's cards and the landed cards not yet pushed, recordsNow) with "the snapshot, as of <snapshotAt>, is behind the card records", and while the loop runs its cards
-# against the cap, loop.json's count now while the snapshot is behind (recordsNow, commands/snapshot.sh); then, when the
+# against the cap, loop.json's count now while the snapshot is behind (recordsNow, commands/snapshot.sh); then, while the card folder's free disk is under the floor, "loop: paused: free disk <n> GB under the <floor> GB floor" (health's state, lib/control.sh state()); then, when the
 # snapshot names the engine stopped and ps no longer shows it stopped, "the engine (pid <n>) runs" or "has ended"; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
 # cards waiting on other issues and the held issues as issue numbers, the self-heals list's line (lib.sh healsdef), the whole-suite run under way (else the last one that ended),
 # then every problem a wake names (the blocked cards as NOWBLOCKED gives them), the push failing at once, the suite that ended left out (its line is above), and a release-prep started again by its landed fixes (it needs no one), each "needs you: <text>", then each card unreported names, "not yet reported: blocked #N". A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
@@ -345,7 +345,7 @@ STATUS=$SUITE$REF$(healsdef)'def num: if type == "number" then "#\(.)" else tost
     # While the snapshot is behind the card records, the loop'"'"'s count is the one loop.json gives now (recordsNow).
     + (((if (.recordsNow | type) == "object" then .recordsNow | {building} else (.health | objects) // {} end) as $b
       | .health | objects | select(($b.building | type) == "number" and (.builderCap | type) == "number")
-      | "; \($b.building) of the cap \(.builderCap)") // ""),
+      | "; \($b.building) of the cap \(.builderCap)") // ""), (.health | objects | .state | strings | select(startswith("paused: free disk")) | "loop: \(.)"),
   (.belt | arrays | .[] | objects | "  \(ref) \(.step)\((.waitsOn | objects | select(.issue | numbers) | " on \(ref)") // "")"
     + " \((.stepAt | fromdate? | $now - .) // null | if . == null then "?" else took end) \(.title // "" | tostring | gsub("\\s+"; " ") | .[0:60] | sub(" $"; ""))"),
   (.queue.waiting | arrays | select(length > 0) | "waiting: " + (map(objects | "\(.issue | num) on \(.waitsFor | arrays | map(num) | join(" "))") | join(", "))),

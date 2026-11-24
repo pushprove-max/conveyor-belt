@@ -794,7 +794,7 @@ run() { # [max-cards] [serve]
     elif [ -n "$nocli" ]; then echo "conveyor: $nocli; nothing recorded" >&2; exit 1
     elif [ -n "$mhold" ]; then echo "conveyor: the machine hold stands; nothing recorded" >&2; exit 1
     elif [ "$now" = running ]; then echo "conveyor: no issue qualifies; nothing recorded"
-    else echo "conveyor: the loop is $now (the control record); nothing recorded"; fi
+    else echo "conveyor: the loop is $now$([[ $now == "paused: free disk"* ]] || echo ' (the control record)'); nothing recorded"; fi
   fi
   ! owed=$(owed) || { echo "conveyor: main (${owed##* }) is not pushed; the push line in the card records has the reason" >&2; exit 1; }
 }

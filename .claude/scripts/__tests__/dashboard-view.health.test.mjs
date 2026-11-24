@@ -578,6 +578,17 @@ test('Health: gh signed in but GitHub not reached is a warning row, never "Not s
   assert.equal(dt.nextElementSibling.querySelector(':scope > .chip.chip-warn').textContent, 'Not reached');
   assert.doesNotMatch(panel(w, 'health').textContent, /Not signed in/);
 });
+// Issue 1655. Bug it catches: a running loop that picks nothing because the card folder's free disk is under the floor
+// showed "Running", and the Disk row "Low", with no word that picks had paused.
+test('Health: a running loop paused by the free disk floor is a "Paused" warning that says why', () => {
+  const data = full(), state = 'paused: free disk 2.5 GB under the 3 GB floor';
+  Object.assign(data.panels.health.data.records[0], { loop: true, state, diskFreeKb: 2621440 });
+  const w = page('health');
+  deliver(w, data);
+  const row = dd(w, 'Conveyor');
+  assert.equal(row.querySelector(':scope > .chip.chip-warn')?.textContent, 'Paused', `the loop row with state "${state}": ${row.textContent}`);
+  assert.match(row.textContent, /paused: free disk 2\.5 GB under the 3 GB floor/, `the loop row with state "${state}"`);
+});
 test('Health: a proxy that fails is a fault with a next step', () => {
   const w = routes({ subscription: { state: 'expired' }, proxy: { state: 'fails', baseUrl: 'http://127.0.0.1:4141', route: 'fallback' } });
   assert.equal(dd(w, 'Claude route: subscription login').querySelector(':scope > .chip.chip-bad').textContent, 'Expired');

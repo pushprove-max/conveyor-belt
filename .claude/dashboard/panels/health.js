@@ -117,8 +117,11 @@ window.DASH_APP.panel({
       // A loop its control record stops is not meant to run: it is off, not a fault. One meant to run with no
       // loop process is.
       const off = !r.loop && r.state === 'stopped';
-      const loop = check(`Conveyor${of}`, r.loop ? ctx.chip('Running', 'ok') : off ? ctx.chip('Off', 'quiet') : ctx.chip('Stopped', 'bad'), off ? 'not meant to run' : null,
-        r.newest ? 'last step recorded' : 'no step recorded', r.newest ? ctx.since(r.newest, ' ago') : null);
+      // A running loop that starts no new card while the card folder's free disk is under the floor (state(), conveyor/lib/control.sh).
+      const low = r.loop && typeof r.state === 'string' && r.state.startsWith('paused: free disk');
+      const loop = check(`Conveyor${of}`, low ? ctx.chip('Paused', 'warn') : r.loop ? ctx.chip('Running', 'ok') : off ? ctx.chip('Off', 'quiet') : ctx.chip('Stopped', 'bad'),
+        low ? r.state : off ? 'not meant to run' : null, r.newest ? 'last step recorded' : 'no step recorded', r.newest ? ctx.since(r.newest, ' ago') : null);
+      if (low) loop.next = 'Free space on the disk that holds the cards folder. Picks start again on their own once free space is over the floor.';
       if (!r.loop && !off) loop.next = `Start Conveyor again on ${ctx.machine}: its machine command starts every project.`;
       // The kept snapshot this view is read from (conveyor.sh snapshot), shown only when it is over a minute old.
       const snapAt = typeof r.snapshotAt === 'string' ? Date.parse(r.snapshotAt) : NaN;

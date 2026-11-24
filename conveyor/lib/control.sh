@@ -138,11 +138,24 @@ reading() { # [fresh]
   lastread
 }
 # What a pick does now, from the control record ("" when it does not read) and the reading's percent ("" for none):
-# running, paused, stopped, "paused by guard", or "control record unreadable". The loop, health and the snapshot all
-# ask here.
-state() { # <control record> <percent>
-  jq -rn --argjson c "${1:-null}" --arg p "${2:-}" 'if $c == null then "control record unreadable" elif $c.mode == "pause" then "paused"
-    elif $c.mode == "stop" then "stopped" elif $c.guard != null and $p != "" and ($p | tonumber) >= $c.guard then "paused by guard" else "running" end'
+# running, paused, stopped, "paused by guard", "paused: free disk <n> GB under the <floor> GB floor" (the card folder's
+# free space, diskfree(), is under the pack's tunables.minFreeDiskGb; a free space that does not read pauses nothing),
+# or "control record unreadable". The loop, health and the snapshot all ask here. Only a stop ends cards in flight.
+# A caller that also shows the free space passes the one reading it shows (KB, "" for none), so the two agree. The floor
+# is read as jq reads a number, so a floor packget gives as 1E+1 is 10 GB and shows as 10; one that is not a number
+# of 0 or more is 3.
+state() { # <control record> <percent> [<free KB>]
+  local f fl=''; if [ $# -ge 3 ]; then f=$3; else f=$(diskfree) || f=''; fi
+  packget tunables.minFreeDiskGb fl 2>/dev/null || fl=''
+  jq -rn --argjson c "${1:-null}" --arg p "${2:-}" --arg f "$f" --arg fl "$fl" '((($fl | tonumber? | select(. >= 0)) // 3) + 0) as $fl
+    | if $c == null then "control record unreadable" elif $c.mode == "pause" then "paused"
+    elif $c.mode == "stop" then "stopped" elif $c.guard != null and $p != "" and ($p | tonumber) >= $c.guard then "paused by guard"
+    elif $f != "" and ($f | tonumber) < $fl * 1048576 then "paused: free disk \($f | tonumber * 10 / 1048576 | floor / 10) GB under the \($fl) GB floor" else "running" end'
+}
+# The free space of the card folder ($CARDS), in KB, as df -Pk reads it; fails when df gives no number.
+diskfree() {
+  local f=''; { read -r _ && read -r _ _ _ f _; } 2>/dev/null < <(df -Pk "$CARDS" 2>/dev/null) || :
+  [[ $f =~ ^[0-9]+$ ]] && echo "$f"
 }
 # The model and effort a seat runs on now, as {model, effort, agent}: the control record's over the seed's. agent is
 # the CLI that runs the model: the one the record names with it (cli), whatever the pack lists; for a record that

@@ -56,6 +56,11 @@ Some pack settings that this site names:
   example `npm ci`. Use it in place of `linkFromMain` when a card can change a lockfile. When it fails, the card is
   blocked with the end of its output.
 - `tunables.pushRetry`: the seconds between two tries of a push that failed for the network or the remote.
+- `tunables.minFreeDiskGb`: the free disk floor, in GB, of the folder that holds the card worktrees. The default is
+  3. Before each pick, the loop reads the free space of that folder. When it is under the floor, no new card starts,
+  and the loop's state, `foreman status` and the Board's health say `paused: free disk <n> GB under the <floor> GB
+  floor`. Cards that already run go on. When the free space is over the floor again, picks start again by
+  themselves. When the free space cannot be read, the loop picks as usual. Set it to 0 to turn the floor off.
 - `tunables.sessionTestSlots`: the most test slots that a test run in a card's build, fix or rebase session holds at
   one time. The default is 2. The loop's own test step keeps its full share.
 - `push.landAs`: the rule Land as, `main` (the default) or `pr`, until the control record sets it ([Land
