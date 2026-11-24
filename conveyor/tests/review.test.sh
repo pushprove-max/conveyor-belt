@@ -424,3 +424,26 @@ t_declinefailrun() {
     && st 'select(.step == "blocked") | .reason' | grep -q 'could not write its leftover findings to the declined list' || fail "a card whose findings could not be declined did not end landed, then blocked saying so: $(st 'select(.step | IN("landed", "blocked"))')"
   k=$ST/$(st 'select(.step == "blocked") | .kept'); grep -q 'seen again in review 2' "$k"/*.review || fail "the last review, of the findings that could not be declined, was not kept: $(ls "$k" 2>&1)"
 }
+
+# Bug it catches: cardreview() did not give judged() the tree before the last fix round (fixtree), so the judge's
+# message after that fix lost the cited line the fix deleted (f2), though judgefindings() keeps it when given the tree.
+# cardreview() is called in the state card() holds after fix round 1 (told(); refix and fixtree both set, as card()
+# sets them), with the real judged(); the review session and the judge's call are stubbed, the judge's call keeping
+# the message it is given.
+t_judgedfixtree() {
+  setup "[$(issue 17 2026-01-01)]"; fx_wt 'printf "%s\n" f1 f2 f3 > f.txt' b.txt base
+  printf '%s\n' '[P1] f.txt:2 f2 is wrong' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  fx_in 'c=c7 n=17 wt=$FXWT br="" sprompt="" sf="" sk="" pk="" pt="" mode="" kept="" grown=1 fin="" vmode="" pass=2 rounds=0 rv=$REVIEW prv=""
+    issue=$(jq -c ".[0]" "$STUB/issues.json"); fixtree=$(git -C "$wt" write-tree) && told 1 "printf \"%s\n\" f1 f3 > f.txt" && refix=1 || exit 3
+    redbrief() { :; }; trialflag() { :; }; lintgate() { return 0; }; began() { :; }; reusable() { return 1; }; minor() { :; }; judgeon() { echo "[]"; }
+    reviewed() { printf "%s\n" "[P1] f.txt:2 the fix deleted f2" "USER-VISIBLE: no" "VERDICT: NO-GO" > "$1.review"; printf "%s\n" "$2" > "$T/$CASE/brief"; echo "{}"; }
+    judgecall() { printf "%s\n" "$3" > "$T/$CASE/judged"; echo "{\"failed\": \"stub\"}"; return 1; }
+    cardreview'
+  # The review was told about fix round 1 (rereview()), so the case ran the path card() takes after a fix round.
+  [ "$RC" = 0 ] && grep -qF "$FXWT.rounds/1.diff" "$T/$CASE/brief" 2>/dev/null \
+    || fail "the review after fix round 1 (refix=1) was not told that round, so the case missed card()'s path after a fix round (exit $RC): $(cat "$T/$CASE/run.out" 2>&1)"
+  [ "$RC" = 0 ] && [ "$(grep -A3 -xF '  Lines at f.txt:2 (the code before the last fix round):' "$T/$CASE/judged" 2>/dev/null)" = '  Lines at f.txt:2 (the code before the last fix round):
+    1: f1
+    2: f2
+    3: f3' ] || fail "the judge's message after fix round 1 (review: [P1] f.txt:2 the fix deleted f2) lost the lines before that fix (exit $RC): $(cat "$T/$CASE/judged" "$T/$CASE/run.out" 2>&1)"
+}
