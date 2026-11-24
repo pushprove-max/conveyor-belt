@@ -166,11 +166,17 @@ outfirst() { # <worktree>
   while [ -e "$f" ]; do n=$((n + 1)); f=$1.out.first-$n; done
   cp "$1.out" "$f" 2>/dev/null || :
 }
+unpricedleft() { # <worktree>: an earlier try with no price left its output (outfirst()); a try refused on stderr alone leaves an empty one
+  local x
+  for x in "$1".out.first "$1".out.first-*; do [ ! -s "$x" ] || return 0; done
+  return 1
+}
 outkeep() { # <card> <step> <the line>
   local d=$ST/kept/$1 f n=1 o i=1 u=''
   case $2 in build | fix | rebase) ;; *) return 0 ;; esac
   # Each <card>.out.first* is a try with no price to read, kept whatever the line says: a line stopped() writes in a
-  # later try's wait reads that later try alone, which can have its price.
+  # later try's wait reads that later try alone when it wrote output, or else the tries' fold ($wt.spent), either of
+  # which can have a price.
   ! jq -e "$UNPRICED" <<<"$3" >/dev/null 2>&1 || u=1
   o=$CARDS/$1.out.first
   while :; do

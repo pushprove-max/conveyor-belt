@@ -460,13 +460,17 @@ EOT
 #   wait kept the same try twice, from .out.first and from .out.
 # - second (E11, review; bug it catches): stopped in try 2's wait, the line stopped() writes reads try 2 alone, priced,
 #   and outkeep() kept nothing, so clean() removed try 1's output with no price to read.
+# - stderr (issue 1628; bug it catches): try 2 is refused on stderr alone (the 503 of t_apistderr), so <card>.out is
+#   empty in its wait. stopped() returned with no line, as it read <card>.out alone, and clean() removed try 1's output.
 # A direct call cannot show it: the stop's order (the card ended, then stopped(), then clean()) is the loop's own, so
 # the case runs the loop and polls for the refused try and the stopped line.
-apistop() { # <the try whose wait the stop comes in: 1 or 2>
+apistop() { # <the try whose wait the stop comes in: 1 or 2> [stderr: try 2 is refused on stderr alone]
   local pid card cd=$T/$CASE/cards
   setup "$(issue 7 2026-01-01 | jq -cs .)"; tune '.tunables.apiPause = 30 | .tunables.idle = 1 | .tunables.poll = 1'
+  [ -z "${2:-}" ] || : > "$STUB/stderr"
   cat > "$STUB/build" <<'EOT'
 echo x >> "$STUB/calls"; n=$(wc -l < "$STUB/calls")
+[ "$n" = 1 ] || [ ! -e "$STUB/stderr" ] || { printf 'API Error: 503 Service Unavailable\n' >&2; exit 1; }
 jq -cn --argjson n "$n" '{type: "result", is_error: true, result: "API Error: 429 Too Many Requests, try \($n)"}
   + if $n > 1 then {usage: {input_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 1}} else {} end'
 exit 1
@@ -489,7 +493,33 @@ EOT
   [ "$(jq -r --arg c "$card" 'select(.card == $c and .step == "build") | .result' "$ST/retried.jsonl" 2>/dev/null)" = stopped ] && [ "$(wc -l < "$STUB/calls")" = "$1" ] \
     || fail "the build was not stopped in the wait after try $1: $(cat "$STUB/serve.out")"
   [ "$(ls "$ST/kept/$card" 2>&1)" = "$card.build.out" ] && grep -qF 'try 1' "$ST/kept/$card/$card.build.out" \
-    || fail "the build stopped in the wait after try $1 did not keep try 1's output, with no usage, once and alone: $(ls "$ST/kept/$card" 2>&1)"
+    || fail "the build stopped in the wait after try $1${2:+ (try 2 refused on stderr alone)} did not keep try 1's output, with no usage, once and alone: $(ls "$ST/kept/$card" 2>&1)"
+  # Counted: the stopped line holds what the tries used (apitries()' fold), so try 1's unread usage is said on it; its
+  # model, which the Board prices the estimate at (estimate_rest()); and its seconds from the build's start, try 1's
+  # 30-second wait in them (the fold sums only the tries' own run time).
+  [ -z "${2:-}" ] || jq -e --arg c "$card" 'select(.card == $c and .step == "build") | (.unread | type) == "string" and (.model | type) == "string" and .model != "" and .sec >= 30' "$ST/retried.jsonl" >/dev/null 2>&1 \
+    || fail "the build stopped in the wait after a stderr-only refused try 2 did not write the tries' use, its model and its time with the waits on its line: $(jq -c --arg c "$card" 'select(.card == $c and .step == "build")' "$ST/retried.jsonl" 2>&1)"
 }
 t_apistopfirst() { apistop 1; }
 t_apistopsecond() { apistop 2; }
+t_apistopstderr() { apistop 2 stderr; }
+# Bug (issue 1628, review E2): tries 1 and 3 refused on stderr alone, try 2 a 429 on stdout with no usage. outfirst()
+# left an empty <card>.out.first (try 1) and try 2's output in <card>.out.first-2; stopped in try 3's wait, stopped()
+# looked at <card>.out.first alone, wrote no line, and clean() removed try 2's output. The stop is the loop's own two
+# calls (stopped(), then clean(), lib/run.sh), made here in that wait: no other order of them is in question.
+t_apistopthird() {
+  setup '[]'; tune '.tunables.apiPause = 0.02'; fx_wt : b.txt one
+  cat > "$STUB/build" <<'EOT'
+echo x >> "$STUB/calls"; n=$(wc -l < "$STUB/calls")
+[ "$n" = 2 ] || { printf 'API Error: 503 Service Unavailable\n' >&2; exit 1; }
+echo '{"type": "result", "is_error": true, "result": "API Error: 429 Too Many Requests, try 2"}'; exit 1
+EOT
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  local stop='sleep() { [ "${FUNCNAME[1]}" != apitries ] || { echo x >> "$STUB/sleeps"; [ "$(wc -l < "$STUB/sleeps")" -lt 3 ] || { stopped c7 7; clean "$FXWT"; echo stopped; exit 0; }; }; command sleep "$@"; }' # sleep: the engine's own wait, passed on unchanged until the third, where the stop comes
+  apicall "$stop"'; began c7 7 build && session "$FXWT" "Build the issue."'
+  grep -qx stopped "$T/$CASE/run.out" && [ "$(wc -l < "$STUB/calls")" = 3 ] || fail "the build was not stopped in the wait after try 3: $(cat "$T/$CASE/run.out")"
+  [ "$(ls "$ST/kept/c7" 2>&1)" = c7.build.out ] && grep -qF 'try 2' "$ST/kept/c7/c7.build.out" \
+    || fail "the build stopped in try 3's wait did not keep try 2's output, with no usage, once and alone: $(ls "$ST/kept/c7" 2>&1)"
+  st 'select(.card == "c7" and .step == "build")' | jq -se 'length == 1 and (.[0] | .result == "stopped" and (.unread | type) == "string" and (.model | type) == "string" and .model != "")' >/dev/null \
+    || fail "the build stopped in try 3's wait did not write one stopped line with the tries' unread use and its model: $(st 'select(.card == "c7")' | jq -c . 2>&1)"
+}

@@ -347,7 +347,7 @@ stopped() { # <card> <issue>
   # A Codex build, fix or rebase: its output opens as Codex's does. Its usage is its session file's running total.
   elif [ "$of" != review ] && head -n 1 "$wt.out" 2>/dev/null | grep -q '"thread.started"'; then
     roll=$(rollout "$wt.out"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }
-    f=$(jq -cRn --arg m "$m" --arg e "" --argjson s "${s:-0}" --argjson run "${run:-null}" "$CODEXREAD" "$wt.out" 2>/dev/null | tail -n 1 | jq -c 'del(.ok) | del(.effort)' 2>/dev/null)
+    f=$(jq -cRn --arg m "$m" --arg e "" --argjson s "${s:-0}" --argjson run "${run:-null}" "$CODEXREAD" "$wt.out" 2>/dev/null | tail -n 1 | jq -c 'del(.ok) | del(.effort)' 2>/dev/null); elif [ "$of" != review ] && [ ! -s "$wt.out" ] && unpricedleft "$wt"; then f=$(jq -ce --argjson s "${s:-0}" 'objects | del(.step, .ok, .effort, .start) | .sec = $s' "$wt.spent" 2>/dev/null) || f='' # stopped in a later try's wait, that try with no output (refused on stderr alone), and a try before it with no price left its output (unpricedleft(), lib/records.sh): the line is what apitries() folded of the tries ($wt.spent), its seconds from the step's start as the waits count too, and outkeep() keeps that output before clean() removes it
   else case $of:$m in
     build:opencode:* | fix:opencode:* | rebase:opencode:*) [ -s "$wt.out" ] || return 0
       f=$(jq -cRn --arg m "$m" --argjson s "${s:-0}" "$OPENCODEREAD" "$wt.out" 2>/dev/null | tail -n 1 | jq -c 'del(.ok)' 2>/dev/null) ;;
