@@ -554,6 +554,10 @@
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/foreman/foreman-launcher.test.sh",
+    "conveyor/foreman/foreman-size.test.sh",
+    "conveyor/foreman/foreman-standing.test.sh",
+    "conveyor/foreman/foreman.test.sh",
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/port.test.sh"
   ],
@@ -960,12 +964,22 @@
     ".claude/scripts/__tests__/dashboard-local.test.sh"
   ],
   "conveyor/lib/standing.sh": [
-    ".claude/scripts/__tests__/dashboard-local.test.sh"
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
+    "conveyor/foreman/foreman-launcher.test.sh",
+    "conveyor/foreman/foreman-size.test.sh",
+    "conveyor/foreman/foreman-standing.test.sh",
+    "conveyor/foreman/foreman.test.sh"
   ],
   "conveyor/tests/needsask.test.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh"
   ],
   "conveyor/tests/reviewland.test.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/foreman/procedures.md": [
+    "conveyor/foreman/foreman-launcher.test.sh",
+    "conveyor/foreman/foreman-size.test.sh",
+    "conveyor/foreman/foreman-standing.test.sh",
+    "conveyor/foreman/foreman.test.sh"
   ]
 }
