@@ -529,7 +529,8 @@ hostclis() { # [fresh | due | <cli>]
       | if .value == "*" then .value = ($o.clis[.key] // null) else . end] | from_entries' --args "${found[@]}") || return 1
   # seen: every CLI a report of this host has listed, kept when one goes (seatwait()), with the CLIs the old report's
   # clis has, before one is taken out of it (a report written before seen was has only them). A CLI that clis has as
-  # null there is not counted: engines up to v1.9 wrote null for a CLI not installed. One CLI read that is not
+  # null there is not counted: engines up to v1.9 wrote null for a CLI not installed, Claude Code too (seatwait() counts
+  # that one for a step's wait only, as it cannot tell it from an installed one with no list). One CLI read that is not
   # installed is taken out of clis, not written there as installed with no list.
   # The new report is written to a file of its own (mktemp), then moved over CLIS: the cards' subshells share $$, so a
   # name made from it was one file for two cards, and one card's mv could make CLIS the file the other had just emptied.
@@ -557,7 +558,7 @@ seatready() { # <builder|reviewer|judge> <its seat>
 # A step's check of its seat before its session starts (session1(), review(), judgecall()). A CLI that an update or a
 # reinstall takes away for a moment must not block the card for good (issue 839): when seatready fails on a CLI that a
 # report of this host has listed (its seen, or the clis of a report written before seen was, with a list for it: a
-# null there is a CLI an engine up to v1.9 found not installed), the host's CLIs are read again (a fresh report) SEAT_TRIES times, SEAT_PAUSE seconds apart, the card keeping its build slot. When the CLI is
+# null there is a CLI an engine up to v1.9 found not installed, except Claude Code's, which has no list), the host's CLIs are read again (a fresh report) SEAT_TRIES times, SEAT_PAUSE seconds apart, the card keeping its build slot. When the CLI is
 # still missing, a card of the loop (LOOPCARD, cardrun()) waits in its step: its live record names the CLI (its cli
 # and action) and <worktree>.idle stands, so the machine's count leaves it out (the card cap counts it), until the loop takes
 # that mark away in a turn once the host's report lists the CLI again, with no look at the free slots (cliwake(), lib/run.sh); the step then starts, or waits again
@@ -568,7 +569,7 @@ seatwait() { # <role> <its seat> <worktree> <step>
   local why a i=0 at
   why=$(seatready "$1" "$2") && return 0
   a=$(jq -r '.agent | strings' <<<"$2" 2>/dev/null)
-  [ -n "$a" ] && jq -e --arg a "$a" '[(.seen | arrays | .[]), (.clis | objects | with_entries(select(.value != null)) | keys[])] | index($a)' "$CLIS" >/dev/null 2>&1 || { printf '%s\n' "$why"; return 1; }
+  [ -n "$a" ] && jq -e --arg a "$a" '[(.seen | arrays | .[]), (.clis | objects | with_entries(select(.value != null or .key == "claude")) | keys[])] | index($a)' "$CLIS" >/dev/null 2>&1 || { printf '%s\n' "$why"; return 1; }
   at=$(date -u +%FT%TZ)
   while [ "$i" -lt "$SEAT_TRIES" ]; do
     seatlive "$1" "$3" "$4" "$a" "$at"; i=$((i + 1)); sleep "$SEAT_PAUSE"; hostclis fresh >/dev/null

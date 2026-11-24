@@ -232,6 +232,35 @@ t_clinull() {
     || fail "seatwait for a codex seat, on a report with clis.codex null and no codex installed, did not fail at once: $(cat "$STUB/eng.out"); pauses: $(cat "$STUB/slept" 2>&1)"
 }
 
+# Bug (#1516): Claude Code lists no models, so a report of an engine before seen wrote has clis.claude: null whenever it
+# is installed, and seatwait() dropped that key as a CLI never listed. A Claude Code that left PATH for a moment during
+# an update then failed the step at once, where a Codex seat would have waited. Here, on such a report with no Claude
+# Code on PATH, a claude seat is checked SEAT_TRIES times, a pause each, before it fails.
+t_cliclaudenull() {
+  # shellcheck disable=SC2016 # expanded in the engine shell (cliengine)
+  cliengine "$(jq -cn '{at: (now | floor), clis: {claude: null}}')" \
+    'PATH=$(on); seatwait reviewer "{\"model\":\"claude-opus-5-5\",\"effort\":\"low\",\"agent\":\"claude\"}" "$CARDS/c7" review; echo "rc=$?"'
+  [ "$(tail -n 1 "$STUB/eng.out")" = rc=1 ] && [ "$(wc -l < "$STUB/slept")" = 4 ] \
+    || fail "seatwait for a claude seat, on a report with clis.claude null and no seen, with claude gone from PATH, did not wait out its checks: $(cat "$STUB/eng.out"); pauses: $(cat "$STUB/slept" 2>&1)"
+}
+# Bug (#1516, review E1): an engine before seen wrote clis.claude: null for a Claude Code that was installed and for one
+# a `control` request named while it was not (the request wrote the entry before the seat check refused it), so that null
+# is no proof Claude Code was ever there. A read made with claude gone from PATH must not save it on seen, or the false
+# history stays for good. Here a read of claude alone leaves seen empty and clis.claude out.
+t_cliclaudeseenone() {
+  # shellcheck disable=SC2016 # expanded in the engine shell (cliengine)
+  cliengine "$(jq -cn '{at: (now | floor), clis: {claude: null}}')" 'PATH=$(on); hostclis claude'
+  out=$(jq -c '[.seen, (.clis | has("claude"))]' "$ST/clis.json")
+  [ "$out" = '[[],false]' ] || fail "hostclis claude with claude gone from PATH, on a report with clis.claude null and no seen, saved claude as seen: $out $(cat "$STUB/eng.out")"
+}
+# Bug (#1516, review E1): the same as t_cliclaudeseenone, for the fresh read (its own jq run in hostclis()).
+t_cliclaudeseenfresh() {
+  # shellcheck disable=SC2016 # expanded in the engine shell (cliengine)
+  cliengine "$(jq -cn '{at: (now | floor), clis: {claude: null}}')" 'PATH=$(on); hostclis fresh'
+  out=$(jq -c '[.seen, (.clis | has("claude"))]' "$ST/clis.json")
+  [ "$out" = '[[],false]' ] || fail "hostclis fresh with claude gone from PATH, on a report with clis.claude null and no seen, saved claude as seen: $out $(cat "$STUB/eng.out")"
+}
+
 # Bug it catches (issue 1538): a card in its build, fix or rebase step that waited for its seat's CLI started again only
 # in a free slot of the cap, and the cap counts it now, so with the cap full of waiting cards a free-slot check would
 # leave every one of them waiting for ever. Here two cards wait in their build for claude with the cap at 1: one turn's
