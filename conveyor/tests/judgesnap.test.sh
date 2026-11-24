@@ -54,6 +54,12 @@ t_judgesnapshot() {
   echo "$NOGO" > "$STUB/review.3"; echo "$GO" > "$STUB/review.4"
   printf '%s\n' 'F1 ACCEPT: the word is wrong for every reader. Cost to every card: none' 'F2 DECLINE: a matter of taste' 'F3 DECLINE: a matter of taste too' > "$STUB/judge.1"
   echo 'F1 DECLINE: no such line' > "$STUB/judge.2"
+  # Bug (#1380): the judge's line kept no stats, so its turns and tool reads could not be measured as the review's line's can.
+  # The judge's stub output holds three turns, two Read calls and one model, whichever of its calls is read.
+  for id in t1 t2; do
+    jq -cn --arg id "$id" '{type: "assistant", message: {model: "claude-opus-5-5", content: [{type: "tool_use", id: $id, name: "Read", input: {}}], usage: {input_tokens: 1, output_tokens: 1}}}'
+  done > "$STUB/judge-pre"
+  echo '{"num_turns": 3, "modelUsage": {"claude-opus-5-5": {"inputTokens": 3, "outputTokens": 2, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0}}}' > "$STUB/judge-extra"
   # Whole cards, because the snapshot is read from the records card() writes: the review lines with their judge
   # fields over two rounds and a fix, a failed judge call's line, and the track's review steps; records written here
   # by hand would show only that the snapshot reads what the test wrote. One run, a card at a time (max-cards 1), #7
@@ -65,6 +71,8 @@ t_judgesnapshot() {
     || fail "#7's reviews do not give one accepted and two declined, then a GO the judge made: $(jq -c '.landed[] | select(.issue == 7) | .rounds' <<<"$out")"
   [ "$(jq -c '.landed[] | select(.issue == 8) | .rounds | map(.judge | [.ran, (.why | test("^the judge call failed")), .why])' <<<"$out")" = '[[false,true,"'"$(rev 8 '.judge.failed // empty')"'"],[false,false,"the review had no finding"]]' ] \
     || fail "#8's reviews do not say the judge did not run, with why (its call failed; no finding to judge): $(jq -c '.landed[] | select(.issue == 8) | .rounds | map(.judge)' <<<"$out")"
+  [ "$(rev 7 'select(.judge.stats != null) | .judge.stats | [.turns, .tools, .models] | tojson' | sort -u)" = '[3,{"Read":2},["claude-opus-5-5"]]' ] \
+    || fail "#7's review lines do not hold the judge's three turns, two Read calls and its model in judge.stats: $(rev 7 '.judge | tojson')"
   # Each review step of the card's track says the same as its review.
   [ "$(jq -c '.landed[] | [.rounds | map(.judge)] == [.track.records | map(select(.name | startswith("review")) | .judge)]' <<<"$out" | sort -u)" = true ] \
     || fail "a review step of a card's track does not hold its review's judge: $(jq -c '.landed[] | .track.records | map(select(.name | startswith("review")))' <<<"$out")"

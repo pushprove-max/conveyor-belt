@@ -483,8 +483,8 @@ excerpts() { # <worktree> [<the tree before the fix round the review follows>]
   printf '%s\n' "$out"
 }
 # One judge call, read-only as a review is (claudereview(), codexreview(), opencodereview()): its answer in
-# <worktree>.judge. Prints its fields as one JSON object, {model, effort, sec} and, when they can be read, tokens and
-# usage (an OpenCode judge's holding its cost, usage.cost, when it reports one); one that fails prints them with failed (why) and fails.
+# <worktree>.judge. Prints its fields as one JSON object, {model, effort, sec} and, when they can be read, tokens,
+# usage and stats (turns, tool calls by name, models, as the review's line has them) (an OpenCode judge's holding its cost, usage.cost, when it reports one); one that fails prints them with failed (why) and fails.
 # The check of a Fix hollow cases card (hollowproof(), lib/speedproof.sh) runs it on another seat: CALLSEAT, a seat as
 # seat() prints it, with CALLSTEP and CALLACT the step and action its live record shows.
 judgecall() { # <worktree> <instructions> <the brief and the findings>
@@ -504,7 +504,7 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
     (cd "$1" && proxyenv && cacheenv && acctrun "$d" && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$model" --effort "$effort" --permission-mode default --tools Read,Grep,Glob \
       --setting-sources "" --strict-mcp-config --add-dir "$1.rv" --no-session-persistence --output-format stream-json --verbose \
       <<<"$p"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
-    f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" "$SESSIONREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage, ok} | del(.[] | nulls)' 2>/dev/null)
+    f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" "$SESSIONREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage, stats, ok} | del(.[] | nulls)' 2>/dev/null)
     [ $rc != 0 ] || { [ "$(jq -r .ok <<<"$f" 2>/dev/null)" = true ] \
       && jq -Rrn '[inputs | fromjson? // empty | objects | select(.type == "result")] | last | .result | strings' "$1.judge.events" > "$1.judge" 2>/dev/null; } || rc=1
     # Should a write get through all the same, the worktree is put back to the change the review read.
@@ -518,7 +518,7 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
     (ocrun "$1" "$model" "$effort" <<<"$p"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
     [ $rc != 0 ] || jq -Rrn "$OPENCODEANSWER" "$1.judge.events" > "$1.judge" 2>/dev/null || rc=1
     git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq || rc=1
-    f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" "$OCREVIEWREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage} | del(.[] | nulls)' 2>/dev/null)
+    f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" "$OCREVIEWREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c --arg m "$model" '{model, effort, sec, tokens, usage, stats} | if .stats then .stats.models = [$m] else . end | del(.[] | nulls)' 2>/dev/null)
   else
     model=$(codexmodel "$model") || { jq -cn --arg r "$model" '{failed: $r}'; return 1; }
     codexsb read-only
@@ -527,7 +527,7 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
     # With no Codex sandbox (codexsb()), the worktree is put back after the judge, as after an OpenCode one.
     [ "${CODEX_SB[0]}" = -s ] || { git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq; } || rc=1
     roll=$(rollout "$1.judge.events"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }
-    f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" --argjson run "${run:-null}" "$REVIEWREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage}' 2>/dev/null)
+    f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" --argjson run "${run:-null}" "$REVIEWREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c --arg m "$model" '{model, effort, sec, tokens, usage, stats} | if .stats then .stats.models = [$m] else . end' 2>/dev/null)
   fi
   [ -n "$f" ] || f=$(jq -cn --arg m "$model" --arg e "$effort" --argjson s "$sec" '{model: $m, effort: $e, sec: $s}')
   [ $rc = 0 ] && [ -s "$1.judge" ] && { printf '%s\n' "$f"; return 0; }

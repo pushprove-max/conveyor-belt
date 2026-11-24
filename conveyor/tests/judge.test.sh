@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: the review's judge (judged()), which decides which findings of a review count. Its helpers below
-# (judging(), judgeone(), jf(), jr(), rev()) are also judgeminor.test.sh's; judgesnap.test.sh uses only judging() and rev().
+# (judging(), judgeone(), jf(), jr(), rev()) are also judgeminor.test.sh's; judgesnap.test.sh uses judging() and rev(). A case may
+# set the judge stub's events (a file $STUB/judge-pre, one JSON line each, before its result) and fields of its result ($STUB/judge-extra, a JSON object).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -23,7 +24,8 @@ judging() { # <issues json> [on | off: the control record's judge, on when not g
 #!/usr/bin/env bash
 case "$*" in *"--tools Read,Grep,Glob"*)
   cat > "$STUB/judge-asked"; echo "$*" >> "$STUB/judges"; [ ! -f "$STUB/judge-cmd" ] || . "$STUB/judge-cmd"
-  jq -cn --rawfile r "$STUB/judge.$(wc -l < "$STUB/judges")" '{type: "result", is_error: false, result: $r, usage: {input_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 2}}'
+  [ ! -f "$STUB/judge-pre" ] || cat "$STUB/judge-pre"
+  jq -cn --rawfile r "$STUB/judge.$(wc -l < "$STUB/judges")" --argjson x "$(cat "$STUB/judge-extra" 2>/dev/null || echo '{}')" '{type: "result", is_error: false, result: $r, usage: {input_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 2}} + $x'
   exit ;;
 esac
 cat > "$STUB/brief"; echo "$*" >> "$STUB/sessions"; . "$STUB/build"
@@ -578,6 +580,7 @@ t_judgeopencode() {
 cat > "$STUB/oc-asked"; printf '%s\n' "$*" >> "$STUB/oc-runs"; printf '%s\n' "$PWD" "$OPENCODE_CONFIG_CONTENT" > "$STUB/oc-env"
 echo '{"type":"step_start","timestamp":1,"sessionID":"s","part":{"type":"step-start"}}'
 echo '{"type":"text","timestamp":1,"sessionID":"s","part":{"type":"text","text":"F1 DECLINE: the proof needs a stub built to misbehave"}}'
+echo '{"type":"tool_use","timestamp":1,"sessionID":"s","part":{"type":"tool","tool":"read","state":{"status":"completed"}}}'
 echo '{"type":"step_finish","timestamp":1,"sessionID":"s","part":{"type":"step-finish","reason":"stop","cost":0.5,"tokens":{"input":30,"output":4,"reasoning":1,"cache":{"read":9,"write":2}}}}'
 EOF
   chmod +x "$STUB/opencode"
@@ -592,4 +595,7 @@ EOF
   # Its cost is in its usage (usage.cost), where an OpenCode step's is priced from, as a build's and a review's are.
   [ "$(jf 7 '.judge | [.model, .effort, .tokens, .usage, .cost] | tojson')" = '["opencode:prov/m-2","medium",{"codex":37},{"input":30,"write":2,"read":9,"output":5,"cost":0.5},null]' ] \
     || fail "what the OpenCode judge used and cost is not in the usage on the review's fields: $(jf 7 '.judge | tojson')"
+  # Bug (#1380): an OpenCode judge's line kept no stats, or no model in them, as a Claude judge's has.
+  [ "$(jf 7 '.judge.stats | tojson')" = '{"turns":1,"tools":{"read":1},"models":["opencode:prov/m-2"]}' ] \
+    || fail "the OpenCode judge's turns, tool calls and model are not in its stats: $(jf 7 '.judge | tojson')"
 }
