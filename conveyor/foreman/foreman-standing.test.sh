@@ -13,9 +13,10 @@ trap 'rm -rf "$B"' EXIT
 cd "$B" || exit 1
 unset CONVEYOR_FOREMAN CONVEYOR_FOREMAN_LAUNCH CONVEYOR_CARD CONVEYOR_LANE CLAUDE_CONFIG_DIR CLAUDE_PROJECT_DIR CONVEYOR_MACHINE_ID
 export CLAUDE_PLUGIN_OPTION_boardAutoOpen=false ENG=$SRC/../conveyor.sh
-# The ask seam (lib.sh ask): `auto standing <run>` runs the engine on the record's main, as on its host; any other ask
-# fails.
-export CONVEYOR_FOREMAN_ASK='[[ $CONVEYOR_CMD == "auto standing "?* ]] || exit 3; cd "$CONVEYOR_MAIN" && bash "$ENG" auto standing "${CONVEYOR_CMD#auto standing }"'
+# The ask seam (lib.sh ask): `auto standing <run>` and `auto standing <kind> how` run the engine on the record's main,
+# as on its host, with the arguments the real ask gives (<run> is one argument, with spaces); any other ask fails.
+export CONVEYOR_FOREMAN_ASK='[[ $CONVEYOR_CMD == "auto standing "?* ]] || exit 3; cd "$CONVEYOR_MAIN" || exit 1; r=${CONVEYOR_CMD#auto standing }
+if [[ $r =~ ^([a-z-]+)\ how$ ]]; then bash "$ENG" auto standing "${BASH_REMATCH[1]}" how; else bash "$ENG" auto standing "$r"; fi'
 fail() { echo "FAIL [standing-$CASE]: $*" >&2; exit 1; }
 # pack <checkout> <kinds>: a git checkout with the test pack, its auto.standing <kinds> (a json list).
 pack() {
@@ -84,8 +85,8 @@ t_unread() {
 t_act() {
   local out run act c=0123456789abcdef0123456789abcdef01234567
   fixture act '["asked-fix"]'; out=$(start)
-  run=$(sed -n 's/.*Run each command below after `\([^`]*\)`\..*/\1/p' <<<"$out")
-  act=$(sed -n 's/.*After each act, log it with `\(auto act <kind> [^`]*\)`.*/\1/p' <<<"$out")
+  run=$(sed -n 's/.*Run each command after `\([^`]*\)`\..*/\1/p' <<<"$out")
+  act=$(sed -n 's/.*Log each act with `\(auto act <kind> [^`]*\)`.*/\1/p' <<<"$out")
   [[ $run == *"$XDG_DATA_HOME/conveyor/foreman.sh ask alpha"* ]] || fail "the start's act command does not reach the record alpha: $out"
   [ -n "$act" ] || fail "the start does not tell the Foreman to log an act with auto act <kind>: $out"
   mkdir -p "$XDG_DATA_HOME/conveyor/versions/$c" && ln -s "$SRC/.." "$XDG_DATA_HOME/conveyor/versions/$c/conveyor" \
@@ -95,8 +96,27 @@ t_act() {
     && [ "$(jq -r .kind "$CONVEYOR_RULING_LOG")" = asked-fix ] && [ "$(jq -r .answer "$CONVEYOR_RULING_LOG")" = '<what you did, with the issue or card>' ] \
     || fail "the start's act command ($run ${act//<kind>/asked-fix}) did not log the act in the record: $out"
 }
+# The rest of the release-check and review-retry rules, which the start names by a command, is asked of the record's
+# host, as the rules are: the engine that printed the rule prints its rest. The ask seam logs each ask it gets.
+# Bug it catches (review of #1638): the rules sent the Foreman to foreman.sh procedures, which the Foreman's own engine
+# prints; with the belt on a host whose engine is newer than the Foreman's machine's, that engine had no such text.
+t_how() {
+  local out out2 run k cmd c=0123456789abcdef0123456789abcdef01234567
+  fixture how '["release-check", "review-retry"]'; out=$(start)
+  run=$(sed -n 's/.*Run each command after `\([^`]*\)`\..*/\1/p' <<<"$out")
+  mkdir -p "$XDG_DATA_HOME/conveyor/versions/$c" && ln -s "$SRC/.." "$XDG_DATA_HOME/conveyor/versions/$c/conveyor" \
+    && jq -n --arg c "$c" '{commit: $c}' > "$M/.git/conveyor-engine.json" || fail "the Foreman's install was not made"
+  for k in release-check review-retry; do
+    cmd=$(grep -F -- "- $k: " <<<"$out" | grep -oF "\`auto standing $k how\`" | tr -d '`')
+    [ -n "$cmd" ] && [ -n "$run" ] || fail "the start's $k rule names no auto standing $k how command, or no command to run it with: $out"
+    out2=$(cd "$T" && CONVEYOR_FOREMAN_ASK="echo \"\$CONVEYOR_REPO \$CONVEYOR_MAIN \$CONVEYOR_CMD\" >> $(printf %q "$T/asked"); $CONVEYOR_FOREMAN_ASK" eval "$run $cmd" 2>&1) \
+      && [ "$out2" = "$(cd "$H" && bash "$ENG" auto standing "$k" how)" ] && [ -n "$out2" ] \
+      && grep -qxF "alpha $H auto standing $k how" "$T/asked" \
+      || fail "the start's command ($run $cmd) did not print the rest of the $k rule from the record's host: $out2; asked: $(cat "$T/asked" 2>&1)"
+  done
+}
 
-cases=(askedfix reviewfollowup releasecheck fixedblock reviewretry none unread act)
+cases=(askedfix reviewfollowup releasecheck fixedblock reviewretry none unread act how)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

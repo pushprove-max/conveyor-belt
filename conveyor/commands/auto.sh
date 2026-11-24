@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# `conveyor.sh auto on | narrow | off | status | band | rules | decide | rulings | send | standing [<run> | <kind> on|off] | act <kind> <what> | reserved`:
+# `conveyor.sh auto on | narrow | off | status | band | rules | decide | rulings | send | standing [<run> | <kind> on|off|how] | act <kind> <what> | reserved`:
 # /conveyor-belt:auto, for the project it is called in. While it is on, the Foreman decides the owner's open decisions for them, by the owner's recorded way of
 # deciding, and logs each with its reasons; what the pack reserves (auto.reserved) is never decided and waits for the
 # owner. Sourced by conveyor.sh.
@@ -20,6 +20,7 @@
 #   run their commands with (default: this engine); the Foreman's start gives `foreman.sh ask <repo>`, which reaches
 #   the record from the Foreman's machine.
 #   standing <kind> on|off: the Board's Rules tab turns one standing kind on or off in the pack (auto.standing).
+#   standing <kind> how: the rest of that kind's rule, which the rule names (lib/standing.sh standinghow).
 #   act <kind> <what>: the Foreman logs one act under a kind that is on (the ruling log, source "standing") and gets the
 #   line it tells the owner; a kind that is off is refused, so the step goes to the owner.
 #   reserved: what waits for the owner, as one JSON list (lib/standing.sh heldlist): the pack's auto.reserved and the
@@ -51,8 +52,8 @@
 . "$HERE/lib/standing.sh" || exit 1
 { [ $# = 2 ] && [[ $2 =~ ^(on|narrow|off|status|band|rules|decide|rulings|send|standing|reserved)$ ]]; } \
   || { [ $# = 3 ] && [ "$2" = standing ] && [[ $3 == *[![:space:]]* ]]; } \
-  || { [ $# = 4 ] && [[ " ${STANDING_KINDS[*]} " == *" $3 "* ]] && { { [ "$2" = standing ] && [[ $4 =~ ^(on|off)$ ]]; } || { [ "$2" = act ] && [[ $4 == *[![:space:]]* ]]; }; }; } \
-  || { echo "usage: conveyor.sh auto on | narrow | off | status | band | rules | decide | rulings | send | standing [<run> | <kind> on|off] | act <kind> <what> | reserved (a kind: ${STANDING_KINDS[*]})" >&2; exit 2; }
+  || { [ $# = 4 ] && [[ " ${STANDING_KINDS[*]} " == *" $3 "* ]] && { { [ "$2" = standing ] && [[ $4 =~ ^(on|off|how)$ ]]; } || { [ "$2" = act ] && [[ $4 == *[![:space:]]* ]]; }; }; } \
+  || { echo "usage: conveyor.sh auto on | narrow | off | status | band | rules | decide | rulings | send | standing [<run> | <kind> on|off|how] | act <kind> <what> | reserved (a kind: ${STANDING_KINDS[*]})" >&2; exit 2; }
 AD=$ST/auto MODE=$ST/auto/mode.json LAST=$ST/auto/last.json DECISION=$HERE/../.claude/scripts/decision.sh
 die() { echo "conveyor: auto: $*" >&2; exit 1; }
 # The mode while on, as JSON: {scope, since, log}; fails while off.
@@ -194,6 +195,7 @@ EOF
     fi ;;
   standing)
     if [ $# != 4 ]; then r=$(reserved) || exit 1; standingrules "${3:-bash $(printf %q "$HERE/conveyor.sh")}" "$r"; exit; fi
+    [ "$4" != how ] || { standinghow "$3"; exit; }
     # The pack's list as it was, with the kind added or taken out; each kind once, in STANDING_KINDS' order.
     packset --arg k "$3" --argjson on "$([ "$4" = on ] && echo true || echo false)" --argjson all "$(jq -cn '$ARGS.positional' --args "${STANDING_KINDS[@]}")" \
       '.auto.standing = ((.auto.standing // []) - [$k] + (if $on then [$k] else [] end) | . as $s | $all | map(select(IN($s[]))))' || exit 1

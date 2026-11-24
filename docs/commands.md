@@ -210,8 +210,9 @@ Lanes and the Foreman:
 - `auto on | narrow | off | status | band | rules` is the Foreman's auto mode ([Foreman](foreman.md)): `on` and
   `narrow` start it, `off` ends it, `status` prints one line about it, `band` prints its state for the plugin's band,
   and `rules` prints what the Foreman is told while it is on. `conveyor.sh auto decide` is its decide step. `auto
-  standing` prints the standing kinds of yes that are on, `auto standing <kind> on|off` turns one on or off, and `auto act
-  <kind> <what>` logs a step taken under a kind that is on ([Foreman](foreman.md#standing-yes)).
+  standing` prints the standing kinds of yes that are on, `auto standing <kind> on|off` turns one on or off, `auto
+  standing <kind> how` prints the rest of the rule of `release-check` or `review-retry`, and `auto act <kind> <what>`
+  logs a step taken under a kind that is on ([Foreman](foreman.md#standing-yes)).
 
 Setup and the engine:
 

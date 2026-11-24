@@ -97,19 +97,30 @@ standingrules() { # <run> <reserved>
   packget auto.standing s_ || return 1
   [ "$(jq 'length' <<<"$s_")" != 0 ] || return 0
   cat <<EOF
-# STANDING YES (the pack's auto.standing)
+# STANDING YES
 
-The owner said yes ahead of time to the kinds of step below. Take each one without asking (but review-retry, which the watcher takes itself), even where your other rules wait for the owner's yes. Run each command below after \`$1\`. After each act, log it with \`auto act <kind> "<what you did, with the issue or card>"\` and put the one line it prints in your next reply.
+The owner said yes ahead of time to these kinds of step. Take each one without asking (but review-retry, which the watcher takes itself), even where other rules wait for the owner. Run each command after \`$1\`. Log each act with \`auto act <kind> "<what you did, with the issue or card>"\` and put the line it prints in your next reply.
 EOF
   for k in "${STANDING_KINDS[@]}"; do
     jq -e --arg k "$k" 'index($k) != null' <<<"$s_" >/dev/null || continue
     case $k in
       asked-fix) echo "- asked-fix: the owner reports a problem or asks for a fix. File the issue, then release it at once (\`control release <issue>\`)." ;;
-      review-followup) echo "- review-followup: a follow-up from the review of a card the owner approved. Release it when it only finishes or corrects that card's own change. The engine itself does not hold, and logs, one whose finding names only that card's files and no word of auto.reserved: tell the owner of each too." ;;
-      release-check) echo "- release-check: a check fails in a release the owner asked for (a false privacy hit, a red test file). File a fix card for each failure, with the line \`Release fix: <version>\` in its body, and release it. Once every fix card has landed, the engine starts \`release-run prep <version>\` for a red test file; for another check, go on with the release." ;;
-      fixed-block) echo "- fixed-block: a card is blocked, and a fix that landed removed the cause. Add \`Depends on: #<fix>\` to the card's issue, then run \`retry <issue> --fresh\`." ;;
-      review-retry) echo "- review-retry: a card blocked by its review (\"the fix for <finding> did not hold after <n> rounds\"). The watcher runs \`retry <issue>\` once for each issue and logs it: you take no step for it, log nothing and tell the owner nothing of it. A wake for such a card is a failed retry; a retry that worked but that the watcher could not log (\"was retried (review-retry), but the act was not logged\"); a block whose reason holds a word of auto.reserved or an item of the owner's profile, which the watcher leaves blocked for the owner; a block the watcher did not retry, as it could not read auto.reserved or the owner's profile on the card's host; or a second such block of an issue that review-retry already gave back once (the watcher, or the engine while the watcher was down), which waits for the owner in Needs you with both block reasons (while auto is on, the engine lands it instead, once for each issue, files its findings as follow-ups and logs that act). Act on the reason of a failed retry; one that says review-retry already gave the issue back once is such a second block. For a retry that was not logged, log it with \`auto act review-retry\` and do not say that the retry failed. Ask the owner for the last three, do not retry them, and do not say that a retry failed: no retry ran." ;;
+      review-followup) echo "- review-followup: a review follow-up of a card the owner approved. Release it when it only finishes or corrects that card's change. The engine does not hold, and logs, one whose finding names only that card's files and no auto.reserved word: tell the owner of each too." ;;
+      release-check) echo "- release-check: a check fails in a release the owner asked for (a false privacy hit, a red test file). File a fix card for each, with the line \`Release fix: <version>\` in its body, and release it. Then do what \`auto standing release-check how\` prints." ;;
+      fixed-block) echo "- fixed-block: a landed fix removed a blocked card's cause. Add \`Depends on: #<fix>\` to its issue, then run \`retry <issue> --fresh\`." ;;
+      review-retry) echo "- review-retry: a card blocked by its review (\"the fix for <finding> did not hold after <n> rounds\"). The watcher retries it once per issue and logs it: you take no step for it, log nothing and tell the owner nothing of it. On a wake for such a card, do what \`auto standing review-retry how\` prints." ;;
     esac
   done
   echo "- Still ask the owner, whatever the kind: new engine behaviour (how the engine builds, reviews, fixes, tests, lands or pushes) or a release, each one the owner did not ask for; a design choice; anything about $2. When unsure, ask."
+}
+# The rest of a kind's rule, which standingrules leaves out so the Foreman's start fits its size limit. The rule names
+# it as an `auto standing <kind> how` command run like its others: by the engine on the record's host, the same engine
+# that printed the rule, so a Foreman's machine with an older engine still reads it (a file of the Foreman's own engine
+# could not). Nonzero for a kind with no such rest.
+standinghow() { # <kind>
+  case $1 in
+    release-check) echo "Once every fix card has landed, the engine starts \`release-run prep <version>\` for a red test file; for another check, go on with the release." ;;
+    review-retry) echo "A wake for such a card is a failed retry; a retry that worked but that the watcher could not log (\"was retried (review-retry), but the act was not logged\"); a block whose reason holds a word of auto.reserved or an item of the owner's profile, which the watcher leaves blocked for the owner; a block the watcher did not retry, as it could not read auto.reserved or the owner's profile on the card's host; or a second such block of an issue that review-retry already gave back once (the watcher, or the engine while the watcher was down), which waits for the owner in Needs you with both block reasons (while auto is on, the engine lands it instead, once for each issue, files its findings as follow-ups and logs that act). Act on the reason of a failed retry; one that says review-retry already gave the issue back once is such a second block. For a retry that was not logged, log it with \`auto act review-retry\` and do not say that the retry failed. Ask the owner for the last three, do not retry them, and do not say that a retry failed: no retry ran." ;;
+    *) echo "conveyor: auto: the standing kind $1 has no more to its rule than auto standing prints" >&2; return 1 ;;
+  esac
 }

@@ -53,6 +53,13 @@ t_standingrelfix() {
   out=$(cd "$R" && loop auto standing) || fail "auto standing failed: $out"
   grep -F -- '- release-check: ' <<<"$out" | grep -qF 'with the line `Release fix: <version>` in its body' \
     || fail "release-check does not tell the Foreman to write the Release fix line in each fix card: $out"
+  # Bug it catches (review of #1638): the rule left out how a release goes on once its fix cards land, and named no
+  # command that prints it, so the Foreman did not know that the engine starts release-prep again for a red test file.
+  grep -F -- '- release-check: ' <<<"$out" | grep -qF 'Then do what `auto standing release-check how` prints.' \
+    || fail "release-check does not name the command that prints how the release goes on: $out"
+  out=$(cd "$R" && loop auto standing release-check how) \
+    && grep -qF 'Once every fix card has landed, the engine starts `release-run prep <version>` for a red test file; for another check, go on with the release.' <<<"$out" \
+    || fail "auto standing release-check how does not say how the release goes on once its fix cards land: $out"
 }
 
 # Bug: when `auto reserved` fails on the card's host (an owner's profile there that cannot be read), the watcher wakes
@@ -66,6 +73,11 @@ t_standingretry() {
   tune '.auto.standing = ["review-retry"]'
   out=$(cd "$R" && loop auto standing) || fail "auto standing failed: $out"
   out=$(grep -F -- '- review-retry: ' <<<"$out")
+  # The wakes of review-retry are the rest of its rule (`auto standing review-retry how`), so the start stays under its
+  # limit: the line names that command, and the command prints the rule's words.
+  grep -qF 'you take no step for it, log nothing and tell the owner nothing of it. On a wake for such a card, do what `auto standing review-retry how` prints' <<<"$out" \
+    || fail "review-retry does not name the command that prints what to do on its wakes: $out"
+  out=$(cd "$R" && loop auto standing review-retry how) || fail "auto standing review-retry how failed: $out"
   grep -qF 'a block the watcher did not retry, as it could not read auto.reserved' <<<"$out" && grep -qF 'do not say that a retry failed' <<<"$out" \
     || fail "review-retry does not tell the Foreman of a block the watcher could not retry: $out"
   grep -qF 'was retried (review-retry), but the act was not logged' <<<"$out" && grep -qF 'do not say that the retry failed' <<<"$out" \

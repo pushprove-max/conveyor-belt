@@ -58,14 +58,14 @@ t_text() {
   # commands of the release suite line, so a Foreman that read them ran a command that does not exist. The rules are text
   # the Foreman's model reads, so their text is the behaviour here.
   grep -qF "release it (conveyor.sh control release <issue>, in that issue's project record) only once the owner has said yes" <<<"$st" \
-    && grep -qF 'in that checkout run conveyor.sh setup pack-commit;' <<<"$proc" \
+    && grep -qF "In a project's main checkout, run conveyor.sh setup pack-commit" <<<"$proc" \
     && grep -qF 'on no the same with no; say what it printed' <<<"$proc" \
     && grep -qF "with $L ask <project> testissue <test file> <title> <body> (each ask <project> below starts with that path too)" <<<"$st" \
     && grep -qF 'Each `ask <project> ...` below is run as the start gives it' <<<"$proc" \
     && grep -qF 'the JSON ask <project> control prints' <<<"$proc" \
     && grep -qF 'the JSON ask <project> suite-machine check --json prints' <<<"$proc" \
     && grep -qF "run $L procedures and follow what it prints" <<<"$st" \
-    || fail "the start lost where a command runs or the command in front of one (filing, procedures, pack-commit, control, suite-machine): $(grep -E '^# (Filing|Three procedures)' <<<"$st" | cut -c1-400)"
+    || fail "the start lost where a command runs or the command in front of one (filing, procedures, pack-commit, control, suite-machine): $(grep -E '^# (Filing|Procedures):' <<<"$st" | cut -c1-400)"
   # The line that sends the Foreman to the plugin's owner-rules.md (a start over its limit, as this one is with the long
   # fixture paths) names the plugin's folder, not a command, so it is left out of the folder check below.
   [ "$n" -eq 2 ] && [ "$(grep -oF "$L" <<<"$st" | wc -l)" -eq 3 ] || fail "the start names $L ask $n times, not the 2 places the versioned path was in, or $L not 3 times with its procedures command: $st"
