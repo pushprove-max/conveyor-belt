@@ -73,6 +73,8 @@ snapask() { # <since> [nowait]
 # (watch.py SNAPSHOT_LIMIT) left its marker, and nothing else removes it. kill -0 is a builtin, so a build with no
 # such marker runs no program more. It also fails for a pid it may not signal (another user's): that call, with its
 # marker gone, builds its own after this one.
+# KEPT.notes names the Foreman's plugin-bugs.md the build read its priceNotes from (SNAPNOTES, snapshot()), written in
+# place as the build reads it (no program more): snapprint leaves those notes out once that file is newer than KEPT.
 # KEPTREAD holds how many lines each card had in the copy of the card records the kept snapshot's build took
 # (`<count>\t<card>`, one card a line: snapcopy keeps them with its copy, so a build never reads the whole records to
 # count them), put in place after the rename and dated then, so it is newer than the snapshot it goes with
@@ -89,7 +91,7 @@ snapkeep() {
     p=${a#"$KEPT".}; p=${p%.asked}
     [[ $p =~ ^[0-9]+$ ]] && ! kill -0 "$p" 2>/dev/null && rm -f -- "$a"
   done
-  : > "$KEPT.at" && SNAPCOUNTS=$c snapshot > "$n" && [ -s "$n" ] && touch -r "$KEPT.at" "$n" && mv -f "$n" "$KEPT"; rc=$?
+  : > "$KEPT.at" && SNAPCOUNTS=$c SNAPNOTES=$KEPT.notes snapshot > "$n" && [ -s "$n" ] && touch -r "$KEPT.at" "$n" && mv -f "$n" "$KEPT"; rc=$?
   # A count that could not be taken leaves the last one, now older than the kept snapshot: recordsnow takes none.
   if [ "$rc" = 0 ]; then [ ! -e "$c" ] || { mv -f "$c" "$KEPTREAD" && touch "$KEPTREAD"; } 2>/dev/null || :; else rm -f "$n" "$c"; fi
   return "$rc"
@@ -137,10 +139,17 @@ snapprint() {
   now=${EPOCHREALTIME/[.,]/}; now=$((10#$now / 1000)); m=$((now > m ? now - m : 0))
   printf '{"snapshotAt":"%s","snapshotAge":%d.%03d,"recordsNewer":%s,%s' "$at" $((m / 1000)) $((m % 1000)) "$newer" "$rn"
   # A card started since joins the belt (recordsNow's started) and its issue leaves the queue's lists, so it is not
-  # shown in Queue and on the belt at once: one program more, only while there is one.
-  if [[ $r == *'"started":[{'* ]]; then jq -c --argjson r "$r" '[$r.started[].issue | numbers | select(. > 0)] as $n
+  # shown in Queue and on the belt at once. The kept priceNotes are left out ([]) when the plugin-bugs.md they were
+  # read from (KEPT.notes) changed after the build began: stop.sh can have marked one filed, or the Board's File or
+  # Dismiss taken it out, and a Board on another machine would add it to its own notes again. The next build gives
+  # them as the file holds them then. One program more, only while there is one of the two.
+  local jf='.' pf=''
+  { read -r pf < "$KEPT.notes"; } 2>/dev/null || pf=''
+  [ -z "$pf" ] || [ ! "$pf" -nt "$KEPT" ] || jf='.priceNotes = []'
+  [[ $r != *'"started":[{'* ]] || jf+=' | [$r.started[].issue | numbers | select(. > 0)] as $n
       | .belt = (.belt // []) + $r.started
-      | (.queue | objects | (.next, .order, .waiting) | arrays) |= map(select((.issue | IN($n[])) | not))' "$KEPT" | tail -c +2
+      | (.queue | objects | (.next, .order, .waiting) | arrays) |= map(select((.issue | IN($n[])) | not))'
+  if [ "$jf" != . ]; then jq -c --argjson r "${r:-null}" "$jf" "$KEPT" | tail -c +2
   else tail -c +2 "$KEPT"; fi
 }
 # What the card records and loop.json say now, which stay current while a new build takes minutes: the kept snapshot

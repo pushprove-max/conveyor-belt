@@ -841,7 +841,7 @@ snapshot() (
   # a Board on another machine takes out its copy of a note filed here: a note no longer given is not filed for that.
   # So is each model the folder's noprice-noted lists (noprice() puts each model it notes there) with no open note there:
   # the Board's File and Dismiss take the note out of plugin-bugs.md and leave no filed line.
-  pn='{"notes":[],"filed":[]}'
+  pn='{"notes":[],"filed":[]}' pnf=''
   pnm=$(jq -ce '[.notes | arrays | .[] | strings | select(startswith("- ")) | capture(" · No built-in price for (?<m>[^ :]+): ").m]' "$NOPRICE" 2>/dev/null) \
     || pnm='[]'
   if pnf=$(foremandir) && { [ -s "$pnf/plugin-bugs.md" ] || [ -s "$pnf/noprice-noted" ]; }; then
@@ -854,6 +854,10 @@ snapshot() (
          filed: ($f + [$k | splits("\n") | select(test("^(claude|gpt)-[A-Za-z0-9._\\[\\]-]+$")) | select(. as $x | $o | index([$x]) == null)] | unique)}') \
       || pn='{"notes":[],"filed":[]}'
   fi
+  # With SNAPNOTES set (snapkeep), the file those notes are read from, an empty line when none is read: a reader of the
+  # kept snapshot leaves its notes out once that file changed after its build began (snapprint). Written while the
+  # notes' models are known, so a build that finds them all filed names the file the older kept snapshot's came from.
+  [ -z "${SNAPNOTES:-}" ] || printf '%s\n' "${pnf:+$pnf/plugin-bugs.md}" > "$SNAPNOTES" || :
   # The full test suite (fulltest()): the run in progress, only while its lock is held by a run or an ask (a run that
   # was killed left its file; fullreap() holds it shared, as this one tries it), and the last line of its record.
   packget test.full ft 2>/dev/null || ft=''

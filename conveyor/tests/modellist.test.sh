@@ -370,6 +370,33 @@ t_nopricetaken() {
   out=$(loop snapshot --fresh | jq -c '[.priceNotes, .priceFiled]')
   [ "$out" = '[[],["claude-new-9"]]' ] || fail "with the note dismissed on the host (plugin-bugs.md: $(cat "$n")), [priceNotes, priceFiled] is $out"
 }
+# Bug it catches: a reader is given the kept snapshot while a new one builds (commands/snapshot.sh), and that one still
+# held a note stop.sh had marked filed since, so a Board on another machine added it to its notes to file again. The
+# kept notes are given while plugin-bugs.md is as the build read it, and none once it changed after. What must stay
+# true: no reader gets a note filed after the kept snapshot's build began. The other writer is the background build: a
+# build holds the kept lock here (as snapkept.test.sh does) and a record line changes, so the reader is due a build,
+# starts its own writer, which finds the lock held, and the reader prints the kept snapshot while the build runs.
+t_nopricekept() {
+  local n out at lk
+  setup '[]'; unset CONVEYOR_NOPRICE_CMD; n=$ST/foreman/plugin-bugs.md
+  tune '.models.allowed.claude += ["claude-new-9"]'
+  loop control model claude claude-new-9 >/dev/null || fail "the builder's seat was not set"
+  looks noprice
+  at=$(loop snapshot --fresh | jq -r .snapshotAt) || fail "no snapshot"
+  exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
+  touch "$ST/cards.jsonl"
+  out=$(loop snapshot | jq -c '[.snapshotAt, .recordsNewer, .priceNotes]')
+  [ "$out" = "$(grep '^- ' "$n" | jq -Rsc --arg at "$at" '[$at, true, [splits("\n") | select(. != "")]]')" ] \
+    || fail "the kept snapshot, read while a build runs and plugin-bugs.md unchanged since its build, does not give the note it holds: $out"
+  # stop.sh in the plugin's own repository puts the filed line in the note's place.
+  sed 's/ · evidence: -$/ filed as #12 · evidence: -/' "$n" > "$n.new" && mv "$n.new" "$n" && grep -q 'filed as #12' "$n" \
+    || fail "the note was not marked filed: $(cat "$n" 2>&1)"
+  out=$(loop snapshot | jq -c '[.snapshotAt, .recordsNewer, .priceNotes]')
+  [ "$out" = "$(jq -cn --arg at "$at" '[$at, true, []]')" ] \
+    || fail "the kept snapshot, read while a build runs, gives a note filed after its build ($(grep '^- ' "$n")): $out"
+  # One build after the lock is let go: a writer the reads started finds nothing due, so none builds after the case.
+  exec {lk}>&-; loop snapshot --fresh > /dev/null || fail "the snapshot after the reads exited non-zero"
+}
 # Bug: a project with no judge (a Claude-only one: the judge needs another CLI than the reviewer's) listed no model at
 # all, as the judge's seat, unset, failed the look.
 t_nopricenojudge() {
