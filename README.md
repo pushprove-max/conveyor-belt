@@ -25,7 +25,8 @@ in), the Claude Code CLI and the Codex CLI. On Debian or Ubuntu, Python 3 also n
 runs the default reviewer. Without it, the reviewer runs on Claude. If you set your own `models.allowed` in
 `.conveyor/project.json`, remove its `codex` models, then run `/conveyor-belt:setup` again. Conveyor runs its
 sessions in Claude Code, Codex or OpenCode.
-`/conveyor-belt:setup` installs each one that is missing or too old. [Setup](docs/setup.md#requirements) lists each
+`/conveyor-belt:setup` installs each one that is missing or too old. It also installs ast-grep, a code search that
+matches syntax, which Claude Code sessions run as `ast-grep`. [Setup](docs/setup.md#requirements) lists each
 requirement with its minimum version.
 
 ## Install

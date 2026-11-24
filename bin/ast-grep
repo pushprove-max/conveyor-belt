@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# The plugin's ast-grep command. Claude Code puts the plugin's bin/ folder on the Bash tool's PATH while the plugin is
+# on, so a session runs `ast-grep run -p '<pattern>' -l <lang>` by its bare name. It runs the ast-grep binary that setup
+# installs (the PyPI package ast-grep-cli) in the Board's virtualenv, the folder BOARD_VENV of conveyor/lib/paths.sh
+# names. With no binary there it prints the setup command that installs it and exits 127, as a missing command does.
+bin=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/board-venv/bin/ast-grep
+[ -x "$bin" ] || { echo "ast-grep: not installed; run /conveyor-belt:setup, which installs it" >&2; exit 127; }
+exec "$bin" "$@"

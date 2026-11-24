@@ -34,6 +34,10 @@ found and where.
 - Matt Pocock's skills, the plugin `mattpocock-skills` of the official marketplace. `/conveyor-belt:plan` reads it.
   Setup installs it (`claude plugin install mattpocock-skills@claude-plugins-official`), and `conveyor.sh doctor` names
   it when it is missing.
+- ast-grep, a code search that matches syntax, not text. Setup installs it in the Board's virtualenv. While the plugin
+  is on, a Claude Code session runs it as `ast-grep`. When the project tracks a file in a language that ast-grep
+  reads, the session starts with a line that tells how to call it. Without ast-grep, the session gets no such
+  line, and `conveyor.sh doctor` shows a warning with the command that installs it.
 - OpenCode 1.x, only for OpenCode models (`npm install -g opencode-ai`). Setup does not install it. See
   [Models](configuration.md#models).
 

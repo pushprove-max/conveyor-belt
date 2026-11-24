@@ -1291,6 +1291,9 @@ doctor() {
     if "$BOARD_VENV/bin/python3" -c "import $p" 2>/dev/null; then ok "$p, in the Board's virtualenv $BOARD_VENV"
     else no "$p, for the Board, in its virtualenv $BOARD_VENV" "run /conveyor-belt:setup, which installs it there"; fi
   done; fi
+  # ast-grep, which the plugin's bin/ast-grep runs, is optional: sessions without it search code by text only.
+  if [ -x "$BOARD_VENV/bin/ast-grep" ]; then ok "ast-grep, in the Board's virtualenv $BOARD_VENV"
+  else echo "warning: ast-grep is not in the Board's virtualenv $BOARD_VENV, so sessions search code by text only; fix: run /conveyor-belt:setup, which installs it there"; fi
   # The Board is optional, so one not running is a warning with its fix (bad stays 0), named by its address. One that
   # runs older Conveyor than the project's (boardold) is missing: it may not read what this one writes, such as the
   # host file setup writes, and shows no card.

@@ -29,6 +29,15 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/ast-grep.sh",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "PreToolUse": [

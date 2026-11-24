@@ -93,6 +93,9 @@ t_doctor() {
   [ "$(cksum < "$h/.claude/rulings/dashboard-tls/cert.pem")" = "$sum" ] || fail "fixture_keeps_the_home_certificate: boardup changed the certificate in HOME's rulings folder"
   out=$(cd "$S" && PATH=$T/$CASE/board:$PATH CONVEYOR_DASHBOARD_PORT=8791 bash "$X" doctor 2>&1) || fail "doctor failed with everything in place: $out"
   grep -qx 'ok: the Board, running at https://localhost:8791/' <<<"$out" || fail "doctor did not name the running Board's address: $out"
+  # Bug: doctor warned of a missing ast-grep that is in the virtualenv, or said nothing of it.
+  grep -qx "ok: ast-grep, in the Board's virtualenv $XDG_DATA_HOME/conveyor/board-venv" <<<"$out" && ! grep -q '^warning: ast-grep' <<<"$out" \
+    || fail "doctor did not name the installed ast-grep: $out"
   ! grep -q '^missing' <<<"$out" && grep -q '^ok: the pinned commit' <<<"$out" && grep -q '^ok: codex' <<<"$out" && grep -q '^ok: the terms file' <<<"$out" \
     && grep -q "^ok: segno, in the Board's virtualenv " <<<"$out" && ! grep -q 'no test times' <<<"$out" \
     && grep -qx 'ok: the plugin mattpocock-skills@claude-plugins-official, for /conveyor-belt:plan' <<<"$out" || fail "doctor with everything in place: $out"
@@ -142,7 +145,7 @@ t_doctormissing() {
   # reviewer is Codex's gpt-6.1-sol on a host with no Codex: the seat that cannot start (#593 below).
   jq '.models.allowed = {claude: ["claude-opus-5-5"], codex: ["gpt-6.1-sol"], "claude-reviewer": ["claude-opus-5-5"]}' "$S/.conveyor/project.json" > "$T/$CASE/p" \
     && mv "$T/$CASE/p" "$S/.conveyor/project.json" || fail "the pack was not rewritten"
-  rm "$T/$CASE/terms" "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"; : > "$G/out"; uninstalled; echo segno > "$G/nopkg"
+  rm "$T/$CASE/terms" "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" "$XDG_DATA_HOME/conveyor/board-venv/bin/ast-grep"; : > "$G/out"; uninstalled; echo segno > "$G/nopkg"
   local gone=d791d168d791d168d791d168d791d168d791d168; mkdir -p "$XDG_CONFIG_HOME/systemd/user" \
     && printf '[Service]\nExecStart="/bin/bash" "%s" serve\n' "$V/$gone/conveyor/conveyor.sh" > "$XDG_CONFIG_HOME/systemd/user/conveyor-gone-1.service"
   # The host file's one record is another checkout of the same folder name (setup adds no second record of a name).
@@ -170,6 +173,10 @@ t_doctormissing() {
     || fail "doctor did not name why the Board cannot read the host file's record: $out"
   grep -qx "missing: segno, for the Board, in its virtualenv $XDG_DATA_HOME/conveyor/board-venv; fix: run /conveyor-belt:setup, which installs it there" <<<"$out" \
     && grep -q "^ok: pyotp, in the Board's virtualenv " <<<"$out" || fail "doctor did not name the Board's missing package with its fix: $out"
+  # Bug: with no ast-grep in the Board's virtualenv, doctor said nothing of it, or named it missing (a failure) when
+  # it is optional. It warns, with the setup command that installs it.
+  grep -qxF "warning: ast-grep is not in the Board's virtualenv $XDG_DATA_HOME/conveyor/board-venv, so sessions search code by text only; fix: run /conveyor-belt:setup, which installs it there" <<<"$out" \
+    && ! grep -q '^missing: ast-grep' <<<"$out" || fail "doctor did not warn of the missing ast-grep with its fix: $out"
   rm "$G/nopkg"
   # Bug caught (#573): a service named an install that prune had removed, so a restart or a reboot would not start
   # its loop, and doctor said nothing.

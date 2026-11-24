@@ -79,11 +79,14 @@ EOF
   printf '#!/bin/sh\nexit 1\n' > "$G/opencode"; chmod +x "$G/gh" "$G/claude" "$G/codex" "$G/opencode" || return 1
   # The Board's virtualenv, already made: its python3 records each pip call in $G/pip and, as pip with
   # --require-hashes does, fails unless the file it is given pins each package the Board imports, with a hash; it
-  # fails to import the package $G/nopkg names.
+  # fails to import the package $G/nopkg names. Bug: the file did not pin ast-grep-cli, so setup installed no ast-grep
+  # binary for the plugin's bin/ast-grep to run, while the docs and doctor send the user to setup for it. An install
+  # that passes puts the ast-grep binary beside python3, as pip does with ast-grep-cli.
   cat > "$1/board-venv/bin/python3" <<'EOF'
 #!/usr/bin/env bash
 [ "$1 $2" != "-m pip" ] || { echo "$*" >> "$G/pip"; r=${*: -1}
-  for p in pyotp segno cryptography; do grep -A1 "^$p==" "$r" | grep -q -- '--hash=sha256:' || exit 1; done; exit 0; }
+  for p in pyotp segno cryptography ast-grep-cli; do grep -A1 "^$p==" "$r" | grep -q -- '--hash=sha256:' || exit 1; done
+  printf '#!/bin/sh\n' > "${0%/*}/ast-grep" && chmod +x "${0%/*}/ast-grep"; exit; }
 [ ! -s "$G/nopkg" ] || [ "$*" != "-c import $(cat "$G/nopkg")" ]
 EOF
   chmod +x "$1/board-venv/bin/python3"

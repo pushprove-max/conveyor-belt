@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# A read-only ast-grep, for a review: the plugin's bin/ast-grep with only the run and scan subcommands, and none of the
+# options that write. -U (--update-all) and -i (--interactive) write rewrites into files; --custom-languages trust and
+# revoke write ast-grep's record of trusted projects, and allow loads the native libraries a project names, so that
+# option is refused with any value. ast-grep reads a group of short options as one (-Ul is -U -l), so an argument with
+# one dash that holds a U or an i is refused whole, also as a pattern written against its option (-pif: write -p if).
+# A refusal is one line on stderr and exit 2; nothing runs.
+no() { echo "cb-ast: $1" >&2; exit 2; }
+case ${1-} in run | scan) ;; *) no "only the run and scan subcommands are allowed, not '${1-}'" ;; esac
+for a in "${@:2}"; do
+  case $a in
+    --update-all | --update-all=* | --interactive | --interactive=*) no "$a writes files, and cb-ast is read-only" ;;
+    --custom-languages | --custom-languages=*) no "$a can write ast-grep's trust record or load native code, and cb-ast is read-only" ;;
+    --*) ;;
+    -*[Ui]*) no "$a holds -U or -i, which write files, and cb-ast is read-only (give a pattern or value apart from its option)" ;;
+  esac
+done
+exec "$(dirname "${BASH_SOURCE[0]}")/ast-grep" "$@"
