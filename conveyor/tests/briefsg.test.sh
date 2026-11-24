@@ -95,16 +95,18 @@ EOF
 }
 
 # Bug: without ast-grep, the brief changed: it must be the text search's, as it was before ast-grep was used, the
-# comments and the string listed too, and $(ctl), g() and bayEdge() not found as a call or a definition.
+# comments and the string listed too, $(ctl) not found as a call, and g() and bayEdge() not found as a definition but
+# each listed as called in its own file (the text search reads `g(` and `bayEdge(2)` as calls): a brief that loses the
+# whole g() or bayEdge() line fails here. The empty first entry (`called in , src/Y.java`) is the text search's line as
+# it was before ast-grep was used: briefcalls() starts its list with an empty line when no shell file matches.
 t_briefsgnone() {
   export XDG_DATA_HOME=$T/$CASE/data
   sgbrief
   local want
   for want in '- `fa()`: defined in lib/a.sh; called in lib/b.sh, lib/c.sh' '- `fb()`: defined in lib/s.sh, tests/h.bats, tests/old.bats' \
-    '- `jc()`: called in lib/b.sh, src/Y.java, src/Z.java' '- `kd()`: called in lib/c.sh' '- `ctl()`: defined in lib/a.sh'; do
+    '- `jc()`: called in lib/b.sh, src/Y.java, src/Z.java' '- `kd()`: called in lib/c.sh' '- `ctl()`: defined in lib/a.sh' \
+    '- `g()`: called in , src/Y.java' '- `bayEdge()`: called in , js/s.js'; do
     grep -qxF -e "$want" "$T/$CASE/run.out" \
       || fail "without ast-grep (none under $XDG_DATA_HOME), the brief for the fixture of sgbrief() has no line: $want; it is: $(cat "$T/$CASE/run.out")"
   done
-  ! grep -qE -e '^- `(g|bayEdge)\(\)`: defined' "$T/$CASE/run.out" \
-    || fail "without ast-grep (none under $XDG_DATA_HOME), the brief finds a definition of g() or bayEdge(), which the text search cannot: $(cat "$T/$CASE/run.out")"
 }
