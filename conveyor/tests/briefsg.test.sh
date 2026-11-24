@@ -38,7 +38,10 @@ sgbrief() {
 # prints, for each scan the brief makes (the function the rules name, the files after --), what ast-grep 0.51.3 prints
 # for these files with the brief's rules (its JSON lines cut to the fields the brief reads). It fails as a bad rule does
 # (exit 8) when the rules have no def and call rule for Bash, Java or JavaScript, and prints nothing with exit 2 for any
-# other run: the real parse is ast-grep's own, and the machine that runs the suite need not have it installed.
+# other run: the real parse is ast-grep's own, and the machine that runs the suite need not have it installed. As
+# ast-grep does, it counts a rule for a file, and prints the rule's match there, only when the rule's language is the
+# file's (Bash for *.sh and *.bats) and no other key (files:, ignores:) narrows it: so a def-bash rule with
+# files: ["*.sh"] loses the definition in tests/h.bats, and the case fails.
 t_briefsg() {
   local v=$T/$CASE/data/conveyor/board-venv/bin
   mkdir -p "$v" && cat > "$v/ast-grep" <<'EOF' && chmod +x "$v/ast-grep" || fail "the ast-grep stand-in could not be made"
@@ -46,11 +49,27 @@ t_briefsg() {
 [ "$1" != --version ] || { echo 'ast-grep 0.51.3'; exit 0; }
 [ "$1 $2 $4 $5 $6 $7" = 'scan --inline-rules --json=stream --inspect entity --' ] || { echo "ast-grep stand-in: no answer for: $*" >&2; exit 2; }
 for r in def-bash call-bash def-java call-java def-javascript call-javascript; do grep -qx "id: $r" <<<"$3" || { echo "ERROR: no rule $r" >&2; exit 8; }; done
-n=$(grep -o "regex: '^[A-Za-z_]*\\$'" <<<"$3" | sort -u)
+n=$(grep -o "regex: '^[A-Za-z_]*\\$'" <<<"$3" | sort -u) rules=$3
 shift 7
-e() { for f in "$@"; do printf 'sg: entity|file|%s: language=%s,appliedRuleCount=2\n' "$f" "$(case $f in *.java) echo Java ;; *.js) echo JavaScript ;; *) echo Bash ;; esac)" >&2; done
+# ok <rule id> <file>: the rule applies to the file: its language is the file's and it has only id, language and rule.
+ok() {
+  local l b
+  case $2 in *.java) l=java ;; *.js) l=javascript ;; *.sh | *.bats) l=bash ;; *) return 1 ;; esac
+  [ "${1#*-}" = "$l" ] || return 1
+  # The whole rule document (from one --- to the next) that holds the id, so a key put before id: is counted too.
+  b=$(awk -v id="$1" '/^---$/ { if (f) printf "%s", d; d = ""; f = 0; next } { d = d $0 "\n" } $0 == "id: " id { f = 1 }
+    END { if (f) printf "%s", d }' <<<"$rules")
+  [ "$(grep -c '' <<<"$b")" = 3 ] && grep -qx "language: $l" <<<"$b" && grep -q '^rule: ' <<<"$b"
+}
+e() {
+  local f l c
+  for f in "$@"; do
+    case $f in *.java) l=java ;; *.js) l=javascript ;; *) l=bash ;; esac
+    c=0; ! ok "def-$l" "$f" || c=$((c + 1)); ! ok "call-$l" "$f" || c=$((c + 1))
+    printf 'sg: entity|file|%s: language=%s,appliedRuleCount=%s\n' "$f" "$(case $l in java) echo Java ;; javascript) echo JavaScript ;; *) echo Bash ;; esac)" "$c" >&2
+  done
   echo "sg: summary|file: scannedFileCount=$#,skippedFileCount=0" >&2; }
-j() { printf '{"ruleId":"%s","file":"%s","range":{"start":{"line":%s}},"lines":"%s"}\n' "$@"; }
+j() { ! ok "$1" "$2" || printf '{"ruleId":"%s","file":"%s","range":{"start":{"line":%s}},"lines":"%s"}\n' "$@"; }
 case "$n -- $*" in
   "regex: '^fa\$' -- lib/a.sh lib/b.sh lib/c.sh") e "$@"; j call-bash lib/b.sh 0 'if true; then fa; fi'; j def-bash lib/a.sh 0 'fa() { echo a; }' ;;
   "regex: '^fb\$' -- lib/s.sh tests/h.bats tests/old.bats") e "$@"; j def-bash tests/h.bats 0 'fb() { :; }' ;;
