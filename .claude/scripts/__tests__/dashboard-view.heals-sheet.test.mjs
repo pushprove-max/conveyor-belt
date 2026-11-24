@@ -66,6 +66,12 @@ test('Batch sheet: Review batch on an area card keeps and leaves out entries, ad
 
   keep(w, A2, false);
   assert.deepEqual(sheetIds(w), [[A2, true], [A1, false]], 'the entry left out stays in the sheet, dimmed');
+  // Bug it catches: the left-out row was dimmed with opacity, which blends each tag's text into its badge (the light
+  // P1 tag fell to about 2.5:1, under 4.5:1). The row is marked apart from a kept row with no opacity on it or in it.
+  const st = w.document.createElement('style'); st.textContent = css; w.document.head.append(st);
+  const out = q(w, `.sh-sheet-row[data-key="sample:${A2}"]`), kept = q(w, `.sh-sheet-row[data-key="sample:${A1}"]`);
+  for (const el of [out, ...out.querySelectorAll('*')]) assert.equal(w.getComputedStyle(el).opacity, '1', `opacity of ${el.className || el.tagName} in the left-out row`);
+  assert.notEqual(w.getComputedStyle(out).backgroundColor, w.getComputedStyle(kept).backgroundColor, 'a left-out row looks apart from a kept one');
   assert.equal(q(w, '.sh-sheet-n').textContent, 'Entries in this card 1 of 2');
   assert.equal(act(w, 'sheet-queue').textContent, 'File and queue · 1 entry');
   assert.equal(q(w, '.sh-sheet-name').value, 'Self-heals batch: review (1 entry)', 'the title follows the entries kept until it is edited');

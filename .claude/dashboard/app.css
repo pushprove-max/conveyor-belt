@@ -1710,7 +1710,10 @@ html.b3-filling, html.b3-filling body { overflow: hidden; }
 .sh-sheet-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
 .sh-sheet-n { margin-right: auto; }
 .sh-sheet-row { cursor: default; }
-.sh-sheet-row.is-out { opacity: .55; }
+/* A left-out row is marked by its edge, ground and title colour, never by opacity: opacity blends each tag's text
+   into its badge, under the 4.5:1 that small text must meet (--muted on --surface-2 is held to it). */
+.sh-sheet-row.is-out { border-style: dashed; background: var(--surface-2); }
+.sh-sheet-row.is-out .sh-row-title { color: var(--muted); }
 .sh-key { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
 .sh-fix { margin-top: 2px; font-size: var(--fs-xs); color: var(--muted); }
 .sh-sheet-more { margin-top: var(--sp-3); }
