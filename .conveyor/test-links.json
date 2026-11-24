@@ -620,6 +620,7 @@
   ],
   "conveyor/tests/review.test.sh": [
     "conveyor/tests/fail.test.sh",
+    "conveyor/tests/findingid.test.sh",
     "conveyor/tests/judge.test.sh",
     "conveyor/tests/reviewback.test.sh"
   ],

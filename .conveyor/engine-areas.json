@@ -593,6 +593,7 @@
 {"area": "card", "test": "batchreusewhole.test.sh"}
 {"area": "card", "test": "batchreuseagain.test.sh"}
 {"area": "card", "test": "batchreusemoved.test.sh"}
+{"area": "card", "test": "findingid.test.sh"}
 {"area": "card", "test": "rules.test.sh"}
 {"area": "card", "test": "testruns.test.sh"}
 {"area": "card", "test": "checkrun.test.sh"}

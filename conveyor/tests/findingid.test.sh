@@ -118,21 +118,29 @@ t_fidlongreview() {
 }
 
 # Bug (#1590): a fix session was told nothing of what a returned finding means, so each fix made the same guess
-# narrower and the reviewer found the next, narrower case. The fix session's prompt (fixprompt(), card.sh) carries the
-# rule (FIXBACK) when the engine's repeats() lists a finding that came back, and not when every finding is new. The
-# findings are the lines fixlines() gives the session, from a real review beside a worktree; no card runs.
+# narrower and the reviewer found the next, narrower case. The fix session's prompt carries the rule (FIXBACK) when
+# the engine's repeats() lists a finding that came back, and not when every finding is new. Both prompts are the ones
+# cardfix() (card.sh) gives session() after a real review beside a worktree, its session stubbed to keep the prompt;
+# no card runs.
+# Bug caught: the prompts were made here with fixprompt() and the repeats given by hand, so cardfix() could drop its
+# repeats from its fixprompt() call, or pass the findings in their place, and the case still passed.
+# fid_fix <file>: $W.review is review 2; afterreview() and cardfix() follow it, and the fix prompt goes to <file>.
+fid_fix() {
+  rm -f "${T:?}/${CASE:?}/go"
+  FXWT=$W afterrun "$(issue 7 2026-01-01)" 'pass=2' \
+    'c=c7 n=7 rline="" fixed=0 sprompt="" br=""; session() { printf "%s\n" "$2" > "'"$1"'"; }; checked() { :; }; cardfix; echo "$go" > "$T/$CASE/go"'
+  [ "$(cat "$T/$CASE/go" 2>/dev/null)" = next ] && [ -s "$1" ] || fail "cardfix() on the review '$(tr '\n' ' ' < "$W.review")' started no fix session: $AFTER $(cat "$T/$CASE/run.out")"
+}
 t_fidbackrule() {
   setup "[$(issue 7 2026-01-01)]"
-  fid_round $'[P2] a.txt:5 a nit here\n[P1] a.txt:9 another bug' 'echo more >> a.txt' $'[P2] [E1] a.txt:6 The name still reads badly. Proof: line 6\n[P1] a.txt:12 a new bug'
-  local back fresh brep frep
-  back=$(fid_eng 'fixlines "$W" "$(numbered "$W")"'); brep=$(fid_eng 'repeats "$W"')
-  [ "$(jq -r .id <<<"$brep")" = E1 ] || fail "the engine did not list E1 as a finding that came back: $brep"
-
-  grep -qx 'E1 \[P2\] \[E1\] a.txt:6 .*' <<<"$back" || fail "the returned finding is not led by its id: $back"
-  printf '%s\n' '[P1] a.txt:12 a new bug' 'VERDICT: NO-GO' > "$W.review"
-  fresh=$(fid_eng 'fixlines "$W" "$(numbered "$W")"'); frep=$(fid_eng 'repeats "$W"')
-  grep -qx 'E3 \[P1\] a.txt:12 a new bug' <<<"$fresh" || fail "the new finding is not led by its own id: $fresh"
-  BACK=$back FRESH=$fresh BREP=$brep FREP=$frep fx_in 'fixprompt "" "$BACK" "$BREP" > "$T/$CASE/back"; fixprompt "" "$FRESH" "$FREP" > "$T/$CASE/fresh"'; [ "$RC" = 0 ] || fail "the prompts could not be made (exit $RC): $(cat "$T/$CASE/run.out")"
+  # A review with only a new finding goes first: the fix round its cardfix() records makes that finding a repeat.
+  fid_round $'[P2] a.txt:5 a nit here\n[P1] a.txt:9 another bug' 'echo more >> a.txt' '[P1] a.txt:12 a new bug'
+  fid_fix "$T/$CASE/fresh"
+  grep -qx 'E3 \[P1\] a.txt:12 a new bug' "$T/$CASE/fresh" || fail "the new finding is not led by its own id: $(cat "$T/$CASE/fresh")"
+  # Then a review that brings E1 back, with a new finding so the loop goes on (a review of repeats alone ends it).
+  printf '%s\n' '[P2] [E1] a.txt:6 The name still reads badly. Proof: line 6' '[P1] a.txt:15 a third bug' 'VERDICT: NO-GO' > "$W.review"
+  fid_fix "$T/$CASE/back"
+  grep -qx 'E1 \[P2\] \[E1\] a.txt:6 .*' "$T/$CASE/back" || fail "the returned finding is not led by its id: $(cat "$T/$CASE/back")"
   # Each line of the rule is checked: the order to not narrow the guess, both actions it allows, and the reply it asks for.
   local l
   for l in 'Do not make the same guess' 'Either record the fact where it is written, so the reader no longer has to infer it' \
