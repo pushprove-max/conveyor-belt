@@ -653,6 +653,27 @@ run
 [ -z "$(grep '^- ' "$SN")" ] || fail "a dismissed note for a model with no built-in price came back: $(cat "$SN")"
 # Bug: each cycle after the first listed the model again in price-notes.txt, so the file grew every Board refresh.
 [ "$(cat "${SN%/*}/price-notes.txt" 2>&1)" = claude-new-9 ] || fail "price-notes.txt does not list the added model once: $(cat "${SN%/*}/price-notes.txt" 2>&1)"
+# Bug: once the host filed the note, its snapshots stopped giving it, but the copy added here stayed, so this Board
+# offered File for a note already filed. A snapshot with no priceNotes (none read) takes nothing out; one that no
+# longer gives the note takes the copy out, and leaves a line filed here and a line of another form.
+FD="${PN/· evidence: -/filed as #7 · evidence: -}"
+printf '%s\n%s\n- 2026-11-12T09:00:00Z · card #3 · other\n' "$PN" "$FD" >> "$SN"
+quiet; run
+[ "$(grep -c '^- ' "$SN")" = 3 ] || fail "a snapshot with no priceNotes took a note out of plugin-bugs.md: $(cat "$SN")"
+# Bug (E2): the copy was written as a new file, so a plugin-bugs.md of mode 0600 became 0644 under umask 022.
+chmod 600 "$SN"
+answer "$(snap '{"priceNotes": []}')" "$P_URL" 1794000000 "$(snap '{"priceNotes": []}')" "$C_URL" 0
+(umask 022; run) || exit 1
+[ "$(grep '^- ' "$SN")" = "$FD"$'\n- 2026-11-12T09:00:00Z · card #3 · other' ] \
+  || fail "with snapshots that give priceNotes [], the copied note was not the one line taken out: $(cat "$SN")"
+[ "$(ls -l "$SN" | cut -c1-10)" = -rw------- ] || fail "taking the copied note out changed the mode of plugin-bugs.md: $(ls -l "$SN")"
+# Bug (E1): the model stayed in price-notes.txt, so when a snapshot gave the unfiled note again (a group split for a
+# refresh, the note read under another project's folder), it never came back here. Its model leaves the list too.
+[ ! -s "${SN%/*}/price-notes.txt" ] || fail "the model of the note taken out is still in price-notes.txt: $(cat "${SN%/*}/price-notes.txt")"
+grep -vxF -- "$FD" "$SN" > "$SN.new" && mv "$SN.new" "$SN"
+answer "$(snap "$(jq -cn --arg n "$PN" '{priceNotes: [$n]}')")" "$P_URL" 1794000000 "$(snap)" "$C_URL" 0
+run
+[ "$(grep -c -xF -- "$PN" "$SN")" = 1 ] || fail "a note taken out came back in a snapshot and was not added again: $(cat "$SN")"
 # Bug (R10): with the Board's checkout and the build machine's at the same path, the record's main exists here too, and
 # the host's note was never added: the import ran only for a main not on this machine. ssh names the host.
 mkdir -p "$T/same/conveyor/state/foreman"
