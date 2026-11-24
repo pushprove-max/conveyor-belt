@@ -146,6 +146,11 @@ refused "gh issue create --title 'Fix the form' --label bug --body 'The form pri
 refused "gh issue create --title 'Fix the form' --label bug --body \"The form prints \\n## Cause\\n as text.\""
 # A backtick opener with a backtick in its info string is no fence, so the heading after it counts.
 passes "$(body $'## What happens now\nThe form prints this line:\n``` `name`\n## Cause\nThe cache is stale.')"
+}
+
+# A fence in a list item hides the `## Cause` in its block; a line outside the list is read as no item.
+t_list() {
+case_ list
 # Bug (#1510 review): a fence after a list marker was no fence, so the indented `## Cause` in the item's code block
 # counted as the heading and a fix with no Cause section passed. A heading after the item still counts.
 refused "$(body $'## What happens now\nThe form prints an example.\n\n- ~~~\n  ## Cause\n  ~~~')"
@@ -170,6 +175,16 @@ refused "$(body $'## What happens now\nThe form prints an example.\n\n- Outer:\n
 # Bug (E2 of the follow-up): a thematic break did not end the list, so an indented code line after it was read as a
 # fence in the item and hid the real `## Cause` heading.
 passes "$(body $'## What happens now\nThe form fails.\n\n- Example\n***\n\n    ~~~\n  ## Cause\nThe cache is stale.')"
+# Bug (E2, follow-up): only a paragraph at column 0 ended the list, so after a paragraph indented 1 (left of the item
+# text at 2, so outside the list) `2. ~~~` was still a fence and hid the heading. A paragraph at the item text stays in it.
+passes "$(body $'## What happens now\n- One example.\n\n A separate paragraph.\n2. ~~~\n   ## Cause\nThe cache is stale.')"
+refused "$(body $'## What happens now\n- One example.\n\n  More of the item.\n2. ~~~\n   ## Cause\n   ~~~')"
+# Bug (E1): the list kept the text indent of its first item (2), not of its last (3), so a paragraph at 2 after the
+# second item stayed in the list and `2. ~~~` hid the heading after it.
+passes "$(body $'## What happens now\n- First example.\n-  Second example.\n\n  A separate paragraph.\n2. ~~~\n   ## Cause\nThe cache is stale.')"
+# Bug (E2): the spaces that start an indented code block after `1.` counted as item indent (6, not 3), so the
+# paragraph at 3 left the list and `2. ~~~` was read as text: the heading inside its fence counted.
+refused "$(body $'## What happens now\n1.     Example output\n\n   More of the item.\n2. ~~~\n   ## Cause\n   ~~~')"
 }
 
 # unfenced <inline> <quote> <text> keeps what is outside the fences and reads on after each block ends.
@@ -271,7 +286,7 @@ grep -qxF conveyor/foreman/filing-cause.test.sh <(tail -n +2 "$W/list") \
   || fail "the cap leaves files out of the list of a card that changes only no_cause in $f, so its records can drop conveyor/foreman/filing-cause.test.sh; left out: $(head -1 "$W/list"), list: $(tail -n +2 "$W/list" | tr '\n' ' ')"
 }
 
-cases=(what heading fence bug new linked)
+cases=(what heading list fence bug new linked)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

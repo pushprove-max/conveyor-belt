@@ -36,15 +36,19 @@ unfenced() {
     function cut(x, w,   i, v) {
       for (i = 1; v < w && substr(x, i, 1) ~ /^[ \t]$/; i++) v = tab(v, substr(x, i, 1))
       return substr("   ", 1, v - w) substr(x, i) }
-    # item: x without its list markers; W is the width they take (0 when none), the indent of the item text. With
+    # item: x without its list markers; W is the width they take (0 when none), the indent of the item text, W1 the
+    # width of the first, the indent of the text of the outermost item, and I1 the indent of that first marker. Five
+    # spaces or more after a marker start an indented code block, so only the first of them goes on the marker. With
     # <para> 1 x goes on a paragraph, so a first ordered marker that does not start at 1 is none.
     # M[1..nm] is the width each marker takes with those before it (the indent of each nested item text).
-    function item(x, para,   m) {
+    function item(x, para,   m, r) {
       W = nm = 0
       while (match(x, /^[ ]?[ ]?[ ]?([-*+]|[0-9]+[.)])[ ][ ]?[ ]?[ ]?/)) {
-        m = substr(x, 1, RLENGTH)
+        m = substr(x, 1, RLENGTH); r = RLENGTH
         if (!W && para && m ~ /^[ ]*[0-9]/ && m !~ /^[ ]*0*1[.)]/) break
-        W += RLENGTH; M[++nm] = W; x = substr(x, RLENGTH + 1) }
+        if (substr(x, r + 1, 1) == " ") r -= 3
+        if (!W) { W1 = r; match(m, /^[ ]*/); I1 = RLENGTH }
+        W += r; M[++nm] = W; x = substr(x, r + 1) }
       return W ? x : strip(x) }
     # lazy: 1 when x (a line indented less than the item it would be in, without the indent of the items it is in) goes
     # on the paragraph of the line before: it is no fence, heading, thematic break (`***`, `---`, `___`) or list item.
@@ -58,7 +62,7 @@ unfenced() {
     # list items, outer first: a line is in each item it is indented at least as far as, so it is read after the indent of
     # the last of them (a fence on a later line of an item is in the item too). A line indented less than an item that is
     # no paragraph text going on (after a blank line, or a fence, heading, thematic break or list item) ends that item.
-    function fence(line,   c, i, k, w) {
+    function fence(line,   c, i, k, w, w1, i1) {
       fq = ""; k = ns
       if (line !~ /^[ \t]*$/) {
         while (k > 0 && S[k] > col(line)) k--
@@ -66,13 +70,13 @@ unfenced() {
       w = k ? S[k] : 0
       c = item(w ? cut(line, w) : line, P && !L); W += w
       for (i = 1; i <= nm; i++) S[++ns] = w + M[i]
-      w = W
+      w = W; w1 = W1; i1 = I1
       if (c ~ /^[`~]/) return c
       if (inline == 1)
         for (i = 1; i < length(line); i++)
           if (isq(substr(line, i, 1)) && (i == 1 || substr(line, i - 1, 1) ~ /[ \t$]/) && (c = item(substr(line, i + 1), 0)) ~ /^[`~]/) {
             fq = substr(line, i, 1); return c }
-      W = w; return "" }
+      W = w; W1 = w1; I1 = i1; return "" }
     # qend: where the first quote <cq> with no backslash before it is in <s>, or 0 when none is
     function qend(s, cq,   i) {
       for (i = 1; i <= length(s); i++)
@@ -88,14 +92,16 @@ unfenced() {
           c = fence(line); ch = substr(c, 1, 1); k = 0
           while (ch != "" && substr(c, k + 1, 1) == ch) k++
           if (!(k >= 3 && !(ch == "`" && index(substr(c, k + 1), "`")))) {
-            # P: the line before goes on a paragraph; L: that paragraph is in a list.
+            # P: the line before goes on a paragraph; L: that paragraph is in a list, the text of whose last outermost item
+            # is at LI. A marker left of LI starts a new outermost item; a paragraph after a blank line that starts left of
+            # LI is outside the list.
             if ($0 ~ /^[ \t]*$/ || $0 ~ /^[ ]?[ ]?[ ]?#[#]?[#]?[#]?[#]?[#]?([ \t]|$)/) P = 0
-            else if (W) P = L = 1
-            else { if (!P && col($0) == 0) L = 0; P = 1 }
+            else if (W) { if (!L || I1 < LI) LI = W1; P = L = 1 }
+            else { if (!P && col($0) < LI) L = 0; P = 1 }
             # The line that opens a here-document ends the command text: the body starts a new paragraph.
             if (inline != 1 && $0 ~ /<<-?[ ]*["\047]?[A-Za-z_][A-Za-z_0-9]*["\047]?[ ]*\)*[ ]*$/) P = 0
             print line; next }
-          open = ch; n = k; oq = fq; P = 0; if (W) L = 1
+          open = ch; n = k; oq = fq; P = 0; if (W) { if (!L || I1 < LI) LI = W1; L = 1 }
           # A block after a quote can end on its own line (a title of ~~~ and a word), at its closing quote: read on from
           # that quote. The rest of the opening line is its info string, never a closing fence (`~~~ ~~~` stays open).
           if (oq == "" || !(j = qend(substr(c, k + 1), oq))) next
