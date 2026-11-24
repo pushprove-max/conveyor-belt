@@ -211,16 +211,16 @@ EOF
 }
 
 # Bug it catches: a project with no tool, or with a map of its own, got no map or a wrong one. A project with no
-# coverage tool the map knows is told so, and keeps finding its tests by name; a map of its own
-# (test.map: a path) in area lines, as .conveyor/engine-areas.json holds them, is read: a case file named by its name
-# is the tracked test file of that name, and an area whose tests are "all" is shared. One that names a case file
-# there is none of fails the read, saying which (the area-map check).
+# coverage tool the map knows is told so, and keeps finding its tests by name; a map of its own (test.map: a path) in
+# area lines, as .conveyor/engine-areas.json holds them, is read: a case file named by its name is the tracked test file
+# of that name, and an area whose tests are "all" is shared. One that names a case file there is none of, or a name two
+# tracked files have in different folders (b.test.sh: an index of base names that kept one of them read it), fails.
 # The per-file fixture's own a.test.sh goes: it would be a second tracked a.test.sh, so the name would not resolve.
 t_testmaparea() {
   setup '[]'; git -C "$R" rm -q a.test.sh || fail "the fixture's a.test.sh"
   mapeng 'mapbuild "$R"'; grep -qxF "conveyor: no test map: its language has no coverage tool the test map knows (Node, Python, Go, Rust or Ruby); a card's tests are found by name" "$T/$CASE/eng.out" \
     || fail "a project with no known tool was not told: $(cat "$T/$CASE/eng.out")"
-  mkdir -p "$R/lib" "$R/tests" && for f in lib/a.sh lib/b.sh lib/core.sh tests/a.test.sh tests/b.test.sh; do echo x > "$R/$f"; done
+  mkdir -p "$R/lib" "$R/tests" && for f in lib/a.sh lib/b.sh lib/core.sh tests/a.test.sh tests/b.test.sh lib/b.test.sh; do echo x > "$R/$f"; done
   printf '%s\n' '{"outside": "lib/README.md"}' '{"area": "a", "test": "a.test.sh"}' '{"area": "a", "file": "lib/a.sh"}' \
     '{"area": "b", "test": "tests/b.test.sh"}' '{"area": "b", "file": "lib/b.sh"}' \
     '{"area": "core", "tests": "all"}' '{"area": "core", "why": "every case runs it"}' '{"area": "core", "file": "lib/core.sh"}' > "$R/areas.json"
@@ -228,9 +228,9 @@ t_testmaparea() {
   tune '.test.map = "areas.json"'
   mapeng 'mapread "$R"' && [ "$(jq -c '[.sources, .shared, .age]' "$T/$CASE/eng.out")" = '[{"lib/a.sh":["tests/a.test.sh"],"lib/b.sh":["tests/b.test.sh"]},["lib/core.sh"],null]' ] \
     || fail "the area lines were not read as a map: $(cat "$T/$CASE/eng.out")"
-  echo '{"area": "a", "test": "gone.test.sh"}' >> "$R/areas.json"
-  ! mapeng 'mapread "$R"' && grep -qF 'areas.json: gone.test.sh is named, but there is no one tracked test file of that name' "$T/$CASE/eng.out" \
-    || fail "a map naming a case file there is none of was read: $(cat "$T/$CASE/eng.out")"
+  cp "$R/areas.json" "$T/$CASE/areas" && for n in gone b; do { cat "$T/$CASE/areas"; echo "{\"area\": \"a\", \"test\": \"$n.test.sh\"}"; } > "$R/areas.json"
+    ! mapeng 'mapread "$R"' && grep -qF "areas.json: $n.test.sh is named, but there is no one tracked test file of that name" "$T/$CASE/eng.out" \
+      || fail "a map naming $n.test.sh, of no one tracked test file, was read: $(cat "$T/$CASE/eng.out")"; done
 }
 
 # Go, Rust and Ruby, each with its tool stubbed on PATH as it reports coverage: <files> in main, committed, the stub

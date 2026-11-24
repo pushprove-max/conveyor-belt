@@ -566,8 +566,10 @@ mapread() { # <worktree> [<file> [<commit>]]
   mt=$(cat -- "$f" 2> /dev/null) && in=/dev/stdin
   jq -ne 'any(inputs; type == "object" and (.test | type) == "string" and (.test | contains("/") | not))' "$in" <<<"$mt" > /dev/null 2>&1 || bare=''
   out=$(jq -cs --rawfile ts <([ -z "$bare" ] || if [ -n "${3:-}" ]; then git -C "$1" -c core.quotePath=false ls-tree -r --full-tree --name-only "$3"; else git -C "$1" -c core.quotePath=false ls-files; fi 2>/dev/null | testpaths) --argjson age "$age" --arg f "${m:-$f}" '
-    ($ts | split("\n") | map(select(. != ""))) as $ts
-    | def tfile: if contains("/") then . else . as $n | [$ts[] | select(split("/")[-1] == $n)]
+    # The tracked test files by base name, built once: a line naming a test by its name alone looks it up there, not
+    # by a scan of every file (#1651).
+    (reduce ($ts | split("\n")[] | select(. != "")) as $t ({}; .[$t | split("/")[-1]] += [$t])) as $ix
+    | def tfile: if contains("/") then . else . as $n | ($ix[$n] // [])
         | if length == 1 then .[0] else error("\($f): \($n) is named, but there is no one tracked test file of that name") end end;
     (if length == 1 and (.[0] | type) == "object" and (.[0].sources | type) == "object" then {sources: .[0].sources, tests: (.[0].tests // []), all: []}
      elif length == 1 and (.[0] | type) == "object" and all(.[0][]; type == "array") then {sources: .[0], tests: ([.[0][][]] | unique), all: []}
