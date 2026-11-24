@@ -13,3 +13,15 @@ lane later with its `create` command, below. A lane that is already there stays 
   an operating-system sandbox, with no network. The sandbox can write only `reports/`, the lane's own folder and the
   temp folder. The lane files issues only through its own filing command, and they stay held until the owner releases
   them (`conveyor/README.md`, Research lane).
+
+## Send a message to the Foreman
+
+A session in a lane can send a message to the project's Foreman: a finding, a question, or a card to file or watch.
+The session's start tells it the command.
+
+- In the fast lane: `conveyor.sh lane fast tell '<message>'`. It works only in the fast lane's checkout.
+- In the research lane: `research-file --tell '<message>'`. The lane's shell has no network, so this command is the
+  way out.
+
+The message comes to the Foreman in its next wake, as one line that names the lane. When no Foreman runs, it comes at
+the Foreman's next start. A message is one line. A long message is refused: write a report and send its path.

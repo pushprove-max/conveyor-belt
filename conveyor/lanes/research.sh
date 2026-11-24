@@ -18,7 +18,8 @@
 #   it makes each file git tracks in the worktree, each folder holding one and the worktree read-only on disk, so the
 #   Edit tools, which run outside the lane's shell, cannot write them either.
 # start (SessionStart): the lane's rules: where reports go, and that work is filed by the lane's filing command
-#   (research-file, the one way out of the shell's sandbox to GitHub), where it starts held.
+#   (research-file, the one way out of the shell's sandbox to GitHub), where it starts held, and that a message for the
+#   project's Foreman goes by research-file --tell (foreman/tell.sh).
 # guard (PreToolUse): refuses a git command that can change what git tracks (a commit, a push; git by any path; a
 #   subcommand made by an expansion cannot be read, so it is refused too), and, so that refusal is not run round, a
 #   program whose commands cannot be read: a program the session could have written (a file git does not track, run by
@@ -123,7 +124,10 @@ start() {
 # Bash runs in a sandbox: it can write only reports/, the lane's folder and the temp folder; anything else is read-only.
 # Reports: write each to reports/<today, YYYY-MM-DD>/<name>.md in this worktree (untracked), then add one line for it to reports/INDEX.md: "<date> <path> <what it found, in one line>".
 EOF
-  echo "# Work you want built: file it as an issue with $HERE/research-file <title> < <body file>; Bash has no network, so gh and curl cannot reach GitHub. It starts held, and is built only once the owner says yes."
+  # The command's path quoted for the shell, as the session runs the line it is given (a path with a space in it).
+  local f; f=$(printf %q "$HERE/research-file")
+  echo "# Work you want built: file it as an issue with $f <title> < <body file>; Bash has no network, so gh and curl cannot reach GitHub. It starts held, and is built only once the owner says yes."
+  echo "# A message for the project's Foreman (a finding, a question, a card to file or watch): send it with $f --tell '<message>'. It reaches the Foreman in its next wake, named as the research lane's; for a long finding, write a report and send its path."
 }
 
 deny() {

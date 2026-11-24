@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# research-file <title> < <body> -- the research lane's filing command, its one way to GitHub: the lane's shell
-# (research-bash) has no network, so a command in it reaches GitHub only by this. It sends the title and the body (its
+# research-file <title> < <body> | --tell <message> -- the research lane's filing command, its one way to GitHub (and,
+# with --tell, to the Foreman: below): the lane's shell (research-bash) has no network, so a command in it reaches GitHub only by this. It sends the title and the body (its
 # input) to the filer the lane's shell runs outside its sandbox (on file descriptors 7 and 6), and prints the new
 # issue's link. Exit 1 when the issue was not filed, or was filed and not held, saying why.
 # research-file --serve: the filer (research-bash runs it, outside the sandbox, in the lane's worktree, with
@@ -11,6 +11,8 @@
 # is held, then they start them in the queue again; a record it cannot set held files nothing. One filer of the lane
 # files at a time (filing.lock in its folder), so none starts new issues in the queue again while another is filing,
 # and nor does the lane's own filed hook, which waits for its turn too (foreman/foreman.sh, queue_again).
+# A request {tell} is a message to the project's Foreman (research-file --tell): the filer puts it in the Foreman's
+# pending wakes (foreman/tell.sh), which the sandbox cannot write either.
 # It answers with a JSON line, {ok, out}.
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -19,7 +21,8 @@ serve() {
   local req
   exec 5>>"${CONVEYOR_FOREMAN_DIR:?}/filing.lock" || exit 1
   while IFS= read -r req; do
-    if flock 5; then file1 "$req" 5>&-; flock -u 5; else reply false "the filer could not wait its turn to file"; fi
+    if jq -e 'has("tell")' <<<"$req" >/dev/null 2>&1; then tell1 "$req" 5>&-
+    elif flock 5; then file1 "$req" 5>&-; flock -u 5; else reply false "the filer could not wait its turn to file"; fi
   done
 }
 file1() {
@@ -36,14 +39,22 @@ file1() {
   why=$(jq -r '.reason // empty' <<<"$out" 2>/dev/null)
   if [ "$rc" = 0 ] && [ -z "$why" ]; then reply true "$r"; else reply false "$r${why:+ $why}"; fi
 }
+tell1() {
+  local m out
+  m=$(jq -r '.tell | strings' <<<"$1" 2>/dev/null)
+  if out=$(bash "$HERE/../foreman/tell.sh" research "$m" 2>&1); then reply true "$out"; else reply false "$out"; fi
+}
 reply() { jq -cn --argjson ok "$1" --arg o "$2" '{ok: $ok, out: $o}'; }
 
-case ${1:-} in
-  --serve) [ $# = 1 ] && serve; exit ;;
-  '' | -*) echo "usage: research-file <title> < <body>" >&2; exit 2 ;;
+U="usage: research-file <title> < <body> | --tell <message>"
+case ${1:-}:$# in
+  --serve:1) serve; exit ;;
+  --tell:2) what='not sent to the Foreman'; req=$(jq -cn --arg m "$2" '{tell: $m}') || exit 1 ;;
+  '':* | -*) echo "$U" >&2; exit 2 ;;
+  *:1) what='not filed held'; req=$(jq -cn --arg t "$1" --rawfile b /dev/stdin '{title: $t, body: $b}') || exit 1 ;;
+  *) echo "$U" >&2; exit 2 ;;
 esac
-[ $# = 1 ] || { echo "usage: research-file <title> < <body>" >&2; exit 2; }
 { : >&7 && : <&6; } 2>/dev/null || { echo "research-file: no filer here: run it in the research lane's shell" >&2; exit 1; }
-jq -cn --arg t "$1" --rawfile b /dev/stdin '{title: $t, body: $b}' >&7 || exit 1
+printf '%s\n' "$req" >&7 || exit 1
 IFS= read -r r <&6 || { echo "research-file: the filer gave no answer" >&2; exit 1; }
-if jq -e .ok <<<"$r" >/dev/null 2>&1; then jq -r .out <<<"$r"; else echo "research-file: not filed held: $(jq -r .out <<<"$r")" >&2; exit 1; fi
+if jq -e .ok <<<"$r" >/dev/null 2>&1; then jq -r .out <<<"$r"; else echo "research-file: $what: $(jq -r .out <<<"$r")" >&2; exit 1; fi

@@ -435,7 +435,8 @@ where the shell can; the worktree is never the main checkout. Reports go to the 
 `reports/<date>/`, each with a line in `reports/INDEX.md`. The shell has no network (its own network namespace on
 Linux, no outbound connection on macOS), so curl and gh cannot reach GitHub from it; the lane files work with its
 filing command, `lanes/research-file <title> < <body>`, whose filer the shell runs outside the sandbox. An issue filed
-that way starts held, as the Foreman's do, and is built only once the owner releases it.
+that way starts held, as the Foreman's do, and is built only once the owner releases it. The lane sends a message to
+the project's Foreman with `lanes/research-file --tell <message>`, through the same filer ([Lanes](../docs/lanes.md)).
 
 ## Test slots
 

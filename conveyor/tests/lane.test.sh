@@ -233,3 +233,51 @@ t_lanesingle() {
   out=$(cd "$L" && loop lane fast land) || fail "the land: $out"
   out=$(loop lane fast reset) && grep -q 'patch-equivalent to one on main' <<<"$out" && [ "$(git -C "$L" rev-parse HEAD)" = "$(git -C "$R" rev-parse main)" ] || fail "reset after a landing: $out"
 }
+# Bug (issue 1641): a session in the fast lane had no way it knew of to send the Foreman a message, so the owner carried
+# what it found across by hand. The plugin's start hook, run by the plugin's shim in the lane, names `lane fast tell`,
+# and what the printed command sends from the lane is in the Foreman's next wake (its waiter's stop in the main
+# checkout) as one line naming the lane. A session in the main checkout is not told it.
+# Bugs: the first setup makes the lanes before it commits the pack, and the shim skipped the start (and every hook) of
+# a lane with no pack of its own; the start printed the path of the install that ran it, which a prune can remove while
+# the session is open. Here the lanes have no pack, and the install that printed the line is gone before it is run.
+t_lanetell() {
+  lane_start
+  local m=$'a finding: the rule\n misses the case' sp rc w c1=1111111111111111111111111111111111111111 c2=2222222222222222222222222222222222222222 \
+    v=$T/$CASE/data/conveyor/versions p=$T/$CASE/plugin rw=$T/$CASE/research cmd
+  export XDG_DATA_HOME=$T/$CASE/data
+  mkdir -p "$v/$c1" "$p" && cp -a "$SRC" "$v/$c1/conveyor" && cp "$SRC/../shim.sh" "$v/$c1/" && cp "$SRC/../shim.sh" "$p/" \
+    && git -C "$R" worktree add -q --detach "$rw" && rm -f "$L/.conveyor/project.json" "$rw/.conveyor/project.json" \
+    || fail "the install, the plugin copy and the research lane's worktree could not be made"
+  tune --arg c "$c1" '.plugin.commit = $c'
+  # The plugin's SessionStart hook as hooks/hooks.json runs it, after a compaction: one at startup in the main checkout
+  # would claim the Foreman's role for the session.
+  hookstart() { jq -cn --arg d "$1" '{session_id: "lane-session", source: "compact", transcript_path: "", cwd: $d}' \
+    | (cd "$1" && env -u CONVEYOR_MAIN CLAUDE_PROJECT_DIR="$1" CLAUDE_PLUGIN_ROOT="$p" CONVEYOR_HOOK=1 CONVEYOR_PIN=1 \
+      "$p/shim.sh" conveyor/foreman/foreman.sh start --rules-apart) | jq -r '.hookSpecificOutput.additionalContext // empty'; }
+  out=$(hookstart "$L"); cmd=$(sed -n "s/.* with \(.*\) '<message>'\. It reaches.*/\1/p" <<<"$out")
+  [[ $cmd == *" lane fast tell" ]] || fail "the start of a session in the fast lane $L, which has no pack, does not name lane fast tell: $out"
+  out=$(hookstart "$R"); ! grep -qF 'lane fast tell' <<<"$out" || fail "the start of a session in the main checkout $R names lane fast tell: $out"
+  # The research lane's start hook as its settings run it (lanes/research.sh create), in its worktree with no pack.
+  out=$(cd "$rw" && echo '{}' | env CLAUDE_PROJECT_DIR="$rw" CONVEYOR_LANE=research CONVEYOR_FOREMAN_DIR="$T/$CASE/rld" CONVEYOR_MAIN="$R" \
+    "$v/$c1/shim.sh" conveyor/lanes/research.sh start 2>&1); grep -qF -- "--tell '<message>'" <<<"$out" \
+    || fail "the start of a session in the research lane $rw, which has no pack, does not name research-file --tell: $out"
+  # Bug: from the main checkout the message went out named as the fast lane's. It is refused there, and nothing is sent.
+  ! out=$(cd "$R" && CONVEYOR_CARDS=$T/$CASE/cards bash "$SRC/conveyor.sh" lane fast tell 'not from the lane' 2>&1) && grep -q 'runs only in the fast lane' <<<"$out" \
+    || fail "lane fast tell 'not from the lane' in the main checkout $R was not refused: $out"
+  # The project's engine moves on (a newer install), and a prune removes the one that printed the line.
+  mv "$v/$c1" "$v/$c2" && tune --arg c "$c2" '.plugin.commit = $c' || fail "the install could not be moved to the newer commit"
+  # Bug: conveyor.sh moves to the main checkout before the command runs, and the lane's own call was refused as the main
+  # checkout's; a lane whose branch a session renamed was refused too. The printed command, run from the lane on a
+  # renamed branch.
+  git -C "$L" branch -m renamed || fail "the lane's branch could not be renamed"
+  out=$(cd "$L" && env -u CONVEYOR_MAIN -u CLAUDE_PROJECT_DIR CONVEYOR_CARDS="$T/$CASE/cards" bash -c "$cmd \"\$1\"" tell "$m" 2>&1) \
+    || fail "the start's command $cmd \"$m\" failed in the lane $L on the branch renamed, its install gone: $out"
+  sleep 600 & sp=$! # sleep: the stand-in for the Foreman session's process, ended with the case so its waiters end
+  w='sleep 600' # sleep: the one stand-in watcher finds nothing, so the wake holds only what the lane sent
+  # The waiter lists its folder in the machine's foremen file: the case's own data folder holds it.
+  echo '{}' | CONVEYOR_MAIN=$R CONVEYOR_FOREMAN=1 CONVEYOR_FOREMAN_SESSION_PID=$sp CONVEYOR_FOREMAN_WATCHERS=$w \
+    bash "$SRC/foreman/waiter.sh" 2> "$T/$CASE/wake" > /dev/null; rc=$?
+  kill "$sp"
+  [ "$rc" = 2 ] && [ "$(cat "$T/$CASE/wake")" = 'Message from the fast lane: a finding: the rule misses the case' ] \
+    || fail "the Foreman's wake (exit $rc) does not carry $cmd \"$m\" as one line naming the lane: $(cat "$T/$CASE/wake")"
+}

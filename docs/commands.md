@@ -203,7 +203,8 @@ The self-heals list and the docs list ([Harm or self-heals](cards.md#harm-or-sel
 
 Lanes and the Foreman:
 
-- `lane fast create | review | land | reset [--drop <sha>]` and `lane research create` ([Lanes](lanes.md)).
+- `lane fast create | review | land | reset [--drop <sha>] | tell <message>` and `lane research create`
+  ([Lanes](lanes.md)).
 - `foreman [--new] [<claude argument>...]` starts the Foreman's Claude Code session in the main checkout. It resumes the
   last one unless you give `--new`.
 - `foreman status [<project>]` prints the state of the Foreman's projects as short text ([Foreman](foreman.md)).

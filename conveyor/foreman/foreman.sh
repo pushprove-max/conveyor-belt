@@ -39,7 +39,8 @@
 #   yes each record's pack turns on, asked of the record: `conveyor.sh auto standing`), then its saved state: the DONE items of state.md archived
 #   (archive.py), a warning line when the project runs an old engine here (`conveyor.sh take stale`), a live summary
 #   built fresh (never saved), then state.md, cut to its cap. The output is JSON: that text as additionalContext, and
-#   sessionTitle "<project> - foreman", the Foreman session's name (the first project mine names).
+#   sessionTitle "<project> - foreman", the Foreman session's name (the first project mine names). Any other session
+#   in the project's fast lane gets one line: how to send the Foreman a message (fastlane).
 # start --rules-apart: the start without rules.md (see rules); the plugin's hook passes it. An engine from before the
 #   rules hook ignores it and puts rules.md before the rest when the whole fits, or a Read line in its place when it does
 #   not; a start without it here puts rules.md after the rest, cut to what the limit leaves.
@@ -264,8 +265,22 @@ start_() {
       '{systemMessage: $m, hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: ("# " + $m)}}' || return 1
     locked told "$SID"; return
   fi
+  ! fastlane || return 0
   [ "$src" = startup ] && [[ $SID =~ ^[A-Za-z0-9-]+$ ]] && [ -z "${CONVEYOR_CARD:-}" ] && [ -z "${CONVEYOR_LANE:-}" ] && inmain || return 0
   auto
+}
+# fastlane: 0 when the session's folder (the hook input's cwd) is in the project's fast lane, a worktree with the
+# lane's push refusal in its own config (lib/lane.sh laneseal), once it printed the line that tells the session how to
+# send the Foreman a message (`conveyor.sh lane fast tell`, tell.sh). Bug (issue 1641): the lane had no way to.
+# The command runs through the plugin's shim, which finds the project's engine at each call: this install's path could
+# be pruned (lib/install.sh prune) while the session is open.
+fastlane() {
+  local d c
+  d=$(jq -r '.cwd // empty | strings' <<<"$IN" 2>/dev/null)
+  [ "$(git -C "${d:-.}" config --worktree --get protocol.allow 2>/dev/null)" = never ] || return 1
+  printf -v c '%q/shim.sh conveyor/conveyor.sh lane fast tell' "${CLAUDE_PLUGIN_ROOT:-$(cd "$FHERE/../.." && pwd -P)}"
+  jq -cn --arg c "# Fast lane: send a message to the project's $NAME (a finding, a question, a card to file or watch) with $c '<message>'. It reaches the $NAME in its next wake, named as the fast lane's." \
+    '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c}}'
 }
 # inmain: 0 when this runs in a project's main checkout (one with a pack, .conveyor/project.json), never a worktree
 # (a card's, a lane's).

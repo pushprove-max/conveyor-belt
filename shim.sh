@@ -18,6 +18,12 @@ set -uo pipefail
 [ $# -ge 1 ] || { echo "usage: shim.sh <path in the plugin> [<arg>...]" >&2; exit 2; }
 top=${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}
 pack=$top/.conveyor/project.json
+# A lane (the research lane's hooks name it, CONVEYOR_LANE; the fast lane has its push refusal in its own config,
+# lib/lane.sh laneseal) made by the first setup, before the pack was committed, has no pack of its own: its project's
+# pack is the main checkout's. Bug (issue 1641): its start and guards were skipped there.
+if [ ! -f "$pack" ] && [ -n "$top" ] && { [ -n "${CONVEYOR_LANE:-}" ] || [ "$(git -C "$top" config --worktree --get protocol.allow 2>/dev/null)" = never ]; }; then
+  pack=$(git -C "$top" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && pack=${pack%/.git}/.conveyor/project.json
+fi
 if [ -n "${CONVEYOR_HOOK:-}" ]; then
   [ -n "$top" ] && [ -f "$pack" ] && git -C "$top" rev-parse --git-dir >/dev/null 2>&1 || exit 0
 fi

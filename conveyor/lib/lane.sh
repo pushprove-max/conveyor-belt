@@ -61,8 +61,9 @@ landbranch() { # <branch>
 # (a path starting ~/ is under the home folder; none: the folder the checkout is in), named <checkout>-fast-lane.
 # `lane fast create` makes it; `lane fast review` is a preview of its change by the card reviewer, with the
 # repeat-class stop; `lane fast land` lands it as one card (land-branch); `lane fast reset [--drop <sha>]` sets it to
-# main's head once that card has landed. The lane is the owner's alone: land and reset refuse in a Foreman session
-# and inside a card. It never pushes: the lane's own config (a worktree's own, read after every other config file)
+# main's head once that card has landed; `lane fast tell <message>` sends a message to the project's Foreman
+# (foreman/tell.sh), as the start of a session in the lane says (foreman/foreman.sh fastlane). The lane is the
+# owner's alone: land and reset refuse in a Foreman session and inside a card. It never pushes: the lane's own config (a worktree's own, read after every other config file)
 # allows no transport (protocol.allow and each protocol.<name>.allow set to never), so no hook skipped by --no-verify,
 # URL rewrite, remote or push URL, made before or after create, gets a push out. A command's GIT_ALLOW_PROTOCOL
 # outranks those, so the same config also rewrites every URL, push URL included, to a transport no git has (LANEURL:
@@ -132,6 +133,19 @@ lanefind() {
     || { echo "conveyor: no fast lane of $MAIN at $LANE: make it with conveyor.sh lane fast create" >&2; return 2; }
   LBR=$(git -C "$LANE" symbolic-ref -q --short HEAD) && [ "$LBR" = "$LANEBR" ] \
     || { echo "conveyor: the lane $LANE is on ${LBR:-no branch}, not $LANEBR: switch it back to $LANEBR" >&2; return 2; }
+}
+# lanetell <message>: `lane fast tell`, a message to the project's Foreman named as the fast lane's (foreman/tell.sh),
+# sent only from the fast lane itself: from any other checkout it would name the wrong sender, so it is refused there.
+# The lane is the checkout the command was called in (CALLED: conveyor.sh has moved to MAIN by now), a linked worktree
+# of this repository with the lane's push refusal in its own config (laneseal), as the start hook finds it (foreman.sh
+# fastlane): on any branch, as a session may rename the lane's.
+lanetell() {
+  local top
+  top=$(git -C "$CALLED" rev-parse --show-toplevel 2>/dev/null) && top=$(cd "$top" && pwd -P) && [ "$top" != "$(cd "$MAIN" && pwd -P)" ] \
+    && [ "$(git -C "$top" rev-parse --path-format=absolute --git-common-dir)" = "$(git rev-parse --path-format=absolute --git-common-dir)" ] \
+    && [ "$(git -C "$top" config --worktree --get protocol.allow 2>/dev/null)" = never ] \
+    || { echo "conveyor: lane fast tell runs only in the fast lane (conveyor.sh lane fast create), and $CALLED is not in it: nothing sent" >&2; return 2; }
+  CONVEYOR_MAIN=$MAIN bash "$HERE/foreman/tell.sh" fast "$1"
 }
 # The protocols the lane's push refusal names: every built-in transport, and any other a config file names.
 laneprotos() {
