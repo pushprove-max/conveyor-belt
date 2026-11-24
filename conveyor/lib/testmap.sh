@@ -635,20 +635,84 @@ briefref() { # <worktree> <path>
   if [ "$same" -gt 1 ] && [ -n "$sfx" ]; then printf '%s' "(^|[^A-Za-z0-9_./-])($sfx)$b$end|$v($sfx)$b$end"
   else printf '%s' "(^|[^A-Za-z0-9_./-])(${sfx:-^})?$b$end|$v${sfx:+($sfx)?}$b$end"; fi
 }
+# The ast-grep the brief's searches use: the plugin's bin/ast-grep, when it runs (ast-grep is installed). Fails when not.
+briefsgbin() { local s=${HERE%/*}/bin/ast-grep; [ -n "${HERE:-}" ] && "$s" --version >/dev/null 2>&1 && echo "$s"; }
+# The ast-grep rules (scan --inline-rules) that find a definition (id def-<language>) and a call (call-<language>) of
+# the function <name>, for each language hooks/ast-grep.sh lists that has functions; CSS, HCL, HTML, JSON, Markdown and
+# YAML have none of their own, so their files keep the text search. A call is the name alone in the call's function
+# place (a shell command's name, also in $( )), as the text search's name( is: not obj.name(). Each rule was checked
+# against ast-grep 0.51.3 on a file of its language with a definition, a call, a comment and a string.
+briefsgrules() { # <name>
+  local l d c x r="regex: '^$1\$'" ex="kind: arguments, inside: {kind: call, has: {field: target, regex: '^defp?\$'}}"
+  while IFS='|' read -r l d c; do
+    for x in $l; do printf 'id: def-%s\nlanguage: %s\nrule: %s\n---\nid: call-%s\nlanguage: %s\nrule: %s\n---\n' "$x" "$x" "${d//@/$r}" "$x" "$x" "${c//@/$r}"; done
+  done <<EOF
+bash|{kind: function_definition, has: {field: name, @}}|{kind: command_name, @}
+c cpp|{kind: function_declarator, has: {field: declarator, @}}|{kind: call_expression, has: {field: function, @}}
+csharp|{any: [{kind: method_declaration}, {kind: local_function_statement}], has: {field: name, @}}|{kind: invocation_expression, has: {field: function, @}}
+dart|{kind: function_signature, has: {field: name, @}}|{kind: call_expression, has: {field: function, @}}
+elixir|{kind: call, has: {field: target, @}, inside: {$ex}}|{kind: call, has: {field: target, @}, not: {inside: {$ex}}}
+go|{any: [{kind: function_declaration}, {kind: method_declaration}], has: {field: name, @}}|{kind: call_expression, has: {field: function, @}}
+haskell|{kind: function, has: {field: name, @}}|{kind: apply, has: {field: function, @}}
+java|{kind: method_declaration, has: {field: name, @}}|{kind: method_invocation, has: {field: name, @}, not: {has: {field: object, regex: ''}}}
+javascript typescript tsx|{any: [{kind: function_declaration}, {kind: generator_function_declaration}, {kind: method_definition}, {kind: variable_declarator, has: {field: value, any: [{kind: arrow_function}, {kind: function_expression}]}}], all: [{has: {field: name, @}}]}|{kind: call_expression, has: {field: function, @}}
+kotlin|{kind: function_declaration, has: {kind: simple_identifier, @}}|{kind: call_expression, has: {kind: simple_identifier, @}}
+lua|{kind: function_declaration, has: {field: name, @}}|{kind: function_call, has: {field: name, @}}
+nix|{kind: binding, all: [{has: {field: expression, kind: function_expression}}, {has: {field: attrpath, @}}]}|{kind: apply_expression, has: {field: function, @}}
+php|{any: [{kind: function_definition}, {kind: method_declaration}], has: {field: name, @}}|{kind: function_call_expression, has: {field: function, @}}
+python|{kind: function_definition, has: {field: name, @}}|{kind: call, has: {field: function, @}}
+ruby|{any: [{kind: method}, {kind: singleton_method}], has: {field: name, @}}|{kind: call, has: {field: method, @}, not: {has: {field: receiver, regex: ''}}}
+rust|{kind: function_item, has: {field: name, @}}|{kind: call_expression, has: {field: function, @}}
+scala|{kind: function_definition, has: {field: name, @}}|{kind: call_expression, has: {field: function, @}}
+solidity|{kind: function_definition, has: {field: name, @}}|{kind: call_expression, has: {field: function, @}}
+swift|{kind: function_declaration, has: {field: name, @}}|{kind: call_expression, has: {kind: simple_identifier, @}}
+zig|{kind: function_declaration, has: {field: name, @}}|{kind: call_expression, has: {field: function, @}}
+EOF
+}
+# With ast-grep installed, the syntax search for the function <name> in the tracked files of <worktree> that have the
+# word: a line "file<TAB><path>" for each file a rule of briefsgrules() applies to (the text search leaves these out),
+# and "def<TAB><language><TAB><path>:<line>:<text>" or "call<TAB>..." for each definition or call it finds, so not a
+# name in a comment or a string. Fails without ast-grep, or when its run fails: the text search is then all there is.
+briefsg() { # <worktree> <name>
+  local s t files rc=0
+  s=$(briefsgbin) || return 1
+  mapfile -t files < <(git -C "$1" -c core.quotePath=false grep -lwIF -e "$2" 2>/dev/null)
+  # With no file named ast-grep would search the whole folder; with none, the text search finds nothing either.
+  [ ${#files[@]} -gt 0 ] || return 0
+  t=$(mktemp -d)
+  # A run that read its files ends its report with the file summary line and names no error (a missing file is an
+  # ERROR line with exit 0).
+  (cd "$1" && "$s" scan --inline-rules "$(briefsgrules "$2")" --json=stream --inspect entity -- "${files[@]}" > "$t/out" 2> "$t/err") || rc=1
+  if [ "$rc" = 0 ] && grep -q '^sg: summary|file:' "$t/err" && ! grep -q '^ERROR' "$t/err"; then
+    sed -n 's/^sg: entity|file|\(.*\): language=[^,]*,appliedRuleCount=[1-9][0-9]*$/file\t\1/p' "$t/err"
+    jq -r '(.ruleId | split("-")) as $r | "\($r[0])\t\($r[1])\t\(.file):\(.range.start.line + 1):\(.lines | split("\n")[0])"' "$t/out" || rc=1
+  else rc=1; fi
+  rm -rf "$t"
+  return "$rc"
+}
+# The lines of <git grep -n output> (stdin) in no file of <briefsg() output>: the files the syntax search covers.
+briefsgout() { # <briefsg() output>
+  awk -F'\t' 'FILENAME == ARGV[1] { if ($1 == "file") p[$2]; next } { f = $0; sub(/:[0-9]+:.*$/, "", f) } !(f in p)' <(printf '%s\n' "$1") -
+}
 # The files that call the function <name>, one a line: a shell command (a *.sh or *.bash file, the name at the start
 # of a line, or after ; & | ( { ! then do else if while until, and followed by a space, a ; & or the end) and, in any
-# other file but a Markdown page, a call written name( that is not a definition. Not a line in a comment. A function that
+# other file but a Markdown page, a call written name( that is not a definition. Not a line in a comment. With ast-grep
+# installed (<briefsg() output>), a file the syntax search covers has the calls it found in place of the text
+# search's, so not a name in a comment or a string. A function that
 # only shell files (<defs>, one a line) define has no caller in a file of another language, whose own name( is another
 # function, so that search runs only when <defs> is empty or names a file that is not shell. A file whose only match is
 # the name alone on a line (a word in a list of commands) comes after the files with a call that has more on its line.
-briefcalls() { # <worktree> <name> <defs>
-  local wt=$1 n=$2 defs=$3 dp dq lines
+briefcalls() { # <worktree> <name> <defs> [<briefsg() output>]
+  local wt=$1 n=$2 defs=$3 sg=${4-} dp dq lines lang=bash
   dp="^[[:space:]]*(function[[:space:]]+)?${n}[[:space:]]*\\(\\)"; dq="(function|def|func|fn)[[:space:]]+${n}([^A-Za-z0-9_]|$)"
   lines=$(git -C "$wt" -c core.quotePath=false grep -nIE -e "(^|[;&|({]|(^|[[:space:]])(then|do|else|if|while|until|!))[[:space:]]*${n}([[:space:]]|;|&|$)" -- '*.sh' '*.bash' 2>/dev/null)
   if [ -z "$defs" ] || grep -qvE '\.(sh|bash)$' <<<"$defs"; then
     lines+=$'\n'$(git -C "$wt" -c core.quotePath=false grep -nIE -e "(^|[^A-Za-z0-9_.\$])${n}[[:space:]]*\\(" -- . ':(exclude)*.md' ':(exclude)*.sh' ':(exclude)*.bash' 2>/dev/null)
+    lang=''
   fi
-  lines=$(grep -vE -e "^[^:]*:[0-9]+:${dp#^}" -e "^[^:]*:[0-9]+:.*$dq" <<<"$lines")
+  lines=$(grep -vE -e "^[^:]*:[0-9]+:${dp#^}" -e "^[^:]*:[0-9]+:.*$dq" <<<"$lines" | briefsgout "$sg")
+  sg=$(awk -F'\t' -v l="$lang" '$1 == "call" && (l == "" || $2 == l) { sub(/^[^\t]*\t[^\t]*\t/, ""); print }' <<<"$sg")
+  [ -z "$sg" ] || lines=$(printf '%s\n%s\n' "$lines" "$sg" | grep .)
   # The files with a match that is more than the name alone, then the others.
   awk 'FILENAME == ARGV[1] { print; seen[$0]; next } !($0 in seen)' \
     <(grep -vE -e "^[^:]*:[0-9]+:[[:space:]]*${n}[[:space:]]*$" <<<"$lines" | briefcode) <(briefcode <<<"$lines")
@@ -660,7 +724,7 @@ briefcalls() { # <worktree> <name> <defs>
 # run time, or in another language, is not found. Nothing when the issue names no tracked file or function, or the
 # search finds nothing for a name. The text starts with a blank line, as a part of the brief does.
 startbrief() { # <worktree> <issue json>
-  local wt=$1 toks t n defs hits tests m out='' lines='' fns=() files=() d
+  local wt=$1 toks t n defs hits tests m out='' lines='' fns=() files=() d sg
   mapfile -t toks < <(jq -r '[.title, .body] | map(strings) | join("\n") as $x
     | [($x | scan("`([^`\n]+)`") | .[0]), ($x | scan("(?<![A-Za-z0-9_.])[A-Za-z_][A-Za-z0-9_]*\\(\\)"))
        , ($x | scan("\\.?[A-Za-z0-9_][A-Za-z0-9_./-]*[A-Za-z0-9_](?::[0-9]+(?:-[0-9]+)?)?") | select(test("[./]")))] | unique | .[:80][]' <<<"$2")
@@ -683,8 +747,12 @@ startbrief() { # <worktree> <issue json>
   while read -r n; do
     [ -n "$n" ] || continue
     # A definition: a shell `name()` at the start of a line, or `function`, `def`, `func` or `fn` before the name.
-    defs=$(git -C "$wt" -c core.quotePath=false grep -lIE -e "^[[:space:]]*(function[[:space:]]+)?${n}[[:space:]]*\\(\\)" -e "(function|def|func|fn)[[:space:]]+${n}([^A-Za-z0-9_]|$)" 2>/dev/null)
-    hits=$(briefcalls "$wt" "$n" "$defs")
+    defs=$(git -C "$wt" -c core.quotePath=false grep -nIE -e "^[[:space:]]*(function[[:space:]]+)?${n}[[:space:]]*\\(\\)" -e "(function|def|func|fn)[[:space:]]+${n}([^A-Za-z0-9_]|$)" 2>/dev/null)
+    # With ast-grep installed, a file the syntax search covers has the definitions it found in place of the text
+    # search's, so not a name in a comment or a string (briefsg()). The files in path order, as git grep -l gives them.
+    sg=$(briefsg "$wt" "$n") || sg=''
+    defs=$({ briefsgout "$sg" <<<"$defs"; awk -F'\t' '$1 == "def" { print $3 }' <<<"$sg"; } | cut -d: -f1 | grep . | LC_ALL=C sort -u)
+    hits=$(briefcalls "$wt" "$n" "$defs" "$sg")
     out=''
     [ -z "$defs" ] || out="defined in $(briefcap "$defs")"
     [ -z "$hits" ] || out+="${out:+; }called in $(briefcap "$hits")"

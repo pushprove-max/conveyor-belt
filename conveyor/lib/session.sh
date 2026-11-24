@@ -507,7 +507,7 @@ BUILDNOTOOLS=Agent,ScheduleWakeup,CronCreate,CronDelete,CronList,Monitor,RemoteT
 sq() { local q="'"; printf "'%s'" "${1//$q/$q\\$q$q}"; } # <word>: it single-quoted for a shell
 builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: claude, opencode or codex> [Claude session id to resume]
   local h a=()
-  cd "$1" && mkdir -p "$1.briefs" || exit 1
+  cd "$1" && mkdir -p "$1.briefs" || exit 1; ! "${HERE%/*}/bin/ast-grep" --version >/dev/null 2>&1 || export PATH="${HERE%/*}/bin:$PATH" # PATH: the plugin's bin/ when ast-grep is installed (bin/ast-grep runs), for each CLI, so the session runs `ast-grep` by name: a card session loads no plugin, so its CLI puts no bin/ there
   export CONVEYOR_CARD=${1##*/} CONVEYOR_BRIEFS=$1.briefs CONVEYOR_TESTSTEPONLY=0; ! teststeponly || CONVEYOR_TESTSTEPONLY=1 # BRIEFS: kept long outputs (tools/outbrief.sh), gone with the card. TESTSTEPONLY: the rule Only the Test step runs tests (teststeponly(), lib/prompts.sh), 1 on, 0 off whatever the loop inherited, for the card's command guard (.claude/hooks/bash-guardrails.sh), which refuses the session's test commands while it is on.
   case $6 in
     codex) export CLAUDE_PROJECT_DIR=$1

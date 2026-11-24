@@ -81,6 +81,14 @@ A Claude build or fix session cannot use the tools that schedule work, send mess
 `WebSearch`. There is no limit on turns or on cost. The session ends at its time limit, or sooner when it makes no
 progress for the pack's `tunables.stuck`.
 
+When ast-grep is installed ([Setup](setup.md)), a build or fix session can run `ast-grep` by its name, with Claude
+Code, Codex or OpenCode. The card rules tell it to use `ast-grep run` to find definitions, callers and code patterns,
+and text search for strings, comments and docs. The brief of a build session lists the files that define and call each
+function that the issue names. With ast-grep, ast-grep finds them in each file of a language that has functions and
+that ast-grep reads, such as shell (Bats too), Java, JavaScript and Python. It finds a call in `$(name)`, a Java method
+and a JavaScript arrow function, which a text search misses. It does not list a file that names the function only in
+a comment or a string. Other files, and every file without ast-grep, come from a text search.
+
 A Claude build session that makes no progress, or that the model API refuses, continues once in the same session
 (`claude --resume`). It does not start again with the whole brief. The card's line then shows `resumed: 1`. This needs
 the session id in the session's output: a session that stops before it names its id starts again with the whole

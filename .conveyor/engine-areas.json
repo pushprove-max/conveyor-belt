@@ -467,6 +467,7 @@
 {"area": "testmap", "test": "doctor.test.sh"}
 {"area": "testmap", "test": "maintest.test.sh"}
 {"area": "testmap", "test": "testmapbuild.test.sh"}
+{"area": "testmap", "test": "briefsg.test.sh"}
 {"area": "testmap", "file": "conveyor/lib/testmap.sh"}
 {"area": "testmap", "file": "conveyor/commands/testmap.sh"}
 {"area": "fnclash", "test": "testcountrunner.test.sh"}
