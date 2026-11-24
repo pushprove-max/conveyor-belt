@@ -1354,32 +1354,52 @@ test('WORKER ACTIVITY and the belt name the card that has the landing turn by it
     { ...BELT[1], card: 'c15-1595', issue: 1595, step: 'land', live: wait('c14-1594'), waitsOn: { card: 'c10-1533', issue: 1533, state: 'tests' } },
     // A part of a parent issue: its own ID, `#1596 of #1600`, leaves the wait text the fewest columns.
     { ...BELT[1], card: 'c16-1596', issue: 1596, umbrella: 1600, step: 'build', live: { action: `queued for the next batch: card c10-1533 has the landing turn`, turns: 0, lastOutputAt: ago(0) }, waitsOn: { card: 'c10-1533', issue: 1533, state: 'tests' } },
+    { ...BELT[1], card: 'c17-1597', issue: 1597, umbrella: 1600, step: 'land', live: wait('c10-1533'), waitsOn: { card: 'c10-1533', issue: 1533, state: 'tests' } },
     // Parts that wait on a holder with a longer ID, `fu #1590`, in both wait messages.
-    { ...BELT[1], card: 'c17-1597', issue: 1597, umbrella: 1600, step: 'land', live: wait(fu), waitsOn: { card: fu, issue: 0, state: 'tests', name: 'Review follow-up of #1590' } },
-    { ...BELT[1], card: 'c18-1598', issue: 1598, umbrella: 1600, step: 'build', live: { action: `queued for the next batch: card ${fu} has the landing turn`, turns: 0, lastOutputAt: ago(0) }, waitsOn: { card: fu, issue: 0, state: 'tests', name: 'Review follow-up of #1590' } },
+    { ...BELT[1], card: 'c18-1598', issue: 1598, umbrella: 1600, step: 'land', live: wait(fu), waitsOn: { card: fu, issue: 0, state: 'tests', name: 'Review follow-up of #1590' } },
+    { ...BELT[1], card: 'c19-1599', issue: 1599, umbrella: 1600, step: 'build', live: { action: `queued for the next batch: card ${fu} has the landing turn`, turns: 0, lastOutputAt: ago(0) }, waitsOn: { card: fu, issue: 0, state: 'tests', name: 'Review follow-up of #1590' } },
+    // A follow-up, `fu #1596`, with no parent to drop, behind the main-red fix in both wait messages.
+    { ...BELT[1], card: 'c20-0', issue: 0, name: 'Review follow-up of #1596', step: 'land', live: wait(red), waitsOn: { card: red, issue: 0, state: 'tests', name: 'Main is red (19e3b6e4f5a6)' } },
+    { ...BELT[1], card: 'c21-0', issue: 0, name: 'Review follow-up of #1596', step: 'build', live: { action: `queued for the next batch: card ${red} has the landing turn`, turns: 0, lastOutputAt: ago(0) }, waitsOn: { card: red, issue: 0, state: 'tests', name: 'Main is red (19e3b6e4f5a6)' } },
   ] })
   const rows = activityModel(s, s.snap!, 80, 0).map(plain)
   expect(rows[1]).toMatch(/^◐ #1531  fu #1590 lands first \(landing turn\)/)
   expect(rows[2]).toMatch(/^◐ #1585  #1533 lands first \(landing turn\)/)
   expect(rows[3]).toMatch(/^◐ #1589  red 19e3b6e lands first \(landing turn\)/)
   expect(rows[4], 'no waitsOn: the engine text').toMatch(/^◐ #1592  waiting for card c20261124T015216/)
-  expect(rows[5], 'queued for the next batch').toMatch(/^◐ #1593  #1533 has the landing turn \(next batch\)/)
+  expect(rows[5], 'queued for the next batch').toMatch(/^◐ #1593  #1533 next batch \(has the landing turn\)/)
   expect(rows[6], 'stale waitsOn: not the card that had the turn before').toMatch(/^◐ #1595  waiting for card c14-1594 to land first/)
-  for (const r of [...rows.slice(1, 4), rows[5], rows[7]]) expect(r, 'no card id').not.toMatch(/c20261124T|c10-1533/)
+  for (const r of [...rows.slice(1, 4), rows[5], ...rows.slice(7)]) expect(r, 'no card id').not.toMatch(/c20261124T|c10-1533/)
   // Follow-ups of that issue. Bug they catch: the wait text put the holder's ID after a lead-in (`queued for the next
   // batch: `, then `queued: `), and spread() cut the text before the clock on the right, so a narrow pane showed
   // `queued: #15…` at 40 columns for `#1596 of #1600`, and `queu…` at 24 columns for `#1593`. At 40 columns the ID
-  // and the clock both fit; at 24 the clock gives way to the ID. A part waiting on `fu #1590` still showed
-  // `◐ #1596 of #1600  fu #1…` at 24 columns with no clock: there its parent gives way too, at 40 it stays.
-  const waits = [[1, 'fu #1590'], [2, '#1533'], [3, 'red 19e3b6e'], [5, '#1533'], [7, '#1533'], [8, 'fu #1590'], [9, 'fu #1590']] as const
+  // and the clock both fit; at 24 the clock gives way to the ID. A later follow-up: with the ID first, the kind of
+  // wait came last, so at 24 columns `#1593` showed `#1533…` both when it waited to land and when it was queued for
+  // the next batch. The first letter of the word after the ID (`l` of `lands`, `n` of `next`) tells them apart, and
+  // the clock gives way to it too, but only to it: at 40 columns `#1598 of #1600` keeps the clock with `fu #1590 la…`.
+  // A part (`#1596 of #1600`) left room for only `#1533…` or `fu #1…` in both kinds of wait: at 24 columns its own ID
+  // drops its parent, as the clock does. `fu #1596` has no parent to drop, and behind the main-red fix it showed
+  // `red 19e3b6e…` in both kinds of wait: there the holder's ID is cut, so the letter fits.
+  // [row, its own ID at 40 columns, at 24 columns, the start of its wait text at 40 columns, at 24 columns]
+  const waits = [
+    [1, '#1531', '#1531', 'fu #1590 lands', 'fu #1590 lands'],
+    [2, '#1585', '#1585', '#1533 lands', '#1533 lands'],
+    [3, '#1589', '#1589', 'red 19e3b6e lands', 'red 19e3b6e la…$'],
+    [5, '#1593', '#1593', '#1533 next', '#1533 next'],
+    [7, '#1596 of #1600', '#1596', '#1533 next', '#1533 next'],
+    [8, '#1597 of #1600', '#1597', '#1533 lands', '#1533 lands'],
+    [9, '#1598 of #1600', '#1598', 'fu #1590 la', 'fu #1590 lands'],
+    [10, '#1599 of #1600', '#1599', 'fu #1590 ne', 'fu #1590 next'],
+    [11, 'fu #1596', 'fu #1596', 'red 19e3b6e lands', 'red 19e3… l…$'],
+    [12, 'fu #1596', 'fu #1596', 'red 19e3b6e next', 'red 19e3… n…$'],
+  ] as const
   for (const [w, clock] of [[40, ' \\d+:\\d\\d [AP]M$'], [24, '']] as const) {
     const narrow = activityModel(s, s.snap!, w, 0).map(plain)
-    for (const [i, id] of waits) {
+    for (const [i, own40, own24, said40, said24] of waits) {
       const r = narrow[i] ?? ''
-      expect(r, `row ${i} at ${w} columns: ${r}`).toMatch(new RegExp(`^◐ #15\\d\\d( of #1600)?  ${id}( |…|$).*${clock}`))
+      expect(r, `row ${i} at ${w} columns: ${r}`).toMatch(new RegExp(`^◐ ${w === 40 ? own40 : own24}  ${w === 40 ? said40 : said24}.*${clock}`))
       expect(cols(r), `row ${i} at ${w} columns: ${r}`).toBeLessThanOrEqual(w)
     }
-    for (const i of [8, 9]) expect(narrow[i], `part row ${i} at ${w} columns`).toMatch(w === 40 ? /^◐ #159\d of #1600  fu #1590 / : /^◐ #159\d  fu #1590( |…|$)/)
   }
   const belt = tableText(s, 100)
   expect(belt, 'the belt\'s live line too').toMatch(/now fu #1590 lands first \(landing turn\)/)

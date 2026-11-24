@@ -195,8 +195,11 @@ A word wider than the pane breaks between whole characters.
   in the card's worktree shows as `worktree` (`cd worktree/x && git add -A`), and any other path shows only its last
   part. On the right: the tool (`Bash`) and the time the step started. A card that runs no command shows its step.
   A card that waits for the landing turn names the card that has it by its ID, as the tables do:
-  `fu #1590 lands first (landing turn)`, or `#1590 has the landing turn (next batch)`. In a narrow pane, such a row
-  leaves out the time when the time would cut that ID. The live line on the belt says the same.
+  `fu #1590 lands first (landing turn)`, or `#1590 next batch (has the landing turn)`. In a narrow pane, such a row
+  leaves out the time when the time would cut that ID or the first letter of the word after it (`lands` or `next`). If
+  the row still cuts them, the card's own ID leaves out its parent issue (`#1596`, not `#1596 of #1600`). If the row
+  cuts them after that, it cuts the ID of the card that has the turn (`fu #1596  red 19e3… l…`). The live line on the belt
+  says the same.
 - **PICK ORDER**: on the right, `next 5 of 7` when more than five issues are ready (with `+` when a project listed its
   full ten), else how many the loop can pick now (`2 ready`). Under it, the next five issues in pick order, numbered,
   each with its issue (and project when the pane shows more than one), its title cut to fit and its priority

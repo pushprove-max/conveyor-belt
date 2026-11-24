@@ -895,12 +895,13 @@ const verdicts = (rs: Review[]): Seg[][] => rs.map(r => {
 // `fu #1590`, `red 19e3b6e`), not by the card id the engine's live text holds: at its land step (landwait(),
 // lib/claim.sh) or queued for the next batch at its claim. Only when that card id is the snapshot's waitsOn: the live
 // text streams in between snapshots, so waitsOn can still name the card that had the turn before. "" for any other
-// live text. The ID comes first: WORKER ACTIVITY cuts the text before the clock on the right, and at 40 columns a row
-// of a part (`#1593 of #1600`) leaves about 11 columns of it.
-const turnWait = (b: Belt): string => {
+// live text. The ID comes first and the kind of wait next (`lands` or `next`): WORKER ACTIVITY cuts the text before
+// the clock on the right, and at 40 columns a row of a part (`#1593 of #1600`) leaves about 11 columns of it.
+const turnWait = (b: Belt): { id: string, kind: string, text: string } | null => {
   const m = /^(?:waiting for card (\S+) to land first\b|queued for the next batch: card (\S+) has the landing turn\b)/.exec(b.live?.action ?? '')
-  if (!m || !b.waitsOn || (m[1] ?? m[2]) !== b.waitsOn.card) return ''
-  return m[1] ? `${idOf(b.waitsOn)} lands first (landing turn)` : `${idOf(b.waitsOn)} has the landing turn (next batch)`
+  if (!m || !b.waitsOn || (m[1] ?? m[2]) !== b.waitsOn.card) return null
+  const id = idOf(b.waitsOn), kind = m[1] ? 'lands' : 'next'
+  return { id, kind, text: m[1] ? `${id} ${kind} first (landing turn)` : `${id} ${kind} batch (has the landing turn)` }
 }
 // The running step's live fields: `    now Bash: npm test · 3 turns · last output 4s ago`. None when it streams nothing.
 // The Test step runs no model, so in place of its turns it shows how far the tests are: the file that runs now and its
@@ -917,7 +918,7 @@ const liveLine = (b: Belt, now: number, w: number): Line[] => {
     : files ? `${files.run}${files.of === null ? '' : ` of ${files.of}`} test files${files.over ? ` · ${count(files.over, 'more file')} than selected` : ''}` : ''
   // The Test step's list: the changed tests (how many files) or the whole suite.
   const list = t?.at !== 3 || !t.list ? '' : t.list.mode === 'changed' ? `changed: ${count(t.list.files, 'file')}` : 'whole suite'
-  const parts = [l.action ? `now ${turnWait(b) || l.action}` : '', list, progress, ago ? `last output ${ago} ago` : ''].filter(Boolean)
+  const parts = [l.action ? `now ${turnWait(b)?.text || l.action}` : '', list, progress, ago ? `last output ${ago} ago` : ''].filter(Boolean)
   return [fitWidth([{ t: `    ${parts.join(' · ')}`, d: true }], w)]
 }
 
@@ -1301,7 +1302,7 @@ export const shortCommand = (cmd: string, card: string): string => {
 }
 // WORKER ACTIVITY: a line a card, its mark (it turns with `motion`), its ID and its live command made short; on the
 // right the tool and when the step started. A card that streams no command shows its step. A card that waits for the
-// landing turn shows the ID of the card that has it (turnWait). A card in its Test step
+// landing turn shows the ID of the card that has it, then the kind of wait (turnWait). A card in its Test step
 // whose track gives test counts shows, in place of the command, a bar of its tests done of all: `▰▰▰▰▰▰▰▰▱▱ 72/89 · 3 failed`.
 export const activityModel = (s: State, snap: Snap, w: number, frame: number): Line[] => [
   section('WORKER ACTIVITY', '', w),
@@ -1309,18 +1310,21 @@ export const activityModel = (s: State, snap: Snap, w: number, frame: number): L
   ...snap.belt.map((b): Line => {
     const m = /^([A-Za-z][\w.-]*): ([\s\S]*)$/.exec(b.live?.action ?? '')
     const wait = turnWait(b)
-    const what = wait || (m ? shortCommand(m[2], b.card) : b.live?.action ? shortCommand(b.live.action, b.card) : stepOf(b))
+    let what = wait?.text || (m ? shortCommand(m[2], b.card) : b.live?.action ? shortCommand(b.live.action, b.card) : stepOf(b))
     const tests = b.track?.at === 3 ? b.track.tests : null
-    const shown: Line = tests ? [...gauge(tests.of ? (100 * tests.done) / tests.of : 0), { t: ` ${tests.done}/${tests.of}${tests.failed ? ` · ${tests.failed} failed` : ''}` }] : [{ t: what }]
     const at = b.track?.since ?? b.stepAt
     let right = [m?.[1] ?? '', at === null ? '' : clockOf(at)].filter(Boolean).join(' · ')
     // A card that waits for the landing turn drops the clock when the clock would cut the ID of the card that has the
-    // turn: spread() gives the text w - clock - 2 columns, and the cut text ends in `…`. When that ID is still cut with
-    // no clock, a part drops its parent (`#1596 of #1600` reads `#1596`).
+    // turn or the first letter of the kind of wait after it (`l` of `lands`, `n` of `next`): spread() gives the text
+    // w - clock - 2 columns, and the cut text ends in `…`. When the row cuts them with no clock too, a part drops its
+    // parent (`#1596 of #1600` reads `#1596`). When the row still cuts them, the ID of the card that has the turn is
+    // cut (`red 19e3…`), so the kind of wait shows after it.
     let own = beltId(b)
-    const need = (id: string) => (b.waitsOn ? cols(`${workMark(frame)} ${id}  ${idOf(b.waitsOn)}`) + 1 : 0)
-    if (wait && need(own) > w - cols(right) - 2) right = ''
-    if (wait && need(own) > w) own = idOf(b)
+    const cuts = (room: number) => !!wait && cols(`${workMark(frame)} ${own}  ${wait.id} ${wait.kind[0]}`) + 1 > room
+    if (cuts(w - cols(right) - 2)) right = ''
+    if (cuts(w)) own = idOf(b)
+    if (wait && cuts(w)) what = `${plain(fitWidth([{ t: wait.id }], w - cols(`${workMark(frame)} ${own}  `) - 3))}${wait.text.slice(wait.id.length)}`
+    const shown: Line = tests ? [...gauge(tests.of ? (100 * tests.done) / tests.of : 0), { t: ` ${tests.done}/${tests.of}${tests.failed ? ` · ${tests.failed} failed` : ''}` }] : [{ t: what }]
     const left: Line = [{ t: `${workMark(frame)} `, c: C.work }, { t: `${own}  `, c: C.name, b: true }, ...shown]
     return spread(left, right ? { t: right, d: true } : null, w)
   }),
