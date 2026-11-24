@@ -646,9 +646,9 @@ privwords() {
   terms=$(termsfile); [ -z "${2:-}" ] || terms=''
   [ -n "$terms" ] || [ -n "${2:-}" ] || ! termsnamed || { echo "conveyor: privacy: the host file's terms file cannot be read" >&2; return 1; }
   t=$(mktemp) || return 1
-  # One line per word: the word, then each decoding of it (one line, its line breaks made spaces).
-  jq -rn --arg a "$a" "$row"' $a | [scan("\\S+")] | unique[] | row' > "$t" && l=$(privhit) \
-    && w=$(jq -rn --arg a "$a" --arg l "$l" '[$a | scan("\\S+")] | unique as $w
+  # One line per word: the word, then each decoding of it (line breaks made spaces). jq reads the text from a file (bug: a big diff passed one argument over Linux's 128 KiB limit).
+  jq -rn --rawfile a <(printf '%s' "$a") "$row"' $a | [scan("\\S+")] | unique[] | row' > "$t" && l=$(privhit) \
+    && w=$(jq -rn --rawfile a <(printf '%s' "$a") --arg l "$l" '[$a | scan("\\S+")] | unique as $w
       | [$l | split("\n")[] | select(. != "") | capture("^(?<l>[0-9]+) (?<n>.*)") | {w: $w[(.l | tonumber) - 1], n}]
       | unique_by(.w)[] | "\(.n)\t\(.w)"') || { rm -f "$t"; return 1; }
   # Each line of the text with the words found made "_": a line that still hits holds a hit of several words.
@@ -656,15 +656,15 @@ privwords() {
     | [$a | split("\n") | to_entries[] | .key as $k | .value | [scan("\\s+|\\S+")] | . as $tok
       | [range(length) | select($tok[.] | test("^\\S"))] as $p | {k: $k, tok: $tok, p: $p,
         masked: ([$tok[] | if $s[.] then "_" else . end] | join(""))}]'
-  jq -rn --arg a "$a" --arg w "$w" "$row$wins"'[] | .masked | row' > "$t" && l=$(privhit) || { rm -f "$t"; return 1; }
+  jq -rn --rawfile a <(printf '%s' "$a") --arg w "$w" "$row$wins"'[] | .masked | row' > "$t" && l=$(privhit) || { rm -f "$t"; return 1; }
   if [ -n "$l" ]; then
     # Every run of two or more words of those lines that holds no word found, each checked as a piece.
     local runs="$wins"' | ($l | split("\n") | map(select(. != "") | split(" ")[0] | tonumber - 1)) as $hl
       | [.[] | select(IN(.k; $hl[])) | . as $x | range($x.p | length) as $i | range($i + 1; $x.p | length) as $j
         | select(all($x.p[$i:$j + 1][]; $s[$x.tok[.]] | not))
         | {k: $x.k, i: $i, j: $j, r: ($x.tok[$x.p[$i]:$x.p[$j] + 1] | join(""))}]'
-    jq -rn --arg a "$a" --arg w "$w" --arg l "$l" "$row$runs"'[] | .r | row' > "$t" && rc=$(privhit) \
-      && w+=$'\n'$(jq -rn --arg a "$a" --arg w "$w" --arg l "$l" --arg rc "$rc" "$runs"' as $r
+    jq -rn --rawfile a <(printf '%s' "$a") --arg w "$w" --arg l "$l" "$row$runs"'[] | .r | row' > "$t" && rc=$(privhit) \
+      && w+=$'\n'$(jq -rn --rawfile a <(printf '%s' "$a") --arg w "$w" --arg l "$l" --arg rc "$rc" "$runs"' as $r
         | [$rc | split("\n")[] | select(. != "") | capture("^(?<l>[0-9]+) (?<n>.*)") | $r[(.l | tonumber) - 1] + {n}]
         | unique_by(.k, .i, .j) | . as $h
         | .[] | . as $x | select(any($h[]; .k == $x.k and .i >= $x.i and .j <= $x.j and (.i != $x.i or .j != $x.j)) | not)
@@ -683,7 +683,7 @@ privmask() {
   # A private key is masked whole first, from its BEGIN line to its END line, as one mark: the check flags its BEGIN
   # line alone, and its body and END line are the key. Bug: only the BEGIN line was masked. Then a run of several
   # words (privwords()) is masked, then each word.
-  jq -rn --arg a "$a" --arg w "$w" '($w | split("\n") | map(select(. != "") | split("\t") | {key: .[1], value: .[0]})) as $e
+  jq -rn --rawfile a <(printf '%s' "$a") --arg w "$w" '($w | split("\n") | map(select(. != "") | split("\t") | {key: .[1], value: .[0]})) as $e
     | ($e | map(select(.key | test("\\s") | not)) | from_entries) as $m
     | ($a | gsub("-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----"; "<token>")) as $a
     | reduce ($e[] | select(.key | test("\\s"))) as $r ($a; split($r.key) | join("<\($r.value)>"))

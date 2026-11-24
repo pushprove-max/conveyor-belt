@@ -196,41 +196,82 @@ decline() { # <card> <issue> <why>, the findings on stdin, one a line: each to t
 # spelling of a listed file is that file, and a longer name that starts with one (a.sh.bak) is not. A name may hold
 # spaces: every run of words between the finding's other separators is a candidate. A "*" is a separator too, so a
 # name in Markdown emphasis (**conveyor/lib/**) is that name. The sentence marks a candidate ends in (".", "?", "!") are dropped.
+# A candidate with its leading and closing "_" dropped is a candidate too, so a name in emphasis of underscores
+# (__conveyor/lib/__) is that name, and a name that starts or ends in "_" is still read whole.
 onpipeline() {
   jq -r --arg f "$1" 'def norm: reduce (split("/")[] | select(. != "" and . != ".")) as $s ([]; if $s == ".." and length > 0 and .[-1] != ".." then .[:-1] else . + [$s] end) | join("/");
     map(norm) as $e | [$f | scan("[^\\]\\[:,;()\u0027\"`<>*]+") | [splits("\\s+") | select(. != "")] as $w
-      | range(0; $w | length) as $i | range($i + 1; ($w | length) + 1) as $j | $w[$i:$j] | join(" ") | sub("[.?!]+$"; "") | norm]
+      | range(0; $w | length) as $i | range($i + 1; ($w | length) + 1) as $j | $w[$i:$j] | join(" ") | sub("[.?!]+$"; "") | (., (sub("^_+"; "") | sub("_+$"; ""))) | norm]
     | if any(. as $p | $e | any(. as $x | $x == "" or $p == $x or ($p | startswith($x + "/")))) then "1" else "" end'
 }
 # <finding> <worktree>: prints 1 when the finding names a file, and each file it names is one of the worktree's staged
 # change (the card's change, as its review read it); a name with no folder counts as the changed file of that name. A
-# file it names: a word with a "/" that ends in an extension or a "/", or is a tracked path; or a word that is a tracked
-# file's name or a changed file. A word is a run of letters, digits and _.@+/- (so a ":<line>" is not part of it), its
-# leading "./" and closing "." dropped. Bug it stops: a follow-up that changes another pipeline file let through with no
+# file it names: a word with a "/" that ends in an extension or a "/", is a tracked path, or starts with a tracked
+# top folder (a new file: conveyor/lib/newguard, or in a new folder: conveyor/lib/guards/newguard); or a word that is a tracked file's name or a changed file. A word is a run of
+# letters, digits and _.@+/- (so a ":<line>" is not part of it), its leading "./" and closing "." dropped; a word that
+# names no file as written is read again with its leading and closing "_" dropped (Markdown emphasis:
+# __conveyor/lib/newguard__). Bug it stops: a follow-up that changes another pipeline file let through with no
 # one asked.
 ownonly() {
   jq -rn --arg f "$1" --rawfile ch <(git -C "$2" diff --cached --no-renames --name-only 2>/dev/null) --rawfile tr <(git -C "$2" ls-files 2>/dev/null) '
     def lines: split("\n") | map(select(. != ""));
     ($ch | lines) as $c | ($tr | lines) as $t | ($t | map(split("/")[-1])) as $tn | ($c | map(split("/")[-1])) as $cn
-    | [$f | scan("[A-Za-z0-9_.@+/-]+") | sub("^(\\./)+"; "") | sub("\\.+$"; "")
-       | select(. != "" and ((contains("/") and (test("\\.[A-Za-z0-9]+$") or endswith("/") or IN($t[]))) or IN($tn[]) or IN($c[])))]
+    | ([$t[] | select(contains("/")) | {key: split("/")[0], value: true}] | from_entries) as $d
+    | def named: . != "" and ((contains("/") and (test("\\.[A-Za-z0-9]+$") or endswith("/") or IN($t[]) or $d[split("/")[0]])) or IN($tn[]) or IN($c[]));
+    [$f | scan("[A-Za-z0-9_.@+/-]+") | sub("^(\\./)+"; "") | sub("\\.+$"; "")
+       | [., (sub("^_+"; "") | sub("_+$"; "") | sub("^(\\./)+"; "") | sub("\\.+$"; ""))] | map(select(named)) | .[0] // empty]
     | if length > 0 and all(IN($c[]) or ((contains("/") | not) and IN($cn[]))) then "1" else "" end'
 }
 # <worktree>: prints the first finding of its review (<worktree>.review) that quotes a word the privacy check flags
-# (privwords(), lib/issues.sh) which a line the card's staged change adds holds, the word's leading and closing marks
-# (quotes, brackets, a closing . or :) aside. Such a finding is a privacy hit in the card's own change: a follow-up
+# (privwords(), lib/issues.sh) that names a hit the check finds in the lines the card's staged change adds: the finding's
+# word, with its leading and closing marks (quotes, brackets, a closing . or :) aside, as written or with its string
+# escapes decoded (\/<home>\/x is /<home>/x; <home> here is the home folder), is at a place in a flagged added word
+# (as written or decoded) where every text the check passes to its left (from the added word) and every text it passes
+# to its right, with the finding's word between them, is flagged, and no letter, digit, _ or - (or a . or @ before one)
+# goes on after it. So $C/<home>/hf (a folder under a variable) is no hit for /<home>/hf, nor is /<home>/hf2, and in
+# PATH=/<home>/y/bin:/<home>/x/bin /<home>/x/bin is a hit though /<home>/y/bin is one too. Such a finding is a privacy hit in the card's own change: a follow-up
 # would land the hit on main, so the card fixes it (card.sh). A terms file the host file names that cannot be read does not
 # stop the check: the built-in patterns are still checked (bug: the gate was off for a home path). Prints nothing when
 # the check could not be made.
 privown() {
-  local f w x added
+  local f w x t l terms added hits
   added=$(git -C "$1" diff --cached --no-renames -U0 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+ ') || return 0
+  hits=$(privwords "$added" 2>/dev/null || privwords "$added" builtin 2>/dev/null) && [ -n "$hits" ] || return 0
+  # occ: each place {a, s, e} a flagged added word $a holds the finding's word $w; cuts: each text checked for it: its
+  # left and right contexts, and the two with the place between them.
+  local occ="def unesc: $UNESCAPE;"'def forms: [., unesc] | map(gsub("[\\n\\r]"; " ")) | unique;
+    def occ: ($w | forms | map(select(. != ""))) as $f | [$h | split("\n")[] | select(. != "") | split("\t")[1:] | join("\t") | forms[]] | unique[] as $a
+      | $f[] as $x | ($x | length) as $n | range(0; ($a | length) - $n + 1) as $s | select($a[$s:$s + $n] == $x)
+      | select($a[$s + $n:] | test("^([A-Za-z0-9_-]|[.@][A-Za-z0-9])") | not) | {a: $a, s: $s, e: ($s + $n)};
+    def cuts: occ | . as $o | range(0; $o.s + 1) as $k | range($o.e; ($o.a | length) + 1) as $m | $o.a[$k:$o.s], $o.a[$o.e:$m], $o.a[$k:$m];'
+  terms=$(termsfile); t=$(mktemp) || return 0
   while IFS= read -r f; do
     while IFS=$'\t' read -r x w; do
       w=$(sed -E 's/^[^[:alnum:]/~\\]+//; s/[^[:alnum:]]+$//' <<<"$w")
-      [ -z "$w" ] || [[ $added != *"$w"* ]] || { printf '%s\n' "$f"; return 0; }
+      [ -n "$w" ] || continue
+      # Bug: the finding's word as a substring of a flagged added word (PATH=$C/<home>/hf:/<home>/hf2 is flagged for
+      # /<home>/hf2, and a finding quoting /<home>/hf matched it), and that word taken out while another hit stayed
+      # (/<home>/x/bin in PATH=/<home>/x/bin:/<home>/y/bin, missed).
+      jq -rn --arg w "$w" --rawfile h <(printf '%s' "$hits") "$occ"'[cuts] | unique[]' > "$t" || continue
+      [ -s "$t" ] || continue
+      # A terms file that cannot be read is retried with the built-in patterns, so its error is not printed.
+      l=$("$HERE/privacy/check.sh" ${terms:+--terms "$terms"} "$t" 2>/dev/null); [ $? -le 1 ] || l=$("$HERE/privacy/check.sh" "$t"); [ $? -le 1 ] || break 2
+      jq -en --arg w "$w" --rawfile h <(printf '%s' "$hits") --arg l "$l" --arg p "$t:" "$occ"'([cuts] | unique) as $c
+        | ([$l | split("\n")[] | select(startswith($p)) | ltrimstr($p) | split(":")[0] | {key: $c[tonumber - 1], value: true}] | from_entries) as $hit
+        | any(occ; . as $o | all(range(0; $o.s + 1) as $k | select($hit[$o.a[$k:$o.s]] | not)
+          | range($o.e; ($o.a | length) + 1) as $m | select($hit[$o.a[$o.e:$m]] | not) | $o.a[$k:$m]; $hit[.] // false))' >/dev/null \
+        && { printf '%s\n' "$f"; rm -f "$t"; return 0; }
     done < <(privwords "$f" 2>/dev/null || privwords "$f" builtin 2>/dev/null)
   done < <(leftovers "$1.review")
+  rm -f "$t"; return 0
+}
+# <text>: a follow-up's title, the text cut at 200 characters; a word the cut falls in is dropped, unless it is the
+# title's only word. Bug: an example.com address cut at its 200th character read as another address (example.com with its last letter cut),
+# which the privacy check flags, so the follow-up was not filed and nothing landed.
+futitle() {
+  local t=${1:0:200}
+  [ ${#1} -le 200 ] || [[ ${1:200:1} == [[:space:]] ]] || [[ $t != *[[:space:]]* ]] || t=${t%[[:space:]]*}
+  printf '%s' "$t"
 }
 unfile() { # <parent issue> <review file> <follow-up issue>...
   local n=$1 r=$2 i j=0 found=(); shift 2
@@ -328,11 +369,11 @@ Follow-up depth: $((depth + 1))"
       [ -z "$free" ] || standinglog review-followup "a follow-up card of #$n (card $1) was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''
       # Its parent's card is filed before it lands: the card waits on that id, as an issue waits on its parent's landed line (jq/upnext.jq).
       # It keeps its parent's area label, as the follow-up issue does (more), so an area set to Never build holds it too.
-      num=$(tcadd "" "${g:0:200}" "$body"$'\n'"Depends on: $1" "$([ -z "$cost" ] || [ -n "$free" ] || echo held)" "Review follow-up of #$n" "$(jq -cn '$ARGS.positional' --args "$FOLLOWUP" ${kind:+"$kind"} ${mark:+"$mark"} ${area:+"$area"})" "$n") \
+      num=$(tcadd "" "$(futitle "$g")" "$body"$'\n'"Depends on: $1" "$([ -z "$cost" ] || [ -n "$free" ] || echo held)" "Review follow-up of #$n" "$(jq -cn '$ARGS.positional' --args "$FOLLOWUP" ${kind:+"$kind"} ${mark:+"$mark"} ${area:+"$area"})" "$n") \
         && printf '%s\t%s\n' "$num" "$f" >> "$fc" && { [ -z "$why" ] || jq -cn --arg f "$f" --arg i "$num" '{finding: $f, issue: $i}' >> "$ofc"; } || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): its card could not be started"; return 1; }
       continue
     fi
-    out=$(gh_write issue create --title "${g:0:200}" --label "$FOLLOWUP" ${kind:+--label "$kind"} ${mark:+--label "$mark"} "${more[@]}" --body "$body" 2>&1) && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
+    out=$(gh_write issue create --title "$(futitle "$g")" --label "$FOLLOWUP" ${kind:+--label "$kind"} ${mark:+--label "$mark"} "${more[@]}" --body "$body" 2>&1) && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
       || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
     nums+=("$num")
     [ -z "$why" ] || jq -cn --arg f "$f" --argjson i "$num" '{finding: $f, issue: $i}' >> "$ofc" \
