@@ -288,13 +288,14 @@ holdwaited() { # <worktree> [lane]
 # mainwaited() does), then is fitted onto main and tested again. Its ready file stays, with any pass it holds: the card
 # keeps its place in batching, and a pass of its tests after the wait is marked on that file (tested()). Its worktree is
 # still on the red commit while it waits on a claim, but settle() runs no test of the card there (the commit has an entry in the
-# main-red record: redhere()), so it is fitted onto main first. A card that cannot give its files way (giveway(): it did so
-# GIVEWAY times) does not wait: the main-red fix card may need them, and both would wait. Returns 9 when the step goes on
-# (main is not red, or the card does not wait); else sets go and returns as cardfailed() does.
+# main-red record: redhere()), so it is fitted onto main first. It gives its files way for the wait even when it did so
+# GIVEWAY times (giveway() red): the main-red fix card may need them, and both would wait. One whose claim could not be
+# given way does not wait. Returns 9 when the step goes on (main is not red, or the card does not wait); else sets go
+# and returns as cardfailed() does.
 mainredhold() {
   local mwon rc hw
   mapfile -t mwon < <(redhere "$c") && [ ${#mwon[@]} -gt 1 ] || return 9
-  locked giveway "$c" "$wt" || ! jq -e '.held == true' "$wt.claim" >/dev/null 2>&1 || return 9
+  locked giveway "$c" "$wt" red || ! jq -e '.held == true' "$wt.claim" >/dev/null 2>&1 || return 9
   echo "conveyor: card $c: main is red at ${mwon[0]:0:12} (${mwon[*]:1}): its tests do not start; it waits for main to change"
   hw=$SECONDS; redholdwait "$wt" "$c"; mainsec=$((mainsec + SECONDS - hw))
   unmate; away=''; caught=''
@@ -361,7 +362,8 @@ cardfailed() {
     fi
   elif [ "$route" = main ]; then
     echo "conveyor: card $c: every case it still fails fails on main too: it waits for main to change"
-    rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
+    # A card at the give-way limit gives its files way too (giveway() red): the main-red fix card may need them.
+    rm -f "$wt.ready"; locked giveway "$c" "$wt" red; began "$c" "$n" test
     mapfile -t mwon < <(jq -r '.mainRun.sha, (.verdicts[] | select(.verdict == "main") | .case)' <<<"$t")
     mainwaited "$wt" "${mwon[@]}"; held=1
   fi

@@ -298,15 +298,18 @@ docsonly() { # <patch of its change, by its absolute path> <id>
 # that were waiting for its files then (for). gave counts its give-ways; one that has given way GIVEWAY times keeps
 # its claim, as before give-ways (not for a fix round while a card is stacked on it, stackto()): returns 1 then, and when
 # it holds nothing to give. fixing marks a give-way for the
-# fix of the card's failed tests, for the Board; fix one for the fix of its review's findings.
+# fix of the card's failed tests, for the Board; fix one for the fix of its review's findings. red gives way to wait for
+# main to change while main is red (cardland.sh mainredhold(), cardfailed()): not capped, as the card cannot land until
+# main changes and the main-red fix card may need its files: a claim kept then has both wait for good.
 GIVEWAY=3
-giveway() { # <card> <worktree> [fixing|fix]; under the lock
+giveway() { # <card> <worktree> [fixing|fix|red]; under the lock
   local o f='[]' s=false
+  [ "${3:-}" != red ] || s=true
   # Gone back for a fit, a review, a fix or a run again, it lands next no more: its landing turn ends (turnon()).
   turnfree "$1"
   # A card stacked on this one (stackto()) goes on once this one gives way for a fix round (claim()): that give-way is
   # not capped, and a claim already away (given way to be fitted, reviewed or tested again) is marked for that round.
-  if [ -n "${3:-}" ] && jq -e --arg c "$1" 'select(.on == $c)' "$CARDS"/*.stack >/dev/null 2>&1; then
+  if [ "${3:-red}" != red ] && jq -e --arg c "$1" 'select(.on == $c)' "$CARDS"/*.stack >/dev/null 2>&1; then
     s=true
     if jq -e '.away == true' "$2.claim" >/dev/null 2>&1; then
       jq -c --arg x "$3" '.[$x] = true' "$2.claim" > "$2.claim.new" && mv -f "$2.claim.new" "$2.claim"; return 1

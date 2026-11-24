@@ -595,8 +595,8 @@ failure gets a verdict:
   for its change is kept, and so is its place in a batch. A card that waits at a file claim for another card runs no
   test of its own while its worktree is on a commit that the record holds an entry for, even when main has moved past
   that commit: it is fitted onto main first. A card with no GitHub issue (a branch's, a Tests page card) waits as any
-  card does. A card that has given way as many times as it may (it keeps its files) does not wait, so it cannot hold up
-  the fix card; its tests start. Only a card that a loop with no limit on its picks started (`conveyor.sh serve`, or
+  card does. A card that has given way as many times as it may also gives up its files for this wait, and for a wait
+  after a failed run whose failures all fail on main too, so it cannot hold up the fix card. Only a card that a loop with no limit on its picks started (`conveyor.sh serve`, or
   `conveyor.sh run` with no number) waits. A card of `conveyor.sh land-branch` (it may land the repair itself), and a
   card of a run limited with a number or with `--only` (it may start no fix card), start their tests. Its other steps
   (build, review, fix, lint) do not wait, and a main-red fix card (a card that an entry of the record names) runs its
@@ -1751,7 +1751,8 @@ fixed or tested again first gives way for that time: it holds nothing, the cards
 meanwhile, and it claims again once it is ready (its review and tests passed and its change applies to main), after
 the cards that were waiting for its files when it gave way. The Board shows it as "fitting onto main (gave way to
 #N)", N being the card that took its turn, or as "gave way to #N while fixing" when its tests failed and it gave way
-for their fix; its live record names that card too (gaveWay). A card that has given way 3 times keeps its next turn.
+for their fix; its live record names that card too (gaveWay). A card that has given way 3 times keeps its next turn,
+but not while it waits for main to change when main is red.
 
 With batches on (`landBatch` over 1), a card that would wait on a card that holds its files, and that it does not go
 past once its own tests pass (a card whose tests passed first, or a card in `order`), does not sleep. It is

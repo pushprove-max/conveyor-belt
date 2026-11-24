@@ -120,14 +120,35 @@ t_mainredholdlanded() {
     "the card waited on an entry whose fix card landed"
 }
 
-# Bug it catches: a card that has given way GIVEWAY times keeps its claim (giveway() refuses to give it up), and waited
-# for main while it held files the fix card of main's commit may need: each waited for the other. It runs its tests
-# as before, and its claim is still held.
+# Bug it catches: a card that has given way GIVEWAY times kept its claim (giveway() refused to give it up), so it ran its
+# tests on red main, and they failed there on main's cases. It now gives its files way for the wait (giveway() red), so
+# the fix card of main's commit that needs them is not held up, and waits for main as any card does. Its claim, with
+# gave at 3 and settle() stubbed, is away after the wait: nothing claimed it again.
 t_mainredholdclaim() {
   redholdsetup
-  redholdnow 'mainred c1 "a.test: one" a.test "$s"; echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":true,\"gave\":3}" > "$wt.claim"' \
-    "a card that cannot give its files way waited for main"
-  jq -e '.held == true' "$FXWT.claim" >/dev/null 2>&1 || fail "the card that cannot give its files way lost its claim: $(cat "$FXWT.claim" 2>&1)"
+  redholdwaits 'mainred c1 "a.test: one" a.test "$s"; echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":true,\"gave\":3}" > "$wt.claim"'
+  [ "$(jq -c '[.held, .away]' "$FXWT.claim" 2>&1)" = '[false,true]' ] \
+    || fail "a card that had given way 3 times kept its claim while it waited for main: $(cat "$FXWT.claim" 2>&1)"
+}
+
+# Bug it catches: a card that had given way GIVEWAY times, whose tests then failed only on cases that fail on main too,
+# waited for main to change in cardfailed() with its claim held, as giveway() refused it: the main-red fix card that
+# needs the same files waited at its claim, and nothing freed either. cardfailed() runs its main route, each step
+# around the wait stubbed: mainwaited() prints the claim as the wait starts, and settle() stops the card.
+t_mainredfailclaim() {
+  # shellcheck disable=SC2034 # FXWT is read by fx_in, a fix card's worktree; this case has none
+  local FXWT=$T/$CASE/none
+  setup '[]'
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'c=c7 n=7 wt=$T/$CASE/c7 rc=1 own="" sec=1 mainsec=0 br="" sprompt="" issue=""
+    echo "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":true,\"gave\":3}" > "$wt.claim"
+    depsmissing() { :; }; voidrun() { return 1; }; testfails() { :; }; testroute() { echo main; }
+    verdicts() { echo "{\"mainRun\":{\"sha\":\"abc\"},\"verdicts\":[{\"case\":\"a.test: one\",\"verdict\":\"main\"}]}"; }
+    record() { :; }; failline() { :; }; testrulespass() { :; }; began() { :; }; unmate() { :; }; redbrief() { :; }; settle() { return 1; }
+    mainwaited() { echo "waits with claim $(jq -c "[.held, .away]" "$wt.claim")"; }
+    cardfailed || :'
+  grep -qx 'waits with claim \[false,true\]' "$T/$CASE/run.out" \
+    || fail "cardfailed of a card at the give-way limit whose failed case fails on main waited with its claim held: $(tr '\n' '|' < "$T/$CASE/run.out")"
 }
 
 # Fix card cfix of the entry for main's commit lands (the entry then holds main red no more), run from a case's stubs.
