@@ -50,6 +50,45 @@ EOF
   f=$(allfails 0 | jq -c .passcases) || fail "the passed cases could not be read"
   [ "$f" = '[{"file":"f.test.mjs","cases":["a b, c","d e"]}]' ] || fail "node's ✔ and TAP's ok lines are not the file's passed cases: $f"
 }
+# Issue 1639. Bug it catches: node prints a failed file it ran as a failure line of its own (`✖ <file> (<n>ms)`, or a
+# TAP `not ok` with the file's path), and that line was a failed case of the file beside the real one: a rerun of the
+# failed cases by name ran the whole file. Each failed case is under its file once, and the file itself is no case.
+t_testfailsnodefile() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+echo "== test/f.test.mjs" | tee -a "$CONVEYOR_TEST_LOG/a.log"
+printf '%s\n' '✖ adds (1.2ms)' '✔ keeps (0.3ms)' '✖ test/f.test.mjs (43.1ms)' 'not ok 1 - /src/app/test/f.test.mjs' '✖ failing tests:' '' 'test at test/f.test.mjs:2:1' '✖ adds (1.2ms)'
+echo "-- FAIL test/f.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"
+EOF
+  f=$(logfails 1 | jq -c '[.files[] | {file, cases: [.cases[].name]}]') || fail "the failures could not be read"
+  [ "$f" = '[{"file":"test/f.test.mjs","cases":["adds"]}]' ] \
+    || fail "for the node output $(tr '\n' '|' < "$T/$CASE/cmd" | head -c 400), the failed cases are not case adds alone under its file: $f"
+}
+# Issue 1639. Bug it catches: a runner that writes its `== ` lines to its log alone gave node's failure lines no file:
+# the failed case went to a file "" and its file had no case, so a rerun of the failed cases by name ran the whole part.
+# With one failed file in the run, the case is of that file.
+t_testfailsnodenofile() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+echo "== test/f.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"
+printf '%s\n' '✖ adds (1.2ms)' '✔ keeps (0.3ms)' '✖ failing tests:' '' 'test at test/f.test.mjs:2:1' '✖ adds (1.2ms)'
+echo "-- FAIL test/f.test.mjs" >> "$CONVEYOR_TEST_LOG/a.log"
+EOF
+  f=$(logfails 1 | jq -c '[.files[] | {file, cases: [.cases[].name]}]') || fail "the failures could not be read"
+  [ "$f" = '[{"file":"test/f.test.mjs","cases":["adds"]}]' ] \
+    || fail "for the node output $(tr '\n' '|' < "$T/$CASE/cmd" | head -c 400) with no == line, case adds is not under its file alone: $f"
+}
+# Issue 1639. Bug it catches: a node failure line printed before the first `== ` line of a run of two failed files went
+# to a file "", beside the same case under its file: the record held the case twice, and the copy with no file made a
+# rerun of the failed cases by name run the whole part. The case is under its file once.
+t_testfailsnodebare() {
+  mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
+printf '%s\n' '== test/f.test.mjs' '== test/g.test.mjs' >> "$CONVEYOR_TEST_LOG/a.log"
+printf '%s\n' '✖ adds (1.2ms)' '== test/f.test.mjs' '✖ adds (1.2ms)' '== test/g.test.mjs' '✖ subs (1.2ms)'
+printf '%s\n' '-- FAIL test/f.test.mjs' '-- FAIL test/g.test.mjs' >> "$CONVEYOR_TEST_LOG/a.log"
+EOF
+  f=$(logfails 1 | jq -c '[.files[] | {file, cases: [.cases[].name]}]') || fail "the failures could not be read"
+  [ "$f" = '[{"file":"test/f.test.mjs","cases":["adds"]},{"file":"test/g.test.mjs","cases":["subs"]}]' ] \
+    || fail "for the node output $(tr '\n' '|' < "$T/$CASE/cmd" | head -c 400), a failed case is not under its file once: $f"
+}
 # R389. Bug it catches: a to-do TAP case that fails (`not ok 2 - k # TODO later`) is expected to fail, and is no failure
 # of its file; no fixture held one, so a reader that took it for a failed case passed. The file failed on case real
 # alone.

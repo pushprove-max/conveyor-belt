@@ -122,8 +122,10 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
 }
 # The run on main of <units> ([{file, case}]: verdicts(), mainwait()), once for each commit of main and file however
 # many cards ask (issue 1313). $MAINPROBE keeps the results at one commit of main and state of its dependency folders,
-# {sha, deps, hits, files: {<file>: {ctl, res}}} (deps: depkey(), so a run after the folders change, as when an
-# install repairs them, never reads a result of the run before it: R98; res: the file's entry in testfails() of the
+# {sha, deps, hits, files: {<file>: {ctl, res}}} (deps: depkey() and the engine's commit, RAN, so a run after the
+# folders change, as when an install repairs them, never reads a result of the run before it: R98; nor does an engine
+# whose testfails() reads a run another way, as issue 1639's no longer names a file's own failure line as its case;
+# res: the file's entry in testfails() of the
 # run that ran it, {file, cases: []} when it failed there naming no case; null when it has none, as the file passed there),
 # and a caller takes the result of each of its files that a run beside every control it would take ran, and runs the
 # rest. A result is kept only from a run whose controls all passed, and not of a file that cachehits() names or that
@@ -156,7 +158,7 @@ mainprobe() { # <name> <units, json> <units no control is taken from, json> <oth
     { exec {l}>>"$MAINPROBE.locks/$k"; } 2>/dev/null || continue
     if flock "$l"; then lk+=("$l"); else exec {l}>&-; fi
   done < <(jq -r '[.[].file] | unique[]' <<<"$ur" | while IFS= read -r k; do printf '%s' "$k" | cksum; done | cut -d' ' -f1 | sort -un)
-  dk=$(depkey)
+  dk=$(depkey; printf 'engine %s\n' "$RAN")
   o=$(jq -ce --arg s "$sha" --arg d "$dk" 'objects | select(.sha == $s and .deps == $d)' "$MAINPROBE" 2>/dev/null) \
     && hits=$(jq -c '.hits' <<<"$o") && ctl=$(jq -cn --slurpfile h <(printf '%s' "$hits") --slurpfile u <(printf '%s' "$3") --slurpfile c <(printf '%s' "$p") "$pick") \
     && got=$(jq -c --slurpfile u <(printf '%s' "$ur") --slurpfile c <(printf '%s' "$ctl") '.files as $fs | [$u[0][].file | select($fs[.] and ($c[0] - $fs[.].ctl == []))] | unique | map({key: ., value: $fs[.].res}) | from_entries' <<<"$o") \

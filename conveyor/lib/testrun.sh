@@ -28,7 +28,7 @@
 # line of the output: `FAIL [<case>]: ...`, TAP's `not ok N - <case>` (never a TODO or SKIP one; tapjq(), lib/failat.sh: its name is read back as the case has it, and a line in a result's YAML block is no result) or node's
 # `✖ <case> (Nms)`; it is its file's when the output has `== <file>` before it for a file the logs say began, and
 # began after the file the output was in (a log is one runner's and its files run in its order, so a `== ` line that
-# goes back in its log, or names no file of the run, is a test's own), else under the file "". A case line under a
+# goes back in its log, or names no file of the run, is a test's own), else the run's one failed file's when it failed one, else under the file "" unless a file has the case (issue 1639). A case line under a
 # file that passed is that test's own output and is no failure. A runner prints each of its files' `== ` lines once,
 # in its log's order, so a case line can be of each file that leaves every file of its log up to it a `== ` line
 # before the case, in order, and every later file one after it. The logs of two runners say nothing of which ran
@@ -85,7 +85,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
     --arg rx "${FRAMERX:-}" --arg pyrx "${PYFRAMERX:-}" --arg wd "$wd" --arg wdr "$wdr" '$log[0] as $log | '"$named ${FRAMEJQ:-def frame: null; def pyend(\$l): false;} ${RECJQ:-def recs(\$r; \$l): .;} $(tapjq 2>/dev/null || printf %s 'def tapname: .; def tapyaml: .;')"'
     def cut: if length <= 200 then . else (.[0:201] | sub("\\s+\\S*$"; "")) as $w | if ($w | length) > 200 then .[0:200] else $w end end;
     def failcase: [capture("^FAIL \\[(?<c>[^\\]]+)\\]: "), (capture("^\\s*not ok [0-9]+ (- )?(?<c>.*\\S)") | tapname), capture("^\\s*✖ (?<c>.+) \\([0-9.]+ms\\)$")][0].c;
-    (if $log.files == [] and $cmd != "" then $cmd else null end) as $only
+    (if $log.files == [] and $cmd != "" then $cmd else null end) as $only | (if ($log.failed | length) == 1 then $log.failed[0] else "" end) as $one
     | ([inputs] | tapyaml) as $ls | ($log.order | map(length)) as $ns
     # $at: of each failing case, [file, line] of the first place a stack after its failure line names in the worktree
     # (FRAMEJQ); a passed case line or a `== ` line of a file of the run (not the `=== ` of an assertion node prints before
@@ -130,8 +130,8 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
     | reduce range(0; $ls | length) as $k ({cur: "", at: ($ns | map(-1)), seen: {}, oks: {}, files: ([$only // $log.failed[]] | map({file: ., cases: []}))};
       $ls[$k] as $l
       # A passed case: `ok <case>`, `✔ <name> (<n>ms)` of node or `ok <n> - <name>` of TAP (not a skipped or to-do
-      # one), named as its failure lines name it. Node also prints a file it ran as one of these lines (as when its
-      # name filter ran no case): a name that is the file itself, or a path of it, is no case.
+      # one), named as its failure lines name it. Node also prints a file it ran as one of these lines, or as a failure
+      # line when it failed: a name that is the file itself, or a path of it, is no case, passed or failed (issue 1639).
       | (if .cur == "" then $only else .cur end) as $of
       | ([$l | capture("^ok (?<c>\\S+)$"), capture("^\\s*✔ (?<c>.+) \\([0-9.]+ms\\)$"),
           (select(test("^\\s*ok .*# *(TODO|SKIP)"; "i") | not) | capture("^\\s*ok [0-9]+ (- )?(?<c>.*\\S)") | tapname)][0].c
@@ -139,16 +139,16 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
       | (if $o and $of then .oks[$of] += [$o] else . end)
       | ($l | failcase) as $c
       | (if $c and ($l | test("^\\s*not ok .*# *(TODO|SKIP)"; "i") | not) then
-          (if $whole | not then [.cur | select(. == "" or IN($log.failed[]))]
-           elif all($pre[$k][]; . == 0) then [$only // ""]
+          (if $whole | not then [.cur | if . == "" then $one else . end | select(. == "" or IN($log.failed[]))]
+           elif all($pre[$k][]; . == 0) then [$only // $one] # $one: a line no `== ` line gives a file is of the one failed file, when there is one; after recs, a case a file has is not also one with no file (issue 1639)
            else .seen as $seen | [range(0; $ns | length) as $r | range(([$ns[$r] - $suf[$k][$r] - 1, 0] | max); $pre[$k][$r]) as $j
              | $seen["\($r) \($j)"] as $t | select(all(range(0; $ns | length); . == $r or $pre[$t + 1][.] + $suf[$k][.] >= $ns[.]))
              | $log.order[$r][$j] | select(IN($log.failed[]))] end) as $own
           | reduce $own[] as $file (.; (if any(.files[]; .file == $file) then . else .files += [{file: $file, cases: []}] end)
-            | .files |= map(if .file == $file and (any(.cases[]; .name == $c) | not) then .cases += [{name: $c, line: ($l | sub("^\\s+"; "") | cut)}] else . end))
+            | .files |= map(if .file == $file and (any(.cases[]; .name == $c) | not) and ($c == $file or ($c | endswith("/" + $file)) or ($file | endswith("/" + $c)) | not) then .cases += [{name: $c, line: ($l | sub("^\\s+"; "") | cut)}] else . end))
         else . end)
       | reduce $hs[$k][] as [$r, $i] (.; .seen["\($r) \($i)"] = $k | if $i > .at[$r] then .cur = $log.order[$r][$i] | .at[$r] = $i else . end))
-    | recs($rec; $log) | (($log.open | flatten) - $log.notrun) as $open | ($log.files - $log.failed - $open - $log.notrun) as $passed | .files as $fs
+    | recs($rec; $log) | .files |= ([.[] | select(.file != "") | .cases[].name] as $fc | map(if .file == "" then .cases |= map(select(IN(.name; $fc[]) | not)) else . end) | map(select(.file != "" or .cases != []))) | (($log.open | flatten) - $log.notrun) as $open | ($log.files - $log.failed - $open - $log.notrun) as $passed | .files as $fs
     | {of: ($log.n // ($log.files | length | if . == 0 then null else . end)),
        files: (.files | map((.cases |= map(. + if $at[.name] then {at: $at[.name]} else {} end)) + if .cases == [] and $fat[.file] then {at: $fat[.file]} else {} end)),
        timeout: (if $rc == "124" then {sec: ($sec | tonumber? // $sec), file: ($only // ($open | last))} else null end),

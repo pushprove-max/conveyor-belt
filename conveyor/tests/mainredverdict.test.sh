@@ -111,6 +111,22 @@ t_mainkeepstopped() {
   [ "$out" = '["a.test"]' ] || fail "mainkeep of units $u after main's run $mf kept files other than a.test: $out"
 }
 
+# Issue 1639 (E2, review). Bug it catches: the results of a run on main were kept by main's commit and dependency
+# folders alone, so after an engine update a card at the same commit read a result that the older engine's testfails()
+# had read (a node load failure kept with its file's path as its case), and as its own run now names no case for that
+# failure, the verdict was the card's. Card c7 runs a.test on main under engine e1; c8, at the same commit and folders
+# under engine e2, runs a.test on main again.
+t_mainprobeengine() {
+  local s c fl='{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]}]}'
+  mrshared
+  for c in c7 c8; do
+    git -C "$R" worktree add -q --detach "$T/$CASE/cards/$c" || fail "card $c's worktree could not be made"
+    eng 'RAN=e'"${c#c}"'; TEST_GIVEN=; TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts '"$c"' "$CONVEYOR_CARDS/'"$c"'" '"'$fl'"'' > "$STUB/v.$c" 2>&1
+  done
+  [ "$(tr '\n' ' ' < "$STUB/mainruns")" = 'a.test a.test ' ] \
+    || fail "card c8, failing $fl under engine e8 at the commit c7 ran a.test on under engine e7, read c7's run and did not run a.test on main again: $(cat "$STUB/mainruns" "$STUB/v.c8")"
+}
+
 # Bug (E6, follow-up of #1594): redrun() read timeout alone, so of two files the time limit stopped (testfails()
 # stopped), the one timeout did not name got the verdict none, not fail. The stand-in tests() ends as a time-out does
 # (124) and testfails() names both files stopped: each file's verdict is fail.
