@@ -54,6 +54,12 @@ its own, and the Board's Rules tab sets them in its Judge row.
 - `lint`: the rule Lint check, on by default. On, each card's change goes through the review gate (Lint, below)
   before each review and the landing gate before it lands. The exception is a review of the change that the landing
   gate's lint fix left: while no other session changes it, it has no review gate, because the landing gate checks it. Off, no lint command runs in a card and the brief has no `# Lint` section.
+- `failfast`: the rule Stop a card's tests at the first failure, on by default. On, a card's test step ends at its
+  first failed case: no other test file or case starts, the files that still run stop, and the step names the files
+  that did not run. Each file's command gets `CONVEYOR_TEST_FAILFAST=1`. The run again after such a stop runs the failed
+  file, so the cases after the failed one run too; its cases that passed run again too, unless the test command
+  leaves out the cases that its `CONVEYOR_TEST_RERUN` list names as passed. Off, the step runs every case that it
+  selects. A release's suite runs every case with either setting.
 - `split`: the rule Split large issues, `off`, `shadow` or `on`. It is on by default (`conveyor.sh control rules split=<off|shadow|on>`).
   Before a card builds, code measures its issue against the pack's `split` limits; an issue that reaches
   one goes to the judge one time, which answers keep or 2 or 3 slices. Shadow records the verdict on the card's
@@ -509,7 +515,9 @@ its wait and its run.
 
 A card's test step runs each test file of its list alone through the pack's `test.fileCommand`, in its worktree. A run that ends with cases that did not pass (they
 failed, or never finished because the run was killed or timed out) runs once more, straight away and on the same test
-slot, for those cases alone: the cases that passed are not run again. Only when a case still does not pass does the
+slot, for those cases alone: the cases that passed are not run again. After a run that stopped at its first
+failure (`failfast`, above), it runs each failed file, and repeats the cases of that file that passed when the test
+command cannot leave them out. Only when a case still does not pass does the
 card go to its fix session; a card whose re-run passes goes on with no fix session. A fix session that leaves the
 card's staged change as it was is followed by a run of only the cases that had not passed, not the whole selection.
 A fix session (or any session) that changes the change is followed by a run of the cases that had not passed in the

@@ -454,6 +454,7 @@
 {"area": "testrun", "file": "conveyor/lib/loadfactor.sh"}
 {"area": "testrun", "file": "conveyor/lib/fileeach.sh"}
 {"area": "testrun", "test": "fileeach.test.sh"}
+{"area": "testrun", "test": "failfast.test.sh"}
 {"area": "testrun", "file": "conveyor/lib/filerun.sh"}
 {"area": "testrun", "test": "filerun.test.sh"}
 {"area": "testmap", "test": "testmap.test.sh"}

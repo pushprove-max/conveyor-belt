@@ -382,7 +382,10 @@ one control, and the value in force is the selected part.
    the account's list and does not ask for a box. With no box named, an admin's check also asks the account for a box
    under the tag, which can create one; a member's check does not. A missing tool shows **Set up now**, which
    is off until Conveyor can run `.conveyor/test-machine.sh` from the Board
-   ([Where the suite runs](releases.md#where-the-suite-runs)). **Reserved cores**
+   ([Where the suite runs](releases.md#where-the-suite-runs)). **Stop a card's tests at the first failure** is On
+   by default. On, a card's test step ends at its first failed case, and the step names the test files that did not
+   run. Off, the step runs every case that it selects. A release runs every case with either setting
+   ([Which tests a card runs](configuration.md#which-tests-a-card-runs)). **Reserved cores**
    shows the cores that card work does not use. You set them in the host file
    ([Reserved cores](configuration.md#cores-kept-for-you)). The row also links to the Tests page, which holds the test
    limits.

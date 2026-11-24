@@ -117,6 +117,8 @@
       rows.append(row);
     });
     if (files.length) box.append(rows);
+    const notRun = (Array.isArray(f.notRun) ? f.notRun : []).filter((x) => typeof x === 'string'); // a run that stopped at its first failure (testfails())
+    if (notRun.length) box.append(h('p', 'test-notrun', `Not run, as the run stopped at its first failure: ${notRun.join(', ')}`));
     return box;
   }
   // A lint command's short name for its row: the script's file name (`bash .conveyor/lint-shell.sh {files}` is

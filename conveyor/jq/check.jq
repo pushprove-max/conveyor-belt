@@ -2,9 +2,11 @@
 # field the check refused (one not in the list below, a required one missing, or the first whose value it refuses),
 # "(not JSON)", "(not an object)", or "step" when only the fields together are refused for that step.
 # A test run's failures (testfails(), lib/testrun.sh); stopped, only of a run that timed out: the files begun and not
-# ended (testaction.sh testfacts() reads it).
-def fails: type == "object" and (keys - ["stopped"]) == ["files", "of", "timeout"] and (.of | . == null or type == "number")
+# ended (testaction.sh testfacts() reads it); notRun, only of a run that stopped at its first failure: the files it did
+# not run or did not finish.
+def fails: type == "object" and (keys - ["stopped", "notRun"]) == ["files", "of", "timeout"] and (.of | . == null or type == "number")
   and (.stopped // [] | type == "array" and all(type == "string"))
+  and (.notRun // [] | type == "array" and all(type == "string"))
   and (.files | type == "array" and all((.file | type == "string") and (.cases | type == "array" and all(keys == ["line", "name"] and all(type == "string")))))
   and (.timeout | . == null or (type == "object" and keys == ["file", "sec"]));
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];

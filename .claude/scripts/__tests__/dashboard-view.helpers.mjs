@@ -21,12 +21,36 @@ import { fileURLToPath } from 'node:url';
 // its name, so a file whose cases differ between loads fails rather than runs the wrong body.
 const POOL = workerData && workerData.dashboardCases;
 const registered = [];
+// With CONVEYOR_TEST_FAILFAST=1 (a card's Test step with the rule Stop a card's tests at the first failure on:
+// .conveyor/test-changed.sh), a file's first failed case stops it: no further case starts, each case still running is
+// ended with its worker, and each of them and each case not begun is reported skipped, not run, never as passed. The
+// mark is taken out of this process's environment, so no worker and nothing a case starts reads it.
+const FAST = !POOL && process.env.CONVEYOR_TEST_FAILFAST === '1';
+if (!POOL) delete process.env.CONVEYOR_TEST_FAILFAST;
+const NOTRUN = Symbol('not run');
+// The cases node runs of the file: its --test-name-pattern and --test-skip-pattern options (node --test gives them to
+// the file's process; .conveyor/test-changed.sh nodecases() keeps off a flaky case with one), each read as node reads
+// it. A case node does not run is not run in a worker either: under FAST its failure stopped the file, and node,
+// which reports no failure of it, passed the file with the cases it selected not run.
+const patterns = (flag) => process.execArgv.filter((a) => a.startsWith(`${flag}=`)).map((a) => {
+  const p = a.slice(flag.length + 1);
+  const m = /^\/(.*)\/([a-z]*)$/s.exec(p);
+  return m ? new RegExp(m[1], m[2]) : new RegExp(p);
+});
+const NAMES = POOL ? [] : patterns('--test-name-pattern');
+const SKIPS = POOL ? [] : patterns('--test-skip-pattern');
+const selected = (name) => (NAMES.length === 0 || NAMES.some((r) => r.test(name))) && !SKIPS.some((r) => r.test(name));
 export function cases(file) {
   if (POOL) return (name, fn) => { registered.push({ name, fn }); };
   let pool = null;
   let count = 0;
   const queue = [];
   const start = () => {
+    // The stop at the first failed case (FAST): it runs before the failed case's worker could take another.
+    const halt = () => {
+      for (const j of queue.splice(0)) j.done(NOTRUN);
+      for (const x of pool) { const j = x.job; x.job = null; if (j) j.done(NOTRUN); x.terminate(); }
+    };
     const take = (wk) => {
       const job = queue.shift();
       if (!job) { if (pool.every((x) => !x.job)) for (const x of pool) x.terminate(); return; }
@@ -39,9 +63,15 @@ export function cases(file) {
     pool = Array.from({ length: size }, () => {
       // Not the test runner's flags: a worker given them never starts. Its heap is capped as the runner's is.
       const wk = new Worker(new URL(import.meta.url), { workerData: { dashboardCases: file }, execArgv: [], resourceLimits: { maxOldGenerationSizeMb: 1024 } });
-      wk.on('message', (m) => { const { job } = wk; wk.job = null; m.ok ? job.done() : job.fail(Object.assign(new Error(m.message), { stack: m.stack })); take(wk); });
+      // A message of a worker the stop ended has no case left to settle.
+      wk.on('message', (m) => {
+        const { job } = wk; wk.job = null;
+        if (!job) return;
+        if (m.ok) job.done(); else { job.fail(Object.assign(new Error(m.message), { stack: m.stack })); if (FAST) { halt(); return; } }
+        take(wk);
+      });
       // A worker that dies (an uncaught error outside a case's promise) fails the case it ran and every one left.
-      wk.on('error', (e) => { for (const j of [wk.job, ...queue.splice(0)]) if (j) j.fail(e); wk.job = null; });
+      wk.on('error', (e) => { for (const j of [wk.job, ...queue.splice(0)]) if (j) j.fail(e); wk.job = null; if (FAST) halt(); });
       wk.on('exit', (code) => { const j = wk.job; wk.job = null; if (j) j.fail(new Error(`the case's worker exited (${code})`)); });
       wk.on('online', () => take(wk));
       return wk;
@@ -49,13 +79,15 @@ export function cases(file) {
   };
   return (name, fn) => {
     assert.equal(typeof fn, 'function', `${name}: a case is a name and a body`);
+    if (count === 0) setImmediate(start);
+    // Its place in the file is kept (the worker finds a body by it); node, which filters it out, never calls the body.
+    if (!selected(name)) { count++; nodeTest(name, () => {}); return; }
     let done, fail;
     const result = new Promise((res, rej) => { done = res; fail = rej; });
     // A case can fail before node:test reaches it; its test still reports the failure.
     result.catch(() => {});
-    if (count === 0) setImmediate(start);
     queue.push({ index: count++, name, done, fail });
-    nodeTest(name, () => result);
+    nodeTest(name, (t) => result.then((v) => { if (v === NOTRUN) t.skip('not run: the file stopped at its first failed case'); }));
   };
 }
 // caseNames(file) -- the names of the cases a file registers, in its order, found by loading it as a case's worker

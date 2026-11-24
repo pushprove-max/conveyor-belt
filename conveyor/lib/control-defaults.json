@@ -21,6 +21,7 @@
     "releaseissues": true,
     "splitissues": true,
     "healsdays": 30,
+    "failfast": true,
     "never": []
   },
   "model": {

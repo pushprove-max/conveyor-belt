@@ -29,14 +29,15 @@ sidefile() { # <name> <n> [fail]
 }
 # A card's run of the test files <file>... of the worktree, each alone with bash, as its Test step runs it: the command
 # filecmd() makes for a card's list, run by testonce() with the engine as serve.sh loads it. SLOT_HOME is set, so the run
-# itself takes no slot (as in loadfactor.test.sh): each file takes one of the case's pool. Exits as the run;
+# itself takes no slot (as in loadfactor.test.sh): each file takes one of the case's pool. With SIDEFAST set, the run
+# stops at its first failure (filecmd() fast: failfast.test.sh). Exits as the run;
 # testfails()'s reading of its output is in $T/$CASE/fails.
 siderun() { # <file>...
   local w=$T/$CASE/wt
   # shellcheck disable=SC2034 # LIVE, STUCK, TEST_TIMEOUT, TEST_FILES and TEST_GIVEN (as listcmd() sets them) are read by watch(), testclock() and testonce()
   ( LIVE=0.2 STUCK=1200 TEST_TIMEOUT=${SIDELIMIT:-60} TEST_FILES=$(printf '%s\n' "$@") TEST_GIVEN=$#; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards SLOT_HOME=$T/$CASE/slot
     cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" || exit 99
-    testonce "$w" "$(filecmd bash files)"; rc=$?; testfails "$w.test" "$rc" > "$T/$CASE/fails"; exit $rc )
+    testonce "$w" "$(filecmd bash files ${SIDEFAST:+fast})"; rc=$?; testfails "$w.test" "$rc" > "$T/$CASE/fails"; exit $rc )
 }
 
 # Bug it catches (#1594): a card's Test step ran its files one at a time, though test slots were free, so its time grew

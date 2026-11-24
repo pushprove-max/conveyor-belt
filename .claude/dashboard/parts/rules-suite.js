@@ -161,6 +161,18 @@
     el.append(row('suite-mode', 'Release suite mode', 'how a release runs its test files, when its press asks no other',
       seg('Release suite mode', one, all), known ? null : S.ctx.h('span', 'board-from', 'needs a newer Conveyor')));
   }
+  // Stop a card's tests at the first failure: the record's rules.failfast (`control rules failfast=on|off`). On (the
+  // default), a card's test step ends at its first failed case and names the test files it did not run; Off runs every
+  // case it selects. A release runs every case either way. A record without it is drawn disabled.
+  function rulesFailFast(el, r) {
+    const h = S.ctx.h, on = r.failfast !== false, known = typeof r.failfast === 'boolean', name = "Stop a card's tests at the first failure";
+    const fOn = choice('On', 'failfast-on', `${name}: on`, on, () => { if (!on) send('rules', ['failfast=on'], null, ['rules', ['failfast=off']]); });
+    const fOff = choice('Off', 'failfast-off', `${name}: off`, !on, () => { if (on) send('rules', ['failfast=off'], null, ['rules', ['failfast=on']]); });
+    fOn.disabled = fOff.disabled = !known;
+    const note = !known ? h('span', 'board-from', 'needs a newer Conveyor') : on ? null : h('span', 'board-from rules-off', "off: a card's test step runs every case it selects");
+    el.append(row('failfast', name, "a card's test step ends at its first failed case and names the test files it did not run; a release runs every case",
+      seg(name, fOn, fOff), note));
+  }
   // A radio of the choice, labelled with its name and what it means.
   function kindRadio(k, name, what, shown, pick) {
     const h = S.ctx.h, lab = h('label', 'rules-suite-kind'), i = h('input');
@@ -210,6 +222,6 @@
   }
   window.DASH_APP.part('rules-suite', function (shared) {
     ({ S, num, send, button, post, row, draw, choice, seg } = shared);
-    return { rulesSuite, rulesMode, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
+    return { rulesSuite, rulesMode, rulesFailFast, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
   });
 })();

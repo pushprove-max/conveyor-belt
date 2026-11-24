@@ -396,7 +396,7 @@ cardfailed() {
   fi
   if [ "$route" = block ] || [ "$route" = fix ]; then
     tmain=''
-    [ "$route" != block ] || { block "$c" "$n" "$wt" "the changed tests failed again after their one fix round (exit $rc); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
+    [ "$route" != block ] || { block "$c" "$n" "$wt" "the changed tests failed again after their one fix round (exit $rc$(jq -r '.notRun // [] | if . == [] then empty else "; the run stopped at its first failure, so these files did not run: " + join(", ") end' <<<"${out:-null}" 2>/dev/null)); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
     tfix=1; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
     # On the testFix seat (seat(): the builder's unless the control record sets testFix); the card's second fix session of any kind runs one effort level up.
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(testfixprompt "$sprompt" "$wt" "$rc" "$out")" fix testFix "$([ "$fixed" = 0 ] || echo up)") \

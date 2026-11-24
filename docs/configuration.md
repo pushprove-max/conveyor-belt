@@ -244,6 +244,13 @@ failed most recently in a test step run first, then the others in the order of t
 says this, and the Board shows the note with the step. If no test file is linked to the change, the card runs no
 test. The card's test line says so.
 
+The rule **Stop a card's tests at the first failure** is on in a new project. When it is on, the first failed case
+ends the card's test run. No other test file starts, and Conveyor stops the files that still run. The output, the
+test line and the Board name the files that did not run. When the step runs the failed test file again, the cases
+after the failed one run too. The cases of that file that passed run again too, unless the test command can leave
+out one case of a file. When the rule is off, the card runs every case that it selects. A release's suite runs every case with either setting. The Rules tab's row in
+Capacity sets the rule, as do `conveyor.sh control rules failfast=off` and `failfast=on`.
+
 When a run fails, the card runs again only the files that did not pass. After a fix session that changed the card's
 change, every file of its list runs again. A test file with a failed case in the run before the fix can also run
 again, though the fix did not change it. This occurs when the card's change links the file to a changed file.

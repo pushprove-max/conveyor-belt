@@ -117,6 +117,11 @@ if [ "${1:-}" = --file ]; then
   done
 fi
 RERUN=${CONVEYOR_TEST_RERUN:-}; unset CONVEYOR_TEST_RERUN
+# The mark of a card's run that stops at its first failure (conveyor/lib/fileeach.sh): given to the engine's runner
+# and to a node test file (below), which stop at their first failed case (the node file's case pool takes it out of
+# its environment: dashboard-view.helpers.mjs); no other test file this runs reads it, as one may run a loop of its
+# own. Each other file stops at its first failed case all the same (failstop(), unittest's -f).
+FAILFAST=${CONVEYOR_TEST_FAILFAST:-}; unset CONVEYOR_TEST_FAILFAST
 RERUN0=$RERUN
 # The cases the loop names of the test files it gives (conveyor/lib/testlist.sh owncases(): `<file><TAB><case>` lines),
 # read in one-file mode (below); unset, as the list is, so no test this runs reads the loop's.
@@ -1521,23 +1526,37 @@ fi
 # cases/failed of its log folder (session.sh testdone()). The engine's runner writes a record for each of its own cases.
 # This script writes the records for a Board or other shell test file when the file ends, one for each case counted
 # above. A file that passed gets them all in ok. A failed file gets as many in failed as its runner's summary says
-# (node's `fail N`, python's `FAILED (failures=N, errors=M)`), at least 1 and at most all of them, and the rest in ok.
+# (node's `fail N`, python's `FAILED (failures=N, errors=M)`, the plugin test run's `(fail) ` lines), at least 1 and
+# at most all of them, and the rest in ok.
+# With FAILFAST, a failed file stopped at its first failed case, so the rest did not all run: only as many go in ok
+# as its runner's summary says passed (node's `pass N`; python's `Ran N tests` less its failures, errors and skips),
+# else, with no summary (a file the stop ended part-way, a shell test file, the plugin test run), as many as its
+# output has lines of a passed case (TAP's `ok` but a TODO or SKIP, the plugin test run's `(pass) `), and the rest
+# get no record.
 # A shell test file run with parts (fparts) gets one record a part, as it was counted.
 ended() { # <test file> <ok|FAIL> <its output> [<its parts, comma-separated>]
   [ -d "${CONVEYOR_TEST_LOG:-}" ] || return 0
-  local k f=0 i d=$CONVEYOR_TEST_LOG/cases
+  local k f=0 g i d=$CONVEYOR_TEST_LOG/cases
   case $1 in
     *.mjs|*.py|*.ts|*.tsx) k=$(filecases "$1") ;;
     *) if [ -n "${4:-}" ]; then k=$(tr , '\n' <<<"$4" | grep -c .); else k=$(shellcases "$1"); fi ;;
   esac
+  g=$k
   if [ "$2" = FAIL ]; then
     f=$(sed 's/\x1b\[[0-9;]*m//g' "$3" | awk '/^(ℹ|#) fail [0-9]+$/ { n += $3 }
+      /^\(fail\) / { n++ }
       /^FAILED \(/ { while (match($0, /(failures|errors)=[0-9]+/)) { split(substr($0, RSTART, RLENGTH), a, "="); n += a[2]; $0 = substr($0, RSTART + RLENGTH) } }
       END { print n + 0 }')
-    f=$((f < 1 ? 1 : f)); f=$((f > k ? k : f))
+    f=$((f < 1 ? 1 : f)); f=$((f > k ? k : f)); g=$k
+    [ -z "$FAILFAST" ] || g=$(sed 's/\x1b\[[0-9;]*m//g' "$3" | awk -v f="$f" '/^(ℹ|#) pass [0-9]+$/ { n += $3; s = 1 }
+      /^Ran [0-9]+ tests? / { n += $2; py = 1; s = 1 }
+      py && /^FAILED \(/ { while (match($0, /(failures|errors|skipped|expected failures)=[0-9]+/)) { split(substr($0, RSTART, RLENGTH), a, "="); n -= a[2]; $0 = substr($0, RSTART + RLENGTH) } }
+      (/^ok( [0-9]+)? - / && !/# *(TODO|SKIP)/) || /^\(pass\) / { c++ }
+      END { if (!s) n = c; print f + (n > 0 ? n : 0) }')
+    g=$((g > k ? k : g))
   fi
   mkdir -p "$d/ok" "$d/failed"
-  for ((i = 1; i <= k; i++)); do
+  for ((i = 1; i <= g; i++)); do
     if [ "$i" -le "$f" ]; then : > "$d/failed/${1//\//:}#$i"; else : > "$d/ok/${1//\//:}#$i"; fi
   done
 }
@@ -1545,6 +1564,12 @@ ended() { # <test file> <ok|FAIL> <its output> [<its parts, comma-separated>]
 # test file prints itself (`✔ X (1ms)`, `ok 1 - X`) is never read as the pass of a case X that the file did not run
 # (testfails() reads `ok <n> - <name>` and `not ok <n> - <name>`); the default reporter prints it as it prints a pass.
 NODETEST=(node --max-old-space-size=4096 --test --test-reporter=tap)
+# With FAILFAST, a node test file runs with NODEHOLD (node's --import, which node --test gives the file's process):
+# after a case that did not pass, the next case waits before it starts, and failstop (below), which reads the failed
+# case's `not ok` line, ends the file in that wait. Node starts its next case at once, before failstop could read the
+# line, and a case of a file with no case pool of its own (dashboard-view.helpers.mjs cases()) ran past the failure.
+# A failed TODO case, at which failstop does not stop, is not told apart: the case after it starts 30 s later.
+NODEHOLD="data:text/javascript,import { afterEach, beforeEach } from 'node:test'; let held = false; afterEach((t) => { if (!t.passed) held = true; }); beforeEach(async () => { if (held) { held = false; await new Promise((r) => setTimeout(r, 30000)); } });"
 # Of a node test file, the cases the list says to leave out or to run alone, as node's options (nargs): each case named
 # whole (its own name, as testfails() reads it from node's `not ok <n> - <name>` line, matched exactly). Not run: each case of an
 # `ok` line (one the loop keeps off as flaky, conveyor.sh flakyoff(), or that passed in a run killed part-way) or of an
@@ -1580,8 +1605,10 @@ plugintest() { # <test file>
   local n p='test-changed: the plugin test run'
   if [ ! -s "$o.plugin" ]; then
     n=$(git ls-files -co --exclude-standard '*.test.ts' '*.test.tsx' | grep -c .)
+    # With FAILFAST, the run ends at the first failed case of this file (failstop --in): a failed case of another
+    # file is that file's to report.
     ( LIMKB=$((LIMKB * (n > 1 ? n : 1)))
-      share_run "$p (claude plugin test, a share for each of its $n test files)" "$o.tmp/p" env "${mk[@]}" claude plugin test . ) > "$o.plugin" 2>&1
+      failstop --in "$1:" share_run "$p (claude plugin test, a share for each of its $n test files)" "$o.tmp/p" env "${mk[@]}" claude plugin test . ) > "$o.plugin" 2>&1
   fi
   awk -v f="$1:" -v p="$p (" 'index($0, p) == 1 { next } $0 == f { on = 1; next } on && /^[^ (].*:$/ { exit } on' "$o.plugin" > "$o.part"
   cat "$o.part"
@@ -1594,6 +1621,49 @@ fshare() { # <test file> <command>...
   local t=$1; shift
   share_run "test-changed: $t" "$o.tmp/f" "$@"
 }
+# failstop [--in <line>] <command>...: runs it, its output and errors to this run's output. With FAILFAST (a card's
+# run that stops at its first failure), it ends the command and all it started (its own process group) at the first
+# failed case line its output has: `FAIL [<case>]: ` or `FAIL: ` (a shell test file's), TAP's `not ok` but a TODO or
+# SKIP, or `(fail) ` (the plugin test run's); with --in, only such a line after the line <line> and before the next
+# line that ends in `:` (the plugin test run's section of one file, plugintest()). A shell test file goes on after
+# its failed case, and the plugin test run after a failed file; a node test file holds its next case until the line
+# ends it (NODEHOLD, above; the Board's case pool, dashboard-view.helpers.mjs cases(), stops its own workers), and a
+# Python test file is told with unittest's -f (below), but the line ends it too. In a subshell of its own, so its trap is its own: told to end (the file's group is, when the
+# loop ends the file: lib/fileeach.sh), it ends the command's group as well, which no signal to the file's group
+# reaches. It ends the command with fsend.
+# Its lines are read with the shell's own read, a line as it comes: awk (mawk) reads a pipe in blocks, and saw the
+# failed case only once the command had ended.
+# fstree <pid>: it and each process under it, one a line, each stopped (STOP) before the processes under it are looked
+# for, so none starts one more unseen.
+fstree() { local c; kill -STOP "$1" 2>/dev/null; echo "$1"; for c in $(pgrep -P "$1" 2>/dev/null); do fstree "$c"; done; }
+# fsend <pid>: TERM to the process group <pid> leads and to each process under <pid> and its group, then CONT to let
+# them end. A process under it can run in a group of its own (timeout makes one for its command: a Board collect of
+# dashboard-limit.test.sh), which a signal to the command's group does not reach, and it ran on after the stop.
+fsend() {
+  # Its own IFS: failstop's trap runs it in the middle of an `IFS= read`, whose empty IFS left the list one word.
+  local q ps IFS=$' \t\n'; ps=$(fstree "$1")
+  kill -TERM -- "-$1" 2>/dev/null
+  for q in $ps; do kill -TERM -- "-$q" 2>/dev/null; kill -TERM "$q" 2>/dev/null; done
+  for q in $ps; do kill -CONT -- "-$q" 2>/dev/null; kill -CONT "$q" 2>/dev/null; done
+}
+failstop() (
+  [ -n "$FAILFAST" ] || { [ "$1" != --in ] || shift 2; "$@"; exit; }
+  p='' s='' in='' on=1 f=$o.ff fx='^FAIL( \[[^]]+\])?: ' nx='^[[:space:]]*not ok ' kx='# *(TODO|SKIP)' px='^\(fail\) ' hx='^[^ (].*:$'
+  [ "$1" != --in ] || { in=$2; on=''; shift 2; }
+  trap '[ -z "$p" ] || { fsend "$p"; wait "$p" 2>/dev/null; }; exit 143' TERM INT HUP
+  rm -f "$f"; mkfifo "$f" || exit 1
+  set -m; "$@" > "$f" 2>&1 & p=$!; set +m
+  while IFS= read -r l || [ -n "$l" ]; do
+    printf '%s\n' "$l"
+    [ -z "$s" ] || continue
+    if [ -n "$in" ]; then
+      if [ "$l" = "$in" ]; then on=1; continue; elif [[ $l =~ $hx ]]; then on=''; fi
+    fi
+    [ -n "$on" ] || continue
+    if [[ $l =~ $fx ]] || [[ $l =~ $px ]] || { [[ $l =~ $nx ]] && ! [[ $l =~ $kx ]]; }; then s=1; fsend "$p"; fi
+  done < "$f"
+  wait "$p" 2>/dev/null; rc=$?; rm -f "$f"; exit "$rc"
+)
 # The meta-runner hook (BASH_ENV, header above): a bash test file of this checkout, started whole under the mark of
 # another, writes `TESTRUN nested` to $o.nested. A test file's own start, and one of a scratch file no path here
 # ends, write nothing. Under an engine case file's mark the runner is the file's own: it runs the file's cases, and
@@ -1697,7 +1767,7 @@ for t in $(printf '%s\n' "${!ecases[@]}" | LC_ALL=C sort); do
   [ -z "$slots" ] || slot_take
   ( [ -z "$slots" ] || slot_mine
     share_run "test-changed: $t" "$o.tmp/e$k" env CONVEYOR_TEST_FILE="$t" BASH_ENV="$o.hook" CONVEYOR_TEST_TIMES="$o.e$k.times" \
-      CONVEYOR_SHELL_TEST_CASE="${ecases[$t]}" bash conveyor/conveyor.test.sh ) > "$o.e$k" 2>&1 < /dev/null &
+      CONVEYOR_SHELL_TEST_CASE="${ecases[$t]}" ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} bash conveyor/conveyor.test.sh ) > "$o.e$k" 2>&1 < /dev/null &
   epid[$t]=$!; erun[$!]=$t
   [ -z "$slots" ] || slot_free
 done
@@ -1722,11 +1792,11 @@ for t in "${order[@]}"; do
       # Every case file of the engine still runs when the list holds a case of each (enginewhole): the step's record
       # says so as below.
       [ -z "$w" ] || echo "TESTRUN whole-suite" >> "$log"
-      echo "== $t (cases: $cases)"; fshare "$t" env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" CONVEYOR_SHELL_TEST_CASE="$cases" bash "$t" || r=FAIL
+      echo "== $t (cases: $cases)"; fshare "$t" env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" CONVEYOR_SHELL_TEST_CASE="$cases" ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} bash "$t" || r=FAIL
     else
       # Every case file of the engine runs: the step's record says so in one field (testrec(): wholeSuite).
       echo "TESTRUN whole-suite" >> "$log"
-      echo "== $t"; fshare "$t" env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" bash "$t" || r=FAIL
+      echo "== $t"; fshare "$t" env "${mk[@]}" CONVEYOR_TEST_TIMES="$o.times" ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} bash "$t" || r=FAIL
     fi
     # Each case file whose every case it ran, timed by the runner (the sums of its cases' clock and CPU seconds, as
     # they run at once), for the times the loop records of a test file (conveyor/README.md, The test step).
@@ -1753,12 +1823,12 @@ for t in "${order[@]}"; do
     # A meta-runner runs in its card mode (the pack's test.files cardMode, mk above): its own checks, with a stub in
     # place of the files it starts.
     case $t in
-      *.mjs) nodecases "$t"; fshare "$t" env "${mk[@]}" "${NODETEST[@]}" "${nargs[@]}" "$t" ;;
-      *.py) fshare "$t" env "${mk[@]}" python3 "$t" ;;
+      *.mjs) nodecases "$t"; failstop fshare "$t" env "${mk[@]}" ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} "${NODETEST[@]}" ${FAILFAST:+"--import=$NODEHOLD"} "${nargs[@]}" "$t" ;;
+      *.py) fshare "$t" env "${mk[@]}" python3 "$t" ${FAILFAST:+-f} ;;
       *.ts|*.tsx) plugintest "$t" ;;
       # An engine case file's run with no case (nocase, above): a selection of a blank, which the file keeps (it gives
       # the runner all its cases only when none is set) and in which the runner finds no case.
-      *) fshare "$t" env "${mk[@]}" ${p:+"CONVEYOR_SHELL_TEST_CASE=$p"} ${nocase[$t]:+"CONVEYOR_SHELL_TEST_CASE= "} bash "$t" ;;
+      *) failstop fshare "$t" env "${mk[@]}" ${p:+"CONVEYOR_SHELL_TEST_CASE=$p"} ${nocase[$t]:+"CONVEYOR_SHELL_TEST_CASE= "} bash "$t" ;;
     esac 2>&1 | tee "$o"; [ "${PIPESTATUS[0]}" = 0 ] || r=FAIL
     marked "$t" || r=FAIL; metaran "$t" || r=FAIL
     times >> "$o.cpu"

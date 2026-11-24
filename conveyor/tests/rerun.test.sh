@@ -25,6 +25,10 @@
 # (`main fail <case>`, `main <case>`, $STUB/rerun.main); there, as on a clean tree, only the files a `fail` line names run.
 rerunsetup() {
   setup "$(jq -cs . <(issue 7 2026-01-01))"
+  # The stub runs each file's cases past a failed one (it does not read CONVEYOR_TEST_FAILFAST): it is a runner of the
+  # rule Stop a card's tests at the first failure off. With the rule on, the run again runs each failed file whole
+  # (t_failfastrerun, failfast.test.sh), and these cases' lists of what passed and what failed would have that line too.
+  loop control rules failfast=off > /dev/null || fail "control rules failfast=off was refused"
   for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   printf '%s\n' 'a.test one two' 'b.test flaky' 'c.test three' > "$STUB/cases"
   printf '%s\n' 'a.txt a.test' 'core.txt all' 'x.txt a.test:one' > "$STUB/map"

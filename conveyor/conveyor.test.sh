@@ -10,7 +10,7 @@ set -uo pipefail
 for f in "$SRC"/tests/*.test.sh; do . "$f"; done
 ALL=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$SRC"/tests/*.test.sh | tr '\n' ' ')
 # Each case's limit in seconds, its file's `# timeout:` line, the same in a card's run of that file and in a
-# whole-suite run (run_case, case_keep): a case past it is stopped and fails as timed out, and the run goes on. In one
+# whole-suite run (run_case, case_keep): a case past it is stopped and fails as timed out, and the run goes on (but with FAST, below). In one
 # process for all cases, no file's limit applied: one hung case stood a release still for 43 minutes with no error.
 declare -A CASE_LIMITS=()
 # shellcheck disable=SC2034 # CASE_LIMITS is read by run_case (tests/lib.sh)
@@ -24,7 +24,11 @@ SEL=${CONVEYOR_SHELL_TEST_CASE:-${*:-$ALL}}; SEL=${SEL//,/ }
 # CONVEYOR_TEST_TIMES names a file it writes, once its cases end, the time of each case file whose every case it ran
 # (case_times()), for the times the Test step records of a test file. The run's own, not its cases'.
 TIMES=${CONVEYOR_TEST_TIMES:-}
-unset CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_TIMES
+# CONVEYOR_TEST_FAILFAST=1 (a card's run with the rule Stop a card's tests at the first failure on: lib/fileeach.sh)
+# stops the run at its first failed case: no case starts after it, each case still running is ended (case_halt()),
+# and the output names the cases not run. The run's own, not its cases': a loop a case runs reads its own rule.
+FAST=${CONVEYOR_TEST_FAILFAST:-}
+unset CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_TIMES CONVEYOR_TEST_FAILFAST
 for CASE in $SEL; do case " $ALL " in *" $CASE "*) ;; *) echo "unknown case $CASE" >&2; exit 2 ;; esac; done
 # As many cases at once as it gets of the machine's test slots (lib/slots.sh), never a number of its own: a case
 # starts once the runner holds a slot for it (the run's home slot, or one of the pool), and the slot is the case's from
@@ -43,11 +47,40 @@ trap 'trap "" TERM INT HUP; kill -TERM $(jobs -p) 2>/dev/null; wait; exit 143' T
 # How many cases it selected, for a loop's live record of the run (conveyor.sh watch()): a case named twice runs once.
 N=$(tr ' ' '\n' <<<"$SEL" | grep . | sort -u | wc -l); echo "TESTRUN cases=$((N))"
 [ "$N" -ne "$(wc -w <<<"$ALL")" ] || slot_whole || exit 1
+# With FAST: RUN is each case started whose end has not been read (its worker), RED the first that failed.
+declare -A RUN=(); RED=
+# A case that ended failed (its exit in $T/<case>.rc not 0, or its worker gone with none): RED names it. Read with the
+# shell's own read, no program a case.
+case_red() {
+  local c got
+  for c in "${!RUN[@]}"; do
+    got=; { read -r got < "$T/$c.rc"; } 2>/dev/null || { ! kill -0 "${RUN[$c]}" 2>/dev/null || continue; read -r got < "$T/$c.rc"; } 2>/dev/null
+    [ "$got" = 0 ] || { RED=$c; return 0; }
+    unset "RUN[$c]"
+  done
+  return 1
+}
+# The first failed case's stop: each case still running (no exit written) is ended as at the run's end (run_case),
+# and is named, with each case not started, as not run.
+case_halt() {
+  local c no=()
+  for c in "${!RUN[@]}"; do [ -e "$T/$c.rc" ] || { kill -TERM "${RUN[$c]}" 2>/dev/null; [ ! -d "${CONVEYOR_TEST_LOG:-}" ] || rm -f "$CONVEYOR_TEST_LOG/cases/$c"; }; done
+  wait
+  for c in $SEL; do [ -e "$T/$c.rc" ] || no+=("$c"); done
+  [ ${#no[@]} = 0 ] || echo "conveyor: the run stopped at its first failed case, $RED; not run: ${no[*]}"
+}
+# With FAST, the wait for a slot looks for a failed case too (SLOT_STOP): a push that takes each slot coming free
+# would else hold the runner in slot_take while the cases still running go on.
 for CASE in $FIRST $REST; do
-  slot_take
+  SLOT_STOP=${FAST:+case_red} slot_take || break
+  [ -z "$FAST" ] || ! case_red || { slot_free; break; }
   run_case &
+  [ -z "$FAST" ] || RUN[$CASE]=$!
   slot_free
 done
+# sleep: with FAST, the run looks for a failed case among those still running, as a case's own end says nothing to it
+if [ -n "$FAST" ]; then while [ -z "$RED" ] && [ ${#RUN[@]} -gt 0 ]; do case_red || sleep 0.2; done; fi
+[ -z "$RED" ] || case_halt
 wait
 [ -z "$TIMES" ] || case_times "$SRC"/tests/*.test.sh > "$TIMES"
 for CASE in $SEL; do got=; read -r got < "$T/$CASE.rc"; [ "$got" = 0 ] || exit 1; done

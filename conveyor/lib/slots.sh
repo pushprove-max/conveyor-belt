@@ -237,9 +237,13 @@ slot_asked() {
 # (slot_session) holds a permit of the session's for each slot of the pool it takes, and waits for one before it
 # takes one; a turn on its home slot, a slot it holds already, needs none (a runner a worker of the session's run
 # starts, whose permits that run's workers hold, then runs its workers one at a time on its home slot).
+# With SLOT_STOP, the name of a function of the caller's, it asks that function before each try and returns 1, with
+# no slot, once it is true: a run that stops at its first failure (fileeach() fast, the engine's runner) sees a failure
+# while it waits, though a push takes each slot that comes free (slot_yield).
 slot_take() {
   local i=0
   while :; do
+    [ -z "${SLOT_STOP:-}" ] || ! "$SLOT_STOP" || return 1
     if [ -n "$SLOT_HOME" ] && { exec {SLOT_FD}>>"$SLOT_DIR/$SLOT_HOME_K$SLOT_TURN.t"; } 2>/dev/null; then
       flock -n "$SLOT_FD" && { SLOT_K=$SLOT_HOME_K; SLOT_ENV=$SLOT_HOME$SLOT_TURN.t; [ -z "${SLOT_CAPFD:-}" ] || { exec {SLOT_CAPFD}>&-; SLOT_CAPFD=''; }; return 0; }
       exec {SLOT_FD}>&-

@@ -192,7 +192,7 @@ cardsubject() { # <card> <issue json>
 failline() { # <worktree> <exit> <seconds> <failures json, or null> <verdicts json> <carried and partial json>
   tail -n 60 "$1.test" 2>/dev/null | tr -d '\000' | jq -cRs --slurpfile x <(testrec "$1" "$2" "$3") --slurpfile f <(printf '%s' "$4") --arg rc "$2" --slurpfile r <(firstrun "$1") --slurpfile v <(printf '%s' "$5") --slurpfile o <(printf '%s' "$6") \
     '$x[0] as $x | $f[0] as $f | $r[0] as $r | $v[0] as $v | $o[0] as $o | sub("\n+$"; "") as $t | $x + $o + {
-       reason:("exit " + $rc + (if $f.timeout then ": timed out after \($f.timeout.sec)s" + (if $f.timeout.file then " in \($f.timeout.file)" else "" end) else "" end))}
+       reason:("exit " + $rc + (if $f.timeout then ": timed out after \($f.timeout.sec)s" + (if $f.timeout.file then " in \($f.timeout.file)" else "" end) else "" end) + ($f.notRun // [] | if . == [] then "" else "; it stopped at its first failure, so these files did not run: " + join(", ") end))}
      + (if $f then {failures:($f | del(.passed, .okcases, .passcases))} else {} end) + (if $t == "" then {} else {tail:$t} end) + $r + $v'
 }
 # What card() does after a review, decided from its verdict (res) and the loop's state, with nothing done: after is hard (a repeated

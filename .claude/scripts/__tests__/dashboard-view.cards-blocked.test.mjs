@@ -159,6 +159,22 @@ test('a failed Tests step names the failing files and cases, and keeps its outpu
   assert.match(css, /\.tl-item > \.test-fails,/);
 });
 
+// Bug this guards (#1616): a card's test step that stopped at its first failure named its failed case, but not the
+// test files it did not run (the record's failures.notRun), so a reader took them as passed.
+test('a failed Tests step that stopped at its first failure names the test files it did not run', () => {
+  const w = boot();
+  const data = full();
+  const records = [{ name: 'tests failed', state: 'failed', sec: 5, why: 'exit 1', output: '== a.test.sh\nFAIL [first]: broken',
+    failures: { of: 2, timeout: null, files: [{ file: 'a.test.sh', cases: [{ name: 'first', line: 'FAIL [first]: broken' }] }], notRun: ['b.test.sh'] } }];
+  Object.assign(data.panels.needs.data.cards.blocked[0], { track: { ...trackOf('++!...', ''), at: null, records } });
+  deliver(w, data);
+  const [failed] = panel(w, 'needs').querySelectorAll('li[data-key="blocked:c2-13"] details.track-detail .timeline > li');
+  assert.deepEqual(Array.from(failed.querySelectorAll('.test-case-name'), (c) => c.textContent), ['first'], 'the failed case is named, as before');
+  const said = failed.querySelector('.test-notrun');
+  assert.ok(said, `the step does not name the files not run: ${failed.textContent}`);
+  assert.equal(said.textContent, 'Not run, as the run stopped at its first failure: b.test.sh');
+});
+
 // Bug (R1): the project's checks failing before any test file ran is recorded as {of: 0, files: [{file: <the command>,
 // cases: []}]}; the step history called that command "1 test file failed" in place of the recorded reason.
 test('a Tests step the project\'s checks failed shows its recorded reason, not a failed test file', () => {

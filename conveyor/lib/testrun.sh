@@ -51,14 +51,16 @@
 # testlist.sh passlist()); stopped, with a timeout only, each file begun and not ended (its own limit stopped it, or
 # the run's did): timeout names only the last of them, and another file's cases may have passed. A run whose command wrote no such
 # log is one file, named by the command (test.command): its cases are that file's, and a timeout is in it. An output
-# that is no run's (norun(): no log folder) names no file.
+# that is no run's (norun(): no log folder) names no file. notRun, only when there is one, is each file a card's run
+# that stopped at its first failure did not run or did not finish (`-- notrun <file>` log lines: fileeach()): none of
+# timeout, stopped or passed names it, as the stop ended it, not a limit, and it did not pass.
 # A case's line ends with where it failed, ` (at <file>:<line>: <that line's text>)`, when a stack trace follows a
 # failure line of the case in the output: its place in a file of the worktree (<worktree>.test's <worktree>, outside
 # node_modules; FRAMEJQ: a JavaScript stack's first frame there, a Python traceback's last), the text read there
 # (wtline()), trimmed and cut to 120 characters. A failed file whose failure names no case (python3 on a unittest
 # file) has at, `<file>:<line>: <text>`, of the first stack after its `== ` line that no case took. So a failure that
 # prints no message of its own (node's assert.ok(false) under TAP: only actual and expected) still shows the assertion.
-testfails() { # <test output file> <exit> [the pack's field of the run's command: test.command]; prints {of, files: [{file, cases: [{name, line}], at}], timeout, passed, okcases: [{file, cases}], passcases: [{file, cases}]}
+testfails() { # <test output file> <exit> [the pack's field of the run's command: test.command]; prints {of, files: [{file, cases: [{name, line}], at}], timeout, passed, okcases: [{file, cases}], passcases: [{file, cases}], notRun}
   local logs=() log cmd='' named out wd=${1%.test} wdr=''
   [ -d "$wd" ] && wd=$(cd "$wd" && pwd) && wdr=$(cd "$wd" && pwd -P) || wd=''
   # A file's name may have spaces, at its end too, and words may follow it on a line that is not its beginning in the
@@ -71,14 +73,14 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
   mapfile -t logs < <(testlogs "${1%.test}"); [ ! -d "${1%.test}.testlog" ] || packget "${3:-test.command}" cmd 2>/dev/null || cmd=''
   # Each log begins on a line of its own: a log that ends without a newline would else join the next log's mark.
   log=$(for log in "${logs[@]}"; do printf '\n\001\n'; cat "$log" 2>/dev/null; done | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\000\r' | jq -cRn "$named"'
-    reduce inputs as $l ({n: null, files: [], order: [], failed: [], open: []};
-      . as $s | ([$l | capture("^== (?<f>.*\\S.*)")][0].f) as $b
+    reduce inputs as $l ({n: null, files: [], order: [], failed: [], open: [], notrun: []};
+      . as $s | ([$l | capture("^== (?<f>.*\\S.*)")][0].f) as $b | ([$l | capture("^-- notrun (?<f>.*\\S.*)")][0].f) as $x
       | ([$l | capture("^-- (?<r>ok|FAIL) (?<f>.*\\S.*)") | .f |= (named($s.open[-1]) // (sub("^ +"; "") | named($s.open[-1]) // named($s.order[-1]) // sub(" .*"; "")))][0]) as $e
       | ([$l | capture("^TESTRUN files=(?<n>[0-9]+)")][0].n) as $n
       | if $l == "\u0001" then .order += [[]] | .open += [[]]
         elif $b then .files |= (. + [$b] | unique) | (if .order[-1] | index($b) then . else .order[-1] += [$b] end) | .open[-1] += [$b]
         elif $e then .files |= (. + [$e.f] | unique) | .open[-1] -= [$e.f] | if $e.r == "FAIL" and (.failed | index($e.f) | not) then .failed += [$e.f] else . end
-        elif $n then .n += ($n | tonumber) else . end)') || return 1
+        elif $x then .notrun |= (. + [$x] | unique) elif $n then .n += ($n | tonumber) else . end)') || return 1
   out=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | awk '{ k = /== / || /^[[:space:]]*(not ok |ok |✔|✖)/ || /^FAIL \[/ || /^ *[.][.][.]$/ || (/^ *---$/ && prev ~ /^ *(not )?ok /) || /\/[^():]*:[0-9]+:[0-9]+\)?([[:space:]]*[{])?[[:space:]]*$/ || /^[[:space:]]*File "\//; if (py && /^[^[:space:]]/ && !/^Traceback /) { k = 1; py = 0 }; if (/^[[:space:]]*File "\//) py = 1; prev = $0; if (k) print }' | jq -cRn --arg rc "$2" --arg sec "$(cat "${1%.test}.limit" 2>/dev/null || echo "${TEST_TIMEOUT:-}")" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") --slurpfile rec <(cat "${1%.test}.testlog"/results/* 2>/dev/null | jq -cR 'fromjson? // empty') \
     --arg rx "${FRAMERX:-}" --arg pyrx "${PYFRAMERX:-}" --arg wd "$wd" --arg wdr "$wdr" '$log[0] as $log | '"$named ${FRAMEJQ:-def frame: null; def pyend(\$l): false;} ${RECJQ:-def recs(\$r; \$l): .;} $(tapjq 2>/dev/null || printf %s 'def tapname: .; def tapyaml: .;')"'
     def cut: if length <= 200 then . else (.[0:201] | sub("\\s+\\S*$"; "")) as $w | if ($w | length) > 200 then .[0:200] else $w end end;
@@ -146,14 +148,14 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
             | .files |= map(if .file == $file and (any(.cases[]; .name == $c) | not) then .cases += [{name: $c, line: ($l | sub("^\\s+"; "") | cut)}] else . end))
         else . end)
       | reduce $hs[$k][] as [$r, $i] (.; .seen["\($r) \($i)"] = $k | if $i > .at[$r] then .cur = $log.order[$r][$i] | .at[$r] = $i else . end))
-    | recs($rec; $log) | ($log.files - $log.failed - ($log.open | flatten)) as $passed | .files as $fs
+    | recs($rec; $log) | (($log.open | flatten) - $log.notrun) as $open | ($log.files - $log.failed - $open - $log.notrun) as $passed | .files as $fs
     | {of: ($log.n // ($log.files | length | if . == 0 then null else . end)),
        files: (.files | map((.cases |= map(. + if $at[.name] then {at: $at[.name]} else {} end)) + if .cases == [] and $fat[.file] then {at: $fat[.file]} else {} end)),
-       timeout: (if $rc == "124" then {sec: ($sec | tonumber? // $sec), file: ($only // ($log.open | flatten | last))} else null end),
+       timeout: (if $rc == "124" then {sec: ($sec | tonumber? // $sec), file: ($only // ($open | last))} else null end),
        passed: $passed,
        okcases: [.oks | to_entries[] | .key as $f | select(IN($passed[]; $f) | not)
          | {file: $f, cases: ((.value | unique) - [$fs[] | select(.file == $f) | .cases[].name])} | select(.cases != [])],
-       passcases: [.oks | to_entries[] | select(IN($passed[]; .key)) | {file: .key, cases: (.value | unique)}]} + (if $rc == "124" then {stopped: (if $only then [$only] else $log.open | flatten | unique end)} else {} end)') || return 1
+       passcases: [.oks | to_entries[] | select(IN($passed[]; .key)) | {file: .key, cases: (.value | unique)}]} + (if $rc == "124" then {stopped: (if $only then [$only] else $open | unique end)} else {} end) + (if $log.notrun == [] then {} else {notRun: $log.notrun} end)') || return 1
   [[ $out == *'"at":['* ]] || { printf '%s\n' "$out"; return 0; }
   atsource "$wd" <<<"$out"
 }
@@ -280,7 +282,7 @@ testrec() { # <worktree> <exit> <seconds>
 # ends it, <worktree>.wide) does not run again and fails with <worktree>.stop saying why. card() blocks a card whose
 # run left <worktree>.stop.
 tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alone]
-  local cmd at rc r p='' b='' t='' f o l=() wn wb w=$SECONDS t0 ob mf mw off kp ko ka kc cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-}
+  local cmd at rc r p='' b='' t='' f o l=() wn wb w=$SECONDS t0 ob mf mw off kp ko ka kc cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-} TEST_FAST=''
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide" "$1.noresult"
   # The files the run before timed (testlist.sh timed()): kept below when this run keeps its passes and so may not run them.
   mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
@@ -355,7 +357,12 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
   runfiles "$1"
   testonce "$1" "$cmd"; rc=$?; cachekeep "$1"; runnernote "$RUNOFF" >> "$1.test"
   if [ ! -s "$1.wide" ] && [ $rc != 0 ] && [ -n "$p" ] && f=$(testfails "$1.test" "$rc") && f=$(nopass "$1" "$f") && rerunlist "$1" "$p" "$f" "$b" "$t" \
-    && { [ -z "$off" ] || printf '%s\n' "$off" >> "$1.rerun"; }; then
+    && { [ -z "$off" ] || printf '%s\n' "$off" >> "$1.rerun"; } \
+    && { [ -z "$TEST_FAST" ] || jq -r '.files[].file | "fail\t\(.)"' <<<"$f" >> "$1.rerun"; }; then
+    # A run that stopped at its first failure (TEST_FAST: listcmd()) ran none of a failed file's cases after its
+    # failed one: the run again runs each failed file (a `fail` line naming no case), all its cases but those an `ok`
+    # line names as passed when the command can leave out one case (the whole file when it cannot), so a pass of the
+    # failed case on re-run is never taken for the cases after it, which never ran.
     # Its output's end (the last 60 lines, as a failed test line's tail, card()) goes with them: the run again
     # overwrites <worktree>.test, and a pass on re-run is the only record of the flaky failure (FAILURE, testfiles.sh).
     jq -c --argjson rc "$rc" --rawfile t <(tail -n 60 "$1.test" 2>/dev/null | tr -d '\000') \
@@ -411,6 +418,9 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
   [ -z "$CAPNOTE" ] || printf 'conveyor: %s\n' "$CAPNOTE" >> "$1.test"
   return $rc
 }
+# The rule Stop a card's tests at the first failure (rules.failfast of the control record the card started on, CARDCTL,
+# else the one in force): on unless it is false. Only a card's run reads it (listcmd()): a release's runs every case.
+failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>/dev/null)" != false ]; }
 # The command of a card's run (tests()) given the list of the tests its change touches (README.md, The list of tests a
 # card's run is given), in LISTCMD: test.fileCommand, which runs each file of the list alone (filecmd() files, the
 # files in TEST_FILES). A card never runs the whole suite: the list is the test files its own change adds or changes
@@ -424,7 +434,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
 # test.fileCommand set, Conveyor's own runner runs each file (testlist.sh ownrunner()); when it has none for one of them, nothing
 # runs, <worktree>.stop says why (NORUNNER) and it fails. TEST_GIVEN is how many files
 # it got (watch() stops a run that reports more: tests()). <report args> (reportask() files) go after the command,
-# before each file's path.
+# before each file's path. TEST_FAST is `fast` when the command stops at its first failure (failfast()), else empty.
 listcmd() { # <worktree> [report args]
   local s fs=() by fc rn='' f c nf=0 nw=0 lk=() sh=() ns=0
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
@@ -502,7 +512,7 @@ listcmd() { # <worktree> [report args]
   [ ${#fs[@]} != 0 ] || { LISTNONE=1; return 0; }
   packget test.fileCommand fc || return 1
   [ -n "$fc" ] || fc=$(ownrunner "$1" "${fs[@]}") || { narrowstop "$fc" > "$1.stop"; return 1; }
-  LISTCMD=$(filecmd "$fc${2:+ $2}" files); TEST_FILES=$(printf '%s\n' "${fs[@]}"); TEST_GIVEN=${#fs[@]}
+  TEST_FAST=; ! failfast || TEST_FAST=fast; LISTCMD=$(filecmd "$fc${2:+ $2}" files "$TEST_FAST"); TEST_FILES=$(printf '%s\n' "${fs[@]}"); TEST_GIVEN=${#fs[@]}
 }
 # Of the test files <file>... linked to a card's change (testsel() narrow: listcmd(); and those of the bug-card check,
 # bugproof.sh bugproof()), the ones a card runs, in CAPFILES: all of them up to the
@@ -642,10 +652,13 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 # changed code since those passes) keeps none: every file it is given runs, as any of them may test that code; tests() gives it
 # the files of the card's list but those the list keeps something of (a `pass`, `ok` or `off` line) and that the pack's test.changed
 # command selects nothing of (testlist.sh runfiles()).
+# With fast too (the rule Stop a card's tests at the first failure: failfast()), the run stops at its first failure:
+# the command exports CONVEYOR_TEST_FAILFAST=1, which fileeach() and each file's command read (lib/fileeach.sh).
 # The command holds fileeach()'s own text, so it needs no file of the engine's where it runs.
-filecmd() { # <the pack's test.fileCommand> [files]
+filecmd() { # <the pack's test.fileCommand> [files [fast]]
   local q m=one; q=$(printf %q "$1")
   if [ "${2:-}" = files ]; then m=side
+    [ "${3:-}" != fast ] || echo 'export CONVEYOR_TEST_FAILFAST=1'
     printf '%s\n' 'fs=() t=$'"'"'\t'"'"' c=; l=$CONVEYOR_TEST_LOG/files' \
       '! grep -qE "^(changed|main)$t" "${CONVEYOR_TEST_RERUN:-/dev/null}" 2>/dev/null || c=1' \
       'while IFS= read -r f; do' \
