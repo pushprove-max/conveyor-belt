@@ -283,7 +283,12 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
     && jq -Rrn '[inputs | fromjson? // empty | objects | select(.type == "result")] | last | .result | strings | sub("\\s+$"; "")' "$1.events" > "$1.review.new" 2>/dev/null \
     && [ -s "$1.review.new" ] && mv -f "$1.review.new" "$1.review"; then
     routedone 1
-    jq -e 'has("tokens")' <<<"$f" >/dev/null && jq -c 'del(.ok)' <<<"$f" && return 0
+    if jq -e 'has("tokens")' <<<"$f" >/dev/null; then
+      # One whose usage is only part of what it used (unread) keeps its events and err too: with no verdict, reviewed()
+      # removes its events and the run again writes its err again, so why it ended could not be read.
+      ! jq -e 'has("unread")' <<<"$f" >/dev/null || reviewkeep "$1" "" >/dev/null
+      jq -c 'del(.ok)' <<<"$f" && return 0
+    fi
     # One that reported no token usage, or failed (below), keeps its events and err as a failed Codex review's are (reviewkeep()): a run again overwrites both; clean() removes them with the card.
     kn=$(reviewkeep "$1" ""); s="review reported no token usage$kn"; [ "$(verdict "$1.review")" != none ] || no=2
   else kn=$(reviewkeep "$1" ""); s="review failed ($(exitsaid "$rc" "$REVIEW_TIMEOUT"))$kn"$'\n'"$(tail -n 60 "$1.err")"

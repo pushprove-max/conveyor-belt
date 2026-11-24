@@ -99,7 +99,7 @@ f=$(grep -o 'the file [^ ]*staged\.diff' "$STUB/asked" | cut -d' ' -f3); cp "$f"
 f=$(grep -o 'are in the folder [^ ]*/rounds' "$STUB/asked" | cut -d' ' -f5); [ -z "$f" ] || cp "$f/1.diff" "$STUB/fix.$n"
 [ ! -f "$STUB/review-nostart" ] || { rm "$STUB/review-nostart"; echo 'stderr: stopped before any work' >&2; exit 1; }
 [ ! -f "$STUB/review-bare" ] || { rm "$STUB/review-bare"; echo 'stderr: bare' >&2; echo '{"type":"result","is_error":false,"result":"Review interrupted"}'; exit 0; }
-[ ! -f "$STUB/review-part" ] || { rm "$STUB/review-part"; echo '{"type":"result","is_error":false,"result":"x","usage":{"input_tokens":100,"cache_creation_input_tokens":50,"cache_read_input_tokens":1000,"output_tokens":7}}'
+[ ! -f "$STUB/review-part" ] || { rm "$STUB/review-part"; echo 'stderr: part' >&2; echo '{"type":"result","is_error":false,"result":"x","usage":{"input_tokens":100,"cache_creation_input_tokens":50,"cache_read_input_tokens":1000,"output_tokens":7}}'
   echo '{"type":"result","is_error":false,"result":"Review interrupted"}'; exit 0; }
 echo '{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"a.txt"}}],"usage":{"input_tokens":100,"cache_creation_input_tokens":50,"cache_read_input_tokens":1000,"output_tokens":7}}}'
 [ -f "$STUB/review.$n" ] || exit 1
@@ -172,6 +172,10 @@ t_claudepart() {
   out=$(rvcall 11)
   [ "$(head -n 1 <<<"$out" | jq -c '[.tokens.claude, (.unread | test("1 of 2 results"))]')" = '[314,true]' ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \
     || fail "a retried review whose first attempt's usage was partial is priced as whole: $out"
+  # Bug: the first attempt returned at once with its part usage, so reviewed() removed its events and the run again
+  # wrote its err again, and why it ended with no verdict was lost.
+  grep -q 'Review interrupted' "$ST/kept/c11/c11.review.events" && grep -qx 'stderr: part' "$ST/kept/c11/c11.review.err" \
+    || fail "the events or err of a Claude review with part usage and no verdict were not kept: $(ls "$ST/kept/c11" 2>&1)"
 }
 
 # Bugs: an OpenCode model OpenCode lists is refused as the reviewer;
