@@ -622,3 +622,35 @@ test('an earlier attempt blocked by a long finding says how it ended in short te
   assert.ok(again.querySelector('summary').textContent.endsWith(', ended: tests failed in the second run.'), again.querySelector('summary').textContent);
   assert.match(again.querySelector(':scope > .why-block').textContent, /end$/);
 });
+
+// Follow-up of #1540: card.sh cuts a review block's finding at 300 characters and gives no sign whether its last word
+// was whole, so the Board dropped a whole word in both forms ("The same…" for a cut before " accepts", and "calls"
+// before " the finding"). The attempt's review record holds each finding whole: what follows the cut there decides.
+test('an earlier attempt blocked by a cut finding keeps the last word its review wrote whole', () => {
+  const w = boot();
+  const data = full();
+  const line = (head, tail) => `${head} Proof: ${'x '.repeat(150)}`.slice(0, 300 - tail.length - 1).trimEnd().padEnd(299 - tail.length, 'x') + ` ${tail}`;
+  const check = line('[P1] [E1] conveyor/bench/a.sh:584 A running session meets the wait check.', 'The same check'), calls = line('[P0] conveyor/lib/a.sh:12 The rule fires.', 'the reason calls');
+  const halfWord = line('[P1] [E1] conveyor/lib/b.sh:9 A slot is freed.', 'it acce');
+  const said = [`${check} accepts an idle field.`, `${calls} the finding a gap.`, `${halfWord}pts it.`, '[P2] c.txt:3 other'];
+  for (const l of [check, calls, halfWord]) assert.equal([...l].length, 300, `the fixture's cut is 300 characters: ${l}`);
+  const records = [{ name: 'review 1 (NO-GO)', state: 'done', sec: 30, at: iso(T0 - 2500000), output: said.join('\n') }];
+  const prior = { card: 'c3-60', start: iso(T0 - 3600000), end: iso(T0 - 2400000), sec: 2640, reason: `the fix for ${check} did not hold after 1 round`, track: trackOf('++++!.', '', { at: null, since: null, records }) };
+  Object.assign(data.panels.belt.data.cards[0], timesOf(T0, 2640), { earlier: [prior] });
+  deliver(w, data);
+  openEvery(w, panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.track-detail'));
+  const proof = () => panel(w, 'belt').querySelector('li[data-key="sample:c3-63"] details.tl-earlier > .why-block .finding-proof-text').textContent;
+  assert.ok(proof().endsWith('x The same check…'), `the "the fix for" form keeps "check": ${proof().slice(-30)} for ${prior.reason}`);
+  prior.reason = `review 2 is the last review and still holds a P0 finding, so it files no follow-up: ${calls}`;
+  next(w, data);
+  assert.ok(proof().endsWith('x the reason calls…'), `the last review's form keeps "calls": ${proof().slice(-30)} for ${prior.reason}`);
+  // The record also shows a half word as half: "acce" of "accepts" goes.
+  prior.reason = `the fix for ${halfWord} did not hold after 1 round`;
+  next(w, data);
+  assert.ok(proof().endsWith('x it…'), `the half word goes: ${proof().slice(-30)} for ${prior.reason}`);
+  // A finding of exactly 300 characters that its review wrote so was not cut: it is drawn whole, with no "…".
+  records[0].output = [check, ...said].join('\n');
+  prior.reason = `the fix for ${check} did not hold after 1 round`;
+  next(w, data);
+  assert.ok(proof().endsWith('x The same check'), `an uncut finding stays whole: ${proof().slice(-30)} for ${prior.reason}`);
+});

@@ -378,7 +378,7 @@
       const { block, last, full } = r;
       const end = block ? `blocked: the fix did not hold after ${block[2]} ${block[3]}` : last ? `blocked: the last review ${last[1]}` : `ended: ${full ? first(full) : 'no reason recorded'}`;
       d.firstChild.textContent = `Earlier attempt: ${when(e.start)} to ${when(e.end)}, ${num(e.sec) ? took(e.sec) : 'time not read'}, ${end}`;
-      const why = earlierWhy(r, repoUrl);
+      const why = earlierWhy(r, repoUrl, saidLines(e.track));
       if (why) d.firstChild.after(why);
       return d;
     });
@@ -397,12 +397,14 @@
     const full = block || last || !retried ? bare : bare ? `${bare}; ${retried}` : retried;
     return { block, last, retried, full };
   }
+  // saidLines(t): the lines of the reviews' findings in the track t (a NO-GO review's output), whole (wholeWords).
+  const saidLines = (t) => stepsOf(t).filter((s) => /^review \d/.test(s.name) && typeof s.output === 'string').flatMap((s) => s.output.split('\n'));
   // What an earlier attempt's short line leaves out (earlierReason's r), to open above its steps, else null: a review
   // block's finding, as the Declined panel draws it (level, linked place, claim, proof), its note and the retry note,
-  // or any other reason in full.
-  function earlierWhy({ block, last, retried, full }, repoUrl) {
+  // or any other reason in full. said: the lines its reviews wrote whole (saidLines).
+  function earlierWhy({ block, last, retried, full }, repoUrl, said) {
     const known = new Set(pathsIn(full));
-    const body = block ? reviewWhy(block[1], repoUrl, known, false, true) : last ? findingRows(last[2], '', repoUrl, known, false, true) : full && first(full) !== full ? clipped(full, repoUrl, known) : null;
+    const body = block ? reviewWhy(block[1], repoUrl, known, false, said) : last ? findingRows(last[2], '', repoUrl, known, false, said) : full && first(full) !== full ? clipped(full, repoUrl, known) : null;
     if (!body) return null;
     const why = whyBlock(block || last ? 'Why it blocked' : 'Why it ended', body);
     if (block && block[4]) why.append(fill(h('div', 'why-text why-full'), block[4].trim(), repoUrl, known, 'why'));
@@ -691,13 +693,18 @@
     };
     return joins.find((i) => outside(i) || atCut(i)) ?? -1;
   }
-  // wholeWords(t): a finding of exactly 300 characters (with the spaces the cut left before " did not hold") is one card.sh
-  // cut (joinAt), maybe inside a word or a code span: it ends at its last whole word, outside any open span, then "…". A
-  // last word that ends in a closing backtick is whole, as is a cut at a space. Any other finding is as it came. The cut
-  // gives no sign of a word it left whole at the 300th character, so that last word goes too: it may be half a word.
-  function wholeWords(t) {
+  // wholeWords(t, said): a finding of exactly 300 characters (with the spaces the cut left before " did not hold") is one
+  // card.sh cut (joinAt), maybe inside a word or a code span: it ends at its last whole word, outside any open span, then
+  // "…". Its last word is whole when the line of said (saidLines) that starts with t goes on with a space, the end, or
+  // closing marks then either ("notice." or "`.inputs`,"); a line that is t was not cut. With no such line, only a last
+  // word that ends in a closing backtick, or a cut at a space, is whole. Any other finding is as it came. Bug: the cut
+  // gives no sign of a word it left whole, so the Board dropped one ("The same…" for a cut before " accepts").
+  function wholeWords(t, said) {
     if ([...t].length !== 300) return t;
-    let end = /\S$/.test(t) && !t.endsWith('`') ? t.replace(/\S+$/, '') : t;
+    const rest = said.find((l) => l.startsWith(t))?.slice(t.length);
+    if (rest === '') return t;
+    const whole = rest === undefined ? /\s$/.test(t) || t.endsWith('`') : /^[.,;:!?)\]}'"’”`]*(\s|$)/.test(rest);
+    let end = whole ? t : t.replace(/\S+$/, '');
     const ticks = [...end.matchAll(/`+/g)];
     for (let k = 0; k < ticks.length; k++) {
       const e = ticks.findIndex((x, j) => j > k && x[0].length === ticks[k][0].length);
@@ -706,7 +713,7 @@
     }
     return `${end.trimEnd()}…`;
   }
-  // tidy: the finding cut by the engine is drawn by wholeWords (the earlier attempt's line); the other panels draw it as cut.
+  // tidy: the earlier attempt's saidLines: its cut finding is drawn by wholeWords; the other panels draw it as cut.
   function reviewWhy(full, repoUrl, known, brief, tidy) {
     // m[2]: the spaces the finding itself ended with, before the one space card.sh writes: they count in its 300 characters.
     const m = /^the fix for (\[P[0-3]\][\s\S]*?)(\s*)\sdid not hold after \d+ rounds?$/.exec(full);
@@ -716,7 +723,7 @@
   function findingRows(text, spaces, repoUrl, known, brief, tidy) {
     const rows = h('ol', 'output-findings'), join = joinAt(text);
     (join < 0 ? text : `${text.slice(0, join)}\n${text.slice(join + 2)}`).split(/\n(?=\[P[0-3]\])/).slice(0, brief ? 1 : Infinity).forEach((t, i, parts) => {
-      const f = /^\[(P[0-3])\]\s*(?:\[(?:E\d+|cleanup)\]\s*)*(?:(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S))?([\s\S]*)$/.exec((tidy ? wholeWords(i === parts.length - 1 ? t + spaces : t) : t).trim());
+      const f = /^\[(P[0-3])\]\s*(?:\[(?:E\d+|cleanup)\]\s*)*(?:(\S+:\d+(?:[-–]\d+)?)[:,]?\s+(?=\S))?([\s\S]*)$/.exec((tidy ? wholeWords(i === parts.length - 1 ? t + spaces : t, tidy) : t).trim());
       if (!f) return;
       const { at: cut, label } = proofAt(f[3]), claim = (cut < 0 ? f[3] : f[3].slice(0, cut)).trim(), proof = cut < 0 ? '' : f[3].slice(cut + label.length).trim();
       const row = h('li', 'output-finding'), head = h('div', 'finding-head'), said = h('p', 'finding-text');
