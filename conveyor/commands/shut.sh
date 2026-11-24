@@ -26,6 +26,12 @@
 # loop blocked it first, with its own reason, once its process was killed. A card it could not end (shutopen() fails:
 # left open, as its words say) makes it exit 1, once the others are shut.
 [[ ${2:-} =~ ^(c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-[0-9]+|[0-9]+)$ ]] || { echo "usage: conveyor.sh shut <issue | card id>" >&2; exit 2; }
+# A card with no GitHub issue that is not picked yet has no card lines to shut: it is taken off the record, so the loop never picks it (testcardact(), lib/testcardact.sh).
+if [[ $2 =~ -0$ ]]; then
+  . "$HERE/lib/testaction.sh" || exit 1
+  . "$HERE/lib/testcardact.sh" || exit 1
+  testcardact shut "$2"; rc=$?; [ "$rc" = 3 ] || exit "$rc"
+fi
 left=0; ended=$(shutopen "$2") || left=1; [ -z "$ended" ] || echo "$ended"
 own=$(sed -n 's/^conveyor: card \([^ ]*\) was open .*/\1/p' <<<"$ended" | jq -Rsc 'split("\n") - [""]') || exit 1
 if [[ $2 =~ ^[0-9]+$ ]]; then closed=$(locked shut "[$2]" "$own") || exit 1; else locked shut "$2" "$own" || exit; exit $left; fi

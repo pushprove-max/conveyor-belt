@@ -155,6 +155,14 @@ the turn's timer ends. `conveyor.sh control hold`, `conveyor.sh control release`
 end the wait, so the next turn starts at once. A `run` ends at the first turn where none of its cards, pushes, machine hold checks or picks
 is left (`runends`).
 
+A card with no GitHub issue (a Tests page card or a Foreman card) can be stopped before the loop picks it. `conveyor.sh
+control hold <card id>` holds it, so no turn picks it, and `conveyor.sh control release <card id>` lets the next turn
+pick it. `conveyor.sh shut <card id>` takes it off the record, and it is never picked. It refuses a card that is a
+part of a split issue, which that issue waits for: hold it instead. `control hold` and `control
+release` take issue numbers and card ids in one list and act on each. If one argument does not fit (a card id that is
+not waiting to be picked, or a word that is neither an issue number nor a card id), they name it and change nothing.
+A card the loop has picked is stopped with `conveyor.sh shut <card id>` as before.
+
 ## The judge
 
 The judge is set in each project's control record, by `conveyor.sh control judge ...` or in the Judge row of the

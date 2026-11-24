@@ -32,10 +32,20 @@ elif [ "${1:-}" = card ] && [ "${3:-}" = pick ]; then
 else case ${1:-}:${2:-} in model:* | reviewer:* | judge:* | tests:*) [[ " $CLINAMES " != *" ${2:-} "* ]] || hostclis "$2" >/dev/null ;; esac
   # A builder seat is not refreshed: its Codex list is codex-builder's (lib/paths.sh), which this refresh does not read.
   case ${1:-}:${3:-}:${4:-} in card:reviewer:?* | card:judge:?*) [ "$4" = clear ] || cardclis ;; esac
-  # `release <card id>` of a held card with no GitHub issue (testrelease(), lib/testaction.sh); any other card id is
-  # refused by control() as before.
-  if [ "${1:-}" = release ] && [ $# = 2 ] && [[ $2 =~ ^c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0$ ]]; then
+  # `hold` and `release` of card ids of cards with no GitHub issue, alone or with issue numbers (testcardact(),
+  # lib/testcardact.sh). A list with an argument that is neither is refused before any card is changed, naming it, as is
+  # a card id that is no waiting card (a main-red fix card's, a picked card's, a card not held, to release).
+  tcact=${1:-}; tcids=(); tcnums=()
+  if [ "$tcact" = hold ] || [ "$tcact" = release ]; then
+    for tcx in "${@:2}"; do if [[ $tcx =~ ^c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0$ ]]; then tcids+=("$tcx"); else tcnums+=("$tcx"); fi; done
+  fi
+  if [ ${#tcids[@]} != 0 ]; then
+    for tcx in "${tcnums[@]}"; do [[ $tcx =~ ^[1-9][0-9]{0,8}$ ]] || { echo "conveyor: control $tcact: \"$tcx\" is neither an issue number nor a card id of a card with no GitHub issue; nothing changed" >&2; exit 2; }; done
     . "$HERE/lib/testaction.sh" || exit 1
-    testrelease "$2"; rc=$?; [ "$rc" = 3 ] || exit "$rc"
+    . "$HERE/lib/testcardact.sh" || exit 1
+    testcardact "$tcact" "${tcids[@]}" || exit $?
+    wakeloop # as control() does for a hold and a release: the loop's wait ends, so its next turn reads the record now
+    [ ${#tcnums[@]} = 0 ] && exit 0
+    locked control "$tcact" "${tcnums[@]}"; exit
   fi
   locked control "$@"; fi

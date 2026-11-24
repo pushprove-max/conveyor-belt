@@ -144,7 +144,7 @@ testissue() { # <test file> <title> <body>
 # review follow-up or a split part, its parent issue instead),
 # the title and body the action would have filed, when it was asked, its card id (id, made here, so another card can
 # wait on it before it is picked: testpick()), card, null until the loop picks it (testpick()), held (true until
-# `control release <id>`: testrelease()), was (the cards of it given back, oldest first) and filed and filedUrl (the
+# `control release <id>`: testcardact(), lib/testcardact.sh), was (the cards of it given back, oldest first) and filed and filedUrl (the
 # issue File on GitHub filed from it: cardissue()). One writer at a time (a lock of its own). It keeps every card not
 # picked yet, the newest 200 picked ones (card() reads a picked card's record while it builds, and the Board's Landed
 # today shows a landed one's) and the older ones tcadd() keeps. Prints that the card is queued; one held also says on
@@ -234,7 +234,7 @@ tcfree() { # <the record's cards json>
   printf '%s' "$card"
 }
 # Under the lock (pick()), after the main-red fix cards and ahead of the queue: the oldest card with no GitHub issue
-# that is not picked yet, not held (testrelease()), and whose `Depends on:` lines name no card id (c<date>T<time>-<project>-<issue>,
+# that is not picked yet, not held (testcardact()), and whose `Depends on:` lines name no card id (c<date>T<time>-<project>-<issue>,
 # 0 for a card of no issue) that has not landed or ended as already done (TADONE): the card of that id, or the card now of the entry
 # that id is or was, and no issue (#N) that is open and has not landed (waitsof(), as upnext() reads it), and that has none of
 # its labels set to never build (rules.never). A review follow-up's body names its parent card so, so it waits for its parent to land. Any size: no split
@@ -312,19 +312,6 @@ testpick() { # <the open issues json>
       and (.value | [farneeds[] as $x | select(.far[$x].open != false) | $x] == [])
       and all(.value.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*-[0-9]+(?![A-Za-z0-9_])"); cardlanded(.))) | .key')
   exec {lock}>&-
-}
-# `control release <card id>` of a held card with no GitHub issue (testcard() held): it is picked in its turn from then
-# on. Exit 3, nothing changed: no held entry of the record has that id (control() then refuses the card id as before).
-testrelease() { # <card id>
-  local lock rec
-  [ -s "$TACARDS" ] || return 3
-  { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the record of the Tests page's cards could not be locked; nothing released" >&2; return 1; }
-  rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) || rec='[]'
-  jq -e --arg c "$1" 'any(.[]; .id == $c and .held == true)' <<<"$rec" >/dev/null || { exec {lock}>&-; return 3; }
-  jq -c --arg c "$1" '{cards: map(if .id == $c then del(.held) else . end)}' <<<"$rec" > "$TACARDS.new" && mv -f "$TACARDS.new" "$TACARDS" \
-    || { rm -f "$TACARDS.new"; exec {lock}>&-; echo "conveyor: the record of the Tests page's cards could not be written; card $1 is still held" >&2; return 1; }
-  exec {lock}>&-
-  echo "conveyor: card $1 is released: it is picked in its turn"
 }
 # The cards given back of a card with no GitHub issue (its entry's was, testpick()), oldest first, one a line, whose
 # kept work it starts from (resumeplan(), lib/card.sh); nothing for another card.
