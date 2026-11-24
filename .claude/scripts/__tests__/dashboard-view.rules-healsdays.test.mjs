@@ -21,12 +21,13 @@ const sent = async (w, fn) => { fn(); await settle(); return w.posts.splice(0).m
 // command; a step sent another rule or number; the steps went past 1 or 3650, which the engine refuses.
 test('Rules: Self-heals expiry shows the record\'s days and steps them down and up', async () => {
   const w = boot({ tab: 'rules' });
-  deliver(w, data(30));
+  // 45, not the default 30: Undo falls back to 30 when it reads no days, so a record of 30 cannot tell the two apart.
+  deliver(w, data(45));
   assert.ok(row(w), 'the rule has a row on the Rules tab');
-  assert.equal(row(w).querySelector('.board-value').textContent, '30', 'the row shows the record\'s 30');
-  assert.deepEqual(await sent(w, () => act(rulesP(w), 'self-heals expiry days-up').click()), [{ action: 'rules', args: ['healsdays=31'], repo: 'sample' }]);
-  // Bug this guards: Undo sent another rule or the new days, not the days the record held before.
-  assert.deepEqual(await sent(w, () => act(rulesP(w).querySelector('.rules-note'), 'undo').click()), [{ action: 'rules', args: ['healsdays=30'], repo: 'sample' }], 'Undo puts the earlier days back');
+  assert.equal(row(w).querySelector('.board-value').textContent, '45', 'the row shows the record\'s 45');
+  assert.deepEqual(await sent(w, () => act(rulesP(w), 'self-heals expiry days-up').click()), [{ action: 'rules', args: ['healsdays=46'], repo: 'sample' }]);
+  // Bug this guards: Undo sent another rule, the new days or the default 30, not the 45 the record held before.
+  assert.deepEqual(await sent(w, () => act(rulesP(w).querySelector('.rules-note'), 'undo').click()), [{ action: 'rules', args: ['healsdays=45'], repo: 'sample' }], 'Undo puts the earlier days back');
   next(w, data(31));
   assert.deepEqual(await sent(w, () => act(rulesP(w), 'self-heals expiry days-down').click()), [{ action: 'rules', args: ['healsdays=30'], repo: 'sample' }]);
   next(w, data(1));
