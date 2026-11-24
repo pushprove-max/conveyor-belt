@@ -445,7 +445,10 @@ pending_run() {
 # blocked as the line says, as `conveyor.sh health` reads it now (retried, landed or shut since the watcher put the
 # wake, or retried and blocked again: a line whose since, or whose reason, is not health's), is
 # taken out, its ref with it from the blocked parts of the wake's first line; a wake left with no other line is
-# removed. A record whose health does not read, or gives no blocked list, keeps its lines.
+# removed. A record whose health does not read, or gives no blocked list, keeps its lines. PENDING_DROPPED grows by
+# one for each wake it removes whole, one put while it read health too (the waiter tells by it a watcher that put a wake
+# from one that died).
+PENDING_DROPPED=0
 pending_fresh() {
   local f repos repo main now='{}' h n t
   repos=$(cat "$PENDING"/*.wake 2>/dev/null | sed -nE 's/^([A-Za-z0-9._-]+): (.+ is blocked since |.+ has been blocked for |not yet reported: blocked ).*/\1/p' | sort -u)
@@ -462,7 +465,7 @@ pending_fresh() {
   for f in "$PENDING"/*.wake; do
     [ -f "$f" ] || continue
     t=$(jq -Rrs --argjson now "$now" "$FRESH" "$f" 2>/dev/null) || continue
-    if [ -z "$t" ]; then rm -f "$f"; elif [ "$t" != "$(cat "$f")" ]; then printf '%s\n' "$t" > "$f.tmp" && mv -f "$f.tmp" "$f"; fi
+    if [ -z "$t" ]; then rm -f "$f" && PENDING_DROPPED=$((PENDING_DROPPED + 1)); elif [ "$t" != "$(cat "$f")" ]; then printf '%s\n' "$t" > "$f.tmp" && mv -f "$f.tmp" "$f"; fi
   done
 }
 # The wake (raw text) without the blocked cards $now (each repo's blocked cards, of the repos read: ref, since and the

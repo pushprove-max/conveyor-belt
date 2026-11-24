@@ -105,7 +105,20 @@ local out; out=$(bash -c '. "$1/lib.sh" && pending_run "$2"' _ "$SRC" "$T/ack")
 [ "$out" = "$w" ] || fail "for the kept wake of follow-up c2 of #7 blocked, pending_run did not relay it: $out"
 }
 
-cases=(freshnolist freshretrynote freshreminder freshown freshnoissue freshfollowups)
+# Bug caught (issue 1659): the waiter counted the wakes pending_fresh took out by a list of the pending files made
+# before it, so a watcher's wake put while pending_fresh read health (a watcher of several projects puts one a project)
+# was taken out uncounted, and the watcher's exit 0 after it counted toward WATCHER DOWN. Here health's read puts #9's
+# wake: both wakes go, and PENDING_DROPPED counts both.
+t_freshcount() {
+fixture freshcount alpha
+printf '%s\n' 'Conveyor: alpha: blocked: #7' 'alpha: #7 is blocked since 2026-11-19T09:58:00Z: tests failed' > "$FD/pending/$WAKE"
+local n; n=$(CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" = health ] || exit 3; printf "%s\n" "Conveyor: alpha: blocked: #9" "alpha: #9 is blocked since 2026-11-19T09:59:00Z: tests failed" > "$CONVEYOR_FOREMAN_DIR/pending/20261119T100100Z-2-b.wake"; echo "{\"blocked\": []}"' \
+  bash -c '. "$1/lib.sh" && pending_fresh; echo "$PENDING_DROPPED"' _ "$SRC")
+[ "$n" = 2 ] && ! compgen -G "$FD/pending/*.wake" > /dev/null \
+  || fail "for a wake of #7 blocked pending and one of #9 blocked put while health (nothing blocked) was read, pending_fresh did not take out both and count 2 (counted '$n'; left: $(ls "$FD/pending"))"
+}
+
+cases=(freshnolist freshretrynote freshreminder freshown freshnoissue freshfollowups freshcount)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

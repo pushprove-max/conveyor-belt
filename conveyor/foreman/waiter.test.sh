@@ -550,7 +550,55 @@ CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" = health ] || exit 3; echo "{\"blocked\"
   || fail "for a wake of #7, #8 and #9 blocked and #10 still blocked for 'tests failed [this could not be posted on the issue]', and health holding #8 as the wake says, #7 blocked again since 10:05 for another reason, #9 not at all and #10 for 'tests failed' alone since 09:30, the stop did not relay the wake with #8 alone (exit $rc): $(cat "$T/wake")"
 }
 
-cases=(handoff restart why downheld downstop goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed resumed slowsid forkterm noreader stopover reclaim checkquiet startwake startother startlive startover startheld startclaim startadopt retried)
+# stale <exit>: a watcher that puts a wake of alpha's #7 blocked, which health (staleask) no longer holds, waits
+# until the stop's freshness check takes it out at a poll (it runs on while the waiter drops its wake, as a watcher of
+# several projects does), then exits with <exit>.
+stale() { echo "echo \$\$ >> $T/starts; . $SRC/lib.sh && printf '%s\n' 'Conveyor: alpha: blocked: #7' 'alpha: #7 is blocked since 2026-11-19T09:58:00Z: tests failed' | pending_put; while compgen -G \"$FD/pending/*-\$\$-*.wake\" > /dev/null; do sleep 0.1; done; exit $1"; } # sleep: a wait for the waiter's poll to take the wake out
+staleask() { mkdir -p "$XDG_CONFIG_HOME/conveyor" "$T/alpha"; jq -n --arg m "$T/alpha" '{records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"; export CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" = health ] && echo "{\"blocked\": []}"'; }
+# Bug caught (issue 1659): the stop's waiter counted a watcher that put a wake (exit 0) toward WATCHER DOWN when the
+# freshness check took that wake out as stale, so a watcher that put 4 stale wakes in an hour was set down as dead;
+# and one whose wake a poll took out while it ran on (it found nothing pending at its exit). The case polls the real
+# waiter's watcher starts: the count is kept only in the running waiter's memory, and a fifth start is the one outside
+# action that shows the exits were not counted.
+t_stalestop() {
+fixture stalestop; staleask
+stop "$(stale 0)" & s=$!
+WAIT_CEILING=60 wait_until '[ "$(wc -l < "$T/starts" 2>/dev/null)" -ge 5 ]' || fail "a watcher that put a stale wake 4 times was not started a fifth time ($(wc -l < "$T/starts") starts): $(cat "$T/wake")"
+kill -0 "$s" 2>/dev/null && ! grep -q 'WATCHER DOWN' "$T/wake" || fail "a watcher that put a stale wake 4 times raised WATCHER DOWN: $(cat "$T/wake")"
+kill "$SP"; wait "$s"
+}
+# A watcher of the stop's waiter that exits non-zero 4 times in an hour is set down, though the freshness check took
+# out its stale wake each time: only an exit 0 tells a wake put.
+t_stalefail() {
+fixture stalefail; staleask
+stop "$(stale 1)"; rc=$?
+[ "$rc" = 2 ] && grep -q '^WATCHER DOWN: ' "$T/wake" && [ "$(wc -l < "$T/starts")" = 4 ] || fail "a watcher that put a stale wake and exited 1 4 times was not set down after its fourth start (exit $rc, $(wc -l < "$T/starts") starts): $(cat "$T/wake")"
+}
+
+# Bug caught (issue 1659, a review of it): a watcher that put its wake after the stop's poll listed pending, and
+# exited before the waiter read its exit, was counted as dead: its stale wake was taken out only at the next poll.
+# The race is forced at its weak point: watcher D dies once, and while the waiter sleeps the 5 s before it starts D
+# again (after its poll and before it reads R's exit), R puts its stale wake and exits 0; then R dies 3 times, and its
+# fifth start runs on. Not counted, the race leaves R 3 deaths, one short of WATCHER DOWN; counted, the third death
+# raises it. D must come
+# first in the waiter's walk of its watchers (a hash order): a comment is added to its line until it does. The case
+# polls the real waiter's starts, as the count is kept only in its memory.
+t_stalerace() {
+fixture stalerace; staleask
+local r d n=0 first
+r="echo \$\$ >> $T/starts; n=\$(wc -l < $T/starts); [ \$n -lt 5 ] || exec sleep 600; [ \$n = 1 ] || exit 1; until pgrep -P \$PPID -xf 'sleep 5' > /dev/null; do sleep 0.1; done; . $SRC/lib.sh && printf '%s\n' 'Conveyor: alpha: blocked: #7' 'alpha: #7 is blocked since 2026-11-19T09:58:00Z: tests failed' | pending_put" # sleep: a wait for the waiter's 5 s pause before it starts D again
+while :; do
+  d="[ -e $T/died ] || { touch $T/died; exit 1; }; sleep 600 # $n" # sleep: a watcher that finds nothing once it died
+  first=$(bash -c 'declare -A C=() P=(); C[$1]=1; C[$2]=1; for k in "${!C[@]}"; do P[$k]=1; done; for k in "${!P[@]}"; do printf "%s" "$k"; break; done' _ "$r" "$d")
+  [ "$first" = "$d" ] && break; n=$((n + 1))
+done
+stop "$r"$'\n'"$d" & s=$!
+WAIT_CEILING=60 wait_until '[ "$(wc -l < "$T/starts" 2>/dev/null)" -ge 5 ] || ! kill -0 '"$s" || fail "the waiter of watchers R and D ended or did not start R a fifth time ($(wc -l < "$T/starts") starts): $(cat "$T/wake")"
+kill -0 "$s" 2>/dev/null && ! grep -q 'WATCHER DOWN' "$T/wake" || fail "a watcher R that put a stale wake after the poll and exited 0, then died 3 times, raised WATCHER DOWN ($(wc -l < "$T/starts") starts): $(cat "$T/wake")"
+kill "$SP"; wait "$s"
+}
+
+cases=(handoff restart why downheld downstop stalestop stalefail stalerace goneblock takeover undelivered takecheck oldpid refused delivered refusedwait claimed resumed slowsid forkterm noreader stopover reclaim checkquiet startwake startother startlive startover startheld startclaim startadopt retried)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

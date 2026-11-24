@@ -28,7 +28,8 @@
 # waiter.log, in the Foreman's folder, has a line when a waiter starts and when it ends, with why (lib.sh
 # waiter_state reads it); a waiter killed with no chance to write leaves its start line last.
 # The watchers: watch-conveyor.sh, watch-limit.sh, watch-alerts.sh, watch-idle.sh. Each exits 0 only once it put a
-# wake (a held waiter tells a wake by that exit alone); one that exits with nothing put died: it is started again
+# wake (a held waiter tells a wake by that exit alone; a stop's waiter by that exit and a wake the freshness check took
+# out as stale, which is not counted); one that exits with nothing put died: it is started again
 # after 5 s, up to 3 times an hour each; past that one WATCHER DOWN wake names it, and it is
 # not started again until the next stop (a held waiter leaves it out too: CONVEYOR_FOREMAN_DOWN).
 # The hook is ended at its 86400 s timeout, and nothing would start it again in a day with no wake: after 23 hours
@@ -211,7 +212,9 @@ ACK=$(mktemp) || { why='no temporary file could be made'; exit 0; }
 # SIGPIPE is ignored for that write, as Claude Code's hooks have it, so the waiter sees the failed write and says why.
 # A blocked card a pending wake names that was retried (blocked again since or not), landed or shut since it was put
 # is taken out of it first (lib.sh pending_fresh): a retry run in the turn would otherwise come back as a blocked wake
-# at its stop, with its old reason.
+# at its stop, with its old reason. That check counts each wake it removed whole in PENDING_DROPPED, one a watcher put
+# while it ran too: the loop below tells by it a watcher that put a wake the check took out (at that exit, or at a poll
+# while the watcher ran on) from one that exited 0 with nothing put.
 deliver() {
   : > "$ACK"
   live
@@ -317,8 +320,13 @@ while :; do
     else continue; fi
     # A held waiter's watcher that put a wake is started again: the wake waits in pending for the next stop. It is
     # told by its own exit (0: a watcher exits 0 once it put a wake), not by the count of pending wakes, which another
-    # watcher's wake or one put before the start makes grow (R210).
-    if [ "$MODE" = --held ] && [ "$ws" = 0 ]; then sleep 5 7>&-; start "$w"; continue; fi
+    # watcher's wake or one put before the start makes grow (R210). So is the watcher of a stop's waiter that exited 0
+    # while a wake the freshness check took out is not yet set against an exit (PENDING_DROPPED): it put a wake, and did
+    # not die. Its wake is in pending once its exit is read, but the poll above may have listed pending before the put:
+    # a second delivery here relays it, or its freshness check takes it out and counts it.
+    if [ "$ws" = 0 ] && [ "$MODE" = --held ]; then sleep 5 7>&-; start "$w"; continue; fi
+    if [ "$ws" = 0 ]; then ! deliver || { stop_all; handoff; exit 2; }; fi
+    if [ "$ws" = 0 ] && [ "$PENDING_DROPPED" -gt 0 ]; then PENDING_DROPPED=$((PENDING_DROPPED - 1)); sleep 5 7>&-; start "$w"; continue; fi
     now=$(date +%s); kept=()
     for t in ${TRIES[$w]:-}; do [ $((now - t)) -ge 3600 ] || kept+=("$t"); done
     if [ ${#kept[@]} -ge 3 ]; then
