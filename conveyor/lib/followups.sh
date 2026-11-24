@@ -396,7 +396,7 @@ Follow-up depth: $((depth + 1))"
     [ -z "$free" ] || standinglog review-followup "#$num, a follow-up of #$n (card $1), was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''
     [ -z "$cost" ] || [ -n "$free$rl" ] || out=$(locked control hold "$num" 2>&1 >/dev/null) \
       || { unfile "$n" "$3" "${nums[@]}"; echo "a follow-up that changes a pipeline file could not be held, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
-    [ -z "$rl" ] || out=$(locked control release "$num" 2>&1 >/dev/null) \
+    [ -z "$rl" ] || out=$(CONVEYOR_RELEASEBY=follow-up locked control release "$num" 2>&1 >/dev/null) \
       || { unfile "$n" "$3" "${nums[@]}"; echo "the follow-up of the finding that blocked the card could not be released, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
   done
   jq -cn '$ARGS.positional | map(tonumber)' --args "${nums[@]}"

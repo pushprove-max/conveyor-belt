@@ -570,8 +570,9 @@ def control_script(action, args, main, today, record=None, user=None):
         # dropped, so testissue holds the issue only when the record's new issues start held.
         return 'cd %s || exit 1; CONVEYOR_FOREMAN= CLAUDE_CODE_SESSION_ID= %s testissue %s %s %s' % (q(record or main), conv, q(args[0]), q(args[1]), q(args[2]))
     if action == 'unlabel':
-        return 'cd %s || exit 1; %s gh-write issue edit %s %s >/dev/null && %s control release %s' % (
-            q(record or main), conv, q(args[0]), ' '.join('--remove-label %s' % q(x) for x in args[1:]), conv, q(args[0]))
+        # CONVEYOR_UNLABELED: the release dates the owner's release though only the label held the issue (control release).
+        labels = ' '.join(f'--remove-label {q(x)}' for x in args[1:])
+        return f'cd {q(record or main)} || exit 1; {conv} gh-write issue edit {q(args[0])} {labels} >/dev/null && CONVEYOR_UNLABELED=1 {conv} control release {q(args[0])}'
     if action in ('approve', 'decline'):
         # The line names the record's pack owner: conveyor.sh's conditional() reads any other name as a condition.
         owner = 'o=$(bash %s get owner.name %s)' % (q(main + '/conveyor/lib/pack.sh'), q((record or main) + '/.conveyor/project.json'))

@@ -82,7 +82,8 @@ again() { # <issue | card id> [fresh]
   retry "$@" || { [ -z "$c" ] || CONVEYOR_MAIN=$MAIN bash "$HERE/../.claude/scripts/decision.sh" reopen "$c" >/dev/null \
     || echo "conveyor: decision $c could not be reopened; reopen it with \`decision.sh reopen $c\`" >&2; return 1; }
   [ "$held" = true ] || return 0
-  control release "$1" >/dev/null || { echo "conveyor: issue #$1 is held; release it with \`conveyor.sh control release $1\`" >&2; return 1; }
+  # Only the owner's retry is the owner's release (control(): released dates it); another's (review-retry, a Foreman's) is not.
+  CONVEYOR_RELEASEBY=${RETRYBY#owner} control release "$1" >/dev/null || { echo "conveyor: issue #$1 is held; release it with \`conveyor.sh control release $1\`" >&2; return 1; }
   echo "conveyor: issue #$1 was held; it is released, so the loop picks it again"
 }
 # An issue's card stuck in flight (its process gone or stopped, or no process of its step for the pack's stuck) is ended first,

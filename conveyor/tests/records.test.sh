@@ -158,6 +158,25 @@ t_unblockseen() {
   [ "$(jq -c '[.held, .startSeen]' "$ST/control.json")" = '[[],[]]' ] || fail "the refused unblock 9 --hold left held or startSeen changed: $(cat "$ST/control.json")"
   [ "$(loop control adopt 9 | jq -c .held)" = '[9]' ] || fail "control adopt 9, after the refused unblock 9 --hold, did not hold #9: $(cat "$ST/control.json")"
 }
+# Bug (#1627): a refused unblock put the hold back off, but not the owner's release time the hold took out (released),
+# so foreman status no longer said the owner had released #9, and the Foreman took the missing hold for a fault.
+t_unblockreleased() {
+  setup '[]'
+  loop control hold 9 >/dev/null && CONVEYOR_NOW=$(jq -n '"2026-11-24T10:15:00Z" | fromdate') loop control release 9 >/dev/null || fail "control hold 9, release 9 failed"
+  loop unblock 9 --hold >/dev/null 2>&1 && fail "unblock 9 --hold, #9 with no card, exited 0"
+  [ "$(jq -c '[.held, .released]' "$ST/control.json")" = '[[],{"9":"2026-11-24T10:15:00Z"}]' ] \
+    || fail "after unblock 9 --hold was refused, the hold or the owner's release time of #9 is not as before: $(jq -c '[.held, .released]' "$ST/control.json")"
+}
+# Bug (#1627): a retry by the standing review-retry released its held issue with the owner's `control release`, which
+# dated it in released, so foreman status said the owner released an issue the engine gave back.
+t_retrynotowner() {
+  setup "$(issue 7 2026-01-01 | jq -cs .)"
+  landed 7 | jq -c '.step = "blocked" | .result = "blocked" | .reason = "review: NO-GO"' >> "$ST/cards.jsonl"
+  loop control hold 7 >/dev/null || fail "control hold 7 failed"
+  CONVEYOR_REVIEWRETRY=1 loop retry 7 >/dev/null 2>&1 || fail "the review-retry of the held #7 failed"
+  [ "$(jq -c '[.held, .released]' "$ST/control.json")" = '[[],{}]' ] \
+    || fail "after the review-retry of the held #7, it is still held or dated as the owner's release: $(jq -c '[.held, .released]' "$ST/control.json")"
+}
 
 # Bug (#1472): a refused unblock took its hold off control.json but left the move to Held in moved.json, the Board's
 # history, so the next snapshot or adopt kept the failed command's Held time. The refused unblock leaves the issue's

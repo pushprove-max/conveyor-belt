@@ -140,13 +140,14 @@ t_needsmain() {
 
 # Bug (#1167): the answer did nothing, so the owner's pick was carried out by hand. Answered "Release it, first in the
 # order", the next pass releases #7 and puts it first in `order`, before #8 that was first. Read again, the answer
-# changes nothing more.
+# changes nothing more. Bug (#1627): the release dated #7 as the owner's (released), though auto may have given the
+# answer and the ledger does not say who did, so foreman status could credit the owner for auto's pick.
 t_needsrelease() {
   setup "$(jq -cs . <(issue 7 2026-01-01) <(issue 8 2026-02-01))"; mmain 7
   nmain; manswer 7 'Release it, first in the order'
   nmain; nmain
-  [ "$(jq -c '[.held, .order]' "$ST/control.json")" = '[[],[7,8]]' ] \
-    || fail "#7 was not released first in the order: $(cat "$ST/control.json") $(cat "$T/$CASE/run.out")"
+  [ "$(jq -c '[.held, .order, .released]' "$ST/control.json")" = '[[],[7,8],{}]' ] \
+    || fail "#7 was not released first in the order, or its release was dated as the owner's: $(cat "$ST/control.json") $(cat "$T/$CASE/run.out")"
 }
 
 # Bug (#1167): "Leave it held" must take no step: #7 stays held, however often the answered decision is read. #8,

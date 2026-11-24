@@ -15,6 +15,10 @@
 # reviewAccount are null or the name of one of the host file's accounts (ACCT, above); start is where
 # new issues start, queue or held, startHeld the spans it was held ({from, to}: the newest issue number at each switch;
 # to is null for the one in force, the last), startSeen the issues this setting has had its say on: held by adopt(), or released.
+# released is when the owner last released each issue the record or a label held (`control release`, the Board's
+# Queue, its "Remove the label and queue it"), keyed
+# by its number: foreman status shows it, so the Foreman takes the hold gone for the owner's release, not a fault. A
+# hold of the issue takes its entry out; a closed issue keeps it, so the release still shows if the issue is reopened.
 # filing is null, or the newest issue's number when the Foreman's filing hooks began a command that may file an issue
 # (`control filing on`): while it is set, adopt() holds a follow-up opened after it too.
 # depGuard is the dependency guard (true, the seed's, for a record written before it: no issue is picked while an
@@ -89,6 +93,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
       and (.judgeOn | type == "boolean") and (.judgeAlways | type == "array" and all(type == "string"))
       and (.judgeRare | type == "array" and all(IN("P0", "P1", "P2", "P3")))
       and (.depGuard | type == "boolean") and (.forced | type == "array" and all(type == "number"))
+      and (.released | type == "object" and all(to_entries[]; (.key | test("^[1-9][0-9]{0,8}$")) and (.value | type == "string")))
       and (.signin == null or (.signin | type == "string")) and (.landAs == null or (.landAs | IN("main", "pr")))
       and (.prMerge == null or (.prMerge | IN("button", "release", "idle")))
       and (.onboarded == null or (.onboarded | type == "object" and keys == ["at", "rules"] and (.at | type == "string") and (.rules | type == "array" and all(type == "string"))))
@@ -1238,7 +1243,7 @@ control() { # [action [arguments]]
         # jq reads a --dir among its arguments as its own option: the folder alone is given.
         set -- ssh "$2" "${4:-}"; f='.suiteMachine = {kind: "ssh", target: $v[1], dir: (if $v[2] == "" then "~/conveyor-suite" else $v[2] end)}'
       else bad; return; fi ;;
-    hold) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.held = (.held + ($v | map(tonumber)) | unique)' ;;
+    hold) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.held = (.held + ($v | map(tonumber)) | unique) | .released |= with_entries(select(.key | IN($v[]) | not))' ;;
     # adopt: the filing hooks' hold (foreman/foreman.sh filed) of the issues named: each one opened in a span of
     # startHeld, or after the filing mark (the owner may select Queue while a command files several), that
     # startSeen does not have yet (an older issue opened in the queue, which the command's output may link too, is
@@ -1272,8 +1277,16 @@ control() { # [action [arguments]]
         names && open=$(openissues number 2>/dev/null | jq -ce 'arrays') || { echo "conveyor: cannot read the open issues; nothing changed" >&2; return 1; }
       fi
       f='if $v[0] == "off" then .filing = null else .filing //= $n end' ;;
-    # release: one released is never held again by adopted(), whatever the setting or who opened it.
-    release) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.held -= ($v | map(tonumber)) | .startSeen = (.startSeen + ($v | map(tonumber)) | unique)' ;;
+    # release: one released is never held again by adopted(), whatever the setting or who opened it. The owner's
+    # release (the command line, the Board's Queue) dates each issue the record held in released (foreman status: "you
+    # released it <time>"), and each issue named when CONVEYOR_UNLABELED is set: the Board's "Remove the label and
+    # queue it" took the label that held it off first, so the record need not have held it. The engine's own
+    # (CONVEYOR_RELEASEBY names it: a retry not by the owner, a follow-up, a closed umbrella, a decision's answer)
+    # dates none, as it is no act of the owner.
+    release) [ $# != 0 ] && nums "$@" || { bad; return; }
+      f='.held -= ($v | map(tonumber)) | .startSeen = (.startSeen + ($v | map(tonumber)) | unique)'
+      [ -n "${CONVEYOR_RELEASEBY:-}" ] || f='((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate) as $t | .held as $h
+         | .released += ([$v[] | tonumber | select(IN($h[]) or ($ENV.CONVEYOR_UNLABELED // "") != "")] | map({key: tostring, value: $t}) | from_entries) | '"$f" ;;
     order) nums "$@" || { bad; return; }; f='.order = reduce ($v[] | tonumber) as $n ([]; if index($n) then . else . + [$n] end)' ;;
     unpin) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.order -= ($v | map(tonumber))' ;;
     # The dependency guard; with it off, `force` lets one issue be picked while issues it depends on are open.
@@ -1414,8 +1427,9 @@ control() { # [action [arguments]]
     | .held = (.held + $h | unique) | .startSeen = (.startSeen + $h | unique)' <<<"$new") && [ -n "$new" ]; } || return 1
   ctlput "$c" "$new" || return 1
   # A release of an issue the record's held does not list changes nothing there: it is held for another reason, or not
-  # held. Say so on stderr (exit 0 stays), so the one who ran it does not take the issue for released.
-  if [ "$a" = release ]; then
+  # held. Say so on stderr (exit 0 stays), so the one who ran it does not take the issue for released. The Board's
+  # release after it took the label off (CONVEYOR_UNLABELED) changed the label and released, so it says nothing.
+  if [ "$a" = release ] && [ -z "${CONVEYOR_UNLABELED:-}" ]; then
     for x in $(jq -r '.held as $h | $ARGS.positional[] | select(tonumber | IN($h[]) | not)' --args "$@" <<<"$c"); do
       echo "conveyor: #$x is not held in this record, so nothing changed; foreman status says what holds it" >&2
     done

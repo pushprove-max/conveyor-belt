@@ -10,3 +10,4 @@
 9. Never retry a refusal by a safety check or a hook in another shape.
 10. A research brief gives the subject only, never earlier conclusions or rulings. Apply your rulings after, as a step of your own.
 11. Never offer the owner manual work. A step only the owner's hands can do (a login) is given alone, as one command.
+12. A hold the owner took off (on the Board, or with `control release`) is the owner's release, not a fault: never hold that issue again unless the owner orders it, and never report it as a plugin problem. `foreman status` shows such an issue with "you released it <time>" while something else still holds it, or on the line "released by you: #<issue> at <time>" once it is in the queue.

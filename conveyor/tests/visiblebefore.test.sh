@@ -80,6 +80,45 @@ t_beforehold() {
   loop control hold 7 >/dev/null && [ "$(loop health | jq -c .before)" = '[]' ] || fail "a held issue is still asked for: $(loop health | jq -c .before)"
   loop control release 7 >/dev/null
 }
+# Issue 1627: the owner queued held issues from the Board, which only took them out of the control record's held. The
+# Foreman's status still showed each as "waits for your yes" with nothing to say the owner had released it, so the
+# Foreman took the missing hold for a fault and held them all again. Bug it catches: the release leaves no trace the
+# status shows (no released time in the record, the snapshot, or the held line). The release is the command the Board's
+# Queue runs (control_script() in .claude/scripts/dashboard_server_control.py: `conveyor.sh control release <n>`).
+# #7 stays held for the yes before its build, so the held line names it; #9, held only by the owner, goes to the queue,
+# which the held line leaves out (bug: its release showed nowhere), so its own line names it. #11 was held by a label
+# only, never in the record's held: the Board's "Remove the label and queue it" takes the label off, then runs the
+# release with CONVEYOR_UNLABELED (dashboard-server.test.sh checks the Board sends it); bug: that release dated only
+# issues the record held, so #11's showed nowhere.
+t_beforereleased() {
+  beforestart
+  jq -cs . <(sec 7 "$S") <(issue 9 2026-02-01) <(issue 11 2026-03-01) > "$STUB/issues.json"
+  loop control hold 7 9 >/dev/null || fail "control hold 7 9 failed"
+  CONVEYOR_NOW=$(jq -n '"2026-11-24T10:15:00Z" | fromdate') loop control release 7 9 >/dev/null || fail "control release 7 9 failed"
+  CONVEYOR_NOW=$(jq -n '"2026-11-24T10:20:00Z" | fromdate') CONVEYOR_UNLABELED=1 loop control release 11 >/dev/null \
+    || fail "the Board's release of #11 after its label came off failed"
+  loop snapshot --fresh > "$T/$CASE/snap" || fail "snapshot exited non-zero"
+  # foreman status of one record (alpha, main $R) that reads this snapshot through its ask, as status.test.sh does.
+  local F=$T/$CASE/foreman out l
+  mkdir -p "$F/config/conveyor" "$F/home"
+  jq -n --arg s "$F/state" --arg m "$R" '{stateDir: $s, records: [{repo: "alpha", main: $m}]}' > "$F/config/conveyor/host.json"
+  out=$(cd "$R" && XDG_CONFIG_HOME=$F/config XDG_DATA_HOME=$F/data HOME=$F/home CONVEYOR_FOREMAN_DIR=$F/state/foreman \
+    CONVEYOR_FOREMAN_NOW=$(jq -n '"2026-11-24T12:00:00Z" | fromdate') CONVEYOR_FOREMAN_ASK="cat $T/$CASE/snap" \
+    bash "$SRC/conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+  l='held: #7 (waits for your yes; you released it 2026-11-24T10:15:00Z)'
+  grep -qxF -- "$l" <<<"$out" || fail "after control release 7 9, foreman status does not say the owner released #7 and when; wanted '$l' in: $out"
+  l='released by you: #9 at 2026-11-24T10:15:00Z, #11 at 2026-11-24T10:20:00Z'
+  [ "$(jq -c '[.queue.order[].issue]' "$T/$CASE/snap")" = '[9,11]' ] && grep -qxF -- "$l" <<<"$out" \
+    || fail "after control release 7 9 and the Board's release of #11, #9 or #11 is not queued, or foreman status does not say the owner released them and when; wanted '$l' in: $out"
+  # A hold again takes the release back: the status no longer says the owner released it.
+  loop control hold 7 >/dev/null && [ "$(loop control | jq -c '.released | keys')" = '["11","9"]' ] || fail "control hold 7 kept its release time: $(loop control | jq -c .released)"
+  # #9 closed, below #11 that stays open: a snapshot keeps #9's release (bug: its adopt dropped it, so a reopened #9
+  # had no record of the owner's release; an earlier filter kept only entries above the highest open issue, which #9
+  # is not).
+  jq -cs . <(sec 7 "$S") <(issue 11 2026-03-01) > "$STUB/issues.json"
+  loop snapshot --fresh >/dev/null && [ "$(loop control | jq -c '.released["9"]')" = '"2026-11-24T10:15:00Z"' ] \
+    || fail "with #9 closed and #11 open, a snapshot dropped #9's release time: $(loop control | jq -c .released)"
+}
 # With the approval line the card is held to the section (heldto, vmode held: the build and the review are given the
 # section and the line, t_beforediffers), the reviewer answers matches, and the gate lets it land with no second ask.
 t_beforeyes() {

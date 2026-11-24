@@ -1047,7 +1047,8 @@ snapshot() (
     # is blocked, or landed with the issue still open; step; notPushed: true when it landed while push is off and is
     # not pushed yet) or parent (a follow-up filed before its parent card
     # landed) or approve (it waits for the yes of the owner before its
-# build, in "Needs you"). null when gh cannot list the issues.
+# build, in "Needs you"). Each also has released: when the owner last released it from the held list of the control
+    # record (`control release`, Queue on the Board), else null. null when gh cannot list the issues.
     ($iss[0]) as $open | ($ua[0]) as $up
     # A card landed while push is off (x.after wait) is off the belt: its issue is landed, not pushed (held, below).
     | ([$c[] | select(.result == "" or (.x.after != null and .x.after != "wait")) | .issue]) as $onbelt
@@ -1074,6 +1075,7 @@ snapshot() (
             | select(($i.number | IN($queued[])) | not)
             | {issue: $i.number, title: ($i.title // "")[0:200], priority: level($l; $prio), followup: $isfu,
                labels: $l, created: $i.createdAt, parent: (($i.body // "") | capture("^Follow-up to #(?<n>[0-9]+)") | .n | tonumber) // null, reasons: $why,
+               released: ($control // {} | .released // {} | .[$i.number | tostring] // null),
                # The slices of a split issue (the rule Split large issues On), else the parts of a parent (its GitHub
                # sub-issues in this repository): it is their umbrella while it is open.
                umbrella: (([$c[] | select(.issue == $i.number and (.x.split.filed | type) == "array")] | last | .x.split.filed)

@@ -649,6 +649,8 @@ cat > "$HM/conveyor/conveyor.sh" <<STUB
 # The Board's GitHub writes go through the host's gh-write (plan section 8, P5): recorded, then handed to gh.
 [ "\$1" != gh-write ] || { shift; printf '%s\n' "\$*" >> "$F/gh-writes"; exec gh "\$@"; }
 printf '%s %s\n' "CONVEYOR_MAIN=\$CONVEYOR_MAIN" "\$*" >> "$F/conveyor-calls"
+# A call with the Board's mark of a release after the label came off (unlabel), which control release reads.
+[ -z "\${CONVEYOR_UNLABELED:-}" ] || printf '%s\n' "\$*" >> "$F/unlabeled-calls"
 [ ! -e "$F/conveyor-refuse" ] || { echo "conveyor: \$(cat "$F/conveyor-refuse")" >&2; exit 2; }
 case \$1 in
   health) printf '{"waiting":[{"card":"c1","issue":%s}],"before":[{"issue":%s}]}\n' "\$(cat "$F/waiting" 2>/dev/null || echo 0)" "\$(cat "$F/before" 2>/dev/null || echo 0)" ;;
@@ -693,7 +695,7 @@ ctl() {
 # Every action names the record it is for: here the host file's one record, sample, on its main.
 act() { jq -cn --arg a "$1" '{action: $a, args: $ARGS.positional, repo: "sample"}' --args -- "${@:2}"; }
 yes_act() { act "$@"; }
-fresh_control() { rm -f "$F/testissue-mark" "$F/conveyor-calls" "$F/gh-calls" "$F/gh-writes" "$F/gh-pwd" "$F/gh-body" "$F/ssh-calls" "$F/conveyor-refuse" "$F/waiting" "$F/before" "$F/ssh-down" "$F/shut-none" "$F/shut-fails" "$F/shut-unlocked"; }
+fresh_control() { rm -f "$F/testissue-mark" "$F/conveyor-calls" "$F/unlabeled-calls" "$F/gh-calls" "$F/gh-writes" "$F/gh-pwd" "$F/gh-body" "$F/ssh-calls" "$F/conveyor-refuse" "$F/waiting" "$F/before" "$F/ssh-down" "$F/shut-none" "$F/shut-fails" "$F/shut-unlocked"; }
 calls() { cat "$F/conveyor-calls" 2>/dev/null; }
 
 # control_part <part> <port> -- a part on the control host, max logged in on control-test ($A/ct).
@@ -1132,11 +1134,14 @@ done
 [ ! -e "$F/ssh-calls" ] && [ -z "$(calls)" ] || fail "control_bad_repo_runs_nothing: $(cat "$F/ssh-calls" 2>/dev/null)"
 jq -n --arg m "$HM" --arg l "$L" '{host: "buildhost", ssh: "user@buildhost", main: $m, records: [{repo: "sample", main: $m, ledger: $l}]}' > "$M/conveyor/host.json"
 pass=$((pass + 6))
-# "Remove the label and queue it": the label comes off the issue on GitHub, then the issue is released.
+# "Remove the label and queue it": the label comes off the issue on GitHub, then the issue is released. The release
+# carries CONVEYOR_UNLABELED (bug #1627: without it, control release dated no owner's release of an issue only the
+# label held, so foreman status showed none and the Foreman held the issue again).
 fresh_control
 [ "$(ctl "$(act unlabel 12 ux-change)")" = 200 ] && [ "$(calls)" = "CONVEYOR_MAIN=$HM control release 12" ] \
+  && [ "$(cat "$F/unlabeled-calls" 2>/dev/null)" = 'control release 12' ] \
   && [ "$(cat "$F/gh-calls")" = 'issue edit 12 --remove-label ux-change' ] && [ "$(cat "$F/gh-writes")" = "$(cat "$F/gh-calls")" ] && grep -q '"mode":"run"' "$M/ctl.out" \
-  || fail "unlabel_removes_the_label_and_releases: ran '$(calls)', gh '$(cat "$F/gh-calls" 2>&1)', answered '$(cat "$M/ctl.out")'"
+  || fail "unlabel_removes_the_label_and_releases: ran '$(calls)', marked unlabeled '$(cat "$F/unlabeled-calls" 2>&1)', gh '$(cat "$F/gh-calls" 2>&1)', answered '$(cat "$M/ctl.out")'"
 fresh_control
 [ "$(ctl "$(act unlabel 13 backlog dormant)")" = 200 ] && [ "$(cat "$F/gh-calls")" = 'issue edit 13 --remove-label backlog --remove-label dormant' ] \
   || fail "unlabel_removes_every_label_named: gh '$(cat "$F/gh-calls" 2>&1)'"

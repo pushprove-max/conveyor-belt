@@ -127,7 +127,9 @@ rlreopen() {
 #     or released by hand) is asked again, under the same id, once the issue is held and open again.
 #   - An open decision whose issue is no longer held (released by hand), or is closed, is answered NEEDSMAIN_GONE.
 #   - A decision answered NEEDSMAIN_RELEASE whose issue is still held and open has the step taken: the issue goes first in
-#     the control record's `order`, then is released, as `control order` and `control release` do. The decision's id and
+#     the control record's `order`, then is released, as `control order` and `control release` do; the release is the
+#     engine's (CONVEYOR_RELEASEBY decision): the ledger does not say whether the owner or auto gave the answer, so
+#     foreman status never credits the owner with it. The decision's id and
 #     its asking number (MAINASKS) are then written to the file $ST/mainred-released, and that answer is read no more, so
 #     a later hold of the issue is not released again by the old answer; the answer itself is left as the owner gave it.
 #     The same decision asked again (reopened, or asked again as above) has a new asking number, so its answer is read,
@@ -230,7 +232,7 @@ needsmain() {
       OPEN) [ "$ans" = "$NEEDSMAIN_RELEASE" ] || continue
         echo "conveyor: decision $id is answered \"$ans\": order $n first, release $n" >&2
         mapfile -t rest < <(jq -r --argjson n "$n" '.order[] | select(. != $n)' <<<"$c")
-        bash "$HERE/conveyor.sh" control order "$n" "${rest[@]}" > /dev/null < /dev/null && bash "$HERE/conveyor.sh" control release "$n" > /dev/null < /dev/null \
+        bash "$HERE/conveyor.sh" control order "$n" "${rest[@]}" > /dev/null < /dev/null && CONVEYOR_RELEASEBY=decision bash "$HERE/conveyor.sh" control release "$n" > /dev/null < /dev/null \
           && echo "$id $k" >> "$ST/mainred-released" ;;
     esac
   done < <(jq -r '.[] | last | [.id, (.answer // ""), .askedAt, ._k] | map(tostring) | join("\u001f")' <<<"$rows")

@@ -349,9 +349,9 @@ STATUS=$SUITE$REF$(healsdef)'def num: if type == "number" then "#\(.)" else tost
   (.belt | arrays | .[] | objects | "  \(ref) \(.step)\((.waitsOn | objects | select(.issue | numbers) | " on \(ref)") // "")"
     + " \((.stepAt | fromdate? | $now - .) // null | if . == null then "?" else took end) \(.title // "" | tostring | gsub("\\s+"; " ") | .[0:60] | sub(" $"; ""))"),
   (.queue.waiting | arrays | select(length > 0) | "waiting: " + (map(objects | "\(.issue | num) on \(.waitsFor | arrays | map(num) | join(" "))") | join(", "))),
-  # Each held issue with what holds it and the step that clears it, from its reasons (snapshot.sh, open.held); none: the number alone.
-  (.open.held | arrays | select(length > 0) | "held: " + (map(objects | . as $h | (($h.reasons | arrays | map(objects | heldwhy($h)) | join("; ")) // "") as $w
-    | ($h.issue | num) + (if $w == "" then "" else " (\($w))" end)) | join(" "))),
+  # Each held issue with what holds it and the step that clears it, from its reasons (snapshot.sh, open.held), then when the owner released it (released, #1627); none: the number alone. Then each other open issue the owner released (control.released): one released into the queue.
+  (.open.held | arrays | select(length > 0) | "held: " + (map(objects | . as $h | ([($h.reasons | arrays | .[] | objects | heldwhy($h)), ($h.released | strings | "you released it \(.)")] | join("; ")) as $w | ($h.issue | num) + (if $w == "" then "" else " (\($w))" end)) | join(" "))),
+  ([.open.held | arrays | .[] | objects | .issue] as $hn | [.open.issues | arrays | .[] | objects | .issue] as $on | [.control.released | objects | to_entries[] | (.key | tonumber?) as $n | select(($n | IN($on[])) and ($n | IN($hn[]) | not)) | {n: $n, at: .value}] | sort_by(.n) | select(length > 0) | "released by you: " + (map("\(.n | num) at \(.at)") | join(", "))),
   (.selfheals | objects | healsline), # never a "needs you" (lib.sh healsdef)
   ([.suites | arrays | .[] | objects] as $s | ($s | map(select(.ended == null))) as $run
     | if $run != [] then $run[] | suiteline($now)

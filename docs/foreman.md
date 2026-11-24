@@ -113,7 +113,10 @@ see only that project. It shows:
 - the cards that wait on other issues, and the held issues, by number. After each held issue, in brackets, what holds it
   and the step that clears it: `#12 (your hold: control release)`, `#13 (split: waits for its parts #14 #15)` or
   `#16 (card blocked: retry)`. `control release` frees only an issue you hold. For any other, it changes nothing and
-  prints a line on stderr that says so; the bracket names what to do instead.
+  prints a line on stderr that says so; the bracket names what to do instead. A held issue that you released, with
+  **Queue** or **Remove the label and queue it** on the Board, or with `control release`, also shows when: `#7 (waits for your yes; you released it
+  2026-11-24T10:15:00Z)`. An issue you released that is now in the queue shows on its own line:
+  `released by you: #9 at 2026-11-24T10:15:00Z`. The Foreman does not hold such an issue again.
 - the release or full-test run in progress: its commit, how long it has run, the cases done of all its cases, and the
   failed cases. With no run in progress, it shows how the last run ended.
 - each item that needs you, one a line: a blocked card with its reason, a change that waits for your yes, a push
