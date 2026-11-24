@@ -409,7 +409,7 @@ TRYFOLD=$(<"$HERE/jq/tryfold.jq") # the jq defs the two folds of a step's tries 
 # so the step is priced as an estimate, never as exact; the usage counted is kept (one try's alone when the other's is unknown, with its split; a try's on another model in alsoUsed, with its split: TRYFOLD). An OpenCode cost (usage.cost) is the sum when both report one, else left out. A resumed try (session1()) leaves it resumed.
 APIFOLD="$TRYFOLD"'
   .sec += $p.sec | (if .tokens != null or $p.tokens != null then .tokens = add2(.tokens; $p.tokens) else . end) | (if $p.resumed then .resumed = $p.resumed else . end) | .alsoUsed = ((.alsoUsed // []) + ($p.alsoUsed // []))
-  | if $p.model != null and $p.model != .model then .unread //= "a try the model API refused ran on another model (\($p.model)): one model cannot price both" | if ($p.usage | type) == "object" then .alsoUsed += [also($p)] else . end
+  | if $p.model != null and $p.model != .model then .unread //= otherwhy($p; "a try the model API refused") | if ($p.usage | type) == "object" then .alsoUsed += [also($p)] else . end
     elif (.usage | type) == "object" and ($p.usage | type) == "object" then fold($p)
       | if $p.unread then .unread //= $p.unread else . end
     elif ($p.usage | type) == "object" then took($p) | .unread //= ($p.unread // "the token usage of the try after the one the model API refused could not be read")

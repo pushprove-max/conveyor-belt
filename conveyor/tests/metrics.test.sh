@@ -361,6 +361,8 @@ EOF
 # estimate left those tokens out (no estimate at all, as here, with no exact review to take a median of). Card 1's
 # review retried on claude-opus-5-5 after a try on claude-haiku-5-5 that counted 1M input tokens ($0.10 at Haiku's
 # rate); card 2 blocked on a review whose retry read nothing after a try that counted 2M ($0.20).
+# Bug caught (#1585 review): card 3's old review line, whose first try asked for Sonnet and ran on Opus as its retry
+# did (1M input tokens each, the retry's alone in the usage), had the first try's 1M left out: $4, not $8.
 t_metricsoldtry() {
   export TZ=UTC; setup '[]'; S=$ST; mkdir -p "$S"; d=$(date -u +%F); y=$d; now=$(date -u -d "${d}T23:59:00Z" +%s)
   l 1 01:00 picked ok '{"title":"T1"}'
@@ -368,11 +370,16 @@ t_metricsoldtry() {
   l 1 01:30 landed ok '{"sha":"s1","product":false}'
   l 2 02:00 picked ok '{"title":"T2"}'
   l 2 02:10 blocked blocked '{"reason":"review failed (exit 124)","spent":{"step":"review","model":"claude-haiku-5-5","sec":60,"unread":"the token usage of the first attempt could not be read","firstTry":{"reason":"review failed (exit 124)","spent":{"step":"review","model":"claude-haiku-5-5","usage":{"input":2000000}}}}}'
+  l 3 03:00 picked ok '{"title":"T3"}'
+  l 3 03:10 review GO '{"model":"claude-opus-5-5","usage":{"input":1000000},"stats":{"byModel":{"claude-opus-5-5":{"input":1000000}}},"unread":"the first attempt ran on another model (claude-sonnet-5-5): one model cannot price both","firstTry":{"reason":"review failed (exit 124)","spent":{"step":"review","model":"claude-sonnet-5-5","usage":{"input":1000000},"stats":{"byModel":{"claude-opus-5-5":{"input":1000000}}}}}}'
+  l 3 03:30 landed ok '{"sha":"s3","product":false}'
   recok "$S/cards.jsonl" "review lines written before BOTHTRIES kept a first try's count"
   out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot exited non-zero"
-  [ "$(jq -c '[.landed[0].metrics.timeline[0], .needsYou.blocked[0].metrics.timeline[0]] | map([.usd, .model, .estimate])' <<<"$out")" \
+  [ "$(jq -c '[(.landed[] | select(.card == "c1")), .needsYou.blocked[0]] | map(.metrics.timeline[0] | [.usd, .model, .estimate])' <<<"$out")" \
     = '[[0.1,"claude-haiku-5-5","the tokens it counted, at its model'"'"'s price"],[0.2,"claude-haiku-5-5","the tokens it counted, at its model'"'"'s price"]]' ] \
-    || fail "an old review's first try count ($S/cards.jsonl) is left out of its estimate: $(jq -c '[.landed[0].metrics.timeline, .needsYou.blocked[0].metrics.timeline]' <<<"$out")"
+    || fail "an old review's first try count ($S/cards.jsonl) is left out of its estimate: $(jq -c '[.landed[].metrics.timeline, .needsYou.blocked[0].metrics.timeline]' <<<"$out")"
+  [ "$(jq -c '.landed[] | select(.card == "c3") | .metrics.timeline[0].usd' <<<"$out")" = 8.0 ] \
+    || fail "card 3's review in $S/cards.jsonl, whose first attempt (1M input tokens at claude-opus-5-5) is only in firstTry, is not \$8: $(jq -c '.landed[] | select(.card == "c3") | .metrics.timeline' <<<"$out")"
 }
 
 # A session cut off by the time limit ends with an answer Claude Code names <synthetic> (no model answered it). Bug

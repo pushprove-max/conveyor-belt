@@ -12,6 +12,9 @@
 # other try's usage is added to that model's part of the split too (bmof): the price table prices a split of several
 # models from the split alone, so a later try's split on another model would leave the first try's tokens out.
 # took($p): $p's usage, with its split, in place of this try's, which read none.
+# ranby: the models a try ran on, as it said (ranon), else the one it asked for. otherwhy($p; $who): the reason of a
+# try $p that asked for another model than this one (its usage is in alsoUsed, priced apart): it names the models $p
+# ran on (ranby) that this try did not; when there are none, it says $p asked for another model, and names that one.
 def add2(a; b): [a, b] | map(. // {} | to_entries[]) | reduce .[] as $e ({}; .[$e.key] += $e.value);
 def ranon: [.stats // {} | ((.byModel | objects | keys) // (.models | arrays) // [])[] | select(. != "<synthetic>")] | unique;
 def split: .stats // {} | {byModel, models} | with_entries(select(.value != null));
@@ -35,4 +38,8 @@ def fold($p): ranon as $a | ($p | ranon) as $b
     elif ($a == $b and ($a | length) <= 1) or ([$a, $b] | map(length) | sort) == [0, 1] then onemodel($p; ($a + $b)[0])
     else ([$b, $a] | map(join(", ") | if . == "" then "none named" else . end)) as [$x, $y]
       | .unread //= "a try named other models that ran it (\($x)) than the other (\($y)): one split cannot price both" | .alsoUsed += [also($p)] end;
+def ranby: ranon as $r | if $r == [] then [.model | strings] else $r end;
+def otherwhy($p; $who): (($p | ranby) - ranby) as $e
+  | if $e == [] then "\($who) asked for another model (\($p.model)): each is priced at the models that ran it"
+    else "\($who) ran on another model (\($e | join(", "))): one model cannot price both" end;
 def took($p): .usage = $p.usage | ($p | split) as $s | if .stats == null and $s == {} then . else .stats = ((.stats // {}) | del(.byModel, .models)) + $s end;

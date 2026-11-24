@@ -343,6 +343,7 @@ EOT
 # attempts) and APIFOLD (the tries the model API refused), keep them: the counted usage when the step's own try read
 # none, and a try's on another model (x) in alsoUsed, priced at that model. Bug caught (#1585 review): that try's
 # own word on the model that ran it (stats.byModel, y) was dropped, so its tokens were priced at the model it asked for.
+# Bug caught (#1585 review): unread named the model that try asked for (x), not the one it ran on (y).
 t_triesusage() {
   setup '[]'
   local d=$T/$CASE/folds u='{"input":10,"read":0,"output":1}' b='{"byModel":{"y":{"input":10,"write":0,"read":0,"output":1}}}'; mkdir -p "$d"
@@ -353,9 +354,31 @@ t_triesusage() {
       jq -c --argjson f "{\"spent\": $s}" "$BOTHTRIES | [.usage, .unread, .alsoUsed]" "'"$d"'/${t%:*}"; jq -c --argjson p "$s" "$APIFOLD | [.usage, .unread, .alsoUsed]" "'"$d"'/${t%:*}"; done'
   [ "$(cat "$T/$CASE/run.out")" = "[$u,\"none read\",null]
 [$u,\"none read\",null]
-[$u,\"the first attempt ran on another model (x): one model cannot price both\",[{\"model\":\"x\",\"usage\":$u,\"stats\":$b}]]
-[$u,\"a try the model API refused ran on another model (x): one model cannot price both\",[{\"model\":\"x\",\"usage\":$u,\"stats\":$b}]]" ] \
+[$u,\"the first attempt ran on another model (y): one model cannot price both\",[{\"model\":\"x\",\"usage\":$u,\"stats\":$b}]]
+[$u,\"a try the model API refused ran on another model (y): one model cannot price both\",[{\"model\":\"x\",\"usage\":$u,\"stats\":$b}]]" ] \
     || fail "the folds of a step whose own try read no usage ($d/none beside $d/m) and of one beside a try on another model ($d/m beside $d/x): $(cat "$T/$CASE/run.out")"
+}
+# Bug caught (#1585 review): a first try that asked for s and ran on o, beside a retry that asked for o and ran on o,
+# kept the reason "the first attempt ran on another model (s)": both ran on o. The reason says it asked for s. Bug
+# caught (#1585 review): adding the two tries' usage and splits as one left such a first try's 1-hour writes with no
+# model of the retry's split to price them at, and made an old line's first try (firstused, jq/rows.jq) counted twice.
+# Both folds keep it apart, in alsoUsed, at its own split, as for a try on another model.
+# Bug caught (#1585 review): a first try that asked for s and ran on h and o (two) kept the reason "ran on another
+# model (h, o)": the retry ran on o too. The reason names h alone.
+t_triesranon() {
+  setup '[]'
+  local d=$T/$CASE/folds; mkdir -p "$d"
+  echo '{"model":"s","sec":1,"usage":{"input":10},"stats":{"byModel":{"o":{"input":10}}}}' > "$d/first"
+  echo '{"model":"s","sec":1,"usage":{"input":10},"stats":{"byModel":{"h":{"input":4},"o":{"input":6}}}}' > "$d/two"
+  echo '{"model":"o","sec":1,"usage":{"input":10},"stats":{"byModel":{"o":{"input":10}}}}' > "$d/retry"
+  # shellcheck disable=SC2016 # expanded in the engine shell
+  fx_in 'for t in first two; do s=$(cat "'"$d"'/$t"); jq -c --argjson f "{\"spent\": $s}" "$BOTHTRIES | [.usage, .stats, .unread, (.alsoUsed | length)]" "'"$d"'/retry"
+      jq -c --argjson p "$s" "$APIFOLD | [.usage, .stats, .unread, (.alsoUsed | length)]" "'"$d"'/retry"; done'
+  [ "$(cat "$T/$CASE/run.out")" = "[{\"input\":10},{\"byModel\":{\"o\":{\"input\":10}}},\"the first attempt asked for another model (s): each is priced at the models that ran it\",1]
+[{\"input\":10},{\"byModel\":{\"o\":{\"input\":10}}},\"a try the model API refused asked for another model (s): each is priced at the models that ran it\",1]
+[{\"input\":10},{\"byModel\":{\"o\":{\"input\":10}}},\"the first attempt ran on another model (h): one model cannot price both\",1]
+[{\"input\":10},{\"byModel\":{\"o\":{\"input\":10}}},\"a try the model API refused ran on another model (h): one model cannot price both\",1]" ] \
+    || fail "the folds of $d/first (asked for s, ran on o) and of $d/two (asked for s, ran on h and o) before $d/retry (asked for o, ran on o): $(cat "$T/$CASE/run.out")"
 }
 # Bug caught (#1585 review): two tries asked of one model added their usage and kept only the last try's split by model
 # (stats.byModel), so the price table priced the first try's tokens at the models the last one named (a refused try

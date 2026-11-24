@@ -29,8 +29,7 @@
 # A review's record with its failed first attempt $f ({reason, spent}) folded in, as reviewed() and stopped() write it.
 BOTHTRIES="$TRYFOLD"'
   . + {firstTry: $f} | .tokens = add2(.tokens; $f.spent.tokens) | .alsoUsed = ((.alsoUsed // []) + ($f.spent.alsoUsed // []))
-  | if $f.spent.model != null and $f.spent.model != .model then
-      .unread //= "the first attempt ran on another model (\($f.spent.model)): one model cannot price both"
+  | if $f.spent.model != null and $f.spent.model != .model then .unread //= otherwhy($f.spent; "the first attempt")
       | if ($f.spent.usage | type) == "object" then .alsoUsed += [also($f.spent)] else . end
     elif (.usage | type) == "object" and ($f.spent.usage | type) == "object" then fold($f.spent)
       | if $f.spent.unread then .unread //= $f.spent.unread else . end
