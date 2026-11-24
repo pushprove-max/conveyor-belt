@@ -634,7 +634,10 @@ test('an earlier attempt blocked by a cut finding keeps the last word its review
   const halfWord = line('[P1] [E1] conveyor/lib/b.sh:9 A slot is freed.', 'it acce');
   const said = [`${check} accepts an idle field.`, `${calls} the finding a gap.`, `${halfWord}pts it.`, '[P2] c.txt:3 other'];
   for (const l of [check, calls, halfWord]) assert.equal([...l].length, 300, `the fixture's cut is 300 characters: ${l}`);
-  const records = [{ name: 'review 1 (NO-GO)', state: 'done', sec: 30, at: iso(T0 - 2500000), output: said.join('\n') }];
+  // As in the saved cases, review 1 holds another finding and the blocking one is in review 2: a Board that reads only
+  // the first review drops the word.
+  const records = [{ name: 'review 1 (NO-GO)', state: 'done', sec: 30, at: iso(T0 - 2700000), output: '[P2] d.txt:1 an earlier finding' },
+    { name: 'review 2 (NO-GO)', state: 'done', sec: 30, at: iso(T0 - 2500000), output: said.join('\n') }];
   const prior = { card: 'c3-60', start: iso(T0 - 3600000), end: iso(T0 - 2400000), sec: 2640, reason: `the fix for ${check} did not hold after 1 round`, track: trackOf('++++!.', '', { at: null, since: null, records }) };
   Object.assign(data.panels.belt.data.cards[0], timesOf(T0, 2640), { earlier: [prior] });
   deliver(w, data);
@@ -649,7 +652,7 @@ test('an earlier attempt blocked by a cut finding keeps the last word its review
   next(w, data);
   assert.ok(proof().endsWith('x it…'), `the half word goes: ${proof().slice(-30)} for ${prior.reason}`);
   // A finding of exactly 300 characters that its review wrote so was not cut: it is drawn whole, with no "…".
-  records[0].output = [check, ...said].join('\n');
+  records[1].output = [check, ...said].join('\n');
   prior.reason = `the fix for ${check} did not hold after 1 round`;
   next(w, data);
   assert.ok(proof().endsWith('x The same check'), `an uncut finding stays whole: ${proof().slice(-30)} for ${prior.reason}`);
