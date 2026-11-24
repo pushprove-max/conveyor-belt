@@ -104,6 +104,19 @@ t_codexstop() {
   kill $pid 2>/dev/null; wait $pid 2>/dev/null; trap - EXIT
 }
 
+# Bug it catches: a Codex review that `control stop` ended after thread.started and before any usage got the fallback
+# stopped line with no model, though the live file names it, so the Board could not price it at the median of that
+# model's reviews (estimate_rest()). stopped() is called as the loop calls it, the review's session file not there yet.
+t_codexstopreview() {
+  local w=$T/$CASE/cards/c1-7
+  setup '[]'; export CODEX_HOME=$T/$CASE/codex-home; mkdir -p "$w" "$CODEX_HOME/sessions"
+  jq -cn '{card: "c1-7", issue: 7, time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, sha: "", reason: "", step: "start", result: "", of: "review"}' >> "$ST/cards.jsonl"
+  echo '{"type":"thread.started","thread_id":"th-1"}' > "$w.events"; echo '{"model":"cx-1"}' > "$w.live"
+  fx_in 'stopped c1-7 7'; [ "$RC" = 0 ] || fail "stopped() exited $RC: $(cat "$T/$CASE/run.out")"
+  [ "$(st 'select(.step == "review") | [.result, .model, has("unread")]' | jq -c .)" = '["stopped","cx-1",true]' ] \
+    || fail "the stopped Codex review's line, with events only thread.started and live file {\"model\":\"cx-1\"}, does not name its model: $(st 'select(.step == "review")')"
+}
+
 # Bugs: a command the Bash guardrails refuse runs in a Codex session, or is refused without the guard's message (Codex
 # reads a refusal from exit 2 and stderr); a command they rewrite (an unbounded search) runs as written; a command
 # they allow is refused; a subagent is let through; apply_patch, Codex's file

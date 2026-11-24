@@ -328,7 +328,7 @@ OPENCODEANSWER='[inputs | fromjson? // empty | objects | select(.type == "step_s
 # A card that `control stop` ended with a session or review running: what that one used so far is written as
 # a line of its step, result stopped (its model the one the live file names, its seconds from its start line), so
 # it is priced and counted when the card's lines move to the retried file. Called by the loop before the worktree
-# goes; a line that cannot be written is said, and the stop goes on. A build, fix or rebase whose output holds no usage yet is read from its transcript (transcribed()), on the account its worktree line names (the loop's own ACCT is the default), and one still with no price keeps its output (outkeep()), as a session's line does.
+# goes; a line that cannot be written is said, and the stop goes on. A build, fix or rebase whose output holds no usage yet is read from its transcript (transcribed()), on the account its worktree line names (the loop's own ACCT is the default), and one still with no price keeps its output (outkeep()), as a session's line does. A line with no usage read still names the model, so the Board can price it at that model's median (estimate_rest()).
 stopped() { # <card> <issue>
   local wt=$CARDS/$1 last of o f m e s x roll run='' ft=$CARDS/$1.firsttry
   last=$(stdb ask last "$1" 2>/dev/null)
@@ -363,7 +363,7 @@ stopped() { # <card> <issue>
       f=$(jq -cRn --arg m "$m" --arg e "$e" --argjson s "${s:-0}" --argjson run "${run:-null}" "$REVIEWREAD" "$wt.events" 2>/dev/null | tail -n 1 | jq -c 'del(.effort)' 2>/dev/null) ;;
     *) return 0 ;;
   esac; fi
-  [ -n "$f" ] || f=$(jq -cn --argjson s "${s:-0}" '{sec: $s, unread: "the output of the stopped session could not be read"}')
+  [ -n "$f" ] || f=$(jq -cn --argjson s "${s:-0}" --arg m "$m" '{model: $m, sec: $s, unread: "the output of the stopped session could not be read"}')
   [ -n "$m" ] || f=$(jq -c 'del(.model)' <<<"$f")
   # Stopped while a review ran again: the failed first attempt (reviewed()) is on the line, its tokens counted.
   [ "$of" != review ] || ! x=$(jq -ce objects "$ft" 2>/dev/null) || f=$(jq -c --argjson f "$x" "$BOTHTRIES" <<<"$f")
