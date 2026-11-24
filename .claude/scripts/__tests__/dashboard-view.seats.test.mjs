@@ -42,7 +42,7 @@ test('Settings shows each seat, marks the card\'s own, and Save sends one contro
     { action: 'card', args: ['20', 'judge', 'clear'], repo: 'sample' }]);
 });
 
-// Bug: the engine passes over a card's own seat whose model the pack no longer allows the seat (percard), but the
+// Bug: the engine skips a card's own seat whose model the pack no longer allows the seat (percard), but the
 // Board showed that model as "this card" while the card ran on the project's.
 test('a card\'s own builder whose model the pack no longer allows shows the project\'s builder', () => {
   const w = boot({ tab: 'control' });

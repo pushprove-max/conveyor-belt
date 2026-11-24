@@ -837,6 +837,7 @@
     "conveyor/foreman/foreman-size.test.sh"
   ],
   "conveyor/lib/review.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs"
   ],
   ".claude/dashboard/parts/rules-prices.js": [
@@ -930,5 +931,8 @@
   ],
   "conveyor/tests/lintyes.test.sh": [
     "conveyor/tests/fail.test.sh"
+  ],
+  "conveyor/tests/fail.test.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
   ]
 }
