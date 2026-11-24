@@ -53,6 +53,18 @@ t_lintgatestaged() {
     || fail "the lint line does not say the tools ran as installed: $(st 'select(.step == "lint")')"
   recok "$ST/cards.jsonl" "lintline"
 }
+# R227. Bug it catches: line() keeps 1500 characters of a reason, and lintline() put each command's whole text before
+# its result, so with long commands the last results and "tools ran as installed" were cut out of the card's history.
+# Twelve commands of 303 characters each, all passed with a trigger changed: the reason holds all twelve results and
+# ends with the note, each command's text cut to fit.
+t_lintlinelong() {
+  setup '[]'
+  jq -cn 'range(1; 13) as $n | {n: $n, run: ("bash lint-\($n).sh " + ("x" * 290)), result: "pass", sec: 1, reported: [], triggered: true}' > "$T/$CASE/o"
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'LINT_WHY=; lintline c7 7 "$T/$CASE/o" 0 review'
+  [ "$(st 'select(.step == "lint") | [([.reason | scan(": pass, 1 s")] | length), (.reason | endswith("; tools ran as installed")), (.reason | test("lint command 12 \\(bash lint-12\\.sh x+…\\)"))] | tojson')" = '[12,true,true]' ] \
+    || fail "with twelve lint commands of 303 characters, the lint line's reason lost a result or the as-installed note: $(st 'select(.step == "lint") | .reason') $(cat "$T/$CASE/run.out")"
+}
 # Bug: a command whose tool is missing (skipped) and whose trigger the change changed makes the lint line say the
 # tools ran as installed, though no tool ran. Bug (#1435): the case called lintrun() and lintline() rather than the gate,
 # and passed with an empty reason; it runs lintgate(), and the reason names the skipped command.

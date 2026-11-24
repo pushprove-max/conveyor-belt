@@ -26,6 +26,36 @@ t_kept() {
   st 'select(.step == "blocked") | .reason' | grep -q "^build: .*could not be kept as a patch.*its worktree is left at $wt\]" && [ "$(tail -n 1 "$wt/a.txt" 2>&1)" = two ] \
     || fail "a change that could not be staged went with its worktree, or the reason does not say where it is: $(st 'select(.step == "blocked") | .reason') $(ls "$T/$CASE/cards")"
 }
+# Bug it catches: a build the model API refused three times with no usage left each earlier try's output as
+# <card>.out.first and <card>.out.first-2 (outfirst(), lib/records.sh), and block() moved only .out.first to the kept
+# evidence: the second try's output went with the worktree. Each is kept.
+t_keptfirsts() {
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' k.txt kept
+  echo try1 > "$FXWT.out.first"; echo try2 > "$FXWT.out.first-2"; echo try3 > "$FXWT.out"
+  fx_in 'block c7 7 "$FXWT" "build: the model API refused"'
+  [ "$RC" = 0 ] || fail "block() failed: $(cat "$T/$CASE/run.out")"
+  [ "$(cat "$ST/kept/c7/c7.out.first" "$ST/kept/c7/c7.out.first-2" "$ST/kept/c7/c7.out" 2>&1 | paste -sd ' ')" = 'try1 try2 try3' ] \
+    || fail "the blocked card did not keep each try's output: $(ls "$ST/kept/c7" 2>&1)"
+}
+# Bug it catches: when the kept folder could not be made, the blocked reason named .out.first alone as left beside the
+# worktree, though the numbered ones (.out.first-2 and on) were left there too.
+t_keptfirstsleft() {
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' k.txt kept
+  echo try1 > "$FXWT.out.first"; echo try2 > "$FXWT.out.first-2"
+  mkdir -p "$ST/kept" && : > "$ST/kept/c7" || fail "the kept folder's place could not be taken"
+  fx_in 'block c7 7 "$FXWT" "build: the model API refused"'
+  st 'select(.step == "blocked") | .reason' | grep -qF '.out.first, .out.first-2 and on,' && [ "$(cat "$FXWT.out.first-2" 2>&1)" = try2 ] \
+    || fail "the reason does not name the numbered output left beside the worktree: $(st 'select(.step == "blocked") | .reason')"
+}
+# E3 (review). Bug it catches: outkeep() removed <card>.out.first, an earlier try's output with no price to read, even
+# when its copy to the kept folder failed (a full disk; here the folder's place is taken), so the only copy was lost.
+t_keptfirstfail() {
+  local cd=$T/$CASE/cards
+  setup '[]'; mkdir -p "$cd" "$ST/kept" && : > "$ST/kept/c7" && echo try1 > "$cd/c7.out.first" && echo try2 > "$cd/c7.out" || fail "the outputs could not be made"
+  fx_in 'outkeep c7 build "{\"step\":\"build\",\"usage\":null}"'
+  [ "$(cat "$cd/c7.out.first" 2>&1)" = try1 ] && grep -qF "it is left at $cd/c7.out.first" "$T/$CASE/run.out" \
+    || fail "outkeep c7 build, with the kept folder's place taken, removed try 1's output or did not say where it is: $(cat "$T/$CASE/run.out")"
+}
 
 # NO-GO with more findings than a brief may hold, its fix, then a review that fails: the NO-GO's findings are kept.
 t_keptlong() {

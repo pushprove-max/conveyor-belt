@@ -155,14 +155,35 @@ TAIL='split("\n") | .[-60:] | join("\n")'
 # A build, fix or rebase line written with no price to read (no usage: its output held none, or the session's fields
 # were lost and the line written bare; or unread) keeps that session's output, which clean() removes as the card
 # ends, beside the card's kept work: $ST/kept/<card>/<card>.<step>.out (-2, -3 and so on for a later one), so the
-# cause can be read.
+# cause can be read. A step run again after a stall or the model API's refusal (lib/session.sh session1(),
+# apitries()) wrote a new output over the try before; each try with no price to read left its own first (outfirst()),
+# and these are kept first, in try order: the line's unread can be that try's (BOTHTRIES, APIFOLD).
+UNPRICED='(.usage | type) != "object" or (.unread | type) == "string"'
+# The output of a try with no price to read, before the next try writes over it: <worktree>.out.first for the first,
+# then <worktree>.out.first-2 and so on, as outkeep() reads them.
+outfirst() { # <worktree>
+  local f=$1.out.first n=1
+  while [ -e "$f" ]; do n=$((n + 1)); f=$1.out.first-$n; done
+  cp "$1.out" "$f" 2>/dev/null || :
+}
 outkeep() { # <card> <step> <the line>
-  local d=$ST/kept/$1 f n=1
+  local d=$ST/kept/$1 f n=1 o i=1 u=''
   case $2 in build | fix | rebase) ;; *) return 0 ;; esac
-  jq -e '(.usage | type) != "object" or (.unread | type) == "string"' <<<"$3" >/dev/null 2>&1 && [ -s "$CARDS/$1.out" ] || return 0
-  f=$d/$1.$2.out; while [ -e "$f" ]; do n=$((n + 1)); f=$d/$1.$2-$n.out; done
-  mkdir -p "$d" 2>/dev/null && cp "$CARDS/$1.out" "$f" 2>/dev/null \
-    || echo "conveyor: card $1: its $2 line has no price to read, and its output could not be kept in $d" >&2
+  # Each <card>.out.first* is a try with no price to read, kept whatever the line says: a line stopped() writes in a
+  # later try's wait reads that later try alone, which can have its price.
+  ! jq -e "$UNPRICED" <<<"$3" >/dev/null 2>&1 || u=1
+  o=$CARDS/$1.out.first
+  while :; do
+    if [ -s "$o" ] && { [ -n "$u" ] || [ "$o" != "$CARDS/$1.out" ]; }; then
+      f=$d/$1.$2.out; while [ -e "$f" ]; do n=$((n + 1)); f=$d/$1.$2-$n.out; done
+      # An earlier try's output is removed only once it is kept: one that could not be (a full disk) is the only copy.
+      if mkdir -p "$d" 2>/dev/null && cp "$o" "$f" 2>/dev/null; then [ "$o" = "$CARDS/$1.out" ] || rm -f "$o"
+      else echo "conveyor: card $1: its $2 line has no price to read, and its output could not be kept in $d$([ "$o" = "$CARDS/$1.out" ] || echo "; it is left at $o")" >&2; fi
+    elif [ "$o" != "$CARDS/$1.out" ]; then rm -f "$o"
+    fi
+    [ "$o" != "$CARDS/$1.out" ] || break
+    i=$((i + 1)); o=$CARDS/$1.out.first-$i; [ -e "$o" ] || o=$CARDS/$1.out
+  done
 }
 # A step's line is always written: one whose extra fields are not one JSON object is written without them,
 # and says so (unread, with the start of what they were), so the card goes on. A line that cannot be written at all

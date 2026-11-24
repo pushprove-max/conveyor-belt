@@ -462,7 +462,7 @@ apitries() { # <worktree> <step> <output file> <command ...>
     try=$((try + 1)); used=$(jq -c 'del(.step)' "$wt.spent"); APIRESUME=1; APIRESUMED=''; jq -e '.resumed' <<<"$used" >/dev/null 2>&1 && APIRESUMED=1 # each retry of a Claude build resumes the refused session by the id its output names (session1(); other agents and steps run again from nothing), so a try refused before it named one leaves the resume to the next; a resumed try is the step's one resume, so no later try resumes (APIRESUMED)
     jq -cn --arg s "$st" --arg a "waiting: the model API refused ($api); trying again at $(p_date "@$at" +%H:%M)" --slurpfile u "$wt.spent" \
       '{step: $s, at: (now | todate), last: null, turns: 0, model: $u[0].model, action: $a} + (if ($u[0].effort | type) == "string" and $u[0].effort != "" then {effort: $u[0].effort} else {} end)' > "$wt.live.tmp" && mv -f "$wt.live.tmp" "$wt.live"
-    sleep "$w"
+    sleep "$w"; [ "$o" != "$wt.out" ] || [ ! -e "$wt.out.unpriced" ] || outfirst "$wt" # the refused try's output, when its own fields (session1(), not $wt.spent, which holds the tries before it too) have no price to read, before the next try writes over it: after the wait, as a stop in it (stopped()) keeps <worktree>.out itself, and a copy made before would be kept twice (outkeep(), lib/records.sh)
   done
 }
 # The worktree's tree before the session is kept in <worktree>.before (treeof(), lib/donewhen.sh), so donewhen.sh asks() can tell a
@@ -471,8 +471,8 @@ apitries() { # <worktree> <step> <output file> <command ...>
 # changed tests), else the builder's. With up as its 5th argument it runs one effort level above the seat's (session1()).
 session() { # <worktree> <prompt> [step: build (when none is given), fix or rebase] [seat: builder (the default), fix or testFix] [up]
   local p=$2; newtexts p
-  treeof "$1" > "$1.before" 2>/dev/null || rm -f "$1.before"
-  apitries "$1" "${3:-build}" "$1.out" session1 "$1" "$p" "${@:3}"
+  treeof "$1" > "$1.before" 2>/dev/null || rm -f "$1.before"; rm -f "$1.out.first" "$1.out.first-"* "$1.out.unpriced"
+  apitries "$1" "${3:-build}" "$1.out" session1 "$1" "$p" "${@:3}"; local rc=$?; replyout "$1"; return $rc # replyout: the draft reply precheck left out, out of the change (lib/donewhen.sh)
 }
 # The texts of a card's prompts that its old code made, each with the one the new code makes in its place, in the
 # order of its switches (switchcode(), lib/card.sh); newtexts() puts the new ones in a prompt, in that order.
@@ -577,7 +577,7 @@ session1() {
   # The session runs on the cores left for card work (lib/slots.sh slot_keepwords).
   local KEEP bp p rid rd='' k; slot_keepwords
   # A session that stalls (watch()) is ended and runs once more after REVIEW_PAUSE, as a review with no verdict does
-  # (reviewed()), on what it left in the worktree; the stalled try is firstTry on the step's line (BOTHTRIES), and stalls counts the stalls. A second stall fails the step. Each try starts with no guard failure (<worktree>.guardfail): one of the stalled try does not count against the next.
+  # (reviewed()), on what it left in the worktree; the stalled try is firstTry on the step's line (BOTHTRIES), its output kept (outfirst(), lib/records.sh) when it has no price to read, for outkeep() (apitries() does the same for each try the API refused), and stalls counts the stalls. A second stall fails the step. Each try starts with no guard failure (<worktree>.guardfail): one of the stalled try does not count against the next.
   # A Claude build session cut off by a stall, or by the model API (APIRESUME: apitries()'s retries), is resumed once by the session id its output names (claude --resume, told RESUMEBRIEF), not run again from nothing: its line has resumed 1.
   # What a try left running in the card's folders as it ends (a test it started under timeout, in a process group of its own) is ended then (leftin(), lib/run.sh), before the next try reads the worktree or block() takes it away.
   while :; do
@@ -593,11 +593,11 @@ session1() {
     jq -e 'objects | has("ok")' <<<"$f" >/dev/null 2>&1 \
       || f=$(jq -cn --arg m "$model" --arg e "$effort" --argjson s "$sec" '{model: $m, effort: $e, sec: $s, unread: "the session output could not be read", ok: false}
           | if $e == "" then del(.effort) else . end')
-    [ "$agent" != claude ] || [ -n "$rid" ] || f=$(transcribed "$f" "$1.out" "$1" "$dir") # not for a resumed try (rid): its transcript holds the earlier try, which BOTHTRIES or APIFOLD adds; a fresh try after it has its own
+    [ "$agent" != claude ] || [ -n "$rid" ] || f=$(transcribed "$f" "$1.out" "$1" "$dir"); rm -f "$1.out.unpriced"; ! jq -e "$UNPRICED" <<<"$f" >/dev/null 2>&1 || : > "$1.out.unpriced" # transcribed not for a resumed try (rid): its transcript holds the earlier try, which BOTHTRIES or APIFOLD adds; a fresh try after it has its own. <worktree>.out.unpriced: this try's own price, before BOTHTRIES or APIFOLD adds an earlier try's, is not to read, so its output is kept for that (outfirst(), lib/records.sh), and not one an earlier try lacked usage for
     [ -z "$x" ] && [ -e "$1.stalled" ] || break
     x=$(jq -c --arg r "stalled at ${3:-build}: no progress since $(<"$1.stalled")" '{reason: $r, spent: del(.ok)}' <<<"$f")
     echo "conveyor: card ${1##*/}: its ${3:-build} made no progress for ${STUCK}s: ended, and run once more after ${REVIEW_PAUSE}s" >&2
-    sleep "$REVIEW_PAUSE"
+    sleep "$REVIEW_PAUSE"; [ ! -e "$1.out.unpriced" ] || outfirst "$1" # after the pause, as apitries() does: a stop in it keeps <worktree>.out once
   done
   [ -z "$x" ] || f=$(jq -c --argjson f "$x" --argjson n "$([ -e "$1.stalled" ] && echo 2 || echo 1)" "$BOTHTRIES"' | .stalls = $n' <<<"$f"); [ -z "$rd" ] || f=$(jq -c '.resumed = 1' <<<"$f")
   [ "$agent" != claude ] || proxypack

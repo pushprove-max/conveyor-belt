@@ -39,7 +39,7 @@
 # each whose verdict is machine to the machine hold (machinehold()), and to no fix card.
 # The card's own TEST_WAIT, TEST_RUN and TEST_FREE are kept (testrec()).
 verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
-  local sha='' u um nt m=null mf=null k fst v c f b cmd='' hits='[]' ctl='[]' cf='[]' chg
+  local sha='' u um nt m=null mf=null k fst v c f b ls lc tf tk bb cmd='' hits='[]' ctl='[]' cf='[]' chg
   packget test.command cmd test.control ctl 2>/dev/null || { cmd=''; ctl='[]'; }
   # The units that still did not pass, each {file, case}: case null for a file that failed naming no case or ran out of
   # time (each file the time limit stopped: testfails() stopped; timeout names only the last). The test command itself
@@ -82,9 +82,29 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
     && { machinehold "$1" "$sha" "$(jq -c --slurpfile cf <(printf '%s' "$cf") --slurpfile h <(printf '%s' "$hits") '$cf[0] as $cf | $h[0] as $h | $cf + [.[] | select(.verdict == "machine") | .file | select(IN($h[]))] | unique' <<<"$v")" \
       "$(jq -c '[.[] | select(.verdict == "machine") | .case]' <<<"$v")" || :; }
   # brokeMain: the card whose landing turned main red, as the main-red record keeps it for a case of verdict main
-  # (mainred(): landing), the entry of main's commit first, then the newest; none when no landing is known.
-  b=$(jq -r --arg s "$sha" --slurpfile v <(printf '%s' "$v") '[$v[0][] | select(.verdict == "main") | .case] as $mc
-    | (.reds // []) | [(map(select(.sha == $s)) + reverse)[] | .cases[]? | select(.case | IN($mc[])) | .landing.card? | strings] | first // empty' "$MAINRED" 2>/dev/null) || b=''
+  # (mainred(): landing): the first landing named for the case by the entry of main's commit, else by the newest older
+  # entry with the case whose fix card is open (redopen()): a newer one names a landing that broke the case after the
+  # older was made (fixed on main and broken again while the older one's card stays blocked). While that card is open,
+  # mainred() adds no entry for the case or (when another failure made one) adds it to the entry of main's commit with
+  # no landing, as brokeby() searches TESTLINK_DEPTH commits only. An older entry's landing is the cause only while the
+  # case did not pass on main after it: when brokeby() names a later landing (the one after the last landing whose card
+  # ran the case's file, so passed it, and that one is after the older entry's landing), the case was fixed and broken
+  # again, and that later landing is named. An entry whose fix card landed or closed is not read: its landing broke the
+  # case before, not on this commit (a case fixed and broken again).
+  b=''
+  while IFS=$'\x1f' read -r c ls lc f tf tk; do
+    if [ "$c" != $'\x1e' ]; then
+      redopen "$c" || continue
+      bb=''
+      [ -z "$tf" ] || bb=$(brokeby "$tf" "$sha" "$f" "$tk" 2>/dev/null | jq -r '"\(.sha) \(.card)"' 2>/dev/null) || bb=''
+      [ -z "$bb" ] || [ "${bb%% *}" = "$ls" ] || ! git merge-base --is-ancestor "$ls" "${bb%% *}" 2>/dev/null || lc=${bb#* }
+    fi
+    b=$lc; break
+  done < <(jq -r --arg s "$sha" --slurpfile v <(printf '%s' "$v") '[$v[0][] | select(.verdict == "main") | .case] as $mc | (.reds // [])
+    | (map(select(.sha == $s) | .card = "\u001e") + (map(select(.sha != $s)) | reverse))[] | .card as $c
+    | .cases[]? | select(.case | IN($mc[])) | select(.landing.card? | strings) | (.file // "") as $f
+    | [($c // ""), (.landing.sha | strings // ""), .landing.card, $f, (if ((.files | arrays | length) // 0) == 1 then .files[0] else "" end),
+       (.case | if $f != "" and startswith($f + ": ") then .[($f | length) + 2:] else "" end)] | join("\u001f")' "$MAINRED" 2>/dev/null)
   jq -cn --slurpfile v <(printf '%s' "$v") --slurpfile m <(printf '%s' "$m") --arg b "$b" '$v[0] as $v | $m[0] as $m | {verdicts: [$v[] | {case, verdict} + if .why then {why} else {} end]} + if $m then {mainRun: $m} else {} end
     + if $b == "" then {} else {brokeMain: $b} end'
 }
@@ -548,14 +568,20 @@ redopen() { # <card id, or "">
 # record names the card. Prints "<card> 0 false", `wait` when the machine holds it back, nothing when
 # no commit waits for a card.
 redpick() {
-  local lock rec s c l card=''
+  local lock rec s c l card='' o=()
   [ -s "$MAINRED" ] || return 0
   { exec {lock}>>"$MAINRED.lock"; } 2>/dev/null || { echo "conveyor: the main-is-red record could not be locked; its fix card waits" >&2; return 1; }
   flock "$lock" || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be locked; its fix card waits" >&2; return 1; }
   rec=$(jq -ce '.reds | arrays' "$MAINRED" 2>/dev/null) || rec='[]'
   # A document's case (.md, .txt, .rst), which an engine before #367 took for main red, goes, with an entry it leaves
-  # with no case: no fix card could make it pass, and the cards that wait on it (mainwait()) run again.
-  s=$(jq -c 'map(.cases |= map(select(.file // "" | test("\\.(md|txt|rst)$"; "i") | not)) | select(.cases != []))' <<<"$rec") || s=$rec
+  # with no case: no fix card could make it pass, and the cards that wait on it (mainwait()) run again. An entry whose
+  # fix card is on the belt or blocked (it has lines, none landed or closed; records that cannot be read count as such)
+  # stays whole: that card's brief and commit are made from it (redissue()). One given back by `retry` has no lines
+  # (moveout(), lib/issues.sh): its entry loses the case, so it is not picked again for it.
+  while IFS= read -r l; do
+    c=$(stdb ask card "$l" 2>/dev/null) && ! jq -se 'length > 0 and (any(.step | IN("landed", "closed")) | not)' <<<"$c" >/dev/null || o+=("$l")
+  done < <(jq -r '.[] | select(any(.cases[]?; .file // "" | test("\\.(md|txt|rst)$"; "i"))) | .card | strings | select(. != "")' <<<"$rec")
+  s=$(jq -c --args 'map(if .card | IN($ARGS.positional[]) then . else .cases |= map(select(.file // "" | test("\\.(md|txt|rst)$"; "i") | not)) | select(.cases != []) end)' "${o[@]}" <<<"$rec") || s=$rec
   # The record goes to jq on its input, not as an argument: Linux refuses one over 128 KiB (issue 369).
   [ "$s" = "$rec" ] || { jq -c '{reds: .}' <<<"$s" > "$MAINRED.new" && mv -f "$MAINRED.new" "$MAINRED" && rec=$s; } \
     || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be written; its fix card waits" >&2; return 1; }

@@ -167,6 +167,24 @@ addedmarks() { # <worktree>
       [[ $t = 0 || $k != *TODO* ]] || printf '%s\0TODO\0' "$p"; [[ $v = 0 || $k != *'[VERIFY]'* ]] || printf '%s\0[VERIFY]\0' "$p"
     done | jq -Rsc 'split("\u0000") | .[:-1] | [range(0; length; 2) as $i | .[$i:$i + 2]]'
 }
+# Each draft reply `conveyor.sh precheck` left out of the change (commands/precheck.sh; their paths in
+# <worktree>.briefs/reply, one a line) is left out of the card's change too, after the session (session(),
+# lib/session.sh), before anything stages the worktree: moved beside it, to <worktree>.reply.kept (then .reply.kept-2
+# and on), when git does not track it. A path is the session's to write, so one that leaves the worktree (absolute,
+# `..`, or through a symlink to a folder outside it) moves nothing.
+replyout() { # <worktree>
+  local p w k n=1 ps
+  # No file when precheck named none (the reply outside the worktree, or no precheck): bash opens a redirect before a
+  # later 2>/dev/null applies, so its absence is tested first, and the session's log gets no error.
+  [ -f "$1.briefs/reply" ] && mapfile -t ps 2>/dev/null < "$1.briefs/reply" || return 0
+  rm -f -- "$1.briefs/reply"
+  w=$(cd -P -- "$1" && pwd -P) || return 0
+  for p in "${ps[@]}"; do
+    [[ -n $p && $p != /* && /$p/ != */../* ]] && ! git -C "$1" ls-files --error-unmatch -- ":(literal)$p" > /dev/null 2>&1 || continue
+    k=$w.reply.kept; while [ -e "$k" ]; do n=$((n + 1)); k=$w.reply.kept-$n; done
+    ( d=.; [[ $p != */* ]] || d=${p%/*}; cd -P -- "$w/$d" 2>/dev/null && [[ $(pwd -P)/ == "$w"/* ]] && [ -f "${p##*/}" ] && mv -f -- "${p##*/}" "$k" ) || :
+  done
+}
 # The check of the last session's reply (its stream in <worktree>.out) against the staged change: prints
 # {items, met, failed} (and notes, the files named that are not there, when there is one), and detail (DONEWHEN's),
 # nothing when it is skipped

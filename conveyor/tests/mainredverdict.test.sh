@@ -72,6 +72,54 @@ t_redrunstopped() {
   [ "$got" = '["fail","fail"]' ] || fail "redrun of $c, with testfails() naming c.test and d.test stopped, did not fail both: $got"
 }
 
+# R273. Bug it catches: when the main-red entry of main's commit names no landing, verdicts() took brokeMain from the
+# newest entry holding the case, so a case fixed and broken again blamed the landing that broke it the first time.
+# E8 (review). Bug it catches: verdicts() read brokeMain only from the entry of main's commit, but while the fix card of
+# an older entry holding the case is open, mainred() adds the case to no entry of main's commit (a landing since then
+# did not break it), so brokeMain lost the known cause.
+# The entry of commit 1111... holds b.test: flaky, broken by landing old, its fix card cold <its last step>; b.test:
+# flaky now fails on main (another commit) and no landing ran b.test. Closed: the case is broken again, a new entry of
+# main's commit names no landing, and brokeMain is none, not old. Picked (open): the case stays in the old entry alone
+# and brokeMain is old.
+# E8 (review, again). Bug it catches: when another failure already made the entry of main's commit, mainred() adds the
+# case to it with no landing (brokeby() searches a limited depth), and verdicts() stopped there. Picked, with that
+# entry (head): the old entry's landing is still named, and the record holds both entries.
+# Bug it catches (newer): verdicts() read the older entries oldest first, so when the case was fixed on main and broken
+# again by landing new, which a newer entry (its fix card cnew open too) names, while cold stays blocked, brokeMain
+# named old, the landing of the first break.
+# E10 (review). Bug it catches: with no entry for the new break (mainred() adds none while cold is open), verdicts()
+# named old, though the case passed on main after old's landing and broke again: landings on main after old's are
+# fixed (its test line ran b.test, so passed it) and new (which did not run it). Again: brokeMain is new, as brokeby()
+# finds it, and the record still holds the old entry alone.
+mrland() { # <card> <issue> [<its test line's times, as JSON>]: a landing of <card> on main, with its test and landed lines
+  local s t=${3:-'{}'}
+  echo "$1" > "$R/$1.txt" && git -C "$R" add "$1.txt" && git -C "$R" commit -qm "$1" && s=$(git -C "$R" rev-parse HEAD) \
+    && eng "append \"\$(line $1 $2 test pass '{\"times\": $t}')\" && append \"\$(line $1 $2 landed ok '{\"sha\": \"$s\"}')\""
+}
+mrblame() { # <cold's last step> <brokeMain, as JSON> <entries the record then holds> [head | newer | again]
+  rerunsetup '1 fail flaky' '2 fail flaky' 'main fail flaky'; rerunfiles
+  local v fl='{"of":null,"files":[{"file":"b.test","cases":[{"name":"flaky","line":"1"}]}],"timeout":null}'
+  jq -cn '{reds: [{sha: "1111111111111111111111111111111111111111", card: "cold", cases: [{case: "b.test: flaky", file: "b.test", by: "c1", files: ["b.test"], last: "",
+    landing: {sha: "2222222222222222222222222222222222222222", card: "old", issue: 1}}]}]}' > "$ST/mainred.json" || fail "the old entry could not be written"
+  [ "${4:-}" != head ] || { jq -c --arg s "$(git -C "$R" rev-parse refs/heads/main)" '.reds += [{sha: $s, card: null, cases: [{case: "c.test: other", file: "c.test", by: "c2", files: ["c.test"], last: ""}]}]' \
+    "$ST/mainred.json" > "$ST/mainred.new" && mv "$ST/mainred.new" "$ST/mainred.json"; } || fail "the entry of main's commit could not be written"
+  [ "${4:-}" != newer ] || { jq -c '.reds += [{sha: "3333333333333333333333333333333333333333", card: "cnew", cases: [{case: "c.test: other", file: "c.test", by: "c2", files: ["c.test"], last: ""},
+    {case: "b.test: flaky", file: "b.test", by: "c3", files: ["b.test"], last: "", landing: {sha: "4444444444444444444444444444444444444444", card: "new", issue: 2}}]}]' \
+    "$ST/mainred.json" > "$ST/mainred.new" && mv "$ST/mainred.new" "$ST/mainred.json" && eng 'append "$(line cnew 0 picked ok)"'; } || fail "the newer entry could not be written"
+  [ "${4:-}" != again ] || { mrland old 1 && jq -c --arg s "$(git -C "$R" rev-parse HEAD)" '.reds[0].cases[0].landing.sha = $s' "$ST/mainred.json" > "$ST/mainred.new" \
+    && mv "$ST/mainred.new" "$ST/mainred.json" && mrland fixed 2 '{"b.test": 1}' && mrland new 3; } || fail "the landings on main could not be made"
+  eng 'append "$(line cold 0 '"$1"' ok)"' || fail "card cold's line could not be written"
+  git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" && rerunedit 'echo two >> a.txt' || fail "the card's worktree could not be made"
+  v=$(mrverdicts "$fl") || fail "verdicts failed: $v"
+  [ "$(jq -c '[.verdicts[].verdict, .brokeMain]' <<<"$v")" = "[\"main\",$2]" ] && [ "$(jq '.reds | length' "$ST/mainred.json")" = "$3" ] \
+    || fail "given b.test: flaky failing on main with fix card cold $1, verdicts() did not name $2 in brokeMain, or the record does not hold $3 entries: $v: $(cat "$ST/mainred.json" 2>&1)"
+}
+t_mainredblameold() { mrblame closed null 2; }
+t_mainredblameopen() { mrblame picked '"old"' 1; }
+t_mainredblamehead() { mrblame picked '"old"' 2 head; }
+t_mainredblamenewer() { mrblame picked '"new"' 2 newer; }
+t_mainredblameagain() { mrblame picked '"new"' 1 again; }
+
 # bkinit <text of tests/x.test.sh>: the case's repository, with that test file. bkland <card> <issue> <the rest of its
 # test line, as JSON>: a landing of that card that changes lib/a.sh, with its test line and landed line in the case's
 # card records. bkblame <case>: the card brokeby() blames for <case> of tests/x.test.sh at HEAD, as brokeby() reads them.

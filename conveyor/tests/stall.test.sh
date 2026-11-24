@@ -56,7 +56,7 @@ EOF
 # reset the clock, and it was never ended.
 t_stalltwice() {
   setup "[$(issue 7 2026-01-01)]"; tune '.tunables.stuck = 3'
-  printf '%s\n' 'echo "{\"type\":\"system\",\"session_id\":\"0aa1-b2\"}"; echo kept >> a.txt; for i in $(seq 120); do printf x; sleep 0.5; done' > "$STUB/build" # sleep: the pause between two bytes of a spinner, ended by the engine
+  printf '%s\n' 'echo "{\"type\":\"system\",\"session_id\":\"0aa1-b2\",\"try\":$(wc -l < "$STUB/sessions")}"; echo kept >> a.txt; for i in $(seq 120); do printf x; sleep 0.5; done' > "$STUB/build" # sleep: the pause between two bytes of a spinner, ended by the engine
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   c=$(st 'select(.step == "picked") | .card')
   [ "$(wc -l < "$STUB/sessions")" = 2 ] && [ ! -e "$STUB/reviews" ] || fail "the build did not run twice, then stop: $(wc -l < "$STUB/sessions") sessions"
@@ -68,6 +68,10 @@ t_stalltwice() {
   [ "$(st 'select(.step == "blocked") | [.stalls, .kept, .spent.step] | tostring')" = "[2,\"kept/$c\",\"build\"]" ] \
     || fail "the blocked line does not count both stalls or name the kept work: $(st 'select(.step == "blocked")')"
   grep -qx '+kept' "$ST/kept/$c/$c.patch" || fail "the stalled build's work was not kept: $(cat "$ST/kept/$c/$c.patch" 2>/dev/null)"
+  # E9. Bug it catches: the first try, stalled with no usage, left its output as <card>.out.first (outfirst()), but the
+  # block moved only the last try's output to the kept evidence, so the first try's was removed with the worktree.
+  grep -qF '"try":1' "$ST/kept/$c/$c.out.first" 2>/dev/null && grep -qF '"try":2' "$ST/kept/$c/$c.out" \
+    || fail "the blocked card did not keep the output of each stalled try: $(ls "$ST/kept/$c" 2>&1)"
   # Issue 1309. Bug it catches: the stalled build ran again from nothing, its whole brief once more, and its block was in
   # the class "session failed", as any failed session's. The stalled Claude session is resumed once by its session id
   # (claude --resume, told the resume brief), and the block of the second stall is in the class stall, with resumed 1.
@@ -173,6 +177,19 @@ t_stallleft() {
   [ -n "$bg" ] && grep -qx 'rc=0' "$T/$CASE/run.out" || fail "the build that starts a background test did not run and end well: $(cat "$T/$CASE/run.out")"
   wait_until "! ps -o stat= -p $bg | grep -qv Z" "ps -o pid=,stat=,args= -p $bg" \
     || { kill "$bg" 2>/dev/null; fail "the test the build left running in its worktree under timeout outlived the session"; }
+}
+# R287. Bug it catches: a build that stalled with no price to read and ran again kept the second try's output (each
+# try writes <card>.out anew), though its line is unpriced by the first try (BOTHTRIES): the output of the try with no
+# usage was lost. The build session alone, as card() calls it, then its line as record() writes it.
+t_stallkeepfirst() {
+  setup '[]'; tune '.tunables.stuck = 2'; fx_wt : b.txt one
+  # The first try prints a line with no usage and then nothing; the second ends with the stub's usage.
+  echo 'if [ "$(wc -l < "$STUB/sessions")" = 1 ]; then echo "{\"type\":\"system\",\"note\":\"the first try\"}"; sleep 60; fi; echo two >> a.txt' > "$STUB/build" # sleep: a build that stalls, ended by the engine
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'f=$(session "$FXWT" "Build the issue.") && record c7 7 build ok "$f" && echo recorded'
+  grep -qx recorded "$T/$CASE/run.out" && [ "$(st 'select(.step == "build") | .stalls')" = 1 ] || fail "the stalled build did not run again and write its line: $(cat "$T/$CASE/run.out")"
+  grep -qF '"the first try"' "$ST/kept/c7/c7.build.out" 2>/dev/null \
+    || fail "the build that stalled once with no usage, then ran with it, did not keep the first try's output: $(head -c 300 "$ST/kept/c7/c7.build.out" 2>&1)"
 }
 # The runner (conveyor.test.sh) sources every area file before any case runs, so a function two files define is, in
 # every run, the later file's for the cases of both. Bug it catches (#871): views.test.sh and stall.test.sh each

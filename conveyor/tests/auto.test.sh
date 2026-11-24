@@ -246,8 +246,8 @@ t_autolock() {
 # Bug (#1168, review): the host had the mode but not the owner's rulings, which are written on the owner's machine, so
 # it could decide against one. auto on sends the ruling log's picker answers first (`auto rulings`, on stdin), and each
 # `auto decide` of the Foreman sends them again, for the rulings given since.
-autohost() { # the Foreman's record "origin", its main on another host
-  mkdir -p "$XDG_CONFIG_HOME/conveyor" && jq -n '{records: [{repo: "origin", main: "/nonexistent-host/origin"}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+autohost() { # the Foreman's record "origin", its main on another host, the host file's ssh target
+  mkdir -p "$XDG_CONFIG_HOME/conveyor" && jq -n '{ssh: "build.example.com", records: [{repo: "origin", main: "/nonexistent-host/origin"}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
   autoledger; export CALLS=$T/$CASE/calls SENT=$T/$CASE/sent
 }
 t_autohosts() {
@@ -270,6 +270,24 @@ t_autohosts() {
   out=$(cd "$R" && loop auto off 2>&1) && [ "$(cat "$CALLS")" = $'origin auto rulings\norigin auto on\norigin auto rulings\norigin auto off' ] \
     || fail "auto on, decide and off did not send the rulings, then the mode, to the record's host: $out $(cat "$CALLS" 2>&1)"
 }
+# R170. Bug: remote() took a record for this machine's when its main path is a folder here, though the Foreman's ask
+# runs every command at the host file's ssh target: a build host whose checkout has the same path as one here was left
+# out of the mode. With that ssh target and the record's main a folder here, auto on still sends the rulings and the mode.
+t_autohostssh() {
+  local out; autoledger; export CALLS=$T/$CASE/calls
+  mkdir -p "$XDG_CONFIG_HOME/conveyor" "$T/$CASE/here/origin" && jq -n --arg m "$T/$CASE/here/origin" '{ssh: "build.example.com", records: [{repo: "origin", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  export CONVEYOR_FOREMAN_ASK='echo "$CONVEYOR_REPO $CONVEYOR_CMD" >> "$CALLS"; echo "auto ON: until off."'
+  out=$(cd "$R" && loop auto on 2>&1) && [ "$(cat "$CALLS" 2>&1)" = $'origin auto rulings\norigin auto on' ] \
+    || fail "with the host file's ssh target build.example.com and the record's main a folder here, auto on did not send the rulings and the mode there: $out $(cat "$CALLS" 2>&1)"
+}
+# E3. Bug: remote() took a record whose checkout is not here for a remote host though the host file names no ssh
+# target, so ask ran its `cd` here and failed. With no target, auto on asks no host.
+t_autohostnossh() {
+  local out; autohost; jq 'del(.ssh)' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/$CASE/h" && mv "$T/$CASE/h" "$XDG_CONFIG_HOME/conveyor/host.json"
+  export CONVEYOR_FOREMAN_ASK='echo "$CONVEYOR_REPO $CONVEYOR_CMD" >> "$CALLS"; echo "auto ON: until off."'
+  out=$(cd "$R" && loop auto on 2>&1) && [ ! -e "$CALLS" ] \
+    || fail "with no ssh target in the host file and the record's main /nonexistent-host/origin, auto on asked a host: $out $(cat "$CALLS" 2>&1)"
+}
 # Bug (#1168, review): the mode set on a host the rulings did not reach lets the engine there decide against them. When
 # `auto rulings` fails there, auto on is not set there, and says so.
 t_autohostsno() {
@@ -281,16 +299,24 @@ t_autohostsno() {
 }
 
 # Bug (#1168, review): on the host, decide read only that machine's ruling log, so a ruling the owner gave on their own
-# machine was not seen. The local log holds the owner's older yes to "Merge the docs fix now?" (x-1, no time); the
-# rulings sent from the owner's machine hold their later "wait" (x-9): decide leaves d-docs open, against x-9.
+# machine was not seen. The rulings sent from the owner's machine hold their "no" to "Tag the release now?" (x-7):
+# decide leaves d-tag open, against x-7. R348. Bug: only the latest ruling on a question counts, by its time, but the
+# newest was in the file read last, so it won by its place and the sort by time went untested. The local log, read
+# first, holds the owner's newest answer to "Merge the docs fix now?", "wait" (x-9); the sent rulings hold their older
+# yes (x-8), and the log their yes with no time (x-1): decide leaves d-docs open, against x-9.
 t_autohostrul() {
   local out log; autoledger
-  out=$(cd "$R" && jq -cn '{id: "x-9", utc: "2026-11-20T10:00:00Z", source: "ask", question: "Merge the docs fix now?", answer: "wait", pick: "option"}' | loop auto rulings) \
+  jq -cn '{id: "x-9", utc: "2026-11-20T10:00:00Z", source: "ask", question: "Merge the docs fix now?", answer: "wait", pick: "option"}' >> "$CONVEYOR_RULING_LOG"
+  jq -cn '{id: "d-tag", askedAt: "2026-11-15T10:03:00Z", question: "Tag the release now?", proposedDefault: "yes", source: "t", answer: null, answeredAt: null, options: ["yes", "no"]}' >> "$LEDGER"
+  out=$(cd "$R" && jq -cn '{id: "x-8", utc: "2026-11-18T10:00:00Z", source: "ask", question: "Merge the docs fix now?", answer: "yes, merge it (Recommended)", pick: "recommended"},
+    {id: "x-7", utc: "2026-11-18T10:00:00Z", source: "ask", question: "Tag the release now?", answer: "no", pick: "option"}' | loop auto rulings) \
     || fail "auto rulings failed: $out"
   out=$(cd "$R" && loop auto on && loop auto decide 2>&1) || fail "auto on or decide failed: $out"
   log=$(jq -r .log "$ST/auto/mode.json")
+  [ "$(answer d-tag)" = open ] && grep -qF -- '- d-tag: Tag the release now? (against the owner'"'"'s latest ruling x-7 on this question)' "$log" \
+    || fail "decide answered d-tag against the ruling x-7 sent from the owner's machine: $(answer d-tag) $(cat "$log")"
   [ "$(answer d-docs)" = open ] && grep -qF -- '- d-docs: Merge the docs fix now? (against the owner'"'"'s latest ruling x-9 on this question)' "$log" \
-    || fail "decide answered d-docs against the ruling x-9 sent from the owner's machine: $(answer d-docs) $(cat "$log")"
+    || fail "decide answered d-docs by the sent ruling x-8 (2026-11-18), not the local log's newer x-9 (2026-11-20): $(answer d-docs) $(cat "$log")"
 }
 
 # Bug (#1571): auto on sent the build host only the owner's picker answers, never the items of their profile, which is

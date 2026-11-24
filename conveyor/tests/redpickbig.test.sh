@@ -23,3 +23,26 @@ t_redpickbig() {
   [[ $out == *-0\ 0\ false ]] && [ "$(jq -c --arg c "$c" '[.reds[] | [.sha, .card == $c, (.cases | length)]]' "$ST/mainred.json")" = "[[\"$s\",true,300]]" ] \
     || fail "the document's entry was kept or main's commit got no fix card: ${out:0:300} $(jq -c '[.reds[] | [.sha, .card, (.cases | length)]]' "$ST/mainred.json")"
 }
+# R331. Bug it catches: redpick() dropped a document's entry (one an engine before #367 made) whose fix card cb is
+# blocked, not ended, though that card's brief and commit are made from its entry (redissue()). It is kept whole.
+t_redpickblocked() {
+  setup "[]"
+  local out
+  jq -cn '{reds: [{sha: "1111111111111111111111111111111111111111", cases: [{case: "tests/speed/page.md", file: "tests/speed/page.md", by: "c1", files: [], last: ""}], card: "cb"}]}' > "$ST/mainred.json"
+  eng 'append "$(line cb 0 picked ok "{\"title\":\"Main is red\"}")" && append "$(line cb 0 blocked fail "{}")"' || fail "card cb's lines could not be written"
+  out=$(eng 'locked redpick' 2>&1) || fail "redpick failed: $out"
+  [ -z "$out" ] && [ "$(jq -c '[.reds[] | [.card, (.cases | length)]]' "$ST/mainred.json")" = '[["cb",1]]' ] \
+    || fail "with its fix card cb blocked, the document's entry was dropped, or a card was picked: $out $(cat "$ST/mainred.json")"
+}
+# E5. Bug it catches: a blocked fix card given back by `retry` has no lines (moveout()), and redpick() kept its
+# document-only entry whole as if the card were still open, then picked a new card for the document case again.
+t_redpickretried() {
+  setup "[]"
+  local out
+  jq -cn '{reds: [{sha: "1111111111111111111111111111111111111111", cases: [{case: "tests/speed/page.md", file: "tests/speed/page.md", by: "c1", files: [], last: ""}], card: "c20260101T000000-x-0"}]}' > "$ST/mainred.json"
+  out=$(eng 'append "$(line c20260101T000000-x-0 0 picked ok "{\"title\":\"Main is red\",\"mainRed\":\"1111111111111111111111111111111111111111\"}")" && append "$(line c20260101T000000-x-0 0 blocked fail "{}")" && retry c20260101T000000-x-0' 2>&1) \
+    && [ -z "$(eng 'stdb ask card c20260101T000000-x-0')" ] || fail "the blocked card could not be given back by retry: $out"
+  out=$(eng 'locked redpick' 2>&1) || fail "redpick failed: $out"
+  [ -z "$out" ] && [ "$(jq -c '.reds' "$ST/mainred.json")" = '[]' ] \
+    || fail "with its fix card given back by retry, the document-only entry was kept, or a card was picked for it: $out $(cat "$ST/mainred.json")"
+}

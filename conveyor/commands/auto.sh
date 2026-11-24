@@ -85,13 +85,16 @@ profile() {
   f=$(profilefile) || return 0
   printf '\n%s' "- The owner's written profile of how they decide is in $f: read it before you decide. Follow its \"Never decide; ask\" and \"Hard lines\" sections as you follow the pack's auto.reserved."
 }
-# The records of this checkout's Foreman (foreman/lib.sh mine) whose main checkout is not on this machine, one name a
-# line: the belt runs on another host, whose engine decides that record's open decisions (lib/needsask.sh needsauto) by
-# its own auto mode and log.
+# The records of this checkout's Foreman (foreman/lib.sh mine) whose belt runs on another host, one name a line: every
+# record when the host file names an ssh target, none when it names none. The Foreman's ask routes by the same test
+# (foreman/lib.sh host_ssh): with a target it runs each command there, though a checkout of the same path may be on this
+# machine too; with none it runs each here, where a record whose checkout is not here has no belt to ask. The engine
+# there decides that record's open decisions (lib/needsask.sh needsauto) by its own auto mode and log.
 remote() {
-  local repo main
-  while IFS=$'\t' read -r repo main; do [ -n "$repo" ] && [ ! -d "$main" ] && printf '%s\n' "$repo"; done \
-    < <(CONVEYOR_MAIN=$MAIN bash -c '. "$1" > /dev/null && mine' _ "$HERE/foreman/lib.sh" 2>/dev/null)
+  local repo t
+  { IFS= read -r t && [ -n "$t" ] || return 0
+    while IFS=$'\t' read -r repo _; do [ -z "$repo" ] || printf '%s\n' "$repo"; done
+  } < <(CONVEYOR_MAIN=$MAIN bash -c '. "$1" > /dev/null && printf "%s\n" "$(host_ssh)" && mine' _ "$HERE/foreman/lib.sh" 2>/dev/null)
   return 0
 }
 # hostrulings <repo>: the owner's picker answers of this machine's ruling log sent to the record's host (`auto rulings`

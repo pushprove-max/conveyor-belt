@@ -8,7 +8,9 @@
 # must name (dwform()). It prints each failure and exits 1; with none it prints `precheck: passed` and exits 0. It stages
 # nothing: the trailers and the markers are read from a copy of the index, in which the reply file is not part of the
 # change, and the new files' objects go to a temporary folder (a session may not write in the repository's own object
-# folder). It makes no state folder. Sourced by conveyor.sh.
+# folder). It makes no state folder; in a card's worktree it adds the reply file it left out to <worktree>.briefs/reply
+# (or fails), so the engine leaves it out of the card's change too, and leaves out each one named there. Sourced by
+# conveyor.sh.
 . "$HERE/lib/slots.sh" || exit 1
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/lint.sh" || exit 1
@@ -35,8 +37,20 @@ if [ $# = 3 ]; then
   if [[ $pcfull == "$PCTOP"/* ]] && ! git -C "$PCTOP" ls-files --error-unmatch -- ":(literal)${pcfull#"$PCTOP"/}" > /dev/null 2>&1; then
     GIT_INDEX_FILE=$PCIDX git -C "$PCTOP" rm -q --cached --ignore-unmatch -- ":(literal)${pcfull#"$PCTOP"/}" > /dev/null \
       || { pcclean; echo "conveyor precheck: the reply file could not be left out of the change" >&2; exit 2; }
+    # The engine leaves it out of the card's change too, after the session (replyout(), lib/donewhen.sh): a card's
+    # worktree (one in the cards folder) names it in its briefs folder, <worktree>.briefs/reply, which a Codex session's
+    # sandbox lets it write as well (builder(), lib/session.sh), one a line: a precheck run again on another file adds
+    # it, as each draft is left in the worktree. One not written fails the precheck: the engine would stage the reply.
+    [ "$(cd "${PCTOP%/*}" && pwd -P)" != "$(cd "$CARDS" 2>/dev/null && pwd -P)" ] \
+      || { mkdir -p "$PCTOP.briefs" && { grep -qxF -- "${pcfull#"$PCTOP"/}" "$PCTOP.briefs/reply" || printf '%s\n' "${pcfull#"$PCTOP"/}" >> "$PCTOP.briefs/reply"; }; } 2>/dev/null \
+      || { pcclean; echo "conveyor precheck: the reply file could not be named in $PCTOP.briefs/reply, so the engine would stage it: put it outside the worktree" >&2; exit 2; }
   fi
 fi
+# The drafts an earlier precheck of this session named are out of the change as well, as the engine moves each.
+[ ! -s "$PCTOP.briefs/reply" ] || while IFS= read -r pcp; do
+  git -C "$PCTOP" ls-files --error-unmatch -- ":(literal)$pcp" > /dev/null 2>&1 \
+    || GIT_INDEX_FILE=$PCIDX git -C "$PCTOP" rm -q --cached --ignore-unmatch -- ":(literal)$pcp" > /dev/null 2>&1 || :
+done < "$PCTOP.briefs/reply"
 pcowe=$(GIT_INDEX_FILE=$PCIDX owing "$PCTOP"); pcr=$?
 [ $pcr = 0 ] || { pcclean; echo "conveyor precheck: the commit trailers that the pack requires could not be read" >&2; exit 2; }
 if [ -n "$pcowe" ]; then

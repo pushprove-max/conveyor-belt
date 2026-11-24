@@ -468,14 +468,14 @@ lintrun() { # <worktree> <base> <card> <output file>
 # `skipped: missing <tool>` (or <the trigger file, lintlate>); lint.asInstalled true when a command that ran (not
 # one with no files or a missing tool) has a trigger the change changed (the tools ran as installed, not as the change would install them); lint.gate the gate
 # that ran it, review, land (the landing gate) or wait (the gate for a waiting card), so the Board and /units can name
-# the fix session it starts (track.jq). The reason says the same, and an execution error's why.
+# the fix session it starts (track.jq). The reason says the same (each command's text cut to fit line()'s 1500 characters), and an execution error's why.
 lintline() { # <card> <issue> <output file> <lintrun's exit> <review|land|wait>
   local r=pass x
   case $4 in 1) r=findings ;; 2) r=error ;; esac
   x=$(jq -cs --arg w "$LINT_WHY" --arg g "$5" 'map({n, run, result: (if .result == "skipped" then "skipped: missing \(.why)" else .result end), sec, findings: (.reported | length)} + (if .reported == [] then {} else {reported: (.reported | map({file, line, text}))} end) + (if .result == "error" then {why} else {} end)) as $c
-    | any(.[]; .triggered and (.result | IN("no files", "skipped") | not)) as $i
-    | {lint: {commands: $c, asInstalled: $i, gate: $g}, reason: ([$c[] | "lint command \(.n) (\(.run)): \(.result)\(if .result == "findings" then ", \(.findings) of this change" else "" end), \(.sec) s"]
-        + (if $i then ["tools ran as installed"] else [] end) + (if $w == "" then [] else [$w] end) | join("; "))}' "$3") \
+    | any(.[]; .triggered and (.result | IN("no files", "skipped") | not)) as $i | [$c[] | ": \(.result)\(if .result == "findings" then ", \(.findings) of this change" else "" end), \(.sec) s"] as $t | (if $i then ["tools ran as installed"] else [] end) as $x
+    | ((1500 - ([range($c | length) as $k | "lint command \($c[$k].n)\($t[$k])"] + $x | join("; ") | length)) / ([$c | length, 1] | max) - 3 | floor) as $room
+    | {lint: {commands: $c, asInstalled: $i, gate: $g}, reason: ([range($c | length) as $k | ($c[$k].run | tostring) as $r | "lint command \($c[$k].n)\(if $room < 2 then "" elif ($r | length) > $room then " (\($r[0:$room - 1])…)" else " (\($r))" end)\($t[$k])"] + $x + (if $w == "" then [] else [$w] end) | join("; "))}' "$3") \
     || x=$(jq -cn --arg w "$LINT_WHY" --arg g "$5" '{lint: {commands: [], asInstalled: false, gate: $g}, reason: $w}')
   record "$1" "$2" lint "$r" "$x"
 }

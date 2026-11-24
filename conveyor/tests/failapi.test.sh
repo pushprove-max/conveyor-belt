@@ -396,3 +396,70 @@ t_triesthird() {
   [ "$(cat "$T/$CASE/run.out")" = '[300,{"z":100,"y":200},null]' ] \
     || fail "APIFOLD of $d/1 (usage alone), then $d/2 (split on y), then $d/3 (split on z): the split must hold all 300 input tokens: $(cat "$T/$CASE/run.out")"
 }
+
+# E4. Bug it catches: the API refused a build twice before either try reported usage, and the third try built the
+# change. Only the first refused try's output was kept beside the card (apitries() kept none once <card>.out.first was
+# there), so the second's was lost from the unpriced line's kept outputs. Each one is kept, in try order, then the last.
+t_apikeepeach() {
+  setup '[]'; tune '.tunables.apiPause = 0.02'; fx_wt : b.txt one
+  cat > "$STUB/build" <<'EOT'
+echo x >> "$STUB/calls"; n=$(wc -l < "$STUB/calls")
+[ "$n" -gt 2 ] || { jq -cn --arg n "$n" '{type: "result", is_error: true, result: "API Error: 429 Too Many Requests, try \($n)"}'; exit 1; }
+echo two >> a.txt
+EOT
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  apicall 'f=$(session "$FXWT" "Build the issue.") && record c7 7 build ok "$f" && echo recorded'
+  grep -qx recorded "$T/$CASE/run.out" && [ "$(wc -l < "$STUB/calls")" = 3 ] || fail "the build refused twice did not run a third time and write its line: $(cat "$T/$CASE/run.out")"
+  grep -qF 'try 1' "$ST/kept/c7/c7.build.out" 2>/dev/null && grep -qF 'try 2' "$ST/kept/c7/c7.build-2.out" 2>/dev/null && [ -s "$ST/kept/c7/c7.build-3.out" ] \
+    || fail "the outputs of the two tries the API refused with no usage were not both kept, in order, before the last: $(ls "$ST/kept/c7" 2>&1)"
+}
+# E2 (review). Bug it catches: try 1 refused with no usage, try 2 refused with its usage: apitries() read try 2's price
+# from <card>.spent after APIFOLD had added try 1's unread to it, so try 2's output, which has its price, was kept as
+# one with none. Only try 1's is kept before the last try's.
+t_apikeeppriced() {
+  setup '[]'; tune '.tunables.apiPause = 0.02'; fx_wt : b.txt one
+  cat > "$STUB/build" <<'EOT'
+echo x >> "$STUB/calls"; n=$(wc -l < "$STUB/calls")
+[ "$n" -gt 2 ] || { jq -cn --argjson n "$n" '{type: "result", is_error: true, result: "API Error: 429 Too Many Requests, try \($n)"}
+  + if $n > 1 then {usage: {input_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 1}} else {} end'; exit 1; }
+echo two >> a.txt
+EOT
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  apicall 'f=$(session "$FXWT" "Build the issue.") && record c7 7 build ok "$f" && echo recorded'
+  grep -qx recorded "$T/$CASE/run.out" && [ "$(wc -l < "$STUB/calls")" = 3 ] || fail "the build refused twice did not run a third time and write its line: $(cat "$T/$CASE/run.out")"
+  grep -qF 'try 1' "$ST/kept/c7/c7.build.out" 2>/dev/null && ! grep -qsF 'try 2' "$ST/kept/c7/"* \
+    || fail "with try 1 refused with no usage and try 2 refused with its usage, try 1's output alone of the two was not kept: $(grep -c 'try' "$ST/kept/c7/"* 2>&1)"
+}
+# `control stop` while a build waits after the model API refused it: the loop ends the card, then writes its stopped
+# line (stopped()) and removes its outputs (clean()). Try 1 is refused with no usage, try 2 with it. The stopped build
+# keeps try 1's output once, and only that.
+# - first (bug it catches): apitries() copied try 1's output to <card>.out.first before its wait, so a stop in that
+#   wait kept the same try twice, from .out.first and from .out.
+# - second (E11, review; bug it catches): stopped in try 2's wait, the line stopped() writes reads try 2 alone, priced,
+#   and outkeep() kept nothing, so clean() removed try 1's output with no price to read.
+# A direct call cannot show it: the stop's order (the card ended, then stopped(), then clean()) is the loop's own, so
+# the case runs the loop and polls for the refused try and the stopped line.
+apistop() { # <the try whose wait the stop comes in: 1 or 2>
+  local pid card cd=$T/$CASE/cards
+  setup "$(issue 7 2026-01-01 | jq -cs .)"; tune '.tunables.apiPause = 30 | .tunables.idle = 1 | .tunables.poll = 1'
+  cat > "$STUB/build" <<'EOT'
+echo x >> "$STUB/calls"; n=$(wc -l < "$STUB/calls")
+jq -cn --argjson n "$n" '{type: "result", is_error: true, result: "API Error: 429 Too Many Requests, try \($n)"}
+  + if $n > 1 then {usage: {input_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 1}} else {} end'
+exit 1
+EOT
+  # loop: the card must be stopped by `control stop` through the loop, which ends it before stopped() and clean() run.
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$cd; exec timeout 120 bash "$SRC/conveyor.sh" serve > "$STUB/serve.out" 2>&1 ) & pid=$!; SERVEPID=$pid; trap 'kill "$SERVEPID" 2>/dev/null' EXIT
+  # <card>.spent is removed as each try starts and written as it fails: with try <n> made, try <n> has ended.
+  until { [ -s "$STUB/calls" ] && [ "$(wc -l < "$STUB/calls")" = "$1" ] && compgen -G "$cd/*.spent" >/dev/null; } || ! kill -0 $pid 2>/dev/null; do sleep 0.1; done
+  card=$(st 'select(.step == "picked") | .card'); [ -n "$card" ] && [ -s "$cd/$card.spent" ] || fail "serve did not make try $1 of the build: $(cat "$STUB/serve.out")"
+  loop control stop >/dev/null
+  until [ -n "$(jq -r --arg c "$card" 'select(.card == $c and .step == "build") | .card' "$ST/retried.jsonl" 2>/dev/null)" ] || ! kill -0 $pid 2>/dev/null; do sleep 0.1; done
+  kill $pid; wait $pid 2>/dev/null
+  [ "$(jq -r --arg c "$card" 'select(.card == $c and .step == "build") | .result' "$ST/retried.jsonl" 2>/dev/null)" = stopped ] && [ "$(wc -l < "$STUB/calls")" = "$1" ] \
+    || fail "the build was not stopped in the wait after try $1: $(cat "$STUB/serve.out")"
+  [ "$(ls "$ST/kept/$card" 2>&1)" = "$card.build.out" ] && grep -qF 'try 1' "$ST/kept/$card/$card.build.out" \
+    || fail "the build stopped in the wait after try $1 did not keep try 1's output, with no usage, once and alone: $(ls "$ST/kept/$card" 2>&1)"
+}
+t_apistopfirst() { apistop 1; }
+t_apistopsecond() { apistop 2; }

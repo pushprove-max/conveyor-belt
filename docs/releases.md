@@ -146,7 +146,8 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    and makes the GitHub release with the notes as its text (`gh release create`).
 
 With Land as `pr` and the rule Merge PR set to `release` ([Merge PR](configuration.md#merge-pr)), the cards wait in
-the pull request from `conveyor/landing`. Step 4 then runs the suite on the head of `conveyor/landing`. In step 5,
+the pull request from `conveyor/landing`. While that pull request is open, step 4 runs the suite on the head of
+`conveyor/landing`. When no pull request from it is open, step 4 runs the suite on `main` on GitHub. In step 5,
 the checkout must be at the head of `conveyor/landing`, and the checks read that commit. When a check stops the
 release, the pull request stays open. When all checks pass, step 5 merges the pull request and moves your local `main`
 to the merged `main` on GitHub. Step 6 then works on top of the merge: the release commit follows it, and the tag is on

@@ -214,7 +214,7 @@ cards() {
 # does not serve the project (machinerefuses(), lib/install.sh); null when it reads it; machineHold ({since, card, sha,
 # controls, cases}): the machine hold while it stands (machinehold(), lib/mainred.sh: the loop picks no card), else
 # null, for the Foreman's watcher; landingPr ({number, url, merge, cards}): the open pull request of Land as pr as
-# GitHub last showed it ($LANDPR, prstate() and prsync(), lib/push.sh), with how many cards its pushed lines name and its last merge (a merge
+# GitHub last showed it ($LANDPR, prstate() and prsync(), lib/push.sh), with how many cards its pushed lines name or it carried from one closed unmerged, and its last merge (a merge
 # GitHub refused gives the reason), for the Board's Merge and the Foreman; null with none open; landingMerged ({number,
 # merged, issues}): the last landing pull request merged, by Conveyor or on GitHub ($LANDPR's merged, until a new one is opened), with
 # the issues whose pushed lines name it or an earlier one (each went to LANDING before it, so is merged with it), for
@@ -491,7 +491,7 @@ health() {
   jq -cs --argjson loop "$loop" --argjson gh "$gh" --argjson ghr "$ghr" --arg ghwhy "$ghwhy" --arg ghread "$GHREAD" --argjson free "$free" --argjson stuck "$STUCK" --argjson sstuck "$SESSION_STUCK" --argjson casestuck "$CASE_STUCK" --argjson waitlimit "$WAIT_LIMIT" --argjson gone "$gone" --argjson stopped "$stopped" --slurpfile livef <(printf '%s' "${lv:-{\}}") --argjson proof "$(proofs)" --argjson testout "$(testouts)" \
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" --arg lintyes "$LINTYES" \
     --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson force "$(inforce "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson pushlast "$pl" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
-    --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge}' "$LANDPR" 2>/dev/null) --slurpfile lm <(jq -c 'objects | select(.merged != null and (.number | type) == "number") | {number, merged}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) --rawfile carry <(printf '%s\n' "$carry") "$UNTIMED$SPLITM$REVIEWAGAIN"'
+    --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge, carried: (.carried // [] | arrays)}' "$LANDPR" 2>/dev/null) --slurpfile lm <(jq -c 'objects | select(.merged != null and (.number | type) == "number") | {number, merged}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) --rawfile carry <(printf '%s\n' "$carry") "$UNTIMED$SPLITM$REVIEWAGAIN"'
     $livef[0] as $live | (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
     | ([.[], $old[] | select(.step == "picked") | if (.mainRed | type) == "string" then {key: .card, value: "Main is red (\(.mainRed[0:12]))"}
@@ -584,7 +584,7 @@ health() {
        untimed: untimed, split: splitm([.[], $old[]]),
        unchecked: ([group_by(.card)[] | select(any(.step == "landed")) | map(select(.step == "lint")) | last | select(.skipped == true)] | length), report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold, machineHold: ($mh[0] // null),
        landingPr: ([.[] | select(.step == "pushed" and (.pr | type) == "number") | {pr, card}] as $pp
-         | $lp[0] // null | if . == null then null else . + {cards: ([$pp[] | select(.pr == $lp[0].number) | .card] | unique | length)} end),
+         | $lp[0] // null | if . == null then null else del(.carried) + {cards: ([($pp[] | select(.pr == $lp[0].number) | .card), $lp[0].carried[]] | unique | length)} end),
        landingMerged: ([.[] | select(.step == "pushed" and (.pr | type) == "number" and .pr <= $lm[0].number) | .issue | numbers] as $mi
          | $lm[0] // null | if . == null then null else . + {issues: ($mi | unique)} end)}
     | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$hd/rec"

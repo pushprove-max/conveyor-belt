@@ -913,7 +913,8 @@ decides when a push happens.
 Merge PR sets who merges the pull request of Land as `pr`.
 
 - `button` (the default): only you merge it. Use **Merge** on the Board's Control tab, or `conveyor.sh pr merge`.
-- `release`: the release merges it. `release-prep` runs the whole suite on `conveyor/landing`. `release` checks
+- `release`: the release merges it. `release-prep` runs the whole suite on `conveyor/landing` while its pull request
+  is open, and on the default branch on GitHub when none is open. `release` checks
   that head first. When all checks pass, it merges the pull request, then makes the release on top of the merge. A release
   that a check stops merges nothing.
 - `idle`: Conveyor merges it when no card is on the belt and no issue can be picked. When Test before a push is on,

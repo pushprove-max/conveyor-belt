@@ -304,25 +304,29 @@ pushto() { local la; la=$(landas) || return 1; if [ "$la" = pr ]; then echo "$LA
 # The pull requests GitHub has open from LANDING into the pack's branch, as a JSON array of {number, url}, newest
 # first; or, when GitHub could not be asked, gh's error, and it fails. `gh pr list --head` matches the branch name in
 # any repository, so a fork's pull request from its own conveyor/landing is listed too: it is left out (and any whose
-# isCrossRepository GitHub did not give), as Conveyor would edit or merge it with its own credentials.
+# isCrossRepository GitHub did not give), as Conveyor would edit or merge it with its own credentials. gh lists 30 by
+# default, so up to PRLIST are asked for: forks' pull requests newer than Conveyor's must not push it off the list.
+PRLIST=200
 landingprs() { # [seconds to wait for gh, default 60]
   local out
-  out=$(timeout "${1:-60}" gh pr list --head "$LANDING" --base "$BRANCH" --state open --json number,url,isCrossRepository 2>&1) \
+  out=$(timeout "${1:-60}" gh pr list --head "$LANDING" --base "$BRANCH" --state open --limit "$PRLIST" --json number,url,isCrossRepository 2>&1) \
     && jq -ce 'arrays | map(select(.isCrossRepository == false) | {number, url})' <<<"$out" 2>/dev/null || { echo "$out"; return 1; }
 }
 # The one pull request of Land as pr, from LANDING into the pack's branch: the open one is updated, and with none open
 # (the first push, or the first after it was merged) one is opened. Its body is written whole at each push: every card
-# in it, in landing order (the cards whose pushed line names it, then those this push carries), each with its
+# in it, in landing order (the cards whose pushed line names it, and those still on LANDING of another one closed
+# unmerged, then those this push carries), each with its
 # "Closes #N" (a card of no issue has none), title, card id, Done-when check with its D<n> lines (doneLines, each with
 # its state), fix rounds and the tests it ran (each file, with the cases it selected of it). Prints the
 # pull request's number, or why it failed. $LANDPR then names it, with its link, for the Board's Merge (prstate()).
 landpr() { # <"card issue sha" of each card this push carries>...
-  local n out text url
+  local n out text url car
   out=$(landingprs) && n=$(jq -er '.[0].number // 0 | numbers' <<<"$out" 2>/dev/null) \
     || { echo "the open pull request from $LANDING could not be read: ${out:0:600}"; return 1; }
   url=$(jq -r '.[0].url // "" | strings' <<<"$out" 2>/dev/null)
-  text=$(stdb ask lines cards 2>/dev/null | jq -rs --argjson n "$n" --arg b "$BRANCH" '. as $all | $ARGS.positional as $new
-    | (map(select(.step == "pushed" and $n != 0 and .pr == $n) | .card) + $new) as $in
+  car=$(prcarried "$n") || { echo "$car"; return 1; }
+  text=$(stdb ask lines cards 2>/dev/null | jq -rs --argjson n "$n" --arg b "$BRANCH" --argjson car "$car" '. as $all | $ARGS.positional as $new
+    | (map(select(.step == "pushed" and $n != 0 and .pr == $n) | .card) + $car + $new) as $in
     | reduce (.[] | select(.step == "landed" and (.card | IN($in[])))) as $l ([]; if any(.[]; .card == $l.card) then . else . + [$l] end)
     | "Conveyor: \(length) card\(if length == 1 then "" else "s" end) landed on \($b)",
       "Conveyor lands these cards on \($b) through this pull request, in the order they landed. Merging it closes their issues.", "",
@@ -354,13 +358,28 @@ landpr() { # <"card issue sha" of each card this push carries>...
   else
     out=$(gh_write pr edit "$n" --title "${text%%$'\n'*}" --body "${text#*$'\n'}" 2>&1) || { echo "pull request #$n could not be updated: ${out:0:600}"; return 1; }
   fi
-  prstate "$n" '.url = (if $u == "" then .url else $u end)' --arg u "$url"
+  prstate "$n" '.url = (if $u == "" then .url else $u end) | .carried = $c' --arg u "$url" --argjson c "$car"
   echo "$n"
+}
+# The cards pushed into another pull request that was closed unmerged are on LANDING still, and pull request <n> merges
+# them: those whose landing origin's default branch, fetched now, lacks (a merged one's cards it holds). Their pushed
+# lines name the other one, whether <n> was opened after it closed (here or on GitHub) or reopened after a newer one
+# closed, so <n> keeps them in $LANDPR's carried (prstate()), worked out anew at each push (landpr()) and each time
+# GitHub's open one is not the one $LANDPR names (prsync()): the body, Merge's issues (mergeone()) and the Board's count
+# (lib/views.sh health) read them from there. Prints them as a JSON array, or why they could not be read.
+prcarried() { # <n, 0 for one not opened yet>
+  local out car
+  out=$(prfetch) && out=$(git rev-list "refs/heads/$BRANCH" --not "$out" 2>&1) \
+    && car=$(stdb ask lines cards 2>/dev/null | jq -cs --argjson n "$1" --rawfile on <(printf '%s' "$out") '($on | split("\n") | map(select(. != "")) | INDEX(.)) as $on
+      | [.[] | select(.step == "landed" and $on[.sha | strings]) | .card] as $l | [.[] | select(.step == "pushed" and (.pr | numbers) and .pr != $n and (.card | IN($l[]))) | .card] | unique') \
+    || { echo "the cards of an earlier pull request could not be read: ${out:0:600}"; return 1; }
+  echo "$car"
 }
 # The landing pull request as the Board and the Foreman see it (health's landingPr), in $LANDPR: {number, url (null
 # when GitHub gave none), merge ({time, by, sha, result: merged or refused, reason}: the last merge asked of it, else
 # null), merged (when it was merged, here or on GitHub (prsync()), else null), closed (when GitHub showed it not open, merged or closed there, prsync(); else
-# null)}. A pull request of another number starts the file anew.
+# null), carried (the cards of another one closed unmerged that it holds, as the last push or sync found them, prcarried())}. A pull request of another number
+# starts the file anew.
 prstate() { # <number> <jq filter, with $t the time> [jq arguments]
   local x n=$1 f=$2
   shift 2
@@ -372,18 +391,22 @@ prstate() { # <number> <jq filter, with $t the time> [jq arguments]
 # $LANDPR brought to GitHub's state (health() reads it, else `github` for `watch`): the pull request GitHub has open
 # from LANDING is named there, with its link (one opened before $LANDPR was kept too), and with none open, the one it
 # names as open is closed (merged or closed on GitHub, not here), so the Board shows no Merge for it, and merged, with
-# GitHub's time, when GitHub shows it merged. Skipped while a
-# push or a merge holds the push lock (each writes $LANDPR itself), and when GitHub does not answer. With Land as main
+# GitHub's time, when GitHub shows it merged; one open that $LANDPR does not name has its carried cards worked out
+# (prcarried()). Skipped while a push or a merge holds the push lock (each writes $LANDPR itself), and when GitHub does not answer. With Land as main
 # it still asks while $LANDPR names one open: a pull request left open when the rule changed is merged or closed on
 # GitHub later, and the Board must not keep showing it.
 prsync() {
-  local lk out n u
+  local lk out n u car
   [ "$(landas 2>/dev/null)" = pr ] || jq -e 'objects | .merged == null and .closed == null and (.number | type) == "number"' "$LANDPR" > /dev/null 2>&1 || return 0
   { exec {lk}>>"$PUSHED.lock"; } 2>/dev/null || return 0
   if flock -n "$lk"; then
     if out=$(landingprs 20 {lk}>&-) \
       && n=$(jq -er '.[0].number // 0 | numbers' <<<"$out" 2>/dev/null); then
-      if [ "$n" != 0 ]; then u=$(jq -r '.[0].url // "" | strings' <<<"$out"); prstate "$n" '.closed = null | .url = (if $u == "" then .url else $u end)' --arg u "$u"
+      if [ "$n" != 0 ]; then u=$(jq -r '.[0].url // "" | strings' <<<"$out")
+        # Another one than $LANDPR names (one reopened, or opened on GitHub): its carried cards are worked out now, as
+        # the record starts anew; when they cannot be read, $LANDPR is left as it is, and the next sync tries again.
+        car=keep; [ "$n" = "$(jq -r 'objects | .number' "$LANDPR" 2>/dev/null)" ] || car=$(prcarried "$n" {lk}>&-) \
+          && prstate "$n" '.closed = null | .url = (if $u == "" then .url else $u end) | if $c == "keep" then . else .carried = ($c | fromjson) end' --arg u "$u" --arg c "$car"
       elif n=$(jq -er 'objects | select(.merged == null and .closed == null) | .number | numbers' "$LANDPR" 2>/dev/null); then
         # One merged on GitHub is merged here too, with GitHub's time, so health's landingMerged names it (lib/views.sh).
         out=$(timeout 20 gh pr view "$n" --json state,mergedAt {lk}>&- 2>/dev/null) \
@@ -401,7 +424,8 @@ prsync() {
 prmergerule() { local d x; packget push.prMerge d && x=$(ctl 2>/dev/null) && x=$(jq -er --arg d "$d" '.prMerge // $d' <<<"$x" 2>/dev/null) && echo "$x"; }
 # The merge of the open pull request from LANDING, by <who> (button, release or idle), under the push lock (no push
 # goes to LANDING during it): GitHub's merge with --merge, a merge commit, so main here takes origin's default branch as it is
-# then (prmain()). The issues of the cards in it (those whose pushed line names it) that GitHub still shows open are
+# then (prmain()). The issues of the cards in it (those whose pushed line names it, and those it carried
+# from one closed unmerged: $LANDPR's carried) that GitHub still shows open are
 # closed, each with an issue line, and $LANDPR says merged: the next push opens a new pull request (landpr()). A merge
 # GitHub refuses (checks, conflicts) leaves the pull request open, and $LANDPR's merge gives GitHub's reason. Exit 2: no
 # pull request is open; 1: refused, or it could not be asked; 3: merged, but main or an issue was not brought in line
@@ -416,6 +440,10 @@ mergeone() { # <who>
   out=$(landingprs) && n=$(jq -er '.[0].number // 0 | numbers' <<<"$out" 2>/dev/null) \
     || { echo "conveyor: the open pull request from $LANDING could not be read: ${out:0:600}" >&2; return 1; }
   [ "$n" != 0 ] || { echo "conveyor: no pull request from $LANDING into $BRANCH is open; nothing merged" >&2; return 2; }
+  # One $LANDPR does not name (reopened, or opened on GitHub, since the last push or sync) has its carried cards worked
+  # out before the merge, while origin's default branch still lacks them: after it, their issues are closed too.
+  [ "$n" = "$(jq -r 'objects | .number' "$LANDPR" 2>/dev/null)" ] || { c=$(prcarried "$n") && prstate "$n" '.carried = $c' --argjson c "$c"; } \
+    || { echo "conveyor: pull request #$n was not merged, as the cards it carries could not be read: ${c:0:600}" >&2; return 1; }
   sha=$(pushed) || sha=''
   out=$(mergecall "$1" "$n" 2>&1 < /dev/null); mc=$?
   [ "$mc" != 4 ] || return 0
@@ -431,7 +459,8 @@ mergeone() { # <who>
     if [ "$st" = CLOSED ] || out=$(gh_write issue close "$i" --comment "Closed by the merge of pull request #$n." 2>&1 < /dev/null); then record "$c" "$i" issue ok
     else rc=3; record "$c" "$i" issue fail "$(jq -cn --arg r "the merge of pull request #$n did not close the issue: ${out:0:600}" '{reason: $r}')"
       echo "conveyor: issue #$i was not closed after the merge: ${out:0:600}" >&2; fi
-  done < <(stdb ask lines cards 2>/dev/null | jq -rs --argjson n "$n" 'map(select(.step == "pushed" and .pr == $n and .issue != 0)) | unique_by(.card) | .[] | "\(.card) \(.issue)"')
+  done < <(stdb ask lines cards 2>/dev/null | jq -rs --argjson n "$n" --slurpfile car <(jq -c --argjson n "$n" 'objects | select(.number == $n) | .carried // [] | arrays' "$LANDPR" 2>/dev/null) \
+    'map(select(.step == "pushed" and (.pr == $n or (.card | IN(($car[0] // [])[]))) and .issue != 0)) | unique_by(.card) | .[] | "\(.card) \(.issue)"')
   return $rc
 }
 # GitHub's merge of pull request <n> for <who>. For idle, the rule, Land as, the card records and the queue are read
@@ -558,13 +587,16 @@ atorigin() { # <sha>
 }
 # The commit release-prep's suite runs on (commands/release-prep.sh), after the remote's branch and tags are fetched:
 # the remote's head of the pack's branch; with Land as pr and Merge PR release (prmergerule()), the head of LANDING
-# while that holds a commit the branch lacks, as `release` merges that pull request before it tags. Fails when the
-# remote's branch cannot be read.
+# while a pull request from it is open and it holds a commit the branch lacks, as `release` merges that pull request
+# before it tags (one closed unmerged is not merged: the branch is released). Fails when the remote's branch, or then
+# the open pull request, cannot be read.
 relhead() {
   local sha out
   git fetch -q "$REMOTE" "+refs/heads/$BRANCH:refs/remotes/$REMOTE/$BRANCH" 'refs/tags/v*:refs/tags/v*' < /dev/null \
     && sha=$(git rev-parse -q --verify "refs/remotes/$REMOTE/$BRANCH^{commit}") || return 1
-  if [ "$(prmergerule 2>/dev/null)" = release ] && [ "$(landas 2>/dev/null)" = pr ] \
+  [ "$(prmergerule 2>/dev/null)" = release ] && [ "$(landas 2>/dev/null)" = pr ] || { echo "$sha"; return 0; }
+  out=$(landingprs) || { echo "conveyor: the open pull request from $LANDING could not be read: ${out:0:600}" >&2; return 1; }
+  if [ "$(jq -r '.[0].number // ""' <<<"$out" 2>/dev/null)" != "" ] \
     && git fetch -q "$REMOTE" "+refs/heads/$LANDING:refs/remotes/$REMOTE/$LANDING" < /dev/null 2>/dev/null \
     && out=$(git rev-parse -q --verify "refs/remotes/$REMOTE/$LANDING^{commit}") && ! git merge-base --is-ancestor "$out" "$sha"; then
     sha=$out
@@ -764,7 +796,7 @@ trialflag() {
   while IFS= read -r f; do [ -z "$(onpipeline "$f" <<<"$pipe")" ] || files+=("$f"); done < <(git -C "$1" diff --cached --no-renames --name-only 2>/dev/null)
   PICK=$(jq -c 'if $ARGS.positional == [] then del(.pipeline) else .pipeline = $ARGS.positional end' --args "${files[@]}" <<<"$PICK") || :
 }
-clean() { tidy "$1"; rm -f "$1".out "$1".err "$1".review "$1".test "$1".withdrawn "$1".fucards "$1".outside "$1".effects "$1".outfiled "$1".approvals "$1".spent "$1".trailers; rm -rf "$1".testlog "$1".rounds; }
+clean() { tidy "$1"; rm -f "$1".out "$1".out.first "$1".out.first-* "$1".out.unpriced "$1".reply.kept "$1".reply.kept-* "$1".err "$1".review "$1".test "$1".withdrawn "$1".fucards "$1".outside "$1".effects "$1".outfiled "$1".approvals "$1".spent "$1".trailers; rm -rf "$1".testlog "$1".rounds; }
 # The class of a failed build session (session()'s reason), for its blocked line (block()'s BLOCKCLASS) and the
 # metrics: api error (refused at each try, apitries()), stall (stalled twice, session1()), timeout (the time limit's
 # exit 124, exitsaid()), else nothing: the metrics then read the class from the reason (blockclass, jq/metrics.jq:
@@ -873,11 +905,13 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   # outside: the findings its judge found outside its change (judged()), which the retry files when it lands;
   # effects: the kind (harm or self-heals) its judge gave each finding it accepted (judged()), which the retry's filing reads;
   # stabilised: the STABILISED lines of its replies (speedproof.sh stabilised()), which a retry's check reads when its fix's reply names none.
-  for f in out err review test testlog withdrawn approvals body trailers rounds rerun covered outside effects stabilised; do
-    [ -e "$3.$f" ] || continue
-    if mkdir -p "$k" 2>/dev/null && mv -f "$3.$f" "$k/" 2>/dev/null; then kept=$k; else left=1; fi
+  # out.first, out.first-2 and so on: the output of each earlier try with no price to read (outfirst(), lib/records.sh), which
+  # the last try's output (out) wrote over: a build that stalled twice is blocked with no line for outkeep() to keep them by.
+  for f in "$3".{out,err,review,test,testlog,withdrawn,approvals,body,trailers,rounds,rerun,covered,outside,effects,stabilised,out.first} "$3".out.first-*; do
+    [ -e "$f" ] || continue
+    if mkdir -p "$k" 2>/dev/null && mv -f "$f" "$k/" 2>/dev/null; then kept=$k; else left=1; fi
   done
-  [ -z "$left" ] || { [ -n "$patch" ] || kept=''; reason="${reason:0:1200} [evidence not moved to $k: it is still at $3.out, .err, .review, .test, .testlog, .withdrawn, .body, .trailers, .rounds, .rerun, .covered, .outside, .effects, .stabilised]"; }
+  [ -z "$left" ] || { [ -n "$patch" ] || kept=''; reason="${reason:0:1200} [evidence not moved to $k: it is still at $3.out, .out.first, .out.first-2 and on, .err, .review, .test, .testlog, .withdrawn, .body, .trailers, .rounds, .rerun, .covered, .outside, .effects, .stabilised]"; }
   if [ -n "$hold" ]; then git worktree remove --force "$3" 2>/dev/null; rm -rf "$3".briefs; rm -f "$3".events "$3".firsttry "$3".firsttry.new "$3".reviewed "$3".index "$3".msg "$3".review.new "$3".carried "$3".live "$3".live.tmp "$3".idle "$3".nocap "$3".capheld "$3".claim "$3".claim.new "$3".cpatch "$3".cpatch.new "$3".stack "$3".settings "$3".opencode.json "$3".donewhen "$3".unfixed "$3".stalled "$3".before
   elif [ -z "$stay" ]; then tidy "$3"; else rm -f "$3".events "$3".firsttry "$3".firsttry.new "$3".reviewed "$3".patch "$3".index "$3".msg "$3".review.new "$3".carried "$3".base "$3".live "$3".live.tmp "$3".idle "$3".nocap "$3".capheld "$3".claim "$3".claim.new "$3".cpatch "$3".cpatch.new "$3".stack "$3".settings "$3".opencode.json "$3".donewhen "$3".unfixed "$3".stalled "$3".before; fi
   # The session or review that failed: what it spent is on this line (spent, and its tokens), so it is priced.

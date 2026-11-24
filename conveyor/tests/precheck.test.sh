@@ -87,3 +87,44 @@ t_precheckdraft() {
   preout reply.md
   [ "$RC" = 0 ] && [ "$out" = 'precheck: passed' ] || fail "precheck counted the draft reply reply.md as part of the change (exit $RC): $out"
 }
+
+# R171. Bug it catches: precheck left an untracked draft reply in the worktree out of the change, but the engine staged
+# it (donewhen(), git add -A), so an ALREADY-DONE card's clean worktree had a change with no D<n> lines for the issue's
+# Done-when items: a fix session. The build session writes reply.md in the worktree and runs precheck on it; after the
+# session (session()), donewhen() sees no change and the worktree is clean, the draft moved beside it.
+# Bug it catches too: a second precheck, on reply-final.md, replaced the first draft's name, so only reply-final.md was
+# moved and donewhen() staged reply.md. The session runs precheck on each draft: both are moved, in that order.
+t_precheckengine() {
+  prewt 'fine' 'ALREADY-DONE: a.txt on main holds it'
+  rm -f "$W/t.test.sh"; git -C "$W" show HEAD:a.txt > "$W/a.txt" || fail "a.txt is not in the worktree's commit"
+  local pc; pc="bash $(printf %q "$SRC/conveyor.sh") precheck 7"
+  # shellcheck disable=SC2016 # expanded by the stub's shell, in the worktree
+  printf '%s\n' 'echo "ALREADY-DONE: a.txt on main holds it" > reply.md' "$pc"' reply.md > "$STUB/pre.out" 2>&1' \
+    'printf "Checked again.\nALREADY-DONE: a.txt on main holds it\n" > reply-final.md' "$pc"' reply-final.md >> "$STUB/pre.out" 2>&1' > "$STUB/build"
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'session "$W" "Build the issue." > /dev/null; donewhen "$W" "$(gh issue view 7 --json number,title,body,labels,milestone)"; git -C "$W" status --porcelain'
+  [ "$(cat "$STUB/pre.out" 2>&1 | paste -sd ' ')" = 'precheck: passed precheck: passed' ] || fail "precheck, given each untracked draft reply in a clean worktree, did not pass: $(cat "$STUB/pre.out" 2>&1)"
+  [ ! -s "$T/$CASE/run.out" ] && [ "$(cat "$W.reply.kept" 2>&1)" = 'ALREADY-DONE: a.txt on main holds it' ] \
+    && [ "$(head -n 1 "$W.reply.kept-2" 2>&1)" = 'Checked again.' ] \
+    || fail "after the session, donewhen() checked a draft reply as a change, or the worktree is not clean: $(cat "$T/$CASE/run.out") $(ls "$W".reply.kept* 2>&1)"
+}
+# E13 (review). Bug it catches: a session whose reply is outside the worktree (precheck names no draft, so there is
+# no <worktree>.briefs/reply) had replyout() print bash's missing-file error to the session's log after each session.
+t_precheckoutside() {
+  prewt 'fine' 'ALREADY-DONE: a.txt on main holds it'
+  preout
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'replyout "$W"'
+  [ "$RC" = 0 ] && [ ! -e "$W.briefs/reply" ] && [ ! -s "$T/$CASE/run.out" ] \
+    || fail "replyout on a worktree whose precheck, given $T/$CASE/reply outside it, named no draft printed or failed (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+# E2. Bug it catches: precheck wrote the reply's name beside the worktree, where a Codex session's sandbox may not
+# write, and passed when the write failed: the engine then staged the draft reply. A briefs folder that cannot be
+# written (here a file in its place) must fail the precheck, not pass it.
+t_precheckmarkfail() {
+  prewt 'fine' 'ALREADY-DONE: a.txt on main holds it'
+  rm -f "$W/t.test.sh"; git -C "$W" show HEAD:a.txt > "$W/a.txt" || fail "a.txt is not in the worktree's commit"
+  cp "$T/$CASE/reply" "$W/reply.md"; echo x > "$W.briefs"
+  preout reply.md
+  [ "$RC" = 2 ] && [[ $out == *'could not be named'* ]] || fail "precheck 7 reply.md, with the reply's name not writable, did not fail (exit $RC): $out"
+}

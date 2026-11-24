@@ -57,7 +57,7 @@ la_land() { # <n> [<fix rounds>]
 }
 # gh's pull requests, in front of the shared stub (its issues): each one a file $STUB/pr.<n>, numbered from 7 (one with
 # .cross true is a fork's: listed by its branch name, as GitHub lists it, with isCrossRepository true); a list is
-# newest first (highest number first), as gh lists them; a view gives its state, with a mergedAt once merged; every
+# newest first (highest number first), at most --limit of them (30 when none is given), as gh lists them; a view gives its state, with a mergedAt once merged; every
 # pr call is logged in $STUB/pr-calls. A merge (gh pr merge <n> --merge) makes GitHub's merge commit on origin's
 # main, of it and the head branch, unless $STUB/merge-refuse holds the reason GitHub gives (gh then exits with the
 # status $STUB/merge-exit holds, or 1); $STUB/merge-first, when there is one, is sourced before a merge, and
@@ -69,9 +69,9 @@ la_prstub() {
 #!/usr/bin/env bash
 [ "$1" = pr ] || exec "$STUB/gh.issues" "$@"
 echo "$*" >> "$STUB/pr-calls"; c=$2; n=''; [ "$c" != edit ] && [ "$c" != merge ] && [ "$c" != view ] || { n=$3; shift; }; shift 2
-while [ $# -gt 0 ]; do case $1 in --head) h=$2 ;; --base) b=$2 ;; --title) t=$2 ;; --body) y=$2 ;; --merge) shift; continue ;; esac; shift 2; done
+l=30; while [ $# -gt 0 ]; do case $1 in --head) h=$2 ;; --base) b=$2 ;; --title) t=$2 ;; --body) y=$2 ;; --limit) l=$2 ;; --merge) shift; continue ;; esac; shift 2; done
 case $c in
-  list) cat "$STUB"/pr.* 2>/dev/null | jq -cs --arg h "$h" --arg b "$b" '[.[] | select(.head == $h and .base == $b and .state == "OPEN")] | sort_by(-.number) | [.[] | {number, url: "https://github.com/o/r/pull/\(.number)", isCrossRepository: (.cross // false)}]' ;;
+  list) cat "$STUB"/pr.* 2>/dev/null | jq -cs --arg h "$h" --arg b "$b" --argjson l "$l" '[.[] | select(.head == $h and .base == $b and .state == "OPEN")] | sort_by(-.number) | .[:$l] | [.[] | {number, url: "https://github.com/o/r/pull/\(.number)", isCrossRepository: (.cross // false)}]' ;;
   merge) [ ! -e "$STUB/merge-first" ] || . "$STUB/merge-first"
     [ ! -e "$STUB/merge-refuse" ] || { cat "$STUB/merge-refuse" >&2; exit "$(cat "$STUB/merge-exit" 2>/dev/null || echo 1)"; }
     o=$(cat "$STUB/origin"); export GIT_AUTHOR_NAME=gh GIT_AUTHOR_EMAIL=gh@example.com GIT_COMMITTER_NAME=gh GIT_COMMITTER_EMAIL=gh@example.com
@@ -194,6 +194,80 @@ t_prfork() {
   [ "$(loop health | jq -c .landingPr.number)" = 8 ] || fail "health does not show Conveyor's pull request: $(loop health | jq -c .landingPr)"
   out=$(loop pr merge 2>&1) || fail "pr merge failed: $out"
   [ "$(la_prst 8)" = MERGED ] && [ "$(la_prst 7)" = OPEN ] && [ "$(la_prst 9)" = OPEN ] || fail "Merge merged a fork's pull request: $(cat "$STUB/pr-calls")"
+}
+# R285. Bug it catches: landingprs() took gh's default list of 30, so 31 forks' pull requests from their own
+# conveyor/landing, newer than Conveyor's #7, pushed #7 off the list: the push opened a second one and Merge found none.
+t_prforkmany() {
+  local out i
+  setup '[]'; la_prstub
+  jq -n '{number: 7, head: "conveyor/landing", base: "main", title: "ours", body: "ours", state: "OPEN"}' > "$STUB/pr.7"
+  for i in $(seq 8 38); do printf '{"number":%s,"head":"conveyor/landing","base":"main","title":"fork","body":"fork","state":"OPEN","cross":true}\n' "$i" > "$STUB/pr.$i"; done
+  out=$(la_eng landingprs) && [ "$(jq -c 'map(.number)' <<<"$out")" = '[7]' ] \
+    || fail "with 31 forks' pull requests newer than Conveyor's #7, landingprs did not give #7: $out"
+}
+# R283. Bug it catches: with the landing pull request #7 closed unmerged, the next push opened #8 with only the card it
+# carried, though card 1, pushed into #7, is on conveyor/landing too: merging #8 lands card 1 with no Closes line.
+t_prclosed() {
+  local body
+  setup "[$(issue 1 2026-01-01),$(issue 2 2026-01-01)]"; la_prstub
+  tune '.push.landAs = "pr"'
+  la_land 1; la_eng push c1 1 || fail "the push of card 1 failed"
+  jq '.state = "CLOSED"' "$STUB/pr.7" > "$STUB/pr.new" && mv "$STUB/pr.new" "$STUB/pr.7" || fail "#7 could not be closed"
+  la_land 2; la_eng push c2 2 || fail "the push of card 2 failed"
+  body=$(jq -r .body "$STUB/pr.8" 2>&1)
+  [ "$(la_prst 8)" = OPEN ] && [ "$(grep -o '^Closes #[0-9]*' <<<"$body" | paste -sd ' ')" = 'Closes #1 Closes #2' ] \
+    || fail "with #7 closed unmerged, the new pull request does not list card 1, pushed into #7, and card 2: $body"
+  # Bug it catches too: the carried cards were worked out only when a push opened a pull request, so with #8 closed
+  # unmerged and #7 reopened on GitHub, the push of card 3 into #7 dropped card 2 (its pushed line names #8): no Closes
+  # line, the Board counted 2 cards, and Merge left issue 2 open.
+  jq '.state = "CLOSED"' "$STUB/pr.8" > "$STUB/pr.new" && mv "$STUB/pr.new" "$STUB/pr.8" \
+    && jq '.state = "OPEN"' "$STUB/pr.7" > "$STUB/pr.new" && mv "$STUB/pr.new" "$STUB/pr.7" || fail "#8 could not be closed and #7 reopened"
+  la_land 3; la_eng push c3 3 || fail "the push of card 3 failed"
+  body=$(jq -r .body "$STUB/pr.7" 2>&1)
+  [ "$(grep -o '^Closes #[0-9]*' <<<"$body" | paste -sd ' ')" = 'Closes #1 Closes #2 Closes #3' ] \
+    || fail "the push of card 3 into #7, reopened, dropped card 2, pushed into #8 closed unmerged: $body"
+  [ "$(loop health | jq -c '[.landingPr.number, .landingPr.cards]')" = '[7,3]' ] || fail "health does not count card 2 in #7: $(loop health | jq -c .landingPr)"
+  echo OPEN > "$STUB/state.2"
+  body=$(loop pr merge 2>&1) || fail "pr merge failed: $body"
+  grep -qx 2 "$STUB/closed" 2>/dev/null || fail "the merge of #7 left issue 2, carried from #8, open: $(cat "$STUB/closed" 2>&1)"
+}
+# Bug it catches: a switch of the open pull request with no push between (#8 closed and #7 reopened on GitHub, then
+# back) started $LANDPR anew with no carried cards (prsync(), prstate()), so health counted only the cards whose pushed
+# line names the open one, and Merge (mergeone()) left the issues of the others open.
+t_prreopen() {
+  local out
+  setup "[$(issue 1 2026-01-01),$(issue 2 2026-01-01)]"; la_prstub
+  tune '.push.landAs = "pr"'
+  la_land 1; la_eng push c1 1 || fail "the push of card 1 failed"
+  la_prset 7 CLOSED; la_land 2; la_eng push c2 2 || fail "the push of card 2 failed"
+  la_prset 8 CLOSED; la_prset 7 OPEN
+  out=$(loop health | jq -c '[.landingPr.number, .landingPr.cards]')
+  [ "$out" = '[7,2]' ] || fail "with #8 closed and #7 reopened, health does not count card 2, carried from #8: $out"
+  la_prset 7 CLOSED; la_prset 8 OPEN
+  out=$(loop health | jq -c '[.landingPr.number, .landingPr.cards]')
+  [ "$out" = '[8,2]' ] || fail "with #7 closed and #8 reopened, health does not count card 1, carried from #7: $out"
+  # No health between this switch and the merge: Merge works the carried cards out itself.
+  la_prset 8 CLOSED; la_prset 7 OPEN; echo OPEN > "$STUB/state.2"
+  out=$(loop pr merge 2>&1) || fail "pr merge of #7, reopened, failed: $out"
+  grep -qx 2 "$STUB/closed" 2>/dev/null || fail "the merge of #7, reopened with no sync, left issue 2, carried from #8, open: $(cat "$STUB/closed" 2>&1)"
+}
+# Pull request <n> of the gh stub set to <state> (OPEN or CLOSED), as when it is closed or reopened on GitHub.
+la_prset() { # <n> <state>
+  jq --arg s "$2" '.state = $s' "$STUB/pr.$1" > "$STUB/pr.new" && mv "$STUB/pr.new" "$STUB/pr.$1" || fail "#$1 could not be set $2"
+}
+# Bug it catches: with #7 closed unmerged and #8 opened on GitHub before Conveyor's next push, that push (into #8)
+# found no carried cards, as it opened no pull request, and dropped card 1, pushed into #7.
+t_prclosedopen() {
+  local body
+  setup "[$(issue 1 2026-01-01),$(issue 2 2026-01-01)]"; la_prstub
+  tune '.push.landAs = "pr"'
+  la_land 1; la_eng push c1 1 || fail "the push of card 1 failed"
+  jq '.state = "CLOSED"' "$STUB/pr.7" > "$STUB/pr.new" && mv "$STUB/pr.new" "$STUB/pr.7" \
+    && jq -n '{number: 8, head: "conveyor/landing", base: "main", title: "by hand", body: "", state: "OPEN"}' > "$STUB/pr.8" || fail "#7 could not be closed and #8 opened"
+  la_land 2; la_eng push c2 2 || fail "the push of card 2 failed"
+  body=$(jq -r .body "$STUB/pr.8" 2>&1)
+  [ "$(grep -o '^Closes #[0-9]*' <<<"$body" | paste -sd ' ')" = 'Closes #1 Closes #2' ] \
+    || fail "the push into #8, opened on GitHub after #7 closed unmerged, dropped card 1: $body"
 }
 # Issue 464. Bug it catches: when a card landed on main here after the push (main and origin's default branch have
 # diverged), Merge left main without origin's merge commit (prff() did not merge it in with remerge()), so the next
@@ -422,6 +496,17 @@ t_prreleasebare() {
     && grep -qF 'or its status could not be read' <<<"$out" || fail "the refusal is not the check after the merge: $out"
   [ -z "$(git -C "$R" tag -l v1.1.0)" ] && [ -z "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] && ! grep -q '^release' "$STUB/gh-calls" 2>/dev/null \
     || fail "the refused release tagged or released: $(git -C "$R" tag -l) $(cat "$STUB/gh-calls" 2>&1)"
+}
+# R177. Bug it catches: relhead() took conveyor/landing's head while it held a commit main lacks, though `release`
+# merges the landing pull request only while one is open: with #7 closed unmerged, release-prep ran the suite on a
+# commit `release` never releases (it releases origin's default branch).
+t_prreleaseclosed() {
+  local out m
+  la_prrelsetup
+  jq '.state = "CLOSED"' "$STUB/pr.7" > "$STUB/pr.new" && mv "$STUB/pr.new" "$STUB/pr.7" || fail "#7 could not be closed"
+  m=$(git -C "$T/$CASE/origin" rev-parse main)
+  out=$(loop release-prep 1.1.0 2>&1)
+  [ "$(cat "$STUB/full-at" 2>&1)" = "$m" ] || fail "with #7 closed unmerged, release-prep did not run the suite on origin's main ($m): $(cat "$STUB/full-at" 2>&1): $out"
 }
 # The fixture of a Merge PR release: the pack sets pr and Merge PR release, main holds plugin.json (p, 1.0.0) tagged
 # v1.0.0 and notes for 1.1.0, and card 1 is pushed into pull request #7. gh posts a commit status as GitHub does.
