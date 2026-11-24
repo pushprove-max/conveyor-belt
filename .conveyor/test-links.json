@@ -269,6 +269,7 @@
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/issues.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -379,6 +380,7 @@
     "conveyor/tests/testruns.test.sh"
   ],
   "conveyor/lib/views.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/snapexec.test.sh"
@@ -769,6 +771,7 @@
     ".claude/scripts/__tests__/dashboard-local.test.sh"
   ],
   ".claude/dashboard/panels/rules.js": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     "conveyor/tests/metrics.test.sh"
   ],
   ".claude/dashboard/parts/rules-moves.js": [
@@ -802,6 +805,7 @@
     "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/lib/followups.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/lib/fulltest.sh": [
@@ -828,6 +832,7 @@
     "conveyor/tests/metrics.test.sh"
   ],
   "docs/cards.md": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/metrics.test.sh"
   ],
@@ -940,6 +945,27 @@
     "conveyor/tests/fail.test.sh"
   ],
   "conveyor/tests/fail.test.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  ".claude/scripts/__tests__/dashboard-view.rules-standing.test.mjs": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/commands/auto.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/commands/retry.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/lib/needsask.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/lib/standing.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/tests/needsask.test.sh": [
+    ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/tests/reviewland.test.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh"
   ]
 }

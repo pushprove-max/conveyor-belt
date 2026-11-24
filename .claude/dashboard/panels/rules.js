@@ -89,7 +89,7 @@
     ['review-followup', 'Review follow-up', 'a follow-up that only finishes or corrects a card you approved is queued'],
     ['release-check', 'Release check', 'a failed check in a release you asked for gets one fix card, then the release goes on'],
     ['fixed-block', 'Fixed block', 'a card blocked by a cause that a landed fix removed waits on that fix and is tried again'],
-    ['review-retry', 'Review retry', 'a card blocked by its review is tried again one time for each issue, with no turn of the Foreman; the next block comes to you. While auto is on, that next block lands once its tests pass, with its finding as a follow-up, unless it names a P0, a reserved word or an item of your profile, its issue is at the follow-up depth cap, or you answered it'],
+    ['review-retry', 'Review retry', 'a card blocked by its review is tried again one time for each issue, with no turn of the Foreman; the next block comes to you. While auto is on, that next block lands once its tests succeed, with its finding as a follow-up, unless it names a P0, a reserved word or an item of your profile, its issue is at the follow-up depth cap, or you answered it'],
   ];
   // A group of rows inside a group of the index (rulesIndexed()): its key, its name, then its rows (by their rule).
   const NOISSUE = ['noissue', 'Cards with no GitHub issue', 'testissues', 'foremanissues', 'followupissues', 'releaseissues', 'splitissues'];
