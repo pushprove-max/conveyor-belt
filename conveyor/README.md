@@ -551,7 +551,8 @@ other file of the card's runs as passed. Each
 failure gets a verdict:
 
 - **main**: the same case failed on main too (a timeout or a kill there says nothing of the case), an input of its
-  file changed since its last recorded pass, and a control passed beside it or no control could run (see
+  file changed since its last recorded pass, and a control passed beside it, no control could run, or main changed
+  its file, or a file the test map links to it, after the last landing whose tests ran that case (see
   **machine**). The test command
   itself is never a case and gets no verdict: it names no test. Conveyor files no
   GitHub issue: the case goes to the fix card of main's commit, a card of issue 0 that the
@@ -608,7 +609,8 @@ failure gets a verdict:
   and pause apply as to any card. The Board shows that card as "beyond the cap: main is red".
 - **machine**: the same case failed on main too, but the machine is at fault, not main. This is so when the case's
   file passed before with the same inputs (the test results cache holds a pass of it with main's content), or when
-  every control failed beside it. The controls are the test files of the pack's `test.control` that have a recorded
+  every control failed beside it and main did not change its file, or a file the test map links to it, after the
+  last landing whose tests ran that case. The controls are the test files of the pack's `test.control` that have a recorded
   pass with main's content, and are not among the failing files. When the cache holds no pass with main's content
   at all, as with a runner that logs no `TESTRUN inputs` lines, the controls are all those files that are not among
   the failing files. They run in the same run on main as the failing cases, so on the same slot. With no control to
@@ -618,7 +620,8 @@ failure gets a verdict:
   as failed. `machinehold.json` in the state folder holds the hold: when it began, the card and commit that found it,
   the files that must pass again (the controls that failed, and the failing files that passed before with the same
   inputs) and the cases. While it stands, the loop picks no card
-  and says why once: "the machine fails <files> on main, with no change to main that explains it". At
+  and says why once: "the machine fails <files> on main, with no change to main that explains it", with the
+  failing cases. At
   most once every `tunables.poll` seconds the loop runs those files on main as it is now, on a test slot. When they
   all pass, the hold goes and the loop picks again. A card with a machine verdict and no card verdict gives way and
   waits in its Test step, its live record saying "waiting for the machine". When the hold

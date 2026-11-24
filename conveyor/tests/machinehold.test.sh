@@ -55,8 +55,9 @@ t_machinecontrol() {
   # loop: run() itself refuses to pick while the hold stands (its exit, no picked line, its message); no function gives that, and it runs no card
   out=$(loop run 1 2>&1) && fail "run exited zero while the machine hold stands: $out"
   [ -z "$(st 'select(.step == "picked") | .card')" ] || fail "the loop picked a card while the machine hold stands: $(st '"\(.step) \(.issue)"' | tr '\n' ,)"
-  grep -qF 'conveyor: the machine fails c.test on main, with no change to main that explains it' <<<"$out" && grep -qF 'the machine hold stands; nothing recorded' <<<"$out" \
-    || fail "the loop did not say why it picks nothing: $out"
+  # Issue 1613: the message names the failing case too, not only the control.
+  grep -qF 'conveyor: the machine fails c.test on main, with no change to main that explains it' <<<"$out" && grep -qF '; failing: b.test: flaky): no card is picked' <<<"$out" \
+    && grep -qF 'the machine hold stands; nothing recorded' <<<"$out" || fail "the loop did not say why it picks nothing, naming the control c.test and the case b.test: flaky: $out"
   [ -e "$ST/machinehold.json" ] || fail "a look that failed the control again ended the hold"
 }
 

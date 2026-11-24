@@ -486,10 +486,12 @@ The test fix session gets the failing cases first, each with its file and the pl
 
 A case that fails again runs on main. When it fails there too, Conveyor checks whether main or the machine is at
 fault. Main is at fault only when an input of the case's test file changed since its last recorded pass, and a
-control passed in the same run or no control could run. The controls are the test files that the pack's
-`test.control` names. Otherwise the
+control passed in the same run, no control could run, or a change on main explains the case (below). The controls are the test files that the pack's
+`test.control` names. When all the controls fail, Conveyor checks each case alone. Main is at fault for a case when a
+change on main changed its test file, or a file that the test map links to it, after the last landing whose tests ran that
+case. Otherwise the
 machine is at fault: no "Main is red" card opens, and the loop picks no new card. The Foreman gets one wake that names
-the files that fail. The cards with that failure wait in their Test step, "waiting for the machine". The Board shows
+the files and the cases that fail. The cards with that failure wait in their Test step, "waiting for the machine". The Board shows
 that step as "tests held: the machine", not as failed. When those files
 pass on main again, the loop picks again and the waiting cards run their tests again (`conveyor/README.md`, The test
 step).

@@ -320,10 +320,12 @@ bash "$SRC/watch-conveyor.sh" --once && fail "a refused run already reported wok
 rm -f "$FD"/pending/*.wake; jq -c '.health.refused = []' "$T/ask/beta" > "$T/b" && mv "$T/b" "$T/ask/beta"
 # Issue 221: the machine hold (the loop picks no card while it stands) wakes the Foreman once, naming the failing
 # control. Bug it catches: a hold the owner never heard of left the loop idle for good.
-jq -c '.health.machineHold = {since: "2026-11-11T11:55:00Z", card: "c41", sha: "0123456789abcdef", controls: ["tests/control.test.sh"], cases: ["tests/a.test.sh: one"]}' "$T/ask/beta" > "$T/b" && mv "$T/b" "$T/ask/beta"
+jq -c '.health.machineHold = {since: "2026-11-11T11:55:00Z", card: "c41", sha: "0123456789abcdef", controls: ["tests/control.test.sh"], cases: ["tests/a.test.sh: one", "tests/a.test.sh: two", "tests/a.test.sh: the review keeps the full said line"]}' "$T/ask/beta" > "$T/b" && mv "$T/b" "$T/ask/beta"
 bash "$SRC/watch-conveyor.sh" --once || fail "no wake for the machine hold"
-grep -qF 'beta: the machine fails tests/control.test.sh on main, with no change to main that explains it: the loop picks no card until they pass again' "$FD"/pending/*.wake \
-  || fail "the machine hold's wake does not name the failing control: $(cat "$FD"/pending/*.wake)"
+# Issue 1613: it names each failing case too, whole, as a hold with no landing found names nothing else of it. Bug it
+# catches: the line was cut at 240 characters, so the last case read "tests/a.test.sh: the review keeps the".
+grep -qF 'beta: the machine fails tests/control.test.sh on main, with no change to main that explains it: the loop picks no card until they pass again (found by c41; failing: tests/a.test.sh: one, tests/a.test.sh: two, tests/a.test.sh: the review keeps the full said line)' "$FD"/pending/*.wake \
+  || fail "the machine hold's wake, given health.machineHold controls [tests/control.test.sh] and cases [tests/a.test.sh: one, tests/a.test.sh: two, tests/a.test.sh: the review keeps the full said line], does not name the failing control and each case whole: $(cat "$FD"/pending/*.wake)"
 rm -f "$FD"/pending/*.wake
 bash "$SRC/watch-conveyor.sh" --once && fail "a machine hold already reported woke again: $(cat "$FD"/pending/*.wake)"
 rm -f "$FD"/pending/*.wake; jq -c '.health.machineHold = null' "$T/ask/beta" > "$T/b" && mv "$T/b" "$T/ask/beta"

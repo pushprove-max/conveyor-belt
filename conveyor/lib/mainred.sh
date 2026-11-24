@@ -14,13 +14,14 @@
 # verdict, as notpassed() names it:
 # - main: the same case (or the same file failing naming no case) failed on main too, an input of its file changed
 #   since its last recorded pass (the file has no pass in the test results cache with main's content: testlist.sh cachehits()),
-#   and a control passed beside it, or no control could run (below). A timeout or a kill on main says nothing of the case.
+#   and a control passed beside it, or no control could run (below), or a change to main explains it (mainchanged()). A timeout or a kill on main says nothing of the case.
 #   A file the card's run ran out of time in (a unit naming no case) failed on main too when main's run failed that file
 #   with any case, or ran out of time in that same file.
 #   The test command itself (testfails()'s name for a run that logged no file) gets no verdict: it names no test (a
 #   card's run whose only failure it is gave no result: voidrun()).
-# - machine (issue 221): it failed on main too, but its file passed before with the same inputs, or every control failed:
-#   the machine's, not main's (machinehold()). The controls are the files of the pack's test.control that have a
+# - machine (issue 221): it failed on main too, but its file passed before with the same inputs, or every control failed
+#   and no change to main explains it (mainchanged(): issue 1613; a case it explains is main's whatever the controls
+#   say): the machine's, not main's (machinehold()). The controls are the files of the pack's test.control that have a
 #   recorded pass on main's content (testlist.sh cachehits()), or all of them when the cache has no pass on main's content at all
 #   (a test command that logs no `TESTRUN inputs` lines records none), and are not among the failing files: main's run
 #   runs them too, on the same slot (CONVEYOR_TEST_ONESLOT: a runner of the command runs its workers one at a time on
@@ -39,7 +40,7 @@
 # each whose verdict is machine to the machine hold (machinehold()), and to no fix card.
 # The card's own TEST_WAIT, TEST_RUN and TEST_FREE are kept (testrec()).
 verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
-  local sha='' u um nt m=null mf=null k fst v c f b ls lc tf tk bb cmd='' hits='[]' ctl='[]' cf='[]' chg
+  local sha='' u um nt m=null mf=null k fst v c f b ls lc tf tk bb cmd='' hits='[]' ctl='[]' cf='[]' chg mc=()
   packget test.command cmd test.control ctl 2>/dev/null || { cmd=''; ctl='[]'; }
   # The units that still did not pass, each {file, case}: case null for a file that failed naming no case or ran out of
   # time (each file the time limit stopped: testfails() stopped; timeout names only the last). The test command itself
@@ -73,8 +74,16 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
        # A file the card ran out of time in names no case: main failing it with any case, or running out of time there, is main red.
        verdict: (if $m != null and ($x | IN($um[])) and (any($m.files[]?; .file == $x.file and (if $x.case == null then .cases == [] or ($x.file | IN($lt[]))
            else any(.cases[]; .name == $x.case) end)) or ($x.case == null and ($x.file | IN($lt[])) and ($x.file | IN($mt[]))))
-         then (if ($x.file | IN($h[]) | not) and ($ctl == [] or $ctl - $cf != []) then "main" else "machine" end) else "card" end)}
+         then (if $x.file | IN($h[]) then "machine" elif $ctl == [] or $ctl - $cf != [] then "main" else "controls" end) else "card" end)}
        + if $x.file | IN($nt[]) then {why: "no test file: a selection error"} else {} end)]') || v='[]'
+  # A case that failed beside controls that all failed is judged by itself (issue 1613): main's when a change to main
+  # explains it (mainchanged()), else the machine's. Bug: every such case was the machine's, so a control that failed
+  # once turned a real main red into a machine hold that no card could end.
+  while IFS=$'\t' read -r c f; do
+    k=${c#"$f: "}; [ "$k" != "$c" ] || k=''
+    ! mainchanged "$f" "$sha" "$2" "$k" || mc+=("$c")
+  done < <(jq -r '.[] | select(.verdict == "controls") | [.case, .file] | @tsv' <<<"$v")
+  v=$(jq -c 'map(if .verdict == "controls" then .verdict = (if .case | IN($ARGS.positional[]) then "main" else "machine" end) else . end)' --args "${mc[@]}" <<<"$v") || v='[]'
   while IFS=$'\t' read -r c f; do mainred "$1" "$c" "$f" "$sha" || :; done < <(jq -r '.[] | select(.verdict == "main") | [.case, .file] | @tsv' <<<"$v")
   # A machine verdict holds the loop (machinehold()) until the controls that failed, and the files that failed with
   # the inputs they last passed with, pass on main again (a file whose inputs changed may fail there for good).
@@ -211,8 +220,8 @@ depkey() {
   done < <(jq -j '.[]? | strings | "\(.)\u0000"' <<<"$ps" 2>/dev/null)
 }
 # The machine hold (issue 221): a case that failed on main as on the card, though its inputs did not change since it
-# last passed (testlist.sh cachehits()), or while every control (verdicts()) that ran beside it on the same slot failed, is the
-# machine's (verdicts(): machine), not main's. $MACHINEHOLD keeps
+# last passed (testlist.sh cachehits()), or while every control (verdicts()) that ran beside it on the same slot failed
+# and no change to main explains it (mainchanged(), issue 1613), is the machine's (verdicts(): machine), not main's. $MACHINEHOLD keeps
 # {since, card, sha, controls, cases}: when the hold began, the card and main's commit that found it, the test files
 # that must pass on main again (the controls that failed, and the failing files that passed before with the same
 # inputs) and the cases. While it
@@ -227,10 +236,11 @@ machinehold() { # <card> <main's commit> <the files, json> <the cases, json>
     > "$MACHINEHOLD.new" && mv -f "$MACHINEHOLD.new" "$MACHINEHOLD" || { exec {lock}>&-; echo "conveyor: the machine hold could not be written: the loop is not held" >&2; return 1; }
   exec {lock}>&-
 }
-# What the loop says while the machine hold stands, nothing when none does: the files that must pass on main again.
+# What the loop says while the machine hold stands, nothing when none does: the files that must pass on main again,
+# and the failing cases (issue 1613: the controls alone did not say which case the hold is for).
 machineheld() {
   [ -s "$MACHINEHOLD" ] || return 0 # no hold: no jq at each turn of the loop (#1542)
-  jq -re 'objects | "the machine fails \(.controls | join(", ")) on main, with no change to main that explains it (found by card \(.card) at \(.sha[0:12]), since \(.since): no card is picked until they pass again"' "$MACHINEHOLD" 2>/dev/null || :
+  jq -re 'objects | "the machine fails \(.controls | join(", ")) on main, with no change to main that explains it (found by card \(.card) at \(.sha[0:12]), since \(.since)\(if (.cases // []) == [] then "" else "; failing: \(.cases | join(", "))" end)): no card is picked until they pass again"' "$MACHINEHOLD" 2>/dev/null || :
 }
 # The loop's look at the hold (run()), at most once every POLL seconds while it stands: the hold's files run on main as it is now, in a
 # worktree of its commit ($CARDS/mainrun/machine), on a test slot, each alone through test.fileCommand, its list
@@ -466,7 +476,8 @@ mainred() { # <card> <case> <its file> <main's commit> [<the landing that broke 
 # under the file its run named it under: a run of only some cases of the file, issue 604; when <case> is given and
 # the line's ranCases list the test file itself, its why or times stand for a run of those cases only, so they count
 # only through ranCases; ranCases of any other file leave them as a whole run) and so passed it, the first
-# landing after that one. Prints {sha, card, issue, links: {<each file that landing changed>: [<test file>]}}; fails
+# landing after that one. Prints {sha, card, issue, links: {<each file that landing changed>: [<test file>]}, since:
+# <the commit of the landing that ran <case>, or the whole file when no case is given>}; fails
 # when no landing ran the file in the last TESTLINK_DEPTH commits (when it last passed is not known) or none is after it.
 TESTLINK_DEPTH=500
 brokeby() { # <test file> <main's commit> [<the file its run named the case under> <case>]
@@ -481,12 +492,26 @@ brokeby() { # <test file> <main's commit> [<the file its run named the case unde
     | .[] | select(.step == "landed" and (.sha | type) == "string" and .sha != "") | "\(.sha) \(.card) \(.issue) \($ran[.card] // false)"' 2>/dev/null) || return 1
   while read -r s; do
     s=$(grep -m 1 "^$s " <<<"$l") || continue
-    if [ "${s##* }" = true ]; then ran=1; break; fi
+    if [ "${s##* }" = true ]; then ran=${s%% *}; break; fi
     by=$s
   done < <(git rev-list -n "$TESTLINK_DEPTH" "$2" 2>/dev/null)
   [ -n "$ran" ] && [ -n "$by" ] || return 1
   read -r s card iss _ <<<"$by"
-  landingof "$s" "$card" "$iss" "$1"
+  landingof "$s" "$card" "$iss" "$1" | jq -c --arg r "$ran" '. + {since: $r}'
+}
+# Whether a change to main explains <test file>'s failure there (verdicts(): issue 1613): a commit since the last
+# landing whose card's test step ran <case> (brokeby(): since; a landing that ran only other cases of the file does
+# not count) changed the file, or a file the test map links to it
+# (mapread(): the files mapped to it and the files the map shares with most tests; a map the project keeps is read as
+# main's commit has it, not as the card's change has it). Fails when no landing in brokeby()'s depth ran the case, as
+# when it last passed on main is then not known.
+mainchanged() { # <test file> <main's commit> <worktree> [<case>]
+  local since m fs=()
+  since=$(brokeby "$1" "$2" "$1" "${4:-}" 2>/dev/null | jq -re '.since | strings | select(. != "")' 2>/dev/null) || return 1
+  packget test.map m 2>/dev/null || m=off
+  mapfile -t fs < <(case $m in off | '') mapread "$3" ;; *) mapread "$3" <(git show "$2:$m" 2>/dev/null) ;; esac 2>/dev/null \
+    | jq -r --arg f "$1" '[(.sources | objects | to_entries[] | select(any(.value[]?; . == $f)) | .key), (.shared | arrays | .[] | strings)] | unique[]' 2>/dev/null)
+  [ -n "$(git --literal-pathspecs diff --name-only --no-renames "$since" "$2" -- "$1" "${fs[@]}" 2>/dev/null)" ]
 }
 # The landing <sha> of <card> as mainred() keeps it (brokeby(), pushtests() in lib/push.sh): {sha, card, issue,
 # links: {<each file it changed but the test file>: [<test file>]}}.

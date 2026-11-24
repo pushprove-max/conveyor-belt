@@ -35,6 +35,30 @@ mrtimeout() { # <fail | timeout>
 t_mainredtimeout() { mrtimeout fail; }
 t_mainredtimeoutmain() { mrtimeout timeout; }
 
+# Issue 1613. Bug it catches: with every control failing on main, verdicts() gave each failing case to the machine, so
+# a landing that broke a case put the loop on a machine hold that named no landing, and the hold stood until main
+# passed. Card c8 fails a.test: one and b.test: two on main while the control c.test fails there. Landing l1 ran both
+# files; then landing bad changed lib/x.sh, which the pack's test map (areas.json, as main has it) links to a.test.
+# a.test: one is main's, and its main-red entry names bad; b.test: two, whose file and mapped file lib/y.sh did not
+# change since l1, is still the machine's, and the hold holds it alone.
+t_mainredcontrolchanged() {
+  local s v='{"files":[{"file":"a.test","cases":[{"name":"one","line":1}]},{"file":"b.test","cases":[{"name":"two","line":1}]}]}'
+  mrshared; tune '.test.control = ["c.test"] | .test.map = "areas.json"'; : > "$STUB/broken"
+  mkdir -p "$R/lib" && echo 't_two() { false; }' > "$R/b.test" && echo y > "$R/lib/y.sh" \
+    && echo '{"lib/x.sh": ["a.test"], "lib/y.sh": ["b.test"]}' > "$R/areas.json" \
+    && git -C "$R" add b.test lib/y.sh areas.json && git -C "$R" commit -qm 'b.test and the map' || fail "main's b.test and map could not be committed"
+  mrland l1 1 '{"a.test": 1, "b.test": 1}' || fail "landing l1 could not be made"
+  echo x > "$R/lib/x.sh" && git -C "$R" add lib/x.sh && git -C "$R" commit -qm bad && s=$(git -C "$R" rev-parse HEAD) \
+    && eng "append \"\$(line bad 2 landed ok '{\"sha\": \"$s\"}')\"" || fail "landing bad could not be made"
+  mrv c8 "$v"
+  [ "$(jq -c .verdicts "$STUB/v.c8")" = '[{"case":"a.test: one","verdict":"main"},{"case":"b.test: two","verdict":"machine"}]' ] \
+    || fail "card c8 failing $v with the control c.test failing on main, after bad changed lib/x.sh (mapped to a.test): not main for a.test: one and machine for b.test: two: $(cat "$STUB/v.c8" "$STUB/v.c8.err")"
+  [ "$(jq -c '[.reds[].cases[] | [.case, .landing.card]]' "$ST/mainred.json" 2>/dev/null)" = '[["a.test: one","bad"]]' ] \
+    || fail "the main-red record does not hold a.test: one alone with the landing bad: $(cat "$ST/mainred.json" 2>&1)"
+  [ "$(jq -c .cases "$ST/machinehold.json" 2>/dev/null)" = '["b.test: two"]' ] \
+    || fail "the machine hold does not hold b.test: two alone: $(cat "$ST/machinehold.json" 2>&1)"
+}
+
 # Bug (#1594, E6): a card's files run side by side, so the time limit stops several at once. testfails() lists them
 # all in stopped, but timeout names only the last: verdicts() read timeout alone, so c.test, stopped beside d.test,
 # never ran on main and got no verdict, and main's red went unrecorded for it.

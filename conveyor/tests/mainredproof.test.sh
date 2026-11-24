@@ -440,10 +440,12 @@ mrshared() { # [<ok.txt on main>]
   s=$(git -C "$R" rev-parse HEAD); mkdir -p "$T/$CASE/cards"
 }
 # verdicts() of card <card> (its worktree made on main's commit when there is none) given <its last run's failures>:
-# its output in $STUB/v.<card>, its errors in $STUB/v.<card>.err.
+# its output in $STUB/v.<card>, its errors in $STUB/v.<card>.err. TEST_GIVEN is cleared, as the loop's verdicts() has
+# none: the bug-card check runs this file given one test file (TEST_GIVEN=1), and a probe on main of more files than
+# that would be stopped as a wide run (watch()), so each case would get the verdict card whatever verdicts() does.
 mrv() { # <card> <testfails() json>
   [ -d "$T/$CASE/cards/$1" ] || git -C "$R" worktree add -q --detach "$T/$CASE/cards/$1" || fail "card $1's worktree could not be made"
-  eng 'TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts '"$1"' "$CONVEYOR_CARDS/'"$1"'" '"'$2'"'' > "$STUB/v.$1" 2> "$STUB/v.$1.err"
+  eng 'TEST_GIVEN=; TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts '"$1"' "$CONVEYOR_CARDS/'"$1"'" '"'$2'"'' > "$STUB/v.$1" 2> "$STUB/v.$1.err"
 }
 # Bug it catches (issue 1313): each card that failed the same case on a red main ran the case on main again, so three
 # cards on one red commit paid for three runs of one file; and a card that read another's run counted its wait for that

@@ -44,8 +44,10 @@ Some pack settings that this site names:
 - `test.control`: test files, as paths from the top of your checkout, that tell a broken machine from a broken main.
   When a card's failing cases fail on main too, the ones of these that passed before with main's content run beside
   them. When no test passed before with main's content, as with a test command that records no passes, all of
-  these run. When none of them passes, the machine is at fault: no "Main is red" card opens, and the loop picks no
-  card until the failing files pass again ([Cards](cards.md#tests)). Empty by default. When it is empty, no control
+  these run. When none of them passes, Conveyor checks each failing case alone. A case is main's when main changed
+  its test file, or a file that the test map links to it, after the last landing whose tests ran that case. That case gets
+  a "Main is red" card. For each other case, the machine is at fault: no "Main is red" card opens for it, and the
+  loop picks no card until the failing files pass again ([Cards](cards.md#tests)). Empty by default. When it is empty, no control
   runs, and a failure on main is main's unless its test file passed before with the same inputs.
 - `linkFromMain`: the folders, as paths from the top of your checkout, that each card's worktree links from your
   checkout, such as `node_modules`. These are the dependencies its build and tests need. Setup fills it from the

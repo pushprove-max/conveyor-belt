@@ -42,7 +42,7 @@
 #   a push that failed its check (health's pushError.kind check), at once and again for each commit it fails on: the
 #     loop does not push again until main moves
 #   a card's test step that refused a full run of its tests (health's refused: the engine's tests()), once a test line
-#   the machine hold (health's machineHold: the engine's mainred.sh machinehold()), once a hold, naming the controls that fail
+#   the machine hold (health's machineHold: the engine's mainred.sh machinehold()), once a hold, naming the controls and the cases that fail
 #   a merge of the landing pull request that GitHub refused (health's landingPr.merge), once a refusal, with GitHub's reason
 #   every other entry of the Board's Needs you: .claude/scripts/dashboard_needs.json is the one list of its kinds,
 #     which the Board reads too, each with the snapshot field it is read from (the whole test failing on main, an engine
@@ -217,9 +217,12 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
       | ["pushflaky:\(.time)", "push flaky", ($i | join(" ")),
          "push went on: the pre-push hook failed naming \(.files | arrays | join(", ")), flaky: passed alone\(if $i == [] then "" else "; held for the owner: \($i | join(", "))" end)" | one]),
     (.refused | arrays | .[] | objects | ["refused:\(.card):\(.since)", "full test run refused", ref, "\(ref): the test step \(.reason | one)"]),
-    # The machine hold (health machineHold, conveyor/lib/mainred.sh machinehold()): once a hold, by when it began.
+    # The machine hold (health machineHold, conveyor/lib/mainred.sh machinehold()): once a hold, by when it began,
+    # naming the failing cases too (issue 1613), each whole: one cuts only the part before them, as a case name cut
+    # short names no case.
     (.machineHold | objects | ["machine:\(.since)", "machine held", "",
-      "the machine fails \(.controls | arrays | map(tostring) | join(", ")) on main, with no change to main that explains it: the loop picks no card until they pass again (found by \(.card // "a card"))" | one]),
+      ("the machine fails \(.controls | arrays | map(tostring) | join(", ")) on main, with no change to main that explains it: the loop picks no card until they pass again (found by \(.card // "a card")" | one)
+        + ((.cases | arrays | map(tostring | gsub("\\s+"; " ")) | select(. != []) | "; failing: " + join(", ")) // "") + ")"]),
     # A merge of the landing pull request that GitHub refused (health landingPr, conveyor/lib/push.sh mergeone()): once a refusal.
     (.landingPr | objects | select(.merge.result == "refused") | ["prmerge:\(.number):\(.merge.time)", "merge refused", "",
       "GitHub refused the merge of landing pull request #\(.number), which stays open: \(.merge.reason // "" | one)"]),
