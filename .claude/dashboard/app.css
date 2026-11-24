@@ -1702,6 +1702,27 @@ html.b3-filling, html.b3-filling body { overflow: hidden; }
 .sh-docs-area { margin-bottom: var(--sp-3); }
 .sh-docs-head { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-1); }
 .sh-doc { cursor: default; }
+.sh-area-batch { align-self: flex-start; }
+.sh-docs-sweep { margin-left: auto; }
+/* The batch sheet: the entries beside the card, as the list beside the detail panel (one column at phone width). */
+.sh-crumb { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); font-size: var(--fs-sm); color: var(--muted); margin-bottom: var(--sp-2); }
+.sh-sheet-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: var(--sp-3) var(--sp-5); margin-bottom: var(--sp-4); }
+.sh-sheet-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.sh-sheet-n { margin-right: auto; }
+.sh-sheet-row { cursor: default; }
+.sh-sheet-row.is-out { opacity: .55; }
+.sh-key { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
+.sh-fix { margin-top: 2px; font-size: var(--fs-xs); color: var(--muted); }
+.sh-sheet-more { margin-top: var(--sp-3); }
+.sh-sheet-foot { margin-top: var(--sp-2); font-size: var(--fs-sm); color: var(--muted); }
+.sh-sheet-field { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); color: var(--muted); }
+.sh-sheet-field .sh-search, .sh-sheet-field .sh-sort { color: var(--text); padding: var(--sp-1) var(--sp-2); }
+.sh-files { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); }
+.sh-files li { display: flex; justify-content: space-between; gap: var(--sp-2); }
+.sh-files-n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.sh-how { padding: var(--sp-3); border-radius: var(--radius-sm); background: var(--info-bg); color: var(--text); font-size: var(--fs-sm); }
+.sh-how .sh-label { color: var(--info); }
+.sh-how ul { display: flex; flex-direction: column; gap: 2px; padding-left: var(--sp-4); list-style: disc; }
 /* At phone width the detail panel stacks under the list (it follows the list in the page). */
 @media (max-width: 900px) {
   .sh-split { grid-template-columns: minmax(0, 1fr); }

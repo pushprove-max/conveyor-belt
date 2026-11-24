@@ -45,6 +45,22 @@ for args in (['harm', H1], ['harm', H1, H2], ['harm'] + ['h%012x' % i for i in r
 for args in (['harm'], ['drop'], ['harm', 'd0123456789ab'], ['harm', 'h0123;id'], ['drop', H1 + 'x'], ['drop', '-'], ['harm', 'area:engine'],
              ['harm'] + ['h%012x' % i for i in range(11)], ['drop'] + ['h%012x' % i for i in range(401)]):
     check('refuses_heals_%s_%s' % (args[0], len(args) - 1), not ok(args), args[:3])
+# The Self-heals page's batch sheet: --held, --prio P<n> and --title, then the entries it keeps (self-heals ids for a
+# batch, docs ids for a docs sweep). Bug each catches: the sheet's filing refused, or a title, level or id that is shell
+# text, too long or of the other list let through.
+D1 = 'd0123456789ab'
+for args in (['batch', 'area:engine', H1], ['batch', '-', '--held', '--prio', 'P3', '--title', 'Self-heals batch: engine (2 entries)', H1, H2],
+             ['batch', 'area:engine', '--queue', '--prio', 'P2', H1], ['docs', 'area:docs', '--title', 'Docs sweep: docs (1 entry)', D1]):
+    check('takes_sheet_%s' % '_'.join(args[:4]), ok(args), args)
+# The sheet offers P3 and P2 alone: bug P0 and P1 caught, a level the sheet never sends let through; and --held with
+# --queue, which ask for opposite things.
+for args in (['batch', 'area:engine', D1], ['docs', 'area:docs', H1], ['batch', 'area:engine', '--prio', 'P4', H1], ['batch', 'area:engine', '--prio'],
+             ['batch', 'area:engine', '--prio', 'P0', H1], ['batch', 'area:engine', '--prio', 'P1', H1], ['batch', 'area:engine', '--held', '--queue', H1],
+             ['batch', 'area:engine', '--title', 'a\nb', H1], ['batch', 'area:engine', '--title', 'x' * 201, H1], ['batch', 'area:engine', '--title'],
+             ['batch', 'area:engine', '--title', 't', '--held', H1], ['batch', 'area:engine'] + ['h%012x' % i for i in range(401)]):
+    check('refuses_sheet_%s' % '_'.join(a[:12] for a in args[2:4]), not ok(args), args[:6])
+cmd = ds.control_script('heals', ['batch', 'area:engine', '--held', '--title', 'A b', H1], '/m', '2026-11-23', '/r', 'u')
+check('runs_heals_batch_sheet_on_the_record', cmd.startswith('CONVEYOR_MAIN=/r ') and cmd.endswith(" heals batch area:engine --held --title 'A b' %s" % H1), cmd)
 cmd = ds.control_script('heals', ['harm', H1, H2], '/m', '2026-11-23', '/r', 'u')
 check('runs_heals_harm_on_the_record', cmd.startswith('CONVEYOR_MAIN=/r ') and cmd.endswith(' heals harm %s %s' % (H1, H2)), cmd)
 cmd = ds.control_script('heals', ['drop', H1], '/m', '2026-11-23', '/r', 'u')
@@ -57,4 +73,37 @@ for args in (['healsdays=10'], ['healsdays=3650'], ['healsdays=1']):
 for args in (['healsdays='], ['healsdays=0'], ['healsdays=010'], ['healsdays=-1'], ['healsdays=1.5'], ['healsdays=1;id'], ['healsdays=10000']):
     check('refuses_rules_%s' % args[0], not rules(args), args)
 print('dashboard-server-heals: %d passed' % passed)
+EOF
+[ $? = 0 ] || exit 1
+# The batch sheet's answer, through the server's POST /control: the host's run is a stub (run_script) that prints what
+# `heals batch --held` prints: the filed line, which says how many entries wait, then the hold. Bug it catches: the
+# Board answered the hold's line alone, so the owner never read that entries still wait.
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
+mkdir -p "$T/config/conveyor" "$T/out" "$T/main" && echo page > "$T/out/index.html" \
+  && jq -n --arg m "$T/main" '{records: [{repo: "proj", main: $m}]}' > "$T/config/conveyor/host.json" || exit 1
+CONVEYOR_DASHBOARD_AUTH=$T/auth.json CONVEYOR_RULING_LOG=$T/rulings.jsonl CONVEYOR_MAIN=$T/main \
+  XDG_CONFIG_HOME=$T/config HOME=$T "$PY" -I - "$HERE/.." "$T" <<'EOF'
+import functools, http.client, json, subprocess, sys, threading
+sys.path.insert(0, sys.argv[1])
+import dashboard_server as ds
+
+T = sys.argv[2]
+SAID = ('conveyor: filed 100101 with 1 finding of area:engine; 1 wait for their card to land or close and stay on the list\n'
+        'conveyor: #100101 is held, as it was filed held: release it (conveyor.sh control release 100101) once the owner says yes\n')
+ds.run_script = lambda args, timeout, env=None: subprocess.CompletedProcess(args, 0, SAID, '')
+read_host = ds.conveyor_host
+ds.conveyor_host = lambda: (lambda h: h[:2] + (T + '/main',) + h[3:])(read_host())
+srv = ds.Server(('127.0.0.1', 0), functools.partial(ds.Handler, directory=T + '/out'))
+threading.Thread(target=srv.serve_forever, kwargs={'poll_interval': 0.02}, daemon=True).start()
+args = ['batch', 'area:engine', '--held', '--prio', 'P3', 'h0123456789ab', 'hba9876543210']
+c = http.client.HTTPConnection('127.0.0.1', srv.server_address[1], timeout=60)
+c.request('POST', '/control', body=json.dumps({'action': 'heals', 'args': args, 'repo': 'proj'}),
+          headers={'Host': 'localhost:%d' % srv.server_address[1], 'Origin': 'https://localhost:%d' % srv.server_address[1], 'Content-Type': 'application/json'})
+r = c.getresponse()
+said = (r.status, r.read().decode()); srv.shutdown()
+if said != (200, SAID.strip()):
+    print('FAIL [heals_batch_answers_every_line]: POST /control heals %s answered %r, not the whole receipt %r' % (' '.join(args), said, SAID.strip()), file=sys.stderr)
+    sys.exit(1)
+print('dashboard-server-heals: the batch sheet gets the whole receipt')
 EOF

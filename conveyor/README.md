@@ -246,7 +246,8 @@ list. A finding that cannot be written to its list has no kind. One still open a
 list, and at that review only a `harm` P0 or P1 (or one with no kind) blocks the card. A line that
 the reviewer itself starts with `SELFHEALS:` is a finding. `conveyor.sh heals batch <area>` (the Board's "File a batch
 card", `-` for the entries with no area) files one card that holds an area's open entries as its scope, and marks them
-with that card. `conveyor.sh heals docs <area>` (the Board's "File a docs sweep card") does the same with the docs
+with that card. The Board's batch sheet names the entries it keeps, the card's title, its priority and whether it is
+held or queued (`--held` or `--queue`, `--prio P2` or `P3`, `--title <text>`, then the entry ids): only those entries go in the card. `conveyor.sh heals docs <area>` (the Board's "File a docs sweep card") does the same with the docs
 list, and `release-prep` runs it for each area with entries before the suite. An entry whose card has not landed or closed waits for a later batch card. A batch card shut before
 it lands gives its entries back, and `retry` of it takes them again, or is refused when another batch card holds them.
 `conveyor.sh heals harm <id>...` (the Board's "Move up to harm") files each entry as its own follow-up at once, and

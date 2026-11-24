@@ -101,8 +101,6 @@ test('Self-heals: the tab after Benchmarks draws the title line, the tiles, the 
   assert.equal(docs.querySelector('.sh-sub').textContent, 'Docs (1)');
   assert.deepEqual(Array.from(docs.querySelectorAll('.sh-docs-area'), (a) => [a.dataset.area, a.querySelector('.sh-row-title').textContent]), [['area:docs', 'omits the Self-heals tab']]);
   assert.equal(docs.querySelector('.sh-left, .sh-ring'), null, 'a docs entry never expires: no days-left ring');
-  assert.equal(page(w).querySelector('[data-act="heals-batch"], [data-act="heals-docs"]'), null, 'no batch filing on this page yet');
-  assert.equal(qa(w, 'button').filter((b) => /Review batch|File docs sweep card|File a batch card/.test(b.textContent)).length, 0);
   // Bug it catches: with 2 days, the thirds rounded to 1, 1 and 2 days, so an entry 25 days old was counted in a part
   // the legend named "2–2 days". Each part's legend names the ages it counts.
   const two = full();

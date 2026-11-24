@@ -113,8 +113,10 @@ class Handler(Pages, http.server.SimpleHTTPRequestHandler):
                 return self.reply(*err)
             said = (run.stdout.strip().splitlines() or ['done'])[-1]
         # Compare's answer is the whole comparison (totals, the tasks, each flipped task's facts); a Start's and a check's
-        # is every line of their receipt, or of their end when it came first; the ruling row keeps its last line.
-        whole = action == 'bench' and (args[:1] in (['diff'], ['run']) or args[:2] == ['arms', 'check'])
+        # is every line of their receipt, or of their end when it came first; so is a batch or docs card's (what it filed,
+        # what waits, then its hold: lib/heals.sh); the ruling row keeps its last line.
+        whole = (action == 'bench' and (args[:1] in (['diff'], ['run']) or args[:2] == ['arms', 'check'])) \
+            or (action == 'heals' and args[:1] in (['batch'], ['docs']))
         answer = run.stdout.strip() if results is None and whole and run.stdout.strip() else said
         try:  # the ruling row names the Board user who did it, as /answer's does
             log_ruling('Board control: %s' % ' '.join([action] + args), said, user)

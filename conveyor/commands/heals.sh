@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-# `conveyor.sh heals sort | heals batch <area | -> | heals docs <area | -> | heals harm <id>... | heals drop <id>...`:
+# `conveyor.sh heals sort | heals batch <area | -> [--held | --queue] [--prio P2|P3] [--title <text>] [<id>...] | heals docs <area | ->
+# [the same] | heals harm <id>... | heals drop <id>...`:
 # the self-heals list and the docs list (lib/heals.sh). sort: the queued follow-up cards and open finding issues sorted
 # by the judge's kinds (healssort()); batch: one audit card for an area's entries of the self-heals list (healsbatch(),
 # the Board's Self-heals panel); docs: one docs sweep card for an area's entries of the docs list (the Board's Docs
@@ -19,6 +20,6 @@
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1
 names || exit 1
-case ${2:-}:$# in sort:2) healssort ;; batch:3) healsbatch "$3" ;; docs:3) healsbatch "$3" docs ;;
+case ${2:-}:$# in sort:2) healssort ;; batch:[3-9]|batch:[1-9][0-9]*) healsbatch "$3" '' "${@:4}" ;; docs:[3-9]|docs:[1-9][0-9]*) healsbatch "$3" docs "${@:4}" ;;
   harm:*) healsharm "${@:3}" ;; drop:*) healsdiscard "${@:3}" ;;
-  *) echo "usage: conveyor.sh heals sort | heals batch <area | -> | heals docs <area | -> | heals harm <id>... | heals drop <id>..." >&2; exit 2 ;; esac
+  *) echo "usage: conveyor.sh heals sort | heals batch <area | -> [--held | --queue] [--prio P2|P3] [--title <text>] [<id>...] | heals docs <area | -> [the same] | heals harm <id>... | heals drop <id>..." >&2; exit 2 ;; esac

@@ -1351,7 +1351,8 @@ the list is for.
   entries that leave the list in 7 days or less. They stay in the dropped entries. **Moved up to harm, 30 days**: the entries moved up in the last 30 days, also those that a review found again later.
 - **By area**: a card for each area, with the area's group and name, its count, and an age bar in three parts of the
   days. The legend gives each part's days. A screen reader reads the count of each part. The card also shows the
-  kinds of its entries with their counts, and "Ready to batch" at 10 entries or more, else "N more to batch".
+  kinds of its entries with their counts, "Ready to batch" at 10 entries or more, else "N more to batch", and
+  **Review batch**, which opens the batch sheet for the area.
 - **Entries**: a search (finding, file or card), **Sort** (**Leaves soonest**, **Newest**, **Seen most**, **Area**)
   and a filter chip for each kind with its count: **Waits longer**, **Runs again**, **Text fixes itself**, **Extra
   work only**, **Docs or comment**, **Cleanup** and **Already guarded**. **All** shows every entry. Each row shows the
@@ -1367,8 +1368,35 @@ the list is for.
   entry gets its own follow-up card at once and leaves the list. A card whose finding names a pipeline file is held
   for your yes, as a review follow-up is. **Drop now** takes the entry off the list now, and it
   stays in the dropped entries. Click it, then click it again. Check rows to act on many: the bar "N selected" has
-  **Move up to harm** and **Clear**.
-- **Docs**: the Docs list by area. Its entries do not expire, so they have no ring.
+  **File a batch card**, **Move up to harm** and **Clear**.
+- **Docs**: the Docs list by area. Its entries do not expire, so they have no ring. **File docs sweep card** on an
+  area opens the batch sheet for a docs sweep card of its entries.
+
+### Batch sheet
+
+The batch sheet files one card that fixes many entries together. It opens in place of the page from an area card's
+**Review batch**, from **File a batch card** in the "N selected" bar, from **Add to the <area> batch** in the detail
+panel and from **File docs sweep card** in the Docs section. From the bar, the sheet holds the rows you checked. It
+has the label of the area with most of them. When you check rows of two projects, **File a batch card** is off, and
+the bar says to check the entries of one project only.
+
+- **Top**: the path **Self-heals list › group › area**, the title and **Cancel**, **File held** and **File and queue ·
+  N entries**. **Cancel** and **Self-heals list** go back to the page.
+- **Entries**: "Entries in this card N of M". Each entry has a checkbox, its id, level, title, kind, file and line,
+  days left and, for an audit's entry, its "Fix:" line. Clear the checkbox to leave an entry out. The entry stays in
+  the sheet, dimmed. **Keep all** keeps each entry again. **Add from other areas** lists the entries of the
+  project's other areas. **Add** puts one in the card. An entry you leave out stays on the list with its days left.
+- **The card**: its title, which you can edit. It starts as "Self-heals batch: <area> (N entries)", or "Docs sweep:
+  <area> (N entries)", and follows the count until you edit it. **Priority** is P3 or P2. The card gets the area's
+  label. **Files it touches** gives each file with the count of entries kept in it. **How this card is reviewed**
+  says when an entry is done, and a note says what happens when the card lands or you shut it.
+
+**File and queue** files the card with only the entries you keep, and the loop builds it in its turn, also when new
+issues start in Held. **File held**
+files it held: the loop does not build it until you release it. Click the button, then click it again. With
+`followupissues` off in Rules, the card has no GitHub issue. Filed entries leave the list with the next read. An
+entry whose card has not landed or closed waits for a later batch card, and the answer says so. When the build
+machine refuses, the sheet stays open with its answer.
 
 The kind of a Cleanup or Already guarded entry is the judge's. For a self-heals entry, the Board reads the kind from
 the judge's reason. A reason that names no kind, or an entry with no date, shows "not read".

@@ -12,7 +12,11 @@
 //     chip for each kind; a row is picked by a click and shown in the panel; checked rows get a bar with Move up to harm.
 //     Move up to harm (`conveyor.sh heals harm`, a card each: confirmed by a second click) and Drop now (`heals drop`,
 //     also confirmed) take an entry off the page at once; the dropped entries are under the list's footer;
-//   the docs list by area, whose entries never expire (no days-left ring).
+//   the docs list by area, whose entries never expire (no days-left ring);
+//   the batch sheet, drawn in place of the page: an area card's Review batch, the bar's File a batch card, the detail
+//     panel's Add to the <area> batch and a docs area's File docs sweep card open it. The owner keeps or leaves out each
+//     entry (and adds entries of other areas of that project), edits the card's title and level, and files it held or
+//     queued: `conveyor.sh heals batch|docs <area> --held|--queue --prio P<n> --title <t> <id>...`, the kept entries alone.
 // What heals (kindOf): cleanup and already guarded are the judge's kinds; a self-heals entry's way of healing is read
 // from the judge's reason (READS), "not read" when the reason names none. An entry with no date or a project with no
 // days shows "not read" for its days left and its age.
@@ -31,8 +35,8 @@
   const NOT_READ = 'not read';
   // What the owner did here, through every redraw: the search, sort, kind chip, the row shown in the detail panel, the
   // rows checked, the entries moved or dropped here (gone: hidden until a snapshot no longer lists them), the last
-  // answer of the host (note) and whether the dropped entries are open.
-  const S = { q: '', sort: 'leaves', kind: 'all', sel: null, checked: new Set(), gone: new Set(), note: '', dropOpen: false, busy: false, ctx: null, m: null, at: null };
+  // answer of the host (note) and whether the dropped entries are open. sheet: the batch sheet open, else null.
+  const S = { q: '', sort: 'leaves', kind: 'all', sel: null, checked: new Set(), gone: new Set(), note: '', dropOpen: false, busy: false, ctx: null, m: null, at: null, el: null, sheet: null };
   const list = (v) => (Array.isArray(v) ? v : []);
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const plural = (k, one, many) => `${k} ${k === 1 ? one : many}`;
@@ -45,6 +49,8 @@
   const placeOf = (s) => { const m = PLACE.exec(String(s || '')); return m ? m[0] : null; };
   // Its proof: after "Proof:", or an audit's "- How:" section, up to the audit's next section (- Fix:, - Test:, - Raised on).
   const proofOf = (e) => { const m = /(?:\bproof:|\s- how:)\s*([\s\S]+?)(?=\s+- (?:fix:|test:|raised on\b)|$)/i.exec(text(e)); return m ? m[1].trim() : null; };
+  // An audit's fix: its "- Fix:" section, up to its next.
+  const fixOf = (e) => { const m = /\s- fix:\s*([\s\S]+?)(?=\s+- (?:test:|raised on\b)|$)/i.exec(text(e)); return m ? m[1].trim() : null; };
   const isAudit = (e) => /^R[0-9]+\s/.test(text(e).replace(MARKS, ''));
   // The finding without its marks, audit number, place (an audit quotes it in backticks) and Proof or audit sections:
   // what it says is wrong.
@@ -205,7 +211,10 @@
     const pills = h('div', 'sh-pills');
     KINDS.concat([[null]]).forEach(([k]) => { if (!kinds.has(k)) return; const p = kindPill(k); p.append(h('span', 'sh-kind-n', ` ${kinds.get(k)}`)); pills.append(p); });
     const foot = h('p', `sh-area-foot${n >= READY ? ' is-ready' : ''}`, n >= READY ? '✓ Ready to batch' : `${READY - n} more to batch`);
-    card.append(top, ageBar(a), pills, foot);
+    const review = h('button', `btn${n >= READY ? ' btn-primary' : ''} sh-area-batch`, 'Review batch');
+    review.type = 'button'; review.dataset.act = 'heals-batch';
+    review.addEventListener('click', () => openSheet('batch', a.repo, a.area, a.rs.slice().sort(byLeft).map((r) => r.key)));
+    card.append(top, ageBar(a), pills, foot, review);
     return card;
   }
 
@@ -277,12 +286,23 @@
     bar.replaceChildren();
     bar.hidden = !rs.length;
     if (!rs.length) return;
-    const up = h('button', 'btn', 'Move up to harm'), clear = h('button', 'btn btn-quiet', 'Clear');
+    const batch = h('button', 'btn btn-primary', 'File a batch card'), up = h('button', 'btn', 'Move up to harm'), clear = h('button', 'btn btn-quiet', 'Clear');
+    // The sheet files for one project and is labelled with one area: that of the most entries checked. The checked
+    // entries of its other areas go in too. Rows checked in two projects file no card: the bar says so.
+    const repos = new Set(rs.map((r) => r.e.repo));
+    batch.type = 'button'; batch.dataset.act = 'heals-batch'; batch.disabled = repos.size > 1;
+    batch.addEventListener('click', () => {
+      const by = new Map();
+      rs.forEach((r) => { const k = r.e.area || ''; by.set(k, (by.get(k) || []).concat(r)); });
+      const top = Array.from(by.values()).sort((x, y) => y.length - x.length)[0][0];
+      openSheet('batch', top.e.repo, top.e.area || null, rs.map((r) => r.key));
+    });
     up.type = 'button'; up.dataset.act = 'harm'; up.disabled = S.busy;
     S.ctx.twice(up, 'spend', `Click again to file ${plural(rs.length, 'follow-up card', 'follow-up cards')}`, () => send(rs, 'harm'));
     clear.type = 'button'; clear.dataset.act = 'clear';
     clear.addEventListener('click', () => { S.checked.clear(); drawEntries(); });
-    bar.append(h('strong', 'sh-bar-n', `${rs.length} selected`), up, clear);
+    bar.append(h('strong', 'sh-bar-n', `${rs.length} selected`), batch, up, clear);
+    if (repos.size > 1) bar.append(h('span', 'sh-hint','A batch card is for one project. Check the entries of one project only.'));
   }
   function detailEl(r) {
     if (!r) return [h('p', 'sh-detail-none', 'Pick an entry to see why it self-heals, its proof and its history.')];
@@ -314,12 +334,16 @@
     step(r.seen ? `Seen again ${r.seen}×, last` : 'Not seen again yet', r.seen ? e.seen : null);
     step(r.left === null ? `Leaves the list: ${NOT_READ}` : `Leaves the list in ${plural(r.left, 'day', 'days')} unless it is seen again`);
     out.push(h('p', 'sh-label', 'History'), hist);
-    const acts = h('div', 'sh-acts'), up = h('button', 'btn', 'Move up to harm'), drop = h('button', 'btn btn-quiet', 'Drop now');
+    const acts = h('div', 'sh-acts'), add = h('button', 'btn btn-primary', `Add to the ${areaOf(e.area).name} batch`);
+    const up = h('button', 'btn', 'Move up to harm'), drop = h('button', 'btn btn-quiet', 'Drop now');
+    add.type = 'button'; add.dataset.act = 'heals-batch';
+    add.addEventListener('click', () => openSheet('batch', e.repo, e.area || null,
+      S.m.es.filter((x) => x.e.repo === e.repo && (x.e.area || null) === (e.area || null)).sort(byLeft).map((x) => x.key)));
     up.type = 'button'; up.dataset.act = 'harm'; up.disabled = S.busy;
     drop.type = 'button'; drop.dataset.act = 'drop'; drop.disabled = S.busy;
     ctx.twice(up, 'spend', 'Click again to file its own follow-up card', () => send([r], 'harm'));
     ctx.twice(drop, 'final', 'Click again to drop it now', () => send([r], 'drop'));
-    acts.append(up, drop);
+    acts.append(add, up, drop);
     out.push(acts, h('p', 'sh-hint', 'Move up to harm when it shows up in real logs or records. It then gets its own follow-up card at once.'));
     return out;
   }
@@ -382,6 +406,10 @@
       sec.dataset.area = a.area || '';
       head.append(h('span', 'sh-group', place.group), h('strong', null, place.name), h('span', 'sh-area-n', String(a.rs.length)));
       if (m.many) head.append(S.ctx.tag(a.repo));
+      const sweep = h('button', 'btn sh-docs-sweep', 'File docs sweep card');
+      sweep.type = 'button'; sweep.dataset.act = 'heals-docs';
+      sweep.addEventListener('click', () => openSheet('docs', a.repo, a.area, a.rs.map((r) => r.key)));
+      head.append(sweep);
       const ul = h('ul', 'sh-rows');
       a.rs.sort((x, y) => y.time - x.time).forEach((r) => {
         const li = h('li', 'sh-row sh-doc'), main = h('div', 'sh-row-main'), t = h('p', 'sh-open');
@@ -398,8 +426,165 @@
     return box;
   }
 
+  // ---- the batch sheet ----
+  // <list>: batch (the self-heals list) or docs (the docs list); <keys>: the entries it starts with, each kept.
+  function openSheet(list, repo, area, keys) {
+    S.sheet = { list, repo, area, keys: keys.slice(), keep: new Set(keys), title: null, prio: 'P3', adding: false, note: '' };
+    S.ctx.redraw();
+    const t = S.el && S.el.querySelector('.sh-sheet-title');
+    if (t) t.focus({ preventScroll: true });
+  }
+  const closeSheet = () => { S.sheet = null; S.ctx.redraw(); };
+  // The entries the sheet can hold (its project's, of its list) and those it shows: an entry another filing took off the
+  // list leaves it.
+  const poolOf = (m, sh) => (sh.list === 'docs' ? m.docs : m.es).filter((r) => r.e.repo === sh.repo);
+  function sheetModel(m) {
+    const sh = S.sheet, pool = poolOf(m, sh), rs = sh.keys.map((k) => pool.find((r) => r.key === k)).filter(Boolean);
+    const kept = rs.filter((r) => sh.keep.has(r.key)), docs = sh.list === 'docs';
+    const name = sh.area ? areaOf(sh.area).name : 'no area';
+    return { sh, pool, rs, kept, docs, auto: `${docs ? 'Docs sweep' : 'Self-heals batch'}: ${name} (${plural(kept.length, 'entry', 'entries')})` };
+  }
+  const titleSaid = (v) => (v.sh.title === null ? v.auto : v.sh.title.trim());
+  function drawSheet() {
+    const k = document.activeElement && document.activeElement.closest && document.activeElement.closest('.sh-sheet') ? document.activeElement.dataset.focus || null : null;
+    S.el.replaceChildren(sheetEl(S.m));
+    const el = k && Array.from(S.el.querySelectorAll('[data-focus]')).find((x) => x.dataset.focus === k);
+    if (el) el.focus({ preventScroll: true });
+  }
+  // The two filing buttons: off with no entry kept, no title or a filing on its way.
+  const fileOff = (v) => S.busy || !v.kept.length || !titleSaid(v);
+  function sheetEl(m) {
+    const v = sheetModel(m), { sh, docs } = v, place = areaOf(sh.area), box = h('section', 'sh-sheet');
+    box.setAttribute('aria-label', docs ? 'File a docs sweep card' : 'File a batch card');
+    const crumb = h('nav', 'sh-crumb'), back = h('button', 'btn btn-quiet sh-crumb-list', 'Self-heals list');
+    crumb.setAttribute('aria-label', 'Where this sheet is');
+    back.type = 'button'; back.addEventListener('click', closeSheet);
+    crumb.append(back, ' › ', h('span', null, place.group), ' › ', h('span', null, place.name));
+    const head = h('div', 'sh-sheet-head'), main = h('div', 'sh-head-main'), acts = h('div', 'sh-acts');
+    const title = h('h3', 'sh-title sh-sheet-title', docs ? 'File a docs sweep card' : 'File a batch card');
+    title.tabIndex = -1;
+    main.append(title, h('p', 'sh-lede', docs ? 'One card makes the docs match what users see, for the entries you keep here.'
+      : 'One card fixes the entries you keep here together. An entry you leave out stays on the list.'));
+    const cancel = h('button', 'btn btn-quiet', 'Cancel'), held = h('button', 'btn', 'File held'), queue = h('button', 'btn btn-primary', `File and queue · ${plural(v.kept.length, 'entry', 'entries')}`);
+    cancel.type = 'button'; cancel.dataset.act = 'sheet-cancel'; cancel.addEventListener('click', closeSheet);
+    [[held, 'held', 'Click again to file it held'], [queue, 'queue', 'Click again to file and queue it']].forEach(([b, how, ask]) => {
+      b.type = 'button'; b.dataset.act = `sheet-${how}`; b.disabled = fileOff(v);
+      S.ctx.twice(b, 'spend', ask, () => fileSheet(how === 'held'));
+    });
+    acts.append(cancel, held, queue);
+    head.append(main, acts);
+    const note = h('p', 'sh-note', sh.note);
+    note.setAttribute('aria-live', 'polite');
+    const split = h('div', 'sh-split sh-sheet-split');
+    split.append(sheetEntries(v), sheetCard(v, held, queue));
+    box.append(crumb, head, note, split);
+    return box;
+  }
+  function sheetEntries(v) {
+    const { sh, docs } = v, side = h('div', 'sh-list sh-sheet-entries'), top = h('div', 'sh-sheet-top');
+    const all = h('button', 'btn btn-quiet', 'Keep all'), more = h('button', 'btn btn-quiet', 'Add from other areas');
+    all.type = 'button'; all.dataset.act = 'sheet-keep-all'; all.dataset.focus = 'keep-all';
+    all.addEventListener('click', () => { v.rs.forEach((r) => sh.keep.add(r.key)); drawSheet(); });
+    more.type = 'button'; more.dataset.act = 'sheet-more'; more.dataset.focus = 'more'; more.setAttribute('aria-expanded', String(sh.adding));
+    more.addEventListener('click', () => { sh.adding = !sh.adding; drawSheet(); });
+    top.append(h('strong', 'sh-sheet-n', `Entries in this card ${v.kept.length} of ${v.rs.length}`), all, more);
+    const ul = h('ul', 'sh-rows');
+    v.rs.forEach((r) => {
+      const on = sh.keep.has(r.key), li = h('li', `sh-row sh-sheet-row${on ? '' : ' is-out'}`), box = h('input', 'sh-check'), main = h('div', 'sh-row-main');
+      li.dataset.key = r.key;
+      box.type = 'checkbox'; box.checked = on; box.dataset.focus = `keep:${r.key}`; box.setAttribute('aria-label', `Keep in the card: ${r.title}`);
+      box.addEventListener('change', () => { if (box.checked) sh.keep.add(r.key); else sh.keep.delete(r.key); drawSheet(); });
+      const t = h('p', 'sh-open');
+      t.append(h('code', 'sh-key', r.e.id), pTag(r.level), h('span', 'sh-row-title', r.title));
+      const meta = h('p', 'sh-row-meta');
+      if (!docs) meta.append(kindPill(r.kind));
+      meta.append(h('code', 'sh-at', r.place || `file ${NOT_READ}`), h('span', 'sh-row-area', r.e.area || 'No area'));
+      if (!docs) meta.append(h('span', 'sh-left-n', daysLeft(r)));
+      main.append(t, meta);
+      const fix = fixOf(r.e);
+      if (fix) main.append(h('p', 'sh-fix', `Fix: ${fix}`));
+      li.append(box, main);
+      ul.append(li);
+    });
+    if (!v.rs.length) ul.append(h('li', 'sh-none', 'No entry of this card is on the list now.'));
+    side.append(top, ul);
+    if (sh.adding) {
+      const others = v.pool.filter((r) => (r.e.area || null) !== (sh.area || null) && !sh.keys.includes(r.key)), add = h('ul', 'sh-rows sh-sheet-more');
+      add.setAttribute('aria-label', 'Entries of other areas');
+      others.forEach((r) => {
+        const li = h('li', 'sh-row sh-doc'), main = h('div', 'sh-row-main'), b = h('button', 'btn btn-quiet', 'Add');
+        li.dataset.key = r.key;
+        main.append(h('span', 'sh-row-title', r.title), h('p', 'sh-row-meta', r.e.area || 'No area'));
+        b.type = 'button'; b.dataset.act = 'sheet-add'; b.setAttribute('aria-label', `Add to the card: ${r.title}`);
+        b.addEventListener('click', () => { sh.keys.push(r.key); sh.keep.add(r.key); drawSheet(); });
+        li.append(main, b);
+        add.append(li);
+      });
+      if (!others.length) add.append(h('li', 'sh-none', 'No entry of another area is on the list.'));
+      side.append(add);
+    }
+    side.append(h('p', 'sh-sheet-foot', docs ? 'An entry you leave out stays on the docs list.' : 'An entry you leave out stays on the list with its days left.'));
+    return side;
+  }
+  function sheetCard(v, held, queue) {
+    const { sh, docs } = v, card = h('aside', 'sh-detail sh-sheet-card'), name = h('input', 'sh-search sh-sheet-name'), prio = h('select', 'sh-sort sh-sheet-prio');
+    card.setAttribute('aria-label', 'The card');
+    name.type = 'text'; name.maxLength = 200; name.value = sh.title === null ? v.auto : sh.title; name.dataset.focus = 'name';
+    // The title is the owner's once edited; until then it follows the count kept. The buttons follow it as it is typed.
+    name.addEventListener('input', () => { sh.title = name.value; held.disabled = queue.disabled = fileOff(v); });
+    ['P3', 'P2'].forEach((p) => { const o = h('option', null, p); o.value = p; o.selected = sh.prio === p; prio.append(o); });
+    prio.dataset.focus = 'prio';
+    prio.addEventListener('change', () => { sh.prio = prio.value; });
+    const lt = h('label', 'sh-sheet-field', 'Title'), lp = h('label', 'sh-sheet-field', 'Priority');
+    lt.append(name); lp.append(prio);
+    const dl = h('dl', 'sh-facts'), dd = h('dd', null);
+    dd.append(sh.area ? h('code', null, sh.area) : 'none: the entries have no area');
+    dl.append(h('dt', null, 'Area label'), dd);
+    const files = new Map();
+    v.kept.forEach((r) => { const f = r.place ? r.place.replace(/:[0-9]+(?:[–-][0-9]+)?$/, '') : `file ${NOT_READ}`; files.set(f, (files.get(f) || 0) + 1); });
+    const fl = h('ul', 'sh-files');
+    Array.from(files).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).forEach(([f, n]) => {
+      const li = h('li', null);
+      li.append(h('code', 'sh-at', f), h('span', 'sh-files-n', plural(n, 'entry', 'entries')));
+      fl.append(li);
+    });
+    if (!files.size) fl.append(h('li', 'sh-none', 'No entry is kept.'));
+    const how = h('div', 'sh-how'), hl = h('ul', null);
+    (docs ? ['Each entry is done when the docs match what the code does. The card changes no code.',
+      'The card checks each entry against main first. Its reply names an entry that is already fixed or no longer true.']
+      : ['Each entry is done when its Proof no longer holds. The card checks each entry against main first. Its reply names an entry that is already fixed or no longer true.',
+        'A self-heals entry gets a test that fails without the fix.',
+        'For an already guarded entry, the card checks that its guard still stops the outcome. If the guard no longer does, the card fixes it as harm, with a test.'])
+      .forEach((s) => hl.append(h('li', null, s)));
+    how.append(h('p', 'sh-label', 'How this card is reviewed'), hl);
+    card.append(h('h4', 'sh-detail-title', 'The card'), lt, lp, dl, h('p', 'sh-label', 'Files it touches'), fl, how,
+      h('p', 'sh-hint', docs ? 'When the card lands, its entries leave the docs list as fixed. If you shut it before it lands, they come back on the docs list.'
+        : 'When the card lands, its entries leave the list as fixed. If you shut it before it lands, they come back on the list, and their days start again.'));
+    return card;
+  }
+  // POST /control heals <batch | docs> <area | -> <--held | --queue> --prio P<n> --title <title> <the ids kept>. The
+  // host's answer says what it filed and which entries wait; an entry it filed leaves the list with the next snapshot,
+  // one that waits for its card stays. A refusal keeps the sheet open with the answer.
+  function fileSheet(held) {
+    const v = sheetModel(S.m), { sh } = v, ctx = S.ctx;
+    if (fileOff(v)) return;
+    const args = [sh.list, sh.area || '-', held ? '--held' : '--queue'].concat(['--prio', sh.prio, '--title', titleSaid(v)], v.kept.map((r) => r.e.id));
+    S.busy = true; sh.note = 'Sending…'; drawSheet();
+    ctx.post('control', { action: 'heals', args, repo: sh.repo })
+      .then((res) => res.text().then((t) => ({ ok: res.ok, said: String(t).trim() || `the build machine answered ${res.status}` })),
+        () => ({ ok: false, said: 'the build machine did not answer. Make sure that it is on. Then try again' }))
+      .then((a) => {
+        S.busy = false;
+        if (!a.ok) { if (S.sheet === sh) sh.note = `Not filed: ${a.said}`; ctx.redraw(); return; }
+        v.kept.forEach((r) => S.checked.delete(r.key));
+        if (S.sheet === sh) S.sheet = null;
+        S.note = `Filed: ${a.said}`;
+        ctx.redraw();
+      });
+  }
+
   function render(el, d, ctx) {
-    S.ctx = ctx;
+    S.ctx = ctx; S.el = el;
     S.at = typeof ctx.updatedAt === 'function' ? ctx.updatedAt() : null;
     // An entry moved or dropped here is hidden until a snapshot no longer lists it; then it may come back as listed again.
     const live = new Set(listsOf(d).flatMap((x) => list(x.entries).filter(Boolean).map(keyOf)));
@@ -408,6 +593,7 @@
     S.m = m;
     S.checked.forEach((k) => { if (!m.es.some((r) => r.key === k)) S.checked.delete(k); });
     if (S.sel !== null && !m.es.some((r) => r.key === S.sel)) S.sel = null;
+    if (S.sheet) { drawSheet(); return; }
     const entries = h('section', 'sh-entries'), split = h('div', 'sh-split'), side = h('div', 'sh-list');
     const tools = toolbar(), note = h('p', 'sh-note'), bar = h('div', 'sh-bar'), rows = h('ul', 'sh-rows'), foot = h('div', 'sh-foot'), detail = h('aside', 'sh-detail');
     note.setAttribute('aria-live', 'polite');
@@ -441,6 +627,8 @@
     attention: healsCount,
     isEmpty: (d) => !listsOf(d).some((x) => list(x.entries).length || list(x.docs && x.docs.entries).length || list(x.dropped).length),
     empty(el, ctx) {
+      // An open sheet ends with the list: a later entry must not open it again.
+      S.sheet = null;
       el.append(ctx.state('empty', 'The Self-heals list is empty', 'This page lists the review findings whose failure heals by itself: a card waits longer, a step runs again, or text is wrong until the next turn. Conveyor does not build them one by one: a batch card fixes an area\'s entries together. When a review sorts a finding so, it shows here.'));
     },
     error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the self-heals list', message)); },

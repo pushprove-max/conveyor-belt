@@ -245,6 +245,7 @@ def bench_spec_ok(name, x):
 # panel gets the record and not a 504 while GitHub is slow; raise it with that timeout.
 DECLINED_ID = re.compile(r'd[0-9a-f]{12}')  # a line of the declined list, as conveyor.sh's declined() names it
 HEALS_ID = re.compile(r'h[0-9a-f]{12}')  # an entry of the self-heals list, as conveyor.sh's healsadd() names it
+DOCS_ID = re.compile(r'd[0-9a-f]{12}')  # an entry of the docs list, likewise
 HEALS_HARM_MAX = 10  # the most entries one heals harm files (one card each, within the heals call limit)
 # depends reads the open issues and writes the issue's body, each through gh (the write under gh-write's 60 s timeout).
 CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'unblock': 60, 'close': 60,'start': 90, 'build': 60, 'heals': 60, 'depends': 120,

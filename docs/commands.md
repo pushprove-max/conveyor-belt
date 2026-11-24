@@ -186,7 +186,11 @@ The self-heals list and the docs list ([Harm or self-heals](cards.md#harm-or-sel
 
 - `heals batch <area | ->` files one card with the area's open entries of the self-heals list as its scope. `-` takes
   the entries with no area. An entry whose card has not landed or closed waits. With no entry ready in the area, it
-  files nothing and exits 2.
+  files nothing and exits 2. After the area, these options are optional: `--held` files the card held until you
+  release it. `--queue` puts it in the queue, also when new issues start held. `--prio P2` (or `P3`) gives it that
+  priority in place of the pack's last one. `--title <text>`
+  gives it its title. Entry ids after them put only those entries in the card, also entries of other areas; the card
+  keeps the area's label. When an id is not an open entry of the list, it files nothing and exits 2.
 - `heals docs <area | ->` files one docs sweep card with the area's open entries of the docs list, in the same way.
   `release-prep` files one for each area that has entries, before it runs the suite.
 - `heals harm <id>...` moves entries of the self-heals list up to harm: each gets its own follow-up card at once and

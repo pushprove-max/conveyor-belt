@@ -121,6 +121,73 @@ t_healsharmretry() {
     || fail "heals harm h00000000a4 (a pipeline finding, so it asks control hold) and a retry 90 that holds the records' lock waited for each other, or one did not do its work (retry exit $(cat "$STUB/retry-rc" 2>&1)): $out $(cat "$STUB/retry-out" 2>&1) held $(loop control | jq -c .held) $(cat "$ST/selfheals.jsonl")"
 }
 
+# Bugs: the Board's batch sheet filed every entry of the area, not only the entries it kept, so one the owner left out
+# left the list; an entry added from another area was not filed; its title, its level or File held was not kept (the
+# card queued with the pack's last priority); an id that is not an open entry was filed anyway or let the others file;
+# a named entry whose card is in flight (c9) was filed, or left the list unsaid; File held made the issue with no built
+# label, so the picker could take it before its hold was saved; a level the sheet never offers (P0, P1) was taken.
+t_healsbatchsheet() {
+  local out rc p
+  setup '[]'; actlist
+  jq -cn '{id: "h00000000a5", time: "2026-11-21T00:00:00Z", card: "c8", issue: 8, repo: "main", area: "area:board", finding: "[P2] d.js:4 a late tile", why: "the next poll redraws it", effect: "self-heals", from: "review"},
+    {id: "h00000000a6", time: "2026-11-21T00:00:00Z", card: "c9", issue: 9, repo: "main", area: "area:board", finding: "[P2] e.js:5 a late chip", why: "it heals", effect: "self-heals", from: "review"}' >> "$ST/selfheals.jsonl"
+  landed 9 | jq -c '.card = "c9" | .step = "picked"' >> "$ST/cards.jsonl"
+  out=$(loop heals batch area:engine h00000000a1 h00000000a3 2>&1); rc=$?
+  [ $rc = 2 ] && [ ! -e "$STUB/filed" ] && grep -qF 'has no open entry h00000000a3' <<<"$out" \
+    || fail "heals batch area:engine h00000000a1 h00000000a3 (a3 held by a batch card) filed something, or did not exit 2 naming a3 (exit $rc): $out"
+  for p in P0 P1; do
+    out=$(loop heals batch area:engine --prio "$p" h00000000a1 2>&1); rc=$?
+    [ $rc = 2 ] && [ ! -e "$STUB/filed" ] || fail "heals batch area:engine --prio $p h00000000a1 filed a card, or did not exit 2 (exit $rc): $out"
+  done
+  # stub: the create's arguments, as the label the issue was made with is taken off it later
+  echo 'printf "%s\n" "$*" >> "$STUB/create-args"' > "$STUB/create-cmd"
+  out=$(loop heals batch area:engine --held --prio P3 --title 'Self-heals batch: engine (2 entries)' h00000000a1 h00000000a5 h00000000a6 2>&1) \
+    && grep -qF '; 1 wait for their card to land or close and stay on the list' <<<"$out" \
+    || fail "heals batch area:engine --held --prio P3 --title ... h00000000a1 h00000000a5 h00000000a6 failed, or did not say that a6 waits: $out"
+  # awaiting-deploy: the fixture pack's built label, which the picker skips
+  head -n 1 "$STUB/create-args" | grep -qF -- '--label awaiting-deploy --body' \
+    || fail "heals batch area:engine --held ... made its issue with no built label (awaiting-deploy), so the picker could take it before the hold: $(head -c 300 "$STUB/create-args")"
+  rm -f "$STUB/create-cmd"
+  [ "$(jq -c '[.title, (.labels | map(.name))]' "$STUB/filed")" = '["Self-heals batch: engine (2 entries)",["bug","area:engine"]]' ] \
+    && jq -r .body "$STUB/filed" | grep -qF 'list entry h00000000a5' && ! jq -r .body "$STUB/filed" | grep -qF 'list entry h00000000a2' \
+    && [ "$(loop control | jq -c .held)" = '[100101]' ] \
+    || fail "heals batch area:engine --held --prio P3 --title ... h00000000a1 h00000000a5 did not file only a1 and a5 under its title, with no priority label (P3 of three), held and the built label off: $out $(cat "$STUB/filed") $(loop control | jq -c .held)"
+  [ "$(jq -rs 'map(objects | "\(.id)=\(.batched)") | join(" ")' "$ST/selfheals.jsonl")" = 'h00000000a1=100101 h00000000a2=null h00000000a3=77 h00000000a5=100101 h00000000a6=null' ] \
+    || fail "after heals batch ... h00000000a1 h00000000a5, the entries kept are not marked with the card, or a2, left out, or a6, waiting, left the list: $(cat "$ST/selfheals.jsonl")"
+  out=$(loop heals batch area:engine --prio P2 h00000000a2 2>&1) && [ "$(sed -n 2p "$STUB/filed" | jq -c '[.title, (.labels | map(.name))]')" = '["Self-heals batch: 1 finding of area:engine",["P2","area:engine"]]' ] \
+    && [ "$(loop control | jq -c .held)" = '[100101]' ] \
+    || fail "heals batch area:engine --prio P2 h00000000a2 did not file the cleanup entry queued, with the P2 label: $out $(sed -n 2p "$STUB/filed" 2>&1) $(loop control | jq -c .held)"
+}
+
+# Bug: File and queue filed an ordinary issue, so a project whose new issues start held (`control start held`) held
+# it at its first sight (adopted(), lib/control.sh) though the owner asked to queue it. The real picker's adopt reads
+# the open issues with the filed one (list-filed) and must pick it.
+t_healsbatchqueue() {
+  local out p
+  setup '[]'; actlist
+  loop control start held > /dev/null || fail "control start held was refused"
+  touch "$STUB/list-filed"
+  out=$(loop heals batch area:engine --queue --prio P2 h00000000a1 2>&1) || fail "heals batch area:engine --queue --prio P2 h00000000a1 failed: $out"
+  jq -s '.' "$STUB/filed" > "$STUB/open.json"
+  p=$(loop pick --dry --issues "$STUB/open.json" --state "$ST" 2>&1)
+  [ "$p" = 100101 ] && [ "$(loop control | jq -c '[.held, (.startSeen | index(100101) != null)]')" = '[[],true]' ] \
+    || fail "after heals batch area:engine --queue ... with new issues held, #100101 was held or not picked (pick: $p): $out $(loop control)"
+}
+
+# Bug: a docs sweep from the Board's sheet filed every entry of its area, also the one the owner left out, which left
+# the docs list unfixed.
+t_healsdocssheet() {
+  local out
+  setup '[]'
+  jq -cn '{id: "d00000000d1", time: "2026-11-21T00:00:00Z", card: "c5", issue: 5, repo: "main", area: "area:docs", finding: "[P3] docs/a.md:1 omits a", why: "drift", effect: "docs drift", from: "review"},
+    {id: "d00000000d2", time: "2026-11-21T00:00:00Z", card: "c6", issue: 6, repo: "main", area: "area:docs", finding: "[P3] docs/b.md:2 omits b", why: "drift", effect: "docs drift", from: "review"}' > "$ST/docsdrift.jsonl"
+  out=$(loop heals docs area:docs --queue --title 'Docs sweep: docs (1 entry)' d00000000d2 2>&1) || fail "heals docs area:docs --queue --title ... d00000000d2 failed: $out"
+  [ "$(jq -r .title "$STUB/filed")" = 'Docs sweep: docs (1 entry)' ] && jq -r .body "$STUB/filed" | grep -qF 'list entry d00000000d2' \
+    && ! jq -r .body "$STUB/filed" | grep -qF 'list entry d00000000d1' \
+    && [ "$(jq -rs 'map("\(.id)=\(.batched)") | join(" ")' "$ST/docsdrift.jsonl")" = 'd00000000d1=null d00000000d2=100101' ] \
+    || fail "heals docs area:docs ... d00000000d2 did not file d2 alone, or a1 left the docs list: $out $(cat "$STUB/filed" "$ST/docsdrift.jsonl")"
+}
+
 # Bugs: "Drop now" erased the entry (no trace of it), left it on the list, or dropped some entries of an ask that named
 # one it could not drop; a dropped finding a review lists again stayed dropped, so it was lost.
 t_healsdrop() {

@@ -107,7 +107,22 @@ def control_ok(body):
     if a == 'heals':  # the Self-heals list's "File a batch card" (batch), the Docs list's "File a docs sweep card" (docs): an area's label, or - for the entries with none
         if n >= 2 and v[0] in ('harm', 'drop'):  # the Self-heals page's "Move up to harm" (one card each: at most HEALS_HARM_MAX) and "Drop now": entry ids
             return n - 1 <= (globals()['HEALS_HARM_MAX'] if v[0] == 'harm' else 400) and all(globals()['HEALS_ID'].fullmatch(x) for x in v[1:])  # the base part's
-        return n == 2 and v[0] in ('batch', 'docs') and (v[1] == '-' or globals()['LABEL'].fullmatch(v[1]) is not None)  # the base part's
+        if not (n >= 2 and v[0] in ('batch', 'docs') and (v[1] == '-' or globals()['LABEL'].fullmatch(v[1]) is not None)):  # the base part's
+            return False
+        # The batch sheet's: --held or --queue, --prio P2|P3, --title <text>, in that order, then the entries it keeps (of its list).
+        rest = v[2:]
+        if rest[:1] in (['--held'], ['--queue']):
+            rest = rest[1:]
+        if rest[:1] == ['--prio']:
+            if len(rest) < 2 or rest[1] not in ('P2', 'P3'):
+                return False
+            rest = rest[2:]
+        if rest[:1] == ['--title']:
+            if len(rest) < 2 or not globals()['said_ok'](rest[1]) or len(rest[1]) > 200:  # the base part's
+                return False
+            rest = rest[2:]
+        entry = globals()['DOCS_ID'] if v[0] == 'docs' else globals()['HEALS_ID']  # the base part's
+        return len(rest) <= 400 and all(entry.fullmatch(x) for x in rest)
     if a in ('approve', 'decline'):  # the issue, then a condition (approve) or a reason (decline), if any
         return 1 <= n <= 2 and ISSUE.fullmatch(v[0]) is not None and (n == 1 or said_ok(v[1]))
     if a == 'unlabel':  # the issue and the labels that hold it back
