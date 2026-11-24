@@ -139,3 +139,20 @@ t_mainredbiglinks() {
     && [ "$(git -C "$w/fix" diff --cached --name-only)" = .conveyor/test-links.json ] \
     || fail "with main's links and the new links each over 128 KiB, the new links were not staged beside main's, or the change was not the links alone: $got"
 }
+# Issue 1487. Bug it catches: depkey() read only the stat of node_modules itself, so restoring one file deep in it
+# (node_modules/jsdom/lib/api.js, as a hand repair does) left the key as it was, and mainprobe() reused a failure kept
+# at the same commit from before the repair. The broken and the restored file have the same size and mtime, so only
+# the change time, which no program sets back, tells them apart: a key of size or mtime alone fails here.
+t_mainreddepsdeep() {
+  local f k1 k2 c0 i=0
+  setup "[]"; tune '.linkFromMain = ["node_modules"]'
+  f=$R/node_modules/jsdom/lib/api.js
+  mkdir -p "${f%/*}" && echo good > "$f" && cp -p "$f" "$STUB/api.js.was" && echo evil > "$f" && touch -r "$STUB/api.js.was" "$f" \
+    || fail "main's node_modules could not be made"
+  k1=$(eng depkey) && [ -n "$k1" ] || fail "depkey gave no key: $k1"
+  c0=$(. "$SRC/lib/portable.sh"; p_ctimens "$f")
+  # The restore must land on a later ctime tick than the break for any key to see it: copy again until it does.
+  until cp -p "$STUB/api.js.was" "$f" && [ "$(. "$SRC/lib/portable.sh"; p_ctimens "$f")" != "$c0" ] || [ $((i += 1)) -gt 1000 ]; do :; done
+  k2=$(eng depkey)
+  [ "$k2" != "$k1" ] || fail "depkey kept its key after node_modules/jsdom/lib/api.js was restored (same size and mtime), so a failed probe would be reused: $k1"
+}

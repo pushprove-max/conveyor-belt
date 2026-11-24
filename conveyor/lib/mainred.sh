@@ -179,12 +179,16 @@ mainkeep() { # <name> <units, json>
 }
 # The state of the dependency folders a run on main is given (deps(), lib/push.sh: each path of the pack's
 # linkFromMain, linked from the main checkout), for mainprobe(): of each, p_filekey() of the folder itself in the main
-# checkout (its times to the nanosecond and inode), a line each, or `none <path>` when it is not there. An install
-# that makes the folder again (npm ci), or adds or takes out a package in it, changes the state.
+# checkout (its times to the nanosecond and inode) and the newest ctime of anything under it, a line each, or
+# `none <path>` when it is not there. An install that makes the folder again (npm ci), adds or takes out a package in
+# it, or a write, restore or delete of one file deep in it changes the state (no program sets a ctime back).
 depkey() {
   local ps p
   packget linkFromMain ps 2>/dev/null || ps='[]'
-  while IFS= read -r -d '' p; do p_filekey "$MAIN/$p" || echo "none $p"; done < <(jq -j '.[]? | strings | "\(.)\u0000"' <<<"$ps" 2>/dev/null)
+  while IFS= read -r -d '' p; do
+    p_filekey "$MAIN/$p" || { echo "none $p"; continue; }
+    find -H "$MAIN/$p" -printf '%C@\n' 2>/dev/null | sort -n | tail -n 1
+  done < <(jq -j '.[]? | strings | "\(.)\u0000"' <<<"$ps" 2>/dev/null)
 }
 # The machine hold (issue 221): a case that failed on main as on the card, though its inputs did not change since it
 # last passed (testlist.sh cachehits()), or while every control (verdicts()) that ran beside it on the same slot failed, is the
