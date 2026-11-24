@@ -118,7 +118,8 @@ test('Tests actions: a count rule says it matches at its limit and does not use 
   const w = boot({ tab: 'tests' });
   deliver(w, snap({ rules: { ...TA.RULES, list: [...TA.RULES.list, { name: 'flaky twice', on: true, measure: 'flaky', limit: 2, runs: 3, minRuns: 0, days: 7 }] } }));
   const help = (rule, k) => auto(w).querySelector(`[data-rule="${rule}"] [data-limit="rule-${k}"] .rules-what`).textContent;
-  assert.equal(help('flaky twice', 'limit'), 'A file matches when its count in those days is this limit or more.');
+  // A limit of 0 still needs one event (testrulesmatches(): count > 0 and count >= limit), so the help names both.
+  assert.equal(help('flaky twice', 'limit'), 'A file matches when its count in those days is 1 or more and is this limit or more.');
   assert.equal(help('flaky twice', 'runs'), 'This rule does not use this setting.');
   assert.equal(help('over usual', 'limit'), 'A file matches when its measure is over this limit.');
   assert.match(help('over usual', 'runs'), /last runs, this many, are all over the limit/);

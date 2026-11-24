@@ -120,6 +120,37 @@ test('a run waiting on a notes card its fixes entry says is closed shows Stop in
   assert.equal(s1.querySelector('[data-figure="stop-other"]'), null, 'the run is of the typed version: no other-version line');
 });
 
+// Bug it guards: release-prep writes its open run (sha null) before it drafts the notes, and any open run counted as the
+// suite running, so a version with notes typed then said "the suite is running" though no suite ran. The draft is
+// still a run under way: Stop shows and no second run can start (a fix that ended "going" there hid Stop).
+test('while release-prep of 1.6.0 only drafts its notes, Release of 1.5.1 does not say the suite is running, and Stop shows', () => {
+  const w = boot();
+  deliver(w, data([{ ...RUN, version: '1.6.0', sha: null, ended: null, state: 'running', machine: null }], { next: '1.5.1', written: ['1.5.1'] }));
+  const field = card(w).querySelector('[data-field="version"]');
+  field.value = '1.5.1'; field.dispatchEvent(new w.Event('input'));
+  assert.doesNotMatch(act(card(w), 'release').textContent, /the suite is running/);
+  assert.doesNotMatch(card(w).textContent, /Suite running|The suite of release 1\.6\.0 runs/);
+  assert.equal(stepOf(w, 'full-suite').dataset.state, 'todo', 'no suite runs while the notes are drafted');
+  assert.equal(stepOf(w, 'full-suite').querySelector('[data-figure="stop-other"]').textContent, 'release-prep of 1.6.0 drafts the notes. Stop stops it.');
+  assert.ok(act(card(w), 'release-stop'), 'Stop shows while the draft is under way');
+  assert.equal(act(card(w), 'release-prep').disabled, true, 'Run suite is off while the draft is under way');
+  const again = card(w).querySelector('[data-field="version"]');
+  again.value = '1.6.0'; again.dispatchEvent(new w.Event('input'));
+  assert.equal(act(card(w), 'release-prep').textContent, 'Draft notes');
+  assert.equal(act(card(w), 'release-prep').disabled, true, 'Draft notes is off while a draft is under way');
+  assert.ok(act(card(w), 'release-stop'), 'Stop shows for the version being drafted');
+});
+
+// Bug it guards: release opens its run (sha null when no suite passed before) ahead of its fetch, and a check that took
+// any open run with no commit for a notes draft labelled that release "Drafting notes". Only release-prep drafts notes.
+test('an open release with no commit yet shows Suite running, not Drafting notes', () => {
+  const w = boot();
+  deliver(w, data([{ ...RUN, step: 'release', sha: null, ended: null, state: 'running', machine: null }]));
+  assert.match(card(w).textContent, /Suite running/);
+  assert.doesNotMatch(card(w).textContent, /Drafting notes|drafts the notes/);
+  assert.equal(stepOf(w, 'full-suite').dataset.state, 'now');
+});
+
 // Bug it guards (review of the follow-up of #1461): with 1.1.0 typed while the suite of 1.0.0 ran, the suite step showed
 // only Stop under the typed 1.1.0, so the owner could not see that Stop stops the run of 1.0.0. The step names 1.0.0, and
 // Stop sends that version; with 1.0.0 typed, no such line shows.

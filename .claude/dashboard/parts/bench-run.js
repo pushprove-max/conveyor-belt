@@ -45,10 +45,10 @@
   // the trials left on arms of that guard (both guards' arms, when they read one login: K.weekPool). A run from before the engine kept the share says it is not kept; so does a need
   // no trial has shown yet.
   function guardSaid(r, cols, data) {
-    const now = K.obj(r.weekLeft) || {}, start = K.obj(r.weekStart) || {};
+    const now = K.obj(r.weekLeft) || {};
     const kinds = [...new Set(cols.map(guardOf).filter((k) => K.num(now[k]) !== null))].sort((a, b) => now[a] - now[b]);
     if (!kinds.length) return `The usage guard's week left: ${K.NOT_KEPT}.`;
-    const k = kinds[0], mine = cols.filter((c) => K.weekPool(start, k).includes(guardOf(c))), ran = K.sum(mine.map((c) => K.num(c.ran) || 0)), used = K.num(start[k]) === null ? null : start[k] - now[k];
+    const k = kinds[0], mine = cols.filter((c) => K.weekPool(r, k).includes(guardOf(c))), ran = K.sum(mine.map((c) => K.num(c.ran) || 0)), from = K.weekFrom(r, k), used = from === null ? null : from - now[k];
     const left = K.sum(mine.map((c) => Math.max(0, (K.num(r.n) || 0) - (K.num(c.done) || 0) - reusedOf(data, c)[1])));
     return `The usage guard has ${Math.round(now[k])}% of the week left; ${ran && used > 0 ? `this run needs about ${Math.round(used / ran * left)}% more` : `what this run needs is ${K.NOT_KEPT}`}.`;
   }

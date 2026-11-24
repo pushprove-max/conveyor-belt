@@ -91,7 +91,7 @@
     const after = num(t.sec) ? ` after ${t.sec < 60 ? took(t.sec) : `${Math.round(t.sec / 60)} min`}` : '';
     return `Timed out${after}${typeof t.file === 'string' && t.file ? ` in ${t.file}` : ''}${n ? ` · ${failed}` : ''}`;
   }
-  // What a failed test run says went wrong (the record's failures: {of, files: [{file, cases: [{name, line}]}],
+  // What a failed test run says went wrong (the record's failures: {of, files: [{file, cases: [{name, line}], at}],
   // timeout: null | {sec, file}}): one line that sums it up ("2 of 41 test files failed", or that it timed out and in
   // which file), then a row a failing file with its failing cases, each on a line of its own with its first failure
   // line. Never a passing file or case. null when the record names no failing file and no timeout. brief: the line that
@@ -112,6 +112,8 @@
         cases.append(li);
       });
       row.append(h('span', 'test-file-name', x.file || 'Test file not named'), cases);
+      // A file that failed with no case named (a Python test file): the first place its failure names (testfails()).
+      if (!cases.children.length && typeof x.at === 'string' && x.at) row.append(h('span', 'test-case-line', x.at));
       rows.append(row);
     });
     if (files.length) box.append(rows);

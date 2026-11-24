@@ -413,7 +413,7 @@ With On, the card uses these seats, with these exceptions:
 - A seat that you set for the issue (`control card`) keeps your setting.
 - A trial card keeps its challenger as the builder, at the judge's effort fitted to the range of the challenger in
   the builder's pick list. When the judge fails, the card uses the challenger's own effort fitted to that range. Its reviewer and judge are the
-  project's. The `choice` of its pick stays the challenger, so the trial counts for the
+  project's, unless you set them for the issue. The `choice` of its pick stays the challenger, so the trial counts for the
   challenger. `trialEffort` shows the effort that the card builds at, when it is a different effort.
 - When a seat of the judge's choice runs on a Claude account at the weekly limit guard, the card uses the project's
   seats, and `asked` has `guard` with the reason.
@@ -430,7 +430,8 @@ the builder of an earlier answer.
 
 With the rule On, a trial card builds on the group's challenger. The challenger is Sonnet 5.5 (`claude-sonnet-5-5`)
 until `next` (below) puts another on trial. The card builds at the judge's effort, fitted to its effort range in the
-builder's pick list. Its pick has `trial: true`. Its review and judge use the project's settings. A card that is not a trial uses the seats above.
+builder's pick list. Its pick has `trial: true`. Its review and judge use the project's settings, unless you set
+them for the issue (`control card`). A card that is not a trial uses the seats above.
 
 - **Eligible cards**: a card is eligible when its group is "small docs" or "small code", or a medium group that you
   added (below). The issue names no path in `pipelineFiles`. The cards of a medium group that you did not add use

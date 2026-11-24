@@ -42,6 +42,17 @@ test('Settings shows each seat, marks the card\'s own, and Save sends one contro
     { action: 'card', args: ['20', 'judge', 'clear'], repo: 'sample' }]);
 });
 
+// Bug: the engine passes over a card's own seat whose model the pack no longer allows the seat (percard), but the
+// Board showed that model as "this card" while the card ran on the project's.
+test('a card\'s own builder whose model the pack no longer allows shows the project\'s builder', () => {
+  const w = boot({ tab: 'control' });
+  const d = full();
+  d.panels.board.data.control.cards = { 20: { builder: { model: 'claude-haiku-5-5', effort: 'low' } } };
+  deliver(w, d);
+  assert.equal(seatRows(w, 20)[0], "Builder | claude-opus-5-5 · high | project's", 'claude-haiku-5-5 is not in modelSettings.builder.choices');
+  assert.equal(seatLine(w, 20).querySelector('.is-own'), null, 'no seat is marked the card\'s own');
+});
+
 // Bug: Pick for me changed the card's settings on its own, showed no reason for a choice, or its Apply did not send
 // the picked seats; Discard left them to be applied later.
 test('Pick for me shows the judge\'s settings with a reason each, sends nothing more until Apply, and Apply sets them', async () => {

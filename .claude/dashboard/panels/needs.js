@@ -146,9 +146,9 @@ window.DASH_APP.panel({
     const retried = new Set((Array.isArray(d.retried) ? d.retried : []).filter((x) => x && typeof x.card === 'string').map((x) => `${x.repo}\n${x.card}`));
     const isRetried = (c) => retried.has(`${c.repo}\n${c.card}`);
     // The blocked cards whose <details> (.block-more) the owner left open: a row whose key changes (its card retried,
-    // or the change of its branch now on main) is drawn anew, and opens it again (blockedRow).
+    // or the whole card read after its records) is drawn anew, and opens it again (blockedRow).
     const opened = new Set(Array.from(el.querySelectorAll('li[data-card]'), (li) => (li.querySelector(':scope > details.block-more[open]') ? li.dataset.card : null)).filter(Boolean));
-    const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, prices: (x) => `prices:${x.repo}:${x.models.join(',')}`,before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}${c.fromRecords === true ? ':records' : ''}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}${c.onMain === true ? ':on-main' : ''}${c.fromRecords === true ? ':records' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
+    const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, prices: (x) => `prices:${x.repo}:${x.models.join(',')}`,before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}${c.fromRecords === true ? ':records' : ''}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}${c.fromRecords === true ? ':records' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
     const items = itemsOf(d);
     // An entry of a kind with no row of its own (entryRow) is drawn once for its key, so the key holds its title and
     // reason: an entry whose text changes under the same since (the counts of a Pick settings decision) is drawn anew.
@@ -221,8 +221,6 @@ window.DASH_APP.panel({
         : c.push ? 'Conveyor pushes again by itself when the cause has a fix. You do not need to retry.'
           : again ? `${n} is back in the queue. A new card builds it in its turn.` : `Retry puts ${n} back in the queue, and a new card builds it in its turn.`);
       li.append(head, lead);
-      // A land-branch card whose branch's change another card landed (the snapshot's onMain): shut is all it needs.
-      if (c.onMain === true) li.append(h('p', 'hint on-main', `The change of its branch is already on main. Another card landed it. To close this card, run conveyor.sh shut ${c.card}.`));
       const more = h('details', 'block-more');
       more.append(h('summary', null, 'The full reason and every step'));
       if (rest) more.append(rest);
@@ -239,6 +237,14 @@ window.DASH_APP.panel({
       more.open = opened.has(li.dataset.card);
       li.append(more, meta);
       return li;
+    };
+    // A land-branch card whose branch's change another card landed (the snapshot's onMain): shut is all it needs. Set
+    // at each draw, new row or kept (the update in show), not by the row's key: a row drawn anew drops a Close already clicked once.
+    const onMainOf = (li, c) => {
+      const was = li.querySelector(':scope > .on-main');
+      if (c.onMain !== true) { if (was) was.remove(); return; }
+      if (!was) li.insertBefore(h('p', 'hint on-main', `The change of its branch is already on main. Another card landed it. To close this card, run conveyor.sh shut ${c.card}.`),
+        li.querySelector(':scope > .block-step, :scope > .retry-does, :scope > details.block-more'));
     };
     // A blocked card is retried (conveyor.sh retry: it costs a new build) or its issue closed (for good), here, through
     // POST /control with the card's repository, each on a second click. A main-red fix card has no issue (issue 0): it
@@ -636,11 +642,38 @@ window.DASH_APP.panel({
       if (key === 'waiting' && errors.waiting) { if (!restart) warn.after(ctx.restartButton()); } else if (restart) restart.remove();
       g.hidden = items[key].length === 0 && !errors[key];
       // A new item draws the eye once: the mark goes with the next change of this panel's data.
-      const show = (xs) => ctx.list(g.querySelector('.rows'), xs, keyOf[key], make[key], (li, x) => {
-        li.classList.toggle('is-new', isNew.has(keyOf[key](x)));
-        if (key === 'blocked') outputOf(li, x);
-        if (key === 'waiting') shotsIn(li, x);
-      });
+      // A card first drawn from its records (key ':records') is drawn anew once the snapshot gives the whole card, and
+      // list() removes the old row: the focus (a link, a field or a button) and a button clicked once (data-armed) go
+      // to the same control in the new row, the nth of its tag, data-act and class there as in the old row. A button
+      // armed for a time (twice(): Close, Retry) keeps the end of the first click's window (data-arm-end), not a new one.
+      const rows = g.querySelector('.rows');
+      const CONTROLS = 'a[href], button, input, textarea, select, summary';
+      const sig = (x) => `${x.tagName}|${x.dataset.act || ''}|${x.className}`;
+      const twin = (x, was, now) => {
+        const same = (r) => Array.from(r.querySelectorAll(CONTROLS)).filter((y) => sig(y) === sig(x));
+        return same(now)[same(was).indexOf(x)] || null;
+      };
+      const show = (xs) => {
+        const recs = new Map(Array.from(rows.children).filter((n) => n.dataset.key && n.dataset.key.endsWith(':records')).map((n) => [n.dataset.key, n]));
+        const a = document.activeElement;
+        ctx.list(rows, xs, keyOf[key], make[key], (li, x) => {
+          li.classList.toggle('is-new', isNew.has(keyOf[key](x)));
+          if (key === 'blocked') { outputOf(li, x); onMainOf(li, x); }
+          if (key === 'waiting') shotsIn(li, x);
+        });
+        recs.forEach((was, k) => {
+          const now = was.isConnected ? null : Array.from(rows.children).find((n) => n.dataset.key === k.slice(0, -':records'.length));
+          if (!now) return;
+          was.querySelectorAll('[data-armed]').forEach((b) => {
+            const to = twin(b, was, now);
+            if (!to || to.disabled || to.hasAttribute('data-armed')) return;
+            if (b.dataset.armEnd) to.dataset.armEnd = b.dataset.armEnd;
+            to.click();
+          });
+          const to = a && was.contains(a) ? twin(a, was, now) : null;
+          if (to && !to.disabled) to.focus({ preventScroll: true });
+        });
+      };
       if (key !== 'blocked') { show(items[key]); continue; }
       // The blocked cards, newest first (sorted by project, the newest first in each project), five at a time.
       const apart = ctx.sorted();

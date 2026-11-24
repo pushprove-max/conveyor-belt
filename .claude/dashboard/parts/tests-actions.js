@@ -445,7 +445,7 @@
     fld('measure', 'Measure', 'What the rule measures in the test runs of each file.', { choices: MEASURES, check: () => null });
     // A count rule (flaky, failed) matches at its limit and does not use runs in a row (testrulesmatches()).
     const count = x.measure === 'flaky' || x.measure === 'failed';
-    fld('limit', 'Limit (times, or a count)', count ? 'A file matches when its count in those days is this limit or more.' : 'A file matches when its measure is over this limit.', { type: 'number', check: checkBy(LIMIT, 'The limit is a number of 0 or more, as 1 or 1.5.') });
+    fld('limit', 'Limit (times, or a count)', count ? 'A file matches when its count in those days is 1 or more and is this limit or more.' : 'A file matches when its measure is over this limit.', { type: 'number', check: checkBy(LIMIT, 'The limit is a number of 0 or more, as 1 or 1.5.') });
     fld('runs', 'Runs in a row', count ? 'This rule does not use this setting.' : 'A file matches only when its last runs, this many, are all over the limit.', { type: 'number', check: checkBy(WHOLE1, 'Runs in a row is a whole number of 1 or more.') });
     fld('minRuns', 'Least runs on record', 'The rule does not look at a file with fewer runs on record.', { type: 'number', check: checkBy(WHOLE0, 'Least runs on record is a whole number of 0 or more.') });
     if (count) fld('days', 'Days', 'The rule counts the test steps of this many past days.', { type: 'number', check: checkBy(WHOLE1, 'Days is a whole number of 1 or more.') });

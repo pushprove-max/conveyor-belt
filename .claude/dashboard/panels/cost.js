@@ -210,7 +210,7 @@ window.DASH_APP.panel({
           ul.append(li);
         });
         flagged.forEach((x) => {
-          const li = h('li', 'row', `${x.repo} #${x.issue}: this trial card changes pipeline files that its issue does not name: ${x.files.join(', ')}. Its review and judge use the defaults.`);
+          const li = h('li', 'row', `${x.repo} #${x.issue}: this trial card changes pipeline files that its issue does not name: ${x.files.join(', ')}. Its review and judge use the project's settings, unless you set them for the issue.`);
           li.dataset.flagged = x.card;
           ul.append(li);
         });

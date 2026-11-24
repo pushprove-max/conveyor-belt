@@ -97,6 +97,21 @@ test('Board: a new snapshot keeps the focus on a parent row\'s summary and on th
   assert.equal(w.document.activeElement, det().querySelector('summary'), 'the row\'s summary');
 });
 
+// Bug this guards: the parent's own issue link is in the summary but in no part, so a redraw put the focus on the
+// summary, not on the link.
+test('Board: a new snapshot keeps the focus on a parent row\'s issue link', () => {
+  const w = boot({ tab: 'control' });
+  deliver(w, snap());
+  const det = () => row(w, 90);
+  const was = det().querySelector(':scope > summary a.issue');
+  was.focus();
+  const d = snap();
+  d.panels.board.data.building.at(-1).step = 'merge';
+  next(w, d);
+  assert.notEqual(det().querySelector(':scope > summary a.issue'), was, 'the row was drawn again');
+  assert.equal(w.document.activeElement, det().querySelector(':scope > summary a.issue'), 'the parent\'s issue link');
+});
+
 // Bug this guards: a blocked part folded into its parent's row was no longer in Needs you, where it is answered.
 test('Board: a blocked part shows in its parent\'s row and in Needs you', () => {
   const w = boot({ tab: 'control' });

@@ -209,23 +209,26 @@
   // second click: the first turns the button to `ask` for ARM_MS, and it looks apart from a one-click button. No browser
   // dialog: it looks like nothing else on the page and blocks it.
   const ARM_MS = 5000;
-  // A button with its own aria-label hears the ask too while armed: its label would hide the changed text.
+  // A button with its own aria-label hears the ask too while armed: its label would hide the changed text. The armed
+  // window's end is in data-arm-end; a caller that arms a new copy of a button armed before (a row drawn anew) sets it
+  // first, so the copy keeps the window of the first click and does not start a new one.
   function twice(b, tier, ask, go) {
     const label = b.textContent, named = b.getAttribute('aria-label');
     let timer = null;
     b.classList.add(tier === 'final' ? 'btn-final' : 'btn-cost');
     b.dataset.guard = tier;
     const reset = () => {
-      window.clearTimeout(timer); timer = null; b.textContent = label; b.setAttribute('aria-pressed', 'false'); delete b.dataset.armed;
+      window.clearTimeout(timer); timer = null; b.textContent = label; b.setAttribute('aria-pressed', 'false'); delete b.dataset.armed; delete b.dataset.armEnd;
       if (named !== null) b.setAttribute('aria-label', named);
     };
     b.setAttribute('aria-pressed', 'false');
     b.addEventListener('click', () => {
       if (b.disabled) return;
       if (timer === null) {
-        b.textContent = ask; b.setAttribute('aria-pressed', 'true'); b.dataset.armed = '';
+        const now = Date.now(), set = Number(b.dataset.armEnd), end = set > now && set <= now + ARM_MS ? set : now + ARM_MS;
+        b.textContent = ask; b.setAttribute('aria-pressed', 'true'); b.dataset.armed = ''; b.dataset.armEnd = String(end);
         if (named !== null) b.setAttribute('aria-label', ask);
-        timer = window.setTimeout(reset, ARM_MS);
+        timer = window.setTimeout(reset, end - now);
         return;
       }
       reset();

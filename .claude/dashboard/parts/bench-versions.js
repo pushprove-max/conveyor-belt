@@ -251,8 +251,10 @@
   function boxOf(label, v, tone) { const d = h('div', `bench-four bench-four-${tone}`); d.append(h('div', 'bench-four-n', String(v)), h('div', 'bench-small', label)); return d; }
   function pair(label, a, b, fmt, A, Bs) {
     const d = h('div', 'bench-pair'), m = Math.max(K.num(a) || 0, K.num(b) || 0) || 1;
-    // Each bar is named by the first 2 words of its arm's label, the whole label when those would name both alike.
-    const short = (s) => s.label.split(' ').slice(0, 2).join(' '), same = short(A) === short(Bs), name = (s) => (same ? s.label : short(s));
+    // Each bar is named by the first 2 words of its arm's label, the whole label when those would name both alike, and
+    // the arm's ID when the whole labels are alike too (two saved arms of one name on one engine version).
+    const short = (s) => s.label.split(' ').slice(0, 2).join(' '), same = short(A) === short(Bs), whole = A.label === Bs.label;
+    const name = (s) => (whole ? String(s.arm) : same ? s.label : short(s));
     d.append(h('div', 'bench-muted bench-small', label));
     [[A, a, 'bench-fill'], [Bs, b, 'bench-fill-warn']].forEach(([s, v, cls]) => d.append(K.add(h('div', 'bench-row bench-nowrap'), [h('span', 'bench-muted bench-pl', name(s)), K.bar((K.num(v) || 0) / m, cls), h('b', 'bench-pv', fmt(v))])));
     return d;

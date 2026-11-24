@@ -81,7 +81,7 @@ test('Needs you: a review block shows its unresolved finding, and a long reason 
 // Bug #878: the note that a land-branch card's change is already on main was put at the end of its reason, so a review
 // block lost its finding panel (its reason no longer ended "did not hold after N rounds"). The note is its own line,
 // from the snapshot's onMain, and the finding is still drawn. A row drawn before another card landed the change was
-// reused as it was, so the note never came: the next snapshot's onMain draws the row anew, with it.
+// reused as it was, so the note never came: the next snapshot's onMain adds it to the kept row.
 test('Needs you: a land-branch card whose change is on main says it can be shut, beside its finding', () => {
   const w = boot({ list: ['needs'] });
   const d = full(), b = d.panels.needs.data.cards.blocked;
@@ -91,7 +91,7 @@ test('Needs you: a land-branch card whose change is on main says it can be shut,
   assert.equal(blockedRow(w).querySelector('.on-main'), null, 'no note before the change is on main');
   b[0].onMain = true;
   next(w, d);
-  const li = blockedRow(w, 'c2-13:on-main');
+  const li = blockedRow(w);
   assert.equal(li.querySelector('.on-main').textContent, 'The change of its branch is already on main. Another card landed it. To close this card, run conveyor.sh shut c2-13.');
   assert.equal(li.querySelector(':scope > .why-block .finding-claim').textContent, 'The word is wrong.', 'the finding panel is still drawn');
   assert.equal(blockedRow(w, 'c2-14').querySelector('.on-main'), null, 'a card without onMain says nothing of main');
@@ -395,6 +395,18 @@ test('Needs you: a failed test file that names no case keeps its file in the lea
   Object.assign(d.panels.needs.data.cards.blocked[0], { reason, track });
   deliver(w, d);
   assert.match(blockedRow(w).textContent, /1 of 4 test files failed[\s\S]*t\.py/);
+});
+
+// Bug: a failed file with no case named carries the place its failure names (at), and the Board showed only the file.
+test('Needs you: a failed test file that names no case shows the place its failure names', () => {
+  const track = trackOf('+++!..', '', {
+    records: [{ name: 'tests failed', state: 'failed', sec: 3, failures: { of: 4, files: [{ file: 't.py', cases: [], at: 't.py:3: assert x' }], timeout: null } }],
+  });
+  const w = boot({ list: ['needs'] });
+  const d = full();
+  Object.assign(d.panels.needs.data.cards.blocked[0], { reason: 'tests: the changed tests failed (exit 1); nothing landed.', track });
+  deliver(w, d);
+  assert.equal(blockedRow(w).querySelector('.test-file .test-case-line').textContent, 't.py:3: assert x');
 });
 
 // Bug: a card whose first review said NO-GO and whose second review session then failed ("review 2: review failed

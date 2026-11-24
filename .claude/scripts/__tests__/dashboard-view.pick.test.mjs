@@ -324,7 +324,10 @@ test('Cost: Pick settings trials shows each dropped challenger and each flagged 
   deliver(w, d);
   const p = panel(w, 'cost');
   assert.match(p.querySelector('ul.trials li[data-dropped="small docs"]').textContent, /no more trials in small docs.*c1-5, c1-10.*default builder/);
-  assert.match(p.querySelector('ul.trials li[data-flagged="c1-15"]').textContent, /#15: .*pipeline files .*ci\/deploy\.sh\. Its review and judge use the defaults/);
+  // Bug: the line said the review and judge use the defaults, but a reviewer or judge set for the issue (control card)
+  // keeps the trial and is the one used (percard, lib/control.sh).
+  assert.match(p.querySelector('ul.trials li[data-flagged="c1-15"]').textContent,
+    /#15: .*pipeline files .*ci\/deploy\.sh\. Its review and judge use the project's settings, unless you set them for the issue\.$/);
 });
 
 // The judge replay study (#765) beside the pick table: the last replay, Estimate (no model called) and Run.

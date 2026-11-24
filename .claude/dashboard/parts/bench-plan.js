@@ -154,7 +154,7 @@
     let used = 0, ran = 0;
     const at = (w) => (K.obj(w) ? K.num(w[kind]) : null);
     K.runsOf().forEach((r) => {
-      const a = at(r.weekStart), b = at(r.weekLeft), pool = K.weekPool(r.weekStart, kind);
+      const a = K.weekFrom(r, kind), b = at(r.weekLeft), pool = K.weekPool(r, kind);
       const t = K.sum(K.colsOf(r).filter((c) => pool.includes((K.armsOf().find((x) => x.name === c.arm) || {}).guard)).map((c) => K.num(c.ran) || 0));
       if (a !== null && b !== null && t > 0) { used += Math.max(0, a - b); ran += t; }
     });

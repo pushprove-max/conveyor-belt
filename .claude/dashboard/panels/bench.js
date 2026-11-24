@@ -307,9 +307,18 @@
     return B.ctx.state('empty', `Reading ${what}…`, 'The runs and their figures are read from the build machine when this tab is shown.');
   }
 
-  // The guards whose arms' trials used the share of the week that a guard's reading shows: both when they read one login
-  // (weekStart or weekLeft of a run, or the history's weekLeft, keeps shared: true), else the guard alone.
-  const weekPool = (week, kind) => (obj(week) && week.shared === true ? ['conveyor', 'agent'] : [kind]);
+  // The guards whose arms' trials used the share of the week that a guard's reading shows in run r: both when they read
+  // one login (the run's weekStart or its weekLeft keeps shared: true; a login that became shared during the run has it in
+  // weekLeft alone), else the guard alone.
+  const weekPool = (r, kind) => (obj(r) && [r.weekStart, r.weekLeft].some((w) => obj(w) && w.shared === true) ? ['conveyor', 'agent'] : [kind]);
+  // The share of the week left at run r's start for a guard's pool (weekPool): one reading for a shared pool, the larger
+  // of its guards' (a login that became shared during the run read apart at the start; each guard's own start made
+  // Plan and Live run give the pool a use that hung on the guard asked); else the guard's own. Null when none is kept.
+  const weekFrom = (r, kind) => {
+    const start = obj(r) && obj(r.weekStart) ? r.weekStart : {};
+    const xs = weekPool(r, kind).map((k) => num(start[k])).filter((x) => x !== null);
+    return xs.length ? Math.max(...xs) : null;
+  };
 
   // ---- the study: what the Scoreboard, Task, Task map and Compare read ----
   // The runs that ended (not archived, not going, not refused), the newest first.
@@ -478,7 +487,7 @@
     said, graded, costOf, costSaid, costSum, apart, lossOf, testsOf, testsSaid, linesOf, isTest, isConveyor, colName, verOf, paint, h, chip, button, add,
     answers, verdict, box, grid, stat, note, callout, dot, armSaid, table, fold, kv, bar, ciBar, svg, say, saidAt, refusedAt, go, openTask, live, readHist,
     readRun, hist, allRuns, runsOf, armsOf, colsOf, keysOf, benchOf, setSize, reading, studyOf, armOf, figsOf, versionsOf, moved, send, ask,
-    stopRun, runActs, RUNS_SAID, stateOf, elapsed, weekPool, draw: () => draw() };
+    stopRun, runActs, RUNS_SAID, stateOf, elapsed, weekPool, weekFrom, draw: () => draw() };
   const P = {};
   ['bench-score', 'bench-versions', 'bench-run', 'bench-plan'].forEach((name) => Object.assign(P, window.DASH_APP.use(name, K)));
   function draw() {

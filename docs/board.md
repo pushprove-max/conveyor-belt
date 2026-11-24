@@ -646,7 +646,7 @@ Conveyor: a project whose `main` has a `docs/releases/` folder. Other projects d
 with Conveyor, the panel says "No project releases with Conveyor."
 
 The top row of a card shows the project, its newest release tag (or "No release yet"), the number of changes since that
-tag, and one status. The status is the first of these that applies: Suite running, Suite failed, Main moved since the
+tag, and one status. The status is the first of these that applies: Suite running, Drafting notes, Suite failed, Main moved since the
 suite, Notes card under way, Released, Notes missing, Suite not run, Ready to release.
 
 Under the top row are three numbered steps. Each step has a mark: done, failed, in progress or to do.

@@ -427,6 +427,20 @@ test('Plan a run, one run of both guards on one login: the share used is spread 
   const n = act(bp(w), 'plan-n'); n.value = '500'; n.dispatchEvent(new w.Event('input'));
   assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1], 'fits in the week left', '450 Conveyor trials at 9 / 300 trials: about 13%');
 });
+// Bug it guards: the pool was read from weekStart alone, so a login that became shared during the run (weekLeft's
+// shared: true) priced each trial from Conveyor's start alone over its 100 trials: 1 / 100, the plan's 900 trials of both
+// guards 9%, and 31 - 9 left over the stop 20, so the plan fit. And each guard took its own start (Conveyor 32, Claude 40,
+// read apart before the login was shared): 1 / 300 a trial, 3%, and the plan fit. The pool's one start is 40: 9 / 300 a
+// trial, 27%, and 31 - 27 is under the stop 20.
+test('Plan a run, a run whose login became shared during it: the pool is measured from one start, over the trials of both', async () => {
+  const set = BH.study();
+  set.hist.weekLeft = { conveyor: 31, agent: 31, shared: true, stop: 20 };
+  Object.assign(set.hist.runs[0], { weekStart: { conveyor: 32, agent: 40, shared: false }, weekLeft: { conveyor: 31, agent: 31, shared: true } });
+  set.hist.runs.forEach((r) => r.cols.forEach((c) => { c.ran = c.done; }));
+  const w = await opened(set, 'plan');
+  const n = act(bp(w), 'plan-n'); n.value = '500'; n.dispatchEvent(new w.Event('input'));
+  assert.equal(kv(q(w, '.bench-before')).find(([k]) => k === 'Usage guard')[1], 'would reach the guard; the run stops there', '900 trials of both guards at 9 / 300 a trial: 27% of 31, stop 20');
+});
 
 // Bug it guards (#1223): a run from before the engine kept the share of the week left gave the chip nothing to say: it said
 // a state the mockup does not have. With none kept the chip says "not kept", for the history's share and for a trial's use.
@@ -470,6 +484,13 @@ test('Live run, with the guard\'s share of the week kept: the mockup\'s percenta
 // the 237 trials they have left (78 and 159): about 34%, not 32%.
 test('Live run, both guards on one login: the share the run needs is spread over the trials of every arm that has a guard', async () => {
   const said = await liveGuard({ weekStart: { conveyor: 40, agent: 40, shared: true }, weekLeft: { conveyor: 31, agent: 31, shared: true } });
+  assert.match(said, /The usage guard has 31% of the week left; this run needs about 34% more\.$/, said);
+});
+// Bug it guards: a login that became shared during the run has shared: true in weekLeft alone; read from weekStart, the
+// points were put on the 22 Conveyor trials alone, not on the 63 trials of both guards. And the tightest guard's own start
+// (Conveyor 34, read apart before the login was shared) gave 3 points, about 11%; the pool's one start, 40, gives 9: about 34%.
+test('Live run, a login that became shared during the run: the pool is measured from one start, over the trials of both guards', async () => {
+  const said = await liveGuard({ weekStart: { conveyor: 34, agent: 40, shared: false }, weekLeft: { conveyor: 31, agent: 31, shared: true } });
   assert.match(said, /The usage guard has 31% of the week left; this run needs about 34% more\.$/, said);
 });
 
@@ -524,6 +545,17 @@ test('Compare, Claude with Superpowers against Claude with Caveman: the bars kee
   await settle(); await settle();
   const names = Array.from(box(w, 'Cost and time').querySelectorAll('.bench-pair')[0].querySelectorAll('.bench-pl'), text);
   assert.deepEqual(names, ['Claude + Superpowers', 'Claude + Caveman']);
+});
+// Bug it guards: two saved arms of one name on one engine version have one whole label ("Example v1.9.0"), so Compare
+// named both bars alike; the arm's ID tells them apart.
+test('Compare, two arms with one label on one engine version: the bars are named by their arm IDs', async () => {
+  const set = BH.study();
+  set.hist.runs[0].cols.filter((c) => c.kind === 'conveyor').forEach((c) => { c.label = 'Example'; });
+  const w = await opened(set, 'compare');
+  const s = act(bp(w), 'cmp-b'); s.value = 'arm:conveyor-codex-claude'; s.dispatchEvent(new w.Event('change'));
+  await settle(); await settle();
+  const names = Array.from(box(w, 'Cost and time').querySelectorAll('.bench-pair')[0].querySelectorAll('.bench-pl'), text);
+  assert.deepEqual(names, ['conveyor', 'conveyor-codex-claude']);
 });
 
 // Bug it guards: Live run wrote its times as 24-hour with the year first whatever Customize set; the Board's Time and

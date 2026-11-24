@@ -543,7 +543,7 @@
     const a = document.activeElement, from = a ? Array.from(S.at).find(([, p]) => p.el.contains(a)) : null;
     // The focus a pending action took (its control was off) comes back when the controls do.
     const keep = (from ? { panel: from[0], issue: a.closest('.bcard') && a.closest('.bcard').dataset.issue, col: a.closest('.bcard') && a.closest('.bcard').dataset.col, act: a.dataset.act || null, card: a.classList.contains('bcard'), filter: a.dataset.filter || null,
-      parent: a.closest('.board-parent') && a.closest('.board-parent').dataset.issue, part: a.closest('.board-part') && a.closest('.board-part').dataset.part } : null) || S.keep;
+      parent: a.closest('.board-parent') && a.closest('.board-parent').dataset.issue, part: a.closest('.board-part') && a.closest('.board-part').dataset.part, link: a.matches('.board-parent > summary a.issue') } : null) || S.keep;
     S.keep = null;
     if (top) {
       if (!top.querySelector('.board-top')) top.replaceChildren(h('div', 'board-top'), noteLine());
@@ -560,9 +560,10 @@
     if (to) {
       // A card in two columns: the one in the column the focus was in, else (it moved) the card where it is now.
       const c = keep.issue ? (keep.col && to.querySelector(`.bcard[data-col="${keep.col}"][data-issue="${keep.issue}"]`)) || to.querySelector(`.bcard[data-issue="${keep.issue}"]`) : null;
-      // In a parent's row: its part's link (by the part), else its summary, which is drawn again on every draw.
+      // In a parent's row: its part's link (by the part), else the summary's issue link, else its summary; the row is
+      // drawn again on every draw.
       const row = keep.parent ? to.querySelector(`.board-parent[data-issue="${keep.parent}"]`) : null;
-      const inRow = row && (keep.part ? row.querySelector(`.board-part[data-part="${keep.part}"] [data-act="part-card"]`) : row.querySelector(':scope > summary'));
+      const inRow = row && (keep.part ? row.querySelector(`.board-part[data-part="${keep.part}"] [data-act="part-card"]`) : row.querySelector(keep.link ? ':scope > summary a.issue' : ':scope > summary'));
       const again = keep.parent ? inRow : keep.filter ? to.querySelector(`[data-filter="${keep.filter}"]`) : keep.card ? c : (keep.act ? (c || to).querySelector(`[data-act="${keep.act}"]`) : null);
       if (again && !again.disabled) again.focus({ preventScroll: true });
       else if (S.busy) S.keep = keep;

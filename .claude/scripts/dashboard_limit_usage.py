@@ -307,8 +307,8 @@ def account_cache(cache_dir, folder):
 def note(cache, kept, now, body, why):
     """Writes one read of the account (usage()'s answer) over `kept` into `cache`, as account_reading() keeps it.
     The file is read again under its lock first: readers of one account (the Board, the guard, the watcher) can ask
-    at once, and a 429 another one saved while this read was out keeps its later deadline and reason, whatever this
-    read got. Written over, that 429's wait was lost and the account asked again inside it."""
+    at once, and a 429 another one saved while this read was out keeps its deadline and reason while it is in force,
+    whatever this read got. Written over, that 429's wait was lost and the account asked again inside it."""
     os.makedirs(os.path.dirname(cache), exist_ok=True)
     with open(cache + ".lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -329,8 +329,15 @@ def note(cache, kept, now, body, why):
             # raised to it, the read dashboard.sh retries at that named time was refused by this kept deadline.
             if wait:
                 new["next"] = now + int(wait.group(1))
+        # A kept 429 still in force stays, its reason and its deadline with it: a read that started later can end with
+        # a later `next` (a success at T+1 has T+1+ACCOUNT_TTL, past a 429's T+ACCOUNT_TTL), and fetch() waits only on
+        # a 429's reason; that later `next` is not the 429's wait, so it does not lengthen it. Only a 429 of this read
+        # whose deadline is later takes its place.
         err, nxt = kept.get("error"), kept.get("next")
-        if isinstance(err, str) and err.startswith(RATE_LIMITED) and isinstance(nxt, (int, float)) and nxt > new["next"]:
+        limited = globals()["RATE_LIMITED"]  # dashboard_limit.py's, run in this namespace: globals() names it for a linter
+        mine = isinstance(new["error"], str) and new["error"].startswith(limited)
+        if isinstance(err, str) and err.startswith(limited) and isinstance(nxt, (int, float)) and nxt > now \
+                and (nxt > new["next"] or not mine):
             new.update(next=nxt, error=err)
         tmp = "%s.%d" % (cache, os.getpid())
         with open(tmp, "w") as f:

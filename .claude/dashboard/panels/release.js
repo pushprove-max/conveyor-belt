@@ -227,7 +227,12 @@
   // passed on main's head, which release-prep reuses with no test, else null).
   function stateOf(notes, run, v, m, green) {
     const cur = run && run.version === v ? run : null;
+    // going: a run is open (Stop shows, no other run starts). An open release-prep runs the suite once it names its commit
+    // or its machine (relsuite() in release-prep.sh): before that, it only drafts the notes. An open release (its fetch and
+    // checks, then the suite when none passed) counts as the suite's run.
     const going = !!(run && run.ended === null);
+    const suite = going && !(run.step === 'release-prep' && !(typeof run.sha === 'string' && run.sha)
+      && !(run.machine && typeof run.machine === 'object'));
     const passed = !!(cur && cur.ended !== null && typeof cur.sha === 'string' && cur.sha
       && (cur.state === 'passed' || cur.state === 'released' || (cur.state === 'refused' && cur.step === 'release' && !cur.failed)));
     const failed = failedOf(cur, green, m.head);
@@ -252,7 +257,8 @@
       && run.restarted == null ? String(run.version) : '';
     const stoppable = !!stopOf;
     let chip;
-    if (going) chip = ['Suite running', 'info'];
+    if (suite) chip = ['Suite running', 'info'];
+    else if (going) chip = ['Drafting notes', 'info'];
     else if (failed) chip = ['Suite failed', 'bad'];
     else if (notStarted) chip = ['Suite not started', 'bad'];
     else if (moved) chip = ['Main moved since the suite', 'warn'];
@@ -267,7 +273,7 @@
     // Release reuses a passed release-prep of v on main's head, main not moved since (release-run); else it runs the
     // suite first.
     const reuse = passed && !moved && cur.step === 'release-prep' && cur.state === 'passed';
-    return { cur, going, passed: passed && !moved, failed, notStarted, moved, released, reuse, waiting, stoppable, stopOf, notesClosed, chip };
+    return { cur, going, suite, passed: passed && !moved, failed, notStarted, moved, released, reuse, waiting, stoppable, stopOf, notesClosed, chip };
   }
 
   // One numbered step: its mark (done, failed, in progress or to do), its name and its one line, then what else.
@@ -469,17 +475,18 @@
     // 2. The whole suite on main's head.
     let s2;
     if (s.going) {
-      const line = h('span', null, `Running on ${short(run.sha) || 'main\'s head'} · `);
+      const line = h('span', null, s.suite ? `Running on ${short(run.sha) || 'main\'s head'} · ` : `release-prep of ${run.version} drafts the notes · `);
       if (typeof run.since === 'string') line.append(ctx.since(run.since, ' so far'));
       const stop = h('button', 'btn', 'Stop');
       stop.type = 'button'; stop.dataset.act = 'release-stop';
       stop.title = 'End this run\'s processes. Nothing else of Conveyor stops.';
-      const moved = run.moved === true ? h('p', 'warn-note', 'Main moved while the suite runs: a card landed, so the suite does not test the new main.') : null;
+      const moved = s.suite && run.moved === true ? h('p', 'warn-note', 'Main moved while the suite runs: a card landed, so the suite does not test the new main.') : null;
       const lines = machineLines(h, ctx, run, false);
       const stopBox = h('div', 'release-stop');
-      // A version typed that is not the running suite's: say which release Stop stops.
+      // A version typed that is not the open run's: say which release Stop stops, and what that run does.
       if (run.version !== v) {
-        const other = h('p', 'row-meta', `The suite of release ${run.version} runs. Stop stops it.`);
+        const other = h('p', 'row-meta', s.suite ? `The suite of release ${run.version} runs. Stop stops it.`
+          : `release-prep of ${run.version} drafts the notes. Stop stops it.`);
         other.dataset.figure = 'stop-other';
         stopBox.append(other);
       }
@@ -490,7 +497,7 @@
         sl.dataset.figure = 'stop-line';
         stopBox.append(sl);
       }
-      s2 = step(h, 'Full suite', 'now', line, ...lines, modeLine(h, run, true), ...rerunLines(h, ctx, run), moved, stopBox);
+      s2 = step(h, 'Full suite', s.suite ? 'now' : 'todo', line, ...lines, modeLine(h, run, true), ...rerunLines(h, ctx, run), moved, stopBox);
     } else if (s.notStarted) {
       // A run that did not start: its failed step's chip says why, with one fix line, and the two ways on.
       // On this machine (its worktree could not be made) the machine's chips are not shown, so the reason is listed, and
@@ -590,6 +597,7 @@
     const waits = !VERSION.test(v) ? 'needs a version such as 1.2.0'
       : releasedAlready(m, s, v) ? `v${v} is already released`
         : !notes ? `needs release notes docs/releases/${v}.md`
+          : s.going && !s.suite ? `release-prep of ${run.version} drafts the notes`
           : s.going ? `the suite is running${num(prog.done) && num(prog.of) && prog.of > 0 ? ` (${prog.done} of ${prog.of} files)` : ''}`
             : s.failed ? `the suite failed: ${bad} ${bad === 1 ? 'failure' : 'failures'}`
               : !s.passed && !green ? `needs the whole suite to succeed on main's head (${short(m.head)})` : '';

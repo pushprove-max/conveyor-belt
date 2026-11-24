@@ -236,10 +236,16 @@
     lines.forEach((t) => box.append(h('span', 'why-line', t)));
     return box;
   }
+  // The card's own seat o, or null when it has none or its model is not one the pack allows the seat (p: the project's
+  // seat): the engine passes over such a seat (percard, lib/control.sh), and the form marks it stale.
+  function ownSeat(o, p) {
+    const mine = o && typeof o.model === 'string' ? o : null;
+    return mine && !(p && Array.isArray(p.choices) && !p.choices.includes(mine.model)) ? mine : null;
+  }
   // The seat k a card runs on (seatList): o, the owner's own seat, or null; x, its model and effort, or null; by, who
   // chose it (SEATBY), or null for the project's. own: the card's own seats; run: the seats the rule set.
   function seatRun(k, here, own, run) {
-    const p = here ? projSeat(k) : null, o = own[k] && typeof own[k].model === 'string' ? own[k] : null;
+    const p = here ? projSeat(k) : null, o = ownSeat(own[k], p);
     // On a card of the project shown, the owner's seat is the control record's as it is now (own), not the pick's
     // record of it: a seat the owner cleared since runs on the project's.
     const q = !o && run[k] && typeof run[k].model === 'string' && SEATBY[run[k].by] && !(here && run[k].by === 'card') ? run[k] : null;
