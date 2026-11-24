@@ -1653,8 +1653,13 @@ slots=
 # and the run's timeout names the last of them.
 declare -A epid=() erc=() eout=() shown=()
 eend() {
-  # Each runs its runner under share_run, a child of its worker, which passes the TERM on to the runner.
-  trap "" TERM INT HUP; [ ${#epid[@]} = 0 ] || pkill -TERM -P "$(IFS=,; echo "${epid[*]}")" 2>/dev/null; wait
+  # Each runs its runner under share_run, a child of its worker, which passes the TERM on to the runner. Each worker is
+  # waited for by its pid, never with a bare `wait` (issue 1607): a TERM to the run's whole group (timeout's) ends a
+  # worker as it reaches the run, so the `wait "$p"` it cut short can have taken the worker's exit unrecorded, and bash
+  # then keeps a running job that is no child of the shell, which a bare `wait` asks for again and again, an error
+  # line each time, until the KILL.
+  trap "" TERM INT HUP; [ ${#epid[@]} = 0 ] || pkill -TERM -P "$(IFS=,; echo "${epid[*]}")" 2>/dev/null
+  for q in "${epid[@]}"; do wait "$q" 2>/dev/null; done
   for t in $(printf '%s\n' "${!epid[@]}" | LC_ALL=C sort); do
     [ -z "${shown[$t]:-}" ] || continue
     echo "== $t" >> "$log"; echo "== $t (cases: ${ecases[$t]})"; cat "${eout[$t]}"
