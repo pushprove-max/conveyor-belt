@@ -487,6 +487,10 @@ t_needsautoreask() {
   fx_in needsauto
   [ "$RC" = 0 ] && [ "$(jq -cs 'map(select(.id == "x-1")) | last | .answer' "$CONVEYOR_LEDGER")" = '"yes"' ] \
     || fail "x-1, asked again under the id the log lists, was not decided by the auto pass ($RC): $(cat "$CONVEYOR_LEDGER") $(cat "$T/$CASE/run.out")"
+  # Bug it catches: the pass that answered x-1 left its old "- x-1:" line under "Waiting for the owner", and the summary
+  # counted the answered decision as still waiting.
+  ! grep -q '^- x-1: ' "$AUTOLOG" && grep -q 'Waiting for the owner: 0\.' "$AUTOLOG" \
+    || fail "x-1, answered by the auto pass, still waits for the owner in the log: $(cat "$AUTOLOG")"
 }
 
 # Bug it catches (R280 fix): <log>.seen kept a held decision's id and asking time, and decision.sh stamps whole seconds,

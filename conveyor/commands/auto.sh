@@ -261,6 +261,10 @@ EOF
         "$log" > "$log.new" && mv "$log.new" "$log" || die "the log $log could not be written"; k=$((k + 1))
       s=$(jq -r --argjson c "$cnt" '"\(.id | gsub("[\r\n]+"; " ")) \($c[.id] // 0)"' <<<"$row") \
         && { grep -qxF -- "$s" "$log.seen" 2>/dev/null || printf '%s\n' "$s" >> "$log.seen"; } || die "the file $log.seen could not be written"; }
+    # unhold <id>: the decision's line taken out of "## Waiting for the owner" once this pass answered it: a decision held,
+    # then asked again under its id and answered here, no longer waits, and the summary counts that section's lines.
+    unhold() { P="- $1: " awk '/^## / { on = ($0 == "## Waiting for the owner") } on && index($0, ENVIRON["P"]) == 1 { next } { print }' \
+      "$log" > "$log.new" && mv "$log.new" "$log" || die "the log $log could not be written"; }
     while IFS= read -r row; do
       # Split on the unit separator, not on a tab: read joins tabs in a row, so an empty field would move the rest.
       IFS=$'\x1f' read -r id q def asked opts < <(jq -r 'def one: gsub("[\r\n\u001f]+"; " "); [.id, (.question | one), (.proposedDefault | one), .askedAt,
@@ -311,7 +315,7 @@ EOF
       fi
       put "$(printf '### %s %s: %s\n- **Question:** %s%s\n- **Picked:** %s\n- **Why:** %s.\n- **Reversible:** yes: the owner replaces the answer on the Board, or with `decision.sh answer %s <answer> --correct`.\n' \
         "$(date +%H:%M)" "$id" "${q:0:100}" "$q" "${opts:+ (options: $opts)}" "$def" "$why" "$id")"
-      if e=$(CONVEYOR_MAIN=$MAIN bash "$DECISION" answer "$id" "$def" --asked-at "$asked" 2>&1 >/dev/null); then d=$((d + 1)); [ -z "$bk" ] || seen+=$'\n'$bk
+      if e=$(CONVEYOR_MAIN=$MAIN bash "$DECISION" answer "$id" "$def" --asked-at "$asked" 2>&1 >/dev/null); then d=$((d + 1)); unhold "$id"; [ -z "$bk" ] || seen+=$'\n'$bk
       else put "- **Recorded:** no, so it still waits for the owner: ${e//$'\n'/ }"; hold "$id" "$q" "the answer could not be recorded"; fi
     done < <(jq -c '.[]' <<<"$open")
     # The summary, made again from the log: its decisions and the lines waiting for the owner.
