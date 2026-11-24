@@ -36,6 +36,15 @@ _strip_keep_span() { # uses strip_quoted's MARK, SPAN and OUT
 # strip_quoted <command> <mark> ends also prints, on stderr, each here-document
 # operator whose end word is not one plain word, bare, in one pair of quotes or
 # after one backslash (bash-guardrails.sh refuses those for every hook).
+#
+# strip_quoted <command> <mark> <ends> <names> prints, instead, the command as
+# written less the body and end line of each here-document that is only data:
+# its end word is quoted (bash expands nothing in it), it is outside every
+# bracket and substitution, and the command it is given to starts with a name
+# the extended regex <names> matches. The caller checks what else on the line
+# could run that text (a pipe to a shell, a script it writes and runs). A
+# here-document with no end word line (the last line may end the text) is not
+# one bash and this reader agree on, so then the command is printed whole.
 _STRIP_PLAIN_W='[A-Za-z0-9_][A-Za-z0-9_.-]*'
 _STRIP_PLAIN_END="^<<-?[[:blank:]]*('$_STRIP_PLAIN_W'|\"$_STRIP_PLAIN_W\"|\\\\?$_STRIP_PLAIN_W)([[:space:];|&<>()]|\$)"
 _strip_arith_end() { # <index of the first `(` of a `((`>: sets strip_quoted's AEND when the pair is closed by `))`
@@ -46,9 +55,10 @@ _strip_arith_end() { # <index of the first `(` of a `((`>: sets strip_quoted's A
 }
 strip_quoted() {
   local TEXT=$1 MARK=${2-} SPAN="" OUT="" MODE=code CHAR NEXT PREV="" I DEPTH=0 TAG="" DASH="" LINE="" AEND=0 K
+  local NAMES=${4-} RAW="" WAS S KEEP=""
   local -a STACK=()
   for ((I=0; I<${#TEXT}; I++)); do
-    CHAR=${TEXT:I:1}; NEXT=${TEXT:I+1:1}
+    CHAR=${TEXT:I:1}; NEXT=${TEXT:I+1:1}; WAS=$MODE; S=$I
     case "$MODE" in
       sq) if [ "$CHAR" = "'" ]; then MODE=code; _strip_keep_span; else SPAN+=$CHAR; fi ;;
       dq)
@@ -85,7 +95,7 @@ strip_quoted() {
           '<') if [ "$NEXT" = '<' ] && [ "${TEXT:I+2:1}" = '<' ]; then OUT+='<<<'; I=$((I+2))
                elif [ "$NEXT" = '<' ] && [ "$I" -lt "$AEND" ]; then OUT+='<<'; I=$((I+1))
                elif [ "$NEXT" = '<' ]; then
-                 local J=$((I+2)) T=${TEXT:I:26} D=""
+                 local J=$((I+2)) T=${TEXT:I:26} D="" Q=""
                  [ -z "${3-}" ] || [[ ${TEXT:I:80} =~ $_STRIP_PLAIN_END ]] || printf '%s\n' "${T%%$'\n'*}" >&2
                  T=""
                  [ "${TEXT:J:1}" = '-' ] && { J=$((J+1)); D=1; }
@@ -93,10 +103,13 @@ strip_quoted() {
                  # An end word is plain here: bash-guardrails.sh refuses every other one.
                  while :; do
                    local C=${TEXT:J:1}
-                   case "$C" in ''|' '|$'\t'|$'\n'|';'|'&'|'|'|'('|')'|'<'|'>') break ;; "'"|'"'|'\') ;; *) T+=$C ;; esac
+                   case "$C" in ''|' '|$'\t'|$'\n'|';'|'&'|'|'|'('|')'|'<'|'>') break ;; "'"|'"'|'\') Q=1 ;; *) T+=$C ;; esac
                    J=$((J+1))
                  done
                  [ -n "$T" ] && { TAG=$T; DASH=$D; }
+                 local SEGT=${OUT##*[;&|()$'\n']}
+                 [ -n "$T" ] && [ -n "$Q" ] && [ "$DEPTH" = 0 ] && [ "${#STACK[@]}" = 0 ] && [ -n "$NAMES" ] \
+                   && [[ $SEGT =~ ^[[:space:]]*($NAMES)([[:space:]]|$) ]] || KEEP=1
                  OUT+='<<'; I=$((I+1))
                else OUT+=$CHAR; fi ;;
           $'\n') OUT+=$CHAR; if [ -n "$TAG" ]; then MODE=heredoc; LINE=""; fi ;;
@@ -108,6 +121,14 @@ strip_quoted() {
         esac ;;
     esac
     PREV=$CHAR
+    # A body and its end line are left out of RAW unless a here-document begun on its line is more than data.
+    if [ -z "$NAMES" ]; then :
+    elif [ "$WAS" != heredoc ] || [ -n "$KEEP" ]; then RAW+=${TEXT:S:I-S+1}
+    elif [ "$MODE" = code ]; then RAW+=$'\n'; fi
+    [ "$WAS" != heredoc ] || [ "$MODE" != code ] || KEEP=""
   done
-  printf '%s' "$OUT"
+  if [ -z "$NAMES" ]; then printf '%s' "$OUT"
+  elif [ "$MODE" = heredoc ] && [ "$LINE" != "$TAG" ] && ! { [ -n "$DASH" ] && [ "${LINE#"${LINE%%[!	]*}"}" = "$TAG" ]; }; then
+    printf '%s' "$TEXT"
+  else printf '%s' "$RAW"; fi
 }

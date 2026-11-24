@@ -97,9 +97,11 @@ cmd_approved() {
 # span stays the word it is, a span of several words becomes $QUOTED.
 # Commands that only carry text; none runs a quoted word given to it.
 SENDERS='gh|git[[:space:]]+(commit|tag|notes|status|log|diff|show|add)|echo|printf|cat|rg|grep|(bash[[:space:]]+)?[^[:space:]]*decision\.sh'
+# Commands that may stand beside a note (ran, below): none runs a file or reads its input as commands.
+NOTE_OK='mkdir|cd|ls|wc|head|tail|exit|true'
 . "${BASH_SOURCE[0]%/*}/lib/strip-quoted.sh" 2>/dev/null || true
 ran() {
-  local M=$'\x01' CODE SEG
+  local M=$'\x01' CODE SEG NOTES=""
   # Whether anything can run a word is asked of the reader's own output, never
   # of the raw text: it alone knows which `<<` opens a here-document, so one
   # named in a comment or a quoted string hides no line after it. What
@@ -107,32 +109,42 @@ ran() {
   # as a mark after its `<<`; a here-document with any other end word expands
   # its body, which the reader drops, so the whole command is read instead.
   # An end word is plain here: bash-guardrails.sh refuses every other one.
-  if declare -F strip_quoted >/dev/null && CODE=$(strip_quoted "$1" "$M") && [[ $CODE != *'`'* && $CODE != *'$('* ]] \
-    && ! grep -qE "<<-?[[:space:]]*[^[:space:]$M<-]" <<<"${CODE//<<</ }"; then
+  # A line whose other commands are each one of NOTE_OK, which run no file and
+  # read no text as commands, is read whole less the body of each here-document
+  # with a quoted end word given straight to a sender (a note written to a
+  # file), so its prose is not read as an install. Any other command (a shell,
+  # an install, a script the line writes and then runs) makes the line read
+  # whole, the notes too.
+  declare -F strip_quoted >/dev/null && CODE=$(strip_quoted "$1" "$M") || { whole "$1"; return; }
+  if [[ $CODE != *'`'* && $CODE != *'$('* ]] && ! grep -qE "<<-?[[:space:]]*[^[:space:]$M<-]" <<<"${CODE//<<</ }"; then
     CODE=$(sed -E "s/$M([^[:space:]$M])/\1/g; s/$M/ \$QUOTED /g" <<<"$CODE")
     while IFS= read -r SEG; do
-      [[ $SEG =~ ^[[:space:]]*$ || $SEG =~ ^[[:space:]]*($SENDERS)([[:space:]]|$) ]] || { whole "$1"; return; }
+      [[ $SEG =~ ^[[:space:]]*$ || $SEG =~ ^[[:space:]]*($SENDERS)([[:space:]]|$) ]] && continue
+      [[ $SEG =~ ^[[:space:]]*($NOTE_OK)([[:space:]]|$) ]] || { whole "$1"; return; }
+      NOTES=1
     done < <(sed -E 's/[0-9]*[<>]&[0-9-]*//g; s/&&|\|\||[;|&()]/\n/g' <<<"$CODE")
-    printf '%s' "$CODE"
-  else
-    whole "$1"
+    [ -n "$NOTES" ] || { printf '%s' "$CODE"; return; }
+    whole "$(strip_quoted "$1" "$M" "" "$SENDERS")"; return
   fi
+  whole "$1"
 }
 # The whole line as code: a quote mark is a word break, so `bash -c 'npm ci'`
 # reads as npm ci. A quoted folder with a space becomes $QUOTED, which blocks
 # as a folder the guard cannot read, instead of its first word.
 whole() {
-  printf '%s' "$1" | sed -E "s/(cd|pushd|--prefix|-C)([[:space:]=]+)\\\\?(\"[^\"']*[[:space:]][^\"']*\"|'[^\"']*[[:space:]][^\"']*')/\1\2\$QUOTED /g" \
+  printf '%s' "$1" | sed -z 's/\\\n/ /g' | sed -E "s/(cd|pushd|--prefix|-C)([[:space:]=]+)\\\\?(\"[^\"']*[[:space:]][^\"']*\"|'[^\"']*[[:space:]][^\"']*')/\1\2\$QUOTED /g" \
     | tr "\"'\`" '   ' | sed 's/<<</ /g'
 }
 
 if [ "$TOOL" = "Bash" ]; then
   CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
   [ -z "$CMD" ] && exit 0
-  # Normalize backslash-newline continuations so a split command matches the
-  # same as its single-line form.
-  CMD=$(printf '%s' "$CMD" | sed -z 's/\\\n/ /g')
+  # ran reads the text as written (in a quoted here-document a line ending in
+  # `\` is body, and joining it to the next line hid the end word and the
+  # install after it), and joins backslash-newline continuations in what it
+  # prints, so a split command matches the same as its single-line form.
   RAN=$(ran "$CMD")
+  CMD=$(printf '%s' "$CMD" | sed -z 's/\\\n/ /g')
   # npm ci replaces node_modules. In a worker worktree that is a symlink to the
   # main checkout's shared copy, and npm ci there wiped it for every worktree.
   # Checked before the approval shortcut: no approval covers it. The guard does
@@ -205,6 +217,7 @@ if [ "$TOOL" = "Bash" ]; then
     case "$CMD" in
       *';'*|*'&'*|*'|'*)
         CMD=$(printf '%s' "$CMD" | sed -E 's/^[[:space:]]*CONVEYOR_DEP_APPROVED=1[[:space:]][^;&|]*//')
+        RAN=$(ran "$CMD")
         ;;
       *) exit 0 ;;
     esac
@@ -216,7 +229,7 @@ if [ "$TOOL" = "Bash" ]; then
   #        `i` is excluded from LOOSE -- too short to survive arbitrary tokens.
   # A redirection is not a package, and neither is what follows a separator:
   # the package position stops at `;`, `&`, `|` and `)`.
-  CMD=$(ran "$CMD")
+  CMD=$RAN
   CMD=$(sed -E 's/[[:space:]]*[0-9]*(>>?|<)&?[[:space:]]*[^;&|<>[:space:]]+//g' <<<"$CMD")
   # npm's flags that take a value: dropped with the value, so `npm install
   # --prefix web` is a bare install and `npm --prefix web i lodash` is not

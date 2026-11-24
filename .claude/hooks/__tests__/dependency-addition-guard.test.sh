@@ -467,6 +467,29 @@ for C in "$(printf "cat <<'EOF'\nnote\nEOF\n%s lodash" "$INSTALL")" "$(printf "c
   "$(printf "echo hi; cat <<'EOF'\nnote\nEOF\necho done && %s lodash" "$INSTALL")"; do
   check "an install after a note still blocks: $C" 2 "$(run "$(bash_p "$C")")"
 done
+# Bug #1643: on a line with a command that is no sender, the whole text was read, a quoted note's prose too, so
+# "pip install into the virtualenv" was refused as an install of "into". Such a note given to a sender is data
+# when every other command on the line runs no file (NOTE_OK), also with `||` or a pipe between them.
+for C in "$(printf "mkdir -p /tmp/d && cat > /tmp/d/x.md <<'EOF'\nsetup's pip install into the virtualenv\nEOF")" \
+  "$(printf "cd /tmp; cat > /tmp/x.md <<'EOF'\nthen %s lodash and npm ci\nEOF\nwc -l /tmp/x.md" "$INSTALL")" \
+  "$(printf "mkdir -p /tmp/d && cat > /tmp/d/x.md <<'EOF' || exit\nsetup's pip install into the virtualenv\nEOF")" \
+  "$(printf "mkdir -p /tmp/d && cat > /tmp/d/x.md <<'EOF'\nsetup's pip install into the virtualenv\nEOF\nwc -l /tmp/d/x.md | head")"; do
+  check "a quoted note given to a sender on a line with other commands passes: $C" 0 "$(run "$(bash_p "$C" "$WTX")")"
+done
+# The note is all that is left out: an install after it, a note a shell runs, or one fed on to a shell still blocks.
+# The notes here name no install, so only the install after the note, or the note a shell runs, can block.
+# A body line ending in `\` before the end word: joined to the next line it hid the end word and the install after it.
+# A note with no end line is read whole. A note written to a script that the same call runs is read whole.
+for C in "$(printf "mkdir -p /tmp/d && cat > /tmp/d/x.md <<'EOF'\na note\nEOF\npip install requests")" \
+  "$(printf "mkdir -p /tmp/d && cat > /tmp/d/x.md <<'EOF'\na note \\\\\nEOF\npip install requests")" \
+  "$(printf "mkdir -p /tmp/d && cat > /tmp/d/x.md <<'EOF'\npip install requests")" \
+  "$(printf "cat > /tmp/setup.sh <<'EOF'\npip install requests\nEOF\nbash /tmp/setup.sh")" \
+  "$(printf "mkdir /tmp/d; cat > /tmp/x.md <<'EOF'\nnote\nEOF\n%s lodash" "$INSTALL")" "$(printf "mkdir /tmp/d; bash <<'EOF'\n%s lodash\nEOF" "$INSTALL")" \
+  "$(printf "mkdir /tmp/d; cat <<'EOF' | bash\n%s lodash\nEOF" "$INSTALL")" "$(printf "{\ncat <<'EOF'\n%s lodash\nEOF\n} | bash" "$INSTALL")" \
+  "$(printf "mkdir /tmp/d; cat <<'EOF' > >(bash)\n%s lodash\nEOF" "$INSTALL")" "$(printf "mkdir /tmp/d; bash -c \"\$(cat <<'EOF'\n%s lodash\nEOF\n)\"" "$INSTALL")" \
+  "$(printf "mkdir /tmp/d; cat <<'EOF'; bash <<'E2'\nnote\nEOF\n%s lodash\nE2" "$INSTALL")" "$(printf "mkdir /tmp/d; cat <<EOF\n%s lodash\nEOF" "$INSTALL")"; do
+  check "an install beside a quoted note on a line with other commands still blocks: $C" 2 "$(run "$(bash_p "$C")")"
+done
 # An end word that is not plain never reaches this guard: bash-guardrails.sh
 # refuses the command, so this guard reads no odd end word. Every form review
 # found that hid an install after the note:
