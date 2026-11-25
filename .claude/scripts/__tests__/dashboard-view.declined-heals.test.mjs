@@ -39,6 +39,12 @@ test('Declined: with self-heals, docs and dropped entries, the panel draws its d
   assert.deepEqual(all('.sh-entries .sh-row').map((r) => r.dataset.key), ['sample:h00000000000a'], 'the entries');
   assert.match(tab.querySelector('.sh-docs').textContent, /omits the tab/, 'the Docs list');
   assert.match(tab.querySelector('.sh-sorted').textContent, /^The sort of the queued follow-ups ran .+ ago, and moved 2 of 3 to the lists\.$/, 'the sort line');
+  // The dropped entry h0000000000dd is still drawn on the tab: Dropped entries counts it and opens it, expired.
+  const drop = tab.querySelector('.sh-dropped-link');
+  assert.equal(drop && drop.textContent, 'Dropped entries (1) ›', 'the Dropped entries button');
+  drop.click();
+  assert.deepEqual(all('.sh-dropped li').map((li) => [li.querySelector('.sh-row-title').textContent, li.querySelector('.sh-gone-why').textContent]),
+    [['an old wait', 'expired']], 'the dropped entry h0000000000dd, opened from Dropped entries');
   data.panels.declined.data.lines = [];
   data.panels.declined.data.rest = [];
   next(w, data);
