@@ -26,7 +26,9 @@
 # its Done-when items, and the card ends with a closed line whose followups are the slices (so a run limited by --only
 # to the issue takes its slices too, ups() in DEPS); the issue stays open. umbrellas() closes it once each of its sub-issues
 # is closed or landed, push on or off (or, when they could not be attached, once each slice has a card that landed or closed it as done). A slice that cannot be filed withdraws the
-# ones filed before it, and the issue is built whole.
+# ones filed before it, and the issue is built whole. So is an issue with a slice open that an earlier card of it filed
+# for its grown change (growopen()), or whose open follow-ups cannot be read: nothing is filed, as a slice of this
+# split could build that slice's work a second time.
 SPLIT_TIMEOUT=300 SPLIT_FILE=6000 SPLIT_FILES=10
 # The issue (its input, as gh issue view gives it) as the split check measures it. $area is the pack's area prefix.
 # The Done when section is a heading or a line "Done when" (in bold or with a colon too) up to the next heading; its
@@ -137,11 +139,20 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
   fi
   split=$(jq -c --arg m "$rule" --arg h "$h" --argjson s "$size" '{mode: $m, hash: $h, size: ($s | .doneWhen |= length | .files |= length)} + .' <<<"$v") || return 0
   # On, a split is filed; one that cannot be filed is recorded as a split not filed, and the issue is built whole.
+  # Not while a slice that an earlier card filed for its grown change is open (growopen()): the edited issue may hold
+  # that slice's work, and a slice of this split would build it a second time. Bug: a split before the build filed a
+  # second copy of an open grown slice.
   if [ "$rule" = on ] && [ "$(jq -r .verdict <<<"$split")" = split ]; then
-    began "$1" "$2" file # stop (halt(), lib/run.sh) leaves the card to finish from here: its slices are being filed
-    sf=splitfile; [ "$(jq -r '.rules.splitissues' <<<"$c" 2>/dev/null)" != false ] || sf=splitcards # Cards with no GitHub issue: Split parts On
-    if nums=$($sf "$1" "$issue" "$(jq -c .slices <<<"$split")" 1); then split=$(jq -c --argjson f "$nums" '. + $f' <<<"$split")
-    else split=$(jq -c --arg r "$nums" '.why += "; the slices could not be filed, so the issue is built whole: \($r)"' <<<"$split"); fi
+    if ! x=$(growopen "$2"); then
+      split=$(jq -c --arg n "$2" '.why += "; the open follow-ups of #\($n) could not be read, so no slice is filed and the issue is built whole"' <<<"$split")
+    elif [ "$x" != '[]' ]; then
+      split=$(jq -c --argjson o "$x" '.why += "; \($o | map("#\(.n)") | join(", ")), slices that earlier cards filed for its grown changes, are still open, so no slice is filed and the issue is built whole"' <<<"$split")
+    else
+      began "$1" "$2" file # stop (halt(), lib/run.sh) leaves the card to finish from here: its slices are being filed
+      sf=splitfile; [ "$(jq -r '.rules.splitissues' <<<"$c" 2>/dev/null)" != false ] || sf=splitcards # Cards with no GitHub issue: Split parts On
+      if nums=$($sf "$1" "$issue" "$(jq -c .slices <<<"$split")" 1); then split=$(jq -c --argjson f "$nums" '. + $f' <<<"$split")
+      else split=$(jq -c --arg r "$nums" '.why += "; the slices could not be filed, so the issue is built whole: \($r)"' <<<"$split"); fi
+    fi
   fi
   record "$1" "$2" split "$(jq -r 'if .verdict == "split" then "split" else "kept" end' <<<"$split")" \
     "$(jq -c --arg m "$model" '{split: .} + (if $m != "" and .verdict != "under" then {model: $m} else {} end)' <<<"$split")"
@@ -365,16 +376,23 @@ growcheck() { # <card> <issue> <worktree> <issue json> <the sessions' prompt>: 0
 # lost; left open, the files it shares would be built twice), prints why and fails: the card then files nothing.
 growprior() { # <issue> <slices json> <files json>
   local l x
-  l=$(openissues number,body --label "$FOLLOWUP") && l=$(jq -c --argjson n "$1" --argjson new "$2" '($new | map(.files[])) as $t
-      | [.[] | select((.body // "" | startswith("Follow-up of #\($n): slice ")) and (.body | contains("moved this part out of its change for #\($n), which grew past")))
-         | (.body | split("\n") | map(rtrimstr("\r"))) as $b | ($b | index("## The files of that change this slice builds again")) as $i
-         | {n: .number, files: (if $i == null then [] else $b[$i + 1:] | (first(range(length) as $j | select(.[$j] | startswith("- ") | not) | $j) // length) as $e | .[:$e] | map(.[2:]) end)}
-         | select(any(.files[]; IN($t[])))]' <<<"$l" 2>/dev/null) && [ -n "$l" ] \
+  l=$(growopen "$1") && l=$(jq -c --argjson new "$2" '($new | map(.files[])) as $t | map(select(any(.files[]; IN($t[]))))' <<<"$l" 2>/dev/null) && [ -n "$l" ] \
     || { echo "the open follow-ups of #$1 could not be read, so the slices that earlier cards filed for it are not known"; return 1; }
   x=$(jq -r --argjson n "$1" --argjson all "$3" 'map(select(.files - $all != []))[0] // empty
     | "#\(.n), a slice that an earlier card filed for #\($n), also takes \(.files - $all | join(", ")), which this change does not have"' <<<"$l")
   [ -z "$x" ] || { echo "$x"; return 1; }
   jq -c 'map(.n)' <<<"$l"
+}
+# The slices that cards of <issue> filed for their grown changes and that are still open, read from GitHub (the open
+# follow-ups whose body is that of a grown slice of <issue>, splitfile()): a JSON list of {n, files}, each with the
+# files its body lists now. Fails when the follow-ups cannot be read.
+growopen() { # <issue>
+  local l
+  l=$(openissues number,body --label "$FOLLOWUP") && l=$(jq -c --argjson n "$1" '[.[]
+      | select((.body // "" | startswith("Follow-up of #\($n): slice ")) and (.body | contains("moved this part out of its change for #\($n), which grew past")))
+      | (.body | split("\n") | map(rtrimstr("\r"))) as $b | ($b | index("## The files of that change this slice builds again")) as $i
+      | {n: .number, files: (if $i == null then [] else $b[$i + 1:] | (first(range(length) as $j | select(.[$j] | startswith("- ") | not) | $j) // length) as $e | .[:$e] | map(.[2:]) end)}]' <<<"$l" 2>/dev/null) \
+    && [ -n "$l" ] && printf '%s\n' "$l"
 }
 # The earlier slices <prior> (growprior()) of <issue> closed, before card <card> files the slices of its grown change
 # in their place. Each file of <prior> is in the card's change (growprior()), and the change drops none of them before

@@ -382,7 +382,10 @@ records the verdict, the slices and the reason.
   issue becomes their umbrella: Conveyor holds it and does not build it. The slices become its GitHub sub-issues, and
   Conveyor adds a comment that names the slice for each Done-when item. Held on the Board names its slices. Conveyor
   closes the issue when each of its slices is closed or landed ([Issues](commands.md#issues)). An issue split before its slices
-  were sub-issues closes when the last slice lands, or closes because main already does what it asks.
+  were sub-issues closes when the last slice lands, or closes because main already does what it asks. Conveyor files
+  no slice, and builds the issue whole, when a slice that an earlier card filed for the issue's grown change is still
+  open ([A change that grows while it is built](#a-change-that-grows-while-it-is-built)), or when it cannot read the
+  open follow-ups of the issue. The `split` line tells why.
 
 The Health panel shows the cards that Conveyor checked while the rule was Shadow or On: how many it kept and how many
 would split, and the first-review GO rate and the fix rounds of each group.

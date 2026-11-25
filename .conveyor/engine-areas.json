@@ -698,6 +698,7 @@
 {"area": "snapshot", "test": "replay.test.sh"}
 {"area": "slices", "test": "slices.test.sh"}
 {"area": "slices", "test": "slicewithdraw.test.sh"}
+{"area": "slices", "test": "slicesopen.test.sh"}
 {"area": "slices", "test": "parts.test.sh"}
 {"area": "slices", "test": "testcards.test.sh"}
 {"area": "cmd-parts", "file": "conveyor/commands/parts.sh"}
