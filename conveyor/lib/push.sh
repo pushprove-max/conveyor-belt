@@ -752,8 +752,10 @@ pushheld() { # <why, or "" when no push is held>
   [ -z "$1" ] || s=${owed##* }
   if [ -n "$s" ] && [ "$s" = "${heldsha:-}" ]; then heldn=$((${heldn:-0} + 1)); elif [ -n "$s" ]; then heldn=1; else heldn=0; fi
   heldsha=$s
-  jq -cn --argjson p "$$" --arg s "$s" --arg h "$1" --argjson n "$heldn" \
-    '{pid: $p, at: (now | todate), sha: (if $s == "" then null else $s end), held: (if $h == "" then null else $h end), turns: $n}' \
+  # No push held (most turns): the line has no text to quote, and the shell writes it with no jq.
+  { if [ -z "$1" ]; then printf '{"pid":%d,"at":"%s","sha":null,"held":null,"turns":0}\n' "$$" "$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' -1)"
+    else jq -cn --argjson p "$$" --arg s "$s" --arg h "$1" --argjson n "$heldn" \
+      '{pid: $p, at: (now | todate), sha: (if $s == "" then null else $s end), held: $h, turns: $n}'; fi; } \
     > "$PUSHWAIT.new" 2>/dev/null && mv -f "$PUSHWAIT.new" "$PUSHWAIT" 2>/dev/null || rm -f "$PUSHWAIT.new"
 }
 # A turn's check that the push job (pusher) has ended: then no push runs. push() clears its record ($PUSHING) as it

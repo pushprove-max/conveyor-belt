@@ -34,12 +34,14 @@ pickbranch() { # <branch> <issue> <title> <main's commit> [<slice: its card id>]
 # Of the landed commits on stdin (one a line; a line that is no whole commit id is left out), those that main
 # (<main's commit>) does not hold: those git does not have, and those one rev-list finds off main (it prints whole ids,
 # as a landed line holds). umbrellas() (lib/slices.sh) and the snapshot's slice cards (lib/snapshot.sh) count a card
-# landed only while main holds its commit.
+# landed only while main holds its commit. The ids are read and set apart in the shell: with none, no program starts.
 offmain() { # <main's commit>
-  local ids miss off
-  ids=$({ grep -xE '[0-9a-f]{40}|[0-9a-f]{64}' || :; } | sort -u)
-  miss=$([ -z "$ids" ] || git cat-file --batch-check='%(objectname) %(objecttype)' <<<"$ids" | awk '$NF != "commit" {print $1}') || return 1
-  off=$({ grep -vxF -f <(printf '%s\n' "$miss") <<<"$ids" || :; } | git rev-list --stdin "^$1") || return 1
+  local l miss off; local -A ids=()
+  while IFS= read -r l || [ -n "$l" ]; do [[ ! $l =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || ids[$l]=1; done
+  [ ${#ids[@]} != 0 ] || return 0
+  miss=$(printf '%s\n' "${!ids[@]}" | git cat-file --batch-check='%(objectname) %(objecttype)' | awk '$NF != "commit" {print $1}') || return 1
+  for l in $miss; do unset "ids[$l]"; done
+  off=$([ ${#ids[@]} = 0 ] || printf '%s\n' "${!ids[@]}" | git rev-list --stdin "^$1") || return 1
   printf '%s\n%s' "$miss" "$off"
 }
 # Under the lock and the record's lock (TACARDS.lock), from pickbranch(): the entry of a split's slice (the one whose id, card or one of whose was is <slice>,

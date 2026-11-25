@@ -685,8 +685,8 @@ branchon() {
     END { done(); hdr(); exit bad }' "$3/onmain.br" "$3/onmain.mn"
 }
 # The Tests page parts of the snapshot (tests: testspart(); testMap: mapboard()) and the test owners they read
-# (testowners()) are kept in SNAPPARTS, a file each: the sum of the key it was made under on its first line, the part
-# after it. A build whose key of a part is the same takes the kept part and computes nothing; another key, or a kept
+# (testowners()) are kept in SNAPPARTS, a file each: the length of the key it was made under on its first line, then
+# that key's text, then the part (the shell compares the key: no program sums it). A build whose key of a part is the same takes the kept part and computes nothing; another key, or a kept
 # file that is missing or cannot be read, computes the part as before and keeps it. Each part read every input again on
 # every build, 7 to 16 seconds of it, though /units reads only testMap of them.
 # What must stay true: a part is never kept under a key newer than what it read. snapkeys() reads every key before the
@@ -707,8 +707,8 @@ SNAPPARTS=${STATE%/*}/snapparts
 # SK_TESTS, for testspart(): <since>, and TZ with /etc/localtime (its 7 days are local days); the test history's start
 #   (the control record's testsFrom, of the build's copy, control: its other fields are not read); the sum of the
 #   retried lines and the card records as the part reads them (testlines(): the test, picked, landed, bugproof, review,
-#   blocked and closed lines, and of each only the fields TESTLINE keeps), so a line the part does not read (a card's
-#   start, its sessions) leaves the key as it was; the flaky entries inside FLAKY_DAYS of now (flakyAgain counts them
+#   blocked and closed lines, and of each only the fields TESTLINE keeps; read once, kept in SK_LINES, which testspart()
+#   then reads in their place), so a line the part does not read (a card's start, its sessions) leaves the key as it was; the flaky entries inside FLAKY_DAYS of now (flakyAgain counts them
 #   from the clock, so an entry that ages out changes the part with no file written); and the files FLAKY, slow.json,
 #   SUITERUNS, TESTRULES, TESTRULESLOG, TAFILED, TACARDS, the test actions' records ($TESTACTS/*.json) and the mutation
 #   checks' ($MUTS/*.json, $MUTS/asked). $TESTACTS/neverloads is not keyed: it holds parse results by each file's
@@ -720,32 +720,41 @@ SNAPPARTS=${STATE%/*}/snapparts
 #   that file (mapread() reads it in main's checkout, tracked or not). Empty, so the part is not kept, when the pack
 #   cannot be read, or while the progress or the build record names a pid: whether that process still runs changes the
 #   part with no file written.
+# Main's diff, its tracked files, the pack's two objects and the engine's files and schema go into one sum, each after a
+# NUL (the diff holds none, a path is never empty), so a key is a few lines; the files of the three keys are read by one
+# find, "/" between the keys' lists.
 snapkeys() { # <since>
-  local m n l tm ex=()
+  local m n l tm tv='' tsv='' from='' p i=0 st=('' '' '') ex=() mf=()
   case $PACK in "$MAIN"/*) ex=(":(exclude,literal)${PACK#"$MAIN"/}") ;; esac
+  packget test tv tests tsv 2>/dev/null || tv='' tsv=''
+  # A pack that cannot be read: no key of the map (a newline is no value packget gives).
+  packget test.map tm 2>/dev/null || tm=$'\n'
+  case $tm in '' | off | $'\n') ;; *) mf=("$MAIN/$tm") ;; esac
+  while IFS= read -r l; do if [ "$l" = "${l% /}" ]; then st[i]+=$l$'\n'; else i=$((i + 1)); fi; done < <(snapfiles "$SCHEMA" "$HERE"/conveyor.sh "$HERE"/lib/*.sh "$HERE"/jq/* / \
+    /etc/localtime "$FLAKY" "${STATE%/*}/slow.json" "$SUITERUNS" "$TESTRULES" "$TESTRULESLOG" "$TAFILED" "$TACARDS" "$TESTACTS"/*.json "$MUTS"/*.json "$MUTS/asked" / \
+    "$(mappath)" "$(mapprogpath)" "$(mapbuildpath)" "${STATE%/*}/suiteruns.jsonl" "${mf[@]}")
   m=$(printf 'head %s\n' "$(git -C "$MAIN" rev-parse -q --verify HEAD 2>/dev/null)"
-    printf 'diff %s\n' "$(git -C "$MAIN" diff --no-ext-diff --no-textconv --binary HEAD -- "${ex[@]}" 2>/dev/null | git hash-object --stdin)"
-    printf 'tracked %s\n' "$(git -C "$MAIN" ls-files -z 2>/dev/null | git hash-object --stdin)"
-    printf 'pack %s\n' "$({ packok && jq -cS '{test, tests}' <<<"$PACK_T"; } 2>/dev/null | git hash-object --stdin)"
-    snapfiles "$SCHEMA" "$HERE"/conveyor.sh "$HERE"/lib/*.sh "$HERE"/jq/*
+    printf 'main %s\n' "$({ git -C "$MAIN" diff --no-ext-diff --no-textconv --binary HEAD -- "${ex[@]}" 2>/dev/null; printf '\0tracked\0'
+      git -C "$MAIN" ls-files -z 2>/dev/null; printf '\0pack\0%s\0%s\0engine\0%s' "$tv" "$tsv" "${st[0]}"; } | git hash-object --stdin)"
     command -v node python3)
   SK_OWNERS=$m
-  n=$(jq -r --argjson d "$FLAKY_DAYS" '(($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $t
-    | [.entries | arrays | .[] | objects | select(((.time | fromdate?) // 0) > $t - $d * 86400)] | length' "$FLAKY" 2>/dev/null) || n=none
-  l=$(testlines | cksum)
-  SK_TESTS=$m$'\n'$(printf 'since %s\ntz %s\nfrom %s\nlines %s\nflaky %s\n' "$1" "${TZ-unset}" \
-      "$(jq -r '(objects | .testsFrom) // ""' <<<"$control" 2>/dev/null)" "$l" "$n"
-    snapfiles /etc/localtime "$FLAKY" "${STATE%/*}/slow.json" "$SUITERUNS" "$TESTRULES" "$TESTRULESLOG" "$TAFILED" "$TACARDS" \
-      "$TESTACTS"/*.json "$MUTS"/*.json "$MUTS/asked")
+  { IFS= read -r from; IFS= read -r n; } < <(jq -rn --argjson c "${control:-null}" --argjson d "$FLAKY_DAYS" '(($c | objects | .testsFrom) // "" | tostring),
+    (try (input | (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $t
+      | [.entries | arrays | .[] | objects | select(((.time | fromdate?) // 0) > $t - $d * 86400)] | length) catch "none")' "$FLAKY" 2>/dev/null)
+  [ -n "$n" ] || n=none
+  # The lines, read once: testspart() takes them from SK_LINES (testlines()), so it reads what its key names.
+  unset SK_LINES; SK_LINES=$(testlines) || unset SK_LINES
+  l=$(cksum <<<"${SK_LINES-}")
+  SK_TESTS=$m$'\n'$(printf 'since %s\ntz %s\nfrom %s\nlines %s\nflaky %s\n%s' "$1" "${TZ-unset}" "$from" "$l" "$n" "${st[1]}")
   SK_MAP=''
-  packget test.map tm 2>/dev/null || return 0
-  grep -qsF '"pid"' -- "$(mapprogpath)" "$(mapbuildpath)" && return 0
+  [ "$tm" != $'\n' ] || return 0
+  for p in "$(mapprogpath)" "$(mapbuildpath)"; do [ ! -r "$p" ] || [[ $(<"$p") != *'"pid"'* ]] || return 0; done 2>/dev/null
   case $tm in
     off) l='' ;;
     '') l=$(maplang "$MAIN"); l="lang $l"$'\n'"tool $(maptool "$l" "$MAIN"; echo " $?")" ;;
-    *) l=$(snapfiles "$MAIN/$tm") ;;
+    *) l='' ;; # its file is in the find's third list
   esac
-  SK_MAP=$m$'\n'"map $tm"$'\n'$l$'\n'$(snapfiles "$(mappath)" "$(mapprogpath)" "$(mapbuildpath)" "${STATE%/*}/suiteruns.jsonl")
+  SK_MAP=$m$'\n'"map $tm"$'\n'$l$'\n'${st[2]}
 }
 # `<size> <mtime> <ctime> <inode> <path>` of each file, a line each, from one GNU find (a stat a file was a program a
 # file, and the test actions' records are one a file); a file that is not there, or a glob that matched none, gives none.
@@ -754,14 +763,14 @@ snapfiles() { find -L "$@" -maxdepth 0 -printf '%s %T@ %C@ %i %p\n' 2>/dev/null 
 # output written there, and kept under the key when the command succeeds with output and the key is not empty. Exit 1
 # when the command fails. A part that cannot be kept is computed again next time, nothing else.
 snappart() {
-  local f=$SNAPPARTS/$1 k=$2 o=$3 h='' l
+  local f=$SNAPPARTS/$1 k=$2 o=$3 h l
   shift 3
-  if [ -n "$k" ] && h=$(git hash-object --stdin <<<"$k") && { IFS= read -r l && [ "$l" = "$h" ] && cat > "$o"; } 2>/dev/null < "$f" && [ -s "$o" ]; then
+  if [ -n "$k" ] && { IFS= read -r h && [ "$h" = "${#k}" ] && IFS= read -r -N "$h" l && [ "$l" = "$k" ] && cat > "$o"; } 2>/dev/null < "$f" && [ -s "$o" ]; then
     return 0
   fi
   "$@" > "$o" || return 1
-  [ -z "$h" ] || [ ! -s "$o" ] || { mkdir -p "$SNAPPARTS" && { printf '%s\n' "$h"; cat -- "$o"; } > "$f.$BASHPID" && mv -f -- "$f.$BASHPID" "$f"; } 2>/dev/null \
-    || rm -f -- "$f.$BASHPID"
+  [ -z "$k" ] || [ ! -s "$o" ] || { { [ -d "$SNAPPARTS" ] || mkdir -p "$SNAPPARTS"; } && { printf '%s\n%s' "${#k}" "$k"; cat -- "$o"; } > "$f.$BASHPID" \
+    && mv -f -- "$f.$BASHPID" "$f"; } 2>/dev/null || rm -f -- "$f.$BASHPID"
 }
 # The test owners (testowners()) as two lines, defs then refs, for snappart.
 snapowners() { local defs refs; testowners; printf '%s\n%s\n' "$defs" "$refs"; }
@@ -876,14 +885,14 @@ snapshot() (
   ga=$(guardaccts "$control") && [ -n "$ga" ] || ga=null
   # The samples and the pushes are the state database's (snapcopy).
   # The whole list of files each card waiting for the owner's yes changed, read from its kept patch: its blocked
-  # line holds only the first 200. A card whose patch cannot be read has its line's list.
-  while IFS=$'\t' read -r c k; do
+  # line holds only the first 200. A card whose patch cannot be read has its line's list. No such card: no jq.
+  [ -s "$d/yes" ] && while IFS=$'\t' read -r c k; do
     [ -r "$k/$c.patch" ] || continue
     git apply --numstat -z "$k/$c.patch" 2>/dev/null | jq -Rcs --arg c "$c" '{($c): (split("\u0000") | map(select(. != "") | split("\t") | .[2:] | join("\t") | .[0:300])) | select(length > 0)}' 2>/dev/null
   done < "$d/yes" | jq -cs 'add // {}' > "$d/paths" 2>/dev/null || echo '{}' > "$d/paths"
   # The project's own screenshots each such card kept (keepshots(), lib/push.sh), and the hash of its kept patch now:
   # the Board shows them only while the two hashes are one.
-  while IFS=$'\t' read -r c k; do
+  [ -s "$d/yes" ] && while IFS=$'\t' read -r c k; do
     [ -r "$k/shots/shots.json" ] || continue
     jq -c --arg c "$c" --arg p "$(git hash-object -- "$k/$c.patch" 2>/dev/null)" \
       'objects | {($c): {patch: (if $p == "" then null else $p end), shots: {patch, shots}}}' "$k/shots/shots.json" 2>/dev/null
@@ -899,19 +908,26 @@ snapshot() (
   # The cards come from the rows (rows.jq: step is the closing step, x.branch and x.base the picked line's branch and
   # main's commit, kept the kept patch's folder, kept/<card> in the state folder), and a branch that is gone is not said to be on main. The fields are
   # split on the unit separator, not on a tab: read joins tabs, so an empty field would move the rest.
+  # The same jq gives the landed commits of the cards of issue 0, each after a record separator, for soff (below).
   mc=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) && mtree=$(git rev-parse -q --verify "$mc^{tree}" 2>/dev/null) || mtree=''
-  { [ -n "$mtree" ] && jq -r '.[] | select(.issue == 0 and .step == "blocked" and (.x.branch | type) == "string")
-      | [.card, .x.branch, (.x.base | strings // ""), (.kept | strings // "")] | join("\u001f")' "$d/rows" 2>/dev/null; } \
+  on=$({ [ -n "$mtree" ] && jq -r '.[] | select(.issue == 0) | if .step == "landed" then .sha | strings | "\u001e\(.)"
+        elif .step == "blocked" and (.x.branch | type) == "string" then [.card, .x.branch, (.x.base | strings // ""), (.kept | strings // "")] | join("\u001f")
+        else empty end' "$d/rows" 2>/dev/null; } \
     | while IFS=$'\x1f' read -r c b base k; do
+        [[ $c != $'\x1e'* ]] || { printf '%s\n' "${c#?}" >> "$d/landed0"; continue; }
         tip=$(git rev-parse -q --verify "refs/heads/$b^{commit}" 2>/dev/null) || continue
         if git merge-base --is-ancestor "$tip" "$mc" 2>/dev/null; then
           [ -n "$base" ] || [ -z "$k" ] || base=$(cat -- "$ST/$k/$c.base" 2>/dev/null) || base=''
           if [ "$tip" = "$mc" ] || { [ -n "$base" ] && branchon "$tip" "$base" "$d"; }; then printf '%s\n' "$c"; fi
         elif t=$(git merge-tree --write-tree "$mc" "$tip" 2>/dev/null) && [ "${t%%$'\n'*}" = "$mtree" ]; then printf '%s\n' "$c"; fi
-      done | jq -Rcs 'split("\n") | map(select(. != ""))' > "$d/onmain" 2>/dev/null || echo '[]' > "$d/onmain"
+      done)
+  # No card on main: no jq to write the empty list.
+  if [ -z "$on" ]; then echo '[]'; else jq -Rcs 'split("\n") | map(select(. != ""))' <<<"$on" 2>/dev/null || echo '[]'; fi > "$d/onmain"
   # The landed commits of cards with no GitHub issue that main does not hold (offmain()): a split's slice card landed
-  # with one is not landed (sliceCards, below), as umbrellas() does not count it. Main unread: none is left out.
-  soff=$([ -z "$mc" ] || jq -r '.[] | select(.issue == 0 and .step == "landed") | .sha | strings' "$d/rows" 2>/dev/null | offmain "$mc") || soff=''
+  # with one is not landed (sliceCards, below), as umbrellas() does not count it. Main unread: none is left out. As
+  # offmain() prints whole commit ids, the shell writes their list for jq.
+  soff=$([ -z "$mc" ] || [ ! -s "$d/landed0" ] || offmain "$mc" < "$d/landed0") || soff=''
+  soffj=''; for sc in $soff; do [[ ! $sc =~ ^[0-9a-f]+$ ]] || soffj+=${soffj:+,}\"$sc\"; done
   # Today and the 7 days are reckoned from the health record's time (CONVEYOR_NOW when set), as now is.
   # Each of the three days with its midnight's epoch (t0d, t0w, t0p), from one date program: day by bash's own printf.
   ht=$(jq -r '.time | fromdate' <<<"$h") && [[ $ht =~ ^[0-9]+$ ]] && printf -v day '%(%F)T' "$ht" \
@@ -933,9 +949,13 @@ snapshot() (
     | [.entries | arrays | .[] | objects | select((.case | type) == "string" and ((.time | fromdate?) // 0) > $t - $days * 86400)] | group_by(.case)
     | map(.[0].case as $c | {case: $c, count: length, issue: ([$f[] | select(.case == $c) | .issue][-1] // null), files: ($c | caseowners)}) | sort_by(-.count, .case)' "$FLAKY" 2>/dev/null) || fl='[]'
   # The last pass of the test rules, when its burst guard stopped it (testrulespass()).
-  tr=$(jq -ce 'select(.on == true) | .time as $t | .burst | objects | {time: $t, matched, cap}' "$TESTRULES" 2>/dev/null) || tr=null
-  # The models the belt runs or offers with no price, as serve's last look found them (noprice()).
-  np=$(jq -ce '.missing | arrays | map(strings) | select(length > 0) | {models: .}' "$NOPRICE" 2>/dev/null) || np=null
+  [ -s "$TESTRULES" ] && tr=$(jq -ce 'select(.on == true) | .time as $t | .burst | objects | {time: $t, matched, cap}' "$TESTRULES" 2>/dev/null) || tr=null
+  # The models the belt runs or offers with no price, as serve's last look found them (noprice()); and, from the same
+  # jq, the models of its notes (pnm, below).
+  np='' pnm=''
+  [ ! -s "$NOPRICE" ] || { IFS= read -r np && IFS= read -r pnm; } < <(jq -c '(try ((.missing | arrays | map(strings) | select(length > 0) | {models: .}) // null) catch null),
+    (try [.notes | arrays | .[] | strings | select(startswith("- ")) | capture(" · No built-in price for (?<m>[^ :]+): ").m] catch [])' "$NOPRICE" 2>/dev/null) || :
+  [ -n "$np" ] || np=null; [ -n "$pnm" ] || pnm='[]'
   # The plugin problem notes that look made for the models the built-in price table does not price (noprice()), as the
   # Foreman's plugin-bugs.md (foremandir()) holds them now: a note filed since (stop.sh puts "filed as #<n>" at its
   # end, after whatever its FILED takes before it: a comma, a semicolon, white space or none) or taken out (the Board's File and Dismiss) is not given, so no Board adds it again.
@@ -946,8 +966,6 @@ snapshot() (
   # So is each model the folder's noprice-noted lists (noprice() puts each model it notes there) with no open note there:
   # the Board's File and Dismiss take the note out of plugin-bugs.md and leave no filed line.
   pn='{"notes":[],"filed":[]}' pnf=''
-  pnm=$(jq -ce '[.notes | arrays | .[] | strings | select(startswith("- ")) | capture(" · No built-in price for (?<m>[^ :]+): ").m]' "$NOPRICE" 2>/dev/null) \
-    || pnm='[]'
   if pnf=$(foremandir) && { [ -s "$pnf/plugin-bugs.md" ] || [ -s "$pnf/noprice-noted" ]; }; then
     pn=$({ grep '^- ' "$pnf/plugin-bugs.md" 2>/dev/null || true; } | jq -Rcs --argjson m "$pnm" --arg k "$(cat "$pnf/noprice-noted" 2>/dev/null)" \
       'def mod: capture(" · No built-in price for (?<m>[^ :]+): ").m // null;
@@ -979,15 +997,19 @@ snapshot() (
   printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
     && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$ht" "$SAMPLE" "$yes" \
     || exit 1
-  # The records of the cards with no GitHub issue (testcard(), lib/testaction.sh), by their card: body, filed and filedUrl, which a landed one shows.
+  # The records of the cards with no GitHub issue (testcard(), lib/testaction.sh), by their card: body, filed and filedUrl, which a landed one shows
+  # ($tac); and by their id, the card each has now and all its cards ($tid): one jq reads both, none when there is no record.
   jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --slurpfile mt <(printf '%s' "$mt") \
-    --slurpfile tac <(jq -c '[.cards | arrays | .[] | objects | select(.card | type == "string") | {key: .card, value: {body: (.body // null), filed: (.filed // null), filedUrl: (.filedUrl // null)}}] | from_entries' "$TACARDS" 2>/dev/null || echo '{}') \
-    --slurpfile tid <(jq -c '[.cards | arrays | .[] | objects | select(.id | type == "string") | {key: .id, value: {card: (.card // null), all: ([.id, .card] + (.was // []) | map(strings))}}] | from_entries' "$TACARDS" 2>/dev/null || echo '{}') \
-    --argjson shuts "$(jq -cn '$ARGS.positional' --args "$SHUT" "$OWNSHUT" "$ENGSHUT")" --slurpfile soff <(printf '%s\n' "$soff" | jq -Rcs 'split("\n") - [""]') --slurpfile fl <(printf '%s' "$fl") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson np "$np" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
+    --slurpfile tt <({ [ -s "$TACARDS" ] && jq -c '[.cards | arrays | .[] | objects] as $e
+      | {tac: (try ([$e[] | select(.card | type == "string") | {key: .card, value: {body: (.body // null), filed: (.filed // null), filedUrl: (.filedUrl // null)}}] | from_entries) catch {}),
+         tid: (try ([$e[] | select(.id | type == "string") | {key: .id, value: {card: (.card // null), all: ([.id, .card] + (.was // []) | map(strings))}}] | from_entries) catch {})}' "$TACARDS" 2>/dev/null; } \
+      || echo '{"tac":{},"tid":{}}') \
+    --arg shut0 "$SHUT" --arg shut1 "$OWNSHUT" --arg shut2 "$ENGSHUT" --slurpfile soff <(printf '[%s]' "$soffj") --slurpfile fl <(printf '%s' "$fl") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson np "$np" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --arg pef "$pef" --argjson efforts "$EFFORTS" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson pn "$pn" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg lintyes "$lintyes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
-    --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q | '"$DEPS$LEVEL$INSIDE"'
+    --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q
+    | [$shut0, $shut1, $shut2] as $shuts | [$tt[0].tac] as $tac | [$tt[0].tid] as $tid | '"$DEPS$LEVEL$INSIDE"'
     def day: fromdate | strflocaltime("%Y-%m-%d");
     def usd: if length == 0 then 0 elif any(.usd == null) then null else map(.usd) | add * 10000 | round / 10000 end;
     # The totals: the dollars of the steps that are priced, and how many are left out for having no price.

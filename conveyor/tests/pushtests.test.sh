@@ -293,3 +293,17 @@ t_pushbatchrun() {
     || fail "the run with 2 landings and pushbatchwhen 3 did not end, exit 1, saying the rule holds the push (exit $rc): $out"
   [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$base" ] || fail "the run pushed the held landings: $out"
 }
+
+# Release 1.12.0: the loop writes its word on the push (pushheld(), lib/push.sh) at each turn, most often with no push
+# held. Bug caught: that turn started a jq to write a line with no text to quote, so a batch run went over its jq limit
+# (stdbcalls.test.sh). A turn that held a push comes first, so the next turn must set turns back to 0 and sha and held
+# to null; jq is a shell function after it, so the calls of the turn with no hold are logged.
+t_pushheldnone() {
+  setup '[]'
+  fx_in 'owed="c1 abc"; pushheld "held \"why\""; jq -c . "$PUSHWAIT"; jq() { echo jq >> "$T/$CASE/calls"; command jq "$@"; }; pushheld ""'
+  [ "$RC" = 0 ] && jq -e '.sha == "abc" and .held == "held \"why\"" and .turns == 1' "$T/$CASE/run.out" > /dev/null \
+    || fail "pushheld 'held \"why\"' with owed 'c1 abc' did not write its hold (exit $RC): $(cat "$T/$CASE/run.out")"
+  [ ! -e "$T/$CASE/calls" ] || fail "pushheld '' started $(wc -l < "$T/$CASE/calls") jq: the line with no hold is written by the shell"
+  jq -e 'keys == ["at", "held", "pid", "sha", "turns"] and (.pid | type) == "number" and (.at | fromdate) > 0 and .sha == null and .held == null and .turns == 0' "$ST/pushwait" > /dev/null \
+    || fail "pushheld '' after a held turn did not write {pid, at, sha: null, held: null, turns: 0}: $(cat "$ST/pushwait")"
+}

@@ -167,3 +167,16 @@ t_partsbig() {
   [ "$(cat "$STUB/closed" 2>/dev/null)" = 10 ] && grep -qF '(#11, #12)' "$STUB/close-comments" \
     || fail "with the open list over 128 KiB, the parent #10 whose parts are closed was not closed: $(cat "$STUB/closed" "$STUB/close-comments" 2>/dev/null) $(cat "$T/$CASE/run.out")"
 }
+
+# Release 1.12.0: a turn that asks GitHub runs umbrellas() (lib/slices.sh). With no open issue that has parts and no
+# split line in the records (#10 has no sub-issues, #11 has a landed line), no parent can be closed. Bug caught:
+# umbrellas() read main's commit with git and the landed commits with jq, git and grep first, so each turn of a batch
+# started programs for nothing (stdbcalls.test.sh counts a batch run's jq calls). git and jq are shell functions here,
+# so each call umbrellas() makes is logged.
+t_partsnone() {
+  setup "[$(issue 10 2026-11-01)]"
+  landed 11 >> "$ST/cards.jsonl"
+  fx_in 'o=$(asked); git() { echo git >> "$T/$CASE/calls"; command git "$@"; }; jq() { echo jq >> "$T/$CASE/calls"; command jq "$@"; }; umbrellas "$o"'
+  [ "$RC" = 0 ] && [ ! -e "$T/$CASE/calls" ] && [ ! -e "$STUB/closed" ] \
+    || fail "umbrellas '[#10, no parts]' with a landed line and no split line started programs or closed an issue (exit $RC): $(sort "$T/$CASE/calls" 2>/dev/null | uniq -c | tr -s ' \n' ' ') $(cat "$STUB/closed" 2>/dev/null) $(cat "$T/$CASE/run.out")"
+}

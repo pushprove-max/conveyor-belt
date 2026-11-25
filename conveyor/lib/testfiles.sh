@@ -426,8 +426,8 @@ HISTFROM='def fromstart($s): select($s == "" or ((.time | strings) >= $s));
 histstart() { ctl 2>/dev/null | jq -r '.testsFrom // ""' 2>/dev/null || :; }
 # The retried lines, then the card records, as the Tests part reads them (TESTLINE), each from its summary (linesum());
 # nothing when they cannot be read. The snapshot's copy (READG, snapcopy()) is summed in place: copied, it was read whole.
-testlines() {
-  local td rec
+testlines() { # in a snapshot, the lines its Tests part key was made from (SK_LINES, snapkeys(), lib/snapshot.sh): no program starts
+  local td rec; [ -z "${SK_LINES+x}" ] || { printf '%s\n' "$SK_LINES"; return 0; }
   td=$(mktemp -d) || return 1; if [ -n "${READG:-}" ]; then rec=$READ; else rec=$td/rec; fi
   { olds > "$td/old" && { [ "$rec" = "$READ" ] || recs > "$rec"; } && linesum "$td/old" "$RETRIED.tests" "$td/o" "$TESTLINE" && linesum "$rec" "$STATE.tests" "$td/r" "$TESTLINE" \
       && cat "$td/o" "$td/r"; } 2>/dev/null

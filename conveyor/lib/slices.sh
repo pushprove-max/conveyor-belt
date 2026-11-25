@@ -511,11 +511,13 @@ growclose() { # <card> <issue> <prior json>
 # the cards of the slice's entry, a land-branch card that landed a branch named as the slice's card id included (slicetake(), lib/lane.sh).
 # A card counts as landed only while its landed commit is on main (refs/heads/$BRANCH): with push off, the pack's
 # defaultBranch changed to a branch without it leaves its parent open. A landed commit git no longer has (pruned once
-# its branch went) is not on main either.
+# its branch went) is not on main either. With no open issue that has parts and no split line in the records, none
+# can be closed: no program starts (it runs at each turn that asks GitHub).
 umbrellas() { # <open issues, a json list>
   local k n s x m b cs off
-  b=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || { echo "conveyor: main ($BRANCH) could not be read; no parent is closed this turn" >&2; return 0; }
   cs=$(turncards) || return 0
+  [[ $1 == *'"parts"'* || $cs == *'"split"'* ]] || return 0
+  b=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || { echo "conveyor: main ($BRANCH) could not be read; no parent is closed this turn" >&2; return 0; }
   off=$(jq -r 'select(.step == "landed") | .sha | strings' <<<"$cs" | offmain "$b") || return 0
   while IFS=$'\t' read -r k n s; do
     if [ "$k" = parts ]; then m="Conveyor: each part of this issue is closed or landed ($s), so this issue is closed too."
