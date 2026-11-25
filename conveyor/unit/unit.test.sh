@@ -29,4 +29,17 @@ grep -q '^unit: 2 cases of 1 unit files, 0 failed' "$T/out" && [ "$(cat "$T/rc")
 unit conveyor/lib/pack.sh
 [ "$(cat "$T/rc")" = 0 ] && [ ! -s "$T/out" ] && echo "ok - a change to pack.sh runs no unit case" \
   || no "unit.sh conveyor/lib/pack.sh: exit $(cat "$T/rc"): $(cat "$T/out")"
+
+# Bug: a change to a unit file alone runs none of its cases, so a broken case lands untested.
+unit conveyor/unit/portable.unit.sh
+grep -q '^unit: 2 cases of 1 unit files, 0 failed' "$T/out" && [ "$(cat "$T/rc")" = 0 ] \
+  && echo "ok - a change to portable.unit.sh runs its unit cases" \
+  || no "unit.sh conveyor/unit/portable.unit.sh: exit $(cat "$T/rc"): $(cat "$T/out")"
+
+# Bug: a change to this runner alone runs no unit case, so a broken runner lands untested. It must run every unit file.
+all=$(find "$HERE" -maxdepth 1 -name '*.unit.sh' | wc -l | tr -d ' ')
+unit conveyor/unit/unit.sh
+grep -q "^unit: [1-9][0-9]* cases of $all unit files, 0 failed" "$T/out" && [ "$(cat "$T/rc")" = 0 ] \
+  && echo "ok - a change to unit.sh runs every unit file's cases" \
+  || no "unit.sh conveyor/unit/unit.sh (expected all $all unit files): exit $(cat "$T/rc"): $(cat "$T/out")"
 exit $rc
