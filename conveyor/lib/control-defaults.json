@@ -23,6 +23,9 @@
     "healsdays": 30,
     "failfast": true,
     "teststeponly": false,
+    "pushbatch": false,
+    "pushbatchwhen": 2,
+    "pushbatchtests": "linked",
     "never": []
   },
   "model": {

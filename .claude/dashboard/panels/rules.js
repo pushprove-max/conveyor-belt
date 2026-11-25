@@ -25,7 +25,8 @@
 // request, the record's landAs or else the pack's; disabled the same way for a record with no landAs), Merge PR
 // (Button, Release or Idle, the record's prMerge or else the pack's; disabled the same way for a record with no
 // prMerge), Test before a push (On or Off: the record's pushCheck, else the pack's push.check; disabled the same way
-// for a snapshot with no pushCheck), Approve visible changes (On or Off; disabled the same way for a record with no
+// for a snapshot with no pushCheck), Push after a combined test run (On or Off: the record's rules.pushbatch, with
+// when its run starts and which tests it runs, rules.pushbatchwhen and pushbatchtests; parts/rules-suite.js), Approve visible changes (On or Off; disabled the same way for a record with no
 // rules.visible). Done without asking: one row a standing kind of routine yes the Foreman takes without asking (the
 // pack's auto.standing: Requested fix, Review follow-up, Release check, Fixed block, Review retry, each On or Off;
 // disabled the same way for a snapshot with no standing), then its group Cards with no GitHub issue (NOISSUE): Tests
@@ -101,7 +102,7 @@
     ['models', 'Models', 'Three seats for each card.', ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account']],
     ['capacity', 'Capacity', 'Build slots and machine limits.', ['cap', 'guard', 'atonce', 'suite-mode', 'suite', 'failfast', 'teststeponly', 'cores']],
     ['picking', 'Picking', 'Choose which issues enter the belt.', ['build', 'never', 'start', 'dep-guard', 'split', 'pick', 'healsdays']],
-    ['landing', 'Landing and push', 'Decide how finished cards reach the repository.', ['push', 'land-as', 'pr-merge', 'push-check', 'lint', 'visible']],
+    ['landing', 'Landing and push', 'Decide how finished cards reach the repository.', ['push', 'land-as', 'pr-merge', 'push-check', 'pushbatch', 'lint', 'visible']],
     ['standing', 'Done without asking', 'Choose when the Foreman can act on your behalf.', STANDING.map(([k]) => `standing-${k}`).concat([NOISSUE])],
     ['order', 'Issue order', 'Inspect held issues and set the order of pinned work.', ['held', 'order']],
   ];

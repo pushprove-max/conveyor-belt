@@ -65,6 +65,15 @@ its own, and the Board's Rules tab sets them in its Judge row.
   say that the Test step runs the tests and that a session reads the last Test step's result. The card's command
   guard also refuses each test command of a session, a named case or test file too. Off, the card rules are the text
   of their files.
+- `pushbatch`: the rule Push after a combined test run, off by default. On, the loop pushes no landing until the run
+  is due (`pushbatchwhen`). Then it pushes all the landings since the last push together, after their tests pass on
+  main (the run before a push, which then runs even with `push.check` off). A file that fails holds them all, and the
+  push line names the landing that broke it, or says that it failed before those landings. Off, the loop pushes each
+  landing as it comes.
+- `pushbatchwhen`: when the run of Push after a combined test run is due: a number of landings not pushed (1 to 100),
+  or a UTC time of day, `HH:MM`. The default is in `lib/control-defaults.json`.
+- `pushbatchtests`: which tests that run runs: `linked` (the default), the test files linked to the landings; `all`,
+  every test file of main but the pack's runners of the whole suite.
 - `split`: the rule Split large issues, `off`, `shadow` or `on`. It is on by default (`conveyor.sh control rules split=<off|shadow|on>`).
   Before a card builds, code measures its issue against the pack's `split` limits; an issue that reaches
   one goes to the judge one time, which answers keep or 2 or 3 slices. Shadow records the verdict on the card's
@@ -114,7 +123,8 @@ issue waits again while the guard is on.
 
 `conveyor.sh control push-check on|off|default` (the Rules tab's Test before a push; `default` clears it) sets whether the test files linked to the
 landings since the last push run before a push (`pushCheck` in the record). A record that does not set it, as a new
-one does not, takes the pack's `push.check` (on by default). Off, a push runs no test first.
+one does not, takes the pack's `push.check` (on by default). Off, a push runs no test first, unless the rule Push
+after a combined test run (`pushbatch`) is on: then the run before the push still runs.
 
 `conveyor.sh control onboarded <rule>...` records that the owner set up the project on the Board: `onboarded` in the
 record becomes `{at, rules}`, the time and the rules the owner confirmed, each by its key on the Board (`build`,

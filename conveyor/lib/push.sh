@@ -675,6 +675,31 @@ owed() {
   o=$(stdb ask lines cards 2>/dev/null | jq -r 'select(.step == "landed") | "\(.card) \(.issue) \(.sha)"' 2>/dev/null); o=${o##*$'\n'}
   [ -n "$o" ] && git merge-base --is-ancestor "${o##* }" "refs/heads/$BRANCH" 2>/dev/null && ! atorigin "${o##* }" && echo "$o"
 }
+# The rule Push after a combined test run (docs/configuration.md): the control record's rules.pushbatch is true. On, the
+# loop pushes no landing until its run is due (batchdue(), pushturn()); then the landings since the last push go in one
+# push, and the run before it (pushtests(), lib/pushrun.sh) runs on them all whether Test before a push is on or off.
+# Off (the default, and a record that does not read), each landing is pushed as it comes.
+pushbatch() { [ "$(ctl 2>/dev/null | jq -r '.rules.pushbatch' 2>/dev/null)" = true ]; }
+PUSHBATCHWAIT='the rule Push after a combined test run holds the push until its run is due (pushbatchwhen)'
+# The run of the rule Push after a combined test run is due, as the control record's rules.pushbatchwhen says: a number
+# of landings, when that many of the landings in main are not at origin (atorigin()); a UTC time of day (HH:MM), when
+# one of them landed before that time last came (today's, once it has passed, else yesterday's), now as clock() has
+# it. Fails when the record or the card records cannot be read, so a push is held then.
+batchdue() {
+  local w at=() a t
+  t=$(clock) || return 1
+  w=$(ctl 2>/dev/null | jq -er '.rules.pushbatchwhen | select(type == "number" or type == "string")' 2>/dev/null) || return 1
+  for a in "$(pushed)" "refs/remotes/$REMOTE/$BRANCH"; do
+    [ -z "$a" ] || ! a=$(git rev-parse -q --verify "$a^{commit}" 2>/dev/null) || at+=("$a")
+  done
+  stdb ask lines cards 2>/dev/null | jq -se --rawfile in <(git rev-list "refs/heads/$BRANCH" --not "${at[@]}" 2>/dev/null) \
+    --arg w "$w" --arg now "$t" '
+    ($in | split("\n") | map(select(. != "") | {(.): true}) | add // {}) as $c
+    | [.[] | select(.step == "landed" and (.sha | type) == "string" and $c[.sha])] as $l
+    | if $w | test("^[0-9]+$") then ($l | length) >= ($w | tonumber)
+      else ($now[0:11] + $w + ":00Z") as $t | (if $t <= $now then $t else $t | fromdate - 86400 | todate end) as $last
+        | any($l[]; .time < $last) end' > /dev/null 2>&1
+}
 # The push a turn of the loop starts (run(), lib/run.sh), in run()'s own variables: with the pack read (nopack), no
 # push running (pusher) and no restart due (new), the owed push (owed) is started beside the cards as a job, its pid
 # in pusher, at once when it is not the one last tried (tried), else once PUSH_RETRY seconds have passed since that
@@ -682,10 +707,15 @@ owed() {
 # An owed push that it does not start, with no push running, is held: pushheld() records why, at every turn. A last
 # try that did not start (triedwhy, pushended(): a release run under way, the push lock) is named as that, not as a
 # failure. With the pack unread no push is held: health reads the same pack and fails, saying why (commands/health.sh).
+# With the rule Push after a combined test run on (pushbatch()), the owed push is held until its run is due
+# (batchdue()), so the landings until then go in one push, after one run before it on them all; batchheld (a global
+# of the loop shell, as heldsha is) keeps that owed push, for pushdecided().
 pushturn() {
   local why=''
   if [ -z "$pusher" ] && [ -z "$nopack" ] && owed=$(owed 2>/dev/null); then
+    batchheld=''
     if [ -n "$new" ]; then why='the loop restarts on new code first, and the new loop starts the push'
+    elif pushbatch && ! batchdue; then why="$PUSHBATCHWAIT"; batchheld=$owed
     elif [ "$owed" = "$tried" ] && [ $((SECONDS - triedat)) -lt "$PUSH_RETRY" ]; then
       if [ -n "${triedwhy:-}" ]; then why="its last push did not start: $triedwhy; the next try waits for the pack's pushRetry time"
       else why="its last push failed; the next try waits for the pack's pushRetry time"; fi
@@ -696,6 +726,11 @@ pushturn() {
   fi
   pushheld "$why"
 }
+# A `run` with no card or push left may end (run(), lib/run.sh): the pack is unread (nopack), no push is owed, a turn
+# tried the owed push (tried), or the rule Push after a combined test run held it (batchheld). Without that last, a
+# run whose landings were fewer than pushbatchwhen, or came before its time, turned for ever, as no turn starts that
+# push; that run exits 1, saying the rule holds the push. Sets owed, for run().
+pushdecided() { [ -n "$nopack" ] || ! owed=$(owed) || [ "$owed" = "$tried" ] || [ "$owed" = "${batchheld:-}" ]; }
 # The loop's word on its push at each turn, for health() (lib/views.sh), kept between turns in the loop shell's
 # heldsha and heldn (globals: a restart's exec starts them again):
 # PUSHWAIT holds {pid, at: the turn's time, sha: the owed commit that no push started (owed), held: <why>, turns: the

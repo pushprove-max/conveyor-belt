@@ -399,8 +399,8 @@ one control, and the value in force is the selected part.
    start in**, **Dependency guard**, **Split large issues**, **Pick settings** and **Self-heals expiry** (the days an
    entry of the Self-heals list can go unfixed and unseen before it leaves the list). A main-red fix card is built
    whatever the P0 to P3 switches say, by design: held, every card that meets the red main would wait for good.
-4. **Landing and push**: **Push on landing**, **Land as**, **Merge PR**, **Test before a push**, **Lint check** and
-   **Approve visible changes**.
+4. **Landing and push**: **Push on landing**, **Land as**, **Merge PR**, **Test before a push**, **Push after a
+   combined test run**, **Lint check** and **Approve visible changes**.
 5. **Done without asking**: **Requested fix**, **Review follow-up**, **Release check**, **Fixed block** and
    **Review retry**, each On or Off. Under them, the group **Cards with no GitHub issue** has **Tests page actions**,
    On or Off.
@@ -471,13 +471,25 @@ cards; merge it to close their issues" ([Land as](configuration.md#land-as)).
 
 **Merge PR** is **Button**, **Release** or **Idle**. Until you set it, it shows the pack's `push.prMerge`. Button
 leaves the merge to you, with **Merge** on the Control tab. Release merges the pull request when you make a release.
-Idle merges it when no card is on the belt and no issue can be picked. When **Test before a push** is on, the test files
+Idle merges it when no card is on the belt and no issue can be picked. When **Test before a push** or **Push after a
+combined test run** is on, the test files
 linked to its cards must pass first, when the pack can run one test file at a time ([Merge PR](configuration.md#merge-pr)).
 
 **Test before a push** is a switch per project. On, before each push Conveyor runs the test files linked to the
 landings since the last push, and a file that fails holds the push. Off, a push runs no test first, and the tab says
-"off: a push runs no test first". The switch shows the pack's `push.check` (on in a new project) until you change it
+"off: a push runs no test first". While **Push after a combined test run** is on, its tests still run before each
+push, and the tab says "off: Push after a combined test run is On, so its tests still run before each push". The switch shows the pack's `push.check` (on in a new project) until you change it
 here. Your change goes in the control record and wins over the pack
+([Which tests a card runs](configuration.md#which-tests-a-card-runs)).
+
+**Push after a combined test run** is a switch per project, Off by default. Off, Conveyor pushes each card when it
+lands. On, the cards that land wait until the combined run is due. Then Conveyor runs the tests on main, also when
+**Test before a push** is off, and pushes the cards together when the tests pass. A file that fails holds every card,
+and the push line names the landing that broke it. If the file failed before those landings too, the push line says
+that and names no landing. While the switch is on, the tab says "on: the tests run even when
+Test before a push is Off, and a file that fails holds every card". Below the switch, **After N landings** makes the
+run due when that many landings are not pushed, and **At (UTC)** makes it due at a time of day. **Linked files** runs
+the test files linked to the landings, and **All files** runs every test file of main
 ([Which tests a card runs](configuration.md#which-tests-a-card-runs)).
 
 **Lint check** is a switch per project, On by default. On, the pack's lint commands run on each card's change before
@@ -611,6 +623,7 @@ tells more.
 
 The Rules tab's **Push on landing** rule is Off by default. Conveyor lands each card on main and pushes when you
 press **Push landed** or **Push now**. Turn the rule On, and Conveyor pushes each card on its own after it lands.
+With **Push after a combined test run** On too, it pushes the cards together after their combined test run passes.
 
 With the rule Off, a card that landed leaves the belt. It is not in On the belt, Belt 3D or `/units` ON THE BELT. Landed
 today shows it as "Landed, waiting for Push landed", and the Control tab counts it in "N landed, not pushed". Its Push

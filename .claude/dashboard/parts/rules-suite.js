@@ -185,6 +185,45 @@
     el.append(row('teststeponly', name, "a card's sessions do not run tests; the Test step runs them",
       seg(name, tOn, tOff), note));
   }
+  // Push after a combined test run (Landing and push): the record's rules.pushbatch (`control rules pushbatch=on|off`).
+  // Off (the default), each card is pushed when it lands; On, the cards that land wait until the run is due, then the
+  // tests run on main and they are pushed together once those pass. When it starts is rules.pushbatchwhen: a number
+  // of landings (After N landings) or a UTC time of day (At, HH:MM); which tests is rules.pushbatchtests: the files
+  // linked to the landings (Linked files) or every test file (All files). A record without them is drawn disabled.
+  const BATCH_N = [2, 3, 5, 10];
+  const BATCH_AT = /^([01]\d|2[0-3]):[0-5]\d$/;
+  function rulesPushBatch(el, r) {
+    const h = S.ctx.h, on = r.pushbatch === true, known = typeof r.pushbatch === 'boolean', name = 'Push after a combined test run';
+    const when = r.pushbatchwhen, tests = r.pushbatchtests;
+    const whenKnown = Number.isInteger(when) || (typeof when === 'string' && BATCH_AT.test(when)), testsKnown = tests === 'linked' || tests === 'all';
+    const bOn = choice('On', 'pushbatch-on', `${name}: on`, on, () => { if (!on) send('rules', ['pushbatch=on'], null, ['rules', ['pushbatch=off']]); });
+    const bOff = choice('Off', 'pushbatch-off', `${name}: off`, !on, () => { if (on) send('rules', ['pushbatch=off'], null, ['rules', ['pushbatch=on']]); });
+    bOn.disabled = bOff.disabled = !known;
+    const setWhen = (v) => { if (whenKnown && String(v) !== String(when)) send('rules', [`pushbatchwhen=${v}`], null, ['rules', [`pushbatchwhen=${when}`]]); };
+    const ns = BATCH_N.concat(Number.isInteger(when) && !BATCH_N.includes(when) ? [when] : []).sort((a, b) => a - b);
+    const counts = ns.map((n) => {
+      const b = choice(`After ${n} landings`, `pushbatchwhen-${n}`, `${name}: after ${n} landings`, when === n, () => setWhen(n));
+      b.disabled = !whenKnown;
+      return b;
+    });
+    const at = h('input');
+    at.type = 'time'; at.dataset.act = 'pushbatchwhen-at'; at.setAttribute('aria-label', `${name}: at a UTC time of day`); at.disabled = !whenKnown;
+    at.value = typeof when === 'string' ? when : '';
+    at.addEventListener('change', () => { if (BATCH_AT.test(at.value)) setWhen(at.value); });
+    const atBox = h('label', 'rules-suite-field');
+    atBox.append(h('span', 'board-from', 'At (UTC)'), ' ', at);
+    const testsBtn = (v, t) => {
+      const b = choice(t, `pushbatchtests-${v}`, `${name} runs: ${t}`, tests === v, () => {
+        if (testsKnown && tests !== v) send('rules', [`pushbatchtests=${v}`], null, ['rules', [`pushbatchtests=${tests}`]]);
+      });
+      b.disabled = !testsKnown;
+      return b;
+    };
+    const note = !known || !whenKnown || !testsKnown ? h('span', 'board-from', 'needs a newer Conveyor')
+      : on ? h('span', 'board-from', 'on: the tests run even when Test before a push is Off, and a file that fails holds every card') : null;
+    el.append(row('pushbatch', name, 'cards that land are not pushed one by one: when the run is due, the tests run on main, and the cards are pushed together when they pass',
+      seg(name, bOn, bOff), seg(`${name}: starts`, ...counts), atBox, seg(`${name}: tests`, testsBtn('linked', 'Linked files'), testsBtn('all', 'All files')), note));
+  }
   // A radio of the choice, labelled with its name and what it means.
   function kindRadio(k, name, what, shown, pick) {
     const h = S.ctx.h, lab = h('label', 'rules-suite-kind'), i = h('input');
@@ -234,6 +273,6 @@
   }
   window.DASH_APP.part('rules-suite', function (shared) {
     ({ S, num, send, button, post, row, draw, choice, seg } = shared);
-    return { rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
+    return { rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, rulesPushBatch, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
   });
 })();

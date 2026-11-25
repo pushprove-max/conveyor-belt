@@ -4,7 +4,8 @@
 # Engine cases (#384): the run before a push (lib/pushrun.sh pushtests()): the test files the test map and the links give
 # the landings since the last push, each alone, once; a file that fails is run on the landings in turn to find the one
 # that broke it, goes to a main-fix card naming that landing, and holds the push; with the push check off (#395: the
-# pack's push.check, or `control push-check`), it runs nothing.
+# pack's push.check, or `control push-check`), it runs nothing; with the rule Push after a combined test run on (#1621),
+# the loop holds the push until its run is due (pushbatchwhen), and the run runs whatever the push check says.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -25,8 +26,9 @@ pushfix() { # <push.check>
     && echo 'touch "$STUB/whole"' > "$R/lib/cart-all.test.js" && git -C "$R" add -A && git -C "$R" commit -qm c1 \
     && l1=$(git -C "$R" rev-parse HEAD) && echo bad > "$R/lib/cart.js" && git -C "$R" commit -qam c2 && l2=$(git -C "$R" rev-parse HEAD) \
     || fail "the two landings could not be made"
-  printf '%s\n' "{\"card\":\"c1\",\"issue\":1,\"step\":\"landed\",\"time\":\"2026-11-18T10:00:00Z\",\"result\":\"ok\",\"sha\":\"$l1\"}" \
-    "{\"card\":\"c2\",\"issue\":2,\"step\":\"landed\",\"time\":\"2026-11-18T11:00:00Z\",\"result\":\"ok\",\"sha\":\"$l2\"}" >> "$ST/cards.jsonl"
+  # Whole records (jq/check.jq): a `run` sets a partial line aside before it reads the landings.
+  printf '%s\n' "{\"card\":\"c1\",\"issue\":1,\"step\":\"landed\",\"time\":\"2026-11-18T10:00:00Z\",\"tokens\":{\"claude\":0,\"codex\":0},\"result\":\"ok\",\"sha\":\"$l1\",\"reason\":\"\",\"product\":false}" \
+    "{\"card\":\"c2\",\"issue\":2,\"step\":\"landed\",\"time\":\"2026-11-18T11:00:00Z\",\"tokens\":{\"claude\":0,\"codex\":0},\"result\":\"ok\",\"sha\":\"$l2\",\"reason\":\"\",\"product\":false}" >> "$ST/cards.jsonl"
 }
 pushnow() { # [<what the loop's shell runs>]
   # The loop's shell, as `conveyor.sh run` starts it.
@@ -171,4 +173,100 @@ $m lib/cart.test.js
 $l1 lib/cart.test.js" ] || fail "the file did not run on c1, then on the merge (and on c1 for the landing that broke it): $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
   [ "$(st 'select(.step == "push") | [.result, .kind, .check, .sha] | join(" ")')" = "fail check lib/cart.test.js $m" ] \
     || fail "the push line is not a check failure of the merge naming the file: $(st 'select(.step == "push")')"
+}
+
+# One turn of the loop's push (pushturn(), lib/push.sh), as a new loop makes it, run by pushnow: a push it starts has
+# ended before the turn's word on the push ($PUSHWAIT's held) is printed. STUBPUSH: push() a stub that writes its card
+# and issue to $STUB/pushcalls in place of a push.
+PUSHTURN='nopack="" new="" pusher="" tried="" triedat=0 PUSH_RETRY=600; pushturn; [ -z "$pusher" ] || wait "$pusher"; jq -r .held "$PUSHWAIT"'
+STUBPUSH='push() { echo "$1 $2" >> "$STUB/pushcalls"; }; '
+# #1621, the rule Push after a combined test run (rules.pushbatch), with Test before a push off (the pack's push.check
+# false, and the state folder's push.check.off), so only the rule makes the run. c1 and c2 have landed. Bugs it
+# catches: with the rule on and its run set for 3 landings (pushbatchwhen), the turn pushed c1 and c2, so cards went
+# out before the owner's count; set for a UTC time of day, the run was due before that time came, or not once it had
+# passed (batchdue()); with the rule off, the turn held the push where it pushes at once; once the run was due (2
+# landings), the push ran no test (Test before a push is off) and took c2's broken lib/cart.js to origin, or its push
+# line did not name c2, or the next turn pushed it all the same.
+t_pushbatch() {
+  local l1 l2 base
+  pushfix false
+  loop control rules push=on pushbatch=on pushbatchwhen=3 > /dev/null || fail "control rules push=on pushbatch=on pushbatchwhen=3 failed"
+  pushnow "$STUBPUSH$PUSHTURN"
+  [ ! -e "$STUB/pushcalls" ] && [ "$(cat "$T/$CASE/push.out")" = 'the rule Push after a combined test run holds the push until its run is due (pushbatchwhen)' ] \
+    || fail "with the rule on for 3 landings and 2 landed, the turn (pushturn) did not hold the push: $(cat "$STUB/pushcalls" "$T/$CASE/push.out" 2>&1)"
+  # c1 landed at 10:00 and c2 at 11:00 UTC on 2026-11-18. At 10:30 that day, 11:00 last came the day before; at 12:00, after c1.
+  loop control rules pushbatchwhen=11:00 > /dev/null && pushnow 'for n in 1794997800 1795003200; do CONVEYOR_NOW=$n batchdue && echo "$n due" || echo "$n not due"; done'
+  [ "$(cat "$T/$CASE/push.out")" = $'1794997800 not due\n1795003200 due' ] \
+    || fail "pushbatchwhen=11:00 was not due at 10:30 and due at 12:00 (batchdue): $(cat "$T/$CASE/push.out")"
+  loop control rules pushbatch=off > /dev/null && pushnow "$STUBPUSH$PUSHTURN"
+  [ "$(cat "$STUB/pushcalls" 2>&1)" = 'c2 2' ] || fail "with the rule off, the turn (pushturn) did not push c2 at once: $(cat "$T/$CASE/push.out")"
+  loop control rules pushbatch=on pushbatchwhen=2 > /dev/null && : > "$ST/push.check.off"
+  pushnow "$PUSHTURN; checkheld && echo held > \"\$T/\$CASE/held\""
+  [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$base" ] && [ -z "$(st 'select(.step == "pushed") | .card')" ] \
+    || fail "the turn with the run due pushed c1 or c2 past a failed run: $(st 'select(.step | IN("push", "pushed"))') $(cat "$T/$CASE/push.out")"
+  [ "$(cat "$STUB/ran" 2>&1)" = "$l2 lib/cart.test.js
+$l1 lib/cart.test.js" ] || fail "with the rule on, the push did not run lib/cart.test.js on main, then on c1's landing: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+  st 'select(.step == "push") | "\(.result) \(.kind) \(.reason)"' | grep -qF "fail check the run before the push failed 1 test file(s) linked to the landings since the last push: lib/cart.test.js (broken by the landing ${l2:0:12} of c2)" \
+    && [ -e "$T/$CASE/held" ] || fail "the failed run's push line does not name c2, or does not hold the push: $(st 'select(.step == "push")')"
+}
+
+# #1621. With the rule on, its run due (2 landings) and pushbatchtests all, c1 and c2 go out in one push once the run
+# before it passes. lib/other.test.js, added to main after c2 by no card, is linked to neither landing. Bugs it
+# catches: a pack whose test command cannot be given one file pushed them with no run (it holds them, saying why);
+# once it can, the run ran only the files linked to the landings (pushbatchtests ignored), or ran the pack's runner of
+# the whole suite (lib/cart-all.test.js) as a test file, or the push left a card unpushed or pushed them apart. Also: a
+# pass of the linked files alone (pushbatchtests linked) on the same main commit cleared the push after the owner set
+# pushbatchtests all, so the other files never ran. a.test.sh is the fixture's own test file of main (setup()).
+t_pushbatchpass() {
+  local l1 l2 base m
+  pushfix false
+  echo 'true' > "$R/lib/other.test.js" && git -C "$R" add lib/other.test.js && git -C "$R" commit -qm other && m=$(git -C "$R" rev-parse HEAD) \
+    || fail "lib/other.test.js could not be committed"
+  loop control rules push=on pushbatch=on pushbatchtests=all > /dev/null || fail "control rules push=on pushbatch=on pushbatchtests=all failed"
+  printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"' > "$STUB/one" # one: every test file passes
+  tune 'del(.test.fileCommand) | .test.list = "runner"'; pushnow "$PUSHTURN"
+  [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$base" ] && st 'select(.step == "push") | "\(.kind) \(.reason)"' | grep -qF 'transport the test files linked to the landings did not run before the push' \
+    || fail "with no test.fileCommand, the rule did not hold the push, saying why: $(st 'select(.step == "push")') $(cat "$T/$CASE/push.out")"
+  tune '.test.fileCommand = "bash \"$STUB/one\""'
+  loop control rules pushbatchtests=linked > /dev/null && pushnow "pushtests c2 2 $m $base" \
+    && [ "$(cat "$STUB/ran" 2>&1)" = "$m lib/cart.test.js" ] || fail "pushtests c2 2 $m $base with pushbatchtests linked did not pass on lib/cart.test.js alone: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+  rm -f "$STUB/ran"; loop control rules pushbatchtests=all > /dev/null && pushnow "$PUSHTURN"
+  [ "$(cat "$STUB/ran" 2>&1)" = "$m a.test.sh
+$m lib/cart.test.js
+$m lib/other.test.js" ] || fail "with pushbatchtests all, after a pass of the linked files on the same commit, the run before the push did not run every test file of main but the runner: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+  [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$m" ] && [ "$(st 'select(.step == "pushed") | "\(.card) \(.head)"' | paste -sd,)" = "c1 $m,c2 $m" ] \
+    || fail "c1 and c2 were not pushed together at main: $(st 'select(.step | IN("push", "pushed"))') $(cat "$T/$CASE/push.out")"
+}
+
+# #1621. With the rule on, its run due and pushbatchtests all, a.test.sh (the fixture's own test file of main) fails
+# already on origin, before c1 and c2, and still fails on them; c2 breaks lib/cart.test.js. Bug it catches: the run
+# named c1, the oldest landing, as the one that broke a.test.sh, as it never ran the file on the commit before c1. The
+# push is held, the reason says a.test.sh failed before the landings, and it names c2 for lib/cart.test.js alone.
+t_pushbatchold() {
+  local l1 l2 base r
+  pushfix false
+  printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"; [ "$1" != a.test.sh ] && bash "$1"' > "$STUB/one"
+  loop control rules push=on pushbatch=on pushbatchtests=all > /dev/null || fail "control rules push=on pushbatch=on pushbatchtests=all failed"
+  pushnow "$PUSHTURN"
+  r=$(st 'select(.step == "push") | "\(.result) \(.kind) \(.reason)"')
+  [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$base" ] && [ -z "$(st 'select(.step == "pushed") | .card')" ] \
+    || fail "with a.test.sh failing on main, the turn pushed c1 or c2: $r $(cat "$T/$CASE/push.out")"
+  grep -qF "fail check the run before the push failed 2 test file(s) of ${l2:0:12} (pushbatchtests all): a.test.sh (it failed before the landings since the last push too" <<<"$r" \
+    && grep -qF "lib/cart.test.js (broken by the landing ${l2:0:12} of c2" <<<"$r" && ! grep -qF "${l1:0:12}" <<<"$r" \
+    || fail "the push line does not say a.test.sh failed before c1 and c2, names c1, or does not name c2 for lib/cart.test.js: $r"
+  grep -qx "$base a.test.sh" "$STUB/ran" || fail "a.test.sh did not run on the commit before c1: $(cat "$STUB/ran" 2>&1)"
+}
+
+# #1621. Bug it catches: a `run` whose landings are fewer than pushbatchwhen ended only once a turn had tried their
+# push, and the rule stops every turn from trying it, so the run turned for ever (run(), lib/run.sh, pushdecided()).
+# It ends, exit 1, saying the rule holds the push, and nothing is pushed.
+t_pushbatchrun() {
+  local l1 l2 base out rc=0
+  pushfix false
+  loop control rules push=on pushbatch=on pushbatchwhen=3 > /dev/null || fail "control rules push=on pushbatch=on pushbatchwhen=3 failed"
+  # loop: only the run's own loop shows that it ends with the push held; timeout stops one that turns for ever.
+  out=$(CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards timeout 60 bash "$SRC/conveyor.sh" run 2>&1) || rc=$?
+  [ "$rc" = 1 ] && [[ $out == *"is not pushed: the rule Push after a combined test run holds the push until its run is due (pushbatchwhen)"* ]] \
+    || fail "the run with 2 landings and pushbatchwhen 3 did not end, exit 1, saying the rule holds the push (exit $rc): $out"
+  [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$base" ] || fail "the run pushed the held landings: $out"
 }

@@ -751,7 +751,7 @@ run() { # [max-cards] [serve]
     [ -z "$old" ] || [ -z "$new" ] || turnrestart
     if [ -n "$old" ] && [ "$running" = 0 ] && [ -z "$pusher" ]; then
       # A `run` ends here; a card that landed after this turn's push check is owed a push first, as below.
-      [ -n "$serve" ] || { [ -n "$nopack" ] || ! owed=$(owed) || [ "$owed" = "$tried" ] || continue; break; }
+      [ -n "$serve" ] || { pushdecided || continue; break; }
       # A pin, or a checkout's HEAD, first seen to move after this turn began (new is read at its start) is restarted
       # on at the next turn.
       [ -z "$FOLLOW" ] || continue
@@ -776,7 +776,7 @@ run() { # [max-cards] [serve]
     fi
     # A card that landed after this turn's push check is owed a push no turn has tried: one more turn makes it.
     if runends; then
-      [ -n "$nopack" ] || ! owed=$(owed) || [ "$owed" = "$tried" ] || continue
+      pushdecided || continue
       break
     fi
     # The wait (turnwait()) returns at once when a card has already ended; the next turn then counts it as gone.
@@ -796,5 +796,5 @@ run() { # [max-cards] [serve]
     elif [ "$now" = running ]; then echo "conveyor: no issue qualifies; nothing recorded"
     else echo "conveyor: the loop is $now$([[ $now == "paused: free disk"* ]] || echo ' (the control record)'); nothing recorded"; fi
   fi
-  ! owed=$(owed) || { echo "conveyor: main (${owed##* }) is not pushed; the push line in the card records has the reason" >&2; exit 1; }
+  ! owed=$(owed) || { echo "conveyor: main (${owed##* }) is not pushed$([ "$owed" = "${batchheld:-}" ] && echo ": $PUSHBATCHWAIT" || echo '; the push line in the card records has the reason')" >&2; exit 1; }
 }

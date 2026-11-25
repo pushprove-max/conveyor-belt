@@ -66,13 +66,18 @@
   // The words of each action's change (words), from its args a.
   const seatWords = (a, action) => `${action === 'model' ? 'builder' : 'reviewer'} ${a[0] === 'default' ? 'back to the default' : a.join(' ')}`;
   const accountWords = (a, action) => `${action === 'account' ? 'account' : 'review account'} ${a.length ? a[0] : 'back to the default'}`;
-  const RULE_WORDS = { followups: 'Follow-ups', push: 'Push on landing', visible: 'Approve visible changes', lint: 'Lint check', failfast: "Stop a card's tests at the first failure", teststeponly: 'Only the Test step runs tests', split: 'Split large issues', pick: 'Pick settings', healsdays: 'Self-heals expiry days' };
+  const RULE_WORDS = { followups: 'Follow-ups', push: 'Push on landing', visible: 'Approve visible changes', lint: 'Lint check', failfast: "Stop a card's tests at the first failure", teststeponly: 'Only the Test step runs tests', pushbatch: 'Push after a combined test run', split: 'Split large issues', pick: 'Pick settings', healsdays: 'Self-heals expiry days' };
   // The five switches of Cards with no GitHub issue (the record's rules.testissues, foremanissues, followupissues, releaseissues and
   // splitissues): each kind is On while its rule is off.
   const NOISSUE_WORDS = { testissues: 'Tests page actions', foremanissues: 'Foreman orders', followupissues: 'Review follow-ups', releaseissues: 'Release fix cards', splitissues: 'Split parts' };
+  // When the run of Push after a combined test run starts (rules.pushbatchwhen), and which tests it runs (rules.pushbatchtests).
+  const BATCH_WORDS = {
+    pushbatchwhen: (o) => `combined test run ${/^\d+$/.test(o) ? `after ${o} landings` : `at ${o} UTC`}`,
+    pushbatchtests: (o) => `combined test run on ${o === 'all' ? 'every test file' : 'the linked test files'}`,
+  };
   const WORDS = {
     rules: (a) => a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}`
-      : own(NOISSUE_WORDS, k) ? `${NOISSUE_WORDS[k]} with no GitHub issue ${o === 'off' ? 'on' : 'off'}` : `${own(RULE_WORDS, k) ? RULE_WORDS[k] : k} ${o}`; }).join(', '),
+      : own(BATCH_WORDS, k) ? BATCH_WORDS[k](o) : own(NOISSUE_WORDS, k) ? `${NOISSUE_WORDS[k]} with no GitHub issue ${o === 'off' ? 'on' : 'off'}` : `${own(RULE_WORDS, k) ? RULE_WORDS[k] : k} ${o}`; }).join(', '),
     cap: (a) => (a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`),
     guard: (a) => (a[0] === 'off' ? 'pause at: off' : `pause at ${a[0]}%`),
     atonce: (a) => `parallel suite: ${a[0]} test file${a[0] === '1' ? '' : 's'} at once`,
@@ -154,11 +159,13 @@
       const [key, o] = String(x).split('=');
       if (key === 'split' || key === 'pick') { r.rules[key] = o; return; } // Split large issues and Pick settings keep their word: off, shadow or on
       if (key === 'healsdays') { r.rules[key] = Number(o); return; } // the days an entry of the Self-heals list may go unfixed and unseen
+      if (key === 'pushbatchwhen') { r.rules[key] = /^\d+$/.test(o) ? Number(o) : o; return; } // a number of landings, or a UTC time HH:MM
+      if (key === 'pushbatchtests') { r.rules[key] = o; return; } // linked or all
       if (!isArea(key)) { r.rules[key] = o === 'on'; return; }
       const never = list(r.rules.never).filter((y) => y !== key);
       r.rules.never = o === 'off' ? never.concat([key]) : never;
     });
-    return [r, isArea(k) ? 'never' : ['push', 'visible', 'lint', 'failfast', 'teststeponly', 'testissues', 'foremanissues', 'followupissues', 'releaseissues', 'splitissues', 'split', 'pick', 'healsdays'].includes(k) ? k : 'build'];
+    return [r, own(BATCH_WORDS, k) ? 'pushbatch' : isArea(k) ? 'never' : ['push', 'visible', 'lint', 'failfast', 'teststeponly', 'pushbatch', 'testissues', 'foremanissues', 'followupissues', 'releaseissues', 'splitissues', 'split', 'pick', 'healsdays'].includes(k) ? k : 'build'];
   }
   // A setting as the record would hold it once the host takes it, and the row it is in; null for an action that is
   // not one setting (release, order, unpin...): those show when the host answers.

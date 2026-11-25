@@ -617,7 +617,9 @@ in turn to find the landing that broke it. Then it files a main-fix card that na
 push until main changes. Push landed pushes the commit that its full test run tested, so it skips this run. The run
 needs `test.fileCommand`, or a `test.list` form that can give the test command one file. Without them, the push goes
 on without the run. With `push.check` off, or the Rules tab's **Test before a push** Off, the push goes on without
-the run too ([Which tests a card runs](configuration.md#which-tests-a-card-runs)).
+the run too ([Which tests a card runs](configuration.md#which-tests-a-card-runs)). These two do not apply while the
+Rules tab's **Push after a combined test run** is On. Then the run always runs before the push, and when it cannot run
+one file, the push is held.
 
 Each push writes the pre-push hook's output, as it comes, to a log of its own: `pushlogs/<time>-<process>.log` in the
 state folder (`conveyor.sh state-dir` prints it). Conveyor keeps the newest 20 logs. Push now also writes the path of

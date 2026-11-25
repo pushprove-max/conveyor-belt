@@ -275,8 +275,30 @@ landings since the last push. Each file runs alone. If a file fails, Conveyor fi
 a main-fix card, and holds the push ([Push](cards.md#push)).
 
 `push.check` in `.conveyor/project.json` turns this run on or off. It is on in a new project. Set it to `false`, and
-a push runs no test first. `conveyor.sh control push-check on` or `off`, or the Rules tab's **Test before a push**,
-sets it in the control record, and that value wins over the pack's. `conveyor.sh control push-check default` clears it, so the pack's holds again.
+a push runs no test first, unless Push after a combined test run is on (below). `conveyor.sh control push-check on`
+or `off`, or the Rules tab's **Test before a push**, sets it in the control record, and that value wins over the
+pack's. `conveyor.sh control push-check default` clears it, so the pack's holds again.
+
+The rule **Push after a combined test run** is off in a new project. When it is off, the loop pushes each card when
+it lands. When it is on, the loop does not push a card when it lands. It waits until the combined run is due, then
+pushes all the cards that landed since the last push, in one push. Before that push, Conveyor runs the tests on main,
+also when Test before a push is off. If a file fails, no card is pushed. The push line names the landing that broke
+the file, or says that the file failed before those landings. The push waits until main moves.
+
+Two settings in the control record change the run:
+
+- `pushbatchwhen` sets when the run is due. A number from 1 to 100 makes it due when that many landings are not
+  pushed. A UTC time of day, `HH:MM`, makes it due once that time has come after a landing that is not pushed.
+  `conveyor.sh control rules pushbatchwhen=<1-100|HH:MM>` sets it.
+- `pushbatchtests` sets which tests run. `linked` runs the test files linked to the landings, as above. `all` runs
+  every test file of main, each one alone, but not the pack's runners of the whole suite (`test.wholeCommands`).
+  `conveyor.sh control rules pushbatchtests=<linked|all>` sets it.
+
+The rule needs a pack that can run one test file at a time: `test.fileCommand`, or a `test.list` form that gives the
+test command one file. If the pack cannot, Conveyor does not push, and the push line says why. The rule Push on
+landing must also be on. A `conveyor.sh run` that ends while the rule holds a push exits 1 and says so. The Rules
+tab's row in Landing and push sets the rule and both settings, as do `conveyor.sh control rules pushbatch=on` and
+`pushbatch=off`.
 
 The check of a bug card on main's code runs at most `test.cardFiles` test files (in `.conveyor/project.json`). If
 more are linked, the files that failed most recently in a test step run first.
@@ -952,12 +974,13 @@ Merge PR sets who merges the pull request of Land as `pr`.
   is open, and on the default branch on GitHub when none is open. `release` checks
   that head first. When all checks pass, it merges the pull request, then makes the release on top of the merge. A release
   that a check stops merges nothing.
-- `idle`: Conveyor merges it when no card is on the belt and no issue can be picked. When Test before a push is on,
-  Conveyor first runs the test files linked to every card in the pull request, each one alone, on the head of
+- `idle`: Conveyor merges it when no card is on the belt and no issue can be picked. When Test before a push or Push
+  after a combined test run is on, Conveyor first runs the test files linked to every card in the pull request (every test file with `pushbatchtests` `all`), each one alone, on the head of
   `conveyor/landing`. Conveyor merges only when they all pass. A file that fails goes to a main-fix card, as in the run
   before a push. This run needs a pack that can run one test file at a time: `test.fileCommand`, or a `test.list` form
-  that can give the test command one file. When Test before a push is off, or the pack cannot run one test file,
-  Conveyor merges with no test run first ([Which tests a card runs](#which-tests-a-card-runs)).
+  that can give the test command one file. When both rules are off, Conveyor merges with no test run first. When
+  the pack cannot run one test file, Conveyor merges with no test run first while Push after a combined test run is
+  off, and does not merge while it is on ([Which tests a card runs](#which-tests-a-card-runs)).
 
 With every rule, **Merge** shows on the Control tab while a pull request is open. Conveyor merges with a merge
 commit. Then your local default branch moves to the remote's default branch, Conveyor closes the issues of the cards

@@ -8,7 +8,7 @@
   let KIND, MODEL, KINDS_MAX, STANDING, SETS, PINS_SHOWN, KNOWN_KINDS, GUARDS, BUILDS, ROLES, OTHER, S, ONB, OB,
     num, list, ctl, same, plural, pre, isArea, depKnown, landNow, landKnown, PRMERGE, prNow, prKnown, pushCheckOn,
     draftOf, draftPut, draftDrop, say, send, button, choice, seg, pickList, stepper, row, wouldSkip, skipWords,
-    fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw, relength, rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, suiteSlots, run, judgeRare, rulesHeals;
+    fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw, relength, rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, rulesPushBatch, suiteSlots, run, judgeRare, rulesHeals;
 
   // ---- left: one row a rule ----
   // A role: its CLI (one of those installed on the loop's host, s.clis; the judge's the reviewer's too), then a model
@@ -225,7 +225,7 @@
     }
     const r = c.rules && typeof c.rules === 'object' ? c.rules : {};
     rulesBuild(el, r); rulesNever(el, d, r); rulesCap(el, d, c); rulesGuard(el, d, c); rulesAtOnce(el, c); rulesMode(el, c); rulesSuite(el, c); rulesFailFast(el, r); rulesTestStepOnly(el, r); rulesSeats(el, d); rulesJudge(el, c, d);
-    rulesAccounts(el, c); rulesGates(el, c, r); rulesLand(el, c); rulesCheck(el, c, r); rulesLint(el, r); rulesSplit(el, r); rulesHeals(el, r); rulesTestIssues(el, r);
+    rulesAccounts(el, c); rulesGates(el, c, r); rulesLand(el, c); rulesCheck(el, c, r); rulesPushBatch(el, r); rulesLint(el, r); rulesSplit(el, r); rulesHeals(el, r); rulesTestIssues(el, r);
     rulesPick(el, d, r); rulesCores(el); rulesStanding(el); rulesHeld(el, all); rulesPins(el, c, d); rulesIndexed(el);
     return el;
   }
@@ -399,7 +399,7 @@
     const pOn = choice('On', 'push-on', 'Push on landing: on', pushOn, () => { if (!pushOn) send('rules', ['push=on'], null, ['rules', ['push=off']]); });
     const pOff = choice('Off', 'push-off', 'Push on landing: off', !pushOn, () => { if (pushOn) send('rules', ['push=off'], null, ['rules', ['push=on']]); });
     pOn.disabled = pOff.disabled = !pushKnown;
-    el.append(row('push', 'Push on landing', 'Conveyor pushes each card when it lands',
+    el.append(row('push', 'Push on landing', 'Conveyor pushes each card when it lands, or the cards together after their combined test run when Push after a combined test run is On',
       seg('Push on landing', pOn, pOff), pushKnown ? offLine(pushOn, 'land only: cards land on main, and Push landed on the Control tab pushes them') : newer(pushKnown)));
   }
   function rulesLand(el, c) {
@@ -424,14 +424,14 @@
   }
   function rulesCheck(el, c, r) {
     // Test before a push: On (the default of a new pack) runs the test files linked to the landings since the last
-    // push before each push, and a file that fails holds it; Off pushes with no test first. The pack's push.check
-    // sets it until a change here, which the control record keeps over the pack.
+    // push before each push, and a file that fails holds it; Off pushes with no test first, but not while Push after a combined test run is On,
+    // whose run still comes first (and the line says so). The pack's push.check sets it until a change here, which the control record keeps over the pack.
     const checkOn = pushCheckOn(c), checkKnown = typeof S.d.pushCheck === 'boolean';
     const cOn = choice('On', 'push-check-on', 'Test before a push: on', checkOn, () => { if (!checkOn) send('push-check', ['on']); });
     const cOff = choice('Off', 'push-check-off', 'Test before a push: off', !checkOn, () => { if (checkOn) send('push-check', ['off']); });
     cOn.disabled = cOff.disabled = !checkKnown;
     el.append(row('push-check', 'Test before a push', 'the test files linked to the landings run before each push, and one that fails holds the push',
-      seg('Test before a push', cOn, cOff), checkKnown ? offLine(checkOn, 'a push runs no test first') : newer(checkKnown)));
+      seg('Test before a push', cOn, cOff), checkKnown ? offLine(checkOn, r.pushbatch === true ? 'Push after a combined test run is On, so its tests still run before each push' : 'a push runs no test first') : newer(checkKnown)));
     // Approve visible changes: On stops a card whose change customers or staff will see until its
     // issue, or a parent issue it inherits the yes from (follow-ups and split slices), has a `Visible change approved:` line; Off (the default) lets it land without one, and says so beside the switch, so a
     // landed visible change is not read as approved.
@@ -794,7 +794,7 @@
       num, list, ctl, same, plural, pre, isArea, depKnown, landNow, landKnown, PRMERGE, prNow, prKnown, pushCheckOn,
       draftOf, draftPut, draftDrop, say, send, button, choice, seg, pickList, stepper, row, wouldSkip, skipWords,
       fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw,
-      relength, rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, suiteSlots, run, judgeRare, rulesHeals } = shared);
+      relength, rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, rulesPushBatch, suiteSlots, run, judgeRare, rulesHeals } = shared);
     return { rules, index };
   });
 })();

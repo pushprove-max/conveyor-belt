@@ -38,7 +38,9 @@ test('Rules: Push when a card lands, on by default, is turned off and on from it
   assert.deepEqual(['push-on', 'push-off'].map((a) => act(rulesP(w), a).getAttribute('aria-pressed')), ['false', 'true']);
   // Bug (UX38): the words under the name described the Off state while Off was set, so name and words said opposite
   // things. They describe the switch by its name whatever is set; what Off means shows beside it, only while Off.
-  assert.equal(row(w, 'push').querySelector('.rules-what').textContent, 'Conveyor pushes each card when it lands');
+  // #1621: the words also name the exception, as Push after a combined test run holds the cards for one push.
+  assert.equal(row(w, 'push').querySelector('.rules-what').textContent,
+    'Conveyor pushes each card when it lands, or the cards together after their combined test run when Push after a combined test run is On');
   assert.equal(row(w, 'push').querySelector('.rules-off').textContent, 'off: land only: cards land on main, and Push landed on the Control tab pushes them');
   assert.deepEqual(await sent(w, () => act(rulesP(w), 'push-on').click()), [{ action: 'rules', args: ['push=on'], repo: 'sample' }]);
   // A record with no rules.push is an engine that does not know the rule: neither choice is sent.

@@ -4,14 +4,19 @@
 # The run before a push of main (pushone(); the owner, 2026-11-18: a card runs only its own test files, listcmd() in
 # lib/testrun.sh, and the files the test map links to its change run here): the test files the test map and the
 # links give each landing since the last push (testsel() narrow, of the landing's own change: the union, in order),
-# each run alone, once: a commit whose run passed ($PUSHED.tested; PUSHTESTED names another such file) is not run again. Never a test runner or the whole
+# each run alone, once: a commit whose run passed ($PUSHED.tested; PUSHTESTED names another such file) is not run again.
+# With the rule Push after a combined test run on and its pushbatchtests all, every test file of the commit in their
+# place (testtracked(), less the pack's runners); that pass is kept as "<commit> all", so a pass of the linked files
+# does not clear a push that the owner then asked all the files for. Never a test runner or the whole
 # suite: testsel() narrow selects neither, and each file runs through a command that runs one file (mapone(),
 # lib/testmap.sh: test.fileCommand, else test.command given it as test.list says); a pack with neither runs none and
 # says so (PUSHNOFILE). The files run in a worktree of the commit ($CARDS/pushtest) on one test slot. The landing
 # that broke a file that fails is found by running the file on the landings in turn, newest first (the pushed commit,
 # when it is a landing, fails it; one that lacks the file passes it), up to the first that passes it: the oldest of
 # the landings after that one, as a file that failed, passed, then failed again was broken by the last change, else
-# none (mainred() of lib/mainred.sh looks for it then: brokeby() there). Each such file goes to the main-fix card of
+# none (mainred() of lib/mainred.sh looks for it then: brokeby() there). When the oldest landing fails it too, the file
+# is run on the commit before that landing: when it fails there as well, it failed before these landings, and the
+# reason names no landing for it. Each such file goes to the main-fix card of
 # the commit (mainred(), naming that landing),
 # and the push is held: a push line, result fail, kind check, its check the first file, its reason naming each file
 # with the landing that broke it and the first place its stack traces say it failed, or the scaled time limit it ran
@@ -22,29 +27,48 @@
 PUSHRAN='the run before the push failed'
 PUSHNOFILE='the test files linked to the landings did not run before the push: the test command cannot be given one test file; set test.fileCommand in .conveyor/project.json'
 pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
-  local c=$1 n=$2 sha=$3 wt=$CARDS/pushtest lands=() fs=() bad=() l f s i tc fc lm by why='' took=$SECONDS tested=${PUSHTESTED:-$PUSHED.tested}
+  local c=$1 n=$2 sha=$3 wt=$CARDS/pushtest lands=() fs=() bad=() l f s i tc fc lm by old what why='' all='' took=$SECONDS tested=${PUSHTESTED:-$PUSHED.tested}
   local -A fat=() # fat: why each failed file failed (pushfile()), which the reason gives after the landing that broke it
   shift 3
-  # Until #395 (the push.check rule): a state folder holding push.check.off runs no test before a push (owner's order).
-  [ ! -f "$ST/push.check.off" ] || return 0
+  # Until #395 (the push.check rule): a state folder holding push.check.off runs no test before a push (owner's order),
+  # unless the rule Push after a combined test run is on (pushbatch(), lib/push.sh): the owner asked for the run then.
+  [ ! -f "$ST/push.check.off" ] || pushbatch || return 0
   pushcheck || { echo "conveyor: the push check is off (push.check, control push-check): no test file runs before the push" >&2; return 0; }
-  [ "$(cat "$tested" 2>/dev/null)" != "$sha" ] || return 0
+  # With the rule Push after a combined test run on and its pushbatchtests all, every test file runs, and its pass is
+  # kept as "<commit> all": a pass of the linked files alone does not clear it.
+  ! pushbatch || [ "$(ctl 2>/dev/null | jq -r '.rules.pushbatchtests' 2>/dev/null)" != all ] || all=' all'
+  [ "$(cat "$tested" 2>/dev/null)" != "$sha$all" ] || return 0
   rm -f "$wt.log" "$wt.at.log"
   packget test.command tc test.fileCommand fc test.list lm 2>/dev/null || return 0
-  if [ -z "$fc" ] && { [ -z "$lm" ] || [ "$lm" = runner ] || [ -n "$(listwhy "$MAIN" "$tc" "$lm")" ]; }; then echo "conveyor: $PUSHNOFILE" >&2; return 0; fi
+  # With the rule Push after a combined test run on, a push the run cannot test is not made: it fails, kind transport,
+  # and is tried again later, once the pack can run one test file.
+  if [ -z "$fc" ] && { [ -z "$lm" ] || [ "$lm" = runner ] || [ -n "$(listwhy "$MAIN" "$tc" "$lm")" ]; }; then
+    echo "conveyor: $PUSHNOFILE" >&2
+    pushbatch || return 0
+    record "$c" "$n" push fail "$(jq -cn --arg s "$sha" --arg r "$PUSHNOFILE; the rule Push after a combined test run holds the push until they can run" '{sha: $s, reason: $r, sec: 0, kind: "transport"}')"
+    return 1
+  fi
   # The landings since the last push, oldest first: "<sha> <card> <issue>".
   mapfile -t lands < <(stdb ask lines cards 2>/dev/null | jq -rs --rawfile in <(git rev-list --reverse "$sha" --not "$@" 2>/dev/null) '
     (map(select(.step == "landed" and (.sha | type) == "string" and .sha != "")) | INDEX(.sha)) as $l
     | $in | split("\n")[] | $l[.] // empty | "\(.sha) \(.card) \(.issue)"')
-  [ ${#lands[@]} != 0 ] || { echo "$sha" > "$tested"; return 0; }
+  [ ${#lands[@]} != 0 ] || { echo "$sha$all" > "$tested"; return 0; }
   pushwt "$wt" "$sha" && slot_pool \
     || { pushwt "$wt"; record "$c" "$n" push fail "$(jq -cn --arg s "$sha" --argjson t $((SECONDS - took)) '{sha: $s, reason: "the worktree or the test slots of the run before the push could not be had", sec: $t, kind: "transport"}')"; return 1; }
   names > /dev/null 2>&1 || :
-  mapfile -t fs < <(for l in "${lands[@]}"; do
-      s=$(testsel "$wt" narrow "${l%% *}^" "${l%% *}" 2>/dev/null) && [[ $s == *$'\n'* ]] && printf '%s\n' "${s#*$'\n'}"
-    done | awk 'NF && !seen[$0]++')
+  # With the rule Push after a combined test run on and its pushbatchtests all, every test file of the commit
+  # (testtracked()) but the pack's runners of the whole suite (SUITERUNNERS); else the files linked to the landings.
+  if [ -n "$all" ]; then
+    mapfile -t fs < <(testtracked "$wt" | grep -vxF -f <(printf '%s\n' "${SUITERUNNERS:-}"))
+    what="of ${sha:0:12} (pushbatchtests all)"
+  else
+    mapfile -t fs < <(for l in "${lands[@]}"; do
+        s=$(testsel "$wt" narrow "${l%% *}^" "${l%% *}" 2>/dev/null) && [[ $s == *$'\n'* ]] && printf '%s\n' "${s#*$'\n'}"
+      done | awk 'NF && !seen[$0]++')
+    what='linked to the landings since the last push'
+  fi
   if [ ${#fs[@]} != 0 ]; then
-    echo "conveyor: before the push of ${sha:0:12}, ${#fs[@]} test file(s) linked to the ${#lands[@]} landing(s) since the last push run, each alone" >&2
+    echo "conveyor: before the push of ${sha:0:12}, ${#fs[@]} test file(s) $what run, each alone (${#lands[@]} landing(s) since the last push)" >&2
     [ -n "$SLOT_HOME" ] || until slot_try || slot_wait; do :; done
     for f in "${fs[@]}"; do pushfile "$wt" "$f" || { bad+=("$f"); fat[$f]=$(head -n 1 "$wt.failat" 2>/dev/null); }; done
     for f in "${bad[@]}"; do
@@ -54,24 +78,31 @@ pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
         if [ "$s" != "$sha" ]; then git cat-file -e "$s:$f" 2>/dev/null && pushwt "$wt.at" "$s" && ! pushfile "$wt.at" "$f" || break; fi
         by=$l
       done
+      # The oldest landing fails it too: when the commit before that landing fails it as well, no landing broke it.
+      old=''; s=${by%% *}
+      if [ -n "$by" ] && [ "$by" = "${lands[0]}" ] && git cat-file -e "$s^:$f" 2>/dev/null && pushwt "$wt.at" "$s^" && ! pushfile "$wt.at" "$f"; then old=1; by=''; fi
       mainred "$c" "$f" "$f" "$sha" "$by" || :
       read -r s l _ <<<"$by"
-      if [ -n "$s" ]; then why+="${why:+, }$f (broken by the landing ${s:0:12} of $l"; else why+="${why:+, }$f (the landing that broke it is not known"; fi
+      if [ -n "$s" ]; then why+="${why:+, }$f (broken by the landing ${s:0:12} of $l"
+      elif [ -n "$old" ]; then why+="${why:+, }$f (it failed before the landings since the last push too"
+      else why+="${why:+, }$f (the landing that broke it is not known"; fi
       why+="${fat[$f]:+; ${fat[$f]}})"
     done
     [ -n "$SLOT_HOME" ] || slot_free
   fi
   pushwt "$wt"; pushwt "$wt.at"
-  [ ${#bad[@]} != 0 ] || { echo "$sha" > "$tested"; return 0; }
+  [ ${#bad[@]} != 0 ] || { echo "$sha$all" > "$tested"; return 0; }
   record "$c" "$n" push fail "$(jq -cn --arg s "$sha" --argjson t $((SECONDS - took)) --arg f "${bad[0]}" \
-    --arg r "$PUSHRAN ${#bad[@]} test file(s) linked to the landings since the last push: $why. Each goes to the main-fix card of ${sha:0:12}, and main is pushed again once it moves" \
+    --arg r "$PUSHRAN ${#bad[@]} test file(s) $what: $why. Each goes to the main-fix card of ${sha:0:12}, and main is pushed again once it moves" \
     '{sha: $s, reason: $r, sec: $t, kind: "check", check: ($f | .[0:100])}')"
   return 1
 }
-# Whether the run before a push (pushtests()) runs: the control record's pushCheck (`control push-check on|off`) when it
-# sets one, else the pack's push.check; on when neither gives a value (no record or pack read, or no push.check).
+# Whether the run before a push (pushtests()) runs: always while the rule Push after a combined test run is on
+# (pushbatch(), lib/push.sh); else the control record's pushCheck (`control push-check on|off`) when it sets one, else
+# the pack's push.check; on when neither gives a value (no record or pack read, or no push.check).
 pushcheck() {
   local v
+  ! pushbatch || return 0
   v=$(ctl 2>/dev/null | jq -r '.pushCheck | booleans' 2>/dev/null)
   [ -n "$v" ] || packget push.check v 2>/dev/null || v=true
   [ "$v" != false ]
