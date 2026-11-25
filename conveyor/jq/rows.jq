@@ -21,8 +21,10 @@ def row: . as $s | $s.first as $f | $s.r as $r | $s.l as $l
          elif $l.result != "NO-GO" then "review" elif $r < $max and ($s.rf | not) then "fix" else "landing" end) as $at
       # name: what a main-red fix card (issue 0, its picked line naming main's commit: mainred.sh redpick()) is shown as, in place
       # of an issue number, "Main is red (<commit>)"; a Tests page card of no issue (its picked line naming its test file:
-      # testpick(), lib/testaction.sh), "Tests page: <file>"; a card of another kind with no issue (noIssue), that name; null for any other card, which is shown by its issue.
-      | {card: $f.card, issue: $f.issue, name: (($f.mainRed | strings | "Main is red (\(.[0:12]))") // ($f.testFile | strings | "Tests page: \(.)") // $f.noIssue // null), title: ($f.title // ""), step: ($end.step // $at),
+      # testpick(), lib/testaction.sh), "Tests page: <file>"; a card of another kind with no issue (noIssue), that name; a land-branch card of a
+      # branch that names no issue (issue 0, its picked line naming the branch: pickbranch(), lib/lane.sh), "Branch: <branch>"; null for any other card, which is shown by its issue.
+      | {card: $f.card, issue: $f.issue, name: (($f.mainRed | strings | "Main is red (\(.[0:12]))") // ($f.testFile | strings | "Tests page: \(.)") // $f.noIssue
+          // (if $f.issue == 0 then $f.branch | strings | "Branch: \(.)" else null end) // null), title: ($f.title // ""), step: ($end.step // $at),
          stage: ({picked: 0, build: 1, fix: 3, landing: 5}[$at] // (if $r + (if $l.step == "review" then 0 else 1 end) > 1 then 4 else 2 end)),
          reviews: $r, startedAt: $f.time, stepAt: $s.gt,
          # seats: the judge's call of the rule Pick settings before the card (pickjudge(), lib/modelpick.sh), priced as a step of its own.

@@ -110,8 +110,11 @@ Cards:
   when each part is landed. This is how to land a part by hand after its card blocked or was shut. The review holds the
   branch to the part's own Done-when items. While the part's own card is open, or after the part has landed,
   `land-branch` refuses the branch. Other branches land as issue 0, also when the name has a
-  number in it. A blocked card of issue 0 is closed with `shut <card id>`. Its kept patch stays, and its branch is
-  not changed. When the branch's change is already on main, Needs you says so.
+  number in it. Such a card shows as "Branch: <branch>". A blocked card of issue 0 is closed with `shut <card id>`. Its
+  kept patch stays, and its branch is not changed. `retry <card id>` gives it back: the loop picks it again, and its
+  next card starts from its kept patch. With no kept patch, that card starts from the branch's tip. A card that lands
+  the fast lane's change is given back on the owner's command only, as `land-branch` lands it. When the branch's
+  change is already on main, Needs you says so.
 - `control [<action>]` changes the control record. `control depends` writes an issue's `Depends on:` line on GitHub.
   `control card <issue> ...` sets an issue's own builder, reviewer and judge, and `control card <issue> pick` asks the
   judge to choose them ([Configuration](configuration.md#settings-for-one-card)).

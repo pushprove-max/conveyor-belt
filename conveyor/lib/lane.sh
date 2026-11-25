@@ -66,6 +66,17 @@ slicetake() { # <slice: its card id> <card>
   return $rc
 }
 
+# Whether <branch> (its tip <tip>, or none when the branch is gone) carries the fast lane's change: the lane's branch, or
+# any branch that holds the change of any of the lane's tips (lanetips, lanein), the lane's own branch renamed included.
+# landbranch() and branchback() land such a branch on the owner's command alone (owneronly()).
+laneheld() { # <branch> <tip>
+  local t
+  [ "$1" != "$LANEBR" ] || return 0
+  [ -n "$2" ] || return 1
+  while read -r t; do lanein "$2" "$t" && return 0; done < <(lanetips | sort -u)
+  return 1
+}
+
 # One branch landed as one card (the rule is in README.md). Everything that can be refused is refused before
 # the picked line, so a refusal leaves no card. The tip is read once: the card lands that commit's change, whatever
 # the branch gains meanwhile. The card's issue is the one of a branch named as the engine names a card of this
@@ -80,9 +91,7 @@ landbranch() { # <branch>
   m=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || { echo "conveyor: no branch $BRANCH to land on" >&2; return 2; }
   # The fast lane's change lands on the owner's command alone, under whatever name it is asked for: its branch, or
   # any branch that holds the change of any of its tips (lanetips, lanein), the lane's own branch renamed included.
-  if [ "$br" = "$LANEBR" ] || { while read -r n; do lanein "$tip" "$n" && break; done < <(lanetips | sort -u); [ -n "$n" ]; }; then
-    owneronly land || return 2
-  fi
+  ! laneheld "$br" "$tip" || owneronly land || return 2
   # Its stdout alone: the first line is the tree id, so a warning on stderr must not come ahead of it.
   end=$(git merge-tree --write-tree "$m" "$tip") \
     || { echo "conveyor: branch $br does not merge into main as it stands; rebase it on main first. Nothing recorded: $(tail -n +2 <<<"$end" | head -c 600)" >&2; return 1; }
@@ -105,6 +114,55 @@ landbranch() { # <branch>
   end=$(jq -rs --arg c "$c" 'map(select(.card == $c and (.step | IN("landed", "closed", "blocked")))) | last | select(.) | "\(.step) \(.sha) \(.reason | gsub("\n"; "; "))"' < <(stdb ask card "$c"))
   echo "conveyor: card $c, branch $br: ${end:-no closing line}"
   [[ $end == landed\ * ]]
+}
+# Under the lock, from retry() (lib/issues.sh) before it moves the lines out: a blocked land-branch card of issue 0 (its
+# picked line names its branch) given back by its card id joins the record of the cards with no GitHub issue (TACARDS)
+# as the card of a new entry named "Branch: <branch>", so the loop picks it again (testpick()) and its next card starts
+# from its kept work (testcardwas(), resumeplan(), lib/card.sh). With no kept patch, the branch's change is kept as the
+# card's patch (BACKKEPT, which retry() writes on its blocked line), so the next card lands the branch's tip, as
+# land-branch does; with no branch either, nothing is given back. A branch that carries the fast lane's change is given
+# back on the owner's command alone, as land-branch lands it (laneheld(), owneronly()). A card the record already holds
+# (a split's slice landed by hand: slicetake()) gets the same patch but no new entry: its slice's entry picks it again.
+# Sets BACKID to the entry it added, for branchdrop() if the move fails.
+branchback() { # <card> <its lines>
+  local br t k lock rec body tip held='' mt from to
+  br=$(jq -rs 'map(select(.step == "picked")) | first | select(.issue == 0) | .branch | strings' <<<"$2") || return 1
+  [ -n "$br" ] || return 0
+  tip=$(git rev-parse -q --verify "refs/heads/$br^{commit}") || tip=''
+  ! laneheld "$br" "$tip" || owneronly land || return 1
+  ! jq -e --arg c "$1" 'any(.cards[]?; .card == $c)' "$TACARDS" >/dev/null 2>&1 || held=1
+  k=$(jq -rs 'map(select(.step == "blocked") | .kept // "" | select(. != "")) | last // ""' <<<"$2")
+  if [ -z "$k" ] || [ ! -s "$ST/$k/$1.patch" ]; then
+    [ -n "$tip" ] || { echo "conveyor: card $1 has no kept patch, and its branch $br is gone: nothing to land; nothing changed" >&2; return 1; }
+    # The change land-branch squash-merges: from main to the tip merged into main, so the patch applies to main as it
+    # is now. A tip that no longer merges: its change against the commit it forked from, which the next card ports.
+    # BRANCH, main's name, is the pack's (names(), lib/prompts.sh): `retry` reads no pack names before this.
+    names || return 1
+    if mt=$(git merge-tree --write-tree "refs/heads/$BRANCH" "$tip" 2>/dev/null); then from=refs/heads/$BRANCH; to=$(head -n 1 <<<"$mt")
+    else from=$(git merge-base "refs/heads/$BRANCH" "$tip") && to=$tip || { echo "conveyor: branch $br shares no commit with $BRANCH; nothing changed" >&2; return 1; }; fi
+    k=kept/$1
+    mkdir -p "$ST/$k" && git diff --binary "$from" "$to" > "$ST/$k/$1.patch" \
+      || { echo "conveyor: the change of branch $br could not be kept as the patch of card $1; nothing changed" >&2; return 1; }
+    # shellcheck disable=SC2034 # BACKKEPT: retry()'s, read by its MOVETAG (lib/issues.sh)
+    BACKKEPT=$k
+  fi
+  [ -z "$held" ] || return 0
+  t=$(jq -rs 'map(select(.step == "picked")) | first | .title // ""' <<<"$2")
+  if [ -n "$tip" ]; then body=$(branchissue "$br" "$tip" | jq -r .body) || return 1
+  else body="No issue: this card lands the change of branch $br against main, as its kept patch holds it."; fi
+  mkdir -p "$TESTACTS" 2>/dev/null
+  { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the record of the cards with no GitHub issue could not be locked; nothing changed" >&2; return 1; }
+  BACKID=$(tcput "" "$t" "$body" "" "Branch: $br") && rec=$(jq -ce '.cards | arrays' "$TACARDS") \
+    && jq -c --arg i "$BACKID" --arg c "$1" '{cards: map(if .id == $i then .card = $c else . end)}' <<<"$rec" > "$TACARDS.new" && mv -f "$TACARDS.new" "$TACARDS" \
+    || { rm -f "$TACARDS.new"; exec {lock}>&-; [ -z "$BACKID" ] || branchdrop "$BACKID"; BACKID=''; echo "conveyor: card $1 could not join the record of the cards with no GitHub issue; nothing changed" >&2; return 1; }
+  exec {lock}>&-
+}
+# The entry branchback() added, taken out of the record again.
+branchdrop() { # <entry id>
+  local lock rec
+  { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || return 1
+  rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) && jq -c --arg i "$1" '{cards: map(select(.id != $i))}' <<<"$rec" > "$TACARDS.new" && mv -f "$TACARDS.new" "$TACARDS" || rm -f "$TACARDS.new"
+  exec {lock}>&-
 }
 
 # The fast lane (plan section 11b): the owner's own linked worktree, on branch fast-lane, in the host file's lanesDir

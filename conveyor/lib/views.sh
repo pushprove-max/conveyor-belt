@@ -227,7 +227,7 @@ cards() {
 # the issues whose pushed lines name it or an earlier one (each went to LANDING before it, so is merged with it), for
 # the Foreman's watcher, else null. Every object of it that names a main-red fix card
 # (card) also has name, "Main is red (<commit>)", as rows.jq names it, and so does a Tests page card ("Tests page:
-# <file>"): the card has no issue (issue 0) to be shown by.
+# <file>") and a land-branch card of a branch that names no issue ("Branch: <branch>"): the card has no issue (issue 0) to be shown by.
 # A bad line is set aside first (check()); records that still do not check give no record: the reason and exit 1.
 # It also says what the control record makes of the loop: state (running, paused, stopped, "paused by guard":
 # the weekly limit reading is at or over the guard, "paused: free disk <n> GB under the <floor> GB floor": the card
@@ -516,7 +516,8 @@ health() {
     $livef[0] as $live | (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
     | ([.[], $old[] | select(.step == "picked") | if (.mainRed | type) == "string" then {key: .card, value: "Main is red (\(.mainRed[0:12]))"}
-        elif (.testFile | type) == "string" then {key: .card, value: "Tests page: \(.testFile)"} elif (.noIssue | type) == "string" then {key: .card, value: .noIssue} else empty end] | from_entries) as $names
+        elif (.testFile | type) == "string" then {key: .card, value: "Tests page: \(.testFile)"} elif (.noIssue | type) == "string" then {key: .card, value: .noIssue}
+        elif .issue == 0 and (.branch | type) == "string" then {key: .card, value: "Branch: \(.branch)"} else empty end] | from_entries) as $names
     | [.[] | select(.step == "landed" and $ahead[.sha]) | {card, issue, sha, since: .time}] as $un
     # The cards the push in progress carries: each whose landed commit is one it carries.
     | ($carry | split("\n") | map(select(. != "")) | INDEX(.)) as $carry

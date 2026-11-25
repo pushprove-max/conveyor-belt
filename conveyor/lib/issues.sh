@@ -19,28 +19,28 @@ strays() {
 # the same file when its turn comes.
 # A main-red fix card (issue 0, mainred.sh redpick()) is given back by its card id: its lines move out the same way, and the loop
 # picks its main commit's entry again, a new card built from nothing. So is a card of no issue (a Tests page card, a Foreman order, a review follow-up, a release fix card or a split part: testpick(),
-# lib/testaction.sh): the loop picks its action again, a new card that starts from its kept work (resumeplan()).
+# lib/testaction.sh): the loop picks its action again, a new card that starts from its kept work (resumeplan()). So is a land-branch card of issue 0 (branchback(), lib/lane.sh).
 # RETRYWHY, when set, is why the loop retried the card itself (speedretry()): its blocked line keeps it as retriedWhy. RETRYBY, who gave it back (commands/retry.sh), as retriedBy (reviewretried(), lib/views.sh), which the Board does not show.
-retry() { # <issue, or the card id of a main-red fix card or a Tests page card> [fresh: an issue's next card builds from nothing]
-  local n=$1 ends l what k='.issue == $n' a p f
+retry() { # <issue, or the card id of a main-red fix card, a Tests page card or a land-branch card of issue 0> [fresh: an issue's next card builds from nothing]
+  local n=$1 ends l what k='.issue == $n' a p f BACKID='' BACKKEPT='' # BACKID, BACKKEPT: the record entry and the kept folder branchback() made
   check || return 1
   # No issue is #0: every main-red fix card is of issue 0, so a retry of it would give back each of them. Said: how to
   # name one, and the blocked ones by card id beside the name they are shown by.
   if [[ $1 =~ ^0+$ ]]; then
     l=$(stdb ask issue cards 0) || return 1
     l=$(jq -rs 'map(select(.step != "push")) | [group_by(.card)[] | (map(select(.step == "picked")) | first) as $p
-      | select((($p.mainRed | type) == "string" or ($p.testFile | type) == "string" or ($p.noIssue | type) == "string") and last.step == "blocked")
-      | "\(.[0].card) (\(if ($p.mainRed | type) == "string" then "Main is red (\($p.mainRed[0:12]))" elif ($p.testFile | type) == "string" then "Tests page: \($p.testFile)" else $p.noIssue end))"]
+      | select((($p.mainRed | type) == "string" or ($p.testFile | type) == "string" or ($p.noIssue | type) == "string" or ($p.branch | type) == "string") and last.step == "blocked")
+      | "\(.[0].card) (\(if ($p.mainRed | type) == "string" then "Main is red (\($p.mainRed[0:12]))" elif ($p.testFile | type) == "string" then "Tests page: \($p.testFile)" elif ($p.noIssue | type) == "string" then $p.noIssue else "Branch: \($p.branch)" end))"]
       | if . == [] then "none is blocked now" else "blocked now: " + join(", ") end' <<<"$l") || return 1
-    echo "conveyor: no issue is #0. A main-red fix card, shown as \"Main is red (<commit>)\", a Tests page card, shown as \"Tests page: <file>\", or another card with no GitHub issue (a Foreman order, a review follow-up, a release fix card, a split part) has no issue: retry it by its card id, \`conveyor.sh retry <card id>\` ($l); nothing changed" >&2
+    echo "conveyor: no issue is #0. A main-red fix card, shown as \"Main is red (<commit>)\", a Tests page card, shown as \"Tests page: <file>\", a land-branch card of a branch that names no issue, shown as \"Branch: <branch>\", or another card with no GitHub issue (a Foreman order, a review follow-up, a release fix card, a split part) has no issue: retry it by its card id, \`conveyor.sh retry <card id>\` ($l); nothing changed" >&2
     return 1
   fi
   if [[ $1 =~ ^[0-9]+$ ]]; then
     what="issue #$1"; a=(--argjson n "$1"); l=$(stdb ask issue cards "$1") || return 1
   else
     what="card $1"; k='.card == $n'; a=(--arg n "$1"); l=$(stdb ask card "$1") || return 1
-    [ -z "$l" ] || jq -se 'any(.step == "picked" and (.mainRed or .testFile or .noIssue))' <<<"$l" >/dev/null \
-      || { echo "conveyor: card $1 is no main-red fix card and no card with no GitHub issue: retry takes a card's issue number; nothing changed" >&2; return 1; }
+    [ -z "$l" ] || jq -se 'any(.step == "picked" and (.mainRed or .testFile or .noIssue or (.issue == 0 and (.branch | type) == "string")))' <<<"$l" >/dev/null \
+      || { echo "conveyor: card $1 is no main-red fix card, no land-branch card and no card with no GitHub issue: retry takes a card's issue number; nothing changed" >&2; return 1; }
   fi
   # A card with a pushed line has landed, whatever line follows it and whatever their times: its commit is on main.
   ends=$(jq -rs "${a[@]}" --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" "map(select($k))"' | group_by(.card)
@@ -82,10 +82,10 @@ retry() { # <issue, or the card id of a main-red fix card or a Tests page card> 
     done
   fi
   # A shut self-heals batch card or docs sweep card takes its entries back, or is refused if another card has one (healstake()).
-  if [ "$k" = '.issue == $n' ]; then healstake "" "$1"; else healstake "$1" 0; fi || return 1
+  if [ "$k" = '.issue == $n' ]; then healstake "" "$1"; else healstake "$1" 0 && branchback "$1" "$l"; fi || return 1
   # The blocked line carries when the owner gave the card back (retriedAt): the wait ends there, not at the next pick.
-  MOVETAG='if .step == "blocked" and .retriedAt == null then . + {retriedAt: $at} + (if $why == "" then {} else {retriedWhy: $why} end) + (if $by == "" then {} else {retriedBy: $by} end) else . end' \
-    moveout "$k" "${a[@]}" --arg why "${RETRYWHY:-}" --arg by "${RETRYBY:-}" || return 1
+  MOVETAG='(if $bk != "" and .step == "blocked" and (.kept // "") == "" then .kept = $bk else . end) | if .step == "blocked" and .retriedAt == null then . + {retriedAt: $at} + (if $why == "" then {} else {retriedWhy: $why} end) + (if $by == "" then {} else {retriedBy: $by} end) else . end' \
+    moveout "$k" "${a[@]}" --arg why "${RETRYWHY:-}" --arg by "${RETRYBY:-}" --arg bk "$BACKKEPT" || { [ -z "$BACKID" ] || branchdrop "$BACKID"; return 1; }
   echo "conveyor: $what can be picked again; its old lines are in $RETRIED"
   [ "$k" = '.issue == $n' ] || return 0
   [ -z "${2:-}" ] || { echo "conveyor: its next card builds from nothing; $([ -n "$moved" ] && echo "its kept work is in $d" || echo "it had no kept work")"; return 0; }
