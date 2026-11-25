@@ -250,6 +250,11 @@ refused $'gh issue create --label bug --title Example --body "$(cat <<EOF\nThe f
 # A comment in a backquote part ends at its closing backquote, as Bash finds that end first: the real Cause section
 # after it is body text and lets the issue through.
 passes $'gh issue create --label bug --title Example --body "The form fails. `true # x`\n## Cause\ny"'
+# Bug (#1623 review, follow-up): in a UTF-8 locale awk (mawk) counted the bytes of the `<<EOF` line and Bash cut the
+# command at that many characters, so the `é` in the title moved the cut into the body: `## Cause` read as `# Cause`.
+# mb, not c: the runner below names each case in c, and its `.passed` mark is written with it.
+mb=$'gh issue create --label bug --title \'Café fails\' --body-file - <<EOF\n## Cause\nThe cache is stale.\nEOF'
+out=$(LC_ALL=C.UTF-8 hook "$mb"); [ -z "$out" ] || fail "a Cause section after a multibyte title was refused in C.UTF-8; command: $mb; output: $out"
 # The body of a split `<\` `<EOF` here-document is still read: its real Cause section lets the issue through.
 passes $'gh issue create --label bug --title Example --body-file - <\\\n<EOF\nThe form fails.\n## Cause\nx\nEOF'
 # Bug (#1623): a `#` after a line continuation starts a comment as bash reads it (the continuation is no character).

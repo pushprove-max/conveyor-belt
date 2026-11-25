@@ -199,6 +199,10 @@ unquoted() {
 # read again from its start, as Bash reads it. With a second argument `0`, the bodies are left out (each is one blank
 # line): only the shell text stays, where the options are read, so a quote or a `#` in a body changes no comment after it.
 heredocs() {
+  # LC_ALL=C (exported to the awks): the awk below and Bash's ${u:0:at} and ${s:at} all count bytes. In a UTF-8 locale
+  # mawk counts bytes and Bash counts characters, so each multibyte character before a `<<WORD` line moved the cut into
+  # the body.
+  local -x LC_ALL=C
   local s=$1 nb=${2:-1} o='' r='' u q ru rq at ops op w line
   while [ -n "$s" ]; do
     # r: the shell text read so far, without the bodies. The text after a body is read on from it, not from a new
