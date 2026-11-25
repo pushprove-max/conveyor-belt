@@ -44,6 +44,28 @@ t_tarunpattern() {
   [ "$(grep -oE '^[0-9]+ src/[^:]*' <<<"$out" | paste -sd, -)" = '0 src/test-a.mjs,2 src/helper.mjs' ] || fail "the paths tafile took and refused: $out"
 }
 
+# Bug it catches (release 1.12.0, tarun): a run by hand of the suite runner is refused at once by its runner
+# (tarunfile(), "is left off the card's list"), and when that refusal had written the record as failed before the ask
+# read it, the ask said the action did not start and gave no id, so `testaction run` failed though the run (with the
+# refusal as its reason, for the Board) was there. taask() itself, on the record that race leaves: failed, with its
+# <id>.txt (the runner wrote it, so it started; a regular file by then). A record failed with no <id>.txt (tafail(): it never started) is still
+# refused with its reason.
+t_taaskended() {
+  setup '[]'; local out
+  out=$(export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && . "$SRC/lib/prompts.sh" \
+    && . "$SRC/lib/issues.sh" && . "$SRC/lib/testaction.sh" && names || exit 1
+    TESTACTS=$T/$CASE/ta; mkdir -p "$TESTACTS" || exit 1
+    echo '{"id": "aaaaaaaaaaaa", "state": "failed", "reason": "it did not run: conveyor: tests/run.test.sh is left off the card'"'"'s list: the test runner, not a test"}' > "$TESTACTS/aaaaaaaaaaaa.json"
+    # A regular file, as tarunfile() leaves it: it copies <worktree>.test over its link before it records failed.
+    echo "conveyor: tests/run.test.sh is left off the card's list: the test runner, not a test" > "$TESTACTS/aaaaaaaaaaaa.txt"
+    echo '{"id": "bbbbbbbbbbbb", "state": "failed", "reason": "the copy of main the session reads could not be made"}' > "$TESTACTS/bbbbbbbbbbbb.json"
+    for id in aaaaaaaaaaaa bbbbbbbbbbbb; do e=$(taask "$id" 2>&1); echo "$? $id: $e"; done) || fail "the engine could not be loaded: $out"
+  grep -qx '0 aaaaaaaaaaaa: aaaaaaaaaaaa' <<<"$out" \
+    || fail "taask aaaaaaaaaaaa (record failed by its runner's refusal, <id>.txt there): the ask did not give the id: $out"
+  grep -qx '1 bbbbbbbbbbbb: conveyor: the test action bbbbbbbbbbbb did not start: the copy of main the session reads could not be made' <<<"$out" \
+    || fail "taask bbbbbbbbbbbb (record failed before it started, no <id>.txt): the ask was not refused with its reason: $out"
+}
+
 # One case on one fixture (trsetup): its refused paths, then a run that passes, then one that fails. Each case of
 # its own paid the fixture again.
 # Bugs this guards (issue 517): the owner could not time one test file without a card. A run by hand of a path that is
@@ -99,10 +121,15 @@ t_tarun() {
 
   # Bug it catches (E9): a run that ended before it started (a suite runner, refused, so it had no scaled limit) had
   # its limit read from an empty value: jq failed on it and the record was written empty, so the Board lost the run.
+  # Bug it catches too: the runner's refusal ended the run before the ask read its record, so the ask said it did not
+  # start and gave no id, though its record (with the refusal as its reason) was there for the Board.
   echo 'echo all' > "$R/tests/run.test.sh" && git -C "$R" add tests/run.test.sh && git -C "$R" commit -qm 'a suite runner' || fail "the runner could not be committed"
   tune '.test.full = "bash tests/run.test.sh"'
   id=$(loop testaction run tests/run.test.sh 2>&1) && [[ $id =~ ^[0-9a-f]{12}$ ]] || fail "the run of the suite runner did not start: $id"
   wait_until "[ \"\$(tarec $id .state)\" != running ]" "cat '$ST/testactions/$id.json' '$ST/testactions/$id.err'" || fail "the run of the suite runner did not end"
   [ "$(tarec "$id" '[.state, .file, .limit] | tojson')" = '["failed","tests/run.test.sh",3600]' ] \
     || fail "testaction run tests/run.test.sh (the pack's test.full runs it): the record of the refused run does not say failed with its limit 3600: $(cat "$ST/testactions/$id.json")"
+  # The Board shows this reason: it must say the file is the test runner, so the user runs a test file in its place.
+  [[ $(tarec "$id" .reason) == *"tests/run.test.sh is left off the card's list: the test runner, not a test"* ]] \
+    || fail "testaction run tests/run.test.sh (the pack's test.full runs it): the refused run's reason does not say it is the test runner: $(cat "$ST/testactions/$id.json")"
 }

@@ -416,13 +416,13 @@ testaction() { # <judge | explain | run> <test file> | stop <id>
 # again as it ends (tarun(), tarunfile()). One holder at a time ($TESTACTS/queue.lock): two ends, or an end and an ask,
 # never start one action twice or more than TAMAX at once. An action counts as running while its record says so and
 # its runner is there. The ask prints the id once the action has started or is queued; one that could not start is
-# failed, saying why (exit 1).
+# failed, saying why (exit 1); one whose runner wrote <id>.txt (tarun(), tarunfile()) started, even if it failed at once.
 TAMAX=3
 taask() { # <id>
   local r
   taqueue
   r=$(jq -ce 'objects' "$TESTACTS/$1.json" 2>/dev/null) || { echo "conveyor: the record of the test action $1 could not be read" >&2; return 1; }
-  [ "$(jq -r .state <<<"$r")" != failed ] || { echo "conveyor: the test action $1 did not start: $(jq -r '.reason // "no reason given"' <<<"$r")" >&2; return 1; }
+  [ "$(jq -r .state <<<"$r")" != failed ] || [ -e "$TESTACTS/$1.txt" ] || { echo "conveyor: the test action $1 did not start: $(jq -r '.reason // "no reason given"' <<<"$r")" >&2; return 1; }
   echo "$1"
 }
 taqueue() {
