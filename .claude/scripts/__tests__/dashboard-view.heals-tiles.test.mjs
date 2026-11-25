@@ -118,6 +118,27 @@ test('Self-heals tiles: a list tile with no entries on the list says that no ent
   assert.equal(q(w, '.sh-none').textContent, 'No entry matches this search, kind or tile.', 'with Seen again pressed');
 });
 
+// Bugs: a zero-count tile left the entries it does not count on the list; the harm tile with no harm move to show
+// opened the dropped entries as an empty list, with no word that no entry matches.
+test('Self-heals tiles: a zero-count tile hides the entries on the list, and a zero-count harm tile says that no entry matches', () => {
+  const w = boot({ tab: 'selfheals' });
+  const d = data();
+  // l1 and n1 are not seen again; d2 moved up to harm out of the 30 days and d3 expired, so both tiles count 0.
+  d.panels.declined.data.heals[0].entries = ENTRIES.filter((e) => /l1$|n1$/.test(e.id));
+  d.panels.declined.data.heals[0].dropped = DROPPED.filter((e) => /d2$|d3$/.test(e.id));
+  deliver(w, d);
+  assert.deepEqual(rowIds(w), ['l1', 'n1']);
+  tile(w, 'seen').click();
+  assert.equal(tile(w, 'seen').querySelector('.sh-tile-n').textContent, '0');
+  assert.deepEqual(rowIds(w), [], 'Seen again at 0 hides the entries on the list');
+  assert.equal(q(w, '.sh-none').textContent, 'No entry matches this search, kind or tile.');
+  tile(w, 'harm').click();
+  assert.equal(tile(w, 'harm').querySelector('.sh-tile-n').textContent, '0');
+  assert.deepEqual(pressed(w), ['harm']);
+  assert.deepEqual(qa(w, '.sh-dropped li').map((li) => li.textContent), ['No entry matches this tile.'],
+    'the harm tile at 0 shows neither the old harm move nor the expired entry, and says that no entry matches');
+});
+
 // Bugs: the harm tile counted entries that the list does not hold, with no way to see them; the dropped entries it
 // opens would show the expired entry or the move up to harm of 40 days ago, which the tile does not count.
 test('Self-heals tiles: Moved up to harm opens the dropped entries with the harm moves of the last 30 days alone', () => {
