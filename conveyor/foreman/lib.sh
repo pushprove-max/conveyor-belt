@@ -245,11 +245,12 @@ await_start() {
   done
 }
 # locked <command> [<argument>...]: runs it holding claim.lock, so two changes of the mark or of former never mix.
-locked() { mkdir -p "$FD" && ( lockturn || exit 1; "$@" ) 9>>"$FD/claim.lock"; }
+locked() { mkdir -p "$FD" && ( lockturn || exit 1; trap lockfree EXIT; "$@" ) 9>>"$FD/claim.lock"; }
 # lockturn: takes claim.lock on fd 9, after however many turns before it, and writes the turn it takes to claim.turn.
-# Every take of claim.lock goes through it (locked, and the start hook waiter.sh --start), so each change of hands shows.
-# It gives up (status 1) only when no turn was taken in a whole wait of CONVEYOR_FOREMAN_LOCK_WAIT seconds (30; set
-# by the tests): one holder kept the lock all that time. Bug (issue 1687): a fixed 30 s wait made claims at once on a
+# Every take and every free of claim.lock writes a turn (lockturn and lockfree: locked, and the start hook waiter.sh
+# --start; a holder killed outright writes none, but its next taker's turn shows), so each change of hands shows. It
+# gives up (status 1) only when no turn was written in a whole wait of CONVEYOR_FOREMAN_LOCK_WAIT seconds (30; set by
+# the tests): one holder kept the lock all that time. Bug (issue 1687): a fixed 30 s wait made claims at once on a
 # loaded machine give up before their turn, though no holder was stuck.
 lockturn() {
   local was now
@@ -259,6 +260,10 @@ lockturn() {
   done
   printf '%s\n' "$BASHPID $EPOCHREALTIME" > "$FD/claim.turn"
 }
+# lockfree: writes a new turn to claim.turn while it still holds claim.lock, then frees it (closes fd 9). A taker
+# writes its turn only once its flock returns, so a wait that ended in that gap read the turn of the take before and
+# gave up, though the lock had changed hands (the review finding of issue 1687); the free's turn is written first.
+lockfree() { printf '%s\n' "$BASHPID $EPOCHREALTIME" > "$FD/claim.turn"; exec 9>&-; }
 # former: the sessions that held the role and lost it, one a line: "<id>" until it is told so at its next start, then
 # "<id> told". Only a claim takes a session off it, so a former Foreman never takes the role back by a resume.
 # forget <session id>: takes it off former. told <session id>: marks it told.
