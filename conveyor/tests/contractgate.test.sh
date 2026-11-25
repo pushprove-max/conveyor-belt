@@ -263,17 +263,27 @@ t_pushgatewait() {
 
 # Bug it catches: the push check ran outside the test slots, beside every test run of a full machine, and with no live
 # record, so the loop took a quiet hook for a card with no process of its step (stuckcard(), lib/run.sh) and stopped
-# it before pushTimeout. With a pool of one slot, main's hook on card c7's change (web.ts) finds that slot held while
-# it runs (as a lint command does in t_lintbasedeps), and the card's live record says it runs the hook; after, the
-# record is gone and the gate passed.
+# it before pushTimeout; and (review of #1683) a check that took a slot when one was free but ran the hook with none
+# when the pool was full. With a pool of one slot, held by another test run, the push check of card c7's change
+# (web.ts) waits and its live record says so; the hook has not run. Once that slot is given back, main's hook finds the
+# slot held while it runs (as a lint command does in t_lintbasedeps), it ran only after the slot was given back, and
+# the card's live record says it runs the hook; after, the record is gone and the gate passed.
 t_pushgateslot() {
-  local p=$T/$CASE/slots o=$T/$CASE/gate
+  local p=$T/$CASE/slots o=$T/$CASE/gate fr=$T/$CASE/free gp
   contractmain '[]' 0
-  pushgatehook "h=0; flock -n $(printf %q "$p/1") true 2>/dev/null || h=1; echo \"slots=\$h live=\$(jq -r .action \"\$PWD.live\" 2>&1)\" > $(printf %q "$o")"
+  pushgatehook "h=0; flock -n $(printf %q "$p/1") true 2>/dev/null || h=1; [ -e $(printf %q "$fr") ] && f=1 || f=0; echo \"slots=\$h freed=\$f live=\$(jq -r .action \"\$PWD.live\" 2>&1)\" > $(printf %q "$o")"
   FXWT=$T/$CASE/cards/c7; git -C "$R" worktree add -q --detach "$FXWT" && echo 'export const n = 1' > "$FXWT/web.ts" && git -C "$FXWT" add -A || fail "the card's change"
+  mkdir -p "$p" && : >> "$p/1" || fail "the test slot"
+  flock "$p/1" bash -c 'until [ -e "$0" ]; do sleep 0.05; done' "$fr" & # sleep: the other test run's poll for the case to give its slot back
+  # The path is put in here: wait_run() has a local p of its own, so "$p" in the condition would read that one.
+  wait_until "! flock -n $(printf %q "$p/1") true" || fail "the one test slot was not held"
   # shellcheck disable=SC2016 # expanded in fx_in's shell
-  fx_in 'unset CONVEYOR_TEST_SLOT; export CONVEYOR_TEST_POOL=1:'"$p"'; pushgaterun c7 "$FXWT"; echo "rc=$? $PUSH_WHY"; [ ! -e "$FXWT.live" ] || echo "live left"'
-  [ "$(cat "$o" 2>&1)" = "slots=1 live=running main's pre-push hook on the card's change" ] \
-    || fail "main's hook on the card's change (web.ts) did not run on the one test slot with the card's live record naming it: $(cat "$o" 2>&1)"
+  fx_in 'unset CONVEYOR_TEST_SLOT; export CONVEYOR_TEST_POOL=1:'"$p"'; pushgaterun c7 "$FXWT"; echo "rc=$? $PUSH_WHY"; [ ! -e "$FXWT.live" ] || echo "live left"' & gp=$!
+  wait_until '[ "$(jq -r .action "$FXWT.live" 2>/dev/null)" = "waiting for a test slot (1 of 1 in use)" ]' 'cat "$FXWT.live" "$o"' \
+    || fail "the push check of the card's change (web.ts) did not wait for the one test slot, held by another run, with its live record saying so: $(cat "$FXWT.live" "$o" 2>&1)"
+  [ ! -e "$o" ] || fail "main's hook on the card's change (web.ts) ran while the one test slot was held by another run: $(cat "$o")"
+  : > "$fr"; wait "$gp"
+  [ "$(cat "$o" 2>&1)" = "slots=1 freed=1 live=running main's pre-push hook on the card's change" ] \
+    || fail "main's hook on the card's change (web.ts) did not run on the one test slot, after the other run gave it back, with the card's live record naming it: $(cat "$o" 2>&1)"
   [ "$(cat "$T/$CASE/run.out")" = 'rc=0 ' ] || fail "the push check of the card's change (web.ts) did not pass and clear its live record: $(cat "$T/$CASE/run.out")"
 }
