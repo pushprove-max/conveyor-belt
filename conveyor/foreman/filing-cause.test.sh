@@ -277,6 +277,9 @@ passes $'# ask alpha testissue conveyor/x.test.sh Slow x\ngh issue create --titl
 # of `It's` in a body opened a quote that ran on past the end word and made the comment after it a `--label bug`
 # (refused), or hid the real `< file` behind a commented one.
 passes $'gh issue create --title Example --body-file - <<\'EOF\'\nIt\'s a note.\nEOF\n# --label bug'
+# Bug (#1623 review, follow-up): a `--label bug` written in a here-document body is body text, not an option; read
+# from the command with its bodies kept (heredocs "$cmd"), the label scan made an issue with no fix in it a fix (refused).
+passes $'gh issue create --title Example --body-file - <<\'EOF\'\nExample: --label bug\nEOF'
 refused "gh issue create --title Example --body-file - <<'EOF'"$'\n'"It's a note."$'\n'"EOF"$'\n'"# < $T/none.md"$'\n'"gh issue create --title Example --body-file - < $T/fix.md"
 }
 
