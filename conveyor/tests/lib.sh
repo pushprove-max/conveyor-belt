@@ -344,7 +344,10 @@ ign = int(next(l for l in open("/proc/%s/status" % sys.argv[1]) if l.startswith(
 for s in signal.SIGPIPE, signal.SIGXFSZ:
     if not ign >> (s - 1) & 1: signal.signal(s, signal.SIG_DFL)
 os.execvp(sys.argv[2], sys.argv[2:])' "$BASHPID")
-  trap 'trap "" TERM INT HUP; [ -z "$k" ] || { kill -TERM -- "-$k" 2>/dev/null; wait "$k"; }; exit 143' TERM INT HUP
+  # Told to end, it ends the case's keeper and still prints what the case wrote (the keeper guard's note among it), as
+  # at the end below: a case stopped so is not left with no output.
+  trap 'trap "" TERM INT HUP; [ -z "$k" ] || { kill -TERM -- "-$k" 2>/dev/null; wait "$k"; }
+    [ ! -s "$T/$CASE.out" ] || flock "$T/print.lock" cat "$T/$CASE.out"; exit 143' TERM INT HUP
   # Every function but the other cases (t_<name> of a case file, which no case calls): with all 2,400 of them, the
   # keeper read 3.5 MB, some 0.17 s of every case.
   # shellcheck disable=SC2046 # function names are single words
@@ -372,7 +375,12 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$BASHPID")
     --arg s "$(cat "$T/$CASE.sec" 2>/dev/null)" '{file: $f, case: $c, result: (if $r == "ok" then "ok" else "fail" end), sec: (($s | tonumber? // 0) / 1e6)}' > "$CONVEYOR_TEST_LOG/results/$CASE"; }
   [ -e "$T/$CASE.rc" ] || echo "FAIL [$CASE]: the case's keeper did not start, or was ended before the case was: $(cat "$T/$CASE.keeper" 2>/dev/null)" >> "$T/$CASE.out"
   [ "$(cat "$T/$CASE.rc" 2>/dev/null)" != 0 ] || echo "ok $CASE" >> "$T/$CASE.out"
+  # Told to end from here, it prints the output once, here, and then ends as told: the trap above would print it again
+  # once this print had ended.
+  local stop=
+  trap 'stop=1' TERM INT HUP
   flock "$T/print.lock" cat "$T/$CASE.out"
+  [ -z "$stop" ] || exit 143
 }
 # The time of each case file <file>... whose every case the run selected (SEL) and timed (run_case: $T/<case>.sec and
 # $T/<case>.cpu), one a line, `<file's name><TAB><seconds><TAB><CPU seconds>`: the sums of its cases' own times, as
