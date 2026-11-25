@@ -1304,6 +1304,12 @@ test('/units takes the loop\'s waiting count now while the snapshot is behind', 
   const s = board({ belt: sixCards(true), recordsNewer: true, recordsNow: { building: 5, waitingCount: 1 }, health: { loop: true, state: 'running', building: 4, waitingCount: 2, builderCap: 6 } })
   expect(matrixHead(s), 'feed: recordsNow {building 5, waitingCount 1}, health {building 4, waitingCount 2, builderCap 6}').toMatch(/ bookstore · 5\/6 slots · 1 waiting$/)
 })
+// Bug it catches: a fresh count of 0 (the last waiting card resumed) taken as no count, so the header fell back to the
+// old snapshot's `2 waiting` (`||` in place of `??` in parseRecord).
+test('/units shows no waiting count when the loop\'s count now is 0 and the snapshot that is behind had 2', () => {
+  const s = board({ belt: sixCards(true), recordsNewer: true, recordsNow: { building: 5, waitingCount: 0 }, health: { loop: true, state: 'running', building: 4, waitingCount: 2, builderCap: 6 } })
+  expect(matrixHead(s), 'feed: recordsNow {building 5, waitingCount 0}, health {building 4, waitingCount 2, builderCap 6}').toMatch(/ bookstore · 5\/6 slots$/)
+})
 // Bug it catches: a view that showed `· 0 waiting`, or a wait mark on a card with no waitsOn.
 test('/units shows the matrix as before when no card waits', () => {
   const m = matrixOf(sixCards(false), { loop: true, state: 'running', building: 6, waitingCount: 0, builderCap: 6 })
