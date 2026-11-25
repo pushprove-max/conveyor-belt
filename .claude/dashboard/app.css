@@ -1719,6 +1719,8 @@ button.sh-tile[aria-pressed="true"] { border-color: var(--accent); background: v
 .sh-sheet-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
 .sh-sheet-n { margin-right: auto; }
 .sh-sheet-row { cursor: default; }
+/* A sheet row has no detail panel to open, so its title wraps: one clipped line would hide a second place on a phone. */
+.sh-sheet-row .sh-row-title { white-space: normal; overflow-wrap: anywhere; }
 /* A left-out row is marked by its edge, ground and title colour, never by opacity: opacity blends each tag's text
    into its badge, under the 4.5:1 that small text must meet (--muted on --surface-2 is held to it). */
 .sh-sheet-row.is-out { border-style: dashed; background: var(--surface-2); }

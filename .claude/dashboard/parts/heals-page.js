@@ -68,11 +68,14 @@
   // what it says is wrong. A place in backticks goes with all it quotes (`file:12 (t_case)`). The row shows only the
   // first place as its place, so each other place the quote names (`a.sh:3, b.sh:9`) goes after what it says, which a
   // narrow row clips last: "... (also at `b.sh:9`)".
-  const titleOf = (e) => {
+  const leadOf = (e) => {
     const s = text(e).replace(MARKS, '').replace(/^R[0-9]+\s+/, '').replace(MARKS, '');
     const m = /^(?:`([A-Za-z0-9_./-]+:[0-9]+(?:[–-][0-9]+)?[^`]*)`|[A-Za-z0-9_./-]+:[0-9]+(?:[–-][0-9]+)?):?\s+/.exec(s);
+    return { s, m, more: m && m[1] ? (m[1].match(new RegExp(PLACE.source, 'g')) || []).slice(1) : [] };
+  };
+  const titleOf = (e) => {
+    const { s, m, more } = leadOf(e);
     const what = (m ? s.slice(m[0].length) : s).replace(/(?:[.:;]?\s*\bproof:|\s+- (?:how|fix|test):)[\s\S]*$/i, '').trim();
-    const more = m && m[1] ? (m[1].match(new RegExp(PLACE.source, 'g')) || []).slice(1) : [];
     return what ? what + (more.length ? ` (also at ${more.map((p) => `\`${p}\``).join(', ')})` : '') : text(e);
   };
   // Where a finding came from: its issue, or its card when it has no GitHub issue (issue 0).
@@ -97,7 +100,7 @@
     const days = num(x.days), at = Date.parse(e.seen || e.time), ok = Number.isFinite(at);
     const age = ok ? Math.max(0, (now - at) / DAY) : null;
     return { e, x, key: keyOf(e), days, age, left: ok && days !== null ? Math.max(0, Math.ceil(days - age)) : null, kind: kindOf(e),
-      level: levelOf(e), title: titleOf(e), place: placeOf(text(e)), seen: num(e.sightings) || 0, time: Date.parse(e.time) || 0 };
+      level: levelOf(e), title: titleOf(e), place: placeOf(text(e)), also: leadOf(e).more, seen: num(e.sightings) || 0, time: Date.parse(e.time) || 0 };
   }
   const listsOf = (d) => list(d && d.heals).filter((x) => x && typeof x === 'object');
   const liveOf = (d) => listsOf(d).flatMap((x) => list(x.entries).filter((e) => e && !S.gone.has(keyOf(e))));
@@ -647,7 +650,9 @@
     dd.append(sh.area ? h('code', null, sh.area) : 'none: the entries have no area');
     dl.append(h('dt', null, 'Area label'), dd);
     const files = new Map();
-    v.kept.forEach((r) => { const f = r.place ? r.place.replace(/:[0-9]+(?:[–-][0-9]+)?$/, '') : `file ${NOT_READ}`; files.set(f, (files.get(f) || 0) + 1); });
+    // Each file an entry names (its place and each other place it quotes), counted once for the entry.
+    const fileOf = (p) => p.replace(/:[0-9]+(?:[–-][0-9]+)?$/, '');
+    v.kept.forEach((r) => new Set(r.place ? [r.place, ...r.also].map(fileOf) : [`file ${NOT_READ}`]).forEach((f) => files.set(f, (files.get(f) || 0) + 1)));
     const fl = h('ul', 'sh-files');
     Array.from(files).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).forEach(([f, n]) => {
       const li = h('li', null);

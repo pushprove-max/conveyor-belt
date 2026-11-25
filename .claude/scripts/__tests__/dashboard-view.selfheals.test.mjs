@@ -165,15 +165,16 @@ test('Self-heals: the sort line says when the sort ran, and a finding and a reas
 // Bug it catches: an audit finding that quotes two places (`a.sh:3, b.sh:9`) lost the quote from its title, and the
 // place shows only the first, so the row, the detail panel, the batch sheet and the Dropped list no longer named the
 // second place. And a title that put both long places first hid what the finding says when a narrow row clips the
-// title to one line: the summary comes first, the second place after it.
+// title to one line: the summary comes first, the second place after it. The quote names a.sh twice, so Files it
+// touches must count that entry once for a.sh, not once for each line it cites there.
 test('Self-heals: a finding that quotes two places keeps the second in its title, after the summary', () => {
-  const two = 'R2 [P2] `conveyor/lib/a.sh:575, conveyor/tests/b.test.sh:116`: the batch lands a card untested - How: x - Raised on #12';
+  const two = 'R2 [P2] `conveyor/lib/a.sh:575, conveyor/tests/b.test.sh:116, conveyor/lib/a.sh:600`: the batch lands a card untested - How: x - Raised on #12';
   const { w } = open({ entries: [entry('h0000000000c1', { time: iso(T0 - DAY), area: 'area:board', effect: 'self-heals', why: 'w', finding: two })],
     dropped: [entry('h0000000000c2', { time: iso(T0 - 9 * DAY), area: 'area:board', effect: 'self-heals', why: 'w', finding: two, dropped: { time: iso(T0 - DAY), why: 'expired' } })] });
-  const want = 'the batch lands a card untested (also at conveyor/tests/b.test.sh:116)';
+  const want = 'the batch lands a card untested (also at conveyor/tests/b.test.sh:116, conveyor/lib/a.sh:600)';
   const title = (sel, what) => {
     assert.equal(q(w, sel).textContent.trim(), want, `${what} of: ${two}`);
-    assert.deepEqual(qa(w, `${sel} code.why-code`).map((c) => c.textContent), ['conveyor/tests/b.test.sh:116'], `${what}'s code spans of: ${two}`);
+    assert.deepEqual(qa(w, `${sel} code.why-code`).map((c) => c.textContent), ['conveyor/tests/b.test.sh:116', 'conveyor/lib/a.sh:600'], `${what}'s code spans of: ${two}`);
   };
   const row = '.sh-row[data-key="sample:h0000000000c1"]';
   title(`${row} .sh-row-title`, 'the row title');
@@ -184,6 +185,13 @@ test('Self-heals: a finding that quotes two places keeps the second in its title
   title('.sh-dropped .sh-row-title', "a dropped entry's title");
   q(w, '.sh-area[data-area="area:board"] [data-act="heals-batch"]').click();
   title('.sh-sheet-row .sh-row-title', "a batch sheet row's title");
+  // Bug it catches: the sheet row (no detail panel, no tooltip) clipped its title to one line, so on a phone the
+  // "(also at ...)" part was cut off, and Files it touches named only the first file. jsdom cascades the stylesheet
+  // but lays nothing out, so the check is the computed white-space of the title.
+  const st = w.document.createElement('style'); st.textContent = css; w.document.head.append(st);
+  assert.equal(w.getComputedStyle(q(w, '.sh-sheet-row .sh-row-title')).whiteSpace, 'normal', `the batch sheet row's title wraps, for: ${two}`);
+  assert.deepEqual(qa(w, '.sh-files li').map((li) => li.textContent), ['conveyor/lib/a.sh1 entry', 'conveyor/tests/b.test.sh1 entry'],
+    `Files it touches names each file of: ${two}`);
 });
 
 // Bugs (issue 1622): the page said in one line what the list holds, so a reader could not tell what a self-heal is, why
