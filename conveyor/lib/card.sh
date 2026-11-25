@@ -279,7 +279,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local sv an ex ids fl # sv, an, ex: a review's survived findings, its answers and the lines it cites (donewhen.sh repeats(), answers(); review.sh excerpts()); ids, fl: the fix round's numbered findings and its lines (donewhen.sh numbered(), fixlines())
   local grown='' # grown: the judge was asked about the size of its change (growcheck(), lib/slices.sh)
   local rline='' ended='{}' stop='' finend='{}' earlyend='' fe # rline, ended, stop: a review's line before it is written, and why the loop ended (loopstop()); finend, earlyend, fe: why the loop of a port's kept review ended, and the stop the filed line carries
-  local lfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh)
+  local lfix='' cfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh); cfix: the BLOCKED lines its persisted-contract fix sessions were given, one a line (contractgate(), lib/contract.sh)
   local fixtree='' rtree='' # fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts()); rtree: the one the last review read, which a reused review reads again
   local after rland='' rlrev='' rlfind='' # after: what follows a review (afterreview()); rland: the card lands its kept patch on its kept review, a retry by review-land's (resumeplan()); rlrev: that kept review; rlfind: the finding its block names
   local priv privfix=0 p1 p1fix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: the fix rounds given for such hits (PRIVFIXES at most); p1: the P1 finding that gets one fix round, p1fix: that round was given

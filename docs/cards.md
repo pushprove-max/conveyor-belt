@@ -225,6 +225,17 @@ The pass stays the card's lint result, and the card gets no new `lint` line.
   `lint: <n> findings left after its fix session; nothing landed`. If a different session (a test fix, for example)
   changed the code after the lint fix, a finding gets one new fix session.
 
+After the lint commands, the landing gate runs the persisted-contract check when the project's pre-push hook runs it
+(the hook names `--contract-range`). The check is the copy in the Conveyor install that the project uses: the
+commit the pack pins, or the newest commit taken on this machine. So a change that the pre-push hook would refuse does
+not land. A refusal goes to a fix session with the check's message. Then the card goes to a review again. The check
+names one writer at a time, so a refusal that names a different writer gets its own fix session. A refusal that a fix
+session already had blocks the card with the reason `contract: the persisted-contract check still refuses the change
+after its fix session; nothing landed: <the check's BLOCKED line>`. With batches on, a card that waits to land runs the same
+check after its lint. A refusal stops its checks and tests, no batch takes it, and its landing gate deals with it.
+The check also runs on each commit just before it lands, so a card in a batch is checked on top of the cards before
+it. A refusal there lands nothing, and the card goes back to its own landing gate.
+
 With batches on, a card that waits to land after its `GO` runs its own product checks and tests while it waits. The
 same lint commands run first, once in the wait. A pass and a missing tool let its checks and tests run. A finding or an
 execution error stops them, with no fix session. The card is then not ready: no batch takes it, and the lint does not

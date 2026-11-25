@@ -1211,7 +1211,19 @@ review gate of that pass does not run on the change the fix left (`lfix`, its `c
 on it. At the next landing gate, a finding on that same change blocks the card with `lint: <n> findings left after its
 fix session; nothing landed`. A change that a later session changed (a test fix, a check fix) gets one new fix session.
 
-The read-only check (`lintrun`) holds around each gate run. Before the commands, the index tree is kept, and the
+After the lint gate, `cardtest()` runs `contractgate` (`lib/contract.sh`) when main's pre-push hook names
+`--contract-range`: `adversarial-review-gate.sh --contract-range` on the card's staged change, from the install of the
+project's engine (the pack's pin, or the newest commit taken on this machine), as the pre-push hook loads it. A loop
+run from a checkout with no such commit uses the engine's own `.claude/hooks/`. A refusal goes to a fix session with
+the check's message, and the card goes round to a review. The check names one writer at a time, so a refusal that
+names another writer gets its own fix session. A refusal that a fix session already had (`cfix`), or a check that
+cannot run, blocks the card with a reason that starts `contract:`. With batches on, a card that waits to land runs the same check
+after its lint (`contractwait`, in `settle()`): a refusal removes its `<worktree>.ready`, so no batch takes it, and its
+landing gate deals with it at its turn. `landone()` (`lib/claim.sh`) runs the check again on each commit it is about to
+land, from the commit before it: in a batch, that is the commit of the card before it. A refusal there, or a check that
+cannot run, lands nothing and removes the card's `<worktree>.ready`.
+
+The read-only check (`lintrun`) holds around each run of the lint commands, not around the persisted-contract check. Before the commands, the index tree is kept, and the
 worktree must match the index with no file that git does not track or ignore; else no command runs and nothing is
 put back. After them, also after a time-out, the index tree must be the kept one and the worktree must match it again;
 else the index is read back from the kept tree, the tracked files are written from it and each file that git does not

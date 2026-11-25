@@ -455,8 +455,9 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
         # The gate for a waiting card first (lintwait(), lib/lint.sh): a finding or an execution error removes
         # <worktree>.ready, so it waits on with no check, test or session, and its landing gate deals with it. Its lint
         # line goes after the wait's start line: a new start line makes the wait the card's last step again, so the
-        # Board and `health` see the wait and its time limit.
-        lintwait "$1" "$2" "$3" || { began "$1" "$2" "$5"; : > "$3.idle"; sleep "$LIVE"; continue; }
+        # Board and `health` see the wait and its time limit. The persisted-contract check (contractwait(),
+        # lib/contract.sh) after it, the same way: a batch lands a card with no turn at its landing gate.
+        { lintwait "$1" "$2" "$3" && contractwait "$1" "$3"; } || { began "$1" "$2" "$5"; : > "$3.idle"; sleep "$LIVE"; continue; }
         sec=$SECONDS; trc=''
         if ! out=$(checks "$3"); then
           trc=1; [ "$(git -C "$3" rev-parse HEAD 2>/dev/null)" = "$(jq -r .base "$3.stack" 2>/dev/null)" ] || { block "$1" "$2" "$3" "a product check failed; nothing landed."$'\n'"$out"; return 1; }
@@ -609,6 +610,13 @@ readyput() { # <worktree> <jq filter> [jq args...]
     jq -c "${@:3}" "$2" "$1.ready" > "$tmp" && mv -f "$tmp" "$1.ready" || { rm -f "$tmp"; r=1; }
   fi
   exec {lock}>&-; return $r
+}
+# <worktree>.ready removed under <worktree>.ready.lock: a readyput() that read the file before an unlocked removal
+# puts it back at its rename, and a batch can take the card again (gather()).
+readyrm() { # <worktree>
+  local lock
+  { exec {lock}>>"$1.ready.lock"; } 2>/dev/null && flock "$lock" || { rm -f "$1.ready"; return; }
+  rm -f "$1.ready"; exec {lock}>&-
 }
 # Whether they passed on the change it holds now: the same staged change, on whatever commit (owner, 2026-11-13: a
 # change that passed its tests and still applies to a main that moved is not tested again; each landing made every
@@ -1244,6 +1252,11 @@ landone() { # <the arguments of land()>
     [ $h = 0 ] || { echo "commit refused: ${err:0:600}"; return 1; }
     [ "$(GIT_INDEX_FILE="$3.index" git write-tree)" = "$want" ] || { echo "main's hooks changed what would be committed: it is not exactly the reviewed diff; it needs $OWNER"; return 1; }
     sha=$(git commit-tree "$want" -p "$tip" -F "$3.msg") || { echo "cannot make the commit object"; return 1; }
+    # The persisted-contract check (contractrange(), lib/contract.sh) on the commit that lands, as main's pre-push hook
+    # runs it: a later card of a batch lands on the commit before it, which its own checks never read. A refusal or a
+    # check that cannot run lands nothing, and the card is no longer ready, so no batch takes it again; its landing gate
+    # (contractgate()) deals with it.
+    contractrange . "$tip" "$sha" || { readyrm "$3"; echo "contract: the persisted-contract check refuses card $1's change on the commit it would land on, or could not run; nothing was landed: ${CONTRACT_OUT:0:600}"; return 1; }
     p=false; ! product "$sha" || p=true
     ls+=("$(jq -c --arg s "$sha" --argjson p "$p" '. + {sha: $s, product: $p}' <<<"$x")"); wts+=("$3"); shas+=("$sha"); tip=$sha
   done
