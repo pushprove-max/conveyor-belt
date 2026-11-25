@@ -102,6 +102,7 @@
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/landas.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "docs/setup.md": [
@@ -466,6 +467,7 @@
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.rules-index.test.mjs",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/tests/landas.test.sh",
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/port.test.sh",
     "conveyor/tests/snapexec.test.sh",
@@ -1007,5 +1009,8 @@
   ],
   "conveyor/tests/needsreleased.test.sh": [
     "conveyor/tests/narrow.test.sh"
+  ],
+  "conveyor/lib/session.sh": [
+    "conveyor/tests/landas.test.sh"
   ]
 }

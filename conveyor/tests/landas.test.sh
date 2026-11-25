@@ -452,14 +452,16 @@ t_pridlegatepick() { la_idlegate pick; }
 # pushtests() runs none with the push check off (push.check), so a reader took an untested merge for a tested one.
 # A text check: the claim is in the docs, with no behaviour of its own to run (t_pridle runs the merge itself). The
 # sentence itself is matched (when Test before a push is on, the linked test files run or pass first): the old claim
-# with "See Test before a push." added named the setting and passed.
+# with "See Test before a push." added named the setting and passed. The condition may also name Push after a
+# combined test run, as that rule also runs test files before the idle merge: the linked ones, or every tracked test
+# file but the suite runners with pushbatchtests all (pushtests(), lib/pushrun.sh).
 t_pridledocs() {
   local p s
   for p in "docs/configuration.md:^- \`idle\`:" "docs/board.md:^Idle merges it"; do
     s=$(awk -v re="${p#*:}" '$0 ~ re {on = 1} on && (/^$/ || (/^- / && $0 !~ re)) {exit} on' "$SRC/../${p%%:*}")
     [ -n "$s" ] || fail "${p%%:*}: the Merge PR idle text is not found"
     s=$(tr -s '\n ' '  ' <<< "${s//\*\*/}")
-    [[ $s =~ When\ Test\ before\ a\ push\ is\ on,\ [^.]*(first\ [^.]*test\ files|test\ files[^.]*\ first) ]] \
+    [[ $s =~ When\ Test\ before\ a\ push\ (or\ Push\ after\ a\ combined\ test\ run\ )?is\ on,\ [^.]*(first\ [^.]*test\ files|test\ files[^.]*\ first) ]] \
       || fail "${p%%:*}: the Merge PR idle text does not say the linked test files run first when Test before a push is on: $s"
   done
 }
