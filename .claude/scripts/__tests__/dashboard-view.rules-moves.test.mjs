@@ -28,6 +28,23 @@ test('Rules: a split umbrella held by you has no Queue, and Queue all sends no r
   assert.ok(!w.posts.some((p) => p.body.action === 'release' && p.body.args.includes('76')), `no release of #76: ${JSON.stringify(w.posts.map((p) => p.body))}`);
 });
 
+// Bug: the umbrella of a split into cards with no GitHub issue has `umbrella: []` and its slices in sliceCards; the
+// Rules tab checked only `umbrella`, so Queue and Queue all sent a release that cleared the split's hold.
+test('Rules: a split umbrella whose slices are cards with no issue has no Queue, and Queue all sends no release for it', async () => {
+  const w = boot({ tab: 'rules' });
+  const d = snap(T0 - 60000);
+  Object.assign(d.panels.rules.data.open.held.find((x) => x.issue === 76), { umbrella: [], sliceCards: [{ card: 'c1', state: 'waiting' }] });
+  deliver(w, d);
+  act(groupEl(w, 'infra'), 'group').click();
+  assert.ok(row(w), 'the umbrella is listed as held');
+  assert.equal(act(row(w), 'queue'), null, 'no Queue on its row');
+  act(groupEl(w, 'infra'), 'queue-all').click();
+  const yes = act(groupEl(w, 'infra'), 'queue-all-yes');
+  if (yes) yes.click();
+  await settle();
+  assert.ok(!w.posts.some((p) => p.body.action === 'release' && p.body.args.includes('76')), `no release of #76: ${JSON.stringify(w.posts.map((p) => p.body))}`);
+});
+
 // A snapshot the collector began at `begun`, with the record holding `held` (76 by default, as full()).
 function snap(begun, held = [76]) {
   const d = full(begun + 20000), r = d.panels.rules.data;

@@ -322,9 +322,10 @@
       // A row moved here stays, shown as moved, until a snapshot shows the move (moveJudge).
       if (!you && !holds.length && !pendingMove(x.issue)) return;
       const rest = others.filter((r) => r.kind !== 'label');
-      // A split umbrella (its held entry's umbrella: its slices) is never picked: a release would clear the hold and
-      // build nothing, so it has no Queue here either (as on the Board's Held column).
-      const umbrella = list(x.umbrella).some((n) => num(n) !== null);
+      // A split umbrella (its held entry's umbrella: its slices, or sliceCards: its slices that are cards with no GitHub
+      // issue, whose umbrella is []) is never picked: a release would clear the hold and build nothing, so it has no
+      // Queue here either (as on the Board's Held column, splitHold).
+      const umbrella = list(x.umbrella).some((n) => num(n) !== null) || list(x.sliceCards).some((c) => c && typeof c.card === 'string');
       const how = umbrella ? null : holds.length ? (rest.length ? null : 'unlabel') : 'release';
       out.push(Object.assign({}, x, { holds, you, how, rest }));
     });
