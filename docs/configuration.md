@@ -399,7 +399,12 @@ Done-when items of its own and the files of the change that it takes. Each file 
 - **On**: Conveyor files each slice as a follow-up of the issue, with `Depends on:` the issue. The slices of a held
   issue are held, and the others go in the queue. Conveyor puts the files of the slices back to what main has, and
   one fix session makes the rest work alone. Then the card goes on to its review. The track on the Board and in
-  /units shows that the card was split for its size, with the count of files before and after.
+  /units shows that the card was split for its size, with the count of files before and after. If an earlier card
+  of the issue filed slices that are still open and that take files of the new slices, Conveyor files the new slices
+  and then closes those earlier slices. Thus each part has one open follow-up. The `grown` line names the closed
+  slices in `withdrawn`. Conveyor files no slice, and the change stays whole, in these conditions: it cannot read the
+  open follow-ups of the issue, an earlier slice also takes a file that is not in the change, or it cannot close an
+  earlier slice. The `grown` line tells why.
 
 Conveyor does not count the files of a follow-up or of a fix card that has no issue.
 

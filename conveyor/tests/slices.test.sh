@@ -535,3 +535,66 @@ t_slicesdepends() {
   [ "$RC" = 0 ] && [ "$(jq -sr '.[6].body | split("\n") | map(select(startswith("Depends on:"))) | join("|")' "$STUB/filed")" = 'Depends on: #7|Depends on: #100105|Depends on: #100106' ] \
     || fail "a grown change's slice does not have one Depends on: line for its parent and each slice it depends on (exit $RC): $(jq -sr '.[6].body' "$STUB/filed")"
 }
+
+# A later card (c7) of issue 7 whose change grows past split.growFiles again (FIVE: 5 files over 3), the judge splitting
+# it (GROWN, its slice src/s1.sh and src/s2.sh, or <answer>). An earlier card (c6) filed an open slice for each <files>
+# (splitfile(), so each has the body GitHub shows; no record names them, as after a restart between the filing and its
+# grown line). growcheck() runs as card() calls it, after <shell>, its fix session and that session's checks left out.
+grownagain() { # <answer or ''> <shell or ''> <files json>...
+  local a=${1:-$GROWN} p=$2 s='' f; shift 2
+  grown on; printf '%s\n' "$a" > "$STUB/answer"; fx_wt "$FIVE" src/s1.sh 'main s1'; : > "$STUB/list-filed"
+  for f; do s+="splitfile c6 \"\$(big 7)\" '[{\"title\":\"old\",\"doneWhen\":[\"x\"],\"files\":$f,\"dependsOn\":[]}]' 0 >/dev/null; "; done
+  fx_in "$s$p"'session() { echo "{}"; }; checked() { :; }; growcheck c7 7 "$FXWT" "$(big 7)" brief'
+}
+grownwhy() { st 'select(.step == "grown") | [.result, .grown.filed, .grown.withdrawn, .grown.why] | @json'; }
+# #100101 takes src/x.sh (a part this change does not take, or a slice the owner edited to take it), #100102 src/s1.sh
+# and src/s2.sh. The new slice #100103 is filed, then #100102 is closed (#100101 stays open), the files leave the
+# change, and the grown line names both. Bug caught (#1684): each card of an issue whose change grew again filed the
+# same part again: six open copies of one part in the queue.
+t_slicesgrownagain() {
+  grownagain '' '' '["src/x.sh"]' '["src/s1.sh","src/s2.sh"]'
+  [ "$RC" = 2 ] && [ "$(cat "$STUB/closed" 2>/dev/null)" = 100102 ] && [ "$(jq -sc 'map(.number)' "$STUB/filed")" = '[100101,100102,100103]' ] \
+    || fail "the earlier slice of the same files was not closed once one was filed in its place (exit $RC): closed $(cat "$STUB/closed" 2>/dev/null): $(cat "$T/$CASE/run.out")"
+  grep -q 'Conveyor card c7 built #7 again.* its slices #100103 ' "$STUB/close-comments" || fail "the closed slice does not name the one in its place: $(cat "$STUB/close-comments")"
+  [ ! -e "$FXWT/src/s2.sh" ] && [ "$(cat "$FXWT/src/s1.sh")" = 'main s1' ] || fail "the slice's files were not dropped from the change: $(git -C "$FXWT" status --short)"
+  [ "$(grownwhy)" = '["split",[100103],[100102],"the tests apart"]' ] || fail "the grown line does not name the slice filed and the one withdrawn: $(cat "$ST/cards.jsonl")"
+  recok "$ST/cards.jsonl" "a later card split for its size"
+}
+# #100101 takes src/s2.sh and src/c1.sh, both in the change. The judge puts src/s2.sh in slice 1 and src/s1.sh in slice
+# 2, which depends on slice 1: both are filed whole, then #100101 is closed. Bugs caught (review of #1684): a slice that
+# took over part of an open one dropped those files but kept its Done-when items, which asked for that work again; an
+# open slice that took a new one's place lacked the `Depends on:` of that place, so it could start first.
+t_slicesgrownpart() {
+  grownagain '{"verdict":"split","why":"apart","core":["src/c1.sh","src/c2.sh","src/c3.sh"],"slices":[{"title":"two","doneWhen":["a"],"files":["src/s2.sh"]},{"title":"one","doneWhen":["b"],"files":["src/s1.sh"],"dependsOn":[1]}]}' '' '["src/s2.sh","src/c1.sh"]'
+  [ "$RC" = 2 ] && [ "$(cat "$STUB/closed" 2>/dev/null)" = 100101 ] || fail "the earlier slice was not closed (exit $RC): $(cat "$T/$CASE/run.out")"
+  [ "$(jq -sr '.[1:] | map("\(.number) \(.title): " + (.body | split("\n") | map(select(test("^(- |Depends on:)"))) | join("|"))) | join(";")' "$STUB/filed")" = '100102 two: - src/s2.sh|Depends on: #7|- a;100103 one: - src/s1.sh|Depends on: #7|Depends on: #100102|- b' ] \
+    || fail "the new slices were not filed whole, each with its own files, order and Done-when items: $(jq -sc '.[1:]' "$STUB/filed")"
+  [ "$(grownwhy)" = '["split",[100102,100103],[100101],"apart"]' ] || fail "the grown line does not name the slices filed and withdrawn: $(cat "$ST/cards.jsonl")"
+}
+# #100101 takes src/s2.sh and src/x.sh, which the change does not have: closed, its src/x.sh part would be lost; left
+# open, src/s2.sh would be built twice. Nothing is filed or closed, and the change is kept whole with the reason.
+t_slicesgrownoutside() {
+  grownagain '' '' '["src/s2.sh","src/x.sh"]'
+  [ "$RC" = 0 ] && [ -e "$FXWT/src/s2.sh" ] && [ ! -e "$STUB/closed" ] && [ "$(jq -s length "$STUB/filed")" = 1 ] \
+    || fail "the change was not kept whole, or a slice was filed or closed (exit $RC): $(cat "$T/$CASE/run.out" "$STUB/closed" 2>/dev/null)"
+  [ "$(grownwhy)" = '["split",null,null,"the tests apart; no slice is filed, so the change is kept whole: #100101, a slice that an earlier card filed for #7, also takes src/x.sh, which this change does not have"]' ] \
+    || fail "the grown line does not say why no slice was filed: $(cat "$ST/cards.jsonl")"
+}
+# GitHub's list of open issues fails: nothing is filed or closed, and the change is kept whole with the reason. Bug
+# caught: with the earlier slices unknown, a second copy was filed silently.
+t_slicesgrownunread() {
+  grownagain '' 'echo "exit 1" > "$STUB/list-cmd"; ' '["src/s1.sh","src/s2.sh"]'
+  [ "$RC" = 0 ] && [ -e "$FXWT/src/s2.sh" ] && [ ! -e "$STUB/closed" ] && [ "$(jq -s length "$STUB/filed")" = 1 ] \
+    || fail "the change was not kept whole, or a slice was filed or closed (exit $RC): $(cat "$T/$CASE/run.out" "$STUB/closed" 2>/dev/null)"
+  [ "$(grownwhy)" = '["split",null,null,"the tests apart; no slice is filed, so the change is kept whole: the open follow-ups of #7 could not be read, so the slices that earlier cards filed for it are not known"]' ] \
+    || fail "the grown line does not say why no slice was filed: $(cat "$ST/cards.jsonl")"
+}
+# GitHub refuses to close #100101: the slice filed in its place (#100102) is withdrawn, and the change is kept whole.
+# Bug caught: a failed close left two open follow-ups of one part.
+t_slicesgrownclose() {
+  grownagain '' 'eval "real_$(declare -f gh_write)"; gh_write() { [ "$1 $2 $3" != "issue close 100101" ] || return 1; real_gh_write "$@"; }; ' '["src/s1.sh","src/s2.sh"]'
+  [ "$RC" = 0 ] && [ -e "$FXWT/src/s2.sh" ] && [ "$(cat "$STUB/closed" 2>/dev/null)" = 100102 ] \
+    || fail "the new slice was not withdrawn, or the change not kept whole (exit $RC): $(cat "$T/$CASE/run.out" "$STUB/closed" 2>/dev/null)"
+  [ "$(grownwhy)" = '["split",null,null,"the tests apart; the slices could not be filed, so the change is kept whole: #100101, a slice that an earlier card filed for #7, could not be closed, so the slices filed in its place are withdrawn"]' ] \
+    || fail "the grown line does not say why no slice was filed: $(cat "$ST/cards.jsonl")"
+}

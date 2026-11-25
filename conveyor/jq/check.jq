@@ -213,16 +213,17 @@ def ok: . as $r | (keys - known) == need
             and (.why == null or (.why | type == "string"))
             and (.reported == null or (.reported | type == "array" and all(type == "object" and keys == ["file", "line", "text"] and (.line | type == "number") and ([.file, .text] | all(type == "string"))))))))))
         # A grown line (growcheck(), lib/slices.sh): a change past split.growFiles files, the judge's verdict on it, the
-        # slices of a split, the issues filed for them and the files left (On), the answer that broke the rules.
+        # slices of a split, the issues filed for them and the files left (On), the open slices of earlier cards
+        # closed in place of its slices (withdrawn, On), the answer that broke the rules.
         and ((.step == "grown") == (.grown != null))
         and (.grown == null or ((.result | IN("kept", "split")) and (.grown | type == "object"
-          and (keys - ["core", "slices", "filed", "after", "answer"]) == ["files", "limit", "mode", "verdict", "why"]
+          and (keys - ["core", "slices", "filed", "withdrawn", "after", "answer"]) == ["files", "limit", "mode", "verdict", "why"]
           and (.mode | IN("shadow", "on")) and ([.why, .answer // ""] | all(type == "string")) and ([.files, .limit, .after // 0] | all(type == "number"))
           and (.verdict | IN("keep", "split", "invalid", "failed")) and ((.verdict == "split") == ($r.result == "split"))
           and (.core // [] | type == "array" and all(type == "string"))
           and (.slices // [] | type == "array" and all(type == "object" and keys == ["dependsOn", "doneWhen", "files", "title"] and (.title | type == "string")
             and (.dependsOn | type == "array" and all(type == "number")) and ([.doneWhen, .files] | all(type == "array" and all(type == "string")))))
-          and (.filed // [] | type == "array" and all(type == "number")))));
+          and ([.filed, .withdrawn] | all(. // [] | type == "array" and all(type == "number"))))));
 def good: try ok catch false;
 # The field refused: one the list does not know, then a required one missing, then the first other field whose removal
 # makes the record pass, then the first required one whose own test fails; else the step, whose fields together fail.
