@@ -130,7 +130,7 @@ export type Push = {
   last: { at: number | null; by: string; started: boolean; why: string; sha: string; ok: boolean; ahead: number | null; check: string; log: string } | null
 }
 // own: the session's own project, whose cards carry no project name ('' or absent: none is).
-export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; order?: { repo: string; issue: number; umbrella: number | null }[]; queueMore: boolean; waits: Waiting[]; held: [string, number][]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; todayEstimate?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
+export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; order?: { repo: string; issue: number; umbrella: number | null }[]; queueMore: boolean; waits: Waiting[]; held: [string, number][]; badDeps?: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; todayEstimate?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
@@ -269,14 +269,20 @@ const mergeQueues = (queues: Queued[][]): Queued[] => {
     rest.find(q => q[q.length - 1] === best)?.pop()
   }
 }
+// The rule the pick (conveyor/jq/upnext.jq) gives an issue whose Depends on: line names no issue in the form #N: a
+// sentence that holds the whole line, up to 200 characters. /units counts these under BAD_DEPS, as one rule however
+// the lines differ, and lists each issue in PICK ORDER's Waiting table with BAD_DEPS_ROW: the line itself is not shown.
+const BAD_DEPS_RULE = /^the line "[\s\S]*", not a list of issues in the form #N$/
+const BAD_DEPS = 'bad Depends on', BAD_DEPS_ROW = 'a Depends on line with no #N'
+const ruleLabel = (rule: string) => (BAD_DEPS_RULE.test(rule) ? BAD_DEPS : rule)
 const heldCounts =(skipped: unknown, holding: unknown): Record<string, number> => {
   const out: Record<string, number> = {}
-  for (const x of Array.isArray(skipped) ? skipped : []) if (x && typeof x === 'object' && one((x as any).rule)) out[one((x as any).rule)] = (out[one((x as any).rule)] ?? 0) + 1
+  for (const x of Array.isArray(skipped) ? skipped : []) if (x && typeof x === 'object' && one((x as any).rule)) { const k = ruleLabel(one((x as any).rule)); out[k] = (out[k] ?? 0) + 1 }
   const n = (Array.isArray(holding) ? holding : []).filter(x => x && typeof x === 'object').length
   if (n > 0) out.held = n
   return out
 }
-type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; order: { repo: string; issue: number; umbrella: number | null }[]; waits: Waiting[]; held: Record<string, number>; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; todayEstimate: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
+type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; order: { repo: string; issue: number; umbrella: number | null }[]; waits: Waiting[]; held: Record<string, number>; badDeps: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; todayEstimate: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
 const pushOf = (repo: string, h: any): Push => {
   const r = h?.pushing, l = h?.pushLast
   return {
@@ -315,6 +321,9 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
       .filter((x: Waiting) => x.waitsFor.length > 0),
     // What the record holds back, counted: the issues its rules skip, by rule (queue.skipped), and the issues it holds (queue.holding).
     held: heldCounts(j.queue.skipped, j.queue.holding),
+    // The issues skipped for a Depends on: line with no #N, by number; one with no number shows in the count only.
+    badDeps: (Array.isArray(j.queue.skipped) ? j.queue.skipped : []).filter((x: any) => x && typeof x === 'object' && num(x.issue) !== null && BAD_DEPS_RULE.test(one(x.rule)))
+      .map((x: any): Ref => ({ repo, issue: num(x.issue) as number, title: one(x.title) })),
     // A record whose loop does not give the list (or whose issues GitHub did not list) has none to show.
     deploy: (Array.isArray(j.awaitingDeploy) ? j.awaitingDeploy : []).filter((x: unknown) => x && typeof x === 'object').map((x: any): Deploy => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), since: time(x.since) })),
     landed: j.landed.map((x: any): Landed => {
@@ -434,6 +443,7 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
       queueMore: queues.some(q => q.length >= 10),
       waits: recs.flatMap(r => r.waits),
       held: [...held].sort((a, b) => a[0].localeCompare(b[0])),
+      badDeps: recs.flatMap(r => r.badDeps),
       deploy: recs.flatMap(r => r.deploy),
       unpushed: recs.flatMap(r => r.unpushed.map(issue => ({ repo: r.loop.repo, issue }))),
       pushes: recs.map(r => r.push).filter(p => p.running || p.last),
@@ -1088,8 +1098,8 @@ export const noteLines = (t: string, w: number, style: Omit<Seg, 't'> = { c: C.y
 
 // What the pick held back, a count a rule, wrapped at its counts, never cut: at 40 columns four rules are wider than
 // the pane, and a cut line drops the last count. `held back: 1 follow-ups · 1 P0 · 1 P1 · 1 P2`. A count whose rule
-// is wider than the line (a Depends on: line the pick cannot read) goes on over lines, at its spaces, and a word in it
-// wider than the line is broken between whole characters (pieces).
+// is wider than the line (a long label name) goes on over lines, at its spaces, and a word in it wider than the line
+// is broken between whole characters (pieces).
 const heldLines = (snap: Snap, w: number, lead: string): Line[] =>
   snap.held.length ? wrapParts(['held back:', ...snap.held.flatMap(([label, n], i, l) => pieces(`${n} ${label}${i < l.length - 1 ? ' ·' : ''}`, w - cols(lead) - 2))], w, lead, ' ') : []
 
@@ -1444,12 +1454,15 @@ export const pickModel = (snap: Snap, w: number): Line[] => {
   const pidOf = (u: Umbrella): string => (u.repo ? `${u.repo}#${u.issue}` : `#${u.issue}`)
   const pids = snap.umbrellas.map(pidOf)
   // A waiting part whose parent has no entry (the snapshot does not list it) keeps its own row, so it is not lost.
-  const waits = snap.waits.filter(x => x.umbrella === null || !pids.includes(x.repo ? `${x.repo}#${x.umbrella}` : `#${x.umbrella}`))
+  // An issue skipped for a Depends on: line with no #N is a row too, with BAD_DEPS_ROW under Requires (requires()).
+  const waits: (Waiting & { bad?: true })[] = [...snap.waits.filter(x => x.umbrella === null || !pids.includes(x.repo ? `${x.repo}#${x.umbrella}` : `#${x.umbrella}`)),
+    ...(snap.badDeps ?? []).map(x => ({ ...x, waitsFor: [], states: {}, umbrella: null, bad: true as const }))]
   const ids = waits.map(x => (x.repo ? `${x.repo}#${x.issue}` : `#${x.issue}`))
   const idW = Math.max(7, ...ids.map(cols), ...pids.map(cols))
   const stack = w - idW - 2 < BESIDE
   const at = stack ? 2 : idW + 2
-  const requires = (x: Waiting): string[] => {
+  const requires = (x: Waiting & { bad?: true }): string[] => {
+    if (x.bad) return pieces(BAD_DEPS_ROW, w - at)
     const out: string[] = []
     // A ref wider than the column (`#967 (waiting for #3900, ... #3905)`) is broken at its spaces, not cut at the width.
     for (const r of x.waitsFor.flatMap(n => pieces(waitRef(x, n), w - at))) {

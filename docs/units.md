@@ -245,10 +245,13 @@ A word wider than the pane breaks between whole characters.
   machine holds back says why on a line under it (`waiting for a machine slot: …`). Then two columns, `Waiting` and
   `Requires`: each issue that waits on other issues and is not forced, and the issues it waits for (`#489  #485  #486  #487  #488`), in
   the order that the loop picks them. When the issues it waits for do not fit on one line, they go on to more lines
-  under `Requires`, so none is lost. With nothing ready and nothing waiting it reads `the queue is empty`, and with a
-  queue GitHub did not list, `not read: GitHub did not list the issues`. The held-back line follows. When its
-  counts do not fit on one line, they go on to more lines, so none is lost. A reason too wide for one line goes on to
-  more lines at its spaces. A word wider than the line breaks between whole characters.
+  under `Requires`, so none is lost. An issue whose `Depends on:` line names no issue in the form `#N` is a row too,
+  with `a Depends on line with no #N` under `Requires`: correct that line in the issue. With nothing ready and nothing
+  waiting it reads `the queue is empty`, and with a queue GitHub did not list, `not read: GitHub did not list the
+  issues`. The held-back line follows. Such issues count there as `bad Depends on` (`held back: 96 held · 1 bad
+  Depends on`), together, and the text of the line does not show. When its counts do not fit on one line, they go on
+  to more lines, so none is lost. A reason too wide for one line goes on to more lines at its spaces. A word wider
+  than the line breaks between whole characters.
 - **LANDED TODAY · 20**: the count of every card landed today; on the right, `5 most recent of 20`. One row for each of the five most recent cards: the time
   it landed, the issue, the last verdict and its round (`✓ GO r2`), its overall time and its cost (or `pushing`,
   `issue open` or `not pushed`). A card that still waits shows `waiting` there, and what it waits for (such as

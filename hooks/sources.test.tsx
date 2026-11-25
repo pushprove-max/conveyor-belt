@@ -604,20 +604,21 @@ test('held back wraps at its counts at 40 columns, never cut, in the pane and /u
   expect(section(tableText(s, 40), 'QUEUE').split('\n').slice(-2)).toEqual([' held back: 1 follow-ups · 1 P0 · 1 P1 ·', '   1 P2'])
 })
 
-// Bug: the rule the pick gives `Depends on: # 2 3` (conveyor/jq/upnext.jq) is one count wider than 40 columns, and
-// the pane and /units cut it with '…', so the end of the explanation was lost. It goes on over lines at its spaces instead.
+// Bug: a rule (a label the pick never takes) one count wider than 40 columns was cut with '…' in the pane and /units,
+// so the end of it was lost. It goes on over lines at its spaces instead.
 test('held back wraps a rule wider than the line at its spaces at 40 columns, never cut, in the pane and /units', () => {
-  const rule = 'the line "Depends on: # 2 3", not a list of issues in the form #N'
+  const rule = 'waiting for the vendor to sign the contract'
   const s = board({ queue: { next: queued(1), skipped: skipped({ [rule]: 1 }) } })
   const pane = paneModel(s, 40, 0).map(plain), at = pane.findIndex(l => l.startsWith('held back:'))
-  expect(pane.slice(at, at + 3)).toEqual(['held back:', '  1 the line "Depends on: # 2 3", not a', '  list of issues in the form #N'])
-  expect(section(tableText(s, 40), 'QUEUE').split('\n').slice(-3)).toEqual([' held back:', '   1 the line "Depends on: # 2 3", not a', '   list of issues in the form #N'])
+  expect(pane.slice(at, at + 3)).toEqual(['held back:', '  1 waiting for the vendor to sign the', '  contract'])
+  expect(section(tableText(s, 40), 'QUEUE').split('\n').slice(-3)).toEqual([' held back:', '   1 waiting for the vendor to sign the', '   contract'])
 })
 
 // Bug: a word in a held-back rule wider than the line was broken per code point, so `❤️` lost its variation selector
 // to the next line at 40 columns in the pane and 41 in /units. It is broken between whole characters.
 test('held back breaks a word wider than the line between whole characters, so an emoji stays whole', () => {
-  const rule = 'the line "Depends on: [Investigate-❤️-before-release](https://example.com/issues/2)", not a list of issues in the form #N'
+  // A label wider than the line, its emoji at column 37 of the count (`1 ` and 35 characters), where the line breaks.
+  const rule = 'Fix-the-crash-seen-in-release-four-❤️-before-the-next-one'
   const s = board({ queue: { next: queued(1), skipped: skipped({ [rule]: 1 }) } })
   const pane = paneModel(s, 40, 0).map(plain), at = pane.findIndex(l => l.startsWith('held back:'))
   const units = section(tableText(s, 41), 'QUEUE').split('\n'), from = units.findIndex(l => l.startsWith(' held back:'))
@@ -625,6 +626,30 @@ test('held back breaks a word wider than the line between whole characters, so a
     expect(lines.filter(l => l.startsWith('\u{FE0F}') || l.trim().startsWith('\u{FE0F}')), `rule ${rule}: ${JSON.stringify(lines)}`).toEqual([])
     expect(lines.join(''), `rule ${rule}`).toContain('❤️')
   }
+})
+
+// The rule the pick (conveyor/jq/upnext.jq) gives an issue whose Depends on: line names no #N: the whole line, up to 200 characters.
+const badDeps = (line: string) => `the line "${line}", not a list of issues in the form #N`
+// Issue 1680. Bug it catches: the held-back count's label was the whole bad Depends on line, over four lines of the
+// view, and did not say which issue holds it. The count is `bad Depends on` and the issue is a row of the Waiting table.
+test('PICK ORDER counts an issue with a Depends on line of no #N as bad Depends on and lists it under Waiting, without the line', () => {
+  const line = `Depends on: owner/project#12 (a note of the writer) ${'and the text of the line goes on here '.repeat(3)}`.slice(0, 150)
+  expect(line.length).toBe(150)
+  const s = board({ queue: { next: [], skipped: [{ issue: 4335, title: 'Bad line', rule: badDeps(line) }] } })
+  const part = section(paneModel(s, 72, 0).map(plain).join('\n'), 'PICK ORDER').split('\n')
+  expect(part.slice(1)).toEqual([expect.stringMatching(/^Waiting +Requires$/), expect.stringMatching(/^#4335 +a Depends on line with no #N$/), 'held back: 1 bad Depends on'])
+  for (const text of [paneModel(s, 72, 0).map(plain).join('\n'), tableText(s, 72)]) expect(text).not.toContain('a note of the writer')
+})
+
+// Issue 1680. Bug it catches: two different bad lines made two counts; they count as one rule, a row each. The other
+// rules keep their own counts.
+test('two issues with different bad Depends on lines count as 2 bad Depends on, a row each, beside the other counts', () => {
+  const skip = [{ issue: 4335, title: 'One', rule: badDeps('Depends on: # 2 3') }, { issue: 4336, title: 'Two', rule: badDeps('Depends on: the login fix') },
+    { issue: 4337, title: 'Urgent', rule: 'P0' }, { issue: 4338, title: 'Later', rule: 'follow-ups' }]
+  const s = board({ queue: { next: [], skipped: skip, holding: [{ issue: 4339, title: 'Held' }] } })
+  const part = section(paneModel(s, 72, 0).map(plain).join('\n'), 'PICK ORDER').split('\n')
+  expect(part.slice(1)).toEqual([expect.stringMatching(/^Waiting +Requires$/), expect.stringMatching(/^#4335 +a Depends on line with no #N$/),
+    expect.stringMatching(/^#4336 +a Depends on line with no #N$/), 'held back: 2 bad Depends on · 1 follow-ups · 1 held · 1 P0'])
 })
 
 // Bug (#1438, O371): the mod sorted queue.next by follow-up and priority, so a pinned P2 issue the engine picks first
