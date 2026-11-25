@@ -63,6 +63,11 @@ def control_ok(body):
     if a == 'order':
         return issues(0, 500)
     if a == 'rules':
+        # Self-heals expiry (the days before an unfixed, unseen entry leaves the Self-heals list) goes alone: a whole
+        # number from 1 to 3650, as conveyor.sh's control rules takes it.
+        if any(x.startswith('healsdays=') for x in v):
+            d = v[0].removeprefix('healsdays=')
+            return n == 1 and d.isascii() and d.isdigit() and d[0] != '0' and len(d) <= 4 and int(d) <= 3650
         return 1 <= n <= 10 and all(RULE.fullmatch(x) for x in v)
     if a == 'judge' and v in (['on'], ['off']):  # the review's judge, on or off
         return True

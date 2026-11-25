@@ -397,11 +397,19 @@
     run(steps, `queued ${plural(free.length + labelled.length, 'issue', 'issues')} of ${g.name}`);
   }
   // Self-heals expiry: the days an entry of the Self-heals list may go unfixed, unfiled and unseen before it leaves the list
-  // (the record's rules.healsdays, 1 to 3650). An engine whose record has none is sent none. Undo sends the days it had (undoOf).
+  // (the record's rules.healsdays, 1 to 3650): 7, 14, 30, 60 and 90 days, and the days in force when they are another (set
+  // with the command), the days in force pressed. Clicking them sends nothing. A record without it is drawn disabled and
+  // is sent none. Undo sends the days it had (undoOf).
   function rulesHeals(el, r) {
-    const days = num(r.healsdays), to = (n) => () => send('rules', [`healsdays=${n}`]);
-    el.append(row('healsdays', 'Self-heals expiry', 'days an entry of the Self-heals list can go unfixed and unseen before it leaves the list',
-      days === null ? S.ctx.h('span', 'board-from', 'needs a newer Conveyor') : stepper('self-heals expiry days', String(days), to(days - 1), to(days + 1), days > 1, days < 3650)));
+    const days = num(r.healsdays), known = days !== null;
+    const all = [7, 14, 30, 60, 90].concat(known && ![7, 14, 30, 60, 90].includes(days) ? [days] : []).sort((a, b) => a - b);
+    const name = 'Self-heals expiry';
+    el.append(row('healsdays', name, 'days an entry of the Self-heals list can go unfixed and unseen before it leaves the list',
+      seg(name, ...all.map((n) => {
+        const b = choice(`${n} days`, `healsdays-${n}`, `${name}: ${n} days`, days === n, () => { if (known && days !== n) send('rules', [`healsdays=${n}`]); });
+        b.disabled = !known;
+        return b;
+      })), known ? null : S.ctx.h('span', 'board-from', 'needs a newer Conveyor')));
   }
   window.DASH_APP.part('rules-moves', function (shared) {
     ({ AREA, RELEASE_MAX, STANDING, ARM_MS, BUILDS, S, ONB, OB, num, list, ctl, plural, prio, pre, isArea,

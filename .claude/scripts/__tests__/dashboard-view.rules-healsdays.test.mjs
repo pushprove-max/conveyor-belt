@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Rules tab's rule "Self-heals expiry": the control record's rules.healsdays, the days an entry of the Self-heals
-// list may go unfixed and unseen before it leaves the list, sent as `control rules healsdays=<days>` (issue 1561).
+// list may go unfixed and unseen before it leaves the list, sent as `control rules healsdays=<days>` (issues 1561, 1615).
 // Shared setup: dashboard-view.helpers.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,30 +16,40 @@ function data(days) {
 }
 const row = (w) => ruled(w).querySelector('[data-rule="healsdays"]');
 const sent = async (w, fn) => { fn(); await settle(); return w.posts.splice(0).map((p) => p.body); };
+// The row's choices, each as its days and whether it is pressed.
+const shown = (w) => [...row(w).querySelectorAll('[data-act^="healsdays-"]')].map((b) => `${b.dataset.act.slice(10)}:${b.getAttribute('aria-pressed')}`);
+const heals = (n) => ({ action: 'rules', args: [`healsdays=${n}`], repo: 'sample' });
 
 // Bugs this guards: the Rules tab had no control for the expiry age, so the owner could change it only with the
-// command; a step sent another rule or number; the steps went past 1 or 3650, which the engine refuses.
-test('Rules: Self-heals expiry shows the record\'s days and steps them down and up', async () => {
+// command; the days in force were not marked, or a value set with the command (45) was not shown at all; a choice
+// sent another rule or number; clicking the days in force sent them again.
+test('Rules: Self-heals expiry offers 7 to 90 days, marks the days in force and sends the days chosen', async () => {
   const w = boot({ tab: 'rules' });
-  // 45, not the default 30: Undo falls back to 30 when it reads no days, so a record of 30 cannot tell the two apart.
+  deliver(w, data(30));
+  assert.deepEqual(shown(w), ['7:false', '14:false', '30:true', '60:false', '90:false']);
+  assert.deepEqual(await sent(w, () => act(rulesP(w), 'healsdays-30').click()), [], 'the days in force send nothing');
+  assert.deepEqual(await sent(w, () => act(rulesP(w), 'healsdays-60').click()), [heals(60)]);
+  next(w, data(45));
+  assert.deepEqual(shown(w), ['7:false', '14:false', '30:false', '45:true', '60:false', '90:false'], 'the command\'s 45 is shown, in order, and marked');
+});
+
+// Bug this guards: Undo sent another rule, the new days or the default 30, not the days the record held before; the
+// Undo of that Undo sent no days. 45, not the default 30: Undo falls back to 30 when it reads no days.
+test('Rules: Undo of a Self-heals expiry choice sends the earlier days, and its Undo the chosen days', async () => {
+  const w = boot({ tab: 'rules' });
+  const undo = () => act(rulesP(w).querySelector('.rules-last'), 'undo');
   deliver(w, data(45));
-  assert.ok(row(w), 'the rule has a row on the Rules tab');
-  assert.equal(row(w).querySelector('.board-value').textContent, '45', 'the row shows the record\'s 45');
-  assert.deepEqual(await sent(w, () => act(rulesP(w), 'self-heals expiry days-up').click()), [{ action: 'rules', args: ['healsdays=46'], repo: 'sample' }]);
-  // Bug this guards: Undo sent another rule, the new days or the default 30, not the 45 the record held before.
-  assert.deepEqual(await sent(w, () => act(rulesP(w).querySelector('.rules-note'), 'undo').click()), [{ action: 'rules', args: ['healsdays=45'], repo: 'sample' }], 'Undo puts the earlier days back');
-  next(w, data(31));
-  assert.deepEqual(await sent(w, () => act(rulesP(w), 'self-heals expiry days-down').click()), [{ action: 'rules', args: ['healsdays=30'], repo: 'sample' }]);
-  next(w, data(1));
-  assert.ok(act(rulesP(w), 'self-heals expiry days-down').disabled, 'the days cannot go below 1');
-  next(w, data(3650));
-  assert.ok(act(rulesP(w), 'self-heals expiry days-up').disabled, 'the days cannot go above 3650');
+  assert.deepEqual(await sent(w, () => act(rulesP(w), 'healsdays-14').click()), [heals(14)]);
+  assert.deepEqual(await sent(w, () => undo().click()), [heals(45)], 'Undo puts the earlier days back');
+  assert.deepEqual(await sent(w, () => undo().click()), [heals(14)], 'the Undo of the Undo puts the chosen days back');
 });
 
 // Bug this guards: a record from an engine before the rule was sent a setting its engine refuses.
-test('Rules: Self-heals expiry, unknown to the record, is not sent', () => {
+test('Rules: Self-heals expiry, unknown to the record, is disabled and not sent', async () => {
   const w = boot({ tab: 'rules' });
   deliver(w, data(undefined));
-  assert.equal(row(w).querySelector('.board-value'), null, 'no stepper to press');
+  const choices = [...row(w).querySelectorAll('[data-act^="healsdays-"]')];
+  assert.ok(choices.length === 5 && choices.every((b) => b.disabled), 'every choice is disabled');
   assert.match(row(w).textContent, /needs a newer Conveyor/);
+  assert.deepEqual(await sent(w, () => act(rulesP(w), 'healsdays-30').click()), [], 'a click sends nothing');
 });

@@ -146,9 +146,8 @@ KINDS_MAX = 20
 # The standing kinds of routine yes, as conveyor.sh's auto standing takes them (conveyor/lib/standing.sh).
 STANDING = frozenset({'asked-fix', 'review-followup', 'release-check', 'fixed-block', 'review-retry'})
 # An area rule is the pack's area prefix and a name: any label here; conveyor.sh checks the prefix.
-# The rules Split large issues (split) and Pick settings (pick) take off, shadow or on; healsdays (the days before an
-# unfixed, unseen entry leaves the Self-heals list) takes a whole number, which conveyor.sh checks is from 1 to 3650.
-RULE = re.compile(r'(split|pick)=(off|shadow|on)|healsdays=[1-9][0-9]{0,3}|(P[0-3]|followups|(?!P[0-9]+=)[A-Za-z0-9][A-Za-z0-9._:/-]{0,79})=(on|off)')
+# The rules Split large issues (split) and Pick settings (pick) take off, shadow or on.
+RULE = re.compile(r'(split|pick)=(off|shadow|on)|(P[0-3]|followups|(?!P[0-9]+=)[A-Za-z0-9][A-Za-z0-9._:/-]{0,79})=(on|off)')
 LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,59}')
 RUN_ID = re.compile(r'[0-9a-f]{12}')  # a full test run's id, as conveyor.sh's full-test anyway takes it
 VERSION = re.compile(r'(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})')  # a release's, as conveyor.sh's release-run takes it

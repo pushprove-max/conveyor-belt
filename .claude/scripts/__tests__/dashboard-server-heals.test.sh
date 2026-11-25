@@ -66,12 +66,14 @@ check('runs_heals_harm_on_the_record', cmd.startswith('CONVEYOR_MAIN=/r ') and c
 cmd = ds.control_script('heals', ['drop', H1], '/m', '2026-11-23', '/r', 'u')
 check('runs_heals_drop_on_the_record', cmd.startswith('CONVEYOR_MAIN=/r ') and cmd.endswith(' heals drop %s' % H1), cmd)
 # The Rules tab's "Self-heals expiry" (#1561): bug it catches, `rules healsdays=10` refused as no rule, or a value that is no whole number
-# (shell text, a sign, a leading zero, a fraction) let through to the host's shell.
+# (shell text, a sign, a leading zero, a fraction) let through to the host's shell, days past 3650 (3651) passed to the
+# host as if good, or the days sent with another rule (#1615: it goes alone).
 rules = lambda args: ds.control_ok({'action': 'rules', 'args': args, 'repo': 'project'})
 for args in (['healsdays=10'], ['healsdays=3650'], ['healsdays=1']):
     check('takes_rules_%s' % args[0], rules(args), args)
-for args in (['healsdays='], ['healsdays=0'], ['healsdays=010'], ['healsdays=-1'], ['healsdays=1.5'], ['healsdays=1;id'], ['healsdays=10000']):
-    check('refuses_rules_%s' % args[0], not rules(args), args)
+for args in (['healsdays='], ['healsdays=0'], ['healsdays=3651'], ['healsdays=010'], ['healsdays=-1'], ['healsdays=1.5'], ['healsdays=1;id'],
+             ['healsdays=10000'], ['healsdays=10\n'], ['healsdays=on'], ['healsdays=10', 'P0=on'], ['P0=on', 'healsdays=10'], ['healsdays=10', 'healsdays=20']):
+    check('refuses_rules_%s' % '_'.join(args), not rules(args), args)
 print('dashboard-server-heals: %d passed' % passed)
 EOF
 [ $? = 0 ] || exit 1
