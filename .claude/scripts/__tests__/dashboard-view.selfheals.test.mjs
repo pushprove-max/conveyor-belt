@@ -162,6 +162,30 @@ test('Self-heals: the sort line says when the sort ran, and a finding and a reas
   assert.equal(page(w).textContent.includes('`'), false, `the batch sheet shows a backtick: ${page(w).textContent}`);
 });
 
+// Bug it catches: an audit finding that quotes two places (`a.sh:3, b.sh:9`) lost the quote from its title, and the
+// place shows only the first, so the row, the detail panel, the batch sheet and the Dropped list no longer named the
+// second place. And a title that put both long places first hid what the finding says when a narrow row clips the
+// title to one line: the summary comes first, the second place after it.
+test('Self-heals: a finding that quotes two places keeps the second in its title, after the summary', () => {
+  const two = 'R2 [P2] `conveyor/lib/a.sh:575, conveyor/tests/b.test.sh:116`: the batch lands a card untested - How: x - Raised on #12';
+  const { w } = open({ entries: [entry('h0000000000c1', { time: iso(T0 - DAY), area: 'area:board', effect: 'self-heals', why: 'w', finding: two })],
+    dropped: [entry('h0000000000c2', { time: iso(T0 - 9 * DAY), area: 'area:board', effect: 'self-heals', why: 'w', finding: two, dropped: { time: iso(T0 - DAY), why: 'expired' } })] });
+  const want = 'the batch lands a card untested (also at conveyor/tests/b.test.sh:116)';
+  const title = (sel, what) => {
+    assert.equal(q(w, sel).textContent.trim(), want, `${what} of: ${two}`);
+    assert.deepEqual(qa(w, `${sel} code.why-code`).map((c) => c.textContent), ['conveyor/tests/b.test.sh:116'], `${what}'s code spans of: ${two}`);
+  };
+  const row = '.sh-row[data-key="sample:h0000000000c1"]';
+  title(`${row} .sh-row-title`, 'the row title');
+  assert.equal(q(w, `${row} .sh-at`).textContent, 'conveyor/lib/a.sh:575', `the row's place of: ${two}`);
+  q(w, `${row} .sh-row-title`).click();
+  title('.sh-detail .sh-detail-title', 'the detail title');
+  q(w, '.sh-dropped-link').click();
+  title('.sh-dropped .sh-row-title', "a dropped entry's title");
+  q(w, '.sh-area[data-area="area:board"] [data-act="heals-batch"]').click();
+  title('.sh-sheet-row .sh-row-title', "a batch sheet row's title");
+});
+
 // Bugs (issue 1622): the page said in one line what the list holds, so a reader could not tell what a self-heal is, why
 // its findings get no card or when an entry leaves; the part, once opened, closed again at the next snapshot.
 test('Self-heals: "What is a self-heal?" is closed at first, opens on a click with each rule, and stays open through a redraw', async () => {

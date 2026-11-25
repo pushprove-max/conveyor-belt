@@ -65,9 +65,16 @@
   const fixOf = (e) => { const m = /\s- fix:\s*([\s\S]+?)(?=\s+- (?:test:|raised on\b)|$)/i.exec(text(e)); return m ? m[1].trim() : null; };
   const isAudit = (e) => /^R[0-9]+\s/.test(text(e).replace(MARKS, ''));
   // The finding without its marks, audit number, place (an audit quotes it in backticks) and Proof or audit sections:
-  // what it says is wrong. A place in backticks goes with all it quotes (`file:12 (t_case)`).
-  const titleOf = (e) => text(e).replace(MARKS, '').replace(/^R[0-9]+\s+/, '').replace(MARKS, '')
-    .replace(/^(?:`[A-Za-z0-9_./-]+:[0-9]+(?:[–-][0-9]+)?[^`]*`|[A-Za-z0-9_./-]+:[0-9]+(?:[–-][0-9]+)?):?\s+/, '').replace(/(?:[.:;]?\s*\bproof:|\s+- (?:how|fix|test):)[\s\S]*$/i, '').trim() || text(e);
+  // what it says is wrong. A place in backticks goes with all it quotes (`file:12 (t_case)`). The row shows only the
+  // first place as its place, so each other place the quote names (`a.sh:3, b.sh:9`) goes after what it says, which a
+  // narrow row clips last: "... (also at `b.sh:9`)".
+  const titleOf = (e) => {
+    const s = text(e).replace(MARKS, '').replace(/^R[0-9]+\s+/, '').replace(MARKS, '');
+    const m = /^(?:`([A-Za-z0-9_./-]+:[0-9]+(?:[–-][0-9]+)?[^`]*)`|[A-Za-z0-9_./-]+:[0-9]+(?:[–-][0-9]+)?):?\s+/.exec(s);
+    const what = (m ? s.slice(m[0].length) : s).replace(/(?:[.:;]?\s*\bproof:|\s+- (?:how|fix|test):)[\s\S]*$/i, '').trim();
+    const more = m && m[1] ? (m[1].match(new RegExp(PLACE.source, 'g')) || []).slice(1) : [];
+    return what ? what + (more.length ? ` (also at ${more.map((p) => `\`${p}\``).join(', ')})` : '') : text(e);
+  };
   // Where a finding came from: its issue, or its card when it has no GitHub issue (issue 0).
   const fromOf = (e) => (e.issue ? `#${e.issue}` : `card ${e.card || NOT_READ}`);
   const kindOf = (e) => {
