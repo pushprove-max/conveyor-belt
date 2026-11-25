@@ -480,7 +480,8 @@ PANELS_JQ='
            perLandedLeftOut: ([$R[].snap.cost.perLandedLeftOut | numbers] | add // 0),
            # How many of the priced steps of each figure are priced as an estimate: the figure is then shown as one.
            todayEstimate: ([$R[].snap.cost.todayEstimate | numbers] | add // 0), weekEstimate: ([$R[].snap.cost.weekEstimate | numbers] | add // 0),
-           perLandedEstimate: ([$R[].snap.cost.perLandedEstimate | numbers] | add // 0),
+           # Per landed card counts only the projects its average holds (those with a reviewed landing), as above.
+           perLandedEstimate: ([$R[].snap.cost | select((.landedAfter | add) > 0) | .perLandedEstimate | numbers] | add // 0),
            # The figures of each project on its own, shown in place of the sums when the page is filtered to one project.
            byRepo: ($R | map({key: .repo, value: (.snap.cost | {todayUsd: .today, weekUsd: .week, perLandedUsd: .perLanded, landedAfter, unpricedSteps,
              todayLeftOut: (.todayLeftOut | numbers // 0), weekLeftOut: (.weekLeftOut | numbers // 0), perLandedLeftOut: (.perLandedLeftOut | numbers // 0),

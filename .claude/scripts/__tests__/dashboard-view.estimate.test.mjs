@@ -75,17 +75,19 @@ test('the overview marks an estimated cost with ~ in the head tiles, Cost, Metri
   assert.doesNotMatch(metrics, /~\$2\.00/, 'the exact step has no ~');
 });
 
-// Bug it catches: the Board's Review card, a Landed card, its Today figure and a project's cost today showed an
-// estimated cost as exact dollars.
+// Bug it catches: the Board's Building and Review cards, a Landed card, its Today figure and a project's cost today
+// showed an estimated cost as exact dollars.
 test('the Control tab marks an estimated cost with ~ on the Board and a project\'s cost today', () => {
   const w = boot({ tab: 'control' });
   const data = full();
+  Object.assign(data.panels.board.data.building[0], { reading: true, usd: 0.75, estimate: true });
   data.panels.board.data.review[0].estimate = true;
   data.panels.board.data.landed[0].estimate = true;
   data.panels.board.data.today.estimate = true;
   data.panels.machine.data.projects[0].todayEstimate = 1;
   deliver(w, data);
   assert.match(loopP(w).querySelector('[data-figure="today"]').textContent, /^Today2 landed~\$3\.00$/, 'the Board\'s Today');
+  assert.match(text(column(w, 'building')), /Plugin thing.*~\$0\.75/, 'a Building card');
   assert.match(text(column(w, 'review')), /review 2 of 3.*~\$1\.25/, 'a Review card');
   assert.match(text(column(w, 'landed')), /2 reviews · ~\$2\.50/, 'a Landed card');
   assert.match(text(column(w, 'landed')), /already fixed/, 'a closed card has no cost line');

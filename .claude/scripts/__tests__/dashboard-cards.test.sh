@@ -864,8 +864,10 @@ q '.panels.cost.data.cards | .todayLeftOut == 1 and .weekLeftOut == 2 and .perLa
 # the parts dropped the snapshot's estimate marks, so Today, 7 days, Per landed card, a card's row, a Review card
 # and the rest showed `$x` with no `~`. Each part keeps the mark of the figure it carries.
 PE=$(jq -c '.belt[0].estimate = true | .landed[0].estimate = true | .landedEstimate = 1 | .needsYou.blocked[0].metrics.estimate = true
-  | .cost += {todayEstimate: 1, weekEstimate: 2, perLandedEstimate: 1} | .cost.cards[0] += {todayEstimate: 1, weekEstimate: 1}' <<<"$P")
-answer "$PE" "$P_URL" 1794000000 "$(jq -c '.cost += {weekEstimate: 1}' <<<"$C")" "$C_URL" 0
+  | .cost += {todayEstimate: 1, weekEstimate: 2, perLandedEstimate: 1} | .cost.cards[0] += {todayEstimate: 1, weekEstimate: 1} | .cost.picks[0].estimate = 1
+  | .metrics.cards[0].metrics += {estimate: true, timeline: [{step: "build", usd: 1}, {step: "review", usd: 1, estimate: "the tokens it counted, at its model'"'"'s price"}]}' <<<"$P")
+# widgetshop's metrics.cards is a list, or the Board shows no project's Metrics cards.
+answer "$PE" "$P_URL" 1794000000 "$(jq -c '.cost += {weekEstimate: 1} | .metrics.cards = []' <<<"$C")" "$C_URL" 0
 run
 q '.panels.board.data | [(.review | map([.issue, .estimate])), (.landed | map([.issue, .estimate])), .today.estimate] == [[[801, true]], [[7, true]], true]' \
   "the Board's Review and Landed cards and its Today figure keep their estimate marks"
@@ -876,6 +878,18 @@ q '.panels.cost.data.cards | [.todayEstimate, .weekEstimate, .perLandedEstimate,
   "Cost's three figures, each project's and each card's row carry how many of their steps are estimates"
 q '[(.panels.metrics.data.compare | (.projects | map(.usdEstimate)), .machine.usdEstimate), (.panels.machine.data | .todayEstimate, (.projects | map(.todayEstimate)))]
   == [[2, 1], 3, 1, [1, 0]]' "the side-by-side cost and the machine's cost today carry their estimates"
+q '.panels.landed.data.cards | map([.issue, .estimate == true]) == [[4, false], [7, true]]' "the Landed panel's cards keep their estimate marks"
+q '.panels.metrics.data.cards | map(select(.repo == "sample")) | (map([.issue, .metrics.estimate == true]) == [[1, true], [2, false], [3, false]])
+  and (.[0].metrics.timeline | map(.estimate)) == [null, "the tokens it counted, at its model'"'"'s price"]' "a Metrics card keeps its estimate mark, and each step how it was priced"
+q '.panels.cost.data.cards.picks | map([.repo, .group, .estimate]) == [["sample", "small docs", 1], ["widgetshop", "small code", null]]' "a Pick row keeps how many of its steps are estimates"
+# Bug: a Building card dropped its estimate mark. And the count of estimates for each landed card summed every
+# project, also widgetshop with no reviewed landing, whose dollars the average leaves out: its estimate put ~ on
+# sample's exact dollars.
+answer "$P" "$P_URL" 1794000000 "$(jq -c '.belt[0].estimate = true | .cost += {landedAfter: {"1": 0, "2": 0, "3": 0, more: 0}, perLandedEstimate: 1}' <<<"$C")" "$C_URL" 0
+run
+q '.panels.board.data.others.widgetshop.building | map([.issue, .estimate]) == [[5, true]]' "a Building card keeps its estimate mark"
+q '.panels.cost.data.cards | [.perLandedUsd, .perLandedEstimate, .byRepo.widgetshop.perLandedEstimate] == [2.5, 0, 1]' \
+  "the estimates for each landed card count only the projects its average holds; the project's own figure keeps its own"
 ) & PIECES+=($!)
 pieces
 ) & started machine
