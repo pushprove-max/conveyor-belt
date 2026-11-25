@@ -151,6 +151,8 @@ it up:
   its commit. A card that lands while no other awaited card is on the belt wakes the Foreman at once. A restart of
   the waiter sends the held landings. Any other wake that the watcher makes from a snapshot names them too. A wake made
   from `conveyor.sh health` alone, because the snapshot is slow, does not: the landings stay held for the next one.
+  To stop waiting for a card, the Foreman adds the line `-<issue>` to its list of awaited issues. That card then
+  gives no wake when it lands, unless the Foreman adds the issue to the list again.
 - A blocked card: the wake names the reason. When the snapshot fails or is slow, as when it is made anew from the
   whole card records, the watcher reads `conveyor.sh health`. A blocked card, or a change that waits for your yes,
   then wakes the Foreman from health at that poll, and does not wait for the snapshot. With the standing kind

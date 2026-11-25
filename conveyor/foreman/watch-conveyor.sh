@@ -34,7 +34,7 @@
 #     pushed wakes once, naming the commit it landed as, but while another awaited issue of the record is on the belt and not
 #     blocked, its wake is held, and the landings of the batch wake in one (holdlandings(); a restart of the waiter, or
 #     any other wake made from a snapshot, sends them). The Foreman only appends to it: what was dropped is counted in await-done-<repo>.txt
-#     ("<issue> <its lines in await-<repo>.txt then>"), so a line appended later awaits it again
+#     ("<issue> <its lines in await-<repo>.txt then>"), so a line appended later awaits it again; a line "-<issue>" it appends ends the wait for that issue with no wake, until a later line of the issue
 #   a whole-suite run (a release's or the full test's, snapshot suites) that ended: its result, commit, reasons and
 #     failed cases (a full test run whose process is gone, with no result: an error, with that reason)
 #   the fix cards of a red release run (its record's fixes): each has landed, once, with release-prep started again
@@ -740,9 +740,9 @@ poll() { # 0 when a wake was put in pending; 2 when one was due but the session'
   trap stopped TERM
   while IFS=$'\t' read -r repo main; do
     # [issue, its lines in await-<repo>.txt] for each awaited issue of the record past what was dropped: the count is
-    # in its landed key, so an issue awaited again after its wake is a new key.
-    await=$(awk 'FILENAME == ARGV[1] { done[$1] = $2; next } /^[1-9][0-9]*$/ { n[$0]++ }
-      END { for (i in n) if (n[i] > done[i] + 0) print "[" i "," n[i] "]" }' "$FD/await-done-$repo.txt" "$FD/await-$repo.txt" | jq -sc sort)
+    # in its landed key, so an issue awaited again after its wake is a new key. A line "-<issue>" ends the wait for that issue's lines above it (no wake for them); a line of the issue below it awaits it again.
+    await=$(awk 'FILENAME == ARGV[1] { done[$1] = $2; next } /^[1-9][0-9]*$/ { n[$0]++; next } /^-[1-9][0-9]*$/ { i = substr($0, 2); if (i in n) off[i] = n[i] }
+      END { for (i in n) if (n[i] > done[i] + 0 && n[i] > off[i] + 0) print "[" i "," n[i] "]" }' "$FD/await-done-$repo.txt" "$FD/await-$repo.txt" | jq -sc sort)
     one=$(record "$repo" "$main" "$now" "$await"); cur+=$one$'\n'; n=$((n + 1))
     df=$FD/conveyor-down-$repo.txt; read -r _ dl _ 2>/dev/null < "$df" && [ "$dl" = "$now" ] && failed+=$df$'\n'
     # Another record is still to be read, which can take minutes (a slow snapshot, health, then the longer read): a

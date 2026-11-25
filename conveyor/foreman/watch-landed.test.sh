@@ -165,5 +165,22 @@ snap pushnoline '' '1, 2' '' 'del(.landed[] | select(.issue == 1)) | del(.pushed
 check 'both pushed, #1 by metrics.cards alone: one wake' poll pushnoline
 check 'it names the commit of the landing of the day before, from metrics.cards' has pushnoline 'pushnoline: #1 landed as 100000000001: your step is due'
 
+# A wait the Foreman ended (a "-<issue>" line under the issue's line). Bug it catches: a wait that was no longer
+# wanted could not be stopped, so its landing cost a wake turn of the Foreman's session for nothing.
+fixture ended 1
+echo -1 >> "$T/ended.fd/await-ended.txt"
+snap ended '' 1
+check 'the issue whose wait was ended landed: no wake' nope poll ended
+echo 1 >> "$T/ended.fd/await-ended.txt"
+check 'the issue awaited again under the ending line: one wake' poll ended
+check 'it names the landing' has ended 'ended: #1 landed as 100000000001: your step is due'
+# Bug it catches: an ending line that also ended the waits for the record's other issues.
+fixture endedone 1 2
+echo -1 >> "$T/endedone.fd/await-endedone.txt"
+snap endedone '' '1, 2'
+check 'one wait of two ended, both landed: one wake' poll endedone
+check 'it names the landing still awaited' has endedone 'endedone: #2 landed as 100000000002: your step is due'
+check 'and not the one whose wait was ended' nope grep -qF '#1 landed' "$T/endedone.wake"
+
 [ "$fails" = 0 ] || { cat "$T"/*.err >&2; exit 1; }
 echo "ok watch-landed" # the pass of the case its FAIL lines name, as the main-red proof reads it

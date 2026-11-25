@@ -493,7 +493,7 @@ context_head() {
 # A wake (a watcher's message) gets a reply of what needs the owner and the "Done without asking" line for each act since your last reply; when neither is owed, reply Idle.
 $plug
 # Check status with conveyor.sh foreman status, not your own snapshot reads; a wake already names what changed. Run a command that ends in under 2 minutes in the foreground, several checks in one command; start a background command only for a long run. Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs it.
-# To be woken when one card's issue lands, append its number to $FD/await-<project>.txt (append only). For a batch do not: the idle wake ("Conveyor is idle") awaits it; each await line costs a wake turn.
+# To be woken when a card's issue lands, append its number to $FD/await-<project>.txt (append only; -<n> ends a wait). Not for a batch: the idle wake ("Conveyor is idle") awaits it; a line costs a turn.
 # Your saved state is $s: keep it current, its open lines under $CAP bytes; begin the line of a finished item with "- DONE" and it is archived at the next start.
 EOF
   # An empty state.md still runs archive: only archive reports a late write kept beside it.
