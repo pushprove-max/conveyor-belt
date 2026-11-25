@@ -194,7 +194,7 @@ fi
 # the rest, the Tests page's history above all, grows without end and made the fetch too slow and too big to read. A snapshot that jq cannot cut prints null, as a failed one does.
 view='with_entries(select(.key | IN("health", "needsYou", "belt", "landed", "landedCount", "queue", "cost", "awaitingDeploy", "suites", "snapshotAt", "recordsNow", "open", "declined", "declinedRest")))
   | if (.open | type) == "object" then .open |= with_entries(select(.key | IN("umbrellas", "held"))) else . end
-  | if (.recordsNow | type) == "object" then .recordsNow |= {building} else . end
+  | if (.recordsNow | type) == "object" then .recordsNow |= {building, waitingCount} else . end
   | reduce ("declined", "declinedRest") as $k (.; if (.[$k] | type) == "array" then .[$k] |= map(select(type == "object" and .by == "judge") | {id, by, time}) else . end)'
 # The cut runs in a bash that has taken the engine's PATH (p_path in conveyor/lib/portable.sh): on macOS the jq the engine
 # needs is Homebrew's, and an ssh command's PATH has no Homebrew folder.

@@ -113,8 +113,8 @@ def figures_only(old, new):
 
 # The parts of a record's snapshot that /units draws (hooks/sources.ts parseRecord). The rest (tests, testActions ...)
 # is the Board's alone and grows with the Tests page's history. `declined` and `declinedRest` are cut to the judge's
-# lines, by id, who and time; `open` to the two lists /units reads; `recordsNow` to its building, the loop's count now
-# that /units gives while the snapshot is behind (the snapshot carries recordsNow then); `testMap` to the test map's
+# lines, by id, who and time; `open` to the two lists /units reads; `recordsNow` to its building and waitingCount, the
+# loop's counts now that /units gives while the snapshot is behind (the snapshot carries recordsNow then); `testMap` to the test map's
 # state (conveyor/lib/testmap.sh mapstate()), which /units shows from the feed while its stream is live and has a
 # record of the checkout (by its main), and asks the fetch for otherwise.
 UNITS_PARTS = ('health', 'needsYou', 'belt', 'landed', 'landedCount', 'queue', 'cost', 'awaitingDeploy', 'suites', 'snapshotAt', 'testMap')
@@ -130,7 +130,7 @@ def units_snap(snap):
     if isinstance(snap.get('open'), dict):
         out['open'] = {k: snap['open'][k] for k in ('umbrellas', 'held') if k in snap['open']}
     if isinstance(snap.get('recordsNow'), dict):
-        out['recordsNow'] = {'building': snap['recordsNow'].get('building')}
+        out['recordsNow'] = {k: snap['recordsNow'].get(k) for k in ('building', 'waitingCount')}
     for k in ('declined', 'declinedRest'):
         if isinstance(snap.get(k), list):
             out[k] = [{f: x.get(f) for f in ('id', 'by', 'time')} for x in snap[k] if isinstance(x, dict) and x.get('by') == 'judge']

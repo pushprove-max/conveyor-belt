@@ -211,7 +211,10 @@ A word wider than the pane breaks between whole characters.
   the test map line and the weekly limit.
 - The old-engine line and the whole-suite line, when there is one (while it runs, a second line with its counts, or the progress of the pass that runs failed cases again, when it has some), and the cards that need you, one line each.
 - **BUILD MATRIX**: on the right, the project and its slots in use against the builder cap (`bookstore · 3/4
-  slots`; the same count as the `ON THE BELT` head when the snapshot is older). One row for each card on the belt: the issue (`#486`; a part of a parent issue `#636 of #647`). A card with no issue shows its kind and its parent:
+  slots`; the same count as the `ON THE BELT` head when the snapshot is older). When cards on the belt wait and do
+  no work (for another card, or for main to change), the number of these cards comes after the slots: `bookstore · 4/4
+  slots · 2 waiting`. With no waiting card, the header has no waiting count. In a narrow pane where the count does not
+  fit, the header, the dim line of each other project and the legend show no waiting count and no `‖ waiting`. One row for each card on the belt: the issue (`#486`; a part of a parent issue `#636 of #647`). A card with no issue shows its kind and its parent:
   `fu #1571` for a review follow-up of #1571, `split #1453` for a split part of #1453, `red <commit>` (the
   first 7 characters of the commit) for a fix of a red main, and `test <file>` for a card of the Tests page (the
   test file's name, without its folder and extension, cut to fit the column). Any other card with no issue shows `card <N>`, with the number its
@@ -219,9 +222,9 @@ A word wider than the pane breaks between whole characters.
   LANDED TODAY, the lists of cards that need you and the toasts. After the ID: one column for each step (`B R F T L P`: Build,
   Review, Fix, Test, Land, Push), its overall time (`Age`), its cost and, last, its short title (`Title`; a review follow-up shows its finding there, as the file's name and line and the finding's text, with no `[P1]` or `[E2]` tag; a fix card of a red main shows its name, `Main is red (<commit>)`). The title
   uses the remaining width of the row, and a title that is too long ends in `…`. A step shows `▶` while it runs,
-  `✓` when it is done, `✗` when it failed and `·` when the card did not get to it (Fix after a GO, too). A dim
+  `‖` while the card waits for another card, `✓` when it is done, `✗` when it failed and `·` when the card did not get to it (Fix after a GO, too). A dim
   legend is under the table. Each project with cards on the belt has its own matrix. Each other project of the
-  machine has one dim line with its name and slots. `Cost` is shown when the ID, the steps and
+  machine has one dim line with its name, its slots and its waiting count. `Cost` is shown when the ID, the steps and
   `Cost` fit in the row, and `Age` only when the row has room for it after that. A row too narrow for `Cost` shows
   no `Cost`, and still shows `Age` when `Age` fits. When fewer than 6 columns are left after the other columns, the title is not shown. When a step of the card has no price, its
   cost shows as `$4.10+`, and the line under the row shows the dollars and the gap: `$4.10 + 1 step not priced`.

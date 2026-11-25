@@ -286,14 +286,15 @@ same 'fresh: the changed record'"'"'s snapshot holds the change, the other'"'"'s
 # a snapshot with a large tests part; the fetch prints only the parts the pane draws, the judge's declined lines cut to
 # id, who and time, and open cut to its two lists. Bug: the cut dropped recordsNow, so
 # /units read from the host counted the kept belt's rows against the cap, not loop.json's count now; of it the cut keeps
-# building alone.
+# building and waitingCount alone. Bug (issue 1679): the cut dropped waitingCount, so /units gave the old snapshot's
+# waiting count beside the slots now.
 machine cut
 printf '%s\n' '#!/usr/bin/env bash' '[ "$1" = snapshot ] || exit 2' \
-  "jq -nc '{recordsNewer: true, recordsNow: {building: 1, running: 2, blocked: [], waiting: [], started: [{card: \"c2\"}]}, health: {state: \"ok\"}, belt: [], queue: {next: []}, cost: {today: 1}, snapshotAt: \"t\", tests: [range(0; 3000) | {file: \"f\\(.)\", log: (\"x\" * 1000)}], testActions: [range(0; 5)], declined: [{id: \"a\", by: \"judge\", time: \"t1\", why: \"long\"}, {id: \"b\", by: \"owner\", time: \"t2\"}], declinedRest: [], open: {umbrellas: [{issue: 1}], held: [], issues: [range(0; 50)]}}'" > "$M/clone/conveyor/conveyor.sh"
+  "jq -nc '{recordsNewer: true, recordsNow: {building: 1, waitingCount: 3, running: 2, blocked: [], waiting: [], started: [{card: \"c2\"}]}, health: {state: \"ok\"}, belt: [], queue: {next: []}, cost: {today: 1}, snapshotAt: \"t\", tests: [range(0; 3000) | {file: \"f\\(.)\", log: (\"x\" * 1000)}], testActions: [range(0; 5)], declined: [{id: \"a\", by: \"judge\", time: \"t1\", why: \"long\"}, {id: \"b\", by: \"owner\", time: \"t2\"}], declinedRest: [], open: {umbrellas: [{issue: 1}], held: [], issues: [range(0; 50)]}}'" > "$M/clone/conveyor/conveyor.sh"
 hostfile --arg c "$M/clone" --arg b "$M/bakery" '{host: "lab", ssh: "lab", main: $c, records: [{repo: "bakery", main: $b}]}'
 got=$(fetch "$M/bakery" | sed -n '/^host/,$p' | sed 1d)
 same 'the snapshot the host fallback prints holds only what the pane draws, whatever the Tests page holds' \
-  'bakery	{"recordsNow":{"building":1},"health":{"state":"ok"},"belt":[],"queue":{"next":[]},"cost":{"today":1},"snapshotAt":"t","declined":[{"id":"a","by":"judge","time":"t1"}],"declinedRest":[],"open":{"umbrellas":[{"issue":1}],"held":[]}}' "$got"
+  'bakery	{"recordsNow":{"building":1,"waitingCount":3},"health":{"state":"ok"},"belt":[],"queue":{"next":[]},"cost":{"today":1},"snapshotAt":"t","declined":[{"id":"a","by":"judge","time":"t1"}],"declinedRest":[],"open":{"umbrellas":[{"issue":1}],"held":[]}}' "$got"
 [ "${#got}" -lt 1000 ] && ok 'the cut snapshot is small' || bad "the cut snapshot is ${#got} characters"
 
 # Bug (issue 1287, review): on a macOS build machine jq is Homebrew's, which an ssh command's PATH does not hold; the

@@ -111,8 +111,10 @@ export type Landed = Card & Times & Priced & { closed: boolean; at: number | nul
 // loop.json (it carries recordsNow: `conveyor.sh snapshot`), as the Foreman takes it; now: then the running loop's count
 // as loop.json gives it now, null when no loop process lives or the loop has not counted a turn yet (and when not
 // behind). onBelt: the record's
-// cards on the belt; landing: those of them landing or landed, in Push (the cap does not count them).
-export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; behind: boolean; now: number | null; cap: number | null; onBelt: number; landing: number }
+// cards on the belt; landing: those of them landing or landed, in Push (the cap does not count them). waiting: the
+// loop's count of its cards that wait and do no work, on another card or for main to change (health.waitingCount;
+// while behind, recordsNow's, the loop's count now, when it has one); null when the snapshot does not say.
+export type Loop = { repo: string; state: string; reason: string; loop: boolean | null; building: number | null; waiting: number | null; behind: boolean; now: number | null; cap: number | null; onBelt: number; landing: number }
 // machine: where a release's suite runs when that is not this machine ({kind: ssh or devbox, name, step: the step the run
 // is at (start, setup, checkout, run, results, done), given: a devbox's lease went back}), else null.
 export type Suite = { repo: string; kind: string; version: string; sha: string; since: number | null; ended: number | null; state: string; done: number | null; failed: number | null
@@ -293,7 +295,8 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
   const next = Array.isArray(j.queue.next) ? j.queue.next.filter((x: unknown) => x && typeof x === 'object') : null
   return {
     loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null, building: num(j.health?.building),
-      ...(j.recordsNow && typeof j.recordsNow === 'object' ? { behind: true, now: num(j.recordsNow.building) } : { behind: false, now: null }), cap: num(j.health?.builderCap),
+      ...(j.recordsNow && typeof j.recordsNow === 'object' ? { behind: true, now: num(j.recordsNow.building), waiting: num(j.recordsNow.waitingCount) ?? num(j.health?.waitingCount) }
+        : { behind: false, now: null, waiting: num(j.health?.waitingCount) }), cap: num(j.health?.builderCap),
       onBelt: j.belt.length, landing: j.belt.filter((x: any) => x?.offCap === true || x?.step === 'push' || x?.step === 'issue').length },
     needs: [
       ...j.needsYou.waiting.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: true, text: one(x.sentence), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
@@ -1320,18 +1323,24 @@ const pickCounts = (snap: Snap): { ready: number; waiting: number } => {
 }
 
 // The step marks of the matrix, as its legend reads: a step the card did not reach, skipped (Fix after a GO) or still
-// to come, is the dim `·`.
+// to come, is the dim `·`. The current step of a card that waits on another card (its waitsOn) is `‖` (WAIT_MARK).
+const WAIT_MARK: Seg = { t: '‖', c: C.work }
 const MARK: Record<Step['state'], Seg> = { done: { t: '✓', c: C.ok }, now: { t: '▶', c: C.work, b: true }, failed: { t: '✗', c: C.you, b: true }, skipped: { t: '·', d: true }, todo: { t: '·', d: true } }
 // A card with no track (an older engine) has only its step: the steps before it done, the ones after not reached.
 const STEP_AT: Record<string, number> = { build: 0, review: 1, fix: 2, tests: 3, landing: 4, push: 5, issue: 5 }
+const markOf = (b: Belt) => (st: Step['state']): Seg => (st === 'now' && b.waitsOn ? WAIT_MARK : MARK[st])
 const statesOf = (b: Belt): Step['state'][] => (b.track ? b.track.steps.map(st => st.state)
   : STEP_NAMES.map((_, i) => { const at = STEP_AT[b.step]; return at === undefined || i > at ? 'todo' : i < at ? 'done' : 'now' }))
 // While the snapshot is behind, the count is loop.json's now; when that is unknown, health.building, then the belt's
-// cards that take a slot (not those in Push), as in the head of ON THE BELT: never 0 for a count nobody knows.
-const slotsOf = (l: Loop) => {
+// cards that take a slot (not those in Push), as in the head of ON THE BELT: never 0 for a count nobody knows. The
+// loop's count of cards that wait follows, `· 2 waiting`, when it is above 0 and `wait` is on; with no count, none is shown.
+const slotsOf = (l: Loop, wait = true) => {
   const n = l.behind ? l.now ?? l.building ?? l.onBelt - l.landing : l.building ?? l.onBelt
-  return l.cap !== null ? `${n}/${l.cap} slots` : `${n} building`
+  return `${l.cap !== null ? `${n}/${l.cap} slots` : `${n} building`}${wait && l.waiting ? ` · ${l.waiting} waiting` : ''}`
 }
+// A text with its waiting part (text(true)) where it fits `room` columns whole, else the text with none (text(false)):
+// the waiting part goes first, so a narrow pane shows the project, its slots and the legend as before it was added.
+const withWait = (room: number, text: (wait: boolean) => string) => { const t = text(true); return cols(t) <= room ? t : text(false) }
 
 // One project's matrix: ID, a column a step (headed by its first letter), Age, Cost and last the title, which takes
 // the rest of the row's width at any pane width (#603). Age goes first when the row does not fit; the title is left
@@ -1359,12 +1368,12 @@ const matrixTable = (s: State, cards: Belt[], w: number): Line[] => {
     fitWidth([{ t: head, d: true }], w),
     ...rows.flatMap((r): Line[] => [fitWidth([
       { t: padR(r.id, idW), c: C.name, b: true }, { t: '  ' },
-      ...statesOf(r.b).flatMap((st, i) => [...(i ? [{ t: ' ' }] : []), MARK[st]]),
+      ...statesOf(r.b).flatMap((st, i) => [...(i ? [{ t: ' ' }] : []), markOf(r.b)(st)]),
       ...(age ? [{ t: `  ${padL(r.age, ageW)}`, d: true }] : []),
       ...(costCol ? [{ t: '  ' }, { t: padL(r.cost, costW), c: C.cost }] : []),
       ...(titleW ? title(r.b) : []),
     ], w), ...(!r.b.reading ? [] : costCol ? gapLine(r.b, idW + 2, w) : dollarsLine(r.b, idW + 2, w))]),
-    fitWidth([{ t: '▶ running · pending ✓ done ✗ failed', d: true }], w),
+    fitWidth([{ t: withWait(w, wait => `▶ running ${wait ? '‖ waiting ' : ''}· pending ✓ done ✗ failed`), d: true }], w),
   ]
 }
 // BUILD MATRIX: a matrix for each project with cards on the belt, its name and slots on the right; every other project
@@ -1374,11 +1383,12 @@ export const matrixModel = (s: State, snap: Snap, w: number): Line[] => {
   const groups = [...snap.loops].sort((a, b) => Number(b.repo === own) - Number(a.repo === own))
     .map(l => ({ l, cards: snap.belt.filter(b => (b.repo || own) === l.repo) }))
   const full = groups.filter(g => g.cards.length), idle = groups.filter(g => !g.cards.length)
-  const right = (l: Loop) => `${l.repo} · ${slotsOf(l)}`
+  // section() (spread) drops a right side wider than w - 3 whole.
+  const right = (l: Loop) => withWait(w - 3, wait => `${l.repo} · ${slotsOf(l, wait)}`)
   return [
     ...(full.length ? full.flatMap((g, i) => [...(i ? [[] as Line] : []), section('BUILD MATRIX', right(g.l), w), ...matrixTable(s, g.cards, w)])
       : [section('BUILD MATRIX', idle[0] ? right(idle[0].l) : '', w), empty('nothing on the belt')]),
-    ...(full.length ? idle : idle.slice(1)).map(g => fitWidth([{ t: `  ${g.l.repo} ${slotsOf(g.l)}`, d: true }], w)),
+    ...(full.length ? idle : idle.slice(1)).map(g => fitWidth([{ t: withWait(w, wait => `  ${g.l.repo} ${slotsOf(g.l, wait)}`), d: true }], w)),
   ]
 }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, test } from 'claude-code/testing'
 import { TWO_PROJECTS } from './fixtures/units-two-projects'
-import { activityModel, ageNotes, boardOf, boardOfFeed, fastText, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, tableText, toasts } from './sources'
+import { activityModel, ageNotes, boardOf, boardOfFeed, fastText, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, STEP_NAMES, tableText, toasts } from './sources'
 import type { Fast, Research, State } from './sources'
 import { clockOf, cols, plain } from './elements'
 
@@ -1257,6 +1257,69 @@ test('the pane from two projects with 4 cards building, 5 waiting and 20 landed:
   for (const l of rows) expect(l).toMatch(/ ▶ · · · · · /)
   expect(text).toMatch(/\nPICK ORDER +0 ready\nWaiting +Requires\n#489 +#485 +#486 +#487 +#488\n#490 +#489\n/)
   expect(text).toMatch(/\nLANDED TODAY · 20 +5 most recent of 20\n[^]*\n\S+ [AP]M +#400 +✓ GO r2 +\S+ +\$4\.21\n/)
+})
+
+// Issue 1679. Bug it catches: BUILD MATRIX drew ▶ on the current step of a card that only waits on another card, so
+// `4/4 slots` sat above six rows that each showed ▶, and the header did not say how many cards wait.
+const matrixOf = (belt: object[], health: object, more: [string, string][] = [], w = 100, repo = 'bookstore') =>
+  section(paneModel(state(fetched([[repo, snapshot({ belt, health })], ...more])), w, 0).map(plain).join('\n'), 'BUILD MATRIX').split('\n')
+// The engine's track (conveyor/jq/track.jq): the steps before `at` done, `at` now, the rest to do.
+const trackAt = (at: number) => ({ steps: STEP_NAMES.map((name, i) => ({ name, state: i < at ? 'done' : i === at ? 'now' : 'todo', sec: null })), at, label: 'x', since: ago(1) })
+// A card at a same-file wait, as conveyor/lib/snapshot.sh sends it: step "waiting", its track and waitsOn. #4104 waits
+// in Land, #4105 in Build.
+const sixCards = (waits: boolean) => [4100, 4101, 4102, 4103, 4104, 4105].map((n, i) => ({ ...BELT[0], card: `c-${n}`, issue: n, title: `Card ${n}`,
+  ...(waits && n >= 4104 ? { step: 'waiting', track: trackAt(n === 4104 ? 4 : 0), waitsOn: { card: 'c-4100', issue: 4100, state: 'build' } }
+    : { step: ['build', 'review', 'fix', 'tests', 'build', 'build'][i] }) }))
+const rowOf = (m: string[], n: number) => m.find(l => l.startsWith(`#${n} `)) ?? ''
+const rowsOf = (m: string[]) => m.filter(l => l.startsWith('#'))
+test('/units marks the current step of a waiting card ‖, not ▶, and gives the waiting count after the slots', () => {
+  const health = { loop: true, state: 'running', building: 4, waitingCount: 2, builderCap: 4 }
+  const idle = snapshot({ health: { loop: true, state: 'running', building: 0, waitingCount: 1, builderCap: 2 } })
+  const m = matrixOf(sixCards(true), health, [['gadgetlab', idle]])
+  const feed = 'feed: 4 working cards (#4100-#4103), 2 at step "waiting" with a track and waitsOn (#4104 in Land, #4105 in Build), health {building 4, waitingCount 2, builderCap 4}; idle gadgetlab waitingCount 1'
+  expect(m[0], feed).toMatch(/^BUILD MATRIX +bookstore · 4\/4 slots · 2 waiting$/)
+  expect(rowsOf(m), feed).toHaveLength(6)
+  for (const n of [4100, 4101, 4102, 4103]) expect(rowOf(m, n), `${feed}: row #${n}`).toMatch(/ ▶ /)
+  expect(rowOf(m, 4104), `${feed}: row #4104`).toMatch(/^#\d+ +✓ ✓ ✓ ✓ ‖ · /)
+  expect(rowOf(m, 4105), `${feed}: row #4105`).toMatch(/^#\d+ +‖ · · · · · /)
+  for (const n of [4104, 4105]) expect(rowOf(m, n), `${feed}: row #${n}`).not.toContain('▶')
+  expect(m, feed).toContain('▶ running ‖ waiting · pending ✓ done ✗ failed')
+  expect(m, feed).toContain('  gadgetlab 0/2 slots · 1 waiting')
+})
+// Bug it catches: at a narrow width the waiting count made the header's right side too wide, so the project and its
+// slots were dropped whole; the idle line and the legend were cut, the legend's `✗ failed` lost. The waiting parts go
+// first. At 40 columns the header's right side has 37, the idle line and the legend 40.
+test('/units leaves out the waiting parts that do not fit, so the project, its slots and the legend show whole', () => {
+  const idle = snapshot({ health: { loop: true, state: 'running', building: 0, waitingCount: 1, builderCap: 2 } })
+  const m = matrixOf(sixCards(true), { loop: true, state: 'running', building: 4, waitingCount: 2, builderCap: 4 }, [['gadgetlab-toolbox', idle]], 40, 'bookstore-shop')
+  const feed = 'feed at 40 columns: bookstore-shop health {building 4, waitingCount 2, builderCap 4} (38 columns with the count); idle gadgetlab-toolbox waitingCount 1 (41 with it)'
+  expect(m[0], feed).toMatch(/ bookstore-shop · 4\/4 slots$/)
+  expect(m, feed).toContain('  gadgetlab-toolbox 0/2 slots')
+  expect(m, feed).toContain('▶ running · pending ✓ done ✗ failed')
+  expect(rowOf(m, 4105), `${feed}: row #4105`).toMatch(/^#\d+ +‖ /)
+})
+// Bug it catches: while the snapshot is behind, the header took the slots from the loop's count now (recordsNow) but
+// the waiting count from the old snapshot, so a card that had stopped waiting was still counted.
+test('/units takes the loop\'s waiting count now while the snapshot is behind', () => {
+  const s = board({ belt: sixCards(true), recordsNewer: true, recordsNow: { building: 5, waitingCount: 1 }, health: { loop: true, state: 'running', building: 4, waitingCount: 2, builderCap: 6 } })
+  expect(matrixHead(s), 'feed: recordsNow {building 5, waitingCount 1}, health {building 4, waitingCount 2, builderCap 6}').toMatch(/ bookstore · 5\/6 slots · 1 waiting$/)
+})
+// Bug it catches: a view that showed `· 0 waiting`, or a wait mark on a card with no waitsOn.
+test('/units shows the matrix as before when no card waits', () => {
+  const m = matrixOf(sixCards(false), { loop: true, state: 'running', building: 6, waitingCount: 0, builderCap: 6 })
+  const feed = 'feed: 6 cards with no waitsOn, health {building 6, waitingCount 0, builderCap 6}'
+  expect(m[0], feed).toMatch(/^BUILD MATRIX +bookstore · 6\/6 slots$/)
+  expect(rowsOf(m), feed).toHaveLength(6)
+  for (const l of rowsOf(m)) expect(l, feed).toMatch(/ ▶ /)
+  expect(rowsOf(m).join('\n'), feed).not.toContain('‖')
+})
+// Bug it catches: a snapshot of an older engine (no waitsOn, no waitingCount) drew a waiting count nobody knows.
+test('/units shows the matrix as before for a snapshot with no waitsOn and no waitingCount', () => {
+  const m = matrixOf(sixCards(false), { loop: true, state: 'running', building: 6, builderCap: 6 })
+  const feed = 'feed: 6 cards with no waitsOn, health {building 6, builderCap 6} with no waitingCount'
+  expect(m[0], feed).toMatch(/^BUILD MATRIX +bookstore · 6\/6 slots$/)
+  expect(rowsOf(m), feed).toHaveLength(6)
+  for (const l of rowsOf(m)) expect(l, feed).toMatch(/ ▶ /)
 })
 
 // Issue 830. Bug it catches: the snapshot keeps only the newest 20 landed rows (and older ones still on the belt), and
