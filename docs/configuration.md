@@ -255,7 +255,8 @@ The rule **Stop a card's tests at the first failure** is on in a new project. Wh
 ends the card's test run. No other test file starts, and Conveyor stops the files that still run. The output, the
 test line and the Board name the files that did not run. When the step runs the failed test file again, the cases
 after the failed one run too. The cases of that file that passed run again too, unless the test command can leave
-out one case of a file. When the rule is off, the card runs every case that it selects. A release's suite runs every case with either setting. The Rules tab's row in
+out one case of a file. When the rule is off, the card runs every case that it selects. A release's suite and a main-red fix card's test run
+run every case with either setting. The Rules tab's row in
 Capacity sets the rule, as do `conveyor.sh control rules failfast=off` and `failfast=on`.
 
 The rule **Only the Test step runs tests** is off in a new project. When it is on, the card rules that a build, fix

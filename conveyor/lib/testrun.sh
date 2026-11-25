@@ -433,9 +433,9 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # "changed", files: <count>, by: "own", "map" or "name", age: the commits the made test map is behind (only with
 # one)}. A list of none runs nothing (LISTNONE set; the list, {mode: "changed", files: 0, by, why}, says so). With no
 # test.fileCommand set, Conveyor's own runner runs each file (testlist.sh ownrunner()); when it has none for one of them, nothing
-# runs, <worktree>.stop says why (NORUNNER) and it fails. TEST_GIVEN is how many files
-# it got (watch() stops a run that reports more: tests()). <report args> (reportask() files) go after the command,
-# before each file's path. TEST_FAST is `fast` when the command stops at its first failure (failfast()), else empty.
+# runs, <worktree>.stop says why (NORUNNER) and it fails. TEST_GIVEN is how many files it got (watch() stops a run that
+# reports more: tests()). <report args> (reportask() files) go after the command, before each file's path. TEST_FAST is
+# `fast` when the command stops at its first failure (failfast()), else empty, as for a main-red fix card (in $MAINRED): cardland.sh redelse() needs a verdict of each case it fails.
 listcmd() { # <worktree> [report args]
   local s fs=() by fc rn='' f c nf=0 nw=0 lk=() sh=() ns=0 READADD=() READWHOLE='' READLINKS=0
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
@@ -513,7 +513,7 @@ listcmd() { # <worktree> [report args]
   [ ${#fs[@]} != 0 ] || { LISTNONE=1; return 0; }
   packget test.fileCommand fc || return 1
   [ -n "$fc" ] || fc=$(ownrunner "$1" "${fs[@]}") || { narrowstop "$fc" > "$1.stop"; return 1; }
-  TEST_FAST=; ! failfast || TEST_FAST=fast; LISTCMD=$(filecmd "$fc${2:+ $2}" files "$TEST_FAST"); TEST_FILES=$(printf '%s\n' "${fs[@]}"); TEST_GIVEN=${#fs[@]}
+  TEST_FAST=; ! failfast || jq -e --arg c "${1##*/}" 'any(.reds[]?; .card == $c)' "$MAINRED" > /dev/null 2>&1 || TEST_FAST=fast; LISTCMD=$(filecmd "$fc${2:+ $2}" files "$TEST_FAST"); TEST_FILES=$(printf '%s\n' "${fs[@]}"); TEST_GIVEN=${#fs[@]}
 }
 # Of the test files <file>... linked to a card's change (testsel() narrow: listcmd(); and those of the bug-card check,
 # bugproof.sh bugproof()), the ones a card runs, in CAPFILES: all of them up to the

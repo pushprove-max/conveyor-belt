@@ -629,6 +629,7 @@
 {"area": "card", "test": "mainred.test.sh"}
 {"area": "card", "test": "mainredproof.test.sh"}
 {"area": "card", "test": "mainredhold.test.sh"}
+{"area": "card", "test": "redcycle.test.sh"}
 {"area": "card", "test": "machinehold.test.sh"}
 {"area": "card", "test": "bugproof.test.sh"}
 {"area": "card", "test": "speedproof.test.sh"}

@@ -59,7 +59,7 @@ its own, and the Board's Rules tab sets them in its Judge row.
   that did not run. Each file's command gets `CONVEYOR_TEST_FAILFAST=1`. The run again after such a stop runs the failed
   file, so the cases after the failed one run too; its cases that passed run again too, unless the test command
   leaves out the cases that its `CONVEYOR_TEST_RERUN` list names as passed. Off, the step runs every case that it
-  selects. A release's suite runs every case with either setting.
+  selects. A release's suite and a main-red fix card's test step run every case with either setting.
 - `teststeponly`: the rule Only the Test step runs tests, off by default. On, the card rules of each session leave out
   each paragraph that starts with the line `Your own test runs, in a build or fix session:`. In their place, the rules
   say that the Test step runs the tests and that a session reads the last Test step's result. The card's command

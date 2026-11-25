@@ -80,6 +80,24 @@ t_failfastoff() {
     || fail "with the rule off, the step's result names a file not run, or not a.test.sh alone as failed: $(cat "$T/$CASE/fails")"
 }
 
+# Bug it catches: a main-red fix card's run stopped at its first failure, another entry's case, before its other
+# cases ran (in that file too), so no verdict named them: it could land with a case it broke unseen, or wait for main
+# with another fix card failing its case first, each for good (cardland.sh redelse()). With the rule on, the same card,
+# which an entry of the main-red record names (its worktree's name, wt), runs b.test.sh's later case, and names no
+# file as not run.
+t_failfastredfix() {
+  # shellcheck disable=SC2034 # FXWT is read by fx_in, a fix card's worktree; this case has none
+  local rc w=$T/$CASE/wt FXWT=$T/$CASE/none
+  ffcard
+  fx_in 'jq -cn "{reds: [{sha: \"1111\", cases: [{case: \"a.test.sh: first\", by: \"c1\"}], card: \"wt\"}]}" > "$MAINRED"'
+  [ "$RC" = 0 ] || fail "the main-red record could not be written: $(cat "$T/$CASE/run.out")"
+  ffrun; rc=$?
+  [ "$rc" != 0 ] || fail "the fix card's Test step with a failing case passed: $(cat "$T/$CASE/out" "$w.test")"
+  [ -e "$T/$CASE/late" ] || fail "the main-red fix card's step stopped at its first failure, and did not run b.test.sh's later case: $(cat "$w.test")"
+  [ "$(jq -c '[.notRun, (.files | map(.file))]' "$T/$CASE/fails")" = '[null,["a.test.sh"]]' ] \
+    || fail "the main-red fix card's step names a file not run, or not a.test.sh alone as failed: $(cat "$T/$CASE/fails")"
+}
+
 # Bug it catches (#1616): a release's run is not a card's: each failure there becomes its own fix card, so it runs
 # every case. With the rule on, the release's run of the same two files (test.full, whose command stops at its first
 # failure when it is given CONVEYOR_TEST_FAILFAST=1) runs b.test.sh's later case too.

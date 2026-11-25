@@ -142,7 +142,8 @@ cardlanding() {
     # Not run again when they passed on what its worktree still holds (that run has its own line): this line says it
     # reused that pass.
     # A batch's run (batch(): TEST_BATCH) says in selected how many passes it kept, and no case ran when it ran none.
-    # A card the repair lane passed (mainred.sh repairlane()): its line says so, with the clean run of its changed tests.
+    # A card the repair lane passed (mainred.sh repairlane()): its line says so, with the clean run of its changed tests;
+    # a main-red fix card whose failures are other entries' (redelse()) says why it goes on.
     if [ -n "$repaired" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --arg r "$repaired" '$x[0] + {reason: $r}')"
     elif [ -n "$ran" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --slurpfile r <(firstrun "$wt" pass) --argjson b "${TEST_BATCH:-null}" \
       --slurpfile s <([ -z "$own" ] && echo '{}' || slowrec "$wt") '$x[0] + $r[0] + $s[0] | if $b then .selected += $b else . end')"
@@ -306,8 +307,28 @@ mainredhold() {
   [ $rc = 0 ] || [ $rc = 4 ] || { rm -f "$wt.ready"; locked giveway "$c" "$wt"; go=next; return 0; }
   go=again; return 0
 }
+# A main-red fix card (issue 0, no branch) whose failed run's verdicts (mainred.sh verdicts()) are all main's, each
+# a case another entry of the main-red record holds, and none a case of its own entry: those cases are other entries',
+# for their fix cards to fix (mainred() gives a case that fails on a commit no open entry holds it for an entry of its
+# own). Were it to wait for main, two fix cards that each fail only the other's cases would wait for good, with
+# nothing landing to change main. Its change makes main no worse, so it goes on as passed: prints why. A case of its
+# entry that it found itself (by: verdicts() adds each case its run fails on main to the entry of that commit,
+# mainred(), which can be its own) is not one it fixes when another entry holds it too: else its own failure of
+# another entry's case would hold it. Fails for any other card, for a case of its own entry, for a case no other
+# entry holds (one it found itself on its own entry's commit is for it to fix), for a run that stopped before some
+# files ran (testfails() notRun: rules.failfast, which a fix card's run does not keep: testrun.sh listcmd()), whose
+# cases no verdict names, and when the record cannot be read (the card then waits for main, as before).
+redelse() { # <card> <issue> <branch> <verdicts() json> <testfails() of its run>
+  [ "$2" = 0 ] && [ -z "$3" ] || return 1
+  jq -e '(.notRun // []) == []' <<<"${5:-null}" > /dev/null 2>&1 || return 1
+  jq -re --arg c "$1" --slurpfile v <(printf '%s' "$4") 'select(any(.reds[]; .card == $c)) | [.reds[] | select(.card == $c) | .cases[] | select(.by != $c) | .case] as $own
+    | [.reds[] | select(.card != $c) | .cases[].case] as $held
+    | [$v[0].verdicts[] | select(.verdict == "main") | .case] | select(length > 0 and all(.[]; IN($held[]) and (IN($own[]) | not)))
+    | "every case it still fails fails on main too, and each is a case of another entry, none a case it fixes (\(join(", "))): it does not wait for main; their own fix cards fix them"' "$MAINRED" 2>/dev/null
+}
 # A test run that failed (rc). go: again (the test step again: no result, a wait for main or the machine, or main
-# moved), next (a fix round, one of TESTFIXES, or a fit onto main that went back) or landed; '' when the repair lane passed it.
+# moved), next (a fix round, one of TESTFIXES, or a fit onto main that went back) or landed; '' when the repair lane passed it,
+# or when it is a main-red fix card whose failures are other entries' (redelse()).
 cardfailed() {
   # The worktree lacks a dependency folder main has (depsmissing(), lib/push.sh): the failure is the project's
   # setup, not the change, and no run on main or fix session mends it. The card is blocked saying so, with no
@@ -349,8 +370,7 @@ cardfailed() {
   # is fitted onto main as it is then and tested again, as after a wait for main. Before it waits, it is judged
   # in the repair lane (mainred.sh repairlane(), issue 222): a card the lane passes goes on as a card whose tests passed;
   # one that finds the lane held by another card waits until it is free, and is then tested and judged again.
-  held=''
-  if [ "$route" = machine ]; then
+  held=''; if [ "$route" = machine ]; then
     lane=0; repairlane "$c" "$wt" || lane=$?
     if [ $lane = 0 ]; then
       echo "conveyor: card $c: a case it still fails is the machine's, and the card repairs it: $REPAIRED"
@@ -361,6 +381,7 @@ cardfailed() {
       rm -f "$wt.ready"; locked giveway "$c" "$wt"; began "$c" "$n" test
       holdwaited "$wt" "$([ $lane != 2 ] || echo lane)"; held=1
     fi
+  elif [ "$route" = main ] && repaired=$(redelse "$c" "$n" "$br" "$t" "${out:-null}"); then echo "conveyor: card $c: $repaired"; rc=0; tmain=''
   elif [ "$route" = main ]; then
     echo "conveyor: card $c: every case it still fails fails on main too: it waits for main to change"
     # A card at the give-way limit gives its files way too (giveway() red): the main-red fix card may need them.
