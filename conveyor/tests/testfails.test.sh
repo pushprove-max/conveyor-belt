@@ -405,7 +405,9 @@ EOF
 }
 # Bug it catches (E1 of the #1461 follow-up): two files past their own limits (filecmd()'s `-- timeout` line, no end
 # line) left the timeout naming the last alone, so the Tests judge told the first one's partial run as a pass.
-# stopped names each file begun and not ended, and not the file between them that passed.
+# stopped names each file begun and not ended, and not the file between them that passed. Bug (#1594 follow-up):
+# ownLimit names each file its own limit stopped, so a verdict that leaves out files only stopped beside the one that
+# timed out still names tests/a.test.sh.
 t_testfailsstopped() {
   mkdir -p "$T/$CASE"; cat > "$T/$CASE/cmd" <<'EOF'
 L=$CONVEYOR_TEST_LOG/run.log
@@ -413,9 +415,9 @@ echo "== tests/a.test.sh" | tee -a "$L"; echo "-- timeout tests/a.test.sh" >> "$
 echo "== tests/b.test.sh" | tee -a "$L"; echo "-- ok tests/b.test.sh" >> "$L"
 echo "== tests/c.test.sh" | tee -a "$L"; echo "-- timeout tests/c.test.sh" >> "$L"
 EOF
-  f=$(logfails 124 2 | jq -c '[.timeout, .stopped]') || fail "the failures could not be read"
-  [ "$f" = '[{"sec":2,"file":"tests/c.test.sh"},["tests/a.test.sh","tests/c.test.sh"]]' ] \
-    || fail "a run (exit 124) where tests/a.test.sh and tests/c.test.sh timed out and tests/b.test.sh passed: stopped does not name both timed-out files alone: $f"
+  f=$(logfails 124 2 | jq -c '[.timeout, .stopped, .ownLimit]') || fail "the failures could not be read"
+  [ "$f" = '[{"sec":2,"file":"tests/c.test.sh"},["tests/a.test.sh","tests/c.test.sh"],["tests/a.test.sh","tests/c.test.sh"]]' ] \
+    || fail "a run (exit 124) where tests/a.test.sh and tests/c.test.sh timed out and tests/b.test.sh passed: stopped and ownLimit do not name both timed-out files alone: $f"
 }
 
 # Bug: a test command that writes no runner log (a pack that runs one test file itself) had its failing cases under

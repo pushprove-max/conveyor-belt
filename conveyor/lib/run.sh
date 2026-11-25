@@ -400,10 +400,10 @@ turnwait() {
   for p in "${j[@]}" "${!mine[@]}"; do kill -0 "$p" 2>/dev/null || return 0; done
   wait -n "$timer" "${j[@]}" "${!mine[@]}" 2>/dev/null; nudged=''
 }
-# A `run` (not a serve) may end at this turn, read in run()'s own variables: no card of its own runs, no push
-# (pusher) or machine-hold look (prober) is under way, and no pick waits.
+# A `run` (not a serve) may end at this turn, read in run()'s own variables: no card of its own runs or is left in mine (one
+# whose job ended after turnended() is in no count until the next turn ends it), no push (pusher) or machine-hold look (prober) is under way, and no pick waits.
 runends() {
-  [ "$running" = 0 ] && [ -z "$serve" ] && [ -z "$pusher" ] && [ -z "$waits" ] && { [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober"; }
+  [ "$running" = 0 ] && [ -z "${!mine[*]}" ] && [ -z "$serve" ] && [ -z "$pusher" ] && [ -z "$waits" ] && { [ -z "$prober" ] || ! jobs -rp | grep -qx "$prober"; }
 }
 # The parts of a turn of the loop, called in order by run(), in run()'s own variables (the only locals of their own are
 # turnended()'s frozen and turnrestart()'s on): turnopen(), turnended(), turnside(), turncount(), turnrestart(),
@@ -608,7 +608,7 @@ turnrestart() {
   # The new commit, named before the exec (sayself()): no record names the old one under this pid from then on.
   local c=${new%/conveyor/conveyor.sh}
   if [ -n "$FOLLOW" ]; then sayself "$(git -C "$HERE" rev-parse -q --verify HEAD 2>/dev/null)" "$HERE"; else sayself "${c##*/}" ''; fi
-  echo "conveyor: restarting on the new code; ${#mine[@]} cards in flight carry on on $( (for k in "${!mine[@]}"; do echo "${on[$k]}"; done; [ ${#mine[@]} != 0 ] || echo "$RAN") | sort -u | paste -sd' ' - | sed 's/ /, /g')$([ ${#mine[@]} = 0 ] || echo "; a stop of this loop or of the machine's Conveyor, or a restart of its service, ends them")"
+  echo "conveyor: restarting on the new code; ${#mine[@]} cards in flight carry on on $( (for k in "${!mine[@]}"; do echo "${on[$k]}"; done; [ -n "${!mine[*]}" ] || echo "$RAN") | sort -u | paste -sd' ' - | sed 's/ /, /g')$([ -z "${!mine[*]}" ] || echo "; a stop of this loop or of the machine's Conveyor, or a restart of its service, ends them")"
   # Without its copy of stderr (LOGFD): the new code makes its own, so each restart kept one more, and after some
   # hundreds every card's test runner got fd 255, bash's own.
   CONVEYOR_KIDS=$held CONVEYOR_ADOPT=$(for k in "${!mine[@]}"; do echo "$k ${mine[$k]} ${on[$k]}"; done) exec "$BASH" "$new" serve {LOGFD}>&-
@@ -693,7 +693,7 @@ turnpick() {
   # Below the cap, the issue it would take is first read beside the cards on the belt (overlap(), outside the lock).
   [ -n "$picked" ] || [ "$building" -ge "$cap" ] || [ "$asking" != 1 ] || { overlap "${issues:-}" "$([ "$left" != 0 ] || echo retried)" "$ctl"; issues=$OVL; }
   [ -n "$picked" ] || [ "$building" -ge "$cap" ] \
-    || picked=$([ "$asking" = 1 ] && lockedfor pick fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "${ctl:-null}") || { [ "$running" != 0 ] || [ -n "$serve" ] || [ -n "$pusher" ] || exit 1; picked=''; }
+    || picked=$([ "$asking" = 1 ] && lockedfor pick fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "${ctl:-null}") || { [ "$running" != 0 ] || [ -n "${!mine[*]}" ] || [ -n "$serve" ] || [ -n "$pusher" ] || exit 1; picked=''; }
   [ "$picked" != stale ] || return 1 # the next turn says so and stops picking
   [ "$picked" != wait ] || { waits=1; picked=''; }
   [ -n "$picked" ] || return 0
@@ -749,7 +749,7 @@ run() { # [max-cards] [serve]
     turnside
     turncount
     [ -z "$old" ] || [ -z "$new" ] || turnrestart
-    if [ -n "$old" ] && [ "$running" = 0 ] && [ -z "$pusher" ]; then
+    if [ -n "$old" ] && [ "$running" = 0 ] && [ -z "${!mine[*]}" ] && [ -z "$pusher" ]; then
       # A `run` ends here; a card that landed after this turn's push check is owed a push first, as below.
       [ -n "$serve" ] || { pushdecided || continue; break; }
       # A pin, or a checkout's HEAD, first seen to move after this turn began (new is read at its start) is restarted

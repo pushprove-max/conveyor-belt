@@ -288,7 +288,9 @@ t_serve() {
   [ "$(originat)" = "$(mainat)" ] && [ "$(fails)" = "$n" ] && [ "$(tail -n 1 "$STUB/pushes")" = "$(mainat)" ] || fail "the push that worked left a push line, or did not pass the pre-push check"
   loopend
   loop check || fail "the record check refuses a push line"
-  [ "$(loop cards | jq -c '[.landed, .open, (.cards | map("\(.step) \(.stage)") | unique)]')" = '[4,0,["landed 5"]]' ] || fail "a push line changed a landed card's dashboard row: $(loop cards)"
+  # The pushes that failed their check made the push block's fix card (pushred(), lib/redfix.sh; pushblockfix.test.sh
+  # has its cases), an issue-0 card of its own that the failed push's run then picked: it is no landed card's row.
+  [ "$(loop cards | jq -c '[.landed, .open, (.cards | map(select(.issue != 0) | "\(.step) \(.stage)") | unique)]')" = '[4,0,["landed 5"]]' ] || fail "a push line changed a landed card's dashboard row: $(loop cards)"
   CONVEYOR_MAIN=$R bash "$SRC/report.sh" | grep -Eq '^cards landed +4$' || fail "the report miscounts cards that hold a push line"
   # Bug: a landing after a failed push waits for the retry timer. Each run above starts with nothing tried, so one loop's
   # turns (after the counts): c98's push is tried and fails (the stub), the timer holds it, c99 lands and is tried at once.

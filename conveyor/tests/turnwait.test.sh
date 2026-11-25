@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 60
-# Engine cases: the wait that ends each turn of the loop (turnwait(), lib/run.sh).
+# Engine cases: the wait that ends each turn of the loop (turnwait(), lib/run.sh), and the end of a `run` (runends()).
+# t_runreaps calls serveeng() and nojobs(), defined in serve.test.sh: the runner sources every area file.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -56,4 +57,23 @@ t_turnwaitadopted() {
   kill "$timer" 2>/dev/null; wait "$timer" 2>/dev/null
   lim=$(loadlimit 2000 5000) # under the timer's 5 s
   [ "$w" -lt "$lim" ] || fail "the turn's wait did not end at once on an adopted card that had ended (${w} ms; limit $lim ms: 2000 ms times the load factor $CASE_LOAD)"
+}
+
+# Bug (1.12.0 release, serve): a `run` counted its cards running (cardsrun()) after its turn's turnended() had looked at
+# them, so a card whose job ended between the two was in no count and was not ended: the run ended with the card still
+# in mine, its <card>.exit left in the cards folder, and any process of it left holding the run lock. Here run() picks
+# #7, and its card() stand-in waits until turnside(), which run() calls between turnended() and its count, lets it
+# close and waits for its job to end. The run must end that card before it ends: no <card>.exit is left.
+t_runreaps() {
+  local c
+  setup "[$(issue 7 2026-01-01)]"; tune '.tunables += {idle: 1, poll: 1}'
+  # run() itself, not runends() alone: the weak point lies between two steps of its turn, in the order only run() calls them.
+  serveeng "$SRC" 'nojobs
+    card() { wait_until "[ -e \"\$STUB/go\" ]"; record "$1" "$2" closed ok; }
+    turnside() { local p; for p in "${!mine[@]}"; do : > "$STUB/go"; wait "$p"; done; }
+    run 1' > "$STUB/run.out" 2>&1
+  c=$(st 'select(.issue == 7 and .step == "picked") | .card')
+  [ -n "$c" ] && [ -e "$STUB/go" ] || fail "run 1 did not pick #7 and start its card: $(cat "$STUB/run.out")"
+  [ ! -e "$T/$CASE/cards/$c.exit" ] \
+    || fail "run 1 ended with card $c not ended by the loop (its job ended between turnended() and the count): $c.exit is left; $(cat "$STUB/run.out")"
 }
