@@ -28,6 +28,10 @@
 #   with the clauses before it that it goes on (one with no subject, "is stale", or a hedge word, "maybe", takes the
 #   clause before it),
 #   so the marker is never lost and the report shows the text as a cause that was not checked.
+#   A turn that opens with a wake naming a card of this Foreman's projects "not yet reported: blocked" (watch-conveyor.sh
+#   unreported) is refused at every stop until, for each such card, an act naming it was logged since it blocked (`auto act`, read back from the ruling
+#   log), the turn asked the owner about it (AskUserQuestion), or its record no longer holds it blocked (retried, shut,
+#   landed): a reply ("Idle", or a plan to act later) alone is not that.
 # Each refused stop is noted in $FD/refused-stops (lib.sh refused_put), which waiter.sh reads.
 set -uo pipefail
 INPUT=$(cat)
@@ -65,8 +69,17 @@ W=$(head -n 1 "$FD/last-wake.txt" 2>/dev/null)
 TURN=$(jq -cs --arg w "$W" 'def txt: .message.content | if type == "string" then . else ([.[]? | select(.type == "text") | .text] | join("\n")) end;
   (map(.type == "user" and (((.isMeta // false) | not) or ($w != "" and (txt | contains($w))))
        and ((.message.content | type) != "array" or all(.message.content[]?; .type != "tool_result"))) | rindex(true)) as $i
-  | if $i == null then empty else {uuid: (.[$i].uuid // ""), opening: (.[$i] | txt),
+  | if $i == null then empty else
+    # ok: the tool calls of the turn whose result is no error: a picker a hook denied (auto on in full, hooks/auto.tsx)
+    # never reached the owner.
+    [.[$i + 1:][] | select(.type == "user") | .message.content | arrays | .[] | objects | select(.type == "tool_result" and .is_error != true) | .tool_use_id] as $ok
+    | {uuid: (.[$i].uuid // ""), opening: (.[$i] | txt), meta: (.[$i].isMeta // false),
       owner: any(.[$i + 1:][]; .type == "attachment" and .attachment.type? == "queued_command" and .attachment.origin.kind? == "human"),
+      # asks: each question of each AskUserQuestion of the turn that the owner was asked (its result is no error), as
+      # JSON (its text and options), one apiece, so a card and a project are matched within one question.
+      asks: [.[$i + 1:][] | select(.type == "assistant") | .message.content[]? | objects
+        | select(.type == "tool_use" and .name == "AskUserQuestion" and (.id | IN($ok[])))
+        | .input | if (.questions? | type) == "array" then .questions[] | tojson else tojson end],
       # reply: the text after the last tool call or user entry (a refused stop adds its feedback as a user
       # entry), so a refused reply is never checked or noted again at the next stop.
       reply: ([.[$i + 1:][] | if .type == "user" then {cut: true} elif .type == "assistant" then (.message.content[]? | if .type == "tool_use" then {cut: true} else . end) else empty end] as $c
@@ -197,6 +210,94 @@ REST=$(grep -viE "$PLUG" <<<"$REPLY" | grep -viE "$DONE")
 # project the owner files it, and the line passes as it is.
 if [ ${#UNFILED[@]} != 0 ] && plugin_home; then
   block "This project is the plugin's own repository, so a plugin problem is a defect you file here yourself, as any issue you file (it starts held until the owner says yes). File it now, then name the issue at the end of the line: 'Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>, filed as #<n>'. Not filed: ${UNFILED[0]}"
+fi
+# A card the wake names "<repo>: not yet reported: blocked <ref>" (watch-conveyor.sh unreported) needs, since it
+# blocked, a change of its state (health no longer holds it blocked as the line says: lib.sh blocked_now and FRESH),
+# an act logged under a standing kind (a row of a ruling log written at or after the block time health gives, and not
+# marked void) or an AskUserQuestion of this turn whose one question names it and whose result is no error (one a hook
+# denied never reached the owner). The lines are read from last-wake.txt (the text the waiter relayed) only in a turn
+# that the wake opens: a meta entry (the waiter's hook feedback, which no owner types) that holds W, and only for a
+# project this Foreman watches (mine): wake text the owner pastes or quotes in a prompt is no wake, and another
+# Foreman's project is not this one's. A card whose record's health does not read
+# (the build host not reached) is still held, as it may still be blocked: its block time is then read from the
+# snapshot the watcher kept of that record ($FD/conveyor-snapshot-<repo>.json, watch-conveyor.sh keepsnap) for the
+# card id its line names ("(card <id>)", watch-conveyor.sh unreported), and only when that snapshot does not list that
+# card (one kept before the card was retried lists the card before it) does its act count from the wake's time
+# (last-wake.txt's), as the card blocked before its wake was put.
+# The ruling logs read are this Foreman's own ($FD/rulings.jsonl, .claude/hooks/lib/rulings.sh rulings_log) and the
+# one of the record's host (lib.sh hostacts, read as it is, so an act logged there by an engine of any pin counts).
+# Only a ruling log counts as an act, not a receipt line, which any command can print. A text names the card only by
+# its id (the line's, or else health's), or, for a card the line names by its issue ("#<n>"), by its project with that
+# issue written together ("<project> #<n>", "<project> issue #<n>", not after a "/"), or by the GitHub repository of
+# the record's main checkout where its belt runs (lib.sh host_slug on the host file's ssh target, else repo_slug here;
+# never a checkout of this machine's that only shares the project's name, which can be the owner's fork), owner and
+# name, with the issue: "<owner>/<name>#<n>" or the issue's link, ".../<owner>/<name>/issues/<n>". Not by a card's name: the follow-ups of
+# one issue share one, and so can cards of two projects. Not by "#<n>" alone, nor by a project and an issue named
+# apart, nor by a fork's link: two projects can each have an issue #7, and the Foreman's records share one ruling log
+# on a machine. A plan in prose is none of these. Refused at every stop, as an unfiled plugin problem is: retrying or
+# shutting the card is always open (asking the owner too, unless auto is on in full), so the turn can always end.
+LEFT=''
+if [ -n "$W" ] && jq -e --arg w "$W" '.meta == true and (.opening | contains($w))' <<<"$TURN" > /dev/null 2>&1; then
+  LEFT=$(grep -E '^[A-Za-z0-9._-]+: not yet reported: blocked .+$' "$FD/last-wake.txt" 2>/dev/null \
+    | awk -F': ' 'NR == FNR { w[$1]; next } $1 in w' <(mine 2>/dev/null | cut -f1) -)
+fi
+if [ -n "$LEFT" ]; then
+  now=$(cut -d: -f1 <<<"$LEFT" | sort -u | blocked_now)
+  t=$(printf 'x\n%s\n' "$LEFT" | jq -Rrs --argjson now "$now" "$FRESH" 2>/dev/null) && LEFT=$(tail -n +2 <<<"$t")
+  ASKS=$(jq -c '.asks // []' <<<"$TURN" 2>/dev/null) || ASKS='[]'
+  # The blocked cards of the watcher's kept snapshot of each record whose health did not read, as blocked_now gives
+  # them: {<repo>: [{ref, card, since}]}. A record with no snapshot kept gives nothing, and the loop goes on: its
+  # failed read is not the loop's status, which pipefail would make the pipeline's and so drop every record's.
+  KEPT=$(cut -d: -f1 <<<"$LEFT" | sort -u | while IFS= read -r r; do
+    jq -e --arg r "$r" 'has($r)' <<<"$now" > /dev/null 2>&1 \
+      || jq -c --arg r "$r" '{($r): [.health.blocked | arrays | .[] | objects | {ref: ((.name | strings) // "#\(.issue)"), card, since}]}' "$FD/conveyor-snapshot-$r.json" 2>/dev/null \
+      || :
+  done | jq -cs 'add // {}' 2>/dev/null) || KEPT='{}'
+  # NAMES: true when a text of its input (a JSON list) names the card id $c, or the issue $n with the project $r, or
+  # with the repository $g ("owner/name", lower case), written together; a word is matched whole, as #7 is not #70, c7
+  # is not c70 and alpha is not alpha-2, and a project's name not after a "/", as fork/alpha is another repository.
+  NAMES='def esc: gsub("(?<c>[.*+?()\\[\\]{}|^$\\\\])"; "\\\(.c)");
+    def word($w): test("(?<![A-Za-z0-9._-])" + $w + "(?![A-Za-z0-9_-]|\\.[A-Za-z0-9_-])");
+    any(.[] | strings; ($c != "" and word($c | esc))
+      or ($n != "" and (word("(?<!/)" + ($r | esc) + "(?:'\''s)?(?:\\s+issue)?\\s*#" + $n)
+        or ($g != "" and test("(?:^|[^A-Za-z0-9._/-]|://[A-Za-z0-9.-]+/)" + ($g | esc) + "(?:#|/issues/)" + $n + "(?![0-9])"; "i")))))'
+  # This Foreman's own ruling log, read once: rows of an act not marked void, {utc, answer}.
+  MINE=$(jq -cRs '[split("\n")[] | fromjson? | objects | select(.source == "standing" and .void != true) | {utc, answer}]' "$FD/rulings.jsonl" 2>/dev/null) || MINE='[]'
+  declare -A ACTS=() SLUG=()
+  # The wake's time, as a ruling row's utc: the time an act counts from when health gives no block time.
+  WT=$(p_mtimes "$FD/last-wake.txt" | jq -Rr 'split(" ")[0] | tonumber | todate' 2>/dev/null) || WT=''
+  KEEP=''
+  while IFS= read -r l; do
+    [[ $l =~ ^([A-Za-z0-9._-]+):\ not\ yet\ reported:\ blocked\ (.+)$ ]] || continue
+    r=${BASH_REMATCH[1]} ref=${BASH_REMATCH[2]} c='' n='' since='' hc=''
+    [[ $ref =~ ^(.+)\ \(card\ ([A-Za-z0-9._-]+)\)$ ]] && ref=${BASH_REMATCH[1]} c=${BASH_REMATCH[2]}
+    # Only a line that names the card by its issue gives one: a named card's issue (a follow-up's) is its parent's.
+    [[ $ref =~ ^#([0-9]+)$ ]] && n=${BASH_REMATCH[1]}
+    # The repository of the record where its belt runs, read once: empty when it does not read, and then only the
+    # project's name counts.
+    if [ -n "$n" ] && [ -z "${SLUG[$r]+x}" ]; then
+      SLUG[$r]=''; m=$(recmain "$r") && SLUG[$r]=$(if [ -n "$(host_ssh)" ]; then host_slug "$m"; else repo_slug "$m"; fi)
+    fi
+    # The block time and the id health gives for the card, or else the kept snapshot's for the card of the line's id
+    # alone: a snapshot kept before the card was retried names the card before it (each retry is a new card), whose
+    # block time is older and whose act is no step on this one. The fields are split on a unit separator, as a tab is
+    # white space to read.
+    IFS=$'\x1f' read -r since hc < <(jq -r --arg r "$r" --arg ref "$ref" --arg c "$c" --argjson k "$KEPT" 'first((.[$r] // (if $c == "" then null else $k[$r] end))[]?
+      | select(.ref == $ref and ($c == "" or .card == $c)))
+      | [(.since | strings) // "", (.card | strings) // ""] | join("\u001f")' <<<"$now" 2>/dev/null)
+    since=${since:-$WT}
+    # A line that names no card id takes health's.
+    c=${c:-${hc:-}}
+    a=(--arg c "$c" --arg r "$r" --arg n "$n" --arg g "${SLUG[$r]:-}")
+    jq -e "${a[@]}" "$NAMES" <<<"$ASKS" > /dev/null 2>&1 && continue
+    if [ -n "${since:-}" ]; then
+      [ -n "${ACTS[$r]+x}" ] || { m=$(recmain "$r") && ACTS[$r]=$(hostacts "$m" 2>/dev/null | jq -cs .); } || ACTS[$r]='[]'
+      jq -e "${a[@]}" --arg s "$since" -s "[add[] | select((.utc | strings) >= \$s) | .answer] | $NAMES" <<<"$MINE${ACTS[$r]}" > /dev/null 2>&1 && continue
+    fi
+    KEEP+=$l$'\n'
+  done <<<"$LEFT"
+  KEEP=${KEEP%$'\n'}
+  [ -z "$KEEP" ] || block "A blocked card is not yet reported: ${KEEP//$'\n'/; }. Before the turn ends, take a step on each one: retry or shut it, or take a standing kind and log it with \`auto act <kind> \"<what you did>\"\`, or ask the owner with AskUserQuestion. Name the card in the act or the question by its card id, or, for a card named here by its issue, by its project with its issue written together, as \`<project> #<n>\`. A plan to do it later is not a step."
 fi
 MARK=$FD/reply-mark
 [ "$(cat "$MARK" 2>/dev/null)" != "$U" ] || exit 0

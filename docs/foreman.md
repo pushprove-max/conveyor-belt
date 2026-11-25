@@ -123,8 +123,8 @@ see only that project. It shows:
   failed cases. With no run in progress, it shows how the last run ended.
 - each item that needs you, one a line: a blocked card with its reason, a change that waits for your yes, a push
   error and a problem of the engine
-- `not yet reported: blocked #N` for each card blocked for two polls or more that the Foreman has not got in a wake.
-  The next wake names it too. A card with no issue shows its name and its card ID, for example
+- `not yet reported: blocked #N (card <id>)` for each card blocked for two polls or more that the Foreman has not
+  got in a wake. The next wake names it too. A card with no issue shows its name and its card ID, for example
   `not yet reported: blocked Review follow-up of #7 (card <id>)`.
 - the watcher's last poll: when it ended and how long it took, with what it read for each project
 - last, the Foreman's waiter: `waiter: listening`, `waiter: starting again` or `waiter: down: <why>`
@@ -242,8 +242,14 @@ unless `XDG_DATA_HOME` says otherwise). Its path does not change when the engine
 A card that moves from one step to the next, as from build to review, gives no wake.
 
 The Foreman's reply to a wake says only what needs you, and the `Done without asking` line for each step it took on a
-standing yes since its last reply. If neither is owed, the reply is the one word Idle. A
-problem that the Foreman finds in Conveyor itself always needs you. Who files it depends on the project:
+standing yes since its last reply. If neither is owed, the reply is the one word Idle. But while a wake names a
+blocked card as `not yet reported`, the Foreman cannot end its turn until it takes a step on that card: it logs an act
+for it with `auto act`, it asks you about it, or the card moves (retried, shut or landed). The act or the question
+names the card by its id. A card that the wake names by its issue can also be named by its project and issue
+together, as `alpha #7`, or by the project's GitHub repository and the issue, as `example/alpha#7` or the issue's
+link. The repository is the one the build host's checkout has, so an issue of your fork names no card. A card's
+name, or `#7` alone, names no card. A question that a hook refuses, as with auto on in full, does not count. A wake
+text that you paste into your own message does not start this check. A problem that the Foreman finds in Conveyor itself always needs you. Who files it depends on the project:
 
 - In any other project, you file it in the plugin's repository. The Foreman says it on a line of its own:
 

@@ -32,7 +32,8 @@ poll() { CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --once 2>"$T/err"; }
 # Foreman learned of it only when the owner asked. #5: no wake put (not in the reported list); #8: its wake still
 # pending; #7: reported and delivered; #6: blocked under two polls ago. The snapshot is behind the card records, so
 # its lines end "(as of 11:29Z)" and the pending wake of #8 has no suffix: bug it catches too, the full lines differed
-# and the status left #8 out.
+# and the status left #8 out. Each line names the card's id after its issue (#1665): with the build host not reached,
+# the Foreman's stop hook tells by it the card the wake named from an earlier card of that issue.
 t_unreported() {
 CASE=unreported; fixture unreported; mkdir -p "$FD/pending"
 b() { echo "{card: \"c$1\", issue: $1, since: \"$2\", reason: \"tests failed twice\"}"; } # <issue> <since>
@@ -41,13 +42,13 @@ printf '%s\n' alpha/blocked:c6 alpha/blocked:c7 alpha/blocked:c8 > "$FD/conveyor
 old=$FD/pending/20261115T110000Z-1-old.wake
 printf '%s\n' 'Conveyor: alpha: blocked: #8' 'alpha: #8 is blocked since 2026-11-15T11:00:00Z: tests failed twice' > "$old"
 out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
-[ "$(grep '^not yet reported: ' <<<"$out")" = $'not yet reported: blocked #5\nnot yet reported: blocked #8' ] \
-  || fail "the status does not name exactly the unreported blocked cards #5 and #8: $out"
+[ "$(grep '^not yet reported: ' <<<"$out")" = $'not yet reported: blocked #5 (card c5)\nnot yet reported: blocked #8 (card c8)' ] \
+  || fail "the status does not name exactly the unreported blocked cards #5 and #8, each with its card id: $out"
 poll || fail "no wake for the new blocked card #5: $(cat "$T/err")"
 w=$(cat "$(find "$FD/pending" -name '*.wake' ! -name "${old##*/}")")
 grep -qxF 'alpha: #5 is blocked since 2026-11-15T11:00:00Z: tests failed twice (as of 11:29Z)' <<<"$w" || fail "the wake does not name #5: $w"
-[ "$(grep 'not yet reported' <<<"$w")" = 'alpha: not yet reported: blocked #8' ] \
-  || fail "the wake does not name the pending #8 alone as not yet reported: $w"
+[ "$(grep 'not yet reported' <<<"$w")" = 'alpha: not yet reported: blocked #8 (card c8)' ] \
+  || fail "the wake does not name the pending #8 alone, with its card id, as not yet reported: $w"
 }
 
 # Bug caught: a wake relayed at a stop that stop.sh refused is kept as <wake>.sent-<session>.<pid>, its key reported,
@@ -60,7 +61,7 @@ echo alpha/blocked:c9 > "$FD/conveyor-reported.txt"
 printf '%s\n' 'Conveyor: alpha: blocked: #9' 'alpha: #9 is blocked since 2026-11-15T11:00:00Z: tests failed twice' > "$FD/pending/20261115T110000Z-1-x.wake.sent-S.42"
 echo k1 > "$FD/sent-stop"; echo k1 > "$FD/refused-stops"
 out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
-grep -qx 'not yet reported: blocked #9' <<<"$out" || fail "with the wake of #9 relayed at the refused stop k1, the status does not name #9 as not yet reported: $out"
+grep -qxF 'not yet reported: blocked #9 (card c9)' <<<"$out" || fail "with the wake of #9 relayed at the refused stop k1, the status does not name #9 as not yet reported: $out"
 echo k2 > "$FD/sent-stop"
 out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
 ! grep -q 'not yet reported' <<<"$out" || fail "with the wake of #9 relayed at the stop k2, not refused, the status names it as not yet reported: $out"
@@ -80,7 +81,7 @@ echo k1 > "$FD/sent-stop"; echo k1 > "$FD/refused-stops"
 out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
 grep -qxF 'needs you: #7 is blocked since 2026-11-15T11:00:00Z: its tests failed' <<<"$out" \
   || fail "the status read from recordsNow does not name #7 blocked with no suffix: $out"
-grep -qx 'not yet reported: blocked #7' <<<"$out" \
+grep -qxF 'not yet reported: blocked #7 (card c7)' <<<"$out" \
   || fail "with the wake 'alpha: #7 is blocked since 2026-11-15T11:00:00Z: its tests failed (as of 11:29Z)' relayed at the refused stop k1, the status does not name #7 as not yet reported: $out"
 }
 
@@ -95,7 +96,7 @@ w='alpha: #7 is blocked since 2026-11-15T11:00:00Z: its tests failed (as of 11:2
 printf '%s\n' 'Conveyor: alpha: blocked: #7' "$w" > "$FD/pending/20261115T113000Z-1-x.wake.sent-S.42"
 echo k1 > "$FD/sent-stop"; echo k1 > "$FD/refused-stops"
 out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
-grep -qx 'not yet reported: blocked #7' <<<"$out" \
+grep -qxF 'not yet reported: blocked #7 (card c7)' <<<"$out" \
   || fail "with the wake '$w' relayed at the refused stop k1, the status does not name #7 as not yet reported: $out"
 }
 
@@ -116,12 +117,12 @@ printf '%s\n' 'Conveyor: alpha: blocked: #8' "$w8" > "$FD/pending/20261115T11000
 printf '%s\n' 'Conveyor: alpha: blocked: #9' "$w9" > "$FD/pending/20261115T110000Z-2-x.wake.sent-S.42"
 echo k1 > "$FD/sent-stop"; echo k1 > "$FD/refused-stops"
 out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
-grep -qx 'not yet reported: blocked #8' <<<"$out" || fail "with the pending wake '$w8' of #8, the status does not name #8 as not yet reported: $out"
-grep -qx 'not yet reported: blocked #9' <<<"$out" || fail "with the wake '$w9' of #9 relayed at the refused stop k1, the status does not name #9 as not yet reported: $out"
+grep -qxF 'not yet reported: blocked #8 (card c8)' <<<"$out" || fail "with the pending wake '$w8' of #8, the status does not name #8 as not yet reported: $out"
+grep -qxF 'not yet reported: blocked #9 (card c9)' <<<"$out" || fail "with the wake '$w9' of #9 relayed at the refused stop k1, the status does not name #9 as not yet reported: $out"
 snap ".recordsNewer = true | .snapshotAt = \"2026-11-15T11:55:00Z\" | .health.blocked = [$(b 8), $(b 9), $(b 10)]"
 poll || fail "no wake for the new blocked card #10 (snapshot of 11:55Z): $(cat "$T/err")"
 w=$(cat "$(find "$FD/pending" -name '*.wake' ! -name 20261115T110000Z-1-p.wake)")
-[ "$(grep 'not yet reported' <<<"$w")" = $'alpha: not yet reported: blocked #8\nalpha: not yet reported: blocked #9' ] \
+[ "$(grep 'not yet reported' <<<"$w")" = $'alpha: not yet reported: blocked #8 (card c8)\nalpha: not yet reported: blocked #9 (card c9)' ] \
   || fail "a poll of a snapshot made at 11:55Z, with the pending wake '$w8' and the wake '$w9' relayed at the refused stop k1, gave a wake that does not name #8 and #9 as not yet reported: $w"
 }
 

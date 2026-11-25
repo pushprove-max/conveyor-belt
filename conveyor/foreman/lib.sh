@@ -357,13 +357,28 @@ ask() {
   [ -z "${CONVEYOR_REVIEWRETRY:-}" ] || fm+="CONVEYOR_REVIEWRETRY=$(printf %q "$CONVEYOR_REVIEWRETRY") "
   [ "$3" != retry ] || fm+='CONVEYOR_RETRYBY=foreman '
   if [ -n "${CONVEYOR_FOREMAN_ASK:-}" ]; then CONVEYOR_REPO=$1 CONVEYOR_MAIN=$2 CONVEYOR_CMD="${*:3}" bash -c "$CONVEYOR_FOREMAN_ASK" < "${ASK_IN:-/dev/null}"; return; fi
-  # A pin names a version folder, so only a full commit id may (as the shim requires): anything else could name a
-  # path outside versions/. A pack that follows the plugin's main runs that machine's current engine (as the shim). A
-  # pack with no plugin key (the plugin's own checkout) runs the engine of the checkout itself, as its loop does.
-  printf -v cmd 'cd %q && if jq -e ".plugin == null" .conveyor/project.json >/dev/null 2>&1; then e=$PWD/conveyor/conveyor.sh; else p=$(if jq -e .plugin.follow .conveyor/project.json >/dev/null 2>&1; then jq -er %q .git/conveyor-engine.json; else jq -er %q .conveyor/project.json; fi) && e=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions/$p/conveyor/conveyor.sh; fi && %sCONVEYOR_MAIN=%q bash "$e"' \
-    "$2" '.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' '.plugin.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' "$fm" "$2"
+  printf -v cmd '%s && %sCONVEYOR_MAIN=%q bash "$e"' "$(engine_at "$2")" "$fm" "$2"
   printf -v cmd '%s%s' "$cmd" "$(printf ' %q' "${@:3}")"
   case $3 in card | testissue) askfiling "$1" "$cmd" ;; *) askrun "$cmd" ;; esac
+}
+# engine_at <main>: a shell command that goes to the record's main checkout and sets e to the engine ask runs there.
+# A pin names a version folder, so only a full commit id may (as the shim requires): anything else could name a path
+# outside versions/. A pack that follows the plugin's main runs that machine's current engine (as the shim). A pack
+# with no plugin key (the plugin's own checkout) runs the engine of the checkout itself, as its loop does.
+engine_at() {
+  printf 'cd %q && if jq -e ".plugin == null" .conveyor/project.json >/dev/null 2>&1; then e=$PWD/conveyor/conveyor.sh; else p=$(if jq -e .plugin.follow .conveyor/project.json >/dev/null 2>&1; then jq -er %q .git/conveyor-engine.json; else jq -er %q .conveyor/project.json; fi) && e=${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/versions/$p/conveyor/conveyor.sh; fi' \
+    "$1" '.commit | select(type == "string" and test("^[0-9a-f]{40}$"))' '.plugin.commit | select(type == "string" and test("^[0-9a-f]{40}$"))'
+}
+# hostacts <main>: the acts logged under a standing kind (lib/standing.sh standinglog) in the ruling log of the
+# record's host, where ask runs, one JSON line each, {utc, answer}; a row marked void is left out. The engine ask runs
+# there names the log (its .claude/hooks/lib/rulings.sh rulings_log, as its `auto act` does), and the log is read as it
+# is, by no command of that engine, so an engine pinned before this hook read acts gives them too. Nothing when the
+# log is not there.
+hostacts() {
+  local cmd
+  printf -v cmd '%s && CONVEYOR_MAIN=%q bash -c %q _ "$e"' "$(engine_at "$1")" "$1" \
+    '. "${1%/conveyor/conveyor.sh}/.claude/hooks/lib/rulings.sh" && l=$(rulings_log) && [ -n "$l" ] && { [ ! -e "$l" ] || cat -- "$l"; }'
+  ASK_LIMIT=10 askrun "$cmd" | jq -cR 'fromjson? | objects | select(.source == "standing" and .void != true) | {utc, answer}'
 }
 askrun() { # <command>: run where the record is, stopped at the ask limit (exit 124, or 137 once killed)
   local target
@@ -441,6 +456,29 @@ pending_run() {
   done
   [ "$n" -gt 0 ]
 }
+# recmain <repo>: the main checkout of the record named <repo>; fails when none is named. mine first: a checkout no
+# record names is watched as its own, named for its folder, and is in no record. awk reads to the end and the
+# pipeline's status is not used: an awk that left at the first match would close the pipe on records, whose failed
+# write (pipefail) failed the lookup of a record it had found.
+recmain() {
+  local m
+  m=$({ mine; records; } 2>/dev/null | awk -F'\t' -v r="$1" '$1 == r && m == "" { m = $2 } END { if (m != "") print m }')
+  [ -n "$m" ] && printf '%s\n' "$m"
+}
+# blocked_now: the blocked cards of each record named on stdin (a repo a line), as `conveyor.sh health` reads them now,
+# as one JSON object, {<repo>: [{ref, card, since, why}]}, the $now that FRESH reads. A record whose health does
+# not read, or gives no blocked list, is not in it.
+blocked_now() {
+  local repo main now='{}' h n
+  while IFS= read -r repo; do
+    [ -n "$repo" ] || continue
+    main=$(recmain "$repo") && h=$(ASK_LIMIT=10 ask "$repo" "$main" health 2>/dev/null) \
+      && n=$(jq -ce --arg r "$repo" --argjson h "$h" '($h | objects | .blocked | arrays) as $b
+        | .[$r] = [$b[] | objects | {ref: ((.name | strings) // "#\(.issue)"), card, since, why: (.reason | tostring | gsub("\\s+"; " ") | .[0:240])}]' <<<"$now" 2>/dev/null) \
+      && now=$n
+  done
+  printf '%s\n' "$now"
+}
 # pending_fresh: before a stop relays the pending wakes, each blocked card a wake names (its "<repo>: <ref> is blocked
 # since" or "has been blocked for" line, or its "not yet reported: blocked <ref>" line) that its record no longer holds
 # blocked as the line says, as `conveyor.sh health` reads it now (retried, landed or shut since the watcher put the
@@ -451,17 +489,10 @@ pending_run() {
 # from one that died).
 PENDING_DROPPED=0
 pending_fresh() {
-  local f repos repo main now='{}' h n t
+  local f repos now t
   repos=$(cat "$PENDING"/*.wake 2>/dev/null | sed -nE 's/^([A-Za-z0-9._-]+): (.+ is blocked since |.+ has been blocked for |not yet reported: blocked ).*/\1/p' | sort -u)
   [ -n "$repos" ] || return 0
-  while IFS= read -r repo; do
-    # mine first: a checkout no record names is watched as its own, named for its folder, and is in no record.
-    main=$({ mine; records; } 2>/dev/null | awk -F'\t' -v r="$repo" '$1 == r { print $2; exit }')
-    [ -n "$main" ] && h=$(ASK_LIMIT=10 ask "$repo" "$main" health 2>/dev/null) \
-      && n=$(jq -ce --arg r "$repo" --argjson h "$h" '($h | objects | .blocked | arrays) as $b
-        | .[$r] = [$b[] | objects | {ref: ((.name | strings) // "#\(.issue)"), card, since, why: (.reason | tostring | gsub("\\s+"; " ") | .[0:240])}]' <<<"$now" 2>/dev/null) \
-      && now=$n
-  done <<<"$repos"
+  now=$(blocked_now <<<"$repos")
   [ "$now" != '{}' ] || return 0
   for f in "$PENDING"/*.wake; do
     [ -f "$f" ] || continue

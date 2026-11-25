@@ -64,7 +64,7 @@
 # (CONVEYOR_FOREMAN_SESSION_PID, waiter.sh) puts no wake and marks nothing reported: it ends, and the next waiter's
 # watcher finds the same problems new.
 # A card blocked for two polls or more that no session has got yet (unreported, below) is named again, on `foreman
-# status` and in the next wake: "not yet reported: blocked #N" (a card with no issue: its name and id, who).
+# status` and in the next wake: "not yet reported: blocked #N (card <id>)" (a card with no issue: its name and id, who).
 # A card that only moves on the belt (build to review, review to tests) needs no one and wakes nothing.
 # Each poll writes one line to conveyor-polls.log in the Foreman's folder: its start, end, time taken, each record's
 # outcome and read, and whether it woke (the main loop, below).
@@ -279,15 +279,14 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     (select($idle) | ["idle", "idle", "", "Conveyor is idle: nothing in flight and nothing to pick"])
   | join("\t")'
 
-# unreported <now>: of the problem lines on stdin (<repo> TAB <key> TAB <kind> TAB <issues> TAB <text>), each card
-# blocked since two polls or more before <now> that no session has got: no wake was put for it (its key is not in
-# conveyor-reported.txt: no watcher ran), or its wake is still in pending (no live session took it), or was relayed at
-# the stop sent-stop names, which stop.sh refused (refused-stops): the waiter relays that wake again (waiter.sh). One
-# line each, "<repo>: not yet reported: blocked <the card: #N, or a card's name with no issue and its id, who>". A wake line and a problem
-# line are matched without the "(as of HH:MMZ)" either may end with (PROBLEMS: a snapshot behind the card records), as
-# the wake and the snapshot read now can differ in it alone: the status builds its blocked lines from the card records
-# now (NOWBLOCKED), with no such suffix. A wake line matches with the note reviewretry() adds after it ("; the
-# review-retry of #N failed: <error>", or that the act was not logged), which the status line has not.
+# unreported <now>: of the problem lines on stdin (<repo> TAB <key> TAB <kind> TAB <issues> TAB <text>), each card blocked since two polls or more
+# before <now> that no session has got: no wake was put for it (its key is not in conveyor-reported.txt: no watcher ran), or its wake is still in
+# pending (no live session took it), or was relayed at the stop sent-stop names, which stop.sh refused (refused-stops): the waiter relays that wake
+# again (waiter.sh). One line each, "<repo>: not yet reported: blocked <the card: #N, or a card's name with no issue, who> (card <id>)": by the id, the
+# Foreman's stop hook (stop.sh) tells this card from an earlier one of its issue with the build host not reached. A wake line and a problem line are
+# matched without the "(as of HH:MMZ)" either may end with (PROBLEMS: a snapshot behind the card records), as the wake and the snapshot read now can
+# differ in it alone: the status builds its blocked lines from the card records now (NOWBLOCKED), with no such suffix. A wake line matches with the
+# note reviewretry() adds after it ("; the review-retry of #N failed: <error>", or that the act was not logged), which the status line has not.
 unreported() {
   local pend k=''
   pend=$(cat "$PENDING"/*.wake 2>/dev/null)
@@ -301,7 +300,8 @@ unreported() {
     | ($text | capture(" is blocked since (?<t>[0-9T:-]+Z):") | .t | fromdate? // empty) as $t
     | ("\($repo): \($text)" | bare) as $w
     | select($now - $t >= 2 * $poll and (("\($repo)/\(.[1])" | IN($seen[]) | not) or any($pend[]; startswith($w) and (.[($w | length):] | tail))))
-    | "\($repo): not yet reported: blocked \($text | sub(" is blocked since .*$"; ""))"'
+    | ($text | sub(" is blocked since .*$"; "")) as $who | (.[1] | ltrimstr("blocked:")) as $id
+    | "\($repo): not yet reported: blocked \($who)\(if ($who | test(" \\(card [A-Za-z0-9._-]+\\)$")) or $id == "null" or ($id | test("^[A-Za-z0-9._-]+$") | not) then "" else " (card \($id))" end)"'
 }
 
 # --status [<project>] (`conveyor.sh foreman status`): each record's state now as short plain text, read from one
@@ -311,7 +311,7 @@ unreported() {
 # against the cap, loop.json's count now while the snapshot is behind (recordsNow, commands/snapshot.sh); then, while the card folder's free disk is under the floor, "loop: paused: free disk <n> GB under the <floor> GB floor" (health's state, lib/control.sh state()); then, when the
 # snapshot names the engine stopped and ps no longer shows it stopped, "the engine (pid <n>) runs" or "has ended"; then a card a line: issue, or a main-red fix card's name, step, time in step, title cut to 60 characters), the
 # cards waiting on other issues and the held issues as issue numbers, the self-heals list's line (lib.sh healsdef), the whole-suite run under way (else the last one that ended),
-# then every problem a wake names (the blocked cards as NOWBLOCKED gives them), the push failing at once, the suite that ended left out (its line is above), and a release-prep started again by its landed fixes (it needs no one), each "needs you: <text>", then each card unreported names, "not yet reported: blocked #N" (or a card's name and id, who). A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
+# then every problem a wake names (the blocked cards as NOWBLOCKED gives them), the push failing at once, the suite that ended left out (its line is above), and a release-prep started again by its landed fixes (it needs no one), each "needs you: <text>", then each card unreported names, "not yet reported: blocked #N (card <id>)" (or a card's name and id, who). A record that gives no snapshot is one line, "<repo>: no snapshot (<why>)", the why
 # never empty and one line (the last the engine said: of a stack trace, its error); when one read before (keepsnap),
 # "<repo>: the last snapshot, made <age> ago (a new one failed: <why>):" in its place, and that snapshot's lines as above. <project> names one
 # record of mine; with none, every one of them. Then the watcher's last poll, from

@@ -99,7 +99,7 @@ held() {
   blocksnap true; wake=; out=
   poll held 0 && grep -qxF 'alpha: #7 is blocked since 2026-11-20T21:20:00Z: its tests failed (as of 21:29Z)' <<<"$wake" \
     && bstatus held-status && grep -qxF 'needs you: #7 is blocked since 2026-11-20T21:20:00Z: its tests failed (as of 21:29Z)' <<<"$out" \
-    && grep -qxF 'not yet reported: blocked #7' <<<"$out"
+    && grep -qxF 'not yet reported: blocked #7 (card c7)' <<<"$out"
 }
 check 'a card still blocked in the card records is named blocked, as of the snapshot' held
 # The same snapshot, #7 retried since (its recordsNow lists no card blocked), and health does not read: no wake. Bug
