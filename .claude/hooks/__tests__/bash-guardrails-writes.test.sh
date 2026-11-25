@@ -433,6 +433,8 @@ u "env -S with \\' in single quotes before \\_-i is refused" 2 "env -S \"sed 'x\
 u "time -p sed -i is refused" 2 "time -p sed -i 's/a/b/' src/x.ts"
 # Bash's `time -p --`: the word reader dropped `time` and `-p` but left `--` as the command, so the sed passed.
 u "time -p -- sed -i is refused" 2 "time -p -- sed -i 's/a/b/' src/x.ts"
+# The `--` after `time -p` is dropped, not judged: a check that refused the form, or read `--` as a writer, blocks a read.
+u "time -p -- git status passes" 0 'time -p -- git status'
 # macOS env -P takes a folder: the check read /usr/bin as the command, so the sed behind it passed.
 u "env -P DIR sed -i is refused" 2 "env -P /usr/bin sed -i 's/a/b/' src/x.ts"
 # GNU env takes `--unse` for --unset: the check read HOME, its value, as the command.
@@ -447,6 +449,8 @@ u "env -C /tmp sed -i on a relative path passes" 0 "env -C /tmp sed -i 's/a/b/' 
 u "env -C /tmp does not carry to the next command" 2 "env -C /tmp true; sed -i 's/a/b/' src/x.ts"
 # GNU env keeps only its last -C, so sed runs in ./src: the check joined src to /tmp and passed a source write.
 u "env -C /tmp -C src: the last -C replaces the first" 2 "env -C /tmp -C src sed -i 's/a/b/' x.ts"
+# Two -C to scratch leave sed in /tmp: a check that refused any second -C, or judged its folder as the repo, blocks a scratch write.
+u "env -C /tmp -C /tmp sed -i on a relative path passes" 0 "env -C /tmp -C /tmp sed -i 's/a/b/' x.ts"
 # command -v only names what tee is: the check read tee as the command and the hook as its target.
 u "command -v -- tee on a hook path is a lookup and passes" 0 'command -v -- tee .claude/hooks/bash-guardrails.sh'
 # No check in this hook judges ast-grep yet, so its verdict is the same with or without env whatever unwrap does. What
