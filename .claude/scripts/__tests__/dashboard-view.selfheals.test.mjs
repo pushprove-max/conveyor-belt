@@ -168,7 +168,7 @@ test('Self-heals: the sort line says when the sort ran, and a finding and a reas
 // title to one line: the summary comes first, the second place after it. The quote names a.sh twice, so Files it
 // touches must count that entry once for a.sh, not once for each line it cites there.
 test('Self-heals: a finding that quotes two places keeps the second in its title, after the summary', () => {
-  const two = 'R2 [P2] `conveyor/lib/a.sh:575, conveyor/tests/b.test.sh:116, conveyor/lib/a.sh:600`: the batch lands a card untested - How: x - Raised on #12';
+  const two = 'R2 [P2] `conveyor/lib/a.sh:575, conveyor/tests/b.test.sh:116, conveyor/lib/a.sh:600`: the batch lands a card untested - How: `conveyor/lib/a.sh:575, conveyor/tests/b.test.sh:116` both skip the test - Raised on #12';
   const { w } = open({ entries: [entry('h0000000000c1', { time: iso(T0 - DAY), area: 'area:board', effect: 'self-heals', why: 'w', finding: two })],
     dropped: [entry('h0000000000c2', { time: iso(T0 - 9 * DAY), area: 'area:board', effect: 'self-heals', why: 'w', finding: two, dropped: { time: iso(T0 - DAY), why: 'expired' } })] });
   const want = 'the batch lands a card untested (also at conveyor/tests/b.test.sh:116, conveyor/lib/a.sh:600)';
@@ -181,6 +181,10 @@ test('Self-heals: a finding that quotes two places keeps the second in its title
   assert.equal(q(w, `${row} .sh-at`).textContent, 'conveyor/lib/a.sh:575', `the row's place of: ${two}`);
   q(w, `${row} .sh-row-title`).click();
   title('.sh-detail .sh-detail-title', 'the detail title');
+  // Bug it catches: the proof's quote of two places was one code span, which lineUrl refuses, so neither place linked
+  // to its line on GitHub.
+  assert.deepEqual(qa(w, '.sh-detail .sh-proof a').map((a) => a.href), [`${REPO}/blob/HEAD/conveyor/lib/a.sh#L575`, `${REPO}/blob/HEAD/conveyor/tests/b.test.sh#L116`],
+    `the detail proof links each place of: ${two}`);
   q(w, '.sh-dropped-link').click();
   title('.sh-dropped .sh-row-title', "a dropped entry's title");
   q(w, '.sh-area[data-area="area:board"] [data-act="heals-batch"]').click();

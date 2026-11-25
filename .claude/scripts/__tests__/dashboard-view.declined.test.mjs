@@ -151,6 +151,28 @@ test('Declined: a reason links a file:line on a main-red fix card, finds the ful
     + ' Declined on #250: [P3] [E1][cleanup] conveyor/lib/rules.sh:20 an id before the mark.', 'hover names every finding at that line declined before the reason, not one picked of them, and none declined after it');
 });
 
+// Bug it catches: a code span that quotes two places (`a.sh:5, b.test.sh:9-12`) was one span that lineUrl refuses, so
+// neither place, in the finding's proof (the shared fill) or in the judge's reason (this panel's own loop), linked to
+// its line on GitHub.
+test('Declined: each place of a code span that lists two places links to its own line, in the proof and in the reason', () => {
+  const w = boot();
+  const data = full();
+  const two = '`conveyor/lib/a.sh:5, conveyor/tests/b.test.sh:9-12`';
+  const finding = `[P2] conveyor/lib/a.sh:5 the poll reads late. Proof: ${two} both read the list first`;
+  data.panels.declined.data.lines = [line({ finding, why: `see ${two}`, findings: null })];
+  deliver(w, data);
+  const row = rowOf(w, finding.replaceAll('`', ''));
+  assert.ok(row, `the row of: ${finding}`);
+  const want = [[`${REPO}/blob/HEAD/conveyor/lib/a.sh#L5`, 'conveyor/lib/a.sh:5'], [`${REPO}/blob/HEAD/conveyor/tests/b.test.sh#L9-L12`, 'conveyor/tests/b.test.sh:9-12']];
+  const links = (el) => Array.from(el.querySelectorAll('a'), (a) => [a.href, a.textContent]);
+  const proof = row.querySelector('.declined-proof');
+  assert.deepEqual(links(proof), want, `the proof's links of: ${finding}`);
+  assert.equal(proof.textContent, 'Proof: conveyor/lib/a.sh:5, conveyor/tests/b.test.sh:9-12 both read the list first', `the proof reads as written, for: ${finding}`);
+  const reason = row.querySelector('.reason .why-text');
+  assert.deepEqual(links(reason), want, `the reason's links of: see ${two}`);
+  assert.equal(reason.textContent, 'see conveyor/lib/a.sh:5, conveyor/tests/b.test.sh:9-12', `the reason reads as written, for: see ${two}`);
+});
+
 // Bug: the shared renderer (app-text.js sentences) took only single-backtick spans, so a reason or finding that put a
 // command holding a backtick in double backticks showed the outer backticks raw and cut the code at the inner one;
 // and a "Proof:" inside such a span was taken for the finding's proof.

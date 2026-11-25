@@ -210,14 +210,21 @@
     const c = h('code', 'why-code', s), to = lineUrl(repoUrl, s, known);
     return to ? { el: linkTo(c, to.url, cls), to } : { el: c, to: null };
   }
-  // Text s drawn into el: a span of class `${cls}-line` a sentence, its code spans and bare file paths as codeEl draws
-  // them (links of class `${cls}-at`), the rest as text.
+  // A code span that lists files and lines ("a.sh:3, lib/b.sh:9-12"): each given to code, so each is a link of its own,
+  // and each comma between them, as written, to plain. Any other span goes to code whole.
+  const PLACES = /^(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+:[0-9]+(?:[–-][0-9]+)?(?:,\s*(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+:[0-9]+(?:[–-][0-9]+)?)+$/;
+  function eachPlace(q, code, plain) {
+    if (!PLACES.test(q)) { code(q); return; }
+    q.split(/(,\s*)/).forEach((p, i) => (i % 2 ? plain(p) : code(p)));
+  }
+  // Text s drawn into el: a span of class `${cls}-line` a sentence, its code spans (eachPlace) and bare file paths as
+  // codeEl draws them (links of class `${cls}-at`), the rest as text.
   function fill(el, s, repoUrl, known, cls) {
     for (const parts of sentences(s)) {
       const line = h('span', `${cls}-line`);
       const code = (q) => line.append(codeEl(repoUrl, q, known, `${cls}-at`).el);
       for (const p of parts) {
-        if ('code' in p) code(p.code);
+        if ('code' in p) eachPlace(p.code, code, (q) => line.append(q));
         else barePaths(p.text, code, (q) => line.append(q));
       }
       el.append(line);
@@ -230,7 +237,7 @@
     for (const p of s.matchAll(PROOF)) if (p[0][0] !== '`') return { at: p.index, label: p[0] };
     return { at: -1, label: '' };
   }
-  const findingText = { sentences, pathsIn, repoOf, fileUrl, lineUrl, barePaths, linkTo, codeEl, fill, proofAt };
+  const findingText = { sentences, pathsIn, repoOf, fileUrl, lineUrl, barePaths, linkTo, codeEl, eachPlace, fill, proofAt };
 
   // A review finding: "[P1] path:line The sentence. Proof: why", its place and proof each optional. A "[cleanup]" mark
   // after the level (a fix that changes no behaviour, prompts.sh REVIEWT) and a fix review's ids ("[E1]", "[F2]") are

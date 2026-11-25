@@ -189,7 +189,7 @@
         line.append(a);
       };
       for (const part of parts) {
-        if ('code' in part) code(part.code);
+        if ('code' in part) T.eachPlace(part.code, code, (q) => line.append(q));
         else barePaths(part.text, code, (q) => refsIn(line, q));
       }
       body.append(line);
