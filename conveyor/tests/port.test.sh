@@ -316,7 +316,8 @@ t_rebaseempty() {
     || fail "a rebuild that leaves no change: $(st 'select(.issue == 12) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   local k c; k=$(st 'select(.issue == 12 and .step == "blocked") | "\($ENV.ST)/\(.kept)"'); c=$(st 'select(.issue == 12 and .step == "blocked") | .card')
   [ -n "$k" ] && grep -qx '+two' "$k/$c.patch" && [ "$(cat "$k/$c.base")" = "$(git -C "$R" rev-parse HEAD~1)" ] || fail "a rebuild that left no change did not keep the reviewed change as the card's patch (kept: $k)"
-  tail -n 1 "$STUB/comments" | grep -q "Its work is kept as a patch: <state>/kept/${k##*/}/$c.patch (1 files, 1 KB, built on commit " || fail "the block comment does not name the reviewed patch: $(tail -n 1 "$STUB/comments")"
+  grep -qF "builds the next card from the kept work (1 file, 1 KB; the reviewed change from before the rebuild, which left no change of its own)." "$STUB/comments" \
+    && [ "$(tail -n 1 "$STUB/comments")" = "<sub>Card $c · \`<state>/kept/${k##*/}/$c.patch\` · built on $(head -c 7 "$k/$c.base")</sub>" ] || fail "the block comment does not name the reviewed patch: $(tail -n 3 "$STUB/comments")"
   [ -z "$(ls "$T/$CASE/cards")" ] || fail "a rebuild that left no change left files beside the cards: $(ls "$T/$CASE/cards")"
 }
 

@@ -92,12 +92,13 @@ t_visibleyes() {
   ! grep -q '^# The approved visible change$' "$STUB/asked" || fail "an issue with no section was reviewed against one"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] && [ "$(wc -l < "$STUB/tests")" = "$runs" ] \
     || fail "a visible GO with no approval landed, ran the tests or left its worktree"
-  [ "$(grep -c "^[0-9]* --body " "$STUB/comments")" = 1 ] && grep -q "^8 --body .*needs Dana's yes: guests see a new Pay button" "$STUB/comments" || fail "the reviewer's sentence was not posted on the issue: $(cat "$STUB/comments" 2>&1)"
+  [ "$(grep -c "^[0-9]* --body " "$STUB/comments")" = 1 ] && grep -qx '8 --body \*\*Blocked: the change is visible to customers or staff, so it needs a yes\*\*' "$STUB/comments" \
+    && grep -qx "visible to customers or staff: needs Dana's yes: guests see a new Pay button" "$STUB/comments" || fail "the reviewer's sentence was not posted on the issue: $(cat "$STUB/comments" 2>&1)"
   loop check || fail "the record check refuses a review line with the visible answer"
   # Bugs: the blocked card's change is thrown away with its worktree; the comment does not name the kept patch.
   k=$(st 'select(.issue == 8 and .step == "blocked") | "\($ENV.ST)/\(.kept)"'); old=$(st 'select(.issue == 8 and .step == "blocked") | .card')
   grep -qx '+two' "$k/$old.patch" && [ "$(cat "$k/$old.base")" = "$head" ] && [ -s "$k/$old.review" ] && [ -s "$k/$old.trailers" ] || fail "the blocked card's patch, the commit it was built on and its review are not in the kept folder: $(ls "$k" 2>&1)"
-  grep -q "kept as a patch: <state>/kept/${k##*/}/$old.patch (2 files, 1 KB, built on commit $head)" "$STUB/comments" || fail "the block comment does not name the kept patch and its size: $(cat "$STUB/comments")"
+  grep -qF "builds the next card from the kept work (2 files, 1 KB)." "$STUB/comments" && grep -qxF "<sub>Card $old · \`<state>/kept/${k##*/}/$old.patch\` · built on ${head:0:7}</sub>" "$STUB/comments" || fail "the block comment does not name the kept patch and its size: $(cat "$STUB/comments")"
   # Retried without the approval line, the card waits again, still with no build and no review, and keeps its work.
   # Real retry and turns: what is proved is that the next card picks up the kept patch from the records and the
   # kept folder, which only a turn after `retry` does.
@@ -297,7 +298,7 @@ t_visiblecap() {
   [ "$(st 'select(.issue == 20) | .step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start fix start review blocked " ] || fail "steps of a visible card at the cap: $(steps 20)"
   [ "$(st 'select(.issue == 20 and .step == "blocked") | .reason')" = "visible to customers or staff: needs Dana's yes: guests see a new Pay button" ] || fail "a visible NO-GO at the cap was not blocked for Dana's yes: $(steps 20)"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ ! -e "$STUB/filed" ] && [ ! -e "$STUB/closed" ] && [ "$(wc -l < "$STUB/tests")" = "$runs" ] || fail "a visible NO-GO at the cap landed, filed follow-ups or ran the tests"
-  grep -q "^20 --body .*needs Dana's yes: guests see a new Pay button" "$STUB/comments" && grep -q 'wrong word' "$STUB/comments" || fail "the cap card's sentence and findings were not posted: $(cat "$STUB/comments")"
+  grep -qx '20 --body \*\*Blocked: the change is visible to customers or staff, so it needs a yes\*\*' "$STUB/comments" && grep -qx "visible to customers or staff: needs Dana's yes: guests see a new Pay button" "$STUB/comments" && grep -q 'wrong word' "$STUB/comments" || fail "the cap card's sentence and findings were not posted: $(cat "$STUB/comments")"
 }
 # With the approval line the same NO-GO at the cap passes the gate, so it lands with its follow-up as any last NO-GO.
 t_visiblecapyes() {

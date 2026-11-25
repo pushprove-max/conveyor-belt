@@ -26,6 +26,100 @@ t_kept() {
   st 'select(.step == "blocked") | .reason' | grep -q "^build: .*could not be kept as a patch.*its worktree is left at $wt\]" && [ "$(tail -n 1 "$wt/a.txt" 2>&1)" = two ] \
     || fail "a change that could not be staged went with its worktree, or the reason does not say where it is: $(st 'select(.step == "blocked") | .reason') $(ls "$T/$CASE/cards")"
 }
+# The comment block() posts on the issue of a review block. Bugs it catches: the headline was the card id; the
+# finding that blocked the card was cut mid-word (300 characters in the reason, 600 in the comment) and then shown
+# again whole among the review's raw lines, with their [E<n>] marks, EARLIER, DONE-WHEN and VERDICT lines, and the
+# declined findings mixed in.
+t_keptcomment() {
+  local long body head; setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' k.txt kept; head=$(git -C "$R" rev-parse HEAD)
+  long="[P1] [E7] conveyor/x.sh:258 A picker for one follow-up can clear another. Proof: $(seq -s ', step ' 1 120), END"
+  printf '%s\n' "$long" '[P2] [E3] conveyor/y.test.sh:65 The new cases do not check the transcript.' 'EARLIER: E1 holds' 'DONE-WHEN: D1 holds' \
+    '[P1] conveyor/x.sh:234 The hook rejects a picker that names the issue by its link.' 'DECLINED: [P1] conveyor/x.sh:217 The hook accepts Idle. (judge: no wake is pending)' \
+    'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  # The fix session's output, as a claude session writes it (stream-json): its last reply is the comment's last output.
+  printf '%s\n' '{"type":"system"}' '{"type":"result","result":"Fixed E1 in x.sh.\nThe cases pass."}' > "$FXWT.out"
+  # The reason as afterreview() (lib/card.sh) gives it: the finding cut at 300 characters.
+  REASON="the fix for ${long:0:300} did not hold after 1 round" fx_in 'block c7 7 "$FXWT" "$REASON"'
+  [ "$RC" = 0 ] || fail "block c7 7 <worktree> '${long:0:300} did not hold after 1 round' failed: $(cat "$T/$CASE/run.out")"
+  body=$(sed '1s/^7 --body //' "$STUB/comments")
+  [ "$(st 'select(.step == "blocked") | .reason')" = "the fix for ${long:0:300} did not hold after 1 round" ] || fail "the blocked line's reason changed: $(st 'select(.step == "blocked") | .reason')"
+  [ "$(head -n 1 <<<"$body")" = "**Blocked: the review's fix did not hold after 1 round**" ] && grep -qxF "> **P1** \`conveyor/x.sh:258\` ${long#*:258 }" <<<"$body" \
+    && [ "$(grep -c 'step 120, END' <<<"$body")" = 1 ] || fail "the review block's comment has no headline in words, or not its ${#long}-character finding once and whole: $body"
+  grep -qxF -- '- **P2** `conveyor/y.test.sh:65` The new cases do not check the transcript.' <<<"$body" \
+    && grep -qxF -- '- **P1** `conveyor/x.sh:234` The hook rejects a picker that names the issue by its link.' <<<"$body" \
+    && ! grep -qE '\[E[0-9]+\]|^(EARLIER|DONE-WHEN|VERDICT|USER-VISIBLE|DECLINED):|c7 is blocked' <<<"$body" || fail "the other findings are not one list item each, or the review's marks and lines are in the comment: $body"
+  [[ $body == *$'<details><summary>Declined by the judge (1)</summary>\n\n- **P1** `conveyor/x.sh:217` The hook accepts Idle. (judge: no wake is pending)\n\n</details>'* ]] \
+    || fail "the declined finding is not folded with its count and the judge's note: $body"
+  # Bug: a review block's reason is one line, so its comment had no last output at all.
+  [[ $body == *$'<details><summary>Last output</summary>\n\n```\nFixed E1 in x.sh.\nThe cases pass.\n```\n\n</details>'* ]] \
+    || fail "the review block's comment does not fold the fix session's last reply ($FXWT.out): $body"
+  [ "$(tail -n 3 <<<"$body")" = "**Next:** \`conveyor.sh retry 7\` builds the next card from the kept work (1 file, 1 KB). The card applies it as it is while it applies to main. When it does not, a session brings it onto main.
+
+<sub>Card c7 · \`<state>/kept/c7/c7.patch\` · built on ${head:0:7}</sub>" ] || fail "the comment does not end with the Next line and the footer: $(tail -n 3 <<<"$body")"
+}
+# The comment block() posts on the issue of a last review that still holds a P0 (cardfix(), lib/card.sh). Bug it
+# catches: its headline did not say a P0 blocked the card, or its P0, cut at 300 characters in the reason, was not
+# quoted whole from the review.
+t_keptcommentp0() {
+  local p0 body; setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' k.txt kept
+  p0="[P0] [E2] conveyor/z.sh:9 The push deletes main. Proof: $(seq -s ', run ' 1 80), END"
+  printf '%s\n' "$p0" 'VERDICT: NO-GO' > "$FXWT.review"
+  REASON="review 2 is the last review and still holds a P0 finding, so it files no follow-up: ${p0:0:300}" fx_in 'block c7 7 "$FXWT" "$REASON"'
+  [ "$RC" = 0 ] || fail "block c7 7 <worktree> '$REASON' failed: $(cat "$T/$CASE/run.out")"
+  body=$(sed '1s/^7 --body //' "$STUB/comments")
+  [ "$(sed -n 1,4p <<<"$body")" = "**Blocked: the last review still finds a P0 problem**
+
+The review still finds:
+> **P0** \`conveyor/z.sh:9\` ${p0#*:9 }" ] && [ "$(grep -c 'run 80, END' <<<"$body")" = 1 ] \
+    || fail "the P0 block's comment (reason 'review 2 is the last review and still holds a P0 finding, ...') has no P0 headline, or not its P0 once and whole: $body"
+}
+# The headline of the reasons block() gets from outside the review and test steps. Bug it catches: the reason of a
+# card whose process ended in a step, and that of a follow-up the engine could not file (cardfix(), lib/cardland.sh),
+# got only "the card stopped before it landed"; so did a card the owner shut (shut(), lib/run.sh) and a reason of a
+# form blockhead() does not know, which now gives its own first clause.
+t_keptcommenthead() {
+  local want; setup "[$(issue 7 2026-01-01)]"
+  REASONS=$(printf '%s\n' 'its process ended without a result in its test step (last action: Bash)' \
+    'follow-up not filed, so nothing landed (finding: [P2] a.sh:1 x): HTTP 502' "cannot read the parent issue's labels" \
+    'shut by the owner' 'the land lock was held by another card: c9') \
+    fx_in 'while IFS= read -r r; do printf "%s => %s\n" "$r" "$(blockhead "$r")"; done <<<"$REASONS"'
+  want="its process ended without a result in its test step (last action: Bash) => the card's process ended in its test step without a result
+follow-up not filed, so nothing landed (finding: [P2] a.sh:1 x): HTTP 502 => the engine could not file the review's follow-ups
+cannot read the parent issue's labels => the engine could not file the review's follow-ups
+shut by the owner => the owner shut the card
+the land lock was held by another card: c9 => the land lock was held by another card"
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "$want" ] || fail "blockhead gave other headlines (reason => headline): $(cat "$T/$CASE/run.out")"
+}
+# The comment block() posts on the issue of a session that made no change (nochange(), lib/followups.sh). Bug it
+# catches: the reason quotes the session's last reply, and the comment showed that reply again under "Last output".
+t_keptcommentnochange() {
+  local why body; setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' k.txt kept
+  printf '%s\n' '{"type":"result","result":"I made no change.\nThe issue asks for nothing new."}' > "$FXWT.out"
+  why="the session made no change, so there is nothing to review. Its session's output and errors are kept in kept/c7/. Its last reply: I made no change. The issue asks for nothing new."
+  BLOCKWHY=$why fx_in 'block c7 7 "$FXWT" "$BLOCKWHY" post'
+  [ "$RC" = 0 ] || fail "block c7 7 <worktree> '$why' post failed: $(cat "$T/$CASE/run.out")"
+  body=$(sed '1s/^7 --body //' "$STUB/comments")
+  [ "$(grep -c 'I made no change' <<<"$body")" = 1 ] && ! grep -q 'Last output' <<<"$body" \
+    || fail "the no-change block's comment (reason '$why') shows the session's reply more than once: $body"
+}
+# The comment block() posts on the issue of a block with no review findings (tests that fail after their fix round):
+# the same shape, with the reason whole and the output folded. Bug it catches: the reason was cut at 600 characters
+# and the output was shown open in the comment.
+t_keptcommenttests() {
+  local why body; setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' k.txt kept
+  why="the changed tests failed again after their one fix round (exit 1; the run stopped at its first failure, so these files did not run: $(seq -s '.test.sh, t' 1 60)); nothing landed."
+  # fx_in sets WHY itself: the reason goes in a name of its own.
+  BLOCKWHY=$why$'\nnot ok 1 - t_one\nnot ok 2 - t_two' fx_in 'block c7 7 "$FXWT" "$BLOCKWHY"'
+  [ "$RC" = 0 ] || fail "block c7 7 <worktree> '$why' with two lines of output failed: $(cat "$T/$CASE/run.out")"
+  body=$(sed '1s/^7 --body //' "$STUB/comments")
+  [ "$(sed -n 1,3p <<<"$body")" = "**Blocked: the tests failed after the fix round**
+
+$why" ] || fail "the test block's comment has no headline in words, or not its ${#why}-character reason whole: $body"
+  [[ $body == *$'<details><summary>Last output</summary>\n\n```\nnot ok 1 - t_one\nnot ok 2 - t_two\n```\n\n</details>'* ]] \
+    && ! grep -qE 'Other findings|Declined' <<<"$body" && grep -q '^\*\*Next:\*\* `conveyor.sh retry 7` builds the next card' <<<"$body" \
+    && [ "$(tail -n 1 <<<"$body")" = "<sub>Card c7 · \`<state>/kept/c7/c7.patch\` · built on $(git -C "$R" rev-parse HEAD | cut -c 1-7)</sub>" ] \
+    || fail "the test block's comment does not fold the output, or lacks the Next line or the footer: $body"
+}
 # Bug it catches: a build the model API refused three times with no usage left each earlier try's output as
 # <card>.out.first and <card>.out.first-2 (outfirst(), lib/records.sh), and block() moved only .out.first to the kept
 # evidence: the second try's output went with the worktree. Each is kept.
@@ -128,7 +222,8 @@ t_keptunread() {
   # loop: the block and the issue comment that names its kept patch are a card's whole path to a failed build
   loop run >/dev/null; k=$(st 'select(.issue == 12 and .step == "blocked") | "\($ENV.ST)/\(.kept)"'); old=$(st 'select(.issue == 12 and .step == "blocked") | .card')
   [ -s "$k/$old.patch" ] || fail "#12 kept no patch: $(st 'select(.issue == 12 and .step == "blocked")')"
-  grep -q '^12 --body Conveyor card .*-12 is blocked: build: ' "$STUB/comments" && grep -q "^Its work is kept as a patch: <state>/kept/${k##*/}/.*-12\.patch (1 files, 1 KB, built on commit $(git -C "$R" rev-parse HEAD))" "$STUB/comments" \
+  grep -qx '12 --body \*\*Blocked: the build failed\*\*' "$STUB/comments" && grep -q '^build: ' "$STUB/comments" && grep -qF 'builds the next card from the kept work (1 file, 1 KB).' "$STUB/comments" \
+    && grep -qxF "<sub>Card $old · \`<state>/kept/${k##*/}/$old.patch\` · built on $(git -C "$R" rev-parse HEAD | cut -c 1-7)</sub>" "$STUB/comments" \
     || fail "a build that failed before any review did not name its kept patch and size on the issue: $(cat "$STUB/comments" 2>&1)"
   echo 'not a patch' > "$k/$old.patch"; echo "$GO" > "$STUB/review.1"; echo 'cp "$STUB/brief" "$STUB/brief.12"; echo twelve > w.txt' > "$STUB/build"
   # Past resumeplan's stale mode, card() writes the brief's part on the unreadable patch (inline, no function gives it).

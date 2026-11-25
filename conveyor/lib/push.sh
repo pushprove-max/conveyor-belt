@@ -841,6 +841,101 @@ failclass() { # <reason>
     'session failed (exit 124'*) echo timeout ;;
   esac
 }
+# The headline of a blocked card's comment (blockcomment()): why the card blocked, in words, read from the reason
+# block() was given (its first line). The forms are those of the block() calls in lib/ (card.sh, cardland.sh,
+# claim.sh, lint.sh, donewhen.sh, run.sh); a reason of no known form gets a general headline.
+blockhead() { # <reason>
+  local n
+  case $1 in
+    'the fix for '*' did not hold after '*)
+      n=${1##* did not hold after }; n=${n%% *}
+      if [[ $n =~ ^[0-9]+$ ]]; then echo "the review's fix did not hold after $n round$([ "$n" = 1 ] || echo s)"; else echo "the review's fix did not hold"; fi ;;
+    *' is the last review and still holds a P0 finding'*) echo 'the last review still finds a P0 problem' ;;
+    *' is the last review and still holds a privacy hit'*) echo "the last review still finds a privacy hit in the card's own change" ;;
+    *' is the last review and still holds a P1 finding'*) echo 'the last review still finds a P1 problem after the fix round' ;;
+    'review '*' is NO-GO with no finding to fix'*) echo 'the review said NO-GO but named no finding to fix' ;;
+    'review '*' ended without one clear verdict'*) echo 'the review gave no clear verdict' ;;
+    'review '*) echo 'the review step could not finish' ;;
+    'the changed tests failed again after their one fix round'*) echo 'the tests failed after the fix round' ;;
+    'the changed tests gave no result'*) echo 'the tests gave no result' ;;
+    'test: '*) echo 'the test step stopped the card' ;;
+    'visible to customers or staff: needs '*) echo 'the change is visible to customers or staff, so it needs a yes' ;;
+    'lint policy: needs '*) echo 'the change changes the lint policy, so it needs a yes' ;;
+    'lint: '*) echo 'the lint check did not pass' ;;
+    'rebase onto main conflicts: '*) echo 'the change conflicts with main' ;;
+    'rebase: '*) echo 'the change could not be moved onto main' ;;
+    *'the session changed nothing and asks the owner'*) echo 'the session has a question for the owner' ;;
+    'fix: '*) echo 'a fix session failed' ;;
+    'build: '*) echo 'the build failed' ;;
+    'brief: '*) echo 'the engine could not make the brief' ;;
+    "$NODEPS"*) echo 'the engine could not link the dependencies' ;;
+    'worktree: '*) echo 'the engine could not make the worktree' ;;
+    "the project's checks failed again"*) echo "the project's checks failed after the fix session" ;;
+    'the Done-when check failed again'*) echo 'the Done-when check failed after the fix session' ;;
+    'a product check failed'*) echo 'a product check failed' ;;
+    'its process was gone'*) echo "the card's process stopped" ;;
+    'split for its size'*) echo 'the split for size did not finish' ;;
+    'the session made no change'*) echo 'the session made no change' ;;
+    'its process ended without a result in its '*' step'*)
+      n=${1#its process ended without a result in its }; echo "the card's process ended in its ${n%% step*} step without a result" ;;
+    'its process ended without a result'*) echo "the card's process ended without a result" ;;
+    'the last review said NO-GO and named no finding to file'*) echo 'the last review said NO-GO but named no finding to file' ;;
+    'the session said that main already fixes the issue'*) echo 'the engine could not check that main already fixes the issue' ;;
+    'a commit trailer the pack requires is missing'*) echo 'a commit trailer that the pack requires is missing after the fix session' ;;
+    "a file the card's merge onto main changed still does not parse"*) echo 'a file of the merge onto main does not parse after the fix session' ;;
+    'the card landed, but '* | 'the batch of the card landed, but '*) echo 'the card landed, but the engine could not finish its last step' ;;
+    # The follow-up filer's failures (followups(), lib/followups.sh), as cardland.sh gives them.
+    'cannot '* | 'follow-up '* | 'a follow-up '* | 'the follow-up '* | 'a '*' finding could not be written to its list'*)
+      echo "the engine could not file the review's follow-ups" ;;
+    "the engine could not run the project's checks"*) echo "the engine could not run the project's checks" ;;
+    'the engine could not '* | 'conveyor: the engine could not '* | 'the test links of '*) echo 'a step of the engine failed' ;;
+    'shut by the owner'*) echo 'the owner shut the card' ;;
+    # A reason of no known form gives its own cause: its first clause, cut at a word within 120 characters.
+    *) n=${1%%[.:;(\[]*}; n=${n%"${n##*[![:space:]]}"}
+      if [ ${#n} -gt 120 ]; then n=${n:0:120}; n="${n% *}..."; fi
+      echo "${n:-the card stopped before it landed}" ;;
+  esac
+}
+# The comment block() posts on the issue of a card it blocks. A headline in words (blockhead()). For a review block,
+# the findings the reason names, each whole from the review file (the reason holds a finding cut at 300 characters,
+# card.sh afterreview()); for any other block, the reason whole. Then the review's other findings as a list (priority,
+# file:line, text: no id marks, and no EARLIER, DONE-WHEN or VERDICT lines), its DECLINED findings and the output's
+# tail each folded in <details>, one Next line, and a footer with the card, the kept patch and its base commit. With no
+# review file there are no findings. It reads block()'s reason, shown, patch, pfiles and pnote (bash's dynamic scope).
+# An issue comment holds at most 65536 characters: the lists stop at a length (the rest is in the kept review).
+blockcomment() { # <card> <issue> <worktree> <reason as block() was given it, its first line>
+  local all hits rest dec n note fence='```' body next kb
+  # jq: a finding (findings()) as one Markdown line; a list of such lines as list items within <room> characters.
+  local def='def item: . as $f | ($f.line | sub("^(\\[[^\\]]*\\][[:space:]]*)+"; "")) as $t
+      | "**\($f.level)** " + (if $f.at != "" and ($t | startswith($f.at)) then "`\($f.at)`" + $t[($f.at | length):] else $t end);
+    def list($room): reduce .[] as $i ({out: [], n: 0, left: 0}; if .n + ($i | length) + 3 > $room then .left += 1 else .out += ["- " + $i] | .n += ($i | length) + 3 end)
+      | .out + (if .left > 0 then ["- \(.left) more in the kept review"] else [] end) | join("\n");'
+  all=$(findings "$3.review" 2>/dev/null | jq -sc --arg r "$4" "$def"' map(. as $f | {item: item, hit: ($r | contains($f.line[:300]))})') || all='[]'
+  hits=$(jq -r 'map(select(.hit) | "> " + .item) | join("\n>\n")' <<<"$all")
+  n=$((45000 - ${#hits} - ${#reason})); [ "$n" -gt 0 ] || n=0
+  rest=$(jq -r --argjson room "$n" "$def"' map(select(.hit | not) | .item) | list($room)' <<<"$all")
+  dec=$(findings <(sed -n 's/^DECLINED:[[:space:]]*//p' "$3.review" 2>/dev/null) | jq -sr "$def"' [length, (map(item) | list(10000))] | "\(.[0])\n\(.[1])"')
+  n=${dec%%$'\n'*}; dec=${dec#*$'\n'}
+  body="**Blocked: $(blockhead "$4")**"
+  if [ -n "$hits" ]; then
+    body+=$'\n\n'"The review still finds:"$'\n'"$hits"
+    note=${reason#"$4"}; [ -z "$note" ] || body+=$'\n\n'"${note# }"
+  else body+=$'\n\n'"$reason"; fi
+  [ -z "$rest" ] || body+=$'\n\n'"**Other findings of the last review**"$'\n'"$rest"
+  [ "${n:-0}" = 0 ] || body+=$'\n\n'"<details><summary>Declined by the judge ($n)</summary>"$'\n\n'"$dec"$'\n\n'"</details>"
+  while [[ $shown == *"$fence"* ]]; do fence+='`'; done
+  [ -z "$shown" ] || body+=$'\n\n'"<details><summary>Last output</summary>"$'\n\n'"$fence"$'\n'"$shown"$'\n'"$fence"$'\n\n'"</details>"
+  if [ -n "$patch" ]; then
+    kb=$((($(wc -c < "$patch") + 1023) / 1024))
+    next="\`conveyor.sh retry $2\` builds the next card from the kept work ($((pfiles)) file$([ "$((pfiles))" = 1 ] || echo s), $kb KB${pnote:+; $pnote}). The card applies it as it is while it applies to main. When it does not, a session brings it onto main."
+    # A card that kept the body its review read (the yes, a landing conflict): a change to the issue's visible section voids the patch
+    # (resumeplan()), but a landing conflict's patch only when it must be ported: one that applies to main again gets one session and a review.
+    [ ! -s "$3.body" ] || next+=" If the issue's section of what customers or staff will see changes first$([[ $4 != "rebase onto main conflicts: "* ]] || echo ", and the patch no longer applies to main"), the next card is built from nothing."
+  else next="\`conveyor.sh retry $2\` starts the next card on this issue."; fi
+  body+=$'\n\n'"**Next:** $next"$'\n\n'"<sub>Card $1"
+  [ -z "$patch" ] || body+=" · \`$patch\` · built on $(head -c 7 "${patch%.patch}.base")"
+  printf '%s</sub>' "$body"
+}
 # The closing line for a card that does not land. Its worktree goes, once its change is kept as a patch (a
 # patch that cannot be written leaves the worktree where it is, and the reason says so); its session output, error
 # output, last review, last test output, the findings of its withdrawn follow-ups, the issue body its last review read, its commit trailers, its fix rounds (donewhen.sh repeats()) and the list of what its tests passed (tests(): a retried card keeps those passes) are moved to a folder beside the cards folder, and the line names that folder. Evidence is never deleted
@@ -866,7 +961,7 @@ failclass() { # <reason>
 # A card that stops for the owner's yes to a visible change keeps the project's own screenshots of it (keepshots()),
 # or, retried on the same kept patch, those of the card it resumes (keptshots()).
 block() { # <card> <issue> <worktree> <reason> [post the reason on the issue whatever the review holds]
-  local k=$ST/kept/$1 f kept='' left='' stay='' hold='' patch='' reason=${4%%$'\n'*} tail='' shown body d size=null sp named=null err ws=null bl
+  local k=$ST/kept/$1 f kept='' left='' stay='' hold='' patch='' pfiles='' pnote='' reason=${4%%$'\n'*} tail='' shown body d size=null sp named=null err ws=null bl
   # One block of a card at a time: `retry` or `shut` (endcard(), lib/run.sh) and the loop (turnended(), revive()) can
   # end the same card at once. Each holds the card's lock (<cards>/<card>.block) to its end, and leaves a card that has
   # a blocked or closed line by then (exit 2): a second block would stage the worktree the first one removes, and
@@ -899,7 +994,7 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
     # snapshot reads the whole list from the kept patch while there is one).
     [ $d != 1 ] || named=$(git -C "$3" diff --cached --name-only --no-renames 2>/dev/null | head -n 200 | jq -Rcs 'split("\n") | map(select(. != "") | .[0:300])' 2>/dev/null) || named=null
     if [ $d = 1 ] && mkdir -p "$k" 2>/dev/null && git -C "$3" diff --cached --binary --no-renames > "$k/$1.patch" 2>/dev/null && git -C "$3" rev-parse HEAD > "$k/$1.base" 2>/dev/null; then
-      kept=$k; patch="$k/$1.patch ($(git -C "$3" diff --cached --name-only --no-renames | wc -l) files, $((($(wc -c < "$k/$1.patch") + 1023) / 1024)) KB, built on commit $(<"$k/$1.base"))"
+      kept=$k; patch=$k/$1.patch; pfiles=$(git -C "$3" diff --cached --name-only --no-renames | wc -l)
     elif [ $d != 0 ]; then
       rm -f "$k/$1.patch" "$k/$1.base" 2>/dev/null; stay=1
       reason="${reason:0:1100} [the card's change could not be kept as a patch in $k: its worktree is left at $3]"
@@ -907,7 +1002,7 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
       # The one rebuild left the worktree with no change (its session did nothing, or took everything back): the
       # reviewed change it was rebuilding is still the card's work, in the patch file the landing made.
       if mkdir -p "$k" 2>/dev/null && cp "$3.patch" "$k/$1.patch" 2>/dev/null && cp "$3.base" "$k/$1.base" 2>/dev/null; then
-        kept=$k; patch="$k/$1.patch ($(git apply --numstat "$k/$1.patch" 2>/dev/null | wc -l) files, $((($(wc -c < "$k/$1.patch") + 1023) / 1024)) KB, built on commit $(<"$k/$1.base"); the reviewed change from before the rebuild, which left no change of its own)"
+        kept=$k; patch=$k/$1.patch; pfiles=$(git apply --numstat "$k/$1.patch" 2>/dev/null | wc -l); pnote='the reviewed change from before the rebuild, which left no change of its own'
       else
         rm -f "$k/$1.patch" "$k/$1.base" 2>/dev/null; hold=1
         reason="${reason:0:1100} [the reviewed change from before the rebuild could not be kept as a patch in $k: it is left at $3.patch]"
@@ -922,15 +1017,14 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   [[ $reason != "$YES"* ]] || [ "$d" != 1 ] || [ -z "$kept" ] || [ -e "$k/shots" ] || [ -z "${from:-}" ] || [ -z "${fromk:-}" ] \
     || keptshots "$fromk" "$from" "$k" "$1"
   f=$(grep -Ev "$UNRECORDED" "$3.review" 2>/dev/null)
-  # The comment is one argument, and an issue comment at most 65536 characters, beside up to 60000 of findings: it
-  # shows the output's last whole lines within 4000 characters (the blocked line keeps all 60).
-  shown=$tail; [ ${#shown} -le 4000 ] || { shown=${shown: -4000}; [[ $shown != *$'\n'* ]] || shown=${shown#*$'\n'}; }
-  body="Conveyor card $1 is blocked: ${reason:0:600}"; [ -z "$tail" ] || body+=$'\n\n```\n'"$shown"$'\n```'
-  [ -z "$f" ] || body+=$'\n\n'"Findings of its last review:"$'\n'"${f:0:60000}"
-  [ -z "$patch" ] || body+=$'\n\n'"Its work is kept as a patch: $patch. \`conveyor.sh retry $2\` starts the next card from it: applied as it is while it still applies to main, brought onto main by a session when it does not."
-  # A card that kept the body its review read (the yes, a landing conflict): a change to the issue's visible section voids the patch
-  # (resumeplan()), but a landing conflict's patch only when it must be ported: one that applies to main again gets one session and a review.
-  [ -z "$patch" ] || [ ! -s "$3.body" ] || body+=" If the issue's section of what customers or staff will see changes first$([[ $reason != "rebase onto main conflicts: "* ]] || echo ", and the patch no longer applies to main"), the next card is built from nothing."
+  # The comment is one argument, and an issue comment at most 65536 characters: it shows the output's last whole lines
+  # within 4000 characters (the blocked line keeps all 60), and the findings within the room blockcomment() gives them.
+  # A reason with no output of its own (a review block's is one line) shows the card's last session reply
+  # (lastreply(), lib/followups.sh), read before the evidence moves; not when the reason already quotes that reply
+  # (nochange(), lib/followups.sh: "Its last reply: ..."), so the comment does not show it twice.
+  shown=$tail; [ -n "$shown" ] || { sp=$(lastreply "$3.out"); [ -z "$sp" ] || [[ $reason == *"${sp:0:200}"* ]] || shown=$(lastreply "$3.out" whole | tail -n 60); }
+  [ ${#shown} -le 4000 ] || { shown=${shown: -4000}; [[ $shown != *$'\n'* ]] || shown=${shown#*$'\n'}; }
+  body=$(blockcomment "$1" "$2" "$3" "${4%%$'\n'*}")
   [ -z "$f${5:-}$patch" ] || [ "$2" = 0 ] || err=$(gh_write issue comment "$2" --body "$body" 2>&1 >/dev/null) || if [ $? = 3 ]; then
     reason="${reason:0:1100} [$([ -n "$f" ] && echo "the review's findings" || echo this) not posted on the issue: ${err:0:600}]"
   else reason="${reason:0:1100} [$([ -n "$f" ] && echo "the review's findings" || echo this) could not be posted on the issue]"; fi

@@ -145,7 +145,7 @@ t_beforediffers() {
   grep -q '^# The approved visible change$' "$STUB/asked" && grep -q '`USER-VISIBLE: matches`' "$STUB/asked" && grep -q '`USER-VISIBLE: differs: <one' "$STUB/asked" \
     || fail "the reviewer was not given the section or asked whether the change matches it"
   k=$(st 'select(.issue == 11 and .step == "blocked") | "\($ENV.ST)/\(.kept)/\(.card).patch"'); grep -qx '+pay' "$k" || fail "the differing card's patch is not kept: $k"
-  grep -q "^11 --body .*the button says Buy, not Pay" "$STUB/comments" || fail "the difference was not posted on the issue: $(cat "$STUB/comments" 2>&1)"
+  grep -qx '11 --body \*\*Blocked: the change is visible to customers or staff, so it needs a yes\*\*' "$STUB/comments" && grep -qx "${Y}it differs from the change approved before the build: the button says Buy, not Pay" "$STUB/comments" || fail "the difference was not posted on the issue: $(cat "$STUB/comments" 2>&1)"
   [ "$(loop snapshot --fresh | jq -r '.needsYou.waiting[] | select(.issue == 11) | .sentence')" = "it differs from the change approved before the build: the button says Buy, not Pay" ] \
     || fail "Needs you does not ask about the difference: $(loop snapshot --fresh | jq -c .needsYou.waiting)"
   # The owner's yes to what it shows (a second line): the section holds it no more. The kept patch is not built again; it

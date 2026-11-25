@@ -344,7 +344,7 @@ t_donenogo() {
   local c=c0-8
   st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -qF "the issue asks. Its session's output and the last error output (of its review, when the review started) are kept in kept/$c/. ALREADY-DONE: a.txt already" || fail "a NO-GO on ALREADY-DONE does not say the kept errors are the review's: $(st 'select(.issue == 8 and .step == "blocked") | .reason')"
   st 'select(.issue == 8 and .step == "blocked") | .reason' | grep -q 'reviewer says that main does not do what the issue asks.*ALREADY-DONE: a.txt already' || fail "a NO-GO on ALREADY-DONE did not block with the reason: $(st 'select(.issue == 8) | "\(.step) \(.reason)"')"
-  [ "$(st 'select(.issue == 8 and .step == "review") | .result')" = NO-GO ] && grep -q '^8 --body .*blocked' "$STUB/comments" && grep -q 'wrong word' "$STUB/comments" || fail "the disagreeing review is not recorded or not posted on the issue"
+  [ "$(st 'select(.issue == 8 and .step == "review") | .result')" = NO-GO ] && grep -q '^8 --body \*\*Blocked: ' "$STUB/comments" && grep -q 'wrong word' "$STUB/comments" || fail "the disagreeing review is not recorded or not posted on the issue"
   [ ! -e "$STUB/closed" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] || fail "issue #8 was closed over a NO-GO, or it got a second review"
 }
 
@@ -478,7 +478,7 @@ t_doneempty() {
       || fail "issue $n: no change and no ALREADY-DONE last line was not blocked with its reply and kept folder: $r"
     [ -s "$ST/kept/$c/$c.out" ] && [ -e "$ST/kept/$c/$c.err" ] && [ ! -e "$T/$CASE/cards/$c.out" ] || fail "issue $n: the session's output and errors are not in kept/$c/: $(ls "$ST/kept/$c" 2>&1)"
     # Bug: with no findings and no patch, block() did not post the reason, so the issue did not say where the logs are.
-    grep -qF "$n --body Conveyor card $c is blocked: $r" "$STUB/comments" || fail "issue $n: the reason naming its kept folder was not posted on the issue: $(cat "$STUB/comments" 2>&1)"
+    grep -qx "$n --body \*\*Blocked: the session made no change\*\*" "$STUB/comments" && grep -qxF "$r" "$STUB/comments" || fail "issue $n: the reason naming its kept folder was not posted on the issue: $(cat "$STUB/comments" 2>&1)"
   done
   [ ! -e "$STUB/reviews" ] && [ ! -e "$STUB/closed" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] || fail "a card with no change and no ALREADY-DONE line was reviewed, closed or landed"
 }
