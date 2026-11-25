@@ -295,6 +295,42 @@ t_depsblocked() {
   local on; on=$(jq -c '.queue.waiting[0].waitsOn' <<<"$snap")
   [ "$on" = '[{"issue":80,"state":"blocked"}]' ] || fail "the snapshot does not say #80, which #81 waits on, is blocked: $on"
 }
+# Bug (#1677): a dependency's card was shut, so no turn picks the dependency and nothing will build it, but #81 read as
+# a plain wait for it, with nothing in Needs you, for days. The shut dependency is named as such and Needs you lists the
+# wait. One case a fixture: #81 depends on #80; the card of <issue> (picked, then blocked) is the shut one.
+shutfix() { # <issues json> <issue of the card>
+  setup "$1"; mkdir -p "$ST"
+  jq -cn --argjson n "$2" '{card: "c0-\($n)", issue: $n, step: "picked", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: ""}
+    | ., (.step = "blocked" | .time = "2026-11-01T00:10:00Z" | .result = "blocked" | .reason = "tests failed")' > "$ST/cards.jsonl"
+}
+t_depsshut() {
+  local out on ny
+  shutfix "$(jq -cs . <(issue 80 2026-01-01 P2) <(dep "$(issue 81 2026-01-02 P2)" 'Depends on: #80'))" 80
+  out=$(loop shut 80 2>&1) || fail "shut 80, of the blocked card of the open #80, exited non-zero: $out"
+  snap=$(loop snapshot --fresh)
+  on=$(jq -c '.queue.waiting | map([.issue, .waitsOn])' <<<"$snap")
+  [ "$on" = '[[81,[{"issue":80,"state":"shut"}]]]' ] || fail "after shut 80, the snapshot does not say #80, which #81 waits on, is shut: $on"
+  ny=$(jq -c '.needsYou.shutDeps | map({issue, title, dependency, card, reason, since: (.since | type)})' <<<"$snap")
+  [ "$ny" = '[{"issue":81,"title":"title 81","dependency":80,"card":"c0-80","reason":"#81 waits for #80, but the owner shut its card c0-80, so no card builds #80. Run conveyor.sh retry 80 to build it, or remove #80 from the Depends on: line of #81.","since":"string"}]' ] \
+    || fail "after shut 80, Needs you does not list #81's wait on #80 as one that cannot end: $ny"
+  # Bug: #81 forced past its wait (dependency guard off, control force 81) is picked all the same, yet Needs you still
+  # told the owner its wait cannot end.
+  loop control dep-guard off >/dev/null && loop control force 81 >/dev/null || fail "control dep-guard off, then force 81, failed"
+  snap=$(loop snapshot --fresh)
+  [ "$(jq -c '[(.queue.order | map(.issue)), .needsYou.shutDeps]' <<<"$snap")" = '[[81],[]]' ] \
+    || fail "after dep-guard off and force 81, #81 is not in the pick order, or Needs you still lists its wait on the shut #80: $(jq -c '[.queue, .needsYou.shutDeps]' <<<"$snap")"
+}
+# The engine shut the card (shut() engine, as privshut() does: a closed line with ENGSHUT), and the shut one is an open
+# follow-up of #80, which #81 waits on though its Depends on: line names only #80. Bugs: a card the engine shut was not
+# read as shut; the alert told the owner to remove #100101 from a line that does not name it.
+t_depsshutengine() {
+  local ny
+  shutfix "$(jq -cs . <(dep "$(issue 81 2026-01-02 P2)" 'Depends on: #80') <(depfu 100101 80))" 100101
+  { landed 80 '[100101]'; jq -cn '{card: "c0-100101", issue: 100101, step: "closed", time: "2026-11-01T00:20:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: "shut by the engine"}'; } >> "$ST/cards.jsonl"
+  ny=$(loop snapshot --fresh | jq -c '.needsYou.shutDeps | map({issue, dependency, card, reason})')
+  [ "$ny" = '[{"issue":81,"dependency":100101,"card":"c0-100101","reason":"#81 waits for #100101, an open follow-up of a dependency on its Depends on: line, but the engine shut its card c0-100101, so no card builds #100101. Run conveyor.sh retry 100101 to build it, or close #100101."}]' ] \
+    || fail "with the card of #80's follow-up #100101 shut by the engine, Needs you does not list #81's wait on it, or names a line that does not hold it: $ny"
+}
 # What a waiting issue waits on, with no card of it (issue 439). Bug: the snapshot named #80 only, so a queue of
 # waiting issues did not say whether #80 is held or only queued. One case a fixture: #80 open, #81 depends on it.
 depstate() { # <control args, or none>

@@ -593,6 +593,11 @@ answer "$P" "$P_URL" 1794000000 "$(jq -c '.needsYou.farDeps = [{issue: 42, title
 run
 q '.panels.needs.data.cards.farDeps | map([.repo, .issue, .ref, .line, .reason, .url]) == [["widgetshop", 42, "other/repo#600", "Depends on: other/repo#600", "no access", "'"$CU"'/42"]]' "a dependency that cannot be read is in Needs you with its line and why"
 q '.panels.machine.data.projects[1].needs | map([.repo, .issue]) == [["widgetshop", 42]]' "a project's Needs you counts its dependencies that cannot be read"
+# Bug (#1677): an issue waiting on one whose card was shut was in Needs you on the Overview, but left out of the
+# project's Needs you on the Machine panel.
+answer "$P" "$P_URL" 1794000000 "$(jq -c '.needsYou.shutDeps = [{issue: 43, title: "Use the new tool", dependency: 44, card: "c0-44", since: "2026-11-12T08:00:00Z", reason: "#43 waits for #44, but the owner shut its card c0-44"}]' <<<"$C")" "$C_URL" 0
+run
+q '.panels.machine.data.projects[1].needs | map([.repo, .issue]) == [["widgetshop", 43]]' "a project's Needs you counts its waits on a dependency whose card was shut (needsYou.shutDeps: #43 waits on #44, card c0-44 shut)"
 ) & PIECES+=($!)
 ( setup machine-2; cards_fixture
 # The Foremen, read from this machine's state folders. A group of the host file's foreman.groups is one Foreman, in

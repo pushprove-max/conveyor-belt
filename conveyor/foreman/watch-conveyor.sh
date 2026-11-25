@@ -269,6 +269,7 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
       | if $k == "pipeline" then ["pipeline:\(.issue)", "pipeline change held", $n,
           "pipeline change held: \($n)\((.parent | numbers | " (follow-up of #\(.))") // ""): \(.title // "")" | one]
         elif $k == "farDeps" then ["farDeps\($id)", "dependency unreadable", $n, "\($n) waits on \(.ref // "") in another repository, which cannot be read: \(.reason // "")" | one]
+        elif $k == "shutDeps" then ["shutDeps\($id)", "dependency cannot land", $n, .reason // "" | one]
         elif $k == "engines" then ["engines\($id)", "engine update not taken", "", "the plugin commit \(.commit // "") was not taken: \(.reason // "")" | one]
         elif $k == "testRules" then ["testRules\($id)", "test issues held", "", "the test rules matched \(.matched) files, over the cap of \(.cap) a day, so they filed none" | one]
         elif $k == "prices" then (.models | arrays | map(tostring)) as $m | ["prices:\($m | join(","))", "models with no price", "",

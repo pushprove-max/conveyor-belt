@@ -16,6 +16,9 @@
 #   holds them: issue, title, cost: their "Cost to every card:" line, parent, since; null when gh cannot list the issues),
 #   and farDeps (each open issue's dependency in another repository that could not be read, so the issue waits:
 #   issue, title, ref: "owner/repo#N", line: the Depends on: line naming it, reason: what gh said; null when gh cannot list the issues),
+#   and shutDeps (each waiting issue's dependency whose newest card the owner or the engine shut, so no card builds it
+#   and the wait cannot end, one forced past its wait left out: issue, title, dependency, card: the shut card, since: its end,
+#   reason: who shut it and the way out; null when gh cannot list the issues),
 #   and engine (for a pack that follows the plugin's main, the newest commit of it this machine did not take, until a
 #   later one is taken: commit, reason (its failed check, or the hooks it lacks), since; else null), and testRules
 #   (when the last pass of the test rules, lib/testrules.sh, had the switch on and matched more files than one day's
@@ -119,7 +122,7 @@
 #   an open issue it depends on and that pick would take once those land: none held, skipped or waiting for the
 #   owner's yes before its build, which open.held gives with their wait; in pick order: issue, title, priority, followup, retried,
 #   created, waitsFor: the open issues it waits on, open follow-ups of its dependencies included, waitsOn: each
-#   number of waitsFor with its state ({issue, state}; state is one of "building", "blocked", "held", "waiting for a yes", "skipped by a rule", "waiting
+#   number of waitsFor with its state ({issue, state}; state is one of "building", "shut" (its newest card was shut: shutDeps), "blocked", "held", "waiting for a yes", "skipped by a rule", "waiting
 #   for #N" (it waits on another issue too), "queued" or "open, no card"), so a wait says why it does not end, forced: `control
 #   force` lets it be picked all the same, the dependency guard off; a forced one is in order too). All are null when gh cannot list the issues: the rest of the
 #   record is still given. holding and skipped list only issues pick would take but for the record.
@@ -1192,9 +1195,13 @@ snapshot() (
                    labelOrRule: (($hl | length) - $you - ($unpushed | length)), landed: ($unpushed | length), belt: ([$open[] | select(.number | IN($onbelt[]))] | length)}} end) as $openpart
     # Why an open issue that others wait on does not move (waitsOn in queue.waiting): its newest card first, then
     # a hold of the control record, a label, a rule, the yes of the owner, its own wait, the pick order; else no card.
-    | def depstate($n): ([$c[] | select(.issue == $n)] | last) as $k
+    # "shut": its newest card was shut by the owner or the engine ($shuts[1:], OWNSHUT and ENGSHUT; lib/issues.sh): its
+    # issue stays open and no turn picks it until `retry` gives it back, so nothing builds it (shutDeps in Needs you).
+    | def shutcard($n): [$c[] | select(.issue == $n)] | last | if . != null and .step == "closed" and (.reason | IN($shuts[1:][])) then . else null end;
+      def depstate($n): ([$c[] | select(.issue == $n)] | last) as $k
         | ($up // [] | map(select(.number == $n)) | .[0]) as $e
         | if $k != null and $k.result == "" then "building"
+          elif shutcard($n) != null then "shut"
           elif $n | IN(($control // {} | .held // [])[]) then "held"
           elif $k != null and $k.step == "blocked" then (if $k.reason // "" | startswith($yes) or startswith($lintyes) then "waiting for a yes" else "blocked" end)
           elif $open // [] | any(.[]; .number == $n and any(.labels[]; .name == $builtl)) then "held"
@@ -1300,7 +1307,17 @@ snapshot() (
            [$open[] | . as $i | farneeds[] as $r | select($i.far[$r].error != null)
               | {issue: $i.number, title: ($i.title // "")[0:200], ref: $r, reason: $i.far[$r].error,
                  line: ([$i.body // "" | splits("\r?\n") | select({body: .} | farneeds | index([$r]) != null)] | first // "" | sub("^\\s+"; "") | .[0:300])}]
-           | sort_by(.issue) end)},
+           | sort_by(.issue) end),
+         # A wait that cannot end: an issue waiting on one whose card was shut (depstate "shut"), which no card builds.
+         # One forced past its wait (`control force`, the dependency guard off) is picked all the same: no wait to flag.
+         # A dependency its own Depends on: line names can be removed from that line; an open follow-up of one (waitsFor
+         # adds them) is not on it, so the way out is to close the follow-up.
+         shutDeps: ($q.waiting // null | if . == null then null else
+           [.[] | select(.forced | not) | . as $w | (first($open // [] | .[] | select(.number == $w.issue) | needs) // []) as $own
+             | .waitsFor[] | numbers | shutcard(.) as $k | select($k != null)
+             | {issue: $w.issue, title: ($w.title // "")[0:200], dependency: $k.issue, card: $k.card, since: $k.x.endAt,
+                reason: "#\($w.issue) waits for #\($k.issue)\(if $k.issue | IN($own[]) then "" else ", an open follow-up of a dependency on its Depends on: line" end), but \(if $k.reason == $shuts[1] then "the owner" else "the engine" end) shut its card \($k.card), so no card builds #\($k.issue). Run conveyor.sh retry \($k.issue) to build it, or \(if $k.issue | IN($own[]) then "remove #\($k.issue) from the Depends on: line of #\($w.issue)" else "close #\($k.issue)" end)."}]
+           | sort_by(.issue, .dependency) end)},
        mainTest: $mt[0],
        priceNotes: $pn.notes,
        priceFiled: $pn.filed,

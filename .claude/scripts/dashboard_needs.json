@@ -7,6 +7,7 @@
   {"kind": "before", "from": ["needsYou", "before"], "title": "Approve before build"},
   {"kind": "pipeline", "from": ["needsYou", "pipeline"], "title": "Pipeline changes held for you"},
   {"kind": "farDeps", "from": ["needsYou", "farDeps"], "title": "Dependencies that cannot be read"},
+  {"kind": "shutDeps", "from": ["needsYou", "shutDeps"], "title": "Dependencies that cannot land"},
   {"kind": "pick", "from": ["needsYou", "pick"], "title": "Pick settings"},
   {"kind": "waiting", "from": ["needsYou", "waiting"], "title": "Waiting for your yes"},
   {"kind": "blocked", "from": ["needsYou", "blocked"], "title": "Blocked cards"}

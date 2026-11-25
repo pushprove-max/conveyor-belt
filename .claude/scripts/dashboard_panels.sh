@@ -589,7 +589,7 @@ PANELS_JQ='
         projects: [$R[] | . as $r | .snap as $s | {repo, state: ($s.health.state // null), reason: ($s.health.reason // null), loop: $s.health.loop,
           mode: ($s.control.mode // null), cap: ($s.health.builderCap // null), guard: ($s.control.guard // null),
           used: (first($behind[] | select(.repo == $r.repo) | .building | numbers) // ([$s.belt[] | select(counted)] | length)),
-          needs: (([$s.needsYou.waiting[], $s.needsYou.blocked[], ($s.needsYou.before | arrays | .[]), ($s.needsYou.pipeline | arrays | .[]), ($s.needsYou.farDeps | arrays | .[]) | {card, issue, name: (.name // null), title}] | few($r))
+          needs: (([$s.needsYou.waiting[], $s.needsYou.blocked[], ($s.needsYou.before | arrays | .[]), ($s.needsYou.pipeline | arrays | .[]), ($s.needsYou.farDeps | arrays | .[]), ($s.needsYou.shutDeps | arrays | .[]) | {card, issue, name: (.name // null), title}] | few($r))
             + [$dec.decisions | arrays | .[] | select(.repo == $r.repo) | {repo, decision: .id, title: .question}]),
           belt: ([$s.belt[] | select(.landed != true) | {card, issue, name: (.name // null), title, step}] | few($r)),
           queue: ($s.queue.order | if . == null then null else map({issue, title}) | few($r) end),

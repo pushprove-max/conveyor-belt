@@ -421,23 +421,26 @@ bash "$SRC/watch-conveyor.sh" --once && fail "a kind not in the list woke: $(cat
 bash "$T/c/conveyor/foreman/watch-conveyor.sh" --once || fail "no wake for a new kind of Needs you entry"
 w=$(cat "$FD"/pending/*.wake)
 [ "$w" = $'Conveyor: alpha: newKind: #40\nalpha: newKind: #40 a new kind of wait' ] || fail "the new kind's wake: $w"
-# The other kinds the Board shows: a dependency that cannot be read, an engine update not taken, test issues held,
+# The other kinds the Board shows: a dependency that cannot be read, one whose card was shut (#1677: the wake gives its
+# reason, not the bare kind and title, so the owner is told the wait cannot end), an engine update not taken, test issues held,
 # models with no price (#1074: no issue is filed for them now, so this wake is what tells the owner) and the whole
 # test failing on main.
 rm -f "$FD"/pending/*.wake
 jq -c '.needsYou += {farDeps: [{issue: 41, title: "t", ref: "example/other#3", reason: "not found", line: "Depends on: example/other#3"}],
+    shutDeps: [{issue: 43, title: "t", dependency: 44, card: "c0-44", since: "2026-11-11T11:00:00Z", reason: "#43 waits for #44, but the owner shut its card c0-44"}],
     engine: {commit: "abc123", reason: "it failed its check", since: "2026-11-11T11:00:00Z"}, testRules: {time: "2026-11-11T11:00:00Z", matched: 90, cap: 20},
     prices: {models: ["claude-new-9", "m"]}}
   | .mainTest = {issue: 42, cases: ["serve", "views"], from: "a1", to: "b2", since: "2026-11-11T11:00:00Z"}' "$T/ask/alpha" > "$T/a" && mv "$T/a" "$T/ask/alpha"
 bash "$SRC/watch-conveyor.sh" --once || fail "no wake for the other Needs you kinds"
 w=$(cat "$FD"/pending/*.wake)
 for l in "alpha: #41 waits on example/other#3 in another repository, which cannot be read: not found" \
+  "alpha: #43 waits for #44, but the owner shut its card c0-44" \
   "alpha: the plugin commit abc123 was not taken: it failed its check" "alpha: the test rules matched 90 files, over the cap of 20 a day, so they filed none" \
   "alpha: the whole test fails on main (#42): serve, views" \
   "alpha: 2 models the belt runs or offers have no price: claude-new-9, m; add them on the Board, Rules, Model prices"; do
   grep -qxF "$l" <<<"$w" || fail "no line '$l': $w"
 done
-[ "$(wc -l <<<"$w")" = 6 ] || fail "an entry already reported woke again: $w"
+[ "$(wc -l <<<"$w")" = 7 ] || fail "an entry already reported woke again: $w"
 }
 
 t_alerts() {

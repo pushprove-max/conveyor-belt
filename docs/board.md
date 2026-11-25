@@ -250,6 +250,11 @@ lists every project's rows, so it stays as it is.
   screenshots, so a project without them shows none.
 - **Queue and Close.** Each entry under "Pipeline changes held for you" has a **Queue** button, which releases
   the issue (`conveyor.sh control release`), and a **Close** button.
+- **Dependencies that cannot land.** An issue that waits for another issue whose card was shut shows here. No card
+  builds that issue, so the wait does not end. The line says who shut the card and what to do: run
+  `conveyor.sh retry <issue>` to build it, or remove it from the `Depends on:` line. When the shut issue is an open
+  follow-up of an issue on that line, close the follow-up. An issue that `conveyor.sh control force` lets past its
+  wait does not show here.
 - **Models with no price.** One line for each project counts the models that the belt runs or offers with no price.
   **View in Model prices** shows only that project on the Board and opens its list on the Rules tab, where you add
   each price ([Models](configuration.md#models)).
