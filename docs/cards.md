@@ -446,6 +446,11 @@ review of the card rules on a finding again, the later ruling counts. A finding 
 filed as a follow-up. A finding on the list that it rules `harm`, or gives no kind, leaves the list. When the judge
 fails, the review stays as the reviewer wrote it: each of its findings has no kind, so it is `harm`.
 
+Each entry of the self-heals list and the docs list has an area. It is the area of the file that the finding names,
+from the pack's `labels.areaPaths` ([The pack](configuration.md#the-pack)). A file that no path of the map names gets
+the map's `other` area. When the finding names no file, or the pack has no map, the entry gets the area label of its
+issue. When that issue has no area label, the entry has no area, and the Board shows it under "No area".
+
 The list is fixed in batches, one card for each area. The Board's Self-heals tab shows each area with all of its
 entries and their count. "Review batch" on an area opens the batch sheet, which files one card that has the area's
 entries as its scope. An entry whose card has not landed or closed waits for the next batch card: the code it names is only in that

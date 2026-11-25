@@ -34,7 +34,13 @@
         "type": { "description": "The type label a filed follow-up carries.", "type": "string", "minLength": 1 },
         "priorities": { "description": "The priority labels, most urgent first.", "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
         "areaPrefix": { "type": "string", "minLength": 1 },
-        "nonProductAreas": { "description": "Area labels whose issues are not product work.", "type": "array", "items": { "type": "string", "minLength": 1 } }
+        "nonProductAreas": { "description": "Area labels whose issues are not product work.", "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "areaPaths": { "description": "The path-to-area map: paths gives the area label of each path from the repository root (a path ending in / names each file under that folder; the longest that names a file wins), and other the area label of every file no path names. An entry of the self-heals list or the docs list takes the area of the file its finding names, and every issue or card the engine files gets an area label. None: an entry takes its issue's area label; a follow-up or a split part has its parent's area label, a flaky-test issue <areaPrefix>engine when nonProductAreas names it, and another filing none.",
+          "type": "object", "required": ["other"], "additionalProperties": false,
+          "properties": {
+            "paths": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
+            "other": { "type": "string", "minLength": 1 }
+          } }
       }
     },
     "productPaths": {

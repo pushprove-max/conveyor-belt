@@ -101,7 +101,7 @@ TAEXPLAIN="Explain the slowdown of one test file of this project. From its recor
 # `conveyor.sh testissue <test file> <title> <body>`: the Board's File an issue about one test file (an Optimize issue,
 # "Optimize the test file <file>", or a Rewrite as a direct check issue, "Rewrite the test file <file> as direct
 # checks", each checked by speedproof.sh optproof(), or a speed-up; the owner read and edited the title and body), filed through the GitHub write path with the pack's
-# type and its last priority. Each one filed is kept in $TAFILED, one line {time, event: filed, file, issue}, so the
+# type, its last priority and the area label of the test file (filearea(), lib/areas.sh). Each one filed is kept in $TAFILED, one line {time, event: filed, file, issue}, so the
 # file's row has its issue (testspart(): the Board's Close its issue as done). It prints the issue's address.
 # Run for a Foreman session (the launcher's CONVEYOR_FOREMAN=1, or the session the Foreman's mark, $ST/foreman/session,
 # names: Claude Code gives a session's commands its id, CLAUDE_CODE_SESSION_ID), or while the control record's new
@@ -124,18 +124,18 @@ ghunfiled() {
   esac
 }
 testissue() { # <test file> <title> <body>
-  local out n s='' why='' c fm='' rc
+  local out n s='' why='' c fm='' rc a
   [ $# = 3 ] && [[ -n ${2//[[:space:]]/} && $2 != *$'\n'* && -n ${3//[[:space:]]/} ]] || { echo "usage: conveyor.sh testissue <test file> <title> <body>" >&2; return 2; }
   [[ -n $1 && $1 != /* && /$1/ != */../* && /$1/ != */./* && $1 != *$'\n'* ]] && [ "$(git -C "$MAIN" cat-file -t "refs/heads/$BRANCH:$1" 2>/dev/null)" = blob ] \
     || { echo "conveyor: $1 is not a file of $BRANCH; nothing filed" >&2; return 2; }
   mkdir -p "$TESTACTS" || { echo "conveyor: the test actions' folder could not be made; nothing filed" >&2; return 1; }
   read -r s _ 2>/dev/null < "$ST/foreman/session"
-  c=$(ctl 2>/dev/null) || c=''
+  c=$(ctl 2>/dev/null) || c=''; a=$(filearea "" "$1") || a='' # the area label of its test file (lib/areas.sh)
   if [ "${CONVEYOR_FOREMAN:-}" = 1 ] || { [ -n "$s" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$s" ]; }; then why='it was filed for a Foreman session' fm=1
   else case $(jq -r '.start // empty' <<<"$c" 2>/dev/null) in queue) ;; held) why='new issues start held' ;; *) why='the control record cannot be read' ;; esac; fi
   if [ "$(jq -r '.rules.testissues' <<<"$c" 2>/dev/null)" = false ]; then testcard "$@" "${fm:+held}"; return; fi
   # An issue to be held is made with the built label, which the pick skips, until the hold is in the control record.
-  out=$(gh_write issue create --title "${2:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" ${why:+--label "$BUILT"} --body "$3" 2>&1); rc=$?; n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1); n=${n##*/}
+  out=$(gh_write issue create --title "${2:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" ${a:+--label "$a"} ${why:+--label "$BUILT"} --body "$3" 2>&1); rc=$?; n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1); n=${n##*/}
   [ -n "$n" ] || { ghunfiled "the issue about $1" "$rc" "$out"; return 1; }
   grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1 # at once, as cardnew() prints it
   jq -cn --arg t "$(clock)" --arg f "$1" --argjson n "$n" '{time: $t, event: "filed", file: $f, issue: $n}' >> "$TAFILED" \
@@ -168,7 +168,8 @@ testcard() { # <test file> <title> <body> [held [<why it is held>]]
 # The record's one writer, for every kind of card with no GitHub issue: <test file> "" for a card of another kind, which
 # the Board shows by <label> (a Foreman order, a review follow-up, a release fix card or a split part: cardnew(),
 # followups(), splitcards()) in place of "Tests page: <file>"; <labels json> the labels its stand-in issue has
-# (testcardissue()), the pack's type and last priority when none; <parent> the issue a review follow-up or a split part
+# (testcardissue()), the pack's type and last priority when none, with an area label added when they have none (that
+# of <test file>, else of the file <body> names, else the map's other: filearea(), lib/areas.sh; none with no map); <parent> the issue a review follow-up or a split part
 # follows up (parent in the entry: a run limited by --only to that issue takes the card, testpick()). Prints the card's id.
 tcadd() { # <test file> <title> <body> <"held" or ""> [<label> [<labels json> [<parent issue>]]]
   local lock rc=0; mkdir -p "$TESTACTS" 2>/dev/null
@@ -185,8 +186,11 @@ tcput() { local rec id drop; rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/nu
       | map(select(any(.[]; '"$TADONE"') and (any(.[]; .step == "bugproof" and (.speed.fix? | IN("deleted", "merged"))) | not)) | {key: .[0].card, value: true}) | from_entries end' 2>/dev/null) || drop='{}'
   # The record goes to jq on its input: Linux refuses an argument over 128 KiB.
   jq -c --arg f "$1" --arg t "${2:0:200}" --arg b "$3" --arg at "$(clock)" --arg id "$id" --arg held "${4:-}" --arg label "${5:-}" --arg labels "${6:-}" --arg parent "${7:-}" --argjson drop "$drop" \
+    --arg area "$(filearea "" "${1:-$3}" 2>/dev/null)" --arg ap "${AREA:-}" --arg ty "${TYPE:-}" --argjson pr "${PRIOS:-[]}" \
     '. + [{file: (if $f == "" then null else $f end), title: $t, body: $b, time: $at, id: $id, card: null}
-      + (if $held == "held" then {held: true} else {} end) + (if $label == "" then {} else {label: $label} end) + (if $labels == "" then {} else {labels: ($labels | fromjson)} end)
+      + (if $held == "held" then {held: true} else {} end) + (if $label == "" then {} else {label: $label} end)
+      + (($labels | if . == "" then null else fromjson end) as $l | if $area == "" or any(($l // [])[]; startswith($ap)) then (if $l == null then {} else {labels: $l} end)
+         else {labels: (($l // [$ty, $pr[-1]]) + [$area])} end)
       + (if $parent == "" then {} else {parent: ($parent | tonumber)} end)]
     | ([to_entries[] | select(.value.card != null) | .key] | .[:-200]) as $old
     | {cards: [to_entries[] | select((.key | IN($old[])) and $drop[.value.card] == true | not) | .value]}' <<<"$rec" > "$TACARDS.new" \
@@ -199,14 +203,14 @@ tcput() { local rec id drop; rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/nu
 # type label, as a fix issue has) is refused with no `## Cause` section, as the Foreman's filing hook refuses a fix issue.
 # With the control record's rules.foremanissues (rules.releaseissues for --release) false (the Rules tab's Cards with no
 # GitHub issue) it starts a card with no GitHub issue (tcadd()), held until the owner's yes, as an issue the Foreman files
-# is. Otherwise it files the issue, with the pack's type and last priority, and holds it; the issue is made with the
+# is. Otherwise it files the issue, with the pack's type and last priority and the area label of the file its body names (filearea(), lib/areas.sh), and holds it; the issue is made with the
 # built label, which the pick skips, taken off once the hold is in the control record. Prints what it started or filed.
 cardnew() { # [--release <version>] <title> <body>
-  local rule=foremanissues label='Foreman order' body='' out n u nocard rc
+  local rule=foremanissues label='Foreman order' body='' out n u nocard rc a
   [ "${1:-}" != --release ] || { [[ ${2:-} =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]] || { echo "usage: conveyor.sh card [--release <version>] <title> <body>" >&2; return 2; }
     rule=releaseissues label='Release fix'; body=$'\n\nRelease fix: '$2; shift 2; }
   [ $# = 2 ] && [[ -n ${1//[[:space:]]/} && $1 != *$'\n'* && -n ${2//[[:space:]]/} ]] || { echo "usage: conveyor.sh card [--release <version>] <title> <body>" >&2; return 2; }
-  body=$2$body
+  body=$2$body; a=$(filearea "" "$body") || a='' # the area label of the file it names (lib/areas.sh)
   nocard=$(ctl 2>/dev/null | jq -r --arg r "$rule" '.rules[$r] == false' 2>/dev/null)
   if [ "$nocard" != true ] && ! grep -qE '^[[:space:]]*##[[:space:]]+Cause[[:space:]]*$' <<<"$body"; then
     echo 'conveyor: an order that files an issue files a fix issue (it has the pack'"'"'s type label), and a fix issue needs a "## Cause" section: the source of the problem, a place in the code that already solves the same problem (or that none was found), and what the reader sees when the data is stale or missing. Add it and run the command again.' >&2; return 2
@@ -217,7 +221,7 @@ cardnew() { # [--release <version>] <title> <body>
     echo "Card queued with no GitHub issue: ${1:0:200}"; return 0
   fi
   # Made with the built label, which the pick skips, until the hold is in the control record (as testissue() does).
-  out=$(gh_write issue create --title "${1:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" --label "$BUILT" --body "$body" 2>&1); rc=$?; u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1); n=${u##*/}
+  out=$(gh_write issue create --title "${1:0:200}" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" ${a:+--label "$a"} --label "$BUILT" --body "$body" 2>&1); rc=$?; u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1); n=${u##*/}
   [ -n "$n" ] || { ghunfiled "the issue" "$rc" "$out"; return 1; }
   echo "$u" # at once: an ask stopped at its limit while the hold waits still has the link (askfiling(), foreman/lib.sh)
   if ! locked control hold "$n" > /dev/null 2>&1; then echo "conveyor: #$n is filed, but could not be held: hold it (conveyor.sh control hold $n) unless the owner has said yes to it, and take the $BUILT label off it, which the belt skips" >&2

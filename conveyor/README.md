@@ -1282,7 +1282,8 @@ cannot close the issue, or GitHub does not say whether the issue is open, it kee
 
 When a case has entries from three different sources within seven days and no open issue filed for it, Conveyor files
 one issue through its GitHub write path (the privacy check included): the title "Flaky test: <case> fails at random",
-the labels of the pack's type, its last priority, `<areaPrefix>engine` when the pack's `nonProductAreas` names it, and
+the labels of the pack's type, its last priority, the area of the case's test file from the pack's `labels.areaPaths`
+(with no map, `<areaPrefix>engine` when the pack's `nonProductAreas` names it), and
 `flaky-test` (made when the repo lacks it), and a body that lists the entries of those seven days and asks for the
 test to be made reliable or removed, with "Done when: the case passes alone and in the whole test." It is an ordinary
 issue, not a review follow-up. While that issue is open, later entries file nothing; once it is closed, only the entries

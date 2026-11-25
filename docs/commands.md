@@ -208,6 +208,12 @@ The self-heals list and the docs list ([Harm or self-heals](cards.md#harm-or-sel
   back when a review finds it again.
 - `heals sort` sorts the queued follow-up cards and the open finding issues: `harm` stays, `docs drift` goes to the
   docs list, and `self-heals`, `cleanup` and `already guarded` go to the self-heals list.
+- `heals areas` gives an area to what has none, from the pack's `labels.areaPaths`
+  ([The pack](configuration.md#the-pack)). Each entry of the self-heals list and the docs list with no area gets the
+  area of the file that its finding names. An entry that names no file keeps no area. An entry with an area keeps it.
+  Then it makes each label of the map that GitHub does not have. When it cannot make one, it stops and gives no issue
+  a label. Each open issue with no area label gets the area of the file that its body names, else the map's area for
+  all other files. With no map in the pack, it changes nothing and exits 2.
 
 Lanes and the Foreman:
 

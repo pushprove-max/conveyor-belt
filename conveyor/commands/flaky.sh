@@ -6,7 +6,7 @@
 . "$HERE/lib/control.sh" || exit 1
 . "$HERE/lib/issues.sh" || exit 1
 . "$HERE/lib/pick.sh" || exit 1
-. "$HERE/lib/flaky.sh" || exit 1
+. "$HERE/lib/flaky.sh" && . "$HERE/lib/testfiles.sh" || exit 1 # testowners(): a flaky case's test file, for its issue's area label (casefile())
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1

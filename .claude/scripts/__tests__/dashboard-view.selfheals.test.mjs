@@ -401,3 +401,12 @@ test('Self-heals: each kind and the P1 tag read at 4.5:1 in both themes, and at 
   const split = q(w, '.sh-split');
   assert.deepEqual(Array.from(split.children, (c) => c.className), ['sh-list', 'sh-detail'], 'the detail panel follows the list, so one column puts it under');
 });
+
+// Issue 1693: once every entry has an area (the area of its finding's file), the page draws no "No area" card; an
+// entry with no area still has its card, so it is never hidden. Bug it catches: an area card drawn for no entry.
+test('Self-heals: a list whose entries all have an area draws no "No area" card', () => {
+  const { w } = open({ entries: ENTRIES.filter((e) => e.area) });
+  assert.deepEqual(qa(w, '.sh-area').map((c) => c.dataset.area), ['area:board', 'area:engine/review']);
+  assert.equal(q(w, '.sh-area[data-area=""]'), null);
+  assert.ok(!qa(w, '.sh-area .sh-group').some((g) => g.textContent === 'No area'), 'no card is named No area');
+});

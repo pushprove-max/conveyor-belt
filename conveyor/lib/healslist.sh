@@ -14,7 +14,8 @@
 # card's now; in the record of expired entries (same(true)) one card's finding may have moved, so its line numbers need not
 # match), and for a sort of the same issue, an entry of a sort alone; and what a sighting at time $t does to such an entry
 # (again): it is seen now, one more time (sightings, which the Board's Self-heals page shows as "seen N×"), and, as no batch card holds it, it is of the card that saw it (and, from a review, of its issue: heals
-# batch waits for that card to end) and, when $l gives them, takes its kind, reason and finding (the text the listing has now: a
+# batch waits for that card to end), takes the area $l gives when it has none (an entry listed before the pack had its
+# path-to-area map, lib/areas.sh; one with an area keeps it), and, when $l gives them, takes its kind, reason and finding (the text the listing has now: a
 # sort counts the findings its issue still holds against the entries' text; an entry of a sort that a review sees again keeps the
 # finding the sort stored, as healsitems() (lib/heals.sh) reads that text). A sighting names the entries that are as close to its
 # finding as any are (tier): with its own text (exk) first, then with its text but for the level marks, backticks and the colon
@@ -31,6 +32,7 @@ HEALSSAME="$HEALSONE"'def exk: one | sub("(?i)[.:;]* (- how|proof):.*$"; "");
   def same: same(false);
   def tier($x): if $x == 2 then (.finding | exk) == ($l.finding | exk) elif $x == 1 then (.finding | lkey) == ($l.finding | lkey) else true end;
   def again: .seen = $t | .sightings = (.sightings // 0) + 1 | if .batched == null then .card = $l.card | (if .from == "review" then .issue = $l.issue else . end)
+    | (if (.area // "") == "" and ($l.area // "") != "" then .area = $l.area else . end)
     | (if $l.effect then .effect = $l.effect | .why = $l.why | (if .from == "sort" and $l.from != "sort" then . else .finding = $l.finding end) else . end) else . end;'
 # The id of the first entry of <list> that a sighting names (HEALSSAME; <dropped> true for the record of expired entries)
 # and that is of <tier> or nearer: 2, its finding text as the sighting has it (its Proof and How aside, its line numbers

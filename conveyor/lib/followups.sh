@@ -303,15 +303,15 @@ rlpick() {
   if [ "$(jq --arg f "$1" "$HELDIN"'. as $l | $f | heldin($l)' <<<"$3" 2>/dev/null)" = false ]; then echo rl; else echo hold; fi
 }
 followups() { # <card> <issue json> <review file>
-  local f mark where out num n pn nums=() more=() found=() pipe cost own='' free rl held='' res pm g masked depth kind clean body area nocard='' fc=${3%.review}.fucards
+  local f mark where out num n pn nums=() more=() found=() pipe cost own='' free rl held='' res pm g masked depth kind clean body area fa nocard='' fc=${3%.review}.fucards
   local why ofc=${3%.review}.outfiled ek healed=0; [ -z "${rlfind:-}" ] || heldlist held || held='' # what waits for the owner, read for the finding of a retry by review-land (rl, below); none read holds it
   depth=$(fudepth "$2") && [[ $depth =~ ^[0-9]+$ ]] || { echo "cannot read the parent issue's follow-up depth"; return 1; }
   packget pipelineFiles pipe || { echo "cannot read the pack's pipeline files"; return 1; }
   packget privacy.mode pm || { echo "cannot read the pack's privacy mode"; return 1; }
   ! standingon review-followup || { packget auto.reserved res || { echo "cannot read the pack's auto.reserved"; return 1; }; own=1; }
   area=$(jq -r --arg p "$AREA" '.labels | map(.name | select(startswith($p))) | .[0] // empty' <<<"$2") || { echo "cannot read the parent issue's labels"; return 1; }
-  n=$(jq -r .number <<<"$2") && mapfile -t more < <(jq -r --arg p "$AREA" '(.labels | map(.name | select(startswith($p))) | .[0] // empty | "--label", .),
-    (.milestone.title // empty | "--milestone", .)' <<<"$2") || { echo "cannot read the parent issue's labels and milestone"; return 1; }
+  n=$(jq -r .number <<<"$2") && mapfile -t more < <(jq -r '.milestone.title // empty | "--milestone", .' <<<"$2") \
+    || { echo "cannot read the parent issue's milestone"; return 1; } # its area label is each follow-up's fa (filearea(), below)
   # Issue 0's parent is the issue its card follows up, if any (--only takes its follow-ups). pn names it in a follow-up card: #<issue>, else the branch,
   # else the card id (bug: "Review follow-up of #"); a follow-up issue keeps "Follow-up to #<n>", the only form jq/upnext.jq and snapshot.sh read.
   [ "$n" != 0 ] || n=$(tcparent "$1"); [[ $n =~ ^[1-9][0-9]*$ ]] && pn="#$n" || pn=$(stdb ask card "$1" 2>/dev/null | jq -rn 'first(inputs | objects | select(.step == "picked") | .branch | strings) // empty' 2>/dev/null); pn=${pn:-$1}
@@ -334,7 +334,7 @@ followups() { # <card> <issue json> <review file>
     # With the pack's privacy.mode public, the issue's text holds the finding with each word the privacy check flags
     # masked (privmask(), lib/issues.sh), and says so: gh_write would post none of it. Bug: a finding that quoted a
     # home path could not be filed, so its card was blocked.
-    g=$f masked=''
+    g=$f masked=''; fa=$(filearea "$area" "$f") || fa=$area # its parent's area label, else that of the file it names (lib/areas.sh)
     if [ "$pm" = public ]; then
       g=$(privmask "$f") || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed: the privacy check could not be made (finding: ${f:0:200})"; return 1; }
       masked=${f//"$CARDS"/<cards>}; [ "$g" = "${masked//"${STATE%/*}"/<state>}" ] && masked='' \
@@ -384,12 +384,12 @@ Follow-up depth: $((depth + 1))"
       # The standing yes is logged before the card exists (it has no id yet); one that cannot be logged is held, as an issue is.
       [ -z "$free" ] || standinglog review-followup "a follow-up card of $pn (card $1) was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''
       # Its parent's card is filed before it lands: the card waits on that id, as an issue waits on its parent's landed line (jq/upnext.jq).
-      # It keeps its parent's area label, as the follow-up issue does (more), so an area set to Never build holds it too.
-      num=$(tcadd "" "$(futitle "$g")" "$body"$'\n'"Depends on: $1" "$([ -z "$cost" ] || [ -n "$free$rl" ] || echo held)" "Review follow-up of $pn" "$(jq -cn '$ARGS.positional' --args "$FOLLOWUP" ${kind:+"$kind"} ${mark:+"$mark"} ${area:+"$area"})" "$n") \
+      # It has the area label the follow-up issue has (fa), so an area set to Never build holds it too.
+      num=$(tcadd "" "$(futitle "$g")" "$body"$'\n'"Depends on: $1" "$([ -z "$cost" ] || [ -n "$free$rl" ] || echo held)" "Review follow-up of $pn" "$(jq -cn '$ARGS.positional' --args "$FOLLOWUP" ${kind:+"$kind"} ${mark:+"$mark"} ${fa:+"$fa"})" "$n") \
         && printf '%s\t%s\n' "$num" "$f" >> "$fc" && { [ -z "$why" ] || jq -cn --arg f "$f" --arg i "$num" '{finding: $f, issue: $i}' >> "$ofc"; } || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): its card could not be started"; return 1; }
       continue
     fi
-    out=$(gh_write issue create --title "$(futitle "$g")" --label "$FOLLOWUP" ${kind:+--label "$kind"} ${mark:+--label "$mark"} "${more[@]}" --body "$body" 2>&1) && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
+    out=$(gh_write issue create --title "$(futitle "$g")" --label "$FOLLOWUP" ${kind:+--label "$kind"} ${mark:+--label "$mark"} ${fa:+--label "$fa"} "${more[@]}" --body "$body" 2>&1) && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
       || { unfile "$n" "$3" "${nums[@]}"; echo "follow-up not filed, so nothing landed (finding: ${f:0:200}): ${out:0:400}"; return 1; }
     nums+=("$num")
     [ -z "$why" ] || jq -cn --arg f "$f" --argjson i "$num" '{finding: $f, issue: $i}' >> "$ofc" \
@@ -440,14 +440,14 @@ GUARDLESS=' (it names no check found at a file:line of the code that stops the o
 # and one a batch card holds stays as it is. On the self-heals list the same finding of a later card is that entry too,
 # and one found again after it expired takes its line back from HEALSDROPPED; either way the entry is seen now, and
 # the id printed is the entry's own. The finding and the reason are each one line; effect is its kind (self-heals when not given). Prints the
-# entry's id. Callers: judged() (lib/review.sh, from: review), followups() (a finding left at a first card's last
+# entry's id. Its area is that of the file the finding names, else <area> (areapick(), lib/areas.sh). Callers: judged() (lib/review.sh, from: review), followups() (a finding left at a first card's last
 # review) and healssort() (lib/heals.sh, from: sort).
 healsadd() { # <card> <issue> <area | ""> <why> <finding> <review | sort> [<kind>]
   local l id e=${7:-self-heals} f
   [[ $# -le 7 && $2 =~ ^[0-9]+$ && $1 == *[![:space:]]* && $4 == *[![:space:]]* && $5 == *[![:space:]]* && $6 =~ ^(review|sort)$ ]] \
     && jq -e --arg e "$e" 'index($e) != null' <<<"$LISTKINDS" >/dev/null || return 2
   f=$(healsfile "$e")
-  l=$(jq -cn --arg c "$1" --argjson n "$2" --arg a "$3" --arg why "$4" --arg f "$5" --arg from "$6" --arg repo "$REPO" --arg e "$e" \
+  l=$(jq -cn --arg c "$1" --argjson n "$2" --arg a "$(areapick "$5" "$3")" --arg why "$4" --arg f "$5" --arg from "$6" --arg repo "$REPO" --arg e "$e" \
     "$HEALSONE"'
     {card: $c, issue: $n, repo: $repo, area: (if $a == "" then null else $a end), finding: ($f | one), why: ($why | one), effect: $e, from: $from}') \
     && id=$([ "$f" = "$DOCSDRIFT" ] && echo d || echo h)$(jq -j '.card, "\n", .finding' <<<"$l" | git hash-object --stdin | cut -c1-12) && [ ${#id} = 13 ] || return 1

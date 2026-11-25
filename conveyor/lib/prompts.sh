@@ -7,6 +7,7 @@
 # A bash variable cannot hold a NUL byte, so a file with one is refused (JSON never holds one) rather than read short.
 PACK=$MAIN/.conveyor/project.json
 . "$HERE/lib/pack.sh" || exit 1
+. "$HERE/lib/areas.sh" || exit 1 # the pack's path-to-area map (AREAPATHS, which names() reads; areafor(), filearea())
 PACK_OK=()
 packok() { # sets PACK_T and SCHEMA_T to the pack's and the schema's text, and checks it when it is not the kept one
   local a b
@@ -60,7 +61,7 @@ packget() { # <field> <variable> [<field> <variable>]...: sets each variable to 
   for i_ in "${!v_[@]}"; do printf -v "${v_[i_]}" '%s' "${x_[i_]}"; done
 }
 # The pack's names: the remote and branch a card lands on and the loop pushes to (REMOTE, BRANCH), the labels
-# (BUILT, FOLLOWUP, TYPE, PRIOS, AREA, NONPRODUCT), the owner whose yes a visible change needs (OWNER), and what is
+# (BUILT, FOLLOWUP, TYPE, PRIOS, AREA, NONPRODUCT, and AREAPATHS: the path-to-area map, lib/areas.sh), the owner whose yes a visible change needs (OWNER), and what is
 # made of them, of the product paths, of the test files' globs (tests.patterns) and of review.proof: PRODUCT, TESTRX,
 # TESTGLOBS, YES, LINTYES, REVIEW and REVIEWOFF. Read at the start of every
 # command that uses them and again at every turn of the loop, so a pack a card changed counts from the next turn; a
@@ -88,7 +89,7 @@ names() {
   [ "$pj" = "$NAMED_PJ" ] || NAMED=''
   [ -z "$NAMED" ] || return 0
   packget remote REMOTE defaultBranch BRANCH owner.name OWNER labels.built BUILT labels.followup FOLLOWUP labels.type TYPE \
-      labels.areaPrefix AREA labels.priorities PRIOS labels.nonProductAreas NONPRODUCT productPaths p review.proof r tests.patterns t \
+      labels.areaPrefix AREA labels.priorities PRIOS labels.nonProductAreas NONPRODUCT labels.areaPaths AREAPATHS productPaths p review.proof r tests.patterns t \
     && mapfile -d '' -t x < <(jq -nj --argjson t "$t" "$GLOBRX"'input as $p | input as $pk | $p
       | (map(rx) | "^(" + join("|") + ")"), join(", "), ($t | globsrx), ($t | join(", ")), ($pk.tests.patterns | if type == "array" then "1" else "" end)
       | . + "\u0000"' <<<"$p"$'\n'"$PACK_T") \

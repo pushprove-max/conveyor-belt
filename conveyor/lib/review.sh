@@ -627,7 +627,7 @@ guardsaid() { # <worktree>
     && mv -f "$1.judge.said.new" "$1.judge.said"
 }
 # Each finding of the judge's decisions (<the decisions file>, judged()) marked heals is written to the list of its kind
-# (healsadd(), lib/followups.sh), as a finding of <card> and <issue> in <area>. One whose entry cannot be written loses
+# (healsadd(), lib/followups.sh), as a finding of <card> and <issue> in the area of the file it names, else <area>. One whose entry cannot be written loses
 # its mark and its kind, so it stays a finding with no kind (fixed or filed as harm is) and is not lost. Fails only when the file cannot be written again.
 healsput() { # <card> <issue> <area> <the decisions file>
   local n e why f keep=()

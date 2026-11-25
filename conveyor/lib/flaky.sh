@@ -78,8 +78,7 @@ flakyprune() {
 # One issue for a case whose entries come from FLAKY_SOURCES different sources within FLAKY_DAYS days, unless the one
 # filed for it last is open; its state unread files none (it may be open), and the next entry asks again. When that
 # issue is closed, only the entries made after it closed count, and only they are listed (when GitHub says when). An issue
-# GitHub did not take is not kept, so the next entry files it. Its labels: the pack's type, its last priority, the
-# area label <areaPrefix>engine when the pack's nonProductAreas names it, and flaky-test (made when the repo lacks it).
+# GitHub did not take is not kept, so the next entry files it. Its labels: flakylabels() of the case.
 flakyfile() { # <case> <now>, under flaky()'s lock
   local rec n state at='' title body labels out
   # The entries that count: the case's, made within FLAKY_DAYS days of now and after $at (when the last filed issue closed).
@@ -100,16 +99,37 @@ flakyfile() { # <case> <now>, under flaky()'s lock
     + ([counted
         | "- \(.time) \(.source)" + (if .issue != null then ", issue #\(.issue)" else "" end) + (if (.note // "") != "" then ": \(.note)" else "" end)] | join("\n"))
     + "\n\nMake the test reliable, or remove it.\n\nDone when: the case passes alone and in the whole test."' <<<"$rec") || return 1
-  mapfile -t labels < <(flakylabels)
+  mapfile -t labels < <(flakylabels "$1")
   out=$(gh_write issue create --title "$title" "${labels[@]}" --body "$body" 2>&1); n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1); n=${n##*/}
   [ -n "$n" ] || { echo "conveyor: flaky test $1: its issue could not be filed: $out" >&2; return 1; }
   flakyput "$(jq -c --arg c "$1" --argjson n "$n" '.filed = [.filed[] | select(.case != $c)] + [{case: $c, issue: $n}]' <<<"$rec")"
 }
-# The labels of a flaky issue, as gh's arguments, one a line: the pack's type, its last priority, the area label
-# <areaPrefix>engine when the pack's nonProductAreas names it, and flaky-test (made here when the repo lacks it).
-flakylabels() {
+# The test file a case counts for, for the area label of its issue (filearea(), lib/areas.sh; flakylabels(); fullfix(),
+# lib/fulltest.sh): of a case named alone (the full test names one as `apicodex`, as its runner reports it), or of
+# `<file>: <case>` whose <file> does not define the case (a runner, as `conveyor/conveyor.test.sh: slotcaseterm`, runs
+# cases another file defines), the file of main's test files that defines it (testowners(), lib/testfiles.sh): one
+# <file> names, else the first; else <file>, else the name itself (a whole file, or a case no file defines). defs and
+# refs go to jq on its input: on a large project they are over the limit of one argument (128 KiB on Linux).
+casefile() { # <case>
+  local defs refs f='' file='' c=$1
+  [[ $1 != *': '* ]] || { file=${1%%: *}; c=${1#*: }; }
+  if [[ $c =~ ^[A-Za-z0-9_]+$ ]]; then
+    testowners
+    f=$(printf '%s\n%s\n' "$defs" "$refs" | jq -rn --arg f "$file" --arg c "$c" '[inputs] as [$d, $r] | ($d[$c] // []) as $o
+      | if any($o[]; . == $f) then $f else first($o[] | select(. as $o1 | any($r[$f][]?; . == ($o1 | split("/")[-1])))) // $o[0] // empty end' 2>/dev/null) || f=''
+  fi
+  printf '%s\n' "${f:-${file:-$1}}"
+}
+# The labels of a flaky issue, as gh's arguments, one a line: the pack's type, its last priority, the area label of
+# <case>'s test file (casefile(): the file that defines the case, else the file <case> names, else <case>) from
+# the pack's path-to-area map (filearea(), lib/areas.sh), or with no map <areaPrefix>engine when
+# the pack's nonProductAreas names it, and flaky-test (made here when the repo lacks it).
+flakylabels() { # <case>
+  local a
   printf '%s\n' --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")"
-  ! jq -e --arg a "${AREA}engine" 'index($a)' <<<"$NONPRODUCT" >/dev/null || printf '%s\n' --label "${AREA}engine"
+  a=$(filearea "" "$(casefile "$1")") || a=''
+  if [ -n "$a" ]; then printf '%s\n' --label "$a"
+  elif jq -e --arg a "${AREA}engine" 'index($a)' <<<"$NONPRODUCT" >/dev/null; then printf '%s\n' --label "${AREA}engine"; fi
   printf '%s\n' --label "$FLAKY_LABEL"
   gh_write label create -- "$FLAKY_LABEL" >/dev/null 2>&1 # it fails when the label is there already
 }
@@ -164,7 +184,7 @@ flakypush() { # <the commit pushed> <the hook's output> <test file>...
   done
   if [ ${#new[@]} != 0 ]; then
     names >/dev/null 2>&1 || :
-    mapfile -t labels < <(flakylabels)
+    mapfile -t labels < <(flakylabels "${new[0]}") # the area of its first file
     q=''; [ -z "$lines" ] || q=$'\nThe lines of the hook that name them:\n```\n'"$lines"$'\n```\n'
     out=$(gh_write issue create --title "$(printf 'Flaky test: %s failed in the pre-push hook and passed alone' "$(printf '%s, ' "${new[@]}" | sed 's/, $//')" | cut -c1-200)" "${labels[@]}" \
       --body "The pre-push hook failed at ${sha:0:12} naming the test files below. Each passed when run alone, once, on the same commit, so the push went on without the hook.

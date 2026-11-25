@@ -20,6 +20,18 @@ Some pack settings that this site names:
   approval of a visible change ([Board](board.md#needs-you)). Conveyor does not take screenshots.
 - `pipelineFiles`: the files that change how cards are built, reviewed, fixed, tested, landed or pushed. A follow-up
   that changes one is filed held.
+- `labels.areaPaths`: the path-to-area map. `paths` gives the area label of each path from the top of your checkout. A
+  path that ends in `/` is a folder and names each file under it. When two paths name a file, the longer one wins.
+  `other` is the area label of each file that no path names. For example: `{"paths": {"src/": "area:app", "docs/":
+  "area:docs"}, "other": "area:tooling"}`. An entry of the self-heals list or the docs list gets the area of the file
+  that its finding names. When the finding names no file, the entry gets the area label of its issue, or no area. Each
+  issue or card that Conveyor files gets an area label. A follow-up or a split part gets the area of its parent. When
+  the parent has none, and for the other filings, it gets the area of the file that it names, else `other`. With no
+  map, an entry gets the area label of its issue, or no area. A follow-up or a split part gets the area label of its
+  parent, a flaky-test issue gets `<areaPrefix>engine` when `nonProductAreas` names it, and the other filings get no area label.
+  `conveyor.sh doctor` says when the map is not set. After you add the map, run `conveyor.sh heals areas` one time
+  ([Commands](commands.md)): it makes the map's labels on GitHub and gives an area to the entries and open issues
+  that have none. An area label that `nonProductAreas` does not name makes an issue product work.
 - `plugin`: the engine the project runs. When the project follows the plugin's releases or `main` and takes a new
   commit, the loop restarts on that commit unless it can read which files the commit changes and none of them is
   engine code. Engine code is each file that the loop or its cards run or read from the engine: the files under

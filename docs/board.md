@@ -1380,7 +1380,8 @@ the list is for.
 - **By area**: a card for each area, with the area's group and name, its count, and an age bar in three parts of the
   days. The legend gives each part's days. A screen reader reads the count of each part. The card also shows the
   kinds of its entries with their counts, "Ready to batch" at 10 entries or more, else "N more to batch", and
-  **Review batch**, which opens the batch sheet for the area.
+  **Review batch**, which opens the batch sheet for the area. An entry has the area of the file that its finding names
+  ([Harm or self-heals](cards.md#harm-or-self-heals)). The **No area** card shows only when an entry has no area.
 - **Entries**: a search (finding, file or card), **Sort** (**Leaves soonest**, **Newest**, **Seen most**, **Area**)
   and a filter chip for each kind with its count: **Waits longer**, **Runs again**, **Text fixes itself**, **Extra
   work only**, **Docs or comment**, **Cleanup** and **Already guarded**. **All** shows the entries of every kind, in the tile filter when a tile is pressed. Each row shows the

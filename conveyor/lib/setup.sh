@@ -1322,6 +1322,7 @@ doctor() {
     return 1
   fi
   ok "the pack $PACK"
+  areadoctor "$PACK" # a warning when it has no path-to-area map (lib/areas.sh)
   # The pack's test-file globs: they must find the project's tests (testcheck()).
   testcheck || bad=1
   # Each of the pack's lint commands, tried once (lintdoctor(), lib/lint.sh): nothing when the pack has no lint field.

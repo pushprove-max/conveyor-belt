@@ -181,11 +181,15 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
 # they cannot be placed, prints why and fails, the ones filed before it withdrawn (the reason names each whose close
 # failed: it may still be open).
 splitfile() { # <card> <issue json> <slices json> <1: the slices take the parent's place in the pick order; 0: not>
-  local n k i out num nums=() more=() body held w
+  local n k i out num nums=() more=() body held w pa sa t
   n=$(jq -r .number <<<"$2") && k=$(jq length <<<"$3") || { echo "the slices could not be read"; return 1; }
   mapfile -t more < <(jq -r --arg a "$AREA" --arg t "$TYPE" --argjson p "$PRIOS" '(.labels // [] | map(.name)
       | map(select(($a != "" and startswith($a)) or . == $t or IN($p[]))) | unique[] | "--label", .), (.milestone.title // empty | "--milestone", .)' <<<"$2")
+  pa=$(jq -r --arg a "$AREA" '.labels // [] | map(.name | select(startswith($a))) | .[0] // empty' <<<"$2")
   for ((i = 0; i < k; i++)); do
+    # A parent with no area label: each slice has the area of the first file it builds again, else of the file its body
+    # names, else the map's other (filearea(), lib/areas.sh).
+    sa='' t=$(jq -r --argjson i "$i" '.[$i].files[0]? // empty' <<<"$3")
     body=$(jq -r --argjson i "$i" --argjson k "$k" --arg c "$1" --arg area "$AREA" --argjson sl "$3" --argjson nums "$(jq -cn '$ARGS.positional | map(tonumber)' --args "${nums[@]}")" \
       '. as $iss | ('"$SPLITSIZE"' | .doneWhen) as $dw | $iss | .number as $n | $sl[$i] as $s
       | if $s.files == null then
@@ -198,7 +202,8 @@ splitfile() { # <card> <issue json> <slices json> <1: the slices take the parent
           + "\n\nDepends on: #\($n)" + ($s.dependsOn | map("\nDepends on: #\($nums[. - 1])") | join(""))
         end
         + "\n\n## Done when\n" + ($s.doneWhen | map("- " + .) | join("\n"))' <<<"$2") \
-      && out=$(gh_write issue create --title "$(jq -r --argjson i "$i" '.[$i].title' <<<"$3")" --label "$FOLLOWUP" "${more[@]}" --body "$body" 2>&1) \
+      && { [ -n "$pa" ] || sa=$(filearea "" "${t:-$body}") || sa=''; } \
+      && out=$(gh_write issue create --title "$(jq -r --argjson i "$i" '.[$i].title' <<<"$3")" --label "$FOLLOWUP" "${more[@]}" ${sa:+--label "$sa"} --body "$body" 2>&1) \
       && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
       || { w=$(splitwithdraw "$n" "${nums[@]}") || w="; Conveyor could not confirm that GitHub closed the slices filed before it ($w): they may still be open"
            echo "slice $((i + 1)) was not filed: ${out:0:300}$w"; return 1; }

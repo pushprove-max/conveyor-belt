@@ -445,7 +445,7 @@ fullcause() { # <commit> <testfails() of the run> <unit>
 # The fix card of a case: the issue filed last for it while it is open (a comment of <body>), else a new one. Prints
 # {issue, reused, why}.
 fullfix() { # <case> <body>
-  local n state out prio
+  local n state out prio a
   n=$(jq -rs --arg c "$1" '[.[] | .cases[]? | select(.case == $c and (.issue | type) == "number") | .issue] | last // empty' "$FULLTEST" 2>/dev/null)
   if [ -n "$n" ]; then
     state=$(timeout 20 gh issue view "$n" --json state 2>/dev/null | jq -r '.state // ""' 2>/dev/null) || state=''
@@ -460,7 +460,8 @@ $2" >/dev/null 2>&1; then jq -cn --argjson n "$n" '{issue: $n, reused: true}'
     esac
   fi
   prio=$(jq -r '.[[1, length - 1] | min]' <<<"$PRIOS")
-  out=$(gh_write issue create --title "$(jq -rn --arg c "$1" '"Full test suite fails: " + $c | .[0:200]')" --label "$TYPE" --label "$prio" --body "$2" 2>&1) \
+  a=$(filearea "" "$(casefile "$1")") || a='' # the area label of the case's test file (casefile(), lib/flaky.sh; lib/areas.sh)
+  out=$(gh_write issue create --title "$(jq -rn --arg c "$1" '"Full test suite fails: " + $c | .[0:200]')" --label "$TYPE" --label "$prio" ${a:+--label "$a"} --body "$2" 2>&1) \
     && n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && n=${n##*/} && [ -n "$n" ] \
     || { jq -cn --arg r "${out:0:300}" '{issue: null, reused: false, why: ("its issue could not be filed: " + $r)}'; return; }
   jq -cn --argjson n "$n" '{issue: $n, reused: false}'

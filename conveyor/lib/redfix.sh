@@ -35,11 +35,15 @@ REDTITLE='def redtitle: ((if .push then "Push blocked: \(.push.check) fails on m
   else "Main is red: " + ([.cases[].case] | join(", ")) end)[0:200]);'
 # What stands in for the issue of a main-red fix card (card()), from its entry as it is now (mainred()): the title
 # "Main is red: <cases>", and a body naming main's commit, each case with the last commit that changed its files (and
-# the landing that broke it, when known), and what to do. Labelled as the P0 issue it stands in for was (labels.type and the first priority), so it is held to the bug-card check.
+# the landing that broke it, when known), and what to do. Labelled as the P0 issue it stands in for was (labels.type and the first priority), so it is held to the bug-card check,
+# and with the area label of its first case's file (filearea(), lib/areas.sh: a push block with no case, the map's other; none with no map).
 # A push block's entry (pushred()) is titled by REDTITLE; its body names the check, the landing, the push's log and error.
 redissue() { # <card>
-  jq -ce --arg c "$1" --arg t "$TYPE" --argjson p "$PRIOS" "$REDTITLE"'.reds[]? | select(.card == $c)
-    | {number: 0, title: redtitle, milestone: null, labels: [{name: $t}, {name: $p[0]}],
+  local a
+  a=$(jq -r --arg c "$1" '[.reds[]? | select(.card == $c) | .cases[]? | .files[0] // empty] | first // ""' "$MAINRED" 2>/dev/null) || a=''
+  a=$(filearea "" "$a") || a=''
+  jq -ce --arg c "$1" --arg t "$TYPE" --argjson p "$PRIOS" --arg a "$a" "$REDTITLE"'.reds[]? | select(.card == $c)
+    | {number: 0, title: redtitle, milestone: null, labels: ([{name: $t}, {name: $p[0]}] + if $a == "" then [] else [{name: $a}] end),
        body: ((if .push == null then "" else "The push of main at \(.sha[0:12]) failed its check \(.push.check): the pre-push hook refused it, and it fails the same way on each try at that commit, so no landed card is pushed until a fix lands on main. The push was for card \(.push.card)\(if .push.issue > 0 then " (#\(.push.issue))" else "" end)."
            + (if .push.log then " The push'"'"'s whole output is in \(.push.log)." else "" end)
            + (if .push.reason then "\n\nThe end of its output:\n\n```\n\(.push.reason)\n```" else "" end)

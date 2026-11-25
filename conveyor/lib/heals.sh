@@ -120,12 +120,14 @@ healsbatch() { # <area | -> [docs] [--held | --queue] [--prio P2|P3] [--title <t
     body+=$'\n\n## Findings\n'$(jq -r 'map("- \(.finding)\n  - Kind: \(.effect // "self-heals"). From: card \(.card), issue #\(.issue). The judge: \(.why) (list entry \(.id))") | join("\n")' <<<"$es")
     if [ -z "$lvl" ]; then prio=$(jq -r '.[-1] // empty' <<<"$PRIOS")
     else prio=$(jq -r --argjson i "$lvl" 'if $i == 3 and length < 4 then "" else .[[$i, length - 1] | min] // "" end' <<<"$PRIOS"); fi
+    # Its area label: the area's, else (a batch of no area) that of the file its first finding names, else the map's other (lib/areas.sh).
+    la=$(filearea "$a" "$(jq -r '.[0].finding' <<<"$es")") || la=$a
     if [ "$noissue" = 1 ]; then
-      num=$(tcput "" "$title" "$body" "$held" "$kind: ${a:-no area}" "$(jq -cn '$ARGS.positional' --args ${t:+"$t"} ${prio:+"$prio"} ${a:+"$a"})") || exit 1
+      num=$(tcput "" "$title" "$body" "$held" "$kind: ${a:-no area}" "$(jq -cn '$ARGS.positional' --args ${t:+"$t"} ${prio:+"$prio"} ${la:+"$la"})") || exit 1
     else
       pm=''; packget privacy.mode pm || { echo "conveyor: the pack's privacy mode could not be read; nothing filed" >&2; exit 1; }
       [ "$pm" != public ] || body=$(privmask "$body") || { echo "conveyor: the privacy check could not be made; nothing filed" >&2; exit 1; }
-      out=$(gh_write issue create --title "$title" ${t:+--label "$t"} ${prio:+--label "$prio"} ${a:+--label "$a"} ${held:+--label "$BUILT"} --body "$body" 2>&1) \
+      out=$(gh_write issue create --title "$title" ${t:+--label "$t"} ${prio:+--label "$prio"} ${la:+--label "$la"} ${held:+--label "$BUILT"} --body "$body" 2>&1) \
         && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] || { echo "conveyor: the $kind card was not filed: ${out:0:400}" >&2; exit 1; }
       [ -z "$held" ] || hold+=("$num"); [ -z "$queued" ] || queue+=("$num")
     fi
