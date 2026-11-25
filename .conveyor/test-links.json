@@ -961,7 +961,8 @@
     ".claude/scripts/__tests__/dashboard-local.test.sh"
   ],
   "conveyor/lib/needsask.sh": [
-    ".claude/scripts/__tests__/dashboard-local.test.sh"
+    ".claude/scripts/__tests__/dashboard-local.test.sh",
+    "conveyor/tests/narrow.test.sh"
   ],
   "conveyor/lib/standing.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh",
@@ -984,5 +985,8 @@
   ],
   "conveyor/tests/healsact.test.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh"
+  ],
+  "conveyor/tests/needsreleased.test.sh": [
+    "conveyor/tests/narrow.test.sh"
   ]
 }
