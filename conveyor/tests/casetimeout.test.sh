@@ -66,8 +66,9 @@ t_keep_one() {
 # notes whether the keeper's guard still runs after it ($T/guard.live), and then waits on a subshell of the keeper's
 # own that ignores TERM and never ends (it waits on a FIFO, where the one seen spun: KILL alone ends either; its pid in
 # $T/hold.pid). The worker that ran run_case wrote its pid (worker.pid) and, ended, its exit status (worker.rc). The
-# keeper's end, which starts just after the keeper's guard, and the worker's end note the clock in microseconds
-# (end.from, worker.end): keepdeadline reads the two.
+# keeper's end, which starts just after the keeper's guard, the guard's act (its `kill -STOP` of the keeper, just
+# after its sleep and its notice) and the worker's end note the clock in microseconds (end.from, guard.act,
+# worker.end): keepdeadline reads the three.
 keepstuck() {
   local d=$1
   mkdir -p "$d/in" && mkfifo "$d/in/hold" || fail "the fixture could not be made"
@@ -77,16 +78,23 @@ keepstuck() {
       source <(declare -f case_end | sed '1s/^case_end /case_end_real /')
       case_end() { echo "${EPOCHREALTIME/[.,]/}" > "$T/end.from"; case_end_real "$@"; ps -o stat= -p "${guard:-0}" | grep -qv '^Z' && : > "$T/guard.live"
         : "$(trap '' TERM; echo "$BASHPID" > "$T/hold.pid"; read -r <> "$T/hold")"; }
+      # The first STOP is the guard's of the keeper; wait_end's of each of its subshells come after it.
+      kill() { [ "$1" != -STOP ] || [ -e "$T/guard.act" ] || echo "${EPOCHREALTIME/[.,]/}" > "$T/guard.act"; builtin kill "$@"; }
       run_case ) > "$d/report" 2>&1; r=$?; echo "${EPOCHREALTIME/[.,]/}" > "$d/in/worker.end"; echo $r > "$d/in/worker.rc" ) &
 }
-# keepdeadline <dir>: fails unless keepstuck's worker ended at the keeper's deadline, its 1 s limit and 3 s grace from
-# the keeper's end: not before 3.8 s (the guard's sleep starts just before that end is noted), and within 4 s and
-# 900 ms times the load factor for the kills (a few ps and kill calls). A guard that slept 5 s, while its notice still
-# named 4 s, ends the worker past 4.9 s at load factor 1, so it fails here; the notice is checked apart.
+# keepdeadline <dir>: fails unless keepstuck's keeper's guard acted at its deadline, its 1 s limit and 3 s grace from
+# the keeper's end, and the worker ended soon after. The guard's act is from 3.8 s (its sleep starts just before that
+# end is noted) and under 4.5 s, whatever the load factor: keepstuck fixes the guard's deadline at 4 s, so a guard
+# that slept 5 s (its notice still naming 4 s, checked apart) acts past 4.9 s on any machine. Only one ps call is
+# between its sleep and its act, so 500 ms is room enough; the kills after it are what a busy machine makes slow, so
+# the worker's end has 4 s and 900 ms times the load factor.
 keepdeadline() {
-  local from to ms lim
-  from=$(cat "$1/in/end.from" 2>/dev/null) && to=$(cat "$1/in/worker.end" 2>/dev/null) && [ -n "$from" ] && [ -n "$to" ] \
-    || fail "the keeper's end or the worker's end noted no time: $(cat "$1/report")"
+  local from act to ms lim
+  from=$(cat "$1/in/end.from" 2>/dev/null) && act=$(cat "$1/in/guard.act" 2>/dev/null) && to=$(cat "$1/in/worker.end" 2>/dev/null) \
+    && [ -n "$from" ] && [ -n "$act" ] && [ -n "$to" ] || fail "the keeper's end, the guard's act or the worker's end noted no time: $(cat "$1/report")"
+  ms=$(((act - from) / 1000))
+  [ "$ms" -ge 3800 ] && [ "$ms" -lt 4500 ] \
+    || fail "the keeper's guard acted $ms ms after the keeper's end, not at its 4 s deadline (from 3800 ms, under 4500 ms at any load factor): $(cat "$1/report")"
   ms=$(((to - from) / 1000)); lim=$(awk -v f="$CASE_LOAD" 'BEGIN { print int(4000 + 900 * f) }')
   [ "$ms" -ge 3800 ] && [ "$ms" -lt "$lim" ] \
     || fail "the worker ended $ms ms after the keeper's end, not at the keeper's 4 s deadline (from 3800 ms, under $lim ms: 4 s and 900 ms times the load factor $CASE_LOAD): $(cat "$1/report")"
