@@ -1298,7 +1298,8 @@ control() { # [action [arguments]]
     # released it <time>"), and each issue named when CONVEYOR_UNLABELED is set: the Board's "Remove the label and
     # queue it" took the label that held it off first, so the record need not have held it. The engine's own
     # (CONVEYOR_RELEASEBY names it: a retry not by the owner, a follow-up, a closed umbrella, a decision's answer)
-    # dates none, as it is no act of the owner.
+    # dates none, as it is no act of the owner. Each hold it drops, the owner's or the engine's, has a line in HOLDLOG
+    # that names who (ctlput()).
     release) [ $# != 0 ] && nums "$@" || { bad; return; }
       f='.held -= ($v | map(tonumber)) | .startSeen = (.startSeen + ($v | map(tonumber)) | unique)'
       [ -n "${CONVEYOR_RELEASEBY:-}" ] || f='((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate) as $t | .held as $h
@@ -1447,7 +1448,8 @@ control() { # [action [arguments]]
   [ -z "$open" ] || { new=$(jq -c --argjson o "$open" --argjson c "$c" '(if $c.start != .start then .startHeld[-1] else {from: 0, to: 0} end) as $s
     | ([$o[].number | select((. > $s.from and . <= $s.to) or ($c.filing != null and . > $c.filing))] - .startSeen) as $h
     | .held = (.held + $h | unique) | .startSeen = (.startSeen + $h | unique)' <<<"$new") && [ -n "$new" ]; } || return 1
-  ctlput "$c" "$new" || return 1
+  # A hold this drops is logged as the release's (holdlog): CONVEYOR_RELEASEBY's, else the owner's.
+  ctlput "$c" "$new" "$([ "$a" = release ] && echo "${CONVEYOR_RELEASEBY:-owner}" || echo "control $a")" || return 1
   # A release of an issue the record's held does not list changes nothing there: it is held for another reason, or not
   # held. Say so on stderr (exit 0 stays), so the one who ran it does not take the issue for released. The Board's
   # release after it took the label off (CONVEYOR_UNLABELED) changed the label and released, so it says nothing.
@@ -1552,9 +1554,24 @@ depends() ( # <issue> <add|remove> <issue>...
   if [ "$how" = add ]; then echo "conveyor: #$n now waits on $(printf '#%s, ' "$@" | sed 's/, $//')"
   else echo "conveyor: #$n no longer depends on $(printf '#%s, ' "$@" | sed 's/, $//')"; fi
 )
-ctlput() { # <the record as read> <the new record>: written only when it changed
-  [ "$2" = "$1" ] || { printf '%s\n' "$2" > "$CONTROL.new" && mv -f "$CONTROL.new" "$CONTROL"; } \
+# Each issue the record on disk holds that the new record does not is logged as dropped, with who or what dropped it
+# (holdlog): <by>, else the function that called ctlput. The record on disk, not <the record as read>: a writer whose
+# copy is older than the file drops the holds added since too, and that drop is logged as well (#1676: the owner's
+# holds left `held` with no trace of who released them).
+ctlput() { # <the record as read> <the new record> [<who or what drops a hold>]: written only when it changed
+  local d
+  [ "$2" != "$1" ] || return 0
+  d=$(jq -cn --slurpfile o "$CONTROL" --argjson n "$2" '[($o[0].held // []) - ($n.held // []) | .[] | numbers]' 2>/dev/null) \
+    || d=$(jq -cn --argjson o "$1" --argjson n "$2" '[($o.held // []) - ($n.held // []) | .[] | numbers]' 2>/dev/null) || d='[]'
+  { printf '%s\n' "$2" > "$CONTROL.new" && mv -f "$CONTROL.new" "$CONTROL"; } \
     || { echo "conveyor: cannot write $CONTROL; the control record is unchanged" >&2; return 1; }
+  [ "$d" = '[]' ] || holdlog "$d" "${3:-${FUNCNAME[1]:-the engine}}"
+}
+# Appends a line to HOLDLOG for each issue in <issues> (a JSON list): {at, issue, by}. One it cannot write is said on
+# stderr; the record is written already, so it does not fail.
+holdlog() { # <issues json> <by>
+  jq -cn --argjson d "$1" --arg by "$2" --arg t "$(clock)" '$d[] | {at: $t, issue: ., by: $by}' >> "$HOLDLOG" \
+    || echo "conveyor: cannot write $HOLDLOG; the hold of $(jq -r 'map("#\(.)") | join(", ")' <<<"$1") was dropped by $2 with no line there" >&2
 }
 # Now, as the health record has it (CONVEYOR_NOW when set).
 clock() { jq -rn '(($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate'; }

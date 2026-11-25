@@ -194,6 +194,22 @@ t_filedolder() {
     && jq -e '.hookSpecificOutput.additionalContext | test("opened before this filing.*\\(r: 4\\)")' <<<"$out" >/dev/null \
     || fail "filed with output '$o' (#4 opened in the queue before the filing) did not tell the Foreman #4 was opened before it: $out"
 }
+# #1676: the owner's holds left `held` just after the Foreman edited those issues' bodies. A body edit through `gh api`
+# whose text has a backtick reads as a command that may file an issue (files.jq), so both filing hooks run on it, and
+# filed adopts the issue gh's output links. Bug caught: a body edit, through those hooks, drops the owner's hold of the
+# issue edited. The body changes, #4 stays held, and no hold is logged as dropped.
+t_filededit() {
+  local body='The output of `foreman status` names it.'
+  filedsetup
+  loop control hold 4 >/dev/null || fail "control hold 4 failed"
+  cmd="gh api repos/o/r/issues/4 -X PATCH -f body=\"$body\""
+  out=$(hook filing "$cmd"); [ -z "$out" ] && [ "$(jq -r .start "$C")" = held ] || fail "the filing hook did not run on the body edit (command: $cmd): $out $(cat "$C")"
+  o=$(gh api repos/o/r/issues/4 -X PATCH -f body="$body") || fail "the stub did not edit #4"
+  out=$(hook filed "$cmd" "$o"$'\n')
+  [ "$(gh issue view 4 | jq -r .body)" = "$body" ] || fail "the body of #4 was not edited: $(gh issue view 4)"
+  [ "$(jq -c '[.start, .held]' "$C")" = '["queue",[4]]' ] || fail "after the filing hooks of the body edit of the held #4 (command: $cmd), #4 is not held alone: $(cat "$C") $out"
+  [ ! -e "$ST/holds-dropped.jsonl" ] || fail "the body edit of #4 (command: $cmd) logged a dropped hold: $(cat "$ST/holds-dropped.jsonl")"
+}
 # Bug (issue 1333): the filing hooks sent the running loop nothing, so an issue filed and released already (the
 # owner's yes given before filed ran, as in t_filedlink) was picked only once the loop's idle timer (here 100 s)
 # ended. GitHub lists the issue only once the command has ended (the stub's list-filed), after the release, so here

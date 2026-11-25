@@ -44,6 +44,10 @@ case $2 in
   # gh api .../issues/<p>/sub_issues -F sub_issue_id=<id>: "<p> <part>" added to $STUB/subs (the part's id is
   # 6488700000 + its number, as gh api graphql's fullDatabaseId gives it, above).
   repos/*/sub_issues) p=${2%/sub_issues}; p=${p##*/}; for a; do [[ $a != sub_issue_id=* ]] || echo "$p $((${a#*=} - 6488700000))" >> "$STUB/subs"; done ;;
+  # gh api repos/<o>/<r>/issues/<n> -X PATCH -f body=<text>: the issue's body in $STUB/issues.json is that text, and gh
+  # prints the issue, its html_url among its fields (a path below the issue, as .../comments, does nothing here).
+  repos/*/issues/[0-9]*) n=${2##*/issues/}; [[ $n =~ ^[0-9]+$ ]] || exit 0; for a; do [[ $a != body=* ]] || { jq -c --argjson n "$n" --arg b "${a#body=}" 'map(if .number == $n then .body = $b else . end)' "$STUB/issues.json" > "$STUB/issues.new" && mv -f "$STUB/issues.new" "$STUB/issues.json"; }; done
+    echo "{\"number\":$n,\"html_url\":\"https://github.com/o/r/issues/$n\"}" ;;
   # gh auth token: the token gh holds, read without the network (none, with gh's error text, with $STUB/signed-out;
   # timed out, exit 124 as `timeout` gives, with $STUB/token-timeout; an empty token with $STUB/token-empty). gh auth status: the
   # network check, which fails with $STUB/signed-out, and times out (as a GitHub that does not answer) with $STUB/unreached.

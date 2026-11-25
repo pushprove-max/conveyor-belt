@@ -118,7 +118,9 @@ see only that project. It shows:
   on the Board, or with `control release`, also shows when: `#7 (waits for your yes; you released it
   2026-11-24T10:15:00Z)`. An issue you released that is now in the queue shows on its own line:
   `released by you: #9 at 2026-11-24T10:15:00Z`. The Foreman does not hold such an issue again. When auto gives
-  that answer, the release does not show as yours.
+  that answer, the release does not show as yours. To see who or what took a hold off, look in
+  `<state folder>/holds-dropped.jsonl`: each line gives the time, the issue and who or what took the hold off
+  (`owner` for your release).
 - the release or full-test run in progress: its commit, how long it has run, the cases done of all its cases, and the
   failed cases. With no run in progress, it shows how the last run ended.
 - each item that needs you, one a line: a blocked card with its reason, a change that waits for your yes, a push

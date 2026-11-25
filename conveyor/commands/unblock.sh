@@ -20,7 +20,7 @@
 unheld() { # <issue> <entry> <its released time as JSON, null for none>
   local c new
   c=$(ctl) && new=$(jq -ce --argjson n "$1" --argjson r "$3" '.held -= [$n] | if $r == null then . else .released["\($n)"] = $r end' <<<"$c") \
-    && ctlput "$c" "$new" && movedundo "$1" "$2"
+    && ctlput "$c" "$new" "unblock: its retry was refused" && movedundo "$1" "$2"
 }
 unblock() { # <issue>
   local was m r

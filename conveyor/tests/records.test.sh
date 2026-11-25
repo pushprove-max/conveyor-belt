@@ -137,6 +137,9 @@ t_unblockhold() {
   loop unblock 9 --hold >/dev/null 2>&1 && fail "unblock of #9, which has no card, exited 0"
   loop control hold 8 >/dev/null; loop unblock 8 --hold >/dev/null 2>&1
   [ "$(jq -c .held "$S/control.json")" = '[7,8]' ] || fail "a refused unblock changed the holds: $(jq -c .held "$S/control.json")"
+  # #1676: the hold a refused `unblock 9 --hold` takes back is a dropped hold, logged as unblock's, not the owner's.
+  [ "$(jq -sc 'map({issue, by})' "$S/holds-dropped.jsonl" 2>&1)" = '[{"issue":9,"by":"unblock: its retry was refused"}]' ] \
+    || fail "unblock 9 --hold, refused, did not log its hold of #9 dropped by unblock: $(cat "$S/holds-dropped.jsonl" 2>&1)"
   # Released, its next card resumes from the kept patch: the pick takes #7, and card() runs to its worktree step,
   # which applies the patch; its deps step, the next one, notes what is staged there and stops the card.
   loop control release 7 8 >/dev/null

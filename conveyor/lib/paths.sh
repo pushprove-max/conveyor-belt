@@ -138,6 +138,9 @@ REPLAYS=${STATE%/*}/replays.jsonl # each judge replay study the owner ran: its r
 QUARANTINE=${STATE%/*}/quarantined.jsonl
 READ=$STATE; READ_OLD=$RETRIED          # what the readers read: these two files, or the snapshot's one copy of each
 CONTROL=${STATE%/*}/control.json  # the control record; the snapshot reads its own copy of this too
+# Each hold of the control record dropped, one line each: {at, issue, by: who or what dropped it} (ctlput(), lib/control.sh).
+# shellcheck disable=SC2034 # read by lib/control.sh, which conveyor.sh sources beside this file
+HOLDLOG=${STATE%/*}/holds-dropped.jsonl
 # What the running loop makes of the control record: {pid, started (p_started: with pid, it names the loop's
 # process; watch.py tells by it whether the loop runs), state, reason, commit (RAN: the commit it started on, null
 # when none is known), checkout (the folder its script runs from when that is a checkout, else null)}, written when it changes. The loop
