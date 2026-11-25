@@ -375,6 +375,10 @@ t_setupfresh() {
     || fail "setup on a machine with no host file exited non-zero: $out"
   jq -e --arg m "$S" '.records == [{repo: "sample", main: $m}] and (has("terms") | not)' "$XDG_CONFIG_HOME/conveyor/host.json" >/dev/null && [ -s "$S/.conveyor/project.json" ] \
     || fail "setup did not write the host file with the project as its record, and the pack: $(cat "$XDG_CONFIG_HOME/conveyor/host.json" 2>&1)"
+  # The owner's path-to-area map (labels.areaPaths), which setup does not write: with none, doctor warns of it
+  # (areadoctor(), lib/areas.sh; t_areadoctor's), and with it any other new line below still fails the case.
+  jq '.labels.areaPaths = {paths: {"src/": "area:product"}, other: "area:engine"}' "$S/.conveyor/project.json" > "$T/$CASE/pack.json" \
+    && mv "$T/$CASE/pack.json" "$S/.conveyor/project.json" || fail "the pack's labels.areaPaths could not be set"
   # The Board started after setup (as setup asks the owner to), so doctor has no warning that it is not running.
   boardup; out=$(cd "$S" && PATH=$T/$CASE/board:$PATH CONVEYOR_DASHBOARD_PORT=8791 bash "$X" doctor 2>&1) || fail "doctor failed after setup with no terms file: $out"
   # Besides ok: lines, doctor prints only each seat's route (builder:, reviewer:) and the progress line of each seat's

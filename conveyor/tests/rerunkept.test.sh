@@ -115,18 +115,19 @@ t_rerunrebuilt() {
     || fail "the test line does not say why each file ran: $(cat "$T/$CASE/cards/c7.testrec")"
 }
 
-# A retried card: #7 fails b.test's case flaky through its fix and blocks, a.test and c.test passed. `retry` starts
+# A retried card: #7 fails b.test's case flaky through its TESTFIXES (3) fix rounds and blocks (runs 1 to 8: four test
+# steps, each failed run run once more), a.test and c.test passed. `retry` starts
 # the next card from its kept patch (its session leaves it as it was); its run keeps those passes (block() keeps the
 # list with the patch) and runs flaky alone, on a main moved since by a commit that changes only z.txt, which none of
 # its tests selects: it is told what main changed, z.txt, and of no change of its own. (Main moving by a file a test
 # selects: t_rerunrebuilt; told of nothing on the main it was tested on: t_rerunsame, as tests() decides it.)
 t_rerunretry() {
-  rerunsetup '1 fail flaky' '2 fail flaky' '3 fail flaky' '4 fail flaky'; rerunfiles
-  for i in 4 5; do echo "$GO" > "$STUB/review.$i"; done
+  rerunsetup '1 fail flaky' '2 fail flaky' '3 fail flaky' '4 fail flaky' '5 fail flaky' '6 fail flaky' '7 fail flaky' '8 fail flaky'; rerunfiles
+  for i in 4 5 6 7; do echo "$GO" > "$STUB/review.$i"; done
   echo 'grep -qx two a.txt || echo two >> a.txt' > "$STUB/build"
   # loop: the block is a card's whole path through its test runs and fix, whose passes block() keeps with the patch
   loop run 1 > /dev/null || fail "run exited non-zero"
-  [ "$(st 'select(.step == "blocked") | .issue')" = 7 ] && [ "$(ran 4)" = flaky ] || fail "#7 did not block after failing flaky through its fix: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "blocked") | .issue')" = 7 ] && [ "$(ran 8)" = flaky ] || fail "#7 did not block after failing flaky through its 3 fix rounds: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
   echo z > "$R/z.txt"; git -C "$R" add z.txt; git -C "$R" commit -qm "main moves"
   loop retry 7 > /dev/null || fail "the retry of #7 exited non-zero"
   # The next card's resume (its build stub leaves the kept patch as it was), then its test step (tests(),
@@ -134,9 +135,9 @@ t_rerunretry() {
   resumed 7 'tests "$wt" > /dev/null 2>&1; echo $? > "$T/$CASE/testrc"'
   [ "$(jq -c '[.rc, .mode, .staged, (.beside | index("rerun") != null)]' <<<"$RESUMED")" = '[0,"session",["a.txt"],true]' ] \
     || fail "the retried card did not resume from its kept patch with the list of what its tests passed: $RESUMED"
-  [ "$(ran 5)" = flaky ] && [ "$(cat "$T/$CASE/testrc")" = 0 ] \
-    || fail "the retried card did not keep the passes of its last run: $(ran 5): $(cat "$STUB/rerun.5" 2>&1)"
-  [ "$(grep -E $'^(main|changed)\t' "$STUB/rerun.5" | tr '\t\n' ':|')" = "main:z.txt|" ] || fail "the retried card was not told what main changed, and that alone: $(cat "$STUB/rerun.5")"
+  [ "$(ran 9)" = flaky ] && [ "$(cat "$T/$CASE/testrc")" = 0 ] \
+    || fail "the retried card did not keep the passes of its last run: $(ran 9): $(cat "$STUB/rerun.9" 2>&1)"
+  [ "$(grep -E $'^(main|changed)\t' "$STUB/rerun.9" | tr '\t\n' ':|')" = "main:z.txt|" ] || fail "the retried card was not told what main changed, and that alone: $(cat "$STUB/rerun.9")"
 }
 
 # Bug it catches (O258, O270): the timing maps and the kept passes went to jq as arguments, so a run again that keeps

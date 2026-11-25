@@ -514,7 +514,7 @@ t_health() {
   : > "$STUB/signed-out"; ( exec 8>>"$S/cards.jsonl.run"; flock 8; exec sleep 60 ) & lk=$! # sleep: a stand-in that holds the run lock until it is killed
   while kill -0 $lk 2>/dev/null && flock -n "$S/cards.jsonl.run" true; do sleep 0.05; done # until it holds the run lock
   out=$(loop health); kill $lk; wait $lk 2>/dev/null
-  [ "$(jq -c '[.loop, .gh, .newest, .pushFailingSince, .pushError]' <<<"$out")" = "[true,false,\"$now\",\"2026-11-01T00:09:00Z\",{\"time\":\"$now\",\"sha\":\"$ahead\",\"reason\":\"the fast checks are red\",\"kind\":\"check\",\"check\":\"fast-checks\",\"card\":\"c6-6\",\"issue\":6}]" ] \
+  [ "$(jq -c '[.loop, .gh, .newest, .pushFailingSince, .pushError]' <<<"$out")" = "[true,false,\"$now\",\"2026-11-01T00:09:00Z\",{\"time\":\"$now\",\"sha\":\"$ahead\",\"reason\":\"the fast checks are red\",\"kind\":\"check\",\"check\":\"fast-checks\",\"card\":\"c6-6\",\"issue\":6,\"fix\":null}]" ] \
     || fail "loop, gh, newest line or the push error: $out"
   [ "$(jq -c '[.blocked, .waiting, .stuck]' <<<"$out")" = '[[{"card":"c1-1","issue":1,"reason":"review 1: no answer","since":"2026-11-01T00:05:00Z"}],[{"card":"c2-2","issue":2,"reason":"visible to customers or staff: needs Dana'"'"'s yes: a new button","since":"2026-11-01T00:06:00Z"}],[{"card":"c3-3","issue":3,"step":"worktree","since":"2026-11-01T00:07:00Z","late":true}]]' ] \
     || fail "blocked, waiting and stuck cards: $out"

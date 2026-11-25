@@ -22,8 +22,9 @@ test('Rules: each standing kind is On or Off as the pack says, and a click sends
   // Bug (#1589): the review-retry row said every review block is tried again, but an issue is tried again one time.
   // Bug (#1612, review): it said the next block always comes to you, but while auto is on the engine lands it; then it
   // said auto lands every such block, but one with a P0, a reserved word or a profile item, at the depth cap or answered
-  // still comes to you.
-  assert.match(rulesP(w).querySelector('[data-rule="standing-review-retry"]').textContent, /tried again one time for each issue.*the next block comes to you\. While auto is on, that next block lands once its tests succeed.*unless it names a P0, a reserved word or an item of your profile, its issue is at the follow-up depth cap, or you answered it/);
+  // still comes to you. Since #1670 the review blocks no card on a finding: the row says so, and that a card the records
+  // still show blocked by its review is tried again one time for each issue.
+  assert.match(rulesP(w).querySelector('[data-rule="standing-review-retry"]').textContent, /the review blocks no card on a finding: the card lands, and the finding becomes a follow-up\. A card that the records still show blocked by its review is tried again one time for each issue, with no turn of the Foreman, unless its reason names a reserved word or an item of your profile/);
   assert.deepEqual(await sent(w, () => act(rulesP(w), 'standing-fixed-block-on').click()), [{ action: 'standing', args: ['fixed-block', 'on'], repo: 'sample' }]);
   assert.equal(pressed(w, 'standing-fixed-block-on'), 'true', 'the kind saved shows as on before the next snapshot');
   assert.deepEqual(await sent(w, () => act(rulesP(w), 'standing-asked-fix-off').click()), [{ action: 'standing', args: ['asked-fix', 'off'], repo: 'sample' }]);

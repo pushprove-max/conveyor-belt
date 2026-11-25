@@ -15,7 +15,7 @@
 # - a page or release note line that states a condition of behaviour that other cases run (issue 1447): a release note
 #   is the fixed text of a past version, so only its text can be read; each line below names the code or case that runs it.
 # Bugs it catches: a page or release note that says more than the code does (issue 1447, each line below); a /units guide that names only the issue as a row's ID; a tab row the guide does not tell to swipe; a comment that again says a card waits only for its own
-# issue's approval line, a last NO-GO that lands or blocks with no P1 round, or a seat's model only from the pack's list.
+# issue's approval line, or a seat's model only from the pack's list.
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 fails=0
@@ -46,8 +46,6 @@ has docs/units.md '`card <N>`, with the number its card id ends in, or `card` wh
 has docs/units.md 'a review follow-up shows its finding there' 'the guide leaves out what the Title shows'
 # O337: the comment on the Approve visible changes row.
 has .claude/dashboard/parts/rules-rows.js 'or a parent issue it inherits the yes from (follow-ups and split slices)' 'the comment names only the issue'"'"'s own line'
-# O352: the loop comment of a last NO-GO.
-has conveyor/lib/card.sh 'or gets one fix round and a review on a P1' 'the loop comment leaves out the P1 round'
 # O357: the comment of cardok().
 has conveyor/lib/control.sh 'the review'"'"'s list has the Codex models that Codex reports too, when the pack sets no models.allowed or its codex' 'the comment names only the pack'"'"'s list, or Codex'"'"'s models as an addition for every seat or with no condition'
 # Issue 1447 (R-ids are the audit's). Each line is a claim that was wider than the code; the behaviour is run in the case named.
@@ -56,7 +54,7 @@ has docs/configuration.md 'Conveyor never pushes the default branch, except that
 # R401: with no test.fileCommand or test.list form that gives one file, pushtests() runs nothing and idle merges. The merge
 # runs in tests/landas.test.sh t_pridlenofile; the words are read here and in t_pridledocs.
 has docs/configuration.md 'This run needs a pack that can run one test file at a time' 'Idle promises tests before a merge to a pack that cannot run one file'
-has docs/configuration.md 'or the pack cannot run one test file, Conveyor merges with no test run first' 'Idle leaves out the merge with no test run for such a pack'
+has docs/configuration.md 'When the pack cannot run one test file, Conveyor merges with no test run first while Push after a combined test run is off, and does not merge while it is on' 'Idle leaves out the merge with no test run for such a pack, or that it does not merge while Push after a combined test run is on'
 has docs/board.md 'must pass first, when the pack can run one test file at a time' 'the Board guide promises the idle test run to a pack that cannot run one file'
 # R397: the Feed stopped mark follows the heartbeat alone (app-feed.js), so new data can still arrive.
 has docs/board.md "**Feed stopped**: the feed's heartbeat stopped." 'the guide says Feed stopped means no data arrives'

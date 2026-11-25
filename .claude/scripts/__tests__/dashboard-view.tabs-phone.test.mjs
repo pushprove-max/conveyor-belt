@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// The tab bar at phone width (issue 1206): the six tabs are wider than a phone, so the list scrolls inside the page
+// The tab bar at phone width (issue 1206): the seven tabs are wider than a phone, so the list scrolls inside the page
 // and each tab keeps its name on one line. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import { boot, css, deliver, full, next, cases } from './dashboard-view.helpers.mjs';
@@ -14,7 +14,7 @@ test('at 390 px the tab list scrolls inside the page, and no tab name wraps or s
   deliver(w, full());
   const st = w.document.createElement('style'); st.textContent = css; w.document.head.append(st);
   const list = w.document.querySelector('#tabs .tabs-list');
-  assert.equal(list.querySelectorAll('.tab').length, 6);
+  assert.equal(list.querySelectorAll('.tab').length, 7);
   const l = w.getComputedStyle(list);
   assert.equal(l.overflowX, 'auto', 'the list scrolls sideways inside itself, not the page');
   for (const tab of list.querySelectorAll('.tab')) {
@@ -36,8 +36,8 @@ test('the tab list has room for the focus ring round a tab, and keeps its place'
   assert.equal(l.margin, '-4px', 'the same size taken back, so the tabs do not move');
 });
 
-// jsdom lays nothing out: six tabs 100 px wide in a list `client` px wide, laid out from the list's scrollLeft.
-function lay(w, client, scrollWidth = 600) {
+// jsdom lays nothing out: seven tabs 100 px wide in a list `client` px wide, laid out from the list's scrollLeft.
+function lay(w, client, scrollWidth = 700) {
   const room = { client, scrollWidth };
   const list = () => w.document.querySelector('#tabs .tabs-list');
   Object.defineProperty(w.HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return this === list() ? room.client : 0; } });
@@ -91,7 +91,7 @@ test('the selected tab stays in view when a count widens the list, and when the 
 
 // Bug (issue 1206, review): scrollIntoView scrolls the document too, so on a wide Board a key to another tab jumped the
 // page up. The list is scrolled itself, and only when the tab is out of it.
-test('on a wide screen, where all six tabs fit, changing tab neither scrolls the page nor the list', () => {
+test('on a wide screen, where all seven tabs fit, changing tab neither scrolls the page nor the list', () => {
   const w = boot({ width: 1440 });
   let into = 0;
   w.HTMLElement.prototype.scrollIntoView = function () { into += 1; };
