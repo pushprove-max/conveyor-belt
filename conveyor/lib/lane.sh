@@ -153,7 +153,9 @@ branchback() { # <card> <its lines>
   else body="No issue: this card lands the change of branch $br against main, as its kept patch holds it."; fi
   mkdir -p "$TESTACTS" 2>/dev/null
   { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the record of the cards with no GitHub issue could not be locked; nothing changed" >&2; return 1; }
-  BACKID=$(tcput "" "$t" "$body" "" "Branch: $br") && rec=$(jq -ce '.cards | arrays' "$TACARDS") \
+  # No labels, as branchissue() gives the first landing: with none, testcardissue() would give the pack's type label,
+  # and the next card would be checked as a bug fix (bugproof(), lib/card.sh) and named fix, not feat.
+  BACKID=$(tcput "" "$t" "$body" "" "Branch: $br" "[]") && rec=$(jq -ce '.cards | arrays' "$TACARDS") \
     && jq -c --arg i "$BACKID" --arg c "$1" '{cards: map(if .id == $i then .card = $c else . end)}' <<<"$rec" > "$TACARDS.new" && mv -f "$TACARDS.new" "$TACARDS" \
     || { rm -f "$TACARDS.new"; exec {lock}>&-; [ -z "$BACKID" ] || branchdrop "$BACKID"; BACKID=''; echo "conveyor: card $1 could not join the record of the cards with no GitHub issue; nothing changed" >&2; return 1; }
   exec {lock}>&-

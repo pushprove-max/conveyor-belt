@@ -71,6 +71,12 @@ t_branchretry() {
     || fail "after retry $BRC, the pick did not take it again as a new card named Branch: lb: $(cat "$T/$CASE/run.out") $(st 'select(.step == "picked")')"
   [ "$(sed -n 2p "$T/$CASE/run.out")" = "session $BRC kept" ] \
     || fail "the next card $c2 of $BRC did not start from its kept patch (want: session $BRC kept): $(cat "$T/$CASE/run.out")"
+  # Bug it catches (#1673 review follow-up): the entry `retry` added had no labels, so the next card's stand-in issue
+  # (testcardissue()) got the pack's type label, unlike the first landing (branchissue(): none), and cardbuild() then
+  # held the branch's change to a bug fix's proof (bugproof()).
+  fx_in 'testcardissue "'"$c2"'" | jq -c .labels'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = '[]' ] \
+    || fail "the stand-in issue of card $c2, given back from land-branch card $BRC, has labels (want [], as the first landing had): $(cat "$T/$CASE/run.out")"
 }
 
 # #1673, its Cause: with no kept patch, `retry <card id>` keeps the branch's change as the card's patch, so the next
