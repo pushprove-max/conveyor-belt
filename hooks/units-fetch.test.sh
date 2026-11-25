@@ -14,11 +14,17 @@ FETCH=$DIR/units-fetch.sh
 # In TMPDIR, which the suite removes when the file ends or is stopped.
 T=$(mktemp -d) || exit 1
 # The ssh cases' cache folder, S: a socket folder is 45 characters at most (units-fetch.sh), and T's conveyor/ssh is
-# longer under the suite's TMPDIR, so S is a short name at the top of TMPDIR. Its conveyor/ssh fits (SFITS=1) under
-# the suite's TMPDIR on Linux; under a longer one (macOS) the fetch keeps its sockets in its fallback folder FB.
-S=$(mktemp -d "${TMPDIR:-/tmp}/XXX") || exit 1
-FB=/tmp/conveyor-ssh-$UID SFITS=0; [ $((${#S} + 13)) -gt 45 ] || SFITS=1
-trap 'rm -rf "$T" "$S"' EXIT
+# longer under the suite's TMPDIR, so S is a short name at the top of TMPDIR. Where its conveyor/ssh is still too long
+# (the suite's TMPDIR under /var/folders on macOS), S is a short link in /tmp to it, so that the ssh cases run there
+# too: bug it catches: there the space and % cases passed on length alone, and the umask 000 case was left out.
+SR=$(mktemp -d "${TMPDIR:-/tmp}/XXX") || exit 1
+S=$SR
+clean() { rm -rf "$T" "$SR"; [ "$S" = "$SR" ] || [ "$(readlink "$S")" != "$SR" ] || rm -f "$S"; }
+trap clean EXIT
+if [ $((${#S} + 13)) -gt 45 ]; then
+  # A link a stopped run left at this name is replaced; a folder there is no link of this run's, so the file stops.
+  S=/tmp/uf-$UID-$$; rm -f "$S"; ln -s "$SR" "$S" && [ "$(readlink "$S")" = "$SR" ] || exit 1
+fi
 fails=0 TAB=$'\t'
 ok() { echo "ok [units-fetch]: $1"; }
 bad() { echo "FAIL [units-fetch]: $1" >&2; fails=$((fails + 1)); }
@@ -125,7 +131,7 @@ waiter() { # [<watcher left out>]: starts the stand-in in a process group of its
   rm -f "$FD/waiter.pid"; set -m; bash "$M/v/$A/conveyor/foreman/waiter.sh" "$FD" "$A" "$@" & WP=$!; set +m
   for _ in $(seq 100); do [ -s "$FD/waiter.pid" ] && [ "$(pgrep -P "$WP" | wc -l)" -ge $((4 - $#)) ] && return; sleep 0.05; done
 }
-trap 'kill -- -"${WP:-0}" 2>/dev/null; rm -rf "$T"' EXIT
+trap 'kill -- -"${WP:-0}" 2>/dev/null; clean' EXIT
 foreman() { fetch "$M/bakery" feed | grep "^foreman$TAB" || echo 'no foreman line'; }
 waiter
 same 'D1: the role, a live waiter on the current install and its four watchers' \
@@ -482,7 +488,7 @@ hostfile --arg c "$M/clone" --arg b "$M/bakery" --arg g "$M/gadgetlab" \
   '{host: "lab", ssh: "owner@lab", main: $c, records: [{repo: "bakery", main: $b}, {repo: "gadgetlab", main: $g}]}'
 # The cache folder is S: where ssh can take it, the socket folder is its conveyor/ssh. Bug it catches: a socket folder
 # ssh can take was passed over for the fallback.
-XC=$S SD=$FB; [ "$SFITS" = 0 ] || SD=$S/conveyor/ssh
+XC=$S SD=$S/conveyor/ssh
 echo "lab-$$" > "$M/bin/resolved"
 s1=$(fetch "$M/elsewhere" stamp); s2=$(fetch "$M/elsewhere" stamp); got=$(fetch "$M/elsewhere")
 same "over ssh: the second stamp and the poll go through the connection the first one kept (units-fetch.sh stamp, stamp, then a poll, in $M/elsewhere)" \
@@ -506,8 +512,8 @@ rm -f "$sk" "$(cat "$M/bin/sock")"
 # A cache folder ssh cannot take as a socket folder (a space or a % in it, or too long a path) keeps the connection in
 # /tmp/conveyor-ssh-<user id>. Bugs it catches: a space or a % failed every stamp and poll; a long cache folder kept no
 # connection. Each input resolves to a host of its own, this run's, so its socket there is new and is taken away after.
-# The space and the % are in place of S's last character, so that, where S fits, only the character keeps ssh from
-# taking that folder; the fetch never makes such a folder.
+# The space and the % are in place of S's last character, so that only the character keeps ssh from taking that
+# folder; the fetch never makes such a folder.
 n=0
 for xc in "${S%?} " "${S%?}%" "$T/mux/a-cache-folder-too-long-for-a-socket-path"; do
   n=$((n + 1)); echo "lab-$$-$n" > "$M/bin/resolved"; : > "$M/bin/log"; r=$(cksum < "$M/bin/resolved"); r=/tmp/conveyor-ssh-$UID/${r%% *}
@@ -522,15 +528,10 @@ cat > "$M/bin/mkdir" <<'EOF'
 PATH=${PATH//"${0%/*}:"/} mkdir "$@" || exit
 for a; do :; done; case $a in */conveyor/ssh) ls -ld "$a" | cut -c1-10 >> "${0%/*}/mkdirs" ;; esac
 EOF
-# The cache folder is S again, its conveyor folder taken away so that the socket folder is new. Where S does not fit,
-# the fetch makes no socket folder in a cache folder, so the case is left out.
+# The cache folder is S again, its conveyor folder taken away so that the socket folder is new.
 chmod +x "$M/bin/mkdir"; echo "lab-$$-umask" > "$M/bin/resolved"; rm -rf "$S/conveyor"
-if [ "$SFITS" = 1 ]; then
-  same "over ssh under umask 000, a new cache folder $S: mkdir makes its socket folder open to this user alone (units-fetch.sh stamp in $M/elsewhere)" \
-    "$s1|drwx------" "$(umask 000; XC=$S fetch "$M/elsewhere" stamp)|$(cat "$M/bin/mkdirs" 2>/dev/null)"
-else
-  ok "over ssh under umask 000: left out, as $S/conveyor/ssh is over the 45 characters of a socket folder"
-fi
+same "over ssh under umask 000, a new cache folder $S: mkdir makes its socket folder open to this user alone (units-fetch.sh stamp in $M/elsewhere)" \
+  "$s1|drwx------" "$(umask 000; XC=$S fetch "$M/elsewhere" stamp)|$(cat "$M/bin/mkdirs" 2>/dev/null)"
 rm -f "$M/bin/mkdir" "$(cat "$M/bin/sock")"
 
 [ "$fails" = 0 ] || exit 1
