@@ -891,7 +891,8 @@ blockhead() { # <reason>
     'review '*' is NO-GO with no finding to fix'*) echo 'the review said NO-GO but named no finding to fix' ;;
     'review '*' ended without one clear verdict'*) echo 'the review gave no clear verdict' ;;
     'review '*) echo 'the review step could not finish' ;;
-    'the changed tests failed again after their one fix round'*) echo 'the tests failed after the fix round' ;;
+    'the changed tests failed again after their '*' fix rounds'*)
+      n=${1#the changed tests failed again after their }; echo "the tests failed after ${n%% *} fix rounds" ;;
     'the changed tests gave no result'*) echo 'the tests gave no result' ;;
     'test: '*) echo 'the test step stopped the card' ;;
     'visible to customers or staff: needs '*) echo 'the change is visible to customers or staff, so it needs a yes' ;;

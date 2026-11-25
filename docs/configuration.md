@@ -619,7 +619,7 @@ When the checks fail after a session, the card goes to a fix session before any 
 gets the output of the checks. When the checks fail again after that fix session, the card is blocked.
 
 When the checks fail at the start of a Test step, no test file runs. The test line shows one failure that names the
-command. The card goes to a fix session with the output. This does not use the card's one test-fix round.
+command. The card goes to a fix session with the output. This does not use one of the card's 3 test-fix rounds.
 
 Conveyor keeps the result of the checks for each tree. On a tree that the checks ran on, the Test step does not run
 them again. Your test command can read that result in its test log folder: the exit is in

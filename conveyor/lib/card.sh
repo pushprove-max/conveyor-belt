@@ -139,7 +139,7 @@ cardprompt() { # <card> <header> <rules> <brief>
 fixprompt() { # <card prompt> <the findings, each led by its id, and what follows them> [<repeats() lines>: FIXBACK follows FIX when there are any]
   printf '%s' "$1"$'\n\n'"$FIX$([ -z "${3:-}" ] || printf '\n%s' "$FIXBACK")"$'\n'"$2"
 }
-# Why a review ends the fix loop, the first that holds: go (a GO), max-reviews (it is review MAX_REVIEWS, counting the rounds a retried card carries), rebased (the one review after a landing conflict), test-fix (after the one test fix),
+# Why a review ends the fix loop, the first that holds: go (a GO), max-reviews (it is review MAX_REVIEWS, counting the rounds a retried card carries), rebased (the one review after a landing conflict), test-fix (after a test fix),
 # lint-fix (after the landing gate's lint fix), land (the kept review of a kept patch landed with no review), repeat (a NO-GO that repeats a fixed finding, each P0 or P1 of it a repeat; afterreview() ends the loop so too when a repeated harm one is P0 or P1), new-p2 (from review 2 on, counted as max-reviews is, a NO-GO with findings that repeats none, none of them P0 or P1 (a finding with no level is P1): the card lands, each harm finding filed as a follow-up and each of another kind sent to its list, issue 1578; afterreview() drops it at the follow-up depth cap). Prints nothing when a fix round follows.
 loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix> <mode> <donewhen.sh repeats() lines> <review file>
   if [ "$1" = GO ]; then echo go

@@ -358,6 +358,8 @@ OC_GUARD=${CONVEYOR_OPENCODE_GUARD:-$HERE/opencode/guard.mjs}
 # The guard hook every Codex build, fix and rebase session runs (cxready(), README.md Codex builder).
 CX_GUARD=${CONVEYOR_CODEX_GUARD:-$HERE/codex/guard.mjs}
 MAX_REVIEWS=3 # the review rule in README.md
+# shellcheck disable=SC2034 # read by lib/mainred.sh testroute(), which conveyor.sh sources beside this file
+TESTFIXES=3   # the fix rounds a card's failing changed tests get before the card blocks (cardfailed(), lib/cardland.sh; issue 1695)
 # shellcheck disable=SC2034 # read by lib/card.sh, which conveyor.sh sources beside this file
 PRIVFIXES=3   # the fix rounds a privacy hit in a card's own change gets before the card is shut (afterreview(), lib/card.sh; issue 1670)
 # The start of the reason of the block that shuts such a card (privshut(), lib/cardland.sh): needsask() (lib/needsask.sh),

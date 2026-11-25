@@ -212,7 +212,7 @@ cardtest() {
   began "$c" "$n" test
   # The project's checks first (donewhen.sh treecheck(): kept for the tree the last session's check ran on, so not run again
   # there). When they fail, the step ends before any test file runs, its line holding one failure that names
-  # the check and its output. That is not its tests failing: the one test-fix round (tfix) is kept and the card
+  # the check and its output. That is not its tests failing: no test-fix round (tfix) is used and the card
   # is not blocked for it; one fix session is told the output, and donewhen.sh checked() runs the checks again on its change.
   # The line is marked checks: no test ran, so the card's first run of its tests is still its first (testlist.sh testedbefore()).
   out=$(treecheck "$wt"); t=$(testroute checks $?)
@@ -307,7 +307,7 @@ mainredhold() {
   go=again; return 0
 }
 # A test run that failed (rc). go: again (the test step again: no result, a wait for main or the machine, or main
-# moved), next (its one fix round, or a fit onto main that went back) or landed; '' when the repair lane passed it.
+# moved), next (a fix round, one of TESTFIXES, or a fit onto main that went back) or landed; '' when the repair lane passed it.
 cardfailed() {
   # The worktree lacks a dependency folder main has (depsmissing(), lib/push.sh): the failure is the project's
   # setup, not the change, and no run on main or fix session mends it. The card is blocked saying so, with no
@@ -397,8 +397,8 @@ cardfailed() {
   fi
   if [ "$route" = block ] || [ "$route" = fix ]; then
     tmain=''
-    [ "$route" != block ] || { block "$c" "$n" "$wt" "the changed tests failed again after their one fix round (exit $rc$(jq -r '.notRun // [] | if . == [] then empty else "; the run stopped at its first failure, so these files did not run: " + join(", ") end' <<<"${out:-null}" 2>/dev/null)); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
-    tfix=1; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
+    [ "$route" != block ] || { block "$c" "$n" "$wt" "the changed tests failed again after their $tfix fix rounds (exit $rc$(jq -r '.notRun // [] | if . == [] then empty else "; the run stopped at its first failure, so these files did not run: " + join(", ") end' <<<"${out:-null}" 2>/dev/null)); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
+    tfix=$((${tfix:-0} + 1)); locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
     # On the testFix seat (seat(): the builder's unless the control record sets testFix); the card's second fix session of any kind runs one effort level up.
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(testfixprompt "$sprompt" "$wt" "$rc" "$out")" fix testFix "$([ "$fixed" = 0 ] || echo up)") \
       || { block "$c" "$n" "$wt" "fix: $t"; return; }

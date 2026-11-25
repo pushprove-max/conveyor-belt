@@ -92,17 +92,17 @@ t_checkstep() {
     || fail "the first run of the card's tests, after a step that ran none, was not its first: $(st 'select(.issue == 8 and .step == "test")')"
 }
 
-# Bug: a check failure counted as the changed tests failing, so a card whose test-fix round was used was blocked as
-# "the changed tests failed again after their one fix round". Card c7's Test step on fixture state, its test-fix round
-# used (card()'s tfix) and already fitted onto main (tmain): its worktree holds bad.txt, so the step's checks fail
+# Bug: a check failure counted as the changed tests failing, so a card whose test-fix rounds were used was blocked as
+# "the changed tests failed again after their 3 fix rounds". Card c7's Test step on fixture state, its TESTFIXES (3)
+# test-fix rounds used (card()'s tfix) and already fitted onto main (tmain): its worktree holds bad.txt, so the step's checks fail
 # (treecheck() exit 1), and testroute checks sends it to the checks' one fix session, where a failure of its tests
 # (testroute <worktree>) blocks it.
 t_checkround() {
   ccsetup 9
   fx_wt 'echo x > bad.txt' ok.txt ok
-  fx_in 'tfix=1 tmain=1 repaired=""; out=$(treecheck "$FXWT"); r=$?; echo "checks $r $(testroute checks $r)"; echo "tests $(testroute "$FXWT")"'
+  fx_in 'tfix=3 tmain=1 repaired=""; out=$(treecheck "$FXWT"); r=$?; echo "checks $r $(testroute checks $r)"; echo "tests $(testroute "$FXWT")"'
   [ "$(cat "$T/$CASE/run.out")" = $'checks 1 checkfix\ntests block' ] \
-    || fail "a check failure after the test-fix round (tfix=1) did not go to a fix session, unlike a failure of the tests: $(cat "$T/$CASE/run.out")"
+    || fail "a check failure after the test-fix rounds (tfix=3) did not go to a fix session, unlike a failure of the tests: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug: a pack with no test.checkCommand runs something, fails, or keeps a result: every card would change.

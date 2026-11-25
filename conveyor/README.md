@@ -539,7 +539,8 @@ failed, or never finished because the run was killed or timed out) runs once mor
 slot, for those cases alone: the cases that passed are not run again. After a run that stopped at its first
 failure (`failfast`, above), it runs each failed file, and repeats the cases of that file that passed when the test
 command cannot leave them out. Only when a case still does not pass does the
-card go to its fix session; a card whose re-run passes goes on with no fix session. A fix session that leaves the
+card go to its fix session; a card whose re-run passes goes on with no fix session. A card gets 3 such fix sessions
+(fix rounds), and is blocked when a case still does not pass after the third. A fix session that leaves the
 card's staged change as it was is followed by a run of only the cases that had not passed, not the whole selection.
 A fix session (or any session) that changes the change is followed by a run of the cases that had not passed in the
 last run (failed, killed or timed out) and the tests the command selects for the files the session changed: the files

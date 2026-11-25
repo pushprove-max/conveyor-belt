@@ -782,8 +782,8 @@ mainwait() { # <worktree> <main's commit> <case>...
 # main) or nothing (a failure is the card's, or no verdict was read: verdicts() failed and the list is empty, and the
 # failure is then taken as the card's). For that failure, called as `testroute <worktree>`, it prints nothing
 # (the repair lane passed this test step: repaired), moved (main moved since the card's commit, and it was not
-# fitted onto main yet: tmain), block (the tests failed again after their one test-fix round: tfix) or fix (that
-# round). It reads card()'s repaired, tmain and tfix (bash's dynamic scope).
+# fitted onto main yet: tmain), block (the tests failed again after their TESTFIXES test-fix rounds: tfix counts the
+# rounds given, '' for none) or fix (another round). It reads card()'s repaired, tmain and tfix (bash's dynamic scope).
 testroute() {
   if [ "$1" = checks ]; then
     case $2 in 1) echo checkfix ;; 2) echo block ;; esac
@@ -793,7 +793,7 @@ testroute() {
     fi
   elif [ -n "$repaired" ]; then :
   elif [ -z "$tmain" ] && [ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then echo moved
-  elif [ -n "$tfix" ]; then echo block
+  elif [ "${tfix:-0}" -ge "$TESTFIXES" ]; then echo block
   else echo fix
   fi
 }

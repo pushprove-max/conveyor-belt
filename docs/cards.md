@@ -339,7 +339,7 @@ has no step. The loop ends at the first of these:
   the same issue. After an automatic port of one of those cards, it counts only the reviews after the review of the
   port.
 - `rebased`: the one review after a conflict with main at landing.
-- `test-fix`: the one review after the fix of failed tests.
+- `test-fix`: the one review after each fix of failed tests.
 - `lint-fix`: the one review after the fix of lint findings at the landing gate.
 - `land`: the card lands from a kept patch on its kept review, with no new review.
 - `repeat`: a finding comes back after its fix, and each P0 or P1 finding of the review comes back too. A `harm` P0
@@ -549,6 +549,10 @@ to its file goes through a symbolic link. The tests need no change for this.
 
 The test fix session gets the failing cases first, each with its file and the place where it failed, and then the last
 200 lines of the raw output.
+
+A card gets 3 fix rounds for the failed tests of its change. Each round gets the failures of the test run before it.
+When the tests still fail after the third round, the card is blocked with the reason `the changed tests failed again
+after their 3 fix rounds`.
 
 A case that fails again runs on main. When it fails there too, Conveyor checks whether main or the machine is at
 fault. Main is at fault only when an input of the case's test file changed since its last recorded pass, and a

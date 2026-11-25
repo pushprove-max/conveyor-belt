@@ -107,12 +107,12 @@ t_keptcommentnochange() {
 # and the output was shown open in the comment.
 t_keptcommenttests() {
   local why body; setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' k.txt kept
-  why="the changed tests failed again after their one fix round (exit 1; the run stopped at its first failure, so these files did not run: $(seq -s '.test.sh, t' 1 60)); nothing landed."
+  why="the changed tests failed again after their 3 fix rounds (exit 1; the run stopped at its first failure, so these files did not run: $(seq -s '.test.sh, t' 1 60)); nothing landed."
   # fx_in sets WHY itself: the reason goes in a name of its own.
   BLOCKWHY=$why$'\nnot ok 1 - t_one\nnot ok 2 - t_two' fx_in 'block c7 7 "$FXWT" "$BLOCKWHY"'
   [ "$RC" = 0 ] || fail "block c7 7 <worktree> '$why' with two lines of output failed: $(cat "$T/$CASE/run.out")"
   body=$(sed '1s/^7 --body //' "$STUB/comments")
-  [ "$(sed -n 1,3p <<<"$body")" = "**Blocked: the tests failed after the fix round**
+  [ "$(sed -n 1,3p <<<"$body")" = "**Blocked: the tests failed after 3 fix rounds**
 
 $why" ] || fail "the test block's comment has no headline in words, or not its ${#why}-character reason whole: $body"
   [[ $body == *$'<details><summary>Last output</summary>\n\n```\nnot ok 1 - t_one\nnot ok 2 - t_two\n```\n\n</details>'* ]] \

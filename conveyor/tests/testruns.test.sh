@@ -34,7 +34,8 @@ t_tests() {
     && grep -q 'the loop runs the changed tests itself' "$T/$CASE/run.out" || fail "the brief does not say the dependencies are there and the loop runs the tests: $(cat "$T/$CASE/run.out")"
 }
 
-# Bugs: a card whose tests pass after their one fix round does not land; a card landing on its last review's NO-GO
+# Bugs: a card whose tests still fail after their first fix round blocks, though it has TESTFIXES rounds (#1695: the
+# card went to the owner after one round), or one whose tests pass after its second round does not land; a card landing on its last review's NO-GO
 # skips its tests, or files the follow-ups before they have passed; a failed run names a file the test itself logged
 # (`-- FAIL widget.test.ts`) beside the one the runner ran; the build session is not given the card's settings file,
 # or that file is left once the card has landed; the card's briefs folder (CONVEYOR_BRIEFS, where its sessions keep
@@ -42,26 +43,27 @@ t_tests() {
 t_testsland() {
   local p
   setup "[$(issue 7 2026-01-01)]"
-  for i in 1 2 3 4; do moved "$i" "${NOGO/\[P1\]/[P2]}" | p1at2 "$i" > "$STUB/review.$i"; done
+  for i in 1 2 3 4 5; do moved "$i" "${NOGO/\[P1\]/[P2]}" | p1at2 "$i" > "$STUB/review.$i"; done
   # The build adds a line and keeps the settings file it is given, as it is while the session runs; each later session
   # changes the card, so each review after it reads a new change. The first run fails, and its run again too (tests());
-  # the run after the test fix passes, marking whether it came before any follow-up was filed.
+  # so do the two runs after the first test fix; the run after the second test fix passes, marking whether it came
+  # before any follow-up was filed.
   cat > "$STUB/build" <<'EOS'
 if [ "$(wc -l < "$STUB/sessions")" = 1 ]; then echo two >> a.txt; a=("$@"); for i in "${!a[@]}"; do [ "${a[i]}" != --settings ] || cp "${a[i+1]}" "$STUB/settings"; done
   echo "$CONVEYOR_BRIEFS" > "$STUB/briefs"; : > "$CONVEYOR_BRIEFS/outbrief.kept"
 else wc -l < "$STUB/sessions" > fixed.txt; fi
 EOS
-  echo 'echo x >> "$STUB/tests"; [ "$(wc -l < "$STUB/tests")" -gt 2 ] || { echo "FAIL widget.test.ts"; exit 1; }; [ -e "$STUB/filed" ] || : > "$STUB/tested-first"' > "$STUB/test-cmd"
-  # A whole card: that its test step, after the last review's NO-GO and the test fix, goes on to file and land is
+  echo 'echo x >> "$STUB/tests"; [ "$(wc -l < "$STUB/tests")" -gt 4 ] || { echo "FAIL widget.test.ts"; exit 1; }; [ -e "$STUB/filed" ] || : > "$STUB/tested-first"' > "$STUB/test-cmd"
+  # A whole card: that its test step, after the last review's NO-GO and two test fixes, goes on to file and land is
   # card()'s own order of steps, which no function of it makes alone.
   rulecard 7
-  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start fix start review start test start fix start review start test start filed start landed " ] \
-    || fail "steps of a card landing on a last NO-GO after its test fix: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "test") | .result' | tr '\n' ' ')" = "fail pass " ] && [ -e "$STUB/tested-first" ] \
+  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start fix start review start test start fix start review start test start fix start review start test start filed start landed " ] \
+    || fail "steps of a card landing on a last NO-GO after its second test fix: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "test") | .result' | tr '\n' ' ')" = "fail fail pass " ] && [ -e "$STUB/tested-first" ] && [ -z "$(st 'select(.step == "blocked")')" ] \
     && [ "$(st 'select(.step == "landed") | [.sha, (.followups | length)] | tojson')" = "[\"$(git -C "$R" rev-parse main)\",1]" ] \
     || fail "the card did not land with its follow-up after its tests passed, or filed it first: $(st 'select(.step == "test" or .step == "landed")')"
-  [ "$(st 'select(.step == "test" and .result == "fail") | .failures.files | map(.file) | join(" ")')" = a.test.sh ] \
-    || fail "the failed test step does not name a.test.sh alone: $(st 'select(.step == "test" and .result == "fail") | .failures | tojson')"
+  [ "$(st 'select(.step == "test" and .result == "fail") | .failures.files | map(.file) | join(" ")' | paste -sd,)" = a.test.sh,a.test.sh ] \
+    || fail "the failed test steps do not each name a.test.sh alone: $(st 'select(.step == "test" and .result == "fail") | .failures | tojson')"
   p=$T/$CASE/cards/$(st '.card' | head -n 1).settings
   [ "$(sed -n '1s/.*--settings \([^ ]*\) .*/\1/p' "$STUB/sessions")" = "$p" ] && [ -s "$STUB/settings" ] && [ ! -e "$p" ] \
     || fail "the build session was not given the card's settings file, or it was left once the card landed: $(head -n 1 "$STUB/sessions")"
@@ -70,8 +72,9 @@ EOS
   recok "$ST/cards.jsonl" "a card that landed after its test fix"
 }
 
-# Bugs: a failing test run blocks the card with no fix round, or gets more than one; the fix session is not handed the
-# issue and the last 200 lines of the test output; a card whose tests fail twice lands, files the follow-ups of its
+# Bugs: a failing test run blocks the card before its TESTFIXES (3) fix rounds, or gets more than 3; its block reason
+# or the comment's headline does not name the 3 rounds (#1695); the last fix session is not handed the
+# issue and the last 200 lines of the test output; a card whose tests fail after each round lands, files the follow-ups of its
 # last review's NO-GO, leaves main dirty or leaves its worktree; its blocked line's reason is not the one sentence, or
 # its tail is not the last 60 lines of the output, each line whole: a cap on a line's length loses what it says after
 # the cut, and makes lines that differ only there fold as identical on the Board. Lines that long, 60 of them, are
@@ -79,35 +82,45 @@ EOS
 t_testsfix() {
   local head out
   setup "[$(issue 7 2026-01-01)]"
-  for i in 1 2 3 4; do moved "$i" "${NOGO/\[P1\]/[P2]}" | p1at2 "$i" > "$STUB/review.$i"; done
+  for i in 1 2 3 4 5 6; do moved "$i" "${NOGO/\[P1\]/[P2]}" | p1at2 "$i" > "$STUB/review.$i"; done
   # The stub writes no `-- FAIL <file>` line to the runner's log: testprogress() counts each file such lines name as a
   # file run, once however many lines name it, and gadget.test.ts is not the a.test.sh the run was given, so the
-  # count of 2 stops the run (testrun.sh tests(), <worktree>.wide) before its fix round.
-  echo 'echo x >> "$STUB/tests"; seq 300 | sed "s/^/out line /"; for i in $(seq 59); do printf "FAIL %03000d\n" 0; done; echo "FAIL gadget.test.ts: expected 2"; exit 1' > "$STUB/test-cmd"
+  # count of 2 stops the run (testrun.sh tests(), <worktree>.wide) before each fix round.
+  # Each run's last failure names the run, and each session notes the run its brief names and the run before it:
+  # a fix round handed an earlier run's failures (#1695) shows as a pair that differs.
+  echo 'echo x >> "$STUB/tests"; seq 300 | sed "s/^/out line /"; for i in $(seq 59); do printf "FAIL %03000d\n" 0; done; echo "FAIL gadget.test.ts: expected 2 (run $(wc -l < "$STUB/tests"))"; exit 1' > "$STUB/test-cmd"
+  echo 'echo two >> a.txt; r=$(grep -o "expected 2 (run [0-9]*)" "$STUB/brief" | tail -n 1); [ -z "$r" ] || echo "$r $(wc -l < "$STUB/tests")" >> "$STUB/seen"' > "$STUB/build"
   head=$(git -C "$R" rev-parse HEAD)
-  # A whole card: the one fix round, and the block after it, are card()'s test step, which only the card's own run
-  # takes after its reviews.
+  # A whole card: the TESTFIXES (3) fix rounds, and the block after them, are card()'s test step, which only the
+  # card's own run takes after its reviews.
   rulecard 7
-  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start fix start review start test start fix start review start test blocked " ] \
-    || fail "steps of a NO-GO card whose tests fail twice: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
-  [ "$(wc -l < "$STUB/sessions") $(wc -l < "$STUB/reviews") $(wc -l < "$STUB/tests")" = "4 4 4" ] \
-    || fail "sessions, reviews and test runs are $(wc -l < "$STUB/sessions") $(wc -l < "$STUB/reviews") $(wc -l < "$STUB/tests"), not 4 4 4"
+  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start fix start review start test start fix start review start test start fix start review start test start fix start review start test blocked " ] \
+    || fail "steps of a NO-GO card whose tests fail after each of its 3 test fixes: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
+  [ "$(wc -l < "$STUB/sessions") $(wc -l < "$STUB/reviews") $(wc -l < "$STUB/tests")" = "6 6 8" ] \
+    || fail "sessions, reviews and test runs are $(wc -l < "$STUB/sessions") $(wc -l < "$STUB/reviews") $(wc -l < "$STUB/tests"), not 6 6 8"
   # The test-fix session's brief: the issue, and the end of the output (the last 200 lines hold no more than 140 of
   # the 300 `out line` lines). Bug: a cut of 100 lines kept these lines all the same; the part after the
   # heading is counted, and ends with the output's last line (the run's LINKED note).
   out=$(sed '1,/^# The changed tests fail (exit 1): fix that and nothing else\. The end of the test output:$/d' "$STUB/brief")
-  grep -q '^# The changed tests fail' "$STUB/brief" && grep -qx 'FAIL gadget.test.ts: expected 2' <<<"$out" && grep -qx 'out line 300' <<<"$out" \
+  # Each failed run is run again (tests()), and that run's output is the one the round is handed: runs 2, 4 and 6.
+  [ "$(paste -sd, "$STUB/seen")" = 'expected 2 (run 2) 2,expected 2 (run 4) 4,expected 2 (run 6) 6' ] \
+    || fail "the 3 fix rounds were not each handed the failures of the test run just before it (brief's run, runs so far): $(paste -sd, "$STUB/seen")"
+  grep -q '^# The changed tests fail' "$STUB/brief" && grep -qx 'FAIL gadget.test.ts: expected 2 (run 6)' <<<"$out" && grep -qx 'out line 300' <<<"$out" \
     && ! grep -qx 'out line 160' <<<"$out" && [ "$(grep -c '' <<<"$out")" = 200 ] && [[ "$(tail -n 1 <<<"$out")" == "conveyor: the change adds or changes no test file"* ]] \
     && grep -q '^# Issue #7:' "$STUB/brief" || fail "the fix session was not handed the issue and the last 200 lines of the test output: $(grep -c '' <<<"$out") lines, the last $(tail -n 1 <<<"$out" | cut -c1-200)"
-  [ "$(st 'select(.step == "blocked") | .reason')" = "the changed tests failed again after their one fix round (exit 1); nothing landed." ] \
-    || fail "the blocked reason is not the one sentence: $(st 'select(.step == "blocked") | .reason')"
+  # #1695: the reason names the rounds the card had, and the comment's headline (blockhead(), the Board's and the
+  # issue's short reason) is made from that reason as block() wrote it.
+  [ "$(st 'select(.step == "blocked") | .reason')" = "the changed tests failed again after their 3 fix rounds (exit 1); nothing landed." ] \
+    || fail "the blocked reason is not the one sentence naming 3 rounds: $(st 'select(.step == "blocked") | .reason')"
+  grep -qxF '7 --body **Blocked: the tests failed after 3 fix rounds**' "$STUB/comments" \
+    || fail "the block's comment on #7 (reason '$(st 'select(.step == "blocked") | .reason')') has no headline naming 3 fix rounds: $(head -n 3 "$STUB/comments")"
   # After the stub's lines come the run's own: a.test.sh's end (`-- FAIL a.test.sh`: filecmd()) and the note of the
   # linked files it ran (LINKED).
-  [ "$(st 'select(.step == "blocked") | .tail | split("\n") | [length, (.[0] | length), .[-3], .[-2], (.[-1] | startswith("conveyor: the change adds or changes no test file")), (.[-5] == .[-4] and (.[-4] | startswith("FAIL 000") and length == 3005))] | join("|")')" = "60|3005|FAIL gadget.test.ts: expected 2|-- FAIL a.test.sh|true|true" ] \
+  [ "$(st 'select(.step == "blocked") | .tail | split("\n") | [length, (.[0] | length), .[-3], .[-2], (.[-1] | startswith("conveyor: the change adds or changes no test file")), (.[-5] == .[-4] and (.[-4] | startswith("FAIL 000") and length == 3005))] | join("|")')" = "60|3005|FAIL gadget.test.ts: expected 2 (run 8)|-- FAIL a.test.sh|true|true" ] \
     || fail "the blocked line's tail is not the last 60 lines of the test output: $(st 'select(.step == "blocked") | .tail' | cut -c1-400)"
-  recok "$ST/cards.jsonl" "a card whose tests failed twice"
+  recok "$ST/cards.jsonl" "a card whose tests failed after 3 fix rounds"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] && [ ! -s "$STUB/filed" ] \
-    || fail "a card whose tests failed twice landed, left main dirty, left its worktree or filed a follow-up"
+    || fail "a card whose tests failed after 3 fix rounds landed, left main dirty, left its worktree or filed a follow-up"
   grep -q 'FAIL gadget' "$(st 'select(.step == "blocked") | "\($ENV.ST)/\(.kept)"')"/*.test || fail "the test output was not kept"
 }
 
@@ -274,9 +287,9 @@ t_trailerpath() {
 # Bug: Needs You lacks the running file, the timeout or the output of a card's timed-out last test run. t_testfails uses
 # fixture runs; a card run joins exit, log and output. Each run prints a failure, then reads a pipe no one writes.
 t_testtimeout() {
-  setup "[$(issue 7 2026-01-01)]"; tune '.tunables.testTimeout = 1'; mkfifo "$STUB/never"; echo "$GO" | tee "$STUB/review.1" > "$STUB/review.2"
+  setup "[$(issue 7 2026-01-01)]"; tune '.tunables.testTimeout = 1'; mkfifo "$STUB/never"; echo "$GO" | tee "$STUB/review.1" "$STUB/review.2" "$STUB/review.3" > "$STUB/review.4"
   echo 'echo x >> "$STUB/tests"; echo "FAIL [slow]: no answer yet"; read -r < "$STUB/never"' > "$STUB/test-cmd"; rulecard 7
-  [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = "the changed tests failed again after their one fix round (exit 124); nothing landed." ] \
+  [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = "the changed tests failed again after their 3 fix rounds (exit 124); nothing landed." ] \
     || fail "the card was not blocked after its timed-out test runs: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
   [ "$(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records | map(select(.name == "tests failed")) | last | [.why, .failures.timeout.file, (.output | contains("FAIL [slow]: no answer yet"))]')" \
     = '["exit 124: timed out after 1s in a.test.sh","a.test.sh",true]' ] || fail "Needs You does not show the timed-out run: $(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records')"

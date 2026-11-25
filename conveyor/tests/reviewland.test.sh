@@ -203,12 +203,12 @@ t_reviewlandprior() {
   [ "$by" = '["c1-7",""]' ] || fail "prior() of #7, after the owner gave back c3-7 (no kept work), gave [card, by] $by, not c1-7's patch with no review-land: $(cat "$T/$CASE/run.out")"
 }
 
-# A red test still blocks the landing (#1612): the next card's tests fail, before and after its one test fix, so it is
+# A red test still blocks the landing (#1612): the next card's tests fail, before and after each of its 3 test fixes, so it is
 # blocked with that test failure and nothing lands on main.
 t_reviewlandred() {
   rlblocked '[P1] a.txt:2 drops the line'
   echo 'echo x >> "$STUB/tests"; false' > "$STUB/test-cmd"
-  echo "$GO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
+  echo "$GO" | tee "$STUB/review.1" "$STUB/review.2" "$STUB/review.3" > "$STUB/review.4"
   rljob
   [ "$(rlby c1-7)" = review-land ] || fail "the second review block of #7 was not given back as review-land's: $(cat "$T/$CASE/run.out")"
   # loop: only a card run shows a failed test step stopping the landing.
