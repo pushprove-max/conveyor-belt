@@ -418,7 +418,7 @@ cardfailed() {
 # the two would wait on each other for ever. A card that no loop runs (land-branch, `lane fast land`) has no turn to
 # let it go: it goes on at once. Nor does a main-red fix card (issue 0, no branch: card()'s br; redfix(), lib/run.sh)
 # wait: the cards that fill the cap may wait for main (mainwait(), lib/mainred.sh), so for its fix, and the loop picks
-# no other fix card while it is open. As it waits, its live record says so and is brought up to date (as in
+# no other fix card while it is open and does not itself wait for main (redfix()). As it waits, its live record says so and is brought up to date (as in
 # releasewait(), lib/push.sh), so `health` and the loop's stuck check (turnended(), lib/run.sh) see a card that waits.
 caphold() { # <card> <issue> <worktree> <the step it waits to work in> [why it waits, after "card <card>"]
   local at

@@ -11,14 +11,18 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# Bug (O266): verdicts() alone on card c7, whose last run ran out of time in c.test (a unit naming no case). A unit
-# naming no case was main's only when main's run failed the file naming no case, so the card was blamed and main got
-# no main-red entry. The verdict is main, and the main-red record holds c.test, for each way main's run of c.test fails:
-# - fail: it fails its case `two` (a named failure);
-# - timeout (E15, review): it runs out of time in c.test too, so it names no failed case at all.
+# verdicts() alone on card c7, whose last run ran out of time in c.test (a unit naming no case), for each way main's
+# run of c.test ends:
+# - fail (bug O266): it fails its case `two` (a named failure). A unit naming no case was main's only when main's run
+#   failed the file naming no case, so the card was blamed and main got no main-red entry. The verdict is main, and
+#   the main-red record holds c.test. Issue 1688: the output of that failed run on main was removed with its
+#   worktree, so why it failed could not be read: it is kept in the state folder (mainprobe-out).
+# - timeout (issue 1688): it runs out of time in c.test too. A slow file was judged main red, its entry made every
+#   other card wait for main, and the whole belt stood: the verdict is the card's, and the record holds no entry.
 mrtimeout() { # <fail | timeout>
   redrunner ''
-  local w=$T/$CASE/cards/c7 out
+  local w=$T/$CASE/cards/c7 out s v=main reds='["c.test"]'
+  [ "$1" = fail ] || { v=card; reds='[]'; }
   echo 't_two() { false; }' > "$R/c.test" && git -C "$R" add c.test && git -C "$R" commit -qm c.test \
     && git -C "$R" worktree add -q --detach "$w" || fail "the card's worktree could not be made"
   # Main's run opens c.test and outlasts the card's time limit, set to 1 second (TEST_TIMEOUT): that limit ends the
@@ -27,13 +31,65 @@ mrtimeout() { # <fail | timeout>
   [ "$1" = fail ] || printf '%s\n' 'cp "$CONVEYOR_TEST_RERUN" "$STUB/redlist"; echo "== c.test" | tee -a "$CONVEYOR_TEST_LOG/r"; sleep 10' > "$STUB/mainrun-cmd" # sleep: main's run must outlast its 1-second limit, which ends it
   out=$(eng 'TEST_TIMEOUT=1; TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts c7 "$CONVEYOR_CARDS/c7" '"'"'{"files":[],"timeout":{"sec":1,"file":"c.test"}}'"'"' | jq -c .verdicts') \
     || fail "verdicts failed: $out"
-  [ "$out" = '[{"case":"c.test","verdict":"main"}]' ] && grep -qx $'fail\tc.test\t*' "$STUB/redlist" \
-    || fail "a time-out in a file that main's run ends with $1 did not run there or was not main's: $out: $(cat "$STUB/redlist" 2>&1)"
-  [ "$(jq -c '[.reds[].cases[].case]' "$ST/mainred.json" 2>/dev/null)" = '["c.test"]' ] \
-    || fail "with main's run of c.test ending with $1, the main-red record does not hold c.test: $(cat "$ST/mainred.json" 2>&1)"
+  [ "$out" = "[{\"case\":\"c.test\",\"verdict\":\"$v\"}]" ] && grep -qx $'fail\tc.test\t*' "$STUB/redlist" \
+    || fail "a time-out in a file that main's run ends with $1 did not run there or its verdict was not $v: $out: $(cat "$STUB/redlist" 2>&1)"
+  [ "$(jq -c '[.reds[]?.cases[].case]' "$ST/mainred.json" 2>/dev/null || echo '[]')" = "$reds" ] \
+    || fail "with main's run of c.test ending with $1, the main-red record does not hold $reds: $(cat "$ST/mainred.json" 2>&1)"
+  s=$(git -C "$R" rev-parse HEAD)
+  if [ "$1" = timeout ]; then
+    grep -qxF '== c.test' "$ST/mainprobe-out/$s/c7.testlog/r" \
+      || fail "the output of main's run of c.test at $s that ran out of time was not kept in the state folder: $(ls -R "$ST/mainprobe-out" 2>&1 | head -n 20)"
+    return 0
+  fi
+  grep -qF 'FAIL [two]: broken' "$ST/mainprobe-out/$s/c7.test" && [ -d "$ST/mainprobe-out/$s/c7.testlog" ] \
+    || fail "the output of main's failed run of c.test at $s was not kept in the state folder: $(ls -R "$ST/mainprobe-out" 2>&1 | head -n 20)"
+  # Review E2: card c7 asked again at the same commit takes main's kept result (mainprobe.json), and runs nothing: the
+  # only output of that failure was removed. Asked once more with no kept result, it runs again: that run's output is
+  # kept beside the first (c7.1), never in its place.
+  out=$(eng 'TEST_TIMEOUT=1; TEST_WAIT=; TEST_RUN=; TEST_FREE=; l='"'"'{"files":[],"timeout":{"sec":1,"file":"c.test"}}'"'"'
+    verdicts c7 "$CONVEYOR_CARDS/c7" "$l" >/dev/null && ls "$MAINPROBEOUT/'"$s"'" | tr "\n" " " && rm -f "$MAINPROBE" && verdicts c7 "$CONVEYOR_CARDS/c7" "$l" >/dev/null && ls "$MAINPROBEOUT/'"$s"'" | tr "\n" " "') \
+    || fail "verdicts asked again failed: $out"
+  [ "$out" = "c7.test c7.testlog c7.1.test c7.1.testlog c7.test c7.testlog " ] && grep -qF 'FAIL [two]: broken' "$ST/mainprobe-out/$s/c7.test" \
+    || fail "verdicts c7 at $s asked again, from main's kept result, then with none kept: the first run's output was not left whole, or the second run's not kept beside it: $out"
 }
 t_mainredtimeout() { mrtimeout fail; }
 t_mainredtimeoutmain() { mrtimeout timeout; }
+
+# Review E6 (issue 1688). Bug it catches: card c7's run on main at s fails c.test: two and its output is kept, but
+# before verdicts() makes s's entry (mainred()), main moves on and another card's failed run there (probeout() of c9)
+# removed s's output, as s had no entry and none was open: the entry then opened with no output to read. Here mainred()
+# first lands a commit on main and runs c9's probeout() in another process, then makes the entry as it would.
+t_mainredprobehold() {
+  redrunner ''
+  local w=$T/$CASE/cards/c7 out s
+  echo 't_two() { false; }' > "$R/c.test" && git -C "$R" add c.test && git -C "$R" commit -qm c.test \
+    && git -C "$R" worktree add -q --detach "$w" && s=$(git -C "$R" rev-parse HEAD) || fail "the card's worktree could not be made"
+  out=$(eng 'eval "made$(declare -f mainred)"
+    mainred() {
+      git commit -q --allow-empty -m later && echo x > "$CONVEYOR_CARDS/c9.test" && (probeout "$(git rev-parse HEAD)" "$CONVEYOR_CARDS/c9") \
+        && ls "$MAINPROBEOUT/'"$s"'" > "$STUB/held" 2>&1; mademainred "$@"; }
+    TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts c7 "$CONVEYOR_CARDS/c7" '"'"'{"files":[{"file":"c.test","cases":[{"name":"two","line":1}]}]}'"'"' | jq -c .verdicts') \
+    || fail "verdicts failed: $out"
+  [ "$out" = '[{"case":"c.test: two","verdict":"main"}]' ] && [ "$(jq -c '[.reds[] | .sha]' "$ST/mainred.json" 2>/dev/null)" = "[\"$s\"]" ] \
+    || fail "card c7 failing c.test: two, which fails on main at $s: no verdict main or no entry of $s: $out: $(cat "$ST/mainred.json" 2>&1)"
+  [ "$(tr '\n' ' ' < "$STUB/held")" = 'c7.test c7.testlog ' ] && grep -qF 'FAIL [two]: broken' "$ST/mainprobe-out/$s/c7.test" \
+    || fail "probeout c9 at a later commit, run as verdicts c7 at $s was about to make its entry: c7's kept output at $s was removed: $(cat "$STUB/held" 2>&1); now: $(ls -R "$ST/mainprobe-out" 2>&1 | head -n 20)"
+}
+
+# Review E4 (issue 1688). Bug it catches: main's run at commit b2 failed a case that the open entry of commit a1 holds,
+# so mainred() made no entry for b2; once main moved on, the next failed run (at c3) removed b2's output while the
+# fix of a1 was still open. probeout() at c3 keeps a1's and b2's output while fixa is open, and removes both once it
+# has landed.
+t_probeoutopen() {
+  setup "[$(issue 7 2026-01-01)]"
+  local out
+  out=$(eng 'w=$CONVEYOR_CARDS/c9; mkdir -p "$CONVEYOR_CARDS" "$MAINPROBEOUT/a1" "$MAINPROBEOUT/b2" && echo x > "$w.test" \
+    && echo "{\"reds\":[{\"sha\":\"a1\",\"card\":\"fixa\",\"cases\":[{\"case\":\"c.test\",\"file\":\"c.test\"}]}]}" > "$MAINRED" \
+    && append "$(line fixa 0 picked ok)" && probeout c3 "$w" && ls "$MAINPROBEOUT" | tr "\n" " " && echo "|" \
+    && append "$(line fixa 0 landed ok)" && echo x > "$w.test" && probeout c3 "$w" && ls "$MAINPROBEOUT" | tr "\n" " "' 2>&1)
+  [ "$out" = $'a1 b2 c3 |\nc3 ' ] \
+    || fail "probeout c3 with a1's entry open (fixa picked), b2 with no entry, then with fixa landed: the kept output was not a1 b2 c3, then c3 alone: $out"
+}
 
 # Issue 1613. Bug it catches: with every control failing on main, verdicts() gave each failing case to the machine, so
 # a landing that broke a case put the loop on a machine hold that named no landing, and the hold stood until main

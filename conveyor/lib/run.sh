@@ -140,16 +140,16 @@ urgent() {
       | select(IN($on[]) | not) | capture("-(?<n>[0-9]+)$").n | tonumber | select($only == null or IN($only[]))] | unique | select(. != [])' 2>/dev/null
 }
 # A red main commit whose fix card is not picked yet, or was given back by `retry` (mainred.sh redpick()): prints its commit;
-# nothing when there is none, when one of the loop's own cards in progress is a main-red fix card, or in a run with
-# --only (whose pick takes no fix card). With the cap reached, the loop picks that fix card in one slot beyond it
-# (issue 612): the cards on the belt that fail only what is red on main wait for that fix, and with every slot theirs
-# nothing would move. One such card at a time; once it ends its slot ends with it, as the loop counts its cards
-# again. The machine's cap and room apply as to any card (mainred.sh redpick(): room()).
+# nothing when there is none, when a main-red fix card of the loop's own in progress does not wait for main, or with --only.
+# While each such card waits for main (mainwait(): live mainWait), only an entry holding a case one waits on (issue 1688:
+# a waiting fix card holds back no fix but the one that ends its wait). With the cap reached, the loop picks the fix card of
+# that commit (redpick(): REDONLY) in one slot beyond it (issue 612): with every slot held by cards that wait for that fix,
+# nothing would move. One at a time, but for one that ends such a wait; its slot ends with it. The machine's cap applies.
 redfix() { # <the loop's own cards in progress, card ids one a line>
   [ -z "${ONLY:-}" ] && [ -s "$MAINRED" ] || return 0
-  jq -r --slurpfile s <(turncards) --argjson own "$(jq -Rsc '[splits("\n") | select(. != "")]' <<<"$1")" \
-    '[.reds[]?.card | strings] as $fix | select(any($own[]; IN($fix[])) | not) | [$s[].card] as $taken
-    | first(.reds[]? | select(.card == null or (.card | IN($taken[]) | not)) | .sha)' "$MAINRED" 2>/dev/null
+  jq -r --slurpfile s <(turncards) --slurpfile lv <(live) --argjson own "$(jq -Rsc '[splits("\n") | select(. != "")]' <<<"$1")" '[.reds[]?.card | strings] as $fix
+    | [$own[] | select(IN($fix[]))] as $mine | select(all($mine[]; $lv[0][.].mainWait? != null)) | [$mine[] | $lv[0][.].mainWait.cases[]?] as $wc | [$s[].card] as $taken
+    | first(.reds[]? | select(.card == null or (.card | IN($taken[]) | not)) | select($mine == [] or any(.cases[]?; .case | IN($wc[]))) | .sha)' "$MAINRED" 2>/dev/null
 }
 # The cards an older speed check blocked, at the loop's start: each is retried as `retry <issue> --fresh` retries it
 # (its kept work moved to kept-dropped), with no one asked, and says why (SPEEDWHY) in the log and on its retried line.
@@ -687,9 +687,9 @@ turnpick() {
   # A queued card a card on the belt waits on (urgent) goes first, past the cap; the rest only below the cap. Each pick
   # holds the records' lock for LOCKLIMIT seconds at most (lockedfor): one stopped there fails as any failed pick.
   picked=''; [ "$asking" != 1 ] || [ -z "$urgent" ] || { picked=$(ONLY=$urgent lockedfor pick fresh pick retried "$pct" "${issues:-}" "${ctl:-null}") && [ "$picked" != wait ]; } || picked=''
-  # With the cap reached, a main-red fix card (red) takes the one slot beyond it; no queued issue does.
+  # With the cap reached, a main-red fix card (red) takes the one slot beyond it, the fix of red's own commit; no queued issue does.
   [ -n "$picked" ] || [ "$asking" != 1 ] || [ -z "$red" ] \
-    || { picked=$(BEYOND='main is red' lockedfor pick fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "${ctl:-null}") && [ "$picked" != wait ]; } || picked=''
+    || { picked=$(BEYOND='main is red' REDONLY=$red lockedfor pick fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "${ctl:-null}") && [ "$picked" != wait ]; } || picked=''
   # Below the cap, the issue it would take is first read beside the cards on the belt (overlap(), outside the lock).
   [ -n "$picked" ] || [ "$building" -ge "$cap" ] || [ "$asking" != 1 ] || { overlap "${issues:-}" "$([ "$left" != 0 ] || echo retried)" "$ctl"; issues=$OVL; }
   [ -n "$picked" ] || [ "$building" -ge "$cap" ] \

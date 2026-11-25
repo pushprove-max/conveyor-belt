@@ -67,6 +67,35 @@ echo two >> a.txt' > "$STUB/build"
   loop check || fail "the record check refuses a picked line with its slot beyond the cap"
 }
 
+# Issue 1688. Bug it catches: redfix() gave the loop no fix card while one of its own cards was a main-red fix card,
+# even when that card waited itself for main to change on another entry. With every slot waiting, the fix for that
+# entry never started and the whole belt stood. Fix card cfix (entry of 1111) is in flight; entries 0000 (older) and
+# 2222 have no card. While cfix builds, redfix() names nothing (one fix card at a time, issue 612); once cfix waits for
+# main on 2222's case, it names 2222, not the older 0000 (review E1: the pick took the oldest entry, a fix that does
+# not end the wait), and the loop's pick turn at the cap (turnpick(), with run()'s variables as t_locklimit sets
+# them; cardrun() only says) starts the fix card of 2222. The wait is the real mainwait(), run in the background until
+# its live record is written: a hand-written record would not show that mainwait() marks the wait that redfix() reads.
+t_redfixwaiting() {
+  setup "[$(issue 7 2026-01-01)]"
+  local s; s=$(git -C "$R" rev-parse HEAD)
+  mkdir -p "$T/$CASE/cards/cfix"
+  jq -cn '{reds: [{sha: "1111111111111111111111111111111111111111", cases: [{case: "a.test: one", file: "a.test", by: "c1", files: [], last: ""}], card: "cfix"},
+    {sha: "0000000000000000000000000000000000000000", cases: [{case: "c.test: three", file: "c.test", by: "c3", files: [], last: ""}], card: null},
+    {sha: "2222222222222222222222222222222222222222", cases: [{case: "b.test: two", file: "b.test", by: "c2", files: [], last: ""}], card: null}]}' > "$ST/mainred.json"
+  fx_in 'cd "$R" || exit 8; append "$(line cfix 0 picked ok "{\"mainRed\": \"1111111111111111111111111111111111111111\"}")" || exit 8
+    cardrun() { echo "started: issue $2"; }
+    asking=1 urgent="" building=1 cap=1 left=5 pct="" running=0 serve=1 pusher="" started=0 waits="" ctl=$(ctl) issues=$(cat "$STUB/issues.json")
+    declare -A mine=()
+    echo "building: $(redfix cfix)"; mainwait "$CARDS/cfix" '"$s"' "b.test: two" & p=$!
+    wait_until "[ -s \"\$CARDS/cfix.live\" ]" || echo "mainwait wrote no live record"
+    red=$(redfix cfix); echo "waiting: $red"; kill "$p"
+    turnpick; wait'
+  [ "$(cat "$T/$CASE/run.out")" = $'building: \nwaiting: 2222222222222222222222222222222222222222\nstarted: issue 0' ] \
+    || fail "redfix cfix, with fix card cfix building and then waiting for main on b.test: two (entry 2222, no card; older entry 0000 no card), then the pick turn: not nothing, then 2222, then a start: $(cat "$T/$CASE/run.out")"
+  [ "$(st 'select(.step == "picked") | .mainRed' | tr '\n' ' ')" = "1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 " ] \
+    || fail "the pick turn at the cap, with cfix waiting on entry 2222 and red=2222, did not start the fix card of 2222: $(st 'select(.step == "picked") | .mainRed' | tr '\n' ' ')"
+}
+
 # Issue 1581. Bug it catches: the turn gave jq the open list, bodies and all, as one argument; over 128 KiB Linux
 # refuses it, jq never started, and no seat account of an open issue was asked for while a seat was at the guard.
 # Here #13 has a 140 KiB body; the record keeps seats for #7 (open) and #8 (not open), so only 7 is named.

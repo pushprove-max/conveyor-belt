@@ -625,7 +625,11 @@ failure gets a verdict:
   Board, and the reviews and fix sessions after it, name the case); a case an open fix card of an earlier commit
   holds starts nothing more. `retry <card id>` gives the card back when it blocks (built again from nothing), and
   `shut <card id>` shuts it; the Board's Retry and Close in Needs you send its card id. `mainred.json` in the state folder keeps the commits,
-  their cases and their cards. The brief also names the landing that broke a case, when it is known: the first
+  their cases and their cards. When the run on main fails or runs out of time, its output goes to the state folder,
+  to `mainprobe-out/<commit>/<card>.test` and `<card>.testlog`. A later run of the same card on that commit goes to
+  `<card>.1.test`, `<card>.2.test` and so on, so the first output stays. It stays there at least while main is at that commit,
+  and while the record holds an entry for that commit whose fix card has not landed or closed. A commit with no entry of
+  its own keeps its output while any entry in the record is open. The brief also names the landing that broke a case, when it is known: the first
   landing on main after the last one whose card's test step ran the case's file (within the last 500 commits). The
   case's entry keeps a link from each file that landing changed to the case's test file, and the fix card stages
   those links in `.conveyor/test-links.json` (`{"<changed file>": ["<test file>", ...]}`), so they land with its fix.
@@ -648,7 +652,9 @@ failure gets a verdict:
   (build, review, fix, lint) do not wait, and a main-red fix card (a card that an entry of the record names) runs its
   tests at once. Those cards
   count against the cap while they wait (Control, above), so the
-  loop starts a main-red fix card even with the project's cap reached: it takes one slot beyond the cap, one such card at a time, and the slot ends with it. The machine's cap
+  loop starts a main-red fix card even with the project's cap reached: it takes one slot beyond the cap, one such card at a time, and the slot ends with it.
+  A fix card that itself waits for main to change does not count here: the loop starts the fix card for the case it waits on,
+  and not the fix card of another entry. The machine's cap
   and pause apply as to any card. The Board shows that card as "beyond the cap: main is red".
 - **machine**: the same case failed on main too, but the machine is at fault, not main. This is so when the case's
   file passed before with the same inputs (the test results cache holds a pass of it with main's content), or when
