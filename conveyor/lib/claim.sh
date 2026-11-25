@@ -571,8 +571,9 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     git -C "$3" add -A && ! git -C "$3" diff --cached --quiet || { block "$1" "$2" "$3" "fix: the session that brought the card's change onto main left no change"; return 1; }
     parsecheck=1; rm -f "$3.base"
     # A clash in documentation alone (a README), and a session that changed nothing outside it: the card's review and
-    # its test pass stand, so only its product checks run before it lands. It claims again, as one that kept its claim.
-    if [ -n "$docs" ] && [ "$(cardpatch "$3" ':(exclude)*.md')" = "$docs" ]; then [ -z "$dp" ] || tested "$3"; continue; fi
+    # its test pass stand once its push checks pass on its new change (docstested()), so only its product checks run
+    # before it lands. It claims again, as one that kept its claim.
+    if [ -n "$docs" ] && [ "$(cardpatch "$3" ':(exclude)*.md')" = "$docs" ]; then [ -z "$dp" ] || docstested "$1" "$3"; continue; fi
     moved=2
     [ -z "$away$stk" ] || return 2
   done
@@ -599,6 +600,12 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
 cardpatch() { local p r; p=$(git -C "$1" diff --cached --binary --no-renames -U0 HEAD -- "${@:2}" 2>/dev/null | diffid 2>/dev/null); r=$?; [ -z "$p" ] || printf '%s\n' "$p"; return $r; } # <worktree> [pathspec...]
 tested() { [ ! -e "$1.ready" ] || readyput "$1" 'del(.units, .cases, .sel) + {tested: true, tree: $t, head: $h, patch: $p, since: now} + if $u then $u | {units, cases} else {} end' \
   --arg t "$(git -C "$1" write-tree)" --arg h "$(git -C "$1" rev-parse HEAD)" --arg p "$(cardpatch "$1")" --argjson u "$(jq -ce objects "$1.passed" 2>/dev/null || echo null)" || rm -f "$1.ready"; } # <worktree>
+# A card whose change a session changed in documentation (*.md) alone, its change outside it the one whose tests passed
+# (settle(), cardlanding() in lib/cardland.sh): its test pass stands (tested()) only once the push checks pass on its new
+# change (pushgatewait(), lib/contract.sh), as they select by changed files and a .md file can fail one. A batch takes
+# a card on that mark alone (gather()), and a tested card runs no push check while it waits (settle()). On a failure
+# its <worktree>.ready is removed: no batch takes it, and its landing gate (pushgate()) blocks it at its turn.
+docstested() { [ ! -e "$2.ready" ] || { pushgatewait "$1" "$2" && tested "$2"; }; } # <card> <worktree>
 # <worktree>.ready rewritten by <jq filter> (with its jq args), under <worktree>.ready.lock; nothing when it has none, 1
 # when it could not be written. A queued card's own rewrites (settle(), tested()) and a batch card's (stalepass(),
 # batchrun()) run in two processes: unlocked, a rewrite that read the file before the other's write put back what that

@@ -110,8 +110,8 @@ cardready() {
 # again (this loop again) or '' (on).
 cardlanding() {
   # Back from the landing rebuild with its change outside documentation the one that passed its tests (docpass): it
-  # lands on that run, with only its product checks run again.
-  [ -z "$docpass" ] || { [ "$docpass" != "$(cardpatch "$wt" ':(exclude)*.md')" ] || tested "$wt"; docpass=''; }
+  # lands on that run, with only its product checks and its push checks run again (docstested()).
+  [ -z "$docpass" ] || { [ "$docpass" != "$(cardpatch "$wt" ':(exclude)*.md')" ] || docstested "$c" "$wt"; docpass=''; }
   away=''; jq -e '.away == true' "$wt.claim" >/dev/null 2>&1 && away=1
   trc=''
   if [ -z "$away" ]; then

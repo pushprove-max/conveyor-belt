@@ -261,6 +261,59 @@ t_pushgatewait() {
     || fail "settle() did not say why the card (web.ts) runs no test, naming typecheck-web: $(cat "$T/$CASE/run.out")"
 }
 
+# Main ($R) with README.md, its hook failing the check docs-lint on a change that holds README.md while the file <o>
+# is there, and card c7 ($FXWT) on that main, its change code.txt and README.md, staged, its <worktree>.ready marked
+# tested on that change (tested()).
+docscard() { # <o>
+  contractmain '[]' 0
+  pushgatehook "read -r _ l _ r; [ -e $(printf %q "$1") ] && git diff --name-only \"\$r\" \"\$l\" | grep -qx README.md || exit 0; echo 'push-checks: FAILED docs-lint' >&2; exit 1"
+  echo base > "$R/README.md" && git -C "$R" add README.md && git -C "$R" commit -qm 'the readme' || fail "main's README.md"
+  FXWT=$T/$CASE/cards/c7; git -C "$R" worktree add -q --detach "$FXWT" && echo seven > "$FXWT/code.txt" && echo seven > "$FXWT/README.md" \
+    && git -C "$FXWT" add -A && echo '{"issue":7}' > "$FXWT.ready" || fail "the card's change"
+}
+
+# Bug it catches: a session that brought a card's change onto main, changing only its documentation (README.md), kept
+# its test pass (tested() in settle()), so the card waited marked tested, ran no push check (settle() runs
+# pushgatewait() only on an untested card), and a batch took it on that mark (gather()) with a push check its new
+# README.md fails never run. Main moves README.md under c7, so its change no longer applies; settle(), as card() calls
+# it at the landing, gives it to the session (a stand-in that merges README.md and keeps code.txt), and with main's
+# hook failing docs-lint on README.md its <worktree>.ready is gone: no batch takes it.
+t_pushgatedocs() {
+  local o=$T/$CASE/docsfail
+  docscard "$o"; : > "$o"
+  landed 7 | jq -c '.card = "c7" | .step = "picked"' >> "$ST/cards.jsonl"
+  echo main > "$R/README.md" && git -C "$R" commit -qam 'main moves README.md' || fail "main's move"
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'cd "$R" || exit 8; caught="" waitsec=0 behind="[]" parsecheck=""
+    tested "$FXWT"; testedhere "$FXWT" || { echo "c7 not marked tested"; exit 8; }
+    session() { (cd "$1" && echo seven > code.txt && printf "%s\n" main seven > README.md); echo "{}"; }
+    checked() { :; }
+    settle c7 7 "$FXWT" "Build the issue." land "$(issue 7 2026-01-01)"; echo "settle: $?"'
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = 'settle: 0' ] && [ "$(git -C "$FXWT" diff --cached --name-only HEAD | tr '\n' ' ')" = 'README.md code.txt ' ] \
+    || fail "settle() did not bring c7's change (code.txt, README.md) onto main by the session: $(cat "$T/$CASE/run.out")"
+  [ ! -e "$FXWT.ready" ] && grep -qx "push check: docs-lint failed on the card's change (exit 1); nothing landed." "$T/$CASE/run.out" \
+    || fail "after a README.md-only merge session in settle(), c7 whose README.md fails the push check docs-lint kept its test pass, so a batch can land it: $(cat "$FXWT.ready" "$T/$CASE/run.out" 2>&1)"
+}
+
+# Bug it catches: the same at the landing rebuild (cardlanding(), lib/cardland.sh): back from a rebuild that changed
+# only README.md (docpass, its change outside documentation as it was), the card kept its test pass (tested()) with no
+# push check run. cardlanding() is called as card() calls it; settle() is a stand-in that prints the card's mark and
+# ends it. With main's hook passing, the card is marked tested on its new change; with it failing docs-lint on
+# README.md, its <worktree>.ready is gone, so no batch takes it.
+t_pushgatedocsland() {
+  local o=$T/$CASE/docsfail
+  docscard "$o"
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'cd "$R" || exit 8; c=c7 n=7 wt=$FXWT br="" sprompt="Build the issue." issue=$(issue 7 2026-01-01)
+    settle() { if [ -e "$wt.ready" ]; then echo "ready: $(testedhere "$wt" && echo tested)"; else echo "ready: gone"; fi; return 1; }
+    echo "{\"issue\":7,\"tested\":true}" > "$wt.ready"; docpass=$(cardpatch "$wt" ":(exclude)*.md"); cardlanding
+    : > '"$(printf %q "$o")"'; echo "{\"issue\":7,\"tested\":true}" > "$wt.ready"; docpass=$(cardpatch "$wt" ":(exclude)*.md"); cardlanding'
+  [ "$(grep '^ready: ' "$T/$CASE/run.out" | head -n 1)" = 'ready: tested' ] \
+    || fail "back from a README.md-only rebuild whose change passes main's hook, cardlanding() did not mark c7 tested on it: $(cat "$T/$CASE/run.out")"
+  [ "$(grep '^ready: ' "$T/$CASE/run.out" | sed -n 2p)" = 'ready: gone' ] && grep -qx "push check: docs-lint failed on the card's change (exit 1); nothing landed." "$T/$CASE/run.out" \
+    || fail "back from a README.md-only rebuild whose README.md fails the push check docs-lint, cardlanding() kept c7's test pass, so a batch can land it: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug it catches: the push check ran outside the test slots, beside every test run of a full machine, and with no live
 # record, so the loop took a quiet hook for a card with no process of its step (stuckcard(), lib/run.sh) and stopped
 # it before pushTimeout; and (review of #1683) a check that took a slot when one was free but ran the hook with none
