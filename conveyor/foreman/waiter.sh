@@ -123,7 +123,7 @@ mkdir -p "$FD" || exit 0
 # --start takes waiter.lock under claim.lock (fd 9, closed once waiter.pid names it), as a claim stops and starts the
 # session's waiter under it (lib.sh claim_): a claim beside this hook (foreman.sh start) ends before this reads
 # waiter.pid, or reads the waiter.pid this writes, never one this waiter is stopping.
-[ "$MODE" != --start ] || { exec 9>>"$FD/claim.lock" && flock -w 30 9; } || exit 0
+[ "$MODE" != --start ] || { exec 9>>"$FD/claim.lock" && lockturn; } || exit 0
 if [ "$MODE" = --held ]; then
   flock -n 7 2>/dev/null || exit 0 # the lock its starter took, on fd 7: anything else is no lock of a waiter
 else

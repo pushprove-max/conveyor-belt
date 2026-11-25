@@ -245,7 +245,20 @@ await_start() {
   done
 }
 # locked <command> [<argument>...]: runs it holding claim.lock, so two changes of the mark or of former never mix.
-locked() { mkdir -p "$FD" && ( flock -w 30 9 || exit 1; "$@" ) 9>>"$FD/claim.lock"; }
+locked() { mkdir -p "$FD" && ( lockturn || exit 1; "$@" ) 9>>"$FD/claim.lock"; }
+# lockturn: takes claim.lock on fd 9, after however many turns before it, and writes the turn it takes to claim.turn.
+# Every take of claim.lock goes through it (locked, and the start hook waiter.sh --start), so each change of hands shows.
+# It gives up (status 1) only when no turn was taken in a whole wait of CONVEYOR_FOREMAN_LOCK_WAIT seconds (30; set
+# by the tests): one holder kept the lock all that time. Bug (issue 1687): a fixed 30 s wait made claims at once on a
+# loaded machine give up before their turn, though no holder was stuck.
+lockturn() {
+  local was now
+  was=$(cat "$FD/claim.turn" 2>/dev/null)
+  until flock -w "${CONVEYOR_FOREMAN_LOCK_WAIT:-30}" 9; do
+    now=$(cat "$FD/claim.turn" 2>/dev/null); [ "$now" != "$was" ] || return 1; was=$now
+  done
+  printf '%s\n' "$BASHPID $EPOCHREALTIME" > "$FD/claim.turn"
+}
 # former: the sessions that held the role and lost it, one a line: "<id>" until it is told so at its next start, then
 # "<id> told". Only a claim takes a session off it, so a former Foreman never takes the role back by a resume.
 # forget <session id>: takes it off former. told <session id>: marks it told.

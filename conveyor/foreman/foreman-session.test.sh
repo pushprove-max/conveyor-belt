@@ -514,6 +514,53 @@ mkdir -p "$T/ask"; snap '[12,15,16,17,18]' '[7,8]' | jq -c '.pushedCards = [{iss
 grep -qF 'alpha: #40 landed' "$FD"/pending/*.wake || fail "the awaited issue's landing was not named: $(cat "$FD"/pending/*.wake)"
 }
 
+# Bug (issue 1687): claim.lock's wait was a fixed 30 s, so of ten claims at once on a loaded machine five gave up before
+# their turn, though no holder was stuck. A claim waits while the lock changes hands, and gives up, with its message,
+# only when one holder keeps it for a whole wait (CONVEYOR_FOREMAN_LOCK_WAIT, 1 s in these two cases).
+# hold <name>: a holder of claim.lock by the real lock (lib.sh locked); it writes its pid to $T/<name>.held once it
+# holds the lock and keeps it until a line is written to the fifo $T/<name>. held <name>: waits until it holds the lock.
+# The case's end kills each process it keeps at a fifo ($T/*.held, $T/gate/pid<n>): a failed check leaves none blocked.
+hold() { mkfifo "$T/$1"; trap 'kill $(cat "$T"/*.held "$T"/gate/pid* 2>/dev/null) 2>/dev/null' EXIT; (. "$SRC/lib.sh" && locked bash -c 'echo $$ > "$1.held"; read -r _ < "$1"' _ "$T/$1") & }
+held() { wait_until "[ -s '$T/$1.held' ]" || fail "the holder $1 did not take claim.lock"; }
+t_lock_turns() {
+CASE=lock-turns
+ada; hold a; held a; G=$T/gate; mkdir -p "$G"
+# With GATE set, each wait at claim.lock (flock -w <s> 9) waits first for a line on the fifo $G/go<n> (its nth wait),
+# after writing $G/call<n>, then runs the real flock for its whole time and writes its status to $G/rc<n>: the test,
+# not the clock, picks who holds the lock while each wait runs. With HOLD set, the waiter's flock -n 7 (its first step
+# once it holds claim.lock) writes its pid to $HOLD.held and waits for a line on the fifo $HOLD, then ends the waiter.
+flock() {
+  local n rc
+  if [ -n "${GATE:-}" ] && [ "${1:-}" = -w ] && [ "${3:-}" = 9 ]; then
+    n=$(($(cat "$GATE/n" 2>/dev/null || echo 0) + 1)); echo "$n" > "$GATE/n"; echo "$BASHPID" > "$GATE/pid$n"
+    mkfifo "$GATE/go$n" && : > "$GATE/call$n" && read -r _ < "$GATE/go$n"
+    command flock "$@"; rc=$?; echo "$rc" > "$GATE/rc$n"; return "$rc"
+  elif [ -n "${HOLD:-}" ] && [ "$*" = '-n 7' ]; then echo "$BASHPID" > "$HOLD.held"; read -r _ < "$HOLD"; exit 0; fi
+  command flock "$@"
+}
+(export -f flock; export GATE=$G CONVEYOR_FOREMAN_LOCK_WAIT=1; exec bash "$SRC/foreman.sh" claim c1) > "$T/c1" 2>&1 & cp=$!
+wait_until "[ -e '$G/call1' ] || ! kill -0 $cp 2>/dev/null"
+[ -e "$G/call1" ] || fail "the claim (foreman.sh claim c1) did not wait at claim.lock: $(cat "$T/c1")"
+# While the claim's first wait is held back, a frees the lock and b, the session w0's start hook (waiter.sh --start, no
+# claim), takes it: the wait runs its whole 1 s with b holding it, and the claim must wait again, as the lock changed hands.
+echo 'w0 2026-01-01T00:00:00Z' > "$FD/session"; echo w0 > "$FD/started"; mkfifo "$T/b"
+(export -f flock; export HOLD=$T/b CONVEYOR_WAITER_START=1; exec bash "$SRC/waiter.sh" <<<'{"session_id":"w0"}') > "$T/b.out" 2>&1 & echo > "$T/a"; held b
+echo > "$G/go1"
+wait_until "[ -e '$G/call2' ] || ! kill -0 $cp 2>/dev/null"
+[ "$(cat "$G/rc1" 2>/dev/null)" = 1 ] || fail "the claim's first wait at claim.lock (foreman.sh claim c1, b holding it) did not time out: status $(cat "$G/rc1" 2>/dev/null)"
+[ -e "$G/call2" ] || fail "a claim whose wait timed out while claim.lock went from a to the start hook (foreman.sh claim c1; waiter.sh --start, input {\"session_id\":\"w0\"}) gave up: $(cat "$T/c1")"
+echo > "$T/b"; echo > "$G/go2"
+wait "$cp" || fail "a claim that waited again for claim.lock (foreman.sh claim c1) failed once the lock was free: $(cat "$T/c1")"
+[ "$(cut -d' ' -f1 "$FD/session")" = c1 ] || fail "the claim that waited (foreman.sh claim c1) did not move the mark: $(cat "$FD/session")"
+}
+t_lock_stuck() {
+CASE=lock-stuck
+ada; hold a; held a
+out=$(CONVEYOR_FOREMAN_LOCK_WAIT=1 bash "$SRC/foreman.sh" claim c1 2>&1) && fail "a claim (foreman.sh claim c1) behind a holder that kept claim.lock for the whole wait succeeded: $out"
+grep -qxF "foreman: this session could not be made the Foreman ($FD/session)" <<<"$out" \
+  || fail "a claim (foreman.sh claim c1) that could not get claim.lock did not say so: $out"
+}
+
 t_stale() {
 CASE=stale
 # Bug caught (issue 179): a project that follows main stayed on an old engine for hours, its background take failing,
@@ -533,7 +580,7 @@ out=$(sess s1 resume | bash "$SRC/foreman.sh" start | ctx); [[ $out != *'old eng
 
 # Every case at once, each in a subshell on its own fixture; each one's output is shown once all have ended, and the
 # test passes only when each case ran to its end.
-cases=(state_stop state_stop_done state_stop_done_end state_stop_cap reply_stop filing ask_pin ask_self session session_fork session_claims stale)
+cases=(state_stop state_stop_done state_stop_done_end state_stop_cap reply_stop filing ask_pin ask_self session session_fork session_claims lock_turns lock_stuck stale)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for one_case in $SEL; do case " ${cases[*]} " in *" $one_case "*) ;; *) echo "unknown case $one_case" >&2; exit 2 ;; esac; done
