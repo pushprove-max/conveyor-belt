@@ -59,7 +59,13 @@ t_branchretry() {
   local out c2
   brsetup keep
   out=$(loop retry 0 2>&1); grep -qF "blocked now: $BRC (Branch: lb)" <<<"$out" || fail "retry 0 does not name the blocked land-branch card $BRC by its branch: $out"
-  out=$(loop retry "$BRC" 2>&1) && [ -z "$(st "select(.card == \"$BRC\")")" ] || fail "retry $BRC did not give back the blocked land-branch card: $out"
+  # A fast lane holding another change: retry checks branch lb against it (laneheld(), lanein()), which reads main's
+  # name. Bug it catches: retry read no pack names first, so it stopped with "BRANCH: unbound variable", and the
+  # entry's brief (branchissue()) lost the branch's commit messages.
+  lane fast-lane f.txt lane || fail "the fast lane could not be made"
+  out=$(loop retry "$BRC" 2>&1) && [ -z "$(st "select(.card == \"$BRC\")")" ] || fail "retry $BRC (fast-lane present) did not give back the blocked land-branch card: $out"
+  jq -e 'any(.cards[]; .label == "Branch: lb" and (.body | contains("fix(tooling): lb change")))' "$ST/testactions/cards.json" > /dev/null \
+    || fail "retry $BRC: the entry of branch lb does not carry its commit message fix(tooling): lb change: $(cat "$ST/testactions/cards.json")"
   brnext; c2=$(head -n 1 "$T/$CASE/run.out")
   [ "$c2" != "$BRC" ] && [ "$(st "select(.card == \"$c2\" and .step == \"picked\") | [.issue, .noIssue] | @json")" = '[0,"Branch: lb"]' ] \
     || fail "after retry $BRC, the pick did not take it again as a new card named Branch: lb: $(cat "$T/$CASE/run.out") $(st 'select(.step == "picked")')"

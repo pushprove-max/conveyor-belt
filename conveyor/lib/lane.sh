@@ -128,6 +128,9 @@ branchback() { # <card> <its lines>
   local br t k lock rec body tip held='' mt from to
   br=$(jq -rs 'map(select(.step == "picked")) | first | select(.issue == 0) | .branch | strings' <<<"$2") || return 1
   [ -n "$br" ] || return 0
+  # BRANCH, main's name, is the pack's (names(), lib/prompts.sh): `retry` reads no pack names before this, and
+  # laneheld() (lanein()), the kept patch and branchissue() all read it.
+  names || return 1
   tip=$(git rev-parse -q --verify "refs/heads/$br^{commit}") || tip=''
   ! laneheld "$br" "$tip" || owneronly land || return 1
   ! jq -e --arg c "$1" 'any(.cards[]?; .card == $c)' "$TACARDS" >/dev/null 2>&1 || held=1
@@ -136,8 +139,6 @@ branchback() { # <card> <its lines>
     [ -n "$tip" ] || { echo "conveyor: card $1 has no kept patch, and its branch $br is gone: nothing to land; nothing changed" >&2; return 1; }
     # The change land-branch squash-merges: from main to the tip merged into main, so the patch applies to main as it
     # is now. A tip that no longer merges: its change against the commit it forked from, which the next card ports.
-    # BRANCH, main's name, is the pack's (names(), lib/prompts.sh): `retry` reads no pack names before this.
-    names || return 1
     if mt=$(git merge-tree --write-tree "refs/heads/$BRANCH" "$tip" 2>/dev/null); then from=refs/heads/$BRANCH; to=$(head -n 1 <<<"$mt")
     else from=$(git merge-base "refs/heads/$BRANCH" "$tip") && to=$tip || { echo "conveyor: branch $br shares no commit with $BRANCH; nothing changed" >&2; return 1; }; fi
     k=kept/$1
