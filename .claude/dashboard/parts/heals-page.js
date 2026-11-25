@@ -2,7 +2,8 @@
 // The Self-heals tab (issue 1562): the self-heals list of each project on a page of its own, after Benchmarks, drawn
 // from the Declined part's heals (panels/declined.js registers it). Its parts, top to bottom:
 //   the title line, with the days an entry stays unseen (the Rules setting healsdays, as the record gives it) and a link
-//     to that setting, and when the list was read (kept through a failed read, with the list it read then); under the
+//     to that setting, when the list was read (kept through a failed read, with the list it read then), and for each
+//     project when the sort of the queued follow-ups last ran and how many it moved, or that it has not run; under the
 //     title, "What is a self-heal?", closed at first (aboutEl, issue 1622);
 //   five tiles: on the list, areas ready to batch (READY entries or more), seen again in the last 7 days, leaving in
 //     SOON days or less, and moved up to harm in the last 30 days (the dropped record's harm entries, and the
@@ -46,6 +47,13 @@
   const MARKS = /^(?:\[[^\]]*\]\s*)*/;
   const PLACE = /[A-Za-z0-9_./-]+:[0-9]+(?:[–-][0-9]+)?/;
   const text = (e) => String(e.finding || '');
+  // A finding's or a reason's words s, of entry e, drawn into el as the Declined panel draws a finding (app.js
+  // findingText): a sentence a line, text in backticks and bare file paths as code spans, no backtick shown. A file and
+  // line is a link to GitHub, unless linkless (text inside a button, where a link would also open the row).
+  const said = (el, s, e, linkless) => {
+    const T = window.DASH_APP.text, t = String(s || '');
+    return T.fill(el, t, linkless ? null : e.repoUrl, new Set(T.pathsIn(t)), 'declined');
+  };
   // Its level, of the marks that lead it (after an audit's number, R1, which may come first).
   const levelOf = (e) => { const m = /\[P([0-3])\]/.exec(MARKS.exec(text(e).replace(/^R[0-9]+\s+/, ''))[0]); return m ? `P${m[1]}` : null; };
   const placeOf = (s) => { const m = PLACE.exec(String(s || '')); return m ? m[0] : null; };
@@ -55,9 +63,9 @@
   const fixOf = (e) => { const m = /\s- fix:\s*([\s\S]+?)(?=\s+- (?:test:|raised on\b)|$)/i.exec(text(e)); return m ? m[1].trim() : null; };
   const isAudit = (e) => /^R[0-9]+\s/.test(text(e).replace(MARKS, ''));
   // The finding without its marks, audit number, place (an audit quotes it in backticks) and Proof or audit sections:
-  // what it says is wrong.
+  // what it says is wrong. A place in backticks goes with all it quotes (`file:12 (t_case)`).
   const titleOf = (e) => text(e).replace(MARKS, '').replace(/^R[0-9]+\s+/, '').replace(MARKS, '')
-    .replace(/^`?[A-Za-z0-9_./-]+:[0-9]+(?:[–-][0-9]+)?`?:?\s+/, '').replace(/(?:[.:;]?\s*\bproof:|\s+- (?:how|fix|test):)[\s\S]*$/i, '').trim() || text(e);
+    .replace(/^(?:`[A-Za-z0-9_./-]+:[0-9]+(?:[–-][0-9]+)?[^`]*`|[A-Za-z0-9_./-]+:[0-9]+(?:[–-][0-9]+)?):?\s+/, '').replace(/(?:[.:;]?\s*\bproof:|\s+- (?:how|fix|test):)[\s\S]*$/i, '').trim() || text(e);
   // Where a finding came from: its issue, or its card when it has no GitHub issue (issue 0).
   const fromOf = (e) => (e.issue ? `#${e.issue}` : `card ${e.card || NOT_READ}`);
   const kindOf = (e) => {
@@ -112,7 +120,15 @@
   const h = (...a) => S.ctx.h(...a);
   const pTag = (level) => { const t = h('span', `sh-p${level === 'P0' || level === 'P1' ? ' is-high' : ''}`, level || 'P?'); if (!level) t.title = 'level not read'; return t; };
   const kindPill = (kind) => { const p = h('span', `sh-kind sh-k-${kind || 'none'}`, kind ? NAMES[kind] : `kind ${NOT_READ}`); p.dataset.kind = kind || ''; return p; };
-  const daysLeft = (r) => (r.left === null ? NOT_READ : `${r.left} d left`);
+  // The judge's reason and the proof of entry e, each a line under a row that has no detail panel (a Docs row, a batch
+  // sheet row, a dropped entry); none for one it does not give.
+  const notesOf = (e) => {
+    const proof = proofOf(e), out = [];
+    if (e.why) out.push(said(h('p', 'sh-fix sh-note-why'), `Why: ${e.why}`, e));
+    if (proof) out.push(said(h('p', 'sh-fix sh-note-proof'), `Proof: ${proof}`, e));
+    return out;
+  };
+  const daysLeft = (r) =>(r.left === null ? NOT_READ : `${r.left} d left`);
   // The days left of the days an entry may stay unseen, as a ring: amber at SOON days or less; none for one not read.
   function ring(r) {
     const box = h('span', `sh-left${r.left !== null && r.left <= SOON ? ' is-soon' : ''}`), NS = 'http://www.w3.org/2000/svg';
@@ -172,8 +188,21 @@
     });
     side.append(pill, link);
     if (S.at !== null) { const read = h('p', 'sh-read'); read.append('List read ', ctx.since(new Date(S.at).toISOString().replace(/\.\d{3}Z$/, 'Z'), ' ago')); side.append(read); }
+    side.append(...sortedOf(m.lists, ctx));
     box.append(title, side);
     return box;
+  }
+  // When the sort of the queued follow-ups last ran and how many it moved (each project's sorted), or that it has not: a
+  // line a project, on the page and in its empty state alike (a sort that moved nothing leaves the lists empty).
+  function sortedOf(lists, ctx) {
+    const many = new Set(lists.map((x) => x.repo)).size > 1;
+    return lists.map((x) => {
+      const s = x.sorted, line = h('p', 'sh-sorted');
+      if (many) line.append(ctx.tag(x.repo), ' ');
+      if (s && s.time) line.append('The sort of the queued follow-ups ran ', ctx.since(s.time, ' ago'), `, and moved ${s.moved} of ${s.items} to the lists${s.failed ? ` (its judge failed: ${s.failed})` : ''}.`);
+      else line.append('The sort of the queued follow-ups has not run yet.');
+      return line;
+    });
   }
   function tilesEl(m, now) {
     const box = h('div', 'sh-tiles'), areas = areasOf(m.es), lately = now - LATELY * DAY, harmed = now - HARMED * DAY;
@@ -274,8 +303,8 @@
     if (S.sel === r.key) open.setAttribute('aria-current', 'true');
     box.type = 'checkbox'; box.dataset.focus = `check:${r.key}`; open.dataset.focus = `open:${r.key}`; box.checked = S.checked.has(r.key); box.setAttribute('aria-label', `Select: ${r.title}`);
     box.addEventListener('change', () => { if (box.checked) S.checked.add(r.key); else S.checked.delete(r.key); drawBar(); });
-    open.type = 'button'; open.title = text(r.e);
-    open.append(pTag(r.level), h('span', 'sh-row-title', r.title));
+    open.type = 'button'; open.title = text(r.e).replace(/`/g, '');
+    open.append(pTag(r.level), said(h('span', 'sh-row-title'), r.title, r.e, true));
     const meta = h('p', 'sh-row-meta');
     meta.append(kindPill(r.kind), h('code', 'sh-at', r.place || `file ${NOT_READ}`), h('span', 'sh-row-area', r.e.area || 'No area'), h('span', 'sh-from', `from ${fromOf(r.e)}`));
     if (many) meta.append(S.ctx.tag(r.e.repo));
@@ -333,7 +362,7 @@
     if (!r) return [h('p', 'sh-detail-none', 'Pick an entry to see why it self-heals, its proof and its history.')];
     const ctx = S.ctx, e = r.e, out = [], top = h('div', 'sh-detail-top');
     top.append(pTag(r.level), kindPill(r.kind), h('span', `sh-leaves${r.left !== null && r.left <= SOON ? ' is-soon' : ''}`, r.left === null ? `leaves in: ${NOT_READ}` : `leaves in ${plural(r.left, 'day', 'days')}`));
-    out.push(top, h('h4', 'sh-detail-title', r.title));
+    out.push(top, said(h('h4', 'sh-detail-title'), r.title, e));
     const dl = h('dl', 'sh-facts'), fact = (k, ...v) => { dl.append(h('dt', null, k)); const dd = h('dd', null); dd.append(...v); dl.append(dd); };
     fact('Area', e.area || 'No area');
     // A card with no GitHub issue has no issue to link: its card is named.
@@ -344,7 +373,7 @@
     fact('Seen again', r.seen ? `${r.seen}×, last ` : 'not seen again yet', ...(r.seen && e.seen ? [ctx.since(e.seen, ' ago')] : []));
     out.push(dl);
     const why = h('div', 'sh-why');
-    why.append(h('p', 'sh-label', 'Why it self-heals'), h('p', null, e.why || 'The judge gave no reason.'));
+    why.append(h('p', 'sh-label', 'Why it self-heals'), said(h('p', null), e.why || 'The judge gave no reason.', e));
     out.push(why);
     if (r.kind === 'guarded') {
       const g = placeOf(e.why), box = h('div', 'sh-guard');
@@ -352,7 +381,7 @@
       out.push(box);
     }
     const proof = proofOf(e);
-    out.push(h('p', 'sh-label', 'Proof'), h('pre', 'sh-proof', proof || `Proof ${NOT_READ}`));
+    out.push(h('p', 'sh-label', 'Proof'), said(h('div', 'sh-proof'), proof || `Proof ${NOT_READ}`, e));
     const hist = h('ol', 'sh-history'), step = (s, t) => { const li = h('li', null, s); if (t) li.append(' ', ctx.since(t, ' ago')); hist.append(li); };
     step(`Found in the review of ${fromOf(e)}`, e.time);
     step(`Judged ${r.kind ? NAMES[r.kind].toLowerCase() : e.effect || 'self-heals'}`);
@@ -383,10 +412,11 @@
     if (S.dropOpen) {
       const ul = h('ul', 'sh-dropped'), WHY = { expired: 'expired', dropped: 'dropped by you', harm: 'moved up to harm' };
       m.dropped.slice().sort((a, b2) => String(b2.dropped.time).localeCompare(String(a.dropped.time))).forEach((e) => {
-        const li = h('li', null);
-        li.append(h('span', 'sh-row-title', titleOf(e)), ' ', h('span', 'sh-from', `from ${fromOf(e)}`), ' ',
+        const li = h('li', null), meta = h('p', 'sh-row-meta');
+        meta.append(h('code', 'sh-at', placeOf(text(e)) || `file ${NOT_READ}`), h('span', 'sh-from', `from ${fromOf(e)}`),
           h('span', 'sh-gone-why', `${WHY[e.dropped.why] || e.dropped.why}${e.dropped.filed ? ` as ${typeof e.dropped.filed === 'number' ? `#${e.dropped.filed}` : e.dropped.filed}` : ''}`),
           S.ctx.since(e.dropped.time, ' ago'));
+        li.append(said(h('span', 'sh-row-title'), titleOf(e), e), meta, ...notesOf(e));
         ul.append(li);
       });
       out.push(ul);
@@ -438,10 +468,10 @@
       const ul = h('ul', 'sh-rows');
       a.rs.sort((x, y) => y.time - x.time).forEach((r) => {
         const li = h('li', 'sh-row sh-doc'), main = h('div', 'sh-row-main'), t = h('p', 'sh-open');
-        t.append(pTag(r.level), h('span', 'sh-row-title', r.title));
+        t.append(pTag(r.level), said(h('span', 'sh-row-title'), r.title, r.e));
         const meta = h('p', 'sh-row-meta');
         meta.append(h('code', 'sh-at', r.place || `file ${NOT_READ}`), h('span', 'sh-from', `from ${fromOf(r.e)}`));
-        main.append(t, meta);
+        main.append(t, meta, ...notesOf(r.e));
         li.append(main);
         ul.append(li);
       });
@@ -520,14 +550,15 @@
       box.type = 'checkbox'; box.checked = on; box.dataset.focus = `keep:${r.key}`; box.setAttribute('aria-label', `Keep in the card: ${r.title}`);
       box.addEventListener('change', () => { if (box.checked) sh.keep.add(r.key); else sh.keep.delete(r.key); drawSheet(); });
       const t = h('p', 'sh-open');
-      t.append(h('code', 'sh-key', r.e.id), pTag(r.level), h('span', 'sh-row-title', r.title));
+      t.append(h('code', 'sh-key', r.e.id), pTag(r.level), said(h('span', 'sh-row-title'), r.title, r.e));
       const meta = h('p', 'sh-row-meta');
       if (!docs) meta.append(kindPill(r.kind));
       meta.append(h('code', 'sh-at', r.place || `file ${NOT_READ}`), h('span', 'sh-row-area', r.e.area || 'No area'));
       if (!docs) meta.append(h('span', 'sh-left-n', daysLeft(r)));
       main.append(t, meta);
       const fix = fixOf(r.e);
-      if (fix) main.append(h('p', 'sh-fix', `Fix: ${fix}`));
+      if (fix) main.append(said(h('p', 'sh-fix'), `Fix: ${fix}`, r.e));
+      main.append(...notesOf(r.e));
       li.append(box, main);
       ul.append(li);
     });
@@ -539,7 +570,7 @@
       others.forEach((r) => {
         const li = h('li', 'sh-row sh-doc'), main = h('div', 'sh-row-main'), b = h('button', 'btn btn-quiet', 'Add');
         li.dataset.key = r.key;
-        main.append(h('span', 'sh-row-title', r.title), h('p', 'sh-row-meta', r.e.area || 'No area'));
+        main.append(said(h('span', 'sh-row-title'), r.title, r.e), h('p', 'sh-row-meta', r.e.area || 'No area'));
         b.type = 'button'; b.dataset.act = 'sheet-add'; b.setAttribute('aria-label', `Add to the card: ${r.title}`);
         b.addEventListener('click', () => { sh.keys.push(r.key); sh.keep.add(r.key); drawSheet(); });
         li.append(main, b);
@@ -651,10 +682,10 @@
     count: healsCount,
     attention: healsCount,
     isEmpty: (d) => !listsOf(d).some((x) => list(x.entries).length || list(x.docs && x.docs.entries).length || list(x.dropped).length),
-    empty(el, ctx) {
+    empty(el, ctx, d) {
       // An open sheet ends with the list: a later entry must not open it again.
-      S.sheet = null;
-      el.append(ctx.state('empty', 'The Self-heals list is empty', 'This page lists the review findings whose failure heals by itself: a card waits longer, a step runs again, or text is wrong until the next turn. Conveyor does not build them one by one: a batch card fixes an area\'s entries together. When a review sorts a finding so, it shows here.'));
+      S.sheet = null; S.ctx = ctx;
+      el.append(...sortedOf(listsOf(d), ctx), ctx.state('empty', 'The Self-heals list is empty', 'This page lists the review findings whose failure heals by itself: a card waits longer, a step runs again, or text is wrong until the next turn. Conveyor does not build them one by one: a batch card fixes an area\'s entries together. When a review sorts a finding so, it shows here.'));
     },
     error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the self-heals list', message)); },
     render,

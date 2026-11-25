@@ -53,6 +53,7 @@ test('Self-heals: the tab after Benchmarks draws the title line, the tiles, the 
   assert.equal(q(w, '.sh-title').textContent, 'Self-heals list');
   assert.equal(q(w, '.sh-pill').textContent, 'An entry leaves after 30 days unseen', 'the Rules setting as the record gives it');
   assert.equal(q(w, '.sh-rules').textContent, 'Rules › Self-heals');
+  assert.equal(q(w, '.sh-sorted').textContent, 'The sort of the queued follow-ups has not run yet.', 'a record that names no sort (issue 1694)');
   const tiles = Object.fromEntries(qa(w, '.sh-tile').map((t) => [t.dataset.tile, [t.querySelector('.sh-tile-n').textContent, t.querySelector('.sh-tile-sub').textContent]]));
   assert.deepEqual(tiles, {
     on: ['5', 'from 3 issues and 1 audit'], ready: ['0', 'areas with 10 or more entries'], seen: ['1', 'a sighting resets its 30 days'],
@@ -113,6 +114,52 @@ test('Self-heals: the tab after Benchmarks draws the title line, the tiles, the 
   assert.equal(w.document.getElementById('tab-rules').getAttribute('aria-selected'), 'true', 'Rules › Self-heals opens the Rules tab');
   const setting = w.document.querySelector('.rules-row[data-rule="healsdays"]');
   assert.ok(setting && !setting.hidden && !setting.closest('.rules-set').hidden, 'Rules › Self-heals shows the Self-heals expiry setting');
+});
+
+// Bugs it catches (issue 1694): the line that says when the sort of the queued follow-ups ran was on the Declined panel
+// alone; a row, the detail panel, the Dropped list, a Docs row and the batch sheet (its rows and its "Add from other
+// areas" list) showed a finding or the judge's reason with its backticks as plain text, not as the Board's code spans;
+// a place quoted with its case name (`file:156 (t_case)`) left its closing backtick in the title; a file link in a row
+// title sat inside the button that opens the row; a Docs row, a batch sheet row and a dropped entry showed no reason or
+// proof, and a dropped entry no file.
+test('Self-heals: the sort line says when the sort ran, and a finding and a reason with code show code spans and no backtick', () => {
+  const { w } = open({ sorted: { time: iso(T0 - 3600000), items: 3, moved: 2 },
+    entries: [entry('h0000000000b1', { time: iso(T0 - DAY), area: 'area:board', effect: 'self-heals', why: 'the `next()` turn picks it up',
+      finding: 'R1 [P2] `conveyor/x.test.sh:156 (t_case)`: the `poll()` call waits a turn at conveyor/README.md:209 - How: `lib/a.sh:3` reads it late - Fix: call `poll()` after the write - Raised on #12' }),
+    entry('h0000000000b3', { time: iso(T0 - DAY), area: 'area:engine', effect: 'self-heals', why: 'w', finding: '[P2] lib/c.sh:4 the `tick` runs late' })],
+    docs: { areas: [], entries: [entry('d0000000000d2', { time: iso(T0 - DAY), area: 'area:docs', effect: 'docs drift', why: 'the `heals` page is missing',
+      finding: '[P3] docs/board.md:9 omits the `heals` tab. Proof: `docs/board.md:9` names no tab' })] },
+    dropped: [entry('h0000000000b2', { time: iso(T0 - 9 * DAY), area: 'area:board', effect: 'self-heals', why: 'the `wait` ends',
+      finding: '[P2] old.js:1 the `wait` flag. Proof: `old.js:1` sets it', dropped: { time: iso(T0 - DAY), why: 'expired' } })] });
+  const sorted = q(w, '.sh-sorted');
+  assert.match(sorted.textContent, /^The sort of the queued follow-ups ran .+ ago, and moved 2 of 3 to the lists\.$/);
+  assert.equal(sorted.querySelector('time.since')?.dateTime, iso(T0 - 3600000), 'the time the sort ran');
+  const codes = (sel) => qa(w, `${sel} code.why-code`).map((c) => c.textContent);
+  // Each line under a row with no detail panel: its text and its code spans.
+  const lines = (sel) => qa(w, sel).map((p) => [p.textContent, Array.from(p.querySelectorAll('code.why-code'), (c) => c.textContent)]);
+  const row = '.sh-row[data-key="sample:h0000000000b1"]';
+  assert.deepEqual(codes(`${row} .sh-row-title`), ['poll()', 'conveyor/README.md:209'], 'the row title');
+  assert.equal(q(w, `${row} .sh-open a`), null, 'a file link inside the button that opens the row');
+  q(w, `${row} .sh-row-title`).click();
+  assert.deepEqual(codes('.sh-detail .sh-detail-title'), ['poll()', 'conveyor/README.md:209'], 'the detail title');
+  assert.ok(q(w, '.sh-detail .sh-detail-title a code.why-code'), 'the detail title links its file');
+  assert.deepEqual(codes('.sh-detail .sh-why'), ['next()'], "the judge's reason");
+  assert.deepEqual(codes('.sh-detail .sh-proof'), ['lib/a.sh:3'], 'the proof');
+  const doc = '.sh-docs .sh-doc';
+  assert.deepEqual(codes(`${doc} .sh-row-title`), ['heals'], 'a Docs row');
+  assert.deepEqual(lines(`${doc} .sh-fix`), [['Why: the heals page is missing', ['heals']], ['Proof: docs/board.md:9 names no tab', ['docs/board.md:9']]], "a Docs row's reason and proof");
+  q(w, '.sh-dropped-link').click();
+  assert.deepEqual(codes('.sh-dropped .sh-row-title'), ['wait'], 'a dropped entry');
+  assert.equal(q(w, '.sh-dropped .sh-at').textContent, 'old.js:1', "a dropped entry's file");
+  assert.deepEqual(lines('.sh-dropped .sh-fix'), [['Why: the wait ends', ['wait']], ['Proof: old.js:1 sets it', ['old.js:1']]], "a dropped entry's reason and proof");
+  assert.equal(page(w).textContent.includes('`'), false, `the page shows a backtick: ${page(w).textContent}`);
+  q(w, '.sh-area[data-area="area:board"] [data-act="heals-batch"]').click();
+  assert.deepEqual(codes('.sh-sheet-row .sh-row-title'), ['poll()', 'conveyor/README.md:209'], 'a batch sheet row');
+  assert.deepEqual(lines('.sh-sheet-row .sh-fix'), [['Fix: call poll() after the write', ['poll()']], ['Why: the next() turn picks it up', ['next()']],
+    ['Proof: lib/a.sh:3 reads it late', ['lib/a.sh:3']]], 'its Fix line, reason and proof');
+  q(w, '[data-act="sheet-more"]').click();
+  assert.deepEqual(codes('.sh-sheet-more .sh-row-title'), ['tick'], 'an entry in "Add from other areas"');
+  assert.equal(page(w).textContent.includes('`'), false, `the batch sheet shows a backtick: ${page(w).textContent}`);
 });
 
 // Bugs (issue 1622): the page said in one line what the list holds, so a reader could not tell what a self-heal is, why
@@ -271,13 +318,15 @@ test('Self-heals: checked rows show the "N selected" bar with Move up to harm an
 });
 
 // Bugs: the empty page did not say what it is for; a failed read emptied the page, or kept it with no time, so the
-// owner could not tell the list was old.
+// owner could not tell the list was old; the empty page hid when the sort of the queued follow-ups ran (issue 1694: a
+// sort that moved nothing leaves the lists empty).
 test('Self-heals: the empty state says what the page is for, and a failed read keeps the last list with its time', () => {
   const w = boot({ tab: 'selfheals' }), data = full();
-  data.panels.declined.data.heals = [];
+  data.panels.declined.data.heals = [{ repo: 'sample', repoUrl: REPO, sorted: { time: iso(T0 - 3600000), items: 4, moved: 0 }, days: 30, areas: [], entries: [], docs: { areas: [], entries: [] }, dropped: [] }];
   deliver(w, data);
   assert.equal(page(w).dataset.state, 'empty');
   assert.match(page(w).textContent, /The Self-heals list is empty.*review findings whose failure heals by itself/s);
+  assert.match(q(w, '.sh-sorted').textContent, /^The sort of the queued follow-ups ran .+ ago, and moved 0 of 4 to the lists\.$/, 'the sort that moved nothing');
   const good = full(T0);
   good.panels.declined.data.heals = heals();
   next(w, good);

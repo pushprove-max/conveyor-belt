@@ -440,9 +440,9 @@ review of the card rules on a finding again, the later ruling counts. A finding 
 filed as a follow-up. A finding on the list that it rules `harm`, or gives no kind, leaves the list. When the judge
 fails, the review stays as the reviewer wrote it: each of its findings has no kind, so it is `harm`.
 
-The list is fixed in batches, one card for each area. On the Board's Declined panel, the Self-heals list shows each
-area with all of its entries and their count. "File a batch card" files one card that has the area's entries as its
-scope. An entry whose card has not landed or closed waits for the next batch card: the code it names is only in that
+The list is fixed in batches, one card for each area. The Board's Self-heals tab shows each area with all of its
+entries and their count. "Review batch" on an area opens the batch sheet, which files one card that has the area's
+entries as its scope. An entry whose card has not landed or closed waits for the next batch card: the code it names is only in that
 card's change. If you shut a batch card before it lands (`conveyor.sh shut`), its entries go back to the list for the
 next batch card. `conveyor.sh retry` of that card takes them again, and is refused when another batch card holds
 them. A later review that rules an entry of a batch card `harm` files no second card for it.
@@ -452,7 +452,7 @@ An entry that no batch card holds and that nobody fixes or sees again leaves the
 `healsdays` (`conveyor.sh control rules healsdays=<days>`; [Self-heals expiry](configuration.md#self-heals-expiry)). A finding is seen again when the judge rules the same
 finding on a later card (its Proof aside), or rules it `harm` because its Proof names the logs: that starts the days over, and
 the entry is then of that card, so the next batch card waits for it. An entry that leaves is kept, with the date and the reason
-`expired`. The Self-heals list on the Declined panel shows these entries under "Expired from the list", and the Rules tab sets the days. A finding that the judge sorts to the list again takes its entry back. An entry
+`expired`. The Self-heals tab shows these entries under "Dropped entries", and the Rules tab sets the days. A finding that the judge sorts to the list again takes its entry back. An entry
 that a shut batch card gave back counts its days from that day, like any other. The docs list has no expiry.
 Nothing on the list needs you until you file the card. The Foreman's status gives the count and does not report the
 list as something to do.
@@ -463,8 +463,8 @@ none: no test can fail on main for them. Only a batch card that holds only `clea
 so its review reports a change to what the code does.
 
 The docs list is fixed in the same way, one docs sweep card for each area, so that the docs match what users see. An
-entry of the docs list never expires. On the Board's Declined panel, the Docs list shows each area with its entries,
-and "File a docs sweep card" files one card that has the area's entries as its scope. `conveyor.sh release-prep`
+entry of the docs list never expires. On the Board's Self-heals tab, the Docs list shows each area with its entries,
+and "File docs sweep card" opens the batch sheet, which files one card that has the area's entries as its scope. `conveyor.sh release-prep`
 also files one docs sweep card for each area that has entries, before it runs the suite. A docs sweep card has no bug
 label. If you shut a docs sweep card before it lands, its entries go back to the docs list, as a batch card's do.
 

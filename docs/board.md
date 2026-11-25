@@ -122,10 +122,8 @@ the button shows the new count and you must click two times again. A new line ch
 It changes the count of **Dismiss all shown** only if the panel shows the new line. The lines leave the panel and its count. **Show every line** still shows
 them, marked Dismissed.
 
-Above its lines, the Declined panel shows the Self-heals list and the Docs list
-([Harm or self-heals](cards.md#harm-or-self-heals)). Each list shows its areas, each with its entries and their kinds.
-**File a batch card** on an area of the Self-heals list files one card for its entries. **File a docs sweep card** on
-an area of the Docs list files one docs sweep card for its entries. Click the button, then click it again.
+The Declined panel shows declined findings only. The Self-heals list, the Docs list and the dropped entries are on the
+[Self-heals tab](#self-heals-tab).
 
 **File as issue** on a Declined line files the finding as an issue, and Conveyor builds it in its turn. Click it, then
 click it again. If you do not click it again in 5 s, it shows **File as issue** again and the next click only asks
@@ -1366,7 +1364,9 @@ the list is for.
 
 - **Title line**: on the right, a pill gives the days an entry stays on the list unseen, "An entry leaves after N
   days unseen". The days are the Rules setting **Self-heals expiry**, and **Rules › Self-heals** opens it. Under them,
-  the time when the Board read the list. When a read fails, the tab keeps the last list and that time.
+  the time when the Board read the list. When a read fails, the tab keeps the last list and that time. Under it, for
+  each project, when the sort of the queued follow-ups last ran and how many findings it moved to the lists, or that it
+  has not run yet. The page shows this line also when the lists are empty.
 - **What is a self-heal?**: under the title, closed until you click it. It says what a self-heal is, which kinds go
   to a follow-up card and which come to this list, why an entry gets no fix round, when an entry leaves the list, and
   why a finding seen in real logs is harm. A link opens [Harm or self-heals](cards.md#harm-or-self-heals).
@@ -1382,8 +1382,9 @@ the list is for.
   work only**, **Docs or comment**, **Cleanup** and **Already guarded**. **All** shows every entry. Each row shows the
   finding's level, its title, its kind, its file and line, its area, the issue it was found on (the card, for a card
   with no GitHub issue) and, when it was seen again, "seen N×". At the right, a ring and "N d left" show the days left. They are amber at 7 days or less. Under
-  the list, "Showing N of M" and **Dropped entries (M)**, which opens the M entries that left the list, each with
-  why it left: expired after the days unseen, dropped by you, or moved up to harm.
+  the list, "Showing N of M" and **Dropped entries (M)**, which opens the M entries that left the list, each with its
+  file and line, why it left (expired after the days unseen, dropped by you, or moved up to harm), the judge's reason
+  and the proof.
 - **Detail panel**: click a row to show it beside the list. On a phone the panel is under the list. It shows the
   level, the kind, the days left, the area, the review that found it, the file (a link to the line), how often it
   was seen again, the judge's reason (**Why it self-heals**), the guard for an Already guarded entry (**Guarded by**),
@@ -1393,7 +1394,8 @@ the list is for.
   for your yes, as a review follow-up is. **Drop now** takes the entry off the list now, and it
   stays in the dropped entries. Click it, then click it again. Check rows to act on many: the bar "N selected" has
   **File a batch card**, **Move up to harm** and **Clear**.
-- **Docs**: the Docs list by area. Its entries do not expire, so they have no ring. **File docs sweep card** on an
+- **Docs**: the Docs list by area. Its entries do not expire, so they have no ring. Each row shows the finding's
+  level, its title, its file and line, the issue it was found on, the judge's reason and the proof. **File docs sweep card** on an
   area opens the batch sheet for a docs sweep card of its entries.
 
 ### Batch sheet
@@ -1407,7 +1409,7 @@ the bar says to check the entries of one project only.
 - **Top**: the path **Self-heals list › group › area**, the title and **Cancel**, **File held** and **File and queue ·
   N entries**. **Cancel** and **Self-heals list** go back to the page.
 - **Entries**: "Entries in this card N of M". Each entry has a checkbox, its id, level, title, kind, file and line,
-  days left and, for an audit's entry, its "Fix:" line. Clear the checkbox to leave an entry out. The entry stays in
+  days left, for an audit's entry its "Fix:" line, and the judge's reason and the proof. Clear the checkbox to leave an entry out. The entry stays in
   the sheet, dimmed. **Keep all** keeps each entry again. **Add from other areas** lists the entries of the
   project's other areas. **Add** puts one in the card. An entry you leave out stays on the list with its days left.
 - **The card**: its title, which you can edit. It starts as "Self-heals batch: <area> (N entries)", or "Docs sweep:

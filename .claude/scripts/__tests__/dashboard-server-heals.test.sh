@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# The Declined panel's Self-heals list sends POST /control action heals for "File a batch card" (#1559), and its Docs
-# list for "File a docs sweep card" (#1563): the server takes batch or docs and one area label, or - for the entries
+# The Self-heals tab sends POST /control action heals for "File a batch card" (#1559), and its Docs list for "File a
+# docs sweep card" (#1563): the server takes batch or docs and one area label, or - for the entries
 # with no area, and runs `conveyor.sh heals batch <area>` or `conveyor.sh heals docs <area>` on the record. Bug each case catches: a shape that reaches the host's shell unchecked, the button refused, or the command
 # run on another checkout than the record's.
 set -uo pipefail

@@ -182,7 +182,7 @@
 #   the judge numbered them, [{n, finding}]; both null when they are not found in the card's records).
 # declinedRest: every other line of the list, newest first, as its line is, with built (the issue filed for it) or
 #   dismissed ({time, by}) when it has them: the panel's "Show every line" shows them.
-# selfheals: the self-heals list (SELFHEALS) as the Declined panel's Self-heals list shows it (healssnap()): entries,
+# selfheals: the self-heals list (SELFHEALS) as the Board's Self-heals tab shows it (healssnap()): entries,
 #   every line no batch card holds yet (each one a batch card would file), newest first, each as its line is; areas,
 #   [{area (null for none), count}] of those lines, the most first; docs, the docs list (DOCSDRIFT) as {entries, areas}
 #   alike; dropped, the entries that expired off the list (HEALSDROPPED, healsexpire()), each as its line is, with

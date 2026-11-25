@@ -16,8 +16,8 @@
 // whom, when), filed, or more than 7 days old. A review's declined count (ctx.judged, on a card's review steps) opens
 // the panel on that card's lines alone, every one of them (?declined=<card>), with a note that says so, a button to
 // every line and one back to the list. A dismissed, built or old line is greyed and tagged Dismissed, Built or Expired.
-// Above the lines, on the panel's own list, the Self-heals list (healsEl, below) with each area's "File a batch card",
-// and the Docs list with each area's "File a docs sweep card".
+// The part also holds each project's self-heals, docs and dropped lists (heals); the panel does not draw them: the
+// Self-heals tab does (parts/heals-page.js, registered at the end of this file).
 (() => {
   const WHO = { code: 'the code', judge: 'the judge', owner: 'the owner' };
   const DISMISS_MAX = 400; // the most ids POST /control dismiss takes in one request (dashboard_server.py control_ok)
@@ -198,117 +198,6 @@
   };
   const answer = (r) => r.text().then((t) => ({ ok: r.ok, said: String(t).trim() || `the build machine answered ${r.status}` }));
   const noAnswer = () => ({ ok: false, said: 'the build machine did not answer. Make sure that it is on. Then try again' });
-  // The Self-heals list, above the declined lines on the panel's own list (d.heals: each project's, as the snapshot's
-  // selfheals gives it): the findings the judge sorted as self-heals, whose failure heals itself. No follow-up builds
-  // them one by one, and nothing here needs anyone now: an area's batch card fixes its entries together. Each area
-  // shows its count, its entries (the finding, the card it came from, its kind, none for an entry with no kind, and the
-  // judge's reason) and "File a batch card", which a second click confirms (it costs a build): POST /control heals
-  // batch <area> (- for the entries with no area) with the project's repository, and the host files one card with the
-  // area's entries as its scope. Its answer stays under the button (healsSaid). Under the heading, when the sort of
-  // the queued follow-ups last ran, or that it has not run. The self-heals list holds the cleanup and already-guarded
-  // findings too, each with its kind. Under it, the Docs list (each project's selfheals.docs): the findings the judge
-  // sorted as docs drift. No entry expires; each area has "File a docs sweep card" (POST /control heals docs <area>),
-  // and a release files one for each area with entries.
-  const healsSaid = new Map(); // `${kind}:${repo}:${area}` -> the host's answer, through every redraw
-  const docsOf = (x) => ((x.docs && x.docs.entries) || []);
-  // The entries that expired: the dropped record also holds those the owner dropped or moved up to harm on the
-  // Self-heals tab, which shows them with their reason.
-  // The latest to leave first (left: the time it left; the record holds them in the order they left).
-  const droppedOf = (x) => (Array.isArray(x.dropped) ? x.dropped : []).filter((e) => e && (!e.dropped || e.dropped.why === 'expired'))
-    .sort((a, b) => String(b.left || '').localeCompare(String(a.left || '')));
-  // Where an entry came from: a card, or an issue the sort of the queued follow-ups read (its card is "#<n>").
-  const fromText = (e) => (/^#[0-9]+$/.test(String(e.card)) ? 'from issue' : `from card ${e.card}`);
-  const droppedOpen = new Set(); // the repos whose "Expired from the list" is open, through every redraw
-  const healsOf = (d) => (Array.isArray(d.heals) ? d.heals : []).filter((x) => x && ((x.entries || []).length || x.sorted || docsOf(x).length || droppedOf(x).length));
-  // A list's entries by area, the areas in the snapshot's order (areas: the most entries first), none left empty.
-  const byAreas = (areas, entries) => {
-    const m = new Map((areas || []).filter((y) => y && y.count > 0).map((y) => [y.area || '', []]));
-    (entries || []).forEach((e) => { const a = e.area || ''; m.set(a, (m.get(a) || []).concat(e)); });
-    m.forEach((es, a) => { if (!es.length) m.delete(a); });
-    return m;
-  };
-  const healsEl = (d, ctx) => {
-    const h = ctx.h, lists = healsOf(d).filter((x) => (x.entries || []).length || x.sorted || droppedOf(x).length), docs = healsOf(d).filter((x) => docsOf(x).length);
-    const out = [];
-    if (lists.length) {
-      const all = lists.reduce((n, x) => n + (x.entries || []).length, 0);
-      const box = h('section', 'heals');
-      box.dataset.part = 'heals';
-      box.append(h('h3', 'heals-title', `Self-heals list (${all})`),
-        h('p', 'row-meta', 'Findings whose failure heals itself (a longer wait, a step run again, text the next poll corrects), cleanup with no change to what the code does, and findings another check already guards. No follow-up builds them one by one: file an area\'s batch card when you choose. Nothing here needs you now.'));
-      lists.forEach((x) => {
-        const s = x.sorted, sorted = h('p', 'row-meta heals-sorted');
-        if (lists.length > 1) sorted.append(ctx.tag(x.repo));
-        if (s && s.time) sorted.append(h('span', null, `The sort of the queued follow-ups ran, and moved ${s.moved} of ${s.items} to the lists${s.failed ? ` (its judge failed: ${s.failed})` : ''}:`), ctx.since(s.time, ' ago'));
-        else sorted.append(h('span', null, 'The sort of the queued follow-ups has not run yet.'));
-        box.append(sorted);
-        byAreas(x.areas, x.entries).forEach((es, a) => box.append(healsArea(ctx, x, a, es, lists.length > 1, false)));
-        if (droppedOf(x).length) box.append(healsDropped(ctx, x, lists.length > 1));
-      });
-      out.push(box);
-    }
-    if (docs.length) {
-      const box = h('section', 'heals heals-docs');
-      box.dataset.part = 'docs';
-      box.append(h('h3', 'heals-title', `Docs list (${docs.reduce((n, x) => n + docsOf(x).length, 0)})`),
-        h('p', 'row-meta', 'Guides and READMEs that omit or misdescribe what the code does. No entry expires: file an area\'s docs sweep card when you choose. A release files one for each area with entries.'));
-      docs.forEach((x) => byAreas(x.docs.areas, docsOf(x)).forEach((es, a) => box.append(healsArea(ctx, x, a, es, docs.length > 1, true))));
-      out.push(box);
-    }
-    return out;
-  };
-  // The entries that expired off a project's list (no fix, batch card or sighting for the days its rule sets), the latest
-  // first, kept in a record: the finding, its card and when it expired, and when it was seen again after that, if it was.
-  // A list the user opened stays open when new data draws the panel again (droppedOpen).
-  const healsDropped = (ctx, x, many) => {
-    const h = ctx.h, box = h('details', 'heals-dropped'), ul = h('ul', 'rows heals-rows');
-    box.open = droppedOpen.has(x.repo);
-    box.addEventListener('toggle', () => { if (box.open) droppedOpen.add(x.repo); else droppedOpen.delete(x.repo); });
-    box.append(h('summary', null, `${many ? `${x.repo}: ` : ''}Expired from the list (${droppedOf(x).length})`), ul);
-    droppedOf(x).forEach((e) => {
-      const li = h('li', 'row'), meta = h('p', 'row-meta'), at = e.left;
-      meta.append(h('span', null, `${fromText(e)} `), ctx.issueLink(e), ' expired ');
-      if (at) meta.append(ctx.since(at, ' ago'));
-      if (e.seen && at && e.seen > at) meta.append(' and was seen again ', ctx.since(e.seen, ' ago'));
-      li.append(h('div', 'row-main', e.finding), meta);
-      ul.append(li);
-    });
-    return box;
-  };
-  // One area of a project's list (healsEl): its name, count and "File a batch card" (with docs, "File a docs sweep
-  // card"), then its entries; each entry names its project when the Board shows more than one (many).
-  const healsArea = (ctx, x, a, es, many, docs) => {
-    const h = ctx.h, k = `${docs ? 'docs' : 'batch'}:${x.repo}:${a}`, n = es.length;
-    const area = h('div', 'heals-area');
-    area.dataset.area = a;
-    const head = h('p', 'row-main'), note = h('span', 'answer-note');
-    note.setAttribute('aria-live', 'polite');
-    note.textContent = healsSaid.get(k) || '';
-    const b = h('button', 'btn', docs ? 'File a docs sweep card' : 'File a batch card');
-    b.type = 'button'; b.dataset.act = docs ? 'heals-docs' : 'heals-batch';
-    ctx.twice(b, 'spend', `Click again to file one card with these ${n === 1 ? 'one finding' : `${n} findings`}`, () => {
-      b.disabled = true; note.textContent = 'Sending…';
-      ctx.post('control', { action: 'heals', args: [docs ? 'docs' : 'batch', a || '-'], repo: x.repo })
-        .then(answer, noAnswer)
-        .then((r) => { healsSaid.set(k, r.ok ? `Filed: ${r.said}. The list leaves these entries in about a minute.` : `Not filed: ${r.said}`); b.disabled = false; ctx.redraw(); });
-    });
-    head.append(h('strong', null, a || 'No area'), h('span', 'row-meta', ` ${n === 1 ? '1 entry' : `${n} entries`} `), b, ' ', note);
-    const ul = h('ul', 'rows heals-rows');
-    es.forEach((e) => {
-      const li = h('li', 'row');
-      const main = h('div', 'row-main');
-      main.append(h('span', 'title', e.finding));
-      const meta = h('p', 'row-meta');
-      if (many) meta.append(ctx.tag(e.repo));
-      meta.append(h('span', null, fromText(e)), ' ', ctx.issueLink(e));
-      if (e.effect) meta.append(' ', h('span', 'chip chip-quiet heals-kind', e.effect));
-      meta.append(ctx.since(e.time, ' ago'));
-      li.append(main, meta, h('p', 'reason heals-why', `The judge: ${e.why || 'no reason given'}`));
-      ul.append(li);
-    });
-    area.append(head, ul);
-    return area;
-  };
   window.DASH_APP.panel({
     id: 'declined',
     title: 'Declined',
@@ -320,7 +209,7 @@
     // The live part's rest holds the newest lines the snapshot keeps; the others come from the history.
     older: (d, o) => Object.assign({}, d, { rest: window.DASH_APP.joined(d.rest, o.rest, key) }),
     count: (d) => shown(d).length,
-    isEmpty: (d) => d.lines.length === 0 && (d.rest || []).length === 0 && healsOf(d).length === 0,
+    isEmpty: (d) => d.lines.length === 0 && (d.rest || []).length === 0,
     empty(el, ctx) { el.append(ctx.state('empty', 'No declined finding', 'A review finding that Conveyor did not build shows here with who declined it and why.')); },
     error(el, message, ctx) { el.append(ctx.state('error', 'The Board could not read the declined findings', message)); },
     render(el, d, ctx) {
@@ -465,7 +354,7 @@
       // The collector gives them newest first. A row is kept by its line (repo:id): "Show 5 more" adds the new rows
       // under the ones shown, which stay the same nodes and keep an open F-number explanation; the focus moves to the
       // first new row.
-      el.replaceChildren(...(view ? [] : healsEl(d, ctx)), bar, ul, ctx.more(view ? `declined:${view}` : 'declined', lines, (ls) => { drawn = ls; ctx.list(ul, ls, key, row); drawAll(); }));
+      el.replaceChildren(bar, ul, ctx.more(view ? `declined:${view}` : 'declined', lines, (ls) => { drawn = ls; ctx.list(ul, ls, key, row); drawAll(); }));
     },
     // Each second: an unchanged snapshot does not draw the panel again, so the clock moves "Expires in" on. A line that
     // comes within 2 days of leaving, or past it, has the panel drawn again (its note comes or goes); else the text counts.

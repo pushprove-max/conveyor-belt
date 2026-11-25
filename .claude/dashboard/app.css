@@ -1610,7 +1610,7 @@ html.b3-filling, html.b3-filling body { overflow: hidden; }
 .sh-about-more { margin-top: var(--sp-2); }
 .sh-head-side { display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; gap: var(--sp-2); }
 .sh-pill { display: inline-flex; padding: 2px var(--sp-3); border-radius: 999px; background: var(--quiet-bg); color: var(--quiet); font-size: var(--fs-xs); font-weight: 650; }
-.sh-read { flex-basis: 100%; color: var(--muted); font-size: var(--fs-xs); }
+.sh-read, .sh-sorted { flex-basis: 100%; color: var(--muted); font-size: var(--fs-xs); }
 .sh-sub { font-size: var(--fs-lg); margin: var(--sp-5) 0 var(--sp-3); }
 .sh-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--sp-3); }
 .sh-tile { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
@@ -1675,6 +1675,8 @@ html.b3-filling, html.b3-filling body { overflow: hidden; }
 .sh-row-main { flex: 1; min-width: 0; }
 .sh-open { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-width: 0; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; }
 .sh-row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* A title or Fix line is drawn as the Declined panel draws a finding (code spans), its sentences on one line. */
+.sh-row-title .declined-line, .sh-detail-title .declined-line, .sh-fix .declined-line { display: inline; }
 .sh-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); margin-top: 2px; font-size: var(--fs-xs); color: var(--muted); }
 .sh-at { font-family: var(--mono); }
 .sh-seen { color: var(--ok); font-weight: 650; }
@@ -1699,7 +1701,7 @@ html.b3-filling, html.b3-filling body { overflow: hidden; }
 .sh-why { padding: var(--sp-3); border-radius: var(--radius-sm); background: var(--ok-bg); color: var(--text); }
 .sh-why .sh-label { color: var(--ok); }
 .sh-guard { display: flex; flex-direction: column; gap: 2px; }
-.sh-proof { margin: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-2); font-family: var(--mono); font-size: var(--fs-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
+.sh-proof { margin: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .sh-history { display: flex; flex-direction: column; gap: 2px; padding-left: var(--sp-4); list-style: disc; font-size: var(--fs-sm); }
 .sh-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .sh-hint { font-size: var(--fs-xs); color: var(--muted); }
