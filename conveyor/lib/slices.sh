@@ -167,9 +167,10 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
 # names the files of the change it builds again in place of the items it covers, and depends on <issue> too, as it
 # builds on the change that lands it. They start where the parent is (splitplace()): held when the control record
 # holds it, else queued. Prints {filed: their numbers, held: whether they start held}; when one cannot be filed, or
-# they cannot be placed, prints why and fails, the ones filed before it withdrawn.
+# they cannot be placed, prints why and fails, the ones filed before it withdrawn (the reason names each whose close
+# failed: it may still be open).
 splitfile() { # <card> <issue json> <slices json> <1: the slices take the parent's place in the pick order; 0: not>
-  local n k i out num nums=() more=() body held
+  local n k i out num nums=() more=() body held w
   n=$(jq -r .number <<<"$2") && k=$(jq length <<<"$3") || { echo "the slices could not be read"; return 1; }
   mapfile -t more < <(jq -r --arg a "$AREA" --arg t "$TYPE" --argjson p "$PRIOS" '(.labels // [] | map(.name)
       | map(select(($a != "" and startswith($a)) or . == $t or IN($p[]))) | unique[] | "--label", .), (.milestone.title // empty | "--milestone", .)' <<<"$2")
@@ -188,11 +189,13 @@ splitfile() { # <card> <issue json> <slices json> <1: the slices take the parent
         + "\n\n## Done when\n" + ($s.doneWhen | map("- " + .) | join("\n"))' <<<"$2") \
       && out=$(gh_write issue create --title "$(jq -r --argjson i "$i" '.[$i].title' <<<"$3")" --label "$FOLLOWUP" "${more[@]}" --body "$body" 2>&1) \
       && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] \
-      || { splitwithdraw "$n" "${nums[@]}"; echo "slice $((i + 1)) was not filed: ${out:0:300}"; return 1; }
+      || { w=$(splitwithdraw "$n" "${nums[@]}") || w="; Conveyor could not confirm that GitHub closed the slices filed before it ($w): they may still be open"
+           echo "slice $((i + 1)) was not filed: ${out:0:300}$w"; return 1; }
     nums+=("$num")
   done
   held=$(locked splitplace "$n" "$4" "${nums[@]}") && [[ $held =~ ^(true|false)$ ]] \
-    || { splitwithdraw "$n" "${nums[@]}"; echo "the control record could not be read or written, so the slices could not be held or queued as their issue is"; return 1; }
+    || { w=$(splitwithdraw "$n" "${nums[@]}") || w="; Conveyor could not confirm that GitHub closed the slices filed ($w): they may still be open"
+         echo "the control record could not be read or written, so the slices could not be held or queued as their issue is$w"; return 1; }
   jq -cn --argjson h "$held" '{filed: ($ARGS.positional | map(tonumber)), held: $h}' --args "${nums[@]}"
 }
 # The slices of a split as cards with no GitHub issue (rules.splitissues false: tcadd(), lib/testaction.sh), in the
@@ -233,9 +236,12 @@ splitplace() { # <issue> <order: 1 or 0> <slice>...
   [ "$h" != true ] || movedlocked movedhold hold "$new" "$@"
   echo "$h"
 }
+# Closes each <slice> as not planned. When the close of one or more fails, prints each of them (#N, #M) and fails: a
+# failed close is not known to have closed the issue, so it may still be open.
 splitwithdraw() { # <issue> <slice>...
-  local n=$1 x; shift
-  for x; do gh_write issue close "$x" --reason "not planned" --comment "Conveyor: the split of #$n could not be filed whole, so this slice is withdrawn and #$n is built as one card." >/dev/null 2>&1; done
+  local n=$1 x f=(); shift
+  for x; do gh_write issue close "$x" --reason "not planned" --comment "Conveyor: the split of #$n could not be filed whole, so this slice is withdrawn and #$n is built as one card." >/dev/null 2>&1 || f+=("#$x"); done
+  [ ${#f[@]} = 0 ] || { printf -v x '%s, ' "${f[@]}"; echo "${x%, }"; return 1; }
 }
 # A change that grew while it was built (#448). card() calls growcheck() before each review of a card of an issue of
 # its own (not a main-red fix card nor a branch), until it has asked the judge once (it sets the caller's grown). With
