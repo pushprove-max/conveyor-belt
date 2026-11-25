@@ -240,6 +240,16 @@ refused $'gh issue create --label bug --title Example --body-file - <<<\'~~~\n##
 # only the lines up to the end word as the body.
 refused $'gh issue create --label bug --title Example --body-file - <\\\n<EOF\nThe form fails.\nEOF\n## Cause'
 refused $'gh issue create --label bug --title Example --body-file - <<EOF\nThe form fails.\nEOF\n## Cause'
+# Bug (#1623 review, follow-up 2, E1): the text after a body was read from a new start, so the `"` that closes a
+# `"$(cat <<EOF` quote opened one and the `## Cause` comment after it counted; split (`<\` and `<EOF`) or not.
+refused $'gh issue create --label bug --title Example --body "$(cat <\\\n<EOF\nThe form fails.\nEOF\n)"\n## Cause'
+refused $'gh issue create --label bug --title Example --body "$(cat <<EOF\nThe form fails.\nEOF\n)"\n## Cause'
+# Bug (#1623 review, follow-up 3, E1): a `$(...)` in a double quote was read as quoted text, so a `## Cause` comment
+# inside it, after the body's end word, counted. Bash reads shell text there, where a `#` starts a comment.
+refused $'gh issue create --label bug --title Example --body "$(cat <<EOF\nThe form fails.\nEOF\n## Cause\n)"'
+# A comment in a backquote part ends at its closing backquote, as Bash finds that end first: the real Cause section
+# after it is body text and lets the issue through.
+passes $'gh issue create --label bug --title Example --body "The form fails. `true # x`\n## Cause\ny"'
 # The body of a split `<\` `<EOF` here-document is still read: its real Cause section lets the issue through.
 passes $'gh issue create --label bug --title Example --body-file - <\\\n<EOF\nThe form fails.\n## Cause\nx\nEOF'
 # Bug (#1623): a `#` after a line continuation starts a comment as bash reads it (the continuation is no character).

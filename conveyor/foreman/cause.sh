@@ -136,21 +136,33 @@ breaks() {
 }
 # uncommented <command>: the command with the text of each shell comment made spaces, as bash reads no word in it: a `#`
 # that starts a word outside a quote, up to the end of its line (a backslash there continues no line). A quote in a
-# comment then opens no quote, so the quote that opens the body is found after it.
+# comment then opens no quote, so the quote that opens the body is found after it. A `$(` or a backquote in a double
+# quote starts shell text again, as in unquoted (the stack m, depth d; c[d] the open ( in a $(...) part), so a `#` line
+# in `"$(cat <<EOF` ... `)"` is a comment; a comment there hides its `)`, but not the backquote that ends a backquote
+# part, as Bash finds that end before it reads the comments.
 uncommented() {
   awk '{ s = s (NR > 1 ? "\n" : "") $0 }
     END {
-      ws = 1
+      ws = 1; d = 0; m[0] = ""
       for (i = 1; i <= length(s); i++) {
-        ch = substr(s, i, 1)
-        if (m == "c") { if (ch == "\n") { m = ""; ws = 1 } else ch = " "; o = o ch; continue }
+        ch = substr(s, i, 1); nx = substr(s, i + 1, 1); t = m[d]
+        if (t == "c" && ch == "`" && m[d - 1] == "b") { d -= 2; o = o ch; continue }
+        if (t == "c") { if (ch == "\n") { d--; ws = 1 } else ch = " "; o = o ch; continue }
         # ws: the character before ends a word (a blank or an operator outside a quote, with no backslash before it); a
         # line continuation (a backslash before a newline) is no character, so it keeps ws.
-        if (m == "" && ch == "#" && ws) { m = "c"; o = o " "; continue }
-        if (ch == "\\" && m != "s") { nx = substr(s, i + 1, 1); o = o ch nx; i++; if (nx != "\n") ws = 0; continue }
+        sh = t == "" || t == "p" || t == "b"
+        if (sh && ch == "#" && ws) { m[++d] = "c"; o = o " "; continue }
+        if (ch == "\\" && t != "s") { o = o ch nx; i++; if (nx != "\n") ws = 0; continue }
         o = o ch
-        if (m == "") { ws = ch ~ /[ \t\n;&|()<>]/; if (ch == "\"") m = "d"; else if (ch == q) m = (substr(s, i - 1, 1) == "$" ? "a" : "s") }
-        else if ((m == "d" && ch == "\"") || (m != "d" && ch == q)) { m = ""; ws = 0 } }
+        if (t == "d" && ch == "$" && nx == "(") { m[++d] = "p"; c[d] = 0; o = o nx; i++; ws = 1; continue }
+        if (t == "d" && ch == "`") { m[++d] = "b"; ws = 1; continue }
+        if (sh) {
+          ws = ch ~ /[ \t\n;&|()<>]/
+          if (ch == "\"") m[++d] = "d"; else if (ch == q) m[++d] = (substr(s, i - 1, 1) == "$" ? "a" : "s")
+          else if (t == "b" && ch == "`") d--
+          else if (t == "p" && ch == "(") c[d]++
+          else if (t == "p" && ch == ")") { if (c[d]) c[d]--; else d-- } }
+        else if ((t == "d" && ch == "\"") || (t != "d" && ch == q)) { d--; ws = 0 } }
       printf "%s", o }' q="'" <<<"$1"
 }
 # unquoted <command>: the command with the text in each quote made x (the quote marks kept), so a `<<WORD` written in a
@@ -187,12 +199,21 @@ unquoted() {
 # read again from its start, as Bash reads it. With a second argument `0`, the bodies are left out (each is one blank
 # line): only the shell text stays, where the options are read, so a quote or a `#` in a body changes no comment after it.
 heredocs() {
-  local s=$1 nb=${2:-1} o='' u at ops op w line
+  local s=$1 nb=${2:-1} o='' r='' u q ru rq at ops op w line
   while [ -n "$s" ]; do
-    u=$(uncommented "$s") at='' ops=''
+    # r: the shell text read so far, without the bodies. The text after a body is read on from it, not from a new
+    # start, so a quote open when the body began (`"$(cat <<EOF` ... `)"`) is still open: its closing `"` opens none,
+    # and a `#` after it starts a comment. The part read from r (ru, rq; an x after it keeps its last newline) is cut
+    # off the front, not a count of characters, as awk can count bytes where bash counts characters.
+    u=$(uncommented "$r$s") at='' ops=''
+    q=$(unquoted "$u")
+    if [ -n "$r" ]; then
+      ru=$(uncommented "${r}x"); ru=${ru%x}; rq=$(unquoted "${ru}x"); rq=${rq%x}
+      u=${u#"$ru"}; q=${q#"$rq"}
+    fi
     # at: where the first line that holds a `<<WORD` outside quotes ends (its newline); ops: the words of its `<<WORD`s,
     # with a `-` before each one of a `<<-`. A run of `<` is counted across line continuations: three are a here-string.
-    read -r at ops < <(U=$u Q=$(unquoted "$u") awk 'BEGIN {
+    read -r at ops < <(U=$u Q=$q awk 'BEGIN {
       q = ENVIRON["Q"]; u = ENVIRON["U"]; n = length(q)
       for (i = 1; i <= n; i++) {
         ch = substr(q, i, 1)
@@ -207,7 +228,7 @@ heredocs() {
           w = substr(u, i, RLENGTH); gsub(/["\047]/, "", w); ops = ops " " d w; i += RLENGTH }
         i-- } }')
     if [ -z "$at" ]; then o+=$u; break; fi
-    o+=${u:0:at}$'\n'; s=${s:at}
+    o+=${u:0:at}$'\n'; r+=${s:0:at}; s=${s:at}
     for op in $ops; do
       w=${op#-}
       while [ -n "$s" ]; do
