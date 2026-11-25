@@ -187,13 +187,25 @@ t_old_gap() {
 # The sample of t_old (10 lines of rules, 16 of state) fits this repository's own start without --rules-apart: its pack
 # (every standing kind on, its auto.reserved), its record's name, the plugin-home text, the state folder in the checkout
 # and the live summary of a quiet belt. The start is the real one, with no --rules-apart, so the owner rules and rules.md
-# come from context() itself. Its folder, in every path of the text, stays under the runner's TMPDIR (the share of temp
-# space it counts) and is padded to its length in a card's test slot (40 characters, as in foreman-launcher.test.sh), so
-# a shorter TMPDIR does not make the start fit when it does not fit in the slot.
+# come from context() itself. Its folder, in every path of the text, has its length in a card's test slot (40
+# characters, as in foreman-launcher.test.sh) and stays under the runner's TMPDIR (the share of temp space it counts): a
+# shorter one is padded to it, so a shorter TMPDIR does not make the start fit when it does not fit in the slot; a longer
+# one (a hand run of test-changed.sh from /tmp gives each file a TMPDIR of 27 characters, and mktemp's folder in it is
+# 42) is swapped for a folder of a 3-character name in the same TMPDIR, padded the same way, so the start does not fail
+# for room the slot has.
 # Bug it catches (follow-up of #1536): t_old's sample fitted only a start smaller than this repository's own; here the
 # standing text and the owner rules left rules.md 4 of its 10 lines.
 t_own() {
   local st own n B=$B
+  CASE=own
+  if [ "${#B}" -gt 39 ]; then
+    # The case runs in a subshell of its own: its exit removes this folder (OWN_TMP is global, so the trap still finds it
+    # after t_own returns, when $B is the file's own folder again).
+    OWN_TMP=$(mktemp -d "${B%/*}/XXX") || fail "the folder in ${B%/*} was not made"
+    trap 'rm -rf "$OWN_TMP"' EXIT
+    B=$OWN_TMP
+    [ "${#B}" -le 39 ] || fail "TMPDIR ${B%/*} is too long for a folder of a card's test slot's length (40 characters)"
+  fi
   [ "${#B}" -ge 39 ] || B+=/$(printf '%*s' $((39 - ${#B})) '' | tr ' ' p)
   fixture own; allkinds
   own=$(jq -r '.repository | if type == "object" then .url else . end' "$SRC/../../.claude-plugin/plugin.json")
