@@ -39,6 +39,7 @@ export CONVEYOR_FOREMAN_ASK="case \$CONVEYOR_REPO:\$CONVEYOR_CMD:\$ASK_LIMIT in 
 echo "$((NOW - 600)) $((NOW - 60)) 3" > "$FD/conveyor-down-alpha.txt"; printf '%s\n' alpha/unreachable delta/unreachable > "$FD/conveyor-reported.txt"
 echo "$((NOW - 300)) $((NOW - 60)) 2" > "$FD/conveyor-down-beta.txt"
 echo "$((NOW - 400)) $((NOW - 60)) 2" > "$FD/conveyor-down-gamma.txt"
+echo "2 $((NOW - 60)) read9" > "$FD/conveyor-ghreach-gamma.txt" # two polls in a row that did not reach GitHub
 echo "$((NOW - 900)) $((NOW - 181)) 5" > "$FD/conveyor-down-delta.txt" # 181 s: one second past three polls (POLL 60)
 (CONVEYOR_MAIN=$M p_execsid bash "$SRC/watch-conveyor.sh" --once 2>"$T/err" >/dev/null) & w=$!
 wait_until '[ -e "$T/inbeta" ]' 'cat "$T/err"' || fail "the watcher never made beta's longer read: $(cat "$T/err")"
@@ -58,6 +59,11 @@ read -r first last fails < "$FD/conveyor-down-beta.txt"
 read -r first last fails < "$FD/conveyor-down-gamma.txt"
 [ "$first" = $((NOW - 400)) ] && [ "$fails" = 2 ] && [ "$last" -ge $((NOW + 4)) ] \
   || fail "after TERM to the watcher during beta's longer read, before gamma's read, gamma's outage file is not $((NOW - 400)) $((NOW + 4)) or later, 2: $(cat "$FD/conveyor-down-gamma.txt")"
+# Bug caught (#1675): gamma's run of polls that did not reach GitHub kept its previous poll's time, so the next
+# watcher's poll, after the slow reads before it, began the run again and GitHub not reached never woke.
+read -r n last r < "$FD/conveyor-ghreach-gamma.txt"
+[ "$n" = 2 ] && [ "$r" = read9 ] && [ "$last" -ge $((NOW + 4)) ] \
+  || fail "after TERM to the watcher during beta's longer read, before gamma's read, gamma's GitHub not reached file (polls, last poll, read) is not 2 $((NOW + 4)) or later, read9: $(cat "$FD/conveyor-ghreach-gamma.txt")"
 # Delta was not read, and its outage was over before the poll began: its file stays as it was.
 [ "$(cat "$FD/conveyor-down-delta.txt")" = "$((NOW - 900)) $((NOW - 181)) 5" ] \
   || fail "after TERM to the watcher during beta's longer read, before the read of delta (last failed poll 181 s before the poll), delta's outage file is not $((NOW - 900)) $((NOW - 181)) 5 as it was: $(cat "$FD/conveyor-down-delta.txt")"

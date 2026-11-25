@@ -587,17 +587,20 @@ record() { # <repo> <main> <now> <await>
     # how many polls in a row listed them, 1 or 2, and the GitHub read of the last (health ghRead, ghok()'s GHREAD): a
     # snapshot given again from the cache, or built again from the same GitHub folder read, is the same read, so it
     # counts as no new poll (#490). Health's own time is not the read's: a snapshot built again after a card update has
-    # a new one.
+    # a new one. They also hold the time of that last poll, its end as poll()'s downend sets it (as for $down: the reads
+    # of other records after it can take minutes): a gap of over three polls since it (a machine asleep, which polls
+    # only when it wakes for a moment) starts a new run, as an outage's does, so single bad reads hours apart are never
+    # three polls in a row (#1675).
     if ! grep -q $'^idle\t' <<<"$cur"; then rm -f "$idle"
     elif [ ! -e "$idle" ]; then touch "$idle"; cur=$(grep -v $'^idle\t' <<<"$cur"); fi
     local hread; hread=$(jq -r '.health.ghRead | strings' <<<"$rec" 2>/dev/null)
     thirdpoll() { # <key> <its file>: the key left in cur only on the third poll in a row that lists it
-      local n r
+      local n t r
       grep -q "^$1"$'\t' <<<"$cur" || { rm -f "$2"; return; }
-      read -r n r 2>/dev/null < "$2" && [[ $n =~ ^[0-9]+$ ]] || n=0
+      read -r n t r 2>/dev/null < "$2" && [[ $n =~ ^[0-9]+$ ]] && [[ $t =~ ^[0-9]+$ ]] && [ $((now - t)) -le $((POLL * 3)) ] || n=0
       { [ -n "$hread" ] && [ "$n" != 0 ] && [ "$r" = "$hread" ]; } || n=$((n + 1))
       [ "$n" -lt 3 ] || return 0
-      printf '%s %s\n' "$n" "$hread" > "$2"; cur=$(grep -v "^$1"$'\t' <<<"$cur")
+      printf '%s %s %s\n' "$n" "$now" "$hread" > "$2"; cur=$(grep -v "^$1"$'\t' <<<"$cur")
     }
     thirdpoll ghreach "$ghreach"; thirdpoll gh "$ghout"
     # A stuck card is a problem only when two snapshots in a row, at least a poll apart, list it: one reading can
@@ -702,6 +705,8 @@ poll() { # 0 when a wake was put in pending; 2 when one was due but the session'
   # timed now, at the poll's end and before a wake put during the poll: a failed poll with the longer read, of that
   # record or of any other read after it, takes over 3 minutes, so a gap timed from an earlier point made the next
   # poll start a new outage, woken again; and a waiter that relays a wake put during the poll stops the watcher there.
+  # The same holds for each record whose GitHub not reached or signed out run this poll counted ($ghreach, $ghout:
+  # record() saved the poll's start there too), or the run began again at every poll and never woke (#1675).
   downend() {
     local f a c
     while IFS= read -r f; do
@@ -718,13 +723,14 @@ poll() { # 0 when a wake was put in pending; 2 when one was due but the session'
   # new one (during the first read, or before the last outage's unreachable key was dropped). It is left as it is, so
   # the next failed read starts the new outage, whose unreachable wake comes once that outage has failed polls enough,
   # and its old reported key is not kept: timed now, the old outage would go on and keep its key, and the new one never
-  # woke.
+  # woke. Each GitHub not reached or signed out run file ($ghreach, $ghout) is timed the same way, by the same rule.
   stopped() {
     local r f a l c
     while IFS=$'\t' read -r r _; do
-      f=$FD/conveyor-down-$r.txt
-      read -r a l c 2>/dev/null < "$f" && [[ $l =~ ^[0-9]+$ ]] && [ $((now - l)) -le $((POLL * 3)) ] \
-        && echo "$a $((now + EPOCHSECONDS - p0)) $c" > "$f"
+      for f in "$FD/conveyor-down-$r.txt" "$FD/conveyor-ghreach-$r.txt" "$FD/conveyor-ghout-$r.txt"; do
+        read -r a l c 2>/dev/null < "$f" && [[ $l =~ ^[0-9]+$ ]] && [ $((now - l)) -le $((POLL * 3)) ] \
+          && echo "$a $((now + EPOCHSECONDS - p0)) $c" > "$f"
+      done
     done <<<"$RECS"
     exit 143
   }
@@ -735,7 +741,9 @@ poll() { # 0 when a wake was put in pending; 2 when one was due but the session'
     await=$(awk 'FILENAME == ARGV[1] { done[$1] = $2; next } /^[1-9][0-9]*$/ { n[$0]++; next } /^-[1-9][0-9]*$/ { i = substr($0, 2); if (i in n) off[i] = n[i] }
       END { for (i in n) if (n[i] > done[i] + 0 && n[i] > off[i] + 0) print "[" i "," n[i] "]" }' "$FD/await-done-$repo.txt" "$FD/await-$repo.txt" | jq -sc sort)
     one=$(record "$repo" "$main" "$now" "$await"); cur+=$one$'\n'; n=$((n + 1))
-    df=$FD/conveyor-down-$repo.txt; read -r _ dl _ 2>/dev/null < "$df" && [ "$dl" = "$now" ] && failed+=$df$'\n'
+    for df in "$FD/conveyor-down-$repo.txt" "$FD/conveyor-ghreach-$repo.txt" "$FD/conveyor-ghout-$repo.txt"; do
+      read -r _ dl _ 2>/dev/null < "$df" && [ "$dl" = "$now" ] && failed+=$df$'\n'
+    done
     # Another record is still to be read, which can take minutes (a slow snapshot, health, then the longer read): a
     # card of this one newly blocked or waiting for the owner's yes wakes now, in a wake of its own, marked reported.
     [ "$n" -lt "$all" ] || continue

@@ -36,10 +36,11 @@ ghread() { # [again]
   local g read why; IFS=$'\t' read -r g read why <<<"$r"
   if [ "$g" = true ]; then snap true true '' "$read"; else snap false null "$why" "$read"; fi
 }
-# One poll of the case's Foreman, <n> polls after the first; 0 with a wake put in pending, which wake holds.
-poll() { # <case> <n>
+# One poll of the case's Foreman, <n> polls and [s] seconds after the first; 0 with a wake put in pending, which wake
+# holds. With ASKPRE set, it runs before each read (a slow read).
+poll() { # <case> <n> [s]
   local fd=$T/$1/foreman; rm -f "$fd"/pending/*.wake
-  CONVEYOR_FOREMAN_DIR=$fd CONVEYOR_MAIN=$M CONVEYOR_FOREMAN_NOW=$((NOW + 60 * $2)) CONVEYOR_FOREMAN_ASK="cat $T/snap" \
+  CONVEYOR_FOREMAN_DIR=$fd CONVEYOR_MAIN=$M CONVEYOR_FOREMAN_NOW=$((NOW + 60 * $2 + ${3:-0})) CONVEYOR_FOREMAN_ASK="${ASKPRE:-}cat $T/snap" \
     bash "$SRC/watch-conveyor.sh" --once 2>> "$T/$1.err" || return
   wake=$(cat "$fd"/pending/*.wake)
 }
@@ -55,6 +56,44 @@ unreached() {
   snap true false '' r3; poll unreached 4 && grep -qF 'alpha: GitHub not reached' <<<"$wake" && ! grep -qF 'signed out' <<<"$wake"
 }
 check 'GitHub not reached wakes on the third poll in a row, not the second, never as signed out' unreached
+
+# Bug caught (#1675): a good gh auth status read that did not end the run of bad ones: two bad reads, a good one, then
+# one bad read between good reads made the third bad poll and woke the Foreman with "GitHub not reached". The polls
+# are a poll apart, so only the good read can end the run.
+between() {
+  wake=
+  snap true true '' g1; ! poll between 0 || return 1
+  snap true false '' b1; ! poll between 1 || return 1
+  snap true false '' b2; ! poll between 2 || return 1
+  snap true true '' g2; ! poll between 3 || return 1
+  snap true false '' b3; ! poll between 4 || return 1 # one bad read between good reads: no wake
+  snap true true '' g3; ! poll between 5
+}
+check 'one bad gh auth status read between good reads, after two bad ones, wakes nothing' between
+
+# Bug caught (#1675): single bad gh auth status reads hours apart woke the Foreman with "GitHub not reached": a machine
+# asleep polls only when it wakes for a moment, so each read was the next poll of the last, and three of them made
+# three polls in a row. A gap of over three polls since the last bad one starts a new run.
+apart() {
+  wake=
+  snap true false '' b1; ! poll apart 0 || return 1
+  snap true false '' b2; ! poll apart 60 || return 1 # an hour later, the machine asleep between
+  snap true false '' b3; ! poll apart 120 # another hour later: each read is one bad read alone
+}
+check 'single bad gh auth status reads hours apart wake nothing' apart
+
+# Bug caught (#1675 review): the run was timed at the poll's start, so a poll whose reads take minutes (a slow
+# snapshot and its longer read, here 3 s) put over three polls between that time and the next poll's start, and the
+# run began again at every poll: GitHub not reached never woke. Each poll starts 182 s after the last, 179 s after its
+# end. The reads sleep for real: the poll's end is read from the watcher's own clock, which a test cannot set.
+slow() {
+  local ASKPRE='sleep 3; ' # sleep: the slow read that makes the poll end 3 s after its start
+  wake=
+  snap true false '' s1; ! poll slow 0 || return 1
+  snap true false '' s2; ! poll slow 0 182 || return 1
+  snap true false '' s3; poll slow 0 364 && grep -qF 'alpha: GitHub not reached' <<<"$wake"
+}
+check 'GitHub not reached wakes on the third slow poll in a row, each starting over three polls after the last began' slow
 
 # Bug (#490): one health read with gh false, while gh held its token, woke the Foreman with "gh is signed out".
 # gh auth token times out once: no wake from that read, nor from the next poll that the snapshot cache gives the
