@@ -814,6 +814,9 @@ run
 # in its fix session), yet the Board counted it as one Stop now requeues.
 q '.panels.board.data | ([.building[], .review[]] | map(select(.issue | IN(11, 12, 13, 14, 15, 16, 17, 99)) | [.issue, .stays]) | sort) == [[11, true], [12, true], [13, true], [14, false], [15, true], [16, true], [17, false], [99, true]]
   and ([.building[], .review[]] | map(select(.issue | IN(11, 12, 13, 14, 15, 16, 17, 99) | not) | .stays) | all(. == false))' "a card Stop now leaves running (filing, landing, filed its follow-ups or slices, landed) is marked stays; one it ends is not"
+# Bug: the split holds its umbrella before its card closes; the issue is on the belt then, out of open.held, so the
+# Rules tab's Queue in Open issues saw no split and sent a release that cleared the split's hold.
+q '.panels.rules.data.splitting == [15]' "the Rules part names the belt issue whose card filed a split (15), not one kept whole (17) nor one with no split"
 # A long check run (the pack's checks.progress) shows on the Board as the snapshot gives it, or the Board looks idle
 # while the run holds the loop paused.
 CR='{"name":"nightly","sha":"0123456789ab","started":"'"$(ago 600)"'","ended":null,"result":null,"counts":{"passed":3,"failed":1,"running":2,"queued":4,"reused":0},"done":4,"all":10,"leftSec":225,

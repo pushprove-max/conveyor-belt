@@ -129,7 +129,8 @@
 #           the held, skipped or yes-gated issues that wait too (keptWaits), each with waitsFor; each null,
 #           with issuesError, when GitHub did not list the issues), building (how many cards are on the belt), onBelt
 #           (their issues), beltSteps (every card on the belt, landed ones too: issue, step, landed; the waiting list
-#           says where each issue a card waits on is), blocked (the blocked cards), forecast
+#           says where each issue a card waits on is), splitting (the issues on the belt whose card has filed the slices
+#           of a split: their hold is the split's from then on), blocked (the blocked cards), forecast
 #           (the snapshot's: cards, usd, perCard {usd, pct}, guard, reading, pausesAt; null from a snapshot without one;
 #           no time), prices (the snapshot's: the built-in model prices, the pack's prices, added models and aliases,
 #           each model's display name and the model IDs seen in 30 days, for Model prices and the Board's model names,
@@ -299,6 +300,7 @@ PANELS_JQ='
        issuesError: (if $s.queue.order == null then "GitHub did not list the open issues on \($conv.host)." else null end),
        building: [$s.belt[] | select(.landed != true)] | length, onBelt: [$s.belt[] | select(.landed != true) | .issue],
        beltSteps: [$s.belt[] | {issue, step, landed: (.landed == true)}],
+       splitting: [$s.belt[] | select(.landed != true and (.split.filed | type == "array" and length > 0)) | .issue],
        blocked: [$s.needsYou.blocked[] | {card, issue, name: (.name // null), title, since}] | few($r), forecast: ($s.forecast // null),
        prices: ($s.prices | if type == "object" then . + {missing: [$s.needsYou.prices.models | arrays | .[] | strings]} else null end), standing: ($s.standing // null), pushCheck: ($s.pushCheck | if type == "boolean" then . else null end), lintCommands: ($s.lintCommands | if type == "array" then . else null end), open: openOf($r), readAt: ($r.readAt // null)};
   # From the first pick-up of the work of the card to its landing: totalSec of the snapshot, else the time in its card id.

@@ -361,6 +361,7 @@
     const held = new Map(list(d.open.held).map((x) => [x.issue, x]));
     const mine = new Set(c ? list(c.held) : list(d.open.held).filter((x) => list(x.reasons).some((r) => r && r.kind === 'you')).map((x) => x.issue));
     const q = list(d.queue).map((x) => x.issue), belt = new Set(list(d.onBelt)), blocked = new Set(list(d.blocked).map((x) => x.issue));
+    const splitting = new Set(list(d.splitting));
     return d.open.issues.filter((x) => x && num(x.issue) !== null).map((x) => {
       const why = list((held.get(x.issue) || {}).reasons).filter((r) => r && r.kind !== 'you'), k = (kind) => why.find((r) => r.kind === kind);
       const at = q.indexOf(x.issue);
@@ -377,7 +378,12 @@
       // A card stopped and not among the blocked ones waits in Needs you for the owner's yes: nothing to retry.
       else if (k('approve') || (k('card') && k('card').step === 'blocked')) state = 'approve';
       else if (at >= 0) state = at < NEXT ? 'next' : 'queued';
-      return Object.assign({}, x, { state, mine: mine.has(x.issue), waitsFor: state === 'waits' ? list(k('waits').waitsFor) : [], areas: list(x.labels).filter(isArea).sort() });
+      // A split umbrella (as held(): its held entry names slices in umbrella or sliceCards; or its card, still on the
+      // belt, has filed its slices and holds it before it closes: splitting) is held by the split: a release would
+      // clear that hold and build nothing, so Queue leaves it out (split).
+      const h0 = held.get(x.issue) || {};
+      const split = splitting.has(x.issue) || list(h0.umbrella).some((n) => num(n) !== null) || list(h0.sliceCards).some((c) => c && typeof c.card === 'string');
+      return Object.assign({}, x, { state, mine: mine.has(x.issue), split, waitsFor: state === 'waits' ? list(k('waits').waitsFor) : [], areas: list(x.labels).filter(isArea).sort() });
     });
   }
   const stateWord = (x) => (x.state === 'waits' ? `Waiting on ${x.waitsFor.map(S.ctx.depRef).join(', ')}` : STATES.find(([k]) => k === x.state)[1]);

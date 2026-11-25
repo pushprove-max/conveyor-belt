@@ -45,6 +45,35 @@ test('Rules: a split umbrella whose slices are cards with no issue has no Queue,
   assert.ok(!w.posts.some((p) => p.body.action === 'release' && p.body.args.includes('76')), `no release of #76: ${JSON.stringify(w.posts.map((p) => p.body))}`);
 });
 
+// Bug: Open issues counted a split umbrella held by you in Queue, as `mine` comes from the record's hold, so picking it
+// and clicking Queue sent a release that cleared the split's hold and built nothing. Each case picks the umbrella (76)
+// and a plain held issue (79), clicks the enabled Queue 1, and checks that only 79 is released.
+async function openQueue(edit) {
+  const w = boot({ tab: 'rules' });
+  const d = snap(T0 - 60000, [76, 79]), r = d.panels.rules.data;
+  r.open.issues.push({ repo: 'sample', issue: 79, title: 'A plain held one', priority: 'P2', labels: ['P2'], created: '2026-11-02T00:00:00Z' });
+  edit(r);
+  deliver(w, d);
+  for (const n of [76, 79]) {
+    const box = issuesP(w).querySelector(`.rules-issue[data-issue="${n}"] [data-act="pick"]`);
+    box.checked = true; box.dispatchEvent(new w.Event('change'));
+  }
+  const q = act(issuesP(w), 'bulk-release');
+  assert.equal(q.textContent, 'Queue 1', 'only the plain held issue is counted in Queue');
+  q.click();
+  await settle();
+  const rel = w.posts.filter((p) => p.body.action === 'release').map((p) => p.body.args);
+  assert.deepEqual(rel, [['79']], `only #79 is released: ${JSON.stringify(w.posts.map((p) => p.body))}`);
+}
+test('Rules: Queue in Open issues sends no release for a picked split umbrella with numbered slices', () =>
+  openQueue((r) => { r.open.held.find((x) => x.issue === 76).umbrella = [77, 78]; }));
+test('Rules: Queue in Open issues sends no release for a picked split umbrella whose slices are cards with no issue', () =>
+  openQueue((r) => { Object.assign(r.open.held.find((x) => x.issue === 76), { umbrella: [], sliceCards: [{ card: 'c1', state: 'waiting' }] }); }));
+// Bug: the split holds its umbrella before its card closes (lib/slices.sh); meanwhile the issue is on the belt, so the
+// snapshot leaves it out of open.held and only splitting (its card filed the slices) says it is a split.
+test('Rules: Queue in Open issues sends no release for a split umbrella whose card has not closed yet', () =>
+  openQueue((r) => { r.open.held = r.open.held.filter((x) => x.issue !== 76); r.onBelt = [76]; r.splitting = [76]; }));
+
 // A snapshot the collector began at `begun`, with the record holding `held` (76 by default, as full()).
 function snap(begun, held = [76]) {
   const d = full(begun + 20000), r = d.panels.rules.data;

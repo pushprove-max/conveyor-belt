@@ -75,7 +75,7 @@
 // Finish sends `onboarded` with the keys confirmed, those confirmed before too. A record with no onboarded key (an
 // older engine, which cannot save it) is never asked.
 // Its part (dashboard.sh, rules): {repo (null: no record is on the host's main), repoUrl, state, control, cap, guard,
-// modelSettings, areaPrefix, packPick, limit, held, queue (each with areas), skipped, waits, issuesError, building, onBelt, beltSteps,
+// modelSettings, areaPrefix, packPick, limit, held, queue (each with areas), skipped, waits, issuesError, building, onBelt, beltSteps, splitting,
 // blocked, forecast, prices, standing, open (with issues: every open issue), repos, others}.
 (function () {
   'use strict';
@@ -417,9 +417,10 @@
     allBox.addEventListener('change', () => { shown.forEach((x) => { if (allBox.checked) S.picked.add(x.issue); else S.picked.delete(x.issue); }); draw(); });
     allLab.append(allBox, h('span', null, `Select all shown (${shown.length})`));
     acts.append(allLab, h('span', 'board-from', `${picked.length} selected`));
-    // Held by you is the record's hold, whatever state shows first (a blocked or building issue may be held too).
+    // Held by you is the record's hold, whatever state shows first (a blocked or building issue may be held too). A
+    // split umbrella is never queued: a release would clear the split's hold and build nothing (openIssues, split).
     const group = {
-      hold: picked.filter((x) => !x.mine), release: picked.filter((x) => x.mine),
+      hold: picked.filter((x) => !x.mine), release: picked.filter((x) => x.mine && !x.split),
       order: picked.filter((x) => x.state !== 'building'), retry: picked.filter((x) => x.state === 'blocked'),
     };
     [['hold', 'Hold', 'Hold'], ['release', 'Queue', 'Queue'], ['order', 'Order first', 'Pin first in the order'], ['retry', 'Retry', 'Retry the blocked card of']].forEach(([a, word, say2]) => {
