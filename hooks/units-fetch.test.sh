@@ -11,10 +11,14 @@
 set -uo pipefail
 DIR=$(cd "$(dirname "$0")" && pwd -P)
 FETCH=$DIR/units-fetch.sh
-# Under /tmp, not TMPDIR (long on macOS), with a short name: the kept ssh connection's socket folder must stay short
-# enough to be used.
-T=$(mktemp -d /tmp/uf.XXXXXX) || exit 1
-trap 'rm -rf "$T"' EXIT
+# In TMPDIR, which the suite removes when the file ends or is stopped.
+T=$(mktemp -d) || exit 1
+# The ssh cases' cache folder, S: a socket folder is 45 characters at most (units-fetch.sh), and T's conveyor/ssh is
+# longer under the suite's TMPDIR, so S is a short name at the top of TMPDIR. Its conveyor/ssh fits (SFITS=1) under
+# the suite's TMPDIR on Linux; under a longer one (macOS) the fetch keeps its sockets in its fallback folder FB.
+S=$(mktemp -d "${TMPDIR:-/tmp}/XXX") || exit 1
+FB=/tmp/conveyor-ssh-$UID SFITS=0; [ $((${#S} + 13)) -gt 45 ] || SFITS=1
+trap 'rm -rf "$T" "$S"' EXIT
 fails=0 TAB=$'\t'
 ok() { echo "ok [units-fetch]: $1"; }
 bad() { echo "FAIL [units-fetch]: $1" >&2; fails=$((fails + 1)); }
@@ -448,8 +452,9 @@ same 'over ssh with no jq on its PATH, the cut still takes the engine'"'"'s PATH
 # target): -O check passes while a socket's ssh runs (live or hung); with no socket there, or a stale one (no ssh
 # behind it), a call connects anew and, asked to keep the connection for 120 s, leaves a socket that says live; a live
 # socket is reused; through a hung one a call waits, as through a kept ssh whose network is dead; -O exit takes the
-# socket away. Each call's way is logged: new, reuse, probe (the `true` that tries a kept connection), hung or exit.
-# As OpenSSH does, it fails (255) for a ControlPath with a space (which splits the option) or a % that is not %C or %%.
+# socket away. Each call's way is logged: new, reuse, probe (the `true` that tries a kept connection), hung or exit;
+# the socket it was given is written to the file sock. Each host it resolves to is this run's (lab-<pid>), so a socket
+# in the shared fallback folder is this run's own, and is taken away after. As OpenSSH does, it fails (255) for a ControlPath with a space (which splits the option) or a % that is not %C or %%.
 machine mux
 mkdir -p "$M/elsewhere"
 cat > "$M/bin/ssh" <<'EOF'
@@ -458,6 +463,7 @@ cp='' keep=0 op=''
 while :; do case ${1-} in -o) case $2 in ControlPath=*) cp=${2#*=} ;; ControlMaster=auto|ControlPersist=120) keep=$((keep + 1)) ;; esac; shift 2 ;; -O) op=$2; shift 2 ;; *) break ;; esac; done
 t=${cp//%%/} t=${t//%C/}; case $t in *[[:space:]]* | *%*) echo "ssh: bad ControlPath $cp" >&2; exit 255 ;; esac
 l=${0%/*}/log r=$(cat "${0%/*}/resolved" 2>/dev/null || echo "$1"); r=$(cksum <<<"$r"); cp=${cp//%C/${r%% *}}
+[ -z "$cp" ] || echo "$cp" > "${0%/*}/sock"
 s=none; [ -z "$cp" ] || [ ! -e "$cp" ] || s=$(cat "$cp")
 case $op in
   check) [ "$s" = live ] || [ "$s" = hung ]; exit ;;
@@ -474,27 +480,36 @@ EOF
 chmod +x "$M/bin/ssh"
 hostfile --arg c "$M/clone" --arg b "$M/bakery" --arg g "$M/gadgetlab" \
   '{host: "lab", ssh: "owner@lab", main: $c, records: [{repo: "bakery", main: $b}, {repo: "gadgetlab", main: $g}]}'
+# The cache folder is S: where ssh can take it, the socket folder is its conveyor/ssh. Bug it catches: a socket folder
+# ssh can take was passed over for the fallback.
+XC=$S SD=$FB; [ "$SFITS" = 0 ] || SD=$S/conveyor/ssh
+echo "lab-$$" > "$M/bin/resolved"
 s1=$(fetch "$M/elsewhere" stamp); s2=$(fetch "$M/elsewhere" stamp); got=$(fetch "$M/elsewhere")
 same "over ssh: the second stamp and the poll go through the connection the first one kept (units-fetch.sh stamp, stamp, then a poll, in $M/elsewhere)" \
   'new probe reuse probe reuse' "$(paste -sd' ' "$M/bin/log")"
 same 'over ssh: the stamps through the kept connection are the same' "$s1" "$s2"
 same 'over ssh: the poll through the kept connection prints the snapshots as the fixture /units draws' \
   "$(sed '1s/\tbakery$/\t/; s/^fast\tnone$/fast\tnorecord/; s/^host\tlab\tlocal\t0$/host\tlab\tssh\t0/' <<<"$WANT")" "$got"
-same 'over ssh: the socket'"'"'s folder is this user'"'"'s alone' 'drwx------' "$(ls -ld "$H/.cache/conveyor/ssh" | cut -c1-10)"
-sk=$(find "$H/.cache/conveyor/ssh" -type f) && echo hung > "$sk"; : > "$M/bin/log"
+sk=$(cat "$M/bin/sock")
+same "over ssh: the socket is in $SD, and that folder is this user's alone (units-fetch.sh stamp in $M/elsewhere)" \
+  "$SD|drwx------" "${sk%/*}|$(ls -ld "$SD" | cut -c1-10)"
+echo hung > "$sk"; : > "$M/bin/log"
 same "over ssh: a kept connection that does not answer is stopped and the stamp asked on a new one (units-fetch.sh stamp in $M/elsewhere, socket hung)" \
   "$s1|hung exit new" "$(fetch "$M/elsewhere" stamp)|$(paste -sd' ' "$M/bin/log")"
 echo stale > "$sk"; : > "$M/bin/log"
 same "over ssh: a stale socket, no ssh behind it, gives a new connection (units-fetch.sh stamp in $M/elsewhere, socket stale)" \
   "$s1|new" "$(fetch "$M/elsewhere" stamp)|$(paste -sd' ' "$M/bin/log")"
-echo lab2 > "$M/bin/resolved"; : > "$M/bin/log"
+echo "lab2-$$" > "$M/bin/resolved"; : > "$M/bin/log"
 same "over ssh: the alias owner@lab now resolves to another host: a new connection, not the old host's (units-fetch.sh stamp in $M/elsewhere)" \
   "$s1|new" "$(fetch "$M/elsewhere" stamp)|$(paste -sd' ' "$M/bin/log")"
+rm -f "$sk" "$(cat "$M/bin/sock")"
 # A cache folder ssh cannot take as a socket folder (a space or a % in it, or too long a path) keeps the connection in
 # /tmp/conveyor-ssh-<user id>. Bugs it catches: a space or a % failed every stamp and poll; a long cache folder kept no
 # connection. Each input resolves to a host of its own, this run's, so its socket there is new and is taken away after.
+# The space and the % are in place of S's last character, so that, where S fits, only the character keeps ssh from
+# taking that folder; the fetch never makes such a folder.
 n=0
-for xc in "$T/mux/a b" "$T/mux/a%b" "$T/mux/a-cache-folder-too-long-for-a-socket-path"; do
+for xc in "${S%?} " "${S%?}%" "$T/mux/a-cache-folder-too-long-for-a-socket-path"; do
   n=$((n + 1)); echo "lab-$$-$n" > "$M/bin/resolved"; : > "$M/bin/log"; r=$(cksum < "$M/bin/resolved"); r=/tmp/conveyor-ssh-$UID/${r%% *}
   same "over ssh, cache folder $xc: two stamps go through one connection kept in /tmp/conveyor-ssh-$UID (units-fetch.sh stamp, stamp in $M/elsewhere)" \
     "$s1|$s1|new probe reuse|live" "$(XC=$xc fetch "$M/elsewhere" stamp)|$(XC=$xc fetch "$M/elsewhere" stamp)|$(paste -sd' ' "$M/bin/log")|$(cat "$r" 2>/dev/null)"
@@ -507,9 +522,15 @@ cat > "$M/bin/mkdir" <<'EOF'
 PATH=${PATH//"${0%/*}:"/} mkdir "$@" || exit
 for a; do :; done; case $a in */conveyor/ssh) ls -ld "$a" | cut -c1-10 >> "${0%/*}/mkdirs" ;; esac
 EOF
-chmod +x "$M/bin/mkdir"; echo "lab-$$-umask" > "$M/bin/resolved"
-same "over ssh under umask 000, a new cache folder $T/c: mkdir makes its socket folder open to this user alone (units-fetch.sh stamp in $M/elsewhere)" \
-  "$s1|drwx------" "$(umask 000; XC=$T/c fetch "$M/elsewhere" stamp)|$(cat "$M/bin/mkdirs" 2>/dev/null)"
-rm -f "$M/bin/mkdir"
+# The cache folder is S again, its conveyor folder taken away so that the socket folder is new. Where S does not fit,
+# the fetch makes no socket folder in a cache folder, so the case is left out.
+chmod +x "$M/bin/mkdir"; echo "lab-$$-umask" > "$M/bin/resolved"; rm -rf "$S/conveyor"
+if [ "$SFITS" = 1 ]; then
+  same "over ssh under umask 000, a new cache folder $S: mkdir makes its socket folder open to this user alone (units-fetch.sh stamp in $M/elsewhere)" \
+    "$s1|drwx------" "$(umask 000; XC=$S fetch "$M/elsewhere" stamp)|$(cat "$M/bin/mkdirs" 2>/dev/null)"
+else
+  ok "over ssh under umask 000: left out, as $S/conveyor/ssh is over the 45 characters of a socket folder"
+fi
+rm -f "$M/bin/mkdir" "$(cat "$M/bin/sock")"
 
 [ "$fails" = 0 ] || exit 1

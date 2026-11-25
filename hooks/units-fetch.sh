@@ -216,17 +216,18 @@ if [ -f .conveyor/project.json ] && [ "$ok" = 0 ]; then
   t=${here##*/}; t=${t//[^A-Za-z0-9._-]/-}
   if [ "$remote" = 0 ]; then mmain=$here
   else mmain=$(jq -r --arg n "$t" 'first(.records[]? | select(.repo == $n) | .main) // empty' <<<"$got" 2>/dev/null); fi
-  # The feed's first field says whether it is this machine's (1), then its records, only when it is.
+  # The feed's first fields say which machine it is of: local (1 or 0), then its ssh target ("" when it names none),
+  # as the Board's stream wrote them from hostfile.sh; then its records, read only when it is this machine's.
   { [ "$mode" != feed ] && [ "$mode" != map ]; } || [ -z "$mmain" ] || {
-    fm=0; IFS= read -r -d '' fm
-    [ "$fm" = 1 ] || mmain=''
-    while IFS= read -r -d '' m && IFS= read -r -d '' s; do
+    fl=0 fs=''; IFS= read -r -d '' fl; IFS= read -r -d '' fs
+    if [ -z "$mssh" ]; then [ "$fl" = 1 ]; else [ "$fs" = "$mssh" ]; fi || mmain=''
+    [ -z "$mmain" ] || while IFS= read -r -d '' m && IFS= read -r -d '' s; do
       [ "$m" = "$mmain" ] || { [ "$remote" = 0 ] && [ "$m" -ef "$here" ]; } || continue
       mmain=$m skip=$s; break
     done
-  } < <(jq -j --arg s "$mssh" '(.stream.live == true) as $l
-    | (if $s == "" then .local == true else .ssh == $s end) as $same
-    | (if $same then 1 else 0 end), "\u0000", (select($same) | .records[]? | select(.main | strings | test("^/[^[:cntrl:]]*$"))
+  } < <(jq -j '(.stream.live == true) as $l
+    | (if .local == true then 1 else 0 end), "\u0000", ([.ssh] | map(strings | select(test("^[^[:cntrl:]]+$"))) | first // ""), "\u0000",
+      (.records[]? | select(.main | type == "string" and test("^/[^[:cntrl:]]*$"))
       | .main, "\u0000", (if $l and (.snap.testMap | type) == "object" then 1 else 0 end), "\u0000")' "$feedf" 2>/dev/null)
   [[ ! $mmain =~ ^/[^[:cntrl:]]*$ ]] || printf 'maprec\t%s\nmaphost\t%s\n' "$mmain" "$mssh"
 fi
