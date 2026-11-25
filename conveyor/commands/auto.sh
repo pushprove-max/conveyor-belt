@@ -273,8 +273,8 @@ EOF
       # A card blocked by its review after review-retry gave its issue back once (RRAGAIN, lib/needsask.sh needsask) is the owner's:
       # review-retry gives an issue back once, so no pass answers it with a second retry.
       if [[ $id == blocked-* && $q == *") $RRAGAIN, its work kept in "* ]]; then hold "$id" "$q" "review-retry already gave this issue back once"; continue; fi
-      # Reserved: a word or phrase of the pack's list, or an item of the owner's profile, in the question, the
-      # recommended option or an option. A question the engine cut (lib/needsask.sh askcut) names only the items held when
+      # Reserved: a word or phrase of the pack's list, or an item of the owner's profile, as whole words (HELDIN,
+      # lib/standing.sh), in the question, the recommended option or an option. A question the engine cut (lib/needsask.sh askcut) names only the items held when
       # it was put, so its whole text, kept in $AD/asked/<id>.txt, is read too: an item held since then is past the cut.
       # An engine before that file put such a question with no kept text, and the loop keeps it there only on its next
       # pass (needsask, needsmain askkeep): until then a question of 300 characters or more there may be cut, so it waits.
@@ -290,8 +290,11 @@ EOF
           hold "$id" "$q" "its question may be cut, and its whole text is not kept yet"; continue
         fi
       fi
-      t=$(jq -r --argjson r "$RES" --arg w "$wt" '([.question, .proposedDefault, $w] + (.options // []) | join("\n") | ascii_downcase) as $t
-        | first($r[] | select(. as $w | $t | contains($w | ascii_downcase))) // ""' <<<"$row")
+      # In the question, its cut text (the whole text's first 300 characters) is read as the whole text: a word cut in
+      # two at the end ("deleted" to "delete") is no word of the reason.
+      t=$(jq -r --argjson r "$RES" --arg w "$wt" "$HELDIN"'[(.question | if $w == "" then . else split($w[0:300]) | join($w) end),
+        .proposedDefault, $w] + (.options // []) | join("\n")
+        | heldnames($r) | first // ""' <<<"$row")
       if [ -n "$t" ]; then hold "$id" "$q" "reserved: $t"; continue; fi
       # A card blocked again for a reason its issue was already retried for goes to the owner (rules.md "Cards": a repeated
       # block is the owner's), not to a third try that meets the same check.

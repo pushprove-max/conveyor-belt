@@ -116,7 +116,36 @@ t_reserved() {
   fixture reserved '["review-retry"]' 'the fix for [P1][Security] conveyor/lib/x.sh:3 The guard can be skipped. Proof: a quoted name passes did not hold after 2 rounds' 'exit 0'
   poll || fail "no wake for a review block that holds a reserved word: $(cat "$T/err")"
   grep -qF "${BLOCKED}the fix for [P1][Security]" <<<"$wake" || fail "the wake does not name the block: $wake"
+  # Bug (issue 1657): the wake read as a block review-retry takes, so the Foreman took no step and told the owner nothing.
+  grep -qF "did not hold after 2 rounds; review-retry left it for the owner: its reason names security" <<<"$wake" \
+    || fail "the wake does not say review-retry left the block for the owner, or does not name the word: $wake"
   [ ! -e "$T/retries" ] || fail "the watcher retried a block whose reason holds a reserved word: $(cat "$T/retries")"
+}
+# The same block when the snapshot does not read and the watcher wakes on health (readhealth): its wake says so too.
+t_reservedhealth() {
+  fixture reservedhealth '["review-retry"]' 'the fix for [P1][Security] conveyor/lib/x.sh:3 The guard can be skipped did not hold after 1 round' 'exit 0'
+  touch "$T/slow"
+  poll || fail "no wake on health for a review block that holds a reserved word: $(cat "$T/err")"
+  grep -qF "${BLOCKED}the fix for [P1][Security] conveyor/lib/x.sh:3 The guard can be skipped did not hold after 1 round; review-retry left it for the owner: its reason names security" <<<"$wake" \
+    || fail "the wake read on health does not say review-retry left the block for the owner, naming the word: $wake"
+}
+# The held block of t_reserved, reported, and still blocked 30 minutes later: the reminder says so too. Bug caught
+# (issue 1657 review): retryable() read only blocks not yet reported, so the reminder dropped the note.
+t_reservedremind() {
+  fixture reservedremind '["review-retry"]' 'the fix for [P1][Security] conveyor/lib/x.sh:3 The guard can be skipped did not hold after 2 rounds' 'exit 0'
+  CONVEYOR_FOREMAN_NOW=1795082400 poll || fail "no wake for a review block that holds a reserved word: $(cat "$T/err")"
+  CONVEYOR_FOREMAN_NOW=$((1795082400 + 1800)) poll || fail "no reminder 30 minutes after the held block's wake: $(cat "$T/err")"
+  grep -qF 'alpha: #7 has been blocked for' <<<"$wake" && grep -qF 'did not hold after 2 rounds; review-retry left it for the owner: its reason names security' <<<"$wake" \
+    || fail "the reminder of the held block does not say review-retry left it for the owner, naming the word: $wake"
+}
+# The pack holds "rea", and the reason holds it only inside "already" and "create": review-retry gives the card back, with
+# no wake. Bug caught (issue 1657): the watcher matched a reserved word anywhere in the reason, so such a block waited
+# for the owner, and a short word held almost every block.
+t_reservedsubstr() {
+  fixture reservedsubstr '["review-retry"]' 'the fix for [P1] conveyor/lib/x.sh:3 The guard is already skipped where create runs did not hold after 2 rounds' 'echo "conveyor: issue #7 is queued again"'
+  jq '.auto.reserved = ["rea"]' "$M/.conveyor/project.json" > "$T/pack.json" && cp "$T/pack.json" "$M/.conveyor/project.json" || fail "the pack was not changed"
+  poll && fail "the review block whose reason holds \"rea\" only inside other words woke the Foreman: $wake"
+  [ "$(cat "$T/retries" 2>/dev/null)" = 'retry 7' ] || fail "#7, whose reason holds \"rea\" only inside other words, was not retried: $(cat "$T/retries" "$T/err" 2>/dev/null)"
 }
 
 # The pack's own auto.reserved list decides, not a fixed word: the pack holds "gizmo" in place of the default words, and the
@@ -127,6 +156,7 @@ t_reservedpack() {
   jq '.auto.reserved = ["gizmo"]' "$M/.conveyor/project.json" > "$T/pack.json" && cp "$T/pack.json" "$M/.conveyor/project.json" || fail "the pack was not changed"
   poll || fail "no wake for a review block that holds the pack's own reserved word: $(cat "$T/err")"
   grep -qF "${BLOCKED}the fix for [P1] conveyor/lib/x.sh:3 The Gizmo" <<<"$wake" || fail "the wake does not name the block: $wake"
+  grep -qF "review-retry left it for the owner: its reason names gizmo" <<<"$wake" || fail "the wake does not name the pack's word: $wake"
   [ ! -e "$T/retries" ] || fail "the watcher retried a block whose reason holds the pack's reserved word: $(cat "$T/retries")"
 }
 
@@ -163,7 +193,7 @@ t_again() {
   [ "$(wc -l < "$T/retries")" = 1 ] || fail "review-retry gave #7 back a second time: $(cat "$T/retries")"
 }
 
-cases=(on off fails slow other stale health reserved reservedpack unread again)
+cases=(on off fails slow other stale health reserved reservedhealth reservedremind reservedsubstr reservedpack unread again)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

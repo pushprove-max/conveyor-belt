@@ -139,6 +139,32 @@ t_reviewlandreserved() {
   rlblocked '[P1][security] a.txt:2 drops the line'
   rljob; rlstays "with the reserved word security in the block reason"; rlrefused "with the reserved word security in the block reason"
 }
+# Bug guarded (issue 1657): a word of auto.reserved was matched as a substring, so "rea" held a block reason that holds
+# "already", and the engine left the card for the owner. Matched as a whole word it holds nothing there: one job gives
+# c1-7 back as review-land's (landable(), lib/views.sh, read by needsland() and by the retry under the lock).
+t_reviewlandword() {
+  rlblocked '[P1] a.txt:2 already drops the line'
+  tune '.auto.reserved = ["rea"]'
+  rljob
+  [ "$(rlby c1-7)" = review-land ] \
+    || fail "auto.reserved [\"rea\"], block reason of c1-7 '$(st 'select(.card == "c1-7" and .step == "blocked") | .reason')': c1-7 was not given back as review-land's: $(cat "$T/$CASE/run.out" "$ST/retried.jsonl" 2>&1)"
+}
+# Bug guarded (issue 1657): followups() matched auto.reserved as a substring, so with "rea" reserved a finding that holds
+# "already" was held for the owner, by review-followup's check of a finding on the card's own files (free) and by the
+# check of the finding a retry by review-land releases (rlpick). As a whole word, "rea" holds neither; "rea" alone does.
+t_reviewlandwordfree() {
+  local f='[P1] b.txt:2 already drops the line'
+  rlblocked '[P1] a.txt:2 drops the line'
+  tune '.pipelineFiles = ["b.txt"] | .auto.standing = ["review-retry", "review-followup"] | .auto.reserved = ["rea"]'
+  fx_wt 'echo two >> b.txt' b.txt one
+  printf '%s\n' "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  fx_in 'followups c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" "$FXWT.review"'
+  [ "$RC" = 0 ] && jq -e --arg f "$f" '[.cards[] | select(.body | contains($f))] | length == 1 and .[0].held != true' "$ST/testactions/cards.json" >/dev/null \
+    || fail "followups() with review-followup on, auto.reserved [\"rea\"] and the finding '$f' on the card's own pipeline file b.txt held its card (exit $RC): $(cat "$T/$CASE/run.out" "$ST/testactions/cards.json" 2>&1)"
+  fx_in 'rlfind=x; printf "%s %s\n" "$(rlpick "x already" cost "[\"rea\"]")" "$(rlpick "x rea" cost "[\"rea\"]")"'
+  [ "$(cat "$T/$CASE/run.out")" = 'rl hold' ] \
+    || fail "rlpick with rlfind x, a cost and held [\"rea\"], on 'x already' then on 'x rea', gave '$(cat "$T/$CASE/run.out")', not 'rl hold'"
+}
 # Bug guarded (#1612, review): a later review dropped the finding that blocked the card. The card of a retry by
 # review-land keeps its kept review (rlrev, resumeplan()). A review after that one still ends the loop as a last review
 # that files the kept review's findings (earlier, which cardland() files): a GO after a test fix (mode no longer land),

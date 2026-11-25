@@ -35,8 +35,7 @@ askcut() {
   local l w
   askkeep "$1" "$2" || return 1
   [ ${#2} -gt 300 ] || { printf %s "$2"; return 0; }
-  heldlist l 2>/dev/null && w=$(jq -rRs --argjson l "$l" 'ascii_downcase as $t
-    | [$l[] | select(. as $w | $t | contains($w | ascii_downcase))] | join(", ")' <<<"$2" 2>/dev/null) || { printf %s "$2"; return 0; }
+  heldlist l 2>/dev/null && w=$(jq -rRs --argjson l "$l" "$HELDIN"'heldnames($l) | join(", ")' <<<"$2" 2>/dev/null) || { printf %s "$2"; return 0; }
   printf %s "${2:0:300}${w:+ (it names: $w)}"
 }
 # askkeep <id> <text>: a text of 300 characters or more kept whole in $ST/auto/asked/<id>.txt. auto decide holds such a
@@ -285,7 +284,7 @@ needsretry() {
   jq -e 'select(.scope == "full" or .scope == "narrow")' "$ST/auto/mode.json" >/dev/null 2>&1 && standingon review-retry || return 0
   cs=$(stdb ask lines cards) && old=$(stdb ask lines retried) || { echo "conveyor: the card records could not be read; no card was given back by review-retry" >&2; return 0; }
   # A block reason that holds a word of the pack's auto.reserved (a finding tagged [security], say) or an item of the
-  # owner's profile waits for the owner.
+  # owner's profile, as a whole word (HELDIN, lib/standing.sh), waits for the owner.
   heldlist res || { echo "conveyor: the pack's auto.reserved or the owner's profile could not be read; no card was given back by review-retry" >&2; return 0; }
   while IFS=$'\t' read -r c n; do
     ! grep -qxF -- "$c" "$ST/auto/review-retry.cards" 2>/dev/null || continue
@@ -298,7 +297,7 @@ needsretry() {
   done < <(jq -rs --argjson r "$res" --arg rb "$REVIEWBLOCK" --slurpfile old <(printf '%s' "$old") "$REVIEWAGAIN"'retrylines($old) as $all
     | group_by(.card)[] | select(all(.step != "pushed")) | map(select(.step | IN("landed", "closed", "blocked"))) | last
     | select(. != null and .step == "blocked" and (.issue | numbers) > 0 and (.reason | strings | test($rb))
-      and ((.reason | ascii_downcase) as $t | all($r[]; . as $w | $t | contains($w | ascii_downcase) | not))
+      and (.reason | heldin($r) | not)
       and reviewretried(.issue; $all) == null) | "\(.card)\t\(.issue)"' <<<"$cs")
 }
 # While auto is on (scope full, not narrow) with review-retry on, the owner's standing order for a card blocked by its

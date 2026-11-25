@@ -362,12 +362,14 @@ HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, f
 # the engine lands the issue that way once (a later review block goes to the owner). landable($r; $rb): a blocked line
 # whose reason review-land may take (needsland() and landable(), commands/retry.sh, read it the same): a review block
 # ($rb, REVIEWBLOCK) that names no P0 (card.sh names a new P0 first, and a follow-up would land it on main), with no
-# word or item of $r, the pack's auto.reserved and the owner's profile (heldlist(), lib/standing.sh), in any case.
+# word or item of $r, the pack's auto.reserved and the owner's profile (heldlist(), lib/standing.sh), in any case and on
+# word boundaries (HELDIN, lib/standing.sh, sourced here for it).
 # retrylines($old): the lines of the records (.) and of the retried file ($old) that reviewretried() reads, and no other,
 # as it reads them again for each blocked card.
 # shellcheck disable=SC2034 # REVIEWBLOCK is read by needsretry() and needsask() in lib/needsask.sh
 REVIEWBLOCK='\Athe fix for \[P[0-3]\][\s\S]* did not hold after [0-9]+ rounds?( \[[\s\S]*\])?\z'
-REVIEWAGAIN='def retrylines($old): [.[], $old[] | select(.step | IN("blocked", "landed", "pushed"))];
+. "$HERE/lib/standing.sh" || return 1
+REVIEWAGAIN="$HELDIN"'def retrylines($old): [.[], $old[] | select(.step | IN("blocked", "landed", "pushed"))];
   def reviewretried($n; $l): ([$l[] | select(.issue == $n and (.step | IN("landed", "pushed"))) | .time] | max // "") as $land
   | [$l[] | select(.issue == $n and .step == "blocked" and (.retriedAt | type) == "string" and .retriedAt > $land)] as $r
   | ([$r[] | select(.retriedBy == "owner") | .retriedAt] | max // "") as $own
@@ -375,7 +377,7 @@ REVIEWAGAIN='def retrylines($old): [.[], $old[] | select(.step | IN("blocked", "
   def reviewlanded($n; $l): reviewretried($n; $l) as $g | $g != null
   and any($l[]; .issue == $n and .step == "blocked" and .retriedBy == "review-land" and (.retriedAt | type) == "string" and .retriedAt > $g.retriedAt);
   def landable($r; $rb): (.reason | strings | test($rb)) and (.reason | startswith("the fix for [P0]") | not)
-  and ((.reason | ascii_downcase) as $t | all($r[]; . as $w | $t | contains($w | ascii_downcase) | not));'
+  and (.reason | heldin($r) | not);'
 # When health first read each stopped process of the "<pid> TAB <started> TAB <card>" lines on stdin stopped, as ps
 # gives no time a process stopped: <now> for one not read so before. $STATE.stopped keeps "<pid> TAB <started> TAB
 # <epoch>" for those still stopped, so a stop is dated from the first reading of it, not from the card's last output.

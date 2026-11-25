@@ -300,7 +300,7 @@ unfile() { # <parent issue> <review file> <follow-up issue>...
 # reserved word after them was released; and free reads auto.reserved alone, so a profile item was released through it.
 rlpick() {
   [ -n "$2" ] && [ -n "${rlfind:-}" ] && [[ $1 == "$rlfind"* ]] || return 0
-  if [ "$(jq --arg f "$1" 'any(.[]; . as $w | $f | ascii_downcase | contains($w | ascii_downcase))' <<<"$3" 2>/dev/null)" = false ]; then echo rl; else echo hold; fi
+  if [ "$(jq --arg f "$1" "$HELDIN"'. as $l | $f | heldin($l)' <<<"$3" 2>/dev/null)" = false ]; then echo rl; else echo hold; fi
 }
 followups() { # <card> <issue json> <review file>
   local f mark where out num n pn nums=() more=() found=() pipe cost own='' free rl held='' res pm g masked depth kind clean body area nocard='' fc=${3%.review}.fucards
@@ -346,7 +346,7 @@ followups() { # <card> <issue json> <review file>
     # A finding that holds a word or phrase of auto.reserved (in any case, as auto decide reads it) is never let
     # through: it waits for the owner. Bug: a follow-up on the card's own file about security went unheld.
     free=''; [ -z "$cost" ] || [ -z "$own" ] \
-      || [ "$(jq --arg f "$f" 'any(.[]; . as $w | $f | ascii_downcase | contains($w | ascii_downcase))' <<<"$res" 2>/dev/null)" != false ] \
+      || [ "$(jq --arg f "$f" "$HELDIN"'. as $l | $f | heldin($l)' <<<"$res" 2>/dev/null)" != false ] \
       || free=$(ownonly "$f" "${3%.review}")
     rl=$(rlpick "$f" "$cost" "$held"); [ "$rl" != hold ] || free=''; [ "$rl" = rl ] || rl='' # the finding of a retry by review-land, released or held
     cost=${cost:+$'\nCost to every card: not assessed'}

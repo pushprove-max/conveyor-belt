@@ -286,7 +286,7 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
 # Foreman's stop hook (stop.sh) tells this card from an earlier one of its issue with the build host not reached. A wake line and a problem line are
 # matched without the "(as of HH:MMZ)" either may end with (PROBLEMS: a snapshot behind the card records), as the wake and the snapshot read now can
 # differ in it alone: the status builds its blocked lines from the card records now (NOWBLOCKED), with no such suffix. A wake line matches with the
-# note reviewretry() adds after it ("; the review-retry of #N failed: <error>", or that the act was not logged), which the status line has not.
+# note reviewretry() adds after it ("; the review-retry of #N failed: <error>", that the act was not logged, or rrheld()'s), which the status line has not.
 unreported() {
   local pend k=''
   pend=$(cat "$PENDING"/*.wake 2>/dev/null)
@@ -294,7 +294,7 @@ unreported() {
   [ -z "$k" ] || ! grep -qxF -- "$k" "$REFUSED" 2>/dev/null || pend+=$'\n'$(cat "$PENDING"/*.wake.sent-* 2>/dev/null)
   jq -rRs --argjson now "$1" --argjson poll "$POLL" --arg seen "$(cat "$SEEN" 2>/dev/null)" \
     --arg pend "$pend" 'def bare: sub(" \\(as of [0-9]{2}:[0-9]{2}Z\\)$"; "");
-    def tail: test("^( \\(as of [0-9]{2}:[0-9]{2}Z\\))?(; (the review-retry of #[0-9]+ failed|#[0-9]+ was retried \\(review-retry\\), but the act was not logged): .*)?$");
+    def tail: test("^( \\(as of [0-9]{2}:[0-9]{2}Z\\))?(; (the review-retry of #[0-9]+ failed|#[0-9]+ was retried \\(review-retry\\), but the act was not logged|review-retry left it for the owner): .*)?$");
     ($seen | split("\n")) as $seen | ($pend | split("\n")) as $pend
     | split("\n")[] | select(. != "") | split("\t") | select(.[2] == "blocked") | .[0] as $repo | .[4] as $text
     | ($text | capture(" is blocked since (?<t>[0-9T:-]+Z):") | .t | fromdate? // empty) as $t
@@ -356,15 +356,6 @@ STATUS=$SUITE$REF$(healsdef)'def num: if type == "number" then "#\(.)" else tost
   ([.suites | arrays | .[] | objects] as $s | ($s | map(select(.ended == null))) as $run
     | if $run != [] then $run[] | suiteline($now)
       else $s | map(select(.ended != null)) | max_by(.ended) | objects | "last " + suiteline($now) end)'
-# The snapshot as the status reads its problems: while it is behind the card records (recordsNow, commands/snapshot.sh),
-# its health's blocked and waiting cards are the ones the records hold blocked now, and of them those stopped for the
-# owner's yes, so a card blocked or stopped for the yes since the snapshot was made is named as such, and one retried
-# or landed since is not (#1101); being read now, their lines carry no "(as of <time>)" (blockedNow). The watcher's
-# polls read the snapshot's own: a card it holds blocked is later waiting or not.
-NOWBLOCKED='(if ((.recordsNow | objects | [.blocked, .waiting] | all(type == "array")) // false) and (.health | type) == "object" then
-    .health.blocked = [.recordsNow.blocked[] | objects | select(.card | type == "string")]
-    | .health.waiting = [.recordsNow.waiting[] | objects | select(.card | type == "string")] | .blockedNow = true
-  else . end) | '
 # The last snapshot of a record that read, kept by the status and each poll ($FD/conveyor-snapshot-<repo>.json,
 # written whole and renamed into place, readable by this user alone: it holds the accounts' email addresses): the status
 # shows it when a new one does not read.
@@ -489,8 +480,8 @@ record() { # <repo> <main> <now> <await>
     && nobefore=$(jq -r 'if .before == null then 1 else "" end' <<<"$h" 2>>"$errf") \
     && all=$(jq -r --argjson push "$PUSH_S" --argjson now "$now" --argjson poll "$POLL" --argjson await '[]' --argjson hist '[null]' --slurpfile kinds "$KINDS" "{health: .} | $PROBLEMS" <<<"$h" 2>>"$errf") \
     && hcur=$(awk -F'\t' '$1 ~ /^(blocked|waiting|before):/' <<<"$all") || return
-    skip=$(retryable "$h" .blocked | cut -f1)
-    [ -z "$skip" ] || hcur=$(awk -F'\t' 'FILENAME == ARGV[1] { s["blocked:" $0]; next } !($1 in s)' <(printf '%s\n' "$skip") - <<<"$hcur")
+    skip=$(retryable "$h" .blocked)
+    [ -z "$skip" ] || hcur=$(awk -F'\t' 'FILENAME == ARGV[1] { if ($2 != "held") s["blocked:" $1]; next } !($1 in s)' <(printf '%s\n' "$skip") - <<<"$hcur" | rrheld "$skip")
     return 0
   }
   # The standing kind review-retry: each card retryable (lib.sh) gives back is given back with `conveyor.sh retry <issue>`
@@ -499,9 +490,9 @@ record() { # <repo> <main> <now> <await>
   # commands/retry.sh: it wakes as a failed retry; this same card given back so, by needsretry() there, is status 3: done
   # and logged), and the act is logged there (`auto act review-retry`: standinglog). Its line then keeps only its key: it
   # wakes nothing, and is not retried again while a snapshot lists it. A failed retry or unlogged act wakes as the block
-  # does, with why; so does any other block. The longer wait SLOW_S (#1586): a wait ends the ssh client, not the retry.
+  # does, with why; so does any other block, and one retryable holds for the owner says so (rrheld). The longer wait SLOW_S (#1586): a wait ends the ssh client, not the retry.
   reviewretry() {
-    local card issue out rc note
+    local card issue out rc note rr; rr=$(retryable "$rec" .health.blocked); cur=$(rrheld "$rr" <<<"$cur")
     while IFS=$'\t' read -r card issue; do
       out=$(CONVEYOR_REVIEWRETRY=$card ASK_LIMIT=$SLOW_S ask "$repo" "$main" retry "$issue" 2>&1); rc=$?
       if [ "$rc" = 3 ] && [[ $out == *"review-retry already gave back card $card of issue #$issue;"* ]]; then note=''
@@ -512,7 +503,7 @@ record() { # <repo> <main> <now> <await>
       out=$(tr -s '[:space:]' ' ' <<<"$out" | sed 's/^ *//; s/ *$//' | cut -c1-200)
       cur=$(K="blocked:$card" N="$note${note:+: ${out:-exit $rc}}" awk -F'\t' 'BEGIN { OFS = FS }
         $1 == ENVIRON["K"] { if (ENVIRON["N"] == "") { print $1 "\t\t\t"; next } $4 = $4 "; " ENVIRON["N"] } { print }' <<<"$cur")
-    done < <(retryable "$rec" .health.blocked)
+    done < <(awk -F'\t' '$1 != "" && $2 != "held"' <<<"$rr")
   }
   # A blocked card reported and still blocked 30 minutes after a poll first listed it wakes again (#877): a Foreman
   # turn that neither cleared the block nor asked the owner left it with no reminder. $blockf holds each blocked card

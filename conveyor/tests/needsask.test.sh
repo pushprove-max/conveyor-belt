@@ -448,17 +448,24 @@ t_needsautoretry() {
 # [security] (a word of the pack's default auto.reserved) put "security" in the block reason, and the card was retried
 # though anything auto.reserved holds waits for the owner. The card stays blocked, put to the owner, and is not logged.
 # The same holds for an item of the owner's profile (E14, review: its "Never decide; ask" section) in the reason.
-nrheld() { # <the finding the review blocked on> [a "- " line of the profile's Never decide; ask]
-  setup "[$(issue 7 2026-01-01)]"; nainit 7; nareview
+nrjob() { # <the finding the review blocked on> [a "- " line of the profile's Never decide; ask]; RESERVE: the pack's auto.reserved, JSON
+  setup "[$(issue 7 2026-01-01)]"; nainit 7; nareview; [ -z "${RESERVE:-}" ] || tune ".auto.reserved = $RESERVE"
   [ -z "${2:-}" ] || { mkdir -p "$ST/foreman" && printf '%s\n' '## Never decide; ask' "$2" > "$ST/foreman/owner-way.md"; } || fail "the profile"
   jq -c --arg f "$1" 'if .step == "blocked" then .reason = "the fix for \($f) did not hold after 2 rounds" else . end' "$ST/cards.jsonl" > "$T/$CASE/cards.new" \
     && mv "$T/$CASE/cards.new" "$ST/cards.jsonl" || fail "the card's reason"
   najob
-  ! naretried c0-7 && [ -n "$(nadec c0-7)" ] && ! grep -q 'review-retry' "$CONVEYOR_RULING_LOG" 2>/dev/null \
-    || fail "the card blocked for the finding \"$1\" (profile item: ${2:-none}) was given back by review-retry, or not put to the owner: $(cat "$T/$CASE/run.out") $(cat "$ST/retried.jsonl" 2>&1)"
+}
+nrheld() {
+  nrjob "$@"; ! naretried c0-7 && [ -n "$(nadec c0-7)" ] && ! grep -q 'review-retry' "$CONVEYOR_RULING_LOG" 2>/dev/null \
+    || fail "the card blocked for the finding \"$1\" (profile item: ${2:-none}, auto.reserved: ${RESERVE:-default}) was given back by review-retry, or not put to the owner: $(cat "$T/$CASE/run.out") $(cat "$ST/retried.jsonl" 2>&1)"
 }
 t_needsretryreserved() { nrheld '[P1][security] a.txt:1 drops the line'; }
 t_needsretryprofile() { nrheld '[P1] a.txt:1 drops the billing table' '- billing table'; }
+# Bug (issue 1657): a word of auto.reserved held a reason that held it only inside other words: "rea" in "already" and
+# "create". Review-retry gives such a card back, with no question; a cut question's "(it names: …)" tag names no such word.
+t_needsretrysubstr() { RESERVE='["rea"]' nrjob '[P1] a.txt:1 already drops what create makes'; [ "$(jq -r 'select(.card == "c0-7" and .step == "blocked") | .retriedBy' "$ST/retried.jsonl" 2>/dev/null)" = review-retry ] && [ -z "$(nadec c0-7)" ] || fail "the card whose reason holds \"rea\" only in \"already\" and \"create\" was not given back by review-retry, or was put to the owner: $(cat "$ST/retried.jsonl" 2>&1) $(nadec c0-7) $(cat "$T/$CASE/run.out")"
+  fx_in 'askcut x-1 "$(printf "already %.0s" {1..40})"'; ! grep -qF '(it names:' "$T/$CASE/run.out" || fail "askcut of \"already \" 40 times, auto.reserved [\"rea\"], named a word: $(tail -c 80 "$T/$CASE/run.out")"; }
+t_needsretryword() { RESERVE='["rea"]' nrheld '[P1] a.txt:1 drops the rea line'; }
 
 # Bug (#1168, review): a review-retry that fails (here #7 has a card that landed, so retry refuses) must be tried once,
 # not again in each job every IDLE seconds: the card stays blocked for the owner. The second job tries no retry.

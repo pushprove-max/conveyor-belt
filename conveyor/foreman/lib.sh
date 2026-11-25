@@ -12,6 +12,7 @@
 # HOSTF: the host file. NAME: the Foreman's name. pending_put / pending_run: the one path of a wake (below).
 FHERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 . "$FHERE/../lib/portable.sh" && require_bash 5.1 && p_tools || exit 1
+. "$FHERE/../lib/standing.sh" || exit 1 # HELDIN, for retryable()
 ENGINE=$FHERE/../conveyor.sh
 HOSTF=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json
 # LAUNCHER: the one command the start text gives for foreman.sh. Its path is the same in every version of the engine
@@ -414,7 +415,10 @@ askfiling() { # <repo> <command>
 # (lib/standing.sh) gives back: blocked by its review ("the fix for [P1] ... did not hold after <n> rounds", a reason
 # card.sh no longer writes since issue 1670, so only a block already in the card records matches;
 # as the Board's reviewWhy reads it, with any notes block() adds after it in brackets, lib/push.sh), with an issue,
-# whose reason holds no word of `conveyor.sh auto reserved` (case-insensitive), and not reported yet. Not a card that
+# whose reason holds no word of `conveyor.sh auto reserved` (case-insensitive, on word boundaries: HELDIN,
+# lib/standing.sh), and not reported yet. Such a card whose reason holds one is left for the owner: it is printed
+# "<card> TAB held TAB <the words, comma-separated>", reported or not, so its wake and each 30-minute reminder of it
+# (watch-conveyor.sh stillblocked) say so and name them. Not a card that
 # came after a review-retry of its issue (health's reviewRetried, lib/views.sh): review-retry gives an issue back once, and the second
 # block waits for the owner, who has it in Needs you (lib/needsask.sh needsask), or the engine lands it while auto is on
 # (needsland()). None unless the
@@ -422,18 +426,28 @@ askfiling() { # <repo> <command>
 # can be from before the owner turned it off, and health has none. Called by watch-conveyor.sh with its $repo, $main,
 # $errf and $SEEN.
 retryable() {
-  local c st res held
-  c=$(jq -r "$2"' | arrays | .[] | objects | select((.issue | numbers) > 0 and .reviewRetried != true and (.reason | strings
-    | test("\\Athe fix for \\[P[0-3]\\][\\s\\S]* did not hold after [0-9]+ rounds?( \\[[\\s\\S]*\\])?\\z"))) | "\(.card)\t\(.issue)"' <<<"$1" 2>/dev/null \
-    | awk -F'\t' -v p="$repo/blocked:" 'FILENAME == ARGV[1] { s[$0]; next } !((p $1) in s)' "$SEEN" -)
+  local all c st res held
+  all=$(jq -r "$2"' | arrays | .[] | objects | select((.issue | numbers) > 0 and .reviewRetried != true and (.reason | strings
+    | test("\\Athe fix for \\[P[0-3]\\][\\s\\S]* did not hold after [0-9]+ rounds?( \\[[\\s\\S]*\\])?\\z"))) | "\(.card)\t\(.issue)"' <<<"$1" 2>/dev/null)
+  # Those not reported yet, each "<card> TAB <issue>" with a third field "new". A reported one is read on too, for the
+  # words that hold it: the reminder of a held card names them as its first wake did (bug: it dropped them).
+  c=$(awk -F'\t' -v OFS='\t' -v p="$repo/blocked:" 'FILENAME == ARGV[1] { s[$0]; next } $1 != "" { print $1, $2, (((p $1) in s) ? "" : "new") }' "$SEEN" - <<<"$all")
   [ -n "$c" ] && st=$(ask "$repo" "$main" auto standing 2>>"${errf:-/dev/null}") && grep -q '^- review-retry:' <<<"$st" || return 0
   # A reason that holds a word of auto.reserved or an item of the owner's profile waits for the owner (needsretry()
   # leaves it too): the words are read from the record's host; none read, none retried.
   res=$(ask "$repo" "$main" auto reserved 2>>"${errf:-/dev/null}") && jq -e arrays >/dev/null 2>&1 <<<"$res" || return 0
-  held=$(jq -r --argjson r "$res" "$2"' | arrays | .[] | objects | select((.reason | strings | ascii_downcase) as $t
-    | any($r[]; . as $w | $t | contains($w | ascii_downcase))) | .card' <<<"$1" 2>/dev/null) || return 0
-  c=$(awk -F'\t' 'FILENAME == ARGV[1] { s[$0]; next } !($1 in s)' <(printf '%s\n' "$held") - <<<"$c")
+  held=$(jq -r --argjson r "$res" "$HELDIN$2"' | arrays | .[] | objects | (.reason | strings | heldnames($r)) as $n
+    | select($n != []) | "\(.card)\theld\t\($n | join(", ") | gsub("[\t\r\n]+"; " "))"' <<<"$1" 2>/dev/null) || return 0
+  c=$(awk -F'\t' -v OFS='\t' 'FILENAME == ARGV[1] { s[$1] = $3; next } ($1 in s) { print $1, "held", s[$1]; next } $3 == "new" { print $1, $2 }' \
+    <(printf '%s\n' "$held") - <<<"$c")
   [ -z "$c" ] || printf '%s\n' "$c"
+}
+# rrheld <retryable's lines>: the problem lines on stdin (<key> TAB ... with the wake's text in the fourth field), each
+# of a card retryable holds for the owner ending "; review-retry left it for the owner: its reason names <the words>".
+# Bug (issue 1657): that wake read as a block review-retry takes, so the Foreman took no step and the owner was never asked.
+rrheld() {
+  awk -F'\t' -v OFS='\t' 'FILENAME == ARGV[1] { if ($2 == "held") n["blocked:" $1] = $3; next }
+    ($1 in n) && $4 != "" { $4 = $4 "; review-retry left it for the owner: its reason names " n[$1] } { print }' <(printf '%s\n' "$1") -
 }
 
 # The pending items (a watcher's wake, owed to the session). $FD/pending holds one file per wake, written as
@@ -479,6 +493,33 @@ blocked_now() {
   done
   printf '%s\n' "$now"
 }
+# The snapshot as the status reads its problems: while it is behind the card records (recordsNow, commands/snapshot.sh),
+# its health's blocked and waiting cards are the ones the records hold blocked now, and of them those stopped for the
+# owner's yes, so a card blocked or stopped for the yes since the snapshot was made is named as such, and one retried
+# or landed since is not (#1101); being read now, their lines carry no "(as of <time>)" (blockedNow). The watcher's
+# polls read the snapshot's own: a card it holds blocked is later waiting or not. Read by watch-conveyor.sh --status
+# and keptblocked().
+NOWBLOCKED='(if ((.recordsNow | objects | [.blocked, .waiting] | all(type == "array")) // false) and (.health | type) == "object" then
+    .health.blocked = [.recordsNow.blocked[] | objects | select(.card | type == "string")]
+    | .health.waiting = [.recordsNow.waiting[] | objects | select(.card | type == "string")] | .blockedNow = true
+  else . end) | '
+# keptblocked <live>: the blocked cards of the watcher's kept snapshot ($FD/conveyor-snapshot-<repo>.json,
+# watch-conveyor.sh keepsnap) of each record named on stdin that <live> (blocked_now's object) does not hold, as
+# `foreman status` lists them when that record's snapshot does not read (watch-conveyor.sh --status: recheck with no
+# health, then NOWBLOCKED), in blocked_now's form. A record with no snapshot kept gives nothing, and the loop goes on: its
+# failed read is not the loop's status, which pipefail would make the pipeline's and so drop every record's.
+keptblocked() {
+  local r
+  while IFS= read -r r; do
+    [ -n "$r" ] || continue
+    jq -e --arg r "$r" 'has($r)' <<<"$1" > /dev/null 2>&1 && continue
+    jq -c --arg r "$r" '(if .recordsNewer == true and (.health.blocked | type) == "array" and ((.recordsNow | objects | .blocked | arrays) // null) != null
+        then [.recordsNow.blocked[] | objects | .card] as $c | .health.blocked |= map(select(.card | IN($c[]))) else . end) | '"$NOWBLOCKED"'
+      {($r): [.health.blocked | arrays | .[] | objects
+        | {ref: ((.name | strings) // "#\(.issue)"), card, since, why: (.reason | tostring | gsub("\\s+"; " ") | .[0:240])}]}' "$FD/conveyor-snapshot-$r.json" 2>/dev/null \
+      || :
+  done | jq -cs 'add // {}' 2>/dev/null || echo '{}'
+}
 # pending_fresh: before a stop relays the pending wakes, each blocked card a wake names (its "<repo>: <ref> is blocked
 # since" or "has been blocked for" line, or its "not yet reported: blocked <ref>" line) that its record no longer holds
 # blocked as the line says, as `conveyor.sh health` reads it now (retried, landed or shut since the watcher put the
@@ -503,7 +544,7 @@ pending_fresh() {
 # The wake (raw text) without the blocked cards $now (each repo's blocked cards, of the repos read: ref, since and the
 # reason as the watcher's line gives it) no longer holds. A line's reason is health's whole, but for the time of an
 # older snapshot the watcher may put after it (watch-conveyor.sh $asof) and the note of a review-retry that failed
-# after that (reviewretry): an old reason with a note that the new one has not is another block. A line whose
+# after that (reviewretry), or of one that left the card for the owner (rrheld): an old reason with a note that the new one has not is another block. A line whose
 # review-retry worked but was not logged (its note "was retried (review-retry), but the act was not logged") is no
 # block's line: the card was retried, and the line reports that its act is not in the log, which no later read undoes.
 # A card named by its name has its card id after it, "<name> (card <id>)" (watch-conveyor.sh who): the follow-ups of
@@ -517,7 +558,7 @@ FRESH='def line: [(capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>.+?)(?: \\(card (?<id
   def card: line
   | select(. != null and (.why == null or (.why | test("; #[0-9]+ was retried \\(review-retry\\), but the act was not logged: ") | not))) | . as $c
   | select($now[$c.r] != null and (any($now[$c.r][]; . as $i | $i.ref == $c.ref and ($c.id == null or $i.card == $c.id) and ($c.t == null or $i.since == $c.t)
-      and ($c.why == null or ($c.why | sub("; the review-retry of #[0-9]+ failed: [\\s\\S]*$"; "")
+      and ($c.why == null or ($c.why | sub("; (the review-retry of #[0-9]+ failed|review-retry left it for the owner): [\\s\\S]*$"; "")
         | sub(" \\(as of [0-9]{2}:[0-9]{2}Z\\)$"; "")) == $i.why)) | not));
   split("\n") | (if .[-1] == "" then .[:-1] else . end) as $l
   | [$l[1:][] | card] as $g

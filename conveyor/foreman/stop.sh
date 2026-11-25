@@ -31,7 +31,8 @@
 #   A turn that opens with a wake naming a card of this Foreman's projects "not yet reported: blocked" (watch-conveyor.sh
 #   unreported) is refused at every stop until, for each such card, an act naming it was logged since it blocked (`auto act`, read back from the ruling
 #   log), the turn asked the owner about it (AskUserQuestion), or its record no longer holds it blocked (retried, shut,
-#   landed): a reply ("Idle", or a plan to act later) alone is not that.
+#   landed): a reply ("Idle", or a plan to act later) alone is not that. So is any turn, whatever opened it, while
+#   `foreman status` names a card of this Foreman's projects "not yet reported: blocked".
 # Each refused stop is noted in $FD/refused-stops (lib.sh refused_put), which waiter.sh reads.
 set -uo pipefail
 INPUT=$(cat)
@@ -246,18 +247,37 @@ if [ -n "$W" ] && jq -e --arg w "$W" '.meta == true and (.opening | contains($w)
       l != "" && !s[l]++ { print l } { l = "" }' "$FD/last-wake.txt" 2>/dev/null \
     | awk -F': ' 'NR == FNR { w[$1]; next } $1 in w' <(mine 2>/dev/null | cut -f1) -)
 fi
+# A card `foreman status` names "not yet reported" (watch-conveyor.sh unreported) is held so too, whatever opened the
+# turn: one health lists blocked for two of the watcher's polls (2 x 60 s) or more that no wake was put for (its key is
+# not in conveyor-reported.txt), or that a wake still pending, or one relayed at a stop a hook refused, names. Bug (issue
+# 1657): the status named such a card while the Foreman replied "Idle", so the owner was never asked.
+# A record whose health does not read (its build host down) gives the blocked cards of the watcher's kept snapshot, as
+# `foreman status` then lists them (lib.sh keptblocked). Only health read now (NOWH) tells FRESH below that a card is no
+# longer blocked: a kept snapshot is older than the wake, and a card blocked after it is not in it. A pending line names
+# a card whole: "#7" is not "#70", and a card named by its name (which the follow-ups of one issue share) only with its
+# card id.
+NOWH=''
+if MINE_R=$(mine 2>/dev/null | cut -f1) && [ -n "$MINE_R" ]; then
+  NOWH=$(blocked_now <<<"$MINE_R") PEND=$(cat "$PENDING"/*.wake 2>/dev/null) k=''
+  NOWALL=$(keptblocked "$NOWH" <<<"$MINE_R" | jq -c --argjson b "$NOWH" '. + $b' 2>/dev/null) || NOWALL=$NOWH
+  { read -r k < "$FD/sent-stop"; } 2>/dev/null
+  [ -z "$k" ] || ! grep -qxF -- "$k" "$REFUSED" 2>/dev/null || PEND+=$'\n'$(cat "$PENDING"/*.wake.sent-* 2>/dev/null)
+  t=$(jq -rn --argjson b "$NOWALL" --argjson now "$(date +%s)" --arg seen "$(cat "$FD/conveyor-reported.txt" 2>/dev/null)" --arg pend "$PEND" --arg left "$LEFT" '
+    ($seen | split("\n")) as $seen | ($left | split("\n") | map(select(. != ""))) as $l | ($pend | split("\n")) as $pend
+    | $l[], ([$b | to_entries[] | .key as $r | .value[] | objects | select($now - (.since | strings | fromdate? // $now) >= 120) | . as $i
+      | "\($r): not yet reported: blocked \($i.ref)" as $nr
+      | ($i.ref | test("^#[0-9]+$")) as $byissue
+      | select(("\($r)/blocked:\($i.card)" | IN($seen[]) | not) or any($pend[]; ($byissue and (startswith("\($r): \($i.ref) is blocked since \($i.since):") or . == $nr))
+        or startswith("\($r): \($i.ref) (card \($i.card)) is blocked since \($i.since):") or . == "\($nr) (card \($i.card))"))
+      | "\($r): not yet reported: blocked \($i.ref) (card \($i.card))" | select(IN($l[]) | not)] | unique[])' 2>/dev/null) && LEFT=$t
+fi
 if [ -n "$LEFT" ]; then
-  now=$(cut -d: -f1 <<<"$LEFT" | sort -u | blocked_now)
+  now=${NOWH:-$(cut -d: -f1 <<<"$LEFT" | sort -u | blocked_now)}
   t=$(printf 'x\n%s\n' "$LEFT" | jq -Rrs --argjson now "$now" "$FRESH" 2>/dev/null) && LEFT=$(tail -n +2 <<<"$t")
   ASKS=$(jq -c '.asks // []' <<<"$TURN" 2>/dev/null) || ASKS='[]'
   # The blocked cards of the watcher's kept snapshot of each record whose health did not read, as blocked_now gives
-  # them: {<repo>: [{ref, card, since}]}. A record with no snapshot kept gives nothing, and the loop goes on: its
-  # failed read is not the loop's status, which pipefail would make the pipeline's and so drop every record's.
-  KEPT=$(cut -d: -f1 <<<"$LEFT" | sort -u | while IFS= read -r r; do
-    jq -e --arg r "$r" 'has($r)' <<<"$now" > /dev/null 2>&1 \
-      || jq -c --arg r "$r" '{($r): [.health.blocked | arrays | .[] | objects | {ref: ((.name | strings) // "#\(.issue)"), card, since}]}' "$FD/conveyor-snapshot-$r.json" 2>/dev/null \
-      || :
-  done | jq -cs 'add // {}' 2>/dev/null) || KEPT='{}'
+  # them (lib.sh keptblocked): {<repo>: [{ref, card, since, why}]}.
+  KEPT=$(cut -d: -f1 <<<"$LEFT" | sort -u | keptblocked "$now")
   # NAMES: true when a text of its input (a JSON list) names the card id $c, or the issue $n with the project $r, or
   # with the repository $g ("owner/name", lower case), written together; a word is matched whole, as #7 is not #70, c7
   # is not c70 and alpha is not alpha-2, and a project's name not after a "/", as fork/alpha is another repository.

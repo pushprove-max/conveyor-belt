@@ -246,7 +246,9 @@ A card that moves from one step to the next, as from build to review, gives no w
 The Foreman's reply to a wake says only what needs you, and the `Done without asking` line for each step it took on a
 standing yes since its last reply. If neither is owed, the reply is the one word Idle. But while a wake names a
 blocked card as `not yet reported`, the Foreman cannot end its turn until it takes a step on that card: it logs an act
-for it with `auto act`, it asks you about it, or the card moves (retried, shut or landed). The act or the question
+for it with `auto act`, it asks you about it, or the card moves (retried, shut or landed). The same holds on a turn
+that you open, while `foreman status` names a card `not yet reported`, also when the build host is down and the
+status shows the last snapshot. The act or the question
 names the card by its id. A card that the wake names by its issue can also be named by its project and issue
 together, as `alpha #7`, or by the project's GitHub repository and the issue, as `example/alpha#7` or the issue's
 link. The repository is the one the build host's checkout has, so an issue of your fork names no card. A card's
@@ -406,8 +408,9 @@ asking"). The pack keeps the list as `auto.standing`. A kind works whether `/con
   Foreman gets no wake for that card and does not tell you. If the retry fails, the blocked card wakes the Foreman, and
   the wake gives the reason of the failed retry. The engine does not retry a card whose block reason holds a word of
   `auto.reserved` (a finding tagged `[security]`, for example) or an item of the owner's profile, or when it cannot
-  read `auto.reserved` or your profile on the host. The watcher then leaves the card blocked and wakes the Foreman with
-  the block's reason, and the Foreman puts the card to you. The retried card goes through its review, its tests and
+  read `auto.reserved` or your profile on the host. Only a whole word counts: `rea` holds "the rea check", but not
+  "already". The watcher then leaves the card blocked and wakes the Foreman with the block's reason. For a word or an
+  item, the wake and each later reminder of the card also say that review-retry left the card for you, and name the word. The Foreman puts the card to you. The retried card goes through its review, its tests and
   its landing as any card does, so a second review block does not come to you in Needs you.
 
 Some steps always go to you, whatever kinds are on: new engine behaviour that you did not ask for, a design choice, a

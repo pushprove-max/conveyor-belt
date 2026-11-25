@@ -55,6 +55,9 @@ fixture() {
     && chmod +x "$T/bin/ssh" || exit 1
   export CONVEYOR_FOREMAN_ASK="case \$CONVEYOR_CMD in health) cat $T/health-\$CONVEYOR_REPO ;; *) exit 3 ;; esac"
   printf '%s\n' "$WAKE" > "$FD/last-wake.txt"
+  # Each blocked card was reported (the watcher put a wake for it), so only the wake's lines hold a reply: t_unrep is
+  # the case of one `foreman status` names "not yet reported".
+  jq -r 'to_entries[] | .key as $r | .value[] | "\($r)/blocked:\(.card)"' <<<"$2" > "$FD/conveyor-reported.txt" || exit 1
 }
 # hostact <repo> <what>: an act under fixed-block, logged in the host's ruling log.
 hostact() {
@@ -231,6 +234,61 @@ out=$(jq -cn --arg t "$T/t.jsonl" '{transcript_path: $t, stop_hook_active: false
 [ -z "$out" ] || fail "last wake [$WAKE], owner prompt [$p], reply Idle, alpha's #7 blocked in health: the stop was refused: $out"
 }
 
+# A turn the owner opened, with no wake, while `foreman status` names alpha's #7 "not yet reported" (watch-conveyor.sh
+# unreported): Idle is refused naming it, first while no wake was put for it (its key is not in
+# conveyor-reported.txt), then while its wake is still pending; with the wake taken, Idle passes. Bug caught (issue
+# 1657): the hook read only the wake that opened the turn, so the Foreman replied Idle while the status named the card,
+# and the owner was never asked.
+t_unrep() {
+fixture unrep "$(jq -cn --arg s "$SINCE" '{alpha: [{card: "c7", issue: 7, since: $s, reason: "the fix for [P1] x did not hold after 1 round"}]}')"
+local out
+{ jq -cn '{type: "user", uuid: "u2", message: {content: "How is the belt?"}}' && say Idle; } > "$T/t.jsonl" || exit 1
+: > "$FD/conveyor-reported.txt"
+out=$(jq -cn --arg t "$T/t.jsonl" '{transcript_path: $t, stop_hook_active: false}' | bash "$SRC/stop.sh" reply)
+{ refused "$out" && grep -qF 'alpha: not yet reported: blocked #7 (card c7)' <<<"$out"; } \
+  || fail "owner prompt, reply Idle, alpha's #7 (card c7) blocked in health and its key not in conveyor-reported.txt: the stop was not refused naming it: $out"
+echo alpha/blocked:c7 > "$FD/conveyor-reported.txt" && mkdir -p "$FD/pending" \
+  && printf 'Conveyor: alpha: blocked: #7\nalpha: #7 is blocked since %s: the fix for [P1] x did not hold after 1 round\n' "$SINCE" > "$FD/pending/1.wake" || exit 1
+out=$(jq -cn --arg t "$T/t.jsonl" '{transcript_path: $t, stop_hook_active: true}' | bash "$SRC/stop.sh" reply)
+{ refused "$out" && grep -qF 'alpha: not yet reported: blocked #7 (card c7)' <<<"$out"; } \
+  || fail "owner prompt, reply Idle, alpha's #7 reported but its wake [$(cat "$FD/pending/1.wake")] still pending: the stop was not refused naming it: $out"
+rm "$FD/pending/1.wake" || exit 1
+out=$(jq -cn --arg t "$T/t.jsonl" '{transcript_path: $t, stop_hook_active: true}' | bash "$SRC/stop.sh" reply)
+[ -z "$out" ] || fail "owner prompt, reply Idle, alpha's #7 reported and no wake pending: the stop was refused: $out"
+}
+# The build host is down (no health reads), and the watcher's kept snapshot of alpha is behind its card records: its
+# health lists #6 blocked, its records now (recordsNow) list #7 blocked and not #6. `foreman status` prints that
+# snapshot's blocked cards as the records hold them now (NOWBLOCKED), so Idle is refused naming #7 and not #6. Bugs
+# caught (issue 1657 review): the hook read health alone, so with the host down it let Idle through while the status
+# named the card; then it read the snapshot's health list, not the records', so it held #6 and passed over #7.
+t_unrepdown() {
+fixture unrepdown '{}'
+local out snap
+rm -f "$T/health-alpha" "$T/health-beta" || exit 1
+snap=$(jq -cn --arg s "$SINCE" '{health: {blocked: [{card: "c6", issue: 6, since: $s, reason: "tests failed"}]},
+  recordsNow: {blocked: [{card: "c7", issue: 7, since: $s, reason: "tests failed"}], waiting: []}}') \
+  && printf '%s\n' "$snap" > "$FD/conveyor-snapshot-alpha.json" || exit 1
+{ jq -cn '{type: "user", uuid: "u2", message: {content: "How is the belt?"}}' && say Idle; } > "$T/t.jsonl" || exit 1
+out=$(jq -cn --arg t "$T/t.jsonl" '{transcript_path: $t, stop_hook_active: false}' | bash "$SRC/stop.sh" reply)
+{ refused "$out" && grep -qF 'alpha: not yet reported: blocked #7 (card c7)' <<<"$out" && ! grep -qF 'blocked #6' <<<"$out"; } \
+  || fail "owner prompt, reply Idle, no health read, alpha's kept snapshot $snap (#7 not reported): the stop was not refused naming #7 alone: $out"
+}
+# #7, #70 and two follow-ups that share the name "Review follow-up of #7" (cards f1 and f2) all reported, and a pending
+# wake names #70 and f2 alone "not yet reported": Idle is refused for #70 and f2, not for #7 or f1. Bugs caught (issue
+# 1657 review): the pending wake was searched for "blocked #7" as a substring, so #70's line held #7 too; and a pending
+# line of a named card held each card of that name, whatever card id it named.
+t_unrep70() {
+fixture unrep70 "$(jq -cn --arg s "$SINCE" '{alpha: [{card: "c7", issue: 7, since: $s, reason: "tests failed"}, {card: "c70", issue: 70, since: $s, reason: "tests failed"},
+  {card: "f1", issue: 8, name: "Review follow-up of #7", since: $s, reason: "tests failed"}, {card: "f2", issue: 9, name: "Review follow-up of #7", since: $s, reason: "tests failed"}]}')"
+local out
+mkdir -p "$FD/pending" && printf 'Conveyor: alpha: blocked: #70, Review follow-up of #7\nalpha: not yet reported: blocked #70 (card c70)\nalpha: not yet reported: blocked Review follow-up of #7 (card f2)\n' > "$FD/pending/1.wake" || exit 1
+{ jq -cn '{type: "user", uuid: "u2", message: {content: "How is the belt?"}}' && say Idle; } > "$T/t.jsonl" || exit 1
+out=$(jq -cn --arg t "$T/t.jsonl" '{transcript_path: $t, stop_hook_active: false}' | bash "$SRC/stop.sh" reply)
+{ refused "$out" && grep -qF 'alpha: not yet reported: blocked #70 (card c70)' <<<"$out" && grep -qF 'blocked Review follow-up of #7 (card f2)' <<<"$out" \
+  && ! grep -qF 'blocked #7 (card c7)' <<<"$out" && ! grep -qF '(card f1)' <<<"$out"; } \
+  || fail "owner prompt, reply Idle, alpha's #7, #70 and follow-ups f1, f2 reported, pending wake [$(cat "$FD/pending/1.wake")]: the stop was not refused for #70 and f2 alone: $out"
+}
+
 # A project in another Foreman's group is not this Foreman's to report: a line naming it holds nothing. Bug caught: the
 # project's record was looked up among all the host file's records, so another Foreman's blocked card held this reply.
 t_other() {
@@ -308,7 +366,7 @@ out=$(bash -c 'set -uo pipefail; . "$1/lib.sh" || exit 1; eval "real_$(declare -
 [ "$out" = "$T/alpha" ] || fail "recmain alpha under pipefail, records failing after mine named alpha: gave [$out], not $T/alpha"
 }
 
-cases=(idle act fake ask first fork same solo paste other down prev moved recmain)
+cases=(idle act fake ask first fork same solo paste unrep unrepdown unrep70 other down prev moved recmain)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

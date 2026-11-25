@@ -9,7 +9,8 @@
 # ruling log, source "standing", with its kind (standinglog); the Foreman then tells the owner in one line (a
 # review-retry act the watcher takes and logs, and no one tells the owner of). What no kind and no auto pass may take,
 # as it waits for the owner, is heldlist's: the pack's auto.reserved and the owner's profile items.
-# Sourced by commands/auto.sh and lib/followups.sh, after lib/prompts.sh (packget).
+# Sourced by commands/auto.sh and lib/followups.sh, after lib/prompts.sh (packget), and by lib/views.sh and
+# foreman/lib.sh for HELDIN alone.
 # Test seam: CONVEYOR_RULING_LOG (the ruling log).
 STANDING_KINDS=(asked-fix review-followup release-check fixed-block review-retry)
 # How the decision of a card blocked by its review, after review-retry gave its issue back once, says so
@@ -22,6 +23,16 @@ RRAGAIN='is blocked by its review again, after review-retry gave its issue back 
 # ended before it moved the card's lines.
 # shellcheck disable=SC2034 # RLCLOSED is read by commands/retry.sh and lib/needsask.sh
 RLCLOSED='Closed: review-land gave the card back to land, the standing order of the owner while auto is on'
+# HELDIN, jq defs: how a text (.) holds a word or item of heldlist's list $l, in any case and on word boundaries, so
+# a reserved "rea" holds "the rea check" and not "already" or "create" (issue 1657: such a block was left for the
+# owner by accident). An edge of the item that is not a letter, digit or _ (a path's "/", a "[security]" tag) needs no
+# boundary. heldin($l): true when the text holds one; heldnames($l): the ones it holds, in the list's order. Read by
+# lib/needsask.sh, lib/views.sh (landable), commands/auto.sh, lib/followups.sh and foreman/lib.sh (retryable).
+# shellcheck disable=SC2034 # HELDIN is read by the files named above
+HELDIN='def heldre: (if test("\\A\\w") then "(?<!\\w)" else "" end) + gsub("(?<c>[\\\\^$.|?*+()\\[\\]{}])"; "\\\(.c)")
+    + (if test("\\w\\z") then "(?!\\w)" else "" end);
+  def heldnames($l): . as $t | [$l[] | select(. as $w | $t | test($w | heldre; "i"))];
+  def heldin($l): heldnames($l) | length > 0;'
 # The ruling log's path (.claude/hooks/lib/rulings.sh rulings_log, of main's checkout); fails when it cannot be named.
 rulingslog() { [ -z "${CONVEYOR_RULING_LOG:-}" ] || { echo "$CONVEYOR_RULING_LOG"; return; }; CONVEYOR_MAIN=$MAIN bash -c '. "$1" && rulings_log' _ "$HERE/../.claude/hooks/lib/rulings.sh"; }
 # The owner's written profile of how they decide (owner-way.md, in the folder foreman/lib.sh FD names): its path when
@@ -120,7 +131,7 @@ EOF
 standinghow() { # <kind>
   case $1 in
     release-check) echo "Once every fix card has landed, the engine starts \`release-run prep <version>\` for a red test file; for another check, go on with the release." ;;
-    review-retry) echo "A wake for such a card is a failed retry; a retry that worked but that the watcher could not log (\"was retried (review-retry), but the act was not logged\"); a block whose reason holds a word of auto.reserved or an item of the owner's profile, which the watcher leaves blocked for the owner; a block the watcher did not retry, as it could not read auto.reserved or the owner's profile on the card's host; or a second such block of an issue that review-retry already gave back once (the watcher, or the engine while the watcher was down), which waits for the owner in Needs you with both block reasons (while auto is on, the engine lands it instead, once for each issue, files its findings as follow-ups and logs that act). Act on the reason of a failed retry; one that says review-retry already gave the issue back once is such a second block. For a retry that was not logged, log it with \`auto act review-retry\` and do not say that the retry failed. Ask the owner for the last three, do not retry them, and do not say that a retry failed: no retry ran." ;;
+    review-retry) echo "A wake for such a card is a failed retry; a retry that worked but that the watcher could not log (\"was retried (review-retry), but the act was not logged\"); a block whose reason holds a word of auto.reserved or an item of the owner's profile, which the watcher leaves blocked for the owner (its wake says \"review-retry left it for the owner: its reason names <the words>\"); a block the watcher did not retry, as it could not read auto.reserved or the owner's profile on the card's host; or a second such block of an issue that review-retry already gave back once (the watcher, or the engine while the watcher was down), which waits for the owner in Needs you with both block reasons (while auto is on, the engine lands it instead, once for each issue, files its findings as follow-ups and logs that act). Act on the reason of a failed retry; one that says review-retry already gave the issue back once is such a second block. For a retry that was not logged, log it with \`auto act review-retry\` and do not say that the retry failed. Ask the owner for the last three, do not retry them, and do not say that a retry failed: no retry ran." ;;
     *) echo "conveyor: auto: the standing kind $1 has no more to its rule than auto standing prints" >&2; return 1 ;;
   esac
 }

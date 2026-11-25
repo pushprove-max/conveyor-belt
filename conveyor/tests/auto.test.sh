@@ -416,6 +416,18 @@ t_autoblocked() {
     || fail "the second block of one issue and reason: $(answer blocked-c1) $(answer blocked-c22) $(cat "$log")"
 }
 
+# Bug (issue 1657 review): the engine cuts a long block reason at 300 characters, and "deleted" cut there reads
+# "delete", a word of the pack's default auto.reserved: the card was held for a word its reason does not hold. The
+# whole reason is kept, and it is retried.
+t_autocutword() {
+  local out pad; setup '[]'; LEDGER=$R/.claude/metrics/decisions.jsonl; : > "$LEDGER"
+  pad=$(printf 'a%.0s' {1..293})
+  autoblocked c1 7 "$pad deleted the old rows, and the build failed"
+  out=$(cd "$R" && loop auto on && loop auto decide) || fail "auto on or decide failed: $out"
+  [ "$(answer blocked-c1)" = 'Retry keeping the work' ] \
+    || fail "the block whose question was cut at \"delete\" of \"deleted\" was not retried: $(answer blocked-c1) $(cat "$(jq -r .log "$ST/auto/mode.json")")"
+}
+
 # Bug: the check on a repeated block took any later block of the issue (or of the same reason on another issue) as a
 # repeat. Two different reasons of one issue are each retried once, and so is the same reason on another issue; the
 # same reason again, in a later pass, waits for the owner.
