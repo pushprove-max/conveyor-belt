@@ -26,7 +26,10 @@
 # ssh to the host file's ssh target. A record whose snapshot fails prints null; the others still print. how: local or
 # ssh, else why nothing was asked: nofile (no host file; the line then names the two paths looked at) or config (it
 # is not understood).
-# Usage: units-fetch.sh [feed <units-feed.json> | fresh <repo>... | stamp | foreman]. foreman: the Foreman's lines alone, nothing else read.
+# Usage: units-fetch.sh [feed <units-feed.json> | map <units-feed.json> | fresh <repo>... | stamp | foreman]. foreman:
+# the Foreman's lines alone, nothing else read. map: as feed, but it ends after the testmap, maprec and maphost lines,
+# with no engine and no host line. /units runs the plugin's own fetch in this mode when the project's engine is older
+# and prints no maphost line (hooks/units.tsx mapOfOwn).
 # feed: the Board's live feed, the file named, is fresh, so the board is the
 # feed's, with the test map (the testMap of the record the maprec line names, while its stream is live, in a feed of
 # the machine the maphost line names): only the lanes, the Foreman, the engine and, when the feed does not carry it
@@ -39,7 +42,7 @@ set -uo pipefail
 . "${BASH_SOURCE[0]%/*}/../conveyor/lib/portable.sh" && p_tools
 here=$PWD
 mode=${1:-}; [ $# = 0 ] || shift
-feedf=/dev/null; [ "$mode" != feed ] || feedf=${1:-/dev/null}
+feedf=/dev/null; [ "$mode" != feed ] && [ "$mode" != map ] || feedf=${1:-/dev/null}
 # The Foreman (conveyor/foreman/lib.sh FD, the folder its own hooks name): printed only where one is expected, its
 # folder holding a role mark (session) that names a session, or its launcher's settings (settings.json). The line:
 #   foreman <session the mark names> <waiter.pid's pid> <its commit, - from a checkout> <its session> <1 when that pid
@@ -214,7 +217,7 @@ if [ -f .conveyor/project.json ] && [ "$ok" = 0 ]; then
   if [ "$remote" = 0 ]; then mmain=$here
   else mmain=$(jq -r --arg n "$t" 'first(.records[]? | select(.repo == $n) | .main) // empty' <<<"$got" 2>/dev/null); fi
   # The feed's first field says whether it is this machine's (1), then its records, only when it is.
-  [ "$mode" != feed ] || [ -z "$mmain" ] || {
+  { [ "$mode" != feed ] && [ "$mode" != map ]; } || [ -z "$mmain" ] || {
     fm=0; IFS= read -r -d '' fm
     [ "$fm" = 1 ] || mmain=''
     while IFS= read -r -d '' m && IFS= read -r -d '' s; do
@@ -235,6 +238,10 @@ elif [ -f .conveyor/project.json ]; then
   t=${here##*/}; t=${t//[^A-Za-z0-9._-]/-}
   tmcmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" --arg n "$t" 'first(.records[] | select(.repo == $n))
     | "tm=$(CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) testmap 2>/dev/null) && case $tm in \"{\"*) printf \"testmap\\t%s\\n\" \"$tm\" ;; esac; "' <<<"$got" 2>/dev/null)
+fi
+if [ "$mode" = map ]; then
+  [ -z "$tmcmd" ] || rssh 20 "$tmcmd" | grep -m1 '^testmap'$'\t'
+  exit 0
 fi
 # The project runs an old engine on this machine, where its hooks run (`conveyor.sh take stale`, lib/install.sh
 # stalenote(): no remote is read): engine <the line>, only when it does.

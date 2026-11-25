@@ -5,7 +5,7 @@ import { refresh as refreshAutoBand } from './auto'
 import { boardOf, boardOfFeed, foremanOf, noteLines, paneModel, parseFetch, parseLimit, parseStream, seatFromGit, seenOf, tableText, toasts } from './sources'
 import { clockOf, setClock } from './elements'
 import type { Line } from './elements'
-import type { Research, Seen, State } from './sources'
+import type { Fetched, Research, Seen, State } from './sources'
 
 // Conveyor's board: what needs you, the cards on the belt, the queue, what landed today and the two lanes, as
 // `/units` and a side pane; with the pane on, a toast for a card that newly needs you or lands. One fetch a minute
@@ -69,6 +69,16 @@ const fetchPath = async ($: EngineInterface, main: string): Promise<string> => {
   if (!data) return own
   const path = `${data}/conveyor/versions/${commit}/${FETCH}`
   return (await $.fs.stat(path).catch(() => undefined)) ? path : own
+}
+// A fetch of an older engine, with the feed, names the feed's record of this checkout by its path alone and no machine
+// (a maprec line and no maphost line), and reads no map when that record's snapshot has one, of whichever machine the
+// feed is. When it printed no testmap line, the plugin's own fetch, in its map mode, gives the map's lines in place of
+// the older fetch's: the record and the machine the map is read at, and the map itself when the feed is of another
+// machine. When it does not answer, the older fetch's lines stay (sources.ts boardOfFeed then shows no feed map, with OLD_MAP_FETCH).
+const mapOfOwn = async ($: EngineInterface, cwd: string, f: Fetched) => {
+  const r = await $.process.run(['bash', `${$.plugin.root}/${FETCH}`, 'map', `${feedDir}/units-feed.json`], { cwd, timeoutMs: 45_000 }).catch(() => undefined)
+  const m = r && r.exitCode === 0 ? parseFetch(r.stdout) : null
+  if (m) Object.assign(f, { mapRec: m.mapRec, mapHost: m.mapHost, testMap: m.testMap })
 }
 
 // The Board's folder, named as the plugin's dashboard.sh names its OUT, from the Board job installed on this
@@ -285,6 +295,7 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
   ])
   if (taken) stamps ??= taken
   const f = r && r.exitCode === 0 ? parseFetch(r.stdout) : null
+  if (f && fed && f.mapRec && f.mapHost === null && !f.testMap) await mapOfOwn($, cwd, f)
   // The stamps already hold the changed records' new checksums, so the next check would not see them move: a record
   // whose fresh snapshot did not come (the fetch failed, the host timed out, or the answer has no row for it or a null
   // one) is given back, to be built fresh by the next fetch.

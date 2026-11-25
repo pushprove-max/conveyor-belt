@@ -2,6 +2,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { register as loadAgain } from './units'
+import { OLD_MAP_FETCH } from './sources'
 import { TWO_PROJECTS } from './fixtures/units-two-projects'
 
 // The mod asks for one thing, its fetch (a bash run in the main checkout), then reads the Board's limit file for the
@@ -937,6 +938,49 @@ test('a feed of another ssh target does not give the map the fetch named', async
   const pane = await draw($, 'Pane')
   expect(pane, 'feed buildbox at owner@oven, maphost owner@buildbox').toContain(OWN_MAP_LINE)
   expect(pane, 'feed buildbox at owner@oven, maphost owner@buildbox').not.toContain('Test map: 3 of 8 test files')
+})
+
+// A project pinned to an older engine runs that engine's fetch, which with the feed prints maprec and no maphost, and
+// no testmap line when the feed's record at that path carries a map, of whichever machine the feed is. /units then
+// asks the plugin's own fetch in its map mode (mapOfOwn) for the map's lines. The project is pinned to COMMIT_A, whose
+// install (INSTALL) answers every call with the older fetch's lines; ownMap: the plugin's own fetch's answer in map
+// mode alone, so a map asked of the pinned fetch gets no map.
+const OLD_FETCH = `paths\t\t${HOME}\t\nfast\tnone\nmaprec\t${MAIN}\nhost\t\tfeed\t0\n`
+// The plugin's own fetch: units-fetch.sh at the plugin's root, not the pinned install's.
+const isOwnFetch = (argv: readonly string[]) => argv[0] === 'bash' && !!argv[1]?.endsWith('/hooks/units-fetch.sh') && argv[1] !== INSTALL
+const pinnedWorld = (on: On, feedSsh: string, ownMap: string) => {
+  const w = world(on, 'main', OLD_FETCH, { [FEED]: JSON.stringify({ ...JSON.parse(feed(snapshot({ testMap: { state: 'running', done: 3, of: 8 } }))), ssh: feedSsh }), [INSTALL]: '#!/bin/bash' }, true, { HOME })
+  w.files.set(`${MAIN}/.conveyor/project.json`, { text: JSON.stringify({ plugin: { commit: COMMIT_A } }), at: 0 })
+  const run = w.run
+  w.run = (argv, cwd) => {
+    const r = run(argv, cwd)
+    return isOwnFetch(argv) && argv[2] === 'map' ? { value: { exitCode: 0, stdout: ownMap, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } : r
+  }
+  return w
+}
+// The Board and the session at the same build machine, owner@lab. Bug it catches: /units refused that feed's map
+// (no maphost line) while the older fetch read none, so no map was shown.
+test('an older fetch with no maphost line: the feed of the machine the own fetch names gives the map', async ($, on) => {
+  const w = pinnedWorld(on, 'owner@lab', `paths\t\t${HOME}\t\nfast\tnone\nmaprec\t${MAIN}\nmaphost\towner@lab\n`)
+  await start($, 'main')
+  await units($)
+  await w.clock.settle()
+  const text = await units($)
+  expect(fetches(w).some(r => r.argv[1] === INSTALL && r.argv[2] === 'feed'), 'pinned to COMMIT_A: the feed fetch is the install\'s').toBe(true)
+  expect(fetches(w).some(r => isOwnFetch(r.argv) && r.argv[2] === 'map' && r.argv[3] === FEED), `older fetch with maprec, no maphost: own fetch in map mode; runs: ${JSON.stringify(fetches(w).map(r => r.argv))}`).toBe(true)
+  expect(text, 'feed at owner@lab, own fetch maphost owner@lab').toContain('Test map: 3 of 8 test files')
+  expect(text, 'feed at owner@lab, own fetch maphost owner@lab').not.toContain(OLD_MAP_FETCH)
+})
+// The Board at owner@oven, the session's map at owner@lab, the same path: the own fetch names no record and reads the
+// map. Bug it catches: the older fetch skipped the map for the other machine's record, and /units showed none.
+test('an older fetch with no maphost line: a feed of another machine leaves the map the own fetch reads', async ($, on) => {
+  const w = pinnedWorld(on, 'owner@oven', `paths\t\t${HOME}\t\nfast\tnone\ntestmap\t${JSON.stringify(OWN_MAP)}\n`)
+  await start($, 'main')
+  await units($)
+  await w.clock.settle()
+  const text = await units($)
+  expect(text, 'feed at owner@oven, own fetch reads the map at owner@lab').toContain(OWN_MAP_LINE)
+  expect(text, 'feed at owner@oven, own fetch reads the map at owner@lab').not.toContain('Test map: 3 of 8 test files')
 })
 
 // #1651 review: the Board rewrites a feed whose stream is down every 10 s with its last snapshot, so the file stays

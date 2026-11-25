@@ -225,6 +225,11 @@ hostfile --arg b "$M/bakery" '{host: "lab", ssh: "owner@lab", main: $b, records:
 feedfile bakery "$M/bakery" true lab owner@lab
 same "a record of a host file at owner@lab, the feed of lab at owner@lab: the map is read here, no maprec (units-fetch.sh feed $T/feed.json in $M/bakery)" \
   "$MAPRUN" "$(fetch "$M/bakery" feed "$T/feed.json" | grep -E '^(testmap|maprec|maphost)')"
+# Map mode, which /units runs from the plugin's own copy when the project's older engine prints maprec with no maphost
+# (hooks/units.tsx mapOfOwn): the same map lines as feed mode, the feed held to its machine, and no engine or host
+# line. Bug it catches: a project pinned to an older engine lost its map when its feed record matched this path.
+same "map mode, the feed of lab at owner@lab: the map is read here, no maprec, no host line (units-fetch.sh map $T/feed.json in $M/bakery)" \
+  "$MAPRUN" "$(fetch "$M/bakery" map "$T/feed.json" | grep -E '^(testmap|maprec|maphost|engine|host)')"
 cp "$T/lanes-host.json" "$H/.config/conveyor/host.json"
 # Issue 179: a project that follows main and runs an older commit on this machine than the newest its last take read
 # gets doctor's line, feed or not. Bug it catches: a project stayed on an old engine for hours and /units said nothing.
@@ -287,6 +292,12 @@ same "a build machine, the feed of lab at owner@oven with bakery at the same pat
 jq -n --arg m "$M/bakery" '{host: "lab", local: false, stream: {live: true}, records: [{repo: "bakery", main: $m, snap: {testMap: {state: "made", sources: 1, tests: 1, age: 0}}}]}' > "$T/feed.json"
 same "a build machine, the feed of an older Board with no ssh and bakery at the same path: the map is asked over ssh (units-fetch.sh feed $T/feed.json in $M/dev/bakery, host file lab at owner@lab)" \
   "$MAPSSH" "$(fetch "$M/dev/bakery" feed "$T/feed.json" | grep -E '^(testmap|maprec|maphost)')"
+# Map mode (hooks/units.tsx mapOfOwn) with the Board at owner@oven and bakery at the same path: the map is the build
+# machine's, asked over ssh (the testmap names the host file's main, $M/bakery, not this checkout), with no engine or
+# host line. Bug it catches: map mode read no map, or this machine's, for a project pinned to an older engine.
+feedfile bakery "$M/bakery" true oven owner@oven
+same "map mode, a build machine, the feed of oven at owner@oven with bakery at the same path: the map is asked over ssh (units-fetch.sh map $T/feed.json in $M/dev/bakery, host file lab at owner@lab)" \
+  "$MAPSSH" "$(fetch "$M/dev/bakery" map "$T/feed.json" | grep -E '^(testmap|maprec|maphost|engine|host)')"
 
 # The short check (issue 1033): `stamp` prints one checksum a record, of its state folder's cards.jsonl, control.json
 # and queue, in one command (one ssh command for every record); `fresh <repo>` asks that record for a snapshot built
