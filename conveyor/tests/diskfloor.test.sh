@@ -38,7 +38,9 @@ t_diskfloor() {
   # A loop that keeps running: a whole turn under the floor picks nothing and health names the reason; free space back
   # over the floor between two of its turns, and the same loop picks #5 and lands it, with no step by anyone.
   tune '.tunables.idle = 1 | .tunables.poll = 1'; watchturns
-  loop serve > "$STUB/serve.out" 2>&1 & lp=$! # loop: only the running loop's own turns show picks stop under the floor and start again once space is back
+  # The engine as a command of its own, not the loop() function: on bash 5.2 a function in the background is a subshell
+  # with the engine its child, so $! is not the engine, kill leaves it running and its next df read takes a line below.
+  CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards bash "$SRC/conveyor.sh" serve > "$STUB/serve.out" 2>&1 & lp=$! # loop: only the running loop's own turns show picks stop under the floor and start again once space is back
   trap 'kill $lp 2>/dev/null' EXIT
   turns 1
   [ -z "$(st 'select(.step == "picked") | .issue')" ] && [ "$(loop health | jq -r .state)" = 'paused: free disk 2.5 GB under the 3 GB floor' ] \

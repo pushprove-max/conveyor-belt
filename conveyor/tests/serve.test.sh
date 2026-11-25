@@ -440,7 +440,9 @@ grep -q " refs/remotes/origin/main$" <<<"$u" && [ "$(wc -l < "$STUB/pushes" 2>/d
 EOF
   # `3<> turn >&3`, not `1<> turn`: bash before 5.3 prints `1<>` as `<>` (fd 0) in `export -f` and `declare -f`, so the
   # turn went to the run's output and push 2 waited its 120 s.
-  chmod +x "$R/.git/hooks/reference-transaction"; sleep() { [ "${FUNCNAME[1]:-}" != run ] || [ "$1" = 0.1 ] || [ "${running:-0}" != 0 ] || echo 3<> "$STUB/turn" >&3; command sleep "$@"; }; export -f sleep # sleep: the engine's own, passed on as called
+  # The lock watchdog's `sleep "$LOCKLIMIT" &` (lockedfor()) execs the real sleep: on bash 5.2 that job is the
+  # function's subshell with sleep its child, so the watchdog's kill left sleep holding the run lock open after the run.
+  chmod +x "$R/.git/hooks/reference-transaction"; sleep() { [ "${FUNCNAME[1]:-}" != lockedfor ] || exec sleep "$@"; [ "${FUNCNAME[1]:-}" != run ] || [ "$1" = 0.1 ] || [ "${running:-0}" != 0 ] || echo 3<> "$STUB/turn" >&3; command sleep "$@"; }; export -f sleep # sleep: the engine's own, passed on as called
   at=$(originat); loop run > "$STUB/run.out" 2>&1 & pid=$!; read -r -t 200 -u "$l" _ || fail "three cards did not land while the first push was held: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
   [ "$(cat "$STUB/pushes")" = "$(st 'select(.step == "landed") | .sha' | head -n 1)" ] && [ "$(originat)" = "$at" ] || fail "a push was not held for the first landing alone: $(cat "$STUB/pushes")"; echo > "$STUB/held"; wait "$pid"; rc=$?
   [ "$rc" = 0 ] && [ "$(sed -n 2p "$STUB/pushes")" = "$(mainat)" ] && [ "$(originat)" = "$(mainat)" ] && [ "$(wc -l < "$STUB/pushes")" = 2 ] || fail "the run ($rc) did not push the landings made during the held push as one push of main's head: $(cat "$STUB/pushes" "$STUB/run.out")"

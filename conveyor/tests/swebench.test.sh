@@ -591,10 +591,11 @@ t_sweharness() {
   ! grep -rlE 'REFFIX|HIDDENTEST' "$C" || fail "a reference fix or hidden test stayed on disk after the grade"
   h grade o/ds rev1 o__p-9 "$C/patch" "$C/grade9" r1 > /dev/null; [ $? = 3 ] || fail "a task missing from the dataset was not reported as one the harness could not run"
   # Bug: `bench swe stop` sends SIGTERM to the grade, which then ended without removing its cache and the row in it.
-  : > "$C/hold"; SWE_HOLD=$C/hold h grade o/ds rev1 o__p-1 "$C/patch" "$C/gradestop" r1 > /dev/null 2>&1 &
+  : > "$C/hold"; SWE_HOLD=$C/hold h grade o/ds rev1 o__p-1 "$C/patch" "$C/gradestop" r1 > /dev/null 2>&1 & g=$!
   # A poll: what is tested is what a real grade process does on SIGTERM with the official harness under it, which no
   # function call shows, and the grade reaches the harness (it writes its parent's pid) in its own time.
   wait_until "[ -s '$C/hold.pid' ]" || { rm -f "$C/hold"; fail "the stopped grade did not reach the official harness"; }
-  kill -TERM "$(cat "$C/hold.pid")"; wait $!; rm -f "$C/hold"
+  # The grade's pid kept in g: wait_until starts a process substitution, which changes $!, so `wait $!` did not wait.
+  kill -TERM "$(cat "$C/hold.pid")"; wait "$g"; rm -f "$C/hold"
   [ -z "$(ls -A "$C/tmp")" ] && ! grep -rlE 'REFFIX|HIDDENTEST' "$C" || fail "a grade stopped with SIGTERM left its cache, with the reference fix and hidden tests, on disk"
 }

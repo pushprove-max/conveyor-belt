@@ -308,15 +308,17 @@ t_machineparent() {
 # The machine's Conveyor as `conveyor.sh machine` runs it (machineloop, in a shell of the engine), in the background,
 # over one record whose main checkout is not there: its loop ends at once, and the machine says so at its next turn,
 # a second later. Sets mp; its output is in $T/$CASE/out. The shell runs <commands> once the engine is loaded. It
-# starts with INT as the service and a terminal give it (not ignored, as a job in the background of a script has it,
-# which bash cannot trap). On Linux it is first made the reaper of all it starts, as machineloop makes itself, so
-# machineloop does not start conveyor.sh again, which the commands would not reach.
+# starts with INT and HUP as the service and a terminal give them (not ignored, as a job in the background of a script
+# has INT and a run under nohup, as the suite on a box starts, has HUP, which bash cannot trap). On Linux it is first
+# made the reaper of all it starts, as machineloop makes itself, so machineloop does not start conveyor.sh again,
+# which the commands would not reach.
 bare() { # [commands]
   local d=$T/$CASE w
   export XDG_CONFIG_HOME=$d/config; mkdir -p "$XDG_CONFIG_HOME/conveyor" && git init -q "$d/m" || fail "the case's checkout could not be made"
   jq -n --arg m "$d/gone" '{records: [{repo: "gone", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
   w=(python3 -I -c 'import ctypes, os, signal, sys
 signal.signal(signal.SIGINT, signal.SIG_DFL)
+signal.signal(signal.SIGHUP, signal.SIG_DFL)
 sys.platform != "linux" or ctypes.CDLL(None).prctl(36, 1) == 0 or sys.exit("prctl"); os.execvp(sys.argv[1], sys.argv[1:])')
   cat > "$d/machine.sh" <<'EOF'
 . "$1/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$1/commands/machine.sh")" || exit 9
