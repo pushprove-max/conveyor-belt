@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: a main-red fix card whose session made no change while its cases do not all pass on main closes when newer
-# fix cards took its work over (bugproof.sh redreplaced(), called by followups.sh nochange()). Its cases call
-# mainredproof.test.sh's redsetup() and mainred.test.sh's eng().
+# fix cards took its work over (bugproof.sh redreplaced(), called by followups.sh nochange()), and the reason
+# redproof() gives when some of its cases pass on main. Its cases call mainredproof.test.sh's redsetup() and
+# redcheck(), and mainred.test.sh's eng().
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -57,7 +58,7 @@ t_mainredreplacedlanded() {
   local out r
   out=$(eng 'nochange cfix 0 "$CONVEYOR_CARDS/cfix" brief' 2>&1)
   r=$(st 'select(.card == "cfix" and .step == "closed") | .reason')
-  [[ $r == "Replaced: newer main-red fix cards hold each of its cases, on the belt or landed for a case that passes on main: cnew1, cnew2. "*'`a.test: one` passes on main'* ]] \
+  [[ $r == "Replaced: newer main-red fix cards hold each of its cases, on the belt or landed for a case that passes on main: cnew1, cnew2. "*'`a.test: one` passes on main'"'"'s code at '*' without the change in each of 3 runs (main is no longer red for it), while `c.test` fails there.'* ]] \
     && [ -z "$(st 'select(.card == "cfix" and .step == "blocked")')" ] \
     || fail "nochange on cfix (a.test: one passes on main, held by cnew1 landed; c.test fails, held by cnew2 on the belt) did not close it naming both: $out: $(st 'select(.card == "cfix") | "\(.step) \(.reason)"' | tr '\n' ,)"
 }
@@ -75,6 +76,24 @@ t_mainredreplacedflaky() {
   [ "$(cat "$STUB/n" 2>/dev/null)" = 3 ] && [ -n "$(st 'select(.card == "cfix" and .step == "blocked")')" ] \
     && [ -z "$(st 'select(.card == "cfix" and .step == "closed")')" ] \
     || fail "nochange on cfix (a.test: one, held by cnew1 landed, fails in its third run; c.test fails, held by cnew2 on the belt) closed it, or did not run a.test three times (runs: $(cat "$STUB/n" 2>/dev/null)): $out: $(st 'select(.card == "cfix") | "\(.step) \(.reason)"' | tr '\n' ,)"
+  # Bug it catches: the block reason was written from the first run, so it said main is no longer red for
+  # `a.test: one` though the third run failed it.
+  local r
+  r=$(st 'select(.card == "cfix" and .step == "blocked") | .reason')
+  [[ $r == *'`c.test` fails on main'"'"'s code at '*' without the change, and `a.test: one` passed there in a run but failed or gave no result in a later one (main is still red for it).'* && $r != *"no longer red"* ]] \
+    || fail "nochange on cfix (a.test: one passes two runs and fails the third; c.test fails) gave a block reason that does not say main is still red for a.test: one: $r"
+}
+
+# Bug it catches: a card with a change runs its cases on main once without it, and the block reason said main is no
+# longer red for a case that passed in that one run, though only FULL_ALONE passes show that (bugproof.sh redproof()).
+# Here `c.test` passes and `a.test: one` fails in that run; the reason says one run is fewer than FULL_ALONE (3).
+t_redproofonepass() {
+  redsetup c.test
+  local got
+  got=$(redcheck $'one\nc.test')
+  [ "$(head -n 1 <<<"$got")" = "exit 2" ] \
+    && [[ $(tail -n 1 <<<"$got") == '`c.test` passes on main'"'"'s code at '*' without the change in 1 run(s), fewer than the 3 that show main is no longer red for it, while `a.test: one` fails there.' ]] \
+    || fail "bugproof on cfix with a change (c.test passes and a.test: one fails in the one run on main without it) did not block it saying one run is fewer than 3: $got"
 }
 
 # Issue 1666, what must stay true: a landed card counts for a case only on passes of main as it is when the closed line

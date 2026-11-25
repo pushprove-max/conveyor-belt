@@ -381,7 +381,7 @@ bugnamed() { # <card> <worktree> <issue json>
 # that passed in each of FULL_ALONE runs without the change, a JSON array, [] with no such case; and REDSHA: the
 # commit they ran on (redreplaced()).
 redproof() { # <card> <worktree>
-  local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2 kw='' ki='' kf='' fc nw i po=''
+  local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2 kw='' ki='' kf='' fc nw i po='' nr=0 ok lost
   REDRAN='' REDPASS='[]' REDSHA=''
   cs=$(redcases "$1") && REDRAN=$cs \
     || { echo "the main-red record names no case of this card, so the cases main fails could not be run" > "$2.unfixed"; return 2; }
@@ -394,7 +394,7 @@ redproof() { # <card> <worktree>
     # Main is no longer red only when every case passes in each of FULL_ALONE runs (as redgreen() runs them): a case that
     # fails one run in three is still red, so the first run that fails or gives no result is the one judged below.
     [ -n "$nw" ] || for ((i = 0; i < FULL_ALONE; i++)); do
-      wo=$(redrun "$mwt" "$cs") || wo=''; kw=$(redkeep "$1" "$mwt.test" without)
+      wo=$(redrun "$mwt" "$cs") || wo=''; kw=$(redkeep "$1" "$mwt.test" without); nr=$((nr + 1))
       [ -n "$wo" ] && [ -z "$(rednames fail "$wo")$(rednames none "$wo")" ] || break
     done
     # REDPASS holds a case only when it passed in each of FULL_ALONE runs, as main is no longer red for it only then:
@@ -403,7 +403,7 @@ redproof() { # <card> <worktree>
     [ -z "$wo" ] || REDPASS=$(jq -c '[.[] | select(.verdict == "pass") | .name]' <<<"$wo" 2>/dev/null) || REDPASS='[]'
     [ -n "$nw" ] || ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null \
       || for ((i++; i < FULL_ALONE && ${#REDPASS} > 2; i++)); do
-        po=$(redrun "$mwt" "$(jq -c --argjson p "$REDPASS" 'map(select(IN(.name; $p[])))' <<<"$cs")") || po='[]'
+        po=$(redrun "$mwt" "$(jq -c --argjson p "$REDPASS" 'map(select(IN(.name; $p[])))' <<<"$cs")") || po='[]'; nr=$((nr + 1))
         REDPASS=$(jq -c --argjson p "$REDPASS" '[.[] | select(.verdict == "pass" and IN(.name; $p[])) | .name]' <<<"$po" 2>/dev/null) || REDPASS='[]'
       done
     [ -z "$po" ] || cp -f "$kw" "$mwt.test" 2>/dev/null || : # the output shown below is the judged run's
@@ -415,7 +415,17 @@ redproof() { # <card> <worktree>
     elif [ -z "$(rednames fail "$wo")" ]; then
       out="main is no longer red for $(rednames pass "$wo"): they pass on main's code at $sha without the change in each of $FULL_ALONE runs, so the card closes as already done"; rc=3
     elif [ -n "$(rednames pass "$wo")" ]; then
-      out="$(rednames pass "$wo") passes on main's code at $sha without the change (main is no longer red for it), while $(rednames fail "$wo") fails there"
+      # Of the cases that passed in the judged run, those still in REDPASS passed in each of the nr runs; the others
+      # failed or gave no result in a repeat run, so main is still red for them.
+      ok=$(rednames pass "$(jq -c --argjson p "$REDPASS" 'map(select(IN(.name; $p[])))' <<<"$wo")")
+      lost=$(rednames pass "$(jq -c --argjson p "$REDPASS" 'map(select(IN(.name; $p[]) | not))' <<<"$wo")")
+      if [ -z "$ok" ]; then out="$(rednames fail "$wo") fails on main's code at $sha without the change"
+      elif [ "$nr" -ge "$FULL_ALONE" ]; then
+        out="$ok passes on main's code at $sha without the change in each of $nr runs (main is no longer red for it), while $(rednames fail "$wo") fails there"
+      else
+        out="$ok passes on main's code at $sha without the change in $nr run(s), fewer than the $FULL_ALONE that show main is no longer red for it, while $(rednames fail "$wo") fails there"
+      fi
+      [ -z "$lost" ] || out+=", and $lost passed there in a run but failed or gave no result in a later one (main is still red for it)"
     elif git -C "$2" diff --cached --quiet HEAD 2>/dev/null; then
       out="$(rednames fail "$wo") still fails on main's code at $sha, and there is no change to run them with" # nochange()
     elif ! out=$(git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index 2>&1); then

@@ -70,7 +70,7 @@ t_redproofflaky() {
   printf '%s\n' '[ "${CONVEYOR_TEST_FILE:-}" = a.test ] && { n=$(($(cat "$STUB/n" 2>/dev/null || echo 0) + 1)); echo $n > "$STUB/n"; [ $n != 3 ] || { grep -vx one ok.txt > ok.new; mv ok.new ok.txt; }; }' \
     | cat - "$STUB/mainrun-cmd" > "$STUB/mainrun-cmd.new" && mv "$STUB/mainrun-cmd.new" "$STUB/mainrun-cmd" || fail "the flaky runner could not be made"
   got=$(redcheck $'one\nc.test\nfixed')
-  [ "$(cat "$STUB/n")" = 3 ] && [ "$(head -n 1 <<<"$got")" = "exit 2" ] && [[ $(tail -n 1 <<<"$got") == '`c.test` passes on main'"'"'s code at '*' while `a.test: one` fails there.' ]] \
+  [ "$(cat "$STUB/n")" = 3 ] && [ "$(head -n 1 <<<"$got")" = "exit 2" ] && [[ $(tail -n 1 <<<"$got") == '`c.test` passes on main'"'"'s code at '*' without the change in each of 3 runs (main is no longer red for it), while `a.test: one` fails there.' ]] \
     || fail "the card whose case failed in its third run without the change closed, or the check did not judge that run (runs: $(cat "$STUB/n")): $got"
 }
 # The real test file conveyor/foreman/<file>, run as the test step runs a case of it (its case <run>, by
