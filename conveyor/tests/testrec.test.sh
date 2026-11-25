@@ -49,6 +49,26 @@ t_testrecpartial() {
     [ "$f" = partial ] || fail "a test line with partial $p is not refused naming partial (the check named '$f'): $v"
   done
 }
+# Bug (#1713): the record check did not know rerun.failures.ownLimit, so each test line whose first run had a file
+# stopped by its own limit was set aside in quarantined.jsonl. The first run's failures are testfails()'s, kept in
+# <w>.first as tests() keeps them; the pass line is testrec() with firstrun(), as the loop writes it. Its line passes,
+# and an ownLimit that is not a list of strings is refused, the check naming rerun.
+t_testrecownlimit() {
+  local w=$T/$CASE/wt l v f e; mkdir -p "$T/$CASE"
+  printf '%s\n' 'printf "== a.test.sh\n-- timeout a.test.sh\n" > "$CONVEYOR_TEST_LOG/r.log"; exit 1' > "$T/$CASE/cmd"
+  mkdir -p "$w.testlog"; (cd "$T/$CASE" && CONVEYOR_TEST_LOG=$w.testlog exec bash cmd > "$w.test" 2>&1 < /dev/null)
+  ( eval "$(sed -n '/^testfails() {/,/^}/p; /^RECJQ=/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh")"
+    packget() { return 1; }; testfails "$w.test" 1 ) | jq -c '{exit: 1, failures: del(.passed, .okcases, .passcases, .host)}' > "$w.first"
+  jq -e '.failures.ownLimit == ["a.test.sh"]' "$w.first" >/dev/null || fail "a first run whose a.test.sh hit its own limit has no ownLimit: $(cat "$w.first")"
+  rm -rf "$w.testlog"; echo 'true' > "$T/$CASE/cmd"; l=$(recline pass) || fail "the test line could not be made"
+  l=$(jq -c --slurpfile r <(eval "$(sed -n '/^NOTPASSED=/,/unique;.$/p; /^firstrun() {/,/^}/p' "$SRC/lib/testrun.sh")"; firstrun "$w" pass) '. + $r[0]' <<<"$l")
+  jq -e '.rerun.failures.ownLimit == ["a.test.sh"]' <<<"$l" >/dev/null || fail "the pass line has no rerun.failures.ownLimit: $l"
+  e=$(refused "$l"); [ -z "$e" ] || fail "$e"
+  for p in '"a.test.sh"' '[1]' null false; do
+    v=$(jq -c --argjson p "$p" '.rerun.failures.ownLimit = $p' <<<"$l"); f=$(jq -Rrn -f "$SRC/jq/check.jq" <<<"$v" | cut -f2)
+    [ "$f" = rerun ] || fail "a test line with rerun.failures.ownLimit $p is not refused naming rerun (the check named '$f'): $v"
+  done
+}
 # A runner that selects no file of 4 and no case of 9 passes, and its line says "nothing selected", not "passed".
 t_testrecnothing() {
   local l e; mkdir -p "$T/$CASE"; echo 'printf "TESTRUN files=0 of=4\nTESTRUN cases=0 of=9\n" > "$CONVEYOR_TEST_LOG/r.log"' > "$T/$CASE/cmd"

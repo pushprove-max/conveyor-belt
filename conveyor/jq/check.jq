@@ -3,9 +3,10 @@
 # "(not JSON)", "(not an object)", or "step" when only the fields together are refused for that step.
 # A test run's failures (testfails(), lib/testrun.sh); stopped, only of a run that timed out: the files begun and not
 # ended (testaction.sh testfacts() reads it); notRun, only of a run that stopped at its first failure: the files it did
-# not run or did not finish.
-def fails: type == "object" and (keys - ["stopped", "notRun"]) == ["files", "of", "timeout"] and (.of | . == null or type == "number")
+# not run or did not finish; ownLimit, only when there is one: the files each stopped by its own time limit.
+def fails: type == "object" and (keys - ["stopped", "notRun", "ownLimit"]) == ["files", "of", "timeout"] and (.of | . == null or type == "number")
   and (.stopped // [] | type == "array" and all(type == "string"))
+  and ((has("ownLimit") | not) or (.ownLimit | type == "array" and all(type == "string")))
   and (.notRun // [] | type == "array" and all(type == "string"))
   and (.files | type == "array" and all((.file | type == "string") and (.cases | type == "array" and all(keys == ["line", "name"] and all(type == "string")))))
   and (.timeout | . == null or (type == "object" and keys == ["file", "sec"]));
