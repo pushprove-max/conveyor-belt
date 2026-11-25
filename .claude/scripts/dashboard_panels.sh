@@ -64,7 +64,8 @@
 #           ([{area, count}]), days (its rules.healsdays, or null), entries (each with repo, repoUrl, id, time, card, issue, url,
 #           area, finding, why, effect, from, seen, sightings, expired (the dropped mark it had before a sighting took it
 #           back to the list); docs entries without the last four),
-#           docs (its docs list, {areas, entries} alike)}, as its selfheals gives it.
+#           docs (its docs list, {areas, entries} alike), dropped (the entries that left the list, each with dropped
+#           {time, why} and left, the time it left)}, as its selfheals gives it.
 #   health  host {name, reachable, error}, records (each record's steered (the host answer's), repoUrl (its repository's https
 #           address, else null), snapshotAt (when the build of its kept snapshot began, null from a snapshot
 #           without it), loop, state (running, paused, stopped, as
@@ -416,12 +417,13 @@ PANELS_JQ='
         | {repo, repoUrl: ($r.repoUrl // null), id, time, card, issue, name: (.name // null), url, finding, by, why, built: (.built // null), dismissed: (.dismissed // null), round: (.round // null), findings: (.findings // null)}) | sort_by(.time) | reverse))
         # heals: the self-heals list of each record that has one (the snapshot'"'"'s selfheals), its entries tagged.
         # days: the rules.healsdays of the record, the days an entry stays unseen before it leaves the list (null when it has none).
+        # dropped: the entries that left the list (its dropped record), each with its issue link (url) and left, the time it left.
         + {heals: [$R[] | . as $r | .snap.selfheals | objects | {repo: $r.repo, repoUrl: ($r.repoUrl // null), sorted: (.sorted // null), areas: (.areas // []),
             days: ($r.snap.control.rules.healsdays // null),
             entries: [.entries[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null),
               from: (.from // null), seen: (.seen // null), sightings: (.sightings // null), expired: (.expired // null)}],
             docs: (.docs | objects | {areas: (.areas // []), entries: [.entries[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null)}]}) // {areas: [], entries: []},
-            dropped: [.dropped[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null), dropped: (.dropped // null), seen: (.seen // null)}]}]}} end),
+            dropped: [.dropped[]? | objects | tag($r) | {repo, repoUrl, id, time, card, issue, url, area: (.area // null), finding, why, effect: (.effect // null), dropped: (.dropped // null), left: ((.dropped | objects | .time) // null), seen: (.seen // null)}]}]}} end),
    # Belt 3D: the belt, Needs you, the queue (next, held, waiting) and Landed today as above, each card with what its
    # lane, bay and details show.
    belt3d: (if $R == null then {error: $cerr, data: null} else

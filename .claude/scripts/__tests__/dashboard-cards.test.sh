@@ -289,8 +289,9 @@ q '.panels.declined.data.heals | map([.days, (.entries | map([.from, .seen, .sig
   "the self-heals list with the record's healsdays and each entry's source, last sighting, sightings and earlier move up to harm"
 # Issue 1561: the entries that expired off the list reach the Declined part with their dates. Bug it catches: the panel's
 # data left out the snapshot's selfheals.dropped, so the Board could not show what expired.
-q '.panels.declined.data.heals | map(.dropped | map([.id, .url, .finding, .dropped.why, .dropped.time, .seen])) == [[["h0000000000dd", "'"$PU"'/700", "[P2] a.sh:9 an old wait", "expired", "2026-11-01T00:00:00Z", null]]]' \
-  "the entries that expired off the self-heals list, with when and why"
+# Issue 1614: each carries left, the time it left the list, which the panel sorts and shows them by.
+q '.panels.declined.data.heals | map(.dropped | map([.id, .url, .finding, .dropped.why, .dropped.time, .left, .seen])) == [[["h0000000000dd", "'"$PU"'/700", "[P2] a.sh:9 an old wait", "expired", "2026-11-01T00:00:00Z", "2026-11-01T00:00:00Z", null]]]' \
+  "the entries that expired off the self-heals list, with when they left and why"
 # Issue 1563: the docs list of a record reaches the Declined part beside its self-heals list, so the Board shows it
 # and files an area's docs sweep card on the right record. Bug it catches: the docs list left out of the panel's data.
 q '.panels.declined.data.heals | map(.docs | [.areas, (.entries | map([.id, .url, .area, .finding, .effect]))]) == [[[{area: "area:board", count: 1}],

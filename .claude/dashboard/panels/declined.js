@@ -213,7 +213,11 @@
   const docsOf = (x) => ((x.docs && x.docs.entries) || []);
   // The entries that expired: the dropped record also holds those the owner dropped or moved up to harm on the
   // Self-heals tab, which shows them with their reason.
-  const droppedOf = (x) => (Array.isArray(x.dropped) ? x.dropped : []).filter((e) => !e.dropped || e.dropped.why === 'expired');
+  // The latest to leave first (left: the time it left; the record holds them in the order they left).
+  const droppedOf = (x) => (Array.isArray(x.dropped) ? x.dropped : []).filter((e) => e && (!e.dropped || e.dropped.why === 'expired'))
+    .sort((a, b) => String(b.left || '').localeCompare(String(a.left || '')));
+  // Where an entry came from: a card, or an issue the sort of the queued follow-ups read (its card is "#<n>").
+  const fromText = (e) => (/^#[0-9]+$/.test(String(e.card)) ? 'from issue' : `from card ${e.card}`);
   const droppedOpen = new Set(); // the repos whose "Expired from the list" is open, through every redraw
   const healsOf = (d) => (Array.isArray(d.heals) ? d.heals : []).filter((x) => x && ((x.entries || []).length || x.sorted || docsOf(x).length || droppedOf(x).length));
   // A list's entries by area, the areas in the snapshot's order (areas: the most entries first), none left empty.
@@ -262,8 +266,8 @@
     box.addEventListener('toggle', () => { if (box.open) droppedOpen.add(x.repo); else droppedOpen.delete(x.repo); });
     box.append(h('summary', null, `${many ? `${x.repo}: ` : ''}Expired from the list (${droppedOf(x).length})`), ul);
     droppedOf(x).forEach((e) => {
-      const li = h('li', 'row'), meta = h('p', 'row-meta'), at = e.dropped && e.dropped.time;
-      meta.append(h('span', null, `from card ${e.card} `), ctx.issueLink(e), ' expired ');
+      const li = h('li', 'row'), meta = h('p', 'row-meta'), at = e.left;
+      meta.append(h('span', null, `${fromText(e)} `), ctx.issueLink(e), ' expired ');
       if (at) meta.append(ctx.since(at, ' ago'));
       if (e.seen && at && e.seen > at) meta.append(' and was seen again ', ctx.since(e.seen, ' ago'));
       li.append(h('div', 'row-main', e.finding), meta);
@@ -296,7 +300,7 @@
       main.append(h('span', 'title', e.finding));
       const meta = h('p', 'row-meta');
       if (many) meta.append(ctx.tag(e.repo));
-      meta.append(h('span', null, `from card ${e.card}`), ' ', ctx.issueLink(e));
+      meta.append(h('span', null, fromText(e)), ' ', ctx.issueLink(e));
       if (e.effect) meta.append(' ', h('span', 'chip chip-quiet heals-kind', e.effect));
       meta.append(ctx.since(e.time, ' ago'));
       li.append(main, meta, h('p', 'reason heals-why', `The judge: ${e.why || 'no reason given'}`));

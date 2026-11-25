@@ -59,11 +59,14 @@ test('Declined: with no declined line, the panel still shows the Self-heals list
   const data = full();
   data.panels.declined.data.lines = [];
   data.panels.declined.data.rest = [];
-  data.panels.declined.data.heals = heals().map((x) => ({ ...x, sorted: null }));
+  // The entry with no area came from an issue the sort read (its card is "#23").
+  data.panels.declined.data.heals = heals().map((x) => ({ ...x, sorted: null, entries: x.entries.map((e) => (e.area ? e : { ...e, card: '#23', issue: 23, url: `${P}/23` })) }));
   deliver(w, data);
   assert.equal(panel(w, 'declined').dataset.state, 'ready');
   assert.equal(box(w).querySelector('.heals-title').textContent, 'Self-heals list (3)');
   assert.equal(box(w).querySelector('.heals-sorted').textContent, 'The sort of the queued follow-ups has not run yet.');
+  // Bug it catches (issue 1614): an entry from an issue said "from card #23 #23".
+  assert.match(area(w, '').querySelector('.heals-rows > .row .row-meta').textContent, /^from issue #23/);
 });
 
 // Bug it catches (issue 1561): the Board kept no trace of an entry that expired off the list, so the owner could not see
@@ -73,19 +76,27 @@ test('Declined: the Self-heals list shows the entries that expired, with when, a
   const data = full();
   data.panels.declined.data.lines = [];
   data.panels.declined.data.rest = [];
-  const gone = (over) => entry({ id: 'h0000000000dd', finding: '[P2] lib/a.sh:9 an old wait', dropped: { time: iso(T0 - 86400000), why: 'expired' }, ...over });
+  const gone = (over) => entry({ id: 'h0000000000dd', finding: '[P2] lib/a.sh:9 an old wait', dropped: { time: iso(T0 - 86400000), why: 'expired' }, left: iso(T0 - 86400000), ...over });
   // Bug it catches (issue 1562): entries the owner dropped or moved up to harm on the Self-heals tab were listed here as expired.
-  const byOwner = [gone({ id: 'h0000000000f1', dropped: { time: iso(T0), why: 'harm', filed: 812 } }), gone({ id: 'h0000000000f2', dropped: { time: iso(T0), why: 'dropped' } })];
-  data.panels.declined.data.heals = [{ repo: 'sample', repoUrl: REPO, sorted: null, areas: [], entries: [], dropped: [gone(), gone({ id: 'h0000000000ee', seen: iso(T0 - 3600000) }), ...byOwner] }];
+  const byOwner = [gone({ id: 'h0000000000f1', dropped: { time: iso(T0), why: 'harm', filed: 812 }, left: iso(T0) }), gone({ id: 'h0000000000f2', dropped: { time: iso(T0), why: 'dropped' }, left: iso(T0) })];
+  // The record holds them in the order they left, the oldest first; the panel shows the latest first (issue 1614).
+  const older = gone({ id: 'h0000000000ee', card: '#23', issue: 23, url: `${P}/23`, finding: '[P3] lib/c.sh:2 an older wait',
+    dropped: { time: iso(T0 - 2 * 86400000), why: 'expired' }, left: iso(T0 - 2 * 86400000), seen: iso(T0 - 3600000) });
+  data.panels.declined.data.heals = [{ repo: 'sample', repoUrl: REPO, sorted: null, areas: [], entries: [], dropped: [older, gone(), ...byOwner] }];
   deliver(w, data);
   assert.equal(panel(w, 'declined').dataset.state, 'ready', 'a project with expired entries alone is not empty');
   const rows = Array.from(box(w).querySelectorAll('.heals-dropped .row'));
   assert.equal(box(w).querySelector('.heals-dropped summary').textContent, 'Expired from the list (2)', 'the expired entries alone');
-  assert.equal(rows[0].querySelector('.row-main').textContent, '[P2] lib/a.sh:9 an old wait');
+  // Bug it catches (issue 1614): the expired entries were drawn in the record's order, the oldest first.
+  assert.deepEqual(rows.map((r) => r.querySelector('.row-main').textContent), ['[P2] lib/a.sh:9 an old wait', '[P3] lib/c.sh:2 an older wait'], 'the latest to leave first');
   assert.match(rows[0].querySelector('.row-meta').textContent, /^from card c3-63 #63 expired /);
-  assert.equal(rows[0].querySelector('time.since')?.dateTime, iso(T0 - 86400000), 'when it expired');
+  assert.equal(rows[0].querySelector('time.since')?.dateTime, iso(T0 - 86400000), 'when it expired (left)');
   assert.equal(rows[0].textContent.includes('seen again'), false, 'an entry nobody saw again says nothing of it');
   assert.match(rows[1].querySelector('.row-meta').textContent, /and was seen again /);
+  // Bug it catches (issue 1614): an entry the sort read from an issue (card "#23") said "from card #23 #23".
+  assert.match(rows[1].querySelector('.row-meta').textContent, /^from issue #23 expired /);
+  // Bug it catches (issue 1614): an expired entry offered a button that files a card; the list is read only.
+  assert.equal(box(w).querySelectorAll('.heals-dropped button').length, 0, 'no button among the expired entries');
   // Bug it catches: new data drew the panel again and closed the expired list the owner had open.
   const list = box(w).querySelector('.heals-dropped');
   assert.equal(list.open, false, 'the expired list starts closed');
