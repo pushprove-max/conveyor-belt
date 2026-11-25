@@ -216,7 +216,7 @@ test('Self-heals: the filter chips for all seven kinds, the sort and the search 
   assert.equal(q(w, '.sh-chip[data-kind="guarded"]').getAttribute('aria-pressed'), 'true');
   assert.equal(q(w, '.sh-showing').textContent, 'Showing 1 of 5');
   q(w, '.sh-chip[data-kind="text"]').click();
-  assert.equal(q(w, '.sh-none').textContent, 'No entry matches this search or kind.');
+  assert.equal(q(w, '.sh-none').textContent, 'No entry matches this search, kind or tile.');
   q(w, '.sh-chip[data-kind="all"]').click();
   const sort = q(w, '.sh-sort');
   assert.deepEqual(Array.from(sort.options, (o) => o.textContent), ['Leaves soonest', 'Newest', 'Seen most', 'Area']);

@@ -1620,6 +1620,9 @@ html.b3-filling, html.b3-filling body { overflow: hidden; }
 .sh-tile.is-ok .sh-tile-n { color: var(--ok); }
 .sh-tile.is-warn .sh-tile-n { color: var(--warn); }
 .sh-tile.is-bad .sh-tile-n { color: var(--bad); }
+button.sh-tile { font: inherit; color: var(--text); text-align: left; cursor: pointer; }
+button.sh-tile[aria-pressed="true"] { border-color: var(--accent); background: var(--info-bg); }
+.sh-filter { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); font-size: var(--fs-sm); color: var(--muted); }
 .sh-area-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--sp-3); }
 .sh-area { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .sh-area-top { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); }

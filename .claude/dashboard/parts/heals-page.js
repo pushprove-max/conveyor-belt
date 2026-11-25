@@ -7,7 +7,8 @@
 //     title, "What is a self-heal?", closed at first (aboutEl, issue 1622);
 //   five tiles: on the list, areas ready to batch (READY entries or more), seen again in the last 7 days, leaving in
 //     SOON days or less, and moved up to harm in the last 30 days (the dropped record's harm entries, and the
-//     entries back on the list whose expired mark is a move up to harm);
+//     entries back on the list whose expired mark is a move up to harm); a click on one of the last three filters the
+//     entries to what it counts, or, for harm, opens the dropped entries with its entries alone (issue 1691);
 //   a card for each area (its group and name from its label, its count, an age bar in three parts of the days, the kinds
 //     with their counts, and how far it is from a batch);
 //   the entries, a list beside a detail panel (stacked under it at phone width, app.css): search, sort and a filter
@@ -38,8 +39,9 @@
   const CARDS_DOC = 'https://github.com/pushprove-max/conveyor-belt/blob/main/docs/cards.md#harm-or-self-heals';
   // What the owner did here, through every redraw: the search, sort, kind chip, the row shown in the detail panel, the
   // rows checked, the entries moved or dropped here (gone: hidden until a snapshot no longer lists them), the last
-  // answer of the host (note) and whether the dropped entries are open. sheet: the batch sheet open, else null.
-  const S = { q: '', sort: 'leaves', kind: 'all', sel: null, checked: new Set(), gone: new Set(), note: '', dropOpen: false, aboutOpen: false, busy: false, ctx: null, m: null, at: null, el: null, sheet: null };
+  // answer of the host (note) and whether the dropped entries are open. tile: the tile pressed (seen, leaving or harm),
+  // else null. sheet: the batch sheet open, else null.
+  const S = { q: '', sort: 'leaves', kind: 'all', tile: null, sel: null, checked: new Set(), gone: new Set(), note: '', dropOpen: false, aboutOpen: false, busy: false, ctx: null, m: null, at: null, el: null, sheet: null };
   const list = (v) => (Array.isArray(v) ? v : []);
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const plural = (k, one, many) => `${k} ${k === 1 ? one : many}`;
@@ -94,7 +96,7 @@
   const liveOf = (d) => listsOf(d).flatMap((x) => list(x.entries).filter((e) => e && !S.gone.has(keyOf(e))));
   function model(d, now) {
     const lists = listsOf(d);
-    return { lists, many: new Set(lists.map((x) => x.repo)).size > 1,
+    return { lists, now, many: new Set(lists.map((x) => x.repo)).size > 1,
       es: lists.flatMap((x) => list(x.entries).filter((e) => e && !S.gone.has(keyOf(e))).map((e) => entryOf(e, x, now))),
       docs: lists.flatMap((x) => list(x.docs && x.docs.entries).filter(Boolean).map((e) => entryOf(e, { days: null }, now))),
       dropped: lists.flatMap((x) => list(x.dropped).filter((e) => e && e.dropped)) };
@@ -114,7 +116,18 @@
     seen: (a, b) => b.seen - a.seen || byLeft(a, b),
     area: (a, b) => (!a.e.area) - (!b.e.area) || String(a.e.area || '').localeCompare(String(b.e.area || '')) || byLeft(a, b),
   };
-  const shown = (m) => m.es.filter((r) => matches(r) && (S.kind === 'all' || r.kind === S.kind)).sort(SORT[S.sort]);
+  // What each tile counts, and so what a click on it shows (issue 1691): the one test for both, so they cannot differ.
+  // An entry with no sighting date is not in Seen again; one with no days left is not in Leave in 7 days.
+  const TILES = {
+    seen: (r, m) => r.seen > 0 && Date.parse(r.e.seen) >= m.now - LATELY * DAY,
+    leaving: (r) => r.left !== null && r.left <= SOON,
+  };
+  // The moves up to harm of the last HARMED days: the dropped record's harm entries, and the entries a review listed
+  // again whose expired mark is a move up to harm (each with that mark as its dropped record, to draw it the same way).
+  const harmsOf = (m) => m.dropped.concat(m.lists.flatMap((x) => list(x.entries).filter((e) => e && e.expired).map((e) => ({ ...e, dropped: e.expired }))))
+    .filter((e) => e.dropped.why === 'harm' && Date.parse(e.dropped.time) >= m.now - HARMED * DAY);
+  const TILE_SAID = { seen: `seen again, last ${LATELY} days`, leaving: `leave in ${SOON} days`, harm: `moved up to harm, last ${HARMED} days, in Dropped entries` };
+  const shown = (m) => m.es.filter((r) => matches(r) && (S.kind === 'all' || r.kind === S.kind) && (!TILES[S.tile] || TILES[S.tile](r, m))).sort(SORT[S.sort]);
 
   // ---- small marks ----
   const h = (...a) => S.ctx.h(...a);
@@ -204,25 +217,35 @@
       return line;
     });
   }
-  function tilesEl(m, now) {
-    const box = h('div', 'sh-tiles'), areas = areasOf(m.es), lately = now - LATELY * DAY, harmed = now - HARMED * DAY;
+  function tilesEl(m) {
+    const box = h('div', 'sh-tiles'), areas = areasOf(m.es);
     // A card with no GitHub issue (issue 0) adds no issue.
     const issues = new Set(m.es.filter((r) => r.e.issue && !isAudit(r.e)).map((r) => r.e.issue)), audits = new Set(m.es.filter((r) => r.e.issue && isAudit(r.e)).map((r) => r.e.issue));
+    // A tile with a tone is a button: a click shows what it counts (a second click ends the tile filter); the tile pressed
+    // is S.tile, kept through every redraw.
     const tile = (k, label, n, sub, tone) => {
-      const t = h('div', `sh-tile${tone ? ` is-${tone}` : ''}`);
+      const t = h(tone ? 'button' : 'div', `sh-tile${tone ? ` is-${tone}` : ''}`);
       t.dataset.tile = k;
       t.append(h('span', 'sh-tile-label', label), h('span', 'sh-tile-n', String(n)), h('span', 'sh-tile-sub', sub));
+      if (tone) {
+        t.type = 'button'; t.dataset.focus = `tile:${k}`; t.setAttribute('aria-pressed', String(S.tile === k));
+        t.addEventListener('click', () => pickTile(S.tile === k ? null : k));
+      }
       box.append(t);
     };
     const days = daysSaid(m) || NOT_READ;
     tile('on', 'On the list', m.es.length, `from ${plural(issues.size, 'issue', 'issues')} and ${plural(audits.size, 'audit', 'audits')}`);
     tile('ready', 'Ready to batch', areas.filter((a) => a.rs.length >= READY).length, `areas with ${READY} or more entries`);
-    tile('seen', `Seen again, last ${LATELY} days`, m.es.filter((r) => r.seen > 0 && Date.parse(r.e.seen) >= lately).length, `a sighting resets its ${days} days`, 'ok');
-    tile('leaving', `Leave in ${SOON} days`, m.es.filter((r) => r.left !== null && r.left <= SOON).length, 'kept in Dropped, never erased', 'warn');
-    // A move up to harm is in the dropped record, or, once a review listed the finding again, kept on the entry as expired.
-    const ups = m.dropped.map((e) => e.dropped).concat(m.lists.flatMap((x) => list(x.entries).map((e) => e && e.expired)));
-    tile('harm', `Moved up to harm, ${HARMED} days`, ups.filter((x) => x && x.why === 'harm' && Date.parse(x.time) >= harmed).length, 'seen in real logs', 'bad');
+    tile('seen', `Seen again, last ${LATELY} days`, m.es.filter((r) => TILES.seen(r, m)).length, `a sighting resets its ${days} days`, 'ok');
+    tile('leaving', `Leave in ${SOON} days`, m.es.filter((r) => TILES.leaving(r, m)).length, 'kept in Dropped, never erased', 'warn');
+    tile('harm', `Moved up to harm, ${HARMED} days`, harmsOf(m).length, 'seen in real logs', 'bad');
     return box;
+  }
+  // Press a tile (or none): the harm tile opens the dropped entries with its entries alone.
+  function pickTile(k) {
+    S.tile = k;
+    if (k === 'harm') S.dropOpen = true;
+    drawEntries();
   }
 
   // ---- the area cards ----
@@ -318,7 +341,7 @@
   // The control that has the focus (its data-focus), and the focus given back to the control drawn in its place: a row,
   // a chip, the Dropped button, or the summary or guide link of "What is a self-heal?" that the owner works from the
   // keyboard keeps the focus when the list or the page is drawn again.
-  const focusOf = () => { const a = document.activeElement; return a && a.dataset && a.closest('.sh-entries, .sh-about') ? a.dataset.focus || null : null; };
+  const focusOf = () => { const a = document.activeElement; return a && a.dataset && a.closest('.sh-entries, .sh-about, .sh-tiles') ? a.dataset.focus || null : null; };
   const refocus = (k) => {
     const el = k && Array.from(S.el.querySelectorAll('[data-focus]')).find((x) => x.dataset.focus === k);
     if (el && document.activeElement !== el) el.focus({ preventScroll: true });
@@ -326,8 +349,18 @@
   function drawEntries() {
     const m = S.m, rs = shown(m), p = S.parts, k = focusOf();
     drawChips(m);
+    S.el.querySelectorAll('button.sh-tile').forEach((t) => t.setAttribute('aria-pressed', String(S.tile === t.dataset.tile)));
+    p.filter.replaceChildren();
+    if (S.tile) {
+      const x = h('button', 'btn btn-quiet sh-filter-clear', '× clear');
+      x.type = 'button'; x.dataset.focus = 'tile-clear'; x.setAttribute('aria-label', 'Clear the tile filter');
+      // The clear control goes with the filter line, so the focus goes to the tile it cleared.
+      x.addEventListener('click', () => { const was = S.tile; pickTile(null); refocus(`tile:${was}`); });
+      p.filter.append(`Showing: ${TILE_SAID[S.tile]} `, x);
+    }
+    p.filter.hidden = !S.tile;
     p.rows.replaceChildren(...rs.map((r) => rowEl(r, m.many)));
-    if (!rs.length) p.rows.append(h('li', 'sh-none', m.es.length ? 'No entry matches this search or kind.' : 'No entry is on the list now.'));
+    if (!rs.length) p.rows.append(h('li', 'sh-none', m.es.length || TILES[S.tile] ? 'No entry matches this search, kind or tile.' : 'No entry is on the list now.'));
     p.detail.replaceChildren(...detailEl(m.es.find((r) => r.key === S.sel) || null));
     p.note.textContent = S.note;
     p.foot.replaceChildren(...footEl(m, rs.length));
@@ -403,15 +436,25 @@
   }
   function footEl(m, n) {
     const out = [h('span', 'sh-showing', `Showing ${n} of ${m.es.length}`)];
-    if (!m.dropped.length) return out;
+    // With the harm tile pressed, the list it opens holds the harm tile's entries alone.
+    const harm = S.tile === 'harm', gone = harm ? harmsOf(m) : m.dropped;
+    if (!m.dropped.length && !harm) return out;
     // It counts every entry the list it opens holds: expired, dropped by the owner or moved up to harm (each says which).
-    const b = h('button', 'btn btn-quiet sh-dropped-link', `Dropped entries (${m.dropped.length}) ›`);
+    const b = h('button', 'btn btn-quiet sh-dropped-link', `Dropped entries (${gone.length}) ›`);
     b.type = 'button'; b.dataset.focus = 'dropped'; b.setAttribute('aria-expanded', String(S.dropOpen));
-    b.addEventListener('click', () => { S.dropOpen = !S.dropOpen; drawEntries(); });
+    // Closing the list ends the harm tile's filter too: it has nothing left to show. With no dropped entries, this button
+    // goes with it, so the focus goes to the harm tile.
+    b.addEventListener('click', () => {
+      S.dropOpen = !S.dropOpen;
+      if (!S.dropOpen && harm) S.tile = null;
+      drawEntries();
+      if (!S.dropOpen && harm && !m.dropped.length) refocus('tile:harm');
+    });
     out.push(b);
     if (S.dropOpen) {
       const ul = h('ul', 'sh-dropped'), WHY = { expired: 'expired', dropped: 'dropped by you', harm: 'moved up to harm' };
-      m.dropped.slice().sort((a, b2) => String(b2.dropped.time).localeCompare(String(a.dropped.time))).forEach((e) => {
+      if (!gone.length) ul.append(h('li', 'sh-none', 'No entry matches this tile.'));
+      gone.slice().sort((a, b2) => String(b2.dropped.time).localeCompare(String(a.dropped.time))).forEach((e) => {
         const li = h('li', null), meta = h('p', 'sh-row-meta');
         meta.append(h('code', 'sh-at', placeOf(text(e)) || `file ${NOT_READ}`), h('span', 'sh-from', `from ${fromOf(e)}`),
           h('span', 'sh-gone-why', `${WHY[e.dropped.why] || e.dropped.why}${e.dropped.filed ? ` as ${typeof e.dropped.filed === 'number' ? `#${e.dropped.filed}` : e.dropped.filed}` : ''}`),
@@ -651,19 +694,19 @@
     if (S.sel !== null && !m.es.some((r) => r.key === S.sel)) S.sel = null;
     if (S.sheet) { drawSheet(); return; }
     const entries = h('section', 'sh-entries'), split = h('div', 'sh-split'), side = h('div', 'sh-list');
-    const tools = toolbar(), note = h('p', 'sh-note'), bar = h('div', 'sh-bar'), rows = h('ul', 'sh-rows'), foot = h('div', 'sh-foot'), detail = h('aside', 'sh-detail');
+    const tools = toolbar(), note = h('p', 'sh-note'), filter = h('p', 'sh-filter'), bar = h('div', 'sh-bar'), rows = h('ul', 'sh-rows'), foot = h('div', 'sh-foot'), detail = h('aside', 'sh-detail');
     note.setAttribute('aria-live', 'polite');
     bar.setAttribute('role', 'region'); bar.setAttribute('aria-label', 'The entries checked');
     detail.setAttribute('aria-label', 'The entry picked');
-    S.parts = { root: entries, chips: tools.querySelector('.sh-chips'), rows, detail, bar, foot, note };
-    side.append(bar, rows, foot);
+    S.parts = { root: entries, chips: tools.querySelector('.sh-chips'), filter, rows, detail, bar, foot, note };
+    side.append(bar, filter, rows, foot);
     split.append(side, detail);
     entries.append(h('h3', 'sh-sub', 'Entries'), tools, note, split);
     const areas = h('section', 'sh-areas'), grid = h('div', 'sh-area-grid');
     areasOf(m.es).forEach((a) => grid.append(areaCard(a, m.many)));
     areas.append(h('h3', 'sh-sub', 'By area'), grid);
     const k = focusOf();
-    el.replaceChildren(headEl(m), tilesEl(m, now), areas, entries);
+    el.replaceChildren(headEl(m), tilesEl(m), areas, entries);
     if (m.docs.length) el.append(docsEl(m));
     drawEntries();
     refocus(k);

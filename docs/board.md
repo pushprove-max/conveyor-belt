@@ -1373,13 +1373,17 @@ the list is for.
 - **Tiles**: **On the list**, with the issues and audits the entries come from. **Ready to batch**: the areas with 10
   entries or more. **Seen again, last 7 days**: a sighting starts the days of an entry again. **Leave in 7 days**: the
   entries that leave the list in 7 days or less. They stay in the dropped entries. **Moved up to harm, 30 days**: the entries moved up in the last 30 days, also those that a review found again later.
+  Click **Seen again** or **Leave in 7 days** to show only the entries that the tile counts. The tile shows as
+  pressed, and a line above the rows names the filter. Click **× clear** on that line, or click the tile again, to
+  remove the tile filter. The search and the kind chip stay as they are. The tile filter works with the search, the sort and the kind chips. Click **Moved up to harm** to
+  open the dropped entries with only the entries that the tile counts.
 - **By area**: a card for each area, with the area's group and name, its count, and an age bar in three parts of the
   days. The legend gives each part's days. A screen reader reads the count of each part. The card also shows the
   kinds of its entries with their counts, "Ready to batch" at 10 entries or more, else "N more to batch", and
   **Review batch**, which opens the batch sheet for the area.
 - **Entries**: a search (finding, file or card), **Sort** (**Leaves soonest**, **Newest**, **Seen most**, **Area**)
   and a filter chip for each kind with its count: **Waits longer**, **Runs again**, **Text fixes itself**, **Extra
-  work only**, **Docs or comment**, **Cleanup** and **Already guarded**. **All** shows every entry. Each row shows the
+  work only**, **Docs or comment**, **Cleanup** and **Already guarded**. **All** shows the entries of every kind, in the tile filter when a tile is pressed. Each row shows the
   finding's level, its title, its kind, its file and line, its area, the issue it was found on (the card, for a card
   with no GitHub issue) and, when it was seen again, "seen N×". At the right, a ring and "N d left" show the days left. They are amber at 7 days or less. Under
   the list, "Showing N of M" and **Dropped entries (M)**, which opens the M entries that left the list, each with its
