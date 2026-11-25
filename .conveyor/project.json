@@ -28,6 +28,10 @@
     ".conveyor/test-changed.sh",
     ".conveyor/engine-areas.json"
   ],
+  "coverageMap": {
+    "command": "bash .conveyor/coverage.sh",
+    "file": ".conveyor/coverage.jsonl"
+  },
   "test": {
     "command": "bash .conveyor/test-changed.sh",
     "control": [

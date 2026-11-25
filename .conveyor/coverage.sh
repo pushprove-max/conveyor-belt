@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # The coverage map (issue 527): for each function of the shell files below, the test cases that ran it, so that
-# .conveyor/test-changed.sh runs only those cases on a change to the function (covof). Run by hand from the checkout's
-# root, `bash .conveyor/coverage.sh`; never on a card's test step: it runs every case once, traced, and writes
-# .conveyor/coverage.jsonl whole, to commit.
+# .conveyor/test-changed.sh runs only those cases on a change to the function (covof). Run from the checkout's root,
+# `bash .conveyor/coverage.sh`: by hand, or by each release after its whole suite passed, which commits the map (the
+# pack's coverageMap; conveyor/lib/relcov.sh); never on a card's test step: it runs every case once, traced, and
+# writes .conveyor/coverage.jsonl whole, to commit.
 # The traced files: the engine's shell files (each .sh file of .conveyor/engine-areas.json), the Board's collector
 # (.claude/scripts/dashboard.sh) and the hooks' (.claude/hooks/, its lib/ too), each one test-changed.sh --funcs can
 # read (FUNCS).
@@ -18,16 +19,45 @@
 # A function a log names belongs to the traced file whose path ends most like the one bash read it from (a case runs a
 # copy of the engine from a scratch folder), or to each that defines it when bash names no file (an exported
 # function), and only to a file that defines it.
-# The map is one fact a line, sorted, so two of them merge by union (.gitattributes):
+# The map is one fact a line, sorted (issue 1593: one row a function, each test file and unit named once by its
+# number, about a twentieth of the size of a row for each function and unit). Its numbers are this map's own, so two
+# maps do not merge by union; a release writes it whole.
 #   {"traced": <UTC time>}
-#   {"file": <file>, "fn": <function>, "sum": <sum>}   each function of each traced file, as it was traced (sumsof)
-#   {"file": <file>, "fn": <function>, "test": <test file>, "case": <case or part>}   a unit that ran it; no "case" for
-#                                                                                      a test file run whole
+#   {"testfile": <n>, "path": <test file>}   each test file that ran a traced function, numbered from 1
+#   {"unit": <n>, "testfile": <n>, "case": <case or part>}   each unit that ran one, numbered from 1; no "case" for a
+#                                                            test file run whole
+#   {"file": <file>, "fn": <function>, "sum": <sum>, "units": [<n>, ...]}   each function of each traced file, as it
+#                                                                           was traced (sumsof), and the units that ran it
 # A unit that fails is named, with the end of its output, and the map is still written (what it ran, it ran); the
 # exit is then 1. A trace takes several times the time of the run it traces, and its logs, each removed as its unit
 # ends, are under TMPDIR.
+# `coverage.sh --write <traced> <sums> <runs>` prints the map made from a run's two lists (covwrite, below), and
+# traces nothing.
 set -u
 COV=.conveyor/coverage.jsonl
+# covwrite <traced> <sums> <runs>: the map, from the traced files' functions (<file><TAB><function><TAB><sum>) and
+# the functions each unit ran (<file><TAB><function><TAB><test file><TAB><case, or nothing>). A line of <runs> that is
+# not such a fact is dropped: of another shape (a line of a unit's output), of a function no traced file defines, or
+# with no test file or an absolute one. It fails when jq or sort does, so a failed write is never an empty map.
+# The facts, sorted by test file and case, are numbered in that order: a T line for each test file, a U line for each
+# unit, then an F line for each function with its units' numbers, each line made a row by jq.
+covwrite() (
+  set -o pipefail
+  { jq -cn --arg t "$1" '{traced: $t}' \
+    && awk -F'\t' 'NR == FNR { if (NF == 3) has[$1 FS $2] = 1; next }
+        NF == 4 && $3 != "" && substr($3, 1, 1) != "/" && (($1 FS $2) in has)' "$2" "$3" \
+      | LC_ALL=C sort -u | LC_ALL=C sort -t $'\t' -k3,3 -k4,4 \
+      | awk -F'\t' 'NR == FNR { if (NF == 3) fns[++n] = $0; next }
+          $3 != t { t = $3; tn++; print "T\t" tn "\t" t }
+          ($3 FS $4) != k { k = $3 FS $4; un++; print "U\t" un "\t" tn "\t" $4 }
+          { x = $1 FS $2; if (x in u) u[x] = u[x] "," un; else u[x] = un }
+          END { for (i = 1; i <= n; i++) { split(fns[i], a, FS); x = a[1] FS a[2]; print "F\t" fns[i] "\t" ((x in u) ? u[x] : "") } }' "$2" - \
+      | jq -cR 'split("\t") | if .[0] == "T" then {testfile: (.[1] | tonumber), path: .[2]}
+          elif .[0] == "U" then {unit: (.[1] | tonumber), testfile: (.[2] | tonumber)} + (if .[3] != "" then {case: .[3]} else {} end)
+          else {file: .[1], fn: .[2], sum: .[3], units: (.[4] | if . == "" then [] else split(",") | map(tonumber) end)} end'
+  } | LC_ALL=C sort -u
+)
+if [ "${1:-}" = --write ]; then covwrite "$2" "$3" "$4"; exit; fi
 [ -f .conveyor/test-changed.sh ] || { echo "coverage.sh: run it from the checkout's root" >&2; exit 2; }
 # timeout, on macOS too.
 . conveyor/lib/portable.sh && p_tools || exit 1
@@ -129,8 +159,9 @@ while IFS= read -r t; do
 done < <(LC_ALL=C sort -u "$TR/whole")
 wait
 
-# Each unit's functions, named by the traced file they belong to: <file><TAB><function><TAB><test><TAB><case>.
-bad=0; n=0
+# Each unit's functions, named by the traced file they belong to: <file><TAB><function><TAB><test><TAB><case>. Only
+# the facts go to $TR/runs; a failed unit's lines go to this run's output (issue 1593: they were written to the map).
+bad=0; n=0; : > "$TR/runs"
 while IFS=$'\t' read -r t c; do
   n=$((n + 1))
   if [ "$(cat "$TR/$n.rc" 2>/dev/null)" != 0 ]; then
@@ -154,13 +185,10 @@ while IFS=$'\t' read -r t c; do
       if (best == 0 && ($1 == "" || $1 == "environment")) got = substr(of[$2], 2)
       m = split(got, fs, " ")
       for (i = 1; i <= m; i++) if ((fs[i], $2) in has) print fs[i] "\t" $2 "\t" t "\t" c
-    }' "$TR/sums" "$TR/$n.fn"
-done < "$TR/units" > "$TR/runs"
+    }' "$TR/sums" "$TR/$n.fn" >> "$TR/runs"
+done < "$TR/units"
 
 # The map, sorted, one fact a line, written whole.
-{ jq -cn --arg t "$traced" '{traced: $t}'
-  jq -cR 'split("\t") | {file: .[0], fn: .[1], sum: .[2]}' "$TR/sums"
-  LC_ALL=C sort -u "$TR/runs" | jq -cR 'split("\t") | {file: .[0], fn: .[1], test: .[2]} + (if .[3] != "" then {case: .[3]} else {} end)'
-} | LC_ALL=C sort -u > "$TR/map" && mv "$TR/map" "$COV" || { echo "coverage.sh: $COV could not be written" >&2; exit 1; }
+covwrite "$traced" "$TR/sums" "$TR/runs" > "$TR/map" && mv "$TR/map" "$COV" || { echo "coverage.sh: $COV could not be written" >&2; exit 1; }
 echo "coverage.sh: $COV: $(grep -c '"sum"' "$COV") functions, $(wc -l < "$TR/units") units traced"
 exit $bad

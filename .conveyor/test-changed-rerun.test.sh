@@ -327,9 +327,9 @@ p_cover() {
     '( :' ') & started contract' '( :' ') & started history' > "$R/$d"
   (cd "$R" && { echo '{"traced": "2026-11-01T00:00:00Z"}'
     for f in conveyor/x.sh .claude/scripts/dashboard.sh; do
-      bash .conveyor/test-changed.sh --funcs "$f" | jq -cR --arg f "$f" 'split("\t") | {file: $f, fn: .[0], sum: .[1]}'; done
-    jq -cn --arg d "$d" '{file: "conveyor/x.sh", fn: "xone", test: "conveyor/conveyor.test.sh", case: "aone"},
-      {file: ".claude/scripts/dashboard.sh", fn: "dfa", test: $d, case: "history"}'; } > .conveyor/coverage.jsonl)
+      bash .conveyor/test-changed.sh --funcs "$f" | jq -cR --arg f "$f" 'split("\t") | {file: $f, fn: .[0], sum: .[1], units: ({xone: [1], dfa: [2]}[.[0]] // [])}'; done
+    jq -cn --arg d "$d" '{testfile: 1, path: "conveyor/conveyor.test.sh"}, {testfile: 2, path: $d},
+      {unit: 1, testfile: 1, case: "aone"}, {unit: 2, testfile: 2, case: "history"}'; } > .conveyor/coverage.jsonl)
   git -C "$R" add -A && git -C "$R" commit -qm cover
   (cd "$R" && bash .conveyor/test-changed.sh --check) | grep -qE '^coverage map .conveyor/coverage.jsonl: traced 2026-11-01T00:00:00Z, [0-9]+ days ago$' \
     && ok "the map check says when the coverage map was traced and how many days ago" || no "map age: $(cd "$R" && bash .conveyor/test-changed.sh --check)"
@@ -353,9 +353,9 @@ p_cover() {
   printf '%s\n' '# CONVEYOR_SHELL_TEST_CASE' 'CASES=" ha hb hc "' 'echo "hk:${CONVEYOR_SHELL_TEST_CASE:-ALL}" >> "$(dirname "$0")/../../../ran"' > "$R/$hk"
   printf '%s\n' '# CONVEYOR_SHELL_TEST_CASE' '. "$(dirname "${BASH_SOURCE[0]}")/lib/case-filter.sh"' 'echo "bg:${CONVEYOR_SHELL_TEST_CASE:-ALL}" >> "$(dirname "$0")/../../../ran"' \
     'check() { :; }' 'check "the hkb check" x' > "$R/$bg"
-  (cd "$R" && bash .conveyor/test-changed.sh --funcs .claude/hooks/hk.sh | jq -cR 'split("\t") | {file: ".claude/hooks/hk.sh", fn: .[0], sum: .[1]}'
-    jq -cn --arg hk "$hk" --arg bg "$bg" '{file: ".claude/hooks/hk.sh", fn: "hka", test: $hk, case: "hc"}, {file: ".claude/hooks/hk.sh", fn: "hka", test: $hk, case: "ha"},
-      {file: ".claude/hooks/hk.sh", fn: "hkb", test: $bg, case: "the hkb check"}') >> "$R/.conveyor/coverage.jsonl"
+  (cd "$R" && bash .conveyor/test-changed.sh --funcs .claude/hooks/hk.sh | jq -cR 'split("\t") | {file: ".claude/hooks/hk.sh", fn: .[0], sum: .[1], units: {hka: [3, 4], hkb: [5]}[.[0]]}'
+    jq -cn --arg hk "$hk" --arg bg "$bg" '{testfile: 3, path: $hk}, {testfile: 4, path: $bg}, {unit: 3, testfile: 3, case: "hc"}, {unit: 4, testfile: 3, case: "ha"},
+      {unit: 5, testfile: 4, case: "the hkb check"}') >> "$R/.conveyor/coverage.jsonl"
   git -C "$R" add -A && git -C "$R" commit -qm hooks
   sed 's/echo a/echo A/; s/echo b/echo B/' "$R/.claude/hooks/hk.sh" > "$T/e" && cat "$T/e" > "$R/.claude/hooks/hk.sh"; got=$(ran)
   [ "$got" = "bg:the hkb check hk:ha,hc" ] && ok "changed hook functions run only the case_on cases and check texts the map lists" || no "hka and hkb changed: ran '$got': $(cat "$T/out")"

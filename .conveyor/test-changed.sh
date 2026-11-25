@@ -39,7 +39,8 @@
 # files whole; and of the tests named after the file or listed for it (TESTS_OF), those the map names nowhere (that the
 # trace did not run). A part runs only when nothing selects its test file whole. A change outside any function, to a
 # function the map does not hold or lists no case for, or to one changed since the map was traced (its sum differs),
-# runs by the rules above (its area). The map check says how old the coverage map is.
+# runs by the rules above (its area; a hook library, .claude/hooks/lib/, the hooks' tests that reach it: hooklibtests).
+# The map check says how old the coverage map is.
 # A change to the map itself runs the map check, the map's own tests (MAPTESTS: .conveyor/test-changed.test.sh and
 # .conveyor/test-changed-areas.test.sh, which read this checkout's map) and the case files whose naming changed: each
 # case file an area lists in the map now and did not list at HEAD, and every case file of an area whose files list changed, so a file moved to other cases runs them. An "all" area among those, or a map that cannot be read at HEAD or in the worktree, runs the whole engine
@@ -305,8 +306,8 @@ mapcheck() {
   bad=${bad%$'\n'}
   [ -z "$bad" ] || { echo "engine area map check failed:"; echo "$bad"; return 1; }
 }
-# covage: how old the coverage map is (issue 527), with the map check: when it was traced (its oldest `traced` line, as
-# two maps merged keep both) and how many days ago, or that there is none or it cannot be read. It fails nothing: with
+# covage: how old the coverage map is (issue 527), with the map check: when it was traced (its `traced` line; the oldest,
+# if a hand edit left two) and how many days ago, or that there is none or it cannot be read. It fails nothing: with
 # no map, every change runs by its area.
 covage() {
   local a
@@ -499,6 +500,16 @@ declare -A PART_OF=([.claude/scripts/dashboard_panels.sh]=.claude/scripts/dashbo
 # panel: they fill its data (`panels.<id>`) or read its element (`panel(w, '<id>')`, `panel-<id>`; `<id>-<part>` for a
 # panel drawn as several; `panelState.<state>('<id>')`), or they draw each panel of the helpers' list (a loop over LIST
 # or OVERVIEW). A test that only names the file (`panels/<id>.js`) is not selected.
+# hooklibtests <file>: the hooks' test files a change to a hook library (.claude/hooks/lib/<name>.sh) reaches when the
+# coverage map selects none for it (issue 1593: --funcs cannot read hook-fire-log.sh or strip-quoted.sh, and a change
+# outside its functions): each one that names lib/<name>.sh, or names a hook (.claude/hooks/<hook>.sh) that does. A
+# library has no test of its own name and no area, so with none of these its change would run no test.
+hooklibtests() {
+  local b=lib/${1##*/} h
+  { grep -lF -- "$b" .claude/hooks/__tests__/*.test.* 2>/dev/null
+    for h in $(grep -lF -- "$b" .claude/hooks/*.sh 2>/dev/null); do grep -lF -- "/${h##*/}" .claude/hooks/__tests__/*.test.* 2>/dev/null; done
+  } | sort -u
+}
 boardtests() {
   local f=$1 d=.claude/scripts/__tests__ b re e='([^A-Za-z0-9_]|$)'
   local -a tests=()
@@ -1064,7 +1075,8 @@ keysof() {
 # into ccase (the runner's cases), a part of a test file into npart, a whole test file into run. It fails, and the
 # rules after it pick, when there is no map or it cannot be read, the file cannot be read either side, a line outside
 # its functions changed, a function is added, or the map lacks one, lists no case for one, holds an older sum of one,
-# or names a test file, an engine case or a part (partok) that is not there now.
+# names a unit or test file number twice or one it does not name, or names a test file, an engine case or a part
+# (partok) that is not there now.
 covof() {
   local f=$1 a b sa sb s sel t c ac
   local -a fn
@@ -1080,11 +1092,18 @@ covof() {
   # Each one's sum as TXFROM has it: one a function, or the change added one.
   s=$(sumsof <<<"$a" | awk -F'\t' 'NR == FNR { w[$0]; next } $1 in w' <(printf '%s\n' "${fn[@]}") -)
   [ -n "$s" ] && [ "$(grep -c . <<<"$s")" = ${#fn[@]} ] || return 1
-  sel=$(jq -rn --arg f "$f" --arg s "$s" '[inputs] as $m | [$s | split("\n")[] | select(. != "") | split("\t")] as $fs
-    | if all($fs[]; .[0] as $n | .[1] as $x | [$m[] | select(.file == $f and .fn == $n and has("sum")) | .sum]
-          | length > 0 and all(. == $x))
-        and all($fs[]; .[0] as $n | any($m[]; .file == $f and .fn == $n and has("test")))
-      then $m[] | select(.file == $f and has("test")) | select(.fn as $n | any($fs[]; .[0] == $n)) | [.test, .case // ""] | @tsv
+  # The map's form (coverage.sh): its test files and units by number, each number named once (else two maps were
+  # merged and no number can be trusted), and each function's row with the numbers of the units that ran it.
+  sel=$(jq -rn --arg f "$f" --arg s "$s" '[inputs | objects] as $m | [$s | split("\n")[] | select(. != "") | split("\t")] as $fs
+    | [$m[] | select(has("testfile") and has("path"))] as $tf | [$m[] | select(has("unit"))] as $un
+    | (reduce $tf[] as $x ({}; .[$x.testfile | tostring] = $x.path)) as $p
+    | (reduce $un[] as $x ({}; .[$x.unit | tostring] = [$p[$x.testfile | tostring], $x.case // ""])) as $u
+    | [$m[] | select(.file == $f and has("sum"))] as $rows
+    | if ($p | length) == ($tf | length) and ($u | length) == ($un | length)
+        and all($fs[]; .[0] as $n | .[1] as $x | [$rows[] | select(.fn == $n)]
+          | length > 0 and all(.sum == $x) and any((.units // []) | length > 0))
+      then [$rows[] | select(.fn as $n | any($fs[]; .[0] == $n)) | .units[] | $u[tostring]]
+        | if all(.[]; . != null and .[0] != null) then .[] | @tsv else error("not held") end
       else error("not held") end' "$COV" 2>/dev/null) && [ -n "$sel" ] || return 1
   ac=$(allcases)
   while IFS=$'\t' read -r t c; do
@@ -1095,7 +1114,7 @@ covof() {
   while IFS=$'\t' read -r t c; do
     if [ -z "$c" ]; then run[$t]=1; elif [ "$t" = conveyor/conveyor.test.sh ]; then ccase[$c]=1; else npart[$t]+=$'\n'$c; fi
   done <<<"$sel"
-  [ -n "$COVTESTS" ] || COVTESTS=$(jq -rn '[inputs | .test? // empty] | unique[]' "$COV")
+  [ -n "$COVTESTS" ] || COVTESTS=$(jq -rn '[inputs | objects | select(has("testfile") and has("path")) | .path] | unique[]' "$COV")
   parse[$f]=1
 }
 # The tests of the changed files <file>...: into run (test files), area (engine case files) and all (the whole engine
@@ -1144,6 +1163,8 @@ for f; do
     case $f in conveyor/*)
       jq -e --arg f "$f" 'any(.outside[]; . as $o | $f == $o or (($o | endswith("/")) and ($f | startswith($o)))) | not' \
         <<<"$AMAP" > /dev/null && all=1 ;;
+      # A hook library removed: the hooks' tests that reach it (hooklibtests), as for a change to it below.
+      .claude/hooks/lib/*.sh) while read -r t; do [ -z "$t" ] || run[$t]=1; done < <(hooklibtests "$f") ;;
     esac
     continue
   fi
@@ -1174,7 +1195,7 @@ for f; do
     done
   done
   for t in ${TESTS_OF[$of]:-}; do [ ! -f "$t" ] || { [ -n "$cov" ] && grep -qxF -- "$t" <<<"$COVTESTS"; } || run[$t]=1; done
-  [ -n "$cov" ] || case $f in conveyor/*) areaof "$f" ;; esac
+  [ -n "$cov" ] || case $f in conveyor/*) areaof "$f" ;; .claude/hooks/lib/*.sh) while read -r t; do [ -z "$t" ] || run[$t]=1; done < <(hooklibtests "$f") ;; esac
 done
 # A part the coverage map selected runs as a part, unless this pick, or another, selected its file whole (run, here).
 [ -n "$NOTEXT" ] || { for t in "${!run[@]}"; do twhole[$t]=1; done

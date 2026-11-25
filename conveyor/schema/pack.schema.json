@@ -49,6 +49,12 @@
       "default": [],
       "items": { "type": "string", "minLength": 1 }
     },
+    "coverageMap": { "description": "The map of the test cases that ran each function, which each release makes again and commits (docs/releases.md, step 4): command, run on this machine in a worktree of the commit after the whole suite passed on it (on any suite machine), writes file, a path from the repository root; the release commits that file with the version, unless the privacy check finds something in it or the checkout holds a map not committed. A command that fails is named, and a map it still wrote is committed. None: no release makes one.",
+      "type": "object", "additionalProperties": false, "required": ["command", "file"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "file": { "type": "string", "minLength": 1 }
+      } },
     "test": {
       "type": "object",
       "required": ["command"],

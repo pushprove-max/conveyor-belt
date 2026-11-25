@@ -126,6 +126,12 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    full test run. When each failed case is flaky, the suite passes. The status then names the flaky cases, and the
    Release panel lists them in its step 2. A case that fails alone too stops the release, and the output gives the
    result of each of its runs alone.
+
+   When the suite has run and the pack sets `coverageMap`, this step then runs its `command` on this machine, in a
+   worktree of the same commit. This is also true when the suite ran on a box over ssh or on a devbox. The command
+   writes the coverage map, the file that `file` names. Conveyor keeps the map for step 6. When the command fails, the
+   output shows the end of its output, and Conveyor keeps the map that it wrote. In this repository the command is
+   `.conveyor/coverage.sh`, and the map is `.conveyor/coverage.jsonl`.
 5. Ask the owner for a yes in chat. After the yes, run `conveyor.sh release <version>` in the main checkout, on `main`.
    It stops, and changes nothing, when one of these is true:
    - the version is not higher than the newest tag, or its tag exists,
@@ -141,8 +147,10 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
      see [A release over a failed suite](#a-release-over-a-failed-suite).
 
    The output gives the reason.
-6. When all checks pass, the command sets the version in `plugin.json` and the tag in the marketplace entry, and
-   makes the annotated tag. Then it pins the marketplace entry to the commit of that tag, pushes `main` and the tag,
+6. When all checks pass, the command sets the version in `plugin.json` and the tag in the marketplace entry. When
+   step 4 kept a coverage map for this commit, the same commit adds the map. The release adds no map when the privacy
+   check finds something in it, or when your checkout has a map at that path that is not committed. The output then
+   tells you why. Then the command makes the annotated tag. Then it pins the marketplace entry to the commit of that tag, pushes `main` and the tag,
    and makes the GitHub release with the notes as its text (`gh release create`).
 
 With Land as `pr` and the rule Merge PR set to `release` ([Merge PR](configuration.md#merge-pr)), the cards wait in

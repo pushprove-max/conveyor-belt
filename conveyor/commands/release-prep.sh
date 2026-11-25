@@ -98,7 +98,7 @@
 . "$HERE/lib/followups.sh" || exit 1
 . "$HERE/lib/flaky.sh" || exit 1
 . "$HERE/lib/fulltest.sh" || exit 1
-. "$HERE/lib/suitehost.sh" || exit 1
+. "$HERE/lib/suitehost.sh" && . "$HERE/lib/relcov.sh" || exit 1
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1
@@ -547,7 +547,7 @@ relsuite() { # <command name> <commit>
   [ "$m0" = "$m1" ] || echo "conveyor: $n: $BRANCH moved while the suite ran, from ${m0:0:12} to ${m1:0:12}: a card landed; the suite tested ${sha:0:12}"
   # The test map is of the suite run alone here: a red one, though its failed cases then passed alone, refreshes none.
   if [ "$SH_KIND" != local ]; then :; elif [ $sr = 0 ]; then maprefresh "$wt" || :; else mapstop "$wt" "the release's whole run failed"; fi
-  git worktree remove --force "$wt" 2>/dev/null; hostfinish "$n"
+  hostfinish "$n"; relcov "$n" "$wt" "$sha"; git worktree remove --force "$wt" 2>/dev/null # a run on any machine, passed or failed (release --anyway goes over a failed one), makes the coverage map here, that machine given back (lib/relcov.sh)
   # The status names the machine the tests ran on (SH_POST: a box by its kind, as a status is public; a devbox by its name); a pass reused whole, none.
   if [ $rc = 0 ] && [ "$u" != null ] && [ "$(jq '.ran | length' <<<"$u")" = 0 ]; then
     state=success desc=$(jq -r '"The whole suite (test.full) passed: reused the green run of \(.time) on \(.sha[0:12])"' <<<"$u")
@@ -593,7 +593,7 @@ releaseprep() { # <version>
 }
 RELBY='' RELANY='' RELALLOW=() # release [--anyway] [--allow-commit <sha>]... --by <who>: the owner's choices, and who made them
 release() { # <version>
-  local v=$1 sha last c rc out terms name t state st notes=docs/releases/$1.md why=() hits=() red='' body='' known='' a f allow=() passed=()
+  local v=$1 sha last c rc out terms name t state st notes=docs/releases/$1.md why=() hits=() red='' body='' known='' a f allow=() passed=() cov=''
   local P=.claude-plugin/plugin.json M=.claude-plugin/marketplace.json tested=${CONVEYOR_RELEASE_SHA-} at=refs/remotes/$REMOTE/$BRANCH pr=''
   [ -z "${CONVEYOR_RELEASE_SHA+x}" ] || [ -n "$tested" ] || tested=none # set by the Board with no commit: nothing passed
   unset CONVEYOR_RELEASE_SHA
@@ -707,11 +707,11 @@ release() { # <version>
       || { echo "conveyor: release: refused, nothing tagged or released: pull request #$pr is merged, but the checkout is not at a merge holding the files checked on ${sha:0:12}, or its status could not be read" >&2; return 1; }
     sha=$t
   fi
-  # A step that fails undoes what was made here: the tag, the commits, and the two files' changes, nothing else.
-  relundo() { git tag -d "v$v" > /dev/null 2>&1; git reset -q "$sha" && git checkout -q "$sha" -- "$P" "$M"; }
+  # A step that fails undoes what was made here: the tag, the commits, and the changes of the two files and of the coverage map (relcovput()), nothing else.
+  relundo() { git tag -d "v$v" > /dev/null 2>&1; git reset -q "$sha" && git checkout -q "$sha" -- "$P" "$M"; [ -z "$cov" ] || relcovundo "$sha"; }
   relset() { jq "${@:2}" "$1" > "$1.new" && mv "$1.new" "$1"; } # <file> <jq arguments>
   relset "$P" --arg v "$v" '.version = $v' && relset "$M" --arg n "$name" --arg r "v$v" '(.plugins[] | select(.name == $n) | .source) |= (.ref = $r | del(.sha))' \
-    && { git diff --quiet -- "$P" "$M" || git commit -q -m "Release $v" -- "$P" "$M"; } && git tag -a "v$v" -m "Release $v" && t=$(git rev-parse HEAD) \
+    && cov=$(relcovput "$sha" "$terms") && { git diff --quiet HEAD -- "$P" "$M" ${cov:+"$cov"} || git commit -q -m "Release $v" -- "$P" "$M" ${cov:+"$cov"}; } && git tag -a "v$v" -m "Release $v" && t=$(git rev-parse HEAD) \
     && relset "$M" --arg n "$name" --arg s "$t" '(.plugins[] | select(.name == $n) | .source.sha) = $s' \
     && git commit -q -m "Release $v: the marketplace pins v$v at its commit" -- "$M" \
     || { relundo; echo "conveyor: release: the release commits or the tag could not be made; they are undone, nothing pushed" >&2; return 1; }
