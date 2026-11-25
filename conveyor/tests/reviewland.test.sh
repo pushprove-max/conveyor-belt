@@ -352,3 +352,13 @@ t_reviewlandport() {
   [ "$(jq -r .mode <<<"$RESUMED")|$(cat "$T/$CASE/rl")" = 'port|[P1] a.txt:2 drops the line|[P1] a.txt:2 drops the line' ] \
     || fail "the card of #7 after the retry by review-land, its kept patch no longer applying, did not port it carrying the kept review and the finding [P1] a.txt:2 drops the line: $RESUMED; $(cat "$T/$CASE/rl" "$T/$CASE/run.out")"
 }
+# Bug: the retry by review-land of an issue the owner held released the hold, so the loop picked an issue the owner
+# never released. The job (needsland()) gives c1-7 back and leaves #7 held, with no release dated.
+t_reviewlandheld() {
+  rlblocked '[P1] a.txt:2 drops the line'
+  loop control hold 7 > /dev/null || fail "control hold 7 failed"
+  rljob
+  [ "$(rlby c1-7)" = review-land ] || fail "needsjob, #7 held, did not give c1-7 back as review-land's: $(cat "$T/$CASE/run.out")"
+  [ "$(jq -c '[.held, .released]' "$ST/control.json")" = '[[7],{}]' ] \
+    || fail "needsjob's retry by review-land of the held #7 released #7 or dated a release: $(jq -c '[.held, .released]' "$ST/control.json"); $(cat "$T/$CASE/run.out")"
+}

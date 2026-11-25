@@ -5,7 +5,8 @@ sends it to a fix session and then to review again. A card that needs a person s
 its work kept, until you retry or close it.
 
 A card that is blocked with its work kept also shows as an open decision on the Board, once. The recommended option is
-"Retry keeping the work": the loop gives the card back as `conveyor.sh retry <issue>` does. "Fresh retry" gives it back
+"Retry keeping the work": the loop gives the card back as `conveyor.sh retry <issue>` does. Only your answer on the
+Board releases a held issue. When auto or the Foreman gives the answer, a held issue stays held until you release it. "Fresh retry" gives it back
 as `retry <issue> --fresh` does, and the next card builds from nothing. "Leave it held" changes nothing.
 The loop looks for answers after each wait of the `tunables.idle` setting in the pack, and acts on an answer then. If you
 retry or shut the card by hand first, the loop closes the decision and takes no step.

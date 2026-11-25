@@ -170,15 +170,19 @@ t_unblockreleased() {
   [ "$(jq -c '[.held, .released]' "$ST/control.json")" = '[[],{"9":"2026-11-24T10:15:00Z"}]' ] \
     || fail "after unblock 9 --hold was refused, the hold or the owner's release time of #9 is not as before: $(jq -c '[.held, .released]' "$ST/control.json")"
 }
-# Bug (#1627): a retry by the standing review-retry released its held issue with the owner's `control release`, which
-# dated it in released, so foreman status said the owner released an issue the engine gave back.
+# Bugs: a retry by the standing review-retry (the Foreman's watcher sends it as CONVEYOR_REVIEWRETRY, foreman/lib.sh
+# ask()) released its held issue, so the loop picked an issue the owner never released (#1627 dated it in released as
+# the owner's release). It gives the card back and leaves the hold, with no release dated.
 t_retrynotowner() {
+  local out
   setup "$(issue 7 2026-01-01 | jq -cs .)"
   landed 7 | jq -c '.step = "blocked" | .result = "blocked" | .reason = "review: NO-GO"' >> "$ST/cards.jsonl"
   loop control hold 7 >/dev/null || fail "control hold 7 failed"
-  CONVEYOR_REVIEWRETRY=1 loop retry 7 >/dev/null 2>&1 || fail "the review-retry of the held #7 failed"
-  [ "$(jq -c '[.held, .released]' "$ST/control.json")" = '[[],{}]' ] \
-    || fail "after the review-retry of the held #7, it is still held or dated as the owner's release: $(jq -c '[.held, .released]' "$ST/control.json")"
+  out=$(CONVEYOR_REVIEWRETRY=1 loop retry 7 2>&1) || fail "CONVEYOR_REVIEWRETRY=1 retry 7, #7 held, failed: $out"
+  jq -se 'any(.[]; .issue == 7 and .step == "blocked" and .retriedBy == "review-retry")' "$ST/retried.jsonl" >/dev/null 2>&1 \
+    || fail "CONVEYOR_REVIEWRETRY=1 retry 7 did not give the card of #7 back: $out"
+  [ "$(jq -c '[.held, .released]' "$ST/control.json")" = '[[7],{}]' ] && grep -qF 'issue #7 is held, and stays held' <<<"$out" \
+    || fail "CONVEYOR_REVIEWRETRY=1 retry 7, #7 held, released #7, dated a release, or did not say it stays held: $(jq -c '[.held, .released]' "$ST/control.json"); $out"
 }
 
 # Bug (#1472): a refused unblock took its hold off control.json but left the move to Held in moved.json, the Board's

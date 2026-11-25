@@ -64,7 +64,7 @@ landable() { # <issue> [fresh]
 # A held issue (setup holds every open one) would stay off the belt once its card is given back: the owner's retry
 # releases it too, under the same lock, once the retry is done. A refused retry leaves the hold as it was.
 again() { # <issue | card id> [fresh]
-  local held=false c
+  local held=false c hs='' # hs: the issue is held and this retry leaves it held (below)
   [[ ! $1 =~ ^[0-9]+$ ]] || held=$(ctl | jq -r --argjson n "$1" '.held | index($n) != null') \
     || { echo "conveyor: cannot read the control record; nothing changed" >&2; return 1; }
   # The standing review-retry's retry (RETRYBY review-retry) gives an issue back once (reviewretried(), lib/views.sh),
@@ -86,11 +86,16 @@ again() { # <issue | card id> [fresh]
   if [ "$RETRYBY" = review-land ]; then
     c=$(landable "$@") || { echo "conveyor: $c; nothing changed: it waits for the owner" >&2; return 1; }
   fi
-  retry "$@" || { [ -z "$c" ] || CONVEYOR_MAIN=$MAIN bash "$HERE/../.claude/scripts/decision.sh" reopen "$c" >/dev/null \
+  [ "$held" != true ] || [ "$RETRYBY" = owner ] || hs=1
+  HELDSTAYS=$hs retry "$@" || { [ -z "$c" ] || CONVEYOR_MAIN=$MAIN bash "$HERE/../.claude/scripts/decision.sh" reopen "$c" >/dev/null \
     || echo "conveyor: decision $c could not be reopened; reopen it with \`decision.sh reopen $c\`" >&2; return 1; }
   [ "$held" = true ] || return 0
-  # Only the owner's retry is the owner's release (control(): released dates it); another's (review-retry, a Foreman's) is not.
-  CONVEYOR_RELEASEBY=${RETRYBY#owner} control release "$1" >/dev/null || { echo "conveyor: issue #$1 is held; release it with \`conveyor.sh control release $1\`" >&2; return 1; }
+  # A retry by the Foreman, by a standing rule (review-retry: the watcher's and needsretry()'s, review-land) or by auto
+  # decide's answer to a decision (decision, needsask()) gives the card back and leaves the hold: only the owner's retry
+  # releases an issue the owner held, dated in released as the owner's (control()). Bug: they released the hold, so
+  # the loop picked an issue the owner never released.
+  [ "$RETRYBY" = owner ] || { echo "conveyor: issue #$1 is held, and stays held: a retry by $RETRYBY does not release it; the owner releases it with \`conveyor.sh control release $1\`"; return 0; }
+  CONVEYOR_RELEASEBY='' control release "$1" >/dev/null || { echo "conveyor: issue #$1 is held; release it with \`conveyor.sh control release $1\`" >&2; return 1; }
   echo "conveyor: issue #$1 was held; it is released, so the loop picks it again"
 }
 # An issue's card stuck in flight (its process gone or stopped, or no process of its step for the pack's stuck) is ended first,

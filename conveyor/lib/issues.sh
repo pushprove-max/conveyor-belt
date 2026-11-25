@@ -20,7 +20,7 @@ strays() {
 # A main-red fix card (issue 0, mainred.sh redpick()) is given back by its card id: its lines move out the same way, and the loop
 # picks its main commit's entry again, a new card built from nothing. So is a card of no issue (a Tests page card, a Foreman order, a review follow-up, a release fix card or a split part: testpick(),
 # lib/testaction.sh): the loop picks its action again, a new card that starts from its kept work (resumeplan()). So is a land-branch card of issue 0 (branchback(), lib/lane.sh).
-# RETRYWHY, when set, is why the loop retried the card itself (speedretry()): its blocked line keeps it as retriedWhy. RETRYBY, who gave it back (commands/retry.sh), as retriedBy (reviewretried(), lib/views.sh), which the Board does not show.
+# RETRYWHY, when set, is why the loop retried the card itself (speedretry()): its blocked line keeps it as retriedWhy. RETRYBY, who gave it back (commands/retry.sh), as retriedBy (reviewretried(), lib/views.sh), which the Board does not show. HELDSTAYS, when set: the issue is held and this retry leaves it held (again(), commands/retry.sh), so it is said to be given back, not picked again (bug: both were said).
 retry() { # <issue, or the card id of a main-red fix card, a Tests page card or a land-branch card of issue 0> [fresh: an issue's next card builds from nothing]
   local n=$1 ends l what k='.issue == $n' a p f BACKID='' BACKKEPT='' # BACKID, BACKKEPT: the record entry and the kept folder branchback() made
   check || return 1
@@ -86,7 +86,7 @@ retry() { # <issue, or the card id of a main-red fix card, a Tests page card or 
   # The blocked line carries when the owner gave the card back (retriedAt): the wait ends there, not at the next pick.
   MOVETAG='(if $bk != "" and .step == "blocked" and (.kept // "") == "" then .kept = $bk else . end) | if .step == "blocked" and .retriedAt == null then . + {retriedAt: $at} + (if $why == "" then {} else {retriedWhy: $why} end) + (if $by == "" then {} else {retriedBy: $by} end) else . end' \
     moveout "$k" "${a[@]}" --arg why "${RETRYWHY:-}" --arg by "${RETRYBY:-}" --arg bk "$BACKKEPT" || { [ -z "$BACKID" ] || branchdrop "$BACKID"; return 1; }
-  echo "conveyor: $what can be picked again; its old lines are in $RETRIED"
+  echo "conveyor: $what $([ -n "${HELDSTAYS:-}" ] && echo 'is given back, and stays held' || echo 'can be picked again'); its old lines are in $RETRIED"
   [ "$k" = '.issue == $n' ] || return 0
   [ -z "${2:-}" ] || { echo "conveyor: its next card builds from nothing; $([ -n "$moved" ] && echo "its kept work is in $d" || echo "it had no kept work")"; return 0; }
   p=$(prior "$n"); ends=$(jq -r 'select(.kept != "") | "\(.kept)/\(.card).patch"' <<<"$p")

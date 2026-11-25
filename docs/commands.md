@@ -38,8 +38,9 @@
   work. An issue closed while its card was blocked is picked again on its own once it is opened again. A card that
   stopped for your yes to a visible change is the exception: if the issue's `## What customers or staff will see`
   section changed after the card stopped, the issue asks for a different change, and the next card builds from nothing.
-  If the issue is held, `retry` also releases it. If the issue has no card, `retry` names the state folder it read
-  and says to release the issue with `conveyor.sh control release <issue>`, which starts a new card. If another
+  If the issue is held, `retry` also releases it. A retry by the Foreman, by the standing kind `review-retry`, or by
+  an answer to a decision that you did not give on the Board, does not: the issue stays held, and `retry` says so. If the issue
+  has no card, `retry` names the state folder it read and says to release the issue with `conveyor.sh control release <issue>`, which starts a new card. If another
   state folder of the checkout has a card of the issue, `retry` and `conveyor.sh doctor` name that folder too.
   A card can stop in flight: its process is gone or was stopped by a signal, or no process of its step ran for the
   pack's `tunables.stuck` plus `tunables.reviewPause`. `retry` first blocks that card and keeps its work, then gives

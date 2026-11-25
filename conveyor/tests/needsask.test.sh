@@ -25,7 +25,7 @@ nask() { fx_in needsask; [ "$RC" = 0 ] || fail "needsask exited $RC: $(cat "$T/$
 # nadec <card>: the ledger's latest snapshot of the card's decision, as one JSON line.
 nadec() { jq -cs --arg id "blocked-$1" 'map(select(.id == $id)) | last // empty' "$CONVEYOR_LEDGER" 2>/dev/null; }
 # nanswer <card> <answer>: the owner's answer, as the Board records it.
-nanswer() { bash "$SRC/../.claude/scripts/decision.sh" answer "blocked-$1" "$2" > /dev/null || fail "the answer $2 to blocked-$1 was not recorded"; }
+nanswer() { bash "$SRC/../.claude/scripts/decision.sh" answer "blocked-$1" "$2" --by owner > /dev/null || fail "the answer $2 to blocked-$1 was not recorded"; }
 
 # Bug (#1167): a card blocked with its work kept was a "needs you" item the owner learned of only from the Foreman, by
 # hand, and no ledger decision held it, so `auto decide` had nothing to decide. One pass puts one open decision in the

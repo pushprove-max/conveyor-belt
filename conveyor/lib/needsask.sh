@@ -17,8 +17,9 @@
 #   - A decision answered NEEDSASK_RETRY or NEEDSASK_FRESH whose card is still blocked has the step taken, as
 #     `conveyor.sh retry <issue>` (with --fresh for the second) does; the card then leaves the blocked cards, so a
 #     later pass takes no second step. NEEDSASK_HELD takes none. The retry is the owner's own (CONVEYOR_RETRYBY owner,
-#     commands/retry.sh), which lets review-retry give the issue back once more, only for a question asked as RRAGAIN
-#     says: auto decide never answers one (commands/auto.sh). Another answer may be auto decide's (decision).
+#     commands/retry.sh), which lets review-retry give the issue back once more and releases a held issue, only for an
+#     answer decision.sh marked as the owner's (the Board's). Another answer (auto decide's, a Foreman's, or one that
+#     names no one, to a question asked as RRAGAIN says too) is the engine's (decision): its retry leaves a held issue held.
 #   - A decision answered RLCLOSED (lib/standing.sh) whose card is still blocked is reopened (rlreopen()): the retry by
 #     review-land that closed it ended before it moved the card's lines (a restart stopped it), and needsland() tries
 #     each card once, so the card would stay blocked with no one asked.
@@ -51,7 +52,7 @@ askkeep() {
 }
 needsask() {
   local dec=$HERE/../.claude/scripts/decision.sh led=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl}
-  local cs old rows='[]' c n k r r1 e id ans asked by opts q h
+  local cs old rows='[]' c n k r r1 e id ans asked by opts q h mk lines
   local -A issue=()
   # The cards blocked now: a card's last closing line is a blocked one, so a card retried (its lines moved to the
   # retried file), shut or landed is not here. Not a card of a main-red fix (issue 0), nor one stopped for the owner's yes,
@@ -88,8 +89,17 @@ needsask() {
   [ -e "$led" ] || return 0
   rows=$(CONVEYOR_MAIN=$MAIN bash "$dec" list) || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
   # Split on the unit separator, not on a tab: read joins tabs, so an empty answer would move the asking time into it.
-  # by: owner for a question auto decide holds as RRAGAIN's (its own test, commands/auto.sh), else decision.
+  # by: owner for an answer decision.sh marked as the owner's (answer --by owner: the Board's), else decision. Only the
+  # owner's retry releases a held issue (again(), commands/retry.sh). Bugs: auto decide's answer released an issue the
+  # owner held, and so did an answer that named no one to a question asked as RRAGAIN says (auto decide holds those,
+  # but a Foreman can answer one).
+  mk=${led%.jsonl}.answeredby.jsonl; [ -e "$mk" ] || mk=/dev/null
+  lines=$(jq -r --slurpfile m "$mk" '[$m[] | select(.by == "owner") | .row] as $o
+    | .[] | select(.id | startswith("blocked-")) | . as $r
+    | [.id, (.answer // ""), .askedAt, (if any($o[]; . == $r) then "owner" else "decision" end)]
+    | join("\u001f")' <<<"$rows") || { echo "conveyor: the decision ledger $led or $mk could not be read; no blocked decision is read in this pass" >&2; return 1; }
   while IFS=$'\x1f' read -r id ans asked by; do
+    [ -n "$id" ] || continue # no decision: the one empty line of an empty list
     c=${id#blocked-}
     if [ -z "$ans" ] && [ -z "${issue[$c]:-}" ]; then
       CONVEYOR_MAIN=$MAIN bash "$dec" answer "$id" "$NEEDSASK_GONE" --asked-at "$asked" >/dev/null 2>&1 \
@@ -103,8 +113,7 @@ needsask() {
         "$RLCLOSED") locked rlreopen "$id" "$c" "${issue[$c]}" ;;
       esac
     fi
-  done < <(jq -r --arg rr ") $RRAGAIN, its work kept in " '.[] | select(.id | startswith("blocked-"))
-    | [.id, (.answer // ""), .askedAt, (if .question | gsub("[\r\n\u001f]+"; " ") | contains($rr) then "owner" else "decision" end)] | join("\u001f")' <<<"$rows")
+  done <<<"$lines"
   return 0
 }
 # rlreopen <id> <card> <issue>, under the records' lock: decision <id>, closed RLCLOSED, is reopened when <card>'s last
