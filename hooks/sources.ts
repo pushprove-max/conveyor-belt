@@ -410,12 +410,12 @@ export const parseStream = (text: string): Feed | null => {
 // machine the fetch's maphost line names (mapHost): a feed at that ssh target, or, with none, a feed of one machine
 // (local), as another build machine can keep a checkout at the same path. Host names are not compared: one machine can
 // have two. A fetch of an older engine (fetchPath in units.tsx runs the project's engine) prints no maphost line
-// (mapHost null): it matched the feed's record by path alone and names no machine, so its feed's map is taken only from
-// a feed of one machine (local), the session's own, where a record at that path is this checkout; from a feed over ssh
-// it is not taken, as that Board can be on another build machine with a checkout at the same path, and a note says to
-// pin a newer engine. With no such record, a feed of another machine, or a feed whose stream is down (its snapshot is
-// old), the board has no testMap: the fetch's testmap line gives the map then, feed or not.
-const sameMachine = (f: Feed, ssh: string | null) => (ssh ? f.ssh === ssh : f.local)
+// (mapHost null): it matched the feed's record by path alone and names no machine, so its feed's map is never taken,
+// not even from a feed of one machine (local): the session's host file can point at another build machine with a
+// checkout at the same path, and a note says to pin a newer engine. With no such record, a feed of another machine, or
+// a feed whose stream is down (its snapshot is old), the board has no testMap: the fetch's testmap line gives the map
+// then, feed or not.
+const sameMachine = (f: Feed, ssh: string | null) => (ssh === null ? false : ssh ? f.ssh === ssh : f.local)
 export const OLD_MAP_FETCH = "units: the test map is not shown: this project's engine is too old to say which machine the map is on; move plugin.commit in .conveyor/project.json to a newer engine"
 export const boardOfFeed = (f: Feed, own: string, mapRec: string, mapHost: string | null): Pick<State, 'snap' | 'note' | 'notes' | 'host'> & Partial<Pick<State, 'testMap'>> => {
   const b = boardFrom(f.host, f.records, own, f.live)

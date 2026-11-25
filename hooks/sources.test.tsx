@@ -980,7 +980,9 @@ test('a live feed\'s snapshot 90 s old adds no age note; with the stream down, o
 // of a session that reads its map here, was judged by the host name; a feed of an older Board, with no ssh target,
 // was taken as a match; and a fetch of an older engine (a pinned plugin.commit), which prints no maphost line and
 // matched the record by path alone, had its feed's map taken from a feed over ssh, so a Board at owner@oven showed
-// oven's map to a session at lab, yet must keep it from a feed of one machine, the session's own, or /units shows no map.
+// oven's map to a session at lab; and with a local Board serving `bakery` at /srv/bakery, a session whose host file
+// points at owner@lab (an older engine reads lab's record and skips its own testmap on the path match) was shown this
+// machine's map for the lab checkout, as a feed of one machine was taken by path alone.
 test('the feed\'s test map is taken only from a feed of the machine the maphost line names', () => {
   const json = JSON.parse(snapshot({ testMap: { state: 'made', sources: 3, tests: 1, age: 0 } }))
   const feed = (host: string, local: boolean, ssh: string) => ({ host, local, ssh, records: [{ repo: 'bakery', main: '/srv/bakery', json }], live: true, heardAt: NOW, error: '' })
@@ -996,7 +998,7 @@ test('the feed\'s test map is taken only from a feed of the machine the maphost 
     ['feed lab on one machine, maphost this machine', feed('lab', true, ''), '', true],
     ['feed lab at owner@lab, maphost this machine', feed('lab', false, 'owner@lab'), '', false],
     ['feed oven at owner@oven, no maphost line (a fetch of an older engine)', feed('oven', false, 'owner@oven'), null, false],
-    ['feed lab on one machine, no maphost line (a fetch of an older engine)', feed('lab', true, ''), null, true],
+    ['feed lab on one machine, no maphost line (a fetch of an older engine)', feed('lab', true, ''), null, false],
   ]
   for (const [what, f, mh, has] of cases) {
     const b = boardOfFeed(f, '', '/srv/bakery', mh)
