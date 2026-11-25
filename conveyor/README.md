@@ -1251,6 +1251,12 @@ landing gate deals with it at its turn. `landone()` (`lib/claim.sh`) runs the ch
 land, from the commit before it: in a batch, that is the commit of the card before it. A refusal there, or a check that
 cannot run, lands nothing and removes the card's `<worktree>.ready`.
 
+Then `cardtest()` runs the push checks (`pushgaterun`, `lib/contract.sh`) when main's pre-push hook names
+`CONVEYOR_PUSH_GATE`. To let the push checks run before a card lands, a project's pre-push hook names that variable:
+the engine sets it to the card's name when it runs the hook in the card's worktree, so the hook can tell this run from
+a push. A hook that does not name it runs only at the push
+([Landing](../docs/cards.md#landing)).
+
 The read-only check (`lintrun`) holds around each run of the lint commands, not around the persisted-contract check. Before the commands, the index tree is kept, and the
 worktree must match the index with no file that git does not track or ignore; else no command runs and nothing is
 put back. After them, also after a time-out, the index tree must be the kept one and the worktree must match it again;

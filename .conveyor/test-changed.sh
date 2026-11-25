@@ -1681,8 +1681,8 @@ fshare() { # <test file> <command>...
 # calls in $o.e<n>.trace). Not a part of a file, nor an engine case file run with some of its cases, nor a plugin test
 # file: one plugin test run runs them all, so its trace cannot tell which file read what, and the test map picks them.
 # When it passes, its log names what it read (inputsof): the engine keeps that with the pass, keeps the file off a later run
-# while those files are the same, and runs it for a change to one of them (conveyor/README.md, The test results
-# cache). With no such strace, no file names its inputs, and the test map picks it as before. strace runs apart from
+# while those files are the same, and runs it for a change to one of them (conveyor/README.md, Test file
+# times, the paragraph "The test results cache"). With no such strace, no file names its inputs, and the test map picks it as before. strace runs apart from
 # the file's process (-D), so the file ends as it would untraced, not when the last process it left behind ends. It
 # traces each call that takes a path (%file): a test can read a file with no open (a readlink, a stat, an access check
 # or an exec of it). It traces the calls that failed too: a lookup of a file that is not there (a package.json that

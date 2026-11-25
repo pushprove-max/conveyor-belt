@@ -101,5 +101,13 @@ has docs/cards.md "- Main changed no trigger of a lint command. - Main changed n
 has docs/cards.md "- When the card changes a command's triggers or the pack's \`lint\` field, main changed none of the files that the command reads." 'the guide leaves out the files a command reads when the card changes its triggers'
 # R426 (commands/release-prep.sh relnotes): the first release's draft has no source check.
 has docs/releases/1.9.0.md 'For releases after the first, release notes check each line' 'the 1.9.0 notes promise the source check for the first release'
+# Release 1.12.0 fix (lib/contract.sh pushgaterun; tests/contractgate.test.sh runs it): the guide may not name
+# CONVEYOR_PUSH_GATE (README-pages.test.sh), yet a user must still learn that the push checks run before a card lands
+# only when the pre-push hook names it. A page has no behaviour to run, so the guide's step and the engine reference's
+# name are read. Bug: a guide that only drops the name leaves the user with no step to take.
+has docs/cards.md "For the push checks to run before a card lands, add that variable to the project's pre-push hook: its name is in the engine reference ([Lint](../conveyor/README.md#lint))." 'the guide does not tell the user to add the push-gate variable to the pre-push hook, or where its name is'
+awk '/^## / { on = ($0 == "## Lint"); next } on' "$SRC/conveyor/README.md" | tr '\n' ' ' | tr -s ' ' \
+  | grep -qF "\`CONVEYOR_PUSH_GATE\`. To let the push checks run before a card lands, a project's pre-push hook names that variable" \
+  || say "conveyor/README.md's Lint section does not tell a project to name CONVEYOR_PUSH_GATE in its pre-push hook"
 [ "$fails" = 0 ] || exit 1
 echo "ok docs-claims"
