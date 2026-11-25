@@ -70,6 +70,29 @@ $l1 lib/cart.test.js" ] || fail "the run did not run lib/cart.test.js alone on m
   [ ! -e "$T/$CASE/held" ] || fail "the push is still held with the push check off: $(st 'select(.step == "push")')"
 }
 
+# Bug it catches: the run before the push took the test files of some landings only (the newest, the oldest, or the
+# first and the last), so a file linked to another landing since the last push went out unrun. The push of c4 names
+# c1's commit as held by origin, so the landings since then are c2, c3 and c4, each linked to a test file of its own:
+# c2 (it changes lib/cart.js) lib/cart.test.js, c3 lib/tax.test.js, c4 lib/fee.test.js. Every file passes: the run
+# runs the three, each once, in the order of the landings.
+t_pushtestsunion() {
+  local l1 l2 l4 base n
+  pushfix true
+  printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"' > "$STUB/one" # one: every test file passes
+  for n in 3:tax 4:fee; do
+    echo "${n#*:}" > "$R/lib/${n#*:}.js" && echo "grep -qx ${n#*:} lib/${n#*:}.js" > "$R/lib/${n#*:}.test.js" \
+      && git -C "$R" add -A && git -C "$R" commit -qm "c${n%%:*}" \
+      && jq -cn --arg s "$(git -C "$R" rev-parse HEAD)" --argjson i "${n%%:*}" \
+        '{card: "c\($i)", issue: $i, step: "landed", time: "2026-11-18T12:0\($i):00Z", result: "ok", sha: $s}' >> "$ST/cards.jsonl" \
+      || fail "the landing c${n%%:*} could not be made"
+  done
+  l4=$(git -C "$R" rev-parse HEAD)
+  pushnow "pushtests c4 4 $l4 $l1"
+  [ "$(cat "$STUB/ran" 2>&1)" = "$l4 lib/cart.test.js
+$l4 lib/tax.test.js
+$l4 lib/fee.test.js" ] || fail "pushtests c4 4 $l4 $l1 did not run the files of every landing since c1 (c2: lib/cart.test.js, c3: lib/tax.test.js, c4: lib/fee.test.js), each once: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+}
+
 # #1084. Bug it catches: the run before the push named the failing file and the landing that broke it, but not where
 # it failed, so a failure that printed no message of its own (only a stack) could not be read without a run again.
 # The file command prints a stack frame of the push worktree's lib/cart.test.js, line 1, when the file fails: the push
