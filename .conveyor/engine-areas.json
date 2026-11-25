@@ -4,6 +4,7 @@
 {"outside": "conveyor/commands/foreman.sh"}
 {"outside": "conveyor/tools/closure.sh"}
 {"outside": "conveyor/tests/speed/"}
+{"outside": "conveyor/unit/"}
 {"area": "core", "tests": "all"}
 {"area": "core", "file": "conveyor/conveyor.sh"}
 {"area": "core", "file": "conveyor/conveyor.slowest"}

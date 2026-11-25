@@ -11,7 +11,8 @@
 # The engine: each engine source file is in one area of .conveyor/engine-areas.json, which names the case files
 # (conveyor/tests/) that cover it ("all": every one). In a build or fix session an engine change runs only the cases of
 # its areas' files, and of each changed case file, and so does the loop's test step (CONVEYOR_TEST_LOG set: conveyor.sh tests()).
-# Every run first checks the map (in one-file mode in a test step, once a tree: issue 422, below): an engine source
+# Every run first runs the unit cases of the changed engine files (conveyor/unit/unit.sh, issue 1620), then checks the
+# map (both in one-file mode in a test step, once a tree: issue 422, below): an engine source
 # file (a file under conveyor/ that is not a test and not in its "outside" list) in no area, or in two, an area whose tests are not "all" or a non-empty list,
 # or a file or case file it names that does not exist, fails it. So does a file under conveyor/lib/ in an "all" area
 # with no `why` (each engine file names its own case files; "all" is for what every case runs through, and says why),
@@ -104,7 +105,7 @@ unset CONVEYOR_SHELL_TEST_CASE
 # the cases CONVEYOR_TEST_CASES names of it, `<file><TAB><case>` lines, when it names any),
 # a shell test file that selects its cases as the runner does with the cases CONVEYOR_TEST_CASES names of it, and
 # any other test file (the Board's under .claude/scripts/__tests__/, the hooks' under hooks/) whole. The checks every
-# run makes (checks(): the map check, the test lint, no browser tests, no records split, shellcheck, the plugin's
+# run makes (checks(): the unit cases of the changed engine files, the map check, the test lint, no browser tests, no records split, shellcheck, the plugin's
 # validate when the change touches it) still run, once a tree in a test step (issue 422, below). A
 # path that is no file fails at once, before any of it, as does a runner of the whole suite (issue 382: the engine's runner, this script and the full test's), which is no
 # test file.
@@ -333,11 +334,14 @@ metarunners() {
 }
 if [ "${1:-}" = --check ]; then mapcheck; r=$?; covage; metarunners; exit $r; fi
 mapfile -t changed < <({ git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)
-# checks: the checks every run makes (the map check, the test lint, no browser tests, no records split, shellcheck, the plugin's
-# validate when the change touches it), printing what they
+# checks: the checks every run makes (the unit cases of the changed engine files, the map check, the test lint, no browser
+# tests, no records split, shellcheck, the plugin's validate when the change touches it), printing what they
 # find; exit 1 when one fails. In one-file mode in a test step they run once a tree (below), not on every run.
 checks() {
 local rc=0 scfiles scrc scout keep new f pv pvout moved pvhead pvmain pvp
+# First, the engine's unit cases of the changed files (conveyor/unit/unit.sh, issue 1620): they call the
+# functions alone and take milliseconds; the engine cases still run in the Test step. A failed case fails the checks.
+[ ! -f conveyor/unit/unit.sh ] || [ ${#changed[@]} = 0 ] || bash conveyor/unit/unit.sh "${changed[@]}" || rc=1
 mapcheck || rc=1
 covage
 # The test lint, with the map check: a test that sleeps a set time and then checks fails the run (test-lint.sh).
