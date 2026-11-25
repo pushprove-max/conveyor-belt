@@ -61,6 +61,59 @@ t_keep_one() {
   ! declare -F t_casetimeout > /dev/null || { echo "FAIL: it was given t_casetimeout, another case's function"; exit 1; }
 }
 
+# keepstuck <dir>: the fixture of the two cases below (#1671), started in the background ($! its pid). run_case runs
+# t_keep_one, which passes, as the runner runs a case, with a limit of 1 s. Its keeper's end runs the real case_end,
+# notes whether the keeper's guard still runs after it ($T/guard.live), and then waits on a subshell of the keeper's
+# own that ignores TERM and never ends (it waits on a FIFO, where the one seen spun: KILL alone ends either; its pid in
+# $T/hold.pid). The worker that ran run_case wrote its pid (worker.pid) and, ended, its exit status (worker.rc).
+keepstuck() {
+  local d=$1
+  mkdir -p "$d/in" && mkfifo "$d/in/hold" || fail "the fixture could not be made"
+  # shellcheck disable=SC2034,SC2154 # CASE_LIMITS is read by run_case, guard is case_keep's (lib.sh)
+  ( ( T=$d/in; CASE=keep_one; CASE_LOAD=1; declare -gA CASE_LIMITS=([keep_one]=1); echo "$BASHPID" > "$T/worker.pid"
+      # shellcheck source=/dev/null # the real case_end (lib.sh), named case_end_real
+      source <(declare -f case_end | sed '1s/^case_end /case_end_real /')
+      case_end() { case_end_real "$@"; ps -o stat= -p "${guard:-0}" | grep -qv '^Z' && : > "$T/guard.live"
+        : "$(trap '' TERM; echo "$BASHPID" > "$T/hold.pid"; read -r <> "$T/hold")"; }
+      run_case ) > "$d/report" 2>&1; echo $? > "$d/in/worker.rc" ) &
+}
+
+# Bug it catches (#1671): a subshell of a case's keeper that did not end, and ignored TERM, held the run of a case
+# that had passed for 17 minutes. With the keeper held so (keepstuck), the case's run ends within its limit and the
+# 3 s grace (the ceiling below allows for a busy machine), the case still passes, its output names the keeper's end,
+# and the subshell is gone. Also: the keeper's real case_end left its guard running, not taking it for a process the
+# case left.
+t_casekeepstuck() {
+  local d=$T/$CASE r h
+  keepstuck "$d"; r=$!
+  WAIT_CEILING=$(loadlimit 15) wait_until '[ -s "$d/in/worker.rc" ]' || wait_end "$r"
+  [ -e "$d/in/guard.live" ] || fail "the keeper's guard did not run after the keeper's real case_end, which ended it: $(cat "$d/report")"
+  [ -s "$d/in/worker.rc" ] || fail "the run of a case whose keeper's subshell does not end did not go on: $(cat "$d/report")"
+  [ "$(cat "$d/in/keep_one.rc" 2>/dev/null)" = 0 ] && grep -qx 'ok keep_one' "$d/report" \
+    || fail "the case that passed was not reported as passed: $(cat "$d/report")"
+  grep -qxF "note [keep_one]: the case's keeper had not ended 4 s after the case ended (its time limit and 3 s); it and its subshells were killed" "$d/report" \
+    || fail "the run does not say the case's keeper was killed: $(cat "$d/report")"
+  h=$(cat "$d/in/hold.pid" 2>/dev/null) && [ -n "$h" ] || fail "the keeper's subshell did not start: $(cat "$d/report")"
+  ! ps -o stat= -p "$h" | grep -qv '^Z' || fail "the keeper's subshell that ignores TERM, pid $h, still runs: $(ps -o pid=,stat=,args= -p "$h")"
+}
+# Bug it catches (#1671): the runner, told to end, tells the case's keeper's whole group to and waits for the keeper
+# (run_case); the keeper's guard, in that group, ended on that TERM, so the runner waited for ever on a keeper whose
+# subshell ignores TERM. The worker that runs the case is told to end once that subshell holds the keeper
+# (keepstuck: its pid written, the guard started before it): the worker still ends as told (143), the guard having
+# killed the keeper and the subshell, and the case's output names the keeper's end.
+t_casekeepstop() {
+  local d=$T/$CASE r h
+  keepstuck "$d"; r=$!
+  wait_until '[ -s "$d/in/hold.pid" ]' || { wait_end "$r"; fail "the keeper's subshell did not start: $(cat "$d/report")"; }
+  h=$(cat "$d/in/hold.pid"); kill -TERM "$(cat "$d/in/worker.pid")"
+  WAIT_CEILING=$(loadlimit 15) wait_until '[ -s "$d/in/worker.rc" ]' \
+    || { wait_end "$r"; fail "the runner told to end waited for the keeper whose subshell does not end: $(cat "$d/report" "$d/in/keep_one.out")"; }
+  [ "$(cat "$d/in/worker.rc")" = 143 ] || fail "the worker told to end did not end as told (exit $(cat "$d/in/worker.rc")): $(cat "$d/report")"
+  grep -qxF "note [keep_one]: the case's keeper had not ended 4 s after the case ended (its time limit and 3 s); it and its subshells were killed" "$d/in/keep_one.out" \
+    || fail "the case's output does not say the case's keeper was killed: $(cat "$d/in/keep_one.out")"
+  ! ps -o stat= -p "$h" | grep -qv '^Z' || fail "the keeper's subshell that ignores TERM, pid $h, still runs: $(ps -o pid=,stat=,args= -p "$h")"
+}
+
 # Bug it catches (#1084): on a busy machine a case 1.5 times past its file's limit failed the run, though it only ran
 # slower. The runner itself runs, as in t_casetimeout: the limit under test is the runner's own keeper's, which no
 # call of one function shows. With the load factor 2 a full run gives it (CONVEYOR_LOAD_FACTOR) and two slots, a case

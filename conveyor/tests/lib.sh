@@ -411,8 +411,8 @@ case_cpu() { # <file>
 # worker that started it is gone. Ended, the watcher ends its sleep first: one left behind was the keeper's child on
 # Linux, so case_end found it, ended it and looked again, some 0.2 s more for every case.
 case_keep() {
-  local p='' watch timer='' rc
-  trap 'trap "" TERM INT HUP; [ -z "$p" ] || case_end "$p"; exit 143' TERM INT HUP
+  local p='' watch timer='' rc guard=''
+  trap 'trap "" TERM INT HUP; [ -z "$p" ] || case_end "$p"; [ -z "$guard" ] || { kill -USR1 "$guard"; wait "$guard"; } 2>/dev/null; exit 143' TERM INT HUP
   # Its jobs, not the last sleep's pid: a TERM can come after a sleep starts and before its pid is kept.
   ( trap 'kill $(jobs -p) 2>/dev/null; wait; exit 0' TERM
     while kill -0 "$CASE_WORKER" 2>/dev/null; do
@@ -441,12 +441,30 @@ case_keep() {
   echo "$rc" > "$T/$CASE.rc"
   # A failed case's mark for the run of files (CASE_RED), made now: the cleanup below can take seconds.
   [ "$rc" = 0 ] || [ -z "${CASE_RED:-}" ] || : 2> /dev/null > "$CASE_RED"
+  # Its own end has the same limit from here (#1671): a subshell of this keeper that did not end (one at 90% CPU that
+  # ignored TERM, with no child, in case_end) held a passed case's run for 17 minutes. A guard past the limit and its
+  # 3 s grace says so in the case's output, stops this keeper, kills every child of it (wait_end) and the case's
+  # group, and kills the keeper: the case keeps the status it wrote, and the run goes on. The guard is no process the
+  # case left (case_kids). It and its sleep ignore TERM: the runner, told to end, tells this keeper's whole group to
+  # (run_case), and waits for this keeper, which may be the one that does not end. Only this keeper ends it (USR1),
+  # and once it acts it ignores that too, so it never leaves this keeper stopped. A keeper gone before then (its parent
+  # is no longer this one) is not looked for: its pid may be another process's.
+  [ -z "${CASE_LIMIT:-}" ] || { ( trap '' TERM; trap 'kill -KILL $(jobs -p) 2>/dev/null; wait; exit 0' USR1
+      command sleep $((CASE_LIMIT + 3)) & wait $! # sleep: the keeper's time to end what the case left
+      trap '' USR1; local g=$BASHPID k
+      [ "$(ps -o ppid= -p "$g" | tr -d ' ')" = $$ ] || exit 0
+      echo "note [$CASE]: the case's keeper had not ended $((CASE_LIMIT + 3)) s after the case ended (its time limit and 3 s); it and its subshells were killed" >> "$T/$CASE.out"
+      kill -STOP $$; for k in $(case_kids "$g"); do wait_end "$k"; done
+      kill -KILL -- "-$p" 2>/dev/null; kill -KILL $$ ) > /dev/null 2>&1 & guard=$!; }
   kill "$watch" 2>/dev/null; wait "$watch" 2>/dev/null
-  case_end "$p"; exit 0
+  case_end "$p"
+  [ -z "$guard" ] || { kill -USR1 "$guard" 2>/dev/null; wait "$guard" 2>/dev/null; }
+  exit 0
 }
 below() { local k; echo "$1"; for k in $(pgrep -P "$1"); do below "$k"; done; } # <pid>: it and every process under it
-# case_kids <the asking $( )'s own BASHPID>: the keeper's children that still run, but that one.
-case_kids() { ps -axo pid=,ppid=,stat= | awk -v p=$$ -v me="$1" '$2 == p && $1 != me && $3 !~ /^Z/ { print $1 }'; }
+# case_kids <the asking $( )'s own BASHPID>: the keeper's children that still run, but that one and the keeper's guard
+# (case_keep), which is the keeper's own, not the case's.
+case_kids() { ps -axo pid=,ppid=,stat= | awk -v p=$$ -v me="$1" -v g="${guard:-}" '$2 == p && $1 != me && $1 != g && $3 !~ /^Z/ { print $1 }'; }
 # The processes that are the case's by what they carry, wherever they are (no parent, a session of their own): those
 # with the case's mark in their environment (every program the case started and every one those started, where they
 # kept it), those whose environment or command names the case's scratch folder (a program started after the case's
