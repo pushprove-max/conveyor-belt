@@ -485,14 +485,40 @@ out=$(open "$M" a5 resume); [ -z "$out" ] && [ "$(mark)" = a3a3a3a3-0000 ] || fa
 kill "$lp"
 }
 
+# privacy_files <folder>: sets files to each file under the folder, also those in its folders (tests/), tracked or
+# new, and no folder: the check ends with status 2 for a folder (issue 1681: "$SRC"/* gave it tests/, and no file in
+# tests/ was checked). git's list leaves out what .gitignore names (a __pycache__ file holds this checkout's own
+# path), and a file deleted from the worktree but still tracked is left out too.
+privacy_files() {
+local f; files=()
+while IFS= read -r -d '' f; do [ -f "$1/$f" ] && files+=("$1/$f"); done \
+  < <(git -C "$1" ls-files -z -c -o --exclude-standard)
+[ ${#files[@]} -gt 0 ] || fail "git lists no file in $1"
+}
+
 t_privacy() {
 CASE=privacy
-bash "$SRC/../privacy/check.sh" --terms "$TERMS" "$SRC"/* "$SRC/../../commands/"*.md || fail "a Foreman file names something private"
+local files; privacy_files "$SRC"
+bash "$SRC/../privacy/check.sh" --terms "$TERMS" "${files[@]}" "$SRC/../../commands/"*.md || fail "a Foreman file names something private"
+}
+
+# Bug (issue 1681): the privacy case gave the check "$SRC"/*, so a file in a folder under the Foreman's (tests/) was
+# never checked. A folder of its own stands in for the Foreman's (the real one holds no private term): a term in a
+# nested file fails the check, and the check names that file.
+t_privacy_nested() {
+local d=$T/fm files out rc
+mkdir -p "$d/tests" && git init -q "$d" || fail "cannot make the folder $d"
+echo 'echo top' > "$d/top.sh"; echo 'echo zyxwvprivate' > "$d/tests/helper.sh"; echo zyxwvprivate > "$T/terms"
+git -C "$d" add top.sh
+privacy_files "$d"
+out=$(bash "$SRC/../privacy/check.sh" --terms "$T/terms" "${files[@]}" 2>&1); rc=$?
+[ "$rc" = 1 ] || fail "check.sh --terms $T/terms ${files[*]}: status $rc, not 1 (a hit): $out"
+[[ $out == *"$d/tests/helper.sh:1:"* ]] || fail "check.sh --terms $T/terms ${files[*]}: does not name $d/tests/helper.sh: $out"
 }
 
 # Every case at once, each in a subshell on its own fixture; each one's output is shown once all have ended, and the
 # test passes only when each case ran to its end.
-cases=(reopen projects projects_filing projects_groups remote words auto_skip auto privacy)
+cases=(reopen projects projects_filing projects_groups remote words auto_skip auto privacy privacy_nested)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for one_case in $SEL; do case " ${cases[*]} " in *" $one_case "*) ;; *) echo "unknown case $one_case" >&2; exit 2 ;; esac; done
