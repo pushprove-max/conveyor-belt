@@ -233,7 +233,7 @@ EOF
 # against a main that never got the change; a card blocked after a review does not post that review's findings.
 # Bug: a blocked card's session output, error output and last review were deleted with its worktree.
 t_filefail() {
-  # The last review holds no P0 (a last P0 blocks the card before any filing, t_lastp0), so its findings are filed.
+  # The last review holds no P0 and no P1 (a P1 gets its own fix round first: t_p1lastnew), so its findings are filed.
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2; do moved $i "$NOGO3" > "$STUB/review.$i"; done; n3=${NOGO3/\[P0\]/[P2]}; echo "${n3/b.txt:22/[P2] b.txt:22}" > "$STUB/review.3"; head=$(git -C "$R" rev-parse HEAD)
   echo '[ "$n" != 100102 ] || { echo "could not add label" >&2; exit 1; }' > "$STUB/create-cmd"
   # loop: only a whole card run files a last review's findings, then withdraws them when a filing fails
@@ -316,68 +316,118 @@ t_privownsocket() {
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "[P0] a.txt:3 flags $HX/bench" ] \
     || fail "privown with a host file naming a terms file that cannot be opened ($T/$CASE/sock) did not find the home path the card adds (exit $RC): $(cat "$T/$CASE/run.out")"
 }
-# Bug (#1385): once its privacy fix round was given (privfix), privown() was not asked again, so a new privacy hit on
-# the last review, on another line than the one fixed, landed on main with a follow-up. Here that round swapped the
-# home path for another ($HY, the line the change now adds) and the last NO-GO names the new line: cardfix() blocks
-# the card (after priv) and lands nothing (go is not ''). block is replaced so the case reads its reason.
+# Issue 1670: a privacy hit in the card's own change on a last review gets fix sessions until a last review finds none,
+# then the card lands: here the hit ($HY, a home path the change adds) takes two. Review 3 names it: fix session 1
+# leaves it; review 4 names it again: fix session 2 takes the line out; review 5 holds a P2 alone: the card goes on to
+# land (go ''). cardfix() runs as card() runs it, the session replaced. Bugs: the hit found again after the first fix
+# session blocked the card for the owner; privown() was not asked again after it (#1385), so a hit landed with a follow-up.
 t_privfixagain() {
   local HY=/hom"e"/y # a home path, put together as HX is
   setup "[$(issue 7 2026-01-01)]"; fx_wt "printf 'two\ncd %s/bench\n' '$HY' >> a.txt" b.txt base
   printf '%s\n' "[P2] a.txt:3 flags $HY/bench" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
-  ISSUE=$(issue 7 2026-01-01) fx_in 'wt=$FXWT issue=$ISSUE mode="" rounds=0 fin="" finend="{}" c=c7 n=7 rline="" go=end; '"$FIRSTPASS"'; pass=4 privfix=1
-    block() { printf "%s\n" "$4" > "$T/$CASE/blocked"; }
-    res=$(verdict "$wt.review"); cardfix; echo "$after $go" > "$T/$CASE/after"'
-  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/after" 2>/dev/null)" = "priv end" ] \
-    || fail "a privacy hit found again after its fix round (review: [P2] a.txt:3 flags \$HY/bench, privfix=1) did not block the card: $(cat "$T/$CASE/after" "$T/$CASE/run.out" 2>&1)"
-  [ "$(cat "$T/$CASE/blocked")" = "review 4 is the last review and still holds a privacy hit in the card's own change after its one fix round, so it files no follow-up: [P2] a.txt:3 flags $HY/bench" ] \
-    || fail "the block does not name the privacy hit of review 4: $(cat "$T/$CASE/blocked" 2>&1)"
-  # Bug (#1436): the guide said a card has at most three reviews, but a fourth review follows the privacy fix round (the block above is its).
-  pagesays_review docs/cards.md 'at most three times, once more after the fix of a privacy hit on the last review' "review 4 came after the privacy fix: $(cat "$T/$CASE/blocked")"
+  ISSUE=$(issue 7 2026-01-01) fx_in 'wt=$FXWT issue=$ISSUE mode="" rounds=0 fin="" finend="{}" c=c7 n=7 rline="" fixed=0 sprompt="" br="" go=end; '"$FIRSTPASS"'; privfix=0
+    block() { printf "%s\n" "$4" >> "$T/$CASE/blocked"; }; checked() { :; }
+    session() { [ "$fixed" = 0 ] || sed -i "/bench/d" "$1/a.txt"; }
+    for pass in 3 4 5; do
+      [ "$pass" != 5 ] || printf "%s\n" "[P2] c.txt:3 a nit" "USER-VISIBLE: no" "VERDICT: NO-GO" > "$wt.review"
+      res=$(verdict "$wt.review"); go=end; cardfix; echo "$pass $after [$go] $privfix" >> "$T/$CASE/after"
+    done'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/after" 2>/dev/null)" = $'3 fix [next] 1\n4 fix [next] 2\n5 last [] 2' ] && [ ! -e "$T/$CASE/blocked" ] \
+    || fail "a privacy hit (review: [P2] a.txt:3 flags \$HY/bench) that a second fix session takes out did not get two fix sessions and then land: $(cat "$T/$CASE/after" "$T/$CASE/blocked" "$T/$CASE/run.out" 2>&1)"
+  # Bug (#1436): the guide said a card has at most three reviews, but a fourth review follows the privacy fix round.
+  pagesays_review docs/cards.md 'at most three times, once more after each fix of a privacy hit on the last review' "review 4 and 5 came after the privacy fixes: $(cat "$T/$CASE/after")"
+}
+# Issue 1670: a privacy hit still there after PRIVFIXES (3) fix sessions shuts the card with its work kept and puts
+# the hit on the self-heals list as a possible false hit of the privacy check: no Needs you entry, nothing landed.
+# cardfix() runs as card() runs it, from the first last review (3) with no privacy round given, the session replaced
+# by one that leaves the hit; block() and shut() are real. Bugs it catches: the card blocked and waited for the owner;
+# it was shut after fewer than 3 fix sessions; review 6, which holds the hit and a new P1, gave the P1 a fix round and
+# so the hit a fourth one; needsask(), the job that runs beside the card, read the block before the shut (the lock
+# taken for shut() runs it here first) and put the card to the owner; the closed line said the owner shut it.
+t_privshut() {
+  local HY=/hom"e"/y # a home path, put together as HX is
+  setup "[$(issue 7 2026-01-01)]"; fx_wt "printf 'two\ncd %s/bench\n' '$HY' >> a.txt" b.txt base
+  printf '%s\n' "[P2] a.txt:3 flags $HY/bench" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  kline c7 7 picked ok >> "$ST/cards.jsonl"; export CONVEYOR_LEDGER=$T/$CASE/decisions.jsonl
+  ISSUE=$(issue 7 2026-01-01) fx_in 'wt=$FXWT issue=$ISSUE mode="" rounds=0 fin="" finend="{}" c=c7 n=7 rline="" fixed=0 sprompt="" br="" go=end; '"$FIRSTPASS"'; privfix=0
+    checked() { :; }; session() { :; }
+    eval "real$(declare -f locked)"; locked() { [ "$1" != shut ] || needsask; reallocked "$@"; }
+    for pass in 3 4 5 6; do
+      [ "$pass" != 6 ] || printf "%s\n" "[P2] a.txt:3 flags $HY/bench" "[P1] c.txt:9 drops what the issue asks" "USER-VISIBLE: no" "VERDICT: NO-GO" > "$wt.review"
+      res=$(verdict "$wt.review"); go=end; cardfix; echo "$pass $after [$go] $privfix" >> "$T/$CASE/after"
+    done'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/after" 2>/dev/null)" = $'3 fix [next] 1\n4 fix [next] 2\n5 fix [next] 3\n6 priv [end] 3' ] \
+    || fail "a privacy hit that no fix session takes out (review: [P2] a.txt:3 flags \$HY/bench; review 6 adds [P1] c.txt:9) did not get exactly 3 fix sessions and then shut the card: $(cat "$T/$CASE/after" "$T/$CASE/run.out" 2>&1)"
+  [ "$(st 'select(.card == "c7") | .step' | tail -n 1)" = closed ] && [ "$(st 'select(.card == "c7" and .step == "closed") | .reason')" = 'shut by the engine' ] \
+    && st 'select(.card == "c7" and .step == "blocked") | .reason' | grep -qF "after its 3 fix rounds: review 6 still holds it, so the card is shut with its work kept" \
+    && grep -qF bench "$ST/kept/c7/c7.patch" || fail "the card (review 6: [P2] a.txt:3 flags \$HY/bench) did not end shut by the engine with its patch kept: $(st 'select(.card == "c7")') $(ls "$ST/kept/c7" 2>&1)"
+  [ "$(jq -c 'select(.card == "c7") | [.issue, .effect, .finding, (.why | startswith("a possible false hit of the privacy check"))]' "$ST/selfheals.jsonl" 2>&1)" = "[7,\"self-heals\",\"[P2] a.txt:3 flags $HY/bench\",true]" ] \
+    || fail "the hit (review 6: [P2] a.txt:3 flags \$HY/bench) is not on the self-heals list as a possible false hit: $(cat "$ST/selfheals.jsonl" 2>&1)"
+  ! grep -qF '"blocked-c7"' "$CONVEYOR_LEDGER" 2>/dev/null && [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue)')" = '[]' ] \
+    || fail "the shut card (review 6: [P2] a.txt:3 flags \$HY/bench) is in Needs you, or needsask() put it to the owner before the shut: $(cat "$CONVEYOR_LEDGER" 2>&1) $(loop snapshot --fresh | jq -c .needsYou)"
 }
 
 # Bug: a P1 that is new in a last review (the fix-only review after its one fix round finds another, not the one fixed,
 # so repeats() does not see it) landed as a follow-up. The first last review with a P1 goes to a fix round (after fix, no
-# stop); once that round is given (p1fix) a last review that holds a P1 blocks (after p1), and one with only a P2 still
-# lands with its follow-up.
+# stop); once that round is given (p1fix) a last review that holds a P1 lands with it as a follow-up (issue 1670: it
+# blocked), as one with only a P2 does.
 t_p1lastnew() {
   setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo fix1 >> a.txt' b.txt base
   printf '%s\n' '[P1] a.txt:3 drops what the issue asks' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
   afterrun "$(issue 7 2026-01-01)" 'pass=3'
   [ "$(jq -c '[.after, .stop, .last]' <<<"$AFTER")" = '["fix","",""]' ] || fail "a new P1 on the last review did not go to one fix round: $AFTER"
   afterrun "$(issue 7 2026-01-01)" 'pass=4 p1fix=1'
-  [ "$(jq -c '[.after, .stop, .last]' <<<"$AFTER")" = '["p1","max-reviews",""]' ] || fail "a new P1 after the P1 fix round did not block: $AFTER"
+  [ "$(jq -c '[.after, .stop, .last]' <<<"$AFTER")" = '["last","max-reviews","1"]' ] || fail "a new P1 after the P1 fix round (review 4: [P1] a.txt:3 drops what the issue asks) did not land: $AFTER"
   printf '%s\n' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
   afterrun "$(issue 7 2026-01-01)" 'pass=4 p1fix=1'
   [ "$(jq -c '[.after, .stop, .last]' <<<"$AFTER")" = '["last","max-reviews","1"]' ] || fail "a last review with only a P2 after the P1 fix round did not land: $AFTER"
 }
 
+# Issue 1670: a third review (the last) that says NO-GO with a P0 lands the card: cardfix() writes no blocked line and
+# goes on to land (go ''), with no P1 fix round first, and the card files each finding as a follow-up, the P0 too
+# (followups(), as card() calls it). A finding the judge declined (its DECLINED line) is not filed. Bugs: the card
+# blocked for the owner on the P0 ("review 3 is the last review and still holds a P0 finding") and filed nothing; a
+# declined finding was filed.
+t_lastp0() {
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo fix1 >> a.txt' b.txt base
+  printf '%s\n' '[P0] a.txt:3 drops the payment' '[P2] c.txt:3 a nit' 'DECLINED: [P1] b.txt:1 a matter of taste (judge: no defect)' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  afterrun "$(issue 7 2026-01-01)" 'pass=3' 'c=c7 n=7 rline=""; cardfix; echo "[$go]" > "$T/$CASE/go"
+    [ "$after" != last ] || [ -n "$isfu" ] || followups c7 "$issue" "$wt.review" > "$T/$CASE/ups"'
+  [ "$AFTER" = '{"res":"NO-GO","after":"last","last":"1","stop":"max-reviews","hard":"","last0":"[P0] a.txt:3 drops the payment","isfu":"","priv":"","why":""}' ] \
+    && [ "$(cat "$T/$CASE/go" 2>&1)" = '[]' ] && [ -z "$(st 'select(.step == "blocked")' 2>/dev/null)" ] \
+    || fail "a last NO-GO with a P0 (review 3: [P0] a.txt:3 drops the payment) did not go on to land: $AFTER go $(cat "$T/$CASE/go" 2>&1) $(st 'select(.step == "blocked")' 2>&1)"
+  [ "$(cat "$T/$CASE/ups" 2>&1)" = '[100101,100102]' ] && [ "$(jq -r .title "$STUB/filed" | tr '\n' '|')" = '[P0] a.txt:3 drops the payment|[P2] c.txt:3 a nit|' ] \
+    || fail "the last review's P0 and P2 were not filed as follow-ups, or its declined [P1] b.txt:1 was: $(cat "$T/$CASE/ups" "$STUB/filed" 2>&1)"
+}
+
 # Bug (#1436): the guide gave one more review for the fix of a P1 or of a privacy hit, as if the two shared it. Each has its
 # own fix round (privfix, p1fix): review 4, which follows a privacy fix round (privfix=1), holds a P1 that is no privacy
-# hit, and it still goes to its own fix round (and a review 5), and does not block.
+# hit, and it still goes to its own fix round (and a review 5), and does not land first.
 t_privfixthenp1() {
   setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo fix1 >> a.txt' b.txt base
   printf '%s\n' '[P1] a.txt:3 drops what the issue asks' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
   afterrun "$(issue 7 2026-01-01)" 'pass=4 privfix=1'
   [ "$(jq -c '[.after, .stop, .last]' <<<"$AFTER")" = '["fix","",""]' ] || fail "a P1 on review 4, after a privacy fix round, did not go to its own fix round: $AFTER"
-  pagesays_review docs/cards.md 'once more after the fix of a privacy hit on the last review and once more after the fix of a P1 on a last review' "review 4 held a P1 after the privacy fix and got a fix round: $AFTER"
+  pagesays_review docs/cards.md 'once more after each fix of a privacy hit on the last review and once more after the fix of a P1 on a last review' "review 4 held a P1 after the privacy fix and got a fix round: $AFTER"
 }
 
 # Bug: a follow-up chain goes past the cap: a card whose issue is a follow-up at the cap (MAX_DEPTH, 2) files another
-# level on its last NO-GO, or its leftover finding is in no declined list, or its reason does not name the cap.
+# level on its last NO-GO, or its leftover finding is on no list, or its reason does not name the cap. Issue 1670: the
+# finding went to the declined list, where nothing builds it; it goes on the self-heals list instead.
 # Its last NO-GO is a P2 back after its one fix round (afterreview(): the last review, as a third NO-GO is), in two
-# reviews; card() declines the findings of a card at the cap (isfu) with decline(), as called here.
+# reviews; card() puts the findings of a card at the cap (isfu) on the self-heals list with capheals(), as called here.
 t_deep() {
   setup "[$(issue 7 2026-01-01 conveyor-followup bug P1 | jq -c '.body = "Follow-up to #5.\n\nFollow-up depth: 2"')]"
   # The second review names a.txt:12, where the fix's one appended line moves a.txt:11 (donewhen.sh rounded()), so it is the same
-  # finding back; its text differs from the first's, so the declined one is known to come from the last review.
+  # finding back; its text differs from the first's, so the listed one is known to come from the last review.
   fx_wt 'echo two >> a.txt' b.txt base
   for i in 1 2; do printf '%s\n' "[P2] a.txt:1$i wrong word" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.$i"; done; cp "$STUB/review.1" "$FXWT.review"
   afterrun "$(jq -c '.[0]' "$STUB/issues.json")" 'told 1 "echo two >> a.txt" && cp "$STUB/review.2" "$wt.review" && pass=2' \
-    '[ -z "$isfu" ] || leftovers "$wt.review" | decline c7 7 "$FUCAP"'
+    '[ -z "$isfu" ] || leftovers "$wt.review" | capheals c7 7 "$ISSUE"'
   [ "$AFTER" = '{"res":"NO-GO","after":"last","last":"1","stop":"repeat","hard":"","last0":"","isfu":"1","priv":"","why":""}' ] \
-    || fail "a depth-2 card's last review did not land with its findings declined, not filed: $AFTER"
-  [ "$(jq -c '[.issue, .finding, .by, .why]' "$ST/declined.jsonl")" = '[7,"[P2] a.txt:12 wrong word","code","its issue is a follow-up at the depth cap of 2, so no deeper follow-up is filed"]' ] \
-    || fail "the depth-2 card's leftover finding is not in the declined list once, with who and why: $(cat "$ST/declined.jsonl" 2>&1)"
+    || fail "a depth-2 card's last review did not land with its findings listed, not filed: $AFTER"
+  [ "$(jq -c '[.issue, .finding, .effect, .why]' "$ST/selfheals.jsonl")" = '[7,"[P2] a.txt:12 wrong word","self-heals","its issue is a follow-up at the depth cap of 2, so no deeper follow-up is filed"]' ] \
+    && [ ! -e "$ST/declined.jsonl" ] || fail "the depth-2 card's leftover finding is not on the self-heals list once, with why, and off the declined list: $(cat "$ST/selfheals.jsonl" "$ST/declined.jsonl" 2>&1)"
 }
 
 # Bug: a follow-up is known only by its depth line, so one with the follow-up label and no such line (a slice of a
@@ -398,17 +448,17 @@ t_fuknownlong() {
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = 2 ] || fail "the depth line of a body past 64 KiB is not read: $(cat "$T/$CASE/run.out")"
 }
 
-# Bug: a declined list that cannot be written (here a folder is in its place) loses the findings: decline() says it
-# wrote them, so the card ends as landed and clean, and its review goes with its worktree. On its failure (exit
+# Bug: a self-heals list that cannot be written (here a folder is in its place) loses the findings at the depth cap:
+# capheals() says it wrote them, so the card ends as landed and clean, and its review goes with its worktree. On its failure (exit
 # non-zero) the card ends blocked, its review kept (card.sh).
 t_declinefail() {
-  setup "[$(issue 7 2026-01-01)]"; mkdir -p "$ST/declined.jsonl"
-  fx_in 'printf "%s\n" "[P1] a.txt:1 wrong word" | decline c1-7 7 "$FUCAP"'
-  [ "$RC" != 0 ] && grep -q '^conveyor: card c1-7: its declined findings could not be written to ' "$T/$CASE/run.out" \
-    || fail "a declined list that cannot be written did not fail decline() saying so: exit $RC, $(cat "$T/$CASE/run.out")"
+  setup "[$(issue 7 2026-01-01)]"; mkdir -p "$ST/selfheals.jsonl"
+  fx_in 'printf "%s\n" "[P1] a.txt:1 wrong word" | capheals c1-7 7 "$(jq -c ".[0]" "$STUB/issues.json")"'
+  [ "$RC" != 0 ] && grep -q '^conveyor: card c1-7: its findings at the follow-up depth cap could not be written to ' "$T/$CASE/run.out" \
+    || fail "a self-heals list that cannot be written did not fail capheals() saying so: exit $RC, $(cat "$T/$CASE/run.out")"
 }
-# Bug: card() ignores decline()'s failure after the landing: the depth-capped card ends landed and clean, and its review
-# goes with its worktree. A loop run: the landing, then decline(), then the block that keeps the review are joined
+# Bug: card() ignores capheals()'s failure after the landing: the depth-capped card ends landed and clean, and its review
+# goes with its worktree. A loop run: the landing, then capheals(), then the block that keeps the review are joined
 # in cardland() (cardland.sh), which no engine function exposes alone.
 t_declinefailrun() {
   # Its last NO-GO is a P2 back after its one fix round (the last review, as a third NO-GO is), in two reviews.
@@ -417,12 +467,12 @@ t_declinefailrun() {
   # one: with the same words in both, a block that kept review 1 only passed.
   printf '%s\n' '[P2] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   printf '%s\n' '[P2] [E1] a.txt:1 wrong word, seen again in review 2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
-  mkdir -p "$ST/declined.jsonl"
-  # loop: the order of the landing, decline() and the block that keeps the review is card()'s own, after afterreview
+  mkdir -p "$ST/selfheals.jsonl"
+  # loop: the order of the landing, capheals() and the block that keeps the review is card()'s own, after afterreview
   loop run >/dev/null 2>&1 || fail "run exited non-zero"
   [ "$(st 'select(.step | IN("landed", "blocked")) | .step' | tr '\n' ' ')" = 'landed blocked ' ] \
-    && st 'select(.step == "blocked") | .reason' | grep -q 'could not write its leftover findings to the declined list' || fail "a card whose findings could not be declined did not end landed, then blocked saying so: $(st 'select(.step | IN("landed", "blocked"))')"
-  k=$ST/$(st 'select(.step == "blocked") | .kept'); grep -q 'seen again in review 2' "$k"/*.review || fail "the last review, of the findings that could not be declined, was not kept: $(ls "$k" 2>&1)"
+    && st 'select(.step == "blocked") | .reason' | grep -q 'could not write its leftover findings to the self-heals list' || fail "a card whose findings could not be listed did not end landed, then blocked saying so: $(st 'select(.step | IN("landed", "blocked"))')"
+  k=$ST/$(st 'select(.step == "blocked") | .kept'); grep -q 'seen again in review 2' "$k"/*.review || fail "the last review, of the findings that could not be listed, was not kept: $(ls "$k" 2>&1)"
 }
 
 # Bug it catches: cardreview() did not give judged() the tree before the last fix round (fixtree), so the judge's

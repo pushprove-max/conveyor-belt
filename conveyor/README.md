@@ -188,7 +188,7 @@ runs, its claim is wrong, its defect is already fixed on main, or, at a level th
 declined for that: the judge marks it outside. It becomes an `OUTSIDE:` line of the review, with no fix round for
 this card, and a review with no accepted finding is a GO. When the card lands, each outside finding is filed as a
 follow-up of the card, with its level and the card's issue as its parent, as a finding of a last NO-GO is; a card
-at the follow-up depth cap puts it on the declined list instead. The card's filed line names the follow-up of each
+at the follow-up depth cap puts it on the self-heals list instead. The card's filed line names the follow-up of each
 (`outside`), and the Board shows it under the review as "Filed as a follow-up" with that issue. A line the reviewer
 itself starts with `OUTSIDE:` is a finding. From the second review on (counted as for the review limit), a NO-GO
 whose findings are all new and all P2 or P3 ends the fix loop: each finding of the earlier reviews is fixed, and none
@@ -243,7 +243,8 @@ in the change that is not `harm` never blocks a review: at any review whose acce
 of another kind, the findings go to their lists in the same way and the review gives GO. When a `harm` finding, or
 a finding with no kind, is beside them, the review gives NO-GO and the fix round fixes all of them, with none on a
 list. A finding that cannot be written to its list has no kind. One still open after the last review goes to its
-list, and at that review only a `harm` P0 or P1 (or one with no kind) blocks the card. A line that
+list, and at that review no finding blocks the card: a `harm` one (or one with no kind) is filed as a follow-up as
+the card lands, at any level. A line that
 the reviewer itself starts with `SELFHEALS:` is a finding. `conveyor.sh heals batch <area>` (the Board's "File a batch
 card", `-` for the entries with no area) files one card that holds an area's open entries as its scope, and marks them
 with that card. The Board's batch sheet names the entries it keeps, the card's title, its priority and whether it is

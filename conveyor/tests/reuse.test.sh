@@ -58,18 +58,18 @@ t_reuseexcerpts() {
     || fail "the review reused after a fix that changed nothing lost the line the fix before it deleted: $r ($(st 'select(.issue == 7) | "\(.step) \(.result)"' | tr '\n' ,))"
 }
 
-# #8: a NO-GO with a P1: the reused review repeats it after its fix round, and the card blocks as it does today. A
-# case of its own on a main of its own, beside t_reusesame.
+# #8: a NO-GO with a P1: the reused review repeats it after its fix round, which ends the loop: the card lands with the
+# P1 filed as a follow-up (issue 1670; it blocked). A case of its own on a main of its own, beside t_reusesame.
 t_reuseblock() {
   setup "[$(issue 8 2026-01-02)]"; steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
-  echo '[ "$(wc -l < "$STUB/sessions")" != 1 ] || echo two >> a.txt' > "$STUB/build"; head=$(git -C "$R" rev-parse HEAD)
+  echo '[ "$(wc -l < "$STUB/sessions")" != 1 ] || echo two >> a.txt' > "$STUB/build"
   echo "$NOGO" > "$STUB/review.1"
-  # loop: only card()'s review loop shows a reused NO-GO counted as a round and the card blocked, with nothing landed or filed
+  # loop: only card()'s review loop shows a reused NO-GO counted as a round, then the card's test step and landing
   loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
-  [ "$(steps 8)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,blocked blocked," ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
-    && [ "$(st 'select(.issue == 8 and .step == "blocked") | .reason')" = 'the fix for [P1] a.txt:1 wrong word did not hold after 1 round' ] \
-    || fail "a carried NO-GO with a repeated P1 did not block the card: $(steps 8) $(wc -l < "$STUB/reviews") reviews $(st 'select(.issue == 8 and .step == "blocked") | .reason')"
-  [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ ! -e "$STUB/filed" ] || fail "#8 landed or filed"
+  [ "$(steps 8)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,test pass,landed ok," ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
+    || fail "a carried NO-GO with a repeated P1 ([P1] a.txt:1 wrong word) did not land: $(steps 8) $(wc -l < "$STUB/reviews") reviews $(st 'select(.issue == 8 and .step == "blocked") | .reason')"
+  [ "$(jq -r .title "$STUB/filed" 2>&1)" = '[P1] a.txt:1 wrong word' ] && [ "$(st 'select(.issue == 8 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] \
+    || fail "#8 (review: [P1] a.txt:1 wrong word, repeated) did not land on main with the P1 filed: $(cat "$STUB/filed" 2>&1)"
 }
 
 # A review is reused only when both are the same. Bugs: a fix session that changed the staged change, or a card that
@@ -230,12 +230,12 @@ t_p1lastfixed() {
   pagesays_reuse docs/cards.md 'and one more the fix of a P1 on a last review' "the card had $n reviews"
 }
 
-# Done when: the P1 still holds after that fix, so the card blocks with its patch kept and files no follow-up.
+# Done when (issue 1670): the P1 still holds after that fix, so the card lands and the P1 is filed as a follow-up.
+# Bug: the card blocked for the owner and filed nothing.
 t_p1laststill() {
   p1last $'[P1] a.txt:3 drops what the issue asks\nUSER-VISIBLE: no\nVERDICT: NO-GO'
   p1fixround NO-GO
-  [ -z "$(st 'select(.issue == 7 and .step == "landed")')" ] && [ -n "$(st 'select(.issue == 7 and .step == "blocked")')" ] && [ ! -e "$STUB/filed" ] \
-    || fail "a P1 that holds after its fix round did not block with nothing filed: $(steps) $(cat "$STUB/filed" 2>&1)"
-  c=$(st 'select(.issue == 7 and .step == "picked") | .card')
-  [ -n "$(cat "$ST/kept/$c"/*.patch 2>/dev/null)" ] || fail "the blocked card's patch was not kept: $(ls "$ST/kept/$c" 2>&1)"
+  [ "$(steps)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,landed ok," ] \
+    && [ -z "$(st 'select(.issue == 7 and .step == "blocked")')" ] && [ "$(jq -r .title "$STUB/filed" 2>&1)" = '[P1] a.txt:3 drops what the issue asks' ] \
+    || fail "a P1 that holds after its fix round (review 4: [P1] a.txt:3 drops what the issue asks) did not land with it filed: $(steps) $(cat "$STUB/filed" 2>&1)"
 }

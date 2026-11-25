@@ -390,30 +390,17 @@ asking"). The pack keeps the list as `auto.standing`. A kind works whether `/con
   ([Fix cards of a failed suite](releases.md#fix-cards-of-a-failed-suite)).
 - `fixed-block`: a fix that landed removed the cause of a blocked card. The Foreman adds `Depends on: #<fix>` to the
   card's issue and runs `conveyor.sh retry <issue> --fresh`.
-- `review-retry`: the review blocked a card, because the fix for a finding did not hold after its fix rounds. The
-  Foreman's watcher runs `conveyor.sh retry <issue>` on the host itself and logs the step in the ruling log. While
-  auto is on, the engine on the host does this step too, also when the watcher is not running. The
+- `review-retry`: the review blocks no card on a finding. The card lands, and each open finding becomes a follow-up
+  ([When the fix loop ends](cards.md#when-the-fix-loop-ends)). This kind acts only on a card that the card records
+  still show blocked because the fix for a finding did not hold after its fix rounds. The Foreman's watcher runs
+  `conveyor.sh retry <issue>` for that card on the host itself, one time for each issue, and logs the step in the
+  ruling log. While auto is on, the engine on the host does this step too, also when the watcher is not running. The
   Foreman gets no wake for that card and does not tell you. If the retry fails, the blocked card wakes the Foreman, and
-  the wake gives the reason of the failed retry. A card blocked for another reason wakes the Foreman as before. The
-  engine does not retry a card whose block reason holds a word of `auto.reserved` (a finding tagged `[security]`, for
-  example) or an item of the owner's profile. The watcher leaves that card blocked and wakes the Foreman with the
-  block's reason, and the Foreman puts the card to you. When the watcher cannot read `auto.reserved` or your profile on
-  the host (for example, your profile is there but cannot be read), it does not retry the card. It wakes the Foreman
-  with the block's reason, and the Foreman puts the card to you. No retry ran, so the Foreman does not say that a
-  retry failed.
-  `review-retry` retries an issue one time. When the review blocks a later card of the issue, the watcher and the
-  engine do not retry it. The card goes to you in Needs you, with the two block reasons and the kept patch, and auto
-  does not answer it with a retry. While auto is `on` (not `narrow`), the engine lands that card instead, one time for
-  each issue. The next card of the issue starts from the kept patch and goes through its tests and its landing as any
-  card does. A test that fails still stops it. Each finding of its last review becomes a follow-up. The finding that
-  blocked the card is not held, also when it names a pipeline file, unless the finding holds a word of
-  `auto.reserved` or an item of your profile. The engine logs this step in the ruling log, as a
-  `review-retry` step, and in auto's log with the decisions that auto made for you. These still go to you: a block
-  reason that names a P0 finding, a word of `auto.reserved` or an item of your profile; an issue at the follow-up
-  depth cap; and a card that you answered in Needs you. Your own `retry` of the issue (Retry or Fix on the Board, or your answer to that
-  card in Needs you), or a card of the issue that lands, lets `review-retry` retry the issue one more time. Other
-  retries do not: a retry by the Foreman, Hold on the Board, an issue that is opened again or gets your yes, or an
-  answer that auto can give.
+  the wake gives the reason of the failed retry. The engine does not retry a card whose block reason holds a word of
+  `auto.reserved` (a finding tagged `[security]`, for example) or an item of the owner's profile, or when it cannot
+  read `auto.reserved` or your profile on the host. The watcher then leaves the card blocked and wakes the Foreman with
+  the block's reason, and the Foreman puts the card to you. The retried card goes through its review, its tests and
+  its landing as any card does, so a second review block does not come to you in Needs you.
 
 Some steps always go to you, whatever kinds are on: new engine behaviour that you did not ask for, a design choice, a
 release that you did not ask for, and anything that `auto.reserved` holds.

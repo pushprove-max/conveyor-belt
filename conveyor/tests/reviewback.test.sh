@@ -80,19 +80,22 @@ t_cameback() {
 
 t_camebackp1() {
   backsetup 8
-  # #8: a P1 finding back after its fix round blocks the card for the owner (after hard: card() blocks with "the fix
-  # for <hard>"), with no second fix session and nothing filed.
+  # #8: a P1 finding back after its fix round ends the loop (hard, stop repeat) with no second fix session, and the
+  # card lands with the P1 filed as a follow-up (issue 1670). Bug: it blocked the card for the owner.
   printf '%s\n' '[P1] a.txt:1 wrong word' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
   printf '%s\n' '[P1] a.txt:1 wrong word. Proof: line 3 reads fix2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   afterrun "$(issue 8 2026-01-01)" 'answers "$wt" > "$T/$CASE/an1"; told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && pass=2' \
-    'answers "$wt" > "$T/$CASE/an2" || : # its exit is 1 for a review with no EARLIER line, which card() does not read'
-  [ "$AFTER" = '{"res":"NO-GO","after":"hard","last":"","stop":"","hard":"[P1] a.txt:1 wrong word. Proof: line 3 reads fix2 did not hold after 1 round","last0":"","isfu":"","priv":"","why":""}' ] \
-    || fail "a P1 finding back after its fix did not block the card with the reason: $AFTER"
-  # Issue 306: the review that blocks keeps its answer beside the finding's first location and proof (donewhen.sh answers(), on
+    'answers "$wt" > "$T/$CASE/an2" || : # its exit is 1 for a review with no EARLIER line, which card() does not read
+     [ "$after" != last ] || [ -n "$isfu" ] || followups c7 "$issue" "$wt.review" > "$T/$CASE/ups"'
+  [ "$AFTER" = '{"res":"NO-GO","after":"last","last":"1","stop":"repeat","hard":"[P1] a.txt:1 wrong word. Proof: line 3 reads fix2","last0":"","isfu":"","priv":"","why":""}' ] \
+    || fail "a P1 finding back after its fix (review 2: [P1] a.txt:1 wrong word. Proof: line 3 reads fix2) did not end the loop to land: $AFTER"
+  [ "$(cat "$T/$CASE/ups" 2>&1)" = '[100101]' ] && [ "$(jq -r .title "$STUB/filed")" = '[P1] a.txt:1 wrong word. Proof: line 3 reads fix2' ] \
+    || fail "the P1 back after its fix (review 2: [P1] a.txt:1 wrong word. Proof: line 3 reads fix2) was not filed as a follow-up: $(cat "$T/$CASE/ups" "$STUB/filed" 2>&1)"
+  # Issue 306: the last review keeps its answer beside the finding's first location and proof (donewhen.sh answers(), on
   # each review's line when it has one): the first review has none.
   [ "$(cat "$T/$CASE/an1") $(cat "$T/$CASE/an2")" \
     = '[] [{"id":"E1","answer":"[P1] a.txt:1 wrong word. Proof: line 3 reads fix2","first":{"round":1,"at":"a.txt:1","line":"[P1] a.txt:1 wrong word"}}]' ] \
-    || fail "the review that blocked lost its answer or the first proof: $(cat "$T/$CASE/an1") $(cat "$T/$CASE/an2")"
+    || fail "the last review lost its answer or the first proof: $(cat "$T/$CASE/an1") $(cat "$T/$CASE/an2")"
 }
 
 # Issue 1578: from review 2 on, a NO-GO whose findings are all new P2s (each finding of review 1 fixed) ends the loop
@@ -241,8 +244,8 @@ t_retrystabilised() {
     || fail "the retried card lost the kept STABILISED line when its fix's reply named none: $RESUMED $(cat "$T/$CASE/lines" 2>&1)"
 }
 
-# A repeat is known whatever else ends the loop. Bugs: a P1 finding back after its fix on the last round lands with
-# follow-ups instead of blocking; a card that blocks deletes its fix rounds, so its retry fixes a finding that came
+# A repeat is known whatever else ends the loop. Bugs: a P1 finding back after its fix on the last round is not known
+# as a repeat (hard); a card that blocks (on its tests, say) deletes its fix rounds, so its retry fixes a finding that came
 # back as if new; a card whose patch could not be kept deletes them too. Its cases (repeatkept*) each block card c7
 # of one issue (keptblock) after a fix round, with no card run: its build adds fix1 to a.txt ($FXWT, fx_wt), each fix
 # round (told) fix<round + 1>. Its first review is $FXWT.review, the next $STUB/review.<n>.
@@ -252,40 +255,39 @@ keptsetup() { # <issue>
 
 t_repeatkept() {
   keptsetup 10
-  # #10: the third review, the round limit, repeats a P1 its fix round was told to fix: it blocks (after hard), so
-  # nothing is filed. The third review has a verdict, so it answered round 2 (answered, as cardreview() writes it).
+  # #10: the third review, the round limit, repeats a P1 its fix round was told to fix: it is known as a repeat (hard),
+  # and the loop ends to land. The third review has a verdict, so it answered round 2 (answered, as cardreview() writes it).
   echo "$NOGO" > "$FXWT.review"; printf '%s\n' "$B" 'USER-VISIBLE: no' 'VERDICT: NO-GO' | tee "$STUB/review.2" > "$STUB/review.3"
   afterrun "$(issue 10 2026-01-01)" 'told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && told 2 "echo fix3 >> a.txt" && cp "$STUB/review.3" "$wt.review" && : > "$wt.rounds/answered" && pass=3'
-  [ "$(jq -c '[.after, .hard]' <<<"$AFTER")" = "[\"hard\",\"$B did not hold after 1 round\"]" ] || fail "a P1 repeat on the last round did not block: $AFTER"
-  # Blocked so after its three reviews (its worktree, fix rounds and last review as afterrun left them), and retried:
+  [ "$(jq -c '[.after, .hard]' <<<"$AFTER")" = "[\"last\",\"$B\"]" ] || fail "a P1 repeat on the last round (review 3: $B) was not known as a repeat: $AFTER"
+  # Blocked after its three reviews, by its tests (its worktree, fix rounds and last review as afterrun left them), and retried:
   # the resumed session is told the finding came back, with the diff of the fix round told to fix it (keptrep(), then
   # donewhen.sh again(), as card()'s build tells it).
-  keptblock 10 3 "the fix for $B did not hold after 1 round"
+  keptblock 10 3 "test: the changed tests failed after their fix round"
   resumed 10 'keptrep; again "$rep" > "$T/$CASE/brief"'
   b=$T/$CASE/brief
   grep -qx '# These findings came back after a fix round for them' "$b" && grep -qx "## \\$B" "$b" && grep -qx '+fix3' "$b" \
-    || fail "the resumed session of a card blocked on a repeat was not told it came back with the earlier fix's diff: $(cat "$b") $RESUMED"
+    || fail "the resumed session of a card blocked after a repeat was not told it came back with the earlier fix's diff: $(cat "$b") $RESUMED"
 }
 
 t_repeatkeptp0() {
   keptsetup 14
-  # #14: as #10 (t_repeatkept), with a new P0 beside the repeated P1 on the third review: it blocks on the repeat
-  # (after hard), its block reason naming the P0 first (cardfix()) and keeping the form the review-retry and the
-  # Board read: "the fix for [P..] ... did not hold after <n> rounds" (needsask.sh needsretry()). Bugs it catches: a
-  # repeat skipped the P0 check, so the block named only the P1 that came back, and the P0 reached no one; a reason
-  # that began with the P0 was no longer retried or shown as a review's block. And: the P0's proof quotes "; [P2]",
-  # which the reason wrote ";[P2]": each finding's text is as the review wrote it.
+  # #14: as #10 (t_repeatkept), with a new P0 beside the repeated P1 on the third review: the loop ends on the repeat
+  # (stop repeat, the P0 its last0), and cardfix() writes no blocked line and lets the card go on to land (go ''), where
+  # both are filed (issue 1670). Bug: it blocked the card for the owner ("the fix for <the P0>; <the P1> did not hold after 1 round").
   echo "$NOGO" > "$FXWT.review"; printf '%s\n' "$B" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
-  printf '%s\n' "$B" '[P0] c.txt:1 deletes the data. Proof: it prints "kept; [P2] x"' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
-  afterrun "$(issue 14 2026-01-01)" 'told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && told 2 "echo fix3 >> a.txt" && cp "$STUB/review.3" "$wt.review" && pass=3' 'c=c7 n=14 rline=""; cardfix'
-  [ "$(st 'select(.issue == 14 and .step == "blocked") | .reason')" = "the fix for [P0] c.txt:1 deletes the data. Proof: it prints \"kept; [P2] x\"; $B did not hold after 1 round" ] \
-    || fail "a repeat's block did not name the new P0 of its review first, in the form the review-retry reads: $(st 'select(.issue == 14 and .step == "blocked")') $AFTER"
+  printf '%s\n' "$B" '[P0] c.txt:1 deletes the data' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
+  afterrun "$(issue 14 2026-01-01)" 'told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && told 2 "echo fix3 >> a.txt" && cp "$STUB/review.3" "$wt.review" && pass=3' \
+    'c=c7 n=14 rline=""; cardfix; echo "[$after] [$go]" > "$T/$CASE/fix"'
+  [ "$(jq -c '[.stop, .hard, .last0]' <<<"$AFTER")" = "[\"repeat\",\"$B\",\"[P0] c.txt:1 deletes the data\"]" ] && [ "$(cat "$T/$CASE/fix" 2>&1)" = '[last] []' ] \
+    && [ -z "$(st 'select(.issue == 14 and .step == "blocked")')" ] \
+    || fail "a repeat of $B beside a new P0 (review 3) did not go on to land: $AFTER $(cat "$T/$CASE/fix" 2>&1) $(st 'select(.issue == 14 and .step == "blocked")')"
 }
 
 t_repeatkeptfail() {
   keptsetup 11
   # #11: a NO-GO, its fix, then a review that fails: blocked with its patch and its fix round kept. The retry's review
-  # repeats the P1: blocked (after hard), with no fix session after it.
+  # repeats the P1: known as a repeat (hard), it ends the loop to land, with no fix session after it.
   printf '%s\n' "$B" 'USER-VISIBLE: no' 'VERDICT: NO-GO' | tee "$STUB/review.retried" > "$FXWT.review"
   keptblock 11 1 'review 2: the review session failed' 'told 1 "echo fix2 >> a.txt"'
   [ -s "$K/c7.patch" ] && [ "$(jq -r .line "$K/c7.rounds/findings.jsonl")" = "$B" ] && grep -qx '+fix2' "$K/c7.rounds/1.diff" \
@@ -293,8 +295,8 @@ t_repeatkeptfail() {
   # Its kept review, written before that fix round, cannot show a repeat of it: the resumed session is not told one
   # (keptrep(), read before the retried card's own review).
   retried 11 "$STUB/review.retried" '' 'keptrep; printf "%s" "$rep" > "$T/$CASE/rep"'
-  [ "$(jq -c '[.mode, .rounds]' <<<"$RESUMED")" = '["session",1]' ] && [ "$(jq -c '[.after, .hard]' <<<"$AFTER")" = "[\"hard\",\"$B did not hold after 1 round\"]" ] \
-    || fail "a retry did not know a repeat of its earlier card's fix round: $RESUMED $AFTER"
+  [ "$(jq -c '[.mode, .rounds]' <<<"$RESUMED")" = '["session",1]' ] && [ "$(jq -c '[.after, .hard]' <<<"$AFTER")" = "[\"last\",\"$B\"]" ] \
+    || fail "a retry did not know a repeat of its earlier card's fix round (its review: $B): $RESUMED $AFTER"
   [ ! -s "$T/$CASE/rep" ] || fail "the resumed session was told of a repeat its kept review, written before the fix round, cannot show: $(cat "$T/$CASE/rep")"
 }
 
@@ -380,14 +382,14 @@ t_repeatkeptmove() {
   jq -r 'select(.issue == 13 and .step == "blocked") | .reason' "$ST/retried.jsonl" | grep -q 'evidence not moved' && [ "$(jq -r .line "$T/$CASE/cards/c7.rounds/findings.jsonl" 2>&1)" = '[P1] a.txt:1 wrong word' ] \
     || fail "fix rounds that could not be moved were deleted: $(cat "$ST/retried.jsonl") $(ls "$T/$CASE/cards")"
   # Its retry takes the fix rounds left beside the worktree, not the folder that stopped their move: the repeat is
-  # known, and its first review blocks the card with no fix session.
+  # known, and its first review ends the loop with no fix session.
   retried 13 "$STUB/review.retried"
-  [ "$(jq -r .mode <<<"$RESUMED")" = session ] && [ "$(jq -c '[.after, .last, .hard]' <<<"$AFTER")" = '["hard","","[P1] a.txt:1 wrong word did not hold after 1 round"]' ] \
+  [ "$(jq -r .mode <<<"$RESUMED")" = session ] && [ "$(jq -c '[.after, .last, .hard]' <<<"$AFTER")" = '["last","1","[P1] a.txt:1 wrong word"]' ] \
     || fail "a retry copied the folder that stopped the move instead of the fix rounds left beside the worktree: $RESUMED $AFTER"
 }
 
 # A kept patch reviewed again with no build (an approval with a condition) carries its loop's rounds. Bug: that
-# review began with no fix rounds, so a P1 back after its fix round was fixed again instead of blocking the card.
+# review began with no fix rounds, so a P1 back after its fix round was fixed again instead of ending the loop.
 # Card c7 of #7 blocked for the owner's yes after two reviews that repeat a P2 after its fix round (the last review,
 # visible, so the card stops for the yes), its issue body kept beside its patch (visgate()), then retried. Its change
 # touches product code (web/), as a visible change must to stop a card. Then the yes comes, with a condition: the
@@ -406,8 +408,8 @@ t_reviewrounds() {
   printf '%s\n' '[P1] a.txt:1 wrong word' "$YES" 'VERDICT: NO-GO' > "$STUB/review.3"
   retried 7 "$STUB/review.3"
   [ "$(jq -c '[.mode, .rounds]' <<<"$RESUMED")" = '["review",2]' ] \
-    && [ "$AFTER" = '{"res":"NO-GO","after":"hard","last":"","stop":"","hard":"[P1] a.txt:1 wrong word did not hold after 1 round","last0":"","isfu":"","priv":"","why":""}' ] \
-    || fail "a kept patch reviewed again did not know a repeat of its loop's fix round: $RESUMED $AFTER"
+    && [ "$AFTER" = '{"res":"NO-GO","after":"last","last":"1","stop":"repeat","hard":"[P1] a.txt:1 wrong word","last0":"","isfu":"","priv":"","why":""}' ] \
+    || fail "a kept patch reviewed again (review: [P1] a.txt:1 wrong word) did not know a repeat of its loop's fix round: $RESUMED $AFTER"
 }
 
 # A kept patch reviewed again with no build counts its loop's reviews toward the round limit. Bug: its count began
@@ -458,19 +460,6 @@ t_retryotherrounds() {
   recok "$ST/cards.jsonl" "a card whose third review ended its loop"
   [ "$(loop snapshot --fresh | jq -c '.landed[] | select(.issue == 7) | .rounds | map(.loopEnd)')" = '[null,null,{"stop":"max-reviews","own":3,"rounds":0}]' ] \
     || fail "the snapshot does not give why the loop ended: $(loop snapshot --fresh | jq -c '.landed[] | select(.issue == 7) | .rounds')"
-}
-
-# Issue 1075: a third review (the last) that says NO-GO with a P0 blocks the card (after p0: card() blocks naming
-# last0). Bug: its findings, the P0 among them, were filed as follow-ups and the card landed the P0 on main. Its work
-# and review stay kept for a retry (block(), as card() calls it then).
-t_lastp0() {
-  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo fix1 >> a.txt' b.txt base
-  printf '%s\n' '[P0] a.txt:3 drops the payment' '[P2] c.txt:3 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
-  afterrun "$(issue 7 2026-01-01)" 'pass=3' '[ "$after" != p0 ] || block c7 7 "$wt" "the last review holds a P0"'
-  [ "$AFTER" = '{"res":"NO-GO","after":"p0","last":"","stop":"max-reviews","hard":"","last0":"[P0] a.txt:3 drops the payment","isfu":"","priv":"","why":""}' ] \
-    && [ ! -e "$STUB/filed" ] || fail "a last NO-GO with a P0 did not block naming it, or filed: $AFTER $(cat "$STUB/filed" 2>&1)"
-  k=$ST/kept/c7; [ -n "$(cat "$k"/*.patch 2>/dev/null)" ] && grep -q 'drops the payment' "$k"/*.review \
-    || fail "the blocked card's patch or last review was not kept for a retry: $(ls "$k" 2>&1)"
 }
 
 # The declined list: every finding that is not built is one line of the project's state. Bugs: a finding declined by

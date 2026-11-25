@@ -55,7 +55,8 @@ needsask() {
   local cs old rows='[]' c n k r r1 e id ans asked by opts q h
   local -A issue=()
   # The cards blocked now: a card's last closing line is a blocked one, so a card retried (its lines moved to the
-  # retried file), shut or landed is not here. Not a card of a main-red fix (issue 0), nor one stopped for the owner's yes.
+  # retried file), shut or landed is not here. Not a card of a main-red fix (issue 0), nor one stopped for the owner's yes,
+  # nor one blocked to be shut for a privacy hit (PRIVSHUT, privshut()): this job can read it before the shut, and nothing waits for the owner there.
   cs=$(stdb ask lines cards) && old=$(stdb ask lines retried) || { echo "conveyor: the card records could not be read; no blocked card was put to the owner" >&2; return 1; }
   [ ! -e "$led" ] || rows=$(CONVEYOR_MAIN=$MAIN bash "$dec" list) || { echo "conveyor: the decision ledger $led could not be read" >&2; return 1; }
   while IFS=$'\t' read -r c n k r r1; do
@@ -79,10 +80,10 @@ needsask() {
       "$NEEDSASK_RETRY" "conveyor engine: card $c blocked" --options "$opts" --reask "a new card, $c, is blocked" 2>&1 >/dev/null) \
       && echo "conveyor: card $c (#$n) is blocked with its work kept: put to the owner as decision blocked-$c" >&2 \
       || echo "conveyor: decision blocked-$c could not be put to the owner: ${e//$'\n'/ }" >&2
-  done < <(jq -rs --arg yes "$YES" --arg lintyes "$LINTYES" --arg rb "$REVIEWBLOCK" --slurpfile old <(printf '%s' "$old") "$REVIEWAGAIN"'retrylines($old) as $all
+  done < <(jq -rs --arg yes "$YES" --arg lintyes "$LINTYES" --arg priv "$PRIVSHUT" --arg rb "$REVIEWBLOCK" --slurpfile old <(printf '%s' "$old") "$REVIEWAGAIN"'retrylines($old) as $all
     | group_by(.card)[] | select(all(.step != "pushed"))
     | map(select(.step | IN("landed", "closed", "blocked"))) | last | select(. != null and .step == "blocked" and .issue > 0 and (.kept // "") != ""
-      and ((.reason // "") | startswith($yes) or startswith($lintyes) | not))
+      and ((.reason // "") | startswith($yes) or startswith($lintyes) or startswith($priv) | not))
     | [.card, .issue, .kept, ((.reason // "") | gsub("\\s+"; " ")),
        (if (.reason // "" | test($rb)) then reviewretried(.issue; $all).reason // "" | gsub("\\s+"; " ") else "" end)] | map(tostring) | join("\t")' <<<"$cs")
   [ -e "$led" ] || return 0
@@ -271,7 +272,7 @@ needsauto() {
 # The standing kind review-retry (lib/standing.sh) while auto is on or narrow here: the Foreman's watcher takes it
 # (foreman/watch-conveyor.sh reviewretry()), and needsretry() takes it too, so it goes on while the watcher is down. Each
 # card blocked by its review (the reason the watcher reads: "the fix for [P1] ... did not hold after <n> rounds", with
-# any notes after it in brackets), and whose reason holds no word of the pack's auto.reserved and no item of the owner's
+# any notes after it in brackets; card.sh no longer writes it since issue 1670, so only a block already in the card records has it), and whose reason holds no word of the pack's auto.reserved and no item of the owner's
 # profile (lib/standing.sh heldlist: that one waits for the owner), is given back with `conveyor.sh retry <issue>`, and
 # the act is logged by `conveyor.sh auto act review-retry`, as the watcher logs it. The retry is marked as review-retry's
 # (CONVEYOR_REVIEWRETRY, commands/retry.sh), and each issue is given back once: a later card of the issue, blocked by

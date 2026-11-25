@@ -43,10 +43,10 @@ retry() { # <issue, or the card id of a main-red fix card or a Tests page card> 
       || { echo "conveyor: card $1 is no main-red fix card and no card with no GitHub issue: retry takes a card's issue number; nothing changed" >&2; return 1; }
   fi
   # A card with a pushed line has landed, whatever line follows it and whatever their times: its commit is on main.
-  ends=$(jq -rs "${a[@]}" --arg shut "$SHUT" --arg own "$OWNSHUT" "map(select($k))"' | group_by(.card)
+  ends=$(jq -rs "${a[@]}" --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" "map(select($k))"' | group_by(.card)
     | map(if any(.step == "pushed") then "landed" else map(select(.step | IN("landed", "closed", "blocked"))) | . as $e
         | [range(length) as $i | $e[$i] | select(.step != "blocked" or ($e[$i + 1:] | all(.step == "blocked")))] | last
-        | if . == null then "open" elif .step == "closed" and (.reason | IN($shut, $own)) then "blocked" else .step end end)
+        | if . == null then "open" elif .step == "closed" and (.reason | IN($shut, $own, $eng)) then "blocked" else .step end end)
     | if length == 0 then "none" elif index("open") then "open" elif index("landed") or index("closed") then "landed" else "blocked" end' <<<"$l") || return 1
   case $ends in
     none) [ "$k" = '.issue == $n' ] || { echo "conveyor: $what has no card; nothing to retry" >&2; return 1; }
@@ -139,18 +139,18 @@ retry() { # <issue, or the card id of a main-red fix card or a Tests page card> 
 # card id whatever its issue.
 SHUT='the issue was closed by hand while the card was blocked'
 OWNSHUT='shut by the owner'
-shut() { # <closed issue numbers, a json array, or a card id: of a card of an issue, or of a main-red fix card, a Tests page card or a land-branch card of issue 0> [own]
-  local closed=$1 own=${2:-[]} c n b o l t='.[0].issue | IN($closed[])' found=''
+shut() { # <closed issue numbers, a json array, or a card id: of a card of an issue, or of a main-red fix card, a Tests page card or a land-branch card of issue 0> [own] [engine]
+  local closed=$1 own=${2:-[]} c n b o l who='by the owner' ownr=$OWNSHUT t='.[0].issue | IN($closed[])' found=''; [ "${3:-}" != engine ] || { who='by the engine'; ownr=$ENGSHUT; }
   check || return 1
   [[ $1 == '['* ]] || { closed=$(jq -cn --arg c "$1" '$c'); t='.[0].card == $closed and (.[0].issue != 0 or any(.[]; .step == "picked" and (.mainRed or .testFile or .noIssue or .branch)))'; }
   while read -r c n b o; do
-    l=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$([ "$o" = own ] && echo "$OWNSHUT" || echo "$SHUT")" '{reason: $r}')") && append "$l" || return 1
+    l=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$([ "$o" = own ] && echo "$ownr" || echo "$SHUT")" '{reason: $r}')") && append "$l" || return 1
     found=1
     # A self-heals batch card or docs sweep card shut before it lands gives its entries back to their list (healsfree(), lib/followups.sh).
     healsfree "$c" "$n" || echo "conveyor: card $c was shut, but the list entries it holds could not be given back to their list" >&2
     # A land-branch card of issue 0 is no main-red fix card: `retry <card id>` refuses it, so no retry is named.
-    if [ "$b" = branch ]; then echo "conveyor: card $c was shut $([ "$o" = own ] && echo "by the owner" || echo "while it was blocked"); the card is closed, its kept work where it was, and its branch left as it is"
-    elif [ "$o" = own ]; then echo "conveyor: card $c was shut by the owner; the card is closed, its kept work where it was, and \`retry $([ "$n" = 0 ] && echo "$c" || echo "$n")\` takes it again"
+    if [ "$b" = branch ]; then echo "conveyor: card $c was shut $([ "$o" = own ] && echo "$who" || echo "while it was blocked"); the card is closed, its kept work where it was, and its branch left as it is"
+    elif [ "$o" = own ]; then echo "conveyor: card $c was shut $who; the card is closed, its kept work where it was, and \`retry $([ "$n" = 0 ] && echo "$c" || echo "$n")\` takes it again"
     elif [ "$n" = 0 ]; then echo "conveyor: card $c was shut while it was blocked; the card is closed, and \`retry $c\` takes it again"
     else echo "conveyor: issue #$n was closed while card $c was blocked; the card is closed, its kept work where it was, and the issue is picked again once it is open"; fi
   done < <(jq -rs --argjson closed "$closed" --argjson own "$own" --arg ownshut "$OWNSHUT" 'map(select(.step != "push")) | group_by(.card)[]
@@ -342,7 +342,7 @@ withdrawn() { # <issue>
   local out cards
   out=$(timeout 60 gh issue list --state closed --limit 1000 --json number,title,body --label "$FOLLOWUP" --search "\"Follow-up to #$1\" in:body" 2>/dev/null) || return 1
   cards=$(stdb ask lines cards 2>/dev/null) || return 1
-  jq -r --argjson n "$1" --arg shut "$SHUT" --arg own "$OWNSHUT" --slurpfile cards <(printf '%s\n' "$cards") '($cards | map(select((.step == "landed" or .step == "closed" and (.reason | IN($shut, $own) | not))) | .issue)) as $done
+  jq -r --argjson n "$1" --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" --slurpfile cards <(printf '%s\n' "$cards") '($cards | map(select((.step == "landed" or .step == "closed" and (.reason | IN($shut, $own, $eng) | not))) | .issue)) as $done
     | sort_by(.number)[] | select((.body // "" | startswith("Follow-up to #\($n) (")) and (.number | IN($done[]) | not))
     | "#\(.number) \((.body | capture("(^|\n)Finding: (?<f>[^\n]*[^[:space:]])").f) // .title)"' <<<"$out" 2>/dev/null
 }

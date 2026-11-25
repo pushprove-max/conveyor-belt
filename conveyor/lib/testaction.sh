@@ -180,7 +180,7 @@ tcput() { local rec id drop; rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/nu
   # The picked cards the trim may drop (none with the records unread): those whose work is on main (TADONE), but one whose
   # proof deleted or merged its test file (bugproof speed.fix), the only source of its removed mark (testspart()). A card
   # blocked, open or given back (`retry`) keeps its entry, which the loop picks it again by (testpick()).
-  drop=$({ stdb ask issue cards 0 || echo '"unread"'; } | jq -cn --arg shut "$SHUT" --arg own "$OWNSHUT" '[inputs] | if any(.[]; . == "unread") then {}
+  drop=$({ stdb ask issue cards 0 || echo '"unread"'; } | jq -cn --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" '[inputs] | if any(.[]; . == "unread") then {}
     else [.[] | objects | select((.card | type) == "string")] | group_by(.card)
       | map(select(any(.[]; '"$TADONE"') and (any(.[]; .step == "bugproof" and (.speed.fix? | IN("deleted", "merged"))) | not)) | {key: .[0].card, value: true}) | from_entries end' 2>/dev/null) || drop='{}'
   # The record goes to jq on its input: Linux refuses an argument over 128 KiB.
@@ -256,11 +256,11 @@ tcfree() { # <the record's cards json>
 # Needs you. Not one stopped for the owner's yes: that waits on the owner, not on a second try. With the records of
 # issue 0 unread, nothing is retried, and only a card not picked yet is picked.
 TCRETRY='retried once with its kept work: a card with no GitHub issue is tried again once before it goes to the owner'
-# A card record line (a jq filter, with $shut and $own the SHUT and OWNSHUT reasons) that ends a card whose work is on main: it
+# A card record line (a jq filter, with $shut, $own and $eng the SHUT, OWNSHUT and ENGSHUT reasons) that ends a card whose work is on main: it
 # landed, or it ended closed because main already did what it asks (closed(), lib/followups.sh: ALREADY-DONE), as umbrellas() reads
 # an issue's slice. A card shut by hand is not one. A card that depends on it by its id, or an umbrella it is a part of, goes
 # on from there (testpick(), umbrellas()).
-TADONE='(.step == "landed" or (.step == "closed" and ((.reason // "") | IN($shut, $own) | not)))'
+TADONE='(.step == "landed" or (.step == "closed" and ((.reason // "") | IN($shut, $own, $eng) | not)))'
 # A run limited by --only (ONLY, a json list of issues) takes only the cards that follow up one of them (parent: a review follow-up
 # or a split part), as it takes their issues': an issue it names grows to its GitHub parts (an open parent's, and each open issue whose umbrella it is) and the follow-ups of its cards, as
 # upnext() grows it (jq/upnext.jq), so a follow-up of a part of a named umbrella is taken; with the Follow-ups rule off (rules.followups false) no follow-up card or split part
@@ -278,7 +278,7 @@ testpick() { # <the open issues json>
   # The unheld cards not picked yet are read as an issue is: the state of each issue of another repository their `Depends on:` lines name is asked now (farstates()).
   # A card given back (card set, its lines gone) is picked again, so it is asked as one not picked yet is; one that landed is not picked again, so it is not asked.
   have=$(stdb ask issue cards 0) || h=0
-  far=$(farstates "$(printf '%s\n%s\n' "$rec" "$have" | jq -Rcn --arg shut "$SHUT" --arg own "$OWNSHUT" 'input | fromjson as $r
+  far=$(farstates "$(printf '%s\n%s\n' "$rec" "$have" | jq -Rcn --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" 'input | fromjson as $r
     | ([inputs | fromjson? | objects | select('"$TADONE"') | .card | strings] | INDEX(.)) as $landed
     | $r | map(if (.held | not) and $landed[.card // ""] == null then {body} else {} end)')") \
     && rec=$(jq -c --argjson f "$far" '[., $f] | transpose | map(.[0] + (.[1] | if .far then {far} else {} end))' <<<"$rec") \
@@ -306,7 +306,7 @@ testpick() { # <the open issues json>
     exec {lock}>&-; echo "$card 0 false"; return 0
   # The record and the lines go to jq on its input: Linux refuses an argument over 128 KiB.
   done < <(printf '%s\n%s\n' "$rec" "$have" | jq -Rrn --argjson h "$h" --argjson only "${ONLY:-null}" --argjson fuoff "${fuoff:-false}" --argjson never "${never:-[]}" --argjson open "${open:-[]}" --argjson parts "$parts" \
-    --slurpfile cards <(printf '%s' "$cards") --arg fu "$FOLLOWUP" --arg shut "$SHUT" --arg own "$OWNSHUT" \
+    --slurpfile cards <(printf '%s' "$cards") --arg fu "$FOLLOWUP" --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" \
     "$DEPS"'input | fromjson as $r | [inputs | fromjson? | objects] as $l
     | ($l | map(.card | strings) | INDEX(.)) as $have | ($l | map(select('"$TADONE"') | .card) | INDEX(.)) as $landed
     | landed($cards) as $idone | ($cards | map(select(.followups))) as $fc

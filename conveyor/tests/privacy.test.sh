@@ -12,17 +12,19 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Bugs (plan section 8, P4 and P5): a finding holding a home path is posted on a public repo's issue; the held text
 # is lost, or the card's reason does not say why nothing was posted; a private repo's (the host project's) comments
 # stop posting; a write is made on a public repo whose named terms file cannot be read. The card is blocked here by
-# its P1 finding coming back after its fix round, so its blocked comment, which quotes the finding, is held. (A
-# follow-up of such a finding is filed masked: review.test.sh, t_privmask.)
+# its second review, which fails, after a NO-GO whose P1 finding quotes the home path, so its blocked comment, which
+# quotes the finding, is held. (A follow-up of such a finding is filed masked: review.test.sh, t_privmask.)
 t_privacy() {
   # The home path is put together here, as AT is, so this file holds none itself.
   local H=/home; local f="[P1] a.txt:1 reads $H/user/notes.txt" S a b; export XDG_CONFIG_HOME=$T/$CASE/config
-  setup "[$(issue 7 2026-01-01)]"; S=$ST; for i in 1 2; do printf '%s\nUSER-VISIBLE: no\nVERDICT: NO-GO\n' "$f" > "$STUB/review.$i"; done
+  setup "[$(issue 7 2026-01-01)]"; S=$ST; printf '%s\nUSER-VISIBLE: no\nVERDICT: NO-GO\n' "$f" > "$STUB/review.1"
+  echo '[ "$(wc -l < "$STUB/reviews")" -lt 2 ] || exit 3' > "$STUB/review-cmd"
   mkdir -p "$XDG_CONFIG_HOME/conveyor"; echo 'case:Zed' > "$STUB/terms"; jq -n --arg t "$STUB/terms" '{terms: $t}' > "$XDG_CONFIG_HOME/conveyor/host.json"
   tune '.privacy.mode = "public"'
+  # loop: only a card run blocks with its last review's findings in the comment that the privacy check holds
   loop run >/dev/null 2>&1
   [ ! -e "$STUB/comments" ] && [ ! -e "$STUB/filed" ] || fail "a public repo's issue got the home path: $(cat "$STUB/comments" "$STUB/filed" 2>&1)"
-  st 'select(.step == "blocked") | .reason' | grep -q 'did not hold.*not posted on the issue: conveyor: privacy: nothing posted; the text is kept at <state>/privacy/[^:]*: line [0-9]*: home path' \
+  st 'select(.step == "blocked") | .reason' | grep -q '^review 2: .*not posted on the issue: conveyor: privacy: nothing posted; the text is kept at <state>/privacy/[^:]*: line [0-9]*: home path' \
     || fail "the blocked reason does not say the privacy check held the comment: $(st 'select(.step == "blocked") | .reason')"
   [ "$(ls "$S/privacy" | wc -l)" = 1 ] && grep -q "reads $H/user/notes.txt" "$S/privacy"/* && grep -q '<state>/kept/' "$S/privacy"/* \
     && ! grep -q "$T" "$S/privacy"/* || fail "the held comment is not kept locally, or names an absolute path: $(ls "$S/privacy"; cat "$S/privacy"/*)"

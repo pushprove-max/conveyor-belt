@@ -60,12 +60,12 @@ t_kindsjudge() {
     || fail "the cleanup entry did not take the later already-guarded ruling and its reason, or a second entry was added: $(cat "$ST/selfheals.jsonl" 2>&1)"
 }
 
-# Bugs (issue 1563): at the last review an in-scope P1 the judge sorts as self-heals still blocks the card, or lands
-# it and is lost rather than listed with the card that landed it; an in-scope harm P1, or one with no kind, lands; a
-# repeated self-heals P1 blocks as a repeated harm one does, and the repeated harm one no longer blocks; a security
-# P1 (a kind the project always accepts) the judge sorts as cleanup lands; a repeat ends the loop while a new P1 of
-# the same review still has its fix round. One card's reviews, each judged again (the last ruling of a finding
-# stands), and afterreview() as card() calls it.
+# Bugs (issue 1563): at the last review an in-scope P1 the judge sorts as self-heals is not let through at once (go), or
+# is lost rather than listed with the card that landed it; an in-scope harm P1, or one with no kind, is not kept as the
+# P1 the card files (p1); a repeated harm P1 is not known as a repeat (hard); a security P1 (a kind the project always
+# accepts) the judge sorts as cleanup is not harm; a repeat ends the loop while a new P1 of the same review still has
+# its fix round. Since issue 1670 a harm P1 left after its fix round lands as a follow-up, so no case here blocks.
+# One card's reviews, each judged again (the last ruling of a finding stands), and afterreview() as card() calls it.
 t_kindsgate() {
   local f='[P1] a.txt:2 the poll waits one turn more. Proof: a.txt:2' e='[P1][E1] a.txt:2 the poll waits one turn more. Proof: a.txt:2' is
   local sec='[P1][security] a.txt:2 the token is logged. Proof: a.txt:2' new='[P1] a.txt:2 the badge shows one turn late. Proof: a.txt:2'
@@ -80,13 +80,13 @@ t_kindsgate() {
   [ "$(heals '[.card, .issue, .finding, .effect] | tojson')" = "$(jq -cn --arg f "$f" '["c8", 8, $f, "self-heals"]')" ] \
     || fail "the landed card's self-heals P1 is not on the self-heals list with card c8: $(cat "$ST/selfheals.jsonl" 2>&1)"
   JUDGEISSUE=$is judgeone 8 "$STUB/review"
-  [ "$(kgate 3 0)" = "$(printf 'p1\tmax-reviews\t\t%s\t' "$f")" ] || fail "the last review's in-scope harm P1 did not block the card: $(kgate 3 0)"
+  [ "$(kgate 3 0)" = "$(printf 'last\tmax-reviews\t\t%s\t' "$f")" ] || fail "the last review's in-scope harm P1 ($f), after its P1 fix round, did not land the card to file it: $(kgate 3 0)"
   JUDGEISSUE=$is judgeone 8 "$STUB/review"
-  [ "$(kgate 3 0)" = "$(printf 'p1\tmax-reviews\t\t%s\t' "$f")" ] || fail "the last review's in-scope P1 with no kind did not block the card: $(kgate 3 0)"
+  [ "$(kgate 3 0)" = "$(printf 'last\tmax-reviews\t\t%s\t' "$f")" ] || fail "the last review's in-scope P1 with no kind ($f), after its P1 fix round, did not land the card to file it: $(kgate 3 0)"
   printf '%s\n' "$sec" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   printf '%s\n' 'F1 ACCEPT: cleanup: a log line changes nothing. Cost to every card: none' > "$STUB/judge.4"
   JUDGEISSUE=$is judgeone 8 "$STUB/review"
-  [ "$(kgate 3 0)" = "$(printf 'p1\tmax-reviews\t\t%s\t' "$sec")" ] || fail "the last review's in-scope security P1 the judge sorted as cleanup did not block the card: $(kgate 3 0)"
+  [ "$(kgate 3 0)" = "$(printf 'last\tmax-reviews\t\t%s\t' "$sec")" ] || fail "the last review's in-scope security P1 the judge sorted as cleanup ($sec) was not kept as the harm P1 the card files: $(kgate 3 0)"
   # The finding back after a fix round (E1), on the second review: a repeat.
   mkdir -p "$T/$CASE/cards/c8.rounds" && jq -cn --arg f "$f" '{id: "E1", round: 1, line: $f, mkey: "x"}' > "$T/$CASE/cards/c8.rounds/findings.jsonl"
   printf '%s\n' "$e" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
@@ -102,7 +102,7 @@ t_kindsgate() {
     || fail "a repeat ended the loop while a new in-scope harm P1 still had its fix round, or the new P1 was outside the change: $(kgate 1 1) $(grep '^F2' "$STUB/judge-asked")"
   printf '%s\n' "$e" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   JUDGEISSUE=$is judgeone 8 "$STUB/review"
-  [ "$(kgate 1 1 | cut -f1,2)" = "$(printf 'hard\t')" ] || fail "a repeated in-scope harm P1 did not block the card: $(kgate 1 1)"
+  [ "$(kgate 1 1 | cut -f1,2)" = "$(printf 'last\trepeat')" ] && [ -n "$(kgate 1 1 | cut -f5)" ] || fail "a repeated in-scope harm P1 ($e) did not end the loop as a repeat (hard) to land: $(kgate 1 1)"
 }
 
 # Bug (issue 1576): the first review of a card that is no follow-up, whose one accepted finding inside the change the

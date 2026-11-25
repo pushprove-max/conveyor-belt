@@ -527,9 +527,9 @@ cardland() {
     reading fresh >/dev/null 2>&1 # the after reading of the landed line, asked for outside the lock
     extra=$(landextra "$left" "$yesfrom" "$ro")
     if [ ${#mates[@]} != 0 ]; then mapfile -d '' t5 < <(fives "$c" "$n" "$wt" "$cmsg" "$extra"); else t5=("$c" "$n" "$wt" "$cmsg" "$extra"); fi
-    # Landed: its declined findings are written; when they cannot be, the card ends blocked, its review kept.
-    t=$(locked land "${t5[@]}") && { [ -z "$dec" ] || decline "$c" "$n" "$FUCAP" <<<"$dec" \
-      || { block "$c" "$n" "$wt" "the card landed, but the engine could not write its leftover findings to the declined list. The findings are in the kept review"; return; }; go=landed; return; }
+    # Landed: its findings at the depth cap go on the self-heals list (capheals()); when they cannot, the card ends blocked, its review kept.
+    t=$(locked land "${t5[@]}") && { [ -z "$dec" ] || capheals "$c" "$n" "$issue" <<<"$dec" \
+      || { block "$c" "$n" "$wt" "the card landed, but the engine could not write its leftover findings to the self-heals list. The findings are in the kept review"; return; }; go=landed; return; }
     # Not landed (main moved, a release run or a landing turn, a conflict): it lands no more now, so the loop counts it against
     # the cap again (capmark(), lib/run.sh) while it waits, rebuilds or runs its lint and checks again, until its next step begins.
     # Cards the loop started while it landed stay; before it works again (its lint, checks, tests or a session) it
@@ -614,10 +614,25 @@ landconflict() {
   fi
   # A landing that fails after the follow-ups were filed withdraws them, unless main did get the commit.
   # shellcheck disable=SC2046 # the filed follow-ups' issue numbers, one word each
-  case $t in "landed as "*) [ -z "$dec" ] || decline "$c" "$n" "$FUCAP" <<<"$dec" ;; *) [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups") ;; esac
+  case $t in "landed as "*) [ -z "$dec" ] || capheals "$c" "$n" "$issue" <<<"$dec" ;; *) [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups") ;; esac
   # A landing conflict keeps the issue body its review read (.body), so that the port of its kept patch is built from
   # nothing when the issue's section of what customers or staff will see changes later (resumeplan(), keptway()).
   # Bug: it kept none, and a port of the old change ran on a rewritten issue.
   [[ $t != "rebase onto main conflicts: "* ]] || [ -z "$issue" ] || jq -c '{body}' <<<"$issue" > "$wt.body" 2>/dev/null || rm -f "$wt.body"
   block "$c" "$n" "$wt" "$t"; return
+}
+# A card whose last review still holds a privacy hit in its own change after its PRIVFIXES fix rounds for it
+# (afterreview(), lib/card.sh: after priv; issue 1670): nothing of it lands, and nothing waits for the owner. The hit
+# goes on the self-heals list (healsadd(), lib/followups.sh) as a possible false hit of the privacy check; then the card
+# is blocked, its work kept (block(), lib/push.sh), with a reason that starts with PRIVSHUT, which needsask() (lib/needsask.sh),
+# run beside the card, puts to no owner though it reads the block before the shut; and shut at once by the engine (shut()
+# engine, lib/issues.sh: ENGSHUT), so `retry` can take it again. A hit that cannot be written to the list leaves the card
+# blocked for the owner, saying so.
+privshut() { # <card> <issue number> <worktree> <issue json> <the hit> <the review's number>
+  local area t="review $6 still holds a privacy hit in the card's own change after $PRIVFIXES fix rounds"
+  area=$(jq -r --arg p "$AREA" '.labels // [] | map(.name | select(startswith($p))) | .[0] // empty' <<<"$4" 2>/dev/null) || area=''
+  healsadd "$1" "$2" "$area" "a possible false hit of the privacy check: $t" "$5" review >/dev/null \
+    || { block "$1" "$2" "$3" "$t, and the hit could not be written to the self-heals list: ${5:0:300}"; return; }
+  block "$1" "$2" "$3" "$PRIVSHUT: review $6 still holds it, so the card is shut with its work kept, and the hit is on the self-heals list as a possible false hit of the privacy check: ${5:0:300}"
+  locked shut "$1" "$(jq -cn --arg c "$1" '[$c]')" engine >/dev/null || echo "conveyor: card $1 is blocked with its work kept, but it could not be shut" >&2
 }

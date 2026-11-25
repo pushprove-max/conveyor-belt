@@ -19,8 +19,8 @@
 # goes to <worktree>.withdrawn, in the order filed (the review's finding lines, as followups() reads them), and from
 # the kept folder into the brief of the issue's next card; the comment names that issue.
 # Each follow-up's body holds its depth, "Follow-up depth: N": its parent's depth (fudepth()) plus 1. A card whose
-# issue is at the cap, MAX_DEPTH (lib/paths.sh), files none, so no chain goes deeper: its last review's findings go to
-# the declined list when it lands, declined by code with FUCAP as the reason; when they cannot be written there the
+# issue is at the cap, MAX_DEPTH (lib/paths.sh), files none, so no chain goes deeper: its last review's findings go on
+# the self-heals list when it lands, with FUCAP as the reason (capheals(); issue 1670); when they cannot be written there the
 # card ends blocked, landed, its review kept.
 # A finding that names one of the pack's pipelineFiles (how the engine builds, reviews, fixes, tests, lands or
 # pushes), or a file under one (onpipeline()), is filed held: the control record holds its issue, as `control hold` does, before the card lands,
@@ -168,7 +168,7 @@ fudepth() {
     (if (.labels // []) | any(.name == $fu) then 1 else 0 end)] | max' <<<"$1"
 }
 # shellcheck disable=SC2034 # read by card() (lib/card.sh)
-FUCAP="its issue is a follow-up at the depth cap of $MAX_DEPTH, so no deeper follow-up is filed" # the reason of a finding declined at the cap
+FUCAP="its issue is a follow-up at the depth cap of $MAX_DEPTH, so no deeper follow-up is filed" # the reason of a finding put on the self-heals list at the cap (capheals())
 leftovers() { grep -Ev "$NOTFINDING" "$1" 2>/dev/null | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk '!seen[$0]++'; } # <review file>: its finding lines, each once
 # <review file>: the findings followups() files, in its order: the review's finding lines (leftovers()), then the
 # findings of <worktree>.outside that are not among them, each once; none the judge last sorted as a kind kept off the
@@ -179,19 +179,20 @@ tofile() { { leftovers "$1"; jq -r '.finding' "${1%.review}.outside" 2>/dev/null
 healsleft() { jq -r --argjson k "$LISTKINDS" 'select(.effect | IN($k[])) | .finding' "${1%.review}.effects" 2>/dev/null; }
 # The findings on stdin, JSON lines with line (donewhen.sh findings(), repeats()), that are harm: all but those the judge
 # of <worktree>'s review last sorted as a kind kept off the belt (<worktree>.effects, healsleft()). A finding with no kind
-# is harm. Only a harm finding blocks a card at its last review (afterreview(), loopstop(), lib/card.sh): the others go to
-# their list as it lands (followups()).
+# is harm. Only a harm finding ends the fix loop as a repeat and becomes a follow-up (afterreview(), loopstop(), lib/card.sh): the others go to their list (followups()).
 harmonly() { # <worktree>
   jq -c --slurpfile e <(jq -c 'objects' "$1.effects" 2>/dev/null || :) --argjson k "$LISTKINDS" '. as $f | select(any($e[]; .finding == $f.line and (.effect | IN($k[]))) | not)'
 }
 # <review file>: why a last NO-GO with no finding line files nothing, with the reviewer's own line (its first UNPROVEN
 # line, else its VERDICT line, as afterreview() quotes one), cut at 200 characters.
 nofiling() { local w; w=$(grep -m1 '^UNPROVEN:' "$1" || grep -m1 '^VERDICT:' "$1"); echo "the last review said NO-GO and named no finding to file${w:+: ${w:0:200}}"; }
-decline() { # <card> <issue> <why>, the findings on stdin, one a line: each to the declined list (declined()), by code
-  local f
+# The findings on stdin, one a line, of a card at the follow-up depth cap: each on the self-heals list (healsadd()) with FUCAP as its
+# reason, under the first area label of <issue json>. Issue 1670: they went to the declined list, where nothing builds them.
+capheals() { # <card> <issue number> <issue json>
+  local f a; a=$(jq -r --arg p "$AREA" '.labels // [] | map(.name | select(startswith($p))) | .[0] // empty' <<<"$3" 2>/dev/null) || a=''
   while IFS= read -r f; do
-    [ -z "$f" ] || declined "$1" "$2" code "$3" "$f" \
-      || { echo "conveyor: card $1: its declined findings could not be written to $DECLINED" >&2; return 1; }
+    [ -z "$f" ] || healsadd "$1" "$2" "$a" "$FUCAP" "$f" review >/dev/null \
+      || { echo "conveyor: card $1: its findings at the follow-up depth cap could not be written to $SELFHEALS" >&2; return 1; }
   done
 }
 # <finding>, the pack's pipelineFiles on stdin: prints 1 when the finding names one of them, or a file under one. Each

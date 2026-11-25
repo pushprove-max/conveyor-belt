@@ -140,7 +140,7 @@ fixprompt() { # <card prompt> <the findings, each led by its id, and what follow
   printf '%s' "$1"$'\n\n'"$FIX$([ -z "${3:-}" ] || printf '\n%s' "$FIXBACK")"$'\n'"$2"
 }
 # Why a review ends the fix loop, the first that holds: go (a GO), max-reviews (it is review MAX_REVIEWS, counting the rounds a retried card carries), rebased (the one review after a landing conflict), test-fix (after the one test fix),
-# lint-fix (after the landing gate's lint fix), land (the kept review of a kept patch landed with no review), repeat (a NO-GO that repeats a fixed finding, each P0 or P1 of it a repeat, so of a kind kept off the belt: afterreview()), new-p2 (from review 2 on, counted as max-reviews is, a NO-GO with findings that repeats none, none of them P0 or P1 (a finding with no level is P1): the card lands, each harm finding filed as a follow-up and each of another kind sent to its list, issue 1578; afterreview() drops it at the follow-up depth cap). Prints nothing when a fix round follows.
+# lint-fix (after the landing gate's lint fix), land (the kept review of a kept patch landed with no review), repeat (a NO-GO that repeats a fixed finding, each P0 or P1 of it a repeat; afterreview() ends the loop so too when a repeated harm one is P0 or P1), new-p2 (from review 2 on, counted as max-reviews is, a NO-GO with findings that repeats none, none of them P0 or P1 (a finding with no level is P1): the card lands, each harm finding filed as a follow-up and each of another kind sent to its list, issue 1578; afterreview() drops it at the follow-up depth cap). Prints nothing when a fix round follows.
 loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix> <mode> <donewhen.sh repeats() lines> <review file>
   if [ "$1" = GO ]; then echo go
   elif [ "$2" -ge "$MAX_REVIEWS" ]; then echo max-reviews
@@ -195,9 +195,9 @@ failline() { # <worktree> <exit> <seconds> <failures json, or null> <verdicts js
        reason:("exit " + $rc + (if $f.timeout then ": timed out after \($f.timeout.sec)s" + (if $f.timeout.file then " in \($f.timeout.file)" else "" end) else "" end) + ($f.notRun // [] | if . == [] then "" else "; it stopped at its first failure, so these files did not run: " + join(", ") end))}
      + (if $f then {failures:($f | del(.passed, .okcases, .passcases, .host))} else {} end) + (if $t == "" then {} else {tail:$t} end) + $r + $v'
 }
-# What card() does after a review, decided from its verdict (res) and the loop's state, with nothing done: after is hard (a repeated
-# P0 or P1 did not hold after its fix: block), p0 (a last NO-GO holds a P0: block), priv and p1 (a last NO-GO holds a privacy hit of
-# its own, or a P1, after its one fix round: block), go (land), last (a last review: land with follow-ups), nofinding (a NO-GO with no
+# What card() does after a review, decided from its verdict (res) and the loop's state, with nothing done: after is priv (a last
+# NO-GO still holds a privacy hit of its own after PRIVFIXES fix rounds: the card is shut, its work kept, the hit on the self-heals list),
+# go (land), last (a last review: land with follow-ups, whatever the level of its findings, issue 1670), nofinding (a NO-GO with no
 # finding to fix: block) or fix (a fix round). It reads card()'s wt, issue, res, fin, finrev, finend, pass, rounds (the rounds a retried
 # card carries), rebased, tfix, lfix, mode, privfix and p1fix, and sets card()'s after, last, earlier, earlyend, fin, rep, hard, priv, p1, stop, last0, ended, isfu and why (bash's dynamic scope).
 afterreview() {
@@ -207,36 +207,35 @@ afterreview() {
   last=''; [ "$fin" != NO-GO ] || [ "$res" != GO ] || { earlier=$finrev; earlyend=$finend; }; fin=''
   [ -z "${rlrev:-}" ] || [ "$mode" = land ] || earlier=$rlrev # A retry by review-land files its kept review's findings (rlrev, resumeplan()) whatever a later review says: each review after that one (mode no longer land) carries it as the earlier loop's last NO-GO. Bug: a GO after a test fix, or after the fix of a port's own finding, dropped the finding that blocked the card.
   # A NO-GO that repeats a finding a fix round was told to fix (donewhen.sh repeats()) spends no more rounds on it: when every
-  # P0 or P1 finding of the review is such a repeat this is the last review (loopstop()); when a repeated harm one is P0 or P1 the card blocks. Here and below, a finding of a kind kept off the belt (harmonly(), lib/followups.sh) blocks no card: it goes to its list as the card lands. The kept review of a retry by review-land (rland, mode land, no fix rounds carried) gives its P1 no fix round (p1, below): the owner's standing order lands it, the P1 filed as a follow-up. Its P0 still blocks (p0).
+  # P0 or P1 finding of the review is such a repeat this is the last review (loopstop()); so is one where a repeated harm one
+  # is P0 or P1 (hard: that finding), whatever else it holds. A review finding never blocks a card (issue 1670): at the last review the card lands, each
+  # harm finding filed as a follow-up and each of a kind kept off the belt (harmonly(), lib/followups.sh) sent to its list. The kept review of a retry by review-land (rland, mode land, no fix rounds carried) gives its P1 no fix round (p1, below).
   rep=''; [ "$res" != NO-GO ] || rep=$(repeats "$wt")
-  hard=$(harmonly "$wt" <<<"$rep" | jq -rs 'map(select(.level == "P0" or .level == "P1")) | first // empty | "\(.line[:300]) did not hold after \(.rounds) round\(if .rounds == 1 then "" else "s" end)"')
+  hard=$(harmonly "$wt" <<<"$rep" | jq -rs 'map(select(.level == "P0" or .level == "P1")) | first // empty | .line[:300]')
   # A last NO-GO with a finding that is a privacy hit in the card's own change (privown(), lib/followups.sh) gets
-  # one more fix round, once a card (privfix); a hit found again after that round blocks the card (after priv): a
-  # follow-up would land the hit on main. Bugs: it was filed as a follow-up the privacy check refused; after its round, a new hit landed.
-  # stop: why this review ends the loop (loopstop()), empty when a fix round follows (or the card blocks).
-  # last0: the first P0 finding of a last NO-GO (one that ends the loop): the card blocks with it and files none of
-  # its findings, its work and reviews kept for a retry. Bug: a P0 first found on the last review was filed as a
-  # follow-up and the card landed it on main. On a repeat (hard) too: that block names it first, after "the fix for", the form needsretry() and the Board read (bug: it hid the P0).
-  # p1: the first P1 finding of a last NO-GO with no P0. It gets one fix round, once a card (p1fix), and a fix-only
-  # review; a P1 still held after that blocks the card. A follow-up would land a miss of the issue on main.
+  # another fix round, up to PRIVFIXES of them (privfix counts them), and lands only once a last review finds no such hit: a
+  # follow-up would land the hit on main. A hit still there after them shuts the card (after priv, cardfix()). Bugs: it was filed as a follow-up the privacy check refused; after its round, a new hit landed.
+  # stop: why this review ends the loop (loopstop()), empty when a fix round follows.
+  # last0: the first P0 finding of a last NO-GO (one that ends the loop): the card lands at once with it filed, no P1 fix round first.
+  # p1: the first P1 finding of a last NO-GO with no P0, no repeat and no privacy hit (one still there here has had its
+  # PRIVFIXES rounds: bug, a new P1 beside it gave it one more). It gets one fix round, once a card (p1fix), and a fix-only
+  # review; a P1 still held after that lands as a follow-up.
   priv=''; stop=''; last0=''; p1=''
-  if [ -z "$hard" ]; then
+  if [ -n "$hard" ]; then stop=repeat
+  else
     stop=$(loopstop "$res" "$((pass + rounds))" "$rebased" "$tfix" "$lfix" "$mode" "$rep" "$wt.review")
     [ "$stop" != new-p2 ] || { d=$(fudepth "$issue") && [ "$d" -lt "$MAX_DEPTH" ]; } || stop='' # a card at the follow-up depth cap files none: it gets the fix round (bug: its P2s landed, declined)
-    [ -z "$stop" ] || [ "$res" = GO ] || ! priv=$(privown "$wt") || [ -z "$priv" ] || [ -n "$privfix" ] || stop=''
-    [ -z "$stop" ] || [ "$res" = GO ] || last0=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]')
-    [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$last0" ] || [ "$mode:${rland:-}" = land:1 ] || p1=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P1")) | first // empty | .line[:300]'); [ -z "$p1" ] || [ -n "$p1fix" ] || stop=''
-  else last0=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]'); fi
+  fi
+  [ -z "$stop" ] || [ "$res" = GO ] || ! priv=$(privown "$wt") || [ -z "$priv" ] || [ "${privfix:-0}" -ge "$PRIVFIXES" ] || stop=''
+  [ -z "$stop" ] || [ "$res" = GO ] || last0=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]')
+  [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$hard$last0$priv" ] || [ "$mode:${rland:-}" = land:1 ] || p1=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P1")) | first // empty | .line[:300]'); [ -z "$p1" ] || [ -n "$p1fix" ] || stop=''
   # The review line, and the filed line after it, say why the loop ended: stop, with pass and rounds as they are here.
   ended=$(jq -cn --arg s "$stop" --argjson p "$pass" --argjson r "$rounds" 'if $s == "" then {} else {stop: $s, pass: $p, rounds: $r} end')
-  if [ -n "$hard" ]; then after=hard
-  elif [ -n "$last0" ]; then after=p0
-  elif [ -n "$priv" ] && [ -n "$privfix" ]; then after=priv
-  elif [ -n "$p1" ] && [ -n "$p1fix" ]; then after=p1
+  if [ -n "$stop" ] && [ -n "$priv" ]; then after=priv
   elif [ "$res" = GO ] && [ -z "$earlier" ]; then after=go
   elif [ -n "$stop" ]; then
-    # A card whose issue is a follow-up at the depth cap (fudepth(), lib/followups.sh) files none: its findings are
-    # declined. A depth that cannot be read counts as the cap.
+    # A card whose issue is a follow-up at the depth cap (fudepth(), lib/followups.sh) files none: its findings go
+    # on the self-heals list as it lands (capheals(), lib/followups.sh). A depth that cannot be read counts as the cap.
     after=last; last=1; isfu=1; d=$(fudepth "$issue") && [ "$d" -lt "$MAX_DEPTH" ] && isfu=''
   # A NO-GO with no finding (an UNPROVEN line alone, say) has nothing for a fix session to fix, or to number: the
   # card blocks with the reviewer's own line (its first UNPROVEN line, else its VERDICT line), cut at 200 characters.
@@ -283,7 +282,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local lfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh)
   local fixtree='' rtree='' # fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts()); rtree: the one the last review read, which a reused review reads again
   local after rland='' rlrev='' rlfind='' # after: what follows a review (afterreview()); rland: the card lands its kept patch on its kept review, a retry by review-land's (resumeplan()); rlrev: that kept review; rlfind: the finding its block names
-  local priv privfix='' p1 p1fix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: its fix round was given; p1: the P1 finding that gets one fix round, p1fix: that round was given
+  local priv privfix=0 p1 p1fix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: the fix rounds given for such hits (PRIVFIXES at most); p1: the P1 finding that gets one fix round, p1fix: that round was given
   local fixed=0 # fixed: the fix sessions this card has run, review fixes and test fixes; the second and every later one runs one effort level up (session1())
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
   local voids=0 # voids: the test runs in a row that gave no result (voidrun())
@@ -311,7 +310,8 @@ card() { # <card> <issue> [<branch> <tip>]
   prv=$'\n\n'"$PORTREVIEW"$'\n'"The difference is the file $wt.port."; kp=$fromk/$from.patch
   # A NO-GO is fixed and reviewed again; a NO-GO on a last review (review MAX_REVIEWS, counting the rounds a retried
   # card carries, or the one review after a landing conflict, a test fix or the landing gate's lint fix, or one that
-  # repeats a finding after its fix with every finding P2 or P3, or from review 2 on one whose findings are all new and all P2 or P3: loopstop() new-p2) lands with follow-ups, blocks on a P0, or gets one fix round and a review on a P1 (p1, below).
+  # repeats a finding after its fix, or from review 2 on one whose findings are all new and all P2 or P3: loopstop() new-p2) lands with follow-ups,
+  # after one fix round and a review on a P1, or after up to PRIVFIXES fix rounds on a privacy hit in its own change (afterreview()).
   # A GO card whose landing conflicts goes round once more: rebase, review. A finished loop whose landing still conflicts is ported once, as `retry` would port it.
   # Whatever the review, the changed tests pass here before anything is filed or landed.
   while pass=$((${pass:-0} + 1)); do
@@ -595,24 +595,20 @@ cardreview() {
   fi
   go=''
 }
-# What follows the review (afterreview()): its line is written, then the card blocks, goes to a fix round (go: next)
-# or goes on to land (go: '').
+# What follows the review (afterreview()): its line is written, then the card is shut (privshut(), lib/cardland.sh),
+# blocks on a NO-GO with no finding, goes to a fix round (go: next) or goes on to land (go: '').
 cardfix() {
   # What follows this review (afterreview()): the review line is written with why the loop ended (ended), then
-  # card() blocks, lands (go, last) or gives the findings to a fix round.
+  # card() is shut, blocks, lands (go, last) or gives the findings to a fix round.
   # rl: this review's line, whose judge's reasons go with the fix round's findings (rounded()).
   afterreview; local rl=$rline; [ -z "$rline" ] || record "$c" "$n" review "$res" "$(jq -c --argjson e "$ended" '. + $e' <<<"$rline")"; rline=''
-  # A new P0 is named first, joined to the repeated finding by "; ", each finding's text as the review wrote it (the Board splits the two at that join: app-track.js). Bug: the reason changed a proof's quoted "; [" to ";[".
-  [ "$after" != hard ] || { [ -z "$last0" ] || [[ $hard == "$last0 did not hold"* ]] || hard="$last0; $hard"; block "$c" "$n" "$wt" "the fix for $hard"; return; }
-  [ "$after" != p0 ] || { block "$c" "$n" "$wt" "review $pass is the last review and still holds a P0 finding, so it files no follow-up: $last0"; return; }
-  [ "$after" != priv ] || { block "$c" "$n" "$wt" "review $pass is the last review and still holds a privacy hit in the card's own change after its one fix round, so it files no follow-up: ${priv:0:300}"; return; }
-  [ "$after" != p1 ] || { block "$c" "$n" "$wt" "review $pass is the last review and still holds a P1 finding after its one fix round, so it files no follow-up: $p1"; return; }
+  [ "$after" != priv ] || { privshut "$c" "$n" "$wt" "$issue" "$priv" "$pass"; return; }
   [ "$after" != nofinding ] || { block "$c" "$n" "$wt" "review $pass is NO-GO with no finding to fix: ${why:0:200}"; return; }
   if [ "$after" != fix ]; then mode=''
   else
     # A card stacked on this one (stackto()) that passed its tests goes on during this round, fitted onto main alone
     # (giveway(), claim()). A kept patch landed with no review (land) is reviewed after this fix, as after lintgate's fix.
-    [ "$mode" != land ] || mode=''; [ -z "$priv" ] || { privfix=1; echo "conveyor: card $c: a finding of its last review is a privacy hit in its own change, so it goes to one more fix round: ${priv:0:200}"; }
+    [ "$mode" != land ] || mode=''; [ -z "$priv" ] || { privfix=$((${privfix:-0} + 1)); echo "conveyor: card $c: a finding of its last review is a privacy hit in its own change, so it goes to fix round $privfix of $PRIVFIXES for it: ${priv:0:200}"; }
     [ -z "$p1" ] || { p1fix=1; echo "conveyor: card $c: its last review holds a P1 finding, so it goes to one fix round and a review of that fix: ${p1:0:200}"; }
     locked giveway "$c" "$wt" fix; began "$c" "$n" fix
     old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"

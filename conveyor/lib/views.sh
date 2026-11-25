@@ -10,7 +10,7 @@
 # A blocked line whose card's change was kept adds paths: the files it changed, the first 200.
 # A closed line ends a card that changed nothing because its issue was already fixed: it has no commit to name. A
 # closed line whose reason is SHUT ends a blocked card whose issue was closed, for whatever reason, while it waited
-# on the owner (shut()), and one whose reason is OWNSHUT a card the owner shut: it fixed and landed nothing, and is counted with neither the landed cards nor the blocked ones.
+# on the owner (shut()), and one whose reason is OWNSHUT a card the owner shut (ENGSHUT: the engine shut it): it fixed and landed nothing, and is counted with neither the landed cards nor the blocked ones.
 # A test line (result pass or fail) adds sec, the seconds its run took, and a zero token split, so the dashboard
 # prices the step at nothing instead of leaving the card unpriced.
 # A review line of a card's change adds visible: the review's USER-VISIBLE answer ("no", or "yes: <what a customer or
@@ -138,7 +138,7 @@ whole() {
 # [row, state] of each card that file names.
 rows() { # [records file: the retried file's lines are card records too] [file of card states]
   local states=${2:-}
-  jq -cs --argjson max "$MAX_REVIEWS" --arg nodeps "$NODEPS" --arg yes "$YES" --arg lintyes "$LINTYES" --arg shut "$SHUT" --arg ownshut "$OWNSHUT" ${states:+--slurpfile states "$states"} -f "$HERE/jq/rows.jq" "${1:-$READ}"
+  jq -cs --argjson max "$MAX_REVIEWS" --arg nodeps "$NODEPS" --arg yes "$YES" --arg lintyes "$LINTYES" --arg shut "$SHUT" --arg ownshut "$OWNSHUT" --arg engshut "$ENGSHUT" ${states:+--slurpfile states "$states"} -f "$HERE/jq/rows.jq" "${1:-$READ}"
 }
 cards() {
   local out models url n t titles='{}'

@@ -568,7 +568,7 @@ JUDGEDLINE='select(. != "") | fromjson | objects | select(.step == "review" or (
   | {card, step} + if .step == "picked" then {mainRed} else {judge: (.judge | if type == "object" then {accepted, declined} else . end)} end'
 snaprows() { # <records file> <kept> <to> [<lineage> <size>]
   # The key is the same for both files of one snapshot: worked out once, in the snapshot's shell (SNAPROWS_K).
-  [ -n "${SNAPROWS_K:-}" ] || SNAPROWS_K=$({ cksum < "$HERE/jq/rows.jq" && printf '%s\n' "$MAX_REVIEWS" "$NODEPS" "$YES" "$LINTYES" "$SHUT" "$OWNSHUT"; } | cksum) || return 1
+  [ -n "${SNAPROWS_K:-}" ] || SNAPROWS_K=$({ cksum < "$HERE/jq/rows.jq" && printf '%s\n' "$MAX_REVIEWS" "$NODEPS" "$YES" "$LINTYES" "$SHUT" "$OWNSHUT" "$ENGSHUT"; } | cksum) || return 1
   local k=$SNAPROWS_K r cs size h1 h2 o s n=-1 g=${4:-} rf=$3.rows skip=0
   # With a lineage, the caller gives the copy's size; else the file's sum and size come from one cksum: a file not
   # grown since the summary needs no other program to check it.

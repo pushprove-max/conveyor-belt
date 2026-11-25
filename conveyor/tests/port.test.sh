@@ -416,7 +416,7 @@ t_resumep1() {
 # review after the port's own alone, so its first NO-GO (a P1, review 2 of 3) gets a fix round; with the 5 counted,
 # or the 2 after the port, it was its last review and landed the finding as a follow-up. A P1, as p1at2() makes one:
 # from review 2 on, a NO-GO of new P2 findings alone ends the loop (loopstop(): new-p2) whatever the count. p1fix is
-# set (the card's one P1 round spent), so a miscounted last review prints "p1 max-reviews", not the P1's own fix round.
+# set (the card's one P1 round spent), so a miscounted last review prints "last max-reviews", not the P1's own fix round.
 t_resumeport3() {
   local r l=''
   resumesetup 7

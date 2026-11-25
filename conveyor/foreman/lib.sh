@@ -396,7 +396,8 @@ askfiling() { # <repo> <command>
 }
 
 # retryable <record> <jq path to its blocked list>: "<card> TAB <issue>" for each card the standing kind review-retry
-# (lib/standing.sh) gives back: blocked by its review (card.sh: "the fix for [P1] ... did not hold after <n> rounds",
+# (lib/standing.sh) gives back: blocked by its review ("the fix for [P1] ... did not hold after <n> rounds", a reason
+# card.sh no longer writes since issue 1670, so only a block already in the card records matches;
 # as the Board's reviewWhy reads it, with any notes block() adds after it in brackets, lib/push.sh), with an issue,
 # whose reason holds no word of `conveyor.sh auto reserved` (case-insensitive), and not reported yet. Not a card that
 # came after a review-retry of its issue (health's reviewRetried, lib/views.sh): review-retry gives an issue back once, and the second

@@ -870,7 +870,7 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   # One block of a card at a time: `retry` or `shut` (endcard(), lib/run.sh) and the loop (turnended(), revive()) can
   # end the same card at once. Each holds the card's lock (<cards>/<card>.block) to its end, and leaves a card that has
   # a blocked or closed line by then (exit 2): a second block would stage the worktree the first one removes, and
-  # remove the patch the first one kept. A card that landed is still blocked when its declined findings cannot be
+  # remove the patch the first one kept. A card that landed is still blocked when its findings at the follow-up depth cap cannot be
   # written (cardland.sh). The lock file goes once the blocked line is written, so a block that waited on it finds
   # that line. Its lines are read from the retried records too, in the same reading: `retry` takes no card lock, so it
   # can move the card's blocked line out (moveout(), lib/issues.sh) before a block that waited on the lock reads it.

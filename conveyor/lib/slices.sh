@@ -370,12 +370,12 @@ umbrellas() { # <open issues, a json list>
     x=$(gh_write issue close "$n" --comment "$m" 2>&1 >/dev/null) \
       || { echo "conveyor: #$n is $([ "$k" = parts ] && echo "a parent whose parts are all closed or landed" || echo "an umbrella whose follow-ups have all landed or are already done on main"), and it could not be closed (${x:0:300}); the next turn tries again" >&2; continue; }
     CONVEYOR_RELEASEBY=closed locked control release "$n" >/dev/null 2>&1 || :
-  done < <(jq -rs --slurpfile open <(printf '%s' "$1") --rawfile off <(printf '%s' "$off") --arg shut "$SHUT" --arg own "$OWNSHUT" "$DEPS"'$open[0] as $open
+  done < <(jq -rs --slurpfile open <(printf '%s' "$1") --rawfile off <(printf '%s' "$off") --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" "$DEPS"'$open[0] as $open
     # A card whose landed commit main does not hold: its landed and pushed lines are left out.
     | ($off | split("\n") - [""]) as $off | ([.[] | select(.step == "landed" and (.sha | IN($off[]))) | .card] | unique) as $offc
     | map(select((.step | IN("landed", "pushed")) and (.card | IN($offc[])) | not))
     | landed(.) as $done
-    | ([.[] | select(.step == "landed" or (.step == "closed" and (.reason | IN($shut, $own) | not))) | .issue] | unique) as $landed
+    | ([.[] | select(.step == "landed" or (.step == "closed" and (.reason | IN($shut, $own, $eng) | not))) | .issue] | unique) as $landed
     | ($open[] | select((.parts // []) != [] and all(.parts[]; (.open | not) or (.number | IN($done[]))))
       | [.parts[] | select(.open and (.number | IN($done[]))) | .ref] as $l
       | "parts\t\(.number)\t\(.parts | map(.ref) | join(", "))\(if $l == [] then "" else "; landed, not closed yet: \($l | join(", "))" end)"),

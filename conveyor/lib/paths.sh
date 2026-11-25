@@ -355,5 +355,15 @@ OC_GUARD=${CONVEYOR_OPENCODE_GUARD:-$HERE/opencode/guard.mjs}
 # The guard hook every Codex build, fix and rebase session runs (cxready(), README.md Codex builder).
 CX_GUARD=${CONVEYOR_CODEX_GUARD:-$HERE/codex/guard.mjs}
 MAX_REVIEWS=3 # the review rule in README.md
+# shellcheck disable=SC2034 # read by lib/card.sh, which conveyor.sh sources beside this file
+PRIVFIXES=3   # the fix rounds a privacy hit in a card's own change gets before the card is shut (afterreview(), lib/card.sh; issue 1670)
+# The start of the reason of the block that shuts such a card (privshut(), lib/cardland.sh): needsask() (lib/needsask.sh),
+# a job beside the card that can read the block before the shut, puts no such card to the owner.
+# shellcheck disable=SC2034 # read by lib/cardland.sh and lib/needsask.sh, which conveyor.sh sources beside this file
+PRIVSHUT="a privacy hit in the card's own change is still there after its $PRIVFIXES fix rounds"
+# The reason of the closed line of a card the engine shut (privshut(): shut() with engine, lib/issues.sh): read as
+# OWNSHUT is (its issue still open, nothing landed), but it names no owner.
+# shellcheck disable=SC2034 # read by lib/issues.sh, lib/views.sh, lib/snapshot.sh, lib/slices.sh, lib/testaction.sh and commands/shut.sh
+ENGSHUT='shut by the engine'
 # shellcheck disable=SC2034 # read by lib/card.sh, lib/followups.sh and lib/prompts.sh, which conveyor.sh sources beside this file
 MAX_DEPTH=2   # the follow-up depth cap (fudepth(), lib/followups.sh), so the longest chain a pick reads: parent, its follow-up, that one's follow-up

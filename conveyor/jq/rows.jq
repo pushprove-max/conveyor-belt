@@ -1,5 +1,5 @@
 # rows() in conveyor.sh: every card as one row. Arguments: $max (reviews a card), $nodeps, $yes and $lintyes (how those reasons begin),
-# $shut (the reason of the closed line of a card whose issue was closed while it was blocked) and $ownshut (that of a card the owner shut).
+# $shut (the reason of the closed line of a card whose issue was closed while it was blocked), $ownshut (that of a card the owner shut) and $engshut (that of a card the engine shut).
 # A card's row is made from its lines in record order (push lines left out), each folded into the card's state (fold),
 # and the state then made a row (row). The state is what the row needs of the lines read so far, so a card's row after
 # one more line needs its state and that line, not its older lines.
@@ -37,7 +37,7 @@ def row: . as $s | $s.first as $f | $s.r as $r | $s.l as $l
              endAt: ($end.time // null), retriedAt: ($end.retriedAt // null), retriedWhy: ($end.retriedWhy // null),
              # When a card whose issue was closed while it was blocked, or that the owner shut (shut()), was blocked,
              # else null: from then to its end it waited on the owner, and none of that time is a landing's.
-             blockedAt: (if $end.step == "closed" and ($end.reason | IN($shut, $ownshut)) then $s.lb else null end), followups: ($end.followups // []), rollout: ($end.rollout // []), branch: ($f.branch // null), base: ($f.base // null),
+             blockedAt: (if $end.step == "closed" and ($end.reason | IN($shut, $ownshut, $engshut)) then $s.lb else null end), followups: ($end.followups // []), rollout: ($end.rollout // []), branch: ($f.branch // null), base: ($f.base // null),
              diff: ($end.diff // null), paths: ($end.paths // null), batch: ($end.batch // null), depth: $s.dep,
              # The blocked card whose kept patch this card resumes (named by its first worktree line), else null.
              from: ($s.wt | .reason // "" | select(test("built from nothing") | not)

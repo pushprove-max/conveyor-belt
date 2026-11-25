@@ -214,8 +214,8 @@ of these are true:
 The pass stays the card's lint result, and the card gets no new `lint` line.
 
 - A finding goes to one fix session before any test runs. Its step is `Fix <n>: lint findings`. Then the card goes to
-  a review, and that review is its last review: a `NO-GO` lands with follow-ups, blocks if it holds a `harm` P0, or gets
-  one fix round if it holds a `harm` P1 ([When the fix loop ends](#when-the-fix-loop-ends)). The gate before that review does not
+  a review, and that review is its last review: a `NO-GO` lands with follow-ups, or gets one fix round if it holds a
+  `harm` P1 and no P0, and lands after that round ([When the fix loop ends](#when-the-fix-loop-ends)). The gate before that review does not
   run again on the fixed change.
 - At the next landing gate, a finding that is still there blocks the card with the reason
   `lint: <n> findings left after its fix session; nothing landed`. If a different session (a test fix, for example)
@@ -263,7 +263,7 @@ card, the brief has no `# Lint` section, and a change of lint policy does not st
 
 ## Review and the judge
 
-A second model reviews each card, at most three times, once more after the fix of a privacy hit on the last review and once more after the fix of a P1 on a last review. Each finding has a level:
+A second model reviews each card, at most three times, once more after each fix of a privacy hit on the last review and once more after the fix of a P1 on a last review. Each finding has a level:
 
 - P0: it breaks main, loses data or opens a security hole.
 - P1: the change does not do what the issue asks, or breaks behaviour the project uses today.
@@ -298,7 +298,7 @@ highest effort its program takes when the list names no range. A model with no e
 has no step. The loop ends at the first of these:
 
 - `go`: a review says `GO`.
-- `max-reviews`: the card has had three reviews. One more review follows the fix of a privacy hit on the last review, and one more the fix of a P1 on a last review (below). A card that starts from the kept patch of a blocked card also counts
+- `max-reviews`: the card has had three reviews. One more review follows each fix of a privacy hit on the last review, and one more the fix of a P1 on a last review (below). A card that starts from the kept patch of a blocked card also counts
   the reviews of that card and of the cards whose kept patch it took. It does not count the reviews of other cards of
   the same issue. After an automatic port of one of those cards, it counts only the reviews after the review of the
   port.
@@ -306,8 +306,9 @@ has no step. The loop ends at the first of these:
 - `test-fix`: the one review after the fix of failed tests.
 - `lint-fix`: the one review after the fix of lint findings at the landing gate.
 - `land`: the card lands from a kept patch on its kept review, with no new review.
-- `repeat`: a finding comes back after its fix, and each `harm` finding of the review is P2 or P3. A `harm` P0 or P1
-  that comes back blocks the card. A P0 or P1 of another kind does not (Harm or self-heals, below).
+- `repeat`: a finding comes back after its fix, and each P0 or P1 finding of the review comes back too. A `harm` P0
+  or P1 that comes back also ends the loop this way, whatever else the review holds. The card gets no more fix
+  sessions for it.
 - `new-p2`: from the second review on, a `NO-GO` whose findings are all new and all P2 or P3. Each finding of the
   earlier reviews is fixed, and none is P0 or P1. The card lands, and each `harm` finding becomes a follow-up card. A
   finding of another kind goes to its list (Harm or self-heals, below). A review with a new P0 or P1, or with a finding
@@ -319,14 +320,20 @@ A `NO-GO` with no finding to fix, such as one that holds only an `UNPROVEN` line
 reasons above ends the loop at that review. The reason is
 `review <n> is NO-GO with no finding to fix:` and the reviewer's first `UNPROVEN` line, else its `VERDICT` line.
 
-If a finding of the last review is a privacy hit in the card's own change, the card gets one more fix session. If a
-last review after that session still holds such a hit, the card blocks and files no follow-up. If the
-last review is a `NO-GO` that holds a P1 finding, the card also gets one fix session, once, and one more review of that
-fix alone. If that review still holds a P1, the card blocks and files no follow-up, as it does for a P1 that comes back
-after its fix. The findings that are still open when the loop ends become follow-ups. If the last review is a `NO-GO`
-that holds a P0 finding, the card does not land and files no follow-ups. It blocks, and the reason names the P0. The
-card's work and reviews are kept, so you can retry it. These P0 and P1 rules apply to `harm` findings, and to findings
-with no kind. A P0 or P1 of another kind lands with the card and goes to its list (Harm or self-heals, below). The review that ends the loop and the `filed` step
+A review finding never blocks a card. When the loop ends, the card goes on to its tests and its landing gate, and
+lands. Each `harm` finding that is still open, at any level from P0 to P3, becomes a follow-up card. A finding of
+another kind goes to its list (Harm or self-heals, below). A finding that the judge declined is not filed.
+
+If the last review is a `NO-GO` that holds a `harm` P1 finding and no P0, the card first gets one fix session, once,
+and one more review of that fix alone. If that review still holds a P1, the card lands and the P1 becomes a follow-up.
+A P0 on the last review gets no extra fix session: the card lands, and the P0 becomes a follow-up. A finding with no
+kind counts as `harm`, and a finding with no level counts as P1.
+
+A privacy hit in the card's own change never lands. If a finding of the last review is such a hit, the card gets
+another fix session and one more review. This repeats until a last review holds no such hit, and then the card lands
+as above. If the hit is still there after 3 of these fix sessions, the card does not land and does not go to Needs
+you: the engine shuts it with its work kept, and the hit goes on the self-heals list as a possible false hit of the privacy
+check. `conveyor.sh retry <issue>` takes the card again. The review that ends the loop and the `filed` step
 record the reason as `stop`, with `pass` (the reviews of this card) and `rounds` (the reviews of earlier cards). On the
 Board, that review shows "Fix loop ended:" and the reason.
 
@@ -388,9 +395,8 @@ whatever kind the judge gives it.
   them, the review gives NO-GO and the fix round fixes all of them; none goes to a list. A finding that cannot be
   written to its list is a finding with no kind. If such a finding is still open after the last review, it goes to
   its list.
-- At the last review, a P0 or P1 in the card's own change stops the card only when it is `harm`. A P0 or P1 of
-  another kind does not stop it: the card lands, and the finding goes to its list with that card. A finding with no
-  kind is `harm`, so it still stops the card.
+- At the last review, no finding stops the card. A `harm` P0 or P1 in the card's own change becomes a follow-up as the
+  card lands. A P0 or P1 of another kind goes to its list with that card. A finding with no kind is `harm`.
 
 A follow-up's body has a `Kind:` line, with the kind and the judge's reason. In a card's steps on the Board, each
 review finding that the judge gave a kind shows it, and an accepted one also shows the judge's reason. When a later
@@ -474,10 +480,8 @@ Findings still open after the last review become follow-up issues, which become 
 judge sorted as another kind than `harm` goes to its list instead (Harm or self-heals, above). Each follow-up's
 body says how deep it is, as the line `Follow-up depth: N`: 1 for a follow-up of a first card, 2 for a follow-up of
 a follow-up. Follow-ups go two levels deep. A card whose issue is at depth 2 files no follow-ups: its leftover findings
-go to the Declined list, and the reason names the cap. A follow-up that changes one of the pack's `pipelineFiles` is filed held.
-It builds only once you release it. There is one exception: when auto is on and the engine lands a card that its review
-blocked a second time, the follow-up of the finding that blocked the card is not held. If that finding holds a word of
-`auto.reserved` or an item of your profile, it is held (`docs/foreman.md`, `review-retry`).
+go on the self-heals list, and the reason names the cap. A follow-up that changes one of the pack's `pipelineFiles` is filed held.
+It builds only once you release it.
 
 A finding whose fix changes no behaviour, such as a comment, dead code or a redundant check, has the mark `[cleanup]`
 after its level, as `[P3][cleanup] file:line what`. Its follow-up is a cleanup, not a bug: it does not get the pack's
