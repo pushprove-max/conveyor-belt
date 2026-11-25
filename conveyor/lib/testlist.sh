@@ -103,13 +103,34 @@ carriedrec() { # <worktree> [<partial file>]
 # TESTCACHE_KEEP lines are kept; one writer at a time, under a lock of its own.
 TESTCACHE=${STATE%/*}/testcache.tsv TESTCACHE_KEEP=5000
 # Of lines `<file>\t<input>...` on stdin, each as `<hash>\t<the line>`: the hash of the line's paths, in its order,
-# each with the hash of its content in the worktree (a path that is no file there counts as missing), by two git calls.
+# each with the hash of its content in the worktree and whether it can run (a path that is no file there counts as
+# missing), by two git calls. A symbolic link counts as the path it names, not the file it leads to (#1619): a test
+# can read the link itself, and a link made to lead elsewhere changes that. A file whose content stays the same but
+# that can run, or no longer can, changes it too (#1619): a test can run it. A path that is a folder there (one a test
+# looked for and did not find, made a folder since) counts as a folder, not as missing (#1619). A folder (a path that
+# ends in /, ./ for the worktree's root) counts as the names of the tracked files and folders directly in it, each
+# folder's name with a / after it (#1619): a test that listed it reads a change that adds a file there or deletes one,
+# or that makes a file there a folder of the same name.
 cachesums() { # <worktree>
-  local d rc=0
+  local d rc=0 p
   d=$(mktemp -d) || return 1
   cat > "$d/lines"
-  tr '\t' '\n' < "$d/lines" | sort -u | while IFS= read -r p; do [ ! -f "$1/$p" ] || printf '%s\n' "$p"; done > "$d/paths"
-  { git -C "$1" hash-object --no-filters --stdin-paths < "$d/paths" > "$d/sums" && paste "$d/paths" "$d/sums" > "$d/blobs" \
+  tr '\t' '\n' < "$d/lines" | sort -u > "$d/all"
+  : > "$d/paths"; : > "$d/modes"; : > "$d/links"
+  while IFS= read -r p; do
+    [[ $p != */ ]] || continue
+    if [ -L "$1/$p" ]; then printf '%s\tlink %s\n' "$p" "$(readlink "$1/$p")" >> "$d/links"
+    elif [ -f "$1/$p" ]; then printf '%s\n' "$p" >> "$d/paths"; if [ -x "$1/$p" ]; then echo 100755; else echo 100644; fi >> "$d/modes"
+    elif [ -d "$1/$p" ]; then printf '%s\tfolder\n' "$p" >> "$d/links"; fi
+  done < "$d/all"
+  grep '/$' "$d/all" > "$d/dirs" || :
+  : > "$d/dirsums"
+  [ ! -s "$d/dirs" ] || { git -C "$1" -c core.quotePath=false ls-files | awk -v d="$d" 'FILENAME == D { at[$0] = ++n; next }
+      { m = split($0, p, "/"); q = "./"; for (j = 1; j <= m; j++) { e = p[j] (j < m ? "/" : ""); if ((q in at) && !((q, e) in s)) { s[q, e] = 1; ls[q] = ls[q] e "\n" }; q = (j == 1 ? "" : q) p[j] "/" } }
+      END { for (k in at) { f = d "/f" at[k]; printf "%s", ls[k] > f; close(f); print k "\t" f } }' D="$d/dirs" "$d/dirs" - > "$d/dirmap" \
+    && cut -f2 "$d/dirmap" | git -C "$1" hash-object --no-filters --stdin-paths | paste <(cut -f1 "$d/dirmap") - > "$d/dirsums"; } || rc=1
+  [ $rc = 0 ] && { git -C "$1" hash-object --no-filters --stdin-paths < "$d/paths" > "$d/sums" \
+    && paste "$d/paths" <(paste -d' ' "$d/modes" "$d/sums") | cat - "$d/links" "$d/dirsums" > "$d/blobs" \
     && awk -F'\t' -v d="$d" 'FILENAME != L { b[$1] = $2; next }
       { f = d "/e" FNR; for (i = 1; i <= NF; i++) printf "%s\t%s\n", $i, ($i in b ? b[$i] : "-") > f; close(f); print f }' \
       L="$d/lines" "$d/blobs" "$d/lines" > "$d/entries" \
@@ -117,20 +138,25 @@ cachesums() { # <worktree>
   rm -rf "$d"; return $rc
 }
 # After each run of the command (tests()), each file it passed whole, with the inputs its log names, into $TESTCACHE: a
-# file its log ends `-- ok` that no `-- FAIL` line, no `TESTRUN case` line (a run of some of its cases) and no `ok`,
-# `fail` or `off` line of the list the run was given (some of its cases kept or left out) names. A file a path of whose
-# line is absolute or climbs out of the worktree (`..`) is not kept.
+# file its log ends `-- ok` that no `-- FAIL` line, no `TESTRUN case` line (a run of some of its cases: but for an
+# engine case file whose case lines name every `t_<case>() {` case it holds, run whole, #1619) and no `ok`, `fail` or
+# `off` line of the list the run was given (some of its cases kept or left out) names. A file a path of whose line is
+# absolute or climbs out of the worktree (`..`) is not kept.
 cachekeep() { # <worktree>
-  local l=() add sums lock r=/dev/null
+  local l=() add sums lock r=/dev/null cs
   mapfile -t l < <(testlogs "$1"); [ ${#l[@]} -gt 0 ] && grep -qh $'^TESTRUN inputs\t' "${l[@]}" 2>/dev/null || return 0
   [ ! -f "$1.rerun" ] || r=$1.rerun
-  add=$(awk -F'\t' -v L="$r" 'function bad(p) { return p == "" || p ~ /^\// || p ~ /(^|\/)\.\.(\/|$)/ }
+  # Each case each file with an inputs line holds, `<file>\t<case>`.
+  cs=$(cat "${l[@]}" 2>/dev/null | awk -F'\t' '$1 == "TESTRUN inputs" { print $2 }' | sort -u | while IFS= read -r f; do
+    [ ! -f "$1/$f" ] || sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$1/$f" | awk -v f="$f" '{ print f "\t" $0 }'; done | sort -u)
+  add=$(C=$cs awk -F'\t' -v L="$r" 'function bad(p) { return p == "" || p ~ /^\// || p ~ /(^|\/)\.\.(\/|$)/ }
+    BEGIN { n = split(ENVIRON["C"], x, "\n"); for (i = 1; i <= n; i++) if (split(x[i], y, "\t") == 2) { all[y[1], y[2]] = 1; na[y[1]]++ } }
     FILENAME == L { if ($1 == "ok" || $1 == "fail" || $1 == "off") part[$2] = 1; next }
     /^-- ok / { ok[substr($0, 7)] = 1; next }
     /^-- FAIL / { part[substr($0, 9)] = 1; next }
-    $1 == "TESTRUN case" { part[$2] = 1; next }
+    $1 == "TESTRUN case" { hc[$2] = 1; if (!(($2, $3) in all)) part[$2] = 1; else if (!(($2, $3) in got)) { got[$2, $3] = 1; ng[$2]++ }; next }
     $1 == "TESTRUN inputs" { if (bad($2)) next; seen[$2] = 1; for (i = 3; i <= NF; i++) { if (bad($i)) part[$2] = 1; inp[$2] = inp[$2] "\t" $i } }
-    END { for (f in seen) if ((f in ok) && !(f in part)) print f inp[f] }' "$r" "${l[@]}")
+    END { for (f in seen) if ((f in ok) && !(f in part) && (!(f in hc) || ng[f] == na[f])) print f inp[f] }' "$r" "${l[@]}")
   [ -n "$add" ] || return 0
   sums=$(printf '%s\n' "$add" | cachesums "$1") || return 1
   { exec {lock}>>"$TESTCACHE.lock"; } 2>/dev/null || return 1
@@ -150,10 +176,18 @@ cachehits() { # <worktree>
 # A run (tests(): a card's, and the whole test on main) is told to keep off each file of $TESTCACHE whose hash in its
 # worktree is a kept one: a `pass` and an `off` line for it in its list (the off line keeps it off though
 # a `changed` or `main` line selects it, its inputs being the same), unless the list names failed cases of it. Prints
-# each such file's line for the run's log, `TESTRUN why<TAB><file><TAB>passed before with the same inputs`.
+# each such file's line for the run's log, `TESTRUN why<TAB><file><TAB>passed before with the same inputs`. Each other
+# file of the card's list (TEST_FILES, listcmd()) that its list does not keep as passed or keep off whole gets a line
+# that says why no pass of it is used (#1619): its inputs changed since the last pass on record, or it has no pass on
+# record with its inputs (no $TESTCACHE yet, or its runner names none).
 cacheoff() { # <worktree>
   local f m add=''
   m=$(cachehits "$1") || return 0
+  while IFS= read -r f; do
+    [ -n "$f" ] && ! grep -qxF -- "$f" <<<"$m" && ! grep -qxF -e "pass"$'\t'"$f" -e "off"$'\t'"$f" "$1.rerun" 2>/dev/null || continue
+    if cut -f2 "$TESTCACHE" 2>/dev/null | grep -qxF -- "$f"; then printf 'TESTRUN why\t%s\tits inputs changed since its last pass, so the test runs again\n' "$f"
+    else printf 'TESTRUN why\t%s\tno pass of it is on record with the files it reads, so the test runs\n' "$f"; fi
+  done <<<"${TEST_FILES:-}"
   [ -n "$m" ] || return 0
   while IFS= read -r f; do
     grep -qxF "pass"$'\t'"$f" "$1.rerun" 2>/dev/null || add+="pass"$'\t'"$f"$'\n'
@@ -162,6 +196,42 @@ cacheoff() { # <worktree>
   done < <(cat "$1.rerun" 2>/dev/null | M=$m awk -F'\t' 'BEGIN { n = split(ENVIRON["M"], a, "\n"); for (i = 1; i <= n; i++) w[a[i]] = 1 }
     $1 == "fail" { delete w[$2] } END { for (f in w) print f }' | sort)
   [ -z "$add" ] || printf '%s' "$add" >> "$1.rerun"
+}
+# listcmd()'s list fs with each test file added, run whole, whose last pass in $TESTCACHE read a file the staged change
+# in <worktree> touches (#1619): one of its inputs, a folder it listed (an input that ends in /) that the change adds a
+# file to or deletes one from, or a path it looked for that the change adds a file under (cachereaders()). Only files
+# still there. The test map and the links still
+# give the tests that have no pass on record; cacheoff() keeps off a file whose inputs are the same as at a pass. One
+# already on the list with only some of its cases (TEST_CASES) runs whole: a case it does not name can read that file.
+# READADD: the files it added; READLINKS: how many of them are linked files (lk, listcmd()'s) the cap left out;
+# READWHOLE: set when it made one run whole (listcmd() counts these in its note).
+# shellcheck disable=SC2034,SC2154 # READWHOLE is read by listcmd() (lib/testrun.sh), and lk is its own
+readersin() { # <worktree>
+  local f c
+  READADD=(); READWHOLE=''; READLINKS=0
+  [ -s "$TESTCACHE" ] && c=$(git -C "$1" -c core.quotePath=false diff --cached --name-status --no-renames HEAD -- 2>/dev/null) && [ -n "$c" ] || return 0
+  while IFS= read -r f; do
+    [ -f "$1/$f" ] || continue
+    if [ ${#fs[@]} != 0 ] && printf '%s\n' "${fs[@]}" | grep -qxF -- "$f"; then
+      cut -f1 <<<"${TEST_CASES:-}" | grep -qxF -- "$f" || continue
+      TEST_CASES=$(awk -F'\t' -v f="$f" '$1 != f' <<<"$TEST_CASES"); TEST_CASES=${TEST_CASES:+$TEST_CASES$'\n'}; READWHOLE=1
+    else fs+=("$f"); READADD+=("$f"); [ ${#lk[@]} = 0 ] || ! printf '%s\n' "${lk[@]}" | grep -qxF -- "$f" || READLINKS=$((READLINKS + 1)); fi
+  done < <(cachereaders "$c")
+  runnersout
+}
+# The test files whose last pass in $TESTCACHE read a file of <changes> (`git diff --name-status --no-renames` lines),
+# one a line, A to Z: one of its inputs; a folder it listed (an input that ends in /) that a file of it is added to or
+# deleted from (status A or D); or a path it looked for that a file is added under (status A: the path made a folder).
+# Not for a change to the test file itself: the card's own test files run as before, only the cases the change touches
+# when it touches only some (owncases()). readersin() adds them to a card's list; rerunsince() drops what the card's last
+# run kept of them.
+cachereaders() { # <changes>
+  [ -s "$TESTCACHE" ] && [ -n "$1" ] || return 0
+  C=$1 awk -F'\t' 'BEGIN { n = split(ENVIRON["C"], l, "\n")
+      for (i = 1; i <= n; i++) { if (split(l[i], x, "\t") < 2) continue; ch[x[2]] = 1; if (x[1] !~ /^[AD]/) continue
+        ch["./"] = 1; m = split(x[2], p, "/"); q = ""; for (j = 1; j < m; j++) { q = q p[j] "/"; ch[q] = 1 } } }
+    { last[$2] = $0 }
+    END { for (f in last) { k = split(last[f], a, "\t"); for (i = 3; i <= k; i++) if ((a[i] in ch) || (a[i] !~ /\/$/ && (a[i] "/") in ch)) { print f; break } } }' "$TESTCACHE" | LC_ALL=C sort
 }
 # The cases of the test file <file> that the staged change in <worktree> adds or changes (listcmd(), #414), A to Z, one
 # a line: by the case scan (CASESCAN, lib/testfiles.sh) of main's file (HEAD) and of the staged one, each case of the
@@ -559,7 +629,7 @@ testclock() { # <timeout's pid> <turn wait file> <the run's limit: TEST_TIMEOUT,
 # a merge in doubt.
 # shellcheck disable=SC2034 # RERUN_WHY is read by tests() in lib/testrun.sh
 rerunsince() { # <worktree> <the staged change's id> <HEAD> <tree>
-  local ot ob ch m='' c
+  local ot ob ch m='' c rd
   RERUN_WHY='no list of what the last run passed'
   [ -n "$2" ] && [ -s "$1.rerun" ] || return 1
   ob=$(sed -n 's/^base\t//p' "$1.rerun"); ot=$(sed -n 's/^tree\t//p' "$1.rerun")
@@ -574,9 +644,15 @@ rerunsince() { # <worktree> <the staged change's id> <HEAD> <tree>
     ch=$(grep -xF -f <(grep . <<<"$c") <<<"$ch")
     ! grep -vxF -f <(grep . <<<"$m") <<<"$ch" | grep -q . || return 2
   fi
+  # A test file whose last pass on record read a file that differs between the two trees (cachereaders(), #1619) keeps
+  # no `pass`, `ok` or `fail` line, so it runs whole though the command selects none of it (runfiles()): bug, a fix
+  # that changed a file a passed test read kept that pass, and runfiles() left the test off.
+  RERUN_WHY="the files that differ between the tree last tested ($ot) and the tree now cannot be read"
+  rd=$(git -C "$1" -c core.quotePath=false diff --name-status --no-renames "$ot" "$4" -- 2>/dev/null) && rd=$(cachereaders "$rd") || return 1
   RERUN_WHY="the list for this run could not be written"
   { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$2" "$3" "$4"; [ "$ob" = "$3" ] || printf 'from\t%s\n' "$ob"
-    grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun"; awk 'length { print "changed\t" $0 }' <<<"$ch"; awk 'length { print "main\t" $0 }' <<<"$m"; } > "$1.rerun.new" \
+    grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun" | awk -F'\t' -v R="$rd" 'BEGIN { n = split(R, x, "\n"); for (i = 1; i <= n; i++) d[x[i]] = 1 }
+      $1 == "shared" || !($2 in d)'; awk 'length { print "changed\t" $0 }' <<<"$ch"; awk 'length { print "main\t" $0 }' <<<"$m"; } > "$1.rerun.new" \
     && mv -f "$1.rerun.new" "$1.rerun"
 }
 # The test files a card's run again adds to its list on a main that moved (listcmd(): MAINFROM is the commit its list was

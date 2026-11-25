@@ -633,6 +633,9 @@ LINKED='the change adds or changes no test file, so the card ran <n> of the <all
 # Added to LINKED when a run again of the shared test files (listcmd() SHAREDRUN) ran <k> linked files past those <n>.
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 SHAREDLINKED=' It also ran <k> more of the linked files, because cards that landed on main changed them.'
+# Added to LINKED when the test results cache (testlist.sh readersin()) ran <k> linked files past those <n>.
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+READLINKED=' It also ran <k> more of the linked files, because their last pass read a file that the change touches.'
 # What a card's test step says when it ran only the <n> cases its change adds or changes of <m>
 # of its own test files (listcmd(), testlist.sh owncases(): #414), with OWNWHOLE when <w> of them ran whole; <s> is "s" for a
 # count over 1.

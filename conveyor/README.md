@@ -919,14 +919,25 @@ a "Test times" warning, when the project's last card test runs (up to 5 that ran
 warning names the runner and the report option to add to the test command.
 
 **The test results cache.** A runner can also give, for each test file it runs whole, the files that the test file
-reads: `TESTRUN inputs<TAB><file><TAB><input file>...` in its log (the test file's imports; for an engine case file,
-the engine files that the coverage map gives for its cases, else every engine file). Paths are relative to the
-checkout. When the file passes (its `-- ok` line, and no `TESTRUN case` line or `ok`, `fail` or `off` line of the
-list names it), Conveyor keeps a hash of the contents of the file and its inputs in `testcache.tsv` in the state
-folder (the last 5000). A later test run of any card, or the whole test on main, keeps off a file whose hash in its
-worktree matches a kept one: its list gets a `pass<TAB><file>` and an `off<TAB><file>` line (unless the list names
-failed cases of it). The run's log says so with `TESTRUN why<TAB><file><TAB>passed before with the same inputs`, so
-the test line's `why` holds it too. A file with no `TESTRUN inputs` line is never kept off in this way.
+reads: `TESTRUN inputs<TAB><file><TAB><input file>...` in its log. Paths are relative to the checkout. An input that
+ends in `/` is a folder that the test file lists (`./` is the checkout's root): Conveyor compares the names of the
+tracked files and folders in it, so a file added there or deleted, or a file changed to a folder of the same name,
+changes the input. An input can also be a path that was not there when the test file looked for it. When the file passes (its
+`-- ok` line, and no `ok`, `fail` or `off` line of the list names it, and no `TESTRUN case` line names it unless its
+case lines name every `t_<case>() {` case that the file holds), Conveyor keeps a hash of the file and its inputs in
+`testcache.tsv` in the state folder (the last 5000). The hash covers the contents of each file, whether the file can
+run, whether a path is a file, a folder or not there, and, for a symbolic link, the path that the link names. A later test run of any card, or the whole test on
+main, keeps off a file whose hash in its worktree matches a kept one: its list gets a `pass<TAB><file>` and an
+`off<TAB><file>` line (unless the list names failed cases of it). The run's log says so with
+`TESTRUN why<TAB><file><TAB>passed before with the same inputs`, so the test line's `why` holds it too. A file with
+no `TESTRUN inputs` line is never kept off in this way.
+A card's test list also gets each test file whose last kept pass read a file that the change touches, or listed a
+folder that the change adds a file to or deletes a file from. Such a file runs whole, also when the card's own change
+selects only some of its cases. When a fix, or a newer main, changes a file that a test file's last kept pass read,
+the card's next test run does not use the pass of that file from the card's earlier run. The test map and the test
+links still give the tests that have no kept pass. Each
+other file on the card's list gets a `TESTRUN why` line that tells why it runs: its inputs changed since its last
+pass, or no pass of it is kept with its inputs.
 The full test suite does not use the cache. A path that is absolute or contains `..` is not kept.
 
 A slow test file never sends a card to its review, a fix or another test step, and nothing is filed for it as a

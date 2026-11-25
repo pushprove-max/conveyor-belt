@@ -437,7 +437,7 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # it got (watch() stops a run that reports more: tests()). <report args> (reportask() files) go after the command,
 # before each file's path. TEST_FAST is `fast` when the command stops at its first failure (failfast()), else empty.
 listcmd() { # <worktree> [report args]
-  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() sh=() ns=0
+  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() sh=() ns=0 READADD=() READWHOLE='' READLINKS=0
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
   # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only while it is not set.
   # A suite runner (SUITERUNNERS) is on no list (#382): testpaths() leaves each off the card's own files, and
@@ -476,7 +476,8 @@ listcmd() { # <worktree> [report args]
         TEST_CASES=$(awk -F'\t' -v f="$f" '$1 != f' <<<"$TEST_CASES"); TEST_CASES=${TEST_CASES:+$TEST_CASES$'\n'}
       else fs+=("$f"); fi
     done
-    if [ ${#lk[@]} != 0 ]; then
+    readersin "$1" # each file whose last pass read a file the change touches, whole (testlist.sh, #1619), before the note's counts
+    if [ ${#lk[@]} != 0 ] || [ ${#READADD[@]} != 0 ] || [ -n "$READWHOLE" ]; then
       runnersout; nf=$(cut -f1 <<<"$TEST_CASES" | grep . | sort -u | grep -c .) || :; nw=$((${#fs[@]} - nf))
     fi
     if [ $nf != 0 ]; then
@@ -487,8 +488,7 @@ listcmd() { # <worktree> [report args]
   else
     s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
       narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
-    by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"
-    runnersout
+    by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"; runnersout
     lk=("${fs[@]}"); CAPMAX=$CARDLINKED testcap "${fs[@]}"; fs=("${CAPFILES[@]}"); ns=0
     # The shared files of a run again (sh) join after the cap, taking none of its places. One the cap left out of the
     # linked files runs, so it is not left out (CAPLEFT): bug, the list said 6 files ran and 115 of 120 were left out.
@@ -497,11 +497,11 @@ listcmd() { # <worktree> [report args]
       fs+=("$f"); printf '%s\n' "${lk[@]}" | grep -qxF -- "$f" && { CAPLEFT=$((CAPLEFT - 1)); ns=$((ns + 1)); }
     done
     [ ${#sh[@]} = 0 ] || runnersout
-    # The note's <n> counts only the linked files the cap chose, most recent failure first; the shared linked files
-    # past it (ns), in name order, get their own sentence (SHAREDLINKED): bug, the note said all of them ran in order
-    # of most recent failure.
-    [ ${#lk[@]} = 0 ] || [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/$((${#lk[@]} - CAPLEFT - ns))}; CAPNOTE=${CAPNOTE//'<all>'/${#lk[@]}}
-      [ $ns = 0 ] || CAPNOTE+=${SHAREDLINKED//'<k>'/$ns}; }
+    # Past the cap, each file whose last pass read a file the change touches (testlist.sh readersin(), #1619): a linked one (READLINKS) is not left out: bug, the list said 5 of 10 were left out with 6 on it.
+    readersin "$1"; CAPLEFT=$((CAPLEFT - READLINKS))
+    # The note's <n> counts only the linked files the cap chose, most recent failure first; the shared linked files past it (ns), in name order, and those of the last passes (READLINKS) get their own sentences (SHAREDLINKED, READLINKED): bug, the note said all of them ran in order of most recent failure.
+    [ ${#lk[@]} = 0 ] || [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/$((${#lk[@]} - CAPLEFT - ns - READLINKS))}; CAPNOTE=${CAPNOTE//'<all>'/${#lk[@]}}
+      [ $ns = 0 ] || CAPNOTE+=${SHAREDLINKED//'<k>'/$ns}; [ "$READLINKS" = 0 ] || CAPNOTE+=${READLINKED//'<k>'/$READLINKS}; }
   fi
   [ -z "${MAINFROM:-}" ] || [ ${#fs[@]} = 0 ] || while IFS= read -r f; do printf '%s\n' "${fs[@]}" | grep -qxF -- "$f" || fs+=("$f"); done < <(mainlinks "$1" "$MAINFROM")
   # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.

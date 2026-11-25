@@ -63,6 +63,9 @@
 # And `claude plugin validate` when the change touches hooks/, types/ or .claude-plugin/: an error fails the run, and so
 # does a type error HEAD's copy of the plugin does not have (below).
 # In one-file mode in a test step these checks run once a tree, and later runs of that tree reuse their result.
+# In a test step, each test file it runs whole (an engine case file with every case it holds, but a plugin test file)
+# runs under strace where the host can trace, and when it passes, its log names the files it read (`TESTRUN inputs`,
+# issue 1619: TRACE, below).
 # A run again of the same change (conveyor.sh tests(): CONVEYOR_TEST_RERUN names what passed and what failed) runs
 # no file that passed, and of the engine's runner only the cases that failed, when the run before named them, else
 # those of its selection that did not print `ok <case>` (a runner killed part-way). A file the list names failed cases
@@ -1648,7 +1651,83 @@ plugintest() { # <test file>
 # share, or fails with the reason ($o.tmp/f<n>.noroom when that is want of room: a host problem, below).
 fshare() { # <test file> <command>...
   local t=$1; shift
+  [ -z "${trc:-}" ] || set -- "${TRACE[@]}" "$o.trace" "$@"
   share_run "test-changed: $t" "$o.tmp/f$fk" "$@"
+}
+# The files a test file reads (issue 1619). In the loop's test step (CONVEYOR_TEST_LOG), on a host where strace can
+# trace this run's children (Linux) and says nothing doing so, each test file run whole runs under strace: a file run
+# one at a time below (trc, its calls in $o.trace) and an engine case file run with every case it holds (etr, below: its
+# calls in $o.e<n>.trace). Not a part of a file, nor an engine case file run with some of its cases, nor a plugin test
+# file: one plugin test run runs them all, so its trace cannot tell which file read what, and the test map picks them.
+# When it passes, its log names what it read (inputsof): the engine keeps that with the pass, keeps the file off a later run
+# while those files are the same, and runs it for a change to one of them (conveyor/README.md, The test results
+# cache). With no such strace, no file names its inputs, and the test map picks it as before. strace runs apart from
+# the file's process (-D), so the file ends as it would untraced, not when the last process it left behind ends. It
+# traces each call that takes a path (%file): a test can read a file with no open (a readlink, a stat, an access check
+# or an exec of it). It traces the calls that failed too: a lookup of a file that is not there (a package.json that
+# Node looks for) changes what the test does once that file is added.
+TRACE=(strace -D -f -qq --seccomp-bpf -y -e trace=%file -o)
+if [ -d "${CONVEYOR_TEST_LOG:-}" ] && command -v strace > /dev/null 2>&1 && tp=$("${TRACE[@]}" /dev/null true 2>&1) && [ -z "$tp" ]; then :
+else TRACE=(); fi
+# inputsof <test file> <trace>: its `TESTRUN inputs<TAB><file><TAB><input>...` line, from the trace: each tracked file
+# of this checkout that a call read, by the path the call was given (a symbolic link as itself, not its target) and, for
+# an open, by the path of the file it opened; and each folder holding a tracked file that it opened, as <folder>/ (./
+# for the root), so a file added there or deleted changes its inputs; and each path here that a call looked for and
+# did not find (it failed with ENOENT or ENOTDIR), so adding a file or folder there changes its inputs. A read is an
+# open (not one for writing alone), a stat, an access check, a readlink, an exec or a failed chdir. A relative path is
+# of the folder the call names (AT_FDCWD<folder>, or <fd><folder>), else of the folder the process was last seen in
+# (its last AT_FDCWD, or its last chdir that did not fail), else of the checkout. A call strace split (`<unfinished
+# ...>`) takes its result from the line it resumed on. Not the file itself, nor .git. Nothing, and so no pass kept, for
+# a trace that names a path here with a byte strace escapes, which no tracked path can be matched to; that opens this
+# checkout's Git index or a file of its Git objects (a `git ls-files`, a `git diff`, a `git show`): what the test then
+# reads is the list of tracked files or their content in Git, which no input names, so a pass kept on its inputs could
+# stand after a file was added; or that read a path here that is not tracked and was there (a dependency folder linked
+# from main, such as node_modules, or a file a test left): no input names its content, so a pass kept could stand
+# after a file in it changed or was deleted.
+inputsof() {
+  local in g c
+  [ -s "$2" ] && git -c core.quotePath=false ls-files > "$o.tracked" && g=$(git rev-parse --absolute-git-dir) && g=$(cd "$g" && pwd -P) \
+    && c=$(git rev-parse --path-format=absolute --git-common-dir) && c=$(cd "$c" && pwd -P) || return 1
+  in=$(awk -v r="$(pwd -P)" -v r2="$PWD" -v t="$1" -v T="$o.tracked" -v G="$g" -v C="$c" '
+    function norm(p,  n, a, s, i, k, o) {
+      n = split(p, a, "/"); k = 0
+      for (i = 1; i <= n; i++) { if (a[i] == "" || a[i] == ".") continue; if (a[i] == "..") { if (k) k--; continue }; s[++k] = a[i] }
+      o = ""; for (i = 1; i <= k; i++) o = o "/" s[i]; return o == "" ? "/" : o }
+    # x read by a call (op: an open) whose result was st: ok, or the error it failed with (ENOENT and so on).
+    function add(x, op, st) {
+      if (op && (x == G "/index" || index(x, C "/objects/") == 1)) { bad = 1; return }
+      if (x == r || x == r2) x = "./"; else if (index(x, r "/") == 1) x = substr(x, length(r) + 2)
+      else if (index(x, r2 "/") == 1) x = substr(x, length(r2) + 2); else return
+      if (x ~ /^\.git(\/|$)/ || x == t) return
+      if (index(x, "\\")) { bad = 1; return }
+      if (x in f) use[x] = 1; else if (x == "./") { if (op) use[x] = 1 } else if ((x "/") in d) { if (op) use[x "/"] = 1 }
+      else if (st == "ENOENT" || st == "ENOTDIR") use[x] = 1; else bad = 1 }
+    # The call c of process q on the path x, its result on the line l.
+    function done(q, c, x, l,   st) {
+      st = "ok"; if (match(l, / = -1 E[A-Z0-9]+( \(.*\))?$/)) { st = substr(l, RSTART + 6); sub(/ .*/, "", st) }
+      if (c == "chdir") { if (st == "ok") cwd[q] = x; else add(x, 0, st); return }
+      add(x, c ~ /^open/, st) }
+    FILENAME == T { f[$0] = 1; d["./"] = 1; n = split($0, a, "/"); p = ""; for (i = 1; i < n; i++) { p = p a[i] "/"; d[p] = 1 }; next }
+    /O_WRONLY/ { next }
+    { pid = $1; at = r }
+    match($0, /AT_FDCWD<[^>]*>/) { cwd[pid] = substr($0, RSTART + 9, RLENGTH - 10) }
+    pid in cwd { at = cwd[pid] }
+    # An open: the path of the file it opened (its fd, -y), on its line or on the line it resumed on.
+    match($0, /^[0-9]+ +(<\.\.\. )?open(at2?)?[ (]/) && match($0, / = [0-9]+<.*>$/) {
+      x = substr($0, RSTART, RLENGTH); sub(/^ = [0-9]+</, "", x); sub(/>$/, "", x); add(x, 1, "ok") }
+    # The path the call was given: its first string, of the folder its first argument names when that is one.
+    match($0, /^[0-9]+ +[a-z0-9_]+\(/) {
+      c = substr($0, RSTART, RLENGTH - 1); sub(/^[0-9]+ +/, "", c); g = substr($0, RSTART + RLENGTH)
+      if (c !~ /^(open|openat2?|l?stat(64)?|newfstatat|fstatat64|statx|access|faccessat2?|readlink(at)?|execve(at)?|chdir)$/) next
+      b = at; if (match(g, /^(AT_FDCWD|[0-9]+)<[^>]*>, /)) { b = substr(g, 1, RLENGTH - 3); sub(/^[^<]*</, "", b); g = substr(g, RLENGTH + 1) }
+      if (!match(g, /^"([^"\\]|\\.)*"/)) next
+      x = substr(g, 2, RLENGTH - 2); x = (substr(x, 1, 1) == "/") ? norm(x) : norm(b "/" x)
+      if ($0 ~ /<unfinished \.\.\.>$/) { pc[pid] = c; px[pid] = x; next }
+      done(pid, c, x, $0); next }
+    # A call strace split: the path from the line it began on, the result from this one.
+    match($0, /^[0-9]+ +<\.\.\. [a-z0-9_]+ resumed>/) && (pid in px) { c = pc[pid]; x = px[pid]; delete pc[pid]; delete px[pid]; done(pid, c, x, $0) }
+    END { if (bad) exit 1; for (x in use) print x }' "$o.tracked" "$2") || return 1
+  printf 'TESTRUN inputs\t%s%s\n' "$1" "$(LC_ALL=C sort <<<"$in" | awk 'length { printf "\t%s", $0 }')"
 }
 # failstop [--in <line>] <command>...: runs it, its output and errors to this run's output. With FAILFAST (a card's
 # run that stops at its first failure), it ends the command and all it started (its own process group) at the first
@@ -1772,7 +1851,7 @@ trap eend TERM INT HUP
 # (share_run, share_take); with still no room, it does not run, with the reason, and $o.tmp/e<n>.noroom (enr) says so:
 # a host problem, not a failed test (below). Once one did not start so, the run's next files do not wait again.
 # erun: the pid of each still running.
-declare -A erun=() enr=()
+declare -A erun=() enr=() etr=()
 # One that ended: its exit in erc. One that ended before this wait began is not among the jobs a bash before 5.3 waits
 # for with `wait -n` (p is left unset): its exit is asked for by itself, as test-full.sh reap() does.
 ereap() {
@@ -1794,12 +1873,15 @@ for t in $(printf '%s\n' "${!ecases[@]}" | LC_ALL=C sort); do
     ereap
   done
   for c in ${ecases[$t]}; do printf 'TESTRUN case\t%s\t%s\n' "$t" "$c" >> "$log"; done
+  # It runs under strace when this run traces (TRACE, inputsof above) and it runs every case it holds (etr: its trace).
+  et=(); [ ${#TRACE[@]} = 0 ] || [ "$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$t" | LC_ALL=C sort -u | paste -sd' ' -)" != "${ecases[$t]}" ] \
+    || { etr[$t]=$o.e$k.trace; et=("${TRACE[@]}" "${etr[$t]}"); }
   [ -z "$slots" ] || slot_take
   # Its output file is opened inside, so one that cannot be made (a temp space out of inodes) is SHARE_NOSTART, a file
   # that did not start, as share_run's folder is.
   ( exec > "$o.e$k" 2>&1 || exit "$SHARE_NOSTART"
     [ -z "$slots" ] || slot_mine
-    share_run "test-changed: $t" "$o.tmp/e$k" env CONVEYOR_TEST_FILE="$t" BASH_ENV="$o.hook" CONVEYOR_TEST_TIMES="$o.e$k.times" \
+    share_run "test-changed: $t" "$o.tmp/e$k" "${et[@]}" env CONVEYOR_TEST_FILE="$t" BASH_ENV="$o.hook" CONVEYOR_TEST_TIMES="$o.e$k.times" \
       CONVEYOR_SHELL_TEST_CASE="${ecases[$t]}" ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} bash conveyor/conveyor.test.sh ) < /dev/null &
   epid[$t]=$!; erun[$!]=$t
   [ -z "$slots" ] || slot_free
@@ -1812,7 +1894,7 @@ for t in "${order[@]}"; do
   # nr: the file share_run leaves when the file did not start for want of room in the temp space (enr above; fshare's,
   # or the plugin test run's for a plugin test file); ns: set when its run exited SHARE_NOSTART, as it does when its temp
   # folder (share_run), its output file or its pipe (failstop) could not be made: a space where nr cannot be written.
-  fk=$((fk + 1)); r=ok; ns=; nr=$o.tmp/f$fk.noroom; echo "== $t" >> "$log"
+  fk=$((fk + 1)); r=ok; ns=; trc=; nr=$o.tmp/f$fk.noroom; echo "== $t" >> "$log"
   # Why it runs (the step's record, conveyor.sh testrec()): one line a reason.
   printf '%s' "${why[$t]:-}" | awk -v t="$t" 'length { printf "TESTRUN why\t%s\t%s\n", t, $0 }' >> "$log"
   # Its mark and the meta-runner hook (header above), and its card mode when the pack gives it one (issue 584).
@@ -1847,6 +1929,7 @@ for t in "${order[@]}"; do
     # they run at once), for the times the loop records of a test file (conveyor/README.md, The test step).
     [ ! -s "${eout[$t]}.times" ] || awk -F'\t' 'NF == 3 { printf "TESTRUN sec\tconveyor/tests/%s\t%s\t%s\n", $1, $2, $3 }' "${eout[$t]}.times" >> "$log"
     marked "$t" || r=FAIL; metaran "$t" || r=FAIL
+    [ -z "${etr[$t]:-}" ] || [ $r != ok ] || inputsof "$t" "${etr[$t]}" >> "$log"
   else
     # Its CPU seconds are the shell's children's user and system times (`times`) after it, less those before: the
     # file's process tree, each process counted as it is waited for.
@@ -1857,6 +1940,8 @@ for t in "${order[@]}"; do
     # run that never ends keeps the passes of its other cases (testlist.sh rerunlist()).
     p=$(fparts "$t")
     [ -z "$p" ] || tr , '\n' <<<"$p" | grep . | while IFS= read -r c; do printf 'TESTRUN case\t%s\t%s\n' "$t" "$c"; done >> "$log"
+    # It runs under strace when this run traces (TRACE, inputsof above) and it runs whole (trc), but a plugin test file.
+    tf=; [ ${#TRACE[@]} = 0 ] || [ -n "$p" ] || [[ $t == *.ts || $t == *.tsx ]] || { trc=1; tf=$o.trace; rm -f "$tf"; }
     echo "== $t${p:+ (parts: $p)}"; s=${EPOCHREALTIME/,/.}; times > "$o.cpu"; [[ $t != *.ts && $t != *.tsx ]] || nr=$o.tmp/p.noroom
     # A meta-runner runs in its card mode (the pack's test.files cardMode, mk above): its own checks, with a stub in
     # place of the files it starts.
@@ -1869,6 +1954,7 @@ for t in "${order[@]}"; do
       *) failstop fshare "$t" env "${mk[@]}" ${p:+"CONVEYOR_SHELL_TEST_CASE=$p"} ${nocase[$t]:+"CONVEYOR_SHELL_TEST_CASE= "} bash "$t" ;;
     esac 2>&1 | tee "$o"; st=${PIPESTATUS[0]}; [ "$st" = 0 ] || r=FAIL; [ "$st" != "$SHARE_NOSTART" ] || ns=1
     marked "$t" || r=FAIL; metaran "$t" || r=FAIL
+    [ -z "$tf" ] || [ $r != ok ] || inputsof "$t" "$tf" >> "$log"; trc=
     times >> "$o.cpu"
     # Its own time and CPU seconds, for the times the loop records of a test file (conveyor/README.md, The test step); not
     # of a run of some of its parts, which is not the file's time.
