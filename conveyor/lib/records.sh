@@ -33,13 +33,14 @@ LOCKLIMIT=120
 # locked, for <step>'s work, to LOCKLIMIT seconds. Past it, the work and every process under it are stopped (each
 # one holds the lock's file open, and the lock is free only when all of them have ended), the log says which step ran
 # out of time, and the status is 124: the step failed, as when it fails on its own. The watch has no stdout (a caller
-# that reads the work's output reads to its end) and no lock.
+# that reads the work's output reads to its end) and no lock: neither this one (fd 9) nor the loop's run lock (fd 8),
+# which a sleep it leaves behind would hold after the loop is killed.
 # shellcheck disable=SC2034 # LOCKHELD: read by check() in lib/views.sh
 lockedfor() { # <step> <command> [args]
   local step=$1; shift
   ( flock 9 || exit 1
     LOCKHELD=1; "$@" & p=$!
-    ( exec > /dev/null 9>&-; s=''; trap 'kill "$s" 2>/dev/null; exit 0' TERM; sleep "$LOCKLIMIT" 2> /dev/null & s=$!; wait "$s" || exit 0; trap '' TERM
+    ( exec > /dev/null 9>&- 8>&-; s=''; trap 'kill "$s" 2>/dev/null; exit 0' TERM; sleep "$LOCKLIMIT" 2> /dev/null & s=$!; wait "$s" || exit 0; trap '' TERM
       echo "conveyor: $step ran out of time: it held the card records' lock for over $LOCKLIMIT s; it is stopped and the lock is free" >&2
       # shellcheck disable=SC2046 # the pids freeze() (lib/run.sh, loaded by the pick and the snapshot) prints, one word each
       kill -KILL $(freeze "$p") 2>/dev/null; exit 3 ) & k=$!

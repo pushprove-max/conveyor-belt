@@ -92,3 +92,21 @@ t_snaplimit() {
   grep -q "conveyor: the snapshot's adopt ran out of time: it held the card records' lock for over 2 s" <<<"$out" || fail "the log does not say the snapshot's adopt ran out of time: $out"
   grep -q '^lock: free$' <<<"$out" || fail "the card records' lock was still held after the snapshot's adopt was stopped: $out"
 }
+
+# Bug it catches: lockedfor's watchdog closed its own lock (fd 9) but not the loop's run lock (fd 8), so its
+# `sleep "$LOCKLIMIT"` held the run lock; on bash 5.2 a function `sleep` left the real sleep alive past the watchdog's
+# kill, and a killed loop kept its run lock for LOCKLIMIT seconds. Here fd 8 is open on a run lock file and `sleep` is a
+# function that notes whether fd 8 is open in the watchdog's shell, then tells the work (through a fifo) that it ran,
+# so the work ends only after the note is written. The function then blocks, as the real sleep does, in a builtin read
+# of a second fifo that no one writes, until the watchdog's kill ends it: a stub that returned would let the watchdog
+# take its timeout path and stop the work. The note must say fd 8 is closed.
+t_watchrunlock() {
+  setup "[$(issue 7 2026-01-01)]"
+  fx_in 'f=$T/$CASE/ran; h=$T/$CASE/hold; mark=$T/$CASE/fd8; mkfifo "$f" "$h"; exec 8>> "$T/$CASE/run.lock"
+    sleep() { { { : >&8; } 2>/dev/null && echo open || echo closed; } > "$mark"; echo ran > "$f"; read -r -t 60 _ <> "$h"; }
+    work() { read -r -t 10 _ <> "$f"; }; lockedfor pick work; echo "lockedfor: $?"'
+  local out; out=$(cat "$T/$CASE/run.out")
+  [ "$out" = 'lockedfor: 0' ] || fail "lockedfor pick work (fd 8 open, sleep a function) or its work, a read of the fifo for 10 s, failed: $out"
+  [ "$(cat "$T/$CASE/fd8" 2>&1)" = closed ] \
+    || fail "lockedfor's watchdog (fd 8 open on a run lock, sleep a function that notes fd 8) called sleep with the run lock open: $(cat "$T/$CASE/fd8" 2>&1)"
+}
