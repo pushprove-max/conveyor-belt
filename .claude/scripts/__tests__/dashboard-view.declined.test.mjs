@@ -38,6 +38,29 @@ test("Declined: an F1 in the judge's reason shows the card's first finding of th
 
 // Bugs: an F<n> whose finding is not in the card's records links to another finding, or is dropped from the reason;
 // a reason not the judge's has its F<n> turned into a finding of a review it never read.
+// Bug: the shared text helper (app-text.js sentences(), fill(), proofAt()) paired single backticks only, so a span in
+// double backticks round a command with single backticks in it showed stray backticks, drew the command as text, and a
+// "Proof:" inside the span was taken as the start of the proof. The Self-heals page draws through the same fill().
+test('Declined: code in double backticks, with single backticks in it, is one code span in the reason and the finding', () => {
+  const w = boot();
+  const data = full();
+  const span = 'rm -r `x` Proof: y';
+  data.panels.declined.data.lines = [line({ finding: `[P2] a.txt:2 It runs \`\` ${span} \`\` once. Proof: a.txt:2 runs it`,
+    why: `the hook stops \`\` ${span} \`\`, and \`a.txt:2\` too`, by: 'owner', round: null, findings: null })];
+  deliver(w, data);
+  const row = panel(w, 'declined').querySelector('.rows > .row');
+  const why = row.querySelector('.why-text');
+  assert.deepEqual(Array.from(why.querySelectorAll('code'), (c) => c.textContent), [span, 'a.txt:2'], `the reason's code spans, for: ${why.textContent}`);
+  assert.equal(why.textContent, `the hook stops ${span}, and a.txt:2 too`, 'no backtick is left on show');
+  const f = row.querySelector('.declined-finding');
+  assert.ok(Array.from(f.querySelectorAll('code'), (c) => c.textContent).includes(span), `the finding's span is one code span: ${f.textContent}`);
+  assert.equal(f.querySelector('.declined-proof').textContent, 'Proof: a.txt:2 runs it', 'the proof starts at the Proof: outside the span');
+  // The span keeps its own backticks round x; outside the code spans none is left on show.
+  const shown = f.cloneNode(true);
+  for (const c of shown.querySelectorAll('code')) c.remove();
+  assert.ok(!shown.textContent.includes('`'), `no backtick is left on show outside code in the finding: ${f.textContent}`);
+});
+
 test('Declined: an F<n> with no matching finding is shown as written, with "finding not found" on hover', () => {
   const w = boot();
   const data = full();

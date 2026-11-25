@@ -124,6 +124,7 @@
   // A code span: a run of backticks, then text, then a run of the same length (as in Markdown), so a span in double
   // backticks can hold a single backtick: ``a `b` c`` is the code "a `b` c". One space just inside each end of a span
   // that has both is not code (Markdown's padding round code that starts or ends with a backtick).
+  // Single backticks paired alone split such a span: stray backticks showed and its words were drawn as text.
   const CODE = /(?<!`)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
   const unpad = (c) => (/^ [\s\S]* $/.test(c) && /\S/.test(c) ? c.slice(1, -1) : c);
   // A text split into sentences, each a list of parts: {code} (a code span, drawn without its backticks) or {text}.
