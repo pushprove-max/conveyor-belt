@@ -808,7 +808,7 @@ snapshot() (
   h=$(ISSUESJSON=${issues:-null}; health) && h=$(timesadd "$h") && printf '%s\n' "$h" > "$d/health" || exit 1
   snaprows "$READ_OLD" "$RETRIED.rows" "$d/old" 2>/dev/null || { echo "conveyor: $RETRIED does not read as card records; stopping" >&2; exit 1; }
   models=$(jq -c .models <<<"$h"); settings=$(modelsettings "$control"); ACCT=$(ctlacct "$control")
-  # A main-red fix card is titled from its entry as it is now (mainred.sh redtitles()), so a case added while it runs shows.
+  # A main-red fix card is titled from its entry as it is now (redfix.sh redtitles()), so a case added while it runs shows.
   # One card a line: the pricing below prices only the lines that changed since the last snapshot.
   # A bug card's check of its new tests on main's code (proofs()) runs between two steps, no start line before it: while
   # it runs (its live record there, the card open, its last line no start), it is the card's proof, the step in progress.
@@ -1276,10 +1276,18 @@ snapshot() (
            # A push that failed again on its next try needs the owner, until a push works: one item, under the card
            # of the last landing not pushed, naming every card not pushed; its tail is what git and the hook said.
            # One that failed its check needs the owner at once: it is not tried again until main moves (checkheld()).
-           + [($h.pushError.kind == "check") as $chk | select($h.pushFails >= 2 or $chk) | $h.unpushed as $u | $c[] | select(.card == $u[-1].card)
+           # Not while its fix card (health pushError.fix: redfix.sh pushred()) leaves the owner nothing to do (its
+           # needsYou false: it waits for its pick, is on the belt, or landed with the loop to push it). One that needs
+           # the owner names that card (fix).
+           + [($h.pushError.kind == "check") as $chk | ($h.pushError.fix | objects // null) as $fx
+              | select($h.pushFails >= 2 or $chk) | select($chk and $fx != null and $fx.needsYou != true | not)
+              | $h.unpushed as $u | $c[] | select(.card == $u[-1].card)
               | {card, issue, title, reason: ((if $chk then "push blocked: \($h.pushError.check) failed after \($h.pushError | if .issue == 0 then .card else "#\(.issue)" end). A retry will fail too, so the push waits until a fix lands on main"
+                   + (if $fx == null then "" else (if $fx.card == null then ". Its fix card is not picked yet" elif $fx.state == "landed" then ". Its fix card \($fx.card) landed" else ". Its fix card \($fx.card) is \($fx.state)" end)
+                     + (if $fx.state == "landed" and (($control // {}) | .rules.push? == false) then ", and the rule Push when a card lands is off: push main with Push now" elif $h.loop != true then ", and no loop is running to pick it or push main: start the loop"
+                       elif $fx.state == "queued" and $h.state != "running" then ", and the loop is \($h.state), so it picks no card: resume the loop" else "" end) end)
                    else "the push of main keeps failing" end) + ". Not pushed: \($u | map(if .issue == 0 then .card else "#\(.issue)" end) | join(", "))"), tail: ([($h.pushError.log | strings | "Log: \(.)"), ($h.pushError.reason | strings)] | if . == [] then null else join(". ") end),
-                 since: $h.pushFailingSince, push: true, check: (if $chk then $h.pushError.check else null end), unpushed: ($u | map({card, issue})), parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split} + times],
+                 since: $h.pushFailingSince, push: true, check: (if $chk then $h.pushError.check else null end), fix: (if $chk then $fx else null end), unpushed: ($u | map({card, issue})), parent: parent, reviews: reviews, track: track($max; $perr), metrics, doneWhen: .x.doneWhen, split: .x.split} + times],
          before: $h.before,
          engine: $eng,
          testRules: $tr,

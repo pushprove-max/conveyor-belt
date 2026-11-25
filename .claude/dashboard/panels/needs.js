@@ -213,11 +213,12 @@ window.DASH_APP.panel({
     // whole explanation, what Retry does, its output (outputOf, drawn at each refresh), where it stopped, its track,
     // every step and its reviews. The row is kept through a redraw (ctx.list), so that <details> stays as the owner
     // left it; a row drawn anew for the same card (retried) opens it when the old one was open (opened). A push that keeps failing is not a card to retry (its card has landed): the loop pushes again by itself;
-    // one that failed its check (c.check names it) is pushed again only once a fix lands on main. It, and a card
+    // one that failed its check (c.check names it) is pushed again only once a fix lands on main, and by the loop only
+    // while Push on landing is on (owed(), conveyor/lib/push.sh): the hint says both, as the row does not read the rule. It, and a card
     // already retried, has no buttons: what happens next is said under the failure.
     const blockedRow = (c, li, head, meta, n, again) => {
       const { lead, rest } = ctx.failureShort(c), acts = !c.push && !again;
-      const does = h('p', 'hint retry-does', c.push && c.check ? `Land a fix for ${c.check} on main. Conveyor then pushes again by itself. It does not retry until main moves.`
+      const does = h('p', 'hint retry-does', c.push && c.check ? `Land a fix for ${c.check} on main. It does not retry until main moves. Then Conveyor pushes again by itself if Push on landing is on. If it is off, use Push now.`
         : c.push ? 'Conveyor pushes again by itself when the cause has a fix. You do not need to retry.'
           : again ? `${n} is back in the queue. A new card builds it in its turn.` : `Retry puts ${n} back in the queue, and a new card builds it in its turn.`);
       li.append(head, lead);

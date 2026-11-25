@@ -192,7 +192,12 @@ cards() {
 # wait began, waitsOn as stuck's): every open card waiting at its claim (the live record of the step it is running names
 # the card it waits on and was brought up to date within STUCK seconds); unpushed (card, issue, sha, since): the landed commits in main that neither the last push that worked nor
 # origin's main as last seen here holds; pushError (time, sha, reason, kind: check or transport, check: the check that
-# failed, card and issue, and log, the push's log, when its push line names one: the landing it was pushed for; the last failed push since the oldest of those landed, else null), pushFailingSince (the first such failure, else null) and pushFails (how many such failures); pushFlaky (time, card,
+# failed, card and issue, and log, the push's log, when its push line names one: the landing it was pushed for; and, of a
+# failed check, fix: its fix card, {card, issue, state} as a card waited on is named (state queued, card null, when the loop
+# has not picked it yet), the card of the last push entry of that check in the main-red record (redfix.sh pushred()),
+# else null, and needsYou: whether the owner must act (no loop runs to pick it or push it; or it is blocked, closed or
+# gone, or not picked yet while the loop is not running by its control record (state: paused, stopped; pick() picks
+# none), or it landed while the rule Push when a card lands is off, so no loop pushes it: owed(), lib/push.sh); the last failed push since the oldest of those landed, else null), pushFailingSince (the first such failure, else null) and pushFails (how many such failures); pushFlaky (time, card,
 # issue, files, issues: the last pushed line whose push went on over a pre-push hook that failed naming test files that
 # each passed alone, pushone(), lib/push.sh, in the last 24 hours; else null); pushing (the push in progress,
 # {pid, since, started, sha, stage: as pushing() in lib/push.sh writes it, log, sec: the seconds since its stage
@@ -514,7 +519,7 @@ health() {
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" --arg lintyes "$LINTYES" \
     --slurpfile pw <(jq -c 'objects | select(.at | strings | fromdate?)' "$PUSHWAIT" 2>/dev/null) --argjson turn "$((POLL > IDLE ? POLL : IDLE))" \
     --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson force "$(inforce "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson pushlast "$pl" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
-    --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge, carried: (.carried // [] | arrays)}' "$LANDPR" 2>/dev/null) --slurpfile lm <(jq -c 'objects | select(.merged != null and (.number | type) == "number") | {number, merged}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) --rawfile carry <(printf '%s\n' "$carry") "$UNTIMED$SPLITM$REVIEWAGAIN"'
+    --slurpfile old "$hd/old" --slurpfile mh <(jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile rd <(jq -c '[.reds[]? | select(.push != null) | {check: .push.check, card}]' "$MAINRED" 2>/dev/null || echo '[]') --slurpfile lp <(jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge, carried: (.carried // [] | arrays)}' "$LANDPR" 2>/dev/null) --slurpfile lm <(jq -c 'objects | select(.merged != null and (.number | type) == "number") | {number, merged}' "$LANDPR" 2>/dev/null) --slurpfile qt <(jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) --rawfile carry <(printf '%s\n' "$carry") "$UNTIMED$SPLITM$REVIEWAGAIN"'
     $livef[0] as $live | (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
     | ([.[], $old[] | select(.step == "picked") | if (.mainRed | type) == "string" then {key: .card, value: "Main is red (\(.mainRed[0:12]))"}
@@ -601,7 +606,9 @@ health() {
          # A card whose process or engine is stopped says which, on each of its entries.
          | map(. + ($stopped.cards[.card] // null | if . then {stopped: .} else {} end))), engineStopped: $stopped.engine,
        waitingOnCard: [$c[] | select(.end == null and atclaim) | $live[.card] as $v | {card, issue, since: $v.at, waitsOn: holder($v.waits.on)}],
-       unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} + (if .log then {log} else {} end) else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: (if $pushing == null then null else $pushing + {cards: $carried} | del(.base) end), pushLast: $pushlast,
+       unpushed: $un, pushError: ($fail | last | if . then {time, sha, reason, kind: (.kind // null), check: (.check // null), card, issue} + (if .log then {log} else {} end)
+         + (if .kind == "check" then .check as $k | {fix: ([$rd[0][]? | select(.check == $k)] | last | if . == null then null elif .card == null then {card: null, state: "queued"} else holder(.card) end
+           | if . == null then null else . + {needsYou: ($loop != true or (.state | IN("blocked", "closed", "gone") or (. == "queued" and $state != "running") or (. == "landed" and $ctl.rules.push == false)))} end)} else {} end) else null end), pushFailingSince: ($fail[0].time // null), pushFails: ($fail | length), pushing: (if $pushing == null then null else $pushing + {cards: $carried} | del(.base) end), pushLast: $pushlast,
        pushWaits: (($pw[0] // null) as $w | ($un | last) as $u
          | if $u == null or $loop != true or $ctl.rules.push == false or ($pushing != null and ($pushing.stale | not)) or any($fail[]; .sha == $u.sha) then null
            elif $w != null and $w.sha == $u.sha and ($w.turns | numbers) >= 3 and ($w.held | type) == "string" then {held: $w.held, turns: $w.turns}

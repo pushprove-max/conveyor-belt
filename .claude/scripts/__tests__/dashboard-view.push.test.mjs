@@ -228,6 +228,8 @@ test('Needs you: a push that failed its check names the check, shows its failing
   assert.match(item.querySelector('.why-block .why-full').textContent, /^push blocked: typecheck-web failed after #15; a retry fails the same way/);
   assert.deepEqual(Array.from(item.querySelectorAll('.output-fails li'), (x) => x.textContent), [
     "exit 1 (124 is the 600s timeout): web/pay.ts(3,7): error TS2322: Type 'string' is not assignable to type 'number'.", 'push-checks: FAILED typecheck-web', "error: failed to push some refs to 'origin'"]);
-  assert.equal(item.querySelector('.hint').textContent, 'Land a fix for typecheck-web on main. Conveyor then pushes again by itself. It does not retry until main moves.');
+  // Review finding E13: with Push on landing off the loop does not push after the fix (owed(), conveyor/lib/push.sh),
+  // and the row does not read the rule, so the hint names both cases, not an automatic push alone.
+  assert.equal(item.querySelector('.hint').textContent, 'Land a fix for typecheck-web on main. It does not retry until main moves. Then Conveyor pushes again by itself if Push on landing is on. If it is off, use Push now.');
   assert.equal(item.querySelector('button[data-act="retry"]'), null, 'its card has landed: nothing to retry');
 });

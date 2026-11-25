@@ -534,7 +534,7 @@ t_mainredretry() {
 }
 
 # Issue 597, the fix card's brief and landing commit, as card() makes them: it is built from its stand-in issue
-# (mainred.sh redissue(): the cases, main's commit, the last commit of each case's file), redbrief() runs before each session and
+# (redfix.sh redissue(): the cases, main's commit, the last commit of each case's file), redbrief() runs before each session and
 # before the landing, and it lands under a commit naming the cases and main's commit (redmsg()). Bug it catches: a
 # card of issue 0 with no branch had no issue to read (branchissue() wants a branch), or closed an issue on GitHub
 # (a Closes line). A case found on main's commit during the review (as mainred.sh mainred() adds it) reaches the fix session

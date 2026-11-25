@@ -631,6 +631,8 @@ linksonly() { # <card> <worktree>
   STAGEDLINKS[$2]=$e
   return 1
 }
+# The push block's entry (pushred()), the fix card's title (REDTITLE, redtitles()) and its issue (redissue()).
+. "${BASH_SOURCE[0]%/*}/redfix.sh" || return 1
 # Whether a main-red fix card is open: not picked yet ("") or given back by `retry` (no line of it in the card
 # records), on the belt or blocked; not when it landed or closed. Records that cannot be read count as open.
 redopen() { # <card id, or "">
@@ -644,7 +646,7 @@ redopen() { # <card id, or "">
 # record names the card. Prints "<card> 0 false", `wait` when the machine holds it back, nothing when
 # no commit waits for a card.
 redpick() {
-  local lock rec s c l card='' o=()
+  local lock rec s c l p card='' o=()
   [ -s "$MAINRED" ] || return 0
   { exec {lock}>>"$MAINRED.lock"; } 2>/dev/null || { echo "conveyor: the main-is-red record could not be locked; its fix card waits" >&2; return 1; }
   flock "$lock" || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be locked; its fix card waits" >&2; return 1; }
@@ -657,39 +659,27 @@ redpick() {
   while IFS= read -r l; do
     c=$(stdb ask card "$l" 2>/dev/null) && ! jq -se 'length > 0 and (any(.step | IN("landed", "closed")) | not)' <<<"$c" >/dev/null || o+=("$l")
   done < <(jq -r '.[] | select(any(.cases[]?; .file // "" | test("\\.(md|txt|rst)$"; "i"))) | .card | strings | select(. != "")' <<<"$rec")
-  s=$(jq -c --args 'map(if .card | IN($ARGS.positional[]) then . else .cases |= map(select(.file // "" | test("\\.(md|txt|rst)$"; "i") | not)) | select(.cases != []) end)' "${o[@]}" <<<"$rec") || s=$rec
+  s=$(jq -c --args 'map(if .card | IN($ARGS.positional[]) then . else .cases |= map(select(.file // "" | test("\\.(md|txt|rst)$"; "i") | not)) | select(.cases != [] or .push != null) end)' "${o[@]}" <<<"$rec") || s=$rec
   # The record goes to jq on its input, not as an argument: Linux refuses one over 128 KiB (issue 369).
   [ "$s" = "$rec" ] || { jq -c '{reds: .}' <<<"$s" > "$MAINRED.new" && mv -f "$MAINRED.new" "$MAINRED" && rec=$s; } \
     || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be written; its fix card waits" >&2; return 1; }
-  while IFS=$'\t' read -r s c; do
+  while IFS=$'\t' read -r s p c; do # The card goes last: read drops an empty tab-separated field between two others.
     if [ -n "$c" ]; then l=$(stdb ask card "$c") && [ -z "$l" ] || continue; fi
+    # A push block (pushred()) whose commit origin holds now (pushed by hand) is none: its entry loses it, and goes with no case.
+    [ "$p" != true ] || ! atorigin "$s" || { jq -c --arg s "$s" '{reds: map(if .sha == $s then del(.push) else . end | select(.cases != [] or .push != null))}' <<<"$rec" > "$MAINRED.new" \
+      && mv -f "$MAINRED.new" "$MAINRED" && rec=$(jq -c .reds "$MAINRED") || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be written; its fix card waits" >&2; return 1; }
+      jq -e --arg s "$s" 'any(.[]; .sha == $s)' <<<"$rec" >/dev/null || continue; }
     # The machine's yes (room()), as for any card: held back, the loop asks again at its next turn.
     room 0 >/dev/null || { exec {lock}>&-; echo wait; return 0; }
     # A card id is its second, its project and its issue: a card of issue 0 picked in the same second waits for the next.
     while card="c$(date -u +%Y%m%dT%H%M%S)-$CTAG-0"; [ -n "$(stdb ask card "$card")" ] || stdb ask lines retried | grep -F "\"card\":\"$card\"" >/dev/null; do sleep 1; done
     jq -c --arg s "$s" --arg c "$card" '{reds: map(if .sha == $s then .card = $c else . end)}' <<<"$rec" > "$MAINRED.new" && mv -f "$MAINRED.new" "$MAINRED" \
-      && l=$(line "$card" 0 picked ok "$(jq -c --arg s "$s" --arg b "${BEYOND:-}" '.[] | select(.sha == $s) | {title: ("Main is red: " + ([.cases[].case] | join(", ")))[0:200], mainRed: $s}
+      && l=$(line "$card" 0 picked ok "$(jq -c --arg s "$s" --arg b "${BEYOND:-}" "$REDTITLE"'.[] | select(.sha == $s) | {title: redtitle, mainRed: $s}
         + if $b == "" then {} else {beyond: $b} end' <<<"$rec")") \
       && append "$l" || { exec {lock}>&-; echo "conveyor: the fix card of main's commit $s could not be picked" >&2; return 1; }
     exec {lock}>&-; echo "$card 0 false"; return 0
-  done < <(jq -r --arg o "${REDONLY:-}" '.[] | select($o == "" or .sha == $o) | [.sha, .card // ""] | @tsv' <<<"$rec")
+  done < <(jq -r --arg o "${REDONLY:-}" '.[] | select($o == "" or .sha == $o) | [.sha, .push != null, .card // ""] | @tsv' <<<"$rec")
   exec {lock}>&-
-}
-# What stands in for the issue of a main-red fix card (card()), from its entry as it is now (mainred()): the title
-# "Main is red: <cases>", and a body naming main's commit, each case with the last commit that changed its files (and
-# the landing that broke it, when known), and what to do. Labelled as the P0 issue it stands in for was (labels.type and the first priority), so it is held to the bug-card check.
-redissue() { # <card>
-  jq -ce --arg c "$1" --arg t "$TYPE" --argjson p "$PRIOS" '.reds[]? | select(.card == $c)
-    | {number: 0, title: ("Main is red: " + ([.cases[].case] | join(", ")))[0:200], milestone: null, labels: [{name: $t}, {name: $p[0]}],
-       body: ("These test cases fail on main at \(.sha[0:12]). A card'"'"'s test step failed each on its run and its run again, and it failed again when run on main, without the card'"'"'s change. A card that fails only cases that fail on main waits (no fix session, no block) until main changes, then tests again.\n\n"
-         + ([.cases[] | "- `\(.case)`, found by card \(.by). The last commit that changed \(if .files == [] then "its file" else .files | join(", ") end): \(if .last == "" then "none found" else .last end)."
-           + if .landing == null then "" else " The landing that broke it: \(.landing.sha[0:12]) (card \(.landing.card), #\(.landing.issue)), whose test step did not run \(.files[0]). This card links \(.files[0]) to the files that landing changed, in .conveyor/test-links.json, so later cards that change them run it: \(.links | keys | join(", "))." end] | join("\n"))
-         + "\n\nMake the cases pass on main.\n\nDone when: the cases pass on main.")}' "$MAINRED" 2>/dev/null
-}
-# The titles of the main-red fix cards as their entries are now ({<card>: "Main is red: <cases>"}): the Board shows a
-# case added while the card runs (mainred()), which its picked line's title does not name.
-redtitles() {
-  jq -ce '[.reds[]? | select(.card) | {key: .card, value: ("Main is red: " + ([.cases[].case] | join(", ")))[0:200]}] | from_entries' "$MAINRED" 2>/dev/null || echo '{}'
 }
 # Whether the main-red record (mainred()) holds main red for any of <case>...: an entry of any commit lists one, and
 # its fix card is not picked yet or is still open (redopen()), as mainred() files a case (a case failing at a later

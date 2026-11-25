@@ -215,7 +215,9 @@ bugproof() { # <card> <worktree> <issue json>
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
   # A main-red fix card (its entry in the main-red record names it) is proved by main's own failing cases (redproof()).
   # Its change that is only the links the engine staged (mainred.sh linksonly()) is no change, as above: card() drops it.
-  ! jq -e --arg c "$1" 'any(.reds[]?; .card == $c)' "$MAINRED" >/dev/null 2>&1 || { ! linksonly "$1" "$2" || return 0; redproof "$1" "$2"; return; }
+  # A push block's fix card (redfix.sh pushred()), with or without cases, is checked as any bug card: its cases passing
+  # on main would close it (redproof() exit 3) while the push check still fails.
+  ! jq -e --arg c "$1" 'any(.reds[]?; .card == $c and .push == null)' "$MAINRED" >/dev/null 2>&1 || { ! linksonly "$1" "$2" || return 0; redproof "$1" "$2"; return; }
   # A change to test files alone (every changed path, deleted ones too, is a test file: testpaths()) has no fix to take out:
   # its tests would run on the same code and pass, so it is not run. The review is told, and judges the tests.
   # The paths are counted, not tested with grep -q: under pipefail its early exit could fail the pipe and pass a change

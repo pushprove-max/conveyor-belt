@@ -140,9 +140,14 @@ window.DASH_APP.panel({
       if (r.pushFailingSince) {
         const e = r.pushError || {}, line = h('span', 'detail');
         line.append('Push failing for ', ctx.since(r.pushFailingSince, ''), typeof e.check === 'string' && e.check ? `: ${e.check} failed` : '');
-        check(`Last push${of}`, ctx.chip('Failing', 'bad'), line, { tail: e.reason }).next = e.kind === 'check'
-          ? 'It is in Needs you. The push waits until a fix lands on main, and Conveyor does not try it again before that.'
-          : 'Conveyor tries it again by itself. If a retry fails, it shows in Needs you.';
+        // A failed check's fix card (pushError.fix) that leaves the owner nothing to do (needsYou false) keeps it out of Needs you.
+        const fx = e.fix && typeof e.fix === 'object' ? e.fix : null;
+        check(`Last push${of}`, ctx.chip('Failing', 'bad'), line, { tail: e.reason }).next = e.kind !== 'check'
+          ? 'Conveyor tries it again by itself. If a retry fails, it shows in Needs you.'
+          : fx && fx.needsYou !== true
+            ? (fx.state === 'landed' ? `Conveyor's fix card ${fx.card} landed, and Conveyor pushes it next.`
+              : `Conveyor's fix card ${fx.card || 'for it'} is ${fx.state === 'queued' ? 'queued' : `at ${fx.state}`}. The push waits until a fix lands on main. When that card lands, Conveyor pushes if Push on landing is on. If it is off, use Push now.`)
+            : 'It is in Needs you. The push waits until a fix lands on main, and Conveyor does not try it again before that.';
       } else if (r.unpushed.length) {
         check(`Last push${of}`, ctx.chip(`${r.unpushed.length} not pushed`, 'warn'), 'oldest landed', ctx.since(r.unpushed[0].since, ' ago')).next =
           'Conveyor pushes after each landing. If Push on landing is off, Push landed on the Control tab pushes them.';

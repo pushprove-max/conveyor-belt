@@ -515,7 +515,43 @@ out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "forema
 ! grep -q '^loop: ' <<<"$out" || fail "health state 'running': a pause line in: $out"
 }
 
-cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog stopped resumed resumedhost askhost diskfloor)
+# Issue 1683. Bug it catches: "needs you: push blocked" stood while the engine's fix card for the block (health
+# pushError.fix) was on the belt, so the owner was asked for nothing to do, and once that card was blocked the line
+# did not name it. The second review: landed (the loop pushes it) must stay quiet too, and landed with no automatic push
+# (needsYou true: the rule Push when a card lands is off, control.rules.push false) must name it.
+t_pushfix() {
+CASE=pushfix; fixture pushfix
+local e='.health.pushFailingSince = "2026-11-15T11:59:00Z" | .health.pushError = {time: "2026-11-15T11:59:00Z", sha: "a1", reason: "push-checks: FAILED typecheck-web", kind: "check", check: "typecheck-web", card: "c12", issue: 12, fix: {card: "c20261115T115900-alpha-0", issue: 0, state: $s, needsYou: $y}}' s
+for s in build landed; do
+  snap "\"$s\" as \$s | false as \$y | $e"
+  out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+  ! grep -q '^needs you: push blocked' <<<"$out" || fail "pushError.fix state $s, needsYou false: a needs-you line for the push block, with nothing for the owner to do: $out"
+done
+# Fourth review: with the rule off and no loop running, the line said "start the loop", but a started loop does not
+# push with the rule off (owed(), lib/push.sh): the step is Push now.
+snap "\"landed\" as \$s | true as \$y | $e | .health.loop = false | .control = {rules: {push: false}}"
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+grep -qxF 'needs you: push blocked: typecheck-web failed after #12; it will not pass on a retry; its fix card c20261115T115900-alpha-0 landed, and the rule Push when a card lands is off: push main (Push now)' <<<"$out" \
+  || fail "pushError.fix state landed, needsYou true, health loop false, control rules push false: no needs-you line saying Push now in: $out"
+snap "\"blocked\" as \$s | true as \$y | $e"
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+grep -qxF 'needs you: push blocked: typecheck-web failed after #12; it will not pass on a retry; its fix card c20261115T115900-alpha-0 is blocked: the push waits until a fix lands on main' <<<"$out" \
+  || fail "pushError.fix state blocked: no needs-you line naming the fix card in: $out"
+# Third review, E8: with no loop running, a fix card not picked yet needs the owner (health's needsYou true), and the
+# line said "its fix card null is queued".
+snap '.health.loop = false | .health.pushFailingSince = "2026-11-15T11:59:00Z" | .health.pushError = {time: "2026-11-15T11:59:00Z", sha: "a1", reason: "push-checks: FAILED typecheck-web", kind: "check", check: "typecheck-web", card: "c12", issue: 12, fix: {card: null, state: "queued", needsYou: true}}'
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+grep -qxF 'needs you: push blocked: typecheck-web failed after #12; it will not pass on a retry; its fix card is not picked yet, and no loop is running to pick it or push main: start the loop' <<<"$out" \
+  || fail "health loop false, pushError.fix queued with no card, needsYou true: no needs-you line saying no loop runs to pick it in: $out"
+# Review finding E12: a paused loop runs but picks no card (pick(), lib/pick.sh), so the owner must resume it; the
+# line must say so, not that the push waits for a fix.
+snap '.health.loop = true | .health.state = "paused" | .health.pushFailingSince = "2026-11-15T11:59:00Z" | .health.pushError = {time: "2026-11-15T11:59:00Z", sha: "a1", reason: "push-checks: FAILED typecheck-web", kind: "check", check: "typecheck-web", card: "c12", issue: 12, fix: {card: null, state: "queued", needsYou: true}}'
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+grep -qxF 'needs you: push blocked: typecheck-web failed after #12; it will not pass on a retry; its fix card is not picked yet, and the loop is paused, so it picks no card: resume the loop' <<<"$out" \
+  || fail "health loop true, state paused, pushError.fix queued with no card, needsYou true: no needs-you line saying resume the loop in: $out"
+}
+
+cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog stopped resumed resumedhost askhost diskfloor pushfix)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

@@ -182,7 +182,7 @@ pushone() { # <card> <issue> [<commit>]
   took=$((SECONDS - took))
   # Why it failed (docs/cards.md, Push): check, the pre-push hook exited non-zero (it fails the same way on the same
   # commit, so the loop does not push again until main moves: checkheld()), or transport, anything else (git, the
-  # network, the remote, the timeout), which a later try may get past.
+  # network, the remote, the timeout), which a later try may get past. A failed check gets its fix card (pushred(), lib/mainred.sh).
   # A failed check names the test the output names failed (its last "FAILED <name>"), else the pre-push hook (pcheck,
   # for pushlast()); the push line names the push's log too. A check failure's reason ends with where the hook's tests
   # failed (failat(), lib/failat.sh: the push worktree's files, read from the commit), one line each.
@@ -191,7 +191,7 @@ pushone() { # <card> <issue> [<commit>]
     m=''; [ "$a" != check ] || m=$(failat "$wt" "$sha" <<<"$out" | sed 's/^/conveyor: a test of the hook failed at /')
     record "$1" "$2" push fail "$(jq -cn --arg s "$([[ $sha =~ ^[0-9a-f]{40,64}$ ]] && echo "$sha")" --argjson t "$took" --arg k "$a" --arg c "$pcheck" --arg l "${plog:-}" \
     --arg r "exit $rc (124 is the ${plim:-$PUSH_TIMEOUT}s timeout): $(tail -c 1200 <<<"${out:-$sha}" | tr -d '\000')${m:+$'\n'$m}" '{sha:$s,reason:$r,sec:$t,kind:$k}
-      + (if $k == "check" then {check: $c} else {} end) + (if $l == "" then {} else {log: $l} end)')"; return; }
+      + (if $k == "check" then {check: $c} else {} end) + (if $l == "" then {} else {log: $l} end)')"; [ $a != check ] || ! [[ $sha =~ ^[0-9a-f]{40,64}$ ]] || pushred "$sha" "$pcheck" "$1" "$2" "${plog:-}" "$(tail -c 1500 <<<"$out" | tr -d '\000')${m:+$'\n'$m}" || :; return; }
   rm -f "$wt.trace"
   # Pushed over a hook that failed under load: each pushed line says so (flaky: {files, issues}).
   [ ${#ff[@]} = 0 ] || { fl=$(flakypush "$sha" "$ho" "${ff[@]}") || :; fl=",\"flaky\":${fl:-$(jq -cn '{files: $ARGS.positional, issues: []}' --args "${ff[@]}")}"; }
@@ -709,13 +709,14 @@ batchdue() {
 # failure. With the pack unread no push is held: health reads the same pack and fails, saying why (commands/health.sh).
 # With the rule Push after a combined test run on (pushbatch()), the owed push is held until its run is due
 # (batchdue()), so the landings until then go in one push, after one run before it on them all; batchheld (a global
-# of the loop shell, as heldsha is) keeps that owed push, for pushdecided().
+# of the loop shell, as heldsha is) keeps that owed push, for pushdecided(). The landing of a push block's fix card
+# (redfix.sh pushred()) is pushed at once all the same (pushfixowed()): the landings the block held wait for it (issue 1683).
 pushturn() {
   local why=''
   if [ -z "$pusher" ] && [ -z "$nopack" ] && owed=$(owed 2>/dev/null); then
     batchheld=''
     if [ -n "$new" ]; then why='the loop restarts on new code first, and the new loop starts the push'
-    elif pushbatch && ! batchdue; then why="$PUSHBATCHWAIT"; batchheld=$owed
+    elif pushbatch && ! batchdue && ! pushfixowed; then why="$PUSHBATCHWAIT"; batchheld=$owed
     elif [ "$owed" = "$tried" ] && [ $((SECONDS - triedat)) -lt "$PUSH_RETRY" ]; then
       if [ -n "${triedwhy:-}" ]; then why="its last push did not start: $triedwhy; the next try waits for the pack's pushRetry time"
       else why="its last push failed; the next try waits for the pack's pushRetry time"; fi
@@ -725,6 +726,16 @@ pushturn() {
     fi
   fi
   pushheld "$why"
+}
+# Whether the landing of a push block's fix card (a card a push entry of $MAINRED names: redfix.sh pushred()) is in
+# main and not at origin (atorigin()), for pushturn().
+pushfixowed() {
+  local s
+  while read -r s; do
+    [ -n "$s" ] && git merge-base --is-ancestor "$s" "refs/heads/$BRANCH" 2>/dev/null && ! atorigin "$s" && return 0
+  done < <(stdb ask lines cards 2>/dev/null | jq -r --slurpfile r <(jq -c '[.reds[]? | select(.push != null) | .card | strings]' "$MAINRED" 2>/dev/null || echo '[]') \
+    '($r[0] // []) as $r | select(.step == "landed" and (.card | IN($r[])) and (.sha | type) == "string") | .sha' 2>/dev/null)
+  return 1
 }
 # A `run` with no card or push left may end (run(), lib/run.sh): the pack is unread (nopack), no push is owed, a turn
 # tried the owed push (tried), or the rule Push after a combined test run held it (batchheld). Without that last, a

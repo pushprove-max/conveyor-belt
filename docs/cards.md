@@ -139,7 +139,13 @@ A main-red fix card whose session changes no file runs its cases again on main. 
 each of its cases, the card ends as `closed`, and its `closed` line names those cards. A newer card on the belt counts
 for each case it holds. A newer card that landed counts only for a case that passes in each of its runs on main,
 and only while main is still the commit of those runs. A card that keeps a
-reviewed change from a rebuild after a landing conflict does not close this way. Otherwise the card is blocked. Any other build session that changes no file blocks the card with "the session made no change", unless
+reviewed change from a rebuild after a landing conflict does not close this way. Otherwise the card is blocked.
+
+A "Push blocked" fix card (see Push, below) is not a main-red fix card here, also when main is red at its commit.
+Its cases passing on main do not close it, as its push check can still fail. Before its build session it runs no
+case. Its change is checked as a bug card's change. When its session changes no file, it goes the way below.
+
+Any other build session that changes no file blocks the card with "the session made no change", unless
 its reply ends with one of two lines:
 
 - `ALREADY-DONE: <where it is fixed>`: main already does what the issue asks. A reviewer checks this against main.
@@ -656,8 +662,15 @@ the remote removes the "ahead" text.
 
 A push that fails is one of two kinds:
 
-- `check`: the pre-push hook failed (typecheck, tests, lint), or a test file failed in the run before the push. A retry fails the same way, so the loop wakes the
-  Foreman and shows the hook's last lines on Needs you. It does not run the checks again until main's commit changes.
+- `check`: the pre-push hook failed (typecheck, tests, lint), or a test file failed in the run before the push. A retry fails the same way,
+  so the loop does not run the checks again until main's commit changes. When the pre-push hook failed, Conveyor makes
+  a fix card with no issue, titled "Push blocked: <check> fails on main". The loop starts it before the queued cards,
+  and also when the cap is reached, as it starts a "Main is red" card. When that card lands, the loop pushes at once,
+  also while the rule Push after a combined test run holds other landings. If origin has the blocked commit before
+  the loop starts the card (you pushed it yourself), the loop does not start the card. Needs you and the Foreman's
+  wake show the block only when you must act: when it has no fix card, when no loop is running, when the loop is
+  paused and has not started the fix card, when its fix card is blocked, closed or gone, or when it landed and the rule Push when a card lands is off. Then they name the fix card, and Needs you shows the
+  hook's last lines. While the fix card is on the belt, the Board's Health tab names it in the Last push row.
 - `transport`: git, the network or the remote failed. The loop tries again every `tunables.pushRetry` seconds. Needs
   you shows it once a retry fails too.
 

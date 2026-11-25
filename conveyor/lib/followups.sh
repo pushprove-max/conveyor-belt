@@ -669,7 +669,7 @@ ncblock() { # <card> <issue> <worktree> <reason> <words>
 # every file the ALREADY-DONE line names is the same on the new main (issue 552: on a busy belt main moves during
 # nearly every review, and a new review only meets the same move again).
 # A main-red fix card (issue 0, its entry in the main-red record) that made no change first runs its cases again on
-# main as it is now (bugproof.sh redproof(), issue 323): when every case passes there, main is no longer red for them, and the card
+# main as it is now (bugproof.sh redproof(), issue 323; a push block's, with or without cases: redfix.sh pushred(), goes as any card, as its cases passing does not make the push check pass): when every case passes there, main is no longer red for them, and the card
 # closes as not needed, its closed line saying so; so too when the pack's test command cannot run them alone (no
 # test.fileCommand: #1275), as then nothing shows main red the pack's way. Else it is blocked, saying why, whatever its reply says: only that
 # run, not a review of an ALREADY-DONE line, shows main is no longer red. When newer fix cards hold each of its cases (bugproof.sh
@@ -683,7 +683,7 @@ nochange() { # <card> <issue> <worktree> <brief>
   kept=" Its session's output and errors are kept in kept/$c/."; why=$kept
   if r=$(lastreply "$wt.out") && [ -n "$r" ]; then why+=" Its last reply: $r"
   elif [ -e "$wt.out" ]; then why+=" The session ended well (exit 0) but left no reply."$'\n'"$(tail -n 20 "$wt.err" 2>/dev/null)"; fi
-  if [ "$n" = 0 ] && jq -e --arg c "$c" 'any(.reds[]?; .card == $c)' "$MAINRED" >/dev/null 2>&1; then
+  if [ "$n" = 0 ] && jq -e --arg c "$c" 'any(.reds[]?; .card == $c and .push == null)' "$MAINRED" >/dev/null 2>&1; then
     t="the session made no change, so there is nothing to review"
     [ -z "$(git -C "$wt" status --porcelain 2>&1)" ] && err=$(git -C "$wt" checkout -q --detach "refs/heads/$BRANCH" 2>&1) \
       || { ncblock "$c" "$n" "$wt" "$t. The engine could not run its cases again on main: the worktree is not clean or could not be moved to main. ${err:0:400}" "$why"; return; }

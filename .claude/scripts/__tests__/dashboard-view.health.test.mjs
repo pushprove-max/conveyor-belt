@@ -51,6 +51,29 @@ test('Health: failing rows come first, faults before warnings, each with a next 
   assert.equal(panel(ok, 'health').querySelector('details.checks-fine summary').textContent, '6 checks fine');
 });
 
+// Issue 1683. Bug: while Conveyor's own fix card for a failed push check was building, the row sent the owner to Needs
+// you, which holds no item for the block then (snapshot.sh drops it while pushError.fix.needsYou is false). The row
+// names the fix card instead.
+test('Health: a push check whose fix card is on the belt names that card, not Needs you', () => {
+  const w = page('health'), data = failing();
+  data.panels.health.data.records[0].pushError.fix = { card: 'c20261115T115900-sample-0', issue: 0, state: 'build', needsYou: false };
+  deliver(w, data);
+  const said = dd(w, 'Last push').querySelector('.check-next').textContent;
+  assert.ok(!said.includes('Needs you') && said.includes('c20261115T115900-sample-0 is at build'), `pushError.fix state build, needsYou false: ${said}`);
+  // Review finding E13: with Push on landing off the loop does not push the fix's landing (owed(), conveyor/lib/push.sh),
+  // and the row does not read the rule, so it must not promise a push alone.
+  assert.ok(said.includes('If it is off, use Push now.'), `pushError.fix state build: the row promises an automatic push with no word of Push on landing: ${said}`);
+});
+
+// Issue 1683. Bug: a fix card that needs the owner (blocked: needsYou true) must send them to Needs you, where
+// snapshot.sh lists the block again; a row that named only the card hid that the owner has to act.
+test('Health: a push check whose fix card needs the owner says Needs you', () => {
+  const w = page('health'), data = failing();
+  data.panels.health.data.records[0].pushError.fix = { card: 'c20261115T115900-sample-0', issue: 0, state: 'blocked', needsYou: true };
+  deliver(w, data);
+  assert.match(dd(w, 'Last push').querySelector('.check-next').textContent, /Needs you/, 'pushError.fix state blocked, needsYou true');
+});
+
 // Bugs (UX31): a failing push poured some 25 lines of raw output into its row, the panel grew to about 1,500 px and
 // buried the warnings below it; a wait read "retry after 1022 s". The row is one plain line (how long it has failed and
 // which check), the output whole under a closed "Show output"; a long error shows its first 100 characters on the row

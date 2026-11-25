@@ -40,7 +40,7 @@
 #   the fix cards of a red release run (its record's fixes): each has landed, once, with release-prep started again
 #     or why it did not start; one closed with no landed card, once, naming it, as the release then waits on the Foreman
 #   a push that failed its check (health's pushError.kind check), at once and again for each commit it fails on: the
-#     loop does not push again until main moves
+#     loop does not push again until main moves. Only while the owner must act (pushError.fix.needsYou: no loop runs, or its fix card, redfix.sh pushred(), is blocked, closed or gone, or landed with no automatic push): that card is named
 #   a card's test step that refused a full run of its tests (health's refused: the engine's tests()), once a test line
 #   the machine hold (health's machineHold: the engine's mainred.sh machinehold()), once a hold, naming the controls and the cases that fail
 #   a merge of the landing pull request that GitHub refused (health's landingPr.merge), once a refusal, with GitHub's reason
@@ -205,11 +205,11 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
         end),
     (select(.loop | not) | ["noloop", "no loop", "", "no loop is running"]),
     (select(.pushFailingSince != null) | .pushError as $e
-      | if ($e | type) == "object" and $e.kind == "check" then
-          ["push:\($e.sha)", "push blocked", ($e.name | strings) // ($e.issue | numbers | select(. > 0) | "#\(.)") // "",
-           "push blocked: \($e.check // "a check" | one) failed after \(($e.name | strings) // ($e.issue | numbers | select(. > 0) | "#\(.)") // ($e.card // "the last landing" | one)); it will not pass on a retry"]
-        elif $pushheld or (.time | fromdate) - (.pushFailingSince | fromdate) > $push then
-          ["push", "push failing", "", "the push has failed since \(.pushFailingSince): \(.pushError.reason // "" | one)"]
+      | if ($e | type) == "object" and $e.kind == "check" then ($e.fix | objects // null) as $f | select($f == null or $f.needsYou == true)
+          | ["push:\($e.sha)\(if $f then ":\($f.card):\($f.state)" else "" end)", "push blocked", ($e.name | strings) // ($e.issue | numbers | select(. > 0) | "#\(.)") // "",
+           "push blocked: \($e.check // "a check" | one) failed after \(($e.name | strings) // ($e.issue | numbers | select(. > 0) | "#\(.)") // ($e.card // "the last landing" | one)); it will not pass on a retry"
+           + if $f == null then "" else (if $f.card == null then "; its fix card is not picked yet" elif $f.state == "landed" then "; its fix card \($f.card | one) landed" else "; its fix card \($f.card | one) is \($f.state)" end) + if $f.state == "landed" and ([$snap.control | objects | .rules | objects | .push] == [false]) then ", and the rule Push when a card lands is off: push main (Push now)" elif .loop != true then ", and no loop is running to pick it or push main: start the loop" elif $f.state == "queued" and .state != "running" then ", and the loop is \(.state), so it picks no card: resume the loop" else ": the push waits until a fix lands on main" end end]
+        elif $pushheld or (.time | fromdate) - (.pushFailingSince | fromdate) > $push then ["push", "push failing", "", "the push has failed since \(.pushFailingSince): \(.pushError.reason // "" | one)"]
         else empty end),
     # A push that went on over a pre-push hook that failed naming test files that each passed alone (health pushFlaky,
     # conveyor/lib/push.sh pushone()): once a push. Not "will not pass on a retry": they passed alone.
