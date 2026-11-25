@@ -9,13 +9,13 @@
 . "$HERE/lib/modelpick.sh" || exit 1
 . "$HERE/lib/lint.sh" || exit 1
 . "$HERE/lib/cardland.sh" || exit 1
-began() { # <card> <issue> <what begins>
+began() { # <card> <issue> <what begins> [<more fields of the start line, a JSON object>]
   local e=''
   switchcode "$1" "$3"; rm -f "$CARDS/$1.firsttry" "$CARDS/$1.firsttry.new" "$CARDS/$1.reviewed"; capmark "$1" "$3" # capmark(): lib/run.sh
   # A card on the code of a commit it switched to: its start line names that commit, so prune() (inflight(),
   # lib/install.sh) keeps its install while the card runs; its worktree line names the commit it started on.
   [ -z "$RAN" ] || [ "$RAN" != "${CODESEEN:-}" ] || e=",\"engine\":\"$RAN\""
-  record "$1" "$2" start ok "{\"of\":\"$3\"$e}"
+  e="{\"of\":\"$3\"$e}"; [ -z "${4:-}" ] || e=$(jq -c --argjson m "$4" '. + $m' <<<"$e") || return 1; record "$1" "$2" start ok "$e"
 }
 # The form of the files a card saves for its steps (<worktree>.review, .test, .ready, .rerun and the rest): a commit
 # whose code cannot read the files that the code before it saved raises it, and a running card then keeps its old code (switchcode()).

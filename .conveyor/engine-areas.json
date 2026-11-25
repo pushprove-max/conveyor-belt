@@ -708,6 +708,7 @@
 {"area": "slices", "test": "slicesopen.test.sh"}
 {"area": "slices", "test": "parts.test.sh"}
 {"area": "slices", "test": "testcards.test.sh"}
+{"area": "slices", "test": "splitresume.test.sh"}
 {"area": "cmd-parts", "file": "conveyor/commands/parts.sh"}
 {"area": "cmd-parts", "test": "parts.test.sh"}
 {"area": "pick", "test": "parts.test.sh"}

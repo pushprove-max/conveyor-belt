@@ -17,8 +17,14 @@
 # The card's split line records it: result kept or split, and split {mode (the rule: shadow or on), hash, verdict
 # (under: under the thresholds; keep; split; invalid: an answer that broke the rules; failed: the call failed), why,
 # size, slices ({title, doneWhen, covers, dependsOn}, each slice's number from 1), filed (the issues filed, On only),
-# held (On only: whether they started held, as the issue was, or queued), answer (the start of an answer that broke
-# the rules)}, and model (the judge's) when the judge was asked.
+# held (On only: whether they started held, as the issue was, or queued), resumed (the card whose plan this card
+# finished or ended: splitplan()), answer (the start of an answer that broke the rules)}, and model (the judge's) when
+# the judge was asked. Before the first slice is filed, the start line of the filing holds the plan: {split, cards
+# (whether the slices are cards with no GitHub issue)}. A card that stops after that and before its split line leaves
+# the plan unrecorded: while the rule is On and the issue's text is the plan's, the next card of the issue files the
+# slices it lacks (splitmade()), keeps those it filed, picked or not, where they are, and records the split as its own
+# line with resumed, with no new judge call. Else (the rule is Shadow, or the issue was edited) it ends the plan: it
+# withdraws the slices filed for it (a picked card with no GitHub issue stays) and checks the issue as any other.
 # In shadow the card goes on and builds the issue whole, as with the rule off. On, with a split verdict, the slices are
 # filed as follow-ups of the issue (splitfile()), held or queued as the issue is, and in its place in the pick order
 # when the order names it; the issue becomes their umbrella: it is held (`control hold`), the
@@ -113,18 +119,41 @@ splitprompt() { # <issue json> <size json>
   printf '%s' "$p"
 }
 splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the issue was split and the card has ended
-  local c=${CARDCTL:-} rule issue h size t1 t2 t3 t4 p ans v model='' nums x split sf me
+  local c=${CARDCTL:-} rule issue h size t1 t2 t3 t4 p ans v model='' nums x split sf me by res made old gone
   [ -n "$c" ] || c=$(ctl 2>/dev/null) || return 0
   rule=$(jq -r '.rules.split // "off"' <<<"$c" 2>/dev/null)
   [ "$rule" = shadow ] || [ "$rule" = on ] || return 0
   # An issue that cannot be read is built as it is, with no line: its card reads it again (card()).
   issue=$(gh issue view "$2" --json number,title,body,labels,milestone 2>/dev/null) && jq -e 'objects | .number' <<<"$issue" >/dev/null 2>&1 || return 0
   ! jq -e --arg fu "$FOLLOWUP" 'any(.labels[]?; .name == $fu)' <<<"$issue" >/dev/null 2>&1 || return 0
+  size=$(jq -c --arg area "$AREA" "$SPLITSIZE" <<<"$issue") || return 0
   h=$(jq -j '.title // "", "\n", .body // ""' <<<"$issue" | git hash-object --stdin) && [ -n "$h" ] || return 0
-  [ "$({ recs; olds; } 2>/dev/null | grep -F "\"$h\"" | jq -Rn --argjson n "$2" --arg h "$h" \
+  # A split that a card of the issue planned and did not record (it stopped while it filed the slices: splitplan(),
+  # splitmade()). Bug: the hash check below found no split line, so the next card filed the same slices again.
+  by=$1 res='' gone='' made='[]' sf=splitfile
+  x=$(splitplan "$2") || return 0
+  if [ -n "$x" ]; then
+    old=${x%%$'\t'*} x=${x#*$'\t'}
+    [ "$(jq -r .cards <<<"$x")" != true ] || sf=splitcards
+    made=$(splitmade "$old" "$2" "$sf") || { nums=$made made=''; }
+    if [ "$rule" = on ] && [ "$(jq -r .split.hash <<<"$x")" = "$h" ]; then
+      # Rule On and the plan's text: this card files the slices the plan lacks, with no new judge call.
+      by=$old res=1 split=$(jq -c --arg b "$old" '.split + {resumed: $b}' <<<"$x") || return 0
+    else
+      # Shadow builds the issue as one card, and the slices of a plan for an edited issue cover its old items: the plan
+      # is ended, its slices withdrawn (splitend()), and the issue is checked as any other, past the hash check, so
+      # that this card's split line ends the plan. Slices that cannot be read cannot be withdrawn: the card goes on
+      # with no line, and the next card tries again. Bug: the next card filed the plan's missing slices under Shadow,
+      # and for an edited issue with the new items' text under the plan's item numbers.
+      [ -n "$made" ] || return 0
+      gone=$(splitend "$old" "$2" "$sf" "$made") made='[]' sf=splitfile
+    fi
+  fi
+  [ -n "$res$gone" ] || [ "$({ recs; olds; } 2>/dev/null | grep -F "\"$h\"" | jq -Rn --argjson n "$2" --arg h "$h" \
     'any(inputs | fromjson? | objects; .step == "split" and .issue == $n and .split.hash == $h)' 2>/dev/null)" != true ] || return 0
-  size=$(jq -c --arg area "$AREA" "$SPLITSIZE" <<<"$issue") && packget split.doneWhen t1 split.files t2 split.areas t3 split.chars t4 || return 0
-  if jq -e --argjson t "[$t1,$t2,$t3,$t4]" '(.doneWhen | length) < $t[0] and (.files | length) < $t[1] and .areas < $t[2] and .chars < $t[3]' <<<"$size" >/dev/null; then
+  [ -n "$res" ] || packget split.doneWhen t1 split.files t2 split.areas t3 split.chars t4 || return 0
+  if [ -n "$res" ]; then : # the plan's split
+  elif jq -e --argjson t "[$t1,$t2,$t3,$t4]" '(.doneWhen | length) < $t[0] and (.files | length) < $t[1] and .areas < $t[2] and .chars < $t[3]' <<<"$size" >/dev/null; then
     v=$(jq -c '{verdict: "under", why: "under the pack'"'"'s split thresholds: \(.doneWhen | length) Done-when items, \(.files | length) files, \(.areas) areas, \(.chars) characters"}' <<<"$size")
   else
     p=$(splitprompt "$issue" "$size")
@@ -137,7 +166,9 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
     else v=$(jq -Rsc --argjson n "$(jq '.doneWhen | length' <<<"$size")" "$SPLITREAD" <<<"$ans" 2>/dev/null)
       [ -n "$v" ] || v=$(jq -cn --arg a "${ans:0:2000}" '{verdict: "invalid", why: "the answer held no JSON object", answer: $a}'); fi
   fi
-  split=$(jq -c --arg m "$rule" --arg h "$h" --argjson s "$size" '{mode: $m, hash: $h, size: ($s | .doneWhen |= length | .files |= length)} + .' <<<"$v") || return 0
+  [ -n "$res" ] || split=$(jq -c --arg m "$rule" --arg h "$h" --argjson s "$size" '{mode: $m, hash: $h, size: ($s | .doneWhen |= length | .files |= length)} + .' <<<"$v") || return 0
+  [ -z "$gone" ] || split=$(jq -c --arg b "$old" --arg w "$gone" '. + {resumed: $b} | .why += $w' <<<"$split") || return 0
+  [ -n "$res" ] || [ "$(jq -r '.rules.splitissues' <<<"$c" 2>/dev/null)" != false ] || sf=splitcards # Cards with no GitHub issue: Split parts On
   # On, a split is filed; one that cannot be filed is recorded as a split not filed, and the issue is built whole.
   # Not while a slice that an earlier card filed for its grown change is open (growopen()): the edited issue may hold
   # that slice's work, and a slice of this split would build it a second time. Bug: a split before the build filed a
@@ -148,9 +179,11 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
     elif [ "$x" != '[]' ]; then
       split=$(jq -c --argjson o "$x" '.why += "; \($o | map("#\(.n)") | join(", ")), slices that earlier cards filed for its grown changes, are still open, so no slice is filed and the issue is built whole"' <<<"$split")
     else
-      began "$1" "$2" file # stop (halt(), lib/run.sh) leaves the card to finish from here: its slices are being filed
-      sf=splitfile; [ "$(jq -r '.rules.splitissues' <<<"$c" 2>/dev/null)" != false ] || sf=splitcards # Cards with no GitHub issue: Split parts On
-      if nums=$($sf "$1" "$issue" "$(jq -c .slices <<<"$split")" 1); then split=$(jq -c --argjson f "$nums" '. + $f' <<<"$split")
+      # stop (halt(), lib/run.sh) leaves the card to finish from here: its slices are being filed. Its start line holds
+      # the plan (the split and whether its slices are cards) before the first slice is filed, for splitplan().
+      x=''; [ -n "$res" ] || x=$(jq -c --arg sf "$sf" '{plan: {split: ., cards: ($sf == "splitcards")}}' <<<"$split")
+      began "$1" "$2" file "$x" || { made='' nums='the plan of the split could not be recorded'; }
+      if [ -n "$made" ] && nums=$($sf "$by" "$issue" "$(jq -c .slices <<<"$split")" 1 "$made"); then split=$(jq -c --argjson f "$nums" '. + $f' <<<"$split")
       else split=$(jq -c --arg r "$nums" '.why += "; the slices could not be filed, so the issue is built whole: \($r)"' <<<"$split"); fi
     fi
   fi
@@ -179,14 +212,17 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
 # builds on the change that lands it. They start where the parent is (splitplace()): held when the control record
 # holds it, else queued. Prints {filed: their numbers, held: whether they start held}; when one cannot be filed, or
 # they cannot be placed, prints why and fails, the ones filed before it withdrawn (the reason names each whose close
-# failed: it may still be open).
-splitfile() { # <card> <issue json> <slices json> <1: the slices take the parent's place in the pick order; 0: not>
+# failed: it may still be open). <made> (splitmade()) gives the slices <card> filed before it stopped: they are kept,
+# and only the others are filed.
+splitfile() { # <card> <issue json> <slices json> <1: the slices take the parent's place in the pick order; 0: not> [<made json>]
   local n k i out num nums=() more=() body held w pa sa t
   n=$(jq -r .number <<<"$2") && k=$(jq length <<<"$3") || { echo "the slices could not be read"; return 1; }
   mapfile -t more < <(jq -r --arg a "$AREA" --arg t "$TYPE" --argjson p "$PRIOS" '(.labels // [] | map(.name)
       | map(select(($a != "" and startswith($a)) or . == $t or IN($p[]))) | unique[] | "--label", .), (.milestone.title // empty | "--milestone", .)' <<<"$2")
   pa=$(jq -r --arg a "$AREA" '.labels // [] | map(.name | select(startswith($a))) | .[0] // empty' <<<"$2")
   for ((i = 0; i < k; i++)); do
+    num=$(jq -r --argjson i "$i" '.[$i] // empty' <<<"${5:-[]}") || { echo "the slices filed before could not be read"; return 1; }
+    [ -z "$num" ] || { nums+=("$num"); continue; }
     # A parent with no area label: each slice has the area of the first file it builds again, else of the file its body
     # names, else the map's other (filearea(), lib/areas.sh).
     sa='' t=$(jq -r --argjson i "$i" '.[$i].files[0]? // empty' <<<"$3")
@@ -218,14 +254,16 @@ splitfile() { # <card> <issue json> <slices json> <1: the slices take the parent
 # place of splitfile()'s issues: the same bodies, each `Depends on:` line naming the card id of an earlier slice, the
 # parent's priority, area and type labels and the follow-up label as the stand-in issue's, held when the control record
 # holds <issue>. Prints {filed: [], cards: their ids, held: whether they start held}; when one cannot be made, prints
-# why and fails, the ones made before it taken out again.
-splitcards() { # <card> <issue json> <slices json> <unused: 1 or 0, as splitfile()>
+# why and fails, the ones made before it taken out again (tcdrop(): a picked one stays). <made>: as splitfile()'s.
+splitcards() { # <card> <issue json> <slices json> <unused: 1 or 0, as splitfile()> [<made json>]
   local n k i body held ids=() id x labels
   n=$(jq -r .number <<<"$2") && k=$(jq length <<<"$3") || { echo "the slices could not be read"; return 1; }
   held=$(jq -r --argjson n "$n" 'if .held | index($n) != null then "held" else "" end' <<<"$(ctl 2>/dev/null)") || held=''
   labels=$(jq -c --arg a "$AREA" --arg t "$TYPE" --arg f "$FOLLOWUP" --argjson p "$PRIOS" '(.labels // [] | map(.name) | map(select(($a != "" and startswith($a)) or . == $t or IN($p[]))) | unique) + [$f]' <<<"$2") \
     || { echo "the labels of #$n could not be read"; return 1; }
   for ((i = 0; i < k; i++)); do
+    id=$(jq -r --argjson i "$i" '.[$i] // empty' <<<"${5:-[]}") || { echo "the slices made before could not be read"; return 1; }
+    [ -z "$id" ] || { ids+=("$id"); continue; }
     body=$(jq -r --argjson i "$i" --argjson k "$k" --arg c "$1" --arg area "$AREA" --argjson sl "$3" --argjson ids "$(jq -cn '$ARGS.positional' --args "${ids[@]}")" \
       '. as $iss | ('"$SPLITSIZE"' | .doneWhen) as $dw | .number as $n | $sl[$i] as $s
       | "Follow-up of #\($n): slice \($i + 1) of \($k). Conveyor card \($c) split #\($n) under the rule Split large issues. #\($n) stays open and held until each of its slices lands or is already done on main.\n\n"
@@ -256,8 +294,55 @@ splitplace() { # <issue> <order: 1 or 0> <slice>...
 # failed close is not known to have closed the issue, so it may still be open.
 splitwithdraw() { # <issue> <slice>...
   local n=$1 x f=(); shift
-  for x; do gh_write issue close "$x" --reason "not planned" --comment "Conveyor: the split of #$n could not be filed whole, so this slice is withdrawn and #$n is built as one card." >/dev/null 2>&1 || f+=("#$x"); done
+  for x; do gh_write issue close "$x" --reason "not planned" --comment "Conveyor: the split of #$n could not be filed whole, so this slice is withdrawn and is not built." >/dev/null 2>&1 || f+=("#$x"); done
   [ ${#f[@]} = 0 ] || { printf -v x '%s, ' "${f[@]}"; echo "${x%, }"; return 1; }
+}
+# Ends the plan of card <card> for <issue> that no split line records (splitcheck()): the slices <made> (splitmade())
+# it filed are withdrawn (splitwithdraw()), or its cards with no GitHub issue taken out of the queue (tcdrop(): a picked
+# one stays and is built). Prints the end of the split line's why that says so.
+splitend() { # <card> <issue> <splitfile or splitcards> <made json>
+  local s=() w x
+  mapfile -t s < <(jq -r '.[] // empty' <<<"$4")
+  w="; card $1 stopped before it filed the whole split it planned for #$2"
+  if [ ${#s[@]} = 0 ]; then w+=", and it had filed no slice"
+  elif [ "$3" = splitfile ]; then
+    printf -v x '#%s, ' "${s[@]}"; w+=", so its slices ${x%, } are withdrawn"
+    x=$(splitwithdraw "$2" "${s[@]}") || w+="; Conveyor could not confirm that GitHub closed $x: they may still be open"
+  else
+    for x in "${s[@]}"; do tcdrop "$x"; done
+    printf -v x '%s, ' "${s[@]}"; w+=", so its cards ${x%, } are taken out of the queue"
+    if ! x=$(jq -r --argjson s "$4" '[.cards[] | select(.id | IN($s[])) | .id] | join(", ")' "$TACARDS" 2>/dev/null); then
+      w+="; the queue could not be read after, so they may still be in it"
+    elif [ -n "$x" ]; then w+="; $x stays in it: a card picked it first, or it could not be taken out"; fi
+  fi
+  echo "$w"
+}
+# The newest split that a card of <issue> planned (the plan on its start line of the filing, splitcheck()) and that no
+# split line records: neither the card's own line nor that of a card that finished it (split.resumed). Prints
+# "<card>\t<plan json>", nothing when there is none; fails when the records cannot be read.
+splitplan() { # <issue>
+  { recs && olds; } 2>/dev/null | grep -F -e '"plan"' -e '"split"' | jq -Rnr --argjson n "$1" '[inputs | fromjson? | objects | select(.issue == $n)]
+    | [.[] | select(.step == "split") | .card, (.split.resumed // empty)] as $done
+    | [.[] | select(.step == "start" and .plan != null and (.card | IN($done[]) | not))] | last // empty | "\(.card)\t\(.plan | tojson)"'
+  # Kept at once: the first test replaces PIPESTATUS. Bug: the second read an unset item, and set -u failed the call.
+  local s=("${PIPESTATUS[@]}"); [ "${s[0]}" = 0 ] && [ "${s[2]}" = 0 ]
+}
+# The slices of <issue> that card <card> filed or made for its plan before it stopped (splitfile(), splitcards()): the
+# follow-ups, open or closed, or the queue's cards with no GitHub issue, picked or not, whose body names <card> as the
+# card that split <issue>. Prints a JSON list with the issue number or card id of each slice by its place (null: not
+# filed yet). A slice that is already picked or built is kept as it is, so no card builds a slice twice. When they
+# cannot be read, prints why and fails.
+splitmade() { # <card> <issue> <splitfile or splitcards>
+  local re="^Follow-up of #$2: slice (?<i>[0-9]+) of [0-9]+\\. Conveyor card (?<c>[^ ]+) split #$2 under the rule Split large issues\\." l
+  if [ "$3" = splitcards ]; then
+    l='[]'; [ ! -s "${TACARDS:-}" ] || l=$(jq -ce '.cards | arrays | map({number: .id, body})' "$TACARDS") \
+      || { echo "the queue of cards with no GitHub issue could not be read, so the slices that card $1 made for #$2 are not known"; return 1; }
+  else
+    l=$(gh issue list --state all --limit 1000 --label "$FOLLOWUP" --json number,body) \
+      || { echo "the follow-ups could not be read, so the slices that card $1 filed for #$2 are not known"; return 1; }
+  fi
+  jq -c --arg re "$re" --arg c "$1" 'reduce (.[] | . as $e | .body // "" | capture($re)? | select(.c == $c) | {i: (.i | tonumber), v: $e.number}) as $s
+    ([]; .[$s.i - 1] = $s.v)' <<<"$l" || { echo "the slices that card $1 filed for #$2 could not be read"; return 1; }
 }
 # A change that grew while it was built (#448). card() calls growcheck() before each review of a card of an issue of
 # its own (not a main-red fix card nor a branch), until it has asked the judge once (it sets the caller's grown). With
