@@ -129,7 +129,11 @@ neither a pass line nor a fail line for a named case gives no result, and the ca
 named cases must print a pass line for each case that passes.
 
 A main-red fix card whose session changes no file runs its cases again on main. When they pass, the card ends as
-`closed`, and when they fail, the card is blocked. Any other build session that changes no file blocks the card with "the session made no change", unless
+`closed`. When they do not all pass (a case fails, or a run gives no result) and newer main-red fix cards hold
+each of its cases, the card ends as `closed`, and its `closed` line names those cards. A newer card on the belt counts
+for each case it holds. A newer card that landed counts only for a case that passes in each of its runs on main,
+and only while main is still the commit of those runs. A card that keeps a
+reviewed change from a rebuild after a landing conflict does not close this way. Otherwise the card is blocked. Any other build session that changes no file blocks the card with "the session made no change", unless
 its reply ends with one of two lines:
 
 - `ALREADY-DONE: <where it is fixed>`: main already does what the issue asks. A reviewer checks this against main.

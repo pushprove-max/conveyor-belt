@@ -603,7 +603,11 @@ failure gets a verdict:
   worktree cannot be made (then the file is `<card>.redrun-setup.out`), the reason names that file and quotes its
   last 40 lines. When its build session makes no change,
   its cases run again on main as it is now. When they all pass, the card closes as not needed, and its `closed`
-  line says so; main is no longer red. Otherwise it is blocked, and the reason gives the result on main. An
+  line says so; main is no longer red. When they do not all pass (a case fails, or a run gives no result) and newer
+  main-red fix cards hold each of its cases, it closes, and its `closed` line names those cards and gives the result
+  on main. A newer card on the belt counts for each case it holds. A newer card that landed counts only for a case
+  that passes in each of its runs on main, and only while main is still the commit of those runs. A card that keeps
+  a reviewed change from a rebuild after a landing conflict does not close this way. Otherwise it is blocked, and the reason gives the result on main. An
   `ALREADY-DONE` line in the session's reply does not change this.
   The Board shows it titled "Main is red: <cases>"; its commit names the cases and main's
   commit. In place of an issue number, the Board, `foreman status` and the Foreman's wakes name it

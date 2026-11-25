@@ -377,10 +377,12 @@ bugnamed() { # <card> <worktree> <issue json>
 # fails, a run gave no result for a case, or a run could not be made (card() blocks the card with that first line).
 # The output of each run (redkeep()) stays beside the card's kept work after the run's worktree goes: a reason that a
 # run gave no result, or could not be made, names that file and quotes its end. A check that holds, or a card that
-# closes as already done, keeps none. Sets REDRAN: the cases it ran (redclosed()).
+# closes as already done, keeps none. Sets REDRAN: the cases it ran (redclosed()); REDPASS: the names of the cases
+# that passed in each of FULL_ALONE runs without the change, a JSON array, [] with no such case; and REDSHA: the
+# commit they ran on (redreplaced()).
 redproof() { # <card> <worktree>
-  local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2 kw='' ki='' kf='' fc nw i
-  REDRAN=''
+  local mwt=$CARDS/mainrun/$1.unfixed cs sha='' out wo='' wi='' rc=2 kw='' ki='' kf='' fc nw i po=''
+  REDRAN='' REDPASS='[]' REDSHA=''
   cs=$(redcases "$1") && REDRAN=$cs \
     || { echo "the main-red record names no case of this card, so the cases main fails could not be run" > "$2.unfixed"; return 2; }
   if sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
@@ -395,6 +397,17 @@ redproof() { # <card> <worktree>
       wo=$(redrun "$mwt" "$cs") || wo=''; kw=$(redkeep "$1" "$mwt.test" without)
       [ -n "$wo" ] && [ -z "$(rednames fail "$wo")$(rednames none "$wo")" ] || break
     done
+    # REDPASS holds a case only when it passed in each of FULL_ALONE runs, as main is no longer red for it only then:
+    # with no change (nochange()), the cases that passed in the run that stopped the loop run again alone until they
+    # have FULL_ALONE runs, and a case that fails or gives no result in one leaves it. The judged run stays $wo.
+    [ -z "$wo" ] || REDPASS=$(jq -c '[.[] | select(.verdict == "pass") | .name]' <<<"$wo" 2>/dev/null) || REDPASS='[]'
+    [ -n "$nw" ] || ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null \
+      || for ((i++; i < FULL_ALONE && ${#REDPASS} > 2; i++)); do
+        po=$(redrun "$mwt" "$(jq -c --argjson p "$REDPASS" 'map(select(IN(.name; $p[])))' <<<"$cs")") || po='[]'
+        REDPASS=$(jq -c --argjson p "$REDPASS" '[.[] | select(.verdict == "pass" and IN(.name; $p[])) | .name]' <<<"$po" 2>/dev/null) || REDPASS='[]'
+      done
+    [ -z "$po" ] || cp -f "$kw" "$mwt.test" 2>/dev/null || : # the output shown below is the judged run's
+    REDSHA=$sha
     if [ -n "$nw" ]; then
       out="main is not red for $(jq -r '[.[] | "`\(.name)`"] | join(", ")' <<<"$cs") the pack's way: $nw; main is marked red only when that run fails, so the card closes as already done"; rc=3
     elif [ -z "$wo" ] || [ -n "$(rednames none "$wo")" ]; then
@@ -446,6 +459,49 @@ redclosed() { # <card> <closed line>
   if [ -n "$add" ]; then echo "The card was not closed: a case joined its entry in the main-red record while its cases ran, and did not run: $add."
   elif append "$2"; then rc=0
   else echo "The engine could not write the closed line."; fi
+  exec {lock}>&-
+  return $rc
+}
+# The fix cards that took over main-red fix card <card>'s work (issue 1666): each case its entry in $MAINRED holds is
+# held, by the same name, by an entry after it (made later, for a later red commit) whose fix card is on the belt
+# (picked, and not pushed, landed, closed or blocked), or, for a case in <passed> (the names of the cases that passed
+# on main as it is now in each of FULL_ALONE runs: redproof()'s REDPASS), whose fix card landed (pushed, or its last landed, closed or blocked line
+# is landed). A landed card does not count for a case that did not pass: its fix did not hold it, or a later commit
+# broke it again and it stayed with this open card (mainred.sh mainred(): redopen()), so closing it would leave the
+# case with no fix card. Prints those cards, one a line; fails when a case has none, or the card has no entry.
+redtakers() { # <card> [<passed: JSON array of case names>]
+  local rec c s on='{}'
+  rec=$(jq -ce --arg c "$1" '.reds | arrays | (map(.card) | index($c)) as $i | select($i != null)
+    | {old: [.[$i].cases[].case], newer: [.[$i + 1:][] | select(.card | strings) | {card, cases: [.cases[].case]}]}' "$MAINRED" 2>/dev/null) || return 1
+  # Each newer card on the belt ({<card>: "belt"}) or landed ({<card>: "landed"}).
+  while IFS= read -r c; do
+    s=$(stdb ask card "$c" 2>/dev/null | jq -sce --arg c "$c" 'map(select(.card == $c)) as $l | select($l != [])
+      | ($l | map(select(.step | IN("landed", "closed", "blocked"))) | last) as $e
+      | if any($l[]; .step == "pushed") or $e.step == "landed" then {($c): "landed"} elif $e == null then {($c): "belt"} else empty end') \
+      && on=$(jq -c --argjson s "$s" '. + $s' <<<"$on")
+  done < <(jq -r '[.newer[].card] | unique[]' <<<"$rec")
+  jq -re --argjson on "$on" --argjson p "${2:-[]}" '.newer as $n
+    | [.old[] as $k | first($n[] | select(IN(.cases[]; $k) and ($on[.card] == "belt" or ($on[.card] == "landed" and IN($p[]; $k)))) | .card) // null]
+    | select(length > 0 and all(. != null)) | unique[]' <<<"$rec"
+}
+# Closes main-red fix card <card> whose session made no change while its cases did not all pass on main (a case still
+# failed, gave no result or could not run: followups.sh nochange()), when newer fix cards took its work over
+# (redtakers(), given the cases that passed in each of redproof()'s runs: REDPASS): a closed line whose reason names them, then <reason>, written to the log too. Under the records' lock (locked(): the caller takes it), so no taker writes its
+# blocked or closed line between the read and the write, and then the main-red record's lock, the order pick() takes
+# them in: a case mainred() adds to the entry meanwhile is read, and when no newer card holds it the card stays open.
+# Those passes count only while main is still the commit they ran on (REDSHA): a landing that moved main since then
+# may have broken the case again, so then a landed card counts for none. A landing after this check makes a commit no
+# run has passed, and main's own test run records what it breaks (mainred.sh mainred()).
+# Fails, writing nothing, when no cards took every case over or the line cannot be written.
+redreplaced() { # <card> <issue> <reason>
+  local lock by t res rc=1 p=${REDPASS:-[]}
+  { exec {lock}>>"$MAINRED.lock"; } 2>/dev/null && flock "$lock" || return 1
+  [ -n "${REDSHA:-}" ] && [ "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" = "$REDSHA" ] || p='[]'
+  if by=$(redtakers "$1" "$p"); then
+    t="Replaced: newer main-red fix cards hold each of its cases, on the belt or landed for a case that passes on main: ${by//$'\n'/, }. ${3^}"
+    res=$(line "$1" "$2" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") \
+      && append "$res" && { echo "conveyor: card $1 closed: $t" >&2; rc=0; }
+  fi
   exec {lock}>&-
   return $rc
 }

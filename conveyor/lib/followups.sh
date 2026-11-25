@@ -672,8 +672,8 @@ ncblock() { # <card> <issue> <worktree> <reason> <words>
 # main as it is now (bugproof.sh redproof(), issue 323): when every case passes there, main is no longer red for them, and the card
 # closes as not needed, its closed line saying so; so too when the pack's test command cannot run them alone (no
 # test.fileCommand: #1275), as then nothing shows main red the pack's way. Else it is blocked, saying why, whatever its reply says: only that
-# run, not a review of an ALREADY-DONE line, shows main is no longer red.
-# Every reason it blocks with names the card's kept folder, where block() moves the session's output and errors, so
+# run, not a review of an ALREADY-DONE line, shows main is no longer red. When newer fix cards hold each of its cases (bugproof.sh
+# redreplaced(), issue 1666), it closes as replaced, naming them, unless it holds a rebuild's reviewed change (<worktree>.patch: block() keeps it). Every reason it blocks with names the card's kept folder, where block() moves the session's output and errors, so
 # the owner finds why the session stopped (issue 495), and is posted on the issue. A review of an ALREADY-DONE line
 # writes its own error output in place of the session's, and a reason after it says so.A reason of a main-red card, or of a card with no ALREADY-DONE
 # line, also quotes the session's last reply (lastreply()); with none it says so, and the end of the session's error
@@ -688,7 +688,8 @@ nochange() { # <card> <issue> <worktree> <brief>
     [ -z "$(git -C "$wt" status --porcelain 2>&1)" ] && err=$(git -C "$wt" checkout -q --detach "refs/heads/$BRANCH" 2>&1) \
       || { ncblock "$c" "$n" "$wt" "$t. The engine could not run its cases again on main: the worktree is not clean or could not be moved to main. ${err:0:400}" "$why"; return; }
     redproof "$c" "$wt"
-    [ $? = 3 ] || { ncblock "$c" "$n" "$wt" "$t. Its cases on main as it is now: $(head -n 1 "$wt.unfixed")" "$why"; return; }
+    [ $? = 3 ] || { t+=". Its cases on main as it is now: $(head -n 1 "$wt.unfixed")" # not all passed: closed if replaced (issue 1666)
+      [ -e "$wt.patch" ] || ! locked redreplaced "$c" "$n" "$t" || { clean "$wt"; return; }; ncblock "$c" "$n" "$wt" "$t" "$why"; return; }
     t="Not needed: the session made no change, and its cases were checked again on main. $(head -n 1 "$wt.unfixed")"
     # Written only while its entry holds no case that did not run (bugproof.sh redclosed()): a case that joined it then keeps it open.
     err=''; res=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && err=$(locked redclosed "$c" "$res") \
