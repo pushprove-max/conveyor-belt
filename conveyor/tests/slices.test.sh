@@ -59,7 +59,7 @@ t_slicesshadow() {
   [ ! -s "$STUB/filed" ] && [ "$(jq -c .held "$ST/control.json")" = '[]' ] || fail "shadow filed or held something: $(cat "$STUB/filed" 2>/dev/null) $(jq -c .held "$ST/control.json")"
   recok "$ST/cards.jsonl" "a shadow card"
   # The snapshot gives the card's split to the Board, which shows "Would have split into 2".
-  [ "$(loop snapshot | jq -c '.landed | map(select(.issue == 7)) | .[0].split')" = '{"result":"split","slices":2,"filed":null}' ] \
+  [ "$(loop snapshot | jq -c '.landed | map(select(.issue == 7)) | .[0].split')" = '{"result":"split","slices":2,"filed":null,"cards":null}' ] \
     || fail "the snapshot does not give the landed card its split: $(loop snapshot | jq -c '.landed')"
 }
 
