@@ -101,12 +101,19 @@ standinglog() {
   { { flock -w 10 9 && printf '%s\n' "$row" >&9; } 9>>"$rl"; } 2>/dev/null || { echo "conveyor: the ruling log $rl could not be written, so the $1 act was not logged" >&2; return 1; }
   printf '%s\n' "$id"
 }
-# What the Foreman is told about the kinds that are on, with their limits; nothing when none is on. <run> is how the
-# Foreman runs this engine; <reserved> the pack's auto.reserved, as words.
-standingrules() { # <run> <reserved>
-  local s_ k
+# What the Foreman is told about the kinds that are on, with their limits, and what it still asks the owner; nothing
+# when none is on. <run> is how the Foreman runs this engine; <reserved> the pack's auto.reserved, as words. With
+# <start> (the Foreman's start, which names its run), the still-ask line even when no kind is on: the Foreman's role
+# line (foreman.sh) names that list as what goes to the owner.
+standingrules() { # <run> <reserved> [<start>]
+  local s_
   packget auto.standing s_ || return 1
-  [ "$(jq 'length' <<<"$s_")" != 0 ] || return 0
+  if [ "$(jq 'length' <<<"$s_")" != 0 ]; then standingkinds "$1" "$s_"; elif [ -z "${3:-}" ]; then return 0; fi
+  echo "- Still ask the owner, whatever the kind: new engine behaviour (how the engine builds, reviews, fixes, tests, lands or pushes) or a release, each one the owner did not ask for; a design choice; anything about $2. When unsure, ask."
+}
+# The header and the rule of each kind on in <kinds> (a json list), for standingrules.
+standingkinds() { # <run> <kinds>
+  local s_=$2 k
   cat <<EOF
 # STANDING YES
 
@@ -122,7 +129,6 @@ EOF
       review-retry) echo "- review-retry: a card blocked by its review (\"the fix for <finding> did not hold after <n> rounds\"). The watcher retries it once per issue and logs it: you take no step for it, log nothing and tell the owner nothing of it. On a wake for such a card, do what \`auto standing review-retry how\` prints." ;;
     esac
   done
-  echo "- Still ask the owner, whatever the kind: new engine behaviour (how the engine builds, reviews, fixes, tests, lands or pushes) or a release, each one the owner did not ask for; a design choice; anything about $2. When unsure, ask."
 }
 # The rest of a kind's rule, which standingrules leaves out so the Foreman's start fits its size limit. The rule names
 # it as an `auto standing <kind> how` command run like its others: by the engine on the record's host, the same engine

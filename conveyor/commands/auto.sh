@@ -15,7 +15,8 @@
 #   rules: what the Foreman is told while it is on; nothing while it is off. When the project keeps owner-way.md, its
 #   written profile of how the owner decides, in the Foreman's folder (beside rules.md), the rules name it.
 # - standing: the standing kinds of routine yes this checkout's pack turns on (lib/standing.sh), which hold whether
-#   auto is on or off; nothing when no kind is on. The Foreman's start asks each of its records for them (foreman.sh),
+#   auto is on or off; nothing when no kind is on, save that with <run> (the Foreman's start) the still-ask line is
+#   always printed, as the Foreman's role line names it. The Foreman's start asks each of its records for them (foreman.sh),
 #   on the host that has the record, as the Board turns them on or off there. <run>: how the rules name the engine to
 #   run their commands with (default: this engine); the Foreman's start gives `foreman.sh ask <repo>`, which reaches
 #   the record from the Foreman's machine.
@@ -194,7 +195,7 @@ The owner is here. Decide only the formalities; ask them everything else as usua
 EOF
     fi ;;
   standing)
-    if [ $# != 4 ]; then r=$(reserved) || exit 1; standingrules "${3:-bash $(printf %q "$HERE/conveyor.sh")}" "$r"; exit; fi
+    if [ $# != 4 ]; then r=$(reserved) || exit 1; standingrules "${3:-bash $(printf %q "$HERE/conveyor.sh")}" "$r" "${3:+start}"; exit; fi
     [ "$4" != how ] || { standinghow "$3"; exit; }
     # The pack's list as it was, with the kind added or taken out; each kind once, in STANDING_KINDS' order.
     packset --arg k "$3" --argjson on "$([ "$4" = on ] && echo true || echo false)" --argjson all "$(jq -cn '$ARGS.positional' --args "${STANDING_KINDS[@]}")" \

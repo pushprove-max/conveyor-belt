@@ -63,10 +63,18 @@ t_reviewretry() {
     && grep -qF 'you take no step for it, log nothing and tell the owner nothing of it' <<<"$out" \
     || fail "the start gives the watcher's review-retry to the Foreman: $out"
 }
-# Every kind off (the list setup writes): the start says nothing of standing kinds.
+# Every kind off (the list setup writes): the start names no standing kind.
+# And its role line sends to the owner only what the still-ask list and the project's rules name. Bug it catches
+# (#1678): the line said "take every decision to the owner", so the Foreman waited for the owner on decisions its
+# rules let it take, and blocked cards sat until the owner asked. The list the line names is in the start with no kind
+# on too: auto.standing is empty by default, and a start that left the list out pointed the Foreman at nothing.
 t_none() {
   local out; fixture none '[]'; out=$(start)
-  grep -qF '# Foreman mode: you are' <<<"$out" || fail "no Foreman start: $out"
+  local role; role=$(grep '^# Foreman mode: you are' <<<"$out") || fail "no Foreman start: $out"
+  # The wording is checked on the role line itself: on a line after it, it would not be the Foreman's role.
+  grep -qF 'clear blocked cards the same turn; ask only what "Still ask the owner" or rules name; never build or answer for them' <<<"$role" \
+    && ! grep -qF 'take every decision to the owner' <<<"$out" || fail "the start's role line does not limit what goes to the owner to the still-ask list and the rules: $role"
+  grep -qF -- '- Still ask the owner, whatever the kind: new engine behaviour' <<<"$out" || fail "the start with no kind on has no still-ask list for its role line to name: $out"
   ! grep -qE 'STANDING YES|WARNING: the standing' <<<"$out" || fail "the start names standing kinds while none is on: $out"
 }
 # The host cannot be asked: one warning names the record, and no kind is taken, not even this checkout's.

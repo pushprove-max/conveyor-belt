@@ -3,8 +3,8 @@
 # foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | ask <repo> <command> [<argument>...] | off | start | rules | words | live | filing | filed --
 # Foreman mode (plan docs/plans/conveyor-plugin-2026-11-10.md, section 11b). The Foreman is a Claude session in a
 # project's main checkout that watches that project's Conveyor (or its group's: lib.sh mine) and brings the owner
-# what needs them: it files issues,
-# clears blocked cards and takes every decision to the owner; it builds nothing itself. Its hooks are the plugin's own
+# what needs them: it files issues, clears blocked cards the same turn and takes to the owner only what its still-ask
+# list and rules name; it builds nothing itself. Its hooks are the plugin's own
 # (hooks/hooks.json, run in every session through the shim): start and waiter.sh --start (asyncRewake, run as
 # CONVEYOR_WAITER_START=1) at SessionStart; stop.sh state, stop.sh reply and
 # waiter.sh (asyncRewake) at Stop; waiter.sh --check after each prompt and each tool call, which starts the waiter
@@ -485,7 +485,7 @@ context_head() {
     plug="# A suspected defect in Conveyor itself: this project is the plugin's own repository, so file it here at once, held, and say it on its own line with the issue's number, \"Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>, filed as #<n>\"; a cause you checked goes in <what it did> with where you checked it."
   fi
   cat <<EOF
-# Foreman mode: you are $NAME, the Foreman of this project. You file issues as cards, watch Conveyor, clear blocked cards and take every decision to the owner; you never answer for the owner or build code.
+# Foreman mode: you are $NAME, the Foreman of this project. File cards, watch Conveyor, clear blocked cards the same turn; ask only what "Still ask the owner" or rules name; never build or answer for them.
 # You are the Foreman of $(mine 2>/dev/null | cut -f1 | paste -sd' ' - | sed 's/ /, /g; s/^$/this project/') only; never read or change another project's Foreman folder, saved state or memory.
 # Filing: file issues only in your own projects, held; release it (conveyor.sh control release <issue>, in that issue's project record) only once the owner has said yes. File an issue about a test file with $FQ ask <project> testissue <test file> <title> <body> (each ask <project> below starts with that path too): it runs where the record is, so the issue starts held there too (rules.testissues false: a held card, released by its card ID). An order from the owner, or a release's fix card (card --release <version>): ask <project> card <title> <body>, held.
 # Questions to the owner go only by the picker (AskUserQuestion), never as a question in your reply.
