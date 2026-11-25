@@ -30,8 +30,13 @@ ln -s "$SRC" "$SRCLINK"
 # reads as scratch.
 ln -s "$SRC" "$STUB/nl"$'\n'
 ln -s "$STUB/nl"$'\n' "$STUB/via-nl"
-# A home folder reached by a link: a search of it is a search of every checkout under it.
+# A home folder reached by a link: a search of it is a search of every checkout under it. It names a checkout folder,
+# as a home under /tmp is scratch space to the search check. The hook writes its log under its home, so the log goes
+# to this test's temp folder (CONVEYOR_HOOK_FIRE_LOG), never into the checkout.
 ln -s "$ROOT/conveyor" "$STUB/home"
+export CONVEYOR_HOOK_FIRE_LOG=$STUB/hook-fire-log.jsonl
+# The stamp the checkout is checked against below: no file under its conveyor/.claude/ is newer when the cases end.
+touch "$STUB/stamp"
 
 FAILED=0 RAN=()
 run() { # <expected exit> <why> <command> [<HOME>]; the hook runs in the checkout root, as a session does
@@ -66,5 +71,9 @@ run 0 "a search after cd to a relative checkout folder was refused" "cd conveyor
   printf 'FAIL: the hook never ran the stub realpath, so these commands did not test it:%s\n' "$(printf ' [%s]' "${RAN[@]}")" >&2
   FAILED=1
 }
+# Bug: the hook wrote its log under the linked home, the checkout's conveyor/ folder, on the blocked search of ~, and
+# the engine area map check read that log as an engine file in no area.
+WROTE=$(find "$ROOT/conveyor/.claude" -type f -newer "$STUB/stamp" 2>/dev/null || true)
+[ -z "$WROTE" ] || { echo "FAIL: the hook wrote into the checkout, given HOME=$STUB/home and: $(printf ' [%s]' "${RAN[@]}"): $WROTE" >&2; FAILED=1; }
 [ "$FAILED" = 0 ] || exit 1
 echo "PASS"
