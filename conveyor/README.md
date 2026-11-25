@@ -1255,7 +1255,7 @@ Then `cardtest()` runs the push checks (`pushgaterun`, `lib/contract.sh`) when m
 `CONVEYOR_PUSH_GATE`. To let the push checks run before a card lands, a project's pre-push hook names that variable:
 the engine sets it to the card's name when it runs the hook in the card's worktree, so the hook can tell this run from
 a push. A hook that does not name it runs only at the push
-([Landing](../docs/cards.md#landing)).
+([Lint](../docs/cards.md#lint)).
 
 The read-only check (`lintrun`) holds around each run of the lint commands, not around the persisted-contract check. Before the commands, the index tree is kept, and the
 worktree must match the index with no file that git does not track or ignore; else no command runs and nothing is
