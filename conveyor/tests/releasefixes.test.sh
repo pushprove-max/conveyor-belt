@@ -207,12 +207,15 @@ t_relfixesnone() {
 }
 # Bug (#758): with Land as pr, a fix's push goes to conveyor/landing; with Merge PR button, release-prep still tests
 # origin's main, so a retry there would test the red commit again, without the fix: nothing starts. With Merge PR
-# release, release-prep tests the head of conveyor/landing, which holds the fix: release-prep 1.1.0 runs there.
+# release, release-prep tests the head of conveyor/landing while a pull request from it is open (relhead(), #1533),
+# and that head holds the fix: release-prep 1.1.0 runs there.
 t_relfixespr() {
   relsetup ''
   fixred; tune '.push.landAs = "pr" | .push.prMerge = "button"'
   fixissue 20 11 CLOSED 'Release fix: 1.1.0' | jq -s . > "$STUB/fixes.json"
-  printf '%s\n' '[ "$1 $2" != "issue list" ] || cat "$STUB/fixes.json"' >> "$STUB/gh"
+  local prs='[ "$1 $2" != "pr list" ] || echo "[{\"number\":9,\"url\":\"https://example.com/pr/9\",\"isCrossRepository\":false}]"'
+  # stub: relfixes() reads the issues through `gh issue list`, and relhead() the open pull request from conveyor/landing through `gh pr list` (landingprs()): #9 is open, as the push of Land as pr opened it
+  printf '%s\n' '[ "$1 $2" != "issue list" ] || cat "$STUB/fixes.json"' "$prs" >> "$STUB/gh"
   # The push of Land as pr, and its record as the loop writes it (lib/push.sh), which atorigin() takes as at origin.
   git -C "$R" push -q origin "HEAD:refs/heads/conveyor/landing" && echo "$(git -C "$R" rev-parse HEAD) origin conveyor/landing" > "$ST/pushed" \
     || fail "the fixture could not be pushed"
