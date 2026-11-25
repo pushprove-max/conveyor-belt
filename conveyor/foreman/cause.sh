@@ -179,6 +179,47 @@ unquoted() {
         else if (t == "p" && ch == ")") { if (c[d]) c[d]--; else d-- } }
       printf "%s", o }' q="'" <<<"$1"
 }
+# heredocs <command>: the command as Bash reads its here-documents: each body as written (a `#` line in it is Markdown,
+# a quote ends nothing), and the shell text around the bodies with its comments made spaces (uncommented), so a
+# `## Cause` comment after a body is no heading. A body starts on the line after the one (with its line continuations)
+# that holds its `<<WORD`, and ends at a line that is only WORD (tabs before it taken off for a `<<-`). A blank line goes
+# before the bodies and in place of each end word, so a body starts and ends a paragraph. The text after the bodies is
+# read again from its start, as Bash reads it.
+heredocs() {
+  local s=$1 o='' u at ops op w line
+  while [ -n "$s" ]; do
+    u=$(uncommented "$s") at='' ops=''
+    # at: where the first line that holds a `<<WORD` outside quotes ends (its newline); ops: the words of its `<<WORD`s,
+    # with a `-` before each one of a `<<-`. A run of `<` is counted across line continuations: three are a here-string.
+    read -r at ops < <(U=$u Q=$(unquoted "$u") awk 'BEGIN {
+      q = ENVIRON["Q"]; u = ENVIRON["U"]; n = length(q)
+      for (i = 1; i <= n; i++) {
+        ch = substr(q, i, 1)
+        if (ch == "\\") { i++; continue }
+        if (ch == "\n") { if (ops != "") { print i, ops; exit } continue }
+        if (ch != "<") continue
+        for (k = 0; i <= n; )
+          if (substr(q, i, 1) == "<") { k++; i++ } else if (substr(q, i, 2) == "\\\n") i += 2; else break
+        d = ""; if (substr(q, i, 1) == "-") { d = "-"; i++ }
+        while (substr(q, i, 1) ~ /[ \t]/) i++
+        if (k == 2 && match(substr(u, i), /^["\047]?[A-Za-z_][A-Za-z_0-9]*/)) {
+          w = substr(u, i, RLENGTH); gsub(/["\047]/, "", w); ops = ops " " d w; i += RLENGTH }
+        i-- } }')
+    if [ -z "$at" ]; then o+=$u; break; fi
+    o+=${u:0:at}$'\n'; s=${s:at}
+    for op in $ops; do
+      w=${op#-}
+      while [ -n "$s" ]; do
+        line=${s%%$'\n'*}
+        if [[ $s == *$'\n'* ]]; then s=${s#*$'\n'}; else s=''; fi
+        if [ "$op" != "$w" ]; then while [[ $line == $'\t'* ]]; do line=${line:1}; done; fi
+        if [ "$line" = "$w" ]; then o+=$'\n'; break; fi
+        o+=$line$'\n'
+      done
+    done
+  done
+  printf '%s' "$o"
+}
 no_cause() {
   local cmd f t ti=0 fc=
   cmd=$(jq -r '.tool_input.command // ""' <<<"$1" 2>/dev/null) || return 1
@@ -204,11 +245,14 @@ no_cause() {
   # `\\n` is a backslash and an n. The quote that opens the body is the one that closes it.
   # u: the command with its shell comments made spaces (uncommented), so a quote, a `<<WORD` or a heading in a comment
   # is read as none. An inline body is found and read in u; a here-document body is read from cmd, as a `#` line in it
-  # is Markdown, not a comment. The `<<WORD` is looked for outside quotes (unquoted): one in a quote is text. A `<<<` is
-  # a here-string, no here-document: its last two `<` start none.
-  local u
+  # is Markdown, not a comment, and the text around it from u (heredocs). The `<<WORD` is looked for outside quotes (unquoted): one in a quote is text. A `<<<` is
+  # a here-string, no here-document: its last two `<` start none. uq: the unquoted text with its line continuations
+  # taken out after the quotes are made x (one in a quote is text), as Bash joins `<\` at a line end and a next-line
+  # `<<` into one `<<<`.
+  local u uq
   u=$(uncommented "$cmd")
-  if [[ $(unquoted "$u") =~ $hd ]]; then hc=$(unfenced 0 "" "$cmd")
+  uq=$(unquoted "$u"); uq=${uq//$'\\\n'/}
+  if [[ $uq =~ $hd ]]; then hc=$(unfenced 0 "" "$(heredocs "$cmd")")
   else
     # `ask <project> testissue <test file> <title> <body>` has no --body (a `--body` in its text is text): its body is
     # the word after the title. A word is parts with no unquoted space: $'...', '...', "...", a \-escaped character

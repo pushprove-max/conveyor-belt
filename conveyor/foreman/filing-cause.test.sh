@@ -224,6 +224,16 @@ refused $'echo \'Use <<EOF\' # example\ngh issue create --label bug --title Exam
 # Bug (#1623 review E3): the last two `<` of a `<<<` here-string, before a quote made x, were read as a here-document,
 # where a quote opens no fence, so the fenced `## Cause` counted. A `<<<` is no here-document.
 refused $'gh issue create --label bug --title Example --body-file - <<< \'~~~\n## Cause\n~~~\'\n# example'
+# Bug (#1623 review, follow-up): a line continuation splitting `<<<` (`<\` at a line end, `<<` on the next line) left
+# the last two `<` read as a here-document; Bash removes the continuation and reads one `<<<` here-string.
+refused $'gh issue create --label bug --title Example --body-file - <\\\n<< \'~~~\n## Cause\n~~~\'\n# example'
+# Bug (#1623 review, follow-up E1): a command with a here-document was read whole as written, so a `## Cause` shell
+# comment after the body's end word counted as the body's Cause section; split (`<\` and `<EOF`) or not. Bash reads
+# only the lines up to the end word as the body.
+refused $'gh issue create --label bug --title Example --body-file - <\\\n<EOF\nThe form fails.\nEOF\n## Cause'
+refused $'gh issue create --label bug --title Example --body-file - <<EOF\nThe form fails.\nEOF\n## Cause'
+# The body of a split `<\` `<EOF` here-document is still read: its real Cause section lets the issue through.
+passes $'gh issue create --label bug --title Example --body-file - <\\\n<EOF\nThe form fails.\n## Cause\nx\nEOF'
 # Bug (#1623): a `#` after a line continuation starts a comment as bash reads it (the continuation is no character).
 refused $'echo a \\\n# "\ngh issue create --label bug --title Example --body \'~~~\n~~~"\n## Cause\n~~~\''
 # A comment ends at its line end: the body after it is read, and its real Cause section lets the issue through.
