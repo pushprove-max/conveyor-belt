@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, test } from 'claude-code/testing'
 import { TWO_PROJECTS } from './fixtures/units-two-projects'
-import { activityModel, ageNotes, boardOf, boardOfFeed, fastText, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, STEP_NAMES, tableText, toasts } from './sources'
+import { activityModel, ageNotes, boardOf, boardOfFeed, fastText, OLD_MAP_FETCH, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, STEP_NAMES, tableText, toasts } from './sources'
 import type { Fast, Research, State } from './sources'
 import { clockOf, cols, plain } from './elements'
 
@@ -978,9 +978,9 @@ test('a live feed\'s snapshot 90 s old adds no age note; with the stream down, o
 // path. Bugs it catches: with the Board on another build machine, /units showed that machine's map for this session's
 // project, its record matched by path or host name alone; a feed of the same ssh target under another host name, or
 // of a session that reads its map here, was judged by the host name; a feed of an older Board, with no ssh target,
-// was taken as a match; and a fetch of an older engine, which prints no maphost line and matched the record by path
-// alone, had its feed's map taken from a feed over ssh, so a Board at owner@oven showed oven's map to a session at lab,
-// yet must keep it from a feed of one machine, the session's own, or /units shows no map.
+// was taken as a match; and a fetch of an older engine (a pinned plugin.commit), which prints no maphost line and
+// matched the record by path alone, had its feed's map taken from a feed over ssh, so a Board at owner@oven showed
+// oven's map to a session at lab, yet must keep it from a feed of one machine, the session's own, or /units shows no map.
 test('the feed\'s test map is taken only from a feed of the machine the maphost line names', () => {
   const json = JSON.parse(snapshot({ testMap: { state: 'made', sources: 3, tests: 1, age: 0 } }))
   const feed = (host: string, local: boolean, ssh: string) => ({ host, local, ssh, records: [{ repo: 'bakery', main: '/srv/bakery', json }], live: true, heardAt: NOW, error: '' })
@@ -1002,7 +1002,13 @@ test('the feed\'s test map is taken only from a feed of the machine the maphost 
     const b = boardOfFeed(f, '', '/srv/bakery', mh)
     if (has) expect(b.testMap, what).toMatchObject({ state: 'made', sources: 3 })
     else expect(b, what).not.toHaveProperty('testMap')
+    // Bug it catches: with an older fetch the map went missing with no word of why or of the fix.
+    expect(b.notes.includes(OLD_MAP_FETCH), what).toBe(mh === null)
   }
+  // The older fetch read the map itself when the snapshot has none: no note then.
+  const bare = JSON.parse(snapshot({}))
+  const noMap = boardOfFeed({ ...feed('oven', false, 'owner@oven'), records: [{ repo: 'bakery', main: '/srv/bakery', json: bare }] }, '', '/srv/bakery', null)
+  expect(noMap.notes, 'feed snapshot with no testMap, no maphost line').not.toContain(OLD_MAP_FETCH)
 })
 
 // Bug it catches: the pane drew a fetch's failure note and a record's not-read note at their full width, so in a

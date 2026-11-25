@@ -409,18 +409,22 @@ export const parseStream = (text: string): Feed | null => {
 // repo name alone can name another checkout's record there), which is not own on a build machine, in a feed of the
 // machine the fetch's maphost line names (mapHost): a feed at that ssh target, or, with none, a feed of one machine
 // (local), as another build machine can keep a checkout at the same path. Host names are not compared: one machine can
-// have two. A fetch of an older engine prints no maphost line (mapHost null): it matched the feed's record by path
-// alone and names no machine, so its feed's map is taken only from a feed of one machine (local), the session's own,
-// where a record at that path is this checkout; from a feed over ssh it is not taken, as that Board can be on another
-// build machine with a checkout at the same path. With no such record, a feed of another machine, or a feed whose
-// stream is down (its snapshot is old), the board has no testMap: the fetch's testmap line gives the map then, feed or
-// not.
+// have two. A fetch of an older engine (fetchPath in units.tsx runs the project's engine) prints no maphost line
+// (mapHost null): it matched the feed's record by path alone and names no machine, so its feed's map is taken only from
+// a feed of one machine (local), the session's own, where a record at that path is this checkout; from a feed over ssh
+// it is not taken, as that Board can be on another build machine with a checkout at the same path, and a note says to
+// pin a newer engine. With no such record, a feed of another machine, or a feed whose stream is down (its snapshot is
+// old), the board has no testMap: the fetch's testmap line gives the map then, feed or not.
 const sameMachine = (f: Feed, ssh: string | null) => (ssh ? f.ssh === ssh : f.local)
+export const OLD_MAP_FETCH = "units: the test map is not shown: this project's engine is too old to say which machine the map is on; move plugin.commit in .conveyor/project.json to a newer engine"
 export const boardOfFeed = (f: Feed, own: string, mapRec: string, mapHost: string | null): Pick<State, 'snap' | 'note' | 'notes' | 'host'> & Partial<Pick<State, 'testMap'>> => {
   const b = boardFrom(f.host, f.records, own, f.live)
   if (!f.live) b.notes.unshift(`units: the live stream is down${f.error ? ` (${f.error})` : ''}; the board is as ${f.host || 'the host'} was ${f.heardAt ? `at ${clockOf(f.heardAt)}` : 'last heard'}`)
-  const r = mapRec && f.live && sameMachine(f, mapHost) ? f.records.find(x => x.main === mapRec) : undefined
-  if (!r) return b
+  const r = mapRec && f.live ? f.records.find(x => x.main === mapRec) : undefined
+  // The older fetch read no map when the snapshot's testMap is an object (its skip test).
+  const tm = (r?.json as any)?.testMap
+  if (r && mapHost === null && tm && typeof tm === 'object') b.notes.push(OLD_MAP_FETCH)
+  if (!r || !sameMachine(f, mapHost)) return b
   return { ...b, testMap: testMapFrom((r.json as any)?.testMap) }
 }
 
