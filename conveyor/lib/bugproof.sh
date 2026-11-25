@@ -441,7 +441,7 @@ redproof() { # <card> <worktree>
     { printf '%s\n' "${out^}."
       echo 'This card fixes a red main, so its proof is the cases main fails, each run alone on main'"'"'s code without the change and then with it; it need not add a test.'
       if [ -n "$kf" ]; then echo 'The end of that run'"'"'s output:'; echo '```'; tail -n 40 "$kf"; echo '```'
-      else echo 'The end of the last run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; fi; } > "$2.unfixed"
+      else echo 'The end of the judged run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; fi; } > "$2.unfixed"
   elif kf=$(redkeep "$1" <(printf '%s\n' "$out") setup); then
     { printf 'The cases main fails could not be run on main'"'"'s code at %s: its worktree could not be made. The whole output of making it is kept in %s.\n' "${sha:-a commit that could not be read}" "$kf"
       echo 'The end of that output:'; echo '```'; tail -n 40 "$kf"; echo '```'; } > "$2.unfixed"
