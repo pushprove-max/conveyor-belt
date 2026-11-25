@@ -143,10 +143,10 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
 # results it took, null when nothing ran) and m ({sha, sec, exit}, null when nothing ran; sec: the seconds the
 # caller's own run took, 0 when it took every result from the kept ones). The caller's TEST_WAIT, TEST_RUN and
 # TEST_FREE are kept (testrec()). The output of a run that failed or ran out of time is kept in the state folder
-# (probeout()) before the worktree goes.
+# (probeout()) before the worktree goes; a failure taken from the kept ones holds it there, or runs again with none.
 MAINPROBE=${STATE%/*}/mainprobe.json
 mainprobe() { # <name> <units, json> <units no control is taken from, json> <other files, json> <a commit with the units' files>
-  local mwt=$CARDS/mainrun/$1 out='' rc='' s=0 lim k l f lk=() o='' got='{}' ur gone=() p=${ctl:-[]} w=${TEST_WAIT-} r=${TEST_RUN-} fr=${TEST_FREE-} dk
+  local mwt=$CARDS/mainrun/$1 out='' rc='' s=0 lim k l f lk=() o='' got='{}' ur ua gone=() p=${ctl:-[]} w=${TEST_WAIT-} r=${TEST_RUN-} fr=${TEST_FREE-} dk
   local pick='$h[0] as $h | $u[0] as $u | $c[0] as $c | [$c | arrays[] | strings | select(($h == [] or IN($h[])) and (IN($u[].file) | not))] | unique'
   mf=null; m=null; hits='[]'; cf='[]'
   sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) \
@@ -162,11 +162,12 @@ mainprobe() { # <name> <units, json> <units no control is taken from, json> <oth
     { exec {l}>>"$MAINPROBE.locks/$k"; } 2>/dev/null || continue
     if flock "$l"; then lk+=("$l"); else exec {l}>&-; fi
   done < <(jq -r '[.[].file] | unique[]' <<<"$ur" | while IFS= read -r k; do printf '%s' "$k" | cksum; done | cut -d' ' -f1 | sort -un)
-  dk=$(depkey; printf 'engine %s\n' "$RAN")
+  dk=$(depkey; printf 'engine %s\n' "$RAN"); ua=$ur
   o=$(jq -ce --arg s "$sha" --arg d "$dk" 'objects | select(.sha == $s and .deps == $d)' "$MAINPROBE" 2>/dev/null) \
     && hits=$(jq -c '.hits' <<<"$o") && ctl=$(jq -cn --slurpfile h <(printf '%s' "$hits") --slurpfile u <(printf '%s' "$3") --slurpfile c <(printf '%s' "$p") "$pick") \
     && got=$(jq -c --slurpfile u <(printf '%s' "$ur") --slurpfile c <(printf '%s' "$ctl") '.files as $fs | [$u[0][].file | select($fs[.] and ($c[0] - $fs[.].ctl == []))] | unique | map({key: ., value: $fs[.].res}) | from_entries' <<<"$o") \
     && f=$(jq -c --slurpfile g <(printf '%s' "$got") '[.[] | select(.file | IN($g[0] | keys[]) | not)]' <<<"$ur") && ur=$f || { got='{}'; hits='[]'; }
+  ! jq -e 'any(.[]; . != null)' <<<"$got" >/dev/null 2>&1 || probeout "$sha" || { ur=$ua; got='{}'; hits='[]'; }
   if [ "$ur" = '[]' ]; then
     mf=$(jq -c '{files: [.[] | values]}' <<<"$got"); cf='[]'; rc=$(jq -r 'if any(.[]; . != null) then 1 else 0 end' <<<"$got")
     echo "conveyor: card $1: its failing cases ran on main at ${sha:0:12} already: their verdicts are that run's" >&2
@@ -225,17 +226,17 @@ mainkeep() { # <name> <units, json>
 # (mainkeep()), so the run is kept as <the run's name>.<n> (n: 1, 2 and so on, the first free). Each other commit's
 # kept output is removed here once main is not at that commit and its entry in the main-red record is not open
 # (redopen(): its fix card landed or closed), or, for a commit with no entry, once no entry in the record is open.
-# Output a caller still holds is never removed (review E6): the run's caller (verdicts(), mainwait()) holds it (a shared
-# lock on <commit's folder>/.hold, fd PROBEHOLD, taken here) until its entry is made (mainred()) and it lets go
-# (probelet()), so a run at a later commit cannot remove it first. One writer at a time (a lock of its own).
+# Output a caller holds is never removed (review E6): the run's caller (verdicts(), mainwait()), or, given no worktree, a
+# caller that took its failures from the kept results (mainprobe(); it fails with none kept), holds it (a shared lock on
+# <commit's folder>/.hold, fd PROBEHOLD) until its entry is made (mainred()) and it lets go (probelet()). One writer.
 MAINPROBEOUT=${STATE%/*}/mainprobe-out
 probeout() { # <main's commit> <worktree of the run>
-  local k d s c h now n=${2##*/} i=0 op=''
-  { exec {k}>>"$MAINPROBEOUT.lock"; } 2>/dev/null && flock "$k" || { echo "conveyor: the output of the run on main in ${2##*/} could not be kept" >&2; return 1; }
-  d=$MAINPROBEOUT/$1
-  while [ -e "$d/$n.test" ] || [ -e "$d/$n.testlog" ]; do i=$((i + 1)); n=${2##*/}.$i; done
-  mkdir -p "$d" && { [ ! -e "$2.test" ] || mv -f "$2.test" "$d/$n.test"; } && { [ ! -e "$2.testlog" ] || mv -f "$2.testlog" "$d/$n.testlog"; } \
-    || echo "conveyor: the output of the run on main in ${2##*/} could not be kept in $d" >&2
+  local k d s c h now w=${2-} n i=0 op=''
+  { exec {k}>>"$MAINPROBEOUT.lock"; } 2>/dev/null && flock "$k" || { echo "conveyor: the output of the run on main in ${w##*/} could not be kept" >&2; return 1; }
+  d=$MAINPROBEOUT/$1; n=${w##*/}; [ -n "$w" ] || { [ -d "$d" ] && probelet && { exec {PROBEHOLD}>>"$d/.hold"; } 2>/dev/null && flock -s "$PROBEHOLD" || { probelet; exec {k}>&-; return 1; }; exec {k}>&-; return 0; }
+  while [ -e "$d/$n.test" ] || [ -e "$d/$n.testlog" ]; do i=$((i + 1)); n=${w##*/}.$i; done
+  mkdir -p "$d" && { [ ! -e "$w.test" ] || mv -f "$w.test" "$d/$n.test"; } && { [ ! -e "$w.testlog" ] || mv -f "$w.testlog" "$d/$n.testlog"; } \
+    || echo "conveyor: the output of the run on main in ${w##*/} could not be kept in $d" >&2
   probelet; { exec {PROBEHOLD}>>"$d/.hold"; } 2>/dev/null && { flock -s "$PROBEHOLD" || probelet; } || PROBEHOLD=''
   now=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) || now=''
   for d in "$MAINPROBEOUT"/*/; do

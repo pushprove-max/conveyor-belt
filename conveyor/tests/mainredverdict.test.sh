@@ -76,6 +76,31 @@ t_mainredprobehold() {
     || fail "probeout c9 at a later commit, run as verdicts c7 at $s was about to make its entry: c7's kept output at $s was removed: $(cat "$STUB/held" 2>&1); now: $(ls -R "$ST/mainprobe-out" 2>&1 | head -n 20)"
 }
 
+# Review E6, follow-up of issue 1688. Bug it catches: a first run on main at s fails c.test: two and makes no entry
+# (here mainred() does nothing), so it lets go of its output. A later card that fails c.test takes that failure from
+# the kept results (mainprobe.json) and held nothing: before it made s's entry, main moved on and another card's failed
+# run (probeout() of c9) removed s's output, so the entry opened with none. The later card must hold that output, and
+# run again when it is gone already. Review E1: probeout() given no worktree read $2 under set -u, so the cached
+# failure stopped verdicts() (eng() runs the engine with conveyor.sh's set -u) before it made any verdict.
+t_mainredprobeholdkept() {
+  redrunner ''
+  local w=$T/$CASE/cards/c7 out s
+  echo 't_two() { false; }' > "$R/c.test" && git -C "$R" add c.test && git -C "$R" commit -qm c.test \
+    && git -C "$R" worktree add -q --detach "$w" && s=$(git -C "$R" rev-parse HEAD) || fail "the card's worktree could not be made"
+  out=$(eng 'eval "made$(declare -f mainred)"; mainred() { :; }
+    TEST_WAIT=; TEST_RUN=; TEST_FREE=; l='"'"'{"files":[{"file":"c.test","cases":[{"name":"two","line":1}]}]}'"'"'
+    verdicts c7 "$CONVEYOR_CARDS/c7" "$l" >/dev/null && [ -s "$MAINPROBE" ] && rm -rf "$MAINPROBEOUT/'"$s"'" \
+      && verdicts c7 "$CONVEYOR_CARDS/c7" "$l" >/dev/null && ls "$MAINPROBEOUT/'"$s"'" > "$STUB/again" 2>&1
+    mainred() {
+      git commit -q --allow-empty -m later && echo x > "$CONVEYOR_CARDS/c9.test" && (probeout "$(git rev-parse HEAD)" "$CONVEYOR_CARDS/c9") \
+        && ls "$MAINPROBEOUT/'"$s"'" > "$STUB/held" 2>&1; mademainred "$@"; }
+    verdicts c7 "$CONVEYOR_CARDS/c7" "$l" | jq -c .verdicts') || fail "verdicts failed: $out"
+  [ "$(tr '\n' ' ' < "$STUB/again")" = 'c7.test c7.testlog ' ] \
+    || fail "verdicts c7 at $s took c.test: two from the kept results after their output at $s was removed: it did not run again to keep output: $(cat "$STUB/again" 2>&1)"
+  [ "$out" = '[{"case":"c.test: two","verdict":"main"}]' ] && [ "$(tr '\n' ' ' < "$STUB/held")" = 'c7.test c7.testlog ' ] \
+    || fail "probeout c9 at a later commit, run as verdicts c7 (its failure taken from the kept results at $s) was about to make its entry: the kept output at $s was removed: $out: $(cat "$STUB/held" 2>&1)"
+}
+
 # Review E4 (issue 1688). Bug it catches: main's run at commit b2 failed a case that the open entry of commit a1 holds,
 # so mainred() made no entry for b2; once main moved on, the next failed run (at c3) removed b2's output while the
 # fix of a1 was still open. probeout() at c3 keeps a1's and b2's output while fixa is open, and removes both once it
