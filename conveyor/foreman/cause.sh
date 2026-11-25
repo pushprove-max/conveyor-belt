@@ -74,7 +74,7 @@ unfenced() {
       if (c ~ /^[`~]/) return c
       if (inline == 1)
         for (i = 1; i < length(line); i++)
-          if (isq(substr(line, i, 1)) && (i == 1 || substr(line, i - 1, 1) ~ /[ \t$]/) && (c = item(substr(line, i + 1), 0)) ~ /^[`~]/) {
+          if (isq(substr(line, i, 1)) && (i == 1 || substr(line, i - 1, 1) ~ /[ \t$<]/) &&(c = item(substr(line, i + 1), 0)) ~ /^[`~]/) {
             fq = substr(line, i, 1); return c }
       W = w; W1 = w1; I1 = i1; return "" }
     # qend: where the first quote <cq> with no backslash before it is in <s>, or 0 when none is
@@ -272,7 +272,9 @@ no_cause() {
     # one body's quote is never used to read another's fences. at: where that word starts in u, as rest has no line
     # continuations (each is two characters fewer in rest).
     rest=${u//$'\\\n'/}
-    while [[ $rest =~ ${pre}(${ask}|(--body|-b)[[:space:]=]+)\$?([\'\"]) ]]; do
+    # A `<<<` here-string opens a body too, as it is the stdin of `--body-file -`: its quote is the one that closes it.
+    # Bash needs no space before `<<<` (`-<<<'...'`), so a word may touch it.
+    while [[ $rest =~ ${pre}(${ask}|(--body|-b)[[:space:]=]+|${w}?<<<[[:space:]]*)\$?([\'\"]) ]]; do
       n=${#BASH_REMATCH[1]}; qs=("${BASH_REMATCH[-1]}" "${qs[@]}"); rest=${rest:0:n}
       at=$n; r=${u:0:at}; r=${r//$'\\\n'/}
       while [ "${#r}" -lt "$n" ]; do at=$((at + n - ${#r})); r=${u:0:at}; r=${r//$'\\\n'/}; done

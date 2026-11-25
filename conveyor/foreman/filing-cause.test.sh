@@ -227,6 +227,14 @@ refused $'gh issue create --label bug --title Example --body-file - <<< \'~~~\n#
 # Bug (#1623 review, follow-up): a line continuation splitting `<<<` (`<\` at a line end, `<<` on the next line) left
 # the last two `<` read as a here-document; Bash removes the continuation and reads one `<<<` here-string.
 refused $'gh issue create --label bug --title Example --body-file - <\\\n<< \'~~~\n## Cause\n~~~\'\n# example'
+# Bug (#1623 review, follow-up): a `<<<` here-string set no body quote, so `~~~"` (text in the `'...'` here-string)
+# closed the fence and the fenced `## Cause` counted; the same with `~~~'` in a `"..."` here-string.
+refused $'gh issue create --label bug --title Example --body-file - <<< \'~~~\n~~~"\n## Cause\n~~~\'\n# example'
+refused $'gh issue create --label bug --title Example --body-file - <<< "~~~\n~~~\'\n## Cause\n~~~"'
+# Bug (follow-up review E1): Bash reads the same here-string with no space around `<<<`, but a word touching `<<<` hid
+# its body quote, and a quote touching `<<<` was no place a fence may follow, so the fenced `## Cause` counted.
+refused $'gh issue create --label bug --title Example --body-file -<<< \'~~~\n~~~"\n## Cause\n~~~\'\n# example'
+refused $'gh issue create --label bug --title Example --body-file - <<<\'~~~\n## Cause\n~~~\'\n# example'
 # Bug (#1623 review, follow-up E1): a command with a here-document was read whole as written, so a `## Cause` shell
 # comment after the body's end word counted as the body's Cause section; split (`<\` and `<EOF`) or not. Bash reads
 # only the lines up to the end word as the body.
