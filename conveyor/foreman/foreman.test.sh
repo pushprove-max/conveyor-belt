@@ -412,8 +412,9 @@ rm -f "$FD"/pending/*.wake
 bash "$SRC/watch-conveyor.sh" --once && fail "a held pipeline change already reported woke again: $(cat "$FD"/pending/*.wake)"
 # D2: a kind added to the list of Needs you kinds the Board reads (.claude/scripts/dashboard_needs.json) wakes under
 # its kind, with no change to the watcher: here the watcher runs from a copy of the plugin whose list has one more kind.
-mkdir -p "$T/c/conveyor/foreman" "$T/c/conveyor/lib" "$T/c/.claude/scripts"
-ln -s "$SRC"/*.sh "$T/c/conveyor/foreman/"; ln -s "$SRC/../lib/portable.sh" "$T/c/conveyor/lib/"
+# The copy links the whole engine lib folder, as foreman/lib.sh sources more of it than portable.sh (standing.sh).
+mkdir -p "$T/c/conveyor/foreman" "$T/c/.claude/scripts"
+ln -s "$SRC"/*.sh "$T/c/conveyor/foreman/"; ln -s "$SRC/../lib" "$T/c/conveyor/lib"
 jq '. + [{kind: "newKind", from: ["needsYou", "newKind"], title: "A new kind"}]' "$SRC/../../.claude/scripts/dashboard_needs.json" > "$T/c/.claude/scripts/dashboard_needs.json"
 jq -c '.needsYou.newKind = [{issue: 40, title: "a new kind of wait"}]' "$T/ask/alpha" > "$T/a" && mv "$T/a" "$T/ask/alpha"
 bash "$SRC/watch-conveyor.sh" --once && fail "a kind not in the list woke: $(cat "$FD"/pending/*.wake)"
