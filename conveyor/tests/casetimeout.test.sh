@@ -65,7 +65,9 @@ t_keep_one() {
 # t_keep_one, which passes, as the runner runs a case, with a limit of 1 s. Its keeper's end runs the real case_end,
 # notes whether the keeper's guard still runs after it ($T/guard.live), and then waits on a subshell of the keeper's
 # own that ignores TERM and never ends (it waits on a FIFO, where the one seen spun: KILL alone ends either; its pid in
-# $T/hold.pid). The worker that ran run_case wrote its pid (worker.pid) and, ended, its exit status (worker.rc).
+# $T/hold.pid). The worker that ran run_case wrote its pid (worker.pid) and, ended, its exit status (worker.rc). The
+# keeper's end, which starts just after the keeper's guard, and the worker's end note the clock in microseconds
+# (end.from, worker.end): keepdeadline reads the two.
 keepstuck() {
   local d=$1
   mkdir -p "$d/in" && mkfifo "$d/in/hold" || fail "the fixture could not be made"
@@ -73,22 +75,35 @@ keepstuck() {
   ( ( T=$d/in; CASE=keep_one; CASE_LOAD=1; declare -gA CASE_LIMITS=([keep_one]=1); echo "$BASHPID" > "$T/worker.pid"
       # shellcheck source=/dev/null # the real case_end (lib.sh), named case_end_real
       source <(declare -f case_end | sed '1s/^case_end /case_end_real /')
-      case_end() { case_end_real "$@"; ps -o stat= -p "${guard:-0}" | grep -qv '^Z' && : > "$T/guard.live"
+      case_end() { echo "${EPOCHREALTIME/[.,]/}" > "$T/end.from"; case_end_real "$@"; ps -o stat= -p "${guard:-0}" | grep -qv '^Z' && : > "$T/guard.live"
         : "$(trap '' TERM; echo "$BASHPID" > "$T/hold.pid"; read -r <> "$T/hold")"; }
-      run_case ) > "$d/report" 2>&1; echo $? > "$d/in/worker.rc" ) &
+      run_case ) > "$d/report" 2>&1; r=$?; echo "${EPOCHREALTIME/[.,]/}" > "$d/in/worker.end"; echo $r > "$d/in/worker.rc" ) &
+}
+# keepdeadline <dir>: fails unless keepstuck's worker ended at the keeper's deadline, its 1 s limit and 3 s grace from
+# the keeper's end: not before 3.8 s (the guard's sleep starts just before that end is noted), and within 4 s and
+# 900 ms times the load factor for the kills (a few ps and kill calls). A guard that slept 5 s, while its notice still
+# named 4 s, ends the worker past 4.9 s at load factor 1, so it fails here; the notice is checked apart.
+keepdeadline() {
+  local from to ms lim
+  from=$(cat "$1/in/end.from" 2>/dev/null) && to=$(cat "$1/in/worker.end" 2>/dev/null) && [ -n "$from" ] && [ -n "$to" ] \
+    || fail "the keeper's end or the worker's end noted no time: $(cat "$1/report")"
+  ms=$(((to - from) / 1000)); lim=$(awk -v f="$CASE_LOAD" 'BEGIN { print int(4000 + 900 * f) }')
+  [ "$ms" -ge 3800 ] && [ "$ms" -lt "$lim" ] \
+    || fail "the worker ended $ms ms after the keeper's end, not at the keeper's 4 s deadline (from 3800 ms, under $lim ms: 4 s and 900 ms times the load factor $CASE_LOAD): $(cat "$1/report")"
 }
 
 # Bug it catches (#1671): a subshell of a case's keeper that did not end, and ignored TERM, held the run of a case
 # that had passed for 17 minutes. With the keeper held so (keepstuck), the case's run ends within its limit and the
-# 3 s grace (the ceiling below allows for a busy machine), the case still passes, its output names the keeper's end,
-# and the subshell is gone. Also: the keeper's real case_end left its guard running, not taking it for a process the
-# case left.
+# 3 s grace (keepdeadline; the wait's ceiling only keeps a run that never ends from holding this one), the case still
+# passes, its output names the keeper's end, and the subshell is gone. Also: the keeper's real case_end left its guard
+# running, not taking it for a process the case left.
 t_casekeepstuck() {
   local d=$T/$CASE r h
   keepstuck "$d"; r=$!
   WAIT_CEILING=$(loadlimit 15) wait_until '[ -s "$d/in/worker.rc" ]' || wait_end "$r"
   [ -e "$d/in/guard.live" ] || fail "the keeper's guard did not run after the keeper's real case_end, which ended it: $(cat "$d/report")"
   [ -s "$d/in/worker.rc" ] || fail "the run of a case whose keeper's subshell does not end did not go on: $(cat "$d/report")"
+  keepdeadline "$d"
   [ "$(cat "$d/in/keep_one.rc" 2>/dev/null)" = 0 ] && grep -qx 'ok keep_one' "$d/report" \
     || fail "the case that passed was not reported as passed: $(cat "$d/report")"
   grep -qxF "note [keep_one]: the case's keeper had not ended 4 s after the case ended (its time limit and 3 s); it and its subshells were killed" "$d/report" \
@@ -100,7 +115,7 @@ t_casekeepstuck() {
 # (run_case); the keeper's guard, in that group, ended on that TERM, so the runner waited for ever on a keeper whose
 # subshell ignores TERM. The worker that runs the case is told to end once that subshell holds the keeper
 # (keepstuck: its pid written, the guard started before it): the worker still ends as told (143), the guard having
-# killed the keeper and the subshell, and the case's output names the keeper's end.
+# killed the keeper and the subshell at its deadline (keepdeadline), and the case's output names the keeper's end.
 t_casekeepstop() {
   local d=$T/$CASE r h
   keepstuck "$d"; r=$!
@@ -109,6 +124,7 @@ t_casekeepstop() {
   WAIT_CEILING=$(loadlimit 15) wait_until '[ -s "$d/in/worker.rc" ]' \
     || { wait_end "$r"; fail "the runner told to end waited for the keeper whose subshell does not end: $(cat "$d/report" "$d/in/keep_one.out")"; }
   [ "$(cat "$d/in/worker.rc")" = 143 ] || fail "the worker told to end did not end as told (exit $(cat "$d/in/worker.rc")): $(cat "$d/report")"
+  keepdeadline "$d"
   grep -qxF "note [keep_one]: the case's keeper had not ended 4 s after the case ended (its time limit and 3 s); it and its subshells were killed" "$d/in/keep_one.out" \
     || fail "the case's output does not say the case's keeper was killed: $(cat "$d/in/keep_one.out")"
   ! ps -o stat= -p "$h" | grep -qv '^Z' || fail "the keeper's subshell that ignores TERM, pid $h, still runs: $(ps -o pid=,stat=,args= -p "$h")"
