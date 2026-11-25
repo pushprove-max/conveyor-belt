@@ -178,6 +178,9 @@
                   elif $l.step == "issue" then (if $l.result == "ok" then "issue closed" else "issue not closed" end)
                   elif $l.step == "filed" then "follow-ups filed" elif $l.step == "blocked" then "stopped"
                   elif $l.step == "grown" then (if $l.grown.after != null then "split for its size: \($l.grown.files) files, \($l.grown.after) after"
+                    # On, a split with no filed slices on its line (growcheck(), lib/slices.sh): the change was kept whole. Its slices
+                    # were not filed, or were filed and withdrawn (growclose()); why says which.
+                    elif $l.result == "split" and $l.grown.mode == "on" and $l.grown.filed == null then "kept whole: \($l.grown.files) files"
                     elif $l.result == "split" then "would split for its size: \($l.grown.files) files" else "kept at its size: \($l.grown.files) files" end)
                   else $l.step end),
                  state: (if ($l.step == "test" and $l.result == "fail") or ($l.step == "issue" and $l.result != "ok") or ($l.step == "review" and ($l.result | IN("fail", "stopped")))
@@ -194,7 +197,9 @@
                       or ($l.step == "review" and ($l.result | IN("fail", "stopped"))) or $l.step == "worktree" or $l.step == "lint" then $l.reason
                       # A test run that left linked test files out (testcap(), testrun.sh), or ran only the changed
                       # cases of its own test files (owncases(), testlist.sh): its list's note (rows.jq) says so.
-                      elif $l.step == "test" and $l.list != null then $l.list.why else null end),
+                      elif $l.step == "test" and $l.list != null then $l.list.why
+                      # A grown line of a split kept whole (On, no filed slices on its line): the judge's why and the reason it was kept whole.
+                      elif $l.step == "grown" and $l.result == "split" and $l.grown.mode == "on" and $l.grown.filed == null then $l.grown.why else null end),
                     # A GO review's findings too when the judge found one outside the card's change (an OUTSIDE line of its tail, rows.jq).
                     output: (if $l.step == "blocked" or ($l.step == "test" and $l.result != "pass") or ($l.step == "review" and $l.result == "NO-GO") then $l.tail
                       elif $l.step == "review" and ($l.tail // "" | test("(^|\n)(OUTSIDE|SELFHEALS): ")) then $l.tail else null end),

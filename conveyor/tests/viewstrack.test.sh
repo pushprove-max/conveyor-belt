@@ -249,3 +249,22 @@ EOF
     = '[["c61","resumed from the kept patch of card c60: one session, then review","resumed from the kept patch of card c60: one session, then review"],["c62",null,null]]' ] \
     || fail "the start line of a card resumed from a kept patch is not in its track: $(jq -c '[.landed[], .belt[]] | map(select(.card == "c61" or .card == "c62") | {card, kept: .track.kept, records: .track.records[0:3]})' <<<"$out")"
 }
+
+# The grown line of each split (growcheck(), lib/slices.sh), as the Board draws it: On with no filed slices on its line
+# (a failed read of slices, or slices filed and then withdrawn by growclose(), keeps the change whole), On filed (the
+# line before a block), and Shadow. Each card's lines go through the snapshot's rows (jq/rows.jq, logline()) before the
+# track reads them. Bugs caught: a split kept whole On read "would split for its size", and the track left out its why;
+# its name said "no slice filed" when growclose() had filed slices and withdrawn them; and logline() kept only the files
+# of a grown line, so the track never saw its mode, filed or why.
+t_trackgrown() {
+  local out
+  jq -nc 'def g($c; $x): {card: $c, issue: 7, step: "picked", result: "ok", time: "2026-11-01T00:00:00Z"},
+      {card: $c, issue: 7, step: "grown", result: "split", time: "2026-11-01T00:00:09Z", grown: ({files: 5, why: "apart; no slice is filed, so the change is kept whole: the open follow-ups of #7 could not be read"} + $x)};
+    g("c1"; {mode: "on"}), g("c2"; {mode: "on", why: "apart; the slices could not be filed, so the change is kept whole: #9, a slice that an earlier card filed for #7, could not be closed, so the slices filed in its place are withdrawn"}),
+    g("c3"; {mode: "on", filed: [100101]}), g("c4"; {mode: "shadow"})' > "$T/$CASE/rec" || fail "the fixture could not be written"
+  out=$(jq -cs --argjson max 3 --arg nodeps "" --arg yes "" --arg lintyes "" --arg shut "" --arg ownshut "" --arg engshut "" -f "$SRC/jq/rows.jq" "$T/$CASE/rec" \
+    | jq -c "$(<"$SRC/jq/track.jq")"' sort_by(.card)[] | track(null; null) | .records[] | select(.name | test("split|kept")) | [.name, .why]') \
+    || fail "the track of a grown line could not be drawn: $out"
+  [ "$out" = $'["kept whole: 5 files","apart; no slice is filed, so the change is kept whole: the open follow-ups of #7 could not be read"]\n["kept whole: 5 files","apart; the slices could not be filed, so the change is kept whole: #9, a slice that an earlier card filed for #7, could not be closed, so the slices filed in its place are withdrawn"]\n["would split for its size: 5 files",null]\n["would split for its size: 5 files",null]' ] \
+    || fail "a grown line of a split kept whole (On, none filed, or filed and withdrawn) is not named so with its why, or another split's line changed (On filed, Shadow): $out"
+}

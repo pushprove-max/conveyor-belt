@@ -117,8 +117,9 @@ def logline($i; $pt): {step, of, result, time, counts, created, sec: (if .step =
                # The review line that ended the fix loop, and the filed line: why it ended (stop), with this card's own reviews
                # (the record's pass, given as own) and rounds then (card.sh loopstop()).
                loopEnd: (if (.step == "review" or .step == "filed") and (.stop | type) == "string" then {stop, own: .pass, rounds} else null end),
-               # A grown line (growcheck(), lib/slices.sh): the files of the change before, and after the split (On).
-               grown: (if .step == "grown" then {files: .grown.files, after: (.grown.after // null)} else null end),
+               # A grown line (growcheck(), lib/slices.sh): the files of the change before, and after the split (On); its rule
+               # (mode), the slices filed and the judge's why: the track names an On split with none filed "kept whole", with its why.
+               grown: (if .step == "grown" then {files: .grown.files, after: (.grown.after // null), mode: .grown.mode, filed: .grown.filed, why: .grown.why} else null end),
                took: (if $i == 0 then null else (.time | fromdate) - ($pt | fromdate) end)} | with_entries(select(.value != null));
 # A review record of a line written before BOTHTRIES kept what a failed first try counted: that try's usage was only in
 # firstTry.spent when it ran on another model or the retry read none. It is taken from there as BOTHTRIES now keeps it
