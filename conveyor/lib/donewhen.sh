@@ -434,6 +434,16 @@ roundno() { # <worktree> <pass + rounds>
   done
   echo "$r"
 }
+# The findings of the entries an earlier review of <card> wrote to the self-heals list or the docs list (from: review)
+# whose file:line the last fix round's diff in <worktree>.rounds removed or replaced (moveto()), as a JSON array: none
+# when no fix round has run, and never one with no file:line or one whose line that fix kept.
+fixedheals() { # <card> <worktree>
+  local r; r=$(($(roundno "$2" 1) - 1)); [ -f "$2.rounds/$r.diff" ] || { echo '[]'; return 0; }
+  { cat "$SELFHEALS" "$DOCSDRIFT" 2>/dev/null || :; } | jq -Rcs --arg c "$1" --rawfile d "$2.rounds/$r.diff" --rawfile ls <(git -C "$2" ls-files) "$MOVEJQ"'
+    ($d | files) as $fs | ($ls | split("\n") | map(select(. != ""))) as $l
+    | [split("\n")[] | fromjson? | objects | select(.card == $c and .from == "review") | .finding
+      | select([scan("[A-Za-z0-9_./-]+:[0-9]+")] | first // "" | capture("^(?<p>.*):(?<n>[0-9]+)$")? | moveto($fs; $l; .p; (.n | tonumber)) == null)]'
+}
 # The review beside the worktree as its fix session is told it (FIX): every line but the DECLINED, MINOR, OUTSIDE, SELFHEALS and ROLLOUT
 # ones (a rollout action is no defect, rollouts()), each finding led by its id (<numbered() lines>).
 fixlines() { # <worktree> <numbered() lines>

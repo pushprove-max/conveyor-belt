@@ -658,11 +658,11 @@ HEALSEVERY='if .every and any(.d[]; .accept and (.heals | not)) then .d |= map(i
 # list leaves the list, so it is never on two lists, or both on one and fixed or filed. An entry a batch card holds
 # stays; one that was taken back from the dropped record goes back to it. Fails when a list cannot be written again.
 healsunput() { # <card> <the decisions file> [all]
-  local gone f
+  local gone f d; d=$(cat "$2") || return 1 # read once, for both lists: a pipe (healsnone()) gives nothing to a second read
   for f in "$SELFHEALS" "$DOCSDRIFT"; do
     grep -qF "\"card\":$(jq -cn --arg c "$1" '$c')," "$f" 2>/dev/null || continue
     gone=$(jq -c --arg all "${3:-}" --arg docs "$([ "$f" = "$DOCSDRIFT" ] && echo 1)" "$HEALSONE"'[.d[]
-      | select($all != "" or (.heals | not) or ((.effect == "docs drift") != ($docs != ""))) | .finding | one]' "$2" 2>/dev/null) || return 1
+      | select($all != "" or (.heals | not) or ((.effect == "docs drift") != ($docs != ""))) | .finding | one]' 2>/dev/null <<<"$d") && [ -n "$gone" ] || return 1
     [ "$gone" != '[]' ] || continue
     ( flock 9 || exit 1
       # An entry a review took back from the dropped record (healsagain(), lib/healslist.sh) goes back to it as it
@@ -676,10 +676,10 @@ healsunput() { # <card> <the decisions file> [all]
 }
 # The review of <worktree> stands as the reviewer wrote it (no judge, or a judge that failed: judged()), so no earlier
 # round's ruling of its findings holds: each finding's kind leaves <worktree>.effects (with none, followups() files it
-# as harm) and its entry leaves the self-heals list (healsunput()). Fails when either cannot be written again.
+# as harm) and its entry leaves its list (healsunput()). A GO with no finding line, which can review the fix alone, takes off only the entries whose line that fix removed (fixedheals(), lib/donewhen.sh). Fails when either cannot be written again.
 healsnone() { # <card> <worktree>
-  local fs
-  fs=$(leftovers "$2.review" | jq -Rcs 'split("\n") | map(select(. != ""))') || return 1
+  local fs; fs=$(leftovers "$2.review" | jq -Rcs 'split("\n") | map(select(. != ""))') || return 1
+  [ "$fs" != '[]' ] || [ "$(verdict "$2.review")" != GO ] || fs=$(fixedheals "$1" "$2") || return 1
   [ "$fs" != '[]' ] || return 0
   [ ! -s "$2.effects" ] || { jq -c --argjson f "$fs" 'select(.finding | IN($f[]) | not)' "$2.effects" > "$2.effects.new" && mv -f "$2.effects.new" "$2.effects"; } || return 1
   healsunput "$1" <(jq -cn --argjson f "$fs" '{d: ($f | map({finding: .}))}') all

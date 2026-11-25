@@ -169,7 +169,7 @@ fudepth() {
 }
 # shellcheck disable=SC2034 # read by card() (lib/card.sh)
 FUCAP="its issue is a follow-up at the depth cap of $MAX_DEPTH, so no deeper follow-up is filed" # the reason of a finding put on the self-heals list at the cap (capheals())
-leftovers() { grep -Ev "$NOTFINDING" "$1" 2>/dev/null | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk '!seen[$0]++'; } # <review file>: its finding lines, each once
+leftovers() { { grep -Ev "$NOTFINDING" "$1" 2>/dev/null || [ $? = 1 ]; } | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk '!seen[$0]++'; } # <review file>: its finding lines, each once; none (a GO) is no failure, a file not read is
 # <review file>: the findings followups() files, in its order: the review's finding lines (leftovers()), then the
 # findings of <worktree>.outside that are not among them, each once; none the judge last sorted as a kind kept off the
 # belt (healsleft()), which go to their list instead.

@@ -258,3 +258,48 @@ t_kindslock() {
   [ "$rc" = 0 ] && [ "$(kdocs .batched)" = "$(jq -r '.cards[0].id' "$ST/testactions/cards.json" 2>&1)" ] \
     || fail "heals docs with no GitHub issue did not file the docs sweep card for its entry once the list was free: $(cat "$T/$CASE/docs.out") $(cat "$ST/docsdrift.jsonl")"
 }
+
+# Bug (issue 1686): a branch landing (issue 0) whose NO-GO review the judge ruled, then whose review after the fix
+# round is a GO with no finding line, printed "cannot take the kinds an earlier judge gave the findings ... away":
+# healsnone() read the GO review's findings with leftovers(), whose grep matched no line and so failed the pipe under
+# pipefail. On a follow-up branch the judge sends the first review's cleanup finding to the self-heals list and its
+# docs drift finding to the docs list; after the GO, an entry whose line the fix round replaced must leave its list
+# (healsnone() left both), and one whose line the fix did not touch must stay: a review of the fix alone says nothing
+# of it. healsunput() read its decisions twice, so with entries on both lists the second read of the pipe was empty,
+# the docs entry stayed and the line was printed.
+# The first review of card c0, judged, then fix round 1 (the diff card() writes, from <fix>, a command run in the
+# worktree), then a GO with no finding line, judged; prints nothing and fails the case when the GO does not stand as a
+# GO or judged() prints the line.
+kgoafterfix() { # <fix>
+  local wt=$T/$CASE/cards/c0 old is review='USER-VISIBLE: no / VERDICT: GO'
+  judging '[]'
+  is=$(hissue 0 "a branch landing" "$(fubody "$KHARM" | sed 's/Follow-up depth: 1/Follow-up depth: 2/')")
+  printf '%s\n' "$KHARM" "$KCLEAN" "$KDRIFT" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  printf '%s\n' 'F1 ACCEPT: harm: the first line is lost. Cost to every card: none' 'F2 ACCEPT: cleanup: the name changes nothing the code does. Cost to every card: none' \
+    'F3 ACCEPT: docs drift: the guide says less than the code does. Cost to every card: none' > "$STUB/judge.1"
+  JUDGEISSUE=$is judgeone 0 "$STUB/review" fix
+  [ "$(jf 0 .verdict)" = NO-GO ] && [ -n "$(heals 'select(.card == "c0" and .effect == "cleanup")')" ] && [ -n "$(kdocs 'select(.card == "c0")')" ] \
+    || fail "the first review of c0 (review: $KHARM / $KCLEAN / $KDRIFT; issue: Follow-up depth: 2) is not a NO-GO with its cleanup entry and its docs entry listed: $(jf 0 .) $(cat "$ST/selfheals.jsonl" "$ST/docsdrift.jsonl" 2>&1)"
+  old=$(git -C "$wt" write-tree) && (cd "$wt" && eval "$1") && git -C "$wt" add -A && mkdir -p "$wt.rounds" \
+    && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/1.diff" || fail "fix round 1 of c0 ($1) could not be made"
+  printf '%s\n' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review"
+  : > "$T/$CASE/judged.err"
+  JUDGEISSUE=$is JUDGEWRAP='exec 2>> "$T/$CASE/judged.err"' judgeone 0 "$STUB/review"
+  [ "$(jf 0 .verdict)" = GO ] && ! grep -qF 'cannot take the kinds' "$T/$CASE/judged.err" \
+    || fail "judged() on c0's GO review ($review) after fix round 1 ($1) did not stand as a GO, or printed: $(cat "$T/$CASE/judged.err")"
+}
+KHARM='[P0] a.txt:2 the change drops the first line. Proof: a.txt:2'
+KCLEAN='[P3] a.txt:2 the name tmp says nothing. Proof: a.txt:2'
+KDRIFT='[P3] a.txt:2 the guide omits the docs list. Proof: a.txt:2'
+# The fix replaces a.txt:2, the line all three findings cite: neither list keeps an entry of c0.
+t_kindsgoafterfix() {
+  kgoafterfix "printf 'one\nthree\n' > a.txt"
+  [ -z "$(heals 'select(.card == "c0")')$(kdocs 'select(.card == "c0")')" ] \
+    || fail "after fix round 1 replaced a.txt:2 and the GO review, a list still holds an entry of c0's earlier round: $(cat "$ST/selfheals.jsonl" "$ST/docsdrift.jsonl" 2>&1)"
+}
+# The fix changes only b.txt, so the cleanup and docs drift findings at a.txt:2 still stand: both entries stay.
+t_kindsgoafterotherfix() {
+  kgoafterfix 'echo b > b.txt'
+  [ "$(heals .finding)" = "$KCLEAN" ] && [ "$(kdocs .finding)" = "$KDRIFT" ] \
+    || fail "after fix round 1 changed only b.txt and the GO review, the entries of c0's findings at a.txt:2 left their lists: $(cat "$ST/selfheals.jsonl" "$ST/docsdrift.jsonl" 2>&1)"
+}
