@@ -9,11 +9,20 @@
     draw;
 
   // ---- the cards ----
+  // The hold a split puts on its umbrella when its slices are cards with no GitHub issue (sliceCards): the split's, not
+  // the owner's, so it names the slice cards not landed yet, a shut one as shut. null for any other issue.
+  function splitHold(x) {
+    const s = issues(x && x.sliceCards).filter((c) => c && typeof c.card === 'string');
+    if (!s.length) return null;
+    const w = s.filter((c) => c.state !== 'landed').map((c) => (c.state === 'shut' ? `${c.card} (shut)` : c.card));
+    // Each slice landed: the loop closes it at its next turn (umbrellas()).
+    return `Held as the umbrella of a split: ${w.length ? `waits for ${w.join(', ')}` : 'each slice landed; the loop closes it at its next turn'}`;
+  }
   function chipsOf(x) {
     // The four states an owner can change, each in one word everywhere: Held by you, Held by a label, Skipped by a rule
     // (a standing rule of Conveyor's own and one not picked for a reason named too), Waiting on #N.
     return issues(x.reasons).map((r) => ({
-      you: r.outside ? 'Opened by someone outside the project: release it to build it' : 'Held by you', label: `Held by a label: ${r.label}`, rule: `Skipped by a rule: ${r.rule}`, standing: `Skipped by a rule: ${r.rule || 'Conveyor\'s own'}`,
+      you: splitHold(x) || (r.outside ? 'Opened by someone outside the project: release it to build it' : 'Held by you'), label: `Held by a label: ${r.label}`, rule: `Skipped by a rule: ${r.rule}`, standing: `Skipped by a rule: ${r.rule || 'Conveyor\'s own'}`,
       waits: `Waiting on ${issues(r.waitsFor).map(S.ctx.depRef).join(', ')}`, card: r.step === 'blocked' ? 'Card blocked (Needs you)' : r.notPushed === true ? 'Landed, not pushed' : `Card ${r.step || 'open'}`,
       parent: 'Waits for its parent card to land', approve: 'Approve before build (Needs you)', other: 'Skipped by a rule',
     }[r.kind]));
@@ -22,7 +31,7 @@
     const h = S.ctx.h, acts = h('div', 'board-moves');
     const t = `#${item.issue}`;
     // An umbrella is never picked: a release would clear the hold and build nothing, so it has no Queue.
-    const mine = col === 'held' && kinds(item).includes('you') && !slicesOf(item).length;
+    const mine = col === 'held' && kinds(item).includes('you') && !slicesOf(item).length && !splitHold(item);
     if (mine) acts.append(button('Queue', 'btn-quiet', 'release', `Queue ${t}: release it from your hold`, () => release(item)));
     // A card that waits on another issue is not in the pick order: it can be held, not moved. One held only by that
     // wait is in Held and can still be held by you, so it is not picked once the issue it waits on closes.

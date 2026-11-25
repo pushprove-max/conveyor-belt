@@ -116,9 +116,10 @@
   }
   // The group of a held card: its first reason; a label is a group of its own.
   // Conveyor's own standing rules and an issue not picked for a reason named are skipped by a rule too: one group.
+  // The hold a split puts on its umbrella (split: true, lib/snapshot.sh) is no hold of yours: it goes with its closed card.
   function groupOf(x) {
     const r = issues(x.reasons)[0] || { kind: 'other' };
-    return r.kind === 'label' ? `label:${r.label}` : r.kind === 'standing' || r.kind === 'other' ? 'rule' : r.kind;
+    return r.kind === 'label' ? `label:${r.label}` : r.kind === 'standing' || r.kind === 'other' ? 'rule' : r.kind === 'you' && r.split ? 'card' : r.kind;
   }
   function groupTitle(key) {
     if (key.startsWith('label:')) return `Held by a label: ${key.slice(6)}`;

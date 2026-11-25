@@ -333,13 +333,17 @@ cardtree() {
   [ -n "$br" ] || [ -z "$err" ] || { block "$c" "$n" "$wt" "worktree: the new worktree already holds a staged change that is no kept work of this issue: $(paste -sd ' ' - <<<"$err" | cut -c 1-400)"; return; }
   go=''
 }
+# The issue a card is built and reviewed against, as gh prints it. A card of issue 0 (no GitHub issue): its local record stands in, a branch's (branchissue()), a main-red fix card's (redissue()) or a Tests page card's
+# (testcardissue(), lib/testaction.sh). None is split for its size (splitcheck() above); testpick() picks a Tests page card only once released and the cards it depends on by card id landed, and retries it once.
+# A branch landed as a split's slice (slicetake(), lib/lane.sh) is held to the slice's own entry, its Done-when items, as the slice's card would be.
+cardissueof() { # <card> <issue> <branch or ""> <tip>
+  if [ -n "$3" ] && [ "$2" = 0 ]; then testcardissue "$1" || branchissue "$3" "$4"; elif [ "$2" = 0 ]; then redissue "$1" || testcardissue "$1"; else gh issue view "$2" --json number,title,body,labels,milestone; fi
+}
 # The worktree's dependencies and the brief (sprompt), with the resume of a retried card (resumeplan()). go: ''.
 cardopen() {
   # Its issue's retried lines, read by prior() and carried(), kept in this shell (stdb, lib/records.sh).
   [ "$n" = 0 ] || stdb ask issue retried "$n" >/dev/null 2>&1 || :
-  # A card of issue 0 (no GitHub issue): its local record stands in, a branch's (branchissue()), a main-red fix card's (redissue()) or a Tests page card's
-  # (testcardissue(), lib/testaction.sh). None is split for its size (splitcheck() above); testpick() picks a Tests page card only once released and the cards it depends on by card id landed, and retries it once.
-  issue=$(if [ -n "$br" ] && [ "$n" = 0 ]; then branchissue "$br" "$tip"; elif [ "$n" = 0 ]; then redissue "$c" || testcardissue "$c"; else gh issue view "$n" --json number,title,body,labels,milestone; fi) || issue=''
+  issue=$(cardissueof "$c" "$n" "$br" "$tip") || issue=''
   # The control record's rule "visible changes need the owner's yes" (yesrule()), as the card starts. Off, nothing below
   # waits for or asks for a `Visible change approved:` line: no condition, section or inherited yes is held to, the
   # brief and the review leave the approval out, and a visible change lands as any change does.

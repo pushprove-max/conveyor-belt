@@ -105,7 +105,11 @@ Cards:
   `retry <card id>` and `shut <card id>`. `retry 0` lists the blocked ones by card id. `control release <card id>`
   releases such a card that started held.
 - `land-branch <branch>` lands a branch's tip as one card, reviewed and tested as any card. A branch named as a card
-  id (`c<time>-<project>-<issue>`) lands as that issue. Other branches land as issue 0, also when the name has a
+  id (`c<time>-<project>-<issue>`) lands as that issue. A branch named as the card id of a split part
+  (`c<time>-<project>-0`) lands as that part: when its card lands, the part counts as landed, and the umbrella closes
+  when each part is landed. This is how to land a part by hand after its card blocked or was shut. The review holds the
+  branch to the part's own Done-when items. While the part's own card is open, or after the part has landed,
+  `land-branch` refuses the branch. Other branches land as issue 0, also when the name has a
   number in it. A blocked card of issue 0 is closed with `shut <card id>`. Its kept patch stays, and its branch is
   not changed. When the branch's change is already on main, Needs you says so.
 - `control [<action>]` changes the control record. `control depends` writes an issue's `Depends on:` line on GitHub.

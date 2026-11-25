@@ -820,6 +820,9 @@ snapshot() (
           if [ "$tip" = "$mc" ] || { [ -n "$base" ] && branchon "$tip" "$base" "$d"; }; then printf '%s\n' "$c"; fi
         elif t=$(git merge-tree --write-tree "$mc" "$tip" 2>/dev/null) && [ "${t%%$'\n'*}" = "$mtree" ]; then printf '%s\n' "$c"; fi
       done | jq -Rcs 'split("\n") | map(select(. != ""))' > "$d/onmain" 2>/dev/null || echo '[]' > "$d/onmain"
+  # The landed commits of cards with no GitHub issue that main does not hold (offmain()): a split's slice card landed
+  # with one is not landed (sliceCards, below), as umbrellas() does not count it. Main unread: none is left out.
+  soff=$([ -z "$mc" ] || jq -r '.[] | select(.issue == 0 and .step == "landed") | .sha | strings' "$d/rows" 2>/dev/null | offmain "$mc") || soff=''
   # Today and the 7 days are reckoned from the health record's time (CONVEYOR_NOW when set), as now is.
   # Each of the three days with its midnight's epoch (t0d, t0w, t0p), from one date program: day by bash's own printf.
   ht=$(jq -r '.time | fromdate' <<<"$h") && [[ $ht =~ ^[0-9]+$ ]] && printf -v day '%(%F)T' "$ht" \
@@ -887,7 +890,9 @@ snapshot() (
     || exit 1
   # The records of the cards with no GitHub issue (testcard(), lib/testaction.sh), by their card: body, filed and filedUrl, which a landed one shows.
   jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --slurpfile mt <(printf '%s' "$mt") \
-    --slurpfile tac <(jq -c '[.cards | arrays | .[] | objects | select(.card | type == "string") | {key: .card, value: {body: (.body // null), filed: (.filed // null), filedUrl: (.filedUrl // null)}}] | from_entries' "$TACARDS" 2>/dev/null || echo '{}') --slurpfile fl <(printf '%s' "$fl") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson np "$np" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
+    --slurpfile tac <(jq -c '[.cards | arrays | .[] | objects | select(.card | type == "string") | {key: .card, value: {body: (.body // null), filed: (.filed // null), filedUrl: (.filedUrl // null)}}] | from_entries' "$TACARDS" 2>/dev/null || echo '{}') \
+    --slurpfile tid <(jq -c '[.cards | arrays | .[] | objects | select(.id | type == "string") | {key: .id, value: {card: (.card // null), all: ([.id, .card] + (.was // []) | map(strings))}}] | from_entries' "$TACARDS" 2>/dev/null || echo '{}') \
+    --argjson shuts "$(jq -cn '$ARGS.positional' --args "$SHUT" "$OWNSHUT" "$ENGSHUT")" --slurpfile soff <(printf '%s\n' "$soff" | jq -Rcs 'split("\n") - [""]') --slurpfile fl <(printf '%s' "$fl") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson np "$np" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
     --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --arg pef "$pef" --argjson efforts "$EFFORTS" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson pn "$pn" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg lintyes "$lintyes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
@@ -1073,13 +1078,24 @@ snapshot() (
                   + (if .x.after == "wait" then {notPushed: true} else {} end) end)]) as $why
             | (if $why == [] and $e == null and $isfu then [{kind: "parent"}] elif $why == [] and $e == null then [{kind: "other"}] else $why end) as $why
             | select(($i.number | IN($queued[])) | not)
+            # The slices of a split made cards with no GitHub issue (splitcards(), lib/slices.sh), each {card: its id,
+            # state}: landed (a card of its entry, $tid, landed with its commit on main ($soff: those main does not hold,
+            # offmain()) or ended already done on main, as umbrellas() counts it), shut (the card its entry has now was
+            # shut by hand) or waiting; null for an issue no such split holds.
+            | ([$c[] | select(.issue == $i.number and (.x.split.cards | type) == "array" and .x.split.cards != [])] | last | .x.split.cards
+                | if . == null then null else map(. as $d | ($tid[0][$d] // {card: $d, all: [$d]}) as $e
+                    | {card: $d, state: (if any($c[]; (.card | IN($e.all[])) and ((.step == "landed" and (.sha | IN($soff[0][]) | not)) or (.step == "closed" and (.reason | IN($shuts[]) | not)))) then "landed"
+                        elif any($c[]; .card == ($e.card // $d) and .step == "closed" and (.reason | IN($shuts[]))) then "shut" else "waiting" end)}) end) as $sc
+            # Its own hold, once the card of the split closed, is held by the split (split: true): the Board and `foreman status` name it so, never as held by the owner.
+            | (if $sc != null and any($why[]; .kind == "card" and .step == "closed") then $why | map(if .kind == "you" then . + {split: true} else . end) else $why end) as $why
             | {issue: $i.number, title: ($i.title // "")[0:200], priority: level($l; $prio), followup: $isfu,
                labels: $l, created: $i.createdAt, parent: (($i.body // "") | capture("^Follow-up to #(?<n>[0-9]+)") | .n | tonumber) // null, reasons: $why,
                released: ($control // {} | .released // {} | .[$i.number | tostring] // null),
                # The slices of a split issue (the rule Split large issues On), else the parts of a parent (its GitHub
                # sub-issues in this repository): it is their umbrella while it is open.
                umbrella: (([$c[] | select(.issue == $i.number and (.x.split.filed | type) == "array")] | last | .x.split.filed)
-                 // ([($i.parts // [])[].number | numbers] | if . == [] then null else . end))}] as $hl
+                 // ([($i.parts // [])[].number | numbers] | if . == [] then null else . end)),
+               sliceCards: $sc}] as $hl
         | ($hl | map(select((.reasons | map(.kind) | unique) == ["you"])) | length) as $you
         | [$hl[] | select(any(.reasons[]; .notPushed == true)) | .issue] as $unpushed
         | {count: ($open | length), held: $hl,

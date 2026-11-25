@@ -43,6 +43,11 @@ once with no GitHub issue. Its record is only in Conveyor. The five kinds:
   `Depends on: <card id>`. The Board shows each as "Split part of #<umbrella>". Conveyor closes the umbrella when each
   part card has landed or is already done on main. A part inherits the yes that the owner gave to the umbrella for a
   visible change. The parts of a change that grew past `split.growFiles` are still issues.
+  The hold on the umbrella is the split's, not yours: `conveyor.sh foreman status` and the Board show it as "held as
+  the umbrella of a split: waits for <part card ids>". The list has the parts that are not landed, and a shut part
+  has "(shut)" after its id. A part counts as landed only while main has its commit. To land a part by hand, put its
+  change on a branch named as the part's card id and run `conveyor.sh land-branch <card id>` ([Commands](commands.md)).
+  That card lands as the part, and its review holds it to the part's Done-when items.
 
 A review follow-up and a split part are follow-ups, so the Follow-ups rule in the Rules tab holds them back when it is
 Off. `conveyor.sh run --only <issue>` also runs the review follow-ups and the split parts of that issue, and the review follow-ups of those parts. A follow-up of a split part names the umbrella as its parent, so it inherits the same yes.

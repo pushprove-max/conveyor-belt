@@ -54,8 +54,9 @@ def row: . as $s | $s.first as $f | $s.r as $r | $s.l as $l
              # Why its picked line took a slot beyond the project's cap (pick(): "main is red"), else null.
              beyond: ($f.beyond // null),
              # Its split line (splitcheck(), lib/slices.sh): {result: kept or split, slices: how many the judge gave,
-             # filed: the slices filed (the rule On), else null}; null for a card the rule did not check.
-             split: ($s.sp | if . == null then null else {result, slices: (.split.slices // [] | length), filed: (.split.filed // null)} end),
+             # filed: the slices filed (the rule On), else null; cards: the slices made cards with no GitHub issue
+             # (splitcards()), else null}; null for a card the rule did not check.
+             split: ($s.sp | if . == null then null else {result, slices: (.split.slices // [] | length), filed: (.split.filed // null), cards: (.split.cards // null)} end),
              # Its pick (modelpick(), lib/modelpick.sh): the one its last line with a pick holds; null for a card the
              # rule Pick settings did not pick.
              pick: $s.pk,

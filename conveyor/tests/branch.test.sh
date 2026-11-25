@@ -80,3 +80,60 @@ t_branchmark() {
   [ -n "$c" ] && [ "$(cat "$STUB/mark" 2>/dev/null)" = "$c" ] \
     || fail "land-branch seven: a process its card ${c:-(none picked)} started carried the mark '$(cat "$STUB/mark" 2>/dev/null)', not the card's id: $(cat "$T/$CASE/run.out")"
 }
+
+# Bug (#1674): #7 split into two slices that are cards with no GitHub issue; slice a blocked and the owner shut it, and
+# its change landed by hand with `land-branch <a's card id>`. That card was a new card of issue 0 that no slice knew, so
+# umbrellas() never counted a as done: #7 stayed open and held. And the snapshot gave #7 no slices, so `foreman status`
+# called the split's hold the owner's. Now the snapshot names the slices (a shut, b landed); land-branch refuses the
+# branch while a's card is open, and once a is shut lands it as slice a, so #7 is closed and released.
+t_branchslice() {
+  local a b c sd
+  branchsetup
+  fx_in 'splitcards c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" '"'"'[{"title":"First part","doneWhen":["a"],"covers":[1],"dependsOn":[]},{"title":"Second part","doneWhen":["b"],"covers":[2],"dependsOn":[1]}]'"'"' 1'
+  a=$(jq -r '.cards[0].id' "$(nicards)"); b=$(jq -r '.cards[1].id' "$(nicards)")
+  [ "$(nipick)" = "$a 0 false" ] || fail "the pick did not take the first slice $a: $(cat "$T/$CASE/run.out")"
+  loop control hold 7 > /dev/null || fail "control hold 7 failed"
+  lane "$a" s.txt ess
+  fx_in 'card() { append "$(line "$1" "$2" landed ok "{\"sha\":\"abe\",\"product\":false}")"; }; landbranch '"$a"
+  [ "$RC" != 0 ] && grep -qF "slice $a has its card $a still open" "$T/$CASE/run.out" && [ "$(newest)" = "$a" ] \
+    || fail "land-branch $a was taken while the slice's own card $a was open (exit $RC): $(cat "$T/$CASE/run.out") $(st 'select(.step == "picked") | .card')"
+  # b landed as a commit main does not hold yet (a side branch's), as after the pack's defaultBranch changed.
+  lane side t.txt tee; sd=$(git -C "$R" rev-parse side)
+  fx_in 'append "$(line c1-7 7 split split "{\"split\":{\"mode\":\"on\",\"hash\":\"h\",\"size\":{\"areas\":1,\"chars\":10,\"doneWhen\":3,\"files\":1},\"verdict\":\"split\",\"why\":\"w\",\"cards\":[\"'"$a"'\",\"'"$b"'\"],\"filed\":[]}}")"
+    append "$(line c1-7 7 closed ok "{\"reason\":\"split\"}")"
+    append "$(line '"$a"' 0 blocked fail "{\"reason\":\"the review found a fault\"}")"
+    append "$(line '"$a"' 0 closed ok "$(jq -cn --arg r "$OWNSHUT" "{reason: \$r}")")"
+    append "$(line '"$b"' 0 landed ok "{\"sha\":\"'"$sd"'\",\"product\":false}")"; umbrellas "$(asked)"'
+  [ ! -e "$STUB/closed" ] || fail "the umbrella #7 closed with its slice $a shut and not landed: $(cat "$STUB/closed")"
+  # Bugs: the snapshot counted b landed though main does not hold its commit (umbrellas() does not count it), and gave
+  # #7's own hold no mark of the split's, so the Board grouped it under Held by you. (Each slice entry may also carry
+  # its card's name, which the snapshot adds to every object that names a card; only card and state are in question.)
+  [ "$(loop snapshot --fresh | jq -c '.open.held[] | select(.issue == 7) | [.reasons[0], (.sliceCards | map({card, state}))]')" = "[{\"kind\":\"you\",\"split\":true},[{\"card\":\"$a\",\"state\":\"shut\"},{\"card\":\"$b\",\"state\":\"waiting\"}]]" ] \
+    || fail "the snapshot does not give #7 the split's hold and its slice cards, $a shut and $b waiting (its commit off main): $(loop snapshot --fresh | jq -c '.open.held')"
+  git -C "$R" merge -q --ff-only side || fail "main could not take the side branch"
+  # The land-branch of slice a, with two bugs forced. A competing writer of the record of the cards with no GitHub
+  # issue (tcadd()) acts at once after the card's id is picked, before the slice's entry keeps it, with the clock held
+  # so it would pick the same id: it waits for the record's lock when pickbranch() holds it, else it runs then. And
+  # the card stand-in keeps the issue the card is reviewed against (cardissueof()), which was the branch's commit
+  # messages in place of the slice's own Done-when items.
+  fx_in 'date() { if [ "${2:-}" = +%Y%m%dT%H%M%S ]; then k=$(( $(cat "$STUB/dates" 2>/dev/null || echo 0) + 1 )); echo "$k" > "$STUB/dates"; printf "20990101T0000%02d\n" "$(( k < 3 ? 0 : k ))"; else command date "$@"; fi; }
+    eval "real$(declare -f slicetake)"
+    slicetake() { if ( [ -z "${lock:-}" ] || exec {lock}>&-; flock -n "$TACARDS.lock" true ); then tcadd "" Other "other body" > "$STUB/tcid"
+      else ( exec {lock}>&-; tcadd "" Other "other body" > "$STUB/tcid" ) & fi; realslicetake "$@"; }
+    card() { cardissueof "$1" "$2" "$3" "$4" > "$STUB/issue"; append "$(line "$1" "$2" landed ok "{\"sha\":\"abe\",\"product\":false}")"; }; landbranch '"$a"'; umbrellas "$(asked)"'
+  c=$(newest)
+  [ "$c" != "$a" ] && [ "$(jq -c --arg a "$a" '.cards[] | select(.id == $a) | [.card, .was]' "$(nicards)")" = "[\"$c\",[\"$a\"]]" ] \
+    || fail "land-branch $a did not land as slice $a (its entry's card the new card ${c:-none}, $a in its was): $(cat "$T/$CASE/run.out") $(cat "$(nicards)")"
+  [ -s "$STUB/tcid" ] && [ "$(cat "$STUB/tcid")" != "$c" ] && [ "$(jq -c --arg t "$(cat "$STUB/tcid")" '[.cards[] | select(.id == $t) | .title]' "$(nicards)")" = '["Other"]' ] \
+    || fail "tcadd() at the handoff of land-branch $a took the slice card's id $c (it got '$(cat "$STUB/tcid" 2>&1)'): $(cat "$(nicards)")"
+  [ "$(jq -c '[.title, .body]' "$STUB/issue")" = "$(jq -c --arg a "$a" '.cards[] | select(.id == $a) | [.title, .body]' "$(nicards)")" ] \
+    || fail "land-branch $a was reviewed against $(cat "$STUB/issue" 2>&1), not slice $a's own issue: $(cat "$(nicards)")"
+  [ "$(cat "$STUB/closed" 2>/dev/null)" = 7 ] && [ "$(loop control | jq -c '.held | index(7)')" = null ] \
+    || fail "the umbrella #7 was not closed and released once slice $a landed by land-branch and $b landed: $(cat "$STUB/closed" 2>&1) $(loop control | jq -c .held) $(cat "$T/$CASE/run.out")"
+  # Bug: a second land-branch of a's branch, with one more commit, made a new card the slice's: a card that may block,
+  # which a card that depends on slice a would wait on again. Slice a is done: it is refused.
+  echo more > "$T/$CASE/lane-$a/s.txt" && git -C "$T/$CASE/lane-$a" commit -qam 'fix(tooling): more' || fail "branch $a could not take a commit"
+  fx_in 'card() { append "$(line "$1" "$2" landed ok "{\"sha\":\"abf\",\"product\":false}")"; }; landbranch '"$a"
+  [ "$RC" != 0 ] && grep -qF "slice $a is done already, as card $c" "$T/$CASE/run.out" && [ "$(jq -r --arg a "$a" '.cards[] | select(.id == $a) | .card' "$(nicards)")" = "$c" ] \
+    || fail "a second land-branch $a, after slice $a landed as $c, was not refused, or took the slice (exit $RC): $(cat "$T/$CASE/run.out") $(cat "$(nicards)")"
+}

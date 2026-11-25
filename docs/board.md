@@ -563,7 +563,10 @@ An issue that [Split large issues](configuration.md#split-large-issues) split is
 in Held until each slice lands, and then Conveyor closes it. Its card says "Split into #a, #b; closes when they land"
 and lists each slice with its state: landed, building, blocked, waiting or held. The umbrella has no **Queue**, and
 a drag to Queue does not release it: queue its slices, which keep their own **Queue**. An issue that waits on an umbrella says so, as "Waiting on #12 (its slices
-#20, #21)".
+#20, #21)". When the slices are cards with no GitHub issue, the umbrella shows "Held as the umbrella of a split: waits
+for <card ids>" in place of **Held by you**, and has no **Queue**. A shut slice has "(shut)" after its id. Its card is
+in the group of its closed card, not in **Held by you**, and the Rules tab does not list it as held by you. When each
+slice has landed, it says "each slice landed; the loop closes it at its next turn".
 
 On the Rules tab, "waiting on another card" opens the waiting list. It shows each waiting card with the cards it waits
 on, as "waits on #12 (testing), #13 (landed)". The **Dependency guard** row sets the guard On or Off. With it Off,

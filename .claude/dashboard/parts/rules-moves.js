@@ -317,7 +317,8 @@
     by.forEach((x) => {
       const others = list(x.reasons).filter((r) => r && r.kind !== 'you');
       const holds = others.filter((r) => r.kind === 'label' && typeof r.label === 'string').map((r) => r.label);
-      const you = mine.has(x.issue);
+      // The hold a split puts on its umbrella (split: true, lib/snapshot.sh) is the split's, not yours: not listed as held by you.
+      const you = mine.has(x.issue) && !list(x.reasons).some((r) => r && r.kind === 'you' && r.split);
       // A row moved here stays, shown as moved, until a snapshot shows the move (moveJudge).
       if (!you && !holds.length && !pendingMove(x.issue)) return;
       const rest = others.filter((r) => r.kind !== 'label');

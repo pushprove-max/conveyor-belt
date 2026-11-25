@@ -71,6 +71,10 @@ grep -qF 'beta is none of' <<<"$out" || fail "the refusal does not name the proj
 # #17 a waiting list, #19 a shut card with no parts (null umbrella: it must still show its card), #20 a parent with
 # parts and no card, held by the owner (its hold is the only reason, so it must still show it); an issue with no reasons
 # shows its number alone.
+# Issue 1674: #23, split into cards with no GitHub issue (sliceCards, with no umbrella of issue numbers), showed as
+# "your hold: control release", though the split held it, not the owner. Its hold is the split's: it names the slice
+# cards not landed yet (the landed one left out) and marks the shut one as shut. #24, each of its slice cards landed
+# and the umbrella not closed yet (umbrellas() closes it at the loop's next turn), said "waits for" and no card.
 t_statusheld() {
 CASE=statusheld; fixture statusheld
 snap '.open.held = [{issue: 12, reasons: [{kind: "you"}]},
@@ -78,9 +82,12 @@ snap '.open.held = [{issue: 12, reasons: [{kind: "you"}]},
   {issue: 16, reasons: [{kind: "card", step: "blocked", card: "c16"}]},
   {issue: 17, reasons: [{kind: "waits", waitsFor: [14, 15]}]}, {issue: 18},
   {issue: 19, reasons: [{kind: "card", step: "closed", card: "c19"}], umbrella: null},
-  {issue: 20, reasons: [{kind: "you"}], umbrella: [21, 22]}]'
+  {issue: 20, reasons: [{kind: "you"}], umbrella: [21, 22]},
+  {issue: 23, reasons: [{kind: "you"}, {kind: "card", step: "closed", card: "c23"}], umbrella: [],
+    sliceCards: [{card: "c20261124T230045-alpha-0", state: "landed"}, {card: "c20261124T230046-alpha-0", state: "shut"}, {card: "c20261124T230047-alpha-0", state: "waiting"}]},
+  {issue: 24, reasons: [{kind: "you", split: true}, {kind: "card", step: "closed", card: "c24"}], umbrella: [], sliceCards: [{card: "c20261124T230048-alpha-0", state: "landed"}]}]'
 out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
-l='held: #12 (your hold: control release) #13 (split: waits for its parts #14 #15) #16 (card blocked: retry) #17 (waits for #14 #15) #18 #19 (card closed) #20 (your hold: control release)'
+l='held: #12 (your hold: control release) #13 (split: waits for its parts #14 #15) #16 (card blocked: retry) #17 (waits for #14 #15) #18 #19 (card closed) #20 (your hold: control release) #23 (held as the umbrella of a split: waits for c20261124T230046-alpha-0 (shut) c20261124T230047-alpha-0) #24 (held as the umbrella of a split: each slice landed; the loop closes it at its next turn)'
 grep -qxF -- "$l" <<<"$out" || fail "the held line does not give each issue its reason; wanted '$l' in: $out"
 }
 

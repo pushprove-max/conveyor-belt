@@ -144,6 +144,18 @@ test('Rules: with 183 held issues the rules list none, and the held section is o
   assert.deepEqual(groupsOf(w).map((g) => [g[0], g[1]]), [['No label: held by you', 143], ['ux-change', 31], ['dormant', 9]]);
 });
 
+// Issue 1674: the umbrella of a split into cards with no GitHub issue is in the control record's held list, so the Rules
+// tab listed it under "No label: held by you", though the split holds it, not the owner. Its hold (split: true) is no hold of yours.
+test('Rules: a split umbrella is not listed as held by you', () => {
+  const w = boot({ tab: 'rules' });
+  const d = heldMany(), x = d.panels.rules.data.open.held.find((h) => h.reasons[0].kind === 'you');
+  x.reasons = [{ kind: 'you', split: true }, { kind: 'card', step: 'closed', card: 'c1' }];
+  deliver(w, d);
+  const by = act(heldP(w), 'held-by');
+  by.value = 'label'; by.dispatchEvent(new w.Event('change'));
+  assert.deepEqual(groupsOf(w).map((g) => [g[0], g[1]]), [['No label: held by you', 142], ['ux-change', 31], ['dormant', 9]], `#${x.issue} is held by its split, not by you`);
+});
+
 test('Rules: the search narrows the groups to their matches, by number or title, and opens them', () => {
   const w = boot({ tab: 'rules' });
   deliver(w, heldMany());

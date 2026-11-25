@@ -10,15 +10,60 @@ branchissue() { # <branch> <tip>
 # Under the lock: the picked line of a land-branch card, with main's commit the branch was weighed against (base: Needs
 # you reads from it what the card was picked to land, branchon(), lib/snapshot.sh). Prints the card id. An issue with
 # an open card is refused: that card (in flight in the loop, or stopped mid-card) is building the same issue.
-pickbranch() { # <branch> <issue> <title> <main's commit>
-  local card l
+# With <slice>, the card lands as that slice of a split (slicetake()).
+pickbranch() { # <branch> <issue> <title> <main's commit> [<slice: its card id>]
+  local card l lock rc=0
   check || return 1
   [ "$2" = 0 ] || ! stdb ask issue cards "$2" | jq -es --argjson n "$2" 'map(select(.issue == $n)) | group_by(.card) | any(all(.step | IN("landed", "closed", "blocked") | not))' >/dev/null \
     || { echo "conveyor: issue #$2 has a card that is still open; nothing recorded" >&2; return 1; }
   # A card id is its second, its project and its issue: a second landing in the same second (every branch that names no issue is
   # issue 0) waits for the next one, so no two cards share their lines.
-  while card="c$(date -u +%Y%m%dT%H%M%S)-$CTAG-$2"; [ -n "$(stdb ask card "$card")" ]; do sleep 1; done
+  if [ -z "${5:-}" ]; then
+    while card="c$(date -u +%Y%m%dT%H%M%S)-$CTAG-$2"; [ -n "$(stdb ask card "$card")" ]; do sleep 1; done
+  else
+    # A slice's card takes an id no entry of the record of the cards with no GitHub issue holds either (tcfree()), as the
+    # entry it joins is found by its ids. The record's lock is held from that id to the entry that keeps it, so tcadd()
+    # (tcfree() under the same lock) gives no new entry the same id.
+    { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" \
+      || { echo "conveyor: the record of the cards with no GitHub issue could not be locked; nothing recorded" >&2; return 1; }
+    card=$(tcfree "$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null || echo '[]')") && slicetake "$5" "$card" || rc=1
+    exec {lock}>&-; [ "$rc" = 0 ] || return 1
+  fi
   l=$(line "$card" "$2" picked ok "$(jq -cn --arg t "${3:0:200}" --arg b "$1" --arg m "$4" '{title:$t,branch:$b,base:$m}')") && append "$l" && echo "$card"
+}
+# Of the landed commits on stdin (one a line; a line that is no whole commit id is left out), those that main
+# (<main's commit>) does not hold: those git does not have, and those one rev-list finds off main (it prints whole ids,
+# as a landed line holds). umbrellas() (lib/slices.sh) and the snapshot's slice cards (lib/snapshot.sh) count a card
+# landed only while main holds its commit.
+offmain() { # <main's commit>
+  local ids miss off
+  ids=$({ grep -xE '[0-9a-f]{40}|[0-9a-f]{64}' || :; } | sort -u)
+  miss=$([ -z "$ids" ] || git cat-file --batch-check='%(objectname) %(objecttype)' <<<"$ids" | awk '$NF != "commit" {print $1}') || return 1
+  off=$({ grep -vxF -f <(printf '%s\n' "$miss") <<<"$ids" || :; } | git rev-list --stdin "^$1") || return 1
+  printf '%s\n%s' "$miss" "$off"
+}
+# Under the lock and the record's lock (TACARDS.lock), from pickbranch(): the entry of a split's slice (the one whose id, card or one of whose was is <slice>,
+# in the record of the cards with no GitHub issue) takes <card> as its card, the card it had going to its was, as
+# testpick() does for a card given back. So the slice is done once <card> lands: its umbrella closes (umbrellas(),
+# lib/slices.sh) and a card that depends on the slice by its id starts (testpick()). Refused while the slice's own
+# card is open (no landed, closed or blocked line): the loop is building it; and once that card is done (TADONE).
+slicetake() { # <slice: its card id> <card>
+  local rec cur got='' rc=1
+  if ! rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) \
+    || ! cur=$(jq -er --arg s "$1" 'first(.[] | select(. as $e | $s | IN($e.id, $e.card, ($e.was // [])[]))) | .card // ""' <<<"$rec"); then
+    echo "conveyor: slice $1 is not in the record of the cards with no GitHub issue; nothing recorded" >&2
+  elif [ -n "$cur" ] && ! got=$(stdb ask card "$cur"); then
+    echo "conveyor: the lines of card $cur, slice $1's card, could not be read; nothing recorded" >&2
+  elif [ -n "$got" ] && ! jq -es 'any(.[]; .step | IN("landed", "closed", "blocked"))' <<<"$got" > /dev/null; then
+    echo "conveyor: slice $1 has its card $cur still open; nothing recorded" >&2
+  # A slice already done stays done: a second landing of its branch would make the slice's card one that may block,
+  # and a card that depends on the slice (testpick()) or its umbrella (umbrellas()) would wait on that card again.
+  elif [ -n "$got" ] && jq -es --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" "any(.[]; $TADONE)" <<<"$got" > /dev/null; then
+    echo "conveyor: slice $1 is done already, as card $cur; land the further change on a branch with another name; nothing recorded" >&2
+  elif jq -c --arg s "$1" --arg c "$2" '{cards: map(if . as $e | $s | IN($e.id, $e.card, ($e.was // [])[]) then (if .card == null then . else .was = (.was // []) + [.card] end) | .card = $c else . end)}' <<<"$rec" > "$TACARDS.new" \
+    && mv -f "$TACARDS.new" "$TACARDS"; then rc=0
+  else rm -f "$TACARDS.new"; echo "conveyor: the record of the cards with no GitHub issue could not be written; nothing recorded" >&2; fi
+  return $rc
 }
 
 # One branch landed as one card (the rule is in README.md). Everything that can be refused is refused before
@@ -27,7 +72,7 @@ pickbranch() { # <branch> <issue> <title> <main's commit>
 # project (c<time>-<project>-<issue>), else 0: a number elsewhere in a name (hand/snapexec-290) is no issue, as the
 # engine would review the branch against that issue and could close it.
 landbranch() { # <branch>
-  local br=$1 tip n title c end m
+  local br=$1 tip n s title c end m
   # A branch name only: revision syntax (fast-lane~0, @{-1}) names no branch.
   [ "$br" != "$BRANCH" ] && git check-ref-format "refs/heads/$br" && tip=$(git rev-parse -q --verify "refs/heads/$br^{commit}") \
     || { echo "conveyor: no branch $br to land" >&2; return 2; }
@@ -42,13 +87,18 @@ landbranch() { # <branch>
   end=$(git merge-tree --write-tree "$m" "$tip") \
     || { echo "conveyor: branch $br does not merge into main as it stands; rebase it on main first. Nothing recorded: $(tail -n +2 <<<"$end" | head -c 600)" >&2; return 1; }
   [ "$(head -n 1 <<<"$end")" != "$(git rev-parse "$m^{tree}")" ] || { echo "conveyor: nothing to land: branch $br holds no change against main"; return 0; }
-  n=0; ! [[ $br =~ ^c[0-9]{8}T[0-9]{6}-"$CTAG"-([1-9][0-9]{0,8})$ ]] || n=${BASH_REMATCH[1]}
+  n=0; s=''; ! [[ $br =~ ^c[0-9]{8}T[0-9]{6}-"$CTAG"-([1-9][0-9]{0,8})$ ]] || n=${BASH_REMATCH[1]}
+  # A branch named as the card id of a split's slice with no GitHub issue (an entry splitcards() made, lib/slices.sh)
+  # lands as that slice (slicetake()).
+  [ "$n" != 0 ] || ! [[ $br =~ ^c[0-9]{8}T[0-9]{6}-"$CTAG"-0$ ]] \
+    || ! jq -e --arg s "$br" 'any(.cards[]?; . as $e | ($e.label // "" | startswith("Split part of #")) and ($s | IN($e.id, $e.card, ($e.was // [])[])))' "$TACARDS" > /dev/null 2>&1 \
+    || s=$br
   if [ "$n" = 0 ]; then title=$(git log --reverse --format=%s "refs/heads/$BRANCH..$tip" | head -n 1)
   else title=$(timeout 60 gh issue view "$n" --json title | jq -er .title) \
     || { echo "conveyor: branch $br lands as issue #$n, which cannot be read; nothing recorded" >&2; return 1; }
   fi
   c=$(codexready) || { echo "conveyor: $c; nothing recorded" >&2; return 1; }
-  c=$(locked pickbranch "$br" "$n" "$title" "$m") || return 1
+  c=$(locked pickbranch "$br" "$n" "$title" "$m" "$s") || return 1
   # Each process the card starts carries its mark, as a card of the loop's does (cardrun(), lib/run.sh): a review left
   # running when this shell is gone is ended by retry or shut before its worktree is taken (leftin()).
   CONVEYOR_CARDRUN=$c card "$c" "$n" "$br" "$tip"

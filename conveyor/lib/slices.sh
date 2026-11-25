@@ -350,20 +350,16 @@ growcheck() { # <card> <issue> <worktree> <issue json> <the sessions' prompt>: 0
 # So is each open issue of the list with no parts (its slices were never attached as its sub-issues) that is the
 # umbrella of a split (a split line with filed slices) whose slices each have a landed line, or a closed line (main
 # already does it: ALREADY-DONE) that is not a shut one (SHUT: the owner closed it by hand; OWNSHUT: the owner shut the card).
-# The slices that are cards with no GitHub issue (the split line's cards) count the same, by their card's records (TADONE).
+# The slices that are cards with no GitHub issue (the split line's cards) count the same, by their card's records (TADONE):
+# the cards of the slice's entry, a land-branch card that landed a branch named as the slice's card id included (slicetake(), lib/lane.sh).
 # A card counts as landed only while its landed commit is on main (refs/heads/$BRANCH): with push off, the pack's
 # defaultBranch changed to a branch without it leaves its parent open. A landed commit git no longer has (pruned once
 # its branch went) is not on main either.
 umbrellas() { # <open issues, a json list>
-  local k n s x m b cs ids miss off
+  local k n s x m b cs off
   b=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || { echo "conveyor: main ($BRANCH) could not be read; no parent is closed this turn" >&2; return 0; }
   cs=$(turncards) || return 0
-  ids=$(jq -r 'select(.step == "landed") | .sha | strings | select(test("^([0-9a-f]{40}|[0-9a-f]{64})$"))' <<<"$cs" | sort -u)
-  # The landed commits that main does not hold: those git does not have, and those one rev-list finds off main (it
-  # prints whole ids, as a landed line holds).
-  miss=$([ -z "$ids" ] || git cat-file --batch-check='%(objectname) %(objecttype)' <<<"$ids" | awk '$NF != "commit" {print $1}') || return 0
-  off=$({ grep -vxF -f <(printf '%s\n' "$miss") <<<"$ids" || :; } | git rev-list --stdin "^$b") || return 0
-  off=$(printf '%s\n%s' "$miss" "$off")
+  off=$(jq -r 'select(.step == "landed") | .sha | strings' <<<"$cs" | offmain "$b") || return 0
   while IFS=$'\t' read -r k n s; do
     if [ "$k" = parts ]; then m="Conveyor: each part of this issue is closed or landed ($s), so this issue is closed too."
     else m="Conveyor: the last follow-up of this issue is done ($s), so each of its Done-when items is built."; fi

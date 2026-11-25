@@ -201,6 +201,27 @@ test('the Board: an issue opened by someone outside the project says so in Held,
   assert.deepEqual(w.posts, [{ url: 'control', body: { action: 'release', args: ['76'], repo: 'sample' } }]);
 });
 
+// Issue 1674: a split whose slices are cards with no GitHub issue holds its umbrella, but the Board called that hold
+// "Held by you" and offered Queue, which would clear the hold and build nothing. The chip names the split's hold, the
+// slice cards not landed yet and a shut one as shut, and the card has no Queue. It was also grouped under "Held by
+// you", the group of its first reason: the split's hold (split: true) goes with its closed card. Once each slice landed,
+// the chip said "waits for" and no card until the loop's next turn closed it: it says each slice landed.
+test('the Board: the umbrella of a split into cards with no GitHub issue is held by the split, names its slice cards, and has no Queue', () => {
+  const held = clone(OPEN.held);
+  held[0].reasons = [{ kind: 'you', split: true }, { kind: 'card', step: 'closed', card: 'c76' }];
+  held[0].sliceCards = [{ card: 'c20261124T230045-sample-0', state: 'landed' }, { card: 'c20261124T230046-sample-0', state: 'shut' }, { card: 'c20261124T230047-sample-0', state: 'waiting' }];
+  const w = boot({ tab: 'control' });
+  deliver(w, withOpen({ held }));
+  assert.equal(bcard(w, 76).querySelector('.chip[data-reason="you"]').textContent,
+    'Held as the umbrella of a split: waits for c20261124T230046-sample-0 (shut), c20261124T230047-sample-0');
+  assert.equal(act(bcard(w, 76), 'release'), null, 'a split umbrella offers no Queue');
+  assert.equal(bcard(w, 76).closest('.board-group').dataset.group, 'card', 'a split umbrella is not in the group Held by you');
+  held[0].sliceCards.forEach((c) => { c.state = 'landed'; });
+  next(w, withOpen({ held }));
+  assert.equal(bcard(w, 76).querySelector('.chip[data-reason="you"]').textContent,
+    'Held as the umbrella of a split: each slice landed; the loop closes it at its next turn');
+});
+
 test('the Board: an issue held only by an issue it waits on is in Held, counted there, and can still be held by you', async () => {
   const wait = { repo: 'sample', issue: 44, title: 'Second half', url: `${P}/44`, priority: 'P2', labels: [], reasons: [{ kind: 'waits', waitsFor: [20] }] };
   const w = boot({ tab: 'control' });
