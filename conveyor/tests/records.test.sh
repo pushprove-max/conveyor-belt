@@ -28,7 +28,8 @@ t_report() {
   grep -q "^== $d" <<<"$out" && grep -q 'open.*cC' <<<"$out" && grep -q '^blocked, for Dana: cB.*NO-GO twice' <<<"$out" || fail "day block, open card or blocked list missing"
   { row cA picked 10:00:00 '{}'; row cA landed 10:10:00 '{"product":false,"sha":"abc"}'; row cB picked 11:00:00 '{}'
     row cB landed 12:50:00 '{"product":false,"sha":"abd"}'; } > "$ST/cards.jsonl"
-  CONVEYOR_MAIN=$R bash "$SRC/report.sh" | sed -n '/^== week/,/^$/p' | grep -Eq '^median start-to-landed \(min\) +60$' || fail "median of 10 and 110 is not 60"
+  out=$(CONVEYOR_MAIN=$R bash "$SRC/report.sh") && week=$(sed -n '/^== week/,/^$/p' <<<"$out") \
+    && grep -Eq '^median start-to-landed \(min\) +60$' <<<"$week" || fail "median of 10 and 110 is not 60: $week"
   { row cE picked 13:00:00 '{}'; for m in 1 2 3 4 5 6; do row cE review "13:0$m:00" '{}'; done
     row cF picked 14:00:00 '{}'; for m in 1 2 3 4 5; do row cF review "14:0$m:00" '{}'; done; } >> "$ST/cards.jsonl"
   out=$(CONVEYOR_MAIN=$R bash "$SRC/report.sh"); grep -q 'past 5 reviews.*cE.*: 6 reviews' <<<"$out" && ! grep -q 'past 5 reviews.*cF' <<<"$out" || fail "an open card past 5 reviews is not flagged, or one at 5 is"

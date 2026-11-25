@@ -291,7 +291,10 @@ t_serve() {
   # The pushes that failed their check made the push block's fix card (pushred(), lib/redfix.sh; pushblockfix.test.sh
   # has its cases), an issue-0 card of its own that the failed push's run then picked: it is no landed card's row.
   [ "$(loop cards | jq -c '[.landed, .open, (.cards | map(select(.issue != 0) | "\(.step) \(.stage)") | unique)]')" = '[4,0,["landed 5"]]' ] || fail "a push line changed a landed card's dashboard row: $(loop cards)"
-  CONVEYOR_MAIN=$R bash "$SRC/report.sh" | grep -Eq '^cards landed +4$' || fail "the report miscounts cards that hold a push line"
+  # Read whole before the check: piped into grep -q, the report's later lines hit a closed pipe and pipefail fails the check.
+  # The week's section only: a day's row of 4 must not stand in for a wrong week count.
+  rep=$(CONVEYOR_MAIN=$R bash "$SRC/report.sh") && week=$(sed -n '/^== week/,/^$/p' <<<"$rep") \
+    && grep -Eq '^cards landed +4$' <<<"$week" || fail "the report miscounts cards that hold a push line: $rep"
   # Bug: a landing after a failed push waits for the retry timer. Each run above starts with nothing tried, so one loop's
   # turns (after the counts): c98's push is tried and fails (the stub), the timer holds it, c99 lands and is tried at once.
   serveeng "$SRC" 'pushstub; stubland 98; turn; turn; echo T >> "$STUB/pushcalls"; stubland 99; turn'
