@@ -5,7 +5,8 @@
 dashboard.sh --loop runs it beside the page server. For every record conveyor/host.json names it keeps one
 `conveyor.sh watch` running (conveyor/watch.py says what each line holds): over ssh to the build machine (at host.json's
 `ssh` target), or here on one machine (config()). After each line it writes <dashboard folder>/stream.json, the same
-object dashboard.sh's conveyor() gives ({host, local, reachable, error, records}), each record with main (its main
+object dashboard.sh's conveyor() gives ({host, local, reachable, error, records}), with ssh (the ssh target its
+snapshots come from, null on one machine: /units takes the feed's test map only from its own machine), each record with main (its main
 checkout, as the host file names it: /units finds its own record's test map by it), readAt (when its
 snapshot began: the snapshotAt the host wrote in it, else this machine's clock less the line's took; data.js is dated when it is built, which can be after a change the snapshot
 did not read yet) and retried (the blocked cards its host's last retried line names: {card, issue, at}), plus `stream`: {live (every record's stream is up and its host's last snapshot worked), heardAt (the oldest of
@@ -319,7 +320,7 @@ class Feed:
             error = None
             if records is None:
                 error = down[0]['error'] if down else 'waiting for the first snapshot of every record'
-            return {'host': self.host, 'local': self.target is None, 'reachable': not any(r['unreachable'] for r in recs), 'error': error, 'records': records,
+            return {'host': self.host, 'local': self.target is None, 'ssh': self.target, 'reachable': not any(r['unreachable'] for r in recs), 'error': error, 'records': records,
                     'stream': {'live': live, 'heardAt': None if None in heard else iso(min(heard)),
                                'since': None if live else iso(min(r['downAt'] or time.time() for r in down)),
                                'error': None if live else '; '.join(sorted({r['error'] for r in down if r['error']})) or None,

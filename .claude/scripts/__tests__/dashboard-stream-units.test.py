@@ -58,6 +58,17 @@ class UnitsFeed(unittest.TestCase):
                 self.assertEqual(read(out, 'units-feed.json')[1]['records'], records, f'records {records!r} changed in the units feed')
 
 
+class FeedMachine(unittest.TestCase):
+    """Bug (issue 1667): the feed named its host alone, so /units could not tell a build machine reached at another ssh
+    target under the same host name, and took that machine's test map for the session's project at the same path."""
+
+    def test_the_feed_names_the_ssh_target_its_snapshots_come_from_and_none_on_one_machine(self):
+        with tempfile.TemporaryDirectory() as out:
+            for target in ('owner@oven', None):
+                d = ds.Feed(out, '/nonexistent/dashboard.sh', out, 'lab', '/h', [('r', '/m')], target).doc()
+                self.assertEqual([d['host'], d['ssh'], d['local']], ['lab', target, target is None], f'a feed with ssh target {target!r} gave {d!r}')
+
+
 class LiveGap(unittest.TestCase):
     """Bug (#1585 review): a live line laid a running step's dollars over a belt card but not its known dollars and its
     gap, so /units showed the snapshot's "$0.00 + 1 step not priced" for the whole of a priced fix after such a step."""

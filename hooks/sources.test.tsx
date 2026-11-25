@@ -966,11 +966,41 @@ test('a live feed\'s snapshot 90 s old adds no age note; with the stream down, o
   const made = NOW - 90_000
   const snap = snapshot({ snapshotAt: new Date(made).toISOString() })
   const note = `units: the bookstore snapshot is 1m old (made at ${clockOf(made)})`
-  const feed = (live: boolean) => boardOfFeed({ host: 'buildbox', records: [{ repo: 'bookstore', main: '/r/main', json: snap }], live, heardAt: made, error: '' }, '', '')
+  const feed = (live: boolean) => boardOfFeed({ host: 'buildbox', local: false, ssh: 'owner@buildbox', records: [{ repo: 'bookstore', main: '/r/main', json: snap }], live, heardAt: made, error: '' }, '', '', null)
   const feedState = (b: ReturnType<typeof boardOfFeed>): State => ({ now: NOW, ...b, limit: null, fast: { state: 'none' }, research: { state: 'none' } })
   expect(ageNotes(state(fetched([['bookstore', snap]])))).toEqual([note])
   expect(ageNotes(feedState(feed(true)))).toEqual([])
   expect(ageNotes(feedState(feed(false)))).toEqual([note])
+})
+
+// Issue 1667: the feed's map is taken only from a feed of the machine the fetch's maphost line names (the ssh target
+// the fetch reads the map at, or, empty, this machine), as another build machine can keep its checkout at the same
+// path. Bugs it catches: with the Board on another build machine, /units showed that machine's map for this session's
+// project, its record matched by path or host name alone; a feed of the same ssh target under another host name, or
+// of a session that reads its map here, was judged by the host name; a feed of an older Board, with no ssh target,
+// was taken as a match; and a fetch of an older engine, which prints no maphost line, lost the feed's map that it had
+// told /units to read.
+test('the feed\'s test map is taken only from a feed of the machine the maphost line names', () => {
+  const json = JSON.parse(snapshot({ testMap: { state: 'made', sources: 3, tests: 1, age: 0 } }))
+  const feed = (host: string, local: boolean, ssh: string) => ({ host, local, ssh, records: [{ repo: 'bakery', main: '/srv/bakery', json }], live: true, heardAt: NOW, error: '' })
+  const over = 'paths\t\t/h\t\nmaprec\t/srv/bakery\nmaphost\towner@lab\nhost\t\tfeed\t0\n'
+  const here = 'paths\t\t/h\t\nmaprec\t/srv/bakery\nmaphost\t\nhost\t\tfeed\t0\n'
+  expect(parseFetch(over), over).toMatchObject({ mapRec: '/srv/bakery', mapHost: 'owner@lab' })
+  expect(parseFetch(here), here).toMatchObject({ mapRec: '/srv/bakery', mapHost: '' })
+  const cases: [string, ReturnType<typeof feed>, string | null, boolean][] = [
+    ['feed oven at owner@oven, maphost owner@lab', feed('oven', false, 'owner@oven'), 'owner@lab', false],
+    ['feed lab at owner@oven, maphost owner@lab', feed('lab', false, 'owner@oven'), 'owner@lab', false],
+    ['feed oven at owner@lab, maphost owner@lab', feed('oven', false, 'owner@lab'), 'owner@lab', true],
+    ['feed lab with no ssh, not local (an older Board), maphost owner@lab', feed('lab', false, ''), 'owner@lab', false],
+    ['feed lab on one machine, maphost this machine', feed('lab', true, ''), '', true],
+    ['feed lab at owner@lab, maphost this machine', feed('lab', false, 'owner@lab'), '', false],
+    ['feed lab at owner@lab, no maphost line (a fetch of an older engine)', feed('lab', false, 'owner@lab'), null, true],
+  ]
+  for (const [what, f, mh, has] of cases) {
+    const b = boardOfFeed(f, '', '/srv/bakery', mh)
+    if (has) expect(b.testMap, what).toMatchObject({ state: 'made', sources: 3 })
+    else expect(b, what).not.toHaveProperty('testMap')
+  }
 })
 
 // Bug it catches: the pane drew a fetch's failure note and a record's not-read note at their full width, so in a

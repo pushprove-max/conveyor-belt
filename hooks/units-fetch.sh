@@ -10,7 +10,8 @@
 #   testmap <the test map's state, JSON>: as it is made, or its state, where Conveyor runs for this checkout (below), only
 #   with .conveyor/project.json here, and with the feed only when the feed's snapshot does not carry it
 #   maprec <main>: the main checkout of the record whose feed snapshot's testMap is this checkout's map (below), only
-#   with .conveyor/project.json here and when one is
+#   with .conveyor/project.json here and when one is; then maphost <ssh target>: the machine whose feed carries it,
+#   empty for this machine
 #   engine <one line>: the project runs an old engine on this machine (below), only when it does
 #   host <name> <how> <exit> [<path looked at>...], then for every record of the host file, in its order: <repo> <its
 #   snapshot, or null>
@@ -27,8 +28,9 @@
 # is not understood).
 # Usage: units-fetch.sh [feed <units-feed.json> | fresh <repo>... | stamp | foreman]. foreman: the Foreman's lines alone, nothing else read.
 # feed: the Board's live feed, the file named, is fresh, so the board is the
-# feed's, with the test map (the testMap of the record the maprec line names, while its stream is live): only the
-# lanes, the Foreman, the engine and, when the feed does not carry it, the test map are read, and the host line is
+# feed's, with the test map (the testMap of the record the maprec line names, while its stream is live, in a feed of
+# the machine the maphost line names): only the lanes, the Foreman, the engine and, when the feed does not carry it
+# (or is of another machine), the test map are read, and the host line is
 # `host <empty> feed 0`.
 # fresh: the short check saw these records change, so their snapshots are built now (`snapshot --fresh`), not the
 # kept ones. stamp: the short check alone (below), which prints `stamps <local | ssh | none>`, then <repo> <checksum>
@@ -193,21 +195,37 @@ n=0; [ -z "$fd" ] || n=$(grep -c '^- ' "$fd/plugin-bugs.md" 2>/dev/null) || n=0
 # map (testMap, .claude/scripts/dashboard_stream.py units_snap): /units finds that record in the feed by its main, as a
 # repo name can name another checkout there (the Board may read another host file, or `{}`, which gives each checkout
 # its own record "project"). Here, this checkout; with a build machine, the main of the record named as this checkout's
-# folder. With the feed (`feed <its units-feed.json>`), the feed file is read: a record there whose main is that one
+# folder. maphost <ssh target> follows it: where this fetch reads the map, the host file's ssh target when the
+# snapshots are asked over ssh, else empty (this machine, even when the host file names a target: this checkout is
+# then a record, and its map is read here). /units takes the feed's map only from a feed of that same machine: one
+# whose ssh target is that target, or, when it is empty, a feed of one machine (local), as the feed file is this
+# machine's. The host names are not compared: one machine can have two names, and two machines can keep a checkout at
+# the same path. When the host file is not understood, neither line is printed. With the feed (`feed <its
+# units-feed.json>`), the feed file is read: when the feed is of another machine (a feed of an older Board, which
+# names no ssh target, is one when the map comes over ssh), no maprec line is printed and the map is asked as with no
+# feed. Else a record there whose main is that one
 # (here, or one that is this same folder) is named by its main as the feed gives it, and when the feed's stream is live
 # (a stream that is down keeps an old snapshot) and that record's snapshot has a testMap, the map is not asked: /units
 # reads it in that snapshot. Else it is asked as with no feed.
-tmcmd='' mmain='' skip=0
-if [ -f .conveyor/project.json ]; then
+tmcmd='' mmain='' skip=0 mssh=''
+[ "$remote" = 0 ] || mssh=$target
+if [ -f .conveyor/project.json ] && [ "$ok" = 0 ]; then
   t=${here##*/}; t=${t//[^A-Za-z0-9._-]/-}
   if [ "$remote" = 0 ]; then mmain=$here
   else mmain=$(jq -r --arg n "$t" 'first(.records[]? | select(.repo == $n) | .main) // empty' <<<"$got" 2>/dev/null); fi
-  [ "$mode" != feed ] || [ -z "$mmain" ] || while IFS= read -r -d '' m && IFS= read -r -d '' s; do
-    [ "$m" = "$mmain" ] || { [ "$remote" = 0 ] && [ "$m" -ef "$here" ]; } || continue
-    mmain=$m skip=$s; break
-  done < <(jq -j '(.stream.live == true) as $l | .records[]? | select(.main | strings | test("^/[^[:cntrl:]]*$"))
-    | .main, "\u0000", (if $l and (.snap.testMap | type) == "object" then 1 else 0 end), "\u0000"' "$feedf" 2>/dev/null)
-  [[ ! $mmain =~ ^/[^[:cntrl:]]*$ ]] || printf 'maprec\t%s\n' "$mmain"
+  # The feed's first field says whether it is this machine's (1), then its records, only when it is.
+  [ "$mode" != feed ] || [ -z "$mmain" ] || {
+    fm=0; IFS= read -r -d '' fm
+    [ "$fm" = 1 ] || mmain=''
+    while IFS= read -r -d '' m && IFS= read -r -d '' s; do
+      [ "$m" = "$mmain" ] || { [ "$remote" = 0 ] && [ "$m" -ef "$here" ]; } || continue
+      mmain=$m skip=$s; break
+    done
+  } < <(jq -j --arg s "$mssh" '(.stream.live == true) as $l
+    | (if $s == "" then .local == true else .ssh == $s end) as $same
+    | (if $same then 1 else 0 end), "\u0000", (select($same) | .records[]? | select(.main | strings | test("^/[^[:cntrl:]]*$"))
+      | .main, "\u0000", (if $l and (.snap.testMap | type) == "object" then 1 else 0 end), "\u0000")' "$feedf" 2>/dev/null)
+  [[ ! $mmain =~ ^/[^[:cntrl:]]*$ ]] || printf 'maprec\t%s\nmaphost\t%s\n' "$mmain" "$mssh"
 fi
 if [ "$skip" = 1 ]; then :
 elif [ -f .conveyor/project.json ] && [ "$remote" = 0 ]; then

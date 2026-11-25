@@ -770,7 +770,7 @@ const FEED = `${BOARD}/units-feed.json`
 const OLD_FEED = `${HOME}/.conveyor/dashboard/units-feed.json`
 // heardAt: the heartbeat, the field the Board moves on each rewrite.
 const feed = (snap: string, live = true, heardAt = ago(0)) => JSON.stringify({
-  host: 'buildbox', records: [{ repo: 'bookstore', main: MAIN, snap: JSON.parse(snap) }],
+  host: 'buildbox', local: false, ssh: 'owner@buildbox', records: [{ repo: 'bookstore', main: MAIN, snap: JSON.parse(snap) }],
   stream: { live, heardAt, since: live ? null : ago(1), error: live ? null : 'buildbox: no line in 30 s' },
 })
 const feeds = (w: World) => fetches(w).filter(r => r.argv.includes('feed'))
@@ -846,7 +846,7 @@ const OWN_MAP_LINE = 'Test map: 120 source, 40 test files · up to date with mai
 test('with the feed fresh, the test map is the feed record\'s the fetch names, and the fetch is asked for none', async ($, on) => {
   const mine = { repo: 'shop', main: '/build/bookstore', snap: JSON.parse(snapshot({ testMap: OWN_MAP })) }
   const records = [{ repo: 'bookstore', main: '/build/other', snap: JSON.parse(snapshot({ testMap: { state: 'made', sources: 7, tests: 2, age: 5 } })) }, mine]
-  const w = world(on, 'main', `paths\t\t${HOME}\t\nfast\tnone\nmaprec\t/build/bookstore\nhost\t\tfeed\t0\n`, { [FEED]: JSON.stringify({ host: 'buildbox', records, stream: { live: true, heardAt: ago(0) } }) })
+  const w = world(on, 'main', `paths\t\t${HOME}\t\nfast\tnone\nmaprec\t/build/bookstore\nmaphost\towner@buildbox\nhost\t\tfeed\t0\n`, { [FEED]: JSON.stringify({ host: 'buildbox', local: false, ssh: 'owner@buildbox', records, stream: { live: true, heardAt: ago(0) } }) })
   await start($, 'main')
   await units($)
   await w.clock.settle()
@@ -860,7 +860,7 @@ test('with the feed fresh, the test map is the feed record\'s the fetch names, a
   await w.clock.settle()
   const before = fetches(w).length
   mine.snap.testMap = { state: 'running', done: 3, of: 8 }
-  w.files.set(FEED, { text: JSON.stringify({ host: 'buildbox', records, stream: { live: true, heardAt: ago(0) } }), at: NOW + 500 })
+  w.files.set(FEED, { text: JSON.stringify({ host: 'buildbox', local: false, ssh: 'owner@buildbox', records, stream: { live: true, heardAt: ago(0) } }), at: NOW + 500 })
   await w.clock.advance(1000)
   // The pane draws the map under Machine details, closed until its Button is pressed.
   await pressDetails($)
@@ -906,7 +906,7 @@ test('a fetch that names no map record keeps its testmap line\'s map when the fe
 // back before the next fetch. Bug it catches: a fetch with no feed cleared the map's record, so the feed that came back
 // drew the fetch's old map and never the feed's.
 test('the map record a fetch with no feed names gives the map when the feed comes back', async ($, on) => {
-  const w = world(on, 'main', answer(FULL).replace('\nhost\t', `\nmaprec\t${MAIN}\ntestmap\t${JSON.stringify(OWN_MAP)}\nhost\t`))
+  const w = world(on, 'main', answer(FULL).replace('\nhost\t', `\nmaprec\t${MAIN}\nmaphost\towner@buildbox\ntestmap\t${JSON.stringify(OWN_MAP)}\nhost\t`))
   await start($, 'main')
   await units($)
   await w.clock.settle()
@@ -920,6 +920,23 @@ test('the map record a fetch with no feed names gives the map when the feed come
   const pane = await draw($, 'Pane')
   expect(pane).toContain('Test map: 3 of 8 test files')
   expect(pane).not.toContain(OWN_MAP_LINE)
+})
+
+// Issue 1667: the feed that comes back is the Board's of another build machine (its ssh target owner@oven, the
+// session's owner@buildbox), under the same host name and with bookstore at the same path. Bug it catches: /units drew
+// that machine's map, the feed's record matched by its path and host name alone; the map stays the fetch's.
+test('a feed of another ssh target does not give the map the fetch named', async ($, on) => {
+  const w = world(on, 'main', answer(FULL).replace('\nhost\t', `\nmaprec\t${MAIN}\nmaphost\towner@buildbox\ntestmap\t${JSON.stringify(OWN_MAP)}\nhost\t`))
+  await start($, 'main')
+  await units($)
+  await w.clock.settle()
+  await pressDetails($)
+  const other = JSON.parse(feed(snapshot({ testMap: { state: 'running', done: 3, of: 8 } })))
+  w.files.set(FEED, { text: JSON.stringify({ ...other, ssh: 'owner@oven' }), at: NOW + 500 })
+  await w.clock.advance(1000)
+  const pane = await draw($, 'Pane')
+  expect(pane, 'feed buildbox at owner@oven, maphost owner@buildbox').toContain(OWN_MAP_LINE)
+  expect(pane, 'feed buildbox at owner@oven, maphost owner@buildbox').not.toContain('Test map: 3 of 8 test files')
 })
 
 // #1651 review: the Board rewrites a feed whose stream is down every 10 s with its last snapshot, so the file stays
