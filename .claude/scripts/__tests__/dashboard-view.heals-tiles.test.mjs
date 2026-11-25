@@ -68,9 +68,14 @@ test('Self-heals tiles: Seen again shows the entries it counts, pressed and name
   d.panels.declined.data.heals[0].entries = ENTRIES.concat(
     entry('h00000000000x1', { time: iso(T0 - 5 * DAY), seen: iso(T0 - 1 * DAY), sightings: 1, effect: 'self-heals', why: 'the next turn picks it up', finding: '[P2] x.js:1 new' }),
     entry('h00000000000x2', { time: iso(T0 - 5 * DAY), effect: 'self-heals', why: 'the next turn picks it up', finding: '[P2] y.js:1 new' }));
+  const before = tile(w, 'seen');
+  assert.equal(w.document.activeElement, before, 'the tile has the focus before the redraw');
   next(w, d);
   assert.deepEqual(rowIds(w), ['s2', 'x1'], 'the tile and the chip hold through a redraw, and apply to the new entries');
   assert.deepEqual(pressed(w), ['seen']);
+  // Bug: a redraw replaces the tiles, and the focused tile lost the focus to the page.
+  assert.notEqual(tile(w, 'seen'), before, 'the redraw draws the tiles again');
+  assert.equal(w.document.activeElement, tile(w, 'seen'), 'the focused tile keeps the focus through a redraw');
   assert.equal(filterSaid(w), 'Showing: seen again, last 7 days × clear');
   q(w, '.sh-chip[data-kind="all"]').click();
   tile(w, 'seen').click();
