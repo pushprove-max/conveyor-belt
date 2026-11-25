@@ -134,11 +134,56 @@ breaks() {
         else if ((m == "d" && ch == "\"") || (m != "d" && ch == q)) m = "" }
       printf "%s", o }' q="'" <<<"$1"
 }
+# uncommented <command>: the command with the text of each shell comment made spaces, as bash reads no word in it: a `#`
+# that starts a word outside a quote, up to the end of its line (a backslash there continues no line). A quote in a
+# comment then opens no quote, so the quote that opens the body is found after it.
+uncommented() {
+  awk '{ s = s (NR > 1 ? "\n" : "") $0 }
+    END {
+      ws = 1
+      for (i = 1; i <= length(s); i++) {
+        ch = substr(s, i, 1)
+        if (m == "c") { if (ch == "\n") { m = ""; ws = 1 } else ch = " "; o = o ch; continue }
+        # ws: the character before ends a word (a blank or an operator outside a quote, with no backslash before it); a
+        # line continuation (a backslash before a newline) is no character, so it keeps ws.
+        if (m == "" && ch == "#" && ws) { m = "c"; o = o " "; continue }
+        if (ch == "\\" && m != "s") { nx = substr(s, i + 1, 1); o = o ch nx; i++; if (nx != "\n") ws = 0; continue }
+        o = o ch
+        if (m == "") { ws = ch ~ /[ \t\n;&|()<>]/; if (ch == "\"") m = "d"; else if (ch == q) m = (substr(s, i - 1, 1) == "$" ? "a" : "s") }
+        else if ((m == "d" && ch == "\"") || (m != "d" && ch == q)) { m = ""; ws = 0 } }
+      printf "%s", o }' q="'" <<<"$1"
+}
+# unquoted <command>: the command with the text in each quote made x (the quote marks kept), so a `<<WORD` written in a
+# quote (`echo 'Use <<EOF'`) is no here-document. A `$(` or a backquote in a double quote starts shell text again, up to
+# its own `)` or backquote, so the `<<'EOF'` of `--body "$(cat <<'EOF'` stays. d: the depth of the stack m of what each
+# open part is ("" shell text, s '...', a $'...', d "...", p $(...), b `...`); c[d]: the open ( in a $(...) part.
+unquoted() {
+  awk '{ s = s (NR > 1 ? "\n" : "") $0 }
+    END {
+      d = 0; m[0] = ""
+      for (i = 1; i <= length(s); i++) {
+        ch = substr(s, i, 1); nx = substr(s, i + 1, 1); t = m[d]
+        if (t == "s") { if (ch == q) { d--; o = o ch } else o = o "x"; continue }
+        if (t == "a" || t == "d") {
+          if (ch == "\\") { o = o "xx"; i++; continue }
+          if ((t == "a" && ch == q) || (t == "d" && ch == "\"")) { d--; o = o ch; continue }
+          if (t == "d" && ch == "$" && nx == "(") { m[++d] = "p"; c[d] = 0; o = o ch nx; i++; continue }
+          if (t == "d" && ch == "`") { m[++d] = "b"; o = o ch; continue }
+          o = o "x"; continue }
+        o = o ch
+        if (ch == "\\") { o = o nx; i++; continue }
+        if (ch == q) m[++d] = (substr(s, i - 1, 1) == "$" ? "a" : "s")
+        else if (ch == "\"") m[++d] = "d"
+        else if (t == "b" && ch == "`") d--
+        else if (t == "p" && ch == "(") c[d]++
+        else if (t == "p" && ch == ")") { if (c[d]) c[d]--; else d-- } }
+      printf "%s", o }' q="'" <<<"$1"
+}
 no_cause() {
   local cmd f t ti=0 fc=
   cmd=$(jq -r '.tool_input.command // ""' <<<"$1" 2>/dev/null) || return 1
-  # j: the command with its line continuations (a backslash before a newline) taken out, as Bash reads its words; the
-  # words are matched in it, the body text in cmd as written.
+  # j: the command with its line continuations (a backslash before a newline) taken out, as Bash reads its words; an
+  # `ask <project> testissue` is matched in it.
   local j=${cmd//$'\\\n'/}
   t=${j//[\"\']/}
   [[ $t =~ (^|[[:space:];\&|])ask[[:space:]]+[^[:space:]]+[[:space:]]+testissue([[:space:]]|$) ]] && ti=1
@@ -152,12 +197,18 @@ no_cause() {
   # allows): after a newline or the quote that opens the body, so '### Cause' and a mention of
   # '## What happens now' in a sentence are no heading.
   # A line inside a fenced code block (``` or ~~~) is no heading: the headings are read from the text without its fences.
-  local hs=$'(^|\n|["\'])[ ]{0,3}##[[:space:]]+' he=$'[ \t]*(\n|$)' hc='' hd=$'<<-?[ ]*[\'"]?[A-Za-z_][A-Za-z_0-9]*[\'"]?[ ]*\\)*[ ]*\n'
+  local hs=$'(^|\n|["\'])[ ]{0,3}##[[:space:]]+' he=$'[ \t]*(\n|$)' hc='' hd=$'(^|[^<])<<-?[ ]*[\'"]?[A-Za-z_][A-Za-z_0-9]*[\'"]?[ ]*\\)*[ ]*\n'
   # A command with a here-document (`<<WORD` ending its line) holds its body as written: `\n` there is text, and a quote
   # ends nothing; so does a body file (read apart from the command). In an inline body a written `\n` in a `$'...'` quote
   # is a line break; elsewhere it is a backslash and an n, which starts or ends no fence and starts no heading (breaks);
   # `\\n` is a backslash and an n. The quote that opens the body is the one that closes it.
-  if [[ $cmd =~ $hd ]]; then hc=$(unfenced 0 "" "$cmd")
+  # u: the command with its shell comments made spaces (uncommented), so a quote, a `<<WORD` or a heading in a comment
+  # is read as none. An inline body is found and read in u; a here-document body is read from cmd, as a `#` line in it
+  # is Markdown, not a comment. The `<<WORD` is looked for outside quotes (unquoted): one in a quote is text. A `<<<` is
+  # a here-string, no here-document: its last two `<` start none.
+  local u
+  u=$(uncommented "$cmd")
+  if [[ $(unquoted "$u") =~ $hd ]]; then hc=$(unfenced 0 "" "$cmd")
   else
     # `ask <project> testissue <test file> <title> <body>` has no --body (a `--body` in its text is text): its body is
     # the word after the title. A word is parts with no unquoted space: $'...', '...', "...", a \-escaped character
@@ -165,24 +216,25 @@ no_cause() {
     # whole from the command start (pre), so an `ask ... testissue` or a `--body "` written inside a quote (a gh title)
     # is text: the body quote comes from the real `--body`.
     local w="((\\\$'([^'\\\\]|\\\\.)*'|'[^']*'|\"([^\"\\\\]|\\\\.)*\"|\\\\.|\\\$[^'\"[:space:]\\\\]|[^[:space:]'\"\\\\\$])+)"
-    local pre="^(([[:space:];&|]|${w})*[[:space:];&|])?" rest=$j n at r i e qs=() ats=()
+    local pre="^(([[:space:];&|]|${w})*[[:space:];&|])?" rest n at r i e qs=() ats=()
     local ask="ask[[:space:]]+${w}[[:space:]]+[\"\']?testissue[\"\']?[[:space:]]+${w}[[:space:]]+${w}[[:space:]]+"
     # A command that files more than one issue has a body quote for each: the longest match finds the last body, and
     # the text before it is searched again. Each body is read from its `--body` (or `ask`) word with its own quote, so
-    # one body's quote is never used to read another's fences. at: where that word starts in cmd, as j has no line
-    # continuations (each is two characters fewer in j).
+    # one body's quote is never used to read another's fences. at: where that word starts in u, as rest has no line
+    # continuations (each is two characters fewer in rest).
+    rest=${u//$'\\\n'/}
     while [[ $rest =~ ${pre}(${ask}|(--body|-b)[[:space:]=]+)\$?([\'\"]) ]]; do
       n=${#BASH_REMATCH[1]}; qs=("${BASH_REMATCH[-1]}" "${qs[@]}"); rest=${rest:0:n}
-      at=$n; r=${cmd:0:at}; r=${r//$'\\\n'/}
-      while [ "${#r}" -lt "$n" ]; do at=$((at + n - ${#r})); r=${cmd:0:at}; r=${r//$'\\\n'/}; done
+      at=$n; r=${u:0:at}; r=${r//$'\\\n'/}
+      while [ "${#r}" -lt "$n" ]; do at=$((at + n - ${#r})); r=${u:0:at}; r=${r//$'\\\n'/}; done
       ats=("$at" "${ats[@]}")
     done
     # The text before the first body is read with it; with no body quote found, either quote may open the body.
     [ "${#qs[@]}" -gt 0 ] || qs=('')
     ats[0]=0
     for i in "${!qs[@]}"; do
-      e=${ats[i + 1]:-${#cmd}}
-      hc+=$(unfenced 1 "${qs[i]}" "$(breaks "${cmd:ats[i]:e - ats[i]}")")$'\n'
+      e=${ats[i + 1]:-${#u}}
+      hc+=$(unfenced 1 "${qs[i]}" "$(breaks "${u:ats[i]:e - ats[i]}")")$'\n'
     done
   fi
   hc=${hc//$'\002'/\\n}

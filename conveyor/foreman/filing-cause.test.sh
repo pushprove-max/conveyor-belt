@@ -205,6 +205,29 @@ refused "gh issue create --label bug --title Fix --body \$'~~~\n ## Cause\n~~~';
 refused "gh issue create --label bug --title Fix \\
 --body \$'~~~\n ## Cause\n~~~'; \\
 foreman.sh ask alpha testissue conveyor/x.test.sh Slow \"Summary\""
+# #1623: the issue's proof, a fenced `## Cause` after a shell comment that holds a double quote, is refused.
+refused $'# The form prints a literal "\ngh issue create --label bug --title Example --body \'~~~\n## Cause\n~~~\''
+# Bug (#1623 review E1): the comment's `"` was read as an open quote, so no body quote was found and `~~~"` (text in the
+# `'...'` body) closed the fence: the fenced `## Cause` counted. The same with a `'` in the comment and a `"..."` body.
+refused $'# The form prints a literal "\ngh issue create --label bug --title Example --body \'~~~\n~~~"\n## Cause\n~~~\''
+refused $'# it\'s\ngh issue create --label bug --title Example --body "~~~\n~~~\'\n## Cause\n~~~"'
+# Bug (#1623): with no body quote, `x "```` (text in the `'...'` body) opened a fence, so the real fence after it was
+# read as its end and the `## Cause` in the real fence counted.
+refused $'# The form prints a literal "\ngh issue create --label bug --title Example --body \'## What happens now\nx "```\n```\n## Cause\n```\n```\''
+# Bug (#1623): a `<<EOF` in a comment made the command read as a here-document, where a quote opens no fence; and a
+# `## Cause` comment line counted as the body's Cause section.
+refused $'# use <<EOF\ngh issue create --label bug --title Example --body \'~~~\n## Cause\n~~~\''
+refused $'## Cause\ngh issue create --label bug --title Example --body \'## What happens now\nx\''
+# Bug (#1623 review E2): a `<<EOF` in a quote, with the comment after it made spaces, ended its line, so the command was
+# read as a here-document and the fenced `## Cause` counted. A `<<` in a quote is text.
+refused $'echo \'Use <<EOF\' # example\ngh issue create --label bug --title Example --body \'~~~\n## Cause\n~~~\''
+# Bug (#1623 review E3): the last two `<` of a `<<<` here-string, before a quote made x, were read as a here-document,
+# where a quote opens no fence, so the fenced `## Cause` counted. A `<<<` is no here-document.
+refused $'gh issue create --label bug --title Example --body-file - <<< \'~~~\n## Cause\n~~~\'\n# example'
+# Bug (#1623): a `#` after a line continuation starts a comment as bash reads it (the continuation is no character).
+refused $'echo a \\\n# "\ngh issue create --label bug --title Example --body \'~~~\n~~~"\n## Cause\n~~~\''
+# A comment ends at its line end: the body after it is read, and its real Cause section lets the issue through.
+passes $'# a comment "\ngh issue create --label bug --title Example --body \'## What happens now\nx\n## Cause\ny\''
 }
 
 # unfenced <inline> <quote> <text> keeps what is outside the fences and reads on after each block ends.
