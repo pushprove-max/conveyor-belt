@@ -106,8 +106,24 @@ t_words_claim_fails() {
   jq -e '.hookSpecificOutput | (.additionalContext | contains("the claim failed")) and (has("sessionTitle") | not)' <<<"$out" > /dev/null     || fail "the words whose claim failed gave a sessionTitle, or did not say the claim failed: $out"
   [ ! -e "$FD/titled" ] || fail "a failed claim noted the session as named: $(cat "$FD/titled")"
 }
+# cc_pid (lib.sh), run two processes below the case's own, finds this shell, the Claude Code process of the fixture, with
+# one ps. Bug it catches: one ps for each ancestor, each a read of every process, made a claim or start slow on a busy
+# machine, and foreman-size.test.sh ran past its time limit under the test step's strace.
+t_ccpid() {
+  local real out n cmd
+  fixture ccpid
+  real=$(command -v ps) && mkdir -p "$T/bin" || fail "no ps on PATH, or no stub folder"
+  # stub: ps counts its calls in $T/ps.calls, then runs the real ps, so the walk is the real one.
+  printf '#!/usr/bin/env bash\necho x >> %q\nexec %q "$@"\n' "$T/ps.calls" "$real" > "$T/bin/ps" && chmod +x "$T/bin/ps" || fail "the ps stub was not made"
+  # The outer bash runs a command after the inner one, so it stays a process of its own between them and this case.
+  cmd='bash -c ". \"\$1\" && PATH=\$2:\$PATH cc_pid" _ "$1" "$2"; :'
+  out=$(bash -c "$cmd" _ "$SRC/lib.sh" "$T/bin")
+  n=$(grep -c '' "$T/ps.calls" 2>/dev/null)
+  [ "$out" = "$$" ] && [ "$n" = 1 ] \
+    || fail "bash -c '$cmd' (cc_pid, with $HOME/.claude/sessions/$$.json) printed '$out' after $n ps calls, not $$ after 1"
+}
 
-cases=(startup resume clear auto group other words words_claim words_claim_fails)
+cases=(startup resume clear auto group other words words_claim words_claim_fails ccpid)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

@@ -569,6 +569,8 @@
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/foreman/foreman-size.test.sh",
+    "conveyor/foreman/foreman-title.test.sh",
     "conveyor/foreman/foreman.test.sh"
   ],
   "conveyor/foreman/plugin-problem.test.sh": [
@@ -905,10 +907,12 @@
   ],
   "hooks/sources.test.tsx": [
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/foreman/foreman-size.test.sh",
     "conveyor/tests/port.test.sh"
   ],
   "hooks/sources.ts": [
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "conveyor/foreman/foreman-size.test.sh",
     "conveyor/tests/port.test.sh"
   ],
   "hooks/units.test.tsx": [

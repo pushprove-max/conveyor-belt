@@ -258,11 +258,16 @@ told() { awk -v s="$1" '{ print ($0 == s ? s " told" : $0) }' "$FD/former" > "$F
 # Foreman's cannot be told then, and a mark in the wrong one would make a second Foreman.
 claim() { locked claim_ "${1:-}"; }
 # cc_pid: the Claude Code process this command runs under: the nearest of its ancestors with a sessions/<pid>.json
-# (Claude Code's file for a running session); prints nothing when there is none.
+# (Claude Code's file for a running session); prints nothing when there is none. It reads the process table once and
+# walks the ancestors in it. Bug: one ps for each ancestor, each a read of every process, made a claim or start slow
+# on a busy machine (under the test step's strace, foreman-size.test.sh ran past its time limit).
 cc_pid() {
-  local p=$PPID cc=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
-  while [ "${p:-0}" -gt 1 ] && [ ! -f "$cc/sessions/$p.json" ]; do p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' '); done
-  [ "${p:-0}" -gt 1 ] && printf '%s' "$p"
+  local p cc=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+  for p in $(LC_ALL=C ps -A -o pid= -o ppid= 2>/dev/null | awk -v p="$PPID" '{ pp[$1] = $2 }
+    END { while (p + 0 > 1 && !(p in seen)) { seen[p]; print p; p = pp[p] } }'); do
+    [ ! -f "$cc/sessions/$p.json" ] || { printf '%s' "$p"; return 0; }
+  done
+  return 1
 }
 # claude_rec: records the Claude process of the marked session in $FD/claude.pid (empty when none is found).
 claude_rec() { { cc_pid > "$FD/claude.pid.new" || : ; } && mv "$FD/claude.pid.new" "$FD/claude.pid"; }
