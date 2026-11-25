@@ -15,15 +15,15 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # Main ($R, setup with <issues json>) holds a persisted-contract writer, src/repositories/widget-repository.ts, with a
 # reader and a writer export, pushed. Its pre-push hook runs the check on each pushed range from the installed Conveyor
-# (this engine's .claude/hooks/adversarial-review-gate.sh): main holds no copy of it, as in a project that loads it so.
-# <hook> 0 leaves the hook out.
-contractmain() { # <issues json> [<hook>]
+# (this engine's .claude/hooks/adversarial-review-gate.sh, or <checker>): main holds no copy of it, as in a project that
+# loads it so. <checker> 0 leaves the hook out.
+contractmain() { # <issues json> [<checker>]
   setup "$1"
   mkdir -p "$R/src/repositories" && printf '%s\n' 'export function readWidget(id) {' '  return id;' '}' 'export function saveWidget(id) {' '  return id;' '}' > "$R/src/repositories/widget-repository.ts" \
     && git -C "$R" add -A && git -C "$R" commit -qm 'the writer' && git -C "$R" push -q origin main || fail "main's writer"
-  [ "${2:-1}" = 0 ] && return
+  [ "${2:-}" = 0 ] && return
   printf '%s\n' '#!/usr/bin/env bash' 'z=0000000000000000000000000000000000000000' \
-    "while read -r _ l _ r; do [ \"\$r\" = \"\$z\" ] || bash '$SRC/../.claude/hooks/adversarial-review-gate.sh' --contract-range \"\$r\" \"\$l\" || exit 1; done" \
+    "while read -r _ l _ r; do [ \"\$r\" = \"\$z\" ] || bash '${2:-$SRC/../.claude/hooks/adversarial-review-gate.sh}' --contract-range \"\$r\" \"\$l\" || exit 1; done" \
     > "$R/.git/hooks/pre-push" && chmod +x "$R/.git/hooks/pre-push" || fail "main's pre-push hook"
 }
 # A change that adds the writer saveGadget to widget-repository.ts.
@@ -77,11 +77,12 @@ t_contracttwowriters() {
 
 # Bug it catches: the gate ran a checker other than the one Git runs at push, so a change the push refuses could land:
 # a copy in main's checkout, or this engine's own, while the project's engine is another install. With the pack pinned
-# to a commit whose install's checker refuses, and passing copies in main's checkout and in this engine, the gate's
-# check is that install's.
+# to a commit whose install's checker refuses, main's pre-push hook loading that install's checker, and passing copies
+# in main's checkout and in this engine, the gate's check is that install's, and a push of the same change gets the
+# same refusal: the gate and the push run one checker.
 t_contractpinned() {
-  contractmain '[]'
   local c=0123456789abcdef0123456789abcdef01234567
+  contractmain '[]' "$T/$CASE/versions/$c/.claude/hooks/adversarial-review-gate.sh"
   tune --arg c "$c" '.plugin.commit = $c'
   mkdir -p "$T/$CASE/versions/$c/.claude/hooks" "$R/.claude/hooks" \
     && printf '%s\n' 'echo "BLOCKED: the pinned install checked this" >&2; exit 2' > "$T/$CASE/versions/$c/.claude/hooks/adversarial-review-gate.sh" \
@@ -91,6 +92,11 @@ t_contractpinned() {
   fx_in 'VERSIONS=$T/$CASE/versions; contractrun "$FXWT"; echo "rc=$? $CONTRACT_OUT"'
   grep -qx 'rc=2 BLOCKED: the pinned install checked this' "$T/$CASE/run.out" \
     || fail "the gate did not run the pinned install's checker on the change ($GADGET; $COVER): $(cat "$T/$CASE/run.out")"
+  local push
+  git -C "$FXWT" commit -qm 'the change' || fail "the card's commit"
+  push=$(git -C "$FXWT" push origin HEAD:main 2>&1) && fail "the push of the change ($GADGET; $COVER) was not refused: $push"
+  grep -qx 'BLOCKED: the pinned install checked this' <<<"$push" \
+    || fail "the push of the change ($GADGET; $COVER) did not run the gate's checker, the pinned install's: $push"
 }
 
 # Bug it catches: with batches on, a card that waits to land runs its checks and tests and is marked tested, so a batch
