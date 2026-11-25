@@ -496,24 +496,25 @@ while IFS= read -r -d '' f; do [ -f "$1/$f" ] && files+=("$1/$f"); done \
 [ ${#files[@]} -gt 0 ] || fail "git lists no file in $1"
 }
 
+# t_privacy [<folder> <terms file>]: the Foreman's folder and this machine's terms with none given; t_privacy_nested
+# gives a folder and terms of its own.
 t_privacy() {
 CASE=privacy
-local files; privacy_files "$SRC"
-bash "$SRC/../privacy/check.sh" --terms "$TERMS" "${files[@]}" "$SRC/../../commands/"*.md || fail "a Foreman file names something private"
+local dir=${1:-$SRC} terms=${2:-$TERMS} files; privacy_files "$dir"
+bash "$SRC/../privacy/check.sh" --terms "$terms" "${files[@]}" "$SRC/../../commands/"*.md || fail "a Foreman file names something private"
 }
 
 # Bug (issue 1681): the privacy case gave the check "$SRC"/*, so a file in a folder under the Foreman's (tests/) was
-# never checked. A folder of its own stands in for the Foreman's (the real one holds no private term): a term in a
-# nested file fails the check, and the check names that file.
+# never checked. A folder of its own stands in for the Foreman's (the real one holds no private term): the privacy
+# case itself (t_privacy, in a subshell, as its fail ends it) fails on a term in a nested file and names that file.
 t_privacy_nested() {
-local d=$T/fm files out rc
+local d=$T/fm out rc
 mkdir -p "$d/tests" && git init -q "$d" || fail "cannot make the folder $d"
 echo 'echo top' > "$d/top.sh"; echo 'echo zyxwvprivate' > "$d/tests/helper.sh"; echo zyxwvprivate > "$T/terms"
 git -C "$d" add top.sh
-privacy_files "$d"
-out=$(bash "$SRC/../privacy/check.sh" --terms "$T/terms" "${files[@]}" 2>&1); rc=$?
-[ "$rc" = 1 ] || fail "check.sh --terms $T/terms ${files[*]}: status $rc, not 1 (a hit): $out"
-[[ $out == *"$d/tests/helper.sh:1:"* ]] || fail "check.sh --terms $T/terms ${files[*]}: does not name $d/tests/helper.sh: $out"
+out=$(t_privacy "$d" "$T/terms" 2>&1); rc=$?
+[ "$rc" = 1 ] && [[ $out == *"FAIL [privacy]"* ]] || fail "t_privacy $d $T/terms: status $rc, not a privacy failure: $out"
+[[ $out == *"$d/tests/helper.sh:1:"* ]] || fail "t_privacy $d $T/terms: does not name $d/tests/helper.sh: $out"
 }
 
 # Every case at once, each in a subshell on its own fixture; each one's output is shown once all have ended, and the
