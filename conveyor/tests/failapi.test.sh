@@ -118,14 +118,19 @@ t_apihold() {
     || fail "the held card's live record does not say what it waits for and until when: $(cat "$STUB/waitlive" 2>&1)"
 }
 # Bug: a Codex review started while an API error was fresh: only Claude sessions were held. An API error marked fresh
-# for 1 s (as another card's refused session marks it); the Codex review starts only once the error is no longer
-# fresh, the card's live record saying meanwhile what it waits for.
+# (as another card's refused session marks it); the Codex review starts only once the error is no longer fresh, the
+# card's live record saying meanwhile what it waits for.
+# Issue 1604: marked fresh for 1 s before the engine shell loaded, the mark could pass under a full run's load before
+# the review reached its hold, so nothing waited. The mark is now an hour ahead, and the hold's first sleep ends the
+# outage (moves the mark to that time, in $STUB/marked) in place of the wait, so the hold is met at any load.
 t_apicodex() {
   setup '[]'; printf '%s\n' "$GO" > "$STUB/review.1"; fx_wt 'echo two >> a.txt' b.txt one
   # shellcheck disable=SC2016
   echo 'date +%s.%N >> "$STUB/rcalls"' > "$STUB/review-cmd"
-  mkdir -p "$ST"; jq -n 'now + 1' > "$ST/apierror"; cp "$ST/apierror" "$STUB/marked"
-  apicall 'reviewed "$FXWT" "Build the issue."; echo "rc=$? $(verdict "$FXWT.review")"'
+  mkdir -p "$ST"; jq -n 'now + 3600' > "$ST/apierror"
+  # Each of apihold()'s sleeps adds the live record it sleeps on to $STUB/waits (as apicall's does) and ends the outage.
+  local held='sleep() { [ "${FUNCNAME[1]}" = apihold ] || { command sleep "$@"; return; }; cat "$FXWT.live" >> "$STUB/waits"; jq -n now > "$APIERR"; cp "$APIERR" "$STUB/marked"; }; ' # sleep: any other wait of the engine's, passed on unchanged
+  apicall "$held"'reviewed "$FXWT" "Build the issue."; echo "rc=$? $(verdict "$FXWT.review")"'
   [ "$(tail -n 1 "$T/$CASE/run.out")" = "rc=0 GO" ] && [ "$(wc -l < "$STUB/rcalls")" = 1 ] || fail "the review did not answer GO once: $(cat "$T/$CASE/run.out")"
   jq -en --argjson s "$(sed -n 1p "$STUB/rcalls")" --slurpfile u "$STUB/marked" '$s >= $u[0]' >/dev/null \
     || fail "a Codex review started while the API error was fresh: fresh until $(cat "$STUB/marked"), the review at $(sed -n 1p "$STUB/rcalls")"
