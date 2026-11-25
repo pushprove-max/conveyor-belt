@@ -44,7 +44,9 @@ sgbrief() {
 # files: ["*.sh"] loses the definition in tests/h.bats, and the case fails.
 t_briefsg() {
   local v=$T/$CASE/data/conveyor/board-venv/bin
-  mkdir -p "$v" && cat > "$v/ast-grep" <<'EOF' && chmod +x "$v/ast-grep" || fail "the ast-grep stand-in could not be made"
+  mkdir -p "$v" || fail "the ast-grep stand-in's folder could not be made"
+  # A statement of its own: bash 5.2 reads a heredoc in an && or || chain back from declare -f (run_case) as a syntax error.
+  cat > "$v/ast-grep" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" != --version ] || { echo 'ast-grep 0.51.3'; exit 0; }
 [ "$1 $2 $4 $5 $6 $7" = 'scan --inline-rules --json=stream --inspect entity --' ] || { echo "ast-grep stand-in: no answer for: $*" >&2; exit 2; }
@@ -81,6 +83,7 @@ case "$n -- $*" in
   *) echo "ast-grep stand-in: no answer for: $n -- $*" >&2; exit 2 ;;
 esac
 EOF
+  chmod +x "$v/ast-grep" || fail "the ast-grep stand-in could not be made"
   export XDG_DATA_HOME=$T/$CASE/data
   sgbrief
   local want

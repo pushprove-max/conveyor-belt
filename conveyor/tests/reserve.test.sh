@@ -58,8 +58,8 @@ t_reservepool() {
 # session, through the words every session uses, slot_keepwords) runs on the cores left, at its caller's priority,
 # with a host file that still sets the removed steer; with no cores kept its words are none.
 t_reservesession() {
-  # shellcheck disable=SC2034 # BUILD_TIMEOUT is read by builder()
-  local d=$T/$CASE KEEP BUILD_TIMEOUT=30 n c
+  # shellcheck disable=SC2034 # BUILD_TIMEOUT and HERE (the engine folder, as conveyor.sh sets it) are read by builder()
+  local d=$T/$CASE KEEP BUILD_TIMEOUT=30 n c HERE=$SRC
   command -v taskset >/dev/null || return 0
   n=$(nproc --all); [ "$n" -ge 3 ] || return 0
   mkdir -p "$d/bin" "$d/wt"

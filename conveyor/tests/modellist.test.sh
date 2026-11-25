@@ -391,7 +391,9 @@ t_nopricekept() {
   printf -v t '%(%Y%m%d%H%M.%S)T' $(($(date +%s) - 20)); touch -t "$t" "$n" || fail "plugin-bugs.md could not be dated"
   printf -v t '%(%Y%m%d%H%M.%S)T' $(($(date +%s) - 10)); touch -t "$t" "$ST/snapshot.json" "$ST/snapshot.json.at" || fail "the kept snapshot could not be dated"
   at=$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$(p_mtimes "$ST/snapshot.json" | cut -d' ' -f1)")
-  mkdir -p "$py" && cat > "$py/sitecustomize.py" <<'PY' || fail "the sitecustomize could not be written"
+  mkdir -p "$py" || fail "the sitecustomize's folder could not be made"
+  # A statement of its own: bash 5.2 reads a heredoc in an && or || chain back from declare -f (run_case) as a syntax error.
+  cat > "$py/sitecustomize.py" <<'PY'
 import os, sys, time
 if sys.argv[0].endswith("cardruns.py"):
     open(os.environ["NOPRICE_HELD"], "w").close()
@@ -400,6 +402,7 @@ if sys.argv[0].endswith("cardruns.py"):
             break
         time.sleep(0.1)  # sleep: the pause between two looks for go, which the case makes after its reads
 PY
+  [ -s "$py/sitecustomize.py" ] || fail "the sitecustomize could not be written"
   touch "$ST/cards.jsonl"
   NOPRICE_HELD=$T/$CASE/held NOPRICE_GO=$T/$CASE/go PYTHONPATH=$py loop snapshot > /dev/null \
     || fail "the reader that starts the writer exited non-zero"

@@ -15,7 +15,7 @@ export HOME=$T/home XDG_CONFIG_HOME=$T/config XDG_DATA_HOME=$T/data
 I=$XDG_DATA_HOME/conveyor/versions/$A M=$T/alpha FD=$T/foreman
 # The install of $A: the watcher, the Foreman's lib and the files they read, as an install holds them.
 mkdir -p "$HOME" "$FD" "$XDG_CONFIG_HOME/conveyor" "$I/conveyor/lib" "$I/.claude/scripts" && cp -r "$SRC" "$I/conveyor/" \
-  && cp "$SRC/../lib/portable.sh" "$I/conveyor/lib/" && cp "$SRC/../../.claude/scripts/dashboard_needs.json" "$I/.claude/scripts/" \
+  && cp "$SRC/../lib/portable.sh" "$SRC/../lib/standing.sh" "$I/conveyor/lib/" && cp "$SRC/../../.claude/scripts/dashboard_needs.json" "$I/.claude/scripts/" \
   && jq -n --arg m "$M" '{records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json" \
   && git init -q "$M" && mkdir -p "$M/.conveyor" && jq -n '{plugin: {follow: "main"}}' > "$M/.conveyor/project.json" \
   || fail "the fixture was not made"
