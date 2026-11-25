@@ -121,9 +121,14 @@
   // Declined, a card's review output, a blocked card's reason and Health's lists all draw their text with these
   // (window.DASH_APP.text, findingText here): each `code` span set apart (app.css .why-code), each file and line a link to that line.
   // A text with no code span and no path draws as plain text.
-  // A text split into sentences, each a list of parts: {code} (a span the text has in backticks, drawn without them)
-  // or {text}. A sentence ends at a . ! or ? before a space, outside backticks; the space stays at its end, so the
-  // sentences joined (with the backticks) are the text as written. A lone backtick is left as text.
+  // A code span: a run of backticks, then text, then a run of the same length (as in Markdown), so a span in double
+  // backticks can hold a single backtick: ``a `b` c`` is the code "a `b` c". One space just inside each end of a span
+  // that has both is not code (Markdown's padding round code that starts or ends with a backtick).
+  const CODE = /(?<!`)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
+  const unpad = (c) => (/^ [\s\S]* $/.test(c) && /\S/.test(c) ? c.slice(1, -1) : c);
+  // A text split into sentences, each a list of parts: {code} (a code span, drawn without its backticks) or {text}.
+  // A sentence ends at a . ! or ? before a space, outside code spans; the space stays at its end. A backtick that opens
+  // no span is left as text.
   function sentences(text) {
     const out = [[]];
     let at = 0;
@@ -136,9 +141,9 @@
       }
       if (from < s.length) out[out.length - 1].push({ text: s.slice(from) });
     };
-    for (const m of text.matchAll(/`([^`]+)`/g)) {
+    for (const m of text.matchAll(CODE)) {
       plain(text.slice(at, m.index));
-      out[out.length - 1].push({ code: m[1] });
+      out[out.length - 1].push({ code: unpad(m[2]) });
       at = m.index + m[0].length;
     }
     plain(text.slice(at));
@@ -218,9 +223,10 @@
     }
     return el;
   }
-  // Where a finding's proof starts: its "Proof:" outside backticks, else -1; label: the "Proof:" and the space after it.
+  // Where a finding's proof starts: its "Proof:" outside code spans, else -1; label: the "Proof:" and the space after it.
+  const PROOF = new RegExp(`${CODE.source}|\\bProof:\\s*`, 'g');
   function proofAt(s) {
-    for (const p of s.matchAll(/`[^`]*`|\bProof:\s*/g)) if (p[0][0] !== '`') return { at: p.index, label: p[0] };
+    for (const p of s.matchAll(PROOF)) if (p[0][0] !== '`') return { at: p.index, label: p[0] };
     return { at: -1, label: '' };
   }
   const findingText = { sentences, pathsIn, repoOf, fileUrl, lineUrl, barePaths, linkTo, codeEl, fill, proofAt };

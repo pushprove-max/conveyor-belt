@@ -128,6 +128,26 @@ test('Declined: a reason links a file:line on a main-red fix card, finds the ful
     + ' Declined on #250: [P3] [E1][cleanup] conveyor/lib/rules.sh:20 an id before the mark.', 'hover names every finding at that line declined before the reason, not one picked of them, and none declined after it');
 });
 
+// Bug: the shared renderer (app-text.js sentences) took only single-backtick spans, so a reason or finding that put a
+// command holding a backtick in double backticks showed the outer backticks raw and cut the code at the inner one;
+// and a "Proof:" inside such a span was taken for the finding's proof.
+test('Declined: a span in double backticks is one code span with its inner backticks, and its "Proof:" is not the proof', () => {
+  const w = boot();
+  const data = full();
+  const finding = '[P2] a.txt:3 It runs ``echo `Proof: x` | sh`` twice. Proof: Run it.';
+  data.panels.declined.data.lines = [line({ finding, why: 'The command ``a `b` c`` and `` `d` `` are code.', by: 'owner', round: null, findings: null })];
+  deliver(w, data);
+  const row = rowOf(w, '[P2] a.txt:3 It runs echo `Proof: x` | sh twice. Proof: Run it.');
+  const f = row.querySelector('.declined-finding');
+  assert.equal(f.querySelector('strong.declined-claim').textContent, 'It runs echo `Proof: x` | sh twice. ', `the claim of ${finding} keeps its code span whole`);
+  assert.equal(f.querySelector('.declined-proof').textContent, 'Proof: Run it.', `the proof of ${finding} starts at its Proof: outside code`);
+  assert.deepEqual(Array.from(f.querySelectorAll('strong code'), (c) => c.textContent), ['echo `Proof: x` | sh']);
+  const r = row.querySelector('.reason');
+  assert.deepEqual(Array.from(r.querySelectorAll('code'), (c) => c.textContent), ['a `b` c', '`d`'],
+    'double-backtick spans are code without their outer backticks or padding spaces');
+  assert.equal(r.querySelector('.why-text').textContent, 'The command a `b` c and `d` are code.');
+});
+
 // Bug (#412): a finding was one long bold paragraph with its backticks shown raw, and in it and in its reason code and
 // file paths read like the prose round them; a bare path (no backticks) was not linked.
 const LONG = '[P2] src/services/fold-cutover-preflight.ts:338 The hash check accepts a box count the manifest refuses. Proof: Set `componentInnerBoxes: 2` in the fixture. '

@@ -209,8 +209,8 @@ test('Needs you: a new P0 with a \'"\' in a two-backtick code span before a cut 
   deliver(w, d);
   const rows = Array.from(blockedRow(w).querySelectorAll(':scope > details.block-more .output-finding'));
   assert.deepEqual(rows.map((r) => r.querySelector('.finding-claim').textContent), ['deletes the data.', 'broken'], `one row a finding for the reason ${reason}`);
-  // The text renderer draws the inner `"` as a code element and keeps the outer backticks as text.
-  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, p0.slice(p0.indexOf('it prints')).replace('`"`', '"'), `the P0 proof is whole for the reason ${reason}`);
+  // The text renderer draws the two-backtick span as one code element "\"", with no backtick left as text.
+  assert.equal(rows[0].querySelector('.finding-proof-text').textContent, p0.slice(p0.indexOf('it prints')).replace('``"``', '"'), `the P0 proof is whole for the reason ${reason}`);
 });
 
 // Bug: a single repeated P0 whose proof quotes "; [P1]" (cardfix() joins nothing) drew as two rows, split at the
