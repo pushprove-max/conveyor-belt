@@ -108,7 +108,36 @@ if [ -e "$cfg" ]; then
 fi
 # The snapshots are asked over ssh with a build machine, unless this checkout is a record of the host file or its main.
 remote=0; [ "$ok" != 0 ] || [ -z "$target" ] || [ "$rec" = 1 ] || [ "$here" -ef "$main" ] || remote=1
-# stamp: the short check. For every record, in one command where the snapshots are asked (one ssh call at most), a
+# Over ssh, one connection to the build machine is kept open for 120 s after its last use (ControlPersist), its
+# socket in a folder only this user can open: the next stamp or poll goes through it, with no new login. The socket's
+# name is ssh's own %C, a hash of the user, host and port that ssh resolves from its config: a target whose HostName,
+# Port or User changes gets a new connection. A socket with no ssh behind it, ssh takes away itself and connects anew
+# (ControlMaster=auto). Before each call, a kept connection (`-O check`) must run `true` within 2 s: one whose
+# connection is dead (it fails, or does not answer) is stopped (`-O exit`), and the call opens a new one; when it
+# cannot be stopped, the call uses no kept connection. The socket folder is conveyor/ssh in the cache folder, else
+# /tmp/conveyor-ssh-<user id>: the first that ssh can take as it is and that is this user's own (not a link), made
+# open to this user alone from the start (umask 077), not only after its chmod. ssh can
+# take a folder of letters, digits and / . _ - only (a space splits its option, and a % or $ is read as a token or a
+# name), and of 45 characters at most (the 41 of /%C and the 17 that ssh adds while it makes the socket fill the
+# system's socket path). With neither, the call keeps no connection.
+sshmux=()
+if [ "$remote" = 1 ]; then
+  for sockd in "${XDG_CACHE_HOME:-$HOME/.cache}/conveyor/ssh" "/tmp/conveyor-ssh-$UID"; do
+    [[ $sockd == /* && $sockd != *[!A-Za-z0-9/._-]* ]] && [ "${#sockd}" -le 45 ] && [ ! -L "$sockd" ] \
+      && (umask 077 && mkdir -p "$sockd") 2>/dev/null && [ ! -L "$sockd" ] && [ -O "$sockd" ] && chmod 700 "$sockd" 2>/dev/null || continue
+    sshmux=(-o ControlMaster=auto -o ControlPersist=120 -o "ControlPath=$sockd/%C"); break
+  done
+fi
+rssh() { # <seconds> <command> [<ssh option>...]: the command on the build machine, its output and exit status
+  local t=$1 c=$2 s0=$SECONDS mux=("${sshmux[@]}"); shift 2
+  if [ "${#mux[@]}" -gt 0 ] && timeout -k 1 2 ssh "${mux[@]}" -O check "$target" > /dev/null 2>&1 \
+    && ! timeout -k 1 2 ssh -o BatchMode=yes "${mux[@]}" "$target" true > /dev/null 2>&1; then
+    timeout -k 1 2 ssh "${mux[@]}" -O exit "$target" > /dev/null 2>&1 || mux=()
+  fi
+  t=$((t - (SECONDS - s0))); [ "$t" -gt 0 ] || return 124
+  timeout -k 2 "$t" ssh -o BatchMode=yes -o ConnectTimeout=5 "$@" "${mux[@]}" "$target" "$c" 2>/dev/null
+}
+# stamp: the short check. For every record, in one command where the snapshots are asked (over ssh by rssh), a
 # checksum of what a card started, a step, a landing or a block changes: the size and last 4 KiB of its cards.jsonl,
 # its control.json and the queue (snapgh/issues), in its state folder (`conveyor.sh state-dir`), and its live records
 # in its cards folder (lib/paths.sh CARDS: the name kept in the state folder's cards-folder, beside its main): which
@@ -118,10 +147,26 @@ remote=0; [ "$ok" != 0 ] || [ -z "$target" ] || [ "$rec" = 1 ] || [ "$here" -ef 
 # hooks/units.tsx (knowsStamp) reads the next line's text to know that this script has the check: keep it as it is.
 if [ "$mode" = stamp ]; then
   [ -e "$cfg" ] && [ "$ok" = 0 ] || { printf 'stamps\tnone\n'; exit 0; }
-  scmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" '.records[]
-    | "d=$(CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) state-dir 2>/dev/null); k=$(head -n 1 \"$d/cards-folder\" 2>/dev/null); case $k in conveyor-cards|conveyor-cards-*) ;; *) k=conveyor-cards ;; esac; c=\(.main | sub("/+$"; "") | sub("/[^/]*$"; "") | @sh)/$k; printf \"%s\\t%s\\n\" \(.repo | @sh) \"$({ wc -c < \"$d/cards.jsonl\"; tail -c 4096 \"$d/cards.jsonl\"; cat \"$d/control.json\" \"$d/snapgh/issues\"; cd \"$c\" && { ls -1 -- *.live mainrun/*.unfixed.live; grep -o -H -E \"[{,].(step|on).:.[^,}]*\" -- *.live; }; } 2>/dev/null | cksum)\"; "' <<<"$got")
+  # Each record's state folder is kept, on the machine that names it, in a file under its cache folder, with a key of
+  # what the engine reads to name the folders and to refuse two checkouts that share one (lib/paths.sh): that
+  # machine's host file (its modification time and its file, its links followed), and the folder that each checkout
+  # it names (its main, its stateDir, its records' mains) and the records asked here, and each one's conveyor/state,
+  # lead to (p_realpath), and the folder each such checkout is, when it is there (cd, as the engine finds it). While
+  # the key stays, the next stamp reads the folders there in place of asking the engine once a record; a key that
+  # cannot be read keeps none, as with a host file that is not a file there (none, or a broken link, which the engine
+  # reads and refuses). The key is read before the engine is asked, so a change while
+  # it names the folders gives the next stamp another key. A host file changed in the second the folders are named
+  # keeps none (a later change in that second would keep its time), nor does a folder not named. The file's name is a
+  # checksum of the records and the engine asked.
+  uk=$(cksum <<<"$got") uk=${uk%% *}
+  kc='set -o pipefail; . "$1" && p_path || exit 1; h=$2; shift 2; { [ -f "$h" ] && jq -r "(.main, .stateDir, (.records | arrays | .[] | objects | .main)) | strings" "$h" || exit 1; printf "%s\n" "$@"; } | while IFS= read -r p; do p_realpath "$p" && p_realpath "$p/conveyor/state" || exit 1; printf "%s\n" "$(cd "$p" 2>/dev/null && pwd -P)"; done | tr "\n" "\t"'
+  kc=$(jq -r --arg s "$kc" --arg l "$engine/conveyor/lib/portable.sh" '"bash -c \($s | @sh) _ \($l | @sh) \"$h\" \([.records[].main | @sh] | join(" "))"' <<<"$got")
+  sp='nl=$(printf "\n_"); nl=${nl%_}; h=${XDG_CONFIG_HOME:-$HOME/.config}/conveyor/host.json; sf=${XDG_CACHE_HOME:-$HOME/.cache}/conveyor/units-dirs-'"$uk"'; hi=$(stat -L -c "%Y %d:%i" "$h" 2>/dev/null || stat -L -f "%m %d:%i" "$h" 2>/dev/null); sk=${hi%% *} sw=1 sn=; ks=$hi/$('"$kc"' 2>/dev/null) || sw=0; sc=$(cat "$sf" 2>/dev/null)$nl; kk=${sc%%"$nl"*} sc=${sc#*"$nl"} su=0; [ "$sw" = 0 ] || [ "$kk" != "$ks" ] || su=1; '
+  ss='[ "$su" = 1 ] || [ "$sw" = 0 ] || [ "${sk:-0}" -ge "$(date +%s)" ] || { mkdir -p "${sf%/*}" && printf "%s\n%s" "$ks" "$sn" > "$sf.$$" && mv -f "$sf.$$" "$sf"; } 2>/dev/null; :'
+  scmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" --arg sp "$sp" --arg ss "$ss" '$sp, (.records[]
+    | "d=; [ \"$su\" = 0 ] || { d=${sc%%\"$nl\"*}; sc=${sc#*\"$nl\"}; }; [ -n \"$d\" ] || d=$(CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) state-dir 2>/dev/null); case $d in \"\"|*\"$nl\"*) sw=0 ;; esac; sn=$sn$d$nl; k=$(head -n 1 \"$d/cards-folder\" 2>/dev/null); case $k in conveyor-cards|conveyor-cards-*) ;; *) k=conveyor-cards ;; esac; c=\(.main | sub("/+$"; "") | sub("/[^/]*$"; "") | @sh)/$k; printf \"%s\\t%s\\n\" \(.repo | @sh) \"$({ wc -c < \"$d/cards.jsonl\"; tail -c 4096 \"$d/cards.jsonl\"; cat \"$d/control.json\" \"$d/snapgh/issues\"; cd \"$c\" && { ls -1 -- *.live mainrun/*.unfixed.live; grep -o -H -E \"[{,].(step|on).:.[^,}]*\" -- *.live; }; } 2>/dev/null | cksum)\"; "), $ss' <<<"$got")
   if [ "$remote" = 0 ]; then out=$(timeout -k 2 10 bash -c "$scmd"); rc=$?; how=local
-  else out=$(timeout -k 2 10 ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$scmd" 2>/dev/null); rc=$?; how=ssh; fi
+  else out=$(rssh 10 "$scmd"); rc=$?; how=ssh; fi
   [ "$rc" = 0 ] || exit 1
   printf 'stamps\t%s\n%s\n' "$how" "$out"; exit 0
 fi
@@ -180,7 +225,7 @@ if [ -f .conveyor/project.json ]; then
     && [ -n "$en" ] && printf 'engine\t%s\n' "${en//$'\t'/ }"
 fi
 if [ "$mode" = feed ]; then
-  [ -z "$tmcmd" ] || timeout -k 2 20 ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" "$tmcmd" 2>/dev/null | grep -m1 '^testmap'$'\t'
+  [ -z "$tmcmd" ] || rssh 20 "$tmcmd" | grep -m1 '^testmap'$'\t'
   printf 'host\t\tfeed\t0\n'; exit 0
 fi
 
@@ -196,13 +241,17 @@ view='with_entries(select(.key | IN("health", "needsYou", "belt", "landed", "lan
   | if (.open | type) == "object" then .open |= with_entries(select(.key | IN("umbrellas", "held"))) else . end
   | if (.recordsNow | type) == "object" then .recordsNow |= {building, waitingCount} else . end
   | reduce ("declined", "declinedRest") as $k (.; if (.[$k] | type) == "array" then .[$k] |= map(select(type == "object" and .by == "judge") | {id, by, time}) else . end)'
-# The cut runs in a bash that has taken the engine's PATH (p_path in conveyor/lib/portable.sh): on macOS the jq the engine
-# needs is Homebrew's, and an ssh command's PATH has no Homebrew folder.
-cutc='. "$1" && p_path && jq -c "$2"'
-cmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" --arg l "$engine/conveyor/lib/portable.sh" --arg v "$view" --arg c "$cutc" '$ARGS.positional as $f | .records[]
-  | "printf \"%s\\t\" \(.repo | @sh); { s=$(CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) snapshot\(.repo as $r | if any($f[]; . == $r) then " --fresh" else "" end) 2>/dev/null) && printf \"%s\" \"$s\" | bash -c \($c | @sh) _ \($l | @sh) \($v | @sh) || echo null; }; "' --args "$@" <<<"$got")
+# Every record's snapshot is cut in one jq run: the records go to it as <repo> US <snapshot, empty when it failed> RS
+# (control characters that JSON text never holds), and it prints <repo> <its cut snapshot> a line. The cut runs in a
+# bash that has taken the engine's PATH (p_path in conveyor/lib/portable.sh): on macOS the jq the engine needs is
+# Homebrew's, and an ssh command's PATH has no Homebrew folder.
+pass='split("\u001e")[:-1][] | split("\u001f") | "\(.[0])\t\(.[1] // "" | try (fromjson | '"$view"' | tojson) catch "null")"'
+cutc='. "$1" && p_path && jq -R -r -s "$2"'
+cmd=$(jq -j --arg e "$engine/conveyor/conveyor.sh" --arg l "$engine/conveyor/lib/portable.sh" --arg v "$pass" --arg c "$cutc" '$ARGS.positional as $f
+  | "{ :; ", (.records[] | "printf \"%s\\037\" \(.repo | @sh); s=$(CONVEYOR_MAIN=\(.main | @sh) bash \($e | @sh) snapshot\(.repo as $r | if any($f[]; . == $r) then " --fresh" else "" end) 2>/dev/null) && printf \"%s\" \"$s\"; printf \"\\036\"; "),
+    "} | bash -c \($c | @sh) _ \($l | @sh) \($v | @sh); "' --args "$@" <<<"$got")
 if [ "$remote" = 0 ]; then out=$(timeout -k 2 50 bash -c "$cmd"); rc=$?; how=local
-else out=$(timeout -k 2 50 ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$target" "$tmcmd$cmd" 2>/dev/null); rc=$?; how=ssh
+else out=$(rssh 50 "$tmcmd$cmd" -o ServerAliveInterval=15 -o ServerAliveCountMax=4); rc=$?; how=ssh
   # The build machine's testmap line comes first, and goes before the host line, as parseFetch reads it.
   if [ -n "$tmcmd" ] && [[ $out == testmap$'\t'* ]]; then printf '%s\n' "${out%%$'\n'*}"; [[ $out == *$'\n'* ]] && out=${out#*$'\n'} || out=''; fi
 fi

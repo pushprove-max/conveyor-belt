@@ -437,7 +437,7 @@ const drawFeed = async ($: EngineInterface, got: { board: Board; at: number; key
 }
 
 // Every CHECK_MS while no live feed runs (the feed is drawn within the second already): the fetch's `stamp`, one
-// checksum a record (one command, over one ssh call at most). A record whose checksum moved since the last check is
+// checksum a record (one command, over ssh with a build machine). A record whose checksum moved since the last check is
 // fetched at once, fresh; a check that finds none moved fetches nothing. A fetch that prints no stamps (an install
 // older than the check, which takes it for a whole fetch) stops the checks for this load: the minute's fetch stays. So
 // does a fetch script with no `stamp` mode, seen as the opening fetch starts: it is never asked.

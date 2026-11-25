@@ -11,7 +11,9 @@
 set -uo pipefail
 DIR=$(cd "$(dirname "$0")" && pwd -P)
 FETCH=$DIR/units-fetch.sh
-T=$(mktemp -d) || exit 1
+# Under /tmp, not TMPDIR (long on macOS), with a short name: the kept ssh connection's socket folder must stay short
+# enough to be used.
+T=$(mktemp -d /tmp/uf.XXXXXX) || exit 1
 trap 'rm -rf "$T"' EXIT
 fails=0 TAB=$'\t'
 ok() { echo "ok [units-fetch]: $1"; }
@@ -26,17 +28,17 @@ printf '%s\n' "$WANT" > "$T/two.txt"
 
 # A machine: its home (with the host file under XDG_CONFIG_HOME), the Conveyor clone the host file's main names, whose
 # stub engine prints, for `snapshot`, the fixture's line of the record CONVEYOR_MAIN names (by its folder's name), and
-# a checkout per project. Each case is a machine of its own.
+# fails for a record the fixture has no line of, and a checkout per project. Each case is a machine of its own.
 machine() { # <case>
   M=$T/$1; H=$M/home
   mkdir -p "$H/.config/conveyor" "$M/clone/conveyor/lib" "$M/bakery" "$M/gadgetlab" "$M/bin"
   cp "$DIR/../conveyor/lib/portable.sh" "$M/clone/conveyor/lib/portable.sh" # the fetch's cut takes its PATH from it
   printf '%s\n' '#!/usr/bin/env bash' '[ "$1" = snapshot ] || exit 2' \
-    "awk -F'\\t' -v r=\"\${CONVEYOR_MAIN##*/}\" '\$1 == r { sub(/^[^\\t]*\\t/, \"\"); print }' '$T/two.txt'" > "$M/clone/conveyor/conveyor.sh"
+    "awk -F'\\t' -v r=\"\${CONVEYOR_MAIN##*/}\" '\$1 == r { sub(/^[^\\t]*\\t/, \"\"); print; f = 1 } END { exit !f }' '$T/two.txt'" > "$M/clone/conveyor/conveyor.sh"
 }
 hostfile() { jq -n "$@" > "$H/.config/conveyor/host.json"; }
-fetch() { # <checkout> [<arg>]: the fetch's output, the home folder shown as /r/HOME
-  (cd "$1" && unset CONVEYOR_FOREMAN_DIR && HOME=$H XDG_CONFIG_HOME=$H/.config PATH=$M/bin:$PATH bash "$FETCH" "${@:2}") | sed "s|$H|/r/HOME|g"
+fetch() { # <checkout> [<arg>]: the fetch's output, the home folder shown as /r/HOME; XC, when set, is the cache folder
+  (cd "$1" && unset CONVEYOR_FOREMAN_DIR && HOME=$H XDG_CONFIG_HOME=$H/.config XDG_CACHE_HOME=${XC:-$H/.cache} PATH=$M/bin:$PATH bash "$FETCH" "${@:2}") | sed "s|$H|/r/HOME|g"
 }
 
 # D2: a host file with two projects, neither the plugin's own, read in the first one's checkout.
@@ -47,6 +49,14 @@ same 'two projects: their snapshots in the host file order, read here, as the fi
 # Bug: the first record was taken for the session's own project, so a session in gadgetlab showed bakery's cards
 # with no name and looked for its Fast lane's card among bakery's. The own project is the record whose main is here.
 same 'a session in the second project names that project its own' "$(sed '1s/\tbakery$/\tgadgetlab/' <<<"$WANT")" "$(fetch "$M/gadgetlab")"
+# D1 (issue 1653): the snapshots are cut in one jq run for every record, so one record whose snapshot fails must print
+# null in its place and leave the records after it whole. Bug it catches: a failed record dropped from the list, or
+# its failure cutting the records after it.
+mkdir -p "$M/ghost"
+hostfile --arg c "$M/clone" --arg b "$M/bakery" --arg g "$M/gadgetlab" --arg x "$M/ghost" \
+  '{host: "lab", ssh: "lab", main: $c, records: [{repo: "bakery", main: $b}, {repo: "ghost", main: $x}, {repo: "gadgetlab", main: $g}]}'
+same "a failed snapshot between two: null in its place, the others whole (units-fetch.sh in $M/bakery, records bakery ghost gadgetlab)" \
+  "$(sed -n '/^host/,$p' <<<"$WANT" | sed 1d | awk -v t="ghost${TAB}null" '1; NR == 1 { print t }')" "$(fetch "$M/bakery" | sed -n '/^host/,$p' | sed 1d)"
 
 # No host file: the board says so, naming the paths looked at (XDG_CONFIG_HOME's, then the checkout's; bug: /units
 # named ~/.config/conveyor/host.json whatever XDG_CONFIG_HOME was), and the lanes have no record to come from.
@@ -243,14 +253,15 @@ same "a build machine, the feed's bakery on another main: the map is asked over 
   "$(printf 'maprec\t%s/bakery\ntestmap\t{"state":"made","of":"%s/bakery"}' "$M" "$M")" "$(fetch "$M/dev/bakery" feed "$T/feed.json" | grep -E '^(testmap|maprec)')"
 
 # The short check (issue 1033): `stamp` prints one checksum a record, of its state folder's cards.jsonl, control.json
-# and queue, in one command (one ssh call for every record); `fresh <repo>` asks that record for a snapshot built now.
-# The stub engine names each checkout's state folder, and its snapshot is the kept one (health state "kept") unless
+# and queue, in one command (one ssh command for every record); `fresh <repo>` asks that record for a snapshot built
+# now. The stub engine names each checkout's state folder, and its snapshot is the kept one (health state "kept") unless
 # --fresh, then the last line of cards.jsonl as its health. Bugs it catches: a card started showed only at the next minute's fetch, and then from a
 # kept snapshot older than it; a check asked the host once a record, or moved for a record nothing changed in.
+# The ssh stub logs each command it runs; a kept connection's -O check, which runs nothing on the host, finds none.
 machine stamp
 printf '%s\n' '#!/usr/bin/env bash' 'case $1 in' 'state-dir) echo "$CONVEYOR_MAIN/state" ;;' \
   'snapshot) if [ "${2-}" = --fresh ]; then tail -n 1 "$CONVEYOR_MAIN/state/cards.jsonl" | jq -c "{health: .}"; else echo "{\"health\":{\"state\":\"kept\"}}"; fi ;;' '*) exit 2 ;;' 'esac' > "$M/clone/conveyor/conveyor.sh"
-printf '%s\n' '#!/usr/bin/env bash' 'echo x >> "$(dirname "$0")/calls"' 'while [ "$1" = -o ]; do shift 2; done' 'bash -c "$2"' > "$M/bin/ssh" && chmod +x "$M/bin/ssh"
+printf '%s\n' '#!/usr/bin/env bash' 'while [ "$1" = -o ]; do shift 2; done' '[ "$1" != -O ] || exit 255' 'echo x >> "$(dirname "$0")/calls"' 'bash -c "$2"' > "$M/bin/ssh" && chmod +x "$M/bin/ssh"
 mkdir -p "$M/bakery/state" "$M/gadgetlab/state" "$M/elsewhere"
 echo '{"step":"landed"}' > "$M/bakery/state/cards.jsonl"
 hostfile --arg c "$M/clone" --arg b "$M/bakery" --arg g "$M/gadgetlab" \
@@ -281,6 +292,77 @@ got=$(fetch "$M/bakery" fresh bakery)
 same 'fresh: the changed record'"'"'s snapshot holds the change, the other'"'"'s is the kept one' \
   "$(printf 'bakery\t{"health":{"step":"start","card":"c9"}}\ngadgetlab\t{"health":{"state":"kept"}}')" "$(sed -n '/^host/,$p' <<<"$got" | sed 1d)"
 
+# Issue 1653: each record's state folder is kept with a key of what the engine reads to name it: the host file (its
+# time and its file, a link followed) and the folder each checkout the host file names, and its conveyor/state, leads
+# to. So a stamp while the key stays asks the engine for none (bug: every 5 s stamp started the engine once a record);
+# a host file that names another state folder is read at the next stamp, here through a link to it whose own time does
+# not change (bugs: a kept folder outlived the host file's change; the link's time was read, not its file's); a link
+# that gives two checkouts one folder asks the engine again, which refuses it (bug: the kept folders went round that
+# refusal). The stub engine names the folders as lib/paths.sh does: the stateDir is the host main's (its main, else
+# its first record's), else its conveyor/state, and every other record's is its conveyor/state; it refuses two
+# checkouts that lead to one folder, and counts each time it is asked in sdcalls. The host file's times are set in
+# the past: one changed in this second keeps no folder.
+cat > "$T/sdstub.sh" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = state-dir ] || exit 2
+echo x >> "$XDG_CONFIG_HOME/sdcalls"
+h=$XDG_CONFIG_HOME/conveyor/host.json hm=$(jq -r '.main // .records[0].main' "$h")
+st() { if [ "$1" = "$hm" ]; then jq -r --arg d "$1/conveyor/state" '.stateDir // $d' "$h"; else echo "$1/conveyor/state"; fi; }
+seen=' '
+for m in $(jq -r '.main // empty, .records[].main' "$h" | sort -u); do p=$(cd "$(st "$m")" 2>/dev/null && pwd -P) || continue; case $seen in *" $p "*) exit 1 ;; esac; seen="$seen$p "; done
+st "$CONVEYOR_MAIN"
+EOF
+sdcalls() { wc -l < "$H/.config/sdcalls" | tr -d ' '; }
+machine stampcache
+mkdir -p "$M/bakery/conveyor/lib" "$M/bakery/conveyor/state" "$M/gadgetlab/conveyor/state" "$M/moved"
+cp "$T/sdstub.sh" "$M/bakery/conveyor/conveyor.sh"; cp "$DIR/../conveyor/lib/portable.sh" "$M/bakery/conveyor/lib/"
+echo '{"step":"landed"}' > "$M/bakery/conveyor/state/cards.jsonl"; echo '{"step":"moved"}' > "$M/moved/cards.jsonl"
+ln -s "$H/.config/conveyor/kept.json" "$H/.config/conveyor/host.json"
+hostfile --arg b "$M/bakery" --arg g "$M/gadgetlab" '{host: "lab", ssh: "owner@lab", main: $b, records: [{repo: "bakery", main: $b}, {repo: "gadgetlab", main: $g}]}'
+touch -t 202601010000 "$H/.config/conveyor/kept.json"; touch -h -t 202601010000 "$H/.config/conveyor/host.json"
+s5=$(fetch "$M/bakery" stamp)
+same "stamp: a second stamp with the host file unchanged reads the kept state folders (units-fetch.sh stamp in $M/bakery)" \
+  "$s5|2" "$(fetch "$M/bakery" stamp)|$(sdcalls)"
+hostfile --arg b "$M/bakery" --arg g "$M/gadgetlab" --arg s "$M/moved" \
+  '{host: "lab", ssh: "owner@lab", main: $b, stateDir: $s, records: [{repo: "bakery", main: $b}, {repo: "gadgetlab", main: $g}]}'
+touch -t 202601010001 "$H/.config/conveyor/kept.json"
+same "stamp: the host file, behind a link, names another state folder for its main, bakery: the next stamp reads it (units-fetch.sh stamp in $M/bakery)" \
+  "bakery|4" "$(diff <(echo "$s5") <(fetch "$M/bakery" stamp) | sed -n 's/^> \([^\t]*\)\t.*/\1/p')|$(sdcalls)"
+rmdir "$M/gadgetlab/conveyor/state" && ln -s "$M/moved" "$M/gadgetlab/conveyor/state"
+same "stamp: gadgetlab's conveyor/state made a link to bakery's stateDir, host file unchanged: the engine is asked again (units-fetch.sh stamp in $M/bakery)" \
+  6 "$(fetch "$M/bakery" stamp > /dev/null; sdcalls)"
+# The same, with a host main that is no record (bug: the kept folders were only the records', so a link that gave the
+# host main's conveyor/state a record's folder went round the engine's refusal).
+machine stamphm
+mkdir -p "$M/clone/conveyor/state" "$M/bakery/conveyor/state" "$M/gadgetlab/conveyor/state"
+cp "$T/sdstub.sh" "$M/clone/conveyor/conveyor.sh"
+hostfile --arg c "$M/clone" --arg b "$M/bakery" --arg g "$M/gadgetlab" '{host: "lab", ssh: "owner@lab", main: $c, records: [{repo: "bakery", main: $b}, {repo: "gadgetlab", main: $g}]}'
+touch -t 202601010000 "$H/.config/conveyor/host.json"
+fetch "$M/bakery" stamp > /dev/null; fetch "$M/bakery" stamp > /dev/null; n=$(sdcalls)
+rmdir "$M/clone/conveyor/state" && ln -s "$M/bakery/conveyor/state" "$M/clone/conveyor/state"
+same "stamp: the host main's (no record's) conveyor/state made a link to bakery's, host file unchanged: the engine is asked again (units-fetch.sh stamp in $M/bakery)" \
+  "2|4" "$n|$(fetch "$M/bakery" stamp > /dev/null; sdcalls)"
+# On one machine (no ssh target), where the engine is this copy of Conveyor: its own state-dir is the reader whose
+# refusal the kept folders must not go round. After two stamps, a change that only makes the engine refuse bakery's
+# folder (a broken host file link under XDG_CONFIG_HOME, which it reads and fails on; a host main that was not there
+# made, which then shares its stateDir with bakery) gives bakery's next stamp line another checksum, of no folder. Bugs:
+# a broken link was taken as no host file, and a host main not there as the folder it would be, so the kept folder
+# was read.
+machine stamplocal
+mkdir -p "$M/bakery/conveyor/state"; echo '{"step":"landed"}' > "$M/bakery/conveyor/state/cards.jsonl"
+jq -n --arg b "$M/bakery" '{records: [{repo: "bakery", main: $b}]}' > "$M/bakery/conveyor/host.json"
+s6=$(fetch "$M/bakery" stamp); fetch "$M/bakery" stamp > /dev/null
+ln -s "$H/.config/conveyor/gone.json" "$H/.config/conveyor/host.json"
+same "stamp: a broken host file link added, which the engine refuses: bakery's line changes (units-fetch.sh stamp in $M/bakery, host file $M/bakery/conveyor/host.json)" \
+  bakery "$(diff <(echo "$s6") <(fetch "$M/bakery" stamp) | sed -n 's/^> \([^\t]*\)\t.*/\1/p')"
+rm "$H/.config/conveyor/host.json"
+hostfile --arg b "$M/bakery" --arg m "$M/hm" '{main: $m, stateDir: "\($b)/conveyor/state", records: [{repo: "bakery", main: $b}]}'
+touch -t 202601010000 "$H/.config/conveyor/host.json"
+s7=$(fetch "$M/bakery" stamp); fetch "$M/bakery" stamp > /dev/null
+mkdir "$M/hm"
+same "stamp: the host main $M/hm made, its stateDir bakery's folder, which the engine refuses: bakery's line changes (units-fetch.sh stamp in $M/bakery)" \
+  bakery "$(diff <(echo "$s7") <(fetch "$M/bakery" stamp) | sed -n 's/^> \([^\t]*\)\t.*/\1/p')"
+
 # Bug (issue 1287): a snapshot printed whole, with the Tests page's history (tests, testActions) and every declined line,
 # grew past what the fetch could read in time, and past the cap, though the pane draws none of it. The stub engine prints
 # a snapshot with a large tests part; the fetch prints only the parts the pane draws, the judge's declined lines cut to
@@ -310,5 +392,77 @@ printf '%s\n' '#!/usr/bin/env bash' 'while [ "$1" = -o ]; do shift 2; done' "PAT
 hostfile --arg c "$M/clone" --arg b "$M/bakery" '{host: "lab", ssh: "lab", main: $c, records: [{repo: "bakery", main: $b}]}'
 same 'over ssh with no jq on its PATH, the cut still takes the engine'"'"'s PATH and the snapshot is kept' \
   'bakery	{"health":{"state":"ok"}}' "$(fetch "$M/elsewhere" | sed -n '/^host/,$p' | sed 1d)"
+
+# Issue 1653: over ssh, the stamp and the poll share one kept connection (ControlMaster=auto, ControlPersist=120, its
+# socket in a folder only this user can open). Bugs it catches: every 5 s stamp and every poll logged in to the build
+# machine again; a kept connection whose network went dead made each call wait out its time and fail; a kept
+# connection outlived a change of the host its ssh alias resolves to. The ssh stub does what OpenSSH does by the
+# ControlPath it is given, its %C the checksum of the host the target resolves to (the file resolved, else the
+# target): -O check passes while a socket's ssh runs (live or hung); with no socket there, or a stale one (no ssh
+# behind it), a call connects anew and, asked to keep the connection for 120 s, leaves a socket that says live; a live
+# socket is reused; through a hung one a call waits, as through a kept ssh whose network is dead; -O exit takes the
+# socket away. Each call's way is logged: new, reuse, probe (the `true` that tries a kept connection), hung or exit.
+# As OpenSSH does, it fails (255) for a ControlPath with a space (which splits the option) or a % that is not %C or %%.
+machine mux
+mkdir -p "$M/elsewhere"
+cat > "$M/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+cp='' keep=0 op=''
+while :; do case ${1-} in -o) case $2 in ControlPath=*) cp=${2#*=} ;; ControlMaster=auto|ControlPersist=120) keep=$((keep + 1)) ;; esac; shift 2 ;; -O) op=$2; shift 2 ;; *) break ;; esac; done
+t=${cp//%%/} t=${t//%C/}; case $t in *[[:space:]]* | *%*) echo "ssh: bad ControlPath $cp" >&2; exit 255 ;; esac
+l=${0%/*}/log r=$(cat "${0%/*}/resolved" 2>/dev/null || echo "$1"); r=$(cksum <<<"$r"); cp=${cp//%C/${r%% *}}
+s=none; [ -z "$cp" ] || [ ! -e "$cp" ] || s=$(cat "$cp")
+case $op in
+  check) [ "$s" = live ] || [ "$s" = hung ]; exit ;;
+  exit) echo exit >> "$l"; rm -f "$cp"; exit 0 ;;
+esac
+w=reuse; [ "$2" != true ] || w=probe
+case $s in
+  live) echo "$w" >> "$l" ;;
+  hung) echo hung >> "$l"; exec sleep 30 ;;
+  *) echo new >> "$l"; [ -z "$cp" ] || [ "$keep" != 2 ] || echo live > "$cp" ;;
+esac
+exec bash -c "$2"
+EOF
+chmod +x "$M/bin/ssh"
+hostfile --arg c "$M/clone" --arg b "$M/bakery" --arg g "$M/gadgetlab" \
+  '{host: "lab", ssh: "owner@lab", main: $c, records: [{repo: "bakery", main: $b}, {repo: "gadgetlab", main: $g}]}'
+s1=$(fetch "$M/elsewhere" stamp); s2=$(fetch "$M/elsewhere" stamp); got=$(fetch "$M/elsewhere")
+same "over ssh: the second stamp and the poll go through the connection the first one kept (units-fetch.sh stamp, stamp, then a poll, in $M/elsewhere)" \
+  'new probe reuse probe reuse' "$(paste -sd' ' "$M/bin/log")"
+same 'over ssh: the stamps through the kept connection are the same' "$s1" "$s2"
+same 'over ssh: the poll through the kept connection prints the snapshots as the fixture /units draws' \
+  "$(sed '1s/\tbakery$/\t/; s/^fast\tnone$/fast\tnorecord/; s/^host\tlab\tlocal\t0$/host\tlab\tssh\t0/' <<<"$WANT")" "$got"
+same 'over ssh: the socket'"'"'s folder is this user'"'"'s alone' 'drwx------' "$(ls -ld "$H/.cache/conveyor/ssh" | cut -c1-10)"
+sk=$(find "$H/.cache/conveyor/ssh" -type f) && echo hung > "$sk"; : > "$M/bin/log"
+same "over ssh: a kept connection that does not answer is stopped and the stamp asked on a new one (units-fetch.sh stamp in $M/elsewhere, socket hung)" \
+  "$s1|hung exit new" "$(fetch "$M/elsewhere" stamp)|$(paste -sd' ' "$M/bin/log")"
+echo stale > "$sk"; : > "$M/bin/log"
+same "over ssh: a stale socket, no ssh behind it, gives a new connection (units-fetch.sh stamp in $M/elsewhere, socket stale)" \
+  "$s1|new" "$(fetch "$M/elsewhere" stamp)|$(paste -sd' ' "$M/bin/log")"
+echo lab2 > "$M/bin/resolved"; : > "$M/bin/log"
+same "over ssh: the alias owner@lab now resolves to another host: a new connection, not the old host's (units-fetch.sh stamp in $M/elsewhere)" \
+  "$s1|new" "$(fetch "$M/elsewhere" stamp)|$(paste -sd' ' "$M/bin/log")"
+# A cache folder ssh cannot take as a socket folder (a space or a % in it, or too long a path) keeps the connection in
+# /tmp/conveyor-ssh-<user id>. Bugs it catches: a space or a % failed every stamp and poll; a long cache folder kept no
+# connection. Each input resolves to a host of its own, this run's, so its socket there is new and is taken away after.
+n=0
+for xc in "$T/mux/a b" "$T/mux/a%b" "$T/mux/a-cache-folder-too-long-for-a-socket-path"; do
+  n=$((n + 1)); echo "lab-$$-$n" > "$M/bin/resolved"; : > "$M/bin/log"; r=$(cksum < "$M/bin/resolved"); r=/tmp/conveyor-ssh-$UID/${r%% *}
+  same "over ssh, cache folder $xc: two stamps go through one connection kept in /tmp/conveyor-ssh-$UID (units-fetch.sh stamp, stamp in $M/elsewhere)" \
+    "$s1|$s1|new probe reuse|live" "$(XC=$xc fetch "$M/elsewhere" stamp)|$(XC=$xc fetch "$M/elsewhere" stamp)|$(paste -sd' ' "$M/bin/log")|$(cat "$r" 2>/dev/null)"
+  rm -f "$r"
+done
+# Under umask 000, the socket folder is open to this user alone as mkdir makes it (bug: it was made open to all users,
+# and only closed by a chmod after). A mkdir in front of the real one logs the mode of the socket folder it makes.
+cat > "$M/bin/mkdir" <<'EOF'
+#!/usr/bin/env bash
+PATH=${PATH//"${0%/*}:"/} mkdir "$@" || exit
+for a; do :; done; case $a in */conveyor/ssh) ls -ld "$a" | cut -c1-10 >> "${0%/*}/mkdirs" ;; esac
+EOF
+chmod +x "$M/bin/mkdir"; echo "lab-$$-umask" > "$M/bin/resolved"
+same "over ssh under umask 000, a new cache folder $T/c: mkdir makes its socket folder open to this user alone (units-fetch.sh stamp in $M/elsewhere)" \
+  "$s1|drwx------" "$(umask 000; XC=$T/c fetch "$M/elsewhere" stamp)|$(cat "$M/bin/mkdirs" 2>/dev/null)"
+rm -f "$M/bin/mkdir"
 
 [ "$fails" = 0 ] || exit 1

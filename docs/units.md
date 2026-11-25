@@ -290,7 +290,8 @@ nothing until then); a `/units` typed while a fetch is still waiting to start st
 How fast the views follow the belt: with the live feed (below) running, a change is in the views within about
 2 seconds. With no live feed, the mod makes a short check every 5 seconds: for each record, one checksum of its
 `cards.jsonl`, `control.json` and queue, and of the step that each of its live cards (and each bug card's proof run)
-is on now, all in one command (one `ssh` call when the records are on a build machine).
+is on now, all in one command (over `ssh` when the records are on a build machine, through a connection that stays
+open between checks).
 When a record's checksum changes, a fetch starts at once, and that record's snapshot is built new for it
 (`conveyor.sh snapshot --fresh`), so a card started, a step, a landing or a block shows within about 5 seconds, plus
 the time that build takes. If that fetch fails or brings no snapshot for the record, the next check asks for it
