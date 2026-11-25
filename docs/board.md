@@ -1385,6 +1385,11 @@ the list is for.
   kinds of its entries with their counts, "Ready to batch" at 10 entries or more, else "N more to batch", and
   **Review batch**, which opens the batch sheet for the area. An entry has the area of the file that its finding names
   ([Harm or self-heals](cards.md#harm-or-self-heals)). The **No area** card shows only when an entry has no area.
+  Click a kind pill on an area card to show only the entries of that kind in that area. The pill shows as pressed,
+  and so does the toolbar's chip of that kind when the toolbar has one. The line above the rows names the area and
+  the kind. A pill and a tile do not filter together: a click on one ends the other. Click **× clear** on that line,
+  or click the pill again, to show all entries. The filter works with the search and the sort. When **Show** picks
+  another project, the filter ends.
 - **Entries**: a search (finding, file or card), **Sort** (**Leaves soonest**, **Newest**, **Seen most**, **Area**)
   and a filter chip for each kind with its count: **Waits longer**, **Runs again**, **Text fixes itself**, **Extra
   work only**, **Docs or comment**, **Cleanup** and **Already guarded**. **All** shows the entries of every kind, in the tile filter when a tile is pressed. Each row shows the

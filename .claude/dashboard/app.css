@@ -1641,6 +1641,9 @@ button.sh-tile[aria-pressed="true"] { border-color: var(--accent); background: v
 .sh-area-foot.is-ready { color: var(--ok); font-weight: 650; }
 .sh-kind { display: inline-flex; align-items: center; padding: 1px var(--sp-2); border-radius: 999px; font-size: var(--fs-xs); font-weight: 650; white-space: nowrap;
   color: var(--quiet); background: var(--quiet-bg); }
+button.sh-kind { border: 0; font-family: inherit; cursor: pointer; }
+.sh-kind[aria-pressed="true"] { box-shadow: inset 0 0 0 2px currentColor; }
+.sh-kind-n { margin-left: var(--sp-1); font-weight: 500; font-variant-numeric: tabular-nums; }
 .sh-kind.sh-k-wait { color: var(--k-wait); background: var(--k-wait-bg); }
 .sh-kind.sh-k-again { color: var(--k-again); background: var(--k-again-bg); }
 .sh-kind.sh-k-text { color: var(--k-text); background: var(--k-text-bg); }

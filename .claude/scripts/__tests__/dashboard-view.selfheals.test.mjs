@@ -60,7 +60,7 @@ test('Self-heals: the tab after Benchmarks draws the title line, the tiles, the 
     leaving: ['1', 'kept in Dropped, never erased'], harm: ['2', 'seen in real logs'],
   }, 'bugs: an entry of a card with no GitHub issue counted an issue #0; a move up to harm that a review listed again was not counted');
   const cards = qa(w, '.sh-area').map((c) => [c.querySelector('.sh-group').textContent, c.querySelector('.sh-area-name strong').textContent, c.querySelector('.sh-area-n').textContent,
-    Array.from(c.querySelectorAll('.sh-kind'), (k) => k.textContent), c.querySelector('.sh-area-foot').textContent]);
+    Array.from(c.querySelectorAll('.sh-kind'), (k) => `${k.querySelector('.sh-kind-name').textContent} ${k.querySelector('.sh-kind-n').textContent}`), c.querySelector('.sh-area-foot').textContent]);
   assert.deepEqual(cards, [
     ['Board', 'board', '2', ['Waits longer 1', 'Already guarded 1'], '8 more to batch'],
     ['Engine', 'review', '2', ['Runs again 1', 'Cleanup 1'], '8 more to batch'],

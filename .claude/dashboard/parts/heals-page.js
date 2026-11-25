@@ -10,7 +10,8 @@
 //     entries back on the list whose expired mark is a move up to harm); a click on one of the last three filters the
 //     entries to what it counts, or, for harm, opens the dropped entries with its entries alone (issue 1691);
 //   a card for each area (its group and name from its label, its count, an age bar in three parts of the days, the kinds
-//     with their counts, and how far it is from a batch);
+//     with their counts, and how far it is from a batch); a click on a kind pill filters the entries to that area's
+//     entries of that kind (issue 1692);
 //   the entries, a list beside a detail panel (stacked under it at phone width, app.css): search, sort and a filter
 //     chip for each kind; a row is picked by a click and shown in the panel; checked rows get a bar with Move up to harm.
 //     Move up to harm (`conveyor.sh heals harm`, a card each: confirmed by a second click) and Drop now (`heals drop`,
@@ -40,8 +41,9 @@
   // What the owner did here, through every redraw: the search, sort, kind chip, the row shown in the detail panel, the
   // rows checked, the entries moved or dropped here (gone: hidden until a snapshot no longer lists them), the last
   // answer of the host (note) and whether the dropped entries are open. tile: the tile pressed (seen, leaving or harm),
-  // else null. sheet: the batch sheet open, else null.
-  const S = { q: '', sort: 'leaves', kind: 'all', tile: null, sel: null, checked: new Set(), gone: new Set(), note: '', dropOpen: false, aboutOpen: false, busy: false, ctx: null, m: null, at: null, el: null, sheet: null };
+  // else null. pill: the area card's kind pill pressed ({ id, repo, area, kind }), else null; it sets kind too.
+  // sheet: the batch sheet open, else null.
+  const S = { q: '', sort: 'leaves', kind: 'all', tile: null, pill: null, sel: null, checked: new Set(), gone: new Set(), note: '', dropOpen: false, aboutOpen: false, busy: false, ctx: null, m: null, at: null, el: null, sheet: null };
   const list = (v) => (Array.isArray(v) ? v : []);
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const plural = (k, one, many) => `${k} ${k === 1 ? one : many}`;
@@ -137,7 +139,10 @@
   const harmsOf = (m) => m.dropped.concat(m.lists.flatMap((x) => list(x.entries).filter((e) => e && e.expired).map((e) => ({ ...e, dropped: e.expired }))))
     .filter((e) => e.dropped.why === 'harm' && Date.parse(e.dropped.time) >= m.now - HARMED * DAY);
   const TILE_SAID = { seen: `seen again, last ${LATELY} days`, leaving: `leave in ${SOON} days`, harm: `moved up to harm, last ${HARMED} days, in Dropped entries` };
-  const shown = (m) => m.es.filter((r) => matches(r) && (S.kind === 'all' || r.kind === S.kind) && (!TILES[S.tile] || TILES[S.tile](r, m))).sort(SORT[S.sort]);
+  // An area card's kind pill counts the entries of one project, area and kind: no area and kind not read are '' here.
+  const pillId = (repo, area, kind) => `${repo}|${area || ''}|${kind || ''}`;
+  const shown = (m) => m.es.filter((r) => matches(r) && (S.kind === 'all' || r.kind === S.kind) && (!TILES[S.tile] || TILES[S.tile](r, m))
+    && (!S.pill || pillId(r.e.repo, r.e.area, r.kind) === S.pill.id)).sort(SORT[S.sort]);
 
   // ---- small marks ----
   const h = (...a) => S.ctx.h(...a);
@@ -251,9 +256,11 @@
     tile('harm', `Moved up to harm, ${HARMED} days`, harmsOf(m).length, 'seen in real logs', 'bad');
     return box;
   }
-  // Press a tile (or none): the harm tile opens the dropped entries with its entries alone.
+  // Press a tile (or none): the harm tile opens the dropped entries with its entries alone. A tile ends a pressed kind
+  // pill (and its kind), as a pill ends a pressed tile: one of them filters at a time, so each shows all it counts.
   function pickTile(k) {
     S.tile = k;
+    if (S.pill) { S.pill = null; S.kind = 'all'; }
     if (k === 'harm') S.dropOpen = true;
     drawEntries();
   }
@@ -295,13 +302,33 @@
     if (many) name.append(S.ctx.tag(a.repo));
     top.append(name, h('span', 'sh-area-n', String(n)));
     const pills = h('div', 'sh-pills');
-    KINDS.concat([[null]]).forEach(([k]) => { if (!kinds.has(k)) return; const p = kindPill(k); p.append(h('span', 'sh-kind-n', ` ${kinds.get(k)}`)); pills.append(p); });
+    // A pill is a button: its kind and its count are two parts (app.css spaces them), and a click filters the entries
+    // to what it counts (a second click ends the filter).
+    KINDS.concat([[null]]).forEach(([k]) => {
+      if (!kinds.has(k)) return;
+      const id = pillId(a.repo, a.area, k), p = h('button', `sh-kind sh-k-${k || 'none'}`);
+      p.type = 'button'; p.dataset.kind = k || ''; p.dataset.pill = id; p.dataset.focus = `pill:${id}`; p.setAttribute('aria-pressed', String(!!S.pill && S.pill.id === id));
+      const label = k ? NAMES[k] : `kind ${NOT_READ}`, n = kinds.get(k);
+      // The parts' text holds no space, so a screen reader is given the name with one.
+      p.setAttribute('aria-label', `${label}: ${n}`);
+      p.append(h('span', 'sh-kind-name', label), h('span', 'sh-kind-n', String(n)));
+      p.addEventListener('click', () => pickPill(S.pill && S.pill.id === id ? null : { id, repo: a.repo, area: a.area, kind: k }));
+      pills.append(p);
+    });
     const foot = h('p', `sh-area-foot${n >= READY ? ' is-ready' : ''}`, n >= READY ? '✓ Ready to batch' : `${READY - n} more to batch`);
     const review = h('button', `btn${n >= READY ? ' btn-primary' : ''} sh-area-batch`, 'Review batch');
     review.type = 'button'; review.dataset.act = 'heals-batch';
     review.addEventListener('click', () => openSheet('batch', a.repo, a.area, a.rs.slice().sort(byLeft).map((r) => r.key)));
     card.append(top, ageBar(a), pills, foot, review);
     return card;
+  }
+  // Press a kind pill (or none): its kind is the kind chip's too; with none, every kind shows again. A pill ends a
+  // pressed tile, so the entries shown are all the entries the pill counts.
+  function pickPill(p) {
+    S.pill = p;
+    if (p) S.tile = null;
+    S.kind = p ? p.kind : 'all';
+    drawEntries();
   }
 
   // ---- the entries: toolbar, rows, detail panel, selection bar, footer ----
@@ -326,7 +353,7 @@
       const b = h('button', `sh-chip sh-k-${k}`);
       b.type = 'button'; b.dataset.kind = k; b.dataset.focus = `chip:${k}`; b.setAttribute('aria-pressed', String(S.kind === k));
       b.append(h('span', 'sh-dot', ''), `${label} `, h('span', 'sh-chip-n', String(n)));
-      b.addEventListener('click', () => { S.kind = k; drawEntries(); });
+      b.addEventListener('click', () => { S.kind = k; S.pill = null; drawEntries(); });
       chips.append(b);
     });
   }
@@ -351,7 +378,7 @@
   // The control that has the focus (its data-focus), and the focus given back to the control drawn in its place: a row,
   // a chip, the Dropped button, or the summary or guide link of "What is a self-heal?" that the owner works from the
   // keyboard keeps the focus when the list or the page is drawn again.
-  const focusOf = () => { const a = document.activeElement; return a && a.dataset && a.closest('.sh-entries, .sh-about, .sh-tiles') ? a.dataset.focus || null : null; };
+  const focusOf = () => { const a = document.activeElement; return a && a.dataset && a.closest('.sh-entries, .sh-about, .sh-tiles, .sh-areas') ? a.dataset.focus || null : null; };
   const refocus = (k) => {
     const el = k && Array.from(S.el.querySelectorAll('[data-focus]')).find((x) => x.dataset.focus === k);
     if (el && document.activeElement !== el) el.focus({ preventScroll: true });
@@ -368,7 +395,15 @@
       x.addEventListener('click', () => { const was = S.tile; pickTile(null); refocus(`tile:${was}`); });
       p.filter.append(`Showing: ${TILE_SAID[S.tile]} `, x);
     }
-    p.filter.hidden = !S.tile;
+    S.el.querySelectorAll('button.sh-kind[data-pill]').forEach((t) => t.setAttribute('aria-pressed', String(!!S.pill && S.pill.id === t.dataset.pill)));
+    if (S.pill) {
+      const was = S.pill.id, x = h('button', 'btn btn-quiet sh-filter-clear', '× clear');
+      x.type = 'button'; x.dataset.focus = 'pill-clear'; x.setAttribute('aria-label', 'Clear the area and kind filter');
+      x.addEventListener('click', () => { pickPill(null); refocus(`pill:${was}`); });
+      const said = `${areaOf(S.pill.area).name}${m.many ? ` (${S.pill.repo})` : ''}, ${S.pill.kind ? NAMES[S.pill.kind] : `kind ${NOT_READ}`}`;
+      p.filter.append(`Showing: ${said} `, x);
+    }
+    p.filter.hidden = !S.tile && !S.pill;
     p.rows.replaceChildren(...rs.map((r) => rowEl(r, m.many)));
     if (!rs.length) p.rows.append(h('li', 'sh-none', m.es.length || TILES[S.tile] ? 'No entry matches this search, kind or tile.' : 'No entry is on the list now.'));
     p.detail.replaceChildren(...detailEl(m.es.find((r) => r.key === S.sel) || null));
@@ -704,6 +739,9 @@
     S.m = m;
     S.checked.forEach((k) => { if (!m.es.some((r) => r.key === k)) S.checked.delete(k); });
     if (S.sel !== null && !m.es.some((r) => r.key === S.sel)) S.sel = null;
+    // A pressed pill whose area card is not drawn now (another project picked in Show, or its entries gone) is ended:
+    // it would hide every entry, with no pill left to press again.
+    if (S.pill && !m.es.some((r) => pillId(r.e.repo, r.e.area, r.kind) === S.pill.id)) { S.pill = null; S.kind = 'all'; }
     if (S.sheet) { drawSheet(); return; }
     const entries = h('section', 'sh-entries'), split = h('div', 'sh-split'), side = h('div', 'sh-list');
     const tools = toolbar(), note = h('p', 'sh-note'), filter = h('p', 'sh-filter'), bar = h('div', 'sh-bar'), rows = h('ul', 'sh-rows'), foot = h('div', 'sh-foot'), detail = h('aside', 'sh-detail');
