@@ -212,14 +212,28 @@ test('the Board: the umbrella of a split into cards with no GitHub issue is held
   held[0].sliceCards = [{ card: 'c20261124T230045-sample-0', state: 'landed' }, { card: 'c20261124T230046-sample-0', state: 'shut' }, { card: 'c20261124T230047-sample-0', state: 'waiting' }];
   const w = boot({ tab: 'control' });
   deliver(w, withOpen({ held }));
-  assert.equal(bcard(w, 76).querySelector('.chip[data-reason="you"]').textContent,
-    'Held as the umbrella of a split: waits for c20261124T230046-sample-0 (shut), c20261124T230047-sample-0');
+  // Every chip, not only `you`: while the split's hold is there, the closed card's chip must not repeat the slice list.
+  assert.deepEqual(Array.from(bcard(w, 76).querySelectorAll('.chip[data-reason]'), (c) => c.textContent),
+    ['Held as the umbrella of a split: waits for c20261124T230046-sample-0 (shut), c20261124T230047-sample-0', 'Card closed'],
+    'split umbrella, reasons [you split, card closed]');
   assert.equal(act(bcard(w, 76), 'release'), null, 'a split umbrella offers no Queue');
   assert.equal(bcard(w, 76).closest('.board-group').dataset.group, 'card', 'a split umbrella is not in the group Held by you');
   held[0].sliceCards.forEach((c) => { c.state = 'landed'; });
   next(w, withOpen({ held }));
-  assert.equal(bcard(w, 76).querySelector('.chip[data-reason="you"]').textContent,
-    'Held as the umbrella of a split: each slice landed; the loop closes it at its next turn');
+  assert.deepEqual(Array.from(bcard(w, 76).querySelectorAll('.chip[data-reason]'), (c) => c.textContent),
+    ['Held as the umbrella of a split: each slice landed; the loop closes it at its next turn', 'Card closed'],
+    'split umbrella, each slice landed, reasons [you split, card closed]');
+  // A control release of the umbrella removes the `you` reason; its closed card still holds it. Only the `you` chip named
+  // the slices, so the card said only "Card closed": the closed card's chip names them, once. The release also takes
+  // 76 out of the record's held list, which the Board reads as `you` too.
+  held[0].reasons = [{ kind: 'card', step: 'closed', card: 'c76' }];
+  held[0].sliceCards[2].state = 'waiting';
+  const released = withOpen({ held });
+  released.panels.board.data.held = [];
+  released.panels.board.data.control.held = [];
+  next(w, released);
+  assert.deepEqual(Array.from(bcard(w, 76).querySelectorAll('.chip[data-reason]'), (c) => c.textContent),
+    ['Held as the umbrella of a split: waits for c20261124T230047-sample-0'], 'released umbrella, reasons [card closed]');
 });
 
 test('the Board: an issue held only by an issue it waits on is in Held, counted there, and can still be held by you', async () => {

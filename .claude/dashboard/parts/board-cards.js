@@ -23,7 +23,10 @@
     // (a standing rule of Conveyor's own and one not picked for a reason named too), Waiting on #N.
     return issues(x.reasons).map((r) => ({
       you: splitHold(x) || (r.outside ? 'Opened by someone outside the project: release it to build it' : 'Held by you'), label: `Held by a label: ${r.label}`, rule: `Skipped by a rule: ${r.rule}`, standing: `Skipped by a rule: ${r.rule || 'Conveyor\'s own'}`,
-      waits: `Waiting on ${issues(r.waitsFor).map(S.ctx.depRef).join(', ')}`, card: r.step === 'blocked' ? 'Card blocked (Needs you)' : r.notPushed === true ? 'Landed, not pushed' : `Card ${r.step || 'open'}`,
+      waits: `Waiting on ${issues(r.waitsFor).map(S.ctx.depRef).join(', ')}`,
+      // After the owner releases a split's umbrella (control release), its closed card still holds it: that chip names the slices.
+      card: r.step === 'blocked' ? 'Card blocked (Needs you)' : (r.step === 'closed' && !kinds(x).includes('you') && splitHold(x))
+        || (r.notPushed === true ? 'Landed, not pushed' : `Card ${r.step || 'open'}`),
       parent: 'Waits for its parent card to land', approve: 'Approve before build (Needs you)', other: 'Skipped by a rule',
     }[r.kind]));
   }
