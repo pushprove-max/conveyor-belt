@@ -17,7 +17,32 @@
       "area:board",
       "area:hooks",
       "area:plugin"
-    ]
+    ],
+    "areaPaths": {
+      "paths": {
+        "conveyor/tests/": "area:engine/tests",
+        "conveyor/foreman/": "area:engine/foreman",
+        "conveyor/commands/": "area:engine/commands",
+        "conveyor/": "area:engine",
+        ".claude/dashboard/": "area:board",
+        ".claude/scripts/": "area:board",
+        ".claude/hooks/": "area:hooks",
+        "hooks/": "area:hooks",
+        ".conveyor/lint-funcs.awk": "area:linter",
+        ".conveyor/lint-funcs.sh": "area:linter",
+        ".conveyor/lint-funcs.test.sh": "area:linter",
+        ".conveyor/lint-js.sh": "area:linter",
+        ".conveyor/lint-js.test.sh": "area:linter",
+        ".conveyor/lint-policy.test.sh": "area:linter",
+        ".conveyor/lint-ruff.test.sh": "area:linter",
+        ".conveyor/lint-shell.sh": "area:linter",
+        ".conveyor/lint-shell.test.sh": "area:linter",
+        ".conveyor/": "area:pack",
+        "docs/": "area:docs",
+        "README.md": "area:docs"
+      },
+      "other": "area:plugin"
+    }
   },
   "productPaths": [
     "site/"
