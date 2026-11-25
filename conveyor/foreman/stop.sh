@@ -211,7 +211,9 @@ REST=$(grep -viE "$PLUG" <<<"$REPLY" | grep -viE "$DONE")
 if [ ${#UNFILED[@]} != 0 ] && plugin_home; then
   block "This project is the plugin's own repository, so a plugin problem is a defect you file here yourself, as any issue you file (it starts held until the owner says yes). File it now, then name the issue at the end of the line: 'Plugin problem (for the conveyor-belt repo): <the command or step>, <what it did>, <what you expected>[, cause not checked: <what you think the cause is>], card <card>, evidence <path>, filed as #<n>'. Not filed: ${UNFILED[0]}"
 fi
-# A card the wake names "<repo>: not yet reported: blocked <ref>" (watch-conveyor.sh unreported) needs, since it
+# A card the wake names "<repo>: not yet reported: blocked <ref>" (watch-conveyor.sh unreported), or names in its own
+# first wake as "<repo>: <ref> is blocked since <time>: <why>" (watch-conveyor.sh record, read here as the same
+# "not yet reported" line: the ref before the first " is blocked since "), needs, since it
 # blocked, a change of its state (health no longer holds it blocked as the line says: lib.sh blocked_now and FRESH),
 # an act logged under a standing kind (a row of a ruling log written at or after the block time health gives, and not
 # marked void) or an AskUserQuestion of this turn whose one question names it and whose result is no error (one a hook
@@ -238,7 +240,10 @@ fi
 # shutting the card is always open (asking the owner too, unless auto is on in full), so the turn can always end.
 LEFT=''
 if [ -n "$W" ] && jq -e --arg w "$W" '.meta == true and (.opening | contains($w))' <<<"$TURN" > /dev/null 2>&1; then
-  LEFT=$(grep -E '^[A-Za-z0-9._-]+: not yet reported: blocked .+$' "$FD/last-wake.txt" 2>/dev/null \
+  LEFT=$(awk '/^[A-Za-z0-9._-]+: not yet reported: blocked .+$/ { l = $0 }
+      match($0, /^[A-Za-z0-9._-]+: /) && (i = index($0, " is blocked since ")) > RLENGTH + 1 && substr($0, i + 18) ~ /^[0-9T:-]+Z: / {
+        l = substr($0, 1, RLENGTH) "not yet reported: blocked " substr($0, RLENGTH + 1, i - RLENGTH - 1) }
+      l != "" && !s[l]++ { print l } { l = "" }' "$FD/last-wake.txt" 2>/dev/null \
     | awk -F': ' 'NR == FNR { w[$1]; next } $1 in w' <(mine 2>/dev/null | cut -f1) -)
 fi
 if [ -n "$LEFT" ]; then

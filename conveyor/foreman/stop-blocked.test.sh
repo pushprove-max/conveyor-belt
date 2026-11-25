@@ -161,6 +161,21 @@ out=$(again "$out" "$(ask "$q1" "$q2")"$'\n'"$(say Idle)")
 [ -z "$out" ] || fail "wake [$WAKE], refused once, then questions [$q1], [$q2], reply Idle: the stop was refused: $out"
 }
 
+# A card's own first wake names it "<repo>: <ref> is blocked since <time>: <why>" (watch-conveyor.sh record), with no
+# "not yet reported" line: Idle is refused naming each card, and a question naming each (alpha #7 by health's card c7,
+# the main-red card by the id its line gives) lets it pass. Bug caught: only "not yet reported" lines were read, so an
+# Idle reply to a card's first wake passed.
+t_first() {
+local WAKE=$'Conveyor: alpha: blocked: #7\nalpha: #7 is blocked since 2026-01-01T00:00:00Z: tests failed (as of 00:05Z)\nalpha: Main is red (d0758b25165b) (card c20261124T215417-alpha-0) is blocked since 2026-01-01T00:00:00Z: the main is red'
+fixture first "$ALL"
+local q1='Should I retry card c7?' q2='Should I retry c20261124T215417-alpha-0?' out
+out=$(stop "$(say Idle)")
+{ refused "$out" && grep -qF 'alpha: not yet reported: blocked #7' <<<"$out" && grep -qF 'blocked Main is red (d0758b25165b) (card c20261124T215417-alpha-0)' <<<"$out" \
+  && ! grep -qF 'beta:' <<<"$out"; } || fail "wake [$WAKE], reply Idle, each card blocked in health: the stop was not refused naming alpha's two cards alone: $out"
+out=$(again "$out" "$(ask "$q1" "$q2")"$'\n'"$(say Idle)")
+[ -z "$out" ] || fail "wake [$WAKE], refused once, then questions [$q1], [$q2], reply Idle: the stop was refused: $out"
+}
+
 # Two blocked follow-ups of one issue share their name. With f1 shut since the wake, a question naming f1 by its wake
 # reference, one naming the shared name alone, and an act naming the name and the parent's issue (alpha #7) leave f2
 # refused. A follow-up has no issue of its own: its card is recorded, and health gives it, with issue 0. Bug caught:
@@ -293,7 +308,7 @@ out=$(bash -c 'set -uo pipefail; . "$1/lib.sh" || exit 1; eval "real_$(declare -
 [ "$out" = "$T/alpha" ] || fail "recmain alpha under pipefail, records failing after mine named alpha: gave [$out], not $T/alpha"
 }
 
-cases=(idle act fake ask fork same solo paste other down prev moved recmain)
+cases=(idle act fake ask first fork same solo paste other down prev moved recmain)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
