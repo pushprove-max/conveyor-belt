@@ -67,7 +67,7 @@ t_keep_one() {
 # own that ignores TERM and never ends (it waits on a FIFO, where the one seen spun: KILL alone ends either; its pid in
 # $T/hold.pid). The worker that ran run_case wrote its pid (worker.pid) and, ended, its exit status (worker.rc). The
 # keeper's end, which starts just after the keeper's guard, the guard's act (its `kill -STOP` of the keeper, just
-# after its sleep and its notice) and the worker's end note the clock in microseconds (end.from, guard.act,
+# after its wait and its notice) and the worker's end note the clock in microseconds (end.from, guard.act,
 # worker.end): keepdeadline reads the three.
 keepstuck() {
   local d=$1
@@ -83,10 +83,10 @@ keepstuck() {
       run_case ) > "$d/report" 2>&1; r=$?; echo "${EPOCHREALTIME/[.,]/}" > "$d/in/worker.end"; echo $r > "$d/in/worker.rc" ) &
 }
 # keepdeadline <dir>: fails unless keepstuck's keeper's guard acted at its deadline, its 1 s limit and 3 s grace from
-# the keeper's end, and the worker ended soon after. The guard's act is from 3.8 s (its sleep starts just before that
+# the keeper's end, and the worker ended soon after. The guard's act is from 3.8 s (its wait starts just before that
 # end is noted) and under 4.5 s, whatever the load factor: keepstuck fixes the guard's deadline at 4 s, so a guard
 # that slept 5 s (its notice still naming 4 s, checked apart) acts past 4.9 s on any machine. Only one ps call is
-# between its sleep and its act, so 500 ms is room enough; the kills after it are what a busy machine makes slow, so
+# between its wait and its act, so 500 ms is room enough; the kills after it are what a busy machine makes slow, so
 # the worker's end has 4 s and 900 ms times the load factor.
 keepdeadline() {
   local from act to ms lim
@@ -140,6 +140,26 @@ t_casekeepstop() {
   grep -qxF "note [keep_one]: the case's keeper had not ended 4 s after the case ended (its time limit and 3 s); it and its subshells were killed" "$d/report" \
     || fail "the worker told to end did not print the case's output that says the case's keeper was killed: $(cat "$d/report")"
   ! ps -o stat= -p "$h" | grep -qv '^Z' || fail "the keeper's subshell that ignores TERM, pid $h, still runs: $(ps -o pid=,stat=,args= -p "$h")"
+}
+# Bug it catches (#1700): the keeper's watch, told to end as its case ended, ran `wait` in its TERM trap (and the
+# guard in its USR1 trap); bash once spun there at full CPU with no child, and the keeper's wait for the watch held a
+# case that passed until its guard's deadline, past its file's time limit, so alonecheck.test.sh failed at random.
+# That spin cannot be made on demand, so here a `wait` given no pid never returns, as that one did: the keeper still
+# ends with its case, its guard never acts, and the case is reported as passed. With the old watch the guard acts at
+# 4 s and says so; with the old guard the keeper never ends.
+t_casekeepwait() {
+  local d=$T/$CASE r
+  mkdir -p "$d/in" && mkfifo "$d/in/hold" || fail "the fixture could not be made"
+  # shellcheck disable=SC2034 # CASE_LIMITS is read by run_case
+  ( ( T=$d/in; CASE=keep_one; CASE_LOAD=1; declare -gA CASE_LIMITS=([keep_one]=1)
+      wait() { [ $# -gt 0 ] || read -r <> "$T/hold"; builtin wait "$@"; }
+      run_case ) > "$d/report" 2>&1; echo $? > "$d/in/worker.rc" ) & r=$!
+  WAIT_CEILING=$(loadlimit 15) wait_until '[ -s "$d/in/worker.rc" ]' \
+    || { wait_end "$r"; fail "the run of a case whose keeper's trap ran a wait that never returns did not end: $(cat "$d/report")"; }
+  [ "$(cat "$d/in/keep_one.rc" 2>/dev/null)" = 0 ] && grep -qx 'ok keep_one' "$d/report" \
+    || fail "the case that passed was not reported as passed: $(cat "$d/report")"
+  ! grep -qF "the case's keeper had not ended" "$d/report" \
+    || fail "the keeper did not end with its case, as its watch's trap ran a wait that never returned: $(cat "$d/report")"
 }
 # Bug it catches: a worker told to end while it printed its case's output (run_case's last print) let that print end
 # and then printed the output again from its TERM trap. The print lock is held here, so the worker waits in that last

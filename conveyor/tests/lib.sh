@@ -416,15 +416,20 @@ case_cpu() { # <file>
 }
 # The keeper of one case (run_case), in a shell of its own. The case is a process group of its own (what it starts in
 # the background stays in it), with the case's mark in its environment. A watcher tells the keeper to end when the
-# worker that started it is gone. Ended, the watcher ends its sleep first: one left behind was the keeper's child on
-# Linux, so case_end found it, ended it and looked again, some 0.2 s more for every case.
+# worker that started it is gone. The watcher waits with no sleep process: a sleep left behind was the keeper's child
+# on Linux, so case_end found it, ended it and looked again, some 0.2 s more for every case.
 case_keep() {
-  local p='' watch timer='' rc guard=''
+  local p='' watch timer='' rc guard='' tick
   trap 'trap "" TERM INT HUP; [ -z "$p" ] || case_end "$p"; [ -z "$guard" ] || { kill -USR1 "$guard"; wait "$guard"; } 2>/dev/null; exit 143' TERM INT HUP
-  # Its jobs, not the last sleep's pid: a TERM can come after a sleep starts and before its pid is kept.
-  ( trap 'kill $(jobs -p) 2>/dev/null; wait; exit 0' TERM
-    while kill -0 "$CASE_WORKER" 2>/dev/null; do
-      command sleep 0.5 & wait $! # sleep: the gap between looks at the worker, which tells no one when it ends
+  # The clock of the watch and the guard below: `read -t` on a FIFO no one writes (tick), which waits as a sleep does
+  # with no process of its own (#1700). Each once waited on a background sleep and, told to end, ended it in its trap
+  # by `kill $(jobs -p); wait`: one, told TERM so, spun at full CPU with no child, and the keeper's wait for it held a
+  # case that passed past its file's time limit, until the guard's. Now the watch ends on TERM at once, and leaves
+  # nothing for case_end. The keeper makes the FIFO, so neither starts a process a TERM could leave.
+  { mkfifo "$T/$CASE.tick" && exec {tick}<> "$T/$CASE.tick" && rm -f "$T/$CASE.tick"; } \
+    || { echo "FAIL [$CASE]: its keeper could not make its clock, the FIFO $T/$CASE.tick" >> "$T/$CASE.out"; echo 1 > "$T/$CASE.rc"; exit 0; }
+  ( while kill -0 "$CASE_WORKER" 2>/dev/null; do
+      read -rt 0.5 -u "$tick" # the gap between looks at the worker, which tells no one when it ends
     done; kill -TERM $$ ) > /dev/null 2>&1 & watch=$!
   # Without the runner's test log: a case that runs a case of its own (run_case: t_machineleft) is one case of the run,
   # and its inner one is not named in the run's records (cases/, conveyor.sh watch()). Without the run's failed mark
@@ -432,8 +437,8 @@ case_keep() {
   # Each case has a host file folder of its own: a case that wrote its host file into one the cases shared (t_codexbuild:
   # a pool of one slot, testSlotsDir its own) gave every case's loop after it that pool, which held no slot of theirs,
   # and each card's test step waited for that one slot, "1 of 1 in use", for ever (the owner, 2026-11-14).
-  # It starts in its own folder, never the runner's, which may be a checkout (gitfence, above).
-  set -m; ( set +m; export "${CASE_MARK?}" XDG_CONFIG_HOME=$T/$CASE/config; unset CONVEYOR_TEST_LOG CASE_RED
+  # It starts in its own folder, never the runner's, which may be a checkout (gitfence, above), without the keeper's clock.
+  set -m; ( set +m; exec {tick}<&-; export "${CASE_MARK?}" XDG_CONFIG_HOME=$T/$CASE/config; unset CONVEYOR_TEST_LOG CASE_RED
     { mkdir -p "$T/$CASE" && cd "$T/$CASE"; } || { echo "FAIL [$CASE]: the case's folder $T/$CASE could not be made" >&2; exit 1; }
     "t_$CASE" ) > "$T/$CASE.out" 2>&1 & p=$!; set +m
   # Its limit (CASE_LIMIT: its file's `# timeout:` line, run_case): past it, the case's group is told to end and
@@ -453,12 +458,13 @@ case_keep() {
   # ignored TERM, with no child, in case_end) held a passed case's run for 17 minutes. A guard past the limit and its
   # 3 s grace says so in the case's output, stops this keeper, kills every child of it (wait_end) and the case's
   # group, and kills the keeper: the case keeps the status it wrote, and the run goes on. The guard is no process the
-  # case left (case_kids). It and its sleep ignore TERM: the runner, told to end, tells this keeper's whole group to
+  # case left (case_kids). It ignores TERM: the runner, told to end, tells this keeper's whole group to
   # (run_case), and waits for this keeper, which may be the one that does not end. Only this keeper ends it (USR1),
   # and once it acts it ignores that too, so it never leaves this keeper stopped. A keeper gone before then (its parent
-  # is no longer this one) is not looked for: its pid may be another process's.
-  [ -z "${CASE_LIMIT:-}" ] || { ( trap '' TERM; trap 'kill -KILL $(jobs -p) 2>/dev/null; wait; exit 0' USR1
-      command sleep $((CASE_LIMIT + 3)) & wait $! # sleep: the keeper's time to end what the case left
+  # is no longer this one) is not looked for: its pid may be another process's. It waits on the keeper's clock (tick,
+  # above), so its USR1 trap has no sleep to end and runs no `wait` (#1700): this keeper's `wait "$guard"` never hangs.
+  [ -z "${CASE_LIMIT:-}" ] || { ( trap '' TERM; trap 'exit 0' USR1
+      read -rt $((CASE_LIMIT + 3)) -u "$tick" # the keeper's time to end what the case left
       trap '' USR1; local g=$BASHPID k
       [ "$(ps -o ppid= -p "$g" | tr -d ' ')" = $$ ] || exit 0
       echo "note [$CASE]: the case's keeper had not ended $((CASE_LIMIT + 3)) s after the case ended (its time limit and 3 s); it and its subshells were killed" >> "$T/$CASE.out"
