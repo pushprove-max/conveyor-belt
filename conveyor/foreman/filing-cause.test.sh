@@ -238,6 +238,23 @@ passes $'gh issue create --label bug --title Example --body-file - <\\\n<EOF\nTh
 refused $'echo a \\\n# "\ngh issue create --label bug --title Example --body \'~~~\n~~~"\n## Cause\n~~~\''
 # A comment ends at its line end: the body after it is read, and its real Cause section lets the issue through.
 passes $'# a comment "\ngh issue create --label bug --title Example --body \'## What happens now\nx\n## Cause\ny\''
+# Bug (#1623 review, follow-up): a `## Cause` comment before a here-document body counted as its Cause section (the
+# here-document path read the command with its comments); heredocs makes the comment spaces.
+refused $'## Cause\ngh issue create --title Example --body "$(cat <<\'EOF\'\n## What happens now\nIt breaks.\nEOF\n)"'
+# Bug (#1623 review, follow-up): the options were read from the command with its comments, so a `--body-file` in a
+# comment hid the real body file (the fix passed), and a `--label bug` or an `ask ... testissue` in a comment made an
+# issue with no fix in it a fix (refused).
+printf '## What happens now\nIt breaks.\n' > "$T/fix.md"
+refused "# --body-file $T/none.md"$'\n'"gh issue create --title Example --body-file $T/fix.md"
+refused "# < $T/none.md"$'\n'"gh issue create --title Example --body-file - < $T/fix.md"
+passes $'# --label bug\ngh issue create --title Example --body \'A note.\''
+passes $'gh issue create --title Example --body \'A note.\' # -l bug'
+passes $'# ask alpha testissue conveyor/x.test.sh Slow x\ngh issue create --title Example --body \'A note.\''
+# Bug (#1623 review, follow-up, E1): the options were read from the command with its here-document bodies, so the quote
+# of `It's` in a body opened a quote that ran on past the end word and made the comment after it a `--label bug`
+# (refused), or hid the real `< file` behind a commented one.
+passes $'gh issue create --title Example --body-file - <<\'EOF\'\nIt\'s a note.\nEOF\n# --label bug'
+refused "gh issue create --title Example --body-file - <<'EOF'"$'\n'"It's a note."$'\n'"EOF"$'\n'"# < $T/none.md"$'\n'"gh issue create --title Example --body-file - < $T/fix.md"
 }
 
 # unfenced <inline> <quote> <text> keeps what is outside the fences and reads on after each block ends.

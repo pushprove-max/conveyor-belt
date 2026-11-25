@@ -184,9 +184,10 @@ unquoted() {
 # `## Cause` comment after a body is no heading. A body starts on the line after the one (with its line continuations)
 # that holds its `<<WORD`, and ends at a line that is only WORD (tabs before it taken off for a `<<-`). A blank line goes
 # before the bodies and in place of each end word, so a body starts and ends a paragraph. The text after the bodies is
-# read again from its start, as Bash reads it.
+# read again from its start, as Bash reads it. With a second argument `0`, the bodies are left out (each is one blank
+# line): only the shell text stays, where the options are read, so a quote or a `#` in a body changes no comment after it.
 heredocs() {
-  local s=$1 o='' u at ops op w line
+  local s=$1 nb=${2:-1} o='' u at ops op w line
   while [ -n "$s" ]; do
     u=$(uncommented "$s") at='' ops=''
     # at: where the first line that holds a `<<WORD` outside quotes ends (its newline); ops: the words of its `<<WORD`s,
@@ -214,7 +215,7 @@ heredocs() {
         if [[ $s == *$'\n'* ]]; then s=${s#*$'\n'}; else s=''; fi
         if [ "$op" != "$w" ]; then while [[ $line == $'\t'* ]]; do line=${line:1}; done; fi
         if [ "$line" = "$w" ]; then o+=$'\n'; break; fi
-        o+=$line$'\n'
+        [ "$nb" = 0 ] || o+=$line$'\n'
       done
     done
   done
@@ -223,15 +224,22 @@ heredocs() {
 no_cause() {
   local cmd f t ti=0 fc=
   cmd=$(jq -r '.tool_input.command // ""' <<<"$1" 2>/dev/null) || return 1
-  # j: the command with its line continuations (a backslash before a newline) taken out, as Bash reads its words; an
+  # u: the command with its shell comments made spaces (uncommented), as bash reads no word in them. o: u with its
+  # here-document bodies left out (heredocs), so a quote in a body (`It's`) opens no quote that hides a comment after the
+  # body. The options (`ask ... testissue`, `--body-file`, its `< file`, `--label`) are read in o: one written in a
+  # comment or a body is none.
+  local u uq o
+  u=$(uncommented "$cmd")
+  o=$(heredocs "$cmd" 0)
+  # j: o with its line continuations (a backslash before a newline) taken out, as Bash reads its words; an
   # `ask <project> testissue` is matched in it.
-  local j=${cmd//$'\\\n'/}
+  local j=${o//$'\\\n'/}
   t=${j//[\"\']/}
   [[ $t =~ (^|[[:space:];\&|])ask[[:space:]]+[^[:space:]]+[[:space:]]+testissue([[:space:]]|$) ]] && ti=1
   files "$1" || [ "$ti" = 1 ] || return 1
-  if [[ $cmd =~ (--body-file|-F)[[:space:]=]+[\"\']?([^[:space:]\"\']+) ]] && f=${BASH_REMATCH[2]}; then
+  if [[ $o =~ (--body-file|-F)[[:space:]=]+[\"\']?([^[:space:]\"\']+) ]] && f=${BASH_REMATCH[2]}; then
     # `--body-file -` reads the body from stdin: a `< file` redirect names that file (stdin_file in lib.sh).
-    [ "$f" != - ] || f=$(stdin_file "$cmd") || f=-
+    [ "$f" != - ] || f=$(stdin_file "$o") || f=-
     [ ! -f "$f" ] || fc=$(cat "$f" 2>/dev/null)
   fi
   # A heading is its line whole, exactly two hashes, at a line start (up to three spaces before them, as Markdown
@@ -243,14 +251,11 @@ no_cause() {
   # ends nothing; so does a body file (read apart from the command). In an inline body a written `\n` in a `$'...'` quote
   # is a line break; elsewhere it is a backslash and an n, which starts or ends no fence and starts no heading (breaks);
   # `\\n` is a backslash and an n. The quote that opens the body is the one that closes it.
-  # u: the command with its shell comments made spaces (uncommented), so a quote, a `<<WORD` or a heading in a comment
-  # is read as none. An inline body is found and read in u; a here-document body is read from cmd, as a `#` line in it
+  # In u a quote, a `<<WORD` or a heading in a comment is read as none. An inline body is found and read in u; a here-document body is read from cmd, as a `#` line in it
   # is Markdown, not a comment, and the text around it from u (heredocs). The `<<WORD` is looked for outside quotes (unquoted): one in a quote is text. A `<<<` is
   # a here-string, no here-document: its last two `<` start none. uq: the unquoted text with its line continuations
   # taken out after the quotes are made x (one in a quote is text), as Bash joins `<\` at a line end and a next-line
   # `<<` into one `<<<`.
-  local u uq
-  u=$(uncommented "$cmd")
   uq=$(unquoted "$u"); uq=${uq//$'\\\n'/}
   if [[ $uq =~ $hd ]]; then hc=$(unfenced 0 "" "$(heredocs "$cmd")")
   else
@@ -285,5 +290,5 @@ no_cause() {
   [ -z "$fc" ] || hc+=$'\n'$(unfenced 0 "" "$fc")
   [[ $hc =~ ${hs}Cause${he} ]] && return 1
   [[ $hc =~ ${hs}What\ happens\ now${he} || $ti = 1 ]] && return 0
-  grep -qiE "(^|[[:space:]])(--label|-l)(=|[[:space:]]+)?[\"']?([^[:space:]\"']*,)?bug([,\"'[:space:]]|\$)" <<<"$cmd"
+  grep -qiE "(^|[[:space:]])(--label|-l)(=|[[:space:]]+)?[\"']?([^[:space:]\"']*,)?bug([,\"'[:space:]]|\$)" <<<"$o"
 }
