@@ -198,8 +198,8 @@ cardtest() {
     fi
   fi
   # The landing gate (lintgate(), lib/lint.sh), before any check or test: a fix of lint findings goes round to a review, a last review (lfix), and back here, where a finding left on the change
-  # that fix left blocks. Then the pre-push hook's persisted-contract check (contractgate(), lib/contract.sh): a refusal goes to one fix session and back to review the same way.
-  lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br" land && contractgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br"; case $? in 1) return ;; 2) kept=''; docpass=''; go=next; return ;; esac
+  # that fix left blocks. Then the pre-push hook's persisted-contract check (contractgate(), lib/contract.sh): a refusal goes to one fix session and back to review the same way. Then main's push checks on the card's change (pushgate(), lib/contract.sh): a failure, or a run past its time limit, blocks it.
+  lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br" land && contractgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br" && pushgate "$c" "$n" "$wt"; case $? in 1) return ;; 2) kept=''; docpass=''; go=next; return ;; esac
   # The product checks, on every pass that would land: a failure blocks the card, never a finding to fix. Not on
   # the pass that runs again on main as it is now what failed in a red run (tmain): there a failing check is that
   # red run failing again, as a check that fails on a batch's change is a red run (batch()), and goes to the one

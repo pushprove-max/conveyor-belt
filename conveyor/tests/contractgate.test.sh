@@ -5,7 +5,9 @@
 # (contractgate(), in cardtest()), for a card that waits to land in a batch (contractwait(), in settle()) and on each
 # commit that lands (landone(), lib/claim.sh). It runs
 # adversarial-review-gate.sh --contract-range on the card's change when main's pre-push hook runs that check, so a
-# change that hook refuses does not land.
+# change that hook refuses does not land. Then the push checks at the landing gate (pushgate(), after contractgate())
+# and for a card that waits to land in a batch (pushgatewait(), after contractwait()): main's pre-push hook, when it
+# names CONVEYOR_PUSH_GATE, run on the card's change alone, on a test slot.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -172,4 +174,106 @@ t_contractnohook() {
   fx_in 'session() { echo fix >> "$STUB/fixbrief"; echo "{}"; }; cfix=""; contractgate c7 7 "$FXWT" "{}" prompt br; echo "rc=$?"'
   grep -qx 'rc=0' "$T/$CASE/run.out" && [ ! -e "$STUB/fixbrief" ] \
     || fail "the gate refused a change (change: $GADGET) though main's pre-push hook runs no contract check: $(cat "$T/$CASE/run.out")"
+}
+
+# Card #7 with main's pre-push hook <hook> (lines after its shebang; it names CONVEYOR_PUSH_GATE, so the landing gate
+# runs it, pushgate() in lib/contract.sh), and the pack changed by the jq filter <tune>. Its build adds web.ts; its
+# reviews are GO. card() runs it to its landing or block.
+pushgatecard() { # <hook> [<tune>]
+  setup "[$(issue 7 2026-01-01)]"
+  tune "${2:-.}" || fail "the pack"
+  pushgatehook "$1"
+  echo 'echo "export const n: number = 1" > web.ts' > "$STUB/build"
+  for i in 1 2 3 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
+  rulecard 7
+}
+
+# #1683, Done-when 1. Bug it catches: the push checks ran only at the push, so a card whose change fails one landed and
+# main then held a commit it could not push. Main's hook selects its checks by the files of the pushed range, as a
+# project's does: given the card's change alone (web.ts), its typecheck fails. The card is blocked before it lands,
+# its record naming the check and holding the check's error. The hook's file is named from $T/$CASE, not $STUB:
+# setup(), in pushgatecard(), sets $STUB after this hook's text is made.
+t_pushgatefail() {
+  local g=$T/$CASE/gatefiles
+  pushgatecard "read -r _ l _ r; git diff --name-only \"\$r\" \"\$l\" > $(printf %q "$g")
+grep -qx web.ts $(printf %q "$g") || exit 0
+echo 'web.ts(1,14): error TS2322: Type string is not assignable to type number.' >&2; echo 'push-checks: FAILED typecheck-web' >&2; exit 1"
+  [ "$(cat "$g" 2>&1)" = web.ts ] || fail "main's hook was not given the card's change (web.ts) alone as the pushed range: $(cat "$g" 2>&1)"
+  [ -z "$(st 'select(.step == "landed")')" ] && [ ! -e "$R/web.ts" ] || fail "the card whose change (web.ts) fails the push check typecheck-web landed: $(st 'select(.step == "landed")')"
+  [[ $(st 'select(.step == "blocked") | .reason') == "push check: typecheck-web failed on the card's change (exit 1); nothing landed."* ]] \
+    && st 'select(.step == "blocked") | .tail' | grep -qF 'error TS2322' \
+    || fail "the card (change web.ts) was not blocked naming typecheck-web with its error in the record: $(st 'select(.step == "blocked") | {reason, tail}')"
+}
+
+# #1683, Done-when 2 and 3. Bug it catches: a push check past its time limit let the card land (exit 0), and the check
+# ran in a card folder that was gone ("cd: ... No such file or directory"). Main's hook passes one check, then runs one
+# for 20 s, past pushTimeout 1 (times the load factor, at most 3 s); while it runs, it notes once each 0.2 s whether its
+# folder is gone. The card is blocked as its checks not finished, the hook ran in the card's worktree, that folder was
+# there each time it looked, and neither the run's output nor the card's record (its reason and the hook's output
+# in .tail, which the engine captures from the hook) names a missing folder.
+t_pushgateslow() {
+  local d=$T/$CASE
+  pushgatecard "pwd -P > $(printf %q "$d/gatedir"); echo 'push-checks: ok lint-web'
+for i in \$(seq 100); do [ -d \"\$PWD\" ] || echo gone >> $(printf %q "$d/gone"); sleep 0.2; done; echo 'push-checks: ok slow-web'" '.tunables.pushTimeout = 1' # sleep: the hook's check must run past its time limit
+  [ -z "$(st 'select(.step == "landed")')" ] && [[ $(st 'select(.step == "blocked") | .reason') == "push check: its checks not finished: "* ]] \
+    || fail "a card whose push check ran 20 s past pushTimeout 1 was not held back as its checks not finished: $(st 'select(.step | IN("blocked", "landed")) | "\(.step) \(.reason)"')"
+  [[ $(cat "$d/gatedir" 2>&1) == "$(cd "$d/cards" && pwd -P)/c"* ]] || fail "the push check did not run in the card's worktree: $(cat "$d/gatedir" 2>&1)"
+  [ ! -e "$d/gone" ] || fail "the card's worktree was gone while its push check ran ($(wc -l < "$d/gone") looks)"
+  ! grep -q 'cd: .*No such file or directory' "$d/run.out" || fail "the run printed a missing folder: $(grep 'cd: .*No such file or directory' "$d/run.out")"
+  ! st 'select(.step == "blocked") | .reason, .tail' | grep -q 'No such file or directory' \
+    || fail "the card's record names a missing folder from the push check: $(st 'select(.step == "blocked") | {reason, tail}')"
+}
+
+# Main ($R) with a pre-push hook that names CONVEYOR_PUSH_GATE and runs <hook>.
+pushgatehook() { # <hook>
+  printf '%s\n' '#!/usr/bin/env bash' '# CONVEYOR_PUSH_GATE: run before a card lands, on its change alone' "$1" > "$R/.git/hooks/pre-push" \
+    && chmod +x "$R/.git/hooks/pre-push" || fail "main's pre-push hook"
+}
+
+# Bug it catches: with batches on, a card that waits to land ran its checks and tests and was marked tested with no
+# push check, so a batch landed it (gather(), landone()) and never ran the check on its change. Card #8 (web.ts, which
+# main's hook fails) waits on #7, which changes the same file, in settle() as card() calls it. It runs no test, and
+# its <worktree>.ready is gone, so no batch takes it; the run names the check that failed. Each look of the wait
+# sleeps: here sleep() counts the looks and the third ends the call (exit 8).
+t_pushgatewait() {
+  contractmain '[]' 0
+  pushgatehook "read -r _ l _ r; git diff --name-only \"\$r\" \"\$l\" | grep -qx web.ts || exit 0; echo 'push-checks: FAILED typecheck-web' >&2; exit 1"
+  echo 'echo test >> "$STUB/tested"' >> "$STUB/test-cmd"
+  tune '.landBatch = 2'
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  for n in 7 8; do
+    git -C "$R" worktree add -q --detach "$CARDS/c$n-$n" main || fail "the worktree of card $n"
+    landed "$n" | jq -c --arg c "c$n-$n" '.card = $c | .step = "picked"' >> "$ST/cards.jsonl"
+    echo "export const n: number = $n" > "$CARDS/c$n-$n/web.ts" && git -C "$CARDS/c$n-$n" add -A || fail "the change of card $n"
+  done
+  echo '{"issue":8,"msg":"title 8 (#8)","extra":{"waitSec":0}}' > "$CARDS/c8-8.ready"
+  local looks='sleep() { [ "${FUNCNAME[1]}" = settle ] || { command sleep "$@"; return; }; LOOKS=$((LOOKS + 1)); [ $LOOKS -lt 3 ] || exit 8; }' # sleep: a stand-in that counts the looks of settle() and runs no wait
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'cd "$R" || exit 9; caught="" waitsec=0 behind="[]" parsecheck="" LOOKS=0
+    [ -z "$(locked claim c7-7 "$CARDS/c7-7" $$)" ] || { echo "#7 did not hold the file"; exit 9; }
+    '"$looks"'
+    settle c8-8 8 "$CARDS/c8-8" "Build the issue." land "$(issue 8 2026-01-01)"; echo "settle: $?"'
+  [ "$RC" = 8 ] && grep -q 'conveyor: card c8-8 waits on card c7-7' "$T/$CASE/run.out" || fail "#8 (web.ts) did not wait on #7 (web.ts): exit $RC: $(cat "$T/$CASE/run.out")"
+  [ ! -e "$STUB/tested" ] && [ ! -e "$CARDS/c8-8.ready" ] \
+    || fail "the waiting card whose change (web.ts) fails the push check typecheck-web ran its tests or is still ready, so a batch can land it: $(cat "$STUB/tested" "$CARDS/c8-8.ready" 2>&1)"
+  grep -qx 'conveyor: card c8-8: its push checks failed while it waits, or could not run: it runs no check or test, and its landing gate deals with it at its turn' "$T/$CASE/run.out" \
+    && grep -qx "push check: typecheck-web failed on the card's change (exit 1); nothing landed." "$T/$CASE/run.out" \
+    || fail "settle() did not say why the card (web.ts) runs no test, naming typecheck-web: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches: the push check ran outside the test slots, beside every test run of a full machine, and with no live
+# record, so the loop took a quiet hook for a card with no process of its step (stuckcard(), lib/run.sh) and stopped
+# it before pushTimeout. With a pool of one slot, main's hook on card c7's change (web.ts) finds that slot held while
+# it runs (as a lint command does in t_lintbasedeps), and the card's live record says it runs the hook; after, the
+# record is gone and the gate passed.
+t_pushgateslot() {
+  local p=$T/$CASE/slots o=$T/$CASE/gate
+  contractmain '[]' 0
+  pushgatehook "h=0; flock -n $(printf %q "$p/1") true 2>/dev/null || h=1; echo \"slots=\$h live=\$(jq -r .action \"\$PWD.live\" 2>&1)\" > $(printf %q "$o")"
+  FXWT=$T/$CASE/cards/c7; git -C "$R" worktree add -q --detach "$FXWT" && echo 'export const n = 1' > "$FXWT/web.ts" && git -C "$FXWT" add -A || fail "the card's change"
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'unset CONVEYOR_TEST_SLOT; export CONVEYOR_TEST_POOL=1:'"$p"'; pushgaterun c7 "$FXWT"; echo "rc=$? $PUSH_WHY"; [ ! -e "$FXWT.live" ] || echo "live left"'
+  [ "$(cat "$o" 2>&1)" = "slots=1 live=running main's pre-push hook on the card's change" ] \
+    || fail "main's hook on the card's change (web.ts) did not run on the one test slot with the card's live record naming it: $(cat "$o" 2>&1)"
+  [ "$(cat "$T/$CASE/run.out")" = 'rc=0 ' ] || fail "the push check of the card's change (web.ts) did not pass and clear its live record: $(cat "$T/$CASE/run.out")"
 }

@@ -242,6 +242,21 @@ check after its lint. A refusal stops its checks and tests, no batch takes it, a
 The check also runs on each commit just before it lands, so a card in a batch is checked on top of the cards before
 it. A refusal there lands nothing, and the card goes back to its own landing gate.
 
+Then the landing gate runs the push checks on the card's change, when the project's pre-push hook names
+`CONVEYOR_PUSH_GATE`. The hook runs in the card's worktree, as for a push of the card's change alone: its input line
+gives the card's change as the local commit and the commit before it as the remote's. So the checks that the hook
+selects by changed files are those of the card. The hook gets `CONVEYOR_PUSH_GATE` set to the card's name, and it has
+the time limit of a push (`pushTimeout`, in the `tunables` of `.conveyor/project.json`). It runs on a test slot, and
+waits for one while all are in use. The Test step shows the card as waiting for a slot, then as running the hook. If a
+check fails, the card blocks with the reason `push check: <check> failed on the card's change (exit <n>); nothing landed.` and the hook's
+output. The check is the word after the last `FAILED` that the hook prints. If the hook runs past its time limit, the
+card blocks with the reason `push check: its checks not finished: ...`. A hook that does not name
+`CONVEYOR_PUSH_GATE` runs only at the push.
+
+With batches on, a card that waits to land runs the push checks too, after the persisted-contract check. If they fail
+or do not finish, it runs no checks or tests, no batch takes it, and at its turn its landing gate runs them again and
+blocks it if they fail again.
+
 With batches on, a card that waits to land after its `GO` runs its own product checks and tests while it waits. The
 same lint commands run first, once in the wait. A pass and a missing tool let its checks and tests run. A finding or an
 execution error stops them, with no fix session. The card is then not ready: no batch takes it, and the lint does not

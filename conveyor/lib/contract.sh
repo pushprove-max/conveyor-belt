@@ -3,7 +3,9 @@
 # card that waits to land in a batch (contractwait()), after its lint, and on each commit that lands (contractrange(),
 # from landone() in lib/claim.sh). A project's pre-push hook can run this check
 # (adversarial-review-gate.sh --contract-range <base> <tip>), so a card that fails it could land and then main could
-# not push. Here it runs on the card's own change before that change lands.
+# not push. Here it runs on the card's own change before that change lands. Then the push checks
+# main's pre-push hook selects for the card's change: at the landing gate (pushgate()), and for a card that waits to
+# land in a batch (pushgatewait()).
 
 CONTRACTFIX=$'# Persisted-contract check: fix it and nothing else\nThe persisted-contract check (the one the project\'s pre-push hook runs) refused this card\'s change. A change to a persisted-contract writer needs one changed test that names both that writer and a changed reader. Add or change such a test. Do not change the check. Its message:'
 
@@ -66,6 +68,67 @@ contractgate() { # <card> <issue> <worktree> <issue json> <the sessions' prompt>
   checked "$c" "$n" "$wt" "$4" "$5" fix "$(jq -c --arg r "contract: ${out:0:300}" '. + {reason: $r}' <<<"$t")" || return 1
   git -C "$wt" add -A 2>/dev/null; trialflag "$wt"
   return 2
+}
+
+# The push checks before a card lands: main's pre-push hook (`git rev-parse --git-path hooks/pre-push` in main, never
+# the card's own copy), when it names CONVEYOR_PUSH_GATE, runs in the card's worktree as git runs it for a push of the
+# card's change alone: its stdin line gives the card's change (a commit of its index) as the local commit and the
+# worktree's HEAD as the remote's, so the checks the hook selects by changed files are those of the card's change. It
+# gets CONVEYOR_PUSH_GATE (the card), the pack's push.env and the load factor, under pushTimeout times that factor, on a
+# test slot, as the push's hook does (pushone(), lib/push.sh): it waits for a slot while every one is held. A hook that
+# does not name CONVEYOR_PUSH_GATE is not run here: it can run a whole suite, which the card's own test step covers.
+# While it waits and runs, <worktree>.live says so, so the loop does not take the card for one with no process of its
+# step (stuckcard(), lib/run.sh) and stop it before its time limit. 0: it passed, or there is no such hook. 1: PUSH_WHY
+# is the reason: the hook failed (the reason names the check, the word after its last "FAILED", and the hook's output
+# follows it), it ran past its time limit (PUSHLATE), or it could not run.
+PUSHLATE='its checks not finished'
+pushgaterun() { # <card> <worktree>
+  local c=$1 wt=$2 p base head pe e=() u pf lim out rc k
+  PUSH_WHY=''
+  p=$(cd "$MAIN" && git rev-parse --git-path hooks/pre-push 2>/dev/null) || return 0
+  [[ $p == /* ]] || p=$MAIN/$p
+  [ -x "$p" ] && grep -qF CONVEYOR_PUSH_GATE "$p" 2>/dev/null || return 0
+  base=$(git -C "$wt" rev-parse -q --verify HEAD) && head=$(cd "$wt" && git commit-tree "$(git write-tree)" -p "$base" -m "conveyor push checks" 2>&1) \
+    || { PUSH_WHY="push check: the engine could not make the card's change a commit, so its push checks did not run and nothing landed: ${head:-}"; return 1; }
+  packget push.env pe && { [ -z "$pe" ] || mapfile -d '' -t e < <(jq -j 'to_entries[] | "\(.key)=\(.value)\u0000"' <<<"$pe"); } \
+    || { PUSH_WHY="push check: the pack's push.env could not be read, so the push checks did not run and nothing landed"; return 1; }
+  u=$(git -C "$MAIN" remote get-url "$REMOTE" 2>/dev/null) || u=$REMOTE
+  slot_pool 2>/dev/null || { PUSH_WHY="push check: the test slots folder could not be made, so the push checks did not run and nothing landed"; return 1; }
+  if [ -z "$SLOT_HOME" ]; then until slot_try || slot_wait; do pushgatelive "$wt" "$(slot_waiting)"; done; fi
+  pushgatelive "$wt" "running main's pre-push hook on the card's change"
+  pf=$(loadfactor); lim=$(awk -v n="$PUSH_TIMEOUT" -v f="$pf" "$LOADSCALE") || lim=$PUSH_TIMEOUT
+  out=$(exec 2>&1 8>&-; cd "$wt" && { [ -n "$SLOT_HOME" ] || slot_mine; } \
+    && exec env "${e[@]}" CONVEYOR_PUSH_GATE="$c" CONVEYOR_LOAD_FACTOR="$pf" timeout --kill-after=30 "$lim" "$p" "$REMOTE" "$u" <<<"HEAD $head refs/heads/$BRANCH $base"); rc=$?
+  [ -n "$SLOT_HOME" ] || slot_free
+  rm -f "$wt.live"
+  [ $rc != 0 ] || return 0
+  out=$(tail -c 4000 <<<"$out" | tr -d '\000')
+  if [ $rc = 124 ] || [ $rc = 137 ]; then
+    PUSH_WHY="push check: $PUSHLATE: main's pre-push hook ran past its time limit of ${lim}s on the card's change; nothing landed."$'\n'"$out"; return 1
+  fi
+  k=$(jq -Rrs '[scan("(?:^|[^A-Za-z0-9_])FAILED:?[ \t]+(\\S+)")] | last[0] // "the pre-push hook" | .[0:100]' <<<"$out")
+  PUSH_WHY="push check: $k failed on the card's change (exit $rc); nothing landed."$'\n'"$out"; return 1
+}
+# The live record of the push checks (pushgaterun()): the Test step, doing <action>.
+pushgatelive() { # <worktree> <action>
+  jq -cn --arg a "$2" '{step: "test", at: (now | todate), last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null, action: $a}' > "$1.live.tmp" 2>/dev/null \
+    && mv -f "$1.live.tmp" "$1.live"
+}
+# At the landing gate (cardtest(), lib/cardland.sh, after contractgate()). 0: on to land. 1: the card is blocked with
+# the reason (pushgaterun()), nothing landed.
+pushgate() { # <card> <issue> <worktree>
+  pushgaterun "$1" "$3" || { block "$1" "$2" "$3" "$PUSH_WHY"; return 1; }
+}
+# For a card that waits to land (settle(), lib/claim.sh), with batches on, after contractwait(): a batch lands a card
+# with no turn at its landing gate. 0: its checks and tests run. 1: the push checks failed or could not run: its
+# <worktree>.ready is removed, so no batch takes it (gather()), and at its turn its landing gate (pushgate()) runs them
+# again and blocks it on a failure.
+pushgatewait() { # <card> <worktree>
+  pushgaterun "$1" "$2" && return 0
+  readyrm "$2"
+  echo "conveyor: card $1: its push checks failed while it waits, or could not run: it runs no check or test, and its landing gate deals with it at its turn"
+  printf '%s\n' "${PUSH_WHY:0:2000}"
+  return 1
 }
 
 # The check for a card that waits to land (settle(), lib/claim.sh), with batches on, after its lint (lintwait()). 0:

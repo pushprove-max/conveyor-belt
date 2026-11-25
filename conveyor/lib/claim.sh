@@ -456,8 +456,9 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
         # <worktree>.ready, so it waits on with no check, test or session, and its landing gate deals with it. Its lint
         # line goes after the wait's start line: a new start line makes the wait the card's last step again, so the
         # Board and `health` see the wait and its time limit. The persisted-contract check (contractwait(),
-        # lib/contract.sh) after it, the same way: a batch lands a card with no turn at its landing gate.
-        { lintwait "$1" "$2" "$3" && contractwait "$1" "$3"; } || { began "$1" "$2" "$5"; : > "$3.idle"; sleep "$LIVE"; continue; }
+        # lib/contract.sh) after it, the same way: a batch lands a card with no turn at its landing gate. Then its push
+        # checks (pushgatewait(), lib/contract.sh), the same way.
+        { lintwait "$1" "$2" "$3" && contractwait "$1" "$3" && pushgatewait "$1" "$3"; } || { began "$1" "$2" "$5"; : > "$3.idle"; sleep "$LIVE"; continue; }
         sec=$SECONDS; trc=''
         if ! out=$(checks "$3"); then
           trc=1; [ "$(git -C "$3" rev-parse HEAD 2>/dev/null)" = "$(jq -r .base "$3.stack" 2>/dev/null)" ] || { block "$1" "$2" "$3" "a product check failed; nothing landed."$'\n'"$out"; return 1; }
