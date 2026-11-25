@@ -36,11 +36,24 @@ t_relcovmap() {
 }
 # Bug: release-prep made no map after a failed suite, and release --anyway runs none, so a release over a failed suite
 # (releaseanyway.test.sh's anysetup) committed no fresh map. The failed run makes it, and the release commits it.
+# Bug (issue 1708): the map was made before the failed suite's status was posted and its failure reported, so a long
+# map held the result back. Here, on the build machine, the status is posted, the failure printed (release-prep holds
+# its stderr to its end, relrun()) and the run's record says the suite failed and the map runs (the Release panel's
+# Suite failed, not Suite running) before the map; the record says nothing of the map once it is made.
+# Bug (review of issue 1708): the run's end (ended) was written only after the map, and the Foreman's report and wake go
+# by it, as do the fix cards (relfixes(): those filed after it), so a fix filed while the map ran was not counted. The
+# end is in the record while the map runs, and the run's own end keeps that time.
 t_relcovanyway() {
-  local O out t
-  anysetup; covcmd 'git rev-parse HEAD > cov.jsonl'
+  local O out t a b rr=$T/$CASE/cards/release/run.json
+  anysetup; covcmd 'grep -qF state=failure "$STUB/gh-calls" || echo "no status posted" >> "$STUB/cov-at"' 'git rev-parse HEAD > cov.jsonl' \
+    "jq -e '(.ended | type) == \"string\" and .state == \"failed\" and .coverage == \"running\"' '$rr' > /dev/null || echo 'the record does not say the run ended with its suite failed and the map runs' >> \"\$STUB/cov-at\"" \
+    "jq -c '.ended = \"2000-01-01T00:00:00Z\"' '$rr' > '$rr.t' && mv '$rr.t' '$rr'" # the end written before the map, marked so the one the run's end writes cannot pass for it
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not fail on the red suite: $out"
+  jq -e '.state == "failed" and has("coverage") == false and .ended == "2000-01-01T00:00:00Z"' "$rr" > /dev/null \
+    || fail "the ended run's record is not failed, still says the map runs, or its end is not the one written before the map: $(cat "$rr")"
   grep -qF "the coverage map of ${O:0:12} is kept for its release to commit" <<<"$out" || fail "the failed suite made no coverage map: $out"
+  a=$(grep -nF 'the whole suite failed on' <<<"$out" | cut -d: -f1) b=$(grep -nF 'makes the coverage map' <<<"$out" | cut -d: -f1)
+  [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] || fail "the failed suite was not reported before the coverage map step started: $out"
   out=$(loop release 1.1.0 --anyway --by 'the owner' 2>&1) || fail "--anyway over the red suite was refused: $out"
   t=$(git -C "$T/$CASE/origin" rev-parse 'v1.1.0^{commit}') || fail "origin has no tag v1.1.0: $out"
   [ "$(git -C "$R" show "$t:cov.jsonl" 2>&1)" = "$O" ] && [ "$(grep -c . "$STUB/cov-at")" = 1 ] \
@@ -55,16 +68,75 @@ t_relcovundo() {
   [ ! -e "$R/cov.jsonl" ] && [ "$(git -C "$R" rev-parse HEAD)" = "$O" ] && [ -z "$(git -C "$R" status --porcelain --untracked-files=no)" ] \
     || fail "the undone release left the map or a change in the checkout: $(git -C "$R" status --porcelain 2>&1) $(git -C "$R" log --oneline -2)"
 }
-# Bug: a suite run on a devbox (or a box over ssh) made no map, so this project's releases, whose suite runs on a
-# devbox, never refreshed it. The command runs here, in the worktree of the tested commit, once the devbox's lease is
-# given back (a traced run holds no leased box).
+# Bugs: a suite run on a devbox (or a box over ssh) made no map; then (issue 1708) it made it on the build machine, 4
+# units at a time, after the box was given back and before the suite's result was posted or reported. The command runs
+# on the devbox, in its checkout of the tested commit, with the lease still held and the suite's status posted; the
+# older map the commit holds is not there for it (only a map this run wrote comes back); the map comes back and is kept,
+# and the lease is given back once after it.
 t_relcovdevbox() {
-  local O out
-  runsetup "$BOXSUITE"; devboxsetup 3; covcmd '[ ! -e "$STUB/devbox-leased" ] || echo "lease held" >> "$STUB/cov-at"' 'echo map > cov.jsonl'
+  local O out a b
+  runsetup "$BOXSUITE"; devboxsetup 3
+  covcmd '[ -e "$STUB/devbox-leased" ] || echo "lease given back" >> "$STUB/cov-at"' '[ ! -e cov.jsonl ] || echo "an older map is there" >> "$STUB/cov-at"' \
+    'grep -qF context=conveyor/release-suite "$STUB/gh-calls" || echo "no status posted" >> "$STUB/cov-at"' 'echo map > cov.jsonl'
+  echo old > "$R/cov.jsonl" && git -C "$R" add cov.jsonl && git -C "$R" commit -qm 'an older map' && git -C "$R" push -q origin main && O=$(git -C "$R" rev-parse HEAD) \
+    || fail "the fixture could not be made"
   out=$(loop release-prep 1.1.0 2>&1) || fail "release-prep on the devbox failed: $out"
   [ "$(cat "$STUB/full-pwd" 2>&1)" = "$BOX/wt" ] || fail "the suite did not run on the devbox: $(cat "$STUB/full-pwd" 2>&1)"
-  [ "$(cat "$STUB/cov-at" 2>&1)" = "$T/$CASE/cards/release/wt" ] && grep -qF "the coverage map of ${O:0:12} is kept for its release to commit" <<<"$out" \
-    || fail "the coverage command did not run once here, in the suite's worktree, after the lease was given back: $(cat "$STUB/cov-at" 2>&1): $out"
+  [ "$(cat "$STUB/cov-at" 2>&1)" = "$BOX/wt" ] || fail "the coverage command did not run once on the devbox's checkout, with the lease held, the status posted and no older map: $(cat "$STUB/cov-at" 2>&1): $out"
+  [ "$(cat "$T/$CASE/cards/release/coverage."* 2>&1)" = map ] && grep -qF "the coverage map of ${O:0:12} is kept for its release to commit" <<<"$out" \
+    || fail "the map the devbox wrote did not come back and was not kept: $(cat "$T/$CASE/cards/release/coverage."* 2>&1): $out"
+  [ "$(cat "$STUB/devbox-released" 2>&1)" = lease-1274 ] && [ ! -e "$STUB/devbox-leased" ] || fail "the lease was not given back once after the map: $(cat "$STUB/devbox-released" 2>&1)"
+  a=$(grep -nF 'the whole suite passed on' <<<"$out" | cut -d: -f1) b=$(grep -nF 'makes the coverage map' <<<"$out" | cut -d: -f1)
+  [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] || fail "the suite's result was not reported before the coverage map step started: $out"
+}
+# Bug (review of issue 1708): when the devbox call that removes the old map and runs the command failed before it ran
+# (a lost connection), the next call still brought back the map the commit holds, and it was kept as fresh. No map
+# comes back from a call that did not run there, and the output says none is kept.
+t_relcovdevboxlost() {
+  local O out
+  runsetup "$BOXSUITE"; devboxsetup 3; covcmd 'echo map > cov.jsonl'
+  echo old > "$R/cov.jsonl" && git -C "$R" add cov.jsonl && git -C "$R" commit -qm 'an older map' && git -C "$R" push -q origin main \
+    && O=$(git -C "$R" rev-parse HEAD) && mv "$STUB/devbox" "$STUB/devbox-real" || fail "the fixture could not be made"
+  # stub: the stand-in devbox, whose call that runs the coverage command fails before it runs there, as a lost connection does
+  printf '%s\n' '#!/usr/bin/env bash' 'case "$*" in *cov-cmd*) exit 255 ;; esac' 'exec "$STUB/devbox-real" "$@"' > "$STUB/devbox" && chmod +x "$STUB/devbox" \
+    || fail "the fixture could not be made"
+  out=$(loop release-prep 1.1.0 2>&1) || fail "release-prep on the devbox failed: $out"
+  [ ! -e "$STUB/cov-at" ] && ! compgen -G "$T/$CASE/cards/release/coverage.*" > /dev/null && grep -qF "the coverage map's command wrote no cov.jsonl" <<<"$out" \
+    || fail "a map came back from a call that did not run there, or the output did not say none is kept: $(cat "$T/$CASE/cards/release/coverage."* 2>&1): $out"
+}
+# Bugs (review of issue 1708): release-run stop while a box made the map left the map's units running there: each runs
+# under `timeout` (.conveyor/coverage.sh), which starts a process group of its own, and the stop signalled only the
+# group in wt.pid. And a run whose end is written before the map is one the stop must still find, whose suite's result
+# it keeps. The record's machine step says the map runs, not the suite. A whole release-run, as only it starts the map
+# in the background, holds the lock and is stopped by `release-run stop`; the box's processes carry no mark of the run
+# (boxsetup), so only the stop sent over ssh ends them. The session read is the box's /proc: a Linux box.
+t_relcovboxstop() {
+  local O RUN out
+  [ "$(uname -s)" = Linux ] || return 0
+  runsetup "$BOXSUITE"; boxsetup 3; boxrule
+  covcmd 'timeout 300 sleep 300 & echo $! > "$STUB/map-unit"; wait' # sleep: the map's unit, under timeout as coverage.sh runs one, which only the stop ends
+  out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
+  # wait_until: the map starts on the box in the background; only its note there shows when it runs.
+  wait_until '[ -s "$STUB/map-unit" ]' || fail "the map did not start on the box: $(cat "$T/$CASE/cards/release/run.log" 2>&1)"
+  jq -e '.state == "passed" and (.ended | type) == "string" and .coverage == "running" and .machine.step == "map"' "$RUN" > /dev/null \
+    || fail "while the map runs, the record does not say the suite passed, the run ended and the box makes the map: $(cat "$RUN")"
+  out=$(loop release-run stop 2>&1) || fail "the stop failed: $out"
+  # wait_until: a process sent TERM ends a moment later; only a check of it shows when it has.
+  wait_until "! kill -0 $(cat "$STUB/map-unit") 2>/dev/null" || { kill "$(cat "$STUB/map-unit")"; fail "the map's unit still runs on the box after release-run stop: $out"; }
+  jq -e '.state == "passed" and has("coverage") == false and (.reasons | index("the coverage map was stopped by the owner"))' "$RUN" > /dev/null \
+    || fail "the stop did not keep the suite's pass and say the map was stopped: $(cat "$RUN")"
+}
+# Bug (review of issue 1708): release-prep posts the suite's status before it makes the map, so a run stopped while the
+# map is made, or a command that writes none, leaves a passed status and no map; the release after it reuses that
+# status and runs no suite, and it committed no map with no word of it. It says it commits none.
+t_relcovnone() {
+  local O out t
+  covsetup ':'
+  out=$(loop release-prep 1.1.0 2>&1) || fail "release-prep failed: $out"
+  out=$(loop release 1.1.0 2>&1) || fail "the release was refused: $out"
+  t=$(git -C "$T/$CASE/origin" rev-parse 'v1.1.0^{commit}') || fail "origin has no tag v1.1.0: $out"
+  grep -qF "no coverage map of ${O:0:12} is kept" <<<"$out" && ! git -C "$R" cat-file -e "$t:cov.jsonl" 2>/dev/null \
+    || fail "the release with no map kept did not say it commits none, or committed one: $out"
 }
 # Bug: a release replaced a map in the checkout that no commit holds (the Foreman's first map, made by hand), and its
 # undo then deleted it. The release leaves it as it is and commits no map; its push fails (the command moves origin's

@@ -23,6 +23,8 @@
 #   records, the snapshot, the reruns (suitereuse()) and the flaky rule read the same files as of a run here. A run
 #   there takes no test slot of this machine (a devbox's run is started with `devbox exec -d`); one that ends past a run here's time limit (testTimeout) timed out, and
 #   one still going a poll's time past it is stopped there.
+# - map: ssh or devbox, when the pack names a coverage map: its command runs there, in the run's checkout, and its map
+#   comes back (hostmap()). A run here, or one with no map, has no such step.
 # - results: the box's run files are cleared (an ssh box's), and a devbox's lease is given back (`devbox release
 #   --lease_id <id>`), as it is when any step fails, and by `release-run stop`; a devbox the run never gives back stops
 #   itself when idle (idleStop).
@@ -46,10 +48,14 @@ printf "slots\t%s\n" "$(eval "$(cat)" > /dev/null 2>&1 && slot_pool > /dev/null 
 HOSTRUN='bash -c "$1" > ../wt.test 2>&1 < /dev/null; r=$?
 [ "$SECONDS" -lt "$2" ] || { r=124; echo "conveyor: the suite ran past its time limit, $2 s (testTimeout), on $3" >> ../wt.test; }
 echo "$r" > ../wt.rc'
-# The suite's run on the box stopped: its process group, which setsid made, else its process. It prints
+# The suite's run on the box stopped: its process group, which setsid made, else its process, and every other process of
+# the session setsid made (the box is Linux: its /proc/<pid>/stat names each one's session), as a command under it can
+# start a group of its own (`timeout` does, as the coverage map's units run: hostmap()). It prints
 # "conveyor-kill: stopped" when it was stopped, "conveyor-kill: ended" when there was none to stop (the run had ended, or
 # none started): its output, not its exit, as `devbox exec` gives 1 for any exit of its command but 0.
-HOSTKILL='r=ended; p=$(cat "$D/wt.pid" 2> /dev/null) && { kill -TERM -- -"$p" 2> /dev/null || kill -TERM "$p" 2> /dev/null; } && r=stopped; rm -f "$D/wt.pid"; echo "conveyor-kill: $r"'
+HOSTKILL='r=ended; p=$(cat "$D/wt.pid" 2> /dev/null) && [[ $p =~ ^[1-9][0-9]*$ ]] && { { kill -TERM -- -"$p" 2> /dev/null || kill -TERM "$p" 2> /dev/null; } && r=stopped
+for f in /proc/[0-9]*/stat; do x=$(cat "$f" 2> /dev/null) && x=${x##*) } && read -r _ _ _ s _ <<< "$x" && [ "$s" = "$p" ] && kill -TERM "${f//[!0-9]/}" 2> /dev/null && r=stopped; done; }
+rm -f "$D/wt.pid"; echo "conveyor-kill: $r"'
 # The jq filter of a release record's machine whose suite's run `release-run stop` stops (hoststop()): a box over ssh, or
 # a devbox leased or named, whose step is not done; empty for any other record.
 HOSTLIVE='.machine | objects | select((.kind == "ssh" or (.kind == "devbox" and (((.lease // "") | length > 0) or ((.box // "") | length > 0)))) and .step != "done")'
@@ -303,11 +309,28 @@ hosttests() { # <worktree> <field> [alone]
   [[ $rc =~ ^[0-9]+$ ]] || rc=1
   return "$rc"
 }
+# The coverage map's <command> (relcov(), lib/relcov.sh) run on the box over ssh or the devbox, in its checkout of the
+# tested commit, after the suite and before the box is given back (hostfinish()). The map there is removed first, so
+# only one this run wrote comes back (a commit can hold an older one): then wt.map-ran there gets a mark new to this
+# call, and the map comes back only when wt.map-ran holds that mark, so a connection that failed before the remove
+# brings back no map. The command's output goes to <out>, and its process group to wt.pid, as the suite's, so
+# `release-run stop` stops it there (HOSTKILL). The map <file> is then brought back to <worktree>/<file>, whole or not
+# at all. Its exit is the command's (on a devbox, 1 for any but 0), and 124 when it runs past the time limit of a run
+# here (testTimeout).
+hostmap() { # <worktree> <command> <file> <out>
+  local rc lim=${TEST_TIMEOUT:-} q m=$$.$RANDOM.$RANDOM
+  [[ $lim =~ ^[1-9][0-9]*$ ]] || lim=3600
+  hoststep map
+  q=$(hostq "$3")
+  hostssh "$SH_D"'; cd "$D/wt" && rm -f -- '"$q"' && echo '"$m"' > ../wt.map-ran && { S=$(command -v setsid || :); $S bash -c '"$(hostq "$2")"' < /dev/null 2>&1 & echo $! > ../wt.pid; wait $!; }' "$lim" < /dev/null > "$4" 2>&1; rc=$?
+  mkdir -p "$(dirname "$1/$3")" && hostssh "$SH_D"'; [ "$(cat "$D/wt.map-ran" 2>/dev/null)" = '"$m"' ] && cat -- "$D/wt/"'"$q" 300 < /dev/null > "$1/$3" 2>/dev/null || rm -f "$1/$3"
+  return $rc
+}
 # results: the run's files cleared on a box over ssh, a devbox's lease given back (its results came back with the last
 # poll), and the steps done.
 hostfinish() { # <command name>
   hoststep results
-  [ "$SH_KIND" != ssh ] || hostssh "$SH_D"'; rm -rf "$D/wt.pid" "$D/in"' 30 < /dev/null > /dev/null 2>&1 || :
+  [ "$SH_KIND" != ssh ] || hostssh "$SH_D"'; rm -rf "$D/wt.pid" "$D/wt.map-ran" "$D/in"' 30 < /dev/null > /dev/null 2>&1 || :
   hostrelease "$1" || :
   hoststep 'done'
 }

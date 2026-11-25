@@ -680,8 +680,9 @@ Conveyor: a project whose `main` has a `docs/releases/` folder. Other projects d
 with Conveyor, the panel says "No project releases with Conveyor."
 
 The top row of a card shows the project, its newest release tag (or "No release yet"), the number of changes since that
-tag, and one status. The status is the first of these that applies: Suite running, Drafting notes, Suite failed, Main moved since the
-suite, Notes card under way, Released, Notes missing, Suite not run, Ready to release.
+tag, and one status. The status is the first of these that applies: Suite failed or Suite passed while the run makes
+the coverage map, Suite running, Drafting notes, Suite failed, Main moved since the suite, Notes card under way,
+Released, Notes missing, Suite not run, Ready to release.
 
 Under the top row are three numbered steps. Each step has a mark: done, failed, in progress or to do.
 
@@ -692,7 +693,9 @@ Under the top row are three numbered steps. Each step has a mark: done, failed, 
    the panel"), and a card still open delays the suite. When the card is closed before it lands, the step shows it
    failed and names the card: click **Draft notes** again.
 2. **Full suite**: the whole suite on the head of `main`. It shows passed or failed, with the commit and the time, or
-   "Not run". While the suite runs, a bar shows the test files done of all the test files, with the names of the files
+   "Not run". When the suite ended and the run makes the coverage map, the step shows passed or failed with the
+   commit, and its failed test files, and says that the run makes the coverage map. **Stop** still shows, and stops
+   only the map: the suite's result stays. **Release** and **Release anyway** wait until the map is made. While the suite runs, a bar shows the test files done of all the test files, with the names of the files
    that failed. A test case that ran out of time shows as "<case>: timed out". When release-prep runs the failed
    cases again, one at a time, the step says which round runs now, of how many, and for which case, with when it last
    moved. The bar then shows that round's test files. Under it, a "First run:" heading shows. Below the heading are the number of test
@@ -746,8 +749,8 @@ rule on this machine, the question has no machine part.
 
 While a run goes on a devbox or a box over ssh, step 2 shows a line with the machine, the box (the lease of a devbox,
 the address of an ssh box), the commit and when the lease began. Under it are the steps of that machine, each a chip:
-**Start** (with "reused" or its time), **Set up** (with "not needed" or its time), **Check out**, **Run**, **Bring back
-results** and **Give back the box**. A finished step is green, the step now is blue. A run on this machine shows no
+**Start** (with "reused" or its time), **Set up** (with "not needed" or its time), **Check out**, **Run**, **Make the
+coverage map** (only when the run makes one), **Bring back results** and **Give back the box**. A finished step is green, the step now is blue. A run on this machine shows no
 such line and no chips.
 
 When the machine fails to start, set up or check out, no test runs. The status is Suite not started. The chip of the

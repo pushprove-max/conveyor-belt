@@ -556,7 +556,7 @@ releasestop() { # [<version> | <since>]
   local p s v b lk='' rc=1 hs=2 r want=${1:-}
   # The pid, start, version and name of the box whose suite's run the stop ends (HOSTLIVE) from one read of the record,
   # so they are all of one run.
-  r=$(jq -er 'select(.ended == null and (.pid | numbers)) | "\(.pid)\t\(.since)\t\(.version)\t\(('"$HOSTLIVE"' | .name // "its box") // "")"' "$RELRUN" 2>/dev/null) \
+  r=$(jq -er 'select((.ended == null or .coverage == "running") and (.pid | numbers)) | "\(.pid)\t\(.since)\t\(.version)\t\(('"$HOSTLIVE"' | .name // "its box") // "")"' "$RELRUN" 2>/dev/null) \
     && IFS=$'\t' read -r p s v b <<<"$r" \
     && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q 'conveyor\.sh' || { relstopwaiting "$want"; return; }
   [ -z "$want" ] || [ "$v" = "$want" ] || { echo "conveyor: release-run stop: the release run under way is of $v, not $want; nothing stopped" >&2; return 1; }
@@ -567,8 +567,12 @@ releasestop() { # [<version> | <since>]
   # which a stop without the lock could end (its record read before the new one was written).
   [ $rc != 0 ] || { hoststop "$p" "$s"; hs=$?; }
   # .counts: the suite's counts while its failed cases run alone, which the run's own end takes into the record; the
-  # stop does the same, as the snapshot does for a run that ended with no record of it (lib/snapshot.sh suites()).
-  [ $rc != 0 ] || relrec --argjson p "$p" --arg s "$s" --arg t "$(clock)" 'if .pid == $p and .since == $s then . + (.counts // {}) | del(.counts) | .state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"] else . end'
+  # stop does the same, as the snapshot does for a run that ended with no record of it (lib/snapshot.sh suites()). A run
+  # whose end relsuite() wrote before its coverage map (coverage: "running") keeps that end and its suite's result: only
+  # the map is stopped.
+  [ $rc != 0 ] || relrec --argjson p "$p" --arg s "$s" --arg t "$(clock)" 'if .pid != $p or .since != $s then .
+    elif .ended != null then del(.coverage) | .reasons += ["the coverage map was stopped by the owner"]
+    else . + (.counts // {}) | del(.counts, .coverage) | .state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"] end'
   [ -z "$lk" ] || exec {lk}>&-
   # Not the lock, but another run's record: that run took the lock once this one's processes had let it go.
   [ $rc = 0 ] || jq -e --argjson p "$p" --arg s "$s" '.pid != $p or .since != $s' "$RELRUN" > /dev/null 2>&1 || { echo "conveyor: release-run stop: the run is stopped, but a process of it still holds $CARDS/release/lock; release-prep and release are refused until it ends${b:+, and the suite of the run on $b is not stopped}" >&2; return 1; }

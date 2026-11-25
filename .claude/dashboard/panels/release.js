@@ -137,15 +137,17 @@
   // with its time. The record's machine.step is the one under way (or, for a run not started, the one that failed);
   // results is two chips, the results came back with the last poll and the box is given back. Done steps are ok, the
   // one under way info, the failed one bad, the rest quiet.
-  const MSTEPS = [['start', 'Start'], ['setup', 'Set up'], ['checkout', 'Check out'], ['run', 'Run'], ['results', 'Bring back results'], ['done', 'Give back the box']];
-  const MAT = { start: 0, setup: 1, checkout: 2, run: 3, results: 5, done: 6 };
+  // map: the coverage map's command there after the suite (hostmap(), lib/suitehost.sh), shown only once it begins.
+  const MSTEPS = [['start', 'Start'], ['setup', 'Set up'], ['checkout', 'Check out'], ['run', 'Run'], ['map', 'Make the coverage map'], ['results', 'Bring back results'], ['done', 'Give back the box']];
+  const MAT = { start: 0, setup: 1, checkout: 2, run: 3, map: 4, results: 6, done: 7 };
   function machineSteps(h, ctx, m, failed) {
     const at = Object.hasOwn(MAT, m.step) ? MAT[m.step] : 0, secs = m.secs && typeof m.secs === 'object' ? m.secs : {};
     const ul = h('ul', 'release-machine-steps');
     ul.dataset.list = 'machine-steps';
     MSTEPS.forEach(([key, label], i) => {
+      if (key === 'map' && m.step !== 'map' && !num(secs.map)) return;
       const state = failed && i === at ? 'failed' : i < at ? 'done' : i === at ? 'now' : 'todo';
-      const t = secs[i === 5 ? 'results' : key];
+      const t = secs[i === 6 ? 'results' : key];
       let more = '';
       if (state === 'failed') more = typeof m.reason === 'string' ? m.reason.replace(/^[A-Z](?=[a-z])/, (c) => c.toLowerCase()) : '';
       else if (state === 'done' && num(t)) more = key === 'start' && m.kind === 'devbox' && t === 0 ? 'reused' : key === 'setup' && t === 0 ? 'not needed' : ctx.dur(t);
@@ -223,15 +225,38 @@
     }
     return step(h, 'Full suite', 'done', line, from, reasonsList(h, why));
   }
+  // The chip of a release's state (st: the flags stateOf() reads, passed before main moved): its text and its tone.
+  function chipOf(st, run, cur, notes, green) {
+    const { going, mapping, suite, passed, failed, notStarted, moved, released, waiting } = st;
+    if (mapping) return run.state === 'failed' ? ['Suite failed', 'bad'] : ['Suite passed', 'info'];
+    if (suite) return ['Suite running', 'info'];
+    if (going) return ['Drafting notes', 'info'];
+    if (failed) return ['Suite failed', 'bad'];
+    if (notStarted) return ['Suite not started', 'bad'];
+    if (moved) return ['Main moved since the suite', 'warn'];
+    if (waiting) return ['Notes card under way', 'info'];
+    // A release just made: its own commits (the version in plugin.json) are on main past the tag, and the next
+    // version's notes are not written yet.
+    if (released && !notes) return ['Released', 'ok'];
+    if (!notes) return ['Notes missing', 'warn'];
+    if (!passed && !green) return ['Suite not run', 'quiet'];
+    if (cur && cur.state === 'released') return ['Released', 'ok'];
+    return ['Ready to release', 'ok'];
+  }
+
   // The state of one project's release of version v (cur: its last release run, when of v; green: a full test run that
   // passed on main's head, which release-prep reuses with no test, else null).
   function stateOf(notes, run, v, m, green) {
     const cur = run && run.version === v ? run : null;
     // going: a run is open (Stop shows, no other run starts). An open release-prep runs the suite once it names its commit
     // or its machine (relsuite() in release-prep.sh): before that, it only drafts the notes. An open release (its fetch and
-    // checks, then the suite when none passed) counts as the suite's run.
-    const going = !!(run && run.ended === null);
-    const suite = going && !(run.step === 'release-prep' && !(typeof run.sha === 'string' && run.sha)
+    // checks, then the suite when none passed) counts as the suite's run. A run whose end is written while it still
+    // makes the coverage map (coverage: "running", relcov() in lib/relcov.sh) is open too.
+    const going = !!(run && (run.ended === null || run.coverage === 'running'));
+    // mapping: the open run's suite ended (its state passed or failed) and its coverage map is under way: the panel
+    // shows the suite's result, not a suite that runs.
+    const mapping = going && run.coverage === 'running' && (run.state === 'passed' || run.state === 'failed');
+    const suite = going && !mapping && !(run.step === 'release-prep' && !(typeof run.sha === 'string' && run.sha)
       && !(run.machine && typeof run.machine === 'object'));
     const passed = !!(cur && cur.ended !== null && typeof cur.sha === 'string' && cur.sha
       && (cur.state === 'passed' || cur.state === 'released' || (cur.state === 'refused' && cur.step === 'release' && !cur.failed)));
@@ -256,24 +281,11 @@
     const stopOf = run && run.ended !== null && run.state === 'waiting' && run.notes && typeof run.notes.card === 'string'
       && run.restarted == null ? String(run.version) : '';
     const stoppable = !!stopOf;
-    let chip;
-    if (suite) chip = ['Suite running', 'info'];
-    else if (going) chip = ['Drafting notes', 'info'];
-    else if (failed) chip = ['Suite failed', 'bad'];
-    else if (notStarted) chip = ['Suite not started', 'bad'];
-    else if (moved) chip = ['Main moved since the suite', 'warn'];
-    else if (waiting) chip = ['Notes card under way', 'info'];
-    // A release just made: its own commits (the version in plugin.json) are on main past the tag, and the next
-    // version's notes are not written yet.
-    else if (released && !notes) chip = ['Released', 'ok'];
-    else if (!notes) chip = ['Notes missing', 'warn'];
-    else if (!passed && !green) chip = ['Suite not run', 'quiet'];
-    else if (cur && cur.state === 'released') chip = ['Released', 'ok'];
-    else chip = ['Ready to release', 'ok'];
+    const chip = chipOf({ going, mapping, suite, passed, failed, notStarted, moved, released, waiting }, run, cur, notes, green);
     // Release reuses a passed release-prep of v on main's head, main not moved since (release-run); else it runs the
     // suite first.
     const reuse = passed && !moved && cur.step === 'release-prep' && cur.state === 'passed';
-    return { cur, going, suite, passed: passed && !moved, failed, notStarted, moved, released, reuse, waiting, stoppable, stopOf, notesClosed, chip };
+    return { cur, going, mapping, suite, passed: passed && !moved, failed, notStarted, moved, released, reuse, waiting, stoppable, stopOf, notesClosed, chip };
   }
 
   // One numbered step: its mark (done, failed, in progress or to do), its name and its one line, then what else.
@@ -475,7 +487,8 @@
     // 2. The whole suite on main's head.
     let s2;
     if (s.going) {
-      const line = h('span', null, s.suite ? `Running on ${short(run.sha) || 'main\'s head'} · ` : `release-prep of ${run.version} drafts the notes · `);
+      const line = h('span', null, s.mapping ? `${run.state === 'failed' ? 'Failed' : 'Passed'} on ${short(run.sha)} · makes the coverage map · `
+        : s.suite ? `Running on ${short(run.sha) || 'main\'s head'} · ` : `release-prep of ${run.version} drafts the notes · `);
       if (typeof run.since === 'string') line.append(ctx.since(run.since, ' so far'));
       const stop = h('button', 'btn', 'Stop');
       stop.type = 'button'; stop.dataset.act = 'release-stop';
@@ -485,7 +498,8 @@
       const stopBox = h('div', 'release-stop');
       // A version typed that is not the open run's: say which release Stop stops, and what that run does.
       if (run.version !== v) {
-        const other = h('p', 'row-meta', s.suite ? `The suite of release ${run.version} runs. Stop stops it.`
+        const other = h('p', 'row-meta', s.mapping ? `The run of release ${run.version} makes the coverage map. Stop stops it.`
+          : s.suite ? `The suite of release ${run.version} runs. Stop stops it.`
           : `release-prep of ${run.version} drafts the notes. Stop stops it.`);
         other.dataset.figure = 'stop-other';
         stopBox.append(other);
@@ -497,7 +511,9 @@
         sl.dataset.figure = 'stop-line';
         stopBox.append(sl);
       }
-      s2 = step(h, 'Full suite', s.suite ? 'now' : 'todo', line, ...lines, modeLine(h, run, true), ...rerunLines(h, ctx, run), moved, stopBox);
+      // While the map is made, the suite's counts are its result (no progress bar).
+      s2 = step(h, 'Full suite', s.mapping && run.state === 'failed' ? 'failed' : s.mapping || s.suite ? 'now' : 'todo', line, ...lines, modeLine(h, run, !s.mapping),
+        ...(s.mapping ? counts(h, run, false) : rerunLines(h, ctx, run)), moved, stopBox);
     } else if (s.notStarted) {
       // A run that did not start: its failed step's chip says why, with one fix line, and the two ways on.
       // On this machine (its worktree could not be made) the machine's chips are not shown, so the reason is listed, and
@@ -565,8 +581,9 @@
     }
     // Release anyway, beside release-prep's red result on main's head when main holds the notes: the owner's release
     // over that failed suite (`release-run anyway <version>`). A release cannot be undone: a second click whose words
-    // name the failed files and cases. The suite's status stays failed.
-    if (s.failed && overRed(s.cur) && s.cur.sha === m.head && notes && VERSION.test(v)) {
+    // name the failed files and cases. The suite's status stays failed. None while the run still makes the coverage map:
+    // it holds the release lock, which refuses the release.
+    if (s.failed && !s.going && overRed(s.cur) && s.cur.sha === m.head && notes && VERSION.test(v)) {
       const c = s.cur, files = c.files && typeof c.files === 'object' ? list(c.files.failed).map(String) : [], named = list(c.cases).map(String);
       const ask = `Click again: release ${v} over this failed suite, with no new run. ${files.length ? `Failed files: ${files.join(', ')}. ` : ''}`
         + `${named.length ? `Failed cases: ${named.join(', ')}.` : 'The run named no failed case.'}`;
@@ -597,6 +614,7 @@
     const waits = !VERSION.test(v) ? 'needs a version such as 1.2.0'
       : releasedAlready(m, s, v) ? `v${v} is already released`
         : !notes ? `needs release notes docs/releases/${v}.md`
+          : s.mapping ? `the run of ${run.version} makes the coverage map`
           : s.going && !s.suite ? `release-prep of ${run.version} drafts the notes`
           : s.going ? `the suite is running${num(prog.done) && num(prog.of) && prog.of > 0 ? ` (${prog.done} of ${prog.of} files)` : ''}`
             : s.failed ? `the suite failed: ${bad} ${bad === 1 ? 'failure' : 'failures'}`

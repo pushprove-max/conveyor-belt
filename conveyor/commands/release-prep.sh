@@ -313,7 +313,7 @@ relstart() { # <command name> <version>
   # (timeout) is a process group of its own, which a signal to this process never reaches, and each holds the release
   # lock it inherited. A KILL runs no trap, so a watcher, without the lock, ends them once the run's pid has ended.
   export CONVEYOR_RELEASE_RUN="${CONVEYOR_RELEASE_PID:-$$}"
-  ( [ -z "$RELLK" ] || exec {RELLK}>&-
+  ( [ -z "$RELLK" ] || exec {RELLK}>&-; [ -z "${RELERR:-}" ] || exec {RELFD}>&- # nor relrun()'s stderr, which it outlives
     while kill -0 "$CONVEYOR_RELEASE_RUN" 2>/dev/null; do sleep 1; done # sleep: the watcher's pause between two checks
     relreap "$$" "$CONVEYOR_RELEASE_RUN" "$BASHPID" ) < /dev/null > /dev/null 2>&1 &
   # The run's end reaps (relrun()), and so does a stop (TERM, INT, HUP: relsig()). No EXIT trap: a TERM to a child just
@@ -372,22 +372,23 @@ relreap() { # <pid> <mark> [<pid left out>]
     kill -KILL $ps 2>/dev/null; env -u CONVEYOR_RELEASE_RUN sleep 0.1
   done
 }
-# The record at the command's end: its state, and each line it printed to stderr (<file>) as a reason.
+# The record at the command's end: its state, and each line it printed to stderr (<file>) as a reason; an end relsuite() wrote before the coverage map keeps its time, which the Foreman's report and relfixes() (lib/fulltest.sh) go by.
 relend() { # <exit> <stderr file>
   [ -n "$RELSTARTED" ] || return 0
-  relrec --arg t "$(clock)" --argjson rc "$1" --rawfile e "$2" '.ended = $t
+  relrec --arg t "$(clock)" --argjson rc "$1" --rawfile e "$2" '.ended = (.ended // $t)
     | .reasons = [$e | split("\n")[] | select(. != "") | sub("^conveyor: [a-z-]+: (refused, nothing tagged or released: )?"; "")]
     | .state = (if $rc == 0 then (if .step == "release" then "released" else "passed" end) elif .state | IN("failed", "not started", "waiting") then .state else "refused" end)'
 }
-# The command, its record kept; its stderr is printed once it ends.
+# The command, its record kept; its stderr is printed once it ends, or sooner by relsaid().
 relrun() { # <function> <version>
   local e rc
-  e=$(mktemp) || { echo "conveyor: $1: no scratch file; nothing run" >&2; return 1; }
+  e=$(mktemp) || { echo "conveyor: $1: no scratch file; nothing run" >&2; return 1; }; RELERR=$e RELSAID=0; exec {RELFD}>&2
   "$1" "$2" 2> "$e"; rc=$?
-  cat "$e" >&2; relend "$rc" "$e"; rm -f "$e"
+  relsaid; exec {RELFD}>&-; RELERR=''; relend "$rc" "$e"; rm -f "$e"
   [ -z "$RELSTARTED" ] || relreap $$ "$CONVEYOR_RELEASE_RUN" # the run's end ends every process of the run (relstart())
   return $rc
 }
+relsaid() { local s; [ -n "${RELERR:-}" ] && s=$(($(wc -c < "$RELERR"))) || return 0; tail -c +$((RELSAID + 1)) "$RELERR" | head -c $((s - RELSAID)) >&"$RELFD"; RELSAID=$s; } # the stderr relrun() holds and has not printed, printed now to its own stderr (relend()'s reasons still read it all); none held with no relrun()
 # The newest vX.Y.Z tag, after the remote's branch and tags are fetched.
 # relmessage <commit>: the commit's message for the privacy check, with the email taken out of each Signed-off-by: or
 # Co-authored-by: trailer whose last <email> is the commit's own author or committer email (case aside), which the
@@ -547,7 +548,6 @@ relsuite() { # <command name> <commit>
   [ "$m0" = "$m1" ] || echo "conveyor: $n: $BRANCH moved while the suite ran, from ${m0:0:12} to ${m1:0:12}: a card landed; the suite tested ${sha:0:12}"
   # The test map is of the suite run alone here: a red one, though its failed cases then passed alone, refreshes none.
   if [ "$SH_KIND" != local ]; then :; elif [ $sr = 0 ]; then maprefresh "$wt" || :; else mapstop "$wt" "the release's whole run failed"; fi
-  hostfinish "$n"; relcov "$n" "$wt" "$sha"; git worktree remove --force "$wt" 2>/dev/null # a run on any machine, passed or failed (release --anyway goes over a failed one), makes the coverage map here, that machine given back (lib/relcov.sh)
   # The status names the machine the tests ran on (SH_POST: a box by its kind, as a status is public; a devbox by its name); a pass reused whole, none.
   if [ $rc = 0 ] && [ "$u" != null ] && [ "$(jq '.ran | length' <<<"$u")" = 0 ]; then
     state=success desc=$(jq -r '"The whole suite (test.full) passed: reused the green run of \(.time) on \(.sha[0:12])"' <<<"$u")
@@ -557,10 +557,10 @@ relsuite() { # <command name> <commit>
   else state=failure desc="The whole suite (test.full) failed on $SH_POST (exit $rc)"; fi
   # A status's description is at most 140 characters (GitHub): the record's alone names every case judged flaky.
   [ -z "$fl" ] || { desc+="; judged flaky: $fl"; desc=${desc:0:140}; }
-  gh_write api -X POST "repos/{owner}/{repo}/statuses/$sha" -f "state=$state" -f context=conveyor/release-suite -f "description=$desc" > /dev/null \
-    || { echo "conveyor: $n: the status of ${sha:0:12} could not be posted (the suite $([ $rc = 0 ] && echo passed || echo failed))" >&2; return 1; }
-  if [ $rc = 0 ]; then echo "conveyor: $n: the whole suite passed on ${sha:0:12}; its status is posted"
-  else echo "conveyor: $n: the whole suite failed on ${sha:0:12} (exit $rc; its output is in $wt.test); a failing status is posted" >&2; return 1; fi
+  if ! gh_write api -X POST "repos/{owner}/{repo}/statuses/$sha" -f "state=$state" -f context=conveyor/release-suite -f "description=$desc" > /dev/null; then echo "conveyor: $n: the status of ${sha:0:12} could not be posted (the suite $([ $rc = 0 ] && echo passed || echo failed))" >&2; rc=1
+  elif [ $rc = 0 ]; then echo "conveyor: $n: the whole suite passed on ${sha:0:12}; its status is posted"; else echo "conveyor: $n: the whole suite failed on ${sha:0:12} (exit $rc; its output is in $wt.test); a failing status is posted" >&2; fi
+  # Its result posted and printed, a result that ends the run (release-prep's, or a failed one: release then refuses) is the run's end in the record, the map's mark (coverage: "running", which `release-run stop` and the Board go by: releasestop(), lib/fulltest.sh) written first so the run never reads as closed while the map is made; a run on any machine, passed or failed (release --anyway goes over a failed one), then makes the coverage map on that machine, then given back (lib/relcov.sh).
+  relsaid; if [ "$n" = release-prep ] || [ $rc != 0 ]; then ! relcovon || relrec '.coverage = "running"'; [ -z "${RELERR:-}" ] || relend $((rc != 0)) "$RELERR"; fi; relcov "$n" "$wt" "$sha"; hostfinish "$n"; git worktree remove --force "$wt" 2>/dev/null; [ $rc = 0 ]
 }
 releaseprep() { # <version>
   local v=$1 cmd sha last d out was wn nx=${CONVEYOR_RELEASE_THEN:-prep} # nx: what follows a pass (relnoteswait()), as relstart() unsets it

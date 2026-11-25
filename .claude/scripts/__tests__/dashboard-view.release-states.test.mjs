@@ -164,3 +164,28 @@ test('with 1.1.0 typed while the suite of 1.0.0 runs, the suite step says Stop s
   assert.equal(s2.querySelector('[data-figure="stop-other"]').textContent, 'The suite of release 1.0.0 runs. Stop stops it.');
   assert.deepEqual(await sent(w, () => { act(card(w), 'release-stop').click(); act(card(w), 'release-stop').click(); }), [{ action: 'release-run', args: ['stop', '1.0.0'], repo: 'plugin' }]);
 });
+
+// Bug it guards (issue 1708): release-prep makes the coverage map after the suite's result is written (coverage:
+// "running" on the open run, lib/relcov.sh), and the panel said "Suite running" for all that time, so a failed suite
+// was not seen until the map was made. The panel shows the result, says the map is made, and Stop still shows.
+// Review of issue 1708: the run's end is written before the map (ended set, coverage still "running"), so the panel
+// keeps it open (Stop shows, Release and Release anyway wait); while the map is made, step 2 drew the suite's progress
+// bar, and the box's chips showed Run as the step now.
+test('while the coverage map is made after a failed suite, the panel shows Suite failed, not Suite running, and Stop shows', () => {
+  const w = boot();
+  const machine = { kind: 'ssh', name: 'box.example.com', target: 'tester@box.example.com', dir: '~/suite', lease: null, step: 'map', secs: { start: 1, setup: 0, checkout: 5, run: 600 }, reason: null };
+  deliver(w, data([{ ...RUN, ended: '2026-11-14T08:25:00Z', state: 'failed', mode: 'parallel', failed: 2, cases: ['a', 'b'], files: { done: 2, of: 2, failed: ['t/a.test.sh'] },
+    machine, coverage: 'running' }]));
+  assert.match(card(w).textContent, /Suite failed/);
+  assert.doesNotMatch(card(w).textContent, /Suite running|the suite is running/);
+  const s2 = stepOf(w, 'full-suite');
+  assert.equal(s2.dataset.state, 'failed');
+  assert.match(s2.querySelector('.release-line').textContent, /^Failed on bbbbbbbbbbbb · makes the coverage map · /);
+  assert.equal(s2.querySelector('[data-figure="progress"]'), null, 'no progress bar while the map is made');
+  assert.match(s2.textContent, /2 files done · 1 failed/);
+  assert.deepEqual(Array.from(s2.querySelectorAll('[data-list="machine-steps"] li'), (li) => [li.dataset.step, li.dataset.state]),
+    [['start', 'done'], ['setup', 'done'], ['checkout', 'done'], ['run', 'done'], ['map', 'now'], ['results', 'todo'], ['done', 'todo']]);
+  assert.equal(act(card(w), 'release').textContent, 'Release 1.0.0: the run of 1.0.0 makes the coverage map');
+  assert.equal(act(card(w), 'release-anyway'), null, 'no Release anyway while the run holds the release lock');
+  assert.ok(act(card(w), 'release-stop'), 'Stop shows while the map is made');
+});

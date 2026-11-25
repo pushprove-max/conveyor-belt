@@ -42,7 +42,8 @@
 #   ended (null while under way), state, done, failed, cases (the failed cases' names), timedout (a release's: those
 #   of them that timed out, suiteprog()), files ({done, of, failed}),
 #   moved, reasons}, and a release's rerun (while its failed cases run alone: {round, of, case, since, done, failed,
-#   files, at: when that pass last moved}; else null): the release
+#   files, at: when that pass last moved}; else null), and its coverage ("running" while its run makes the coverage
+#   map, ended or not: relcov(), lib/relcov.sh): the release
 #   record of commands/release-prep.sh, its cases counted as the suite runs; the full test's run under way, else its
 #   last run. release is main as the Release panel shows it (releasemain()): {tag, count, commits, next, notes, written,
 #   head, releases}, null when main cannot be read. drift is the latest drift watch (driftof(), bench/drift.sh --json):
@@ -398,7 +399,7 @@ suites() {
   if r=$(jq -ce 'objects | select(.kind == "release") | del(.pid)' "$CARDS/release/run.json" 2>/dev/null); then
     if [ "$(jq -r .ended <<<"$r")" = null ]; then
       if ( flock -n 9 ) 9>>"$CARDS/release/lock" 2>/dev/null; then
-        t=$(p_stat "$CARDS/release/run.json") && r=$(jq -c --argjson t "${t#* }" '. + (.counts // {}) | del(.counts) | .state = "stopped" | .ended = ($t | todate)' <<<"$r")
+        t=$(p_stat "$CARDS/release/run.json") && r=$(jq -c --argjson t "${t#* }" '. + (.counts // {}) | del(.counts, .coverage) | .state = "stopped" | .ended = ($t | todate)' <<<"$r")
       elif jq -e '.state == "running" and .sha != null' <<<"$r" > /dev/null; then
         # A card that lands while the suite runs moves main: the panel says so now, not at the suite's end. While the
         # failed cases run alone (rerun), the counts are the suite's, and the worktree's progress is the pass under way:
@@ -414,6 +415,10 @@ suites() {
           '($p[0] // null) as $p | (if .counts != null and (.rerun | type) == "object" and ([$again | fromjson? | objects | .rerun] | first) == .rerun then .rerun += ($p | {done, failed, files})
               + {at: ([.rerun.since, $at, (if $lg == "" then null else $lg | tonumber | todate end)] | map(select(type == "string" and . != "")) | max)} else . end)
             | . + (.counts // $p) | del(.counts) | if .main != null and $h != "" and .main != $h then .moved = true else . end' <<<"$r"); fi
+    # A run whose end was written before its coverage map (relsuite(), commands/release-prep.sh) and that let the lock
+    # go with the map's mark still on (killed while the map was made): the map no longer runs.
+    elif [ "$(jq -r '.coverage // ""' <<<"$r")" = running ] && ( flock -n 9 ) 9>>"$CARDS/release/lock" 2>/dev/null; then
+      r=$(jq -c 'del(.coverage)' <<<"$r")
     fi
   fi
   # A full test's marker read before and after its lock is found free ended with no result (fulldead()): a run that

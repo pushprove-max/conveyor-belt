@@ -127,10 +127,14 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    Release panel lists them in its step 2. A case that fails alone too stops the release, and the output gives the
    result of each of its runs alone.
 
-   When the suite has run and the pack sets `coverageMap`, this step then runs its `command` on this machine, in a
-   worktree of the same commit. This is also true when the suite ran on a box over ssh or on a devbox. The command
-   writes the coverage map, the file that `file` names. Conveyor keeps the map for step 6. When the command fails, the
-   output shows the end of its output, and Conveyor keeps the map that it wrote. In this repository the command is
+   When the suite has run and the pack sets `coverageMap`, this step then runs its `command` on the machine that ran
+   the suite, in a worktree of the same commit. The command starts after the step posts the status and shows the
+   result of the suite. When the suite's result ends the run (release-prep, or a failed suite), the run's record
+   already shows that result while the command runs. On a box over ssh or a devbox, the command runs before Conveyor
+   gives the box back, and the map comes back to this machine. `conveyor.sh release-run stop` while the command runs
+   stops the command, there too, and the suite's result stays. The command writes the coverage map, the file that `file` names. Conveyor keeps the
+   map for step 6. When the command fails, the output shows the end of its output, and Conveyor keeps the map that it
+   wrote. In this repository the command is
    `.conveyor/coverage.sh`, and the map is `.conveyor/coverage.jsonl`.
 5. Ask the owner for a yes in chat. After the yes, run `conveyor.sh release <version>` in the main checkout, on `main`.
    It stops, and changes nothing, when one of these is true:
@@ -149,8 +153,9 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    The output gives the reason.
 6. When all checks pass, the command sets the version in `plugin.json` and the tag in the marketplace entry. When
    step 4 kept a coverage map for this commit, the same commit adds the map. The release adds no map when the privacy
-   check finds something in it, or when your checkout has a map at that path that is not committed. The output then
-   tells you why. Then the command makes the annotated tag. Then it pins the marketplace entry to the commit of that tag, pushes `main` and the tag,
+   check finds something in it, or when your checkout has a map at that path that is not committed. It also adds none
+   when step 4 kept no map, for example when you stopped the run while the map's command ran. The output then tells
+   you why. Then the command makes the annotated tag. Then it pins the marketplace entry to the commit of that tag, pushes `main` and the tag,
    and makes the GitHub release with the notes as its text (`gh release create`).
 
 With Land as `pr` and the rule Merge PR set to `release` ([Merge PR](configuration.md#merge-pr)), the cards wait in
