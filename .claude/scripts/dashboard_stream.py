@@ -5,7 +5,8 @@
 dashboard.sh --loop runs it beside the page server. For every record conveyor/host.json names it keeps one
 `conveyor.sh watch` running (conveyor/watch.py says what each line holds): over ssh to the build machine (at host.json's
 `ssh` target), or here on one machine (config()). After each line it writes <dashboard folder>/stream.json, the same
-object dashboard.sh's conveyor() gives ({host, local, reachable, error, records}), each record with readAt (when its
+object dashboard.sh's conveyor() gives ({host, local, reachable, error, records}), each record with main (its main
+checkout, as the host file names it: /units finds its own record's test map by it), readAt (when its
 snapshot began: the snapshotAt the host wrote in it, else this machine's clock less the line's took; data.js is dated when it is built, which can be after a change the snapshot
 did not read yet) and retried (the blocked cards its host's last retried line names: {card, issue, at}), plus `stream`: {live (every record's stream is up and its host's last snapshot worked), heardAt (the oldest of
 the times each record's host was last heard from), since (when the stream went down; null while live), error (why it
@@ -113,14 +114,19 @@ def figures_only(old, new):
 # The parts of a record's snapshot that /units draws (hooks/sources.ts parseRecord). The rest (tests, testActions ...)
 # is the Board's alone and grows with the Tests page's history. `declined` and `declinedRest` are cut to the judge's
 # lines, by id, who and time; `open` to the two lists /units reads; `recordsNow` to its building, the loop's count now
-# that /units gives while the snapshot is behind (the snapshot carries recordsNow then).
-UNITS_PARTS = ('health', 'needsYou', 'belt', 'landed', 'landedCount', 'queue', 'cost', 'awaitingDeploy', 'suites', 'snapshotAt')
+# that /units gives while the snapshot is behind (the snapshot carries recordsNow then); `testMap` to the test map's
+# state (conveyor/lib/testmap.sh mapstate()), which /units shows from the feed while its stream is live and has a
+# record of the checkout (by its main), and asks the fetch for otherwise.
+UNITS_PARTS = ('health', 'needsYou', 'belt', 'landed', 'landedCount', 'queue', 'cost', 'awaitingDeploy', 'suites', 'snapshotAt', 'testMap')
+TEST_MAP_PARTS = ('state', 'done', 'of', 'started', 'why', 'sources', 'tests', 'age')
 
 
 def units_snap(snap):
     if not isinstance(snap, dict):
         return snap
     out = {k: snap[k] for k in UNITS_PARTS if k in snap}
+    if isinstance(snap.get('testMap'), dict):  # less its notMapped list, which grows with the project's tests
+        out['testMap'] = {k: snap['testMap'][k] for k in TEST_MAP_PARTS if k in snap['testMap']}
     if isinstance(snap.get('open'), dict):
         out['open'] = {k: snap['open'][k] for k in ('umbrellas', 'held') if k in snap['open']}
     if isinstance(snap.get('recordsNow'), dict):
@@ -307,7 +313,7 @@ class Feed:
             heard = [r['snapAt'] if r['up'] and r['failed'] is not None else r['heardAt'] for r in recs]
             down = [dict(r, error=r['failed'], downAt=r['failedAt']) if r['up'] else r for r in recs if stale(r)]
             records = None if any(r['snap'] is None for r in recs) else [
-                {'repo': r['repo'], 'snap': self.merged(r), 'steered': r['main'] == self.hmain, 'repoUrl': r['repoUrl'], 'lastPushAt': r['lastPushAt'],
+                {'repo': r['repo'], 'main': r['main'], 'snap': self.merged(r), 'steered': r['main'] == self.hmain, 'repoUrl': r['repoUrl'], 'lastPushAt': r['lastPushAt'],
                  'readAt': iso(r['readAt']), 'retried': r['retried']}
                 for r in recs]
             error = None

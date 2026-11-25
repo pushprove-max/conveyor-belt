@@ -941,7 +941,7 @@ test('a live feed\'s snapshot 90 s old adds no age note; with the stream down, o
   const made = NOW - 90_000
   const snap = snapshot({ snapshotAt: new Date(made).toISOString() })
   const note = `units: the bookstore snapshot is 1m old (made at ${clockOf(made)})`
-  const feed = (live: boolean) => boardOfFeed({ host: 'buildbox', records: [{ repo: 'bookstore', json: snap }], live, heardAt: made, error: '' }, '')
+  const feed = (live: boolean) => boardOfFeed({ host: 'buildbox', records: [{ repo: 'bookstore', main: '/r/main', json: snap }], live, heardAt: made, error: '' }, '', '')
   const feedState = (b: ReturnType<typeof boardOfFeed>): State => ({ now: NOW, ...b, limit: null, fast: { state: 'none' }, research: { state: 'none' } })
   expect(ageNotes(state(fetched([['bookstore', snap]])))).toEqual([note])
   expect(ageNotes(feedState(feed(true)))).toEqual([])

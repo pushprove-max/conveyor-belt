@@ -325,7 +325,7 @@ job here, or no state folder), each poll asks again, the board is read from the 
 While that file is fresh (written in the last 30 s), the board is read from it: once a second the mod looks at it, and
 a file that changed is drawn at once (a rewrite that only moved its heartbeat, `stream.heardAt`, is not built into a
 board again), so a card's step or a control change is in the views within about 2 seconds; the minute's fetch then
-asks no host for the snapshots (it still reads the lanes and the test map). A stream that is down keeps its last board, with a note under it:
+asks no host for the snapshots, nor for the test map when the feed has it (below); it still reads the lanes. A stream that is down keeps its last board, with a note under it:
 `units: the live stream is down (<why>); the board is as <host> was at <time>`. With no fresh file the fetch reads the
 snapshot as above.
 
@@ -341,7 +341,11 @@ Then three reads on this machine:
   that makes the map writes how far it is in `.conveyor/test-map.run.json`, beside the map. When Conveyor for this
   checkout runs on a build machine, the map is that machine's: `conveyor.sh testmap` runs there, in the same `ssh`
   command as the snapshots, for the record with this checkout's folder name. While the board comes from the live
-  feed, an `ssh` command asks for the map only.
+  feed, the map comes from the feed too, and no command asks for it. The map is in the snapshot of the record for this
+  checkout: on one machine, the feed's record whose main is this checkout; with a build machine, the feed's record
+  with this checkout's folder name and the main that your host file gives that name. A record with the same name for a
+  different checkout does not count. When the feed has no record for this checkout, or its stream is down, the map is
+  read as with no feed.
 - The Research lane's last activity: the newest write to a Claude session log of its folder
   (`~/.claude/projects/<that path with dashes>/*.jsonl`, under `$CLAUDE_CONFIG_DIR` in place of `~/.claude` when that
   is set; a name over 200 characters is cut to its first 200, a dash and a hash, as Claude Code names the folder); it

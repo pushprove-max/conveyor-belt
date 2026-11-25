@@ -158,10 +158,11 @@ const one = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim
 // nofile (with the paths of the host file looked at) or config. foreman: its line's fields after the word, where a Foreman is
 // expected (the fetch says which); null where none is. foremanDir: the Foreman's folder, empty when none is named. pluginBugs: `pluginbugs <how many> <file>`, null when the Foreman
 // noted none. testMap: `testmap <its state, JSON>` (testMapOf), null with no such line or one not understood. engine:
-// `engine <line>`, the line that says the project runs an old engine on this machine; null when it does not.
-export type Fetched = { research: string; home: string; own: string; fast: Fast; foreman: string[] | null; foremanDir: string; pluginBugs: PluginBugs | null; testMap: TestMap | null; engine: string | null; host: { name: string; how: string; rc: number; looked: string[] } | null; records: { repo: string; json: unknown }[] }
+// `engine <line>`, the line that says the project runs an old engine on this machine; null when it does not. mapRec:
+// `maprec <main>`, the main checkout of the record whose feed snapshot's testMap is this checkout's map; empty with none.
+export type Fetched = { research: string; home: string; own: string; fast: Fast; foreman: string[] | null; foremanDir: string; pluginBugs: PluginBugs | null; testMap: TestMap | null; mapRec: string; engine: string | null; host: { name: string; how: string; rc: number; looked: string[] } | null; records: { repo: string; json: unknown }[] }
 export const parseFetch = (stdout: string): Fetched | null => {
-  const out: Fetched = { research: '', home: '', own: '', fast: { state: 'unread' }, foreman: null, foremanDir: '', pluginBugs: null, testMap: null, engine: null, host: null, records: [] }
+  const out: Fetched = { research: '', home: '', own: '', fast: { state: 'unread' }, foreman: null, foremanDir: '', pluginBugs: null, testMap: null, mapRec: '', engine: null, host: null, records: [] }
   for (const line of stdout.split('\n')) {
     const f = line.split('\t')
     if (out.host) { if (f.length >= 2 && f[0]) out.records.push({ repo: f[0], json: f.slice(1).join('\t') }) }
@@ -173,6 +174,7 @@ export const parseFetch = (stdout: string): Fetched | null => {
     else if (f[0] === 'foremandir') out.foremanDir = f[1] ?? ''
     else if (f[0] === 'pluginbugs' && /^[1-9]\d*$/.test(f[1] ?? '') && f[2]) out.pluginBugs = { n: Number(f[1]), path: f[2] }
     else if (f[0] === 'testmap') out.testMap = testMapOf(f.slice(1).join('\t'))
+    else if (f[0] === 'maprec') out.mapRec = f.slice(1).join('\t')
     else if (f[0] === 'engine' && one(f.slice(1).join(' '))) out.engine = one(f.slice(1).join(' '))
     else if (f[0] === 'host') out.host = { name: f[1] ?? '', how: f[2] ?? '', rc: Number(f[3]), looked: f.slice(4).filter(Boolean) }
   }
@@ -183,6 +185,10 @@ export const parseFetch = (stdout: string): Fetched | null => {
 export const testMapOf = (text: string): TestMap | null => {
   let j: any
   try { j = JSON.parse(text) } catch { return null }
+  return testMapFrom(j)
+}
+// The map's state as an object: the fetch's line, or a feed snapshot's testMap.
+const testMapFrom = (j: any): TestMap | null => {
   const n = (v: unknown) => (num(v) !== null && (v as number) >= 0 ? (v as number) : null)
   if (j?.state === 'running' && n(j.done) !== null && n(j.of) !== null) return { state: 'running', done: j.done, of: j.of, started: n(j.started) }
   if (j?.state === 'failed') return { state: 'failed', why: one(j.why) }
@@ -370,22 +376,28 @@ export const boardOf = (f: Fetched | null, cut: string | null = null): Pick<Stat
 
 // The dashboard collector's live feed: its units-feed.json (stream.json with each snapshot cut to what /units draws),
 // which it rewrites with each change Conveyor's host streams and at least every 10 s.
-// `{host, records: [{repo, snap}], stream: {live, heardAt, error}}`; null when the
-// file is not that, or holds no snapshot of every record yet.
-export type Feed = { host: string; records: { repo: string; json: unknown }[]; live: boolean; heardAt: number | null; error: string }
+// `{host, records: [{repo, main, snap}], stream: {live, heardAt, error}}` (main: the record's main checkout, empty
+// when the feed names none); null when the file is not that, or holds no snapshot of every record yet.
+export type Feed = { host: string; records: { repo: string; main: string; json: unknown }[]; live: boolean; heardAt: number | null; error: string }
 export const parseStream = (text: string): Feed | null => {
   let j: any
   try { j = JSON.parse(text) } catch { return null }
   if (!j || typeof j !== 'object' || !Array.isArray(j.records) || !j.records.length || !j.stream || typeof j.stream !== 'object') return null
   if (!j.records.every((r: any) => r && typeof r === 'object' && typeof r.repo === 'string')) return null
-  return { host: one(j.host), records: j.records.map((r: any) => ({ repo: r.repo, json: r.snap })), live: j.stream.live === true, heardAt: time(j.stream.heardAt), error: one(j.stream.error) }
+  return { host: one(j.host), records: j.records.map((r: any) => ({ repo: r.repo, main: typeof r.main === 'string' ? r.main : '', json: r.snap })), live: j.stream.live === true, heardAt: time(j.stream.heardAt), error: one(j.stream.error) }
 }
 // The board from the live feed, as from a fetch; a feed that is down says so under it, with when the host was last heard.
-// own: the session's own project, as the fetch names it.
-export const boardOfFeed = (f: Feed, own: string): Pick<State, 'snap' | 'note' | 'notes' | 'host'> => {
+// own: the session's own project, as the fetch names it. testMap: the snapshot's test map (its testMap, the map's state
+// as the fetch's testmap line gives it) of the record whose main is mapRec, the main the fetch's maprec line names (a
+// repo name alone can name another checkout's record there), which is not own on a build machine. With no such record,
+// or a feed whose stream is down (its snapshot is old), the board has no testMap: the fetch's testmap line gives the
+// map then, feed or not.
+export const boardOfFeed = (f: Feed, own: string, mapRec: string): Pick<State, 'snap' | 'note' | 'notes' | 'host'> & Partial<Pick<State, 'testMap'>> => {
   const b = boardFrom(f.host, f.records, own, f.live)
   if (!f.live) b.notes.unshift(`units: the live stream is down${f.error ? ` (${f.error})` : ''}; the board is as ${f.host || 'the host'} was ${f.heardAt ? `at ${clockOf(f.heardAt)}` : 'last heard'}`)
-  return b
+  const r = mapRec && f.live ? f.records.find(x => x.main === mapRec) : undefined
+  if (!r) return b
+  return { ...b, testMap: testMapFrom((r.json as any)?.testMap) }
 }
 
 // The cards of own, the session's own project, carry no project name (laneCard finds the Fast lane's card among them);
@@ -784,7 +796,7 @@ export const foremanModel = (s: State, w: number): Line[] => [
 ]
 
 // The test map's one line, in /units and the pane: while a run makes it, how many of its test files have run and for
-// how long, with a bar at the right edge (kept whole, the text cut first); else its state. None when the fetch read none.
+// how long, with a bar at the right edge (kept whole, the text cut first); else its state. None when neither the fetch nor the feed gave one.
 export const testMapModel = (s: State, w: number): Line[] => {
   const m = s.testMap
   if (!m) return []

@@ -165,7 +165,10 @@ const readTime = async ($: EngineInterface) => {
 // the limit. A board with no snapshot is drawn as its note alone, so the
 // line leads the note too.
 let dataOver: string | null = null
-type Board = Pick<State, 'snap' | 'note' | 'notes' | 'host'>
+// testMap: the feed's board carries the test map when the fetch named its record (mapRec, boardOfFeed); a host's board,
+// and a feed's with no mapRec or with its stream down, has none: the fetch's testmap line gives it then, and a feed's
+// board laid over the state keeps it.
+type Board = Pick<State, 'snap' | 'note' | 'notes' | 'host'> & Partial<Pick<State, 'testMap'>>
 const withDataOver = (b: Board): Board => {
   const over = dataOver
   if (!over) return b
@@ -200,20 +203,24 @@ const feedText = (text: string) => {
 // The session's own project, as the last fetch named it (the host file's record whose main is this checkout): its cards
 // carry no project name, in the feed's board as in the host's. Empty until a fetch names one.
 let own = ''
-// The last board built from the feed, with its text, the own it was built for and the Time it wrote its notes' times
+// The main checkout of the feed record whose snapshot carries this checkout's test map, as the last fetch named it (its
+// maprec line): this checkout, or on a build machine the main of the record named as this checkout's folder. Empty
+// until a fetch names one.
+let mapRec = ''
+// The last board built from the feed, with its text, the own and mapRec it was built for and the Time it wrote its notes' times
 // in (clockOf(0), "12:00 AM" or "00:00"): the same text is not parsed into cards again under the same Time. null: the
 // text is not a feed.
-let feedBuilt: { key: string; own: string; clock: string; board: Board } | null = null
+let feedBuilt: { key: string; own: string; mapRec: string; clock: string; board: Board } | null = null
 const feedBoardOf = (key: string): Board | null => {
   const clock = clockOf(0)
-  if (feedBuilt?.key !== key || feedBuilt.own !== own || feedBuilt.clock !== clock) {
+  if (feedBuilt?.key !== key || feedBuilt.own !== own || feedBuilt.mapRec !== mapRec || feedBuilt.clock !== clock) {
     const f = parseStream(key)
     if (!f) return null
-    feedBuilt = { key, own, clock, board: boardOfFeed(f, own) }
+    feedBuilt = { key, own, mapRec, clock, board: boardOfFeed(f, own, mapRec) }
   }
   return feedBuilt.board
 }
-const readFeed = async ($: EngineInterface) => {
+const readFeed = async ($: EngineInterface): Promise<{ board: Board; at: number; key: string } | { over: string } | null> => {
   if (!feedDir) return null
   const file = `${feedDir}/units-feed.json`
   const st = await $.fs.stat(file).catch(() => undefined)
@@ -234,8 +241,9 @@ const nameFeedDir = ($: EngineInterface, cwd: string) => (naming ??= (async () =
 })().finally(() => { naming = undefined }))
 
 // One poll. Whatever fails, the views get a state: a fetch that cannot run is the one "cannot be read" line. With the
-// live feed fresh, the board is the feed's and the fetch asks the host for no snapshot (only for a build machine's
-// test map). fedAt: the feed file's write time when the board is the feed's. A feed folder not yet named is asked for
+// live feed fresh, the board is the feed's and the fetch asks the host for no snapshot. The test map is the feed's
+// too, and not asked, when the fetch, which reads the same feed file, finds its record of this checkout there with the
+// stream live; else (the feed's stream is down, or no feed record is this checkout) it reads the map as with no feed. fedAt: the feed file's write time when the board is the feed's. A feed folder not yet named is asked for
 // again; while it is unnamed the board is the host's, with a note that says so.
 // The Foreman's folder as the last fetch named it, and the write times of its role mark (session) and waiter.pid as the
 // last fetch or Foreman read left them: foremanTick reads the Foreman line again when either time changes.
@@ -253,7 +261,7 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
   // The records the short check saw change since the last fetch began: their snapshots are built fresh.
   const fresh = [...freshFor]
   freshFor.clear()
-  const mode = fed ? ['feed'] : fresh.length ? ['fresh', ...fresh] : []
+  const mode = fed ? ['feed', `${feedDir}/units-feed.json`] : fresh.length ? ['fresh', ...fresh] : []
   // The Foreman's files as they were before the fetch reads them: a change while it runs is read again next second.
   const dir0 = foremanDir
   const key0 = dir0 ? await foremanKey($, dir0) : null
@@ -280,13 +288,14 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
   const now = await $.clock.now()
   if (f) {
     own = f.own
+    mapRec = f.mapRec
     foremanDir = f.foremanDir
     // A folder not known before the fetch has no earlier look: the fetch may have read its role before a change, so the
     // next second reads the Foreman line once (null is never a write time).
     foremanSeen = foremanDir === dir0 ? key0 : null
   }
-  // The feed's board again for the own this fetch named, which the feed was read before.
-  const board = fed && f ? (feedBoardOf(fed.key) ?? fed.board) : boardOf(f, r?.isStdoutTruncated ? CUT : null)
+  // The feed's board again for the own and mapRec this fetch named, which the feed was read before.
+  const board: Board = fed && f ? (feedBoardOf(fed.key) ?? fed.board) : boardOf(f, r?.isStdoutTruncated ? CUT : null)
   // Read whether or not the host answered: a failed fetch must not drop the limit file's not-read line.
   const lim = await readLimit($).catch(() => NO_LIMIT)
   dataOver = lim.over
@@ -301,7 +310,10 @@ const collect = async ($: EngineInterface, cwd: string): Promise<{ st: State; fe
     // The fetch reads the Foreman's folder; whether this session is the one it names is the session's own id.
     foreman: f ? foremanOf(f.foreman, await $.session.id().catch(() => '')) : null,
     pluginBugs: f ? f.pluginBugs : null,
-    testMap: f ? f.testMap : null,
+    // The fetch's testmap line, when it read the map; with the feed live and its record of this checkout carrying the
+    // map, the fetch reads none and the feed's board gives it. A board with no map (the host's, or a feed's whose stream
+    // is down or with no record of this checkout) leaves the fetch's.
+    testMap: f ? (f.testMap ?? board.testMap ?? null) : null,
     engine: f ? f.engine : null,
   }
   return { st, fedAt: fed && f ? fed.at : null, fedKey: fed && f ? fed.key : null }
@@ -338,7 +350,8 @@ let feedSeq = 0
 // The newest board the feed gave, with its file's write time: set before that board is published, so a poll that
 // publishes in between takes this board, never the older one the views still hold.
 let feedBoard: { board: Board; at: number } | null = null
-const boardPart = (b: Board): Board => ({ snap: b.snap, note: b.note, notes: b.notes, host: b.host })
+// A board with no testMap stays without one: laid over the state, it keeps the map the fetch gave.
+const boardPart = (b: Board): Board => ({ snap: b.snap, note: b.note, notes: b.notes, host: b.host, ...('testMap' in b ? { testMap: b.testMap } : {}) })
 const feedTick = ($: EngineInterface) => {
   if (feedBusy || !feedDir || !main || !anyWanted()) return
   feedBusy = true

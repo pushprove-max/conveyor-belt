@@ -131,6 +131,34 @@ t_watchproof() {
   kill $pid; wait $pid 2>/dev/null; :
 }
 
+# Bug (#1651 review): the stream did not watch the test map's run (.conveyor/test-map.run.json, rewritten at each test
+# file), and the kept snapshot was not built again for it (snapinputs), so /units, which reads the map from the live
+# feed, showed old progress until the kept snapshot was SNAPOLD (30 s) old. The stream runs 25 s, under SNAPOLD and the
+# refresh (30 s): only the watched file can bring the new progress in time. The stream is run whole as the watcher, the
+# kept snapshot's reader and its writer, three processes, are what must act together; no single call shows that.
+t_watchmap() {
+  watchstart
+  stream 25 "$T/$CASE/watchmap.out" CONVEYOR_WATCH_GITHUB=60 CONVEYOR_WATCH_GITHUB_FIRST=0
+  trap 'kill $pid 2>/dev/null' EXIT
+  come '.type == "snapshot" and .why == "start"' "the first snapshot"
+  [ "$(ev '.why == "start"' | jq -r .snap.testMap.state)" != running ] || fail "the first snapshot read a map run before one began"
+  # The run's pid is this shell's, alive, so mapstate() reads it as running.
+  echo "{\"pid\": $$, \"started\": 1700000000, \"done\": 3, \"of\": 8}" > "$R/.conveyor/test-map.run.json"
+  come '.type == "snapshot" and .why == "record" and .snap.testMap.state == "running" and .snap.testMap.done == 3' \
+    "a snapshot with the map run's progress after $R/.conveyor/test-map.run.json was written"
+  # Bug (#1651 review): `testmap stop` ends a build by removing the run's file (mapend()), which is newer than nothing,
+  # so the reader (snapinputs) kept the snapshot that showed it running until SNAPOLD. The real mapend() removes it.
+  # Only a line printed after mapend counts: the reader can print the kept snapshot from before the run (not running)
+  # while the writer builds the running one, and that earlier line would pass for the removal's (#1651 review).
+  local n; n=$(wc -l < "$W")
+  ( . "$SRC/lib/testmap.sh"; PACK=$R/.conveyor/project.json mapend )
+  [ ! -e "$R/.conveyor/test-map.run.json" ] || fail "mapend did not remove $R/.conveyor/test-map.run.json"
+  after() { tail -n +"$((n + 1))" "$W" | jq -ne "any(inputs; $1)" >/dev/null 2>&1; }
+  till "a snapshot with no map run after mapend removed $R/.conveyor/test-map.run.json" \
+    after '.type == "snapshot" and .why == "record" and .snap.testMap.state != "running"'
+  kill $pid; wait $pid 2>/dev/null; :
+}
+
 # Bug (#1585 review): the live stream laid a running step over a card's dollars (usd) but not over its known dollars
 # and its gap (usdKnown, notPriced), so /units kept the last snapshot's figures for the whole step: a priced fix after
 # a build with no price added nothing to "$0.00 + 1 step not priced". The stream's lay() is called on the snapshot's

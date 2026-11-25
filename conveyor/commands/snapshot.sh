@@ -7,7 +7,8 @@
 # a minute, with 12 to 35 of them running at once, so no reader got one before it stopped waiting.
 # When an input changed after that build began (a record line, the retried lines, the control record, the files the
 # stream watches beside them (watch.py STATE_FILES), a card's live record or a proof run's, a card begun or ended, the
-# issues list the stream keeps or the loop's, ISSUES: snapinputs) or the kept snapshot is SNAPOLD seconds old
+# issues list the stream keeps or the loop's, ISSUES, the test map or its run's progress (watch.py MAP_FILES):
+# snapinputs) or the kept snapshot is SNAPOLD seconds old
 # (what counts on the clock alone, and an issues list asked of GitHub), the reader starts the writer in the background.
 # The writer is one process a project (it holds KEPT.lock while it builds; a second one finds it held and ends): it
 # builds, writes the new snapshot beside KEPT, dates it when its build began and renames it into place, so a reader
@@ -30,11 +31,15 @@ case ${2-} in
   --fresh) fresh=1 ;;
   *) echo "usage: conveyor.sh snapshot [--fresh]" >&2; exit 2 ;;
 esac
-# Whether an input of the kept snapshot changed after its build began (KEPT's time is when that build began).
+# Whether an input of the kept snapshot changed after its build began (KEPT's time is when that build began). The map's
+# folder (M) counts by its own time as well as by its map files': a run's progress file that is removed (mapend(), as
+# `testmap stop` ends a build) is newer than nothing, but its removal dates the folder.
 snapinputs() {
-  local f=("$STATE" "$RETRIED" "$CONTROL" "$ST/pushed" "$ST/limit.jsonl" "$ST/maintest.json" "$ST/loop.json" "$ISSUES" "$CARDS" "$CARDS/mainrun")
+  local M=$MAIN/.conveyor
+  local f=("$STATE" "$RETRIED" "$CONTROL" "$ST/pushed" "$ST/limit.jsonl" "$ST/maintest.json" "$ST/loop.json" "$ISSUES" "$CARDS" "$CARDS/mainrun" "$M")
   [ -z "$GITHUB" ] || f+=("$GITHUB/issues")
-  [ -n "$(find "${f[@]}" -maxdepth 1 \( ! -path "$CARDS/*" -o -path "$CARDS/mainrun" -o -name '*.live' \) -newer "$KEPT" -print -quit 2>/dev/null)" ]
+  [ -n "$(find "${f[@]}" -maxdepth 1 \( ! -path "$CARDS/*" ! -path "$M/*" -o -path "$CARDS/mainrun" -o -name '*.live' \
+    -o -path "$M/test-map.json" -o -path "$M/test-map.run.json" \) -newer "$KEPT" -print -quit 2>/dev/null)" ]
 }
 snapdue() { snapinputs || ! p_newer "$KEPT" "$SNAPOLD"; }
 # GitHub's answers and the guard's usage readings for the next build, asked outside the build lock into SNAPGH, when

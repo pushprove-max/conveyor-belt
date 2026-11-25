@@ -87,7 +87,7 @@ g "$M/bakery" init -q -b trunk && g "$M/bakery" commit -q --allow-empty -m start
 hostfile --arg c "$M/clone" --arg b "$M/bakery" \
   '{host: "lab", main: $c, records: [{repo: "bakery", main: $b, lanes: {fast: {worktree: "~/lane"}, research: {worktree: "~/research"}}}]}'
 RH=/r/HOME
-same 'the lanes from the host file' "$(printf 'paths\t%s/research\t%s\tbakery\nfast\tok\tlane-12\t1\t0\tBread oven timer\nforemandir\t%s/bakery/conveyor/state/foreman\nhost\t\tfeed\t0' "$RH" "$RH" "$M")" \
+same 'the lanes from the host file' "$(printf 'paths\t%s/research\t%s\tbakery\nfast\tok\tlane-12\t1\t0\tBread oven timer\nforemandir\t%s/bakery/conveyor/state/foreman\nmaprec\t%s/bakery\nhost\t\tfeed\t0' "$RH" "$RH" "$M" "$M")" \
   "$(fetch "$M/bakery" feed)"
 
 # The Foreman line (issue 47): read from the Foreman's folder in the project's state folder (conveyor.sh state-dir),
@@ -149,13 +149,57 @@ same 'a set-up Foreman whose role no session holds still prints its line' \
 # /units can say so; the file's heading is no problem. Bug it catches: a noted problem /units never showed.
 printf '# Plugin problems\n\n- 2026-11-16T10:00:00Z · card #7 · a · evidence: -\n- 2026-11-16T11:00:00Z · card - · b · evidence: -\n' > "$FD/plugin-bugs.md"
 same 'the plugin problems noted: how many, and the file' "$(printf 'pluginbugs\t2\t%s' "$FD/plugin-bugs.md")" "$(fetch "$M/bakery" feed | grep '^pluginbugs')"
-# Issue 176: while the test map is made, the progress the engine writes beside it (conveyor/lib/testmap.sh) is read,
-# feed or not; a checkout with no project settings (the machines above) prints no testmap line. Bug it catches: /units
-# never showed a map's run, so a setup or refresh that ran for many minutes looked like nothing.
+# Issue 176: while the test map is made, the progress the engine writes beside it (conveyor/lib/testmap.sh) is read;
+# a checkout with no project settings (the machines above) prints no testmap line. Bug it catches: /units never
+# showed a map's run, so a setup or refresh that ran for many minutes looked like nothing. With the feed fresh, the
+# map is not read: the feed's snapshot carries it (#1651). Bug that catches: every minute's fetch ran `conveyor.sh
+# testmap` for a map /units already had.
 mkdir -p "$M/bakery/.conveyor" && echo '{}' > "$M/bakery/.conveyor/project.json"
 echo "{\"pid\": $$, \"started\": 1700000000, \"done\": 3, \"of\": 8}" > "$M/bakery/.conveyor/test-map.run.json"
-same 'the test map being made: its files run of how many, and its start' \
-  "$(printf 'testmap\t{"state":"running","done":3,"of":8,"started":1700000000}')" "$(fetch "$M/bakery" feed | grep '^testmap')"
+# The map's record is named with no feed too (#1651 review), by its main: /units keeps it for the feed that comes back
+# between two fetches. Bug it catches: a fetch with no feed left /units with no map's record, and the next feed drew no map.
+MAPRUN=$(printf 'testmap\t{"state":"running","done":3,"of":8,"started":1700000000}')
+MAPREC=$(printf 'maprec\t%s/bakery' "$M")
+same "the test map being made: its files run of how many, and its start, and its record (units-fetch.sh in $M/bakery)" \
+  "$(printf '%s\n%s' "$MAPREC" "$MAPRUN")" "$(fetch "$M/bakery" | grep -E '^(testmap|maprec)')"
+# The Board's feed file (units-feed.json, as .claude/scripts/dashboard_stream.py writes it): one record, its repo, its
+# main and whether its stream is live, its snapshot with a test map.
+feedfile() { # <repo> <main> <live: true or false>
+  jq -n --arg r "$1" --arg m "$2" --argjson l "$3" '{host: "lab", stream: {live: $l}, records: [{repo: $r, main: $m, snap: {testMap: {state: "made", sources: 1, tests: 1, age: 0}}}]}' > "$T/feed.json"
+}
+# D2: the feed live, its record of this checkout (by its main) carries the map: the map is not read.
+feedfile bakery "$M/bakery" true
+same "with the feed live and its record of this checkout, no test map is read (units-fetch.sh feed $T/feed.json in $M/bakery)" \
+  "$MAPREC" "$(fetch "$M/bakery" feed "$T/feed.json" | grep -E '^(testmap|maprec)')"
+# The feed's record of this checkout by another path to the same folder is named as the feed names it: /units finds the
+# record by that text. Bug it catches: the map was read again, or /units looked for a main the feed does not have.
+ln -s "$M/bakery" "$M/bakery-link"
+feedfile bakery "$M/bakery-link" true
+same "the feed's main is another path to this checkout: the map's record is named by the feed's path (units-fetch.sh feed in $M/bakery)" \
+  "$(printf 'maprec\t%s/bakery-link' "$M")" "$(fetch "$M/bakery" feed "$T/feed.json" | grep -E '^(testmap|maprec)')"
+# The feed's record of the same name is another checkout's (the Board reads another host file that names bakery for
+# it, #1651 review): the map is read. Bug it catches: /units showed the other checkout's map, found by name alone.
+feedfile bakery "$M/gadgetlab" true
+same "the feed's bakery is another checkout: the map is read (units-fetch.sh feed in $M/bakery, feed bakery on gadgetlab)" \
+  "$(printf '%s\n%s' "$MAPREC" "$MAPRUN")" "$(fetch "$M/bakery" feed "$T/feed.json" | grep -E '^(testmap|maprec)')"
+# A feed whose stream is down keeps its last snapshot, so its map can be old: the map is read (#1651 review). Bug it
+# catches: /units kept showing a run's old progress after the map was made, while the Board's stream was down.
+feedfile bakery "$M/bakery" false
+same "the feed's stream is down: the map is read (units-fetch.sh feed in $M/bakery, stream not live)" \
+  "$(printf '%s\n%s' "$MAPREC" "$MAPRUN")" "$(fetch "$M/bakery" feed "$T/feed.json" | grep -E '^(testmap|maprec)')"
+# A host file with no records and no main (`{}`) puts its record "project" on whichever checkout reads it (#1651
+# review). The Board in this same checkout: its feed's "project" is on this checkout, so the map is not read. The Board
+# in another checkout: its "project" is that one, so the map is read. Bugs they catch: with the Board and the session in
+# one checkout, every fetch read the map again; in a second checkout, /units showed the Board's checkout's map.
+cp "$H/.config/conveyor/host.json" "$T/lanes-host.json"
+hostfile '{}'
+feedfile project "$M/bakery" true
+same "host file {}, the Board in this checkout: no test map is read (units-fetch.sh feed in $M/bakery, feed project on bakery)" \
+  "$MAPREC" "$(fetch "$M/bakery" feed "$T/feed.json" | grep -E '^(testmap|maprec)')"
+feedfile project "$M/gadgetlab" true
+same "host file {}, the Board in another checkout: the map is read (units-fetch.sh feed in $M/bakery, feed project on gadgetlab)" \
+  "$(printf '%s\n%s' "$MAPREC" "$MAPRUN")" "$(fetch "$M/bakery" feed "$T/feed.json" | grep -E '^(testmap|maprec)')"
+cp "$T/lanes-host.json" "$H/.config/conveyor/host.json"
 # Issue 179: a project that follows main and runs an older commit on this machine than the newest its last take read
 # gets doctor's line, feed or not. Bug it catches: a project stayed on an old engine for hours and /units said nothing.
 mkdir -p "$M/bakery/.git" && jq '.plugin = {follow: "main"}' "$DIR/../conveyor/lib/test-pack.json" > "$M/bakery/.conveyor/project.json"
@@ -166,13 +210,14 @@ same 'an old engine: the line that names it and the command that takes the newes
   "$(fetch "$M/bakery" feed | grep '^engine')"
 # When Conveyor for this checkout runs on a build machine, the map is that machine's: asked in the snapshots' ssh
 # command, of the record named as this checkout's folder, and printed before the host line, as parseFetch reads it;
-# with the feed, the map alone is asked over ssh. Bug it catches: /units showed this machine's map, which no run on the
-# build machine makes or refreshes, so it read "being made" or "not made yet" forever; or, with the Board's live feed
-# fresh, it showed no map at all.
+# with the feed, it is not asked: the feed's snapshot carries it (#1651). Bug it catches: /units showed this machine's
+# map, which no run on the build machine makes or refreshes, so it read "being made" or "not made yet" forever; or,
+# with the Board's live feed fresh, each minute's fetch still asked the build machine for the map over ssh.
 machine buildmap
 printf '%s\n' '#!/usr/bin/env bash' 'while [ "$1" = -o ]; do shift 2; done' 'bash -c "$2"' > "$M/bin/ssh" && chmod +x "$M/bin/ssh"
-# The stub engine's testmap names the checkout it was asked of; its snapshot is the fixture's, as above.
-printf '%s\n' '#!/usr/bin/env bash' '[ "$1" != testmap ] || { echo "{\"state\":\"made\",\"of\":\"$CONVEYOR_MAIN\"}"; exit 0; }' \
+# The stub engine's testmap names the checkout it was asked of; its snapshot is the fixture's, as above. Each command
+# it is asked is written to engine.log, so a case can say whether the map was asked at all.
+printf '%s\n' '#!/usr/bin/env bash' "echo \"\$1\" >> '$M/engine.log'" '[ "$1" != testmap ] || { echo "{\"state\":\"made\",\"of\":\"$CONVEYOR_MAIN\"}"; exit 0; }' \
   '[ "$1" = snapshot ] || exit 2' "awk -F'\\t' -v r=\"\${CONVEYOR_MAIN##*/}\" '\$1 == r { sub(/^[^\\t]*\\t/, \"\"); print }' '$T/two.txt'" > "$M/clone/conveyor/conveyor.sh"
 mkdir -p "$M/dev/bakery/.conveyor" && echo '{}' > "$M/dev/bakery/.conveyor/project.json"
 echo "{\"pid\": $$, \"started\": 1700000000, \"done\": 3, \"of\": 8}" > "$M/dev/bakery/.conveyor/test-map.run.json"
@@ -182,8 +227,20 @@ got=$(fetch "$M/dev/bakery")
 same 'a build machine: its map, of the record named as this checkout, before the host line' \
   "$(printf 'testmap\t{"state":"made","of":"%s"}\nhost\tlab\tssh\t0' "$M/bakery")" "$(grep -E '^(testmap|host)' <<<"$got")"
 same 'a build machine: every record still has its snapshot' 'gadgetlab bakery' "$(sed -n '/^host/,$p' <<<"$got" | sed 1d | cut -f1 | tr '\n' ' ' | sed 's/ $//')"
-same 'a build machine with the feed: its map still, and no snapshots' \
-  "$(printf 'testmap\t{"state":"made","of":"%s"}\nhost\t\tfeed\t0' "$M/bakery")" "$(fetch "$M/dev/bakery" feed | grep -E '^(testmap|host|gadgetlab|bakery)')"
+same "a build machine with no feed: the map is asked of its engine (units-fetch.sh in $M/dev/bakery)" 'testmap' "$(grep -x testmap "$M/engine.log")"
+rm -f "$M/engine.log"
+# The feed's map is that of the record named as this checkout's folder, on the main the host file gives it, as the ssh
+# map's is: no record's main is this checkout here, so the own of the paths line is empty. Bug it catches: /units
+# showed no map on a build machine with the feed.
+feedfile bakery "$M/bakery" true
+same "a build machine with the feed: no map and no snapshots, the map's record the folder's (units-fetch.sh feed in $M/dev/bakery)" \
+  "$(printf 'maprec\t%s/bakery\nhost\t\tfeed\t0' "$M")" "$(fetch "$M/dev/bakery" feed "$T/feed.json" | grep -E '^(testmap|maprec|host|gadgetlab|bakery)')"
+same "a build machine with the feed: its engine is asked nothing (units-fetch.sh feed in $M/dev/bakery)" '' "$(cat "$M/engine.log" 2>/dev/null)"
+# The feed's bakery is on another main than this host file's: the map is asked of the build machine, as with no feed.
+# Bug it catches: the fetch read no map, and /units showed another checkout's map, found by name alone.
+feedfile bakery "$M/gadgetlab" true
+same "a build machine, the feed's bakery on another main: the map is asked over ssh (units-fetch.sh feed in $M/dev/bakery)" \
+  "$(printf 'maprec\t%s/bakery\ntestmap\t{"state":"made","of":"%s/bakery"}' "$M" "$M")" "$(fetch "$M/dev/bakery" feed "$T/feed.json" | grep -E '^(testmap|maprec)')"
 
 # The short check (issue 1033): `stamp` prints one checksum a record, of its state folder's cards.jsonl, control.json
 # and queue, in one command (one ssh call for every record); `fresh <repo>` asks that record for a snapshot built now.

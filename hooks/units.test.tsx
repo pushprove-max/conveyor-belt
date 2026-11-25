@@ -770,7 +770,7 @@ const FEED = `${BOARD}/units-feed.json`
 const OLD_FEED = `${HOME}/.conveyor/dashboard/units-feed.json`
 // heardAt: the heartbeat, the field the Board moves on each rewrite.
 const feed = (snap: string, live = true, heardAt = ago(0)) => JSON.stringify({
-  host: 'buildbox', records: [{ repo: 'bookstore', snap: JSON.parse(snap) }],
+  host: 'buildbox', records: [{ repo: 'bookstore', main: MAIN, snap: JSON.parse(snap) }],
   stream: { live, heardAt, since: live ? null : ago(1), error: live ? null : 'buildbox: no line in 30 s' },
 })
 const feeds = (w: World) => fetches(w).filter(r => r.argv.includes('feed'))
@@ -832,6 +832,116 @@ test('the live feed\'s board takes the session\'s own project from the fetch: a 
   await w.clock.settle()
   expect(await units($)).toMatch(/\n bakery#12 Bread oven timer [^]*\n #7 Gear ratio chart /)
   expect(fetches(w).at(-1)?.argv).toContain('feed')
+})
+
+// Issue 1651: with the feed fresh, the fetch reads no test map (units-fetch.sh feed), so the map is the testMap of the
+// feed's snapshot of the record whose main its maprec line names. Bug it catches: /units showed no map with the feed,
+// or another record's. The fetch here is a build machine's: no record's main is this checkout, so its own is empty and
+// only maprec names the map's record (bug it catches: the map read by own, none shown on a build machine). The other
+// record has this checkout's folder name with another main (#1651 review: a host file that names the name for another
+// checkout): the record is found by its main, not its name.
+// The two cases give one map, by the feed and by the fetch's testmap line: /units must draw the same line from each.
+const OWN_MAP = { state: 'made', sources: 120, tests: 40, age: 0 }
+const OWN_MAP_LINE = 'Test map: 120 source, 40 test files · up to date with main'
+test('with the feed fresh, the test map is the feed record\'s the fetch names, and the fetch is asked for none', async ($, on) => {
+  const mine = { repo: 'shop', main: '/build/bookstore', snap: JSON.parse(snapshot({ testMap: OWN_MAP })) }
+  const records = [{ repo: 'bookstore', main: '/build/other', snap: JSON.parse(snapshot({ testMap: { state: 'made', sources: 7, tests: 2, age: 5 } })) }, mine]
+  const w = world(on, 'main', `paths\t\t${HOME}\t\nfast\tnone\nmaprec\t/build/bookstore\nhost\t\tfeed\t0\n`, { [FEED]: JSON.stringify({ host: 'buildbox', records, stream: { live: true, heardAt: ago(0) } }) })
+  await start($, 'main')
+  await units($)
+  await w.clock.settle()
+  const text = await units($)
+  // The fetch is given the feed file, which it reads to know whether the feed carries the map.
+  expect(fetches(w).at(-1)?.argv.slice(2)).toEqual(['feed', FEED])
+  expect(text).toContain(OWN_MAP_LINE)
+  expect(text).not.toContain('Test map: 7 source')
+  // The feed's next board carries the map's next state, drawn within the second with no fetch. The fetch that /units
+  // above queued settles first, so the count below sees only a fetch the feed's change would ask.
+  await w.clock.settle()
+  const before = fetches(w).length
+  mine.snap.testMap = { state: 'running', done: 3, of: 8 }
+  w.files.set(FEED, { text: JSON.stringify({ host: 'buildbox', records, stream: { live: true, heardAt: ago(0) } }), at: NOW + 500 })
+  await w.clock.advance(1000)
+  // The pane draws the map under Machine details, closed until its Button is pressed.
+  await pressDetails($)
+  expect(await draw($, 'Pane')).toContain('Test map: 3 of 8 test files')
+  expect(fetches(w).length).toBe(before)
+})
+
+test('with no feed, the test map is the fetch\'s testmap line, drawn as the feed\'s is', async ($, on) => {
+  const w = world(on, 'main', answer(FULL).replace('\nhost\t', `\ntestmap\t${JSON.stringify(OWN_MAP)}\nhost\t`))
+  await start($, 'main')
+  await units($)
+  await w.clock.settle()
+  expect(await units($)).toContain(OWN_MAP_LINE)
+  expect(feeds(w)).toEqual([])
+})
+
+// #1651 review: a fetch that names no map's record (no maprec line: the fetch of an engine pinned before it, or no
+// record serves this checkout) gives the map in its testmap line, feed or not, and the feed's board has no map to lay
+// over it. Bugs it catches: the feed that came back after a fetch with no feed drew no map in place of the fetch's
+// (drawFeed), and with the feed fresh the poll dropped the fetch's map for the feed's none (collect).
+test('a fetch that names no map record keeps its testmap line\'s map when the feed comes and while it is fresh', async ($, on) => {
+  const w = world(on, 'main', answer(FULL).replace('\nhost\t', `\ntestmap\t${JSON.stringify(OWN_MAP)}\nhost\t`))
+  await start($, 'main')
+  await units($)
+  await w.clock.settle()
+  // The pane draws the map under Machine details, closed until its Button is pressed.
+  await pressDetails($)
+  expect(await draw($, 'Pane')).toContain(OWN_MAP_LINE)
+  // The feed comes back, its snapshot with no testMap: drawn within the second, the fetch's map kept.
+  w.files.set(FEED, { text: feed(snapshot()), at: NOW + 500 })
+  await w.clock.advance(1000)
+  expect(w.reads).toContain(FEED)
+  expect(feeds(w)).toEqual([])
+  expect(await draw($, 'Pane')).toContain(OWN_MAP_LINE)
+  // The next poll reads the feed's board (`feed`), and the map is still the fetch's.
+  await units($)
+  await w.clock.settle()
+  expect(feeds(w).length).toBeGreaterThan(0)
+  expect(await units($)).toContain(OWN_MAP_LINE)
+})
+
+// #1651 review: a fetch with no feed names the map's record too (maprec), and /units keeps it for the feed that comes
+// back before the next fetch. Bug it catches: a fetch with no feed cleared the map's record, so the feed that came back
+// drew the fetch's old map and never the feed's.
+test('the map record a fetch with no feed names gives the map when the feed comes back', async ($, on) => {
+  const w = world(on, 'main', answer(FULL).replace('\nhost\t', `\nmaprec\t${MAIN}\ntestmap\t${JSON.stringify(OWN_MAP)}\nhost\t`))
+  await start($, 'main')
+  await units($)
+  await w.clock.settle()
+  // The pane draws the map under Machine details, closed until its Button is pressed.
+  await pressDetails($)
+  expect(await draw($, 'Pane')).toContain(OWN_MAP_LINE)
+  // The feed comes back, its bookstore snapshot with the map's next state: drawn within the second, with no fetch.
+  w.files.set(FEED, { text: feed(snapshot({ testMap: { state: 'running', done: 3, of: 8 } })), at: NOW + 500 })
+  await w.clock.advance(1000)
+  expect(feeds(w)).toEqual([])
+  const pane = await draw($, 'Pane')
+  expect(pane).toContain('Test map: 3 of 8 test files')
+  expect(pane).not.toContain(OWN_MAP_LINE)
+})
+
+// #1651 review: the Board rewrites a feed whose stream is down every 10 s with its last snapshot, so the file stays
+// fresh while its map stays as it was. The fetch then reads the map (units-fetch.sh feed), and /units draws that one.
+// Bug it catches: /units drew the down feed's old running map and never the finished one.
+test('with the feed\'s stream down, the test map is the fetch\'s, not the feed\'s old one', async ($, on) => {
+  const w = world(on, 'main', `paths\t\t${HOME}\tbookstore\nfast\tnone\nmaprec\t${MAIN}\ntestmap\t${JSON.stringify(OWN_MAP)}\nhost\t\tfeed\t0\n`,
+    { [FEED]: feed(snapshot({ testMap: { state: 'running', done: 3, of: 8 } }), false) })
+  await start($, 'main')
+  await units($)
+  await w.clock.settle()
+  const text = await units($)
+  expect(fetches(w).at(-1)?.argv).toContain('feed')
+  expect(text).toContain(OWN_MAP_LINE)
+  expect(text).not.toContain('Test map: 3 of 8')
+  // The down feed is rewritten (its heartbeat moves): its board, drawn with no fetch, keeps the fetch's map.
+  w.files.set(FEED, { text: feed(snapshot({ testMap: { state: 'running', done: 3, of: 8 } }), false, ago(1)), at: NOW + 500 })
+  await w.clock.advance(1000)
+  await pressDetails($)
+  const pane = await draw($, 'Pane')
+  expect(pane).toContain(OWN_MAP_LINE)
+  expect(pane).not.toContain('Test map: 3 of 8')
 })
 
 test('a feed file the collector no longer writes is no feed: the fetch asks the host', async ($, on) => {

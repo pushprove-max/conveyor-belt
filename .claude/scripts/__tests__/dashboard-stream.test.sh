@@ -101,7 +101,9 @@ feed
 
 # What the host streams is on the page in seconds: the belt, then the live fields laid over it.
 until_is "a_snapshot_reaches_data_js" data '.panels.belt.data.cards | map(.card) == ["c1"]' .panels.belt
-until_is "the_feed_is_live" stream '.stream.live == true and .records[0].steered and .records[0].repoUrl == "https://github.com/o/r"'
+# A record names its main (#1651 review): /units finds its own record's test map by it, as a repo name can be another
+# checkout's. Bug it catches: the feed had no main, and /units took another checkout's map of the same name.
+until_is "the_feed_is_live" stream '.stream.live == true and .records[0].steered and .records[0].repoUrl == "https://github.com/o/r" and .records[0].main == "/srv/main"'
 grep -q 'CONVEYOR_MAIN=/srv/main exec bash /srv/main/conveyor/conveyor.sh watch' "$T/ssh-calls" || fail "the ssh command: $(cat "$T/ssh-calls")"
 # The Rules part is dated by when the record's snapshot began, not when data.js was built (issue 288: a release
 # answered while the snapshot ran was judged by a snapshot that had not read it, and came back "Not queued").

@@ -8,7 +8,9 @@
 #   foremandir <the Foreman's folder>, then foreman <its role, waiter and watchers> (below), only where a Foreman is expected
 #   pluginbugs <how many> <file>: the plugin problems the Foreman noted (below), only when it noted one
 #   testmap <the test map's state, JSON>: as it is made, or its state, where Conveyor runs for this checkout (below), only
-#   with .conveyor/project.json here
+#   with .conveyor/project.json here, and with the feed only when the feed's snapshot does not carry it
+#   maprec <main>: the main checkout of the record whose feed snapshot's testMap is this checkout's map (below), only
+#   with .conveyor/project.json here and when one is
 #   engine <one line>: the project runs an old engine on this machine (below), only when it does
 #   host <name> <how> <exit> [<path looked at>...], then for every record of the host file, in its order: <repo> <its
 #   snapshot, or null>
@@ -23,9 +25,11 @@
 # ssh to the host file's ssh target. A record whose snapshot fails prints null; the others still print. how: local or
 # ssh, else why nothing was asked: nofile (no host file; the line then names the two paths looked at) or config (it
 # is not understood).
-# Usage: units-fetch.sh [feed | fresh <repo>... | stamp | foreman]. foreman: the Foreman's lines alone, nothing else read.
-# feed: the Board's live feed is fresh, so the board is the
-# feed's: only the lanes, the Foreman, the test map and the engine are read, and the host line is `host <empty> feed 0`.
+# Usage: units-fetch.sh [feed <units-feed.json> | fresh <repo>... | stamp | foreman]. foreman: the Foreman's lines alone, nothing else read.
+# feed: the Board's live feed, the file named, is fresh, so the board is the
+# feed's, with the test map (the testMap of the record the maprec line names, while its stream is live): only the
+# lanes, the Foreman, the engine and, when the feed does not carry it, the test map are read, and the host line is
+# `host <empty> feed 0`.
 # fresh: the short check saw these records change, so their snapshots are built now (`snapshot --fresh`), not the
 # kept ones. stamp: the short check alone (below), which prints `stamps <local | ssh | none>`, then <repo> <checksum>
 # for every record, and exits 1 when the host did not answer.
@@ -33,6 +37,7 @@ set -uo pipefail
 . "${BASH_SOURCE[0]%/*}/../conveyor/lib/portable.sh" && p_tools
 here=$PWD
 mode=${1:-}; [ $# = 0 ] || shift
+feedf=/dev/null; [ "$mode" != feed ] || feedf=${1:-/dev/null}
 # The Foreman (conveyor/foreman/lib.sh FD, the folder its own hooks name): printed only where one is expected, its
 # folder holding a role mark (session) that names a session, or its launcher's settings (settings.json). The line:
 #   foreman <session the mark names> <waiter.pid's pid> <its commit, - from a checkout> <its session> <1 when that pid
@@ -139,10 +144,28 @@ n=0; [ -z "$fd" ] || n=$(grep -c '^- ' "$fd/plugin-bugs.md" 2>/dev/null) || n=0
 # JSON object>, printed only in a checkout with Conveyor's project settings, and read where Conveyor runs for it. Here,
 # by this copy of Conveyor, unless the snapshots come from a build machine: then that machine's, in the same ssh
 # command, of the record named as this checkout's folder (the record doctor names it served by, lib/setup.sh), and none
-# when no record has that name. When the board is the feed's, the snapshots are not asked, but the map still is, over
-# ssh on its own: the feed has no map. This machine's own map is never shown then.
-tmcmd=''
-if [ -f .conveyor/project.json ] && [ "$remote" = 0 ]; then
+# when no record has that name. maprec <main> names the main checkout of the record whose feed snapshot carries this
+# map (testMap, .claude/scripts/dashboard_stream.py units_snap): /units finds that record in the feed by its main, as a
+# repo name can name another checkout there (the Board may read another host file, or `{}`, which gives each checkout
+# its own record "project"). Here, this checkout; with a build machine, the main of the record named as this checkout's
+# folder. With the feed (`feed <its units-feed.json>`), the feed file is read: a record there whose main is that one
+# (here, or one that is this same folder) is named by its main as the feed gives it, and when the feed's stream is live
+# (a stream that is down keeps an old snapshot) and that record's snapshot has a testMap, the map is not asked: /units
+# reads it in that snapshot. Else it is asked as with no feed.
+tmcmd='' mmain='' skip=0
+if [ -f .conveyor/project.json ]; then
+  t=${here##*/}; t=${t//[^A-Za-z0-9._-]/-}
+  if [ "$remote" = 0 ]; then mmain=$here
+  else mmain=$(jq -r --arg n "$t" 'first(.records[]? | select(.repo == $n) | .main) // empty' <<<"$got" 2>/dev/null); fi
+  [ "$mode" != feed ] || [ -z "$mmain" ] || while IFS= read -r -d '' m && IFS= read -r -d '' s; do
+    [ "$m" = "$mmain" ] || { [ "$remote" = 0 ] && [ "$m" -ef "$here" ]; } || continue
+    mmain=$m skip=$s; break
+  done < <(jq -j '(.stream.live == true) as $l | .records[]? | select(.main | strings | test("^/[^[:cntrl:]]*$"))
+    | .main, "\u0000", (if $l and (.snap.testMap | type) == "object" then 1 else 0 end), "\u0000"' "$feedf" 2>/dev/null)
+  [[ ! $mmain =~ ^/[^[:cntrl:]]*$ ]] || printf 'maprec\t%s\n' "$mmain"
+fi
+if [ "$skip" = 1 ]; then :
+elif [ -f .conveyor/project.json ] && [ "$remote" = 0 ]; then
   tm=$(CONVEYOR_MAIN=$here timeout -k 2 20 bash "${BASH_SOURCE[0]%/*}/../conveyor/conveyor.sh" testmap 2>/dev/null) \
     && [[ $tm == '{'* ]] && printf 'testmap\t%s\n' "$tm"
 elif [ -f .conveyor/project.json ]; then
@@ -167,8 +190,8 @@ fi
 # `snapshot --fresh`: its state changed since the kept snapshot may have been built, which a plain read would print.
 [ "$mode" = fresh ] || set --
 # Each snapshot is cut, on the machine that makes it, to the parts the pane draws (hooks/sources.ts parseRecord; the same
-# cut as units_snap in .claude/scripts/dashboard_stream.py): the rest, the Tests page's history above all, grows without
-# end and made the fetch too slow and too big to read. A snapshot that jq cannot cut prints null, as a failed one does.
+# cut as units_snap in .claude/scripts/dashboard_stream.py, less its testMap: here the testmap line above gives it):
+# the rest, the Tests page's history above all, grows without end and made the fetch too slow and too big to read. A snapshot that jq cannot cut prints null, as a failed one does.
 view='with_entries(select(.key | IN("health", "needsYou", "belt", "landed", "landedCount", "queue", "cost", "awaitingDeploy", "suites", "snapshotAt", "recordsNow", "open", "declined", "declinedRest")))
   | if (.open | type) == "object" then .open |= with_entries(select(.key | IN("umbrellas", "held"))) else . end
   | if (.recordsNow | type) == "object" then .recordsNow |= {building} else . end

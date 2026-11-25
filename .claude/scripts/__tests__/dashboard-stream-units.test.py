@@ -18,8 +18,11 @@ DRAWN = {'health': {'state': 'ok'}, 'needsYou': {'waiting': [], 'blocked': []}, 
          'queue': {'next': [], 'held': {}}, 'cost': {'today': 1}, 'awaitingDeploy': [], 'suites': [], 'snapshotAt': 't',
          # Bug: the feed dropped recordsNow, so /units counted the kept belt's rows against the cap, not loop.json's
          # count now. Of recordsNow the feed keeps building alone: /units reads no more of it (SNAP's lists).
-         'recordsNow': {'building': 1}}
-SNAP = dict(DRAWN, recordsNow={'building': 1, 'waitingCount': 0, 'running': 2, 'landed': 1, 'blocked': [{'card': 'c1'}], 'waiting': [], 'started': [{'card': 'c2'}]},
+         'recordsNow': {'building': 1},
+         # Bug (#1651): the feed had no test map, so /units asked the host for it on every fetch, over ssh on a build
+         # machine. Of the map the feed keeps its state (mapstate()), not the Tests page's notMapped list.
+         'testMap': {'state': 'running', 'done': 3, 'of': 8, 'started': 1700000000}}
+SNAP = dict(DRAWN, testMap=dict(DRAWN['testMap'], tool='c8', notMapped=[{'file': f'n{i}', 'why': 'z' * 200} for i in range(50)]), recordsNow={'building': 1, 'waitingCount': 0, 'running': 2, 'landed': 1, 'blocked': [{'card': 'c1'}], 'waiting': [], 'started': [{'card': 'c2'}]},
             tests=[{'file': f'f{i}', 'log': 'x' * 1000} for i in range(4200)], testActions=[{'a': 'y' * 1000}] * 300,
             declined=[{'id': 'a', 'by': 'judge', 'time': 't1', 'why': 'long'}, {'id': 'b', 'by': 'owner', 'time': 't2'}], declinedRest=[],
             open={'umbrellas': [{'issue': 2}], 'held': [], 'issues': list(range(500))})

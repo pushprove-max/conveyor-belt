@@ -10,7 +10,8 @@ ends). Every line has `type` and `at` (when it was printed):
             record too, is that much older than the line), repoUrl (the checkout's GitHub address, null for none),
             lastPushAt (when the last push that worked was recorded, null for none)}. The first line is one; a new one
             follows a new kept snapshot put in place by its writer when the last line's was built too early to read
-            the change it was asked for (as that change), a new record line, a retry, a push, a new guard reading (record), a control change (control), the loop's
+            the change it was asked for (as that change), a new record line, a retry, a push, a new guard reading, the
+            test map's run or map (record), a control change (control), the loop's
             process starting or ending (loop), and a new answer from GitHub (github).
             Changes that come while one is built give one more after it, not one each. With no other for REFRESH
             seconds, one is made anyway (refresh): what counts on the clock alone (a card stuck for want of output,
@@ -31,7 +32,8 @@ ends). Every line has `type` and `at` (when it was printed):
   error     {error}: a snapshot failed (the end of what it said); the stream goes on, and the next change tries again.
 
 What it watches, by looking every POLL seconds (one way on every system; each look is a stat of a few files): the state folder (cards.jsonl, retried.jsonl, control.json, pushed, maintest.json,
-limit.jsonl, snapshot.json: the kept snapshot, and loop.json: what the running loop makes of the control record), the cards folder (each *.live) and its own GitHub folder. GitHub is asked by `conveyor.sh github <folder>`
+limit.jsonl, snapshot.json: the kept snapshot, and loop.json: what the running loop makes of the control record), the cards folder (each *.live), the
+main checkout's .conveyor folder (MAP_FILES: the test map and its run's progress, the snapshot's testMap) and its own GitHub folder. GitHub is asked by `conveyor.sh github <folder>`
 every GITHUB_EVERY seconds, in a thread of its own, and every snapshot runs with CONVEYOR_GITHUB naming that folder:
 the snapshot reads GitHub's last answers and never waits on GitHub. The first snapshot waits for the first answer, at
 most GITHUB_FIRST seconds, and not at all once a record, control or live record change comes: that change is on its way at once,
@@ -75,6 +77,10 @@ POLL = 0.5
 SNAPSHOT_LIMIT = 120  # a snapshot that hangs is killed, and the next change tries again
 STATE_FILES = {'cards.jsonl': 'record', 'retried.jsonl': 'record', 'pushed': 'record', 'limit.jsonl': 'record', 'maintest.json': 'record', 'control.json': 'control',
                'issues.json': 'record', 'loop.json': 'loop', 'snapshot.json': 'kept'}
+# In the main checkout's .conveyor folder (lib/testmap.sh mappath(), mapprogpath()): a run's progress, rewritten at each
+# test file, and the map it makes. Each change asks for a snapshot (record), so the snapshot's testMap, which /units
+# reads from the live feed, follows the run.
+MAP_FILES = ('test-map.run.json', 'test-map.json')
 # Asked for while another waits, the one that says more is kept: a refresh is the least, then GitHub's.
 RANK = {None: 0, 'refresh': 1, 'github': 2}
 GITHUB_URL = re.compile(r'github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(\.git)?$')
@@ -419,6 +425,7 @@ class Stream:
         files.add(self.state, 'state', lambda n: n in STATE_FILES)
         files.add(self.cards, 'cards', lambda n: n.endswith('.live'))
         files.add(os.path.join(self.cards, 'mainrun'), 'proof', lambda n: n.endswith(PROOF_LIVE))
+        files.add(os.path.join(self.main, '.conveyor'), 'map', lambda n: n in MAP_FILES)
         files.read()  # what is there now is no change
         proofs = {n for k, n in files.seen if k == 'proof'}  # the proof runs' live records there now
         threading.Thread(target=self.snapshots, daemon=True).start()
@@ -453,6 +460,11 @@ class Stream:
                         self.ask(STATE_FILES[name])
                     else:
                         self.start()  # the change goes now, in the first snapshot
+                elif kind == 'map':
+                    if self.started:
+                        self.ask('record')
+                    else:
+                        self.start()
                 else:
                     if not self.started:
                         self.start()  # a running step's fields go now, in the live line right after the first snapshot
