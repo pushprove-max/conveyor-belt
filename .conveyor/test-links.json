@@ -1012,5 +1012,11 @@
   ],
   "conveyor/lib/session.sh": [
     "conveyor/tests/landas.test.sh"
+  ],
+  "conveyor/lib/healslist.sh": [
+    "conveyor/tests/budgetrun.test.sh"
+  ],
+  "conveyor/tests/healsexpire.test.sh": [
+    "conveyor/tests/budgetrun.test.sh"
   ]
 }

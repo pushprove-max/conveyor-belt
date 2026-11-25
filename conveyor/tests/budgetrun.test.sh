@@ -47,15 +47,16 @@ t_budgetfix() {
   landedone 7 || fail "the card did not land after its fix"
 }
 # Bug caught (#341): a run after a fix session that failed again said nothing of s.test, which it kept as passed and
-# did not run, so the test judge could not tell that the step before it was the one that ran s.test.
+# did not run, so the test judge could not tell that the step before it was the one that ran s.test. The card gets
+# 3 fix rounds (TESTFIXES, lib/paths.sh; #1695) before it blocks, and each run after one names s.test as carried.
 t_budgetfixfail() {
   budgetfixsetup; echo '[ -e "$STUB/built" ] || { echo two >> a.txt; echo 5 9 > s.test; }; touch "$STUB/built"' > "$STUB/build"
   # loop: only a whole card run has a test step fail again after a fix session, with the run's list kept between them
   loop run --only 7 1 > /dev/null 2>&1
-  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test fail," ] \
-    || fail "f.test did not fail before and after the fix: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "test") | .carried | tojson' | tr '\n' ' ')" = 'null ["s.test"] ' ] \
-    || fail "the failed run after the fix does not name s.test as carried, not run: $(st 'select(.step == "test") | .carried | tojson' | tr '\n' ' ')"
+  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test fail,fix ok,test fail,fix ok,test fail," ] \
+    || fail "f.test did not fail before and after each of the 3 fixes: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "test") | .carried | tojson' | tr '\n' ' ')" = 'null ["s.test"] ["s.test"] ["s.test"] ' ] \
+    || fail "a failed run after a fix does not name s.test as carried, not run: $(st 'select(.step == "test") | .carried | tojson' | tr '\n' ' ')"
   [ -z "$(jq -Rn -f "$SRC/jq/check.jq" < "$ST/cards.jsonl")" ] || fail "the record check refuses a line"
 }
 # Card 7 and its test command (budgetfix, budgetfixfail): s.test, which the build writes, passes and is timed unless
