@@ -676,6 +676,87 @@ branchon() {
     inh && /^\+/ { add[++nadd] = substr($0, 2) }
     END { done(); hdr(); exit bad }' "$3/onmain.br" "$3/onmain.mn"
 }
+# The Tests page parts of the snapshot (tests: testspart(); testMap: mapboard()) and the test owners they read
+# (testowners()) are kept in SNAPPARTS, a file each: the sum of the key it was made under on its first line, the part
+# after it. A build whose key of a part is the same takes the kept part and computes nothing; another key, or a kept
+# file that is missing or cannot be read, computes the part as before and keeps it. Each part read every input again on
+# every build, 7 to 16 seconds of it, though /units reads only testMap of them.
+# What must stay true: a part is never kept under a key newer than what it read. snapkeys() reads every key before the
+# parts read their inputs, so a record, flaky entry or pack written while a part is computed gives the next build
+# another key, and that build computes the part again.
+SNAPPARTS=${STATE%/*}/snapparts
+# snapkeys sets SK_OWNERS, SK_TESTS and SK_MAP, the key texts of the three parts, from what each reads. A file is keyed
+# by its size, mtime and ctime to the nanosecond and inode, a link's by its target's (snapfiles; no line when it is
+# not there): written again, even to the same size in the same second, it gives another key. <since> is testspart()'s first day of the 7 days.
+# SK_OWNERS, for testowners(), and the start of the other two: main's checkout, its HEAD and the change of its tracked
+#   files since (git diff HEAD: an edit not committed is read too) and the list of its tracked files (git ls-files: a
+#   deletion or an add staged changes the index, not the diff), which give the tracked test files (testtracked()),
+#   their text (the cases, the hollow and proxy checks, the runner the test command names) and the test-speed survey
+#   (.conveyor/test-times.json); of the pack ($PACK, untracked in some projects, and left out of main's diff), only the
+#   keys the parts read, its test and tests objects (the test.* keys, the test rules' settings and tests.patterns), as
+#   packok() checked them, so a change to another key keeps the parts; the engine's code that computes the parts and
+#   the pack schema's defaults; and the tools on PATH that neverwhy() looks for (node, python3).
+# SK_TESTS, for testspart(): <since>, and TZ with /etc/localtime (its 7 days are local days); the test history's start
+#   (the control record's testsFrom, of the build's copy, control: its other fields are not read); the sum of the
+#   retried lines and the card records as the part reads them (testlines(): the test, picked, landed, bugproof, review,
+#   blocked and closed lines, and of each only the fields TESTLINE keeps), so a line the part does not read (a card's
+#   start, its sessions) leaves the key as it was; the flaky entries inside FLAKY_DAYS of now (flakyAgain counts them
+#   from the clock, so an entry that ages out changes the part with no file written); and the files FLAKY, slow.json,
+#   SUITERUNS, TESTRULES, TESTRULESLOG, TAFILED, TACARDS, the test actions' records ($TESTACTS/*.json) and the mutation
+#   checks' ($MUTS/*.json, $MUTS/asked). $TESTACTS/neverloads is not keyed: it holds parse results by each file's
+#   content, which main's key already names.
+# SK_MAP, for mapboard(): the pack's test.map; the made map (mappath()), the progress of a run that makes it
+#   (mapprogpath()), the record of a build by hand (mapbuildpath()) and suiteruns.jsonl (the suite's seconds); with
+#   test.map unset, main's language and its coverage tool's check, run as mapboard() runs it (maplang(), maptool(): a
+#   tool installed, as a gem with no Gemfile, changes no file the key could name); with a map the project keeps itself,
+#   that file (mapread() reads it in main's checkout, tracked or not). Empty, so the part is not kept, when the pack
+#   cannot be read, or while the progress or the build record names a pid: whether that process still runs changes the
+#   part with no file written.
+snapkeys() { # <since>
+  local m n l tm ex=()
+  case $PACK in "$MAIN"/*) ex=(":(exclude,literal)${PACK#"$MAIN"/}") ;; esac
+  m=$(printf 'head %s\n' "$(git -C "$MAIN" rev-parse -q --verify HEAD 2>/dev/null)"
+    printf 'diff %s\n' "$(git -C "$MAIN" diff --no-ext-diff --no-textconv --binary HEAD -- "${ex[@]}" 2>/dev/null | git hash-object --stdin)"
+    printf 'tracked %s\n' "$(git -C "$MAIN" ls-files -z 2>/dev/null | git hash-object --stdin)"
+    printf 'pack %s\n' "$({ packok && jq -cS '{test, tests}' <<<"$PACK_T"; } 2>/dev/null | git hash-object --stdin)"
+    snapfiles "$SCHEMA" "$HERE"/conveyor.sh "$HERE"/lib/*.sh "$HERE"/jq/*
+    command -v node python3)
+  SK_OWNERS=$m
+  n=$(jq -r --argjson d "$FLAKY_DAYS" '(($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $t
+    | [.entries | arrays | .[] | objects | select(((.time | fromdate?) // 0) > $t - $d * 86400)] | length' "$FLAKY" 2>/dev/null) || n=none
+  l=$(testlines | cksum)
+  SK_TESTS=$m$'\n'$(printf 'since %s\ntz %s\nfrom %s\nlines %s\nflaky %s\n' "$1" "${TZ-unset}" \
+      "$(jq -r '(objects | .testsFrom) // ""' <<<"$control" 2>/dev/null)" "$l" "$n"
+    snapfiles /etc/localtime "$FLAKY" "${STATE%/*}/slow.json" "$SUITERUNS" "$TESTRULES" "$TESTRULESLOG" "$TAFILED" "$TACARDS" \
+      "$TESTACTS"/*.json "$MUTS"/*.json "$MUTS/asked")
+  SK_MAP=''
+  packget test.map tm 2>/dev/null || return 0
+  grep -qsF '"pid"' -- "$(mapprogpath)" "$(mapbuildpath)" && return 0
+  case $tm in
+    off) l='' ;;
+    '') l=$(maplang "$MAIN"); l="lang $l"$'\n'"tool $(maptool "$l" "$MAIN"; echo " $?")" ;;
+    *) l=$(snapfiles "$MAIN/$tm") ;;
+  esac
+  SK_MAP=$m$'\n'"map $tm"$'\n'$l$'\n'$(snapfiles "$(mappath)" "$(mapprogpath)" "$(mapbuildpath)" "${STATE%/*}/suiteruns.jsonl")
+}
+# `<size> <mtime> <ctime> <inode> <path>` of each file, a line each, from one GNU find (a stat a file was a program a
+# file, and the test actions' records are one a file); a file that is not there, or a glob that matched none, gives none.
+snapfiles() { find -L "$@" -maxdepth 0 -printf '%s %T@ %C@ %i %p\n' 2>/dev/null || :; } # <file>...
+# snappart <name> <key text> <to> <command> [<arg>...]: the part kept under the key written to <to>; else the command's
+# output written there, and kept under the key when the command succeeds with output and the key is not empty. Exit 1
+# when the command fails. A part that cannot be kept is computed again next time, nothing else.
+snappart() {
+  local f=$SNAPPARTS/$1 k=$2 o=$3 h='' l
+  shift 3
+  if [ -n "$k" ] && h=$(git hash-object --stdin <<<"$k") && { IFS= read -r l && [ "$l" = "$h" ] && cat > "$o"; } 2>/dev/null < "$f" && [ -s "$o" ]; then
+    return 0
+  fi
+  "$@" > "$o" || return 1
+  [ -z "$h" ] || [ ! -s "$o" ] || { mkdir -p "$SNAPPARTS" && { printf '%s\n' "$h"; cat -- "$o"; } > "$f.$BASHPID" && mv -f -- "$f.$BASHPID" "$f"; } 2>/dev/null \
+    || rm -f -- "$f.$BASHPID"
+}
+# The test owners (testowners()) as two lines, defs then refs, for snappart.
+snapowners() { local defs refs; testowners; printf '%s\n%s\n' "$defs" "$refs"; }
 snapshot() (
   next=null; held=null; built=null; queue=null; yes=$YES
   lintyes=$LINTYES
@@ -835,9 +916,11 @@ snapshot() (
     '.fail | objects | select(.issue == null or $iss[0] == null or (.issue as $n | $iss[0] | any(.number == $n)))' "$MAINTEST" 2>/dev/null) || mt=null
   # The commit of the plugin's main (or newest release) this machine did not take, while the pack follows it (take(), lib/install.sh).
   packget plugin.follow eng && [ -n "$eng" ] && eng=$(jq -ce '.refused | objects | {commit, reason, since}' "$ENGINE" 2>/dev/null) || eng=null
-  # The test owners, read once: testspart, below, reads these too.
-  local defs refs
-  testowners
+  # The keys of the kept Tests page parts, read before any of them reads its inputs (snapkeys()).
+  snapkeys "$since"
+  # The test owners, read once (kept: snappart()): testspart, below, reads these too.
+  local defs='{}' refs='{}'
+  snappart owners "$SK_OWNERS" "$d/owners" snapowners && { IFS= read -r defs && IFS= read -r refs; } < "$d/owners" || testowners
   fl=$(jq -ce --slurpfile h "$d/health" --argjson days "$FLAKY_DAYS" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") '$h[0] as $h | '"$OWNERS"'($h.time | fromdate) as $t | [.filed | arrays | .[] | objects] as $f
     | [.entries | arrays | .[] | objects | select((.case | type) == "string" and ((.time | fromdate?) // 0) > $t - $days * 86400)] | group_by(.case)
     | map(.[0].case as $c | {case: $c, count: length, issue: ([$f[] | select(.case == $c) | .issue][-1] // null), files: ($c | caseowners)}) | sort_by(-.count, .case)' "$FLAKY" 2>/dev/null) || fl='[]'
@@ -1363,10 +1446,11 @@ snapshot() (
     {shown: map(select(shown)), rest: map(select(shown | not))}' "$d/${DECLINED##*/}" > "$d/declined" 2>/dev/null && [ -s "$d/declined" ] || echo '{"shown":[],"rest":[]}' > "$d/declined"
   # testActions: the Tests seat (the control record's tests, null when none is set), the time limit of an action and
   # the actions' records it lists, running and kept, newest first (testacts(), lib/testaction.sh). tests: the test files'
-  # figures, settings and totals (testspart(), lib/testfiles.sh), null when the pack cannot be read.
-  testspart "$since" > "$d/tests" 2>/dev/null && [ -s "$d/tests" ] || echo null > "$d/tests"
+  # figures, settings and totals (testspart(), lib/testfiles.sh), null when the pack cannot be read. It and testMap are
+  # kept while their inputs are unchanged (snappart()).
+  snappart tests "$SK_TESTS" "$d/tests" testspart "$since" 2>/dev/null && [ -s "$d/tests" ] || echo null > "$d/tests"
   # testMap: the Test map part (mapboard(), lib/testmap.sh).
-  mapboard "$MAIN" > "$d/testmap" 2>/dev/null && [ -s "$d/testmap" ] || echo null > "$d/testmap"
+  snappart testmap "$SK_MAP" "$d/testmap" mapboard "$MAIN" 2>/dev/null && [ -s "$d/testmap" ] || echo null > "$d/testmap"
   # bench: the Benchmarks tab's live part, board.json of `conveyor.sh bench swe` (bench/swe.sh); a run in progress whose process
   # is gone (killed with no end written) is shown stopped, and soloKey is the key of the builder seat in force now
   # (swe_solokey()), not the one board.json kept from its last write.

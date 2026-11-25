@@ -259,6 +259,7 @@
 {"area": "snapshot", "test": "slices.test.sh"}
 {"area": "snapshot", "test": "slots.test.sh"}
 {"area": "snapshot", "test": "snapkept.test.sh"}
+{"area": "snapshot", "test": "snapparts.test.sh"}
 {"area": "snapshot", "test": "stall.test.sh"}
 {"area": "snapshot", "test": "standing.test.sh"}
 {"area": "snapshot", "test": "testmapbuild.test.sh"}
