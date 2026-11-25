@@ -28,7 +28,7 @@ t_readyclaim() {
   done
   sed -i 1s/1/seven/ "$CARDS/c7-7/a.txt"; git -C "$CARDS/c7-7" add -A
   sed -i 1s/1/eight/ "$CARDS/c8-8/a.txt"; git -C "$CARDS/c8-8" add -A
-  eval "$(sed -n '/^claim() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^readyput() {/,/^}/p; /^testedhere() {/p; /^readysince() {/,/^}/p; /^bpid() {/,/^}/p; /^turnq() {/,/^}/p' "$SRC/lib/claim.sh")"
+  eval "$(sed -n '/^claim() {/,/^}/p; /^claimline() {/,/^}/p; /^readyrows() {/,/^}/p; /^together() {/,/^}/p; /^ready() {/,/^}/p; /^fits() {/,/^}/p; /^merge3() {/,/^}/p; /^cardpatch() {/p; /^tested() {/,/} # <worktree>$/p; /^readyput() {/,/^}/p; /^testedhere() {/p; /^readysince() {/,/^}/p; /^bpid() {/,/^}/p; /^turnq() {/,/^}/p' "$SRC/lib/claim.sh")"
   packget() { printf -v "$2" 1; } # for turnq(): the test pack's landBatch, batches off
   eval "$(sed -n '/^declare -A ASKED_K/p; /^stdb() {/,/^}/p' "$SRC/lib/records.sh")"
   # shellcheck disable=SC2034 # read by stdb(), for the folder state.py is in
