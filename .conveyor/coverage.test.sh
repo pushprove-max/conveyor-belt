@@ -9,32 +9,38 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 AT=@
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t${AT}example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t${AT}example.com
 # The loop's test step sets these: left set, the scratch test-changed.sh runs below would select the card's files too.
-unset CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_LOG CONVEYOR_TEST_FILELIST CONVEYOR_TEST_RERUN
+unset CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_LOG CONVEYOR_TEST_FILELIST CONVEYOR_TEST_RERUN CONVEYOR_TEST_CASES
 bad=0; n=0
 ok() { n=$((n + 1)); echo "ok $n - $1"; }
 no() { n=$((n + 1)); echo "not ok $n - $1"; bad=1; }
 
-# A scratch checkout, traced once: an engine file of two functions and two cases of the runner that each call one
+# A scratch checkout, traced once: an engine file of three functions and two cases of the runner that each call one
 # (t_two through a copy of the file in a scratch folder, in a bash of its own, as engine cases run the engine), and a
 # third that fails, its output naming a path of this machine; dashboard.sh with two functions and a test file of two
 # parts that each run one; a hook with a function its whole test file runs and one no test runs.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/lib" "$R/conveyor/tests" "$R/.claude/scripts/__tests__" "$R/.claude/hooks/__tests__"
-cp "$HERE/coverage.sh" "$HERE/test-changed.sh" "$HERE/test-share.sh" "$R/.conveyor/"; cp "$ROOT/conveyor/lib/portable.sh" "$R/conveyor/lib/"
-printf '%s\n' '{"area": "a", "file": "conveyor/lib/f.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
-printf 'fone() {\n  echo one\n}\nftwo() {\n  echo two\n}\n' > "$R/conveyor/lib/f.sh"
+cp "$HERE/coverage.sh" "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"; cp "$ROOT/conveyor/lib/portable.sh" "$R/conveyor/lib/"
+# portable.sh outside the map, so the map check of a one-file run passes (issue 1723's checks of its exit, below).
+printf '%s\n' '{"outside": "conveyor/lib/portable.sh"}' '{"area": "a", "file": "conveyor/lib/f.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
+printf 'fone() {\n  echo one\n}\nftwo() {\n  echo two\n}\nfbare() {\n  echo bare\n}\n' > "$R/conveyor/lib/f.sh"
+# fbare: run by t_one in its own bash and by t_two only in a bash started with an emptied environment (env -i), as
+# apiroute.test.sh's t_apicard runs the engine.
 cat > "$R/conveyor/tests/a.test.sh" <<'EOF'
 t_one() {
-  fone
+  fone; fbare
 }
 t_two() {
-  local d; d=$(mktemp -d) && mkdir "$d/lib" && cp conveyor/lib/f.sh "$d/lib/" && bash -c ". '$d/lib/f.sh' && ftwo"; rm -rf "$d"
+  local d; d=$(mktemp -d) && mkdir "$d/lib" && cp conveyor/lib/f.sh "$d/lib/" && bash -c ". '$d/lib/f.sh' && ftwo" \
+    && env -i PATH="$PATH" bash -c ". '$d/lib/f.sh' && fbare"; rm -rf "$d"
 }
 t_bad() {
   echo "$PWD/conveyor/tests/a.test.sh: line 9: boom"; return 1
 }
 EOF
+# The runner calls p_tools, as conveyor/tests/lib.sh does: on macOS it puts Homebrew's folders on PATH (below).
 cat > "$R/conveyor/conveyor.test.sh" <<'EOF'
 cd "$(dirname "$0")/.." || exit 1
+. conveyor/lib/portable.sh && p_tools || exit 1
 . conveyor/lib/f.sh
 for f in conveyor/tests/*.test.sh; do . "$f"; done
 for c in ${CONVEYOR_SHELL_TEST_CASE//,/ }; do "t_$c" || exit 1; done
@@ -72,7 +78,15 @@ printf '%s\n' '# gfive' 'check "g$V" "$(bash "$G" "g$V")"' >> "$R/.claude/hooks/
 # The checks every test-changed.sh run starts, empty: the selection runs below check none of them.
 for c in test-lint no-browser-tests no-records-split; do : > "$R/.conveyor/$c.sh"; done
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init
-(cd "$R" && bash .conveyor/coverage.sh) > "$T/out" 2>&1; rc=$?
+# Traced as on macOS (a `uname -s` of Darwin, which portable.sh's p_darwin asks): a Homebrew (B) of this machine's own
+# tools, its bash in B/bin, which p_tools puts on PATH in coverage.sh and again in the runner.
+B=$T/brew; mkdir -p "$B/bin" && ln -s "$BASH" "$B/bin/bash" && ln -s "$(command -v gtimeout || command -v timeout)" "$B/bin/gtimeout" \
+  && printf '#!/bin/sh\n[ "$1" = -s ] && echo Darwin || exec %s "$@"\n' "$(command -v uname)" > "$B/bin/uname" && chmod +x "$B/bin/uname" \
+  || no "the Homebrew folder could not be made"
+for x in coreutils:timeout coreutils:date coreutils:stat findutils:find gnu-sed:sed grep:grep; do
+  mkdir -p "$B/opt/${x%%:*}/libexec/gnubin" && ln -s "$(command -v "g${x#*:}" || command -v "${x#*:}")" "$B/opt/${x%%:*}/libexec/gnubin/${x#*:}"
+done
+(cd "$R" && PATH="$B/bin:$PATH" bash .conveyor/coverage.sh) > "$T/out" 2>&1; rc=$?
 M=$R/.conveyor/coverage.jsonl
 # facts <map>: each function-to-unit fact it holds, `<file><TAB><function><TAB><test file><TAB><case>` a line, sorted.
 facts() {
@@ -97,6 +111,13 @@ notfacts() {
 [ "$(runs conveyor/lib/f.sh fone)" = conveyor/conveyor.test.sh:one ] && [ "$(runs conveyor/lib/f.sh ftwo)" = conveyor/conveyor.test.sh:two ] \
   && ok "the map lists each engine function with only the case that ran it" \
   || no "fone: '$(runs conveyor/lib/f.sh fone)', ftwo: '$(runs conveyor/lib/f.sh ftwo)': $(cat "$M")"
+# Issue 1723. Bug: a bash started with env -i lost the trace (BASH_ENV), so fbare was listed with t_one alone, and a
+# change to it selected t_one and not t_two, which also runs it. Bug it catches too: on macOS the runner's p_tools put
+# Homebrew's folders, and its bash, ahead of the unit's own bash again, so env -i started Homebrew's bash, untraced
+# (portable.sh p_path). Both cases are listed.
+[ "$(runs conveyor/lib/f.sh fbare)" = "conveyor/conveyor.test.sh:one conveyor/conveyor.test.sh:two" ] \
+  && ok "a function a case runs only in a bash started with env -i is listed with that case" \
+  || no "fbare, run by t_one and by t_two under env -i: '$(runs conveyor/lib/f.sh fbare)'"
 # The owner's order of 2026-11-14: dashboard.sh by the parts of dashboard.test.sh, and the hooks by their test files.
 [ "$(runs .claude/scripts/dashboard.sh dpa)" = .claude/scripts/__tests__/dashboard.test.sh:pa ] \
   && [ "$(runs .claude/scripts/dashboard.sh dpb)" = .claude/scripts/__tests__/dashboard.test.sh:pb ] \
@@ -180,6 +201,36 @@ got=$(sel "$F/new")
 { cat "$F/new"; jq -c 'select(has("unit")) | .case = "two"' "$F/new" | head -n 1; } > "$F/dup"
 [ "$(sel "$F/dup" | sed -n 's/^TESTRUN case	conveyor\/tests\/a.test.sh	//p' | paste -sd ' ' -)" = "bad one two" ] \
   && ok "a map that names a unit number twice is not read, and the change runs its area's cases" || no "two rows of one unit number: $(cat "$F/out")"
+# Issue 1723. A card's Test step runs each file the engine lists (from the area map: a.test.sh for f.sh; b.test.sh, as
+# a file the engine can list for its own reasons) alone, through --file, with the list in CONVEYOR_TEST_FILELIST. Bug:
+# each listed case file ran all its cases, so a change to fone ran bad, one and two of a.test.sh and other of b.test.sh,
+# and the map narrowed nothing. A.test.sh runs one alone, and b.test.sh no case, and passes.
+cp "$F/new" "$M" && git -C "$R" add -A && git -C "$R" commit -qm map1723 && sed 's/echo one/echo uno/' "$R/conveyor/lib/f.sh" > "$T/e" \
+  && cat "$T/e" > "$R/conveyor/lib/f.sh" && printf '%s\n' conveyor/tests/a.test.sh conveyor/tests/b.test.sh > "$F/list" \
+  || no "the one-file fixture could not be made"
+for x in a b; do
+  rm -rf "$F/o$x"; mkdir "$F/o$x"
+  (cd "$R" && CONVEYOR_TEST_LOG=$F/o$x CONVEYOR_TEST_FILELIST=$F/list bash .conveyor/test-changed.sh --file conveyor/tests/$x.test.sh) > "$F/o$x.out" 2>&1
+  echo $? > "$F/o$x.rc"
+done
+# The engine asks the list mode which of the linked files to run first when it caps them (conveyor/lib/testlist.sh
+# selfirst()). Bug it catches: the list named every listed file in name order, so a Board test the engine listed, which
+# the selection did not choose, came before a.test.sh, which holds the case the map chose, and took its place under the
+# cap. The list names a.test.sh first, then dashboard.test.sh, and not b.test.sh, which runs no case.
+{ cat "$F/list"; echo .claude/scripts/__tests__/dashboard.test.sh; } > "$F/list2"
+(cd "$R" && CONVEYOR_TEST_LIST=$F/sel CONVEYOR_TEST_FILELIST=$F/list2 bash .conveyor/test-changed.sh) > "$F/sel.out" 2>&1
+git -C "$R" checkout -q -- conveyor/lib/f.sh
+[ "$(paste -sd ' ' "$F/sel" 2>&1)" = "conveyor/tests/a.test.sh .claude/scripts/__tests__/dashboard.test.sh" ] \
+  && ok "the list names first the files the selection chose, then those only the engine's list brought" \
+  || no "list mode, fone changed, files given a.test.sh, b.test.sh and dashboard.test.sh: listed '$(paste -sd ' ' "$F/sel" 2>&1)': $(cat "$F/sel.out")"
+got=$(sed -n 's/^TESTRUN case	//p' "$F/oa/test-changed.log" | paste -sd ' ' -)
+[ "$(cat "$F/oa.rc")" = 0 ] && [ "$got" = "conveyor/tests/a.test.sh	one" ] \
+  && ok "a card's one-file run of a listed case file runs only the case the map lists for the changed function" \
+  || no "--file a.test.sh, fone changed, list a and b.test.sh: exit $(cat "$F/oa.rc"), ran '$got': $(cat "$F/oa.out")"
+got=$(sed -n 's/^TESTRUN case	//p' "$F/ob/test-changed.log" | paste -sd ' ' -)
+[ "$(cat "$F/ob.rc")" = 0 ] && [ -z "$got" ] && grep -qF 'selects none of the cases of conveyor/tests/b.test.sh' "$F/ob.out" \
+  && ok "a card's one-file run of a listed case file that holds no case the map lists runs none, and passes" \
+  || no "--file b.test.sh, fone changed, list a and b.test.sh: exit $(cat "$F/ob.rc"), ran '$got': $(cat "$F/ob.out")"
 # Issue 1593's review. Bug: a change to a hook library the map does not hold (--funcs cannot read hook-fire-log.sh or
 # strip-quoted.sh) ran no test: a library has no test of its own name and no area. It runs the hooks' tests that name
 # it, or name a hook that names it: h.test.sh (h.sh names lib/hl.sh) and l.test.sh (names it), not g, k or m.test.sh.

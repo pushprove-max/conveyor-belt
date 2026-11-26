@@ -795,9 +795,10 @@ the change adds or changes; a file whose change touches a line outside every cas
 and a file with no such case run whole. The command gets those cases in `CONVEYOR_TEST_CASES`, one `<file><TAB><case>`
 line each; a command that does not read it runs each file whole. The list then has `cases`, `[{"file", "case"}]`, and
 a `why`, `the card ran <n> changed cases of <m> test files`, which the output and the Board's step show. A change with
-none runs at most 5 of the test files the test map and the links give its files, those that failed most recently
-first, and its output says so; one with none of those runs nothing and passes, its list `{"mode": "changed", "files":
-0, ..., "why": "..."}`. When linked files are left out, the list has `left` (how many did not run) and a `why` that
+none runs at most 5 of the test files the test map and the links give its files, and its output says so. When the
+pack sets `test.changed`, the files that `test.command` lists for the change run first, in the order of its list.
+Then the files that failed most recently run. A change with no linked test file runs nothing and passes, its list
+`{"mode": "changed", "files": 0, ..., "why": "..."}`. When linked files are left out, the list has `left` (how many did not run) and a `why` that
 says the run before the push runs them all. The Board shows this note with the step. The live record and the test
 line hold `list`: `{"mode": "changed", "files": <count>, "by": "own", "map" or "name", "age": <commits>}` (`age`, the
 commits the made test map is behind, only with one). The Board shows it with the test step (`changed: 7 files (map)

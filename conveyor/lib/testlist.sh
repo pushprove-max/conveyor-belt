@@ -564,6 +564,27 @@ runfiles() { # <worktree>
       !(($0 in p) && !($0 in f) && !($0 in sel))' "$1.runsel" "$1.rerun" "$1.runfiles")
   rm -f "$1.runsel" "$1.runsel.out" "$1.runfiles"; return 0
 }
+# Of more test files linked to a card's change (fs, listcmd()) than the cap keeps (<max>: testcap()), those the
+# changed-tests command (test.command) selects a case of go first, in the order of its list, then the rest, in theirs
+# (#1723); SELN is how many it selected, for testcap()'s CAPFIRST. The command can narrow a linked file to none of its
+# cases (.conveyor/test-changed.sh, by its coverage map), so a cap that kept the first linked files by name ran files
+# that ran no case, and left out the file of the cases it selected; and it lists first the files it ranks first (a hook
+# library's tests that run the most of its users, test-changed.sh hooklibtests()), so a cap keeps those.
+# The command is asked as runfiles() asks it, with the linked files as the list and no earlier run's list; only a pack
+# that sets test.changed is asked. With none, or when the command fails or writes no list, the order stays.
+# shellcheck disable=SC2034 # SELN is read by listcmd() (lib/testrun.sh)
+selfirst() { # <worktree> <max>
+  local cmd tc o=()
+  SELN=0
+  [ ${#fs[@]} -gt "$2" ] && packget test.changed tc && [ -n "$tc" ] && packget test.command cmd && [ -n "$cmd" ] || return 0
+  rm -f "$1.capsel"; printf '%s\n' "${fs[@]}" > "$1.capfiles" \
+    && (cd "$1" && CONVEYOR_TEST_LIST=$1.capsel CONVEYOR_TEST_RERUN='' CONVEYOR_TEST_FILELIST=$1.capfiles CONVEYOR_TEST_CASES='' CONVEYOR_TEST_LOG='' \
+      timeout 300 bash -c "$cmd" > /dev/null 2>&1 < /dev/null 8>&-) && [ -f "$1.capsel" ] \
+    && mapfile -t o < <(awk 'FILENAME == ARGV[1] { l[$0] = 1; f[++n] = $0; next } ($0 in l) && !($0 in s) { s[$0] = 1; print "s\t" $0 }
+      END { for (i = 1; i <= n; i++) if (!(f[i] in s)) print "r\t" f[i] }' "$1.capfiles" "$1.capsel") && [ ${#o[@]} = ${#fs[@]} ] \
+    && fs=("${o[@]#?$'\t'}") && SELN=$(printf '%s\n' "${o[@]}" | grep -c '^s') || :
+  rm -f "$1.capsel" "$1.capfiles"; return 0
+}
 # The files that differ between two trees or commits, one a line (read NUL-separated: a name with spaces is whole).
 treediff() { # <worktree> <from> <to>
   git -C "$1" diff --name-only --no-renames -z "$2" "$3" -- > "$1.rerun.new" 2>/dev/null && tr '\0' '\n' < "$1.rerun.new"

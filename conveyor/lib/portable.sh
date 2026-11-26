@@ -44,7 +44,9 @@ p_brewprefix() {
   echo /opt/homebrew
 }
 # On macOS, Homebrew's gnubin folders, its openssl@3 and its bin folder first on PATH, each that is there, and
-# exported; once only, so a nested call leaves PATH as it is. Elsewhere, nothing.
+# exported; once only: when they are on PATH already, in that order, PATH stays as it is, so a nested call leaves it,
+# and a folder put ahead of them stays ahead (#1723: the bash .conveyor/coverage.sh puts first, that keeps the trace in
+# a bash started with env -i). Elsewhere, nothing.
 p_path() {
   local pre d dirs=''
   p_darwin || return 0
@@ -52,7 +54,7 @@ p_path() {
   for d in coreutils findutils gnu-sed grep; do [ ! -d "$pre/opt/$d/libexec/gnubin" ] || dirs=$dirs:$pre/opt/$d/libexec/gnubin; done
   [ ! -d "$pre/opt/openssl@3/bin" ] || dirs=$dirs:$pre/opt/openssl@3/bin
   dirs=${dirs#:}${dirs:+:}$pre/bin
-  case $PATH in "$dirs:"*) ;; *) PATH=$dirs:$PATH ;; esac
+  case :$PATH: in *":$dirs:"*) ;; *) PATH=$dirs:$PATH ;; esac
   export PATH
 }
 

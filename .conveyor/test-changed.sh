@@ -105,8 +105,8 @@ set -u
 unset CONVEYOR_SHELL_TEST_CASE
 # One-file mode (issue 379; the pack's test.fileCommand, which Conveyor runs once for each listed test file):
 # `test-changed.sh --file <path>` runs that test file alone and nothing else: an engine case file
-# (conveyor/tests/<area>.test.sh) with the cases the selection chose in it (all its cases when it chose none there;
-# the cases CONVEYOR_TEST_CASES names of it, `<file><TAB><case>` lines, when it names any),
+# (conveyor/tests/<area>.test.sh) with the cases the selection chose in it (all its cases when it chose none there,
+# none when the coverage map chose the selection: cnarrow, below; the cases CONVEYOR_TEST_CASES names of it, `<file><TAB><case>` lines, when it names any),
 # a shell test file that selects its cases as the runner does with the cases CONVEYOR_TEST_CASES names of it, and
 # any other test file (the Board's under .claude/scripts/__tests__/, the hooks' under hooks/) whole. The checks every
 # run makes (checks(): the unit cases of the changed engine files, the map check, the test lint, no browser tests, no records split, shellcheck, the plugin's
@@ -131,14 +131,16 @@ RERUN0=$RERUN
 # The cases the loop names of the test files it gives (conveyor/lib/testlist.sh owncases(): `<file><TAB><case>` lines),
 # read in one-file mode (below); unset, as the list is, so no test this runs reads the loop's.
 TCASES=${CONVEYOR_TEST_CASES:-}; unset CONVEYOR_TEST_CASES
-# onecases <engine case file> <chosen cases, words>: the cases of that file a run of it alone runs, one a line: the chosen
-# ones it holds, else all its cases, and of those the cases the loop names of it (TCASES) when it names any. Fails with none.
+# onecases <engine case file> <chosen cases, words> [narrow]: the cases of that file a run of it alone runs, one a line:
+# the chosen ones it holds, else all its cases (with narrow, none: cnarrow, below), and of those the cases the loop
+# names of it (TCASES) when it names any. Fails when the file holds no case.
 onecases() {
   local own c k
   own=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$1" | sort -u); [ -n "$own" ] || return 1
   c=; [ -z "$2" ] || c=$(tr ' ' '\n' <<<"$2" | grep -xF -f <(echo "$own"))
   k=$(awk -F'\t' -v f="$1" '$1 == f {print $2}' <<<"$TCASES" | grep -xF -f <(echo "$own")) && c=$k
-  printf '%s\n' "${c:-$own}"
+  [ -n "$c" ] || [ -n "${3:-}" ] || c=$own
+  [ -z "$c" ] || printf '%s\n' "$c"
 }
 # Each engine case file runs as its own test file (issue 214, below), so the list names its cases under it; a list
 # written before that names them under the runner, conveyor/conveyor.test.sh. Both are read as one: the selection
@@ -464,6 +466,11 @@ declare -A run=() area=() ccase=() allby=()
 declare -A npart=() tparts=() twhole=()
 oparts=
 COVTESTS=
+# COVSEL: set when the coverage map chose the tests of a changed file (covof, in pick), for cnarrow (below).
+COVSEL=
+# RANKED: the test files hooklibtests gave, one a line, most of the library's users first: the list (CONVEYOR_TEST_LIST,
+# below) names them first, in this order.
+RANKED=
 all=
 # A source file's test files that are not named after it (pick), space-separated: Rules' Undo is tested in
 # dashboard-view.needs; dashboard.sh, the collector, is run by dashboard-limit and dashboard-limit-wait (through the
@@ -503,12 +510,19 @@ declare -A PART_OF=([.claude/scripts/dashboard_panels.sh]=.claude/scripts/dashbo
 # hooklibtests <file>: the hooks' test files a change to a hook library (.claude/hooks/lib/<name>.sh) reaches when the
 # coverage map selects none for it (issue 1593: --funcs cannot read hook-fire-log.sh or strip-quoted.sh, and a change
 # outside its functions): each one that names lib/<name>.sh, or names a hook (.claude/hooks/<hook>.sh) that does. A
-# library has no test of its own name and no area, so with none of these its change would run no test.
+# library has no test of its own name and no area, so with none of these its change would run no test. A card's Test
+# step runs only the files the engine lists (CONVEYOR_TEST_FILELIST, below), from the map and the links, so
+# .conveyor/test-links.json links each library to these same tests (issue 1723; test-changed-hooklib.test.sh).
+# Those that name the most of the library's users (the library, and each hook that names it) come first, then by name:
+# they run the most of the code that calls it. The list mode (below) keeps that order (RANKED), and the engine runs the
+# first of them when it caps the linked files (conveyor/lib/testlist.sh selfirst()): bug, a cap that kept the first by
+# name ran tests of one hook each and left out git-safety.test.sh, whose hooks both strip-quoted.sh and
+# hook-fire-log.sh serve (issue 1723).
 hooklibtests() {
   local b=lib/${1##*/} h
   { grep -lF -- "$b" .claude/hooks/__tests__/*.test.* 2>/dev/null
     for h in $(grep -lF -- "$b" .claude/hooks/*.sh 2>/dev/null); do grep -lF -- "/${h##*/}" .claude/hooks/__tests__/*.test.* 2>/dev/null; done
-  } | sort -u
+  } | LC_ALL=C sort | uniq -c | LC_ALL=C sort -k1,1nr -k2,2 | awk '{ print $2 }'
 }
 boardtests() {
   local f=$1 d=.claude/scripts/__tests__ b re e='([^A-Za-z0-9_]|$)'
@@ -1164,7 +1178,7 @@ for f; do
       jq -e --arg f "$f" 'any(.outside[]; . as $o | $f == $o or (($o | endswith("/")) and ($f | startswith($o)))) | not' \
         <<<"$AMAP" > /dev/null && all=1 ;;
       # A hook library removed: the hooks' tests that reach it (hooklibtests), as for a change to it below.
-      .claude/hooks/lib/*.sh) while read -r t; do [ -z "$t" ] || run[$t]=1; done < <(hooklibtests "$f") ;;
+      .claude/hooks/lib/*.sh) while read -r t; do [ -z "$t" ] || { run[$t]=1; RANKED+=$t$'\n'; }; done < <(hooklibtests "$f") ;;
     esac
     continue
   fi
@@ -1179,7 +1193,7 @@ for f; do
   [ -n "$NOTEXT" ] || ! textonly "$f" || continue
   # A change to functions alone that the coverage map holds: the cases it lists (issue 527), and of the tests below,
   # those the map names nowhere (a test the trace did not run); not its area.
-  cov=; [ -n "$NOTEXT" ] || ! covof "$f" || cov=1
+  cov=; [ -n "$NOTEXT" ] || ! covof "$f" || { cov=1; COVSEL=1; }
   # A change to functions of paths.sh, or to commands of conveyor.sh, alone: their callers' tests (issue 514). A change
   # to the control record's defaults: the tests of the code that reads the keys it changed (issue 530).
   [ -n "$NOTEXT" ] || [ -n "$cov" ] || ! { funcsof "$f" || cmdsof "$f" || keysof "$f"; } || continue
@@ -1195,7 +1209,7 @@ for f; do
     done
   done
   for t in ${TESTS_OF[$of]:-}; do [ ! -f "$t" ] || { [ -n "$cov" ] && grep -qxF -- "$t" <<<"$COVTESTS"; } || run[$t]=1; done
-  [ -n "$cov" ] || case $f in conveyor/*) areaof "$f" ;; .claude/hooks/lib/*.sh) while read -r t; do [ -z "$t" ] || run[$t]=1; done < <(hooklibtests "$f") ;; esac
+  [ -n "$cov" ] || case $f in conveyor/*) areaof "$f" ;; .claude/hooks/lib/*.sh) while read -r t; do [ -z "$t" ] || { run[$t]=1; RANKED+=$t$'\n'; }; done < <(hooklibtests "$f") ;; esac
 done
 # A part the coverage map selected runs as a part, unless this pick, or another, selected its file whole (run, here).
 [ -n "$NOTEXT" ] || { for t in "${!run[@]}"; do twhole[$t]=1; done
@@ -1232,9 +1246,17 @@ for f in "${!conly[@]}"; do echo "comment-only change: $f, no tests selected"; d
 # (conveyor/lib/testrun.sh testonce()), one path a line (testsel(), reading .conveyor/engine-areas.json through
 # conveyor/lib/testmap.sh mapread(), as a user's card reads its map); so is each one-file run (ONE) of the loop of
 # test.fileCommand (filecmd()). Each runs: an engine case file with all its
-# cases, as a test file of its own (below); another file whole. The selection above adds the tests it finds and the engine does not
+# cases (but with cnarrow, below), as a test file of its own (below); another file whole. The selection above adds the tests it finds and the engine does not
 # (TESTS_OF, NAMED, the coverage map's parts), so no case it ran is lost. With no list (a session's run, or a change
 # the engine sends to the whole suite) the selection above is the run's.
+# cnarrow (issue 1723): when the coverage map chose the tests of a changed file (COVSEL) and nothing chose the runner
+# whole, a listed engine case file brings none of its cases: it runs the chosen cases it holds and those the loop names
+# of it (TCASES), and with none of them it runs no case. Else a change to one function ran every case of each case file
+# of the file's area, as the engine lists those (bug: the map's selection never narrowed a card's run). Before its cap
+# of linked files, the engine puts the files this list mode selects of them first (conveyor/lib/testlist.sh selfirst()).
+# BYLIST: the other files the loop's list brings that the selection above did not choose, which the list names last.
+cnarrow=; [ -z "$COVSEL" ] || { [ -n "${run[conveyor/conveyor.test.sh]:-}" ] && [ -z "$cases" ]; } || cnarrow=1
+declare -A BYLIST=()
 while IFS= read -r t; do
   case $t in
     '') ;;
@@ -1243,24 +1265,28 @@ while IFS= read -r t; do
       # runs (onecases), as every case of the runner is explicit, so a case of the file the loop did not name is no reason to start it.
       if [ -n "${CONVEYOR_TEST_LIST:-}" ]; then
         [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || [ -n "$cases" ] || cases=$(allcases)
-        add=$(onecases "$t" "") || continue
+        add=$(onecases "$t" "${cnarrow:+$cases}" "$cnarrow") && [ -n "$add" ] || continue
         cases=$({ tr ' ' '\n' <<<"$cases" | grep -vxF -f <(comm -23 <(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$t" | sort -u) <(sort -u <<<"$add")); echo "$add"; } | grep . | sort -u | tr '\n' ' ')
       else
         [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || [ -n "$cases" ] || continue
-        cases=$({ tr ' ' '\n' <<<"$cases"; sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$t"; } | grep . | sort -u | tr '\n' ' ')
+        if [ -n "$cnarrow" ]; then add=$(onecases "$t" "" 1) && [ -n "$add" ] || continue
+        else add=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$t"); fi
+        cases=$({ tr ' ' '\n' <<<"$cases"; echo "$add"; } | grep . | sort -u | tr '\n' ' ')
       fi
       run[conveyor/conveyor.test.sh]=1 ;;
-    *) run[$t]=1; twhole[$t]=1 ;;
+    *) [ -n "${run[$t]:-}" ] || BYLIST[$t]=1; run[$t]=1; twhole[$t]=1 ;;
   esac
 done < "${CONVEYOR_TEST_FILELIST:-/dev/null}"
 # One-file mode (ONE, above): the selection is that file alone. An engine case file keeps the chosen cases it holds,
-# or all its cases when none of them is chosen or the runner was chosen whole; any other file runs whole. The cases
+# or all its cases when none of them is chosen or the runner was chosen whole (with cnarrow, none: it runs no case and
+# passes); any other file runs whole. The cases
 # the loop names of the file (TCASES: a card's change adds or changes them, issue 414) are the chosen cases then, of
 # an engine case file and of a shell test file that selects its cases (below).
 if [ -n "$ONE" ]; then
   if [[ $ONE == conveyor/tests/*.test.sh && $ONE != conveyor/tests/*/* ]]; then
-    c=$(onecases "$ONE" "${run[conveyor/conveyor.test.sh]:+$cases}") || { echo "test-changed: --file: $ONE holds no t_ case" >&2; exit 1; }
-    cases=$(tr '\n' ' ' <<<"$c"); run=([conveyor/conveyor.test.sh]=1)
+    c=$(onecases "$ONE" "${run[conveyor/conveyor.test.sh]:+$cases}" "$cnarrow") || { echo "test-changed: --file: $ONE holds no t_ case" >&2; exit 1; }
+    if [ -n "$c" ]; then cases=$(tr '\n' ' ' <<<"$c"); run=([conveyor/conveyor.test.sh]=1)
+    else cases=; run=(); echo "test-changed: --file: the coverage map selects none of the cases of $ONE for this change: none run"; fi
   else
     # Any other shell test file that selects its cases as the runner does (`SEL=${CONVEYOR_SHELL_TEST_CASE...`) runs
     # the cases TCASES names of it, as its parts, and only them: the loop lists the file (CONVEYOR_TEST_FILELIST, above)
@@ -1428,13 +1454,19 @@ done
 # The list of the selection (issue 43: release-prep, which reruns only what changed since an earlier whole-suite run,
 # conveyor/commands/release-prep.sh): with CONVEYOR_TEST_LIST, it writes the test files it selected to that file, one
 # a line, and runs none: each file it selected whole or in parts (a whole-only one too), and of the engine's runner the
-# case files that hold its chosen cases, or with none chosen the runner and every case file.
+# case files that hold its chosen cases, or with none chosen the runner and every case file. The files of RANKED still
+# selected come first, in its order, then by name the rest the selection chose, then those only the loop's list brought
+# (BYLIST): a card that runs only the first few runs those (conveyor/lib/testlist.sh selfirst()).
 if [ -n "${CONVEYOR_TEST_LIST:-}" ]; then
-  for t in "${!run[@]}"; do
-    if [ "$t" != conveyor/conveyor.test.sh ]; then echo "$t"
-    elif [ -z "$cases" ]; then echo "$t"; printf '%s\n' conveyor/tests/*.test.sh
-    else grep -lE "^t_($(tr ' ' '\n' <<<"$cases" | grep . | paste -sd'|' -))\(\) \{" conveyor/tests/*.test.sh; fi
-  done | LC_ALL=C sort -u > "$CONVEYOR_TEST_LIST" || exit 1
+  lsel=$(for t in "${!run[@]}"; do
+      if [ "$t" != conveyor/conveyor.test.sh ]; then echo "$t"
+      elif [ -z "$cases" ]; then echo "$t"; printf '%s\n' conveyor/tests/*.test.sh
+      else grep -lE "^t_($(tr ' ' '\n' <<<"$cases" | grep . | paste -sd'|' -))\(\) \{" conveyor/tests/*.test.sh; fi
+    done | LC_ALL=C sort -u) || exit 1
+  { while IFS= read -r t; do [ -z "$t" ] || [ -z "${run[$t]:-}" ] || echo "$t"; done <<<"$RANKED"
+    while IFS= read -r t; do [ -z "$t" ] || [ -n "${BYLIST[$t]:-}" ] || echo "$t"; done <<<"$lsel"
+    while IFS= read -r t; do [ -z "$t" ] || [ -z "${BYLIST[$t]:-}" ] || echo "$t"; done <<<"$lsel"
+  } | awk '!seen[$0]++' > "$CONVEYOR_TEST_LIST" || exit 1
   # Of the files the loop gave (CONVEYOR_TEST_FILELIST) that the list keeps as passed (a `pass` line, no `fail` line) and does not
   # name, the loop starts none: the cases a run of each alone would count as kept (below) are logged here, once.
   if [ -s "$RERUN0" ] && [ -d "${CONVEYOR_TEST_LOG:-}" ]; then
@@ -1443,7 +1475,7 @@ if [ -n "${CONVEYOR_TEST_LIST:-}" ]; then
       [ -n "$t" ] && [ -f "$t" ] && ! grep -qxF -- "$t" "$CONVEYOR_TEST_LIST" \
         && awk -F'\t' -v f="$t" '$2 == f { if ($1 == "pass") p = 1; else if ($1 == "fail") x = 1 } END { exit !(p && !x) }' "$RERUN0" || continue
       case $t in
-        conveyor/tests/*.test.sh) kc=$((kc + $(onecases "$t" "$fullcases" | grep -c .))) ;;
+        conveyor/tests/*.test.sh) kc=$((kc + $(onecases "$t" "$fullcases" "$cnarrow" | grep -c .))) ;;
         *.mjs|*.py|*.ts|*.tsx) kc=$((kc + $(filecases "$t"))) ;;
         *) kc=$((kc + $(shellcases "$t"))) ;;
       esac

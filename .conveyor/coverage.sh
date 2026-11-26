@@ -15,7 +15,13 @@
 # below); each other test file there (shell, node, python) whole.
 # The trace: each bash a unit starts reads BASH_ENV, which turns xtrace on into the unit's own log, on a descriptor of
 # its own (BASH_XTRACEFD), each line headed by the file and the function it runs (PS4). A bash started with an emptied
-# environment (env -i) is not traced, nor are the functions it runs.
+# environment (env -i) loses BASH_ENV, so each unit's PATH starts with a folder of its own whose `bash` sets the trace
+# again and runs this bash; on macOS this bash's p_tools (below) has put Homebrew's folders on PATH already, so the
+# p_tools or p_path a test calls (conveyor/tests/lib.sh) leaves that folder ahead of Homebrew's bash (issue 1723: a
+# case that ran a function only under env -i was missing from the map, and a change to that function did not run it).
+# A bash started with an emptied environment other than as `bash` on the
+# unit's PATH (by its full path, or with no PATH), or given a BASH_ENV of the test's own, is not traced, nor are the
+# functions it runs.
 # A function a log names belongs to the traced file whose path ends most like the one bash read it from (a case runs a
 # copy of the engine from a scratch folder), or to each that defines it when bash names no file (an exported
 # function), and only to a file that defines it.
@@ -126,9 +132,13 @@ unit() {
     *.py) cmd=(python3 "$t") ;;
     *) cmd=(bash "$t") ;;
   esac
-  env COVERAGE_LOG="$TR/$n.log" BASH_ENV="$TR/env.sh" ${c:+"CONVEYOR_SHELL_TEST_CASE=$c"} timeout 900 "${cmd[@]}" \
+  # The unit's own bash, first on its PATH: it sets the trace again in a bash started with env -i (above), and leaves
+  # a BASH_ENV a test set (a case's own hook) as it is.
+  mkdir -p "$TR/$n.bin" && printf '#!%s\n[ -n "${BASH_ENV:-}" ] || export COVERAGE_LOG=%q BASH_ENV=%q\nexec %q "$@"\n' "$BASH" "$TR/$n.log" "$TR/env.sh" "$BASH" \
+    > "$TR/$n.bin/bash" && chmod +x "$TR/$n.bin/bash" || { echo 1 > "$TR/$n.rc"; return; }
+  env PATH="$TR/$n.bin:$PATH" COVERAGE_LOG="$TR/$n.log" BASH_ENV="$TR/env.sh" ${c:+"CONVEYOR_SHELL_TEST_CASE=$c"} timeout 900 "${cmd[@]}" \
     > "$TR/$n.out" 2>&1 < /dev/null
-  echo $? > "$TR/$n.rc"
+  echo $? > "$TR/$n.rc"; rm -rf "$TR/$n.bin"
   awk 'substr($0, 1, 1) == "\001" && (i = index($0, "\002")) { x = substr($0, 1, i - 1); sub(/^\001+/, "", x)
     if (x ~ /\t./) print x }' "$TR/$n.log" 2>/dev/null | LC_ALL=C sort -u > "$TR/$n.fn"
   rm -f "$TR/$n.log"

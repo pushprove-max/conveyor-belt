@@ -437,7 +437,7 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # reports more: tests()). <report args> (reportask() files) go after the command, before each file's path. TEST_FAST is
 # `fast` when the command stops at its first failure (failfast()), else empty, as for a main-red fix card (in $MAINRED): cardland.sh redelse() needs a verdict of each case it fails.
 listcmd() { # <worktree> [report args]
-  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() sh=() ns=0 READADD=() READWHOLE='' READLINKS=0
+  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() sh=() ns=0 READADD=() READWHOLE='' READLINKS=0 SELN=0
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
   # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only while it is not set.
   # A suite runner (SUITERUNNERS) is on no list (#382): testpaths() leaves each off the card's own files, and
@@ -446,7 +446,7 @@ listcmd() { # <worktree> [report args]
   # The test files the card's own change adds or changes (the pack's test patterns: testpaths(), so no runner and no
   # document; no shared helper, which testsel() does not run as a test either) are the card's tests (#384); with
   # none, the CARDLINKED test files the test map and the links give the change (testsel() narrow), those that failed
-  # most recently first (testcap()), and its output says so (LINKED). The run before the push runs the files the map
+  # most recently first, after those the pack's changed-tests command selects (selfirst(), testcap()), and its output says so (LINKED). The run before the push runs the files the map
   # links to every landing (pushtests(), lib/pushrun.sh).
   mapfile -t fs < <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames --diff-filter=AM HEAD -- 2>/dev/null | testpaths \
     | jq -Rr "$SHAREDJQ"'select(. != "" and (shared | not))')
@@ -489,7 +489,7 @@ listcmd() { # <worktree> [report args]
     s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
       narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
     by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"; runnersout
-    lk=("${fs[@]}"); CAPMAX=$CARDLINKED testcap "${fs[@]}"; fs=("${CAPFILES[@]}"); ns=0
+    lk=("${fs[@]}"); selfirst "$1" "$CARDLINKED"; CAPMAX=$CARDLINKED CAPFIRST=$SELN testcap "${fs[@]}"; fs=("${CAPFILES[@]}"); ns=0
     # The shared files of a run again (sh) join after the cap, taking none of its places. One the cap left out of the
     # linked files runs, so it is not left out (CAPLEFT): bug, the list said 6 files ran and 115 of 120 were left out.
     for f in "${sh[@]}"; do
@@ -499,9 +499,9 @@ listcmd() { # <worktree> [report args]
     [ ${#sh[@]} = 0 ] || runnersout
     # Past the cap, each file whose last pass read a file the change touches (testlist.sh readersin(), #1619): a linked one (READLINKS) is not left out: bug, the list said 5 of 10 were left out with 6 on it.
     readersin "$1"; CAPLEFT=$((CAPLEFT - READLINKS))
-    # The note's <n> counts only the linked files the cap chose, most recent failure first; the shared linked files past it (ns), in name order, and those of the last passes (READLINKS) get their own sentences (SHAREDLINKED, READLINKED): bug, the note said all of them ran in order of most recent failure.
+    # The note's <n> counts only the linked files the cap chose, most recent failure first (those the changed-tests command selects, SELN, before them: SELLINKED); the shared linked files past it (ns), in name order, and those of the last passes (READLINKS) get their own sentences (SHAREDLINKED, READLINKED): bug, the note said all of them ran in order of most recent failure.
     [ ${#lk[@]} = 0 ] || [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/$((${#lk[@]} - CAPLEFT - ns - READLINKS))}; CAPNOTE=${CAPNOTE//'<all>'/${#lk[@]}}
-      [ $ns = 0 ] || CAPNOTE+=${SHAREDLINKED//'<k>'/$ns}; [ "$READLINKS" = 0 ] || CAPNOTE+=${READLINKED//'<k>'/$READLINKS}; }
+      [ "$SELN" = 0 ] || CAPNOTE+=${SELLINKED//'<k>'/$((SELN < CARDLINKED ? SELN : CARDLINKED))}; [ $ns = 0 ] || CAPNOTE+=${SHAREDLINKED//'<k>'/$ns}; [ "$READLINKS" = 0 ] || CAPNOTE+=${READLINKED//'<k>'/$READLINKS}; }
   fi
   [ -z "${MAINFROM:-}" ] || [ ${#fs[@]} = 0 ] || while IFS= read -r f; do printf '%s\n' "${fs[@]}" | grep -qxF -- "$f" || fs+=("$f"); done < <(mainlinks "$1" "$MAINFROM")
   # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.
@@ -519,7 +519,7 @@ listcmd() { # <worktree> [report args]
 # bugproof.sh bugproof()), the ones a card runs, in CAPFILES: all of them up to the
 # pack's test.cardFiles (CAPMAX when set: listcmd()'s CARDLINKED); of more, that many: first those that failed most recently in a test step on record (the card
 # records' test lines: FAILURE and failedrun, lib/testfiles.sh), newest first, then the rest in the order given (the
-# test map's). CAPLEFT is how many it left out, CAPNOTE says so (CAPPED), empty when none: the release's run covers them.
+# test map's; listcmd()'s, after selfirst()); with CAPFIRST <k>, the first k (those the changed-tests command selects: selfirst()) before the rest, each part so ordered (#1723: bug, a file that failed most recently, of which the command runs no case, took the place of the file of the cases it selected). CAPLEFT is how many it left out, CAPNOTE says so (CAPPED), empty when none: the release's run covers them.
 testcap() { # <file>...
   local n=${CAPMAX:-} fl ks=() defs refs
   CAPFILES=("$@"); CAPLEFT=0; CAPNOTE=''
@@ -531,9 +531,9 @@ testcap() { # <file>...
     | group_by(.f) | map(max_by(.t)) | sort_by(.t) | reverse | map(.f)') || fl='[]'
   # A record that cannot be read leaves the given order: the first test.cardFiles files.
   CAPFILES=("${@:1:n}")
-  fl=$(printf '%s\n' "$@" | jq -cRn --slurpfile fl <(printf '%s' "$fl") --argjson n "$n" '$fl[0] as $fl | [inputs] as $all
-    | ($all | map({key: ., value: true}) | from_entries) as $have | [$fl[] | select($have[.])] as $f
-    | ($f | map({key: ., value: true}) | from_entries) as $first | ($f + [$all[] | select($first[.] | not)])[:$n]') \
+  fl=$(printf '%s\n' "$@" | jq -cRn --slurpfile fl <(printf '%s' "$fl") --argjson n "$n" --argjson k "${CAPFIRST:-0}" '$fl[0] as $fl
+    | def byfail: . as $all | ($all | map({key: ., value: true}) | from_entries) as $have | [$fl[] | select($have[.])] as $f
+      | ($f | map({key: ., value: true}) | from_entries) as $first | $f + [$all[] | select($first[.] | not)]; [inputs] as $all | (($all[:$k] | byfail) + ($all[$k:] | byfail))[:$n]') \
     && mapfile -t ks < <(jq -r '.[]' <<<"$fl") && [ ${#ks[@]} = "$n" ] && CAPFILES=("${ks[@]}")
   CAPLEFT=$(($# - ${#CAPFILES[@]}))
   CAPNOTE=${CAPPED//'<left>'/$CAPLEFT}; CAPNOTE=${CAPNOTE//'<all>'/$#}; CAPNOTE=${CAPNOTE//'<max>'/$n}

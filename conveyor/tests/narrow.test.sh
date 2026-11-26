@@ -204,7 +204,7 @@ t_narrowdoctor() {
 # The records hold the test lines <line>... first.
 caprun() { # <n> <source> [<more>] [<line>...]
   local i f fs=() s=$2 m=${3:-}
-  narrowsetup
+  narrowsetup; [ -z "${CAPTUNE:-}" ] || tune "$CAPTUNE"
   [ $# -lt 4 ] || printf '%s\n' "${@:4}" >> "$ST/cards.jsonl"
   mkdir -p "$R/${s%/*}" && echo x > "$R/$s"
   for ((i = 1; i <= $1; i++)); do printf -v f 't%03d.test.js' "$i"; fs+=("$f"); echo x > "$R/$f"; done
@@ -345,6 +345,28 @@ t_narrowcapunder() {
     || fail "the card did not run its 3 linked files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
   [ "$(jq -c '.list | [.files, .left, .why]' "$T/$CASE/cards/c7.rec")" = '[3,null,null]' ] \
     || fail "a run under the limit names files left out: $(cat "$T/$CASE/cards/c7.rec")"
+}
+
+# #1723. Bug it catches: the cap kept the first linked files by name, though the pack's changed-tests command (test.changed
+# set: .conveyor/test-changed.sh, by its coverage map) selected no case of them, so the card ran files that ran no case
+# and left out those that held the cases it selected. Two more: the files that failed most recently on record went
+# before the selected ones, though the command runs no case of them, and took their places; and the selected ones ran
+# in name order, not the command's, so a hook library's change left out git-safety.test.sh, which the command lists
+# first (test-changed.sh hooklibtests()). Of 120 linked files, t001 to t004 failed on record (newest last), and the
+# command, given them all, lists t120.test.js then t110.test.js: the card runs those two, in that order, then
+# t004, t003 and t002, and its note says the command chose two.
+t_narrowcapsel() {
+  local i l=()
+  for i in 1 2 3 4; do
+    l+=("{\"card\":\"c$i\",\"issue\":$i,\"step\":\"test\",\"time\":\"2026-11-1${i}T12:00:00Z\",\"result\":\"fail\",\"failures\":{\"of\":1,\"files\":[{\"file\":\"t00$i.test.js\",\"cases\":[]}],\"timeout\":null}}")
+  done
+  CAPTUNE='.test.changed = "sel.sh" | .test.command = "grep -xE \"t1(10|20)[.]test[.]js\" \"$CONVEYOR_TEST_FILELIST\" | sort -r > \"${CONVEYOR_TEST_LIST:?}\""' \
+    caprun 120 lib/cartsum.js '' "${l[@]}"
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = "$(printf 'one:t%03d.test.js\n' 2 3 4 110 120)" ] \
+    && [ "$(sed -n 's/^== //p' "$T/$CASE/cards/c7.testlog/files" 2>&1)" = "$(printf 't%03d.test.js\n' 120 110 4 3 2)" ] \
+    || fail "120 linked files, t001 to t004 failed on record, the command listing t120 then t110.test.js: the card did not run those two first, then t004 to t002 (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/cards/c7.testlog/files" "$T/$CASE/run.out" 2>&1)"
+  jq -r '.list.why' "$T/$CASE/cards/c7.rec" | grep -qF ' The test command selects 2 of the files that ran for the change, and they ran first.' \
+    || fail "the note does not say the command chose 2 of the files that ran: $(cat "$T/$CASE/cards/c7.rec")"
 }
 
 # Bug it catches: the run again of the test files a card's change shares with main's (SHAREDRUN: card(), rebatch())

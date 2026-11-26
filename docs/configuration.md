@@ -258,8 +258,9 @@ If the change adds or changes no test file, the card runs 5 of the test files li
   example, a change to `src/cart/total.js` runs the test file of `total` in `src/cart/`, not one in another folder.
 
 A change to a document (`.md`, `.txt`, `.rst`) adds only the test files that `.conveyor/test-links.json` links to it
-or that the test map says cover it. A document is never on the list, even when it is in a test folder. The files that
-failed most recently in a test step run first, then the others in the order of the test map. The card's test step
+or that the test map says cover it. A document is never on the list, even when it is in a test folder. When the pack
+sets `test.changed`, the files that `test.command` lists for the change run first, in the order of its list. Then the
+files that failed most recently in a test step run, then the others in the order of the test map. The card's test step
 says this, and the Board shows the note with the step. If no test file is linked to the change, the card runs no
 test. The card's test line says so.
 
