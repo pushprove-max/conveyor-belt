@@ -98,11 +98,11 @@ verdicts() { # <card> <worktree> <testfails() of the card's last run, or null>
   # entry with the case whose fix card is open (redopen()): a newer one names a landing that broke the case after the
   # older was made (fixed on main and broken again while the older one's card stays blocked). While that card is open,
   # mainred() adds no entry for the case or (when another failure made one) adds it to the entry of main's commit with
-  # no landing, as brokeby() searches TESTLINK_DEPTH commits only. An older entry's landing is the cause only while the
+  # no landing when brokeby() names none (it searches TESTLINK_DEPTH commits only). An older entry's landing counts while the
   # case did not pass on main after it: brokeby() searches every commit of main after the older entry's landing, not
   # only its last TESTLINK_DEPTH (issue 1611: more landings than that after the case passed again left the first break
   # named), and when a landing there ran the case's file, so passed it, the case was fixed and broken again: the
-  # landing after it is named; when no landing is after it, that case names none and the next case's entry is read (a
+  # landing brokeby() finds after it is named; when it finds none, that case names none and the next entry is read (a
   # case with no known cause does not hide another case's known one). A landing not in main's commit's history is not
   # searched from (the search would read most of main): its own landing stays named. An entry whose fix card landed or
   # closed is not read: its landing broke the case before, not on this commit (a case fixed and broken again).
@@ -508,7 +508,7 @@ mainred() { # <card> <case> <its file> <main's commit> [<the landing that broke 
   t=''; [ ${#fs[@]} = 0 ] || t=$(git log -1 --format='%h %s' "$4" -- "${fs[@]}" 2>/dev/null)
   by=null
   if [ -n "${5:-}" ]; then read -r s lc li <<<"$5"; by=$(landingof "$s" "$lc" "$li" "${fs[0]:-$3}" | jq -ce objects 2>/dev/null) || by=null
-  elif [ ${#fs[@]} = 1 ]; then by=$(brokeby "${fs[0]}" "$4" "$3" "$k" | jq -ce objects 2>/dev/null) || by=null; fi
+  elif [ ${#fs[@]} = 1 ]; then by=$(brokeby "${fs[0]}" "$4" "$3" "$k" | jq -ce 'select(.sha)' 2>/dev/null) || by=null; fi
   jq -c --arg s "$4" --arg c "$2" --arg f "$3" --arg by "$1" --arg t "$t" --slurpfile b <(printf '%s' "$by") --args '$b[0] as $b | ({case: $c, file: $f, by: $by, files: $ARGS.positional, last: $t}
       + if $b == null then {} else {landing: ($b | {sha, card, issue}), links: $b.links} end) as $x
     | {reds: (if any(.[]; .sha == $s) then map(if .sha == $s then .cases += [$x] else . end) else . + [{sha: $s, cases: [$x], card: null}] end | .[-100:])}' \
@@ -521,19 +521,23 @@ mainred() { # <card> <case> <its file> <main's commit> [<the landing that broke 
 # name it in why or times, or say the whole engine suite ran, for an engine case file, or its ranCases name <case>
 # under the file its run named it under: a run of only some cases of the file, issue 604; when <case> is given and
 # the line's ranCases list the test file itself, its why or times stand for a run of those cases only, so they count
-# only through ranCases; ranCases of any other file leave them as a whole run) and so passed it, the first
-# landing after that one. Prints {sha, card, issue, links: {<each file that landing changed>: [<test file>]}, since:
-# <the commit of the landing that ran <case>, or the whole file when no case is given>}; fails
-# when no landing ran the file in the last TESTLINK_DEPTH commits (when it last passed is not known) or none is after it.
-# Given <after>, a commit of main, it searches every commit after <after> in place of the last TESTLINK_DEPTH (verdicts():
-# did the case pass on main after an older break's landing, however many commits ago), and when a landing ran the file
-# but none is after it, prints {since} alone (the case passed on main after <after>, and no landing broke it).
+# only through ranCases; ranCases of any other file leave them as a whole run) and so passed it. A landing after that
+# one is named only when it is the one commit since then that changes a file (a merge is not counted, the commits it
+# brings are; of several, nor is one that changes only documents the test file does not read: testdocs()): neither
+# their order nor the test map shows which of several broke it (issue 1720). Prints {sha, card,
+# issue, links: {<each file that landing changed>: [<test file>]}, since: <the commit of the landing that ran <case>,
+# or the whole file when no case is given>} for it, else {since} alone. Fails when no landing ran the file in the last
+# TESTLINK_DEPTH commits (when it last passed is not known) or no landing is after it. Given <after>, a commit of main,
+# it searches every commit after <after> in place of the last TESTLINK_DEPTH (verdicts(): did the case pass on main
+# after an older break's landing, however many commits ago), and when a landing ran the file but none is after it,
+# prints {since} alone (the case passed on main after <after>, and no landing broke it).
 TESTLINK_DEPTH=500
 brokeby() { # <test file> <main's commit> [<the file its run named the case under> <case> [<after>]]
-  local l s by='' ran='' card iss rn
+  local l s by='' ran='' card iss rn tx hit=() doc=()
   # The runners the test file names (a case file runs itself through its runner): a run before issue 214 named the
   # cases it ran of the engine's case files under their runner, conveyor/conveyor.test.sh.
-  rn=$(git show "$2:$1" 2>/dev/null | grep -oE '[A-Za-z0-9_.-]+\.test\.[A-Za-z0-9]+' | jq -cRn '[inputs] | unique') || rn='[]'
+  tx=$(git show "$2:$1" 2>/dev/null)
+  rn=$(grep -oE '[A-Za-z0-9_.-]+\.test\.[A-Za-z0-9]+' <<<"$tx" | jq -cRn '[inputs] | unique') || rn='[]'
   l=$(stdb ask lines cards 2>/dev/null | jq -rs --arg f "$1" --arg r "${3:-}" --arg c "${4:-}" --argjson rn "${rn:-[]}" '(map(select(.step == "test")) | group_by(.card)
       | map({key: .[0].card, value: any(.[]; (.wholeSuite == true and ($f | startswith("conveyor/tests/")))
         or ($c != "" and any(.ranCases // {} | objects | to_entries[] | select(.key == $r or IN(.key | split("/")[-1]; $rn[])) | .value | arrays | .[]; . == $c))
@@ -544,23 +548,27 @@ brokeby() { # <test file> <main's commit> [<the file its run named the case unde
     if [ "${s##* }" = true ]; then ran=${s%% *}; break; fi
     by=$s
   done < <(if [ -n "${5:-}" ]; then git rev-list "$5..$2"; else git rev-list -n "$TESTLINK_DEPTH" "$2"; fi 2>/dev/null)
-  [ -n "$ran" ] || return 1
-  [ -n "$by" ] || { [ -n "${5:-}" ] || return 1; jq -cn --arg r "$ran" '{since: $r}'; return; }
+  [ -n "$ran" ] && [ -n "$by${5:-}" ] || return 1
+  # The commits since the pass that change a file (:/ leaves out empty ones), a commit pushed by hand among them.
+  mapfile -t hit < <(git rev-list --no-merges --full-history -n 2 "$ran..$2" -- :/ 2>/dev/null)
+  # Of several, one that changes only documents is no cause, but for a document the test file reads (testdocs()).
+  if [ ${#hit[@]} -gt 1 ]; then
+    mapfile -t doc < <(testdocs "$1" "$2" "$tx" 2>/dev/null)
+    mapfile -t hit < <({ git rev-list --no-merges --full-history -n 2 "$ran..$2" -- :/ ':(top,exclude,icase)*.md' ':(top,exclude,icase)*.txt' ':(top,exclude,icase)*.rst'
+      [ ${#doc[@]} = 0 ] || git rev-list --no-merges --full-history -n 2 "$ran..$2" -- "${doc[@]}"; } 2>/dev/null | sort -u)
+  fi
+  [ ${#hit[@]} = 1 ] && by=$(grep -m 1 "^${hit[0]} " <<<"$l") || { jq -cn --arg r "$ran" '{since: $r}'; return; }
   read -r s card iss _ <<<"$by"
   landingof "$s" "$card" "$iss" "$1" | jq -c --arg r "$ran" '. + {since: $r}'
 }
 # Whether a change to main explains <test file>'s failure there (verdicts(): issue 1613): a commit since the last
 # landing whose card's test step ran <case> (brokeby(): since; a landing that ran only other cases of the file does
-# not count) changed the file, or a file the test map links to it
-# (mapread(): the files mapped to it and the files the map shares with most tests; a map the project keeps is read as
-# main's commit has it, with main's commit's tests, not as the card's change has them). Fails when no landing in brokeby()'s depth ran the case, as
-# when it last passed on main is then not known.
+# not count) changed the file, or a file the test map links to it (maplinked(), the map as main's commit has it).
+# Fails when no landing in brokeby()'s depth ran the case, as when it last passed on main is then not known.
 mainchanged() { # <test file> <main's commit> <worktree> [<case>]
-  local since m fs=()
+  local since fs=()
   since=$(brokeby "$1" "$2" "$1" "${4:-}" 2>/dev/null | jq -re '.since | strings | select(. != "")' 2>/dev/null) || return 1
-  packget test.map m 2>/dev/null || m=off
-  mapfile -t fs < <(case $m in off | '') mapread "$3" ;; *) mapread "$3" <(git show "$2:$m" 2>/dev/null) "$2" ;; esac 2>/dev/null \
-    | jq -r --arg f "$1" '[(.sources | objects | to_entries[] | select(any(.value[]?; . == $f)) | .key), (.shared | arrays | .[] | strings)] | unique[]' 2>/dev/null)
+  mapfile -t fs < <(maplinked "$1" "$2" "$3")
   [ -n "$(git --literal-pathspecs diff --name-only --no-renames "$since" "$2" -- "$1" "${fs[@]}" 2>/dev/null)" ]
 }
 # The landing <sha> of <card> as mainred() keeps it (brokeby(), pushtests() in lib/push.sh): {sha, card, issue,

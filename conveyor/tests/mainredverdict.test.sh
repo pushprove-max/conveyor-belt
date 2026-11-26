@@ -168,6 +168,50 @@ t_mainchangeddeleted() {
   [ "$out" = changed ] || fail "mainchanged a.test $s <c8, on main before b.test> one, main's areas.json linking lib/x.sh (changed by bad) to a.test: not changed: $out"
 }
 
+# Issue 1720. Bugs it catches: of several changes since the last pass, brokeby() named a landing as the cause, the first
+# one or the one the test map picks, though the map lacks causes and holds files that most tests share. Landing l1 ran
+# a.test; landing side then changed lib/y.sh, which main's map does not link to a.test, and landing bad lib/x.sh, which
+# it does: brokeby() prints since alone, mainred() records the case with no landing and no links, and mainchanged()
+# still reads since. After landing l2 ran a.test, a commit pushed by hand and then landing after: since alone, as that
+# commit may be the cause. After landing l3 ran a.test, landing one, brought to main by a merge commit: one is named,
+# as the merge is no second change. brokeby() itself is called.
+# Review E3: of several changes, a document a.test does not read is no cause (t_mainredcontrolchanged). Bug it catches
+# here: a document a.test reads dropped with those, so the landing before it is named though the document may be the
+# cause: docs/m.md (the map links it to a.test), docs/l.md (main's test links do) and docs/t.md (a.test names it).
+t_brokebyonlychange() {
+  local s l1 l2 l3 m got want d p
+  mrshared; tune '.test.map = "areas.json"'
+  mkdir -p "$R/lib" "$R/docs" "$R/.conveyor" && echo '{"lib/x.sh": ["a.test"], "docs/m.md": ["a.test"]}' > "$R/areas.json" \
+    && echo '{"docs/l.md": ["a.test"]}' > "$R/.conveyor/test-links.json" && echo '# reads t.md' >> "$R/a.test" \
+    && git -C "$R" add -f areas.json .conveyor/test-links.json a.test && git -C "$R" commit -qm 'the map' || fail "main's map could not be committed"
+  put() { echo "$1" > "$R/$2" && git -C "$R" add "$2" && git -C "$R" commit -qm "$1" && s=$(git -C "$R" rev-parse HEAD); } # <subject> <file>
+  land() { put "$1" "$3" && eng "append \"\$(line $1 $2 landed ok '{\"sha\": \"$s\"}')\""; } # <card> <issue> <the file it changes>
+  mrland l1 1 '{"a.test": 1}' && l1=$(git -C "$R" rev-parse HEAD) && land side 2 lib/y.sh && land bad 3 lib/x.sh \
+    || fail "landings l1, side and bad could not be made"
+  got=$(eng "brokeby a.test $s a.test one; mainred c9 'a.test: one' a.test $s && jq -c '.reds[0].cases[0] | [.case, .landing, .links]' \"\$MAINRED\"; mainchanged a.test $s . one && echo changed" 2>&1)
+  want=$(printf '%s\n' "{\"since\":\"$l1\"}" '["a.test: one",null,null]' changed)
+  [ "$got" = "$want" ] \
+    || fail "brokeby a.test $s a.test one, mainred c9 'a.test: one' a.test $s and mainchanged a.test $s . one, after l1 ran a.test, side changed lib/y.sh and bad lib/x.sh (mapped to a.test): not since $l1 alone, a case with no landing or links, and changed: $got"
+  mrland l2 4 '{"a.test": 1}' && l2=$(git -C "$R" rev-parse HEAD) && put hand lib/y.sh && land after 5 lib/x.sh \
+    || fail "landing l2, the commit pushed by hand and landing after could not be made"
+  got=$(eng "brokeby a.test $s a.test one" 2>&1)
+  [ "$got" = "{\"since\":\"$l2\"}" ] \
+    || fail "brokeby a.test $s a.test one, after l2 ran a.test, a commit pushed by hand changed lib/y.sh and landing after lib/x.sh: not since $l2 alone: $got"
+  mrland l3 6 '{"a.test": 1}' && l3=$(git -C "$R" rev-parse HEAD) && land one 7 lib/x.sh \
+    && m=$(git -C "$R" commit-tree 'HEAD^{tree}' -p HEAD -p 'HEAD^' -m merge) && git -C "$R" update-ref HEAD "$m" \
+    || fail "landing l3, landing one and its merge commit could not be made"
+  got=$(eng "brokeby a.test $m a.test one | jq -c '[.card, .since]'" 2>&1)
+  [ "$got" = "[\"one\",\"$l3\"]" ] \
+    || fail "brokeby a.test $m a.test one, after l3 ran a.test and a merge commit brought landing one to main: did not name one with since $l3: $got"
+  for d in m l t; do
+    mrland "p$d" 8 '{"a.test": 1}' && p=$(git -C "$R" rev-parse HEAD) && land "q$d" 9 lib/x.sh && put "$d" "docs/$d.md" \
+      || fail "landings p$d and q$d and the change of docs/$d.md could not be made"
+    got=$(eng "brokeby a.test $s a.test one" 2>&1)
+    [ "$got" = "{\"since\":\"$p\"}" ] \
+      || fail "brokeby a.test $s a.test one, after p$d ran a.test, landing q$d changed lib/x.sh and a later commit docs/$d.md, which a.test reads: not since $p alone: $got"
+  done
+}
+
 # Bug (#1594, E6): a card's files run side by side, so the time limit stops several at once. testfails() lists them
 # all in stopped, but timeout names only the last: verdicts() read timeout alone, so c.test, stopped beside d.test,
 # never ran on main and got no verdict, and main's red went unrecorded for it.
@@ -333,14 +377,13 @@ bkblame() {
 
 # Bug (O255): brokeby() took a card's test line that names the file in why or times as a run of the red case, before it
 # looked at ranCases; a card that ran only some cases of the file (its ranCases for the file lack the case) stopped the
-# walk, and the landing after it was blamed. Landings, oldest first: l1 ran the whole file (why alone), p2 ran only
-# `other` of it (why and ranCases), b3 ran nothing of it. For the case `partial`, the landing after l1 broke it: p2.
+# walk, and p2 was not named. Landings, oldest first: l1 ran the whole file (why alone), p2 ran only `other` of it
+# (why and ranCases). For the case `partial`, the landing after l1 broke it: p2.
 t_brokebypartial() {
   local got
   bkinit $'t_partial() { :; }\nt_other() { :; }'
   bkland l1 1 '{"why": {"tests/x.test.sh": "linked"}}'
   bkland p2 2 '{"why": {"tests/x.test.sh": "linked"}, "ranCases": {"tests/x.test.sh": ["other"]}}'
-  bkland b3 3 '{}'
   got=$(bkblame partial) || fail "brokeby found no landing: $got"
   [ "$got" = p2 ] || fail "brokeby for the case partial blamed $got, not p2, the landing after the last one that ran it (l1)"
 }

@@ -587,6 +587,26 @@ mapread() { # <worktree> [<file> [<commit>]]
   printf '%s\n' "$out"
 }
 
+# The files the test map gives <test file>, one a line (mapread()): those mapped to it and those the map shares with
+# most tests. A map the project keeps is read as <commit> has it, with that commit's tests, not as the change in
+# <worktree> has them.
+maplinked() { # <test file> <commit> <worktree>
+  local m
+  packget test.map m 2>/dev/null || m=off
+  case $m in off | '') mapread "$3" ;; *) mapread "$3" <(git show "$2:$m" 2>/dev/null) "$2" ;; esac 2>/dev/null \
+    | jq -r --arg f "$1" '[(.sources | objects | to_entries[] | select(any(.value[]?; . == $f)) | .key), (.shared | arrays | .[] | strings)] | unique[]' 2>/dev/null
+}
+# The documents (.md, .txt, .rst) <test file> reads, as git pathspecs (mainred.sh brokeby()): each name or glob its
+# <text> holds, in any folder, and each document the test map (maplinked()) or the links of <commit>
+# (.conveyor/test-links.json) give it. Run in the main checkout.
+testdocs() { # <test file> <commit> <its text>
+  local dx='\.([Mm][Dd]|[Tt][Xx][Tt]|[Rr][Ss][Tt])'
+  grep -oE "[A-Za-z0-9_.*-]+$dx" <<<"$3" | sed 's|^|:(top,glob)**/|'
+  { maplinked "$1" "$2" .
+    git show "$2:.conveyor/test-links.json" 2>/dev/null | jq -r --arg f "$1" 'objects | to_entries[] | select(any(.value[]?; . == $f)) | .key' 2>/dev/null
+  } | grep -E "$dx\$" | sed 's/^/:(top,literal)/'
+}
+
 # The files of <lines> (one a line), the first 12 joined by ", ", and how many more there are.
 briefcap() { # <lines>
   awk 'NR <= 12 { printf "%s%s", (NR > 1 ? ", " : ""), $0 } NR > 12 { n++ } END { if (n) printf " and %d more", n }' <<<"$1"

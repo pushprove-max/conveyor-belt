@@ -638,10 +638,15 @@ failure gets a verdict:
   to `mainprobe-out/<commit>/<card>.test` and `<card>.testlog`. A later run of the same card on that commit goes to
   `<card>.1.test`, `<card>.2.test` and so on, so the first output stays. It stays there at least while main is at that commit,
   and while the record holds an entry for that commit whose fix card has not landed or closed. A commit with no entry of
-  its own keeps its output while any entry in the record is open. The brief also names the landing that broke a case, when it is known: the first
-  landing on main after the last one whose card's test step ran the case's file (within the last 500 commits). The
-  case's entry keeps a link from each file that landing changed to the case's test file, and the fix card stages
-  those links in `.conveyor/test-links.json` (`{"<changed file>": ["<test file>", ...]}`), so they land with its fix.
+  its own keeps its output while any entry in the record is open. The brief also names the landing that broke a case, when it is known.
+  Conveyor looks at the commits on main after the last landing whose card's test step ran the case's file (within the
+  last 500 commits). It names a landing only if that landing is the one commit there that changes a file. Merge commits
+  do not count. With two or more such commits, Conveyor also ignores a commit that changes only documents (`.md`,
+  `.txt`, `.rst`). It does not ignore a document that the case's test file names, or that the test map or
+  `.conveyor/test-links.json` links to that file. If two or more commits stay, Conveyor cannot tell which one broke the
+  case, and names none. For a named landing, the case's entry keeps a link from each file that landing changed to the
+  case's test file, and the fix card stages those links in `.conveyor/test-links.json`
+  (`{"<changed file>": ["<test file>", ...]}`), so they land with its fix.
   From then on, a card that changes a linked file runs its linked test files too (a whole-only file in its card
   mode), and its log says so (`TESTRUN linked<TAB><test file><TAB><changed file>`); a link to a test file that no
   longer exists is dropped. A key `main:<file>` in the same file names test files that a card's run again adds to its

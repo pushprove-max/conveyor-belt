@@ -220,10 +220,9 @@ t_mainredholdsec() {
 
 # Issue 598. Bug it catches: a landing broke a test its card did not run, and nothing linked the test to the files it
 # changed, so later cards changing them did not run it either. In a fixture repo, landing L1's card ran
-# tests/b.test.sh; landing A changes lib/a.sh and its card does not run it; landing C after it changes lib/c.sh. b.test
-# fails on main: the case's entry in the main-red record (mainred.sh mainred()) names landing A, not C, and the fix card's
-# worktree (mainred.sh testlinks()) holds .conveyor/test-links.json linking lib/a.sh, and only it, to tests/b.test.sh, staged to
-# land with the fix.
+# tests/b.test.sh; landing A changes lib/a.sh and its card does not run it. b.test fails on main: the case's entry in
+# the main-red record (mainred.sh mainred()) names landing A, and the fix card's worktree (mainred.sh testlinks()) holds
+# .conveyor/test-links.json linking lib/a.sh, and only it, to tests/b.test.sh, staged to land with the fix.
 t_mainredlinks() {
   local w=$T/$CASE r a h got
   r=$w/r; mkdir -p "$r/tests" "$r/lib"; git -C "$r" init -q
@@ -233,8 +232,7 @@ t_mainredlinks() {
       '{card: $c, issue: $n, step: "test", result: "pass", why: {($t): ["the card changed it"]}}, {card: $c, issue: $n, step: "landed", result: "ok", sha: $s}' >> "$w/cards.jsonl"
   }
   echo 't_one() { :; }' > "$r/tests/b.test.sh"; land l1 1 lib/a.sh tests/b.test.sh
-  land ca 2 lib/a.sh lib/a.test.sh; a=$(git -C "$r" rev-parse HEAD)
-  land cc 3 lib/c.sh lib/c.test.sh; h=$(git -C "$r" rev-parse HEAD)
+  land ca 2 lib/a.sh lib/a.test.sh; a=$(git -C "$r" rev-parse HEAD); h=$a
   git -C "$r" worktree add -q --detach "$w/fix" "$h"
   got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^testlinks() {/,/^}/p; /^linkput() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/mainred.sh")"
     stdb() { cat "$w/cards.jsonl"; }
@@ -381,9 +379,9 @@ t_mainredlinksout() {
 # Issue 604. Bug it catches: a card that ran only some cases of a test file, named under the runner (`TESTRUN case`
 # lines, no why or times of the file, no wholeSuite), counted as not having run it, so the search for the landing that
 # broke a case went past it and named no landing, or the wrong one. In a fixture repo, landing L1's card ran the
-# case `one` of tests/b.test.sh through the runner r.test.sh; landing A changes lib/a.sh and its card does not run it;
-# landing C's card runs only the case `two` of the runner, which does not run `one`. `r.test.sh: one` fails on main:
-# the main-red record names landing A and links lib/a.sh to tests/b.test.sh.
+# case `one` of tests/b.test.sh through the runner r.test.sh; landing A changes lib/a.sh and its card runs only the
+# case `two` of the runner, which does not run `one`. `r.test.sh: one` fails on main: the main-red record names landing
+# A and links lib/a.sh to tests/b.test.sh.
 t_mainredpartial() {
   local w=$T/$CASE r a h got
   r=$w/r; mkdir -p "$r/tests" "$r/lib"; git -C "$r" init -q
@@ -394,8 +392,7 @@ t_mainredpartial() {
        {card: $c, issue: $n, step: "landed", result: "ok", sha: $s}' >> "$w/cards.jsonl"
   }
   printf 't_one() { :; }\nt_two() { :; }\n' > "$r/tests/b.test.sh"; land l1 1 lib/a.sh one
-  land ca 2 lib/a.sh none; a=$(git -C "$r" rev-parse HEAD)
-  land cc 3 lib/c.sh two; h=$(git -C "$r" rev-parse HEAD)
+  land ca 2 lib/a.sh two; a=$(git -C "$r" rev-parse HEAD); h=$a
   got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/mainred.sh")"
     stdb() { cat "$w/cards.jsonl"; }
     # Issue 1066: the list of the commit's test files fails here. Bug it catches: mainred.sh mainred() then searched no file for
