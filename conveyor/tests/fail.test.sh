@@ -93,9 +93,22 @@ t_reviewretry() {
     && [ "$(head -n 1 "$T/$CASE/run.out" | jq -c '.firstTry | [(.reason | test("review failed \\(exit 124")), .spent.model, (.spent.sec | type)]')" = '[true,"x","number"]' ] \
     || fail "a review that timed out once was not run again, or its failed attempt is not in its answer with its reason and what it spent: $(cat "$T/$CASE/run.out")"
   # An answer with no verdict, the reviewer's exit clean, is no verdict too: it runs once more.
+  # shellcheck disable=SC2016 # expanded in the codex stub
+  echo 'echo "stderr: try $(wc -l < "$STUB/reviews")" >&2' > "$STUB/review-cmd" # each try's err says which try it is
   echo 'Review interrupted' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; flreview 11
-  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(flout)" = "reviewed: 0 GO" ] && [ "$(head -n 1 "$T/$CASE/run.out" | jq -r .firstTry.reason)" = "the review ended without one clear verdict" ] \
-    || fail "an answer with no verdict was not run again: $(cat "$T/$CASE/run.out")"
+  local r k; r=$(head -n 1 "$T/$CASE/run.out" | jq -r .firstTry.reason); k=${r##*; its events are kept in }
+  [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(flout)" = "reviewed: 0 GO" ] && [[ $r == 'the review ended without one clear verdict; its events are kept in c11-11.review'*.events ]] \
+    || fail "an answer with no verdict was not run again, or its reason names no kept events file: $(cat "$T/$CASE/run.out")"
+  # Bug (#1718): a review that read its usage but gave no verdict lost its events (reviewed() removes them before the run
+  # again) and its err (the run again writes it again), so why it gave none could not be read.
+  grep -q turn.completed "$ST/kept/c11-11/$k" && grep -qx 'stderr: try 1' "$ST/kept/c11-11/${k%.events}.err" \
+    || fail "the events or err of the first of two tries with no verdict were not kept as $k: $(ls "$ST/kept/c11-11" 2>&1)"
+  # The same for the second try with no verdict: the reason the card blocks with names its own kept files.
+  echo 'Review interrupted' > "$STUB/review.2"; flreview 11; rm "$STUB/review-cmd"; r=$(head -n 1 "$T/$CASE/run.out"); k=${r##*; its events are kept in }; k=${k%% *}
+  [[ $(flout) == "reviewed: 1 "* && $r == *'run again after 0s: the review ended without one clear verdict; its events are kept in '* ]] && grep -q turn.completed "$ST/kept/c11-11/$k" \
+    && grep -qx 'stderr: try 2' "$ST/kept/c11-11/${k%.events}.err" \
+    || fail "the events or err of a second try with no verdict were not kept, or the reason does not name them: $r $(ls "$ST/kept/c11-11" 2>&1)"
+  echo "$GO" > "$STUB/review.2"
   # The same, the answer's events holding no usage either: it runs once more.
   echo '[ "$(wc -l < "$STUB/reviews")" != 1 ] || { echo "Review interrupted" > "$out"; echo "stderr: no usage" >&2; exit 0; }' > "$STUB/review-cmd"; flreview 11; rm "$STUB/review-cmd"
   local r k; r=$(head -n 1 "$T/$CASE/run.out" | jq -r .firstTry.reason); k=${r##*; its events are kept in }

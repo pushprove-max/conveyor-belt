@@ -49,11 +49,12 @@ reusable() { # <card> <patch> <main> <seen>
       | {reused: .time} + ({model, effort} | del(.[] | nulls)) + (if (.usage | type) == "object" then {usage: (.usage | map_values(0))} else {} end)' 2>/dev/null
 }
 reviewed() { # <worktree> <brief> [instructions]: prints and fails as review() does
-  local t u rc x s r n=0
+  local t u rc x s r kn n=0
   rm -f "$1.stalled"; t=$(review "$@"); rc=$?
   if [ $rc = 0 ]; then
     [ "$(verdict "$1.review")" = none ] || { printf '%s\n' "$t"; return 0; }
-    x=$(jq -c '{reason: "the review ended without one clear verdict", spent: .}' <<<"$t")
+    # One that ended cleanly with no verdict keeps its events and err (reviewkeep()): below they go, its err written again.
+    kn=$(reviewkeep "$1" ""); x=$(jq -c --arg k "$kn" '{reason: ("the review ended without one clear verdict" + $k), spent: .}' <<<"$t")
   elif [ $rc = 2 ]; then
     x=$(jq -cn --arg r "$t" --slurpfile s "$1.spent" '{reason: $r, spent: ($s[0] | del(.step))}' 2>/dev/null) || x=$(jq -cn --arg r "$t" '{reason: $r}')
   else printf '%s\n' "$t"; return 1; fi
@@ -66,7 +67,7 @@ reviewed() { # <worktree> <brief> [instructions]: prints and fails as review() d
   printf '%s\n' "$x" > "$1.firsttry.new"; rm -f "$1.spent" "$1.events"; mv -f "$1.firsttry.new" "$1.firsttry"; sleep "$REVIEW_PAUSE"
   u=$(review "$@"); rc=$?
   [ $rc != 0 ] || [ "$(verdict "$1.review")" = none ] || { jq -c --argjson f "$x" --argjson n "$n" "$BOTHTRIES"' | if $n > 0 then .stalls = $n else . end' <<<"$u"; return 0; }
-  [ $rc != 0 ] || { jq -c '{step: "review"} + .' <<<"$u" > "$1.spent"; u="the review ended without one clear verdict"; }
+  [ $rc != 0 ] || { jq -c '{step: "review"} + .' <<<"$u" > "$1.spent"; kn=$(reviewkeep "$1" ""); u="the review ended without one clear verdict$kn"; }
   [ ! -e "$1.stalled" ] || n=$((n + 1))
   s=$(jq -ce objects "$1.spent" 2>/dev/null) || s='{"step":"review"}'
   jq -c --argjson f "$x" --argjson n "$n" "$BOTHTRIES"' | if $n > 0 then .stalls = $n else . end' <<<"$s" > "$1.spent"
@@ -304,9 +305,8 @@ claudereview() { # <worktree> <brief> <instructions> <model> <effort>
     && [ -s "$1.review.new" ] && mv -f "$1.review.new" "$1.review"; then
     routedone 1
     if jq -e 'has("tokens")' <<<"$f" >/dev/null; then
-      # One whose usage is only part of what it used (unread) keeps its events and err too: with no verdict, reviewed()
-      # removes its events and the run again writes its err again, so why it ended could not be read.
-      ! jq -e 'has("unread")' <<<"$f" >/dev/null || reviewkeep "$1" "" >/dev/null
+      # One whose usage is only part of what it used (unread) keeps its events and err too; with no verdict, reviewed() does.
+      ! jq -e 'has("unread")' <<<"$f" >/dev/null || [ "$(verdict "$1.review")" = none ] || reviewkeep "$1" "" >/dev/null
       jq -c 'del(.ok)' <<<"$f" && return 0
     fi
     # One that reported no token usage, or failed (below), keeps its events and err as a failed Codex review's are (reviewkeep()): a run again overwrites both; clean() removes them with the card.

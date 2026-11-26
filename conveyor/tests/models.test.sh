@@ -179,6 +179,8 @@ t_claudepart() {
   # wrote its err again, and why it ended with no verdict was lost.
   grep -q 'Review interrupted' "$ST/kept/c11/c11.review.events" && grep -qx 'stderr: part' "$ST/kept/c11/c11.review.err" \
     || fail "the events or err of a Claude review with part usage and no verdict were not kept: $(ls "$ST/kept/c11" 2>&1)"
+  # Bug (#1718): claudereview() and reviewed() each kept that try, so its files were in the kept folder twice.
+  [ ! -e "$ST/kept/c11/c11.review-2.events" ] || fail "a Claude try with part usage and no verdict was kept twice: $(ls "$ST/kept/c11")"
 }
 
 # Bugs: an OpenCode model OpenCode lists is refused as the reviewer;
@@ -286,8 +288,10 @@ t_opencoderetry() {
   echo 'I looked at it.' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
   out=$(rvcall 8)
   [ "$(wc -l < "$STUB/oc-runs")" = 2 ] && [ "$(tail -n 1 <<<"$out")" = 'rc=0 GO' ] \
-    && [ "$(head -n 1 <<<"$out" | jq -c '[.firstTry.reason, .tokens.codex, .usage.cost]')" = '["the review ended without one clear verdict",370,1.5]' ] \
+    && [ "$(head -n 1 <<<"$out" | jq -c '[.firstTry.reason, .tokens.codex, .usage.cost]')" = '["the review ended without one clear verdict; its events are kept in c8.review.events",370,1.5]' ] \
     || fail "an OpenCode answer with no verdict was not run again, or its first attempt left out of the line: $out"
+  # Bug (#1718): reviewed() removed that answer's events before the run again, so why it gave no verdict could not be read.
+  grep -qF 'I looked at it.' "$ST/kept/c8/c8.review.events" || fail "the events of an OpenCode answer with no verdict were not kept: $(ls "$ST/kept/c8" 2>&1)"
   # A try the model API refused (after one step) runs again; what it used and cost is on the line with the next.
   : > "$STUB/refuse-api"; echo "$GO" > "$STUB/review.4"; tune '.tunables.apiPause = 0.1'
   out=$(rvcall 10)
