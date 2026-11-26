@@ -1304,8 +1304,10 @@ only when an entry came after the closing. A card's run is told to keep the case
 `CONVEYOR_TEST_RERUN` list, unless the list already names the case or its file as passed, and an
 `off<TAB><file><TAB><case>` line, unless a `fail` line names the case), so the command does not run it. An `ok` line
 alone is also a case that passed in a run killed part-way, which a `changed` or `main` line that selects it runs
-again; an `off` case stays off even then (a test file that cannot run in part runs whole); the full test suite and the whole test on main are given no such list and run it. A whole file, or a case with no
-file, is never kept off. The snapshot's `flaky` lists the cases with entries in the last seven days, each with
+again; an `off` case stays off even then (a test file that cannot run in part runs whole); the full test suite and the whole test on main are given no such list and run it. A whole file
+the record names, such as a shell test file with no cases, is kept off the same way only while an issue filed for it
+is open: its card's list gets `pass<TAB><file>` and `off<TAB><file>`, unless a `fail` line names the file. A whole
+file with no issue filed, or a case with no file, is never kept off. The snapshot's `flaky` lists the cases with entries in the last seven days, each with
 its count and the issue filed for it; the Board's Health panel draws them as its "Flaky tests" line.
 
 ## Bug cards: the new tests fail without the fix

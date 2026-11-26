@@ -83,22 +83,29 @@ t_flakyrunzero() {
 }
 
 # The cases kept off card runs (flakyoff(), called alone): a case whose last flaky issue is open, or that has none yet;
-# never a case whose issue closed with no entry since, nor a whole file, nor a case the card's list already names.
+# never a case whose issue closed with no entry since, nor a case the card's list already names. A whole file is kept
+# off only while an issue filed for it is open (g.test): never with no issue (d.test), nor a closed one (h.test), even
+# with an entry newer than its closing (a full-suite rerun records one after the issue closes), nor a file the card's
+# list names as failed (i.test, its issue open: the card's own failure must run it).
+# Bug it catches: #1690 filed foreman-size.test.sh (a shell file, no cases) and said card steps keep it off, but they
+# ran it whole, and its time-outs blocked #1734.
 # A case whose entries aged out of the record (older than FLAKY_KEEP, dropped at the next write) stays off while its
 # filed issue is open (#470): e.test: five has no entries left, only its open issue.
 t_flakyoffissue() {
   setup '[]'
   local w=$T/$CASE/wt
-  jq -cn '{entries: (["b.test: one", "b.test: two", "c.test: three", "d.test", "b.test: four"]
+  jq -cn '{entries: (["b.test: one", "b.test: two", "c.test: three", "d.test", "b.test: four", "g.test", "h.test", "i.test"]
       | map({case: ., source: "s", time: "2026-11-10T00:00:00Z"})), filed: [{case: "b.test: one", issue: 100101}, {case: "b.test: two", issue: 100102},
-      {case: "e.test: five", issue: 100103}]}' > "$T/$CASE/flaky.json"
+      {case: "e.test: five", issue: 100103}, {case: "g.test", issue: 100104}, {case: "h.test", issue: 100105}, {case: "i.test", issue: 100106}]}' > "$T/$CASE/flaky.json"
   echo OPEN > "$STUB/state.100101"; echo CLOSED > "$STUB/state.100102"; echo OPEN > "$STUB/state.100103"
-  printf 'fail\tb.test\tfour\npass\tc.test\n' > "$w.rerun"
+  echo OPEN > "$STUB/state.100104"; echo CLOSED > "$STUB/state.100105"
+  echo 2026-11-01T00:00:00Z > "$STUB/closedAt.100105"; echo OPEN > "$STUB/state.100106"
+  printf 'fail\tb.test\tfour\npass\tc.test\nfail\ti.test\n' > "$w.rerun"
   ( eval "$(sed -n '/^flakyoff() {/,/^}/p' "$SRC/lib/flaky.sh")"; FLAKY=$T/$CASE/flaky.json flakyoff "$w" ) || fail "flakyoff failed"
   # Bug it catches (issue 469): the `ok` line alone could not be told from a case that passed in a run killed part-way,
   # so a change that selected a kept-off case ran it again. Each kept-off case has an `off` line too, its file listed
   # as passed or not (a change that selects c.test runs it again).
-  [ "$(tr '\t\n' ':|' < "$w.rerun")" = "fail:b.test:four|pass:c.test|ok:b.test:one|off:b.test:one|off:c.test:three|ok:e.test:five|off:e.test:five|" ] || fail "the cases kept off: $(cat "$w.rerun")"
+  [ "$(tr '\t\n' ':|' < "$w.rerun")" = "fail:b.test:four|pass:c.test|fail:i.test|ok:b.test:one|off:b.test:one|off:c.test:three|ok:e.test:five|off:e.test:five|pass:g.test|off:g.test|" ] || fail "the cases kept off: $(cat "$w.rerun")"
 }
 
 # `flaky add` (the nightly whole test: a case that failed in the full run and passed alone) adds one entry with its
