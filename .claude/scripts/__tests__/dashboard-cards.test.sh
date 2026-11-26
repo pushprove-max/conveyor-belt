@@ -151,7 +151,8 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
   "queue": {"next": [{"issue": 20, "title": "Next up", "priority": "P1", "followup": true, "retried": false}],
     "order": [{"issue": 20, "title": "Next up", "priority": "P1", "followup": true, "retried": false}], "holding": [{"issue": 30, "title": "Held one"}],
     "skipped": [{"issue": 31, "title": "Infra one", "rule": "area:infra"}],
-    "waiting": [{"issue": 32, "title": "Second half", "priority": "P2", "followup": false, "retried": false, "created": "2026-11-01T00:00:00Z", "waitsFor": [20]}]},
+    "waiting": [{"issue": 32, "title": "Second half", "priority": "P2", "followup": false, "retried": false, "created": "2026-11-01T00:00:00Z", "waitsFor": [20]}],
+    "cards": [{"card": "c20261102T000001-sample-0", "kind": "Docs sweep"}]},
   "control": {"mode": "pause", "cap": null, "guard": 90, "held": [30], "order": [], "rules": {"P0": true, "P1": true, "P2": true, "followups": true, "never": ["area:infra"], "healsdays": 30}, "model": null, "reviewer": null, "judgeOn": true, "suiteMachine": {"kind": "ssh", "target": "dev@192.0.2.7", "dir": "~/suite"}},
   "modelSettings": {"builder": {"model": "claude-x", "effort": "medium", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-x"], "efforts": ["low"]},
     "judge": {"model": "claude-j", "effort": "high", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-j"], "efforts": ["high"], "default": "claude-j"}},
@@ -339,6 +340,8 @@ q '.panels.rules.data | .repo == "sample" and .repoUrl == "https://github.com/ex
 q '.panels.board.data | (.unpushed | map([.issue, .card, .url])) == [[7, "c5-7", "'"$PU"'/7"]] and .fullTest.command == true and .fullTest.last.state == "failed"
   and (.others.widgetshop.unpushed | map(.issue)) == [2] and .others.widgetshop.fullTest == null' "the Board part: the landed cards not pushed and the full test suite"
 q '.panels.rules.data | has("unpushed") or has("fullTest") | not' "the Rules part carries neither: its tab has no Push landed or Run full test suite"
+# Bug (#1714): the part dropped the snapshot's waiting cards with no GitHub issue, so the Rules tab could show none.
+q '.panels.rules.data.cards == [{card: "c20261102T000001-sample-0", kind: "Docs sweep"}]' "the Rules part gives the snapshot's queue.cards"
 # The pack's Land as (#247): without it, the Rules tab shows Main for a project whose pack lands as a pull request.
 q '.panels.rules.data.packLandAs == "pr"' "the Rules part gives the pack's push.landAs"
 # Merge PR (#248): the pack's rule for the Rules tab, and the open pull request for the Control tab's Merge. Without

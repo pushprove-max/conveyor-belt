@@ -279,7 +279,7 @@ class Stream:
 
     def github_files(self):
         out = {}
-        for name in ('issues', 'labelled', 'gh', 'ghreach'):
+        for name in ('issues', 'labelled', 'gh', 'ghreach', 'cardfar'):
             try:
                 with open(os.path.join(self.github, name), 'rb') as f:
                     out[name] = f.read()

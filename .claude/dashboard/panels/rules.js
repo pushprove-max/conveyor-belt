@@ -51,7 +51,11 @@
 // dependency guard Off a "Queue anyway" that acts on a second click, sending force; each row removes a dependency (×) or adds
 // one, sending depends), Next up (the next five in pick order, each
 // ready or "waits on #N"), the queue's dollar forecast as one line,
-// the guard's warning when the forecast says it pauses the loop before the queue ends, and the skipped issues.
+// the guard's warning when the forecast says it pauses the loop before the queue ends, and the skipped issues. The
+// waiting cards with no GitHub issue (cards) are counted and listed with the issues, each named by its kind: the ready
+// ones in Next up where pick takes them, the others in the waiting and skipped lists, the held ones under Held by you
+// or a label; more than five in one list fold to one row with their count. A title's text in backticks is a code span.
+// When their record was not read, one line says so. When GitHub did not list the open issues, they show all the same.
 // Model prices: the built-in prices and the pack's prices, added models and aliases, grouped, searched and each
 // changed in its row here (pricesSection). Held by you or a label: the issues held by you (the control record) or by a label (awaiting-deploy),
 // one line a group (by area by default, or by priority or holding label): its name, count and how
@@ -77,7 +81,7 @@
 // Finish sends `onboarded` with the keys confirmed, those confirmed before too. A record with no onboarded key (an
 // older engine, which cannot save it) is never asked.
 // Its part (dashboard.sh, rules): {repo (null: no record is on the host's main), repoUrl, state, control, cap, guard,
-// modelSettings, areaPrefix, packPick, limit, held, queue (each with areas), skipped, waits, issuesError, building, onBelt, beltSteps, splitting,
+// modelSettings, areaPrefix, packPick, limit, held, queue (each with areas), skipped, waits, cards, issuesError, building, onBelt, beltSteps, splitting,
 // blocked, forecast, prices, standing, open (with issues: every open issue), repos, others}.
 (function () {
   'use strict';

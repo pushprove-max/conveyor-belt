@@ -45,6 +45,41 @@
     };
     return list(d.waits).filter((x) => list(x.waitsFor).length && x.forced !== true).map((x) => ({ x, also: also(x) }));
   }
+  // The cards with no GitHub issue that wait to be picked (the snapshot's queue.cards, in the order pick takes them);
+  // none when their record was not read (produce() says so). Each is held, skipped by a rule, waiting on another card
+  // or ready.
+  const cards = () => list(S.d.cards);
+  const heldCards = () => cards().filter((x) => x.held);
+  const skippedCards = () => cards().filter((x) => x.rule);
+  const waitingCards = () => cards().filter((x) => list(x.waitsFor).length);
+  const readyCards = () => cards().filter((x) => !x.held && !x.rule && !list(x.waitsFor).length);
+  const NEXT_ROWS = 5;  // the rows of Next up; a longer run of these cards is one row
+  // One card's row (cls), named by its kind, with what follows its title. A review follow-up's title is its finding,
+  // so it is drawn as one: text in backticks as a code span.
+  function cardRow(cls, x, ...more) {
+    const h = S.ctx.h, li = h('li', cls), T = window.DASH_APP.text, title = x.title || 'untitled';
+    li.dataset.card = String(x.card);
+    li.append(S.ctx.issueLink({ name: x.kind }), T.fill(h('span', 'board-title'), title, S.d.repoUrl, new Set(T.pathsIn(title)), 'declined'), ...more);
+    return li;
+  }
+  // The rows of a list's cards: a long run folds to one row with its count, which opens to every one.
+  function folded(where, xs, row) {
+    if (xs.length <= NEXT_ROWS) return xs.map(row);
+    const h = S.ctx.h, li = h('li', 'rules-cards'), key = `cards:${where}`, open = S.open.has(key);
+    const tog = h('button', 'rules-group-toggle');
+    tog.type = 'button'; tog.dataset.act = `cards-${where}`;
+    tog.setAttribute('aria-expanded', String(open));
+    tog.append(h('span', 'rules-caret', open ? '▾' : '▸'), h('span', 'rules-group-name', 'Cards with no GitHub issue'), h('span', 'rules-group-count', String(xs.length)));
+    tog.addEventListener('click', () => { if (open) S.open.delete(key); else S.open.add(key); draw(); relength(); });
+    li.append(tog);
+    if (open) {
+      const ul = h('ul', 'rules-held-list');
+      ul.setAttribute('aria-label', 'Cards with no GitHub issue');
+      ul.append(...xs.map(row));
+      li.append(ul);
+    }
+    return [li];
+  }
   // Where an issue a card waits on is: its step on the belt (landed, while its push or close is still to come), blocked,
   // queued, waiting itself, held, else open.
   const STEPS = { brief: 'getting ready', build: 'building', review: 'in review', fix: 'fixing', tests: 'testing', landing: 'landing',
@@ -137,39 +172,59 @@
       depControls(li, x);
       ul.append(li);
     });
+    // A card with no GitHub issue waits on issues, or on a card that has none, which it names by its id.
+    const on = (n) => (typeof n === 'number' ? `#${n} (${where(n)})` : n.includes('#') ? `${n} (another repository)` : `card ${n}`);
+    ul.append(...folded('waiting', waitingCards(), (x) => cardRow('rules-wait', x,
+      h('span', 'board-from', `waits on ${x.waitsFor.map(on).join(', ')}`),
+      ...(x.held ? [h('span', 'board-from', 'also held')] : []),
+      ...(x.rule ? [h('span', 'board-from', `also skipped: ${why(x.rule)}`)] : []))));
     return ul;
   }
   function produce(all) {
     const h = S.ctx.h, d = S.d, f = d.forecast && typeof d.forecast === 'object' ? d.forecast : null, el = h('section', 'rules-side rules-produce');
     el.append(h('h3', 'board-head', 'What these rules produce'));
     if (S.ctl) el.append(h('p', 'board-from', 'Changed here: this side shows it in about a minute.'));
+    const unread = Array.isArray(d.cards) ? [] : [h('p', 'warn-note', 'Conveyor could not read the cards with no GitHub issue.')];
     if (d.queue === null || d.queue === undefined) {
-      el.append(h('p', 'warn-note', d.issuesError || 'GitHub did not list the open issues.'));
+      el.append(h('p', 'warn-note', d.issuesError || 'GitHub did not list the open issues.'), ...unread);
+      if (cards().length) cardsAlone(el);
       return el;
     }
     const q = list(d.queue), sk = list(d.skipped), w = waiters(), wa = waitingAll();
-    el.append(produceStats(all, q, sk, wa));
-    if (S.waitsOpen && wa.length) el.append(waitList(wa));
+    el.append(produceStats(all, q, sk, wa), ...unread);
+    if (S.waitsOpen && (wa.length || waitingCards().length)) el.append(waitList(wa));
     nextUp(el, q, w);
     forecastLines(el, f, q);
     skippedList(el, sk);
     return el;
   }
-  // The counts of What these rules produce: ready (q), waiting on another card (wa), held (all) and skipped (sk).
+  // With the open issues not listed: what the cards with no GitHub issue alone give.
+  function cardsAlone(el) {
+    el.append(S.ctx.h('p', 'board-from', 'The counts and lists here show only the cards with no GitHub issue.'), produceStats([], [], [], []));
+    if (S.waitsOpen && waitingCards().length) el.append(waitList([]));
+    if (readyCards().length) nextUp(el, [], []);
+    skippedList(el, []);
+  }
+  // The counts of What these rules produce: ready (q), waiting on another card (wa), held (all) and skipped (sk), each
+  // with the cards with no GitHub issue that are so.
   function produceStats(all, q, sk, wa) {
-    const h = S.ctx.h, stats = h('div', 'rules-stats');
+    const h = S.ctx.h, stats = h('div', 'rules-stats'), waiting = wa.length + waitingCards().length;
+    const ready = q.length + readyCards().length;
     // The waiting count opens the list of the waiting cards.
     const ws = h('button', 'rules-stat rules-stat-open');
     ws.type = 'button'; ws.dataset.figure = 'waiting'; ws.dataset.act = 'waits-open';
     ws.setAttribute('aria-expanded', String(S.waitsOpen)); ws.setAttribute('aria-controls', 'rules-waits');
-    ws.append(h('span', 'rules-big', String(wa.length)), h('span', 'board-from', 'waiting on another card'));
-    ws.disabled = !wa.length;
+    ws.append(h('span', 'rules-big', String(waiting)), h('span', 'board-from', 'waiting on another card'));
+    ws.disabled = !waiting;
     ws.addEventListener('click', () => { S.waitsOpen = !S.waitsOpen; draw(); });
-    stats.append(stat('ready', String(q.length), 'ready to build'), ws,
-      stat('held', String(all.length), HELD.toLowerCase()), stat('skipped', String(sk.length), 'skipped by a rule'));
+    stats.append(stat('ready', String(ready), 'ready to build'), ws,
+      stat('held', String(all.length + heldCards().length), HELD.toLowerCase()),
+      stat('skipped', String(sk.length + skippedCards().length), 'skipped by a rule'));
     return stats;
   }
-  // Next up: the queue (q) in its order, with each issue that waits on another card (w) where pick would take it.
+  // Next up: the queue (q) in its order, with each issue that waits on another card (w) and the ready cards with no
+  // GitHub issue, where pick would take them. A card that cannot start has no row: pick passes it over, and its row
+  // would push the issue picked next out of the list (the waiting list shows what it waits on).
   function nextUp(el, q, w) {
     const h = S.ctx.h;
     const order = list((ctl() || {}).order);
@@ -179,23 +234,33 @@
     const pin = (i) => { const k = order.indexOf(i); return k < 0 ? Infinity : k; };
     const before = (x, y) => { const a = pin(x.issue), b = pin(y.issue); return a !== b ? a < b : a === Infinity && ahead(x, y); };
     w.forEach((x) => { const at = next.findIndex((y) => before(x, y)); next.splice(at < 0 ? next.length : at, 0, x); });
+    // Pick takes these cards after the ready issues pinned ahead of every other and before the rest (pick(),
+    // conveyor/lib/pick.sh).
+    let at = 0;
+    next.forEach((y, i) => { if (q.includes(y) && pin(y.issue) !== Infinity) at = i + 1; });
+    const rows = next.slice(0, NEXT_ROWS).map(nextRow);
+    rows.splice(at, 0, ...folded('next', readyCards(), (x) => cardRow('rules-next', x, waitMarks(x))));
     el.append(h('h4', 'board-label', 'Next up'));
-    if (next.length) {
+    if (rows.length) {
       const flow = h('ol', 'rules-flow');
-      flow.setAttribute('aria-label', 'The next issues Conveyor picks, in order');
-      next.slice(0, 5).forEach((x) => {
-        const li = h('li', 'rules-next');
-        li.dataset.issue = String(x.issue);
-        const marks = h('span', 'rules-marks');
-        const waits = list(x.waitsFor);
-        // One forced past its wait (`control force`) is picked all the same: it says so, not "ready".
-        if (waits.length) waits.forEach((n) => marks.append(S.ctx.chip(`${x.forced === true ? 'forced past' : 'waits on'} ${S.ctx.depRef(n)}`, 'warn')));
-        else marks.append(S.ctx.chip('ready', 'ok'));
-        li.append(S.ctx.issueLink(x), h('span', 'board-title', x.title || 'untitled'), marks);
-        flow.append(li);
-      });
+      flow.setAttribute('aria-label', 'What Conveyor picks next, in order');
+      flow.append(...rows.slice(0, NEXT_ROWS));
       el.append(flow);
     } else el.append(h('p', 'board-empty', 'Nothing to build under these rules.'));
+  }
+  // A Next up row's marks: ready, or what it waits on. One forced past its wait (`control force`) is picked all the
+  // same: it says so, not "ready".
+  function waitMarks(x) {
+    const marks = S.ctx.h('span', 'rules-marks'), waits = list(x.waitsFor);
+    if (waits.length) waits.forEach((n) => marks.append(S.ctx.chip(`${x.forced === true ? 'forced past' : 'waits on'} ${S.ctx.depRef(n)}`, 'warn')));
+    else marks.append(S.ctx.chip('ready', 'ok'));
+    return marks;
+  }
+  function nextRow(x) {
+    const h = S.ctx.h, li = h('li', 'rules-next');
+    li.dataset.issue = String(x.issue);
+    li.append(S.ctx.issueLink(x), h('span', 'board-title', x.title || 'untitled'), waitMarks(x));
+    return li;
   }
   // The queue's forecast (f) in dollars, and the guard's warning (q: the queue).
   function forecastLines(el, f, q) {
@@ -216,10 +281,10 @@
       el.append(warn);
     }
   }
-  // The issues skipped by a rule (sk), each with the rule.
+  // The issues skipped by a rule (sk) and the cards with no GitHub issue a rule skips, each with the rule.
   function skippedList(el, sk) {
-    const h = S.ctx.h;
-    if (sk.length) {
+    const h = S.ctx.h, skc = skippedCards();
+    if (sk.length || skc.length) {
       const ul = h('ul', 'rules-skipped');
       ul.setAttribute('aria-label', 'Skipped by a rule');
       sk.forEach((x) => {
@@ -228,6 +293,7 @@
         li.append(S.ctx.issueLink(x), h('span', 'board-title', x.title || 'untitled'), h('span', 'board-from', why(x.rule)));
         ul.append(li);
       });
+      ul.append(...folded('skipped', skc, (x) => cardRow('rules-skip', x, h('span', 'board-from', why(x.rule)))));
       el.append(h('h4', 'board-label', 'Skipped'), ul);
     }
   }
@@ -310,16 +376,27 @@
     gs.forEach((g) => box.append(group(g, searching)));
     if (!all.length) box.append(h('p', 'board-empty', 'Nothing holds an issue.'));
     else if (!gs.length) box.append(h('p', 'board-empty', 'No held issue matches the search.'));
+    // The held cards are searched by their kind and title.
+    heldCardList(box, heldCards().filter((x) => !searching || matches({ issue: '', title: `${x.kind} ${x.title}` })));
     return box;
+  }
+  // The held cards with no GitHub issue (hc) under their own heading, added to box: the Board has no Queue for them.
+  function heldCardList(box, hc) {
+    if (!hc.length) return;
+    const h = S.ctx.h, ul = h('ul', 'rules-held-list');
+    ul.setAttribute('aria-label', 'Held cards with no GitHub issue');
+    ul.append(...folded('held', hc, (x) => cardRow('rules-held-row', x, h('span', 'rules-prio', prio(x)), S.ctx.chip('held', 'warn'))));
+    box.append(h('h4', 'board-label', 'Held cards with no GitHub issue'), ul);
   }
   function heldSection(all) {
     const h = S.ctx.h, el = h('section', 'rules-held');
     el.id = 'rules-held';
     if (unlisted()) {
       el.append(h('h3', 'board-head', HELD), h('p', 'warn-note', `${S.d.issuesError || 'GitHub did not list the open issues.'} ${heldUnknown()}`));
+      heldCardList(el, heldCards());
       return el;
     }
-    el.append(h('h3', 'board-head', `${HELD} · ${all.length}`));
+    el.append(h('h3', 'board-head', `${HELD} · ${all.length + heldCards().length}`));
     const tools = h('div', 'rules-held-tools');
     const search = h('input', 'field rules-search');
     search.type = 'search'; search.placeholder = 'Search number or title'; search.dataset.act = 'held-search';

@@ -134,7 +134,7 @@ export type Push = {
 }
 // own: the session's own project, whose cards carry no project name ('' or absent: none is). foremanHas: the blocked
 // cards the Foreman works on (a note that is not a question to the owner), apart from needs.
-export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; foremanHas?: Need[]; belt: Belt[]; queue: Queued[] | null; order?: { repo: string; issue: number; umbrella: number | null }[]; queueMore: boolean; waits: Waiting[]; held: [string, number][]; badDeps?: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; todayEstimate?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
+export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; foremanHas?: Need[]; belt: Belt[]; queue: Queued[] | null; order?: { repo: string; issue: number; umbrella: number | null }[]; queueMore: boolean; waits: Waiting[]; held: [string, number][]; cards?: number; badDeps?: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; todayEstimate?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
@@ -290,7 +290,7 @@ const heldCounts =(skipped: unknown, holding: unknown): Record<string, number> =
   if (n > 0) out.held = n
   return out
 }
-type Rec = { loop: Loop; needs: Need[]; foremanHas: Need[]; belt: Belt[]; queue: Queued[] | null; order: { repo: string; issue: number; umbrella: number | null }[]; waits: Waiting[]; held: Record<string, number>; badDeps: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; todayEstimate: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
+type Rec = { loop: Loop; needs: Need[]; foremanHas: Need[]; belt: Belt[]; queue: Queued[] | null; order: { repo: string; issue: number; umbrella: number | null }[]; waits: Waiting[]; held: Record<string, number>; cards: number; badDeps: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; todayEstimate: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
 const pushOf = (repo: string, h: any): Push => {
   const r = h?.pushing, l = h?.pushLast
   return {
@@ -339,6 +339,8 @@ export const parseRecord = (repo: string, json: unknown, retried: string[] = [])
       .filter((x: Waiting) => x.waitsFor.length > 0),
     // What the record holds back, counted: the issues its rules skip, by rule (queue.skipped), and the issues it holds (queue.holding).
     held: heldCounts(j.queue.skipped, j.queue.holding),
+    // How many cards with no GitHub issue wait to be picked (queue.cards); none when their record was not read.
+    cards: Array.isArray(j.queue.cards) ? j.queue.cards.length : 0,
     // The issues skipped for a Depends on: line with no #N, by number; one with no number shows in the count only.
     badDeps: (Array.isArray(j.queue.skipped) ? j.queue.skipped : []).filter((x: any) => x && typeof x === 'object' && num(x.issue) !== null && BAD_DEPS_RULE.test(one(x.rule)))
       .map((x: any): Ref => ({ repo, issue: num(x.issue) as number, title: one(x.title) })),
@@ -480,6 +482,7 @@ const boardFrom = (name: string, records: { repo: string; json: unknown; retried
       waits: recs.flatMap(r => r.waits),
       held: [...held].sort((a, b) => a[0].localeCompare(b[0])),
       badDeps: recs.flatMap(r => r.badDeps),
+      cards: recs.reduce((n, r) => n + r.cards, 0),
       deploy: recs.flatMap(r => r.deploy),
       unpushed: recs.flatMap(r => r.unpushed.map(issue => ({ repo: r.loop.repo, issue }))),
       pushes: recs.map(r => r.push).filter(p => p.running || p.last),
@@ -1161,6 +1164,9 @@ export const noteLines = (t: string, w: number, style: Omit<Seg, 't'> = { c: C.y
 // the pane, and a cut line drops the last count. `held back: 1 follow-ups · 1 P0 · 1 P1 · 1 P2`. A count whose rule
 // is wider than the line (a long label name) goes on over lines, at its spaces, and a word in it wider than the line
 // is broken between whole characters (pieces).
+// The count of the waiting cards with no GitHub issue, which the queue's rows do not hold.
+const cardLines = (snap: Snap, w: number, lead: string): Line[] =>
+  snap.cards ? wrapParts(['cards with no GitHub issue:', `${snap.cards} waiting`], w, lead, ' ') : []
 const heldLines = (snap: Snap, w: number, lead: string): Line[] =>
   snap.held.length ? wrapParts(['held back:', ...snap.held.flatMap(([label, n], i, l) => pieces(`${n} ${label}${i < l.length - 1 ? ' ·' : ''}`, w - cols(lead) - 2))], w, lead, ' ') : []
 
@@ -1220,7 +1226,7 @@ export const queueModel = (snap: Snap, w: number): Line[] => {
     // A queue whose only issues wait on others is not empty: nothing can be picked, and it names what they wait on.
     ...(snap.queue === null ? [empty('not read: GitHub did not list the issues')] : next.length ? []
       : snap.waits.length ? wrapParts(['nothing can be picked: waiting for', ...waitedOn(snap.waits, snap.own ?? '')], w, '  ', ' ', { d: true })
-      : [empty('the queue is empty')]),
+      : [empty(snap.cards ? 'no issue is queued' : 'the queue is empty')]),
     ...readyRows(snap, w),
     // The issues that wait on another: not in the pick order, each with what it waits for.
     // A label too long to sit beside the title (with room for 6 columns of it) goes under it, wrapped at its words:
@@ -1232,6 +1238,7 @@ export const queueModel = (snap: Snap, w: number): Line[] => {
         : [titled({ ...x, parent: null }, [{ t: ' · ', d: true }], [], w, false), ...wrapParts(['Waits for', ...refs], w, '    ', ' ')]
     }),
     ...(snap.waits.length > NEXT ? [empty(`and ${snap.waits.length - NEXT} more waiting`)] : []),
+    ...cardLines(snap, w, ' '),
     ...heldLines(snap, w, ' '),
     ...unpushedLines(snap, w, ' '),
   ]
@@ -1549,7 +1556,8 @@ export const pickModel = (snap: Snap, w: number): Line[] => {
       return [fitWidth(row, w), ...pieces(title, w - at).map((p): Line => fitWidth([{ t: `${' '.repeat(at)}${p}`, c: C.name }], w))]
     }),
     ...(waits.length ? [fitWidth([{ t: stack ? 'Waiting' : `${padR('Waiting', idW)}  Requires`, d: true }], w)]
-      : snap.queue === null ? [empty('not read: GitHub did not list the issues')] : snap.umbrellas.length ? [] : all ? [empty('nothing waiting')] : [empty('the queue is empty')]),
+      : snap.queue === null ? [empty('not read: GitHub did not list the issues')] : snap.umbrellas.length ? [] : all ? [empty('nothing waiting')]
+      : [empty(snap.cards ? 'no issue is queued' : 'the queue is empty')]),
     ...waits.flatMap((x, i): Line[] => {
       const reqs = requires(x)
       if (stack) return [fitWidth([{ t: ids[i] ?? '', c: C.name, b: true }], w), ...reqs.map((r): Line => [{ t: `  ${r}` }])]
@@ -1649,6 +1657,7 @@ const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean
     ...matrixModel(s, snap, w), [],
     ...activityModel(s, snap, w, frame), [],
     ...pickModel(snap, w),
+    ...cardLines(snap, w, ''),
     ...heldLines(snap, w, ''),
     ...unpushedLines(snap, w, ''),
     ...pushLines(s, snap, w, ''),

@@ -481,7 +481,7 @@ export function full(now = T0) {
         ],
         skipped: [{ repo: 'sample', card: null, issue: 23, title: 'Infra thing', url: `${P}/23`, rule: 'area:infra' }],
         waits: [{ repo: 'sample', card: null, issue: 24, title: 'Second half', url: `${P}/24`, priority: 'P2', followup: false, retried: false, waitsFor: [20] }],
-        issuesError: null, building: 2,
+        cards: [], issuesError: null, building: 2,
         forecast: { cards: 3, usd: 2.85, perCard: { usd: 0.95, pct: 0.5 }, guard: 90, reading: 44, pausesAt: null },
         open: { count: 9, split: { queued: 3, you: 1, labelOrRule: 3, belt: 2 }, held: [
           { repo: 'sample', card: null, issue: 76, title: 'Split the PROD stack', url: `${P}/76`, priority: 'P1', labels: ['P1', 'area:infra'], reasons: [{ kind: 'you' }] },

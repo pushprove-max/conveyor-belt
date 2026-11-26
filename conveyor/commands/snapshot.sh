@@ -61,6 +61,7 @@ snapask() { # <since> [nowait]
     local i; : > "$SNAPGH/at" || exit 1
     if i=$(openissues "$FIELDS" 2>/dev/null); then printf '%s\n' "$i" > "$SNAPGH/issues.new" && mv -f "$SNAPGH/issues.new" "$SNAPGH/issues"
     else rm -f "$SNAPGH/issues"; fi
+    queuedfarkeep "$SNAPGH" # the other repositories' issues the waiting cards with no GitHub issue name
     [[ $i != *"\"$BUILT\""* ]] || { labelled > "$SNAPGH/labelled.new" && mv -f "$SNAPGH/labelled.new" "$SNAPGH/labelled"; }
     local g=false r=false; ! ghok || g=true
     # Whether GitHub answers too (health's ghReached): the build reads SNAPGH as a feed, and a feed with no ghreach

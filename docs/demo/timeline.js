@@ -243,7 +243,7 @@ export function createTimeline(wallStart = Date.now()) {
           today: { landed: landedToday, usd: today }, push: true, unpushed: [], fullTest: { command: true, why: null, running: null, last: null },
           open: { count: q.length + held.length + used + blocked.length, split: { queued: q.length, you: held.length, labelOrRule: 0, belt: used }, issues: q.concat(held) } } },
         rules: { error: null, data: { repo: REPO, state: 'running', control: ctl, cap: control.cap, areaPrefix: 'area:', guard, modelSettings: models, limit: { pct: 31, from: 'loop' },
-          held, queue: q, skipped: [], waits: [], issuesError: null, building: used,
+          held, queue: q, skipped: [], waits: [], cards: [], issuesError: null, building: used,
           forecast: { cards: 9, usd: 16.2, perCard: { usd: 1.8, pct: 0.6 }, guard: 90, reading: 31, pausesAt: null },
           open: { count: q.length + held.length + used, split: { queued: q.length, you: held.length, labelOrRule: 0, belt: used },
             held: held.map((x) => ({ ...x, priority: prio[x.issue], labels: [prio[x.issue]], reasons: [{ kind: 'you' }] })) } } },

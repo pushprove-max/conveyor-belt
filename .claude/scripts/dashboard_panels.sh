@@ -128,7 +128,8 @@
 #           without it), packPick (the models Pick settings may give each seat, each with its effort range, and the
 #           efforts each program takes; null from a snapshot without it), held, queue (each with its areas), skipped and waits (the snapshot's queue.waiting and, after it,
 #           the held, skipped or yes-gated issues that wait too (keptWaits), each with waitsFor; each null,
-#           with issuesError, when GitHub did not list the issues), building (how many cards are on the belt), onBelt
+#           with issuesError, when GitHub did not list the issues), cards (the snapshot's queue.cards, the waiting cards
+#           with no GitHub issue; null when their record was not read), building (how many cards are on the belt), onBelt
 #           (their issues), beltSteps (every card on the belt, landed ones too: issue, step, landed; the waiting list
 #           says where each issue a card waits on is), splitting (the issues on the belt whose card has filed the slices
 #           of a split: their hold is the split's from then on), blocked (the blocked cards), forecast
@@ -301,6 +302,7 @@ PANELS_JQ='
        queue: ($s.queue.order | if . == null then null else few($r) end),
        skipped: ($s.queue.skipped | if . == null then null else few($r) end),
        waits: ($s.queue.order | if . == null then null else ($s.queue.waiting // []) + keptWaits($s) | few($r) end),
+       cards: ($s.queue.cards // null),
        issuesError: (if $s.queue.order == null then "GitHub did not list the open issues on \($conv.host)." else null end),
        building: [$s.belt[] | select(.landed != true)] | length, onBelt: [$s.belt[] | select(.landed != true) | .issue],
        beltSteps: [$s.belt[] | {issue, step, landed: (.landed == true)}],

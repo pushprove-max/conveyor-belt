@@ -672,6 +672,15 @@ test('QUEUE counts what is held back from the snapshot\'s queue.skipped by rule 
   expect(paneModel(s, 80, 0).map(plain).join('\n')).toContain('held back: 1 backlog · 2 dormant · 2 held')
 })
 
+// Bug (#1714): /units showed no count of the waiting cards with no GitHub issue, and called a queue of them empty.
+test('/units counts the waiting cards with no GitHub issue, and does not call a queue of them empty', () => {
+  const s = board({ queue: { next: [], cards: [{ card: 'c20261102T000001-sample-0' }, { card: 'c20261102T000002-sample-0' }] } })
+  for (const text of [section(tableText(s, 80), 'QUEUE'), paneModel(s, 80, 0).map(plain).join('\n')]) {
+    expect(text).toContain('cards with no GitHub issue: 2 waiting')
+    expect(text).not.toContain('the queue is empty')
+  }
+})
+
 // Bug: at 40 columns `held back: 1 follow-ups · 1 P0 · 1 P1 · 1 P2` is 44 columns, and the pane and /units cut it, so
 // the last count fell off. The counts wrap at the width instead, each whole.
 test('held back wraps at its counts at 40 columns, never cut, in the pane and /units', () => {

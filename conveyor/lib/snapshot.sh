@@ -131,6 +131,10 @@
 #   moved.json (MOVED) dates it, so the Board sorts those columns by the time in them, not by the issue's age.
 #   Each issue of the queue, and each card of belt and needsYou.blocked, that is a GitHub sub-issue of a parent
 #   (openissues()) also has umbrella: that parent's number.
+#   cards: every card with no GitHub issue that waits to be picked (TCQUEUE), in the order pick takes them: {card: its
+#   id, title, kind: the name the Board shows it by, priority, created: when it was filed, held, waitsFor: issue numbers,
+#   "owner/repo#N" and card ids, rule: the area label never built or "follow-ups" that skips it, else null}. null when
+#   their record is missing or cannot be read. Given with or without the open issues.
 # open: every open issue and where it is (issues: each with its labels), below at open; umbrellas: each open parent
 #   (an issue with GitHub sub-issues) as one entry {issue, title, parts, done, all, inFlight, closed}; null when gh cannot list the issues.
 # control: the whole control record as it stands, start (where new issues start) among it (null when it does
@@ -774,6 +778,46 @@ snappart() {
 }
 # The test owners (testowners()) as two lines, defs then refs, for snappart.
 snapowners() { local defs refs; testowners; printf '%s\n%s\n' "$defs" "$refs"; }
+# queue.cards: the entries $e of the cards' record (null: not read) that no card of the records $c took, in the
+# record's order. What a card waits on, the rules that skip it and a card given back are read as testpick()
+# (lib/testaction.sh) reads them. Another repository's issue is open unless the read of it says closed: $cf, the read
+# for these cards (queuedfar(); null: none), else an open issue's. With the open issues not listed ($iss null), an
+# issue a card waits on counts as open.
+TCQUEUE='def tcqueue($e; $c; $iss; $cf; $shuts; $fu; $rules; $prio):
+  if $e == null then null else
+    ([$c[] | {key: .card, value: true}] | from_entries) as $have
+    | ([$c[] | select(.step == "landed" or (.step == "closed" and ((.reason // "") | IN($shuts[]) | not))) | {key: .card, value: true}] | from_entries) as $ended
+    | landed($c) as $done | [$c[] | select(.x.followups) | {issue, followups: .x.followups}] as $fc
+    | (if $iss == null then null else [$iss[].number] end) as $open | (([($iss // [])[].far // {}] + [$cf // {}]) | add) as $far
+    | def ended($d): ((first($e[] | . as $x | select($d | IN($x.id, $x.card, ($x.was // [])[]))) | .card) // $d) as $k | $ended[$k] != null;
+    [$e[] | select(.card == null or $have[.card] == null) | (.labels // [$prio[-1]]) as $l
+      | {card: .id, title: (.title // "")[0:200], kind: (.label // (if .file != null then "Tests page" else "Card" end)),
+         priority: level($l; $prio), created: .time, held: (.held == true),
+         waitsFor: ([ups($fc; needs)[] | select(($open == null or IN($open[])) and (IN($done[]) | not))]
+           + [farneeds[] as $r | select($far[$r].open != false) | $r]
+           + [.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*-[0-9]+(?![A-Za-z0-9_])")
+              | select(ended(.) | not) | (capture("-(?<n>[1-9][0-9]*)$").n | tonumber) // .] | unique),
+         rule: (([$l[] | select(IN(($rules.never // [])[]))] | sort | .[0])
+           // (if $rules.followups == false and ($l | index($fu)) != null then "follow-ups" else null end))}]
+  end;'
+# The state now of each issue of another repository that a `Depends on:` line of a waiting card with no GitHub issue
+# names, as {"owner/repo#N": {open}} (farstates()), as testpick() asks it. No open issue need name it, so the open
+# issues' reads alone left it open for good. Fails when the record or the card records cannot be read.
+queuedfar() {
+  local have rec
+  [ -s "${TACARDS:-}" ] || return 0
+  have=$(stdb ask issue cards 0) \
+    && rec=$(printf '%s\n%s\n' "$(jq -c '.cards | arrays' "$TACARDS" 2>/dev/null)" "$have" | jq -Rcn 'input | fromjson as $r
+      | ([inputs | fromjson? | objects | .card | strings] | INDEX(.)) as $have
+      | $r | map(select(.card == null or $have[.card] == null) | {body})' 2>/dev/null) \
+    && rec=$(farstates "$rec") && jq -c '[.[].far // {}] | add // {}' <<<"$rec"
+}
+# <folder>: queuedfar's answer kept in the GitHub folder as cardfar, beside the issues; no file when it cannot be read.
+# With no record of the cards nothing runs.
+queuedfarkeep() {
+  [ -s "${TACARDS:-}" ] || return 0
+  queuedfar > "$1/cardfar.new" && mv -f "$1/cardfar.new" "$1/cardfar" || rm -f "$1/cardfar.new" "$1/cardfar"
+}
 snapshot() (
   next=null; held=null; built=null; queue=null; yes=$YES
   lintyes=$LINTYES
@@ -856,6 +900,10 @@ snapshot() (
       cacheWrite: (.value[3] // (.value[0] * 1.25))})), aliases, overrides: $o, names, seen, research: (if $rm == "" then null else $rm end)}' "$d/pricedall"; } > "$d/prices" 2>/dev/null \
     && [ -s "$d/prices" ] || echo null > "$d/prices"
   echo null > "$d/issues"; echo null > "$d/upall"
+  # The other repositories' issues the waiting cards name: as kept in the GitHub folder (GITHUB), else asked now.
+  local cardfar=/dev/null
+  if [ -n "$GITHUB" ]; then [ ! -s "$GITHUB/cardfar" ] || cardfar=$GITHUB/cardfar
+  elif [ -s "${TACARDS:-}" ] && queuedfar > "$d/cardfar"; then cardfar=$d/cardfar; fi
   # What health reads of the records (HEALTHLINE), from its kept summary (health brought it up to date): the pick
   # order and the slow-test list below both read it.
   linesum "$READ" "$STATE.health" "$d/hrec" "$HEALTHLINE" && hrec=1 || hrec=''
@@ -998,18 +1046,20 @@ snapshot() (
     && python3 "$HERE/cardruns.py" "$d/priced" "$STATE.cardruns" "$d/cards" "$d/cardruns.jq" "$d/samples" "$ht" "$SAMPLE" "$yes" \
     || exit 1
   # The records of the cards with no GitHub issue (testcard(), lib/testaction.sh), by their card: body, filed and filedUrl, which a landed one shows
-  # ($tac); and by their id, the card each has now and all its cards ($tid): one jq reads both, none when there is no record.
+  # ($tac); and by their id, the card each has now and all its cards ($tid); and the entries themselves for queue.cards
+  # (queued, null when the record is not read): one jq reads all, none when there is no record.
   jq -cn --slurpfile all "$d/cards" --slurpfile hs "$d/health" --slurpfile allp "$d/paths" --slurpfile shots "$d/shots" --slurpfile onm "$d/onmain" --slurpfile mt <(printf '%s' "$mt") \
     --slurpfile tt <({ [ -s "$TACARDS" ] && jq -c '[.cards | arrays | .[] | objects] as $e
       | {tac: (try ([$e[] | select(.card | type == "string") | {key: .card, value: {body: (.body // null), filed: (.filed // null), filedUrl: (.filedUrl // null)}}] | from_entries) catch {}),
-         tid: (try ([$e[] | select(.id | type == "string") | {key: .id, value: {card: (.card // null), all: ([.id, .card] + (.was // []) | map(strings))}}] | from_entries) catch {})}' "$TACARDS" 2>/dev/null; } \
-      || echo '{"tac":{},"tid":{}}') \
+         tid: (try ([$e[] | select(.id | type == "string") | {key: .id, value: {card: (.card // null), all: ([.id, .card] + (.was // []) | map(strings))}}] | from_entries) catch {}),
+         queued: (if (.cards | type) == "array" then $e else null end)}' "$TACARDS" 2>/dev/null; } \
+      || echo '{"tac":{},"tid":{},"queued":null}') \
     --arg shut0 "$SHUT" --arg shut1 "$OWNSHUT" --arg shut2 "$ENGSHUT" --slurpfile soff <(printf '[%s]' "$soffj") --slurpfile fl <(printf '%s' "$fl") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson np "$np" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
-    --slurpfile iss "$d/issues" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --arg pef "$pef" --argjson efforts "$EFFORTS" \
+    --slurpfile iss "$d/issues" --slurpfile cf "$cardfar" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --arg pef "$pef" --argjson efforts "$EFFORTS" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson pn "$pn" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg lintyes "$lintyes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
     --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q
-    | [$shut0, $shut1, $shut2] as $shuts | [$tt[0].tac] as $tac | [$tt[0].tid] as $tid | '"$DEPS$LEVEL$INSIDE"'
+    | [$shut0, $shut1, $shut2] as $shuts | [$tt[0].tac] as $tac | [$tt[0].tid] as $tid | '"$DEPS$LEVEL$INSIDE$TCQUEUE"'
     def day: fromdate | strflocaltime("%Y-%m-%d");
     def usd: if length == 0 then 0 elif any(.usd == null) then null else map(.usd) | add * 10000 | round / 10000 end;
     # The totals: the dollars of the steps that are priced, and how many are left out for having no price.
@@ -1384,7 +1434,8 @@ snapshot() (
          beyond: (if $landed then null else .x.beyond end)} + umbrella + times],
        queue: {next: ($next | if . == null then null else map(. + {parent: parent} + umbrella + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) end), order: ($q.order | if type == "array" then map(. + umbrella + (if $h.room.issue == .issue then {room: $h.room.reason} else {} end)) else null end),
          holding: ($q.holding // null | if . == null then null else map(. + umbrella) end), skipped: ($q.skipped // null | if . == null then null else map(. + umbrella) end),
-         waiting: ($q.waiting // null | if . == null then null else map(. + {waitsOn: [.waitsFor[] | numbers | {issue: ., state: depstate(.)}]} + umbrella) end)},
+         waiting: ($q.waiting // null | if . == null then null else map(. + {waitsOn: [.waitsFor[] | numbers | {issue: ., state: depstate(.)}]} + umbrella) end),
+         cards: tcqueue($tt[0].queued; $c; $iss[0]; $cf[0]; $shuts; $fu; $control.rules // {}; $prio)},
        open: $openpart,
        control: $control,
        modelSettings: $settings,

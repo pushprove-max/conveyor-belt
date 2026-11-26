@@ -573,6 +573,23 @@ title and text of the card. Conveyor closes that issue at once with a comment th
 is already on main. The row then links the issue. A card that shows **Already fixed** landed no commit, so its row has
 no **File on GitHub**.
 
+## Queued cards with no GitHub issue
+
+Some cards wait to be picked and have no GitHub issue, for example review follow-ups and docs sweep cards
+([Cards with no GitHub issue](cards.md#cards-with-no-github-issue)). You find them on the Rules tab. Each one shows
+its kind, for example "Review follow-up of #12", and its title.
+
+- **What these rules produce** counts them with the issues. A card that is ready counts in "ready to build".
+- **Next up** shows the cards that are ready, at their place in the pick order.
+- "waiting on another card" opens the list of the cards that wait. Each one says what it waits on.
+- **Skipped** shows each card that a rule skips, with the rule.
+- **Held by you or a label** shows the held cards.
+
+When a list has more than five of these cards, they are one row with their count. Click the row to see them. When the
+Board cannot read these cards, it shows the issues and the line "Conveyor could not read the cards with no GitHub
+issue." When GitHub does not list the open issues, the Rules tab still shows these cards. `/units` shows how many of
+these cards wait.
+
 ## Held issues and dependencies
 
 An issue that is not being built is in Held for one of four reasons: **Held by you**, **Held by a label**,

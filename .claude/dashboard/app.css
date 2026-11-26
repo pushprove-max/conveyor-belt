@@ -523,6 +523,8 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .declined-claim { display: block; margin-top: 2px; font-weight: 650; }
 .declined-line { display: block; }
 .declined-claim .declined-line, .declined-more .declined-line { display: inline; }
+/* A queued card's title on the Rules tab is drawn as a finding (code spans), its sentences on one line. */
+.rules-side [data-card] .declined-line, .rules-held [data-card] .declined-line { display: inline; }
 .declined-proof { margin-top: var(--sp-1); }
 .declined-proof-label { display: block; color: var(--muted); font-size: var(--fs-xs); font-weight: 600; }
 .day-totals .foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }

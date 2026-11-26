@@ -226,6 +226,7 @@
 {"area": "snapshot", "test": "snapexec.test.sh"}
 {"area": "snapshot", "test": "shots.test.sh"}
 {"area": "snapshot", "test": "testfiles.test.sh"}
+{"area": "snapshot", "test": "snapqueued.test.sh"}
 {"area": "snapshot", "file": "conveyor/lib/snapshot.sh"}
 {"area": "snapshot", "file": "conveyor/cardruns.py"}
 {"area": "snapshot", "test": "snaplines.test.sh"}
