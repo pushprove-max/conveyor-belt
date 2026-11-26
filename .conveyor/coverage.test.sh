@@ -241,8 +241,7 @@ got=$(sed -n 's/^TESTRUN case	//p' "$F/ob/test-changed.log" | paste -sd ' ' -)
 [ "$(cat "$F/ob.rc")" = 0 ] && [ -z "$got" ] && grep -qF 'selects none of the cases of conveyor/tests/b.test.sh' "$F/ob.out" \
   && ok "a card's one-file run of a listed case file that holds no case the map lists runs none, and passes" \
   || no "--file b.test.sh, fone changed, list a and b.test.sh: exit $(cat "$F/ob.rc"), ran '$got': $(cat "$F/ob.out")"
-# Issue 1593's review. Bug: a change to a hook library the map does not hold (--funcs cannot read hook-fire-log.sh or
-# strip-quoted.sh) ran no test: a library has no test of its own name and no area. It runs the hooks' tests that name
+# Issue 1593's review. Bug: a change to a hook library the map does not hold ran no test: a library has no test of its own name and no area. It runs the hooks' tests that name
 # it, or name a hook that names it: h.test.sh (h.sh names lib/hl.sh) and l.test.sh (names it), not g, k or m.test.sh.
 mkdir -p "$R/.claude/hooks/lib" && printf 'hlf() {\n  :\n}\n' > "$R/.claude/hooks/lib/hl.sh" && printf '# . lib/hl.sh\n' >> "$R/.claude/hooks/h.sh" \
   && printf '. "$(dirname "$0")/../lib/hl.sh"\n' > "$R/.claude/hooks/__tests__/l.test.sh" && cp "$F/new" "$M" && git -C "$R" add -A \
