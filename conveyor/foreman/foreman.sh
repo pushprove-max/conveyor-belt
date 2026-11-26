@@ -67,7 +67,7 @@
 #   filing, before the command runs, marks every record (conveyor.sh control filing on: its loop holds a follow-up too) and sets each whose new issues start in the queue to start them held
 #   (another project's too, as the command may file there) (conveyor.sh control start held), so an issue is held from its first sight, however long the command runs on;
 #   when a record cannot be set, or the command is to run in the background, the command is refused. filed holds every
-#   issue the command's output links (github.com/<owner>/<name>/issues/<n>) in the record whose main checkout's GitHub
+#   issue the command's output links (github.com/<owner>/<name>/issues/<n>, but not one in an example line of gh's help text, which starts with "$ ") in the record whose main checkout's GitHub
 #   repository is <owner>/<name> (read on the host file's ssh host for a main not on this machine), else the record named <name> whose main's repository cannot be read, letter case aside (lib.sh record_of; filing needs no lookup,
 #   as it sets every record), unless it was released or held already, or is an older issue opened in the queue (conveyor.sh control adopt; control hold in a
 #   record whose engine has no adopt), so a release given before filed runs stays, and tells the Foreman which it holds, which were released and which were older; then it sets back to
@@ -707,9 +707,9 @@ filed() {
   files "$in" || return 0
   ev=$(jq -r '.hook_event_name // "PostToolUse"' <<<"$in")
   recs=$(records 2>&1) || { bad+=("any issue you filed (${recs##*$'\n'})"); recs=''; }
-  # Every issue linked, as "<owner>/<name> <n>", each once: two owners' repositories of one name are two projects.
+  # Every issue linked, as "<owner>/<name> <n>", each once: two owners' repositories of one name are two projects. A line starting "$ " is an example in gh's help text (on a bad flag, stderr or 2>&1 stdout): no filed issue.
   n=$(jq -r '[.tool_response, .error] | map(select(. != null) | if type == "object" then [.stdout, .stderr] | map(strings) | join("\n") else tostring end) | join("\n")' <<<"$in" 2>/dev/null \
-    | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/issues/[1-9][0-9]*' | awk -F/ '{ print $2 "/" $3, $5 }' | sort -u)
+    | grep -vE '^[[:space:]]*\$[[:space:]]' | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/issues/[1-9][0-9]*' | awk -F/ '{ print $2 "/" $3, $5 }' | sort -u)
   while read -r gh nums; do
     [ -n "$gh" ] && [ -n "$recs" ] || continue
     nums=$(awk -v r="$gh" '$1 == r { print $2 }' <<<"$n" | paste -sd' ' -)

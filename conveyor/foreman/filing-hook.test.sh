@@ -72,7 +72,43 @@ out=$(run "$(line PostToolUse)" "$(input "$c" '{hook_event_name: "PostToolUse"}'
 [ ! -s "$T/marks" ] || fail "the filed line started the engine; command: $c; marks: $(cat "$T/marks")"
 }
 
-cases=(quiet files testissue)
+# gh's help text, as it prints on a bad flag: an example links issue 42 of another repository.
+HELP='unknown flag: --bogus\n\nUsage:  gh issue create [flags]\n\nEXAMPLES\n  # Create an issue under a parent\n  $ gh issue create --parent https://github.com/cli/go-gh/issues/42\n\nLEARN MORE\n'
+# hook <event> <command> <tool output as jq>: run the filed line of that event on a command and its output.
+hook() { run "$(line "$1")" "$(jq -cn --arg c "$2" --arg e "$1" '{session_id: "s1", tool_use_id: "x", hook_event_name: $e, tool_input: {command: $c}} + '"$3")"; }
+# Bug (#1703): a `gh issue create` that failed on a bad flag printed gh's help text, whose example links issue 42 of
+# another repository, and filed told the Foreman that issue was not held.
+t_failed() {
+CASE=failed; case_ failed
+local c='gh issue create -R example/alpha --bogus --title example'
+out=$(hook PostToolUseFailure "$c" "{error: \"Exit code 1\\n$HELP\"}")
+case $out in *'Not held in Conveyor'*) fail "the example link in gh's help text was taken for a filed issue; command: $c; output: $out" ;; esac
+! grep -q 'control adopt' "$T/calls" 2>/dev/null || fail "the example link in gh's help text was held; command: $c; calls: $(cat "$T/calls")"
+}
+# Bug (#1703): with 2>&1 gh's help text is on stdout of a call that ends well (|| true), and a call whose first create
+# failed and whose second worked has the help text before the link of the issue it filed (issue 41): that one is held, 42 is not.
+t_helpout() {
+CASE=helpout; case_ helpout
+local c='gh issue create -R example/alpha --bogus --title example 2>&1 || true'
+out=$(hook PostToolUse "$c" "{tool_response: {stdout: \"$HELP\", stderr: \"\"}}")
+case $out in *'Not held in Conveyor'*) fail "the example link in gh's help text on stdout was taken for a filed issue; command: $c; output: $out" ;; esac
+! grep -q 'control adopt' "$T/calls" 2>/dev/null || fail "the example link in gh's help text on stdout was held; command: $c; calls: $(cat "$T/calls")"
+c='gh issue create -R example/alpha --bogus --title a 2>&1; gh issue create -R example/alpha --title b --body b'
+out=$(hook PostToolUse "$c" "{tool_response: {stdout: \"${HELP}https://github.com/example/alpha/issues/41\\n\", stderr: \"\"}}")
+case $out in *'Not held in Conveyor'*) fail "the issue the second create filed was not held; command: $c; output: $out" ;; esac
+grep -qx 'alpha control adopt 41' "$T/calls" || fail "the issue the second create filed was not held; command: $c; calls: $(cat "$T/calls" 2>/dev/null)"
+! grep -q 'control adopt.* 42\|cli' "$T/calls" || fail "the example link in gh's help text was held; command: $c; calls: $(cat "$T/calls")"
+}
+# A command that files an issue and then fails (PostToolUseFailure) still holds the issue its output links, in JSON as
+# gh api prints it: a filter that kept only a link alone on its line would drop it.
+t_failedfiled() {
+CASE=failedfiled; case_ failedfiled
+local c='gh api repos/example/alpha/issues -f title=example -f body=example; false'
+out=$(hook PostToolUseFailure "$c" '{error: "Exit code 1\n{\"url\":\"https://api.github.com/repos/example/alpha/issues/41\",\"html_url\":\"https://github.com/example/alpha/issues/41\",\"number\":41}\n"}')
+grep -qx 'alpha control adopt 41' "$T/calls" || fail "an issue filed by a command that then failed was not held; command: $c; output: $out; calls: $(cat "$T/calls" 2>/dev/null)"
+}
+
+cases=(quiet files testissue failed helpout failedfiled)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
