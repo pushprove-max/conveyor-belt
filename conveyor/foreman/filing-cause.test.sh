@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# The Foreman's filing hook (foreman.sh filing, cause.sh no_cause, no_design) refuses a fix issue with no `## Cause` section (#1293)
+# The Foreman's filing hook (foreman.sh filing, filing-cause.sh no_cause, no_design) refuses a fix issue with no `## Cause` section (#1293)
 # and an issue with a `## What to build` section and no `## Design` section (#1730).
 # Bug caught: the Foreman filed a fix that named a symptom ("the reader is over its size cap") and never the source of
 # the problem, because nothing in the filing path asked for the cause.
@@ -287,7 +287,7 @@ refused "gh issue create --title Example --body-file - <<'EOF'"$'\n'"It's a note
 # unfenced <inline> <quote> <text> keeps what is outside the fences and reads on after each block ends.
 t_fence() {
 CASE=fence
-. "$SRC/cause.sh"
+. "$SRC/filing-cause.sh"
 local o
 o=$(unfenced 0 "" $'a\n~~~\nx\n~~~\nb\nc') || fail "unfenced failed"
 [ "$o" = $'a\nb\nc' ] || fail "text after a closing tilde fence was not read on; got: $o"
@@ -409,6 +409,7 @@ jq -e --arg p "$T/none.md" '.hookSpecificOutput.permissionDecision == "deny" and
 # five (CARDLINKED): the cap left it out. The case stages a change to no_cause in a copy of this checkout and asks the
 # engine for the card's list as its Test step does (testsel narrow, then testcap with CARDLINKED; neither runs a
 # test): the list comes from the links, the name lookup and the cap together, which the link text alone does not show.
+# It then asks the project's selector (.conveyor/test-changed.sh) for its list of the same change.
 t_linked() {
 CASE=linked
 local root W=$B/linked R=$B/linked/r f
@@ -433,6 +434,13 @@ grep -qxF conveyor/foreman/filing-cause.test.sh <(tail -n +2 "$W/list") \
 # (testcap), and any of them can push this file out. Only a list the cap leaves whole runs it whatever the records say.
 [ "$(head -1 "$W/list")" = 0 ] \
   || fail "the cap leaves files out of the list of a card that changes only no_cause in $f, so its records can drop conveyor/foreman/filing-cause.test.sh; left out: $(head -1 "$W/list"), list: $(tail -n +2 "$W/list" | tr '\n' ' ')"
+# The project's own selector picks the tests the Test step runs. It finds a test by name only when the test's name
+# starts with the source's stem (`cause.sh` does not find `filing-cause.test.sh`, though the engine's lookup above does),
+# so a rename or a dropped link can leave this file out there alone. Its listing (CONVEYOR_TEST_LIST) runs no test.
+( unset "${!CONVEYOR_TEST_@}" CONVEYOR_SHELL_TEST_CASE BASH_ENV; cd "$R" && CONVEYOR_TEST_LIST=$W/plist bash .conveyor/test-changed.sh ) > "$W/pout" 2>&1 \
+  || fail "the project's selector made no list for a change to no_cause in $f: $(tail -5 "$W/pout")"
+grep -qxF conveyor/foreman/filing-cause.test.sh "$W/plist" \
+  || fail "the project's selector (.conveyor/test-changed.sh) does not select conveyor/foreman/filing-cause.test.sh for a change to no_cause in $f; its list: $(tr '\n' ' ' < "$W/plist")"
 }
 
 cases=(what heading list quote fence bug new design closer linked)

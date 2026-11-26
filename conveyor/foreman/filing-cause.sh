@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# cause.sh: the Foreman's check that a fix issue it files has a `## Cause` section (no_cause), sourced by foreman.sh,
-# whose filing hook calls it; it uses foreman.sh files and lib.sh stdin_file. It is a file of its own so that a change
-# to it selects its tests (conveyor/foreman/filing-cause.test.sh, linked in .conveyor/test-links.json) and only them:
-# in foreman.sh, they were one of more linked test files than a card's Test step runs.
+# filing-cause.sh: the Foreman's check that a fix issue it files has a `## Cause` section (no_cause), sourced by
+# foreman.sh, whose filing hook calls it; it uses foreman.sh files and lib.sh stdin_file. It is a file of its own so that
+# a change to it selects its tests and only them: in foreman.sh, they were one of more linked test files than a card's
+# Test step runs. Its name selects them (conveyor/foreman/filing-cause.test.sh, its stem and `.test.sh`) in both the
+# engine's selector and .conveyor/test-changed.sh, which finds only a test whose name starts with the source's stem.
 # filing_read <hook input> then no_cause: 0 when its command files a fix issue with no `## Cause` section: the command files an issue
 # (foreman.sh files, or `ask <project> testissue`), and the text it carries (a body file it names, when readable, too, and
 # for `--body-file -` the file a `< file` redirect names) has a `## What happens now` section or a `bug` label (`--label bug`, `-l foo,bug`, `--label=bug`); `testissue` always

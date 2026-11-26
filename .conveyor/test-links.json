@@ -557,9 +557,6 @@
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
   ],
-  "conveyor/foreman/cause.sh": [
-    "conveyor/foreman/filing-cause.test.sh"
-  ],
   "conveyor/foreman/foreman.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",

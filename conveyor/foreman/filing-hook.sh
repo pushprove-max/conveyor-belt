@@ -7,7 +7,7 @@
 # the project's engine, and the engine, never start. Any other input goes on to `shim.sh conveyor/foreman/foreman.sh
 # <filing | filed>` whole, which tests it again with the engine's own files.jq. Both hooks of a call run this same
 # copy, so a filing it lets through has its filed too. A filing hook for a command naming `testissue` goes on too: the
-# engine checks that the fix issue it files has a Cause section (cause.sh no_cause).
+# engine checks that the fix issue it files has a Cause section (filing-cause.sh no_cause).
 set -u
 case ${1:-} in filing | filed) ;; *) echo "usage: filing-hook.sh filing | filed" >&2; exit 2 ;; esac
 in=$(cat)
