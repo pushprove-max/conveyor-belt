@@ -8,7 +8,7 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-# resumed is port.test.sh's: the runner loads every case file into one shell. A change to port.test.sh runs this file
+# resumed is resume.test.sh's: the runner loads every case file into one shell. A change to resume.test.sh runs this file
 # too, through its link in .conveyor/test-links.json.
 
 # Bugs: a blocked card whose change cannot be staged (an index lock) loses it with its worktree;

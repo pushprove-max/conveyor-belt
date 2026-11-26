@@ -162,7 +162,7 @@ t_camebacktold() {
   # review's line and the Board's snapshot name the one that came back.
   grep -qx 'E1 \[P2\] a.txt:1 a nit. Proof: line 3 reads fix2' "$b" && grep -qx 'E2 \[P1\] b.txt:2 a new bug' "$b" || fail "the fix session was not given the findings' ids: $(cat "$b")"
   [ "$(cat "$T/$CASE/survived")" = '[{"id":"E1","rounds":1}]' ] || fail "the review line does not name the finding that came back: $(cat "$T/$CASE/survived")"
-  # The snapshot reads it from the card's review lines, as card() writes them (kline, port.test.sh), on a card that
+  # The snapshot reads it from the card's review lines, as card() writes them (kline, resume.test.sh), on a card that
   # landed now (the snapshot's landed are today's).
   { kline c7 9 picked ok; kline c7 9 review NO-GO; kline c7 9 review NO-GO "{\"survived\": $(cat "$T/$CASE/survived")}"; kline c7 9 review GO; landed 9 | jq -c '.card = "c7"'; } \
     | jq -c --arg t "$(date -u +%FT%TZ)" '.time = $t' > "$ST/cards.jsonl"
@@ -173,7 +173,7 @@ t_camebacktold() {
     || fail "the GO lost its answer on E2: $(cat "$T/$CASE/an3")"
 }
 
-# The card that takes up the kept work of retried <issue> (resumed, port.test.sh) and its first review, <review file>,
+# The card that takes up the kept work of retried <issue> (resumed, resume.test.sh) and its first review, <review file>,
 # decided as card() decides it (AFTERREVIEW, review.test.sh), with no card run: $RESUMED and $AFTER. <before> runs
 # after resumeplan, <after> once it has decided, in the same shell, on that card's worktree ($wt).
 retried() { # <issue> <review file> [<after>] [<before>]
@@ -452,7 +452,7 @@ t_retryotherrounds() {
   [ "$(cat "$T/$CASE/after3")" = '["last","max-reviews","",{"stop":"max-reviews","pass":3,"rounds":0}]' ] \
     && [ "$(cat "$T/$CASE/ups")" = '[100101,100102]' ] && [ "$(jq -r .title "$STUB/filed" | tr '\n' '|')" = '[P2] a.txt:3 drops the payment|[P2] c.txt:3 a nit|' ] \
     || fail "the third review did not end the loop saying why, or did not file its findings: $(cat "$T/$CASE/after3") $(cat "$STUB/filed" 2>&1)"
-  # The review line and the filed line, as card() writes them with ended (kline, port.test.sh), pass the record check,
+  # The review line and the filed line, as card() writes them with ended (kline, resume.test.sh), pass the record check,
   # and the Board's card reads why the loop ended from the snapshot's reviews (the snapshot's landed are today's).
   e=$(jq -c '.[3]' "$T/$CASE/after3")
   { kline c9 7 picked ok; kline c9 7 review NO-GO; kline c9 7 review NO-GO; kline c9 7 review NO-GO "$e"; kline c9 7 filed ok "$(jq -c '. + {followups: [100101, 100102]}' <<<"$e")"

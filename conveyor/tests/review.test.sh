@@ -20,7 +20,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # <before> changes it (pass=3, a fix round: told). <after> runs once it has decided, in the same shell. The outcome
 # card() acts on is $AFTER: {res, after, last, stop, hard, last0, isfu, priv, why}; last is the one card() reads to
 # land a last review with its follow-ups filed or declined. AFTERREVIEW, the call, also runs on the
-# card that takes up kept work, after resumeplan (resumed, port.test.sh). Used by the cases of reviewback, fail and
+# card that takes up kept work, after resumeplan (resumed, resume.test.sh). Used by the cases of reviewback, fail and
 # judge too (the runner loads every case file into one shell; .conveyor/test-links.json runs them when this file
 # changes).
 AFTERREVIEW='res=$(verdict "$wt.review"); afterreview

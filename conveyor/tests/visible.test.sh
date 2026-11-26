@@ -8,7 +8,7 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-# resumed is port.test.sh's: the runner loads every case file into one shell. A change to port.test.sh runs this file
+# resumed is resume.test.sh's: the runner loads every case file into one shell. A change to resume.test.sh runs this file
 # too, through its link in .conveyor/test-links.json.
 
 # Bugs: a change customers or staff would see lands without the owner's yes: on a GO, or on the last review's NO-GO
@@ -39,7 +39,7 @@ visiblestart() { # <issue>
 # card's worktree and landing), carried from one turn to the next in the records and the kept folder; no one engine
 # function holds that path, and t_visibleyes, t_visibleapproved and t_retryoff each prove one such path from end to
 # end. The block the others start from is that real turn; their retried card's resume is a call of resumeplan
-# (resumed, port.test.sh).
+# (resumed, resume.test.sh).
 RO='Run migration 0004 before the deploy | the new column is missing | a.txt:2'
 blockedmake() { # <folder>
   ( CASE=${1#"$T/"}; visiblestart 8

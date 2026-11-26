@@ -218,6 +218,39 @@ moved() { sed -E "s/\.txt:([0-9]+)/.txt:$1\1/g" <<<"$2"; } # <k> <review>
 # The review on stdin, as review <k> of a case whose loop runs on past review 2: from review 2 on, a NO-GO of new P2
 # findings alone ends the loop (loopstop(): new-p2), so review 2 has its first P2 made a P1 and gets a fix round.
 p1at2() { if [ "$1" = 2 ]; then awk '!d && sub(/\[P2\]/, "[P1]") { d = 1 } 1'; else cat; fi; } # <k>
+# NOGO3 with each finding a P2 (its P0, and the line with no level, which counts as a P1): a last NO-GO that lands with its follow-ups filed (one with a P0 or a P1 does not land).
+PORTNOGO=${NOGO3/\[P0\]/[P2]}; PORTNOGO=${PORTNOGO/$'\n'b.txt:22/$'\n'[P2] b.txt:22}
+# rebasesetup <issue>: a fresh main with that one issue, every review a GO; the build adds a line, and its rebuild
+# after a landing conflict ($STUB/rebuild) keeps what it was handed.
+rebasesetup() {
+  setup "[$(issue "$1" 2026-01-01)]"; for i in 1 2 3 4; do echo "$GO" > "$STUB/review.$i"; done
+  # The build adds a line; meanwhile main changes the line beside it. The rebuild holds both.
+  cat > "$STUB/build" <<'EOF'
+if grep -q '^# Landing conflict' "$STUB/brief"; then cat a.txt > "$STUB/started-from"; eval "$(cat "$STUB/rebuild")"
+else echo two >> a.txt; fi
+EOF
+}
+# conflicted <issue> <commands>: card c7 of <issue> as card() holds it when land() (lib/claim.sh) says its change no
+# longer applies to main, with no card run: its worktree ($FXWT, fx_wt) on main's earlier commit with the build's line
+# two staged in a.txt, main's a.txt then changed to ONE, and card()'s locals after a GO that let it land. <commands>
+# run in that shell: land1 is land()'s answer (it writes <worktree>.patch from the staged change, t the conflict), and
+# outcome adds what card() acts on after landconflict() (go, and the rebased, ported, parsecheck, kept and pass it
+# sets) to $OUTCOME, one JSON line a call.
+conflicted() {
+  fx_wt 'echo two >> a.txt' b.txt b
+  echo ONE > "$R/a.txt"; git -C "$R" commit -qam other || fail "main could not be moved"
+  fx_in 'cd "$R" || exit 3; n='"$1"' c=c7 br="" wt=$CARDS/c7
+    issue=$(gh issue view "$n" --json number,title,body,labels,milestone) || exit 3
+    sprompt="the card prompt"
+    was="" res=GO ended="{}" rebased="" ported="" ups="" dec="" left="" tfix="" caught="" pass=1 rounds=0 last="" docs="" docpass="" kept="" parsecheck="" fin="" finend="{}" kp="" why="" old="" err=""
+    land1() { git -C "$wt" add -A && git -C "$wt" diff --cached --binary --no-renames > "$wt.patch"; t="rebase onto main conflicts: CONFLICT (content): Merge conflict in a.txt"; }
+    outcome() { jq -cn --arg go "$go" --arg r "$rebased" --arg p "$ported" --arg pc "$parsecheck" --arg k "$kept" --argjson pass "$pass" \
+      "{go: \$go, rebased: \$r, ported: \$p, parsecheck: \$pc, kept: \$k, pass: \$pass}" >> "$T/$CASE/outcome"; }
+    '"$2"
+  # shellcheck disable=SC2034 # OUTCOME is read by the cases that call conflicted (port.test.sh, resume.test.sh)
+  OUTCOME=$(cat "$T/$CASE/outcome" 2>/dev/null)
+  [ "$RC" = 0 ] || fail "landconflict could not be called on #$1, or the commands after it failed (exit $RC): $(cat "$T/$CASE/run.out")"
+}
 
 setup() { # <issues json>: a fresh main repo, the three stubs, one billing and one prism ruling
   export R=$T/$CASE/main STUB=$T/$CASE/stub ST

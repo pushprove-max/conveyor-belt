@@ -10,7 +10,7 @@
 
 # rerunsetup, rerunfiles, ran, rerunedit, rerunstep and rerunwt are rerun.test.sh's: the runner loads every case
 # file into one shell. A change to rerun.test.sh's helpers or setup runs this file too, through its link in .conveyor/test-links.json.
-# So is resumed port.test.sh's, through that file's link.
+# So is resumed resume.test.sh's, through that file's link.
 
 # Bug this guards against: a session that brings the change onto another HEAD and edits it where main changed
 # nothing (here a.txt, the card's own file, on a HEAD whose new commit changes no file) has edited it outside any

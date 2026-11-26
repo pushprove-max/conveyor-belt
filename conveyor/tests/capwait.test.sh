@@ -265,7 +265,7 @@ EOF
 
 # Bug it catches (E10 of a later review): the rebuild reset its worktree to main, then waited for room; a card that
 # landed meanwhile was not in it, so the session started on the earlier commit. A caphold() stand-in lands a commit on
-# main; the rebuild must start on it. rebasesetup and conflicted are port.test.sh's.
+# main; the rebuild must start on it. rebasesetup and conflicted are lib.sh's.
 t_caprebaseheld() {
   rebasesetup 7
   echo 'git log -1 --format=%s > "$STUB/started-on"; printf "ONE\ntwo\n" > a.txt' > "$STUB/rebuild"

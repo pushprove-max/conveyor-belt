@@ -8,7 +8,7 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 # A page of the repository says <text> (lines joined, spaces folded). Each case file that calls it defines its own, named after the file: the bug check puts only the card's test files on main's code, where a helper in lib.sh is missing, and the runner sources the case files into one shell, where one name cannot be defined twice.
 pagesays_visibleinherit() { tr '\n' ' ' < "$SRC/../$1" | tr -s ' ' | grep -qF -- "$2" || fail "$1 does not say \"$2\": $3"; } # <page> <text> <what the run showed>
-# resumed is port.test.sh's: the runner loads every case file into one shell. A change to port.test.sh runs this file
+# resumed is resume.test.sh's: the runner loads every case file into one shell. A change to resume.test.sh runs this file
 # too, through its link in .conveyor/test-links.json.
 
 # Bugs: a follow-up stops again for a visible change its parent already had the owner's yes for;
