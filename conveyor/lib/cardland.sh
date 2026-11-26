@@ -29,9 +29,14 @@ cardready() {
     # The places of the diff are widened at least as far as in the hash the owner approved (lintpolicy()): all after
     # its hash, as a path in its widths can hold a space.
     ph=''; [ -z "$from" ] || ph=$(jq -r '.policy // "" | index(" ") as $i | if $i then .[$i + 1:] else "" end' "$pb" 2>/dev/null) || ph=''
-    { packget lint pf && pf=$(lintpolicy "$wt" "$(git -C "$wt" rev-parse HEAD)" "$pf" "$ph"); } || { block "$c" "$n" "$wt" "lint: the engine could not read the lint policy files that the change changes, so nothing landed"; return; }
+    { packget lint pl && pf=$(lintpolicy "$wt" "$(git -C "$wt" rev-parse HEAD)" "$pl" "$ph"); } || { block "$c" "$n" "$wt" "lint: the engine could not read the lint policy files that the change changes, so nothing landed"; return; }
     ph=${pf%%$'\n'*}; pf=$(tail -n +2 <<<"$pf" | jq -Rrs 'split("\n") | map(select(. != "")) | join(", ")')
     [ -z "$pf" ] || [ -z "$from" ] || ! lintyes "$issue" "$pb" "$ph" || { echo "conveyor: card $c: its lint policy change is the one $OWNER approved"; pf=''; }
+    # A new stop keeps the widths this diff needs on this main, never the old approval's: a width kept from it (one
+    # number for every file, from before each file had its own) hashed the lines next to an edit, and a later main
+    # edit of one of them asked for the yes again.
+    [ -z "$pf" ] || [ -z "$from" ] || { ph=$(lintpolicy "$wt" "$(git -C "$wt" rev-parse HEAD)" "$pl") && ph=${ph%%$'\n'*} && [ -n "$ph" ]; } \
+      || { block "$c" "$n" "$wt" "lint: the engine could not read the lint policy files that the change changes, so nothing landed"; return; }
   fi
   # The visible-change gate after the review (visgate()): a stop blocks the card, its reason in err.
   visgate || { block "$c" "$n" "$wt" "$err" post; return; }

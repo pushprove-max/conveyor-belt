@@ -245,6 +245,33 @@ t_lintyeswidths() {
   yeslanded && [ "$(blocks | wc -l)" = 1 ] && [ "$(git -C "$R" show HEAD:.size-exempt)" = "$(printf 'x\ny # main\nz\nv\nw')" ] \
     || fail "after main edited .size-exempt's y and .lintrc's other done, the approved change did not land: $(blocks | paste -sd'|'); $(yessteps)"
 }
+# Bug (issue 1575 follow-up): a stop kept before each file had its own width holds `<hash> 1`. When main then edited
+# the line next to .lintrc's edit, the approval of that stop no longer covered the diff, and the new stop saved the
+# old width (`{".lintrc":1}`), though .lintrc needs none. Approved, that stop asked for the yes again at the next main
+# edit of that line. The new stop saves the width the diff needs (0), and its approval lands after main edits c again.
+t_lintyesoldwidth() {
+  local b
+  yessetup 'awk '\''NR == 2 { print; print "# why"; next } 1'\'' .lintrc > .l && mv .l .lintrc'
+  # Each main edit of c is in the kept patch's context lines, so each retry brings it onto main in a session, reviewed.
+  echo "$GO" > "$STUB/review.3"
+  printf 'a\nb\nc\nd\n' > "$R/.lintrc" && git -C "$R" add .lintrc && git -C "$R" commit -qm "policy file" || fail "main's policy file"
+  # loop: the stop, the approval line, main's edits and the landing through cardready() are turns of a card's path
+  loop run > /dev/null || fail "run exited non-zero"
+  b=$(ls "$ST"/kept/*/*.body) && jq -c '.policy |= (split(" ")[0] + " 1")' "$b" > "$b.n" && mv "$b.n" "$b" || fail "no kept body to make old: $(blocks)"
+  printf 'a\nb\nc # rules\nd\n' > "$R/.lintrc" && git -C "$R" commit -qam "main edits c" || fail "main's first edit"
+  approve
+  # loop: as above, the turn after the approval line finds the diff changed at the old width and stops again
+  loop run > /dev/null || fail "the run after the first approval line exited non-zero"
+  b=$(ls -t "$ST"/kept/*/*.body | head -n 1)
+  [ "$(blocks | wc -l)" = 2 ] && jq -e '.policy | test(" [{]\".lintrc\":0[}]$")' "$b" > /dev/null \
+    || fail "the stop after the old width 1 did not keep .lintrc's own width 0: $(blocks | paste -sd'|'); $(cat "$b" 2>&1)"
+  printf 'a\nb\nc # limits\nd\n' > "$R/.lintrc" && git -C "$R" commit -qam "main edits c again" || fail "main's second edit"
+  issue 7 2026-01-01 | jq -c '[.body += "\n\nVisible change approved: Dana 2026-01-02 (yes)\nVisible change approved: Dana 2026-01-03 (yes)\n"]' > "$STUB/issues.json"
+  # loop: as above, the turn after the second approval line lands the kept patch on the newer main
+  loop run > /dev/null || fail "the run after the second approval line exited non-zero"
+  yeslanded && [ "$(blocks | wc -l)" = 2 ] \
+    || fail "after main edited c next to the approved .lintrc edit, the approved change did not land: $(blocks | paste -sd'|'); $(yessteps)"
+}
 # Bug: a yes covers more than the policy diff it was given for: a session after the yes (the issue's ask changed, so
 # the kept patch gets one) edits .lintrc again, and the card lands on the old yes. It stops again.
 t_lintyesagain() {

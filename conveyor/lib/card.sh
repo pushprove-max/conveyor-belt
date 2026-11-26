@@ -292,7 +292,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local mainsec=0 mwon # mwon: main's commit and the cases it waits on there (mainred.sh mainwait()); mainsec: the seconds it has waited for main to change or for the machine (mainwaited(), holdwaited()); its landed line's waitSec adds them to waitsec
   local repaired='' lane queued='' # repaired: the repair lane passed its test step (mainred.sh repairlane()), or a main-red fix card's failures are other entries' (cardland.sh redelse()), saying how; lane: its exit; queued: another card had the landing turn (gather()), so it waits for the next batch
   local ins rr # ins, rr: the review's instructions, and fix when it reviews the fix alone (donewhen.sh rereview()), reused when the last review stands (reusable())
-  local ph pf pb # ph, pf: the hash and the files of the change's lint policy diff (lintpolicy()); pb: the body kept by the card it resumes
+  local ph pf pb pl # ph, pf: the hash and the files of the change's lint policy diff (lintpolicy()); pb: the body kept by the card it resumes; pl: the pack's lint field
   local go sx # go, sx: what the step that returned says follows (above), and its exit
   # shellcheck disable=SC2034 # SEATCARD is read by seat() in lib/control.sh
   local SEATCARD=$n # every step of this card, its split check too, runs on the seats the control record keeps for its issue (seat(), lib/control.sh)
