@@ -144,8 +144,7 @@ t_batchland() {
 t_batchmask() {
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; echo 8 > "$STUB/ready"
   # Each card's tests are its own: card <n> writes s<n>.txt too, which the links give t<n>.test.sh, and a.txt, which
-  # both change, is linked to none. A card whose landing touched a test file of #7's would make #7's pass run again
-  # there (sharedtests(), lib/claim.sh), not be reused.
+  # both change, is linked to none.
   echo x > "$R/t7.test.sh"; echo x > "$R/t8.test.sh"; git -C "$R" add t7.test.sh t8.test.sh
   linkset '{"s7.txt": ["t7.test.sh"], "s8.txt": ["t8.test.sh"]}'
   cat > "$STUB/build" <<'EOF'

@@ -62,22 +62,3 @@ t_testlistlinkdocs() {
   [ -n "$s" ] || fail "docs/configuration.md: the text on a source file the map does not cover is not found"
   [[ $s == *'`.conveyor/test-links.json` links to it'* ]] || fail "docs/configuration.md: the text on a source file the map does not cover does not name its test links: $s"
 }
-
-# Bug it catches (#1591 review): a shared test file of the card's own change (SHAREDRUN) lost its changed cases in a
-# run again, so the command ran every case of it; and each check that sends it whole: with no test.changed, the pack's
-# command cannot read main's change (unshare() names it failed whole); linked from another of the card's test files, a
-# case the change did not change can call that file's helpers; named failed with no case (unshare()'s fallback).
-# sharedkeep() is asked for v.test.sh, the card's test files v.test.sh and h.test.sh, in each of those states.
-t_sharedkeep() {
-  eval "$(sed -n '/^sharedkeep() {/,/^}/p' "$SRC/lib/testlist.sh")"
-  local w=$T/$CASE/w pc=sel.sh r=''
-  packget() { printf -v "$2" '%s' "$pc"; }
-  ask() { if SHAREDRUN=${1:-$'v.test.sh\nz.test.sh'} sharedkeep "$w" v.test.sh v.test.sh h.test.sh; then r+=keeps,; else r+=whole,; fi; } # [<SHAREDRUN>]
-  mkdir -p "$w/.conveyor"; echo '{"v.test.sh": ["v.test.sh"]}' > "$w/.conveyor/test-links.json"; printf 'pass\tv.test.sh\n' > "$w.rerun"
-  ask; pc=''; ask; pc=sel.sh
-  echo '{"h.test.sh": ["v.test.sh"]}' > "$w/.conveyor/test-links.json"; ask
-  echo '{}' > "$w/.conveyor/test-links.json"; printf 'fail\tv.test.sh\nfail\tz.test.sh\tt_z\n' > "$w.rerun"; ask
-  printf 'pass\tv.test.sh\n' > "$w.rerun"; ask z.test.sh
-  [ "$r" = keeps,whole,whole,whole,whole, ] \
-    || fail "sharedkeep \$w v.test.sh v.test.sh h.test.sh: as kept, with no test.changed, linked from h.test.sh, named failed whole, not shared: $r (want keeps,whole,whole,whole,whole,)"
-}

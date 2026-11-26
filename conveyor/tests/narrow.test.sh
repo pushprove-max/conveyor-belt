@@ -369,38 +369,6 @@ t_narrowcapsel() {
     || fail "the note does not say the command chose 2 of the files that ran: $(cat "$T/$CASE/cards/c7.rec")"
 }
 
-# Bug it catches: the run again of the test files a card's change shares with main's (SHAREDRUN: card(), rebatch())
-# listed only the change's own test file, so a shared file it links (prices.test.sh, for a change to prices.sh and
-# mutate.test.sh) never ran, and the card landed. A change to lib/card.sh (linked to t001 to t040) and its own
-# samefile.test.sh, with t007.test.js shared and gone.test.js gone, runs samefile.test.sh and t007.test.js.
-t_narrowshared() {
-  SHAREDRUN=$'t007.test.js\ngone.test.js' caprun 40 lib/card.sh 'mkdir -p tests && echo y >> tests/samefile.test.sh'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:t007.test.js\none:tests/samefile.test.sh' ] \
-    || fail "SHAREDRUN t007.test.js, gone.test.js: the shared file did not run beside the own one (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
-}
-
-# Bug it catches: a shared file of a run again past the cap of linked files (CARDLINKED, 5) was left out. A change
-# to lib/cartsum.js linked to 120 files, with t110.test.js shared, runs the 5 the cap gives and t110.test.js.
-# Bug it catches too: the list counted t110.test.js as run and as left out (files 6, left 115, a note of 5 of 120).
-# Bug it catches too: the note said 6 of 120 ran, most recent failure first, though t110.test.js joined past the cap
-# in name order; it says 5 of 120, and 1 more because main changed it.
-t_narrowsharedcap() {
-  SHAREDRUN=t110.test.js caprun 120 lib/cartsum.js
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = "$(printf 'one:t%03d.test.js\n' 1 2 3 4 5 110)" ] \
-    || fail "SHAREDRUN t110.test.js: the shared file past the cap did not run (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
-  [ "$(jq -r '.list | "\(.files) \(.left)"' "$T/$CASE/cards/c7.rec")" = '6 114' ] \
-    && grep -qF 'card ran 5 of the 120 test files linked to it, those that failed most recently first. The run before the push runs all of them. It also ran 1 more of the linked files, because cards that landed on main changed them.' "$T/$CASE/cards/c7.test" \
-    || fail "SHAREDRUN t110.test.js: the list does not count 6 run and 114 left out, or its note does not name 5 by the cap and 1 shared: $(cat "$T/$CASE/cards/c7.rec" "$T/$CASE/cards/c7.test")"
-}
-
-# Bug it catches: a shared file the card changed one case of ran that case alone, not the cases main's change touched.
-# A change to t_bone of b.test.sh, with b.test.sh and c.test.sh shared, runs both whole.
-t_narrowsharedwhole() {
-  SHAREDRUN=$'tests/b.test.sh\ntests/c.test.sh' ownrun "ownedit tests/b.test.sh '^  echo 1\$' '  echo 11'"
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/b.test.sh|\none:tests/c.test.sh|' ] \
-    || fail "SHAREDRUN tests/b.test.sh, tests/c.test.sh: the shared files did not run whole (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
-}
-
 # D3, #351 scenario 8. Bug it catches: the bug card's proof run on main gave the suite command every test file of the
 # change, past the limit. With test.cardFiles 2, a change to three test files runs two on main, each alone through
 # test.fileCommand (one process a file, each given its own path), the one that failed most recently first, and the

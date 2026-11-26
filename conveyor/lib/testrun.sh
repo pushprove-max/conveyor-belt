@@ -319,7 +319,7 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
     # With no HEAD or tree now, it keeps no list (testlist.sh rerunlist()): the whole selection runs.
     if [ $r = 1 ] && [ -n "$p" ] && [ -z "$mw" ] && { { [ -n "$ob" ] && [ "$ob" = "$b" ]; } || testedbefore "$1"; }; then
       TEST_REFUSED="refused full run: $RERUN_WHY"
-      if [ -s "$1.rerun" ] && [ -n "$b" ] && [ -n "$t" ] && { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$p" "$b" "$t"; grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun"; } > "$1.rerun.new" \
+      if [ -s "$1.rerun" ] && [ -n "$b" ] && [ -n "$t" ] && { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$p" "$b" "$t"; grep -E $'^(pass|ok|fail)\t' "$1.rerun"; } > "$1.rerun.new" \
         && mv -f "$1.rerun.new" "$1.rerun"; then r=0; fi
     fi
     # Those times are in <worktree>.oldtimes, apart from this run's own (<worktree>.times).
@@ -437,7 +437,7 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # reports more: tests()). <report args> (reportask() files) go after the command, before each file's path. TEST_FAST is
 # `fast` when the command stops at its first failure (failfast()), else empty, as for a main-red fix card (in $MAINRED): cardland.sh redelse() needs a verdict of each case it fails.
 listcmd() { # <worktree> [report args]
-  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() sh=() ns=0 READADD=() READWHOLE='' READLINKS=0 SELN=0
+  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 SELN=0
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
   # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only while it is not set.
   # A suite runner (SUITERUNNERS) is on no list (#382): testpaths() leaves each off the card's own files, and
@@ -450,10 +450,6 @@ listcmd() { # <worktree> [report args]
   # links to every landing (pushtests(), lib/pushrun.sh).
   mapfile -t fs < <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames --diff-filter=AM HEAD -- 2>/dev/null | testpaths \
     | jq -Rr "$SHAREDJQ"'select(. != "" and (shared | not))')
-  # A run again of the test files a card's change shares with main's (SHAREDRUN, one a line, those still there: card()'s
-  # sharedtests(); its batch's, rebatch()'s sharedown) gives each to the command, its cases as the list says (unshare()),
-  # past the cap: bug, a change with a test file of its own listed only that one, and the shared file never ran.
-  mapfile -t sh < <(grep . <<<"${SHAREDRUN:-}" | sort -u | while IFS= read -r f; do [ ! -f "$1/$f" ] || printf '%s\n' "$f"; done)
   CAPLEFT=0; CAPNOTE=''
   if [ ${#fs[@]} != 0 ]; then by='{"by":"own","age":null}'
     # Of each, only the cases the change adds or changes run (testlist.sh owncases(), #414): TEST_CASES, `<file><TAB><case>`
@@ -467,12 +463,11 @@ listcmd() { # <worktree> [report args]
     # links to it, those still there, each run whole: they call its helpers (#1000), or a change that needed this file
     # changed broke them before (a Foreman title case and the start's size cases). One already on the list with only its
     # changed cases runs whole too, as a case it did not change can call them; a link of a file to itself is no reason.
-    # The shared files of a run again (sh) are added the same way, but one that keeps its cases (testlist.sh sharedkeep()).
-    mapfile -t lk < <({ jq -r '. as $m | $ARGS.positional[] as $k | $m[$k] | arrays[] | strings | select(. != $k)' \
-      --args "${fs[@]}" < "$1/.conveyor/test-links.json" 2>/dev/null; [ ${#sh[@]} = 0 ] || printf '%s\n' "${sh[@]}"; } | sort -u)
+    mapfile -t lk < <(jq -r '. as $m | $ARGS.positional[] as $k | $m[$k] | arrays[] | strings | select(. != $k)' \
+      --args "${fs[@]}" < "$1/.conveyor/test-links.json" 2>/dev/null | sort -u)
     for f in "${lk[@]}"; do
       [ -n "$f" ] && [ -f "$1/$f" ] || continue
-      if printf '%s\n' "${fs[@]}" | grep -qxF -- "$f"; then ! sharedkeep "$1" "$f" "${fs[@]}" || continue
+      if printf '%s\n' "${fs[@]}" | grep -qxF -- "$f"; then
         TEST_CASES=$(awk -F'\t' -v f="$f" '$1 != f' <<<"$TEST_CASES"); TEST_CASES=${TEST_CASES:+$TEST_CASES$'\n'}
       else fs+=("$f"); fi
     done
@@ -489,19 +484,12 @@ listcmd() { # <worktree> [report args]
     s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
       narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
     by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"; runnersout
-    lk=("${fs[@]}"); selfirst "$1" "$CARDLINKED"; CAPMAX=$CARDLINKED CAPFIRST=$SELN testcap "${fs[@]}"; fs=("${CAPFILES[@]}"); ns=0
-    # The shared files of a run again (sh) join after the cap, taking none of its places. One the cap left out of the
-    # linked files runs, so it is not left out (CAPLEFT): bug, the list said 6 files ran and 115 of 120 were left out.
-    for f in "${sh[@]}"; do
-      printf '%s\n' "${fs[@]}" | grep -qxF -- "$f" && continue
-      fs+=("$f"); printf '%s\n' "${lk[@]}" | grep -qxF -- "$f" && { CAPLEFT=$((CAPLEFT - 1)); ns=$((ns + 1)); }
-    done
-    [ ${#sh[@]} = 0 ] || runnersout
+    lk=("${fs[@]}"); selfirst "$1" "$CARDLINKED"; CAPMAX=$CARDLINKED CAPFIRST=$SELN testcap "${fs[@]}"; fs=("${CAPFILES[@]}")
     # Past the cap, each file whose last pass read a file the change touches (testlist.sh readersin(), #1619): a linked one (READLINKS) is not left out: bug, the list said 5 of 10 were left out with 6 on it.
     readersin "$1"; CAPLEFT=$((CAPLEFT - READLINKS))
-    # The note's <n> counts only the linked files the cap chose, most recent failure first (those the changed-tests command selects, SELN, before them: SELLINKED); the shared linked files past it (ns), in name order, and those of the last passes (READLINKS) get their own sentences (SHAREDLINKED, READLINKED): bug, the note said all of them ran in order of most recent failure.
-    [ ${#lk[@]} = 0 ] || [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/$((${#lk[@]} - CAPLEFT - ns - READLINKS))}; CAPNOTE=${CAPNOTE//'<all>'/${#lk[@]}}
-      [ "$SELN" = 0 ] || CAPNOTE+=${SELLINKED//'<k>'/$((SELN < CARDLINKED ? SELN : CARDLINKED))}; [ $ns = 0 ] || CAPNOTE+=${SHAREDLINKED//'<k>'/$ns}; [ "$READLINKS" = 0 ] || CAPNOTE+=${READLINKED//'<k>'/$READLINKS}; }
+    # The note's <n> counts only the linked files the cap chose, most recent failure first (those the changed-tests command selects, SELN, before them: SELLINKED); the linked files past it that ran for the last passes (READLINKS) get their own sentence (READLINKED): bug, the note said all of them ran in order of most recent failure.
+    [ ${#lk[@]} = 0 ] || [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/$((${#lk[@]} - CAPLEFT - READLINKS))}; CAPNOTE=${CAPNOTE//'<all>'/${#lk[@]}}
+      [ "$SELN" = 0 ] || CAPNOTE+=${SELLINKED//'<k>'/$((SELN < CARDLINKED ? SELN : CARDLINKED))}; [ "$READLINKS" = 0 ] || CAPNOTE+=${READLINKED//'<k>'/$READLINKS}; }
   fi
   [ -z "${MAINFROM:-}" ] || [ ${#fs[@]} = 0 ] || while IFS= read -r f; do printf '%s\n' "${fs[@]}" | grep -qxF -- "$f" || fs+=("$f"); done < <(mainlinks "$1" "$MAINFROM")
   # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.
@@ -559,7 +547,7 @@ testcap() { # <file>...
 # is read as no map (the links and the names still give tests), a change to a test map of the project's own (the
 # pack's test.map path) selects, with its links' tests, the tests of each source the map changes, those it gave the
 # source before and those it gives now (as the project's selector of the changed tests runs them, whose count the stop
-# on a card's run allows: watch(), lib/session.sh), and a change that selects none prints the first line alone. Given two commits, the change between them stands in for the staged change (sharedtests(), lib/claim.sh; a landing's own change, pushtests(), lib/push.sh).
+# on a card's run allows: watch(), lib/session.sh), and a change that selects none prints the first line alone. Given two commits, the change between them stands in for the staged change (a landing's own change, pushtests(), lib/push.sh).
 # A helper, setup, fixture or mock file (or one in a folder of such a name), that many tests may read (shared): no
 # test of its own (testsel(), listcmd()). A file named as a test (<name>.test.<ext>, <name>_spec.<ext>) is a test by
 # its file name, though the name starts with or holds setup or helper (tests/setup.test.sh, setupservice.test.sh).

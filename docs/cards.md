@@ -640,14 +640,11 @@ Same-file cards).
 A ready card lands first. A card is ready when its review gave a GO and its tests passed. It does not wait for a card
 that changes the same files and is still in its tests or its fix, even when that card was picked first. When two cards
 are ready, the card that became ready first lands first. The other card is then put on main with the change that
-landed. When its change applies there, it is not reviewed again. It runs again only the tests that its change and
-the landed change both select. A test file that the landed card ran only because main moved does not count. When the
-pack sets `test.changed`, only the cases that both changes select run again, and the card's test line gives the
-reason `main changed <file>` for them. When the pack does not set `test.changed`, each test file that both changes
-select runs again whole. A batch runs again in the same way when a card lands on main during the batch's tests.
-When the cards of a batch passed their tests on different commits of main, only the cards of one commit keep their
-passed tests. The batch runs all the tests that the changes of the other cards select.
-When its change clashes, one session fits it onto main, and it is reviewed again before it
+landed. When its change applies there, it is not reviewed again, and its tests do not run again: its pass stands, even
+when the landed change uses the same test files. The same is true for a batch when a card lands on main during the
+batch's tests, and for the cards of a batch that passed their tests on different commits of main. Two changes that
+each passed alone can fail together. That failure shows on main, as main red, and the main-red fix card fixes it.
+When its change clashes, one session fits it onto main, and it is reviewed and tested again before it
 lands. A card in the `order` list still goes before the cards that are not in it. So the Board shows a ready card as
 "waiting on card" only when the other card became ready first or is in the `order` list.
 

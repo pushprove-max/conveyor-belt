@@ -19,7 +19,7 @@
 redholdsetup() { setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo seven >> a.txt' b.txt base; }
 redholdcard() { # <commands> <times>; after redholdsetup
   fx_in 'cd "$R"; LOOPFIX=1 c=c7 n=7 wt=$FXWT issue="{}" sprompt="" br="" parsecheck="" tmain="" away="" apart="" me=$$ cmsg=x mates=() mainsec=0 waitsec=0 behind="[]" LIVE=0.2
-    lintgate() { return 0; }; checks() { :; }; treecheck() { :; }; testedhere() { return 1; }; sharedtests() { return 1; }; landedsince() { :; }
+    lintgate() { return 0; }; checks() { :; }; treecheck() { :; }; testedhere() { return 1; }
     gather() { echo x >> "$T/$CASE/gather"; return 1; }; turntake() { :; }; tests() { echo own >> "$T/$CASE/own"; return 0; }
     [ -n "${REALSETTLE:-}" ] || settle() { return 0; }; s=$(git rev-parse "refs/heads/$BRANCH"); '"$1"'
     for i in $(seq '"$2"'); do go=end; cardtest; echo "pass $i: go=$go tests run $(cat "$T/$CASE/own" 2>/dev/null | wc -l)"; done'

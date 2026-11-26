@@ -421,7 +421,7 @@ git -C "$R" init -q && git -C "$R" add -A && git -C "$R" -c user.name=t -c user.
   || fail "the copy was not committed"
 sed 's/^no_cause() {/no_cause() { :;/' "$R/$f" > "$W/f.tmp" && mv "$W/f.tmp" "$R/$f" && git -C "$R" add -A || fail "no_cause was not changed"
 # The engine of the copy, on the copy as its main, with no host file, so its state folder is the copy's own.
-( unset "${!CONVEYOR_TEST_@}" SHAREDRUN CAPMAX
+( unset "${!CONVEYOR_TEST_@}" CAPMAX
   export HOME=$W/home XDG_CONFIG_HOME=$W/config CONVEYOR_MAIN=$R CONVEYOR_CARDS=$W/cards
   . "$R/conveyor/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$R/conveyor/commands/run.sh")" || exit 1
   s=$(testsel "$R" narrow) || exit 1; mapfile -t a < <(tail -n +2 <<<"$s")

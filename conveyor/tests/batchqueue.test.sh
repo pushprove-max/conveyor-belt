@@ -89,84 +89,33 @@ else n=${PWD##*-}; echo "$n" > "f$n.txt"; fi' > "$STUB/build"
   [ -z "$(ls "$T/$CASE/cards")" ] || fail "a worktree or mark is left: $(ls "$T/$CASE/cards")"
 }
 
-# Bug it catches (#334 again, through the queue): a card queued for a batch waits on the main its tests ran on, and
-# the batch reused its pass though a card landed meanwhile on its test file, so that file never ran on main as it is.
-# stalepass() as the engine has it: c7 (fx_wt) changes lib/rows.sh, and its pass names lib/view.test.sh, which the links
-# give lib/panel.sh too. A landing on a.txt keeps the pass; one on lib/panel.sh drops it (and the batch pass), so the
-# batch's run runs the file; one whose shared file c7 already ran again for this change (sharedran, #447) keeps it.
+# The owner's pick (#1777, "a pass stands"): c7 (fx_wt) changes lib/rows.sh and passed lib/view.test.sh, which the links
+# give lib/panel.sh too; then a card lands on that test file, and c7, queued, goes into c8's batch on main as it is now.
+# batch() keeps c7's pass: its run has no case to run. Bug it catches: the batch dropped c7's pass for the landing on
+# its test file and ran the file again. c7.rerun names the commit its tests ran on, as a run leaves it.
 t_batchqueuestale() {
   setup '[]'; mkdir -p "$R/lib"; linkset '{"lib/panel.sh": ["lib/view.test.sh"], "lib/rows.sh": ["lib/view.test.sh"]}'
   fx_wt 'echo eight >> lib/rows.sh' lib/panel.sh panel lib/rows.sh rows lib/view.test.sh case1
   fx_in 'printf "base\t%s\n" "$(git -C "$FXWT" rev-parse HEAD)" > "$FXWT.rerun"
-    for f in a.txt lib/panel.sh sharedran; do
-      echo "{\"issue\":7,\"tested\":true,\"units\":[\"lib/view.test.sh\"],\"cases\":1}" > "$FXWT.ready"; echo "{}" > "$FXWT.bpass"
-      if [ "$f" = sharedran ]; then cardpatch "$FXWT" > "$FXWT.sharedran"; else echo landed >> "$R/$f" && git -C "$R" commit -qam "$f lands" || exit 3; fi
-      stalepass c8 "$R" c7; echo "$f: $(jq -c .units "$FXWT.ready") $([ -e "$FXWT.bpass" ] && echo kept || echo gone)"; done'
-  [ "$RC" = 0 ] && [ "$(tr '\n' ',' < "$T/$CASE/run.out")" = 'a.txt: ["lib/view.test.sh"] kept,lib/panel.sh: null gone,sharedran: ["lib/view.test.sh"] kept,' ] \
-    || fail "stalepass c8 $R c7 did not drop c7's pass for the landing on its test file alone: $(cat "$T/$CASE/run.out")"
+    jq -cn --arg p "$(cardpatch "$FXWT")" "{tested: true, patch: \$p, units: [\"lib/view.test.sh\"], cases: 1}" > "$FXWT.ready" || exit 3
+    echo landed >> "$R/lib/view.test.sh" && git -C "$R" commit -qam "a card lands on c7'"'"'s test file" || exit 3
+    W=$CARDS/c8; git -C "$R" worktree add -q --detach "$W" main && echo 8 > "$W/8.txt" && git -C "$W" add -A || exit 3
+    jq -cn --arg p "$(cardpatch "$W")" "{tested: true, patch: \$p, units: [\"8.test.sh\"], cases: 1}" > "$W.ready" || exit 3
+    lintbatch() { return 0; }; checks() { :; }; tests() { : > "$T/$CASE/ran"; : > "$W.test"; TEST_WAIT=0; TEST_RUN=0; TEST_FREE=0; TEST_REFUSED=""; }
+    cd "$R" && batch c8 "$W" c7 c8; echo "batch: $? kept: $TEST_BATCH units: $(jq -c .units "$FXWT.ready")"'
+  [ "$RC" = 0 ] && [ ! -e "$T/$CASE/ran" ] && grep -qx 'batch: 0 kept: {"cases":0,"kept":2} units: \["lib/view.test.sh"\]' "$T/$CASE/run.out" \
+    || fail "batch c8 <c8> c7 c8, after a landing on c7's test file, did not keep c7's pass and run no case: $(cat "$T/$CASE/run.out")"
 }
 
-# Bug it catches (#1591 review): as t_batchqueuestale's landing on lib/panel.sh, with the pack's test.changed:
-# stalepass() still dropped c7's pass, so the batch's list named c7's files `changed` and its run ran every test they
-# select. c7 keeps its pass, and the batch's list (batchlist()) names main's change, lib/panel.sh, as a `main` line,
-# from which the command runs the cases both changes select. And (review): the list named no `from` commit, so the
-# command could not read which cases main changed and ran the file whole: its `from` is c7's base.
-t_batchqueuestalemain() {
-  stalemain ''
-  [ "$RC" = 0 ] && [ "$(tr '\t\n' ':,' < "$T/$CASE/run.out")" = '["lib/view.test.sh"] kept,from:c7base,pass:lib/view.test.sh,main:a.txt,main:lib/panel.sh,' ] \
-    || fail "stalepass c8 $R c7 with test.changed, after landings on lib/panel.sh and a.txt, did not keep c7's pass and put main's change, from c7's base, on the batch's list: $(cat "$T/$CASE/run.out")"
-}
-
-# Bug it catches (#1591 review): the batch already keeps passes of runs on the later commit `mid` (rebatch()), and c7's
-# tests ran on its older base. The list's one `from` was the older of the two, so a case main changed after it and
-# changed back before HEAD read as unchanged, and a pass on `mid` of the changed case stood. c7 loses its pass, as with
-# no test.changed, and the `from` stays `mid`.
-t_batchqueuestalefrom() {
-  stalemain 1
-  [ "$RC" = 0 ] && [ "$(tr '\t\n' ':,' < "$T/$CASE/run.out")" = 'null gone,from:mid,pass:lib/view.test.sh,main:a.txt,' ] \
-    || fail "stalepass c8 $R c7 with test.changed, after the batch kept passes on mid, kept c7's pass from its older base, or the list's from is not mid: $(cat "$T/$CASE/run.out")"
-}
-
-# t_batchqueuestale's c7 with the pack's test.changed: lib/panel.sh lands (to `mid`), then a.txt (HEAD); with <first> 1
-# the batch first keeps passes of runs on `mid` (mainsince()). Then stalepass() for c7, and the list batchlist() writes
-# for a pass of lib/view.test.sh kept (its lines but change, base and tree), after c7's units and whether its .bpass is
-# left, in run.out.
-stalemain() { # <first: 1 or empty>
-  setup '[]'; tune '.test.changed = "sel.sh"'; mkdir -p "$R/lib"; linkset '{"lib/panel.sh": ["lib/view.test.sh"], "lib/rows.sh": ["lib/view.test.sh"]}'
-  fx_wt 'echo eight >> lib/rows.sh' lib/panel.sh panel lib/rows.sh rows lib/view.test.sh case1
-  fx_in 'b=$(git -C "$FXWT" rev-parse HEAD); printf "base\t%s\n" "$b" > "$FXWT.rerun"
-    echo "{\"issue\":7,\"tested\":true,\"units\":[\"lib/view.test.sh\"],\"cases\":1}" > "$FXWT.ready"; echo "{}" > "$FXWT.bpass"
-    echo landed >> "$R/lib/panel.sh" && git -C "$R" commit -qam "lib/panel.sh lands" || exit 3
-    echo a > "$R/a.txt" && git -C "$R" add a.txt && git -C "$R" commit -qm "a.txt lands" && m=$(git -C "$R" rev-parse HEAD^) || exit 3
-    BATCHMAIN=""; BATCHFROM=""; [ -z "'"$1"'" ] || mainsince "$R" "$m" HEAD || exit 4
-    stalepass c8 "$R" c7; echo "$(jq -c .units "$FXWT.ready") $([ -e "$FXWT.bpass" ] && echo kept || echo gone)"
-    batchlist "$R" "{\"keep\": [\"lib/view.test.sh\"], \"changed\": [], \"units\": [\"lib/view.test.sh\"]}" \
-      && grep -v "^change\|^base\|^tree" "$R.rerun" | sed "s/$b/c7base/; s/$m/mid/"'
-}
-
-# Bug it catches (R239): a queued card's settle() brings its waitSec up to date in <worktree>.ready while the batch
-# card's stalepass() takes the card's passes out of the same file, in another process. Unlocked, settle()'s rewrite read
-# the file first and wrote it after, so the units stalepass() removed came back and batchkeep() kept the stale pass.
-# settle() runs in the background as a queued card: its claim always says it waits (claim() stubbed), and its second
-# look brings waitSec (mainsec 60, and the second it waited) up to date; stdb(), asked right after that rewrite, ends it.
-# Its rewrite reads the file and then waits 3 s before it writes; stalepass() runs within that wait: the file keeps
-# both changes, no units and the new waitSec.
-t_batchqueuerace() {
-  local slow='jq() { command jq "$@"; local r=$?; case "$*" in *waitSec*) sleep 3 ;; esac; return $r; }' # sleep: the rewrite waits between its read and its write, for stalepass() to run there
-  # shellcheck disable=SC2016 # expanded by fx_in's eval
-  local race='LIVE=0.1 waitsec=0 mainsec=60 parsecheck="" behind="[]"; claim() { echo "{\"on\":\"c8\",\"paths\":[\"lib/panel.sh\"],\"turn\":true}"; }
-    stackto() { return 1; }; turnfree() { :; }; began() { :; }; stdb() { [ -z "$waited" ] || exit 0; }
-    ( settle c7 7 "$FXWT" prompt land "{}" > /dev/null ) &
-    until [ -e "$FXWT.idle" ]; do sleep 0.1; done; sleep 0.6' # sleep: stalepass() starts once settle() has slept out its first look (LIVE) and its rewrite has read the file
-  setup '[]'; mkdir -p "$R/lib"; linkset '{"lib/panel.sh": ["lib/view.test.sh"], "lib/rows.sh": ["lib/view.test.sh"]}'
-  fx_wt 'echo eight >> lib/rows.sh' lib/panel.sh panel lib/rows.sh rows lib/view.test.sh case1
-  fx_in 'printf "base\t%s\n" "$(git -C "$FXWT" rev-parse HEAD)" > "$FXWT.rerun"
-    echo "{\"issue\":7,\"tested\":true,\"units\":[\"lib/view.test.sh\"],\"cases\":1,\"extra\":{\"waitSec\":0}}" > "$FXWT.ready"
-    echo landed >> "$R/lib/panel.sh" && git -C "$R" commit -qam "lib/panel.sh lands" || exit 3
-    '"$slow"'
-    '"$race"'
-    stalepass c8 "$R" c7; wait; command jq -c "[.units, .extra.waitSec]" "$FXWT.ready"'
-  # waitSec 60 (mainsec), or 61 when the clock's second turns in the wait.
-  [ "$RC" = 0 ] && grep -qxE '\[null,6[01]\]' "$T/$CASE/run.out" \
-    || fail "stalepass c8 $R c7, run while settle() of c7 rewrote its ready file's waitSec (60), did not leave [no units, waitSec 60]: $(tr '\n' '|' < "$T/$CASE/run.out")"
+# Bug it catches: a case main added to one card's test file during a batch's run was in no card's own cases, so the
+# run gave it to every card (batchpass()'s by), and a batch formed again counted it as each card's own. c7 and c8 pass
+# the case t_<n> of <n>.test.sh; the batch passes both and t_new of 7.test.sh. t_new is c7's alone.
+t_batchpassby() {
+  setup '[]'; mkdir -p "$T/$CASE/cards"
+  for n in 7 8; do git -C "$R" worktree add -q --detach "$T/$CASE/cards/c$n" main && echo "$n" > "$T/$CASE/cards/c$n/$n.txt" && git -C "$T/$CASE/cards/c$n" add -A \
+    && git -C "$T/$CASE/cards/c$n" diff --cached --binary --no-renames > "$T/$CASE/cards/c$n.bpatch" || fail "the change of card $n"; done
+  fx_in 'for n in 7 8; do jq -cn --arg p "$(cardpatch "$CARDS/c$n")" --arg u "$n.test.sh" "{tested: true, patch: \$p, units: [\$u + \"\\tt_$n\"]}" > "$CARDS/c$n.ready" || exit 3; done
+    batchpass c7 "$CARDS/c7" "[\"7.test.sh\\tt_7\", \"7.test.sh\\tt_new\", \"8.test.sh\\tt_8\"]" 3 c7 c8; jq -c .by "$CARDS/c7.bpass"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = '{"c7":["7.test.sh\tt_7","7.test.sh\tt_new"],"c8":["8.test.sh\tt_8"]}' ] \
+    || fail "batchpass c7 <c7> <t_7, t_new, t_8> 3 c7 c8 did not give each card its own file's cases: $(cat "$T/$CASE/run.out")"
 }

@@ -731,10 +731,7 @@ ended ok (`-- ok <file>`, below), `ok<TAB><file><TAB><case>` for each case of a 
 line `ok <case>` says it passed (a file killed part-way), and `fail<TAB><file><TAB><case>` for each case that failed.
 A command that reads it runs no file it lists as passed; of a file it names passed cases of, the rest of its cases;
 of a file it names only failed cases of, only those cases; a file it does not name (one that failed naming no case, never finished or never
-began) runs whole. A file that passed, but that main changed what it tests since then, keeps its `pass` line when the
-pack sets `test.changed`: the `main<TAB><file>` lines (below) make the command run the tests that both changes select. When the
-pack does not set `test.changed`, the file has a `fail<TAB><file>` line and a `shared<TAB><file>` line: it runs whole,
-and the log can say it passed before. After a session changed the staged change, the file also has a line `changed<TAB><file>` for each
+began) runs whole. After a session changed the staged change, the file also has a line `changed<TAB><file>` for each
 file the session changed: the command runs the tests it selects for those files too, whether or not they passed, and
 says in its log how many cases of its selection it kept as passed and did not run (`TESTRUN kept=<n>`; the test line's
 `selected.kept`). When the pack sets `test.changed` and the list has a `changed` or `main` line, the step first runs
@@ -787,9 +784,7 @@ The list is the test files the card's change adds or changes (`"by": "own"`; a s
 adds a test file that had a failed case in the card's last run, though the change does not change it. It does this
 only when the file is still there and the card's change links it (the test map, the links or its name)
 (`conveyor/lib/testlist.sh` `failsleft()`). Thus a fix that changes only another test file still runs the failed case
-again. The list's `files` count includes the added file. When cards landed on main change a test file that the
-card's change also uses, Conveyor runs that file again. It adds the file to the list, runs it whole and runs it in
-addition to the limit of linked files. This applies to a card's own run and to its batch's run. Of a test file
+again. The list's `files` count includes the added file. Of a test file
 main has, it runs only the cases (`t_<case>() {` to its `}` line, with the comment lines above it) that hold a line
 the change adds or changes; a file whose change touches a line outside every case (a helper or setup), a new file,
 and a file with no such case run whole. The command gets those cases in `CONVEYOR_TEST_CASES`, one `<file><TAB><case>`
@@ -1779,14 +1774,14 @@ claims the files its change names, documentation files (`README.md` and any othe
 file never makes one card wait for another, whatever their edits to it. Two cards that share a file overlap only when
 their changes do not apply together: a card whose change merges three-way (`git apply --3way`), with no conflict left,
 onto main with the other card's change already merged there does not wait on it, so changes to different parts of one
-file land in turn without waiting, each tested on main as the one before left it. Two cards that change the same lines
+file land in turn without waiting, each on main as the one before left it. Two cards that change the same lines
 of a file still wait, one behind the other. With batches on, a ready card also waits for the landing turn, on any
 files (the queue, below). A card waits while a card it overlaps holds one of those files, then goes
 on from main as it is then. A ready card lands first: a card whose review gave a GO and whose tests passed on main does
 not wait for a card it overlaps that is still in its tests or its fix, even one picked before it. When both are
 ready, the card that became ready first lands first. The card that was passed is then put on main with the landed
-change, as below: it is reviewed again only when a session had to fit it, and it runs again only its test files that
-the landed change touched too. A card in `order` still goes before a card that is not in it. Its change is put on main with a plain apply, or, where that fails, with a three-way
+change, as below: it is reviewed again only when a session had to fit it, and its tests run again only when its change
+is not the one that passed. A card in `order` still goes before a card that is not in it. Its change is put on main with a plain apply, or, where that fails, with a three-way
 merge: when either leaves no conflict it goes on to its tests and lands with no rebuild session and no second review
 (the merged change's own added and removed lines are what was reviewed and tested; only the lines around them moved).
 A merge counts only when it leaves those same lines: a change main holds already merges to nothing and does not.
@@ -1859,10 +1854,8 @@ main moved meanwhile (a card on other files landed during it), with no second ru
 the run and its changes still apply, in its order, to main as it is now: the lint commands and the product checks run
 again on the batch's combined change there before it lands, and a lint finding or execution error or a check that fails
 is a red run: the batch is run again there and split, and the card that breaks it goes to its fix, or leaves the batch
-for its lint, as above. When the cards that landed meanwhile touch a test file the batch touches too,
-the batch is tested again on main as it is now before it lands. When the pack sets `test.changed`, that run keeps
-the passes of its cards, and runs only the tests that both the batch's change and the landed change select. When it
-does not, that run runs every test that the cards' changes select. A card of it whose
+for its lint, as above. The batch's pass stands even when the cards that landed meanwhile use a test file that the
+batch also uses. A card of it whose
 change no longer applies to main leaves the batch and is fitted afterwards; the others land. A batch
 that does not land for another reason sends that card to its tests again, alone, before it lands alone. A card whose change does not apply on top of the
 earlier ones, the card whose turn it is too, leaves the batch and is fitted afterwards, as a waiting card is. A card with follow-ups to file lands on
@@ -1888,20 +1881,15 @@ waits, and runs them again where it goes next. When the holder's change changes 
 again once; after that it waits on the holder. A card whose issue names the holder's issue in a `Depends on:` line is
 never stacked: it waits.
 
-A card's tests are not run again only because main moved. When main moved since its checks
-and tests ran (while it was away, during its tests or before its landing), its change is put on main as it is then.
-When it applies there unchanged, or merges there three-way with no conflict (the same added and removed lines; only the
-lines around them moved), its product checks run again and it lands on the tests it already passed; a change a
-session had to rework to fit is reviewed and tested again (not one it changed only in documentation files), and one whose test files were merged keeping both sides is
-tested again. When the cards that landed since its tests ran select a test file that its change selects too, its
-tests run again on main as it is now before it lands: two changes that each passed alone can fail together. A test
-file counts for a landed card when that card's change selected it, not when it ran only because main moved. When the
-pack sets `test.changed`, only the tests that both changes select run again, of the engine's runner the cases. When
-it does not, each such test file runs again whole. A failure there
-goes to the card's fix, and the card does not land. These tests run again once for each change. When they pass and more
-cards land on the same test files before the card lands, the card lands with no second run. Its log line names the
-cards that landed since. If the change no longer applies to main, it is fitted onto main as before. A failure of the
-two changes together then shows on main, as main red.
+A pass stands when main moves. A card's tests are not run again only because main moved. When main moved since its
+checks and tests ran (while it was away, during its tests or before its landing), its change is put on main as it is
+then. When it applies there unchanged, or merges there three-way with no conflict (the same added and removed lines;
+only the lines around them moved), its product checks run again and it lands on the tests it already passed. This is
+also true when the cards that landed since use a test file that its change also uses. A change a session had to rework
+to fit is reviewed and tested again (not one it changed only in documentation files), and one whose test files were
+merged keeping both sides is tested again. If the change no longer applies to main, it is fitted onto main as before.
+Two changes that each passed alone can fail together. The card's tests do not run again to find this. The failure shows
+on main, as main red, and the main-red fix card fixes it.
 
 A card whose issue is in the control record's `order` list does not wait for a card that is not in the list: it claims
 the files and goes on to land while that card holds them. The card it went past waits for it at its own next claim

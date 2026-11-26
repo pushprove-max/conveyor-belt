@@ -25,8 +25,7 @@ during() { # <shell that commits to main>
 t_batchmovedleft() {
   batchsetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02),$(issue 9 2026-01-03)]"
   # The cards' tests are not main's a.txt's: card <n> writes s<n>.txt too, which the links give a.test.sh, and a.txt
-  # is linked to none. A main that moved a.txt's test file would have the batch tested again (sharedtests(),
-  # lib/claim.sh), not landed on the run it passed.
+  # is linked to none.
   linkset '{"s7.txt": ["a.test.sh"], "s8.txt": ["a.test.sh"], "s9.txt": ["a.test.sh"]}'
   cat > "$STUB/build" <<'EOF'
 echo x > "s${PWD##*-}.txt"

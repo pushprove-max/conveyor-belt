@@ -60,7 +60,7 @@ has docs/board.md 'must pass first, when the pack can run one test file at a tim
 has docs/board.md "**Feed stopped**: the feed's heartbeat stopped." 'the guide says Feed stopped means no data arrives'
 # R208: a "filed as" line outside the plugin's own repository is a second row (foreman/stop.sh, plugin_home).
 has docs/foreman.md 'In another project, it is a second line.' 'the guide says one line each, though a filed line outside the plugin repository is a second one'
-# R408 (lib/claim.sh): the batch is on any files, off at landBatch 1, and runs a shared test file again once for each change.
+# R408 (the 1.11.0 batch line): the batch is on any files, off at landBatch 1, and in 1.11.0 ran a shared test file again once for each change.
 has docs/releases/1.11.0.md "The cards can change different files. A batch holds up to the pack's \`landBatch\` cards, and \`landBatch\` 1 turns batches off." 'the 1.11.0 batch line leaves out the files and the off value'
 has docs/releases/1.11.0.md 'the batch runs that file again on main before it lands, once for each change of that card.' 'the 1.11.0 batch line promises a second run whenever a landing shares a file'
 # R409 (lib/mainred.sh mainprobe() and mainkeep(): a run is kept only when its controls pass, a file that timed out is

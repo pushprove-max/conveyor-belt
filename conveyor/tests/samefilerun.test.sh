@@ -9,7 +9,7 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# The three cases below but t_samepastshared, which calls the engine's functions on t_samepastrun's landing, run cards
+# The three cases below but t_samepastshared, which calls the engine's functions on a landing like t_samepastrun's, run cards
 # through the real loop (loop run): the direct checks in samefile.test.sh and
 # sameoff.test.sh show claim(), settle(), land() and urgent() each on its own, but only card() and run() join them (a
 # fix round to the next claim, a pass at the landing step to another review, a wait on the belt to the pick past the
@@ -85,29 +85,24 @@ EOF
     || fail "#7 was rebuilt in place of being fitted onto #8's commit as passed: $(cat "$STUB/sessions") $(st '"\(.issue) \(.step) \(.of // "")"' | tr '\n' ,)"
 }
 
-# What card() reads of #7 at its landing, once fitted onto #8's commit (t_samepastrun's turn, with no card): #7's tests
-# passed on m0 (tested(), its list based there); #8 lands its case at the end of a.test.sh. settle() fits #7 onto #8's
-# commit with the union merge and no session. Bug it catches: a card whose tests ran before #8 landed its case in the
-# same test file landed on that pass, so a.test.sh never ran with both cases: the merged change is not the one that
-# passed (testedhere() fails), a.test.sh is shared with #8 (sharedtests()), #8 is the card landed since (landedsince()),
-# and the run again lists a.test.sh to run whole, not as passed (unshare()).
+# What card() reads of #7 at its landing, once fitted onto #8's commit: #7's tests passed on m0 (tested()); #8 lands
+# its case at the end of a.test.sh. settle() fits #7 onto #8's commit with the union merge and no session. Bug it
+# catches: a card whose tests ran before #8 landed its case in the same test file landed on that pass, so a.test.sh
+# never ran with both cases: the merged change is not the one that passed (testedhere() fails), so it is tested again.
 t_samepastshared() {
-  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo case7 >> a.test.sh' a.test.sh case1; m0=$(git -C "$R" rev-parse main)
-  echo '{"issue":7}' > "$FXWT.ready"; printf 'base\t%s\npass\ta.test.sh\n' "$m0" > "$FXWT.rerun"
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo case7 >> a.test.sh' a.test.sh case1
+  echo '{"issue":7}' > "$FXWT.ready"
   fx_in 'tested "$FXWT"'; [ "$RC" = 0 ] || fail "#7's pass could not be recorded: $(cat "$T/$CASE/run.out")"
   echo case8 >> "$R/a.test.sh"; git -C "$R" commit -qam "title 8 (#8)" || fail "#8 could not land"
-  landed 8 | jq -c --arg s "$(git -C "$R" rev-parse main)" '.card = "c8-8" | .sha = $s' >> "$ST/cards.jsonl"
   fx_in 'cd "$R" || exit 9; caught="" waitsec=0 behind="[]" parsecheck=""
     session() { echo session >> "$STUB/sessions"; return 1; }
     settle c7 7 "$FXWT" "Build the issue." land "$(issue 7 2026-01-01)"; echo "settle: $?"
-    if testedhere "$FXWT"; then echo "testedhere: 0"; else echo "testedhere: 1"; fi
-    t=$(sharedtests "$FXWT" "'"$m0"'"); echo "sharedtests: $t"; echo "landedsince: $(landedsince "$FXWT" "'"$m0"'")"
-    unshare "$FXWT" "$t" && grep -v "^base" "$FXWT.rerun" | sort | tr "\t\n" ":,"'
+    if testedhere "$FXWT"; then echo "testedhere: 0"; else echo "testedhere: 1"; fi'
   [ ! -e "$STUB/sessions" ] && [ "$(git -C "$FXWT" rev-parse HEAD)" = "$(git -C "$R" rev-parse main)" ] \
     && [ "$(tr '\n' ' ' < "$FXWT/a.test.sh")" = "case1 case8 case7 " ] \
     || fail "#7 was not fitted onto #8's commit keeping both cases, with no session: $(cat "$T/$CASE/run.out")"
-  [ "$(sed 1d "$T/$CASE/run.out" | tr '\n' '|')" = "testedhere: 1|sharedtests: a.test.sh|landedsince: c8-8|fail:a.test.sh,shared:a.test.sh," ] \
-    || fail "card() would land #7 on its pass from before #8's case, or not run a.test.sh whole again: $(cat "$T/$CASE/run.out")"
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "testedhere: 1" ] \
+    || fail "card() would land #7 on its pass from before #8's case: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug it catches: the turn's pick past the cap (run(): urgent(), then `pick retried` with ONLY) did not take a card

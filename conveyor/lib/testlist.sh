@@ -263,19 +263,6 @@ owncases() { # <worktree> <file>
     END { if (whole || !ih) exit 1; for (c in hit) { print c; m++ }; exit m ? 0 : 1 }') || return 1
   LC_ALL=C sort <<<"$c"
 }
-# Whether <file>, a test file of the card's own change that its run again shares with main's change (SHAREDRUN:
-# listcmd()), keeps the cases the change adds or changes (owncases()), not running whole: when the pack sets
-# test.changed, no other of <the card's test files> links to it (.conveyor/test-links.json) and <worktree>.rerun does not
-# name it failed with no case (unshare() kept its pass). The command runs of main's change only the cases both changes
-# select, which are among those (#1591). Bug (#1591): its cases were dropped, so the command ran every case of the file.
-sharedkeep() { # <worktree> <file> <the card's test files>...
-  local w=$1 f=$2 tc=''
-  shift 2
-  grep -qxF -- "$f" <<<"${SHAREDRUN:-}" && packget test.changed tc 2>/dev/null && [ -n "$tc" ] \
-    && ! jq -e --arg f "$f" '. as $m | [$ARGS.positional[] as $k | select($k != $f) | $m[$k][]? | select(. == $f)] != []' \
-      --args "$@" < "$w/.conveyor/test-links.json" >/dev/null 2>&1 \
-    && ! awk -F'\t' -v f="$f" '$1 == "fail" && $2 == f && $3 == "" { x = 1 } END { exit !x }' "$w.rerun" 2>/dev/null
-}
 # Why <command> cannot be given a list of test files in the form test.list <form> names (the run before a push,
 # pushtests(), lib/push.sh): no test.list, none, placeholder with no `{files}` in the command, or args with a command
 # that already names the test files its runner runs (testrunner()). Nothing when it can (runner: pushtests() says).
@@ -296,16 +283,16 @@ narrowstop() { # <why> [bare]
   printf '%s\n' "${t//'<why>'/"$1"}"
 }
 # The pack's suite runners (SUITERUNNERS, runnerfiles() in lib/prompts.sh) that the list <file> (CONVEYOR_TEST_RERUN)
-# names on a `fail` or `shared` line, a leading ./ taken off, one a line; each such line is taken off the list (#382:
+# names on a `fail` line, a leading ./ taken off, one a line; each such line is taken off the list (#382:
 # a runner run as a card's test runs the whole suite). Prints nothing, and leaves the list as it is, when it names none.
 runnersoff() { # <list file>
   local rs
   [ -s "$1" ] || return 0
   names > /dev/null 2>&1 || :
   [ -n "${SUITERUNNERS:-}" ] || return 0
-  rs=$(awk -F'\t' '$1 == "fail" || $1 == "shared" { sub(/^\.\//, "", $2); print $2 }' "$1" | grep -xF -f <(printf '%s\n' "$SUITERUNNERS") | sort -u) || return 0
+  rs=$(awk -F'\t' '$1 == "fail" { sub(/^\.\//, "", $2); print $2 }' "$1" | grep -xF -f <(printf '%s\n' "$SUITERUNNERS") | sort -u) || return 0
   R=$rs awk -F'\t' 'BEGIN { n = split(ENVIRON["R"], a, "\n"); for (i = 1; i <= n; i++) r[a[i]] = 1 }
-    { f = $2; sub(/^\.\//, "", f) } ($1 == "fail" || $1 == "shared") && (f in r) { next } { print }' "$1" > "$1.new" && mv -f "$1.new" "$1"
+    { f = $2; sub(/^\.\//, "", f) } $1 == "fail" && (f in r) { next } { print }' "$1" > "$1.new" && mv -f "$1.new" "$1"
   printf '%s\n' "$rs"
 }
 # listcmd()'s list fs with each suite runner (SUITERUNNERS) on it taken off, a leading ./ taken off each path; adds
@@ -529,7 +516,7 @@ testedbefore() { # <worktree>
 # a case), that is still there, that the card's change selects (testsel() narrow) and that is not on the card's list
 # (TEST_FILES), is added to it and to the count of files the run is given (TEST_GIVEN, and <worktree>.testlist's
 # files). A fix that edited only a test file has that file as its list (listcmd(): by own), and without this the case
-# that had failed did not run again. A `fail` line with no case (unshare()) or of a file the card's change does not
+# that had failed did not run again. A `fail` line with no case or of a file the card's change does not
 # select (a batch's run, of another card's change) adds nothing.
 failsleft() { # <worktree>
   local f n=$TEST_GIVEN fs s
@@ -674,8 +661,8 @@ rerunsince() { # <worktree> <the staged change's id> <HEAD> <tree>
   rd=$(git -C "$1" -c core.quotePath=false diff --name-status --no-renames "$ot" "$4" -- 2>/dev/null) && rd=$(cachereaders "$rd") || return 1
   RERUN_WHY="the list for this run could not be written"
   { printf 'change\t%s\nbase\t%s\ntree\t%s\n' "$2" "$3" "$4"; [ "$ob" = "$3" ] || printf 'from\t%s\n' "$ob"
-    grep -E $'^(pass|ok|fail|shared)\t' "$1.rerun" | awk -F'\t' -v R="$rd" 'BEGIN { n = split(R, x, "\n"); for (i = 1; i <= n; i++) d[x[i]] = 1 }
-      $1 == "shared" || !($2 in d)'; awk 'length { print "changed\t" $0 }' <<<"$ch"; awk 'length { print "main\t" $0 }' <<<"$m"; } > "$1.rerun.new" \
+    grep -E $'^(pass|ok|fail)\t' "$1.rerun" | awk -F'\t' -v R="$rd" 'BEGIN { n = split(R, x, "\n"); for (i = 1; i <= n; i++) d[x[i]] = 1 }
+      !($2 in d)'; awk 'length { print "changed\t" $0 }' <<<"$ch"; awk 'length { print "main\t" $0 }' <<<"$m"; } > "$1.rerun.new" \
     && mv -f "$1.rerun.new" "$1.rerun"
 }
 # The test files a card's run again adds to its list on a main that moved (listcmd(): MAINFROM is the commit its list was

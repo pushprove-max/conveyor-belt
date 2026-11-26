@@ -50,9 +50,9 @@ EOF
   [ -e "$STUB/refused" ] && grep -q "card $c7: its batch did not land, so it is tested alone" <<<"$out" || fail "the first batch was not refused: $out"
   # The own runs of #8 and #7, the batch's run of s1, #7's run alone on the same main (issue 460: it keeps the passes
   # of the batch's run, x1 and x2, whose x.txt is as it was, and runs s1 again, as b.txt, which #8 changed too, differs),
-  # #9's own run, none for the batch of #8 and #9, and, last, #7's run again of s1 on main as that batch left it (#8
-  # landed b.txt, which selects s.test.sh, #7's test file too: sharedtests(), lib/claim.sh). #9's own run and #7's run
-  # alone go side by side, in either order, so the runs are compared sorted.
+  # #9's own run, none for the batch of #8 and #9, and, last, #7's run again of s1 on main as that batch left it: its
+  # batch that did not land took its ready mark (cardland()), so no pass of its run alone is recorded (testedhere()).
+  # #9's own run and #7's run alone go side by side, in either order, so the runs are compared sorted.
   [ "$(LC_ALL=C sort "$STUB/runs" | tr '\n' ',')" = "7 s1,7 s1,7 s1,7 s1 x1 x2,8 s1 y1 y2,9 z1 z2," ] && [ "$(tail -n 1 "$STUB/runs")" = "7 s1" ] \
     || fail "a run for the batch formed again, or not one run of s1 for the first batch: $(runs): $out"
   [ "$(st 'select(.step == "landed") | "\(.issue) \(.batch)"' | tail -n 1)" = "7 null" ] || fail "#7 did not land alone after the batch of #8 and #9: $(st 'select(.step == "landed")')"

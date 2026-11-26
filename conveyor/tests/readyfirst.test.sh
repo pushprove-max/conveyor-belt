@@ -78,16 +78,14 @@ t_readyclaim() {
 
 # The fixture of batchreuse.test.sh (reusesetup): #7 and #8 change a.txt (#7 its first line, #8 a line at its end) and
 # a file each, x.txt and y.txt; a.txt selects s.test, x.txt x.test, y.txt y.test. #7 holds a.txt first, and a product
-# check holds it before its tests until #8, its tests passed, waits at its claim. Here each run's log times each file
-# it ran (`TESTRUN sec`), as a project's runner does, so a card's test line names its test files (sharedtests()), and
-# #7's first tests end only once #8 has landed ($STUB/during then), is gone, or writes a wait at its claim after they
-# began (its live record's `last`; the bug: #8 waits on #7, which waits in its tests on #8), so a change in who waits
-# fails the cases rather than hanging them. No card is in the order list.
+# check holds it before its tests until #8, its tests passed, waits at its claim. #7's first tests end only once #8 has
+# landed ($STUB/during then), is gone, or writes a wait at its claim after they began (its live record's `last`; the
+# bug: #8 waits on #7, which waits in its tests on #8), so a change in who waits fails the cases rather than hanging
+# them. No card is in the order list.
 rfsetup() {
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'a.txt s.test' 'x.txt x.test' 'y.txt y.test'
   jq -c '.order = []' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
   cat >> "$STUB/test-cmd" <<'EOF'
-sed -n 's/^== //p' "$L" | sort -u | while read -r f; do printf 'TESTRUN sec\t%s\t1\t1\n' "$f"; done >> "$L"
 case $PWD in *-7) [ -e "$STUB/ran7" ] || { : > "$STUB/ran7"; s=$(date +%s); while [ -d "$STUB" ]; do
   jq -e 'select(.issue == 8 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && { : > "$STUB/during"; break; }
   ls -d ../*-8 >/dev/null 2>&1 || break
@@ -97,13 +95,15 @@ EOF
 
 # Bug: #8 passed its review and its tests, and waited on #7, picked first and still in its test step, until #7 landed.
 # #8 lands while #7 is in its tests. #7 is then fitted onto main with #8's change (it applies there): it is not
-# reviewed again, and it runs again only s.test, the one of its listed test files that #8's landing touched, not x.test.
+# reviewed again, and it lands on its pass with no second run, though #8's landing touched s.test, one of its test files
+# (the owner's pick, #1777). Bug it catches too: #7 ran s.test again before it landed.
 t_readyfirst() {
   rfsetup
+  # loop: only a whole run shows #8 landing while card() holds #7 in its tests, and #7 then landing on its pass
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ -e "$STUB/during" ] && [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] \
     || fail "#8, ready, did not land while #7 was in its tests: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,) $(st 'select(.step == "blocked") | .reason')"
-  [ "$(runs)" = "8 s1 y1 y2,7 s1 x1 x2,7 s1," ] || fail "#7 did not run again only s.test, which #8's landing touched: $(runs): $out"
+  [ "$(runs)" = "8 s1 y1 y2,7 s1 x1 x2," ] || fail "#7 ran its tests again after #8 landed on s.test, its test file: $(runs): $out"
   [ "$(st 'select(.step == "review") | "\(.issue) \(.result)"' | tr '\n' ,)" = "7 GO,8 GO," ] && [ -z "$(st 'select(.step == "fix") | .issue')" ] \
     || fail "#7 was reviewed again or brought onto main by a session, though its change applied there: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
   [ "$(sed -n '1p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven eight " ] && [ "$(cat "$R/x.txt" "$R/y.txt" | tr '\n' ' ')" = "x y " ] \

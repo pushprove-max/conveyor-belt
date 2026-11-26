@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: test files at landing: the three-way merge of test files, a test file shared with a card landed since
-# and the landing turn its run again gives (lib/claim.sh), and the parse check of merged files.
+# Engine cases: test files at landing: the three-way merge of test files, a pass that stands when main moves (a test
+# file a card landed since touches too), the landing turn (lib/claim.sh), and the parse check of merged files.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -56,78 +56,18 @@ EOF
   [ "$(tr '\n' ' ' < "$R/a.test.sh")" = "case1 main-case case7 fixed " ] || fail "main does not hold both cases and the fix: $(cat "$R/a.test.sh")"
 }
 
-# Bug (#334: two cards that each added a row to one panel passed their tests alone, and its test file failed on main
-# once both landed): a card whose change still applied to a main that moved landed on the tests it passed before, though
-# the card landed meanwhile touched a test file of its own. Card c7 (fx_wt) changes lib/rows.sh; the card landed
-# meanwhile, lib/panel.sh: the test links give both lib/view.test.sh. Once main holds that landing, sharedtests() names
-# lib/view.test.sh, so the card runs it again on main as it is now (card()) and does not land red; a landing that
-# touches none of the card's test files (a.txt) names none, so the card lands on the run it passed.
-t_mergesharedtests() {
-  setup '[]'; mkdir -p "$R/lib"; linkset '{"lib/panel.sh": ["lib/view.test.sh"], "lib/rows.sh": ["lib/view.test.sh"]}'
-  fx_wt 'echo eight >> lib/rows.sh' lib/panel.sh panel lib/rows.sh rows lib/view.test.sh case1
-  # Each landing, then c7's change brought onto main as it is now (settle()), and what sharedtests() prints and returns.
-  fx_in 'cd "$FXWT" && b=$(git rev-parse HEAD) || exit 3
-    for f in a.txt lib/panel.sh; do echo landed >> "$R/$f" && git -C "$R" commit -qam "$f lands" && git diff --cached --binary --no-renames > "$FXWT.patch" \
-      && git reset -q --hard main && git apply --index "$FXWT.patch" || exit 3; t=$(sharedtests "$FXWT" "$b"); echo "$f: $? $t"; done'
-  [ "$RC" = 0 ] && [ "$(tr '\n' ',' < "$T/$CASE/run.out")" = "a.txt: 1 ,lib/panel.sh: 0 lib/view.test.sh," ] \
-    || fail "the test file c7 shares with a card landed since was not named, or one with a landing that touches none was: $(cat "$T/$CASE/run.out")"
-}
-
-# #447: card A (#7) passes; card-b lands touching A's test file lib/view.test.sh; A runs that file again and passes;
-# card-c lands touching it again (and, given "conflict", A's line of lib/panel.sh too). card-b and card-c stand for
-# cards that landed: a commit on main and its landed line. Each run of A's tests logs the file, and the n-th lands the
-# n-th of them. Given "turn", card B (#8, in $T/$CASE/b8) is ready to land at the same time as A (sharedturn()).
-sharedonce() { # [conflict|turn]
-  setup "[$(issue 7 2026-01-01)]"; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
-  mkdir -p "$R/lib"; echo panel > "$R/lib/panel.sh"; echo case1 > "$R/lib/view.test.sh"
-  git -C "$R" add lib; linkset '{"lib/panel.sh": ["lib/view.test.sh"]}' # A's change runs lib/view.test.sh
-  echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i 's/^panelC\$/panelC seven/' lib/panel.sh; else sed -i 's/^panel\$/seven/' lib/panel.sh; fi" > "$STUB/build"
-  if [ "${1:-}" = turn ]; then sharedturn; elif [ -n "${1:-}" ]; then : > "$STUB/conflict"; fi
-  cat >> "$STUB/test-cmd" <<'EOF'
-n=$(( $(cat "$STUB/n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB/n"
-echo "== lib/view.test.sh"; printf "%s\n" "== lib/view.test.sh" "-- ok lib/view.test.sh" "TESTRUN sec	lib/view.test.sh	1	1" >> "$CONVEYOR_TEST_LOG/run.log"
-c=''; case $n in 1) c=card-b ;; 2) c=card-c ;; esac
-[ -z "$c" ] || { echo "$c" >> "$R/lib/view.test.sh"; [ "$c" != card-c ] || [ ! -e "$STUB/conflict" ] || sed -i 's/^panel$/panelC/' "$R/lib/panel.sh"
-  git -C "$R" commit -qam "$c lands"; jq -cn --arg c "$c" --arg s "$(git -C "$R" rev-parse HEAD)" '{card: $c, issue: 90, step: "landed", result: "ok", sha: $s}' >> "$ST/cards.jsonl"; }
-EOF
-  # loop: only a whole card run shows card-b and card-c landing between A's test runs and A's run again before it lands
-  out=$(loop run 2>&1); rc=$?; : > "$STUB/runend"; [ $rc = 0 ] || fail "run exited non-zero: $out"
-  grep -q 'card .*-7: cards landed since its tests ran touch its test files too.*lib/view.test.sh' <<<"$out" \
-    || fail "#7 did not run its test file again after card-b landed on it: $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-}
-# Card B for sharedonce turn: once a card has the landing turn (land.turn), B's worktree is made on main as it is then,
-# adding a line to A's shared test file, and B tries to land (land(), as card() calls it), its output and exit in
-# $T/$CASE/b.out, then $STUB/btried. Main's pre-commit hook holds a landing made with the turn taken until then (30 s at most), so B tries
-# while A has the turn and is landing. B gives up when the run ends first (no turn was taken).
-sharedturn() {
-  local h=$R/.git/hooks/pre-commit
-  # Only a commit made while a card has the turn waits: card-b's and card-c's commits (test-cmd) come before it.
-  printf '%s\n' '#!/usr/bin/env bash' "[ -s '$T/$CASE/cards/land.turn' ] || exit 0" "for i in \$(seq 300); do [ -e '$STUB/btried' ] && break; sleep 0.1; done" > "$h" && chmod +x "$h" || fail "main's pre-commit hook" # sleep: the landing waits for card B's try
-  # This polls the loop's cards folder: only a card() run takes the turn after its run again of the shared files.
-  ( for i in $(seq 1200); do [ -s "$T/$CASE/cards/land.turn" ] && break; [ ! -e "$STUB/runend" ] || exit 0; sleep 0.1; done # sleep: B waits for A's turn
-    git -C "$R" worktree add -q --detach "$T/$CASE/b8" main && echo eight >> "$T/$CASE/b8/lib/view.test.sh" && git -C "$T/$CASE/b8" add -A || exit 0
-    ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; cd "$R" || exit 9
-      . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names || exit 9
-      land c8-8 8 "$T/$CASE/b8" "eight (#8)"; echo "land: $?" ) > "$T/$CASE/b.out" 2>&1
-    : > "$STUB/btried" ) & BPID=$!
-}
-
-# Bug (#1148): card #1134 passed its run again of its shared test files, and each time it came to land another card had
-# landed first: it was fitted onto main and ran its lint and tests again, four rounds in 13 minutes. A (#7), its run
-# again passed, has the landing turn: B, ready at the same time, tries to land while A lands and is refused, main
-# staying as A's tests left it; A lands with no second run again of its shared file, then B lands on A's commit.
-t_mergesharedturn() {
-  local a
-  sharedonce turn; wait "$BPID"
-  [ "$(cat "$T/$CASE/b.out" 2>&1)" = $'another card has the landing turn, as its batch or its run again of the shared test files lands first; nothing was landed\nland: 1' ] \
-    || fail "card B was not refused while A had the landing turn: $(cat "$T/$CASE/b.out" 2>&1)"
-  a=$(st 'select(.issue == 7 and .step == "landed") | .sha')
-  [ -n "$a" ] && [ "$(cat "$STUB/n")" = 2 ] && [ "$(git -C "$R" log -1 --format=%s "$a^")" = "card-c lands" ] && [ ! -e "$T/$CASE/cards/land.turn" ] \
-    || fail "A did not land on main as its tests left it with no second run, or its turn stayed: runs $(cat "$STUB/n"); $(git -C "$R" log --format=%s | head -4 | paste -sd,)"
-  fx_in 'W=$T/$CASE/b8; git -C "$W" diff --cached --binary > "$W.p" && git -C "$W" reset -q --hard main && git -C "$W" apply --index "$W.p" || exit 3
-    land c8-8 8 "$W" "eight (#8)"; echo "land: $?"'
-  [ "$(tail -n 1 "$T/$CASE/run.out")" = 'land: 0' ] && [ "$(git -C "$R" rev-parse main^)" = "$a" ] && grep -qx eight "$R/lib/view.test.sh" \
-    || fail "B did not land after A once A's turn ended: $(cat "$T/$CASE/run.out")"
+# Bug (#1148): a card ready to land while another card has the landing turn landed, and moved main under the batch that
+# had the turn. land() refuses c8-8 while c7-7 has it, main staying where it was, and lands it once the turn has ended.
+t_mergeturnrefuse() {
+  setup '[]'; mkdir -p "$T/$CASE/cards"; local m; m=$(git -C "$R" rev-parse main)
+  git -C "$R" worktree add -q --detach "$T/$CASE/cards/c8-8" main && echo eight > "$T/$CASE/cards/c8-8/b.txt" && git -C "$T/$CASE/cards/c8-8" add -A || fail "c8's change"
+  echo "{\"pid\":$$,\"paths\":[\"a.txt\"]}" > "$T/$CASE/cards/c7-7.claim"; echo "{\"card\":\"c7-7\",\"pid\":$$}" > "$T/$CASE/cards/land.turn"
+  fx_in 'land c8-8 8 "$CARDS/c8-8" "eight (#8)"; echo "land: $?"; git -C "$R" rev-parse main
+    turnfree c7-7; land c8-8 8 "$CARDS/c8-8" "eight (#8)"; echo "land: $?"'
+  [ "$(head -n 3 "$T/$CASE/run.out")" = $'another card has the landing turn, as its batch lands first; nothing was landed\nland: 1\n'"$m" ] \
+    || fail "c8-8 was not refused while c7-7 had the landing turn, or main moved: $(cat "$T/$CASE/run.out")"
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = 'land: 0' ] && [ "$(git -C "$R" show main:b.txt)" = eight ] \
+    || fail "c8-8 did not land once the turn ended: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug (#1148): a card ready to land while another card has the landing turn landed, or waited saying nothing. c8-8 at
@@ -156,87 +96,40 @@ t_mergeturnwait() {
   recok "$ST/cards.jsonl" "the wait for a landing turn"
 }
 
-# Bug it catches: after its shared run again passed, card-c landed on the file again and A ran it again, on and on:
-# each run let another card land, and A never landed (#447). A lands with no third run, and its log names card-c only.
-t_mergesharedonce() {
-  sharedonce
-  [ "$(cat "$STUB/n")" = 2 ] && [ "$(st 'select(.issue == 7 and .step == "test") | "\(.result) \(.reused // false)"' | tr '\n' ,)" = "pass false,pass false,pass true," ] \
-    && [ "$(st 'select(.issue == 7 and .step == "landed") | .issue')" = 7 ] \
-    || fail "#7 ran its shared test file again after card-c landed, or did not land: runs $(cat "$STUB/n"); $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  grep -q 'card .*-7: .*lands with no second run again\. Cards landed since: card-c$' <<<"$out" \
-    || fail "#7's log does not say it lands with no second run, naming card-c alone: $(grep 'card .*-7' <<<"$out" | tail -5)"
-  [ "$(tr '\n' ' ' < "$R/lib/panel.sh")" = "seven " ] || fail "main does not hold #7's change: $(cat "$R/lib/panel.sh")"
-}
-
-# Bug it catches: a card past its one shared run again (#447) landing on that pass when its change no longer applies.
-# card-c changes A's line too: A is fitted onto main as before (its rebuild session), reviewed and tested again, and
-# lands. The three-way merge is tried only to spare a rebuild: a change whose lines main changed too still goes to the
-# rebuild session, and the rebuilt change lands, not main's line.
-t_mergesharedonceconflict() {
-  sharedonce conflict
+# The owner's pick (#1777): a card's pass stands when main moves, but a change a session had to rework to fit is still
+# tested again. Card A (#7) passes its tests; during that run card-b lands (a commit on main), changing A's line of
+# lib/panel.sh and its test file lib/view.test.sh. A is brought onto main by its rebuild session, reviewed and tested
+# again, and lands its fitted change. Bug it catches: a reworked change landing on the pass of the change before it.
+t_mergepassconflict() {
+  setup "[$(issue 7 2026-01-01)]"; for i in 1 2; do echo "$GO" > "$STUB/review.$i"; done
+  mkdir -p "$R/lib"; echo panel > "$R/lib/panel.sh"; echo case1 > "$R/lib/view.test.sh"
+  git -C "$R" add lib; linkset '{"lib/panel.sh": ["lib/view.test.sh"]}' # A's change runs lib/view.test.sh
+  echo "if grep -q '^# Landing conflict' \"\$STUB/brief\"; then sed -i 's/^panelC\$/panelC seven/' lib/panel.sh; else sed -i 's/^panel\$/seven/' lib/panel.sh; fi" > "$STUB/build"
+  cat >> "$STUB/test-cmd" <<'EOF'
+n=$(( $(cat "$STUB/n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB/n"
+[ "$n" != 1 ] || { echo card-b >> "$R/lib/view.test.sh"; sed -i 's/^panel$/panelC/' "$R/lib/panel.sh"; git -C "$R" commit -qam "card-b lands"; }
+EOF
+  # loop: only a whole card run shows card-b landing during A's tests, then A's rebuild session, review and run again
+  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   st 'select(.issue == 7 and .step == "rebase") | .reason' | grep -q '^rebase onto main conflicts' \
-    || fail "#7 was not fitted onto main after card-c's conflicting change: $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(cat "$STUB/n")" = 3 ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(st 'select(.issue == 7 and .step == "landed") | .issue')" = 7 ] \
+    || fail "#7 was not fitted onto main after card-b's conflicting change: $(st 'select(.issue == 7) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
+  [ "$(cat "$STUB/n")" = 2 ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] && [ "$(st 'select(.issue == 7 and .step == "landed") | .issue')" = 7 ] \
     && [ "$(tr '\n' ' ' < "$R/lib/panel.sh")" = "panelC seven " ] \
     || fail "#7's fitted change was not reviewed and tested again before it landed: runs $(cat "$STUB/n"), reviews $(wc -l < "$STUB/reviews"); $(cat "$R/lib/panel.sh")"
 }
 
-# Bug (#345): unshare() named a shared file that had passed only as failed, so the run again logged "did not pass" for
-# it. Each shared file no `fail` line names gets a `shared` line beside its `fail` line; one that failed a case (c) gets
-# none, as it did fail; so does each file whose passes it drops when the shared files could not be listed. Bug (R238):
-# a shared file the list had no line for (e, which never ran) was named shared too, so the run again logged "main
-# changed what it tests since it passed" for a file that never passed: it gets a `fail` line alone.
-t_mergeunshare() {
-  eval "$(sed -n '/^unshare() {/,/^}/p' "$SRC/lib/claim.sh")"
-  local w=$T/$CASE/w
-  mkdir -p "$T/$CASE"; printf 'change\tx\npass\ta\npass\tb\nfail\tc\tone\nok\tc\ttwo\n' > "$w.rerun"
-  unshare "$w" $'a\nc\ne'
-  [ "$(sort "$w.rerun" | tr '\t\n' ':|')" = "change:x|fail:a|fail:c|fail:c:one|fail:e|pass:b|shared:a|" ] \
-    || fail "the shared files that passed are not each named shared, or one that failed or never ran (e) is: $(cat "$w.rerun")"
-  printf 'change\tx\npass\ta\nfail\tc\tone\nok\tc\ttwo\n' > "$w.rerun"
-  unshare "$w" "(the test files of the change or of main's could not be listed)"
-  [ "$(sort "$w.rerun" | tr '\t\n' ':|')" = "change:x|fail:c:one|shared:a|" ] \
-    || fail "with no list of shared files, the files that passed are not each named shared: $(cat "$w.rerun")"
-}
-
-# With the pack's test.changed set, unshare() leaves the list as it is: tests() adds main's change as `main` lines,
-# from which the command runs the cases both changes select (#1591; t_mainmovedcases runs it through card()). Bug it
-# catches: a list with no tree line, or a base (b1) that cannot be compared with HEAD, gets no `main` line from
-# tests(), so left as it is the shared file would not run again at all: there it is named failed, to run whole, as with
-# no test.changed. Each of the two is checked apart, so neither check of unshare() can go unnoticed.
-t_mergeunsharechanged() {
-  eval "$(sed -n '/^unshare() {/,/^}/p' "$SRC/lib/claim.sh")"
-  local w=$T/$CASE/w l=$'change\tx\nbase\tb0\ntree\tt0\npass\ta\npass\tb\n'
-  packget() { printf -v "$2" '%s' sel.sh; }; treediff() { [ "$2" = b0 ] && [ "$3" = HEAD ]; }
-  mkdir -p "$T/$CASE"; printf '%s' "$l" > "$w.rerun"
-  unshare "$w" a
-  [ "$(cat "$w.rerun")" = "${l%$'\n'}" ] || fail "with test.changed, the shared file a lost its pass: $(cat "$w.rerun")"
-  printf '%s' "$l" | grep -v '^tree' > "$w.rerun"
-  unshare "$w" a
-  [ "$(sort "$w.rerun" | tr '\t\n' ':|')" = "base:b0|change:x|fail:a|pass:b|shared:a|" ] \
-    || fail "with test.changed and no tree line, the shared file a was not named failed to run whole: $(cat "$w.rerun")"
-  printf '%s' "${l/b0/b1}" > "$w.rerun"
-  unshare "$w" a
-  [ "$(sort "$w.rerun" | tr '\t\n' ':|')" = "base:b1|change:x|fail:a|pass:b|shared:a|tree:t0|" ] \
-    || fail "with test.changed and a base (b1) that cannot be compared with HEAD, the shared file a was not named failed to run whole: $(cat "$w.rerun")"
-}
-
-# Main moves under card c7 (#7) after its tests passed (#1591). The pack sets test.changed: its test command reads the
-# list's `main` lines. The links are <links>; c7 makes <c7's change>, by default adding `eight` to lib/rows.sh. Its
-# tests passed on m0, its list (c7.rerun) as a run leaves it: lib/view.test.sh passed. Card c8 lands, adding <c8's line>
-# to lib/panel.sh (its commit and landed line), and c7's change is brought onto main as it is now. lib/view.test.sh
-# (<its text> on main) by default fails when lib/rows.sh holds `eight` and lib/panel.sh holds `landed`: the two changes
-# fail together (#334). $STUB/test-cmd stands for the project's command: it adds each file it is given to
-# $STUB/given, keeps the list it got in $STUB/list, and runs the file unless the list keeps it as passed and names no
-# `main` line, adding to $STUB/ran `<file> <case>` for each of the file's cases it runs: those CONVEYOR_TEST_CASES
-# names of it, else all its t_ cases. Of main's change it runs only those, as the project's command runs of it only
-# the cases the change's own selection holds (.conveyor/test-changed-rerun.test.sh tests that rule). Asked for its selection
-# (CONVEYOR_TEST_LIST), it lists the files it is given but those $STUB/unselected names.
+# Main moves under card c7 (#7), whose test step then runs on the main that moved: its change is not marked as passed
+# (as after a failed run fitted onto main). The pack sets test.changed: its test command reads the list's `main`
+# lines. The links are <links>; c7 makes <c7's change>, by default adding `eight` to lib/rows.sh. Its list (c7.rerun)
+# is as a run on m0 leaves it: lib/view.test.sh passed. Card c8 lands, adding <c8's line> to lib/panel.sh (its commit
+# and landed line), and c7's change is brought onto main as it is now. $STUB/test-cmd stands for the project's
+# command: it adds each file it is given to $STUB/given and runs the file unless the list keeps it as passed and names
+# no `main` line, adding to $STUB/ran `<file> <case>` for each of the file's cases it runs: those CONVEYOR_TEST_CASES
+# names of it, else all its t_ cases. Asked for its selection (CONVEYOR_TEST_LIST), it lists the files it is given but
+# those $STUB/unselected names.
 mainmoved() { # <links json> <c8's line> [<c7's change> [<lib/view.test.sh text> [<lib/other.test.sh text>]]]
-  local v='! { grep -qx eight lib/rows.sh && grep -qx landed lib/panel.sh; }'
   setup "[$(issue 7 2026-01-01)]"; tune '.test.changed = "sel.sh"'; mkdir -p "$R/lib"; linkset "$1"
-  fx_wt "${3:-echo eight >> lib/rows.sh}" lib/panel.sh panel lib/rows.sh rows lib/other.test.sh "${5:-exit 0}" lib/x.test.sh 'exit 0' \
-    lib/y.test.sh 'exit 0' lib/w.test.sh 'exit 0' lib/view.test.sh "${4:-$v}"
+  fx_wt "${3:-echo eight >> lib/rows.sh}" lib/panel.sh panel lib/rows.sh rows lib/other.test.sh "${5:-exit 0}" lib/view.test.sh "${4:-exit 0}"
   m0=$(git -C "$R" rev-parse main)
   printf 'change\t%s\nbase\t%s\ntree\t%s\npass\tlib/view.test.sh\n' "$(git -C "$FXWT" diff --cached --binary --no-renames HEAD | git hash-object --stdin)" \
     "$m0" "$(git -C "$FXWT" write-tree)" > "$FXWT.rerun"
@@ -247,48 +140,53 @@ mainmoved() { # <links json> <c8's line> [<c7's change> [<lib/view.test.sh text>
   cat > "$STUB/test-cmd" <<'EOF'
 # Asked for its selection (CONVEYOR_TEST_LIST: runfiles()), it lists the files it is given, but those $STUB/unselected names.
 [ -z "${CONVEYOR_TEST_LIST:-}" ] || { [ -d "${CONVEYOR_TEST_LOG:-}" ] && echo "log cases=${CONVEYOR_TEST_CASES-unset}" > "$STUB/selenv"; grep -vxFf <(cat "$STUB/unselected" 2>/dev/null) "$CONVEYOR_TEST_FILELIST" > "$CONVEYOR_TEST_LIST"; exit 0; }
-f=$CONVEYOR_TEST_FILE; echo "$f" >> "$STUB/given"; cp "$CONVEYOR_TEST_RERUN" "$STUB/list"
+f=$CONVEYOR_TEST_FILE; echo "$f" >> "$STUB/given"
 if grep -q "^main	" "$CONVEYOR_TEST_RERUN" || ! grep -qxF "pass	$f" "$CONVEYOR_TEST_RERUN"; then
   cs=$(printf '%s\n' "${CONVEYOR_TEST_CASES:-}" | awk -F'\t' -v f="$f" '$1 == f { print $2 }'); [ -n "$cs" ] || cs=$(sed -n 's/^t_\([a-z]*\)() {.*/\1/p' "$f")
   for c in $cs; do echo "$f $c" >> "$STUB/ran"; done; bash "$f"
 fi
 EOF
 }
-# card()'s test step (cardtest()) on c7, as card() calls it, with the real sharedtests(), unshare() and tests(): the
-# lint gate, checks, batches and the landing turn stubbed; c7's change is the one that passed (testedhere()). run.out
-# ends with the run's exit.
+# card()'s test step (cardtest()) on c7, as card() calls it, with the real testedhere() and tests(): the lint gate,
+# checks and batches stubbed. run.out ends with the run's exit.
 mainmovedtest() {
   fx_in 'c=c7 n=7 wt=$FXWT issue="{}" sprompt="" br="" parsecheck="" tmain="" away="" apart="" me=$$ cmsg=x mates=()
-    lintgate() { return 0; }; checks() { :; }; treecheck() { :; }; testedhere() { return 0; }; gather() { return 1; }; turntake() { :; }
+    lintgate() { return 0; }; checks() { :; }; treecheck() { :; }; gather() { return 1; }
     cardtest; echo "rc $rc"'
 }
 
-# Bug it catches (#334, kept with #1591's narrower run again): c7 and c8 each pass alone, and lib/view.test.sh, which
-# both changes select, fails with both on main. With no file named failed in c7's list, its run again on main as it
-# is now still gives the command that file with main's change named, so the pair fails before c7 lands.
+# The owner's trade-off (#1777, "a pass stands"), kept in view: c7 and c8 each pass lib/view.test.sh alone and fail it
+# together. c8 lands first, a change to that test file too. c7 then lands on its own pass with no second run, and the
+# main run (the whole test on main) after that second landing fails: the main-red fix card fixes it. Bug it catches: a
+# card whose tests passed ran them again because another card landed on the same test file, or the main run missed the pair.
 t_mainmovedpair() {
-  mainmoved '{"lib/rows.sh": ["lib/view.test.sh"], "lib/panel.sh": ["lib/view.test.sh"]}' landed; mainmovedtest
-  [ "$(tail -n 1 "$T/$CASE/run.out")" != "rc 0" ] && grep -qx lib/view.test.sh "$STUB/given" \
-    || fail "c7 and c8, which fail together in lib/view.test.sh, did not fail c7's run again before it landed: $(cat "$T/$CASE/run.out")"
-}
-
-# Bug it catches (#1591): a run again on a main that moved named each shared file failed with no case, so the command
-# ran it whole: card #1533's selection was 14 to 20 files and its run again 135. And (#1591 review) the run again
-# took the card's own cases off a shared file of its own (listcmd()), so the command ran every case of it. c7 changes
-# the case t_a of lib/view.test.sh, which holds t_a, t_b and t_c: its own selection is t_a. c8's change to lib/panel.sh
-# selects lib/view.test.sh, whole, and lib/other.test.sh, which c7's does not. c7's run again keeps its pass of
-# lib/view.test.sh, names main's change (`main` line) and is given t_a alone of it: t_a runs, not t_b or t_c, and
-# lib/other.test.sh is not given.
-t_mainmovedcases() {
-  mainmoved '{"lib/panel.sh": ["lib/view.test.sh", "lib/other.test.sh"]}' other \
-    'printf "t_a() {\n  echo a2\n}\nt_b() {\n  echo b\n}\nt_c() {\n  echo c\n}\n" > lib/view.test.sh' $'t_a() {\n  echo a\n}\nt_b() {\n  echo b\n}\nt_c() {\n  echo c\n}'
+  export XDG_CONFIG_HOME=$T/$CASE/config # the host file the main run changes is the case's own
+  setup '[]'; mkdir -p "$R/lib"; linkset '{"lib/rows.sh": ["lib/view.test.sh"], "lib/panel.sh": ["lib/view.test.sh"]}'
+  tune '.test.main = "bash lib/view.test.sh"'
+  fx_wt 'echo eight >> lib/rows.sh' lib/panel.sh panel lib/rows.sh rows \
+    lib/view.test.sh '! { grep -qx eight lib/rows.sh && grep -qx landed lib/panel.sh; } || { echo "FAIL [pair]: eight beside landed"; exit 1; }'
+  echo 'echo run >> "$STUB/ran"; bash "$CONVEYOR_TEST_FILE"' > "$STUB/test-cmd"
+  git -C "$R" worktree add -q --detach "$T/$CASE/cards/c8" main && echo landed >> "$T/$CASE/cards/c8/lib/panel.sh" \
+    && sed -i '1i # the case of #8' "$T/$CASE/cards/c8/lib/view.test.sh" && git -C "$T/$CASE/cards/c8" add -A || fail "c8's change"
+  # Each passes its test file alone, its pass recorded (tested()) with the commit its run was on (.rerun, as a run's
+  # list names it); then c8 lands on its pass.
+  fx_in 'for w in "$FXWT" "$CARDS/c8"; do (cd "$w" && bash lib/view.test.sh) || exit 3; echo "{}" > "$w.ready"; tested "$w"
+      printf "base\t%s\n" "$(git -C "$w" rev-parse HEAD)" > "$w.rerun"; done
+    land c8 8 "$CARDS/c8" "title 8 (#8)"; echo "land: $?"'
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = 'land: 0' ] || fail "c8, which passes alone, did not land: $(cat "$T/$CASE/run.out")"
+  CONVEYOR_NOW=1800000000 loop main-test || fail "the main run after c8 landed failed to run"
+  [ "$(jq -r .pass "$ST/maintest.json")" = "$(git -C "$R" rev-parse main)" ] || fail "main is not green with c8 alone: $(cat "$ST/maintest.json")"
+  git -C "$FXWT" diff --cached --binary --no-renames > "$FXWT.patch" && git -C "$FXWT" reset -q --hard main \
+    && git -C "$FXWT" apply --index "$FXWT.patch" || fail "c7's change could not be brought onto main as it is now"
   mainmovedtest
-  [ "$(tail -n 1 "$T/$CASE/run.out")" = "rc 0" ] && [ "$(sort -u "$STUB/given" | tr '\n' ' ')" = "lib/view.test.sh " ] \
-    || fail "c7's run again was not given lib/view.test.sh alone (given: $(cat "$STUB/given" 2>&1)): $(cat "$T/$CASE/run.out")"
-  [ "$(cat "$STUB/ran" 2>&1)" = 'lib/view.test.sh a' ] \
-    || fail "c7's run again, its own selection t_a of lib/view.test.sh, ran other cases of it (ran: $(cat "$STUB/ran" 2>&1)): $(cat "$T/$CASE/run.out")"
-  grep -qx $'pass\tlib/view.test.sh' "$STUB/list" && grep -qx $'main\tlib/panel.sh' "$STUB/list" && ! grep -q $'^fail\t' "$STUB/list" \
-    || fail "c7's run again was not given its pass of lib/view.test.sh and main's change, or named a file failed to run it whole: $(cat "$STUB/list" 2>&1)"
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "rc 0" ] && [ ! -e "$STUB/ran" ] \
+    || fail "c7's tests ran again after c8 landed on its test file, or its test step did not pass: $(cat "$T/$CASE/run.out")"
+  fx_in 'land c7 7 "$FXWT" "title 7 (#7)"; echo "land: $?"'
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = 'land: 0' ] && grep -qx eight <(git -C "$R" show main:lib/rows.sh) \
+    && grep -qx landed <(git -C "$R" show main:lib/panel.sh) || fail "c7 did not land on its pass beside c8: $(cat "$T/$CASE/run.out")"
+  CONVEYOR_NOW=1800003600 loop main-test
+  [ "$(jq -r '.fail.to' "$ST/maintest.json")" = "$(git -C "$R" rev-parse main)" ] \
+    || fail "the main run after c7 landed did not fail on the pair: $(cat "$ST/maintest.json")"
 }
 
 # Bug it catches (#1595): after main moved, a card's run started every file of its list, though the move selected no case of
@@ -331,21 +229,6 @@ t_mainmovedoff() {
   echo lib/other.test.sh > "$STUB/unselected"; mainmovedtest
   [ "$(tail -n 1 "$T/$CASE/run.out")" = "rc 0" ] && [ "$(sort -u "$STUB/given" | tr '\n' ' ')" = "lib/view.test.sh " ] \
     || fail "c7's run again was started for lib/other.test.sh, of which only an ok and an off line were kept, or did not pass (given: $(cat "$STUB/given" 2>&1)): $(cat "$T/$CASE/run.out")"
-}
-
-# Bug it catches (#1591): the shared list grew with each move of main. c7's own passes held lib/x.test.sh, which it ran
-# once only because main moved, and c8's test line names lib/y.test.sh only because main moved under c8 (its reason
-# `main changed`, its time): both counted as shared, so they ran again. c8's line naming lib/w.test.sh with the reason
-# `the card changed` is c8's own selection, which the links do not give: it still counts.
-t_mainmovedgrow() {
-  mainmoved '{"lib/rows.sh": ["lib/view.test.sh", "lib/y.test.sh", "lib/w.test.sh"], "lib/panel.sh": ["lib/view.test.sh", "lib/x.test.sh"]}' other
-  jq -cn '{units: ["lib/view.test.sh", "lib/x.test.sh"], tested: true}' > "$FXWT.ready"
-  jq -cn '{card: "c8-8", issue: 8, step: "test", result: "pass", times: {"lib/y.test.sh": 2},
-    why: {"lib/view.test.sh": ["the card changed lib/panel.sh"], "lib/w.test.sh": ["the card changed lib/panel.sh"],
-      "lib/y.test.sh": ["main changed lib/z.sh"]}}' >> "$ST/cards.jsonl"
-  fx_in 't=$(sharedtests "$FXWT" "'"$m0"'"); echo "$? $t"'
-  [ "$(tr '\n' ' ' < "$T/$CASE/run.out")" = "0 lib/view.test.sh lib/w.test.sh " ] \
-    || fail "sharedtests() of c7 after c8 landed is not lib/view.test.sh and lib/w.test.sh alone: $(cat "$T/$CASE/run.out")"
 }
 
 # Bug (#451: #415's merge, which git called clean, left a test file with two openings and one end, and only its test

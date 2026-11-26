@@ -219,17 +219,6 @@ p_mainmoved() {
   got=$(CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun ran | sorted)
   [ "$got" = "aone atwo " ] && ok "after main changed the map, the runner's cases the change selects run again" || no "main changed the map: ran '$got': $(cat "$T/out")"
 }
-# Bug (#345): a file that passed, run again because the cards landed since touch what it tests (conveyor's unshare():
-# a `fail` line and a `shared` line), was logged as "did not pass". Its log now says main changed what it tests, of an
-# engine case file run through the runner too. (A file that failed still says it did not pass: p_mainmoved.)
-p_sharedwhy() {
-  wchange
-  printf 'change\tabc\nfail\tlib/w.test.sh\nshared\tlib/w.test.sh\nfail\tconveyor/tests/b.test.sh\nshared\tconveyor/tests/b.test.sh\nok\tconveyor/conveyor.test.sh\taone\nok\tconveyor/conveyor.test.sh\tatwo\n' > "$T/rerun"
-  mkdir "$T/slog"; got=$(CONVEYOR_TEST_LOG=$T/slog CONVEYOR_TEST_RERUN=$T/rerun ran | sorted)
-  [ "$got" = "bone w " ] && [ "$(sed -n 's/^TESTRUN why\t//p' "$T/slog/test-changed.log" | sort | tr '\t\n' ':|')" = "conveyor/tests/b.test.sh:main changed what it tests since it passed|lib/w.test.sh:main changed what it tests since it passed|" ] \
-    && ok "a file run again on main's change says main changed what it tests, not that it did not pass" \
-    || no "shared files: ran '$got': $(cat "$T/slog/test-changed.log" "$T/out")"
-}
 p_fixpassed() {
   wchange
   # The runner had passed whole; the fix changed x.sh: only area a's cases run, not the whole engine test.
@@ -461,7 +450,7 @@ p_mapmainentry() {
     || no "--file conveyor/tests/a.test.sh after main added x2.sh to area a: ran '$got': $(cat "$T/out")"
 }
 
-for p in rerun mainrun mainwhole nodecases flakyoff slowoff killed fixengine fixtest mainmoved sharedwhy fixpassed \
+for p in rerun mainrun mainwhole nodecases flakyoff slowoff killed fixengine fixtest mainmoved fixpassed \
   core firstwhy handrun noarea why unlisted cover linked mapmainother mapmainentry; do part "$p"; done
 wait
 for p in "${PARTS[@]}"; do

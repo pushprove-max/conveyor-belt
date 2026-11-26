@@ -87,12 +87,8 @@ cardready() {
   # under the lock. Its tests run again only when the fitted change is not the one that passed (testedhere(): a
   # session changed it, or brought it onto main when it no longer applied, or its test files were merged keeping
   # both sides; a clean three-way merge onto main is the change that passed, settle(), and so is one a session changed
-  # only in documentation files, settle() and the rebuild marking it tested again), and when the cards landed since
-  # its last run touch a test file its change touches too (sharedtests(): two changes that passed apart can fail
-  # together, #334), once for the change it holds: after that run passed it lands on it (#447). That run keeps the passes of the run before, its list naming what main
-  # changed (rerunsince()): with the pack's test.changed, the command runs the cases both changes select; with none, the
-  # shared files lose their passes and run whole (unshare()). A failure there goes to
-  # the card's fix, as main alone passes it.
+  # only in documentation files, settle() and the rebuild marking it tested again). A pass stands whatever test files
+  # the cards landed since touch (owner, #1777): two changes that fail together show on main, as main red.
   # Batches: after a GO it is ready to land once its own checks and tests pass (tested()), and a batch may take it
   # while it waits (gather()); one with follow-ups to file lands on its own. Holding its files on main as it is now,
   # its tests passed, it takes the landing turn and the ready cards that share them or wait on that turn, and one run
@@ -228,23 +224,12 @@ cardtest() {
     go=next; return
   fi
   mainredhold; rc=$?; [ $rc = 9 ] || return $rc; [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null) # main red: the step waits (mainredhold())
-  sec=$SECONDS; rc=0; ran=''; own=''; apart=''; queued=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; BATCHMAIN=''; BATCHFROM=''; rm -f "$wt.stop"
+  sec=$SECONDS; rc=0; ran=''; own=''; apart=''; queued=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"
   # The times its own run took go on its test line (testlist.sh slowtests()); only a test rule files an issue about a test
   # file (testrulespass(), after the test line is recorded).
   testedhere "$wt" || own=1
-  # Its shared files run again once for the change it holds (<worktree>.sharedran: that change's patch-id, once
-  # that run passed): on a busy main, each run again let another card land on them, and the card never landed
-  # (#447). A failure of the two changes together that this lets onto main is caught there (main red).
-  # That run's list holds the shared files (t; SHAREDRUN, testrun.sh listcmd()). Past that run, it has the landing turn once this step passed (turntake(), below).
-  shared=''; sb=$(sed -n 's/^base\t//p' "$wt.rerun" 2>/dev/null)
-  if [ -z "$own" ] && t=$(sharedtests "$wt" "$sb"); then
-    if [ "$(cat "$wt.sharedran" 2>/dev/null)" = "$(cardpatch "$wt")" ]; then
-      shared=2; echo "conveyor: card $c: cards landed since its shared test files ran again touch them too ($(paste -sd ' ' <<<"$t")); they ran again once, so it lands with no second run again. Cards landed since: $(landedsince "$wt" "$sb")"
-    else own=1; shared=1; unshare "$wt" "$t"; echo "conveyor: card $c: cards landed since its tests ran touch its test files too, so they run again on main as it is now: $(paste -sd ' ' <<<"$t")"; fi
-  fi
-  [ -z "$own" ] || { ran=1; SHAREDRUN=${shared:+$t} tests "$wt"; rc=$?; [ $rc != 0 ] || slowtests "$wt" || :; }
+  [ -z "$own" ] || { ran=1; tests "$wt"; rc=$?; [ $rc != 0 ] || slowtests "$wt" || :; }
   [ $rc != 0 ] || [ -z "$own" ] || tested "$wt"
-  [ $rc != 0 ] || [ "$shared" != 1 ] || cardpatch "$wt" > "$wt.sharedran" || rm -f "$wt.sharedran"
   if [ $rc = 0 ] && [ -z "$away" ] && [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" = "$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)" ]; then
     # Another card has the landing turn (gather() 2): it is queued, waiting on that card for the next batch (cardlanding()).
     out=$(locked gather "$c" "$wt" "$me"); t=$?; [ $t = 0 ] || out=''; [ $t != 2 ] || queued=1
@@ -253,12 +238,11 @@ cardtest() {
   fi
   # Main moved during its batch's run: the batch lands on that run when it still stands there (rebatch()). A
   # product check that fails on its change there is a red run: the batch is run again there, as batch() does one.
-  # That run (4: for the shared files, its passes dropped, or with the pack's test.changed kept and main's change on its list, rebatch() mainsince(); its list holds its sharers' shared files, sharedown as SHAREDRUN, testrun.sh listcmd()) is their run again for each card that shares one and passed in it, the card failing or not (markshared(); bugs: a third run; a mate that passed went back to its own test step unmarked when the card failed; a red run's, 3, can reuse every pass).
   back=''
   if [ ${#mates[@]} != 0 ]; then
     rebatch "$c" "$wt"; t=$?
     [ $t != 2 ] || { block "$c" "$n" "$wt" "the engine fitted the batch of the card onto main, but it could not put the change of the card back in its worktree. Nothing landed. The change is in the patch $wt.bpatch"; return; }
-    [ $t != 3 ] && [ $t != 4 ] || { ran=1; SHAREDRUN=$([ $t != 4 ] || printf '%s\n' "${sharedown[@]}") batch "$c" "$wt" "${mates[@]}"; rc=$?; [ $t != 4 ] || markshared "$c" "$wt" $rc; }
+    [ $t != 3 ] || { ran=1; batch "$c" "$wt" "${mates[@]}"; rc=$?; }
   fi
   sec=$((SECONDS - sec))
   # It broke its batch, or its patch did not apply on the cards before it there: the cards that passed land without it,
@@ -274,10 +258,6 @@ cardtest() {
   [ -z "$back" ] || { git -C "$wt" reset -q --hard "$back" 2>/dev/null && git -C "$wt" apply --index "$wt.bpatch" 2>/dev/null; } \
     || { block "$c" "$n" "$wt" "the batch of the card landed, but the engine could not put the change of the card back in its worktree. The change is in the patch $wt.bpatch"; return; }
   rm -f "$wt.lent" # its worktree holds its own change again (batch())
-  # Its run again of the shared files passed (now, or before for the change it holds), and its batch's run too when a
-  # batch took it: it takes the landing turn (turntake(), lib/claim.sh), so no other card lands on main before it.
-  # Not before its batch's run: the cards of a batch it broke land without it (above).
-  [ $rc != 0 ] || [ -n "$apart" ] || [ -z "$shared" ] || locked turntake "$c" "$me" || :
   go=''
 }
 # card()'s wait for the machine hold or the repair lane (mainred.sh holdwait()), its seconds added to card()'s mainsec, as
@@ -506,8 +486,7 @@ cardland() {
     # An ordered or a ready card went past this one since its claim (it holds its files only from its landing step,
     # so that is where it is passed): it claims again, waits for that card, and is fitted onto main as that card
     # left it. Gone past by an ordered card, it is reviewed again when main moved meanwhile; gone past only by ready
-    # cards (claim(): fit), only when the fit changed its change, and its tests run again only where the cards that
-    # landed touch its test files (sharedtests()).
+    # cards (claim(): fit), only when the fit changed its change, and its tests run again only then (testedhere()).
     # land() reads the same mark under the lock, so a card passed after this reading does not land: it comes back here.
     # A card that tested in a batch is tested again after it.
     if jq -e '.passed == true' "$wt.claim" >/dev/null 2>&1; then
