@@ -629,7 +629,8 @@ judge. With no effort, the effort is medium.
 The replay takes the newest review lines, in the card records and the retried lines, where the judge accepted or
 declined findings. By default it takes 20. `--last <n>` sets a different number. For each review, the replay judge
 gets the same findings, the issue, the change of the card, and the findings that were declined on the cards of the
-issue before that judge ran. When a fix round came before the review, the replay judge also gets the findings that
+issue before that judge ran. Each finding has its `proof line` mark, which the engine reads again from the finding and
+the change, as it does in a review. When a fix round came before the review, the replay judge also gets the findings that
 the fix round was told to fix, each with its `E<n>` ID and, when the judge gave one, the reason that the judge
 accepted it, as the recorded judge got them. These are the lines that the review recorded. The change is the commit that landed, or the kept patch of a blocked card, on the commit
 that the review ran on. A review is skipped when its card has no landed commit and no kept patch. It is also skipped

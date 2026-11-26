@@ -324,6 +324,27 @@ dwchecked() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <s
     || { block "$1" "$2" "$3" "the Done-when check failed again after its one fix session: $(jq -r '.failed | join("; ")' <<<"$k")"; return 1; }
 }
 
+# Whether the code line a finding quotes is the line the staged tree has. A finding ends its proof with
+# "At <file:line>: `<the text of that line>`" (REVIEWT). For each finding of <worktree>.review, in the order
+# judgemarks() lists them, it prints one word: match (the last such part quotes the text that the staged file has at
+# that line, each run of white space made one space and the ends trimmed), differs (other text, a file the staged tree
+# lacks or a line past its end) or none (no such part). It drops no finding: the judge reads the word. A finding the
+# judge declined, ruled outside or sent to a list, and a MINOR one, counts too (its prefix and the judge's reason are left out).
+proofline() { # <worktree>
+  local f p n want got re='^.*At ([A-Za-z0-9_./-]+):([0-9]+): `(.+)`' real
+  real=$(cd "$1" && pwd -P) || return 1
+  sed -E 's/^[[:space:]]*((DECLINED|MINOR|OUTSIDE|SELFHEALS):[[:space:]]*)+//; s/ \(judge: .*\)$//' "$1.review" | grep -Ev "$NOTFINDING" \
+    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk 'NF && !seen[$0]++' | while IFS= read -r f; do
+    [[ $f =~ $re ]] || { echo none; continue; }
+    p=${BASH_REMATCH[1]}; n=$((10#${BASH_REMATCH[2]})); want=$(proofnorm "${BASH_REMATCH[3]}")
+    p=${p#"$1"/}; p=${p#"$real"/}; p=${p#./}
+    got=$(git -C "$1" cat-file blob ":$p" 2>/dev/null | awk -v n="$n" 'NR == n') || got=''
+    got=$(proofnorm "$got")
+    if [ -n "$got" ] && [ "$got" = "$want" ]; then echo match; else echo differs; fi
+  done
+}
+# shellcheck disable=SC2086 # the unquoted $1 is split on white space on purpose, with globbing off
+proofnorm() { local IFS=$' \t\r\n'; set -f; set -- $1; printf '%s' "$*"; } # <text>: its white-space runs made one space, its ends trimmed
 # The findings of a review at each level, as its record line holds them: counted over the whole review, of which
 # the line keeps only the first 1500 characters. A finding is any line followups() would file, and one with no
 # [P0] to [P3] mark counts as P1, the level it is filed at. An accepted P3 listed only (a MINOR line, minor()) counts

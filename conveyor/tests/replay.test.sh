@@ -45,7 +45,7 @@ replaysetup() {
           read: ($t | fromdateiso8601 - 5 | todate)} + $j)}' >> "${6:-$ST/cards.jsonl}"
   }
   landed() { jq -cn --arg c "$1" --argjson i "$2" --arg t "$3" --arg s "$sha" '{card: $c, issue: $i, step: "landed", time: $t, tokens: {claude: 0, codex: 0}, result: "ok", sha: $s, reason: ""}' >> "$ST/cards.jsonl"; } # <card> <issue> <time>
-  rline c1-7 7 1 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:2 F-one","place":"inside","reason":"real","cost":"none"}],"declined":[{"n":2,"finding":"[P2] a.txt:1 F-two","place":"outside","reason":"style"}]}'
+  rline c1-7 7 1 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:2 F-one. Proof: p. At a.txt:2: `l2`","place":"inside","reason":"real","cost":"none"}],"declined":[{"n":2,"finding":"[P2] a.txt:1 F-two","place":"outside","reason":"style"}]}'
   landed c1-7 7 2026-11-01T00:02:00Z
   # Findings ruled OUTSIDE on issue 7 (#1734): c1-0, before c1-7's judge ran, one in judge.outside and one that went to the
   # self-heals list (outside: true); c1-13, after it ran. Neither review has a ruling to replay, so neither is a case.
@@ -83,6 +83,16 @@ STUBJUDGE='judgecall() {
     *) echo "{\"model\":\"claude-haiku-5-5\",\"effort\":\"low\",\"sec\":9,\"usage\":$U,\"failed\":\"the judge call failed (timeout)\"}"; return 1 ;;
   esac
 }'
+# fx_in() with the libraries `conveyor.sh pick replay` loads (the replay branch of commands/pick.sh), not the run command's:
+# a function replay() calls from a library the command does not load is missing here as it is there. A list that
+# yields no library leaves names() undefined, which ends the shell with 9 and fails the case.
+fx_pick() { # <commands>
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(sed -n '/= replay \]/,/^fi$/p' "$SRC/commands/pick.sh" | grep '^  \. "\$HERE/lib/')" || exit 9
+    names || exit 9
+    eval "$1" ) > "$T/$CASE/run.out" 2>&1; RC=$?
+  [ "$RC" != 9 ] || fail "the replay command's libraries could not be loaded: $(cat "$T/$CASE/run.out")"
+}
 
 # Bugs caught: the replay did not give the judge the recorded findings with their diff (the landed commit, or the
 # kept patch of a blocked card in the retried lines), counted a case with no diff, compared with the reason of a kind
@@ -93,7 +103,9 @@ t_replayjudge() {
   # Bug caught: the replay judge was given another decline rule than a review's judge is now (the control record's
   # rare-case levels, judgeprompt()).
   loop control judge rare P2 >/dev/null || fail "control judge rare P2 failed"; eval "$SUMS" > "$STUB/before"
-  fx_in '. "$HERE/lib/replay.sh"; '"$STUBJUDGE"'; replay judge claude-haiku-5-5 low'
+  # Bug caught (#1749): replay() marked every finding's proof line `none` when run as `conveyor.sh pick replay` runs it,
+  # because proofline() came from a library that only the run command loads; so it runs with the replay command's libraries.
+  fx_pick "$STUBJUDGE"'; replay judge claude-haiku-5-5 low'
   [ "$RC" = 0 ] || fail "the replay failed: $(cat "$T/$CASE/run.out")"
   out=$(tail -n 1 "$T/$CASE/run.out")
   jq -e '{reviews, skipped, findings, agree, unanswered, usd, recordedUsd, model, effort} == {"reviews":3,"skipped":3,"findings":3,"agree":2,"unanswered":1,"usd":0.3,"recordedUsd":6,"model":"claude-haiku-5-5","effort":"low"}' <<<"$out" >/dev/null \
@@ -103,8 +115,8 @@ t_replayjudge() {
   [ "$(jq -c '.calls | map([.card, .usage.input, .failed // ""])' <<<"$out")" = '[["c1-7",1000000,""],["c1-8",1000000,""],["c1-11",1000000,"the judge call failed (timeout)"]]' ] \
     || fail "each call's usage, the failed one's too, is not recorded: $(jq -c .calls <<<"$out")"
   [ "$(cat "$ST/replays.jsonl")" = "$out" ] || fail "the replay's line is not the one line of $ST/replays.jsonl: $(cat "$ST/replays.jsonl" 2>&1)"
-  grep -q '^+three$' "$STUB/judged" && grep -q '^+four$' "$STUB/judged" && grep -q '^F1 \[inside the diff\] \[P1\] a.txt:2 F-one$' "$STUB/judged" \
-    && grep -q '^F2 \[outside the diff\] \[P2\] a.txt:1 F-two$' "$STUB/judged" && grep -q '^#7 title 7$' "$STUB/judged" \
+  grep -q '^+three$' "$STUB/judged" && grep -q '^+four$' "$STUB/judged" && grep -q '^F1 \[inside the diff; proof line: match\] \[P1\] a.txt:2 F-one. Proof: p. At a.txt:2: `l2`$' "$STUB/judged" \
+    && grep -q '^F2 \[outside the diff; proof line: none\] \[P2\] a.txt:1 F-two$' "$STUB/judged" && grep -q '^#7 title 7$' "$STUB/judged" \
     || fail "the judge was not given each case's diff, issue and findings: $(cat "$STUB/judged")"
   # Bug caught (#1381): the replay judge's prompt says each finding is followed by the lines it cites and a small staged
   # change is in the message, but replay sent the finding text alone, so it judged with less than the live judge has.
@@ -115,14 +127,14 @@ t_replayjudge() {
 '"$(cat "$STUB/c1-7.diff")"'
 
 # The findings
-F1 [inside the diff] [P1] a.txt:2 F-one
+F1 [inside the diff; proof line: match] [P1] a.txt:2 F-one. Proof: p. At a.txt:2: `l2`
   Lines at a.txt:2 (the staged change):
     1: one
     2: l2
     3: l3
     4: l4
     5: l5
-F2 [outside the diff] [P2] a.txt:1 F-two
+F2 [outside the diff; proof line: none] [P2] a.txt:1 F-two
   Lines at a.txt:1 (the staged change):
     1: one
     2: l2

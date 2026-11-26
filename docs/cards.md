@@ -320,6 +320,13 @@ needs. `any`, the default, takes any proof that can be reproduced. `real` asks f
 runs: its real config, commands and inputs. A finding with no such proof becomes an `UNPROVEN:` line, which never
 holds the verdict. A security finding needs only a proof that can be reproduced.
 
+The proof of a finding ends with `At <file:line>: ` and the text of that line in backticks: the one line of the code that
+makes the proof true. The engine reads that line in the staged change, with each run of spaces taken as one space, and
+marks the finding `proof line: match` when the text is the same. It marks it `differs` when the text is other or the line
+does not exist, and `none` when the finding has no such part. The engine drops no finding for this mark. The judge sees
+it, and reads the code before it accepts a finding marked `differs` or `none`. The review's line in the card's steps
+keeps the number of findings of each mark as `proofLines`.
+
 A Claude review or judge can read and search the files, but it cannot edit them. When ast-grep is installed
 ([Setup](setup.md)), it can also run `cb-ast run -p '<pattern>' -l <language>`, an ast-grep search that cannot
 write. Its shell refuses every other command that writes: `rm`, `touch`, `bash -c`, an ast-grep option that writes, a

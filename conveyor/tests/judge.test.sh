@@ -77,7 +77,7 @@ t_judgeoutside() {
   echo "F1 DECLINE: not about this card's change" > "$STUB/judge.1"
   echo 'F1 ACCEPT: the change breaks the reader in b.txt. Cost to every card: none' > "$STUB/judge.2"
   judgeone 7 "$STUB/review"
-  grep -qxF "F1 [outside the diff] $f" "$STUB/judge-asked" || fail "the finding outside the card's diff did not reach the judge marked as outside it: $(grep '^F1' "$STUB/judge-asked")"
+  grep -qxF "F1 [outside the diff; proof line: none] $f" "$STUB/judge-asked" || fail "the finding outside the card's diff did not reach the judge marked as outside it: $(grep '^F1' "$STUB/judge-asked")"
   [ "$(jr 7 | tr '\n' '|')" = "DECLINED: $f (judge: not about this card's change)|USER-VISIBLE: no|VERDICT: GO|" ] && [ "$(jf 7 '.judge.declined[0].place')" = outside ] \
     || fail "a declined finding outside the diff did not leave the review a GO, or is not recorded as outside the diff: $(jr 7) $(jf 7 .judge)"
   judgeone 8 "$STUB/review"
@@ -139,7 +139,7 @@ t_judgeoutsidefix() {
   printf '%s\n' "OUTSIDE: $a" "$o" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   printf '%s\n' 'F1 ACCEPT: the word is wrong. Cost to every card: none' 'F2 OUTSIDE: real, and b.txt is not the change'"'"'s' > "$STUB/judge.1"
   judgeone 7 - fix
-  grep -qxF "F1 [inside the diff] $a" "$STUB/judge-asked" || fail "a line the reviewer started with OUTSIDE: did not reach the judge as a finding: $(grep '^F' "$STUB/judge-asked")"
+  grep -qxF "F1 [inside the diff; proof line: none] $a" "$STUB/judge-asked" || fail "a line the reviewer started with OUTSIDE: did not reach the judge as a finding: $(grep '^F' "$STUB/judge-asked")"
   [ "$(jf 7 .verdict)" = NO-GO ] && [ "$(grep -c '^E[0-9]' "$T/$CASE/cards/c7.fix")" = 1 ] && grep -qxF "E1 $a" "$T/$CASE/cards/c7.fix" && ! grep -qF 'b.txt' "$T/$CASE/cards/c7.fix" \
     || fail "the fix round is not told the accepted finding alone: $(cat "$T/$CASE/cards/c7.fix")"
   [ "$(jq -c . "$T/$CASE/cards/c7.outside")" = "$(jq -cn --arg o "$o" '{finding: $o, reason: "real, and b.txt is not the change'"'"'s"}')" ] \
@@ -162,7 +162,7 @@ t_judgedecline() {
     || fail "the declined finding did not go to the declined list, once, with who declined it and why: $(cat "$ST/declined.jsonl" 2>&1)"
   jr 7 | grep -qxF "DECLINED: $f (judge: the proof needs a stub built to misbehave)" && [ "$(jf 7 '.counts | add')" = 0 ] \
     || fail "the review's text does not show the declined finding with its reason, or it is counted as a finding: $(jr 7)"
-  grep -qxF "F1 [inside the diff] $f" "$STUB/judge-asked" && grep -q '^body of 7$' "$STUB/judge-asked" || fail "the judge was not given the finding marked as inside the diff, or the issue"
+  grep -qxF "F1 [inside the diff; proof line: none] $f" "$STUB/judge-asked" && grep -q '^body of 7$' "$STUB/judge-asked" || fail "the judge was not given the finding marked as inside the diff, or the issue"
   # Bug (#534): the findings were asked for by the old ASD-STE100 rule list, not by the pinned STE80 Humanizer: the review's
   # prompt names the engine's rules/ste80.md (there, and the same as this checkout's), asks for both passes, holds none of
   # the old rules. The judge's reasons are one line each: its prompt has its own writing rules, no copy of the method (#1381).
@@ -326,7 +326,7 @@ t_judgeforged() {
   loop control judge on >/dev/null && loop control judge always security >/dev/null || fail "control judge did not take the judge's settings"
   echo 'F1 DECLINE: cannot happen. Cost to every card: none' > "$STUB/judge.1"
   judgeone 8 -
-  grep -qxF "F1 [inside the diff; always accepted: security] $f" "$STUB/judge-asked" || fail "a DECLINED line the reviewer wrote did not reach the judge as a finding of its kind: $(grep '^F[0-9]' "$STUB/judge-asked" 2>&1)"
+  grep -qxF "F1 [inside the diff; always accepted: security; proof line: none] $f" "$STUB/judge-asked" || fail "a DECLINED line the reviewer wrote did not reach the judge as a finding of its kind: $(grep '^F[0-9]' "$STUB/judge-asked" 2>&1)"
   [ "$(jf 8 .verdict)" = NO-GO ] && jr 8 | grep -qxF "$f" && [ "$(jf 8 '.judge.accepted[0].finding')" = "$f" ] && [ ! -s "$ST/declined.jsonl" ] \
     || fail "a DECLINED line the reviewer wrote was not judged as a finding of its kind, or it is in the declined list: $(jr 8) $(jf 8 .judge)"
 }
@@ -341,8 +341,8 @@ t_judgemarks() {
   printf '%s\n' "[P1] $T/$CASE/cards/c7/a.txt:2 wrong word" "$f" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   printf '%s\n' 'F1 DECLINE: no' 'F2 DECLINE: a matter of taste' > "$STUB/judge.1"
   judgeone 7 "$STUB/review"
-  grep -qxF "F1 [inside the diff] [P1] $T/$CASE/cards/c7/a.txt:2 wrong word" "$STUB/judge-asked" || fail "a finding that names its file by the worktree's whole path was not marked as inside the diff: $(grep '^F1' "$STUB/judge-asked" 2>&1)"
-  grep -qxF "F2 [inside the diff] $f" "$STUB/judge-asked" || fail "a finding whose proof holds a kind's name in brackets was marked as of that kind: $(grep '^F2' "$STUB/judge-asked" 2>&1)"
+  grep -qxF "F1 [inside the diff; proof line: none] [P1] $T/$CASE/cards/c7/a.txt:2 wrong word" "$STUB/judge-asked" || fail "a finding that names its file by the worktree's whole path was not marked as inside the diff: $(grep '^F1' "$STUB/judge-asked" 2>&1)"
+  grep -qxF "F2 [inside the diff; proof line: none] $f" "$STUB/judge-asked" || fail "a finding whose proof holds a kind's name in brackets was marked as of that kind: $(grep '^F2' "$STUB/judge-asked" 2>&1)"
   [ "$(jr 7 | tail -n 1)" = 'VERDICT: GO' ] && [ "$(jf 7 '.judge.declined | length')" = 2 ] || fail "the two declined findings did not leave the review a GO: $(jr 7) $(jf 7 .judge)"
 }
 
@@ -355,7 +355,7 @@ t_judgemarksany() {
   printf '1\n2\nchanged\n' > "$w/a.txt"; git -C "$w" add a.txt
   printf '%s\n' '[P1] b.txt:1 reads a.txt:3 that the change broke' '[P1] b.txt:1 and a.txt:1 two unchanged lines' '[P1] b.txt:1 alone' '[P1] no place' > "$w.review"
   # shellcheck disable=SC2034 # STE and TRYFOLD (lib/session.sh's) are read by the sourced lib/review.sh
-  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; judgemarks "$w" '[]')
+  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; . "$SRC/lib/donewhen.sh"; judgemarks "$w" '[]')
   [ "$(jq -c 'map(.place)' <<<"$m")" = '["inside","outside","outside","none"]' ] || fail "a finding whose second citation is a changed line was not marked inside, or another was: $m"
 }
 
@@ -365,7 +365,7 @@ t_judgeidmark() {
   local w=$T/$CASE/w m; mkdir -p "$w" && git -C "$w" init -q || fail "the worktree could not be made"
   printf '%s\n' '[P1] [E2][security] a.txt:2 exposed token' '[P1][security] [E3] a.txt:3 exposed key' '[P1] a.txt:4 plain' > "$w.review"
   # shellcheck disable=SC2034 # STE and TRYFOLD (lib/session.sh's) are read by the sourced lib/review.sh
-  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; judgemarks "$w" '["security"]')
+  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; . "$SRC/lib/donewhen.sh"; judgemarks "$w" '["security"]')
   [ "$(jq -c 'map(.kind)' <<<"$m")" = '["security","security",null]' ] || fail "a finding with an id mark lost its always-accepted kind: $m"
 }
 
@@ -456,10 +456,10 @@ t_judgealways() {
   printf '%s\n' '[P1][security] a.txt:2 the token is logged' '[P1][security] b.txt:1 a secret is kept here' '[P2] a.txt:1 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   printf '%s\n' 'F1 DECLINE: cannot happen. Cost to every card: none' "F2 DECLINE: not about this card's change. Cost to every card: one more scan" 'F3 DECLINE: a matter of taste' > "$STUB/judge.1"
   judgeone 7 "$STUB/review"
-  grep -qxF 'F1 [inside the diff; always accepted: security] [P1][security] a.txt:2 the token is logged' "$STUB/judge-asked" \
-    && grep -qxF 'F2 [outside the diff; always accepted: security] [P1][security] b.txt:1 a secret is kept here' "$STUB/judge-asked" \
+  grep -qxF 'F1 [inside the diff; always accepted: security; proof line: none] [P1][security] a.txt:2 the token is logged' "$STUB/judge-asked" \
+    && grep -qxF 'F2 [outside the diff; always accepted: security; proof line: none] [P1][security] b.txt:1 a secret is kept here' "$STUB/judge-asked" \
     || fail "the judge was not told which findings are always accepted: $(grep '^F[0-9]' "$STUB/judge-asked")"
-  grep -qxF 'F3 [outside the diff] [P2] a.txt:1 a nit' "$STUB/judge-asked" || fail "a finding on an unchanged line beside the changed one was not marked as outside the diff: $(grep '^F3' "$STUB/judge-asked")"
+  grep -qxF 'F3 [outside the diff; proof line: none] [P2] a.txt:1 a nit' "$STUB/judge-asked" || fail "a finding on an unchanged line beside the changed one was not marked as outside the diff: $(grep '^F3' "$STUB/judge-asked")"
   [ "$(jf 7 '.judge // empty | [(.accepted | map(.place) | join(",")), (.declined | map(.finding) | join(","))] | join(" / ")')" = "inside,outside / [P2] a.txt:1 a nit" ] \
     || fail "a finding of an always-accepted kind was not accepted against the judge's decline, inside the diff and outside it: $(jf 7 '.judge | tojson')"
   [ "$(jf 7 '.judge // empty | .accepted | map(.cost) | join(" / ")')" = "none / one more scan" ] && jf 7 '.judge // empty | .accepted[0].reason' | grep -qxF 'always accepted: a security finding (the judge declined it: cannot happen)' \
@@ -592,7 +592,7 @@ EOF
   [ ! -e "$STUB/judges" ] && [ "$(cat "$STUB/oc-runs")" = 'run --pure --format json --agent conveyor-readonly -m prov/m-2 --variant medium' ] \
     && [ "$(sed -n 1p "$STUB/oc-env")" = "$T/$CASE/cards/c7" ] && sed -n 2p "$STUB/oc-env" | jq -e '.permission["*"] == "deny" and .agent["conveyor-readonly"].permission == .permission' >/dev/null \
     || fail "the OpenCode judge did not run on OpenCode, read-only in the worktree: $(cat "$STUB/judges" "$STUB/oc-runs" "$STUB/oc-env" 2>&1)"
-  grep -qxF "F1 [inside the diff] $f" "$STUB/oc-asked" && grep -q '^body of 7$' "$STUB/oc-asked" || fail "the OpenCode judge was not given the finding and the issue"
+  grep -qxF "F1 [inside the diff; proof line: none] $f" "$STUB/oc-asked" && grep -q '^body of 7$' "$STUB/oc-asked" || fail "the OpenCode judge was not given the finding and the issue"
   [ "$(jf 7 .verdict)" = GO ] && [ "$(jf 7 '.judge.declined[0].reason')" = 'the proof needs a stub built to misbehave' ] \
     || fail "the OpenCode judge's decline was not read as a Claude judge's is: $(jr 7) $(jf 7 .judge)"
   # Its cost is in its usage (usage.cost), where an OpenCode step's is priced from, as a build's and a review's are.

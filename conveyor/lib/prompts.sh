@@ -345,8 +345,9 @@ A finding whose fix changes no behaviour (a comment, dead code, a redundant chec
 its level and any other mark, as `[P3][cleanup] file:line what. Proof: <proof>`: its follow-up is a cleanup, with no
 test that must fail. When the issue has a line that starts `Cleanup:`, a change to what the code does is a finding.
 The proof ends the line: the input or command that fails, or the exact line (code, test, comment
-or doc) that is untrue after the change. A problem you cannot prove that way is one line `UNPROVEN: what`: it never
-holds the verdict.<real proof> After each finding, look for the same mistake elsewhere in the staged change. One
+or doc) that is untrue after the change. Each proof ends with `At <file:line>: ` and the text of that line in
+backticks: the one line of the worktree that makes the proof true. A problem you cannot prove that way is one line
+`UNPROVEN: what`: it never holds the verdict.<real proof> After each finding, look for the same mistake elsewhere in the staged change. One
 mistake is one finding: name the other places in the same finding.
 '"$STE"'
 Read the change from three angles, in this one review:

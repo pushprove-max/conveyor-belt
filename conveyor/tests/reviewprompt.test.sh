@@ -34,6 +34,7 @@ t_reviewprompt() {
   for l in 'One mistake is one finding: name the other places in the same finding.' \
     'Do not write that tests or builds were not run.' \
     "The card rules, under \`# Rules\` below when a card has them, are the builder's standard: hold the change to them. Their lines about how to write a reply are for the builder only." \
+    'Each proof ends with `At <file:line>: ` and the text of that line in backticks: the one line of the worktree that makes the proof true.' \
     'Four checks hold on every review:'; do
     grep -qF -- "$l" "$a.flat" || fail "the review prompt lacks: $l"
   done
@@ -114,4 +115,70 @@ t_reviewproof() {
   out=$(tuned '.review.proof = "strict"' loop check 2>&1) && fail "check passed a pack whose review.proof is strict"
   grep -qF '.review.proof: "strict" is not one of ["any","real"]' <<<"$out" || fail "check did not say why it refused review.proof: $out"
   tuned '.review.proof = "real"' loop check >/dev/null 2>&1 || fail "check refused review.proof real"
+}
+
+# Bugs (#1749): a finding whose proof quotes code the reviewer did not read reaches the judge looking like any other: the
+# quote of a line the staged tree does not have (other text, a line past the end, a file it lacks), or a finding with no
+# quote at all, is marked as true. It calls proofline(), judgemarks() and judgefindings() alone: no card runs.
+t_proofline() {
+  local w=$T/$CASE/w m x
+  mkdir -p "$w" && git -C "$w" init -q && printf '%s\n' 'one' '  two   words  ' 'three' > "$w/a.txt" && git -C "$w" add -A \
+    && git -C "$w" -c user.name=t -c user.email=t@example.com commit -qm base && printf '%s\n' 'one' '  two   words  ' 'changed' > "$w/a.txt" \
+    && git -C "$w" add -A && printf '%s\n' 'unstaged' > "$w/a.txt" || fail "the worktree could not be made"
+  printf '%s\n' \
+    '[P1] a.txt:3 f1 match. Proof: p. At a.txt:3: `changed`' \
+    '[P1] a.txt:3 f2 differs, the text of the file on disk is not the staged tree. Proof: p. At a.txt:3: `unstaged`' \
+    '[P1] a.txt:3 f3 differs, the line is the one before the change. Proof: p. At a.txt:3: `three`' \
+    '[P1] a.txt:9 f4 differs, past the end. Proof: p. At a.txt:9: `changed`' \
+    '[P1] gone.txt:1 f5 differs, no such file. Proof: p. At gone.txt:1: `one`' \
+    '[P1] a.txt:2 f6 match, runs of spaces made one. Proof: p. At a.txt:2: `two words`' \
+    "[P1] $w/a.txt:1 f7 match, the whole path of the worktree. Proof: p. At $w/a.txt:1: \`one\`" \
+    '[P1] a.txt:1 f8 match, the last At part is the one read. Proof: At a.txt:3: `three`. At a.txt:1: `one`' \
+    '[P1] a.txt:1 f9 none, no At part. Proof: p' \
+    '[P1] a.txt:1 f10 none, no quote. Proof: p. At a.txt:1: one' \
+    'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$w.review"
+  # shellcheck disable=SC2034 # STE and TRYFOLD (lib/session.sh's) are read by the sourced lib/review.sh
+  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING|RX)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; . "$SRC/lib/donewhen.sh"; judgemarks "$w" '[]')
+  [ "$(jq -r 'map(.proof) | join(" ")' <<<"$m")" = 'match differs differs differs differs match match match none none' ] \
+    || fail "the findings' proof lines are not match, differs x4, match x3, none x2 in order: $(jq -c 'map(.proof)' <<<"$m")"
+  # The mark reaches the judge's message, beside the place.
+  printf '%s\n' "$m" > "$w.judge.marks"
+  # shellcheck disable=SC2034 # STE and TRYFOLD (lib/session.sh's) are read by the sourced lib/review.sh
+  x=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; judgefindings "$w")
+  grep -qF 'F1 [inside the diff; proof line: match] [P1] a.txt:3 f1' <<<"$x" \
+    && grep -qF 'F4 [outside the diff; proof line: differs] ' <<<"$x" && grep -qF 'F9 [outside the diff; proof line: none] ' <<<"$x" \
+    || fail "the judge's message lacks the proof line marks: $(grep '^F' <<<"$x")"
+}
+
+# Bug (#1749): the review's record line counted only the findings the review still held as findings: one the judge
+# declined, ruled outside or sent to the self-heals list (a DECLINED, OUTSIDE or SELFHEALS line), or listed as minor (MINOR),
+# was left out, so the counts fell short and the judge's reason, which can hold backticks, was read as part of the quote.
+# It calls proofline() alone, on a review as the judge leaves it.
+t_proofdeclined() {
+  local w=$T/$CASE/w m
+  mkdir -p "$w" && git -C "$w" init -q && printf '%s\n' 'one' 'two' > "$w/a.txt" && git -C "$w" add -A || fail "the worktree could not be made"
+  printf '%s\n' \
+    '[P1] a.txt:1 kept. Proof: p. At a.txt:1: `one`' \
+    'DECLINED: [P1] a.txt:1 declined, match. Proof: p. At a.txt:1: `one` (judge: claim wrong: `one` is there)' \
+    'DECLINED: [P1] a.txt:2 declined, differs. Proof: p. At a.txt:2: `three` (judge: claim wrong)' \
+    'OUTSIDE: [P2] a.txt:2 outside, none. Proof: p (judge: old code)' \
+    'SELFHEALS: [P2] a.txt:2 heals, match. Proof: p. At a.txt:2: `two` (judge: harm: it fixes itself)' \
+    'MINOR: [P3] a.txt:1 minor, differs. Proof: p. At a.txt:1: `two`' \
+    'USER-VISIBLE: no' 'VERDICT: GO' > "$w.review"
+  # NOTFINDING is read by the sourced lib/donewhen.sh, and its line of prompts.sh expands ROLLOUT, so both are loaded.
+  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; . "$SRC/lib/donewhen.sh"; proofline "$w" | tr '\n' ' ')
+  [ "$m" = 'match match differs none match differs ' ] \
+    || fail "the proof lines of a kept, a declined (x2), an outside, a self-heals and a minor finding are not match match differs none match differs: $m"
+}
+
+# Bug (#1749): the review's record line leaves out how many findings quoted a true line, so the share of proofs the
+# reviewer did not read cannot be measured. A whole card run, as only card() writes the line.
+t_prooflines() {
+  setup "[$(issue 7 2026-01-01)]"
+  printf '%s\n' '[P1] a.txt:1 wrong word. Proof: p. At a.txt:1: `one`' '[P1] a.txt:1 other. Proof: p. At a.txt:1: `two`' '[P1] a.txt:1 third. Proof: p' \
+    'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"
+  # loop: the review's line is written by card(), after its sessions; no function shows what that line holds
+  loop run >/dev/null || fail "run exited non-zero"
+  [ "$(st 'select(.step == "review") | .proofLines | tojson' | head -n 1)" = '{"match":1,"differs":1,"none":1}' ] \
+    || fail "the first review's line does not count one finding of each proof line: $(st 'select(.step == "review") | .proofLines | tojson' | head -n 1)"
 }

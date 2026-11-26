@@ -98,7 +98,7 @@ t_kindsgate() {
   # With a new harm P1 beside the repeat, its fix round follows, as on any review before the last.
   printf '%s\n' "$e" "$new" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   JUDGEISSUE=$is judgeone 8 "$STUB/review"
-  [ "$(kgate 1 1)" = "$(printf 'fix\t\t\t\t')" ] && ! grep -qF '[outside the diff]' "$STUB/judge-asked" \
+  [ "$(kgate 1 1)" = "$(printf 'fix\t\t\t\t')" ] && ! grep -qF '[outside the diff;' "$STUB/judge-asked" \
     || fail "a repeat ended the loop while a new in-scope harm P1 still had its fix round, or the new P1 was outside the change: $(kgate 1 1) $(grep '^F2' "$STUB/judge-asked")"
   printf '%s\n' "$e" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
   JUDGEISSUE=$is judgeone 8 "$STUB/review"

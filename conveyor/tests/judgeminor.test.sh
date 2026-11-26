@@ -211,10 +211,10 @@ judgeinline() { # <the build's shell>: a card with two findings judged, one insi
     || fail "the judge's folder holds more than the staged diff, or its message names the writing method: $(cat "$STUB/rv-list") $(grep -ci ste80 "$STUB/judge-asked")"
   # Each finding is followed by its cited line and those around it: a.txt's whole staged file (line 1 is near line 2).
   want="# The findings
-F1 [inside the diff] [P1] a.txt:2 wrong word. Proof: a.txt:2
+F1 [inside the diff; proof line: none] [P1] a.txt:2 wrong word. Proof: a.txt:2
   Lines at a.txt:2 (the staged change):
 $(git -C "$wt" show :a.txt | awk '{ printf "    %d: %s\n", NR, $0 }')
-F2 [outside the diff] [P2] b.txt:1 stale line. Proof: b.txt:1
+F2 [outside the diff; proof line: none] [P2] b.txt:1 stale line. Proof: b.txt:1
   Lines at b.txt:1 (the staged change):
     1: b"
   [ "$(git -C "$wt" show :a.txt | wc -l)" -ge 2 ] && [ "$(sed -n '/^# The findings$/,$p' "$STUB/judge-asked")" = "$want" ] \

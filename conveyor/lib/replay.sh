@@ -18,7 +18,10 @@
 # The replay judge is the judge seat the control record would give for <model> and <effort> (seat(), as `control
 # judge` would set it; the record is not written), called as the review calls the judge (judgecall()), with the issue's
 # title and body as the brief, the findings the fix round before the review was told to fix and the findings already
-# declined on the issue's cards before that judge ran, as judged() gives them.
+# declined on the issue's cards before that judge ran, as judged() gives them. The judge is given each finding's proof line
+# mark as a review's judge is (proofline(), lib/donewhen.sh), which this file loads: the libraries `conveyor.sh pick replay`
+# loads (commands/pick.sh) are not the run command's, and none of them loads it.
+. "${BASH_SOURCE[0]%/*}/donewhen.sh" || return 1
 REPLAY_LAST=20
 
 # The cases, one JSON line each, oldest first: {card, issue, time, main, judge: the recorded judge's {model, effort,
@@ -148,7 +151,9 @@ replay() { # judge <model> [<effort>] [--last <n>] [--estimate]
     # The findings the fix round before the review was told to fix, with the judge's earlier reason for each it gave a readable line for, as judged() gives them.
     back=$(jq -r '.back | arrays | if length > 0 then "# The findings the last fix round was told to fix\n\(join("\n"))" else empty end' <<<"$k")
     # The findings as judged() gives them (judgefindings(): the small staged change, the lines each finding cites), from the marks file it reads.
-    jq -c '[.findings | to_entries[] | {n: (.key + 1), place: (.value.place | if . == "inside" or . == "outside" then . else "none" end), finding: .value.finding}]' <<<"$k" > "$d/wt.judge.marks"
+    # Each finding's proof line mark (proofline()) is read from the findings written as a review beside the rebuilt worktree.
+    jq -r '.findings[].finding' <<<"$k" > "$d/wt.review"
+    jq -c --rawfile pl <(proofline "$d/wt") '($pl | split("\n")) as $pw | [.findings | to_entries[] | {n: (.key + 1), place: (.value.place | if . == "inside" or . == "outside" then . else "none" end), proof: ($pw[.key] // "none"), finding: .value.finding}]' <<<"$k" > "$d/wt.judge.marks"
     out=$(CALLSEAT=$s CALLSTEP=replay CALLACT="the replay judge reads the findings of $(jq -r .card <<<"$k")" judgecall "$d/wt" "$jp" "$brief"$'\n\n'"${back:+$back$'\n\n'}${before:+$before$'\n\n'}${outside:+$outside$'\n\n'}$(judgefindings "$d/wt")") && f=ok || f=''
     jq -e objects <<<"$out" >/dev/null 2>&1 || out='{"failed": "the judge call printed no fields"}'
     ans='[]'; [ -z "$f" ] || ans=$(jq -cRn '[inputs | gsub("^[[:space:]`*-]+|[[:space:]`*]+$"; "") | capture("^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE):[[:space:]]*(?<r>.*)$")]' "$d/wt.judge" 2>/dev/null) || ans='[]'

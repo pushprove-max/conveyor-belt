@@ -61,7 +61,7 @@ t_excerpts() {
   echo '[{"n":1,"place":"inside","finding":"[P1] f.txt:2 the fix deleted f2"},{"n":2,"place":"inside","finding":"[P1] a.txt:2 wrong case"}]' > "$w.judge.marks"
   # shellcheck disable=SC2034 # STE and TRYFOLD (lib/session.sh's) are read by the sourced lib/review.sh
   x=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; judgefindings "$w" "$fx")
-  [ "$(awk '/^F2 /{ exit } /^F1 /{ on = 1 } on' <<<"$x")" = 'F1 [inside the diff] [P1] f.txt:2 the fix deleted f2
+  [ "$(awk '/^F2 /{ exit } /^F1 /{ on = 1 } on' <<<"$x")" = 'F1 [inside the diff; proof line: none] [P1] f.txt:2 the fix deleted f2
   Lines at f.txt:2 (the staged change):
     1: f1
     2: f3
@@ -69,7 +69,7 @@ t_excerpts() {
     1: f1
     2: f2
     3: f3' ] || fail "the judge's lines for f.txt:2 are not the staged lines near it and the lines the fix deleted: $x"
-  [ "$(awk '/^F2 /{ on = 1 } on' <<<"$x" | head -4)" = 'F2 [inside the diff] [P1] a.txt:2 wrong case
+  [ "$(awk '/^F2 /{ on = 1 } on' <<<"$x" | head -4)" = 'F2 [inside the diff; proof line: none] [P1] a.txt:2 wrong case
   Lines at a.txt:2 (the staged change):
     1: one
     2: TWO' ] || fail "the judge's lines for a.txt:2 leave out the line before it: $x"

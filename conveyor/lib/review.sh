@@ -400,7 +400,7 @@ and the staged change is given whole when it is small; read the rest of the chan
 you cannot tell yet whether a claim is right or a proof can happen, read the code until you can: doubt alone is no
 reason to decline.
 Each finding is marked with its place: `inside the diff` (its file and line are in the staged change), `outside the
-diff` (they are not) or `no place` (it names no file and line).
+diff` (they are not) or `no place` (it names no file and line). A finding also carries `proof line: match` (the code line its proof quotes is the line of the staged change), `differs` (the line is other text or does not exist) or `none` (it quotes no line): for `differs` or `none`, read the code before you accept it, and decline it as `claim wrong` when the code does not do what the finding says.
 Answer OUTSIDE for a real defect that this card'"'"'s change did not cause: code the card neither changed nor broke.
 The card lands without a fix for it, and the finding is filed as a follow-up of the card. A finding is real when
 its proof can happen with what the project really runs and its claim is right. "Not about this card'"'"'s change" is
@@ -468,13 +468,13 @@ square brackets right after its level, as `[P1][<kind>] file:line what. Proof: <
 # that came back ([E2], REREVIEW) before or after its kind mark leaves it tagged}.
 judgemarks() { # <worktree> <the always-accepted kinds, a JSON array>
   grep -Ev "$NOTFINDING" "$1.review" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk 'NF && !seen[$0]++' \
-    | jq -cRn --argjson always "$2" --arg wt "$1/" --arg real "$(cd "$1" && pwd -P)/" --rawfile names <(git -C "$1" diff --cached --no-renames --name-only) \
+    | jq -cRn --argjson always "$2" --arg wt "$1/" --arg real "$(cd "$1" && pwd -P)/" --rawfile names <(git -C "$1" diff --cached --no-renames --name-only) --rawfile pl <(proofline "$1") \
       --rawfile hunks <(git -C "$1" diff --cached --no-renames -U0 | awk '/^diff --git / { h = 1; f = "" } h && /^\+\+\+ b\// { f = substr($0, 7); sub(/\t$/, "", f) }
         /^@@ / { h = 0; if (f != "") { split($3, a, ","); s = substr(a[1], 2) + 0; print f "\t" s "\t" s + (a[2] == "" ? 1 : a[2] == 0 ? 2 : a[2] + 0) - 1 } }') "$RX"'
-      ($names | split("\n") | map(select(. != ""))) as $files
+      ($names | split("\n") | map(select(. != ""))) as $files | ($pl | split("\n")) as $pw
       | ($hunks | split("\n") | map(select(. != "") | split("\t") | {file: .[0], from: (.[1] | tonumber), to: (.[2] | tonumber)})) as $h
       | [inputs] | to_entries | map(.value as $l | ($l | split($wt) | join("") | split($real) | join("") | [scan("([A-Za-z0-9_./-]+):([0-9]+)")]) as $ws
-        | {n: (.key + 1), finding: $l,
+        | {n: (.key + 1), finding: $l, proof: ($pw[.key] // "none"),
            place: (if ($ws | length) == 0 then "none"
              elif any($ws[]; (.[0] | ltrimstr("./")) as $p | (.[1] | tonumber) as $ln
                | any($files[]; . == $p) and (all($h[]; .file != $p) or any($h[]; .file == $p and .from <= $ln and $ln <= .to))) then "inside" else "outside" end),
@@ -596,7 +596,7 @@ judgefindings() { # <worktree> [<the tree before the last fix round> [<the tree 
   [ -z "$d" ] || [ "$(wc -l <<<"$d")" -ge "$JUDGEDIFFLINES" ] || printf '# The staged change (git diff --cached)\n%s\n\n' "$d"
   echo '# The findings'
   while IFS= read -r m; do
-    jq -r '"F\(.n) [\({inside: "inside the diff", outside: "outside the diff", none: "no place"}[.place])\(if .kind then "; always accepted: \(.kind)" else "" end)] \(.finding)"' <<<"$m"
+    jq -r '"F\(.n) [\({inside: "inside the diff", outside: "outside the diff", none: "no place"}[.place])\(if .kind then "; always accepted: \(.kind)" else "" end); proof line: \(.proof // "none")] \(.finding)"' <<<"$m"
     f=$(jq -r .finding <<<"$m")
     ex=$(excerpts "$1" "${2:-}" <(printf '%s\n' "$f") "$JUDGECONTEXT") || ex='[]'
     [ -z "${3:-}" ] || [ "$3" = "${2:-}" ] || { ex2=$(excerpts "$1" "$3" <(printf '%s\n' "$f") "$JUDGECONTEXT") && ex2=$(jq -c --argjson e "$ex2" '. as $x | . + [$e[] | select(.side == "fix") | select(. as $y | any($x[]; .side == "fix" and .lines == $y.lines) | not) | .side = "ruling"]' <<<"$ex") && ex=$ex2; } || :

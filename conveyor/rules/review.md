@@ -23,3 +23,5 @@ Lint suppressions: a lint suppression the change adds with no stated reason besi
 Lint config: a change to lint config or lint policy (the pack's `lint` field, a linter's config file) that the issue does not ask for is a finding.
 
 Severity: critical is P0, high is P1, medium is P2, low is P3. A gap in documentation or wording is low unless it hides a real defect; then rate the defect. Only critical, high and medium findings hold the review. In each finding body, add one line "Class search: rg <arguments>": a read-only rg search from the repository root whose hits are every place with the same mistake, this one among them. When you can run cb-ast (the read-only ast-grep) and the mistake is in code that ast-grep parses, the line can be "Class search: cb-ast run <arguments>" in its place: a search by syntax, whose hits leave out comments and strings. Every finding names the exact failing input or command that shows it; leave out any you cannot, and never invent one.
+
+Each proof ends with `At <file:line>: ` and the text of that line in backticks: the one line of the worktree that makes the proof true.
