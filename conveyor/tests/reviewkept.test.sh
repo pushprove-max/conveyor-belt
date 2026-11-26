@@ -82,3 +82,31 @@ t_reviewkeptstop() {
   grep -qxF 'stopped by control stop while it ran; its events are kept in c7-7.review.events' "$T/$CASE/run.out" \
     || fail "stopped c7-7 7: the stopped line's reason does not name the kept events file: $(cat "$T/$CASE/run.out")"
 }
+# rkstopnoevent <live model> [first attempt]: `control stop` ends a review on <live model> that wrote to stderr but no
+# event yet; with [first attempt], the review runs again and that is its .firsttry (reviewed()). stopped() and clean()
+# are called as the loop calls them (run.sh). Bug: stopped() returned on the empty events file before reviewkeep(), and
+# clean() then removed the err that said why the review had not started.
+rkstopnoevent() {
+  setup '[]'
+  for l in '{"step":"worktree","result":"ok"}' '{"step":"start","result":"","of":"review"}'; do
+    jq -c '{card: "c7-7", issue: 7, time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, sha: "", reason: ""} + .' <<<"$l" >> "$ST/cards.jsonl"
+  done
+  [ -z "${2:-}" ] || printf '%s\n' "$2" > "$T/$CASE/firsttry"
+  fx_in "w=\$CARDS/c7-7 && mkdir -p \"\$CARDS\" && echo '{\"model\":\"$1\"}' > \"\$w.live\" \
+    && { [ ! -s \"$T/$CASE/firsttry\" ] || cp \"$T/$CASE/firsttry\" \"\$w.firsttry\"; } \
+    && : > \"\$w.events\" && echo rk-err > \"\$w.err\" && stopped c7-7 7 && clean \"\$w\""
+  local k=$ST/kept/c7-7
+  grep -qF rk-err "$k/c7-7.review.err" \
+    || fail "stopped c7-7 7 then clean, a review on live model $1 with empty events, err rk-err and first attempt '${2:-none}': the err was not kept in $k: $(ls "$k" 2>&1) $(cat "$T/$CASE/run.out")"
+}
+t_reviewkeptstopnoeventclaude() { rkstopnoevent claude-m; }
+t_reviewkeptstopnoeventopencode() { rkstopnoevent opencode:prov/m; }
+t_reviewkeptstopnoeventcodex() { rkstopnoevent cx-1; }
+# Bug: a review that ran again after a first attempt with a price and no verdict took the first-attempt branch, and
+# that price skipped the keep at the end of stopped(): the second attempt's err went with clean(). Its stopped line
+# names the kept file.
+t_reviewkeptstopnoeventretry() {
+  rkstopnoevent cx-1 '{"reason":"the review ended without one clear verdict","spent":{"model":"cx-1","tokens":{"codex":5},"usage":{"input":3,"output":2}}}'
+  jq -r 'select(.step == "review") | .reason' "$ST/cards.jsonl" | grep -qxF 'stopped by control stop while it ran; its events are kept in c7-7.review.events' \
+    || fail "stopped c7-7 7 after a first attempt with a price: the stopped line's reason does not name the kept file: $(grep '"review"' "$ST/cards.jsonl")"
+}

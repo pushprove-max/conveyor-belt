@@ -328,7 +328,7 @@ OPENCODEANSWER='[inputs | fromjson? // empty | objects | select(.type == "step_s
 # A card that `control stop` ended with a session or review running: what that one used so far is written as
 # a line of its step, result stopped (its model the one the live file names, its seconds from its start line), so
 # it is priced and counted when the card's lines move to the retried file. Called by the loop before the worktree
-# goes; a line that cannot be written is said, and the stop goes on. A build, fix or rebase whose output holds no usage yet is read from its transcript (transcribed()), on the account its worktree line names (the loop's own ACCT is the default), and one still with no price keeps its output (outkeep()), as a session's line does; a review still with no price keeps its events and err (reviewkeep()). A line with no usage read still names the model, so the Board can price it at that model's median (estimate_rest()).
+# goes; a line that cannot be written is said, and the stop goes on. A build, fix or rebase whose output holds no usage yet is read from its transcript (transcribed()), on the account its worktree line names (the loop's own ACCT is the default), and one still with no price keeps its output (outkeep()), as a session's line does; a review still with no price keeps its events and err (reviewkeep()), and one stopped before its first event (its first attempt or one that runs again) keeps them when its err holds anything (clean() removes them next). A line with no usage read still names the model, so the Board can price it at that model's median (estimate_rest()).
 stopped() { # <card> <issue>
   local wt=$CARDS/$1 last of o f m e s x roll run='' kn='' ft=$CARDS/$1.firsttry
   last=$(stdb ask last "$1" 2>/dev/null)
@@ -340,8 +340,8 @@ stopped() { # <card> <issue>
   # Stopped in the pause before a review ran again (no live file then), or before its second attempt wrote anything:
   # the first attempt (below) is all it used, on its model. While it is still .firsttry.new, the events are the first
   # attempt's own, stopped before reviewed() dropped them: read once, from it. Never told apart by file times, which
-  # can be equal.
-  [ ! -s "$wt.firsttry.new" ] || ft=$wt.firsttry.new
+  # can be equal. A Claude, OpenCode or Codex review stopped before its first event keeps the err it wrote (reviewkeep()) here, before a branch below returns or reads the first attempt, whose price would skip the keep at the end.
+  [ ! -s "$wt.firsttry.new" ] || ft=$wt.firsttry.new; [ "$of" != review ] || [ -s "$wt.events" ] || [ ! -s "$wt.err" ] || kn=$(reviewkeep "$wt" "")
   if [ "$of" = review ] && [ -s "$ft" ] && { [ ! -s "$wt.events" ] || [ "$ft" = "$wt.firsttry.new" ]; }; then
     [ -n "$m" ] || m=$(jq -r '.spent.model // ""' "$ft" 2>/dev/null); f=$(jq -cn --argjson s "${s:-0}" --arg m "$m" '{tokens: {}, usage: {}, model: $m, sec: $s}')
   # A Codex build, fix or rebase: its output opens as Codex's does. Its usage is its session file's running total.
@@ -366,7 +366,7 @@ stopped() { # <card> <issue>
   [ -n "$f" ] || f=$(jq -cn --argjson s "${s:-0}" --arg m "$m" '{model: $m, sec: $s, unread: "the output of the stopped session could not be read"}')
   [ -n "$m" ] || f=$(jq -c 'del(.model)' <<<"$f")
   # Stopped while a review ran again: the failed first attempt (reviewed()) is on the line, its tokens counted. A review still with no price then keeps its events and err, which clean() removes next (reviewkeep(); outkeep() keeps no review's): its reason names them.
-  [ "$of" != review ] || { { ! x=$(jq -ce objects "$ft" 2>/dev/null) || f=$(jq -c --argjson f "$x" "$BOTHTRIES" <<<"$f"); }; [ ! -e "$wt.events" ] || ! jq -e '(.usage | type) != "object" or (.unread | type) == "string"' <<<"$f" >/dev/null 2>&1 || kn=$(reviewkeep "$wt" ""); }
+  [ "$of" != review ] || { { ! x=$(jq -ce objects "$ft" 2>/dev/null) || f=$(jq -c --argjson f "$x" "$BOTHTRIES" <<<"$f"); }; [ -n "$kn" ] || [ ! -e "$wt.events" ] || ! jq -e '(.usage | type) != "object" or (.unread | type) == "string"' <<<"$f" >/dev/null 2>&1 || kn=$(reviewkeep "$wt" ""); }
   f=$(line "$1" "$2" "$of" stopped "$(jq -c --arg k "$kn" '. + {reason: ("stopped by control stop while it ran" + $k)}' <<<"$f")") && locked append "$f" && { outkeep "$1" "$of" "$f" || :; } \
     || echo "conveyor: card $1 was stopped, but what its $of used could not be written to the card records" >&2
 }
