@@ -26,20 +26,25 @@
 # passed), only a shell file's parse check; the run prints `comment-only change: <file>, no tests selected` for each.
 # A changed case file whose shared part (its lines outside its t_<case> functions) is the same but for comments and
 # blanks runs only its changed and added cases (issue 513: casesof); else it runs whole.
-# A change to functions of conveyor/lib/paths.sh alone runs the case files of their callers' areas and the case files
-# that call them, unless one runs at start-up (issue 514: funcsof); a change to lines of conveyor.sh's command table
-# alone (a command added, removed or changed, with its usage text) runs the case files that run those commands (cmdsof;
-# issue 530). Else each runs the whole, as before. A change to keys of the control record's defaults
-# (conveyor/lib/control-defaults.json) runs the case files of the code that reads those keys and of the case files that
-# read the file (keysof); else the file's area.
-# Ahead of those two, a change to functions alone of a shell file the coverage map holds (.conveyor/coverage.jsonl,
+# A change to functions alone of an engine shell file (conveyor/lib/paths.sh too) runs the test files that name a
+# changed function or a function that calls one (one hop), and of a command script whose lines outside its functions
+# call one, the case files that run its commands, and the tests named after the file or listed for it; not its area,
+# unless one runs at start-up or they have more than 25 callers (issue 1775: callersof). A change to lines of
+# conveyor.sh's command table alone (a command added, removed or changed, with its usage text) runs the case files that
+# run those commands (cmdsof; issue 530). Else each runs the whole, as before. A change to keys of the control record's
+# defaults (conveyor/lib/control-defaults.json) runs the case files of the code that reads those keys and of the case
+# files that read the file (keysof); else the file's area. So a change to functions runs by three rules, in this order:
+# the coverage map (covof, below), then callersof, then the area; a line per changed function names the rule that
+# picked its tests (covrules).
+# Ahead of those, a change to functions alone of a shell file the coverage map holds (.conveyor/coverage.jsonl,
 # written by a traced run of every case: .conveyor/coverage.sh; issue 527: covof) runs the cases the map lists for each
 # changed function: engine cases through the runner, parts of dashboard.test.sh and of the hooks' tests (partsof;
 # CONVEYOR_SHELL_TEST_CASE, comma-separated), other test
 # files whole; and of the tests named after the file or listed for it (TESTS_OF), those the map names nowhere (that the
 # trace did not run). A part runs only when nothing selects its test file whole. A change outside any function, to a
 # function the map does not hold or lists no case for, or to one changed since the map was traced (its sum differs),
-# runs by the rules above (its area; a hook library, .claude/hooks/lib/, the hooks' tests that reach it: hooklibtests).
+# runs by the rules above (callersof, else its area; a hook library, .claude/hooks/lib/, the hooks' tests that reach
+# it: hooklibtests).
 # The map check says how old the coverage map is.
 # A change to the map itself runs the map check, the map's own tests (MAPTESTS: .conveyor/test-changed.test.sh,
 # .conveyor/test-changed-map.test.sh and .conveyor/test-changed-areas.test.sh, which read this checkout's map) and the case files whose naming changed: each
@@ -320,14 +325,22 @@ mapcheck() {
 }
 # covage: how old the coverage map is (issue 527), with the map check: when it was traced (its `traced` line; the oldest,
 # if a hand edit left two) and how many days ago, or that there is none or it cannot be read. It fails nothing: with
-# no map, every change runs by its area.
+# no map, a change to functions runs by the rules after covof (callersof, then the area).
 covage() {
   local a
-  if [ ! -s "$COV" ]; then echo "coverage map: none ($COV); a change to a function runs its area's cases"
+  if [ ! -s "$COV" ]; then echo "coverage map: none ($COV); a change to a function runs the case files that name it or its callers, else its area's cases"
   elif a=$(jq -rn '[inputs | .traced? // empty] | min | select(. != null)
       | "\(.), \((now - fromdateiso8601) / 86400 | floor) days ago"' "$COV" 2>/dev/null) && [ -n "$a" ]; then
     echo "coverage map $COV: traced $a"
-  else echo "coverage map $COV: cannot be read, or says not when it was traced; a change to a function runs its area's cases"; fi
+  else echo "coverage map $COV: cannot be read, or says not when it was traced; a change to a function runs the case files that name it or its callers, else its area's cases"; fi
+}
+# covrules (issue 1775): after the pick, with covage's lines, a line for each changed function of a shell file that
+# names the rule that picked its tests (RULES, rulefor): `coverage map rule: <file> <function>(): covof` (the map's
+# cases), `callersof` (the tests that name it or its callers) or `area` (its area's cases); `coverage map rule: <file>,
+# a change outside its functions: area` when no changed function was read. None for a file textonly picked for.
+covrules() {
+  [ -z "$RULES" ] || awk -F'\t' '!s[$0]++ { if ($2 == "-") print "coverage map rule: " $1 ", a change outside its functions: " $3
+    else print "coverage map rule: " $1 " " $2 "(): " $3 }' <<<"${RULES%$'\n'}"
 }
 # The pack's marks of meta-runners (issue 584): cmode, a test file's card mode (a NAME=VALUE for env; another value
 # is no mark, as env would run it as a command), and wonly, a file marked whole-only.
@@ -478,6 +491,8 @@ oparts=
 COVTESTS=
 # COVSEL: set when the coverage map chose the tests of a changed file (covof, in pick), for cnarrow (below).
 COVSEL=
+# CFN: the changed functions of the file pick reads (covof, callersof); RULES: which rule picked each one's tests (rulefor).
+CFN=; RULES=
 # RANKED: the test files hooklibtests gave, one a line, most of the library's users first: the list (CONVEYOR_TEST_LIST,
 # below) names them first, in this order.
 RANKED=
@@ -933,8 +948,7 @@ texttests() {
 # other line (its setup, helpers and top-level lines); and `U`, and no more, when a case is of no such shape, is defined
 # twice or does not end. A line in a case is indented or blank, or a line of a heredoc it starts (to the heredoc's
 # word), so a line at the left (`helper() {`, a comment) after a case read wrongly as not ended is U, not taken into the
-# case: the file runs whole. With lib=1 it reads a library of functions (paths.sh: funcsof) so: a K line for each
-# function, `<name>() {` at the left, and S for its top-level lines. A one-line case or function may end in a redirect (`...; } 2>/dev/null`).
+# case: the file runs whole. A one-line case may end in a redirect (`...; } 2>/dev/null`).
 CASES='function bad() { print "U"; u = 1; exit }
 function heredoc(x) {
   x = $0; gsub(/<<</, "", x)
@@ -946,11 +960,9 @@ c != "" {
   if ($0 !~ /^([ \t]|$)/) bad()
   b = b "\001" $0; heredoc(); next
 }
-BEGIN { if (lib) { at = "^[A-Za-z_][A-Za-z0-9_]*\\("; ok = "^[A-Za-z_][A-Za-z0-9_]*\\(\\) \\{"; pl = 0 }
-  else { at = "^t_[a-z0-9]*\\("; ok = "^t_[a-z0-9]+\\(\\) \\{"; pl = 2 } }
-$0 ~ at {
-  if ($0 !~ ok) bad()
-  n = substr($0, pl + 1, index($0, "(") - pl - 1); if (n in seen) bad(); seen[n] = 1
+/^t_[a-z0-9]*\(/ {
+  if ($0 !~ /^t_[a-z0-9]+\(\) \{/) bad()
+  n = substr($0, 3, index($0, "(") - 3); if (n in seen) bad(); seen[n] = 1
   if ($0 ~ /[;&] *\}([ \t]*[0-9]*>+[ \t]*[^ \t;&|]+)*[ \t]*(#.*)?$/) print "K\t" n "\t" $0; else { c = n; b = $0; heredoc() }
   next
 }
@@ -992,32 +1004,69 @@ callers() {
   while read -r t; do case $t in conveyor/tests/*.test.sh) area[$t]=1 ;; *) areaof "$t" ;; esac; done \
     < <(awk -v p="$1" '!/^[ \t]*#/ && $0 ~ p { print FILENAME; nextfile }' "${files[@]}" < /dev/null)
 }
-# funcsof <file> (issue 514): when the change of conveyor/lib/paths.sh (TXFROM to TXTO, as textonly reads it) edits,
-# adds or removes its functions alone (CASES with lib=1; its top-level lines the same but for comments and blanks,
-# TEXT), the engine test of their callers (callers): of each of them, and of each other function of the file that
-# calls one. It fails, and the file's area ("all") runs, when the file cannot be read either side, CASES or TEXT
-# cannot read it, a top-level line changed, or one of them is called at start-up: by a top-level line of the file, or
-# in the code of conveyor/conveyor.sh or conveyor/lib/portable.sh (or either cannot be read).
-funcsof() {
-  local f=$1 a b sa sb st more
-  local -a fn
-  [ "$f" = conveyor/lib/paths.sh ] && [ -n "$TXFROM" ] || return 1
-  a=$(git show "$TXFROM:$f" 2>/dev/null) && a=$(awk -v lib=1 "$CASES" <<<"$a") || return 1
-  if [ -n "$TXTO" ]; then b=$(git show "$TXTO:$f" 2>/dev/null) && b=$(awk -v lib=1 "$CASES" <<<"$b") || return 1
-  else b=$(awk -v lib=1 "$CASES" "$f") || return 1; fi
+# callersof <file> (issue 1775): when the change of an engine shell file (a .sh file of the map under conveyor/, not
+# under conveyor/tests/; TXFROM to TXTO) edits, adds or removes its functions alone (FUNCS; its other lines the same
+# but for comments and blanks, TEXT), the test files that name a changed function or a function that calls one (one
+# hop, no more): each case file under conveyor/tests/ into area, each test file under .claude/scripts/__tests__/ and
+# .claude/hooks/__tests__/ into run; and when the changed function, a caller, or a line outside the functions is in a
+# command script (conveyor/commands/), the tests cmdtests gives for that script's commands (no test names its entry
+# function, as releaseprep() of release-prep.sh: they run `loop release-prep`). A caller is a function of an engine
+# shell file of the map with a line that names a changed function as a word and is no comment. It leaves the changed functions'
+# names in CFN once it has read them. It fails, and the rules after it pick (the file's area), when the file cannot be
+# read either side, a line outside its functions changed, a code line outside the functions of the file, or any code
+# line of conveyor/conveyor.sh or conveyor/lib/portable.sh, names a changed function (it runs at start-up), a line
+# outside the functions of another engine file (but a command script) names one, a command script that names one has
+# no command, an engine file that names one cannot be read (FUNCS), or the changed functions have more than 25 callers
+# (a helper that many functions use).
+callersof() {
+  local f=$1 a b sa sb st w re t k n c
+  local -a fn=() files=() hit=() cmds=()
+  local -A who=() scr=()
+  CFN=
+  case $f in conveyor/tests/*) return 1 ;; conveyor/*.sh) ;; *) return 1 ;; esac
+  [ -n "$TXFROM" ] && jq -e --arg f "$f" 'any(.areas[].files[]; . == $f)' <<<"$AMAP" > /dev/null || return 1
+  a=$(git show "$TXFROM:$f" 2>/dev/null) && a=$(awk "$FUNCS" <<<"$a") || return 1
+  if [ -n "$TXTO" ]; then b=$(git show "$TXTO:$f" 2>/dev/null) && b=$(awk "$FUNCS" <<<"$b") || return 1
+  else b=$(awk "$FUNCS" "$f") || return 1; fi
   ! grep -qx U <<<"$a"$'\n'"$b" || return 1
-  sa=$(awk 'sub(/^S\t/, "")' <<<"$a" | awk -v lang=sh "$TEXT") && sb=$(awk 'sub(/^S\t/, "")' <<<"$b" | awk -v lang=sh "$TEXT") || return 1
-  ! grep -qx U <<<"$sa"$'\n'"$sb" && [ "$sa" = "$sb" ] || return 1
   # The functions changed, added or removed: a K line on one side alone.
   mapfile -t fn < <(grep '^K' <<<"$a"$'\n'"$b" | LC_ALL=C sort | uniq -u | cut -f2 | LC_ALL=C sort -u)
   [ ${#fn[@]} -gt 0 ] || return 1
-  while more=$(grep '^K' <<<"$a"$'\n'"$b" | grep -wF -f <(printf '%s\n' "${fn[@]}") | cut -f2 \
-      | grep -vxF -f <(printf '%s\n' "${fn[@]}") | LC_ALL=C sort -u) && [ -n "$more" ]; do
-    mapfile -t -O "${#fn[@]}" fn <<<"$more"
-  done
+  CFN=${fn[*]}
+  sa=$(awk 'sub(/^S\t/, "")' <<<"$a" | awk -v lang=sh "$TEXT") && sb=$(awk 'sub(/^S\t/, "")' <<<"$b" | awk -v lang=sh "$TEXT") || return 1
+  ! grep -qx U <<<"$sa"$'\n'"$sb" && [ "$sa" = "$sb" ] || return 1
+  w=$(IFS='|'; echo "${fn[*]}"); re="(^|[^A-Za-z0-9_])($w)([^A-Za-z0-9_]|\$)"
   st=$({ textof sh < conveyor/conveyor.sh && textof sh < conveyor/lib/portable.sh; } 2>/dev/null) && ! grep -qx U <<<"$st" || return 1
-  ! grep '^C' <<<"$sb"$'\n'"$st" | grep -qwF -f <(printf '%s\n' "${fn[@]}") || return 1
-  callers "(^|[^A-Za-z0-9_])($(IFS='|'; echo "${fn[*]}"))([^A-Za-z0-9_]|\$)" "$f"
+  ! grep '^C' <<<"$sb"$'\n'"$st" | grep -qE "$re" || return 1
+  # The callers: of each engine shell file that names one, its functions with a line that is no comment and names one
+  # (K), and S when a line outside its functions does.
+  mapfile -t files < <(jq -r '.areas[].files[] | select(test("^conveyor/.*[.]sh$"))' <<<"$AMAP" | LC_ALL=C sort -u \
+    | while read -r t; do [ ! -f "$t" ] || echo "$t"; done)
+  mapfile -t hit < <(grep -lwE -- "$w" "${files[@]}" 2>/dev/null < /dev/null)
+  # A command script's functions run by its commands (scr): the changed ones, when the file is one, and its callers.
+  [[ $f != conveyor/commands/*.sh ]] || scr[$f]=1
+  for t in "${hit[@]}"; do
+    c=$(awk "$FUNCS" "$t") && ! grep -qx U <<<"$c" || return 1
+    while IFS=$'\t' read -r k n; do
+      if [ "$k" = K ]; then { [ "$t" = "$f" ] && [[ " $CFN " == *" $n "* ]]; } || who[$n]=1
+      elif [ "$t" != "$f" ] && [[ $t != conveyor/commands/*.sh ]]; then return 1; fi
+      [[ $t != conveyor/commands/*.sh ]] || scr[$t]=1
+    done < <(awk -v re="$re" '/^K\t/ { n = substr($0, 3); sub(/\t.*/, "", n); k = split(substr($0, length(n) + 4), l, "\001")
+        sub(/^(function[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/, "", l[1])
+        for (i = 1; i <= k; i++) if (l[i] !~ /^[ \t]*#/ && l[i] ~ re) { print "K\t" n; break } }
+      /^S\t/ && !s { x = substr($0, 3); if (x !~ /^[ \t]*#/ && x ~ re) { print "S\t-"; s = 1 } }' <<<"$c")
+  done
+  [ ${#who[@]} -le 25 ] || return 1
+  for t in "${!scr[@]}"; do
+    n=$(awk -v s="${t##*/}" '$1 == "cmd" && $3 == s { print $2 }' conveyor/conveyor.sh) && [ -n "$n" ] || return 1
+    mapfile -t -O "${#cmds[@]}" cmds <<<"$n"
+  done
+  [ ${#who[@]} = 0 ] || w+="|$(IFS='|'; echo "${!who[*]}")"
+  mapfile -t files < <(git ls-files -co --exclude-standard 'conveyor/tests/*.test.sh' '.claude/scripts/__tests__/*' \
+    '.claude/hooks/__tests__/*' | grep -E '[.]test[.][a-z]+$' | while read -r t; do [ ! -f "$t" ] || echo "$t"; done)
+  [ ${#files[@]} = 0 ] || while read -r t; do case $t in conveyor/tests/*) area[$t]=1 ;; *) run[$t]=1 ;; esac; done \
+    < <(awk -v p="(^|[^A-Za-z0-9_])($w)([^A-Za-z0-9_]|\$)" '!/^[ \t]*#/ && $0 ~ p { print FILENAME; nextfile }' "${files[@]}" < /dev/null)
+  [ ${#cmds[@]} = 0 ] || cmdtests "${cmds[@]}"
   parse[$f]=1
 }
 # TABLE, an awk program, reads conveyor/conveyor.sh as its command table and the rest: a `K<TAB><command><TAB><line>`
@@ -1040,7 +1089,7 @@ usages() { awk -F'\t' 'index($3, "\047") { u = substr($3, index($3, "\047") + 1)
 # fails, and the file's area ("all") runs, when the file cannot be read either side, TABLE or TEXT cannot read it, a
 # code line outside the table changed, or texttests fails (a changed usage text under 6 characters).
 cmdsof() {
-  local f=$1 a b sa sb ka kb w v t p
+  local f=$1 a b sa sb ka kb
   local -a cs
   [ "$f" = conveyor/conveyor.sh ] && [ -n "$TXFROM" ] || return 1
   a=$(git show "$TXFROM:$f" 2>/dev/null) && a=$(awk "$TABLE" <<<"$a") || return 1
@@ -1059,6 +1108,14 @@ cmdsof() {
   kb=$(LC_ALL=C comm -13 <(grep '^K' <<<"$a" | LC_ALL=C sort) <(grep '^K' <<<"$b" | LC_ALL=C sort) | usages)
   ka=$(LC_ALL=C comm -3 <(grep . <<<"$ka" | LC_ALL=C sort) <(grep . <<<"$kb" | LC_ALL=C sort) | awk -F'\t' '{ print "T\tK" NR "\t" $NF }')
   texttests "$sa" "$sb${ka:+$'\n'$ka}" || return 1
+  cmdtests "${cs[@]}"
+  parse[$f]=1
+}
+# cmdtests <command>... (issue 514): the engine test of the files that run those commands of conveyor/conveyor.sh
+# (callers, but conveyor.sh's own table), as cmdsof reads them; callersof uses it for a command script that calls a
+# changed function.
+cmdtests() {
+  local w v t p
   w=$(sed -nE 's/^[ \t]*([A-Za-z_][A-Za-z0-9_]*)\(\) *\{.*conveyor[.]sh"? +"\$(@|\{@:2\})".*/\1/p' conveyor/tests/*.sh 2>/dev/null \
     | LC_ALL=C sort -u | paste -sd '|' -)
   v=$({ jq -r '.areas[].files[]' <<<"$AMAP"; git ls-files -co --exclude-standard 'conveyor/tests/*.sh'; } 2>/dev/null \
@@ -1067,8 +1124,7 @@ cmdsof() {
     | LC_ALL=C sort -u | paste -sd '|' -)
   p='conveyor[.]sh"?'; [ -z "$v" ] || p="($p|\"?[\$][{]?($v)[}]?\"?)"
   [ -z "$w" ] || p="($p|(^|[^A-Za-z0-9_-])($w)([ \t]+[^ \t]+)?)"
-  callers "${p}[ \t]+($(IFS='|'; echo "${cs[*]}"))([^A-Za-z0-9_-]|\$)" "$f"
-  parse[$f]=1
+  callers "${p}[ \t]+($(IFS='|'; echo "$*"))([^A-Za-z0-9_-]|\$)" conveyor/conveyor.sh
 }
 # keysof <file> (issue 530): when the change of conveyor/lib/control-defaults.json (TXFROM to TXTO), the control
 # record's default for each key, adds, removes or changes keys (at the top, or in rules), the engine test of the code
@@ -1096,8 +1152,8 @@ keysof() {
 # covof <file> (issue 527): when the change of a shell file (TXFROM to TXTO) edits or removes its functions alone (FUNCS;
 # its other lines the same but for comments and blanks, TEXT), and the coverage map ($COV) holds each of them as it was
 # at TXFROM (one sum, the same as sumsof's there) with at least one case: the cases it lists for them. An engine case
-# into ccase (the runner's cases), a part of a test file into npart, a whole test file into run. It fails, and the
-# rules after it pick, when there is no map or it cannot be read, the file cannot be read either side, a line outside
+# into ccase (the runner's cases), a part of a test file into npart, a whole test file into run. It leaves the changed
+# functions' names in CFN once it has read them. It fails, and the rules after it pick, when there is no map or it cannot be read, the file cannot be read either side, a line outside
 # its functions changed, a function is added, or the map lacks one, lists no case for one, holds an older sum of one,
 # names a unit or test file number twice or one it does not name, or names a test file, an engine case or a part
 # (partok) that is not there now.
@@ -1113,6 +1169,7 @@ covof() {
   ! grep -qx U <<<"$sa"$'\n'"$sb" && [ "$sa" = "$sb" ] || return 1
   mapfile -t fn < <(grep '^K' <<<"$a"$'\n'"$b" | LC_ALL=C sort | uniq -u | cut -f2 | LC_ALL=C sort -u)
   [ ${#fn[@]} -gt 0 ] || return 1
+  CFN=${fn[*]}
   # Each one's sum as TXFROM has it: one a function, or the change added one.
   s=$(sumsof <<<"$a" | awk -F'\t' 'NR == FNR { w[$0]; next } $1 in w' <(printf '%s\n' "${fn[@]}") -)
   [ -n "$s" ] && [ "$(grep -c . <<<"$s")" = ${#fn[@]} ] || return 1
@@ -1141,10 +1198,16 @@ covof() {
   [ -n "$COVTESTS" ] || COVTESTS=$(jq -rn '[inputs | objects | select(has("testfile") and has("path")) | .path] | unique[]' "$COV")
   parse[$f]=1
 }
+# rulefor <file> <rule> (issue 1775): a line `<file><TAB><function><TAB><rule>` in RULES for each changed function
+# (CFN), `-` for none: which rule picked the tests of each (covof, callersof or area), which the run prints.
+rulefor() {
+  local n
+  for n in ${CFN:--}; do RULES+=$1$'\t'$n$'\t'$2$'\n'; done
+}
 # The tests of the changed files <file>...: into run (test files), area (engine case files) and all (the whole engine
 # test), then (but in textonly's pick) pick's cases (the engine runner's cases, none for all of them) and run[the runner].
 pick() {
-local f t s named stem dir cov cpart helpers of nmap
+local f t s named stem dir cov cal cpart helpers of nmap
 [ -n "$NOTEXT" ] || npart=()
 for f; do
   # A change to its comment and blank lines alone: no test, its linked ones and itself, a test file, too (commentonly).
@@ -1203,10 +1266,13 @@ for f; do
   [ -n "$NOTEXT" ] || ! textonly "$f" || continue
   # A change to functions alone that the coverage map holds: the cases it lists (issue 527), and of the tests below,
   # those the map names nowhere (a test the trace did not run); not its area.
-  cov=; [ -n "$NOTEXT" ] || ! covof "$f" || { cov=1; COVSEL=1; }
-  # A change to functions of paths.sh, or to commands of conveyor.sh, alone: their callers' tests (issue 514). A change
-  # to the control record's defaults: the tests of the code that reads the keys it changed (issue 530).
-  [ -n "$NOTEXT" ] || [ -n "$cov" ] || ! { funcsof "$f" || cmdsof "$f" || keysof "$f"; } || continue
+  cov=; [ -n "$NOTEXT" ] || ! covof "$f" || { cov=1; COVSEL=1; rulefor "$f" covof; }
+  # Else a change to functions alone of an engine shell file: the tests that name them or their callers, and the tests
+  # named after the file or listed for it; not its area (issue 1775).
+  cal=; [ -n "$NOTEXT" ] || [ -n "$cov" ] || ! callersof "$f" || { cal=1; rulefor "$f" callersof; }
+  # A change to commands of conveyor.sh alone: the tests that run them (issue 514). A change to the control record's
+  # defaults: the tests of the code that reads the keys it changed (issue 530).
+  [ -n "$NOTEXT" ] || [ -n "$cov$cal" ] || ! { cmdsof "$f" || keysof "$f"; } || continue
   # A part of a Board script (of, above): the script's tests.
   stem=$(basename "${of%.*}"); dir=$(dirname "$of")
   for s in "$stem" "${stem//_/-}"; do
@@ -1219,7 +1285,8 @@ for f; do
     done
   done
   for t in ${TESTS_OF[$of]:-}; do [ ! -f "$t" ] || { [ -n "$cov" ] && grep -qxF -- "$t" <<<"$COVTESTS"; } || run[$t]=1; done
-  [ -n "$cov" ] || case $f in conveyor/*) areaof "$f" ;; .claude/hooks/lib/*.sh) while read -r t; do [ -z "$t" ] || { run[$t]=1; RANKED+=$t$'\n'; }; done < <(hooklibtests "$f") ;; esac
+  [ -n "$cov$cal" ] || [ -n "$NOTEXT" ] || case $f in conveyor/tests/*) ;; conveyor/*.sh) rulefor "$f" area ;; esac
+  [ -n "$cov$cal" ] || case $f in conveyor/*) areaof "$f" ;; .claude/hooks/lib/*.sh) while read -r t; do [ -z "$t" ] || { run[$t]=1; RANKED+=$t$'\n'; }; done < <(hooklibtests "$f") ;; esac
 done
 # A part the coverage map selected runs as a part, unless this pick, or another, selected its file whole (run, here).
 [ -n "$NOTEXT" ] || { for t in "${!run[@]}"; do twhole[$t]=1; done
@@ -1252,6 +1319,7 @@ shellcases() { # <shell test files>
 casefiles() { [ -n "${1// /}" ] && grep -lE "^t_($(tr ' ' '\n' <<<"$1" | grep . | paste -sd'|' -))\(\) \{" conveyor/tests/*.test.sh; }
 pick "${changed[@]}"
 for f in "${!conly[@]}"; do echo "comment-only change: $f, no tests selected"; done | LC_ALL=C sort
+covrules
 # The tests the engine chose for the change (#150): a card's run is given them in the file CONVEYOR_TEST_FILELIST names
 # (conveyor/lib/testrun.sh testonce()), one path a line (testsel(), reading .conveyor/engine-areas.json through
 # conveyor/lib/testmap.sh mapread(), as a user's card reads its map); so is each one-file run (ONE) of the loop of

@@ -207,6 +207,10 @@ got=$(sel "$F/new")
 [ "$(grep -c '^TESTRUN case' <<<"$oldsel")" = 4 ] && [ "$got" = "$oldsel" ] \
   && ok "covof selects from the new form the tests it selected from the old: only the cases that ran each changed function" \
   || no "from the old form: '$oldsel'; the new form ran: '$got': $(cat "$F/out")"
+# Issue 1775: the run names the rule that picked each changed function's tests; here the map (covof), not the callers.
+grep -qxF 'coverage map rule: conveyor/lib/f.sh fone(): covof' "$F/out" \
+  && ok "the run says covof picked the tests of a function the map holds" \
+  || no "conveyor/lib/f.sh fone() changed, the map holds it: no covof rule line: $(cat "$F/out")"
 # A map whose unit numbers are not each named once (two maps merged line by line) is not read: the change runs by area.
 { cat "$F/new"; jq -c 'select(has("unit")) | .case = "two"' "$F/new" | head -n 1; } > "$F/dup"
 [ "$(sel "$F/dup" | sed -n 's/^TESTRUN case	conveyor\/tests\/a.test.sh	//p' | paste -sd ' ' -)" = "bad evl one two" ] \

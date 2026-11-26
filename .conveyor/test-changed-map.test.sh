@@ -101,25 +101,24 @@ p_mbasevalue() {
   [ "$got" = ALL ] && ok "a changed value in test-pack.json runs the whole engine test" || no "test-pack.json value changed: ran '$got': $(cat "$T/out")"
 }
 # Issue 514. Bug: any code change to paths.sh (base, an "all" area) ran the whole engine test, 74 case files, though
-# it changed one function that only some areas call. D1: a changed function body runs the case files of its callers'
-# areas (review.sh calls it; claim.sh through cardaccts, a function of paths.sh that calls it) and the case file that
-# calls it, not pick.sh's whose comment names it. D2: a changed top-level line, or a function a top-level line calls
-# at start-up, still runs the whole.
+# it changed one function that only some areas call. D1: a changed function body runs the case file that calls it
+# (wait) and the case file that calls rv, its caller in review.sh (stall; issue 1775: callersof, one hop, so not the
+# areas of review.sh and of claim.sh, whose cl calls cardaccts, another caller), not pick.sh's whose comment names it.
+# D2: a changed top-level line, or a function a top-level line calls at start-up, still runs the whole.
 mfuncsfix() {
   printf 'HOST=x\nnohost() {\n  :\n}\nnohost\nguardread() { # <control record>\n  echo one\n}\ncardaccts() { guardread; } 2>/dev/null\n' \
     > "$M/conveyor/lib/paths.sh"
   printf 'rv() { guardread; }\n' > "$M/conveyor/lib/review.sh"; printf 'cl() { cardaccts; }\n' > "$M/conveyor/lib/claim.sh"
   printf '# guardread() reads the guard\n' > "$M/conveyor/lib/pick.sh"; printf 't_wait() {\n  guardread\n}\n' > "$M/conveyor/tests/wait.test.sh"
+  printf 't_stall() {\n  rv\n}\n' > "$M/conveyor/tests/stall.test.sh"
   git -C "$M" commit -qam functions
 }
 p_mfuncs() {
   mfuncsfix
-  want=$({ jq -r '.areas[] | select(.files | index("conveyor/lib/review.sh") or index("conveyor/lib/claim.sh")) | .tests[]' "$HMAP"
-    echo wait.test.sh; } | sed 's/[.]test[.]sh$//' | sort -u | tr '\n' ' ')
   sed 's/echo one/echo two/' "$M/conveyor/lib/paths.sh" > "$T/e" && cat "$T/e" > "$M/conveyor/lib/paths.sh"; got=$(mran)
-  [ "$got" = "${want% }" ] && [ "$(wc -w <<<"$got")" -lt "$cases" ] && [ "$(cat "$T/rc")" = 0 ] \
-    && ok "a changed function body in paths.sh runs the case files of its callers' areas ($got), not the whole engine test" \
-    || no "paths.sh guardread() changed: ran '$got', want '$want', exit $(cat "$T/rc"): $(cat "$T/out")"
+  [ "$got" = "stall wait" ] && [ "$(cat "$T/rc")" = 0 ] \
+    && ok "a changed function body in paths.sh runs the case files that call it or its callers ($got), not the whole engine test" \
+    || no "paths.sh guardread() changed: ran '$got', want 'stall wait', exit $(cat "$T/rc"): $(cat "$T/out")"
 }
 p_mfuncsall() {
   mfuncsfix

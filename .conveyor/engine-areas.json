@@ -21,7 +21,7 @@
 {"area": "base", "file": "conveyor/lib/test-pack.json"}
 {"area": "base", "file": "conveyor/lib/test-card-rules.md"}
 {"area": "base", "file": "conveyor/lib/test-hooks.json"}
-{"area": "base", "why": "every case runs through these: the dispatcher sources portable.sh and paths.sh before any other engine file, and every case's main is made from the test pack, rules and hooks; a change to paths.sh's functions alone runs the case files of their callers (test-changed.sh funcsof)"}
+{"area": "base", "why": "every case runs through these: the dispatcher sources portable.sh and paths.sh before any other engine file, and every case's main is made from the test pack, rules and hooks; a change to paths.sh's functions alone runs the case files that name them or their callers (test-changed.sh callersof)"}
 {"area": "wait", "test": "wait.test.sh"}
 {"area": "wait", "why": "wait.sh, what these cases test, is in core (every case waits through it); this area names the case file so a change to it alone runs it"}
 {"area": "slots", "test": "slots.test.sh"}

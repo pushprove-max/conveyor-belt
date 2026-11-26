@@ -808,6 +808,19 @@ tests it says cover a changed file are its tests, and a file more than half the 
 suite. A card's run never adds to the map; the whole test on main and
 `release-prep` make the map again when it is due (`test.mapAge`, or another test command), from the coverage that the
 run collects (Node and Python), with no second run of the suite.
+In this repository, `.conveyor/test-changed.sh` picks the tests for a change to the functions of an engine shell file.
+It uses three rules, in this order:
+
+1. The coverage map (`.conveyor/coverage.jsonl`): the cases that ran each changed function when the map was made.
+2. The callers: the test files that name a changed function or a function that calls it. When one of these
+   functions is in a command script (`conveyor/commands/`), the tests that run that command also run. This rule
+   applies when the map does not have the function, or when there is no map.
+3. The area: every case file of the file's area in `.conveyor/engine-areas.json`. This rule applies when the change
+   is outside every function, when a changed function runs at start-up, and when more than 25 functions call it.
+
+The output has one `coverage map rule:` line for each changed function. The line names the rule that picked its tests.
+A change to texts, comments or blank lines alone has no such line. A change to texts runs the tests that hold those
+texts. A change to comments or blank lines alone runs only the parse check of the file.
 
 ### When a full test run is allowed
 
