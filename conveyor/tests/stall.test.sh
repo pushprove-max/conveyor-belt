@@ -335,3 +335,30 @@ t_stallnostep() {
   c=$(st 'select(.step == "picked") | .card')
   [ "$(st 'select(.step == "blocked") | .kept')" = "kept/$c" ] && [ -s "$ST/kept/$c/$c.patch" ] || fail "the card's work was not kept: $(st 'select(.step == "blocked")')"
 }
+
+# Issue 1696, Done when 2. Bug it catches: a card in its test step whose failing cases ran on main (verdicts(): live
+# record $CARDS/mainrun/<card>.live), or in the repair lane (<card>.repair.live), had no live record the stuck check
+# read; that run waited for room under the temp space, writing nothing, and after stuck and reviewPause the engine
+# stopped the card. Card c1's process is this shell, its last line a review GO (its step: test), every file of it
+# older than stuck and reviewPause: with either live record it is not stuck; with neither it is.
+t_stallmainrun() {
+  # shellcheck disable=SC2034 # STUCK and REVIEW_PAUSE are read by stuckcard(), sourced below
+  local CARDS=$T/$CASE/cards STUCK=1 REVIEW_PAUSE=1
+  mkdir -p "$CARDS/mainrun"
+  ( . "$SRC/lib/portable.sh"; eval "$(sed -n '/^stuckcard() {/,/^}/p' "$SRC/lib/run.sh")"
+    started=$(p_started $$) || exit 1
+    stdb() { jq -cn --argjson p $$ --arg s "$started" '{card: "c1", issue: 1, step: "worktree", pid: $p, started: $s, time: "2026-01-01T00:00:00Z"},
+      {card: "c1", issue: 1, step: "review", result: "GO", time: "2026-01-01T00:01:00Z"}'; } # the card's records, as the store gives them
+    for l in live repair.live; do
+      touch -t 202601010000 "$CARDS/mainrun/c1.$l" || exit 1
+      ! out=$(stuckcard c1) || { echo "with mainrun/c1.$l: $out"; exit 2; }
+      rm -f "$CARDS/mainrun/c1.$l"
+    done
+    out=$(stuckcard c1) && [ "$out" = "$$ test stuck" ] || { echo "with no live record: '$out'"; exit 3; } ) > "$T/$CASE/out" 2>&1
+  case $? in
+    0) ;;
+    1) fail "the card's process start or its live record could not be made: $(cat "$T/$CASE/out")" ;;
+    2) fail "a card in its test step whose run on main had a live record was found stuck: $(cat "$T/$CASE/out")" ;;
+    *) fail "a card in its test step with no live record and no write was not found stuck: $(cat "$T/$CASE/out")" ;;
+  esac
+}

@@ -264,12 +264,12 @@ cardgone() { # <card> <its last step>
   else echo "$why; it exited with status $rc"; fi
 }
 # A card stuck in flight (#466): open, its worktree line (or, before it, its split check's start line, lib/slices.sh)
-# naming its process (pid and start), and either that process
-# gone, or alive with no process of its step for a stall's time (below). Its step is the one the Board shows it in: the step
-# its last start line begins, else the one after its last line. A step's process (a session, a review, a test run, a
-# wait at the claim or for the machine or the model API, a bug card's run on main's code) keeps a live record while it
-# runs, and watch() ends one that makes no progress for STUCK seconds; the step then waits REVIEW_PAUSE and runs once
-# more, writing nothing meanwhile. So a card in its build, review, fix or test step with no live record, and with no
+# naming its process (pid and start), and either that process gone, or alive with no process of its step for a stall's
+# time (below). Its step is the one the Board shows it in: the step its last start line begins, else the one after its
+# last line. A step's process (a session, a review, a test run, a wait at the claim or for the machine or the model API,
+# a bug card's run on main's code, the run on main of its failing cases, the repair lane's run: $CARDS/mainrun/<card>
+# .unfixed.live, .live, .repair.live) keeps a live record while it runs, and watch() ends one that makes no progress for
+# STUCK seconds; the step then waits REVIEW_PAUSE and runs once more, writing nothing meanwhile. So a card in its build, review, fix or test step with no live record, and with no
 # new line and no write to any of its files for STUCK and REVIEW_PAUSE together, has no process of that step. Prints
 # "<pid> <step> gone" or "<pid> <step> stuck"; fails for any other card. With `turn`, the loop's look at its cards, it
 # reads the card records its turn kept (turncards()), asking the store nothing: a card is stuck only after minutes with
@@ -288,7 +288,7 @@ stuckcard() { # <card> [turn | any]
   p_alive "$p" "$t" || { echo "$p $s gone"; return 0; }
   [ "${2:-}" = turn ] || [[ $(ps -o stat= -p "$p" 2>/dev/null) != *T* ]] || { echo "$p $s stopped"; return 0; }
   [ "${2:-}" != any ] || { echo "$p $s running"; return 0; }
-  [[ $s =~ ^(build|review|fix|test)$ ]] && [ ! -e "$CARDS/$c.live" ] && [ ! -e "$CARDS/mainrun/$c.unfixed.live" ] || return 1
+  [[ $s =~ ^(build|review|fix|test)$ ]] && [ ! -e "$CARDS/$c.live" ] && [ ! -e "$CARDS/mainrun/$c.live" ] && [ ! -e "$CARDS/mainrun/$c.unfixed.live" ] && [ ! -e "$CARDS/mainrun/$c.repair.live" ] || return 1
   m=$at
   while read -r f _; do [[ ! $f =~ ^[0-9]+$ ]] || [ "$f" -le "$m" ] || m=$f; done < <(p_mtimes "$CARDS/$c" "$CARDS/$c".* "$CARDS/mainrun/$c".* 2>/dev/null)
   [ $((EPOCHSECONDS - m)) -ge $((STUCK + REVIEW_PAUSE)) ] || return 1

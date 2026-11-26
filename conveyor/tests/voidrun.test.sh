@@ -122,10 +122,12 @@ t_voidnocasefail() {
 # `-- notrun <file>` (.conveyor/test-changed.sh): voidrun() takes the run as one with no result, naming the why, so
 # nothing of it goes to main or to a main-red card (t_voidrun: a run with no result goes to neither). The logs are
 # those of a run through test.fileCommand (fileeach(), as this repository's pack runs its files): its own log `files`
-# has `-- FAIL h.test.sh` for the runner's failed exit, which must not count as a failed test (a check that read it so made it one). A run that
-# also failed a file is not taken so: that failure is a result. Its failures (testfails(), what verdicts() runs on
+# has `-- FAIL h.test.sh` for the runner's failed exit, which must not count as a failed test (a check that read it so made it one). With a file
+# that also failed, its failures (testfails(), what verdicts() runs on
 # main) name the file that failed alone: with h.test.sh among them, main's run of it did not start for the same want
 # of room, and main was marked red on it (the bug of the blocked card for this issue). h.test.sh is not passed either.
+# Issue 1696: a run that also failed a file was a result, so that file ran on main, where the run waited for room, and
+# the card was stopped with no process of its step. Such a run is no whole run: it has no result too.
 t_voidhost() {
   local w=$T/$CASE/wt got why='test-changed: h.test.sh did not start: 7800 MB is free to this user under /tmp, and it needs 8192 MB there'
   mkdir -p "$w.testlog" && printf '%s\n' 'TESTRUN files=1' '== h.test.sh' '-- FAIL h.test.sh' > "$w.testlog/files" \
@@ -135,12 +137,32 @@ t_voidhost() {
   got=$(vr 1) && [ "$got" = "exit 1: a problem of the host, not of a test: $why" ] \
     || fail "a run whose only file did not start for want of room (logs: $(cat "$w.testlog"/* | tr '\t\n' ':|')) was not taken as a run with no result naming why: '$got'"
   printf '%s\n' '== f.test.sh' '-- FAIL f.test.sh' >> "$w.testlog/files"
-  ! got=$(vr 1) || fail "a run with a file that did not start for want of room and a file that failed (logs: $(cat "$w.testlog"/* | tr '\t\n' ':|')) was taken as a run with no result: '$got'"
+  got=$(vr 1) && [ "$got" = "exit 1: a problem of the host, not of a test: $why" ] \
+    || fail "a run with a file that did not start for want of room and a file that failed (logs: $(cat "$w.testlog"/* | tr '\t\n' ':|')) was not taken as a run with no result naming why: '$got'"
   : > "$w.test"
   got=$( ( eval "$(sed -n '/^testfails() {/,/^}/p; /^RECJQ=/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh"; sed -n '/^tapjq() {/p' "$SRC/lib/failat.sh")"
     packget() { return 1; }; testfails "$w.test" 1 | jq -c '{files: [.files[].file], passed, notRun}' ) )
   [ "$got" = '{"files":["f.test.sh"],"passed":[],"notRun":null}' ] \
     || fail "the failures of a run with h.test.sh not started for want of room and f.test.sh failed (logs: $(cat "$w.testlog"/* | tr '\t\n' ':|')) are not f.test.sh alone, with h.test.sh neither passed nor stopped at a first failure: $got"
+}
+
+# Issue 1696, Done when 1. Bug it catches: the card's run failed c.test's three and its runner did not start b.test
+# for want of room (in the first run and in the run again, which starts b.test as a file its list holds no line of);
+# the run was a result, so c.test ran on main and the card did not run its step again. Now the step's test line says
+# "no result", naming why, nothing runs on main, and the step runs again (run 3, with room) and passes.
+t_voidhostcard() {
+  voidsetup '1 fail three' '2 fail three'
+  # The runner's log of a file it did not start for want of room, as .conveyor/test-changed.sh writes it; the file's
+  # end mark ($S/<its place>) is left, as the stub's files after it wait for it.
+  # shellcheck disable=SC2016 # expanded where the test command sources it
+  echo '[ "$CONVEYOR_TEST_FILE" != b.test ] || case $n in 1 | 2) mkdir -p "$S" && : > "$S/${CONVEYOR_TEST_N:-1}"; printf "== b.test\nTESTRUN host\tb.test\tb.test did not start: no room\n-- notrun b.test\n" >> "$L"; exit 1 ;; esac' > "$STUB/pre"
+  # loop: only a whole card shows its test line and the test step run again after a run with no result
+  loop run 1 > "$STUB/run.out" 2>&1 || fail "run exited non-zero: $(cat "$STUB/run.out")"
+  [ "$(voidsteps)" = "test fail no result,test pass," ] \
+    || fail "the card whose run failed c.test and did not start b.test for want of room did not write a no-result test line and run its step again: $(voidsteps) $(cat "$STUB/run.out")"
+  [ "$(tline 1 .reason)" = "no result: exit 1: a problem of the host, not of a test: b.test did not start: no room" ] \
+    || fail "the no-result test line does not name the file that did not start: $(tline 1 .reason)"
+  [ ! -e "$STUB/rerun.main" ] && [ ! -e "$ST/mainred.json" ] || fail "the run with no result ran on main: $(cat "$STUB/rerun.main" "$ST/mainred.json" 2>&1)"
 }
 
 # Issue 1662 (E5, review). Bug it catches: in a run (exit 124) where a.test.sh ran past its limit and the runner did

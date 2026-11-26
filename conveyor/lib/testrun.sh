@@ -701,7 +701,7 @@ noresult() { # <worktree> <exit> <file>...
 # over 128: the service stopping or restarting), or its time ran out with no test file begun and not ended (the runner
 # itself, not a test, ran out of time), or its runner wrote logs that name nothing it ran (no `TESTRUN`, `== ` or `-- `
 # line), or its only failure is the test command itself (testfails()'s name for a run that logged no file, when its
-# output names no failing case either), or a host problem kept each failed file from starting (hostonly()). Or it
+# output names no failing case either), or a host problem kept a file from starting, whatever else failed (hostonly()). Or it
 # passed with a file whose filter ran no case (nocases(): <worktree>.noresult). Prints why; fails on a result.
 voidrun() { # <worktree> <exit>
   local l=() f cmd h

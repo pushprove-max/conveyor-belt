@@ -667,13 +667,13 @@ mainlinks() { # <worktree> <the commit last tested on>
     | sort -u | while IFS= read -r f; do [ ! -f "$1/$f" ] || printf '%s\n' "$f"; done
 }
 # A run's logs <log>... that name a file the runner did not start for a problem of the host, as no room in the temp
-# space (a line `TESTRUN host<TAB><file><TAB><why>`), and no failed test: each file logged `-- FAIL` or `-- timeout` is
-# such a file (a test.fileCommand run, fileeach(), logs `-- FAIL` for the runner's failed exit on it). Prints the first
-# why; fails when no file is such a file, or a test failed. Bug #1662: such a file was a failed test, so it ran on main,
-# failed there for the same want of room, and main was marked red with nothing to fix (voidrun(), lib/testrun.sh).
+# space (a line `TESTRUN host<TAB><file><TAB><why>`), whatever else the run failed. Prints the first why; fails when
+# no file is such a file. Bug #1662: such a file was a failed test, so it ran on main, failed there for the same want
+# of room, and main was marked red with nothing to fix (voidrun(), lib/testrun.sh). Issue 1696: a run with such a file
+# and a failed test was a result, so its failure ran on main, where that run waited for room too, and the card stopped
+# with no process of its step; a run where a file did not start is no whole run, so it has no result.
 hostonly() { # <log>...
   local h
   h=$(grep -h $'^TESTRUN host\t' "$@" 2>/dev/null | cut -f2-) && [ -n "$h" ] || return 1
-  ! grep -hE '^-- (FAIL|timeout) ' "$@" 2>/dev/null | cut -d' ' -f3- | grep -qvxF -f <(cut -f1 <<<"$h") || return 1
   h=$(head -n 1 <<<"$h"); printf '%s\n' "${h#*$'\t'}"
 }
