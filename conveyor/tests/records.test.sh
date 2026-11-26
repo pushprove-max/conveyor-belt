@@ -548,3 +548,23 @@ t_usdjudge() {
   [ "$(st 'select(.card == "c7-7" and .step == "blocked") | .reason')" = 'fix: stopped at the dollar limit of the card: it spent $6 of $5' ] && [ ! -e "$STUB/ran" ] \
     || fail "a card whose steps cost \$4 and whose judge cost \$2 was not stopped at \$5 with \$6 in its reason, or a judge that ran no call hid its total: $(cat "$T/$CASE/run.out") $(st 'select(.step == "blocked") | .reason')"
 }
+# Bugs: a card's waits are lost or counted twice: two waitnote calls of one name are two entries in place of their sum;
+# a start line holds the waits (the Board would count them before the step that waited); the notes are kept after the
+# line that holds them, so the next line counts them again; a test line's slot wait or a review line's judge seconds
+# are left out; or a card that never waited writes an empty or zero waits field.
+t_waits() {
+  local w
+  setup '[]'
+  # The cards folder is made first, as the loop makes it before any card waits.
+  engine_once 'mkdir -p "$CARDS" && waitnote c1 claim 3 && waitnote c1 claim 4.5 && waitnote c1 turn 2 && record c1 1 start ok "{\"of\": \"test\"}"
+    record c1 1 test pass "{\"wait\": 12}" && [ ! -e "$CARDS/c1.waits" ] || exit 1
+    record c1 1 review ok "{\"judge\": {\"sec\": 9}}"
+    record c2 2 build ok && record c2 2 test pass "{\"wait\": 0}" && record c2 2 review ok "{\"judge\": {\"model\": \"m\"}}"
+    ! waitnote c2 claim soon 2>/dev/null' > "$T/$CASE/run.out" 2>&1 \
+    || fail "the waits were not noted, the lines not written, the notes kept after the test line, or a wait of no seconds noted: $(cat "$T/$CASE/run.out")"
+  # A line with no waits holds no waits key at all (has()), so a "waits": null line does not pass for one with none.
+  w=$(jq -sc 'map({card, step} + if has("waits") then {waits} else {} end)' "$ST/cards.jsonl")
+  [ "$w" = '[{"card":"c1","step":"start"},{"card":"c1","step":"test","waits":[{"name":"claim","sec":7.5},{"name":"slot","sec":12},{"name":"turn","sec":2}]},{"card":"c1","step":"review","waits":[{"name":"judge","sec":9}]},{"card":"c2","step":"build"},{"card":"c2","step":"test"},{"card":"c2","step":"review"}]' ] \
+    || fail "waitnote c1 claim 3, claim 4.5, turn 2, then a start line, a test line with wait 12 and a review line with judge.sec 9; card c2 with no wait: the lines' waits are $w"
+  recok "$ST/cards.jsonl" "lines with waits"
+}

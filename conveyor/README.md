@@ -538,6 +538,11 @@ Each run of a card's changed tests writes one `test` line to the card records, `
 - `times`: the CPU seconds of every test file the card's own run timed, `{"<file>": <CPU seconds>}`: what the test
   rules and the Tests page read (below).
 
+A step line of a card that waited holds `waits`: one `{name, sec}` for each name, with the seconds of all its waits of
+that name added together. The names are `slot`, the `wait` of a `test` line, `judge`, the `judge.sec` of a `review`
+line, and the name of each wait the engine noted for the card since its line before. A `start` line never holds
+`waits`, so the waits noted before it go on the next line. A card that did not wait has no `waits` on its lines.
+
 A card whose tests already passed on what it holds, while it waited to land, is not run again: its `test` line is a
 `pass` with `reused: true` and no run. No passing output is kept. The Board's card shows the Test step's time as
 its wait and its run.

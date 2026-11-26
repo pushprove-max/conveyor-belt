@@ -157,16 +157,30 @@ heldpick() { # <card>
   p=$(stdb ask card "$1" 2>/dev/null | jq -cs '[.[] | objects | .pick | objects] | last // empty' 2>/dev/null)
   [ -z "$p" ] || { PICK=$p; PICKCARD=$1; }
 }
+# A wait of the card, <seconds> long, noted for its next line that is not a start line: line() sums the waits of
+# each name into that line's waits, and record() removes the notes once the line is written.
+waitnote() { # <card> <name> <seconds>
+  [ -n "$2" ] && [[ $3 =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "conveyor: waitnote: no name or no seconds for card $1: '$2' '$3'" >&2; return 1; }
+  jq -cn --arg n "$2" --argjson s "$3" '{name: $n, sec: $s}' >> "$CARDS/$1.waits"
+}
 # One step = one line, of no fixed size (a tail can hold many long lines), appended under the lock (locked, above),
 # so another writer's line never lands inside it.
 line() { # <card> <issue> <step> <result> [extra json]
   # The extra fields come on stdin, not as an argument: a tail of long lines can be more than one argument can hold.
   # A line of the card whose pick card() holds (PICK, PICKCARD: modelpick(), lib/modelpick.sh) carries it.
-  local x=${5:-} p=null; [ -n "$x" ] || x='{}'
+  local x=${5:-} p=null w='[]'; [ -n "$x" ] || x='{}'
   [ -z "${PICK:-}" ] || [ "${PICKCARD:-}" != "$1" ] || p=$PICK
-  printf '%s' "$x" | jq -c --arg c "$1" --argjson i "$2" --arg s "$3" --arg r "$4" --arg repo "$REPO" --argjson p "$p" \
+  # The waits waitnote noted since the card's last line; a start line holds none, so they wait for the next line.
+  [ "$3" = start ] || [ ! -s "$CARDS/$1.waits" ] \
+    || w=$(jq -cRn '[inputs | fromjson? | objects | select((.name | type == "string") and (.sec | type == "number"))]' "$CARDS/$1.waits" 2>/dev/null) || w='[]'
+  printf '%s' "$x" | jq -c --arg c "$1" --argjson i "$2" --arg s "$3" --arg r "$4" --arg repo "$REPO" --argjson p "$p" --argjson w "$w" \
     '. as $x | {card:$c,issue:$i,step:$s,time:(now|todate),tokens:{claude:0,codex:0},result:$r,sha:"",reason:"",repo:$repo} * $x | .reason |= .[0:1500]
      | if $p != null then .pick = $p else . end
+     | if $s == "start" then . else
+         ($w + (if $s == "test" and (.wait | type == "number") then [{name: "slot", sec: .wait}] else [] end)
+          + (if $s == "review" and (.judge | type == "object") and (.judge.sec | type == "number") then [{name: "judge", sec: .judge.sec}] else [] end)
+          | map(select(.sec > 0)) | group_by(.name) | map({name: .[0].name, sec: (map(.sec) | add)})) as $ws
+         | if $ws == [] then . else .waits = $ws end end
      | if has("tail") then .tail |= '"($TAIL)"' else . end'
 }
 # A line's tail (a blocked line's output, the findings of a NO-GO review or of a GO with an OUTSIDE line): its last 60 lines, each whole, so no line loses what it says and identical lines stay
@@ -219,7 +233,10 @@ outkeep() { # <card> <step> <the line>
 record() { # <card> <issue> <step> <result> [extra json]
   local l
   l=$(line "$@" 2>/dev/null) || l=$(line "$1" "$2" "$3" "$4" "$(jq -cn --arg x "${5:0:300}" '{unread: ("the fields of this line were not one JSON object, so they were left out: " + $x)}')" 2>/dev/null) || l=''
-  [ -n "$l" ] && { locked append "$l" || { sleep 1; locked append "$l"; }; } && { outkeep "$1" "$3" "$l"; return 0; }
+  [ -n "$l" ] && { locked append "$l" || { sleep 1; locked append "$l"; }; } && {
+    # The line holds the card's noted waits (line()), so they are not counted again; a start line holds none.
+    [ "$3" = start ] || rm -f "$CARDS/$1.waits"
+    outkeep "$1" "$3" "$l"; return 0; }
   echo "conveyor: cannot record $1 $3" >&2
   [ "$3" = blocked ] || [ ! -d "$CARDS/$1" ] || block "$1" "$2" "$CARDS/$1" "conveyor: the engine could not write the $3 line of this card to the card records"
   exit 1
