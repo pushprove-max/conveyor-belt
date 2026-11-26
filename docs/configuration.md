@@ -26,9 +26,12 @@ Some pack settings that this site names:
   "area:docs"}, "other": "area:tooling"}`. An entry of the self-heals list or the docs list gets the area of the file
   that its finding names. When the finding names no file, the entry gets the area label of its issue, or no area. Each
   issue or card that Conveyor files gets an area label. A follow-up or a split part gets the area of its parent. When
-  the parent has none, and for the other filings, it gets the area of the file that it names, else `other`. With no
-  map, an entry gets the area label of its issue, or no area. A follow-up or a split part gets the area label of its
-  parent, a flaky-test issue gets `<areaPrefix>engine` when `nonProductAreas` names it, and the other filings get no area label.
+  the parent has none, and for the other filings, it gets the area of the file that it names, else `other`. An entry
+  that you move up to harm is a follow-up. Its parent is the issue or card that put it on the list. **File on GitHub**
+  keeps the area of its card. With no map, an entry gets the area label of its issue, or no area. A follow-up or a
+  split part gets the area label of its parent. When the parent of an entry that you move up to harm has none, it gets
+  the area of the entry. **File on GitHub** keeps the area of its card, a flaky-test issue gets `<areaPrefix>engine`
+  when `nonProductAreas` names it, and the other filings get no area label.
   `conveyor.sh doctor` says when the map is not set. After you add the map, run `conveyor.sh heals areas` one time
   ([Commands](commands.md)): it makes the map's labels on GitHub and gives an area to the entries and open issues
   that have none. An area label that `nonProductAreas` does not name makes an issue product work.

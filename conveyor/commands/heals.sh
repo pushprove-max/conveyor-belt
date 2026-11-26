@@ -16,6 +16,7 @@
 . "$HERE/lib/review.sh" || exit 1
 . "$HERE/lib/followups.sh" || exit 1
 . "$HERE/lib/testaction.sh" || exit 1
+. "$HERE/lib/redfix.sh" || exit 1 # redissue(): the parent of an entry a main-red fix card listed (healsred())
 . "$HERE/lib/heals.sh" || exit 1
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1

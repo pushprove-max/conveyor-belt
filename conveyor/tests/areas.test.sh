@@ -226,6 +226,57 @@ t_areasplitplain() {
     || fail "splitcards of a slice whose Done-when is 'lib/a.sh says why.' made a card with the labels $(jq -c '.cards[0].labels' "$ST/testactions/cards.json" 2>&1) (exit $RC): $(cat "$T/$CASE/run.out")"
 }
 
+# An entry of the self-heals list for `heals harm`.
+harmentry() { # <id> <issue> <card> <area json> <finding>
+  jq -cn --arg i "$1" --argjson n "$2" --arg c "$3" --argjson a "$4" --arg f "$5" \
+    '{id: $i, time: "2026-11-20T00:00:00Z", card: $c, issue: $n, area: $a, finding: $f, why: "w", effect: "self-heals", from: "review"}' >> "$ST/selfheals.jsonl"
+}
+# Bug (#1728): "Move up to harm" gave the follow-up the entry's area (its finding's file), not its parent's, and an
+# entry with no area was filed with none. The parents: #7 labelled area:board, #8 with no label, a card with no
+# GitHub issue (c0-9, given back as c0-10) labelled area:docs, and a main-red fix card of a case of
+# lib/tests/x.test.sh (cred-2, given back once as cred-1), whose area:tests the record of main red gives, not TACARDS.
+# The retried file runs on past cred-1's line, more than a pipe holds: a lookup that stops at its match loses the parent.
+t_areaharmparent() {
+  local out
+  amap "[$(issue 7 2026-01-01 area:board), $(issue 8 2026-01-01)]"
+  harmentry h000000000a1 7 c1-7 '"area:engine"' '[P2] lib/a.sh:1 a'
+  harmentry h000000000a2 8 c2-8 null '[P2] lib/a.sh:2 b'
+  harmentry h000000000a3 0 c0-9 '"area:engine"' '[P2] lib/a.sh:3 c'
+  mkdir -p "$ST/testactions" && jq -cn '{cards: [{id: "x", card: "c0-10", was: ["c0-9"], title: "t", body: "b", labels: ["bug", "area:docs"]}]}' > "$ST/testactions/cards.json"
+  harmentry h000000000a4 0 cred-2 '"area:engine"' '[P2] lib/a.sh:4 d'
+  harmentry h000000000a5 0 cred-1 '"area:engine"' '[P2] lib/a.sh:5 e'
+  jq -cn '{reds: [{sha: "abc", card: "cred-2", cases: [{case: "lib/tests/x.test.sh: t_one", files: ["lib/tests/x.test.sh"], by: "c1", last: ""}]}]}' > "$ST/mainred.json"
+  echo '{"card": "cred-1", "issue": 0, "step": "picked", "time": "2026-11-20T00:00:00Z", "mainRed": "abc"}' > "$ST/retried.jsonl"
+  jq -cn 'range(3000) | {card: "cold-\(.)", issue: 0, step: "picked", time: "2026-11-20T00:00:00Z"}' >> "$ST/retried.jsonl"
+  out=$(loop heals harm h000000000a1 h000000000a2 h000000000a3 h000000000a4 h000000000a5 2>&1) || fail "heals harm of five entries failed: $out"
+  [ "$(jq -c '[.labels[].name | select(startswith("area:"))]' "$STUB/filed" | paste -sd' ' -)" = '["area:board"] ["area:engine"] ["area:docs"] ["area:tests"] ["area:tests"]' ] \
+    || fail "heals harm h000000000a1 (parent #7 of area:board) h000000000a2 (parent #8 and entry of no area) h000000000a3 (parent card of area:docs) h000000000a4 (parent main-red card cred-2 of area:tests) h000000000a5 (the same, given back as cred-1), each finding of lib/a.sh, filed: $(cat "$STUB/filed") $out"
+}
+# Bug (review of #1728): a blocked main-red card replaced without `retry` lost its area, as only the retried file named
+# its commit. pushred() takes the card off the commit's entry and redpick() names a new one; one entry is moved up
+# between the two, while the record names no card, and one after.
+t_areaharmreplaced() {
+  local s
+  amap; mainfile; s=$(git -C "$R" rev-parse HEAD)
+  jq -cn --arg s "$s" '{reds: [{sha: $s, card: "cred-1", cases: [{case: "lib/tests/x.test.sh: t_one", files: ["lib/tests/x.test.sh"], by: "c1", last: ""}]}]}' > "$ST/mainred.json"
+  jq -cn --arg s "$s" '{card: "cred-1", issue: 0, step: "picked", time: "2026-11-20T00:00:00Z", mainRed: $s}, {card: "cred-1", issue: 0, step: "blocked", time: "2026-11-20T00:00:01Z"}' >> "$ST/cards.jsonl"
+  harmentry h000000000c1 0 cred-1 '"area:engine"' '[P2] lib/a.sh:1 a'
+  harmentry h000000000c2 0 cred-1 '"area:engine"' '[P2] lib/a.sh:2 b'
+  fx_in 'pushred '"$s"' typecheck c1 1 && echo "named $(jq -c "[.reds[].card]" "$MAINRED")" && healsharm h000000000c1 \
+    && locked redpick && echo "named $(jq -c "[.reds[].card]" "$MAINRED")" && healsharm h000000000c2'
+  [ "$RC" = 0 ] && grep -qx 'named \[null\]' "$T/$CASE/run.out" && grep -q '^named \["c[0-9]\{8\}T' "$T/$CASE/run.out" \
+    && [ "$(jq -c '[.labels[].name | select(startswith("area:"))]' "$STUB/filed" | paste -sd' ' -)" = '["area:tests"] ["area:tests"]' ] \
+    || fail "healsharm h000000000c1 (after pushred() replaced blocked main-red card cred-1) and h000000000c2 (after redpick() named the new card), each finding of lib/a.sh, did not file area:tests (exit $RC): $(cat "$STUB/filed" 2>&1) $(cat "$T/$CASE/run.out")"
+}
+# Bug it catches: a parent whose labels GitHub did not give is read as one with no area, so the follow-up is filed under
+# another area and its entry leaves the list.
+t_areaharmunread() {
+  amap; harmentry h000000000b1 7 c1-7 '"area:engine"' '[P2] lib/a.sh:1 a'
+  fx_in 'timeout() { [ "$2 $3 $4" != "gh issue view" ] || return 1; command timeout "$@"; }; healsharm h000000000b1'
+  [ "$RC" = 1 ] && [ ! -e "$STUB/filed" ] && [ "$(jq -r .id "$ST/selfheals.jsonl")" = h000000000b1 ] && grep -q 'the labels of #7.*could not be read' "$T/$CASE/run.out" \
+    || fail "healsharm h000000000b1 with gh issue view 7 failing exited $RC, filed $(cat "$STUB/filed" 2>&1) and said: $(cat "$T/$CASE/run.out")"
+}
+
 # The one pass (#1693, item 3): each entry of both lists with no area gets its finding's file's area, and one with an
 # area or no file is left as it is; each open issue with no area label gets one, and one with a label is left.
 t_areapass() {

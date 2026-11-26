@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # The area of a file, from the pack's path-to-area map (labels.areaPaths): the area of an entry of the self-heals list
 # or the docs list (areapick(), healsadd(), lib/followups.sh), the area label of what the engine files (filearea():
-# follow-ups, flaky tests, main red, release fixes, batch cards, split parts, the Foreman's card and testissue, File on
-# GitHub, the whole test on main, a declined finding built, the test-speed survey, a test rule and an entry moved up to harm), and
+# follow-ups, an entry moved up to harm, flaky tests, main red, the whole test on main, release fixes, batch cards,
+# split parts, declined findings, test rules, test-speed surveys, File on GitHub, the Foreman's card and testissue), and
 # the one pass that gives what exists an area (healsareas()). The map is the pack's: the plugin names no path and no
-# area. A pack with no map gives no area here: an entry keeps its issue's area label, and a filing has the labels it
-# had before (a follow-up or a split part its parent's, a flaky issue <areaPrefix>engine when nonProductAreas names
-# it). Sourced by lib/prompts.sh, which reads the map (names(): AREAPATHS).
+# area. A pack with no map gives no area here: an entry keeps its issue's area label, and a filing has only a label
+# it takes from what it was made of (a follow-up or a split part its parent's, an entry moved up to harm its parent's
+# or its own, File on GitHub its card's, a flaky issue <areaPrefix>engine when nonProductAreas names it). Sourced by
+# lib/prompts.sh, which reads the map (names(): AREAPATHS).
 
 # The jq of the map, $m (labels.areaPaths: {paths: {<path>: <area label>}, other: <area label>}, or null for none):
 #   areaof($m): the area label of the path on the input: that of the longest line of paths that names it (a line

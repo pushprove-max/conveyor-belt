@@ -167,11 +167,24 @@ healsdiscard() { # <id>...
     healsgone "$(jq -cn '$ARGS.positional' --args "$@")" dropped || { echo "conveyor: the self-heals list could not be written; nothing dropped" >&2; exit 1; }
     echo "conveyor: dropped $# entr$([ $# = 1 ] && echo y || echo ies) from the self-heals list" ) 9>>"$SELFHEALS.lock"
 }
+# What stands in for the issue of main-red fix card <card> (redissue(), lib/redfix.sh). $MAINRED no longer names a card
+# given back by `retry` and picked again, nor one that blocked or closed and that pushred() replaces. Its entry, which
+# may name a new card or none yet, is found by main's commit: the card's picked line names it, in the card records or, once
+# given back, in the retried file (read in that order, as `retry` writes it there first). Fails for any other card.
+healsred() { # <card>
+  local s
+  redissue "$1" && return 0
+  # jq reads to the end: one that stops at its match fails the pipe (pipefail) when more lines follow than it holds.
+  s=$({ stdb ask card "$1" && stdb ask lines retried; } | jq -rn --arg c "$1" '[inputs | objects | select(.card == $c) | .mainRed | strings] | first // empty') && [ -n "$s" ] || return 1
+  redissue "$s"
+}
 # `conveyor.sh heals harm <id>...` (the Board's Self-heals page, "Move up to harm"): the owner saw the finding of each
 # entry <id> of the self-heals list in real logs or records, so it is harm and gets its own follow-up card at once, as
 # followups() files a harm finding: the pack's follow-up label, its type label (none for a cleanup entry), the priority
-# of the finding's [P<n>] (P1 when it names none) and the entry's area label (with none, filearea()'s); with rules.followupissues false a card
-# with no GitHub issue (the locks of healslocks()). Each entry then leaves the list for the dropped record (healsgone(),
+# of the finding's [P<n>] (P1 when it names none) and an area label: its parent's (the entry's issue, else the card with
+# no GitHub issue that listed it), else that of the file the finding names, else the map's other (filearea(),
+# lib/areas.sh), else the entry's; an entry whose issue's labels cannot be read is not filed. With rules.followupissues
+# false a card with no GitHub issue (the locks of healslocks()). Each entry then leaves the list for the dropped record (healsgone(),
 # why: harm, filed: the card), so it is neither on the list nor lost; it is marked right after its own card is filed, so
 # a failure on a later entry leaves none filed twice. When an id is not an open entry of the list, nothing is filed (exit 2).
 # A finding that names one of the pack's pipelineFiles (onpipeline(), lib/followups.sh) is filed held, as followups()
@@ -193,7 +206,16 @@ healsharm() { # <id>...
       mark=$(grep -oE '\[P[0-3]\]' <<<"$f" | head -n 1 | tr -d '[]P'); where=$(grep -oE '[^[:space:]]+:[0-9]+' <<<"$g" | head -n 1)
       mark=$(jq -r --argjson i "${mark:-1}" 'if $i == 3 and length < 4 then "" else .[[$i, length - 1] | min] end' <<<"$PRIOS")
       t=$TYPE; [ "$(jq -r .effect <<<"$e")" != cleanup ] || t=''
-      a=$(jq -r '.area // empty' <<<"$e"); la=$(filearea "$a" "$f") && a=$la # an entry with no area: its finding's file's, else the map's other
+      n=$(jq -r .issue <<<"$e")
+      if [ "$n" != 0 ]; then
+        par=$(timeout 20 gh issue view "$n" --json labels 2>/dev/null) || { echo "conveyor: the labels of #$n, the issue of entry $id, could not be read; it is not filed" >&2; exit 1; }
+      else # a card with no GitHub issue: a main-red fix card (healsred()), else one of the record, under the id it has now or had before it was given back (was)
+        c=$(jq -r .card <<<"$e")
+        par=$(healsred "$c") || par=$(jq -c --arg c "$c" 'first(.cards[]? | select(.card == $c or any(.was[]?; . == $c))) | {labels: [.labels[]? | {name: .}]}' "$TACARDS" 2>/dev/null) || par=''
+      fi
+      pa=$(jq -r --arg p "$AREA" 'first(.labels[]?.name | select(startswith($p)))' <<<"$par") || pa=''
+      a=$(filearea "$pa" "$f") || a=$pa
+      [ -n "$a" ] || a=$(jq -r '.area // empty' <<<"$e")
       cost=$(onpipeline "$f" <<<"$pipe") || { echo "conveyor: whether entry $id names a pipeline file could not be told; it is not filed" >&2; exit 1; }
       body=$(jq -r --arg w "${where:-the finding names no file:line}" '"Conveyor'"'"'s self-heals list held the finding below. The owner moved it up to harm on the Board: it shows up in real logs or records, so it is fixed in a card of its own.\n\nFinding: \(.finding)\nWhere: \($w)\nKind: harm (moved up from the self-heals list, where the judge had sorted it as \(.effect // "self-heals"): \(.why))\nFrom: card \(.card), issue #\(.issue) (list entry \(.id))"' <<<"$e") \
         || { echo "conveyor: entry $id could not be read; it is not filed" >&2; exit 1; }
