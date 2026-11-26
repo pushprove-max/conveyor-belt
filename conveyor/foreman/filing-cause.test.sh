@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# The Foreman's filing hook (foreman.sh filing, cause.sh no_cause) refuses a fix issue with no `## Cause` section (#1293).
+# The Foreman's filing hook (foreman.sh filing, cause.sh no_cause, no_design) refuses a fix issue with no `## Cause` section (#1293)
+# and an issue with a `## What to build` section and no `## Design` section (#1730).
 # Bug caught: the Foreman filed a fix that named a symptom ("the reader is over its size cap") and never the source of
 # the problem, because nothing in the filing path asked for the cause.
 set -uo pipefail
@@ -351,6 +352,33 @@ out=$(cd "$M" && jq -cn --arg c "$(body $'## What happens now\nIt breaks.')" '{s
 [ -z "$out" ] || fail "a fix issue filed in a session that is not the Foreman's was checked; command: $(body $'## What happens now\nIt breaks.'); output: $out"
 }
 
+# Bug (#1730): an issue that asks for new work (`## What to build`) left its design to the builder (where data is kept, its
+# key, its limits), and the review found fault with those choices. The filing check now asks for a `## Design` section.
+t_design() {
+case_ design
+design_refused() { # <command>: refused with the NO_DESIGN text, which names the four things the section decides
+  out=$(hook "$1")
+  jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | test("## Design") and test("where each new piece of data is kept \\(the file or record\\) and its key") and test("each limit as a number with its unit") and test("the one place that reads it") and test("for example") and test("A or B"))' <<<"$out" >/dev/null \
+    || fail "an issue with What to build and no Design section was not refused with the Design text; command: $1; output: $out"
+}
+design_refused "$(body $'## What to build\nA note is kept for each card.')"
+design_refused "$(body $'## Done when\nx\n## What to build\nA note.' '--label enhancement')"
+design_refused "gh issue create --title 'New' --body \$'## What to build\nA note.\n### Design\nnone'"
+design_refused "foreman.sh ask alpha testissue conveyor/x.test.sh 'Slow' '## Cause
+Stale.
+## What to build
+A note.'"
+printf '## What to build\nA note.\n' > "$T/new.md"
+design_refused "gh issue create --title 'New' --body-file $T/new.md"
+# A `## Design` line in a fenced block is no heading, and the fix issue with neither section is told about Cause first.
+design_refused "$(body $'## What to build\nA note.\n```md\n## Design\n```')"
+refused "$(body $'## What happens now\nIt breaks.\n## What to build\nA note.')"
+passes "$(body $'## What to build\nA note.\n## Design\nThe note is kept in notes.json, keyed by card, 200 characters.')"
+passes "$(body $'## What happens now\nIt breaks.\n## Cause\nStale.\n## Design\nx\n## What to build\ny')"
+printf '## What to build\nA note.\n## Design\nNotes are kept in notes.json.\n' > "$T/new.md"
+passes "gh issue create --title 'New' --body-file $T/new.md"
+}
+
 # Bug: a card that changed only no_cause did not run this file. The Foreman folder is outside the engine's area map and
 # no test is named after foreman.sh, so only its test links chose this file, one of six, and a card's Test step runs
 # five (CARDLINKED): the cap left it out. The case stages a change to no_cause in a copy of this checkout and asks the
@@ -382,7 +410,7 @@ grep -qxF conveyor/foreman/filing-cause.test.sh <(tail -n +2 "$W/list") \
   || fail "the cap leaves files out of the list of a card that changes only no_cause in $f, so its records can drop conveyor/foreman/filing-cause.test.sh; left out: $(head -1 "$W/list"), list: $(tail -n +2 "$W/list" | tr '\n' ' ')"
 }
 
-cases=(what heading list quote fence bug new linked)
+cases=(what heading list quote fence bug new design linked)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

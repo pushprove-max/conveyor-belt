@@ -48,7 +48,7 @@ output holds `rules.md` after the rest, cut the same way. When the Conveyor comm
 start holds `rules.md` before the rest when the whole fits, and otherwise has one line in its place that tells the
 Foreman to read that file now.
 
-The same second output starts with 11 rules on working with the owner. Every project's Foreman gets them, with no
+The same second output starts with the rules on working with the owner. Every project's Foreman gets them, with no
 `rules.md` needed; the plugin ships them, and `rules.md` follows them:
 
 1. Scope is the owner's words. An issue for an owner's order opens with those words. Anything the Foreman adds goes to
@@ -69,6 +69,9 @@ The same second output starts with 11 rules on working with the owner. Every pro
 9. A refusal by a safety check or a hook is never retried in another shape.
 10. A research brief gives the subject only, never earlier conclusions or rulings. The Foreman applies its rulings after.
 11. The Foreman never offers the owner manual work. A step only the owner can do (a login) is given alone, as one command.
+12. A hold that you took off (on the Board, or with `control release`) is your release, not a fault. The Foreman does
+    not hold that issue again unless you order it, and does not report it as a plugin problem.
+13. An issue with a `## What to build` section needs a `## Design` section that settles what that section leaves open.
 
 The Foreman uses the 1-hour prompt cache. `conveyor.sh foreman` starts its session with it. For a session in the main
 checkout, `/conveyor-belt:setup --foreman` sets `CLAUDE_CODE_PROMPT_CACHE_TTL` to `1h` in the `env` of
@@ -212,6 +215,13 @@ section must hold: where the bad data or behaviour comes from and why it is ther
 already solves the same problem (or that none was found), and what the reader sees when the data is stale or missing.
 The check also covers `foreman.sh ask <project> testissue`. An issue for new work that you ordered, with neither the
 section nor the label, is not checked, and nor is an issue that the engine files itself, such as a follow-up.
+
+The Foreman also files an issue with a `## What to build` section only with a `## Design` section, for a fix issue and
+for new work. If the section is missing, the filing command does not run. The Foreman is told that the section must
+decide what `## What to build` leaves open: where each new piece of data is kept (the file or record) and its key, each
+limit as a number with its unit, the one place that reads it, and each choice made where the text says "for example" or
+"A or B". A fix issue with neither `## Cause` nor `## Design` is refused for the missing `## Cause` first. The text of
+the section is not judged.
 
 The Foreman can also file an issue about a test file with `conveyor.sh testissue`, the Tests page's command. For a
 Foreman session, this command holds the issue in the project's record and says so. It also holds an issue that it

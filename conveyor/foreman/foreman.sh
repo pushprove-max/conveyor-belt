@@ -62,7 +62,8 @@
 # filing (PreToolUse, Bash) and filed (PostToolUse and PostToolUseFailure, Bash): an issue the Foreman files (a
 #   command holding `issue create` or `issue new`: gh's, or the engine's gh-write) starts held, so nothing it files is
 #   built before the owner's yes; the Foreman releases it (conveyor.sh control release) once the owner says yes. A fix
-#   issue (a `## What happens now` section or a `bug` label) with no `## Cause` section is refused first (no_cause).
+#   issue (a `## What happens now` section or a `bug` label) with no `## Cause` section is refused first (no_cause); an
+#   issue with a `## What to build` section and no `## Design` section is refused next (no_design).
 #   filing, before the command runs, marks every record (conveyor.sh control filing on: its loop holds a follow-up too) and sets each whose new issues start in the queue to start them held
 #   (another project's too, as the command may file there) (conveyor.sh control start held), so an issue is held from its first sight, however long the command runs on;
 #   when a record cannot be set, or the command is to run in the background, the command is refused. filed holds every
@@ -620,7 +621,7 @@ context_state() {
 # The program is files.jq, which the plugin's hook lines (filing-hook.sh) read too, so a command that files no issue
 # ends there, before the shim looks for the engine.
 files() { jq -e -f "$FHERE/files.jq" <<<"$1" >/dev/null 2>&1; }
-# no_cause and its refusal, NO_CAUSE: cause.sh.
+# filing_read, no_cause and no_design, and their refusals NO_CAUSE and NO_DESIGN: cause.sh.
 . "$FHERE/cause.sh" || exit 1
 # Every Foreman of the host file, and every lane's filer, files against the same records, so what filing set held is
 # kept in one list for all ($SF/held, beside the host file), and each filing in flight adds a line to $SF/in (the
@@ -631,7 +632,10 @@ files() { jq -e -f "$FHERE/files.jq" <<<"$1" >/dev/null 2>&1; }
 filing() {
   local in recs repo main c s bad=() kept=() sl
   in=$IN
-  if foreman "$SID" && no_cause "$in"; then deny "$NO_CAUSE"; return 0; fi
+  if foreman "$SID" && filing_read "$in"; then
+    if no_cause; then deny "$NO_CAUSE"; return 0; fi
+    if no_design; then deny "$NO_DESIGN"; return 0; fi
+  fi
   files "$in" || return 0
   # A command run in the background has its filed hook as soon as it starts: the records would start new issues in
   # the queue again before it files any, and its output links none, so nothing it files would be held.

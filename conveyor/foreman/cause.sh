@@ -4,13 +4,15 @@
 # whose filing hook calls it; it uses foreman.sh files and lib.sh stdin_file. It is a file of its own so that a change
 # to it selects its tests (conveyor/foreman/filing-cause.test.sh, linked in .conveyor/test-links.json) and only them:
 # in foreman.sh, they were one of more linked test files than a card's Test step runs.
-# no_cause <hook input>: 0 when its command files a fix issue with no `## Cause` section: the command files an issue
+# filing_read <hook input> then no_cause: 0 when its command files a fix issue with no `## Cause` section: the command files an issue
 # (foreman.sh files, or `ask <project> testissue`), and the text it carries (a body file it names, when readable, too, and
 # for `--body-file -` the file a `< file` redirect names) has a `## What happens now` section or a `bug` label (`--label bug`, `-l foo,bug`, `--label=bug`); `testissue` always
 # files with the pack's type label (`bug` in this pack), so it counts as a fix issue too. The section is read as
 # written in the command, as files is: its text is not judged, and a body made by an expansion is not seen.
-# shellcheck disable=SC2034 # NO_CAUSE is read in foreman.sh filing
+# no_design: 0 when that text has a `## What to build` section and no `## Design` section (any issue the Foreman files).
+# shellcheck disable=SC2034 # NO_CAUSE and NO_DESIGN are read in foreman.sh filing
 NO_CAUSE='Not run: a fix issue needs a "## Cause" section, and this one has none. Name the source of the problem, not only what the reader sees. The section holds three things. First, where the bad data or behaviour comes from and why it is there at all. Second, a place in the code that already solves the same problem, or that none was found. Third, what the reader sees when the data is stale or missing. Add the section and file it again.'
+NO_DESIGN='Not run: an issue with a "## What to build" section needs a "## Design" section, and this one has none. The section decides what "## What to build" leaves open, so the builder does not choose it. It names four things. First, where each new piece of data is kept (the file or record) and its key. Second, each limit as a number with its unit. Third, the one place that reads it. Fourth, each choice made where the text says "for example" or "A or B". Add the section and file the issue again.'
 # unfenced <inline> <quote> <text>: the text without its fenced code blocks. A fence is a line of three or more backticks
 # or tildes, up to three spaces before them; an opener of backticks has no backtick after them (Markdown). The block ends
 # at a line of that fence character at least as often with nothing after it, or at the end of the text. With <inline> 1
@@ -246,7 +248,11 @@ heredocs() {
   done
   printf '%s' "$o"
 }
-no_cause() {
+# filing_read <hook input>: reads the issue text of a filing command, once, for no_cause and no_design: 0 when the
+# command files an issue, with FT_TEXT the text it carries (see no_cause), FT_TI 1 for a `testissue` and FT_O the command
+# without its comments and here-document bodies; 1 when it files none (the three are then not set).
+FT_TEXT='' FT_TI=0 FT_O=''
+filing_read() {
   local cmd f t ti=0 fc=
   cmd=$(jq -r '.tool_input.command // ""' <<<"$1" 2>/dev/null) || return 1
   # u: the command with its shell comments made spaces (uncommented), as bash reads no word in them. o: u with its
@@ -267,11 +273,8 @@ no_cause() {
     [ "$f" != - ] || f=$(stdin_file "$o") || f=-
     [ ! -f "$f" ] || fc=$(cat "$f" 2>/dev/null)
   fi
-  # A heading is its line whole, exactly two hashes, at a line start (up to three spaces before them, as Markdown
-  # allows): after a newline or the quote that opens the body, so '### Cause' and a mention of
-  # '## What happens now' in a sentence are no heading.
   # A line inside a fenced code block (``` or ~~~) is no heading: the headings are read from the text without its fences.
-  local hs=$'(^|\n|["\'])[ ]{0,3}##[[:space:]]+' he=$'[ \t]*(\n|$)' hc='' hd=$'(^|[^<])<<-?[ ]*[\'"]?[A-Za-z_][A-Za-z_0-9]*[\'"]?[ ]*\\)*[ ]*\n'
+  local hc='' hd=$'(^|[^<])<<-?[ ]*[\'"]?[A-Za-z_][A-Za-z_0-9]*[\'"]?[ ]*\\)*[ ]*\n'
   # A command with a here-document (`<<WORD` ending its line) holds its body as written: `\n` there is text, and a quote
   # ends nothing; so does a body file (read apart from the command). In an inline body a written `\n` in a `$'...'` quote
   # is a line break; elsewhere it is a backslash and an n, which starts or ends no fence and starts no heading (breaks);
@@ -315,7 +318,22 @@ no_cause() {
   fi
   hc=${hc//$'\002'/\\n}
   [ -z "$fc" ] || hc+=$'\n'$(unfenced 0 "" "$fc")
-  [[ $hc =~ ${hs}Cause${he} ]] && return 1
-  [[ $hc =~ ${hs}What\ happens\ now${he} || $ti = 1 ]] && return 0
-  grep -qiE "(^|[[:space:]])(--label|-l)(=|[[:space:]]+)?[\"']?([^[:space:]\"']*,)?bug([,\"'[:space:]]|\$)" <<<"$o"
+  FT_TEXT=$hc FT_TI=$ti FT_O=$o
+}
+# has_heading <title>: 0 when FT_TEXT has a `## <title>` heading: the line whole, exactly two hashes, at a line start (up
+# to three spaces before them, as Markdown allows), after a newline or the quote that opens the body, so '### Cause' and
+# a mention of '## What happens now' in a sentence are no heading.
+has_heading() {
+  local hs=$'(^|\n|["\'])[ ]{0,3}##[[:space:]]+' he=$'[ \t]*(\n|$)' t=${1// /\\ }
+  [[ $FT_TEXT =~ ${hs}${t}${he} ]]
+}
+# no_cause: 0 when the command filing (read by filing_read) files a fix issue with no `## Cause` section.
+no_cause() {
+  has_heading Cause && return 1
+  if has_heading 'What happens now' || [ "$FT_TI" = 1 ]; then return 0; fi
+  grep -qiE "(^|[[:space:]])(--label|-l)(=|[[:space:]]+)?[\"']?([^[:space:]\"']*,)?bug([,\"'[:space:]]|\$)" <<<"$FT_O"
+}
+# no_design: 0 when the command filing (read by filing_read) has a `## What to build` section and no `## Design` section.
+no_design() {
+  has_heading 'What to build' && ! has_heading Design
 }
