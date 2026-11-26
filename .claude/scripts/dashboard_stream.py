@@ -9,7 +9,7 @@ object dashboard.sh's conveyor() gives ({host, local, reachable, error, records}
 snapshots come from, null on one machine: /units takes the feed's test map only from its own machine), each record with main (its main
 checkout, as the host file names it: /units finds its own record's test map by it), readAt (when its
 snapshot began: the snapshotAt the host wrote in it, else this machine's clock less the line's took; data.js is dated when it is built, which can be after a change the snapshot
-did not read yet) and retried (the blocked cards its host's last retried line names: {card, issue, at}), plus `stream`: {live (every record's stream is up and its host's last snapshot worked), heardAt (the oldest of
+did not read yet) and retried (the blocked cards its host's last retried line names: {card, issue, at, held}), plus `stream`: {live (every record's stream is up and its host's last snapshot worked), heardAt (the oldest of
 the times each record's host was last heard from), since (when the stream went down; null while live), error (why it
 is down), writtenAt (when this file was written: every TICK seconds at least)}. After a line that changed something it
 has `dashboard.sh --publish` build data.js again from that and the slower parts the last cycle read, so a card's step
@@ -257,7 +257,8 @@ class Feed:
                 changed = True
             elif kind == 'retried' and isinstance(ev.get('cards'), list):
                 # The cards given back, read at once by the host: a snapshot can take long after a retry, and until
-                # it comes Needs you shows such a blocked card as retried (docs/board.md).
+                # it comes Needs you shows such a blocked card as retried, one held (held) as blocked, each with no
+                # Foreman's note (docs/board.md).
                 rec['retried'] = [c for c in ev['cards'] if isinstance(c, dict) and isinstance(c.get('card'), str)]
                 changed = True
             elif kind == 'error':

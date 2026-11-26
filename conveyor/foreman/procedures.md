@@ -9,3 +9,6 @@ A wake that a card has waited (or is still waiting) for main to change, or on an
 
 ## The pack not committed
 In a project's main checkout, run conveyor.sh setup pack-commit (with no answer: it reads the size entries' exempt paths from the pack, so do not gate it on a git status of fixed paths); on ok: there is nothing to do; on an ask: line, ask the owner by the picker "Commit the Conveyor pack (.conveyor/project.json) on <default branch> now?" (yes / no), with the change it printed; on yes run conveyor.sh setup pack-commit yes, on no the same with no; say what it printed. Never list a git command for the owner to run.
+
+## A blocked card you take
+When you take a blocked card (a hand run, a fix card, a picker to the owner), run `note <card> <what you do about it>` after the same path as the `ask <project>` commands, one short line, so /units and the Board show the card as yours and not as one that needs the owner. When the card waits on the owner's answer to your picker, run `note <card> --ask <the question>`: it stays with the cards that need the owner and says it waits for their answer. Write it again when what you do changes; a retry, a landing or a shut ends it.

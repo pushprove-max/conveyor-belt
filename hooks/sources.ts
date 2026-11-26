@@ -54,7 +54,10 @@ export type TimelineStep = {
 export type Times = { start: number | null; pickedAt: number | null; priorSec: number; totalSec: number | null }
 // A blocked card is off the belt: its reviews and its track (the step it stopped in is failed, with the seconds that
 // step ran) come with it here. parent: the issue whose card filed it as a follow-up (null for any other).
-export type Need = Card & Times & { yes: boolean; text: string; since: number | null; parent: number | null; reviews: Review[]; track: Track | null; metrics: Metrics | null }
+// The Foreman's note on a blocked card (the snapshot's foreman, foreman/note.sh): what it does about it, since when, and
+// ask: the card waits for the owner's answer to a picker.
+export type ForemanNote = { note: string; ask: boolean; since: number | null }
+export type Need = Card & Times & { yes: boolean; text: string; since: number | null; parent: number | null; reviews: Review[]; track: Track | null; metrics: Metrics | null; foreman?: ForemanNote | null }
 // The snapshot's track: the six steps Build, Review, Fix, Test, Land, Push, each done, now, skipped, failed or
 // todo with its measured seconds (Review and Fix with their rounds n, Review with the rule's of, Push with the
 // follow-ups filed). at is the step in progress (null on a card that has ended), label what it is doing, since when that
@@ -129,8 +132,9 @@ export type Push = {
   running: { since: number | null; sha: string; stage: string; pid: number | null; log: string; line: string; sec: number | null; stale: boolean } | null
   last: { at: number | null; by: string; started: boolean; why: string; sha: string; ok: boolean; ahead: number | null; check: string; log: string } | null
 }
-// own: the session's own project, whose cards carry no project name ('' or absent: none is).
-export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; belt: Belt[]; queue: Queued[] | null; order?: { repo: string; issue: number; umbrella: number | null }[]; queueMore: boolean; waits: Waiting[]; held: [string, number][]; badDeps?: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; todayEstimate?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
+// own: the session's own project, whose cards carry no project name ('' or absent: none is). foremanHas: the blocked
+// cards the Foreman works on (a note that is not a question to the owner), apart from needs.
+export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; foremanHas?: Need[]; belt: Belt[]; queue: Queued[] | null; order?: { repo: string; issue: number; umbrella: number | null }[]; queueMore: boolean; waits: Waiting[]; held: [string, number][]; badDeps?: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; todayEstimate?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
@@ -286,7 +290,7 @@ const heldCounts =(skipped: unknown, holding: unknown): Record<string, number> =
   if (n > 0) out.held = n
   return out
 }
-type Rec = { loop: Loop; needs: Need[]; belt: Belt[]; queue: Queued[] | null; order: { repo: string; issue: number; umbrella: number | null }[]; waits: Waiting[]; held: Record<string, number>; badDeps: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; todayEstimate: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
+type Rec = { loop: Loop; needs: Need[]; foremanHas: Need[]; belt: Belt[]; queue: Queued[] | null; order: { repo: string; issue: number; umbrella: number | null }[]; waits: Waiting[]; held: Record<string, number>; badDeps: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; todayEstimate: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
 const pushOf = (repo: string, h: any): Push => {
   const r = h?.pushing, l = h?.pushLast
   return {
@@ -296,13 +300,22 @@ const pushOf = (repo: string, h: any): Push => {
   }
 }
 // One record's snapshot. null: it is not the object `conveyor.sh snapshot` prints, so nothing of it is shown.
-export const parseRecord = (repo: string, json: unknown): Rec | null => {
+// retried: the cards the live feed's last retried line of the host names (given back by a retry or a Hold: a snapshot
+// can come long after it), whose Foreman's note that ended.
+export const parseRecord = (repo: string, json: unknown, retried: string[] = []): Rec | null => {
   let j: any = json
   if (typeof json === 'string') try { j = JSON.parse(json) } catch { return null }
   const lists = [j?.needsYou?.waiting, j?.needsYou?.blocked, j?.belt, j?.landed]
   if (!lists.every(l => Array.isArray(l) && l.every((x: unknown) => x && typeof x === 'object')) || typeof j.queue !== 'object' || !j.queue || typeof j.cost !== 'object' || !j.cost) return null
   const card = (x: any): Card => ({ repo, card: one(x.card), issue: num(x.issue) ?? 0, title: one(x.title), name: one(x.name) })
   const next = Array.isArray(j.queue.next) ? j.queue.next.filter((x: unknown) => x && typeof x === 'object') : null
+  // A blocked card with the Foreman's note: one it works on is the Foreman's (foremanHas), its note in place of the
+  // block reason; one that waits for the owner's answer stays in needs with its note.
+  const noteOf = (f: any): ForemanNote | null => (f && typeof f === 'object' && one(f.note) ? { note: one(f.note), ask: f.ask === true, since: time(f.since) } : null)
+  const blocked = j.needsYou.blocked.map((x: any): Need => {
+    const foreman = retried.includes(one(x.card)) ? null : noteOf(x.foreman)
+    return { ...card(x), ...timesOf(x), yes: false, text: one(x.reason), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics), foreman }
+  })
   return {
     loop: { repo, state: one(j.health?.state), reason: one(j.health?.reason), loop: typeof j.health?.loop === 'boolean' ? j.health.loop : null, building: num(j.health?.building),
       ...(j.recordsNow && typeof j.recordsNow === 'object' ? { behind: true, now: num(j.recordsNow.building), waiting: num(j.recordsNow.waitingCount) ?? num(j.health?.waitingCount) }
@@ -310,8 +323,9 @@ export const parseRecord = (repo: string, json: unknown): Rec | null => {
       onBelt: j.belt.length, landing: j.belt.filter((x: any) => x?.offCap === true || x?.step === 'push' || x?.step === 'issue').length },
     needs: [
       ...j.needsYou.waiting.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: true, text: one(x.sentence), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
-      ...j.needsYou.blocked.map((x: any): Need => ({ ...card(x), ...timesOf(x), yes: false, text: one(x.reason), since: time(x.since), parent: parentOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics) })),
+      ...blocked.filter((n: Need) => !n.foreman || n.foreman.ask),
     ],
+    foremanHas: blocked.filter((n: Need) => n.foreman && !n.foreman.ask),
     belt: j.belt.map((x: any): Belt => ({ ...card(x), ...timesOf(x), step: one(x.step), review: num(x.review), of: num(x.of), stepAt: time(x.stepAt), model: one(x.model) || null, tokens: num(x.tokens?.claude) === null || num(x.tokens?.codex) === null ? null : x.tokens.claude + x.tokens.codex, ...pricedOf(x), reading: x.reading === true, atEnd: x.atEnd === true, parent: parentOf(x), umbrella: umbrellaOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics), live: liveOf(x.live), waitsOn: x.waitsOn && typeof x.waitsOn === 'object' && one(x.waitsOn.card) ? card(x.waitsOn) : null })),
     queue: next && next.map((x: any): Queued => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), priority: one(x.priority), followup: x.followup === true, retried: x.retried === true, parent: parentOf(x), umbrella: umbrellaOf(x), room: one(x.room) })),
     // queue.order is the whole pick order; queue.next stops at ten. pickCounts needs the whole to tell a waiting part from one that is ready.
@@ -392,16 +406,18 @@ export const boardOf = (f: Fetched | null, cut: string | null = null): Pick<Stat
 
 // The dashboard collector's live feed: its units-feed.json (stream.json with each snapshot cut to what /units draws),
 // which it rewrites with each change Conveyor's host streams and at least every 10 s.
-// `{host, local, ssh, records: [{repo, main, snap}], stream: {live, heardAt, error}}` (main: the record's main checkout,
-// empty when the feed names none; local: true on one machine; ssh: the ssh target its snapshots come from, empty on one
-// machine or from a Board of an older engine); null when the file is not that, or holds no snapshot of every record yet.
-export type Feed = { host: string; local: boolean; ssh: string; records: { repo: string; main: string; json: unknown }[]; live: boolean; heardAt: number | null; error: string }
+// `{host, local, ssh, records: [{repo, main, snap, retried}], stream: {live, heardAt, error}}` (main: the record's main checkout,
+// empty when the feed names none; retried: the cards its host's last retried line names, held or not, [{card, ...}]; local: true on
+// one machine; ssh: the ssh target its snapshots come from, empty on one machine or from a Board of an older engine);
+// null when the file is not that, or holds no snapshot of every record yet.
+export type Feed = { host: string; local: boolean; ssh: string; records: { repo: string; main: string; json: unknown; retried?: string[] }[]; live: boolean; heardAt: number | null; error: string }
 export const parseStream = (text: string): Feed | null => {
   let j: any
   try { j = JSON.parse(text) } catch { return null }
   if (!j || typeof j !== 'object' || !Array.isArray(j.records) || !j.records.length || !j.stream || typeof j.stream !== 'object') return null
   if (!j.records.every((r: any) => r && typeof r === 'object' && typeof r.repo === 'string')) return null
-  return { host: one(j.host), local: j.local === true, ssh: one(j.ssh), records: j.records.map((r: any) => ({ repo: r.repo, main: typeof r.main === 'string' ? r.main : '', json: r.snap })), live: j.stream.live === true, heardAt: time(j.stream.heardAt), error: one(j.stream.error) }
+  return { host: one(j.host), local: j.local === true, ssh: one(j.ssh), records: j.records.map((r: any) => ({ repo: r.repo, main: typeof r.main === 'string' ? r.main : '', json: r.snap,
+    retried: Array.isArray(r.retried) ? r.retried.flatMap((x: any) => (x && typeof x === 'object' && one(x.card) ? [one(x.card)] : [])) : [] })), live: j.stream.live === true, heardAt: time(j.stream.heardAt), error: one(j.stream.error) }
 }
 // The board from the live feed, as from a fetch; a feed that is down says so under it, with when the host was last heard.
 // own: the session's own project, as the fetch names it. testMap: the snapshot's test map (its testMap, the map's state
@@ -433,9 +449,9 @@ export const boardOfFeed = (f: Feed, own: string, mapRec: string, mapHost: strin
 // The cards of own, the session's own project, carry no project name (laneCard finds the Fast lane's card among them);
 // every other record's carry its repo. With no own (this checkout is no record's), every card carries its name.
 // live: the board is a live feed's whose stream is up (its file fresh, which the reader checks).
-const boardFrom = (name: string, records: { repo: string; json: unknown }[], own: string, live = false): Pick<State, 'snap' | 'note' | 'notes' | 'host'> => {
+const boardFrom = (name: string, records: { repo: string; json: unknown; retried?: string[] }[], own: string, live = false): Pick<State, 'snap' | 'note' | 'notes' | 'host'> => {
   const none = (why: string) => ({ snap: null, note: `${CANNOT} (${why})`, notes: [] as string[], host: name })
-  const read = records.map(r => ({ repo: r.repo, rec: parseRecord(own && r.repo === own ? '' : r.repo, r.json) }))
+  const read = records.map(r => ({ repo: r.repo, rec: parseRecord(own && r.repo === own ? '' : r.repo, r.json, r.retried) }))
   const recs = read.map(r => r.rec).filter((r): r is Rec => !!r)
   if (!recs.length) return none(`${name} gave no snapshot`)
   const notes = read.filter(r => !r.rec).map(r => `units: the ${r.repo} snapshot cannot be read`)
@@ -454,6 +470,8 @@ const boardFrom = (name: string, records: { repo: string; json: unknown }[], own
       loops: read.flatMap(r => (r.rec ? [{ ...r.rec.loop, repo: r.repo }] : [])),
       // Your yes first, then the blocked cards; in each, the one waiting longest first.
       needs: recs.flatMap(r => r.needs).sort((a, b) => Number(b.yes) - Number(a.yes) || at(a.since) - at(b.since)),
+      // The blocked cards the Foreman has, the one blocked longest first.
+      foremanHas: recs.flatMap(r => r.foremanHas).sort((a, b) => at(a.since) - at(b.since)),
       belt: recs.flatMap(r => r.belt),
       // The records' pick orders as one list: each record's own order stands (see mergeQueues).
       queue: queues.length ? mergeQueues(queues) : null,
@@ -523,7 +541,7 @@ export const nameOf = (c: Ref) => (c.issue || c.name ? `${ref(c)}${titleOf(c) ? 
 // The round in progress, as the track names it ("review 2 of 3", "fix after review 1", "tests", "landing"). A review
 // past the rule's count (after a landing conflict or a test fix) is named by its number alone.
 export const stepOf = (b: Belt) => b.track?.label || (b.step === 'review' && b.review ? `review ${b.review}${b.of && b.review <= b.of ? ` of ${b.of}` : ''}` : b.step || 'step unknown')
-const whatOf = (n: Need) => (n.yes ? `your yes: ${n.text || 'a visible change'}` : `blocked: ${n.text || 'no reason recorded'}`)
+const whatOf = (n: Need) => (n.yes ? `your yes: ${n.text || 'a visible change'}` : n.foreman?.ask ? `waits for your answer: ${n.foreman.note}` : `blocked: ${n.text || 'no reason recorded'}`)
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 // Dollars priced, `~` before them when a step is priced as an estimate, and the steps left out for having no price
 // after them: `$4.12`, `~$4.12`, `$4.10 + 1 step not priced`. The priced part is never shown as the whole. short, for
@@ -946,30 +964,55 @@ export const headerModel = (s: State, snap: Snap, w: number): Line[] => {
   ]
 }
 
+// One card of NEEDS YOU or FOREMAN HAS IT: its mark, name and age (right), and what it waits on (what). Short: one line,
+// the name kept to under half of it so what it waits on shows. Full: that whole, on its own line, then the card's details.
+// The step it stopped in and how long that step ran: the card is off the belt, so it is said here.
+const needLines = (n: Need, w: number, short: boolean, mark: Seg, right: Seg[], what: string): Line[] => {
+  const name: Seg = { t: nameOf(n), c: C.name, b: true }
+  const stopped = stoppedOf(n.track)
+  // Short, with the Foreman's note: the note before the step, as the line is cut at its end and the note (a question
+  // to the owner, or what the Foreman does) is what the line is read for.
+  const step: Seg[] = stopped ? [{ t: ` · ${stopped}`, c: C.bad }] : [], said: Seg[] = [{ t: ` · ${what}` }]
+  if (short) {
+    const one = spread([mark, { t: ' ' }, ...fitWidth([name], Math.max(8, Math.floor(w * 0.45))), ...(n.foreman ? [...said, ...step] : [...step, ...said])], right.length ? right : null, w)
+    // A note the line cuts (a 32-column dock): the name and age on the line, then the note whole, wrapped at its
+    // spaces under it, then the step: what the Foreman does, or that the card waits for an answer, is never cut.
+    if (!n.foreman || plain(one).includes(` · ${what}`)) return [one]
+    return [item(mark, name, [], right, w), ...wrapParts(what.split(' '), w, '    ', ' ', {}), ...(stopped ? [fitWidth([{ t: `    ${stopped}`, c: C.bad }], w)] : [])]
+  }
+  return [
+    item(mark, name, [], right, w),
+    [{ t: `    ${what}` }],
+    ...(stopped ? [[{ t: `    ${stopped}`, c: C.bad }] as Line] : []),
+    // Its six steps, as on the belt; then one line a finished review, and the judge on the latest.
+    ...(n.track ? trackLines(n.track, w, '   ') : []),
+    ...n.reviews.map((r): Line => fitWidth([{ t: `    ${reviewText(r)}`, c: r.verdict === 'GO' ? C.ok : C.you }], w)),
+    ...judgeLine(n.reviews, w, '    '),
+    ...keptLine(n.track, w, '    '),
+    ...metricsLines(n.metrics, w),
+  ]
+}
 export const needsModel = (s: State, snap: Snap, w: number, short: boolean): Line[] => snap.needs.length ? [
   head('NEEDS YOU', snap.needs.length, C.you),
   ...snap.needs.flatMap((n): Line[] => {
-    const mark: Seg = n.yes ? { t: '◆', c: C.you } : { t: '✗', c: C.bad }
     const age = since(n.since, s.now)
-    const right: Seg[] = age ? [{ t: age, c: n.yes ? C.you : C.bad }] : []
-    const name: Seg = { t: nameOf(n), c: C.name, b: true }
-    // Short: one line, the name kept to under half of it so the reason shows. Full: the reason whole, on its own line.
-    // The step it stopped in and how long that step ran: the card is off the belt, so it is said here.
-    const stopped = stoppedOf(n.track)
-    if (short) return [spread([mark, { t: ' ' }, ...fitWidth([name], Math.max(8, Math.floor(w * 0.45))), ...(stopped ? [{ t: ` · ${stopped}`, c: C.bad }] : []), { t: ` · ${whatOf(n)}` }], right.length ? right : null, w)]
-    return [
-      item(mark, name, [], right, w),
-      [{ t: `    ${whatOf(n)}` }],
-      ...(stopped ? [[{ t: `    ${stopped}`, c: C.bad }] as Line] : []),
-      // Its six steps, as on the belt; then one line a finished review, and the judge on the latest.
-      ...(n.track ? trackLines(n.track, w, '   ') : []),
-      ...n.reviews.map((r): Line => fitWidth([{ t: `    ${reviewText(r)}`, c: r.verdict === 'GO' ? C.ok : C.you }], w)),
-      ...judgeLine(n.reviews, w, '    '),
-      ...keptLine(n.track, w, '    '),
-      ...metricsLines(n.metrics, w),
-    ]
+    return needLines(n, w, short, n.yes ? { t: '◆', c: C.you } : { t: '✗', c: C.bad }, age ? [{ t: age, c: n.yes ? C.you : C.bad }] : [], whatOf(n))
   }),
 ] : [[{ t: 'NEEDS YOU', c: C.head, b: true }, { t: '  nothing', d: true }]]
+
+// FOREMAN HAS IT: the blocked cards the Foreman works on, each with its note and the note's age in place of the block
+// reason, and the same details as in NEEDS YOU, apart from it: they wait for the Foreman, not for the owner. No lines
+// when there is none.
+export const foremanHasModel = (s: State, snap: Snap, w: number, short: boolean): Line[] => {
+  const mine = snap.foremanHas ?? []
+  return mine.length ? [
+    head('FOREMAN HAS IT', mine.length),
+    ...mine.flatMap((n): Line[] => {
+      const age = since(n.foreman?.since ?? null, s.now)
+      return needLines(n, w, short, { t: '●', c: C.work }, age ? [{ t: age, c: C.work }] : [], `Foreman: ${n.foreman?.note ?? ''}`)
+    }),
+  ] : []
+}
 
 // A card's reference on its row (titled): `repo#12 `, or its name.
 const refText = (c: Ref) => (c.issue ? `${c.repo}#${c.issue} ` : c.name ? `${named(c)} ` : '')
@@ -1306,6 +1349,7 @@ const board = (s: State, snap: Snap, w: number, short: boolean, frame: number): 
   ...testMapModel(s, w),
   ...suitesModel(s, snap, w).map(l => (short ? fitWidth(l, w) : l)), [],
   ...needsModel(s, snap, w, short), [],
+  ...(snap.foremanHas?.length ? [...foremanHasModel(s, snap, w, short), []] : []),
   ...beltModel(s, snap, w, short, frame), ...pushLines(s, snap, w, ' '), [],
   ...queueModel(snap, w), [],
   ...(snap.deploy.length ? [...deployModel(s, snap, w), []] : []),
@@ -1600,7 +1644,8 @@ const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean
     ] : []),
     ...engineModel(s, w),
     ...suitesModel(s, snap, w).map(l => fitWidth(l, w)),
-    ...(snap.needs.length ? [[], ...needsModel(s, snap, w, true)] : []), [],
+    ...(snap.needs.length ? [[], ...needsModel(s, snap, w, true)] : []),
+    ...(snap.foremanHas?.length ? [[], ...foremanHasModel(s, snap, w, true)] : []), [],
     ...matrixModel(s, snap, w), [],
     ...activityModel(s, snap, w, frame), [],
     ...pickModel(snap, w),
@@ -1616,12 +1661,15 @@ const paneBoard = (s: State, snap: Snap, w: number, frame: number, open: boolean
 // open: Machine details is opened.
 export const paneModel = (s: State, w: number, frame: number, open = false): Line[] => (s.snap ? paneBoard(s, s.snap, w, frame, open) : [...noteLines(s.note, w), ...foremanModel(s, w), ...engineModel(s, w), ...testMapModel(s, w)])
 
-// What the toasts compare between two polls: the cards that need you and the cards that landed, by card id.
-export type Seen = { needs: Map<string, string>; landed: Map<string, string> }
+// What the toasts compare between two polls: the cards that need you, the blocked cards the Foreman has and the cards
+// that landed, by card id.
+export type Seen = { needs: Map<string, string>; foreman: Set<string>; landed: Map<string, string> }
 export const seenOf = (snap: Snap): Seen => ({
   needs: new Map(snap.needs.map(n => [`${n.repo}/${n.card}`, `${ref(n)} ${n.yes ? 'needs your yes' : 'is blocked'}`])),
+  foreman: new Set((snap.foremanHas ?? []).map(n => `${n.repo}/${n.card}`)),
   landed: new Map(snap.landed.map(l => [`${l.repo}/${l.card}`, `${ref(l)} ${l.closed ? 'closed as already fixed' : 'landed'}`])),
 })
-// The first poll only sets the baseline: nothing that was already there when the session began is a toast.
+// The first poll only sets the baseline: nothing that was already there when the session began is a toast. A card the
+// Foreman had that comes back to the cards that need you (its note ended) was blocked already: no toast.
 export const toasts = (prev: Seen | null, cur: Seen): string[] =>
-  prev ? [...[...cur.needs].filter(([k]) => !prev.needs.has(k)), ...[...cur.landed].filter(([k]) => !prev.landed.has(k))].map(([, text]) => text) : []
+  prev ? [...[...cur.needs].filter(([k]) => !prev.needs.has(k) && !prev.foreman.has(k)), ...[...cur.landed].filter(([k]) => !prev.landed.has(k))].map(([, text]) => text) : []

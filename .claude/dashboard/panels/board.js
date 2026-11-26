@@ -10,7 +10,9 @@
 // Move down (the keyboard: arrow keys on a card). Each of these, and Pause <project> after current and Resume <project>, acts on one click
 // and the line that says it was done has Undo, which sends the opposite change. Stop now, which cannot be undone, acts
 // on a second click that names what it ends. The Needs you column shows the same cards as Overview's Needs you panel,
-// each leading with why it stopped, as a link into that panel, the one place they are answered. Every change is one
+// each leading with why it stopped, as a link into that panel, the one place they are answered. A blocked card the
+// Foreman has (its note: foreman/note.sh) leads with the note and its age in place of why, under "Foreman has it",
+// after the cards that wait for the owner; one that waits for the owner's answer says so. Every change is one
 // POST control to the page's own host, which runs it on the Conveyor host; the record the host answers with is shown
 // at once, and the loop's own state replaces it in about a minute. Cards glide to their new place when the board
 // changes; never under reduced motion.
@@ -591,7 +593,13 @@
     const raw = unshaped(), filled = el.querySelector('.board').dataset.filled === '1';
     COLS.forEach(([k]) => {
       const col = el.querySelector(`.board-col[data-col="${k}"]`), note = col.querySelector('.warn-note');
-      const got = shape(k, raw[k]);
+      // Needs you: the cards the Foreman has (its note, foremanHas) after the cards that wait for the owner, under a
+      // heading of their own (data-heading: not a row, so "Show more" focuses the first new card, not it); each part
+      // keeps the column's sort.
+      const sorted = shape(k, raw[k]);
+      const got = k === 'needs' && sorted ? sorted.filter((x) => !foremanHas(x)).concat(sorted.filter(foremanHas)) : sorted;
+      const heading = () => { const x = h('li', 'board-apart', 'Foreman has it'); x.dataset.heading = ''; return x; };
+      const apart = (xs) => xs.flatMap((x, i) => (k === 'needs' && foremanHas(x) && (i === 0 || !foremanHas(xs[i - 1])) ? [heading(), card(k, x)] : [card(k, x)]));
       note.hidden = got !== null;
       note.textContent = got === null ? (S.d.issuesError || 'GitHub did not list the open issues.') : '';
       // A column shows its first PAGE cards (Landed today its first LANDED), then "Show PAGE more" and "Show all (N)";
@@ -604,7 +612,7 @@
         // Landed today pages by landing: the cards of one batch are one entry, so a page never cuts a batch short.
         const rows = k === 'landed' ? landings(got || []) : got || [];
         const none = () => (filtering() && raw[k] && raw[k].length ? unmatched('li', UNMATCHED[k]) : k === 'queue' ? queueEmpty(raw.held) : h('li', 'board-empty', EMPTY[k]));
-        more = cx(PART).more(k, rows, (xs) => { list.replaceChildren(...(xs.length || got === null ? xs.map((x) => (Array.isArray(x) ? landing(x) : card(k, x))) : [none()])); lock(list); }, k === 'landed' ? LANDED : PAGE);
+        more = cx(PART).more(k, rows, (xs) => { list.replaceChildren(...(xs.length || got === null ? (k === 'landed' ? xs.map((x) => (Array.isArray(x) ? landing(x) : card(k, x))) : apart(xs)) : [none()])); lock(list); }, k === 'landed' ? LANDED : PAGE);
       }
       const old = col.querySelector('.show-more');
       if (old) old.remove();
@@ -682,7 +690,7 @@
   Object.assign(shared, window.DASH_APP.use('board-filters', shared));
   Object.assign(shared, window.DASH_APP.use('board-push', shared));
   Object.assign(shared, window.DASH_APP.use('board-cards', shared));
-  const { pushTest, split, slicesOf, parents, chipsOf, rulesLink, card, landings, landing, filtering, shape, viewBar,
+  const { pushTest, split, slicesOf, parents, chipsOf, rulesLink, card, landings, landing, foremanHas, filtering, shape, viewBar,
     EMPTY, UNMATCHED, queueEmpty, LANDED, unshaped, groupOf, groupTitle, groupRank, unmatched } = shared;
 
   PANELS.forEach(([id, title]) => window.DASH_APP.panel({

@@ -282,7 +282,10 @@ PANELS_JQ='
        review: [$s.belt[] | select(.landed != true and .step == "review") | {card, issue, name: (.name // null), title, review, of, gaveWay: (.gaveWay // null), gaveWayFixing: (.gaveWayFixing == true), stepAt, usd, estimate: (.estimate == true), reading, atEnd: (.atEnd == true),stays: stays, doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0), beyond: (.beyond // null)}] | few($r),
        waiting: [$s.needsYou.waiting[] | {card, issue, name: (.name // null), title, sentence, since, doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0)}] | few($r),
        # Its track and reviews too: the card leads with why it failed (the tests that failed, the NO-GO reviews), as in Needs you.
-       blocked: [$s.needsYou.blocked[] | {card, issue, name: (.name // null), title, reason, tail, since, track: (.track // null), reviews: (.reviews // null), doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0)}] | few($r),
+       # And the note of the Foreman on it (foreman: {note, ask, since}, conveyor.sh snapshot), as in Needs you: none on a
+       # card the live feed says its host gave back (retried), as the retry ended it before the next snapshot comes.
+       blocked: [$s.needsYou.blocked[] | {card, issue, name: (.name // null), title, reason, tail, since,
+         foreman: (if .card | IN($r.retried | arrays | .[] | objects | .card) then null else .foreman // null end), track: (.track // null), reviews: (.reviews // null), doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0)}] | few($r),
        landed: [$s.landed[] | {card, issue, name: (.name // null), title, step, time, usd, estimate: (.estimate == true), reviews, batch: (.batch // null), doneWhen: (.doneWhen // null), split: (.split // null), seats: (.seats // null), stalls: (.stalls // 0)}] | few($r),
        today: {landed: $s.landedCount, usd: $s.landedUsd, estimate: (($s.landedEstimate // 0) > 0)},
        unpushed: ($s.health.unpushed // null | if . == null then null else map({card, issue, name: (.name // null), since}) | few($r) end), fullTest: ($s.fullTest // null),
@@ -377,8 +380,9 @@ PANELS_JQ='
         kinds: $kinds, entries: ($kinds | map(.from as $f | {key: .kind, value: ($R // [] | map(. as $r | .snap | (try getpath($f) catch null)
           | (if type == "array" then .[] else . end) | objects | tag($r) | {repo, url, card, issue, name: (.name // null), title, reason, since}))}) | from_entries),
         decisions: $dec.decisions, decisionsError: $dec.error, retrying: $retrying,
-        # The cards the host of each record gave back (the retried line of its stream): a blocked card among them waits for its turn.
-        retried: ($R // [] | map(. as $r | .retried | arrays | .[] | objects | select(.card | type == "string") | {repo: $r.repo, card, issue}))}} end),
+        # The cards the host of each record gave back (the retried line of its stream): a blocked card among them waits for its turn,
+        # but one a Hold gave back (held true), which waits for its release.
+        retried: ($R // [] | map(. as $r | .retried | arrays | .[] | objects | select(.card | type == "string") | {repo: $r.repo, card, issue, held: (.held == true)}))}} end),
    belt: (if $R == null then {error: $cerr, data: null} else {error: null, data: {cards: [$belt[] | select((pushFailed and (. as $c | any($landed[]; .repo == $c.repo and .card == $c.card))) | not)],
         cap: ($R | cardcap),
         # building: while a record is behind its card records, the cards building now: loop.json'"'"'s count for each

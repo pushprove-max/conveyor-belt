@@ -22,12 +22,12 @@ ends). Every line has `type` and `at` (when it was printed):
             Every card with a running step is in it; one whose step ended is left out. At most one a second, and only
             when something in it changed, and one right after every snapshot (its reader drops the live fields with
             each snapshot, which holds them as they were when it began).
-  retried   {cards: [{card, issue, at}]}: the blocked cards `retry` gave back, the newest RETRIED_KEEP of retried.jsonl's
-            last RETRIED_TAIL bytes (at: retriedAt, null when not recorded), but those whose issue the control
-            record holds: Hold gives a card back as retry does, and a held issue waits for its release, not its
-            turn. Sent at the start and whenever retried.jsonl or control.json changes, before the snapshot that
-            follows: after a retry rewrote the card records, that snapshot reads them whole and can take long, and until it comes the Board shows a given-back card as
-            retried, not as blocked.
+  retried   {cards: [{card, issue, at, held}]}: the blocked cards `retry` gave back, the newest RETRIED_KEEP of
+            retried.jsonl's last RETRIED_TAIL bytes (at: retriedAt, null when not recorded); held: true for one whose
+            issue the control record holds: Hold gives a card back as retry does, and a held issue waits for its
+            release, not its turn, but its Foreman's note (conveyor.sh foreman note) ended all the same. Sent at the start and whenever retried.jsonl or control.json changes, before the snapshot that
+            follows: after a retry rewrote the card records, that snapshot reads them whole and can take long, and until it comes the Board shows a card
+            retry gave back as retried, not as blocked, and one held as blocked, with no Foreman's note.
   beat     nothing more, every BEAT seconds: the stream is alive though nothing changed.
   error     {error}: a snapshot failed (the end of what it said); the stream goes on, and the next change tries again.
 
@@ -326,9 +326,9 @@ class Stream:
                 x = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(x, dict) and x.get('step') == 'blocked' and isinstance(x.get('card'), str) \
-                    and not (isinstance(x.get('issue'), int) and x['issue'] in held):
-                cards.append({'card': x['card'], 'issue': x.get('issue'), 'at': x.get('retriedAt')})
+            if isinstance(x, dict) and x.get('step') == 'blocked' and isinstance(x.get('card'), str):
+                cards.append({'card': x['card'], 'issue': x.get('issue'), 'at': x.get('retriedAt'),
+                              'held': isinstance(x.get('issue'), int) and x['issue'] in held})
         cards = cards[-RETRIED_KEEP:]
         if cards != self.sent_retried:
             self.sent_retried = cards

@@ -6,8 +6,10 @@
 // it is in one <details> under them (blockedRow). It has Retry and Close, each sent as POST /control retry or close on
 // a second click (Retry costs a new build; Close cannot be undone, and says so), and Hold (POST /control unblock: one
 // click with Undo, a release). A card whose reason has a fix Conveyor runs itself (FIXES) also has Fix, which says
-// what it does. The line above its buttons names the step its kind of block takes (STEPS). One its host already gave back (retried) shows "Retried, waiting for its turn", with no
-// buttons. Its part:
+// what it does. The line above its buttons names the step its kind of block takes (STEPS). One its host already gave back by a retry (retried, not held) shows "Retried, waiting for its
+// turn", with no buttons. A blocked card the Foreman has (its note, foreman/note.sh) is marked "Foreman has it", says the note and its
+// age above why it failed, and comes after the cards that wait for the owner; one that waits for the owner's answer
+// says so. Its part:
 // {cards: {waiting, blocked} | null, cardsError, decisions | null, decisionsError, retrying, retried, kinds, entries,
 // behind ([{repo, at}]: a project whose snapshot is behind its card records, whose waiting and blocked cards are then
 // the ones its records hold blocked now: dashboard.sh; a card only the records hold has fromRecords true, and no track or
@@ -95,6 +97,11 @@ const pricesOf = (d) => (Array.isArray(d.prices) ? d.prices.filter((x) => x && A
 // The kinds of Needs you, in order (kinds: .claude/scripts/dashboard_needs.json, the list the Foreman watcher reads too), each
 // a group here. A kind with a row of its own below reads its own part; any other (one added to the list later) shows
 // its entries (entries[kind]), so no kind is on the list and missing here.
+// The Foreman's note on a blocked card (foreman: {note, ask, since}, which the snapshot gives while the Foreman's
+// session that wrote it lives and the card stays blocked: foreman/note.sh), else null. foremanHas: the Foreman works on
+// the card (a note that is not a question to the owner): its row says so, and comes after the cards that wait for the owner.
+const foremanOf = (c) => (c && c.foreman && typeof c.foreman === 'object' && typeof c.foreman.note === 'string' ? c.foreman : null);
+const foremanHas = (c) => { const f = foremanOf(c); return !!f && f.ask !== true; };
 const kindsOf = (d) => (Array.isArray(d.kinds) ? d.kinds.filter((k) => k && typeof k.kind === 'string' && typeof k.title === 'string') : []);
 const OWN = { tests: testsOf, engines: enginesOf, testRules: testRulesOf, prices: pricesOf, before: beforeOf, pipeline: pipelineOf, farDeps: farDepsOf,
   waiting: (d) => (d.cards ? d.cards.waiting : []), blocked: (d) => (d.cards ? d.cards.blocked : []) };
@@ -143,12 +150,30 @@ window.DASH_APP.panel({
     }
     // A blocked card its host already gave back (retried: the record's retried lines, read at once, before the
     // snapshot that drops the card) waits for its new card: it is drawn anew, with no buttons, until that snapshot.
-    const retried = new Set((Array.isArray(d.retried) ? d.retried : []).filter((x) => x && typeof x.card === 'string').map((x) => `${x.repo}\n${x.card}`));
+    // One a Hold gave back (held: its issue held) waits for its release, not its turn, and is not shown as retried.
+    const back = (Array.isArray(d.retried) ? d.retried : []).filter((x) => x && typeof x.card === 'string');
+    const retried = new Set(back.filter((x) => x.held !== true).map((x) => `${x.repo}\n${x.card}`));
+    const given = new Set(back.map((x) => `${x.repo}\n${x.card}`));
     const isRetried = (c) => retried.has(`${c.repo}\n${c.card}`);
+    // The retry and the Hold end the Foreman's note on the card (conveyor.sh foreman note), so a card given back shows
+    // none, and is not grouped by the note, before the snapshot that drops it comes.
+    const isGiven = (c) => given.has(`${c.repo}\n${c.card}`);
+    const noteOf = (c) => (isGiven(c) ? null : foremanOf(c));
+    const hasNote = (c) => !isGiven(c) && foremanHas(c);
+    // The row's key holds the note as it was before a Hold (keyNote), so the row held keeps its node, with the Undo of
+    // the Hold (a row drawn anew loses it), and its note is taken off in place (heldNote, at each draw).
+    const keyNote = (c) => (isRetried(c) ? null : foremanOf(c));
+    const foremanChip = () => { const x = ctx.chip('Foreman has it', 'info'); x.dataset.foreman = ''; return x; };
+    const heldNote = (li, c) => {
+      if (!isGiven(c)) return;
+      li.classList.remove('is-foreman');
+      li.querySelectorAll(':scope > .foreman-note').forEach((p) => p.remove());
+      li.querySelectorAll(':scope > .row-main > .chip[data-foreman]').forEach((x) => x.replaceWith(ctx.chip('Blocked', 'bad')));
+    };
     // The blocked cards whose <details> (.block-more) the owner left open: a row whose key changes (its card retried,
     // or the whole card read after its records) is drawn anew, and opens it again (blockedRow).
     const opened = new Set(Array.from(el.querySelectorAll('li[data-card]'), (li) => (li.querySelector(':scope > details.block-more[open]') ? li.dataset.card : null)).filter(Boolean));
-    const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, prices: (x) => `prices:${x.repo}:${x.models.join(',')}`,before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}${c.fromRecords === true ? ':records' : ''}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}${c.fromRecords === true ? ':records' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
+    const keyOf = { tests:(x) => `tests:${x.repo}`, engines: (x) => `engine:${x.repo}@${x.commit}`, testRules: (x) => `testrules:${x.repo}@${x.time}`, prices: (x) => `prices:${x.repo}:${x.models.join(',')}`,before: (x) => `before:${x.repo}#${x.issue}`, pipeline: (x) => `pipeline:${x.repo}#${x.issue}`, farDeps: (x) => `fardep:${x.repo}#${x.issue}:${x.ref}`, waiting: (c) => `waiting:${c.card}${c.fromRecords === true ? ':records' : ''}`, blocked: (c) => `blocked:${c.card}${isRetried(c) ? ':retried' : ''}${keyNote(c) ? `:foreman:${keyNote(c).ask === true}@${keyNote(c).since}\n${keyNote(c).note}` : ''}${c.fromRecords === true ? ':records' : ''}`, decisions: (x) => `decision:${x.repo}:${x.id}@${x.askedAt}` };
     const items = itemsOf(d);
     // An entry of a kind with no row of its own (entryRow) is drawn once for its key, so the key holds its title and
     // reason: an entry whose text changes under the same since (the counts of a Pick settings decision) is drawn anew.
@@ -169,7 +194,7 @@ window.DASH_APP.panel({
       const head = h('div', 'row-main');
       const again = kind === 'blocked' && !c.push && isRetried(c);
       head.append(ctx.issueLink(c), h('span', 'title', c.title || 'untitled'), kind === 'waiting' ? ctx.chip('Waiting for your yes', 'warn')
-        : again ? ctx.chip('Retried, waiting for its turn', 'quiet') : ctx.chip('Blocked', 'bad'));
+        : again ? ctx.chip('Retried, waiting for its turn', 'quiet') : kind === 'blocked' && hasNote(c) ? foremanChip() : ctx.chip('Blocked', 'bad'));
       const meta = h('p', 'row-meta');
       meta.append(ctx.tag(c.repo), ctx.since(c.since, ' ago'));
       const n = c.issue > 0 ? `#${c.issue}` : 'its issue';
@@ -221,7 +246,16 @@ window.DASH_APP.panel({
       const does = h('p', 'hint retry-does', c.push && c.check ? `Land a fix for ${c.check} on main. It does not retry until main moves. Then Conveyor pushes again by itself if Push on landing is on. If it is off, use Push now.`
         : c.push ? 'Conveyor pushes again by itself when the cause has a fix. You do not need to retry.'
           : again ? `${n} is back in the queue. A new card builds it in its turn.` : `Retry puts ${n} back in the queue, and a new card builds it in its turn.`);
-      li.append(head, lead);
+      // The Foreman's note and its age, above why the card failed: "Foreman: <note>", or "Waits for your answer: <note>".
+      const f = noteOf(c);
+      li.classList.toggle('is-foreman', hasNote(c));
+      li.append(head);
+      if (f) {
+        const p = h('p', `reason foreman-note${f.ask === true ? ' is-ask' : ''}`, f.ask === true ? `Waits for your answer: ${f.note}` : `Foreman: ${f.note}`);
+        p.append(' · ', ctx.since(f.since, ' ago'));
+        li.append(p);
+      }
+      li.append(lead);
       const more = h('details', 'block-more');
       more.append(h('summary', null, 'The full reason and every step'));
       if (rest) more.append(rest);
@@ -643,8 +677,8 @@ window.DASH_APP.panel({
       if (key === 'waiting' && errors.waiting) { if (!restart) warn.after(ctx.restartButton()); } else if (restart) restart.remove();
       g.hidden = items[key].length === 0 && !errors[key];
       // A new item draws the eye once: the mark goes with the next change of this panel's data.
-      // A card first drawn from its records (key ':records') is drawn anew once the snapshot gives the whole card, and
-      // list() removes the old row: the focus (a link, a field or a button) and a button clicked once (data-armed) go
+      // A card's row whose key changes is drawn anew (first drawn from its records, key ':records', then the whole card;
+      // a blocked card whose Foreman's note changes: keyOf), and list() removes the old row: the focus (a link, a field or a button) and a button clicked once (data-armed) go
       // to the same control in the new row, the nth of its tag, data-act and class there as in the old row. A button
       // armed for a time (twice(): Close, Retry) keeps the end of the first click's window (data-arm-end), not a new one.
       const rows = g.querySelector('.rows');
@@ -655,15 +689,17 @@ window.DASH_APP.panel({
         return same(now)[same(was).indexOf(x)] || null;
       };
       const show = (xs) => {
-        const recs = new Map(Array.from(rows.children).filter((n) => n.dataset.key && n.dataset.key.endsWith(':records')).map((n) => [n.dataset.key, n]));
+        // The same card: a blocked row's card (data-card), else the row's key less ':records'.
+        const idOf = (n) => n.dataset.card || n.dataset.key.replace(/:records$/, '');
+        const recs = new Map(Array.from(rows.children).filter((n) => n.dataset.key).map((n) => [idOf(n), n]));
         const a = document.activeElement;
         ctx.list(rows, xs, keyOf[key], make[key], (li, x) => {
           li.classList.toggle('is-new', isNew.has(keyOf[key](x)));
-          if (key === 'blocked') { outputOf(li, x); onMainOf(li, x); }
+          if (key === 'blocked') { outputOf(li, x); onMainOf(li, x); heldNote(li, x); }
           if (key === 'waiting') shotsIn(li, x);
         });
         recs.forEach((was, k) => {
-          const now = was.isConnected ? null : Array.from(rows.children).find((n) => n.dataset.key === k.slice(0, -':records'.length));
+          const now = was.isConnected ? null : Array.from(rows.children).find((n) => n.dataset.key && idOf(n) === k);
           if (!now) return;
           was.querySelectorAll('[data-armed]').forEach((b) => {
             const to = twin(b, was, now);
@@ -678,7 +714,8 @@ window.DASH_APP.panel({
       if (key !== 'blocked') { show(items[key]); continue; }
       // The blocked cards, newest first (sorted by project, the newest first in each project), five at a time.
       const apart = ctx.sorted();
-      const newest = items.blocked.slice().sort((a, b) => (apart && a.repo !== b.repo ? (a.repo < b.repo ? -1 : 1) : String(b.since || '').localeCompare(String(a.since || ''))));
+      // The cards the Foreman has (hasNote) come after those that wait for the owner, in the same order.
+      const newest = items.blocked.slice().sort((a, b) => (hasNote(a) - hasNote(b)) || (apart && a.repo !== b.repo ? (a.repo < b.repo ? -1 : 1) : String(b.since || '').localeCompare(String(a.since || ''))));
       const more = ctx.more('blocked', newest, show), old = g.querySelector('.show-more');
       if (old) old.replaceWith(more); else g.append(more);
     }

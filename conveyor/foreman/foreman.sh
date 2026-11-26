@@ -77,12 +77,15 @@
 #   who holds the issue it filed at once; in a record that started new issues held before the filing began, filed
 #   then holds every open issue opened since, a follow-up too (conveyor.sh control adopt since). The
 #   research lane (lanes/research.sh) runs these two as well, with CONVEYOR_LANE=research and its own folder as $FD, so an issue it files starts held too.
+# note <card> [--ask] <what you do> (the Foreman, by Bash, when it takes a blocked card): note.sh, which says what it
+#   keeps and what shows it.
 set -uo pipefail
 case ${1:-} in
   setup | launch | start | rules | words | live | filing | filed | off | procedures) ;;
   claim) [ $# = 2 ] && [[ $2 =~ ^[A-Za-z0-9-]+$ ]] || { echo "usage: foreman.sh claim <session id>" >&2; exit 2; } ;;
   ask) [ $# -ge 3 ] && [[ $2 =~ ^[A-Za-z0-9._-]+$ ]] || { echo "usage: foreman.sh ask <repo> <command> [<argument>...]" >&2; exit 2; } ;;
-  *) echo "usage: foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | ask <repo> <command> [<argument>...] | off | start | rules | words | live | filing | filed | procedures" >&2; exit 2 ;;
+  note) shift; exec bash "$(dirname "${BASH_SOURCE[0]}")/note.sh" "$@" ;;
+  *) echo "usage: foreman.sh setup | launch [--new] [<claude argument>...] | claim <session id> | ask <repo> <command> [<argument>...] | note <card> [--ask] <what you do about it> | off | start | rules | words | live | filing | filed | procedures" >&2; exit 2 ;;
 esac
 # A hook's input, and the session it names.
 case $1 in start | rules | words | filing | filed) IN=$(cat); SID=$(jq -r '.session_id // empty | strings' <<<"$IN" 2>/dev/null) ;; esac
@@ -489,7 +492,7 @@ context_head() {
 # You are the Foreman of $(mine 2>/dev/null | cut -f1 | paste -sd' ' - | sed 's/ /, /g; s/^$/this project/') only; never read or change another project's Foreman folder, saved state or memory.
 # Filing: file issues only in your own projects, held; release it (conveyor.sh control release <issue>, in that issue's project record) only once the owner has said yes. File an issue about a test file with $FQ ask <project> testissue <test file> <title> <body> (each ask <project> below starts with that path too): it runs where the record is, so the issue starts held there too (rules.testissues false: a held card, released by its card ID). An order from the owner, or a release's fix card (card --release <version>): ask <project> card <title> <body>, held.
 # Questions to the owner go only by the picker (AskUserQuestion), never as a question in your reply.
-# Procedures: run $FQ procedures and follow what it prints before you run conveyor.sh release-run (a release's suite), when the pack is not committed (in a project's main checkout, conveyor.sh setup pack-commit prints ok: when the pack and its size entries' exempt files are), and on a wake that a card waits for main to change or on another card.
+# Procedures: run $FQ procedures and follow what it prints before you run conveyor.sh release-run or take a blocked card, when the pack is not committed (in a project's main checkout, conveyor.sh setup pack-commit prints ok: when it and its size entries' exempt files are), and on a wake that a card waits for main to change or on another card.
 # A wake (a watcher's message) gets a reply of what needs the owner and the "Done without asking" line for each act since your last reply; when neither is owed, reply Idle.
 $plug
 # Check status with conveyor.sh foreman status, not your own snapshot reads; a wake already names what changed. Run a command that ends in under 2 minutes in the foreground, several checks in one command; start a background command only for a long run. Read an image (a screenshot, a GIF frame) only when the owner asks or a check needs it.

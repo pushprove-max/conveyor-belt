@@ -181,11 +181,23 @@
       card.append(p);
     }
   }
+  // The Foreman's note on a blocked card (foreman: {note, ask, since}, which the snapshot gives while the Foreman's
+  // session that wrote it lives and the card stays blocked: foreman/note.sh), else null. foremanHas: the Foreman works
+  // on the card (a note that is not a question to the owner), so it is shown apart from the cards that wait for the owner.
+  const foremanOf = (x) => (x && !x.waiting && x.foreman && typeof x.foreman === 'object' && typeof x.foreman.note === 'string' ? x.foreman : null);
+  const foremanHas = (x) => { const f = foremanOf(x); return !!f && f.ask !== true; };
+  // The note and its age, in place of the block reason: "Foreman: <note> · 5 min ago", or "Waits for your answer: <note>".
+  function foremanLine(f) {
+    const h = S.ctx.h, p = h('p', `board-why board-foreman${f.ask === true ? ' is-ask' : ''}`, f.ask === true ? `Waits for your answer: ${f.note}` : `Foreman: ${f.note}`);
+    p.append(' · ', S.ctx.since(f.since, ' ago'));
+    return p;
+  }
   // A card in the Needs you column leads with why it stopped (a blocked card's reason in one sentence, its explanation
-  // under it, shown; a visible change's sentence), and links into Overview's Needs you panel, the one place it is answered.
+  // under it, shown; a visible change's sentence; the Foreman's note, when it has one), and links into Overview's
+  // Needs you panel, the one place it is answered.
   function needs(card, item, waitingYes) {
-    const h = S.ctx.h;
-    card.append(waitingYes ? h('p', 'board-why', `Visible change: ${item.sentence || 'the reviewer gave no sentence'}`) : S.ctx.failureLine(item));
+    const h = S.ctx.h, f = foremanOf(item);
+    card.append(waitingYes ? h('p', 'board-why', `Visible change: ${item.sentence || 'the reviewer gave no sentence'}`) : f ? foremanLine(f) : S.ctx.failureLine(item));
     const a = h('a', 'board-answer', waitingYes ? 'Answer it in Needs you' : 'Retry or close it in Needs you');
     a.href = S.ctx.panelHref('needs');
     a.dataset.act = 'needs-open';
@@ -405,8 +417,9 @@
     if (col === 'held' || col === 'queue') waitingCard(el, col, item);
     else if (col === 'building' || col === 'review') workingCard(el, col, item);
     else if (col === 'needs') {
-      el.classList.add(item.waiting ? 'is-waiting' : 'is-blocked');
-      el.append(ctx.chip(item.waiting ? 'Waiting for your yes' : 'Blocked', item.waiting ? 'warn' : 'bad'));
+      const mine = foremanHas(item);
+      el.classList.add(item.waiting ? 'is-waiting' : mine ? 'is-foreman' : 'is-blocked');
+      el.append(ctx.chip(item.waiting ? 'Waiting for your yes' : mine ? 'Foreman has it' : 'Blocked', item.waiting ? 'warn' : mine ? 'info' : 'bad'));
       needs(el, item, item.waiting);
     } else el.append(landedMeta(item));
     cardFoot(el, col, item);
@@ -614,6 +627,6 @@
     ({ STEP, S, DEPENDS_MAX, num, waitsOn, issues, ctl, waiting, forced, waitsOf, kinds, waitsOnly, labelsOf,
       unlabelable, PART, elOf, relength, say, send, hold, release, shift, button, arm, slicesOf, sliceState, unshaped,
       draw } = shared);
-    return { chipsOf, rulesLink, card, landings, landing };
+    return { chipsOf, rulesLink, card, landings, landing, foremanHas };
   });
 })();

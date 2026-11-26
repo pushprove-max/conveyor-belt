@@ -598,12 +598,13 @@
   // ('more' or 'all'). After
   // "Show <size> more" the focus goes to the first new row: the item at the old length in the list just above the control.
   // A row in a closed group (a <details> the owner left closed) cannot take the focus: that group's heading takes it.
+  // A heading among the rows (an li with data-heading) is not an item, so it is not counted as a row.
   const PAGE = 5;
   const pageOf = (scope, key) => { const v = keptGet('pages', scope, key); return v === 'all' || (Number.isInteger(v) && v > 0) ? v : undefined; };
   const rowsAbove = (box) => {
     let c = box.previousElementSibling;
     while (c && !c.matches('ul, ol') && !c.querySelector('ul, ol')) c = c.previousElementSibling;
-    return c ? Array.from(c.querySelectorAll('li')).filter((li) => !li.parentElement.closest('li') || !c.contains(li.parentElement.closest('li'))) : [];
+    return c ? Array.from(c.querySelectorAll('li')).filter((li) => !li.hasAttribute('data-heading') && (!li.parentElement.closest('li') || !c.contains(li.parentElement.closest('li')))) : [];
   };
   // The host's refusal of a dependency that would make a cycle (control depends: "#12 depending on #15 would make a
   // dependency cycle (#12, #15): ..."), said as what already waits on what. Any other text is the host's own.

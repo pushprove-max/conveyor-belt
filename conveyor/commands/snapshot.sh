@@ -25,6 +25,8 @@
 # call asks at a time (SNAPGH.lock), and a call asks nothing when another one asked after it began (--fresh) or after
 # the kept snapshot's build began (the writer): two calls for one rebuild ask GitHub once.
 KEPT=$ST/snapshot.json SNAPOLD=30 SNAPGAP=5 SNAPGH=$ST/snapgh KEPTREAD=$ST/snapshot.json.records
+# The Foreman's notes on blocked cards (snapprint); NOTELEASE is the same as commands/foreman-note.sh's.
+NOTES=$ST/foreman-notes NOTELEASE=300
 SNAPLIBS='slots prompts control views snapshot issues pick testrun push flaky fulltest testaction testfiles testrules lane run machine install setup'
 case ${2-} in
   '') fresh='' ;;
@@ -140,7 +142,25 @@ snapprint() {
   at=$(export TZ=UTC; printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$s")
   # The shell's own test of the times (to the nanosecond, as find -newer): no program on each read.
   { [ "$STATE" -nt "$KEPT" ] || [ "$RETRIED" -nt "$KEPT" ]; } && newer=true
-  if [ "$newer" = true ] || [ "$SAYS" -nt "$KEPT" ]; then r=$(recordsnow "$at" "$off" 2>/dev/null) && [ -n "$r" ] || r=null; rn="\"recordsNow\":$r,"; fi
+  # The Foreman's notes on blocked cards (NOTES, commands/foreman-note.sh) are read at each print, not by the build:
+  # they end when the Foreman's watcher stops renewing them (its session gone), which changes no input of the build.
+  # While renewed at most NOTELEASE seconds ago, a blocked card with a note gets it as foreman {note, ask, since}: one
+  # of recordsNow's blocked (a card blocked after the build began, which then joins needsYou.blocked too) and one of
+  # the kept needsYou.blocked (below), but
+  # not the push item, and only when the card was blocked before the note was written (a card blocked again since has
+  # a note of an earlier block). One program more, only while there are notes. The notes go to jq as a file: as an
+  # argument, a long line is more than the system lets one argument be.
+  local ns='' nt='' nj='' nf='' rr
+  { { read -r ns nt; IFS= read -r nj; } < "$NOTES"; } 2>/dev/null && [ -n "$ns" ] && [[ $nt =~ ^[0-9]+$ ]] && [ $((EPOCHSECONDS - nt)) -le "$NOTELEASE" ] \
+    && nf='(($fn | try fromjson catch null | objects) // {}) as $fn
+      | def noted($held): map(if .push != true and (.card | type) == "string" and ($fn[.card] | type) == "object"
+          and ($held == null or (.card | IN($held[]))) and (($fn[.card].since | strings) // "") >= ((.since | strings) // "")
+        then . + {foreman: ($fn[.card] | {note: ((.note | strings) // ""), ask: (.ask == true), since: ((.since | strings) // null)})} else . end);'
+  if [ "$newer" = true ] || [ "$SAYS" -nt "$KEPT" ]; then
+    r=$(recordsnow "$at" "$off" 2>/dev/null) && [ -n "$r" ] || r=null
+    [ -z "$nf" ] || [[ $r != '{'* ]] || ! rr=$(jq -c --rawfile fn <(printf '%s' "$nj") "$nf"' if (.blocked | type) == "array" then .blocked |= noted(null) else . end' <<<"$r") || r=$rr
+    rn="\"recordsNow\":$r,"
+  fi
   now=${EPOCHREALTIME/[.,]/}; now=$((10#$now / 1000)); m=$((now > m ? now - m : 0))
   printf '{"snapshotAt":"%s","snapshotAge":%d.%03d,"recordsNewer":%s,%s' "$at" $((m / 1000)) $((m % 1000)) "$newer" "$rn"
   # A card started since joins the belt (recordsNow's started) and its issue leaves the queue's lists, so it is not
@@ -159,6 +179,16 @@ snapprint() {
   local jf='.' pf=''
   if { read -r pf < "$KEPT.notes"; } 2>/dev/null; then [ -z "$pf" ] || [ ! "$pf" -nt "$KEPT" ] || jf='.priceNotes = []'
   else jf='.priceNotes = []'; fi
+  # The Foreman's notes on blocked cards (NOTES, commands/foreman-note.sh), from nf above: a card of the kept
+  # needsYou.blocked gets its note while the records still hold it blocked (recordsNow's blocked, when the records are
+  # newer than the build: a retry took its lines out). A card of recordsNow's blocked with a note (blocked after the
+  # build began) joins needsYou.blocked, fromRecords true as on the Board: /units and the Board's Needs you column read
+  # only needsYou, so its note would else show nowhere but in Overview until the next build.
+  [ -z "$nf" ] || jf+=" | $nf"' (if ($r | type) == "object" and ($r.blocked | type) == "array" then [$r.blocked[].card] else null end) as $held
+      | (.needsYou | objects | .blocked | arrays) |= noted($held)
+      | if $held != null and (.needsYou | type) == "object" and (.needsYou.blocked | type) == "array"
+        then [.needsYou.blocked[].card] as $kb | .needsYou.blocked += [$r.blocked[] | select(.foreman != null and (.card | IN($kb[]) | not)) | . + {fromRecords: true}]
+        else . end'
   [[ $r != *'"started":[{'* ]] || jf+=' | [$r.started[].issue | numbers | select(. > 0)] as $n
       | .belt = (.belt // []) + $r.started
       | (.queue | objects | (.next, .order, .waiting) | arrays) |= map(select((.issue | IN($n[])) | not))
@@ -169,7 +199,8 @@ snapprint() {
           | if (.split | type) == "object" then .split |= (.you -= $you | .landed -= $np | .labelOrRule -= (($g | length) - $you - $np) | .belt += ($g | length)) else . end)
       | ([$r.blocked, $r.waiting | arrays | .[].card | strings]) as $now
       | (.needsYou | objects | (.waiting, .blocked) | arrays) |= map(select(.push == true or (.issue | IN($n[]) | not) or (.card | IN($now[]))))'
-  if [ "$jf" != . ]; then jq -c --argjson r "${r:-null}" "$jf" "$KEPT" | tail -c +2
+  # recordsNow goes by file too: with the notes on its blocked cards, it can be more than one argument may be.
+  if [ "$jf" != . ]; then jq -c --slurpfile rs <(printf '%s' "${r:-null}") --rawfile fn <(printf '%s' "$nj") '$rs[0] as $r | '"$jf" "$KEPT" | tail -c +2
   else tail -c +2 "$KEPT"; fi
 }
 # What the card records and loop.json say now, which stay current while a new build takes minutes: the kept snapshot

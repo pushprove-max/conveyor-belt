@@ -142,6 +142,13 @@ grep -qE 'run [^ ]*foreman\.sh procedures and follow what it prints before you r
   && grep -qF 'on a wake that a card waits for main to change or on another card' <<<"$out" \
   || fail "the Foreman's start context does not name the command that prints its procedures: $out"
 out+=$'\n'$(cd "$M" && bash "$SRC/foreman.sh" procedures) || fail "foreman.sh procedures failed"
+# Issue 1685: the start names taking a blocked card among the times to run the procedures, and they give the note
+# command (foreman.sh note), so /units and the Board show the card as the Foreman's. Bug it catches: a start or
+# procedures that do not say it, so the Foreman never writes a note.
+grep -qE 'run [^ ]*foreman\.sh procedures and follow what it prints before you run conveyor\.sh release-run or take a blocked card,' <<<"$out" \
+  && grep -qF 'When you take a blocked card (a hand run, a fix card, a picker to the owner), run `note <card> <what you do about it>`' <<<"$out" \
+  && grep -qF 'run `note <card> --ask <the question>`' <<<"$out" \
+  || fail "the Foreman's start and procedures do not tell it to run note <card> <what you do> when it takes a blocked card: $out"
 # Bug (#187): the Foreman listed a git command for the owner to commit the pack. Its rules put the question by the picker.
 grep -qF 'ask the owner by the picker "Commit the Conveyor pack (.conveyor/project.json) on <default branch> now?"' <<<"$out" \
   && grep -qF 'on yes run conveyor.sh setup pack-commit yes' <<<"$out" \

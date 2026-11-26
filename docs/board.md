@@ -237,6 +237,16 @@ lists every project's rows, so it stays as it is.
     price.
   - Any other block names its reason, then what Retry does: "Blocked because: ... Retry starts a new card, from the
     kept work if there is any."
+- **The Foreman has it.** When the Foreman takes a blocked card, it writes a note on it (`foreman.sh note`, see
+  [The Foreman](foreman.md)). The card then shows "Foreman has it" in place of Blocked, and the note and its age
+  ("Foreman: traced run in progress, then hand land and retry · 5 min ago"). These cards come after the cards that
+  wait for you, here and in the Needs you column of Control, where the note takes the place of why the card failed
+  and the cards are under the heading "Foreman has it". A card that waits for your answer to the Foreman's picker
+  stays with the others and shows "Waits for your answer:" and the note. The Board reads the note from the
+  snapshot, as /units does. A retried card shows "Retried, waiting for its turn" with no note. A card that you hold
+  shows Blocked with no note, and keeps the Undo of the Hold. A landed or shut
+  card leaves Needs you. When the Foreman session that wrote the note ends or loses the role, the note goes away
+  within five minutes, and a card that is still blocked shows as Blocked again.
 - **Retried.** After a retry, the card shows "Retried, waiting for its turn" in place of Blocked, with no buttons.
   The card leaves Needs you at the Board's next full read of Conveyor, and a new card builds the issue in its turn.
   This needs the live feed. Without it, the card shows as Blocked until that read. A card that you held is not shown

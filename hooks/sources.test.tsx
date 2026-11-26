@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, test } from 'claude-code/testing'
 import { TWO_PROJECTS } from './fixtures/units-two-projects'
-import { activityModel, ageNotes, boardOf, boardOfFeed, fastText, OLD_MAP_FETCH, paneModel, parseFetch, parseLimit, researchText, seatFromGit, seenOf, shortTitle, STEP_NAMES, tableText, toasts } from './sources'
+import { activityModel, ageNotes, boardOf, boardOfFeed, fastText, OLD_MAP_FETCH, paneModel, parseFetch, parseLimit, parseStream, researchText, seatFromGit, seenOf, shortTitle, STEP_NAMES, tableText, toasts } from './sources'
 import type { Fast, Research, State } from './sources'
 import { clockOf, cols, plain } from './elements'
 
@@ -254,6 +254,83 @@ test('a blocked card shows the step it failed at with its seconds, its six steps
   expect(paneModel(s, 100, 0).map(plain).join('\n')).toMatch(/\n✗ #3850 Logo upload · failed at Fix \(step 3 of 6\) after 12m · blocked: fix: session fail[^\n]*… +1h 30m\n/)
   // A blocked card whose record gives no track (an older loop) shows its reason alone.
   expect(section(tableText(board({ needsYou: { waiting: [], blocked: [BLOCKED] } }), 100), 'NEEDS YOU').split('\n')).toHaveLength(3)
+})
+
+// Issue 1685: the owner saw a blocked card under NEEDS YOU with its bare block reason after the Foreman took it, and
+// no sign that someone worked on it. A card with the Foreman's note (the snapshot's foreman) is under FOREMAN HAS IT
+// with the note and its age, not under NEEDS YOU nor in its count; one that waits for the owner's answer stays under
+// NEEDS YOU and says so; with no note (the snapshot gives none after a retry, or once the Foreman's session is gone),
+// the card shows as before.
+test("a blocked card with the Foreman's note shows under FOREMAN HAS IT with the note and its age, not under NEEDS YOU", () => {
+  const had = { ...BLOCKED, foreman: { note: 'traced run in progress, then hand land and retry', ask: false, since: ago(5) } }
+  const asks = { ...BLOCKED, card: 'c5-3852', issue: 3852, title: 'Pick a fix', foreman: { note: 'which of two fixes to land', ask: true, since: ago(2) } }
+  const s = board({ needsYou: { waiting: [], blocked: [had, asks] } })
+  const text = tableText(s, 100)
+  expect(section(text, 'FOREMAN HAS IT').split('\n')).toEqual([
+    'FOREMAN HAS IT (1)',
+    expect.stringMatching(/^● #3850 Logo upload +5m$/),
+    '    Foreman: traced run in progress, then hand land and retry',
+  ])
+  expect(section(text, 'NEEDS YOU').split('\n')).toEqual([
+    'NEEDS YOU (1)',
+    expect.stringMatching(/^✗ #3852 Pick a fix +1h 30m$/),
+    '    waits for your answer: which of two fixes to land',
+  ])
+  // The pane: the card on a line of its own under FOREMAN HAS IT, and the count band's NEEDS YOU counts only #3852.
+  const pane = paneModel(s, 100, 0).map(plain).join('\n')
+  expect(pane).toContain('1 NEEDS YOU')
+  expect(pane).toMatch(/\nFOREMAN HAS IT \(1\)\n● #3850 Logo upload · Foreman: traced run in progress, then hand land and retry +5m\n/)
+  // With no note, the card is under NEEDS YOU with its reason, and there is no FOREMAN HAS IT.
+  const none = tableText(board({ needsYou: { waiting: [], blocked: [BLOCKED] } }), 100)
+  expect(none).not.toContain('FOREMAN HAS IT')
+  expect(section(none, 'NEEDS YOU').split('\n')).toEqual(['NEEDS YOU (1)', expect.stringMatching(/^✗ #3850 Logo upload +1h 30m$/), '    blocked: review 3 was NO-GO: [P1] the sanitizer drops every path'])
+})
+
+// Issue 1685: a card the Foreman takes keeps the details NEEDS YOU drew for it. Bug it catches: under FOREMAN HAS IT the
+// card had only its title, age and note, and lost the step it failed at, its six steps and its reviews.
+test('a blocked card under FOREMAN HAS IT keeps the step it failed at, its six steps and its reviews', () => {
+  const t = track('++!...', '', { at: null })
+  const failed = { ...t, since: null, steps: t.steps.map((x, i) => (i === 2 ? { ...x, sec: 754 } : x)) }
+  const had = { ...BLOCKED, reason: 'fix: session failed (exit 124)', track: failed, reviews: [{ round: 1, verdict: 'NO-GO', counts: counts(0, 1, 2, 0), sec: 200, fixed: true }],
+    foreman: { note: 'hand run in progress', ask: false, since: ago(5) } }
+  expect(section(tableText(board({ needsYou: { waiting: [], blocked: [had] } }), 100), 'FOREMAN HAS IT').split('\n').slice(2)).toEqual([
+    '    Foreman: hand run in progress', '    failed at Fix (step 3 of 6) after 12m',
+    '    ✓ Build 30s ━━ ✓ Review 31s ━━ ✗ Fix ── Test ── Land ── Push', '    R1 NO-GO  1 P1, 2 P2'])
+  // The pane's one line a card, at 56 columns. Bug it catches: the step it failed at came before the note, so the
+  // title and "failed at Fix (step 3 of 6) after 12m" filled the line and cut off the whole note, a question too.
+  const asks = { ...had, card: 'c5-3852', issue: 3852, title: 'Pick', foreman: { note: 'which?', ask: true, since: ago(2) } }
+  const lines = paneModel(board({ needsYou: { waiting: [], blocked: [had, asks] } }), 56, 0).map(plain)
+  expect(lines.find(l => l.startsWith('● #3850'))).toMatch(/^● #3850 Logo upload · Foreman: hand run in progress/)
+  expect(lines.find(l => l.startsWith('✗ #3852'))).toMatch(/^✗ #3852 Pick · waits for your answer: which\?/)
+  // At a 32-column dock body. Bug it catches: the one line left `● #3850 Logo upl… · Foreman:…` with none of the note,
+  // and cut `waits for your answer` to `wait…`. The note goes whole under the name, wrapped at its spaces.
+  const narrow = paneModel(board({ needsYou: { waiting: [], blocked: [had, asks] } }), 32, 0).map(plain)
+  const under = (mark: string) => narrow.slice(narrow.findIndex(l => l.startsWith(mark)), narrow.findIndex(l => l.startsWith(mark)) + 3)
+  expect(under('● #3850'), narrow.join('\n')).toEqual([expect.stringMatching(/^● #3850 Logo upload +5m$/), '    Foreman: hand run in', '      progress'])
+  expect(under('✗ #3852'), narrow.join('\n')).toEqual([expect.stringMatching(/^✗ #3852 Pick +1h 30m$/), '    waits for your answer:', '      which?'])
+  expect(narrow.every(l => cols(l) <= 32), narrow.join('\n')).toBe(true)
+})
+
+// Issue 1685: a retry ends the Foreman's note, and the live feed says so (its record's retried line) before the next
+// snapshot comes. Bugs it catches: parseStream dropped the record's retried cards, so /units kept the card under
+// FOREMAN HAS IT with the ended note until that snapshot; and the pane's toast took the card's move back to NEEDS YOU
+// for a new block, and said "#3850 is blocked" of a card the owner had just retried.
+test("a card the live feed says was retried shows under NEEDS YOU with its reason, not with the Foreman's note", () => {
+  const had = { ...BLOCKED, foreman: { note: 'hand run in progress', ask: false, since: ago(5) } }
+  const feed = (retried: object[]) => JSON.stringify({ host: 'buildbox', local: false, ssh: 'owner@buildbox', stream: { live: true, heardAt: new Date(NOW).toISOString(), error: '' },
+    records: [{ repo: 'bookstore', main: '/r/main', snap: JSON.parse(snapshot({ needsYou: { waiting: [], blocked: [had] } })), retried }] })
+  const stateOf = (retried: object[]): State => {
+    const f = parseStream(feed(retried))
+    if (!f) throw new Error(`parseStream gave null for the feed ${feed(retried)}`)
+    // The session's own project is the feed's record, so its cards are `#<issue>`, with no project name.
+    return { now: NOW, ...boardOfFeed(f, 'bookstore', '', null), limit: null, fast: { state: 'none' }, research: { state: 'none' } }
+  }
+  const before = stateOf([]), retried = stateOf([{ card: had.card, issue: had.issue, at: new Date(NOW).toISOString() }])
+  expect(tableText(before, 100)).toContain('FOREMAN HAS IT (1)')
+  const after = tableText(retried, 100)
+  expect(after).not.toContain('FOREMAN HAS IT')
+  expect(section(after, 'NEEDS YOU').split('\n')).toEqual(['NEEDS YOU (1)', expect.stringMatching(/^✗ #3850 Logo upload +1h 30m$/), '    blocked: review 3 was NO-GO: [P1] the sanitizer drops every path'])
+  expect(toasts(seenOf(before.snap!), seenOf(retried.snap!))).toEqual([])
 })
 
 test('NEEDS YOU with nothing waiting is one line saying so', () => {

@@ -78,7 +78,15 @@ right-aligned and the title is what gives way.
   change (with the reviewer's sentence), then blocked cards (with the reason). A blocked card is off the belt, so the
   step it stopped in is said here: `failed at Build (step 1 of 6) after 12m`, then its six steps and one line for each
   finished review (`R1 NO-GO  1 P1, 2 P2`; a review recorded with no counts shows its verdict alone), and its
-  measurements (below).
+  measurements (below). A blocked card that waits for your answer to the Foreman's picker shows
+  `waits for your answer: <the Foreman's note>` in place of the reason.
+- **FOREMAN HAS IT**: the blocked cards that the Foreman works on, under their own heading and not under `NEEDS YOU`.
+  Each card shows the Foreman's note in place of the block reason (`Foreman: traced run in progress, then hand land
+  and retry`) and the age of the note on the right. The Foreman writes the note with `foreman.sh note` (see
+  [The Foreman](foreman.md)). When you retry or hold the card, the note goes away: the card shows under `NEEDS YOU`
+  with its block reason until the next snapshot, and then leaves it. A landed or shut card leaves both lists. When the Foreman session that wrote
+  the note ends or loses the role, the note goes away within five minutes, and a card that is still blocked shows
+  under `NEEDS YOU` again. With no such card, the heading does not show.
 - **ON THE BELT**: under the heading, the same count against the builder cap as the head, when the loop gives it; then
   three lines a card and a blank line between cards.
   1. The issue and its short title in bold (a follow-up: what it fixes and the issue it came from, `Board: … ↳ #12`,
@@ -209,7 +217,7 @@ A word wider than the pane breaks between whole characters.
 - **`[ Machine details ]`**: closed at first. Click it, or press `m` while the pane has the focus, to open or close it.
   It shows the session that has the Foreman role, the waiter and the watchers, the link to the plugin problems file,
   the test map line and the weekly limit.
-- The old-engine line and the whole-suite line, when there is one (while it runs, a second line with its counts, or the progress of the pass that runs failed cases again, when it has some), and the cards that need you, one line each.
+- The old-engine line and the whole-suite line, when there is one (while it runs, a second line with its counts, or the progress of the pass that runs failed cases again, when it has some), and the cards that need you, one line each. Then `FOREMAN HAS IT`, one line for each card that the Foreman works on, with its note. `NEEDS YOU` in the count band does not count these cards.
 - **BUILD MATRIX**: on the right, the project and its slots in use against the builder cap (`bookstore · 3/4
   slots`; the same count as the `ON THE BELT` head when the snapshot is older). When cards on the belt wait and do
   no work (for another card, or for main to change), the number of these cards comes after the slots: `bookstore · 4/4

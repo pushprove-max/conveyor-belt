@@ -404,6 +404,23 @@ hostacts() {
     '. "${1%/conveyor/conveyor.sh}/.claude/hooks/lib/rulings.sh" && l=$(rulings_log) && [ -n "$l" ] && { [ ! -e "$l" ] || cat -- "$l"; }'
   ASK_LIMIT=10 askrun "$cmd" | jq -cR 'fromjson? | objects | select(.source == "standing" and .void != true) | {utc, answer}'
 }
+# renewnotes <records> (the Conveyor watcher, at each poll; <records> as mine prints them): the Foreman's notes on blocked
+# cards (note.sh) stay shown while they are renewed (commands/foreman-note.sh: the snapshot shows them for NOTELEASE
+# seconds after). Each record the session wrote one in (note.sh's NOTED) gets them renewed, by ask, while that session
+# holds the role and the Claude process recorded for it (claude.pid: foreman.sh claim_ and adopt_) runs and holds that
+# session (its sessions/<pid>.json). A /resume of another session in that process, a claim by another session, an off
+# or the end of the process stops the renewal, so the notes end.
+renewnotes() {
+  local s='' m p='' repo main
+  { IFS= read -r s < "$FD/noted"; } 2>/dev/null && [ -n "$s" ] && m=$(marked) && [ "$s" = "$m" ] || return 0
+  { read -r p < "$FD/claude.pid"; } 2>/dev/null
+  [[ $p =~ ^[0-9]+$ ]] && kill -0 "$p" 2>/dev/null \
+    && jq -e --arg m "$m" '.sessionId == $m' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/$p.json" > /dev/null 2>&1 || return 0
+  tail -n +2 "$FD/noted" | while IFS= read -r repo; do
+    main=$(awk -F'\t' -v r="$repo" '$1 == r { print $2; exit }' <<<"$1")
+    [ -z "$main" ] || ASK_LIMIT=10 ask "$repo" "$main" foreman note "$m" renew > /dev/null 2>&1 || :
+  done
+}
 askrun() { # <command>: run where the record is, stopped at the ask limit (exit 124, or 137 once killed)
   local target
   target=$(host_ssh)

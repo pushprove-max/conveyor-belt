@@ -698,7 +698,6 @@ heldsave() { # the file holds hnew, or is removed when hnew is empty
   [ -n "$hnew" ] || { rm -f "$HELDF"; return 0; }
   printf '%s\n' "$hnew" > "$HELDF.tmp" && mv "$HELDF.tmp" "$HELDF"
 }
-
 poll() { # 0 when a wake was put in pending; 2 when one was due but the session's process has ended
   local now=${CONVEYOR_FOREMAN_NOW:-$(date +%s)} p0=$EPOCHSECONDS cur='' new late await repo main df dl hnew one soon sent='' n=0 all failed=''
   all=$(grep -c . <<<"$RECS")
@@ -787,6 +786,7 @@ poll() { # 0 when a wake was put in pending; 2 when one was due but the session'
 utc() { TZ=UTC0 printf '%(%Y-%m-%dT%H:%M:%SZ)T' "$1"; }
 while :; do
   t0=$EPOCHSECONDS; : > "$POLLF"
+  renewnotes "$RECS" # the Foreman's notes on blocked cards (lib.sh)
   poll; rc=$?; trap - TERM
   # The poll log (PLOG): one line a poll, so a late wake can be told from the logs: its start, end, seconds taken,
   # each record's outcome (record()) and whether it woke. Past PLOG_MAX lines it keeps the newest half.

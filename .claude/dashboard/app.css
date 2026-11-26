@@ -357,6 +357,9 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .row .chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .row .chip > * { min-width: 0; }
 .row { position: relative; min-width: 0; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+/* Needs you: the blocked cards the Foreman has come after the owner's, set apart by a gap and their border. */
+.row.is-foreman { border-color: var(--info); }
+.rows > .row:not(.is-foreman) + .row.is-foreman { margin-top: var(--sp-3); }
 .rows.compact .row { padding: var(--sp-2) var(--sp-3); }
 .rows.numbered { counter-reset: n; }
 .rows.numbered .row { counter-increment: n; padding-left: calc(var(--sp-5) + var(--sp-3)); }
@@ -714,6 +717,8 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .bcard.enter { animation: rise var(--motion) var(--ease); }
 .bcard.is-waiting { border-color: var(--warn); }
 .bcard.is-blocked { border-color: var(--bad); }
+.bcard.is-foreman { border-color: var(--info); }
+.board-apart { padding: var(--sp-2) 0 0; font-size: var(--fs-xs); font-weight: 700; color: var(--muted); border-top: 1px solid var(--border); }
 .board-title { font-size: var(--fs-sm); font-weight: 600; overflow-wrap: anywhere; }
 .board-why { font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .board-answer { display: inline-block; margin-top: var(--sp-1); font-size: var(--fs-sm); font-weight: 650; overflow-wrap: anywhere; }

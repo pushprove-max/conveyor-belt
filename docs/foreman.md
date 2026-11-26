@@ -246,6 +246,29 @@ unless `XDG_DATA_HOME` says otherwise). Its path does not change when the engine
 
 A card that moves from one step to the next, as from build to review, gives no wake.
 
+### A blocked card that the Foreman takes
+
+When the Foreman takes a blocked card (it runs the card by hand, files a fix card, or asks you with a picker), it
+writes one line about it with `foreman.sh note <card> <what it does>`, as its start text tells it to (by
+`foreman.sh procedures`, which the start names). /units then
+shows the card under `FOREMAN HAS IT`, with the note and its age, in place of the block reason, and not under
+`NEEDS YOU`. On the Board, the card shows the note and its age, marked `Foreman has it`, after the cards that wait
+for you, in the Needs you column and in Overview's Needs you panel. A card that waits for your answer to the
+Foreman's picker gets `foreman.sh note <card> --ask <the question>`: it stays under Needs you, with
+`waits for your answer` and the note. Only the Foreman's own session can write a note, and only on a card that is
+blocked: on a card that was retried, landed or was shut, the command fails and says so. It also fails on a card that
+waits for your yes (a visible change or a lint policy change), as Needs you shows that card already. A new note on the same card
+replaces the one before.
+
+The note is kept with the card's project, on the machine where the belt runs (`foreman-notes` in that project's state
+folder), so /units and the Board show it also when the Foreman runs on your own machine. A note shows only while its
+card stays blocked and the Foreman keeps the note alive. The Foreman's Conveyor watcher does this at each poll, while
+the Foreman session holds the role and runs in its Claude process. When the card is retried or held, lands or is
+shut, the note goes away at once. When the session ends, another session takes the role, or you open another session in the
+Foreman's Claude process with `/resume`, the note goes away within five minutes. While the watcher is down, the notes
+go away too. A note that went away does not come back, also when the same session starts again: the Foreman writes
+it again.
+
 The Foreman's reply to a wake says only what needs you, and the `Done without asking` line for each step it took on a
 standing yes since its last reply. If neither is owed, the reply is the one word Idle. But while a wake names a
 blocked card as `not yet reported`, the Foreman cannot end its turn until it takes a step on that card: it logs an act
