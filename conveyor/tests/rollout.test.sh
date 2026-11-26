@@ -138,7 +138,8 @@ t_rolloutfixonly() {
   local old='Run migration 0004 before the deploy | the new column is missing | a.txt:4'
   sed -i 's|^cat > /dev/null; echo x >> "$STUB/reviews";|echo x >> "$STUB/reviews"; cat > "$STUB/prompt.$(wc -l < "$STUB/reviews")";|' "$STUB/codex"
   echo 'if [ "$(wc -l < "$STUB/sessions")" = 1 ]; then printf "%s\n" two three migrate0004 >> a.txt; else sed -i "/migrate0004/d" a.txt; fi' > "$STUB/build"
-  printf '%s\n' '[P2] a.txt:4 migration 0004 is not needed: take it out' "ROLLOUT: $old" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  # A P1: a review 1 of new P2s alone ends the loop (loopstop(): new-p2), with no fix round.
+  printf '%s\n' '[P1] a.txt:4 migration 0004 is not needed: take it out' "ROLLOUT: $old" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   printf '%s\n' 'EARLIER: E1 holds' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review.2"
   # loop: the landing reads the card's review lines after a fix round, which only card()'s review loop writes.
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"

@@ -98,17 +98,16 @@ t_camebackp1() {
     || fail "the last review lost its answer or the first proof: $(cat "$T/$CASE/an1") $(cat "$T/$CASE/an2")"
 }
 
-# Issue 1578: from review 2 on, a NO-GO whose findings are all new P2s (each finding of review 1 fixed) ends the loop
+# Issue 1578: a review 2 that is a NO-GO whose findings are all new P2s (each finding of review 1 fixed) ends the loop
 # (stop new-p2): the card lands and files each as a follow-up. Bugs: such a review gets another fix round, so cards
-# reach 3 to 5 reviews; the rule fires on review 1 too; with the standing yes review-followup on, the follow-up on the
-# card's own pipeline file is held for the owner.
+# reach 3 to 5 reviews; with the standing yes review-followup on, the follow-up on the card's own pipeline file is held
+# for the owner. Review 1 is reuse.test.sh's t_newp2first.
 t_newp2() {
   backsetup 10; tune '.pipelineFiles = ["a.txt"] | .auto.standing = ["review-followup"]'; export CONVEYOR_RULING_LOG=$T/$CASE/rulings.jsonl
   printf '%s\n' '[P2] a.txt:1 the nit stays here' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
   printf '%s\n' '[P2] a.txt:2 the fix counts one line short. Proof: line 3 reads fix2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
-  afterrun "$(issue 10 2026-01-01)" 'loopstop NO-GO 1 "" "" "" "" "" "$wt.review" > "$T/$CASE/stop1"; told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && pass=2' \
+  afterrun "$(issue 10 2026-01-01)" 'told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review" && pass=2' \
     '[ "$after" != last ] || [ -n "$isfu" ] || followups c7 "$issue" "$wt.review" > "$T/$CASE/ups"'
-  [ ! -s "$T/$CASE/stop1" ] || fail "review 1 with a P2 alone ended the loop ($(cat "$T/$CASE/stop1")), with no fix round"
   [ "$AFTER" = '{"res":"NO-GO","after":"last","last":"1","stop":"new-p2","hard":"","last0":"","isfu":"","priv":"","why":""}' ] \
     || fail "review 2 with a new P2 alone did not end the loop: $AFTER"
   [ "$(cat "$T/$CASE/ups" 2>&1)" = '[100101]' ] && [ "$(jq -r .title "$STUB/filed")" = '[P2] a.txt:2 the fix counts one line short. Proof: line 3 reads fix2' ] \

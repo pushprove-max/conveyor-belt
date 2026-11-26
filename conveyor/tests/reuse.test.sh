@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: a review reused when the card's staged change and main are those of its last review (reusable()), and
-# what the review after a fix of review findings is given when it runs (donewhen.sh rereview()).
+# what the review after a fix of review findings is given when it runs (donewhen.sh rereview()), and the first review
+# that ends the loop with new P2 or P3 findings alone (loopstop(): new-p2).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -21,9 +22,9 @@ t_reusesame() {
   rv() { st "select(.issue == $1 and .step == \"review\") | $2"; }
   # The build changes a.txt; each fix session after it changes nothing.
   echo '[ "$(wc -l < "$STUB/sessions")" != 1 ] || echo two >> a.txt' > "$STUB/build"
-  # #7: a P2 NO-GO: the reused review repeats it after its fix round, every finding P2, so it is the last review and
-  # the card lands, filing the finding.
-  printf '%s\n' '[P2] a.txt:1 a nit. Proof: line 2 reads two' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  # #7: a P1 NO-GO (a P2 alone ends the loop at once: loopstop() new-p2): the reused review repeats it after its fix
+  # round, so it is the last review and the card lands, filing the finding.
+  printf '%s\n' '[P1] a.txt:1 a nit. Proof: line 2 reads two' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   # loop: only card()'s review loop shows a fix round that changed nothing reusing the review, then the test and landing
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
   [ "$(steps 7)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,test pass,landed ok," ] \
@@ -35,7 +36,7 @@ t_reusesame() {
     && [ "$(rv 7 '.tokens.codex' | tail -n 1)" = 0 ] || fail "the reused review line does not name the review it reuses, or spent tokens: $(rv 7 tojson)"
   [ "$(rv 7 .patch | head -n 1 | wc -c)" -gt 1 ] && [ "$(rv 7 .main | head -n 1)" = "$(git -C "$R" rev-parse HEAD~1)" ] \
     || fail "the review line does not hold the staged change and the main commit it read: $(rv 7 tojson)"
-  [ "$(jq -r .title "$STUB/filed")" = '[P2] a.txt:1 a nit. Proof: line 2 reads two' ] || fail "the last review's finding was not filed: $(cat "$STUB/filed" 2>&1)"
+  [ "$(jq -r .title "$STUB/filed")" = '[P1] a.txt:1 a nit. Proof: line 2 reads two' ] || fail "the last review's finding was not filed: $(cat "$STUB/filed" 2>&1)"
   loop check >/dev/null || fail "the review lines do not pass the record check: $(loop check 2>&1)"
 }
 
@@ -48,8 +49,8 @@ t_reuseexcerpts() {
   local r
   setup "[$(issue 7 2026-01-01)]"
   echo 'case $(wc -l < "$STUB/sessions") in 1) printf "%s\n" two three >> a.txt ;; 2) sed -i "/^two$/d" a.txt ;; esac' > "$STUB/build"
-  printf '%s\n' '[P2] a.txt:1 a nit. Proof: line 1 reads one' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
-  # A P1: a review 2 of new P2s alone ends the loop (loopstop(): new-p2), with no second fix round to reuse it.
+  # P1s: a review of new P2s alone ends the loop (loopstop(): new-p2), with no fix round to reuse it.
+  printf '%s\n' '[P1] a.txt:1 a nit. Proof: line 1 reads one' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   printf '%s\n' '[P1] a.txt:2 the deleted two was needed. Proof: line 2 read two before the fix' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   # loop: only card()'s review loop shows a fix round, the review after it and a reused review after a second fix
   loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
@@ -197,14 +198,14 @@ t_reusereindent() {
 
 # Issue 1302: a P1 first found in the last review (the third) gets one fix round and a review of that fix alone before
 # the card can land; if the P1 still holds the card blocks. Bug: the loop's end decided, so the card landed with the P1
-# filed as a follow-up. p1last runs card #7 through two P2 rounds and a third review that finds the P1, then gives the
+# filed as a follow-up. p1last runs card #7 through two fix rounds and a third review that finds the P1, then gives the
 # fourth review (<review 4>) and reads the steps (steps), the prompts of the reviews (prompt.N) and the follow-ups (filed).
 p1last() { # <review 4>
   setup "[$(issue 7 2026-01-01)]"; steps() { st "select(.issue == 7 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
   sed -i 's|^cat > /dev/null; echo x >> "$STUB/reviews";|echo x >> "$STUB/reviews"; cat > "$STUB/prompt.$(wc -l < "$STUB/reviews")";|' "$STUB/codex"
   echo 'echo "fix$(wc -l < "$STUB/sessions")" >> a.txt' > "$STUB/build"
-  printf '%s\n' '[P2] a.txt:1 first nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
-  # A P1: a review 2 of new P2s alone ends the loop (loopstop(): new-p2), with no third review to find the P1.
+  # P1s: a review of new P2s alone ends the loop (loopstop(): new-p2), with no third review to find the P1.
+  printf '%s\n' '[P1] a.txt:1 first nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   printf '%s\n' '[P1] a.txt:2 second nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   printf '%s\n' '[P1] a.txt:3 drops what the issue asks' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.3"
   printf '%s\n' "$1" > "$STUB/review.4"
@@ -238,4 +239,39 @@ t_p1laststill() {
   [ "$(steps)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,fix ok,review NO-GO,test pass,landed ok," ] \
     && [ -z "$(st 'select(.issue == 7 and .step == "blocked")')" ] && [ "$(jq -r .title "$STUB/filed" 2>&1)" = '[P1] a.txt:3 drops what the issue asks' ] \
     || fail "a P1 that holds after its fix round (review 4: [P1] a.txt:3 drops what the issue asks) did not land with it filed: $(steps) $(cat "$STUB/filed" 2>&1)"
+}
+
+# Issue 1736: a first review that is a NO-GO with only new P2 or P3 findings ends the loop (loopstop(): new-p2): the
+# card runs no fix session, goes to its tests and lands, each finding filed as a follow-up at depth 1. Bugs: such a
+# review got a fix round (new-p2 held from review 2 on only), so the card paid a fix session and a second review for
+# findings that land as follow-ups anyway; the stop on its review line is not new-p2; a finding is not filed.
+t_newp2first() {
+  local p2='[P2] a.txt:1 the count is one short. Proof: line 2 reads two' p3='[P3] a.txt:2 a style nit'
+  setup "[$(issue 7 2026-01-01)]"; steps() { st "select(.issue == 7 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }
+  printf '%s\n' "$p2" "$p3" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
+  # loop: only a whole card shows that no fix session runs and the card goes on to its tests and lands with the follow-ups
+  loop run --only 7 >/dev/null || fail "run of #7 exited non-zero"
+  [ "$(steps)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,test pass,landed ok," ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] \
+    && [ "$(st 'select(.issue == 7 and .step == "review") | .stop')" = new-p2 ] \
+    || fail "review 1 ($p2; $p3) did not end the loop as new-p2 with no fix session: $(steps) $(wc -l < "$STUB/sessions") sessions"
+  [ "$(jq -r .title "$STUB/filed" | tr '\n' '|')" = "$p2|$p3|" ] && [ "$(jq -rs 'map(.body | test("(^|\n)Follow-up depth: 1(\n|$)")) | all' "$STUB/filed")" = true ] \
+    || fail "review 1's findings ($p2; $p3) were not each filed as a follow-up at depth 1: $(cat "$STUB/filed" 2>&1)"
+  pagesays_reuse docs/cards.md '`new-p2`: from the first review on, a `NO-GO` whose findings are all new and all P2 or P3' "review 1 ended the loop as $(st 'select(.issue == 7 and .step == "review") | .stop')"
+}
+
+# Issue 1736: a first review with a P1 beside a P2 gets a fix round (new-p2 needs no P0 or P1). Bug: the card lands it.
+t_newp2firstp1() {
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' b.txt base
+  printf '%s\n' '[P1] a.txt:2 drops the count' '[P2] b.txt:1 a nit' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  afterrun "$(issue 7 2026-01-01)"
+  [ "$(jq -c '[.after, .stop]' <<<"$AFTER")" = '["fix",""]' ] || fail "review 1 with [P1] a.txt:2 drops the count and [P2] b.txt:1 a nit did not go to a fix round: $AFTER"
+}
+
+# Issue 1736: a card whose issue is a follow-up at the depth cap (Follow-up depth: 2) files no follow-up, so a first
+# review of P2s alone gets a fix round there (afterreview() drops new-p2). Bug: the card lands and the P2 is fixed nowhere.
+t_newp2firstcap() {
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' b.txt base
+  printf '%s\n' '[P2] a.txt:2 the count is one short' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$FXWT.review"
+  afterrun "$(issue 7 2026-01-01 | jq -c '.body += "\nFollow-up depth: 2"')"
+  [ "$(jq -c '[.after, .stop]' <<<"$AFTER")" = '["fix",""]' ] || fail "review 1 with [P2] a.txt:2 the count is one short, on a follow-up at depth 2, did not go to a fix round: $AFTER"
 }

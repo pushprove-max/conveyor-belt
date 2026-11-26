@@ -103,8 +103,8 @@ t_port() {
 # patch. The prompt of the rebuild, and of a port (rebaseprompt(), lib/card.sh, on the card's prompt as card() makes
 # it), names the patch file and the commit it was made against, and holds none of the card's diff of 3 MB.
 # Bug: a NO-GO on the review after the rebuild got a fix round. That review is a last review (afterreview(),
-# lib/card.sh): its NO-GO lands the card with its finding filed, where the same NO-GO with no rebuild is fixed. Both are
-# review 1: from review 2 on, a NO-GO of new P2 findings alone ends the loop with no rebuild too (issue 1578).
+# lib/card.sh): its NO-GO lands the card with its finding filed, where the same NO-GO with no rebuild is fixed. The
+# NO-GO holds a P0: one of new P2 findings alone ends the loop with no rebuild too (loopstop(): new-p2).
 t_rebasebig() {
   local cm='rebase onto main conflicts: CONFLICT (content): Merge conflict in a.txt'
   setup "[$(issue 11 2026-01-01)]"
@@ -112,7 +112,7 @@ t_rebasebig() {
     issue=$(gh issue view 11 --json number,title,body,labels,milestone) && hdr=$(header on) && b=$(brief c1-11 "$issue" "$hdr") || exit 3
     p=$(cardprompt c1-11 "$hdr" "the card rules" "$b")
     rebaseprompt "$p" "$wt" "$cm" 0123abc > "$T/$CASE/rebuild" && rebaseprompt "$p" "$wt" "$cm" 0123abc port > "$T/$CASE/port" || exit 3
-    printf "%s\n" "$PORTNOGO2" > "$wt.review"; res=NO-GO fin="" finrev="" finend="{}" pass=1 rounds=0 tfix="" lfix="" mode="" privfix="" p1fix=""
+    printf "%s\n" "$NOGO3" > "$wt.review"; res=NO-GO fin="" finrev="" finend="{}" pass=1 rounds=0 tfix="" lfix="" mode="" privfix="" p1fix=""
     for rebased in 1 ""; do afterreview; echo "$after $stop"; done > "$T/$CASE/after"'
   [ "$RC" = 0 ] || fail "the rebuild's prompt or the decision after its review could not be made (exit $RC): $(cat "$T/$CASE/run.out")"
   local f; for f in rebuild port; do

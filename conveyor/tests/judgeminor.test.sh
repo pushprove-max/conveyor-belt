@@ -89,13 +89,13 @@ t_minorforged() {
 
 # Bug: an accepted P3 still open after the last review round lands with no follow-up, or one filed above P3: with the
 # test pack's three priorities (P0 to P2, as this project's pack) it was labelled P2. An issue with none of the pack's
-# priorities is P3 (LEVEL), so the follow-up has none. The second review repeats it after its fix, and every finding
-# is P3, so it is the last review (donewhen.sh repeats()).
+# priorities is P3 (LEVEL), so the follow-up has none. The first review holds the P3 alone, a new finding, so it is the
+# last review (loopstop(): new-p2).
 t_minorleft() {
   judging "[$(issue 7 2026-01-01 P1)]" off
-  printf '%s\n' "$MINOR3" 'USER-VISIBLE: no' 'VERDICT: NO-GO' | tee "$STUB/review.1" > "$STUB/review.2"
+  printf '%s\n' "$MINOR3" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   loop run --only 7 >/dev/null || fail "run exited non-zero"
-  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO NO-GO " ] && [ "$(st 'select(.step == "landed") | .followups | tojson')" = '[100101]' ] \
+  [ "$(rev 7 .result | tr '\n' ' ')" = "NO-GO " ] && [ "$(st 'select(.step == "landed") | .followups | tojson')" = '[100101]' ] \
     || fail "the P3 left after the last review did not land with its follow-up: $(st 'select(.step | IN("review", "landed", "blocked")) | "\(.step) \(.result)"' | tr '\n' ,)"
   [ "$(jq -r '[.title, (.labels | map(.name) | join(" "))] | join(" | ")' "$STUB/filed")" = "$MINOR3 | conveyor-followup bug" ] \
     || fail "the follow-up is not the P3 finding with no priority label (P3): $(cat "$STUB/filed")"

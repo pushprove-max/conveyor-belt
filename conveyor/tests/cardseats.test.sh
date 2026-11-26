@@ -101,8 +101,8 @@ t_cardseatfix() {
 # card's sessions, comma-joined (not printed: the setup must stay in the case's shell).
 fixrounds() { # [pack filter]
   seatsetup "[$(issue 7 2026-01-01)]"; [ -z "${1:-}" ] || tune "$1"
-  printf '%s\n' '[P2] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
-  # A P1: a review 2 of new P2s alone ends the loop (loopstop(): new-p2), with no second fix round.
+  # P1s: a review of new P2s alone ends the loop (loopstop(): new-p2), with no fix round.
+  printf '%s\n' '[P1] a.txt:1 wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.1"
   printf '%s\n' '[P1] a.txt:2 another wrong word' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review.2"
   echo "$GO" > "$STUB/review.3"; echo 'echo "$RANDOM" >> a.txt' > "$STUB/build"
   : > "$STUB/sessions"; loop run >/dev/null || fail "run exited non-zero" # loop: only a whole card has a second fix round, with its own seat's effort

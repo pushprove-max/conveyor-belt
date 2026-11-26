@@ -150,7 +150,7 @@ t_privprivate() {
   local H=/home; local f="[P2] a.txt:1 reads $H/user/notes.txt" # the home path is put together here, as AT is
   setup "[$(issue 7 2026-01-01)]"; for i in 1 2 3; do printf '%s\nUSER-VISIBLE: no\nVERDICT: NO-GO\n' "$(moved "${i/3/}" "$f")" > "$STUB/review.$i"; done
   [ "$(bash "$SRC/lib/pack.sh" get privacy.mode "$R/.conveyor/project.json")" = private ] || fail "the test pack is not in private mode"
-  # loop: only a whole card files its review's findings as follow-ups when its reviews run out, the warning in its output
+  # loop: only a whole card files its review's findings as follow-ups when its loop ends, the warning in its output
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   grep -q "reads $H/user/notes.txt" "$STUB/filed" && [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "a private repo's follow-up was not filed: $(cat "$STUB/filed" 2>&1)"
   grep -q 'privacy warning .*line [0-9]*: home path' <<<"$out" && ! grep -q 'privacy warning.*notes\.txt' <<<"$out" || fail "no privacy warning, or it names the match: $out"

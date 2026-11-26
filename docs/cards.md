@@ -366,12 +366,12 @@ has no step. The loop ends at the first of these:
 - `repeat`: a finding comes back after its fix, and each P0 or P1 finding of the review comes back too. A `harm` P0
   or P1 that comes back also ends the loop this way, whatever else the review holds. The card gets no more fix
   sessions for it.
-- `new-p2`: from the second review on, a `NO-GO` whose findings are all new and all P2 or P3. Each finding of the
-  earlier reviews is fixed, and none is P0 or P1. The card lands, and each `harm` finding becomes a follow-up card. A
-  finding of another kind goes to its list (Harm or self-heals, below). A review with a new P0 or P1, or with a finding
-  that comes back, does not end the loop this way: the reasons above apply to it as before, and when none of them
-  holds, it gets a fix round. A fix round also follows for a card whose issue is a follow-up at the follow-up depth cap, as it files no follow-up. The reviews
-  are counted as for `max-reviews`.
+- `new-p2`: from the first review on, a `NO-GO` whose findings are all new and all P2 or P3. None of them is P0 or P1,
+  and none comes back after its fix. The card gets no fix session for them: it goes to its tests and lands, and each
+  `harm` finding becomes a follow-up card. A finding of another kind goes to its list (Harm or self-heals, below). A
+  review with a P0 or P1, or with a finding that comes back, does not end the loop this way: the reasons above apply to
+  it as before, and when none of them holds, it gets a fix round. A fix round also follows for a card whose issue is a
+  follow-up at the follow-up depth cap, as it files no follow-up.
 
 A `NO-GO` with no finding to fix, such as one that holds only an `UNPROVEN` line, blocks the card when none of the
 reasons above ends the loop at that review. The reason is
@@ -546,7 +546,9 @@ panel lists them, and "File as issue" files one as an issue (`conveyor/README.md
 is in its own block under the finding, led by "Why the judge declined it" or "Why the code declined it". Each sentence
 starts a new line, code shows in a code font, and a file and line in it opens that line on GitHub.
 
-Findings still open after the last review become follow-up issues, which become cards of their own. A finding that the
+Findings still open after the last review become follow-up issues, which become cards of their own. This includes
+the first review: when it is a `NO-GO` whose findings are all P2 or P3, the loop ends there (`new-p2`, above), and the
+card gets no fix session for them. A finding that the
 judge sorted as another kind than `harm` goes to its list instead (Harm or self-heals, above). Each follow-up's
 body says how deep it is, as the line `Follow-up depth: N`: 1 for a follow-up of a first card, 2 for a follow-up of
 a follow-up. Follow-ups go two levels deep. A card whose issue is at depth 2 files no follow-ups: its leftover findings

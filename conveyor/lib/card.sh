@@ -140,7 +140,7 @@ fixprompt() { # <card prompt> <the findings, each led by its id, and what follow
   printf '%s' "$1"$'\n\n'"$FIX$([ -z "${3:-}" ] || printf '\n%s' "$FIXBACK")"$'\n'"$2"
 }
 # Why a review ends the fix loop, the first that holds: go (a GO), max-reviews (it is review MAX_REVIEWS, counting the rounds a retried card carries), rebased (the one review after a landing conflict), test-fix (after a test fix),
-# lint-fix (after the landing gate's lint fix), land (the kept review of a kept patch landed with no review), repeat (a NO-GO that repeats a fixed finding, each P0 or P1 of it a repeat; afterreview() ends the loop so too when a repeated harm one is P0 or P1), new-p2 (from review 2 on, counted as max-reviews is, a NO-GO with findings that repeats none, none of them P0 or P1 (a finding with no level is P1): the card lands, each harm finding filed as a follow-up and each of another kind sent to its list, issue 1578; afterreview() drops it at the follow-up depth cap). Prints nothing when a fix round follows.
+# lint-fix (after the landing gate's lint fix), land (the kept review of a kept patch landed with no review), repeat (a NO-GO that repeats a fixed finding, each P0 or P1 of it a repeat; afterreview() ends the loop so too when a repeated harm one is P0 or P1), new-p2 (from review 1 on, a NO-GO with findings that repeats none, none of them P0 or P1 (a finding with no level is P1): the card lands, each harm finding filed as a follow-up and each of another kind sent to its list, issue 1578; afterreview() drops it at the follow-up depth cap). Prints nothing when a fix round follows.
 loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix> <mode> <donewhen.sh repeats() lines> <review file>
   if [ "$1" = GO ]; then echo go
   elif [ "$2" -ge "$MAX_REVIEWS" ]; then echo max-reviews
@@ -149,7 +149,7 @@ loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix>
   elif [ -n "$5" ]; then echo lint-fix
   elif [ "$6" = land ]; then echo land
   elif [ -n "$7" ] && [ "$(findings "$8" | jq -s --slurpfile r <(jq -c '.line' <<<"$7") 'map(select((.level == "P0" or .level == "P1") and (.line | IN($r[]) | not))) | length')" = 0 ]; then echo repeat
-  elif [ -z "$7" ] && [ "$2" -ge 2 ] && [ "$(findings "$8" | jq -s 'length > 0 and all(.level != "P0" and .level != "P1")')" = true ]; then echo new-p2
+  elif [ -z "$7" ] && [ "$(findings "$8" | jq -s 'length > 0 and all(.level != "P0" and .level != "P1")')" = true ]; then echo new-p2
   fi
 }
 testfixprompt() { # <card prompt> <worktree> <the test run's exit> [the failures json of testfails(), as cardfailed() read them]
@@ -309,7 +309,7 @@ card() { # <card> <issue> [<branch> <tip>]
   prv=$'\n\n'"$PORTREVIEW"$'\n'"The difference is the file $wt.port."; kp=$fromk/$from.patch
   # A NO-GO is fixed and reviewed again; a NO-GO on a last review (review MAX_REVIEWS, counting the rounds a retried
   # card carries, or the one review after a landing conflict, a test fix or the landing gate's lint fix, or one that
-  # repeats a finding after its fix, or from review 2 on one whose findings are all new and all P2 or P3: loopstop() new-p2) lands with follow-ups,
+  # repeats a finding after its fix, or one whose findings are all new and all P2 or P3: loopstop() new-p2) lands with follow-ups,
   # after one fix round and a review on a P1, or after up to PRIVFIXES fix rounds on a privacy hit in its own change (afterreview()).
   # A GO card whose landing conflicts goes round once more: rebase, review. A finished loop whose landing still conflicts is ported once, as `retry` would port it.
   # Whatever the review, the changed tests pass here before anything is filed or landed.

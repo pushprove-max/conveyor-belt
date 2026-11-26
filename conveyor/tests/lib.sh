@@ -215,9 +215,9 @@ NOGO3=$'[P0] a.txt:1 wrong word\nb.txt:22 no mark here\n[P2] c.txt:3 a nit\nNEW 
 # A review with each finding moved to other lines (a.txt:1 becomes a.txt:<k>1): the review of round <k> in a case
 # whose rounds must not repeat a finding (one that comes back after its fix round ends the loop early).
 moved() { sed -E "s/\.txt:([0-9]+)/.txt:$1\1/g" <<<"$2"; } # <k> <review>
-# The review on stdin, as review <k> of a case whose loop runs on past review 2: from review 2 on, a NO-GO of new P2
-# findings alone ends the loop (loopstop(): new-p2), so review 2 has its first P2 made a P1 and gets a fix round.
-p1at2() { if [ "$1" = 2 ]; then awk '!d && sub(/\[P2\]/, "[P1]") { d = 1 } 1'; else cat; fi; } # <k>
+# The review on stdin, as review <k> of a case whose loop runs on past review 2: a NO-GO of new P2 findings alone ends
+# the loop (loopstop(): new-p2), so reviews 1 and 2 have their first P2 made a P1 and get a fix round.
+p1at2() { if [ "$1" = 1 ] || [ "$1" = 2 ]; then awk '!d && sub(/\[P2\]/, "[P1]") { d = 1 } 1'; else cat; fi; } # <k>
 # NOGO3 with each finding a P2 (its P0, and the line with no level, which counts as a P1): a last NO-GO that lands with its follow-ups filed (one with a P0 or a P1 does not land).
 PORTNOGO=${NOGO3/\[P0\]/[P2]}; PORTNOGO=${PORTNOGO/$'\n'b.txt:22/$'\n'[P2] b.txt:22}
 # rebasesetup <issue>: a fresh main with that one issue, every review a GO; the build adds a line, and its rebuild
