@@ -15,7 +15,8 @@
 # other logs together name more times than its `== <file>` lines was run by another file's run too (wideeach() reads
 # that as well). A file's end line is logged by the file's own process as its command ends, as a run one at a time
 # logs it, never later by the run (which can be waiting for a slot then): a run stopped after a file passed keeps that
-# pass in the log. Exits 1 when a file failed.
+# pass in the log. Exits 1 when a file failed. A file whose command exits 126 or 127 (it could not run) has a line
+# `TESTRUN cannotrun<TAB><file><TAB><exit>` after its `-- FAIL` line.
 # side (a card's list, filecmd() files): the files run side by side, each in its own process on a test slot of its own
 # (lib/slots.sh, the library CONVEYOR_TEST_SLOTS names): the run's home slot when no other file of the run is on it
 # (slot_take), else a slot of the pool, waited for, so a card never runs more files at once than it holds slots and
@@ -142,7 +143,7 @@ fileeach() { # <side|one> <test.fileCommand> <FILELIMIT> <LOADSCALE> <log> [file
       # Its end line, logged here at once: the run reads its exit only once it is free (fe_reap). Ended with the run
       # from now on, it exits with its own exit, so the output and the log both have the end line.
       trap '' TERM
-      if [ "$x" = 0 ]; then echo "-- ok $f"; elif [ "$x" = 124 ] && [ "$n" != 0 ]; then echo "-- timeout $f"; else echo "-- FAIL $f"; fi >> "$l"
+      if [ "$x" = 0 ]; then echo "-- ok $f"; elif [ "$x" = 124 ] && [ "$n" != 0 ]; then echo "-- timeout $f"; else echo "-- FAIL $f"; [ "$x" != 126 ] && [ "$x" != 127 ] || printf 'TESTRUN cannotrun\t%s\t%s\n' "$f" "$x"; fi >> "$l"
       exit "$x" ) < /dev/null &
     job[$!]=$i
     [ -z "$sl" ] || slot_free

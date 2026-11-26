@@ -602,13 +602,16 @@ line gives that is not in the worktree: judge whether that line'"'"'s evidence s
 # The bug-card check (bugproof.sh bugproof(), card()): the reasons a bug card goes back to its build session or is blocked (UNFIXED
 # only when its test files ran without the fix; NOTEST when the change has none, <patterns> the pack's tests.patterns;
 # SHARED when its only new tests are inline tests that share lines with the fix in <file>;
-# NOTBACK when main's code could not be put back for the run), what
+# NOTBACK when main's code could not be put back for the run; NOTBUG when the run without the fix failed, but its test
+# command could not run or its output lacks the issue's `Bug error:` text), what
 # that session is told after the brief (<why>: the reason; the check's result follows it), and what the review is told
 # before that result.
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 UNFIXED='the new tests pass without the fix, so they do not prove it'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 NOTEST='no test file found in the change (patterns: <patterns>); set tests.patterns in .conveyor/project.json'
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+NOTBUG='the new tests fail without the fix, but not with the bug'"'"'s own error'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 SHARED='the new test and the fix are in the same lines of <file>; bugproof cannot take out the fix alone'
 # Why a card's test run, or its bug-card check, did not run or was stopped (narrowstop(), lib/testlist.sh): a card

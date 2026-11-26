@@ -188,7 +188,8 @@ commentsonly() { # <worktree>
 # <worktree>.unfixed, which the review is shown, and fails when the check does not hold: the change adds or changes no
 # test file, or no test failed in their run on main (it passed, or only its runner failed it). BUGWHY is the reason,
 # which card() gives the build session and the block: "the new tests pass without the fix" (UNFIXED) only when its
-# test files ran without the fix; with none found it names the patterns (NOTEST). A run that reports more test files than it was given
+# test files ran without the fix; "the new tests fail without the fix, but not with the bug's own error" (NOTBUG) when the
+# run failed but proves nothing (testfailed()); with none found it names the patterns (NOTEST). A run that reports more test files than it was given
 # (tests()) is stopped as it runs (watch()): the check fails with exit 2, the result's first line the reason (NARROW),
 # as a build session cannot change the pack. A failed run on main
 # that gave no result for one of those files (noresult(): no pass and no fail of it) proves nothing either way: it runs
@@ -300,14 +301,16 @@ bugmain() { # <card> <worktree> <issue json>
   # with no test.fileCommand, and the check fails with that reason (exit 2), as a build session cannot change the pack.
   TEST_GIVEN=${#fs[@]} bugrun "$mwt" "${fs[@]}"; rc=$?
   [ ! -s "$mwt.stop" ] || stop=$(<"$mwt.stop")
-  [ -n "$stop" ] || ! testfailed "$mwt" "$rc" || held=1
+  [ -n "$stop" ] || ! testfailed "$mwt" "$rc" "$3" || held=1
   # A failed run that proved nothing and gave no result for a file it was given (noresult()) says nothing either
-  # way: it runs once more, and when that run gives none either the card is blocked with that reason (exit 2).
-  if [ -z "$stop" ] && [ -z "$held" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}"); then
+  # way: it runs once more, and when that run gives none either the card is blocked with that reason (exit 2). A run
+  # that failed without the bug's own error, or whose command could not run (NOTBUGWHY), is not that: it is no proof,
+  # and the build is told so (exit 1).
+  if [ -z "$stop" ] && [ -z "$held" ] && [ -z "$NOTBUGWHY" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}"); then
     TEST_GIVEN=${#fs[@]} bugrun "$mwt" "${fs[@]}"; rc=$?
     [ ! -s "$mwt.stop" ] || stop=$(<"$mwt.stop")
-    [ -n "$stop" ] || ! testfailed "$mwt" "$rc" || held=1
-    [ -z "$stop" ] && [ -z "$held" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}") || nr=''
+    [ -n "$stop" ] || ! testfailed "$mwt" "$rc" "$3" || held=1
+    [ -z "$stop" ] && [ -z "$held" ] && [ -z "$NOTBUGWHY" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}") || nr=''
   fi
   [ -z "$stop" ] || BUGWHY=$stop
   { [ -z "$stop" ] || printf '%s\n' "$stop"
@@ -319,6 +322,7 @@ bugmain() { # <card> <worktree> <issue json>
     if [ -n "$stop" ]; then echo "The run was stopped there, so it proves nothing either way."
     elif [ $rc = 0 ]; then echo "They all passed there: $UNFIXED."
     elif [ -n "$nr" ]; then echo "The run failed there twice (exit $rc), and gave no result for $nr either time, so it proves nothing either way."
+    elif [ -n "$NOTBUGWHY" ]; then BUGWHY=$NOTBUG; echo "The run failed there (exit $rc), but $NOTBUGWHY: $NOTBUG."
     elif [ -z "$held" ]; then echo "The run failed there (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
     else echo "The run failed there (exit $rc): at least one fails without the fix, as it should."; latecount "$mwt"; fi
     echo 'The end of that run'"'"'s output:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
@@ -353,7 +357,7 @@ bugnamed() { # <card> <worktree> <issue json>
     elif git -C "$mwt" reset -q --hard; then TEST_GIVEN=${#nf[@]} bugrun "$mwt" "${nf[@]}"; rc=$?; [ ! -s "$mwt.stop" ] || stop=$(<"$mwt.stop")
     else rc=''; fi
     [ -z "$stop" ] || BUGWHY=$stop
-    [ -n "$stop" ] || [ "$fx" != 0 ] || [ -z "$rc" ] || ! testfailed "$mwt" "$rc" || held=1
+    [ -n "$stop" ] || [ "$fx" != 0 ] || [ -z "$rc" ] || ! testfailed "$mwt" "$rc" "$3" || held=1
     { [ -z "$stop" ] || printf '%s\n' "$stop"
       printf 'The change selects no test of its own (no test file is linked to the files it touches), so the test files its issue'"'"'s Done-when names were run alone on main'"'"'s code at %s, with the fix and without it:\n' "$sha"
       printf -- '- %s\n' "${nf[@]}"; [ -z "$cn" ] || printf '%s\n' "${cn^}"
@@ -361,6 +365,7 @@ bugnamed() { # <card> <worktree> <issue json>
       elif [ "$fx" != 0 ]; then echo "They failed with the fix (exit $fx): $UNFIXED."
       elif [ -z "$rc" ]; then BUGWHY=$NOTBACK; echo "Main's code could not be put back without the fix, so they did not run without it."
       elif [ "$rc" = 0 ]; then echo "They all passed without the fix: $UNFIXED."
+      elif [ -n "$NOTBUGWHY" ]; then BUGWHY=$NOTBUG; echo "The run without the fix failed (exit $rc), but $NOTBUGWHY: $NOTBUG."
       elif [ -z "$held" ]; then echo "The run without the fix failed (exit $rc), but no test failed in it (its runner stopped it): $UNFIXED."
       else echo "They pass with the fix, and the run without it failed (exit $rc): at least one fails without the fix, as it should."; latecount "$mwt"; fi
       echo 'The end of the run without the fix:'; echo '```'; tail -n 30 "$mwt.test" 2>/dev/null | tr -d '\000'; echo '```'; } > "$2.unfixed"
@@ -549,12 +554,33 @@ redkeep() { # <card> <output file> <without|with|setup>
 rednames() { # <verdict> <mainred.sh redrun() output>
   jq -r --arg v "$1" '[.[] | select(.verdict == $v) | "`\(.name)`"] | join(", ")' <<<"$2"
 }
+# The bug's own error in an issue (<issue json>): the text after the first body line that starts with `Bug error:`,
+# trimmed, when it has 8 characters or more. Prints nothing when the issue names none.
+bugerror() { # <issue json>
+  jq -r '[.body // "" | splits("\r?\n")] | map(select(startswith("Bug error:"))) | first // empty
+    | ltrimstr("Bug error:") | gsub("^\\s+|\\s+$"; "") | select(length >= 8)' <<<"${1:-null}" 2>/dev/null
+}
 # A run of the bug-card check (bugproof()) that is proof: it failed, and a test failed in it. With the runner's logs
 # (testlogs()), they must name a file that failed (testfails()); an exit of the runner itself with no test failing (its
 # own check refused the run) proves nothing. A command that writes no logs says no more than its exit. A test file
 # stopped at its own time limit (testlist.sh bugrun(): <worktree>.late, the run's exit 124) failed: a test that hangs without the
-# fix fails without it.
-testfailed() { # <worktree> <exit>
-  { [ "$2" = 124 ] && [ -s "$1.late" ]; } && return 0
-  [ "$2" != 0 ] && { [ -z "$(testlogs "$1")" ] || jq -e '.files != []' <<<"$(testfails "$1.test" "$2")" >/dev/null 2>&1; }
+# fix fails without it. Two runs that failed are still no proof, and NOTBUGWHY, set here (and emptied on every call), says
+# which: the test command could not run (exit 126 or 127, or a file's, which fileeach() logs as `TESTRUN cannotrun`), or the issue gives the bug's own error (bugerror()) and the
+# run's output, its colour codes taken out, does not hold that text (a fixed string, exact in case). Callers give
+# NOTBUG as the reason when it is set.
+testfailed() { # <worktree> <exit> <issue json>
+  local err x='' l=()
+  NOTBUGWHY=''
+  [ "$2" != 0 ] || return 1
+  case $2 in 126|127) NOTBUGWHY="the test command could not run (exit $2)"; return 1 ;; esac
+  # A runner that runs each file alone (fileeach()) exits 1 for a file whose command could not run, and logs it.
+  mapfile -t l < <(testlogs "$1")
+  [ ${#l[@]} = 0 ] || x=$(grep -hm1 $'^TESTRUN cannotrun\t' "${l[@]}" 2>/dev/null | head -n 1 | cut -f2-)
+  [ -z "$x" ] || { NOTBUGWHY="the test command could not run (exit ${x#*$'\t'}, for ${x%%$'\t'*})"; return 1; }
+  { { [ "$2" = 124 ] && [ -s "$1.late" ]; } \
+    || { [ -z "$(testlogs "$1")" ] || jq -e '.files != []' <<<"$(testfails "$1.test" "$2")" >/dev/null 2>&1; }; } || return 1
+  err=$(bugerror "${3:-}")
+  [ -z "$err" ] || [ "$(sed 's/\x1b\[[0-9;]*m//g' "$1.test" 2>/dev/null | grep -caF -- "$err")" != 0 ] && return 0
+  NOTBUGWHY="the run's output does not hold \"$err\", the text of the issue's \`Bug error:\` line"
+  return 1
 }

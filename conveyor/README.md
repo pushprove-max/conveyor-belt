@@ -1326,7 +1326,12 @@ When the change adds or changes no test file, the reason is "no test file found 
 patterns>); set tests.patterns in .conveyor/project.json" in its place. When the pack sets no `test.fileCommand` and Conveyor has no runner of its own for one of those files, the check does not run: the card is blocked with a reason that names
 `test.fileCommand`, with no second build session and no review. When the project's test files run alone as plain
 scripts, setup suggests `node`, `bash` or `python3` as `test.fileCommand`. A failed run counts only when a test failed in it: when the runner writes its logs, they must name a
-file that failed (a runner that stops the run with no test failing proves nothing). Each test file keeps its own time
+file that failed (a runner that stops the run with no test failing proves nothing). A run whose test command could not
+run (exit 126 or 127) proves nothing either. When the issue has a body line that starts with `Bug error:`, its text
+(8 characters or more; only the first such line counts) must be in the run's output, exact in case, with colour codes
+taken out. A run that fails without that text goes back to the build session with the reason "the new tests fail
+without the fix, but not with the bug's own error" (the same once-only route as above), and its result says whether the
+command could not run or which text was not found. Each test file keeps its own time
 limit there, its `# timeout: <seconds>` line among the comments it starts with; a file with no such line has no limit
 of its own. The `testTimeout` setting limits the whole run, not each file, so the files before it can use most of
 that time. When a file runs past its own limit, it is stopped and named as timed out. When the run's limit stops the

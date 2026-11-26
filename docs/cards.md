@@ -546,6 +546,14 @@ The build check of a bug card does not block a change that changes only comments
 `.mts` or `.cts` product files, with or without a test file. Its result says the change is comments only, and the
 review judges each changed comment.
 
+A bug issue names its error in a line of its body that starts with `Bug error:`, followed by the error text. The text
+needs 8 characters or more, and only the first such line counts. The build check of a bug card runs the card's new
+tests on main's code without the fix, and a failing run proves the fix only when the test command could run and, when
+the issue has such a line, the run's output holds that text, exact in case. A run whose test command could not run
+(exit 126 or 127), or whose output lacks that text, is no proof: the card goes back to its build session, told "the
+new tests fail without the fix, but not with the bug's own error", and the result says which of the two it was. An
+issue with no such line is checked as before.
+
 When the pack's `privacy.mode` is public, a follow-up's finding is filed with each part the privacy check flags
 replaced by a mark such as `<home path>`, and the issue says the text was masked. A last finding that the privacy check
 flags in a line the card itself adds gets one more fix round instead of a follow-up.

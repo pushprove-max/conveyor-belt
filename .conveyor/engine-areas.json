@@ -424,6 +424,7 @@
 {"area": "testrun", "test": "mainredreplaced.test.sh"}
 {"area": "testrun", "test": "machinehold.test.sh"}
 {"area": "testrun", "test": "bugproof.test.sh"}
+{"area": "testrun", "test": "bugerror.test.sh"}
 {"area": "testrun", "test": "speedproof.test.sh"}
 {"area": "testrun", "test": "widerun.test.sh"}
 {"area": "testrun", "test": "narrow.test.sh"}
