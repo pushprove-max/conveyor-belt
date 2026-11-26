@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 60
+# timeout: 120
 # The Foreman's reply stop hook (stop.sh reply) and a wake that names a card "not yet reported: blocked".
 # Bug caught (#1665): a blocked card sat under Needs you for 45 minutes while the Foreman replied "Idle" to four wakes
 # about it, as the hook judged a wake reply by its words alone. Now the stop is refused, at every stop, until an act
 # naming the card was logged in a ruling log since it blocked, the turn asked the owner about it, or its record no
 # longer holds it blocked.
+# The limit is 120 s, not 60: the 17 cases run side by side and cost about 30 s of CPU, so in a card's test run that
+# shares the machine with other files the file took 44 to 60 s of wall clock, and its own limit stopped it at random
+# (#1710: no case failed, the run ended with exit 124, and the file passed alone on the re-run).
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 export ENG=$SRC/../conveyor.sh
