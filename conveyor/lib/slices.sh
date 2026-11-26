@@ -37,12 +37,13 @@
 # split could build that slice's work a second time.
 SPLIT_TIMEOUT=300 SPLIT_FILE=6000 SPLIT_FILES=10
 # The issue (its input, as gh issue view gives it) as the split check measures it. $area is the pack's area prefix.
-# The Done when section is a heading or a line "Done when" (in bold or with a colon too) up to the next heading; its
+# The Done when section is a heading or a line "Done when", "Acceptance criteria" or "Definition of done" (in bold or
+# with a colon too; the first one in the issue) up to the next heading; its
 # items are its bullets at the least indent (a nested bullet is part of its item). A file path is a word with a dot
 # and an extension that starts with a letter, two characters or more before that dot (not e.g. or 4.7M); it can start
 # with a dot, as a path in a hidden directory does (.claude/x.js).
 SPLITSIZE='def dwsect: [splits("\r?\n")] as $l
-    | ([range($l | length) | select($l[.] | test("^\\s*(#{1,6}\\s*)?(\\*\\*)?Done when(\\*\\*)?\\s*:?\\s*(\\*\\*)?\\s*:?\\s*$"; "i"))] | first) as $i
+    | ([range($l | length) | select($l[.] | test("^\\s*(#{1,6}\\s*)?(\\*\\*)?(Done when|Acceptance criteria|Definition of done)(\\*\\*)?\\s*:?\\s*(\\*\\*)?\\s*:?\\s*$"; "i"))] | first) as $i
     | if $i == null then [] else $l[($i + 1):] | (map(test("^\\s*#{1,6}\\s")) | index(true)) as $e | if $e == null then . else .[:$e] end end;
   def items: map(select(test("^\\s*[-*+]\\s+\\S"))) | (map(capture("^(?<i>\\s*)").i | length) | min) as $m
     | map(select((capture("^(?<i>\\s*)").i | length) == $m) | sub("^\\s*[-*+]\\s+"; "") | sub("\\s+$"; ""));

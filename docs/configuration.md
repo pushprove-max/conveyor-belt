@@ -370,9 +370,10 @@ Conveyor checks an issue one time, when it picks the issue and before the card b
 only after you edit its title or body. It does not check follow-ups, the slices of a split issue, or fix
 cards that have no issue.
 
-First, code measures the issue: the items of its Done when section, the file paths and the area labels that it names,
-and its length. The limits are `split.doneWhen`, `split.files`, `split.areas` and `split.chars` in
-`.conveyor/project.json`. When the issue is under all of them, Conveyor keeps it whole and asks no model.
+First, code measures the issue: the items of its Done when section (a section headed Acceptance criteria or
+Definition of done counts the same), the file paths and the area labels that it names, and its length. The limits are
+`split.doneWhen`, `split.files`, `split.areas` and `split.chars` in `.conveyor/project.json`. When the issue is under
+all of them, Conveyor keeps it whole and asks no model.
 
 When the issue reaches one limit, Conveyor asks the judge (Judge on the Rules tab) one time. The judge gets the issue
 and the files that it names, as they are on main. It answers keep, or split into 2 or 3 slices:

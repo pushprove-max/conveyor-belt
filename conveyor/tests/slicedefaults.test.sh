@@ -15,10 +15,10 @@ FXWT=$T/none
 
 # Issue 7 with <items> Done-when items, naming <files> files, padded so that its title and body hold <chars> characters
 # (the split check counts the title, a newline and the body). The rule is shadow, the stub judge keeps the issue.
-sdissue() { # <items> <files> <chars>
+sdissue() { # <items> <files> <chars> [<heading line of the checklist, default "Done when:">]
   local body="Change" i
   for ((i = 1; i <= $2; i++)); do body+=" src/f$i.sh"; done
-  body+=$'.\n\nDone when:'
+  body+=$'.\n\n'"${4:-Done when:}"
   for ((i = 1; i <= $1; i++)); do body+=$'\n'"- item $i"; done
   body+=$'\n\n'
   local pad=$(($3 - 2 - ${#body}))
@@ -73,4 +73,24 @@ t_slicedefaultpack() {
   [ "$RC" = 0 ] && [ "$(judged)" = 0 ] || fail "splitcheck c1-7 7, 5 items under a pack with split.doneWhen 6, asked the judge ($(judged) calls) or stopped (exit $RC): $(cat "$T/$CASE/run.out")"
   [ "$(st 'select(.step == "split") | [.result, .split.verdict] | @json')" = '["kept","under"]' ] \
     || fail "the split line of 5 items under split.doneWhen 6 is not kept and under: $(st 'select(.step == "split")')"
+}
+
+# Bug caught (#1753): an issue whose checklist sits under "## Acceptance criteria" had no Done-when items, so it was
+# kept as under with no judge call, or every slice the judge proposed was thrown out. The 4 items are read: counted on
+# the split line, numbered D1 to D4 in the judge's prompt, and the judge is asked.
+t_slicedefaultaccept() {
+  sdissue 4 1 500 '## Acceptance criteria'
+  fx_in 'splitcheck c1-7 7'
+  [ "$(judged)" = 1 ] && grep -qF 'D4: item 4' "$STUB/prompt" || fail "splitcheck c1-7 7, an issue with 4 items under '## Acceptance criteria', asked the judge $(judged) times, not 1, or its prompt lacks 'D4: item 4': $(st 'select(.step == "split")')"
+  [ "$(st 'select(.step == "split") | .split.size.doneWhen')" = 4 ] \
+    || fail "the split line of 4 items under '## Acceptance criteria' does not count 4 Done-when items: $(st 'select(.step == "split")')"
+}
+
+# Bug caught (#1753): the split step read "Acceptance criteria" but not "Definition of done", the third heading it
+# accepts, so an issue with its 4 items under "## Definition of done" was kept as under with no judge call.
+t_slicedefaultdod() {
+  sdissue 4 1 500 '## Definition of done'
+  fx_in 'splitcheck c1-7 7'
+  [ "$(judged)" = 1 ] && [ "$(st 'select(.step == "split") | .split.size.doneWhen')" = 4 ] \
+    || fail "splitcheck c1-7 7, an issue with 4 items under '## Definition of done', asked the judge $(judged) times, not 1, or did not count 4 items: $(st 'select(.step == "split")')"
 }
