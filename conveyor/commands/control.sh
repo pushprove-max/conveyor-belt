@@ -44,8 +44,11 @@ else case ${1:-}:${2:-} in model:* | reviewer:* | judge:* | tests:*) [[ " $CLINA
     . "$HERE/lib/testaction.sh" || exit 1
     . "$HERE/lib/testcardact.sh" || exit 1
     testcardact "$tcact" "${tcids[@]}" || exit $?
-    wakeloop # as control() does for a hold and a release: the loop's wait ends, so its next turn reads the record now
-    [ ${#tcnums[@]} = 0 ] && exit 0
-    locked control "$tcact" "${tcnums[@]}"; exit
+    # The loop's wait ends, so its next turn reads the record now. With issue numbers, control() wakes it once it has
+    # saved their hold or release: a wake before that could let the woken pick take an issue this holds. A control
+    # that fails still wakes it here, for the cards changed above.
+    if [ ${#tcnums[@]} = 0 ]; then wakeloop; exit 0; fi
+    locked control "$tcact" "${tcnums[@]}" && exit 0
+    tcrc=$?; wakeloop; exit "$tcrc"
   fi
   locked control "$@"; fi

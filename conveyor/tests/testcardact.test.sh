@@ -132,6 +132,36 @@ t_tcwake() {
   kill "$e" 2>/dev/null; wait "$e" 2>/dev/null; return 0
 }
 
+# Bug it catches (#1579 review): `control hold 7 <card id>` woke the loop before it saved the hold of #7, so the woken
+# pick, if it took the records' lock first, read #7 as unheld and picked it. Here this shell holds that lock, as such a
+# pick does, so the hold of #7 cannot be saved. The command runs with a flock() that marks, as a file, its wait for
+# that lock (`locked` takes it on fd 9; the card record's lock is on another fd), which comes after the old wake: once
+# it is there, the stand-in loop must not have been woken. This shell then sends the stand-in a WINCH: bash runs
+# waiting traps in signal-number order, and URG's number is the lower on Linux and macOS, so a wake sent before is
+# logged before the mark. The stand-in, a real process the command signals, is waited for as a file. With the lock let
+# go, the command saves the hold of #7 and then wakes the stand-in, which reads #7 held.
+t_tcwakeafter() {
+  tkcards; local d=$T/$CASE e lk
+  bash -c 'trap "echo \"urg \$(jq -c .held \"\$1\")\" >> \"\$0.sig\"" URG; trap "echo mark >> \"\$0.sig\"" WINCH; : > "$0.ready"; sleep 60 & s=$!; while kill -0 "$s" 2>/dev/null; do wait "$s"; done' "$STUB/loop" "$ST/control.json" & e=$! # sleep: the stand-in loop's own wait
+  wait_until '[ -e "$STUB/loop.ready" ]' || fail "the stand-in loop did not start"
+  jq -cn --argjson p "$e" --arg t "$(p_started "$e")" '{pid: $p, started: $t}' > "$ST/loop.json"
+  exec {lk}>>"$ST/cards.jsonl"; flock "$lk" || fail "this shell could not take the records' lock"
+  # The command's shell closes its copy of this shell's lock descriptor: a copy left open keeps the lock held after
+  # this shell lets it go, and the command then waits for it until the test times out.
+  ( exec {lk}>&-; flock() { [ "$1" != 9 ] || : > "$TKWAITS"; command flock "$@"; }; export -f flock; export TKWAITS=$d/waits
+    loop control hold 7 "$TKF" > "$d/hold.out" 2>&1; echo $? > "$d/hold.rc" ) &
+  wait_until "[ -e '$d/waits' ]" || { exec {lk}>&-; fail "control hold 7 $TKF did not reach the records' lock: $(cat "$d/hold.out")"; }
+  kill -WINCH "$e"
+  wait_until '[ -s "$STUB/loop.sig" ]' || { exec {lk}>&-; fail "the stand-in loop logged no mark"; }
+  # The card's hold, taken under its own lock, is saved: the command is past the point where it used to wake the loop.
+  [ "$(tkheld)" = '[["f.test.sh",true],["g.test.sh",false]]' ] && [ "$(cat "$STUB/loop.sig")" = mark ] \
+    || { exec {lk}>&-; fail "control hold 7 $TKF, run while this shell held the records' lock, did not hold the card, or woke the loop before it saved the hold of #7 (cards: $(tkheld), the stand-in's log: $(cat "$STUB/loop.sig"), output: $(cat "$d/hold.out"))"; }
+  exec {lk}>&-
+  wait_until "[ -s '$d/hold.rc' ]" && [ "$(cat "$d/hold.rc")" = 0 ] || fail "control hold 7 $TKF did not end with 0 once the lock was let go: $(cat "$d/hold.out")"
+  WAIT_CEILING=10 wait_until 'grep -qxF "urg [7]" "$STUB/loop.sig"' || fail "control hold 7 $TKF did not wake the loop with #7 held: $(cat "$STUB/loop.sig")"
+  kill "$e" 2>/dev/null; wait "$e" 2>/dev/null; return 0
+}
+
 # Bug it catches (#1579): a shut queued card leaves what another record still assigns to it. (1) A batch card of the
 # self-heals list holds its entries (batched): shut must give them back, or no later batch takes them. (2) A card that
 # is a part of a split issue is what that issue waits for: shut refuses it, naming the issue, and changes nothing.
