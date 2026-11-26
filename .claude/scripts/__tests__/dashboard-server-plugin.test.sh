@@ -284,6 +284,25 @@ check('unread_host_file_refused', got == 500 and 'the host file does not read' i
       and text(os.path.join(T, 'gh-calls')) == 'call\n' and text(NOTES) == HEAD + A + '\n' + C + '\n', (got, said))
 os.remove(os.path.join(T, 'config', 'conveyor', 'host.json'))
 
+# Bug: outside the plugin's own repository stop.sh adds a filed line and keeps the price note. A preview open from before
+# the filing could still file the note (the check was on the submitted row alone), and Dismiss of the filed line left
+# the note, which then showed again with File on GitHub. Filing or previewing the note is refused (409), no gh call is
+# made; Dismiss of the filed line takes that model's note with it and leaves the note of another model.
+PN = '- 2026-11-20T10:00:00Z · card - · No built-in price for claude-new-7: it is not priced · evidence: -'
+PO = '- 2026-11-20T10:01:00Z · card - · No built-in price for claude-new-8: it is not priced · evidence: -'
+PF = '- 2026-11-20T10:02:00Z · card - · No built-in price for claude-new-7: it is not priced, filed as #21 · evidence: -'
+with open(NOTES, 'w') as f:
+    f.write(HEAD + PN + '\n' + PO + '\n' + PF + '\n')
+got_p, said_p = call('/plugin-preview', {'file': NOTES, 'line': PN})
+got_f, said_f = call('/plugin-file', {'file': NOTES, 'line': PN, 'title': 'No price for claude-new-7', 'body': 'p\n'})
+check('price_note_of_a_filed_model_not_filed', got_p == 409 and got_f == 409 and text(os.path.join(T, 'gh-calls')) == 'call\n'
+      and text(NOTES) == HEAD + PN + '\n' + PO + '\n' + PF + '\n', 'preview and File of %r beside %r: %r, %r' % (PN, PF, (got_p, said_p), (got_f, said_f)))
+got_o, said_o = call('/plugin-preview', {'file': NOTES, 'line': PO})
+check('price_note_of_another_model_previewed', got_o == 200, 'preview of %r beside %r: %r' % (PO, PF, (got_o, said_o)))
+got_d = post({'file': NOTES, 'line': PF})
+check('dismissing_filed_line_takes_its_price_note', got_d == 200 and text(NOTES) == HEAD + PO + '\n',
+      'Dismiss of %r left %r' % (PF, text(NOTES)))
+
 # Bug (R114): two tabs that File one note at once both found it in the file and both filed it, as the check that the
 # note is there, the gh call and the removal were held by no lock (the server answers each request on its own
 # thread). The first File's gh is held until the second request has asked for the note's lock (note_hold()), or,

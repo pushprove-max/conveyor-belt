@@ -425,7 +425,7 @@ lanes() {
 # here, under the lock the loop takes. Once a model: price-notes.txt in the folder lists the models added, so a note
 # dismissed or filed here does not come back; and none for a model a note in the file already names. A note so added
 # whose model a snapshot names as filed or dismissed on the host (priceFiled) is taken out here, unless filed here;
-# while no snapshot gives priceFiled, one the snapshots of all the Foreman's projects no longer give is.
+# while no snapshot gives priceFiled, one the snapshots of all the Foreman's projects no longer give is. Outside the plugin's own repository stop.sh adds a filed line as a row and keeps the note: the note of a model a filed line names is not listed (pluginNotes) or counted (pluginBugs), so Health does not offer File on GitHub for it again.
 # checkout_of <repo> [<ledger>]: the main checkout on this machine whose remote the pack names (.remote, default
 # origin) has that repository's name as the last part of its address (lib.sh's repo_name), looked for in the
 # checkout holding the record's ledger, then in the folders beside the Board's own checkout. Nonzero when none has.
@@ -510,9 +510,9 @@ foremen() { # <conveyor part>
     [[ $since =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] || since=''
     wake=$(stat -c %Y "$dir/last-wake.txt" 2>/dev/null) && wake=$(iso "$wake") || wake=''
     waiting=$(for f in "$dir"/pending/*.wake; do [ ! -f "$f" ] || head -n 1 "$f" | cut -c1-200; done | jq -Rc . | jq -cs .) || waiting='[]'
-    bugs=$(grep -c '^- ' "$dir/plugin-bugs.md" 2>/dev/null) || bugs=0
     notes=$({ grep '^- ' "$dir/plugin-bugs.md" 2>/dev/null || true; } | jq -Rc '(capture("^- (?<at>[^ ]+) · card (?<card>[^ ]+) · (?<text>.*)$")
-      // {at: null, card: null, text: ltrimstr("- ")}) + {line: .}' | jq -cs .) || notes='[]'
+      // {at: null, card: null, text: ltrimstr("- ")}) + {line: .}' | jq -cs 'def mod: (.line | capture(" · No built-in price for (?<m>[^ :]+): ").m) // null; def filed: .line | test("filed as #[1-9][0-9]*[[:space:]]*\\.? · evidence: "; "i"); [.[] | select(filed) | mod | strings] as $f | map(select(filed or (mod as $x | $x == null or ($f | index([$x]) == null))))') || notes='[]'
+    bugs=$(jq length <<<"$notes") || bugs=0
     url=$(jq -r '.[0]' <<<"$projects"); url=plugin-bugs/${url//[^A-Za-z0-9._-]/_}.txt
     [ "$bugs" -eq 0 ] || { mkdir -p "$OUT/plugin-bugs" && cp -- "$dir/plugin-bugs.md" "$OUT/$url" && chmod 644 "$OUT/$url"; } || url=''
     out=$(jq -c --argjson p "$projects" --arg sid "$sid" --arg s "$since" --arg w "$wake" --argjson q "${waiting:-[]}" \

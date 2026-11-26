@@ -630,6 +630,14 @@ q '.panels.health.data.pluginBugs[0].notes | map([.at, .card, .text]) == [["2026
   "Health has each note the Foreman noted, with its time, card and text"
 # Bug it catches: the link was file://, which a browser does not open from the https Board; the copy is served beside the page.
 cmp -s "$FM/plugin-bugs.md" "$OUT/plugin-bugs/sample.txt" || fail "the Board's folder has a copy of the notes, which the page links to"
+# Bug it catches: outside the plugin's own repository stop.sh adds the filed line as a row and keeps the price note, so
+# Health listed the note too and gave it File on GitHub again. Only the note of a model a filed line names goes; a
+# note for another model, and the filed line itself, stay.
+PX='- 2026-11-12T09:00:00Z · card - · No built-in price for claude-new-7: it is not priced · evidence: -'
+printf '# Plugin problems\n\n%s\n- 2026-11-12T09:05:00Z · card - · No built-in price for claude-new-8: it is not priced · evidence: -\n- 2026-11-12T09:10:00Z · card - · No built-in price for claude-new-7: it is not priced, filed as #21 · evidence: -\n' "$PX" > "$FM/plugin-bugs.md"
+run
+q '.panels.machine.data.foremen[0] | .pluginBugs == 2 and (.pluginNotes | map(.text) == ["No built-in price for claude-new-8: it is not priced · evidence: -", "No built-in price for claude-new-7: it is not priced, filed as #21 · evidence: -"])' \
+  "a price note a filed line names is listed or counted, or the note of another model or the filed line is not"
 rm -f "$FM/plugin-bugs.md"
 # No group: the same folder is sample's own Foreman, and widgetshop has none. A mark emptied (the role turned off)
 # is no Foreman either. Groups that name a project twice are not understood: each project has its own.

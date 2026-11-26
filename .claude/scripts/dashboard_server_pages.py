@@ -10,6 +10,18 @@ def notes_lock(path):
     return open(globals()['os'].path.join(globals()['os'].path.dirname(path), 'noprice.lock'), 'a')
 
 
+def price_model(line):
+    """The model a note of the Foreman's for a model with no built-in price names (NOTE_PRICE), else None."""
+    # NOTE_PRICE is the control part's, run in this namespace: globals() names it where a linter reads this file alone.
+    m = globals()['NOTE_PRICE'].search(line)
+    return m.group('model') if m else None
+
+
+def is_filed(line):
+    """Whether the note line names the issue it was filed as (NOTE_FILED, the control part's)."""
+    return bool(globals()['NOTE_FILED'].search(line))
+
+
 NOTE_HOLDS = {}  # a plugin-bugs.md path and note line, and the lock of the File and Dismiss requests on it (note_hold())
 
 
@@ -351,7 +363,8 @@ class Pages:
         .claude-plugin/plugin.json names, through conveyor.sh gh-write (the engine's privacy gate, gh_write(),
         lib/issues.sh) run on this machine's checkout (board_main()); only once gh answers the new issue's link is the note removed, as dismiss
         removes it, and the reply is that link. A failed gh call leaves the note and the reply is gh's error (502). A note
-        that names the issue it was filed as (NOTE_FILED) is neither previewed nor filed (409); it can be dismissed."""
+        that names the issue it was filed as (NOTE_FILED) is neither previewed nor filed (409), nor is a price note
+        whose model a filed line of the file names; a filed line can be dismissed, and takes that model's price note with it."""
         if not self.own_page():
             return self.send_error(403)
         user = self.authed()
@@ -388,13 +401,18 @@ class Pages:
         under note_hold()."""
         try:
             with open(path, encoding='utf-8') as f:
-                held = any(x.rstrip('\n') == body['line'] for x in f)
+                lines = [x.rstrip('\n') for x in f]
         except (OSError, ValueError) as e:  # ValueError: a file that is not UTF-8
             return self.reply(500, 'the note could not be read: %s' % (getattr(e, 'strerror', None) or e))
-        if not held:
+        if body['line'] not in lines:
             return self.reply(409, 'that note is no longer in the file; nothing was changed')
         if act != 'dismiss' and NOTE_FILED.search(body['line']):
             return self.reply(409, 'that note names the issue it was filed as; nothing was filed')
+        # Outside the plugin's own repository stop.sh adds a filed line as a row and keeps the price note: a page that
+        # still shows the note (a preview open from before) must not file the model's note a second time.
+        model = price_model(body['line'])
+        if act != 'dismiss' and model and any(is_filed(x) and price_model(x) == model for x in lines):
+            return self.reply(409, 'a line of the file names the issue this note was filed as; nothing was filed')
         if act == 'preview':
             try:
                 repo = plugin_repo()
@@ -456,7 +474,12 @@ class Pages:
             at = next((i for i, x in enumerate(lines) if x.rstrip('\n') == body['line']), None)
             if at is None:  # filed, then dismissed from another page meanwhile: the issue is still the reply
                 return self.reply(200, url) if url else self.reply(409, 'that note is no longer in the file; nothing was changed')
-            del lines[at]
+            # A filed line of a price note is dismissed with the note it was filed from, which stop.sh keeps beside it
+            # outside the plugin's own repository: left, the note would show again with File on GitHub. The model
+            # stays on noprice-noted, so serve does not note it again.
+            model = price_model(body['line']) if is_filed(body['line']) else None
+            lines = [x for i, x in enumerate(lines) if i != at and not (
+                model and price_model(x) == model and not is_filed(x))]
             with open(tmp, 'w', encoding='utf-8') as f:
                 f.writelines(lines)
             os.chmod(tmp, os.stat(path).st_mode & 0o7777)

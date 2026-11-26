@@ -339,6 +339,7 @@ NOTE_LINE = re.compile(r'- (?P<at>\S+) · card (?P<card>\S+) · (?P<text>.*)')  
 # The note's guessed cause (foreman/stop.sh's "cause not checked: <text>" part): it ends at the card, evidence or filed part, each in its own shape, a card id or "-", a path or "-" (so a cause that says ", card lookups" goes on).
 NOTE_CAUSE = globals()['re'].compile(r'(?:, |^)cause not checked: (?P<cause>.*?)(?=, card (?:(?:c[0-9]{8}T[0-9]{6}-|<card>)\S*|-)(?:, |$)|, evidence (?:\S*/\S*|-)(?:, |$)|, filed as #|$)', globals()['re'].I)  # re is the base part's, as CARD is
 NOTE_FILED = globals()['re'].compile(r'[\s,;]filed as #[1-9][0-9]*\s*\.? · evidence: ', globals()['re'].I)  # re is the base part's, as above
+NOTE_PRICE = globals()['re'].compile(r' · No built-in price for (?P<model>[^ :]+): ')  # the Foreman's note for a model with no price (noprice(), lib/control.sh)
 # Any card id a note's text or evidence names (its card field's, or another card's, or a card's evidence file name): it
 # ends at its last '-<issue or lane>' part, so a file's extension (c...-alpha-7.err) and the stop that ends a sentence
 # (see c...-alpha-7.) stay out of it.
