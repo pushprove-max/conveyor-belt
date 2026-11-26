@@ -166,6 +166,17 @@ t_reldraft() {
     || fail "release-prep does not say the model gave no notes: $out"
   [ ! -e "$ST/release/1.1.0.md" ] || fail "a draft was written when the model gave none"
 }
+# Bug (#1704): a model that refuses ("I cannot write ...") gave lines with no source, the trace left every one out, and
+# the empty draft started a notes card. The run now ends non-zero with the model's first line, no draft, no card.
+t_relrefused() {
+  local out cards
+  relsetup true nonotes; cards=$ST/testactions/cards.json
+  relmodel $'I cannot write the 1.1.0 release notes from this input.\nThe commits give too little to go on.'
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] \
+    && grep -qF 'the notes draft could not be written: the model gave no notes: I cannot write the 1.1.0 release notes from this input.; nothing run' <<<"$out" \
+    && [ ! -e "$ST/release/1.1.0.md" ] && [ ! -e "$ST/release/1.1.0.sources.json" ] && ! grep -qs 'docs/releases/1.1.0.md' "$cards" \
+    || fail "a refusal from the model started a notes card, left a draft, or its first line is not in the reason: $out"
+}
 # notesshut: the notes card the release run waits on (its record's notes.card) is closed, so the next release-prep
 # drafts again.
 notesshut() {

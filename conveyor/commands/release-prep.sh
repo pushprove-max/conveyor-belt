@@ -155,9 +155,9 @@ Answer with the notes alone, in Markdown, and nothing else.'
 # short hash, which the model names after each line (RELNOTES), and the draft is then traced to them (reltrace()) and
 # checked by the style check (relfix()). With no last tag (the first release): from <commit>'s README and docs alone
 # (relfirst()), no commit or issue, and no trace. Prints the trace's and the style check's words; fails, with why on
-# stdout, when the model gives no notes or the draft cannot be traced.
+# stdout, when the model gives no notes (no line has a source, as in a refusal; the reason is its first line) or the draft cannot be traced.
 relnotes() { # <version> <last tag, or empty> <commit> <file>
-  local subj ns n j iss='[]' p nums hs t
+  local subj ns n j iss='[]' p nums hs t first
   if [ -z "$2" ]; then relask "$(relfirst "$1" "$3")" "$4" || return 1; relfix "$4"; relheadsrefuse "$3" "$4" "$1"; return; fi
   subj=$(git log --no-merges --format='%h %s' "$2..$3" | sed -E 's/ \(#[0-9]+\)$//') && ns=$(git log --no-merges --format=%B "$2..$3") \
     && hs=$(git log --no-merges --format=%H "$2..$3") || { echo "the commits could not be read"; return 1; }
@@ -168,8 +168,8 @@ relnotes() { # <version> <last tag, or empty> <commit> <file>
   done
   p=${RELNOTES//VERSION/$1}$'\n\n# The README sections\n\n'$(relsections "$3" | sed 's/^/- /')$'\n\n'$(jq -r --arg s "$subj" '"# The issues that landed\n\n" + (map("## #\(.number): \(.title // "")\n\n\((.body // "")[0:4000])\n") | join("\n"))
     + "\n# The commit subjects\n\n" + $s' <<<"$iss") || { echo "the issues could not be read"; return 1; }
-  relask "$p" "$4.raw" || return 1
-  t=$(reltrace "$4.raw" "$4" "$iss" "$hs" "$2") || { rm -f "$4.raw"; echo "$t"; return 1; }
+  relask "$p" "$4.raw" || return 1; first=$(grep -m 1 -v '^[[:space:]]*$' "$4.raw" | cut -c 1-200) # read before reltrace() replaces the raw answer with its kept lines
+  t=$(reltrace "$4.raw" "$4" "$iss" "$hs" "$2") || { rm -f "$4.raw"; echo "$t"; return 1; }; jq -e 'length > 0' "${4%.md}.sources.json" > /dev/null || { rm -f "$4.raw"; echo "the model gave no notes: $first"; return 1; }
   printf '%s' "$t"; relfix "$4" "$4.raw" "$iss" "$hs" "$2"; rm -f "$4.raw"; relheadsrefuse "$3" "$4" "$1"
 }
 # The draft <raw> traced to the release's issues (<issues>: those its commits name that gh read, a JSON array of
