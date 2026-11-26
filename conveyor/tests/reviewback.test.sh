@@ -398,7 +398,7 @@ yesblock() {
   fx_wt 'echo fix1 >> a.txt; mkdir -p web; echo pay >> web/pay.ts' b.txt base; issue 7 2026-01-01 | jq -c '{body}' > "$FXWT.body"
   for i in 1 2; do printf '%s\n' '[P2] a.txt:1 wrong word' "$YES" 'VERDICT: NO-GO' > "$STUB/review.$i"; done; cp "$STUB/review.1" "$FXWT.review"
   keptblock 7 2 "visible to customers or staff: needs Dana's yes: guests see a new Pay button" 'told 1 "echo fix2 >> a.txt" && cp "$STUB/review.2" "$wt.review"'
-  issue 7 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-11, only for admins"]' > "$STUB/issues.json"
+  issue 7 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-11; condition: only for admins"]' > "$STUB/issues.json"
 }
 
 t_reviewrounds() {

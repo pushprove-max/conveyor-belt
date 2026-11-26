@@ -275,7 +275,7 @@ t_resumeyes() {
   portkept 11 "$old" "visible to customers or staff: needs Dana's yes: guests see a new Pay button" 'echo eleven > e.txt; mkdir -p web; echo eleven > web/e.ts' \
     "$(printf '%s\n' "$YES" 'VERDICT: GO')"
   issue 11 2026-01-01 | jq -c '{body}' > "$K/$old.body"
-  issue 11 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-12, only for admins"]' > "$STUB/issues.json"
+  issue 11 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-12; condition: only for admins"]' > "$STUB/issues.json"
   # Bug: retry said this card lands "with no build and no review", though the condition has it reviewed first.
   loop retry 11 | grep -q "reviews the kept patch .*-11\.patch against Dana's yes as the issue now gives it, with no build" || fail "retry does not say the conditionally approved kept patch is reviewed before it lands"
   resumed 11

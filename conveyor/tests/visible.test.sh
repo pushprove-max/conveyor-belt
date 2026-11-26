@@ -138,14 +138,30 @@ t_visibleapproved() {
   # A turn with no approval line added gives nothing back. Real turns: the bug is that no turn gives the card back
   # by itself, so only a turn with no `retry` shows it.
   loop run >/dev/null; [ "$(st 'select(.issue == 8 and .step == "picked") | .card')" = "$old" ] && [ ! -s "$ST/retried.jsonl" ] || fail "#8 was given back with no approval line: $(steps 8)"
-  issue 8 2026-01-01 | jq -c '[.body += "\n\nVisible change approved: Dana 2026-01-02 (yes)\n"]' > "$STUB/issues.json"
+  # Bug: a note on the line ("looks good, ship it") was taken as a condition, so the plain yes had the kept patch
+  # reviewed again. Only text after `condition:` is a condition (t_visiblecondition).
+  issue 8 2026-01-01 | jq -c '[.body += "\n\nVisible change approved: Dana 2026-01-02 (yes), looks good, ship it\n"]' > "$STUB/issues.json"
+  sessions=$(wc -l < "$STUB/sessions")
   # The bug is the turn giving the card back by itself (approved(), at each turn of lib/run.sh), with no `retry`.
   # loop: a call of resumeplan after a retry would not show the turn gives the card back by itself
   loop run >/dev/null || fail "run after the approval line exited non-zero"
   grep -q "\"card\":\"$old\"" "$ST/retried.jsonl" || fail "the turn did not give #8 back once its approval line was added"
-  [ "$(st 'select(.issue == 8 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] \
-    || fail "the approved #8 did not land from its kept patch with no second review: $(steps 8)"
+  [ "$(st 'select(.issue == 8 and .step == "landed") | .sha')" = "$(git -C "$R" rev-parse HEAD)" ] && [ "$(wc -l < "$STUB/reviews")" = 1 ] && [ "$(wc -l < "$STUB/sessions")" = "$sessions" ] \
+    || fail "#8, approved with a note and no condition, did not land from its kept patch with no build and no second review: $(steps 8)"
   [ "$(loop snapshot --fresh | jq -c '[.needsYou.blocked[], .needsYou.waiting[]] | map(.issue)')" = '[]' ] || fail "Needs you still lists the approved #8: $(loop snapshot --fresh | jq -c .needsYou)"
+}
+# Bug it catches: a yes with `condition: <text>` landed the kept patch unreviewed, or had it built again. The next
+# card reviews the kept patch against the condition, with no build session.
+t_visiblecondition() {
+  blocked; old=$(st 'select(.issue == 8 and .step == "blocked") | .card'); sessions=$(wc -l < "$STUB/sessions")
+  printf '%s\n' "$YES" 'VERDICT: GO' > "$STUB/review.2"
+  issue 8 2026-01-01 | jq -c '[.body += "\n\nVisible change approved: Dana 2026-01-02 (yes); condition: guests see it only on mobile\n"]' > "$STUB/issues.json"
+  # The turn gives the card back by itself, as in t_visibleapproved, and the next card's whole path is what is proved.
+  # loop: resumeplan alone would not show that the review ran against the line with no build session
+  loop run >/dev/null || fail "run after the approval line with a condition exited non-zero"
+  st 'select(.issue == 8 and .step == "worktree") | .reason' | grep -q "^reviewing the kept patch of card $old against the condition of Dana's yes: no build" \
+    && [ "$(wc -l < "$STUB/sessions")" = "$sessions" ] && [ "$(wc -l < "$STUB/reviews")" = 2 ] && grep -qF 'condition: guests see it only on mobile' "$STUB/asked" \
+    || fail "#8, approved with condition: guests see it only on mobile, was not reviewed against the condition with no build: $(steps 8)"
 }
 # Bug (R92): a card an engine before #349 stopped for the yes to a budget of its own for its test file (the yes form,
 # then "a budget of its own for the test file ", #7, its patch kept as its build changed the file), blocked for it

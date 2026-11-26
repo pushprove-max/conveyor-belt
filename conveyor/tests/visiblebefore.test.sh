@@ -176,15 +176,26 @@ t_beforeyesno() {
 # there holds the card to words nobody wrote. Read as the loop reads an approval line (card.sh: conditional() of
 # prompts.sh), with no card run: a card whose line gives a condition is held to it (t_beforediffers's brief).
 t_beforeboard() {
-  # shellcheck disable=SC2034 # OWNER is read by conditional(), defined by the eval
-  local OWNER=Dana RX; eval "$(grep '^RX=' "$SRC/lib/prompts.sh"; sed -n '/^conditional() {/,/^}/p' "$SRC/lib/prompts.sh")"
-  [ -n "$RX" ] && declare -F conditional >/dev/null || fail "the engine no longer defines conditional() or RX where this case reads them"
+  eval "$(sed -n '/^conditional() {/,/^}/p' "$SRC/lib/prompts.sh")"
+  declare -F conditional >/dev/null || fail "the engine no longer defines conditional() where this case reads it"
   A='Visible change approved: Dana, 2026-01-02'
   cond() { conditional "$(jq -cn --arg b "Make Pay green."$'\n\n'"$1" '{body: $b}')"; } # <approval line>
   ! cond "$A" && cond "$A; condition: staff only" || fail "a plain yes and a yes with a condition are not told apart, so this case proves nothing"
   ! cond "$A (Board user ops.dana)" || fail "the Board user named on the approval line was taken as a condition"
   cond "$A (Board user ops.dana); condition: staff only" || fail "a Board approval line with a condition was not held to it"
   ! cond "$A (Board user this device)" || fail "the Board user \"this device\" on the approval line was taken as a condition"
+  # Bug: any word beyond who and when (a note such as "looks good") was taken as a condition, so a plain yes with a
+  # note was reviewed again. Only text after `condition:` (any case) is a condition.
+  ! cond "$A, looks good, ship it" || fail "a note on the approval line was taken as a condition: $A, looks good, ship it"
+  cond "$A; Condition: staff only" || fail "a condition marked \`Condition:\` was not read: $A; Condition: staff only"
+  ! cond "$A; condition: " || fail "a \`condition:\` mark with no text after it was taken as a condition: $A; condition: "
+  # Bug: only a letter or digit after the mark counted, so a Board condition of symbols alone was not reviewed.
+  cond "$A; condition: 🔒" || fail "a condition of symbols only was not read: $A; condition: 🔒"
+  # Bug: the mark was found inside a longer word, so a note holding "precondition:" was reviewed as a condition.
+  ! cond "$A, precondition: tests already passed" || fail "a note with \`precondition:\` was taken as a condition: $A, precondition: tests already passed"
+  # Bug: a dash before the mark was read as part of a word, so the condition was skipped and the kept patch landed
+  # unreviewed.
+  cond "$A -condition: staff only" || fail "a condition after a dash was not read: $A -condition: staff only"
 }
 # #13 says nothing visible changes; its review finds a visible change: it stops, as with no section, though it
 # has an approval line, and is not held to a section.

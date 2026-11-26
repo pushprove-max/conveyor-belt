@@ -308,6 +308,12 @@ approval line stops again, with no build. Your yes covers that one policy change
 changes a policy file, the card stops again for a new yes. This stop is not controlled by the rule "visible changes
 need the owner's yes". It waits for your yes when that rule is off too. To say no, hold the issue.
 
+A yes gives a condition in one form only: `condition:`, in any case, with the condition after it, as in
+`Visible change approved: <owner>, <date>; condition: <text>`. **Approve with this condition** on the Board writes
+this form. All other words in the line are notes, and they change nothing. When the rule "visible changes need the
+owner's yes" is on, a yes with a condition has the kept patch reviewed against the condition, with no build, before
+it lands. A yes with no condition lands the kept patch with no build and no review.
+
 The rule Lint check is on by default. `conveyor.sh control rules lint=off` turns it off. Then no lint command runs in a
 card, the brief has no `# Lint` section, and a change of lint policy does not stop for your yes.
 

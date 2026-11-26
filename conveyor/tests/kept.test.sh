@@ -458,7 +458,7 @@ t_kepttestotherreview() {
 # Bug it catches: a yes with a condition had every retry of a Test-step block review its kept patch again, though that
 # block's review read the issue with the line in it and held the change to the condition, and the issue has not changed.
 t_kepttestcond() {
-  local body=$'Add (a).\nVisible change approved: r-12, only for admins'
+  local body=$'Add (a).\nVisible change approved: r-12; condition: only for admins'
   kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' "$body" '' "$GO" "$body"
   [ "$(jq -c '[.rc, .mode, .note]' <<<"$RESUMED")" = '[0,"land","starting at the tests from the kept patch of card c1-9: no build and no review"]' ] \
     || fail "a card blocked in its Test step, on an issue whose conditional yes its review read, did not start at its tests: $RESUMED"
@@ -466,14 +466,14 @@ t_kepttestcond() {
 # Bug it catches: skipping the condition check for every Test-step block let a conditional yes written after the review,
 # which nothing had held the change against, land on that review.
 t_kepttestcondnew() {
-  kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' $'Add (a).\nVisible change approved: r-12, only for admins'
+  kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' $'Add (a).\nVisible change approved: r-12; condition: only for admins'
   [ "$(jq -c '[.rc, .mode, .note]' <<<"$RESUMED")" = "[0,\"review\",\"reviewing the kept patch of card c1-9 against the condition of Dana's yes: no build\"]" ] \
     || fail "a card blocked in its Test step, on a conditional yes written after its review, was not reviewed against the condition with no build: $RESUMED"
 }
 # Bug it catches: the Test-step skip of the condition check trusted keptway() wait, which counts approval lines and does
 # not read them: a condition edited in the line that was already there (same count) landed on a review of the old one.
 t_kepttestcondedit() {
-  kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' $'Add (a).\nVisible change approved: r-12, only for admins' '' "$GO" $'Add (a).\nVisible change approved: r-12, only for staff'
+  kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' $'Add (a).\nVisible change approved: r-12; condition: only for admins' '' "$GO" $'Add (a).\nVisible change approved: r-12; condition: only for staff'
   [ "$(jq -c '[.rc, .mode, .note]' <<<"$RESUMED")" = "[0,\"review\",\"reviewing the kept patch of card c1-9 against the condition of Dana's yes: no build\"]" ] \
     || fail "a card blocked in its Test step, on a yes whose condition was edited since its review, was not reviewed against the condition with no build: $RESUMED"
 }

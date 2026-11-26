@@ -90,7 +90,7 @@ t_rolloutretry() {
   printf '%s\n' "ROLLOUT: $mig" "$yes" 'VERDICT: GO' > "$STUB/review.2"
   # loop: the block for the yes is a card's whole path (its review line with the rollout action, kept patch and body)
   loop run >/dev/null; st 'select(.issue == 11 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#11 was not blocked for Dana's yes: $(st 'select(.issue == 11)')"
-  issue 11 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-12, only for admins"]' > "$STUB/issues.json"
+  issue 11 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-12; condition: only for admins"]' > "$STUB/issues.json"
   printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$yes" 'VERDICT: NO-GO' > "$STUB/review.3"
   # The GO after the fix reviews the fix alone, and keeps an action by writing it again: it writes those its prompt
   # names as in force (rereview()), so 0004 lands only when the retried card's action reached that review.
@@ -117,7 +117,7 @@ t_rolloutreplaced() {
   printf '%s\n' "ROLLOUT: $old" "$yes" 'VERDICT: GO' > "$STUB/review.1"
   # loop: the block for the yes is a card's whole path (its review line with the rollout action, kept patch and body)
   loop run >/dev/null; st 'select(.issue == 13 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#13 was not blocked for Dana's yes: $(st 'select(.issue == 13)')"
-  issue 13 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-14, only for admins"]' > "$STUB/issues.json"
+  issue 13 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-14; condition: only for admins"]' > "$STUB/issues.json"
   printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$yes" 'VERDICT: NO-GO' > "$STUB/review.2"
   printf '%s\n' "ROLLOUT: $new" "$yes" 'VERDICT: GO' > "$STUB/review.3"
   echo 'echo admins >> e.txt' > "$STUB/build"
@@ -164,7 +164,7 @@ t_rolloutcleared() {
   printf '%s\n' "ROLLOUT: $old" "$yes" 'VERDICT: GO' > "$STUB/review.1"
   # loop: the block for the yes is a card's whole path (its review line with the rollout action, kept patch and body)
   loop run >/dev/null; st 'select(.issue == 15 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#15 was not blocked for Dana's yes: $(st 'select(.issue == 15)')"
-  issue 15 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-16, only for admins"]' > "$STUB/issues.json"
+  issue 15 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-16; condition: only for admins"]' > "$STUB/issues.json"
   printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$yes" 'VERDICT: NO-GO' > "$STUB/review.2"
   printf '%s\n' "$yes" 'VERDICT: GO' > "$STUB/review.3"
   echo 'echo admins > e.txt' > "$STUB/build"
@@ -190,7 +190,7 @@ t_rolloutretryfix() {
   printf '%s\n' "ROLLOUT: $old" "$yes" 'VERDICT: GO' > "$STUB/review.1"
   # loop: the block for the yes is a card's whole path (its review line with the rollout action, kept patch and body)
   loop run >/dev/null; st 'select(.issue == 17 and .step == "blocked") | .reason' | grep -q "needs Dana's yes" || fail "#17 was not blocked for Dana's yes: $(st 'select(.issue == 17)')"
-  issue 17 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-18, only for admins"]' > "$STUB/issues.json"
+  issue 17 2026-01-01 | jq -c '[.body += "\nVisible change approved: r-18; condition: only for admins"]' > "$STUB/issues.json"
   printf '%s\n' '[P1] e.txt:1 guests see it: the approval is only for admins' "$yes" 'VERDICT: NO-GO' > "$STUB/review.2"
   printf '%s\n' "$yes" 'VERDICT: GO' > "$STUB/review.3"
   echo 'echo admins >> e.txt' > "$STUB/build"

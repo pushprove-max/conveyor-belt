@@ -606,7 +606,7 @@ def control_script(action, args, main, today, record=None, user=None):
         labels = ' '.join(f'--remove-label {q(x)}' for x in args[1:])
         return f'cd {q(record or main)} || exit 1; {conv} gh-write issue edit {q(args[0])} {labels} >/dev/null && CONVEYOR_UNLABELED=1 {conv} control release {q(args[0])}'
     if action in ('approve', 'decline'):
-        # The line names the record's pack owner: conveyor.sh's conditional() reads any other name as a condition.
+        # The line names the record's pack owner, whose yes it is.
         owner = 'o=$(bash %s get owner.name %s)' % (q(main + '/conveyor/lib/pack.sh'), q((record or main) + '/.conveyor/project.json'))
         main = record or main
         n = q(args[0])
@@ -624,7 +624,7 @@ def control_script(action, args, main, today, record=None, user=None):
             # made first was undone and the declined card was built again.
             held = q(f'conveyor: issue #{args[0]} is held; it is not built until it is released')
             return f'cd {q(main)} || exit 1; {gate}{why} && {{ [ "$w" = before ] || {conv} retry {n}; }} && {conv} control hold {n} >/dev/null && echo {held}'
-        # conveyor.sh's conditional() reads "(Board user <name>)" as who said yes, not as a condition.
+        # conveyor.sh's conditional() reads only the text after "condition:" as a condition.
         rest = ', %s (Board user %s)' % (today, user) + ('; condition: %s' % said if said else '')
         return ('cd %s || exit 1; %s && %s && b=$(gh issue view %s --json body --jq .body)'
                 ' && printf \'%%s\\n\\nVisible change approved: %%s%%s\\n\' "$b" "$o" %s'

@@ -451,13 +451,12 @@ made undone. Do not review the rest of the change again: it was reviewed. The di
 the staged change, line for line (- is the kept patch, + the staged change), is the file named below. Its hunk
 headers are kept: a changed header is main moving the lines, or the port changing another place than the patch did.
 An empty file means the staged change is the kept patch exactly.'
-# Does the owner's yes hold more than a plain yes? A `Visible change approved:` line that says anything beyond who,
-# when and which ruling (the pack's owner, a date, a ruling id, "yes", the Board user who said it as the Board writes
-# it, "(Board user <name>)", or "(Board user this device)" for the Board opened with no login on its own machine) may
-# give a condition, and is taken as giving one.
+# Does the owner's yes give a condition? A condition has one form: `condition:` (any case) on a
+# `Visible change approved:` line, as a word of its own (not the end of "precondition:"; any punctuation before it,
+# a dash too, ends the word before), with any text after it, symbols too (the Board writes "; condition: <text>" for
+# any text it is given). Any other words on the line are notes, and change nothing.
 conditional() { # <issue json>
-  jq -e --arg o "$OWNER" "$RX"'($o | rx) as $o | .body // "" | split("\n") | any(select(startswith("Visible change approved:")) | ltrimstr("Visible change approved:")
-    | gsub("\\(Board user ([A-Za-z0-9._-]{1,40}|this device)\\)|r-[0-9A-Za-z-]+|[0-9]{4}-[0-9]{2}-[0-9]{2}|\\b(" + $o + "|yes|ruling)\\b|[[:space:][:punct:]]"; ""; "i") != "")' <<<"$1" >/dev/null 2>&1
+  jq -e '.body // "" | split("\n") | any(select(startswith("Visible change approved:")) | test("(^|[^[:alnum:]_])condition:[[:space:]]*[^[:space:]]"; "i"))' <<<"$1" >/dev/null 2>&1
 }
 # A follow-up inherits its parent's yes. A follow-up Conveyor filed (its body opens "Follow-up
 # to #N (Conveyor card ", or, a slice of a split, "Follow-up of #N: slice ") with no approval line of its own reads up its chain, up to MAX_DEPTH + 1 issues, for the
