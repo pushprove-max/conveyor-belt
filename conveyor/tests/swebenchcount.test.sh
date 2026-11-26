@@ -80,6 +80,20 @@ t_sweweekone() {
     || fail "swe_weeks 1 1 fresh, a conveyor and another arm on the builder's account (askings 30%, then 31%), does not give one share left for both: $o"
 }
 
+# Bug (#1454 follow-up E4): the other arm took the builder's account's newest kept reading (lastread) after the conveyor
+# guard's asking, so a card that landed in between (cardland.sh's `reading fresh`, here run as a wrapper on reading
+# right after the guard's asking returns) gave it a newer one: 70 and 69 for one account, shared false.
+t_sweweekland() {
+  swe; local o
+  export CONVEYOR_LIMIT_CMD='n=$(cat "$SWE_FX/n" 2>/dev/null || echo 30); echo $((n + 1)) > "$SWE_FX/n"; echo "{\"seven_day\":{\"utilization\":$n}}"'
+  o=$(set -- bench; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards HERE=$SRC; . "$SRC/lib/paths.sh" && . "$SRC/lib/records.sh" && . "$SRC/lib/prompts.sh" \
+    && . "$SRC/lib/control.sh" && tunables && . "$SRC/bench/swe.sh" && eval "real_$(declare -f reading)" \
+    && reading() { real_reading "$@"; [ -e "$T/$CASE/landed" ] || { : > "$T/$CASE/landed"; real_reading fresh > /dev/null; }; } \
+    && swe_weeks 1 1 fresh 2>&1)
+  [ "$o" = '{"conveyor":70,"agent":70,"shared":true}' ] \
+    || fail "swe_weeks 1 1 fresh, a conveyor and another arm on the builder's account, a card landing after the guard's asking (30%, then 31%), does not give one share left for both: $o"
+}
+
 # Bug (#1454 follow-up): with both roles on a proxy the conveyor guard reads no account, and that empty list matched
 # the default login's empty name, so the other arm took the kept start reading (30%) in place of asking again (40%).
 t_sweweekproxy() {

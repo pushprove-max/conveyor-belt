@@ -223,12 +223,10 @@ swe_guarded() { # [an arm that is not the engine's: any non-empty word] [a conve
   pct=$(swe_pct "$c" "${1:-}")
   [ "$(state "$(jq -c '.mode = "run"' <<<"$CTL_V")" "$pct")" = "paused by guard" ]
 }
-# With fresh, the reading is asked for whatever the age of the last asking (reading fresh); with last, the other arm's
-# is the newest kept, never asked (lastread).
-swe_pct() { # <control record> [an arm that is not the engine's: any non-empty word] [fresh | last]: the week's use the guard reads, "" for none
+# With fresh, the reading is asked for whatever the age of the last asking (reading fresh).
+swe_pct() { # <control record> [an arm that is not the engine's: any non-empty word] [fresh]: the week's use the guard reads, "" for none
   local f=''; [ "${3:-}" != fresh ] || f=fresh
-  if [ -n "${2:-}" ] && [ "${3:-}" = last ]; then ACCT=$(ctlacct "$1") lastread | jq -r '.pct // empty'
-  elif [ -n "${2:-}" ]; then ACCT=$(ctlacct "$1") reading $f | jq -r '.pct // empty'; else guardread "$1" "${f:-ask}" | jq -r '.pct // empty'; fi
+  if [ -n "${2:-}" ]; then ACCT=$(ctlacct "$1") reading $f | jq -r '.pct // empty'; else guardread "$1" "${f:-ask}" | jq -r '.pct // empty'; fi
 }
 # The share of the week left at which the guard stops new trials (100 less its percent; "off" for no guard, which stops
 # nothing), null when the control record does not read. The Board's Plan keeps a plan's use of the week above it.
@@ -242,17 +240,24 @@ swe_weekstop() {
 # read the builder's account when it is one of them and its reading is that highest, though a Claude reviewer has an
 # account of its own. A drop in the week is then the use of the trials of both kinds of arm together and the Board takes it so.
 # With fresh (the reading after a trial), each is asked for whatever the age of the last asking: a run that ends within
-# LIMIT_TTL of its start would otherwise end on its start's reading and show no use of the week. The builder's account,
-# when the conveyor guard has just asked for it, is not asked again for the other arm: two askings can differ, and
-# one account has one share of the week left.
+# LIMIT_TTL of its start would otherwise end on its start's reading and show no use of the week. When the conveyor
+# guard reads the builder's account, the other arm takes the reading of that account from the guard's own pass, never
+# a second asking or a later look at the readings file: two askings can differ, a card that lands in between can add a
+# newer reading, and one account has one share of the week left.
 swe_weeks() { # <conveyor: non-empty when the run has a conveyor arm> <agent: non-empty when it has another arm on the Claude login> [fresh]
-  local c='' a='' s=false o=false fa=${3:-}
+  local c='' a='' s=false o=false b r x f=''; [ "${3:-}" != fresh ] || f=fresh
   if ctlread 2>/dev/null; then
-    [[ $'\n'$(subaccts "$CTL_V" | cut -d ' ' -f 2-)$'\n' == *$'\n'"$(ctlacct "$CTL_V")"$'\n'* ]] && o=true
-    # The other arm takes the conveyor guard's asking only when it gave a reading: with every role on an API route, no
-    # account is read and the empty list matches the default login's empty name, so lastread would give a stale one.
-    [ -z "$1" ] || { c=$(swe_pct "$CTL_V" '' "${3:-}"); [ "$o:${3:-}" != true:fresh ] || [ -z "$c" ] || fa=last; }
-    [ -z "$2" ] || a=$(swe_pct "$CTL_V" 1 "$fa")
+    b=$(ctlacct "$CTL_V")
+    [[ $'\n'$(subaccts "$CTL_V" | cut -d ' ' -f 2-)$'\n' == *$'\n'"$b"$'\n'* ]] && o=true
+    if [ -n "$1" ] && [ "$o" = true ]; then
+      # The conveyor guard's reading as guardread asks it (the highest of its accounts), each kept with its account.
+      r=$(subaccts "$CTL_V" | cut -d ' ' -f 2- | sort -u | while IFS= read -r x; do ACCT=$x reading $f | jq -c --arg x "$x" '{x: $x, pct}'; done | jq -cs .)
+      c=$(jq -r 'max_by(.pct).pct // empty' <<<"$r")
+      [ -z "$2" ] || a=$(jq -r --arg b "$b" 'map(select(.x == $b)) | first.pct // empty' <<<"$r")
+    elif [ -n "$1" ]; then c=$(swe_pct "$CTL_V" '' "${3:-}"); fi
+    # With every role on an API route the guard reads no account (the empty list matches the default login's empty
+    # name): the other arm asks for its own.
+    [ -z "$2" ] || [ -n "$a" ] || a=$(swe_pct "$CTL_V" 1 "${3:-}")
     if [ -n "$c" ] && [ "$c" = "$a" ] && [ "$o" = true ]; then s=true; fi
   fi
   jq -nc --arg c "$c" --arg a "$a" --argjson s "$s" 'def left: if . == "" then null else (100 - tonumber) * 10 | round / 10 end;
