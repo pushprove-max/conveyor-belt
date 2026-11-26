@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 60
+# timeout: 120
 # The Foreman's start (foreman.sh start, its context) and its rules hook (foreman.sh rules) each stay under Claude Code's
 # 10,000-character limit on a hook's output; when a file does not fit, the output cuts it at a whole line and tells the
 # Foreman to Read the rest.
