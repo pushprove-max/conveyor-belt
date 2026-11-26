@@ -1712,11 +1712,14 @@ LANDEDLINE='fromjson? | objects | select(.step == "landed") | .issue'
 # ($STATE.landed, linesum()): only the lines written since the last read are parsed, so the cost does not grow with the
 # history. Parsing the whole records as one jq string, under the records' lock, ran for minutes on a long history and
 # held every card's record writes. A dry pick writes nothing, so it parses each line of its file in place (a line
-# not whole yet is skipped).
+# not whole yet is skipped). The issues of the landed list (landedall(), lib/records.sh) follow: a card whose lines
+# went to the archive is still landed.
 landedissues() {
   local d rc=0
-  if [ -n "${DRYPICK:-}" ]; then jq -cR "$LANDEDLINE" "$READ"; return; fi
+  if [ -n "${DRYPICK:-}" ]; then jq -cR "$LANDEDLINE" "$READ" && landedtsv; return; fi
   d=$(mktemp -d) || return 1
-  { recs > "$d/rec" && linesum "$d/rec" "$STATE.landed" "$d/l" "$LANDEDLINE" && cat "$d/l"; } || rc=1
+  { recs > "$d/rec" && linesum "$d/rec" "$STATE.landed" "$d/l" "$LANDEDLINE" && cat "$d/l" && landedtsv; } || rc=1
   rm -rf "$d"; return "$rc"
 }
+# The issue of each line of the landed list, one a line.
+landedtsv() { local l; l=$(landedall) || return 1; [ -z "$l" ] || awk -F'\t' '$2 ~ /^[0-9]+$/ { print $2 + 0 }' <<<"$l"; }

@@ -30,6 +30,12 @@ locked() { ( flock 9 && LOCKHELD=1 && "$@" ) 9>>"$STATE"; }
 # The longest a pick, or a snapshot's hold of new issues (adopt), may hold that lock, in seconds: every card's record
 # writes wait on it, and one jq that did not end there stopped the whole belt, with no word, until it was stopped by hand.
 LOCKLIMIT=120
+# How long a finished card stays in the live records, in days from its last line, and the most finished cards one
+# archive run moves out. Their lines go to the archive (ARCHIVE, below).
+# shellcheck disable=SC2034 # read by the archive run
+ARCHIVE_DAYS=2
+# shellcheck disable=SC2034 # read by the archive run
+ARCHIVE_BATCH=2000
 # locked, for <step>'s work, to LOCKLIMIT seconds. Past it, the work and every process under it are stopped (each
 # one holds the lock's file open, and the lock is free only when all of them have ended), the log says which step ran
 # out of time, and the status is 124: the step failed, as when it fails on its own. The watch has no stdout (a caller
@@ -97,6 +103,22 @@ turncards() { if [ -n "${ASKED_K[lines cards ]:-}" ]; then printf '%s' "${ASKED_
 # files themselves even when its folder is the state folder: the helper would write the database there.
 recs() { if [ "$READ" = "$STATE" ] && [ -z "${DRYPICK:-}" ]; then stdb ask lines cards; else cat -- "$READ"; fi; }
 olds() { if [ "$READ_OLD" = "$RETRIED" ] && [ -z "${DRYPICK:-}" ]; then stdb ask lines retried; else cat -- "$READ_OLD"; fi; }
+# The lines of finished cards moved out of the live records: one gzip file a month, cards-YYYY-MM.jsonl.gz, each run
+# a gzip member appended to it. archrecs prints them, oldest month first and each file's members in order; allrecs
+# prints them and then the live records (recs). Only the all-time totals read allrecs (the snapshot's cost, tokens,
+# metrics and history: archrows(), lib/snapshot.sh), never a step under the card records' lock: every other reader
+# reads the live records alone.
+ARCHIVE=${STATE%/*}/archive
+archrecs() {
+  local f
+  for f in "$ARCHIVE"/cards-[0-9][0-9][0-9][0-9]-[0-9][0-9].jsonl.gz; do [ ! -e "$f" ] || gzip -dc -- "$f" || return 1; done
+}
+allrecs() { archrecs && recs; }
+# The landed list: one line a landed card, `<card> TAB <issue> TAB <sha> TAB <time>`, kept live when the card's lines
+# go to the archive. landedall prints it (nothing when there is none). The pick (upnext(), lib/pick.sh) and adopted()
+# (landedissues(), lib/control.sh) read it beside the live records' landed lines, so an archived issue stays landed.
+LANDEDTSV=${STATE%/*}/landed.tsv
+landedall() { [ ! -e "$LANDEDTSV" ] || cat -- "$LANDEDTSV"; }
 # The findings the judge ruled OUTSIDE on the cards of an issue (and on a card), from their review lines: the
 # judge.outside ones, and the judge.selfheals ones marked outside (an OUTSIDE ruling whose effect sends it to the
 # self-heals list), the last 50, each with its effect and reason, as the judge is given them (judged(): a repeat of one

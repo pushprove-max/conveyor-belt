@@ -617,6 +617,27 @@ snaprows() { # <records file> <kept> <to> [<lineage> <size>]
 ROWKEY='select(. != "") | fromjson | select(.step != "push") | .card | tojson'
 # Each [row, state] rows() gives with states, as its card's line in the summary (snaprows).
 ROWLINE='.[] | "\(.[1].k | tojson)\t\(.[0] | tojson)\t\(.[1] | tojson)"'
+# The rows of the archived cards (archrecs(), lib/records.sh), written to <to> as one JSON array ([] with no archive):
+# the snapshot's cards are those of allrecs, so its cost, tokens, metrics and history count a card whose lines went to
+# the archive. They are made by snaprows, with its summary beside the records ($STATE.archrows), and kept with a key of
+# the archive files' names, sizes and times and the rows' key ($STATE.archived): the archive is read only when one of
+# its files changed. Call it after snaprows has set SNAPROWS_K. The archived push lines, as the state database's pushes
+# question gives the live ones (state.py), are written to <pushes to> (nothing with no archive) and kept the same way
+# ($STATE.archpushes): the push totals count them too.
+archrows() { # <scratch folder> <to> <pushes to>
+  local f k=''
+  for f in "$ARCHIVE"/cards-[0-9][0-9][0-9][0-9]-[0-9][0-9].jsonl.gz; do [ ! -e "$f" ] || k+=$(p_filekey "$f")$'\n' || return 1; done
+  [ -n "$k" ] || { echo '[]' > "$2" && : > "$3"; return; }
+  k=$(printf '%s\n%s' "$SNAPROWS_K" "$k" | cksum) || return 1
+  { read -r f && [ "$f" = "$k" ] && cat > "$2"; } 2>/dev/null < "$STATE.archived" && [ -s "$2" ] \
+    && { read -r f && [ "$f" = "$k" ] && cat > "$3"; } 2>/dev/null < "$STATE.archpushes" && return 0
+  archrecs > "$1/archived" && snaprows "$1/archived" "$STATE.archrows" "$2" && jq -cR "$ARCHPUSH" "$1/archived" > "$3" || return 1
+  { printf '%s\n' "$k" && cat "$2"; } > "$STATE.archived.$$" 2>/dev/null && mv -f "$STATE.archived.$$" "$STATE.archived" || rm -f "$STATE.archived.$$"
+  { printf '%s\n' "$k" && cat "$3"; } > "$STATE.archpushes.$$" 2>/dev/null && mv -f "$STATE.archpushes.$$" "$STATE.archpushes" || rm -f "$STATE.archpushes.$$"
+}
+# One push or pushed line of the records, as the state database's pushes question gives it: {step, time, sec[, head]}.
+ARCHPUSH='fromjson? | objects | select(.step == "push" or .step == "pushed") | {step, time, sec}
+  + if (.head | type) == "string" and .head != "" then {head} else {} end'
 # The self-heals list and the last sort as the snapshot gives them (selfheals, above).
 healssnap() {
   jq -cn --slurpfile e <(jq -c 'objects' "$SELFHEALS" 2>/dev/null) --slurpfile d <(jq -c 'objects' "$DOCSDRIFT" 2>/dev/null) \
@@ -873,11 +894,14 @@ snapshot() (
   # A step that waits for its seat's CLI (seatwait(), its live record's cli) is shown with no start line before it too:
   # the judge's check of a test file for hollow cases waits after the build line.
   # A running step whose result named the models that ran it keeps their split (stats.byModel, watch()): its live part is priced at each one's rate.
+  # The archived cards' rows come first (archrows): the cards are those of allrecs, archive then live records.
+  archrows "$d" "$d/arows" "$d/apushes" && cat -- "$d/apushes" >> "$d/pushes" || exit 1
+  allrows=$d/rows; [ "$(head -c 2 "$d/arows")" = '[]' ] || { jq -cs 'add' "$d/arows" "$d/rows" > "$d/allrows" && allrows=$d/allrows; } || exit 1
   jq -c --argjson m "$models" --slurpfile livef <(printf '%s' "$LIVEJSON") --argjson proof "$(proofs)" --argjson away "$(aways)" --argjson capoff "$(offcaps)" --argjson red "$(redtitles)" --slurpfile old "$d/old" '$livef[0] as $live | (map($live[.card] as $v | $proof[.card] as $p
       | .title = ($red[.card] // .title) | .gaveWay = ($away[.card].to // null) | .gaveWayFixing = ($away[.card].fixing == true) | .offCap = ($capoff[.card] == true)
       | if $v != null and .result == "" and ((.x.log | last | .step == "start" and .of == $v.step) or ($v.cli | type) == "string") then .live = ($v | {step, at, turns, last, usage, files, tests, list, action, waits, before} + (if $v.zero == true then {zero: true} else {} end) +(if $v.model then {model: $v.model} else {} end) + (if ($v.effort | type) == "string" and $v.effort != "" then {effort: $v.effort} else {} end) + (if ($v.stalled | type) == "string" then {stalled: $v.stalled} else {} end) + (if ($v.stats.byModel | type) == "object" then {stats: {byModel: $v.stats.byModel}} else {} end)) else . end
       | if ($p | type) == "object" and .result == "" and (.x.log | last | .step != "start") then .proof = ($p | {at, files, tests, list, action}) else . end)
-    + ($old[0] | map(.x.retried = true)) | map(.models = $m))[]' "$d/rows" > "$d/all" || exit 1
+    + ($old[0] | map(.x.retried = true)) | map(.models = $m))[]' "$allrows" > "$d/all" || exit 1
   # The pack's model prices, added models and aliases (prices) win over the built-in table; a pack that does not read
   # has none. The models the steps of the last 30 days ran are counted from since (seen).
   packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
