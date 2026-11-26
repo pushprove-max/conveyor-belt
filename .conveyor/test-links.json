@@ -223,6 +223,9 @@
     ".conveyor/test-full-tmp.test.sh",
     ".conveyor/test-share-fds.test.sh"
   ],
+  "AGENTS.md": [
+    "CLAUDE.test.sh"
+  ],
   "CLAUDE.md": [
     "conveyor/tests/snapexec.test.sh"
   ],

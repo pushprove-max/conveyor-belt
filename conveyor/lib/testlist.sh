@@ -176,7 +176,8 @@ cachehits() { # <worktree>
 # A run (tests(): a card's, and the whole test on main) is told to keep off each file of $TESTCACHE whose hash in its
 # worktree is a kept one: a `pass` and an `off` line for it in its list (the off line keeps it off though
 # a `changed` or `main` line selects it, its inputs being the same), unless the list names failed cases of it. Prints
-# each such file's line for the run's log, `TESTRUN why<TAB><file><TAB>passed before with the same inputs`. Each other
+# each such file's line for the run's log, `TESTRUN why<TAB><file><TAB>passed before with the same inputs`: of a card's
+# run, only for a file of its list (TEST_FILES), so its log names no test it never selected as reused. Each other
 # file of the card's list (TEST_FILES, listcmd()) that its list does not keep as passed or keep off whole gets a line
 # that says why no pass of it is used (#1619): its inputs changed since the last pass on record, or it has no pass on
 # record with its inputs (no $TESTCACHE yet, or its runner names none).
@@ -192,6 +193,7 @@ cacheoff() { # <worktree>
   while IFS= read -r f; do
     grep -qxF "pass"$'\t'"$f" "$1.rerun" 2>/dev/null || add+="pass"$'\t'"$f"$'\n'
     grep -qxF "off"$'\t'"$f" "$1.rerun" 2>/dev/null || add+="off"$'\t'"$f"$'\n'
+    [ -z "${TEST_FILES:-}" ] || grep -qxF -- "$f" <<<"$TEST_FILES" || continue
     printf 'TESTRUN why\t%s\tpassed before with the same inputs\n' "$f"
   done < <(cat "$1.rerun" 2>/dev/null | M=$m awk -F'\t' 'BEGIN { n = split(ENVIRON["M"], a, "\n"); for (i = 1; i <= n; i++) w[a[i]] = 1 }
     $1 == "fail" { delete w[$2] } END { for (f in w) print f }' | sort)

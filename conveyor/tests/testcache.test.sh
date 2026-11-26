@@ -160,6 +160,17 @@ t_testcachewhole() {
     || fail "with e.txt changed, which k.test.sh read, the list did not run k.test.sh whole and j.test.sh's t_one alone (files|cases): $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
 }
 
+# #1722: cacheoff() of a card whose list is b.test.sh alone, with a pass of a.test.sh and of b.test.sh on record, their
+# inputs the same: the run's log names b.test.sh's pass as used, not a.test.sh's. Bug it catches: the log named every
+# file with a pass on record as reused, also one the card never selected.
+t_testcachelisted() {
+  setup '[]'
+  echo a > "$R/a.test.sh"; echo b > "$R/b.test.sh"; echo e > "$R/e.txt"; cachelistsetup a.test.sh b.test.sh e.txt
+  LASTPASS='' cachelistrun 'printf "a.test.sh\te.txt\nb.test.sh\te.txt\n" | cachesums "$wt" > "$TESTCACHE" && TEST_FILES=b.test.sh cacheoff "$wt" > "$T/$CASE/got"'
+  [ "$(cat "$T/$CASE/got" 2>&1)" = $'TESTRUN why\tb.test.sh\tpassed before with the same inputs' ] \
+    || fail "with a list of b.test.sh alone, the log does not name b.test.sh's pass alone as used: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+}
+
 # #1619: cachesums() of a pass that listed lst/ and looked for gone, which was not there. Making the file lst/one.txt
 # a folder of that name changes the hash, and so does making gone a folder; cachereaders() picks u.test.sh, which
 # looked for gone, for a change that adds gone/x. Bugs it catches: the listing named one.txt as a file and as a folder
