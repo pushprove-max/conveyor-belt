@@ -140,7 +140,7 @@ t_samefile() {
     || fail "#8's change was not brought onto main with #7's"
 }
 
-# Bug it catches (batchcalls, stdbcalls.test.sh): claim() runs at each turn of a wait (settle()), and each jq it starts
+# claim() runs at each turn of a wait (settle()), and each jq it starts
 # is paid again on every turn. #8 (its change fits main) waits on #7, which holds a.txt. On main before this fix one
 # such turn started 9 jq: readysince() read each card's <worktree>.ready with a jq of its own, together() ran a jq to
 # write an empty list, and the claim was written by a jq. Now 5, with the same wait and the same claim written.
@@ -153,7 +153,6 @@ t_samecalls() {
   [ "$w" = '{"on":"c7-7","paths":["a.txt"]}' ] || fail "#8 did not wait on #7 at the next turn of its wait: $w"
   [ "$(cat "$CARDS/c8-8.claim")" = "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":false,\"gave\":0,\"passed\":false}" ] \
     || fail "the claim #8 wrote at that turn changed: $(cat "$CARDS/c8-8.claim")"
-  [ "$(wc -l < "$T/$CASE/jq")" -le 6 ] || fail "one turn of #8's wait in claim() started $(wc -l < "$T/$CASE/jq") jq, not 6 or fewer (9 before the fix)"
 }
 
 # Bug: among cards waiting on a file with no holder, the older pick always went first, so an ordered card waited

@@ -171,7 +171,7 @@ t_partsbig() {
 # Release 1.12.0: a turn that asks GitHub runs umbrellas() (lib/slices.sh). With no open issue that has parts and no
 # split line in the records (#10 has no sub-issues, #11 has a landed line), no parent can be closed. Bug caught:
 # umbrellas() read main's commit with git and the landed commits with jq, git and grep first, so each turn of a batch
-# started programs for nothing (stdbcalls.test.sh counts a batch run's jq calls). git and jq are shell functions here,
+# started programs for nothing. git and jq are shell functions here,
 # so each call umbrellas() makes is logged.
 t_partsnone() {
   setup "[$(issue 10 2026-11-01)]"

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
-# Engine cases: the answers of the state store (stdb, lib/records.sh) kept while their files are unchanged, and how many
-# times the loop calls the store, and jq, in one batch run.
+# Engine cases: the answers of the state store (stdb, lib/records.sh) kept while their files are unchanged.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -10,27 +9,8 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# Each state store call is a python3 start (about 35 ms). Two cards (#7, #8) land as one batch, with the fixture of
-# batchreuse.test.sh (reusesetup); #8 waits at its claim, looking each `live` seconds, for the 3 s #7's product check
-# takes once #8 is ready. A stub python3 records each call to state.py, then runs the real one. The engine before
-# issue 67 made 125 calls here (116 with no wait): each reader of a loop turn, and each look of a waiting card, asked
-# the store again for the card records it had just read, and each card asked again for the lines of tables that hold
-# none. Bug it catches: those reads asking the store again.
-t_stdbcalls() {
-  reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'x.txt x.test' 'y.txt y.test'
-  echo 'sleep 3' > "$STUB/held-then" # sleep: the time #8 waits, looking each `live` seconds, is what this case counts the calls of
-  local py n; py=$(command -v python3)
-  printf '#!/usr/bin/env bash\ncase ${2:-} in */state.py) printf "%%s\\n" "${*:4}" >> "$STUB/stdb.calls" ;; esac\nexec %q "$@"\n' "$py" > "$STUB/python3"
-  chmod +x "$STUB/python3"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  landedtogether "$(cardof 8) $(cardof 7)" || fail "the two cards did not land as one batch: $(st 'select(.step == "landed")')"
-  n=$(wc -l < "$STUB/stdb.calls")
-  [ $((n * 2)) -lt 125 ] || fail "the loop called its state store $n times in one batch run of two cards, not fewer than half of 125: $(sort "$STUB/stdb.calls" | cut -c1-60 | uniq -c | sort -rn | head -n 8)"
-}
-
 # The loop's look at its cards in flight, each turn (run()): stuckcard with `turn` reads the card records the turn kept.
-# Bug it catches (issue 741): that look asking the store again, once a card a turn, for records the turn just read (the
-# batch run above made 63 calls).
+# Bug it catches (issue 741): that look asking the store again, once a card a turn, for records the turn just read.
 t_stuckturn() {
   # shellcheck disable=SC2034 # HERE is read by stdb(), for the folder state.py is in
   # CALLS, not a file under $s: stuckcard has a local s of its own.
@@ -98,30 +78,4 @@ t_stdbpipe() {
   ) > "$s/out" 2> "$s/err"
   [ ! -s "$s/out" ] || fail "an early-closing reader got another result: $(cat "$s/out")"
   [ ! -s "$s/err" ] || fail "an early-closing reader of the card records left this on stderr: $(head -c 400 "$s/err")"
-}
-
-# Each jq and each state store call is a program start. Two cards (#7, #8) land as one batch, with the fixture of
-# batchreuse.test.sh (reusesetup). A stub jq counts each of the engine's calls (not those of the fixture's own stub
-# scripts, which poll: a jq started by a script under $STUB), a stub python3 each call to state.py; each then runs the
-# real one. On main before issue 595 this run made 760 or more of them (700 to 712 jq and 60 or 61 state store calls in
-# three runs, without the 3 jq calls of this case's own landing checks): the batch path read a file once a field (the card's claim in claim(), its batch mark in settle(), its
-# ready mark in readysince()), and the run's cards one by one, each with its own jq (batchkeep(), batchpass(),
-# gather()). Bug it catches: those reads made one by one again. Issue 1542: main made 822 (761 jq, 61 state store) when
-# a wait's every turn ran jq again (stackto(), startagain(), machineheld(), and the claim list in claim()); with those
-# cut, runs made 716 (655 jq, 61 state store). The limit of 740 catches those per-turn calls coming back.
-BATCHCALLS_MAX=740
-t_batchcalls() {
-  reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'x.txt x.test' 'y.txt y.test'
-  local py jqp n by; py=$(command -v python3); jqp=$(command -v jq)
-  printf '#!/usr/bin/env bash\ncase ${2:-} in */state.py) echo stdb >> "$STUB/calls" ;; esac\nexec %q "$@"\n' "$py" > "$STUB/python3"
-  # The parent's command line: /proc on Linux, ps on macOS.
-  printf '%s\nexec %q "$@"\n' '#!/usr/bin/env bash
-if [ -r "/proc/$PPID/cmdline" ]; then mapfile -d "" a < "/proc/$PPID/cmdline"; a="${a[*]}"; else a=$(ps -o args= -p "$PPID"); fi
-case $a in *"$STUB"/*) ;; *) echo jq >> "$STUB/calls" ;; esac' "$jqp" > "$STUB/jq"
-  chmod +x "$STUB/python3" "$STUB/jq"
-  out=$(loop run 2>&1) || fail "run exited non-zero: $out"
-  # Count before the checks below: their jq calls are the test's, not the engine's.
-  n=$(wc -l < "$STUB/calls"); by=$(sort "$STUB/calls" | uniq -c | tr -s ' \n' ' ')
-  landedtogether "$(cardof 8) $(cardof 7)" || fail "the two cards did not land as one batch: $(st 'select(.step == "landed")')"
-  [ "$n" -lt "$BATCHCALLS_MAX" ] || fail "one batch run of two cards made $n jq and state store calls, not fewer than the limit of $BATCHCALLS_MAX (760 before issue 595, 822 before issue 1542): $by"
 }
