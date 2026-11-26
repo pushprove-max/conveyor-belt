@@ -24,7 +24,8 @@
 # functions it runs.
 # A function a log names belongs to the traced file whose path ends most like the one bash read it from (a case runs a
 # copy of the engine from a scratch folder), or to each that defines it when bash names no file (an exported
-# function), and only to a file that defines it.
+# function) or names a file that holds no definition of it (a case that loads the function's body with eval: bash
+# names the case file), and only to a file that defines it.
 # The map is one fact a line, sorted (issue 1593: one row a function, each test file and unit named once by its
 # number, about a twentieth of the size of a row for each function and unit). Its numbers are this map's own, so two
 # maps do not merge by union; a release writes it whole.
@@ -187,12 +188,29 @@ while IFS=$'\t' read -r t c; do
       while (i > 0 && j > 0 && x[i] == y[j]) { k++; i--; j-- }
       return k
     }
+    # evald(f, n): bash read n from f, a file that holds no definition of n in its own text: a case loaded the traced
+    # body with eval (`eval "$(sed -n "/^n() {/,/^}/p" ...)"`). Not a file that defines a stub of that name, nor one
+    # that cannot be read.
+    function evald(f, n, l, x) {
+      if (!(f in rd)) {
+        rd[f] = 0
+        while ((getline l < f) > 0) {
+          rd[f] = 1
+          while (match(l, /(^|[;{(&|])[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/)) {
+            x = substr(l, RSTART, RLENGTH); sub(/^[;{(&| \t]*/, "", x); sub(/[ \t]*\(\)$/, "", x); def[f, x] = 1
+            l = substr(l, RSTART + RLENGTH)
+          }
+        }
+        close(f)
+      }
+      return rd[f] && !((f, n) in def)
+    }
     NR == FNR { has[$1, $2] = 1; of[$2] = of[$2] " " $1; next }
     !($2 in of) { next }
     {
       m = split(substr(of[$2], 2), fs, " "); best = 0; got = ""
       for (i = 1; i <= m; i++) { s = score($1, fs[i]); if (s > best) { best = s; got = fs[i] } else if (s == best && s > 0) got = got " " fs[i] }
-      if (best == 0 && ($1 == "" || $1 == "environment")) got = substr(of[$2], 2)
+      if (best == 0 && ($1 == "" || $1 == "environment" || evald($1, $2))) got = substr(of[$2], 2)
       m = split(got, fs, " ")
       for (i = 1; i <= m; i++) if ((fs[i], $2) in has) print fs[i] "\t" $2 "\t" t "\t" c
     }' "$TR/sums" "$TR/$n.fn" >> "$TR/runs"

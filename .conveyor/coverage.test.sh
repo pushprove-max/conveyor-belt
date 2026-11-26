@@ -14,17 +14,18 @@ bad=0; n=0
 ok() { n=$((n + 1)); echo "ok $n - $1"; }
 no() { n=$((n + 1)); echo "not ok $n - $1"; bad=1; }
 
-# A scratch checkout, traced once: an engine file of three functions and two cases of the runner that each call one
+# A scratch checkout, traced once: an engine file of four functions and two cases of the runner that each call one
 # (t_two through a copy of the file in a scratch folder, in a bash of its own, as engine cases run the engine), and a
-# third that fails, its output naming a path of this machine; dashboard.sh with two functions and a test file of two
+# third that fails, its output naming a path of this machine, and a fourth that loads the fourth function's body with
+# eval and calls it with a stub of the first that it defines itself; dashboard.sh with two functions and a test file of two
 # parts that each run one; a hook with a function its whole test file runs and one no test runs.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/lib" "$R/conveyor/tests" "$R/.claude/scripts/__tests__" "$R/.claude/hooks/__tests__"
 cp "$HERE/coverage.sh" "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"; cp "$ROOT/conveyor/lib/portable.sh" "$R/conveyor/lib/"
 # portable.sh outside the map, so the map check of a one-file run passes (issue 1723's checks of its exit, below).
 printf '%s\n' '{"outside": "conveyor/lib/portable.sh"}' '{"area": "a", "file": "conveyor/lib/f.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
-printf 'fone() {\n  echo one\n}\nftwo() {\n  echo two\n}\nfbare() {\n  echo bare\n}\n' > "$R/conveyor/lib/f.sh"
+printf 'fone() {\n  echo one\n}\nftwo() {\n  echo two\n}\nfbare() {\n  echo bare\n}\nfthree() {\n  echo three\n}\n' > "$R/conveyor/lib/f.sh"
 # fbare: run by t_one in its own bash and by t_two only in a bash started with an emptied environment (env -i), as
-# apiroute.test.sh's t_apicard runs the engine.
+# apiroute.test.sh's t_apicard runs the engine. fthree: run by t_evl only, its body loaded with eval.
 cat > "$R/conveyor/tests/a.test.sh" <<'EOF'
 t_one() {
   fone; fbare
@@ -35,6 +36,9 @@ t_two() {
 }
 t_bad() {
   echo "$PWD/conveyor/tests/a.test.sh: line 9: boom"; return 1
+}
+t_evl() {
+  ( eval "$(sed -n '/^fthree() {/,/^}/p' conveyor/lib/f.sh)"; fone() { :; }; fthree && fone )
 }
 EOF
 # The runner calls p_tools, as conveyor/tests/lib.sh does: on macOS it puts Homebrew's folders on PATH (below).
@@ -118,6 +122,12 @@ notfacts() {
 [ "$(runs conveyor/lib/f.sh fbare)" = "conveyor/conveyor.test.sh:one conveyor/conveyor.test.sh:two" ] \
   && ok "a function a case runs only in a bash started with env -i is listed with that case" \
   || no "fbare, run by t_one and by t_two under env -i: '$(runs conveyor/lib/f.sh fbare)'"
+# Bug: a case that loads a function's body with eval (`eval "$(sed -n '/^f() {/,/^}/p' ...)"`, as revive.test.sh's
+# cardgone) was missing from its row, as bash names the case file for it, so a change to the function skipped that case.
+# A stub the case file defines itself (fone) is still not the traced function.
+[ "$(runs conveyor/lib/f.sh fthree)" = conveyor/conveyor.test.sh:evl ] \
+  && ok "the map lists a function a case loads with eval with that case, and not a function the case stubs" \
+  || no "fthree: '$(runs conveyor/lib/f.sh fthree)', fone: '$(runs conveyor/lib/f.sh fone)'"
 # The owner's order of 2026-11-14: dashboard.sh by the parts of dashboard.test.sh, and the hooks by their test files.
 [ "$(runs .claude/scripts/dashboard.sh dpa)" = .claude/scripts/__tests__/dashboard.test.sh:pa ] \
   && [ "$(runs .claude/scripts/dashboard.sh dpb)" = .claude/scripts/__tests__/dashboard.test.sh:pb ] \
@@ -199,7 +209,7 @@ got=$(sel "$F/new")
   || no "from the old form: '$oldsel'; the new form ran: '$got': $(cat "$F/out")"
 # A map whose unit numbers are not each named once (two maps merged line by line) is not read: the change runs by area.
 { cat "$F/new"; jq -c 'select(has("unit")) | .case = "two"' "$F/new" | head -n 1; } > "$F/dup"
-[ "$(sel "$F/dup" | sed -n 's/^TESTRUN case	conveyor\/tests\/a.test.sh	//p' | paste -sd ' ' -)" = "bad one two" ] \
+[ "$(sel "$F/dup" | sed -n 's/^TESTRUN case	conveyor\/tests\/a.test.sh	//p' | paste -sd ' ' -)" = "bad evl one two" ] \
   && ok "a map that names a unit number twice is not read, and the change runs its area's cases" || no "two rows of one unit number: $(cat "$F/out")"
 # Issue 1723. A card's Test step runs each file the engine lists (from the area map: a.test.sh for f.sh; b.test.sh, as
 # a file the engine can list for its own reasons) alone, through --file, with the list in CONVEYOR_TEST_FILELIST. Bug:
