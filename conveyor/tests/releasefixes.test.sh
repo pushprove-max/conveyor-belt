@@ -4,7 +4,9 @@
 # Engine cases: a red release run's fix cards (relfixes(), lib/fulltest.sh, issue 758): the issues that carry
 # `Release fix: <version>` are recorded in the run's record, and release-prep starts again by itself once they have
 # all landed, are in the commit release-prep tests and no card is open; so does a release-prep that waits on its notes
-# card (t_relnoteslanded). Each case but t_relfixesserve calls relfixes() as the loop's job does. t_relfixesland's,
+# card (t_relnoteslanded). Each case but t_relfixesserve, t_relstoprestarted (relstopwaiting()) and t_engineonce
+# (fixcall's engine_once) calls relfixes() as
+# the loop's job does. t_relfixesland's,
 # t_relfixespr's and t_relnoteslanded's fixture is release.test.sh's relsetup, as their release-prep runs.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -12,7 +14,7 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
 # fixred: the record of a red release-prep of 1.1.0 that ended at 10:00 (RUN); fixcall: relfixes(), with the loop's
-# libraries loaded; fixissue <number> <created hour> <OPEN|CLOSED> <body>: one issue as gh issue list gives it.
+# libraries loaded once per case and pack (engine_once, lib.sh); fixissue <number> <created hour> <OPEN|CLOSED> <body>: one issue as gh issue list gives it.
 fixred() {
   RUN=$T/$CASE/cards/release/run.json
   mkdir -p "${RUN%/*}" && jq -cn '{kind: "release", step: "release-prep", version: "1.1.0", since: "2026-11-19T09:00:00Z", ended: "2026-11-19T10:00:00Z",
@@ -20,8 +22,7 @@ fixred() {
     || fail "the fixture could not be made"
 }
 fixcall() {
-  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names \
-    && cd "$R" && relfixes ) > "$T/$CASE.fix" 2>&1 || fail "relfixes failed: $(cat "$T/$CASE.fix")"
+  engine_once 'cd "$CONVEYOR_MAIN" && relfixes' > "$T/$CASE.fix" 2>&1 || fail "relfixes failed: $(cat "$T/$CASE.fix")"
 }
 fixissue() { jq -cn --argjson n "$1" --arg h "$2" --arg s "$3" --arg b "$4" '{number: $n, title: "fix \($n)", body: $b, createdAt: "2026-11-19T\($h):00:00Z", state: $s}'; }
 fixrec() { jq -e "$2" "$RUN" > /dev/null || fail "$1: $(cat "$RUN")"; } # <what> <jq test of the record>
@@ -282,4 +283,35 @@ t_relstoprestarted() {
   [ "$RC" = 1 ] && grep -q 'no longer waits on notes card c-1 (it started again, or another run began); nothing stopped' "$T/$CASE/run.out" \
     || fail "the stop of a run started again as it took the lock did not fail saying it stopped nothing ($RC): $(cat "$T/$CASE/run.out")"
   fixrec "the stop changed the record of the run started again" '.state == "waiting" and .restarted == "2026-11-19T11:00:00Z" and .reasons == []'
+}
+# engine_once (lib.sh), which fixcall runs relfixes() in. Bugs it catches: a load per call (each fixcall paid a whole
+# engine load again), whether it starts conveyor.sh again or only sources the libraries of commands/run.sh again; a
+# call after a pack change run in the load of the pack before (the engine reads the pack as it loads); a call run with
+# the first caller's environment or folder (a variable one call set, such as CONVEYOR_NOW, seen by the next, which did
+# not set it); a call without the case's test slot or trace descriptor (CONVEYOR_TEST_SLOT, BASH_XTRACEFD: its tests()
+# waited for another slot, and the coverage log lost its lines). The loads are counted by a scratch engine folder
+# whose conveyor.sh notes each start and then sources the real one, and whose commands/run.sh (the real one, with the
+# other commands linked) has one more library line that notes each time the libraries are sourced.
+t_engineonce() {
+  local e=$T/$CASE/engine-src out rc c f sl tf=${COVERAGE_LOG:-}
+  setup '[]'
+  mkdir -p "$e/commands" "$R/sub" && for f in "$SRC"/commands/*; do ln -s "$f" "$e/commands/${f##*/}" || break; done \
+    && rm "$e/commands/run.sh" && printf '. "$HERE/lib/portable.sh" && echo lib >> %q\n' "$T/$CASE/libs" | cat "$SRC/commands/run.sh" - > "$e/commands/run.sh" \
+    && printf 'echo load >> %q\n. %q "$@"\n' "$T/$CASE/loads" "$SRC/conveyor.sh" > "$e/conveyor.sh" || fail "the scratch engine could not be made"
+  local SRC=$e
+  # The case's own slot and trace descriptors, as the runner and a coverage run give them; the coverage log's own when
+  # it traces this case.
+  exec {sl}>> "$T/$CASE/slot" || fail "the slot file could not be opened"
+  [ -n "${BASH_XTRACEFD:-}" ] && [ -n "$tf" ] || { tf=$T/$CASE/trace; exec {BASH_XTRACEFD}>> "$tf"; } || fail "the trace file could not be opened"
+  printf -v c 'echo "${X-unset} $PWD"; [ /dev/fd/%s -ef %q ] || echo "no slot"; [ /dev/fd/"$BASH_XTRACEFD" -ef %q ] || echo "no trace"' "$sl" "$T/$CASE/slot" "$tf"
+  out=$(X=one CONVEYOR_TEST_SLOT=$sl.t engine_once "$c") && [ "$out" = "one $T/$CASE" ] \
+    || fail "the first call (X=one, in $T/$CASE, slot descriptor $sl, trace descriptor $BASH_XTRACEFD) printed: $out"
+  out=$(cd "$R/sub" && engine_once 'echo "${X-unset} $PWD"; echo err >&2; exit 3' 2>&1); rc=$?
+  [ "$rc" = 3 ] && [ "$out" = "unset $R/sub"$'\n'err ] || fail "the second call (no X, in $R/sub, exit 3) ended $rc and printed: $out"
+  [ "$(cat "$T/$CASE/loads" "$T/$CASE/libs" | tr '\n' ' ')" = 'load lib ' ] \
+    || fail "two calls on one pack started conveyor.sh $(grep -c . "$T/$CASE/loads") times and sourced the libraries $(grep -c . "$T/$CASE/libs") times"
+  tune '.tunables.idle = 7'
+  out=$(engine_once 'packget tunables.idle i && echo "$i"') && [ "$out" = 7 ] || fail "the call after the pack set tunables.idle to 7 read: $out"
+  [ "$(cat "$T/$CASE/loads" "$T/$CASE/libs" | tr '\n' ' ')" = 'load load lib lib ' ] \
+    || fail "the call after a pack change started conveyor.sh $(grep -c . "$T/$CASE/loads") times and sourced the libraries $(grep -c . "$T/$CASE/libs") times in all, not twice each"
 }

@@ -9,8 +9,6 @@
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
-# The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
-SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # recok (lib.sh) fails on each line the check refuses. The writers the cases here do not reach are checked by recok in
 # the cases that already make their lines: the rebase line (port.test.sh t_rebase), the filed line and a landed line
@@ -67,7 +65,8 @@ t_recfailed() {
 
 # A card's test line when its change narrows the run (test.list args): its list is the changed tests, how many and by
 # what. Written as card.sh writes a passing first run: testrec(), firstrun() and testlist.sh slowrec() of the run tests() made,
-# through record().
+# through record(). Each call moves into main's checkout first, where the engine's load leaves the loop (lib/records.sh)
+# and engine_once does not: speedproof() and closed() run git there with no -C.
 t_reclist() {
   local wt=$T/$CASE/cards/c7
   setup '[]'
@@ -75,10 +74,8 @@ t_reclist() {
   printf '%s\n' 'echo "$*" > "$STUB/got"' > "$STUB/list-cmd"
   tune '.test.list = "args" | .test.command = "bash \"$STUB/list-cmd\""'
   git -C "$R" worktree add -q --detach "$wt" && echo y >> "$wt/lib/cartsum.js" && git -C "$wt" add -A || fail "the card's change could not be staged"
-  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
-    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
-    names || exit 1; tests "$wt" || exit 1
-    record c7 7 test pass "$(jq -cn --argjson x "$(testrec "$wt" 0 1)" --argjson r "$(firstrun "$wt" pass)" --argjson s "$(slowrec "$wt")" '$x + $r + $s')" ) \
+  wt=$wt engine_once 'cd "$CONVEYOR_MAIN" && tests "$wt" || exit 1
+    record c7 7 test pass "$(jq -cn --argjson x "$(testrec "$wt" 0 1)" --argjson r "$(firstrun "$wt" pass)" --argjson s "$(slowrec "$wt")" "\$x + \$r + \$s")"' \
     > "$T/$CASE/run.out" 2>&1 || fail "the test step failed: $(cat "$T/$CASE/run.out")"
   [ "$(st 'select(.step == "test") | .list | tojson')" = '{"mode":"changed","files":1,"by":"name"}' ] || fail "the test line has no list of the changed tests: $(cat "$ST/cards.jsonl")"
   recok "$ST/cards.jsonl" "a card's narrowed test run"
@@ -98,12 +95,10 @@ t_recother() {
   echo 'printf "TESTRUN sec\tf.test.sh\t1\t4\n" > "$CONVEYOR_TEST_LOG/r"' > "$STUB/mainrun-cmd"
   printf '%s\n' '#!/usr/bin/env bash' 'echo "push-checks: FAILED fast-checks" >&2; exit 1' > "$R/.git/hooks/pre-push" && chmod +x "$R/.git/hooks/pre-push"
   git -C "$R" worktree add -q --detach "$wt" && echo fast > "$wt/f.test.sh" && git -C "$wt" add -A || fail "the card's change could not be staged"
-  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
-    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
-    names || exit 1; tests "$wt" || exit 1
-    record c7 7 test pass "$(jq -cn --argjson x "$(testrec "$wt" 0 1)" --argjson r "$(firstrun "$wt" pass)" --argjson s "$(slowrec "$wt")" '$x + $r + $s')"
-    speedproof c7 "$wt" '{"number":7}' f.test.sh || exit 1
-    push c7 7; closed c7 7 "$wt" 'ALREADY-DONE: f.test.sh is fast' ) > "$T/$CASE/run.out" 2>&1 || fail "a writer failed: $(cat "$T/$CASE/run.out")"
+  wt=$wt engine_once 'cd "$CONVEYOR_MAIN" && tests "$wt" || exit 1
+    record c7 7 test pass "$(jq -cn --argjson x "$(testrec "$wt" 0 1)" --argjson r "$(firstrun "$wt" pass)" --argjson s "$(slowrec "$wt")" "\$x + \$r + \$s")"
+    speedproof c7 "$wt" "{\"number\":7}" f.test.sh || exit 1
+    push c7 7; closed c7 7 "$wt" "ALREADY-DONE: f.test.sh is fast"' > "$T/$CASE/run.out" 2>&1 || fail "a writer failed: $(cat "$T/$CASE/run.out")"
   recsteps "the other writers" test bugproof push closed
   [ "$(st 'select(.step == "test") | .list | tojson')" = '{"mode":"changed","files":1,"by":"own"}' ] || fail "the test line's list is not the card's own test file: $(st 'select(.step == "test")')"
   [ "$(st 'select(.step == "bugproof") | .speed | tojson')" = '{"file":"f.test.sh","before":10,"after":4,"fix":"sped up","into":[]}' ] \

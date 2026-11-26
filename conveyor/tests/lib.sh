@@ -109,6 +109,58 @@ NOMARK='(.step | IN("deps", "start", "filed", "pushed", "issue") | not)'
 # test fails on main's code without the fix, wherever main is (bugproof.sh bugproof()). Without it the card is sent back to build
 # and blocked, never reviewed.
 provenbug() { echo 'echo two >> a.txt; echo "[ \$(wc -l < a.txt) -ge $(wc -l < a.txt) ]" > a.test.sh' > "$STUB/build"; echo 'bash a.test.sh' > "$STUB/mainrun-cmd"; }
+# engine_once <commands>: <commands> run (eval) with the engine loaded as fx_in loads it (CONVEYOR_MAIN=$R, cards under
+# the case's folder, `names` run), but loaded once per case: an engine load of the libraries is about as slow as a
+# new engine start, so a case that called the engine many times paid for many loads. The first call starts one shell
+# that loads the engine and then waits; each call is a fork of that shell, with the caller's exported environment
+# and folder and stdin /dev/null; it prints the call's output and error output (in that order, each whole) and
+# returns the call's exit. The load is kept per main and pack text: a call after the pack changes ends the shell
+# and loads again, as a load reads the pack. The control record is read at each call, not at the load. Exit 9:
+# the engine could not be loaded (its output on stderr). It uses no other helper, so a shell the case starts (a
+# hook's CONVEYOR_FOREMAN_ASK, filedhold.test.sh) can run it, from `declare -f engine_once`, with R, T, CASE and SRC.
+engine_once() { # <commands>
+  local d k x rc
+  k=$(set -o pipefail; { printf '%s\n' "$R"; cat "$R/.conveyor/project.json"; } | cksum) || { echo "engine_once: no pack in $R" >&2; return 9; }
+  d=$T/$CASE/engine/${k%% *}
+  if [ ! -p "$d/in" ]; then
+    # The load of the pack before is ended, and its FIFO taken away: a pack set back to that text loads again.
+    for x in "$T/$CASE"/engine/*/pid; do [ ! -f "$x" ] || { kill "$(cat "$x")" 2>/dev/null; rm -f "$x" "${x%/pid}/in"; }; done
+    mkdir -p "$d" && mkfifo "$d/in" "$d/ready" || return 9
+    # The shell holds none of the caller's descriptors (a lock, a pipe a $( ) waits on), as it outlives the call, but
+    # two: the case's test slot (CONVEYOR_TEST_SLOT), which a call's tests() would else wait for another slot in place
+    # of, and the trace (BASH_XTRACEFD, the coverage log), which would else lose each call's lines.
+    ( ok='' pre=$PATH fd='' q='' v='' s=${CONVEYOR_TEST_SLOT:-} t=${BASH_XTRACEFD:-}
+      s=${s%%.*}
+      for x in /dev/fd/*; do
+        x=${x##*/}; [ "$x" -le 2 ] 2>/dev/null || [ "$x" = "$s" ] || [ "$x" = "$t" ] || eval "exec $x>&-" 2>/dev/null
+      done
+      trap '[ -n "$ok" ] || echo 9 > "$d/ready"' EXIT
+      echo "$BASHPID" > "$d/pid"
+      export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+      . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" && names || exit 9
+      ok=1; trap - EXIT; echo 0 > "$d/ready"
+      pre=${PATH%"$pre"} # what the load put before PATH (p_path, on macOS), put before each caller's PATH
+      exec {fd}<> "$d/in"
+      while read -r -u "$fd" q; do
+        ( exec {fd}<&-
+          for v in $(compgen -e); do unset "$v"; done 2> /dev/null
+          # shellcheck disable=SC1090 # the caller's environment, written by the call below
+          . "$q.env" 2> /dev/null; PATH=$pre$PATH; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+          # shellcheck disable=SC2034 # LOGFD is the engine's own stderr (conveyor.sh): the call's, not the first caller's
+          exec {LOGFD}>&2; eval "$(< "$q.cmd")" ) > "$q.out" 2> "$q.err" < /dev/null
+        echo $? > "$q.rc"
+      done ) > "$d/log" 2>&1 < /dev/null &
+    read -r rc < "$d/ready"
+    [ "$rc" = 0 ] || { cat "$d/log" >&2; rm -f "$d/in" "$d/pid"; return 9; }
+  fi
+  x=$d/c$BASHPID.${EPOCHREALTIME//[!0-9]/}
+  printf 'cd -- %q || exit 9\n%s\n' "$PWD" "$1" > "$x.cmd" && mkfifo "$x.rc" || return 9
+  for k in $(compgen -e); do printf 'export %s=%q\n' "$k" "${!k}"; done > "$x.env"
+  echo "$x" > "$d/in"
+  read -r rc < "$x.rc"
+  cat "$x.out"; cat "$x.err" >&2; rm -f "$x".*
+  return "$rc"
+}
 # The checks of the Board's fix cards (fixcheck.test.sh, runcheck.test.sh): the engine as the loop loads it, in a shell
 # of the case's main ($R), cards under the case's folder, with <commands> run there (eval); its output in run.out, its
 # exit in $RC, the first line of what the review is shown (<worktree>.unfixed of $FXWT) in $WHY.

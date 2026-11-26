@@ -12,13 +12,24 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # One main with #4 open, Queue, and a filer's hooks on it: the research lane's (CONVEYOR_LANE=research), so no Foreman
 # claim is needed, with a host file of their own whose one record "r" is the main (the stub's links name o/r). The
-# hooks reach the record through this engine (CONVEYOR_FOREMAN_ASK), with the engine's own config folder.
+# hooks reach the record through this engine (CONVEYOR_FOREMAN_ASK), with the engine's own config folder: each ask
+# (`control ...`) is commands/control.sh run in the engine that engine_once (lib.sh) loads once for the case, less
+# the libraries that load has (those commands/run.sh loads), in place of a new conveyor.sh start per ask.
 # hook <filing|filed> <command> [stdout]: one hook call, as Claude Code makes it for a Bash call.
 filedsetup() {
+  local ask
   setup "[$(issue 4 2000-01-01T00:00:00Z P2)]"; C=$ST/control.json; echo : > "$STUB/build"; touch "$STUB/list-filed"
   FC=$T/$CASE/filer-config; mkdir -p "$FC/conveyor" "$T/$CASE/filer/lane"
   jq -cn --arg m "$R" '{records: [{repo: "r", main: $m}]}' > "$FC/conveyor/host.json"
-  printf -v ASKE 'cd "$CONVEYOR_MAIN" && XDG_CONFIG_HOME=%q CONVEYOR_CARDS=%q bash %q $CONVEYOR_CMD' "$XDG_CONFIG_HOME" "$T/$CASE/cards" "$SRC/conveyor.sh"
+  IFS= read -r -d '' ask << 'EOF' || :
+set -- $CONVEYOR_CMD
+[ "$1" = control ] || { echo "the filing hooks' ask runs control alone, not: $CONVEYOR_CMD" >&2; exit 2; }
+# What conveyor.sh's start makes for control (lib/records.sh), which the load, made as state-dir, does not.
+mkdir -p "${STATE%/*}" "$CARDS" && : >> "$STATE" && : >> "$RETRIED" || exit 1
+eval "$(grep -vxF -f <(grep '^\. "\$HERE/lib/' "$HERE/commands/run.sh") "$HERE/commands/control.sh")"
+EOF
+  printf -v ASKE '%s\nR=%q T=%q CASE=%q SRC=%q\ncd "$CONVEYOR_MAIN" && XDG_CONFIG_HOME=%q CONVEYOR_CARDS=%q engine_once %q' \
+    "$(declare -f engine_once)" "$R" "$T" "$CASE" "$SRC" "$XDG_CONFIG_HOME" "$T/$CASE/cards" "$ask"
   hook() {
     jq -cn --arg e "$1" --arg c "$2" --arg o "${3:-}" '{hook_event_name: (if $e == "filing" then "PreToolUse" else "PostToolUse" end), session_id: "s1",
       tool_use_id: "t1", tool_input: {command: $c}} + (if $e == "filed" then {tool_response: {stdout: $o, stderr: ""}} else {} end)' \
