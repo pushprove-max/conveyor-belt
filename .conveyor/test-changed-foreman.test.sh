@@ -22,14 +22,17 @@ no() { echo "not ok - $1"; fails=1; }
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests" "$R/conveyor/lib" "$R/conveyor/foreman"
 cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-links.json" "$R/.conveyor/"
 : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"; : > "$R/.conveyor/no-records-split.sh"
-printf '%s\n' '{"outside": "conveyor/foreman/"}' '{"area": "cmd-auto", "file": "conveyor/lib/standing.sh"}' \
+printf '%s\n' '{"outside": "conveyor/foreman/"}' '{"outside": "conveyor/commands/foreman.sh"}' '{"area": "cmd-auto", "file": "conveyor/lib/standing.sh"}' \
   '{"area": "cmd-auto", "test": "standing.test.sh"}' > "$R/.conveyor/engine-areas.json"
 cp "$ROOT/conveyor/lib/standing.sh" "$R/conveyor/lib/"
 cp "$ROOT/conveyor/foreman/foreman.sh" "$ROOT/conveyor/foreman/procedures.md" "$R/conveyor/foreman/"
+mkdir -p "$R/conveyor/commands" && cp "$ROOT/conveyor/commands/foreman.sh" "$R/conveyor/commands/"
 printf 't_one() {\n  :\n}\n' > "$R/conveyor/tests/standing.test.sh"
 FOREMAN=(conveyor/foreman/foreman-launcher.test.sh conveyor/foreman/foreman-size.test.sh conveyor/foreman/foreman-standing.test.sh
   conveyor/foreman/foreman.test.sh)
-for t in "${FOREMAN[@]}" conveyor/foreman/waiter.test.sh; do echo ':' > "$R/$t"; done
+# The Foreman session cases, split in two files (foreman-session and foreman-claims): a change that runs one runs both.
+SESSION=(conveyor/foreman/foreman-session.test.sh conveyor/foreman/foreman-claims.test.sh)
+for t in "${FOREMAN[@]}" "${SESSION[@]}" conveyor/foreman/waiter.test.sh; do echo ':' > "$R/$t"; done
 git -C "$R" init -q && git -C "$R" add -A && git -C "$R" commit -qm init
 
 # listed <file> <sed script>: the listing of the change the sed script makes to <file>; the change is undone after.
@@ -46,11 +49,20 @@ names() {
   for t in "${FOREMAN[@]}"; do grep -qxF "$t" "$T/list" 2>/dev/null || no "a change to $1 does not select $t: list '$(tr '\n' ' ' < "$T/list" 2>&1)'"; done
   ! grep -qxF conveyor/foreman/waiter.test.sh "$T/list" || no "a change to $1 selects waiter.test.sh, which no link names: the check above proves nothing"
 }
+# sessions <file>: both Foreman session test files are in the list made for a change to <file>.
+sessions() {
+  local t
+  for t in "${SESSION[@]}"; do grep -qxF "$t" "$T/list" 2>/dev/null || no "a change to $1 does not select $t: list '$(tr '\n' ' ' < "$T/list" 2>&1)'"; done
+}
 
 # The issue's case: a change to the standing-yes text alone (the text-only rule picks only tests that hold the text).
 listed conveyor/lib/standing.sh 's/When unsure, ask\./When unsure, ask the owner./'; names conveyor/lib/standing.sh
 listed conveyor/foreman/foreman.sh '$a\
-: two'; names conveyor/foreman/foreman.sh
+: two'; names conveyor/foreman/foreman.sh; sessions conveyor/foreman/foreman.sh
+# Bug: the claims cases left foreman-session.test.sh for foreman-claims.test.sh, and a change to the engine's foreman
+# command ran only the old file (its tests are listed by hand in test-changed.sh TESTS_OF).
+listed conveyor/commands/foreman.sh '$a\
+: two'; sessions conveyor/commands/foreman.sh
 listed conveyor/foreman/procedures.md '$a\
 One more line.'; names conveyor/foreman/procedures.md
 

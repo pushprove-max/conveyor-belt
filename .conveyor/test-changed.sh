@@ -508,7 +508,8 @@ all=
 declare -A TESTS_OF=([.claude/dashboard/panels/rules.js]=.claude/scripts/__tests__/dashboard-view.needs.test.mjs
   [.claude/scripts/dashboard.sh]=".claude/scripts/__tests__/dashboard-limit.test.sh .claude/scripts/__tests__/dashboard-limit-wait.test.sh
     .claude/scripts/__tests__/dashboard-server.test.sh"
-  [conveyor/commands/foreman.sh]="conveyor/foreman/foreman.test.sh conveyor/foreman/foreman-session.test.sh conveyor/foreman/foreman-projects.test.sh"
+  [conveyor/commands/foreman.sh]="conveyor/foreman/foreman.test.sh conveyor/foreman/foreman-session.test.sh conveyor/foreman/foreman-claims.test.sh
+    conveyor/foreman/foreman-projects.test.sh"
   [hooks/sources.ts]=hooks/units.test.tsx [hooks/elements.ts]="hooks/sources.test.tsx hooks/units.test.tsx"
   [hooks/fixtures/units-two-projects.ts]="hooks/units-fetch.test.sh hooks/units.test.tsx hooks/sources.test.tsx"
   [.conveyor/engine-areas.json]=.conveyor/test-map-areas.test.sh [conveyor/lib/testmap.sh]=.conveyor/test-map-areas.test.sh)

@@ -11,6 +11,7 @@
 # (#1710: no case failed, the run ended with exit 124, and the file passed alone on the re-run).
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
+. "$SRC/../tests/wait.sh"
 export ENG=$SRC/../conveyor.sh
 B=$(mktemp -d); trap 'rm -rf "$B"' EXIT
 cd "$B" || exit 1
@@ -374,8 +375,10 @@ cases=(idle act fake ask first fork same solo paste unrep unrepdown unrep70 othe
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"
-for c in "${cases[@]}"; do ("t_$c" && : > "$B/$c.passed") > "$B/$c.out" 2>&1 & done
-wait
+# side_<case>: the case, its output in $B/<case>.out, and $B/<case>.passed once it passed; cases_side runs them side by
+# side, at most 8 at a time. Each name is one of the cases above, checked, so the eval runs no text from outside.
+for c in "${cases[@]}"; do eval "side_$c() { (t_$c && : > \"\$B/$c.passed\") > \"\$B/$c.out\" 2>&1; }"; done
+cases_side side_ "${cases[@]}"
 bad=0
 for c in "${cases[@]}"; do
   cat "$B/$c.out" >&2

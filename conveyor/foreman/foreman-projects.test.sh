@@ -4,7 +4,7 @@
 # Foreman mode's projects (foreman.sh, watch-conveyor.sh, watch-alerts.sh, lib.sh): the launcher reopening the
 # Foreman's session, one Foreman per project (or per group of linked projects), a clone of a host's project, the role
 # claimed by words or at a session's start, and no private name or path in any Foreman file. The other Foreman cases
-# are in foreman.test.sh and foreman-session.test.sh.
+# are in foreman.test.sh, foreman-session.test.sh and foreman-claims.test.sh.
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 . "$SRC/../tests/wait.sh"

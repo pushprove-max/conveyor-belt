@@ -3,7 +3,7 @@
 # timeout: 120
 # Foreman mode (foreman.sh, watch-conveyor.sh, watch-alerts.sh, waiter.sh): set up on a fresh host with two records,
 # the launcher starting a session that gets the live summary, and every wake naming every item. The other Foreman
-# cases are in foreman-session.test.sh and foreman-projects.test.sh.
+# cases are in foreman-session.test.sh, foreman-claims.test.sh and foreman-projects.test.sh.
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 . "$SRC/../tests/wait.sh"
