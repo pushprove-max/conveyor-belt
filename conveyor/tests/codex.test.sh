@@ -216,6 +216,41 @@ t_codexapi() {
   jq -e numbers "$ST/apierror" >/dev/null 2>&1 || fail "a Codex build the API refused marked no API error"
   [ "$(st 'select(.step == "build") | .tokens.codex')" = 11 ] || fail "the build line: $(st 'select(.step == "build")')"
 }
+# Bug: a Codex build the API refused at all 5 tries failed with the last 60 lines of Codex's error words below its
+# reason, and block() posts that tail in the issue's GitHub comment: a password in a URL of them went public. The
+# reason names the status alone; Codex's words stay in the card's files, on stdout and on stderr alike. Bug too: its
+# stderr ending "; its events are kept in <URL>" was read by keptnote() as a review's kept events file, and the URL
+# went into the reason's first line.
+t_codexapiwords() {
+  cxsetup; tune '.tunables.apiPause = 0.02'; fx_wt : b.txt one
+  # shellcheck disable=SC2016 # expanded in the codex stub
+  printf '%s\n' 'echo x >> "$STUB/cx-tries"; echo "{\"type\":\"thread.started\",\"thread_id\":\"th-7\"}"' \
+    'echo "{\"type\":\"error\",\"message\":\"exceeded retry limit, last status: 429 Too Many Requests at https://demo:pw123@example.com/\"}"' \
+    'echo "API Error: 429; its events are kept in https://demo:pw123@example.com/" >&2; exit 1' > "$STUB/cx-cmd"
+  fx_in 'echo "{}" > "$FXWT.settings"; session "$FXWT" "Build the issue."; echo "rc=$?"'
+  [ "$(wc -l < "$STUB/cx-tries")" = 5 ] && [ "$(tail -n 1 "$T/$CASE/run.out")" = rc=1 ] \
+    && head -n 1 "$T/$CASE/run.out" | grep -q '^the model API refused (429) at each of 5 tries' \
+    || fail "a Codex build the API kept refusing did not fail after 5 tries naming the status: $(wc -l < "$STUB/cx-tries") tries, $(cat "$T/$CASE/run.out")"
+  ! grep -qE 'pw123|example\.com|exceeded retry limit' "$T/$CASE/run.out" || fail "the refused Codex build's reason holds Codex's words: $(cat "$T/$CASE/run.out")"
+}
+# Bug: a Codex build whose subscription login failed, and that the API then refused through the fallback proxy at
+# all 5 tries, kept the words below bothsaid()'s first line (Codex's own, from both routes) on its reason, which
+# block() posts to GitHub. The reason keeps the login's cause from that first line and no word of Codex's. session1()
+# is a stub that answers as two such routes do: the real proxy fallback on a 429 is t_proxyapi's (Claude), and only
+# apitries()'s reason is under test here.
+t_codexapiproxy() {
+  cxsetup; tune '.tunables.apiPause = 0.02'; fx_wt : b.txt one
+  # shellcheck disable=SC2016 # expanded in the engine shell (fx_in)
+  fx_in 'session1() { echo x >> "$STUB/cx-tries"; echo "{\"step\":\"build\",\"sec\":1}" > "$1.spent"; : > "$1.err"
+      echo "{\"type\":\"error\",\"message\":\"exceeded retry limit, last status: 429 Too Many Requests\"}" > "$1.out"
+      printf "%s\n" "on the subscription login, the Codex sign-in expired (exit 1): run codex login; through the proxy, session failed (exit 1)" \
+        "token expired at https://demo:pw123@example.com/" "API Error: 429; its events are kept in https://demo:pw123@example.com/"; return 1; }
+    apitries "$FXWT" build "$FXWT.out" session1 "$FXWT" "Build the issue." build builder; echo "rc=$?"'
+  [ "$(wc -l < "$STUB/cx-tries")" = 5 ] && [ "$(tail -n 1 "$T/$CASE/run.out")" = rc=1 ] \
+    && head -n 1 "$T/$CASE/run.out" | grep -q '^the model API refused (429) at each of 5 tries, .*, through the proxy; on the subscription login, the Codex sign-in expired (exit 1)' \
+    || fail "a Codex build refused through the proxy did not fail after 5 tries naming the status and the login's cause: $(wc -l < "$STUB/cx-tries") tries, $(cat "$T/$CASE/run.out")"
+  ! grep -qE 'pw123|example\.com|token expired' "$T/$CASE/run.out" || fail "the Codex build refused through the proxy holds Codex's words in its reason: $(cat "$T/$CASE/run.out")"
+}
 
 # Bug (#495): a build that changes nothing and leaves no reply was blocked as "nothing to review", with no word that it
 # said nothing and no sign of what went wrong. Its reason says it left no reply and names the kept folder, and the end

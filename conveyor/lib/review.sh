@@ -114,11 +114,10 @@ reviewkeep() { # <worktree> <session file, or "">
   printf '; its events are kept in %s' "$b.events"; return $rc
 }
 # The note reviewkeep() printed (its last "; its events are kept in <name>") in a reason <text>, for a reason that replaces
-# the review's own (a stall, or the API's refusal at each try): prints it, or nothing.
+# the review's own (a stall, or the API's refusal at each try): prints it, or nothing. Bug: it read the whole reason, so a CLI's words below its first line ending "; its events are kept in <a URL>" put that URL (and a credential in it) in a reason, which goes to a GitHub comment: the note is read from the first line alone, where reviewkeep() puts it, and only a name of reviewkeep()'s shape is kept.
 keptnote() { # <reason text>
-  local n=${1##*; its events are kept in }
-  [ "$n" != "$1" ] || return 0
-  n=${n%%[;[:space:]]*}; printf '; its events are kept in %s' "$n"
+  local l=${1%%$'\n'*} n; [[ $l == *'; its events are kept in '* ]] || return 0; n=${l##*; its events are kept in }; n=${n%%[;[:space:]]*}
+  [[ $n =~ ^[A-Za-z0-9._-]+\.review(-[0-9]+)?\.events$ ]] && printf '; its events are kept in %s' "$n"; return 0
 }
 # nostart()'s reason (NOSTART_WHY) with reviewkeep()'s note at the end of its first line, the CLI's words below it, for a
 # Claude or OpenCode review (a Codex review's reason holds none of its words: nostartsaid()). Bug: the reason was
