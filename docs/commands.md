@@ -52,6 +52,9 @@
   card or its card landed. A failure, such as card records that it cannot lock, exits with another code.
 - `conveyor.sh retry <issue> --fresh` gives a blocked card back without its kept work: the next card builds from
   nothing. The kept work moves to a dated folder under `kept-dropped/` in the state folder; it is not deleted.
+  `--fresh` also works with a card id, for a card that has no GitHub issue, such as a split part. A card that
+  was landing a branch (a land-branch card, or a split part landed by hand) starts again from the tip of that
+  branch, not from nothing. `retry` refuses it when the branch is gone, and changes nothing.
 - `conveyor.sh unblock <issue> --hold` takes a blocked card off the belt and holds its issue. Its kept work stays.
   After `conveyor.sh control release <issue>`, the loop picks the issue again and starts from that kept work. This is
   the Board's **Hold**.

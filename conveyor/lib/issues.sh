@@ -21,8 +21,8 @@ strays() {
 # picks its main commit's entry again, a new card built from nothing. So is a card of no issue (a Tests page card, a Foreman order, a review follow-up, a release fix card or a split part: testpick(),
 # lib/testaction.sh): the loop picks its action again, a new card that starts from its kept work (resumeplan()). So is a land-branch card of issue 0 (branchback(), lib/lane.sh).
 # RETRYWHY, when set, is why the loop retried the card itself (speedretry()): its blocked line keeps it as retriedWhy. RETRYBY, who gave it back (commands/retry.sh), as retriedBy (reviewretried(), lib/views.sh), which the Board does not show. HELDSTAYS, when set: the issue is held and this retry leaves it held (again(), commands/retry.sh), so it is said to be given back, not picked again (bug: both were said).
-retry() { # <issue, or the card id of a main-red fix card, a Tests page card or a land-branch card of issue 0> [fresh: an issue's next card builds from nothing]
-  local n=$1 ends l what k='.issue == $n' a p f BACKID='' BACKKEPT='' # BACKID, BACKKEPT: the record entry and the kept folder branchback() made
+retry() { # <issue, or the card id of a card with no GitHub issue> [fresh: the next card builds from nothing]
+  local n=$1 ends l what k='.issue == $n' a p f d='' BACKID='' BACKKEPT='' # BACKID, BACKKEPT: the record entry and the kept folder branchback() made; d: the folder fresh drops kept work to
   check || return 1
   # No issue is #0: every main-red fix card is of issue 0, so a retry of it would give back each of them. Said: how to
   # name one, and the blocked ones by card id beside the name they are shown by.
@@ -65,30 +65,30 @@ retry() { # <issue, or the card id of a main-red fix card, a Tests page card or 
   ends=$(jq -rs 'group_by(.card)[] | map(select(.step == "worktree" and (.pid | type) == "number")) | last | select(.)
       | "\(.pid)\t\(.started // "")"' <<<"$l" | while IFS=$'\t' read -r p t; do ! p_alive "$p" "$t" || printf ' %s' "$p"; done) || return 1
   [ -z "$ends" ] || { echo "conveyor: $what has a blocked card whose process is still ending (pid$ends); nothing changed: retry once it has ended" >&2; return 1; }
-  # fresh (`retry <issue> --fresh`): the kept work of every blocked card of the issue, this one's and those of earlier
-  # retries (prior() reads them all), moves to a dated folder under the state folder, not deleted: its kept folder and
-  # a review left beside its worktree. With none of it left, the next card builds from nothing. Done before the lines
-  # move out: a move that fails leaves the card blocked.
+  [ -z "${2:-}" ] || d=$ST/kept-dropped/$(date -u +%Y%m%dT%H%M%SZ)-$n
+  # A shut self-heals batch card or docs sweep card takes its entries back, or is refused if another card has one (healstake()).
+  if [ "$k" = '.issue == $n' ]; then healstake "" "$1"; else healstake "$1" 0 && branchback "$1" "$l" "$d"; fi || return 1
+  # fresh (`retry <issue | card id> --fresh`): the kept work (kept folder, review beside the worktree) of every blocked card of
+  # the issue, or of the card and those given back before it (testcardwas(), read by resumeplan()), moves to a dated folder
+  # under the state folder, not deleted. Done after branchback()'s refusals, before the lines move out (a failed move leaves
+  # it blocked). A card with a branch had its own kept folder moved by branchback(), which put the branch's patch in its place.
   if [ -n "${2:-}" ]; then
-    local c f d moved=''
-    d=$ST/kept-dropped/$(date -u +%Y%m%dT%H%M%SZ)-$n
-    ends=$({ printf '%s\n' "$l"; stdb ask issue retried "$n"; } | jq -r 'select(.step == "blocked") | .card' | sort -u) || return 1
+    local c
+    ends=$({ printf '%s\n' "$l"; stdb ask lines retried; } | jq -r --arg n "$n" --arg was "$([ "$k" = '.issue == $n' ] || testcardwas "$n")" \
+      'select(.step == "blocked" and ((.issue | tostring) == $n or .card == $n or (.card | IN($was | split("\n")[])))) | .card' | sort -u) || { [ -z "$BACKID" ] || branchdrop "$BACKID"; return 1; }
     for c in $ends; do
       for f in "$ST/kept/$c" "$CARDS/$c.review"; do
-        [ -e "$f" ] || continue
-        mkdir -p "$d" && mv "$f" "$d/" || { echo "conveyor: $f could not be moved to $d; $what is still blocked" >&2; return 1; }
-        moved=1
+        [ -e "$f" ] && [ "$f" != "$ST/$BACKKEPT" ] || continue
+        mkdir -p "$d" && mv "$f" "$d/" || { [ -z "$BACKID" ] || branchdrop "$BACKID"; echo "conveyor: $f could not be moved to $d; $what is still blocked" >&2; return 1; }
       done
     done
   fi
-  # A shut self-heals batch card or docs sweep card takes its entries back, or is refused if another card has one (healstake()).
-  if [ "$k" = '.issue == $n' ]; then healstake "" "$1"; else healstake "$1" 0 && branchback "$1" "$l"; fi || return 1
   # The blocked line carries when the owner gave the card back (retriedAt): the wait ends there, not at the next pick.
   MOVETAG='(if $bk != "" and .step == "blocked" and (.kept // "") == "" then .kept = $bk else . end) | if .step == "blocked" and .retriedAt == null then . + {retriedAt: $at} + (if $why == "" then {} else {retriedWhy: $why} end) + (if $by == "" then {} else {retriedBy: $by} end) else . end' \
     moveout "$k" "${a[@]}" --arg why "${RETRYWHY:-}" --arg by "${RETRYBY:-}" --arg bk "$BACKKEPT" || { [ -z "$BACKID" ] || branchdrop "$BACKID"; return 1; }
   echo "conveyor: $what $([ -n "${HELDSTAYS:-}" ] && echo 'is given back, and stays held' || echo 'can be picked again'); its old lines are in $RETRIED"
+  [ -z "${2:-}" ] || { echo "conveyor: its next card $([ -n "$BACKKEPT" ] && echo "starts from its branch's tip" || echo 'builds from nothing'); $([ -d "$d" ] && echo "its kept work is in $d" || echo "it had no kept work")"; return 0; }
   [ "$k" = '.issue == $n' ] || return 0
-  [ -z "${2:-}" ] || { echo "conveyor: its next card builds from nothing; $([ -n "$moved" ] && echo "its kept work is in $d" || echo "it had no kept work")"; return 0; }
   p=$(prior "$n"); ends=$(jq -r 'select(.kept != "") | "\(.kept)/\(.card).patch"' <<<"$p")
   [ -n "$ends" ] && [ -s "$ends" ] || return 0
   # A patch stopped for the owner's yes: what card() does with it, by the issue as it is now (keptway()), and by the

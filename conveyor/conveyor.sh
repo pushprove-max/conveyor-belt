@@ -57,7 +57,7 @@ CMD_ARG=${1:-}
 cmd run run.sh 'run [--only <issue>[,<issue>...]] [max-cards]'
 cmd serve serve.sh 'serve'
 cmd land-branch land-branch.sh 'land-branch <branch>'
-cmd retry retry.sh 'retry <issue [--fresh] | card id>'
+cmd retry retry.sh 'retry <issue | card id> [--fresh]'
 cmd shut shut.sh 'shut <issue [--closed] | card id>'
 cmd unblock unblock.sh 'unblock <issue> --hold'
 cmd parts parts.sh 'parts <parent> <issue>...'

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # `conveyor.sh retry <issue | card id>`: a blocked card's issue queued again, or a blocked main-red fix card, Tests
-# page card or land-branch card of issue 0 by its card id (retry(), lib/issues.sh), sourced by conveyor.sh. `retry <issue> --fresh` drops the issue's kept work first (moved
-# to a dated folder under the state folder): its next card builds from nothing.
+# page card or land-branch card of issue 0 by its card id (retry(), lib/issues.sh), sourced by conveyor.sh. `retry <issue | card id> --fresh` drops the card's or issue's kept work first (moved
+# to a dated folder under the state folder): its next card builds from nothing (a card of a branch, a land-branch card or
+# a split part landed by hand: from its branch's tip, refused when the branch is gone).
 . "$HERE/lib/prompts.sh" || exit 1
 . "$HERE/lib/views.sh" || exit 1
 . "$HERE/lib/issues.sh" || exit 1
@@ -22,8 +23,8 @@
 # The record of the cards with no GitHub issue, which a land-branch card given back joins (branchback(), lib/lane.sh).
 . "$HERE/lib/testaction.sh" || exit 1
 . "$HERE/lib/lane.sh" || exit 1
-[[ ${2:-} =~ ^([0-9]+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] && { [ $# = 2 ] || { [ $# = 3 ] && [ "$3" = --fresh ] && [[ $2 =~ ^[0-9]+$ ]]; }; } \
-  || { echo "usage: conveyor.sh retry <issue> [--fresh] | retry <the card id of a main-red fix card, a Tests page card or a land-branch card>" >&2; exit 2; }
+[[ ${2:-} =~ ^([0-9]+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] && { [ $# = 2 ] || { [ $# = 3 ] && [ "$3" = --fresh ]; }; } \
+  || { echo "usage: conveyor.sh retry <issue | card id> [--fresh]; a card id is the one of a main-red fix card, a Tests page card, a land-branch card or another card with no GitHub issue (a Foreman order, a review follow-up, a release fix card, a split part)" >&2; exit 2; }
 # The retry by review-land (RETRYBY review-land, needsland(), lib/needsask.sh) is the other way round from
 # review-retry's, and read under the lock too, as needsland() reads its cards before it: the owner's standing order
 # holds now. Auto is on (scope full) with the standing kind review-retry on; the issue's last blocked card is blocked by

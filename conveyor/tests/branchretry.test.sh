@@ -41,10 +41,12 @@ brsetup() {
   [[ $BRC == c*-0 ]] && [ "$(st "select(.card == \"$BRC\") | .step" | tail -n 1)" = blocked ] || fail "land-branch $b did not leave a blocked card of issue 0: $(cat "$T/$CASE/run.out")"
 }
 # brnext: the pick takes the card given back as a new card (its id printed), and resumeplan() (lib/card.sh), as card()
-# calls it on that card's new worktree, prints its mode and the s.txt it staged (its lines joined by spaces).
+# calls it on that card's new worktree, prints its mode and the s.txt it staged (its lines joined by spaces). A case that
+# calls it twice gets a new worktree each time: the one of the first call is removed before the second is added.
 brnext() {
   fx_in 'read -r c n _ <<<"$(locked pick "" "" "[]")" && [ "$n" = 0 ] || { echo "pick took ${c:-nothing}"; exit 3; }
     echo "$c"; br="" wt=$T/$CASE/wt vrule=on heldto="" inh="" mode="" from=""
+    [ ! -e "$wt" ] || git worktree remove --force "$wt" || exit 5
     git worktree add -q --detach "$wt" "refs/heads/$BRANCH" && issue=$(testcardissue "$c") && resumeplan || exit 4
     echo "$mode $from $(git -C "$wt" show :s.txt 2>&1 | paste -sd " " -)"'
   [ "$RC" = 0 ] || fail "the next card of $BRC could not be picked or resumed (exit $RC): $(cat "$T/$CASE/run.out")"
@@ -105,6 +107,84 @@ t_branchretryslice() {
   brnext
   [ "$(sed -n 2p "$T/$CASE/run.out")" = "session $BRC tip" ] \
     || fail "the next card of split part $PART, whose landing card $BRC kept no patch, did not start from its branch's tip (want: session $BRC tip): $(cat "$T/$CASE/run.out")"
+}
+
+# #1754. Bug it catches: `retry <card id> --fresh` of a blocked split part (a card with no GitHub issue) printed only a
+# usage line that left split parts out and did nothing, though `retry <card id>` gave it back; `--fresh` took an issue
+# number alone. Now the part's kept work moves to the dated folder under kept-dropped, and its next card starts from the
+# branch's tip ("tip"), not from the kept patch ("kept"). The usage line, printed for a bad call, names split parts.
+# Review E6, a second bug: a card that held a kept patch had no patch made from its branch (branchback() found the kept
+# one), so the retry dropped the kept patch and the next card had no patch at all, not the branch's tip.
+t_branchretryfresh() {
+  local out
+  brsetup keep part
+  out=$(loop retry "$BRC" nonsense 2>&1); grep -qF 'split part' <<<"$out" && grep -qF -- '--fresh' <<<"$out" \
+    || fail "the usage line of a bad retry call (retry $BRC nonsense) does not name split parts and --fresh: $out"
+  # The list of commands, printed for a call with no command, says `--fresh` takes a card id as it takes an issue (review E8).
+  out=$(loop 2>&1); grep -qF 'retry <issue | card id> [--fresh]' <<<"$out" \
+    || fail "the usage message of a call with no command (conveyor.sh) does not say retry takes --fresh with a card id: $out"
+  out=$(loop retry "$BRC" --fresh 2>&1) || fail "retry $BRC --fresh of the blocked split part $PART failed: $out"
+  [ -z "$(st "select(.card == \"$BRC\")")" ] && [ -n "$(find "$ST/kept-dropped" -name "$BRC.patch" 2>/dev/null)" ] \
+    || fail "retry $BRC --fresh did not give the card back with its kept patch moved under kept-dropped: $out $(find "$ST" -name "$BRC*" 2>&1)"
+  brnext
+  [ "$(sed -n 2p "$T/$CASE/run.out")" = "session $BRC tip" ] \
+    || fail "the next card of split part $PART after retry $BRC --fresh did not start from its branch's tip, with the kept patch dropped (want: session $BRC tip): $(cat "$T/$CASE/run.out")"
+}
+
+# #1754, review E1. Bug it catches: `retry <card id> --fresh` of a split part's second card dropped only that card's
+# kept work: the first card's kept patch, given back before it (testcardwas()), still came along, so the next card
+# started from the patch the owner asked to drop. The second card has no branch (an entry's pick names none), so nothing
+# is made from a branch: the next card is built from nothing. (Review E7: the second brnext call reuses the first one's worktree.)
+t_branchretryfresh2() {
+  local out c2
+  brsetup keep part
+  out=$(loop retry "$BRC" 2>&1) || fail "retry $BRC of the blocked split part $PART failed: $out"
+  brnext; c2=$(head -n 1 "$T/$CASE/run.out")
+  fx_in 'append "$(line "'"$c2"'" 0 blocked fail "{\"reason\": \"the review found a fault\", \"kept\": \"\"}")"'
+  out=$(loop retry "$c2" --fresh 2>&1) || fail "retry $c2 --fresh of the second card of split part $PART failed: $out"
+  [ -n "$(find "$ST/kept-dropped" -name "$BRC.patch" 2>/dev/null)" ] \
+    || fail "retry $c2 --fresh left the kept patch of the earlier card $BRC in place: $out $(find "$ST" -name "$BRC*" 2>&1)"
+  brnext
+  [[ $(sed -n 2p "$T/$CASE/run.out") != *kept* ]] \
+    || fail "the next card of split part $PART after retry $c2 --fresh still started from the kept patch of $BRC: $(cat "$T/$CASE/run.out")"
+}
+
+# #1754, review E6. Bug it catches: `retry <card id> --fresh` of a blocked land-branch card of a branch that names no
+# issue, with a kept patch, dropped that patch and made none from the branch (branchback() found the kept one), so its
+# entry carried no patch and the next card did not land the branch's tip.
+t_branchretryfreshlb() {
+  local out
+  brsetup keep
+  out=$(loop retry "$BRC" --fresh 2>&1) || fail "retry $BRC --fresh of the blocked land-branch card failed: $out"
+  [ -n "$(find "$ST/kept-dropped" -name "$BRC.patch" 2>/dev/null)" ] && jq -e --arg c "$BRC" 'any(.cards[]; .label == "Branch: lb" and .card == $c)' "$ST/testactions/cards.json" > /dev/null \
+    || fail "retry $BRC --fresh did not move the kept patch under kept-dropped and add the entry of branch lb: $out $(find "$ST" -name "$BRC*" 2>&1) $(cat "$ST/testactions/cards.json" 2>&1)"
+  brnext
+  [ "$(sed -n 2p "$T/$CASE/run.out")" = "session $BRC tip" ] \
+    || fail "the next card of $BRC after retry $BRC --fresh did not start from branch lb's tip (want: session $BRC tip): $(cat "$T/$CASE/run.out")"
+}
+
+# #1754, review E6. Bug it catches: `retry <card id> --fresh` of a card whose branch is gone would drop its kept patch,
+# the only change it has, and leave the card nothing to land; the refusal leaves the kept patch and the card as they were.
+t_branchretryfreshgone() {
+  local out
+  brsetup keep part
+  git -C "$R" worktree remove --force "$T/$CASE/lane-$PART" && git -C "$R" branch -D "$PART" > /dev/null || fail "branch $PART could not be removed"
+  out=$(loop retry "$BRC" --fresh 2>&1); [ $? != 0 ] && grep -qF "its branch $PART is gone" <<<"$out" \
+    || fail "retry $BRC --fresh of a card whose branch $PART is gone was not refused as having nothing to land: $out"
+  [ -s "$ST/kept/$BRC/$BRC.patch" ] && [ -z "$(find "$ST/kept-dropped" -name "$BRC*" 2>/dev/null)" ] && [ "$(st "select(.card == \"$BRC\") | .step" | tail -n 1)" = blocked ] \
+    || fail "the refused retry $BRC --fresh (branch $PART gone) moved the kept patch away or gave the card back: $out $(find "$ST" -name "$BRC*" 2>&1)"
+}
+
+# #1754, review E2. Bug it catches: a refused `retry <card id> --fresh` (a Foreman session may not give back a landing
+# of the fast lane's branch: owneronly()) had already moved the card's kept patch away, so the card stayed blocked
+# without its work.
+t_branchretryfreshlane() {
+  local out
+  brsetup keep fast-lane
+  out=$(CONVEYOR_FOREMAN=1 loop retry "$BRC" --fresh 2>&1); [ $? != 0 ] && grep -qF "the owner's alone" <<<"$out" \
+    || fail "retry $BRC --fresh (CONVEYOR_FOREMAN=1) of the fast-lane landing was not refused as the owner's alone: $out"
+  [ -s "$ST/kept/$BRC/$BRC.patch" ] && [ -z "$(find "$ST/kept-dropped" -name "$BRC*" 2>/dev/null)" ] \
+    || fail "the refused retry $BRC --fresh (CONVEYOR_FOREMAN=1) moved the kept patch away: $out $(find "$ST" -name "$BRC*" 2>&1)"
 }
 
 # #1673, review E1. Bug it catches: `retry <card id>` queued a blocked landing of the fast lane's branch from a Foreman
