@@ -41,8 +41,8 @@
 # function the map does not hold or lists no case for, or to one changed since the map was traced (its sum differs),
 # runs by the rules above (its area; a hook library, .claude/hooks/lib/, the hooks' tests that reach it: hooklibtests).
 # The map check says how old the coverage map is.
-# A change to the map itself runs the map check, the map's own tests (MAPTESTS: .conveyor/test-changed.test.sh and
-# .conveyor/test-changed-areas.test.sh, which read this checkout's map) and the case files whose naming changed: each
+# A change to the map itself runs the map check, the map's own tests (MAPTESTS: .conveyor/test-changed.test.sh,
+# .conveyor/test-changed-map.test.sh and .conveyor/test-changed-areas.test.sh, which read this checkout's map) and the case files whose naming changed: each
 # case file an area lists in the map now and did not list at HEAD, and every case file of an area whose files list changed, so a file moved to other cases runs them. An "all" area among those, or a map that cannot be read at HEAD or in the worktree, runs the whole engine
 # test. A map edit that wrongly drops a case file from an area is not caught here: the map check (every case file is
 # named by some area) and the nightly whole test are the net. `test-changed.sh --check` runs the map check alone, and
@@ -167,7 +167,7 @@ if [ -s "$RERUN" ]; then
 fi
 MAP=.conveyor/engine-areas.json
 # The map's own tests, the ones that read this checkout's map: a change to the map runs each that exists.
-MAPTESTS=".conveyor/test-changed.test.sh .conveyor/test-changed-areas.test.sh"
+MAPTESTS=".conveyor/test-changed.test.sh .conveyor/test-changed-map.test.sh .conveyor/test-changed-areas.test.sh"
 # The map is one fact a line, so two changes that each add a line to it merge with no conflict (the repository's
 # .gitattributes merges it keeping both sides): {"outside": <path>}, or of an area {"area": <name>} with one more key,
 # "file": <engine file>, "test": <case file>, "tests": "all" or "why": <text>. AREAS reads its lines (jq -s) as

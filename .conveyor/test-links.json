@@ -1,6 +1,7 @@
 {
   "main:.conveyor/engine-areas.json": [
     ".conveyor/test-changed-areas.test.sh",
+    ".conveyor/test-changed-map.test.sh",
     ".conveyor/test-changed.test.sh"
   ],
   ".conveyor/engine-areas.json": [

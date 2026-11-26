@@ -239,28 +239,38 @@ p_mapadd() {
   got=$(CONVEYOR_TEST_LOG=$T/log mran2)
   [ "$got" = "MAPTEST aone atwo" ] && ok "the test step runs the map's test and the newly listed case file for a map change" || no "test step, a.test.sh added to b: ran '$got': $(cat "$T/out")"
 }
-# Bug it catches: the map's own test was split in three files (issue 959) and a map change ran only the one named
-# test-changed.test.sh, so this file's checks of this checkout's map (p_checkout, p_union) never ran on a map change.
-# A map change, made by the card or by main (a `main` line), runs both files that read the map, not the rerun file.
+# Bug it catches: the map's own test was split in files (issues 959, 1739) and a map change ran only the one named
+# test-changed.test.sh, so the checks of this checkout's map in the other files (p_checkout, p_union, the map copy's
+# parts) never ran on a map change. A map change, made by the card or by main (a `main` line), runs the three files
+# that read the map, not the rerun file.
 p_mapareas() {
   local t
-  for t in areas rerun; do echo "echo MAP$t >> \"\$(dirname \"\$0\")/../ran\"" > "$R/.conveyor/test-changed-$t.test.sh"; done
+  for t in areas rerun map; do echo "echo MAP$t >> \"\$(dirname \"\$0\")/../ran\"" > "$R/.conveyor/test-changed-$t.test.sh"; done
   maptest
   jq '.areas.b.tests = ["b.test.sh", "a.test.sh"]' "$T/map" | lines > "$R/.conveyor/engine-areas.json"
   got=$(mran2)
-  [ "$got" = "MAPTEST MAPareas aone atwo" ] && [ "$(cat "$T/rc")" = 0 ] \
-    && ok "a map change runs test-changed.test.sh and test-changed-areas.test.sh, not test-changed-rerun.test.sh" \
-    || no "map change, three map test files: ran '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
-  # The run again: the card's change (each of the three files edited) selects all three, and all three passed; main's
-  # map change runs again only the two that read the map.
+  [ "$got" = "MAPTEST MAPareas MAPmap aone atwo" ] && [ "$(cat "$T/rc")" = 0 ] \
+    && ok "a map change runs test-changed.test.sh, test-changed-map.test.sh and test-changed-areas.test.sh, not test-changed-rerun.test.sh" \
+    || no "map change, four map test files: ran '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
+  # The run again: the card's change (each of the four files edited) selects all four, and all four passed; main's
+  # map change runs again only the three that read the map.
   git -C "$R" checkout -q -- .conveyor/engine-areas.json
-  for t in "" -areas -rerun; do echo ': two' >> "$R/.conveyor/test-changed$t.test.sh"; done
+  for t in "" -areas -rerun -map; do echo ': two' >> "$R/.conveyor/test-changed$t.test.sh"; done
   printf 'change\tabc\n' > "$T/rerun"
-  for t in "" -areas -rerun; do printf 'pass\t.conveyor/test-changed%s.test.sh\n' "$t" >> "$T/rerun"; done
+  for t in "" -areas -rerun -map; do printf 'pass\t.conveyor/test-changed%s.test.sh\n' "$t" >> "$T/rerun"; done
   printf 'main\t.conveyor/engine-areas.json\n' >> "$T/rerun"
   got=$(CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun mran2)
-  [ "$got" = "MAPTEST MAPareas" ] && ok "after main changed the map, both map test files run again, not the rerun file" \
-    || no "main changed the map, three map test files: ran '$got': $(cat "$T/out")"
+  [ "$got" = "MAPTEST MAPareas MAPmap" ] && ok "after main changed the map, the three map test files run again, not the rerun file" \
+    || no "main changed the map, four map test files: ran '$got': $(cat "$T/out")"
+}
+# Bug it catches: the map's tests were split (issue 1739) and .conveyor/test-links.json, which a card's Test step reads
+# when main changed the map, kept the old two files, so the step skipped the third. The link lists exactly the
+# MAPTESTS files of the real test-changed.sh.
+p_maplinks() {
+  want=$(sed -n 's/^MAPTESTS="\(.*\)"$/\1/p' "$ROOT/.conveyor/test-changed.sh" | tr ' ' '\n' | sort)
+  got=$(jq -r '.["main:.conveyor/engine-areas.json"][]' "$ROOT/.conveyor/test-links.json" | grep '^\.conveyor/test-changed' | sort)
+  [ -n "$want" ] && [ "$got" = "$want" ] && ok "a main change to the map links each of the map's test files" \
+    || no "main:.conveyor/engine-areas.json links '$got', MAPTESTS is '$want'"
 }
 p_mapmove() {
   maptest
@@ -395,7 +405,7 @@ p_cputime() {
 }
 
 for p in checkout area selected boardcount shellcount ended realstate filter named owned ownedpy partsh partpy deleted mapadd \
-  mapareas mapmove mapcore emptyarea casefile caseshared scnew scold enginetime cputime badline union; do part "$p"; done
+  mapareas maplinks mapmove mapcore emptyarea casefile caseshared scnew scold enginetime cputime badline union; do part "$p"; done
 wait
 for p in "${PARTS[@]}"; do
   cat "$T/$p.res"
