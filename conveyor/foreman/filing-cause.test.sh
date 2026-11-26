@@ -379,6 +379,31 @@ printf '## What to build\nA note.\n## Design\nNotes are kept in notes.json.\n' >
 passes "gh issue create --title 'New' --body-file $T/new.md"
 }
 
+# Bug (#1702): the body file path was read up to the next space or quote, so `--body-file x.md)` closing a `$( )` named the
+# file `x.md)`, which does not exist: its Cause section was never seen and the hook refused a good body. `;`, `|` and `&`
+# after the path were taken in the same way. A body with no Cause is still refused in each form, and a body file that
+# cannot be read is refused with its path named, not with the missing-section text.
+t_closer() {
+case_ closer
+printf '## What happens now\nIt breaks.\n## Cause\nThe cache is stale.\n' > "$T/good.md"
+printf '## What happens now\nIt breaks.\n' > "$T/bad.md"
+local c
+for c in ')' ' && echo ok)' ';' '; echo ok' '|' ' | cat' '&' ' & echo ok' ' >/dev/null)' '>/dev/null)'; do
+  passes "u=\$(gh issue create --title x --label bug --body-file $T/good.md$c"
+  refused "u=\$(gh issue create --title x --label bug --body-file $T/bad.md$c"
+done
+passes "u=\$(gh issue create --title x --body-file=$T/good.md) && echo \"\$u\""
+refused "u=\$(gh issue create --title x --body-file=$T/bad.md) && echo \"\$u\""
+# A quoted path ends at its closing quote: a `)` or `;` inside it is part of the name, not the end of the word.
+cp "$T/good.md" "$T/a(1);b.md"; cp "$T/bad.md" "$T/c(1);d.md"
+passes "u=\$(gh issue create --title x --label bug --body-file \"$T/a(1);b.md\") && echo \"\$u\""
+refused "u=\$(gh issue create --title x --label bug --body-file '$T/c(1);d.md') && echo \"\$u\""
+c="u=\$(gh issue create --title x --label bug --body-file $T/none.md) && echo \"\$u\""
+out=$(hook "$c")
+jq -e --arg p "$T/none.md" '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("cannot be read") and contains($p) and (contains("where the bad data") | not))' <<<"$out" >/dev/null \
+  || fail "an unreadable body file was not refused with its path named; command: $c; output: $out"
+}
+
 # Bug: a card that changed only no_cause did not run this file. The Foreman folder is outside the engine's area map and
 # no test is named after foreman.sh, so only its test links chose this file, one of six, and a card's Test step runs
 # five (CARDLINKED): the cap left it out. The case stages a change to no_cause in a copy of this checkout and asks the
@@ -410,7 +435,7 @@ grep -qxF conveyor/foreman/filing-cause.test.sh <(tail -n +2 "$W/list") \
   || fail "the cap leaves files out of the list of a card that changes only no_cause in $f, so its records can drop conveyor/foreman/filing-cause.test.sh; left out: $(head -1 "$W/list"), list: $(tail -n +2 "$W/list" | tr '\n' ' ')"
 }
 
-cases=(what heading list quote fence bug new design linked)
+cases=(what heading list quote fence bug new design closer linked)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

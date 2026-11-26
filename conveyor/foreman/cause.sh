@@ -250,8 +250,9 @@ heredocs() {
 }
 # filing_read <hook input>: reads the issue text of a filing command, once, for no_cause and no_design: 0 when the
 # command files an issue, with FT_TEXT the text it carries (see no_cause), FT_TI 1 for a `testissue` and FT_O the command
-# without its comments and here-document bodies; 1 when it files none (the three are then not set).
-FT_TEXT='' FT_TI=0 FT_O=''
+# without its comments and here-document bodies, FT_UNREAD the path of the body file it names when that file cannot be
+# read (else empty); 1 when it files none (the four are then not set).
+FT_TEXT='' FT_TI=0 FT_O='' FT_UNREAD=''
 filing_read() {
   local cmd f t ti=0 fc=
   cmd=$(jq -r '.tool_input.command // ""' <<<"$1" 2>/dev/null) || return 1
@@ -268,10 +269,15 @@ filing_read() {
   t=${j//[\"\']/}
   [[ $t =~ (^|[[:space:];\&|])ask[[:space:]]+[^[:space:]]+[[:space:]]+testissue([[:space:]]|$) ]] && ti=1
   files "$1" || [ "$ti" = 1 ] || return 1
-  if [[ $o =~ (--body-file|-F)[[:space:]=]+[\"\']?([^[:space:]\"\']+) ]] && f=${BASH_REMATCH[2]}; then
-    # `--body-file -` reads the body from stdin: a `< file` redirect names that file (stdin_file in lib.sh).
-    [ "$f" != - ] || f=$(stdin_file "$o") || f=-
-    [ ! -f "$f" ] || fc=$(cat "$f" 2>/dev/null)
+  # A quoted path ends at its closing quote. A bare one ends at a space, a quote or a character that closes or ends the word
+  # (`)` of a `$( )`, a backtick, `;`, `|`, `&`, `<`, `>`: `--body-file -<<<'text'` names `-`, not `-<<<`).
+  local bf=$'(--body-file|-F)[[:space:]=]+("([^"]+)"|\'([^\']+)\'|["\']?([^[:space:]"\';|&<>)`]+))'
+  FT_UNREAD=''
+  if [[ $o =~ $bf ]] && f=${BASH_REMATCH[3]}${BASH_REMATCH[4]}${BASH_REMATCH[5]}; then
+    # `--body-file -` reads the body from stdin: a `< file` redirect names that file (stdin_file in lib.sh). It reads j, with
+    # its line continuations taken out: `<\` and `<< 'text'` on the next line are one `<<<` here-string, no `< file`.
+    [ "$f" != - ] || f=$(stdin_file "$j") || f=-
+    if [ -f "$f" ] && fc=$(cat "$f" 2>/dev/null); then :; elif [ "$f" != - ]; then FT_UNREAD=$f; fi
   fi
   # A line inside a fenced code block (``` or ~~~) is no heading: the headings are read from the text without its fences.
   local hc='' hd=$'(^|[^<])<<-?[ ]*[\'"]?[A-Za-z_][A-Za-z_0-9]*[\'"]?[ ]*\\)*[ ]*\n'
@@ -332,6 +338,13 @@ no_cause() {
   has_heading Cause && return 1
   if has_heading 'What happens now' || [ "$FT_TI" = 1 ]; then return 0; fi
   grep -qiE "(^|[[:space:]])(--label|-l)(=|[[:space:]]+)?[\"']?([^[:space:]\"']*,)?bug([,\"'[:space:]]|\$)" <<<"$FT_O"
+}
+# cause_refusal: the refusal text of no_cause: NO_CAUSE, or, when the body file the command names cannot be read, a text
+# that names its path (FT_UNREAD), as its Cause section could not be seen.
+cause_refusal() {
+  if [ -n "$FT_UNREAD" ]; then
+    printf 'Not run: the body file %s cannot be read, so its "## Cause" section could not be checked. Write the file there, or name the path of a file that exists, and run the command again.' "$FT_UNREAD"
+  else printf '%s' "$NO_CAUSE"; fi
 }
 # no_design: 0 when the command filing (read by filing_read) has a `## What to build` section and no `## Design` section.
 no_design() {

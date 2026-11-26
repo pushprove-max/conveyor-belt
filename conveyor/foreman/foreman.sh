@@ -634,7 +634,7 @@ filing() {
   local in recs repo main c s bad=() kept=() sl
   in=$IN
   if foreman "$SID" && filing_read "$in"; then
-    if no_cause; then deny "$NO_CAUSE"; return 0; fi
+    if no_cause; then deny "$(cause_refusal)"; return 0; fi
     if no_design; then deny "$NO_DESIGN"; return 0; fi
   fi
   files "$in" || return 0
