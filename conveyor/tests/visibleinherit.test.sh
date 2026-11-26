@@ -80,9 +80,15 @@ t_inherit() {
   # t_inheritpart).
   old=$(st 'select(.issue == 100104 and .step == "blocked") | .card')
   loop retry 100104 >/dev/null || fail "retry of the blocked #100104 exited non-zero"
-  resumed 100104
+  resumed 100104 'git worktree remove --force "$wt" && rm -rf "$wt".*'
   [ "$(jq -c '[.rc, .mode, .note, .staged]' <<<"$RESUMED")" = "[0,\"review\",\"reviewing the kept patch of card $old: is its visible change part of the yes of #7? No build\",[\"a.txt\",\"web/pay.ts\"]]" ] \
     || fail "a retried follow-up whose kept review said beyond was not taken up to be reviewed again, with no build: $RESUMED"
+  # Bug: the same kept patch, once it no longer applies to main, had one review of the port alone (fin), though its
+  # kept review gave no INHERITED: part, so nothing asked whether the change stays inside the yes of #7. Its port has the full loop.
+  echo ONE > "$R/a.txt" && git -C "$R" commit -qam other || fail "main could not move"
+  resumed 100104
+  [ "$(jq -c '[.rc, .mode, .note, .fin]' <<<"$RESUMED")" = "[0,\"port\",\"the kept patch of card $old no longer applies to main: one session brings it onto main, then review\",\"\"]" ] \
+    || fail "the port of a follow-up's kept patch whose review said beyond its parent's yes did not keep the full review loop: $RESUMED"
 }
 # The follow-up of a parent with no yes, as it stops and is retried.
 t_inheritno() {

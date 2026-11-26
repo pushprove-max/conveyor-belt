@@ -253,6 +253,47 @@ t_visiblechanged() {
   [ "$(jq -c '[.rc, .mode, .note, .staged]' <<<"$RESUMED")" = "[0,\"session\",\"resumed from the kept patch of card $old: the issue changed since its review: one session, then review\",[\"a.txt\",\"web/pay.ts\"]]" ] \
     || fail "the changed issue's card was not given one session and a review on its kept patch: $RESUMED"
 }
+# The card of #8 stopped for Dana's yes (blocked), its issue body changed by <jq filter> (an approval line added), main
+# moved so that its kept patch no longer applies, retried; then resumeplan called on it (resumed, with heldto set to
+# RESUMEHELD). old: the blocked card; full: the note of a port that goes round the full review loop.
+portmoved() { # <jq filter>
+  blocked; old=$(st 'select(.issue == 8 and .step == "blocked") | .card')
+  full="the kept patch of card $old no longer applies to main: one session brings it onto main, then review"
+  issue 8 2026-01-01 | jq -c "[$1]" > "$STUB/issues.json"
+  echo ONE > "$R/a.txt" && git -C "$R" commit -qam other || fail "main could not move"
+  loop retry 8 >/dev/null || fail "retry of the approved #8 exited non-zero"
+  resumed 8
+}
+YESLINE='\n\nVisible change approved: Dana 2026-01-02 (yes)\n'
+# Bug: an approved kept patch that no longer applies to main went round the full review loop again, though its review
+# had finished and the owner said yes to it. The next card ports it with one session and one review of the port alone
+# (mode port, the kept review's verdict as fin), then its tests, as a port after a landing conflict does.
+t_visibleport() {
+  portmoved ".body += \"$YESLINE\""
+  [ "$(jq -c '[.rc, .mode, .note, .fin, .finend, .staged]' <<<"$RESUMED")" = "[0,\"port\",\"the kept patch of card $old finished its review loop and no longer applies to main: one session brings it onto main, then one review of that port alone\",\"GO\",{},[]]" ] \
+    || fail "the approved kept patch that no longer applies to main was not ported with one review of the port alone: $RESUMED"
+}
+# Bug: an approved kept patch that no longer applies to main, on an issue body edited since its review, had one review
+# of the port alone, so nothing reviewed the change against the issue as it is now. Its port has the full loop (fin empty).
+t_visibleportchanged() {
+  portmoved ".body += \"\\nAlso show the price.$YESLINE\""
+  [ "$(jq -c '[.rc, .mode, .note, .fin, .finend]' <<<"$RESUMED")" = "[0,\"port\",\"$full\",\"\",{}]" ] \
+    || fail "the approved kept patch on an issue edited since its review was not ported with one session and a full review: $RESUMED"
+}
+# Bug: the port of a kept patch approved with `condition: <text>` had one review of the port alone, which was written
+# before the condition, so nothing held the change to it. Its port has the full loop (fin empty).
+t_visibleportcond() {
+  portmoved '.body += "\n\nVisible change approved: Dana 2026-01-02 (yes); condition: guests see it only on mobile\n"'
+  [ "$(jq -c '[.rc, .mode, .note, .fin]' <<<"$RESUMED")" = "[0,\"port\",\"$full\",\"\"]" ] \
+    || fail "the port of a kept patch approved with condition: guests see it only on mobile did not keep the full review loop: $RESUMED"
+}
+# Bug: the port of an approved kept patch on a card held to the section approved before the build (heldto), whose kept
+# review did not say the change matches it, had one review of the port alone, so nothing checked it against that section.
+t_visibleportheld() {
+  RESUMEHELD=1 portmoved ".body += \"$YESLINE\""
+  [ "$(jq -c '[.rc, .mode, .note, .fin]' <<<"$RESUMED")" = "[0,\"port\",\"$full\",\"\"]" ] \
+    || fail "the port of an approved kept patch held to its section, whose review did not say it matches, did not keep the full review loop: $RESUMED"
+}
 # The words inside a line of the body are not the approval line: counted as the loop counts an issue's approval
 # lines (card.sh: SEE's approvals, prompts.sh), with no card run. A card with none stops (t_visibleyes).
 t_visibleinline() {

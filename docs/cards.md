@@ -314,6 +314,12 @@ this form. All other words in the line are notes, and they change nothing. When 
 owner's yes" is on, a yes with a condition has the kept patch reviewed against the condition, with no build, before
 it lands. A yes with no condition lands the kept patch with no build and no review.
 
+When a kept patch that you approved no longer applies to main, one session brings it onto main. Then one review reads
+that port alone, the tests run, and the card lands. The card goes through the full review loop instead when the issue
+text has changed since the review of the kept patch, or when your yes gives a condition. It also does so when the card
+is held to the change you approved before the build and that review did not say the change matches it. The same is
+true when a follow-up's review did not say `INHERITED: part` for the yes it inherits.
+
 The rule Lint check is on by default. `conveyor.sh control rules lint=off` turns it off. Then no lint command runs in a
 card, the brief has no `# Lint` section, and a change of lint policy does not stop for your yes.
 

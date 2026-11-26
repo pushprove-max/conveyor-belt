@@ -109,7 +109,7 @@ portkept() {
 # resumed <issue> [<commands>]: how the next card of a retried <issue> takes up its kept work (resumeplan(),
 # lib/card.sh), with no card run: card()'s new worktree of main ($T/$CASE/cards/c9), its issue as GitHub gives it, the rule
 # "visible changes need the owner's yes" and the inherited yes as card() reads them (the moved cases' issues have
-# no section naming a change, so none is held to one: heldto is empty). Its outcome, as card() acts on it, in
+# no section naming a change, so none is held to one: heldto is empty, or RESUMEHELD for a case that sets it). Its outcome, as card() acts on it, in
 # $RESUMED: {rc, err, mode, note, from, fin, finend, was, pro, rounds, staged (the worktree's staged files), beside (the
 # files beside the worktree, by their ending)}. <commands> run after it, in its shell (wt is that worktree).
 # Used by the resume cases of kept, rerunkept, reviewback, visible and visibleinherit too (the runner loads every case
@@ -120,7 +120,7 @@ resumed() {
     git worktree add -q --detach "$wt" "refs/heads/$BRANCH" || exit 3
     stdb ask issue retried "$n" >/dev/null 2>&1 || :
     issue=$(gh issue view "$n" --json number,title,body,labels,milestone) || exit 3
-    vrule=on heldto="" inh=""; yesrule "" || vrule=off
+    vrule=on heldto="${RESUMEHELD:-}" inh=""; yesrule "" || vrule=off
     [ "$vrule" = off ] || inh=$(inherit "$issue")
     from="" fromk="" was="" mode="" note="" fin="" finend="{}" pro="[]" rounds=0 err=""
     resumeplan; rc=$?

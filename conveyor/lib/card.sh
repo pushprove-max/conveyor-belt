@@ -641,7 +641,7 @@ cardfix() {
 # beside the worktree that come with the kept patch (review, rerun, trailers, covered, stabilised, outside, effects, rounds). It fails, with the
 # reason in err, when the card must block: a kept patch it could not take out again, or retried lines it could not read (cardtree() has checked the new worktree holds no staged change).
 resumeplan() {
-  local prev d t rev='' kw='' crev='[]' # rev: the kept review prior() found; kw: keptway()'s answer for a kept patch; crev: the review lines of the kept-patch chain this card carries (pro and rounds are read from them)
+  local prev d t rev='' kw='' crev='[]' yk='' # yk: the kept patch that no longer applies is one yeskept() holds for; rev: the kept review prior() found; kw: keptway()'s answer for a kept patch; crev: the review lines of the kept-patch chain this card carries (pro and rounds are read from them)
   if [ -z "$br" ] && prev=$(prior "$n" "$([ "$n" != 0 ] || testcardwas "$c")") && [ -n "$prev" ]; then
     from=$(jq -r .card <<<"$prev"); fromk=$(jq -r .kept <<<"$prev"); was=$(jq -r .reason <<<"$prev"); rev=$(jq -r .review <<<"$prev")
     [ -z "$rev" ] || cp "$rev" "$wt.review"
@@ -656,9 +656,9 @@ resumeplan() {
         [ -z "$rland" ] || { mode=land; note="landing from the kept patch of card $from, blocked by its review again after review-retry: no build and no review, its review's findings filed as follow-ups"; }
       elif [ -r "$fromk/$from.patch" ] && git apply --numstat "$fromk/$from.patch" >/dev/null 2>&1; then
         mode=port; note="the kept patch of card $from no longer applies to main: one session brings it onto main, then review"
-        # Its loop finished: only a landing conflict blocked it, and the kept review is the review of that
-        # patch (a GO, or a last NO-GO whose follow-ups were filed); or a retry by review-land. One review of the port alone, then tests and landing.
-        if { [[ $was == "rebase onto main conflicts: "* ]] || [ -n "$rland" ]; } && { [ "$rev" = "$fromk/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } \
+        # Its loop finished: only a landing conflict blocked it, and the kept review is the review of that patch (a GO, or a last NO-GO whose follow-ups were filed); or a retry by review-land;
+        # or its card stopped for the owner's yes after that review (yeskept(): yk; bug: it went round the full loop again). One review of the port alone, then tests and landing.
+        if { [[ $was == "rebase onto main conflicts: "* ]] || [ -n "$rland" ] || { yeskept "$prev" && yk=1; }; } &&{ [ "$rev" = "$fromk/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } \
           && [ -s "$wt.review" ] && fin=$(verdict "$wt.review") && [ "$fin" != none ]; then
           note="the kept patch of card $from finished its review loop and no longer applies to main: one session brings it onto main, then one review of that port alone"
           # finend: why that loop ended, for the filed line: from the blocked card's last NO-GO review that ended a loop,
@@ -701,6 +701,7 @@ resumeplan() {
   # have grown to cover the change; only a kept "part" lands unreviewed.
   [ "$mode" != land ] || [ -z "$inh" ] || [ "$(inheritance "$wt.review")" = part ] \
     || { mode=review; note="reviewing the kept patch of card $from: is its visible change part of the yes of #$(jq -r .from <<<"$inh")? No build"; }
+  [ "$mode" != port ] || [ -z "$yk" ] || [ -z "$fin" ] || { [ "$kw" != review ] && { [ -z "$issue" ] || [ "$vrule" = off ] || ! conditional "$issue"; } && { [ -z "$heldto" ] || [ "$(visible "$wt.review" any)" = matches ]; } && { [ -z "$inh" ] || [ "$(inheritance "$wt.review")" = part ]; }; } || { fin='' finend='{}'; note="the kept patch of card $from no longer applies to main: one session brings it onto main, then review"; } # The port of an approved kept patch (yk) has one review of it alone only where that patch would land unreviewed: a body changed since its review (keptway() review), a yes with a condition, a held section the kept review did not match or an inherited yes with no kept "part" (as above) give it the full loop (fin empty).
   if [ -n "${rland:-}" ] && [[ $mode =~ ^(land|port|review|session)$ ]]; then rlrev=$(cat "$wt.review") || rlrev=''; rlfind=${was#the fix for }; rlfind=${rlfind% did not hold after *}; else rland=''; fi # A retry by review-land that carries its kept patch keeps the kept review (rlrev, afterreview()) and the finding its block names (rlfind, "the fix for <finding> did not hold after ...": followups() files it released); one built from nothing is no such retry.
   # pro: the rollout actions of the retried cards whose kept patch this card carries ($from, the one whose kept patch that one resumed, and so on back to one built from nothing):
   # `retry` moved their review lines out, and a new review replaces the kept one, so its landing reads them (ro, cardready()): the newest review line with a rollout, one that
