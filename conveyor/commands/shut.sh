@@ -16,6 +16,8 @@
 . "$HERE/lib/claim.sh" || exit 1
 . "$HERE/lib/push.sh" || exit 1
 . "$HERE/lib/followups.sh" || exit 1
+# healsfree(), lib/followups.sh, stamps the entries it gives back with clock().
+. "$HERE/lib/control.sh" || exit 1
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1

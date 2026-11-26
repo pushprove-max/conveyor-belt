@@ -145,4 +145,9 @@ t_tcshutheld() {
   out=$(loop shut "$TKF" 2>&1) || fail "shut $TKF failed: $out"
   [ "$(jq -c '[.batched, .freed]' "$ST/selfheals.jsonl")" = "$(jq -cn --arg c "$TKF" '[null, [$c]]')" ] \
     || fail "shut $TKF did not give its self-heals entry back to the list: $(cat "$ST/selfheals.jsonl")"
+  # Bug it catches (#1705): shut.sh did not load clock(), so the give-back printed "clock: command not found" and left the entry's seen time empty.
+  [ "$out" = "conveyor: card $TKF was shut before it was picked; it is taken off the record and never picked" ] \
+    || fail "shut $TKF of a card that holds a self-heals entry printed more than its one line: $out"
+  [[ $(jq -r '.seen' "$ST/selfheals.jsonl") =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] \
+    || fail "shut $TKF freed its self-heals entry with no seen time: $(cat "$ST/selfheals.jsonl")"
 }
