@@ -294,25 +294,35 @@ mainredhold() {
 # nothing landing to change main. Its change makes main no worse, so it goes on as passed: prints why. A case of its
 # entry that it found itself (by: verdicts() adds each case its run fails on main to the entry of that commit,
 # mainred(), which can be its own) is not one it fixes when another entry holds it too: else its own failure of
-# another entry's case would hold it. Fails for any other card, for a case of its own entry, for a case no other
-# entry holds (one it found itself on its own entry's commit is for it to fix), for a run that stopped before some
-# files ran (testfails() notRun: rules.failfast, which a fix card's run does not keep: testrun.sh listcmd()), whose
-# cases no verdict names, and when the record cannot be read (the card then waits for main, as before).
+# another entry's case would hold it. Only an entry whose fix card is open (redopen()) holds a case: one whose card
+# landed or closed stays in the record, but no card is left to fix a case that fails there again. Fails with 1 for
+# any other card, and when the record cannot be read (the card then waits for main, as before). Fails with 2, the
+# failure the fix card's own to fix, for a case of its own entry, for a case no open other entry holds (one it found
+# itself on its own entry's commit is for it to fix), for a run that stopped before some files ran (testfails()
+# notRun: rules.failfast, which a fix card's run does not keep: testrun.sh listcmd()) or in which a file did not
+# start for a problem of the host (testfails() host, which notRun leaves out), whose cases no verdict names, and for
+# a run in which a file ran out of time (testfails() timeout, stopped or ownLimit: the time-out is the card's, though
+# its file, named as the case, fails on main and another entry holds that file's name).
 redelse() { # <card> <issue> <branch> <verdicts() json> <testfails() of its run>
-  [ "$2" = 0 ] && [ -z "$3" ] || return 1
-  jq -e '(.notRun // []) == []' <<<"${5:-null}" > /dev/null 2>&1 || return 1
-  jq -re --arg c "$1" --slurpfile v <(printf '%s' "$4") 'select(any(.reds[]; .card == $c)) | [.reds[] | select(.card == $c) | .cases[] | select(.by != $c) | .case] as $own
-    | [.reds[] | select(.card != $c) | .cases[].case] as $held
+  local o=() l
+  [ "$2" = 0 ] && [ -z "$3" ] && jq -e --arg c "$1" 'any(.reds[]; .card == $c)' "$MAINRED" > /dev/null 2>&1 || return 1
+  jq -e '(.notRun // []) == [] and (.host // []) == [] and .timeout == null and (.stopped // []) == [] and (.ownLimit // []) == []' <<<"${5:-null}" > /dev/null 2>&1 || return 2
+  while IFS= read -r l; do ! redopen "$l" || o+=("$l"); done < <(jq -r --arg c "$1" '[.reds[] | select(.card != $c) | .card // ""] | unique[]' "$MAINRED" 2>/dev/null)
+  jq -re --arg c "$1" --slurpfile v <(printf '%s' "$4") --argjson o "$(jq -cn '$ARGS.positional' --args "${o[@]}")" '[.reds[] | select(.card == $c) | .cases[] | select(.by != $c) | .case] as $own
+    | [.reds[] | select(.card != $c and ((.card // "") | IN($o[]))) | .cases[].case] as $held
     | [$v[0].verdicts[] | select(.verdict == "main") | .case] | select(length > 0 and all(.[]; IN($held[]) and (IN($own[]) | not)))
-    | "every case it still fails fails on main too, and each is a case of another entry, none a case it fixes (\(join(", "))): it does not wait for main; their own fix cards fix them"' "$MAINRED" 2>/dev/null
+    | "every case it still fails fails on main too, and each is a case of another entry, none a case it fixes (\(join(", "))): it does not wait for main; their own fix cards fix them"' "$MAINRED" 2>/dev/null || return 2
 }
 # A test run that failed (rc). go: again (the test step again: no result, a wait for main or the machine, or main
 # moved), next (a fix round, one of TESTFIXES, or a fit onto main that went back) or landed; '' when the repair lane passed it,
-# or when it is a main-red fix card whose failures are other entries' (redelse()).
+# or when it is a main-red fix card whose failures are other entries' (redelse()). A main-red fix card whose failures
+# all fail on main, but are its own to fix (redelse() 2, read as $? by the elif after its call), does not wait for
+# main: its own entry holds main red for them (mainred.sh redlisted()), and the loop starts no fix card for an entry
+# whose card it took before, its own or one that landed or closed (run.sh redfix()), so with no other landing under
+# way nothing would end that wait. Its failure goes to a fix round instead.
 cardfailed() {
-  # The worktree lacks a dependency folder main has (depsmissing(), lib/push.sh): the failure is the project's
-  # setup, not the change, and no run on main or fix session mends it. The card is blocked saying so, with no
-  # test failures.
+  # The worktree lacks a dependency folder main has (depsmissing(), lib/push.sh): the failure is the project's setup,
+  # not the change, and no run on main or fix session mends it. The card is blocked saying so, with no test failures.
   t=$(depsmissing "$wt"); [ -z "$t" ] || { block "$c" "$n" "$wt" "$(depsreason "$t")"; return; }
   # A run with no result (voidrun(): killed by a signal, as by the service stopping or restarting, also under a
   # loop that adopted the card) proves nothing: nothing of it runs on main, goes to the main-red record, a wait
@@ -362,6 +372,7 @@ cardfailed() {
       holdwaited "$wt" "$([ $lane != 2 ] || echo lane)"; held=1
     fi
   elif [ "$route" = main ] && repaired=$(redelse "$c" "$n" "$br" "$t" "${out:-null}"); then echo "conveyor: card $c: $repaired"; rc=0; tmain=''
+  elif [ $? = 2 ]; then echo "conveyor: card $c: every case it still fails fails on main too, but it is the fix card of main, or its run timed out or left a file not run: it does not wait for main, and its failure goes to a fix round"; route=$(testroute "$wt")
   elif [ "$route" = main ]; then
     echo "conveyor: card $c: every case it still fails fails on main too: it waits for main to change"
     # A card at the give-way limit gives its files way too (giveway() red): the main-red fix card may need them.
