@@ -169,7 +169,8 @@ def ok: . as $r | (keys - known) == need
         and (.diff // {files: 0, added: 0, removed: 0} | type == "object" and keys == ["added", "files", "removed"] and all(type == "number"))
         # A split line (splitcheck(), lib/slices.sh): kept or split, the rule's setting, the issue's text and size,
         # the verdict and why, the slices of a split, the issues filed for them and whether they started held (On), the
-        # card whose unrecorded plan this card finished or ended (resumed), the answer that broke the rules. The plan: on the
+        # card whose unrecorded plan this card finished or ended (resumed), the answer that broke the rules, forced: true
+        # when the check was made for an issue with two blocked cards. The plan: on the
         # start line of the filing, the split it files and whether its slices are cards with no GitHub issue.
         # A card's pick (modelpick(), lib/modelpick.sh), on each of its lines from the pick on: its group, the
         # builder chosen, by whom, whether it is a trial, and the rule's setting; on a trial card, the pipeline files its
@@ -199,8 +200,8 @@ def ok: . as $r | (keys - known) == need
         and (.plan == null or (.step == "start" and .of == "file" and (.plan | type == "object" and keys == ["cards", "split"]
           and (.cards | type == "boolean") and (.split | type == "object" and .verdict == "split" and (.slices | type == "array")))))
         and (.split == null or ((.result | IN("kept", "split")) and (.split | type == "object"
-          and (keys - ["slices", "filed", "cards", "held", "resumed", "answer"]) == ["hash", "mode", "size", "verdict", "why"]
-          and (.resumed // "" | type == "string")
+          and (keys - ["slices", "filed", "cards", "held", "resumed", "answer", "forced"]) == ["hash", "mode", "size", "verdict", "why"]
+          and (.resumed // "" | type == "string") and ((has("forced") | not) or .forced == true)
           and (.held // false | type == "boolean")
           and (.mode | IN("shadow", "on")) and ([.hash, .why, .answer // ""] | all(type == "string"))
           and (.verdict | IN("under", "keep", "split", "invalid", "failed")) and ((.verdict == "split") == ($r.result == "split"))

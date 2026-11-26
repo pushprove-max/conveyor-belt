@@ -385,13 +385,21 @@ has three settings: Off, Shadow and On. On is the default for a new project. A p
 own setting. `conveyor.sh control rules split=shadow` sets Shadow, `split=off` sets Off and `split=on` sets On.
 
 Conveyor checks an issue one time, when it picks the issue and before the card builds it. It checks the issue again
-only after you edit its title or body. It does not check follow-ups, the slices of a split issue, or fix
-cards that have no issue.
+only after you edit its title or body, and when two cards of the issue have blocked. It does not check follow-ups, the
+slices of a split issue, or fix cards that have no issue.
+
+The check for an issue with two blocked cards ignores the limits below and always asks the judge. The judge also gets
+why each of the last two blocked cards stopped, and is told that Conveyor built the issue twice and nothing landed.
+Conveyor makes this check one time for each text of the issue. It does not make it when the kept patch of the last
+blocked card waits only for your yes, or when review-land gave the issue back. In Shadow, the card's `split` line
+records the verdict and the card builds the issue. In On, a split is filed as below, and no slice takes the kept patch
+of a blocked card. For any other answer, Conveyor builds the issue as one card. The `split` line of this check holds
+`forced: true`.
 
 First, code measures the issue: the items of its Done when section (a section headed Acceptance criteria or
 Definition of done counts the same), the file paths and the area labels that it names, and its length. The limits are
 `split.doneWhen`, `split.files`, `split.areas` and `split.chars` in `.conveyor/project.json`. When the issue is under
-all of them, Conveyor keeps it whole and asks no model.
+all of them, Conveyor keeps it whole and asks no model, except for the check of an issue with two blocked cards.
 
 When the issue reaches one limit, Conveyor asks the judge (Judge on the Rules tab) one time. The judge gets the issue
 and the files that it names, as they are on main. It answers keep, or split into 2 or 3 slices:

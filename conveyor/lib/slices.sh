@@ -4,16 +4,21 @@
 # card, issue 0, nor a branch). Its issue is left out when it is a follow-up (the pack's follow-up label: the slices of
 # a split issue have it too), or when a split line of the card records or the retried lines already holds the same
 # text of it (hash: the git hash of its title, a newline and its body): an issue is checked again only once it has
-# been edited.
+# been edited, or when it has SPLIT_TRIES blocked cards or more, once for each text of the issue (a forced check, below).
 # Code first: the issue's size (SPLITSIZE: the items of its Done when section, the file paths and area labels it names,
 # its characters) against the pack's split thresholds (split.doneWhen, split.files, split.areas, split.chars). An issue
-# under all of them is kept with no model call. One at or over one of them is given to the judge (the Rules tab's
+# under all of them is kept with no model call, unless a forced check (below) is made. One at or over one of them is given to the judge (the Rules tab's
 # Judge, the seat judgeseat() names), with no tools, once and SPLIT_TIMEOUT at most: its title and body, its Done-when
 # items numbered D1, D2 and so on, and the files it names as they are on main (the first SPLIT_FILE characters of each,
 # SPLIT_FILES files at most). The judge answers keep, or split into 2 or 3 slices (SPLITASK). An answer is used only
 # when it holds to the rules (SPLITREAD): each slice has a title, Done-when items of its own and the parent's items it
 # covers; every item of the parent is covered by exactly one slice; a slice depends only on slices before it. Any other
 # answer, or a call that fails, keeps the issue whole, and the line says why.
+# A forced check (splitforce()): an issue with SPLIT_TRIES blocked cards or more, given back by `retry`, is given to the
+# judge whatever its hash line and its size say, with the block reason of its last two blocked cards in the prompt, and
+# its line holds forced: true. It is made once for each text of the issue, and not when the kept patch of the last
+# blocked card waits only for the owner's yes (yeskept(), lib/issues.sh) or was given back by review-land. Any answer
+# but a valid split builds the issue whole, as the rest of this rule does.
 # The card's split line records it: result kept or split, and split {mode (the rule: shadow or on), hash, verdict
 # (under: under the thresholds; keep; split; invalid: an answer that broke the rules; failed: the call failed), why,
 # size, slices ({title, doneWhen, covers, dependsOn}, each slice's number from 1), filed (the issues filed, On only),
@@ -36,6 +41,9 @@
 # for its grown change (growopen()), or whose open follow-ups cannot be read: nothing is filed, as a slice of this
 # split could build that slice's work a second time.
 SPLIT_TIMEOUT=300 SPLIT_FILE=6000 SPLIT_FILES=10
+# The blocked cards of an issue (given back by `retry`) at which splitcheck() asks the judge again, whatever the hash
+# check and the limits say (splitforce()). Its one reader is splitcheck().
+SPLIT_TRIES=2
 # The issue (its input, as gh issue view gives it) as the split check measures it. $area is the pack's area prefix.
 # The Done when section is a heading or a line "Done when", "Acceptance criteria" or "Definition of done" (in bold or
 # with a colon too; the first one in the issue) up to the next heading; its
@@ -107,7 +115,7 @@ splitcall() { # <the control record> <prompt>
   [ "$rc" = 0 ] && [ -z "$s" ] || { ans="the judge call failed (${s:-exit $rc; 124 is the ${SPLIT_TIMEOUT}s timeout})"; return 1; }
 }
 # The judge's prompt: SPLITASK, the issue, its Done-when items and the files it names, as main has them.
-splitprompt() { # <issue json> <size json>
+splitprompt() { # <issue json> <size json> [<the block reasons of a forced check, a json list>]
   local f n=0 t p
   p=$SPLITASK$'\n\n'$(jq -r --argjson s "$2" '"# The issue: #\(.number) \(.title // "")\n\n\(.body // "")\n\n# Its Done-when items\n"
     + ($s.doneWhen | to_entries | map("D\(.key + 1): \(.value)") | join("\n") | if . == "" then "(none)" else . end)' <<<"$1")
@@ -117,10 +125,25 @@ splitprompt() { # <issue json> <size json>
     n=$((n + 1)); p+=$'\n\n## '"$f ($(wc -l <<<"$t" | tr -d ' ') lines)"$'\n'"${t:0:$SPLIT_FILE}"
   done < <(jq -r '.files[]' <<<"$2")
   [ "$n" != 0 ] || p+=$'\n\n(none of them is a file on main)'
+  [ -z "${3:-}" ] || p+=$'\n\n# This issue was built twice and nothing landed\nAnswer with a split into 2 or 3 slices. Why each of its last blocked cards stopped:\n'$(jq -r 'map("- " + .) | join("\n")' <<<"$3")
   printf '%s' "$p"
 }
+# Whether splitcheck() is made to ask the judge for <issue> (text hash <hash>): the issue has SPLIT_TRIES blocked cards
+# or more (distinct cards of its blocked lines that `retry` gave back), no forced check of this text is on record, and
+# the kept patch of its last blocked card is not one that waits only for the owner's yes (yeskept()) or was given back
+# by review-land. Prints the block reasons of the last two blocked cards (300 characters each, a json list) and
+# succeeds; fails when no check is forced, also when the blocked cards cannot be read.
+splitforce() { # <issue> <hash>
+  local b prev
+  b=$(stdb ask issue retried "$1" 2>/dev/null | jq -sc --argjson n "$1" 'map(select(.issue == $n and .step == "blocked")) | sort_by(.time) | group_by(.card) | map(last) | sort_by(.time)' 2>/dev/null) || return 1
+  [ "$(jq 'length' <<<"$b" 2>/dev/null)" -ge "$SPLIT_TRIES" ] 2>/dev/null || return 1
+  prev=$(prior "$1") && [ -n "$prev" ] && { yeskept "$prev" || [ "$(jq -r '.by' <<<"$prev")" = review-land ]; } && return 1
+  [ "$({ recs; olds; } 2>/dev/null | grep -F "\"$2\"" | jq -Rn --argjson n "$1" --arg h "$2" \
+    'any(inputs | fromjson? | objects; .step == "split" and .issue == $n and .split.hash == $h and .split.forced == true)' 2>/dev/null)" != true ] || return 1
+  jq -c '.[-2:] | map((.reason // "")[0:300])' <<<"$b"
+}
 splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the issue was split and the card has ended
-  local c=${CARDCTL:-} rule issue h size t1 t2 t3 t4 p ans v model='' nums x split sf me by res made old gone
+  local c=${CARDCTL:-} rule issue h size t1 t2 t3 t4 p ans v model='' nums x split sf me by res made old gone force=''
   [ -n "$c" ] || c=$(ctl 2>/dev/null) || return 0
   rule=$(jq -r '.rules.split // "off"' <<<"$c" 2>/dev/null)
   [ "$rule" = shadow ] || [ "$rule" = on ] || return 0
@@ -150,14 +173,15 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
       gone=$(splitend "$old" "$2" "$sf" "$made") made='[]' sf=splitfile
     fi
   fi
-  [ -n "$res$gone" ] || [ "$({ recs; olds; } 2>/dev/null | grep -F "\"$h\"" | jq -Rn --argjson n "$2" --arg h "$h" \
+  [ -n "$res$gone" ] || force=$(splitforce "$2" "$h") || force='' # a forced check passes over the hash check and the limits
+  [ -n "$res$gone$force" ] || [ "$({ recs; olds; } 2>/dev/null | grep -F "\"$h\"" | jq -Rn --argjson n "$2" --arg h "$h" \
     'any(inputs | fromjson? | objects; .step == "split" and .issue == $n and .split.hash == $h)' 2>/dev/null)" != true ] || return 0
   [ -n "$res" ] || packget split.doneWhen t1 split.files t2 split.areas t3 split.chars t4 || return 0
   if [ -n "$res" ]; then : # the plan's split
-  elif jq -e --argjson t "[$t1,$t2,$t3,$t4]" '(.doneWhen | length) < $t[0] and (.files | length) < $t[1] and .areas < $t[2] and .chars < $t[3]' <<<"$size" >/dev/null; then
+  elif [ -z "$force" ] && jq -e --argjson t "[$t1,$t2,$t3,$t4]" '(.doneWhen | length) < $t[0] and (.files | length) < $t[1] and .areas < $t[2] and .chars < $t[3]' <<<"$size" >/dev/null; then
     v=$(jq -c '{verdict: "under", why: "under the pack'"'"'s split thresholds: \(.doneWhen | length) Done-when items, \(.files | length) files, \(.areas) areas, \(.chars) characters"}' <<<"$size")
   else
-    p=$(splitprompt "$issue" "$size")
+    p=$(splitprompt "$issue" "$size" "$force")
     # The judge call can take SPLIT_TIMEOUT, before the card's worktree line names its process: its start line names
     # it (pid, started, as the worktree line does), so `shut` and `retry` find the card (stuckcard(), lib/run.sh).
     # Bug: a card that waited here, or died here, could not be ended outside a running loop.
@@ -167,7 +191,7 @@ splitcheck() { # <card> <issue>: 0 when the card goes on to build; 1 when the is
     else v=$(jq -Rsc --argjson n "$(jq '.doneWhen | length' <<<"$size")" "$SPLITREAD" <<<"$ans" 2>/dev/null)
       [ -n "$v" ] || v=$(jq -cn --arg a "${ans:0:2000}" '{verdict: "invalid", why: "the answer held no JSON object", answer: $a}'); fi
   fi
-  [ -n "$res" ] || split=$(jq -c --arg m "$rule" --arg h "$h" --argjson s "$size" '{mode: $m, hash: $h, size: ($s | .doneWhen |= length | .files |= length)} + .' <<<"$v") || return 0
+  [ -n "$res" ] || split=$(jq -c --arg m "$rule" --arg h "$h" --argjson s "$size" '{mode: $m, hash: $h, size: ($s | .doneWhen |= length | .files |= length)} + (if $f then {forced: true} else {} end) + .' --argjson f "$([ -n "$force" ] && echo true || echo false)" <<<"$v") || return 0
   [ -z "$gone" ] || split=$(jq -c --arg b "$old" --arg w "$gone" '. + {resumed: $b} | .why += $w' <<<"$split") || return 0
   [ -n "$res" ] || [ "$(jq -r '.rules.splitissues' <<<"$c" 2>/dev/null)" != false ] || sf=splitcards # Cards with no GitHub issue: Split parts On
   # On, a split is filed; one that cannot be filed is recorded as a split not filed, and the issue is built whole.
