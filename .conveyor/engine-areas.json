@@ -744,6 +744,7 @@
 {"area": "testaction", "file": "conveyor/lib/testcardact.sh"}
 {"area": "testfiles", "test": "testfiles.test.sh"}
 {"area": "testfiles", "test": "testcases.test.sh"}
+{"area": "testfiles", "test": "testowners.test.sh"}
 {"area": "testfiles", "test": "cputime.test.sh"}
 {"area": "testfiles", "test": "fixcheck.test.sh"}
 {"area": "testfiles", "test": "runcheck.test.sh"}

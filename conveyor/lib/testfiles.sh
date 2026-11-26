@@ -76,16 +76,16 @@ TESTKEEP=5
 # the project, too long for an argument: `--slurpfile defs <(printf '%s' "$defs")`, and refs the same), at the start
 # of the program: caseowners (the files a flaky entry's case counts for) and failedfiles (the files a failed test line counts for).
 testowners() {
-  local tf=()
-  # Main's test files (testtracked(), lib/issues.sh), as paths, not globs; none, no search (git grep with no path
-  # searches the whole checkout).
-  mapfile -d '' -t tf < <(testtracked -z 2>/dev/null)
+  local all=() tf=() f p r o=()
+  # Main's test files (testtracked(), lib/issues.sh); none, no search. A link, or a file below one, is no file (as in
+  # testproxy()): grep follows a link, which can name a file outside the checkout. Each path part by the shell alone.
+  mapfile -d '' -t all < <(testtracked -z 2>/dev/null)
+  for f in "${all[@]}"; do p=$MAIN r=$f; while :; do p+=/${r%%/*}; [ ! -L "$p" ] || continue 2; [[ $r == */* ]] || break; r=${r#*/}; done; tf+=("$f"); done
   defs='{}' refs='{}'
   [ ${#tf[@]} != 0 ] || return 0
-  # Both from one git grep and one jq, as the snapshot reads them each time: a function's match ends in (), a name's
-  # never does (its last character is a letter or a digit), and neither match can hold the other's.
-  local o=()
-  mapfile -t o < <(git -C "$MAIN" --literal-pathspecs grep -oE -e '^(t_)?[A-Za-z0-9_]+\(\)' -e '[A-Za-z0-9_.-]+\.test\.[A-Za-z0-9]+' -- "${tf[@]}" 2>/dev/null \
+  # One grep (git grep -o took seconds to minutes here) and one jq: a function's match ends in (), a name's never does
+  # (it ends in a letter or a digit), and neither can hold the other's. main's tracked files, each named (-H).
+  mapfile -t o < <(cd "$MAIN" && grep -oHE -e '^(t_)?[A-Za-z0-9_]+\(\)' -e '[A-Za-z0-9_.-]+\.test\.[A-Za-z0-9]+' -- "${tf[@]}" 2>/dev/null \
     | jq -cRn '[inputs] | (map(capture("^(?<f>.+):(t_)?(?<c>[A-Za-z0-9_]+)\\(\\)$")) | group_by(.c) | map({key: .[0].c, value: [.[].f] | unique}) | from_entries),
       (map(select(endswith("()") | not) | capture("^(?<f>[^:]+):(?<n>.+)$")) | group_by(.f) | map({key: .[0].f, value: [.[].n] | unique}) | from_entries)')
   [ ${#o[@]} = 2 ] && defs=${o[0]} refs=${o[1]}
