@@ -70,50 +70,49 @@ t_metricstotals() {
   B='{"tokens":{"claude":1000000,"codex":0},"usage":{"input":1000000,"write":0,"write1h":0,"read":0,"output":0},"model":"claude-sonnet-5-5"}'
   V='{"tokens":{"claude":0,"codex":500000},"usage":{"input":500000,"read":0,"output":0},"counts":{"P0":0,"P1":0,"P2":0,"P3":0},"model":"gpt-6.1-sol"}'
   Z='{"usage":{"input":0,"write":0,"write1h":0,"read":0,"output":0}}'
-  l() { # <issue> <hh:mm> <step> <result> [extra json]
-    jq -cn --arg c "c$1" --argjson i "$1" --arg s "$3" --arg t "${d}T$2:00Z" --arg r "$4" --argjson x "${5:-{\}}" \
-      '{card:$c,issue:$i,step:$s,time:$t,tokens:{claude:0,codex:0},result:$r,sha:"",reason:""} * $x' >> "$S/cards.jsonl"
-  }
-  # Card 1: opened 00:00, picked 01:00, a NO-GO with 3 findings, a fix, a GO, the tests, landed 01:36, pushed 01:40.
-  l 1 01:00 picked ok "{\"title\":\"T1\",\"created\":\"${d}T00:00:00Z\"}"; l 1 01:00 worktree ok '{"limit":10}'; l 1 01:00 brief ok '{"depth":0}'
-  l 1 01:00 start ok '{"of":"build"}'; l 1 01:10 build ok "$B"; l 1 01:10 start ok '{"of":"review"}'
-  l 1 01:15 review NO-GO "$(jq -c '.counts = {"P0":0,"P1":2,"P2":1,"P3":0}' <<<"$V")"; l 1 01:15 start ok '{"of":"fix"}'; l 1 01:25 fix ok "$B"
-  l 1 01:25 start ok '{"of":"review"}'; l 1 01:30 review GO "$V"; l 1 01:30 start ok '{"of":"test"}'; l 1 01:35 test pass "$Z"
-  l 1 01:35 start ok '{"of":"land"}'; l 1 01:36 landed ok '{"sha":"s1","product":false,"limit":12,"diff":{"files":2,"added":30,"removed":4}}'
-  l 1 01:40 pushed ok '{"sha":"s1","sec":30}'
-  # Card 2: opened 00:00, picked 02:00, a GO, landed 02:21 with a follow-up; a push that failed after 900 s.
-  # The weekly limit reset during it (80 before, 1 after): what it took is not known, so not -79.
-  l 2 02:00 picked ok "{\"title\":\"T2\",\"created\":\"${d}T00:00:00Z\"}"; l 2 02:00 worktree ok '{"limit":80}'; l 2 02:10 build ok "$B"; l 2 02:15 review GO "$V"; l 2 02:20 test pass "$Z"
-  l 2 02:21 landed ok '{"sha":"s2","product":false,"leftover":true,"followups":[100101],"limit":1}'; l 2 02:30 push fail '{"sha":"s2","sec":900}'
-  # Card 3: blocked on a session's timeout. Card 4: blocked for the owner's yes to a visible change.
-  l 3 03:00 picked ok "{\"title\":\"T3\",\"created\":\"${d}T02:50:00Z\"}"; l 3 03:10 build ok "$B"
-  # Its fix session timed out after 60 s and 1M input tokens: the blocked line holds what it spent, priced ($2).
-  l 3 03:11 blocked blocked '{"reason":"fix: session failed (exit 124; 124 is the 3600s timeout): x","tokens":{"claude":1000000,"codex":0},"spent":{"step":"fix","tokens":{"claude":1000000},"usage":{"input":1000000,"write":0,"write1h":0,"read":0,"output":0},"model":"claude-sonnet-5-5","sec":60}}'
-  # Its review, by Claude, and its judge wrote cache: the snapshot's steps keep those writes (a Claude reviewer or judge
-  # keeps no transcript), which the Board's cache-write alert reads.
+  # Card 4's review, by Claude, and its judge wrote cache: the snapshot's steps keep those writes (a Claude reviewer or
+  # judge keeps no transcript), which the Board's cache-write alert reads.
   J='{"model":"claude-haiku-5-5","effort":"low","sec":5,"tokens":{"claude":20},"usage":{"input":1,"write":7,"write1h":3,"read":0,"output":9}}'
-  l 4 04:00 picked ok '{"title":"T4"}'; l 4 04:10 build ok "$B"; l 4 04:15 review GO "$(jq -c --argjson j "$J" '.judge = $j | .model = "claude-sonnet-5-5" | .usage += {write: 11, write1h: 0}' <<<"$V")"; l 4 04:16 blocked blocked "{\"reason\":\"visible to customers or staff: needs Dana's yes: a button\"}"
-  # Card 6, on the belt: a build recorded before the token split and the model (its fresh tokens only).
-  l 6 06:00 picked ok '{"title":"T6"}'; l 6 06:10 build ok '{"tokens":{"claude":500000,"codex":0}}'
-  # Card 5: blocked yesterday at 22:00 and still blocked: today it waits on the owner from midnight only.
-  y=$(date -u -d "$d 1 day ago" +%F)
-  for x in 'picked ok {"title":"T5"}' 'blocked blocked {"reason":"review 1: no answer"}'; do read -r st rs ex <<<"$x"
-    jq -cn --arg s "$st" --arg r "$rs" --arg t "${y}T22:00:00Z" --argjson x "$ex" '{card:"c5",issue:5,step:$s,time:$t,tokens:{claude:0,codex:0},result:$r,sha:"",reason:""} * $x' >> "$S/cards.jsonl"
-  done
+  y=$(date -u -d "$d 1 day ago" +%F); p=$(date -u -d "$d 9 days ago" +%F) # card 5's day (yesterday) and card 9's
+  # Every record line in one jq call, in place of one jq call a line. l(<issue>; <hh:mm>; <step>; <result>; <extra>)
+  # is a line of card c<issue> at <hh:mm> of the day $d; at(<day>; <issue>; <hh:mm:ss>; ...) is one of <day>.
+  jq -cn --arg d "$d" --arg y "$y" --arg p "$p" --argjson B "$B" --argjson V "$V" --argjson Z "$Z" --argjson J "$J" \
+    --arg visible "visible to customers or staff: needs Dana's yes: a button" '
+    def at($day; $i; $hm; $s; $r; $x): {card: "c\($i)", issue: $i, step: $s, time: "\($day)T\($hm)Z", tokens: {claude: 0, codex: 0}, result: $r, sha: "", reason: ""} * $x;
+    def l($i; $hm; $s; $r; $x): at($d; $i; "\($hm):00"; $s; $r; $x);
+    # Card 1: opened 00:00, picked 01:00, a NO-GO with 3 findings, a fix, a GO, the tests, landed 01:36, pushed 01:40.
+    l(1; "01:00"; "picked"; "ok"; {title: "T1", created: "\($d)T00:00:00Z"}), l(1; "01:00"; "worktree"; "ok"; {limit: 10}), l(1; "01:00"; "brief"; "ok"; {depth: 0}),
+    l(1; "01:00"; "start"; "ok"; {of: "build"}), l(1; "01:10"; "build"; "ok"; $B), l(1; "01:10"; "start"; "ok"; {of: "review"}),
+    l(1; "01:15"; "review"; "NO-GO"; $V | .counts = {P0: 0, P1: 2, P2: 1, P3: 0}), l(1; "01:15"; "start"; "ok"; {of: "fix"}), l(1; "01:25"; "fix"; "ok"; $B),
+    l(1; "01:25"; "start"; "ok"; {of: "review"}), l(1; "01:30"; "review"; "GO"; $V), l(1; "01:30"; "start"; "ok"; {of: "test"}), l(1; "01:35"; "test"; "pass"; $Z),
+    l(1; "01:35"; "start"; "ok"; {of: "land"}), l(1; "01:36"; "landed"; "ok"; {sha: "s1", product: false, limit: 12, diff: {files: 2, added: 30, removed: 4}}),
+    l(1; "01:40"; "pushed"; "ok"; {sha: "s1", sec: 30}),
+    # Card 2: opened 00:00, picked 02:00, a GO, landed 02:21 with a follow-up; a push that failed after 900 s.
+    # The weekly limit reset during it (80 before, 1 after): what it took is not known, so not -79.
+    l(2; "02:00"; "picked"; "ok"; {title: "T2", created: "\($d)T00:00:00Z"}), l(2; "02:00"; "worktree"; "ok"; {limit: 80}), l(2; "02:10"; "build"; "ok"; $B),
+    l(2; "02:15"; "review"; "GO"; $V), l(2; "02:20"; "test"; "pass"; $Z), l(2; "02:21"; "landed"; "ok"; {sha: "s2", product: false, leftover: true, followups: [100101], limit: 1}), l(2; "02:30"; "push"; "fail"; {sha: "s2", sec: 900}),
+    # Card 3: blocked on a session timeout. Card 4: blocked until the owner says yes to a visible change.
+    l(3; "03:00"; "picked"; "ok"; {title: "T3", created: "\($d)T02:50:00Z"}), l(3; "03:10"; "build"; "ok"; $B),
+    # Its fix session timed out after 60 s and 1M input tokens: the blocked line holds what it spent, priced ($2).
+    l(3; "03:11"; "blocked"; "blocked"; {reason: "fix: session failed (exit 124; 124 is the 3600s timeout): x", tokens: {claude: 1000000, codex: 0},
+      spent: {step: "fix", tokens: {claude: 1000000}, usage: {input: 1000000, write: 0, write1h: 0, read: 0, output: 0}, model: "claude-sonnet-5-5", sec: 60}}),
+    l(4; "04:00"; "picked"; "ok"; {title: "T4"}), l(4; "04:10"; "build"; "ok"; $B), l(4; "04:15"; "review"; "GO"; $V | .judge = $J | .model = "claude-sonnet-5-5" | .usage += {write: 11, write1h: 0}), l(4; "04:16"; "blocked"; "blocked"; {reason: $visible}),
+    # Card 6, on the belt: a build recorded before the token split and the model (its fresh tokens only).
+    l(6; "06:00"; "picked"; "ok"; {title: "T6"}), l(6; "06:10"; "build"; "ok"; {tokens: {claude: 500000, codex: 0}}),
+    # Card 5: blocked yesterday at 22:00 and still blocked: today it waits on the owner from midnight only.
+    at($y; 5; "22:00:00"; "picked"; "ok"; {title: "T5"}), at($y; 5; "22:00:00"; "blocked"; "blocked"; {reason: "review 1: no answer"}),
+    # One push that carried two cards, its pushed lines a second apart (written in turn): one push, its seconds once.
+    # The line with no head (written before heads were) is a push of its own, told apart by its time.
+    at($d; 2; "02:50:59"; "pushed"; "ok"; {sec: 50, head: "h2"}), at($d; 1; "02:51:00"; "pushed"; "ok"; {sec: 50, head: "h2"}),
+    # The 7 days before those, for the change the Board shows: a card landed 9 days ago is in them, never in the week.
+    at($p; 9; "10:00:00"; "picked"; "ok"; {title: "T9"}), at($p; 9; "10:30:00"; "landed"; "ok"; {sha: "s9", product: false})' > "$S/cards.jsonl"
   # The loop's samples: 4 of 4 slots at 00:30, 2 at 00:31, none (paused, 2 issues queued) at 05:00, 1 at 05:01.
-  for x in "00:30 4 running 3" "00:31 2 running 3" "05:00 0 paused 2" "05:01 1 running 1"; do read -r t n m k <<<"$x"
-    jq -cn --arg t "${d}T$t:00Z" --argjson n "$n" --arg m "$m" --argjson k "$k" '{time:$t,slots:$n,cap:4,state:$m,queued:$k,load:($n + 0.5),memUsedKb:1000,memTotalKb:4000,diskFreeKb:(9000 - $n)}' >> "$S/samples.jsonl"
-  done
-  # One push that carried two cards, its pushed lines a second apart (written in turn): one push, its seconds once.
-  # The line with no head (written before heads were) is a push of its own, told apart by its time.
-  for x in "c2 2 02:50:59" "c1 1 02:51:00"; do read -r c i t <<<"$x"
-    jq -cn --arg c "$c" --argjson i "$i" --arg t "${d}T${t}Z" '{card:$c,issue:$i,step:"pushed",time:$t,tokens:{claude:0,codex:0},result:"ok",sha:"",reason:"",sec:50,head:"h2"}' >> "$S/cards.jsonl"
-  done
-  # The 7 days before those, for the change the Board shows: a card landed 9 days ago is in them, never in the week.
-  p=$(date -u -d "$d 9 days ago" +%F)
-  for x in 'picked 10:00 {"title":"T9"}' 'landed 10:30 {"sha":"s9","product":false}'; do read -r st t ex <<<"$x"
-    jq -cn --arg s "$st" --arg t "${p}T$t:00Z" --argjson x "$ex" '{card:"c9",issue:9,step:$s,time:$t,tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""} * $x' >> "$S/cards.jsonl"
-  done
+  cat > "$S/samples.jsonl" <<EOF
+{"time":"${d}T00:30:00Z","slots":4,"cap":4,"state":"running","queued":3,"load":4.5,"memUsedKb":1000,"memTotalKb":4000,"diskFreeKb":8996}
+{"time":"${d}T00:31:00Z","slots":2,"cap":4,"state":"running","queued":3,"load":2.5,"memUsedKb":1000,"memTotalKb":4000,"diskFreeKb":8998}
+{"time":"${d}T05:00:00Z","slots":0,"cap":4,"state":"paused","queued":2,"load":0.5,"memUsedKb":1000,"memTotalKb":4000,"diskFreeKb":9000}
+{"time":"${d}T05:01:00Z","slots":1,"cap":4,"state":"running","queued":1,"load":1.5,"memUsedKb":1000,"memTotalKb":4000,"diskFreeKb":8999}
+EOF
   recok "$S/cards.jsonl" "the fixture"
   # The snapshot is taken late in the fixture's day, so its steps are all past whatever the hour the test runs at.
   out=$(CONVEYOR_NOW=$now loop snapshot --fresh) || fail "snapshot of the fixture exited non-zero"
@@ -431,7 +430,9 @@ t_metricsretried() {
   export TZ=UTC; setup '[]'; S=$ST; mkdir -p "$S"; y=$(date -u -d yesterday +%F)
   l 8 09:00 picked ok '{"title":"T8"}'; l 8 10:00 blocked blocked "{\"reason\":\"review 1: no answer\",\"retriedAt\":\"${y}T11:00:00Z\"}"
   mv "$S/cards.jsonl" "$S/retried.jsonl"; : > "$S/cards.jsonl"
-  [ "$(loop snapshot --fresh | jq -c '.metrics.week.waitMaxSec')" = 3600 ] || fail "a retried card's wait before its next pick: $(loop snapshot --fresh | jq -c .metrics.week)"
+  # One snapshot of these records, read again by the failure message in place of a second build of the same records.
+  out=$(loop snapshot --fresh) || fail "snapshot before the next pick exited non-zero"
+  [ "$(jq -c '.metrics.week.waitMaxSec' <<<"$out")" = 3600 ] || fail "a retried card's wait before its next pick: $(jq -c .metrics.week <<<"$out")"
   l 8 12:00 picked ok '{"title":"T8","card":"c9"}'; recok "$S/cards.jsonl" "the retried fixture"; recok "$S/retried.jsonl" "the retried fixture"
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '[.metrics.week.waitMaxSec, (.belt[] | select(.issue == 8) | .metrics.waitMaxSec)]' <<<"$out")" = '[3600,3600]' ] \
