@@ -734,13 +734,13 @@ filed() {
   left=$(queue_again | paste -sd' ' -)
   # An output that links fewer issues than the command has `issue create` calls (`gh issue create ... | grep -oE '[0-9]+$'`
   # links none; one linked issue does not cover the others) does not tell which issue was filed: say so, so the Foreman
-  # holds it at once, as nothing else in the hook can know the issue is held.
+  # holds it at once, as nothing else can know it is held. With no link at all, files.jq (--arg strict) must read a filing.
   # Counted as files.jq reads the command, with quotes and backslashes dropped (`gh issue 'create'`), and only after
   # gh or gh-write and their flags, so a title that says "issue create" is no create. A line continuation (a backslash
   # and a newline) is dropped first, as bash drops it, so `gh \<newline> issue create` is one line that grep counts.
   made=$(jq -r '.tool_input.command // "" | gsub("\\\\\n"; "") | gsub("\\$?[\"\u0027]|\\\\"; "")' <<<"$in" \
     | grep -oE '(^|[^[:alnum:]_-])gh(-write)?([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+issue([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+(create|new)\b' | wc -l)
-  if [ -z "$n" ] || [ "$made" -gt "$(wc -l <<<"$n")" ]; then
+  if { [ -z "$n" ] && jq -e --arg strict 1 -f "$FHERE/files.jq" <<<"$in" >/dev/null 2>&1; } || [ "$made" -gt "$(wc -l <<<"$n")" ]; then
     unlinked="The output of the command shows no link for each issue it filed, so Conveyor cannot tell which issue it filed: hold each issue it filed now (conveyor.sh control hold <issue>, in its record) unless the owner has said yes to it. "
   fi
   # A record held before the filing began (lib.sh kept_file): with an output that does not link each issue, what it filed there is held.

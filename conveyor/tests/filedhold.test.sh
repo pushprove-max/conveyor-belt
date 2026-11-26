@@ -210,6 +210,46 @@ t_filededit() {
   [ "$(jq -c '[.start, .held]' "$C")" = '["queue",[4]]' ] || fail "after the filing hooks of the body edit of the held #4 (command: $cmd), #4 is not held alone: $(cat "$C") $out"
   [ ! -e "$ST/holds-dropped.jsonl" ] || fail "the body edit of #4 (command: $cmd) logged a dropped hold: $(cat "$ST/holds-dropped.jsonl")"
 }
+# #1701: filed told the Foreman to hold "each issue it filed" after a command that filed none, because files.jq reads a
+# `$` word after `gh` or after the word `issue` as a create held in a variable. Bug caught: the message after an edit
+# of an issue with `gh api -X PATCH`, whose output links no issue.
+t_filedpatch() {
+  filedsetup
+  cmd='f=$(mktemp); echo text > "$f"; gh api -X PATCH repos/o/r/issues/4 -F body=@"$f" && foreman.sh ask p retry 4'
+  out=$(hook filed "$cmd" $'ok\n')
+  [ -z "$out" ] || fail "filed said something after an edit of #4 that links no issue (command: $cmd): $out"
+}
+# Bug caught: the message after a search that has the word issue before a variable in its pattern and runs no gh.
+t_filedgrep() {
+  filedsetup
+  cmd='f=/tmp/x; grep -n -B14 '"'shows no link for each issue'"' "$f"'
+  out=$(hook filed "$cmd" $'no match\n')
+  [ -z "$out" ] || fail "filed said something after a search that files no issue (command: $cmd): $out"
+}
+# Bug caught: a filing that the strict reading drops, which leaves the Foreman with an issue it was never told to hold:
+# gh issue with its verb in a variable, a create that follows an edit in the same command, an issue filed through gh api
+# whose quoted title says `-X PATCH` (quoted text is no flag), and an issue filed by a GraphQL mutation in quotes, whose
+# createIssue the strict reading must still see inside the quotes.
+t_filedvar() {
+  filedsetup
+  for cmd in 'v=create; gh issue "$v" --title a --body a >/dev/null' 'gh api -X PATCH repos/o/r/issues/4 -f body=x; gh api repos/o/r/issues -f title=a --jq .number' \
+    "gh api repos/o/r/issues -f title='Document gh api -X PATCH calls' --jq .number" \
+    "gh api graphql -f query='mutation { createIssue(input: {repositoryId: \"R_kgDOExample\", title: \"a\"}) { issue { url } } }' --silent"; do
+    out=$(hook filed "$cmd" $'5\n')
+    jq -e '.hookSpecificOutput.additionalContext | test("no link for each issue")' <<<"$out" >/dev/null \
+      || fail "filed did not say the output links no issue (command: $cmd, output: 5): $out"
+  done
+}
+# Bug caught: a quoted `gh issue` in a search read as a gh issue call whose verb is `$f`, and a quoted -X 'PATCH' that
+# the edit check did not see, alone or beside a quoted path (the two quotes read as one text with a space in it).
+t_filedquoted() {
+  filedsetup
+  for cmd in 'f=conveyor/foreman/foreman.sh; grep -q '"'gh issue'"' "$f"' "gh api -X 'PATCH' repos/{owner}/{repo}/issues/4 -F body=@\"\$f\" --silent" \
+    "gh api -X 'PATCH' 'repos/{owner}/{repo}/issues/4' -F body=@\"\$f\" --silent"; do
+    out=$(hook filed "$cmd" $'ok\n')
+    [ -z "$out" ] || fail "filed said something after a command that files no issue (command: $cmd): $out"
+  done
+}
 # Bug (issue 1333): the filing hooks sent the running loop nothing, so an issue filed and released already (the
 # owner's yes given before filed ran, as in t_filedlink) was picked only once the loop's idle timer (here 100 s)
 # ended. GitHub lists the issue only once the command has ended (the stub's list-filed), after the release, so here
