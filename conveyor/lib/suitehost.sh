@@ -36,12 +36,12 @@
 SH_KIND=local SH_NAME='this machine' SH_POST='the build machine' SH_TARGET='' SH_DIR='' SH_D='' SH_SLOTS='' SH_STEP='' SH_T=0 SH_WHY=''
 SH_SIZE='' SH_TAG='' SH_IDLE='' SH_LEASE='' SH_BOX=''
 # What every check of a box prints, one fact a line: its bash version, each tool named (ok or missing), its CPUs and
-# its test slots: slot_pool's there, of lib/slots.sh sent on ssh's input and read from that stream, never reopened by path (some ssh servers refuse that) (hostfacts()), so its host file's testSlots
+# its test slots: slot_pool's there, of lib/slots.sh sent on ssh's input and read from that stream, never reopened by path (some ssh servers refuse that), or on a devbox, which gets no input, inside the script (hostfacts()), so its host file's testSlots
 # and its cores cap them as the suite's runner there finds them (.conveyor/test-full.sh), never its CPU count alone.
 HOSTFACTS='printf "bash\t%s\n" "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"
 for t; do printf "tool\t%s\t%s\n" "$t" "$(command -v "$t" > /dev/null && echo ok || echo missing)"; done
 printf "cpus\t%s\n" "$(nproc 2> /dev/null || getconf _NPROCESSORS_ONLN 2> /dev/null || echo 0)"
-printf "slots\t%s\n" "$(eval "$(cat)" > /dev/null 2>&1 && slot_pool > /dev/null 2>&1 && echo "$SLOT_N")"'
+printf "slots\t%s\n" "$(eval "${SLOTS_SRC-$(cat)}" > /dev/null 2>&1 && slot_pool > /dev/null 2>&1 && echo "$SLOT_N")"'
 # The suite's run on the box (hosttests()), given its <command>, <time limit> and the box's <name>: its exit in wt.rc,
 # timed by the box's own clock, which starts before this machine's: a run that ends past the limit, even with 0, has
 # 124, the exit of a run here that timed out, and its output says so.
@@ -114,7 +114,9 @@ hostd() {
 hostfacts() { # <tool>...
   local s
   s="set -- $(printf '%q ' "$@"); $HOSTFACTS"
-  if [ "$SH_KIND" = local ]; then bash -c "$s" < "$HERE/lib/slots.sh"; else hostssh "$s" 60 < "$HERE/lib/slots.sh"; fi
+  # `devbox exec` passes no standard input: on a devbox the text of slots.sh goes in the script (SLOTS_SRC), not on the input.
+  if [ "$SH_KIND" = devbox ]; then hostssh "SLOTS_SRC=$(printf '%q' "$(< "$HERE/lib/slots.sh")"); $s" 60 < /dev/null
+  elif [ "$SH_KIND" = local ]; then bash -c "$s" < "$HERE/lib/slots.sh"; else hostssh "$s" 60 < "$HERE/lib/slots.sh"; fi
 }
 # The tools a .conveyor/test-machine.sh names on its `# needs: <tool> [<version>]` lines, one a line, jq and git left
 # out (hostneeds() and hostcheck() name those apart): the script of <blob> (a commit's, hostsetup()), else the main
@@ -383,20 +385,23 @@ hostboxneed() { # [no-create]
 # over ssh), bash 5.1 or later, jq, git and each tool the main checkout's .conveyor/test-machine.sh names on a
 # `# needs: <tool> [<version>]` line (the tool is the command; the version is for people, not checked), then its CPU count and test slots (slot_pool's, here or on the box: HOSTFACTS). With
 # json: {kind, name, ok, needs: [{need, ok, detail}], cpus, slots, boxes (a devbox's: the account's devbox names, else null)}. Exit 0: every need ok; 1: one is missing. For a
-# devbox, the needs are the Namespace login (hostlogin()) and the box (hostboxneed()), and cpus and slots are null: it is leased only for a run.
+# devbox, the needs are the Namespace login (hostlogin()) and the box (hostboxneed()), and cpus and slots are null unless the rule names a box: a box leased for a run is leased only for it.
 hostcheck() { # [json [no-create]]
-  local tools=() f rc v='' n=() ok sl=''
+  local tools=() f='' rc=0 v='' n=() ok sl='' facts=''
   SH_BOXES=null
   hostrule suite-machine || return 1
   if [ "$SH_KIND" = devbox ]; then
-    # A devbox is leased only for a run: its bash, tools and test slots cannot be read without one, its login can.
+    # A devbox leased for a run is leased only for it: its bash, tools and test slots cannot be read without one, its login can.
+    # A box named in the rule needs no lease: with its login and place in the account's list ok, its facts are read.
     hostlogin && ok=true || ok=false
     n+=("$(jq -cn --argjson ok $ok --arg w "$SH_WHY" '{need: "Namespace login", ok: $ok, detail: (if $ok then "logged in" else $w end)}')")
     [ "$ok" = false ] || hostboxneed "${2:-}"
-  else
+    [ -z "$SH_BOX" ] || ! jq -e '.ok' <<<"${n[-1]}" > /dev/null || facts=1
+  else facts=1; fi
+  if [ -n "$facts" ]; then
     mapfile -t tools < <(hostneedtools)
     f=$(hostfacts jq git "${tools[@]}" 2>&1); rc=$?
-    [ "$SH_KIND" = local ] || n+=("$(jq -cn --arg t "$SH_TARGET" --argjson ok "$([ $rc = 255 ] && echo false || echo true)" --arg w "$([ $rc != 255 ] || grep . <<<"$f" | tail -n 1)" \
+    [ "$SH_KIND" != ssh ] || n+=("$(jq -cn --arg t "$SH_TARGET" --argjson ok "$([ $rc = 255 ] && echo false || echo true)" --arg w "$([ $rc != 255 ] || grep . <<<"$f" | tail -n 1)" \
       '{need: "ssh", ok: $ok, detail: (if $ok then "\($t) answers" else "\($t) does not answer: \($w)" end)}')")
     v=$(sed -n 's/^bash\t//p' <<<"$f")
     ok=false; [[ $v =~ ^([0-9]+)\.([0-9]+)$ ]] && { [ "${BASH_REMATCH[1]}" -gt 5 ] || { [ "${BASH_REMATCH[1]}" = 5 ] && [ "${BASH_REMATCH[2]}" -ge 1 ]; }; } && ok=true

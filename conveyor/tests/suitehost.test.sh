@@ -354,6 +354,7 @@ t_hostnostdinpath() {
 # (conveyor-made) in the list; either way it names the box on the line before the lease id, as the real acquire prints
 # the box's name. A file $STUB/devbox-other is another project's box made while acquire runs: a box named devbox, a
 # word of acquire's own lines, joins the list.
+# A file $STUB/devbox-nostdin makes exec pass no standard input, as the real one does.
 DEVBOX='#!/usr/bin/env bash
 L=lease-1274
 note() { printf "%s\n" "$*" >> "$STUB/devbox-calls"; }
@@ -376,6 +377,7 @@ case $1 in
     note "exec${d:+ -d} $t"
     [ -z "$d" ] || exec < /dev/null
     for f in /dev/fd/*; do f=${f##*/}; [ "$f" -le 2 ] || eval "exec $f>&-"; done 2> /dev/null
+    [ ! -e "$STUB/devbox-nostdin" ] || exec < /dev/null
     cd "$STUB/box" && env -i HOME="$STUB/box" PATH="$STUB/box/bin:$(cat "$STUB/box/path" 2> /dev/null || printf %s "$PATH")" STUB="$STUB" "$@" || exit 1 ;;
   *) note "$@"; exit 2 ;;
 esac'
@@ -587,7 +589,7 @@ t_devboxcheck() {
   : > "$STUB/devbox-calls"
   out=$(loop suite-machine check --json 2>&1) && jq -e '.ok and .boxes == ["hand-made"] and (.needs[1] | .need == "Devbox" and .ok and (.detail | test("hand-made")))' <<<"$out" > /dev/null \
     || fail "check with the box hand-made did not pass and list the account's boxes: $out"
-  [ "$(devboxcalls)" = 'auth check-login;list -o json' ] || fail "check with a named box acquired a devbox: $(devboxcalls)"
+  [ "$(devboxcalls)" = 'auth check-login;list -o json;exec facts' ] || fail "check with a named box acquired a devbox, or did not read its facts once: $(devboxcalls)"
   loop control suite-machine devbox --box gone > /dev/null 2>&1 || fail "control suite-machine devbox --box gone did not set the rule"
   out=$(loop suite-machine check 2>&1); [ $? = 1 ] && grep -q '^missing: Devbox: no devbox named gone is in this account; it has: hand-made' <<<"$out" \
     || fail "check with a box the account lacks did not say missing with the boxes it has: $out"

@@ -201,12 +201,13 @@ back with `devbox release` when the run ends. It also gives the lease back when 
 
 `conveyor.sh suite-machine check` prints one line for each need of the chosen machine, `ok` or `missing`: ssh reach,
 bash 5.1 or later, jq, git, each tool that `.conveyor/test-machine.sh` names, and the CPU count and test slots.
-For a devbox it prints two lines: the Namespace login, and the box the run will use. With `--box`, the line says whether
+For a devbox it prints the Namespace login and the box the run will use. With `--box`, the line says whether
 the account has that box. With no box named, Conveyor leases a box under the tag and gives it back at once, to learn
 whether the account can give one. The line says whether the run reuses the box with the tag, or a new box was created
 for it. When the account is at its devbox limit and no box is found, the line is `missing` and says to pick an existing
 box with `--box <name>`, or remove one. With `--no-create`, the check does not ask for a box, so it creates none; the
-Board runs a member's check that way. A devbox's bash, tools and test slots can be read only during a run.
+Board runs a member's check that way. With `--box`, the check also reads the box's bash, tools, CPU count and test
+slots, with or without `--no-create`, and says `missing` when it cannot read the test slots. A box leased for a run has these read only during the run.
 `--json` prints the same as JSON. The command exits 1 when a need is missing.
 
 A run on the box takes no test slot on this machine. In parallel mode it runs at most the box's test slots at once.

@@ -303,4 +303,4 @@ GitHub and releases:
   ([Where the suite runs](releases.md#where-the-suite-runs)).
 - `suite-machine check [--json]` prints, for the machine the release suite runs on, each need as `ok` or `missing`:
   ssh reach, bash 5.1 or later, jq, git, each tool that `.conveyor/test-machine.sh` names, and its CPU count and test
-  slots. For a devbox it prints the Namespace login.
+  slots. For a devbox it prints the Namespace login and the box; with `--box`, also the box's facts as for an ssh box.
