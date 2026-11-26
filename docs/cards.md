@@ -571,6 +571,16 @@ A card gets 3 fix rounds for the failed tests of its change. Each round gets the
 When the tests still fail after the third round, the card is blocked with the reason `the changed tests failed again
 after their 3 fix rounds`.
 
+A retry of a card blocked in its test step (with that reason, or with `the changed tests gave no result 3 times in a
+row`) starts at the tests, from the kept patch. It runs no build session and no review before its first test run. A
+test that fails again gets a test fix session and a review, as in any card. The retry starts so only when the card's last
+review gave a verdict and the issue text is the text that review read. When the issue text has changed, the card runs one
+session and a review. A card blocked in a fix session also runs one session and a review. When the kept patch no longer
+applies to main, one session brings it onto main, and a review follows. When the issue's section `## What customers or
+staff will see` has changed since that review, the card is built from nothing. When the rule "visible changes need the
+owner's yes" is on, and a `Visible change approved:` line with a condition has come or been edited since that review,
+the card first runs one review of the kept patch, with no build session.
+
 A case that fails again runs on main. When it fails there too, Conveyor checks whether main or the machine is at
 fault. Main is at fault only when an input of the case's test file changed since its last recorded pass, and a
 control passed in the same run, no control could run, or a change on main explains the case (below). The controls are the test files that the pack's

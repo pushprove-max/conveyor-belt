@@ -271,10 +271,18 @@ yeskept() { # <prior json>
   [ -n "$from" ] && [[ $was == "$YES"* || $was == "$LINTYES"* ]] && { [ "$rev" = "$(jq -r .kept <<<"$1")/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } \
     && [ -s "$rev" ] && [ "$(verdict "$rev")" != none ] && [ -n "$(visible "$rev" any)" ]
 }
+# Whether the kept patch of prior() ($1) is one card() takes up at its tests, with no build and no review: its card blocked
+# in its Test step (tests failed again after their fix rounds, or no result 3 times in a row) after its own review's verdict.
+testkept() { # <prior json>
+  local from was rev
+  from=$(jq -r .card <<<"$1"); was=$(jq -r .reason <<<"$1"); rev=$(jq -r .review <<<"$1")
+  [ -n "$from" ] && { [[ $was == "the changed tests failed again after their "* ]] || [[ $was == "the changed tests gave no result 3 times in a row"* ]]; } \
+    && { [ "$rev" = "$(jq -r .kept <<<"$1")/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } && [ -s "$rev" ] && [ "$(verdict "$rev")" != none ]
+}
 # How the next card takes up such a kept patch, from the issue as it is now ($1, its json) and the issue as the
-# review of that patch read it (the .body file its card kept when it stopped for the yes or on a landing conflict, $2). Approval lines aside:
-# land: the body is the one the review read and an approval line has come since; wait: nothing has changed, and the
-# card stops again for the yes (no build and no review); review: the body changed, or cannot be compared, with the
+# review of that patch read it (the .body file its card kept when it stopped for the yes, on a landing conflict or in its Test step, $2). Approval lines aside:
+# land: the body is the one the review read and an approval line has come since; wait: no approval line has come, and
+# a card stopped for the yes stops again, a card blocked in its Test step starts at its tests (no build and no review); review: the body changed, or cannot be compared, with the
 # same section of what customers or staff will see, so the patch is built on and reviewed against the issue as it
 # is now; build: that section changed, so the issue asks for another change and the card is built from nothing.
 keptway() { # <issue json> <kept body file>
@@ -284,14 +292,6 @@ keptway() { # <issue json> <kept body file>
     def asks: [.body // "" | splits("\r?\n") | select(startswith("Visible change approved:") | not) | sub("\\s+\\z"; "") | select(. != "")];
     if ($now | section) != ($was | section) then "build" elif ($now | asks) != ($was | asks) then "review"
     elif ($now | approvals) > ($was | approvals) then "land" else "wait" end'
-}
-# The approval lines an issue saying nothing visible changes had when its last card stopped for the owner's yes,
-# as the .approvals file of its newest blocked card that kept one says; nothing when none did.
-yesbase() { # <issue>
-  local f v=''
-  while IFS= read -r f; do [ ! -s "$f" ] || v=$(head -n 1 "$f"); done \
-    < <(jq -r --argjson n "$1" --arg st "$ST" 'select(.issue == $n and .step == "blocked" and (.kept // "") != "") | "\($st)/\(.kept)/\(.card).approvals"' < <(stdb ask issue retried "$1" 2>/dev/null) 2>/dev/null)
-  printf '%s' "$v"
 }
 # What the brief of a retried issue's card carries: the findings of the review now beside the worktree (the
 # blocked card's last one, put there by card()) and the finding of every follow-up withdrawn for the issue.

@@ -209,7 +209,7 @@ afterreview() {
   # A NO-GO that repeats a finding a fix round was told to fix (donewhen.sh repeats()) spends no more rounds on it: when every
   # P0 or P1 finding of the review is such a repeat this is the last review (loopstop()); so is one where a repeated harm one
   # is P0 or P1 (hard: that finding), whatever else it holds. A review finding never blocks a card (issue 1670): at the last review the card lands, each
-  # harm finding filed as a follow-up and each of a kind kept off the belt (harmonly(), lib/followups.sh) sent to its list. The kept review of a retry by review-land (rland, mode land, no fix rounds carried) gives its P1 no fix round (p1, below).
+  # harm finding filed as a follow-up and each of a kind kept off the belt (harmonly(), lib/followups.sh) sent to its list. The kept review of a retry by review-land (rland) or of a Test-step block (tland), in mode land with no fix rounds carried, gives its P1 no fix round (p1, below).
   rep=''; [ "$res" != NO-GO ] || rep=$(repeats "$wt")
   hard=$(harmonly "$wt" <<<"$rep" | jq -rs 'map(select(.level == "P0" or .level == "P1")) | first // empty | .line[:300]')
   # A last NO-GO with a finding that is a privacy hit in the card's own change (privown(), lib/followups.sh) gets
@@ -228,7 +228,7 @@ afterreview() {
   fi
   [ -z "$stop" ] || [ "$res" = GO ] || ! priv=$(privown "$wt") || [ -z "$priv" ] || [ "${privfix:-0}" -ge "$PRIVFIXES" ] || stop=''
   [ -z "$stop" ] || [ "$res" = GO ] || last0=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P0")) | first // empty | .line[:300]')
-  [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$hard$last0$priv" ] || [ "$mode:${rland:-}" = land:1 ] || p1=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P1")) | first // empty | .line[:300]'); [ -z "$p1" ] || [ -n "$p1fix" ] || stop=''
+  [ -z "$stop" ] || [ "$res" = GO ] || [ -n "$hard$last0$priv" ] || { [ "$mode" = land ] && [ -n "${rland:-}${tland:-}" ]; } || p1=$(findings "$wt.review" | harmonly "$wt" | jq -rs 'map(select(.level == "P1")) | first // empty | .line[:300]'); [ -z "$p1" ] || [ -n "$p1fix" ] || stop=''
   # The review line, and the filed line after it, say why the loop ended: stop, with pass and rounds as they are here.
   ended=$(jq -cn --arg s "$stop" --argjson p "$pass" --argjson r "$rounds" 'if $s == "" then {} else {stop: $s, pass: $p, rounds: $r} end')
   if [ -n "$stop" ] && [ -n "$priv" ]; then after=priv
@@ -281,7 +281,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local rline='' ended='{}' stop='' finend='{}' earlyend='' fe # rline, ended, stop: a review's line before it is written, and why the loop ended (loopstop()); finend, earlyend, fe: why the loop of a port's kept review ended, and the stop the filed line carries
   local lfix='' cfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh); cfix: the BLOCKED lines its persisted-contract fix sessions were given, one a line (contractgate(), lib/contract.sh)
   local fixtree='' rtree='' ftree='' # ftree: the tree the first review read whose judge ruled a finding (judgeruled()), kept for the card (a later ruling does not replace it, or it would hide a fix round made before that one), which the judge is given beside fixtree, to tell a finding on lines a fix round changed after a ruling (judgefindings()); fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts()); rtree: the one the last review read, which a reused review reads again
-  local after rland='' rlrev='' rlfind='' # after: what follows a review (afterreview()); rland: the card lands its kept patch on its kept review, a retry by review-land's (resumeplan()); rlrev: that kept review; rlfind: the finding its block names
+  local after rland='' rlrev='' rlfind='' tland='' # tland: the kept review is that of a card blocked in its Test step, whose P1 has had its fix round (resumeplan(), afterreview()); after: what follows a review (afterreview()); rland: the card lands its kept patch on its kept review, a retry by review-land's (resumeplan()); rlrev: that kept review; rlfind: the finding its block names
   local priv privfix=0 p1 p1fix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: the fix rounds given for such hits (PRIVFIXES at most); p1: the P1 finding that gets one fix round, p1fix: that round was given
   local fixed=0 # fixed: the fix sessions this card has run, review fixes and test fixes; the second and every later one runs one effort level up (session1())
   local tmain='' # tmain: set once a failed test step has fitted the card onto a main that had moved (#582)
@@ -634,11 +634,11 @@ cardfix() {
 # a branch, nor a main-red fix card, which `retry` gives back built from nothing): the last kept review of its blocked cards comes along (its findings go in the brief,
 # and stay kept if this card blocks before a review of its own), and the last kept patch is applied when it still
 # applies. No build and no review only when that review is the review of that patch: both kept by the same card
-# (in its kept folder, or beside its worktree when it could not be moved there). So for a retry by review-land (rland: needsland(), lib/needsask.sh, of a card blocked by its review again after review-retry gave its issue back once): it lands on that kept review (afterreview() files its findings), or, when it no longer applies, a session ports it and one review reads that port, as after a landing conflict.
+# (in its kept folder, or beside its worktree when it could not be moved there). So for a retry by review-land (rland: needsland(), lib/needsask.sh, of a card blocked by its review again after review-retry gave its issue back once): it lands on that kept review (afterreview() files its findings), or, when it no longer applies, a session ports it and one review reads that port, as after a landing conflict. So for a card blocked in its Test step (testkept(), lib/issues.sh): it starts at its tests from the kept patch.
 # A patch that no longer applies is still used: its session brings it onto main. Only one git cannot parse is given up, or one whose
 # issue's section of what customers or staff will see changed since its review (keptway() build, below): that card is built from nothing.
 # It reads card()'s n, br, wt, issue, vrule, heldto and inh, and sets its from, fromk, was, mode (land, review,
-# session, port, stale, or none: built from nothing), note, fin, finend, pro and rounds, and the files
+# session, port, stale, or none: built from nothing), note, fin, finend, pro, rounds and tland (a Test-step block's kept patch), and the files
 # beside the worktree that come with the kept patch (review, rerun, trailers, covered, stabilised, outside, effects, rounds). It fails, with the
 # reason in err, when the card must block: a kept patch it could not take out again, or retried lines it could not read (cardtree() has checked the new worktree holds no staged change).
 resumeplan() {
@@ -653,7 +653,7 @@ resumeplan() {
         # goes on from there, as a run again does, on main as it is now (rerunsince()).
         cp "$fromk/$from.rerun" "$wt.rerun" 2>/dev/null || :
         mode=session; note="resumed from the kept patch of card $from: one session, then review"
-        ! yeskept "$prev" || { mode=land; note="landing from the kept patch of card $from: no build and no review"; }
+        if yeskept "$prev"; then mode=land; note="landing from the kept patch of card $from: no build and no review"; elif testkept "$prev"; then mode=land; tland=1; note="starting at the tests from the kept patch of card $from: no build and no review"; fi
         [ -z "$rland" ] || { mode=land; note="landing from the kept patch of card $from, blocked by its review again after review-retry: no build and no review, its review's findings filed as follow-ups"; }
       elif [ -r "$fromk/$from.patch" ] && git apply --numstat "$fromk/$from.patch" >/dev/null 2>&1; then
         mode=port; note="the kept patch of card $from no longer applies to main: one session brings it onto main, then review"
@@ -675,7 +675,7 @@ resumeplan() {
       [ "$mode" = stale ] || for t in trailers covered stabilised; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null; done; for t in outside effects; do cp "$fromk/$from.$t" "$wt.$t" 2>/dev/null || cp "$CARDS/$from.$t" "$wt.$t" 2>/dev/null || :; done
     fi
   fi
-  # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it stopped for the yes, or on a landing conflict). A body changed
+  # A kept patch lands unreviewed only on the issue its review read (keptway(): the body its card kept when it stopped for the yes, on a landing conflict, or in its Test step). A body changed
   # since: the patch is built on and reviewed against the issue as it is now. A section of what customers or staff will see changed since: the issue asks for another change, built from
   # nothing, a port too (bug: it ported the refused change); the old block reason (was) goes too, so its own landing conflict gets its port (landconflict(); bug: it was skipped). Not for a retry by review-land: its card kept no body, and the owner's standing order lands it.
   if { [ "$mode" = land ] || [ "$mode" = port ]; } && [ -n "$issue" ] && [ -z "${rland:-}" ]; then
@@ -688,8 +688,8 @@ resumeplan() {
     esac
   fi
   # The owner's yes with a condition: the kept review was written before that line was, so nothing has held the change
-  # against the condition. The reviewer does (an unmet condition is a finding, and its fix session builds it).
-  [ "$mode" != land ] || [ -z "$issue" ] || [ "$vrule" = off ] || ! conditional "$issue" \
+  # against the condition. The reviewer does (an unmet condition is a finding, and its fix session builds it). Not so for a card blocked in its Test step on the issue as its review read it, approval lines word for word (tland, keptway() wait, sameyes()): that review came after the line and held the change to it.
+  [ "$mode" != land ] || [ -z "$issue" ] || [ "$vrule" = off ] || { [ -n "${tland:-}" ] && [ "$kw" = wait ] && sameyes "$d" "$issue"; } || ! conditional "$issue" \
     || { mode=review; note="reviewing the kept patch of card $from against the condition of $OWNER's yes: no build"; }
   # Held to the section approved before the build (heldto): a kept review that did not say the change matches it was
   # not asked (or said it differs, and no second yes has come since), so the kept patch is reviewed against it: no build.

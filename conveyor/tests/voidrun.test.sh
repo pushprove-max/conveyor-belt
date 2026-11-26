@@ -42,6 +42,9 @@ t_voidrun() {
     || fail "the steps are not a rerun after no result, a fix of the result, and three runs with no result: $(voidsteps)"
   [ "$(st 'select(.step == "blocked") | .reason')" = "the changed tests gave no result 3 times in a row (exit 143: the run was killed by a signal); nothing landed." ] \
     || fail "the card did not block saying its runs gave no result: $(st 'select(.step == "blocked") | .reason')"
+  # Bug it catches: the block kept no issue body, so keptway() read none and the retried card ran one session and a review before its tests.
+  [ "$(jq -r .body "$ST/$(st 'select(.step == "blocked") | .kept')/$(st 'select(.step == "blocked") | .card').body" 2>/dev/null)" = "$(jq -r '.[0].body' "$STUB/issues.json")" ] \
+    || fail "the block after 3 runs with no result kept no issue body beside its patch: $(ls "$ST/$(st 'select(.step == "blocked") | .kept')")"
   # Main's run is of the failing file alone (mainred.sh verdicts(): its list names each failing file, not its cases).
   [ "$(tline 1 '[.verdicts, .mainRun] | tojson')" = '[null,null]' ] && [ "$(sed -n 's/^fail\t//p' "$STUB/rerun.main" | tr '\t\n' ':|')" = "c.test|" ] \
     || fail "a run with no result ran on main: $(tline 1 tojson): $(cat "$STUB/rerun.main" 2>&1)"

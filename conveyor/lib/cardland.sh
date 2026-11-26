@@ -345,7 +345,7 @@ cardfailed() {
     voids=$((voids + 1))
     record "$c" "$n" test fail "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --slurpfile x <(testrec "$wt" "$rc" "$sec") --slurpfile o <(printf '%s' "$cr") --arg r "no result: $t" \
       '$x[0] as $x | $o[0] as $o | sub("\n+$"; "") as $t | $x + $o + {reason: $r} + (if $t == "" then {} else {tail: $t} end)')"
-    [ "$voids" -lt 3 ] || { block "$c" "$n" "$wt" "the changed tests gave no result 3 times in a row ($t); nothing landed."; return; }
+    [ "$voids" -lt 3 ] || { keepbody "$wt" "$issue"; block "$c" "$n" "$wt" "the changed tests gave no result 3 times in a row ($t); nothing landed."; return; }
     echo "conveyor: card $c: its test run gave no result ($t): the test step runs again"
     go=again; return
   fi
@@ -418,7 +418,7 @@ cardfailed() {
   fi
   if [ "$route" = block ] || [ "$route" = fix ]; then
     tmain=''
-    [ "$route" != block ] || { block "$c" "$n" "$wt" "the changed tests failed again after their $tfix fix rounds (exit $rc$(jq -r '.notRun // [] | if . == [] then empty else "; the run stopped at its first failure, so these files did not run: " + join(", ") end' <<<"${out:-null}" 2>/dev/null)); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
+    [ "$route" != block ] || { keepbody "$wt" "$issue"; block "$c" "$n" "$wt" "the changed tests failed again after their $tfix fix rounds (exit $rc$(jq -r '.notRun // [] | if . == [] then empty else "; the run stopped at its first failure, so these files did not run: " + join(", ") end' <<<"${out:-null}" 2>/dev/null)); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
     tfix=$((${tfix:-0} + 1)); locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
     # On the testFix seat (seat(): the builder's unless the control record sets testFix); the card's second fix session of any kind runs one effort level up.
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(testfixprompt "$sprompt" "$wt" "$rc" "$out")" fix testFix "$([ "$fixed" = 0 ] || echo up)") \
@@ -582,6 +582,25 @@ cardland() {
     capdue=1
   done
 }
+# Keep the issue body the card's last review read, in <worktree>.body, for the card that block() stops (keptway(): a
+# retry takes up its kept patch with no build and no review only on that body). None when the issue is not known.
+keepbody() { # <worktree> <issue json>
+  [ -z "$2" ] || jq -c '{body}' <<<"$2" > "$1.body" 2>/dev/null || rm -f "$1.body"
+}
+# Whether the `Visible change approved:` lines of an issue ($2, its json) are those of the kept body ($1, a .body file),
+# in order, word for word. keptway() only counts them, so a condition edited in a line that was there shows only here.
+sameyes() { # <kept body file> <issue json>
+  local f='[.body // "" | splits("\r?\n") | select(startswith("Visible change approved:")) | sub("\\s+\\z"; "")]' was
+  was=$(jq -c "$f" "$1" 2>/dev/null) && [ "$was" = "$(jq -c "$f" <<<"$2" 2>/dev/null)" ]
+}
+# The approval lines an issue saying nothing visible changes had when its last card stopped for the owner's yes,
+# as the .approvals file of its newest blocked card that kept one says; nothing when none did.
+yesbase() { # <issue>
+  local f v=''
+  while IFS= read -r f; do [ ! -s "$f" ] || v=$(head -n 1 "$f"); done \
+    < <(jq -r --argjson n "$1" --arg st "$ST" 'select(.issue == $n and .step == "blocked" and (.kept // "") != "") | "\($st)/\(.kept)/\(.card).approvals"' < <(stdb ask issue retried "$1" 2>/dev/null) 2>/dev/null)
+  printf '%s' "$v"
+}
 # A landing that did not land (its reason in t): the one rebuild of a GO card whose change no longer applies to main,
 # or else the one port of a finished loop; else the card blocks. go: next (review the rebuilt or ported change).
 landconflict() {
@@ -640,7 +659,7 @@ landconflict() {
   # A landing conflict keeps the issue body its review read (.body), so that the port of its kept patch is built from
   # nothing when the issue's section of what customers or staff will see changes later (resumeplan(), keptway()).
   # Bug: it kept none, and a port of the old change ran on a rewritten issue.
-  [[ $t != "rebase onto main conflicts: "* ]] || [ -z "$issue" ] || jq -c '{body}' <<<"$issue" > "$wt.body" 2>/dev/null || rm -f "$wt.body"
+  [[ $t != "rebase onto main conflicts: "* ]] || keepbody "$wt" "$issue"
   block "$c" "$n" "$wt" "$t"; return
 }
 # A card whose last review still holds a privacy hit in its own change after its PRIVFIXES fix rounds for it

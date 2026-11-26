@@ -395,3 +395,85 @@ t_keptgate() {
   [ "$(loop state-dir)" = "$R/conveyor/state" ] || fail "state-dir named $(loop state-dir) with no host file"
   return 0
 }
+
+# A card blocked in its Test step after a review that gave a verdict: its next card starts at its tests from the kept
+# patch (testkept(), resumeplan()), with no build and no review. Bug it catches: it ran one session and a full review
+# first. Each block text of that step is a case of its own (kepttestfail, kepttestvoid), so they run side by side.
+kepttestblock() { # <reason> <issue body now> [<commands run after the resume> [<kept review> [<kept body> [<commands run before the retry>]]]]: card c1-9 blocked with <reason> after a GO (or <kept review>; none when empty), its kept body "Add (a)." (or <kept body>); the next card's resume in $RESUMED
+  resumesetup 9
+  portkept 9 c1-9 "$1" 'echo two >> a.txt' "${4-$GO}"
+  jq -cn --arg b "${5:-Add (a).}" '{body: $b}' > "$K/c1-9.body"
+  issue 9 2026-01-01 | jq -c --arg b "$2" '[.body = $b]' > "$STUB/issues.json"
+  eval "${6:-:}"
+  loop retry 9 > /dev/null || fail "the retry of #9 exited non-zero"
+  resumed 9 "${3:-}"
+}
+t_kepttestfail() {
+  kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' 'Add (a).'
+  [ "$(jq -c '[.rc, .mode, .note, .staged]' <<<"$RESUMED")" = '[0,"land","starting at the tests from the kept patch of card c1-9: no build and no review",["a.txt"]]' ] \
+    || fail "a card blocked because its changed tests failed again, on an unchanged issue, did not start at its tests with no build and no review: $RESUMED"
+}
+t_kepttestvoid() {
+  kepttestblock 'the changed tests gave no result 3 times in a row (killed by a signal); nothing landed.' 'Add (a).'
+  [ "$(jq -c '[.rc, .mode, .note]' <<<"$RESUMED")" = '[0,"land","starting at the tests from the kept patch of card c1-9: no build and no review"]' ] \
+    || fail "a card blocked because its changed tests gave no result 3 times in a row did not start at its tests with no build and no review: $RESUMED"
+}
+# Bug it catches: a body edited since the review let the patch land on a review of another issue.
+t_kepttestedited() {
+  kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' 'Add (b) instead.'
+  [ "$(jq -c '[.rc, .mode, .note]' <<<"$RESUMED")" = '[0,"session","resumed from the kept patch of card c1-9: the issue changed since its review: one session, then review"]' ] \
+    || fail "a card blocked in its Test step, on an issue edited since its review, did not run one session and a review: $RESUMED"
+}
+# Bug it catches: any block of a card after a review took the new way: a card blocked in a fix session (its patch may
+# be half fixed, and the fix is not reviewed) must run one session and a review again.
+t_kepttestfixblock() {
+  kepttestblock 'fix: the session ended with no reply' 'Add (a).'
+  [ "$(jq -c '[.rc, .mode, .note]' <<<"$RESUMED")" = '[0,"session","resumed from the kept patch of card c1-9: one session, then review"]' ] \
+    || fail "a card blocked in a fix session, on an unchanged issue, did not run one session and a review: $RESUMED"
+}
+# Bug it catches: the kept review of a Test-step block is the card's last review, whose P1 has had its one fix round; the
+# next card's p1fix starts empty, so afterreview() sent that P1 to another fix session and a review before the first test.
+t_kepttestp1() {
+  kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' 'Add (a).' \
+    'res=NO-GO rep="" finrev="" earlier="" pass=0 rebased="" tfix="" lfix="" privfix="" p1fix=""; afterreview; echo "$after $stop" > "$T/$CASE/after"' "$NOGO"
+  [ "$(jq -r .mode <<<"$RESUMED")" = land ] && [ "$(cat "$T/$CASE/after")" = "last land" ] \
+    || fail "the kept NO-GO with a P1 of a Test-step block was not landed on as it is, with no fix round: $(cat "$T/$CASE/after") $RESUMED"
+}
+# Bug it catches: a kept review with no verdict (it ends at its visible-change line) was taken for the one that let the
+# patch through, so the card started at its tests with nothing that had read the patch.
+t_kepttestnoverdict() {
+  kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' 'Add (a).' '' 'USER-VISIBLE: no'
+  [ "$(jq -c '[.rc, .mode, .note]' <<<"$RESUMED")" = '[0,"session","resumed from the kept patch of card c1-9: one session, then review"]' ] \
+    || fail "a card blocked in its Test step after a review with no verdict did not run one session and a review: $RESUMED"
+}
+# Bug it catches: the kept review was any review of the issue, not the blocked card's own: c1-9 kept none, and a later card
+# (c1-10, blocked before it took up the patch) kept one, which read another patch.
+t_kepttestotherreview() {
+  kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' 'Add (a).' '' '' '' \
+    'mkdir -p "$ST/kept/c1-10"; printf "%s\n" "$GO" > "$ST/kept/c1-10/c1-10.review"
+     { kline c1-10 9 picked ok; kline c1-10 9 blocked blocked "$(jq -cn --arg k kept/c1-10 "{reason: \"worktree: no dependencies\", kept: \$k}")"; } >> "$ST/cards.jsonl"'
+  [ "$(jq -c '[.rc, .mode, .note]' <<<"$RESUMED")" = '[0,"session","resumed from the kept patch of card c1-9: one session, then review"]' ] \
+    || fail "a card blocked in its Test step with no review of its own (another card's was kept) did not run one session and a review: $RESUMED"
+}
+# Bug it catches: a yes with a condition had every retry of a Test-step block review its kept patch again, though that
+# block's review read the issue with the line in it and held the change to the condition, and the issue has not changed.
+t_kepttestcond() {
+  local body=$'Add (a).\nVisible change approved: r-12, only for admins'
+  kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' "$body" '' "$GO" "$body"
+  [ "$(jq -c '[.rc, .mode, .note]' <<<"$RESUMED")" = '[0,"land","starting at the tests from the kept patch of card c1-9: no build and no review"]' ] \
+    || fail "a card blocked in its Test step, on an issue whose conditional yes its review read, did not start at its tests: $RESUMED"
+}
+# Bug it catches: skipping the condition check for every Test-step block let a conditional yes written after the review,
+# which nothing had held the change against, land on that review.
+t_kepttestcondnew() {
+  kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' $'Add (a).\nVisible change approved: r-12, only for admins'
+  [ "$(jq -c '[.rc, .mode, .note]' <<<"$RESUMED")" = "[0,\"review\",\"reviewing the kept patch of card c1-9 against the condition of Dana's yes: no build\"]" ] \
+    || fail "a card blocked in its Test step, on a conditional yes written after its review, was not reviewed against the condition with no build: $RESUMED"
+}
+# Bug it catches: the Test-step skip of the condition check trusted keptway() wait, which counts approval lines and does
+# not read them: a condition edited in the line that was already there (same count) landed on a review of the old one.
+t_kepttestcondedit() {
+  kepttestblock 'the changed tests failed again after their 3 fix rounds (exit 1); nothing landed.' $'Add (a).\nVisible change approved: r-12, only for admins' '' "$GO" $'Add (a).\nVisible change approved: r-12, only for staff'
+  [ "$(jq -c '[.rc, .mode, .note]' <<<"$RESUMED")" = "[0,\"review\",\"reviewing the kept patch of card c1-9 against the condition of Dana's yes: no build\"]" ] \
+    || fail "a card blocked in its Test step, on a yes whose condition was edited since its review, was not reviewed against the condition with no build: $RESUMED"
+}

@@ -117,7 +117,8 @@ t_rerunrebuilt() {
 
 # A retried card: #7 fails b.test's case flaky through its TESTFIXES (3) fix rounds and blocks (runs 1 to 8: four test
 # steps, each failed run run once more), a.test and c.test passed. `retry` starts
-# the next card from its kept patch (its session leaves it as it was); its run keeps those passes (block() keeps the
+# the next card at its tests from its kept patch (no build session and no review before its first test run; a failed run
+# is followed by a test fix session and a review); its first run keeps those passes (block() keeps the
 # list with the patch) and runs flaky alone, on a main moved since by a commit that changes only z.txt, which none of
 # its tests selects: it is told what main changed, z.txt, and of no change of its own. (Main moving by a file a test
 # selects: t_rerunrebuilt; told of nothing on the main it was tested on: t_rerunsame, as tests() decides it.)
@@ -128,15 +129,20 @@ t_rerunretry() {
   # loop: the block is a card's whole path through its test runs and fix, whose passes block() keeps with the patch
   loop run 1 > /dev/null || fail "run exited non-zero"
   [ "$(st 'select(.step == "blocked") | .issue')" = 7 ] && [ "$(ran 8)" = flaky ] || fail "#7 did not block after failing flaky through its 3 fix rounds: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
+  blocked=$(st 'select(.step == "blocked") | .card')
   echo z > "$R/z.txt"; git -C "$R" add z.txt; git -C "$R" commit -qm "main moves"
   loop retry 7 > /dev/null || fail "the retry of #7 exited non-zero"
-  # The next card's resume (its build stub leaves the kept patch as it was), then its test step (tests(),
-  # lib/testrun.sh) on that worktree, as rerunstep runs it.
-  resumed 7 'tests "$wt" > /dev/null 2>&1; echo $? > "$T/$CASE/testrc"'
-  [ "$(jq -c '[.rc, .mode, .staged, (.beside | index("rerun") != null)]' <<<"$RESUMED")" = '[0,"session",["a.txt"],true]' ] \
-    || fail "the retried card did not resume from its kept patch with the list of what its tests passed: $RESUMED"
-  [ "$(ran 9)" = flaky ] && [ "$(cat "$T/$CASE/testrc")" = 0 ] \
-    || fail "the retried card did not keep the passes of its last run: $(ran 9): $(cat "$STUB/rerun.9" 2>&1)"
+  # The next card starts at its tests from the kept patch (testkept(): its block kept the review and the issue body): no build
+  # session and no review before its first test run, which runs flaky alone (run 9) and fails again; then a test fix session
+  # and a review before it lands. Bug it catches: the card ran one session and a full review before its first test.
+  printf '%s\n' '9 fail flaky' '10 fail flaky' >> "$STUB/plan"; for i in 5 6 7 8 9 10 11 12; do echo "$GO" > "$STUB/review.$i"; done
+  # loop: the next card's whole path, which only a run shows: what it runs before its first test and after a failed one
+  loop run 1 > /dev/null || fail "the run of the retried card exited non-zero"
+  [ "$(st 'select(.issue == 7 and (.card | . != "'"$blocked"'") and (.step | IN("worktree", "build", "review", "test", "fix", "landed"))) | "\(.step) \(.result)"' | paste -sd , -)" = "worktree ok,test fail,fix ok,review GO,test pass,landed ok" ] \
+    || fail "the retried card did not start at its tests, then fix, review and land: $(st 'select(.issue == 7) | "\(.step) \(.result)"' | paste -sd , -)"
+  [[ $(st 'select(.issue == 7 and .step == "worktree") | .reason' | tail -n 1) == "starting at the tests from the kept patch of card $blocked: no build and no review"* ]] \
+    || fail "the retried card's worktree line does not say it starts at the tests: $(st 'select(.issue == 7 and .step == "worktree") | .reason')"
+  [ "$(ran 9)" = flaky ] || fail "the retried card's first test run did not keep the passes of its last run, and run flaky alone: $(ran 9): $(cat "$STUB/rerun.9" 2>&1)"
   [ "$(grep -E $'^(main|changed)\t' "$STUB/rerun.9" | tr '\t\n' ':|')" = "main:z.txt|" ] || fail "the retried card was not told what main changed, and that alone: $(cat "$STUB/rerun.9")"
 }
 
