@@ -13,7 +13,7 @@ def fails: type == "object" and (keys - ["stopped", "notRun", "ownLimit"]) == ["
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "outside", "sec", "visible", "branch", "base", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "excerpts", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "partial", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "noIssue", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "retriedBy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "plan", "pick","lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed", "port", "alsoUsed"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "partial", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "noIssue", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "retriedBy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "plan", "pick","lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed", "port", "alsoUsed", "cacheFirst"];
 def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown", "lint", "seats"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
@@ -90,6 +90,8 @@ def ok: . as $r | (keys - known) == need
         # models that try said ran it ({byModel, models}), when it said.
         and (.alsoUsed // [] | type == "array" and all(type == "object" and (.model | type == "string") and (.usage | type == "object")
           and (.stats // {} | type == "object")))
+        # cacheFirst: the cache read and write tokens of a Claude session's first answer that has usage (SESSIONREAD).
+        and (.cacheFirst // {read: 0, write: 0} | type == "object" and keys == ["read", "write"] and all(type == "number"))
         and (.stats // {} | type == "object") and (.judge // {} | type == "object") and (.firstTry // {} | type == "object") and (.spent // {step: "build"} | type == "object" and (.step | IN("build", "fix", "rebase", "review")))
         and (.tests // {} | type == "object" and all(. == null or type == "number"))
         # A NO-GO review's findings that came back after a fix round (card.sh): each its id and how many fix rounds.

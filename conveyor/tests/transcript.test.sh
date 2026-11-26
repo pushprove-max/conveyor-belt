@@ -46,6 +46,9 @@ t_transcript() {
   [ "$(st 'select(.issue == 10 and .step == "build") | [.model, .usage, .tokens.claude, .stats.models, has("unread")]' | jq -c .)" \
     = '["m",{"input":5,"write":150,"write1h":0,"read":100,"output":100},255,["claude-sonnet-5-5"],false]' ] \
     || fail "the build line does not hold the transcript's totals: $(st 'select(.issue == 10 and .step == "build")')"
+  # Bug (E1): transcribed() dropped cacheFirst, so a build priced from its transcript had no record of its first answer's cache.
+  [ "$(st 'select(.issue == 10 and .step == "build") | .cacheFirst' | jq -c .)" = '{"read":0,"write":100}' ] \
+    || fail "the build line does not hold the transcript's first answer cache (cacheFirst): $(st 'select(.issue == 10 and .step == "build")')"
   [ "$(tsbuild | jq -c '[(.usd | type == "number" and . > 0), .unpriced]')" = '[true,null]' ] || fail "the build is not priced on the Board: $(tsbuild)"
   [ ! -e "$ST/kept/$card/$card.build.out" ] || fail "the output of a build priced from its transcript was kept"
 }

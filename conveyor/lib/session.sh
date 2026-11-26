@@ -271,19 +271,19 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
 # are the session's totals so far: the last result's and the largest are taken.
 SESSIONREAD=$(<"$HERE/jq/sessionread.jq") SESSID='first(inputs | fromjson? | objects | .session_id | strings | select(test("^[0-9A-Za-z-]+$")))' # SESSID: the session id a Claude output's events name
 # A Claude session's fields when its output holds no token usage: Claude Code's own transcript of that session is
-# read with SESSIONREAD (each answer once: the usage of its last event), and its tokens, usage and the models that ran
-# take the place of unread, so the step is priced. The transcript is <account folder, ~/.claude for the default
-# login>/projects/<the worktree's real path, each character but a letter or digit made ->/<session id>.jsonl, the
-# id the output's events name. Fields that hold a usage, an output that names no session, and a transcript that is
-# missing or holds no whole usage leave the fields as they are (unread says why).
+# read with SESSIONREAD (each answer once: the usage of its last event), and its tokens, usage, cacheFirst and the models
+# that ran take the place of unread, so the step is priced. The transcript is <account folder, ~/.claude for the default
+# login>/projects/<the worktree's real path, each character but a letter or digit made ->/<session id>.jsonl, the id the
+# output's events name. Fields that hold a usage, an output that names no session, and a transcript that is missing or
+# holds no whole usage leave the fields as they are (unread says why).
 transcribed() { # <the step's fields> <output file> <worktree> <account folder, "" for the default login>
   local id p t u
   if jq -e '(.usage | type) != "object"' <<<"$1" >/dev/null 2>&1 \
     && id=$(jq -rRn "$SESSID" "$2" 2>/dev/null) && [ -n "$id" ] \
     && p=$(cd "$3" 2>/dev/null && pwd -P) && t=${4:-$HOME/.claude}/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$p")/$id.jsonl && [ -s "$t" ] \
     && u=$(jq -cRn --arg m "$(jq -r '.model // ""' <<<"$1")" --arg e "" --argjson s 0 "$SESSIONREAD" "$t" 2>/dev/null | tail -n 1 \
-      | jq -ce 'select((.usage | type) == "object" and .unread == null) | {tokens, usage, stats: (.stats // {} | {models, byModel, cacheHit})}' 2>/dev/null); then
-    jq -c --argjson u "$u" 'del(.unread) + {tokens: $u.tokens, usage: $u.usage} | .stats = ((.stats // {}) + $u.stats)' <<<"$1"
+      | jq -ce 'select((.usage | type) == "object" and .unread == null) | {tokens, usage, cacheFirst, stats: (.stats // {} | {models, byModel, cacheHit})}' 2>/dev/null); then
+    jq -c --argjson u "$u" 'del(.unread) + {tokens: $u.tokens, usage: $u.usage} + (if $u.cacheFirst == null then {} else {cacheFirst: $u.cacheFirst} end) | .stats = ((.stats // {}) + $u.stats)' <<<"$1"
   else printf '%s\n' "$1"; fi
 }
 # An OpenCode session's output (`opencode run --format json`) gives the same fields (opencoderead.jq), and a Codex
@@ -408,7 +408,7 @@ TRYFOLD=$(<"$HERE/jq/tryfold.jq") # the jq defs the two folds of a step's tries 
 # (BOTHTRIES): when a refused try's usage is unknown or only part of it, or it ran on another model, unread says so,
 # so the step is priced as an estimate, never as exact; the usage counted is kept (one try's alone when the other's is unknown, with its split; a try's on another model in alsoUsed, with its split: TRYFOLD). An OpenCode cost (usage.cost) is the sum when both report one, else left out. A resumed try (session1()) leaves it resumed.
 APIFOLD="$TRYFOLD"'
-  .sec += $p.sec | (if .tokens != null or $p.tokens != null then .tokens = add2(.tokens; $p.tokens) else . end) | (if $p.resumed then .resumed = $p.resumed else . end) | .alsoUsed = ((.alsoUsed // []) + ($p.alsoUsed // []))
+  .sec += $p.sec | keepfirst($p) | (if .tokens != null or $p.tokens != null then .tokens = add2(.tokens; $p.tokens) else . end) | (if $p.resumed then .resumed = $p.resumed else . end) | .alsoUsed = ((.alsoUsed // []) + ($p.alsoUsed // []))
   | if $p.model != null and $p.model != .model then .unread //= otherwhy($p; "a try the model API refused") | if ($p.usage | type) == "object" then .alsoUsed += [also($p)] else . end
     elif (.usage | type) == "object" and ($p.usage | type) == "object" then fold($p)
       | if $p.unread then .unread //= $p.unread else . end

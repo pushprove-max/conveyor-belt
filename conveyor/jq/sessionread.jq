@@ -34,6 +34,9 @@
       | del(.["<synthetic>"])
       | if length == 0 then null
         else with_entries(.key as $k | .value += (if $h1 != null and ($h1[$k] | type) == "number" then {write1h: $h1[$k]} else {} end)) end) catch null) as $bm
+  # The cache read and write of the session's first answer that has usage (a message no model answered excluded): what the session
+  # started from, as the Fix steps of one card are compared by how much of their write is the start they share. None when no answer has usage.
+  | (try ([$all[] | select(.type == "assistant" and (.message.model | . != "<synthetic>") and (.message.usage | type) == "object" and (.message.usage | usable))] | .[0] | if . == null then null else .message.usage | {read: (.cache_read_input_tokens | n), write: (.cache_creation_input_tokens | n)} end) catch null) as $cf
   | {model: $m, effort: $e, sec: $s}
     + (if $u == null then {unread: (if ($all | length) == 0 then "the session output holds no event" else "the session output holds no token usage" end)}
        else {tokens: {claude: ($u.input_tokens + $u.cache_creation_input_tokens + $u.output_tokens)},
@@ -41,6 +44,7 @@
          # A result whose usage cannot be read beside one that can: the usage kept is part of what the session used,
          # so the step is said unread (its tokens missing, priced at that part as an estimate) and keeps the part it has.
          + (if $bad > 0 then {unread: "\($bad) of \($rs | length) results hold no readable token usage, so the usage recorded is only part of it"} else {} end) end)
+    + (if $cf == null then {} else {cacheFirst: $cf} end)
     + {stats: (try {
         turns: ([$rs[].num_turns | numbers] | if length == 0 then null else add end),
         apiSec: ([$rs[].duration_api_ms | numbers] | if length == 0 then null else max / 1000 | round end),

@@ -28,7 +28,7 @@
 # first's is in firstTry. A review that answered, GO or NO-GO, never runs again.
 # A review's record with its failed first attempt $f ({reason, spent}) folded in, as reviewed() and stopped() write it.
 BOTHTRIES="$TRYFOLD"'
-  . + {firstTry: $f} | .tokens = add2(.tokens; $f.spent.tokens) | .alsoUsed = ((.alsoUsed // []) + ($f.spent.alsoUsed // []))
+  . + {firstTry: $f} | keepfirst($f.spent) | .tokens = add2(.tokens; $f.spent.tokens) | .alsoUsed = ((.alsoUsed // []) + ($f.spent.alsoUsed // []))
   | if $f.spent.model != null and $f.spent.model != .model then .unread //= otherwhy($f.spent; "the first attempt")
       | if ($f.spent.usage | type) == "object" then .alsoUsed += [also($f.spent)] else . end
     elif (.usage | type) == "object" and ($f.spent.usage | type) == "object" then fold($f.spent)

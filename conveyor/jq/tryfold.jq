@@ -43,3 +43,5 @@ def otherwhy($p; $who): (($p | ranby) - ranby) as $e
   | if $e == [] then "\($who) asked for another model (\($p.model)): each is priced at the models that ran it"
     else "\($who) ran on another model (\($e | join(", "))): one model cannot price both" end;
 def took($p): .usage = $p.usage | ($p | split) as $s | if .stats == null and $s == {} then . else .stats = ((.stats // {}) | del(.byModel, .models)) + $s end;
+# keepfirst($p): the cacheFirst of the earlier try $p, when it has one: a resumed try starts from the first try's context, so its own first answer says less.
+def keepfirst($p): if ($p.cacheFirst | type) == "object" then .cacheFirst = $p.cacheFirst else . end;
