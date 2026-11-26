@@ -44,7 +44,7 @@
 # has the runner's next line joined to its last, and could else hide its case by leaving the later file no line.
 # A case has its first such line, cut to 200 characters at a word. of is the files selected,
 # else those the logs name (null when none). timeout is null unless the run ran out of time (exit 124): then the
-# seconds it had (<worktree>.limit, the limit scaled by the run's load factor: testonce(); else TEST_TIMEOUT) and the last file begun and not ended (null when there is none). passed is the files the logs say
+# seconds it had (<worktree>.limit, the limit scaled by the run's load factor: testonce(); else TEST_TIMEOUT; when the file named was stopped by its own limit, that file's, read from the line `conveyor: <file> timed out: it ran past its time limit, <n> s`) and the last file begun and not ended (null when there is none). passed is the files the logs say
 # ended ok (tests() runs them no more on the same change); okcases, of each other file, the cases a line `ok <case>`
 # (or node's `✔ <name> (<n>ms)`, or TAP's `ok <n> - <name>`) under it says passed (a runner killed part-way runs
 # them no more); passcases, the same of each file that passed (what a batch that takes the card need not run again:
@@ -62,7 +62,7 @@
 # file) has at, `<file>:<line>: <text>`, of the first stack after its `== ` line that no case took. So a failure that
 # prints no message of its own (node's assert.ok(false) under TAP: only actual and expected) still shows the assertion.
 testfails() { # <test output file> <exit> [the pack's field of the run's command: test.command]; prints {of, files: [{file, cases: [{name, line}], at}], timeout, passed, okcases: [{file, cases}], passcases: [{file, cases}], notRun, host}
-  local logs=() log cmd='' named out wd=${1%.test} wdr=''
+  local logs=() log cmd='' named out own wd=${1%.test} wdr=''
   [ -d "$wd" ] && wd=$(cd "$wd" && pwd) && wdr=$(cd "$wd" && pwd -P) || wd=''
   # A file's name may have spaces, at its end too, and words may follow it on a line that is not its beginning in the
   # logs (a duration, the cases run): the file such a line names is the longest of the files it can be that the line's
@@ -71,7 +71,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
   # `== ` line of the output is of the longest of all the run's files: one that names again a file that is done goes
   # back, and is never the beginning of a later file whose name its name begins with.
   named='def named($fs): . as $r | [$fs[] | select(. as $f | $r == $f or ($r | startswith($f + " ")))] | max_by(length);'
-  mapfile -t logs < <(testlogs "${1%.test}"); [ ! -d "${1%.test}.testlog" ] || packget "${3:-test.command}" cmd 2>/dev/null || cmd=''
+  own=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | jq -cRn '[inputs | capture("^conveyor: (?<f>.*\\S) timed out: it ran past its time limit, (?<n>[0-9]+) s, and it was stopped there(; .*)?$") | {key: .f, value: (.n | tonumber)}] | from_entries') || own='{}'; mapfile -t logs < <(testlogs "${1%.test}"); [ ! -d "${1%.test}.testlog" ] || packget "${3:-test.command}" cmd 2>/dev/null || cmd=''
   # Each log begins on a line of its own: a log that ends without a newline would else join the next log's mark.
   log=$(for log in "${logs[@]}"; do printf '\n\001\n'; cat "$log" 2>/dev/null; done | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\000\r' | jq -cRn "$named"'
     (reduce inputs as $l ({n: null, files: [], order: [], failed: [], open: [], notrun: [], host: [], limit: []};
@@ -82,7 +82,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
         elif $b then .files |= (. + [$b] | unique) | (if .order[-1] | index($b) then . else .order[-1] += [$b] end) | .open[-1] += [$b]
         elif $e then .files |= (. + [$e.f] | unique) | .open[-1] -= [$e.f] | if $e.r == "FAIL" and (.failed | index($e.f) | not) then .failed += [$e.f] else . end
         elif $x then .notrun |= (. + [$x] | unique) elif $lf then .limit |= (. + [$lf] | unique) elif $hf then .host |= (. + [$hf] | unique) elif $n then .n += ($n | tonumber) else . end) | .failed -= .host | .notrun -= .host)') || return 1
-  out=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | awk '{ k = /== / || /^[[:space:]]*(not ok |ok |✔|✖)/ || /^FAIL \[/ || /^ *[.][.][.]$/ || (/^ *---$/ && prev ~ /^ *(not )?ok /) || /\/[^():]*:[0-9]+:[0-9]+\)?([[:space:]]*[{])?[[:space:]]*$/ || /^[[:space:]]*File "\//; if (py && /^[^[:space:]]/ && !/^Traceback /) { k = 1; py = 0 }; if (/^[[:space:]]*File "\//) py = 1; prev = $0; if (k) print }' | jq -cRn --arg rc "$2" --arg sec "$(cat "${1%.test}.limit" 2>/dev/null || echo "${TEST_TIMEOUT:-}")" --arg cmd "$cmd" --slurpfile log <(printf '%s' "$log") --slurpfile rec <(cat "${1%.test}.testlog"/results/* 2>/dev/null | jq -cR 'fromjson? // empty') \
+  out=$(sed 's/\x1b\[[0-9;]*m//g' "$1" 2>/dev/null | tr -d '\000\r' | awk '{ k = /== / || /^[[:space:]]*(not ok |ok |✔|✖)/ || /^FAIL \[/ || /^ *[.][.][.]$/ || (/^ *---$/ && prev ~ /^ *(not )?ok /) || /\/[^():]*:[0-9]+:[0-9]+\)?([[:space:]]*[{])?[[:space:]]*$/ || /^[[:space:]]*File "\//; if (py && /^[^[:space:]]/ && !/^Traceback /) { k = 1; py = 0 }; if (/^[[:space:]]*File "\//) py = 1; prev = $0; if (k) print }' | jq -cRn --arg rc "$2" --arg sec "$(cat "${1%.test}.limit" 2>/dev/null || echo "${TEST_TIMEOUT:-}")" --arg cmd "$cmd" --argjson own "$own" --slurpfile log <(printf '%s' "$log") --slurpfile rec <(cat "${1%.test}.testlog"/results/* 2>/dev/null | jq -cR 'fromjson? // empty') \
     --arg rx "${FRAMERX:-}" --arg pyrx "${PYFRAMERX:-}" --arg wd "$wd" --arg wdr "$wdr" '$log[0] as $log | '"$named ${FRAMEJQ:-def frame: null; def pyend(\$l): false;} ${RECJQ:-def recs(\$r; \$l): .;} $(tapjq 2>/dev/null || printf %s 'def tapname: .; def tapyaml: .;')"'
     def cut: if length <= 200 then . else (.[0:201] | sub("\\s+\\S*$"; "")) as $w | if ($w | length) > 200 then .[0:200] else $w end end;
     def failcase: [capture("^FAIL \\[(?<c>[^\\]]+)\\]: "), (capture("^\\s*not ok [0-9]+ (- )?(?<c>.*\\S)") | tapname), capture("^\\s*✖ (?<c>.+) \\([0-9.]+ms\\)$")][0].c;
@@ -152,7 +152,7 @@ testfails() { # <test output file> <exit> [the pack's field of the run's command
     | recs($rec; $log) | .files |= ([.[] | select(.file != "") | .cases[].name] as $fc | map(if .file == "" then .cases |= map(select(IN(.name; $fc[]) | not)) else . end) | map(select(.file != "" or .cases != []))) | (($log.open | flatten) - $log.notrun - $log.host) as $open | ($log.files - $log.failed - $open - $log.notrun - $log.host) as $passed | .files as $fs
     | {of: ($log.n // ($log.files | length | if . == 0 then null else . end)),
        files: (.files | map((.cases |= map(. + if $at[.name] then {at: $at[.name]} else {} end)) + if .cases == [] and $fat[.file] then {at: $fat[.file]} else {} end)),
-       timeout: (if $rc == "124" then {sec: ($sec | tonumber? // $sec), file: ($only // ($open | last))} else null end),
+       timeout: (if $rc == "124" then ($only // ($open | last)) as $tf | {sec: (if $tf and ($log.limit | index($tf)) then $own[$tf] else null end // ($sec | tonumber? // $sec)), file: $tf} else null end),
        passed: $passed,
        okcases: [.oks | to_entries[] | .key as $f | select(IN($passed[]; $f) | not)
          | {file: $f, cases: ((.value | unique) - [$fs[] | select(.file == $f) | .cases[].name])} | select(.cases != [])],

@@ -124,6 +124,24 @@ t_testsfix() {
   grep -q 'FAIL gadget' "$(st 'select(.step == "blocked") | "\($ENV.ST)/\(.kept)"')"/*.test || fail "the test output was not kept"
 }
 
+# Bug (#1697): the reason of a failed run showed the whole step's limit (5688 s) beside a file that its own limit (99 s)
+# stopped. Run 1: a file stopped at its own limit gives that limit and that file; run 2: the step's clock stopped the
+# run in a file still running, and the reason gives the step's limit and names no file.
+t_testownlimit() {
+  local w=$T/$CASE/cards/c0-7
+  setup "$(jq -cs . <(issue 7 2026-01-01))"; mkdir -p "$w.1.testlog" "$w.2.testlog" "$ST"
+  printf 'TESTRUN files=1\n== tests/slow.test.sh\n-- timeout tests/slow.test.sh\n' > "$w.1.testlog/run.log"
+  printf '== tests/slow.test.sh\nok one\nconveyor: tests/slow.test.sh timed out: it ran past its time limit, 99 s, and it was stopped there; the limit is its # timeout: line'"'"'s 60 s times the load factor 1.65\n' > "$w.1.test"
+  printf 'TESTRUN files=1\n== tests/slow.test.sh\n' > "$w.2.testlog/run.log"; printf '== tests/slow.test.sh\nok one\n' > "$w.2.test"
+  echo 5688 > "$w.1.limit"; echo 7 > "$w.2.limit"
+  fx_in 'failline "'"$w"'.1" 124 226 "$(testfails "'"$w"'.1.test" 124)" "{\"verdicts\":[]}" "{}" > "'"$w"'.1.line" && failline "'"$w"'.2" 124 7 "$(testfails "'"$w"'.2.test" 124)" "{\"verdicts\":[]}" "{}" > "'"$w"'.2.line"'
+  [ "$RC" = 0 ] || fail "the failed test lines could not be made (exit $RC): $(cat "$T/$CASE/run.out")"
+  [ "$(jq -r .reason "$w.1.line")" = "exit 124: timed out after 99s in tests/slow.test.sh" ] \
+    || fail "a file stopped at its own limit of 99 s (the step's limit file says 5688 s) has the reason: $(jq -r .reason "$w.1.line")"
+  [ "$(jq -r .reason "$w.2.line")" = "exit 124: timed out after 7s" ] \
+    || fail "a run stopped at the step's limit of 7 s, no file past its own limit, has the reason: $(jq -r .reason "$w.2.line")"
+}
+
 # Bug: a failed test run's line held the last characters of its output as its reason: cut mid-word, a run of `ok`
 # names and cleanup warnings, a note on exit 124 whatever the exit was, and the failing test named nowhere. The owner
 # could not tell from the Board what failed. The line names the failing files and cases, each with its first FAIL
@@ -184,7 +202,7 @@ t_testfails() {
   fx_in 'failline "'"$w"'.3" 1 2 null "{\"verdicts\":[]}" "{}"'
   [ "$RC" = 0 ] && [ "$(jq -c '.tail | split("\n") | [length, .[0], .[-1]]' "$T/$CASE/run.out")" = '[60,"line 11","line 70"]' ] \
     || fail "the line of a run with a long output does not keep its last 60 lines alone (exit $RC): $(head -c 300 "$T/$CASE/run.out")"
-  [ "$(jq -r .reason "$w.2.line")" = "exit 124: timed out after 2s in tests/slow.test.sh" ] || fail "the reason of a run that timed out: $(jq -r .reason "$w.2.line")"
+  [ "$(jq -r .reason "$w.2.line")" = "exit 124: timed out after 2s" ] || fail "the reason of a run that timed out: $(jq -r .reason "$w.2.line")"
   [ "$(jq -c .failures "$w.2.line")" = "$(f 2 'del(.passed, .okcases, .passcases) | tojson')" ] && [ "$(jq -c '.failures.files[0].cases' "$w.2.line")" = '[{"name":"rejects invalid input","line":"not ok 1 - rejects invalid input"}]' ] \
     || fail "the timed-out line's failures are not the parser's, with their cases: $(jq -c .failures "$w.2.line")"
   [ "$(jq -r '.tail | split("\n") | [.[0], .[1], .[-2], .[-1]] | join("|")' "$w.2.line")" = "== tests/d.test.mjs|not ok 1 - rejects invalid input|== tests/slow.test.sh|ok one" ] \
@@ -198,7 +216,7 @@ t_testfails() {
   } >> "$ST/cards.jsonl"
   recok "$ST/cards.jsonl" "the failed test lines"
   [ "$(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records | map(select(.name == "tests failed") | [.why, (.failures.files | length), .failures.timeout.file, (.output | test("FAIL \\[beta\\]|not ok 1 "))])')" \
-    = '[["exit 1",2,null,true],["exit 124: timed out after 2s in tests/slow.test.sh",2,"tests/slow.test.sh",true]]' ] \
+    = '[["exit 1",2,null,true],["exit 124: timed out after 2s",2,"tests/slow.test.sh",true]]' ] \
     || fail "the card's steps lack a failed run's failures or output: $(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records')"
 }
 
@@ -292,5 +310,5 @@ t_testtimeout() {
   [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = "the changed tests failed again after their 3 fix rounds (exit 124); nothing landed." ] \
     || fail "the card was not blocked after its timed-out test runs: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
   [ "$(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records | map(select(.name == "tests failed")) | last | [.why, .failures.timeout.file, (.output | contains("FAIL [slow]: no answer yet"))]')" \
-    = '["exit 124: timed out after 1s in a.test.sh","a.test.sh",true]' ] || fail "Needs You does not show the timed-out run: $(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records')"
+    = '["exit 124: timed out after 1s","a.test.sh",true]' ] || fail "Needs You does not show the timed-out run: $(loop snapshot --fresh | jq -c '.needsYou.blocked[0].track.records')"
 }
