@@ -692,6 +692,7 @@
 {"area": "needsask", "file": "conveyor/lib/needsask.sh"}
 {"area": "needsask", "test": "holdlog.test.sh"}
 {"area": "needsask", "test": "needsask.test.sh"}
+{"area": "needsask", "test": "needsnotify.test.sh"}
 {"area": "needsask", "test": "needsreleased.test.sh"}
 {"area": "needsask", "test": "reviewland.test.sh"}
 {"area": "needsask", "test": "reviewtwice.test.sh"}

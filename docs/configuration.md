@@ -877,6 +877,34 @@ the machine's `cap` and pause, `testSlots`, `reserveCores`, the Claude accounts 
 groups. Setup writes it. [Setup](setup.md#the-host-file) lists its keys, and [Run](setup.md#run) says what each
 machine setting does.
 
+### A notice to a webhook
+
+When a card waits for you, the Board and the Foreman show it. To also get a message when you are away from both, set
+`notify.webhookEnv` in the host file to the name of an environment variable that holds the address of a webhook:
+
+```json
+{ "notify": { "webhookEnv": "CONVEYOR_WEBHOOK" } }
+```
+
+The key is not set by default, and then nothing is sent. Nothing is sent either when the variable is empty or its value
+is not an `https://` address. The host file holds the name of the variable, never the address.
+
+A card gets one notice when it is blocked and its decision is open in Needs you, or when it stops for your yes to a
+visible change or to a change of lint policy. The notice is one HTTPS POST with the header
+`Content-Type: application/json` and this body:
+
+```json
+{"text": "Conveyor: card <card id> (#<issue number>) waits for the owner: <reason>"}
+```
+
+The reason is the first line of the block reason, cut to 200 characters. The notice holds no diff, no file content, no
+project name and no machine name.
+
+A notice is sent once for each card. The engine keeps the ids of the cards it sent in `notify/sent` in the state folder,
+and writes an id only after the webhook answers with a 2xx code. When the send fails (no answer in 10 seconds, or a
+code that is not 2xx), the engine logs one line that does not hold the address, and sends the notice again in the next
+pass.
+
 ## Cores kept for you
 
 The host file's `reserveCores` keeps cores out of all card work, so that your terminal and apps always have free

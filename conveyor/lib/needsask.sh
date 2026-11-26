@@ -3,7 +3,8 @@
 # step an answer names, sourced by the loop (commands/run.sh). Two kinds: a card blocked with its work kept (needsask()),
 # and a held issue of the nightly whole test (needsmain(), below); and the auto pass that answers them while auto is on
 # (needsauto(), at the end), with the standing review-retry (needsretry()) and the landing of a card blocked by its
-# review again (needsland()). The loop runs them as one job (needsjob()).
+# review again (needsland()), and, when the host file names a webhook, one notice for each card that waits for the
+# owner (needsnotify(), below). The loop runs them as one job (needsjob()).
 # needsask() looks at the card records and the ledger once. The loop (`serve`) calls it every IDLE seconds, a job beside
 # the cards.
 #   - Each card blocked with a kept patch (an issue's card, not one stopped for the owner's yes) that has no decision yet
@@ -351,7 +352,47 @@ rlput() {
   rm -f "$log.$$.put" "$log.$$.new"; exec {lk}>&-
   return "$rc"
 }
+# needsnotify: one notice to a webhook for each card that waits for the owner, so an owner away from the Board and the
+# Foreman learns of it. Off unless the host file's notify.webhookEnv names an environment variable that holds an https
+# address (it is the one reader of that setting). A card is one that is blocked now and has an open decision
+# blocked-<card>, or whose block reason blockhead() reads as a stop for the owner's yes. One POST of {"text": "Conveyor:
+# card <card> (#<issue>) waits for the owner: <reason>"}, the reason being the block reason's first line cut to 200
+# characters: no diff, no project name, no machine name. The card id goes into $ST/notify/sent, one a line, only after a
+# 2xx answer, and a card in it is never sent again; a failed send is tried again the next pass. The address is given to
+# curl on its standard input (curl --config -), never in its arguments, and no log line holds it.
+needsnotify() {
+  local dec=$HERE/../.claude/scripts/decision.sh led=${CONVEYOR_LEDGER:-$MAIN/.claude/metrics/decisions.jsonl}
+  local var url cs rows='[]' open c n r o body code sent=$ST/notify/sent tmp
+  var=$(jq -r '.notify.webhookEnv? // empty | strings' "$HOST" 2>/dev/null) || var=''
+  [[ $var =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 0
+  url=${!var:-}
+  # No character a curl config line would read otherwise (a quote, a backslash, a space or a control character).
+  [[ $url =~ ^https://[^[:space:][:cntrl:]\\\"]+$ ]] || return 0
+  cs=$(stdb ask lines cards) || { echo "conveyor: the card records could not be read; no notice was sent" >&2; return 1; }
+  [ ! -e "$led" ] || rows=$(CONVEYOR_MAIN=$MAIN bash "$dec" list) || { echo "conveyor: the decision ledger $led could not be read; no notice was sent" >&2; return 1; }
+  open=$(jq -c '[.[] | select((.id | startswith("blocked-")) and (.answer // "") == "") | .id]' <<<"$rows") || return 1
+  tmp=$(mktemp "${TMPDIR:-/tmp}/conveyor-notify.XXXXXX") || return 1
+  while IFS=$'\t' read -r c n o r; do
+    [ -n "$c" ] || continue
+    grep -qxF -- "$c" "$sent" 2>/dev/null && continue
+    [ "$o" = open ] || [[ $(blockhead "$r") == *'needs a yes' ]] || continue
+    body=$(jq -cn --arg t "Conveyor: card $c (#$n) waits for the owner: $r" '{text: $t}')
+    printf '%s' "$body" > "$tmp"
+    code=$(printf 'url = "%s"\n' "$url" | curl -q --config - -sS -o /dev/null -w '%{http_code}' --max-time 10 --proto '=https' \
+      -X POST -H 'Content-Type: application/json' --data-binary "@$tmp" 2>/dev/null) && code="HTTP $code" || code="curl exit $?"
+    if [[ $code == "HTTP 2"?? ]]; then
+      mkdir -p "$ST/notify" && echo "$c" >> "$sent" && echo "conveyor: card $c (#$n) waits for the owner: the notice was sent" >&2 \
+        || echo "conveyor: the notice for card $c was sent, but $sent could not be written" >&2
+    else echo "conveyor: the notice for card $c (#$n) was not sent ($code); it is tried again in the next pass" >&2; fi
+  done < <(jq -rs --argjson open "$open" '
+    group_by(.card)[] | select(all(.step != "pushed"))
+    | map(select(.step | IN("landed", "closed", "blocked"))) | last | select(. != null and .step == "blocked")
+    | ("blocked-" + .card) as $id
+    | [.card, .issue, (if ($open | index($id)) != null then "open" else "-" end),
+       ((.reason // "") | split("\n")[0] | gsub("\t"; " ") | .[0:200])] | map(tostring) | join("\t")' <<<"$cs")
+  rm -f "$tmp"
+}
 # needsjob: the loop's job beside the cards: the standing review-retry and the landing of a second review block, the
 # items put to the owner, the auto pass, and, when it ran, the steps its answers name at once (a second needsask and
 # needsmain), not a turn later.
-needsjob() { needsretry; needsland; needsask; needsmain; ! needsauto || { needsask; needsmain; }; }
+needsjob() { needsretry; needsland; needsask; needsmain; needsnotify || :; ! needsauto || { needsask; needsmain; }; }
