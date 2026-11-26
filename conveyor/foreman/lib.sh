@@ -521,17 +521,21 @@ recmain() {
 }
 # blocked_now: the blocked cards of each record named on stdin (a repo a line), as `conveyor.sh health` reads them now,
 # as one JSON object, {<repo>: [{ref, card, since, why}]}, the $now that FRESH reads. A record whose health does
-# not read, or gives no blocked list, is not in it.
+# not read, or gives no blocked list, is not in it. With the argument "both" it gives {blocked: <that object>, waiting:
+# <the same for the cards health holds waiting for the owner's yes>} from the one health read of each record.
 blocked_now() {
-  local repo main now='{}' h n
+  local repo main now='{}' wnow='{}' h n
   while IFS= read -r repo; do
     [ -n "$repo" ] || continue
-    main=$(recmain "$repo") && h=$(ASK_LIMIT=10 ask "$repo" "$main" health 2>/dev/null) \
-      && n=$(jq -ce --arg r "$repo" --argjson h "$h" '($h | objects | .blocked | arrays) as $b
+    main=$(recmain "$repo") && h=$(ASK_LIMIT=10 ask "$repo" "$main" health 2>/dev/null) || continue
+    n=$(jq -ce --arg r "$repo" --argjson h "$h" '($h | objects | .blocked | arrays) as $b
         | .[$r] = [$b[] | objects | {ref: ((.name | strings) // "#\(.issue)"), card, since, why: (.reason | tostring | gsub("\\s+"; " ") | .[0:240])}]' <<<"$now" 2>/dev/null) \
       && now=$n
+    n=$(jq -ce --arg r "$repo" --argjson h "$h" '($h | objects | .waiting | arrays) as $b
+        | .[$r] = [$b[] | objects | {ref: ((.name | strings) // "#\(.issue)"), card, since, why: (.reason | tostring | gsub("\\s+"; " ") | .[0:240])}]' <<<"$wnow" 2>/dev/null) \
+      && wnow=$n
   done
-  printf '%s\n' "$now"
+  if [ "${1:-}" = both ]; then jq -cn --argjson b "$now" --argjson w "$wnow" '{blocked: $b, waiting: $w}'; else printf '%s\n' "$now"; fi
 }
 # The snapshot as the status reads its problems: while it is behind the card records (recordsNow, commands/snapshot.sh),
 # its health's blocked and waiting cards are the ones the records hold blocked now, and of them those stopped for the
@@ -563,43 +567,51 @@ keptblocked() {
 # pending_fresh: before a stop relays the pending wakes, each blocked card a wake names (its "<repo>: <ref> is blocked
 # since" or "has been blocked for" line, or its "not yet reported: blocked <ref>" line) that its record no longer holds
 # blocked as the line says, as `conveyor.sh health` reads it now (retried, landed or shut since the watcher put the
-# wake, or retried and blocked again: a line whose since, or whose reason, is not health's), is
+# wake, or retried and blocked again: a line whose since, or whose reason, is not health's), and each card a wake names
+# as needing the owner's yes ("<repo>: <ref> needs the owner's yes since") that health no longer holds waiting as the line
+# says (the owner answered and the card was retried: #1752), is
 # taken out, its ref with it from the blocked parts of the wake's first line; a wake left with no other line is
-# removed. A record whose health does not read, or gives no blocked list, keeps its lines. PENDING_DROPPED grows by
+# removed. A record whose health does not read, or gives neither a blocked nor a waiting list, keeps its lines. PENDING_DROPPED grows by
 # one for each wake it removes whole, one put while it read health too (the waiter tells by it a watcher that put a wake
 # from one that died).
 PENDING_DROPPED=0
 pending_fresh() {
-  local f repos now t
-  repos=$(cat "$PENDING"/*.wake 2>/dev/null | sed -nE 's/^([A-Za-z0-9._-]+): (.+ is blocked since |.+ has been blocked for |not yet reported: blocked ).*/\1/p' | sort -u)
+  local f repos now wnow t
+  repos=$(cat "$PENDING"/*.wake 2>/dev/null | sed -nE 's/^([A-Za-z0-9._-]+): (.+ is blocked since |.+ has been blocked for |.+ needs the owner'\''s yes since |not yet reported: blocked ).*/\1/p' | sort -u)
   [ -n "$repos" ] || return 0
-  now=$(blocked_now <<<"$repos")
-  [ "$now" != '{}' ] || return 0
+  now=$(blocked_now both <<<"$repos")
+  [ "$(jq -c '[.blocked, .waiting] | map(length) | add' <<<"$now")" != 0 ] || return 0
+  wnow=$(jq -c .waiting <<<"$now") now=$(jq -c .blocked <<<"$now")
   for f in "$PENDING"/*.wake; do
     [ -f "$f" ] || continue
-    t=$(jq -Rrs --argjson now "$now" "$FRESH" "$f" 2>/dev/null) || continue
+    t=$(jq -Rrs --argjson now "$now" --argjson wnow "$wnow" "$FRESH" "$f" 2>/dev/null) || continue
     if [ -z "$t" ]; then rm -f "$f" && PENDING_DROPPED=$((PENDING_DROPPED + 1)); elif [ "$t" != "$(cat "$f")" ]; then printf '%s\n' "$t" > "$f.tmp" && mv -f "$f.tmp" "$f"; fi
   done
 }
 # The wake (raw text) without the blocked cards $now (each repo's blocked cards, of the repos read: ref, since and the
-# reason as the watcher's line gives it) no longer holds. A line's reason is health's whole, but for the time of an
+# reason as the watcher's line gives it) no longer holds, and without the cards named as needing the owner's yes that
+# $wnow (the same of the cards health holds waiting) no longer holds. A blocked line's reason is health's whole, but for the time of an
 # older snapshot the watcher may put after it (watch-conveyor.sh $asof) and the note of a review-retry that failed
-# after that (reviewretry), or of one that left the card for the owner (rrheld): an old reason with a note that the new one has not is another block. A line whose
+# after that (reviewretry), or of one that left the card for the owner (rrheld): an old reason with a note that the new one has not is another block. A needs-the-yes line's
+# reason is health's whole, with nothing stripped: an approval reason may itself end in "(as of HH:MMZ)". A line whose
 # review-retry worked but was not logged (its note "was retried (review-retry), but the act was not logged") is no
 # block's line: the card was retried, and the line reports that its act is not in the log, which no later read undoes.
 # A card named by its name has its card id after it, "<name> (card <id>)" (watch-conveyor.sh who): the follow-ups of
 # one issue share a name, so such a line is health's card of that id alone. A line with no id matches by its ref. In
 # the first line, a card taken out with no id takes out its ref; one with its id takes out one of its ref's names, in
-# the part its line is of ("blocked" or "still blocked"; a "not yet reported" line, either): the follow-ups of one issue
-# are each named there by their shared name.
-FRESH='def line: [(capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>.+?)(?: \\(card (?<id>[A-Za-z0-9._-]+)\\))? is blocked since (?<t>[0-9T:-]+Z): (?<why>.*)$") | .k = "blocked"),
+# the part its line is of ("blocked" or "still blocked"; a "not yet reported" line, either; a needs-the-yes line, the
+# "needs the owner's yes" part): the follow-ups of one issue are each named there by their shared name.
+FRESH='def yes: "needs the owner'\''s yes";
+  def line: [(capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>(?:(?! is blocked since | has been blocked for ).)+?) needs the owner'\''s yes since (?<t>[0-9T:-]+Z): (?<why>.*)$") | .k = yes),
+    (capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>.+?)(?: \\(card (?<id>[A-Za-z0-9._-]+)\\))? is blocked since (?<t>[0-9T:-]+Z): (?<why>.*)$") | .k = "blocked"),
     (capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>.+?)(?: \\(card (?<id>[A-Za-z0-9._-]+)\\))? has been blocked for [0-9hm]+ \\(since (?<t>[0-9T:-]+Z)\\): (?<why>.*)$") | .k = "still blocked"),
     capture("^(?<r>[A-Za-z0-9._-]+): not yet reported: blocked (?<ref>.+?)(?: \\(card (?<id>[A-Za-z0-9._-]+)\\))?$")] | first;
   def card: line
   | select(. != null and (.why == null or (.why | test("; #[0-9]+ was retried \\(review-retry\\), but the act was not logged: ") | not))) | . as $c
-  | select($now[$c.r] != null and (any($now[$c.r][]; . as $i | $i.ref == $c.ref and ($c.id == null or $i.card == $c.id) and ($c.t == null or $i.since == $c.t)
-      and ($c.why == null or ($c.why | sub("; (the review-retry of #[0-9]+ failed|review-retry left it for the owner): [\\s\\S]*$"; "")
-        | sub(" \\(as of [0-9]{2}:[0-9]{2}Z\\)$"; "")) == $i.why)) | not));
+  | (if $c.k == yes then $ARGS.named.wnow else $now end) as $cur
+  | select($cur[$c.r] != null and (any($cur[$c.r][]; . as $i | $i.ref == $c.ref and ($c.id == null or $i.card == $c.id) and ($c.t == null or $i.since == $c.t)
+      and ($c.why == null or ($c.why | if $c.k == yes then . else sub("; (the review-retry of #[0-9]+ failed|review-retry left it for the owner): [\\s\\S]*$"; "")
+        | sub(" \\(as of [0-9]{2}:[0-9]{2}Z\\)$"; "") end) == $i.why)) | not));
   split("\n") | (if .[-1] == "" then .[:-1] else . end) as $l
   | [$l[1:][] | card] as $g
   | if $g == [] then $l | join("\n")
@@ -607,7 +619,7 @@ FRESH='def line: [(capture("^(?<r>[A-Za-z0-9._-]+): (?<ref>.+?)(?: \\(card (?<id
       | if $keep == [] then ""
         else ($l[0] | if startswith("Conveyor: ") then "Conveyor: " + (ltrimstr("Conveyor: ") | split(" | ") | map(index(": ") as $i
             | if $i == null then . else .[:$i] as $r | (.[$i + 2:] | split("; ") | map(index(": ") as $j
-                | if $j != null and (.[:$j] | IN("blocked", "still blocked")) then .[:$j] as $k
+                | if $j != null and (.[:$j] | IN("blocked", "still blocked", yes)) then .[:$j] as $k
                   | (reduce ($g | map(select(.r == $r and (.id == null or .k == null or .k == $k))) | unique_by([.ref, .id])[]) as $x (" \(.[$j + 2:]) ";
                       split(" \($x.ref) ") | if $x.id == null or length == 1 then join(" ") else .[0] + " " + (.[1:] | join(" \($x.ref) ")) end)
                     | ltrimstr(" ") | rtrimstr(" "))

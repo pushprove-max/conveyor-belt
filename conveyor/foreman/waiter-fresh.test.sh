@@ -118,7 +118,31 @@ local n; n=$(CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" = health ] || exit 3; print
   || fail "for a wake of #7 blocked pending and one of #9 blocked put while health (nothing blocked) was read, pending_fresh did not take out both and count 2 (counted '$n'; left: $(ls "$FD/pending"))"
 }
 
-cases=(freshnolist freshretrynote freshreminder freshown freshnoissue freshfollowups freshcount)
+# Bug caught (issue 1752): pending_fresh read only health's blocked list, so a wake that said #7 "needs the owner's yes"
+# stayed after the owner answered and #7 was retried (health holds it no longer waiting), and the Foreman was woken about
+# a block `foreman status` no longer showed. #7 retried goes, with its ref out of the first line; #8, still waiting
+# since the time its line names, stays.
+t_freshwaiting() {
+fixture freshwaiting alpha
+printf '%s\n' "Conveyor: alpha: needs the owner's yes: #7 #8" "alpha: #7 needs the owner's yes since 2026-11-19T09:58:00Z: needs a yes" \
+  "alpha: #8 needs the owner's yes since 2026-11-19T09:59:00Z: needs a yes too" > "$FD/pending/$WAKE"
+CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" = health ] || exit 3; echo "{\"blocked\": [], \"waiting\": [{\"card\": \"c8\", \"issue\": 8, \"since\": \"2026-11-19T09:59:00Z\", \"reason\": \"needs a yes too\"}]}"' fresh
+local want=$'Conveyor: alpha: needs the owner\'s yes: #8\nalpha: #8 needs the owner\'s yes since 2026-11-19T09:59:00Z: needs a yes too'
+[ "$(wake)" = "$want" ] || fail "for a wake of #7 and #8 needing the owner's yes and a health holding #8 alone waiting, pending_fresh did not take out #7 alone: $(wake)"
+}
+
+# Bug caught (review of issue 1752): the reason of a needs-the-yes line went through the strip of a trailing
+# "(as of HH:MMZ)" that a blocked line's reason gets from the watcher, so a live approval whose own reason ends so
+# no longer matched health's waiting reason and its wake was dropped. #7 still waiting with such a reason stays whole.
+t_freshwaitingasof() {
+fixture freshwaitingasof alpha
+printf '%s\n' "Conveyor: alpha: needs the owner's yes: #7" "alpha: #7 needs the owner's yes since 2026-11-19T09:58:00Z: USER-VISIBLE: yes: Staff see the last sync time (as of 09:59Z)" > "$FD/pending/$WAKE"
+local before; before=$(wake)
+CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" = health ] || exit 3; echo "{\"blocked\": [], \"waiting\": [{\"card\": \"c7\", \"issue\": 7, \"since\": \"2026-11-19T09:58:00Z\", \"reason\": \"USER-VISIBLE: yes: Staff see the last sync time (as of 09:59Z)\"}]}"' fresh
+[ "$(wake)" = "$before" ] || fail "for a wake of #7 needing the owner's yes with a reason ending in (as of 09:59Z) and a health holding #7 waiting with that reason, pending_fresh changed the wake: $(wake)"
+}
+
+cases=(freshnolist freshretrynote freshreminder freshown freshnoissue freshfollowups freshcount freshwaiting freshwaitingasof)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
