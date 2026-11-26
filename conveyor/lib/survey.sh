@@ -26,11 +26,12 @@ survey() ( # a subshell: the lock it takes ends with it, never held by the loop 
     || { rm -f "$SURVEY.new"; echo "conveyor: the test-speed survey's issue #$n was filed, but $SURVEY could not be written" >&2; return 1; }
   echo "conveyor: filed #$n, $title"
 )
-# Files one survey issue, <title>, of the pack's type and second priority (names() sets both), and prints its number.
+# Files one survey issue, <title>, of the pack's type and second priority (names() sets both) and the area label of the
+# file its body names (.conveyor/test-times.json, which its card writes; filearea(), lib/areas.sh), and prints its number.
 surveyfile() { # <title> <body>
-  local prio out n
-  prio=$(jq -r '.[[1, length - 1] | min]' <<<"$PRIOS")
-  out=$(gh_write issue create --title "$1" --label "$TYPE" --label "$prio" --body "$2" 2>&1) \
+  local prio out n a
+  prio=$(jq -r '.[[1, length - 1] | min]' <<<"$PRIOS"); a=$(filearea "" "$2") || a=''
+  out=$(gh_write issue create --title "$1" --label "$TYPE" --label "$prio" ${a:+--label "$a"} --body "$2" 2>&1) \
     && n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && n=${n##*/} && [ -n "$n" ] \
     || { echo "conveyor: the test-speed survey's issue could not be filed: ${out:0:300}" >&2; return 1; }
   echo "$n"

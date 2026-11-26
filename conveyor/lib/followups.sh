@@ -65,7 +65,7 @@
 MAIN_TEST_EVERY=3600 MAIN_ALONE=3
 mainput() { printf '%s\n' "$1" > "$MAINTEST.new" && mv -f "$MAINTEST.new" "$MAINTEST" || { rm -f "$MAINTEST.new"; return 1; }; } # <the record>
 maintest() {
-  local cmd daily due=null sha was at wt=$CARDS/maintest/wt lock rc out f cases='[]' lines='[]' u r x ok pass n state='' prio title body told=true ran full short='' tail
+  local cmd daily due=null sha was at wt=$CARDS/maintest/wt lock rc out f cases='[]' lines='[]' u r x ok pass n state='' prio title body told=true ran full short='' tail a
   packget test.main cmd test.mainAt daily && [ -n "$cmd" ] || return 0
   mkdir -p "${wt%/*}" && { exec {lock}>>"$MAINTEST.lock"; } 2>/dev/null && flock -n "$lock" || return 0
   sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") && at=$(clock) || return 0
@@ -146,11 +146,11 @@ $(if [ -n "$pass" ]; then echo "Commits since the last pass (${pass:0:12}..${sha
   if [ "$state" = OPEN ]; then
     printf '%s' "$body" | gh_write issue comment "$n" --body-file - >/dev/null 2>&1 || { told=false; echo "conveyor: the whole test on main failed again; no comment could be added to #$n" >&2; }
   elif [ -z "$n" ] || [ "$state" = CLOSED ]; then
-    prio=$(jq -r '.[[1, length - 1] | min]' <<<"$PRIOS")
+    prio=$(jq -r '.[[1, length - 1] | min]' <<<"$PRIOS"); a=$(filearea "" "$(casefile "$(jq -r '.[0] // ""' <<<"$cases")")") || a='' # its first case's file's area (lib/areas.sh)
     title=$(jq -r --arg s "${sha:0:12}" --arg short "$short" 'if $short != "" then "The whole test on main " + $short + " at " + $s else
       "The whole test fails on main" + (if . == [] then " at " + $s
       else ": " + (.[:3] | join(", ")) + (if length > 3 then " and \(length - 3) more" else "" end) end) end | .[0:200]' <<<"$cases")
-    n=$(printf '%s' "$body" | gh_write issue create --title "$title" --label "$TYPE" --label "$prio" --body-file - 2>&1 | grep -oE '/issues/[0-9]+' | tail -n 1); n=${n##*/}
+    n=$(printf '%s' "$body" | gh_write issue create --title "$title" --label "$TYPE" --label "$prio" ${a:+--label "$a"} --body-file - 2>&1 | grep -oE '/issues/[0-9]+' | tail -n 1); n=${n##*/}
     [ -n "$n" ] || { told=false; echo "conveyor: the whole test on main failed; its issue could not be filed" >&2; }
   else
     told=false; echo "conveyor: the whole test on main failed again; the state of #$n could not be read" >&2
@@ -555,8 +555,8 @@ declinedbuild() { # <id>
     [ -n "$l" ] || { echo "conveyor: the declined list has no line $1; nothing filed" >&2; exit 2; }
     num=$(jq -r '.built // empty' <<<"$l"); [ -z "$num" ] || { echo "conveyor: this finding is already filed as #$num; nothing filed"; exit 0; }
     src=$(jq -r '.issue' <<<"$l")
-    state=$(timeout 20 gh issue view "$src" --json state 2>/dev/null | jq -r '.state // ""' 2>/dev/null) || state=''
-    out=$(gh_write issue create --title "$(jq -r '.finding[0:200]' <<<"$l")" --body "$(jq -r --arg dep "$([ "$state" = CLOSED ] || echo "Depends on: #$src")" \
+    state=$(timeout 20 gh issue view "$src" --json state 2>/dev/null | jq -r '.state // ""' 2>/dev/null) || state=''; a=$(filearea "" "$(jq -r .finding <<<"$l")") || a=''
+    out=$(gh_write issue create --title "$(jq -r '.finding[0:200]' <<<"$l")" ${a:+--label "$a"} --body "$(jq -r --arg dep "$([ "$state" = CLOSED ] || echo "Depends on: #$src")" \
       '"Conveyor declined this review finding. Then the owner asked on the Board to build it.\n\nFinding: \(.finding)\nFrom: Conveyor card \(.card), issue #\(.issue)\nWho declined it: \(.by)\nThe reason to decline it: \(.why)" + if $dep == "" then "" else "\n\n" + $dep end' <<<"$l")" 2>&1) \
       && num=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1) && num=${num##*/} && [ -n "$num" ] || { echo "conveyor: the issue was not filed: ${out:0:400}" >&2; exit 1; }
     stdb ask lines declined | jq -c --arg id "$1" --argjson n "$num" 'if .id == $id then .built = $n else . end' > "$DECLINED.new" \

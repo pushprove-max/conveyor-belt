@@ -145,6 +145,63 @@ t_areacardrelease() {
   amap; cardbody; fx_in 'cardnew --release 1.2.0 "Fix the page" "$(cat "$STUB/body")"'
   [ "$RC" = 0 ] && labels 1 | jq -e 'index("area:docs")' > /dev/null || fail "cardnew --release 1.2.0 of a body naming \`docs/a.md\` filed the labels $(labels 1) (exit $RC): $(cat "$T/$CASE/run.out")"
 }
+# Bug (review of #1693): a release or Foreman card that names its file only in its title (`Fix a.test.sh.`) got the
+# map's other, as only the body was read: so did the issue filed and the card with no GitHub issue (releaseissues off).
+t_areacardtitle() {
+  amap; tune '.labels.areaPaths.paths["a.test.sh"] = "area:tests"'; printf '%s\n' 'Make it pass.' '' '## Cause' 'It fails.' > "$STUB/body"
+  fx_in 'cardnew --release 1.2.0 "Fix a.test.sh." "$(cat "$STUB/body")"'
+  [ "$RC" = 0 ] && labels 1 | jq -e 'index("area:tests")' > /dev/null \
+    || fail "cardnew --release 1.2.0 'Fix a.test.sh.' (a.test.sh mapped to area:tests, the body names no file) filed the labels $(labels 1) (exit $RC): $(cat "$T/$CASE/run.out")"
+  loop control rules releaseissues=off > /dev/null || fail "control rules releaseissues=off was refused"
+  fx_in 'cardnew --release 1.2.0 "Fix a.test.sh." "$(cat "$STUB/body")"'
+  [ "$(jq -c '.cards[0].labels' "$ST/testactions/cards.json")" = '["bug","P2","area:tests"]' ] \
+    || fail "cardnew --release 1.2.0 'Fix a.test.sh.' with releaseissues off made a card with the labels $(jq -c '.cards[0].labels' "$ST/testactions/cards.json" 2>&1) (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+# Bug (review of #1693): the Board's File on GitHub of a landed card with no GitHub issue (cardissue()) filed it with
+# the built label alone. Now the entry's area label, else the area of the file its body names.
+t_areacardissue() {
+  local c c1=c20261120T000001-r-0 c2=c20261120T000002-r-0
+  amap; mkdir -p "$ST/testactions"
+  jq -cn --arg a "$c1" --arg b "$c2" '{cards: [{id: "t1", card: $a, file: null, title: "one", body: "Fix `docs/a.md`.", labels: ["bug", "P2", "area:board"]},
+    {id: "t2", card: $b, file: null, title: "two", body: "Fix `docs/a.md`."}]}' > "$ST/testactions/cards.json"
+  for c in "$c1" "$c2"; do jq -cn --arg c "$c" '{card: $c, issue: 0, step: "landed", time: "2026-11-20T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "abc", reason: ""}' >> "$ST/cards.jsonl"; done
+  fx_in "cardissue $c1 && cardissue $c2"
+  [ "$RC" = 0 ] && [ "$(labels 1)" = '["area:board","awaiting-deploy"]' ] && [ "$(labels 2)" = '["area:docs","awaiting-deploy"]' ] \
+    || fail "cardissue of an entry labelled area:board and of one with no labels, each body naming \`docs/a.md\`, filed the labels $(labels 1) and $(labels 2) (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+# Bug (review of #1693): the whole test on main filed its issue with no area label. Now that of its first failing case's
+# file: `one`, which main's lib/tests/x.test.sh defines. Through the loop's main-test, as the loop runs it.
+t_areamaintest() {
+  export XDG_CONFIG_HOME=$T/$CASE/config # the host file it changes is the case's own
+  amap; mainfile; tune '.test.main = ". \"$STUB/main-cmd\""'; echo 'echo "FAIL [one]: no word"; exit 1' > "$STUB/main-cmd"
+  CONVEYOR_NOW=1800000000 loop main-test > "$T/$CASE/run.out" 2>&1
+  [ "$(labels 1)" = '["bug","P1","area:tests"]' ] || fail "main-test whose whole test failed in case one (t_one of lib/tests/x.test.sh) filed the labels $(labels 1): $(cat "$T/$CASE/run.out")"
+}
+# Bug (review of #1693): a declined finding built (`declined build`), the test-speed survey and a test rule's match
+# each filed an issue with no area label. Now the area of the file the finding, the survey's body or the match names.
+t_areadeclined() {
+  amap; loop declined add c1-7 7 judge 'no proof' '[P2] lib/a.sh:1 a nit' > /dev/null || fail "the finding was not declined"
+  loop declined build "$(jq -r .id "$ST/declined.jsonl")" > "$T/$CASE/run.out" 2>&1
+  [ "$(labels 1)" = '["area:engine"]' ] || fail "declined build of '[P2] lib/a.sh:1 a nit' filed the labels $(labels 1): $(cat "$T/$CASE/run.out")"
+}
+t_areasurvey() {
+  amap; tune '.labels.areaPaths.paths[".conveyor/"] = "area:tests"'; fx_in 'surveyfile "Test-speed survey, first" "$(surveybody 3 first)"'
+  [ "$RC" = 0 ] && [ "$(labels 1)" = '["bug","P1","area:tests"]' ] \
+    || fail "surveyfile of the body naming .conveyor/test-times.json (.conveyor/ mapped to area:tests) filed the labels $(labels 1) (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+t_areatestrule() {
+  amap; fx_in 'testrulefile "{\"rule\": \"failed\", \"measure\": \"failed\", \"file\": \"lib/tests/x.test.sh\", \"values\": {\"count\": 3, \"days\": 7}, \"limit\": 2, \"cards\": []}"'
+  [ "$RC" = 0 ] && [ "$(labels 1)" = '["bug","P2","area:tests"]' ] \
+    || fail "testrulefile of a match of lib/tests/x.test.sh filed the labels $(labels 1) (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+# Bug (review of #1693): `heals harm` of an entry with no area (listed before the pack had the map) filed it with no
+# area label. Now the area of the file its finding names.
+t_areaharm() {
+  amap
+  jq -cn '{id: "h00000000b1", time: "2026-11-20T00:00:00Z", card: "c5", issue: 5, area: null, finding: "[P2] lib/a.sh:1 a late line", why: "it heals", effect: "self-heals", from: "review"}' >> "$ST/selfheals.jsonl"
+  out=$(loop heals harm h00000000b1 2>&1) || fail "heals harm h00000000b1 failed: $out"
+  labels 1 | jq -e 'index("area:engine")' > /dev/null || fail "heals harm of an entry with no area whose finding names lib/a.sh filed the labels $(labels 1): $out"
+}
 # A batch card of the entries with no area (`heals batch -`): the area of its first finding's file, else other.
 t_areabatch() {
   amap

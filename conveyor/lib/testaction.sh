@@ -203,20 +203,20 @@ tcput() { local rec id drop; rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/nu
 # type label, as a fix issue has) is refused with no `## Cause` section, as the Foreman's filing hook refuses a fix issue.
 # With the control record's rules.foremanissues (rules.releaseissues for --release) false (the Rules tab's Cards with no
 # GitHub issue) it starts a card with no GitHub issue (tcadd()), held until the owner's yes, as an issue the Foreman files
-# is. Otherwise it files the issue, with the pack's type and last priority and the area label of the file its body names (filearea(), lib/areas.sh), and holds it; the issue is made with the
+# is. Otherwise it files the issue, with the pack's type and last priority and the area label of the file its body, else its title, names (cardarea(), lib/areas.sh), and holds it; the issue is made with the
 # built label, which the pick skips, taken off once the hold is in the control record. Prints what it started or filed.
 cardnew() { # [--release <version>] <title> <body>
   local rule=foremanissues label='Foreman order' body='' out n u nocard rc a
   [ "${1:-}" != --release ] || { [[ ${2:-} =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]] || { echo "usage: conveyor.sh card [--release <version>] <title> <body>" >&2; return 2; }
     rule=releaseissues label='Release fix'; body=$'\n\nRelease fix: '$2; shift 2; }
   [ $# = 2 ] && [[ -n ${1//[[:space:]]/} && $1 != *$'\n'* && -n ${2//[[:space:]]/} ]] || { echo "usage: conveyor.sh card [--release <version>] <title> <body>" >&2; return 2; }
-  body=$2$body; a=$(filearea "" "$body") || a='' # the area label of the file it names (lib/areas.sh)
+  body=$2$body; a=$(cardarea "$1" "$body") || a=''
   nocard=$(ctl 2>/dev/null | jq -r --arg r "$rule" '.rules[$r] == false' 2>/dev/null)
   if [ "$nocard" != true ] && ! grep -qE '^[[:space:]]*##[[:space:]]+Cause[[:space:]]*$' <<<"$body"; then
     echo 'conveyor: an order that files an issue files a fix issue (it has the pack'"'"'s type label), and a fix issue needs a "## Cause" section: the source of the problem, a place in the code that already solves the same problem (or that none was found), and what the reader sees when the data is stale or missing. Add it and run the command again.' >&2; return 2
   fi
   if [ "$nocard" = true ]; then
-    n=$(tcadd "" "$1" "$body" held "$label") || return 1
+    n=$(tcadd "" "$1" "$body" held "$label" ${a:+"$(jq -cn --arg t "$TYPE" --argjson p "$PRIOS" --arg a "$a" '[$t, $p[-1], $a]')"}) || return 1
     echo "conveyor: card $n is held, as it was asked for a Foreman session: release it (conveyor.sh control release $n) once the owner says yes" >&2
     echo "Card queued with no GitHub issue: ${1:0:200}"; return 0
   fi
@@ -342,7 +342,7 @@ tcparent() { # <card>
 # issue is kept on the entry (filed, filedUrl), which Landed today links; a second ask files none and prints it again.
 # One ask at a time (a lock of its own). Prints the issue's address.
 cardissue() { # <card id>
-  local lock fl rec e sha out n u
+  local lock fl rec e sha out n u a
   [ $# = 1 ] && [[ $1 =~ ^c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0$ ]] || { echo "usage: conveyor.sh cardissue <card id>" >&2; return 2; }
   { exec {fl}>>"$TACARDS.file.lock"; } 2>/dev/null && flock "$fl" || { echo "conveyor: the File on GitHub lock could not be taken; nothing filed" >&2; return 1; }
   e=$(jq -ce --arg c "$1" 'first(.cards[]? | select(.card == $c))' "$TACARDS" 2>/dev/null) \
@@ -351,8 +351,8 @@ cardissue() { # <card id>
   [ -n "$sha" ] || { exec {fl}>&-; echo "conveyor: card $1 has not landed; nothing filed" >&2; return 2; }
   u=$(jq -r '.filedUrl // empty' <<<"$e")
   [ -z "$u" ] || { exec {fl}>&-; echo "conveyor: card $1 was filed before, as $u" >&2; echo "$u"; return 0; }
-  # With the built label from the start: the belt skips an open issue with it, and builds one without it again.
-  out=$(gh_write issue create --title "$(jq -r .title <<<"$e")" --label "$BUILT" --body "$(jq -r .body <<<"$e")" 2>&1); u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1); n=${u##*/}
+  # With the built label from the start (the belt skips an open issue with it), and the entry's area label, else its file's.
+  a=$(jq -r --arg p "${AREA:-}" 'first(select($p != "") | .labels[]? | strings | select(startswith($p))) // empty' <<<"$e"); a=$(filearea "$a" "$(jq -r '.file // .body' <<<"$e")") || a=''; out=$(gh_write issue create --title "$(jq -r .title <<<"$e")" ${a:+--label "$a"} --label "$BUILT" --body "$(jq -r .body <<<"$e")" 2>&1); u=$(grep -oE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1); n=${u##*/}
   [ -n "$n" ] || { exec {fl}>&-; echo "conveyor: the issue of card $1 could not be filed: $out" >&2; return 1; }
   { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" && rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) \
     && jq -c --arg c "$1" --argjson n "$n" --arg u "$u" '{cards: map(if .card == $c then .filed = $n | .filedUrl = $u else . end)}' <<<"$rec" > "$TACARDS.new" && mv -f "$TACARDS.new" "$TACARDS" \

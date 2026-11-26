@@ -147,10 +147,11 @@ testrulespass() { # [preview]
   exec {lock}>&-
 }
 # One issue for a match (testrulespass()): it names the rule, the measured values and the cards; its labels are the
-# pack's type and last priority. Prints the issue's number; one GitHub did not take is said and not kept.
+# pack's type and last priority and the area label of its test file. Prints the issue's number; one GitHub did not take is said and not kept.
 testrulefile() { # <match>
-  local out n
-  out=$(gh_write issue create --title "$(jq -r '"Test rule \(.rule): \(.file)"[:200]' <<<"$1")" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" \
+  local out n a
+  a=$(filearea "" "$(jq -r .file <<<"$1")") || a='' # the area label of its test file (lib/areas.sh)
+  out=$(gh_write issue create --title "$(jq -r '"Test rule \(.rule): \(.file)"[:200]' <<<"$1")" --label "$TYPE" --label "$(jq -r '.[-1]' <<<"$PRIOS")" ${a:+--label "$a"} \
     --body "$(jq -r "$TESTRULES_SAID"'"The test rule `\(.rule)` (\(.measure)) matched the test file `\(.file)`: \(said).\n\nThe cards of those figures: \(if .cards == [] then "none on record" else .cards | join(", ") end).\n\nConveyor'"'"'s test rules filed this issue. Find why the file matches, and change the file or the rule."' <<<"$1")" 2>&1)
   n=$(grep -oE '/issues/[0-9]+' <<<"$out" | tail -n 1); n=${n##*/}
   [ -n "$n" ] || { echo "conveyor: test rule $(jq -r '"\(.rule): \(.file)"' <<<"$1"): its issue could not be filed: $out" >&2; return 1; }

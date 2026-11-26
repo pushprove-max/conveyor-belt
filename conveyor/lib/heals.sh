@@ -170,7 +170,7 @@ healsdiscard() { # <id>...
 # `conveyor.sh heals harm <id>...` (the Board's Self-heals page, "Move up to harm"): the owner saw the finding of each
 # entry <id> of the self-heals list in real logs or records, so it is harm and gets its own follow-up card at once, as
 # followups() files a harm finding: the pack's follow-up label, its type label (none for a cleanup entry), the priority
-# of the finding's [P<n>] (P1 when it names none) and the entry's area label; with rules.followupissues false a card
+# of the finding's [P<n>] (P1 when it names none) and the entry's area label (with none, filearea()'s); with rules.followupissues false a card
 # with no GitHub issue (the locks of healslocks()). Each entry then leaves the list for the dropped record (healsgone(),
 # why: harm, filed: the card), so it is neither on the list nor lost; it is marked right after its own card is filed, so
 # a failure on a later entry leaves none filed twice. When an id is not an open entry of the list, nothing is filed (exit 2).
@@ -193,7 +193,7 @@ healsharm() { # <id>...
       mark=$(grep -oE '\[P[0-3]\]' <<<"$f" | head -n 1 | tr -d '[]P'); where=$(grep -oE '[^[:space:]]+:[0-9]+' <<<"$g" | head -n 1)
       mark=$(jq -r --argjson i "${mark:-1}" 'if $i == 3 and length < 4 then "" else .[[$i, length - 1] | min] end' <<<"$PRIOS")
       t=$TYPE; [ "$(jq -r .effect <<<"$e")" != cleanup ] || t=''
-      a=$(jq -r '.area // empty' <<<"$e")
+      a=$(jq -r '.area // empty' <<<"$e"); la=$(filearea "$a" "$f") && a=$la # an entry with no area: its finding's file's, else the map's other
       cost=$(onpipeline "$f" <<<"$pipe") || { echo "conveyor: whether entry $id names a pipeline file could not be told; it is not filed" >&2; exit 1; }
       body=$(jq -r --arg w "${where:-the finding names no file:line}" '"Conveyor'"'"'s self-heals list held the finding below. The owner moved it up to harm on the Board: it shows up in real logs or records, so it is fixed in a card of its own.\n\nFinding: \(.finding)\nWhere: \($w)\nKind: harm (moved up from the self-heals list, where the judge had sorted it as \(.effect // "self-heals"): \(.why))\nFrom: card \(.card), issue #\(.issue) (list entry \(.id))"' <<<"$e") \
         || { echo "conveyor: entry $id could not be read; it is not filed" >&2; exit 1; }

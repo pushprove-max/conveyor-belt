@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # The area of a file, from the pack's path-to-area map (labels.areaPaths): the area of an entry of the self-heals list
 # or the docs list (areapick(), healsadd(), lib/followups.sh), the area label of what the engine files (filearea():
-# follow-ups, flaky tests, main red, release fixes, batch cards, split parts, the Foreman's card and testissue), and
+# follow-ups, flaky tests, main red, release fixes, batch cards, split parts, the Foreman's card and testissue, File on
+# GitHub, the whole test on main, a declined finding built, the test-speed survey, a test rule and an entry moved up to harm), and
 # the one pass that gives what exists an area (healsareas()). The map is the pack's: the plugin names no path and no
 # area. A pack with no map gives no area here: an entry keeps its issue's area label, and a filing has the labels it
 # had before (a follow-up or a split part its parent's, a flaky issue <areaPrefix>engine when nonProductAreas names
@@ -53,6 +54,18 @@ areapick() { # <finding> <area label | "">
 filearea() { # <area label | ""> <text>
   [ -z "$1" ] || { printf '%s\n' "$1"; return 0; }
   areafor "$2" filing
+}
+# The area label of a card ordered by its title and body (cardnew(), lib/testaction.sh): that of the file <body> names,
+# else of the first word of <title> that is a path (`Fix a.test.sh`), else the map's other. Nothing with no map.
+cardarea() { # <title> <body>
+  local a w ws
+  a=$(areafor "$2") || return 1
+  read -ra ws <<<"$1"
+  for w in "${ws[@]}"; do
+    [ -z "$a" ] || break
+    w=${w//\`/}; a=$(areafor "${w%%[.,:;!?)]}") || return 1
+  done
+  printf '%s\n' "${a:-$(areafor "" filing)}"
 }
 # The doctor's line on the map (doctor(), lib/setup.sh): a warning when the pack <pack> sets none.
 areadoctor() { # <pack>
