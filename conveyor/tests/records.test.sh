@@ -568,3 +568,28 @@ t_waits() {
     || fail "waitnote c1 claim 3, claim 4.5, turn 2, then a start line, a test line with wait 12 and a review line with judge.sec 9; card c2 with no wait: the lines' waits are $w"
   recok "$ST/cards.jsonl" "lines with waits"
 }
+# Bugs (D2): a card queued for the landing turn (turnq()) that a batch then lands has no turn in the waits of its
+# landed line; the lap it slept in when the batch landed goes on a later line; its notes stay after the landed line,
+# for the push line to count again. c7-7, tested and ready, waits in settle() as c6-6 has the turn (real claim()), its
+# looks LIVE (5 s) apart; c6-6's batch takes it, and 2 s into that sleep lands it (land()). settle() and land() run
+# side by side: which line gets the lap is decided between the two processes, so no single call shows it.
+t_waitturn() {
+  local w lap='sleep 2' # sleep: the lap the landing ends is 2 s of the card's wait
+  setup '[]'; tune '.landBatch = 8'
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'cd "$R" && mkdir -p "$CARDS" || exit 9
+    for c in c6-6 c7-7; do git worktree add -q --detach "$CARDS/$c" "refs/heads/$BRANCH" && echo "$c" > "$CARDS/$c/$c.txt" && git -C "$CARDS/$c" add -A || exit 9; done
+    jq -cn --arg p "$(cardpatch "$CARDS/c7-7")" "{tested: true, since: 1, patch: \$p}" > "$CARDS/c7-7.ready"
+    echo "{\"pid\":$BASHPID,\"paths\":[],\"held\":true}" > "$CARDS/c6-6.claim"; echo "{\"card\":\"c6-6\",\"pid\":$BASHPID}" > "$CARDS/land.turn"
+    LIVE=5 waitsec=0 mainsec=0 parsecheck="" behind="[]" caught=""; began() { :; }
+    settle c7-7 7 "$CARDS/c7-7" prompt land "{}" & p=$!
+    # This polls the waiting card: the batch must take it once it sleeps out its first look, as gather() does.
+    for _ in $(seq 100); do [ -e "$CARDS/c7-7.idle" ] && break; sleep 0.1; done
+    echo "{\"by\":\"c6-6\",\"pid\":$BASHPID}" > "$CARDS/c7-7.batch"; '"$lap"'
+    locked land c6-6 6 "$CARDS/c6-6" "title 6 (#6)" "{}" c7-7 7 "$CARDS/c7-7" "title 7 (#7)" "{}"; echo "land: $?"
+    wait $p; echo "settle: $?"; [ ! -e "$CARDS/c7-7.waits" ] && [ ! -e "$CARDS/c7-7.waitlap" ] || echo "notes left"'
+  w=$(jq -sc 'map(select(.card == "c7-7" and .step == "landed") | .waits)' "$ST/cards.jsonl" 2>&1)
+  grep -qx 'land: 0' "$T/$CASE/run.out" && grep -qx 'settle: 3' "$T/$CASE/run.out" && grep -q 'queued for the next batch: card c6-6' "$T/$CASE/run.out" \
+    && ! grep -q 'notes left' "$T/$CASE/run.out" && jq -e 'length == 1 and (.[0] | length == 1 and .[0].name == "turn" and .[0].sec >= 2)' <<<"$w" > /dev/null \
+    || fail "c7-7 queued on c6-6's turn, landed by c6-6's batch 2 s into its sleep: its landed line's waits are $w, not turn of 2 s or more, or notes are left: $(cat "$T/$CASE/run.out")"
+}

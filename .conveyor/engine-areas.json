@@ -589,6 +589,7 @@
 {"area": "followups", "test": "testcards.test.sh"}
 {"area": "followups", "test": "fufiling.test.sh"}
 {"area": "card", "test": "review.test.sh"}
+{"area": "card", "test": "waitnames.test.sh"}
 {"area": "card", "test": "reviewland.test.sh"}
 {"area": "card", "test": "contractgate.test.sh"}
 {"area": "card", "test": "capwait.test.sh"}

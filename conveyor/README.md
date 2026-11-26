@@ -540,7 +540,9 @@ Each run of a card's changed tests writes one `test` line to the card records, `
 
 A step line of a card that waited holds `waits`: one `{name, sec}` for each name, with the seconds of all its waits of
 that name added together. The names are `slot`, the `wait` of a `test` line, `judge`, the `judge.sec` of a `review`
-line, and the name of each wait the engine noted for the card since its line before. A `start` line never holds
+line, and the name of each wait the engine noted for the card since its line before: `cards` (on a card that changes
+the same files), `turn` (for the landing turn), `main` (for main to change), `machine` (for the machine hold or the
+repair lane), `cap` (for room under the card cap) and `proof` (the bug-card proof check). A `start` line never holds
 `waits`, so the waits noted before it go on the next line. A card that did not wait has no `waits` on its lines.
 
 A card whose tests already passed on what it holds, while it waited to land, is not run again: its `test` line is a

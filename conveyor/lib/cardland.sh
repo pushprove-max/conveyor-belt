@@ -262,12 +262,14 @@ cardtest() {
 }
 # card()'s wait for the machine hold or the repair lane (mainred.sh holdwait()), its seconds added to card()'s mainsec, as
 # mainwaited() (card.sh) adds a wait for main: the landed line's waitSec counts it, so the drift watch does not count it as work.
+# The same seconds are noted as the card's wait machine (waitnote(), lib/records.sh; the worktree is $CARDS/<card>).
 holdwaited() { # <worktree> [lane]
-  local hw=$SECONDS; holdwait "$@"; mainsec=$((mainsec + SECONDS - hw)); }
+  local hw=$SECONDS; holdwait "$@"; mainsec=$((mainsec + SECONDS - hw))
+  [ $((SECONDS - hw)) = 0 ] || waitnote "${1##*/}" machine "$((SECONDS - hw))" || :; }
 # Main is red at its commit as the card's test step starts (mainred.sh redhere()): its tests, and a batch's, would fail
 # on main's own failure and run again on main, so none starts. As after a failed run whose failures are all main's
-# (cardfailed()), the card waits, holding no files, until main changes (redholdwait(); its seconds go to mainsec, as
-# mainwaited() does), then is fitted onto main and tested again. Its ready file stays, with any pass it holds: the card
+# (cardfailed()), the card waits, holding no files, until main changes (redholdwait(); its seconds go to mainsec and are
+# noted as its wait main, as mainwaited() does), then is fitted onto main and tested again. Its ready file stays, with any pass it holds: the card
 # keeps its place in batching, and a pass of its tests after the wait is marked on that file (tested()). Its worktree is
 # still on the red commit while it waits on a claim, but settle() runs no test of the card there (the commit has an entry in the
 # main-red record: redhere()), so it is fitted onto main first. It gives its files way for the wait even when it did so
@@ -280,6 +282,7 @@ mainredhold() {
   locked giveway "$c" "$wt" red || ! jq -e '.held == true' "$wt.claim" >/dev/null 2>&1 || return 9
   echo "conveyor: card $c: main is red at ${mwon[0]:0:12} (${mwon[*]:1}): its tests do not start; it waits for main to change"
   hw=$SECONDS; redholdwait "$wt" "$c"; mainsec=$((mainsec + SECONDS - hw))
+  [ $((SECONDS - hw)) = 0 ] || waitnote "$c" main "$((SECONDS - hw))" || :
   unmate; away=''; caught=''
   redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
   [ $rc != 1 ] || return 1
@@ -449,10 +452,13 @@ caphold() { # <card> <issue> <worktree> <the step it waits to work in> [why it w
 }
 # A card that slept out a wait at its claim (settle(), lib/claim.sh), before it works again: while it slept, capfree()
 # left it out of its count and may have let a held card go in its slot. Then its <worktree>.capheld holds "owed", and
-# it waits for room as a held card does (caphold()). Only the card itself takes that mark away, here.
+# it waits for room as a held card does (caphold()). Only the card itself takes that mark away, here. The seconds of
+# that wait are noted as the card's wait cap (waitnote(), lib/records.sh).
 capowed() { # <card> <issue> <worktree> <the step it waits to work in>
+  local cw=$SECONDS
   [ -s "$3.capheld" ] || return 0
   caphold "$1" "$2" "$3" "$4" "waited on another card"
+  [ $((SECONDS - cw)) = 0 ] || waitnote "$1" cap "$((SECONDS - cw))" || :
 }
 # In the loop's turn (turncount(), lib/run.sh): lets go of the held cards (caphold()) while the cards that work and
 # count against the cap are fewer than the cap, and takes away their .idle as it does, so a card let go counts from then.

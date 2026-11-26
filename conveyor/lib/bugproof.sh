@@ -293,6 +293,11 @@ bugproof() { # <card> <worktree> <issue json>
   [ -z "$nr$stop" ] || return 2
   [ -n "$held" ]
 }
+# bugproof() as card() runs it, its exit kept: the seconds of the whole check are noted as the card's wait proof
+# (waitnote(), lib/records.sh).
+bugproofed() { # <card> <worktree> <issue json>
+  local pw=$SECONDS rc; bugproof "$@"; rc=$?
+  [ $((SECONDS - pw)) = 0 ] || waitnote "$1" proof "$((SECONDS - pw))" || :; return $rc; }
 # The part of bugproof() that runs the change's test files (its fs, tf and ins) on main's code in its worktree (its
 # mwt, at its sha) without the fix, and writes the result in <worktree>.unfixed. It is called by bugproof() alone,
 # and reads and sets bugproof()'s own locals (rc, stop, held, nr) and the global BUGWHY, which card() reads.

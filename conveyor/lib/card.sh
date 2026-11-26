@@ -116,9 +116,9 @@ redmsg() { # <card> <issue json>
   local t; t=$(redissue "$1") || t=$2
   jq -r --arg c "$1" --arg s "$(stdb ask card "$1" | jq -rs 'map(.mainRed // empty)[0] // ""')" '"fix(product): \(.title) (main \($s[0:12]))\n\nConveyor card \($c)"' <<<"$t"
 }
-# card()'s wait for main to change (mainred.sh mainwait()), its seconds added to card()'s mainsec, less those of the runs on main it took (mainwait()'s mainrun): mainwait() records each on a start line of card()'s test step as its mainRun, which the Board's mainSec counts.
+# card()'s wait for main to change (mainred.sh mainwait()), its seconds added to card()'s mainsec, less those of the runs on main it took (mainwait()'s mainrun): mainwait() records each on a start line of card()'s test step as its mainRun, which the Board's mainSec counts. The same seconds are noted as the card's wait main (waitnote(), lib/records.sh; the worktree is $CARDS/<card>).
 mainwaited() { # <worktree> <main's commit> <case>...
-  local mw=$SECONDS mainrun=null; mainwait "$@"; mainsec=$((mainsec + SECONDS - mw - $(jq '.sec // 0' <<<"$mainrun" 2>/dev/null || echo 0))); }
+  local mw=$SECONDS mainrun=null s; mainwait "$@"; s=$((SECONDS - mw - $(jq '.sec // 0' <<<"$mainrun" 2>/dev/null || echo 0))); mainsec=$((mainsec + s)); [ "$s" -le 0 ] || waitnote "${1##*/}" main "$s" || :; }
 # A card's landed line's extra (card(), as it lands): <left> (its filed follow-ups) with waitSec, the seconds it waited
 # on other cards (settle()), for main to change (mainwaited()) and for the machine hold or the repair lane (holdwaited(),
 # lib/cardland.sh), for the drift watch (bench/drift.sh); yesFrom; and rollout, its rollout actions, as its ready file holds them too.
@@ -479,7 +479,7 @@ cardbuild() {
       # one that does not hold is blocked with that reason (exit 2), and one whose every case passes on main without
       # its change (exit 3) closes as already done, as nochange() closes a card, its change dropped.
       # bugstep() gives what each exit of the check leads to.
-      bugproof "$c" "$wt" "$issue"; trc=$(bugstep $?)
+      bugproofed "$c" "$wt" "$issue"; trc=$(bugstep $?)
       if [ "$trc" = close ]; then
         greenclose "$c" "$n" "$wt"; return
       fi
@@ -488,7 +488,7 @@ cardbuild() {
         began "$c" "$n" build
         redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more"$'\n\n'"${BUGBUILD//'<why>'/"$BUGWHY"}"$'\n'"$(<"$wt.unfixed")") || { block "$c" "$n" "$wt" "build: $t"; return; }
         checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$(jq -c --arg r "$BUGWHY" '. + {reason: $r}' <<<"$t")" || return
-        bugproof "$c" "$wt" "$issue"; trc=$(bugstep $? again)
+        bugproofed "$c" "$wt" "$issue"; trc=$(bugstep $? again)
         [ "$trc" != block ] || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $(<"$wt.unfixed")"; return; }
         [ "$trc" != unproved ] || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "build: $BUGWHY"$'\n'"$(<"$wt.unfixed")"; return; }
       fi

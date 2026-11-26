@@ -148,7 +148,13 @@ linesum() { # <records file> <kept> <to> <filter>
   tail -c +$((n + 1)) "$1" | head -c $((size - n)) | jq -cR "$4" >> "$3" || return 1
   { printf '%s %s %s\n' "$size" "$cs" "$k" && cat "$3"; } > "$2.$$" 2>/dev/null && mv -f "$2.$$" "$2" || rm -f "$2.$$"
 }
-append() { printf '%s\n' "$1" | stdb append cards; }
+# A card's line written that is not a start line holds the waits noted for it (line()): the notes go, so no later line
+# counts them again, whether record() or another writer of a line() (a batch's landed lines, a closed line) wrote it.
+append() { # <line>
+  printf '%s\n' "$1" | stdb append cards || return
+  [[ $1 =~ ^\{\"card\":\"([^\"/]+)\",\"issue\":-?[0-9]+,\"step\":\"([^\"]+)\" ]] && [ "${BASH_REMATCH[2]}" != start ] && rm -f "$CARDS/${BASH_REMATCH[1]}.waits"
+  return 0
+}
 # The pick a card's own lines hold (the newest), for a line written outside card(), which holds none: a card stopped
 # (stopped(), lib/session.sh) or blocked by the loop when its process was gone or stuck (block(), lib/push.sh). Sets
 # PICK and PICKCARD, which the caller declares local; a card with no pick leaves them as they were.
@@ -158,7 +164,7 @@ heldpick() { # <card>
   [ -z "$p" ] || { PICK=$p; PICKCARD=$1; }
 }
 # A wait of the card, <seconds> long, noted for its next line that is not a start line: line() sums the waits of
-# each name into that line's waits, and record() removes the notes once the line is written.
+# each name into that line's waits, and append() removes the notes once the line is written.
 waitnote() { # <card> <name> <seconds>
   [ -n "$2" ] && [[ $3 =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "conveyor: waitnote: no name or no seconds for card $1: '$2' '$3'" >&2; return 1; }
   jq -cn --arg n "$2" --argjson s "$3" '{name: $n, sec: $s}' >> "$CARDS/$1.waits"
@@ -234,8 +240,6 @@ record() { # <card> <issue> <step> <result> [extra json]
   local l
   l=$(line "$@" 2>/dev/null) || l=$(line "$1" "$2" "$3" "$4" "$(jq -cn --arg x "${5:0:300}" '{unread: ("the fields of this line were not one JSON object, so they were left out: " + $x)}')" 2>/dev/null) || l=''
   [ -n "$l" ] && { locked append "$l" || { sleep 1; locked append "$l"; }; } && {
-    # The line holds the card's noted waits (line()), so they are not counted again; a start line holds none.
-    [ "$3" = start ] || rm -f "$CARDS/$1.waits"
     outkeep "$1" "$3" "$l"; return 0; }
   echo "conveyor: cannot record $1 $3" >&2
   [ "$3" = blocked ] || [ ! -d "$CARDS/$1" ] || block "$1" "$2" "$CARDS/$1" "conveyor: the engine could not write the $3 line of this card to the card records"

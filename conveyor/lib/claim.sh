@@ -391,6 +391,20 @@ stackto() { # <card> <worktree> <claim()'s wait> <issue json>
   rm -rf "$d"; return $rc
 }
 
+# The lap of a wait at a claim (settle()) since its last look, noted for the card's records (waitnote(),
+# lib/records.sh): <worktree>.waitlap holds the wait's name and the time of that look (epoch seconds). Each call notes
+# the seconds since then under that name, then starts the next lap from now under <name>, or with no name ends the
+# wait. With no lap open it notes nothing and starts none, unless new is given: then it starts one and notes no lap
+# it finds. It runs under the lock (locked), as landone() does, which ends the lap of each card its batch lands as it
+# writes the card's landed line: a batch that lands a card while it sleeps between two looks puts that lap on the
+# landed line, never on a later line of the card.
+waitlap() { # <card> <worktree> [name] [new]
+  local n t
+  if read -r n t < "$2.waitlap" 2>/dev/null && [ -z "${4:-}" ]; then
+    [[ ! $t =~ ^[0-9]+$ ]] || [ $((EPOCHSECONDS - t)) -le 0 ] || waitnote "$1" "$n" "$((EPOCHSECONDS - t))" || :
+  elif [ -z "${4:-}" ]; then return 0; fi
+  if [ -n "${3:-}" ]; then printf '%s %s\n' "$3" "$EPOCHSECONDS" > "$2.waitlap"; else rm -f "$2.waitlap"; fi
+}
 # After its review, before landing (at claim()): the card waits while claim() says so, its live record naming that card and the files and a start line of <step> standing,
 # unless it is stacked on that card (stackto(): fitted as below onto the stack's base, not main, it returns 2). Then, when main has
 # moved since its change was made, it goes on from main as it is now: its patch applied there, or merged there
@@ -407,15 +421,19 @@ stackto() { # <card> <worktree> <claim()'s wait> <issue json>
 # and sec say how), else 0. Each merge here (a clean three-way one, a union one, or the session's) sets parsecheck:
 # card() then checks that the merged files parse (parses()) before any test runs.
 settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to begin> <issue json>; sets card()'s caught, trc, sec, waitsec, behind and parsecheck; reads its ph
-  local me=$BASHPID w waited='' ws wb old err t moved=0 away b bl bf bt bs bp out id mt cf tf ix docs dp onto stk rd rt
+  local me=$BASHPID w waited='' ws wb wn='' wo old err t moved=0 away b bl bf bt bs bp out id mt cf tf ix docs dp onto stk rd rt
   ! jq -e '.away == true and (.to | type) == "number"' "$3.claim" >/dev/null 2>&1 || caught=''
+  rm -f "$3.waitlap" # a lap an earlier call left open is no wait of this one
   while :; do
     # In a wait, what the card has waited is brought up to date each time round, the last one of the wait too: a wait
     # that ends between two looks counts whole. A ready card's <worktree>.ready carries it too (extra.waitSec, with
     # card()'s mainsec): a batch that lands it writes its landed line from that extra (fives()), for the drift watch.
+    # Its card records note the seconds since the last look (waitlap()), as wn names the wait of that look: turn,
+    # queued behind the card with the landing turn (turnq()), else cards.
     if [ -n "$waited" ]; then
       waitsec=$((wb + SECONDS - ws))
       readyput "$3" '.extra.waitSec = $w' --argjson w "$((waitsec + ${mainsec:-0}))" || :
+      locked waitlap "$1" "$3" "$wn" || :
     fi
     # A change a session changed here is reviewed again before it lands: no batch takes it till then (gather()).
     [ $moved = 0 ] || rm -f "$3.ready"
@@ -435,7 +453,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
         || { bl=false bf=false bp=0; }
       [ "$bl" != true ] || { rm -f "$3.idle"; return 3; }
       # That run was the batch card's: its wait and run are not known here (testrec()).
-      [ "$bf" != true ] || { trc=$bt; sec=$bs; TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; rm -f "$3.batch" "$3.idle"; capowed "$1" "$2" "$3" "$5"; return 4; }
+      [ "$bf" != true ] || { trc=$bt; sec=$bs; TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; rm -f "$3.batch" "$3.idle"; locked waitlap "$1" "$3" || :; capowed "$1" "$2" "$3" "$5"; return 4; }
       if kill -0 "$bp" 2>/dev/null; then [ -n "$w" ] || { : > "$3.idle"; sleep "$LIVE"; continue; }; else rm -f "$3.batch"; fi
     fi
     # Told to wait, it is stacked on that card instead when it can be (stackto()): fitted below onto the stack's base
@@ -450,7 +468,9 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       # the session that brought it onto main): `health` counts a wait whose start line is the card's last.
       # A card that waits on another card cannot land next: its landing turn ends (turnon()), or the two would wait
       # on each other.
-      [ -n "$waited" ] || { waited=$(date -u +%FT%TZ); ws=$SECONDS; wb=$waitsec; locked turnfree "$1"
+      wo=$wn; wn=cards; [[ $w != *'"turn":true'* ]] || wn=turn
+      [ -z "$waited" ] || [ "$wn" = "$wo" ] || locked waitlap "$1" "$3" "$wn" || :
+      [ -n "$waited" ] || { waited=$(date -u +%FT%TZ); ws=$SECONDS; locked waitlap "$1" "$3" "$wn" new || :; wb=$waitsec; locked turnfree "$1"
         began "$1" "$2" "$5"; jq -r --arg c "$1" 'if .turn then "conveyor: card \($c) is queued for the next batch: card \(.on) has the landing turn"
           else "conveyor: card \($c) waits on card \(.on), which changes the same files: \(.paths | join(", "))" end' <<<"$w"; }
       # The live record names the card it waits on now: one `retry` gives back is picked first, past the cap (urgent).
@@ -480,8 +500,9 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       # the old failure, before the fit onto main below. As in its test step (cardland.sh mainredhold()), it waits on.
       if [ -z "$parsecheck" ] && [ -e "$3.ready" ] && [ "$rt" = false ] && packget landBatch b && [ "$b" -gt 1 ] \
         && ! redhere "$1" >/dev/null && ! redhere "$1" "$3" >/dev/null; then
-        # Its wait so far may have lent its slot under the cap to a held card (capowed(), lib/cardland.sh).
-        rm -f "$3.idle" "$3.nocap"; capowed "$1" "$2" "$3" "$5"
+        # Its wait so far may have lent its slot under the cap to a held card (capowed(), lib/cardland.sh). The seconds
+        # of that wait for room, and of the checks and tests below, are not noted as its wait on cards: a new lap starts.
+        rm -f "$3.idle" "$3.nocap"; capowed "$1" "$2" "$3" "$5"; locked waitlap "$1" "$3" "$wn" new || :
         # The gate for a waiting card first (lintwait(), lib/lint.sh): a finding or an execution error removes
         # <worktree>.ready, so it waits on with no check, test or session, and its landing gate deals with it. Its lint
         # line goes after the wait's start line: a new start line makes the wait the card's last step again, so the
@@ -493,7 +514,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
         if ! out=$(checks "$3"); then
           trc=1; [ "$(git -C "$3" rev-parse HEAD 2>/dev/null)" = "$(jq -r .base "$3.stack" 2>/dev/null)" ] || { block "$1" "$2" "$3" "a product check failed; nothing landed."$'\n'"$out"; return 1; }
         else began "$1" "$2" test; tests "$3"; trc=$?; fi
-        sec=$((SECONDS - sec))
+        sec=$((SECONDS - sec)); locked waitlap "$1" "$3" "$wn" new || :
         # Its run did not run or was stopped (tests(): <worktree>.stop): blocked
         # with that reason, as at its turn (card()).
         [ "$trc" = 0 ] || [ ! -s "$3.stop" ] || { block "$1" "$2" "$3" "test: $(<"$3.stop")"; return 1; }
@@ -502,7 +523,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
           readyput "$3" '. + {stackred: true}' || rm -f "$3.ready"
           trc=''; began "$1" "$2" "$5"; continue
         fi
-        [ "$trc" = 0 ] || { waitsec=$((wb + SECONDS - ws)); return 4; }
+        [ "$trc" = 0 ] || { waitsec=$((wb + SECONDS - ws)); locked waitlap "$1" "$3" || :; return 4; }
         # Its test files' times go on its test line (testlist.sh slowtests()).
         trc=''; slowtests "$3" || :
         record "$1" "$2" test pass "$(jq -cn --slurpfile x <(testrec "$3" 0 "$sec") --slurpfile r <(firstrun "$3" pass) --slurpfile s <(slowrec "$3") '$x[0] + $r[0] + $s[0]')"
@@ -513,7 +534,7 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     fi
     # The wait ended: a later wait of this call begins anew, what the card waited before it counted once.
     # Its slot under the cap may have gone to a held card while it waited: it waits for room first (capowed(), lib/cardland.sh).
-    rm -f "$3.idle" "$3.nocap"; [ -z "$waited" ] || { rm -f "$3.live"; waited=''; }; capowed "$1" "$2" "$3" "$5"
+    rm -f "$3.idle" "$3.nocap"; [ -z "$waited" ] || { rm -f "$3.live"; waited=''; locked waitlap "$1" "$3" || :; }; capowed "$1" "$2" "$3" "$5"
     old=$(git -C "$3" rev-parse HEAD 2>&1) || { block "$1" "$2" "$3" "$5: the engine could not read the commit of the worktree:${old:0:300}"; return 1; }
     [ "$old" != "$(git rev-parse "$onto" 2>/dev/null)" ] || return $moved
     # Stacked, it is reviewed again on the base. A stacked card that waits no more (that card landed, or failed its
@@ -1067,18 +1088,19 @@ turnfree() { [ "$(jq -r '.card' "$CARDS/land.turn" 2>/dev/null)" != "$1" ] || rm
 # A card at its land step waits while another card has the landing turn, as for a release run (releasewait(),
 # lib/push.sh): a start line of its land step marked waitFor: turn, its live record naming that card (waits.on: the
 # Board's step line says "waiting on #<its issue>", as for a wait at a claim), brought up to date as it waits, and
-# <worktree>.idle standing.
+# <worktree>.idle standing. Its seconds are noted as the wait turn (waitnote(), lib/records.sh).
 landwait() { # <card> <issue> <worktree>
-  local at o
+  local at o ws
   o=$(turnon) && [ "$o" != "$1" ] || return 0
   record "$1" "$2" start ok '{"of":"land","waitFor":"turn"}'
-  at=$(date -u +%FT%TZ)
+  at=$(date -u +%FT%TZ) ws=$SECONDS
   while o=$(turnon) && [ "$o" != "$1" ]; do
     jq -cn --arg at "$at" --arg o "$o" '{step: "land", at: $at, last: (now | todate), turns: 0, files: {run: 0, of: null}, tests: null, waits: {on: $o, paths: []},
       action: "waiting for card \($o) to land first: it has the landing turn, as its batch lands first"}' > "$3.live.tmp" 2>/dev/null && mv -f "$3.live.tmp" "$3.live"
     : > "$3.idle"; sleep "$LIVE"
   done
   rm -f "$3.live" "$3.idle"
+  [ $((SECONDS - ws)) = 0 ] || waitnote "$1" turn "$((SECONDS - ws))" || :
 }
 # The landing holds its share of RELLANDING (holdtake(), lib/push.sh) throughout, so a release run that begins
 # meanwhile waits for it to end before its suite reads main.
@@ -1145,6 +1167,8 @@ landone() { # <the arguments of land()>
     || { echo "main moved during the landing; nothing was landed, and the card's change is left in main's checkout for $OWNER to sort out"; return 1; }
   for i in "${!wts[@]}"; do
     turnfree "${a[i * 5]}"
+    # A card the batch took ends the lap of its wait it sleeps in (waitlap()): that lap goes on its landed line.
+    [ ! -e "${wts[i]}.batch" ] || waitlap "${a[i * 5]}" "${wts[i]}"
     l=$(line "${a[i * 5]}" "${a[i * 5 + 1]}" landed ok "${ls[i]}") && append "$l" || { echo "landed as ${shas[i]} but the record line failed"; return 1; }
     [ ! -e "${wts[i]}.batch" ] || { jq -c --arg s "${shas[i]}" '. + {landed: $s}' "${wts[i]}.batch" > "${wts[i]}.batch.new" && mv -f "${wts[i]}.batch.new" "${wts[i]}.batch"; }
   done
