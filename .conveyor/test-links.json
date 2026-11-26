@@ -251,7 +251,8 @@
   "conveyor/jq/check.jq": [
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     "conveyor/tests/metrics.test.sh",
-    "conveyor/tests/snapexec.test.sh"
+    "conveyor/tests/snapexec.test.sh",
+    "conveyor/tests/testruns.test.sh"
   ],
   "conveyor/jq/rows.jq": [
     ".claude/scripts/__tests__/dashboard-local.test.sh",

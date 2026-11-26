@@ -1531,8 +1531,10 @@ done
 # conveyor/commands/release-prep.sh): with CONVEYOR_TEST_LIST, it writes the test files it selected to that file, one
 # a line, and runs none: each file it selected whole or in parts (a whole-only one too), and of the engine's runner the
 # case files that hold its chosen cases, or with none chosen the runner and every case file. The files of RANKED still
-# selected come first, in its order, then by name the rest the selection chose, then those only the loop's list brought
-# (BYLIST): a card that runs only the first few runs those (conveyor/lib/testlist.sh selfirst()).
+# selected come first, in its order, then by name those a link of a changed file names (linked), then by name the rest
+# the selection chose, then those only the loop's list brought (BYLIST): a card that runs only the first few runs those
+# (conveyor/lib/testlist.sh selfirst()). Bug: a link named a test for one file of a large area (testruns.test.sh for
+# conveyor/jq/check.jq), and the area's case files that sort before it filled the card's few, so it never ran.
 if [ -n "${CONVEYOR_TEST_LIST:-}" ]; then
   lsel=$(for t in "${!run[@]}"; do
       if [ "$t" != conveyor/conveyor.test.sh ]; then echo "$t"
@@ -1540,6 +1542,7 @@ if [ -n "${CONVEYOR_TEST_LIST:-}" ]; then
       else grep -lE "^t_($(tr ' ' '\n' <<<"$cases" | grep . | paste -sd'|' -))\(\) \{" conveyor/tests/*.test.sh; fi
     done | LC_ALL=C sort -u) || exit 1
   { while IFS= read -r t; do [ -z "$t" ] || [ -z "${run[$t]:-}" ] || echo "$t"; done <<<"$RANKED"
+    for k in "${!linked[@]}"; do echo "${k%%$'\t'*}"; done | LC_ALL=C sort -u | grep -xF -f <(printf '%s\n' "$lsel")
     while IFS= read -r t; do [ -z "$t" ] || [ -n "${BYLIST[$t]:-}" ] || echo "$t"; done <<<"$lsel"
     while IFS= read -r t; do [ -z "$t" ] || [ -z "${BYLIST[$t]:-}" ] || echo "$t"; done <<<"$lsel"
   } | awk '!seen[$0]++' > "$CONVEYOR_TEST_LIST" || exit 1
