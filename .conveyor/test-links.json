@@ -677,6 +677,7 @@
   ],
   "conveyor/foreman/foreman-size.test.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh",
+    "conveyor/tests/judge.test.sh",
     "conveyor/tests/port.test.sh"
   ],
   "hooks/hooks.json": [

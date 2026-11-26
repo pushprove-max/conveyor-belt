@@ -564,7 +564,7 @@ t_judgemodel() {
   # Bug (#1380): a Codex judge's line kept no stats, or no model in them, as a Claude judge's has.
   [ "$(jf 8 '.judge.stats | tojson')" = '{"turns":1,"tools":{"command_execution":1},"models":["x"]}' ] \
     || fail "the Codex judge's turns, tool calls and model are not in its stats: $(jf 8 '.judge | tojson')"
-  [ "$(jf 8 '[.verdict, .judge.model] | join(" ")')" = "GO x" ] && [ "$(wc -l < "$STUB/judges")" = 1 ] && grep -qx 'F1 \[[a-z ]*\] \[P1\] a.txt:2 wrong word' "$STUB/asked" \
+  [ "$(jf 8 '[.verdict, .judge.model] | join(" ")')" = "GO x" ] && [ "$(wc -l < "$STUB/judges")" = 1 ] && grep -qxF 'F1 [inside the diff; proof line: none] [P1] a.txt:2 wrong word' "$STUB/asked" \
     || fail "the judge on the reviewer's CLI did not read the review, or another judge ran: $(jf 8 '.judge | tojson') $(wc -l < "$STUB/judges")"
   [ "$(loop control judge default | jq -c .judge)" = null ] || fail "control judge default did not clear the setting"
 }
