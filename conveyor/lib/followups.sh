@@ -462,10 +462,10 @@ healsadd() { # <card> <issue> <area | ""> <why> <finding> <review | sort> [<kind
 }
 . "$HERE/lib/healslist.sh" || exit 1 # how a sighting finds its entry (HEALSSAME, healsagain(), healsseen()); after HEALSONE, which it reads as it is sourced
 # The ids the batch card <card> of <issue> may be known by on the self-heals list (batched: its issue number, or for a
-# card with no GitHub issue its Tests page id, healsbatch(), lib/heals.sh), as a JSON list. <card> may be empty.
+# card with no GitHub issue its Tests page id, healsbatch(), lib/heals.sh), as a JSON list. <card> may be empty. It reads TACARDS' file (lib/testaction.sh) by STATE: not every caller loads that.
 healsids() { # <card> <issue>
   local tc=''
-  [ -z "$1" ] || tc=$(jq -r --arg c "$1" 'first(.cards[]? | select(.card == $c or .id == $c or ((.was // []) | index($c)))) | .id // empty' "$TACARDS" 2>/dev/null) || tc=''
+  [ -z "$1" ] || tc=$(jq -r --arg c "$1" 'first(.cards[]? | select(.card == $c or .id == $c or ((.was // []) | index($c)))) | .id // empty' "${STATE%/*}/testactions/cards.json" 2>/dev/null) || tc=''
   jq -cn --arg c "$1" --arg tc "$tc" --argjson n "$2" '[(if $n != 0 then $n else empty end), ($c, $tc | select(. != ""))]'
 }
 # The entries of the self-heals list and the docs list that the batch card or docs sweep card <card> of <issue> holds

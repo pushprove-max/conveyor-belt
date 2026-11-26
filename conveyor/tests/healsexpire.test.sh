@@ -225,6 +225,45 @@ t_healsexpirefreed() {
     || fail "31 days after the give-back, the entry no card took did not leave, or the one a card holds did (rc $RC): $(cat "$T/$CASE/run.out" "$ST/selfheals.jsonl" "$ST/healsdropped.jsonl" 2>&1)"
 }
 
+# The record lines of a blocked card: <card> <issue> [<jq object merged into its picked line>]
+hblocked() {
+  local x=${3:-}; [ -n "$x" ] || x='{}'
+  jq -cn --arg c "$1" --argjson n "$2" --argjson x "$x" '{card: $c, issue: $n, step: "picked", time: "2026-11-01T00:00:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: "", repo: "main"}
+    | (. + $x), (.step = "blocked" | .result = "blocked" | .reason = "build: it failed")' >> "$ST/cards.jsonl"
+}
+
+# Bug it catches (issue 1769): healsids() read TACARDS, which only lib/testaction.sh sets, so a shut() without that file
+# printed "unbound variable" and a batch card with no GitHub issue kept the entry it holds by its Tests page id.
+# shut() is called with the libraries commands/shut.sh loads for every target: `shut <card id>` of a card with no issue
+# also loads lib/testaction.sh, so the command alone cannot show that healsids() needs no variable of it.
+t_healsshutnoissue() {
+  local c=c20261101T000000-main-0
+  judging '[]'
+  hblocked "$c" 0 '{"noIssue": "Self-heals batch: area:engine"}'
+  mkdir -p "$ST/testactions"
+  jq -cn --arg c "$c" '{cards: [{id: "abcabcabcabc", card: $c}]}' > "$ST/testactions/cards.json"
+  hline h-a F-a '{"batched": "abcabcabcabc"}' > "$ST/selfheals.jsonl"
+  ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
+    . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/shut.sh")" && names || exit 9
+    locked shut "$c" ) > "$T/$CASE/run.out" 2>&1; RC=$?
+  [ "$RC" = 0 ] && [ "$(jq -c '[.batched, .freed]' "$ST/selfheals.jsonl")" = '[null,["abcabcabcabc"]]' ] \
+    || fail "shut of the batch card with no GitHub issue did not give back the entry it holds by its Tests page id (rc $RC): $(cat "$T/$CASE/run.out" "$ST/selfheals.jsonl" 2>&1)"
+  ! grep -q 'unbound variable' "$T/$CASE/run.out" || fail "shut $c read an unset variable: $(cat "$T/$CASE/run.out")"
+}
+
+# Bug it catches (issue 1769): `shut <issue>` of any card, with a list that holds a batched entry, printed
+# "TACARDS: unbound variable" once for each such list.
+t_healsshutissue() {
+  local out
+  judging '[]'
+  hblocked c20261101T000000-main-7 7
+  hline h-a F-a '{"batched": 100101}' > "$ST/selfheals.jsonl"
+  out=$(loop shut 7 2>&1 > /dev/null) || fail "shut 7 failed: $out"
+  [[ $out != *'unbound variable'* ]] || fail "shut 7 read an unset variable: $out"
+  [ "$(st 'select(.issue == 7 and .step == "closed") | .card')" = c20261101T000000-main-7 ] && [ "$(jq -c .batched "$ST/selfheals.jsonl")" = 100101 ] \
+    || fail "shut 7 did not close its card, or gave back the entry another card holds: $out $(cat "$ST/cards.jsonl" "$ST/selfheals.jsonl")"
+}
+
 # The loop's turn expires the list when it can pick no card. Bug it catches: expiry ran inside healsonce(), which turnask()
 # calls only when a build slot is free or an urgent card is ready, so a loop with every slot full never expired one.
 # The turn is called whole (turnask()), as t_turnaskbig does (redcap.test.sh): a call of healsexpire() alone cannot show the skip.
