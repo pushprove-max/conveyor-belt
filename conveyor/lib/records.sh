@@ -206,6 +206,29 @@ outfirst() { # <worktree>
   while [ -e "$f" ]; do n=$((n + 1)); f=$1.out.first-$n; done
   cp "$1.out" "$f" 2>/dev/null || :
 }
+# A failed review's first attempt's events and err that its kept folder does not hold, set aside before reviewed()
+# (lib/review.sh) runs it again. Bug: with a kept folder that could not be written, the first attempt's events were
+# removed and its err written over by the second attempt. <note> is reviewkeep()'s: none means the events were not
+# kept, and its err is kept only when the kept folder has it beside them. Each goes to <worktree>.events.first and
+# .err.first (.events.first-2 and on for a later review); block() moves them to the kept folder, as clean() does (leftkeep()).
+reviewleft() { # <worktree> <reviewkeep()'s note, or "">
+  local n=${2##*; its events are kept in } s='' i=1
+  while [ -e "$1.events.first$s" ] || [ -e "$1.err.first$s" ]; do i=$((i + 1)); s=-$i; done
+  if [ -z "$2" ] && [ -s "$1.events" ]; then mv -f "$1.events" "$1.events.first$s"; fi
+  if { [ -z "$2" ] || [ ! -e "$ST/kept/${n%.review*}/${n%.events}.err" ]; } && [ -s "$1.err" ]; then mv -f "$1.err" "$1.err.first$s"; fi
+}
+# The files reviewleft() set aside, moved to the card's kept folder as the card ends with no block() to move them
+# (clean(), lib/push.sh): a run again that passed lands the card, and control stop ends it. Bug: clean() removed
+# them, so the first attempt's events and err were lost. One that cannot be moved stays where it is, and is said.
+leftkeep() { # <worktree>
+  local d=$ST/kept/${1##*/} f
+  for f in "$1".events.first "$1".events.first-* "$1".err.first "$1".err.first-*; do
+    [ -e "$f" ] || continue
+    if ! { mkdir -p "$d" 2>/dev/null && mv -f "$f" "$d/" 2>/dev/null; }; then
+      echo "conveyor: card ${1##*/}: a failed review's ${f##*/} could not be kept in $d; it is left at $f" >&2
+    fi
+  done
+}
 unpricedleft() { # <worktree>: an earlier try with no price left its output (outfirst()); a try refused on stderr alone leaves an empty one
   local x
   for x in "$1".out.first "$1".out.first-*; do [ ! -s "$x" ] || return 0; done

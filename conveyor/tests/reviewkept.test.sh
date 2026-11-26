@@ -110,3 +110,36 @@ t_reviewkeptstopnoeventretry() {
   jq -r 'select(.step == "review") | .reason' "$ST/cards.jsonl" | grep -qxF 'stopped by control stop while it ran; its events are kept in c7-7.review.events' \
     || fail "stopped c7-7 7 after a first attempt with a price: the stopped line's reason does not name the kept file: $(grep '"review"' "$ST/cards.jsonl")"
 }
+# Bug: a review whose kept folder could not hold its first attempt's events and err (reviewkeep() printed no note, as
+# with t_reviewkeepfull's unwritable kept folder) lost them on the run again: reviewed() removed the events, and the
+# second attempt wrote over the err. The stand-in review() fails both attempts with no note, each writing its own
+# events and err; block() then keeps both attempts' files.
+t_reviewkeptleft() {
+  setup "[$(issue 7 2026-01-01)]"; fx_wt 'echo two >> a.txt' b.txt b
+  fx_in 'REVIEW_PAUSE=0; review() { local a=first; [ ! -e "$1.firsttry" ] || a=second; echo "rk-$a-events" > "$1.events"; echo "rk-$a-err" > "$1.err"; echo "review failed (exit 1)"; return 2; }
+    r=$(reviewed "$FXWT" "Build the issue."); block c7 7 "$FXWT" "review 1: $(head -n 1 <<<"$r")"'
+  local k=$ST/kept/c7
+  grep -qx rk-first-events "$k/c7.events.first" && grep -qx rk-first-err "$k/c7.err.first" && grep -qx rk-second-err "$k/c7.err" \
+    || fail "reviewed c7 failed twice with no kept note, then block c7 7: the first attempt's events or err, or the second's err, are not in $k: $(ls "$k" "$T/$CASE/cards" 2>&1) $(cat "$T/$CASE/run.out")"
+}
+# Bug: as t_reviewkeptleft, for a first attempt whose events were kept but whose err could not be (reviewkeep()'s note,
+# with no err beside the kept events): the err alone is set aside, and the kept events are not set aside again.
+t_reviewkeptlefterr() {
+  setup '[]'; local w=$T/$CASE/c7 k=$ST/kept/c7
+  mkdir -p "$k"; echo rk-events > "$k/c7.review.events"; echo rk-events > "$w.events"; echo rk-err > "$w.err"
+  fx_in "reviewleft '$w' '; its events are kept in c7.review.events'"
+  grep -qx rk-err "$w.err.first" && [ ! -e "$w.err" ] && [ ! -e "$w.events.first" ] && grep -qx rk-events "$w.events" \
+    || fail "reviewleft $w '; its events are kept in c7.review.events', no kept err: the err was not set aside, or the kept events were: $(ls "$T/$CASE" 2>&1)"
+}
+# Bug: a card whose review ran again and then passed lands (or control stop ends it) through clean(), with no block()
+# to move what reviewleft() set aside: clean() removed the first attempt's events and err, and a later review's
+# numbered err (err.first-2) was missed by a pattern joined to the next one. clean() now keeps each in the kept folder.
+t_reviewkeptclean() {
+  setup '[]'; local w=$T/$CASE/c7 k=$ST/kept/c7 f
+  for f in events.first err.first events.first-2 err.first-2; do echo "rk-$f" > "$w.$f"; done
+  fx_in "clean '$w'"
+  for f in events.first err.first events.first-2 err.first-2; do
+    grep -qx "rk-$f" "$k/c7.$f" && [ ! -e "$w.$f" ] \
+      || fail "clean $w with a set-aside $f: it is not in $k, or is still beside the worktree: $(ls "$k" "$T/$CASE" 2>&1)"
+  done
+}

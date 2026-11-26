@@ -877,7 +877,7 @@ trialflag() {
   while IFS= read -r f; do [ -z "$(onpipeline "$f" <<<"$pipe")" ] || files+=("$f"); done < <(git -C "$1" diff --cached --no-renames --name-only 2>/dev/null)
   PICK=$(jq -c 'if $ARGS.positional == [] then del(.pipeline) else .pipeline = $ARGS.positional end' --args "${files[@]}" <<<"$PICK") || :
 }
-clean() { tidy "$1"; rm -f "$1".out "$1".out.first "$1".out.first-* "$1".out.unpriced "$1".reply.kept "$1".reply.kept-* "$1".err "$1".review "$1".test "$1".withdrawn "$1".fucards "$1".fulow "$1".outside "$1".effects "$1".outfiled "$1".approvals "$1".spent "$1".trailers; rm -rf "$1".testlog "$1".rounds; }
+clean() { tidy "$1"; leftkeep "$1"; rm -f "$1".out "$1".out.first "$1".out.first-* "$1".out.unpriced "$1".reply.kept "$1".reply.kept-* "$1".err "$1".review "$1".test "$1".withdrawn "$1".fucards "$1".fulow "$1".outside "$1".effects "$1".outfiled "$1".approvals "$1".spent "$1".trailers; rm -rf "$1".testlog "$1".rounds; }
 # The class of a failed build session (session()'s reason), for its blocked line (block()'s BLOCKCLASS) and the
 # metrics: api error (refused at each try, apitries()), stall (stalled twice, session1()), timeout (the time limit's
 # exit 124, exitsaid()), else nothing: the metrics then read the class from the reason (blockclass, jq/metrics.jq:
@@ -1083,11 +1083,12 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   # stabilised: the STABILISED lines of its replies (speedproof.sh stabilised()), which a retry's check reads when its fix's reply names none.
   # out.first, out.first-2 and so on: the output of each earlier try with no price to read (outfirst(), lib/records.sh), which
   # the last try's output (out) wrote over: a build that stalled twice is blocked with no line for outkeep() to keep them by.
-  for f in "$3".{out,err,review,test,testlog,withdrawn,approvals,body,trailers,rounds,rerun,covered,outside,effects,stabilised,out.first} "$3".out.first-*; do
+  # events.first and err.first, then -2 and on: a failed review's first attempt's, which its kept folder could not hold then (reviewleft()).
+  for f in "$3".{out,err,review,test,testlog,withdrawn,approvals,body,trailers,rounds,rerun,covered,outside,effects,stabilised,out.first,events.first,err.first} "$3".out.first-* "$3".events.first-* "$3".err.first-*; do
     [ -e "$f" ] || continue
     if mkdir -p "$k" 2>/dev/null && mv -f "$f" "$k/" 2>/dev/null; then kept=$k; else left=1; fi
   done
-  [ -z "$left" ] || { [ -n "$patch" ] || kept=''; reason="${reason:0:1200} [evidence not moved to $k: it is still at $3.out, .out.first, .out.first-2 and on, .err, .review, .test, .testlog, .withdrawn, .body, .trailers, .rounds, .rerun, .covered, .outside, .effects, .stabilised]"; }
+  [ -z "$left" ] || { [ -n "$patch" ] || kept=''; reason="${reason:0:1200} [evidence not moved to $k: it is still at $3.out, .out.first, .out.first-2 and on, .err, .events.first, .err.first and on, .review, .test, .testlog, .withdrawn, .body, .trailers, .rounds, .rerun, .covered, .outside, .effects, .stabilised]"; }
   if [ -n "$hold" ]; then git worktree remove --force "$3" 2>/dev/null; rm -rf "$3".briefs; rm -f "$3".events "$3".firsttry "$3".firsttry.new "$3".reviewed "$3".index "$3".msg "$3".review.new "$3".carried "$3".live "$3".live.tmp "$3".idle "$3".nocap "$3".capheld "$3".claim "$3".claim.new "$3".cpatch "$3".cpatch.new "$3".stack "$3".settings "$3".opencode.json "$3".donewhen "$3".unfixed "$3".out.unpriced "$3".stalled "$3".before
   elif [ -z "$stay" ]; then tidy "$3"; else rm -f "$3".events "$3".firsttry "$3".firsttry.new "$3".reviewed "$3".patch "$3".index "$3".msg "$3".review.new "$3".carried "$3".base "$3".live "$3".live.tmp "$3".idle "$3".nocap "$3".capheld "$3".claim "$3".claim.new "$3".cpatch "$3".cpatch.new "$3".stack "$3".settings "$3".opencode.json "$3".donewhen "$3".unfixed "$3".out.unpriced "$3".stalled "$3".before; fi
   # The session or review that failed: what it spent is on this line (spent, and its tokens), so it is priced.

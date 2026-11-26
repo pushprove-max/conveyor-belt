@@ -53,18 +53,18 @@ reviewed() { # <worktree> <brief> [instructions]: prints and fails as review() d
   rm -f "$1.stalled"; t=$(review "$@"); rc=$?
   if [ $rc = 0 ]; then
     [ "$(verdict "$1.review")" = none ] || { printf '%s\n' "$t"; return 0; }
-    # One that ended cleanly with no verdict keeps its events and err (reviewkeep()): below they go, its err written again.
+    # One that ended cleanly with no verdict keeps its events and err (reviewkeep()); what is not kept is set aside below (reviewleft()).
     kn=$(reviewkeep "$1" ""); x=$(jq -c --arg k "$kn" '{reason: ("the review ended without one clear verdict" + $k), spent: .}' <<<"$t")
   elif [ $rc = 2 ]; then
     x=$(jq -cn --arg r "$t" --slurpfile s "$1.spent" '{reason: $r, spent: ($s[0] | del(.step))}' 2>/dev/null) || x=$(jq -cn --arg r "$t" '{reason: $r}')
   else printf '%s\n' "$t"; return 1; fi
   # A review that stalled (watch()) ended with no answer taken from it, a verdict it had written or not: it runs once
   # more as a review with no verdict does, and stalls on its line counts the stalls. Two stalls fail it, saying so.
-  [ ! -e "$1.stalled" ] || n=1
+  [ ! -e "$1.stalled" ] || n=1; [ $rc = 0 ] || kn=$(keptnote "$t")
   # The first attempt, kept from here until the review's line is written (began() drops it): a card stopped in the
   # pause records it alone (its events, read into it, go), one stopped in the second attempt records both. It is
   # .firsttry.new until its events are gone, so stopped() never reads them on top of it.
-  printf '%s\n' "$x" > "$1.firsttry.new"; rm -f "$1.spent" "$1.events"; mv -f "$1.firsttry.new" "$1.firsttry"; sleep "$REVIEW_PAUSE"
+  printf '%s\n' "$x" > "$1.firsttry.new"; reviewleft "$1" "$kn"; rm -f "$1.spent" "$1.events"; mv -f "$1.firsttry.new" "$1.firsttry"; sleep "$REVIEW_PAUSE"
   u=$(review "$@"); rc=$?
   [ $rc != 0 ] || [ "$(verdict "$1.review")" = none ] || { jq -c --argjson f "$x" --argjson n "$n" "$BOTHTRIES"' | if $n > 0 then .stalls = $n else . end' <<<"$u"; return 0; }
   [ $rc != 0 ] || { jq -c '{step: "review"} + .' <<<"$u" > "$1.spent"; kn=$(reviewkeep "$1" ""); u="the review ended without one clear verdict$kn"; }
