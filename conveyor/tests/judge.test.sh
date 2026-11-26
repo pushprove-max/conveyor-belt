@@ -254,7 +254,7 @@ t_judgeweaktest() {
   p=$(tr '\n' ' ' < "$STUB/judge-asked" | tr -s ' ')
   grep -qF "A finding that a test does not check what its name, its comment or the issue's Done-when says it checks (it passes with the behaviour broken) is a real defect at its level: \"only a test gap\" and \"hypothetical\" are no reason to decline it." <<<"$p" \
     || fail "the judge's prompt does not make a weak test a real defect that is not declined as a test gap: $(grep -n 'test' "$STUB/judge-asked")"
-  grep -qF 'is declined as a repeat, with the earlier kind, only when that kind is `claim wrong`, `cannot happen` or `fixed`, or the defect is fixed on main. When the earlier kind is `rare case`, `not this change`, `other` or none, judge the finding again from the code, as a new finding.' <<<"$p" \
+  grep -qF 'A repeat is declined, with the earlier kind, when that kind is `claim wrong`, `cannot happen` or `fixed`, or the defect is fixed on main.' <<<"$p" \
     || fail "the judge's prompt does not decline a repeat only after an allowed earlier kind: $(grep -n 'repeat\|already declined' "$STUB/judge-asked")"
   grep -qxF '`F<n> DECLINE: <kind>: <one-line reason>`' "$STUB/judge-asked" \
     && grep -qF '`claim wrong` (its claim is wrong about the code), `cannot happen` (its proof cannot happen with what the project really runs), `fixed` (the defect is already fixed on main), `rare case` (only where the rule above allows it), `not this change` or `other`.' <<<"$p" \

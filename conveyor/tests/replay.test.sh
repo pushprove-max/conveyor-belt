@@ -35,15 +35,22 @@ replaysetup() {
   mkdir -p "$ST/kept/c1-8"; echo four >> "$R/a.txt"; git -C "$R" diff > "$ST/kept/c1-8/c1-8.patch"
   git -C "$R" add a.txt; P8=$(git -C "$R" diff --cached --binary --no-renames -U0 HEAD | diffid); git -C "$R" reset -q; git -C "$R" checkout -q -- a.txt
   U='{"input":1000000,"write":0,"write1h":0,"read":0,"output":0}'
+  # The repo name the engine reads an issue's records by ($REPO): a review line of another card of the issue is the
+  # issue's only when its repo is this one (outsideruled()).
+  rp=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && printf '%s' "$REPO" ) && [ -n "$rp" ] || fail "the engine's repo name could not be read"
   rline() { # <card> <issue> <minute> <patch> <judge json> [<file>]
-    jq -cn --arg c "$1" --argjson i "$2" --arg t "2026-11-01T00:0$3:00Z" --arg m "$base" --arg p "$4" --argjson j "$5" --argjson u "$U" \
-      '{card: $c, issue: $i, step: "review", time: $t, tokens: {claude: 0, codex: 0}, result: "GO", sha: "", reason: "", main: $m, patch: $p,
+    jq -cn --arg c "$1" --argjson i "$2" --arg t "2026-11-01T00:0$3:00Z" --arg m "$base" --arg p "$4" --argjson j "$5" --argjson u "$U" --arg r "$rp" \
+      '{card: $c, issue: $i, repo: $r, step: "review", time: $t, tokens: {claude: 0, codex: 0}, result: "GO", sha: "", reason: "", main: $m, patch: $p,
         judge: ({model: "claude-sonnet-5-5", effort: "medium", sec: 5, tokens: {claude: 1000000, codex: 0}, usage: $u,
           read: ($t | fromdateiso8601 - 5 | todate)} + $j)}' >> "${6:-$ST/cards.jsonl}"
   }
   landed() { jq -cn --arg c "$1" --argjson i "$2" --arg t "$3" --arg s "$sha" '{card: $c, issue: $i, step: "landed", time: $t, tokens: {claude: 0, codex: 0}, result: "ok", sha: $s, reason: ""}' >> "$ST/cards.jsonl"; } # <card> <issue> <time>
   rline c1-7 7 1 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:2 F-one","place":"inside","reason":"real","cost":"none"}],"declined":[{"n":2,"finding":"[P2] a.txt:1 F-two","place":"outside","reason":"style"}]}'
   landed c1-7 7 2026-11-01T00:02:00Z
+  # Findings ruled OUTSIDE on issue 7 (#1734): c1-0, before c1-7's judge ran, one in judge.outside and one that went to the
+  # self-heals list (outside: true); c1-13, after it ran. Neither review has a ruling to replay, so neither is a case.
+  rline c1-0 7 0 "$P7" '{"outside":[{"n":1,"finding":"[P2] b.txt:1 F-out","place":"outside","reason":"old code too","effect":"harm"}],"selfheals":[{"n":2,"finding":"[P3] b.txt:2 F-heal","place":"outside","reason":"a typo","effect":"self-heals","outside":true}]}'
+  rline c1-13 7 8 "$P7" '{"outside":[{"n":1,"finding":"[P2] b.txt:3 F-late","place":"outside","reason":"later"}]}'
   # c1-7's declines: one of an earlier round, before its judge ran (00:00:55, when its review read the list), which
   # the replay judge is given, and the one its judge declined (written after its call), which it is not.
   printf '%s\n' '{"id":"d000000000001","time":"2026-11-01T00:00:30Z","card":"c1-7","issue":7,"finding":"[P2] a.txt:1 F-old","by":"judge","why":"nothing new","kind":"claim wrong","repo":"r"}' \
@@ -135,6 +142,12 @@ F2 [outside the diff] [P2] a.txt:1 F-two
   # told each earlier decline without its kind, which JUDGE needs to decline a repeat (#1522).
   grep -q '^# Findings already declined on the cards of this issue$' "$STUB/judged" && grep -q '^- \[P2\] a.txt:1 F-old (declined: nothing new) \[kind: claim wrong\]$' "$STUB/judged" \
     && ! grep -q '(declined: style)' "$STUB/judged" || fail "the earlier declines given to the judge: $(cat "$STUB/judged")"
+  # Bug caught (#1734): the replay judge used the rule that gives a repeat of an OUTSIDE ruling its earlier ruling again,
+  # but was not given the findings ruled OUTSIDE (the live judge is, outsideruled()), nor the ones that went to the
+  # self-heals list, and not only the ones from before its own review.
+  [ "$(awk '/^== /{on = /c1-7$/} on' "$STUB/judged" | sed -n '/^# Findings ruled OUTSIDE on the cards of this issue$/,/^$/p')" = '# Findings ruled OUTSIDE on the cards of this issue
+- [P2] b.txt:1 F-out (ruled OUTSIDE: harm: old code too)
+- [P3] b.txt:2 F-heal (ruled OUTSIDE: self-heals: a typo)' ] || fail "the replay judge of c1-7 was not given the findings ruled OUTSIDE before its review, or was given a later one: $(grep -n 'OUTSIDE\|F-late\|^== ' "$STUB/judged")"
   # Bug caught: a review's judge is told the findings the fix round before it was told to fix, each with the reason it
   # accepted it with (#1379), but the replay judge was not, so it ruled on a finding back after its fix as on a new
   # one. Bugs caught: the replay judge was given the findings another card's review (c1-10's F-five, before c1-11 on

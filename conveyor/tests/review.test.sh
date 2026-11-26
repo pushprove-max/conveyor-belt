@@ -497,3 +497,57 @@ t_judgedfixtree() {
     2: f2
     3: f3' ] || fail "the judge's message after fix round 1 (review: [P1] f.txt:2 the fix deleted f2) lost the lines before that fix (exit $RC): $(cat "$T/$CASE/judged" "$T/$CASE/run.out" 2>&1)"
 }
+
+# Three reviews of card c7 as card() runs them, a fix round between each two: the real cardreview() and judged(), with
+# the review session and the judge's call stubbed. The arguments are the findings each review reads, the judge's answers
+# to the first two, and the change each of the first two fix rounds makes (told(), with fixtree and refix set as
+# cardfix() sets them). The third review's judge has no answer: its message is kept, $T/$CASE/judged. card() keeps in
+# ftree the tree of the first review whose judge ruled a finding.
+judgedthree() { # <review 1> <review 2> <review 3> <judge 1> <judge 2> <fix 1> <fix 2>
+  setup "[$(issue 17 2026-01-01)]"; fx_wt 'printf "%s\n" f1 f2 f3 > f.txt' b.txt base
+  RV1=$1 RV2=$2 RV3=$3 JA1=$4 JA2=$5 FX1=$6 FX2=$7 fx_in 'c=c7 n=17 wt=$FXWT br="" sprompt="" sf="" sk="" pk="" pt="" mode="" kept="" grown=1 fin="" vmode="" pass=1 rounds=0 rv=$REVIEW prv="" refix="" fixtree=""
+    issue=$(jq -c ".[0]" "$STUB/issues.json")
+    redbrief() { :; }; trialflag() { :; }; lintgate() { return 0; }; began() { :; }; reusable() { return 1; }; minor() { :; }; judgeon() { echo "[]"; }
+    reviewed() { local k=RV$pass; printf "%s\n" "${!k}" "USER-VISIBLE: no" "VERDICT: NO-GO" > "$1.review"; echo "{}"; }
+    judgecall() { local k=JA$pass; [ -z "${!k:-}" ] || { printf "%s\n" "${!k}" > "$1.judge"; echo "{}"; return 0; }; printf "%s\n" "$3" > "$T/$CASE/judged"; echo "{\"failed\": \"stub\"}"; return 1; }
+    cardreview && fixtree=$(git -C "$wt" write-tree) && told 1 "$FX1" && refix=1 && pass=2 && cardreview \
+      && fixtree=$(git -C "$wt" write-tree) && told 2 "$FX2" && refix=2 && pass=3 && cardreview || exit 3'
+  [ "$RC" = 0 ] && [ -s "$T/$CASE/judged" ] || fail "the three reviews of the card did not reach the judge of the third (exit $RC): $(cat "$T/$CASE/run.out" 2>&1)"
+}
+# Bug it catches (#1734): after two fix rounds the judge could not tell that round 1 changed the lines a repeated finding
+# names after its ruling, as it was given the tree before round 2 alone (round 2 changes b.txt only). Review 1's judge
+# rules the note at f.txt:2 not this change and accepts b.txt:1, which makes round 1 rewrite f.txt:2; review 2's judge
+# declines an unrelated finding (b.txt:1), which must not replace the tree of the first ruling with one that holds round 1's rewrite.
+t_judgedrulingtree() {
+  judgedthree $'[P2] f.txt:2 the note is cut at 24 columns\n[P2] b.txt:1 a real defect' $'[P2] b.txt:1 an unrelated note\n[P2] b.txt:1 a second real defect' '[P2] f.txt:2 the note is cut at 32 columns' \
+    $'F1 DECLINE: not this change: the code before the change cuts it too\nF2 ACCEPT: harm: it is real. Cost to every card: none' $'F1 DECLINE: other: unrelated\nF2 ACCEPT: harm: it is real. Cost to every card: none' \
+    'printf "%s\n" f1 g2 f3 > f.txt; echo x >> b.txt' 'echo y >> b.txt'
+  [ "$(grep -A3 -xF '  Lines at f.txt:2 (the code at the first ruling):' "$T/$CASE/judged")" = '  Lines at f.txt:2 (the code at the first ruling):
+    1: f1
+    2: f2
+    3: f3' ] && ! grep -qxF '  Lines at f.txt:2 (the code before the last fix round):' "$T/$CASE/judged" \
+    || fail "the judge's message after fix round 2 (round 1 rewrote f.txt:2 after the ruling, review 2 ruled an unrelated finding, round 2 changed b.txt) does not hold the lines as the first ruling saw them: $(cat "$T/$CASE/judged")"
+}
+# Bug it catches (#1734): a fix round made before the ruling made the ruling look stale, as the judge was given the tree
+# before the card's first fix round. Review 1 rules nothing and round 1 rewrites f.txt:2; review 2 rules the note at
+# f.txt:2 not this change, so the review after round 2 (b.txt only) has no change to f.txt:2 since the ruling.
+t_judgedrulingafter() {
+  judgedthree '[P2] b.txt:1 a real defect' $'[P2] f.txt:2 the note is cut at 24 columns\n[P2] b.txt:1 a second real defect' '[P2] f.txt:2 the note is cut at 32 columns' \
+    'F1 ACCEPT: harm: it is real. Cost to every card: none' $'F1 DECLINE: not this change: the code before the change cuts it too\nF2 ACCEPT: harm: it is real. Cost to every card: none' \
+    'printf "%s\n" f1 g2 f3 > f.txt; echo x >> b.txt' 'echo y >> b.txt'
+  grep -qxF '  Lines at f.txt:2 (the staged change):' "$T/$CASE/judged" && ! grep -qE '^  Lines at f.txt:2 \(the code ' "$T/$CASE/judged" \
+    || fail "the judge's message holds the lines as they were before a change that came before the ruling, so it would rule from the code on a repeat that keeps its ruling: $(cat "$T/$CASE/judged")"
+}
+# Bug it catches (#1734): the judge was given the tree before the card's first fix round in place of the one before the
+# last, so a line that round 1 added and round 2 deleted (z4) was not in its message. Review 1's judge rules f.txt:2
+# (the ruling tree is from before round 1); round 1 appends z4; review 2 rules nothing; round 2 deletes z4.
+t_judgeddeleted() {
+  judgedthree $'[P2] f.txt:2 the note is cut at 24 columns\n[P2] b.txt:1 a real defect' '[P2] b.txt:1 a second real defect' '[P1] f.txt:4 the fix deleted z4' \
+    $'F1 DECLINE: not this change: the code before the change cuts it too\nF2 ACCEPT: harm: it is real. Cost to every card: none' 'F1 ACCEPT: harm: it is real. Cost to every card: none' \
+    'echo z4 >> f.txt' 'printf "%s\n" f1 f2 f3 > f.txt; echo y >> b.txt'
+  [ "$(grep -A4 -xF '  Lines at f.txt:4 (the code before the last fix round):' "$T/$CASE/judged")" = '  Lines at f.txt:4 (the code before the last fix round):
+    1: f1
+    2: f2
+    3: f3
+    4: z4' ] || fail "the judge's message after fix round 2 does not hold the line round 1 added and round 2 deleted: $(cat "$T/$CASE/judged")"
+}

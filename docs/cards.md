@@ -396,9 +396,13 @@ defect, not "only a test gap".
 
 Each decline has a kind: `claim wrong`, `cannot happen`, `fixed` (already fixed on main), `rare case`,
 `not this change` or `other`. The declined list keeps it beside the reason. A finding that repeats a declined one is
-declined as a repeat only when the earlier kind is `claim wrong`, `cannot happen` or `fixed`, or when the defect is
-fixed on main now. A repeat of a finding declined with another kind, or with no kind, is judged again as a new
-finding. The reviewer's list of findings not to raise holds only lines of those three kinds.
+declined as a repeat, with the earlier kind, when that kind is `claim wrong`, `cannot happen` or `fixed`, or when the
+defect is fixed on main now. A repeat is the same claim about the same code, with only a value in its proof different (a width,
+a count, a name, a time). The judge also sees the findings ruled `OUTSIDE` on the cards of the issue. A repeat of one of
+those, or of a decline of the kind `not this change`, gets its earlier ruling again: its reason starts with the earlier
+kind and names the earlier finding by `file:line`. A repeat of a finding declined with another kind, or with no kind,
+is judged again as a new finding, and so is a finding on lines that a fix round of the card changed after that ruling. The
+reviewer's list of findings not to raise holds only lines of those three kinds.
 
 A real defect that the card's change did not cause is never declined for that. The judge marks it `OUTSIDE`. The card
 gets no fix round for it and lands as its other findings let it. When the card lands, the finding is filed as a

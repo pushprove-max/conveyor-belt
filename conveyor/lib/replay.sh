@@ -25,7 +25,9 @@ REPLAY_LAST=20
 # sec, tokens, usage}, findings: [{n, finding, place, accept}] in the order the judge was given them, sha: the landed
 # commit or "", kept: the kept patch's path or "", patch: the patch-id of the change its review read or "", before:
 # the lines of the findings already declined on the card or its issue before its judge ran ("- <finding> (declined:
-# <why>) [kind: <kind, or none>]", the last 50, as judged() gives them), back: the findings of the fix round before
+# <why>) [kind: <kind, or none>]", the last 50, as judged() gives them), outside: the lines of the findings ruled
+# OUTSIDE on the card or its issue in the reviews before its judge ran ("- <finding> (ruled OUTSIDE: <effect>: <reason>)",
+# the last 50, as outsideruled() gives them; read from the review lines, as the judge keeps no copy), back: the findings of the fix round before
 # this review, "- E<n> <finding> (accepted: <reason>)", or "- E<n> <finding>" for one the judge gave no readable line
 # for (its cost null), as its judge was given them (fixedbefore(), lib/review.sh) and its line keeps them
 # (judge.back); none when no fix round of the card ran (a card built from nothing after `retry <issue> --fresh`,
@@ -39,7 +41,7 @@ REPLAY_LAST=20
 # ruled, else at time).
 replaycases() { # <n>
   { stdb ask lines retried -- lines cards; } 2>/dev/null | jq -cs --argjson last "$1" --arg st "$ST" --arg repo "$REPO" \
-    --slurpfile dl <(stdb ask lines declined 2>/dev/null | jq -c 'objects' 2>/dev/null) '
+    --slurpfile dl <(stdb ask lines declined 2>/dev/null | jq -c 'objects' 2>/dev/null) "$OUTSIDEDEF"'
     def t: try (sub("\\.[0-9]+"; "") | fromdateiso8601) catch null;
     map(objects) as $all
     | [$all[] | select(.step == "review" and (.judge | type) == "object" and .judge.failed == null
@@ -50,7 +52,9 @@ replaycases() { # <n>
        back: [.judge.back | arrays[] | strings],
        before: ((.judge.before | arrays | map(strings)) // ([$dl[] | select((.card == $c or (.issue == $n and $n != 0 and .repo == $repo)) and $ran != null)
                  | .finding as $f | [(.was // [])[], {time: (.ruled // .time), why, kind}] | map(select(((.time | t) // $ran) < $ran)) | last // empty
-                 | "- \($f) (declined: \(.why)) [kind: \(.kind // "none")]"] | reduce .[] as $l ([]; if index([$l]) then . else . + [$l] end) | .[-50:])), judge: (.judge | {model, effort, sec, tokens, usage} | del(.[] | nulls)),
+                 | "- \($f) (declined: \(.why)) [kind: \(.kind // "none")]"] | reduce .[] as $l ([]; if index([$l]) then . else . + [$l] end) | .[-50:])),
+       outside: ([$all[] | select(.step == "review" and (.card == $c or (.issue == $n and $n != 0 and .repo == $repo)) and $ran != null and ((.time | t) // $ran) < $ran) | outlines]
+                 | reduce .[] as $l ([]; if index([$l]) then . else . + [$l] end) | .[-50:]), judge: (.judge | {model, effort, sec, tokens, usage} | del(.[] | nulls)),
        findings: ([(.judge.accepted | arrays[] | . + {accept: (.reason | tostring | test("^always accepted: a .* finding \\(the judge declined it: ") | not)}),
                    (.judge.declined | arrays[] | . + {accept: false}), (.judge.selfheals | arrays[] | select(.outside | not) | . + {accept: true})]
                   | sort_by(.n) | map({n, finding, place, accept})),
@@ -100,7 +104,7 @@ replayusd() { # < <steps json array>
 # each call's own usage, {card, issue, model, effort, sec, tokens, usage}, with failed (why) when it failed}. One
 # replay runs at a time.
 replay() { # judge <model> [<effort>] [--last <n>] [--estimate]
-  local model effort='' last=$REPLAY_LAST est='' x rc c s cs=() k d w f out ans skipped=0 brief before back iss fd
+  local model effort='' last=$REPLAY_LAST est='' x rc c s cs=() k d w f out ans skipped=0 brief before outside back iss fd
   local use='usage: conveyor.sh pick replay judge <model> [<effort>] [--last <n>] [--estimate]'
   [ "${1:-}" = judge ] && [ -n "${2:-}" ] && [[ $2 != --* ]] || { echo "$use" >&2; return 2; }
   model=$2; shift 2
@@ -141,11 +145,13 @@ replay() { # judge <model> [<effort>] [--last <n>] [--estimate]
     printf '%s\n' "$k" > "$d/case"
     # The findings declined on the issue's cards before the recorded judge ran, given as judged() gives them.
     before=$(jq -r '.before | arrays | if length > 0 then "# Findings already declined on the cards of this issue\n\(join("\n"))" else empty end' <<<"$k")
+    # The findings ruled OUTSIDE on the issue's cards before the recorded judge ran, as judged() gives them (outsideruled()).
+    outside=$(jq -r '.outside | arrays | if length > 0 then "# Findings ruled OUTSIDE on the cards of this issue\n\(join("\n"))" else empty end' <<<"$k")
     # The findings the fix round before the review was told to fix, with the judge's earlier reason for each it gave a readable line for, as judged() gives them.
     back=$(jq -r '.back | arrays | if length > 0 then "# The findings the last fix round was told to fix\n\(join("\n"))" else empty end' <<<"$k")
     # The findings as judged() gives them (judgefindings(): the small staged change, the lines each finding cites), from the marks file it reads.
     jq -c '[.findings | to_entries[] | {n: (.key + 1), place: (.value.place | if . == "inside" or . == "outside" then . else "none" end), finding: .value.finding}]' <<<"$k" > "$d/wt.judge.marks"
-    out=$(CALLSEAT=$s CALLSTEP=replay CALLACT="the replay judge reads the findings of $(jq -r .card <<<"$k")" judgecall "$d/wt" "$jp" "$brief"$'\n\n'"${back:+$back$'\n\n'}${before:+$before$'\n\n'}$(judgefindings "$d/wt")") && f=ok || f=''
+    out=$(CALLSEAT=$s CALLSTEP=replay CALLACT="the replay judge reads the findings of $(jq -r .card <<<"$k")" judgecall "$d/wt" "$jp" "$brief"$'\n\n'"${back:+$back$'\n\n'}${before:+$before$'\n\n'}${outside:+$outside$'\n\n'}$(judgefindings "$d/wt")") && f=ok || f=''
     jq -e objects <<<"$out" >/dev/null 2>&1 || out='{"failed": "the judge call printed no fields"}'
     ans='[]'; [ -z "$f" ] || ans=$(jq -cRn '[inputs | gsub("^[[:space:]`*-]+|[[:space:]`*]+$"; "") | capture("^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE):[[:space:]]*(?<r>.*)$")]' "$d/wt.judge" 2>/dev/null) || ans='[]'
     jq -c --slurpfile k "$d/case" '$k[0] as $k | {card: $k.card, issue: $k.issue} + ({model, effort, sec, tokens, usage, failed} | del(.[] | nulls))' <<<"$out" >> "$w/calls"

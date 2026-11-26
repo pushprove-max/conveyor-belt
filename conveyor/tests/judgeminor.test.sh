@@ -225,3 +225,50 @@ t_judgeinlinebig() {
   ! grep -qF '# The staged change' "$STUB/judge-asked" && ! grep -qF 'diff --git' "$STUB/judge-asked" && ! grep -qxF '+450' "$STUB/judge-asked" \
     || fail "a staged change of over 400 lines is in the judge's message"
 }
+
+# Bugs (#1734): a finding raised again with only a value of its proof changed (a width: the same claim about the same
+# code) was judged as a new finding, so a ruling that it is not this change's (a decline `not this change`) did not
+# hold, and a fix round cost $2.50 for it. The judge's rules hold no repeat rule for it, no exception for code a fix
+# round changed, and keep the rule of #1522 for a `rare case`, `other` or no kind (judged again from the code). The
+# judge's message is read: the judge is a stub, and what it is told is all the engine decides.
+t_judgerepeatrules() {
+  local p
+  judging "[$(issue 7 2026-01-01)]"
+  printf '%s\n' '[P2] a.txt:1 the pane cuts the note at 24 columns' '[P2] a.txt:2 two cards at once' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  printf '%s\n' 'F1 DECLINE: not this change: the code before the change cuts it too' 'F2 DECLINE: rare case: two cards seldom meet' > "$STUB/judge.1"
+  judgeone 7 "$STUB/review"
+  printf '%s\n' '[P2] a.txt:1 the pane cuts the note at 32 columns' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"; echo 'F1 DECLINE: not this change: a.txt:1 again' > "$STUB/judge.2"
+  judgeone 7 "$STUB/review"
+  grep -qxF -- '- [P2] a.txt:1 the pane cuts the note at 24 columns (declined: not this change: the code before the change cuts it too) [kind: not this change]' "$STUB/judge-asked" \
+    && grep -qxF -- '- [P2] a.txt:2 two cards at once (declined: rare case: two cards seldom meet) [kind: rare case]' "$STUB/judge-asked" \
+    || fail "the judge is not given the earlier declines with their kinds: $(grep -n 'declined' "$STUB/judge-asked")"
+  p=$(tr '\n' ' ' < "$STUB/judge-asked" | tr -s ' ')
+  grep -qF 'is a repeat: the same claim about the same code, with only a value in its proof different (a width, a count, a name, a time).' <<<"$p" \
+    && grep -qF 'A repeat of an OUTSIDE ruling, or of a decline of the kind `not this change`, gets its earlier ruling again: answer OUTSIDE (or DECLINE) as before, and the reason starts with the earlier kind and names the earlier finding by its file:line.' <<<"$p" \
+    || fail "the judge's rules do not give a repeat of a not-this-change decline or an OUTSIDE ruling its earlier ruling again: $(grep -n 'repeat\|Nothing new' "$STUB/judge-asked")"
+  # Bugs caught: the rule reached a `rare case`, `other` or no-kind decline too, which #1522 keeps judged from the code;
+  # and a fix round that changed the code the finding names did not make the finding new.
+  grep -qF 'When the earlier kind is `rare case`, `other` or none, or a fix round of this card changed the lines the finding names since that ruling (the lines marked `the code before the last fix round` or `the code at the first ruling` show the earlier code), judge the finding from the code, as a new finding.' <<<"$p" \
+    || fail "the judge's rules do not judge from the code a repeat of a rare case, other or no-kind decline, or a finding on lines a fix round changed: $(grep -n 'repeat\|rare case' "$STUB/judge-asked")"
+}
+
+# Bug (#1734): the judge was not given the findings ruled OUTSIDE on the cards of the issue (only their declines), so it
+# could not give a repeat of one its earlier ruling. An earlier card of the issue, a retried card of it, and the card's
+# own earlier review hold them in their review lines (judge.outside, and judge.selfheals with outside: true, where an
+# OUTSIDE ruling of the effect `self-heals` goes); another issue's, and an accepted self-heals one, do not belong in the list.
+t_judgeoutsidelist() {
+  local c='{"step":"review","time":"2026-01-01T00:00:00Z","tokens":{"claude":0,"codex":0},"result":"GO","sha":"","reason":""' r
+  judging "[$(issue 7 2026-01-01)]"
+  # The repo name the engine reads the issue's records by ($REPO), as judgeone() makes the engine shell.
+  r=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && printf '%s' "$REPO" ) && [ -n "$r" ] || fail "the engine's repo name could not be read"
+  printf '%s\n' "$c,\"card\":\"c-old\",\"issue\":7,\"repo\":\"$r\",\"judge\":{\"outside\":[{\"n\":1,\"finding\":\"[P2] b.txt:1 the pane cuts the note at 24 columns\",\"place\":\"outside\",\"reason\":\"the code before the change cuts it too\",\"effect\":\"harm\"}],\"selfheals\":[{\"n\":2,\"finding\":\"[P3] b.txt:4 a doc typo\",\"place\":\"outside\",\"reason\":\"old\",\"effect\":\"self-heals\",\"outside\":true},{\"n\":3,\"finding\":\"[P3] b.txt:5 an accepted heal\",\"place\":\"inside\",\"reason\":\"real\",\"effect\":\"self-heals\"}]}}" \
+    "$c,\"card\":\"c-other\",\"issue\":8,\"repo\":\"$r\",\"judge\":{\"outside\":[{\"n\":1,\"finding\":\"[P2] b.txt:9 another issue's finding\",\"place\":\"outside\",\"reason\":\"old\"}]}}" >> "$ST/cards.jsonl"
+  printf '%s\n' "$c,\"card\":\"c-retried\",\"issue\":7,\"repo\":\"$r\",\"judge\":{\"outside\":[{\"n\":1,\"finding\":\"[P3] b.txt:2 a typo\",\"place\":\"outside\",\"reason\":\"old\"}]}}" >> "$ST/retried.jsonl"
+  printf '%s\n' '[P2] b.txt:1 the pane cuts the note at 32 columns' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  echo 'F1 OUTSIDE: harm: b.txt:1 again' > "$STUB/judge.1"
+  judgeone 7 "$STUB/review"
+  [ "$(sed -n '/^# Findings ruled OUTSIDE on the cards of this issue$/,/^$/p' "$STUB/judge-asked")" = "# Findings ruled OUTSIDE on the cards of this issue
+- [P2] b.txt:1 the pane cuts the note at 24 columns (ruled OUTSIDE: harm: the code before the change cuts it too)
+- [P3] b.txt:4 a doc typo (ruled OUTSIDE: self-heals: old)
+- [P3] b.txt:2 a typo (ruled OUTSIDE: old)" ] || fail "the judge is not given the findings ruled OUTSIDE on the issue's cards (also the ones in the self-heals list), or is given another issue's or an accepted heal: $(grep -n 'OUTSIDE\|b.txt' "$STUB/judge-asked")"
+}

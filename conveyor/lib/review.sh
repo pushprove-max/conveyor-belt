@@ -421,12 +421,11 @@ A finding marked `[E<n>]` is the same finding back after its fix: the reviewer f
 the code for it. The findings that fix round was told to fix are listed before the findings, each with your earlier
 reason for accepting it when you gave one that could be read (when there are any). A finding you accepted before is declined now only when the fix made it
 untrue: the reason starts with `other` and says what the fix changed (`fixed` is for a defect already fixed on main). Otherwise judge it as the code stands.
-A finding already declined (listed before the findings, each with the kind of its decline, when there are any) and
-raised again with nothing new is declined as a repeat, with the earlier kind, only when that kind is `claim wrong`,
-`cannot happen` or `fixed`, or the defect is fixed on main. When the earlier kind is `rare case`, `not this change`,
-`other` or none, judge the finding again from the code, as a new finding.
-Answer OUTSIDE for a real finding of any level that the change did not cause, also when its proof needs an uncommon
-input or timing.
+A finding already declined or ruled OUTSIDE on a card of this issue (listed before the findings, with the kind of its decline or its OUTSIDE ruling) and raised again with nothing new is a repeat:
+the same claim about the same code, with only a value in its proof different (a width, a count, a name, a time). A repeat is declined, with the earlier kind, when that kind is `claim wrong`, `cannot happen` or `fixed`, or the defect is fixed on main.
+A repeat of an OUTSIDE ruling, or of a decline of the kind `not this change`, gets its earlier ruling again: answer OUTSIDE (or DECLINE) as before, and the reason starts with the earlier kind and names the earlier finding by its file:line.
+When the earlier kind is `rare case`, `other` or none, or a fix round of this card changed the lines the finding names since that ruling (the lines marked `the code before the last fix round` or `the code at the first ruling` show the earlier code), judge the finding from the code, as a new finding.
+Answer OUTSIDE for a real finding of any level that the change did not cause, also when its proof needs an uncommon input or timing.
 A finding marked `always accepted` is of a kind the project always accepts: answer ACCEPT for it. It is accepted
 whatever you answer, so its line always ends with its `Cost to every card:`.
 '"$HARMRULE"'
@@ -588,11 +587,11 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
 # The judge's message from its findings on (judged()): the whole staged change when it is under JUDGEDIFFLINES lines, then
 # each finding of <worktree>.judge.marks with the lines it cites (excerpts(), as the Board shows them): the judge reads
 # the rest of the diff (its file) and the code by its tools. A finding with no lines that can be read has none beside it.
-# Each finding's lines come with JUDGECONTEXT lines before and after them, and, when <the tree before the last fix round>
-# is given, the lines that fix deleted too, as the Board shows them. The replay (replay.sh) writes the marks file it reads.
+# Each finding's lines come with JUDGECONTEXT lines before and after them, and, with <the tree before the last fix round>, the lines that fix deleted too,
+# as the Board shows them; with <the tree of the card's first ruling> (card()'s ftree), the lines as they were then, when they differ. The replay (replay.sh) writes the marks file it reads.
 JUDGEDIFFLINES=400 JUDGECONTEXT=3
-judgefindings() { # <worktree> [<the tree before the last fix round>]
-  local d m f ex
+judgefindings() { # <worktree> [<the tree before the last fix round> [<the tree of the card's first ruling>]]
+  local d m f ex ex2
   d=$(git -C "$1" diff --cached 2>/dev/null) || d=''
   [ -z "$d" ] || [ "$(wc -l <<<"$d")" -ge "$JUDGEDIFFLINES" ] || printf '# The staged change (git diff --cached)\n%s\n\n' "$d"
   echo '# The findings'
@@ -600,7 +599,8 @@ judgefindings() { # <worktree> [<the tree before the last fix round>]
     jq -r '"F\(.n) [\({inside: "inside the diff", outside: "outside the diff", none: "no place"}[.place])\(if .kind then "; always accepted: \(.kind)" else "" end)] \(.finding)"' <<<"$m"
     f=$(jq -r .finding <<<"$m")
     ex=$(excerpts "$1" "${2:-}" <(printf '%s\n' "$f") "$JUDGECONTEXT") || ex='[]'
-    jq -r '.[] | .from as $f | "  Lines at \(.at) (\({new: "the staged change", old: "the code before the change", fix: "the code before the last fix round"}[.side])):", (.lines | to_entries[] | "    \($f + .key): \(.value)")' <<<"$ex"
+    [ -z "${3:-}" ] || [ "$3" = "${2:-}" ] || { ex2=$(excerpts "$1" "$3" <(printf '%s\n' "$f") "$JUDGECONTEXT") && ex2=$(jq -c --argjson e "$ex2" '. as $x | . + [$e[] | select(.side == "fix") | select(. as $y | any($x[]; .side == "fix" and .lines == $y.lines) | not) | .side = "ruling"]' <<<"$ex") && ex=$ex2; } || :
+    jq -r '.[] | .from as $f | "  Lines at \(.at) (\({new: "the staged change", old: "the code before the change", fix: "the code before the last fix round", ruling: "the code at the first ruling"}[.side])):", (.lines | to_entries[] | "    \($f + .key): \(.value)")' <<<"$ex"
   done < <(jq -c '.[]' "$1.judge.marks")
 }
 # The findings the last fix round of the card was told to fix, each with its id and the reason the judge gave when it
@@ -686,8 +686,8 @@ healsnone() { # <card> <worktree>
 }
 # The review beside the worktree, judged: prints the review's fields, with judge (above) when the judge was asked.
 # It never fails: whatever goes wrong, the review stands as the reviewer wrote it.
-judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue json> [<the tree before the last fix round>]]
-  local wt=$3 ja before readat j why f back fu area stood=''
+judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue json> [<the tree before the last fix round> [<the tree of the card's first ruling>]]]
+  local wt=$3 ja before outside readat j why f back fu area stood=''
   ja=$(judgeon) && [ "$(verdict "$wt.review")" != none ] && grep -Evq "$NOTFINDING" "$wt.review" \
     || { healsnone "$1" "$wt" || echo "conveyor: cannot take the kinds an earlier judge gave the findings of $1 away" >&2; printf '%s\n' "$5"; return 0; }
   # fu: the card is a review follow-up (its issue's "Follow-up depth: N", N 1 or more); area: its issue's area label,
@@ -698,11 +698,11 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue
   # has no kind): one raised again with nothing new is declined again only after a kind JUDGE allows. readat: its time.
   readat=$(clock); before=$(stdb ask lines declined 2>/dev/null | jq -rR --arg c "$1" --argjson n "$2" --arg repo "$REPO" 'fromjson? | objects | select(.card == $c or (.issue == $n and $n != 0 and .repo == $repo))
     | "- \(.finding) (declined: \(.why)) [kind: \(.kind // "none")]"' 2>/dev/null | awk '!seen[$0]++' | tail -n 50)
-  back=$(fixedbefore "$wt"); [ -z "$back" ] || back+=$'\n\n'
+  back=$(fixedbefore "$wt"); [ -z "$back" ] || back+=$'\n\n'; outside=$(outsideruled "$1" "$2"); [ -z "$outside" ] || outside+=$'\n\n'
   if ! { judgemarks "$wt" "$ja" > "$wt.judge.marks" && jq -e 'length > 0' "$wt.judge.marks" > /dev/null; } 2>/dev/null; then
     j=$(jq -cn '{failed: "the findings could not be read for the judge"}'); stood=1
   elif [ -z "$before" ] || before="# Findings already declined on the cards of this issue"$'\n'"$before"$'\n\n'
-    ! j=$(judgecall "$wt" "$(judgeprompt)" "$4"$'\n\n'"$back$before$(judgefindings "$wt" "${7:-}")"); then stood=1
+    ! j=$(judgecall "$wt" "$(judgeprompt)" "$4"$'\n\n'"$back$before$outside$(judgefindings "$wt" "${7:-}" "${8:-}")"); then stood=1
   # What it said of each finding: its one decision line that parses whole, an accepted one with its reason and cost,
   # else the finding is accepted (a duplicate id, a line that cannot be read, no line). A line for no finding of the
   # review is dropped. A line's bullet or list number (`- `, `1. `, `1) `) is not read. None read at all fails the answer. An always-accepted kind beats a decline and an OUTSIDE.

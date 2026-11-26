@@ -97,6 +97,25 @@ turncards() { if [ -n "${ASKED_K[lines cards ]:-}" ]; then printf '%s' "${ASKED_
 # files themselves even when its folder is the state folder: the helper would write the database there.
 recs() { if [ "$READ" = "$STATE" ] && [ -z "${DRYPICK:-}" ]; then stdb ask lines cards; else cat -- "$READ"; fi; }
 olds() { if [ "$READ_OLD" = "$RETRIED" ] && [ -z "${DRYPICK:-}" ]; then stdb ask lines retried; else cat -- "$READ_OLD"; fi; }
+# The findings the judge ruled OUTSIDE on the cards of an issue (and on a card), from their review lines: the
+# judge.outside ones, and the judge.selfheals ones marked outside (an OUTSIDE ruling whose effect sends it to the
+# self-heals list), the last 50, each with its effect and reason, as the judge is given them (judged(): a repeat of one
+# gets its ruling again). OUTSIDEDEF is the jq function that reads them from a review line (outlines); the replay reads them with it too.
+# It prints no closing blank line, as a command substitution drops it: judged() adds it.
+OUTSIDEDEF='def outlines: (.judge.outside[]?, (.judge.selfheals[]? | select(.outside == true))) | objects | select(.finding != null)
+  | "- \(.finding) (ruled OUTSIDE: \(if .effect then "\(.effect): " else "" end)\(.reason))";'
+outsideruled() { # <card> <issue>
+  local l
+  l=$({ recs; olds; } 2>/dev/null | jq -rR --arg c "$1" --argjson n "$2" --arg repo "$REPO" "$OUTSIDEDEF"'fromjson? | objects | select(.step == "review" and (.card == $c or (.issue == $n and $n != 0 and .repo == $repo)))
+    | outlines' 2>/dev/null | awk '!seen[$0]++' | tail -n 50)
+  [ -z "$l" ] || printf '# Findings ruled OUTSIDE on the cards of this issue\n%s' "$l"
+}
+# Whether a judged review's fields (judged()) hold a ruling: a finding the judge declined or ruled OUTSIDE (judge.declined,
+# judge.outside, or judge.selfheals marked outside). card() keeps the tree the first such review read (ftree), so the judge of a later
+# review can tell lines a fix round changed after a ruling (it may take also one from before a later ruling: it then rules from the code).
+judgeruled() { # <the review's fields>
+  jq -e '.judge | objects | ((.declined // []) + (.outside // []) + [(.selfheals // [])[] | select(.outside == true)]) | length > 0' <<<"$1" >/dev/null 2>&1
+}
 # What a reader needs of each line of a records file of whole lines (a copy: READ, READ_OLD, or what recs or olds
 # gave), written to <to>: the output of <filter> (jq -R: it is given each line's text) for each line, in the file's
 # order, from a running summary of the file kept beside the history (<kept>), as snaprows keeps the rows: a line

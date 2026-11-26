@@ -280,7 +280,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local grown='' # grown: the judge was asked about the size of its change (growcheck(), lib/slices.sh)
   local rline='' ended='{}' stop='' finend='{}' earlyend='' fe # rline, ended, stop: a review's line before it is written, and why the loop ended (loopstop()); finend, earlyend, fe: why the loop of a port's kept review ended, and the stop the filed line carries
   local lfix='' cfix='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh); cfix: the BLOCKED lines its persisted-contract fix sessions were given, one a line (contractgate(), lib/contract.sh)
-  local fixtree='' rtree='' # fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts()); rtree: the one the last review read, which a reused review reads again
+  local fixtree='' rtree='' ftree='' # ftree: the tree the first review read whose judge ruled a finding (judgeruled()), kept for the card (a later ruling does not replace it, or it would hide a fix round made before that one), which the judge is given beside fixtree, to tell a finding on lines a fix round changed after a ruling (judgefindings()); fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts()); rtree: the one the last review read, which a reused review reads again
   local after rland='' rlrev='' rlfind='' # after: what follows a review (afterreview()); rland: the card lands its kept patch on its kept review, a retry by review-land's (resumeplan()); rlrev: that kept review; rlfind: the finding its block names
   local priv privfix=0 p1 p1fix='' # priv: a last-review finding that is a privacy hit in the card's own change (privown()); privfix: the fix rounds given for such hits (PRIVFIXES at most); p1: the P1 finding that gets one fix round, p1fix: that round was given
   local fixed=0 # fixed: the fix sessions this card has run, review fixes and test fixes; the second and every later one runs one effort level up (session1())
@@ -571,7 +571,7 @@ cardreview() {
         && t=$(reviewed "$wt" "$sprompt$more" "$ins"); rc=$?; rm -f "$wt.port"
       [ $rc = 0 ] || { block "$c" "$n" "$wt" "review $pass: $t"; return; }
       # The judge (judged()): a finding it declines is no finding from here on, and a review left with none is a GO; the issue tells it whether the card is a follow-up, and its area. While it runs, <worktree>.reviewed holds the review's fields (its usage; began() drops it), as a bench reads its cost (SWE_LIVES).
-      redbrief "$c" "$n" "$br"; printf '%s\n' "$t" > "$wt.reviewed"; t=$(judged "$c" "$n" "$wt" "$sprompt" "$t" "$issue" "$fixtree")
+      redbrief "$c" "$n" "$br"; printf '%s\n' "$t" > "$wt.reviewed"; t=$(judged "$c" "$n" "$wt" "$sprompt" "$t" "$issue" "$fixtree" "${ftree:-}"); [ -n "${ftree:-}" ] || ! judgeruled "$t" || ftree=$(git -C "$wt" write-tree)
       # The P3 findings it leaves, with the rule P3 off, are listed only (minor()).
       minor "$wt"
     fi
