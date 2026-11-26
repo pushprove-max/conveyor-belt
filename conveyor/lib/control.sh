@@ -517,6 +517,8 @@ pxon() {
 # Codex is read again at the next read, due or not, so a model only the proxy serves is not kept for a role on the
 # subscription until CLI_TTL.
 # What it printed is in HOST_R too ("" when it failed), for a caller that keeps it in its own shell (seatready).
+# keepnull($o): the report to write, with the clis.claude null that $o, the old one, holds for a Claude Code off PATH now.
+KEEPNULL='def keepnull($o): if has("claude") or ([$o.clis | objects | select(has("claude")) | .claude] != [null]) then . else .claude = null end; '
 HOST_K=() # the key, then CLIS read as an object, when it was read (.at, whole seconds), the report and its px
 hostclis() { # [fresh | due | <cli>]
   local c old r found=() one=${1:-} t='' a=1 k='' x px='' l ci='' tmp
@@ -553,14 +555,16 @@ hostclis() { # [fresh | due | <cli>]
   # seen: every CLI a report of this host has listed, kept when one goes (seatwait()), with the CLIs the old report's
   # clis has, before one is taken out of it (a report written before seen was has only them). A CLI that clis has as
   # null there is not counted: engines up to v1.9 wrote null for a CLI not installed, Claude Code too (seatwait() counts
-  # that one for a step's wait only, as it cannot tell it from an installed one with no list). One CLI read that is not
-  # installed is taken out of clis, not written there as installed with no list.
+  # that one for its reads again only, as it cannot tell it from an installed one with no list). One CLI read that is not
+  # installed is taken out of clis, not written there as installed with no list, but for that clis.claude null: a read
+  # made while Claude Code is off PATH keeps it (keepnull), or that read (the due one of seatready, `conveyor.sh clis`)
+  # would take away the only record seatwait() has of it. It is in the file only; the report printed has no such CLI.
   # The new report is written to a file of its own (mktemp), then moved over CLIS: the cards' subshells share $$, so a
   # name made from it was one file for two cards, and one card's mv could make CLIS the file the other had just emptied.
   # A report jq could not write is not moved.
   if tmp=$(mktemp "$CLIS.XXXXXX" 2>/dev/null); then
-    if [ "$one" = fresh ]; then jq -cn --argjson r "$r" --argjson o "$old" --arg px "$px" '{at: (now | floor), clis: $r, px: ($px == "true"), seen: ([($o.seen | arrays | .[] | strings), ($o.clis | objects | with_entries(select(.value != null)) | keys[]), ($r | keys[])] | unique)}' > "$tmp"
-    else jq -c --arg c "$one" --argjson r "$r" --arg px "$px" '.seen = ([(.seen | arrays | .[] | strings), (.clis | objects | with_entries(select(.value != null)) | keys[]), ($r | keys[])] | unique) | if $r | has($c) then .clis[$c] = $r[$c] else del(.clis[$c]) end | if $px == "" then . else .px = ($px == "true") end' <<<"$old" > "$tmp"; fi \
+    if [ "$one" = fresh ]; then jq -cn --argjson r "$r" --argjson o "$old" --arg px "$px" "$KEEPNULL"'{at: (now | floor), clis: ($r | keepnull($o)), px: ($px == "true"), seen: ([($o.seen | arrays | .[] | strings), ($o.clis | objects | with_entries(select(.value != null)) | keys[]), ($r | keys[])] | unique)}' > "$tmp"
+    else jq -c --arg c "$one" --argjson r "$r" --arg px "$px" "$KEEPNULL"'. as $o | .seen = ([(.seen | arrays | .[] | strings), (.clis | objects | with_entries(select(.value != null)) | keys[]), ($r | keys[])] | unique) | ($r | keepnull($o)) as $k | if $k | has($c) then .clis[$c] = $k[$c] else del(.clis[$c]) end | if $px == "" then . else .px = ($px == "true") end' <<<"$old" > "$tmp"; fi \
       && mv -f "$tmp" "$CLIS" || rm -f "$tmp"
   fi
   HOST_R=$r; printf '%s\n' "$r"
@@ -586,19 +590,24 @@ seatready() { # <builder|reviewer|judge> <its seat>
 # and action) and <worktree>.idle stands, so the machine's count leaves it out (the card cap counts it), until the loop takes
 # that mark away in a turn once the host's report lists the CLI again, with no look at the free slots (cliwake(), lib/run.sh); the step then starts, or waits again
 # when the CLI is gone again. Outside the loop (a lane's preview review), and for a CLI that no report of this host
-# has listed, it fails with seatready's reason.
+# has listed, it fails with seatready's reason. A clis.claude null with no claude on seen is no proof Claude Code was
+# ever installed (an engine up to v1.9 wrote it for a `control` request that named claude on a host without it), so it
+# gets the reads again but not the wait: on a host that never had Claude Code, no card waits for it with no end.
 SEAT_TRIES=4 SEAT_PAUSE=30
 seatwait() { # <role> <its seat> <worktree> <step>
-  local why a i=0 at
+  local why a i=0 at w
   why=$(seatready "$1" "$2") && return 0
   a=$(jq -r '.agent | strings' <<<"$2" 2>/dev/null)
-  [ -n "$a" ] && jq -e --arg a "$a" '[(.seen | arrays | .[]), (.clis | objects | with_entries(select(.value != null or .key == "claude")) | keys[])] | index($a)' "$CLIS" >/dev/null 2>&1 || { printf '%s\n' "$why"; return 1; }
+  # w: seen, a report of this host listed the CLI; null, only the clis.claude null of an engine before seen.
+  [ -n "$a" ] && w=$(jq -r --arg a "$a" 'if [(.seen | arrays | .[]), (.clis | objects | with_entries(select(.value != null)) | keys[])] | index($a) then "seen"
+      elif $a == "claude" and ([.clis | objects | has("claude")] == [true]) then "null" else empty end' "$CLIS" 2>/dev/null) && [ -n "$w" ] \
+    || { printf '%s\n' "$why"; return 1; }
   at=$(date -u +%FT%TZ)
   while [ "$i" -lt "$SEAT_TRIES" ]; do
     seatlive "$1" "$3" "$4" "$a" "$at"; i=$((i + 1)); sleep "$SEAT_PAUSE"; hostclis fresh >/dev/null
     why=$(seatready "$1" "$2") && { rm -f "$3.live"; return 0; }
   done
-  [ -n "${LOOPCARD:-}" ] || { rm -f "$3.live"; printf '%s\n' "$why"; return 1; }
+  [ -n "${LOOPCARD:-}" ] && [ "$w" = seen ] || { rm -f "$3.live"; printf '%s\n' "$why"; return 1; }
   until [ ! -e "$3.idle" ] && why=$(seatready "$1" "$2"); do
     seatlive "$1" "$3" "$4" "$a" "$at"; : > "$3.idle"
     while [ -e "$3.idle" ]; do sleep "$LIVE"; seatlive "$1" "$3" "$4" "$a" "$at"; done
