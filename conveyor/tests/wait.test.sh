@@ -90,3 +90,26 @@ t_waittick() {
   grep -qF 'last state: the condition was still running' <<<"$out" || fail "the ceiling does not say the condition was still running when the clock moved on before the read: $out"
   wait_until "! kill -0 $(cat "$d/tick") 2>/dev/null" || fail "a condition blocked when the clock moved on before the read was left running"
 }
+# Bugs: cases_side starts every case at once, so a file of many cases overloads the machine; it runs them one after
+# another, so a file takes the sum of its cases; it runs a case twice or drops one; it waits for a background job the
+# caller started before it, or passes when a case failed.
+# Each of the 20 cases records how many case shells are alive as it starts, then stays alive a short while.
+side_case() {
+  touch "$D/alive/$BASHPID"; ls "$D/alive" | wc -l >> "$D/counts"; echo "$1" >> "$D/ran"
+  sleep 0.2 # sleep: the case stays alive a while, so cases started side by side overlap
+  rm "$D/alive/$BASHPID"; [ "$1" != f ]
+}
+t_casesside() {
+  local D=$T/$CASE job rc n; mkdir -p "$D/alive"
+  # cases_side runs <prefix><case>, so each case is a function side_<case> that runs side_case with its own name.
+  for n in $(seq 1 19) f; do eval "side_$n() { side_case $n; }"; done
+  sleep 30 & job=$! # sleep: a background job of the caller's own, which cases_side must not wait for
+  cases_side side_ $(seq 1 19) f; rc=$?
+  kill -0 "$job" 2>/dev/null || fail "cases_side waited for a background job the caller started before it"
+  kill "$job"
+  [ "$rc" = 1 ] || fail "cases_side side_ 1..19 f returned $rc, not 1, when case f failed"
+  [ "$(sort -n "$D/counts" | tail -1)" -le 8 ] || fail "cases_side side_ 1..19 f had more than 8 cases alive: $(sort -n "$D/counts" | tr '\n' ' ')"
+  [ "$(sort -n "$D/counts" | tail -1)" -ge 2 ] || fail "cases_side side_ 1..19 f ran its cases one after another: $(sort -n "$D/counts" | tr '\n' ' ')"
+  [ "$(sort "$D/ran" | tr '\n' ' ')" = "$(printf '%s\n' $(seq 1 19) f | sort | tr '\n' ' ')" ] \
+    || fail "cases_side side_ 1..19 f did not run each case one time: $(sort "$D/ran" | tr '\n' ' ')"
+}

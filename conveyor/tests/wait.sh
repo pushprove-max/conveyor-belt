@@ -60,3 +60,18 @@ under() {
   for k in $(pgrep -P "$1"); do under "$k" "$2" && return 0; done
   return 1
 }
+# cases_side <prefix> <case>...: runs <prefix><case> for each case in a background shell, at most 8 at a time,
+# starting the next when one ends, then waits for the rest. Returns 1 when a case failed. Only its own shells are
+# counted and waited for: a background job the caller started before is left alone.
+cases_side() {
+  local prefix=$1 c p ended rc=0; local -a pids=() left; shift
+  for c; do
+    if [ "${#pids[@]}" -ge 8 ]; then
+      wait -n -p ended "${pids[@]}" || rc=1
+      left=(); for p in "${pids[@]}"; do [ "$p" = "$ended" ] || left+=("$p"); done; pids=("${left[@]}")
+    fi
+    "$prefix$c" & pids+=("$!")
+  done
+  for p in "${pids[@]}"; do wait "$p" || rc=1; done
+  return "$rc"
+}
