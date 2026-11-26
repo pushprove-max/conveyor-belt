@@ -31,6 +31,8 @@ testcardact() { # <hold | release | shut> <card id>...
   if [ "$act" = shut ]; then
     bad=$(stdb ask lines cards | jq -rs --argjson ids "$ids" 'map(select(.step == "split" and any((.split.cards // [])[]; IN($ids[])))) | last | .issue // empty') \
       || { exec {lock}>&-; echo "conveyor: the card records could not be read; nothing changed" >&2; return 1; }
+    # A part that splitcards() (lib/slices.sh) saved before splitcheck() wrote the split line: its entry names the issue.
+    [ -n "$bad" ] || bad=$(jq -r --argjson ids "$ids" 'first(.[] | select((.id | IN($ids[])) and ((.label // "") | startswith("Split part of #"))) | .parent // empty) // empty' <<<"$rec")
     [ -z "$bad" ] || { exec {lock}>&-; echo "conveyor: $1 is a part of the split of issue #$bad, which waits for it; hold it with \`control hold $1\`, or close #$bad by hand first; nothing changed" >&2; return 2; }
   fi
   jq -c --argjson ids "$ids" --arg a "$act" '{cards: (if $a == "shut" then map(select(((.id | IN($ids[])) and .card == null) | not))

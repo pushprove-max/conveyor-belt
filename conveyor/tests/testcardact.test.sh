@@ -151,3 +151,17 @@ t_tcshutheld() {
   [[ $(jq -r '.seen' "$ST/selfheals.jsonl") =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] \
     || fail "shut $TKF freed its self-heals entry with no seen time: $(cat "$ST/selfheals.jsonl")"
 }
+
+# Bug it catches: splitcards() saves each part before splitcheck() writes the split line, and shut read only that line,
+# so a part shut in that interval was taken off the record and umbrellas() waited for it until a person acted. The
+# state of that interval is made by the real splitcards() with no split line written; shut must refuse the part.
+t_tcshutsplitting() {
+  nisetup splitissues; local a out
+  fx_in 'splitcards c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" '"'"'[{"title":"First part","doneWhen":["a"],"covers":[1],"dependsOn":[]},{"title":"Second part","doneWhen":["b"],"covers":[2],"dependsOn":[1]}]'"'"' 1'
+  a=$(jq -r '.cards[0].id' "$(nicards)")
+  [ "$RC" = 0 ] && [ "$(jq '.cards | length' "$(nicards)")" = 2 ] && ! grep -q '"step":"split"' "$ST/cards.jsonl" 2>/dev/null \
+    || fail "splitcards did not leave two parts and no split line (exit $RC): $(cat "$T/$CASE/run.out") $(cat "$(nicards)")"
+  if out=$(loop shut "$a" 2>&1); then fail "shut $a, a part of issue 7 saved before its split line, was accepted: $out"; fi
+  [[ $out == *"$a is a part of the split of issue #7"*"nothing changed" ]] && [ "$(jq '.cards | length' "$(nicards)")" = 2 ] \
+    || fail "shut $a, a part of issue 7 saved before its split line, did not refuse naming #7 and change nothing: $out $(cat "$(nicards)")"
+}
