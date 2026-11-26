@@ -360,6 +360,24 @@ while its entry is on the list is of the card that saw it: the next batch card o
 closes. An entry that a shut batch card gave back counts its days from that day. An entry with no date of its own is dated
 when Conveyor first checks the list, so it stays for the whole number of days. Conveyor checks the list at each turn of its loop.
 
+## Dollar limits
+
+The rules `cardusd` and `issueusd` set the most a card can spend, and the most all the cards of one issue can spend
+together. Each is a whole number of dollars from 1 to 100000, or `off`. At first `cardusd` is 10 and `issueusd` is 25.
+`conveyor.sh control rules cardusd=<dollars|off>` and `conveyor.sh control rules issueusd=<dollars|off>` set them.
+
+Before each build, fix or rebase session, Conveyor adds up the cost of the steps in the card records, with the calls of
+the judge in their reviews, at the list price of their models (the prices of [The Board](board.md#rules) and the pack's
+`prices`). The card counts its own steps. The
+issue counts the steps of all its cards, also the cards that `conveyor.sh retry` took out of the records. A card of no
+issue has no issue limit.
+
+At a limit, Conveyor does not start the session. It blocks the card and keeps its work as a patch. The issue limit is
+checked first. The reason names the limit and what was spent, for example `stopped at the dollar limit of the card: it
+spent $12 of $10`. A step that runs is never ended, so a card can pass a limit by one step. To let the card go on,
+raise the limit or set it to `off`, and give the card back with `conveyor.sh retry <issue>`. When a step has no price, the total is
+not known and the limits are not checked: the session starts, and the log of the loop says so.
+
 ## Split large issues
 
 The rule **Split large issues** on the Rules tab sets what Conveyor does with a large issue before it builds it. It

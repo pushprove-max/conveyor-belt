@@ -21,6 +21,8 @@
     "releaseissues": true,
     "splitissues": true,
     "healsdays": 30,
+    "cardusd": 10,
+    "issueusd": 25,
     "failfast": true,
     "teststeponly": false,
     "pushbatch": false,

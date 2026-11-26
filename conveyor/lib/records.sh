@@ -224,6 +224,54 @@ record() { # <card> <issue> <step> <result> [extra json]
   [ "$3" = blocked ] || [ ! -d "$CARDS/$1" ] || block "$1" "$2" "$CARDS/$1" "conveyor: the engine could not write the $3 line of this card to the card records"
   exit 1
 }
+# The dollars of steps at list price (dashboard_limit.py work, the Board's price table with the pack's prices over it):
+# steps [{step, model, usage, tokens, ...}] as a JSON array on stdin; null when one of them has no price, or the price
+# could not be read. spent() and replayusd() (lib/replay.sh) price with it.
+stepsusd() {
+  local pp u; packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
+  u=$(jq -c --argjson p "$pp" '{steps: ., live: null, prices: $p}' 2>/dev/null | python3 "$HERE/../.claude/scripts/dashboard_limit.py" work 2>/dev/null \
+    | jq -c 'if .state == "known" then .usd else null end' 2>/dev/null) || u=''
+  printf '%s\n' "${u:-null}"
+}
+# What a card and the cards of its issue spent: {card, issue}, each the dollars at list price of the sessions and reviews
+# their step lines hold (stepsusd), a failed one a blocked line keeps (spent) too, and each judge call a review line (or
+# that failed session) holds in its judge, a step of its own as the Board's trial cost prices it (swe_cost(),
+# bench/swe.sh): a judge with no sec (judgecall() writes it once a call ran) ran no call and costs nothing. The issue's
+# are from the card records and the retried lines of the issue (this repository's). A total is null when one of its steps
+# has no price or its lines could not be read, and the issue's is null for issue 0, which has no cards beside the card's
+# own: no limit is checked on a null total (usdstop(), below). Both are rounded to the cent.
+SPENTSTEPS='[.[] | objects | (if .step | IN("seats", "build", "review", "fix", "rebase") then . elif .step == "blocked" and (.spent | type) == "object" then .spent else empty end)
+  | ., (.judge | objects | select(has("sec")) | {step: "judge", model, usage, tokens})]'
+spent() { # <card> <issue>
+  local c i='' l
+  c=$(stdb ask card "$1" 2>/dev/null) && c=$(jq -cs "$SPENTSTEPS" <<<"$c" 2>/dev/null | stepsusd) || c=null
+  if [[ ${2:-0} =~ ^[1-9][0-9]*$ ]]; then
+    l=$({ stdb ask issue cards "$2" && stdb ask issue retried "$2"; } 2>/dev/null) && i=$(jq -cs --arg repo "$REPO" "map(objects | select(.repo == \$repo)) | $SPENTSTEPS" <<<"$l" 2>/dev/null | stepsusd)
+  fi
+  jq -cn --argjson c "$c" --argjson i "${i:-null}" 'def cent: if . == null then null else (. * 100 | round) / 100 end; {card: ($c | cent), issue: ($i | cent)}'
+}
+# The dollar limits of a card and of its issue: the rules cardusd and issueusd of the control record (whole dollars,
+# 0 for off), which this is the one place to read. A session (session(), lib/session.sh) whose card (named by its
+# worktree) or issue (SEATCARD, set by card()) has spent the limit or more (spent(): the step lines at list price) does
+# not start: this prints why, the issue's limit first, and fails, and the caller blocks the card, which keeps its patch. A
+# running session is never ended, so a card can pass a limit by one step. A total with no price (a step whose model has
+# none) is not checked: the session starts and the loop log says so. Issue 0 has no issue limit.
+usdstop() { # <worktree>
+  local c=${1##*/} n=${SEATCARD:-0} cl il s
+  [[ $n =~ ^[0-9]+$ ]] || n=0
+  ctlread 2>/dev/null && read -r cl il <<<"$(jq -r '[.rules.cardusd // 0, .rules.issueusd // 0] | @tsv' <<<"$CTL_V" 2>/dev/null)" && [[ $cl =~ ^[0-9]+$ && $il =~ ^[0-9]+$ ]] || return 0
+  [ "$n" != 0 ] || il=0
+  [ "$cl" != 0 ] || [ "$il" != 0 ] || return 0
+  s=$(spent "$c" "$n") || return 0
+  jq -er --argjson cl "$cl" --argjson il "$il" --argjson n "$n" '
+    def usd: (. * 100 | round) as $c | "$\($c / 100 | floor)" + (if $c % 100 == 0 then "" else ".\($c % 100 | if . < 10 then "0\(.)" else "\(.)" end)" end);
+    if $il > 0 and .issue != null and .issue >= $il then "stopped at the dollar limit of issue #\($n): its cards spent \(.issue | usd) of $\($il)"
+    elif $cl > 0 and .card != null and .card >= $cl then "stopped at the dollar limit of the card: it spent \(.card | usd) of $\($cl)"
+    else empty end' <<<"$s" 2>/dev/null && return 1
+  jq -e --argjson cl "$cl" --argjson il "$il" '($cl > 0 and .card == null) or ($il > 0 and .issue == null)' <<<"$s" >/dev/null 2>&1 \
+    && echo "conveyor: card $c: its dollar limits were not checked: the cost of one of its steps, or of its issue's, is not known" >&2
+  return 0
+}
 
 # The measurements (README.md). The newest weekly limit reading's percent, from the readings file
 # only (nothing is asked here): nothing when none is younger than LIMIT_OLD. Each is the account's in use (ACCT): a

@@ -85,8 +85,9 @@ The card builds in a fresh git worktree. Claude build, fix and review sessions s
 A Claude build or fix session cannot use the tools that schedule work, send messages or start other agents:
 `ScheduleWakeup`, `CronCreate`, `CronDelete`, `CronList`, `Monitor`, `RemoteTrigger`, `PushNotification`,
 `SendMessage`, `ListAgents`, `Agent` and the tool that runs a script of steps. It can still use `WebFetch` and
-`WebSearch`. There is no limit on turns or on cost. The session ends at its time limit, or sooner when it makes no
-progress for the pack's `tunables.stuck`.
+`WebSearch`. There is no limit on turns. The session ends at its time limit, or sooner when it makes no
+progress for the pack's `tunables.stuck`. A card and its issue each have a limit on cost
+([Dollar limits](configuration.md#dollar-limits)).
 
 When ast-grep is installed ([Setup](setup.md)), a build or fix session can run `ast-grep` by its name, with Claude
 Code, Codex or OpenCode. The card rules tell it to use `ast-grep run` to find definitions, callers and code patterns,

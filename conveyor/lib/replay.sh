@@ -88,12 +88,10 @@ replaywt() { # <case json> <folder>
   git -C "$MAIN" -c core.hooksPath=/dev/null worktree add -q --detach "$2/wt" "$base" >/dev/null 2>&1 \
     && replaypatch "$sha" "$kept" | git -C "$2/wt" apply --index 2>/dev/null
 }
-# The dollars of judge calls at list price (dashboard_limit.py work, the Board's price table with the pack's prices
-# over it): steps [{model, usage, tokens}]; null when one of them has no price.
+# The dollars of judge calls at list price (stepsusd(), lib/records.sh): steps [{model, usage, tokens}]; null when one
+# of them has no price.
 replayusd() { # < <steps json array>
-  local pp; packget prices pp 2>/dev/null && [ -n "$pp" ] || pp='{}'
-  jq -c --argjson p "$pp" '{steps: map({step: "judge", model, usage, tokens}), live: null, prices: $p}' \
-    | python3 "$HERE/../.claude/scripts/dashboard_limit.py" work 2>/dev/null | jq -c 'if .state == "known" then .usd else null end' 2>/dev/null || echo null
+  jq -c 'map({step: "judge", model, usage, tokens})' | stepsusd
 }
 # The replay. With --estimate it calls no model: it prints {estimate: true, model, effort, reviews, skipped, findings,
 # usd: the recorded judges' token use priced at <model>, recordedUsd}. Else it calls the judge once a case and appends

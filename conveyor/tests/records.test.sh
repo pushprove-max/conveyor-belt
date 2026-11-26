@@ -464,3 +464,87 @@ EOF
     || fail "run 1 did not build the retried #11 and #7 beside its one new card #12: $(st '"\(.issue) \(.step)"' | tr '\n' ,)"
   [ -z "$(st 'select(.issue == 13) | .step')" ] || fail "run 1 started the new #13 after its one new card #12: $(st 'select(.issue == 13) | .step' | tr '\n' ,)"
 }
+
+# The dollar limits: the rules cardusd and issueusd, the check before each build, fix or rebase session (usdstop()
+# and the totals it reads, spent(), lib/records.sh; session(), lib/session.sh, calls it). Each case runs the engine as the loop loads it
+# (fx_in), with session() and block() as card() runs them, on step lines that cost whole dollars (usdline).
+usdline() { # <card> <issue> <step> <dollars> [<records file>]: a step line, appended to the card records, that cost <dollars> at $20 per million output tokens; USDMODEL and USDREPO name another model or repository
+  jq -cn --arg c "$1" --argjson n "$2" --arg s "$3" --argjson o "$(jq -n --argjson d "$4" '$d * 50000 | round')" --arg repo "${USDREPO:-${R##*/}}" --arg m "${USDMODEL:-claude-opus-5-5}" \
+    '{card:$c,issue:$n,step:$s,time:"2026-11-01T00:00:00Z",tokens:{claude:$o,codex:0},result:"ok",sha:"",reason:"",repo:$repo,model:$m,usage:{input:0,write:0,write1h:0,read:0,output:$o}}' >> "${5:-$ST/cards.jsonl}"
+}
+usdcard() { # <issue> <card>: the card's worktree on main with a change staged, and its picked line
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  git -C "$R" worktree add -q --detach "$CARDS/$2" refs/heads/main && (cd "$CARDS/$2" && echo two >> a.txt) && git -C "$CARDS/$2" add -A \
+    || fail "the change of card $2 could not be staged"
+  landed "$1" | jq -c --arg c "$2" '.card = $c | .step = "picked"' >> "$ST/cards.jsonl"
+}
+usdsession() { # <issue> <card> <build|fix>: session() for the card (SEATCARD its issue), then block() when it fails; run.out ends with "step: <exit>"
+  # shellcheck disable=SC2034 # read by the commands fx_in runs
+  USDN=$1 USDC=$2 USDS=$3
+  fx_in 'SEATCARD=$USDN; w=$CARDS/$USDC; cd "$R" && began "$USDC" "$USDN" "$USDS" || exit 1
+    t=$(session "$w" "Do it." "$USDS"); rc=$?; [ $rc = 0 ] || block "$USDC" "$USDN" "$w" "$USDS: $t"; echo "step: $rc"'
+}
+# Bugs: a card whose steps spent $6 starts its next fix session at cardusd 5, or is blocked with no patch kept, or with a
+# reason that does not name what it spent and the limit, or counts the steps of another card of its issue as its own;
+# both rules off, or a step with no price, stops the session (a total that is not known is no stop), or the unpriced step
+# is passed with no word in the loop's log.
+t_usdcard() {
+  setup '[]'; echo "echo ran >> '$STUB/ran'" > "$STUB/build"
+  loop control rules cardusd=5 issueusd=off >/dev/null || fail "the rules could not be set"
+  usdcard 7 c7-7; usdline c7-7 7 build 4; usdline c7-7 7 review 2
+  usdline c7-8 7 build 9 # another card of the issue: its $9 are not c7-7's, and issueusd is off
+  usdsession 7 c7-7 fix
+  [ "$(st 'select(.card == "c7-7" and .step == "blocked") | .reason')" = 'fix: stopped at the dollar limit of the card: it spent $6 of $5' ] && [ ! -e "$STUB/ran" ] \
+    && grep -q '^+two' "$ST/kept/c7-7/c7-7.patch" \
+    || fail "a card at its dollar limit started a session, or was not blocked with its reason and its patch: $(cat "$T/$CASE/run.out") $(st 'select(.step == "blocked") | .reason')"
+  # Both rules off: the card that spent $60 starts its session.
+  loop control rules cardusd=off >/dev/null || fail "cardusd could not be turned off"
+  usdcard 8 c8-8; usdline c8-8 8 build 60; usdsession 8 c8-8 fix
+  [ -e "$STUB/ran" ] && ! st 'select(.card == "c8-8" and .step == "blocked") | .reason' | grep -q 'dollar limit' \
+    || fail "a card with both limits off was stopped at \$60: $(cat "$T/$CASE/run.out")"
+  # A step with no price: the card's and its issue's totals are not known, so the session starts and the log says the limits were not checked.
+  rm -f "$STUB/ran"; loop control rules cardusd=5 issueusd=5 >/dev/null || fail "the rules could not be set"
+  usdcard 9 c9-9; USDMODEL=no-such-model usdline c9-9 9 build 60; usdsession 9 c9-9 fix
+  [ -e "$STUB/ran" ] && ! st 'select(.card == "c9-9" and .step == "blocked") | .reason' | grep -q 'dollar limit of' && grep -q 'dollar limits were not checked' "$T/$CASE/run.out" \
+    || fail "a step with no price stopped the session, or the log did not say the limits were not checked: $(cat "$T/$CASE/run.out")"
+}
+# Bugs: a new card of an issue whose earlier cards spent $11 (one in the card records, with a failed session its blocked
+# line keeps, one retried out of them) builds at issueusd 10, or its reason does not name the issue, what its cards spent
+# and the limit; the issue's total counts another issue's cards or another repository's, or leaves out the retried ones
+# or a blocked line's failed session; the issue's limit is not checked before the card's; a total is not in whole cents,
+# one step with no price leaves the issue's total known, or issue 0 has an issue total.
+t_usdissue() {
+  setup '[]'; echo "echo ran >> '$STUB/ran'" > "$STUB/build"
+  usdline c1-5 5 build 5
+  jq -cn --arg repo "${R##*/}" '{card:"c1-5",issue:5,step:"blocked",time:"2026-11-01T00:00:00Z",tokens:{claude:0,codex:0},result:"blocked",sha:"",reason:"x",repo:$repo,spent:{step:"fix",model:"claude-opus-5-5",tokens:{claude:50000,codex:0},usage:{input:0,write:0,write1h:0,read:0,output:50000}}}' >> "$ST/cards.jsonl"
+  usdline c2-5 5 build 5 "$ST/retried.jsonl"
+  usdline c3-6 6 build 50; USDREPO=other usdline c4-5 5 build 50 # another issue's card, and another repository's: neither is of issue 5
+  usdline c5-4 4 build 0.126; usdline c6-7 7 build 1; USDMODEL=no-such-model usdline c7-7 7 build 1
+  fx_in 'spent c1-5 5; spent c1-5 0; spent c5-4 4; spent c6-7 7'
+  [ "$(cat "$T/$CASE/run.out")" = "$(printf '%s\n' '{"card":6,"issue":11}' '{"card":6,"issue":null}' '{"card":0.13,"issue":0.13}' '{"card":1,"issue":null}')" ] \
+    || fail "the card's and the issue's totals are not what the step lines cost: $(cat "$T/$CASE/run.out")"
+  loop control rules issueusd=10 cardusd=off >/dev/null || fail "the rules could not be set"
+  usdcard 5 c9-5; usdsession 5 c9-5 build
+  [ "$(st 'select(.card == "c9-5" and .step == "blocked") | .reason')" = 'build: stopped at the dollar limit of issue #5: its cards spent $11 of $10' ] && [ ! -e "$STUB/ran" ] \
+    || fail "a new card of an issue at its dollar limit was not stopped before its build, or not with its reason: $(cat "$T/$CASE/run.out") $(st 'select(.step == "blocked") | .reason')"
+  # Both limits reached: the issue's is the one the reason names.
+  loop control rules cardusd=1 >/dev/null || fail "cardusd could not be set"
+  usdcard 5 c8-5; usdline c8-5 5 build 2; usdsession 5 c8-5 build
+  [ "$(st 'select(.card == "c8-5" and .step == "blocked") | .reason')" = 'build: stopped at the dollar limit of issue #5: its cards spent $13 of $10' ] \
+    || fail "the card's limit was checked before the issue's: $(st 'select(.step == "blocked") | .reason')"
+}
+# Bugs: the judge calls a review line holds (its judge) are left out of the card's total, so a card whose steps cost $4
+# and whose judge cost $2 starts its next fix session at cardusd 5 (the total is $4, not $6); or a judge that ran no call
+# (no sec, as one refused its seat) is priced as a step, has no price, and makes the total unknown, so the check is skipped.
+t_usdjudge() {
+  setup '[]'; echo "echo ran >> '$STUB/ran'" > "$STUB/build"
+  loop control rules cardusd=5 issueusd=off >/dev/null || fail "the rules could not be set"
+  usdcard 7 c7-7; usdline c7-7 7 build 1
+  usdline c7-7 7 review 3 "$T/$CASE/judged.jsonl"
+  jq -c '.judge = {model: "claude-opus-5-5", effort: "high", sec: 5, usage: {input: 0, write: 0, write1h: 0, read: 0, output: 100000}}' "$T/$CASE/judged.jsonl" >> "$ST/cards.jsonl"
+  usdline c7-7 7 review 0 "$T/$CASE/refused.jsonl"
+  jq -c '.judge = {failed: "the control record names no judge"}' "$T/$CASE/refused.jsonl" >> "$ST/cards.jsonl"
+  usdsession 7 c7-7 fix
+  [ "$(st 'select(.card == "c7-7" and .step == "blocked") | .reason')" = 'fix: stopped at the dollar limit of the card: it spent $6 of $5' ] && [ ! -e "$STUB/ran" ] \
+    || fail "a card whose steps cost \$4 and whose judge cost \$2 was not stopped at \$5 with \$6 in its reason, or a judge that ran no call hid its total: $(cat "$T/$CASE/run.out") $(st 'select(.step == "blocked") | .reason')"
+}

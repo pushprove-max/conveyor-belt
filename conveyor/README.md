@@ -103,8 +103,11 @@ its own, and the Board's Rules tab sets them in its Judge row.
   ([Pick settings](../docs/configuration.md#pick-settings)).
 - `healsdays`: the days an entry of the self-heals list can go unfixed and unseen before it leaves the list, a whole
   number from 1 to 3650 (`conveyor.sh control rules healsdays=<days>`; [Self-heals expiry](../docs/configuration.md#self-heals-expiry)).
+- `cardusd` and `issueusd`: the dollars a card, and all the cards of one issue together, can spend before a session
+  does not start and the card is blocked, a whole number from 1 to 100000, or `off`
+  (`conveyor.sh control rules cardusd=<dollars|off>`; [Dollar limits](../docs/configuration.md#dollar-limits)).
 
-Every rule is on by default, except `push` and `visible`, which are off, `pick`, which is `off`, and `healsdays`, which is a number of days, 30 at first. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
+Every rule is on by default, except `push` and `visible`, which are off, `pick`, which is `off`, `healsdays`, which is a number of days, 30 at first, and `cardusd` and `issueusd`, which are numbers of dollars, 10 and 25 at first. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
 that skips it. A record saved before a rule existed reads that rule at its default.
 
 `conveyor.sh control land-as main|pr` sets Land as (`landAs` in the record; null, the default, is the pack's

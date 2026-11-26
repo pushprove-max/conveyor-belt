@@ -468,9 +468,9 @@ apitries() { # <worktree> <step> <output file> <command ...>
 # The worktree's tree before the session is kept in <worktree>.before (treeof(), lib/donewhen.sh), so donewhen.sh asks() can tell a
 # session that changed nothing from one that found a change already there.
 # The session runs on the seat named (seat(): fix, the repair of review findings, or testFix, the repair of failed
-# changed tests), else the builder's. With up as its 5th argument it runs one effort level above the seat's (session1()).
+# changed tests), else the builder's. With up as its 5th argument it runs one effort level above the seat's (session1()). It does not start when its card or its issue is at a dollar limit: it prints why and fails (usdstop(), lib/records.sh).
 session() { # <worktree> <prompt> [step: build (when none is given), fix or rebase] [seat: builder (the default), fix or testFix] [up]
-  local p=$2; newtexts p
+  local p=$2; newtexts p; usdstop "$1" || return 1
   treeof "$1" > "$1.before" 2>/dev/null || rm -f "$1.before"; rm -f "$1.out.first" "$1.out.first-"* "$1.out.unpriced"
   apitries "$1" "${3:-build}" "$1.out" session1 "$1" "$p" "${@:3}"; local rc=$?; rm -f "$1.out.unpriced"; replyout "$1"; return $rc # replyout: the draft reply precheck left out, out of the change (lib/donewhen.sh). <worktree>.out.unpriced marks one try for apitries() and session1() alone: removed here, as a blocked card keeps the worktree's other files and clean() (lib/push.sh) does not run for it
 }
