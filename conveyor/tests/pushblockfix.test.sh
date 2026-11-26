@@ -151,6 +151,39 @@ t_pushblockmoved() {
     || fail "with A ($l1) pushed by hand and B ($l2) blocked by typecheck-web, redpick did not pick B's fix card: $(cat "$T/$CASE/run.out" "$ST/mainred.json" "$T/$CASE/push.out")"
 }
 
+# Review follow-up of #1683, finding 2. Bug it catches: a blocked fix card of A's push block stood for its check after A
+# was pushed by hand (pushred() did not ask origin of a card with records), so B's block of the same check got no entry,
+# and no fix card. c1's push is blocked (A), its fix card is picked and blocks, A is pushed by hand, B lands and its
+# real push fails the same check: the pick takes B's fix card.
+t_pushblockblockedmoved() {
+  local l1 l2 ca c
+  blockedpush
+  fx_in 'cd "$R" && locked redpick'; ca=$(cat "$T/$CASE/run.out"); ca=${ca%% *}
+  [[ $ca =~ -0$ ]] || fail "A's fix card was not picked (redpick): $(cat "$T/$CASE/run.out")"
+  jq -cn --arg c "$ca" '{card: $c, issue: 0, step: "blocked", time: "2026-11-18T10:03:00Z", tokens: {claude: 0, codex: 0}, result: "failed", sha: "", reason: "tests failed"}' >> "$ST/cards.jsonl"
+  git -C "$R" push -q --no-verify origin "$l1:refs/heads/main" || fail "the blocked commit could not be pushed by hand"
+  echo b > "$R/b.txt" && git -C "$R" add b.txt && git -C "$R" commit -qm c2 && l2=$(git -C "$R" rev-parse HEAD) || fail "B could not be committed"
+  jq -cn --arg s "$l2" '{card: "c2", issue: 2, step: "landed", time: "2026-11-18T10:05:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: $s, reason: "", product: false}' >> "$ST/cards.jsonl"
+  pnow
+  fx_in 'cd "$R" && locked redpick'; c=$(cat "$T/$CASE/run.out"); c=${c%% *}
+  [[ $c =~ -0$ ]] && [ "$c" != "$ca" ] && [ "$(st "select(.card == \"$c\" and .step == \"picked\") | .mainRed")" = "$l2" ] \
+    || fail "with A ($l1) pushed by hand, its fix card $ca blocked, and B ($l2) blocked by typecheck-web, redpick did not pick B's fix card: $(cat "$T/$CASE/run.out" "$ST/mainred.json" "$T/$CASE/push.out")"
+}
+
+# Review follow-up of #1683, finding 1. Bug it catches: a push block at a commit whose main-red fix card had blocked was
+# added to that card's entry, which kept the blocked card, so redpick() made no fix card for the block until a person
+# retried it. Main is red at c1's commit, its fix card cx blocked; the push of that commit fails typecheck-web
+# (pushred(), as the push files it): the entry is given a new fix card, named in the record.
+t_pushblockblockedred() {
+  local l1 c
+  pfix
+  jq -cn --arg s "$l1" '{reds: [{sha: $s, cases: [{case: "lib/a.test.sh: adds", file: "lib/a.test.sh", by: "c9", files: ["lib/a.test.sh"], last: ""}], card: "cx"}]}' > "$ST/mainred.json"
+  jq -cn '{card: "cx", issue: 0, step: "picked", time: "2026-11-18T10:01:00Z", tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: "", mainRed: "x"}, {card: "cx", issue: 0, step: "blocked", time: "2026-11-18T10:02:00Z", tokens: {claude: 0, codex: 0}, result: "failed", sha: "", reason: "tests failed"}' >> "$ST/cards.jsonl"
+  fx_in "cd \"\$R\" && pushred $l1 typecheck-web c1 1 && locked redpick"; c=$(cat "$T/$CASE/run.out"); c=${c%% *}
+  [[ $c =~ -0$ ]] && [ "$(jq -r .reds[0].card "$ST/mainred.json")" = "$c" ] && [ "$(jq -r .reds[0].push.check "$ST/mainred.json")" = typecheck-web ] \
+    || fail "with main red at $l1 and its fix card cx blocked, pushred $l1 typecheck-web c1 1 then redpick did not give the entry a new fix card: $(cat "$T/$CASE/run.out" "$ST/mainred.json")"
+}
+
 # Second review, E1: a main-red entry with cases and a push block (pushred() on a commit main is red at). Its cases pass
 # on main (redsetup's ok.txt), its push check does not.
 pushredcases() {

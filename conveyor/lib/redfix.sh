@@ -6,9 +6,10 @@
 # (issue 1683): an entry of <main's commit> in $MAINRED with no case and push: {check, card, issue (the landing the push was
 # for), log, reason (the end of the push's output, for the brief: redissue())}, which the loop picks ahead of the queue, and
 # beyond the cap (redpick(), run.sh redfix()). One fix card at a time for a check: while an entry of the same check has a
-# fix card open (redopen(): on the belt or blocked), or one not picked yet (or given back) whose commit origin does not
-# hold, a failure on a later commit adds nothing, as that card's change clears it. One whose commit origin holds (pushed
-# by hand) is no block: redpick() drops it. Under the record's lock, as mainred().
+# fix card on the belt (redlive()), or one not picked yet (or given back) whose commit origin does not hold, a failure on
+# a later commit adds nothing, as that card's change clears it. One whose commit origin holds (pushed by hand) is no
+# block: redpick() drops it. A blocked fix card clears nothing until a person acts, so a later failure gets its own
+# entry, and the slot of the next fix card. Under the record's lock, as mainred().
 pushred() { # <main's commit> <check> <card> <issue> [<the push's log>] [<its reason>]
   local lock rec s c open=false
   [ -n "$1" ] && [ -n "$2" ] || return 1
@@ -16,19 +17,26 @@ pushred() { # <main's commit> <check> <card> <issue> [<the push's log>] [<its re
     || { echo "conveyor: the main-is-red record could not be locked; the push block of $2 gets no fix card" >&2; return 1; }
   rec=$(jq -ce '.reds | arrays' "$MAINRED" 2>/dev/null) || rec='[]'
   while IFS=$'\t' read -r s c; do # The card goes last: read drops an empty tab-separated field between two others.
-    redopen "$c" < /dev/null || continue
+    redlive "$c" < /dev/null || continue
     if [ -z "$c" ] || [ -z "$(stdb ask card "$c" 2>/dev/null)" ]; then ! atorigin "$s" || continue; fi
     exec {lock}>&-; return 0
   done < <(jq -r --arg k "$2" '.[] | select(.push.check? == $k) | [.sha, .card // ""] | @tsv' <<<"$rec")
-  # An entry of main's commit already (main red there too): it takes the push block, and its fix card, when open,
-  # clears both; one whose card ended (closed as already done) is picked again.
-  c=$(jq -r --arg s "$1" '.[] | select(.sha == $s) | .card // ""' <<<"$rec") && [ -n "$c" ] && redopen "$c" < /dev/null && open=true
+  # An entry of main's commit already (main red there too): it takes the push block, and its fix card, when on the
+  # belt, clears both; one whose card ended (closed as already done, or blocked) is picked again, with a new card.
+  c=$(jq -r --arg s "$1" '.[] | select(.sha == $s) | .card // ""' <<<"$rec") && [ -n "$c" ] && redlive "$c" < /dev/null && open=true
   jq -c --arg s "$1" --arg k "$2" --arg c "$3" --arg n "$4" --arg l "${5:-}" --arg r "${6:-}" --argjson o "$open" '{push: ({check: $k, card: $c, issue: ($n | tonumber? // 0)}
       + (if $l == "" then {} else {log: $l} end) + (if $r == "" then {} else {reason: $r[-1500:]} end))} as $p
     | {reds: (if any(.[]; .sha == $s) then map(if .sha == $s then . + $p + (if $o then {} else {card: null} end) else . end)
         else . + [{sha: $s, cases: [], card: null} + $p] end | .[-100:])}' <<<"$rec" > "$MAINRED.new" \
     && mv -f "$MAINRED.new" "$MAINRED" || { exec {lock}>&-; echo "conveyor: the push block of $2: the main-is-red record could not be written" >&2; return 1; }
   exec {lock}>&-
+}
+# Whether a push block's fix card can still clear it: not picked yet ("") or given back by `retry` (no line of it in the
+# card records), or on the belt; not when it landed, closed or blocked (redopen() counts a blocked one as open). Records
+# that cannot be read count as on the belt.
+redlive() { # <card id, or "">
+  [ -n "$1" ] || return 0
+  stdb ask card "$1" 2>/dev/null | jq -se 'any(.step | IN("landed", "closed", "blocked")) | not' >/dev/null
 }
 # An entry's title (mainred()): "Main is red: <cases>"; a push block's (pushred()): "Push blocked: <check> fails on main", its cases after it.
 REDTITLE='def redtitle: ((if .push then "Push blocked: \(.push.check) fails on main" + ([.cases[].case] | if . == [] then "" else "; main is red: " + join(", ") end)
