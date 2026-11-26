@@ -6,22 +6,21 @@
 # number, or the card id of a follow-up card) for the filed line. Prints the new issue numbers as a JSON array.
 # A finding its judge last sorted as self-heals, cleanup, already guarded or docs drift (HARMRULE, lib/review.sh) is
 # never filed: it goes to the self-heals list or the docs list (healsadd()), and a review whose findings all went there
-# files nothing and prints []. Each follow-up's body names the finding's kind and the judge's reason ("Kind:"); a
-# finding with no kind is harm.
+# files nothing and prints []. Each follow-up's body names the finding's kind and the judge's reason ("Kind:"); a finding with no kind is harm.
 # With the control record's rules.followupissues false (the Rules tab's Cards with no GitHub issue: Review follow-ups On)
 # each finding becomes a card with no GitHub issue instead (tcadd(), lib/testaction.sh), its body the issue's, naming its
 # parent, and a `Depends on:` line with the parent card's id, so it is picked only once the parent has landed. A card on a finding that names a pipeline file is held as the issue is (`control release <card id>`). None is
 # an issue, so the array is empty; each card's id and finding go to <worktree>.fucards, one a line, so unfile() can
-# take them back out of the record. When a filing fails
-# it prints the reason instead, and withdraws (closes) the ones it had already filed: the card will not land, and an
-# open follow-up would be built against a main that never got its parent's change.
+# take them back out of the record. When a filing fails it prints the reason instead, and withdraws (closes) the ones
+# it had already filed: the card will not land, and an open follow-up would be built against a main that never got its parent's change.
 # A withdrawn follow-up is closed as "not planned", never "completed": nothing fixed its finding. The finding
 # goes to <worktree>.withdrawn, in the order filed (the review's finding lines, as followups() reads them), and from
 # the kept folder into the brief of the issue's next card; the comment names that issue.
 # Each follow-up's body holds its depth, "Follow-up depth: N": its parent's depth (fudepth()) plus 1. A card whose
 # issue is at the cap, MAX_DEPTH (lib/paths.sh), files none, so no chain goes deeper: its last review's findings go on
 # the self-heals list when it lands, with FUCAP as the reason (capheals(); issue 1670); when they cannot be written there the
-# card ends blocked, landed, its review kept.
+# card ends blocked, landed, its review kept. Below the cap, a harm P2 or P3 of a card whose issue is at depth 1 or more
+# files none, unless it names a pipeline file: it goes on the self-heals list with FULOW as the reason (healsadd()). A depth followups() cannot read counts as the cap: each finding goes on the list with FUCAP. One not written there lands nothing.
 # A finding that names one of the pack's pipelineFiles (how the engine builds, reviews, fixes, tests, lands or
 # pushes), or a file under one (onpipeline()), is filed held: the control record holds its issue, as `control hold` does, before the card lands,
 # so it is never built until the owner releases it. Its body holds one more line, "Cost to every card:", which reads
@@ -169,11 +168,12 @@ fudepth() {
 }
 # shellcheck disable=SC2034 # read by card() (lib/card.sh)
 FUCAP="its issue is a follow-up at the depth cap of $MAX_DEPTH, so no deeper follow-up is filed" # the reason of a finding put on the self-heals list at the cap (capheals())
+FULOW="its issue is a follow-up, so a P2 or P3 harm finding of it goes on the self-heals list, not to a follow-up of its own" # the reason of such a finding (followups())
 leftovers() { { grep -Ev "$NOTFINDING" "$1" 2>/dev/null || [ $? = 1 ]; } | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk '!seen[$0]++'; } # <review file>: its finding lines, each once; none (a GO) is no failure, a file not read is
 # <review file>: the findings followups() files, in its order: the review's finding lines (leftovers()), then the
 # findings of <worktree>.outside that are not among them, each once; none the judge last sorted as a kind kept off the
-# belt (healsleft()), which go to their list instead.
-tofile() { { leftovers "$1"; jq -r '.finding' "${1%.review}.outside" 2>/dev/null; } | awk 'NF && !seen[$0]++' | grep -vxF -f <(healsleft "$1"); }
+# belt (healsleft()), which go to their list instead, and none followups() put on the self-heals list with FULOW (<worktree>.fulow), so unfile() pairs each filed one with its own.
+tofile() { { leftovers "$1"; jq -r '.finding' "${1%.review}.outside" 2>/dev/null; } | awk 'NF && !seen[$0]++' | grep -vxF -f <(healsleft "$1"; cat "${1%.review}.fulow" 2>/dev/null); }
 # <review file>: the findings the judge of a card that is no follow-up accepted and last sorted as a kind kept off the
 # belt (LISTKINDS; <worktree>.effects, judged()), each once: its fix rounds fixed none of them when the review holds one still.
 healsleft() { jq -r --argjson k "$LISTKINDS" 'select(.effect | IN($k[])) | .finding' "${1%.review}.effects" 2>/dev/null; }
@@ -304,18 +304,17 @@ rlpick() {
 }
 followups() { # <card> <issue json> <review file>
   local f mark where out num n pn nums=() more=() found=() pipe cost own='' free rl held='' res pm g masked depth kind clean body area fa nocard='' fc=${3%.review}.fucards
-  local why ofc=${3%.review}.outfiled ek healed=0; [ -z "${rlfind:-}" ] || heldlist held || held='' # what waits for the owner, read for the finding of a retry by review-land (rl, below); none read holds it
-  depth=$(fudepth "$2") && [[ $depth =~ ^[0-9]+$ ]] || { echo "cannot read the parent issue's follow-up depth"; return 1; }
+  local why ofc=${3%.review}.outfiled ek healed=0 lw; [ -z "${rlfind:-}" ] || heldlist held || held='' # what waits for the owner, read for the finding of a retry by review-land (rl, below); none read holds it
+  depth=$(fudepth "$2") && [[ $depth =~ ^[0-9]+$ ]] || depth=$MAX_DEPTH # one that cannot be read counts as the cap
   packget pipelineFiles pipe || { echo "cannot read the pack's pipeline files"; return 1; }
   packget privacy.mode pm || { echo "cannot read the pack's privacy mode"; return 1; }
   ! standingon review-followup || { packget auto.reserved res || { echo "cannot read the pack's auto.reserved"; return 1; }; own=1; }
   area=$(jq -r --arg p "$AREA" '.labels | map(.name | select(startswith($p))) | .[0] // empty' <<<"$2") || { echo "cannot read the parent issue's labels"; return 1; }
-  n=$(jq -r .number <<<"$2") && mapfile -t more < <(jq -r '.milestone.title // empty | "--milestone", .' <<<"$2") \
-    || { echo "cannot read the parent issue's milestone"; return 1; } # its area label is each follow-up's fa (filearea(), below)
+  n=$(jq -r .number <<<"$2") && mapfile -t more < <(jq -r '.milestone.title // empty | "--milestone", .' <<<"$2") || { echo "cannot read the parent issue's milestone"; return 1; } # its area label is each follow-up's fa (filearea(), below)
   # Issue 0's parent is the issue its card follows up, if any (--only takes its follow-ups). pn names it in a follow-up card: #<issue>, else the branch,
   # else the card id (bug: "Review follow-up of #"); a follow-up issue keeps "Follow-up to #<n>", the only form jq/upnext.jq and snapshot.sh read.
   [ "$n" != 0 ] || n=$(tcparent "$1"); [[ $n =~ ^[1-9][0-9]*$ ]] && pn="#$n" || pn=$(stdb ask card "$1" 2>/dev/null | jq -rn 'first(inputs | objects | select(.step == "picked") | .branch | strings) // empty' 2>/dev/null); pn=${pn:-$1}
-  mapfile -t found < <(tofile "$3")
+  rm -f "${3%.review}.fulow"; mapfile -t found < <(tofile "$3")
   rm -f "$fc" "$ofc"; [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" != false ] || nocard=1; [ -n "$nocard" ] || pn="#$n"
   # A finding of the last review the judge sorted as a kind kept off the belt goes to its list (healsadd()), not to a
   # follow-up: the card's own issue, its area, and the card that lands it. At the last review it no longer blocks the
@@ -328,6 +327,8 @@ followups() { # <card> <issue json> <review file>
     '. as $f | first($e[] | select(.finding == $f)) | [.effect, .reason, .finding] | map(gsub("[[:space:]]+"; " ")) | join("\t")')
   [ ${#found[@]} != 0 ] || { [ "$healed" = 0 ] || { echo '[]'; return 0; }; nofiling "$3"; return 1; }
   for f in "${found[@]}"; do
+    mark=$(grep -oE '\[P[0-3]\]' <<<"$f" | head -n 1 | tr -d '[]P'); cost=$(onpipeline "$f" <<<"$pipe") || { unfile "$n" "$3" "${nums[@]}"; echo "cannot tell whether a finding names a pipeline file, so nothing landed (finding: ${f:0:200})"; return 1; }
+    lw=''; [ "$depth" -lt "$MAX_DEPTH" ] || lw=$FUCAP; [ -n "$lw" ] || [ "$depth" = 0 ] || [[ $mark != [23] ]] || [ -n "$cost" ] || lw=$FULOW; [ -z "$lw" ] || { healsadd "$1" "$(jq -r .number <<<"$2")" "$area" "$lw" "$f" review >/dev/null && printf '%s\n' "$f" >> "${3%.review}.fulow" && continue; unfile "$n" "$3" "${nums[@]}"; echo "a finding of a follow-up could not be written to $SELFHEALS, so nothing landed (finding: ${f:0:200})"; return 1; } # at the cap (an unread depth counts as it) each finding goes on the self-heals list (FUCAP), as capheals() puts it; below it, at depth 1 or more, a P2 or P3 (FULOW), unless it names a pipeline file: a self-heals batch card is never held, so that one is filed held (below)
     # The finding's level, P0 to P3 (P1 when it names none), is the pack's priority at that place, or its last one.
     # A P3 finding in a pack of fewer than four priorities gets none of them: the engine reads an issue with none as P3
     # (LEVEL), and the pack's last one would file it at a higher level. Bug: P3 follow-ups were filed as P2.
@@ -340,9 +341,8 @@ followups() { # <card> <issue json> <review file>
       masked=${f//"$CARDS"/<cards>}; [ "$g" = "${masked//"${STATE%/*}"/<state>}" ] && masked='' \
         || masked=$'\n\nConveyor masked the parts of the finding that the privacy check flags.'
     fi
-    mark=$(grep -oE '\[P[0-3]\]' <<<"$f" | head -n 1 | tr -d '[]P'); where=$(grep -oE '[^[:space:]]+:[0-9]+' <<<"$g" | head -n 1)
+    where=$(grep -oE '[^[:space:]]+:[0-9]+' <<<"$g" | head -n 1)
     mark=$(jq -r --argjson i "${mark:-1}" 'if $i == 3 and length < 4 then "" else .[[$i, length - 1] | min] end' <<<"$PRIOS")
-    cost=$(onpipeline "$f" <<<"$pipe") || { unfile "$n" "$3" "${nums[@]}"; echo "cannot tell whether a finding names a pipeline file, so nothing landed (finding: ${f:0:200})"; return 1; }
     # A finding that holds a word or phrase of auto.reserved (in any case, as auto decide reads it) is never let
     # through: it waits for the owner. Bug: a follow-up on the card's own file about security went unheld.
     free=''; [ -z "$cost" ] || [ -z "$own" ] \

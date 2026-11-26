@@ -450,7 +450,8 @@ with no kind is `harm`, so nothing is lost. An `already guarded` finding is `har
 `file:line`, or when that line is not in the code. A finding of a kind that the project always accepts is `harm`,
 whatever kind the judge gives it.
 
-- A `harm` finding gets its follow-up at once.
+- A `harm` finding gets its follow-up at once. On a follow-up card, a `harm` P2 or P3 goes to the self-heals list
+  instead (Declined findings and follow-ups, below).
 - A `self-heals`, `cleanup` or `already guarded` finding goes to the self-heals list with its kind. A `docs drift`
   finding goes to the docs list. No follow-up is filed for them. On a follow-up card, they also get no fix round. The
   review shows each one as a `SELFHEALS:` line, with its kind and the judge's reason.
@@ -551,8 +552,12 @@ the first review: when it is a `NO-GO` whose findings are all P2 or P3, the loop
 card gets no fix session for them. A finding that the
 judge sorted as another kind than `harm` goes to its list instead (Harm or self-heals, above). Each follow-up's
 body says how deep it is, as the line `Follow-up depth: N`: 1 for a follow-up of a first card, 2 for a follow-up of
-a follow-up. Follow-ups go two levels deep. A card whose issue is at depth 2 files no follow-ups: its leftover findings
-go on the self-heals list, and the reason names the cap. A follow-up that changes one of the pack's `pipelineFiles` is filed held.
+a follow-up. Follow-ups go two levels deep. A card whose issue is a follow-up (depth 1 or more) files a follow-up only
+for a `harm` P0 or P1. Its `harm` P2 and P3 findings go on the self-heals list, under the area of its issue, and the
+reason says that its issue is a follow-up. A P2 or P3 that names one of the pack's `pipelineFiles` is the exception: it
+gets a follow-up, filed held. If a finding cannot be written to the list, the card does not land. If the depth of the
+issue cannot be read, the card counts as at the cap. A card whose issue is at depth 2 files no
+follow-ups: its leftover findings go on the self-heals list, and the reason names the cap. A follow-up that changes one of the pack's `pipelineFiles` is filed held.
 It builds only once you release it.
 
 A finding whose fix changes no behaviour, such as a comment, dead code or a redundant check, has the mark `[cleanup]`

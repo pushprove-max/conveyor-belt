@@ -108,3 +108,53 @@ t_futitlecut() {
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = '[100101]' ] || fail "the follow-up of '$f' was not filed: $(cat "$T/$CASE/run.out")"
   [ "$(jq -r .title "$STUB/filed")" = "$a$w" ] || fail "the title of '$f' is not cut before the address: $(jq -r .title "$STUB/filed")"
 }
+
+# #1736 D3: a card at depth 1 whose last review holds a P1, a P2 and a P3 harm finding files one follow-up, at depth 2,
+# for the P1; the P2 and the P3 go on the self-heals list, under the parent's area, with FULOW as their reason. Bug: each
+# got a follow-up of its own, so each follow-up card spawned more cards for findings that block nothing. The P2 comes
+# first: withdrawing the follow-up (unfile()) still pairs #100101 with the P1, not with a finding that was not filed.
+t_fulowp2() {
+  local p='[P1] a.txt:1 the count is off by one' q='[P2] a.txt:2 the word is wrong' r='[P3] a.txt:3 the name is odd'
+  setup "[$(issue 7 2026-01-01 area:engine | jq -c '.body = "Follow-up to #6\n\nFollow-up depth: 1"')]"
+  printf '%s\n' "$q" "$p" "$r" 'VERDICT: NO-GO' > "$STUB/r.review"
+  fx_in 'followups c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" "$STUB/r.review" && printf "\n%s" "$FULOW" && unfile 7 "$STUB/r.review" 100101'
+  [ "$(cat "$STUB/r.withdrawn" 2>&1)" = "#100101 $p" ] || fail "unfile of #100101 after followups of card c1-7 (findings '$q', '$p', '$r', issue 7 at depth 1) did not pair it with the P1: $(cat "$STUB/r.withdrawn" 2>&1)"
+  [ "$RC" = 0 ] && [ "$(head -n 1 "$T/$CASE/run.out")" = '[100101]' ] \
+    && jq -e -s --arg p "$p" 'length == 1 and (.[0].body | contains("Finding: " + $p) and contains("Follow-up depth: 2"))' "$STUB/filed" > /dev/null \
+    && jq -e -s --arg q "$q" --arg r "$r" --arg w "$(tail -n 1 "$T/$CASE/run.out")" 'map(.finding) == [$q, $r] and all(.why == $w and .issue == 7 and .area == "area:engine") and $w != ""' "$ST/selfheals.jsonl" > /dev/null \
+    || fail "followups of card c1-7 (issue 7 at depth 1) with the findings '$q', '$p' and '$r' did not file one depth-2 follow-up for the P1 and put the P2 and the P3 on the self-heals list with FULOW (exit $RC): $(cat "$T/$CASE/run.out") filed: $(cat "$STUB/filed" 2>&1) list: $(cat "$ST/selfheals.jsonl" 2>&1)"
+}
+
+# A P2 of a follow-up that cannot be written to the self-heals list lands nothing: the P1 filed before it is withdrawn.
+# Bug it catches: the finding was dropped with no follow-up and no list entry, and the card landed.
+t_fulownolist() {
+  local p='[P1] a.txt:1 the count is off by one' q='[P2] a.txt:2 the word is wrong'
+  setup "[$(issue 7 2026-01-01 | jq -c '.body = "Follow-up depth: 1"')]"; mkdir -p "$ST/selfheals.jsonl.lock" # the list's lock cannot be opened
+  printf '%s\n' "$p" "$q" 'VERDICT: NO-GO' > "$STUB/r.review"
+  fx_in 'followups c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" "$STUB/r.review"'
+  [ "$RC" != 0 ] && grep -q 'could not be written' "$T/$CASE/run.out" && [ "$(cat "$STUB/closed" 2>/dev/null)" = 100101 ] \
+    || fail "followups of card c1-7 (issue 7 at depth 1) with the findings '$p' and '$q' and a self-heals list it cannot write did not fail and withdraw #100101 (exit $RC): $(cat "$T/$CASE/run.out") closed: $(cat "$STUB/closed" 2>&1)"
+}
+
+# A depth that cannot be read counts as the cap: no finding is filed, the P1 too goes on the self-heals list, with
+# FUCAP. Bug it catches: an unread depth read as 0 or 1 files the P1 as a follow-up, one level past what can be shown.
+t_fulownodepth() {
+  local p='[P1] a.txt:1 the count is off by one'
+  setup "[$(issue 7 2026-01-01)]"
+  printf '%s\n' "$p" 'VERDICT: NO-GO' > "$STUB/r.review"
+  fx_in 'fudepth() { return 1; }; followups c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" "$STUB/r.review" && printf "\n%s" "$FUCAP"'
+  [ "$RC" = 0 ] && [ "$(head -n 1 "$T/$CASE/run.out")" = '[]' ] && [ ! -s "$STUB/filed" ] \
+    && jq -e -s --arg p "$p" --arg w "$(tail -n 1 "$T/$CASE/run.out")" 'length == 1 and .[0].finding == $p and .[0].why == $w' "$ST/selfheals.jsonl" > /dev/null \
+    || fail "followups of card c1-7 (issue 7, fudepth failing) with the finding '$p' did not put it on the self-heals list with FUCAP and file nothing (exit $RC): $(cat "$T/$CASE/run.out") filed: $(cat "$STUB/filed" 2>&1) list: $(cat "$ST/selfheals.jsonl" 2>&1)"
+}
+
+# A P2 of a follow-up that names a pipeline file is filed held, not put on the self-heals list. Bug it catches: on the
+# list it reached a Self-heals batch card, which is never held, so a change to the pipeline was built with no owner asked.
+t_fulowpipe() {
+  local q='[P2] a.txt:2 the word is wrong'
+  setup "[$(issue 7 2026-01-01 | jq -c '.body = "Follow-up depth: 1"')]"; tune '.pipelineFiles = ["a.txt"]'
+  printf '%s\n' "$q" 'VERDICT: NO-GO' > "$STUB/r.review"
+  fx_in 'followups c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" "$STUB/r.review"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = '[100101]' ] && [ "$(jq -c .held "$ST/control.json")" = '[100101]' ] && [ ! -s "$ST/selfheals.jsonl" ] \
+    || fail "followups of card c1-7 (issue 7 at depth 1, pipelineFiles [a.txt]) with the finding '$q' did not file it held and off the self-heals list (exit $RC): $(cat "$T/$CASE/run.out") held: $(jq -c .held "$ST/control.json" 2>&1) list: $(cat "$ST/selfheals.jsonl" 2>&1)"
+}

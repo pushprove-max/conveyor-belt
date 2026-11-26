@@ -877,7 +877,7 @@ trialflag() {
   while IFS= read -r f; do [ -z "$(onpipeline "$f" <<<"$pipe")" ] || files+=("$f"); done < <(git -C "$1" diff --cached --no-renames --name-only 2>/dev/null)
   PICK=$(jq -c 'if $ARGS.positional == [] then del(.pipeline) else .pipeline = $ARGS.positional end' --args "${files[@]}" <<<"$PICK") || :
 }
-clean() { tidy "$1"; rm -f "$1".out "$1".out.first "$1".out.first-* "$1".out.unpriced "$1".reply.kept "$1".reply.kept-* "$1".err "$1".review "$1".test "$1".withdrawn "$1".fucards "$1".outside "$1".effects "$1".outfiled "$1".approvals "$1".spent "$1".trailers; rm -rf "$1".testlog "$1".rounds; }
+clean() { tidy "$1"; rm -f "$1".out "$1".out.first "$1".out.first-* "$1".out.unpriced "$1".reply.kept "$1".reply.kept-* "$1".err "$1".review "$1".test "$1".withdrawn "$1".fucards "$1".fulow "$1".outside "$1".effects "$1".outfiled "$1".approvals "$1".spent "$1".trailers; rm -rf "$1".testlog "$1".rounds; }
 # The class of a failed build session (session()'s reason), for its blocked line (block()'s BLOCKCLASS) and the
 # metrics: api error (refused at each try, apitries()), stall (stalled twice, session1()), timeout (the time limit's
 # exit 124, exitsaid()), else nothing: the metrics then read the class from the reason (blockclass, jq/metrics.jq:
