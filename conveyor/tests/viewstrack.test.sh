@@ -268,3 +268,19 @@ t_trackgrown() {
   [ "$out" = $'["kept whole: 5 files","apart; no slice is filed, so the change is kept whole: the open follow-ups of #7 could not be read"]\n["kept whole: 5 files","apart; the slices could not be filed, so the change is kept whole: #9, a slice that an earlier card filed for #7, could not be closed, so the slices filed in its place are withdrawn"]\n["would split for its size: 5 files",null]\n["would split for its size: 5 files",null]' ] \
     || fail "a grown line of a split kept whole (On, none filed, or filed and withdrawn) is not named so with its why, or another split's line changed (On filed, Shadow): $out"
 }
+
+# A judge line (reviewlines(), lib/card.sh) is written right before its review line, in the same second. Bugs caught (#1741): the
+# review took only the seconds between the two lines, so its time read 0 (the Board's time in review, metrics' reviewSec) and the
+# judge line took the review's; and a judge that failed was drawn as done, with no reason.
+t_trackjudge() {
+  local out
+  jq -nc 'def g($s; $t; $x): {card: "c1", issue: 7, step: $s, time: "2026-11-01T00:00:\($t)Z", result: "ok", tokens: {claude: 0, codex: 0}, reason: ""} + $x;
+    g("picked"; "00"; {}), g("build"; "20"; {}), g("judge"; "50"; {result: "failed", of: "review", model: "m", reason: "the judge call failed"}), g("review"; "50"; {result: "NO-GO"})' > "$T/$CASE/rec" \
+    && jq -cs --argjson max 3 --arg nodeps "" --arg yes "" --arg lintyes "" --arg shut "" --arg ownshut "" --arg engshut "" -f "$SRC/jq/rows.jq" "$T/$CASE/rec" > "$T/$CASE/rows" \
+    || fail "the rows of the fixture could not be made"
+  out=$(jq -c "$(<"$SRC/jq/track.jq")"' sort_by(.card)[] | track(null; null) | .records[] | select(.name | test("^(judge|review)")) | [.name, .state, .sec, .why]' "$T/$CASE/rows") \
+    || fail "the track of a card with a judge line could not be drawn: $out"
+  [ "$out" = $'["judge","failed",null,"the judge call failed"]\n["review 1 (NO-GO)","done",30,null]' ] \
+    && [ "$(jq -c '.[0].steps[] | select(.step == "review") | .sec' "$T/$CASE/rows")" = 30 ] \
+    || fail "the review's record has not the 30 seconds since the build with the judge's line before it, or the failed judge is not drawn failed with its reason: $out"
+}

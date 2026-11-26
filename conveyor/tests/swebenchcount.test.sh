@@ -22,6 +22,20 @@ t_swesessions() {
   [ "$o" = '[2,3,1,3]' ] || fail "the sessions of a card whose judge never started, whose judge ran, whose review was reused and whose review ran twice are not [2,3,1,3]: $o"
 }
 
+# Bug (#1741): a review's judge is on its review line (judge) and on a line of its own (step judge, reviewlines(), lib/card.sh): a
+# trial counted its tokens, usage and steps twice. The card holds a build, a review whose judge ran (7 tokens), and the judge's line.
+# The steps keep each line's usage (the cost reads it): the build's and the review's own, the judge's only inside its review's judge.
+t_swejudgeline() {
+  local o d=$T/$CASE b='{"card":"c1","issue":1,"step":"build","result":"ok","tokens":{"claude":10,"codex":0},"model":"b","usage":{"input":10,"output":1}}' j='"judge":{"model":"j","sec":30,"tokens":{"claude":7,"codex":0},"usage":{"input":7,"output":3}}'
+  local r='{"card":"c1","issue":1,"step":"review","result":"GO","tokens":{"claude":0,"codex":5},"model":"r","usage":{"input":5,"output":2},'"$j"'}'
+  mkdir -p "$d" && printf '%s\n' "$b" "$r" > "$d/line.jsonl" \
+    && printf '%s\n' "$b" '{"card":"c1","issue":1,"step":"judge","result":"ok","of":"review","model":"j","sec":30,"tokens":{"claude":7,"codex":0},"usage":{"input":7,"output":3}}' "$r" > "$d/both.jsonl" \
+    || fail "the card lines were not written"
+  o=$(swefn 'for f in "$@"; do swe_cardsum 60 "$f" | jq -c "[.tokens, .sessions, .steps]"; done | jq -sc "[.[0] == .[1], .[0][:2], (.[0][2] | map([.usage, .judge.usage]))]"' "$d/line.jsonl" "$d/both.jsonl" 2>&1)
+  [ "$o" = '[true,[22,3],[[{"input":10,"output":1},null],[{"input":5,"output":2},{"input":7,"output":3}]]]' ] \
+    || fail "a card with the judge's line as well as the review's judge field does not count the same tokens, sessions and steps (with their usage) as one without it ([22,3], the build's and the review's own usage, the judge's under the review's judge): $o"
+}
+
 # Bug (#1454 R152): a trial's cost took the prices of the project's pack as it is now, not the run's copy of it
 # (swe_freeze), so a price changed between two tasks of a run priced the later task at the new rate. The run's copy
 # prices bench-m input at $1 a million, the live pack at $5 since; a build of 1M input costs $1. swe_cost is called

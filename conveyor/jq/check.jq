@@ -14,7 +14,7 @@ def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"]
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "outside", "sec", "visible", "branch", "base", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "excerpts", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
   "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "partial", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "noIssue", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "retriedBy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "plan", "pick","lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed", "port", "alsoUsed", "cacheFirst"];
-def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown", "lint", "seats"];
+def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown", "lint", "seats", "judge"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
   elif $k == "tokens" then .tokens | type == "object" and keys == ["claude", "codex"] and all(type == "number")
@@ -33,6 +33,8 @@ def ok: . as $r | (keys - known) == need
               and (.fix | IN("sped up", "split", "merged", "deleted")) and (.into | type == "array" and all(.[]; type == "string")))))))
         and (.speed == null or .step == "bugproof")
         and (.step != "start" or (.of | IN("build", "review", "fix", "test", "file", "land", "rebase", "split")))
+        # A judge line (reviewlines(), lib/card.sh): the judge of a review, result failed with its reason when it failed.
+        and (.step != "judge" or (.of == "review" and (.result | IN("ok", "failed"))))
         # port: the rebase line of a card's automatic port (landconflict(), lib/cardland.sh).
         and (.port == null or (.step == "rebase" and .port == true))
         # A land step's start line that opens a card's wait for a release run (releasewait(), lib/push.sh) or for

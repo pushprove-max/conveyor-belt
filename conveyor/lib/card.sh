@@ -510,6 +510,8 @@ cardbuild() {
   fi
   go=''
 }
+# A review's lines (<card> <issue> <result> <the review line>): the judge's line (step judge, of review: the judge's model, effort, sec, tokens, usage and stats; result failed with its reason when the judge failed; none when the line has no judge with a model: no finding, or a reused review), then the review line, which stays the newest of the pass. The review line's judge field is unchanged: replay and the snapshot read it.
+reviewlines() { local j; j=$(jq -c '.judge | objects | select(.model | strings | . != "") | {of: "review"} + with_entries(select(.key | IN("model", "effort", "sec", "tokens", "usage", "stats"))) + (if .failed then {reason: (.failed | tostring)} else {} end)' <<<"$4" 2>/dev/null); [ -z "$j" ] || record "$1" "$2" judge "$(jq -r 'if .reason then "failed" else "ok" end' <<<"$j")" "$j"; record "$1" "$2" review "$3" "$4"; }
 # One pass's review: the review gate and the checks before a review, then a review session and its judge, or the
 # review it reuses or keeps, its verdict in res and its line, still to be written, in rline. go: ''.
 # shellcheck disable=SC2034 # it declares no variable of its own: docpass, as the rest, is card()'s, read in lib/cardland.sh
@@ -595,17 +597,15 @@ cardreview() {
       --argjson ro "$(rollouts "$wt.review" ROLLOUT)" --argjson h "$(sed -n 's/^DONE-WHEN: D\([0-9][0-9]*\) holds[[:space:]]*$/\1/p' "$wt.review" | jq -sc 'unique')" --argjson ex "${ex:-[]}" --argjson whole "$([ "$res" = GO ] && [ "$rr" != reused ] && [ -z "$fin" ] && echo true || echo false)" \
       'sub("\n+$"; "") as $r | $t + {reason:$r,visible:$v,counts:$k,patch:$p,main:$m,seen:$s} + (if $res == "NO-GO" or ($r | test("(^|\n)(OUTSIDE|SELFHEALS): ")) then {tail: $r} else {} end) + (if $sv == [] then {} else {survived: $sv} end) + (if $an == [] then {} else {answers: $an} end) + (if $h == [] then {} else {doneWhenHolds: $h} end) + (if $ro != [] or $whole then {rollout: $ro} else {} end) + (if $ex == [] then {} else {excerpts: $ex} end)')
     [ -n "$rline" ] || rline='{}' # the grep finds no line in a review of only unrecorded lines: that is no failure
-    [ "$res" != none ] || { record "$c" "$n" review "$res" "$rline"; block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
+    [ "$res" != none ] || { reviewlines "$c" "$n" "$res" "$rline"; block "$c" "$n" "$wt" "review $pass ended without one clear verdict$unclear"; return; }
   fi
   go=''
 }
-# What follows the review (afterreview()): its line is written, then the card is shut (privshut(), lib/cardland.sh),
+# What follows the review (afterreview()): its line is written (with why the loop ended: ended), then the card is shut (privshut(), lib/cardland.sh),
 # blocks on a NO-GO with no finding, goes to a fix round (go: next) or goes on to land (go: '').
 cardfix() {
-  # What follows this review (afterreview()): the review line is written with why the loop ended (ended), then
-  # card() is shut, blocks, lands (go, last) or gives the findings to a fix round.
   # rl: this review's line, whose judge's reasons go with the fix round's findings (rounded()).
-  afterreview; local rl=$rline; [ -z "$rline" ] || record "$c" "$n" review "$res" "$(jq -c --argjson e "$ended" '. + $e' <<<"$rline")"; rline=''
+  afterreview; local rl=$rline; [ -z "$rline" ] || reviewlines "$c" "$n" "$res" "$(jq -c --argjson e "$ended" '. + $e' <<<"$rline")"; rline=''
   [ "$after" != priv ] || { privshut "$c" "$n" "$wt" "$issue" "$priv" "$pass"; return; }
   [ "$after" != nofinding ] || { block "$c" "$n" "$wt" "review $pass is NO-GO with no finding to fix: ${why:0:200}"; return; }
   if [ "$after" != fix ]; then mode=''

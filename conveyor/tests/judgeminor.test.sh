@@ -57,7 +57,9 @@ t_minoroff() {
 
 # Bug: card() runs the judge, minor() and the verdict in the wrong order or skips one, so an accepted P3 on a P3-off
 # card costs a fix round, a follow-up, or is missing from the landed card's review line. A whole card run, because
-# t_minoroff calls those functions in its own order: only card() shows the order they run in on a card.
+# t_minoroff calls those functions in its own order: only card() shows the order they run in on a card. Bug (#1741): the
+# card's own review step left the judge no line (reviewlines(), lib/card.sh): the judge of the landed card's review has its line
+# before the review's, with its model, seconds and usage.
 t_minoroffrun() {
   judging "[$(issue 7 2026-01-01 P1)]"
   loop control rules P3=off >/dev/null || fail "control rules P3=off was refused"
@@ -68,6 +70,9 @@ t_minoroffrun() {
     || fail "an accepted P3 with the rule P3 off made a NO-GO, a fix round or a follow-up: $(rev 7 .result | tr '\n' ' '), $(wc -l < "$STUB/sessions") sessions"
   rev 7 .reason | grep -qxF "MINOR: $MINOR3" && [ "$(rev 7 '.counts.P3')" = 1 ] && [ "$(rev 7 '.judge.accepted[0].finding')" = "$MINOR3" ] \
     || fail "the landed card's review line does not list and count the accepted P3: $(rev 7 '[.reason, .counts] | tojson')"
+  [ "$(st 'select(.issue == 7 and (.step == "judge" or .step == "review")) | .step' | tr '\n' ' ')" = 'judge review ' ] && [ -n "$(rev 7 '.judge.model // empty')" ] \
+    && [ "$(st 'select(.issue == 7 and .step == "judge") | [.result, .of, .model, .sec, .usage] | tojson')" = "$(rev 7 '.judge | ["ok", "review", .model, .sec, .usage] | tojson')" ] \
+    || fail "the card run left no judge line before its review line, with the judge's model, seconds and usage: $(st 'select(.issue == 7) | [.step, .result, .model, .sec, .usage, .judge] | tojson')"
 }
 
 # Bug: a line the reviewer itself starts with `MINOR:` is taken as a P3 listed only, so a P1 written so counts for
@@ -271,4 +276,88 @@ t_judgeoutsidelist() {
 - [P2] b.txt:1 the pane cuts the note at 24 columns (ruled OUTSIDE: harm: the code before the change cuts it too)
 - [P3] b.txt:4 a doc typo (ruled OUTSIDE: self-heals: old)
 - [P3] b.txt:2 a typo (ruled OUTSIDE: old)" ] || fail "the judge is not given the findings ruled OUTSIDE on the issue's cards (also the ones in the self-heals list), or is given another issue's or an accepted heal: $(grep -n 'OUTSIDE\|b.txt' "$STUB/judge-asked")"
+}
+# The judge's line of a review (reviewlines(), lib/card.sh): called as cardfix() calls it, on what judged() made of the review (judgeone),
+# joined to the review's own usage and seconds, with no card run: its lines are in $ST/cards.jsonl. The review line holds no
+# verdict (judgeone adds it for its own readers; the records' check refuses it), and each line is taken by the check (recok).
+jwrite() { # <result>
+  jq -c 'del(.verdict) + {usage: {input: 10, output: 5}, sec: 40}' "$T/$CASE/cards/c7.fields" > "$T/$CASE/line" || fail "the review line could not be made"
+  fx_in 'reviewlines c7 7 '"$1"' "$(cat '"$T/$CASE/line"')"'
+  [ "$RC" = 0 ] || fail "reviewlines() exited $RC: $(cat "$T/$CASE/run.out")"
+  recok "$ST/cards.jsonl" "reviewlines()"
+}
+jsteps() { st 'select(.step == "judge" or .step == "review") | .step' | tr '\n' ' '; }
+# The sum of each field of usage by step over the card's lines: {judge: {...}, review: {...}}, as a reader that adds up usage by step reads it.
+jsum() { jq -sc '[.[] | select(.usage | objects) | {s: .step, u: .usage}] | group_by(.s) | map({(.[0].s): (map(.u | to_entries[]) | group_by(.key) | map({(.[0].key): (map(.value) | add)}) | add)}) | add' "$ST/cards.jsonl"; }
+# Bugs (#1741): the judge's cost was only inside the review line, so a sum of usage by step left it out; its line comes
+# after the review line (the review line is the newest of the pass), or takes the review's usage; the review line loses
+# its judge field (replay and the snapshot read it) or its own usage and seconds. Every field of usage is summed, so one
+# the review loses (here its output) shows. The line's tokens are the judge's (one CLI's, as {claude: n}) over the
+# {claude: 0, codex: 0} every line has (line(), lib/records.sh), which the record check requires.
+t_judgeline() {
+  local want
+  judging "[$(issue 7 2026-01-01)]"; printf '%s\n' '[P1] a.txt:2 wrong word. Proof: a.txt:2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  echo 'F1 ACCEPT: the word is wrong. Cost to every card: none' > "$STUB/judge.1"
+  judgeone 7 "$STUB/review"; jwrite NO-GO; want=$(jf 7 '.judge.usage | tojson')
+  [ "$(jsteps)" = 'judge review ' ] && [ "$(jf 7 '.judge.usage.input')" -gt 0 ] \
+    && [ "$(st 'select(.step == "judge") | [.result, .of, .model, .effort, .sec, .tokens, .usage, .stats] | tojson')" = "$(jf 7 '.judge | ["ok", "review", .model, .effort, .sec, ({claude: 0, codex: 0} + .tokens), .usage, .stats] | tojson')" ] \
+    || fail "the judge has no line of its own before the review line, with the judge's model, seconds and usage: $(st 'select(.step == "judge" or .step == "review") | [.step, .result, .model, .sec, .usage] | tojson')"
+  jq -en --argjson s "$(jsum)" --argjson w "$want" '$s == {judge: $w, review: {input: 10, output: 5}}' > /dev/null \
+    && [ "$(st 'select(.step == "review") | .judge | tojson')" = "$(jf 7 '.judge | tojson')" ] && [ "$(st 'select(.step == "review") | .sec')" = 40 ] \
+    || fail "a sum of usage by step is not the judge's under judge and the review's own ({input: 10, output: 5}) under review, or the review line's judge or seconds changed: $(jsum) $(cat "$ST/cards.jsonl")"
+}
+# Bug (#1741): a judge that failed (its call ran and exited 1) left no line, so its failure and reason were only inside the review line.
+t_judgelinefail() {
+  judging "[$(issue 7 2026-01-01)]"; echo "$NOGO" > "$STUB/review"; echo 'exit 1' > "$STUB/judge-cmd"
+  judgeone 7 "$STUB/review"; jwrite NO-GO
+  [ "$(jsteps)" = 'judge review ' ] && [ -n "$(jf 7 '.judge.failed // empty')" ] \
+    && [ "$(st 'select(.step == "judge") | [.result, .reason] | tojson')" = "$(jf 7 '["failed", .judge.failed] | tojson')" ] \
+    || fail "a failed judge has no judge line with result failed and its reason: $(cat "$ST/cards.jsonl")"
+}
+# Bug (#1741): a review with no finding has no judge, and a judge line was written for it.
+t_judgelineno() {
+  judging "[$(issue 7 2026-01-01)]"; printf '%s\n' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review"
+  judgeone 7 "$STUB/review"; jwrite GO
+  [ "$(jsteps)" = 'review ' ] || fail "a review with no finding left a judge line: $(cat "$ST/cards.jsonl")"
+}
+# Review passes of card c7 as card() runs them (lib/card.sh): cardreview(), then cardfix() for the review line it leaves, <passes>
+# times in a row on the one staged change of judging()'s stub build, in the state card() holds at its first review (the engine
+# runs with set -u, so each variable afterreview() reads is set). The review session is replaced by one that gives the review in
+# $T/$CASE/said (each run is a line of $T/$CASE/reviewruns); the judge (judged()), reusable() and the card's lines are the
+# real ones, so what the passes write is what card() writes. A review with no clear verdict blocks in cardreview(), which
+# ends the passes.
+jpasses() { # <passes>
+  FXWT=$T/$CASE/cards/c7
+  mkdir -p "$T/$CASE/cards" && git -C "$R" worktree add -q --detach "$FXWT" && (cd "$FXWT" && . "$STUB/build") && git -C "$FXWT" add -A \
+    || fail "the card's change could not be staged"
+  fx_in 'c=c7 n=7 wt=$FXWT br="" sprompt="" sf="" sk="" pk="" pt="" mode="" kept="" grown=1 fin="" refix="" fixtree="" vmode="" rounds=0 rv=$REVIEW prv="" fixed=0 finend="{}" finrev="" earlier="" rebased="" tfix="" lfix="" privfix="" p1fix="" isfu="" why=""
+    issue=$(jq -c ".[0]" "$STUB/issues.json")
+    redbrief() { :; }; trialflag() { :; }; lintgate() { return 0; }; began() { :; }
+    reviewed() { echo run >> "$T/$CASE/reviewruns"; cp "$T/$CASE/said" "$1.review" && echo "{\"model\":\"m\",\"effort\":\"medium\",\"usage\":{\"input\":7,\"output\":1},\"sec\":9}"; }
+    for pass in $(seq 1 '"$1"'); do go=end; cardreview; [ "$go" != end ] || break; go=end; cardfix; [ -z "$go" ] || break; done'
+  [ "$RC" = 0 ] || fail "the review pass of c7 did not run (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+# Bug (#1741): a review that reuses the last one (reusable(): no review session, so no judge) wrote the judge line of the review it
+# reuses, or one of its own: its line, with `reused` and no judge field, comes alone. Pass 1 judges a finding (the judge declines it,
+# so the review is a GO) and writes its judge line; pass 2 is on the same change, so reusable() finds that review and it stands.
+t_judgelinereused() {
+  judging "[$(issue 7 2026-01-01)]"; printf '%s\n' '[P1] a.txt:2 wrong word. Proof: a.txt:2' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$T/$CASE/said"
+  echo 'F1 DECLINE: its claim is wrong: the word is right' > "$STUB/judge.1"
+  jpasses 2
+  [ "$(wc -l < "$T/$CASE/reviewruns")" = 1 ] && [ "$(st 'select(.step == "review") | .reused != null' | tr '\n' ' ')" = 'false true ' ] \
+    || fail "the second review pass did not reuse the first review (a review session ran again, or no review line has reused): $(cat "$T/$CASE/reviewruns" 2>&1) $(st 'select(.step == "review") | [.reused, .result] | tojson')"
+  [ "$(jsteps)" = 'judge review review ' ] && [ "$(st 'select(.step == "review") | has("judge")' | tr '\n' ' ')" = 'true false ' ] \
+    || fail "a review that reuses the last one left a judge line of its own, or the first review has none: $(jsteps) $(st 'select(.step == "judge" or .step == "review") | [.step, .reused, has("judge")] | tojson')"
+  recok "$ST/cards.jsonl" "cardreview() and cardfix()"
+}
+# Bug (#1741): the judge line was written only where cardfix() writes the review line, not where cardreview() writes it for a review
+# with no clear verdict (it holds no USER-VISIBLE line, after the judge accepted its finding): that review's judge left no line.
+t_judgelinenone() {
+  judging "[$(issue 7 2026-01-01)]"; printf '%s\n' '[P1] a.txt:2 wrong word. Proof: a.txt:2' 'VERDICT: NO-GO' > "$T/$CASE/said"
+  echo 'F1 ACCEPT: the word is wrong. Cost to every card: none' > "$STUB/judge.1"
+  jpasses 1
+  [ "$(jsteps)" = 'judge review ' ] && [ "$(st 'select(.step == "review") | .result')" = none ] && [ "$(st 'select(.step == "judge") | .result')" = ok ] \
+    && st 'select(.step == "blocked") | .reason' | grep -q 'ended without one clear verdict' \
+    || fail "a review with no clear verdict (result none) and a judge did not leave a judge line before its review line and its block: $(st '[.step, .result] | tojson' | tr '\n' ' ')"
+  recok "$ST/cards.jsonl" "cardreview()"
 }

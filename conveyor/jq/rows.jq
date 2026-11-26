@@ -66,7 +66,7 @@ def row: . as $s | $s.first as $f | $s.r as $r | $s.l as $l
 # The log entry of a line: $i its place in the card's lines, $pt the time of the line before it.
 def logline($i; $pt): {step, of, result, time, counts, created, sec: (if .step == "pushed" then .sec else null end), pr: (if .step == "pushed" then .pr else null end), flaky: (if .step == "pushed" then .flaky else null end), failed: (if .step == "blocked" then .spent.step else null end), n: (if .step == "filed" then .followups | length else null end),
                # An issue line, a test line and a review that failed, a blocked line (its sentence), a fix line (what started it), a worktree line (how it took up a kept patch) and a lint line (its commands' results) keep their reason; a blocked line and a failed test line their output and a NO-GO review its findings (tail); a failed test line its failing files (failures).
-               reason: (if (.step == "issue" and .result != "ok") or (.step == "test" and .result != "pass") or (.step == "review" and (.result | IN("fail", "stopped")))
+               reason: (if (.step == "issue" and .result != "ok") or (.step == "test" and .result != "pass") or (.step == "review" and (.result | IN("fail", "stopped"))) or (.step == "judge" and .result == "failed")
                  or .step == "blocked" or .step == "fix" or .step == "worktree" or .step == "lint" then .reason else null end),
                # A lint line's gate (lintline(), lib/lint.sh): the track names the lint fix that starts next by it.
                gate: (if .step == "lint" then .lint.gate else null end),
@@ -120,7 +120,8 @@ def logline($i; $pt): {step, of, result, time, counts, created, sec: (if .step =
                # A grown line (growcheck(), lib/slices.sh): the files of the change before, and after the split (On); its rule
                # (mode), the slices filed and the judge's why: the track names an On split with none filed "kept whole", with its why.
                grown: (if .step == "grown" then {files: .grown.files, after: (.grown.after // null), mode: .grown.mode, filed: .grown.filed, why: .grown.why} else null end),
-               took: (if $i == 0 then null else (.time | fromdate) - ($pt | fromdate) end)} | with_entries(select(.value != null));
+               # A judge line has no time of its own: the judge's seconds are part of its review line's (see fold()).
+               took: (if $i == 0 or .step == "judge" then null else (.time | fromdate) - ($pt | fromdate) end)} | with_entries(select(.value != null));
 # A review record of a line written before BOTHTRIES kept what a failed first try counted: that try's usage was only in
 # firstTry.spent when it ran on another model or the retry read none. It is taken from there as BOTHTRIES now keeps it
 # (alsoUsed, or the usage), so the step's estimate holds it. A record BOTHTRIES now writes has it already: left as it is.
@@ -156,7 +157,9 @@ def start($k): {k: $k, an: 0, at: null, log: [], le: null, lc: null, lb: null, n
       wl: false, wr: false, rf: false, tc: null, tx: null, dep: null, wt: null, vis: null, dw: null, st: null, sp: null, pk: null};
 # The state after one more line of the card, $x.
 def fold($x): .an as $i | .at as $pt | .gt as $gt | ($x.step | IN("start", "filed", "pushed", "issue")) as $mark
-      | .log += [$x | logline($i; $pt)] | .an += 1 | .at = $x.time
+      # A judge line (reviewlines(), lib/card.sh) is written right before its review line: it moves no clock, so the review line
+      # takes the time since the line before the pass (a judge's seconds count as review seconds, as the review's own do).
+      | .log += [$x | logline($i; $pt)] | .an += 1 | .at = (if $x.step == "judge" then $pt else $x.time end)
       | if $x.step | IN("landed", "closed", "blocked", "pushed") then .le = ($x | endline) else . end
       | if $x.step | IN("landed", "closed") then .lc = ($x | endline) else . end
       | if $x.step == "blocked" then .lb = $x.time else . end
@@ -164,8 +167,8 @@ def fold($x): .an as $i | .at as $pt | .gt as $gt | ($x.step | IN("start", "file
           (if .n == 0 then .first = ($x | {card, issue, mainRed, testFile, noIssue, title, time, branch, base, beyond})
            elif $x.step | IN("seats", "build", "review", "test", "fix", "rebase") then .s1 += [$x | stepline($gt)]
            elif $x.step == "blocked" and ($x.spent | type) == "object" then .s2 += [$x | spentline($gt)] else . end)
-          | .n += 1 | .gt = $x.time
-          | if $x.step | IN("landed", "closed", "blocked") then . else .l = ($x | {step, result}) end
+          | .n += 1 | .gt = (if $x.step == "judge" then $gt else $x.time end)
+          | if $x.step | IN("landed", "closed", "blocked", "judge") then . else .l = ($x | {step, result}) end
           | .tc += $x.tokens.claude | .tx += $x.tokens.codex | .st += ($x.stalls // 0)
           | .rf = (.rf or $x.step == "rebase" or ($x.step == "test" and $x.result == "fail"))
           | if $x.step == "review" then .r += 1 | .vis = $x.visible

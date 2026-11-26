@@ -283,6 +283,11 @@ reviewer's that the pack's `models.allowed` lists for the review (Claude Code or
 so on), at medium effort. The Board's Judge row offers every installed CLI, says "same family as the reviewer" when
 the judge runs on the reviewer's CLI, and shows the model the judge runs on when it is left at default. When the judge cannot run, fails
 or gives an answer that cannot be read, every finding is accepted: no card is blocked by the judge. An answer with some lines that cannot be read keeps the decisions of the lines that can: a finding with no such line, or named by two lines, is accepted. The judge's line then keeps the last 2,000 characters of the answer and the number of findings decided.
+A review that the judge reads also leaves a line of step `judge` in the card's records, written right before the review's
+line. Its fields are `of` (`review`), `model`, `effort`, `sec`, `tokens`, `usage` and `stats` of the judge, and its result is `ok`,
+or `failed` with `reason`, the text of why. A sum of `usage` by step or by model holds the judge's tokens under step `judge`.
+The review's own line keeps the `judge` field as before. A review with no finding, and a review that reuses the last one,
+leave no `judge` line.
 An issue can have its own judge, builder and reviewer (`conveyor.sh control card`: docs/configuration.md, Settings
 for one card); its card uses them in place of the project's.
 

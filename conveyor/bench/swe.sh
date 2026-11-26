@@ -548,9 +548,9 @@ swe_cost() {
 # them but for cost. sessions: each build, review, fix and rebase line, less a reused review (reusable(),
 # lib/review.sh: no session ran), plus a review's failed first attempt (its firstTry: the review ran twice), plus each
 # judge that ran (its judge holds sec, which judgecall() writes only once a call ran; one refused its seat, or with
-# findings it could not read, holds failed alone).
+# findings it could not read, holds failed alone). A judge line (step judge) repeats the review's judge: it is left out.
 swe_cardsum() { # <seconds> <cards>
-  jq -sc --argjson m "$1" 'map(select(.issue == 1 and (.step | IN("start", "picked", "worktree", "deps", "brief") | not))) as $s
+  jq -sc --argjson m "$1" 'map(select(.issue == 1 and (.step | IN("start", "picked", "worktree", "deps", "brief", "judge") | not))) as $s
     | {fixRounds: ($s | map(select(.step == "fix")) | length),
        findingsFixed: ([range($s | length) as $i | select($s[$i].step == "review" and $s[$i].result == "NO-GO" and ($s[$i + 1:] | any(.step == "fix")))
          | $s[$i].counts | objects | add // 0] | add // 0),

@@ -184,7 +184,7 @@
                     elif $l.result == "split" then "would split for its size: \($l.grown.files) files" else "kept at its size: \($l.grown.files) files" end)
                   else $l.step end),
                  state: (if ($l.step == "test" and $l.result == "fail") or ($l.step == "issue" and $l.result != "ok") or ($l.step == "review" and ($l.result | IN("fail", "stopped")))
-                   or ($l.step == "blocked" and $l.stop != "yes") then "failed" else "done" end),
+                   or ($l.step == "judge" and $l.result == "failed") or ($l.step == "blocked" and $l.stop != "yes") then "failed" else "done" end),
                  sec: (if $l.step == "picked" then null else $l.took // null end), at: $l.time}
                 # A filed line's outside: the findings the judge found outside the card's change, each {finding, issue}.
                 + (if $l.step == "filed" then {n: ($l.n // 0)} + (if $l.outside then {outside: $l.outside} else {} end) elif $l.step == "review" then {counts: ($l.counts // null), judge: ($l.judge // null)}
@@ -194,7 +194,7 @@
                 # command's result and seconds, `skipped: missing <tool>`, `tools ran as installed`), a NO-GO review's findings (output), a failed test run's failing files (failures) and the end of its output, and a
                 # fix's reason: what started it when its line names it (a failed Done-when check, main moved), as the Board labels it.
                 + ({why: (if $l.step == "blocked" or ($l.step == "test" and $l.result != "pass") or ($l.step == "issue" and $l.result != "ok")
-                      or ($l.step == "review" and ($l.result | IN("fail", "stopped"))) or $l.step == "worktree" or $l.step == "lint" then $l.reason
+                      or ($l.step == "review" and ($l.result | IN("fail", "stopped"))) or ($l.step == "judge" and $l.result == "failed") or $l.step == "worktree" or $l.step == "lint" then $l.reason
                       # A test run that left linked test files out (testcap(), testrun.sh), or ran only the changed
                       # cases of its own test files (owncases(), testlist.sh): its list's note (rows.jq) says so.
                       elif $l.step == "test" and $l.list != null then $l.list.why

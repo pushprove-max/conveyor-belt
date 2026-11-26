@@ -386,6 +386,10 @@ its place. A declined finding causes no fix and no follow-up (`conveyor/README.m
 the judge also gets the findings that the round was told to fix, each with the reason that the judge gave when it
 accepted it.
 
+The judge's cost is a step of its own. Each review that the judge reads leaves a `judge` step in the card's steps, right
+before the review, with the judge's model, effort, seconds and usage. A judge that fails leaves it with the result
+`failed` and the reason. A review with no finding, and a review that reuses the last one, leave none.
+
 A fix session gets each finding with its `E<n>` ID. When the review finds a finding again after a fix round for it, its
 earlier fix did not hold. The session is then told one more rule: do not make the same guess narrower. It must record the fact where it is
 written, so that the reader does not have to infer it. When the code cannot tell, it takes the safe path: ask again,
