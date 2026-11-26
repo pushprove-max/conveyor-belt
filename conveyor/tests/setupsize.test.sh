@@ -20,6 +20,13 @@ t_setupsizebad() {
   out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --size 3 --size-files ':(glbo)*.sh' 2>&1) && fail "setup --size 3 --size-files ':(glbo)*.sh' exited 0: $out"
   ! jq -e 'any(.lint.commands[]?; .size)' "$S/.conveyor/project.json" >/dev/null && [ ! -e "$S/.conveyor/size-exempt.txt" ] || fail "setup with a pathspec git refuses wrote a size entry or the exempt file: $(jq -c .lint "$S/.conveyor/project.json") $out"
 }
+# Bug it catches (review of #1532, E2): the size entry was written after the survey issue was filed, so a pathspec git refuses
+# stopped the run after the issue was filed, and the run the owner corrected filed a second one.
+t_setupsizebadsurvey() {
+  local X out; setupdone
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --survey yes --size 3 --size-files ':(glbo)*.sh' 2>&1) && fail "setup --survey yes --size 3 --size-files ':(glbo)*.sh' exited 0: $out"
+  [ ! -e "$G/filed" ] || fail "setup filed an issue before it refused the pathspec ':(glbo)*.sh': $(cat "$G/filed") $out"
+}
 # Bugs it catches (R303, E1): with --size 1 --size-files '*', the exempt file was scanned empty, then grew past the limit and
 # failed its own size check; and the lookup of the pack in a long file list (over a pipe's buffer) died of grep -q closing the
 # pipe under pipefail, so the pack and the exempt file were left out.
@@ -51,6 +58,7 @@ t_setupsizegrow() {
 }
 # Bug it catches (E6): setup stopped after it wrote the size entry (here, the fast lane could not be made), and the run after
 # it found the entry there and did not name the pack and the exempt file in the exempt file, so the first lint failed on them.
+# The entry is now written after the lanes, so a stop there leaves no entry; the run after it writes the entry and its names.
 t_setupsizeretry() {
   local X out call i; setupdone; lanestubs
   call=(setup --fast-lane yes --research-lane no --size 1 --size-files '*')
@@ -58,10 +66,32 @@ t_setupsizeretry() {
   for i in 1 2 3; do printf 'a\nb\n' > "$S/two$i.txt"; done
   mkdir "$S-fast-lane" && touch "$S-fast-lane/in-the-way"
   out=$(cd "$S" && bash "$X" "${call[@]}" 2>&1) && fail "setup ${call[*]} with a folder in the fast lane's place exited 0: $out"
-  jq -e 'any(.lint.commands[]?; .size)' "$S/.conveyor/project.json" >/dev/null || fail "the run that stopped did not write the size entry, so this case proves nothing: $out"
+  ! jq -e 'any(.lint.commands[]?; .size)' "$S/.conveyor/project.json" >/dev/null || fail "the run that stopped at the fast lane wrote the size entry, which no exemption of the pack follows: $out"
   rm -r "$S-fast-lane"
   out=$(cd "$S" && bash "$X" "${call[@]}" 2>&1) || fail "setup ${call[*]} run again, with the fast lane's place free, exited non-zero: $out"
   sizelint "${call[*]:1}, run again after a run that stopped"
+}
+# Bug it catches (review of #1532, 1): a setup run after setup had finished named the pack in the exempt file when the owner's own
+# edit had made it grow past the limit, so the size check passed on growth it must report.
+t_setupsizererun() {
+  local X out n; setupdone
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --size 1000 --size-files .conveyor/project.json 2>&1) || fail "setup --size 1000 exited non-zero: $out"
+  n=$(wc -l < "$S/.conveyor/project.json")
+  jq --argjson n "$n" '(.lint.commands[] | select(.size).size.file) = $n' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json" || fail "the limit was not set to the pack's $n lines"
+  sizelint "--size 1000 --size-files .conveyor/project.json, with the limit then set to the pack's $n lines"
+  jq '.worktree.setup = "true"' "$S/.conveyor/project.json" > "$T/$CASE/p" && mv "$T/$CASE/p" "$S/.conveyor/project.json" || fail "the pack was not grown"
+  out=$(cd "$S" && bash "$X" lint 2>&1) && fail "the pack grew past its limit of $n lines and lint did not report it, so this case proves nothing: $out"
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no 2>&1) || fail "setup run again exited non-zero: $out"
+  ! grep -qxF .conveyor/project.json "$S/.conveyor/size-exempt.txt" || fail "setup run again named the pack, grown by the owner, in the exempt file: $(cat "$S/.conveyor/size-exempt.txt")"
+  if out=$(cd "$S" && bash "$X" lint 2>&1); then fail "lint passed on the pack grown past its limit after setup ran again: $out"; fi
+}
+# Bug it catches (review of #1532, 2): setup wrote .conveyor/test-machine.sh after the first count of files over the limit, so with
+# --size 1 --size-files '*' the script was over the limit and the first lint reported it.
+t_setupsizemachine() {
+  local X out; setupdone
+  out=$(cd "$S" && bash "$X" setup --fast-lane no --research-lane no --test-machine yes --size 1 --size-files '*' 2>&1) || fail "setup --test-machine yes --size 1 --size-files '*' exited non-zero: $out"
+  [ "$(wc -l < "$S/.conveyor/test-machine.sh")" -gt 1 ] || fail "setup wrote no .conveyor/test-machine.sh of more than the limit's 1 line, so this case proves nothing: $out"
+  sizelint "--test-machine yes --size 1 --size-files '*'"
 }
 # Bug it catches (R304): an exempt file whose last line had no newline got the next name glued on ('keep.txtbig.txt').
 t_setupsizenl() {

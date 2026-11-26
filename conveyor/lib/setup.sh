@@ -52,7 +52,8 @@ PACK0='{labels: {built: "awaiting-deploy", followup: "conveyor-followup", type: 
 # or --size no, with --size-files <pathspec> (one for each) and --size-skip <folder> (one for each, left out). On a
 # limit, setupsize() writes a size entry in the pack's lint.commands, the exempt file .conveyor/size-exempt.txt naming
 # each file the entry reads that is over the limit now, and that file in lint.policy; at its end each run, setup names the
-# pack and that file there too when the entry reads them and they are over the limit by then (sizeself()).
+# pack and that file there too when the entry reads them and they are over the limit by then (sizeself()). The entry is
+# written last, after every other file setup writes, and only on the run that finds the pack with none.
 # Before the host file names the project, the control record is written when there is none, with new issues and every
 # open issue held (heldstart()).
 # With --foreman it then sets up Foreman mode (foreman/foreman.sh setup), which `conveyor.sh foreman` starts.
@@ -186,6 +187,13 @@ setup() { # as SETUP_USAGE
         || need+=("--lint-shared <yes or no: pyproject.toml holds ruff's config: put it in the pack's lint.policy, so that a card that changes it stops for your yes?>")
     fi
   fi
+  # Before anything outside the checkout is changed (the survey issue, the labels): a pathspec git refuses stops the run here,
+  # so a run the owner corrects files nothing twice. A pack that has a size entry already gets none (setupsize()).
+  if [ -n "$sz" ] && [ "$sz" != no ]; then
+    for x in "${szs[@]}"; do szf+=(":(exclude)${x%/}/*"); done
+    jq -e 'any(.lint.commands[]?; .size)' "$PACK" >/dev/null 2>&1 || git -C "$MAIN" ls-files -z --cached --others --exclude-standard -- "${szf[@]}" > /dev/null \
+      || { echo "conveyor: the files of $MAIN could not be listed for the size limit: check the --size-files and --size-skip pathspecs" >&2; return 1; }
+  fi
   if [ -e "$PACK" ]; then
     [ -n "$sv" ] || { packget test.firstSurvey first || return 1; [ -n "$first" ] || need+=("$ask"); }
     [ ${#need[@]} = 0 ] || { printf 'conveyor: setup needs:%s\n' "$(printf ' %s;' "${need[@]}")" >&2; return 2; }
@@ -235,12 +243,6 @@ setup() { # as SETUP_USAGE
   fi
   if [ "$lra" = yes ] && [ -n "$lro" ] && [ "$lro" != '[]' ]; then setupready "$p" "$lro" "$lsa" || return 1; fi
   [ -z "$lc" ] || setuplint "$p" "$lc" "${lfs[@]}" || return 1
-  if [ -n "$sz" ] && [ "$sz" != no ]; then
-    for x in "${szs[@]}"; do szf+=(":(exclude)${x%/}/*"); done
-    setupsize "$p" "$sz" "${szf[@]}" || return 1
-  fi
-  # Each run, so a size entry the pack has already is said too (lintother()).
-  lintother "$MAIN" || return 1
   if [ "$tpa" = yes ] && [ -n "$tp" ]; then
     tp=$(jq -c 'map(.p)' <<<"$tp") || return 1
     jq --argjson p "$tp" '.tests.patterns = $p' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
@@ -311,7 +313,11 @@ setup() { # as SETUP_USAGE
   # A Board left on older Conveyor would keep running it (it may not read the host file just written): started again.
   boardrenew
   agentfiles
-  sizeself || return 1
+  # Last of the writes, so the first count sees the files setup wrote (.conveyor/test-machine.sh, say)
+  # and no stop after the entry leaves it without its exemptions (sizeself(), run by setupsize()). Each run says the
+  # languages the entry covers (lintother()), one the pack has already too.
+  [ "${#szf[@]}" = 0 ] || setupsize "$p" "$sz" "${szf[@]}" || return 1
+  lintother "$MAIN" || return 1
   packget test.full full || return 1
   echo "conveyor: landed cards wait for Push landed on the Board until push is turned on in the Rules tab$([ -n "$full" ] || echo "; Push landed needs the pack's test.full, the full test suite: add it")"
 }
@@ -500,8 +506,9 @@ exemptadd() {
 # lint.commands, SIZE_EXEMPT added to lint.policy, and SIZE_EXEMPT in the main checkout naming each file the entry
 # reads (a tracked file, or one not tracked and not ignored) that already has more lines than the limit, so the limit
 # stops only what grows past it. A file under a folder that a pathspec excludes is not read, so it is not named. A line
-# already in SIZE_EXEMPT stays. The pack and SIZE_EXEMPT are counted last, when setup has written them (sizeself()).
-# A pathspec git refuses writes nothing. A pack that already has a size entry is left as it is.
+# already in SIZE_EXEMPT stays. The pack and SIZE_EXEMPT are counted last, once the entry is written (sizeself(), which
+# setupsize() runs). A pathspec git refuses writes nothing. A pack that already has a size entry is left as it is, and
+# so is its exempt file: a later run never names a file the owner's edits made grow.
 setupsize() {
   local p=$1 lim=$2 out rc f t new=''; shift 2
   local -a fs
@@ -522,12 +529,13 @@ setupsize() {
     | .lint.policy = (.lint.policy // [] | if index($e) then . else . + [$e] end)' "$PACK" > "$PACK.new" && pinreads "$p" "$PACK.new" && mv "$PACK.new" "$PACK" \
     || { rm -f "$PACK.new"; echo "conveyor: the size entry could not be written in the pack's lint.commands" >&2; return 1; }
   echo "conveyor: wrote a size entry in the pack's lint.commands: no file over $lim lines on $(printf '%s, ' "$@" | sed 's/, $//'); $SIZE_EXEMPT names the files that are over it now (the pack's commit takes it too), and is in the pack's lint.policy, so a card that changes it stops for your yes"
+  sizeself
 }
-# sizeself: once setup has written the pack, the pack and SIZE_EXEMPT named in SIZE_EXEMPT when a size entry of the pack
-# that has SIZE_EXEMPT as its exempt file reads them and they are over its limit then (lintsizelist(): the size check's
-# own count). The pack's own line is added first, since it makes SIZE_EXEMPT longer. A file at the limit is not named.
-# It reads the pack, not what setupsize() did in this run, so a run that stopped after the entry was written (a lane that
-# could not be made) is finished by the next run, which finds the entry already there.
+# sizeself: right after setupsize() wrote the entry, the pack and SIZE_EXEMPT named in SIZE_EXEMPT when a size entry of the
+# pack that has SIZE_EXEMPT as its exempt file reads them and they are over its limit then (lintsizelist(): the size
+# check's own count). The pack's own line is added first, since it makes SIZE_EXEMPT longer. A file at the limit is not
+# named. Only setupsize() calls it, on the run that writes the entry, with nothing that can stop the run between: a
+# later run would name growth the owner made, which the size check must report.
 sizeself() {
   local f l
   jq -e --arg e "$SIZE_EXEMPT" 'any(.lint.commands[]?; .size.exempt == $e)' "$PACK" >/dev/null || return 0
