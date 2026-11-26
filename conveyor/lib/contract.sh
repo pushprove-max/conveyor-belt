@@ -27,15 +27,60 @@ contracthook() {
 # The check on the commits <base>..<tip>, in <dir>; its output in CONTRACT_OUT. 0: the range passes, or main's pre-push
 # hook runs no such check (contracthook). 2: a refusal (exit 2 with a BLOCKED line). 1: the check could not run
 # (CONTRACT_OUT says why).
-contractrange() { # <dir> <base> <tip>
-  local h rc
+# The push of <tip> starts its check at the checker's own answer (--base-only <tip>, the base main's pre-push hook asks
+# for): with pushes not made on landing, a landed card with no review record that covers it (a leftover finding and no
+# filed follow-up) keeps that answer before it. A push sends a commit main has been at (Push landed: the one its run
+# tested), and the next push starts at the checker's answer from that commit (--base-only <tip> <from>). So the range
+# from the answer, and from the answer from each commit of main's reflog between it and <base>, must pass. Bugs: the
+# check read <base>..<tip> alone, so two cards that each passed landed and the push of both was refused; read from the
+# answer alone, a card passed on a test an earlier unpushed card changed, and the push that starts after that card was
+# refused; and read from every commit up to <base>, a card was refused from a commit inside a batch, where main never
+# was. An answer that is not under <base> (an older checker that has no --base-only, no remote branch) is <base>: no
+# range leaves out the card's own change. <covered>: the commits under <base> that the landing of <tip> lands with it
+# (the cards of its batch before it) whose landed lines the checker will read as reviewed (contractcovered()): it has no
+# record of them yet, so its answer stops at them, though the push, which reads their records, does not (contractbase()).
+contractrange() { # <dir> <base> <tip> [<covered>, one a line]
+  local h rc b ps p ms bs
   CONTRACT_OUT=''
   h=$(contracthook) || return 0
   [ -f "$h" ] || { CONTRACT_OUT="main's pre-push hook runs the persisted-contract check, and $h is missing"; return 1; }
-  CONTRACT_OUT=$(cd "$1" && bash "$h" --contract-range "$2" "$3" 2>&1 < /dev/null 8>&-); rc=$?
+  b=$(contractbase "$1" "$h" "$2" "$3" "${4-}")
+  ps=$(git -C "$1" rev-list --ancestry-path "$b..$2" 2>&1) || { CONTRACT_OUT="the commits from $b to $2 cannot be listed: $ps"; return 1; }
+  # The commits main has been at (its reflog, and main now when it keeps none) on the path from the answer to <base>.
+  ms=$( { git -C "$1" reflog show --format=%H "refs/heads/$BRANCH" -- 2>/dev/null; git -C "$1" rev-parse -q --verify "refs/heads/$BRANCH^{commit}"; } \
+    | grep -Fx -f <(printf '%s\n' "$ps") | sort -u)
+  bs=$b
+  for p in $ms; do bs+=$'\n'$(contractbase "$1" "$h" "$2" "$3" "${4-}" "$p"); done
+  for p in $(awk '!seen[$0]++' <<<"$bs"); do
+    CONTRACT_OUT=$(cd "$1" && bash "$h" --contract-range "$p" "$3" 2>&1 < /dev/null 8>&-); rc=$?
+    [ $rc = 0 ] || break
+  done
   [ $rc != 0 ] || return 0
   [ $rc = 2 ] && [[ $CONTRACT_OUT == *BLOCKED:* ]] && return 2
   CONTRACT_OUT="exit $rc: $CONTRACT_OUT"; return 1
+}
+# The checker's answer for <tip> (--base-only; with <from>, as if the remote branch were at that commit), in <dir>. With
+# no <from>: <base> when it gives none, or one that is not under <base>. With <from>: <from> when it gives none, or one
+# that is not under <base> and at or after <from>: an older checker that has no <from> gives its answer from the remote
+# branch, which can leave out a commit after <from> that the push from <from> checks (bug: a card landed on such a
+# commit's test, and that push refused it). When the commit just after the answer, toward <base>, is in <covered>, the
+# answer is the checker's from that commit, as the push reads it once those records are written (bug: a batch card was
+# refused from a commit of its batch whose record was not yet written, where no push starts).
+contractbase() { # <dir> <checker> <base> <tip> <covered, one a line> [<from>]
+  local a n
+  while :; do
+    a=$(cd "$1" && bash "$2" --base-only "$4" ${6:+"$6"} 2>/dev/null < /dev/null 8>&-) && a=$(git -C "$1" rev-parse -q --verify "${a:-none}^{commit}" 2>/dev/null) \
+      && git -C "$1" merge-base --is-ancestor "$a" "$3" 2>/dev/null && { [ -z "${6-}" ] || git -C "$1" merge-base --is-ancestor "$6" "$a" 2>/dev/null; } || a=${6:-$3}
+    n=$(git -C "$1" rev-list --reverse --ancestry-path "$a..$3" 2>/dev/null | head -n 1)
+    [ -n "$n" ] && grep -qxF -e "$n" <<<"$5" || break
+    set -- "$1" "$2" "$3" "$4" "$5" "$n"
+  done
+  echo "$a"
+}
+# The landed line <json> (landone(), lib/claim.sh) is one the checker reads as reviewed (conveyor_reviewed() in
+# .claude/hooks/adversarial-review-gate.sh, the same rule): no leftover finding, or each one filed as a follow-up.
+contractcovered() { # <json>
+  jq -e '.leftover == null or ((.leftover == true) and (.followups | type) == "array" and (.followups | length) > 0)' <<<"$1" > /dev/null 2>&1
 }
 
 # The check on <worktree>'s staged change (HEAD to a commit of its index), in the worktree, as contractrange().

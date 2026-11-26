@@ -165,6 +165,155 @@ t_contractbatchland() {
     || fail "the batch of #7 (src/repositories/gizmo-note.ts naming Gizmo) then #8 (shared/gizmo.ts) landed, or #8 is still ready: $(cat "$T/$CASE/run.out"); ready: $(cat "$CARDS/c8-8.ready" 2>&1)"
 }
 
+# Bug it catches: with pushes not made on landing, the push checks every commit from the checker's base (--base-only),
+# which stays before a landed card that no review record covers, but landone() checked each card's own commit alone.
+# #8 (shared/gizmo.ts) lands alone with a leftover finding and no filed follow-up; #7 (gizmo-note.ts naming Gizmo) then
+# passes alone, and the push of both is refused. Through land(), one card after the other: #7 does not land, the
+# check's message names #8's writer, and main stays at #8's commit.
+t_contractpushrange() {
+  contractmain '[]'
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  for n in 7 8; do landed "$n" | jq -c --arg c "c$n-$n" '.card = $c | .step = "picked"' >> "$ST/cards.jsonl"; done
+  git -C "$R" worktree add -q --detach "$CARDS/c8-8" main && mkdir -p "$CARDS/c8-8/shared" && echo 'export interface Gizmo { id: string }' > "$CARDS/c8-8/shared/gizmo.ts" \
+    && git -C "$CARDS/c8-8" add -A || fail "#8's change"
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'cd "$R" || exit 9
+    land c8-8 8 "$CARDS/c8-8" "title 8 (#8)" "{\"leftover\":true,\"followups\":[]}"; echo "land 8: $?"; git rev-parse main > "$T/$CASE/at8"
+    git worktree add -q --detach "$CARDS/c7-7" main && echo "// Gizmo" > "$CARDS/c7-7/src/repositories/gizmo-note.ts" && git -C "$CARDS/c7-7" add -A || exit 9
+    land c7-7 7 "$CARDS/c7-7" "title 7 (#7)" "{}"; echo "land 7: $?"'
+  grep -qx 'land 8: 0' "$T/$CASE/run.out" || fail "#8 (shared/gizmo.ts) did not land alone, so this case proves nothing: $(cat "$T/$CASE/run.out")"
+  grep -qx 'land 7: 1' "$T/$CASE/run.out" && [ "$(git -C "$R" rev-parse main)" = "$(cat "$T/$CASE/at8")" ] \
+    && grep -qF 'BLOCKED: persisted-contract writer shared/gizmo.ts' "$T/$CASE/run.out" \
+    || fail "#7 (src/repositories/gizmo-note.ts naming Gizmo) landed after #8 (shared/gizmo.ts, landed with no filed follow-up), so the push of both is refused: $(cat "$T/$CASE/run.out")"
+}
+# Bug it catches: the check read only from the push's base, so a card passed on a test that an earlier unpushed card
+# changed. Push landed then pushes that earlier commit alone, and the next push, from it, has no changed test. #8 adds
+# the writer saveGadget with a test naming readWidget and saveGadget, and lands with a leftover finding and no filed
+# follow-up; #7 then adds the writer saveGizmo with no test. From origin/main (the push's base) #7 passes, on #8's test;
+# from #8's commit it is refused. Through land(): #7 does not land, with the check's message, and main stays at #8.
+t_contractpushborrow() {
+  contractborrow
+}
+# Bug it catches: an older installed checker, which has no <from>, answers --base-only <tip> <from> from origin/main,
+# so the check read only the range that holds #8's test, and #7 landed on it. The cards of t_contractpushborrow with
+# such a checker: #7 does not land.
+t_contractpushold() {
+  # shellcheck disable=SC2016 # expanded in the checker's shell
+  contractborrow '[ "$1" != --base-only ] || set -- "$1" "$2"; exec bash "$SRC/../.claude/hooks/adversarial-review-gate.sh" "$@"'
+}
+# The cards of t_contractpushborrow, checked by the installed checker or by <checker> (a script, $SRC set).
+contractborrow() { # [<checker>]
+  contractmain '[]'
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  for n in 7 8; do landed "$n" | jq -c --arg c "c$n-$n" '.card = $c | .step = "picked"' >> "$ST/cards.jsonl"; done
+  git -C "$R" worktree add -q --detach "$CARDS/c8-8" main && (cd "$CARDS/c8-8" && eval "$GADGET" && eval "$COVER") && git -C "$CARDS/c8-8" add -A || fail "#8's change"
+  [ -z "${1-}" ] || printf '%s\n' "SRC='$SRC'" "$1" > "$T/$CASE/checker.sh" || fail "the checker"
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in '[ ! -e "$T/$CASE/checker.sh" ] || contracthook() { echo "$T/$CASE/checker.sh"; }
+    cd "$R" || exit 9
+    land c8-8 8 "$CARDS/c8-8" "title 8 (#8)" "{\"leftover\":true,\"followups\":[]}"; echo "land 8: $?"; git rev-parse main > "$T/$CASE/at8"
+    git worktree add -q --detach "$CARDS/c7-7" main && printf "%s\n" "export function saveGizmo(id) {" "  return id;" "}" >> "$CARDS/c7-7/src/repositories/widget-repository.ts" \
+      && git -C "$CARDS/c7-7" add -A && h=$(cd "$CARDS/c7-7" && git commit-tree "$(git write-tree)" -p HEAD -m 7) || exit 9
+    bash "$(contracthook)" --contract-range origin/main "$h" < /dev/null && echo "from origin/main: passes"
+    land c7-7 7 "$CARDS/c7-7" "title 7 (#7)" "{}"; echo "land 7: $?"'
+  grep -qx 'land 8: 0' "$T/$CASE/run.out" && grep -qx 'from origin/main: passes' "$T/$CASE/run.out" \
+    || fail "#8 (saveGadget with its test) did not land, or #7 (saveGizmo, no test) does not pass from origin/main on #8's test, so this case proves nothing: $(cat "$T/$CASE/run.out")"
+  grep -qx 'land 7: 1' "$T/$CASE/run.out" && [ "$(git -C "$R" rev-parse main)" = "$(cat "$T/$CASE/at8")" ] && grep -qF "nothing was landed: $MSG" "$T/$CASE/run.out" \
+    || fail "#7 (saveGizmo in src/repositories/widget-repository.ts, no changed test) landed on #8's unpushed test, so the push that starts at #8 is refused (checker: ${1:-installed}): $(cat "$T/$CASE/run.out")"
+}
+# Bug it catches: the check read from every commit between the push's base and the card's, though a push starts only
+# at the checker's answer from a commit main has been at (--base-only <tip> <from>). #6 (src/six.ts and a test naming
+# Gizmo and readWidget) lands with a leftover finding and no filed follow-up; the batch of #7 (src/seven.ts) then #8
+# (shared/gizmo.ts) moves main once. #9 adds "// Gizmo" beside readWidget: it passes from origin/main and from #8's
+# commit (the checker's answer from #6's), the bases a push can start at, and is refused from #7's commit, where main
+# never was, and from #6's, where no push starts. Through land(): #9 lands.
+t_contractbatchstart() {
+  contractmain '[]'
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  for n in 6 7 8 9; do landed "$n" | jq -c --arg c "c$n-$n" '.card = $c | .step = "picked"' >> "$ST/cards.jsonl"; done
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'cd "$R" || exit 9
+    wt() { git worktree add -q --detach "$CARDS/c$1-$1" main && (cd "$CARDS/c$1-$1" && eval "$2") && git -C "$CARDS/c$1-$1" add -A; }
+    wt 6 "echo \"export const six = 6;\" > src/six.ts && mkdir -p src/repositories/__tests__ && echo \"Gizmo readWidget\" > src/repositories/__tests__/gizmo.test.ts" \
+      && land c6-6 6 "$CARDS/c6-6" "title 6 (#6)" "{\"leftover\":true,\"followups\":[]}" || exit 9
+    wt 7 "echo \"export const seven = 7;\" > src/seven.ts" && wt 8 "mkdir -p shared && echo \"export interface Gizmo { id: string }\" > shared/gizmo.ts" \
+      && land c7-7 7 "$CARDS/c7-7" "title 7 (#7)" "{}" c8-8 8 "$CARDS/c8-8" "title 8 (#8)" "{}" || exit 9
+    b6=$(git rev-parse main~2) && b7=$(git rev-parse main~1) \
+      && wt 9 "awk '\''{ print } /^export function readWidget/ { print \"  // Gizmo\" }'\'' src/repositories/widget-repository.ts > w && mv w src/repositories/widget-repository.ts" \
+      && h=$(cd "$CARDS/c9-9" && git commit-tree "$(git write-tree)" -p HEAD -m 9) || exit 9
+    for p in origin/main main "$b7" "$b6"; do bash "$(contracthook)" --contract-range "$p" "$h" < /dev/null > /dev/null 2>&1; echo "from $p: $?"; done | sed "s|$b7|#7|; s|$b6|#6|"
+    land c9-9 9 "$CARDS/c9-9" "title 9 (#9)" "{}"; echo "land 9: $?"'
+  [ "$(grep -c '^from \(origin/main\|main\): 0$' "$T/$CASE/run.out")" = 2 ] && [ "$(grep -c '^from #[67]: 2$' "$T/$CASE/run.out")" = 2 ] \
+    || fail "#9 (// Gizmo beside readWidget) does not pass from origin/main and #8's commit, or is not refused from #7's and #6's commits, so this case proves nothing: $(cat "$T/$CASE/run.out")"
+  grep -qx 'land 9: 0' "$T/$CASE/run.out" && git -C "$R" show main:src/repositories/widget-repository.ts | grep -qx '  // Gizmo' \
+    || fail "#9 (// Gizmo beside readWidget) did not land, refused from #7's or #6's commit, which no push starts at: $(cat "$T/$CASE/run.out")"
+}
+# Bug it catches: in a batch, the checker has no landed line yet for the cards before the card, so its answer stopped
+# at one of them, though the push, which reads their lines, starts after them. One batch of three reviewed cards: #5
+# (a test naming Gizmo and readWidget), #6 (shared/gizmo.ts), #7 ("// Gizmo" beside readWidget). The checker's answer
+# for #7 stops at #5's commit (a test-only commit it skips), and from there #6 and #7 are refused, as the check after
+# the landing shows; the push, with all three lines, checks none of them. Through land(): all three land.
+t_contractbatchcovered() {
+  contractmain '[]'
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  for n in 5 6 7; do landed "$n" | jq -c --arg c "c$n-$n" '.card = $c | .step = "picked"' >> "$ST/cards.jsonl"; done
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'cd "$R" || exit 9
+    wt() { git worktree add -q --detach "$CARDS/c$1-$1" main && (cd "$CARDS/c$1-$1" && eval "$2") && git -C "$CARDS/c$1-$1" add -A; }
+    wt 5 "mkdir -p src/repositories/__tests__ && echo \"Gizmo readWidget\" > src/repositories/__tests__/gizmo.test.ts" \
+      && wt 6 "mkdir -p shared && echo \"export interface Gizmo { id: string }\" > shared/gizmo.ts" \
+      && wt 7 "awk '\''{ print } /^export function readWidget/ { print \"  // Gizmo\" }'\'' src/repositories/widget-repository.ts > w && mv w src/repositories/widget-repository.ts" || exit 9
+    land c5-5 5 "$CARDS/c5-5" "title 5 (#5)" "{}" c6-6 6 "$CARDS/c6-6" "title 6 (#6)" "{}" c7-7 7 "$CARDS/c7-7" "title 7 (#7)" "{}"; echo "land: $?"
+    bash "$(contracthook)" --contract-range main~2 main < /dev/null > /dev/null 2>&1; echo "from #5: $?"'
+  grep -qx 'land: 0' "$T/$CASE/run.out" && [ "$(git -C "$R" rev-list --count origin/main..main)" = 3 ] \
+    && git -C "$R" show main:src/repositories/widget-repository.ts | grep -qx '  // Gizmo' \
+    || fail "the batch of #5 (test naming Gizmo and readWidget), #6 (shared/gizmo.ts) and #7 (// Gizmo beside readWidget) did not land, refused from a commit of its batch: $(cat "$T/$CASE/run.out")"
+  grep -qx 'from #5: 2' "$T/$CASE/run.out" || fail "#6 and #7 are not refused from #5's commit, so this case proves nothing: $(cat "$T/$CASE/run.out")"
+}
+
+# A checker for main's pre-push hook (contracthook() names it in contractcardwith()). Each --contract-range call adds
+# "main" or "card" (where it ran) to $STUB/checks. A range with a changed test passes. Else it refuses in main's
+# checkout, that is at landone(); in a card's worktree, at the landing gate, it refuses only after such a refusal, and
+# only when <gate too> is 1: a check that comes to refuse the change between its gate and its landing.
+landrefusing() { # <gate too: 0 or 1>
+  # shellcheck disable=SC2016 # expanded in the checker's shell
+  printf '%s\n' 'case $1 in --contract-range) ;; *) exit 0 ;; esac' \
+    'w=card; [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ] || w=main; echo "$w" >> "$STUB/checks"' \
+    '! git diff --name-only "$2" "$3" | grep -q __tests__ || exit 0' \
+    "[ \"\$w\" = main ] || { [ -e \"\$STUB/refused\" ] && [ $1 = 1 ]; } || exit 0" \
+    ': > "$STUB/refused"; echo "BLOCKED: persisted-contract writer src/repositories/widget-repository.ts needs one changed test that names both it and a changed reader." >&2; exit 2'
+}
+# contractcard() with the checker <checker> in place of the installed one: card() runs card #7 to its landing or block.
+# A whole card run: only it shows where cardland() sends a card that land() refused.
+contractcardwith() { # <checker> <build> [<fix>]
+  contractmain "[$(issue 7 2026-01-01)]"
+  printf '%s\n' "$1" > "$T/$CASE/checker.sh" || fail "the checker"
+  printf '%s\n' "if grep -q '^# Persisted-contract check' \"\$STUB/brief\"; then sed -n '/^# Persisted-contract check/,\$p' \"\$STUB/brief\" > \"\$STUB/fixbrief\"; ${3:-echo fixed >> a.txt}; else $2; fi" > "$STUB/build"
+  for i in 1 2 3 4 5 6; do echo "$GO" > "$STUB/review.$i"; done
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  fx_in 'contracthook() { echo "$T/$CASE/checker.sh"; }
+    cd "$R" && read -r c n _ <<<"$(locked pick "" "" "$(asked)")" && [ "$n" = 7 ] || { echo "pick took ${n:-nothing}"; exit 3; }; card "$c" "$n"'
+  [ "$RC" != 3 ] && [ -s "$ST/cards.jsonl" ] || fail "#7 was not picked (exit $RC): $(tail -n 20 "$T/$CASE/run.out")"
+}
+# Bug it catches: a solo card that landone()'s check refused was blocked with no fix session, though the card goes back
+# to its landing gate. The gate passes the change, the landing refuses it, and the gate then refuses it too: its fix
+# session gets the check's message, adds a test, and the card lands at its second landing.
+t_contractlandgate() {
+  contractcardwith "$(landrefusing 1)" "$GADGET" "$COVER"
+  [ "$(grep -cx main "$STUB/checks")" = 2 ] && grep -qF 'BLOCKED: persisted-contract writer src/repositories/widget-repository.ts' "$STUB/fixbrief" 2>/dev/null \
+    && [ -n "$(st 'select(.step == "landed") | .sha')" ] \
+    || fail "the card whose landing the check refused (change: $GADGET) did not go back to its gate, get its fix session ($COVER) and land: checks $(paste -sd ' ' "$STUB/checks" 2>&1); $(st 'select(.step | IN("blocked", "landed")) | "\(.step) \(.reason)"')"
+}
+# Bug it catches: a refusal at the landing that the gate does not give sends the card between the two without end. The
+# gate passes the change each time; the second refusal at the landing (the second check in main's checkout) blocks the
+# card with the check's message.
+t_contractlandagain() {
+  contractcardwith "$(landrefusing 0)" "$GADGET"
+  [ "$(grep -cx main "$STUB/checks")" = 2 ] && [ ! -e "$STUB/fixbrief" ] \
+    && [[ $(st 'select(.step == "blocked") | .reason') == 'contract: the persisted-contract check refuses card '*'BLOCKED: persisted-contract writer'* ]] \
+    || fail "the card whose landing the check refused twice (change: $GADGET), its gate passing, was not blocked at the second: checks $(paste -sd ' ' "$STUB/checks" 2>&1); $(st 'select(.step | IN("blocked", "landed")) | "\(.step) \(.reason)"')"
+}
+
 # Bug it catches: a project whose pre-push hook does not run the check gets a refusal it would never meet at push. With
 # no such hook, the gate passes the same change and runs no fix session.
 t_contractnohook() {

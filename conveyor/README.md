@@ -1262,7 +1262,17 @@ cannot run, blocks the card with a reason that starts `contract:`. With batches 
 after its lint (`contractwait`, in `settle()`): a refusal removes its `<worktree>.ready`, so no batch takes it, and its
 landing gate deals with it at its turn. `landone()` (`lib/claim.sh`) runs the check again on each commit it is about to
 land, from the commit before it: in a batch, that is the commit of the card before it. A refusal there, or a check that
-cannot run, lands nothing and removes the card's `<worktree>.ready`.
+cannot run, lands nothing and removes the card's `<worktree>.ready`, and `cardland()` sends the card back to its landing
+gate; the same refusal at its next landing (`cland`) blocks it. Each check (`contractrange`) reads every range a push of
+the range's tip can check: from the checker's `--base-only <tip>` answer, and from its `--base-only <tip> <from>`
+answer for each commit of main's reflog between that answer and the range's base (the base of a push made after that
+commit was pushed). An answer that is not a commit under the range's base is the range's base, and an answer from
+`<from>` that is not at or after `<from>` (a checker that has no `<from>`) is `<from>`. When the commit just after an
+answer is a card of the same batch whose landed line the checker reads as reviewed (`contractcovered`), the answer is
+the checker's answer from that commit, as a push reads it once the batch has landed. All of them must pass.
+So with pushes not made on landing, a landed card that no review record covers is checked with the cards after it, and
+a card after it is also checked without it, as a push that starts after it checks the card. A commit inside a batch,
+where main never was, starts no check unless the checker's answer from a commit of main is that commit.
 
 Then `cardtest()` runs the push checks (`pushgaterun`, `lib/contract.sh`) when main's pre-push hook names
 `CONVEYOR_PUSH_GATE`. To let the push checks run before a card lands, a project's pre-push hook names that variable:

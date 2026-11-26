@@ -149,8 +149,8 @@ conveyor_reviewed() {
     | "\(.sha) \(.card)"' "$f" 2>/dev/null || true
 }
 
-reviewed_base() {
-  local tip=${1:-HEAD} fallback=${REVIEW_GATE_BASE_REF:-origin/main} base sha old ahead onpath covered=$'\n'
+reviewed_base() { # [<tip>] [<from>: the remote branch's commit, origin/main by default]
+  local tip=${1:-HEAD} fallback=${2:-${REVIEW_GATE_BASE_REF:-origin/main}} base sha old ahead onpath covered=$'\n'
   git rev-parse --verify -q "$fallback" >/dev/null 2>&1 || { echo "$fallback"; return; }
   ahead=$(git rev-list --reverse --topo-order "$fallback..$tip" 2>/dev/null)
   [ -n "$ahead" ] || { echo "$fallback"; return; }
@@ -529,7 +529,10 @@ persisted_contract_ok() { # <mode>
 # One definition of the base: pre-push asks for it rather than keeping its own
 # copy, so the hook and the recorder cannot drift apart on what is unreviewed.
 if [ "$1" = "--base-only" ]; then
-  # `--base-only <tip>` answers for that tip (a pushed ref); with none, HEAD's answer as before.
+  # `--base-only <tip>` answers for that tip (a pushed ref); with none, HEAD's answer as before. `--base-only <tip>
+  # <from>` answers as if the remote branch were at <from>: the base of a push made once <from> was pushed (Conveyor's
+  # contractrange() asks it for each commit main has been at).
+  if [ -n "${3-}" ]; then reviewed_base "$2" "$3"; exit 0; fi
   printf '%s\n' "${REVIEW_GATE_BASE_REF:-$(reviewed_base "${2:-HEAD}")}"
   exit 0
 fi

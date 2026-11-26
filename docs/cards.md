@@ -247,7 +247,13 @@ session already had blocks the card with the reason `contract: the persisted-con
 after its fix session; nothing landed: <the check's BLOCKED line>`. With batches on, a card that waits to land runs the same
 check after its lint. A refusal stops its checks and tests, no batch takes it, and its landing gate deals with it.
 The check also runs on each commit just before it lands, so a card in a batch is checked on top of the cards before
-it. A refusal there lands nothing, and the card goes back to its own landing gate.
+it. A refusal there lands nothing, and the card goes back to its own landing gate. If the landing gate then
+passes the change and the same refusal comes again when the card lands, the card is blocked.
+Each check reads all the commits that a push can check. With **Push on landing** off, a landed card that is not pushed and
+has a finding that got no follow-up issue is checked again with the cards after it. Each card after it must also pass
+without it, because a push can start after it. A check does not start at a commit inside a batch where no push can start.
+In a batch, a card before it that has no leftover finding, or a follow-up issue for each one, is not checked again
+with it, because a push does not check that card.
 
 Then the landing gate runs the push checks on the card's change, when the project's pre-push hook names the push-gate
 variable. For the push checks to run before a card lands, add that variable to the project's pre-push hook: its name is

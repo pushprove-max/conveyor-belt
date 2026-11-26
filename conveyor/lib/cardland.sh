@@ -495,7 +495,7 @@ capfree() { # <the loop's own cards in progress, "<pid> <card>" one a line> <the
 # The land step, its tests passed: files the follow-ups of a last review and lands, run again while a release run,
 # an ordered or ready card or main moving holds it. go: landed, again (cardlanding() again), next or out.
 cardland() {
-  local capdue='' # a landing of this call did not land: the card counts against the cap again and waits for room before it works (caphold())
+  local capdue='' cb # capdue: a landing of this call did not land: the card counts against the cap again and waits for room before it works (caphold()); cb: the BLOCKED line of a contract refusal
   while :; do
     # While a release run is under way (relhold(), lib/push.sh) it waits here, at its land step, and lands once the
     # run has ended: on main as the release left it, where it is fitted again (STALE, below).
@@ -568,17 +568,28 @@ cardland() {
         [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups"); ups=''; left=''; dec=''
         caphold "$c" "$n" "$wt" land; go=again; return; }
     fi
-    [ "$t" = "$PASSED" ] || [ "$t" = "$STALE" ] || [ "$t" = "$RELHELD" ] || [ "$t" = "$TURNHELD" ] || { go=out; return; }
+    # Refused by the persisted-contract check on the commit it would land on (landone(), lib/claim.sh: its reason starts
+    # "contract: "): it goes back to its landing gate, as a card of a batch does above, where contractgate() gives the
+    # refusal its fix session. Bug: it was blocked with no fix session. A refusal met here again (cland), which that
+    # gate did not give, blocks it, so the two never send it round without end.
+    if [[ $t == "contract: "* ]]; then
+      cb=$(grep -m 1 'BLOCKED:' <<<"$t") || cb='the check could not run'
+      ! grep -qxF -e "$cb" <<<"$cland" || { go=out; return; }
+      cland+=$cb$'\n'
+    else
+      [ "$t" = "$PASSED" ] || [ "$t" = "$STALE" ] || [ "$t" = "$RELHELD" ] || [ "$t" = "$TURNHELD" ] || { go=out; return; }
+    fi
     # Passed, or main moved, or a release run began, or another card took the landing turn, while it went to land: its
     # follow-ups are withdrawn (filed again when it comes back to land). A release run or a landing turn: it waits for
     # its end above, a batch kept. Main moved: it is fitted
     # onto main as it is now and its checks run again there, its tests only when the fitted change is not the one that passed.
     # shellcheck disable=SC2046 # the filed follow-ups' issue numbers, one word each
     [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups"); ups=''; left=''; dec=''
-    # Main moved: it is fitted again and runs its checks, so it waits for room first. Else (a card went past it, a
+    # Main moved, or the contract check refused it: it is fitted again and runs its checks, or goes to a fix session,
+    # so it waits for room first. Else (a card went past it, a
     # release run or another card's landing turn) it waits for room once it is found passed (above), which it may be
     # only after its wait for the run or the turn.
-    [ "$t" != "$STALE" ] || { caphold "$c" "$n" "$wt" land; go=again; return; }
+    [ "$t" != "$STALE" ] && [[ $t != "contract: "* ]] || { caphold "$c" "$n" "$wt" land; go=again; return; }
     capdue=1
   done
 }

@@ -1255,7 +1255,7 @@ land() { # <card> <issue> <worktree> <commit message> [extra json for the landed
   landone "$@" {hk}>&-; rc=$?; exec {hk}>&-; return $rc
 }
 landone() { # <the arguments of land()>
-  local err sha l p base tip want x i h tn b='[]' a=("$@") g=() ls=() wts=() shas=() paths=()
+  local err sha l p base tip want x i h tn b='[]' a=("$@") g=() ls=() wts=() shas=() paths=() cov='' # cov: the batch's commits so far whose landed lines a push reads as reviewed (contractcovered())
   # Another card has the landing turn (turnon()): none of this one's cards lands before it.
   if tn=$(turnon); then for ((i = 0; i < ${#a[@]}; i += 5)); do [ "${a[i]}" != "$tn" ] || tn=''; done; [ -z "$tn" ] || { echo "$TURNHELD"; return 1; }; fi
   [ $# -le 5 ] || b=$(for ((i = 0; i < $#; i += 5)); do printf '%s\n' "${a[i]}"; done | jq -Rsc 'split("\n") | map(select(. != ""))')
@@ -1293,12 +1293,14 @@ landone() { # <the arguments of land()>
     [ "$(GIT_INDEX_FILE="$3.index" git write-tree)" = "$want" ] || { echo "main's hooks changed what would be committed: it is not exactly the reviewed diff; it needs $OWNER"; return 1; }
     sha=$(git commit-tree "$want" -p "$tip" -F "$3.msg") || { echo "cannot make the commit object"; return 1; }
     # The persisted-contract check (contractrange(), lib/contract.sh) on the commit that lands, as main's pre-push hook
-    # runs it: a later card of a batch lands on the commit before it, which its own checks never read. A refusal or a
-    # check that cannot run lands nothing, and the card is no longer ready, so no batch takes it again; its landing gate
-    # (contractgate()) deals with it.
-    contractrange . "$tip" "$sha" || { readyrm "$3"; echo "contract: the persisted-contract check refuses card $1's change on the commit it would land on, or could not run; nothing was landed: ${CONTRACT_OUT:0:600}"; return 1; }
+    # runs it (from each base a push can start at): a later card of a batch lands on the commit before it, which its own
+    # checks never read. A refusal or a check that cannot run lands nothing, and the card is no longer ready, so no batch
+    # takes it again; it goes back to its landing gate (contractgate(), from cardland(), lib/cardland.sh). The batch's
+    # cards before it that a push reads as reviewed once their landed lines are written (cov) start no check.
+    contractrange . "$tip" "$sha" "$cov" || { readyrm "$3"; echo "contract: the persisted-contract check refuses card $1's change on the commit it would land on, or could not run; nothing was landed: ${CONTRACT_OUT:0:600}"; return 1; }
     p=false; ! product "$sha" || p=true
     ls+=("$(jq -c --arg s "$sha" --argjson p "$p" '. + {sha: $s, product: $p}' <<<"$x")"); wts+=("$3"); shas+=("$sha"); tip=$sha
+    ! contractcovered "$x" || cov+=$sha$'\n'
   done
   onmain && [ "$(git rev-parse "refs/heads/$BRANCH")" = "$base" ] || { echo "main moved during the landing; nothing was landed"; return 1; }
   # The checkout gets every card's change in one apply, which writes all or nothing: a change that no longer applies
