@@ -6,8 +6,9 @@
 # no issue (the Board's Keep a case off, an action that files none). A case it names is kept off card test steps
 # (flakyoff()) until its flaky issue closes: the full suite and the whole test on main still run it. It adds no run,
 # wait or retry to a card. A push whose pre-push hook failed naming test files that pass alone adds one entry for
-# each whole file (flakypush()); a whole file is never kept off card test steps, but when the push reopens the closed
-# issue last filed for a case of that file (`<file>: <case>`), flakyoff() keeps that case off again while it is open.
+# each whole file (flakypush()); a whole file is kept off card test steps only while an issue filed for that file is
+# open, and when the push reopens the closed issue last filed for a case of that file (`<file>: <case>`), flakyoff()
+# keeps that case off again while it is open.
 # $FLAKY keeps {entries: [{case, source, time} + {card, issue} (a card's) or {note} (flaky add or off)], filed: [{case,
 # issue} + {time} (a push's)], the issue last filed for each case}. An entry older than FLAKY_KEEP days is dropped at the next write.
 # A case with entries from FLAKY_SOURCES different sources within FLAKY_DAYS days, and no open issue filed for it,
@@ -230,15 +231,17 @@ PASSEDAGAIN='def passedagain($l): if ($l | type) != "object" then [] else
   | unique | map(select(. as [$f, $c] | IN($l.passed[]?; $f) or ($c != null and any(($l.okcases + $l.passcases)[]?; .file == $f and IN(.cases[]; $c)))))
   | map(if .[1] == null then .[0] else "\(.[0]): \(.[1])" end) end;'
 # The cases the flaky-test record keeps off card test steps (the owner, 2026-11-14): each case it names as
-# `<file>: <case>` (a whole file, or a case with no file, is never kept off), while no issue filed for it has closed
-# since its last entry: none filed yet, the last one open or its state unread, or closed before a newer entry. A case
+# `<file>: <case>`, and each whole file with an issue filed for it (the owner, 2026-11-25: a file whose command
+# cannot run part of it, as #1690's; a whole file with no issue filed, or a case with no file, is never kept off),
+# while no issue filed for it has closed since its last entry: none filed yet, the last one open or its state unread, or closed before a newer entry. A case
 # whose entries have aged out of the record (FLAKY_KEEP) is still named by its filed issue, so it stays off while that
 # issue is open. They run in the full suite and the whole test on main, which are given no such list. tests() adds an
 # `ok` line to the card's list (<worktree>.rerun, CONVEYOR_TEST_RERUN) for each, unless the list already names the case
 # or its file passed: the command keeps it as passed and does not run it (a command that cannot run part of a file runs
 # the file whole). It adds an `off` line for each too, unless a `fail` line names the case: an `ok` line alone is also a
 # case that passed in a run killed part-way, which a change that selects it runs again; an `off` case does not run even
-# then.
+# then. A whole file gets a `pass` and an `off` line instead (as cacheoff() keeps a file off), unless a `fail` line
+# names the file.
 flakyoff() { # <worktree>
   local rec c n f k s add=''
   rec=$(jq -ce 'objects' "$FLAKY" 2>/dev/null) || return 0
@@ -248,10 +251,18 @@ flakyoff() { # <worktree>
       # Closed: kept off only by an entry newer than its closing (when GitHub says when).
       [ "${s%%$'\t'*}" != CLOSED ] || jq -e --arg c "$c" --arg at "${s#*$'\t'}" '$at != "" and any(.entries[]; .case == $c and .time > $at)' <<<"$rec" >/dev/null || continue
     fi
+    if [ "$k" = - ]; then # a whole file
+      ! grep -qxF "fail"$'\t'"$f" "$1.rerun" 2>/dev/null || continue
+      grep -qxF "pass"$'\t'"$f" "$1.rerun" 2>/dev/null || add+="pass"$'\t'"$f"$'\n'
+      grep -qxF "off"$'\t'"$f" "$1.rerun" 2>/dev/null || add+="off"$'\t'"$f"$'\n'
+      continue
+    fi
     ! grep -qxF "fail"$'\t'"$f"$'\t'"$k" "$1.rerun" 2>/dev/null || continue
     grep -qxF -e "pass"$'\t'"$f" -e "ok"$'\t'"$f"$'\t'"$k" "$1.rerun" 2>/dev/null || add+="ok"$'\t'"$f"$'\t'"$k"$'\n'
     grep -qxF "off"$'\t'"$f"$'\t'"$k" "$1.rerun" 2>/dev/null || add+="off"$'\t'"$f"$'\t'"$k"$'\n'
-  done < <(jq -r '. as $r | [(.entries[]?.case), (.filed[]?.case) | strings | capture("^(?<f>.+?): (?<k>.+)$")] | unique[] as $x
-    | ([$r.filed[]? | select(.case == "\($x.f): \($x.k)") | .issue][-1] // "-") as $n | ["\($x.f): \($x.k)", $n, $x.f, $x.k] | @tsv' <<<"$rec") # "-": no issue filed (a tab IFS would join an empty field)
+  done < <(jq -r '. as $r | [(.entries[]?.case), (.filed[]?.case) | strings
+      | (capture("^(?<f>.+?): (?<k>.+)$") // (select(. as $c | any($r.filed[]?; .case == $c and .issue != null)) | {f: ., k: "-"}))] | unique[] as $x
+    | (if $x.k == "-" then $x.f else "\($x.f): \($x.k)" end) as $c
+    | ([$r.filed[]? | select(.case == $c) | .issue][-1] // "-") as $n | [$c, $n, $x.f, $x.k] | @tsv' <<<"$rec") # "-": no issue filed, or no case: a whole file (a tab IFS would join an empty field)
   [ -z "$add" ] || printf '%s' "$add" >> "$1.rerun"
 }
