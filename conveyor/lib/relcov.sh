@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # The coverage map a release makes again and commits (issue 1593; the pack's coverageMap: command, which writes file, a
 # path from the repository root). No other run writes it: a card's test step only reads it.
-# relcov <command name> <worktree> <commit>: after the whole suite ran on <commit>, passed or failed, and its result
-# was written and reported (relsuite(), commands/release-prep.sh), runs the command on the machine the suite ran on, in
+# relcov <command name> <worktree> <commit>: after the whole suite ran on <commit> and passed, and its result
+# was written and reported (relsuite(), commands/release-prep.sh; a failed suite makes no map: the map would hold the
+# run, and the landing of cards, to its end), runs the command on the machine the suite ran on, in
 # its worktree of that commit: here, or on a box over ssh or a devbox before it is given back, which sends the map
 # back (hostmap(), lib/suitehost.sh). It keeps the map in $CARDS/release/coverage.<tree of the commit>, for the release of that tree to
-# commit (relcovput()), whether release or release-prep ran the suite (a failed one: for release --anyway). A command
+# commit (relcovput()), whether release or release-prep ran the suite. A command
 # that fails is named, with the end of its output, and the map it still wrote is kept: a traced run whose unit failed
 # still holds what the other units ran.
 # A map kept of another tree is removed. While the command runs, the run's record says so (coverage: "running"), so the
@@ -33,13 +34,13 @@ relcov() {
 # release goes on without it, when the privacy check (with the release's terms file) finds something in the map or
 # cannot read it, as the release pushes it; or when the checkout holds a map at that path that <commit> does not hold
 # (the Foreman's map, made by hand and not committed yet): it is left as it is. A put that fails half way is undone.
-# With no map kept of <commit>'s tree (its command wrote none, or the run was stopped while it ran, after the suite's
+# With no map kept of <commit>'s tree (its suite failed, its command wrote none, or the run was stopped while it ran, after the suite's
 # status was posted, which this release reuses), the output says so and the release commits none.
 relcovput() {
   local f k
   packget coverageMap.file f 2>/dev/null && [ -n "$f" ] || return 0
   k=$CARDS/release/coverage.$(git rev-parse -q --verify "$1^{tree}") && [ -s "$k" ] \
-    || { echo "conveyor: release: no coverage map of ${1:0:12} is kept (its command wrote none, or the run was stopped while it ran); the release commits none" >&2; return 0; }
+    || { echo "conveyor: release: no coverage map of ${1:0:12} is kept (its suite failed, its command wrote none, or the run was stopped while it ran); the release commits none" >&2; return 0; }
   if [ -e "$f" ] && ! { git cat-file -e "$1:$f" 2>/dev/null && git diff --quiet "$1" -- "$f"; }; then
     echo "conveyor: release: the checkout holds a $f that ${1:0:12} does not; it is left as it is, and the release commits no coverage map" >&2; return 0
   fi

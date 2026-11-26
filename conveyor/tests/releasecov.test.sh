@@ -20,10 +20,26 @@ covsetup() { runsetup true; covcmd "$@"; }
 # command in the worktree of the commit it tested; the release after it, which runs no suite on that pass, commits the
 # map in its release commit. The command fails after it wrote the map (as coverage.sh does when a unit fails): it is
 # named, and its map is still committed.
+# Bug (issue 1708): the map was made before the suite's status was posted and its result reported, so a long map held
+# the result back. The status is posted and the result printed before the map starts, and the run's record says the suite
+# passed, the run ended and the map runs (the Release panel's Suite passed, not Suite running) while the map is made.
+# Bug (review of issue 1708): the run's end (ended) was written only after the map, and the Foreman's report and wake go
+# by it, as do the fix cards (relfixes(): those filed after it), so a fix filed while the map ran was not counted. The
+# end is in the record while the map runs, the run's own end keeps that time, and the record says nothing of the map
+# once it is made.
 t_relcovmap() {
-  local O out t
-  covsetup 'git rev-parse HEAD > cov.jsonl' 'echo "a unit failed"; exit 1'
+  local O out t a b rr=$T/$CASE/cards/release/run.json
+  # The command checks the record and the status while it runs, then rewrites the end to a marked time, so the end the
+  # run writes after the map cannot pass for the one written before it.
+  covsetup 'grep -qF state=success "$STUB/gh-calls" || echo "no status posted" >> "$STUB/cov-at"' 'git rev-parse HEAD > cov.jsonl' \
+    "jq -e '(.ended | type) == \"string\" and .state == \"passed\" and .coverage == \"running\"' '$rr' > /dev/null || echo 'the record does not say the run ended with its suite passed and the map runs' >> \"\$STUB/cov-at\"" \
+    "jq -c '.ended = \"2000-01-01T00:00:00Z\"' '$rr' > '$rr.t' && mv '$rr.t' '$rr'" \
+    'echo "a unit failed"; exit 1'
   out=$(loop release-prep 1.1.0 2>&1) || fail "release-prep failed: $out"
+  jq -e '.state == "passed" and has("coverage") == false and .ended == "2000-01-01T00:00:00Z"' "$rr" > /dev/null \
+    || fail "the ended run's record is not passed, still says the map runs, or its end is not the one written before the map: $(cat "$rr")"
+  a=$(grep -nF 'the whole suite passed on' <<<"$out" | cut -d: -f1) b=$(grep -nF 'makes the coverage map' <<<"$out" | cut -d: -f1)
+  [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] || fail "the suite's result was not reported before the coverage map step started: $out"
   grep -qF "the coverage map's command failed (exit 1)" <<<"$out" && grep -qF 'a unit failed' <<<"$out" \
     || fail "release-prep did not name the coverage command's failure and its output: $out"
   [ "$(grep -c . "$STUB/cov-at" 2>/dev/null)" = 1 ] && [ "$(cat "$STUB/cov-at")" != "$R" ] \
@@ -34,30 +50,46 @@ t_relcovmap() {
   [ "$(git -C "$R" show "$t:cov.jsonl" 2>&1)" = "$O" ] && [ "$(git -C "$R" rev-parse "$t^")" = "$O" ] \
     || fail "the release commit $t does not hold the map the command wrote on $O: $(git -C "$R" show --stat "$t" 2>&1)"
 }
-# Bug: release-prep made no map after a failed suite, and release --anyway runs none, so a release over a failed suite
-# (releaseanyway.test.sh's anysetup) committed no fresh map. The failed run makes it, and the release commits it.
-# Bug (issue 1708): the map was made before the failed suite's status was posted and its failure reported, so a long
-# map held the result back. Here, on the build machine, the status is posted, the failure printed (release-prep holds
-# its stderr to its end, relrun()) and the run's record says the suite failed and the map runs (the Release panel's
-# Suite failed, not Suite running) before the map; the record says nothing of the map once it is made.
-# Bug (review of issue 1708): the run's end (ended) was written only after the map, and the Foreman's report and wake go
-# by it, as do the fix cards (relfixes(): those filed after it), so a fix filed while the map ran was not counted. The
-# end is in the record while the map runs, and the run's own end keeps that time.
+# Bug (issue 1712): a release whose suite failed still made its coverage map, and the release's hold on landing lasted
+# to the map's end, for a map the release commits no use of. The failed suite starts no map (the command never runs, so
+# nothing is written to $STUB/cov-at), says so, ends the run with no map mark in its record, and a release over the
+# failed suite (--anyway) goes on and commits none.
 t_relcovanyway() {
-  local O out t a b rr=$T/$CASE/cards/release/run.json
-  anysetup; covcmd 'grep -qF state=failure "$STUB/gh-calls" || echo "no status posted" >> "$STUB/cov-at"' 'git rev-parse HEAD > cov.jsonl' \
-    "jq -e '(.ended | type) == \"string\" and .state == \"failed\" and .coverage == \"running\"' '$rr' > /dev/null || echo 'the record does not say the run ended with its suite failed and the map runs' >> \"\$STUB/cov-at\"" \
-    "jq -c '.ended = \"2000-01-01T00:00:00Z\"' '$rr' > '$rr.t' && mv '$rr.t' '$rr'" # the end written before the map, marked so the one the run's end writes cannot pass for it
+  local O out t rr=$T/$CASE/cards/release/run.json
+  anysetup; covcmd 'git rev-parse HEAD > cov.jsonl'
   out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not fail on the red suite: $out"
-  jq -e '.state == "failed" and has("coverage") == false and .ended == "2000-01-01T00:00:00Z"' "$rr" > /dev/null \
-    || fail "the ended run's record is not failed, still says the map runs, or its end is not the one written before the map: $(cat "$rr")"
-  grep -qF "the coverage map of ${O:0:12} is kept for its release to commit" <<<"$out" || fail "the failed suite made no coverage map: $out"
-  a=$(grep -nF 'the whole suite failed on' <<<"$out" | cut -d: -f1) b=$(grep -nF 'makes the coverage map' <<<"$out" | cut -d: -f1)
-  [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] || fail "the failed suite was not reported before the coverage map step started: $out"
+  [ ! -e "$STUB/cov-at" ] || fail "the failed suite ran the coverage command: $(cat "$STUB/cov-at") $out"
+  grep -qF 'the whole suite failed, so no coverage map is made' <<<"$out" || fail "the failed suite did not say it makes no coverage map: $out"
+  ! grep -qF 'makes the coverage map' <<<"$out" || fail "the failed suite started the coverage map: $out"
+  jq -e '.state == "failed" and has("coverage") == false and (.ended | type) == "string"' "$rr" > /dev/null \
+    || fail "the failed run's record is not ended failed with no map mark: $(cat "$rr")"
   out=$(loop release 1.1.0 --anyway --by 'the owner' 2>&1) || fail "--anyway over the red suite was refused: $out"
   t=$(git -C "$T/$CASE/origin" rev-parse 'v1.1.0^{commit}') || fail "origin has no tag v1.1.0: $out"
-  [ "$(git -C "$R" show "$t:cov.jsonl" 2>&1)" = "$O" ] && [ "$(grep -c . "$STUB/cov-at")" = 1 ] \
-    || fail "the release over the failed suite did not commit the map made once on $O: $(git -C "$R" show --stat "$t" 2>&1)"
+  ! git -C "$R" cat-file -e "$t:cov.jsonl" 2>/dev/null || fail "the release over the failed suite committed a map: $(git -C "$R" show --stat "$t" 2>&1)"
+  [ ! -e "$STUB/cov-at" ] || fail "the release over the failed suite ran the coverage command: $(cat "$STUB/cov-at")"
+}
+# Bug (review of issue 1712): the map was skipped when only the status post failed, though the suite passed: the skip went
+# by release-prep's result, not the suite's. The suite passes, the post fails, and the map is still made.
+t_relcovposted() {
+  local out
+  covsetup 'echo map > cov.jsonl'
+  # stub: gh whose status post fails while the suite passed
+  printf '%s\n' '#!/usr/bin/env bash' 'if [[ " $* " == *" -X POST "* ]] && [[ " $* " == *statuses* ]]; then exit 1; fi' 'echo "[]"' > "$STUB/gh" \
+    || fail "the fixture could not be made"
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] && grep -qF 'could not be posted (the suite passed)' <<<"$out" || fail "release-prep did not fail on the status post: $out"
+  [ "$(grep -c . "$STUB/cov-at" 2>/dev/null)" = 1 ] && ! grep -qF 'the whole suite failed, so no coverage map' <<<"$out" \
+    || fail "the passed suite's coverage map was skipped when its status could not be posted: $(cat "$STUB/cov-at" 2>&1) $out"
+}
+# Bug (review of issue 1712): the skip went by the suite's raw result, so a suite that failed in the whole run and passed
+# once each failed case ran alone (judged flaky: the suite passes) still made no map. The failing case passes alone, the
+# suite passes, and the map is made.
+t_relcovflaky() {
+  local out
+  runsetup '[ -n "${CONVEYOR_TEST_RERUN:-}" ] || { echo "FAIL [flips]: off"; exit 1; }'; covcmd 'echo map > cov.jsonl'
+  out=$(loop release-prep 1.1.0 2>&1) || fail "release-prep failed on a case that passes alone: $out"
+  grep -qF 'judged flaky: flips' <<<"$out" || fail "the case was not judged flaky, so the fixture does not test the path: $out"
+  [ "$(grep -c . "$STUB/cov-at" 2>/dev/null)" = 1 ] && ! grep -qF 'the whole suite failed, so no coverage map' <<<"$out" \
+    || fail "the suite that passed after its flaky case passed alone made no coverage map: $(cat "$STUB/cov-at" 2>&1) $out"
 }
 # Bug: a release whose push fails left the map it put in the checkout there, staged, so the checkout was not as the
 # release found it. The command moves origin's main (as a card that lands meanwhile does), so the push fails.

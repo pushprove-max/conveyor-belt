@@ -53,7 +53,7 @@ Some pack settings that this site names:
   ([Foreman](foreman.md#standing-yes)).
 - `test.full`: the full test suite, which "Push landed" runs. Setup sets it to your test command. `test.main`: the whole test on main. `test.mainAt`: a time of day, `"HH:MM"` in the machine's local time, after which the whole test on main runs once a day; unset, it runs at most once an hour. `test.survey`: the monthly test-speed survey.
   `test.firstSurvey`: the answer to setup's survey question.
-- `coverageMap`: the coverage map that each release makes again and commits. `command` writes the map, and `file` is
+- `coverageMap`: the coverage map that each release makes again and commits, when its suite passed. `command` writes the map, and `file` is
   the path of the map from the top of your checkout ([Releases](releases.md), step 4). Unset, no release makes a map.
 - `test.control`: test files, as paths from the top of your checkout, that tell a broken machine from a broken main.
   When a card's failing cases fail on main too, the ones of these that passed before with main's content run beside

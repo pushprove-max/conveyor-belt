@@ -127,9 +127,9 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
    Release panel lists them in its step 2. A case that fails alone too stops the release, and the output gives the
    result of each of its runs alone.
 
-   When the suite has run and the pack sets `coverageMap`, this step then runs its `command` on the machine that ran
-   the suite, in a worktree of the same commit. The command starts after the step posts the status and shows the
-   result of the suite. When the suite's result ends the run (release-prep, or a failed suite), the run's record
+   When the suite has passed and the pack sets `coverageMap`, this step then runs its `command` on the machine that ran
+   the suite, in a worktree of the same commit. A failed suite makes no map: the output says so, and the run ends at once. The command starts after the step posts the status and shows the
+   result of the suite. When the suite's result ends the run (release-prep), the run's record
    already shows that result while the command runs. On a box over ssh or a devbox, the command runs before Conveyor
    gives the box back, and the map comes back to this machine. `conveyor.sh release-run stop` while the command runs
    stops the command, there too, and the suite's result stays. The command writes the coverage map, the file that `file` names. Conveyor keeps the

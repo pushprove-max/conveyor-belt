@@ -473,7 +473,7 @@ relatonce() { # <command name>
 }
 # 0: passed and posted; 1: failed (failure posted), or a step could not be done; 2: the pack names no test.full.
 relsuite() { # <command name> <commit>
-  local n=$1 sha=$2 cmd wt=$CARDS/release/wt rc sr state desc m0 m1 p l='' u=null f al='[]' fl='' at
+  local n=$1 sha=$2 cmd wt=$CARDS/release/wt rc sr sp state desc m0 m1 p l='' u=null f al='[]' fl='' at
   packget test.full cmd || return 1
   [ -n "$cmd" ] || { echo "conveyor: $n: the pack names no full test suite (test.full); nothing run" >&2; return 2; }
   # The mod on its oldest Claude Code first: its failure stops the release, as a red test file does.
@@ -542,7 +542,7 @@ relsuite() { # <command name> <commit>
       jq -r '.[] | "conveyor: '"$n"': \(.case): \(.verdict)\(if .line then " (\(.line))" else "" end): runs alone \(.runs | join(", "))\(if .why then "; " + .why else "" end)"' <<<"$al" >&2
     fi
   fi
-  m1=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)
+  m1=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null); sp=$rc # sp: the suite's result after the cases judged flaky; the coverage map goes by it, not by the status post (rc = 1 when that fails) or the raw result (sr)
   relrec --slurpfile p <(printf '%s' "$p") --argjson mv "$([ "$m0" = "$m1" ] && echo false || echo true)" --arg st "$([ $rc = 0 ] && echo passed || echo failed)" --slurpfile al <(printf '%s' "$al") \
     '. + $p[0] | .moved = $mv | .state = $st | .alone = $al[0] | .rerun = null | del(.counts)'
   [ "$m0" = "$m1" ] || echo "conveyor: $n: $BRANCH moved while the suite ran, from ${m0:0:12} to ${m1:0:12}: a card landed; the suite tested ${sha:0:12}"
@@ -559,8 +559,8 @@ relsuite() { # <command name> <commit>
   [ -z "$fl" ] || { desc+="; judged flaky: $fl"; desc=${desc:0:140}; }
   if ! gh_write api -X POST "repos/{owner}/{repo}/statuses/$sha" -f "state=$state" -f context=conveyor/release-suite -f "description=$desc" > /dev/null; then echo "conveyor: $n: the status of ${sha:0:12} could not be posted (the suite $([ $rc = 0 ] && echo passed || echo failed))" >&2; rc=1
   elif [ $rc = 0 ]; then echo "conveyor: $n: the whole suite passed on ${sha:0:12}; its status is posted"; else echo "conveyor: $n: the whole suite failed on ${sha:0:12} (exit $rc; its output is in $wt.test); a failing status is posted" >&2; fi
-  # Its result posted and printed, a result that ends the run (release-prep's, or a failed one: release then refuses) is the run's end in the record, the map's mark (coverage: "running", which `release-run stop` and the Board go by: releasestop(), lib/fulltest.sh) written first so the run never reads as closed while the map is made; a run on any machine, passed or failed (release --anyway goes over a failed one), then makes the coverage map on that machine, then given back (lib/relcov.sh).
-  relsaid; if [ "$n" = release-prep ] || [ $rc != 0 ]; then ! relcovon || relrec '.coverage = "running"'; [ -z "${RELERR:-}" ] || relend $((rc != 0)) "$RELERR"; fi; relcov "$n" "$wt" "$sha"; hostfinish "$n"; git worktree remove --force "$wt" 2>/dev/null; [ $rc = 0 ]
+  # Its result posted and printed, a result that ends the run (release-prep's, or a failed one: release then refuses) is the run's end in the record, the map's mark (coverage: "running", which `release-run stop` and the Board go by: releasestop(), lib/fulltest.sh) written first so the run never reads as closed while the map is made; a run on any machine, then, when the suite passed, makes the coverage map on that machine (lib/relcov.sh); a failed suite makes none. The machine is then given back.
+  relsaid; if [ "$n" = release-prep ] || [ $rc != 0 ]; then ! relcovon || [ $sp != 0 ] || relrec '.coverage = "running"'; [ -z "${RELERR:-}" ] || relend $((rc != 0)) "$RELERR"; fi; if [ $sp = 0 ]; then relcov "$n" "$wt" "$sha"; elif relcovon; then echo "conveyor: $n: the whole suite failed, so no coverage map is made on ${sha:0:12}; a change runs by its area"; fi; hostfinish "$n"; git worktree remove --force "$wt" 2>/dev/null; [ $rc = 0 ]
 }
 releaseprep() { # <version>
   local v=$1 cmd sha last d out was wn nx=${CONVEYOR_RELEASE_THEN:-prep} # nx: what follows a pass (relnoteswait()), as relstart() unsets it
