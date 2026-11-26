@@ -80,6 +80,10 @@ setup leaves it as it is and says so. A session keeps the cache time it started 
 role runs with another cache time, such as `5m`, the claim says so in one line. Start that session again to get the
 1-hour cache.
 
+To keep the Foreman's session short, set `foreman.compactAt` in the host file to a whole number from 1 to 100. It is
+the percent of the model's context at which Claude Code compacts the session. Run `/conveyor-belt:setup --foreman`
+again after you change it. With the key not set, nothing changes ([Configuration](configuration.md#the-foremans-compact-point)).
+
 While the Foreman is idle, the waiter sends it a short keepalive turn every 50 minutes, so the cache stays warm. It sends
 at most 10 keepalive turns in one idle spell: the count starts again when you use the Foreman. Before
 the next one, it reads the usage of the last keepalive turn. When the turn wrote the cache again and read none of it,

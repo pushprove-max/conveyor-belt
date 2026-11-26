@@ -924,6 +924,19 @@ of test slots that are left. To change the setting, edit the host file.
 macOS cannot keep a process off a core, so the setting is not available there. Doctor and the Rules tab say so, with
 the reason. On Linux, the setting needs `taskset` (util-linux).
 
+## The Foreman's compact point
+
+The host file's `foreman.compactAt` sets when Claude Code makes the Foreman's session short. It is a whole number from
+1 to 100: the percent of the model's context at which Claude Code compacts the session. When the host file does not set
+it, nothing changes: Claude Code compacts near the end of the context. A long Foreman session reads all its kept context
+again on every turn, so a lower point costs less.
+
+`/conveyor-belt:setup --foreman` writes the number as `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` in the `env` of the Foreman's
+settings and of `.claude/settings.local.json` in the main checkout, and `conveyor.sh foreman` starts the session with it.
+When you take the key out of the host file, the next setup takes the variable out of both files. A value that is not a
+whole number from 1 to 100 makes setup fail with a line that names `foreman.compactAt` and the value, and it changes
+neither file. After a compact, the start text and the rules reach the session again.
+
 ## The control record
 
 Each project has a control record in its state folder. It holds what the loop builds and in what order, the rules,

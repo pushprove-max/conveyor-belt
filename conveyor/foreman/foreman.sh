@@ -16,10 +16,10 @@
 #   project's) with an empty state.md when it has none, and writes $FD/settings.json, the launcher's settings: its
 #   environment (CONVEYOR_FOREMAN=1, the folder, the 1-hour prompt cache; the launcher sets the main checkout it runs
 #   in, as a group's Foreman may run in any of its projects). Written whole each run, so a second run leaves the same
-#   file. Into the checkout it writes only env.CLAUDE_CODE_PROMPT_CACHE_TTL=1h in .claude/settings.local.json (other
+#   file. Into the checkout it writes env.CLAUDE_CODE_PROMPT_CACHE_TTL=1h in .claude/settings.local.json (other
 #   keys kept; a file that is not a JSON object left as it is), so a claimed Foreman's session restarted there gets
 #   the 1-hour cache; the claim says when its session runs with another. Another project's Foreman is set up by the
-#   same command there.
+#   same command there. Both files get env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE from foreman.compactAt, or neither has it when it is not set.
 # launch [--new] (`conveyor.sh foreman`): runs `claude` in the main checkout with those settings and
 #   CONVEYOR_FOREMAN=1, resuming the marked session (`--resume <id>`) while its transcript exists; --new starts fresh.
 # claim <session id> (/conveyor-belt:foreman, with the session's own id): makes that session the Foreman, one per
@@ -126,21 +126,22 @@ WORDS_ADD=300
 RULES_APART=; [ "$1" = start ] && [ "${2:-}" = --rules-apart ] && RULES_APART=1
 
 setup() {
-  local n pin
+  local n pin pct
   n=$(mine | cut -f1 | paste -sd' ' -) && [ -n "$n" ] || return 1
   pin=$(jq -r '.plugin.commit // .plugin.follow // empty' "$MAIN/.conveyor/project.json" 2>/dev/null) && [[ $pin =~ ^([0-9a-f]{40}|main)$ ]] \
     || { echo "foreman: the pack of $MAIN pins no Conveyor commit and follows no main; run /conveyor-belt:setup first" >&2; return 1; }
+  pct=$(jq -r '.foreman | objects | .compactAt | select(. != null) | if type == "number" and . == floor and . >= 1 and . <= 100 then . else "bad " + tojson end' "$HOSTF" 2>/dev/null); [[ $pct != bad* ]] || { echo "foreman: foreman.compactAt in $HOSTF is ${pct#bad }, not a whole number from 1 to 100" >&2; return 1; } # read before any file is written: a bad value changes none
   mkdir -p "$FD" || return 1
   [ -e "$FD/state.md" ] || { printf '# %s: saved state\n' "$NAME" > "$FD/state.md" && echo "foreman: wrote the state file $FD/state.md"; } || return 1
-  jq -n --arg fd "$FD" \
-    '{env: {CONVEYOR_FOREMAN: "1", CONVEYOR_FOREMAN_DIR: $fd, CLAUDE_CODE_PROMPT_CACHE_TTL: "1h"}}' > "$FD/settings.json.new" \
+  jq -n --arg fd "$FD" --arg pct "$pct" \
+    '{env: {CONVEYOR_FOREMAN: "1", CONVEYOR_FOREMAN_DIR: $fd, CLAUDE_CODE_PROMPT_CACHE_TTL: "1h"} + (if $pct == "" then {} else {CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: $pct} end)}' >"$FD/settings.json.new" \
     && mv "$FD/settings.json.new" "$FD/settings.json" || return 1
   # A Foreman claimed in an ordinary session gets the 1-hour cache from the main checkout's local settings, every other
   # key kept; a file that is not a JSON object is not ours to rewrite.
   local sl=$MAIN/.claude/settings.local.json
   if [ ! -e "$sl" ] || jq -e 'type == "object"' "$sl" > /dev/null 2>&1; then
     mkdir -p "$MAIN/.claude" && { if [ -e "$sl" ]; then cat "$sl"; else echo '{}'; fi; } \
-      | jq '.env = ((.env | objects) // {}) + {CLAUDE_CODE_PROMPT_CACHE_TTL: "1h"}' > "$sl.new" && mv "$sl.new" "$sl" \
+      | jq --arg pct "$pct" '.env = ((.env | objects) // {}) + {CLAUDE_CODE_PROMPT_CACHE_TTL: "1h"} | if $pct == "" then del(.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE) else .env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $pct end' > "$sl.new" && mv "$sl.new" "$sl" \
       || { rm -f "$sl.new"; echo "foreman: the 1-hour prompt cache could not be set in $sl" >&2; return 1; }
     echo "foreman: set the 1-hour prompt cache (env.CLAUDE_CODE_PROMPT_CACHE_TTL) in $sl"
   else
@@ -150,14 +151,14 @@ setup() {
 }
 
 launch() {
-  local new= id enc f
+  local new='' id enc f pct
   shift
   [ "${1:-}" != --new ] || { new=1; shift; }
   [ -f "$FD/settings.json" ] || { echo "foreman: Foreman mode is not set up here; run /conveyor-belt:setup --foreman" >&2; return 1; }
   cd "$MAIN" || return 1
   # The launch file names this launch: the session's first start marks it, however it was opened (start).
   mkdir -p "$FD" && echo "$$" > "$FD/launch" || return 1
-  export CONVEYOR_FOREMAN=1 CONVEYOR_FOREMAN_DIR=$FD CONVEYOR_MAIN=$MAIN CLAUDE_CODE_PROMPT_CACHE_TTL=1h CONVEYOR_FOREMAN_LAUNCH=$$
+  export CONVEYOR_FOREMAN=1 CONVEYOR_FOREMAN_DIR=$FD CONVEYOR_MAIN=$MAIN CLAUDE_CODE_PROMPT_CACHE_TTL=1h CONVEYOR_FOREMAN_LAUNCH=$$; pct=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE // empty' "$FD/settings.json" 2>/dev/null); [ -z "$pct" ] || export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=$pct # setup's, from foreman.compactAt
   # Reopen the marked session's own conversation while its transcript (Claude Code's, under the main checkout's
   # project folder) is still there; else, or with --new, a fresh session, which its start marks. Claude Code names
   # the folder for the path, every other character a dash, cut past 200 characters to those and a dash and a hash.
