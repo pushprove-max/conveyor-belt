@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 120
+# timeout: 240
+# Bug (issue 1699): under the test step's strace on a loaded machine its cases take up to 110 s, and at a 120 s limit
+# a run that passed every case was stopped as timed out.
 # Foreman mode's session (foreman.sh, stop.sh, waiter.sh, lib.sh): the stop hooks, every issue the Foreman files held,
 # a record command's pin and engine, the role marked by session (a claim, a fork, claims at once) and the start's line
 # on an old engine. The other Foreman cases are in foreman.test.sh and foreman-projects.test.sh.
