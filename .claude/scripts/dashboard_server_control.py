@@ -68,6 +68,10 @@ def control_ok(body):
         if any(x.startswith('healsdays=') for x in v):
             d = v[0].removeprefix('healsdays=')
             return n == 1 and d.isascii() and d.isdigit() and d[0] != '0' and len(d) <= 4 and int(d) <= 3650
+        # The dollar limits of a card and of an issue go alone too: a whole number from 1 to 100000, or off.
+        if any(x.startswith(('cardusd=', 'issueusd=')) for x in v):
+            d = v[0].partition('=')[2]
+            return n == 1 and (d == 'off' or (d.isascii() and d.isdigit() and d[0] != '0' and len(d) <= 6 and int(d) <= 100000))
         return 1 <= n <= 10 and all(RULE.fullmatch(x) for x in v)
     if a == 'judge' and v in (['on'], ['off']):  # the review's judge, on or off
         return True

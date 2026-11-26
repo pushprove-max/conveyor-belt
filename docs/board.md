@@ -409,8 +409,10 @@ one control, and the value in force is the selected part.
    ([Reserved cores](configuration.md#cores-kept-for-you)). The row also links to the Tests page, which holds the test
    limits.
 3. **Picking**: **Build issues** (the P0 to P3 switches and Follow-ups), **Never build** (area labels), **New issues
-   start in**, **Dependency guard**, **Split large issues**, **Pick settings** and **Self-heals expiry** (the days an
-   entry of the Self-heals list can go unfixed and unseen before it leaves the list). A main-red fix card is built
+   start in**, **Dependency guard**, **Split large issues**, **Pick settings**, **Self-heals expiry** (the days an
+   entry of the Self-heals list can go unfixed and unseen before it leaves the list), **Card dollar limit** and **Issue
+   dollar limit** ([Dollar limits](configuration.md#dollar-limits)). Each dollar limit is Off, $5, $10, $20, $50 or
+   $100. A different limit that you set with the command shows as one more choice. A main-red fix card is built
    whatever the P0 to P3 switches say, by design: held, every card that meets the red main would wait for good.
 4. **Landing and push**: **Push on landing**, **Land as**, **Merge PR**, **Test before a push**, **Push after a
    combined test run**, **Lint check** and **Approve visible changes**.

@@ -20,7 +20,8 @@
 // issues start in (Queue or Held), Dependency guard (On or Off; drawn disabled, "needs a newer engine", for a project
 // whose control record has no depGuard), Split large issues (Off, Shadow or On; disabled the same way for a record with
 // no rules.split), Pick settings (Off, Shadow or On; disabled the same way for a record with no rules.pick; and each
-// seat's allowed models, each with a checkbox and its lowest and highest effort, and Save, for a snapshot with packPick). Landing
+// seat's allowed models, each with a checkbox and its lowest and highest effort, and Save, for a snapshot with packPick), Self-heals
+// expiry (days), Card dollar limit and Issue dollar limit (Off or dollars; no row for a record without the limit). Landing
 // and push: Push on landing (On or Off; disabled the same way for a record with no rules.push), Land as (Main or Pull
 // request, the record's landAs or else the pack's; disabled the same way for a record with no landAs), Merge PR
 // (Button, Release or Idle, the record's prMerge or else the pack's; disabled the same way for a record with no
@@ -101,7 +102,7 @@
   const SETS = [
     ['models', 'Models', 'Three seats for each card.', ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account']],
     ['capacity', 'Capacity', 'Build slots and machine limits.', ['cap', 'guard', 'atonce', 'suite-mode', 'suite', 'failfast', 'teststeponly', 'cores']],
-    ['picking', 'Picking', 'Choose which issues enter the belt.', ['build', 'never', 'start', 'dep-guard', 'split', 'pick', 'healsdays']],
+    ['picking', 'Picking', 'Choose which issues enter the belt.', ['build', 'never', 'start', 'dep-guard', 'split', 'pick', 'healsdays', 'cardusd', 'issueusd']],
     ['landing', 'Landing and push', 'Decide how finished cards reach the repository.', ['push', 'land-as', 'pr-merge', 'push-check', 'pushbatch', 'lint', 'visible']],
     ['standing', 'Done without asking', 'Choose when the Foreman can act on your behalf.', STANDING.map(([k]) => `standing-${k}`).concat([NOISSUE])],
     ['order', 'Issue order', 'Inspect held issues and set the order of pinned work.', ['held', 'order']],
@@ -200,7 +201,7 @@
     if (!c) return null;
     const r = c.rules && typeof c.rules === 'object' ? c.rules : {};
     if (action === 'rules') {
-      return ['rules', a.map((x) => { const k = String(x).split('=')[0]; if (k === 'healsdays') return `${k}=${num(r.healsdays) === null ? 30 : r.healsdays}`; return `${k}=${isArea(k) ? (list(r.never).includes(k) ? 'off' : 'on') : r[k] === false ? 'off' : 'on'}`; })];
+      return ['rules', a.map((x) => { const k = String(x).split('=')[0]; if (k === 'healsdays') return `${k}=${num(r.healsdays) === null ? 30 : r.healsdays}`; if (k === 'cardusd' || k === 'issueusd') return `${k}=${r[k] || 'off'}`; return `${k}=${isArea(k) ? (list(r.never).includes(k) ? 'off' : 'on') : r[k] === false ? 'off' : 'on'}`; })];
     }
     if (action === 'atonce') return num(c.suiteAtOnce) === null ? null : ['atonce', [String(c.suiteAtOnce)]];
     if (action === 'suite-mode') return ['suite-mode', [c.suiteMode === 'parallel' ? 'parallel' : 'serial']];

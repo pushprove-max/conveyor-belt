@@ -66,7 +66,7 @@
   // The words of each action's change (words), from its args a.
   const seatWords = (a, action) => `${action === 'model' ? 'builder' : 'reviewer'} ${a[0] === 'default' ? 'back to the default' : a.join(' ')}`;
   const accountWords = (a, action) => `${action === 'account' ? 'account' : 'review account'} ${a.length ? a[0] : 'back to the default'}`;
-  const RULE_WORDS = { followups: 'Follow-ups', push: 'Push on landing', visible: 'Approve visible changes', lint: 'Lint check', failfast: "Stop a card's tests at the first failure", teststeponly: 'Only the Test step runs tests', pushbatch: 'Push after a combined test run', split: 'Split large issues', pick: 'Pick settings', healsdays: 'Self-heals expiry days' };
+  const RULE_WORDS = { followups: 'Follow-ups', push: 'Push on landing', visible: 'Approve visible changes', lint: 'Lint check', failfast: "Stop a card's tests at the first failure", teststeponly: 'Only the Test step runs tests', pushbatch: 'Push after a combined test run', split: 'Split large issues', pick: 'Pick settings', healsdays: 'Self-heals expiry days', cardusd: 'Card dollar limit', issueusd: 'Issue dollar limit' };
   // The five switches of Cards with no GitHub issue (the record's rules.testissues, foremanissues, followupissues, releaseissues and
   // splitissues): each kind is On while its rule is off.
   const NOISSUE_WORDS = { testissues: 'Tests page actions', foremanissues: 'Foreman orders', followupissues: 'Review follow-ups', releaseissues: 'Release fix cards', splitissues: 'Split parts' };
@@ -159,13 +159,14 @@
       const [key, o] = String(x).split('=');
       if (key === 'split' || key === 'pick') { r.rules[key] = o; return; } // Split large issues and Pick settings keep their word: off, shadow or on
       if (key === 'healsdays') { r.rules[key] = Number(o); return; } // the days an entry of the Self-heals list may go unfixed and unseen
+      if (key === 'cardusd' || key === 'issueusd') { r.rules[key] = o === 'off' ? 0 : Number(o); return; } // dollars; the record keeps off as 0
       if (key === 'pushbatchwhen') { r.rules[key] = /^\d+$/.test(o) ? Number(o) : o; return; } // a number of landings, or a UTC time HH:MM
       if (key === 'pushbatchtests') { r.rules[key] = o; return; } // linked or all
       if (!isArea(key)) { r.rules[key] = o === 'on'; return; }
       const never = list(r.rules.never).filter((y) => y !== key);
       r.rules.never = o === 'off' ? never.concat([key]) : never;
     });
-    return [r, own(BATCH_WORDS, k) ? 'pushbatch' : isArea(k) ? 'never' : ['push', 'visible', 'lint', 'failfast', 'teststeponly', 'pushbatch', 'testissues', 'foremanissues', 'followupissues', 'releaseissues', 'splitissues', 'split', 'pick', 'healsdays'].includes(k) ? k : 'build'];
+    return [r, own(BATCH_WORDS, k) ? 'pushbatch' : isArea(k) ? 'never' : ['push', 'visible', 'lint', 'failfast', 'teststeponly', 'pushbatch', 'testissues', 'foremanissues', 'followupissues', 'releaseissues', 'splitissues', 'split', 'pick', 'healsdays', 'cardusd', 'issueusd'].includes(k) ? k : 'build'];
   }
   // A setting as the record would hold it once the host takes it, and the row it is in; null for an action that is
   // not one setting (release, order, unpin...): those show when the host answers.
@@ -418,11 +419,26 @@
         return b;
       })), known ? null : S.ctx.h('span', 'board-from', 'needs a newer Conveyor')));
   }
+  // The dollar limits of a card and of an issue (the record's rules.cardusd and rules.issueusd, 0 for off): Off, $5 to
+  // $100, and the limit in force when it is another (set with the command). A record without one gets no row for it.
+  function rulesDollars(el, r) {
+    [['cardusd', 'Card dollar limit', 'dollars one card can spend before it stops with its work kept'],
+      ['issueusd', 'Issue dollar limit', 'dollars all cards of one issue can spend before the next card stops']].forEach(([key, name, what]) => {
+      const usd = num(r[key]);
+      if (usd === null) return;
+      const all = [0, 5, 10, 20, 50, 100];
+      if (!all.includes(usd)) all.push(usd);
+      el.append(row(key, name, what, seg(name, ...all.sort((a, b) => a - b).map((n) => {
+        const label = n ? `$${n}` : 'Off';
+        return choice(label, `${key}-${n}`, `${name}: ${label}`, usd === n, () => { if (usd !== n) send('rules', [`${key}=${n || 'off'}`]); });
+      }))));
+    });
+  }
   window.DASH_APP.part('rules-moves', function (shared) {
     ({ AREA, RELEASE_MAX, STANDING, ARM_MS, BUILDS, S, ONB, OB, num, list, ctl, plural, prio, pre, isArea,
       areaName, PRMERGE, undoOf, say, run, button, priceWords, draw } = shared);
     return { MOVES, moveOf, moveMark, readOf, moveJudge, moveNote, words, guessed, tabLine, post, send, undoSkips,
       undoLabel, undoAsk, guarded, choice, seg, judgeRare, pickList, stepper, row, wouldSkip, skipWords, fieldLabel, areaWould,
-      held, unlisted, heldUnknown, groups, labelMark, matches, arm, queueOne, queueAll, rulesHeals };
+      held, unlisted, heldUnknown, groups, labelMark, matches, arm, queueOne, queueAll, rulesHeals, rulesDollars };
   });
 })();

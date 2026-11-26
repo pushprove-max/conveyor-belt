@@ -74,6 +74,14 @@ for args in (['healsdays=10'], ['healsdays=3650'], ['healsdays=1']):
 for args in (['healsdays='], ['healsdays=0'], ['healsdays=3651'], ['healsdays=010'], ['healsdays=-1'], ['healsdays=1.5'], ['healsdays=1;id'],
              ['healsdays=10000'], ['healsdays=10\n'], ['healsdays=on'], ['healsdays=10', 'P0=on'], ['P0=on', 'healsdays=10'], ['healsdays=10', 'healsdays=20']):
     check('refuses_rules_%s' % '_'.join(args), not rules(args), args)
+# The Rules tab's dollar limits: bug it catches, `cardusd=20` refused as no rule, a value the engine does not take
+# (on, which the on or off rules' pattern lets through; abc; 0; past 100000) passed to the host, or a limit sent with
+# another rule.
+for args in (['cardusd=1'], ['cardusd=100000'], ['issueusd=20'], ['cardusd=off'], ['issueusd=off']):
+    check('takes_rules_%s' % args[0], rules(args), args)
+for args in (['cardusd=abc'], ['cardusd=on'], ['issueusd=on'], ['cardusd='], ['cardusd=0'], ['issueusd=100001'], ['cardusd=010'],
+             ['issueusd=1.5'], ['cardusd=5;id'], ['cardusd=5\n'], ['cardusd=5', 'P0=on'], ['P0=on', 'issueusd=on']):
+    check('refuses_rules_%s' % '_'.join(args), not rules(args), args)
 print('dashboard-server-heals: %d passed' % passed)
 EOF
 [ $? = 0 ] || exit 1
@@ -103,9 +111,21 @@ c = http.client.HTTPConnection('127.0.0.1', srv.server_address[1], timeout=60)
 c.request('POST', '/control', body=json.dumps({'action': 'heals', 'args': args, 'repo': 'proj'}),
           headers={'Host': 'localhost:%d' % srv.server_address[1], 'Origin': 'https://localhost:%d' % srv.server_address[1], 'Content-Type': 'application/json'})
 r = c.getresponse()
-said = (r.status, r.read().decode()); srv.shutdown()
+said = (r.status, r.read().decode())
 if said != (200, SAID.strip()):
     print('FAIL [heals_batch_answers_every_line]: POST /control heals %s answered %r, not the whole receipt %r' % (' '.join(args), said, SAID.strip()), file=sys.stderr)
     sys.exit(1)
 print('dashboard-server-heals: the batch sheet gets the whole receipt')
+# Bug it catches: a dollar limit that is no number answered as taken, or sent on to the host's command.
+ran = []
+ds.run_script = lambda args, timeout, env=None: ran.append(args) or subprocess.CompletedProcess(args, 0, '', '')
+body = json.dumps({'action': 'rules', 'args': ['cardusd=abc'], 'repo': 'proj'})
+c = http.client.HTTPConnection('127.0.0.1', srv.server_address[1], timeout=60)
+c.request('POST', '/control', body=body,
+          headers={'Host': 'localhost:%d' % srv.server_address[1], 'Origin': 'https://localhost:%d' % srv.server_address[1], 'Content-Type': 'application/json'})
+status = c.getresponse().status; srv.shutdown()
+if status != 400 or ran:
+    print('FAIL [rules_cardusd_abc_runs_nothing]: POST /control %s answered %r and ran %r' % (body, status, ran), file=sys.stderr)
+    sys.exit(1)
+print('dashboard-server-heals: a dollar limit that is no number runs no command')
 EOF
