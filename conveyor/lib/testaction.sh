@@ -279,13 +279,13 @@ testpick() { # <the open issues json>
   never=$(jq -c '.rules.never // []' <<<"$c" 2>/dev/null) || never='[]'
   open=$(jq -c 'map(.number)' <<<"${1:-[]}" 2>/dev/null) || open='[]'
   parts=$(jq -c '[(.[] | select((.parts // []) != []) | {k: .number, v: [.parts[] | .number | numbers]}), (.[] | select(.umbrella | numbers) | {k: .umbrella, v: [.number]})] | group_by(.k) | map({key: (.[0].k | tostring), value: (map(.v[]) | unique)}) | from_entries' <<<"${1:-[]}" 2>/dev/null) || parts='{}'
-  # The unheld cards not picked yet are read as an issue is: the state of each issue of another repository their `Depends on:` lines name is asked now (farstates()).
+  # The unheld cards not picked yet are read as an issue is: the state of each issue of another repository their `Depends on:` lines name is asked now (farstates()); the record and its far states go to jq on its input, as Linux refuses an argument over 128 KiB.
   # A card given back (card set, its lines gone) is picked again, so it is asked as one not picked yet is; one that landed is not picked again, so it is not asked.
   have=$(stdb ask issue cards 0) || h=0
   far=$(farstates "$(printf '%s\n%s\n' "$rec" "$have" | jq -Rcn --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" 'input | fromjson as $r
     | ([inputs | fromjson? | objects | select('"$TADONE"') | .card | strings] | INDEX(.)) as $landed
     | $r | map(if (.held | not) and $landed[.card // ""] == null then {body} else {} end)')") \
-    && rec=$(jq -c --argjson f "$far" '[., $f] | transpose | map(.[0] + (.[1] | if .far then {far} else {} end))' <<<"$rec") \
+    && rec=$(printf '%s\n%s\n' "$rec" "$far" | jq -cs 'transpose | map(.[0] + (.[1] | if .far then {far} else {} end))') \
     || { exec {lock}>&-; echo "conveyor: the issues of other repositories the Tests page's cards depend on could not be read; its cards wait" >&2; return 1; }
   cards=$(recs) || { exec {lock}>&-; return 1; }
   if [ "$h" = 1 ] && [ -z "${ONLY:-}" ]; then

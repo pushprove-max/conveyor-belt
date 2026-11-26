@@ -439,11 +439,11 @@ t_nihold() {
 }
 
 # Bug it catches: a Foreman order or release fix card with `Depends on: other/repo#600` was picked while that issue of another
-# repository was open (testpick() dropped the reference, as needs does; upnext() holds an issue for it, farstates()).
+# repository was open (testpick() dropped the reference, as needs does; upnext() holds an issue for it, farstates()). Its body over 128 KiB catches a pick that gives the far states to jq as an argument (Argument list too long).
 t_nifar() {
   nisetup foremanissues; local id
   loop card 'Add a Rules row' $'Make it so.\n\nDepends on: other/repo#600' > /dev/null 2>&1 || fail "card with a far Depends on line failed"
-  id=$(jq -r '.cards[0].id' "$(nicards)")
+  id=$(jq -r '.cards[0].id' "$(nicards)"); { jq '.cards[0].body += "\n" + "x" * 140000' "$(nicards)" > "$STUB/c.json" && mv -f "$STUB/c.json" "$(nicards)"; } || fail "the body of $id could not be made over 128 KiB"
   loop control release "$id" > /dev/null || fail "control release $id failed"
   echo OPEN > "$STUB/repo.other_repo.600"
   fx_in 'locked testpick "[]"'
