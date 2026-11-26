@@ -404,10 +404,10 @@
       "default": {},
       "additionalProperties": false,
       "properties": {
-        "doneWhen": { "description": "The items of the issue's Done when section.", "type": "integer", "minimum": 1, "default": 6 },
-        "files": { "description": "The different file paths the issue names.", "type": "integer", "minimum": 1, "default": 8 },
+        "doneWhen": { "description": "The items of the issue's Done when section.", "type": "integer", "minimum": 1, "default": 4 },
+        "files": { "description": "The different file paths the issue names.", "type": "integer", "minimum": 1, "default": 6 },
         "areas": { "description": "The different area labels the issue has or names (labels.areaPrefix and a name).", "type": "integer", "minimum": 1, "default": 3 },
-        "chars": { "description": "The characters of the issue's title and body.", "type": "integer", "minimum": 1, "default": 6000 },
+        "chars": { "description": "The characters of the issue's title and body.", "type": "integer", "minimum": 1, "default": 3000 },
         "growFiles": { "description": "The files a card's change may hold (documentation, *.md, left out) before its next review asks the judge to keep the core change and move the rest into follow-up slices (growcheck(), lib/slices.sh).", "type": "integer", "minimum": 1, "default": 25 }
       }
     },
