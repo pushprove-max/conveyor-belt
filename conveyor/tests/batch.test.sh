@@ -468,6 +468,22 @@ t_batchnoresult() {
   bout 'void: seven: its filter ran no case' \
     || fail "the card's run that gave no result lost its reason when the batch split and ran again: $(cat "$T/$CASE/run.out")"
 }
+# Bug it catches: the split's run that judged a card taken into the batch (#8, alone in its part) gave no result, but
+# its <worktree>.noresult was not copied to #8 with its output and logs, so #8 got fail 4 and voidrun() took the run
+# for a real failure. The stand-in, as tests() does, deletes .noresult at the start of each run, and writes it and
+# fails in each run with #8's change: the whole batch's, then #8's part (run with #7, which passed alone).
+t_batchmatenoresult() {
+  bmain; bwt 7 'echo seven > 7.txt' 200 true; bwt 8 'echo eight > 8.txt' 100
+  echo '{"by":"c7-7","pid":1}' > "$CARDS/c8-8.batch"
+  bfx 'tests() { rm -f "$1.noresult"; echo ran > "$1.test"; TEST_WAIT="" TEST_RUN="" TEST_FREE=""
+      git -C "$1" diff --cached --quiet -- 8.txt && return 0
+      echo "eight: its filter ran no case" > "$1.noresult"; echo "no result" > "$1.test"; return 1; }
+    batch c7-7 "$W" c7-7 c8-8; echo "batch: $?"
+    echo "fail: $(jq -c .fail "$CARDS/c8-8.batch")"
+    echo "void: $(voidrun "$CARDS/c8-8" 1)"'
+  bout 'fail: 1' && bout 'void: eight: its filter ran no case' \
+    || fail "#8's split run gave no result, but #8 did not keep its reason: $(cat "$T/$CASE/run.out")"
+}
 
 # Bug (#1574): gather(), stackto() and settle() gave jq the card's claim, the other claims and the wait as arguments
 # (--argjson); over 128 KiB Linux refuses to start jq, so a card whose claim holds 2,000 long paths could not make a
