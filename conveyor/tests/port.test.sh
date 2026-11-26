@@ -147,6 +147,22 @@ t_rebasebig() {
 # its staged change: the port, a different change, runs its tests again; main moving on another file during the
 # port's tests then fits it onto main with the same change, which reuses the port's pass and starts no run. It lands
 # alone, with the earlier loop's findings filed.
+# Bug: a NO-GO on the one review of a port (its earlier loop ended on a last NO-GO of P2s, whose follow-ups the
+# landing conflict withdrew) dropped that loop's review, so the GO after the fix of the port's own finding landed the
+# card with those P2s filed nowhere. afterreview() (lib/card.sh) as card() calls it on the port's two reviews: the NO-GO
+# gets its fix round, and the GO is a last review that carries the earlier loop's findings and why it ended.
+t_portnogo() {
+  local e='{"stop":"max-reviews","pass":3,"rounds":0}'
+  setup "[$(issue 12 2026-01-01)]"
+  fx_in 'wt=$CARDS/c1-12; mkdir -p "$CARDS" && issue=$(gh issue view 12 --json number,title,body,labels,milestone) || exit 3
+    fin=NO-GO finrev=$PORTNOGO finend=$e earlier="" earlyend="" pass=0 rounds=0 rebased="" tfix="" lfix="" mode="" privfix="" p1fix=""
+    for r in "$NOGO" "$GO"; do printf "%s\n" "$r" > "$wt.review"; res=$(verdict "$wt.review") pass=$((pass + 1)); afterreview
+      jq -cn --arg a "$after" --arg s "$stop" --argjson e "${earlyend:-null}" --arg r "$earlier" "{after: \$a, stop: \$s, earlyend: \$e, earlier: (\$r | test(\"c.txt:3 a nit\"))}"; done > "$T/$CASE/after"'
+  [ "$RC" = 0 ] || fail "afterreview() on the port's reviews could not be called (exit $RC): $(cat "$T/$CASE/run.out")"
+  [ "$(tr '\n' , < "$T/$CASE/after")" = "{\"after\":\"fix\",\"stop\":\"\",\"earlyend\":$e,\"earlier\":true},{\"after\":\"last\",\"stop\":\"go\",\"earlyend\":$e,\"earlier\":true}," ] \
+    || fail "a GO after the fix of a NO-GO on the port's review (earlier loop's review: $PORTNOGO) does not land with that loop's last NO-GO and why it ended: $(tr '\n' , < "$T/$CASE/after")"
+}
+
 t_autoport() {
   setup "[$(issue 8 2026-01-01)]"; for i in 1 2 3; do moved "${i/3/}" "$PORTNOGO" | p1at2 "$i" > "$STUB/review.$i"; done; echo "$GO" > "$STUB/review.4"
   steps() { st "select(.issue == $1 and $NOMARK) | \"\(.step) \(.result)\"" | tr '\n' ,; }

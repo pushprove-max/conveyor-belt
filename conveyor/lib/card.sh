@@ -202,9 +202,9 @@ failline() { # <worktree> <exit> <seconds> <failures json, or null> <verdicts js
 # card carries), rebased, tfix, lfix, mode, privfix and p1fix, and sets card()'s after, last, earlier, earlyend, fin, rep, hard, priv, p1, stop, last0, ended, isfu and why (bash's dynamic scope).
 afterreview() {
   local d
-  # A GO on the review of a port lands with the earlier loop's outcome: after its last NO-GO, that review's
-  # findings are filed again, whatever the reviews after a test fix say. A NO-GO on it is fixed and goes round the loop as any card's.
-  last=''; [ "$fin" != NO-GO ] || [ "$res" != GO ] || { earlier=$finrev; earlyend=$finend; }; fin=''
+  # The review of a port carries the earlier loop's last NO-GO: its findings are filed again as the card lands, whatever later reviews say. A NO-GO on
+  # it is fixed and goes round the loop as any card's. Bug: only a GO on it carried them, so a GO after a fix of the port's own finding filed none.
+  last=''; [ "$fin" != NO-GO ] || { earlier=$finrev; earlyend=$finend; }; fin=''
   [ -z "${rlrev:-}" ] || [ "$mode" = land ] || earlier=$rlrev # A retry by review-land files its kept review's findings (rlrev, resumeplan()) whatever a later review says: each review after that one (mode no longer land) carries it as the earlier loop's last NO-GO. Bug: a GO after a test fix, or after the fix of a port's own finding, dropped the finding that blocked the card.
   # A NO-GO that repeats a finding a fix round was told to fix (donewhen.sh repeats()) spends no more rounds on it: when every
   # P0 or P1 finding of the review is such a repeat this is the last review (loopstop()); so is one where a repeated harm one
