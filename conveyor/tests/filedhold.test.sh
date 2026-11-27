@@ -242,11 +242,16 @@ t_filedgrep() {
 }
 # Bug caught: a filing that the strict reading drops, which leaves the Foreman with an issue it was never told to hold:
 # gh issue with its verb in a variable, a create that follows an edit in the same command, an issue filed through gh api
-# whose quoted title says `-X PATCH` (quoted text is no flag), and an issue filed by a GraphQL mutation in quotes, whose
-# createIssue the strict reading must still see inside the quotes.
+# whose quoted title says `-X PATCH` (quoted text is no flag), an issue filed by a GraphQL mutation in quotes, whose
+# createIssue the strict reading must still see inside the quotes, and a filing in a command substitution in double
+# quotes ($(...) or backticks), which runs and so is no quoted text, also with parentheses in its quoted title or a
+# substitution nested in it.
 t_filedvar() {
   filedsetup
   for cmd in 'v=create; gh issue "$v" --title a --body a >/dev/null' 'gh api -X PATCH repos/o/r/issues/4 -f body=x; gh api repos/o/r/issues -f title=a --jq .number' \
+    'printf '"'%s\n'"' "$(gh api repos/o/r/issues -f title=a --jq .number)"' 'echo "n: `gh api repos/o/r/issues -f title="a b" --jq .number`"' \
+    'printf '"'%s\n'"' "$(gh api repos/o/r/issues -f title='"'Fix (retry)'"' --jq .number)"' \
+    'printf '"'%s\n'"' "$(gh api repos/o/r/issues -f title=$(cat title.txt) --jq .number)"' \
     "gh api repos/o/r/issues -f title='Document gh api -X PATCH calls' --jq .number" \
     "gh api graphql -f query='mutation { createIssue(input: {repositoryId: \"R_kgDOExample\", title: \"a\"}) { issue { url } } }' --silent"; do
     out=$(hook filed "$cmd" $'5\n')
@@ -255,11 +260,12 @@ t_filedvar() {
   done
 }
 # Bug caught: a quoted `gh issue` in a search read as a gh issue call whose verb is `$f`, and a quoted -X 'PATCH' that
-# the edit check did not see, alone or beside a quoted path (the two quotes read as one text with a space in it).
+# the edit check did not see, alone or beside a quoted path (the two quotes read as one text with a space in it), and an
+# escaped \$( in double quotes, which bash prints as text and does not run.
 t_filedquoted() {
   filedsetup
   for cmd in 'f=conveyor/foreman/foreman.sh; grep -q '"'gh issue'"' "$f"' "gh api -X 'PATCH' repos/{owner}/{repo}/issues/4 -F body=@\"\$f\" --silent" \
-    "gh api -X 'PATCH' 'repos/{owner}/{repo}/issues/4' -F body=@\"\$f\" --silent"; do
+    "gh api -X 'PATCH' 'repos/{owner}/{repo}/issues/4' -F body=@\"\$f\" --silent" 'echo "see \$(gh api repos/o/r/issues -f title=a)"'; do
     out=$(hook filed "$cmd" $'ok\n')
     [ -z "$out" ] || fail "filed said something after a command that files no issue (command: $cmd): $out"
   done

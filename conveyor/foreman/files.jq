@@ -3,13 +3,26 @@
 # foreman.sh files and the plugin's filing and filed hook lines (filing-hook.sh) both read it.
 # With --arg strict 1 (foreman.sh filed, for an output that links no issue) it keeps only what shows a filing: a quoted text
 # with a space in it is read as one word, its spaces turned to _ and its other characters kept (a search for 'gh issue' or a
-# title that says -X PATCH is no command, and a mutation in quotes still shows createIssue), a word that holds $ or a
+# title that says -X PATCH is no command, and a mutation in quotes still shows createIssue), except a command substitution
+# ($(...) or backticks, at any depth and with parentheses in its own quotes) inside double quotes, which runs and is read
+# as a command (scan reads the quotes as bash nests them; a backslash makes the next character text), a word that holds $ or a
 # backtick after `issue` alone could be a search pattern, and a `gh api` call with -X PATCH edits an issue and files none,
 # so none of them counts.
 def strict: ($ARGS.named.strict // "") != "";
 def flags: "(?>\\s+-(-[^\\s=]*(=\\S*|\\s+[^-\\s]\\S*)?|[^-\\s](\\s+[^-\\s]\\S*)?(?=\\s)|[^-\\s]\\S+))*";
 def vword: if strict then "(?!)" else "(?!-)\\S*[$`]" end;
-def masked: if strict then gsub("\\\\\n"; "") | gsub("(?<q>'[^']*'|\"[^\"]*\")"; .q | gsub("\\s"; "_")) else . end;
+# The stack .k holds the open contexts: s and d quotes, c for ( or $(, b for a backtick; none open is the command itself.
+def scan: reduce (explode[] | [.] | implode) as $c ({o: [], k: [], e: false, p: ""};
+  (.k[-1] // "") as $t | ($c | test("\\s")) as $w
+  | if .e then .o += [if $w and ($t == "s" or $t == "d") then "_" else $c end] | .e = false | .p = ""
+    elif $t == "s" then (if $c == "\u0027" then .k |= .[:-1] else . end) | .o += [if $w then "_" else $c end] | .p = $c
+    elif $t == "d" then (if $c == "\\" then .e = true elif $c == "\"" then .k |= .[:-1] elif $c == "`" then .k += ["b"]
+      elif $c == "(" and .p == "$" then .k += ["c"] else . end) | .o += [if $w then "_" else $c end] | .p = $c
+    else (if $c == "\\" then .e = true elif $c == "\u0027" then .k += ["s"] elif $c == "\"" then .k += ["d"]
+      elif $c == "`" then (if $t == "b" then .k |= .[:-1] else .k += ["b"] end) elif $c == "(" then .k += ["c"]
+      elif $c == ")" and $t == "c" then .k |= .[:-1] else . end) | .o += [$c] | .p = $c
+    end) | .o | join("");
+def masked: if strict then gsub("\\\\\n"; "") | scan else . end;
 def unedits: if strict then [splits("[;&|\n]")] | map(select(test("\\bgh(-write)?\(flags)\\s+api(\\s+\\S+)*?\\s+(-X\\s*|--method[=\\s]\\s*)(?i:PATCH)\\b") | not)) | join(";") else . end;
 def writes: test("(?i:\\bpost\\b)|\\s-(-(data|json|form|upload-file|body)|[a-zA-Z]*[dFT])");
 def hex: ascii_downcase | explode | reduce .[] as $c (0; . * 16 + if $c >= 97 then $c - 87 else $c - 48 end);
