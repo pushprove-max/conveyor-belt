@@ -42,7 +42,8 @@
 # CONVEYOR_SHELL_TEST_CASE, comma-separated), other test
 # files whole; and of the tests named after the file or listed for it (TESTS_OF), those the map names nowhere (that the
 # trace did not run). A part runs only when nothing selects its test file whole. A function changed since the map was
-# traced (its sum differs) runs the cases the map lists for it as traced; a function the change adds runs the cases of
+# traced (its sum differs) runs the cases the map lists for it as traced and the tests callersof gives (issue 1822;
+# when callersof fails, the map's cases alone, never the area); a function the change adds runs the cases of
 # the functions of its file that call it (up to 3 calls away). A change outside any function, to a function the map
 # does not hold or lists no case for, or an added one that no mapped function of its file calls, runs by the rules above
 # (callersof, else its area; a hook library, .claude/hooks/lib/, the hooks' tests that reach it: hooklibtests).
@@ -337,8 +338,8 @@ covage() {
 }
 # covrules (issue 1775): after the pick, with covage's lines, a line for each changed function of a shell file that
 # names the rule that picked its tests (RULES, rulefor): `coverage map rule: <file> <function>(): covof` (the map's
-# cases), `callersof` (the tests that name it or its callers) or `area` (its area's cases); `coverage map rule: <file>,
-# a change outside its functions: area` when no changed function was read. None for a file textonly picked for.
+# cases), `callersof` (the tests that name it or its callers), `covof+callersof` (both, for a stale row) or `area` (its
+# area's cases); `coverage map rule: <file>, a change outside its functions: area` when no changed function was read. None for a file textonly picked for.
 covrules() {
   [ -z "$RULES" ] || awk -F'\t' '!s[$0]++ { if ($2 == "-") print "coverage map rule: " $1 ", a change outside its functions: " $3
     else print "coverage map rule: " $1 " " $2 "(): " $3 }' <<<"${RULES%$'\n'}"
@@ -490,8 +491,9 @@ declare -A run=() area=() ccase=() allby=()
 declare -A npart=() tparts=() twhole=()
 oparts=
 COVTESTS=
-# COVSEL: set when the coverage map chose the tests of a changed file (covof, in pick), for cnarrow (below).
-COVSEL=
+# COVSEL: set when the coverage map chose the tests of a changed file (covof, in pick), for cnarrow (below). COVSTALE:
+# set when a changed function of the file pick reads has a stale row (covof), for callersof in pick.
+COVSEL=; COVSTALE=
 # CFN: the changed functions of the file pick reads (covof, callersof); RULES: which rule picked each one's tests (rulefor).
 CFN=; RULES=
 # RANKED: the test files hooklibtests gave, one a line, most of the library's users first: the list (CONVEYOR_TEST_LIST,
@@ -1161,7 +1163,9 @@ keysof() {
 # covof <file> (issue 527): when the change of a shell file (TXFROM to TXTO) edits or removes its functions alone (FUNCS;
 # its other lines the same but for comments and blanks, TEXT), and the coverage map ($COV) holds each of them with at
 # least one case: the cases it lists for them. The map's row of a function stands for it whatever its sum: one changed
-# since the trace runs the cases that ran it then. A function the change adds stands as the functions of the changed
+# since the trace runs the cases that ran it then, and covof sets COVSTALE (issue 1822) when the row's sum is not the
+# function's sum at TXFROM (sumsof), so pick also runs callersof for the file: a test that reaches it through a path added
+# since the trace is in no row. A function the change adds stands as the functions of the changed
 # file that call it, up to 3 calls away (an added caller of an added function looks one call further). An engine case
 # into ccase (the runner's cases), a part of a test file into npart, a whole test file into run. It leaves the changed
 # functions' names in CFN once it has read them. It fails, and the rules after it pick, when there is no map or it cannot be read, the file cannot be read either side, a line outside
@@ -1169,7 +1173,7 @@ keysof() {
 # names a unit or test file number twice or one it does not name, or names a test file, an engine case or a part
 # (partok) that is not there now.
 covof() {
-  local f=$1 a b sa sb sel t c ac k n body x y z
+  local f=$1 a b sa sb sel t c ac k n body x y z ts rs
   local -a fn front next
   local -A old=() kb=() use=() seen=()
   [ -n "$TXFROM" ] && [ -s "$COV" ] || return 1
@@ -1227,10 +1231,18 @@ covof() {
     if [ -z "$c" ]; then run[$t]=1; elif [ "$t" = conveyor/conveyor.test.sh ]; then ccase[$c]=1; else npart[$t]+=$'\n'$c; fi
   done <<<"$sel"
   [ -n "$COVTESTS" ] || COVTESTS=$(jq -rn '[inputs | objects | select(has("testfile") and has("path")) | .path] | unique[]' "$COV")
+  # A stale row: a changed function TXFROM has whose row's sum is not its sum there. An added one is never stale.
+  ts=$(sumsof <<<"$a")
+  rs=$(jq -rn --arg f "$f" 'inputs | objects | select(.file == $f and has("sum")) | "\(.fn)\t\(.sum)"' "$COV" 2>/dev/null)
+  for x in "${fn[@]}"; do
+    [ -n "${old[$x]:-}" ] || continue
+    [ "$(awk -F'\t' -v n="$x" '$1 == n { print $2; exit }' <<<"$ts")" = "$(awk -F'\t' -v n="$x" '$1 == n { print $2; exit }' <<<"$rs")" ] || COVSTALE=1
+  done
   parse[$f]=1
 }
 # rulefor <file> <rule> (issue 1775): a line `<file><TAB><function><TAB><rule>` in RULES for each changed function
-# (CFN), `-` for none: which rule picked the tests of each (covof, callersof or area), which the run prints.
+# (CFN), `-` for none: which rule picked the tests of each (covof, callersof, covof+callersof for a stale row, or
+# area), which the run prints.
 rulefor() {
   local n
   for n in ${CFN:--}; do RULES+=$1$'\t'$n$'\t'$2$'\n'; done
@@ -1297,10 +1309,11 @@ for f; do
   [ -n "$NOTEXT" ] || ! textonly "$f" || continue
   # A change to functions alone that the coverage map holds: the cases it lists (issue 527), and of the tests below,
   # those the map names nowhere (a test the trace did not run); not its area.
-  cov=; [ -n "$NOTEXT" ] || ! covof "$f" || { cov=1; COVSEL=1; rulefor "$f" covof; }
-  # Else a change to functions alone of an engine shell file: the tests that name them or their callers, and the tests
-  # named after the file or listed for it; not its area (issue 1775).
-  cal=; [ -n "$NOTEXT" ] || [ -n "$cov" ] || ! callersof "$f" || { cal=1; rulefor "$f" callersof; }
+  cov=; COVSTALE=; [ -n "$NOTEXT" ] || ! covof "$f" || { cov=1; COVSEL=1; }
+  # Else, or with a stale row (COVSTALE, issue 1822), a change to functions alone of an engine shell file: the tests that
+  # name them or their callers, and the tests named after the file or listed for it; not its area (issue 1775).
+  cal=; [ -n "$NOTEXT" ] || { [ -n "$cov" ] && [ -z "$COVSTALE" ]; } || ! callersof "$f" || cal=1
+  [ -z "$cov$cal" ] || rulefor "$f" "${cov:+covof}${cal:+${cov:++}callersof}"
   # A change to commands of conveyor.sh alone: the tests that run them (issue 514). A change to the control record's
   # defaults: the tests of the code that reads the keys it changed (issue 530).
   [ -n "$NOTEXT" ] || [ -n "$cov$cal" ] || ! { cmdsof "$f" || keysof "$f"; } || continue

@@ -307,7 +307,26 @@ p_cover() {
   git -C "$R" checkout -q -- conveyor/x.sh
   sed 's/echo one/echo uno/' "$R/conveyor/x.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/x.sh"; git -C "$R" commit -qam since
   sed 's/echo uno/echo eins/' "$R/conveyor/x.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/x.sh"; got=$(ran)
-  [ "$got" = aone ] && ok "a function changed since the coverage map was traced runs the cases the map lists for it as traced, not the area" || no "xone changed since the trace: ran '$got': $(cat "$T/out")"
+  # Here callersof fails (the scratch repo has no conveyor/conveyor.sh to read): the stale row's cases stand alone.
+  [ "$got" = aone ] && grep -qxF 'coverage map rule: conveyor/x.sh xone(): covof' "$T/out" \
+    && ok "a function changed since the coverage map was traced runs the cases the map lists for it as traced, and with callersof failing, not the area" \
+    || no "xone changed since the trace, callersof failing: ran '$got': $(cat "$T/out")"
+  # Issue 1822. Bug it catches: a stale row lists the cases that ran the old body, so a test that reaches the function
+  # through a path added since the trace (xs.test.sh, which the map does not list) never ran on a change to it. A stale
+  # row also runs the tests callersof gives; a current row runs the map's cases alone, as before.
+  mkdir -p "$R/conveyor/lib"; echo ': main' > "$R/conveyor/conveyor.sh"; echo ': portable' > "$R/conveyor/lib/portable.sh"
+  printf '%s\n' ': xone' 'echo xs >> "$(dirname "$0")/../../../ran"' > "$R/.claude/scripts/__tests__/xs.test.sh"
+  printf '{"outside": "%s"}\n' conveyor/conveyor.sh conveyor/lib/portable.sh >> "$R/.conveyor/engine-areas.json"
+  git -C "$R" add .conveyor/engine-areas.json conveyor/conveyor.sh conveyor/lib/portable.sh .claude/scripts/__tests__/xs.test.sh && git -C "$R" commit -qm callers
+  got=$(ran)
+  [ "$got" = "aone xs" ] && [ "$(cat "$T/rc")" = 0 ] && grep -qxF 'coverage map rule: conveyor/x.sh xone(): covof+callersof' "$T/out" \
+    && ok "a stale coverage row runs the map's case and the test that names the function, not the area" \
+    || no "xone changed since the trace (stale row), callersof reads it: ran '$got': $(cat "$T/out")"
+  printf 'xone() {\n  echo one\n}\nxtwo() {\n  echo two\n}\n' > "$R/conveyor/x.sh"; git -C "$R" commit -qam back
+  sed 's/echo one/echo uno/' "$R/conveyor/x.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/x.sh"; got=$(ran)
+  [ "$got" = aone ] && grep -qxF 'coverage map rule: conveyor/x.sh xone(): covof' "$T/out" \
+    && ok "a current coverage row runs the map's case alone, not the tests callersof gives" \
+    || no "xone changed, its row current, callersof reads it: ran '$got': $(cat "$T/out")"
 }
 
 # Issue 598. Bug it catches: a change to lib/a.sh broke tests/l.test.sh, which no card changing lib/a.sh selects, so it
