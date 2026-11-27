@@ -5,8 +5,8 @@ sends it to a fix session and then to review again. A card that needs a person s
 its work kept, until you retry or close it.
 
 A card that is blocked with its work kept also shows as an open decision on the Board, once. The recommended option is
-"Retry keeping the work": the loop gives the card back as `conveyor.sh retry <issue>` does. Only your answer on the
-Board releases a held issue. When auto or the Foreman gives the answer, a held issue stays held until you release it. "Fresh retry" gives it back
+"Retry keeping the work": the loop gives the card back as `conveyor.sh retry <issue>` does. Only your own answer releases a held issue:
+your answer on the Board, or one given with `decision.sh answer <id> <answer> --by owner`. When auto or the Foreman gives the answer, a held issue stays held until you release it. "Fresh retry" gives it back
 as `retry <issue> --fresh` does, and the next card builds from nothing. "Leave it held" changes nothing.
 The loop looks for answers after each wait of the `tunables.idle` setting in the pack, and acts on an answer then. If you
 retry or shut the card by hand first, the loop closes the decision and takes no step.
@@ -31,7 +31,8 @@ once with no GitHub issue. Its record is only in Conveyor. The five kinds:
   `foreman.sh ask <project> card <title> <body>`. The Board shows the card as "Foreman order".
 - **Review follow-ups**: a finding that the review of a card files as a follow-up. The text of the card names its
   parent. The Board shows it as "Review follow-up of #<parent>". If the parent card has no GitHub issue, the Board
-  shows the branch of the parent card or its card ID in place of "#<parent>". The card waits until its parent card
+  shows the branch of the parent card or its card ID in place of "#<parent>". A split part with no GitHub issue
+  is the exception: its follow-up shows the number of the umbrella issue, as "Review follow-up of #7". The card waits until its parent card
   has landed. A finding that names a file of the pipeline is held as its issue would be. If its parent card does not land, the
   follow-up is taken back, and the finding goes in the brief of the next card of the parent. A follow-up inherits the
   yes that the owner gave to its parent for a visible change.
@@ -176,6 +177,13 @@ reason names the cause from the CLI's own error output: not logged in, a model t
 error, or a CLI that is not installed. The reason also says what to do. Under it are the last lines of that output,
 each cut short. Conveyor writes your home folder as `~`. It leaves out text that looks like a credential, and each
 line that the privacy check's patterns find.
+
+A failed Codex review has no line of the CLI's output under its reason. The reason names the file that keeps that
+output, such as `<card>.review.events`, in the card's kept folder: `kept/<card>` in the state folder (`conveyor.sh
+state-dir` prints it). The CLI's error output is beside it, as `<card>.review.err`. A later review of the same card
+adds a number, as `<card>.review-2.events`. When Conveyor could not keep the files, the reason names a folder to make
+writable. Other review reasons can name a kept events file in the same way, for example a review that **Stop** stopped
+before its cost could be read: look for it in the same folder.
 
 When the cause is the sign-in (it expired, it is missing or it was refused), the reason says so and what to run, for
 example `build: Claude Code's own sign-in expired`, then `run claude /login (or set up the proxy route), then conveyor.sh
@@ -397,13 +405,21 @@ and one more review of that fix alone. If that review still holds a P1, the card
 A P0 on the last review gets no extra fix session: the card lands, and the P0 becomes a follow-up. A finding with no
 kind counts as `harm`, and a finding with no level counts as P1.
 
-A privacy hit in the card's own change never lands. If a finding of the last review is such a hit, the card gets
+With `privacy.mode` public, a privacy hit in the card's own change never lands. With it private, a hit that the
+review does not quote can land. If a finding of the last review is such a hit, the card gets
 another fix session and one more review. This repeats until a last review holds no such hit, and then the card lands
 as above. If the hit is still there after 3 of these fix sessions, the card does not land and does not go to Needs
 you: the engine shuts it with its work kept, and the hit goes on the self-heals list as a possible false hit of the privacy
 check. `conveyor.sh retry <issue>` takes the card again. The review that ends the loop and the `filed` step
 record the reason as `stop`, with `pass` (the reviews of this card) and `rounds` (the reviews of earlier cards). On the
 Board, that review shows "Fix loop ended:" and the reason.
+
+When a card of an issue is blocked, Conveyor posts a comment on the issue. It starts with **Blocked:** and why, in
+words. Next come the findings of the last review that the reason names, under "The review still finds:", or else the
+reason, and then **Other findings of the last review**. Two folded parts follow, which you open on GitHub: **Declined
+by the judge (N)**, the findings that the judge declined, and **Last output**, the end of the card's output. The
+comment ends with **Next:**, what `conveyor.sh retry <issue>` does for this card, and a small line with the card ID
+and, when the work is kept, the path of the kept patch and the commit it was built on.
 
 The judge, when it is on (`conveyor.sh control judge on`), reads each review and declines a finding that does not earn
 its place. A declined finding causes no fix and no follow-up (`conveyor/README.md`, The judge). After a fix round,
@@ -481,7 +497,7 @@ review of the card rules on a finding again, the later ruling counts. A finding 
 filed as a follow-up. A finding on the list that it rules `harm`, or gives no kind, leaves the list. When the judge
 fails, the review stays as the reviewer wrote it: each of its findings has no kind, so it is `harm`.
 
-Each entry of the self-heals list and the docs list has an area. It is the area of the file that the finding names,
+Each entry of the self-heals list and the docs list has an area, or, as below, none. It is the area of the file that the finding names,
 from the pack's `labels.areaPaths` ([The pack](configuration.md#the-pack)). A file that no path of the map names gets
 the map's `other` area. When the finding names no file, or the pack has no map, the entry gets the area label of its
 issue. When that issue has no area label, the entry has no area, and the Board shows it under "No area".
@@ -571,7 +587,8 @@ reason says that its issue is a follow-up. A P2 or P3 that names one of the pack
 gets a follow-up, filed held. If a finding cannot be written to the list, the card does not land. If the depth of the
 issue cannot be read, the card counts as at the cap. A card whose issue is at depth 2 files no
 follow-ups: its leftover findings go on the self-heals list, and the reason names the cap. A follow-up that changes one of the pack's `pipelineFiles` is filed held.
-It builds only once you release it.
+It builds only once you release it. A follow-up whose finding names only files of its parent card's change, and no
+word of `auto.reserved`, is not held ([Standing yes](foreman.md#standing-yes), `review-followup`).
 
 A finding whose fix changes no behaviour, such as a comment, dead code or a redundant check, has the mark `[cleanup]`
 after its level, as `[P3][cleanup] file:line what`. Its follow-up is a cleanup, not a bug: it does not get the pack's

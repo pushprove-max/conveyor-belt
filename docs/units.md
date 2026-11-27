@@ -23,7 +23,8 @@ right-aligned and the title is what gives way.
   cap, the `ON THE BELT` head gives the cards on the belt and the cap. It also gives a card that lands or has landed,
   which the cap does not count (`ON THE BELT (2 of 7, 1 landing not counted)`). When the snapshot is older than the
   card records or the loop's own count, the head gives the count the loop gives now. When the loop gives no count, the
-  head gives the snapshot's count, or else the cards on the belt that the cap counts. The Board uses the loop's count only when the snapshot is older than the card records. With more than
+  head gives the snapshot's count, or else the cards on the belt that the cap counts. With no card on the belt and no
+  count from the loop or the snapshot, the head shows `ON THE BELT` with no count. The Board uses the loop's count only when the snapshot is older than the card records. With more than
   one project, each project's count follows its name (`ON THE BELT (bakery 1 of 3 · gadgetlab 1)`). In `/units` a
   dim line under the head gives how many findings the review's judge declined today (`judge declined 3 findings today`), from the
   snapshot's declined list (its `declined` and `declinedRest` lines by the judge, by this machine's day, each line
@@ -207,7 +208,8 @@ A word wider than the pane breaks between whole characters.
   today. The label and the host are not cut for the dollars. When the pane is too narrow for all of it, the dollars
   show without `DAY SPEND`. When it is narrower still, a gap shows as `+` after the dollars (`$4.10+`), and the
   dollars and the gap go on a line under the head. When `$4.10+` does not fit next to the host, the dollars show only
-  on the line under the head.
+  on the line under the head. With no gap, the dollars move there in the same way when they do not fit next to the
+  host (`$4.50`).
 - **The count band**, between two rules: `4 ON BELT · 0 READY · 5 WAITING · 0 NEEDS YOU`. `READY` counts the issues
   that the loop can pick now. `WAITING` counts the issues that wait on another card.
   When the line is wider than the pane, the dots lose their spaces. When it is still too wide, the band wraps to two
@@ -220,13 +222,14 @@ A word wider than the pane breaks between whole characters.
 - The old-engine line and the whole-suite line, when there is one (while it runs, a second line with its counts, or the progress of the pass that runs failed cases again, when it has some), and the cards that need you, one line each. Then `FOREMAN HAS IT`, one line for each card that the Foreman works on, with its note. `NEEDS YOU` in the count band does not count these cards.
 - **BUILD MATRIX**: on the right, the project and its slots in use against the builder cap (`bookstore · 3/4
   slots`; the same count as the `ON THE BELT` head when the snapshot is older). When cards on the belt wait and do
-  no work (for another card, or for main to change), the number of these cards comes after the slots: `bookstore · 4/4
+  no work (for another card, for main to change, for the machine's hold or for their CLI to come back), the number of these cards comes after the slots: `bookstore · 4/4
   slots · 2 waiting`. With no waiting card, the header has no waiting count. In a narrow pane where the count does not
   fit, the header, the dim line of each other project and the legend show no waiting count and no `‖ waiting`. One row for each card on the belt: the issue (`#486`; a part of a parent issue `#636 of #647`). A card with no issue shows its kind and its parent:
   `fu #1571` for a review follow-up of #1571, `split #1453` for a split part of #1453, `red <commit>` (the
   first 7 characters of the commit) for a fix of a red main, and `test <file>` for a card of the Tests page (the
   test file's name, without its folder and extension, cut to fit the column). Any other card with no issue shows `card <N>`, with the number its
-  card id ends in, or `card` when it ends in no number or in `-0`. The same ID shows in WORKER ACTIVITY,
+  card id ends in, or `card` when it ends in no number or in `-0`. The same ID shows in WORKER ACTIVITY (a narrow wait row there can leave out
+  the parent issue, below),
   LANDED TODAY, the lists of cards that need you and the toasts. After the ID: one column for each step (`B R F T L P`: Build,
   Review, Fix, Test, Land, Push), its overall time (`Age`), its cost and, last, its short title (`Title`; a review follow-up shows its finding there, as the file's name and line and the finding's text, with no `[P1]` or `[E2]` tag; a fix card of a red main shows its name, `Main is red (<commit>)`). The title
   uses the remaining width of the row, and a title that is too long ends in `…`. A step shows `▶` while it runs,
@@ -256,8 +259,8 @@ A word wider than the pane breaks between whole characters.
   under `Requires`, so none is lost. An issue whose `Depends on:` line names no issue in the form `#N` is a row too,
   with `a Depends on line with no #N` under `Requires`: correct that line in the issue. With nothing ready and nothing
   waiting it reads `the queue is empty`, and with a queue GitHub did not list, `not read: GitHub did not list the
-  issues`. The held-back line follows. Such issues count there as `bad Depends on` (`held back: 96 held · 1 bad
-  Depends on`), together, and the text of the line does not show. When its counts do not fit on one line, they go on
+  issues`. The held-back line follows. Such issues count there as `bad Depends on` (`held back: 1 bad Depends on ·
+  96 held`), together, and the text of the line does not show. When its counts do not fit on one line, they go on
   to more lines, so none is lost. A reason too wide for one line goes on to more lines at its spaces. A word wider
   than the line breaks between whole characters.
 - **LANDED TODAY · 20**: the count of every card landed today; on the right, `5 most recent of 20`. One row for each of the five most recent cards: the time
@@ -354,16 +357,20 @@ Then three reads on this machine:
   `units: the Board's folder has data.js but no limit.json (the Board runs an older engine); the usage limit is not read`.
 - The test map of the session's checkout, from `conveyor.sh testmap` of the plugin's own copy of Conveyor: the run
   that makes the map writes how far it is in `.conveyor/test-map.run.json`, beside the map. When Conveyor for this
-  checkout runs on a build machine, the map is that machine's: `conveyor.sh testmap` runs there, in the same `ssh`
-  command as the snapshots, for the record with this checkout's folder name. The live feed can also give the map, but
-  only when the Board reads the same machine that `/units` reads the map from. When `/units` reads the map over `ssh`,
-  the Board must use the same `ssh` target. When `/units` reads the map on this machine, the Board must read this
-  machine too, with no `ssh` target. The `host` names are not compared. Then the map comes from the feed, and no
-  command asks for it. The map is in the snapshot of the record for this checkout: on one machine, the feed's record
-  whose main is this checkout; with a build machine, the feed's record with this checkout's folder name and the main
-  that your host file gives that name. A record with the same name for a different checkout does not count. When the
-  feed comes from a different machine, has no record for this checkout, or its stream is down, the map is read as with
-  no feed.
+  checkout runs on a build machine, the map is that machine's: `conveyor.sh testmap` runs there over `ssh`. With no
+  live feed, it runs in the same `ssh` command as the snapshots. With a feed, it runs in an `ssh` command of its own.
+  The live feed can also give the map, but only when the Board reads the same machine that `/units` reads the map
+  from. When `/units` reads the map over `ssh`, the Board must use the same `ssh` target. When `/units` reads the map
+  on this machine, the Board must read this machine too, with no `ssh` target. The `host` names are not compared. The
+  map is in the snapshot of the feed's record whose main is this checkout's main. With a build machine, that main is
+  the one that your host file gives this checkout's folder name, and the feed's record is found by that main alone. A
+  record for a different main does not count. When that snapshot has a map, the map comes from the feed, and no
+  command asks for it. When the snapshot has no map, when the feed comes from a different machine, has no record for
+  this checkout, or its stream is down, the map is read as with no feed.
+  An engine that `plugin.commit` pins to an older version does not say which machine its map is on. Then `/units`
+  does not take the feed's map, also when the Board reads this machine, and a line under the board says `units: the
+  test map is not shown: this project's engine is too old to say which machine the map is on; move plugin.commit in
+  .conveyor/project.json to a newer engine`.
 - The Research lane's last activity: the newest write to a Claude session log of its folder
   (`~/.claude/projects/<that path with dashes>/*.jsonl`, under `$CLAUDE_CONFIG_DIR` in place of `~/.claude` when that
   is set; a name over 200 characters is cut to its first 200, a dash and a hash, as Claude Code names the folder); it

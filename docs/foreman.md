@@ -130,11 +130,13 @@ see only that project. It shows:
   that answer, the release does not show as yours. When the Foreman, the standing kind `review-retry` or auto retries
   the card of a held issue, the card goes back, but the issue stays held until you release it. To see who or what took a hold off, look in
   `<state folder>/holds-dropped.jsonl`: each line gives the time, the issue and who or what took the hold off
-  (`owner` for your release).
+  (`owner` for your release). The file has only the holds of the control record. A hold that only a label made, and
+  that **Remove the label and queue it** took off, has no line there.
 - the release or full-test run in progress: its commit, how long it has run, the cases done of all its cases, and the
   failed cases. With no run in progress, it shows how the last run ended.
 - each item that needs you, one a line: a blocked card with its reason, a change that waits for your yes, a push
-  error and a problem of the engine
+  error, an issue that waits on a shut issue (`dependency cannot land`, with the reason) and a problem of the engine.
+  A `dependency cannot land` line also wakes the Foreman.
 - `not yet reported: blocked #N (card <id>)` for each card blocked for two polls or more that the Foreman has not
   got in a wake. The next wake names it too. A card with no issue shows its name and its card ID, for example
   `not yet reported: blocked Review follow-up of #7 (card <id>)`.
@@ -169,7 +171,7 @@ it up:
   whole card records, the watcher reads `conveyor.sh health`. A blocked card, or a change that waits for your yes,
   then wakes the Foreman from health at that poll, and does not wait for the snapshot. With the standing kind
   `review-retry` on, a card that its review blocked gives no wake, unless its retry fails, `review-retry` already
-  retried its issue one time, its reason holds a word of `auto.reserved` or an item of your profile, or the watcher
+  retried an earlier card of its issue one time, its reason holds a word of `auto.reserved` or an item of your profile, or the watcher
   cannot read these words on the host ([Standing yes](#standing-yes)).
 - A stopped process: the engine, or the process of a card, is stopped (state T in `ps`). The wake names it. Run
   `kill -CONT` with each process ID of the tree, as the wake gives it, on the machine where the engine runs to resume it.
@@ -179,7 +181,8 @@ it up:
   your open questions names the card's issue (`#N`), there is no wake. A card that is retried, unblocked, shut or
   landed gives no more of these wakes.
 - gh is signed out, GitHub does not answer, or the project gives no snapshot: the wake comes only when three polls in
-  a row find it. One or two such polls give no wake.
+  a row find it. One or two such polls give no wake. A gap of more than three polls since the last such poll (for
+  example, a machine that was asleep) starts the count again at one.
 - A release or full-test run that ends: the wake names the result and the failed cases.
 - Each fix card of a failed release suite has landed
   ([Fix cards of a failed suite](releases.md#fix-cards-of-a-failed-suite)): the wake names the version. It says that
@@ -293,7 +296,8 @@ the push and which card clears it, for example `Push blocked: typecheck-web fail
 wake for a blocked push with the same check and the same error as an earlier one says that it is a repeat of that
 block, not a new one. When the push goes through after such a wake, one more wake comes, and the reply says
 `Push went through: <what>.` If none of these is owed, the reply is the one word Idle. But while a wake names a
-blocked card as `not yet reported`, the Foreman cannot end its turn until it takes a step on that card: it logs an act
+blocked card as `not yet reported`, or names it in its own first wake (`<project>: <card> is blocked since <time>:
+<why>`), the Foreman cannot end its turn until it takes a step on that card: it logs an act
 for it with `auto act`, it asks you about it, or the card moves (retried, shut or landed). The same holds on a turn
 that you open, while `foreman status` names a card `not yet reported`, also when the build host is down and the
 status shows the last snapshot. The act or the question
@@ -419,8 +423,9 @@ asks the host about the record over ssh. Open decisions for that record come fro
   `narrow` and `off` set the same mode on the host, with a log of its own there. `on` and `narrow` first send your
   picker answers from the ruling log on your machine to the host, with the items of `owner-way.md` on your machine,
   and each `auto decide` of the Foreman sends them again. When the items of `owner-way.md` change, the end of the
-  Foreman's next turn sends them to the host. If the host does not get them, the Foreman tells you, because the engine
-  there decides by the items it got last. The end of each later turn sends them again. When the Foreman session starts again, it reads that log and
+  Foreman's next turn sends them to the host. This also occurs while auto is off, because the watcher on the host
+  holds a card for `review-retry` by the items it got last ([Standing yes](#standing-yes)). If the host does not get
+  them, the Foreman tells you, because the engine and the watcher there decide by the items they got last. The end of each later turn sends them again. When the Foreman session starts again, it reads that log and
   tells you what the engine decided. What `auto.reserved` and `owner-way.md` hold, and anything against one of your
   rulings, still wait for you.
 - `owner-way.md`: a project can keep a written profile of how its owner decides. Make it from the ruling log, and put
@@ -429,7 +434,9 @@ asks the host about the record over ssh. Open decisions for that record come fro
   Foreman keeps it current. While auto is on, the Foreman reads it before it decides. It keeps the file's "Never
   decide; ask" and "Hard lines" sections as it keeps `auto.reserved`. `auto decide` leaves a decision under "Waiting
   for the owner" when its text holds an item of those sections (a `- ` line under the heading), as it does for a word
-  of `auto.reserved`. The plugin ships no such file. With no file,
+  of `auto.reserved`. When the engine cut a long question, `auto decide` also reads the whole block reason or case
+  list that the engine kept. So a question under "Waiting for the owner" can name no such word or item: it is in the
+  part of the text that the question does not show. The plugin ships no such file. With no file,
   auto reads the ruling log, and on a host, the items of `owner-way.md` that your machine sent there.
 
 ## Standing yes
@@ -449,7 +456,8 @@ asking"). The pack keeps the list as `auto.standing`. A kind works whether `/con
 - `fixed-block`: a fix that landed removed the cause of a blocked card. The Foreman adds `Depends on: #<fix>` to the
   card's issue and runs `conveyor.sh retry <issue> --fresh`.
 - `review-retry`: the review blocks no card on a finding. The card lands, and each open finding becomes a follow-up
-  ([When the fix loop ends](cards.md#when-the-fix-loop-ends)). This kind acts only on a card that the card records
+  ([When the fix loop ends](cards.md#when-the-fix-loop-ends)). For an issue at the follow-up depth cap, a finding goes
+  on the self-heals list in place of a follow-up. This kind acts only on a card that the card records
   still show blocked because the fix for a finding did not hold after its fix rounds. The Foreman's watcher runs
   `conveyor.sh retry <issue>` for that card on the host itself, one time for each issue, and logs the step in the
   ruling log. While auto is on, the engine on the host does this step too, also when the watcher is not running. The
@@ -459,7 +467,14 @@ asking"). The pack keeps the list as `auto.standing`. A kind works whether `/con
   read `auto.reserved` or your profile on the host. Only a whole word counts: `rea` holds "the rea check", but not
   "already". The watcher then leaves the card blocked and wakes the Foreman with the block's reason. For a word or an
   item, the wake and each later reminder of the card also say that review-retry left the card for you, and name the word. The Foreman puts the card to you. The retried card goes through its review, its tests and
-  its landing as any card does, so a second review block does not come to you in Needs you.
+  its landing as any card does. When its review blocks it again because a fix did not hold, and auto is `on`, the
+  engine gives the card back one time to land its kept patch, and files the finding as a follow-up (review-land). It
+  does not do this when the reason names a P0, a word of `auto.reserved` or an item of your profile, or when the issue
+  is at the follow-up depth cap. Otherwise the card comes to you in **Needs you** with both block reasons, and auto
+  does not retry it. Review-land closes the card's open decision just before it gives the card back. After that, the
+  Board refuses an answer to that decision, also while it still shows the question. A review block of another form,
+  such as "review <n> is the last review and still holds a P1 finding", is not one that `review-retry` acts on. It gets the usual
+  decision, and auto can answer it with a retry.
 
 Some steps always go to you, whatever kinds are on: new engine behaviour that you did not ask for, a design choice, a
 release that you did not ask for, and anything that `auto.reserved` holds.

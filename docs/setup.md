@@ -452,7 +452,9 @@ The host file holds the machine's settings. Each is unset by default:
   card's test step waits this many seconds for room. For a test file that has its own time limit, each wait for room,
   also a wait for the shares of other test files, uses half of the time that is left at most. If there is still no
   room, the file does not run and is not a failed file: main does not become red, and a test step with no other
-  failure gives no result. The reason gives the free space and the space that the share needs. When your quota on
+  failure gives no result. The reason gives the free space and the space that the share needs. If Conveyor cannot
+  write those numbers to its temp folder, the reason says only that its temp folder, output file or pipe could not be
+  made. When your quota on
   the space is the problem, the reason also gives your biggest folders there, so you can see what to clear.
 - `reserveCores`: 0 when unset. The cores that card work never uses, so that you always have free cores. A number
   keeps that many of the highest-numbered cores, and a list of core numbers keeps those cores

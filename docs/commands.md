@@ -39,7 +39,7 @@
   stopped for your yes to a visible change is the exception: if the issue's `## What customers or staff will see`
   section changed after the card stopped, the issue asks for a different change, and the next card builds from nothing.
   If the issue is held, `retry` also releases it. A retry by the Foreman, by the standing kind `review-retry`, or by
-  an answer to a decision that you did not give on the Board, does not: the issue stays held, and `retry` says so. If the issue
+  an answer to a decision that you did not give (on the Board, or with `decision.sh answer ... --by owner`), does not: the issue stays held, and `retry` says so. If the issue
   has no card, `retry` names the state folder it read and says to release the issue with `conveyor.sh control release <issue>`, which starts a new card. If another
   state folder of the checkout has a card of the issue, `retry` and `conveyor.sh doctor` name that folder too.
   A card can stop in flight: its process is gone or was stopped by a signal, or no process of its step ran for the
@@ -102,7 +102,7 @@ The loop:
 Cards:
 
 - `parts <parent> <issue>...` attaches the issues as GitHub sub-issues of the parent ([Issues](#issues)).
-- `retry <issue>` gives a blocked card back; with `--fresh`, its next card builds from nothing. `shut <issue>` stops an open card and shuts it, or shuts a blocked card, with the reason "shut by the owner": the loop does not pick the issue again until you run `retry <issue>`. The Board's Close closes the issue, then runs `shut <issue> --closed`: the loop picks the issue again after it is opened again. `unblock <issue> --hold` holds a
+- `retry <issue>` gives a blocked card back; with `--fresh`, its next card builds from nothing. `shut <issue>` stops an open card and shuts it, or shuts a blocked card, with the reason "shut by the owner": the loop does not pick the issue again until you run `retry <issue>`. The Board's Close closes the issue, then runs `shut <issue> --closed`: the loop picks the issue again after it is opened again, unless the control record still holds it. Close leaves a held issue held, so when you open it again, also release it with `control release <issue>`. `unblock <issue> --hold` holds a
   blocked card's issue and keeps its work. A main-red fix
   card has no issue. It shows as "Main is red (<commit>)". A card from the Tests page with the Rules tab's Tests page
   actions On (Cards with no GitHub issue) has no issue too. It shows as "Tests page: <file>". For these cards, use

@@ -402,7 +402,8 @@ one control, and the value in force is the selected part.
    is off until Conveyor can run `.conveyor/test-machine.sh` from the Board
    ([Where the suite runs](releases.md#where-the-suite-runs)). **Stop a card's tests at the first failure** is On
    by default. On, a card's test step ends at its first failed case, and the step names the test files that did not
-   run. Off, the step runs every case that it selects. A release and a main-red fix card run every case with either setting
+   run. Off, the step runs every case that it selects. A release runs every case with either setting. A main-red fix card does not stop
+   at its first failure, but it keeps off flaky cases and files that passed before with the same inputs
    ([Which tests a card runs](configuration.md#which-tests-a-card-runs)). **Only the Test step runs tests** is Off
    by default. On, the rules that a card's sessions get do not tell them to run tests. The rules say that the Test
    step runs the tests, and that a session reads the result of the last Test step. A session cannot run a test
@@ -519,7 +520,8 @@ cannot change them here: they are set in the `lint` field of `.conveyor/project.
 **Split large issues** has three settings per project: Off, Shadow and On. On is the default for a new project. A project that set the rule keeps its setting. Shadow records what
 the Judge would split a large issue into, and builds the issue whole. The tab says "shadow: the verdict is recorded,
 and the issue is built whole". On files the slices as follow-ups and as sub-issues of the issue, and holds the issue
-as their umbrella until all its slices are closed. Off checks no issue ([Split large issues](configuration.md#split-large-issues)).
+as their umbrella until all its slices are closed. On files no slice, and builds the issue whole, when a slice of
+the issue's grown change is still open or when it cannot read the open follow-ups of the issue. Off checks no issue ([Split large issues](configuration.md#split-large-issues)).
 
 **Pick settings** has three settings per project: Off, Shadow and On. Off is the default. Shadow and On record the
 group of each card, the builder that the rule chooses for it, and the Judge's choice of seats. With Shadow, the card
@@ -547,8 +549,8 @@ costs. Choose a model and an effort, then click **Estimate the cost**. The panel
 replay**. Click it two times to start the replay. Only an admin can start a replay. The result shows in the panel when the replay ends ([Judge replay](configuration.md#judge-replay)).
 
 The **Done without asking** rules turn each standing kind of yes on or off ([Standing yes](foreman.md#standing-yes)).
-All are Off until you turn them on. **Review retry** On: the Foreman's watcher tries again each card
-that its review blocked, and the Foreman gets no wake for it. A retry that fails still wakes the Foreman, with the
+All are Off until you turn them on. **Review retry** On: the Foreman's watcher tries again, once for each
+issue, a card that its review blocked because a fix did not hold, and the Foreman gets no wake for it. A retry that fails still wakes the Foreman, with the
 reason.
 
 The group **Cards with no GitHub issue**, under **Done without asking**, has five switches, one per kind of card and
@@ -612,7 +614,9 @@ in Held until each slice lands, and then Conveyor closes it. Its card says "Spli
 and lists each slice with its state: landed, building, blocked, waiting or held. The umbrella has no **Queue**, and
 a drag to Queue does not release it: queue its slices, which keep their own **Queue**. An issue that waits on an umbrella says so, as "Waiting on #12 (its slices
 #20, #21)". When the slices are cards with no GitHub issue, the umbrella shows "Held as the umbrella of a split: waits
-for <card ids>" in place of **Held by you**, and has no **Queue**. A shut slice has "(shut)" after its id. Its card is
+for <card ids>" in place of **Held by you**, and has no **Queue**. After you release the umbrella with `conveyor.sh
+control release <umbrella issue>`, its closed card still holds it, and the same text shows in place of **Card
+closed**. A shut slice has "(shut)" after its id. Its card is
 in the group of its closed card, not in **Held by you**, and the Rules tab does not list it as held by you. When each
 slice has landed, it says "each slice landed; the loop closes it at its next turn".
 
@@ -877,7 +881,8 @@ issue number, as a link, and the issue title.
   script's file name, such as `lint-shell.sh`; the size check as "Size, limit 800 lines"; for an inline command, its
   first program after a guard, such as `ruff`), a chip for its result (Pass, No files, "Findings: 2 of this change",
   Error, or "Skipped: missing <tool>" when its tool is missing) and its seconds. "Findings: 0 of this change" is grey,
-  not red: the command found problems only on lines the change did not touch, and the step passed. Hover over the name, or focus it, to see
+  not red: this command found problems only on lines the change did not touch. The step can still fail when another
+  command found problems of the change. Hover over the name, or focus it, to see
   the whole command; "Show command" shows it on a touch screen. A command with findings of this change, or an error,
   comes first, with its findings (file, line and text, all of them) or its error under the row. When the change changed
   a trigger of a command that ran, the rows end with "Tools ran as installed". A lint check recorded without its
@@ -1459,7 +1464,8 @@ the bar says to check the entries of one project only.
 - **Top**: the path **Self-heals list › group › area**, the title and **Cancel**, **File held** and **File and queue ·
   N entries**. **Cancel** and **Self-heals list** go back to the page.
 - **Entries**: "Entries in this card N of M". Each entry has a checkbox, its id, level, title, kind, file and line,
-  days left, for an audit's entry its "Fix:" line, and the judge's reason and the proof. Clear the checkbox to leave an entry out. The entry stays in
+  days left, for an audit's entry its "Fix:" line, and the judge's reason and the proof. An entry of a docs sweep
+  shows no kind and no days left: each is docs drift, and the docs list never expires. Clear the checkbox to leave an entry out. The entry stays in
   the sheet, dimmed. **Keep all** keeps each entry again. **Add from other areas** lists the entries of the
   project's other areas. **Add** puts one in the card. An entry you leave out stays on the list with its days left.
 - **The card**: its title, which you can edit. It starts as "Self-heals batch: <area> (N entries)", or "Docs sweep:

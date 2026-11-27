@@ -251,7 +251,9 @@ Of a test file that is on main, the card runs only the test cases that the chang
 your command ([conveyor/README.md](../conveyor/README.md)). A command that does not read them runs each file whole. A
 file runs whole when the change touches a line outside all cases, such as a helper or setup, when the file is new, or
 when no changed case is found in it. The card's test step says "the card ran 3 changed cases of 3 test files", and
-the Board shows this note with the step.
+the Board shows this note with the step. Each test file that `.conveyor/test-links.json` links to a changed file
+also runs, whole. This is true also when the changed file is a test file of which the change touches only one case:
+that change can make another test file run in full.
 
 If the change adds or changes no test file, the card runs 5 of the test files linked to the changed files:
 
@@ -275,8 +277,10 @@ The rule **Stop a card's tests at the first failure** is on in a new project. Wh
 ends the card's test run. No other test file starts, and Conveyor stops the files that still run. The output, the
 test line and the Board name the files that did not run. When the step runs the failed test file again, the cases
 after the failed one run too. The cases of that file that passed run again too, unless the test command can leave
-out one case of a file. When the rule is off, the card runs every case that it selects. A release's suite and a main-red fix card's test run
-run every case with either setting. The Rules tab's row in
+out one case of a file. When the rule is off, the card runs every case that it selects. A release's suite runs every
+case with either setting. A main-red fix card's test run does not stop at the first failure with either setting. It
+runs every case that it selects, but like any card's run it keeps off the flaky cases and the files that passed
+before with the same inputs. The Rules tab's row in
 Capacity sets the rule, as do `conveyor.sh control rules failfast=off` and `failfast=on`.
 
 The rule **Only the Test step runs tests** is off in a new project. When it is on, the card rules that a build, fix
@@ -360,7 +364,7 @@ test run keeps the factor of that run.
 ## Self-heals expiry
 
 The rule `healsdays` sets how many days an entry of the Self-heals list can go unfixed and unseen
-before it leaves the list. The number is from 1 to 3650, and 30 at first. `conveyor.sh control rules healsdays=<days>` sets it, and so does the row **Self-heals expiry** on the Rules tab.
+before it leaves the list. The number is from 1 to 3650, and 30 at first. `conveyor.sh control rules healsdays=<days>` sets any number in that range. The row **Self-heals expiry** on the Rules tab sets 7, 14, 30, 60 or 90 days, and also shows the number in force when it is another.
 
 An entry that a batch card holds does not expire. An entry that nobody has seen again for that many days moves to a record
 of expired entries, with the date and the reason `expired`. A finding that the judge sorts to the list again later takes its entry back from the record. A finding seen again
@@ -451,11 +455,12 @@ Done-when items of its own and the files of the change that it takes. Each file 
   issue are held, and the others go in the queue. Conveyor puts the files of the slices back to what main has, and
   one fix session makes the rest work alone. Then the card goes on to its review. The track on the Board and in
   /units shows that the card was split for its size, with the count of files before and after. If an earlier card
-  of the issue filed slices that are still open and that take files of the new slices, Conveyor files the new slices
-  and then closes those earlier slices. Thus each part has one open follow-up. The `grown` line names the closed
-  slices in `withdrawn`. Conveyor files no slice, and the change stays whole, in these conditions: it cannot read the
-  open follow-ups of the issue, an earlier slice also takes a file that is not in the change, or it cannot close an
-  earlier slice. The `grown` line tells why.
+  of the issue filed slices that are still open and that take files of the new slices, Conveyor first closes those
+  earlier slices and then files the new slices. Thus each part has one open follow-up. The `grown` line names the
+  closed slices in `withdrawn`. Conveyor files no slice, and the change stays whole, in these conditions: it cannot
+  read the open follow-ups of the issue, an earlier slice also takes a file that is not in the change, or it cannot
+  close an earlier slice. In the last case, `withdrawn` names the earlier slices that it did close. The `grown` line
+  tells why, and the card's track on the Board shows "kept whole: <n> files" with the judge's why and the reason.
 
 Conveyor does not count the files of a follow-up or of a fix card that has no issue.
 
@@ -1077,7 +1082,8 @@ Merge PR sets who merges the pull request of Land as `pr`.
   is open, and on the default branch on GitHub when none is open. `release` checks
   that head first: the checkout must be at the head of `conveyor/landing` while the pull request is open, and at the
   head of the default branch on GitHub when none is open. When all checks pass and the pull request is open, it merges
-  the pull request, then makes the release on top of the merge. With no open pull request, it merges nothing. A release
+  the pull request, then makes the release on top of the merge. With no open pull request, it merges nothing and makes
+  the release on the default branch. A release
   that a check stops merges nothing.
 - `idle`: Conveyor merges it when no card is on the belt and no issue can be picked. When Test before a push or Push
   after a combined test run is on, Conveyor first runs the test files linked to every card in the pull request (every test file with `pushbatchtests` `all`), each one alone, on the head of
@@ -1202,7 +1208,7 @@ Conveyor's state stays on your machine. The card records, the declined list, the
 local files. Only the Board's signed-in users can see the Board.
 
 Before the engine or the Board writes to GitHub, the privacy check (`conveyor/privacy/check.sh`) reads the text. It
-looks for email addresses, private network addresses, home paths, access tokens and keys, and every word of your terms
+looks for email addresses, home paths, access tokens and keys, and every word of your terms
 file, when you have one. An address at `example.com`, `example.org` or `example.net` and a home path of the user `dev`
 are not hits: they are names kept for examples. In `public` mode, the default, a hit posts nothing, and the state folder's `privacy` folder keeps the text. In
 `private` mode, a hit is only a warning and Conveyor posts the text. `gh-write <gh arguments>` runs a `gh` write
