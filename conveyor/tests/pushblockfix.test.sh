@@ -8,7 +8,7 @@
 # block origin no longer has gets no card; and a fix card's cases passing on main does not close it while its push
 # check fails (card.sh cardbuild(), bugproof.sh bugproof(), followups.sh nochange()).
 # The fixtures are pushflaky.test.sh's (pfix, pnow), pushtests.test.sh's (pushfix, pushnow, PUSHTURN, STUBPUSH),
-# mainredproof.test.sh's (redsetup, redbuild, redcheck) and mainred.test.sh's (eng): the runner sources every case
+# mainredproof.test.sh's (redsetup, redbuild, redcheck), mainredreplaced.test.sh's (replfix) and mainred.test.sh's (eng): the runner sources every case
 # file before it runs a case.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
@@ -217,4 +217,53 @@ t_pushredproof() {
   pushredcases; got=$(redcheck changed)
   [ "$(head -n 1 <<<"$got")" != "exit 3" ] && [[ $got != *"closes as already done"* ]] \
     || fail "bugproof on fix card cfix (cases pass on main, push block typecheck-web) closed it as already done: $got"
+}
+
+# A push block that joins fix card cfix's entry while its cases run. The callers read `.push == null` before the cases
+# run (cardbuild(), nochange()), and the other writer, the real pushred() (under the main-red record's lock, as the
+# push files it), adds the block at the weak point: after the cases ran and the closer (redclosed(), redreplaced())
+# began, just before it takes the main-red record's lock (flock, wrapped, when the closer itself calls it). So the close
+# sees the block only if it reads `.push` under that lock: a closer that read it before the lock would close the card.
+# What must stay true: a fix card whose entry holds a push block does not close, and the entry keeps the block and
+# names the card (redpick() skips a card with lines; a closed one would leave the block with no fix).
+PUSHJOIN='flock() { case ${FUNCNAME[1]} in redclosed | redreplaced) pushred "$(jq -r .reds[0].sha "$MAINRED")" typecheck-web c1 1 > /dev/null 2>&1 ;; esac; command flock "$@"; }'
+pushjoinkept() { # <the call that was checked>
+  [ -z "$(st 'select(.card == "cfix" and .step == "closed")')" ] && [ -n "$(st 'select(.card == "cfix" and .step == "blocked")')" ] \
+    && [ "$(jq -r '.reds[0] | "\(.card) \(.push.check)"' "$ST/mainred.json")" = "cfix typecheck-web" ] \
+    || fail "$1, with a push block of typecheck-web joining cfix's entry while its cases ran, closed cfix, did not block it, or the entry lost the block or the card: $(st 'select(.card == "cfix") | "\(.step) \(.reason)"' | tr '\n' ,) $(cat "$ST/mainred.json")"
+}
+# Bug it catches: cardbuild() read no push block, redgreen() found the cases passing, and greenclose() closed the card
+# as already done (redclosed() checked only for new cases) after pushred() added the block. It is blocked, naming why.
+t_pushredjoinbuild() {
+  local out
+  redsetup $'one\nc.test'
+  jq -c '.reds[0].card = "cfix"' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json" \
+    && git -C "$R" worktree add -q --detach "$T/$CASE/cards/cfix" HEAD || fail "the fix card's worktree could not be made"
+  out=$(eng "$PUSHJOIN"'
+    session() { echo x >> "$STUB/sessions"; return 1; }
+    c=cfix n=0 br="" mode="" wt=$CONVEYOR_CARDS/cfix sprompt=brief sf="" waitsec=4 mainsec=0 go=end; issue=$(redissue cfix) && cardbuild' 2>&1)
+  pushjoinkept "cardbuild on cfix (cases pass on main): $out"
+  [[ $(st 'select(.card == "cfix" and .step == "blocked") | .reason') == *'a push block joined its entry'* ]] \
+    || fail "cardbuild on cfix: the blocked reason does not say a push block joined its entry: $(st 'select(.card == "cfix") | .reason')"
+}
+# Bug it catches: nochange() read no push block, redproof() found the cases passing (exit 3), and the card closed as not
+# needed after pushred() added the block.
+t_pushredjoinnochange() {
+  local out
+  redsetup $'one\nc.test'
+  jq -c '.reds[0].card = "cfix"' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json" \
+    && git -C "$R" worktree add -q --detach "$T/$CASE/cards/cfix" HEAD || fail "the fix card's worktree could not be made"
+  out=$(eng "$PUSHJOIN"'; nochange cfix 0 "$CONVEYOR_CARDS/cfix" brief' 2>&1)
+  pushjoinkept "nochange on cfix (no change; cases pass on main): $out"
+}
+# Bug it catches: nochange() read no push block, the cases still failed on main, and redreplaced() closed the card as
+# replaced by cnew1 and cnew2 (they hold its cases, not the push check) after pushred() added the block. The fixture is
+# mainredreplaced.test.sh's replfix().
+t_pushredjoinreplaced() {
+  local out
+  replfix '[{"sha": "new1", "cases": [{"case": "a.test: one", "file": "a.test"}], "card": "cnew1"},
+    {"sha": "new2", "cases": [{"case": "c.test", "file": "c.test"}], "card": "cnew2"}]' \
+    '[{"card": "cnew1", "step": "picked"}, {"card": "cnew2", "step": "picked"}]'
+  out=$(eng "$PUSHJOIN"'; nochange cfix 0 "$CONVEYOR_CARDS/cfix" brief' 2>&1)
+  pushjoinkept "nochange on cfix (no change; cases fail on main, held by cnew1 and cnew2 on the belt): $out"
 }

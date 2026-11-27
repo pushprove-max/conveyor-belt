@@ -691,7 +691,7 @@ nochange() { # <card> <issue> <worktree> <brief>
     [ $? = 3 ] || { t+=". Its cases on main as it is now: $(head -n 1 "$wt.unfixed")" # not all passed: closed if replaced (issue 1666)
       [ -e "$wt.patch" ] || ! locked redreplaced "$c" "$n" "$t" || { clean "$wt"; return; }; ncblock "$c" "$n" "$wt" "$t" "$why"; return; }
     t="Not needed: the session made no change, and its cases were checked again on main. $(head -n 1 "$wt.unfixed")"
-    # Written only while its entry holds no case that did not run (bugproof.sh redclosed()): a case that joined it then keeps it open.
+    # Written only while its entry holds no case that did not run and no push block (bugproof.sh redclosed()): one that joined it then keeps it open.
     err=''; res=$(line "$c" "$n" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && err=$(locked redclosed "$c" "$res") \
       || { t=${t/, so the card closes as already done/}; ncblock "$c" "$n" "$wt" "${t%.}. ${err:-The engine could not write the closed line.}" "$why"; return; }
     clean "$wt"; return

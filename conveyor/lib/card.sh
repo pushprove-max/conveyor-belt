@@ -418,7 +418,7 @@ keptrep() {
   rep=''; [ "$(verdict "$wt.review" 2>/dev/null)" != NO-GO ] || [ ! -e "$wt.rounds/answered" ] || rep=$(repeats "$wt")
 }
 # Ends a main-red fix card as closed, its reason the first line of <worktree>.unfixed (bugproof.sh redgreen(), redproof()): main is no
-# longer red for its cases. Its change is dropped: the worktree goes. A closed line that cannot be written (bugproof.sh redclosed(): a case joined its entry as they ran, too) blocks the card, its reason without the result's "so the card closes" clause.
+# longer red for its cases. Its change is dropped: the worktree goes. A closed line that cannot be written (bugproof.sh redclosed(): a case or a push block joined its entry as they ran, too) blocks the card, its reason without the result's "so the card closes" clause.
 greenclose() { # <card> <issue number> <worktree>
   local t out err=''
   t=$(head -n 1 "$3.unfixed") && out=$(line "$1" "$2" closed ok "$(jq -cn --arg r "$t" --argjson e "$(ending)" --argjson w "$(waited)" '{reason: $r} + $e + $w')") && err=$(locked redclosed "$1" "$out") \

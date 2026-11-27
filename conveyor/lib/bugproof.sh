@@ -473,12 +473,16 @@ redcases() { # <card>
 # nochange()), under the records' lock (locked(): the caller takes it) and then the main-red record's lock, the order
 # pick() takes them in (mainred.sh redpick()), only while its entry holds no case but those the run that closes it ran
 # (REDRAN: redproof(), redgreen()). A case mainred() added to the entry while they ran never ran, and the closed line
-# would end the entry's hold on it (mainred.sh redlisted()). Else nothing is written, and it prints why, exit 1 (R86).
+# would end the entry's hold on it (mainred.sh redlisted()). Nor while its entry holds a push block: redfix.sh pushred()
+# may add one, under the same lock, after the caller's read (card.sh cardbuild(), bugproof(), nochange()) and while the
+# cases ran, and the cases passing does not make its check pass. Else nothing is written, and it prints why, exit 1 (R86).
 redclosed() { # <card> <closed line>
   local lock add rc=1
   { exec {lock}>>"$MAINRED.lock"; } 2>/dev/null && flock "$lock" || { echo "The main-red record could not be locked, so the card was not closed."; return 1; }
   add=$(redcases "$1" | jq -r --argjson r "${REDRAN:-[]}" '[.[] | select(IN($r[]) | not) | "`\(.name)`"] | join(", ")' 2>/dev/null) || add='its cases could not be read'
   if [ -n "$add" ]; then echo "The card was not closed: a case joined its entry in the main-red record while its cases ran, and did not run: $add."
+  elif ! jq -e --arg c "$1" 'all(.reds[]?; .card != $c or .push == null)' "$MAINRED" >/dev/null 2>&1; then
+    echo "The card was not closed: a push block joined its entry in the main-red record while its cases ran, and its cases passing does not make that check pass."
   elif append "$2"; then rc=0
   else echo "The engine could not write the closed line."; fi
   exec {lock}>&-
@@ -514,10 +518,12 @@ redtakers() { # <card> [<passed: JSON array of case names>]
 # Those passes count only while main is still the commit they ran on (REDSHA): a landing that moved main since then
 # may have broken the case again, so then a landed card counts for none. A landing after this check makes a commit no
 # run has passed, and main's own test run records what it breaks (mainred.sh mainred()).
-# Fails, writing nothing, when no cards took every case over or the line cannot be written.
+# Fails, writing nothing, when no cards took every case over, its entry holds a push block (redfix.sh pushred() may add
+# one, under the same lock, while its cases ran: the newer cards hold its cases, not the check), or the line cannot be written.
 redreplaced() { # <card> <issue> <reason>
   local lock by t res rc=1 p=${REDPASS:-[]}
   { exec {lock}>>"$MAINRED.lock"; } 2>/dev/null && flock "$lock" || return 1
+  jq -e --arg c "$1" 'all(.reds[]?; .card != $c or .push == null)' "$MAINRED" >/dev/null 2>&1 || { exec {lock}>&-; return 1; }
   [ -n "${REDSHA:-}" ] && [ "$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null)" = "$REDSHA" ] || p='[]'
   if by=$(redtakers "$1" "$p"); then
     t="Replaced: newer main-red fix cards hold each of its cases, on the belt or landed for a case that passes on main: ${by//$'\n'/, }. ${3^}"
