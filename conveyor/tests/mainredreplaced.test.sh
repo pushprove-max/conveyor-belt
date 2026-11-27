@@ -99,6 +99,22 @@ t_redproofonepass() {
     || fail "bugproof on cfix with a change (c.test passes and a.test: one fails in the one run on main without it) did not block it saying one run is fewer than 3: $got"
 }
 
+# Bug it catches: a variable the engine gives one of its own calls (TEST_STILL, cardland.sh pretest(); TEST_GIVEN, the
+# bug-card check; TEST_HARD, mainred.sh verdicts(); TEST_PACKONLY, redrun()) was in the environment of the test command
+# that call ran, as bash exports it for the call. A test that calls the engine read it there as its own: in a card's
+# tests before its first review (TEST_STILL=pretestok), each run on main of this file's cases, whose fixture's main is
+# red, ran nothing and failed every case (the loop, 2026-11-27: 13 failed runs). The test command has none of the four.
+t_testrunownenv() {
+  redsetup ''
+  local w=$T/$CASE/cards/mainrun/x got
+  printf '%s\n' 'echo "${TEST_STILL-none} ${TEST_GIVEN-none} ${TEST_HARD-none} ${TEST_PACKONLY-none}" > "$STUB/env"' \
+    | cat - "$STUB/mainrun-cmd" > "$STUB/mainrun-cmd.new" && mv "$STUB/mainrun-cmd.new" "$STUB/mainrun-cmd" || fail "the runner could not be made"
+  mkdir -p "${w%/*}" && git -C "$R" worktree add -q --detach "$w" HEAD && printf 'fail\ta.test\tone\n' > "$w.rerun" || fail "the run's worktree could not be made"
+  got=$(eng 'TEST_STILL=true TEST_GIVEN=1 TEST_HARD=60 TEST_PACKONLY=1 tests "$CONVEYOR_CARDS/mainrun/x" test.fileCommand alone' 2>&1)
+  [ "$(cat "$STUB/env" 2>/dev/null)" = "none none none none" ] \
+    || fail "a run called with TEST_STILL, TEST_GIVEN, TEST_HARD and TEST_PACKONLY gave them to its test command (it saw: $(cat "$STUB/env" 2>/dev/null)): $got"
+}
+
 # Issue 1666, what must stay true: a landed card counts for a case only on passes of main as it is when the closed line
 # is written. The other writer: a landing (claim.sh land()), which moves main without the locks redreplaced() takes. It
 # is made to act at the weak point, after redproof()'s runs and before redreplaced(), as a commit on main that breaks

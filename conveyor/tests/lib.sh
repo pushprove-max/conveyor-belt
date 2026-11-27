@@ -33,8 +33,11 @@ CASE_RED=${CONVEYOR_TEST_RED:-}; unset CONVEYOR_TEST_RED
 # (issue 452). CONVEYOR_CARDS, where a shell or launcher exports it, names a machine's cards folder: a case that calls
 # the engine with none of its own would take that folder's release lock, claims and live files, shared with every
 # card that tests at the same time (caselocks.test.sh). Without it, a case's cards folder is beside its own main.
+# TEST_STILL, TEST_PACKONLY, TEST_HARD and TEST_GIVEN are the engine's settings for one tests() call. An engine before
+# testonce() cleared them passed them to every test file it started: a case's own engine then ran the loop's check,
+# found its fixture's main red and ran no test (mainredreplaced.test.sh failed in every pre-review run).
 unset CARDCTL CONVEYOR_CARD_SETTINGS CONVEYOR_OPENCODE_GUARD CONVEYOR_CODEX_GUARD CONVEYOR_CARD_RULES CONVEYOR_CARD CONVEYOR_FOREMAN CLAUDE_CODE_SESSION_ID CONVEYOR_TEST_SLOTS \
-  CONVEYOR_MAIN CONVEYOR_FOREMAN_DIR CLAUDE_PROJECT_DIR CONVEYOR_CARDS
+  CONVEYOR_MAIN CONVEYOR_FOREMAN_DIR CLAUDE_PROJECT_DIR CONVEYOR_CARDS TEST_STILL TEST_PACKONLY TEST_HARD TEST_GIVEN
 # `release-run ... --machine local` exports CONVEYOR_RELEASE_MACHINE to the suite it runs, this one included: a case
 # that reads the suiteMachine rule (hostrule) would take this machine, whatever its fixture's rule says. A case that
 # wants it passes `--machine local` to the engine.
