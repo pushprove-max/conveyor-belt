@@ -95,6 +95,30 @@ l='held: #12 (your hold: control release) #13 (split: waits for its parts #14 #1
 grep -qxF -- "$l" <<<"$out" || fail "the held line does not give each issue its reason; wanted '$l' in: $out"
 }
 
+# An issue the benefit hold keeps (open.held, a standing reason, its rule the hold's text: NOBENEFIT, lib/pick.sh).
+# Bug it catches: no wake came and the status listed no needs-you item for it, so the Foreman never learnt the issue
+# waits for the owner's yes on its benefit, nor what it lacks.
+t_statusbenefit() {
+CASE=statusbenefit; fixture statusbenefit
+# The engine's own NOBENEFIT text, whole: a wake that cut it would lose the "Benefit approved:" line that releases it.
+local why w held
+why=$(sed -n "s/^NOBENEFIT='\(.*\)'\$/\1/p" "$SRC/../lib/pick.sh"); [[ $why == *'"Benefit approved:"'* ]] || fail "no NOBENEFIT text read from lib/pick.sh: '$why'"
+held=".open.held = [{issue: 1, reasons: [{kind: \"standing\", rule: $(jq -n --arg w "$why" '$w')}]}]"
+snap "$held"
+out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
+grep -qxF -- "needs you: #1 waits for the owner's yes on its benefit: $why" <<<"$out" || fail "status of a snapshot with #1 held by the standing rule '$why' has no needs-you line naming that rule: $out"
+poll || fail "a snapshot with #1 held by the standing rule '$why' woke nothing: $(cat "$T/err")"
+w=$(cat "$FD"/pending/*.wake)
+grep -qxF -- "alpha: #1 waits for the owner's yes on its benefit: $why" <<<"$w" || fail "the wake for #1 held by the standing rule '$why' does not name the rule: $w"
+# Bug it catches: a snapshot whose GitHub read failed (open null) dropped benefit:1 from the reported keys, so the
+# next snapshot listing the same hold woke the Foreman again.
+rm -f "$FD"/pending/*.wake; snap '.open = null'
+poll && fail "a snapshot with open null, after #1's benefit hold was reported, woke: $(cat "$FD"/pending/*.wake)"
+snap "$held"
+poll && fail "a snapshot with #1 held by the standing rule '$why' again, after a snapshot with open null, woke a second time: $(cat "$FD"/pending/*.wake)"
+return 0
+}
+
 # D2: a card moving from build to review wakes no one; an awaited card that landed and another that blocked give one
 # wake that names the landed commit and the block reason, so the Foreman need not look them up.
 t_wake() {
@@ -555,7 +579,7 @@ grep -qxF 'needs you: push blocked: typecheck-web failed after #12; it will not 
   || fail "health loop true, state paused, pushError.fix queued with no card, needsYou true: no needs-you line saying resume the loop in: $out"
 }
 
-cases=(status statusheld wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog stopped resumed resumedhost askhost diskfloor pushfix)
+cases=(status statusheld statusbenefit wake suite suitedead mainred prmerge building slowlive slowdown nosnapanew nosnapquiet nosnaplast healthwake outageslow outageother outagestop polllog stopped resumed resumedhost askhost diskfloor pushfix)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

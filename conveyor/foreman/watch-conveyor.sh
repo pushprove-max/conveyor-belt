@@ -6,15 +6,14 @@
 # before entries (record()), and, on any NEW problem, puts one wake in pending and
 # exits; a card newly blocked or waiting on the owner's yes in a record read while another is still to be read wakes
 # at once, in a wake of its own (poll()). The problems, each a record's own:
-#   a card waiting on the owner's yes       an issue waiting on the owner's yes before its build (health's before)
+#   a card waiting on the owner's yes       an issue waiting on the owner's yes before its build (health's before) or its benefit (open.held)
 #   a card blocked; one blocked by its review, while the standing kind review-retry is on, the watcher retries itself
-#     and wakes nothing for, unless that retry fails, its reason holds a word of auto.reserved or an item of
-#     the owner's profile, `auto reserved` fails on the record's host (no retry runs then), or its card came after an
-#     earlier review-retry of its issue (an issue is given back once), each of which it leaves
-#     blocked (retryable(), lib.sh, reviewretry()); a card still blocked 30 minutes after a poll
-#     first listed it, and once an hour after, while no open owner question names its issue (stillblocked()); of a
-#     snapshot made before the last change to the card records, only a card health still lists blocked (recheck()),
-#     its line ending "(as of <the snapshot's time>)"
+#     and wakes nothing for, unless that retry fails, its reason holds a word of auto.reserved or an item of the
+#     owner's profile, `auto reserved` fails on the record's host (no retry runs then), or its card came after an
+#     earlier review-retry of its issue (an issue is given back once), each of which it leaves blocked (retryable(),
+#     lib.sh, reviewretry()); a card still blocked 30 minutes after a poll first listed it, and once an hour after,
+#     while no open owner question names its issue (stillblocked()); of a snapshot made before the last change to the
+#     card records, only a card health still lists blocked (recheck()), its line ending "(as of <the snapshot's time>)"
 #   a card stuck (health's stuck: no new step and no output, its process gone, a wait on other cards past the
 #     limit, with the cards it waited on, or a test case that hangs, by name; a session says whether any live output
 #     was recorded and whether its process is gone, uses no CPU or runs no session now); one whose step the engine ended
@@ -131,6 +130,7 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
   | (.waiting[] | ["waiting:\(.card)", "needs the owner'"'"'s yes", ref, "\(ref) needs the owner'"'"'s yes since \(.since): \(.reason | one)"]),
     (.before | arrays | .[] | objects | select(.issue | numbers)
       | ["before:\(.issue)", "needs the owner'"'"'s yes", "#\(.issue)", "#\(.issue) needs the owner'"'"'s yes before its build since \(.since): \(.title | one)"]),
+    ($snap.open.held | arrays | .[] | objects | select(.issue | numbers) | .issue as $i | .reasons | arrays | .[] | objects | select(.kind == "standing") | ["benefit:\($i)", "needs the owner'"'"'s yes", "#\($i)", "#\($i) waits for the owner'"'"'s yes on its benefit: \(.rule // "no live benefit" | one)"]), # an issue the benefit hold keeps (open.held, a standing reason: NOBENEFIT, lib/pick.sh), with what it lacks and the line that releases it
     (.blocked[] | ["blocked:\(.card)", "blocked", ref, "\(who) is blocked since \(.since): \(.reason | one)\($asof)"]),
     # A stopped engine is one item, idle or not, naming the cards it holds; a card under it is not listed again.
     # A held card whose own process is stopped too names that one as well: resuming the engine leaves it stopped.
@@ -447,7 +447,7 @@ while IFS=$'\t' read -r r _; do touch "$FD/await-$r.txt" "$FD/await-done-$r.txt"
 
 # One record's problems now, each line prefixed with its repo: <repo> TAB <key> TAB <kind> TAB <issues> TAB <text>.
 record() { # <repo> <main> <now> <await>
-  local repo=$1 main=$2 now=$3 await=$4 rec cur first last err held
+  local repo=$1 main=$2 now=$3 await=$4 rec cur first last err held keep
   local down=$FD/conveyor-down-$repo.txt idle=$FD/conveyor-idle-$repo.txt ghreach=$FD/conveyor-ghreach-$repo.txt ghout=$FD/conveyor-ghout-$repo.txt stuckf=$FD/conveyor-stuck-$repo.txt errf=$FD/conveyor-watch-$repo.err
   local histf=$FD/conveyor-history-$repo.json reading=$FD/conveyor-reading-$repo.txt
   # The history is asked for only when an awaited issue is not pushed by the snapshot alone, or is pushed with no
@@ -581,8 +581,8 @@ record() { # <repo> <main> <now> <await>
   printf '%s: %s, read %s\n' "$repo" "$outcome" "$used" >> "$POLLF"
   if [ "$rc" = 0 ]; then
     rm -f "$down"
-    # Health's before is null when gh did not list the open issues (views.sh): its reported before: keys stay reported.
-    ! jq -e '.health | objects | .before == null' <<<"$rec" >/dev/null 2>&1 || cur+=$'\n'$(awk -v p="$repo/" 'index($0, p "before:") == 1 { print substr($0, length(p) + 1) "\t\t\t" }' "$SEEN")
+    keep=$(jq -r '[(.health | objects | select(.before == null) | "before:"), (objects | select(.open == null) | "benefit:")] | join("|")' <<<"$rec" 2>/dev/null) # gh did not list the open issues: health's before null (views.sh), the snapshot's open null (snapshot.sh); their reported keys stay reported
+    [ -z "$keep" ] || cur+=$'\n'$(awk -v p="$repo/" -v k="^($keep)" 'index($0, p) == 1 && substr($0, length(p) + 1) ~ k { print substr($0, length(p) + 1) "\t\t\t" }' "$SEEN")
     # Idle is a problem only on the second poll in a row that lists it ($idle marks the first); GitHub not reached
     # and gh signed out only on the third (#715: most cleared on the poll after the first). $ghreach and $ghout hold
     # how many polls in a row listed them, 1 or 2, and the GitHub read of the last (health ghRead, ghok()'s GHREAD): a
