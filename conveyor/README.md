@@ -830,7 +830,7 @@ it has no runner for a file to run, the card stops at its test step under Needs 
 at Build: its bug-card check cannot run, and the card is blocked with that reason (Bug cards: the new tests fail
 without the fix). A bug card whose change is only test files, or only comments in other `.js`, `.mjs`, `.cjs`, `.ts`,
 `.mts` or `.cts` files with or without test files, has no check to run, and with a test file it stops at its test
-step. A comment change in any other file, such as a `.sh` or `.py` file, is a fix, and that card stops at Build. A card with no test file to run passes its
+step. A comment change in any other file, such as a `.sh` or `.py` file, is a fix, and that card stops at Build. A bug card whose change is test files and pages (`.md`, `.txt`, `.rst`) that no test reads has no check to run either, and stops at its test step. A card with no test file to run passes its
 test step. [Which tests a card
 runs](../docs/configuration.md#which-tests-a-card-runs) says which files are on the list.
 The list is the test files the card's change adds or changes (`"by": "own"`; a shared helper is none). Conveyor also
@@ -1443,7 +1443,11 @@ result. A card whose issue is not a bug, and a build that left no change, are no
 checked by the cases that main fails, not by its tests (the **main** verdict, above). A change to test files
 alone (every path it changes is a test file, as in a fix to a test that main made wrong) is not checked either: it has
 no fix to take out, so its tests would run on the same code and pass, and the card would be blocked though correct.
-Its result says the change is test-only, and the review judges whether each changed test still checks what it was
+A change to test files and to pages (`.md`, `.txt`, `.rst`) that no test reads is not checked either. A page that no
+test reads is one that the test map and `.conveyor/test-links.json` give no test, and whose file name no file but a
+page names. A page that they link to a test, or that a test or a program names, can be the fix, so a change to that
+page is checked. The result says the change is test-only, and the card's `bugproof`
+line (result `skipped`) gives the reason. The review judges whether each changed test still checks what it was
 written to check. A change that changes only comments in its product files, with or without test files, is
 not checked either, as a comment changes no behaviour and no test of it can fail without the fix. Only
 `.js`, `.mjs`, `.cjs`, `.ts`, `.mts` and `.cts` product files can be so: the `//` and `/* */` comments are found

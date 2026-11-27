@@ -174,6 +174,35 @@ commentsonly() { # <worktree>
     [ "$a" = "$b" ] || return 1
   done
 }
+# The pages a change has beside its test files, when it has nothing else: each changed path (deleted ones too) that is
+# not a test file (testpaths()) is a page (.md, .txt or .rst, a document as testsel() reads one), no file but a page
+# names one of them, and the test map and its links give those pages no test (testsel() narrow, on a tree of HEAD with
+# their change alone). Prints them, one a line. Fails when the change has a file of another kind, no page or no test
+# file (pages alone are proved by the tests the issue names: bugnamed()), when a file that is not a page names one of
+# its pages or a test reads one, or when the diff, the pack or the selection cannot be read. No test runs a page that
+# no test reads, so the change has no fix a test can prove. Bug: a fix in a test file, with a skill's page beside it,
+# was blocked twice as "the new tests pass without the fix" (#1819). A page that tests read (one a program loads as its instructions, linked to its tests) can
+# be the fix, so a change of one is checked as before.
+pagesonly() { # <worktree>
+  local ps=() es=() f ix t out rc
+  mapfile -d '' -t ps < <(git -C "$1" diff --cached --name-only --no-renames -z HEAD -- 2>/dev/null | testpaths -vz)
+  [ ${#ps[@]} != 0 ] && [ -n "$(git -C "$1" diff --cached --name-only --no-renames -z HEAD -- 2>/dev/null | testpaths -z | tr -d '\000')" ] || return 1
+  for f in "${ps[@]}"; do [[ ${f,,} =~ \.(md|txt|rst)$ ]] || return 1; done
+  # A file that is not a page and names one of them (its file name, in the staged tree: a test, outside the pack's
+  # tests.patterns too, a program that loads it, or the links file) can read it, so the page can be the fix. git grep
+  # exits 1 when no file names it; 0 (one does) or an error fails the change as test-only.
+  for f in "${ps[@]}"; do es+=(-e "${f##*/}"); done
+  rc=0; git -C "$1" grep --cached -q -F "${es[@]}" -- . ':(exclude,icase)*.md' ':(exclude,icase)*.txt' ':(exclude,icase)*.rst' 2>/dev/null || rc=$?
+  [ "$rc" = 1 ] || return 1
+  # The pages' change alone, as a tree: a temporary index (an absolute path, as git -C reads it from the worktree).
+  ix=$(mktemp) && rm -f "$ix" || return 1
+  t=$({ GIT_INDEX_FILE=$ix git -C "$1" read-tree HEAD \
+    && git -C "$1" diff --cached --binary --no-renames HEAD -- "${ps[@]/#/:(literal)}" | GIT_INDEX_FILE=$ix git -C "$1" apply --cached \
+    && GIT_INDEX_FILE=$ix git -C "$1" write-tree; } 2>/dev/null)
+  rm -f "$ix"
+  [ -n "$t" ] && out=$(testsel "$1" narrow HEAD "$t") && [[ $out != *$'\n'* ]] || return 1
+  printf '%s\n' "${ps[@]}"
+}
 # The bug-card check (card(): a card whose issue has the pack's type label, labels.type, after its build and before its
 # review). The test files its staged change adds or changes (paths testpaths() takes for test files: the pack's
 # tests.patterns) run on main's code without the
@@ -197,7 +226,8 @@ commentsonly() { # <worktree>
 # <file>: <the run's last lines>" and the check fails with exit 2 (the card is blocked, as a build session cannot
 # repair the runner). A run that cannot be made (no worktree, or the files do not apply) fails
 # nothing, as a build session cannot repair it (but for a change with no test file, which fails as before): the result says so. A change to test files alone (a test fix for a
-# red main) is not run and fails nothing: with no fix to take out, its tests run on the same code and pass. The result
+# red main), or to test files and pages that no test reads (pagesonly()), is not run and fails nothing (its card's
+# `bugproof` line, result skipped, says why): with no fix to take out, its tests run on the same code and pass. The result
 # says it is test-only, and the review judges its tests. So is a change to product files whose part in them is comments
 # only (commentsonly()), with or without test files: no test of a comment can fail without it. The result says it is
 # comments only, and the review judges it.
@@ -210,7 +240,7 @@ commentsonly() { # <worktree>
 # A main-red fix card is not checked so: its proof is main's own failing cases (redproof(), its exits too).
 # That selection is read only when the change adds or changes no test file.
 bugproof() { # <card> <worktree> <issue json>
-  local mwt=$CARDS/mainrun/$1.unfixed fs=() tf=() ta=() ins=() iks=() nf=() f k out rc fx held='' sha='' why nr='' sh='' stop='' cn
+  local mwt=$CARDS/mainrun/$1.unfixed fs=() tf=() ta=() ins=() iks=() nf=() f k out rc fx held='' sha='' why nr='' sh='' stop='' cn pg=''
   rm -f "$2.unfixed"; BUGWHY=$UNFIXED
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
@@ -223,10 +253,15 @@ bugproof() { # <card> <worktree> <issue json>
   # its tests would run on the same code and pass, so it is not run. The review is told, and judges the tests.
   # The paths are counted, not tested with grep -q: under pipefail its early exit could fail the pipe and pass a change
   # with a source file as test-only. A diff that cannot be read, or a pack that cannot, counts as a change with one.
+  # So is a change to test files and pages that no test reads (pagesonly()). Its card's `bugproof` line (result
+  # skipped) says why (#1819).
   if out=$(git -C "$2" diff --cached --name-only --no-renames -z HEAD -- 2>/dev/null | testpaths -vz | tr -cd '\000' | wc -c) \
-    && [ "$((out))" = 0 ]; then
-    { echo 'The change is test-only: every file it changes is a test file, so it has no fix to take out, and its tests were not run on main'"'"'s code.'
+    && [ "$((out))" = 0 ] || pg=$(pagesonly "$2"); then
+    why='the change is test-only: every file it changes is a test file, so it has no fix to take out'
+    [ -z "$pg" ] || why="the change is test-only but for pages that no test reads (no file but a page names them, and the test map and its links give them no test: ${pg//$'\n'/, }), so it has no fix to take out"
+    { echo "${why^}, and its tests were not run on main's code."
       echo 'Judge whether each test it changes still checks what it was written to check.'; } > "$2.unfixed"
+    record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof skipped "$(jq -cn --arg r "$why" '{reason: $r}')"
     return 0
   fi
   # A change to product files whose part in them is comments only (commentsonly()), with or without test files, has no

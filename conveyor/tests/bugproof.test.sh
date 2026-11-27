@@ -239,6 +239,9 @@ t_bugtestonly() {
   FIX=: bugtest 'grep -qx one a.txt'
   [ "$RC" = 0 ] && [ ! -e "$STUB/mainran" ] || fail "a test-only change was run on main or failed the check (exit $RC): $BW $(cat "$STUB/mainran" 2>&1)"
   grep -q '^The change is test-only: ' "$FXWT.unfixed" || fail "the result does not say the change is test-only: $(cat "$FXWT.unfixed" 2>&1)"
+  # #1819 D1: the card's record says how the check was handled, and why.
+  [ "$(st 'select(.step == "bugproof") | [.result, .reason] | join(": ")')" = "skipped: the change is test-only: every file it changes is a test file, so it has no fix to take out" ] \
+    || fail "the record of a test-only change of a.test.sh has no bugproof line, result skipped, with the reason: $(st 'select(.step == "bugproof")')"
   [ ! -e "$T/$CASE/cards/mainrun" ] || fail "the check left its run's folder: $(ls "$T/$CASE/cards/mainrun")"
 }
 
@@ -341,6 +344,8 @@ t_bugnotest() {
 # #137. Bug it catches: a project whose tests are src/test-<name>.mjs, set in its pack's tests.patterns, had its test
 # file taken for no test file, never run on main, and the card blocked as "the new tests pass without the fix". The
 # file is found, runs alone on main's code without the fix and fails there, and the check holds.
+# #1819. Bug it catches: the fix a.txt (a page) taken as one no test reads, as its linked test a.test.sh is outside
+# the patterns, so the check was skipped; src/test-a.mjs names a.txt, so a.txt can be the fix and the check runs.
 t_bugpatterns() {
   TF=src/test-a.mjs TUNE='.tests.patterns = ["src/test-*.mjs"]' bugtest 'grep -qx two a.txt'
   [ "$(sed 1d "$STUB/mainran" | tr '\n' ' ')" = 'src/test-a.mjs ' ] && [[ $(head -1 "$STUB/mainran") == */cards/mainrun/* ]] \
@@ -369,6 +374,8 @@ t_bugfilecommand() {
 # files (t_bugcommentsyntax: a # line in a .sh file is a fix), so a bug card that changes a shell comment stops at Build.
 # #872. Bug it catches: they said a js comment fix with no test file is a fix that stops at Build, but bugproof.sh commentsonly()
 # now takes it with or without a test file (t_bugcommentsyntax notest).
+# #1819. Bug it catches: they counted a change of test files and pages that no test reads as a fix that stops at
+# Build, but bugproof.sh pagesonly() lets it skip the check (t_bugtestmd).
 # The pages and the schema have no behaviour to run, so their text is read.
 t_bugnofilecmd() {
   local p
@@ -377,9 +384,11 @@ t_bugnofilecmd() {
       || fail "$p does not say a bug card with a fix and no test.fileCommand stops at Build"
     tr '\n' ' ' < "$SRC/../$p" | tr -s ' ' | grep -qiE 'a bug card whose change is only test files, or only comments in other `\.js`, `\.mjs`, `\.cjs`, `\.ts`, `\.mts` or `\.cts` files with or without test files, has no check to run, and with a test file it stops at its test step\. A comment change in any other file, such as a `\.sh` or `\.py` file, is a fix, and that card stops at Build' \
       || fail "$p does not say a JavaScript or TypeScript comments-only bug card, with or without a test file, has no check to run"
+    tr '\n' ' ' < "$SRC/../$p" | tr -s ' ' | grep -qF 'A bug card whose change is test files and pages (`.md`, `.txt`, `.rst`) that no test reads has no check to run either, and stops at its test step.' \
+      || fail "$p does not say a bug card of test files and pages that no test reads has no check to run"
   done
   jq -r .properties.test.properties.fileCommand.description "$SRC/schema/pack.schema.json" \
-    | grep -qF 'a bug card with a fix (any change but test files alone, or comments in .js, .mjs, .cjs, .ts, .mts and .cts files with or without test files; a comment change in a .sh or .py file is a fix) at Build' \
+    | grep -qF 'a bug card with a fix (any change but test files alone, test files with pages (.md, .txt, .rst) that no test reads, or comments in .js, .mjs, .cjs, .ts, .mts and .cts files with or without test files; a comment change in a .sh or .py file is a fix) at Build' \
     || fail "the pack schema's test.fileCommand does not say a js comment change with or without a test file has no check, and one in a .sh or .py file is a fix"
 }
 
