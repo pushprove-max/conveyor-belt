@@ -5,7 +5,8 @@
 # foreman.test.sh) are under conveyor/foreman/, which the engine area map keeps outside. Bug it catches: a card that
 # grew the standing text ran none of them, landed, and main went red on foreman-size.test.sh later. This checkout's
 # .conveyor/test-links.json links each of the three files to those tests; a test-changed.sh listing
-# (CONVEYOR_TEST_LIST, which runs no test) of a change to each one must name them.
+# (CONVEYOR_TEST_LIST, which runs no test) of a change to each one must name them. It links foreman/lib.sh to
+# conveyor/tests/askfiling.test.sh too (the filing ask's cases, below).
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd -P); ROOT=$(dirname "$HERE")
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
@@ -25,9 +26,13 @@ cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/te
 printf '%s\n' '{"outside": "conveyor/foreman/"}' '{"outside": "conveyor/commands/foreman.sh"}' '{"area": "cmd-auto", "file": "conveyor/lib/standing.sh"}' \
   '{"area": "cmd-auto", "test": "standing.test.sh"}' > "$R/.conveyor/engine-areas.json"
 cp "$ROOT/conveyor/lib/standing.sh" "$R/conveyor/lib/"
-cp "$ROOT/conveyor/foreman/foreman.sh" "$ROOT/conveyor/foreman/procedures.md" "$R/conveyor/foreman/"
+cp "$ROOT/conveyor/foreman/foreman.sh" "$ROOT/conveyor/foreman/procedures.md" "$ROOT/conveyor/foreman/lib.sh" "$R/conveyor/foreman/"
 mkdir -p "$R/conveyor/commands" && cp "$ROOT/conveyor/commands/foreman.sh" "$R/conveyor/commands/"
 printf 't_one() {\n  :\n}\n' > "$R/conveyor/tests/standing.test.sh"
+printf 't_cardaskslow() {\n  :\n}\n' > "$R/conveyor/tests/askfiling.test.sh"
+# The test files the links give foreman/lib.sh (more than a card's cap), each there: the cap check below reads them all.
+mapfile -t LIBLINKED < <(jq -r '.["conveyor/foreman/lib.sh"][]' "$HERE/test-links.json")
+for t in "${LIBLINKED[@]}"; do [ -f "$R/$t" ] || { mkdir -p "$R/${t%/*}" && echo ':' > "$R/$t"; }; done
 FOREMAN=(conveyor/foreman/foreman-launcher.test.sh conveyor/foreman/foreman-size.test.sh conveyor/foreman/foreman-standing.test.sh
   conveyor/foreman/foreman.test.sh)
 # The Foreman session cases, split in two files (foreman-session and foreman-claims): a change that runs one runs both.
@@ -65,6 +70,27 @@ listed conveyor/commands/foreman.sh '$a\
 : two'; sessions conveyor/commands/foreman.sh
 listed conveyor/foreman/procedures.md '$a\
 One more line.'; names conveyor/foreman/procedures.md
+# Bug: askfiling() (foreman/lib.sh, outside the map) is tested only by conveyor/tests/askfiling.test.sh, whose area,
+# testaction, holds none of the Foreman's files: a change to the filing ask alone ran none of its cases. It was linked
+# then, but sorted last of the files linked to lib.sh, and the card's cap of them kept the first by name. The engine's
+# own cap (lib/testlist.sh selfirst(), which asks this script, then lib/testrun.sh testcap(), as listcmd() calls them),
+# with no failure on record, must keep it.
+sed '/^askfiling() {/,/^}/s/^\( *\)return 0$/\1return 1/' "$R/conveyor/foreman/lib.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/foreman/lib.sh"
+if git -C "$R" diff --quiet -- conveyor/foreman/lib.sh; then no "the sed script changed no 'return 0' line of askfiling()"
+else
+  # The cap's libraries alone, CARDLINKED as lib/prompts.sh sets it, and the pack's test settings as packget gives them.
+  kept=$(cd "$R" && set +u && eval "$(grep '^CARDLINKED=' "$ROOT/conveyor/lib/prompts.sh")" && . "$ROOT/conveyor/lib/testfiles.sh" \
+    && . "$ROOT/conveyor/lib/testlist.sh" && . "$ROOT/conveyor/lib/testrun.sh" && [ -n "$CARDLINKED" ] || exit 1
+    packget() { case $1 in test.changed) printf -v "$2" %s .conveyor/test-changed.sh ;; test.command) printf -v "$2" %s 'bash .conveyor/test-changed.sh' ;; *) return 1 ;; esac; }
+    testowners() { defs='{}' refs='{}'; : "$defs$refs"; } # testcap() reads defs and refs: no case names on record; olds() { :; }; recs() { :; }
+    fs=("${LIBLINKED[@]}"); selfirst "$R" "$CARDLINKED"; CAPMAX=$CARDLINKED CAPFIRST=$SELN testcap "${fs[@]}"
+    echo "$CARDLINKED of ${#LIBLINKED[@]}:"; printf '%s\n' "${CAPFILES[@]}") 2>&1
+  [ "${#LIBLINKED[@]}" -gt "$(sed -n 's/^\([0-9]*\) of .*/\1/p' <<<"$kept")" ] \
+    || no "the links give foreman/lib.sh no more files than a card's cap keeps, so the check below proves nothing: $kept"
+  grep -qxF conveyor/tests/askfiling.test.sh <<<"$kept" \
+    || no "a change to askfiling()'s 'return 0' in conveyor/foreman/lib.sh: the card's cap of its linked files left out conveyor/tests/askfiling.test.sh: kept $(tr '\n' ' ' <<<"$kept")"
+fi
+git -C "$R" checkout -q -- .
 
-[ "$fails" = 0 ] && echo "ok - a change to each Foreman start-text file selects the Foreman size and text tests"
+[ "$fails" = 0 ] && echo "ok - a change to each Foreman start-text file selects the Foreman size and text tests, and one to foreman/lib.sh the filing ask's cases"
 exit "$fails"

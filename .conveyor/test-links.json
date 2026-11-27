@@ -572,7 +572,8 @@
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/foreman/foreman-size.test.sh",
     "conveyor/foreman/foreman-title.test.sh",
-    "conveyor/foreman/foreman.test.sh"
+    "conveyor/foreman/foreman.test.sh",
+    "conveyor/tests/askfiling.test.sh"
   ],
   "conveyor/foreman/plugin-problem.test.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",

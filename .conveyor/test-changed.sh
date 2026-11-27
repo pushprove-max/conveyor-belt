@@ -506,6 +506,7 @@ all=
 # is run by the Foreman's tests. The /units mod's views (hooks/units.tsx) are drawn by sources.ts with elements.ts, so
 # units.test.tsx tests them too; its two-project fixture is the fetch's test's and the views' tests'. The area map and
 # the engine's map reader (conveyor/lib/testmap.sh) are checked against each other by test-map-areas.test.sh (#150).
+# askfiling() of the Foreman's lib.sh (outside the map) is tested by askfiling.test.sh alone.
 declare -A TESTS_OF=([.claude/dashboard/panels/rules.js]=.claude/scripts/__tests__/dashboard-view.needs.test.mjs
   [.claude/scripts/dashboard.sh]=".claude/scripts/__tests__/dashboard-limit.test.sh .claude/scripts/__tests__/dashboard-limit-wait.test.sh
     .claude/scripts/__tests__/dashboard-server.test.sh"
@@ -513,7 +514,13 @@ declare -A TESTS_OF=([.claude/dashboard/panels/rules.js]=.claude/scripts/__tests
     conveyor/foreman/foreman-projects.test.sh"
   [hooks/sources.ts]=hooks/units.test.tsx [hooks/elements.ts]="hooks/sources.test.tsx hooks/units.test.tsx"
   [hooks/fixtures/units-two-projects.ts]="hooks/units-fetch.test.sh hooks/units.test.tsx hooks/sources.test.tsx"
-  [.conveyor/engine-areas.json]=.conveyor/test-map-areas.test.sh [conveyor/lib/testmap.sh]=.conveyor/test-map-areas.test.sh)
+  [.conveyor/engine-areas.json]=.conveyor/test-map-areas.test.sh [conveyor/lib/testmap.sh]=.conveyor/test-map-areas.test.sh
+  [conveyor/foreman/lib.sh]=conveyor/tests/askfiling.test.sh)
+# outside <file>: the area map keeps <file> outside (an "outside" line names it or a folder above it). No coverage map,
+# callers or area narrows such a file's tests, so pick lists its TESTS_OF first (RANKED), and a card's cap of its linked
+# files keeps them: bug, askfiling.test.sh, the only test of askfiling() (conveyor/foreman/lib.sh), sorted after the
+# Board tests linked to lib.sh, and the cap left it out.
+outside() { jq -e --arg f "$1" '.outside | any(. as $o | $f == $o or (($o | endswith("/")) and ($f | startswith($o))))' <<<"${AMAP:-null}" > /dev/null 2>&1; }
 # The parts of the Board's scripts, each with its script: dashboard.sh sources its parts, and dashboard_server.py and
 # dashboard_limit.py run theirs in their own namespace, so a part has its script's tests (pick): those named after the
 # script, its TESTS_OF and its links (LINKS).
@@ -1308,7 +1315,7 @@ for f; do
       [ -f "$t" ] && ! owned "$t" "$stem" && { [ -z "$cov" ] || ! grep -qxF -- "$t" <<<"$COVTESTS"; } && run[$t]=1
     done
   done
-  for t in ${TESTS_OF[$of]:-}; do [ ! -f "$t" ] || { [ -n "$cov" ] && grep -qxF -- "$t" <<<"$COVTESTS"; } || run[$t]=1; done
+  for t in ${TESTS_OF[$of]:-}; do [ ! -f "$t" ] || { [ -n "$cov" ] && grep -qxF -- "$t" <<<"$COVTESTS"; } || { run[$t]=1; ! outside "$of" || RANKED+=$t$'\n'; }; done
   [ -n "$cov$cal" ] || [ -n "$NOTEXT" ] || case $f in conveyor/tests/*) ;; conveyor/*.sh) rulefor "$f" area ;; esac
   [ -n "$cov$cal" ] || case $f in conveyor/*) areaof "$f" ;; .claude/hooks/lib/*.sh) while read -r t; do [ -z "$t" ] || { run[$t]=1; RANKED+=$t$'\n'; }; done < <(hooklibtests "$f") ;; esac
 done
