@@ -397,6 +397,15 @@ passes "gh issue create --title One --body \$'## What to build\nA.\n## Design\nB
 refused "gh issue create --label bug --title One --body 'It breaks.'; gh issue 'create' --title Two --body \$'## Cause\nStale.'"
 refused "gh issue create --label bug --title One --body 'It breaks.'; gh \\
  issue create --title Two --body \$'## Cause\nStale.'"
+# Bug (#1730 review): a line continuation in a double quote (`"crea\<newline>te"`, which Bash reads as `create`) was
+# made x with the quoted text, so the split missed the second issue and its Design or Cause counted for the first.
+cmd="gh issue create --title One --body \$'## What to build\nA note.'; gh issue \"crea\\
+te\" --title Two --body \$'## Design\nUse notes.json.'"
+out=$(hook "$cmd")
+jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | test("## Design"))' <<<"$out" >/dev/null \
+  || fail "the first issue's missing Design section was not refused, as the second's Design counted for it; command: $cmd; output: $out"
+refused "gh issue create --label bug --title One --body 'It breaks.'; gh issue \"crea\\
+te\" --title Two --body \$'## Cause\nStale.'"
 # A `gh issue create` in a title, a quote or a here-document body starts no issue: the body's Cause after it counts.
 passes "gh issue create --label bug --title 'x; gh issue create' --body \$'Run\ngh issue create\n## Cause\nStale.'"
 # The body has no quote mark of its own, so only the here-document mask (heredocs 2) keeps its line from a split.

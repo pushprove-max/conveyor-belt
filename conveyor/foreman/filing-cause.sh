@@ -172,7 +172,9 @@ uncommented() {
 # unquoted <command>: the command with the text in each quote made x (the quote marks kept), so a `<<WORD` written in a
 # quote (`echo 'Use <<EOF'`) is no here-document. A `$(` or a backquote in a double quote starts shell text again, up to
 # its own `)` or backquote, so the `<<'EOF'` of `--body "$(cat <<'EOF'` stays. d: the depth of the stack m of what each
-# open part is ("" shell text, s '...', a $'...', d "...", p $(...), b `...`); c[d]: the open ( in a $(...) part.
+# open part is ("" shell text, s '...', a $'...', d "...", p $(...), b `...`); c[d]: the open ( in a $(...) part. A
+# line continuation (a backslash before a newline) in a double quote is kept as written, as Bash drops it there and joins
+# the word (`"crea\<newline>te"` is `create`); in a $'...' it is text, made x.
 unquoted() {
   awk '{ s = s (NR > 1 ? "\n" : "") $0 }
     END {
@@ -181,6 +183,7 @@ unquoted() {
         ch = substr(s, i, 1); nx = substr(s, i + 1, 1); t = m[d]
         if (t == "s") { if (ch == q) { d--; o = o ch } else o = o "x"; continue }
         if (t == "a" || t == "d") {
+          if (t == "d" && ch == "\\" && nx == "\n") { o = o ch nx; i++; continue }
           if (ch == "\\") { o = o "xx"; i++; continue }
           if ((t == "a" && ch == q) || (t == "d" && ch == "\"")) { d--; o = o ch; continue }
           if (t == "d" && ch == "$" && nx == "(") { m[++d] = "p"; c[d] = 0; o = o ch nx; i++; continue }
