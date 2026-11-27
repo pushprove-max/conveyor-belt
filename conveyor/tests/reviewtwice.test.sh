@@ -77,3 +77,45 @@ t_reviewtwiceengine() {
     || fail "the watcher's poll, given c0-7 to retry, woke the Foreman or did not run: $(cat "$T/$CASE/run.out" "$T/$CASE/watch.wake" "$T/$CASE/watch.err" 2>&1)"
   rtonce watcher
 }
+
+# A review-retry that comes late, after the card it names was given back and the issue went on: `retry` (again(),
+# commands/retry.sh) gives back no other card, and reports done (status 3) when review-retry gave that card back
+# before. rtlate: c0-7 of #7 blocked by its review (nainit, nareview: needsask.test.sh). rtblock <card>: a later card
+# of #7 blocked by its review. rtlater <card> <status> <what the refusal says>: the late review-retry of c0-7 exits with
+# that status, says so, and leaves <card> blocked, not given back.
+rtlate() { setup "[$(issue 7 2026-01-01)]"; nainit 7; nareview; }
+rtblock() {
+  landed 7 | jq -c --arg c "$1" '.card = $c | (.step = "picked"), (.step = "blocked" | .result = "blocked"
+    | .reason = "the fix for [P1] a.txt:1 drops the line did not hold after 3 rounds")' >> "$ST/cards.jsonl" || fail "the blocked card $1"
+}
+rtlater() {
+  local out rc=0
+  out=$(CONVEYOR_REVIEWRETRY=c0-7 loop retry 7 2>&1) || rc=$?
+  [ "$rc" = "$2" ] && grep -qF "$3" <<<"$out" || fail "CONVEYOR_REVIEWRETRY=c0-7 retry 7 exited $rc, not $2 with \"$3\": $out"
+  [ -z "$1" ] || { ! naretried "$1" && jq -e --arg c "$1" 'select(.card == $c and .step == "blocked" and .retriedAt == null)' "$ST/cards.jsonl" >/dev/null; } \
+    || fail "CONVEYOR_REVIEWRETRY=c0-7 retry 7 gave back $1, a later card than the c0-7 it named: $out $(cat "$ST/retried.jsonl")"
+}
+# Bug: once c0-7's replacement c1-7 landed, reviewretried() no longer counted c0-7, so the late retry ran and failed
+# on the landed card: a false "failed" wake for the Foreman.
+t_reviewlatelanded() {
+  rtlate
+  CONVEYOR_REVIEWRETRY=c0-7 loop retry 7 > /dev/null 2>&1 && naretried c0-7 || fail "the first review-retry of c0-7 did not give it back"
+  landed 7 | jq -c '.card = "c1-7" | .time = "2099-01-01T00:00:00Z"' >> "$ST/cards.jsonl" || fail "the landed line of c1-7"
+  rtlater '' 3 'review-retry already gave back card c0-7 of issue #7;'
+}
+# Bug: after review-retry gave back c0-7 and the owner retried c1-7 (which resets the limit), the late retry of c0-7
+# gave back c2-7, logged as c0-7's act.
+t_reviewlateowner() {
+  rtlate
+  CONVEYOR_REVIEWRETRY=c0-7 loop retry 7 > /dev/null 2>&1 && naretried c0-7 || fail "the first review-retry of c0-7 did not give it back"
+  rtblock c1-7; loop retry 7 > /dev/null 2>&1 && naretried c1-7 || fail "the owner's retry of c1-7 did not give it back"
+  rtblock c2-7
+  rtlater c2-7 3 'review-retry already gave back card c0-7 of issue #7;'
+}
+# Bug: a late review-retry of c0-7, which the owner gave back first, gave back the later c1-7 in its name.
+t_reviewlategone() {
+  rtlate
+  loop retry 7 > /dev/null 2>&1 && naretried c0-7 || fail "the owner's retry of c0-7 did not give it back"
+  rtblock c1-7
+  rtlater c1-7 1 'card c0-7 of issue #7 is not blocked now'
+}

@@ -544,7 +544,7 @@ t_healthreviewretried() {
   local n h; setup '[]'
   hrblock() { landed "$1" | jq -c --arg c "$2" '.card = $c | (.step = "picked"), (.step = "blocked" | .result = "blocked"
     | .reason = "the fix for [P1] a.txt:1 drops the line did not hold after 1 round")' >> "$ST/cards.jsonl"; }
-  for n in 7 8 9 10; do hrblock "$n" "c0-$n"; CONVEYOR_REVIEWRETRY=1 loop retry "$n" > /dev/null 2>&1 || fail "the review-retry of #$n failed"; hrblock "$n" "c1-$n"; done
+  for n in 7 8 9 10; do hrblock "$n" "c0-$n"; CONVEYOR_REVIEWRETRY="c0-$n" loop retry "$n" > /dev/null 2>&1 || fail "the review-retry of #$n failed"; hrblock "$n" "c1-$n"; done
   loop retry 8 > /dev/null 2>&1 && loop unblock 9 --hold > /dev/null 2>&1 && loop control release 9 > /dev/null 2>&1 \
     && CONVEYOR_RETRYBY=foreman loop retry 10 > /dev/null 2>&1 || fail "the second give-backs of #8, #9 and #10 failed"
   for n in 8 9 10; do hrblock "$n" "c2-$n"; done

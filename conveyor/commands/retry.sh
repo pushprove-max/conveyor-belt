@@ -74,11 +74,23 @@ again() { # <issue | card id> [fresh]
   # The card it was asked to give back (CONVEYOR_REVIEWRETRY holds its card id) already given back by review-retry: the
   # other of its two runners came first. Nothing failed, and the act is logged once, by that one: status 3, which both
   # read as done. Bug (#1601): it failed, and the watcher woke the Foreman with a failed retry of a card building again.
+  # That card is found among all its issue's lines, as an owner's retry or a landed card after it drops it from
+  # reviewretried(). And a card review-retry did not give back is retried only while it is blocked in the records and
+  # not given back: retry() gives back every blocked card of the issue. Bug: a late review-retry of a card given back
+  # before (its replacement landed, or the owner retried it) gave back a newer blocked card of the issue, logged with
+  # the old card's id, or with none blocked failed and woke the Foreman.
   if [ "$RETRYBY" = review-retry ] && [[ $1 =~ ^[0-9]+$ ]]; then
-    c=$({ stdb ask issue cards "$1" && stdb ask issue retried "$1"; } | jq -rs --argjson n "$1" "$REVIEWAGAIN"'retrylines([]) as $all | reviewretried($n; $all) | .card // ""') \
+    c=$({ stdb ask issue cards "$1" | jq -c '. + {now: true}' && stdb ask issue retried "$1"; } | jq -rs --argjson n "$1" --arg k "$CONVEYOR_REVIEWRETRY" "$REVIEWAGAIN"'
+      def mine: .card == $k and .step == "blocked";
+      if any(.[]; mine and .retriedBy == "review-retry" and (.retriedAt | type) == "string") then "gave\t\($k)"
+      else (retrylines([]) as $all | reviewretried($n; $all) | .card // "") as $g
+        | if $g != "" then "once\t\($g)" elif any(.[]; mine and .now == true and .retriedAt == null) then "" else "gone\t\($k)" end end') \
       || { echo "conveyor: the card records of issue #$1 could not be read; nothing changed" >&2; return 1; }
-    [ -z "$c" ] || [ "$c" != "$CONVEYOR_REVIEWRETRY" ] || { echo "conveyor: review-retry already gave back card $c of issue #$1; nothing changed" >&2; return 3; }
-    [ -z "$c" ] || { echo "conveyor: review-retry already gave issue #$1 back once (its card $c was blocked by its review), and neither the owner's retry nor a landed card came after; nothing changed: it waits for the owner" >&2; return 1; }
+    case ${c%%$'\t'*} in
+      gave) echo "conveyor: review-retry already gave back card ${c#*$'\t'} of issue #$1; nothing changed" >&2; return 3 ;;
+      once) echo "conveyor: review-retry already gave issue #$1 back once (its card ${c#*$'\t'} was blocked by its review), and neither the owner's retry nor a landed card came after; nothing changed: it waits for the owner" >&2; return 1 ;;
+      gone) echo "conveyor: card ${c#*$'\t'} of issue #$1 is not blocked now (it was given back, or is not a card of the issue), so review-retry gives back no other card; nothing changed" >&2; return 1 ;;
+    esac
   fi
   # landable() closes the card's decision before retry() moves the card's lines, so no answer of the owner is written
   # between the two (the Board's answer is refused as already answered). A retry that then fails reopens the decision,

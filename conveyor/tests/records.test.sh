@@ -179,11 +179,11 @@ t_retrynotowner() {
   setup "$(issue 7 2026-01-01 | jq -cs .)"
   landed 7 | jq -c '.step = "blocked" | .result = "blocked" | .reason = "review: NO-GO"' >> "$ST/cards.jsonl"
   loop control hold 7 >/dev/null || fail "control hold 7 failed"
-  out=$(CONVEYOR_REVIEWRETRY=1 loop retry 7 2>&1) || fail "CONVEYOR_REVIEWRETRY=1 retry 7, #7 held, failed: $out"
+  out=$(CONVEYOR_REVIEWRETRY=c0-7 loop retry 7 2>&1) || fail "CONVEYOR_REVIEWRETRY=c0-7 retry 7, #7 held, failed: $out"
   jq -se 'any(.[]; .issue == 7 and .step == "blocked" and .retriedBy == "review-retry")' "$ST/retried.jsonl" >/dev/null 2>&1 \
-    || fail "CONVEYOR_REVIEWRETRY=1 retry 7 did not give the card of #7 back: $out"
+    || fail "CONVEYOR_REVIEWRETRY=c0-7 retry 7 did not give the card of #7 back: $out"
   [ "$(jq -c '[.held, .released]' "$ST/control.json")" = '[[7],{}]' ] && grep -qF 'issue #7 is held, and stays held' <<<"$out" \
-    || fail "CONVEYOR_REVIEWRETRY=1 retry 7, #7 held, released #7, dated a release, or did not say it stays held: $(jq -c '[.held, .released]' "$ST/control.json"); $out"
+    || fail "CONVEYOR_REVIEWRETRY=c0-7 retry 7, #7 held, released #7, dated a release, or did not say it stays held: $(jq -c '[.held, .released]' "$ST/control.json"); $out"
 }
 
 # Bug (#1472): a refused unblock took its hold off control.json but left the move to Held in moved.json, the Board's
