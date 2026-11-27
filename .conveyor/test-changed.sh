@@ -29,7 +29,7 @@
 # A change to functions alone of an engine shell file (conveyor/lib/paths.sh too) runs the test files that name a
 # changed function or a function that calls one (one hop), and of a command script whose lines outside its functions
 # call one, the case files that run its commands, and the tests named after the file or listed for it; not its area,
-# unless one runs at start-up (issue 1775: callersof; issue 1830: however many callers it has). A change to lines of
+# however many callers it has and though conveyor.sh or portable.sh names it (issue 1775: callersof; issue 1830). A change to lines of
 # conveyor.sh's command table alone (a command added, removed or changed, with its usage text) runs the case files that
 # run those commands (cmdsof; issue 530). Else each runs the whole, as before. A change to keys of the control record's
 # defaults (conveyor/lib/control-defaults.json) runs the case files of the code that reads those keys and of the case
@@ -993,9 +993,11 @@ callers() {
 # function, as releaseprep() of release-prep.sh: they run `loop release-prep`). A caller is a function of an engine
 # shell file of the map with a line that names a changed function as a word and is no comment. It leaves the changed functions'
 # names in CFN once it has read them. It fails, and the rules after it pick (the file's area), when the file cannot be
-# read either side, a line outside its functions changed, a code line outside the functions of the file, or any code
-# line of conveyor/conveyor.sh or conveyor/lib/portable.sh, names a changed function (it runs at start-up), a line
-# outside the functions of another engine file (but a command script) names one, a command script that names one has
+# read either side, a line outside its functions changed, a code line outside the functions of the file names a
+# changed function, a line outside the functions of another engine file names one (but a command script, and
+# conveyor/conveyor.sh and conveyor/lib/portable.sh: a line of conveyor.sh's command table that names one brings the
+# case files that run that command, cmdtests; another line of the two, a call at start-up, brings none, as every case
+# runs it and its callers' tests are what can tell a change apart: issue 1830), a command script that names one has
 # no command, or an engine file that names one cannot be read (FUNCS). However many callers the changed functions have,
 # it gives their tests, never the area (issue 1830: a cap of 25 callers ran cardland.sh's whole area, 86 files).
 callersof() {
@@ -1016,8 +1018,7 @@ callersof() {
   sa=$(awk 'sub(/^S\t/, "")' <<<"$a" | awk -v lang=sh "$TEXT") && sb=$(awk 'sub(/^S\t/, "")' <<<"$b" | awk -v lang=sh "$TEXT") || return 1
   ! grep -qx U <<<"$sa"$'\n'"$sb" && [ "$sa" = "$sb" ] || return 1
   w=$(IFS='|'; echo "${fn[*]}"); re="(^|[^A-Za-z0-9_])($w)([^A-Za-z0-9_]|\$)"
-  st=$({ textof sh < conveyor/conveyor.sh && textof sh < conveyor/lib/portable.sh; } 2>/dev/null) && ! grep -qx U <<<"$st" || return 1
-  ! grep '^C' <<<"$sb"$'\n'"$st" | grep -qE "$re" || return 1
+  ! grep '^C' <<<"$sb" | grep -qE "$re" || return 1
   # The callers: of each engine shell file that names one, its functions with a line that is no comment and names one
   # (K), and S when a line outside its functions does.
   mapfile -t files < <(jq -r '.areas[].files[] | select(test("^conveyor/.*[.]sh$"))' <<<"$AMAP" | LC_ALL=C sort -u \
@@ -1027,9 +1028,13 @@ callersof() {
   [[ $f != conveyor/commands/*.sh ]] || scr[$f]=1
   for t in "${hit[@]}"; do
     c=$(awk "$FUNCS" "$t") && ! grep -qx U <<<"$c" || return 1
+    # conveyor.sh's command table: a line that names one brings the case files that run its command.
+    [ "$t" != conveyor/conveyor.sh ] \
+      || mapfile -t -O "${#cmds[@]}" cmds < <(awk '$1 == "cmd" && $2 ~ /^[a-z][a-z-]*$/' "$t" | grep -E -- "$re" | awk '{ print $2 }')
     while IFS=$'\t' read -r k n; do
       if [ "$k" = K ]; then { [ "$t" = "$f" ] && [[ " $CFN " == *" $n "* ]]; } || who[$n]=1
-      elif [ "$t" != "$f" ] && [[ $t != conveyor/commands/*.sh ]]; then return 1; fi
+      elif [ "$t" != "$f" ] && [[ $t != conveyor/commands/*.sh ]] && [ "$t" != conveyor/conveyor.sh ] \
+        && [ "$t" != conveyor/lib/portable.sh ]; then return 1; fi
       [[ $t != conveyor/commands/*.sh ]] || scr[$t]=1
     done < <(awk -v re="$re" '/^K\t/ { n = substr($0, 3); sub(/\t.*/, "", n); k = split(substr($0, length(n) + 4), l, "\001")
         sub(/^(function[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/, "", l[1])

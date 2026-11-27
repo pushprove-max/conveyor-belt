@@ -297,7 +297,10 @@ p_cover() {
   [ "$got" = "bg:the hkb check hk:ha,hc" ] && ok "changed hook functions run only the case_on cases and check texts the map lists" || no "hka and hkb changed: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- .claude/hooks/hk.sh
   printf 'xthree() {\n  echo three\n}\n' >> "$R/conveyor/x.sh"; got=$(ran)
-  [ "$got" = "aone atwo" ] && ok "D3: an added function that no mapped function calls runs its file's area, as before" || no "xthree added: ran '$got': $(cat "$T/out")"
+  # callersof gives its callers' tests: nothing calls it, so none (issue 1830: before, the scratch repo's missing
+  # conveyor.sh made callersof fail here, and the area ran; a real checkout got none already).
+  [ "$got" = "" ] && grep -qxF 'coverage map rule: conveyor/x.sh xthree(): callersof' "$T/out" \
+    && ok "D3: an added function that nothing calls runs the tests callersof gives (none), not its file's area" || no "xthree added: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- conveyor/x.sh
   printf 'xone() {\n  echo one; xthree\n}\nxtwo() {\n  echo two\n}\nxthree() {\n  xfour\n}\nxfour() {\n  echo four\n}\n' > "$R/conveyor/x.sh"; got=$(ran)
   [ "$got" = aone ] && ok "an added function runs the cases the map lists for the mapped function that calls it, two calls away too, not its area" \
@@ -305,9 +308,10 @@ p_cover() {
   git -C "$R" checkout -q -- conveyor/x.sh; echo 'echo top' >> "$R/conveyor/x.sh"; got=$(ran)
   [ "$got" = "aone atwo" ] && ok "a changed line outside the functions runs the area" || no "top-level line: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- conveyor/x.sh
-  sed 's/echo one/echo uno/' "$R/conveyor/x.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/x.sh"; git -C "$R" commit -qam since
+  sed 's/echo one/echo uno/' "$R/conveyor/x.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/x.sh"; echo xone >> "$R/conveyor/core.sh"
+  git -C "$R" commit -qam since
   sed 's/echo uno/echo eins/' "$R/conveyor/x.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/x.sh"; got=$(ran)
-  # Here callersof fails (the scratch repo has no conveyor/conveyor.sh to read): the stale row's cases stand alone.
+  # Here callersof fails (a line of conveyor/core.sh outside its functions names xone): the stale row's cases stand alone.
   [ "$got" = aone ] && grep -qxF 'coverage map rule: conveyor/x.sh xone(): covof' "$T/out" \
     && ok "a function changed since the coverage map was traced runs the cases the map lists for it as traced, and with callersof failing, not the area" \
     || no "xone changed since the trace, callersof failing: ran '$got': $(cat "$T/out")"
@@ -317,7 +321,8 @@ p_cover() {
   mkdir -p "$R/conveyor/lib"; echo ': main' > "$R/conveyor/conveyor.sh"; echo ': portable' > "$R/conveyor/lib/portable.sh"
   printf '%s\n' ': xone' 'echo xs >> "$(dirname "$0")/../../../ran"' > "$R/.claude/scripts/__tests__/xs.test.sh"
   printf '{"outside": "%s"}\n' conveyor/conveyor.sh conveyor/lib/portable.sh >> "$R/.conveyor/engine-areas.json"
-  git -C "$R" add .conveyor/engine-areas.json conveyor/conveyor.sh conveyor/lib/portable.sh .claude/scripts/__tests__/xs.test.sh && git -C "$R" commit -qm callers
+  echo one > "$R/conveyor/core.sh"
+  git -C "$R" add .conveyor/engine-areas.json conveyor/conveyor.sh conveyor/lib/portable.sh conveyor/core.sh .claude/scripts/__tests__/xs.test.sh && git -C "$R" commit -qm callers
   got=$(ran)
   [ "$got" = "aone xs" ] && [ "$(cat "$T/rc")" = 0 ] && grep -qxF 'coverage map rule: conveyor/x.sh xone(): covof+callersof' "$T/out" \
     && ok "a stale coverage row runs the map's case and the test that names the function, not the area" \

@@ -79,5 +79,27 @@ p_callerstop() {
     && ok "the run says the area picked the tests of a change outside any function" || no "export W=2: no area rule line: $(cat "$T/out")"
 }
 
-for p in callers callersmany callerstop; do part "$p"; done
+# Issue 1830 (the owner's order): conveyor.sh and portable.sh run in every case, so a call of a changed function
+# there named no caller and ran the file's whole area. Bug it catches: target(), also called at start-up by a line of
+# conveyor.sh and one of portable.sh, ran every case file of area w (wthree and wfour reach no caller); it runs its
+# callers' case files, as p_callers.
+p_callersstartup() {
+  cfix; printf '%s\n' 'target' >> "$R/conveyor/conveyor.sh"; printf '%s\n' 'target' >> "$R/conveyor/lib/portable.sh"
+  git -C "$R" add -A && git -C "$R" commit -qm startup
+  edit 's/echo one/: one/'; got=$(ran)
+  [ "$got" = "wcmd wone wtwo wup" ] && [ "$(cat "$T/rc")" = 0 ] \
+    && ok "a changed function conveyor.sh and portable.sh call at start-up runs its callers' case files, not its area" \
+    || no "lib/w.sh target(), called at start-up, changed: ran '$got', want 'wcmd wone wtwo wup', exit $(cat "$T/rc"): $(cat "$T/out")"
+}
+# Bug it catches: a function conveyor.sh's command table names (go(), as `cmd go go.sh`) ran the file's whole area.
+# It runs the case file that runs that command (wcmd), and no other.
+p_callerstable() {
+  cfix; printf '%s\n' 'go() {' '  echo go' '}' >> "$R/conveyor/lib/w.sh"; git -C "$R" add -A && git -C "$R" commit -qm go
+  edit 's/echo go/: go/'; got=$(ran)
+  [ "$got" = "wcmd" ] && [ "$(cat "$T/rc")" = 0 ] \
+    && ok "a changed function conveyor.sh's command table names runs the case files of that command" \
+    || no "lib/w.sh go(), a command of the table, changed: ran '$got', want 'wcmd', exit $(cat "$T/rc"): $(cat "$T/out")"
+}
+
+for p in callers callersmany callerstop callersstartup callerstable; do part "$p"; done
 results
