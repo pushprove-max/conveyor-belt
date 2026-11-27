@@ -168,6 +168,18 @@ cardheld() { # <control record> <issue>
   jq -e --arg n "$2" '.guard != null and (.cards // {} | has($n))' <<<"${1:-null}" >/dev/null 2>&1 || return 1
   [ "$(state "$1" "$(SEATCARD=$2 guardread "$1" | jq -r '.pct // empty')")" = "paused by guard" ]
 }
+# With the cap reached and no commit from run.sh redfix(): the test files the loop's own cards that wait for main (live
+# mainWait, its cases `<file>: <name>` or a file) fail on, as a json list, when a card with no GitHub issue about one of
+# them (a Tests page card in $TACARDS, the fix a Foreman files for main) is released and not picked: the loop picks it
+# (testpick() reads REDFILES) in the slot beyond the cap, as for redfix() (issue 1813: four cards waited for main, its
+# fix card for a slot). Nothing when there is none, when such a card of the loop's own in progress does not wait for main
+# itself (one at a time), or with --only.
+redtests() { # <the loop's own cards in progress, card ids one a line>
+  [ -z "${ONLY:-}" ] && [ -s "$TACARDS" ] || return 0
+  jq -c --slurpfile lv <(live) --argjson own "$(jq -Rsc '[splits("\n") | select(. != "")]' <<<"$1")" '([$own[] | $lv[0][.].mainWait.cases[]? | strings
+    | (index(": ") as $i | if $i then .[:$i] else . end)] | unique) as $f | select($f != []) | [.cards[]? | objects | select(.file | strings | IN($f[]))] as $tc
+    | select(all($tc[] | .card | strings | select(IN($own[])); $lv[0][.].mainWait? != null)) | select(any($tc[]; (.held | not) and .card == null)) | $f' "$TACARDS" 2>/dev/null
+}
 pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues, as asked() gives them] [the control record the reading was taken for]
   local issues=${3:-} n card l again c u m f
   m=''
@@ -182,9 +194,12 @@ pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues
   # The fix card of a red main commit (redpick(), lib/mainred.sh) goes ahead of the queue, as its P0 issue did; it counts
   # toward max-cards (not in `pick retried`), and a run limited by --only takes none. One that cannot be picked leaves
   # the queue to go on.
-  if [ -z "${1:-}" ] && [ -z "$ONLY" ] && [ -s "${MAINRED:-}" ] && n=$(redpick) && [ -n "$n" ]; then echo "$n"; return 0; fi
-  # A pick for the slot beyond the project's cap (BEYOND, set by run(): redfix()) takes a main-red fix card or nothing.
-  [ -z "${BEYOND:-}" ] || return 0
+  if [ -z "${1:-}" ] && [ -z "$ONLY" ] && [ -s "${MAINRED:-}" ] && { [ -z "${BEYOND:-}" ] || [ -n "${REDONLY:-}" ]; } && n=$(redpick) && [ -n "$n" ]; then echo "$n"; return 0; fi
+  # A pick for the slot beyond the project's cap (BEYOND, set by run(): redfix(), redtests()) takes a main-red fix card or nothing:
+  # REDONLY's, or a Tests page card about a file of REDFILES (testpick()).
+  if [ -n "${BEYOND:-}" ]; then
+    [ -z "${1:-}" ] && [ -n "${REDFILES:-}" ] && [ -s "${TACARDS:-}" ] && n=$(testpick "$issues") && [ -n "$n" ] && echo "$n"; return 0
+  fi
   # Then a card with no GitHub issue (testpick(), lib/testaction.sh), asked for at once, ahead of the queue, the same way.
   # A run limited by --only takes only the review follow-ups and split parts of the issues it names (testpick() reads ONLY).
   # It holds back a card as an issue is held: one that depends on an open issue, or has a label the owner set to never build.

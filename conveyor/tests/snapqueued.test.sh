@@ -32,6 +32,9 @@ t_sqcards() {
     || fail "queue.cards does not say what each waiting card is: $(jq -c .queue.cards <<<"$out")"
   [ "$(jq -c '.queue.cards[1] | [.card, .priority, .created]' <<<"$out")" = '["c20261102T000002-sample-0","P1","2026-11-02T00:00:02Z"]' ] \
     || fail "queue.cards does not give a card's id, level and filing time: $(jq -c '.queue.cards[1]' <<<"$out")"
+  # #1813: the Foreman's wake for a card waiting on a red main names a held card by its test file, read here.
+  [ "$(jq -c '.queue.cards | map(.file)' <<<"$out")" = '[null,null,null,null,"f.test.sh"]' ] \
+    || fail "queue.cards does not give a Tests page card's test file (and null for the others): $(jq -c '.queue.cards | map(.file)' <<<"$out")"
   fx_in 'locked pick "" "" "$(cat "$STUB/issues.json")"'
   [ "$(cat "$T/$CASE/run.out")" = 'c20261102T000005-sample-0 0 false' ] || fail "pick did not take the one card queue.cards shows as ready: $(cat "$T/$CASE/run.out")"
   [ "$(loop snapshot --fresh | jq -c '.queue.cards | map(.title)')" = '["Held one","Waits on a card","Waits on an issue","Skipped"]' ] \

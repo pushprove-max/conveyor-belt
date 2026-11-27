@@ -96,6 +96,59 @@ t_redfixwaiting() {
     || fail "the pick turn at the cap, with cfix waiting on entry 2222 and red=2222, did not start the fix card of 2222: $(st 'select(.step == "picked") | .mainRed' | tr '\n' ' ')"
 }
 
+# Issue 1813. Bug it catches: with the cap filled by a card waiting for main on a red commit (entry 2222, no card yet),
+# its fix card never started until a card was shut by hand: redfix() named the oldest entry whose card had no line in
+# the card records, here 0000, whose fix card landed and whose lines went to the archive (the ended list). redpick()
+# reads that list too, so it picked nothing for 0000, and 2222 waited for a slot under the cap that never came. Cap 1,
+# held by c7 waiting in the real mainwait() (run in the background until its live record is written, as in
+# t_redfixwaiting, and still waiting through the pick); the turn's red is redfix() of the loop's cards, as turnask()
+# asks it, then the pick turn (turnpick(); cardrun() only says) starts the fix card of 2222 beyond the cap.
+t_redfixarchived() {
+  setup "[$(issue 7 2026-01-01)]"
+  local s; s=$(git -C "$R" rev-parse HEAD)
+  mkdir -p "$T/$CASE/cards/c7"
+  jq -cn '{reds: [{sha: "0000000000000000000000000000000000000000", cases: [{case: "c.test: three", file: "c.test", by: "c3", files: [], last: ""}], card: "cold"},
+    {sha: "2222222222222222222222222222222222222222", cases: [{case: "b.test: two", file: "b.test", by: "c7", files: [], last: ""}], card: null}]}' > "$ST/mainred.json"
+  fx_in 'cd "$R" || exit 8; mkdir -p "${ENDED%/*}" && { line cold 0 picked ok "{\"mainRed\": \"0000000000000000000000000000000000000000\"}"; line cold 0 landed ok; } > "$ENDED" || exit 8
+    cardrun() { echo "started: issue $2"; }
+    asking=1 urgent="" building=1 cap=1 left=5 pct="" running=0 serve=1 pusher="" started=0 waits="" ctl=$(ctl) issues=$(cat "$STUB/issues.json")
+    mainwait "$CARDS/c7" '"$s"' "b.test: two" & p=$!; declare -A mine=([$p]="c7 7")
+    wait_until "[ -s \"\$CARDS/c7.live\" ]" || echo "mainwait wrote no live record"
+    red=$(redfix "$(for k in "${!mine[@]}"; do echo "${mine[$k]% *}"; done)"); echo "red: $red"
+    turnpick; kill "$p"; wait'
+  [ "$(cat "$T/$CASE/run.out")" = $'red: 2222222222222222222222222222222222222222\nstarted: issue 0' ] \
+    || fail "redfix c7 with c7 waiting for main on b.test: two at the cap (entry 0000: card cold, landed, its lines in the ended list; entry 2222: no card), then the pick turn: not red 2222, then a start: $(cat "$T/$CASE/run.out")"
+  [ "$(st 'select(.step == "picked") | "\(.mainRed) \(.beyond)"')" = "2222222222222222222222222222222222222222 main is red" ] \
+    || fail "the pick turn at the cap, with c7 waiting on entry 2222 and 0000's card archived, did not start the fix card of 2222 beyond the cap: $(st 'select(.step == "picked") | "\(.mainRed) \(.beyond)"')"
+}
+
+# Issue 1813 (D1). Bug it catches: the Foreman's fix for a red main is a Tests page card ($TACARDS, no main-red record
+# entry), and the pick beyond the cap took only redfix()'s entries, so with every slot held by cards waiting for main
+# that card sat in the queue until a card was shut by hand. Cap 2, held by c7 and c8 in the real mainwait() on
+# b.test (as in t_redfixwaiting), both still waiting through the pick. Queued: a released card about z.test (older, so
+# a pick that ignored the file would take it) and the fix card about b.test, held for the owner, then released as
+# `control release` does. The turn's redtests() of the loop's cards, as turnask() asks it, then the pick turn
+# (turnpick(); cardrun() only says) starts the b.test card beyond the cap, and not the z.test one.
+t_redtestsfull() {
+  setup "[$(issue 7 2026-01-01)]"
+  local s; s=$(git -C "$R" rev-parse HEAD)
+  mkdir -p "$T/$CASE/cards"; echo '{"reds": []}' > "$ST/mainred.json"
+  fx_in 'cd "$R" || exit 8
+    cardrun() { echo "started: issue $2"; }
+    asking=1 urgent="" building=2 cap=2 left=5 pct="" running=0 serve=1 pusher="" started=0 waits="" ctl=$(ctl) issues=$(cat "$STUB/issues.json")
+    tcadd z.test "Tests page: z.test" "z body" "" > /dev/null || exit 8; id=$(tcadd b.test "Tests page: b.test" "b body" held) || exit 8
+    mainwait "$CARDS/c7" '"$s"' "b.test: two" & p7=$!; mainwait "$CARDS/c8" '"$s"' "b.test: two" & p8=$!; declare -A mine=([$p7]="c7 7" [$p8]="c8 8")
+    wait_until "[ -s \"\$CARDS/c7.live\" ] && [ -s \"\$CARDS/c8.live\" ]" || echo "mainwait wrote no live record"
+    own=$(for k in "${!mine[@]}"; do echo "${mine[$k]% *}"; done)
+    red=$(redfix "$own"); redtc=$(redtests "$own"); echo "held: [$red] [$redtc]"
+    . "$HERE/lib/testcardact.sh" && testcardact release "$id" > /dev/null || echo "release failed"; redtc=$(redtests "$own"); echo "released: $redtc"
+    turnpick; echo "z.test card: $(jq -r ".cards[] | select(.file == \"z.test\") | .card" "$TACARDS")"; kill "$p7" "$p8"; wait'
+  [ "$(cat "$T/$CASE/run.out")" = $'held: [] []\nreleased: ["b.test"]\nstarted: issue 0\nz.test card: null' ] \
+    || fail "cap 2 held by c7 and c8 waiting for main on b.test: two, queued a released z.test card and a held b.test card, then b.test released, then the pick turn: not nothing while held, b.test once released, one start, z.test not picked: $(cat "$T/$CASE/run.out")"
+  [ "$(st 'select(.step == "picked") | "\(.testFile) \(.beyond)"')" = "b.test main is red" ] \
+    || fail "the pick turn at the cap did not start the b.test Tests page card beyond the cap: $(st 'select(.step == "picked") | "\(.testFile) \(.beyond)"')"
+}
+
 # Issue 1581. Bug it catches: the turn gave jq the open list, bodies and all, as one argument; over 128 KiB Linux
 # refuses it, jq never started, and no seat account of an open issue was asked for while a seat was at the guard.
 # Here #13 has a 140 KiB body; the record keeps seats for #7 (open) and #8 (not open), so only 7 is named.

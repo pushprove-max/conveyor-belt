@@ -57,6 +57,19 @@ check 'its line names the blocked main-red fix card only, not the follow-up nor 
 check 'the wait line names neither the follow-up nor the Tests page card' \
   nope grep -qE '#45 has waited .*(Review follow-up|Tests page)' "$T/follow.wake"
 
+# Bug (#1813): with the fix card for main's failing test held for the owner (a Tests page card of the queue), every
+# wake of a card waiting for main said "no main-red fix card is open" for hours. The held card whose test file fails
+# there is named; a held card of another file, a held one of no file and an unheld one of that file are not.
+fixture held "$(jq -cn --arg at "$AT" '{health: '"$HEALTH"', belt: [
+  {card: "c46", issue: 46, step: "tests", live: {action: "waiting for main to change: src/a.test.ts: case one, src/b.test.ts fail on main at 0123456789ab too", at: $at}}],
+  queue: {next: [], cards: [{card: "cheld", held: true, file: "src/a.test.ts"}, {card: "cother", held: true, file: "src/a.test.tsx"},
+    {card: "cnofile", held: true, file: null}, {card: "cfree", held: false, file: "src/b.test.ts"}, {card: "cheldb", held: true, file: "src/b.test.ts"}]}}')" '{}'
+check 'a wait for main beside a held fix card wakes' poll held 10
+check 'its line names each held card of a failing test file in place of "no main-red fix card is open"' \
+  has held 'held: #46 has waited 10 minutes on main to change (src/a.test.ts: case one, src/b.test.ts fail on main at 0123456789ab too); fix card cheld is held for the owner; fix card cheldb is held for the owner'
+check 'the wait line names no held card of another file or of no file, and no unheld card' \
+  nope grep -qE '#46 has waited .*(cother|cnofile|cfree|no main-red fix card is open)' "$T/held.wake"
+
 # A card waiting at its claim on a same-file card (health waitingOnCard) since $AT, that card in review; the belt's
 # pack sets foreman.waitWake to 5 minutes, which the snapshot gives (the belt may be on another host, its pack not
 # on this machine: the pack here sets none).

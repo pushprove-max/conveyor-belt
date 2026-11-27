@@ -66,7 +66,7 @@
 #   yet", never $0; atEnd is true when, in that time, the running Claude session's answers all report usage 0 (a route
 #   that streams none): "cost shown when the step ends". live is {turns, lastOutputAt, action, at} of the running step (at: when its live record began; for a
 #   card waiting for main to change, mainred.sh mainwait(), when that wait began), or null. beyond: why it took a slot beyond the
-#   project's cap ("main is red": a main-red fix, redfix()), null once it has landed or when it took none. reviews and
+#   project's cap ("main is red": a main-red fix, redfix() or pick.sh redtests()), null once it has landed or when it took none. reviews and
 #   track are as below.
 # reviews (of a belt card and of a landed one): its finished reviews in order: round, verdict (GO, NO-GO, or none),
 #   counts (the findings by level; null for a review recorded before they were counted), sec, fixed (a fix round
@@ -811,7 +811,8 @@ snappart() {
 # The test owners (testowners()) as two lines, defs then refs, for snappart.
 snapowners() { local defs refs; testowners; printf '%s\n%s\n' "$defs" "$refs"; }
 # queue.cards: the entries $e of the cards' record (null: not read) that no card of the records $c took, in the
-# record's order. What a card waits on, the rules that skip it and a card given back are read as testpick()
+# record's order, each with the test file a Tests page card is about (file, else null: the Foreman's wake names a held
+# one whose file fails on main beside a card waiting for main, watch-conveyor.sh). What a card waits on, the rules that skip it and a card given back are read as testpick()
 # (lib/testaction.sh) reads them. Another repository's issue is open unless the read of it says closed: $cf, the read
 # for these cards (queuedfar(); null: none), else an open issue's. With the open issues not listed ($iss null), an
 # issue a card waits on counts as open.
@@ -824,7 +825,7 @@ TCQUEUE='def tcqueue($e; $c; $iss; $cf; $shuts; $fu; $rules; $prio):
     | def ended($d): ((first($e[] | . as $x | select($d | IN($x.id, $x.card, ($x.was // [])[]))) | .card) // $d) as $k | $ended[$k] != null;
     [$e[] | select(.card == null or $have[.card] == null) | (.labels // [$prio[-1]]) as $l
       | {card: .id, title: (.title // "")[0:200], kind: (.label // (if .file != null then "Tests page" else "Card" end)),
-         priority: level($l; $prio), created: .time, held: (.held == true),
+         priority: level($l; $prio), created: .time, held: (.held == true), file: ((.file | strings) // null),
          waitsFor: ([ups($fc; needs)[] | select(($open == null or IN($open[])) and (IN($done[]) | not))]
            + [farneeds[] as $r | select($far[$r].open != false) | $r]
            + [.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*-[0-9]+(?![A-Za-z0-9_])")

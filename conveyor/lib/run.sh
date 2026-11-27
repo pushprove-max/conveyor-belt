@@ -139,18 +139,18 @@ urgent() {
     | [to_entries[] | select((.key | IN($on[])) and (.key | IN($ended[]) | not)) | .value.waits.on // empty
       | select(IN($on[]) | not) | capture("-(?<n>[0-9]+)$").n | tonumber | select($only == null or IN($only[]))] | unique | select(. != [])' 2>/dev/null
 }
-# A red main commit whose fix card is not picked yet, or was given back by `retry` (mainred.sh redpick()): prints its commit;
-# nothing when there is none, when a main-red fix card of the loop's own in progress does not wait for main, or with --only.
-# While each such card waits for main (mainwait(): live mainWait), only an entry holding a case one waits on (issue 1688:
-# a waiting fix card holds back no fix but the one that ends its wait). With the cap reached, the loop picks the fix card of
-# that commit (redpick(): REDONLY) in one slot beyond it (issue 612): with every slot held by cards that wait for that fix,
-# nothing would move. One at a time, but for one that ends such a wait; its slot ends with it. The machine's cap applies.
+# A red main commit whose fix card is not picked yet, or was given back by `retry` (mainred.sh redpick(); not one with lines in the ended list, cardall():
+# it ended and was archived, and named first, redpick() picked nothing for good, #1813): prints its commit; nothing when there is none, when a main-red fix
+# card of the loop's own in progress does not wait for main, or with --only. While each such card waits for main (mainwait(): live mainWait), only an entry
+# holding a case one waits on (issue 1688: a waiting fix card holds back no fix but the one that ends its wait). With the cap reached, the loop picks the fix card
+# of that commit (redpick(): REDONLY) in one slot beyond it (issue 612): with every slot held by cards that wait for that fix, nothing would move. One at a time, but for one that ends such a wait; its slot ends with it. The machine's cap applies.
 redfix() { # <the loop's own cards in progress, card ids one a line>
-  [ -z "${ONLY:-}" ] && [ -s "$MAINRED" ] || return 0
-  jq -r --slurpfile s <(turncards) --slurpfile lv <(live) --argjson own "$(jq -Rsc '[splits("\n") | select(. != "")]' <<<"$1")" '[.reds[]?.card | strings] as $fix
+  local c e s k; [ -z "${ONLY:-}" ] && [ -s "$MAINRED" ] || return 0
+  c=$(jq -r --slurpfile s <(turncards) --slurpfile lv <(live) --argjson own "$(jq -Rsc '[splits("\n") | select(. != "")]' <<<"$1")" '[.reds[]?.card | strings] as $fix
     | [$own[] | select(IN($fix[]))] as $mine | select(all($mine[]; $lv[0][.].mainWait? != null)) | [$mine[] | $lv[0][.].mainWait.cases[]?] as $wc | [$s[].card] as $taken
-    | first(.reds[]? | select(.card == null or (.card | IN($taken[]) | not)) | select($mine == [] or any(.cases[]?; .case | IN($wc[]))) | .sha)' "$MAINRED" 2>/dev/null
-}
+    | .reds[]? | select(.card == null or (.card | IN($taken[]) | not)) | select($mine == [] or any(.cases[]?; .case | IN($wc[]))) | [.sha, .card // ""] | @tsv' "$MAINRED" 2>/dev/null) && [ -n "$c" ] || return 0
+  e=$(endedrecs | grep -oF -f <(cut -f 2 <<<"$c" | sed -n 's/^\(..*\)$/{"card":"\1",/p')) || e='' # those cards' lines of the ended list, read once: each begins with its card
+  while IFS=$'\t' read -r s k; do { [ -n "$k" ] && grep -qF -- "{\"card\":\"$k\"," <<<"$e"; } || { echo "$s"; return 0; }; done <<<"$c"; }
 # The cards an older speed check blocked, at the loop's start: each is retried as `retry <issue> --fresh` retries it
 # (its kept work moved to kept-dropped), with no one asked, and says why (SPEEDWHY) in the log and on its retried line.
 # A card counts when its blocked line is the last end of its issue (no card picked, landed or closed since) and the
@@ -626,9 +626,9 @@ turnask() {
   healsexpire # an entry of the self-heals list that nobody fixed or saw again leaves it at every turn, whether or not this turn can pick
   # The open issues a pick reads, asked before the sample starts, so the sample reads them from ISSUES, never from GitHub under the records' lock.
   urgent=''; [ "$cap" -le 0 ] || urgent=$(urgent) || urgent=''
-  red=''; [ "$cap" -le 0 ] || [ "$building" -lt "$cap" ] || red=$(redfix "$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done)") || red=''
+  red='' redtc=''; [ "$cap" -le 0 ] || [ "$building" -lt "$cap" ] || { t=$(for p in "${!mine[@]}"; do echo "${mine[$p]% *}"; done); red=$(redfix "$t") || red=''; [ -n "$red" ] || redtc=$(redtests "$t") || redtc=''; } # pick.sh redtests()
   # No card is picked while a session's API-side error is fresh (session(): its session would meet the same outage), nor before the sort (healsonce()).
-  asking=''; if { [ "$building" -lt "$cap" ] || [ -n "$urgent" ] || [ -n "$red" ]; } && [ -z "$old" ] && [ -z "$nopack" ] && [ -z "$nocli" ] && [ -z "$mhold" ]; then
+  asking=''; if { [ "$building" -lt "$cap" ] || [ -n "$urgent" ] || [ -n "$red" ] || [ -n "$redtc" ]; } && [ -z "$old" ] && [ -z "$nopack" ] && [ -z "$nocli" ] && [ -z "$mhold" ]; then
     if apifresh || ! healsonce; then waits=1; else asking=1; [ "$now" != running ] || issues=$(asked) || asking=failed; fi
     [ "$asking" != 1 ] || [ "$now" != running ] || [ -z "${ONLYNAMED:-}" ] || ! t=$(onlyparts "$ONLYNAMED") || ONLY=$t; fi # --only's closed parts, read again as they close or move
   # The accounts of the seats the record keeps for an open issue (`control card`) are asked for too, outside the lock:
@@ -687,9 +687,9 @@ turnpick() {
   # A queued card a card on the belt waits on (urgent) goes first, past the cap; the rest only below the cap. Each pick
   # holds the records' lock for LOCKLIMIT seconds at most (lockedfor): one stopped there fails as any failed pick.
   picked=''; [ "$asking" != 1 ] || [ -z "$urgent" ] || { picked=$(ONLY=$urgent lockedfor pick fresh pick retried "$pct" "${issues:-}" "${ctl:-null}") && [ "$picked" != wait ]; } || picked=''
-  # With the cap reached, a main-red fix card (red) takes the one slot beyond it, the fix of red's own commit; no queued issue does.
-  [ -n "$picked" ] || [ "$asking" != 1 ] || [ -z "$red" ] \
-    || { picked=$(BEYOND='main is red' REDONLY=$red lockedfor pick fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "${ctl:-null}") && [ "$picked" != wait ]; } || picked=''
+  # With the cap reached, a main-red fix card takes the one slot beyond it: red's commit's, else a Tests page card of redtc (pick.sh redtests()); no queued issue does.
+  [ -n "$picked" ] || [ "$asking" != 1 ] || [ -z "$red${redtc:-}" ] \
+    || { picked=$(BEYOND='main is red' REDONLY=$red REDFILES=${redtc:-} lockedfor pick fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "${ctl:-null}") && [ "$picked" != wait ]; } || picked=''
   # Below the cap, the issue it would take is first read beside the cards on the belt (overlap(), outside the lock).
   [ -n "$picked" ] || [ "$building" -ge "$cap" ] || [ "$asking" != 1 ] || { overlap "${issues:-}" "$([ "$left" != 0 ] || echo retried)" "$ctl"; issues=$OVL; }
   [ -n "$picked" ] || [ "$building" -ge "$cap" ] \
@@ -707,7 +707,7 @@ turnpick() {
 }
 run() { # [max-cards] [serve]
   local left=${1:--1} serve=${2:-} cap base='' picked running building idles started=0 c n again timer pusher='' owed tried='' triedat=0 ctl pct now='' p k lim='' waits sampled=-1000000 guard issues='' asking urgent red
-  local why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' sorter='' utried=-1000000 nudged='' runcards=''
+  local redtc why say said='' old='' nopack told='' nocli self adopt='' held='' new t tester='' mtried=-1000000 stried=-1000000 taker='' ttook=-1000000 f muter='' sorter='' utried=-1000000 nudged='' runcards=''
   local mhold htold='' prober='' htried=-1000000 gone gs merger='' gtried=-1000000 fixer='' rtried=-1000000 asker='' atried=-1000000
   local inuse # the machine's count of the turn (turncount())
   # The loop's own cards in progress: pid -> "card issue"; took: those it adopted at its start -> the commit they run;

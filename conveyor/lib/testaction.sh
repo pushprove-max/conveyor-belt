@@ -252,7 +252,7 @@ tcfree() { # <the record's cards json>
 # that id is or was, and no issue (#N) that is open and has not landed (waitsof(), as upnext() reads it), and that has none of
 # its labels set to never build (rules.never). A review follow-up's body names its parent card so, so it waits for its parent to land. Any size: no split
 # check reads it (card()). It is picked as its own id the first time, under a new id after that. Its picked line has
-# the action's title and its test file (testFile), which the Board shows it by. Prints "<card> 0 false", `wait` when
+# the action's title and its test file (testFile), which the Board shows it by. Beyond the cap (BEYOND, REDFILES: pick.sh redtests()), only a card about a file of REDFILES, its line saying why (beyond). Prints "<card> 0 false", `wait` when
 # the machine holds it back, nothing when no card waits. A card whose lines left the card records (`retry <card id>`,
 # lib/issues.sh, or a stop of the loop, lib/run.sh) is given back: its entry is picked again, the card it was added
 # to was, so the new card starts from its kept work (resumeplan(), lib/card.sh). First, a card blocked the first time
@@ -305,11 +305,11 @@ testpick() { # <the open issues json>
     card=$(jq -r --argjson i "$i" '.[$i] | select(.card == null) | .id // empty' <<<"$rec")
     if [ -z "$card" ] || [ -n "$(stdb ask card "$card")" ] || stdb ask lines retried | grep -F "\"card\":\"$card\"" >/dev/null; then card=$(tcfree "$rec"); fi
     jq -c --argjson i "$i" --arg c "$card" '{cards: (.[$i] |= ((if .card == null then . else .was = (.was // []) + [.card] end) | .card = $c))}' <<<"$rec" > "$TACARDS.new" && mv -f "$TACARDS.new" "$TACARDS" \
-      && l=$(line "$card" 0 picked ok "$(jq -c --argjson i "$i" '.[$i] | {title} + (if .file != null then {testFile: .file} else {noIssue: (.label // "Card")} end)' <<<"$rec")") && append "$l" \
+      && l=$(line "$card" 0 picked ok "$(jq -c --argjson i "$i" --arg b "${BEYOND:-}" '.[$i] | {title} + (if .file != null then {testFile: .file} else {noIssue: (.label // "Card")} end) + if $b == "" then {} else {beyond: $b} end' <<<"$rec")") && append "$l" \
       || { rm -f "$TACARDS.new"; exec {lock}>&-; echo "conveyor: the Tests page's card about $(jq -r --argjson i "$i" '.[$i] | .file // .title' <<<"$rec") could not be picked" >&2; return 1; }
     exec {lock}>&-; echo "$card 0 false"; return 0
   # The record and the lines go to jq on its input: Linux refuses an argument over 128 KiB.
-  done < <(printf '%s\n%s\n' "$rec" "$have" | jq -Rrn --argjson h "$h" --argjson only "${ONLY:-null}" --argjson fuoff "${fuoff:-false}" --argjson never "${never:-[]}" --argjson open "${open:-[]}" --argjson parts "$parts" \
+  done < <(printf '%s\n%s\n' "$rec" "$have" | jq -Rrn --argjson h "$h" --argjson only "${ONLY:-null}" --argjson rf "${REDFILES:-null}" --argjson fuoff "${fuoff:-false}" --argjson never "${never:-[]}" --argjson open "${open:-[]}" --argjson parts "$parts" \
     --slurpfile cards <(printf '%s' "$cards") --arg fu "$FOLLOWUP" --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" \
     "$DEPS"'input | fromjson as $r | [inputs | fromjson? | objects] as $l
     | ($l | map(.card | strings) | INDEX(.)) as $have | ($l | map(select('"$TADONE"') | .card) | INDEX(.)) as $landed
@@ -319,7 +319,7 @@ testpick() { # <the open issues json>
       (if $only == null then null else $only | grow end) as $only
     | def cardlanded($d): ((first($r[] | . as $e | select($d | IN($e.id, $e.card, ($e.was // [])[]))) | .card) // $d) as $k | $landed[$k] != null;
     $r | to_entries[] | select((.value.held | not) and (.value.card == null or ($h == 1 and $have[.value.card] == null))
-      and ($only == null or (.value.parent | IN($only[]))) and (($fuoff | not) or ((.value.labels // []) | index($fu) == null))
+      and ($only == null or (.value.parent | IN($only[]))) and ($rf == null or (.value.file | IN($rf[]))) and (($fuoff | not) or ((.value.labels // []) | index($fu) == null))
       and ((.value.labels // []) | any(IN($never[])) | not)
       and (.value | [ups($fc; needs)[] | select(IN($open[]) and (IN($idone[]) | not))] == [])
       and (.value | [farneeds[] as $x | select(.far[$x].open != false) | $x] == [])
