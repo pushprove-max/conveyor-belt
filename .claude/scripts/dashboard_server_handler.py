@@ -84,7 +84,9 @@ class Handler(Pages, http.server.SimpleHTTPRequestHandler):
             HTTP code and text of the answer, None)."""
             argv = ['bash', '-c', script] if target is None else ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', target, 'bash -c ' + shlex.quote(script)]
             try:
-                run = run_script(argv, CONTROL_TIMEOUT.get(action, 30))
+                # (run_script and control_timeout come from other parts, run in this namespace: globals() names them
+                # where a linter reads this file alone.)
+                run = globals()['run_script'](argv, globals()['control_timeout'](action))
             except subprocess.TimeoutExpired:
                 return (504, '%s did not finish in time; the change may or may not have been made' % host), None
             except OSError as e:

@@ -255,6 +255,16 @@ CONTROL_TIMEOUT = {'approve': 120, 'decline': 120, 'retry': 60, 'unblock': 60, '
                    'replay': 60,  # the judge replay's estimate reads every review line of the records
                    'bench': 600,  # bench diff makes one model call a flipped task; its stop waits up to 90 s (another Stop, then the run's end)
                    'card': 360}  # Pick for me (card <issue> pick) waits up to conveyor.sh's PICK_TIMEOUT, 300 s, for the judge
+# A control waits first for the card records lock, and the loop's idle merge holds that lock while `gh pr merge` runs,
+# up to gh_write()'s `timeout 60 gh` (conveyor/lib/issues.sh). Each action gets that wait on top of its own time: without
+# it, a slow merge made a hold, a release, Merge PR or Land as a 504 before the change was saved. Raise it with that timeout.
+LOCK_WAIT = 70
+
+
+def control_timeout(action):
+    return CONTROL_TIMEOUT.get(action, 30) + LOCK_WAIT
+
+
 DEPENDS_MAX = 20  # the issues one `control depends` names
 # The condition the owner gives with their yes, or why they say no: one line of plain text.
 MAX_SAID = 300
