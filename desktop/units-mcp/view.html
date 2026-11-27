@@ -1,0 +1,244 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- /units in Claude Desktop's Chat tab: the view server.py names ui://conveyor/units. It draws the units tool's
+     structured content (each record's snapshot, as `conveyor.sh snapshot` gives it) and reads it again every 30 s while
+     it shows, and on Read again. It only reads. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conveyor /units</title>
+<style>
+/* Tokens copied from the Board (.claude/dashboard/app.css), as the approved mockup has them. */
+:root {
+  color-scheme: light;
+  --fs-xs: 0.75rem; --fs-sm: 0.8125rem; --fs-md: 0.9375rem; --fs-lg: 1.125rem;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --radius: 12px; --radius-sm: 6px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --bg: #f4f5f8; --surface: #ffffff; --surface-2: #eceef3; --border: #c9ced8;
+  --text: #14171f; --muted: #4a5262; --accent: #2a4fcf; --on-accent: #ffffff;
+  --ok: #0e6537; --ok-bg: #e0f3e8; --warn: #804400; --warn-bg: #fcefd6; --bad: #a8201a; --bad-bg: #fde6e4;
+  --info: #2a4fcf; --info-bg: #e5ebfd; --quiet: #4a5262; --quiet-bg: #eceef3;
+  --shadow: 0 1px 2px rgba(20, 23, 31, .06), 0 6px 20px rgba(20, 23, 31, .06);
+  --p1: #c2410c; --series-2: #eb6834;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #0c0f15; --surface: #151922; --surface-2: #1e2430; --border: #343d4f;
+    --text: #e9ecf2; --muted: #aab2c2; --accent: #93abff; --on-accent: #0c0f15;
+    --ok: #74dfa3; --ok-bg: #12301f; --warn: #f3c46c; --warn-bg: #33270d; --bad: #ff9d95; --bad-bg: #3a1614;
+    --info: #93abff; --info-bg: #1a2547; --quiet: #aab2c2; --quiet-bg: #1e2430;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .35);
+    --p1: #ffb08a; --series-2: #d95926;
+  }
+}
+* { box-sizing: border-box; margin: 0; }
+html { font-size: 16px; line-height: 1.45; }
+body { font-family: var(--font); color: var(--text); background: transparent; }
+body.is-panel { background: var(--bg); padding: var(--sp-4); }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.brand { display: flex; align-items: baseline; gap: var(--sp-2); font-size: var(--fs-lg); font-weight: 750; letter-spacing: .04em; }
+.brand-label { padding: 1px var(--sp-2); border-radius: var(--radius-sm); background: var(--accent); color: var(--on-accent); font-family: var(--mono); font-size: var(--fs-sm); letter-spacing: 0; }
+.brand-sub { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); letter-spacing: 0; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: var(--sp-1); }
+.chip { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 2px var(--sp-2); border-radius: 999px; font-size: var(--fs-xs); font-weight: 650; white-space: nowrap; }
+.chip-ok { background: var(--ok-bg); color: var(--ok); }
+.chip-warn { background: var(--warn-bg); color: var(--warn); }
+.chip-bad { background: var(--bad-bg); color: var(--bad); }
+.chip-info { background: var(--info-bg); color: var(--info); }
+.chip-quiet { background: var(--quiet-bg); color: var(--quiet); }
+.btn { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 0 var(--sp-4); font-size: var(--fs-sm); font-weight: 600;
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.stats { display: flex; flex-wrap: wrap; align-items: stretch; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--sp-2) 0; row-gap: var(--sp-2); }
+.stat { display: flex; flex: 1 1 auto; flex-direction: column; justify-content: center; padding: 2px var(--sp-3); line-height: 1.2; }
+.stat + .stat { border-left: 1px solid var(--border); }
+.stat-fig { font-size: var(--fs-md); font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-fig.is-you { color: var(--p1); }
+.stat-label { font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.cost { color: var(--series-2); font-weight: 700; font-variant-numeric: tabular-nums; }
+.ucard { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.ucard-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.ucard-head .chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-left: auto; }
+.ucard-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.group-title { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.foot { font-size: var(--fs-sm); color: var(--muted); }
+.foot.is-bad { color: var(--bad); }
+/* Rows in the Board's finding layout (panels/declined.js findingEl). */
+.rows { display: grid; gap: var(--sp-2); list-style: none; padding: 0; }
+.row { min-width: 0; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.row.is-new { border-color: var(--warn); }
+.row.is-foreman { border-color: var(--info); }
+.issue { font-family: var(--mono); font-size: var(--fs-sm); font-weight: 700; }
+.title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.finding-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.finding-text { margin: var(--sp-1) 0 0; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-sm); }
+.finding-claim { font-weight: 650; }
+.why-code { padding: 0 3px; border-radius: 3px; background: var(--surface-2); font-family: var(--mono); font-size: var(--fs-sm);
+  font-style: italic; font-weight: 500; color: var(--accent); }
+.finding-at { margin: 2px 0 0; color: var(--muted); font-family: var(--mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<div id="units"></div>
+<script>
+(function () {
+  'use strict';
+  // data: the last good read (the units tool's structured content); failed: why the latest read failed, '' when it did not.
+  // timer: the 30 s refresh; closed: the host tore the view down.
+  const S = { data: null, failed: '', mode: 'inline', next: 1, pending: new Map(), timer: null, closed: false };
+  const REFRESH_MS = 30000, INLINE_ROWS = 5;
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const list = (v) => (Array.isArray(v) ? v.filter((x) => x && typeof x === 'object') : []);
+  const clock = (t) => { const d = new Date(t); return `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'AM' : 'PM'}`; };
+  const ago = (t) => {
+    const s = Math.max(0, (Date.parse(S.data.readAt) - Date.parse(t)) / 1000);
+    return Number.isFinite(s) ? (s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : `${Math.max(1, Math.floor(s / 60))}m`) : '';
+  };
+
+  // ---- the host (MCP Apps, JSON-RPC over postMessage) ----
+  function rpc(method, params) {
+    const id = S.next++;
+    return new Promise((resolve, reject) => {
+      S.pending.set(id, { resolve, reject });
+      window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+    });
+  }
+  const notify = (method, params) => window.parent.postMessage({ jsonrpc: '2.0', method, params }, '*');
+  window.addEventListener('message', (e) => {
+    const m = e.data;
+    if (!m || m.jsonrpc !== '2.0') return;
+    const p = m.method === undefined ? S.pending.get(m.id) : null;
+    if (p) {
+      S.pending.delete(m.id);
+      if (m.error) p.reject(new Error(m.error.message || 'the host refused')); else p.resolve(m.result);
+    } else if (m.method === 'ui/notifications/tool-result') take(m.params);
+    else if (m.method === 'ui/notifications/host-context-changed' && m.params && m.params.displayMode) { S.mode = m.params.displayMode; draw(); }
+    else if (m.method === 'ui/resource-teardown' && m.id !== undefined) {
+      // The host closes the view and waits for this answer: no read starts after it.
+      clearInterval(S.timer);
+      S.closed = true;
+      window.parent.postMessage({ jsonrpc: '2.0', id: m.id, result: {} }, '*');
+    }
+  });
+
+  // A read that gives no snapshot keeps the last good data, and says why in the foot line.
+  function take(result) {
+    const c = result && result.structuredContent;
+    if (!result || result.isError || !c || !list(c.records).some((r) => r.snapshot)) {
+      S.failed = (c && c.note) || (result && result.isError && result.content && result.content[0] && result.content[0].text) || 'the read gave no snapshot';
+    } else { S.data = c; S.failed = ''; }
+    draw();
+  }
+  const readAgain = () => rpc('tools/call', { name: 'units', arguments: {} }).then(take, (err) => { S.failed = err.message; draw(); });
+  const openBoard = () => rpc('ui/request-display-mode', { mode: 'fullscreen' }).then((r) => { S.mode = (r && r.mode) || S.mode; draw(); }, () => {});
+
+  // ---- what the snapshots say, as /units counts it (hooks/sources.ts parseRecord, boardFrom) ----
+  function board(c) {
+    const recs = list(c.records).filter((r) => r.snapshot);
+    const all = (pick) => recs.flatMap((r) => list(pick(r.snapshot)).map((x) => ({ ...x, repo: r.repo })));
+    const blocked = all((s) => s.needsYou.blocked);
+    const theForemans = (x) => x.foreman && x.foreman.note && x.foreman.ask !== true;
+    const at = (x) => Date.parse(x.since) || 0;
+    const needs = [...all((s) => s.needsYou.waiting).map((x) => ({ ...x, yes: true })), ...blocked.filter((x) => !theForemans(x))]
+      .sort((a, b) => Number(!!b.yes) - Number(!!a.yes) || at(a) - at(b));
+    const belt = all((s) => s.belt), landing = belt.filter((x) => x.offCap === true || x.step === 'push' || x.step === 'issue').length;
+    const caps = recs.map((r) => num(r.snapshot.health && r.snapshot.health.builderCap)).filter((n) => n !== null);
+    const todays = recs.map((r) => num(r.snapshot.cost.today));
+    const left = recs.reduce((n, r) => n + (num(r.snapshot.cost.todayLeftOut) || 0), 0), est = recs.some((r) => num(r.snapshot.cost.todayEstimate) > 0);
+    // A project whose snapshot was not read leaves the day partial (server.py day_of), never a smaller total.
+    const unread = list(c.records).length > recs.length;
+    const today = unread || todays.some((t) => t === null) ? null : todays.reduce((n, t) => n + t, 0);
+    return {
+      recs, needs, belt, landing, foremanHas: blocked.filter(theForemans),
+      onBelt: `${belt.length - landing}${caps.length ? ` of ${caps.reduce((n, k) => n + k, 0)}` : ''}`,
+      ready: all((s) => s.queue.next), waiting: all((s) => s.queue.waiting).filter((x) => x.forced !== true && Array.isArray(x.waitsFor) && x.waitsFor.length),
+      spend: today === null ? 'partial' : `${est ? '~' : ''}$${today.toFixed(2)}${left ? '+' : ''}`,
+      landed: recs.reduce((n, r) => n + Math.max(num(r.snapshot.landedCount) || 0, list(r.snapshot.landed).length), 0),
+    };
+  }
+
+  // ---- drawing ----
+  const stat = (fig, label, cls) => `<div class="stat"><span class="stat-fig${cls ? ` ${cls}` : ''}">${esc(fig)}</span><span class="stat-label">${label}</span></div>`;
+  // A reason's text with each `code` span set apart (.why-code) and drawn without its backticks, as the Board's finding
+  // layout draws it (parts/app-text.js CODE and unpad): a run of backticks, text, then a run of the same length.
+  const CODE = /(?<!`)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
+  const unpad = (c) => (/^ [\s\S]* $/.test(c) && /\S/.test(c) ? c.slice(1, -1) : c);
+  function findingText(s) {
+    let out = '', at = 0;
+    for (const m of s.matchAll(CODE)) {
+      out += `${esc(s.slice(at, m.index))}<code class="why-code">${esc(unpad(m[2]))}</code>`;
+      at = m.index + m[0].length;
+    }
+    return out + esc(s.slice(at));
+  }
+  const idOf = (x) => (x.issue ? `${x.repo === S.data.own ? '' : x.repo}#${x.issue}` : x.name || x.card || '');
+  function row(x) {
+    const ask = !x.yes && x.foreman && x.foreman.ask === true;
+    const chip = x.yes ? ['chip-warn', 'needs your yes'] : ask ? ['chip-warn', 'waits for your answer'] : ['chip-bad', 'blocked'];
+    const text = x.yes ? x.sentence || 'a visible change' : ask ? x.foreman.note : x.reason || 'no reason recorded';
+    const when = x.yes ? `waiting ${ago(x.since)}` : `blocked ${ago(x.since)} ago`;
+    return `<li class="row${x.yes ? ' is-new' : ''}"><div class="finding-head"><span class="issue">${esc(idOf(x))}</span><span class="title">${esc(x.title || '')}</span><span class="chip ${chip[0]}">${chip[1]}</span></div>`
+      + `<p class="finding-text finding-claim">${findingText(String(text))}</p><p class="finding-at">${esc(`${when} · ${x.card || ''}`)}</p></li>`;
+  }
+  function brief(x, chip, cls) {
+    return `<li class="row${cls || ''}"><div class="finding-head"><span class="issue">${esc(idOf(x))}</span><span class="title">${esc(x.title || '')}</span>${chip}</div></li>`;
+  }
+  function foremanChip(f) {
+    if (!Array.isArray(f)) return '';
+    const state = f[7] || '';
+    return f[4] === '1' && state === 'listening' ? '<span class="chip chip-ok">Foreman listening</span>'
+      : `<span class="chip chip-warn">Foreman: ${esc(state || 'no waiter')}</span>`;
+  }
+  function footLine(b) {
+    const parts = b ? [`Foreman has ${b.foremanHas.length}`, `${b.landing} landing, not counted`, `${b.landed} landed today`,
+      S.data.limitLine || 'weekly limit not read', ...(Array.isArray(S.data.notes) ? S.data.notes.filter((n) => typeof n === 'string') : [])] : [];
+    if (!S.data) parts.push(S.failed ? `no read has worked yet: ${S.failed}` : 'reading the Conveyor snapshot');
+    else if (S.failed) parts.push(`last good read ${clock(S.data.readAt)}`, `this read failed: ${S.failed}`);
+    else parts.push(`read ${clock(S.data.readAt)}`);
+    return `<p class="foot${S.failed ? ' is-bad' : ''}" id="foot">${esc(parts.join(' · '))}</p>`;
+  }
+  function panelParts(b) {
+    const group = (title, n, rows) => `<p class="group-title">${title} ${n}</p>${rows.length ? `<ul class="rows">${rows.join('')}</ul>` : ''}`;
+    return [
+      group('Foreman has it', b.foremanHas.length, b.foremanHas.map((x) => brief(x, `<span class="chip chip-info">${esc(x.foreman.note)}</span>`, ' is-foreman'))),
+      group('On the belt', b.belt.length, b.belt.map((x) => brief(x, `<span class="chip chip-info">${esc(x.step || 'step unknown')}</span>${num(x.usd) !== null ? `<span class="cost">$${x.usd.toFixed(2)}</span>` : ''}`))),
+      group('Queue', b.ready.length, b.ready.map((x) => brief(x, `<span class="chip chip-quiet">${esc(x.priority || '')}</span>`))),
+      group('Waiting', b.waiting.length, b.waiting.map((x) => brief(x, `<span class="chip chip-quiet">after ${esc(x.waitsFor.map((n) => `#${n}`).join(', '))}</span>`))),
+    ].join('');
+  }
+  function draw() {
+    const inline = S.mode === 'inline', b = S.data ? board(S.data) : null;
+    document.body.classList.toggle('is-panel', !inline);
+    const host = S.data && S.data.host ? S.data.host.name : '';
+    const shown = b ? (inline ? b.needs.slice(0, INLINE_ROWS) : b.needs) : [];
+    const more = b ? b.needs.length - shown.length : 0;
+    document.getElementById('units').innerHTML = `<div class="ucard">
+      <div class="ucard-head"><div class="brand"><span class="brand-label">/units</span><span>CONVEYOR</span>${host ? `<span class="brand-sub"><span class="dot"></span>${esc(host)}</span>` : ''}</div>
+        <div class="chips">${S.data ? foremanChip(S.data.foreman) : ''}</div></div>
+      ${b ? `<div class="stats" aria-label="The count band">${stat(b.onBelt, 'On belt')}${stat(b.ready.length, 'Ready')}${stat(b.waiting.length, 'Waiting')}${stat(b.needs.length, 'Needs you', 'is-you')}${stat(b.spend, 'Day spend', 'cost')}</div>
+      ${shown.length ? `<ul class="rows" id="needs">${shown.map(row).join('')}</ul>` : '<p class="foot">Needs you: nothing</p>'}
+      ${more > 0 ? `<p class="foot" id="more">and ${more} more</p>` : ''}
+      ${inline ? '' : panelParts(b)}` : ''}
+      ${footLine(b)}
+      <div class="ucard-actions"><button class="btn btn-primary" type="button" id="board">Open the board</button><button class="btn" type="button" id="again">Read again</button></div>
+    </div>`;
+    document.getElementById('board').addEventListener('click', openBoard);
+    document.getElementById('again').addEventListener('click', readAgain);
+    // Inline there is no inner scroll: the host sizes the frame to the card.
+    if (inline) notify('ui/notifications/size-changed', { height: document.documentElement.scrollHeight });
+  }
+
+  draw();
+  rpc('ui/initialize', { protocolVersion: '2026-01-26', appInfo: { name: 'conveyor-units', version: '1' }, appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] } })
+    .then((r) => { S.mode = (r && r.hostContext && r.hostContext.displayMode) || S.mode; notify('ui/notifications/initialized', {}); draw(); }, () => {});
+  S.timer = setInterval(() => { if (!S.closed && document.visibilityState !== 'hidden') readAgain(); }, REFRESH_MS);
+}());
+</script>
+</body>
+</html>
