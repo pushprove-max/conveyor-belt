@@ -407,9 +407,6 @@
   "conveyor/tests/budgetrun.test.sh": [
     "conveyor/tests/snapexec.test.sh"
   ],
-  "conveyor/tests/budgetwait.test.sh": [
-    "conveyor/tests/snapexec.test.sh"
-  ],
   "conveyor/tests/bugproof.test.sh": [
     "conveyor/tests/snapexec.test.sh",
     "conveyor/tests/speedproof.test.sh",

@@ -102,21 +102,6 @@ t_samefileowedbatch() {
     || fail "settle of #8, owed, its batch failed (batch: fail 1): it did not wait for room before its fix: $(cat "$T/$CASE/run.out")"
 }
 
-# Bug it catches (E1 of a follow-up of issue 1538): a ready card that waits on another card at its claim, its slot lent
-# to a held card (capfree() marks it "owed"), ran its product checks at once, with batches on. It waits for room first:
-# the check notes whether the mark still stood when it ran.
-t_samefileowedcheck() {
-  setup '[]'; sfclaim; sfcard 7 'echo seven >> a.txt'; sfcard 8 'echo eight >> a.txt'
-  printf '%s\n' "[ -e '$CARDS/c8-8.capheld' ] && echo early >> '$STUB/checked' || echo after >> '$STUB/checked'" > "$STUB/check"
-  tune --arg c "$STUB/check" '.landBatch = 2 | .checks += [$c]'
-  echo '{"issue":8,"msg":"title 8 (#8)","extra":{"waitSec":0}}' > "$CARDS/c8-8.ready"; echo owed > "$CARDS/c8-8.capheld"
-  [ -z "$(cl 7)" ] || fail "#7 waited with no other claim"
-  sfheld 8
-  # Tested, #8 goes past #7, not ready, and settle() returns 0 (as in lintwait.test.sh's t_lintwaitskip).
-  [ "$(cat "$STUB/checked" 2>/dev/null)" = after ] && grep -qx "$SFHELD" "$T/$CASE/run.out" && [ "$(sfout)" = "settle: 0" ] \
-    || fail "settle of #8, owed, ready and waiting on #7 (landBatch 2): its checks did not run once, after it waited for room ($(cat "$STUB/checked" 2>/dev/null)): $(cat "$T/$CASE/run.out")"
-}
-
 # Bug: two cards in flight that change the same file both went on to land, and the second met "rebase onto main
 # conflicts". The second, #8, waits at its landing claim while #7 holds a.txt, its live record naming #7 and the file,
 # and says it waits once however many looks the wait takes. Once #7 has landed (during the second look) #8's patch no
@@ -143,7 +128,8 @@ t_samefile() {
 # claim() runs at each turn of a wait (settle()), and each jq it starts
 # is paid again on every turn. #8 (its change fits main) waits on #7, which holds a.txt. On main before this fix one
 # such turn started 9 jq: readysince() read each card's <worktree>.ready with a jq of its own, together() ran a jq to
-# write an empty list, and the claim was written by a jq. Now 5, with the same wait and the same claim written.
+# write an empty list, and the claim was written by a jq. Now 5, with the same wait and the same claim written: one
+# not held names the card it waits on (on, read by orderfix()), written with no jq too (claimline()).
 t_samecalls() {
   setup '[]'; sfclaim; sfcard 7 'echo seven >> a.txt'; sfcard 8 'echo eight >> a.txt'
   [ -z "$(cl 7)" ] || fail "#7 waited with no other claim"
@@ -151,7 +137,7 @@ t_samecalls() {
   jq() { echo jq >> "$T/$CASE/jq"; command jq "$@"; } # each jq claim() starts, counted
   : > "$T/$CASE/jq"; w=$(cl 8); unset -f jq
   [ "$w" = '{"on":"c7-7","paths":["a.txt"]}' ] || fail "#8 did not wait on #7 at the next turn of its wait: $w"
-  [ "$(cat "$CARDS/c8-8.claim")" = "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":false,\"gave\":0,\"passed\":false}" ] \
+  [ "$(cat "$CARDS/c8-8.claim")" = "{\"pid\":$$,\"paths\":[\"a.txt\"],\"held\":false,\"gave\":0,\"passed\":false,\"on\":\"c7-7\"}" ] \
     || fail "the claim #8 wrote at that turn changed: $(cat "$CARDS/c8-8.claim")"
 }
 
@@ -297,6 +283,69 @@ t_samelate() {
   [ "$(sfout)" = "settle: 2" ] && ! grep -q 'waits on card' "$T/$CASE/run.out" || fail "#8 was not brought onto main to be reviewed again: $(cat "$T/$CASE/run.out")"
   st 'select(.issue == 8 and .step == "fix") | .reason' | grep -q '^main moved since the card' && [ "$(tr '\n' ' ' < "$CARDS/c8-8/a.txt")" = "one seven eight " ] \
     || fail "no session brought #8 onto main: $(st 'select(.issue == 8)' | tr '\n' ' ')"
+}
+
+# The stand-ins of cardtest() (lib/cardland.sh) for the cases below, in fx_in's shell: no gate, check or batch, and the
+# card's own tests note the commit they ran on in $STUB/tested.
+sfteststubs() {
+  lintgate() { return 0; }; contractgate() { return 0; }; pushgate() { return 0; }; checks() { :; }; treecheck() { :; }
+  gather() { return 0; }; slowtests() { :; }; tests() { git -C "$1" rev-parse HEAD >> "$STUB/tested"; return 0; }
+}
+# Bug it catches (#1698 D1): with batches on, a ready card that waited on another card's files ran its tests while it
+# waited, on main as it was then; once that card landed, main had moved and it ran them again. #8 (ready, a.txt)
+# waits on #7, which holds a.txt, through three looks, the real settle() and claim(); #7 lands at the second look. Then
+# #8's Test step (the real cardtest(), as cardlanding() calls it after settle()) runs its tests once, on main after #7.
+t_samewaitonce() {
+  setup '[]'; sfclaim; sfcard 7 'echo seven >> a.txt'; sfcard 8 'echo eight >> a.txt'
+  tune '.landBatch = 2'
+  echo '{"issue":8,"msg":"title 8 (#8)","extra":{"waitSec":0}}' > "$CARDS/c8-8.ready"
+  [ -z "$(cl 7)" ] || fail "#7 waited with no other claim"
+  atlook() { [ "$SLEPT" != 2 ] || { cp "$STUB/tested" "$STUB/inwait" 2>/dev/null; gone 7 'echo other > other.txt'; }; }
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'cd "$R" || exit 9; c=c8-8 n=8 wt=$CARDS/c8-8 issue="{}" sprompt="" br="" parsecheck="" tmain="" away="" apart="" me=$$ cmsg=x mates=() mainsec=0 waitsec=0 behind="[]" caught="" SLEPT=0
+    sleep() { sfsleep "$@"; }; sfteststubs
+    settle c8-8 8 "$wt" "Build the issue." land "$(issue 8 2026-01-01)"; echo "settle: $?"
+    go=end; cardtest; echo "cardtest: go=$go rc=$rc"'
+  grep -qx 'conveyor: card c8-8 waits on card c7-7, which changes the same files: a.txt' "$T/$CASE/run.out" \
+    || fail "#8 (ready, a.txt) did not wait on #7, which holds a.txt: $(cat "$T/$CASE/run.out")"
+  [ ! -e "$STUB/inwait" ] || fail "#8 ran its tests while it waited on #7, before #7 landed (on $(cat "$STUB/inwait")): $(cat "$T/$CASE/run.out")"
+  grep -qx 'settle: 0' "$T/$CASE/run.out" && grep -qx 'cardtest: go= rc=0' "$T/$CASE/run.out" \
+    || fail "#8 did not go on to its Test step once #7 landed: $(cat "$T/$CASE/run.out")"
+  # Main's tip is #7's landing: a #8 that tested in its wait went past #7, untested, and #7 never landed.
+  [ "$(git -C "$R" log -1 --format=%s main)" = 'title 7 (#7)' ] && [ "$(cat "$STUB/tested" 2>/dev/null)" = "$(git -C "$R" rev-parse main)" ] \
+    || fail "#8's Test step did not run its tests once, on main after #7 landed (main: $(git -C "$R" log -1 --format='%h %s' main)): $(paste -sd, "$STUB/tested" 2>/dev/null || echo 'no run')"
+}
+
+# Bug it catches (#1698 D2): the order of cards that wait on the same files was decided again at each claim, so a card
+# that went first by the rules (one in the control record's order) went past a card that had waited longer. #8 and #9
+# wait on #7 for a.txt (#8 picked first). #7's Test step (the real cardtest()) fixes the order: #8's claim names #7,
+# #9's names #8. #9 then goes into the control record's order, which would let it go past #7 and #8; it waits on #8
+# still, and once #7 has landed #8 takes a.txt, #9 waiting on it. #7's tests stand-in notes the claims' after as its
+# run starts: an order fixed only after the run would leave #8 and #9 free to go past each other while #7 tests.
+# #9's claim has 2,000 more paths (over 160 KiB as JSON): orderfix() given the claims as one jq argument failed to
+# start jq on Linux (over 128 KiB), and #7 tested with no order saved.
+t_sameorderfix() {
+  setup '[]'; sfclaim; sfcard 7 'echo seven >> a.txt'; sfcard 8 'echo eight >> a.txt'; sfcard 9 'echo nine >> a.txt'
+  [ -z "$(cl 7)" ] || fail "#7 waited with no other claim"
+  w=$(cl 8) && [ "$(jq -r .on <<<"$w")" = c7-7 ] && w=$(cl 9) && [ "$(jq -r .on <<<"$w")" = c7-7 ] || fail "#8 or #9 did not wait on #7 for a.txt: $w"
+  jq -c '.paths += [range(2000) | "big/\(. + 100000)" + ("x" * 70)]' "$CARDS/c9-9.claim" > "$CARDS/c9-9.claim.new" && mv "$CARDS/c9-9.claim.new" "$CARDS/c9-9.claim" \
+    && [ "$(wc -c < "$CARDS/c9-9.claim")" -gt 131072 ] || fail "#9's claim was not made over 128 KiB"
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'cd "$R" || exit 9; c=c7-7 n=7 wt=$CARDS/c7-7 issue="{}" sprompt="" br="" parsecheck="" tmain="" away="" apart="" me=$$ cmsg=x mates=() mainsec=0
+    sfteststubs; tests() { jq -r .after "$CARDS/c8-8.claim" "$CARDS/c9-9.claim" | paste -sd, > "$STUB/afterattest"; }
+    go=end; cardtest; echo "cardtest: go=$go rc=$rc"'
+  [ "$(cat "$STUB/afterattest" 2>/dev/null)" = c7-7,c8-8 ] \
+    || fail "#7's tests started before its Test step fixed the order #7, #8, #9 in the claims (the after of #8 and #9 then: $(cat "$STUB/afterattest" 2>/dev/null || echo 'no run')): $(cat "$T/$CASE/run.out")"
+  [ "$(jq -r .after "$CARDS/c8-8.claim")" = c7-7 ] && [ "$(jq -r .after "$CARDS/c9-9.claim")" = c8-8 ] \
+    || fail "#7's Test step did not keep the order #7, #8, #9 in the claims: #8 $(jq -c '{on, after}' "$CARDS/c8-8.claim"), #9 $(jq -c '{on, after}' "$CARDS/c9-9.claim"): $(cat "$T/$CASE/run.out")"
+  grep -qx 'conveyor: card c9-9 lands after card c8-8: the order of the cards that wait on card c7-7 is fixed as it starts its Test step' "$T/$CASE/run.out" \
+    || fail "the Test step of #7 did not say the order it fixed: $(cat "$T/$CASE/run.out")"
+  order '[9]'
+  w=$(cl 9) && [ "$(jq -c '[.on, .after]' <<<"$w")" = '["c8-8","c8-8"]' ] || fail "#9, in the order list, did not wait its turn after #8: $w"
+  w=$(cl 8) && [ "$(jq -r .on <<<"$w")" = c7-7 ] || fail "#8 did not wait on #7 while #7 holds a.txt: $w"
+  gone 7 'echo other > other.txt'
+  w=$(cl 9) && [ "$(jq -r .on <<<"$w")" = c8-8 ] || fail "#9 took its turn before #8 once #7 landed: $w"
+  w=$(cl 8) && [ -z "$w" ] && [ "$(jq .held "$CARDS/c8-8.claim")" = true ] || fail "#8 did not take a.txt once #7 landed, #9 waiting on it: $w"
 }
 
 # Bug: a card that blocked while it held a file, and was given back by `retry`, kept every card that shares the file

@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-# The persisted-contract check before a card lands: at the landing gate (contractgate()), after the lint gate, and for a
-# card that waits to land in a batch (contractwait()), after its lint, and on each commit that lands (contractrange(),
-# from landone() in lib/claim.sh). A project's pre-push hook can run this check
+# The persisted-contract check before a card lands: at the landing gate (contractgate()), after the lint gate, and on
+# each commit that lands (contractrange(), from landone() in lib/claim.sh). A project's pre-push hook can run this check
 # (adversarial-review-gate.sh --contract-range <base> <tip>), so a card that fails it could land and then main could
 # not push. Here it runs on the card's own change before that change lands. Then the push checks
-# main's pre-push hook selects for the card's change: at the landing gate (pushgate()), and for a card that waits to
-# land in a batch (pushgatewait()).
+# main's pre-push hook selects for the card's change: at the landing gate (pushgate()), and for a card whose change a
+# session changed only in its documentation (pushgatewait(), from docstested() in lib/claim.sh).
 
 CONTRACTFIX=$'# Persisted-contract check: fix it and nothing else\nThe persisted-contract check (the one the project\'s pre-push hook runs) refused this card\'s change. A change to a persisted-contract writer needs one changed test that names both that writer and a changed reader. Add or change such a test. Do not change the check. Its message:'
 
@@ -164,27 +163,14 @@ pushgatelive() { # <worktree> <action>
 pushgate() { # <card> <issue> <worktree>
   pushgaterun "$1" "$3" || { block "$1" "$2" "$3" "$PUSH_WHY"; return 1; }
 }
-# For a card that waits to land (settle(), lib/claim.sh), with batches on, after contractwait(): a batch lands a card
-# with no turn at its landing gate. 0: its checks and tests run. 1: the push checks failed or could not run: its
-# <worktree>.ready is removed, so no batch takes it (gather()), and at its turn its landing gate (pushgate()) runs them
-# again and blocks it on a failure.
+# For a card whose test pass is kept on a change a session changed only in its documentation (docstested(),
+# lib/claim.sh): a batch lands a card with no turn at its landing gate. 0: it is marked tested. 1: the push checks
+# failed or could not run: its <worktree>.ready is removed, so no batch takes it (gather()), and at its turn its
+# landing gate (pushgate()) runs them again and blocks it on a failure.
 pushgatewait() { # <card> <worktree>
   pushgaterun "$1" "$2" && return 0
   readyrm "$2"
   echo "conveyor: card $1: its push checks failed while it waits, or could not run: it runs no check or test, and its landing gate deals with it at its turn"
   printf '%s\n' "${PUSH_WHY:0:2000}"
-  return 1
-}
-
-# The check for a card that waits to land (settle(), lib/claim.sh), with batches on, after its lint (lintwait()). 0:
-# its checks and tests run. 1: a refusal, or a check that could not run: its <worktree>.ready is removed, so no batch
-# takes it (gather()) and this check does not run again while it waits; at its turn its landing gate (contractgate)
-# gives it its fix session, or blocks it. This check reads the card's change on its own HEAD: a batch puts it on the
-# commit of the card before it, so landone() (lib/claim.sh) checks each card again on the commit it lands.
-contractwait() { # <card> <worktree>
-  contractrun "$2" && return 0
-  readyrm "$2"
-  echo "conveyor: card $1: the persisted-contract check refused its change while it waits, or could not run: it runs no check or test, and its landing gate deals with it at its turn"
-  printf '%s\n' "${CONTRACT_OUT:0:2000}"
   return 1
 }

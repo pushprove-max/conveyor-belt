@@ -157,30 +157,8 @@ redclose() { jq -c '.reds[0].card = "cfix"' "$MAINRED" > "$MAINRED.new" && mv "$
 # with $T/$CASE/free; its own tests write a line to $T/$CASE/own.
 redsettlestubs() {
   claim() { [ -e "$T/$CASE/free" ] || echo "{\"on\":\"c8\",\"paths\":[\"a.txt\"]}"; }; stackto() { return 1; }; turnfree() { :; }; began() { :; }; capowed() { :; }
-  lintwait() { return 0; }; checks() { return 0; }; tests() { echo own >> "$T/$CASE/own"; return 0; }; record() { :; }; testrulespass() { :; }
+  checks() { return 0; }; tests() { echo own >> "$T/$CASE/own"; return 0; }; record() { :; }; testrulespass() { :; }
   testrec() { echo "{}"; }; firstrun() { echo "{}"; }; slowrec() { echo "{}"; }; slowtests() { :; }
-}
-
-# Bug it catches: a card waiting at its claim with its change reviewed (ready) and batches on runs its own tests there
-# (settle()), before its test step: they fail on main's own failure. With main red at its commit, it only waits on;
-# once the entry has closed (its fix card landed), it runs them (the claim then frees: its exit is the case's end). settle() runs
-# for real with its steps around the tests stubbed; its claim says it waits on card c8. The card here is at its land
-# step, not in mainredhold(): the next cases are the wait of the test step.
-t_mainredholdsettle() {
-  local first
-  redholdsetup
-  tune '.landBatch = 8'
-  # shellcheck disable=SC2016 # run by fx_in's eval
-  ( fx_in 'cd "$R"; LOOPFIX=1 LIVE=0.1 waitsec=0 mainsec=0 parsecheck="" behind="[]"; s=$(git rev-parse "refs/heads/$BRANCH")
-      mainred c1 "a.test: one" a.test "$s"; echo "{\"issue\":7}" > "$FXWT.ready"; redsettlestubs
-      claim() { [ ! -e "$T/$CASE/close" ] || [ -e "$T/$CASE/closed" ] || { redclose; : > "$T/$CASE/closed"; }; [ -e "$T/$CASE/own" ] || echo "{\"on\":\"c8\",\"paths\":[\"a.txt\"]}"; }
-      settle c7 7 "$FXWT" prompt land "{}"' ) & first=$!
-  wait_until "[ -e '$FXWT.idle' ] || [ -e '$T/$CASE/own' ]" 'cat "$T/$CASE/run.out"' || fail "the card's wait did not start: $(cat "$T/$CASE/run.out" 2>/dev/null)"
-  [ ! -e "$T/$CASE/own" ] || fail "a card waiting at its claim ran its tests while main was red at its commit"
-  : > "$T/$CASE/close"
-  wait_until "[ -e '$T/$CASE/own' ]" 'cat "$T/$CASE/run.out"' || fail "once the fix card landed the card waiting at its claim did not run its tests: $(cat "$T/$CASE/run.out" 2>/dev/null)"
-  wait "$first"
-  [ "$(wc -l < "$T/$CASE/own")" = 1 ] || fail "the card waiting at its claim did not run its tests once: $(cat "$T/$CASE/own")"
 }
 
 # Bug it catches (E10, E11): main moved past the red commit while the card waited at its claim for a card that changes the

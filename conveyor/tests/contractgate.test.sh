@@ -2,12 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 240
 # Engine cases: the persisted-contract check before a card lands (conveyor/lib/contract.sh): at the landing gate
-# (contractgate(), in cardtest()), for a card that waits to land in a batch (contractwait(), in settle()) and on each
-# commit that lands (landone(), lib/claim.sh). It runs
+# (contractgate(), in cardtest()) and on each commit that lands (landone(), lib/claim.sh). It runs
 # adversarial-review-gate.sh --contract-range on the card's change when main's pre-push hook runs that check, so a
 # change that hook refuses does not land. Then the push checks at the landing gate (pushgate(), after contractgate())
-# and for a card that waits to land in a batch (pushgatewait(), after contractwait()): main's pre-push hook, when it
-# names CONVEYOR_PUSH_GATE, run on the card's change alone, on a test slot.
+# and for a card whose change a session changed only in its documentation (pushgatewait(), in docstested()): main's
+# pre-push hook, when it names CONVEYOR_PUSH_GATE, run on the card's change alone, on a test slot.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -99,35 +98,6 @@ t_contractpinned() {
   push=$(git -C "$FXWT" push origin HEAD:main 2>&1) && fail "the push of the change ($GADGET; $COVER) was not refused: $push"
   grep -qx 'BLOCKED: the pinned install checked this' <<<"$push" \
     || fail "the push of the change ($GADGET; $COVER) did not run the gate's checker, the pinned install's: $push"
-}
-
-# Bug it catches: with batches on, a card that waits to land runs its checks and tests and is marked tested, so a batch
-# lands it with no landing gate, and the check never runs on its change. Card #8 (its change: GADGET) waits on #7, which
-# changes the same file, in settle() as card() calls it. It runs no test, and its <worktree>.ready is gone, so no batch
-# takes it. Each look of the wait sleeps: here sleep() counts the looks and the third ends the call (exit 8).
-t_contractwait() {
-  contractmain '[]'
-  echo 'echo test >> "$STUB/tested"' >> "$STUB/test-cmd"
-  tune '.landBatch = 2'
-  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
-  for n in 7 8; do
-    git -C "$R" worktree add -q --detach "$CARDS/c$n-$n" main || fail "the worktree of card $n"
-    landed "$n" | jq -c --arg c "c$n-$n" '.card = $c | .step = "picked"' >> "$ST/cards.jsonl"
-  done
-  echo '// seven' >> "$CARDS/c7-7/src/repositories/widget-repository.ts"; (cd "$CARDS/c8-8" && eval "$GADGET")
-  git -C "$CARDS/c7-7" add -A && git -C "$CARDS/c8-8" add -A || fail "the cards' changes"
-  echo '{"issue":8,"msg":"title 8 (#8)","extra":{"waitSec":0}}' > "$CARDS/c8-8.ready"
-  local looks='sleep() { [ "${FUNCNAME[1]}" = settle ] || { command sleep "$@"; return; }; LOOKS=$((LOOKS + 1)); [ $LOOKS -lt 3 ] || exit 8; }' # sleep: a stand-in that counts the looks of settle() and runs no wait
-  fx_in 'cd "$R" || exit 9; caught="" waitsec=0 behind="[]" parsecheck="" LOOKS=0
-    [ -z "$(locked claim c7-7 "$CARDS/c7-7" $$)" ] || { echo "#7 did not hold the file"; exit 9; }
-    '"$looks"'
-    settle c8-8 8 "$CARDS/c8-8" "Build the issue." land "$(issue 8 2026-01-01)"; echo "settle: $?"'
-  [ "$RC" = 8 ] && grep -q 'conveyor: card c8-8 waits on card c7-7' "$T/$CASE/run.out" || fail "#8 did not wait on #7: exit $RC: $(cat "$T/$CASE/run.out")"
-  [ ! -e "$STUB/tested" ] && [ ! -e "$CARDS/c8-8.ready" ] \
-    || fail "the waiting card whose change the check refuses (change: $GADGET) ran its tests or is still ready, so a batch can land it: $(cat "$STUB/tested" "$CARDS/c8-8.ready" 2>&1)"
-  # The check's own BLOCKED line: a check that never ran on #8's change (a wrong path, an error) prints no such line.
-  grep -qx 'conveyor: card c8-8: the persisted-contract check refused its change while it waits, or could not run: it runs no check or test, and its landing gate deals with it at its turn' "$T/$CASE/run.out" \
-    && grep -qxF "$MSG" "$T/$CASE/run.out" || fail "settle() did not say why the card runs no test, with the check's message (change: $GADGET): $(cat "$T/$CASE/run.out")"
 }
 
 # Bug it catches: a batch lands card #8 on #7's commit, a range that #8's own checks never read, and the check reads
@@ -379,37 +349,6 @@ pushgatehook() { # <hook>
     && chmod +x "$R/.git/hooks/pre-push" || fail "main's pre-push hook"
 }
 
-# Bug it catches: with batches on, a card that waits to land ran its checks and tests and was marked tested with no
-# push check, so a batch landed it (gather(), landone()) and never ran the check on its change. Card #8 (web.ts, which
-# main's hook fails) waits on #7, which changes the same file, in settle() as card() calls it. It runs no test, and
-# its <worktree>.ready is gone, so no batch takes it; the run names the check that failed. Each look of the wait
-# sleeps: here sleep() counts the looks and the third ends the call (exit 8).
-t_pushgatewait() {
-  contractmain '[]' 0
-  pushgatehook "read -r _ l _ r; git diff --name-only \"\$r\" \"\$l\" | grep -qx web.ts || exit 0; echo 'push-checks: FAILED typecheck-web' >&2; exit 1"
-  echo 'echo test >> "$STUB/tested"' >> "$STUB/test-cmd"
-  tune '.landBatch = 2'
-  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
-  for n in 7 8; do
-    git -C "$R" worktree add -q --detach "$CARDS/c$n-$n" main || fail "the worktree of card $n"
-    landed "$n" | jq -c --arg c "c$n-$n" '.card = $c | .step = "picked"' >> "$ST/cards.jsonl"
-    echo "export const n: number = $n" > "$CARDS/c$n-$n/web.ts" && git -C "$CARDS/c$n-$n" add -A || fail "the change of card $n"
-  done
-  echo '{"issue":8,"msg":"title 8 (#8)","extra":{"waitSec":0}}' > "$CARDS/c8-8.ready"
-  local looks='sleep() { [ "${FUNCNAME[1]}" = settle ] || { command sleep "$@"; return; }; LOOKS=$((LOOKS + 1)); [ $LOOKS -lt 3 ] || exit 8; }' # sleep: a stand-in that counts the looks of settle() and runs no wait
-  # shellcheck disable=SC2016 # expanded in fx_in's shell
-  fx_in 'cd "$R" || exit 9; caught="" waitsec=0 behind="[]" parsecheck="" LOOKS=0
-    [ -z "$(locked claim c7-7 "$CARDS/c7-7" $$)" ] || { echo "#7 did not hold the file"; exit 9; }
-    '"$looks"'
-    settle c8-8 8 "$CARDS/c8-8" "Build the issue." land "$(issue 8 2026-01-01)"; echo "settle: $?"'
-  [ "$RC" = 8 ] && grep -q 'conveyor: card c8-8 waits on card c7-7' "$T/$CASE/run.out" || fail "#8 (web.ts) did not wait on #7 (web.ts): exit $RC: $(cat "$T/$CASE/run.out")"
-  [ ! -e "$STUB/tested" ] && [ ! -e "$CARDS/c8-8.ready" ] \
-    || fail "the waiting card whose change (web.ts) fails the push check typecheck-web ran its tests or is still ready, so a batch can land it: $(cat "$STUB/tested" "$CARDS/c8-8.ready" 2>&1)"
-  grep -qx 'conveyor: card c8-8: its push checks failed while it waits, or could not run: it runs no check or test, and its landing gate deals with it at its turn' "$T/$CASE/run.out" \
-    && grep -qx "push check: typecheck-web failed on the card's change (exit 1); nothing landed." "$T/$CASE/run.out" \
-    || fail "settle() did not say why the card (web.ts) runs no test, naming typecheck-web: $(cat "$T/$CASE/run.out")"
-}
-
 # Main ($R) with README.md, its hook failing the check docs-lint on a change that holds README.md while the file <o>
 # is there, and card c7 ($FXWT) on that main, its change code.txt and README.md, staged, its <worktree>.ready marked
 # tested on that change (tested()).
@@ -422,8 +361,8 @@ docscard() { # <o>
 }
 
 # Bug it catches: a session that brought a card's change onto main, changing only its documentation (README.md), kept
-# its test pass (tested() in settle()), so the card waited marked tested, ran no push check (settle() runs
-# pushgatewait() only on an untested card), and a batch took it on that mark (gather()) with a push check its new
+# its test pass (tested() in settle()), so the card waited marked tested, ran no push check, and a batch took it on
+# that mark (gather()) with a push check its new
 # README.md fails never run. Main moves README.md under c7, so its change no longer applies; settle(), as card() calls
 # it at the landing, gives it to the session (a stand-in that merges README.md and keeps code.txt), and with main's
 # hook failing docs-lint on README.md its <worktree>.ready is gone: no batch takes it.

@@ -198,8 +198,6 @@ gateredagain() { # <red run>
 t_lintgateleaveagain() { gateredagain 'lintleave c7 "$FXWT" c7'; }
 # Bug it catches: the same for a card the batch took, which leaves it by unbatch.
 t_lintgatetakenagain() { gateredagain 'lintleave c8 "$CARDS/c8" c7'; }
-# Bug it catches: the same for the gate for a waiting card (lintwait()) that found the change red.
-t_lintgatewaitagain() { gateredagain 'lintwait c7 7 "$FXWT"'; }
 # Bug (#1148): a card fitted onto a main that changed none of its files ran its lint again at each fit, 2 to 3 minutes,
 # while other cards landed. The second gate runs no lint command and writes no lint line: the first pass is the card's.
 t_lintgatestands() {

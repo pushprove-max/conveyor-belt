@@ -1285,7 +1285,7 @@ execution-error block and rule Lint check. After a pass there, a card fitted ont
 next landing gate while `lintstands` holds: the card's change and the pack's `lint` field are the same as at that
 pass, and main changed none of the change's files, no command's triggers or size exempt file, and no file that a
 command without `{files}` reads (`<worktree>.linted` keeps the pass). That pass stays the card's result, with no new
-`lint` line. A lint run that finds the change red while the card waits (`lintwait`) or in a batch (`lintleave`) removes
+`lint` line. A lint run that finds the change red in a batch (`lintleave`) removes
 that pass, so the next landing gate runs the commands again. The card's findings go to one fix session, its reply checked as any fix's
 reply is, with no gate run after it. Its fix line's reason starts `lint:`, and the Board names the step
 `Fix <n>: lint findings`. The card then goes round to a review, which is a last review, as after a test fix. The
@@ -1299,9 +1299,7 @@ project's engine (the pack's pin, or the newest commit taken on this machine), a
 run from a checkout with no such commit uses the engine's own `.claude/hooks/`. A refusal goes to a fix session with
 the check's message, and the card goes round to a review. The check names one writer at a time, so a refusal that
 names another writer gets its own fix session. A refusal that a fix session already had (`cfix`), or a check that
-cannot run, blocks the card with a reason that starts `contract:`. With batches on, a card that waits to land runs the same check
-after its lint (`contractwait`, in `settle()`): a refusal removes its `<worktree>.ready`, so no batch takes it, and its
-landing gate deals with it at its turn. `landone()` (`lib/claim.sh`) runs the check again on each commit it is about to
+cannot run, blocks the card with a reason that starts `contract:`. `landone()` (`lib/claim.sh`) runs the check again on each commit it is about to
 land, from the commit before it: in a batch, that is the commit of the card before it. A refusal there, or a check that
 cannot run, lands nothing and removes the card's `<worktree>.ready`, and `cardland()` sends the card back to its landing
 gate; the same refusal at its next landing (`cland`) blocks it. Each check (`contractrange`) reads every range a push of
@@ -1859,9 +1857,11 @@ card to one fix session, given each such file and its error, and nothing lands; 
 blocks.
 
 Cards ready to land land in batches. A card is ready once its review gave a GO and its own product checks and changed
-tests passed: a card that waits to land runs them while it waits, holding nothing (failing tests send it to its fix and a
-failing check blocks it, as at its turn; a lint finding or execution error before them runs none and leaves it not
-ready, for its landing gate at its turn), and the card whose turn comes runs them first. When a ready card's turn to land comes, it takes the
+tests passed at its turn. A card that waits on another card (for its files, stacked on it, or for the landing turn)
+runs no lint, checks or tests while it waits: it runs its Test step once, at its turn, on main after that card landed.
+When a card starts its Test step (`orderfix()`, `lib/claim.sh`), the order of the cards that wait on its files is
+fixed: the claim of each one names the card it lands after (`after`), and it waits on that card while that card has a
+live claim and has not given way, whatever card goes first by the rules below. When a ready card's turn to land comes, it takes the
 landing turn, then the other ready cards waiting to land that are queued for the next batch (on any files) or share a
 file with it, or with a card taken before (in turn), up to the pack's
 `landBatch` (8 by default; 1 turns batches off), and holds the files of them all until the batch lands: a card that
@@ -1917,12 +1917,10 @@ but not while it waits for main to change when main is red.
 With batches on (`landBatch` over 1), a card that would wait on a card that holds its files, and that it does not go
 past once its own tests pass (a card whose tests passed first, or a card in `order`), does not sleep. It is
 stacked on that card: its change is put on main plus the holder's change, with the one session it needs to fit there,
-and it is reviewed and tested there while the holder goes on. When the holder's tests pass, the holder's batch takes
-the stacked card after the holder, and both land in one batch. When the holder's tests fail, the stacked card waits no
+and it is reviewed there while the holder goes on. It runs no checks or tests while it waits: when the holder lands,
+it is fitted onto main and tested there once. When the holder's tests fail, the stacked card waits no
 more: it is fitted onto main alone, reviewed and tested there, and lands. When the holder goes to any other fix round,
-such as a fix of its review findings, the stacked card does the same once its own tests have passed; until then it
-waits. The holder is then fitted onto it after its fix. A stacked card whose checks or tests fail on the holder's change is not blocked or sent to a fix for that: it
-waits, and runs them again where it goes next. When the holder's change changes after the stack, the card is stacked
+such as a fix of its review findings, the stacked card waits on. When the holder's change changes after the stack, the card is stacked
 again once; after that it waits on the holder. A card whose issue names the holder's issue in a `Depends on:` line is
 never stacked: it waits.
 

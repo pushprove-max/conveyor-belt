@@ -124,8 +124,7 @@ cardlanding() {
   merged=''
   while :; do
     if [ -n "$trc" ]; then
-      # Its own tests failed while it waited, or it broke the tests of the batch that took it: that run's exit and
-      # output are its own. No run of its own tests is on this pass (own: testlist.sh carriedrec(), slowrec()).
+      # It broke the tests of the batch that took it: that run's exit and output are its own. No run of its own tests is on this pass (own: testlist.sh carriedrec(), slowrec()).
       rc=$trc; trc=''; own=''; rm -f "$wt.ready"
     else
       go=end; cardtest; sx=$?
@@ -210,8 +209,10 @@ cardtest() {
     [ -n "$tmain" ] || { block "$c" "$n" "$wt" "a product check failed; nothing landed."$'\n'"$out"; return; }
     norun "$wt" "a product check failed on the change of $c on main as it is now:"$'\n'"$out"; sec=0; trc=1; go=again; return
   fi
-  # The changed tests, before the follow-ups are filed: a card that fails them twice files nothing.
+  # The changed tests, before the follow-ups are filed: a card that fails them twice files nothing. The order of the
+  # cards that wait on its files is fixed now (orderfix(), lib/claim.sh): each lands after the card its claim names.
   began "$c" "$n" test
+  locked orderfix "$c" || echo "conveyor: card $c: the engine could not fix the order of the cards that wait on its files: they wait by the claim rules alone"
   # The project's checks first (donewhen.sh treecheck(): kept for the tree the last session's check ran on, so not run again
   # there). When they fail, the step ends before any test file runs, its line holding one failure that names
   # the check and its output. That is not its tests failing: no test-fix round (tfix) is used and the card

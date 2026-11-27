@@ -3,8 +3,8 @@
 # timeout: 300
 # Engine cases: the times of the test files a card's run timed (testlist.sh slowtests(), card.sh) are recorded on its
 # test line and shown, and no file is held to a CPU budget (#349); only a test rule files an issue about a test file
-# (testrules.test.sh). Its cases of whole card runs are split, so that they run side by side: budgetrun.test.sh,
-# budgetkept.test.sh and budgetwait.test.sh, which use this file's helpers.
+# (testrules.test.sh). Its cases of whole card runs are split, so that they run side by side: budgetrun.test.sh
+# and budgetkept.test.sh, which use this file's helpers.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
