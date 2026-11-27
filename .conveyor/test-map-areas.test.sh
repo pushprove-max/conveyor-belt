@@ -35,3 +35,10 @@ for f in conveyor/lib/claim.sh conveyor/lib/run.sh; do
   jq -e --arg f "$f" --arg t conveyor/tests/mainredhold.test.sh '.sources[$f] // [] | index($t)' <<< "$got" > /dev/null \
     && echo "ok - a change to $f runs mainredhold.test.sh" || { echo "not ok - a change to $f does not run mainredhold.test.sh"; exit 1; }
 done
+# Bug it catches: runner.test.sh (t_runnermap, t_runnermapdeleted, through testsel()) and mainredverdict.test.sh
+# (t_mainredcontrolchanged, t_mainchangeddeleted, through mainchanged() and maplinked()) read a test map with mapread(), but the map
+# listed neither under the area of conveyor/lib/testmap.sh, so a card changing only that file did not run them.
+for t in conveyor/tests/runner.test.sh conveyor/tests/mainredverdict.test.sh; do
+  jq -e --arg f conveyor/lib/testmap.sh --arg t "$t" '.sources[$f] // [] | index($t)' <<< "$got" > /dev/null \
+    && echo "ok - a change to conveyor/lib/testmap.sh runs $t" || { echo "not ok - a change to conveyor/lib/testmap.sh does not run $t"; exit 1; }
+done
