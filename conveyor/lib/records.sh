@@ -32,9 +32,9 @@ locked() { ( flock 9 && LOCKHELD=1 && "$@" ) 9>>"$STATE"; }
 LOCKLIMIT=120
 # How long a finished card stays in the live records, in days from its last line, and the most finished cards one
 # archive run moves out. Their lines go to the archive (ARCHIVE, below).
-# shellcheck disable=SC2034 # read by the archive run
+# shellcheck disable=SC2034 # read by the archive run (lib/archive.sh)
 ARCHIVE_DAYS=2
-# shellcheck disable=SC2034 # read by the archive run
+# shellcheck disable=SC2034 # read by the archive run (lib/archive.sh)
 ARCHIVE_BATCH=2000
 # locked, for <step>'s work, to LOCKLIMIT seconds. Past it, the work and every process under it are stopped (each
 # one holds the lock's file open, and the lock is free only when all of them have ended), the log says which step ran
@@ -107,10 +107,16 @@ olds() { if [ "$READ_OLD" = "$RETRIED" ] && [ -z "${DRYPICK:-}" ]; then stdb ask
 # a gzip member appended to it. archrecs prints them, oldest month first and each file's members in order; allrecs
 # prints them and then the live records (recs). Only the all-time totals read allrecs (the snapshot's cost, tokens,
 # metrics and history: archrows(), lib/snapshot.sh), never a step under the card records' lock: every other reader
-# reads the live records alone.
+# reads the live records alone. Given a file of the archive files' keys (p_filekey) as the snapshot's copy took them,
+# under the lock an archive run writes them under (snapcopy(), lib/snapshot.sh), it prints those files to those sizes
+# only: a gzip member appended after the copy holds lines the copy holds too.
 ARCHIVE=${STATE%/*}/archive
-archrecs() {
-  local f
+# shellcheck disable=SC2120 # archrows() in lib/snapshot.sh passes the keys
+archrecs() { # [<the archive files' keys>]
+  local f s
+  if [ -n "${1:-}" ]; then
+    while read -r s _ _ _ f; do head -c "$s" -- "$f" | gzip -dc || return 1; done < "$1"; return
+  fi
   for f in "$ARCHIVE"/cards-[0-9][0-9][0-9][0-9]-[0-9][0-9].jsonl.gz; do [ ! -e "$f" ] || gzip -dc -- "$f" || return 1; done
 }
 allrecs() { archrecs && recs; }
@@ -119,6 +125,25 @@ allrecs() { archrecs && recs; }
 # (landedissues(), lib/control.sh) read it beside the live records' landed lines, so an archived issue stays landed.
 LANDEDTSV=${STATE%/*}/landed.tsv
 landedall() { [ ! -e "$LANDEDTSV" ] || cat -- "$LANDEDTSV"; }
+# The ended list: the end lines of each card whose lines went to the archive (ENDSEL, lib/archive.sh: its picked,
+# landed, pushed, closed, blocked and split lines, and those that name follow-ups), and its test lines as the Tests
+# page reads them (ENDTEST), kept live. endedrecs prints it (nothing when there is none; in a snapshot, the copy
+# snapcopy() took with the records', READ_ENDED). The readers that ask whether a card or an issue ended read it beside
+# the live records: the pick (upnext(), lib/pick.sh), the Tests page's pick and its history (testpick(),
+# lib/testaction.sh; testlines(), lib/testfiles.sh), umbrellas() (lib/slices.sh), reopened() and retry
+# (lib/issues.sh), and, through cardall, the main-red fix cards (lib/mainred.sh, lib/redfix.sh, lib/bugproof.sh), the
+# land-branch command (slicetake(), lib/lane.sh) and File on GitHub (cardissue(), lib/testaction.sh). A retry moves its
+# card's lines from it to the retried file, as from the records (moveout()).
+ENDED=$ARCHIVE/ended.jsonl
+endedrecs() { local f=${READ_ENDED:-$ENDED}; [ ! -e "$f" ] || cat -- "$f"; }
+# The lines of <card>: those of the ended list (older: its lines went to the archive), then those of the card records
+# (a line the archive run read after it chose the card stays live). A line of the list begins with its card, as jq -c
+# writes it.
+cardall() { # <card>
+  { endedrecs | grep -F "{\"card\":\"$1\"," || [ $? = 1 ]; } && stdb ask card "$1"
+}
+# The archive run, which moves finished cards' lines there (archiverun(), at the start of a loop turn).
+. "$HERE/lib/archive.sh" || exit 1
 # The findings the judge ruled OUTSIDE on the cards of an issue (and on a card), from their review lines: the
 # judge.outside ones, and the judge.selfheals ones marked outside (an OUTSIDE ruling whose effect sends it to the
 # self-heals list), the last 50, each with its effect and reason, as the judge is given them (judged(): a repeat of one

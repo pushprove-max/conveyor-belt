@@ -48,13 +48,14 @@ offmain() { # <main's commit>
 # in the record of the cards with no GitHub issue) takes <card> as its card, the card it had going to its was, as
 # testpick() does for a card given back. So the slice is done once <card> lands: its umbrella closes (umbrellas(),
 # lib/slices.sh) and a card that depends on the slice by its id starts (testpick()). Refused while the slice's own
-# card is open (no landed, closed or blocked line): the loop is building it; and once that card is done (TADONE).
+# card is open (no landed, closed or blocked line): the loop is building it; and once that card is done (TADONE),
+# its lines archived or not (cardall(), lib/records.sh).
 slicetake() { # <slice: its card id> <card>
   local rec cur got='' rc=1
   if ! rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) \
     || ! cur=$(jq -er --arg s "$1" 'first(.[] | select(. as $e | $s | IN($e.id, $e.card, ($e.was // [])[]))) | .card // ""' <<<"$rec"); then
     echo "conveyor: slice $1 is not in the record of the cards with no GitHub issue; nothing recorded" >&2
-  elif [ -n "$cur" ] && ! got=$(stdb ask card "$cur"); then
+  elif [ -n "$cur" ] && ! got=$(cardall "$cur"); then
     echo "conveyor: the lines of card $cur, slice $1's card, could not be read; nothing recorded" >&2
   elif [ -n "$got" ] && ! jq -es 'any(.[]; .step | IN("landed", "closed", "blocked"))' <<<"$got" > /dev/null; then
     echo "conveyor: slice $1 has its card $cur still open; nothing recorded" >&2

@@ -87,6 +87,7 @@
 {"area": "records", "test": "testrec.test.sh"}
 {"area": "records", "test": "transcript.test.sh"}
 {"area": "records", "file": "conveyor/lib/records.sh"}
+{"area": "records", "file": "conveyor/lib/archive.sh"}
 {"area": "records", "test": "statedb.test.sh"}
 {"area": "records", "test": "stdbcalls.test.sh"}
 {"area": "records", "file": "conveyor/state.py"}

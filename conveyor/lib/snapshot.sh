@@ -533,6 +533,12 @@ snapcopy() { # [<open issues json>]
     stdb ask -o "$d/since" since cards "$e" "$m" -- -o "$d/${RETRIED##*/}" lines retried -- -o "$d/pushes" pushes \
       -- -o "$d/yes" yes "$YES" "$ST" -- -o "$d/samples" samples -- -o "$d/${DECLINED##*/}" lines declined || exit 1
     read -r f e m n < "$d/since" && [[ $f =~ ^[0-9]+$ && $n =~ ^[0-9]+$ ]] || exit 1
+    # The archive files as they are with this copy (an archive run writes them under this lock): archrows() reads them
+    # to these sizes only, so a card the run moves after the copy is counted once, in the copy.
+    for l in "$ARCHIVE"/cards-[0-9][0-9][0-9][0-9]-[0-9][0-9].jsonl.gz; do [ ! -e "$l" ] || p_filekey "$l" || exit 1; done > "$d/archat"
+    # The ended list too (endedrecs(), lib/records.sh, which reads this copy in the snapshot): a moved card's test lines
+    # are in the copy of the records or in this one, never in both.
+    [ ! -e "$ENDED" ] || cp -- "$ENDED" "$d/ended.jsonl" || exit 1
     # The links of builds that ended (their process gone) are removed, with what the check left beside one (dropbad's
     # <copy>.kept); one of a build still running to the kept copy as it is means that build reads it (w).
     for l in "$k".r*; do
@@ -623,15 +629,16 @@ ROWLINE='.[] | "\(.[1].k | tojson)\t\(.[0] | tojson)\t\(.[1] | tojson)"'
 # the archive files' names, sizes and times and the rows' key ($STATE.archived): the archive is read only when one of
 # its files changed. Call it after snaprows has set SNAPROWS_K. The archived push lines, as the state database's pushes
 # question gives the live ones (state.py), are written to <pushes to> (nothing with no archive) and kept the same way
-# ($STATE.archpushes): the push totals count them too.
+# ($STATE.archpushes): the push totals count them too. The archive files are those snapcopy() noted with the copy
+# (<scratch folder>/archat), read to the sizes they had then.
 archrows() { # <scratch folder> <to> <pushes to>
-  local f k=''
-  for f in "$ARCHIVE"/cards-[0-9][0-9][0-9][0-9]-[0-9][0-9].jsonl.gz; do [ ! -e "$f" ] || k+=$(p_filekey "$f")$'\n' || return 1; done
+  local f k
+  k=$(cat -- "$1/archat") || return 1
   [ -n "$k" ] || { echo '[]' > "$2" && : > "$3"; return; }
-  k=$(printf '%s\n%s' "$SNAPROWS_K" "$k" | cksum) || return 1
+  k=$(printf '%s\n%s\n' "$SNAPROWS_K" "$k" | cksum) || return 1
   { read -r f && [ "$f" = "$k" ] && cat > "$2"; } 2>/dev/null < "$STATE.archived" && [ -s "$2" ] \
     && { read -r f && [ "$f" = "$k" ] && cat > "$3"; } 2>/dev/null < "$STATE.archpushes" && return 0
-  archrecs > "$1/archived" && snaprows "$1/archived" "$STATE.archrows" "$2" && jq -cR "$ARCHPUSH" "$1/archived" > "$3" || return 1
+  archrecs "$1/archat" > "$1/archived" && snaprows "$1/archived" "$STATE.archrows" "$2" && jq -cR "$ARCHPUSH" "$1/archived" > "$3" || return 1
   { printf '%s\n' "$k" && cat "$2"; } > "$STATE.archived.$$" 2>/dev/null && mv -f "$STATE.archived.$$" "$STATE.archived" || rm -f "$STATE.archived.$$"
   { printf '%s\n' "$k" && cat "$3"; } > "$STATE.archpushes.$$" 2>/dev/null && mv -f "$STATE.archpushes.$$" "$STATE.archpushes" || rm -f "$STATE.archpushes.$$"
 }
@@ -858,6 +865,8 @@ snapshot() (
   snapcopy "$issues"; case $? in 0) ;; 3) issues='' ;; *) echo "conveyor: cannot copy the card records" >&2; exit 1 ;; esac
   # READ is the kept copy of the card records (snapcopy's link) and READG its lineage and size, which the check, the
   # rows and the summaries of READ (linesum(), lib/records.sh) read in place of a sum of the whole copy.
+  # shellcheck disable=SC2034 # read by endedrecs() (lib/records.sh)
+  READ_ENDED=$d/ended.jsonl
   READ=$STATE.copy.r$BASHPID; READ_OLD=$d/${RETRIED##*/}; CONTROL=$d/control.json; LIVEJSON=$(live); : "${LIVEJSON:={\}}"
   { read -r READG < "$d/lineage"; } 2>/dev/null || READG=''
   # The control record read once, in this shell: the readers below (health's among them) find it kept (ctlread).

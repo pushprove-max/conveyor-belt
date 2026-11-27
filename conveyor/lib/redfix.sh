@@ -19,7 +19,7 @@ pushred() { # <main's commit> <check> <card> <issue> [<the push's log>] [<its re
   rec=$(jq -ce '.reds | arrays' "$MAINRED" 2>/dev/null) || rec='[]'
   while IFS=$'\t' read -r s c; do # The card goes last: read drops an empty tab-separated field between two others.
     redlive "$c" < /dev/null || continue
-    if [ -z "$c" ] || [ -z "$(stdb ask card "$c" 2>/dev/null)" ]; then ! atorigin "$s" || continue; fi
+    if [ -z "$c" ] || [ -z "$(cardall "$c" 2>/dev/null)" ]; then ! atorigin "$s" || continue; fi
     exec {lock}>&-; return 0
   done < <(jq -r --arg k "$2" '.[] | select(.push.check? == $k) | [.sha, .card // ""] | @tsv' <<<"$rec")
   # An entry of main's commit already (main red there too): it takes the push block, and its fix card, when on the
@@ -33,11 +33,11 @@ pushred() { # <main's commit> <check> <card> <issue> [<the push's log>] [<its re
   exec {lock}>&-
 }
 # Whether a push block's fix card can still clear it: not picked yet ("") or given back by `retry` (no line of it in the
-# card records), or on the belt; not when it landed, closed or blocked (redopen() counts a blocked one as open). Records
+# card records or the ended list: cardall(), lib/records.sh), or on the belt; not when it landed, closed or blocked (redopen() counts a blocked one as open). Records
 # that cannot be read count as on the belt.
 redlive() { # <card id, or "">
   [ -n "$1" ] || return 0
-  stdb ask card "$1" 2>/dev/null | jq -se 'any(.step | IN("landed", "closed", "blocked")) | not' >/dev/null
+  cardall "$1" 2>/dev/null | jq -se 'any(.step | IN("landed", "closed", "blocked")) | not' >/dev/null
 }
 # An entry's title (mainred()): "Main is red: <cases>"; a push block's (pushred()): "Push blocked: <check> fails on main", its cases after it.
 REDTITLE='def redtitle: ((if .push then "Push blocked: \(.push.check) fails on main" + ([.cases[].case] | if . == [] then "" else "; main is red: " + join(", ") end)

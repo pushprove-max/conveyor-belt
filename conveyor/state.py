@@ -22,6 +22,7 @@ Usage: state.py <state folder> <command> ...
                             itself finds the same file), and the table is made from it anew. The caller holds the
                             file's lock. Exit 1 when the file could not be written whole.
   keep <table> <over> <n>   when the table holds more than <over> lines, the file and the table keep the last <n>
+  vacuum                    the database file made anew at its size now (after the archive run's rewrite)
   ask [-o <file>] <question> [<arg>...] [-- [-o <file>] <question> ...]
                             several questions in one call, answered from one reading of the database: each answer's
                             lines go to its -o file, else to stdout, in order.
@@ -383,6 +384,9 @@ def main(argv):
         return rewrite(folder, argv[3], sys.stdin.buffer.read())
     if cmd == "keep" and len(argv) == 6 and argv[3] in TABLES and argv[4].isdigit() and argv[5].isdigit():
         return keep(folder, argv[3], int(argv[4]), int(argv[5]))
+    if cmd == "vacuum" and len(argv) == 3:
+        connect(folder).execute("VACUUM")
+        return 0
     if cmd == "ask":
         return ask(folder, argv[3:])
     fail(f"unknown command: {' '.join(argv[2:])}")

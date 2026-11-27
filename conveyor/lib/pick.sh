@@ -39,7 +39,7 @@
 # lines (HEALTHLINE, lib/views.sh: every field the order below reads), from their kept summaries: the snapshot then
 # reads only the lines past them, not every line of the records each time (#398).
 upnext() { # <open issues json> [retried] [all] [the control record, when the caller has read it]
-  local c=${4:-} sh cards old gd n tsv; [ -n "$c" ] || c=$(ctl) || return 1
+  local c=${4:-} sh cards old gd n tsv e; [ -n "$c" ] || c=$(ctl) || return 1
   packget test.surveyHour sh || return 1
   # The open issues whose own seats' accounts are at the guard: the pick, the same-file check, the dry pick and the
   # Board's order all leave them out, so none of them names an issue the loop will not start.
@@ -52,11 +52,13 @@ upnext() { # <open issues json> [retried] [all] [the control record, when the ca
   # passed back, and jq would read no cards at all, so every issue with a card would be picked again).
   if [ -n "${UPREC:-}" ]; then cards=$(<"$UPREC") && old=$(<"$UPOLD") || return 1
   else cards=$(recs) && old=$(olds) || return 1; fi
-  # Each card of the landed list (landedall(), lib/records.sh) as its landed line: its lines went to the archive, and
-  # its issue is still taken and landed.
-  tsv=$(landedall) || return 1
-  [ -z "$tsv" ] || cards+=$'\n'$(jq -cR 'split("\t") | select(length >= 2 and (.[1] | test("^[0-9]+$")))
-    | {card: .[0], issue: (.[1] | tonumber), step: "landed", sha: (.[2] // ""), time: (.[3] // "")}' <<<"$tsv") || return 1
+  # Each card of the landed list (landedall(), lib/records.sh) as its landed line, and the end lines of the ended list
+  # (endedrecs()): their lines went to the archive, and their issues are still taken, landed or shut. They go before the
+  # live lines, as older cards: an issue's newest card is a live one (landed(), DEPS; the issues filing slices).
+  tsv=$(landedall) && e=$(endedrecs) || return 1
+  [ -z "$e" ] || cards=$e$'\n'$cards
+  [ -z "$tsv" ] || cards=$(jq -cR 'split("\t") | select(length >= 2 and (.[1] | test("^[0-9]+$")))
+    | {card: .[0], issue: (.[1] | tonumber), step: "landed", sha: (.[2] // ""), time: (.[3] // "")}' <<<"$tsv")$'\n'$cards || return 1
   jq -c --slurpfile cards <(printf '%s' "$cards") --slurpfile retried <(printf '%s' "$old") --arg mode "${2:-}" --arg built "$BUILT" --argjson only "${ONLY:-null}" --argjson sh "$sh" \
     --argjson ctl "$c" --arg all "${3:-}" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson np "$NONPRODUCT" --argjson guarded "$gd" \
     "$DEPS$SEE$LEVEL$INSIDE$(<"$HERE/jq/upnext.jq")" <<<"$1"
@@ -205,14 +207,14 @@ pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues
 
 # `pick --dry` (plan section 13, A7: the shadow-comparison contract): the issue pick would take now, from frozen inputs:
 # an open-issues file as asked() gives it and a state folder (its card records, retried file, control record, landed
-# list and weekly limit readings; a file it lacks is read as the loop starts it, empty). The guard is applied to the folder's newest
+# list, ended list and weekly limit readings; a file it lacks is read as the loop starts it, empty). The guard is applied to the folder's newest
 # reading as the loop applies it (lastpct): one older than LIMIT_OLD is no reading, else the dry pick would hold an
 # issue the loop then picks; no new reading is asked for. It writes nothing, there or anywhere: no lock, no check mark, no hold of adopt() saved (the
 # record is read with them) and no card. Prints the issue number, or nothing when pick would take none.
 drypick() { # <open issues file> <state folder>
   # shellcheck disable=SC2034 # DRYPICK is read by recs(), olds() and lastread() in lib/records.sh
-  # shellcheck disable=SC2034 # LANDEDTSV is read by landedall() in lib/records.sh: the folder's own landed list
-  local issues c bad w DRYPICK=1 LANDEDTSV=$2/landed.tsv
+  # shellcheck disable=SC2034 # LANDEDTSV and ENDED are read by landedall() and endedrecs() in lib/records.sh: the folder's own lists
+  local issues c bad w DRYPICK=1 LANDEDTSV=$2/landed.tsv ENDED=$2/archive/ended.jsonl
   issues=$(jq -ce 'arrays' "$1") || { echo "conveyor: $1 is not a list of open issues" >&2; return 1; }
   READ=$2/$(basename "$STATE"); READ_OLD=$2/$(basename "$RETRIED"); CONTROL=$2/control.json; LIMIT=$2/$(basename "$LIMIT")
   [ -e "$READ" ] || READ=/dev/null; [ -e "$READ_OLD" ] || READ_OLD=/dev/null

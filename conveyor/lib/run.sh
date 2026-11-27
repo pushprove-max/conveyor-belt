@@ -765,7 +765,7 @@ run() { # [max-cards] [serve]
         echo "conveyor: the pack pins Conveyor commit ${p:-(none readable)}, which is not installed and verified: run conveyor install <commit>" >&2; exit 1
       fi
     fi
-    turnask
+    archiverun; turnask # finished cards' lines leave the live records before the pick reads them (lib/archive.sh)
     if [ -n "$asking" ]; then turnpick || continue; fi
     # Nothing was picked. With none of the loop's cards running and no push under way, the rule Merge PR idle
     # (idlemerge(), lib/push.sh, which checks the rule and the card records) is looked at once every IDLE seconds: a job

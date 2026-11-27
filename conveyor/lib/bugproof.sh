@@ -497,7 +497,7 @@ redtakers() { # <card> [<passed: JSON array of case names>]
     | {old: [.[$i].cases[].case], newer: [.[$i + 1:][] | select(.card | strings) | {card, cases: [.cases[].case]}]}' "$MAINRED" 2>/dev/null) || return 1
   # Each newer card on the belt ({<card>: "belt"}) or landed ({<card>: "landed"}).
   while IFS= read -r c; do
-    s=$(stdb ask card "$c" 2>/dev/null | jq -sce --arg c "$c" 'map(select(.card == $c)) as $l | select($l != [])
+    s=$(cardall "$c" 2>/dev/null | jq -sce --arg c "$c" 'map(select(.card == $c)) as $l | select($l != [])
       | ($l | map(select(.step | IN("landed", "closed", "blocked"))) | last) as $e
       | if any($l[]; .step == "pushed") or $e.step == "landed" then {($c): "landed"} elif $e == null then {($c): "belt"} else empty end') \
       && on=$(jq -c --argjson s "$s" '. + $s' <<<"$on")

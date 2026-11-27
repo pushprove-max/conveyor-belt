@@ -19,7 +19,7 @@ strays() {
 # the same file when its turn comes.
 # A main-red fix card (issue 0, mainred.sh redpick()) is given back by its card id: its lines move out the same way, and the loop
 # picks its main commit's entry again, a new card built from nothing. So is a card of no issue (a Tests page card, a Foreman order, a review follow-up, a release fix card or a split part: testpick(),
-# lib/testaction.sh): the loop picks its action again, a new card that starts from its kept work (resumeplan()). So is a land-branch card of issue 0 (branchback(), lib/lane.sh).
+# lib/testaction.sh): the loop picks its action again, a new card that starts from its kept work (resumeplan()). So is a land-branch card of issue 0 (branchback(), lib/lane.sh). The ended list's lines (endedrecs(), lib/records.sh) count as the card's: an archived card that landed is refused, and one shut is given back, its lines moving from the list (moveout()).
 # RETRYWHY, when set, is why the loop retried the card itself (speedretry()): its blocked line keeps it as retriedWhy. RETRYBY, who gave it back (commands/retry.sh), as retriedBy (reviewretried(), lib/views.sh), which the Board does not show. HELDSTAYS, when set: the issue is held and this retry leaves it held (again(), commands/retry.sh), so it is said to be given back, not picked again (bug: both were said).
 retry() { # <issue, or the card id of a card with no GitHub issue> [fresh: the next card builds from nothing]
   local n=$1 ends l what k='.issue == $n' a p f d='' BACKID='' BACKKEPT='' # BACKID, BACKKEPT: the record entry and the kept folder branchback() made; d: the folder fresh drops kept work to
@@ -36,9 +36,9 @@ retry() { # <issue, or the card id of a card with no GitHub issue> [fresh: the n
     return 1
   fi
   if [[ $1 =~ ^[0-9]+$ ]]; then
-    what="issue #$1"; a=(--argjson n "$1"); l=$(stdb ask issue cards "$1") || return 1
+    what="issue #$1"; a=(--argjson n "$1"); l=$(stdb ask issue cards "$1" && endedrecs | jq -c "${a[@]}" "select($k)") || return 1
   else
-    what="card $1"; k='.card == $n'; a=(--arg n "$1"); l=$(stdb ask card "$1") || return 1
+    what="card $1"; k='.card == $n'; a=(--arg n "$1"); l=$(stdb ask card "$1" && endedrecs | jq -c "${a[@]}" "select($k)") || return 1
     [ -z "$l" ] || jq -se 'any(.step == "picked" and (.mainRed or .testFile or .noIssue or (.issue == 0 and (.branch | type) == "string")))' <<<"$l" >/dev/null \
       || { echo "conveyor: card $1 is no main-red fix card, no land-branch card and no card with no GitHub issue: retry takes a card's issue number; nothing changed" >&2; return 1; }
   fi
@@ -173,7 +173,7 @@ reopened() { # <open issues, a json list>
   # The open list goes in by file, not as an argument: one argument over 128 KiB (a few long bodies) fails to start jq on Linux.
   done < <(jq -rs --arg shut "$SHUT" --slurpfile open <(printf '%s' "$1") '$open[0] as $open | map(select(.step != "push")) | group_by(.issue)[]
     | select((.[0].issue | IN($open[].number)) and all(.step != "landed" and .step != "pushed" and (.step != "closed" or .reason == $shut)))
-    | group_by(.card) | max_by(.[0].time) | select(any(.step == "closed" and .reason == $shut)) | .[0].issue' < <(turncards) 2>/dev/null)
+    | group_by(.card) | max_by(.[0].time) | select(any(.step == "closed" and .reason == $shut)) | .[0].issue' < <(endedrecs; echo; turncards) 2>/dev/null)
 }
 # At a turn of the loop, outside the lock: an issue of the open list given whose newest card stopped for the owner's
 # yes (to a visible change, YES, or to a lint policy change, LINTYES) is given back with `retry` (under the lock) once its body, as the list has it, holds more approval lines than
@@ -226,18 +226,18 @@ signinback() {
       else select(open) | group_by(.card) | max_by(.[0].time) | select(signin) | .[0].issue end' 2>/dev/null)
 }
 # Under the lock: the lines the jq test picks (asked of each record, with the jq arguments given) move from the card
-# records to the retried file; MOVETAG, when set, is a jq filter each moved line goes through ($at: now).
+# records, and from the ended list (ENDED, lib/records.sh: an archived card's), to the retried file; MOVETAG, when set, is a jq filter each moved line goes through ($at: now).
 moveout() { # <jq test> <jq arguments>...
-  local t=$1; shift
+  local t=$1 e=/dev/null; shift; [ ! -e "$ENDED" ] || e=$ENDED
   # The records as the state database (state.py) holds them, read once; both files are written through it.
   stdb ask -o "$STATE.all" lines cards \
-    && { if [ -n "${MOVETAG:-}" ]; then jq -c "$@" --arg at "$(date -u +%FT%TZ)" "select($t) | $MOVETAG" "$STATE.all"; else jq -Rr "$@" "select(fromjson | $t)" "$STATE.all"; fi; } > "$STATE.moved" \
-    && jq -Rr "$@" "select(fromjson | $t | not)" "$STATE.all" > "$STATE.rest" \
-    || { rm -f "$STATE.all" "$STATE.moved" "$STATE.rest"; echo "conveyor: cannot read the card records; nothing changed" >&2; return 1; }
+    && { if [ -n "${MOVETAG:-}" ]; then jq -c "$@" --arg at "$(date -u +%FT%TZ)" "select($t) | $MOVETAG" "$STATE.all" "$e"; else jq -Rr "$@" "select(fromjson | $t)" "$STATE.all" "$e"; fi; } > "$STATE.moved" \
+    && jq -Rr "$@" "select(fromjson | $t | not)" "$STATE.all" > "$STATE.rest" && { [ "$e" = /dev/null ] || jq -Rr "$@" "select(fromjson | $t | not)" "$e" > "$ENDED.rest"; } \
+    || { rm -f "$STATE.all" "$STATE.moved" "$STATE.rest" "$ENDED.rest"; echo "conveyor: cannot read the card records; nothing changed" >&2; return 1; }
   rm -f "$STATE.all"
-  # Both files change under the one lock a snapshot's copy takes (snapcopy), so it never holds a moved line twice.
-  ( flock 5 || exit 1; stdb append retried < "$STATE.moved" || exit 1; stdb rewrite cards < "$STATE.rest" || exit 2 ) 5>>"$STATE.checked.lock"
-  case $? in 0) ;; 1) rm -f "$STATE.moved" "$STATE.rest"; echo "conveyor: cannot write $RETRIED; the card records are unchanged" >&2; return 1 ;; *) false ;; esac || { echo "conveyor: the card records were not rewritten whole; what they held is in $STATE.rest, and the moved lines are in $RETRIED" >&2; return 1; }
+  # The files change under the one lock a snapshot's copy takes (snapcopy), so it never holds a moved line twice.
+  ( flock 5 || exit 1; stdb append retried < "$STATE.moved" || exit 1; stdb rewrite cards < "$STATE.rest" || exit 2; [ "$e" = /dev/null ] || mv -f -- "$ENDED.rest" "$ENDED" || exit 2 ) 5>>"$STATE.checked.lock"
+  case $? in 0) ;; 1) rm -f "$STATE.moved" "$STATE.rest" "$ENDED.rest"; echo "conveyor: cannot write $RETRIED; the card records are unchanged" >&2; return 1 ;; *) false ;; esac || { echo "conveyor: the card records or the ended list were not rewritten whole; what they held is in $STATE.rest and $ENDED.rest, and the moved lines are in $RETRIED" >&2; return 1; }
   rm -f "$STATE.moved" "$STATE.rest"
 }
 

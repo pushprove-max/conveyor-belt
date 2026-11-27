@@ -540,7 +540,9 @@ growclose() { # <card> <issue> <prior json>
 # can be closed: no program starts (it runs at each turn that asks GitHub).
 umbrellas() { # <open issues, a json list>
   local k n s x m b cs off
-  cs=$(turncards) || return 0
+  # The ended list (endedrecs(), lib/records.sh) first, as older cards: a part or slice whose card's lines went to the
+  # archive is still landed or done.
+  cs=$(endedrecs && echo && turncards) || return 0
   [[ $1 == *'"parts"'* || $cs == *'"split"'* ]] || return 0
   b=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || { echo "conveyor: main ($BRANCH) could not be read; no parent is closed this turn" >&2; return 0; }
   off=$(jq -r 'select(.step == "landed") | .sha | strings' <<<"$cs" | offmain "$b") || return 0

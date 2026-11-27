@@ -424,13 +424,13 @@ HISTFROM='def fromstart($s): select($s == "" or ((.time | strings) >= $s));
           | .timed |= (if type == "array" then map(select(.file as $k | ($o[$k] | strings) >= $s)) else . end)]
       | .h[$c] += [{t: $l.time, c: $cf, p: ($l.partial | if type == "array" then . else [] end), r: ($l.reused == true)}])).out end;'
 histstart() { ctl 2>/dev/null | jq -r '.testsFrom // ""' 2>/dev/null || :; }
-# The retried lines, then the card records, as the Tests part reads them (TESTLINE), each from its summary (linesum());
-# nothing when they cannot be read. The snapshot's copy (READG, snapcopy()) is summed in place: copied, it was read whole.
+# The retried lines, the ended list's (endedrecs(), lib/records.sh: archived cards'), then the card records, as the Tests part reads them (TESTLINE),
+# each from its summary (linesum()); nothing when they cannot be read. The snapshot's copy (READG, snapcopy()) is summed in place: copied, it was read whole.
 testlines() { # in a snapshot, the lines its Tests part key was made from (SK_LINES, snapkeys(), lib/snapshot.sh): no program starts
   local td rec; [ -z "${SK_LINES+x}" ] || { printf '%s\n' "$SK_LINES"; return 0; }
   td=$(mktemp -d) || return 1; if [ -n "${READG:-}" ]; then rec=$READ; else rec=$td/rec; fi
-  { olds > "$td/old" && { [ "$rec" = "$READ" ] || recs > "$rec"; } && linesum "$td/old" "$RETRIED.tests" "$td/o" "$TESTLINE" && linesum "$rec" "$STATE.tests" "$td/r" "$TESTLINE" \
-      && cat "$td/o" "$td/r"; } 2>/dev/null
+  { olds > "$td/old" && endedrecs > "$td/ended" && { [ "$rec" = "$READ" ] || recs > "$rec"; } && linesum "$td/old" "$RETRIED.tests" "$td/o" "$TESTLINE" \
+      && linesum "$td/ended" "$ENDED.tests" "$td/e" "$TESTLINE" && linesum "$rec" "$STATE.tests" "$td/r" "$TESTLINE" && cat "$td/o" "$td/e" "$td/r"; } 2>/dev/null
   rm -rf "$td"
 }
 # The runs of the test files on record, in no order, as the Tests part and testolder() read them: each card test

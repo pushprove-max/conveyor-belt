@@ -176,6 +176,24 @@ free again. The turn counts the pick as failed, and the next turn picks again. T
 `conveyor: pick ran out of time`. A snapshot that holds new issues has the same limit, and the log shows
 `conveyor: the snapshot's adopt ran out of time`.
 
+A finished card stays in the live card records (`cards.jsonl` in the state folder) for 2 days after its last line.
+A finished card is one that was closed or shut, or one that landed and was pushed. If the card has a GitHub issue, the
+push must also close or check that issue. With Land as `pr`, the pull request that holds the card's commit must
+also be merged. A card given back with `conveyor.sh retry` keeps its lines in `retried.jsonl`, so the next card of its issue can
+start from its kept work.
+Before the pick, the turn moves the lines of these older cards to `archive/`
+in the state folder. The move runs one time in an hour. It moves at most 2,000 cards in one run, the oldest first. If
+more cards are left, the next turn moves the next ones, also within the hour. The card records' lines go to
+`cards-YYYY-MM.jsonl.gz`, and the card's lines in `retried.jsonl` go to `retried-YYYY-MM.jsonl.gz`. The month is the
+month of the card's last line. A landed card also gets one line in `landed.tsv` in the state folder: the card, the
+issue, the commit and the time. The end lines of each moved card (picked, landed, pushed, closed, blocked) stay in
+`archive/ended.jsonl`, with its test runs. The pick reads these two files, so it does not pick a landed or shut issue
+again. The main-red fix cards and `conveyor.sh land-branch` read the ended list too, and the Tests page keeps the
+card's test runs.
+`conveyor.sh retry` can still give back a shut card that was moved. The cost, token and history totals read the
+archive too. The run holds the card records' lock with the same 120-second limit, and the
+log shows `conveyor: the archive run ran out of time` when it stops.
+
 When the turn picks nothing, it waits (`turnwait`) until a card, the push or the machine hold's check ends, or until
 the turn's timer ends. `conveyor.sh control hold`, `conveyor.sh control release` and the Foreman's filing hooks also
 end the wait, so the next turn starts at once. A `run` ends at the first turn where none of its cards, pushes, machine hold checks or picks

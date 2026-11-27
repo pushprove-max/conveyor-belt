@@ -181,7 +181,7 @@ tcput() { local rec id drop; rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/nu
   # The picked cards the trim may drop (none with the records unread): those whose work is on main (TADONE), but one whose
   # proof deleted or merged its test file (bugproof speed.fix), the only source of its removed mark (testspart()). A card
   # blocked, open or given back (`retry`) keeps its entry, which the loop picks it again by (testpick()).
-  drop=$({ stdb ask issue cards 0 || echo '"unread"'; } | jq -cn --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" '[inputs] | if any(.[]; . == "unread") then {}
+  drop=$({ stdb ask issue cards 0 && endedrecs || echo '"unread"'; } | jq -cn --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" '[inputs] | if any(.[]; . == "unread") then {}
     else [.[] | objects | select((.card | type) == "string")] | group_by(.card)
       | map(select(any(.[]; '"$TADONE"') and (any(.[]; .step == "bugproof" and (.speed.fix? | IN("deleted", "merged"))) | not)) | {key: .[0].card, value: true}) | from_entries end' 2>/dev/null) || drop='{}'
   # The record goes to jq on its input: Linux refuses an argument over 128 KiB.
@@ -280,8 +280,8 @@ testpick() { # <the open issues json>
   open=$(jq -c 'map(.number)' <<<"${1:-[]}" 2>/dev/null) || open='[]'
   parts=$(jq -c '[(.[] | select((.parts // []) != []) | {k: .number, v: [.parts[] | .number | numbers]}), (.[] | select(.umbrella | numbers) | {k: .umbrella, v: [.number]})] | group_by(.k) | map({key: (.[0].k | tostring), value: (map(.v[]) | unique)}) | from_entries' <<<"${1:-[]}" 2>/dev/null) || parts='{}'
   # The unheld cards not picked yet are read as an issue is: the state of each issue of another repository their `Depends on:` lines name is asked now (farstates()); the record and its far states go to jq on its input, as Linux refuses an argument over 128 KiB.
-  # A card given back (card set, its lines gone) is picked again, so it is asked as one not picked yet is; one that landed is not picked again, so it is not asked.
-  have=$(stdb ask issue cards 0) || h=0
+  # A card given back (card set, its lines gone) is picked again, so it is asked as one not picked yet is; one that landed is not picked again, so it is not asked. The ended list's lines (endedrecs(), lib/records.sh) count as the records': a card whose lines went to the archive ended, and is not given back; a parent card that landed so is landed.
+  have=$(stdb ask issue cards 0 && echo && endedrecs) || h=0
   far=$(farstates "$(printf '%s\n%s\n' "$rec" "$have" | jq -Rcn --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" 'input | fromjson as $r
     | ([inputs | fromjson? | objects | select('"$TADONE"') | .card | strings] | INDEX(.)) as $landed
     | $r | map(if (.held | not) and $landed[.card // ""] == null then {body} else {} end)')") \
@@ -294,7 +294,7 @@ testpick() { # <the open issues json>
     done < <(printf '%s\n%s\n' "$rec" "$have" | jq -Rrn --arg yes "$YES" --arg lintyes "$LINTYES" 'input | fromjson as $r
       | ([inputs | fromjson? | objects | select(.step | IN("landed", "closed", "blocked", "pushed"))] | group_by(.card) | map({key: .[0].card, value: last}) | from_entries) as $end
       | $r[] | select(.card != null and (.was // []) == []) | $end[.card] | select(. != null and .step == "blocked" and ((.reason // "") | startswith($yes) or startswith($lintyes) | not)) | .card')
-    have=$(stdb ask issue cards 0) || h=0
+    have=$(stdb ask issue cards 0 && echo && endedrecs) || h=0
   fi
   # The cards of an issue that a `Depends on:` line names (a review follow-up's parent card): their lines are read too.
   while read -r old; do
@@ -347,7 +347,7 @@ cardissue() { # <card id>
   { exec {fl}>>"$TACARDS.file.lock"; } 2>/dev/null && flock "$fl" || { echo "conveyor: the File on GitHub lock could not be taken; nothing filed" >&2; return 1; }
   e=$(jq -ce --arg c "$1" 'first(.cards[]? | select(.card == $c))' "$TACARDS" 2>/dev/null) \
     || { exec {fl}>&-; echo "conveyor: card $1 is no card with no GitHub issue that the record keeps; nothing filed" >&2; return 2; }
-  sha=$(stdb ask card "$1" | jq -rs 'map(select(.step == "landed") | .sha | strings) | first // empty')
+  sha=$(cardall "$1" | jq -rs 'map(select(.step == "landed") | .sha | strings) | first // empty')
   [ -n "$sha" ] || { exec {fl}>&-; echo "conveyor: card $1 has not landed; nothing filed" >&2; return 2; }
   u=$(jq -r '.filedUrl // empty' <<<"$e")
   [ -z "$u" ] || { exec {fl}>&-; echo "conveyor: card $1 was filed before, as $u" >&2; echo "$u"; return 0; }

@@ -642,10 +642,11 @@ linksonly() { # <card> <worktree>
 # The push block's entry (pushred()), the fix card's title (REDTITLE, redtitles()) and its issue (redissue()).
 . "${BASH_SOURCE[0]%/*}/redfix.sh" || return 1
 # Whether a main-red fix card is open: not picked yet ("") or given back by `retry` (no line of it in the card
-# records), on the belt or blocked; not when it landed or closed. Records that cannot be read count as open.
+# records or the ended list: cardall(), lib/records.sh), on the belt or blocked; not when it landed or closed, its
+# lines archived or not. Records that cannot be read count as open.
 redopen() { # <card id, or "">
   [ -n "$1" ] || return 0
-  stdb ask card "$1" 2>/dev/null | jq -se 'any(.step | IN("landed", "closed")) | not' >/dev/null
+  cardall "$1" 2>/dev/null | jq -se 'any(.step | IN("landed", "closed")) | not' >/dev/null
 }
 # Under the lock (pick()), ahead of the queue: the fix card of the oldest red main commit whose card is not picked yet
 # or was given back by `retry` (mainred()); with REDONLY set (a commit: run.sh redfix(), issue 1688), that commit's
@@ -663,16 +664,17 @@ redpick() {
   # with no case: no fix card could make it pass, and the cards that wait on it (mainwait()) run again. An entry whose
   # fix card is on the belt or blocked (it has lines, none landed or closed; records that cannot be read count as such)
   # stays whole: that card's brief and commit are made from it (redissue()). One given back by `retry` has no lines
-  # (moveout(), lib/issues.sh): its entry loses the case, so it is not picked again for it.
+  # (moveout(), lib/issues.sh): its entry loses the case, so it is not picked again for it. A card's lines are those of
+  # the records and of the ended list (cardall(), lib/records.sh): one that ended and was archived is not given back.
   while IFS= read -r l; do
-    c=$(stdb ask card "$l" 2>/dev/null) && ! jq -se 'length > 0 and (any(.step | IN("landed", "closed")) | not)' <<<"$c" >/dev/null || o+=("$l")
+    c=$(cardall "$l" 2>/dev/null) && ! jq -se 'length > 0 and (any(.step | IN("landed", "closed")) | not)' <<<"$c" >/dev/null || o+=("$l")
   done < <(jq -r '.[] | select(any(.cases[]?; .file // "" | test("\\.(md|txt|rst)$"; "i"))) | .card | strings | select(. != "")' <<<"$rec")
   s=$(jq -c --args 'map(if .card | IN($ARGS.positional[]) then . else .cases |= map(select(.file // "" | test("\\.(md|txt|rst)$"; "i") | not)) | select(.cases != [] or .push != null) end)' "${o[@]}" <<<"$rec") || s=$rec
   # The record goes to jq on its input, not as an argument: Linux refuses one over 128 KiB (issue 369).
   [ "$s" = "$rec" ] || { jq -c '{reds: .}' <<<"$s" > "$MAINRED.new" && mv -f "$MAINRED.new" "$MAINRED" && rec=$s; } \
     || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be written; its fix card waits" >&2; return 1; }
   while IFS=$'\t' read -r s p c; do # The card goes last: read drops an empty tab-separated field between two others.
-    if [ -n "$c" ]; then l=$(stdb ask card "$c") && [ -z "$l" ] || continue; fi
+    if [ -n "$c" ]; then l=$(cardall "$c") && [ -z "$l" ] || continue; fi
     # A push block (pushred()) whose commit origin holds now (pushed by hand) is none: its entry loses it, and goes with no case.
     [ "$p" != true ] || ! atorigin "$s" || { jq -c --arg s "$s" '{reds: map(if .sha == $s then del(.push) else . end | select(.cases != [] or .push != null))}' <<<"$rec" > "$MAINRED.new" \
       && mv -f "$MAINRED.new" "$MAINRED" && rec=$(jq -c .reds "$MAINRED") || { exec {lock}>&-; echo "conveyor: the main-is-red record could not be written; its fix card waits" >&2; return 1; }
