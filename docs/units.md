@@ -253,7 +253,8 @@ A word wider than the pane breaks between whole characters.
   full ten), else how many the loop can pick now (`2 ready`). Under it, the next five issues in pick order, numbered,
   each with its issue (and project when the pane shows more than one), its title cut to fit and its priority
   right-aligned (`P0` and `P1` in the needs-you colour), then `follow-up` or `retried` when it is one. An issue the
-  machine holds back says why on a line under it (`waiting for a machine slot: …`). Then two columns, `Waiting` and
+  machine holds back says why on a line under it (`waiting for a machine slot: …`). An issue that waits for a
+  release ([Releases](releases.md)) says `waits for release <version>` on a line under it. Then two columns, `Waiting` and
   `Requires`: each issue that waits on other issues and is not forced, and the issues it waits for (`#489  #485  #486  #487  #488`), in
   the order that the loop picks them. When the issues it waits for do not fit on one line, they go on to more lines
   under `Requires`, so none is lost. An issue whose `Depends on:` line names no issue in the form `#N` is a row too,

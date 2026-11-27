@@ -273,7 +273,8 @@ While a failed run has a fix card or fix issue that is open, the loop starts onl
 - their review follow-ups, and the follow-ups of those follow-ups,
 - the fix card for a red `main`.
 
-Other issues and cards stay in the queue. A fix that you file holds the queue at the next loop turn, also before the
+Other issues and cards stay in the queue. Each issue that waits shows `waits for release <version>` on its line in
+the Queue on the Board, in /units and in `conveyor.sh foreman status`. A fix that you file holds the queue at the next loop turn, also before the
 run's `fixes` list shows it. When you remove the line `Release fix: <version>` from an open issue or card, the next
 loop turn does not start it as a fix. A card that is already on the belt continues. When the release goes out,
 when the next run starts and ends, or when you stop the run with `conveyor.sh release-run stop`, the next loop turn

@@ -114,7 +114,8 @@
 #   cannot keep cores (slot_reserve_why), else null}.
 # queue: next (the first 10 issues pick would take, in its order: issue, title, priority, followup, retried, and room:
 #   why the machine holds it back, on the one it holds; one forced past its wait also has forced: true and waitsFor:
-#   the open issues it waits on, in order too, so it keeps its dependency tag); and, from the
+#   the open issues it waits on, in order too, so it keeps its dependency tag; release: the version of the release it
+#   waits for, while the release limit (rellimit(), lib/pick.sh) keeps it off the belt, in order too); and, from the
 #   control record, order (every issue pick would take, in its order, as next names them with room, and created: its
 #   createdAt, areas: its area: labels, so the Rules tab can say what a Never build label would skip), holding (issue, title, priority, followup, retried, created: the issues the record holds; the Board
 #   places one released before the snapshot catches up by them, as pick sorts; waitsFor: the open issues it waits on, [] for
@@ -950,14 +951,23 @@ snapshot() (
     # The order from what health reads of the records and the retried lines, each from its kept summary (UPREC, UPOLD).
     [ -n "$hrec" ] && linesum "$READ_OLD" "$RETRIED.health" "$d/hold" "$HEALTHLINE" \
       && UPREC=$d/hrec UPOLD=$d/hold upnext "$issues" '' all > "$d/upall" 2>/dev/null && [ -s "$d/upall" ] || echo null > "$d/upall"
-    queue=$(jq -c --arg area "$AREA" 'map({issue: .number, title: (.title // "")[0:200], priority: .p, followup: (.later | not), retried: .again, created: .createdAt,
+    # The release limit, read as a dry pick reads it (rellimit(), lib/pick.sh: no write, no log): while it is on, each
+    # issue in order and next that is not that release's gets release, the version it waits for, as the pick leaves it
+    # out until the release is out or stopped. Off, or a limit or release record that does not read: no issue gets it.
+    rw=null
+    if rl=$(DRYPICK=1 rellimit "$issues" 2>/dev/null) && [ -n "$rl" ]; then
+      rw=$(jq -ce --slurpfile r "$CARDS/release/run.json" '{issues, version: ($r[0].version | strings)}' <<<"$rl" 2>/dev/null) || rw=null
+    fi
+    # shellcheck disable=SC2016 # jq text, not shell
+    relwait='def relwait: if $rw != null and (.issue | IN($rw.issues[]) | not) then .release = $rw.version else . end;'
+    queue=$(jq -c --arg area "$AREA" --argjson rw "$rw" "$relwait"'map({issue: .number, title: (.title // "")[0:200], priority: .p, followup: (.later | not), retried: .again, created: .createdAt,
           areas: ([.labels[].name | select(startswith($area))] | sort), hold, rule, waits, before, forced})
-        | {order: map(select((.hold | not) and .rule == null and (.waits == [] or .forced) and (.before | not)) | (if .forced then .waitsFor = .waits else del(.forced) end) | del(.hold, .rule, .waits, .before)),
+        | {order: map(select((.hold | not) and .rule == null and (.waits == [] or .forced) and (.before | not)) | (if .forced then .waitsFor = .waits else del(.forced) end) | del(.hold, .rule, .waits, .before) | relwait),
            holding: map(select(.hold) | .waitsFor = .waits | del(.hold, .rule, .waits, .areas, .before, .forced)),
            skipped: map(select(.rule != null) | {issue, title, rule}),
            waiting: map(select(.waits != [] and (.hold | not) and .rule == null and (.before | not)) | del(.hold, .rule, .areas, .before) | .waitsFor = .waits | del(.waits))}' "$d/upall") && [ -n "$queue" ] && [ "$queue" != null ] || queue=null
     # The pick order is that whole list less what a pick leaves out (upnext.jq), not a second reading of the records.
-    next=$(jq -c 'map(select((.hold | not) and .rule == null and (.waits == [] or .forced) and (.before | not))) | .[:10] | map({issue: .number, title: (.title // "")[0:200], priority: .p, followup: (.later | not), retried: .again} + (if .forced then {forced: true, waitsFor: .waits} else {} end))' "$d/upall") \
+    next=$(jq -c --argjson rw "$rw" "$relwait"'map(select((.hold | not) and .rule == null and (.waits == [] or .forced) and (.before | not))) | .[:10] | map({issue: .number, title: (.title // "")[0:200], priority: .p, followup: (.later | not), retried: .again} + (if .forced then {forced: true, waitsFor: .waits} else {} end) | relwait)' "$d/upall") \
       && built=$(jq -c --arg built "$BUILT" 'map(select(.labels | any(.name == $built)) | {issue: .number, title: (.title // "")[0:200]}) | sort_by(.issue)' <<<"$issues") \
       && [ -n "$next" ] && [ -n "$built" ] || { next=null; built=null; }
     [ "$built" = null ] || [ "$built" = '[]' ] || built=$(jq -c --argjson s "$(labelled)" 'map(. + {since: ($s[.issue | tostring] // null)})' <<<"$built")

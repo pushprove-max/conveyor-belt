@@ -84,8 +84,9 @@ export type Live = { action: string; turns: number | null; lastOutputAt: number 
 // priced as an estimate (its usage was read only in part, or not at all).
 export type Priced = { usd: number | null; usdKnown: number | null; notPriced: number; estimate: boolean }
 export type Belt = Card & Times & Priced & { step: string; review: number | null; of: number | null; stepAt: number | null; model: string | null; tokens: number | null; reading: boolean; atEnd: boolean; parent: number | null; umbrella: number | null; reviews: Review[]; track: Track | null; metrics: Metrics | null; live: Live | null; waitsOn: Card | null }
-// room: why the machine holds it back ("waiting for a machine slot: ..."), "" when it does not.
-export type Queued = Ref & { priority: string; followup: boolean; retried: boolean; parent: number | null; umbrella: number | null; room: string }
+// room: why the machine holds it back ("waiting for a machine slot: ..."), "" when it does not. release: the version
+// of the release it waits for while the release limit keeps it off the belt, "" when it does not.
+export type Queued = Ref & { priority: string; followup: boolean; retried: boolean; parent: number | null; umbrella: number | null; room: string; release: string }
 // An open issue that depends on one still open: not picked until each of waitsFor has closed. states: why each of
 // them does not move (the snapshot's waitsOn: held, blocked, building, queued, ...), by its number; none from an older engine.
 export type Waiting = Ref & { waitsFor: number[]; states: Record<number, string>; umbrella: number | null }
@@ -327,7 +328,7 @@ export const parseRecord = (repo: string, json: unknown, retried: string[] = [])
     ],
     foremanHas: blocked.filter((n: Need) => n.foreman && !n.foreman.ask),
     belt: j.belt.map((x: any): Belt => ({ ...card(x), ...timesOf(x), step: one(x.step), review: num(x.review), of: num(x.of), stepAt: time(x.stepAt), model: one(x.model) || null, tokens: num(x.tokens?.claude) === null || num(x.tokens?.codex) === null ? null : x.tokens.claude + x.tokens.codex, ...pricedOf(x), reading: x.reading === true, atEnd: x.atEnd === true, parent: parentOf(x), umbrella: umbrellaOf(x), reviews: reviewsOf(x.reviews), track: trackOf(x.track), metrics: metricsOf(x.metrics), live: liveOf(x.live), waitsOn: x.waitsOn && typeof x.waitsOn === 'object' && one(x.waitsOn.card) ? card(x.waitsOn) : null })),
-    queue: next && next.map((x: any): Queued => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), priority: one(x.priority), followup: x.followup === true, retried: x.retried === true, parent: parentOf(x), umbrella: umbrellaOf(x), room: one(x.room) })),
+    queue: next && next.map((x: any): Queued => ({ repo, issue: num(x.issue) ?? 0, title: one(x.title), priority: one(x.priority), followup: x.followup === true, retried: x.retried === true, parent: parentOf(x), umbrella: umbrellaOf(x), room: one(x.room), release: one(x.release) })),
     // queue.order is the whole pick order; queue.next stops at ten. pickCounts needs the whole to tell a waiting part from one that is ready.
     order: (Array.isArray(j.queue.order) ? j.queue.order : []).filter((x: unknown) => x && typeof x === 'object')
       .map((x: any) => ({ repo, issue: num(x.issue) ?? 0, umbrella: umbrellaOf(x) })),
@@ -1213,7 +1214,8 @@ const pushLines =(s: State, snap: Snap, w: number, lead: string): Line[] => (sna
 // held-back line.
 const NEXT = 5
 // The next five issues the engine picks, numbered, the title cut to fit and the priority right-aligned. The one the
-// machine holds back says why, with the figure that held it: wrapped at its words, as the figure is last.
+// machine holds back says why, with the figure that held it: wrapped at its words, as the figure is last. One the
+// release limit keeps off the belt says `waits for release <version>` under it.
 // The follow-up and retried flags sit beside the priority when the title keeps 6 columns of room; else they go under the row.
 const readyRows = (snap: Snap, w: number): Line[] => (snap.queue ?? []).slice(0, NEXT).flatMap((q, i): Line[] => {
   const prio: Seg = { t: q.priority || 'P3', c: q.priority === 'P0' || q.priority === 'P1' ? C.you : undefined, d: !(q.priority === 'P0' || q.priority === 'P1') }
@@ -1221,7 +1223,8 @@ const readyRows = (snap: Snap, w: number): Line[] => (snap.queue ?? []).slice(0,
   const beside = !flags || cols(` ${i + 1} `) + cols(`${q.repo}#${q.issue} `) + (q.parent ? cols(` ↳ #${q.parent}`) : 0) + 6 + 2 + cols(`${prio.t} · ${flags}`) <= w
   return [titled(q, [{ t: ` ${i + 1} `, d: true }], beside && flags ? [prio, { t: ` · ${flags}`, d: true }] : [prio], w, false),
     ...(flags && !beside ? [[{ t: `    ${flags}`, d: true }] as Line] : []),
-    ...(q.room ? wrapParts(q.room.split(' '), w, '    ', ' ') : [])]
+    ...(q.room ? wrapParts(q.room.split(' '), w, '    ', ' ') : []),
+    ...(q.release ? wrapParts(`waits for release ${q.release}`.split(' '), w, '    ', ' ') : [])]
 })
 export const queueModel = (snap: Snap, w: number): Line[] => {
   const next = (snap.queue ?? []).slice(0, NEXT)

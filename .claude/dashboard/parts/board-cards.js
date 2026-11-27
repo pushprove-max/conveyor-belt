@@ -440,6 +440,8 @@
     else if (forced(item)) tags.append(ctx.chip(`Forced past ${item.waitsFor.map(ctx.depRef).join(', ')}`, 'warn'));
     // The machine holds this card back (its cap, its load or its free memory): why, with the reading.
     if (col === 'queue' && typeof item.room === 'string' && item.room) tags.append(ctx.chip(item.room, 'warn'));
+    // The release limit keeps it off the belt until that release is out or stopped (the snapshot's release: its version).
+    if (col === 'queue' && typeof item.release === 'string' && item.release) tags.append(ctx.chip(`Waits for release ${item.release}`, 'warn'));
     return tags;
   }
   // A split issue (the rule Split large issues On), or a parent of GitHub sub-issues, is held as the umbrella of its

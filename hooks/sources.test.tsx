@@ -142,6 +142,16 @@ test('/units says why the machine holds a queued card back, and draws no machine
   expect(section(none, 'QUEUE').split('\n').length).toBe(2)
 })
 
+// Issue 1711. Bug it catches: an issue the release limit kept off the belt showed in QUEUE as ready, with no reason,
+// while the loop built only the release's cards. It says the release it waits for; once the release is out or stopped
+// (the snapshot gives no release), the line is gone.
+test('/units says a queued issue waits for release <version> while the release limit keeps it off the belt', () => {
+  const waits = tableText(board({ queue: { next: [{ ...queued(1)[0], release: '1.12.0' }] } }), 200)
+  expect(section(waits, 'QUEUE').split('\n')[2]?.trimEnd(), 'snapshot: queue.next[0].release "1.12.0"').toBe('    waits for release 1.12.0')
+  const out = tableText(board({ queue: { next: queued(1) } }), 200)
+  expect(section(out, 'QUEUE'), 'snapshot: queue.next[0] with no release').not.toMatch(/waits for release/)
+})
+
 // Issue 287. Bug it catches: with two projects the cap was not shown, so the view differed by machine. Each project's
 // count is after its name.
 test('with more than one project, the head gives each project\'s count after its name', () => {

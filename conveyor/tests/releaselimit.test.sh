@@ -221,3 +221,27 @@ t_rellimitstop() {
     || fail "release-run stop did not stop red release 1.1.0 before its fixes were read: $out: $(cat "$RUN")"
   got=$(rlpick) || exit 1; [ "${got%% *}" = 5 ] || fail "with release 1.1.0 stopped, the pick did not take #5: $(cat "$T/$CASE/run.out")"
 }
+
+# Bug (#1711): while release 1.1.0 waited on its fix #21, the pick left #5 alone, but the snapshot listed #5 as queued
+# with no reason, so the Board, /units and `foreman status` did not say why it was not built. The snapshot gives #5
+# release "1.1.0" in order and next (#21, the release's own fix, none), and `foreman status` says it waits for the
+# release. Once `release-run stop` ends the wait, no issue has release, and the status no longer says so.
+t_rellimitsnap() {
+  setup "$(jq -cs . <(issue 5 2026-01-01 P1) <(rlfix 21 OPEN))"
+  rlrun .
+  local snap=$T/$CASE/snap.json got out state
+  mkdir -p "$T/$CASE/xdg/conveyor" && jq -n --arg m "$R" '{records: [{repo: "alpha", main: $m}]}' > "$T/$CASE/xdg/conveyor/host.json" || fail "the host file could not be written"
+  for state in waiting stopped; do
+    if [ "$state" = stopped ]; then out=$(loop release-run stop 2>&1) || fail "release-run stop failed: $out"; fi
+    loop snapshot --fresh > "$snap" || fail "the snapshot failed with release 1.1.0 $state"
+    got=$(jq -c '[.queue.order, .queue.next] | map(map([.issue, .release]) | sort)' "$snap")
+    out=$(XDG_CONFIG_HOME=$T/$CASE/xdg CONVEYOR_FOREMAN_DIR=$T/$CASE/foreman CONVEYOR_FOREMAN_ASK="cat $snap" CONVEYOR_MAIN=$R bash "$SRC/foreman/watch-conveyor.sh" --status 2>&1)
+    if [ "$state" = waiting ]; then
+      [ "$got" = '[[[5,"1.1.0"],[21,null]],[[5,"1.1.0"],[21,null]]]' ] || fail "release 1.1.0 waits on fix #21: the snapshot's queue (order, next) does not say #5 alone waits for it: $got"
+      grep -qxF 'waits for release 1.1.0: #5' <<<"$out" || fail "release 1.1.0 waits on fix #21: foreman status (watch-conveyor.sh --status on the snapshot) does not say #5 waits for it: $out"
+    else
+      [ "$got" = '[[[5,null],[21,null]],[[5,null],[21,null]]]' ] || fail "release 1.1.0's wait stopped: the snapshot's queue (order, next) still says an issue waits for it: $got"
+      ! grep -qF 'waits for release' <<<"$out" || fail "release 1.1.0's wait stopped: foreman status (watch-conveyor.sh --status on the snapshot) still says an issue waits for it: $out"
+    fi
+  done
+}

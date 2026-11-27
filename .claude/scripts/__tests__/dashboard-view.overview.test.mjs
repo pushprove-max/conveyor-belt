@@ -307,6 +307,23 @@ test('a card the machine holds back says why on its Board row', () => {
   assert.ok(cards.slice(1).every((x) => !x.textContent.includes('machine slot')), 'no other row says it');
 });
 
+// Issue 1711. Bug it catches: an issue the release limit kept off the belt showed as plainly queued on the Board,
+// so nothing said why the loop did not build it. Its Control tab card and its Overview Queue row name the release it
+// waits for; a row with no release (the release out or stopped) says nothing of it.
+test('a queued issue the release limit keeps off the belt says it waits for release <version>', () => {
+  const data = full();
+  data.panels.board.data.queue[0].release = '1.12.0';
+  data.panels.queue.data.next[0].release = '1.12.0';
+  const c = boot({ tab: 'control' }), w = boot();
+  deliver(c, data); deliver(w, data);
+  const cards = Array.from(panel(c, 'board').querySelectorAll('[data-col="queue"] .bcard'));
+  assert.ok(cards[0].textContent.includes('Waits for release 1.12.0'), `the Board card names the release: ${cards[0].textContent}`);
+  assert.ok(cards.slice(1).every((x) => !x.textContent.includes('Waits for release')), 'no other Board card says it');
+  const rows = Array.from(panel(w, 'queue').querySelectorAll('.queue-next > li'));
+  assert.ok(rows[0].textContent.includes('Waits for release 1.12.0'), `the Queue row names the release: ${rows[0].textContent}`);
+  assert.ok(rows.slice(1).every((x) => !x.textContent.includes('Waits for release')), 'no other Queue row says it');
+});
+
 test('a part read only in part says which piece is missing, and is never shown as empty', () => {
   const w = boot();
   const data = full();

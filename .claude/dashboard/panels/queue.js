@@ -6,7 +6,8 @@
 // waiting for your PROD deploy (N)". waiting is the issues that depend on one still open, in the folded group
 // "Waiting on another card (N)", each shown as "Waiting on #N"; a next row forced past its wait is "Forced past #N".
 // A next row with room is held back by the machine (its cap or its pause: "waiting for a machine slot: 2 of the
-// machine cap 2 in use"), shown as said.
+// machine cap 2 in use"), shown as said. A next row with release waits for that release (the release limit):
+// "Waits for release <version>".
 // How many open issues are held (held: the Board's Held column's count, by you, a label, a rule or a wait, but for
 // the landed, not pushed ones); null when the open issues were not listed.
 const queueHeld = (d) => (d && typeof d.held === 'number' && d.held >= 0 ? d.held : null);
@@ -56,6 +57,8 @@ window.DASH_APP.panel({
       if (q.forced === true && Array.isArray(q.waitsFor) && q.waitsFor.length) chips.push(ctx.chip(`Forced past ${q.waitsFor.map(ctx.depRef).join(', ')}`, 'warn'));
       // The machine holds this card back (its cap, its load or its free memory): why, with the reading.
       if (q.room) chips.push(ctx.chip(q.room, 'warn'));
+      // The release limit keeps it off the belt until that release is out or stopped: the version it waits for.
+      if (typeof q.release === 'string' && q.release) chips.push(ctx.chip(`Waits for release ${q.release}`, 'warn'));
       fill(li, q, chips);
     });
     // How many are held, as the Board's Held column counts them, with a link to it (on the Control tab); an empty
