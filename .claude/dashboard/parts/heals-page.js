@@ -7,7 +7,7 @@
 //     title, "What is a self-heal?", closed at first (aboutEl, issue 1622);
 //   five tiles: on the list, areas ready to batch (READY entries or more), seen again in the last 7 days, leaving in
 //     SOON days or less, and moved up to harm in the last 30 days (the dropped record's harm entries, and the
-//     entries back on the list whose expired mark is a move up to harm); a click on one of the last three filters the
+//     entries, on the list or dropped again, whose expired mark is a move up to harm); a click on one of the last three filters the
 //     entries to what it counts, or, for harm, opens the dropped entries with its entries alone (issue 1691);
 //   a card for each area (its group and name from its label, its count, an age bar in three parts of the days, the kinds
 //     with their counts, and how far it is from a batch); a click on a kind pill filters the entries to that area's
@@ -134,10 +134,14 @@
     seen: (r, m) => r.seen > 0 && Date.parse(r.e.seen) >= m.now - LATELY * DAY,
     leaving: (r) => r.left !== null && r.left <= SOON,
   };
-  // The moves up to harm of the last HARMED days: the dropped record's harm entries, and the entries a review listed
-  // again whose expired mark is a move up to harm (each with that mark as its dropped record, to draw it the same way).
-  const harmsOf = (m) => m.dropped.concat(m.lists.flatMap((x) => list(x.entries).filter((e) => e && e.expired).map((e) => ({ ...e, dropped: e.expired }))))
-    .filter((e) => e.dropped.why === 'harm' && Date.parse(e.dropped.time) >= m.now - HARMED * DAY);
+  // The moves up to harm of the last HARMED days: the dropped record's harm entries, and the entries (on the list, or
+  // dropped again) whose expired mark is a move up to harm, as a review listed them again after it (each with that
+  // mark as its dropped record, to draw it the same way).
+  const harmMark = (e) => [e.dropped, e.expired].find((x) => x && x.why === 'harm');
+  const harmsOf = (m) => m.dropped.concat(m.lists.flatMap((x) => list(x.entries).filter(Boolean)))
+    .map((e) => ({ e, mark: harmMark(e) }))
+    .filter(({ mark }) => mark && Date.parse(mark.time) >= m.now - HARMED * DAY)
+    .map(({ e, mark }) => ({ ...e, dropped: mark }));
   const TILE_SAID = { seen: `seen again, last ${LATELY} days`, leaving: `leave in ${SOON} days`, harm: `moved up to harm, last ${HARMED} days, in Dropped entries` };
   // An area card's kind pill counts the entries of one project, area and kind: no area and kind not read are '' here.
   const pillId = (repo, area, kind) => `${repo}|${area || ''}|${kind || ''}`;

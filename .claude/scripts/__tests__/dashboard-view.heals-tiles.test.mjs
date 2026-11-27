@@ -158,6 +158,20 @@ test('Self-heals tiles: Moved up to harm opens the dropped entries with the harm
   assert.deepEqual(pressed(w), []);
 });
 
+// Bug: an entry moved up to harm that a review listed again, and that then left the list again (Drop now, or expiry),
+// keeps its move only in its expired mark; the tile read the dropped mark alone, so it stopped counting that move.
+test('Self-heals tiles: Moved up to harm counts a move kept in the expired mark of an entry dropped again', () => {
+  const w = boot({ tab: 'selfheals' });
+  const d = data();
+  d.panels.declined.data.heals[0].entries = ENTRIES.filter((e) => !/s3$/.test(e.id));
+  d.panels.declined.data.heals[0].dropped = [entry('h00000000000d4', { time: iso(T0 - 9 * DAY), effect: 'self-heals', why: 'w', finding: '[P2] again.js:1 dropped after its move',
+    expired: { time: iso(T0 - 5 * DAY), why: 'harm', filed: 813 }, dropped: { time: iso(T0 - DAY), why: 'dropped' } })];
+  deliver(w, d);
+  assert.equal(tile(w, 'harm').querySelector('.sh-tile-n').textContent, '1');
+  tile(w, 'harm').click();
+  assert.deepEqual(qa(w, '.sh-dropped li .sh-gone-why').map((t) => t.textContent), ['moved up to harm as #813'], 'the move is shown with the card it was filed as');
+});
+
 // Bug: with no dropped entries, the Dropped entries button that the harm tile shows went away when it closed the list,
 // and the keyboard focus went with it.
 test('Self-heals tiles: closing the harm tile\'s Dropped entries with no dropped entries gives the focus to the harm tile', () => {

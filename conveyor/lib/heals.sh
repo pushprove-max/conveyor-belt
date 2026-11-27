@@ -144,14 +144,16 @@ healsmissing() { # <id>...
 }
 # Entries <ids> (a JSON list) of the self-heals list leave it for the dropped record (HEALSDROPPED), each with dropped
 # {time, why: <why>} and, for one moved up to harm, filed (its card's issue number or id). Its freed goes, so a retry of
-# the batch card that gave it back (healstake(), lib/followups.sh) does not take it back to the list. The dropped lines
+# the batch card that gave it back (healstake(), lib/followups.sh) does not take it back to the list. Its expired mark
+# stays only when it is a move up to harm (a review listed the entry again after that move), so the Board's harm tile
+# still counts the move. The dropped lines
 # are written before the list is, as healsexpiry() writes them: a failure between the two leaves an entry in both, never
 # in neither. The caller holds the list's lock.
 healsgone() { # <ids json> <why> [<filed>]
   local f=$SELFHEALS t
   t=$(clock) || return 1
   jq -c --argjson ids "$1" --arg t "$t" --arg why "$2" --arg n "${3:-}" 'select(type == "object" and (.id | IN($ids[])) and .batched == null)
-    | del(.freed, .expired) + {dropped: ({time: $t, why: $why} + if $n == "" then {} else {filed: ($n | tonumber? // $n)} end)}' "$f" >> "$HEALSDROPPED" \
+    | del(.freed) | if .expired.why == "harm" then . else del(.expired) end | . + {dropped: ({time: $t, why: $why} + if $n == "" then {} else {filed: ($n | tonumber? // $n)} end)}' "$f" >> "$HEALSDROPPED" \
     && jq -c --argjson ids "$1" 'select(type != "object" or (.id | IN($ids[]) | not) or .batched != null)' "$f" > "$f.new" && mv -f "$f.new" "$f" \
     || { rm -f "$f.new"; return 1; }
 }
@@ -512,7 +514,8 @@ healsmove() { # <part item>...
 # again. The owner runs it again by hand.
 HEALSTRIED=-1000000
 # An entry of the self-heals list that no batch card holds and that was not seen again (healsadd() and healsseen(),
-# lib/followups.sh) for rules.healsdays days leaves the list for HEALSDROPPED, with dropped: {time, why: expired}. Its days
+# lib/followups.sh) for rules.healsdays days leaves the list for HEALSDROPPED, with dropped: {time, why: expired}, its
+# expired mark kept only when it is a move up to harm (as healsgone() keeps it). Its days
 # count from its seen, else its time; one with neither (written before the list was dated) is dated now (seen), so it stays
 # this run. One a shut batch card gave back (freed, healsfree()) counts its days from the give-back, and expires as the rest
 # do; a retry of that card (healstake()) after that takes it back from HEALSDROPPED. The docs list never expires. Both files change under the list's lock, as healsadd()
@@ -529,7 +532,7 @@ healsexpiry() {
     days=$(ctl 2>/dev/null | jq -r '.rules.healsdays // empty') && [ -n "$days" ] && t=$(clock) || exit 1
     q='def lastat: try ((.seen // .time) | fromdateiso8601) catch null; def open: type == "object" and .batched == null;'
     jq -c --arg t "$t" --argjson days "$days" "$q"'select(open and lastat != null and lastat + $days * 86400 <= ($t | fromdateiso8601))
-      | . + {dropped: {time: $t, why: "expired"}} | del(.expired)' "$f" > "$f.drop" \
+      | . + {dropped: {time: $t, why: "expired"}} | if .expired.why == "harm" then . else del(.expired) end' "$f" > "$f.drop" \
       && jq -c --arg t "$t" --argjson days "$days" "$q"'if open and lastat == null then .seen = $t
         elif open and lastat + $days * 86400 <= ($t | fromdateiso8601) then empty else . end' "$f" > "$f.new" \
       && { [ ! -s "$f.drop" ] || cat "$f.drop" >> "$HEALSDROPPED"; } && { cmp -s "$f" "$f.new" || mv -f "$f.new" "$f"; }

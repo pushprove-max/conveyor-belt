@@ -216,6 +216,21 @@ t_healsdrop() {
     || fail "the dropped finding a review listed again did not take its entry back to the list: $(cat "$ST/selfheals.jsonl" "$ST/healsdropped.jsonl" 2>&1)"
 }
 
+# Bug: an entry moved up to harm that a review listed again keeps that move only in its expired mark, and "Drop now"
+# (healsgone()) and the expiry (healsexpiry()) erased the mark with its filed card, so the Board's harm tile stopped
+# counting the move. An expired mark that is no move up to harm still goes.
+t_healsdropharm() {
+  local out mark='{"time": "2026-11-22T00:00:00Z", "why": "harm", "filed": 811}'
+  setup '[]'
+  jq -cn --argjson m "$mark" '{id: "h00000000b1", time: "2026-11-20T00:00:00Z", card: "c5", issue: 5, repo: "main", area: "area:engine", finding: "F-b1", why: "w", effect: "self-heals", from: "review", expired: $m},
+    {id: "h00000000b2", time: "2026-11-20T00:00:00Z", card: "c5", issue: 5, repo: "main", area: "area:engine", finding: "F-b2", why: "w", effect: "self-heals", from: "review", expired: {time: "2026-11-21T00:00:00Z", why: "expired"}},
+    {id: "h00000000b3", time: "2000-01-01T00:00:00Z", card: "c5", issue: 5, repo: "main", area: "area:engine", finding: "F-b3", why: "w", effect: "self-heals", from: "review", expired: $m}' > "$ST/selfheals.jsonl"
+  out=$(loop heals drop h00000000b1 h00000000b2 2>&1) || fail "heals drop h00000000b1 h00000000b2 failed: $out"
+  fx_in healsexpire > /dev/null
+  [ "$(jq -sc 'map([.id, .dropped.why, .expired])' "$ST/healsdropped.jsonl")" = "$(jq -cn --argjson m "$mark" '[["h00000000b1", "dropped", $m], ["h00000000b2", "dropped", null], ["h00000000b3", "expired", $m]]')" ] \
+    || fail "heals drop h00000000b1 h00000000b2 and healsexpire (h00000000b3, listed in 2000) did not keep the move up to harm (expired why harm) and drop the other expired mark: $(cat "$ST/selfheals.jsonl" "$ST/healsdropped.jsonl" 2>&1)"
+}
+
 # Bug: an entry kept no count of its sightings, so the Self-heals page could not say how often a finding came back.
 # Each sighting counts one: a listing again, and a sighting of an entry that already expired, in the dropped record.
 t_healssightings() {
