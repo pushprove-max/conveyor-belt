@@ -63,7 +63,9 @@ t_splitforcedkeep() {
   [ "$(judged)" = 1 ] && [ "$(st 'select(.step == "split") | [.result, .split.verdict, .split.forced, .split.mode] | @json')" = '["kept","keep",true,"on"]' ] \
     && [ "$(yesdid)" = build ] && yeslanded \
     || fail "the third card did not build and land after a keep, with a forced keep line (judged $(judged)): $(yessteps); $(yesdid)"
-  blocked7 c3-7 'third reason'
+  # The fourth card checks after `retry` gave back c3-7: its forced keep line is then in retried.jsonl only, so a
+  # splitforce() that does not read retried.jsonl asks the judge again here.
+  blocked7 c3-7 'third reason'; retried7
   fx_in 'splitcheck c4-7 7'
   [ "$RC" = 0 ] && [ "$(judged)" = 1 ] || fail "the fourth card of #7 asked the judge again (exit $RC, judged $(judged)): $(cat "$T/$CASE/run.out")"
   jq -c '.[0].body += "\n- fourth"' "$STUB/issues.json" > "$STUB/i.new" && mv "$STUB/i.new" "$STUB/issues.json"
@@ -99,11 +101,15 @@ t_splitforcedland() {
 # Bug caught: a forced check made for one blocked card whose blocked line is there twice (a card that was ending when
 # `retry` took its lines writes a second one, issues.sh retry): the count is of distinct cards. The second card of #7
 # asks no judge: its text has a split line, in retried.jsonl where `retry` puts it, and one card is under SPLIT_TRIES.
+# The issue is made over the limits (split.doneWhen 3) before the second card: only that split line in retried.jsonl
+# keeps the judge from being asked, so a hash check that does not read retried.jsonl fails here.
 t_splitforcedone() {
   forcedissue "$SPLIT2"
   blocked7 c1-7 'the review found a P1' 1; blocked7 c1-7 'the review found a P1' 1; retried7
+  tune '.split.doneWhen = 3'
   fx_in 'splitcheck c2-7 7'
-  [ "$RC" = 0 ] && [ "$(judged)" = 0 ] || fail "the second card of #7 asked the judge with one blocked card (exit $RC, judged $(judged)): $(cat "$T/$CASE/run.out")"
+  [ "$RC" = 0 ] && [ "$(judged)" = 0 ] && [ -z "$(st 'select(.step == "split") | .card')" ] \
+    || fail "the second card of #7 asked the judge or wrote a split line with one blocked card (exit $RC, judged $(judged)): $(st 'select(.step == "split")') $(cat "$T/$CASE/run.out")"
 }
 
 # Bug caught: a forced check in shadow filed slices, or stopped the card. It writes its line (result split, forced, as
