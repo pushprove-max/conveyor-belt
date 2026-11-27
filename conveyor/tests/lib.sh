@@ -461,10 +461,12 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$BASHPID")
   [ -e "$T/$CASE.rc" ] || echo "FAIL [$CASE]: the case's keeper did not start, or was ended before the case was: $(cat "$T/$CASE.keeper" 2>/dev/null)" >> "$T/$CASE.out"
   [ "$(cat "$T/$CASE.rc" 2>/dev/null)" != 0 ] || echo "ok $CASE" >> "$T/$CASE.out"
   # Told to end from here, it prints the output once, here, and then ends as told: the trap above would print it again
-  # once this print had ended.
+  # once this print had ended. Its flock and cat ignore those signals: a file's timeout sends TERM to the file's whole
+  # process group (fileeach.sh), and it would stop them with the output part printed or not at all; its
+  # --kill-after still ends a print that never gets the lock.
   local stop=
   trap 'stop=1' TERM INT HUP
-  flock "$T/print.lock" cat "$T/$CASE.out"
+  ( trap '' TERM INT HUP; exec flock "$T/print.lock" cat "$T/$CASE.out" )
   [ -z "$stop" ] || exit 143
 }
 # The time of each case file <file>... whose every case the run selected (SEL) and timed (run_case: $T/<case>.sec and

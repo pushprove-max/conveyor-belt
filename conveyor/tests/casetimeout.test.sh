@@ -164,17 +164,21 @@ t_casekeepwait() {
 # Bug it catches: a worker told to end while it printed its case's output (run_case's last print) let that print end
 # and then printed the output again from its TERM trap. The print lock is held here, so the worker waits in that last
 # print (its flock started) when it is told to end; once the lock is let go, the case's output is printed once and the
-# worker still ends as told (143).
+# worker still ends as told (143). TERM goes to the worker's whole process group, as a file's timeout sends it
+# (fileeach.sh): with a print whose flock and cat did not ignore it, the flock waiting for the lock was killed and
+# the case's output was never printed.
 t_caseprintstop() {
   local d=$T/$CASE h
   mkdir -p "$d/in" || fail "the fixture could not be made"
   flock "$d/in/print.lock" sh -c 'echo $$ > "$1"; exec sleep 60' sh "$d/held" & h=$! # sleep: holds the print lock until it is killed below
   wait_until '[ -s "$d/held" ]' || fail "the print lock was not held"
-  ( ( T=$d/in; CASE=keep_one; echo "$BASHPID" > "$T/worker.pid"; run_case ) > "$d/report" 2>&1; echo $? > "$d/in/worker.rc" ) &
+  # set -m: the worker leads a process group of its own, as a file under its timeout does, and this one is not in it.
+  ( set -m; ( T=$d/in; CASE=keep_one; echo "$BASHPID" > "$T/worker.pid"; run_case ) > "$d/report" 2>&1 & w=$!; set +m
+    wait "$w"; echo $? > "$d/in/worker.rc" ) &
   # The worker's last print, waiting for the lock: the only flock of that lock the worker starts before it is told to end.
   wait_until '[ -s "$d/in/worker.pid" ] && pgrep -P "$(cat "$d/in/worker.pid")" -f "^flock $d/in/print.lock cat " > /dev/null' \
     || { kill "$(cat "$d/held")"; fail "the worker did not reach its case's last print: $(cat "$d/in/keep_one.out" 2>/dev/null)"; }
-  kill -TERM "$(cat "$d/in/worker.pid")"; kill "$(cat "$d/held")"; wait "$h"
+  kill -TERM -- "-$(cat "$d/in/worker.pid")"; kill "$(cat "$d/held")"; wait "$h"
   wait_until '[ -s "$d/in/worker.rc" ]' || fail "the worker told to end in its last print did not end: $(cat "$d/report")"
   [ "$(cat "$d/in/worker.rc")" = 143 ] || fail "the worker told to end in its last print did not end as told (exit $(cat "$d/in/worker.rc")): $(cat "$d/report")"
   [ "$(grep -cx 'ok keep_one' "$d/report")" = 1 ] || fail "the worker told to end in its last print did not print the case's output once: $(cat "$d/report")"
