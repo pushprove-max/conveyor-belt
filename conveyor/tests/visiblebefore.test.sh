@@ -187,6 +187,9 @@ t_beforeboard() {
   # Bug: any word beyond who and when (a note such as "looks good") was taken as a condition, so a plain yes with a
   # note was reviewed again. Only text after `condition:` (any case) is a condition.
   ! cond "$A, looks good, ship it" || fail "a note on the approval line was taken as a condition: $A, looks good, ship it"
+  # Bug: a time with a colon, or a note that says what the yes is for, was read as a condition, so a plain yes was held.
+  P='Visible change approved: Dana, 2026-11-24 20:05 ET, picker yes for the matrix title change'
+  ! cond "$P" || fail "an approval line with a time and a note was taken as a condition: $P"
   cond "$A; Condition: staff only" || fail "a condition marked \`Condition:\` was not read: $A; Condition: staff only"
   ! cond "$A; condition: " || fail "a \`condition:\` mark with no text after it was taken as a condition: $A; condition: "
   # Bug: only a letter or digit after the mark counted, so a Board condition of symbols alone was not reviewed.
