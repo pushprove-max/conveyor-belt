@@ -700,7 +700,8 @@ is closed or landed on main, and it removes the hold on it.
 
 Before the loop pushes main, and before Push now, Conveyor runs the test files that the test map and
 `.conveyor/test-links.json` link to the landings since the last push. Each file runs alone, once for each commit of
-main. A file does not run again when it passed before, for example in a card's Test step, and none of the files that it
+main. When more than one file must run, the pack sets `test.fileCommand` and more than one test slot is free, the
+files run side by side, each in its own process on its own test slot. A file does not run again when it passed before, for example in a card's Test step, and none of the files that it
 reads changed since that pass. When the rule Push after a combined test run has `pushbatchtests` set to `all`,
 every file runs. This run never runs a test runner or the whole suite. If a file fails, Conveyor runs that file on each landing
 in turn to find the landing that broke it. Then it files a main-fix card that names that landing, and it holds the

@@ -11,7 +11,8 @@
 # does not clear a push that the owner then asked all the files for. Never a test runner or the whole
 # suite: testsel() narrow selects neither, and each file runs through a command that runs one file (mapone(),
 # lib/testmap.sh: test.fileCommand, else test.command given it as test.list says); a pack with neither runs none and
-# says so (PUSHNOFILE). The files run in a worktree of the commit ($CARDS/pushtest) on one test slot. The landing
+# says so (PUSHNOFILE). The files run in a worktree of the commit ($CARDS/pushtest) on one test slot, or,
+# with more than one to run, test.fileCommand and another slot free, side by side on the free slots (pushside()). The landing
 # that broke a file that fails is found by running the file on the landings in turn, newest first (the pushed commit,
 # when it is a landing, fails it; one that lacks the file passes it), up to the first that passes it: the oldest of
 # the landings after that one, as a file that failed, passed, then failed again was broken by the last change, else
@@ -77,9 +78,15 @@ pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
     echo "conveyor: before the push of ${sha:0:12}, $((l - ${#fs[@]})) test file(s) $what passed before with the same inputs and do not run again" >&2
   fi
   if [ ${#fs[@]} != 0 ]; then
-    echo "conveyor: before the push of ${sha:0:12}, ${#fs[@]} test file(s) $what run, each alone (${#lands[@]} landing(s) since the last push)" >&2
     [ -n "$SLOT_HOME" ] || until slot_try || slot_wait; do :; done
-    for f in "${fs[@]}"; do pushfile "$wt" "$f" "${hit[$f]:-}" || { bad+=("$f"); fat[$f]=$(head -n 1 "$wt.failat" 2>/dev/null); }; done
+    # More than one file, and a slot of the pool free beside the run's own: side by side (pushside()); else one at a time.
+    if [ ${#fs[@]} -gt 1 ] && [ -n "$fc" ] && [ $((SLOT_N - $(slot_used))) -gt 0 ]; then
+      echo "conveyor: before the push of ${sha:0:12}, ${#fs[@]} test file(s) $what run, each alone, side by side on the free test slots (${#lands[@]} landing(s) since the last push)" >&2
+      pushside "$wt" "$fc" "${fs[@]}"
+    else
+      echo "conveyor: before the push of ${sha:0:12}, ${#fs[@]} test file(s) $what run, each alone (${#lands[@]} landing(s) since the last push)" >&2
+      for f in "${fs[@]}"; do pushfile "$wt" "$f" "${hit[$f]:-}" || { bad+=("$f"); fat[$f]=$(head -n 1 "$wt.failat" 2>/dev/null); }; done
+    fi
     # The passes those runs traced are kept (cachekeep()), so a later push or card takes them while their inputs hold;
     # never of a file whose run failed (a `fail` line in <worktree>.rerun), though its log has `-- ok` for it: a check
     # of the command after its tests (mapcheck, .conveyor/test-changed.sh) can fail the file alone.
@@ -150,6 +157,34 @@ pushfile() { # <worktree> <test file> [<fresh>]
     echo "conveyor: $2 timed out: $(cat "$1.failat")" >> "$1.log"
   elif [ $rc != 0 ]; then tail -n "+$((n + 2))" "$1.log" 2>/dev/null | failat "$1" | sed 's/^/it failed at /' > "$1.failat"; fi
   return $rc
+}
+# The test files <file>... run side by side in <worktree> (pushtests(), with more than one to run and a slot of the
+# pool free beside the run's own), through fileeach() side (lib/fileeach.sh): each file in its own process, on a test
+# slot of its own (the slot the run holds, then slots of the pool as they come free), with the pack's <test.fileCommand>
+# and what pushfile() gives one file: its time limit too, testTimeout times the load factor. Their output is added to
+# <worktree>.log, in the files' order. Each file with no `-- ok` line in the run's log is added to the caller's bad, and
+# why it failed (the line pushfile() puts first in <worktree>.failat) to the caller's fat; the caller's hit names the
+# files whose list of inputs is fresh, each run with CONVEYOR_TEST_NOTRACE=1.
+pushside() { # <worktree> <test.fileCommand> <file>...
+  local w=$1 fc=$2 f s lf l=$1.testlog/files; shift 2
+  rm -f "$w.fresh"; [ ${#hit[@]} = 0 ] || printf '%s\n' "${!hit[@]}" > "$w.fresh"
+  lf=$(loadfactor); s=$(awk -v n="${TEST_TIMEOUT:-3600}" -v f="$lf" "$LOADSCALE")
+  # fileeach()'s own limit of a file is the number its FILELIMIT program prints: here testTimeout, for every file.
+  ( cd "$w" && { [ -n "$SLOT_HOME" ] || slot_mine; } && export CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$w.testlog \
+      CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_LOAD_FACTOR=$lf CONVEYOR_TEST_NOTRACE='' CONVEYOR_TEST_FAILFAST='' \
+    && fileeach side "{ ! grep -qxF -- \"\$CONVEYOR_TEST_FILE\" $(printf %q "$w.fresh") 2>/dev/null || export CONVEYOR_TEST_NOTRACE=1; }; $fc" \
+      "BEGIN { print ${TEST_TIMEOUT:-3600}; exit }" "$LOADSCALE" "$l" "$@" < /dev/null 8>&- ) >> "$w.log" 2>&1
+  rm -f "$w.fresh"
+  for f; do
+    ! grep -qxF -- "-- ok $f" "$l" 2>/dev/null || continue
+    bad+=("$f")
+    if grep -qxF -- "-- timeout $f" "$l" 2>/dev/null; then
+      fat[$f]="it ran past its time limit, $s s (testTimeout's ${TEST_TIMEOUT:-3600} s times the load factor $lf), and was stopped there"
+    else # its output: the lines after its `== <file>` line, up to the next file's
+      fat[$f]=$(awk -v f="$f" 'FNR == NR { h["== " $0] = 1; next } $0 == "== " f { on = 1; next } on && ($0 in h) { exit } on' \
+        <(printf '%s\n' "$@") "$w.log" | failat "$w" | sed 's/^/it failed at /' | head -n 1)
+    fi
+  done
 }
 # The test files a failed pre-push hook names as failing (hookalone()), one a line: each test file of <commit>
 # (testtracked(), lib/issues.sh) that a line of the hook's output names, whole or after a /, on a line that says it

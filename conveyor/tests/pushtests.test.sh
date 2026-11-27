@@ -38,6 +38,12 @@ pushnow() { # [<what the loop's shell runs>]
     eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
     names || exit 1; eval "${1:-push c2 2; checkheld && echo held > \"\$T/\$CASE/held\"}" ) > "$T/$CASE/push.out" 2>&1
 }
+# A pool of the case's own of <n> test slots (the host file's testSlots, in a folder no other case shares) for the run
+# before the push, which then takes its slot there: with 1, it has no other slot free and runs its files one at a time.
+pushpool() { # <n>
+  mkdir -p "$XDG_CONFIG_HOME/conveyor" && echo "{\"testSlots\": $1, \"testSlotsDir\": \"$T/$CASE/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json" \
+    || fail "the case's pool of $1 test slot(s)"
+}
 # A push with the check off (#395): no test file runs, nothing is held, and main as it is is pushed.
 pushedunchecked() {
   [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$l2" ] && [ ! -e "$T/$CASE/held" ] || fail "the push was held or did not push c2: $(cat "$T/$CASE/push.out")"
@@ -77,7 +83,7 @@ $l1 lib/cart.test.js" ] || fail "the run did not run lib/cart.test.js alone on m
 # runs the three, each once, in the order of the landings.
 t_pushtestsunion() {
   local l1 l2 l4 base n
-  pushfix true
+  pushfix true; pushpool 1 # one slot: the three files run one at a time, in order, as before #1709 (its D2)
   printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"' > "$STUB/one" # one: every test file passes
   for n in 3:tax 4:fee; do
     echo "${n#*:}" > "$R/lib/${n#*:}.js" && echo "grep -qx ${n#*:} lib/${n#*:}.js" > "$R/lib/${n#*:}.test.js" \
@@ -133,13 +139,36 @@ t_pushtestsstale() {
 # trace was for nothing and the next push ran the file again.
 t_pushtestsnotrace() {
   local l1 l2 base
-  pushfix true
+  pushfix true; pushpool 1 # one slot: the two files run one at a time, in order (t_pushtestsside runs them side by side)
   printf '%s\n' "$PUSHONE" > "$STUB/one"
   loop control rules pushbatch=on pushbatchtests=all > /dev/null || fail "control rules pushbatch=on pushbatchtests=all failed"
   pushnow "$PUSHPASS \"\$R\" > \"\$TESTCACHE\" || exit 1; pushtests c2 2 $l2 $base && cut -f2 \"\$TESTCACHE\" | sort > \"\$T/\$CASE/kept\""
   [ "$(cat "$STUB/ran" 2>&1)" = "$l2 a.test.sh traced
 $l2 lib/cart.test.js 1" ] || fail "pushtests c2 2 $l2 $base with pushbatchtests all did not run a.test.sh traced and lib/cart.test.js untraced: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
   [ "$(cat "$T/$CASE/kept" 2>&1)" = $'a.test.sh\nlib/cart.test.js' ] || fail "the traced pass of a.test.sh was not kept in the cache: $(cat "$T/$CASE/kept" "$T/$CASE/push.out" 2>&1)"
+}
+
+# #1709 D2. With pushbatchtests all, a.test.sh and lib/cart.test.js run on a pool of three slots: each file's command
+# leaves its mark and waits, up to 10 s times the load factor, until both files have begun, then notes how many it
+# saw; lib/cart.test.js then fails on main, printing a stack frame of its line 1. Bugs it catches: the run before the push ran its files one at a time
+# though test slots were free (each saw only itself), so its time grew with the number of files; run side by side, a
+# file whose list of inputs is fresh was traced (CONVEYOR_TEST_NOTRACE lost), or the failed file did not hold the push
+# or its reason lost where the file failed.
+t_pushtestsside() {
+  local l1 l2 base
+  pushfix true; pushpool 3
+  # sleep: a file's wait for the other, in its own shell (no wait_until there)
+  printf '%s\n' "d=$T/$CASE/at; mkdir -p \"\$d\"; : > \"\$d/\${1//\//_}\"" \
+    "i=0; while [ \"\$(ls \"\$d\" | wc -l)\" -lt 2 ] && [ \$i -lt $(loadlimit 200) ]; do i=\$((i + 1)); sleep 0.05; done" \
+    'echo "$(git rev-parse HEAD) $1 ${CONVEYOR_TEST_NOTRACE:-traced} saw $(ls "'"$T/$CASE/at"'" | wc -l)" >> "$STUB/ran"' \
+    '[ "$1" != lib/cart.test.js ] || bash "$1" || { echo "    at Object.<anonymous> ($PWD/$1:1:1)"; exit 1; }' > "$STUB/one"
+  loop control rules pushbatch=on pushbatchtests=all > /dev/null || fail "control rules pushbatch=on pushbatchtests=all failed"
+  pushnow "$PUSHPASS \"\$R\" > \"\$TESTCACHE\" || exit 1; pushtests c2 2 $l2 $base || echo held > \"\$T/\$CASE/held\""
+  [ "$(grep "^$l2 " "$STUB/ran" 2>&1 | sort)" = "$l2 a.test.sh traced saw 2
+$l2 lib/cart.test.js 1 saw 2" ] || fail "pushtests c2 2 $l2 $base on three free slots did not run a.test.sh (traced) and lib/cart.test.js (untraced) side by side: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+  grep -qF 'run, each alone, side by side on the free test slots' "$T/$CASE/push.out" || fail "the push does not say its files run side by side: $(cat "$T/$CASE/push.out")"
+  [ -e "$T/$CASE/held" ] && st 'select(.step == "push") | "\(.result) \(.check) \(.reason)"' | grep -qF "fail lib/cart.test.js the run before the push failed 1 test file(s) of ${l2:0:12} (pushbatchtests all): lib/cart.test.js (broken by the landing ${l2:0:12} of c2; it failed at lib/cart.test.js:1: grep -qx good lib/cart.js)" \
+    || fail "pushtests c2 2 $l2 $base did not hold the push on lib/cart.test.js, which failed side by side, naming where it failed: $(st 'select(.step == "push")') $(cat "$T/$CASE/push.out")"
 }
 
 # Bug it catches: the file command logged a traced pass of lib/cart.test.js (`-- ok` and its inputs) and then failed
@@ -179,6 +208,19 @@ t_pushtestsload() {
     pushfile "$CARDS/pushtest" 2.test.sh && echo "2 passed"; pushfile "$CARDS/pushtest" 5.test.sh || cat "$CARDS/pushtest.failat"'
   [ "$(cat "$T/$CASE/push.out")" = $'2 passed\nit ran past its time limit, 3 s (testTimeout\'s 1 s times the load factor 3), and was stopped there' ] \
     || fail "the push check's file limit is not testTimeout times the load factor, or its timeout does not name them: $(cat "$T/$CASE/push.out")"
+}
+
+# #1709 D2: t_pushtestsload's limit, side by side (pushside()). testTimeout 1 s and a load factor of 3 on a pool of
+# three: 2.test.sh (2 s) passes, and 5.test.sh (5 s) fails with the reason that names the limit and the factor. Bug it
+# catches: files run side by side had no time limit of the push's, or a file stopped there was not named as such.
+t_pushtestssideload() {
+  local l1 l2 base
+  pushfix true; pushpool 3
+  printf '%s\n' 'sleep "${1%.test.sh}"' > "$STUB/one" # sleep: a file that takes the seconds its name says
+  pushnow 'pushwt "$CARDS/pushtest" '"$l1"' && slot_pool && slot_try || exit 1; export TEST_TIMEOUT=1 CONVEYOR_LOAD_FACTOR=3; local -A hit=() fat=(); bad=()
+    pushside "$CARDS/pushtest" "bash \"\$STUB/one\"" 2.test.sh 5.test.sh; echo "${bad[*]}: ${fat[5.test.sh]}"'
+  [ "$(cat "$T/$CASE/push.out")" = "5.test.sh: it ran past its time limit, 3 s (testTimeout's 1 s times the load factor 3), and was stopped there" ] \
+    || fail "pushside with testTimeout 1 and the load factor 3 did not fail 5.test.sh alone, naming the limit and the factor: $(cat "$T/$CASE/push.out" "$T/$CASE/cards/pushtest.log" 2>&1)"
 }
 
 # #395 D1. Bug it catches: with the pack's push.check false, a push after a landing still ran the linked test files
