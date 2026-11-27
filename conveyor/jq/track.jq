@@ -5,21 +5,29 @@
           survived: ($e.value.survived // []), loopEnd: ($e.value.loopEnd // null),
           fixed: ($log[$e.key + 1:($rv[$i + 1].key // ($log | length))] | any(.step == "fix" or (.step == "start" and .of == "fix")))}];
     # Where a step of this kind is drawn, from the state the card is in: after failed tests (tfix) the fix, its review
-    # and the tests again are the tests step; from a rebuild on, everything is the landing step.
+    # and the tests again are the tests step; so are the fix and the tests again after failed tests before the first review
+    # (pretest: lines with before "review", pretest(), lib/cardland.sh), until they pass; from a rebuild on, everything is the landing step.
     def place($kind): if $kind == "file" then 16 elif $kind == "rebase" then 12 elif $kind == "land" or .phase == "rebuild" then 13 elif $kind == "build" or $kind == "proof" then 5
-      elif .phase == "tfix" or $kind == "test" then 11 elif $kind == "review" then [6, 8, 10][[.nrev, 2] | min] else [7, 9][[.nfix, 1] | min] end;
+      elif .phase == "tfix" or .phase == "pretest" or $kind == "test" then 11 elif $kind == "review" then [6, 8, 10][[.nrev, 2] | min] else [7, 9][[.nfix, 1] | min] end;
     def track($of; $perr): . as $c | .x.log as $log
       | ["queued", "picked", "worktree ready", "dependencies linked", "brief written", "building", "review 1", "fix 1", "review 2", "fix 2", "review 3",
          "tests", "rebuild", "landing", "pushed", "issue closed", "follow-ups filed"] as $names
       | (reduce $log[] as $l ({s: [range(17) | {state: "todo", sec: null}], phase: "main", nrev: 0, nfix: 0, cur: null};
           def put($i; $st): .s[$i].sec = (.s[$i].sec // 0) + ($l.took // 0) | .s[$i].state = ($st // .s[$i].state) | .cur = $i;
           def main($st): if .phase == "main" then $st else null end;
-          if $l.step == "picked" then .s[1].state = "done" | .s[0] = {state: "done", sec: (try (($l.time | fromdate) - ($l.created | fromdate)) catch null)}
+          # A review, or its start, ends the pretest phase (below) with no pass line before it: a run again on a main that is
+          # red now runs no test and goes on to the review (pretest(), lib/cardland.sh).
+          (if .phase == "pretest" and ($l.step == "review" or ($l.step == "start" and $l.of == "review")) then .phase = "main" else . end)
+          | if $l.step == "picked" then .s[1].state = "done" | .s[0] = {state: "done", sec: (try (($l.time | fromdate) - ($l.created | fromdate)) catch null)}
           elif $l.step == "worktree" then put(2; "done") elif $l.step == "deps" then put(3; "done") elif $l.step == "brief" then put(4; "done")
           elif $l.step == "build" then put(5; "done")
           elif $l.step == "review" then put(place("review"); main("done")) | .nrev += 1
           elif $l.step == "fix" then put(place("fix"); main("done")) | if .phase == "main" then .nfix += 1 else . end
           # A held test line (card(): the machine's failures, issue 221) is no failure: the step is neither failed nor done.
+          # A test line before the first review (before: "review") leaves the tests step's state as it is (the Test step comes after the reviews):
+          # its fail starts the pretest phase, and its pass ends it, so the first review is drawn as review 1 (a review ends it too: above).
+          elif $l.step == "test" and $l.before == "review" then put(11; null)
+            | if $l.result == "fail" and .phase == "main" then .phase = "pretest" elif $l.result == "pass" and .phase == "pretest" then .phase = "main" else . end
           elif $l.step == "test" then place("test") as $i | put($i; if $l.result == "fail" then "failed" elif $l.result == "pass" and $i == 11 then "done" else null end)
             | if $l.result == "fail" and .phase == "main" then .phase = "tfix" else . end
           # The landing that met the conflict ran until the rebuild began: those seconds stay with the landing. The
@@ -46,6 +54,9 @@
             | if $l.stop == "deps" and .s[2].state == "todo" then .s[2].state = "done" else . end
           else . end)) as $t
       | ($log | last) as $last
+      # pre: the card is in its tests before the first review (pretest(), lib/cardland.sh: their start line is marked
+      # before "review"), or in the fix of them, so the reviews and fixes drawn ahead of the tests step are still to come, not skipped.
+      | ($t.phase == "pretest" or ($last.step == "start" and $last.of == "test" and $last.before == "review")) as $pre
       # A bug card's proof run (snapshot.sh: .proof) is drawn on Build, the step whose change it checks, never as the review after it.
       | (if $c.result != "" then null elif $last.step == "start" and $last.of != "split" then $last.of elif $c.proof then "proof"
          else {build: "build", review: "review", fix: "fix", tests: "test", landing: "land"}[$c.x.at] // null end) as $kind
@@ -68,7 +79,7 @@
       # Nor is the rebuild skipped by a landing that has only begun: that landing may yet meet a conflict.
       | ([(if $kind == "file" then null else $at end) // -1, ($t.s | to_entries | map(select(.value.state != "todo" and .key != 16) | .key) | max // -1)] | max | [., 14] | min) as $reached
       | [range(17) as $i | $t.s[$i] | {name: $names[$i], state: (if $i == $at then (if $label == "fix after failed tests" or ($after | IN("pushfail", "pushheld", "issuefail")) then "failed" else "now" end)
-          elif .state == "todo" and $i < $reached and ($i != 12 or $reached > 13) then "skipped" else .state end), sec} + (if $i == 16 and .n != null then {n} else {} end)] as $detail
+          elif .state == "todo" and $i < $reached and ($i != 12 or $reached > 13) and ($pre and $i >= 6 and $i <= 10 | not) then "skipped" else .state end), sec} + (if $i == 16 and .n != null then {n} else {} end)] as $detail
       # The six steps every card is drawn with: Build (the set-up from the worktree on, then the build; never
       # the time the issue sat queued), Review and Fix (every round, with their count), Test, Land (the rebuild after a
       # conflict is part of the landing) and Push (the push of main, the close of the issue and the follow-ups named on it).
@@ -100,8 +111,16 @@
           # that reused a pass (card(): reused) keeps what the pass it reused was.
           # Its runs' seconds waiting for a test slot and running, added up (a line that does not give them adds none).
           # runs: the runs the lines record; a line with rerun (tests() ran the failed cases again at once) is two.
-          elif $l.step == "test" then add(3) | .runs = (.runs // 0) + (if $l.rerun != null then 2 else 1 end) | .s[3].state = (if $l.result == "pass" then "done" else "todo" end)
-            | .s[3].rerun = (if $l.result == "pass" and $l.reused == true then .s[3].rerun == true else $l.result == "pass" and $l.rerun != null end)
+          # A pass before the first review (before: "review", pretest(), lib/cardland.sh) leaves the step to come: the Test step runs after the reviews.
+          # ag: what of the last run before the review passed only on re-run, [{file, cases}] (rows.jq again); a later pass that went
+          # first time (ranFiles, ranCases) and ran not each of them kept their pass (tests(): <worktree>.rerun), so it is drawn rerun too.
+          # An entry was run again when that pass ran its file whole (no ranCases of it), or ran each of its cases.
+          elif $l.step == "test" then add(3) | .runs = (.runs // 0) + (if $l.rerun != null then 2 else 1 end) | .s[3].state = (if $l.result == "pass" and $l.before != "review" then "done" else "todo" end)
+            | .s[3].rerun = (if $l.result == "pass" and $l.reused == true then .s[3].rerun == true
+                elif $l.ranFiles != null then any((.ag // [])[]; . as $a | ($a.file | IN($l.ranFiles[]) | not)
+                  or (($l.ranCases // {})[$a.file] as $rc | $rc != null and ($a.cases == [] or any($a.cases[]; IN($rc[]) | not))))
+                else $l.result == "pass" and $l.rerun != null end)
+            | .ag = (if $l.before == "review" then $l.again // [] else .ag end)
             | if ($l.wait | type) == "number" and ($l.run | type) == "number" then .s[3].wait = (.s[3].wait // 0) + $l.wait | .s[3].run = (.s[3].run // 0) + $l.run else . end
           # The landing that met a conflict ran until the rebuild began: those seconds are the landing's.
           elif $l.step == "start" and $l.of == "split" then .
@@ -130,7 +149,7 @@
              else .reason // "" | "GitHub did not close the issue" + (if . == "" then "" else ": \(.)" end) end) else null end) as $why
       | {steps: [range(6) as $i | $s6[$i] | {name: ["Build", "Review", "Fix", "Test", "Land", "Push"][$i],
             # Land is skipped only on a card closed unlanded.
-            state: (if .state == "todo" and $i < $top and ($i != 4 or $u.closed) then "skipped" else .state end), sec}
+            state: (if .state == "todo" and $i < $top and ($i != 4 or $u.closed) and ($pre and ($i == 1 or $i == 2) | not) then "skipped" else .state end), sec}
           + (if $i == 0 and $six == 0 and $u.rc then {replyFix: "now"} elif $i == 0 and .replyFix != null then {replyFix} else {} end)
           + (if $i == 0 and $six == 0 and $kind == "fix" and $u.lg == "review" then {lintFix: "now"} elif $i == 0 and .lintFix != null then {lintFix} else {} end)
           # A lint fix on Fix (the landing gate's, or the review gate's after a fix round) or on Land (the review gate's

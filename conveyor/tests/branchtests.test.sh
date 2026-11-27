@@ -20,9 +20,9 @@ t_branchtests() {
   out=$(loop land-branch fast-two) && fail "a branch whose changed tests fail exited zero: $out"
   c=$(newest); count "3 4 8"
   # Bug: a stub that logged its own `-- FAIL widget.test.ts` too made one stub run two failed files.
-  [ "$(st "select(.card == \"$c\" and .step == \"test\") | .failures.files | map(.file) | join(\" \")" | sort -u)" = a.test.sh ] \
-    || fail "a failed test step does not name a.test.sh alone: $(st "select(.card == \"$c\" and .step == \"test\") | .failures | tojson")"
-  [ "$(steps "$c")" = "picked worktree deps brief start review start test start fix start review start test start fix start review start test start fix start review start test blocked " ] && [ "$(git -C "$R" rev-parse main)" = "$at" ] && [ ! -e "$R/e.txt" ] \
+  [ "$(st "select(.card == \"$c\" and .step == \"test\" and .before == null) | .failures.files | map(.file) | join(\" \")" | sort -u)" = a.test.sh ] \
+    || fail "a failed test step does not name a.test.sh alone: $(st "select(.card == \"$c\" and .step == \"test\" and .before == null) | .failures | tojson")"
+  [ "$(steps "$c")" = "picked worktree deps brief start test start review start test start fix start review start test start fix start review start test start fix start review start test blocked " ] && [ "$(git -C "$R" rev-parse main)" = "$at" ] && [ ! -e "$R/e.txt" ] \
     || fail "a failing changed test did not block the landing: $(steps "$c")"
   st "select(.card == \"$c\" and .step == \"blocked\") | .tail" | grep -q 'FAIL widget.test.ts' && grep -q "branch fast-two: blocked" <<<"$out" || fail "the blocked line or the report lacks the reason: $out"
   [ ! -e "$STUB/comments" ] || fail "a card of no issue posted a comment on an issue: $(cat "$STUB/comments")"

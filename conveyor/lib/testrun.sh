@@ -287,12 +287,12 @@ testrec() { # <worktree> <exit> <seconds>
 tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alone]
   local cmd at rc r p='' b='' t='' f o l=() wn wb w=$SECONDS t0 ob mf mw off kp ko ka kc cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-} TEST_FAST=''
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide" "$1.noresult"
-  # The files the run before timed (testlist.sh timed()): kept below when this run keeps its passes and so may not run them.
-  mapfile -t l < <(testlogs "$1"); o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
+  # The files the run before timed (testlist.sh timed()): kept below when this run keeps its passes and so may not run them; not when a pass line holds those times already (<worktree>.timesrec, cardland.sh pretest(): the Tests page would count that run twice).
+  mapfile -t l < <(testlogs "$1"); o=''; [ -e "$1.timesrec" ] || o=$({ cat "$1.oldtimes" "$1.times" "$1.reported"; [ ${#l[@]} = 0 ] || grep -h '^TESTRUN sec' "${l[@]}"; } 2>/dev/null)
   # The commit the last run's list was tested on (ob: its `base`; mf, for main's change, its `from` when it has one, as a batch's
   # list made on the new HEAD has: batchlist()), and a merge in doubt (<worktree>.whole: card(), settle()), before either goes.
   ob=$(sed -n 's/^base\t//p' "$1.rerun" 2>/dev/null); mf=$(sed -n 's/^from\t//p' "$1.rerun" 2>/dev/null | head -n 1); mf=${mf:-$ob}; mw=$(cat "$1.whole" 2>/dev/null); rm -f "$1.whole"
-  rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.oldtimes" "$1.oldfiles" "$1.times" "$1.reported" "$1.uncovered" "$1.covfirst"; { mkdir "$1.testlog" && checkskept "$1" && packget "${2:-test.fileCommand}" cmd && slot_pool; } 2>"$1.test" || return 1
+  rm -rf "$1.testlog" "$1.turnwait" "$1.first" "$1.passed" "$1.oldtimes" "$1.oldfiles" "$1.times" "$1.reported" "$1.uncovered" "$1.covfirst" "$1.timesrec"; { mkdir "$1.testlog" && checkskept "$1" && packget "${2:-test.fileCommand}" cmd && slot_pool; } 2>"$1.test" || return 1
   if [ "${2:-}" = test.fileCommand ]; then
     [ -n "$cmd" ] || cmd=$(mapfile -t l < <(awk -F'\t' '$1 == "fail" && $2 != "" && !s[$2]++ { print $2 }' "$1.rerun" 2>/dev/null)
       nofilecmd "$1" "${l[@]}") || { narrowstop "$cmd" > "$1.stop"; cat "$1.stop" > "$1.test"; return 1; }
@@ -351,6 +351,9 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
         action: $a}' > "$1.live.tmp" 2>/dev/null && mv -f "$1.live.tmp" "$1.live"
     done
   fi
+  # TEST_STILL (pretest() in lib/cardland.sh): checked once the slot is held; on failure nothing runs, <worktree>.whole stays, exit 1.
+  if [ -n "${TEST_STILL:-}" ] && ! "$TEST_STILL"; then [ -z "$mw" ] || printf '%s\n' "$mw" > "$1.whole"
+    [ -n "$SLOT_HOME" ] || slot_free; slot_unask; return 1; fi
   TEST_WAIT=$((SECONDS - w)); TEST_FREE=$((SLOT_N - $(slot_used))); w=$SECONDS; t0=$(date +%s)
   # The `off` lines (flakyoff()), which testlist.sh rerunlist() does not keep: given to the run again too, so it runs no
   # case or file kept off that its list would otherwise select (a case of the runner that did not finish).

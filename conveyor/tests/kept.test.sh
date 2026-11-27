@@ -175,7 +175,7 @@ t_keptlong() {
   # loop: the cut findings and the file named for them must reach the retried build's brief, which card() makes (lib/card.sh) and only its run shows; its landing must then leave no file behind
   loop run >/dev/null || fail "run of the retried #9 exited non-zero"
   st 'select(.issue == 9 and .step == "worktree") | .reason' | grep -q "^resumed from the kept patch of card $old:" && [ "$(cat "$STUB/resumed-with" 2>&1)" = a.txt ] \
-    && [ "$(st 'select(.issue == 9 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review GO,test pass,landed ok," ] \
+    && [ "$(st 'select(.issue == 9 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,test pass,review GO,test pass,landed ok," ] \
     || fail "a retry after a card that blocked before taking up the patch forgot the earlier kept patch: $(st 'select(.issue == 9) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   grep -q 'finding number 1 ' "$STUB/brief.build" && ! grep -q 'finding number 100 ' "$STUB/brief.build" && [ "$(wc -c < "$STUB/brief.build")" -lt 100000 ] \
     && [ "$(grep -c 'finding number' "$STUB/carried" 2>&1)" = 100 ] && grep -q "All of it, .* lines, is in the file .*\.carried" "$STUB/brief.build" \
@@ -233,7 +233,7 @@ t_keptunread() {
   loop retry 12 >/dev/null && loop run >/dev/null || fail "run of the retried #12 exited non-zero"
   st 'select(.issue == 12 and .step == "worktree") | .reason' | grep -q "^the kept patch of card $old cannot be read: built from nothing" && grep -q "^# The kept patch of blocked card $old cannot be read$" "$STUB/brief.12" \
     && [ -n "$(st 'select(.issue == 12 and .step == "landed") | .sha')" ] || fail "a kept patch that cannot be read was not given up for a build from nothing: $(st 'select(.issue == 12) | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
-  [ "$(st 'select(.issue == 12) | .step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start test start landed pushed issue " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] \
+  [ "$(st 'select(.issue == 12) | .step' | tr '\n' ' ')" = "picked worktree deps brief start build start test start review start test start landed pushed issue " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] \
     || fail "a card with no conflict ran an extra session: $(st 'select(.issue == 12) | .step' | tr '\n' ' ') $(wc -l < "$STUB/sessions") sessions"
 }
 

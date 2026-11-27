@@ -640,6 +640,17 @@ A card's tests run before it lands. When some cases fail, they run once more bef
 re-run passes goes on with no fix, and the Board shows its Test step as "passed on re-run" (`conveyor/README.md`, The
 test step).
 
+A card's changed tests also run one time before its first review, when the pack has a `test.fileCommand`, main is
+not red and the project's checks (`test.checkCommand`) pass. A failure there goes the same way as a failure in the Test step. When each failed case also fails on main,
+the card waits for main. When a failed case is a fault of the machine and the card's change repairs that fault (the
+repair lane, `conveyor/README.md`, The test step), the review starts. If not, the card waits until the machine passes
+its checks again. Otherwise the card goes to a test fix session before any review, with the same fix rounds.
+After the fix, the tests run again. The review starts when they pass, or when main is red after a wait, a wait for a
+test slot included. The card's history on
+the Board shows that run before the first review. A card that starts from a kept review has no such run. Nor has the
+one review of a blocked card's kept work that a card brings onto main after the review loop of that work ended, or a
+review that is reused. A card that keeps only the findings of an earlier review has the run.
+
 Each failing case shows where it failed when the output has a stack trace after its failure line. Its line ends with
 `(at <file>:<line>: <that line's text>)`. For a JavaScript stack, this is the first frame of the stack that is in a
 file of the checkout. For a Python traceback, it is the last such frame. So an assertion with no message of its own,

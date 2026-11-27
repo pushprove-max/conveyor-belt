@@ -57,9 +57,9 @@ EOS
   # A whole card: that its test step, after the last review's NO-GO and two test fixes, goes on to file and land is
   # card()'s own order of steps, which no function of it makes alone.
   rulecard 7
-  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start fix start review start test start fix start review start test start fix start review start test start filed start landed " ] \
+  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start test start review start fix start review start fix start review start test start fix start review start test start fix start review start test start filed start landed " ] \
     || fail "steps of a card landing on a last NO-GO after its second test fix: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "test") | .result' | tr '\n' ' ')" = "fail fail pass " ] && [ -e "$STUB/tested-first" ] && [ -z "$(st 'select(.step == "blocked")')" ] \
+  [ "$(st 'select(.step == "test") | .result' | tr '\n' ' ')" = "pass fail fail pass " ] && [ -e "$STUB/tested-first" ] && [ -z "$(st 'select(.step == "blocked")')" ] \
     && [ "$(st 'select(.step == "landed") | [.sha, (.followups | length)] | tojson')" = "[\"$(git -C "$R" rev-parse main)\",1]" ] \
     || fail "the card did not land with its follow-up after its tests passed, or filed it first: $(st 'select(.step == "test" or .step == "landed")')"
   [ "$(st 'select(.step == "test" and .result == "fail") | .failures.files | map(.file) | join(" ")' | paste -sd,)" = a.test.sh,a.test.sh ] \
@@ -97,7 +97,7 @@ t_testsfix() {
   # A whole card: the TESTFIXES (3) fix rounds, and the block after them, are card()'s test step, which only the
   # card's own run takes after its reviews.
   rulecard 7
-  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start fix start review start test start fix start review start test start fix start review start test start fix start review start test blocked " ] \
+  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start test start review start fix start review start fix start review start test start fix start review start test start fix start review start test start fix start review start test blocked " ] \
     || fail "steps of a NO-GO card whose tests fail after each of its 3 test fixes: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
   [ "$(wc -l < "$STUB/sessions") $(wc -l < "$STUB/reviews") $(wc -l < "$STUB/tests")" = "6 6 8" ] \
     || fail "sessions, reviews and test runs are $(wc -l < "$STUB/sessions") $(wc -l < "$STUB/reviews") $(wc -l < "$STUB/tests"), not 6 6 8"
@@ -267,7 +267,7 @@ t_trailers() {
   printf '%s\n' 'mkdir -p café; touch café/c-guard.test.ts' '[ "$(wc -l < "$STUB/sessions")" -lt 2 ] || echo "Mutation-verified: removed the check, the test went red" > "$PWD.trailers"' > "$STUB/build"
   echo 'rm -f "$PWD.trailers"' >> "$STUB/test-cmd"
   rulecard 9
-  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start test start landed " ] \
+  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start test start review start fix start review start test start landed " ] \
     && [ "$(wc -l < "$STUB/sessions") $(wc -l < "$STUB/reviews")" = "2 2" ] && grep -qx 'Mutation-verified: removed the check, the test went red' "$STUB/asked" \
     || fail "the trailer the fix session wrote was not reviewed again: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
   # The whole message, so the trailer is checked in its place: after Closes, before the Conveyor card line.
@@ -284,7 +284,7 @@ t_trailermissing() {
   tune '.commit.trailers = [{"when": "(conformance|guard|parity|coverage)[^/]*\\.test\\.(ts|tsx)$", "token": "Mutation-verified", "ask": "Say what you broke and how the test went red."}]'
   echo "$GO" > "$STUB/review.1"; echo 'touch b-guard.test.ts' > "$STUB/build"; head=$(git -C "$R" rev-parse main)
   rulecard 8
-  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix blocked " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] \
+  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start test start review start fix blocked " ] && [ "$(wc -l < "$STUB/sessions")" = 2 ] \
     && grep -q 'Say what you broke and how the test went red. It adds b-guard.test.ts.' "$STUB/brief" \
     || fail "a card missing a required trailer did not get one fix session asking for it, then stop: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
   st 'select(.step == "blocked") | .reason' | grep -qF 'missing after its one fix session; nothing landed: Mutation-verified (it adds b-guard.test.ts)' \

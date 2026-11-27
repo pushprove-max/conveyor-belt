@@ -461,7 +461,7 @@ t_lintgatemerge() {
   landgate "sed -i '/BAD/d' a.txt" $'[P2] a.txt:1 a nit\nUSER-VISIBLE: no\nVERDICT: NO-GO'
   # loop: the merge onto main between the card's tests and its landing comes only from a whole card run
   loop run > /dev/null || fail "run exited non-zero"
-  [ "$(gatesteps)" = 'lint review lint test lint fix review lint test landed' ] && [ "$(did)" = 'build lintfix' ] \
+  [ "$(gatesteps)" = 'lint test review lint test lint fix review lint test landed' ] && [ "$(did)" = 'build lintfix' ] \
     || fail "the merge's finding did not get one fix before any test and then a review: $(gatesteps); $(did)"
   [ "$(st 'select(.step == "fix") | .reason')" = 'lint: 1 finding(s) of the change on main as it is now' ] \
     || fail "the fix line does not say it fixed lint findings: $(st 'select(.step == "fix")')"
@@ -479,7 +479,7 @@ t_lintgatemergeleft() {
   landgate 'echo "still BAD" >> a.txt' "$GO"
   # loop: the merge onto main between the card's tests and its landing comes only from a whole card run
   loop run > /dev/null || fail "run exited non-zero"
-  [ "$(gatesteps)" = 'lint review lint test lint fix review lint blocked' ] && [ "$(did)" = 'build lintfix' ] \
+  [ "$(gatesteps)" = 'lint test review lint test lint fix review lint blocked' ] && [ "$(did)" = 'build lintfix' ] \
     || fail "the finding left did not block at the next landing gate: $(gatesteps); $(did)"
   [ "$(st 'select(.step == "blocked") | .reason' | head -n 1)" = 'lint: 2 findings left after its fix session; nothing landed' ] \
     && [ -z "$(st 'select(.step == "landed")')" ] && ! grep -q BAD "$R/a.txt" \
@@ -496,7 +496,7 @@ t_lintgatemergep1() {
   gatesessions 'echo seven >> a.txt; echo BAD >> a.txt' "sed -i '/BAD/d' a.txt" 'echo fixed >> a.txt'
   # loop: the merge onto main between the card's tests and its landing comes only from a whole card run
   loop run > /dev/null || fail "run exited non-zero"
-  [ "$(gatesteps)" = 'lint review lint test lint fix review fix lint review lint test landed' ] && [ "$(did)" = 'build lintfix fix' ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] \
+  [ "$(gatesteps)" = 'lint test review lint test lint fix review fix lint review lint test landed' ] && [ "$(did)" = 'build lintfix fix' ] && [ "$(wc -l < "$STUB/reviews")" = 3 ] \
     || fail "the P1 of the review after the lint fix did not get one fix and a review: $(gatesteps); $(did); $(wc -l < "$STUB/reviews") reviews"
   [ "$(st 'select(.step == "landed") | .followups | length')" = 0 ] || fail "the P1 was filed as a follow-up, not fixed: $(st 'select(.step == "landed") | .followups')"
   # The P1 has no kind, so it is `harm` (docs/cards.md, "A finding with no kind is `harm`").

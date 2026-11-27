@@ -82,13 +82,13 @@ t_checkstep() {
   # loop: the Test step writes its checks line itself (cardland.sh), and only the card's next test run shows it is still its first
   loop run --only 8 >/dev/null || fail "run of #8 exited non-zero"
   # One run of the three files, each alone through test.fileCommand: three test commands, none in the failed step.
-  [ "$(ccsteps 8)" = "build review test fix review test landed" ] && [ "$(cc tests)" = 3 ] \
+  [ "$(ccsteps 8)" = "build test review test fix review test landed" ] && [ "$(cc tests)" = 3 ] \
     || fail "the check's failure in the Test step did not end it before any test ran and go to a fix session: $(ccsteps 8), $(cc tests) test run(s)"
   [ "$(st 'select(.issue == 8 and .step == "test") | select(.checks) | [.result, .reason, (.failures.files | map(.file))] | tojson')" \
     = "[\"fail\",\"the project's checks failed (test.checkCommand: bash $STUB/check); no test file ran\",[\"bash $STUB/check\"]]" ] \
     && st 'select(.issue == 8 and .step == "test" and .checks) | .tail' | grep -q '^bad.txt:1: lint: a stand-in warning$' \
     || fail "the Test step's line does not hold one failure naming the check and its line: $(st 'select(.issue == 8 and .step == "test")')"
-  [ "$(st 'select(.issue == 8 and .step == "test" and (.checks | not)) | [.result, .refused] | tojson')" = '["pass",null]' ] \
+  [ "$(st 'select(.issue == 8 and .step == "test" and (.checks | not) and .before == null) | [.result, .refused] | tojson')" = '["pass",null]' ] \
     || fail "the first run of the card's tests, after a step that ran none, was not its first: $(st 'select(.issue == 8 and .step == "test")')"
 }
 

@@ -16,9 +16,9 @@ t_branchvisible() {
   for i in 1 2; do printf 'USER-VISIBLE: yes: a new button\nVERDICT: GO\n' > "$STUB/review.$i"; done
   lane fast-seen web/f.txt eff; at=$(git -C "$R" rev-parse main)
   out=$(loop land-branch fast-seen) && fail "a visible change landed without the owner's yes: $out"
-  c=$(newest); [ "$(steps "$c")" = "picked worktree deps brief start review blocked " ] && [ "$(git -C "$R" rev-parse main)" = "$at" ] && [ ! -e "$STUB/comments" ] \
+  c=$(newest); [ "$(steps "$c")" = "picked worktree deps brief start test start review blocked " ] && [ "$(git -C "$R" rev-parse main)" = "$at" ] && [ ! -e "$STUB/comments" ] \
     && st "select(.card == \"$c\" and .step == \"blocked\") | .reason" | grep -q "needs Dana's yes: a new button" || fail "visible change of a branch card: $(steps "$c") $out"
   git -C "$T/$CASE/lane-fast-seen" commit -q --allow-empty -m $'fix(tooling): the button\n\nVisible change approved: Dana, r-1'
   out=$(loop land-branch fast-seen) || fail "a visible change with the owner's yes in a commit message did not land: $out"
-  [ "$(cat "$R/web/f.txt")" = eff ] && [ "$(steps "$(newest)")" = "picked worktree deps brief start review start test start landed " ] || fail "the approved visible change is not on main"
+  [ "$(cat "$R/web/f.txt")" = eff ] && [ "$(steps "$(newest)")" = "picked worktree deps brief start test start review start test start landed " ] || fail "the approved visible change is not on main"
 }

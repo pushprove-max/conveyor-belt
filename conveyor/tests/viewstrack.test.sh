@@ -58,6 +58,31 @@ t_track() {
   card 35 picked worktree deps brief b "$W" f 'fix:ok:{"reason":"the Done-when check failed: D1"}' r
   card 36 picked worktree deps brief b "$W" f
   card 37 $pre "review:NO-GO:$K" f fix r
+  # Bug: tests before the first review (pretest(), before: "review") that failed, were fixed and passed left the track
+  # in its after-failed-tests state, so the first review was drawn in the tests step ("review 1 after the test fix");
+  # the snapshot dropped the before field, so the track never saw it (rows.jq logline()); the six steps drew the Test
+  # step done from that pass, before the review that comes ahead of it.
+  P='start:ok:{"of":"test","before":"review"}'
+  card 66 picked worktree deps brief b build "$P" 'test:fail:{"before":"review"}' f fix "$P" 'test:pass:{"before":"review"}' r
+  # Bug: while those tests ran (67), or their fix (68), the reviews and fixes ahead of the tests step were drawn
+  # skipped, though they are still to come.
+  card 67 picked worktree deps brief b build "$P"
+  card 68 picked worktree deps brief b build "$P" 'test:fail:{"before":"review"}' f
+  # Bug: the row's step (rows.jq row(), as `conveyor.sh cards` shows it) read a failed run before the review as a failed
+  # Test step, so the fix of review 1's P1 after it (69) was landing; and the pass before review 1 (66) was landing too.
+  card 69 picked worktree deps brief b build "$P" 'test:fail:{"before":"review"}' f fix "$P" 'test:pass:{"before":"review"}' r "review:NO-GO:$K" f
+  # Bug: a failed run before the review whose run again found main red goes to review 1 with no pass line between
+  # (pretest()); the track stayed in its pretest state and drew review 1 in the tests step.
+  card 70 picked worktree deps brief b build "$P" 'test:fail:{"before":"review"}' r
+  # Bug: a.test.sh passed only on re-run before the review; the Test step kept that pass (tests(): <worktree>.rerun) and
+  # ran b.test.sh alone (71), so its line has no rerun, and the six steps drew Test as a plain pass. 72 ran a.test.sh again.
+  A='test:pass:{"before":"review","rerun":{"exit":1,"failures":{"of":null,"files":[{"file":"a.test.sh","cases":[]}],"timeout":null}}}'
+  for n in 71 72; do card $n picked worktree deps brief b build "$P" "$A" r "review:GO:$Z" t "test:pass:{\"ran\":[\"b.test.sh\"$([ $n = 71 ] || echo ',"a.test.sh"')]}"; done
+  # Bug: case one of a.test.sh passed only on re-run before the review; the Test step ran case two of that file alone and
+  # kept case one's pass (73), so the six steps drew Test as a plain pass, as the file was on its ran list. 74 ran case one.
+  A='test:pass:{"before":"review","rerun":{"exit":1,"failures":{"of":null,"files":[{"file":"a.test.sh","cases":[{"name":"one","line":"FAIL [one]: wrong"}]}],"timeout":null}}}'
+  card 73 picked worktree deps brief b build "$P" "$A" r "review:GO:$Z" t 'test:pass:{"ran":["a.test.sh"],"ranCases":{"a.test.sh":["two"]}}'
+  card 74 picked worktree deps brief b build "$P" "$A" r "review:GO:$Z" t 'test:pass:{"ran":["a.test.sh"],"ranCases":{"a.test.sh":["one"]}}'
   # Issue 261: a lint fix is named by the gate on the lint line before it (lint.gate): the review gate's, after the
   # build, is Build's, running (38), then done (39); the landing gate's is a Fix round, running (48).
   lintl() { printf 'lint:%s:{"lint":{"commands":[],"asInstalled":false,"gate":"%s"},"reason":"%s"}' "$@"; }
@@ -107,6 +132,10 @@ t_track() {
   card 63 $pre "review:GO:$Z" t test:pass l 'landed:ok:{"sha":"abh","product":false}' 'pushed:ok:{"flaky":{"files":["lib/a.test.sh"],"issues":[5]}}' issue
   # One snapshot of the cards above, and one jq a card: one after each group and one a line took the case 6 s more.
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
+  [ "$(jq -c '[.belt[] | select(.card | IN("c66", "c69")) | [.card, .step]] | sort' <<<"$out")" = '[["c66","review"],["c69","fix"]]' ] \
+    || fail "the step of cards after tests before their first review: $(jq -c '[.belt[] | select(.card | IN("c66", "c69")) | [.card, .step, .track.records]]' <<<"$out")"
+  [ "$(jq -c '[.belt[] | select(.card | IN("c71", "c72", "c73", "c74")) | [.card, .track.steps[3].state, .track.steps[3].rerun]] | sort' <<<"$out")" = '[["c71","done",true],["c72","done",null],["c73","done",true],["c74","done",null]]' ] \
+    || fail "the Test step's re-run badge after a pass on re-run before the review: $(jq -c '[.belt[] | select(.card | IN("c71", "c72", "c73", "c74")) | [.card, .track.steps[3]]]' <<<"$out")"
   [ "$(jq -c '.belt[] | select(.card == "c34") | .track.records[6:9] | map([.name, .reason])' <<<"$out")" \
     = '[["fix 1","the Done-when check failed: D1 not met"],["review 1 (NO-GO)",null],["fix 2",null]]' ] \
     || fail "a fix lost the reason that started it: $(jq -c '.belt[] | select(.card == "c34") | .track.records' <<<"$out")"
@@ -134,6 +163,10 @@ t_track() {
 29 [16,"filing follow-ups","++++++++++++....>"]
 30 [16,"filing follow-ups","+++++++----++...>"]
 31 [13,"landing","+++++++----+.>..."]
+66 [6,"review 1 of 3","++++++>.........."]
+67 [11,"tests","++++++.....>....."]
+68 [11,"fix after failed tests","++++++.....!....."]
+70 [6,"review 1 of 3","++++++>.........."]
 EOF
   [ "$(jq -c '[.belt[].track.steps | map(.name)] | unique' <<<"$out")" = '[["Build","Review","Fix","Test","Land","Push"]]' ] \
     || fail "the track is not the six steps in order: $(jq -c '[.belt[].track.steps | map(.name)] | unique' <<<"$out")"
@@ -159,6 +192,9 @@ EOF
 48 [2,"++>...",1,1]
 49 [2,"++>...",1,1]
 50 [4,"++-+>.",1,0]
+66 [1,"+>+...",1,1]
+67 [3,"+..>..",0,0]
+68 [2,"+.>...",0,1]
 EOF
   # Bugs (#261): the review gate's lint fix was a Fix round before the first review, and the landing gate's had no
   # note, so neither the Board nor /units could say "Build · lint fix" or "Fix N: lint findings"; the review gate's

@@ -43,7 +43,7 @@ EOF
     || fail "the build's session stats: $(st 'select(.step == "build")')"
   [ "$(st 'select(.step == "review") | [.result, .counts, .model, (.sec | type), .stats] | tojson')" = '["GO",{"P0":0,"P1":0,"P2":0,"P3":0},"x","number",{"turns":1,"tools":{"command_execution":2}}]' ] \
     || fail "the review's measurements: $(st 'select(.step == "review")')"
-  [ "$(st 'select(.step == "test") | .tests | tojson')" = '{"files":1,"total":7,"passed":6,"failed":0,"skipped":1}' ] || fail "the test run's counts: $(st 'select(.step == "test")')"
+  [ "$(st 'select(.step == "test" and .before == null) | .tests | tojson')" = '{"files":1,"total":7,"passed":6,"failed":0,"skipped":1}' ] || fail "the test run's counts: $(st 'select(.step == "test" and .before == null)')"
   [ "$(st 'select(.step | IN("worktree", "brief", "landed")) | [.step, .limit, .depth, .diff] | tojson' | tr '\n' ' ')" \
     = '["worktree",40,null,null] ["brief",null,1,null] ["landed",42.5,null,{"files":1,"added":1,"removed":0}] ' ] || fail "limit, depth or diff: $(st 'select(.step | IN("worktree", "brief", "landed"))')"
   [ "$(st 'select(.step == "pushed") | .sec | type')" = number ] || fail "the push's seconds: $(st 'select(.step == "pushed")')"
@@ -52,7 +52,7 @@ EOF
   recok "$S/cards.jsonl" "a card run with every new field"
   out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
   [ "$(jq -c '.landed[0].metrics | [.depth, .diff.files, .limit, .reviews, .firstReview, (.timeline | map([.step, .sec != null, .model]))]' <<<"$out")" \
-    = '[1,1,{"before":40,"after":42.5,"used":2.5},1,"GO",[["build",true,"claude-opus-5-5"],["review",true,"x"],["test",true,null]]]' ] || fail "the landed card's metrics: $(jq -c '.landed[0].metrics' <<<"$out")"
+    = '[1,1,{"before":40,"after":42.5,"used":2.5},1,"GO",[["build",true,"claude-opus-5-5"],["test",true,null],["review",true,"x"],["test",true,null]]]' ] || fail "the landed card's metrics: $(jq -c '.landed[0].metrics' <<<"$out")"
 }
 
 # The cases below were one with this, each part on a main of its own: apart, they run side by side.

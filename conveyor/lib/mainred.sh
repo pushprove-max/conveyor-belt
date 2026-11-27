@@ -759,8 +759,8 @@ mainwait() { # <worktree> <main's commit> <case>...
       mainprobe "${1##*/}" "$u" "$u" '[]' "$on"; r=$?; probelet # this run makes no entry
       [ "$m" = null ] || mainrun=$(jq -cn --argjson a "$mainrun" --argjson m "$m" '$m + {sec: (($a.sec // 0) + $m.sec)}') || mainrun=$m
       # Each run on main is on a start line of card()'s test step at once (its card c and issue n), not once the wait
-      # ends: a card shut while it waits (endcard(), a SIGKILL) would lose it.
-      [ "$m" = null ] || [ -z "${c:-}" ] || [ -z "${n:-}" ] || record "$c" "$n" start ok "$(jq -c '{of: "test", mainRun: .}' <<<"$m")"
+      # ends: a card shut while it waits (endcard(), a SIGKILL) would lose it. pretest()'s tbefore sets its before.
+      [ "$m" = null ] || [ -z "${c:-}" ] || [ -z "${n:-}" ] || record "$c" "$n" start ok "$(jq -c --arg b "${tbefore:-}" '{of: "test", mainRun: .} + (if $b == "" then {} else {before: $b} end)' <<<"$m")"
       [ $r = 0 ] && [ -n "$sha" ] && [ "$sha" != "$on" ] \
         && jq -en --slurpfile u <(printf '%s' "$u") --slurpfile m <(printf '%s' "$mf") --slurpfile h <(printf '%s' "$hits") --slurpfile c <(printf '%s' "$ctl") --slurpfile f <(printf '%s' "$cf") \
           '$u[0] as $u | $m[0] as $m | $h[0] as $h | $c[0] as $c | $f[0] as $f | ($c == [] or $c - $f != [])

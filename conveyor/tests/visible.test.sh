@@ -352,7 +352,7 @@ t_visiblecap() {
   for i in 1 2 3; do printf '%s\n' "$(moved $i '[P2] a.txt:1 wrong word' | p1at2 "$i")" "$YES" 'VERDICT: NO-GO' > "$STUB/review.$i"; done; runs=$(wc -l < "$STUB/tests")
   # loop: that the last NO-GO reaches the gate, and the gate comes before its tests and its follow-ups, is card()'s order
   loop run >/dev/null || fail "cap run exited non-zero"
-  [ "$(st 'select(.issue == 20) | .step' | tr '\n' ' ')" = "picked worktree deps brief start build start review start fix start review start fix start review blocked " ] || fail "steps of a visible card at the cap: $(steps 20)"
+  [ "$(st 'select(.issue == 20) | .step' | tr '\n' ' ')" = "picked worktree deps brief start build start test start review start fix start review start fix start review blocked " ] || fail "steps of a visible card at the cap: $(steps 20)"
   [ "$(st 'select(.issue == 20 and .step == "blocked") | .reason')" = "visible to customers or staff: needs Dana's yes: guests see a new Pay button" ] || fail "a visible NO-GO at the cap was not blocked for Dana's yes: $(steps 20)"
   [ "$(git -C "$R" rev-parse HEAD)" = "$head" ] && [ ! -e "$STUB/filed" ] && [ ! -e "$STUB/closed" ] && [ "$(wc -l < "$STUB/tests")" = "$runs" ] || fail "a visible NO-GO at the cap landed, filed follow-ups or ran the tests"
   grep -qx '20 --body \*\*Blocked: the change is visible to customers or staff, so it needs a yes\*\*' "$STUB/comments" && grep -qx "visible to customers or staff: needs Dana's yes: guests see a new Pay button" "$STUB/comments" && grep -q 'wrong word' "$STUB/comments" || fail "the cap card's sentence and findings were not posted: $(cat "$STUB/comments")"

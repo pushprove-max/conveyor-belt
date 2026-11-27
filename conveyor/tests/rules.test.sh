@@ -156,7 +156,7 @@ CHECK
   # with no test run and no session after its build, the lines of both checks at the end of its tail.
   echo 'echo "{\"hex\":4}" > baseline.json; echo SCHEMA_5 >> schema.txt' > "$STUB/build"; echo "$GO" > "$STUB/review.1"; k=$(git -C "$R" rev-parse HEAD)
   rulecard 7
-  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start review blocked " ] && [ ! -e "$STUB/tests" ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] \
+  [ "$(st '.step' | tr '\n' ' ')" = "picked worktree deps brief start build start test start review blocked " ] && [ ! -e "$STUB/tests" ] && [ "$(wc -l < "$STUB/sessions")" = 1 ] \
     && [ "$(git -C "$R" rev-parse HEAD)" = "$k" ] || fail "a card that fails a product check landed, ran its tests or got a fix session: $(st '"\(.step) \(.reason)"' | tr '\n' ,)"
   [ "$(st 'select(.step == "blocked") | .reason')" = "a product check failed; nothing landed." ] \
     && [ "$(st 'select(.step == "blocked") | .tail' | tail -n 3)" = $'LOOSENED baseline.json hex: 3 -> 4\nschema-check.sh (exit 1):\nadds schema 5 with no old-format test' ] \
@@ -329,7 +329,7 @@ t_packstops() {
 7|export CONVEYOR_CARD_RULES=$T/$CASE/none.md|picked worktree deps blocked |brief: the card rules file $T/$CASE/none.md is missing or empty; a card never builds without it
 8|export CONVEYOR_CARD_RULES=$T/$CASE/blank.md|picked worktree deps blocked |brief: the card rules file $T/$CASE/blank.md is missing or empty
 9|jq '. + {permissions: {}}' "\$SRC/lib/test-hooks.json" > "\$R/.conveyor/hooks.json"|picked worktree deps blocked |$R/.conveyor/hooks.json is not {"hooks": {<event>: [...]}}
-10|tune '.commit.trailers = [{"when": "[", "token": "Mutation-verified", "ask": "Say what you broke."}]'|picked worktree deps brief start build start review blocked |the engine could not read the commit trailers that the pack requires
+10|tune '.commit.trailers = [{"when": "[", "token": "Mutation-verified", "ask": "Say what you broke."}]'|picked worktree deps brief start build start test start review blocked |the engine could not read the commit trailers that the pack requires
 EOS
   [ "$(git -C "$R" rev-parse HEAD)" = "$h" ] || fail "a card with an invalid pack input landed: $(git -C "$R" log --oneline)"
 }

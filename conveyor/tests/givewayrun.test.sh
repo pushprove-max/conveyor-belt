@@ -65,7 +65,7 @@ EOF
     || fail "#7 did not give way for its rebase, or does not name #8: $(cat "$STUB/rebaseclaim" 2>/dev/null)"
   [ "$(sed -n '1p;8p;20p;21p' "$R/a.txt" | tr '\n' ' ')" = "eight eight-8 twenty seven " ] && [ "$(wc -l < "$R/a.txt")" -eq 21 ] \
     || fail "main does not hold #8's change, main's own and #7's as rebuilt: $(cat "$R/a.txt")"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test rebase review test test landed " ] \
+  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build test review test rebase review test test landed " ] \
     || fail "steps of #7: $(st "select(.issue == 7) | .step" | tr '\n' ' ')"
 }
 

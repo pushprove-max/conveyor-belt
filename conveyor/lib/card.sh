@@ -10,7 +10,7 @@
 . "$HERE/lib/lint.sh" || exit 1
 . "$HERE/lib/cardland.sh" || exit 1
 began() { # <card> <issue> <what begins> [<more fields of the start line, a JSON object>]
-  local e=''
+  local e=''; [ -n "${4:-}" ] || [ "$3" != test ] || [ -z "${tbefore:-}" ] || set -- "$1" "$2" "$3" "$(jq -cn --arg b "$tbefore" '{before: $b}')" # a test step's start line in pretest() (lib/cardland.sh: tbefore), as settle()'s in its fit onto main there, is marked before: "review", so the Board draws no landing (track.jq)
   switchcode "$1" "$3"; rm -f "$CARDS/$1.firsttry" "$CARDS/$1.firsttry.new" "$CARDS/$1.reviewed"; capmark "$1" "$3" # capmark(): lib/run.sh
   # A card on the code of a commit it switched to: its start line names that commit, so prune() (inflight(),
   # lib/install.sh) keeps its install while the card runs; its worktree line names the commit it started on.
@@ -225,7 +225,7 @@ afterreview() {
   priv=''; stop=''; last0=''; p1=''
   if [ -n "$hard" ]; then stop=repeat
   else
-    stop=$(loopstop "$res" "$((pass + rounds))" "$rebased" "$tfix" "$lfix" "$mode" "$rep" "$wt.review")
+    stop=$(loopstop "$res" "$((pass + rounds))" "$rebased" "$([ "${tfix:-0}" -le "${pretfix:-0}" ] || echo "$tfix")" "$lfix" "$mode" "$rep" "$wt.review") # a test fix before the first review (pretest(), lib/cardland.sh: pretfix) makes no review a last one
     [ "$stop" != new-p2 ] || { d=$(fudepth "$issue") && [ "$d" -lt "$MAX_DEPTH" ]; } || stop='' # a card at the follow-up depth cap files none: it gets the fix round (bug: its P2s landed, declined)
   fi
   [ -z "$stop" ] || [ "$res" = GO ] || ! priv=$(privown "$wt") || [ -z "$priv" ] || [ "${privfix:-0}" -ge "$PRIVFIXES" ] || stop=''
@@ -279,7 +279,7 @@ card() { # <card> <issue> [<branch> <tip>]
   local me cc seen=none sect='' nyes=0 heldto='' vmode='' ybase rules sprompt hdr fin='' finrev earlier='' prv='' caught='' owe tsess='' cmsg rtr rrev ro='[]' pro='[]' rmsg ported='' kp='' mates=() t5=() trc ran apart='' back='' rf sf='' sk='' mk='' pk='' pt='' ps=''
   local vrule=on rounds=0 rep hard refix='' waitsec=0 behind='[]' cpid chead cseen own kept='' docpass='' docs parsecheck='' pfix='' # waitsec, behind: the seconds it has waited on other cards, and those cards (settle())
   local sv an ex ids fl # sv, an, ex: a review's survived findings, its answers and the lines it cites (donewhen.sh repeats(), answers(); review.sh excerpts()); ids, fl: the fix round's numbered findings and its lines (donewhen.sh numbered(), fixlines())
-  local grown='' # grown: the judge was asked about the size of its change (growcheck(), lib/slices.sh)
+  local grown='' pretested='' tbefore='' pretfix='' # grown: the judge was asked about the size of its change (growcheck(), lib/slices.sh); pretested: pretest() ran or was skipped, once a card, and is not due again until a test-fix round; tbefore: review while pretest() runs, the before field of its test lines (cardfailed()); pretfix: the test-fix rounds (tfix) given before the first review
   local rline='' ended='{}' stop='' finend='{}' earlyend='' fe # rline, ended, stop: a review's line before it is written, and why the loop ended (loopstop()); finend, earlyend, fe: why the loop of a port's kept review ended, and the stop the filed line carries
   local lfix='' cfix='' cland='' # lfix: the change the landing gate's lint fix left, its cardpatch() (lintgate(), lib/lint.sh); cfix: the BLOCKED lines its persisted-contract fix sessions were given, one a line (contractgate(), lib/contract.sh); cland: those its landings were refused with (cardland(), lib/cardland.sh)
   local fixtree='' rtree='' ftree='' # ftree: the tree the first review read whose judge ruled a finding (judgeruled()), kept for the card (a later ruling does not replace it, or it would hide a fix round made before that one), which the judge is given beside fixtree, to tell a finding on lines a fix round changed after a ruling (judgefindings()); fixtree: the tree before the last fix round, which holds the lines that fix deleted (excerpts()); rtree: the one the last review read, which a reused review reads again
@@ -314,7 +314,7 @@ card() { # <card> <issue> [<branch> <tip>]
   # A GO card whose landing conflicts goes round once more: rebase, review. A finished loop whose landing still conflicts is ported once, as `retry` would port it.
   # Whatever the review, the changed tests pass here before anything is filed or landed.
   while pass=$((${pass:-0} + 1)); do
-    go=end; cardreview; sx=$?; [ "$go" != end ] || return $sx
+    go=end; cardreview; sx=$?; case $go in end) return $sx ;; next) continue ;; esac
     go=end; cardfix; sx=$?; case $go in end) return $sx ;; next) continue ;; esac
     go=end; cardready; sx=$?; case $go in end) return $sx ;; next) continue ;; esac
     go=end; cardlanding; sx=$?; case $go in end) return $sx ;; next) continue ;; landed) break ;; esac
@@ -512,7 +512,7 @@ cardbuild() {
 # A review's lines (<card> <issue> <result> <the review line>): the judge's line (step judge, of review: the judge's model, effort, sec, tokens, usage and stats; result failed with its reason when the judge failed; none when the line has no judge with a model: no finding, or a reused review), then the review line, which stays the newest of the pass. The review line's judge field is unchanged: replay and the snapshot read it.
 reviewlines() { local j; j=$(jq -c '.judge | objects | select(.model | strings | . != "") | {of: "review"} + with_entries(select(.key | IN("model", "effort", "sec", "tokens", "usage", "stats"))) + (if .failed then {reason: (.failed | tostring)} else {} end)' <<<"$4" 2>/dev/null); [ -z "$j" ] || record "$1" "$2" judge "$(jq -r 'if .reason then "failed" else "ok" end' <<<"$j")" "$j"; record "$1" "$2" review "$3" "$4"; }
 # One pass's review: the review gate and the checks before a review, then a review session and its judge, or the
-# review it reuses or keeps, its verdict in res and its line, still to be written, in rline. go: ''.
+# review it reuses or keeps, its verdict in res and its line, still to be written, in rline. go: '', or pretest()'s (next: a test-fix round, no review).
 # shellcheck disable=SC2034 # it declares no variable of its own: docpass, as the rest, is card()'s, read in lib/cardland.sh
 cardreview() {
   redbrief "$c" "$n" "$br"
@@ -524,7 +524,7 @@ cardreview() {
   if [ "$mode" = land ]; then
     # Landing from the kept patch: the kept review is this change's review, and it let the card land (a GO, or a
     # last review's NO-GO), so there is no review here and no review line. A review after this is this card's first.
-    res=$(verdict "$wt.review"); vis=$(visible "$wt.review" any); pass=0
+    res=$(verdict "$wt.review"); vis=$(visible "$wt.review" any); pass=0; pretested=1 # pretested: a card that starts from a kept review runs no tests before a review (pretest())
   elif [ -n "$kept" ]; then
     # Back from the landing rebuild with its change outside documentation (*.md) the one its last review read: that
     # review stands (kept), with no review session and no review line, and no review is counted.
@@ -543,7 +543,6 @@ cardreview() {
       if [ -n "$pk" ]; then fixproof "$c" "$wt" "$issue" "$sf" "$pk"; else optproof "$c" "$wt" "$issue" "$sf"; fi || { SPEEDCHECKED=$([ -n "$pk" ] || echo "$SPEEDCHECK") BLOCKCLASS='proof check' block "$c" "$n" "$wt" "review $pass: $(<"$wt.unfixed")"; return; }
       pt=$(git -C "$wt" add -A && git -C "$wt" write-tree); [ -n "$pk" ] || ps=$(stabilised "$wt")
     fi
-    began "$c" "$n" review
     # The review sees the card's commit trailers beside the diff, and the D<n> lines of the last checked reply.
     more=$(reviewseen "$wt" "$(if [ -n "$sk" ]; then echo "$sk"; elif [ -n "$sf" ]; then echo "$SPEEDREVIEW"; else echo "$BUGREVIEW"; fi)") \
       || { block "$c" "$n" "$wt" "review $pass: the engine could not read the commit trailers of the card"; return; }
@@ -553,8 +552,9 @@ cardreview() {
     # difference, not the change alone.
     cpid=$(cardpatch "$wt"); chead=$(git -C "$wt" rev-parse HEAD 2>/dev/null); cseen=$(git -C "$wt" hash-object --stdin <<<"$more")
     if [ -z "$fin" ] && t=$(reusable "$c" "$cpid" "$chead" "$cseen"); then
-      echo "conveyor: card $c: its staged change, main, trailers and D<n> lines are those of its last review: that review stands, with no review session"; fixtree=$rtree rr=reused
+      began "$c" "$n" review; echo "conveyor: card $c: its staged change, main, trailers and D<n> lines are those of its last review: that review stands, with no review session"; fixtree=$rtree rr=reused
     else
+      pretest; sx=$?; [ -z "$go" ] || return $sx; go=end; began "$c" "$n" review; cpid=$(cardpatch "$wt"); chead=$(git -C "$wt" rev-parse HEAD 2>/dev/null) # first the card's changed tests, once before its first review session (pretest(), lib/cardland.sh): a fail goes to a test-fix round, and this pass ends with no review; a fail fitted onto a main that moved (cardfailed()) and passed there leaves the review another patch and main commit, read again; a pass leaves go '', set back to end, so a block below still ends the card
       # The one review of a port reads what the port changed: the kept patch against the staged change.
       if [ -n "$fin" ]; then
         finrev=$(<"$wt.review")
@@ -652,7 +652,7 @@ resumeplan() {
         # goes on from there, as a run again does, on main as it is now (rerunsince()).
         cp "$fromk/$from.rerun" "$wt.rerun" 2>/dev/null || :
         mode=session; note="resumed from the kept patch of card $from: one session, then review"
-        if yeskept "$prev"; then mode=land; note="landing from the kept patch of card $from: no build and no review"; elif testkept "$prev"; then mode=land; tland=1; note="starting at the tests from the kept patch of card $from: no build and no review"; fi
+        if yeskept "$prev"; then mode=land; note="landing from the kept patch of card $from: no build and no review"; elif testkept "$prev" "$n"; then mode=land; tland=1; note="starting at the tests from the kept patch of card $from: no build and no review"; fi
         [ -z "$rland" ] || { mode=land; note="landing from the kept patch of card $from, blocked by its review again after review-retry: no build and no review, its review's findings filed as follow-ups"; }
       elif [ -r "$fromk/$from.patch" ] && git apply --numstat "$fromk/$from.patch" >/dev/null 2>&1; then
         mode=port; note="the kept patch of card $from no longer applies to main: one session brings it onto main, then review"

@@ -37,7 +37,7 @@ t_recloop() {
   [ "$(st 'select(.issue == 7 and .step == "picked") | .issue')" = 7 ] || fail "the loop did not pick #7 after the line was set aside: $out"
   loop health | jq -e '.quarantined == [{line: 2, field: "later", time: .quarantined[0].time}]' > /dev/null || fail "health does not name the line set aside: $(loop health)"
   recsteps "a card of the loop" picked worktree brief start build review fix test landed pushed
-  [ "$(st 'select(.issue == 7 and .step == "test") | .list.mode')" = changed ] || fail "the test line has no list of the changed tests: $(st 'select(.step == "test")')"
+  [ "$(st 'select(.issue == 7 and .step == "test" and .before == null) | .list.mode')" = changed ] || fail "the test line has no list of the changed tests: $(st 'select(.step == "test")')"
   recok "$ST/cards.jsonl" "a card of the loop"
 }
 

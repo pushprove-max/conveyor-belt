@@ -562,6 +562,23 @@ Each run of a card's changed tests writes one `test` line to the card records, `
   seconds and its CPU seconds (null when its runner gave none).
 - `times`: the CPU seconds of every test file the card's own run timed, `{"<file>": <CPU seconds>}`: what the test
   rules and the Tests page read (below).
+- `before`: `review` on the line of the run before the card's first review (below), and on the `start` line of that
+  run; absent on the lines of the Test step.
+
+A card's changed tests also run one time before its first review session, with no lint gate, no push check and no
+batch. The run does not start while main is red, or when the pack sets no `test.fileCommand`. It also does not start
+when the project's checks (`test.checkCommand`) fail. The Test step then gives those checks their own fix. It does not start for
+a card that starts from a kept review, for the one review of a blocked card's kept work that a card brings onto main
+after the review loop of that work ended, or for a review that is reused. A card that keeps only the findings of an
+earlier review has the run. A pass writes a `pass` line with
+`before: "review"`, and the review starts. A failure writes a `fail` line with `before: "review"`, and the card goes
+on as after a failed Test step. The failed cases run on main. When each one also fails there, the card waits for
+main. When a failed case is a fault of the machine, the line is `held`, not `fail`, and the card goes to the repair
+lane. When the lane passes the card, the review starts. If not, the card waits until the machine passes its checks
+again. Otherwise a test fix session starts, with the same limit of fix rounds. After the fix, the tests run again
+before the review. When main is red after a wait, the tests do not run again, and the review starts. This is also
+true when main becomes red while the card waits for a test slot. A wait in this
+run has its `start` lines marked `before: "review"` too.
 
 A step line of a card that waited holds `waits`: one `{name, sec}` for each name, with the seconds of all its waits of
 that name added together. The names are `slot`, the `wait` of a `test` line, `judge`, the `judge.sec` of a `review`

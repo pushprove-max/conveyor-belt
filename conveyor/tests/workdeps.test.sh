@@ -91,6 +91,6 @@ t_workdepmissing() {
   out=$(loop land-branch deps 2>&1) && fail "a card whose worktree lacks node_modules landed: $out"
   c=$(newest)
   [ "$(st "select(.card == \"$c\" and .step == \"blocked\") | .reason")" = "tests: node_modules, packages/a/node_modules are missing in the card's worktree; add them to linkFromMain or set worktree.setup" ] \
-    && [ "$(steps "$c")" = "picked worktree deps brief start review start blocked " ] && [ ! -s "$STUB/sessions" ] \
+    && [ "$(steps "$c")" = "picked worktree deps brief start test start review start blocked " ] && [ ! -s "$STUB/sessions" ] \
     || fail "the card was not blocked for the missing folders alone: $(st "select(.card == \"$c\")") $(cat "$STUB/sessions" 2>/dev/null)"
 }

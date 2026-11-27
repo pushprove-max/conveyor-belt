@@ -272,12 +272,12 @@ yeskept() { # <prior json>
     && [ -s "$rev" ] && [ "$(verdict "$rev")" != none ] && [ -n "$(visible "$rev" any)" ]
 }
 # Whether the kept patch of prior() ($1) is one card() takes up at its tests, with no build and no review: its card blocked
-# in its Test step (tests failed again after their fix rounds, or no result 3 times in a row) after its own review's verdict.
-testkept() { # <prior json>
+# in its Test step (tests failed again after their fix rounds, or no result 3 times in a row) after its own review's verdict. Not one that blocked in its tests before its first review (its last test line marked before "review", cardland.sh pretest()): the review it kept is one it carried, another patch's.
+testkept() { # <prior json> <issue>
   local from was rev
   from=$(jq -r .card <<<"$1"); was=$(jq -r .reason <<<"$1"); rev=$(jq -r .review <<<"$1")
   [ -n "$from" ] && { [[ $was == "the changed tests failed again after their "* ]] || [[ $was == "the changed tests gave no result 3 times in a row"* ]]; } \
-    && { [ "$rev" = "$(jq -r .kept <<<"$1")/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } && [ -s "$rev" ] && [ "$(verdict "$rev")" != none ]
+    && { [ "$rev" = "$(jq -r .kept <<<"$1")/$from.review" ] || [ "$rev" = "$CARDS/$from.review" ]; } && [ -s "$rev" ] && [ "$(verdict "$rev")" != none ] && stdb ask issue retried "$2" 2>/dev/null | jq -se --arg c "$from" '[.[] | select(.card == $c and .step == "test")] | last | .before != "review"' > /dev/null
 }
 # How the next card takes up such a kept patch, from the issue as it is now ($1, its json) and the issue as the
 # review of that patch read it (the .body file its card kept when it stopped for the yes, on a landing conflict or in its Test step, $2). Approval lines aside:

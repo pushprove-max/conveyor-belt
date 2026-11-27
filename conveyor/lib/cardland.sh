@@ -178,27 +178,29 @@ cardlanding() {
     case $go in again) go=end; continue ;; end) return $sx ;; *) return ;; esac
   done
 }
+# After a merge onto main (settle(), the rebuild, the port), before any check or test runs (cardtest(), pretest()): every
+# file it changed still parses (parses()). One that does not goes to one fix session, given each such file and its
+# error; still failing after it, the card blocks. Nothing lands meanwhile. Its tests then run whole, a merge in
+# doubt (<worktree>.whole, tests()): no pass of the change before the merge is kept (rerunsince()). parsecheck is
+# cleared when no file fails; else it stands, with go next after the fix session, or go unchanged when the card blocked.
+mergeparse() {
+  local out t
+  [ -n "${parsecheck:-}" ] || return 0
+  out=$(parses "$wt"); t=$?
+  [ $t != 0 ] || { parsecheck=''; return 0; }
+  [ $t = 1 ] || { block "$c" "$n" "$wt" "the engine could not check that the files of the merge onto main parse, so nothing landed: $out"; return; }
+  [ -z "$pfix" ] || { block "$c" "$n" "$wt" "a file the card's merge onto main changed still does not parse after its one fix session; nothing landed."$'\n'"$out"; return; }
+  pfix=1; rm -f "$wt.ready" "$wt.rerun"; echo 'merge in doubt: a file of the merge onto main did not parse' > "$wt.whole"; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
+  redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n# A file no longer parses after the card\'s change was merged onto main: fix that and nothing else\nA merge can keep lines of both sides that do not go together. Each file that fails, the check run on it and its output:\n'"$out" fix) \
+    || { block "$c" "$n" "$wt" "fix: $t"; return; }
+  checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$(jq -c --arg r "a file no longer parses after the merge onto main: $(sed -n 's/: `.*` failed:$//p' <<<"$out" | paste -sd ' ' -)" '. + {reason: $r}' <<<"$t")" || return
+  go=next
+}
 # Before any check or test: the parse check after a merge onto main, the landing gate, the product checks and the
 # project's checks; then its changed tests, alone or in a batch. go: '' (the run ended, its exit in rc), again (the
 # failed product check is its run's result) or next.
 cardtest() {
-  # After a merge onto main (settle(), the rebuild, the port), before any check or test runs: every file it
-  # changed still parses (parses()). One that does not goes to one fix session, given each such file and its
-  # error; still failing after it, the card blocks. Nothing lands meanwhile. Its tests then run whole, a merge in
-  # doubt (<worktree>.whole, tests()): no pass of the change before the merge is kept (rerunsince()).
-  if [ -n "$parsecheck" ]; then
-    out=$(parses "$wt"); t=$?
-    if [ $t = 0 ]; then parsecheck=''
-    else
-      [ $t = 1 ] || { block "$c" "$n" "$wt" "the engine could not check that the files of the merge onto main parse, so nothing landed: $out"; return; }
-      [ -z "$pfix" ] || { block "$c" "$n" "$wt" "a file the card's merge onto main changed still does not parse after its one fix session; nothing landed."$'\n'"$out"; return; }
-      pfix=1; rm -f "$wt.ready" "$wt.rerun"; echo 'merge in doubt: a file of the merge onto main did not parse' > "$wt.whole"; locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
-      redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n# A file no longer parses after the card\'s change was merged onto main: fix that and nothing else\nA merge can keep lines of both sides that do not go together. Each file that fails, the check run on it and its output:\n'"$out" fix) \
-        || { block "$c" "$n" "$wt" "fix: $t"; return; }
-      checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$(jq -c --arg r "a file no longer parses after the merge onto main: $(sed -n 's/: `.*` failed:$//p' <<<"$out" | paste -sd ' ' -)" '. + {reason: $r}' <<<"$t")" || return
-      go=next; return
-    fi
-  fi
+  mergeparse; sx=$?; [ -z "$parsecheck" ] || return $sx
   # The landing gate (lintgate(), lib/lint.sh), before any check or test: a fix of lint findings goes round to a review, a last review (lfix), and back here, where a finding left on the change
   # that fix left blocks. Then the pre-push hook's persisted-contract check (contractgate(), lib/contract.sh): a refusal goes to one fix session and back to review the same way. Then main's push checks on the card's change (pushgate(), lib/contract.sh): a failure, or a run past its time limit, blocks it.
   lintgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br" land && contractgate "$c" "$n" "$wt" "$issue" "$sprompt" "$br" && pushgate "$c" "$n" "$wt"; case $? in 1) return ;; 2) kept=''; docpass=''; go=next; return ;; esac
@@ -323,6 +325,73 @@ redelse() { # <card> <issue> <branch> <verdicts() json> <testfails() of its run>
     | [$v[0].verdicts[] | select(.verdict == "main") | .case] | select(length > 0 and all(.[]; IN($held[]) and (IN($own[]) | not)))
     | "every case it still fails fails on main too, and each is a case of another entry, none a case it fixes (\(join(", "))): it does not wait for main; their own fix cards fix them"' "$MAINRED" 2>/dev/null || return 2
 }
+# The card's changed tests, before its first review session (cardreview(), lib/card.sh: after the bug-card check and
+# growcheck()), so a change whose tests fail goes to its test-fix round before a review is paid for. They run as cardtest()
+# runs them for a card alone (tests(), on a test slot), with no lint gate, no push check and no batch. A pass writes a test
+# line marked before: "review", and the Test step keeps its passes (tests(): <worktree>.rerun); a fail writes such a line too and goes the way
+# of a failed Test step (cardfailed()): the same verdicts, fix session and limit of fix rounds (tfix), and this runs again
+# after the fix. It runs once a card (pretested): never for a card that starts from a kept review (cardreview()'s land,
+# or a port's one review: fin), nor while main is red (redmain()), with no test.fileCommand in the pack or when the
+# project's checks fail (treecheck(): the Test step gives them their own fix): such a card goes to its review with no test line. A card that carries an earlier card's review only for its findings
+# (resumeplan()) runs it: a block in it is never taken up at the tests with that review (issues.sh testkept()). A run
+# again after main moved (cardfailed(): again) onto a main that is red now runs no test: the card goes to its review, as
+# does a card whose main went red while it waited for its test slot (pretestok(), asked once tests() holds the slot).
+# A fit onto a main that moved in these tests (cardfailed(): tmain) is not the Test step's: tmain is cleared on the way
+# to the review, so a failure in the Test step after a later move of main is fitted onto main again (testroute(): moved).
+# go: '' (on to the review), next (a fix round: no review this pass, so pass
+# is not counted, and pretfix keeps the rounds given, as the review after them is no last review: loopstop()) or end. A fix session for a merged file that no longer parses (mergeparse()) is such a
+# round too.
+pretest() {
+  local fc red
+  go=end; [ -z "${pretested:-}" ] || { go=''; return 0; }; pretested=1 # card() sets pretested; a test that calls cardreview() alone may not
+  if [ -n "$fin" ] || redmain || ! packget test.fileCommand fc || [ -z "$fc" ]; then tmain=''; go=''; return 0; fi # tmain: a fit of an earlier run of these tests (cardfailed(): settle() gave next) is not the Test step's either
+  while :; do
+    # A fit onto main that moved (cardfailed(): settle()) may merge files that no longer parse: they are checked
+    # before the tests run there, as cardtest() checks them; the fix session after a fail is a fix round with no review.
+    mergeparse; sx=$?; [ -z "${parsecheck:-}" ] || { [ "$go" != next ] || { pretested=''; pass=$((pass - 1)); }; return $sx; }
+    # The project's checks (donewhen.sh treecheck()) that fail, or cannot run, are not the tests failing: the Test step
+    # stops on them before any test runs and gives them to their own fix (cardtest()). A test.fileCommand may run them
+    # too, so no test runs here: on to the review, with no test line.
+    treecheck "$wt" > /dev/null || { tmain=''; go=''; return 0; }
+    began "$c" "$n" test '{"before":"review"}' # its start line marked too: the Board draws the run before the reviews, not as the Test step (track.jq)
+    sec=$SECONDS; own=1; ran=1; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"; red=''
+    TEST_STILL=pretestok tests "$wt"; rc=$?; [ $rc != 0 ] || slowtests "$wt" || :; sec=$((SECONDS - sec))
+    [ -z "$red" ] || { tmain=''; go=''; return 0; } # main went red while it waited for its test slot (pretestok()): no test ran, on to the review
+    [ ! -s "$wt.stop" ] || { block "$c" "$n" "$wt" "test: $(<"$wt.stop")"; return; }
+    voidrun "$wt" "$rc" > /dev/null || voids=0
+    if [ $rc != 0 ]; then
+      tbefore=review; go=end; cardfailed; sx=$?; tbefore=''
+      case $go in
+        again) ! redmain || { tmain=''; go=''; return 0; }; continue ;; # the main it was fitted onto (main moved, or its wait for main or the machine ended) is red: on to the review
+        next) pretested=''; pretfix=${tfix:-}; pass=$((pass - 1)); return 0 ;;
+        '') ;; # the repair lane passed it, or its failures are other entries' (redelse()): it goes on as a pass
+        *) return $sx ;;
+      esac
+    fi
+    record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --slurpfile r <(firstrun "$wt" pass) --slurpfile s <(slowrec "$wt") --arg why "$repaired" \
+      '$x[0] + $r[0] + $s[0] + {before: "review"} + (if $why == "" then {} else {reason: $why} end)')"
+    : > "$wt.timesrec" # its times are on this line: the Test step that keeps this pass carries none of them (tests())
+    testrulespass > /dev/null
+    tmain=''; go=''; return 0
+  done
+}
+# pretest()'s check once tests() holds the test slot (TEST_STILL): it fails, and sets pretest()'s red, when main is red
+# now, as main can go red while the card waits for a slot, after pretest() asked before the wait.
+pretestok() { ! redmain || { red=1; return 1; }; }
+# Whether main is red at its commit now, whichever card asks: the main-red record (mainred.sh) holds an entry for main's
+# commit, with a case, whose fix card is not landed or closed (redopen()). redhere() answers only for a card that waits
+# on main: not a main-red fix card, a run limited by --only or a loop with a limit on its picks (no LOOPFIX).
+redmain() {
+  local now out
+  [ -s "$MAINRED" ] && now=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null) || return 1
+  out=$(jq -r --arg s "$now" '[.reds[]? | select(.sha == $s)] | first // empty | (.card // ""), (.cases[].case)' "$MAINRED" 2>/dev/null) || return 1
+  [ "$(wc -l <<<"$out")" -gt 1 ] && redopen "$(head -n 1 <<<"$out")" < /dev/null
+}
+# A test line's fields (on jq's input) marked before: "review" while pretest() runs (tbefore), else as they are.
+beforemark() { jq -c --arg b "${tbefore:-}" 'if $b == "" then . else . + {before: $b} end'; }
+# The step a fit onto main in a failed run (cardfailed(): settle()) waits to begin: test while pretest() runs (tbefore),
+# as the card has had no review yet and its start lines must not show it landing; else land.
+tstep() { if [ -n "${tbefore:-}" ]; then echo test; else echo land; fi; }
 # A test run that failed (rc). go: again (the test step again: no result, a wait for main or the machine, or main
 # moved), next (a fix round, one of TESTFIXES, or a fit onto main that went back) or landed; '' when the repair lane passed it,
 # or when it is a main-red fix card whose failures are other entries' (redelse()). A main-red fix card whose failures
@@ -344,7 +413,7 @@ cardfailed() {
   if t=$(voidrun "$wt" "$rc"); then
     voids=$((voids + 1))
     record "$c" "$n" test fail "$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000' | jq -cRs --slurpfile x <(testrec "$wt" "$rc" "$sec") --slurpfile o <(printf '%s' "$cr") --arg r "no result: $t" \
-      '$x[0] as $x | $o[0] as $o | sub("\n+$"; "") as $t | $x + $o + {reason: $r} + (if $t == "" then {} else {tail: $t} end)')"
+      '$x[0] as $x | $o[0] as $o | sub("\n+$"; "") as $t | $x + $o + {reason: $r} + (if $t == "" then {} else {tail: $t} end)' | beforemark)"
     [ "$voids" -lt 3 ] || { keepbody "$wt" "$issue"; block "$c" "$n" "$wt" "the changed tests gave no result 3 times in a row ($t); nothing landed."; return; }
     echo "conveyor: card $c: its test run gave no result ($t): the test step runs again"
     go=again; return
@@ -356,7 +425,7 @@ cardfailed() {
   # failure the card's: its test line is `held`, not `fail` (the card's test step is not counted as failed), and it
   # waits for the machine hold (below).
   route=$(testroute verdicts "$t")
-  record "$c" "$n" test "$([ "$route" = machine ] && echo held || echo fail)" "$(failline "$wt" "$rc" "$sec" "${out:-null}" "$t" "$cr")"
+  record "$c" "$n" test "$([ "$route" = machine ] && echo held || echo fail)" "$(failline "$wt" "$rc" "$sec" "${out:-null}" "$t" "$cr" | beforemark)"
   testrulespass > /dev/null
   # A failure that is the card's, or one whose verdicts could not be read (the empty list above), taken as the card's:
   # whether main moved, and the fix round, are read after the test rules ran.
@@ -392,7 +461,7 @@ cardfailed() {
   fi
   if [ -n "$held" ]; then
     unmate; away=''; caught=''
-    redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
+    redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" "$(tstep)" "$issue"; rc=$?
     [ $rc != 1 ] || return
     [ $rc != 3 ] || { go=landed; return; } # a batch landed it
     [ $rc != 4 ] || { go=again; return; }
@@ -409,7 +478,7 @@ cardfailed() {
   if [ "$route" = moved ]; then
     echo "conveyor: card $c: main moved since its commit: its change goes onto main as it is now, and what failed runs again there"
     tmain=1; rm -f "$wt.ready"; unmate; away=''; caught=''
-    redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" land "$issue"; rc=$?
+    redbrief "$c" "$n" "$br"; settle "$c" "$n" "$wt" "$sprompt" "$(tstep)" "$issue"; rc=$?
     [ $rc != 1 ] || return
     [ $rc != 3 ] || { go=landed; return; } # a batch landed it
     [ $rc != 4 ] || { go=again; return; }
@@ -448,7 +517,7 @@ caphold() { # <card> <issue> <worktree> <the step it waits to work in> [why it w
   [ -n "${LOOPCARD:-}" ] && { [ "$2" != 0 ] || [ -n "${br:-}" ]; } || { rm -f "$3.capheld"; return 0; }
   : > "$3.capheld" || return 0
   locked turnfree "$1"
-  record "$1" "$2" start ok "$(jq -cn --arg s "$4" '{of: $s, waitFor: "cap"}')"
+  record "$1" "$2" start ok "$(jq -cn --arg s "$4" --arg b "$([ "$4" != test ] || echo "${tbefore:-}")" '{of: $s, waitFor: "cap"} + (if $b == "" then {} else {before: $b} end)')" # before: in pretest()'s fit onto main (tstep())
   echo "conveyor: card $1 ${5:-did not land}; it waits for room under the card cap before it works again"; wakeloop
   at=$(date -u +%FT%TZ)
   while [ -e "$3.capheld" ]; do
@@ -650,7 +719,7 @@ landconflict() {
   # again after a GO. Once a card, and never on a card that is itself the port of an earlier card's conflict: a
   # conflict after the port blocks for the owner.
   if [ -z "$ported" ] && [[ $t == "rebase onto main conflicts: "* ]] && [[ $was != "rebase onto main conflicts: "* ]] && [ -s "$wt.patch" ]; then
-    ported=1; caught=1; pass=0; rounds=0; rm -rf "$wt.rounds"; rebased=''; tfix=''; locked giveway "$c" "$wt"; why=$t; fin=$res; kp=$wt.patch; old=$(git -C "$wt" rev-parse HEAD 2>/dev/null); printf '%s\n' "$old" > "$wt.base"
+    ported=1; caught=1; pass=0; rounds=0; rm -rf "$wt.rounds"; rebased=''; tfix=''; pretfix=''; locked giveway "$c" "$wt"; why=$t; fin=$res; kp=$wt.patch; old=$(git -C "$wt" rev-parse HEAD 2>/dev/null); printf '%s\n' "$old" > "$wt.base"
     finend=$ended
     # shellcheck disable=SC2046 # the filed follow-ups' issue numbers, one word each
     [ -z "$ups" ] || unfile "$n" "$wt.review" $(jq -r '.[]' <<<"$ups"); ups=''; left=''; dec=''

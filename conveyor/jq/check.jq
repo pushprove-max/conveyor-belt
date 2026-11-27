@@ -13,7 +13,7 @@ def fails: type == "object" and (keys - ["stopped", "notRun", "ownLimit"]) == ["
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "outside", "sec", "visible", "branch", "base", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "excerpts", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "partial", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "noIssue", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "retriedBy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "plan", "pick","lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed", "port", "alsoUsed", "cacheFirst", "proofLines", "waits"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "partial", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "noIssue", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "retriedBy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "plan", "pick","lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed", "port", "alsoUsed", "cacheFirst", "proofLines", "waits", "before"];
 def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown", "lint", "seats", "judge"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
@@ -79,6 +79,8 @@ def ok: . as $r | (keys - known) == need
         and (.doneLines // [] | type == "array" and all(type == "string"))
         # checks: a test line of a Test step the project's checks ended before any test ran (card(), donewhen.sh treecheck()).
         and (.checks // true | . == true)
+        # before: a test line, or the start line of the test step, of the run before the card's first review session (pretest(), lib/cardland.sh).
+        and (.before == null or ((.step == "test" or (.step == "start" and .of == "test")) and .before == "review"))
         # pr: the pull request a pushed line's push went into, with the rule Land as pr (pushone(), lib/push.sh).
         and (.pr // 0 | type == "number")
         # flaky: a pushed line's push went on over a pre-push hook that failed naming test files that each passed alone:

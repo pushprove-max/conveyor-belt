@@ -162,9 +162,9 @@ EOF
   c7=$(cardof 7); c8=$(cardof 8)
   st 'select(.issue == 7 and .step == "test" and .result == "fail") | .tail' | grep -q 'FAIL needs.test' || fail "#7's own tests did not fail: $(st 'select(.issue == 7) | "\(.step) \(.result)"' | tr '\n' ,)"
   [ -z "$(git -C "$R" log --format=%h -- needs-b)" ] || fail "needs-b, which fails #7's own tests, landed: $(git -C "$R" log --stat | head -40)"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test fix review test test landed " ] \
+  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build test review test fix review test test landed " ] \
     || fail "steps of #7: $(st "select(.issue == 7) | .step" | tr '\n' ' ')"
-  st 'select(.issue == 7 and .step == "test") | [.result, .ended, .reused]' | jq -sc . | grep -qxF '[["fail","failed",null],["pass","passed",null],["pass",null,true]]' \
+  st 'select(.issue == 7 and .step == "test" and .before == null) | [.result, .ended, .reused]' | jq -sc . | grep -qxF '[["fail","failed",null],["pass","passed",null],["pass",null,true]]' \
     || fail "#7's tests after its fix did not run once, then say they reused that pass: $(st 'select(.issue == 7 and .step == "test") | [.result, .ended, .reused]' | jq -sc .)"
   [ "$(st 'select(.issue == 7 and .reused == true) | .run')" = null ] || fail "the reused pass has a run of its own: $(st 'select(.issue == 7 and .reused == true)')"
   [ "$(st 'select(.step == "landed") | "\(.issue) \(.batch)"' | tr '\n' ' ')" = "8 null 7 null " ] \
@@ -335,7 +335,7 @@ t_batchalone() {
   printf '%s\n' '! grep -q "(#8)" "$1" || { echo "no #8 here"; exit 1; }' > "$R/.git/hooks/commit-msg"; chmod +x "$R/.git/hooks/commit-msg"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   grep -q "its batch did not land, so it is tested alone" <<<"$out" && [ "$(batchruns)" = 1 ] || fail "#7 was not tested alone after its batch did not land: $out"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test test landed " ] \
+  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build test review test test landed " ] \
     || fail "#7 did not get a second test line for its run alone: $(st "select(.issue == 7) | .step" | tr '\n' ' ')"
   [ "$(st 'select(.step == "landed") | "\(.issue) \(.batch)"' | tr '\n' ' ')" = "7 null " ] && [ -z "$(git -C "$R" log --format=%s | grep '(#8)')" ] \
     || fail "#7 did not land alone, or #8 landed past main's hook: $(st 'select(.step == "landed")')"

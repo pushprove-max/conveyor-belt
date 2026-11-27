@@ -19,7 +19,7 @@ voidsetup() { # <plan lines>
   rerunsetup "$@"; rerunfiles
   echo '! grep -qxF "$n term" "$STUB/plan" || { echo "$n" >> "$STUB/termed"; kill -TERM "$(ps -o ppid= -p "$(ps -o ppid= -p "$PPID" | tr -d " ")")"; sleep 30; }' > "$STUB/pre" # sleep: until the TERM sent to the run's timeout (testonce()) ends the run; tr: ps pads a short PID with spaces, which ps -p refuses
 }
-voidsteps() { st 'select(.step == "test" or .step == "fix") | [.step, .result, (.reason // "" | select(. != "") | sub(": .*"; ""))] | join(" ")' | tr '\n' ,; }
+voidsteps() { st 'select((.step == "test" and .before == null) or .step == "fix") | [.step, .result, (.reason // "" | select(. != "") | sub(": .*"; ""))] | join(" ")' | tr '\n' ,; }
 
 # Issue 218. Bug it catches: a service restart killed a card's test run before its runner logged a line, and main's
 # run of it was killed too; the whole test command was recorded as a case failing on main, a main-red card opened for

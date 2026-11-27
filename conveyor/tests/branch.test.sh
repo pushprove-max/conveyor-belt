@@ -35,7 +35,7 @@ t_branch() {
   lane fast-lane b.txt bee; tip=$(git -C "$R" rev-parse fast-lane); echo "$GO" > "$STUB/review.1"
   out=$(loop land-branch fast-lane) || fail "a good branch did not land: $out"
   c=$(newest); count "0 1 1"
-  [ "$(steps "$c")" = "picked worktree deps brief start review start test start landed " ] || fail "steps of a good branch: $(steps "$c")"
+  [ "$(steps "$c")" = "picked worktree deps brief start test start review start test start landed " ] || fail "steps of a good branch: $(steps "$c")"
   [ "$(st 'select(.step == "picked") | [.issue, .branch, .title] | join("|")')" = "0|fast-lane|fix(tooling): fast-lane change" ] || fail "picked line: $(st 'select(.step == "picked")')"
   [ "$(st 'select(.step == "landed") | .sha')" = "$(git -C "$R" rev-parse main)" ] && [ "$(cat "$R/b.txt")" = bee ] && [ -z "$(git -C "$R" status --porcelain)" ] \
     && [ "$(git -C "$R" rev-parse main~1)" = "$init" ] || fail "main is not its old head plus one commit holding the branch's change"

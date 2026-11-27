@@ -17,7 +17,7 @@ t_branchfix() {
   lane c20260101T000000-main-7 c.txt sea; echo "$NOGO" > "$STUB/review.1"; echo "$GO" > "$STUB/review.2"; m=$(git -C "$R" rev-parse main)
   out=$(loop land-branch c20260101T000000-main-7) || fail "a branch whose second review is a GO did not land: $out"
   c=$(newest); count "1 2 1"
-  [ "$(steps "$c")" = "picked worktree deps brief start review start fix start review start test start landed " ] &&[ "$(st "select(.card == \"$c\" and .step == \"review\") | .result" | tr '\n' ' ')" = "NO-GO GO " ] \
+  [ "$(steps "$c")" = "picked worktree deps brief start test start review start fix start review start test start landed " ] &&[ "$(st "select(.card == \"$c\" and .step == \"review\") | .result" | tr '\n' ' ')" = "NO-GO GO " ] \
     || fail "a NO-GO was not followed by a fix session and a new review: $(steps "$c")"
   # Bug (R314 fix, E13): the picked line kept no main commit, so Needs you read what the card was picked to land from
   # main's reflog, by whole seconds. It keeps main's commit the branch was weighed against (base).
@@ -44,7 +44,7 @@ t_branchnumber() {
   c=$(newest)
   [ "${c##*-}" = 0 ] && [ "$(st 'select(.step == "picked") | [.issue, .branch, .title] | join("|")')" = "0|hand/fix-290|fix(tooling): hand/fix-290 change" ] \
     || fail "the hand fix is not a card of issue 0: $(st 'select(.step == "picked")')"
-  [ "$(steps "$c")" = "picked worktree deps brief start review start test start landed " ] && [ "$(cat "$R/e.txt")" = eee ] || fail "the hand fix did not land: $(steps "$c")"
+  [ "$(steps "$c")" = "picked worktree deps brief start test start review start test start landed " ] && [ "$(cat "$R/e.txt")" = eee ] || fail "the hand fix did not land: $(steps "$c")"
   ! git -C "$R" log -1 --format=%B main | grep -q '#290' || fail "the landed commit names #290: $(git -C "$R" log -1 --format=%B main)"
   [ -z "$(st 'select(.issue == 290)')" ] && ! grep -qs '^290\b' "$STUB/closed" "$STUB/comments" || fail "issue #290 got a card, a comment or a close"
 }

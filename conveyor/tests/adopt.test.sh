@@ -270,7 +270,7 @@ t_switchcode() {
     || fail "c-5 did not say it switched at its land step: $out"
   ! grep -qx 'none of the new code loaded' <<<"$out" && grep -qx 'ran new2' <<<"$out" || fail "c-5's land step did not run new2's code: $out"
   # Its steps: the test step ran once, and the land step, the one start line that names new2, went on to the landing.
-  [ "$(st 'select(.step == "start") | "\(.of) \(.engine // "")"' | paste -sd,)" = 'build ,review ,test ,land new2' ] && [ "$(wc -l < "$STUB/tests")" = 1 ] \
+  [ "$(st 'select(.step == "start") | "\(.of) \(.engine // "")"' | paste -sd,)" = 'build ,test ,review ,test ,land new2' ] && [ "$(wc -l < "$STUB/tests")" = 1 ] \
     && [ "$(st '.step' | tail -n 1)" = landed ] || fail "c-5's steps after the switch: $(st '"\(.step) \(.of // "") \(.engine // "")"' | paste -sd,) ($(wc -l < "$STUB/tests") test runs)"
   grep -qF "$V/new2" "$STUB/settings" && ! grep -qF "${SRC%/*}" "$STUB/settings" \
     || fail "c-5's settings after the switch do not run new2's hooks: $(cat "$STUB/settings" 2>&1)"

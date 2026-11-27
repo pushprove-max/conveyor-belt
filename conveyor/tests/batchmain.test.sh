@@ -61,7 +61,7 @@ EOF
     && [ "$(st 'select(.step == "landed" and .issue == 9) | .batch')" = null ] || fail "#8 and #7 did not land as one batch before #9: $(st 'select(.step == "landed")')"
   [ "$(git -C "$R" log --reverse --format=%s HEAD~4..HEAD | tr '\n' ,)" = "line ten,feat(product): title 8 (#8),feat(product): title 7 (#7),feat(product): title 9 (#9)," ] \
     || fail "#8 and #7 did not land on main as it moved, #9 after them: $(git -C "$R" log --format=%s | tr '\n' ,)"
-  [ "$(st "select(.issue == 9 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test fix review test landed " ] \
+  [ "$(st "select(.issue == 9 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build test review test fix review test landed " ] \
     || fail "steps of #9: $(st "select(.issue == 9) | .step" | tr '\n' ' ')"
   # Left out, #9 waits on #8, ordered first and held by the batch, and is stacked on it: its one session fits it onto
   # main with #8's change.
@@ -153,7 +153,7 @@ t_batchmovedagain() {
     || fail "main did not get one commit per card on top of both commits it got meanwhile: $(git -C "$R" log --format=%s | tr '\n' ,)"
   [ "$(st 'select(.step == "landed") | .batch | join(" ")' | sort -u)" = "$c8 $c7" ] || fail "the two cards did not land as one batch: $(st 'select(.step == "landed")')"
   for n in 7 8; do
-    [ "$(st "select(.issue == $n and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test landed " ] || fail "steps of #$n: $(st "select(.issue == $n) | .step" | tr '\n' ' ')"
+    [ "$(st "select(.issue == $n and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build test review test landed " ] || fail "steps of #$n: $(st "select(.issue == $n) | .step" | tr '\n' ' ')"
   done
   [ "$(sed -n '1p;$p' "$R/a.txt" | tr '\n' ' ')" = "seven eight " ] && [ "$(cat "$R/other.txt")" = other ] || fail "main does not hold the two changes and the other file: $(cat "$R/a.txt")"
   [ "$(cat "$R/third.txt")" = third ] && [ -z "$(git -C "$R" status --porcelain)" ] && [ -z "$(ls "$T/$CASE/cards")" ] || fail "main is dirty, or a worktree or mark is left"

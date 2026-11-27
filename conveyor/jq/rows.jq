@@ -16,7 +16,8 @@ def row: . as $s | $s.first as $f | $s.r as $r | $s.l as $l
       | (if $s.le.step == "blocked" then $s.le else $s.lc end) as $end
       | (if $l.step == "brief" then (if $f.branch then "review" elif $s.wl then "landing"
           elif $s.wr then "review" else "build" end) elif $l.step | IN("build", "fix", "rebase") then "review"
-         elif $l.step == "test" then (if $l.result == "fail" then "fix" else "landing" end)
+         # A pass before the first review (before: "review", pretest(), lib/cardland.sh) goes on to that review, not to the landing.
+         elif $l.step == "test" then (if $l.result == "fail" then "fix" elif $l.before == "review" then "review" else "landing" end)
          elif $l.step != "review" then "picked" elif $l.result == "GO" then "landing"
          elif $l.result != "NO-GO" then "review" elif $r < $max and ($s.rf | not) then "fix" else "landing" end) as $at
       # name: what a main-red fix card (issue 0, its picked line naming main's commit: mainred.sh redpick()) is shown as, in place
@@ -91,6 +92,19 @@ def logline($i; $pt): {step, of, result, time, counts, created, sec: (if .step |
                list: (if .step == "test" and ((.list.left? // 0) > 0 or .list.cases? != null) then {left: .list.left, why: .list.why} else null end),
                # A test line that reused the pass before it (card()): it keeps that pass's rerun on the track.
                reused: (if .step == "test" and .reused == true then true else null end),
+               # again: a pass on re-run before the first review (pretest(), lib/cardland.sh), what had not passed on its first run
+               # (firstrun(): rerun), [{file, cases: the case names}] (cases [] for a whole file: one that ran out of time, or failed with no case named);
+               # ranFiles and ranCases: a later pass that went first time, the files it ran and the cases of those it ran only in part
+               # (testrec(): ran, ranCases). That pass kept the passes on re-run of what it did not run (tests(): <worktree>.rerun):
+               # the track keeps the badge.
+               again: (if .step == "test" and .result == "pass" and .before == "review" and .rerun != null
+                 then .rerun | [((.failures.files // [])[] | {file, cases: [(.cases // [])[].name]}), ((.failures.ownLimit // [])[], (.failures.timeout.file // empty) | {file: ., cases: []})]
+                   | group_by(.file) | map({file: .[0].file, cases: (if any(.[]; .cases == []) then [] else map(.cases[]) | unique end)}) else null end),
+               ranFiles: (if .step == "test" and .result == "pass" and .before == null and .rerun == null and .reused != true then .ran // [] else null end),
+               ranCases: (if .step == "test" and .result == "pass" and .before == null and .rerun == null and .reused != true then .ranCases // {} else null end),
+               # A test line, or the test step's start line, of the run before the first review (pretest(), lib/cardland.sh): the track draws
+               # that run and its fix apart from the Test step's.
+               before: (if .step == "test" or (.step == "start" and .of == "test") then .before else null end),
                # A build, fix or rebase line whose Done-when check failed items: the fix that starts next is the reply
                # check's (donewhen.sh checked()), which the track draws on the step of the session it checks.
                checkFailed: (if (.step | IN("build", "fix", "rebase")) and ((.doneWhen.failed? // []) | length > 0) then true else null end),
@@ -175,9 +189,11 @@ def fold($x): .an as $i | .at as $pt | .gt as $gt | ($x.step | IN("start", "file
              then .s1 += [$x | stepline($gt)]
            elif $x.step == "blocked" and ($x.spent | type) == "object" then .s2 += [$x | spentline($gt)] else . end)
           | .n += 1 | .gt = (if $x.step == "judge" then $gt else $x.time end)
-          | if $x.step | IN("landed", "closed", "blocked", "judge") then . else .l = ($x | {step, result}) end
+          | if $x.step | IN("landed", "closed", "blocked", "judge") then . else .l = ($x | {step, result} + (if .before then {before} else {} end)) end
           | .tc += $x.tokens.claude | .tx += $x.tokens.codex | .st += ($x.stalls // 0)
-          | .rf = (.rf or $x.step == "rebase" or ($x.step == "test" and $x.result == "fail"))
+          # A failed run before the first review (before: "review", pretest(), lib/cardland.sh) is no failed Test step: the
+          # review fixes after it are the review loop's, not the landing's.
+          | .rf = (.rf or $x.step == "rebase" or ($x.step == "test" and $x.result == "fail" and $x.before != "review"))
           | if $x.step == "review" then .r += 1 | .vis = $x.visible
             elif $x.step == "brief" then .dep = ($x.depth // null)
             elif $x.step == "split" then .sp = ($x | {result, split})

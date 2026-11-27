@@ -125,7 +125,7 @@ rerunwt() { # <the build's edit> <plan line>...: rerunsetup's main and stubs, an
   git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" || fail "the card's worktree could not be made"
   rerunedit "$b" || fail "the build's edit could not be staged"
 }
-tline() { st 'select(.step == "test") | tojson' | sed -n "$1p" | jq -r "$2"; } # <nth test line> <jq filter>
+tline() { st 'select(.step == "test" and .before == null) | tojson' | sed -n "$1p" | jq -r "$2"; } # <nth test line> <jq filter>
 
 # The owner, from 186 test runs: every failed run of a day passed on the next run, and most fix sessions it started
 # made no edit. A failing case runs once more, alone, before any fix session; when it passes there is none, and the
@@ -144,7 +144,7 @@ t_rerunpass() {
   [ "$(sed 1,3d "$STUB/rerun.2" | tr '\t\n' ':|')" = "pass:a.test|pass:c.test|fail:b.test:flaky|" ] || fail "the run again was not told what passed and what failed: $(cat "$STUB/rerun.2")"
   [ "$(wc -l < "$STUB/sessions")" = 1 ] || fail "a session beside the build ran: $(cat "$STUB/sessions")"
   [ "$(st 'select(.step == "fix") | .step' | wc -l)" = 0 ] || fail "a fix session started"
-  [ "$(st 'select(.step == "test") | .result' | tr '\n' ' ')" = "pass " ] || fail "not one test line that passed: $(st 'select(.step == "test") | .result')"
+  [ "$(st 'select(.step == "test" and .before == null) | .result' | tr '\n' ' ')" = "pass " ] || fail "not one test line that passed: $(st 'select(.step == "test" and .before == null) | .result')"
   [ "$(tline 1 .reason)" = "passed on re-run: b.test: flaky" ] || fail "the test line does not say it passed on re-run, naming the case: $(tline 1 .reason)"
   [ "$(tline 1 '.rerun | [.exit, (.failures.files | map("\(.file):\(.cases | map(.name) | join(","))"))] | tojson')" = '[1,["b.test:flaky"]]' ] \
     || fail "the test line does not keep the first run's exit and failing case: $(tline 1 .rerun)"
@@ -153,13 +153,14 @@ t_rerunpass() {
   [[ "$(tline 1 '.rerun.tail')" == *"FAIL [flaky]: wrong"* ]] || fail "the test line does not keep the first run's output: $(tline 1 .rerun)"
   st 'select(.step == "landed") | .step' | grep -q landed || fail "the card did not land"
   loop check || fail "the record check refuses a test line with its first run"
-  # The Board draws the card's Test step and its tests bar from these: each says it passed on re-run.
-  [ "$(loop snapshot --fresh | jq -c '.landed[0].track | [.steps[3].rerun, [.records[] | select(.name == "tests passed") | .rerun]]')" = '[true,[true]]' ] \
+  # The Board draws the card's Test step and its tests bar from these: each says it passed on re-run. The run before
+  # the first review (pretest(), lib/cardland.sh) has its own tests passed record first; the Test step's is the last.
+  [ "$(loop snapshot --fresh | jq -c '.landed[0].track | [.steps[3].rerun, ([.records[] | select(.name == "tests passed")] | last | .rerun)]')" = '[true,true]' ] \
     || fail "the card's track does not say its tests passed on re-run: $(loop snapshot --fresh | jq -c '.landed[0].track | [.steps, .records]')"
   # Bug: a later line that reused that pass (card(): reused, as after giving way) drew the Test step as a plain pass.
   jq -c 'if .step == "test" then ., (del(.rerun, .reason) + {reason: "", reused: true}) else . end' "$ST/cards.jsonl" > "$STUB/cards.new" \
     && mv "$STUB/cards.new" "$ST/cards.jsonl"
-  [ "$(st 'select(.step == "test") | .reused // false' | tr '\n' ' ')" = "false true " ] || fail "the reused pass line was not added: $(st 'select(.step == "test")')"
+  [ "$(st 'select(.step == "test" and .before == null) | .reused // false' | tr '\n' ' ')" = "false true " ] || fail "the reused pass line was not added: $(st 'select(.step == "test" and .before == null)')"
   [ "$(loop snapshot --fresh | jq -c '.landed[0].track.steps[3].rerun')" = true ] \
     || fail "a pass reused after a pass on re-run erased it from the card's Test step: $(loop snapshot --fresh | jq -c '.landed[0].track.steps[3]')"
 }
@@ -177,8 +178,8 @@ t_rerunfail() {
   # and the run after it are on the commit it was built on, told of no change of main's.
   [ "$(sed -n 's/^base\t//p' "$STUB/rerun.3")" = "$m1" ] && ! grep -q $'^main\t' "$STUB/rerun.3" \
     || fail "a card on a main that had not moved was moved before its fix: $(cat "$STUB/rerun.3" 2>&1)"
-  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test pass," ] \
-    || fail "the failed run again did not start a fix session before the tests ran again: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
+  [ "$(st 'select((.step == "test" and .before == null) or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test pass," ] \
+    || fail "the failed run again did not start a fix session before the tests ran again: $(st 'select((.step == "test" and .before == null) or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
   [ "$(wc -l < "$STUB/sessions")" = 2 ] || fail "not a build and one fix session: $(cat "$STUB/sessions")"
   [ "$(tline 1 '[.rerun.exit, (.rerun.failures.files | map(.file)), (.failures.files | map("\(.file):\(.cases | map(.name) | join(","))"))] | tojson')" = '[1,["b.test"],["b.test:flaky"]]' ] \
     || fail "the failed line does not keep both runs: $(tline 1 tojson)"
@@ -195,8 +196,9 @@ t_rerunfail() {
   # Its test line says how many cases ran (3) and how many passes were kept from the run before (c.test's three).
   [ "$(tline 2 '.selected | [.cases, .kept] | tojson')" = '[3,1]' ] || fail "the test line after the fix does not say what ran and what was kept: $(tline 2 .selected)"
   [ "$(tline 2 '.rerun // "none"')" = none ] || fail "a run that passed first time says it was run again: $(tline 2 tojson)"
-  [ "$(loop snapshot --fresh | jq -c '.landed[0].track | [.steps[3].rerun, [.records[] | select(.name == "tests passed") | .rerun]]')" = '[null,[null]]' ] \
-    || fail "a card whose last run passed first time is drawn as passed on re-run: $(loop snapshot --fresh | jq -c '.landed[0].track.steps')"
+  # The run before the first review (pretest(), lib/cardland.sh) has its own tests passed record too: no pass of the card's is drawn so.
+  [ "$(loop snapshot --fresh | jq -c '.landed[0].track | [.steps[3].rerun, ([.records[] | select(.name == "tests passed") | .rerun] | unique)]')" = '[null,[null]]' ] \
+    || fail "a card whose last run passed first time is drawn as passed on re-run: $(loop snapshot --fresh | jq -c '.landed[0].track | [.steps, [.records[] | select(.name | startswith("tests"))]]')"
 }
 
 # A run killed part-way (its time ran out in b.test) runs again only what had not passed: the file it was in and the

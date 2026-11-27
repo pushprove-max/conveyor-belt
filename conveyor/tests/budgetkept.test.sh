@@ -35,8 +35,8 @@ t_budgetkept() {
   [ ! -s "$STUB/filed" ] || fail "test.slowIssues, or a rule with the switch off, still filed: $(cat "$STUB/filed")"
   [ "$(grep -c ' s\.test$' "$STUB/timedruns")" = 1 ] && grep ' s\.test$' "$STUB/timedruns" | grep -q -- '-8 s\.test$' \
     || fail "#8's test step did not run s.test once, in its own worktree: $(cat "$STUB/timedruns")"
-  [ "$(st 'select(.step == "test" and .issue == 8) | .times | tojson' | head -n 1)" = '{"s.test":6.5}' ] \
-    || fail "#8's test line does not record the CPU seconds of the file it ran: $(st 'select(.step == "test" and .issue == 8) | .times | tojson')"
+  [ "$(st 'select(.step == "test" and .issue == 8 and .before == null) | .times | tojson' | head -n 1)" = '{"s.test":6.5}' ] \
+    || fail "#8's test line does not record the CPU seconds of the file it ran: $(st 'select(.step == "test" and .issue == 8 and .before == null) | .times | tojson')"
   [ -z "$(jq -Rn -f "$SRC/jq/check.jq" < "$ST/cards.jsonl")" ] || fail "the record check refuses a line"
   # A card that runs a slow file it does not change only records it; the clock rule files one issue for it, the
   # budget rule, read first, none.

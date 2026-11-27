@@ -19,8 +19,8 @@ t_budgetbigrec() {
   echo 'awk '"'"'BEGIN { for (i = 0; i < 1500; i++) printf "TESTRUN sec\tsuite/generated/module/folder/a-long-test-file-name-to-fill-the-record-%05d.test\t1\t1\nTESTRUN case\tsuite/generated/module/folder/a-long-test-file-name-run-in-part-to-fill-the-record-%05d.test\tone\n", i, i }'"'"' >> "$CONVEYOR_TEST_LOG/r.log"' >> "$STUB/test-cmd"
   # loop: the check is on the test line the card records (claim.sh: slowtests(), which calls partran(), then slowrec() into it); a direct call of slowtests() stops before that line.
   loop run --only 7 1 > /dev/null 2>&1 || fail "run exited non-zero"
-  [ "$(st 'select(.step == "test" and .issue == 7) | [(.times | length), (.clocks | length), (.partial | length)] | tojson' | head -n 1)" = '[1501,1501,1500]' ] \
-    || fail "the passing test line lost the times of a run that timed many files: $(st 'select(.step == "test" and .issue == 7) | [.result, (.times | length?), (.partial | length?), .reason] | tojson')"
+  [ "$(st 'select(.step == "test" and .issue == 7 and .before == null) | [(.times | length), (.clocks | length), (.partial | length)] | tojson' | head -n 1)" = '[1501,1501,1500]' ] \
+    || fail "the passing test line lost the times of a run that timed many files: $(st 'select(.step == "test" and .issue == 7 and .before == null) | [.result, (.times | length?), (.partial | length?), .reason] | tojson')"
 }
 
 # Bug caught: a run after a fix session, which does not run again the files that passed, lost the time the runs before
@@ -34,15 +34,15 @@ t_budgetfix() {
   loop run --only 7 1 > /dev/null 2>&1 || fail "run exited non-zero"
   # Runs 1 and 2 are the first and its run again, 3 the run after the fix of f.test, which keeps s.test's pass.
   [ "$(tr '\n' ' ' < "$STUB/ran")" = "1 " ] || fail "s.test did not run in the first run alone: $(tr '\n' ' ' < "$STUB/ran")"
-  [ "$(st 'select(.step == "test") | [.times, .timed] | tojson' | sed -n 2p)" = '[{"s.test":9,"f.test":1},[{"file":"s.test","sec":5,"cpu":9}]]' ] \
-    || fail "the run after the fix of f.test does not record s.test's time: $(st 'select(.step == "test") | [.times, .timed] | tojson' | tr '\n' ' ')"
+  [ "$(st 'select(.step == "test" and .before == null) | [.times, .timed] | tojson' | sed -n 2p)" = '[{"s.test":9,"f.test":1},[{"file":"s.test","sec":5,"cpu":9}]]' ] \
+    || fail "the run after the fix of f.test does not record s.test's time: $(st 'select(.step == "test" and .before == null) | [.times, .timed] | tojson' | tr '\n' ' ')"
   # Bug caught (#341): that line did not say s.test's time was the first run's, kept, so the test judge read it as a
   # new pass of s.test, newer than a release-suite failure of it. The first run's own line, which ran it, says none.
   # Bug caught too: f.test, which that run ran with no time of it, was named, so the judge did not count that run.
-  [ "$(st 'select(.step == "test") | .carried | tojson' | tr '\n' ' ')" = 'null ["s.test"] ' ] \
-    || fail "the run after the fix does not name s.test as carried, not run: $(st 'select(.step == "test") | .carried | tojson' | tr '\n' ' ')"
-  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test pass," ] \
-    || fail "f.test did not fail and pass after a fix, or the slow file sent the card round again: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "test" and .before == null) | .carried | tojson' | tr '\n' ' ')" = 'null ["s.test"] ' ] \
+    || fail "the run after the fix does not name s.test as carried, not run: $(st 'select(.step == "test" and .before == null) | .carried | tojson' | tr '\n' ' ')"
+  [ "$(st 'select((.step == "test" and .before == null) or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test pass," ] \
+    || fail "f.test did not fail and pass after a fix, or the slow file sent the card round again: $(st 'select((.step == "test" and .before == null) or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
   [ "$(reviews 7)" = "GO GO " ] || fail "the slow file went to a review: $(reviews 7)"
   landedone 7 || fail "the card did not land after its fix"
 }
@@ -53,10 +53,10 @@ t_budgetfixfail() {
   budgetfixsetup; echo '[ -e "$STUB/built" ] || { echo two >> a.txt; echo 5 9 > s.test; }; touch "$STUB/built"' > "$STUB/build"
   # loop: only a whole card run has a test step fail again after a fix session, with the run's list kept between them
   loop run --only 7 1 > /dev/null 2>&1
-  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test fail,fix ok,test fail,fix ok,test fail," ] \
-    || fail "f.test did not fail before and after each of the 3 fixes: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
-  [ "$(st 'select(.step == "test") | .carried | tojson' | tr '\n' ' ')" = 'null ["s.test"] ["s.test"] ["s.test"] ' ] \
-    || fail "a failed run after a fix does not name s.test as carried, not run: $(st 'select(.step == "test") | .carried | tojson' | tr '\n' ' ')"
+  [ "$(st 'select((.step == "test" and .before == null) or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test fail,fix ok,test fail,fix ok,test fail," ] \
+    || fail "f.test did not fail before and after each of the 3 fixes: $(st 'select((.step == "test" and .before == null) or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "test" and .before == null) | .carried | tojson' | tr '\n' ' ')" = 'null ["s.test"] ["s.test"] ["s.test"] ' ] \
+    || fail "a failed run after a fix does not name s.test as carried, not run: $(st 'select(.step == "test" and .before == null) | .carried | tojson' | tr '\n' ' ')"
   [ -z "$(jq -Rn -f "$SRC/jq/check.jq" < "$ST/cards.jsonl")" ] || fail "the record check refuses a line"
 }
 # Card 7 and its test command (budgetfix, budgetfixfail): s.test, which the build writes, passes and is timed unless

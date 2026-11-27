@@ -177,11 +177,12 @@ t_machinecard() {
     || fail "the looks at the hold did not run the control alone on main, again once it failed: $(cat "$STUB/looks")"
   [ ! -e "$ST/machinehold.json" ] || fail "the hold stayed after the control passed: $(cat "$ST/machinehold.json")"
   # The held line keeps its run's own reason, exit 1: the repair lane, which did not pass the card, gave it none.
-  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)" = "test held exit 1,test pass ," ] && [ "$(ran 3)" = flaky ] \
+  [ "$(st 'select((.step == "test" and .before == null) or .step == "fix") | "\(.step) \(.result) \(.reason)"' | tr '\n' ,)" = "test held exit 1,test pass ," ] && [ "$(ran 3)" = flaky ] \
     || fail "the card on hold did not test again once the control passed, or went to a fix: $(st '"\(.step) \(.result)"' | tr '\n' ,)"
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the card did not land: $(st '"\(.step) \(.result) \(.reason)"' | tr '\n' ,)"
   loop check || fail "the record check refuses a test line with the verdict machine"
-  [ "$(loop snapshot --fresh | jq -c '[.landed[0].track.records[] | select(.name | startswith("tests")) | [.name, .state]]')" = '[["tests held: the machine","done"],["tests passed","done"]]' ] \
+  # The run before the first review (pretest(), lib/cardland.sh) has its own tests passed record first.
+  [ "$(loop snapshot --fresh | jq -c '[.landed[0].track.records[] | select(.name | startswith("tests")) | [.name, .state]]')" = '[["tests passed","done"],["tests held: the machine","done"],["tests passed","done"]]' ] \
     || fail "the card's track shows the machine's hold as a failed test step: $(loop snapshot --fresh | jq -c '.landed[0].track.records')"
 }
 
@@ -244,8 +245,8 @@ t_repairlands() {
   wait "$lp"; out=$(cat "$STUB/run.out")
   [ "$(cleanruns)" = 'card.repair broken,card.repair mended,card mended,' ] \
     || fail "the repair lane did not run the control without and with the change, then the changed tests, each in a clean harness of the worktree's own: $(cat "$STUB/clean" 2>&1)"
-  [ "$(st 'select(.step == "test") | .result' | tr '\n' ,)" = 'held,pass,' ] && [[ $(tline 2 .reason) == "repair lane: c.test failed on main's code at "* ]] \
-    || fail "the card's test step was not passed by the repair lane: $(st 'select(.step == "test") | "\(.result) \(.reason)"' | tr '\n' ,)"
+  [ "$(st 'select(.step == "test" and .before == null) | .result' | tr '\n' ,)" = 'held,pass,' ] && [[ $(tline 2 .reason) == "repair lane: c.test failed on main's code at "* ]] \
+    || fail "the card's test step was not passed by the repair lane: $(st 'select(.step == "test" and .before == null) | "\(.result) \(.reason)"' | tr '\n' ,)"
   [ "$(st 'select(.step == "landed") | .issue')" = 7 ] || fail "the repair card did not land: $out"
   [ -e "$ST/machinehold.json" ] || fail "the repair lane ended the hold, which only the controls passing on main end"
   loop check || fail "the record check refuses the repair lane's test line"

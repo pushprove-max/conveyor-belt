@@ -56,6 +56,6 @@ t_mainhang() {
   loop run 1 > "$STUB/run.out" 2>&1 || fail "run exited non-zero: $(cat "$STUB/run.out")"
   [ "$(tline 1 '[.mainRun.exit, .verdicts] | tojson')" = '[124,[{"case":"b.test: flaky","verdict":"card"}]]' ] \
     || fail "main's hanging run did not end at its limit with the case the card's: $(tline 1 tojson)"
-  [ "$(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test pass," ] \
-    || fail "the card did not go on to its fix session: $(st 'select(.step == "test" or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
+  [ "$(st 'select((.step == "test" and .before == null) or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)" = "test fail,fix ok,test pass," ] \
+    || fail "the card did not go on to its fix session: $(st 'select((.step == "test" and .before == null) or .step == "fix") | "\(.step) \(.result)"' | tr '\n' ,)"
 }

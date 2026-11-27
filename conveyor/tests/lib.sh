@@ -330,8 +330,17 @@ setup() { # <issues json>: a fresh main repo, the three stubs, one billing and o
 # test.fileCommand is the stub $STUB/file-cmd (the test command setup gives: $STUB/mainrun-cmd on main, else
 # $STUB/test-cmd), and test.command is that stub too. push.check is false, so a landing runs no linked test before its
 # push (a case of that check turns it on). So a card that changes a.txt runs a.test.sh alone, through test.fileCommand.
+# The run of a card's tests before its first review (cardland.sh pretest(): in the card's worktree, cards/<card>,
+# whose last start line is of the test step and marked before "review") passes and runs nothing, unless a case writes
+# $STUB/pretests: the cases of the Test step keep their runs of $STUB/test-cmd, counted in $STUB/tests, and the main
+# moves those runs make ($STUB/move) after the review. That run's own log in the run's log folder names the file
+# `-- notrun` (testfails() notRun), so the run keeps no pass of it (rerunlist()) and the Test step runs it: bug, the
+# skipped run was kept as a pass, and the Test step of an unchanged change ran no $STUB/test-cmd. Every other run, a
+# retry's Test step from a kept review or a case's own call of tests() with no records, runs $STUB/test-cmd: a bug
+# guessed the run before the review from the records (a start of the test step and none of a review), so those runs
+# passed with no test run.
 filemode() {
-  echo 'case $PWD in */mainrun/*) [ ! -f "$STUB/mainrun-cmd" ] || . "$STUB/mainrun-cmd" ;; *) . "$STUB/test-cmd" ;; esac' > "$STUB/file-cmd"
+  echo 'case $PWD in */mainrun/*) [ ! -f "$STUB/mainrun-cmd" ] || . "$STUB/mainrun-cmd" ;; */cards/c*) if [ ! -e "$STUB/pretests" ] && jq -se --arg c "${PWD##*/}" '"'"'[.[] | select(.card == $c and .step == "start")] | last | .of == "test" and .before == "review"'"'"' "$ST/cards.jsonl" > /dev/null 2>&1; then echo "-- notrun $CONVEYOR_TEST_FILE" >> "$CONVEYOR_TEST_LOG/pretest-stub"; else . "$STUB/test-cmd"; fi ;; *) . "$STUB/test-cmd" ;; esac' > "$STUB/file-cmd"
   echo '# The stub test file of a.txt: the pack'"'"'s test.fileCommand runs $STUB/file-cmd for it.' > "$R/a.test.sh"
   git -C "$R" add a.test.sh || fail "main's stub test file a.test.sh could not be staged"
   linkset '{"a.txt": ["a.test.sh"]}'

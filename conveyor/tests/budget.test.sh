@@ -24,8 +24,8 @@ budgetsetup() { # [main seconds and CPU seconds]
   budgetcmd
 }
 reviews() { st "select(.step == \"review\" and .issue == $1) | .result" | tr '\n' ' '; } # <issue>
-slowof() { st "select(.step == \"test\" and .issue == $1) | .slow | tojson" | head -n 1; } # <issue>: its first test line's slow
-timesof() { st "select(.step == \"test\" and .issue == $1) | [.times, .timed] | tojson" | head -n 1; } # <issue>: its first test line's times
+slowof() { st "select(.step == \"test\" and .issue == $1 and .before == null) | .slow | tojson" | head -n 1; } # <issue>: its Test step's first test line's slow (not the run before the review: pretest())
+timesof() { st "select(.step == \"test\" and .issue == $1 and .before == null) | [.times, .timed] | tojson" | head -n 1; } # <issue>: its Test step's first test line's times
 landedone() { [ "$(st "select(.step == \"landed\" and .issue == $1) | .issue")" = "$1" ]; } # <issue>
 
 # #349: no test file has a CPU budget. Bugs caught: a card that adds a test file burning 10 CPU s (10.2 s clock), with
@@ -35,7 +35,7 @@ landedone() { [ "$(st "select(.step == \"landed\" and .issue == $1) | .issue")" 
 t_budgetover() {
   budgetsetup; tune '.test.fileBudget = 8'; echo 'echo two >> a.txt; echo 10.2 10 > s.test' > "$STUB/build"
   loop run --only 7 1 > /dev/null 2>&1 || fail "run exited non-zero"
-  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build review test landed " ] \
+  [ "$(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')" = "picked worktree brief build test review test landed " ] \
     || fail "a slow file sent #7 to another review or test step: $(st "select(.issue == 7 and $NOMARK) | .step" | tr '\n' ' ')"
   [ "$(reviews 7)" = "GO " ] || fail "the review was given the slow file as a finding: $(reviews 7)"
   [ "$(slowof 7)" = null ] || fail "the test line flags the file over a CPU budget: $(slowof 7)"
@@ -43,8 +43,9 @@ t_budgetover() {
   [ ! -s "$STUB/filed" ] || fail "a file slow in one card run was reported: $(cat "$STUB/filed")"
   [ -z "$(jq -Rn -f "$SRC/jq/check.jq" < "$ST/cards.jsonl")" ] || fail "the record check refuses a line"
   landedone 7 || fail "the card did not land"
-  # The Board's Tests bar of the card (jq/rows.jq, jq/track.jq) carries no slow note.
-  [ "$(loop snapshot --fresh | jq -c '[.landed[0].track.records[] | select(.name == "tests passed") | has("slow")]')" = '[false]' ] \
+  # The Board's Tests bar of the card (jq/rows.jq, jq/track.jq) carries no slow note: on neither passing run, the one
+  # before the review (pretest()) and the Test step's.
+  [ "$(loop snapshot --fresh | jq -c '[.landed[0].track.records[] | select(.name == "tests passed") | has("slow")]')" = '[false,false]' ] \
     || fail "the snapshot's track carries a slow note: $(loop snapshot --fresh | jq -c '.landed[0].track.records')"
 }
 
