@@ -241,13 +241,13 @@
     // A card with no GitHub issue (issue 0) adds no issue.
     const issues = new Set(m.es.filter((r) => r.e.issue && !isAudit(r.e)).map((r) => r.e.issue)), audits = new Set(m.es.filter((r) => r.e.issue && isAudit(r.e)).map((r) => r.e.issue));
     // A tile with a tone is a button: a click shows what it counts (a second click ends the tile filter); the tile pressed
-    // is S.tile, kept through every redraw.
+    // is S.tile, kept through every redraw (drawEntries sets its aria-pressed, as render draws the entries next).
     const tile = (k, label, n, sub, tone) => {
       const t = h(tone ? 'button' : 'div', `sh-tile${tone ? ` is-${tone}` : ''}`);
       t.dataset.tile = k;
       t.append(h('span', 'sh-tile-label', label), h('span', 'sh-tile-n', String(n)), h('span', 'sh-tile-sub', sub));
       if (tone) {
-        t.type = 'button'; t.dataset.focus = `tile:${k}`; t.setAttribute('aria-pressed', String(S.tile === k));
+        t.type = 'button'; t.dataset.focus = `tile:${k}`;
         t.addEventListener('click', () => pickTile(S.tile === k ? null : k));
       }
       box.append(t);

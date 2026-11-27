@@ -430,9 +430,10 @@ export const parseStream = (text: string): Feed | null => {
 // have two. A fetch of an older engine (fetchPath in units.tsx runs the project's engine) prints no maphost line
 // (mapHost null): it matched the feed's record by path alone and names no machine. units.tsx mapOfOwn then takes the
 // map's lines from the plugin's own fetch (map mode) when the older fetch read no map, so mapHost is null here only
-// with the older fetch's own testmap line or when the plugin's fetch did not answer: the feed's map is then never
-// taken, not even from a feed of one machine (local): the session's host file can point at another build machine with a
-// checkout at the same path, and a note says to pin a newer engine. With no such record, a feed of another machine, or
+// with the older fetch's own testmap line, when the plugin's fetch did not answer, or when it answered for a feed of
+// another machine (hooks/units-fetch.sh prints no maprec or maphost line then, only its own testmap line): the feed's
+// map is then never taken, not even from a feed of one machine (local): the session's host file can point at another
+// build machine with a checkout at the same path, and, when a maprec line named a record, a note says to pin a newer engine. With no such record, a feed of another machine, or
 // a feed whose stream is down (its snapshot is old), the board has no testMap: the fetch's testmap line gives the map
 // then, feed or not.
 const sameMachine = (f: Feed, ssh: string | null) => (ssh === null ? false : ssh ? f.ssh === ssh : f.local)

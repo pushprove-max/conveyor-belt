@@ -120,7 +120,7 @@ held() { [[ $1 =~ ^[0-9]+$ ]] && ps -o args= -p "$1" 2>/dev/null | grep -q '/con
 # commit's install. The session is last, as it may be empty. The mark is read again once waiter.pid is written: a claim or off
 # between the first check and then read the old waiter.pid, so it is this waiter that stands down.
 mkdir -p "$FD" || exit 0
-# --start takes waiter.lock under claim.lock (fd 9, closed once waiter.pid names it), as a claim stops and starts the
+# --start takes waiter.lock under claim.lock (fd 9, freed by lockfree once waiter.pid names it), as a claim stops and starts the
 # session's waiter under it (lib.sh claim_): a claim beside this hook (foreman.sh start) ends before this reads
 # waiter.pid, or reads the waiter.pid this writes, never one this waiter is stopping. Each way out until then frees it
 # by lib.sh lockfree, which writes the free's turn first, so a claim's wait that ends as the lock changes hands goes on.
@@ -197,8 +197,8 @@ fi
 FOREMEN=${VERSIONS%/*}/foremen
 { grep -qxF "$FD" "$FOREMEN" || echo "$FD" >> "$FOREMEN"; } 2>/dev/null
 printf '%s %s %s %s\n' "$$" "${FROM:--}" "$CONVEYOR_FOREMAN_SESSION_PID" "$SID" > "$FD/waiter.pid"
-[ "$MODE" != --start ] || { trap - EXIT; lockfree; }
-exec 9>&-
+# lockfree closes fd 9 (lib.sh); another mode closes any fd 9 it was started with.
+if [ "$MODE" = --start ]; then trap - EXIT; lockfree; else exec 9>&-; fi
 foreman "$SID" || exit 0
 [ ! -f "$LOG" ] || [ "$(wc -l < "$LOG")" -le 400 ] ||{ tail -n 200 "$LOG" > "$LOG.new" && mv "$LOG.new" "$LOG"; } 2>/dev/null
 why='' sp=''
