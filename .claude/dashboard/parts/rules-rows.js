@@ -711,7 +711,7 @@
       e.preventDefault();
       if (from !== i && !S.busy) move(from, i);
     });
-    const grip = h('span', 'rules-grip', '⠿');
+    const grip = h('span', 'rules-grip', '⠿'), pin = titles.has(n) ? `#${n} ${titles.get(n)}` : `#${n}`;
     grip.setAttribute('aria-hidden', 'true');
     const menu = h('details', 'rules-menu'), sum = h('summary', 'btn btn-quiet', '⋯'), acts = h('span', 'rules-menu-acts');
     sum.setAttribute('aria-label', `Actions for #${n}`); sum.dataset.act = 'pin-menu';  // a redraw gives the focus back by data-act
@@ -721,7 +721,7 @@
       i < order.length - 1 ? button('Move down', 'btn-quiet', 'pin-down', `Move #${n} down in the pinned order`, () => move(i, i + 1)) : null,
       button('Unpin', 'btn-quiet', 'unpin', `Unpin #${n}: pick takes it in its own order`, () => send('unpin', [String(n)], null, ['order', order.map(String)]))].filter(Boolean));
     menu.append(sum, acts);
-    item.append(grip, h('span', 'rules-pin', titles.has(n) ? `#${n} ${titles.get(n)}` : `#${n}`), menu);
+    item.append(grip, Object.assign(h('span', 'rules-pin', pin), { title: pin }), menu);  // the whole title on hover: a long one ends in an ellipsis (app.css, .rules-pin)
     return item;
   }
   function rulesIndexed(el) {

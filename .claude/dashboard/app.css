@@ -799,9 +799,12 @@ a.tab { text-decoration: none; }  /* the account page's tabs: links back to the 
 .rules-seg > .rules-tog:focus-visible { outline-offset: -2px; } /* .rules-seg hides what overflows it */
 .rules-seg > .rules-tog[aria-pressed="true"]:focus-visible { outline-color: var(--on-accent); } /* --focus is the pressed fill's color */
 .rules-seg > .rules-tog.board-danger:focus-visible { outline-color: var(--bad); } /* an armed part's fill is --bad-bg, not --accent */
-.rules-pins { display: grid; gap: var(--sp-1); flex: 1 1 100%; margin: 0; padding: 0; list-style: none; }
-.rules-pin-row { flex-wrap: nowrap; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--surface-2); border-radius: var(--radius-sm); }
-.rules-pin-row .rules-pin { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The pins keep to the panel's width: a long title ends in an ellipsis on its one line, with its menu beside it.
+   min-width 0 and the minmax column stop the title's own width from setting the list's; .rules-pins > raises the
+   nowrap over .rules-item's wrap, which comes later in this file. */
+.rules-pins { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); flex: 1 1 100%; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.rules-pins > .rules-pin-row { flex-wrap: nowrap; min-width: 0; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--surface-2); border-radius: var(--radius-sm); }
+.rules-pin-row .rules-pin { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
 .rules-grip { cursor: grab; color: var(--muted); }
 .rules-menu { position: relative; }
 .rules-menu > summary { list-style: none; cursor: pointer; }
