@@ -13,7 +13,8 @@ def strict: ($ARGS.named.strict // "") != "";
 def flags: "(?>\\s+-(-[^\\s=]*(=\\S*|\\s+[^-\\s]\\S*)?|[^-\\s](\\s+[^-\\s]\\S*)?(?=\\s)|[^-\\s]\\S+))*";
 def vword: if strict then "(?!)" else "(?!-)\\S*[$`]" end;
 # The stack .k holds the open contexts: s and d quotes, c for ( or $(, b for a backtick, B for an escaped backtick (\`)
-# inside a backtick command, which only another \` ends (a \` in a b opens a B); none open is the command itself.
+# inside a backtick command, which only another \` ends (a \` in a b opens a B), a for a case up to its esac (a ) that
+# ends a case pattern ends no substitution); none open is the command itself.
 def scan: reduce (explode[] | [.] | implode) as $c ({o: [], k: [], e: false, p: ""};
   (.k[-1] // "") as $t | ($c | test("\\s")) as $w
   | if .e then (if $c == "`" and any(.k[]; . == "b") then (if $t == "B" then .k |= .[:-1] else .k += ["B"] end) else . end)
@@ -22,9 +23,12 @@ def scan: reduce (explode[] | [.] | implode) as $c ({o: [], k: [], e: false, p: 
     elif $t == "s" then (if $c == "\u0027" then .k |= .[:-1] else . end) | .o += [if $w then "_" else $c end] | .p = $c
     elif $t == "d" then (if $c == "\\" then .e = true elif $c == "\"" then .k |= .[:-1] elif $c == "`" then .k += ["b"]
       elif $c == "(" and .p == "$" then .k += ["c"] else . end) | .o += [if $w then "_" else $c end] | .p = $c
-    else (if $c == "\\" then .e = true elif $c == "\u0027" then .k += ["s"] elif $c == "\"" then .k += ["d"]
+    else (if $t == "a" and ($c | test("[\\s;&|)`]")) and (.o | join("") | test("(^|[;&|()`\\n]|\\bin\\s)\\s*esac$")) then .k |= .[:-1] else . end)
+      | (.k[-1] // "") as $t
+      | (if $c == "\\" then .e = true elif $c == "\u0027" then .k += ["s"] elif $c == "\"" then .k += ["d"]
       elif $c == "`" then (if $t == "b" then .k |= .[:-1] else .k += ["b"] end) elif $c == "(" then .k += ["c"]
-      elif $c == ")" and $t == "c" then .k |= .[:-1] else . end) | .o += [$c] | .p = $c
+      elif $c == ")" and $t == "c" then .k |= .[:-1]
+      elif $w and (.o | join("") | test("(^|[;&|()`{!\\n]|\\b(do|then|else|if|elif|while|until|time)\\s)\\s*case$")) then .k += ["a"] else . end) | .o += [$c] | .p = $c
     end) | .o | join("");
 def masked: if strict then gsub("\\\\\n"; "") | scan else . end;
 def unedits: if strict then [splits("[;&|\n]")] | map(select(test("\\bgh(-write)?\(flags)\\s+api(\\s+\\S+)*?\\s+(-X\\s*|--method[=\\s]\\s*)(?i:PATCH)\\b") | not)) | join(";") else . end;

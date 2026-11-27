@@ -245,8 +245,9 @@ t_filedgrep() {
 # whose quoted title says `-X PATCH` (quoted text is no flag), an issue filed by a GraphQL mutation in quotes, whose
 # createIssue the strict reading must still see inside the quotes, and a filing in a command substitution in double
 # quotes ($(...) or backticks), which runs and so is no quoted text, also with parentheses in its quoted title or a
-# substitution nested in it, or a backtick filing escaped (\`) or a \$( inside an outer backtick command, in quotes or
-# not, which bash unescapes and runs when it reads the outer command (an unquoted \` there opens a command, not closes one).
+# substitution nested in it or a case arm whose pattern ends in ) inside it, also with the case after if, or a backtick
+# filing escaped (\`) or a \$( inside an outer backtick command, in quotes or not, which bash unescapes and runs when it
+# reads the outer command (an unquoted \` there opens a command, not closes one).
 t_filedvar() {
   filedsetup
   for cmd in 'v=create; gh issue "$v" --title a --body a >/dev/null' 'gh api -X PATCH repos/o/r/issues/4 -f body=x; gh api repos/o/r/issues -f title=a --jq .number' \
@@ -255,6 +256,8 @@ t_filedvar() {
     'printf '"'%s\n'"' "$(gh api repos/o/r/issues -f title=$(cat title.txt) --jq .number)"' \
     'printf '"'%s\n'"' "$(echo "`echo "\`gh api repos/o/r/issues -f title=a --jq .number\`"`")"' \
     'echo "`echo "\$(gh api repos/o/r/issues -f title=a --jq .number)"`"' 'echo "`echo \`gh api repos/o/r/issues -f title=a --jq .number\``"' \
+    'printf '"'%s\n'"' "$(case x in x) gh api repos/o/r/issues -f title=a --jq .number;; esac)"' \
+    'printf '"'%s\n'"' "$(if case x in x) gh api repos/o/r/issues -f title=a --jq .number;; esac; then :; fi)"' \
     "gh api repos/o/r/issues -f title='Document gh api -X PATCH calls' --jq .number" \
     "gh api graphql -f query='mutation { createIssue(input: {repositoryId: \"R_kgDOExample\", title: \"a\"}) { issue { url } } }' --silent"; do
     out=$(hook filed "$cmd" $'5\n')
@@ -264,12 +267,14 @@ t_filedvar() {
 }
 # Bug caught: a quoted `gh issue` in a search read as a gh issue call whose verb is `$f`, and a quoted -X 'PATCH' that
 # the edit check did not see, alone or beside a quoted path (the two quotes read as one text with a space in it), and an
-# escaped \$( or \` in double quotes outside a backtick command, which bash prints as text and does not run.
+# escaped \$( or \` in double quotes outside a backtick command, which bash prints as text and does not run, and quoted
+# text after a substitution that holds a case, whose esac ends it so the next ) ends the substitution.
 t_filedquoted() {
   filedsetup
   for cmd in 'f=conveyor/foreman/foreman.sh; grep -q '"'gh issue'"' "$f"' "gh api -X 'PATCH' repos/{owner}/{repo}/issues/4 -F body=@\"\$f\" --silent" \
     "gh api -X 'PATCH' 'repos/{owner}/{repo}/issues/4' -F body=@\"\$f\" --silent" 'echo "see \$(gh api repos/o/r/issues -f title=a)"' \
-    'echo "see \`gh api repos/o/r/issues -f title=a\`"'; do
+    'echo "see \`gh api repos/o/r/issues -f title=a\`"' \
+    'grep "$(case $v in x) echo y;; esac) gh issue $f" log'; do
     out=$(hook filed "$cmd" $'ok\n')
     [ -z "$out" ] || fail "filed said something after a command that files no issue (command: $cmd): $out"
   done
