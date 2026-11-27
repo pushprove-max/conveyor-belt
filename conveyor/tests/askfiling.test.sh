@@ -61,13 +61,22 @@ t_taissueaskslow() {
 }
 # GitHub answers gh's create after the ask limit (2 s; gh takes 4 s): the filing ask waits GHWAIT more for gh's answer
 # (gh_write() stops gh at its own limit), so the link comes and the hold is in. GHWAIT is foreman/lib.sh's own, so a
-# default that is lost or too short fails here too.
+# default that is lost or too short fails here too. Bug this also catches: a GHWAIT of 10 passed the 4-second gh, yet
+# in use it stops the ask while gh still has 50 of its seconds to wait on GitHub. A `timeout` first on PATH writes down
+# the ask's limit and the limit gh_write() gives gh's create, then runs the real one, so the case checks the ask leaves
+# gh its whole limit past the ask limit (2 s) with no wait of gh's own length.
 t_cardaskgh() {
-  local a=(card "Add a Rules row" "$(printf "Make it so.\n## Cause\nNo row exists.")")
-  tasetup
+  local a=(card "Add a Rules row" "$(printf "Make it so.\n## Cause\nNo row exists.")") real ask gh
+  tasetup; real=$(command -v timeout)
+  printf '%s\n' '#!/usr/bin/env bash' '[ "$1 $2 $4" != "-k 2 bash" ] || echo "ask $3" >> "$STUB/limits"' \
+    '[ "$2 $3 $4" != "gh issue create" ] || echo "gh $1" >> "$STUB/limits"' "exec '$real' \"\$@\"" > "$STUB/timeout" \
+    && chmod +x "$STUB/timeout" || fail "the timeout stub could not be written"
   echo 'sleep 4' > "$STUB/create-cmd" # sleep: a slow GitHub answer is gh's time itself, past the ask limit, which no condition stands for
   taask 2 - - "${a[@]}"; tafiled "${a[@]}"
   [ "$(loop control | jq -c .held)" = '[100101]' ] || fail "ask alpha card 'Add a Rules row' with a slow gh did not hold its issue: $(loop control)"
+  ask=$(sed -n 's/^ask //p' "$STUB/limits" | head -n 1); gh=$(sed -n 's/^gh //p' "$STUB/limits" | head -n 1)
+  [[ $ask =~ ^[0-9]+$ && $gh =~ ^[0-9]+$ ]] && [ "$ask" -ge $((2 + gh)) ] \
+    || fail "ask alpha card 'Add a Rules row' at ask limit 2 got a limit of '$ask' s, short of 2 s and gh_write()'s '$gh' s on gh: $(cat "$STUB/limits" 2>&1)"
 }
 # Bug this catches: the ask stopped at its limit (1 s, GHWAIT 0) while gh still waits on GitHub (4 s) gave the Foreman
 # no link and no word that GitHub may have made the issue, so it filed it again.
