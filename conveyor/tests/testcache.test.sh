@@ -34,6 +34,10 @@ EOF
 cachestep() { # <card> <its change, a shell edit staged in its worktree on main>: the card's test step, its own tests()
   local wt=$T/$CASE/cards/$1
   git -C "$R" worktree add -q --detach "$wt" && (cd "$wt" && eval "$2") && git -C "$wt" add -A || return 1
+  cacherun "$1"
+}
+cacherun() { # <card>: the card's test step in its worktree as it is, its own tests(); its output in $T/$CASE/<card>.out
+  local wt=$T/$CASE/cards/$1
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
     . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
     names || exit 1; tests "$wt" || exit; testrec "$wt" 0 0 > "$wt.rec" ) > "$T/$CASE/$1.out" 2>&1
@@ -47,9 +51,10 @@ t_testcacheskip() {
   cachestep c8 'echo three > c.txt' || fail "the second card's test step failed: $(cat "$T/$CASE/c8.out" "$T/$CASE/cards/c8.test" 2>&1)"
   [ "$(sed -n 's/^c8 //p' "$STUB/ran" | tr '\n' ' ')" = "b.test.sh " ] \
     || fail "the second card did not run b.test.sh alone (a.test.sh kept off by the cache): $(cat "$STUB/ran")"
-  grep -qxF $'TESTRUN why\ta.test.sh\tpassed before with the same inputs' "$T/$CASE/cards/c8.testlog/cache" \
+  local at; at=$(git -C "$T/$CASE/cards/c7" rev-parse HEAD)
+  grep -qxF "TESTRUN why"$'\t'"a.test.sh"$'\t'"kept from the run at $at" "$T/$CASE/cards/c8.testlog/cache" \
     || fail "the run's log does not say why a.test.sh did not run: $(cat "$T/$CASE/cards/c8.testlog"/* 2>&1)"
-  [ "$(jq -c '.why["a.test.sh"]' "$T/$CASE/cards/c8.rec")" = '["passed before with the same inputs"]' ] \
+  [ "$(jq -c '.why["a.test.sh"]' "$T/$CASE/cards/c8.rec")" = "[\"kept from the run at $at\"]" ] \
     || fail "the test line's why does not say why a.test.sh did not run: $(cat "$T/$CASE/cards/c8.rec")"
   # The line's ran names the file that ran, not the one the cache kept off (which why names): bug it catches, the
   # landing pull request (landpr()) listing a.test.sh as run and leaving out b.test.sh.
@@ -90,6 +95,26 @@ t_testcacheread() {
     || fail "a change to e.txt, which a.test.sh read, did not run a.test.sh alone: $(cat "$STUB/ran" "$T/$CASE/cards/c8.test" 2>&1)"
 }
 
+# #1698 D3, D4: card c7's test step passed a.test.sh (reads e.txt) and b.test.sh (reads e2.txt). Main then gains a
+# commit that changes e.txt, c7's change is brought onto main as it is now, and its test step runs again (as after a
+# failed run, or a fix round, on a main that moved): a.test.sh runs again, b.test.sh does not, and the step line names
+# b.test.sh as kept from c7's first run. Bugs it catches: b.test.sh, kept off by the cache, ran again because the
+# list had `main` lines (filecmd() ran every file it was given); a file whose input main changed kept its pass; and the
+# step line did not name the run a file it did not run was kept from.
+t_testcachemain() {
+  cachesetup binputs
+  local w=$T/$CASE/cards/c7 at n
+  at=$(git -C "$w" rev-parse HEAD); n=$(wc -l < "$STUB/ran")
+  echo two >> "$R/e.txt" && git -C "$R" commit -qam "main changes e.txt" \
+    && git -C "$w" diff --cached --binary --no-renames > "$w.patch" && git -C "$w" reset -q --hard main && git -C "$w" apply --index "$w.patch" \
+    || fail "c7's change could not be brought onto main as it is now"
+  cacherun c7 || fail "c7's test step on main as it is now failed: $(cat "$T/$CASE/c7.out" "$w.test" 2>&1)"
+  [ "$(tail -n +"$((n + 1))" "$STUB/ran" | tr '\n' ' ')" = "c7 a.test.sh " ] \
+    || fail "after main changed e.txt, c7's step did not run a.test.sh alone: $(cat "$STUB/ran" "$w.test" 2>&1)"
+  [ "$(jq -c '[.why["a.test.sh"], .why["b.test.sh"]]' "$w.rec")" = "[[\"its inputs changed since its last pass, so the test runs again\"],[\"kept from the run at $at\"]]" ] \
+    || fail "the step line does not say a.test.sh ran for its changed input and b.test.sh was kept from the run at $at: $(cat "$w.rec")"
+}
+
 # #1619, D1: both files name their inputs (b.test.sh reads e2.txt), and card c8 changes c.txt, which the test links
 # give to both and which neither read: neither runs, and the run's log names both passes it used. Bug it catches: a
 # change no test read ran the tests the links name, as the cache kept off only a file the map did not pick.
@@ -97,7 +122,7 @@ t_testcachenone() {
   cachesetup binputs
   cachestep c8 'echo three > c.txt' || fail "the second card's test step failed: $(cat "$T/$CASE/c8.out" "$T/$CASE/cards/c8.test" 2>&1)"
   [ -z "$(sed -n 's/^c8 //p' "$STUB/ran")" ] || fail "a change to c.txt, which no test read, ran tests: $(cat "$STUB/ran" "$T/$CASE/cards/c8.testlog/cache" 2>&1)"
-  [ "$(grep -c $'^TESTRUN why\t[ab].test.sh\tpassed before with the same inputs$' "$T/$CASE/cards/c8.testlog/cache" 2>/dev/null)" = 2 ] \
+  [ "$(grep -c "^TESTRUN why"$'\t'"[ab].test.sh"$'\t'"kept from the run at $(git -C "$T/$CASE/cards/c7" rev-parse HEAD)\$" "$T/$CASE/cards/c8.testlog/cache" 2>/dev/null)" = 2 ] \
     || fail "the run's log does not name the passes of a.test.sh and b.test.sh it used: $(cat "$T/$CASE/cards/c8.testlog/cache" 2>&1)"
 }
 
@@ -136,12 +161,12 @@ cachelistsetup() {
   git -C "$R" worktree add -q --detach "$T/$CASE/cards/c7" || fail "the card's worktree could not be made"
 }
 # cachelistrun <code>: <code> in the engine's shell (the loop's libraries sourced, names() run), wt the card's worktree and
-# $TESTCACHE holding the line `h<n><TAB><line>` for the <n>th line of $LASTPASS (a pass of a file and its inputs); its
-# output in $T/$CASE/run.out.
+# $TESTCACHE holding the line `h<n><TAB>c0<TAB><line>` for the <n>th line of $LASTPASS (a pass of a file and its inputs,
+# in a run on the commit c0); its output in $T/$CASE/run.out.
 cachelistrun() {
   ( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; wt=$T/$CASE/cards/c7
     . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")" || exit 1
-    names && mkdir -p "${TESTCACHE%/*}" && awk '{ print "h" NR "\t" $0 }' <<<"$LASTPASS" > "$TESTCACHE" || exit 1; eval "$1" ) > "$T/$CASE/run.out" 2>&1 \
+    names && mkdir -p "${TESTCACHE%/*}" && awk '{ print "h" NR "\tc0\t" $0 }' <<<"$LASTPASS" > "$TESTCACHE" || exit 1; eval "$1" ) > "$T/$CASE/run.out" 2>&1 \
     || fail "the engine's code could not be run: $(cat "$T/$CASE/run.out")"
 }
 
@@ -161,13 +186,15 @@ t_testcachewhole() {
 }
 
 # #1722: cacheoff() of a card whose list is b.test.sh alone, with a pass of a.test.sh and of b.test.sh on record, their
-# inputs the same: the run's log names b.test.sh's pass as used, not a.test.sh's. Bug it catches: the log named every
-# file with a pass on record as reused, also one the card never selected.
+# inputs the same, a.test.sh's from a run on the commit c1 and b.test.sh's from one on c2: the run's log names b.test.sh's
+# pass as used, from the run at c2, not a.test.sh's. Bugs it catches: the log named every file with a pass on record as
+# reused, also one the card never selected; and a file it did not run again named another file's run.
 t_testcachelisted() {
   setup '[]'
   echo a > "$R/a.test.sh"; echo b > "$R/b.test.sh"; echo e > "$R/e.txt"; cachelistsetup a.test.sh b.test.sh e.txt
-  LASTPASS='' cachelistrun 'printf "a.test.sh\te.txt\nb.test.sh\te.txt\n" | cachesums "$wt" > "$TESTCACHE" && TEST_FILES=b.test.sh cacheoff "$wt" > "$T/$CASE/got"'
-  [ "$(cat "$T/$CASE/got" 2>&1)" = $'TESTRUN why\tb.test.sh\tpassed before with the same inputs' ] \
+  LASTPASS='' cachelistrun 'printf "a.test.sh\te.txt\nb.test.sh\te.txt\n" | cachesums "$wt" | awk '\''BEGIN { FS = OFS = "\t" } { $1 = $1 OFS "c" NR } 1'\'' > "$TESTCACHE" \
+    && TEST_FILES=b.test.sh cacheoff "$wt" > "$T/$CASE/got"'
+  [ "$(cat "$T/$CASE/got" 2>&1)" = $'TESTRUN why\tb.test.sh\tkept from the run at c2' ] \
     || fail "with a list of b.test.sh alone, the log does not name b.test.sh's pass alone as used: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
 }
 
@@ -193,8 +220,9 @@ t_testcachekinds() {
 
 # #1619: cachekeep() of a run that passed the engine case files f.test.sh, every case of it named in the log's
 # `TESTRUN case` lines, and g.test.sh, only t_one of its two cases named: f.test.sh's pass is kept, g.test.sh's is
-# not. Bugs it catches: no engine case file's pass was kept, as every `TESTRUN case` line counted as a run of some
-# cases; and a run of some cases of a file kept a pass of the whole file.
+# not; f.test.sh's pass names the commit the run was on (the worktree's HEAD). Bugs it catches: no engine case file's
+# pass was kept, as every `TESTRUN case` line counted as a run of some cases; a run of some cases of a file kept a pass
+# of the whole file; and a kept pass named no run, so a later step could not say which run it was kept from.
 t_testcachekeep() {
   setup '[]'
   local f
@@ -202,9 +230,9 @@ t_testcachekeep() {
   mkdir -p "$T/$CASE/cards/c7.testlog" && { printf 'TESTRUN case\t%s\t%s\n' f.test.sh one f.test.sh two g.test.sh one
     printf -- '-- ok %s\n' f.test.sh g.test.sh; printf 'TESTRUN inputs\t%s\te.txt\n' f.test.sh g.test.sh; } > "$T/$CASE/cards/c7.testlog/run.log" \
     || fail "the run's log could not be written"
-  LASTPASS=$'x.test.sh\te.txt' cachelistrun 'cachekeep "$wt" && cut -f2 "$TESTCACHE" > "$T/$CASE/got"'
-  [ "$(sort "$T/$CASE/got" 2>&1)" = $'f.test.sh\nx.test.sh' ] \
-    || fail "the cache does not hold f.test.sh's pass (every case run) and not g.test.sh's (one of two run): $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+  LASTPASS=$'x.test.sh\te.txt' cachelistrun 'cachekeep "$wt" && cut -f2,3 "$TESTCACHE" > "$T/$CASE/got"'
+  [ "$(sort -k2 "$T/$CASE/got" 2>&1)" = "$(git -C "$T/$CASE/cards/c7" rev-parse HEAD)"$'\tf.test.sh\nc0\tx.test.sh' ] \
+    || fail "the cache does not hold f.test.sh's pass (every case run) with its run's commit, and not g.test.sh's (one of two run): $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
 }
 
 # #1619: a change to doc.md, which the map links to ten test files, of which a card runs five; l7.test.sh, past those

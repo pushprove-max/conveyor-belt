@@ -990,12 +990,14 @@ ends in `/` is a folder that the test file lists (`./` is the checkout's root): 
 tracked files and folders in it, so a file added there or deleted, or a file changed to a folder of the same name,
 changes the input. An input can also be a path that was not there when the test file looked for it. When the file passes (its
 `-- ok` line, and no `ok`, `fail` or `off` line of the list names it, and no `TESTRUN case` line names it unless its
-case lines name every `t_<case>() {` case that the file holds), Conveyor keeps a hash of the file and its inputs in
-`testcache.tsv` in the state folder (the last 5000). The hash covers the contents of each file, whether the file can
+case lines name every `t_<case>() {` case that the file holds), Conveyor keeps a hash of the file and its inputs, with
+the commit that the run was on, in `testpasses.tsv` in the state folder (the last 5000). The hash covers the contents of each file, whether the file can
 run, whether a path is a file, a folder or not there, and, for a symbolic link, the path that the link names. A later test run of any card, or the whole test on
 main, keeps off a file whose hash in its worktree matches a kept one: its list gets a `pass<TAB><file>` and an
 `off<TAB><file>` line (unless the list names failed cases of it). The run's log says so with
-`TESTRUN why<TAB><file><TAB>passed before with the same inputs`, so the test line's `why` holds it too. A file with
+`TESTRUN why<TAB><file><TAB>kept from the run at <commit>`, so the test line's `why` holds it too. When a card's
+tests run again after main moved, a test file that read a file that main changed runs again, and the cache keeps off
+each test file whose inputs did not change. A file with
 no `TESTRUN inputs` line is never kept off in this way.
 A card's test list also gets each test file whose last kept pass read a file that the change touches, or listed a
 folder that the change adds a file to or deletes a file from. Such a file runs whole, also when the card's own change

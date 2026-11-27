@@ -97,11 +97,12 @@ carriedrec() { # <worktree> [<partial file>]
 }
 # The test results cache (README.md, Test file times: The test results cache; the owner, 2026-11-14): each test file a run passed whole,
 # with the inputs its command's log named for it (`TESTRUN inputs<TAB><file><TAB><input>...`), one a line in
-# $TESTCACHE, `<hash>\t<file>\t<input>...` (cachekeep()), the hash of the file's and its inputs' contents
-# (cachesums()). A later run, of any card or the whole test on main, keeps off a file whose hash in its worktree is a
+# $TESTCACHE, `<hash>\t<commit>\t<file>\t<input>...` (cachekeep()), the hash of the file's and its inputs' contents
+# (cachesums()) and the commit (HEAD) of the run that passed it. A later run, of any card or the whole test on main, keeps off a file whose hash in its worktree is a
 # kept one (cacheoff()). A file its log gives no inputs line for is never kept, so never kept off. The last
-# TESTCACHE_KEEP lines are kept; one writer at a time, under a lock of its own.
-TESTCACHE=${STATE%/*}/testcache.tsv TESTCACHE_KEEP=5000
+# TESTCACHE_KEEP lines are kept; one writer at a time, under a lock of its own. Its name is not the one of the cache
+# with no commit (testcache.tsv): a line of that form, read as this one, gave a file it read as a test file to run.
+TESTCACHE=${STATE%/*}/testpasses.tsv TESTCACHE_KEEP=5000
 # Of lines `<file>\t<input>...` on stdin, each as `<hash>\t<the line>`: the hash of the line's paths, in its order,
 # each with the hash of its content in the worktree and whether it can run (a path that is no file there counts as
 # missing), by two git calls. A symbolic link counts as the path it names, not the file it leads to (#1619): a test
@@ -141,10 +142,11 @@ cachesums() { # <worktree>
 # file its log ends `-- ok` that no `-- FAIL` line, no `TESTRUN case` line (a run of some of its cases: but for an
 # engine case file whose case lines name every `t_<case>() {` case it holds, run whole, #1619) and no `ok`, `fail` or
 # `off` line of the list the run was given (some of its cases kept or left out) names. A file a path of whose line is
-# absolute or climbs out of the worktree (`..`) is not kept.
+# absolute or climbs out of the worktree (`..`) is not kept, nor is any file of a worktree whose HEAD cannot be read.
 cachekeep() { # <worktree>
-  local l=() add sums lock r=/dev/null cs
+  local l=() add sums lock r=/dev/null cs h
   mapfile -t l < <(testlogs "$1"); [ ${#l[@]} -gt 0 ] && grep -qh $'^TESTRUN inputs\t' "${l[@]}" 2>/dev/null || return 0
+  h=$(git -C "$1" rev-parse -q --verify HEAD 2>/dev/null) && [ -n "$h" ] || return 0
   [ ! -f "$1.rerun" ] || r=$1.rerun
   # Each case each file with an inputs line holds, `<file>\t<case>`.
   cs=$(cat "${l[@]}" 2>/dev/null | awk -F'\t' '$1 == "TESTRUN inputs" { print $2 }' | sort -u | while IFS= read -r f; do
@@ -158,7 +160,8 @@ cachekeep() { # <worktree>
     $1 == "TESTRUN inputs" { if (bad($2)) next; seen[$2] = 1; for (i = 3; i <= NF; i++) { if (bad($i)) part[$2] = 1; inp[$2] = inp[$2] "\t" $i } }
     END { for (f in seen) if ((f in ok) && !(f in part) && (!(f in hc) || ng[f] == na[f])) print f inp[f] }' "$r" "${l[@]}")
   [ -n "$add" ] || return 0
-  sums=$(printf '%s\n' "$add" | cachesums "$1") || return 1
+  # Each line `<hash>\t<file>\t<input>...` with the run's commit after its hash.
+  sums=$(printf '%s\n' "$add" | cachesums "$1" | awk -v h="$h" '{ i = index($0, "\t"); print substr($0, 1, i) h substr($0, i) }') && [ -n "$sums" ] || return 1
   { exec {lock}>>"$TESTCACHE.lock"; } 2>/dev/null || return 1
   flock "$lock" || { exec {lock}>&-; return 1; }
   # Each hash once, at its last place; the last TESTCACHE_KEEP lines.
@@ -168,25 +171,28 @@ cachekeep() { # <worktree>
   exec {lock}>&-
 }
 # The files of $TESTCACHE whose hash in the worktree is a kept one, one a line: each passed before with the inputs it
-# has there (cacheoff(); mainred.sh verdicts(): its inputs did not change since that pass).
-cachehits() { # <worktree>
+# has there (cacheoff(); mainred.sh verdicts(): its inputs did not change since that pass). Given at, each as
+# `<file>\t<the commit of the run that passed it>`.
+cachehits() { # <worktree> [at]
   [ -s "$TESTCACHE" ] || return 0
-  cut -f2- "$TESTCACHE" | sort -u | cachesums "$1" | awk -F'\t' 'NR == FNR { k[$1] = 1; next } $1 in k { print $2 }' "$TESTCACHE" - | sort -u
+  cut -f3- "$TESTCACHE" | sort -u | cachesums "$1" | awk -F'\t' -v a="${2:-}" 'NR == FNR { k[$1] = $2; next } $1 in k { print $2 (a == "" ? "" : "\t" k[$1]) }' "$TESTCACHE" - | sort -u
 }
 # A run (tests(): a card's, and the whole test on main) is told to keep off each file of $TESTCACHE whose hash in its
 # worktree is a kept one: a `pass` and an `off` line for it in its list (the off line keeps it off though
 # a `changed` or `main` line selects it, its inputs being the same), unless the list names failed cases of it. Prints
-# each such file's line for the run's log, `TESTRUN why<TAB><file><TAB>passed before with the same inputs`: of a card's
+# each such file's line for the run's log, `TESTRUN why<TAB><file><TAB>kept from the run at <commit>`, the commit of
+# the run whose pass of it with those inputs is kept, so the card's step line names the run each file it did not run
+# again passed in: of a card's
 # run, only for a file of its list (TEST_FILES), so its log names no test it never selected as reused. Each other
 # file of the card's list (TEST_FILES, listcmd()) that its list does not keep as passed or keep off whole gets a line
 # that says why no pass of it is used (#1619): its inputs changed since the last pass on record, or it has no pass on
 # record with its inputs (no $TESTCACHE yet, or its runner names none).
 cacheoff() { # <worktree>
-  local f m add=''
-  m=$(cachehits "$1") || return 0
+  local f m at add=''
+  at=$(cachehits "$1" at) || return 0; m=$(cut -f1 <<<"$at")
   while IFS= read -r f; do
     [ -n "$f" ] && ! grep -qxF -- "$f" <<<"$m" && ! grep -qxF -e "pass"$'\t'"$f" -e "off"$'\t'"$f" "$1.rerun" 2>/dev/null || continue
-    if cut -f2 "$TESTCACHE" 2>/dev/null | grep -qxF -- "$f"; then printf 'TESTRUN why\t%s\tits inputs changed since its last pass, so the test runs again\n' "$f"
+    if cut -f3 "$TESTCACHE" 2>/dev/null | grep -qxF -- "$f"; then printf 'TESTRUN why\t%s\tits inputs changed since its last pass, so the test runs again\n' "$f"
     else printf 'TESTRUN why\t%s\tno pass of it is on record with the files it reads, so the test runs\n' "$f"; fi
   done <<<"${TEST_FILES:-}"
   [ -n "$m" ] || return 0
@@ -194,7 +200,7 @@ cacheoff() { # <worktree>
     grep -qxF "pass"$'\t'"$f" "$1.rerun" 2>/dev/null || add+="pass"$'\t'"$f"$'\n'
     grep -qxF "off"$'\t'"$f" "$1.rerun" 2>/dev/null || add+="off"$'\t'"$f"$'\n'
     [ -z "${TEST_FILES:-}" ] || grep -qxF -- "$f" <<<"$TEST_FILES" || continue
-    printf 'TESTRUN why\t%s\tpassed before with the same inputs\n' "$f"
+    printf 'TESTRUN why\t%s\tkept from the run at %s\n' "$f" "$(awk -F'\t' -v f="$f" '$1 == f { print $2; exit }' <<<"$at")"
   done < <(cat "$1.rerun" 2>/dev/null | M=$m awk -F'\t' 'BEGIN { n = split(ENVIRON["M"], a, "\n"); for (i = 1; i <= n; i++) w[a[i]] = 1 }
     $1 == "fail" { delete w[$2] } END { for (f in w) print f }' | sort)
   [ -z "$add" ] || printf '%s' "$add" >> "$1.rerun"
@@ -232,8 +238,8 @@ cachereaders() { # <changes>
   C=$1 awk -F'\t' 'BEGIN { n = split(ENVIRON["C"], l, "\n")
       for (i = 1; i <= n; i++) { if (split(l[i], x, "\t") < 2) continue; ch[x[2]] = 1; if (x[1] !~ /^[AD]/) continue
         ch["./"] = 1; m = split(x[2], p, "/"); q = ""; for (j = 1; j < m; j++) { q = q p[j] "/"; ch[q] = 1 } } }
-    { last[$2] = $0 }
-    END { for (f in last) { k = split(last[f], a, "\t"); for (i = 3; i <= k; i++) if ((a[i] in ch) || (a[i] !~ /\/$/ && (a[i] "/") in ch)) { print f; break } } }' "$TESTCACHE" | LC_ALL=C sort
+    { last[$3] = $0 }
+    END { for (f in last) { k = split(last[f], a, "\t"); for (i = 4; i <= k; i++) if ((a[i] in ch) || (a[i] !~ /\/$/ && (a[i] "/") in ch)) { print f; break } } }' "$TESTCACHE" | LC_ALL=C sort
 }
 # The cases of the test file <file> that the staged change in <worktree> adds or changes (listcmd(), #414), A to Z, one
 # a line: by the case scan (CASESCAN, lib/testfiles.sh) of main's file (HEAD) and of the staged one, each case of the

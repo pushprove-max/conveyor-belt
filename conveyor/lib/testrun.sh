@@ -640,7 +640,9 @@ NOTPASSED='def notpassed: [.failures.files[] | .file as $f | if .cases == [] the
 # the file CONVEYOR_TEST_FILELIST names lists (testonce()), one a line, but for each the list keeps as passed (a `pass` line) and names in no `fail`
 # line (a file that passed before and failed since keeps its `pass` line beside the `fail` lines of its cases): a run
 # again after a failure runs only the files that did not pass. A list with a `changed` or `main` line (rerunsince(): a fix or main
-# changed code since those passes) keeps none: every file it is given runs, as any of them may test that code; tests() gives it
+# changed code since those passes) keeps none: every file it is given runs, as any of them may test that code, but one
+# kept off whole (a `pass` and an `off<TAB><file>` line: its inputs are the same as at a kept pass, testlist.sh cacheoff(),
+# or flaky.sh keeps it off) that no `fail` line names (bug: a file whose inputs main did not change ran again); tests() gives it
 # the files of the card's list but those the list keeps something of (a `pass`, `ok` or `off` line) and that the pack's test.changed
 # command selects nothing of (testlist.sh runfiles()).
 # With fast too (the rule Stop a card's tests at the first failure: failfast()), the run stops at its first failure:
@@ -653,7 +655,7 @@ filecmd() { # <the pack's test.fileCommand> [files [fast]]
     printf '%s\n' 'fs=() t=$'"'"'\t'"'"' c=; l=$CONVEYOR_TEST_LOG/files' \
       '! grep -qE "^(changed|main)$t" "${CONVEYOR_TEST_RERUN:-/dev/null}" 2>/dev/null || c=1' \
       'while IFS= read -r f; do' \
-      '  [ -n "$f" ] && { [ -n "$c" ] || ! grep -qxF "pass$t$f" "${CONVEYOR_TEST_RERUN:-/dev/null}" 2>/dev/null \' \
+      '  [ -n "$f" ] && { { [ -n "$c" ] && ! grep -qxF "off$t$f" "${CONVEYOR_TEST_RERUN:-/dev/null}" 2>/dev/null; } || ! grep -qxF "pass$t$f" "${CONVEYOR_TEST_RERUN:-/dev/null}" 2>/dev/null \' \
       '    || awk -F "$t" -v f="$f" "\$1 == \"fail\" && \$2 == f { e = 1 } END { exit !e }" "$CONVEYOR_TEST_RERUN"; } || continue; fs+=("$f")' \
       'done < "${CONVEYOR_TEST_FILELIST:-/dev/null}"'
   else

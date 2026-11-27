@@ -20,8 +20,10 @@ holdsetup() { # <plan lines>...
   echo b > "$R/b.txt"; echo c > "$R/c.txt"; git -C "$R" add b.txt c.txt && git -C "$R" commit -qm inputs || fail "main's inputs could not be committed"
   echo 'case $PWD in */mainrun/machine) tr "\t\n" ":|" < "$RR" >> "$STUB/looks"; echo >> "$STUB/looks" ;; esac' > "$STUB/pre"
 }
-holdpass() { # <file<TAB>input>...: each passed with main's content, in the test results cache
-  printf '%s\n' "$@" > "$STUB/passes"; eng 'cachesums "$R" < "$STUB/passes" >> "$TESTCACHE"' || fail "the passes could not be recorded"
+holdpass() { # <file<TAB>input>...: each passed with main's content, in the test results cache, on main's commit
+  printf '%s\n' "$@" > "$STUB/passes"
+  eng 'cachesums "$R" < "$STUB/passes" | awk -v h="$(git -C "$R" rev-parse HEAD)" '\''BEGIN { FS = OFS = "\t" } { $1 = $1 OFS h } 1'\'' >> "$TESTCACHE"' \
+    || fail "the passes could not be recorded"
 }
 # The card's failing case, b.test's flaky, as testfails() gives it, judged in card c7's worktree on main.
 holdjudge() {
