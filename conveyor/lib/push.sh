@@ -556,6 +556,7 @@ idleone() {
 # the test files run before the push (pushtests(), hookalone()); ready, the push worktree, its dependencies and a test
 # slot being got; hook, git push and its pre-push hook running; push, git push with no hook running; ended, git push
 # failed and the push goes on to its end or to a next try; pushed, the remote holds the commit and the push ends.
+# At tests, pushtests() adds files, the test files its run chose, those done and those that failed (pushprog()).
 pushing() { jq -cn --argjson p "${pproc:-$BASHPID}" --arg s "$1" --arg g "$2" --arg l "${plog:-}" --arg st "${pstart:-}" '(now | todate) as $t | {pid:$p,since:$t,started:(if $st == "" then $t else $st end),sha:$s,stage:$g,base:$ARGS.positional} + (if $l == "" then {} else {log:$l} end)' --args "${before[@]+"${before[@]}"}" > "$PUSHING" 2>/dev/null || :; } # <commit> <stage>
 # Did the push's pre-push hook exit non-zero? Read from git's trace2 events of the push (the file given): the first
 # event is the push's own, and only its own children count (a check that runs git, or pushes in a test of its own,

@@ -470,9 +470,10 @@ health() {
   # The running loop's count at its last turn: {building: the cards counted against the cap, waiting: those left out of the machine's count}.
   [ "$loop" = true ] && bw=$(jq -ce 'select((.building | type) == "number" and (.waiting | type) == "number") | {building, waiting}' "$SAYS" 2>/dev/null) || bw='{"building":null,"waiting":null}'
   # The push in progress, whoever started it (the loop, Push now, Push landed): stale when its process is gone and it
-  # did not end (push() clears the record at its end); line, the newest line of its log, or its last "N/M passed".
+  # did not end (push() clears the record at its end); line, the newest line of its log, or its last "N/M passed";
+  # files, the run before the push's chosen, done and failed test files (pushprog(), lib/pushrun.sh), else null.
   # started: when the push began (a record with none: its stage's since).
-  if pu=$(jq -ce 'select((.pid | type == "number") and (.since | type == "string")) | {pid, since, started: ((.started | strings) // .since), sha, stage: (.stage // null), log: (.log // null), base: ([.base | arrays | .[] | strings])}' "$PUSHING" 2>/dev/null); then
+  if pu=$(jq -ce 'select((.pid | type == "number") and (.since | type == "string")) | {pid, since, started: ((.started | strings) // .since), sha, stage: (.stage // null), log: (.log // null), base: ([.base | arrays | .[] | strings]), files: (.files | objects // null)}' "$PUSHING" 2>/dev/null); then
     kill -0 "$(jq -r .pid <<<"$pu")" 2>/dev/null && a=false || a=true
     pu=$(jq -c --argjson stale "$a" --rawfile out <(f=$(jq -r '.log // empty' <<<"$pu"); [ -z "$f" ] || tail -c 65536 "$f" 2>/dev/null) '
       (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now

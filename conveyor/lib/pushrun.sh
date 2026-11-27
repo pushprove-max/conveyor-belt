@@ -79,13 +79,18 @@ pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
   fi
   if [ ${#fs[@]} != 0 ]; then
     [ -n "$SLOT_HOME" ] || until slot_try || slot_wait; do :; done
+    pushprog "$(printf '%s\n' "${fs[@]}")" '' ''
     # More than one file, and a slot of the pool free beside the run's own: side by side (pushside()); else one at a time.
     if [ ${#fs[@]} -gt 1 ] && [ -n "$fc" ] && [ $((SLOT_N - $(slot_used))) -gt 0 ]; then
       echo "conveyor: before the push of ${sha:0:12}, ${#fs[@]} test file(s) $what run, each alone, side by side on the free test slots (${#lands[@]} landing(s) since the last push)" >&2
       pushside "$wt" "$fc" "${fs[@]}"
     else
       echo "conveyor: before the push of ${sha:0:12}, ${#fs[@]} test file(s) $what run, each alone (${#lands[@]} landing(s) since the last push)" >&2
-      for f in "${fs[@]}"; do pushfile "$wt" "$f" "${hit[$f]:-}" || { bad+=("$f"); fat[$f]=$(head -n 1 "$wt.failat" 2>/dev/null); }; done
+      i=0
+      for f in "${fs[@]}"; do
+        pushfile "$wt" "$f" "${hit[$f]:-}" || { bad+=("$f"); fat[$f]=$(head -n 1 "$wt.failat" 2>/dev/null); }
+        i=$((i + 1)); pushprog "$(printf '%s\n' "${fs[@]}")" "$(printf '%s\n' "${fs[@]:0:i}")" "$(printf '%s\n' "${bad[@]}")"
+      done
     fi
     # The passes those runs traced are kept (cachekeep()), so a later push or card takes them while their inputs hold;
     # never of a file whose run failed (a `fail` line in <worktree>.rerun), though its log has `-- ok` for it: a check
@@ -164,16 +169,22 @@ pushfile() { # <worktree> <test file> [<fresh>]
 # and what pushfile() gives one file: its time limit too, testTimeout times the load factor. Their output is added to
 # <worktree>.log, in the files' order. Each file with no `-- ok` line in the run's log is added to the caller's bad, and
 # why it failed (the line pushfile() puts first in <worktree>.failat) to the caller's fat; the caller's hit names the
-# files whose list of inputs is fresh, each run with CONVEYOR_TEST_NOTRACE=1.
+# files whose list of inputs is fresh, each run with CONVEYOR_TEST_NOTRACE=1. While they run, and at their end, the
+# push record names the files done and failed (pushprog()).
 pushside() { # <worktree> <test.fileCommand> <file>...
-  local w=$1 fc=$2 f s lf l=$1.testlog/files; shift 2
+  local w=$1 fc=$2 f s lf l=$1.testlog/files wp; shift 2
   rm -f "$w.fresh"; [ ${#hit[@]} = 0 ] || printf '%s\n' "${!hit[@]}" > "$w.fresh"
   lf=$(loadfactor); s=$(awk -v n="${TEST_TIMEOUT:-3600}" -v f="$lf" "$LOADSCALE")
+  # While the files run, the push record names those whose end line the run's log has (pushprog()), each second.
+  # sleep: the run's log has no event to wait on, and the watcher is ended as the run ends.
+  ( while sleep 1; do pushprog "$(printf '%s\n' "$@")" "$(sed -nE 's/^-- (ok|FAIL|timeout) //p' "$l" 2>/dev/null)" \
+      "$(sed -nE 's/^-- (FAIL|timeout) //p' "$l" 2>/dev/null)"; done ) 8>&- & wp=$!
   # fileeach()'s own limit of a file is the number its FILELIMIT program prints: here testTimeout, for every file.
   ( cd "$w" && { [ -n "$SLOT_HOME" ] || slot_mine; } && export CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$w.testlog \
       CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_LOAD_FACTOR=$lf CONVEYOR_TEST_NOTRACE='' CONVEYOR_TEST_FAILFAST='' \
     && fileeach side "{ ! grep -qxF -- \"\$CONVEYOR_TEST_FILE\" $(printf %q "$w.fresh") 2>/dev/null || export CONVEYOR_TEST_NOTRACE=1; }; $fc" \
       "BEGIN { print ${TEST_TIMEOUT:-3600}; exit }" "$LOADSCALE" "$l" "$@" < /dev/null 8>&- ) >> "$w.log" 2>&1
+  kill "$wp" 2>/dev/null; wait "$wp" 2>/dev/null
   rm -f "$w.fresh"
   for f; do
     ! grep -qxF -- "-- ok $f" "$l" 2>/dev/null || continue
@@ -185,6 +196,18 @@ pushside() { # <worktree> <test.fileCommand> <file>...
         <(printf '%s\n' "$@") "$w.log" | failat "$w" | sed 's/^/it failed at /' | head -n 1)
     fi
   done
+  pushprog "$(printf '%s\n' "$@")" "$(printf '%s\n' "$@")" "$(printf '%s\n' "${bad[@]}")"
+}
+# The progress of the run before the push (pushtests()) in the push record ($PUSHING, pushing(), lib/push.sh), as
+# files: {chosen: the test files it runs, done: those of them that ended, failed: those of them that failed}: chosen in
+# the run's order, done and failed as they ended; so health (lib/views.sh) gives them to the Board while the push
+# runs. Only the record of this shell's push (pproc, else this shell): a run with no push record of its own (the idle
+# merge's) writes none.
+pushprog() { # <chosen, a line each> <done, a line each> <failed, a line each>
+  local t=$PUSHING.$BASHPID # this shell's own: the watcher's write never meets the run's
+  [ "$(jq -r '.pid' "$PUSHING" 2>/dev/null)" = "${pproc:-$BASHPID}" ] || return 0
+  jq -c --arg c "$1" --arg d "$2" --arg f "$3" 'def l: split("\n") | map(select(. != ""));
+    . + {files: {chosen: ($c | l), done: ($d | l), failed: ($f | l)}}' "$PUSHING" > "$t" 2>/dev/null && mv -f "$t" "$PUSHING" || rm -f "$t"
 }
 # The test files a failed pre-push hook names as failing (hookalone()), one a line: each test file of <commit>
 # (testtracked(), lib/issues.sh) that a line of the hook's output names, whole or after a /, on a line that says it

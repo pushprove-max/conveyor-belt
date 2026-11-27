@@ -824,7 +824,8 @@ line hold `list`: `{"mode": "changed", "files": <count>, "by": "own", "map" or "
 commits the made test map is behind, only with one). The Board shows it with the test step (`changed: 7 files (map)
 · map 12 commits old`, `changed: 7 files (by name)`); `/units` shows `changed: 7 files`. Before each push, the loop
 runs the test files the test map and the links give each landing since the last push, each alone, once a commit,
-side by side on the free test slots when more than one file runs (`test.fileCommand`). It
+side by side on the free test slots when more than one file runs (`test.fileCommand`). While these files run,
+`conveyor.sh health` shows `pushing.files`: the files chosen, the files done and the files that failed. It
 does not run a file whose kept pass in the test results cache has the inputs that main has (a card's Test step keeps
 one), unless `pushbatchtests` is `all`, which runs every file. A file that fails is run on the landings in turn, goes to the main-fix card of main's commit naming the landing that
 broke it, and holds the push (`lib/push.sh` `pushtests`, [Push](../docs/cards.md#push)), unless the push check is off

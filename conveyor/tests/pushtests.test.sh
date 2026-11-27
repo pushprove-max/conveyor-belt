@@ -176,6 +176,44 @@ $l2 lib/cart.test.js 1 saw 2" ] || fail "pushtests c2 2 $l2 $base on three free 
     || fail "pushtests c2 2 $l2 $base did not hold the push on lib/cart.test.js, which failed side by side, naming where it failed: $(st 'select(.step == "push")') $(cat "$T/$CASE/push.out")"
 }
 
+# The push record of the run before the push, as push() writes it at its stage tests (pushing()), then pushtests c2 2.
+PUSHREC='pproc=$BASHPID; pushing "$l2" tests; pushtests c2 2 "$l2" "$base" || echo held > "$T/$CASE/held"'
+# #1709 D4, one file at a time (one slot). Each file's command keeps the push record as it starts: a.test.sh passes,
+# lib/cart.test.js fails on main. Bugs it catches: the push record did not name the files the run chose, or named
+# none done while it went on, so the Board showed a push at its tests with no progress; the record, or health's push
+# in progress (lib/views.sh), did not name the failed file.
+t_pushtestsprogress() {
+  local l1 l2 base
+  pushfix true; pushpool 1
+  printf '%s\n' "cp \"\$PUSHING\" \"$T/$CASE/rec.\$(git rev-parse HEAD).\${1//\//_}\"; [ \"\$1\" = a.test.sh ] || bash \"\$1\"" > "$STUB/one"
+  loop control rules pushbatch=on pushbatchtests=all > /dev/null || fail "control rules pushbatch=on pushbatchtests=all failed"
+  pushnow "export PUSHING; $PUSHREC"
+  [ "$(jq -c .files "$T/$CASE/rec.$l2.a.test.sh" 2>&1)" = '{"chosen":["a.test.sh","lib/cart.test.js"],"done":[],"failed":[]}' ] \
+    && [ "$(jq -c .files "$T/$CASE/rec.$l2.lib_cart.test.js" 2>&1)" = '{"chosen":["a.test.sh","lib/cart.test.js"],"done":["a.test.sh"],"failed":[]}' ] \
+    || fail "pushtests c2 2 $l2 $base: the push record as each file began does not name the files chosen and those done: $(cat "$T/$CASE"/rec.* "$T/$CASE/push.out" 2>&1)"
+  [ -e "$T/$CASE/held" ] && [ "$(loop health | jq -c .pushing.files)" = '{"chosen":["a.test.sh","lib/cart.test.js"],"done":["a.test.sh","lib/cart.test.js"],"failed":["lib/cart.test.js"]}' ] \
+    || fail "pushtests c2 2 $l2 $base: health's push in progress does not name lib/cart.test.js failed: $(cat "$ST/pushing" "$T/$CASE/push.out" 2>&1)"
+}
+
+# #1709 D4, side by side (three slots). lib/cart.test.js's command waits, up to 10 s times the load factor, until the
+# push record names a.test.sh done, keeps the record it saw first, then fails on main. Bugs it catches: the record named the files done only once
+# every file had ended, so a long side-by-side run showed no progress; it did not name the failed file at the end.
+t_pushtestssideprogress() {
+  local l1 l2 base
+  pushfix true; pushpool 3
+  # sleep: the file's wait for the record, in its own shell (no wait_until there)
+  printf '%s\n' '[ "$1" = a.test.sh ] && exit 0' \
+    "i=0; until jq -e 'any(.files.done[]; . == \"a.test.sh\")' \"\$PUSHING\" > /dev/null 2>&1 || [ \$i -ge $(loadlimit 200) ]; do i=\$((i + 1)); sleep 0.05; done" \
+    "[ -e \"$T/$CASE/seen\" ] || jq -c .files \"\$PUSHING\" > \"$T/$CASE/seen\"; bash \"\$1\"" > "$STUB/one"
+  loop control rules pushbatch=on pushbatchtests=all > /dev/null || fail "control rules pushbatch=on pushbatchtests=all failed"
+  pushnow "export PUSHING; $PUSHREC"
+  grep -qF 'side by side on the free test slots' "$T/$CASE/push.out" || fail "the push did not run its files side by side: $(cat "$T/$CASE/push.out")"
+  [ "$(cat "$T/$CASE/seen" 2>&1)" = '{"chosen":["a.test.sh","lib/cart.test.js"],"done":["a.test.sh"],"failed":[]}' ] \
+    || fail "pushtests c2 2 $l2 $base side by side: the push record while lib/cart.test.js ran did not name a.test.sh done: $(cat "$T/$CASE/seen" "$T/$CASE/push.out" 2>&1)"
+  [ -e "$T/$CASE/held" ] && [ "$(jq -c .files "$ST/pushing")" = '{"chosen":["a.test.sh","lib/cart.test.js"],"done":["a.test.sh","lib/cart.test.js"],"failed":["lib/cart.test.js"]}' ] \
+    || fail "pushtests c2 2 $l2 $base side by side: the push record at the end does not name lib/cart.test.js failed: $(cat "$ST/pushing" "$T/$CASE/push.out" 2>&1)"
+}
+
 # Bug it catches: the file command logged a traced pass of lib/cart.test.js (`-- ok` and its inputs) and then failed
 # it, as a check of .conveyor/test-changed.sh after the tests (mapcheck) does; the cache kept that pass, so a later push
 # whose inputs still matched skipped the file and the check that failed it.
