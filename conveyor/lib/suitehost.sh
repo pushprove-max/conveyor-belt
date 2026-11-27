@@ -37,6 +37,9 @@
 # <size>". Sourced by commands/release-prep.sh and commands/suite-machine.sh.
 SH_KIND=local SH_NAME='this machine' SH_POST='the build machine' SH_TARGET='' SH_DIR='' SH_D='' SH_SLOTS='' SH_STEP='' SH_T=0 SH_WHY=''
 SH_SIZE='' SH_TAG='' SH_IDLE='' SH_LEASE='' SH_BOX=''
+# The `devbox release <name> --lease_id=<id>` (or `--lease_id <id>`) line that `devbox acquire` can print: the box's
+# name, then the lease id (hostlease(), hostboxname()).
+SH_RELRE='devbox release ([A-Za-z0-9][A-Za-z0-9._-]*) --lease_id[= ]([A-Za-z0-9][A-Za-z0-9._:-]*)'
 # What every check of a box prints, one fact a line: its bash version, each tool named (ok or missing), its CPUs and
 # its test slots: slot_pool's there, of lib/slots.sh sent on ssh's input and read from that stream, never reopened by path (some ssh servers refuse that), or on a devbox, which gets no input, inside the script (hostfacts()), so its host file's testSlots
 # and its cores cap them as the suite's runner there finds them (.conveyor/test-full.sh), never its CPU count alone.
@@ -86,11 +89,13 @@ hostssh() { # <script> [seconds] [detach]
   [ "$SH_KIND" != devbox ] || { "${t[@]}" devbox exec "${d[@]}" --lease_id "$SH_LEASE" -- bash -c "$1"; return; }
   "${t[@]}" ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -- "$SH_TARGET" "bash -c $(hostq "$1")"
 }
-# The name of the run's devbox: the rule's box, else the one acquire leased (hostlease()): the last word of the line
-# before the lease id in its output, the marks around it left out. Nothing when acquire named none.
+# The name of the run's devbox: the rule's box, else the one acquire leased (hostlease()): the box its `devbox release`
+# line names (SH_RELRE), else the last word of the line before the lease id in its output, the marks around it left
+# out. Nothing when acquire named none.
 hostboxname() {
   local a
   [ -z "$SH_BOX" ] || { printf %s "$SH_BOX"; return; }
+  [[ ${SH_ACQ:-} =~ $SH_RELRE ]] && { printf %s "${BASH_REMATCH[1]}"; return; }
   a=$(grep . <<<"${SH_ACQ:-}" | tail -n 2 | head -n 1); a=${a##*[[:space:]]}
   [[ $a =~ ^[^A-Za-z0-9]*(.*[A-Za-z0-9])[^A-Za-z0-9]*$ ]] && printf %s "${BASH_REMATCH[1]}"
 }
@@ -205,14 +210,15 @@ hostboxes() {
   SH_BOXES=$(timeout --kill-after=5 60 devbox list -o json 2> /dev/null < /dev/null | jq -c '[.[] | .name | strings]' 2> /dev/null) && [ -n "$SH_BOXES" ] \
     || { SH_BOXES=null SH_WHY="the account's devboxes could not be listed with devbox list"; return 1; }
 }
-# A devbox leased: `devbox acquire <tag>` with the size and the idle stop, which prints the box's name and the lease id
-# last, in SH_LEASE; its whole output in SH_ACQ. Sets SH_WHY to why not, and fails.
+# A devbox leased: `devbox acquire <tag>` with the size and the idle stop, which prints the box's name and the lease id,
+# in SH_LEASE: the id of its `devbox release` line (SH_RELRE), else its last line; its whole output in SH_ACQ. Sets
+# SH_WHY to why not, and fails.
 hostlease() { # <seconds>
   local out
   out=$(timeout --kill-after=5 "$1" devbox acquire "$SH_TAG" --size "$SH_SIZE" --auto_stop_idle_timeout "$SH_IDLE" 2>&1 < /dev/null) \
     || { SH_WHY="a devbox could not be acquired: $(grep . <<<"$out" | tail -n 1)"; return 1; }
   SH_ACQ=$out
-  out=$(grep . <<<"$out" | tail -n 1)
+  if [[ $out =~ $SH_RELRE ]]; then out=${BASH_REMATCH[2]}; else out=$(grep . <<<"$out" | tail -n 1); fi
   [[ $out =~ ^[A-Za-z0-9][A-Za-z0-9._:-]*$ ]] || { SH_WHY="devbox acquire did not print a lease id: ${out:0:200}"; return 1; }
   SH_LEASE=$out
 }

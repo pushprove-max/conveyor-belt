@@ -354,7 +354,7 @@ t_hostnostdinpath() {
 # A file $STUB/devbox-tagged is a box already tagged (tagged-box): acquire reuses it; with none, acquire makes a box
 # (conveyor-made) in the list; either way it names the box on the line before the lease id, as the real acquire prints
 # the box's name. A file $STUB/devbox-other is another project's box made while acquire runs: a box named devbox, a
-# word of acquire's own lines, joins the list.
+# word of acquire's own lines, joins the list. A file $STUB/devbox-relline: acquire ends with a `devbox release` line, not the id.
 DEVBOX='#!/usr/bin/env bash
 L=lease-1274
 note() { printf "%s\n" "$*" >> "$STUB/devbox-calls"; }
@@ -366,7 +366,7 @@ case $1 in
     [ -e "$STUB/devbox-tagged" ] || echo "[{\"name\":\"conveyor-made\"}]" > "$STUB/devbox-list"
     [ ! -e "$STUB/devbox-other" ] || { jq -c ". + [{name: \"devbox\"}]" "$STUB/devbox-list" > "$STUB/devbox-list.new" && mv "$STUB/devbox-list.new" "$STUB/devbox-list"; }
     if [ -e "$STUB/devbox-tagged" ]; then echo "Reused devbox \"tagged-box\"."; else echo "Created devbox \"conveyor-made\"."; fi
-    echo "$L"; : > "$STUB/devbox-leased" ;;
+    if [ -e "$STUB/devbox-relline" ]; then printf "To give it back, run:\n  devbox release conveyor-made --lease_id=%s\n" "$L"; else echo "$L"; fi; : > "$STUB/devbox-leased" ;;
   release) note "$@"; [ "$2 $3" = "--lease_id $L" ] && [ -e "$STUB/devbox-leased" ] || { echo "no such lease" >&2; exit 1; }; rm -f "$STUB/devbox-leased"; echo "$L" >> "$STUB/devbox-released" ;;
   upload) note "upload $2 ${4##*/}"; [ "$2" = hand-made ] || { [ -e "$STUB/devbox-leased" ] && case $2 in conveyor-made|tagged-box) ;; *) false ;; esac; } || { echo "no such devbox: $2" >&2; exit 1; }
     mkdir -p "$(dirname "$4")" && cp "$3" "$4" ;;

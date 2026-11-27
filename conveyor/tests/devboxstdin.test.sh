@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
-# Engine cases: a devbox whose `devbox exec` passes no standard input (lib/suitehost.sh). Its own file, to keep the
+# Engine cases: a devbox whose `devbox exec` passes no standard input, and one whose `devbox acquire` prints its lease id
+# in a `devbox release` line (lib/suitehost.sh). Its own file, to keep the
 # suitehost case file under the 600 lines a case file may have. The helpers and the stand-in devbox are that file's
 # (devboxsetup, DEVBOX, whose exec gives the box no input, as the real one does).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
@@ -53,4 +54,17 @@ t_devboxnamedinput() {
   [ "$(devboxcalls)" = 'auth check-login;exec start;exec facts;exec dir;upload hand-made wt.in;exec setup;exec dir;upload hand-made wt.in;exec checkout;exec dir;upload hand-made wt.in;exec upload;exec -d run;exec poll' ] \
     || fail "the setup script, the bundle and the run's files did not each go by devbox upload before their exec: $(devboxcalls)"
   [ ! -e "$BOX/wt.in" ] || fail "the uploaded input $BOX/wt.in was left on the box after the run"
+}
+# Bug: a `devbox acquire` that ends with `devbox release <name> --lease_id=<id>`, not a bare id, was refused as printing
+# no lease id, so a suite on a devbox leased by tag never started; and hostin() took the box's name from the line before
+# (here "run:"), so no file reached the box. A function call, not a release run: only hostlease() and hostin() are under test.
+t_devboxleaseline() {
+  local out
+  setup '[]'; devboxsetup 3; : > "$STUB/devbox-relline"
+  # shellcheck disable=SC2034,SC2088 # the box's ~ is text; the variables are suitehost.sh's, read by hostlease() and hostin()
+  out=$( (REPO=main; . "$SRC/lib/suitehost.sh" && SH_KIND=devbox SH_TAG=conveyor-suite-main SH_SIZE=4x8 SH_IDLE=15m SH_DIR='~/conveyor-suite' && hostd \
+    && { hostlease 60 || { echo "$SH_WHY"; false; }; } && echo "lease $SH_LEASE" && echo sent | hostin cat 60) 2>&1)
+  [ "$out" = $'lease lease-1274\nsent' ] \
+    || fail "hostlease and hostin on an acquire that printed 'devbox release conveyor-made --lease_id=lease-1274' did not lease lease-1274 and send the input to conveyor-made: $out; calls $(devboxcalls)"
+  grep -qx 'upload conveyor-made wt.in' "$STUB/devbox-calls" || fail "hostin did not upload to the box the devbox release line names: $(devboxcalls)"
 }
