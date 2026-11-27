@@ -680,6 +680,27 @@ mainlinks() { # <worktree> <the commit last tested on>
     | jq -Rr --slurpfile m <(cat "$1/.conveyor/test-links.json" 2>/dev/null || echo '{}') '$m[0]["main:" + .] | arrays[] | strings' 2>/dev/null \
     | sort -u | while IFS= read -r f; do [ ! -f "$1/$f" ] || printf '%s\n' "$f"; done
 }
+# The test files .conveyor/test-links.json links to each file the staged change in <worktree> touches, a test file or
+# not, those still there, one a line, A to Z; a link of a file to itself is left out. listcmd() runs each whole and
+# never leaves one out for its cap: a link says a change to that file broke the test before (bug: a card that changed
+# foreman.sh and a test file ran none of foreman.sh's links, and with no test file the cap ran 5 of its 9).
+changelinks() { # <worktree>
+  git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null \
+    | jq -Rr --slurpfile m <(cat "$1/.conveyor/test-links.json" 2>/dev/null || echo '{}') '. as $k | $m[0][$k] | arrays[] | strings | select(. != $k)' 2>/dev/null \
+    | sort -u | while IFS= read -r f; do [ -z "$f" ] || [ ! -f "$1/$f" ] || printf '%s\n' "$f"; done
+}
+# listcmd()'s capped list fs with each linked file (lk, listcmd()'s) added that the cap left out and that
+# changelinks() gives <worktree>'s change; KEPTLINKS: how many it added (bug: a change to foreman.sh alone ran 5 of
+# the 9 test files its links name).
+# shellcheck disable=SC2154 # lk is listcmd()'s
+linkskept() { # <worktree>
+  local f
+  KEPTLINKS=0
+  while IFS= read -r f; do
+    printf '%s\n' "${lk[@]}" | grep -qxF -- "$f" && ! printf '%s\n' "${fs[@]}" | grep -qxF -- "$f" || continue
+    fs+=("$f"); KEPTLINKS=$((KEPTLINKS + 1))
+  done < <(changelinks "$1")
+}
 # A run's logs <log>... that name a file the runner did not start for a problem of the host, as no room in the temp
 # space (a line `TESTRUN host<TAB><file><TAB><why>`), whatever else the run failed. Prints the first why; fails when
 # no file is such a file. Bug #1662: such a file was a failed test, so it ran on main, failed there for the same want

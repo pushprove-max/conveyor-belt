@@ -638,6 +638,9 @@ LINKED='the change adds or changes no test file, so the card ran <n> of the <all
 # before the rest.
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 SELLINKED=' The test command selects <k> of the files that ran for the change, and they ran first.'
+# Added to LINKED when the links (testlist.sh changelinks()) ran <k> linked files past those <n>.
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+LINKKEPT=' It also ran <k> more of the linked files, because .conveyor/test-links.json links them to a file that the change touches.'
 # Added to LINKED when the test results cache (testlist.sh readersin()) ran <k> linked files past those <n>.
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 READLINKED=' It also ran <k> more of the linked files, because their last pass read a file that the change touches.'

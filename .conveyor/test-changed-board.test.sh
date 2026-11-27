@@ -89,8 +89,8 @@ has "$got" dashboard-view.focus.test.mjs \
 # Bug: a card that changed only docs/board.md did not list dashboard-view.rules-index.test.mjs, which reads that page
 # and checks the order of its two top lines of the Rules panel, as no link named it. The same card also did not list
 # the two other tests that read the guide (dashboard-server-plugin.test.sh, docs-claims.test.sh). A card that adds or
-# changes no test file runs only the first CARDLINKED (5) of the linked files (conveyor/lib/prompts.sh), so
-# rules-index must be among the first five.
+# changes no test file runs only the first CARDLINKED (5) of the files the test map links (conveyor/lib/prompts.sh;
+# each file .conveyor/test-links.json links runs too), so rules-index must be among the first five.
 got=$(listed docs/board.md)
 for t in dashboard-view.rules-index.test.mjs dashboard-server-plugin.test.sh; do
   has "$got" "$t" || no "a change to docs/board.md alone does not list $t, which reads it: $(tr '\n' ' ' <<<"$got")"

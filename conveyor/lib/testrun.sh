@@ -439,7 +439,7 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # reports more: tests()). <report args> (reportask() files) go after the command, before each file's path. TEST_FAST is
 # `fast` when the command stops at its first failure (failfast()), else empty, as for a main-red fix card (in $MAINRED): cardland.sh redelse() needs a verdict of each case it fails.
 listcmd() { # <worktree> [report args]
-  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 SELN=0
+  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 KEPTLINKS=0 SELN=0
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
   # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only while it is not set.
   # A suite runner (SUITERUNNERS) is on no list (#382): testpaths() leaves each off the card's own files, and
@@ -448,7 +448,8 @@ listcmd() { # <worktree> [report args]
   # The test files the card's own change adds or changes (the pack's test patterns: testpaths(), so no runner and no
   # document; no shared helper, which testsel() does not run as a test either) are the card's tests (#384); with
   # none, the CARDLINKED test files the test map and the links give the change (testsel() narrow), those that failed
-  # most recently first, after those the pack's changed-tests command selects (selfirst(), testcap()), and its output says so (LINKED). The run before the push runs the files the map
+  # most recently first, after those the pack's changed-tests command selects (selfirst(), testcap()), and its output says so (LINKED).
+  # Either way each test file .conveyor/test-links.json links to a changed file runs (changelinks()). The run before the push runs the files the map
   # links to every landing (pushtests(), lib/pushrun.sh).
   mapfile -t fs < <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames --diff-filter=AM HEAD -- 2>/dev/null | testpaths \
     | jq -Rr "$SHAREDJQ"'select(. != "" and (shared | not))')
@@ -461,12 +462,13 @@ listcmd() { # <worktree> [report args]
       if c=$(owncases "$1" "$f"); then nf=$((nf + 1)); TEST_CASES+=$(awk -v f="$f" '{print f "\t" $0}' <<<"$c")$'\n'
       else nw=$((nw + 1)); fi
     done
-    # Each of the card's test files, whole or only its changed cases, brings the test files .conveyor/test-links.json
-    # links to it, those still there, each run whole: they call its helpers (#1000), or a change that needed this file
-    # changed broke them before (a Foreman title case and the start's size cases). One already on the list with only its
-    # changed cases runs whole too, as a case it did not change can call them; a link of a file to itself is no reason.
-    mapfile -t lk < <(jq -r '. as $m | $ARGS.positional[] as $k | $m[$k] | arrays[] | strings | select(. != $k)' \
-      --args "${fs[@]}" < "$1/.conveyor/test-links.json" 2>/dev/null | sort -u)
+    # Each file the change touches, each of the card's test files (whole or only its changed cases) and each other
+    # file, brings the test files .conveyor/test-links.json links to it, those still there, each run whole
+    # (testlist.sh changelinks()): they call its helpers (#1000), or a change that needed this file changed broke them
+    # before (a Foreman title case and the start's size cases; bug: a link from foreman.sh itself was never read). One
+    # already on the list with only its changed cases runs whole too, as a case it did not change can call them; a link
+    # of a file to itself is no reason.
+    mapfile -t lk < <(changelinks "$1")
     for f in "${lk[@]}"; do
       [ -n "$f" ] && [ -f "$1/$f" ] || continue
       if printf '%s\n' "${fs[@]}" | grep -qxF -- "$f"; then
@@ -487,11 +489,14 @@ listcmd() { # <worktree> [report args]
       narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
     by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"; runnersout
     lk=("${fs[@]}"); selfirst "$1" "$CARDLINKED"; CAPMAX=$CARDLINKED CAPFIRST=$SELN testcap "${fs[@]}"; fs=("${CAPFILES[@]}")
+    # Past the cap, each linked file .conveyor/test-links.json links to a changed file (testlist.sh linkskept(), KEPTLINKS).
+    linkskept "$1"; CAPLEFT=$((CAPLEFT - KEPTLINKS))
     # Past the cap, each file whose last pass read a file the change touches (testlist.sh readersin(), #1619): a linked one (READLINKS) is not left out: bug, the list said 5 of 10 were left out with 6 on it.
     readersin "$1"; CAPLEFT=$((CAPLEFT - READLINKS))
-    # The note's <n> counts only the linked files the cap chose, most recent failure first (those the changed-tests command selects, SELN, before them: SELLINKED); the linked files past it that ran for the last passes (READLINKS) get their own sentence (READLINKED): bug, the note said all of them ran in order of most recent failure.
-    [ ${#lk[@]} = 0 ] || [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/$((${#lk[@]} - CAPLEFT - READLINKS))}; CAPNOTE=${CAPNOTE//'<all>'/${#lk[@]}}
-      [ "$SELN" = 0 ] || CAPNOTE+=${SELLINKED//'<k>'/$((SELN < CARDLINKED ? SELN : CARDLINKED))}; [ "$READLINKS" = 0 ] || CAPNOTE+=${READLINKED//'<k>'/$READLINKS}; }
+    # The note's <n> counts only the linked files the cap chose, most recent failure first (those the changed-tests command selects, SELN, before them: SELLINKED); the linked files past it that ran for their links (KEPTLINKS: LINKKEPT) or for the last passes (READLINKS) get their own sentences (READLINKED): bug, the note said all of them ran in order of most recent failure.
+    [ ${#lk[@]} = 0 ] || [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/$((${#lk[@]} - CAPLEFT - READLINKS - KEPTLINKS))}; CAPNOTE=${CAPNOTE//'<all>'/${#lk[@]}}
+      [ "$SELN" = 0 ] || CAPNOTE+=${SELLINKED//'<k>'/$((SELN < CARDLINKED ? SELN : CARDLINKED))}; [ "$KEPTLINKS" = 0 ] || CAPNOTE+=${LINKKEPT//'<k>'/$KEPTLINKS}
+      [ "$READLINKS" = 0 ] || CAPNOTE+=${READLINKED//'<k>'/$READLINKS}; }
   fi
   [ -z "${MAINFROM:-}" ] || [ ${#fs[@]} = 0 ] || while IFS= read -r f; do printf '%s\n' "${fs[@]}" | grep -qxF -- "$f" || fs+=("$f"); done < <(mainlinks "$1" "$MAINFROM")
   # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.

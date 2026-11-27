@@ -198,18 +198,49 @@ t_narrowdoctor() {
   [ ! -s "$T/$CASE/fc" ] || fail "doctor warned with test.fileCommand set: $(cat "$T/$CASE/fc")"
 }
 
-# #311, #384. Main holds <n> test files, t001.test.js to t<n>.test.js, which the card's change, an edit of <source>
-# (and <more>, a shell edit, when given), links to it (.conveyor/test-links.json, the worktree's); the pack runs each
-# test file alone (test.fileCommand, which adds `one:<file>` to $STUB/got); its test step runs as narrowrun() runs it.
-# The records hold the test lines <line>... first.
+# #311, #384. Main holds <n> test files, t001.test.js to t<n>.test.js, which the pack's test map (test.map, main's
+# testmap.json) says cover <source>; the card's change is an edit of <source> (and <more>, a shell edit, when given).
+# The map, not .conveyor/test-links.json, gives them, as each test file the links name always runs (t_narrowcaplinks).
+# The pack runs each test file alone (test.fileCommand, which adds `one:<file>` to $STUB/got); its test step runs as
+# narrowrun() runs it. The records hold the test lines <line>... first.
 caprun() { # <n> <source> [<more>] [<line>...]
   local i f fs=() s=$2 m=${3:-}
-  narrowsetup; [ -z "${CAPTUNE:-}" ] || tune "$CAPTUNE"
+  narrowsetup; tune '.test.map = "testmap.json"'; [ -z "${CAPTUNE:-}" ] || tune "$CAPTUNE"
   [ $# -lt 4 ] || printf '%s\n' "${@:4}" >> "$ST/cards.jsonl"
   mkdir -p "$R/${s%/*}" && echo x > "$R/$s"
   for ((i = 1; i <= $1; i++)); do printf -v f 't%03d.test.js' "$i"; fs+=("$f"); echo x > "$R/$f"; done
-  git -C "$R" add -A && git -C "$R" commit -qm tests || fail "main's test files could not be committed"
-  narrowrun "mkdir -p .conveyor && jq -cn --arg s $s '{(\$s): \$ARGS.positional}' --args ${fs[*]} > .conveyor/test-links.json && echo y >> $s${m:+ && $m}"
+  jq -cn --arg s "$s" '{($s): $ARGS.positional}' --args "${fs[@]}" > "$R/testmap.json" \
+    && git -C "$R" add -A && git -C "$R" add -f testmap.json && git -C "$R" commit -qm tests || fail "main's test files could not be committed"
+  narrowrun "echo y >> $s${m:+ && $m}"
+}
+
+# Bug it catches: a card's run left out test files that .conveyor/test-links.json links to its changed file. A change
+# to foreman.sh alone, whose links name 9 test files, ran 5 of them (the cap, CARDLINKED). A change to lib/cartsum.js
+# alone, which the links tie to t001.test.js to t007.test.js and the test map to t008.test.js to t010.test.js, runs
+# the 7 linked files and 5 of the 10, and the note says the links ran 2 past those 5 and 3 were left out.
+t_narrowcaplinks() {
+  local i f ls=() ms=()
+  narrowsetup; tune '.test.map = "testmap.json"'
+  for ((i = 1; i <= 10; i++)); do printf -v f 't%03d.test.js' "$i"; echo x > "$R/$f"; if [ "$i" -le 7 ]; then ls+=("$f"); else ms+=("$f"); fi; done
+  jq -cn '{"lib/cartsum.js": $ARGS.positional}' --args "${ms[@]}" > "$R/testmap.json" \
+    && git -C "$R" add -A && git -C "$R" add -f testmap.json && git -C "$R" commit -qm tests || fail "main's test files could not be committed"
+  narrowrun "mkdir -p .conveyor && jq -cn '{\"lib/cartsum.js\": \$ARGS.positional}' --args ${ls[*]} > .conveyor/test-links.json && echo y >> lib/cartsum.js"
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = "$(printf 'one:t%03d.test.js\n' 1 2 3 4 5 6 7)" ] \
+    || fail "a change to lib/cartsum.js alone did not run exactly its 7 linked files t001 to t007 (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  jq -e '.left == 3 and (.why | startswith("the change adds or changes no test file, so the card ran 5 of the 10 test files linked to it,"))
+      and (.why | endswith(" It also ran 2 more of the linked files, because .conveyor/test-links.json links them to a file that the change touches."))' \
+    "$T/$CASE/cards/c7.testlist" > /dev/null || fail "the list does not say 3 were left out and why the links ran 2 more: $(cat "$T/$CASE/cards/c7.testlist" 2>&1)"
+}
+
+# Bug it catches: a card that changed a test file read .conveyor/test-links.json only for its test files, so a link
+# from a changed source never ran (a Foreman title case with the title in foreman.sh, foreman.sh linked to
+# foreman-size.test.sh). A change to a case of a.test.sh and to lib/cartsum.js, linked to b.test.sh, runs that case
+# of a.test.sh and b.test.sh whole.
+t_narrowownsrclinks() {
+  ownrun "mkdir -p .conveyor && echo '{\"lib/cartsum.js\": [\"tests/b.test.sh\"]}' > .conveyor/test-links.json \
+    && echo y >> lib/cartsum.js && ownedit tests/a.test.sh '^  echo 1\$' '  echo 11'"
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/a.test.sh|aone\none:tests/b.test.sh|' ] \
+    || fail "a change to lib/cartsum.js and a case of a.test.sh did not run b.test.sh, linked to lib/cartsum.js, whole (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
 }
 
 # D1 (#384). Bug it catches: a card ran every test file the map links to its change (65 to 173 a card), holding test

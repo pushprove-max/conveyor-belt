@@ -39,7 +39,8 @@ for lib in "$R"/.claude/hooks/lib/*.sh; do
   [ -n "$got" ] && [ -z "$missing" ] \
     || no "$lib changed: the listing named '$(paste -sd' ' <<<"$got")'; not linked to it in .conveyor/test-links.json: '$(paste -sd' ' <<<"$missing")'"
   # The listing names first the tests that name the most of the library's users (the library, each hook that names
-  # it): the engine runs only the first 5 of its linked files (CARDLINKED, conveyor/lib/testlist.sh selfirst()). Bug it
+  # it): the engine runs these first (conveyor/lib/testlist.sh selfirst()), and of the files the test map alone links
+  # it runs only the first 5 (CARDLINKED; each file .conveyor/test-links.json links runs: changelinks()). Bug it
   # catches: the listing was in name order, and for strip-quoted.sh and hook-fire-log.sh those 5 left out
   # git-safety.test.sh, which runs git-safety.sh, a user of both.
   users=$(cd "$R" && grep -lF -- "lib/${lib##*/}" .claude/hooks/*.sh | sed 's,.*/,/,'; echo "lib/${lib##*/}")
