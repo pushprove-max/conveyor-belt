@@ -686,7 +686,9 @@
     const lt = h('label', 'sh-sheet-field', 'Title'), lp = h('label', 'sh-sheet-field', 'Priority');
     lt.append(name); lp.append(prio);
     const dl = h('dl', 'sh-facts'), dd = h('dd', null);
-    dd.append(sh.area ? h('code', null, sh.area) : 'none: the entries have no area');
+    // A sheet of no area sends '-': the engine then labels the card as healsbatch() does (filearea(), lib/areas.sh).
+    dd.append(sh.area ? h('code', null, sh.area)
+      : 'Set when filed: the area of the file that the entry added first names, else the other area of the pack\'s area map. With no map, none.');
     dl.append(h('dt', null, 'Area label'), dd);
     const files = new Map();
     // Each file an entry names (its place and each other place it quotes), counted once for the entry.

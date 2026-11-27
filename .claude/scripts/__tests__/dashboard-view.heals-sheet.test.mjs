@@ -136,6 +136,20 @@ test('Batch sheet: File a batch card on the checked rows holds the rows checked,
   assert.equal(q(w, '.sh-sheet-card .sh-facts dd').textContent, 'area:board');
 });
 
+// Bug: the No area sheet said the card gets no area label ("none: the entries have no area"), but it sends '-', and
+// `heals batch -` labels the card with the area of the file its first entry names, else the map's other (lib/heals.sh).
+test('Batch sheet: the No area sheet says the engine sets the area label when it files, and sends -', async () => {
+  const N1 = 'h0000000000n1', w = boot({ tab: 'selfheals' }), data = full();
+  data.panels.declined.data.heals = [{ repo: 'sample', repoUrl: REPO, sorted: null, days: 30, areas: [], dropped: [], docs: { areas: [], entries: [] },
+    entries: [entry(N1, { time: iso(T0 - 2 * DAY), area: null, effect: 'cleanup', why: 'x', finding: '[P3] the poll names no file' })] }];
+  deliver(w, data);
+  q(w, '.sh-area[data-area=""] [data-act="heals-batch"]').click();
+  assert.equal(q(w, '.sh-sheet-card .sh-facts dd').textContent,
+    'Set when filed: the area of the file that the entry added first names, else the other area of the pack\'s area map. With no map, none.');
+  act(w, 'sheet-queue').click(); await settle(); act(w, 'sheet-queue').click(); await settle();
+  assert.equal(w.posts.splice(0)[0].body.args[1], '-', 'the No area sheet sends - for the engine to label the card');
+});
+
 // Bug: Add from other areas offered the rows of the sheet's own area that were not checked, under a control that
 // names other areas.
 test('Batch sheet: Add from other areas offers no row of the sheet\'s own area', () => {
