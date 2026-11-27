@@ -175,6 +175,10 @@ Tests:
   `mutate ask <test file>...` puts files at the front of that queue and starts no check (the Board's Mutation check).
 - `test-settings` saves a test setting in the pack: a "slow on purpose" mark,
   whether slow files file issues, the time the test history starts at (saved in the control record), and the test command that records a Wall only file's CPU time (`conveyor/README.md`, The test files in the snapshot).
+- `split-limits` prints the four limits of the rule **Split large issues**, one a line, each with `pack` or
+  `default`. `split-limits files=5` sets one limit in the pack (`doneWhen`, `files`, `areas` or `chars`), and
+  `split-limits files=default` takes it out, so the default counts again. A value under 1 is refused, and the pack
+  does not change ([Split large issues](configuration.md#split-large-issues)).
 - `prices` changes the model prices in the pack ([Configuration](configuration.md#the-pack)):
   - `prices set <model> <input> <output> <cache read> [<cache write>]` saves your price of one model, and
     `prices clear <model>` removes it.

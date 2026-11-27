@@ -412,6 +412,8 @@ First, code measures the issue: the items of its Done when section (a section he
 Definition of done counts the same), the file paths and the area labels that it names, and its length. The limits are
 `split.doneWhen`, `split.files`, `split.areas` and `split.chars` in `.conveyor/project.json`. When the issue is under
 all of them, Conveyor keeps it whole and asks no model, except for the check of an issue with two blocked cards.
+`conveyor.sh split-limits` prints the four limits in force, and `conveyor.sh split-limits files=5` or `files=default`
+sets one ([Commands](commands.md#every-command-conveyorsh-takes)). The next check uses the new limit.
 
 When the issue reaches one limit, Conveyor asks the judge (Judge on the Rules tab) one time. The judge gets the issue
 and the files that it names, as they are on main. It answers keep, or split into 2 or 3 slices:

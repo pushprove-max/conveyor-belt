@@ -105,6 +105,7 @@ cmd cardissue testaction.sh 'cardissue <card id>'
 cmd card testaction.sh 'card [--release <version>] <title> <body>'
 cmd mutate testaction.sh 'mutate <test file> | mutate ask <test file>...'
 cmd test-settings test-settings.sh 'test-settings <what> [<file>] [<value>]'
+cmd split-limits split-limits.sh 'split-limits [doneWhen|files|areas|chars=<n | default>]...'
 cmd prices prices.sh 'prices set <model> <input> <output> <cache read> | prices clear <model>'
 cmd testrules testrules.sh -
 cmd watch watch.sh -
