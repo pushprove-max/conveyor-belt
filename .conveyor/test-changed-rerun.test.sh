@@ -398,13 +398,12 @@ mainmap() {
   CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun CONVEYOR_TEST_FILELIST=$T/files ran | sorted
 }
 # fileran <file>: the one-file run (--file) the loop gives each file of its list, on mainmap's change and `from`. The
-# list is the one the loop keeps of a one-file run of an engine case file: the case file listed and passed, and each of
-# its cases an `ok` line of the runner, with no runner-wide `pass` (which would skip the `ok` filter this checks).
+# list is the one the loop keeps of a one-file run of an engine case file that passed (conveyor/lib/testlist.sh,
+# rerunlist()): only `pass <case file>`, with no `ok` line of its cases and no runner-wide `pass`. Bug: a `--file` mode
+# that skipped the reading of that `pass` as its cases' `ok` lines (test-changed.sh) ran the passed cases again.
 fileran() {
   local from; from=$(awk -F'\t' '$1 == "from" {print $2}' "$T/rerun")
-  { printf 'change\tabc\nfrom\t%s\npass\t%s\n' "$from" "$1"
-    sed -n 's/^t_\([a-z0-9]*\)() {.*/ok\tconveyor\/conveyor.test.sh\t\1/p' "$R/$1"
-    printf 'main\t.conveyor/engine-areas.json\n'; } > "$T/rerun"
+  printf 'change\tabc\nfrom\t%s\npass\t%s\nmain\t.conveyor/engine-areas.json\n' "$from" "$1" > "$T/rerun"
   printf '%s\n' "$1" > "$T/files"
   rm -f "$R/ran"
   (cd "$R" && CONVEYOR_TEST_N=1 CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_RERUN=$T/rerun CONVEYOR_TEST_FILELIST=$T/files \
