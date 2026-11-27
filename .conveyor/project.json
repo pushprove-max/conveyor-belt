@@ -146,10 +146,6 @@
       "claude-opus-5-5": {
         "min": "medium",
         "max": "high"
-      },
-      "claude-sonnet-5-5": {
-        "min": "high",
-        "max": "xhigh"
       }
     },
     "reviewer": {
