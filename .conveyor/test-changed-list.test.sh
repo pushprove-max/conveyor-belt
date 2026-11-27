@@ -90,5 +90,14 @@ grep -qx 'TESTRUN kept=1' "$T/log/test-changed.log" || no "the one case kept of 
 got=$(listwith ctwo)
 [ "$got" = "conveyor/tests/c.test.sh " ] || no "main's change to t_ctwo did not list the file the card runs t_ctwo of: '$got'"
 ! grep -q 'TESTRUN kept' "$T/log/test-changed.log" 2>/dev/null || no "a file the list names was counted as kept: $(cat "$T/log/test-changed.log")"
+# The list keeps only an `off` line of c.test.sh (t_ctwo, kept off as flaky), so main's change to t_ctwo selects no case of it
+# and the loop does not start the file (runfiles() reads `ok` and `off` lines as kept). Bug it catches: the list counted
+# kept cases only of a file with a `pass` line, so t_ctwo, which the file's own run counted as kept, was left out of the
+# test record's kept count.
+printf 'off\tconveyor/tests/c.test.sh\tctwo\nmain\tconveyor/tests/c.test.sh\nfrom\t%s\n' "$FROM" > "$T/rerun"
+got=$(listwith ctwo)
+[ -z "$got" ] || no "with rerun list 'off c.test.sh ctwo', main's change to t_ctwo listed the file: '$got'"
+grep -qx 'TESTRUN kept=1' "$T/log/test-changed.log" \
+  || no "with rerun list 'off c.test.sh ctwo' and card case ctwo, the off case of the file left out was not logged as kept: $(cat "$T/log/test-changed.log" 2>&1)"
 
 [ $fails = 0 ] && echo "ok - test-changed list" || exit 1

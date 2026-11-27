@@ -1569,13 +1569,14 @@ if [ -n "${CONVEYOR_TEST_LIST:-}" ]; then
     while IFS= read -r t; do [ -z "$t" ] || [ -n "${BYLIST[$t]:-}" ] || echo "$t"; done <<<"$lsel"
     while IFS= read -r t; do [ -z "$t" ] || [ -z "${BYLIST[$t]:-}" ] || echo "$t"; done <<<"$lsel"
   } | awk '!seen[$0]++' > "$CONVEYOR_TEST_LIST" || exit 1
-  # Of the files the loop gave (CONVEYOR_TEST_FILELIST) that the list keeps as passed (a `pass` line, no `fail` line) and does not
-  # name, the loop starts none: the cases a run of each alone would count as kept (below) are logged here, once.
+  # Of the files the loop gave (CONVEYOR_TEST_FILELIST) that the list keeps something of (a `pass`, `ok` or `off` line, no `fail`
+  # line: as conveyor/lib/testlist.sh runfiles() reads it) and does not name, the loop starts none: the cases a run of each alone
+  # would count as kept (below) are logged here, once.
   if [ -s "$RERUN0" ] && [ -d "${CONVEYOR_TEST_LOG:-}" ]; then
     kc=0
     while IFS= read -r t; do
       [ -n "$t" ] && [ -f "$t" ] && ! grep -qxF -- "$t" "$CONVEYOR_TEST_LIST" \
-        && awk -F'\t' -v f="$t" '$2 == f { if ($1 == "pass") p = 1; else if ($1 == "fail") x = 1 } END { exit !(p && !x) }' "$RERUN0" || continue
+        && awk -F'\t' -v f="$t" '$2 == f { if ($1 == "pass" || $1 == "ok" || $1 == "off") p = 1; else if ($1 == "fail") x = 1 } END { exit !(p && !x) }' "$RERUN0" || continue
       case $t in
         conveyor/tests/*.test.sh) kc=$((kc + $(onecases "$t" "$fullcases" "$cnarrow" | grep -c .))) ;;
         *.mjs|*.py|*.ts|*.tsx) kc=$((kc + $(filecases "$t"))) ;;
