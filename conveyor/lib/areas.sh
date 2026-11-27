@@ -12,12 +12,14 @@
 # The jq of the map, $m (labels.areaPaths: {paths: {<path>: <area label>}, other: <area label>}, or null for none):
 #   areaof($m): the area label of the path on the input: that of the longest line of paths that names it (a line
 #     ending in / names each file under that folder, any other line one file), else other; null for no path or no map.
-#   fileof($c): the first file the text on the input names, as a path from the repository root: its first file:line
+#   fileof($m; $c): the first file the text on the input names, as a path from the repository root: its first file:line
 #     (as a review finding cites one), else its first path in backticks with a / in it, else its first path written
 #     plain with a / in it and a file's extension (hooks/sources.ts, as a split's Done-when names one; not part of a
-#     URL), else the text itself when it is one path. A path has a / in it or ends in a file's extension (.<letter>...): a clock time (00:05) or a test
-#     case's name (apicodex) is none. A path under the card worktrees' folder $c (CARDS) is read as one in its card's
-#     worktree; another absolute path, or one with a . or .. part, is none. null when the text names none.
+#     URL), else its first file at the root, plain or in backticks, that is a line of the map's paths (README.md; a
+#     setting such as labels.areaPaths is no line, so it is none), else the text itself when it is one path. A path
+#     has a / in it or ends in a file's extension (.<letter>...): a clock time (00:05) or a test case's name (apicodex)
+#     is none. A path under the card worktrees' folder $c (CARDS) is read as one in its card's worktree; another
+#     absolute path, or one with a . or .. part, is none. null when the text names none.
 #   areatext($m; $c): the area of the file the text names; null when it names none.
 #   filingarea($m; $c): the same, else the map's other: a filing always has an area when the pack has a map.
 AREAJQ='def areaof($m): . as $p | if ($m | type) != "object" or ($p | type) != "string" or $p == "" then null
@@ -25,9 +27,11 @@ AREAJQ='def areaof($m): . as $p | if ($m | type) != "object" or ($p | type) != "
   def repopath($c): ltrimstr("./")
     | if startswith("/") then (if $c != "" and startswith($c + "/") then ltrimstr($c + "/") | sub("^[^/]+/"; "") else empty end) else . end
     | select(. != "" and (("/" + . + "/") | test("/\\.\\.?/") | not) and test("/|\\.[A-Za-z][A-Za-z0-9]*$"));
-  def fileof($c): first(((scan("([A-Za-z0-9_./-]+):[0-9]{1,9}") | .[0]), (scan("`([A-Za-z0-9_./-]*/[A-Za-z0-9_./-]*)`") | .[0]),
-      (scan("(?<![A-Za-z0-9_./:-])([A-Za-z0-9_.-]+/[A-Za-z0-9_./-]*\\.[A-Za-z][A-Za-z0-9]*)(?![A-Za-z0-9_/-])") | .[0]), (select(test("^[A-Za-z0-9_./-]+$")))) | repopath($c)) // null;
-  def areatext($m; $c): fileof($c) | areaof($m);
+  def fileof($m; $c): first(((scan("([A-Za-z0-9_./-]+):[0-9]{1,9}") | .[0]), (scan("`([A-Za-z0-9_./-]*/[A-Za-z0-9_./-]*)`") | .[0]),
+      (scan("(?<![A-Za-z0-9_./:-])([A-Za-z0-9_.-]+/[A-Za-z0-9_./-]*\\.[A-Za-z][A-Za-z0-9]*)(?![A-Za-z0-9_/-])") | .[0]),
+      (scan("(?<![A-Za-z0-9_./:-])([A-Za-z0-9_-][A-Za-z0-9_.-]*\\.[A-Za-z][A-Za-z0-9]*)(?![A-Za-z0-9_/-])") | .[0]
+        | select(. as $f | $m | objects | .paths | objects | has($f))), (select(test("^[A-Za-z0-9_./-]+$")))) | repopath($c)) // null;
+  def areatext($m; $c): fileof($m; $c) | areaof($m);
   def filingarea($m; $c): areatext($m; $c) // ($m | objects | .other);'
 # The pack's map as JSON, null when it has none. names() (lib/prompts.sh) reads it at every turn; a shell that has not
 # run names() reads it here.

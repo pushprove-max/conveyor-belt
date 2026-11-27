@@ -157,6 +157,23 @@ t_areacardtitle() {
   [ "$(jq -c '.cards[0].labels' "$ST/testactions/cards.json")" = '["bug","P2","area:tests"]' ] \
     || fail "cardnew --release 1.2.0 'Fix a.test.sh.' with releaseissues off made a card with the labels $(jq -c '.cards[0].labels' "$ST/testactions/cards.json" 2>&1) (exit $RC): $(cat "$T/$CASE/run.out")"
 }
+# Bug (review of #1693): a card whose body names only a file at the root (README.md, no / and no line), written plain
+# in a sentence, got the map's other, though the map has a line for that file: each scan of a path in prose needed a /.
+t_areacardroot() {
+  amap; tune '.labels.areaPaths.paths["README.md"] = "area:docs"'; printf '%s\n' 'Update README.md.' '' '## Cause' 'It is old.' > "$STUB/body"
+  fx_in 'cardnew "Fix the page" "$(cat "$STUB/body")"'
+  [ "$RC" = 0 ] && labels 1 | jq -e 'index("area:docs")' > /dev/null \
+    || fail "cardnew 'Fix the page' with a body 'Update README.md.' (README.md mapped to area:docs) filed the labels $(labels 1) (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+# Bug (review of #1693): a setting in backticks in the body (`labels.areaPaths`) was read as a root file, so the body
+# had a file of the map's other and cardarea() never read the title's README.md. A root name counts only when the map
+# has a line for it.
+t_areacardsetting() {
+  amap; tune '.labels.areaPaths.paths["README.md"] = "area:docs"'; printf '%s\n' 'Name `labels.areaPaths` in it.' '' '## Cause' 'It is old.' > "$STUB/body"
+  fx_in 'cardnew "Update README.md" "$(cat "$STUB/body")"'
+  [ "$RC" = 0 ] && labels 1 | jq -e 'index("area:docs")' > /dev/null \
+    || fail "cardnew 'Update README.md' with a body 'Name \`labels.areaPaths\` in it.' (README.md mapped to area:docs) filed the labels $(labels 1) (exit $RC): $(cat "$T/$CASE/run.out")"
+}
 # Bug (review of #1693): the Board's File on GitHub of a landed card with no GitHub issue (cardissue()) filed it with
 # the built label alone. Now the entry's area label, else the area of the file its body names.
 t_areacardissue() {
