@@ -902,7 +902,7 @@ When a card waits for you, the Board and the Foreman show it. To also get a mess
 `notify.webhookEnv` in the host file to the name of an environment variable that holds the address of a webhook:
 
 ```json
-{ "notify": { "webhookEnv": "CONVEYOR_WEBHOOK" } }
+{ "notify": { "webhookEnv": "MY_WEBHOOK_URL" } }
 ```
 
 The key is not set by default, and then nothing is sent. Nothing is sent either when the variable is empty or its value
