@@ -509,3 +509,42 @@ t_pushtestslanding() {
   [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$base" ] \
     || fail "push c2 2 pushed c3's ${l3:0:12} to origin though its linked lib/fee.test.js fails: $(cat "$T/$CASE/push.out")"
 }
+
+# Bug it catches: once the remote refused the push and main became the merge with its commits (remerge()), the retry
+# read main outside the card records' lock (pushone(), lib/push.sh), so a landing that had moved main past the merge
+# but not yet written its landed line was pushed with none of its linked test files run. c1 passes and is refused, as
+# origin holds a commit by hand; once theirs() has merged it, card c3 lands through locked land() and stops after main
+# moves (turnfree()) until the push asks for the lock (flock 9). c3 adds lib/fee.test.js, which fails: the retry must
+# run it on c3's commit and hold the push, origin left at the commit by hand.
+t_pushtestsmergelanding() {
+  local l1 hand l3 H=$T/$CASE/hand
+  setup '[]'
+  printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"; bash "$1"' > "$STUB/one"
+  tune '.push.check = true | .test.fileCommand = "bash \"$STUB/one\""'
+  mkdir -p "$R/lib" && echo good > "$R/lib/cart.js" && echo 'grep -qx good lib/cart.js' > "$R/lib/cart.test.js" \
+    && git -C "$R" add -A && git -C "$R" commit -qm c1 && l1=$(git -C "$R" rev-parse HEAD) || fail "the landing could not be made"
+  jq -cn --arg s "$l1" '{card: "c1", issue: 1, step: "landed", time: "2026-11-18T10:00:00Z", result: "ok", sha: $s}' >> "$ST/cards.jsonl"
+  git clone -q "$T/$CASE/origin" "$H" && echo hand > "$H/hand.txt" && git -C "$H" add hand.txt && git -C "$H" commit -qm 'by hand' \
+    && git -C "$H" push -q origin main && hand=$(git -C "$H" rev-parse HEAD) || fail "the commit by hand could not be made"
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  # Waits on real processes: a direct check cannot put the real landing between the push's merge and its next read of
+  # main, nor see that read wait on the lock. c3 is made on main once theirs() has merged (go), as land() takes only a
+  # card made on main as it is; the landing's wait has a ceiling of 20 s, reached only when the retry reads main with no
+  # wait on the lock (the bug).
+  ( WAIT_CEILING=60 wait_until "[ -e \"$T/$CASE/go\" ]" && git -C "$R" worktree add -q --detach "$CARDS/c3" refs/heads/main \
+      && echo fee > "$CARDS/c3/lib/fee.js" && echo 'exit 1' > "$CARDS/c3/lib/fee.test.js" && git -C "$CARDS/c3" add -A \
+      || { echo "the change of card c3 could not be staged" > "$T/$CASE/run.out"; touch "$T/$CASE/moved"; exit 1; }
+    fx_in 'eval "orig_$(declare -f turnfree)"; turnfree() { touch "$T/$CASE/moved"; WAIT_CEILING=20 wait_until "[ -e \"$T/$CASE/waits\" ]"; orig_turnfree "$@"; }
+      locked land c3 3 "$CARDS/c3" "title 3 (#3)"; echo "land: $?"' ) &
+  # The lock asks before the merge are not the retry's: waits is made new once theirs() returns.
+  pushnow 'eval "orig_$(declare -f theirs)"; theirs() { orig_theirs "$@" || return; rm -f "$T/$CASE/waits"; touch "$T/$CASE/go"; WAIT_CEILING=60 wait_until "[ -e \"$T/$CASE/moved\" ]"; }
+    flock() { [ "$1" != 9 ] || touch "$T/$CASE/waits"; command flock "$@"; }; push c1 1; checkheld && echo held > "$T/$CASE/held"'
+  wait
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "land: 0" ] || fail "locked land c3 3 failed: $(cat "$T/$CASE/run.out" "$T/$CASE/push.out")"
+  l3=$(git -C "$R" rev-parse main)
+  [ "$(git -C "$R" rev-parse "$l3^^2" 2>&1)" = "$hand" ] || fail "c3 did not land on the merge with the commit by hand: $(git -C "$R" log --oneline -4 main)"
+  grep -qxF "$l3 lib/fee.test.js" "$STUB/ran" \
+    || fail "push c1 1, refused and merged with the commit by hand, then retried while locked land c3 3 had moved main to ${l3:0:12} but not written its landed line, did not run c3's lib/fee.test.js on it: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+  [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$hand" ] && [ -e "$T/$CASE/held" ] \
+    || fail "push c1 1 pushed c3's ${l3:0:12} to origin, or did not hold the push, though its linked lib/fee.test.js fails: $(cat "$T/$CASE/push.out")"
+}
