@@ -441,8 +441,9 @@ cardfailed() {
 # wait: the cards that fill the cap may wait for main (mainwait(), lib/mainred.sh), so for its fix, and the loop picks
 # no other fix card while it is open and does not itself wait for main (redfix()). As it waits, its live record says so and is brought up to date (as in
 # releasewait(), lib/push.sh), so `health` and the loop's stuck check (turnended(), lib/run.sh) see a card that waits.
+# The seconds of the wait are noted as the card's wait cap (waitnote(), lib/records.sh), from every caller.
 caphold() { # <card> <issue> <worktree> <the step it waits to work in> [why it waits, after "card <card>"]
-  local at
+  local at cw=$SECONDS
   [ -n "${LOOPCARD:-}" ] && { [ "$2" != 0 ] || [ -n "${br:-}" ]; } || { rm -f "$3.capheld"; return 0; }
   : > "$3.capheld" || return 0
   locked turnfree "$1"
@@ -455,16 +456,14 @@ caphold() { # <card> <issue> <worktree> <the step it waits to work in> [why it w
     : > "$3.idle"; sleep "$LIVE"
   done
   rm -f "$3.live" "$3.idle"
+  [ $((SECONDS - cw)) = 0 ] || waitnote "$1" cap "$((SECONDS - cw))" || :
 }
 # A card that slept out a wait at its claim (settle(), lib/claim.sh), before it works again: while it slept, capfree()
 # left it out of its count and may have let a held card go in its slot. Then its <worktree>.capheld holds "owed", and
-# it waits for room as a held card does (caphold()). Only the card itself takes that mark away, here. The seconds of
-# that wait are noted as the card's wait cap (waitnote(), lib/records.sh).
+# it waits for room as a held card does (caphold(), which notes the wait). Only the card itself takes that mark away, here.
 capowed() { # <card> <issue> <worktree> <the step it waits to work in>
-  local cw=$SECONDS
   [ -s "$3.capheld" ] || return 0
   caphold "$1" "$2" "$3" "$4" "waited on another card"
-  [ $((SECONDS - cw)) = 0 ] || waitnote "$1" cap "$((SECONDS - cw))" || :
 }
 # In the loop's turn (turncount(), lib/run.sh): lets go of the held cards (caphold()) while the cards that work and
 # count against the cap are fewer than the cap, and takes away their .idle as it does, so a card let go counts from then.

@@ -9,19 +9,21 @@
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
 # Bugs: a wait for main (mainwaited(), and mainredhold() while main is red), for the machine (holdwaited()), for room
-# under the cap (capowed()) or the landing turn at the land step (landwait()) is not noted, so the card's next line
-# has no waits for it. Each wait is a stand-in that sleeps 1 s, all at once.
+# under the cap (caphold(), called directly as cardland()'s stale, contract and failed landings call it) or the
+# landing turn at the land step (landwait()) is not noted, so the card's next line has no waits for it. Each wait is a
+# stand-in that sleeps 1 s, all at once; caphold() runs whole, its sleep a stand-in for the loop's turn that lets it go.
 t_waitnames() {
-  local w waits='mainwait() { sleep 1; }; holdwait() { sleep 1; }; redholdwait() { sleep 1; }; caphold() { sleep 1; }' # sleep: each stand-in wait must last 1 s or more, as what is noted is its seconds
+  local w waits='mainwait() { sleep 1; }; holdwait() { sleep 1; }; redholdwait() { sleep 1; }' # sleep: each stand-in wait must last 1 s or more, as what is noted is its seconds
+  local turn='sleep() { [ "${FUNCNAME[1]}" = caphold ] || { command sleep "$@"; return; }; command sleep 1; rm -f "$wt.capheld"; }' # sleep: a stand-in for the turn of the loop that lets the held card go after 1 s
   setup '[]'
   # shellcheck disable=SC2016 # expanded by fx_in's eval
-  fx_in 'mkdir -p "$CARDS"; c=c9-9 n=9 wt=$CARDS/c9-9 br="" sprompt="" issue="{}" mainsec=0 LIVE=1; echo owed > "$wt.capheld"
-    '"$waits"'
+  fx_in 'mkdir -p "$CARDS"; c=c9-9 n=9 wt=$CARDS/c9-9 br="" sprompt="" issue="{}" mainsec=0 LIVE=1 LOOPCARD=1
+    '"$waits"'; '"$turn"'
     redhere() { printf "abc\ncase\n"; }; giveway() { :; }; unmate() { :; }; redbrief() { :; }; settle() { return 0; }
     # c6-6 has the turn for the first two looks: the one before the wait and the one before its single sleep.
     turnon() { local k; k=$(cat "$CARDS/turnlooks" 2>/dev/null || echo 0); echo $((k + 1)) > "$CARDS/turnlooks"; [ "$k" -lt 2 ] && echo c6-6; }
     landwait c9-9 9 "$wt" &
-    mainwaited "$wt" abc case & holdwaited "$wt" & mainredhold & capowed c9-9 9 "$wt" land &
+    mainwaited "$wt" abc case & holdwaited "$wt" & mainredhold & caphold c9-9 9 "$wt" land &
     wait; record c9-9 9 test pass'
   w=$(jq -sc 'map(select(.card == "c9-9" and .step == "test") | .waits)' "$ST/cards.jsonl" 2>&1)
   jq -e 'length == 1 and (.[0] | map(.name) == ["cap", "machine", "main", "turn"] and all(.sec >= 1)
