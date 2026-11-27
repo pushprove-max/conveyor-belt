@@ -9,13 +9,21 @@
 # to the file's list of projects). Sourced by lib/control.sh.
 # shellcheck disable=SC2034 # the roles the rule takes, read by control() (lib/control.sh)
 SERENAROLES='build|fix|testfix|review|judge'
-SERENATIP="Use Serena's find_symbol and find_referencing_symbols to find code before you grep or read whole files."
+# The line a session's prompt gets with Serena (SERENA_SAY): which tool answers which search, and grep for the rest.
+SERENATIP="Serena finds code by symbol (a function, class or variable). Use find_symbol to find a symbol by name \
+(include_body=true reads its body), find_referencing_symbols to find each caller before you change, rename or remove a \
+function, and get_symbols_overview before you read a whole file. Use grep for strings, comments, config and file names. \
+When Serena finds nothing, check with grep before you decide the code is not there."
 SERENAMISS='Serena rule on, but serena is not installed'
 # Serena's tools a session may call: its search tools. Every other one writes, runs a command or changes Serena
 # itself (SERENAWRITE, the ones Serena 2.1 has), which the card's hooks would not see: a review or judge, on Codex or
 # Claude, is given SERENAREAD alone, and a Claude build, fix or testfix session (bypass mode, where only a refusal
 # holds) is refused SERENAWRITE.
 SERENAREAD=(find_symbol find_referencing_symbols get_symbols_overview)
+# A Claude session gets MCP tools deferred, by name alone, until a ToolSearch call loads them: a session that is not
+# told so never calls them (#1823's first cards made no Serena call). Its prompt gives the one call that loads them.
+SERENALOAD="Serena's tools start deferred: before your first search of code, load them with one ToolSearch call, \
+query \"select:$(printf 'mcp__serena__%s,' "${SERENAREAD[@]}" | sed 's/,$//')\"."
 SERENAWRITE=(create_text_file replace_content replace_in_files delete_lines replace_lines insert_at_line replace_symbol_body
   insert_after_symbol insert_before_symbol rename_symbol safe_delete_symbol write_memory edit_memory delete_memory rename_memory
   execute_shell_command serena_repl open_dashboard activate_project remove_project onboarding jet_brains_move
@@ -81,7 +89,7 @@ serenaargs() { # <worktree> <role> <agent>
       [ ${#t[@]} = 0 ] || SERENA_A+=(--allowedTools "${t[@]}")
     else SERENA_NO=$(printf ',mcp__serena__%s' "${SERENAWRITE[@]}"); fi
   fi
-  SERENA_SAY=$'\n\n'$SERENATIP
+  if [ "$3" = codex ]; then SERENA_SAY=$'\n\n'$SERENATIP; else SERENA_SAY=$'\n\n'"$SERENALOAD $SERENATIP"; fi
 }
 # doctor's line for Serena: where it is and its version; else whether the rule names a session that now starts without it.
 serenadoctor() {

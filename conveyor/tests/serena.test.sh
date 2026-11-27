@@ -47,7 +47,7 @@ t_serenabuild() {
     || fail "session <worktree> brief, with the rule Serena on build and serena installed, did not start claude with --strict-mcp-config --mcp-config $w.mcp.json: $a $(cat "$T/$CASE/run.out")"
   jq -e --arg p "$T/$CASE/bin/serena" --argjson a "$(serenaargsof "$w")" '.mcpServers | keys == ["serena"] and .serena == {command: $p, args: $a}' "$w.mcp.json" >/dev/null 2>&1 \
     || fail "session <worktree> brief, with the rule Serena on build: $w.mcp.json is not serena alone with its web dashboard off: $(cat "$w.mcp.json" 2>&1)"
-  grep -qF "Use Serena's find_symbol and find_referencing_symbols" "$STUB/brief" \
+  grep -qF "Use find_symbol to find a symbol by name" "$STUB/brief" && grep -qF "find_referencing_symbols to find each caller" "$STUB/brief" \
     || fail "session <worktree> brief, with the rule Serena on build: its prompt does not name Serena's search tools: $(cat "$STUB/brief")"
   [[ $a == *"--disallowedTools Agent,"*",mcp__serena__replace_symbol_body,"*",mcp__serena__execute_shell_command,"* && $a != *mcp__serena__find_symbol* ]] \
     || fail "session <worktree> brief, with the rule Serena on build: Serena's write and shell tools are not refused, or a search tool is: $a"
@@ -107,6 +107,21 @@ t_serenaagents() {
   fx_in "$SERENAWT"' && for a in "build codex" "build opencode" "review codex"; do serenaargs "$w" $a; echo "$a: ${#SERENA_A[@]} ${SERENA_SAY:+said}"; done'
   [ "$(cat "$T/$CASE/run.out")" = $'build codex: 0 \nbuild opencode: 0 \nreview codex: 8 said' ] \
     || fail "serenaargs <worktree> <role> <agent>, with the rule Serena on build and review, for a Codex build, an OpenCode build and a Codex review (want none, none, Serena): $(cat "$T/$CASE/run.out")"
+}
+# Bug: a Claude session gets Serena's tools deferred, so a prompt that does not say how to load them gets no Serena
+# call (#1823's first three cards made none in 178 tool calls). A Claude session's line gives the ToolSearch call that
+# loads the search tools, and the tool for each search; a Codex review, whose tools are not deferred, gets the tools
+# without the ToolSearch call.
+t_serenatip() {
+  serenacase '["build","review"]' serena
+  fx_in "$SERENAWT"' && for a in "build claude" "review codex"; do serenaargs "$w" $a; echo "$a: $(printf %s "$SERENA_SAY" | tr -d "\n")"; done'
+  local q='ToolSearch call, query "select:mcp__serena__find_symbol,mcp__serena__find_referencing_symbols,mcp__serena__get_symbols_overview"'
+  grep -qF "build claude: Serena's tools start deferred" "$T/$CASE/run.out" && grep -F 'build claude:' "$T/$CASE/run.out" | grep -qF "$q" \
+    || fail "serenaargs <worktree> build claude did not tell the session how to load Serena's deferred tools: $(cat "$T/$CASE/run.out")"
+  grep -F 'build claude:' "$T/$CASE/run.out" | grep -qF 'find_referencing_symbols to find each caller before you change' \
+    || fail "serenaargs <worktree> build claude did not say which Serena tool finds a function's callers: $(cat "$T/$CASE/run.out")"
+  grep -F 'review codex:' "$T/$CASE/run.out" | grep -qF 'Use find_symbol' && ! grep -F 'review codex:' "$T/$CASE/run.out" | grep -qF ToolSearch \
+    || fail "serenaargs <worktree> review codex should get Serena's line without the ToolSearch call (Codex has none): $(cat "$T/$CASE/run.out")"
 }
 # Bug (#1823): a Claude review or judge runs in permission mode default, so Serena's tools must be allowed, its search
 # tools alone (a review changes nothing), and inside the one --allowedTools its shell already has (a second flag could
