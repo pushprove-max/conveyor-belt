@@ -988,6 +988,7 @@
 {"area": "issues", "test": "clicontract.test.sh"}
 {"area": "pick", "test": "testcards.test.sh"}
 {"area": "pick", "file": "conveyor/lib/pick.sh"}
+{"area": "pick", "file": "conveyor/lib/benefit.sh"}
 {"area": "pick", "file": "conveyor/jq/upnext.jq"}
 {"area": "metrics", "test": "metrics.test.sh"}
 {"area": "metrics", "test": "metricsstop.test.sh"}

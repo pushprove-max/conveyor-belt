@@ -31,10 +31,13 @@
 # before (unless the control record's rule "visible changes need the owner's yes" is off), and is left out of the list unless it is asked for whole, like a held one.
 # The benefit check (BENEFIT, jq: benefitwait) holds an issue for the owner's yes on its benefit: it says no live case
 # is known or the gain was not (or never) measured, names no risk it guards against (security, compliance, data loss,
-# a silent fallback, fail-loud) and has no line starting `Benefit approved:`, the approval-line pattern of a visible
-# change. A `Visible change approved:` line is no yes to the benefit, and the rule "visible changes need the owner's
-# yes" does not turn it off. The wording and the risk are read from the issue's other lines: a condition in an
-# approval line (`; condition: security staff only`) names no risk the issue guards. A risk is named only in a clause
+# a silent fallback, fail-loud) and has no yes: a line starting `Benefit approved:` (the approval-line pattern of a
+# visible change) with benefitYes (benefityes(), lib/benefit.sh): the account gh is signed in as, or the repository's
+# owner, put such a line in the text and last saved it. A collaborator or member, inside the project too (INSIDE), can
+# write or edit an issue's text, so the line alone is no yes; an issue with no benefitYes stays held. A `Visible change approved:` line is no
+# yes to the benefit, and the rule "visible changes need the owner's yes" does not turn it off. The wording and the
+# risk are read from the issue's other lines: a condition in an approval line (`; condition: security staff only`)
+# names no risk the issue guards. A risk is named only in a clause
 # (cut at . ; ! ? a line end or "but") with no word of denial (no, not, never, none, nothing, without, cannot, n't):
 # `This change does not affect security.` names none. Such an issue gets the rule
 # NOBENEFIT, as the run names it; the Board shows it as a rule of Conveyor's own (snapshot.sh), not one of Rules.
@@ -43,8 +46,8 @@ BENEFIT='def benefitwait: [.body // "" | splits("\r?\n")] as $l
     | ($b | test("no live cases? (is |are |was |were )?known|\\b(not|never) (been )?measured"; "i"))
     and ([$b | splits("[.;!?\n]|\\bbut\\b"; "i")] | any(test("security|compliance|data[- ]loss|silent(ly)? fall[- ]?back|fail[- ]loud"; "i")
       and (test("\\b(no|not|never|none|nothing|without|cannot)\\b|n[^[:alnum:][:space:]]t\\b"; "i") | not)) | not)
-    and ($l | any(.[]; startswith("Benefit approved:")) | not);'
-NOBENEFIT='no live benefit: the issue says no live case is known or the gain was not measured, and names no risk it guards against; a line starting "Benefit approved:" in the issue releases it'
+    and ((.benefitYes == true and ($l | any(.[]; startswith("Benefit approved:")))) | not);'
+NOBENEFIT='no live benefit: the issue says no live case is known or the gain was not measured, and names no risk it guards against; a line starting "Benefit approved:" releases it only when the repository owner or the GitHub account of Conveyor added that line'
 # A run limited by --only that finds nothing to pick hears `wait` when an issue of its list is held, waits or
 # waits for approval before its build (or for the owner's yes on its benefit, NOBENEFIT), and is not excluded or
 # stuck: the run goes on polling for

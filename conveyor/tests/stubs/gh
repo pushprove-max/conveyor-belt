@@ -35,6 +35,16 @@ case $2 in
         ! grep -qx "$n" "$STUB/deleted" 2>/dev/null || { echo "{\"data\": {\"repository\": {\"nameWithOwner\": \"o/r\", \"issue\": null}}, \"errors\": [{\"type\": \"NOT_FOUND\", \"path\": [\"repository\", \"issue\"], \"message\": \"Could not resolve to an Issue with the number of $n.\"}]}"; exit 1; }
         { cat "$STUB/subs" 2>/dev/null || :; } | jq -cRn --argjson n "$n" '[inputs | split(" ") | select(.[0] == ($n | tostring))]
         | {data: {repository: {nameWithOwner: "o/r", issue: {subIssues: {nodes: map({number: (.[1] | tonumber), state: .[2], repository: {nameWithOwner: "o/r"}})}}}}}' ;;
+      # The benefit approvals (lib/benefit.sh benefityes()):the issues the question names, as GitHub's viewer m (the
+      # account gh is signed in as) in the repository of the user o. An issue's text is its gqlBody, else its body (a
+      # gqlBody differs when the text changed after the list); its author is its author login, else o; its edit history
+      # is its edits ([{by, at, text, deleted}], oldest first, the first the text as opened, as GitHub keeps it; a
+      # deleted version has no text), of editTotal versions, else as many as it has.
+      *userContentEdits*) n=$(printf '%s\n' "$@" | grep -o 'issue(number: [0-9]*' | grep -o '[0-9]*$' | jq -cs .)
+        issues | jq -c --argjson ns "$n" '{data: {viewer: {login: "m"}, repository: ({owner: {login: "o"}}
+          + (map(select(.number | IN($ns[]))) | map({key: "i\(.number)", value: {number, body: (.gqlBody // .body), author: {login: (.author // "o")},
+            userContentEdits: {totalCount: (.editTotal // (.edits // [] | length)), nodes: [.edits // [] | .[]
+              | {editedAt: .at, deletedAt: (if .deleted then .at else null end), diff: (if .deleted then null else .text end), editor: {login: .by}}]}}}) | from_entries))}}' ;;
       *authorAssociation*) s=$(jq -cRn '[inputs | split(" ") | map(tonumber)]' "$STUB/subs" 2>/dev/null) || s='[]'
       issues | jq -c --argjson s "${s:-[]}" 'map(.number) as $open | {data: {repository: {nameWithOwner: "o/r", issues: {nodes: map(.number as $n | {number, authorAssociation: (.authorAssociation // "OWNER"),
         parent: ([$s[] | select(.[1] == $n) | {number: .[0], repository: {nameWithOwner: "o/r"}}] | first),

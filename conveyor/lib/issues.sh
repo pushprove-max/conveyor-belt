@@ -726,7 +726,8 @@ labelled() {
 # issue that is a part gets umbrella (its parent's number, when the parent is an issue of this repository), and a
 # parent gets parts ([{ref: "#N", or "owner/repo#N" for another repository's, number: N, null for another
 # repository's, open}]; GitHub allows 100 a parent). A pick never takes a parent (jq/upnext.jq), and umbrellas()
-# (lib/slices.sh) closes one whose parts are each closed or landed.
+# (lib/slices.sh) closes one whose parts are each closed or landed. The same issues then get benefitYes (lib/benefit.sh).
+. "$HERE/lib/benefit.sh" || exit 1
 openissues() { # <json fields> [gh issue list arguments]
   local out f=$1 lim=1000 a; shift
   [ -z "$GITHUB" ] || { [ -s "$GITHUB/issues" ] && cat "$GITHUB/issues"; return; }  # the snapshot's fields, as `github` kept them
@@ -745,10 +746,9 @@ openissues() { # <json fields> [gh issue list arguments]
           umbrella: (.parent | if . != null and .repository.nameWithOwner == $me then .number else null end),
           parts: [(.subIssues.nodes // [])[] | (.repository.nameWithOwner == $me) as $here
             | {ref: (if $here then "#\(.number)" else "\(.repository.nameWithOwner)#\(.number)" end), number: (if $here then .number else null end), open: (.state == "OPEN")}]}}]
-        | from_entries' <<<"$a") \
-      || { echo "conveyor: who opened the open issues could not be read (gh api graphql)" >&2; return 1; }
+        | from_entries' <<<"$a") || { echo "conveyor: who opened the open issues could not be read (gh api graphql)" >&2; return 1; }
     out=$(jq -c --argjson a "$a" 'map($a[.number | tostring] as $x | .authorAssociation = $x.authorAssociation
-      | if $x.umbrella != null then .umbrella = $x.umbrella else . end | if ($x.parts // []) != [] then .parts = $x.parts else . end)' <<<"$out") || return 1
+      | if $x.umbrella != null then .umbrella = $x.umbrella else . end | if ($x.parts // []) != [] then .parts = $x.parts else . end)' <<<"$out") && out=$(benefityes "$out") || return 1
   fi
   farstates "$out"
 }

@@ -20,4 +20,4 @@ When you take a blocked card (a hand run, a fix card, a picker to the owner), ru
 Each issue you file has a line `Benefit: <the live case it fixes, or the gain as measured>`, or `Guards: <the risk>` (security, compliance, data loss, a silent fallback, fail-loud).
 
 ## An issue held for its benefit
-An issue skipped by the rule `no live benefit` waits for the owner's yes. Ask the owner by the picker. The question says plainly that no live case is known or the gain was never measured, and "Recommended" goes on closing the issue or measuring first. On yes, add a line `Benefit approved: <date>` to the issue.
+An issue skipped by the rule `no live benefit` waits for the owner's yes. Ask the owner by the picker. The question says plainly that no live case is known or the gain was never measured, and "Recommended" goes on closing the issue or measuring first. On yes, add a line `Benefit approved: <date>` to the issue with gh: the line releases the issue only when the account gh is signed in as, or the repository's owner, added it.
