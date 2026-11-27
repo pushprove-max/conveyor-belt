@@ -66,13 +66,24 @@ pipeentry() {
 
 # Bug: "Move up to harm" filed the follow-up of a finding on a pipeline file as an issue with no hold, so the loop
 # could build a change to the engine's own code before the owner said yes (followups() holds such a finding). The issue
-# is made with the built label, which the pick skips, until the hold is in the control record.
+# is made with the built label, which the pick skips, until the hold is in the control record. Bugs: the issue was made
+# with no built label, or the label was taken off before the hold was saved, so the picker could take it unheld; the
+# final labels cannot show either, so gh's label removal ($STUB/edit-cmd) notes, as it runs, the control record's holds
+# and whether the issue still has the label (only that removal takes it off). awaiting-deploy is the fixture pack's
+# built label.
 t_healsharmpipe() {
   local out
   setup '[]'; actlist; pipeentry
+  # stub: the holds and the issue's labels at the label's removal, which the final state cannot show
+  { printf 'C=%q\n' "$ST/control.json"
+    # shellcheck disable=SC2016 # expanded when gh sources it
+    echo 'jq -nc --argjson n "$n" --slurpfile c "$C" "[\$n, \$c[0].held, ([inputs | select(.number == \$n)][0].labels | map(.name) | index(\"awaiting-deploy\") != null)]" "$STUB/filed" >> "$STUB/edits"'
+  } > "$STUB/edit-cmd"
   out=$(loop heals harm h00000000a4 h00000000a1 2>&1) || fail "heals harm h00000000a4 h00000000a1 failed: $out"
+  [ "$(cat "$STUB/edits" 2>&1)" = '[100101,[100101],true]' ] \
+    || fail "heals harm h00000000a4 h00000000a1 did not keep the built label (awaiting-deploy) on #100101 (the finding on conveyor/lib/run.sh) from its create until its hold was saved, so the picker could take it unheld; [issue, held, label still on] at each label removal: $(cat "$STUB/edits" 2>&1) $out"
   [ "$(loop control | jq -c .held)" = '[100101]' ] \
-    && [ "$(jq -sc 'map([.number, (.labels | map(.name) | index("conveyor-built") != null), (.body | test("\nCost to every card: not assessed"))])' "$STUB/filed")" = '[[100101,false,true],[100102,false,false]]' ] \
+    && [ "$(jq -sc 'map([.number, (.labels | map(.name) | index("awaiting-deploy") != null), (.body | test("\nCost to every card: not assessed"))])' "$STUB/filed")" = '[[100101,false,true],[100102,false,false]]' ] \
     || fail "heals harm h00000000a4 h00000000a1 did not hold only #100101 (the finding on conveyor/lib/run.sh) with its cost line, or left the built label on it: $out $(loop control | jq -c .held) $(cat "$STUB/filed")"
 }
 

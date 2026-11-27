@@ -59,8 +59,9 @@ case $2 in
     printf '%s\n' "${a[*]}" >> "$STUB/comments" ;;
   close) echo "$3" >> "$STUB/closed"; shift 3; printf '%s\n' "$*" >> "$STUB/close-comments" ;;
   reopen) echo "$3" >> "$STUB/reopened"; shift 3; printf '%s\n' "$*" >> "$STUB/reopen-comments" ;;
-  # gh issue edit <n> --remove-label <label>: the label is taken off the issue's line in $STUB/filed (any other edit is ignored).
-  edit) n=$3; shift 3; while [ $# -gt 0 ]; do [ "$1" != --remove-label ] || { jq -c --argjson n "$n" --arg l "$2" 'if .number == $n then .labels |= map(select(.name != $l)) else . end' "$STUB/filed" > "$STUB/filed.new" && mv -f "$STUB/filed.new" "$STUB/filed"; }; shift; done ;;
+  # gh issue edit <n> --remove-label <label>: the label is taken off the issue's line in $STUB/filed (any other edit is ignored),
+  # after $STUB/edit-cmd, when there is one, is sourced (it sees the issue as it was before the edit).
+  edit) n=$3; [ ! -f "$STUB/edit-cmd" ] || . "$STUB/edit-cmd"; shift 3; while [ $# -gt 0 ]; do [ "$1" != --remove-label ] || { jq -c --argjson n "$n" --arg l "$2" 'if .number == $n then .labels |= map(select(.name != $l)) else . end' "$STUB/filed" > "$STUB/filed.new" && mv -f "$STUB/filed.new" "$STUB/filed"; }; shift; done ;;
   create) shift 2; n=$((100101 + $(cat "$STUB/filed" 2>/dev/null | wc -l))); l=(); m=
     [ ! -f "$STUB/create-cmd" ] || . "$STUB/create-cmd"
     # The option that gave the body (--body or --body-file) is noted in $STUB/body-from, a line per issue filed.
