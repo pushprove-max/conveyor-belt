@@ -198,13 +198,15 @@ redtests() { # <the loop's own cards in progress, card ids one a line>
 # nothing while the limit is off: no release, a run that ended or was stopped (`release-run stop`), or a record that
 # does not read. Whether a fix is open is read now (relfixlist(), lib/fulltest.sh), from the open issues the pick was
 # given, the Tests page's cards and the card records: a fix filed since relfixes() last wrote the record's fixes holds
-# the queue at once, and an open issue or a card that no longer says `Release fix: <version>` is no fix at once. The
+# the queue at once, and an open issue or a card that no longer says `Release fix: <version>` is no fix at once. An
+# issue the control record holds (held, with adopted()'s holds: one an outsider opened) cannot start, so it never turns
+# the limit on: else anyone could hold the whole queue by filing an issue that says `Release fix: <version>`. The
 # record's fixes add only the fixes not read now (a landed fix closed on GitHub), for their follow-ups; those not read in the last IDLE seconds (fixesRead) are read first (`relfixes record`), as `run` never
 # reads them. A read that fails stops the pick. The loop log says why each time the limit changes (the last reason is
 # in RELLIMITF). A card on the belt is never stopped. A dry pick (DRYPICK) reads only: no `relfixes record`, no log.
 RELLIMITF=${STATE%/*}/release-limit.txt
 rellimit() { # <the open issues json, as the pick was given them>
-  local f=$CARDS/release/run.json r k p v why set='' fc ta
+  local f=$CARDS/release/run.json r k p v why set='' fc ta hd
   if [ -z "${DRYPICK:-}" ] && jq -e --argjson idle "${IDLE:-0}" 'objects | (.ended | type) == "string" and .restarted == null and .waitStopped == null and (.state | IN("failed", "waiting"))
     and (.fixesRead | numbers // 0) + $idle <= now' "$f" > /dev/null 2>&1; then
     relfixes record || { echo "conveyor: the release limit: the fix cards of the red release could not be read; nothing is picked this turn" >&2; return 1; }
@@ -224,7 +226,8 @@ rellimit() { # <the open issues json, as the pick was given them>
     if [ "$k" = red ]; then
       # Read first (a read that fails stops the pick), and given to jq as files: a long history is over the argument limit.
       fc=$(endedrecs) && fc=$fc$'\n'$(recs) && ta=$(jq -c '.cards | arrays' "${TACARDS:-/dev/null}" 2>/dev/null || echo '[]') \
-        && set=$(jq -c --arg fu "$FOLLOWUP" --slurpfile is <(printf '%s' "${1:-[]}") --slurpfile lines <(printf '%s' "$fc") --slurpfile ta <(printf '%s' "${ta:-[]}") "$RELFIXJQ"'
+        && hd=$(ctl) && hd=$(adopted "$hd" "${1:-[]}") && hd=$(jq -c '.held' <<<"$hd") \
+        && set=$(jq -c --arg fu "$FOLLOWUP" --argjson held "$hd" --slurpfile is <(printf '%s' "${1:-[]}") --slurpfile lines <(printf '%s' "$fc") --slurpfile ta <(printf '%s' "${ta:-[]}") "$RELFIXJQ"'
             $ta[0] as $ta | ($lines | map(select(.followups))) as $fc | def grow: . as $s
               | ($s.issues + [$fc[] | select((.issue | IN($s.issues[])) or (.card | IN($s.cards[]))) | .followups[] | numbers]
                   + [$is[0][] | select(.number | IN($s.issues[])) | (.parts // [])[] | .number | numbers]
@@ -238,9 +241,9 @@ rellimit() { # <the open issues json, as the pick was given them>
             | (if .fixes | type == "array" then .fixes else [] end
               | map(select(if .issue | type == "number" then .issue | IN($open[]) | not else [.card, (.ids // [])[] | strings] | any(IN($tids[])) | not end))) as $old
             | (if $n != "" then [] else $is[0] | map(.state = "OPEN") end | relfixlist($v; $e; $n; $lines; $ta)) as $now
-            | select(any($now[]; .state == "open")) | $old + $now
+            | select(any($now[]; .state == "open" and (.issue | IN($held[]) | not))) | $old + $now
             | {issues: ([.[].issue | numbers] | unique), cards: ([.[] | .card, (.ids // [])[] | strings] | unique)} | grow' "$f") \
-        || { echo "conveyor: the release limit: the fix cards of $v, or the card records, could not be read; nothing is picked this turn" >&2; return 1; }
+        || { echo "conveyor: the release limit: the fix cards of $v, the card records or the control record could not be read; nothing is picked this turn" >&2; return 1; }
       [ -z "$set" ] || k=fix
     fi
     case $k in

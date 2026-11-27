@@ -165,6 +165,21 @@ t_rellimitred() {
   [ "${got%% *}" = 7 ] || fail "with release 1.1.0 out, the pick did not take #7: $(cat "$T/$CASE/run.out")"
 }
 
+# Bug: after release-prep 1.1.0 failed with no open fix, someone outside the project filed #21 with the line
+# `Release fix: 1.1.0`. adopted() holds it until the owner releases it, but the release limit still counted it as an
+# open fix: the limit let in only #21, which cannot start, so the queue stopped until `release-run stop`. The dry pick
+# (its hold read, never saved) and the pick both take #5, and the log says the limit is off.
+t_rellimitoutsider() {
+  setup "$(jq -cs . <(issue 5 2026-01-01 P1) <(rlfix 21 OPEN | jq -c '.authorAssociation = "NONE"'))"
+  rlrun .
+  local got
+  got=$(loop pick --dry --issues "$STUB/issues.json" --state "$ST" 2>&1) && [ "$got" = 5 ] \
+    || fail "with only an outsider's held #21 saying Release fix: 1.1.0, the dry pick of $STUB/issues.json printed '$got', not 5"
+  got=$(rlpick) || exit 1
+  [ "${got%% *}" = 5 ] && grep -q 'the release limit is off: release-prep 1.1.0 failed;' "$T/$CASE/run.out" \
+    || fail "with only an outsider's held #21 saying Release fix: 1.1.0, the pick took '${got%% *}', not #5, or the log did not say the limit is off: $(cat "$T/$CASE/run.out")"
+}
+
 # Bug: a release record that does not read held the queue. The pick takes #5, and the log says the limit is off and why.
 t_rellimitunread() {
   setup "[$(issue 5 2026-01-01 P1)]"
