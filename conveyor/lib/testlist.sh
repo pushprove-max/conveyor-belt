@@ -238,13 +238,25 @@ readersin() { # <worktree>
 # Not for a change to the test file itself: the card's own test files run as before, only the cases the change touches
 # when it touches only some (owncases()). readersin() adds them to a card's list; rerunsince() drops what the card's last
 # run kept of them.
+# An engine case file (conveyor/tests/<name>.test.sh) that changes, or is added or deleted, brings no reader that is an
+# engine case file: the runner sources every case file to find its cases (conveyor.test.sh: `. tests/*.test.sh`), so
+# the trace of each one names every other one, and its folder, as read, and a change to one case file picked every
+# engine case file with a traced pass (34 for a 6-line change to review.test.sh, 2026-11-27). Any other reader is
+# still picked: spdx.test.sh reads the SPDX line of each tracked file in a run of its own. A case file's own read of
+# another (testcountrunner.test.sh's check of function names) cannot be told from the runner's, so it brings no
+# reader either; the full test suite, which does not use the cache, still runs it. The changed case file
+# itself still runs: it is the card's own test (listcmd()).
 cachereaders() { # <changes>
   [ -s "$TESTCACHE" ] && [ -n "$1" ] || return 0
-  C=$1 awk -F'\t' 'BEGIN { n = split(ENVIRON["C"], l, "\n")
-      for (i = 1; i <= n; i++) { if (split(l[i], x, "\t") < 2) continue; ch[x[2]] = 1; if (x[1] !~ /^[AD]/) continue
-        ch["./"] = 1; m = split(x[2], p, "/"); q = ""; for (j = 1; j < m; j++) { q = q p[j] "/"; ch[q] = 1 } } }
+  # ch: what the change touches; cx: the same, less what an engine case file of it touches, for an engine case file.
+  C=$1 awk -F'\t' 'function eng(p) { return p ~ /^conveyor\/tests\/[^\/]+\.test\.sh$/ }
+    function mark(p, e) { ch[p] = 1; if (!e) cx[p] = 1 }
+    BEGIN { n = split(ENVIRON["C"], l, "\n")
+      for (i = 1; i <= n; i++) { if (split(l[i], x, "\t") < 2) continue; e = eng(x[2]); mark(x[2], e); if (x[1] !~ /^[AD]/) continue
+        mark("./", e); m = split(x[2], p, "/"); q = ""; for (j = 1; j < m; j++) { q = q p[j] "/"; mark(q, e) } } }
     { last[$3] = $0 }
-    END { for (f in last) { k = split(last[f], a, "\t"); for (i = 4; i <= k; i++) if ((a[i] in ch) || (a[i] !~ /\/$/ && (a[i] "/") in ch)) { print f; break } } }' "$TESTCACHE" | LC_ALL=C sort
+    END { for (f in last) { k = split(last[f], a, "\t"); e = eng(f)
+        for (i = 4; i <= k; i++) if (e ? ((a[i] in cx) || (a[i] !~ /\/$/ && (a[i] "/") in cx)) : ((a[i] in ch) || (a[i] !~ /\/$/ && (a[i] "/") in ch))) { print f; break } } }' "$TESTCACHE" | LC_ALL=C sort
 }
 # The cases of the test file <file> that the staged change in <worktree> adds or changes (listcmd(), #414), A to Z, one
 # a line: by the case scan (CASESCAN, lib/testfiles.sh) of main's file (HEAD) and of the staged one, each case of the

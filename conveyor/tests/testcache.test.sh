@@ -265,6 +265,36 @@ t_testcachefix() {
     || fail "after a fix changed e.txt, which r.test.sh's last pass read, the list still keeps r.test.sh, or lost q.test.sh's pass (exit $(cat "$T/$CASE/rc")): $(cat "$w.rerun" "$T/$CASE/run.out" 2>&1)"
 }
 
+# The engine's runner sources every case file to find its cases (conveyor.test.sh: `. tests/*.test.sh`), so the traced
+# pass of each engine case file names every other one, and their folder, as read. Card c7 changes only t_one of the
+# engine case file conveyor/tests/j.test.sh; the passes on record of the case file conveyor/tests/k.test.sh (which read
+# e.txt too) and of s.test.sh, a test run on its own, read it and listed conveyor/tests/. The card's list is s.test.sh
+# whole and j.test.sh's t_one (listcmd(), the whole path a card's test step takes); a case file added to
+# conveyor/tests/ picks s.test.sh alone, and a change to e.txt still picks k.test.sh (cachereaders()). Bugs it catches:
+# a change to one case of review.test.sh ran 34 other engine case files whole (2026-11-27); and a rule that kept every
+# changed test file from picking its readers left out a test that reads it in a run of its own (spdx.test.sh, which
+# reads each file's SPDX line).
+t_testcachetestreads() {
+  setup '[]'
+  local f
+  mkdir -p "$R/conveyor/tests" || fail "the case folder could not be made"
+  for f in j k; do printf 't_one() {\n  :\n}\nt_two() {\n  :\n}\n' > "$R/conveyor/tests/$f.test.sh"; done; echo s > "$R/s.test.sh"; echo e > "$R/e.txt"
+  # -f: the scratch repo's .gitignore names conveyor/.
+  git -C "$R" add -f conveyor/tests || fail "the case files could not be added"
+  cachelistsetup s.test.sh e.txt
+  printf 't_one() {\n  echo one\n}\nt_two() {\n  :\n}\n' > "$T/$CASE/cards/c7/conveyor/tests/j.test.sh" && git -C "$T/$CASE/cards/c7" add -A \
+    || fail "the card's change could not be staged"
+  LASTPASS=$'conveyor/tests/k.test.sh\tconveyor/tests/\tconveyor/tests/j.test.sh\te.txt\ns.test.sh\tconveyor/tests/\tconveyor/tests/j.test.sh' \
+    cachelistrun 'listcmd "$wt" && printf "%s|%s" "$TEST_FILES" "$TEST_CASES" > "$T/$CASE/got" \
+    && cachereaders $'"'"'A\tconveyor/tests/n.test.sh'"'"' > "$T/$CASE/add" && cachereaders $'"'"'M\te.txt'"'"' > "$T/$CASE/src"'
+  [ "$(cat "$T/$CASE/got" 2>&1)" = $'conveyor/tests/j.test.sh\ns.test.sh|conveyor/tests/j.test.sh\tone' ] \
+    || fail "a change to one case of conveyor/tests/j.test.sh, which the passes of conveyor/tests/k.test.sh and s.test.sh read, did not run s.test.sh whole and j.test.sh's t_one alone (files|cases): $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(cat "$T/$CASE/add" 2>&1)" = s.test.sh ] \
+    || fail "a case file added to conveyor/tests/, which both passes listed, did not pick s.test.sh alone: '$(cat "$T/$CASE/add" 2>&1)' $(cat "$T/$CASE/run.out")"
+  [ "$(cat "$T/$CASE/src" 2>&1)" = conveyor/tests/k.test.sh ] \
+    || fail "a change to e.txt, which conveyor/tests/k.test.sh's pass read, did not pick it alone: '$(cat "$T/$CASE/src" 2>&1)' $(cat "$T/$CASE/run.out")"
+}
+
 # cachekeep() of a run that passed d.test.sh, whose log names its reads in a `TESTRUN reads` line (it read a path
 # that is not tracked, such as node_modules: .conveyor/test-changed.sh inputsof()), e.txt and pkg/package.json, which
 # was not there. The cache holds the line, so cachereaders() picks d.test.sh for a change that adds pkg/package.json,

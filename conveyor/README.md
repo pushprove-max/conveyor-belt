@@ -1052,7 +1052,11 @@ test file off with it. A change to one of its inputs still adds the test file to
 A card's test list also gets each test file whose last kept pass read a file that the change touches, or listed a
 folder that the change adds a file to or deletes a file from. Such a file runs whole, also when the card's own change
 selects only some of its cases. When a fix, or a newer main, changes a file that a test file's last kept pass read,
-the card's next test run does not use the pass of that file from the card's earlier run. The test map and the test
+the card's next test run does not use the pass of that file from the card's earlier run. One exception applies to all
+of these rules, for an inputs line and a `TESTRUN reads` line alike: a change to an engine case file
+(`conveyor/tests/<name>.test.sh`) does not add another engine case file. The engine's runner loads every case file, so
+each pass of a case file reads all of them. A test file that is not an engine case file and read the changed file
+still gets on the list. The test map and the test
 links still give the tests that have no kept pass. Each
 other file on the card's list gets a `TESTRUN why` line that tells why it runs: its inputs changed since its last
 pass, or no pass of it is kept with its inputs.
