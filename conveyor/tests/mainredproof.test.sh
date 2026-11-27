@@ -391,18 +391,19 @@ mwstart() {
     || fail "the card did not wait for main, saying on what"
 }
 # Bug it catches: the owner removed a wrong main-red entry with main unchanged, and the card waited on until the loop
-# was stopped. The case leaves the record (c.test, which the card does not wait on, stays): the wait ends within one
-# LIVE interval (the ceiling: LIVE and a second's slack), and the card goes on to test again (card()).
+# was stopped. The case leaves the record (c.test, which the card does not wait on, stays): the wait ends, and the card
+# goes on to test again (card()). Main does not move, so nothing else ends the wait, and wait_until's own ceiling
+# catches the bug: a ceiling of LIVE and a second's slack failed at random on a loaded machine (#1768).
 t_mainwaitcleared() {
   local s mw
   mwstart
   jq -c '.reds[0].cases |= map(select(.case != "a.test: one"))' "$ST/mainred.json" > "$STUB/red.new" && mv "$STUB/red.new" "$ST/mainred.json"
-  WAIT_CEILING=3 wait_until "grep -qx 'ended 0' '$STUB/mw.out'" 'cat "$STUB/mw.out"' || fail "the wait did not end once its case left the main-red record"
+  wait_until "grep -qx 'ended 0' '$STUB/mw.out'" 'cat "$STUB/mw.out"' || fail "the wait did not end once its case left the main-red record"
   wait "$mw"; [ ! -e "$T/$CASE/cards/c9.live" ] && [ ! -e "$T/$CASE/cards/c9.idle" ] || fail "the ended wait left its live record or wait mark"
 }
 # Bug it catches: the case's fix card closed as already done (its cases pass on main: bugproof.sh bugproof(), nochange()) with main
 # unchanged, its entry left in the record, and the card waited on. Picked, the fix card holds the wait; closed, it ends
-# within one LIVE interval.
+# (with main unchanged, nothing else ends it: wait_until's own ceiling, as in t_mainwaitcleared).
 t_mainwaitfixclosed() {
   local s mw l
   mwstart
@@ -411,7 +412,7 @@ t_mainwaitfixclosed() {
   wait_until "[ \"\$(jq -r .last '$T/$CASE/cards/c9.live' 2>/dev/null)\" != '$l' ]" || fail "the waiting card's live record was not brought up to date"
   [ -z "$(cat "$STUB/mw.out")" ] || fail "the wait ended while the case's fix card was open: $(cat "$STUB/mw.out")"
   eng 'append "$(line cfix 0 closed ok "{\"reason\":\"already done\"}")"' || fail "the fix card's closed line could not be written"
-  WAIT_CEILING=3 wait_until "grep -qx 'ended 0' '$STUB/mw.out'" 'cat "$STUB/mw.out"' || fail "the wait did not end once the case's fix card closed"
+  wait_until "grep -qx 'ended 0' '$STUB/mw.out'" 'cat "$STUB/mw.out"' || fail "the wait did not end once the case's fix card closed"
   wait "$mw"
 }
 # Bug it catches: a wait that ended on its own with main still red and its entry standing (the card tested again for

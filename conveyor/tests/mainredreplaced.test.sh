@@ -74,9 +74,11 @@ t_mainredreplacedflaky() {
   printf '%s\n' '[ "${CONVEYOR_TEST_FILE:-}" = a.test ] && { n=$(($(cat "$STUB/n" 2>/dev/null || echo 0) + 1)); echo $n > "$STUB/n"; [ $n != 3 ] || { grep -vx one ok.txt > ok.new; mv ok.new ok.txt; }; }' \
     | cat - "$STUB/mainrun-cmd" > "$STUB/mainrun-cmd.new" && mv "$STUB/mainrun-cmd.new" "$STUB/mainrun-cmd" || fail "the flaky runner could not be made"
   out=$(eng 'nochange cfix 0 "$CONVEYOR_CARDS/cfix" brief' 2>&1)
+  # The failure prints the end of the first run's own output (redkeep()): in the loop's Test step this case failed with
+  # no run of a.test and both cases failed (#1768), a cause only that output names, and the case folder is gone after.
   [ "$(cat "$STUB/n" 2>/dev/null)" = 3 ] && [ -n "$(st 'select(.card == "cfix" and .step == "blocked")')" ] \
     && [ -z "$(st 'select(.card == "cfix" and .step == "closed")')" ] \
-    || fail "nochange on cfix (a.test: one, held by cnew1 landed, fails in its third run; c.test fails, held by cnew2 on the belt) closed it, or did not run a.test three times (runs: $(cat "$STUB/n" 2>/dev/null)): $out: $(st 'select(.card == "cfix") | "\(.step) \(.reason)"' | tr '\n' ,)"
+    || fail "nochange on cfix (a.test: one, held by cnew1 landed, fails in its third run; c.test fails, held by cnew2 on the belt) closed it, or did not run a.test three times (runs: $(cat "$STUB/n" 2>/dev/null)): $out: $(st 'select(.card == "cfix") | "\(.step) \(.reason)"' | tr '\n' ,) The end of the first run on main: $(tail -n 20 "$ST/kept/cfix/cfix.redrun-without.out" 2>/dev/null)"
   # Bug it catches: the block reason was written from the first run, so it said main is no longer red for
   # `a.test: one` though the third run failed it.
   local r
