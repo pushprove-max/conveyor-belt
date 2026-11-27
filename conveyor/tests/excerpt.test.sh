@@ -58,7 +58,7 @@ t_excerpts() {
     || fail "a declined finding's lines are not kept (a DECLINED line was read as no finding), for the review: $(cat "$w.review"): $x"
   # Bugs caught (#1381): the lines beside each finding in the judge's message (judgefindings()) left out the lines near
   # the cited one, and, with the tree before the last fix round, the cited line that fix deleted (f2).
-  echo '[{"n":1,"place":"inside","finding":"[P1] f.txt:2 the fix deleted f2"},{"n":2,"place":"inside","finding":"[P1] a.txt:2 wrong case"}]' > "$w.judge.marks"
+  echo '[{"n":1,"place":"inside","finding":"[P1] f.txt:2 the fix deleted f2"},{"n":2,"place":"inside","finding":"[P1] a.txt:2 wrong case"},{"n":3,"place":"inside","finding":"[P1] f.txt:3 f3 is wrong"}]' > "$w.judge.marks"
   # shellcheck disable=SC2034 # STE and TRYFOLD (lib/session.sh's) are read by the sourced lib/review.sh
   x=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; STE='' TRYFOLD=''; . "$SRC/lib/review.sh"; judgefindings "$w" "$fx")
   [ "$(awk '/^F2 /{ exit } /^F1 /{ on = 1 } on' <<<"$x")" = 'F1 [inside the diff; proof line: none] [P1] f.txt:2 the fix deleted f2
@@ -69,10 +69,20 @@ t_excerpts() {
     1: f1
     2: f2
     3: f3' ] || fail "the judge's lines for f.txt:2 are not the staged lines near it and the lines the fix deleted: $x"
-  [ "$(awk '/^F2 /{ on = 1 } on' <<<"$x" | head -4)" = 'F2 [inside the diff; proof line: none] [P1] a.txt:2 wrong case
+  [ "$(awk '/^F3 /{ exit } /^F2 /{ on = 1 } on' <<<"$x" | head -4)" = 'F2 [inside the diff; proof line: none] [P1] a.txt:2 wrong case
   Lines at a.txt:2 (the staged change):
     1: one
     2: TWO' ] || fail "the judge's lines for a.txt:2 leave out the line before it: $x"
+  # Bug: the staged f.txt has no line 3, but its lines 1 and 2 (near the citation) counted as the cited line kept, so
+  # the judge lost line 3 of the tree before the fix round (a line that fix did not delete).
+  [ "$(awk '/^F3 /{ on = 1 } on' <<<"$x")" = 'F3 [inside the diff; proof line: none] [P1] f.txt:3 f3 is wrong
+  Lines at f.txt:3 (the staged change):
+    1: f1
+    2: f3
+  Lines at f.txt:3 (the code before the last fix round):
+    1: f1
+    2: f2
+    3: f3' ] || fail "the judge's lines for f.txt:3 leave out the fix tree's line 3 when the staged lines near it are kept: $x"
 }
 
 # Bug: the Board reads a card's reviewed lines on demand, as the snapshot leaves them out: history excerpts gives

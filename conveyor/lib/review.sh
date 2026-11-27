@@ -485,7 +485,7 @@ judgemarks() { # <worktree> <the always-accepted kinds, a JSON array>
 # read as judgemarks() reads it (a path under the worktree read as one in it). The lines are read from git's trees only,
 # never from the disk: the staged tree the review read (side "new") when it has the file and the first line; the tree
 # of the worktree's HEAD (side "old"); and, for a review that follows a fix round, the tree before that fix (side
-# "fix", the second argument). An older tree's lines are kept when no tree before it kept any for the citation, or
+# "fix", the second argument). An older tree's lines are kept when no tree before it kept the cited first line, or
 # when the cited lines, read as that tree's, take in lines the staged tree no longer has (git diff -U0 of that tree and
 # the staged one): a citation of a line the change, or the fix, deleted keeps that line, beside the staged one when
 # the staged file has a line at that number. A path that is not one in the repository (it starts with /, or has a . or
@@ -520,8 +520,9 @@ excerpts() { # <worktree> [<the tree before the fix round the review follows> [<
       # awk reads to the end: one that stopped early would end git with SIGPIPE, which pipefail reads as a failure.
       ra=$((a > c ? a - c : 1)); rb=$((b + c))
       got=$(git -C "$1" cat-file blob "$t:$p" | awk -v a="$ra" -v b="$rb" 'NR >= a && NR <= b' | jq -Rnc '[inputs | .[0:300]]') || got='[]'
+      # kept only when the lines take in the cited first line: lines near it alone leave an older tree's line to read.
       [ "$got" = '[]' ] || [ "$(jq length <<<"$out")" -ge "$EXCERPTS" ] \
-        || { kept=1; out=$(jq -c --arg at "$at" --arg s "$side" --argjson a "$ra" --argjson l "$got" '. + [{at: $at, side: $s, from: $a, lines: $l}]' <<<"$out"); }
+        || { [ "$(jq length <<<"$got")" -le $((a - ra)) ] || kept=1; out=$(jq -c --arg at "$at" --arg s "$side" --argjson a "$ra" --argjson l "$got" '. + [{at: $at, side: $s, from: $a, lines: $l}]' <<<"$out"); }
     done
   done < <(sed -E 's/^(DECLINED|OUTSIDE|SELFHEALS):[[:space:]]*//' "${3:-$1.review}" 2>/dev/null | grep -Ev "$NOTFINDING" | jq -Rr --arg wt "$1/" --arg real "$(cd "$1" && pwd -P)/" \
     'split($wt) | join("") | split($real) | join("") | [scan("([A-Za-z0-9_./-]+):([0-9]{1,9})(?:[-–]([0-9]{1,9}))?")] | first // empty
