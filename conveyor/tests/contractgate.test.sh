@@ -15,16 +15,17 @@
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # Main ($R, setup with <issues json>) holds a persisted-contract writer, src/repositories/widget-repository.ts, with a
-# reader and a writer export, pushed. Its pre-push hook runs the check on each pushed range from the installed Conveyor
+# reader and a writer export, pushed. Its pre-push hook runs the check on each pushed ref from the installed Conveyor
 # (this engine's .claude/hooks/adversarial-review-gate.sh, or <checker>): main holds no copy of it, as in a project that
-# loads it so. <checker> 0 leaves the hook out.
+# loads it so. As such a hook does, it starts the range at the checker's base for the push (--base-only <local commit>
+# <remote commit>), or at the remote commit when the checker gives none. <checker> 0 leaves the hook out.
 contractmain() { # <issues json> [<checker>]
   setup "$1"
   mkdir -p "$R/src/repositories" && printf '%s\n' 'export function readWidget(id) {' '  return id;' '}' 'export function saveWidget(id) {' '  return id;' '}' > "$R/src/repositories/widget-repository.ts" \
     && git -C "$R" add -A && git -C "$R" commit -qm 'the writer' && git -C "$R" push -q origin main || fail "main's writer"
   [ "${2:-}" = 0 ] && return
-  printf '%s\n' '#!/usr/bin/env bash' 'z=0000000000000000000000000000000000000000' \
-    "while read -r _ l _ r; do [ \"\$r\" = \"\$z\" ] || bash '${2:-$SRC/../.claude/hooks/adversarial-review-gate.sh}' --contract-range \"\$r\" \"\$l\" || exit 1; done" \
+  printf '%s\n' '#!/usr/bin/env bash' 'z=0000000000000000000000000000000000000000' "c='${2:-$SRC/../.claude/hooks/adversarial-review-gate.sh}'" \
+    "while read -r _ l _ r; do [ \"\$r\" = \"\$z\" ] && continue; b=\$(bash \"\$c\" --base-only \"\$l\" \"\$r\" 2>/dev/null < /dev/null); bash \"\$c\" --contract-range \"\${b:-\$r}\" \"\$l\" < /dev/null || exit 1; done" \
     > "$R/.git/hooks/pre-push" && chmod +x "$R/.git/hooks/pre-push" || fail "main's pre-push hook"
 }
 # A change that adds the writer saveGadget to widget-repository.ts.
@@ -195,10 +196,9 @@ contractborrow() { # [<checker>]
 # at the checker's answer from a commit main has been at (--base-only <tip> <from>). #6 (src/six.ts and a test naming
 # Gizmo and readWidget) lands with a leftover finding and no filed follow-up; the batch of #7 (src/seven.ts) then #8
 # (shared/gizmo.ts) moves main once. #9 adds "// Gizmo" beside readWidget: it passes from origin/main and from #8's
-# commit (the checker's answer from #6's), the bases the engine checks from, and is refused from #7's commit, where main
-# never was, and from #6's itself. The engine checks from the checker's answer for each commit main has been at, as a
-# pre-push hook that asks --base-only for its base does; this fixture's hook checks from the remote commit as it is, so
-# a push made while main was at #6 would check from #6, but this case pushes nothing. Through land(): #9 lands.
+# commit (the checker's answer from #6's), the bases a push can start at, and is refused from #7's commit, where main
+# never was, and from #6's, where no push starts. Through land(): #9 lands, and main's pre-push hook passes the push of
+# #6 and then the push of #9 from it.
 t_contractbatchstart() {
   contractmain '[]'
   CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
@@ -214,11 +214,16 @@ t_contractbatchstart() {
       && wt 9 "awk '\''{ print } /^export function readWidget/ { print \"  // Gizmo\" }'\'' src/repositories/widget-repository.ts > w && mv w src/repositories/widget-repository.ts" \
       && h=$(cd "$CARDS/c9-9" && git commit-tree "$(git write-tree)" -p HEAD -m 9) || exit 9
     for p in origin/main main "$b7" "$b6"; do bash "$(contracthook)" --contract-range "$p" "$h" < /dev/null > /dev/null 2>&1; echo "from $p: $?"; done | sed "s|$b7|#7|; s|$b6|#6|"
-    land c9-9 9 "$CARDS/c9-9" "title 9 (#9)" "{}"; echo "land 9: $?"'
+    land c9-9 9 "$CARDS/c9-9" "title 9 (#9)" "{}"; echo "land 9: $?"
+    git push -q origin "$b6:refs/heads/main"; echo "push #6: $?"; git push -q origin main; echo "push #9: $?"'
   [ "$(grep -c '^from \(origin/main\|main\): 0$' "$T/$CASE/run.out")" = 2 ] && [ "$(grep -c '^from #[67]: 2$' "$T/$CASE/run.out")" = 2 ] \
     || fail "#9 (// Gizmo beside readWidget) does not pass from origin/main and #8's commit, or is not refused from #7's and #6's commits, so this case proves nothing: $(cat "$T/$CASE/run.out")"
   grep -qx 'land 9: 0' "$T/$CASE/run.out" && git -C "$R" show main:src/repositories/widget-repository.ts | grep -qx '  // Gizmo' \
-    || fail "#9 (// Gizmo beside readWidget) did not land, refused from #7's or #6's commit, which the engine does not check from:$(cat "$T/$CASE/run.out")"
+    || fail "#9 (// Gizmo beside readWidget) did not land, refused from #7's or #6's commit, which no push starts at: $(cat "$T/$CASE/run.out")"
+  # Bug it catches: main's pre-push hook started the check at Git's remote commit, so once #6 was pushed (Push landed
+  # pushes a commit main has been at), the push of #9 checked #6..#9 and was refused, though #9 had landed.
+  grep -qx 'push #6: 0' "$T/$CASE/run.out" && grep -qx 'push #9: 0' "$T/$CASE/run.out" && [ "$(git -C "$R" rev-parse origin/main)" = "$(git -C "$R" rev-parse main)" ] \
+    || fail "the push of #6 (git push origin #6:main), then of main at #9 (git push origin main), was refused by main's pre-push hook, so #9 landed on a commit main cannot push: $(cat "$T/$CASE/run.out")"
 }
 # Bug it catches: in a batch, the checker has no landed line yet for the cards before the card, so its answer stopped
 # at one of them, though the push, which reads their lines, starts after them. One batch of three reviewed cards: #5
