@@ -6,8 +6,7 @@
 # (testcard(), lib/testaction.sh), which the loop picks ahead of the queue (testpick()) and the Board shows by its test
 # file and title. The card is held to the check of its action (lib/speedproof.sh), is held for a Foreman session until
 # released, waits on a card it depends on, is retried once when it blocks, and lands naming and closing no issue.
-# The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
-# file runs its own cases through the runner.
+# The runner, ../conveyor.test.sh, sources this file after lib.sh and runs its cases; run alone, it runs them through it.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
@@ -49,7 +48,7 @@ t_tcqueue() {
   tcask f.test.sh 'Optimize the test file f.test.sh' 'Make it cheaper.'
   tcask g.test.sh 'Split the test file g.test.sh' 'Split it in two.'
   tcask f.test.sh 'Fix the failures of the test file f.test.sh' 'Make it pass every time.'
-  fx_in 'for i in 1 2 3 4; do p=$(locked pick "" "" "[]") || exit 1; echo "pick $i: $p"; done'
+  tcfx 'for i in 1 2 3 4; do p=$(locked pick "" "" "[]") || exit 1; echo "pick $i: $p"; done'
   [ "$RC" = 0 ] || fail "the picks failed: $(cat "$T/$CASE/run.out")"
   [ "$(grep -cE '^pick [123]: c[0-9T]+-.*-0 0 false$' "$T/$CASE/run.out")" = 3 ] && grep -qx 'pick 4: ' "$T/$CASE/run.out" \
     || fail "the three cards were not each picked once as cards of issue 0: $(cat "$T/$CASE/run.out")"
@@ -82,11 +81,11 @@ t_tcheld() {
     && [ "$(jq -c '[.cards[] | [.file, (.held // false)]]' "$ST/testactions/cards.json")" = '[["f.test.sh",false],["g.test.sh",true]]' ] \
     && grep -qF "card $id is held, as it was asked for a Foreman session: release it (conveyor.sh control release $id)" "$STUB/ti.err" \
     || fail "testissue g.test.sh with the rule off for a Foreman session did not queue a held card with no issue and say how to release it: $out $(cat "$STUB/ti.err") $(cat "$STUB/filed" 2>&1) $(cat "$ST/testactions/cards.json")"
-  fx_in 'for i in 1 2; do p=$(locked pick "" "" "[]") || exit 1; echo "pick $i: $p"; done'
+  tcfx 'for i in 1 2; do p=$(locked pick "" "" "[]") || exit 1; echo "pick $i: $p"; done'
   [ "$RC" = 0 ] && grep -qE '^pick 1: c[0-9T]+-.*-0 0 false$' "$T/$CASE/run.out" && grep -qx 'pick 2: ' "$T/$CASE/run.out" \
     && [ "$(st 'select(.step == "picked") | .testFile')" = f.test.sh ] || fail "the pick took the held card $id, or not the other: $(cat "$T/$CASE/run.out")"
   out=$(loop control release "$id" 2>&1) && [ "$out" = "conveyor: card $id is released: it is picked in its turn" ] || fail "control release $id failed: $out"
-  fx_in 'locked pick "" "" "[]"'
+  tcfx 'locked pick "" "" "[]"'
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "$id 0 false" ] || fail "after control release $id, the pick did not take it as card $id: $(cat "$T/$CASE/run.out")"
   if out=$(loop control release "$id" 2>&1); then fail "control release $id of a card no longer held was taken: $out"; fi
 }
@@ -98,9 +97,9 @@ t_tcdeps() {
   setup '[]'; mkdir -p "$ST/testactions"; local a=c20261101T000000-main-0
   jq -cn --arg a "$a" '{cards: [{file: "b.test.sh", title: "b", body: "Do b.\nDepends on: \($a)", time: "2026-11-01T00:00:00Z", id: "c20261101T000001-x-0", card: null},
     {file: "a.test.sh", title: "a", body: "Do a.", time: "2026-11-01T00:00:01Z", id: $a, card: null}]}' > "$ST/testactions/cards.json"
-  fx_in 'for i in 1 2; do p=$(locked pick "" "" "[]") || exit 1; echo "pick $i: $p"; done'
+  tcfx 'for i in 1 2; do p=$(locked pick "" "" "[]") || exit 1; echo "pick $i: $p"; done'
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "pick 1: $a 0 false"$'\n''pick 2: ' ] || fail "b, which depends on $a, was picked before $a landed, or $a was not picked as its id: $(cat "$T/$CASE/run.out")"
-  fx_in 'append "$(line '"$a"' 0 landed ok "{\"sha\":\"abc\",\"product\":false}")" && locked pick "" "" "[]"'
+  tcfx 'append "$(line '"$a"' 0 landed ok "{\"sha\":\"abc\",\"product\":false}")" && locked pick "" "" "[]"'
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = 'c20261101T000001-x-0 0 false' ] || fail "b was not picked once $a landed: $(cat "$T/$CASE/run.out")"
 }
 
@@ -114,17 +113,17 @@ t_tcretry() {
   setup '[]'; local c c2 out
   mkdir -p "$ST/testactions"
   jq -cn '{cards: [{file: "f.test.sh", title: "Split the test file f.test.sh", body: "Split it.", time: "2026-11-01T00:00:00Z", card: null}]}' > "$ST/testactions/cards.json"
-  fx_in 'c=$(locked pick "" "" "[]") && c=${c%% *} && echo "$c" && append "$(line "$c" 0 blocked ok "{\"reason\":\"build: it failed\"}")"'
+  tcfx 'c=$(locked pick "" "" "[]") && c=${c%% *} && echo "$c" && append "$(line "$c" 0 blocked ok "{\"reason\":\"build: it failed\"}")"'
   c=$(head -n 1 "$T/$CASE/run.out")
   [ "$RC" = 0 ] && [[ $c == c*-0 ]] || fail "the Tests page card was not picked and blocked: $(cat "$T/$CASE/run.out")"
   # `retry 0` names it among the blocked cards of no issue, by the name the Board shows it by.
   out=$(loop retry 0 2>&1); grep -qF "blocked now: $c (Tests page: f.test.sh)" <<<"$out" || fail "retry 0 does not name the blocked Tests page card $c: $out"
   out=$(loop shut "$c" 2>&1) && [ "$(st "select(.card == \"$c\") | .step" | tail -n 1)" = closed ] \
     || fail "shut $c did not close the blocked Tests page card by its card id: $out"
-  fx_in 'locked pick "" "" "[]"'
+  tcfx 'locked pick "" "" "[]"'
   [ "$RC" = 0 ] && [ ! -s "$T/$CASE/run.out" ] || fail "after shut $c, the next pick took its action again: $(cat "$T/$CASE/run.out")"
   out=$(loop retry "$c" 2>&1) && [ -z "$(st "select(.card == \"$c\")")" ] || fail "retry $c did not give back the shut Tests page card by its card id: $out"
-  fx_in 'locked pick "" "" "[]"'
+  tcfx 'locked pick "" "" "[]"'
   c2=$(cut -d ' ' -f 1 "$T/$CASE/run.out")
   [ "$RC" = 0 ] && [[ $c2 == c*-0 && $c2 != "$c" ]] && [ "$(st "select(.card == \"$c2\" and .step == \"picked\") | [.issue, .title, .testFile] | @json")" = '[0,"Split the test file f.test.sh","f.test.sh"]' ] \
     || fail "after retry $c, the next pick did not take the Split action again as a new card: $(cat "$T/$CASE/run.out") $(st 'select(.step == "picked")')"
@@ -152,7 +151,7 @@ t_tcblock() {
   out=$(loop snapshot --fresh) || fail "no snapshot"
   [ "$(jq -c '[.needsYou.blocked[] | select(.issue == 0) | [.card, (.reason | startswith("build:"))]]' <<<"$out")" = "[[\"$c2\",true]]" ] \
     || fail "Needs you does not show card $c2, blocked the second time, alone with its reason: $(jq -c '.needsYou.blocked' <<<"$out")"
-  fx_in 'locked pick "" "" "[]"'
+  tcfx 'locked pick "" "" "[]"'
   [ "$RC" = 0 ] && [ ! -s "$T/$CASE/run.out" ] || fail "card $c2, blocked the second time, was retried again: $(cat "$T/$CASE/run.out")"
 }
 
@@ -277,7 +276,8 @@ nisetup() {
   loop control rules "$1=off" > /dev/null || fail "control rules $1=off was refused"
   [ "$(loop control | jq -c --arg r "$1" '.rules[$r]')" = false ] || fail "control rules $1=off did not set the rule off: $(loop control | jq -c .rules)"
 }
-nipick() { fx_in "${1:+ONLY='$1' }"'locked pick "" "" "[]"'; [ "$RC" = 0 ] || fail "the pick failed: $(cat "$T/$CASE/run.out")"; cat "$T/$CASE/run.out"; } # [<--only list, json>]
+tcfx() { fx_in "$1"; sed -i '/^conveyor: the release limit /d' "$T/$CASE/run.out"; } # fx_in(), less the loop log's release limit line
+nipick() { tcfx "${1:+ONLY='$1' }"'locked pick "" "" "[]"'; [ "$RC" = 0 ] || fail "the pick failed: $(cat "$T/$CASE/run.out")"; cat "$T/$CASE/run.out"; } # [<--only list, json>]
 # nibelt <card id> <name> <title>: the belt shows the card of issue 0 by that name and title.
 nibelt() {
   [ "$(loop snapshot --fresh | jq -c --arg c "$1" '.belt[] | select(.card == $c) | [.issue, .name, .title]')" = "$(jq -cn --arg n "$2" --arg t "$3" '[0, $n, $t]')" ] \
@@ -424,17 +424,17 @@ t_nihold() {
   loop card 'Add a Rules row' $'Make it so.\n\nDepends on: #7' > /dev/null 2>&1 || fail "card with a Depends on line failed"
   id=$(jq -r '.cards[0].id' "$(nicards)")
   loop control release "$id" > /dev/null || fail "control release $id failed"
-  fx_in 'locked testpick "$(jq -c . "$STUB/issues.json")"'
+  tcfx 'locked testpick "$(jq -c . "$STUB/issues.json")"'
   [ "$RC" = 0 ] && [ ! -s "$T/$CASE/run.out" ] || fail "the pick took the Foreman order $id (Depends on: #7) while #7 is open: $(cat "$T/$CASE/run.out")"
-  fx_in 'append "$(line c20261101T000000-main-7 7 landed ok "{\"sha\":\"abc\",\"product\":false}")"; locked testpick "$(jq -c . "$STUB/issues.json")"'
+  tcfx 'append "$(line c20261101T000000-main-7 7 landed ok "{\"sha\":\"abc\",\"product\":false}")"; locked testpick "$(jq -c . "$STUB/issues.json")"'
   [ "$(cat "$T/$CASE/run.out")" = "$id 0 false" ] || fail "the pick did not take the Foreman order $id once the card of #7 landed: $(cat "$T/$CASE/run.out")"
   fx_in 'tcadd "" "A part" "Body." "" "Split part of #7" "[\"area:engine\",\"bug\"]" 7'
   part=$(jq -r '.cards[-1].id' "$(nicards)")
   loop control rules area:engine=off > /dev/null || fail "control rules area:engine=off failed"
-  fx_in 'locked testpick "[]"'
+  tcfx 'locked testpick "[]"'
   [ "$RC" = 0 ] && [ ! -s "$T/$CASE/run.out" ] || fail "the pick took the part $part with area:engine set to never build: $(cat "$T/$CASE/run.out")"
   loop control rules area:engine=on > /dev/null || fail "control rules area:engine=on failed"
-  fx_in 'locked testpick "[]"'
+  tcfx 'locked testpick "[]"'
   [ "$(cat "$T/$CASE/run.out")" = "$part 0 false" ] || fail "with area:engine built again, the pick did not take the part $part: $(cat "$T/$CASE/run.out")"
 }
 
@@ -446,10 +446,10 @@ t_nifar() {
   id=$(jq -r '.cards[0].id' "$(nicards)"); { jq '.cards[0].body += "\n" + "x" * 140000' "$(nicards)" > "$STUB/c.json" && mv -f "$STUB/c.json" "$(nicards)"; } || fail "the body of $id could not be made over 128 KiB"
   loop control release "$id" > /dev/null || fail "control release $id failed"
   echo OPEN > "$STUB/repo.other_repo.600"
-  fx_in 'locked testpick "[]"'
+  tcfx 'locked testpick "[]"'
   [ "$RC" = 0 ] && [ ! -s "$T/$CASE/run.out" ] || fail "the pick took the Foreman order $id (Depends on: other/repo#600) while that issue is open: $(cat "$T/$CASE/run.out")"
   echo CLOSED > "$STUB/repo.other_repo.600"
-  fx_in 'locked testpick "[]"'
+  tcfx 'locked testpick "[]"'
   [ "$(cat "$T/$CASE/run.out")" = "$id 0 false" ] || fail "the pick did not take the Foreman order $id once other/repo#600 closed: $(cat "$T/$CASE/run.out")"
 }
 
@@ -488,9 +488,9 @@ t_nipart() {
   local id
   fx_in 'tcadd "" "Finding" "Body." "" "Review follow-up of #8" "[\"follow-up\"]" 8 > /dev/null'
   id=$(jq -r '.cards[0].id' "$(nicards)")
-  fx_in "ONLY='[9]' "'locked testpick "$(jq -c . "$STUB/issues.json")"'
+  tcfx "ONLY='[9]' "'locked testpick "$(jq -c . "$STUB/issues.json")"'
   [ -z "$(cat "$T/$CASE/run.out")" ] || fail "a run limited to #9 took the follow-up card $id of #8: $(cat "$T/$CASE/run.out")"
-  fx_in "ONLY='[7]' "'locked testpick "$(jq -c . "$STUB/issues.json")"'
+  tcfx "ONLY='[7]' "'locked testpick "$(jq -c . "$STUB/issues.json")"'
   [ "$(cat "$T/$CASE/run.out")" = "$id 0 false" ] || fail "a run limited to #7 did not take the follow-up card $id of its part #8: $(cat "$T/$CASE/run.out")"
 }
 
@@ -581,20 +581,20 @@ t_nifarretry() {
   id=$(jq -r '.cards[0].id' "$(nicards)")
   loop control release "$id" > /dev/null || fail "control release $id failed"
   echo CLOSED > "$STUB/repo.other_repo.600"
-  fx_in 'locked testpick "[]"; append "$(line "'"$id"'" 0 blocked ok "{\"reason\":\"build: it failed\"}")"'
+  tcfx 'locked testpick "[]"; append "$(line "'"$id"'" 0 blocked ok "{\"reason\":\"build: it failed\"}")"'
   [ "$(head -n 1 "$T/$CASE/run.out")" = "$id 0 false" ] || fail "the pick did not take the Foreman order $id once other/repo#600 was closed: $(cat "$T/$CASE/run.out")"
   out=$(loop retry "$id" 2>&1) && [ -z "$(st "select(.card == \"$id\")")" ] || fail "retry $id did not give back the blocked card: $out"
   echo OPEN > "$STUB/repo.other_repo.600"
-  fx_in 'locked testpick "[]"'
+  tcfx 'locked testpick "[]"'
   [ "$RC" = 0 ] && [ ! -s "$T/$CASE/run.out" ] || fail "the pick took the retried card $id (Depends on: other/repo#600) while that issue is open: $(cat "$T/$CASE/run.out")"
   echo CLOSED > "$STUB/repo.other_repo.600"
-  fx_in 'locked testpick "[]"'
+  tcfx 'locked testpick "[]"'
   # A card given back is taken again under a new card id.
   [[ $(cat "$T/$CASE/run.out") =~ ^c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0\ 0\ false$ ]] || fail "the pick did not take the retried card $id once other/repo#600 closed: $(cat "$T/$CASE/run.out")"
   # A card that landed is never picked again, so a pick asks GitHub nothing about its other/repo#600 (each ask holds the records lock for up to 30 seconds).
   new=$(awk '{print $1}' "$T/$CASE/run.out")
   fx_in 'append "$(line "'"$new"'" 0 landed ok "{\"sha\":\"abc\",\"product\":false}")"'
   rm -f "$STUB/far-viewed"
-  fx_in 'locked testpick "[]"'
+  tcfx 'locked testpick "[]"'
   [ "$RC" = 0 ] && [ ! -s "$STUB/far-viewed" ] || fail "the pick asked GitHub about the landed card's other/repo#600: $(cat "$STUB/far-viewed" 2>/dev/null)"
 }

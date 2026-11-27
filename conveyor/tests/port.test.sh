@@ -89,12 +89,12 @@ t_port() {
     && [ "$(git -C "$R" log -1 --format=%s)" = again ] || fail "a conflict after the port did not block for the owner: $(steps 8)"
   echo "$NOGO" > "$STUB/review.5"; echo "$GO" > "$STUB/review.6"; f=$(wc -l < "$STUB/filed")
   # resumeplan only gives the port its finished loop's GO (fin); what is proved is card()'s handling of a NO-GO on that
-  # one review (fixed and reviewed again, nothing filed).
+  # one review: fixed and reviewed again, and the earlier loop's last NO-GO (3 findings) filed again as it lands (afterreview()).
   # loop: only the card's review loop shows a NO-GO on the port's one review fixed and reviewed again
   loop retry 8 >/dev/null && loop run >/dev/null || fail "run of the retried #8 exited non-zero"
   [ "$(st 'select(.issue == 8 and '"$NOMARK"') | "\(.step) \(.result)"' | tr '\n' ,)" = "picked ok,worktree ok,brief ok,build ok,review NO-GO,fix ok,review GO,test pass,landed ok," ] \
-    && [ "$(wc -l < "$STUB/filed")" = "$f" ] && [ "$(st 'select(.issue == 8 and .step == "landed") | has("leftover")')" = false ] && [ "$(tr '\n' ' ' < "$R/a.txt")" = "TWO two two " ] \
-    || fail "a NO-GO on the port's review was not fixed and reviewed again before landing: $(steps 8)"
+    && [ "$(wc -l < "$STUB/filed")" = "$((f + 3))" ] && [ "$(st 'select(.issue == 8 and .step == "landed") | .leftover')" = true ] && [ "$(tr '\n' ' ' < "$R/a.txt")" = "TWO two two " ] \
+    || fail "a NO-GO on the port's review was not fixed and reviewed again before landing, or the earlier loop's findings were not filed: $(steps 8)"
   loop check || fail "the records do not check"
 }
 
