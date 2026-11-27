@@ -5,9 +5,10 @@
 # `retry` has its lines in the retried file alone, where prior() (lib/issues.sh) finds its kept work for the next
 # card of its issue, and they stay there. A finished card is one that landed and was pushed (and, with a GitHub issue,
 # whose issue the push closed or checked: its issue line), so the push and its batch rule (pushone(), batchdue(),
-# lib/push.sh) still find a landing not pushed yet; with Land as pr, also one whose landed commit origin's default
-# branch holds (its pull request merged), so Merge PR idle (idleone()) and the run before its merge (pushtests(),
-# lib/pushrun.sh) still find the landings the pull request holds; or one whose last end line (landed, closed,
+# lib/push.sh) still find a landing not pushed yet; when it was pushed to a pull request (its pushed line names one:
+# pr), also one whose landed commit origin's default branch holds (its pull request merged), whatever Land as is now,
+# so Merge PR idle (idleone()) and the run before its merge (pushtests(), lib/pushrun.sh) still find the landings the
+# pull request holds after Land as goes to main and back; or one whose last end line (landed, closed,
 # blocked) is a closed one: closed, shut, or blocked and then shut. Its lines in the card records go to
 # cards-YYYY-MM.jsonl.gz and its lines in the retried file to retried-YYYY-MM.jsonl.gz (the month of its last line),
 # each run one gzip member more; a landed card goes to the landed list (LANDEDTSV), and the end lines and test lines
@@ -17,14 +18,14 @@
 # file holds how many it left. A run with nothing to move changes no file's bytes (ARCHLAST's time alone).
 ARCHLAST=$ARCHIVE/last
 ARCHEVERY=3600
-# The selection, of the card records' text (jq -n -R, each line an input; $off: the landed commits Land as pr has not
-# merged yet, one a line): {left, cards: {<card>: <month>}, landed: [the landed list's lines]}. A line that is no
+# The selection, of the card records' text (jq -n -R, each line an input; $off: the landed commits origin's default
+# branch does not hold, one a line; read only for a card pushed to a pull request): {left, cards: {<card>: <month>}, landed: [the landed list's lines]}. A line that is no
 # object with a card stays live.
 # shellcheck disable=SC2016 # jq's own variables
 ARCHPICK='(now - $days * 86400 | todate) as $cut | ($off | split("\n") | map(select(. != "")) | INDEX(.)) as $off
   | [inputs | fromjson? | objects | select((.card | type) == "string" and (.time | type) == "string")] | group_by(.card)
   | map((map(.time) | max) as $t | select($t < $cut and (if any(.step == "landed") then any(.step == "pushed") and (.[0].issue == 0 or any(.step == "issue"))
-          and all(.[] | select(.step == "landed"); $off[.sha | tostring] == null)
+          and ((any(.[]; .step == "pushed" and (.pr | numbers)) | not) or all(.[] | select(.step == "landed"); $off[.sha | tostring] == null))
         else ([.[] | select(.step | IN("landed", "closed", "blocked"))] | last | .step) == "closed" end))
       | {card: .[0].card, t: $t, l: (map(select(.step == "landed")) | last)}) | sort_by(.t)
   | {left: ([length - $batch, 0] | max), cards: (.[:$batch] | map({key: .card, value: .t[:7]}) | from_entries),
@@ -49,16 +50,14 @@ archiverun() {
   [ ! -e "$ARCHLAST" ] || ! p_newer "$ARCHLAST" "$ARCHEVERY" || [ "$(cat "$ARCHLAST" 2>/dev/null)" != 0 ] || return 0
   local d k size ino off sum left b=''
   mkdir -p "$ARCHIVE" && d=$(mktemp -d) || return 0
-  # The records' whole lines as they are now, read outside the lock: what the run moves is chosen from them. With Land
-  # as pr (or Land as unread), the landed commits origin's default branch does not hold, as the last fetch of it
-  # (prfetch(), lib/push.sh) has it; every landed commit when no fetch is kept.
+  # The records' whole lines as they are now, read outside the lock: what the run moves is chosen from them. The landed
+  # commits origin's default branch does not hold, as the last fetch of it (prfetch(), lib/push.sh) has it; every
+  # landed commit when no fetch is kept.
   k=$(p_filekey "$STATE") && read -r size _ _ ino _ <<<"$k" && head -c "$size" "$STATE" > "$d/part" \
     && head -n "$(wc -l < "$d/part")" "$d/part" > "$d/read" && off=$(($(wc -c < "$d/read"))) \
-    && sum=$(tail -c 4096 "$d/read" | cksum) && : > "$d/off" \
-    && if [ "$(landas 2>/dev/null || echo pr)" = pr ]; then
-      b=$(git rev-parse -q --verify "refs/remotes/${REMOTE-}/${BRANCH-}^{commit}") || b=''
-      jq -rR 'fromjson? | objects | select(.step == "landed") | .sha | strings' "$d/read" | if [ -n "$b" ]; then offmain "$b"; else cat; fi > "$d/off"
-    fi \
+    && sum=$(tail -c 4096 "$d/read" | cksum) \
+    && { b=$(git rev-parse -q --verify "refs/remotes/${REMOTE-}/${BRANCH-}^{commit}") || b=''; } \
+    && jq -rR 'fromjson? | objects | select(.step == "landed") | .sha | strings' "$d/read" | if [ -n "$b" ]; then offmain "$b"; else cat; fi > "$d/off" \
     && jq -cnR --argjson days "$ARCHIVE_DAYS" --argjson batch "$ARCHIVE_BATCH" --rawfile off "$d/off" "$ARCHPICK" < "$d/read" > "$d/pick" \
     && left=$(jq -r '.left' "$d/pick") || { echo "conveyor: the archive run could not read the card records; nothing moved" >&2; rm -rf "$d"; return 0; }
   if jq -e '.cards == {}' "$d/pick" > /dev/null; then

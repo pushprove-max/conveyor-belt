@@ -89,11 +89,12 @@ ago() { jq -rn --argjson d "$1" 'now - $d * 86400 | todate'; }
 livecards() { jq -r .card "$ST/cards.jsonl" | uniq | paste -sd' ' -; }
 # The checksum of each file of the state folder, sorted.
 stsums() { (cd "$ST" && find . -type f -exec cksum {} + | sort); }
-# landcard <card> <issue> <time> [<sha>]: a card's lines that landed (its commit sha, when given), were pushed and,
-# with an issue, had it closed: a finished card.
+# landcard <card> <issue> <time> [<sha>] [<pull request>]: a card's lines that landed (its commit sha, when given), were
+# pushed (to that pull request, when given, as pushone() writes it with Land as pr) and, with an issue, had it closed:
+# a finished card.
 landcard() {
   archline "$1" "$2" picked "$3"; archline "$1" "$2" landed "$3" | jq -c --arg s "${4:-}" 'if $s == "" then . else .sha = $s end'
-  archline "$1" "$2" pushed "$3"; [ "$2" = 0 ] || archline "$1" "$2" issue "$3"
+  archline "$1" "$2" pushed "$3" | jq -c --arg p "${5:-}" 'if $p == "" then . else .pr = ($p | tonumber) end'; [ "$2" = 0 ] || archline "$1" "$2" issue "$3"
 }
 # Bugs: the archive run moves a card still in flight, or one finished less than ARCHIVE_DAYS ago; moves a landed card
 # not pushed yet (cU: the push, and the rule Push after a combined test run, read live landings alone) or one whose
@@ -244,9 +245,23 @@ t_archpr() {
   setup '[]'; tune '.push.landAs = "pr"'
   git -C "$R" commit -q --allow-empty -m merged && a=$(git -C "$R" rev-parse HEAD) && git -C "$R" update-ref refs/remotes/origin/main "$a" \
     && git -C "$R" commit -q --allow-empty -m held && b=$(git -C "$R" rev-parse HEAD) || fail "the fixture's commits could not be made"
-  { landcard cM 0 "$(ago 3)" "$a"; landcard cH 0 "$(ago 3)" "$b"; } > "$ST/cards.jsonl"
+  { landcard cM 0 "$(ago 3)" "$a" 7; landcard cH 0 "$(ago 3)" "$b" 7; } > "$ST/cards.jsonl"
   fx_in archiverun
   [ "$(livecards)" = cH ] || fail "with Land as pr the live records hold '$(livecards)', not cH alone, whose commit the pull request holds: $(cat "$T/$CASE/run.out")"
+}
+
+# Bugs: after Land as goes to main, the archive run moves a card pushed to a pull request that is still open (cH: its
+# commit is not on origin's default branch): when Land as goes back to pr, Merge PR idle (idleone()) finds no live
+# landing and never merges it. Or it keeps a card pushed straight to main (cS, no pull request) because origin's
+# branch as last fetched lacks its commit: with Land as main no fetch moves that branch, and the records would grow.
+t_archmain() {
+  local a b
+  setup '[]'; tune '.push.landAs = "main"'
+  git -C "$R" commit -q --allow-empty -m merged && a=$(git -C "$R" rev-parse HEAD) && git -C "$R" update-ref refs/remotes/origin/main "$a" \
+    && git -C "$R" commit -q --allow-empty -m held && b=$(git -C "$R" rev-parse HEAD) || fail "the fixture's commits could not be made"
+  { landcard cM 0 "$(ago 3)" "$a" 7; landcard cH 0 "$(ago 3)" "$b" 7; landcard cS 0 "$(ago 3)" "$b"; } > "$ST/cards.jsonl"
+  fx_in archiverun
+  [ "$(livecards)" = cH ] || fail "with Land as main the live records hold '$(livecards)', not cH alone, whose commit the open pull request holds: $(cat "$T/$CASE/run.out")"
 }
 
 # Bugs: the snapshot reads the archive files as they are when it reads them, not as they were with its copy of the
