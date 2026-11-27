@@ -127,24 +127,25 @@ t_redfixarchived() {
 # that card sat in the queue until a card was shut by hand. Cap 2, held by c7 and c8 in the real mainwait() on
 # b.test (as in t_redfixwaiting), both still waiting through the pick. Queued: a released card about z.test (older, so
 # a pick that ignored the file would take it) and the fix card about b.test, held for the owner, then released as
-# `control release` does. The turn's redtests() of the loop's cards, as turnask() asks it, then the pick turn
-# (turnpick(); cardrun() only says) starts the b.test card beyond the cap, and not the z.test one.
+# `control release` does. The real turn is called (turnask(), then turnpick(); cardrun() only says), not redtests()
+# alone with asking set by hand: a turnask() whose gate left out redtc would ask nothing at the cap, and the pick turn
+# would start no card. While held, the turn asks nothing; once released, it asks and starts the b.test card beyond
+# the cap, and not the z.test one.
 t_redtestsfull() {
   setup "[$(issue 7 2026-01-01)]"
   local s; s=$(git -C "$R" rev-parse HEAD)
   mkdir -p "$T/$CASE/cards"; echo '{"reds": []}' > "$ST/mainred.json"
   fx_in 'cd "$R" || exit 8
     cardrun() { echo "started: issue $2"; }
-    asking=1 urgent="" building=2 cap=2 left=5 pct="" running=0 serve=1 pusher="" started=0 waits="" ctl=$(ctl) issues=$(cat "$STUB/issues.json")
+    declare -A shuts=(); asking="" urgent="" building=2 cap=2 left=5 pct="" now=running inuse=2 running=0 sampled=$SECONDS old="" nopack="" nocli="" mhold="" guard="" serve=1 pusher="" started=0 waits="" ctl=$(ctl) issues=""
     tcadd z.test "Tests page: z.test" "z body" "" > /dev/null || exit 8; id=$(tcadd b.test "Tests page: b.test" "b body" held) || exit 8
     mainwait "$CARDS/c7" '"$s"' "b.test: two" & p7=$!; mainwait "$CARDS/c8" '"$s"' "b.test: two" & p8=$!; declare -A mine=([$p7]="c7 7" [$p8]="c8 8")
     wait_until "[ -s \"\$CARDS/c7.live\" ] && [ -s \"\$CARDS/c8.live\" ]" || echo "mainwait wrote no live record"
-    own=$(for k in "${!mine[@]}"; do echo "${mine[$k]% *}"; done)
-    red=$(redfix "$own"); redtc=$(redtests "$own"); echo "held: [$red] [$redtc]"
-    . "$HERE/lib/testcardact.sh" && testcardact release "$id" > /dev/null || echo "release failed"; redtc=$(redtests "$own"); echo "released: $redtc"
+    turnask > /dev/null 2>&1; echo "held: [$red] [$redtc] [$asking]"
+    . "$HERE/lib/testcardact.sh" && testcardact release "$id" > /dev/null || echo "release failed"; turnask > /dev/null 2>&1; echo "released: $redtc [$asking]"
     turnpick; echo "z.test card: $(jq -r ".cards[] | select(.file == \"z.test\") | .card" "$TACARDS")"; kill "$p7" "$p8"; wait'
-  [ "$(cat "$T/$CASE/run.out")" = $'held: [] []\nreleased: ["b.test"]\nstarted: issue 0\nz.test card: null' ] \
-    || fail "cap 2 held by c7 and c8 waiting for main on b.test: two, queued a released z.test card and a held b.test card, then b.test released, then the pick turn: not nothing while held, b.test once released, one start, z.test not picked: $(cat "$T/$CASE/run.out")"
+  [ "$(cat "$T/$CASE/run.out")" = $'held: [] [] []\nreleased: ["b.test"] [1]\nstarted: issue 0\nz.test card: null' ] \
+    || fail "cap 2 held by c7 and c8 waiting for main on b.test: two, queued a released z.test card and a held b.test card, turnask(), then b.test released, turnask() and turnpick(): not no ask while held, an ask for b.test once released, one start, z.test not picked: $(cat "$T/$CASE/run.out")"
   [ "$(st 'select(.step == "picked") | "\(.testFile) \(.beyond)"')" = "b.test main is red" ] \
     || fail "the pick turn at the cap did not start the b.test Tests page card beyond the cap: $(st 'select(.step == "picked") | "\(.testFile) \(.beyond)"')"
 }
