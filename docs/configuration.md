@@ -475,8 +475,9 @@ its own pick. Fix cards that have no issue get no pick. Code puts the card in a 
 The group is the two words, for example "small docs". The choice is the project's builder (Builder on the Rules tab),
 or the challenger on a trial (below).
 When you set the builder of a card (`conveyor.sh control card <issue> builder <model>`), the choice is your setting,
-and the pick says that you chose it. If `models.allowed` no longer has the model of your setting, the card does not
-use your setting, and the pick says `auto`. Each step line of the card from then on, up to its end, has a `pick` field:
+and the pick says that you chose it. If the builder's lists in `models.allowed` (`claude`, `opencode` and
+`codex-builder`) no longer have the model of your setting, the card does not use your setting, and the pick says
+`auto`. A model that only a reviewer's list, such as `claude-reviewer`, still has counts as no longer allowed. Each step line of the card from then on, up to its end, has a `pick` field:
 `group`, `choice` (model and effort), `by` (`owner` or `auto`), `trial` and `mode`. A card that starts again for the same issue, after a retry
 or a stop, keeps the group and trial of the pick that the issue had. Its choice is the builder that it builds on
 now: the project's builder or your setting for the card, the challenger on a trial or of a promoted group, or with the rule On the judge's builder.
@@ -636,11 +637,13 @@ judge. With no effort, the effort is medium.
 
 The replay takes the newest review lines, in the card records and the retried lines, where the judge accepted or
 declined findings. By default it takes 20. `--last <n>` sets a different number. For each review, the replay judge
-gets the same findings, the issue, the change of the card, and the findings that were declined on the cards of the
-issue before that judge ran. Each finding has its `proof line` mark, which the engine reads again from the finding and
-the change, as it does in a review. When a fix round came before the review, the replay judge also gets the findings that
-the fix round was told to fix, each with its `E<n>` ID and, when the judge gave one, the reason that the judge
-accepted it, as the recorded judge got them. These are the lines that the review recorded. The change is the commit that landed, or the kept patch of a blocked card, on the commit
+gets the same findings, the issue, the change of the card, and the findings declined on the cards of the issue that
+the recorded judge read before it waited for its CLI. A decline made or replaced during that wait is not in the list.
+Each finding has its `proof line` mark, which the engine reads again from the finding and
+the change, as it does in a review. When a fix round came before the review and the review line keeps the findings
+that the fix round was told to fix, the replay judge also gets them, each with its `E<n>` ID and, when the judge gave
+one, the reason that the judge accepted it, as the recorded judge got them. An older review line does not keep them,
+and its replay gets no such findings. These are the lines that the review recorded. The change is the commit that landed, or the kept patch of a blocked card, on the commit
 that the review ran on. A review is skipped when its card has no landed commit and no kept patch. It is also skipped
 when that change does not apply on that commit, or is not the change that the judge read, for example when a fix
 round came after the review. For a finding of a kind that the project
@@ -1072,7 +1075,9 @@ Merge PR sets who merges the pull request of Land as `pr`.
 - `button` (the default): only you merge it. Use **Merge** on the Board's Control tab, or `conveyor.sh pr merge`.
 - `release`: the release merges it. `release-prep` runs the whole suite on `conveyor/landing` while its pull request
   is open, and on the default branch on GitHub when none is open. `release` checks
-  that head first. When all checks pass, it merges the pull request, then makes the release on top of the merge. A release
+  that head first: the checkout must be at the head of `conveyor/landing` while the pull request is open, and at the
+  head of the default branch on GitHub when none is open. When all checks pass and the pull request is open, it merges
+  the pull request, then makes the release on top of the merge. With no open pull request, it merges nothing. A release
   that a check stops merges nothing.
 - `idle`: Conveyor merges it when no card is on the belt and no issue can be picked. When Test before a push or Push
   after a combined test run is on, Conveyor first runs the test files linked to every card in the pull request (every test file with `pushbatchtests` `all`), each one alone, on the head of

@@ -36,7 +36,9 @@ all open decisions. The start does not hold the Foreman's steps for a release's 
 and a card that waits for main. It names a command that prints them, and the Foreman runs it when one of them comes
 up. When the rules of auto mode and the standing kinds leave no room for the live summary, the start
 puts them in `start-rest.md` in the Foreman's folder. A start or claim that also holds the rules does the same when
-this gives room for more of the saved state and rules. One line in their place tells the Foreman to read that file now.
+the move lets a larger set of the saved state and the rules fit. The sets, largest first: the saved state, the owner
+rules and `rules.md`; the saved state and the owner rules; the owner rules only. When the move gives more room but the
+same set, the text stays where it is. One line in their place tells the Foreman to read that file now.
 When the saved state does not fit with the rest, the start leaves it out and
 has one line in its place that tells the Foreman to read that file now, with its path. The second, a SessionStart
 hook of its own, holds the project's `rules.md` from the Foreman's folder, and only in the Foreman's session: any other
@@ -256,7 +258,9 @@ for the cards that Conveyor files itself, so the Foreman does nothing for them; 
 
 The Foreman's start names `foreman.sh` by one command, `conveyor/foreman.sh` in the data folder (`~/.local/share`
 unless `XDG_DATA_HOME` says otherwise). Its path does not change when the engine moves to a new version, and it runs
-`foreman.sh` of the engine the project runs, the one its hooks run. The start makes it when it is not there.
+`foreman.sh` of the engine the project runs, the one its hooks run. The start writes it again when it is not there
+or not up to date. When the start cannot write it, the start's text begins with a `# WARNING:` line that says so: the
+start's `foreman.sh` command then may not run, or may run the command that is already there.
 
 A card that moves from one step to the next, as from build to review, gives no wake.
 

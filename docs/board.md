@@ -278,8 +278,11 @@ lists every project's rows, so it stays as it is.
   folder. Each note is one row: the time, the card and what the Foreman saw. Fix the problem, or file it as an issue
   in the repository of Conveyor. Then click **Dismiss** to remove that note from `plugin-bugs.md`, unless you filed it
   with **File on GitHub**, which removes the note. When the Board says it filed the issue but could not remove the
-  note, click **Dismiss**. Dismiss does not file an issue, and it keeps the other notes. When no
-  note is left and no link to a filed issue shows, the pane goes away.
+  note, click **Dismiss**. Dismiss does not file an issue, and it keeps the other notes. A Board that reads a build
+  host over SSH copies the host's notes about a model with no built-in price. It removes such a copy by itself when it
+  refreshes after the host filed or dismissed that note, or, for a host that does not say so, when the host no longer
+  gives the note. You do not click **Dismiss** for it. When no note is left and no link to a filed issue shows, the
+  pane goes away.
 - To file a note, click **File on GitHub** in its row. A preview opens below the note. The title is the first clause
   of the note. A note made only of an unchecked cause takes its title from the first clause of the cause. The body holds
   the note, the plugin version, the engine commit and the system. The cause, when the note has one, is the last line of
@@ -960,8 +963,11 @@ Conveyor gives each failure a verdict. Flaky: the case failed, then passed when 
 main too. Card: the card's own change made it fail, so the test did its job. Fails often counts the flaky and main
 failures, and the failures from before Conveyor kept verdicts ("no verdict on record"). It never counts a card
 failure. The status of the file says the kinds in grey text, for example "Failed: 1 flaky, 1 failed on main too".
-Card failures show apart, as "caught 3 card changes". Point at that text to see the cards. Overview of an open row
-lists each failure with its time, its kind, its card and its failing cases.
+Card failures show apart, as "caught 3 card changes". Point at that text to see the cards. A case can also have the
+verdict "a build machine fault": it failed on main too, but its inputs did not change since it last passed, or the
+control tests on the same build machine failed with it. Fails often does not count it. Overview of an open row lists
+each failed step with its time and its card. Each verdict of its cases follows, with the cases that have it, so one
+step can show several kinds, for example one case as "failed on main too" and another as "caught a card change".
 
 To fix a file that fails often, open its row and click **Fix failures**. The button shows when the file has a flaky or
 main failure. It opens the same issue preview as Optimize, with the title "Fix the failures of the test file
@@ -1178,7 +1184,7 @@ pass in fewer CPU seconds than the median of the last runs that the issue lists,
 that names the verdict and both numbers (`conveyor/README.md`, Bug cards: the new tests fail without the fix). For the
 verdict stabilise, the file may cost as much as those runs, and the build's reply must name the cause of each flaky
 case and how the change removes it. For the verdict merge, a file that takes in another test file runs with the
-change, together with each other test file that the change keeps. These files may cost as much as they cost without
+change, together with each other test file that the change modifies. These files may cost as much as they cost without
 the change, run with the test files that the change removes. When the file goes into another test file, that file must pass with the change
 and may cost as much as it did without the change plus the median of the last runs of the file it takes in, else the
 card is blocked with a reason that names the failure or both numbers. Each file of a split must pass, and the files' CPU seconds summed must be at most the old file's plus a

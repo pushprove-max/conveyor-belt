@@ -26,6 +26,12 @@ under the cap, so waiting cards use up its space. Two picks go past a full cap: 
 each project that builds, reviews, tests or lands, and leaves out the waiting cards. `conveyor.sh foreman status`,
 `/units` and the Board give the count of cards against the cap.
 
+A review that fails (it ends with no clear verdict, reports no token usage, or its run fails), and a review that
+`conveyor.sh control stop` stops before its usage can be read, keeps its files in the card's folder under `kept/` in
+the state folder: `kept/<card>/<card>.review.events` and `<card>.review.err`, and for a Codex review also
+`<card>.review.session`. A later review of the same card gets `<card>.review-2.events` and so on. The reason on the
+card's line ends with the name of the events file: "its events are kept in <name>".
+
 `conveyor.sh control judge on|off`, `conveyor.sh control judge always [<kind>...]`,
 `conveyor.sh control judge rare <level>...|none` and
 `conveyor.sh control judge <cli> <model> [effort]` set the review's judge (below, The judge): each project's record holds
@@ -569,7 +575,8 @@ its wait and its run.
 
 A card's test step runs each test file of its list alone through the pack's `test.fileCommand`, in its worktree. A run that ends with cases that did not pass (they
 failed, or never finished because the run was killed or timed out) runs once more, straight away and on the same test
-slot, for those cases alone: the cases that passed are not run again. After a run that stopped at its first
+slot, for those cases alone: the cases that passed are not run again when the test command can leave them out. A
+test file that the command can only run whole, with `failfast` on or off, runs all its cases again. After a run that stopped at its first
 failure (`failfast`, above), it runs each failed file, and repeats the cases of that file that passed when the test
 command cannot leave them out. Only when a case still does not pass does the
 card go to its fix session; a card whose re-run passes goes on with no fix session. A card gets 3 such fix sessions
@@ -677,7 +684,10 @@ failure gets a verdict:
   longer exists is dropped. A key `main:<file>` in the same file names test files that a card's run again adds to its
   list when main changed `<file>` since the card last ran. When every failure is main's, the card neither goes to fix nor blocks: it gives way and waits in its
   Test step, its live record saying so, until main is at another commit; then it is fitted onto main as it is now
-  and its test step runs again (the same change keeps its passes, so the cases that failed run again). A card that
+  and its test step runs again (the same change keeps its passes, so the cases that failed run again). A main-red
+  fix card does not wait for main. When each case it fails is held by another open entry of the main-red record, and
+  none is a case that it fixes, it goes on as if it passed (`redelse()`): the other entries' fix cards fix those cases.
+  Otherwise its failure goes to a fix round. A card that
   reaches its Test step while the main-red record holds main's commit, with its fix card not landed or closed, starts
   no test run, its own or a batch's: it waits in the same way, with the same live record, until main is at a commit
   the record holds no such entry for. It is then fitted onto main as it is now, and its tests start. A pass it holds
@@ -913,11 +923,12 @@ files they do not run). A line with no CPU seconds is recorded with its clock se
 holds each test file its change adds or modifies with both times (`timed`). The test
 line also holds the clock seconds of each file it timed (`clocks`, `{file: sec}`). A run after a fix session lists
 the files it kept as passed and did not run (`carried`): their times are from an earlier run, and the test judge
-does not count them as a run of that file. A shell test file of which the run ran only some cases or parts (an
-engine case file, the engine's runner, or another shell test file run with some of its parts) gets no time on the
-line, as a runner does not time it: the line lists it as `partial`, and the test judge counts it as a run of that
-file. A Board test file run again with the cases that passed skipped is timed as a run of the file, and is not
-`partial`.
+does not count them as a run of that file. The line lists a test file as `partial` when the step's test record
+names a case of it and gives it no time, and the test judge counts it as a run of that file. This is a shell test file
+that every run of the step ran only some cases or parts of (an engine case file, the engine's runner, or another shell
+test file run with some of its parts), as a runner does not time such a run. When the step's first run timed the whole
+file and its run again ran only the failed cases, the file keeps the first run's time and is not `partial`. A Board
+test file run again with the cases that passed skipped is timed as a run of the file, and is not `partial`.
 
 **How a split is checked.** A split does not lower the CPU seconds summed: each new file has its own start-up. It
 gives files that run side by side. So the check of an Optimize card (Bug cards: the new tests
@@ -1400,9 +1411,11 @@ without the fix, but not with the bug's own error" (the same once-only route as 
 command could not run or which text was not found. Each test file keeps its own time
 limit there, its `# timeout: <seconds>` line among the comments it starts with; a file with no such line has no limit
 of its own. The `testTimeout` setting limits the whole run, not each file, so the files before it can use most of
-that time. When a file runs past its own limit, it is stopped and named as timed out. When the run's limit stops the
-run, the runner's logs name the file begun and not ended, and the result says that the run's limit stopped it. Either
-way the file counts as failing without the fix. A failed run whose logs give no
+that time. When a file runs past its own limit, that file is stopped and named as timed out, and the run goes on with
+the next file. When the run's limit stops the run and the runner's logs name a file begun and not ended, the result
+says that the run's limit stopped it. Either way that file counts as failing without the fix. When the run's limit
+stops the run and the logs name no such file, the stop alone is no test failure: only the files that the logs show
+failed count. A failed run whose logs give no
 result for one of the test files (no pass and no fail of it) proves nothing either way, so it runs once more. When
 that run gives no result for it either, the card is blocked with "the proof run on main gave no result for <file>:
 <the run's last lines>", with no second build session and no review. The review is shown the check's
@@ -1459,14 +1472,14 @@ what the verdict asks, else the card is blocked with a reason that names the ver
   reply gives a line for a case again, that line replaces the build's line for the case.
 - split: the change changes or removes the file and adds test files.
 - merge: the change removes the file and changes another test file, or changes the file and removes another test
-  file. It adds no test file. When the file stays, it and the other test files that the change keeps run alone with
+  file. It adds no test file. When the file stays, it and the other test files that the change modifies run alone with
   the change. They must cost no more than they cost without the change, run with each test file merged into the file.
 - delete: the change removes the file and adds or changes no other test file.
 
 Then the check depends on what the change does:
 
-- The change keeps the file and adds no test file: the check is the speed-up check above (for stabilise and merge,
-  the file may cost as much as its figure).
+- The change keeps the file and adds no test file: the check is the speed-up check above (for stabilise, the file may
+  cost as much as its figure; for a merge, the limit is the one given for merge above).
 - The change adds test files (a split): the new files run alone, with the change, on a test slot, and so does the rest
   of the old file when the change keeps it. When the command also runs other test files, a failure of one of them is
   named as another test file the change selects. They must pass. Their CPU
@@ -1477,7 +1490,7 @@ Then the check depends on what the change does:
   main's code, without the change, and the review gets the cases that its runner named. The review must
   name, for each case, the test that still covers it, one line each: `COVERED-BY: <test file>: <case>`. Such a line is
   not a finding, and it stays in the review's record. A case with no test named is a finding.
-- For a merge, the test files that the change modifies also run alone on main's code, without the change and with it.
+- For a merge that removes the file, the test files that the change modifies also run alone on main's code, without the change and with it.
   They must pass both times. With the change, they may take their CPU seconds without it plus the figure of the removed
   file. Otherwise the check fails and names the cause.
 
@@ -1850,8 +1863,10 @@ session and no second review. When the answer does not count, or the call fails,
 Only when the merge leaves a conflict that the fast resolver does not fit (an earlier landing changed the same lines,
 of a documentation file too), or does not leave the card's change, does one session bring it onto main, and it is reviewed again; unless the clash is in
 documentation files (`*.md`) alone (a README: the change outside them still merges onto main) and that session left the
-change outside them as it was reviewed: then its review and, when they passed on that change, its tests stand, and only
-its product checks run before it lands. Landing is one card, or one batch of cards (below), at a time.
+change outside them as it was reviewed: then its review and, when they passed on that change, its tests stand. Its
+push checks run first on the new change (`docstested()`): a failure takes the card out of any batch, and its landing
+gate blocks it at its turn. Then the landing gate (lint, persisted-contract and push checks) and its product checks run
+before it lands. Landing is one card, or one batch of cards (below), at a time.
 
 After any merge at landing (a clean three-way merge, a union merge, the session that brings a card onto main, or the
 landing's rebuild or port), every file the merge changed is checked to parse before any check or test runs: git can
@@ -2001,8 +2016,9 @@ was made, `snapshotAge`, its age in seconds, and `recordsNewer`. `recordsNewer` 
 after the snapshot was made, so its belt can leave out a card that started since. The Foreman does not call such a
 snapshot idle. When the card records or `loop.json` changed after the snapshot was made, a fourth field, `recordsNow`,
 gives what the card records and `loop.json` say now: `blocked`, each card the records hold blocked now, `waiting`,
-each card that waits for your yes now, and `building` and `waitingCount`, the running loop's count at its last turn
-(null when no loop runs). `conveyor.sh foreman status` takes its building count from `recordsNow` when the snapshot
+each card that waits for your yes now, and `building` and `waitingCount`, the running loop's count at its last turn.
+When this machine has no `loop.json`, the loop does not run here, and `recordsNow` has no `building` or
+`waitingCount`. `conveyor.sh foreman status` takes its building count from `recordsNow` when the snapshot
 has it. When `recordsNewer` is true, `conveyor.sh foreman status`, and the Board's Needs you and On the belt, say "as
 of <time>, the belt has changed since" and take their blocked and waiting cards from `recordsNow`, and the Board takes
 its building count from it too. When only `loop.json` changed, the Board shows the building count of the snapshot.

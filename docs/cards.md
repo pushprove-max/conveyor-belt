@@ -130,10 +130,11 @@ card going. When every case passes in all three runs, the card ends as `closed` 
 
 After the build, the card runs each case on main with its change. A case passes when the run prints a pass line for
 it: `ok <case>`, or the `ok <n> - <case>` line of a TAP report, as a Node test file prints. A case that is a whole file
-also passes when the file passes, and so does any case when the test runner keeps no log of its own. A case fails when
-the run prints a fail line for it: `FAIL [<case>]`, or `not ok <n> - <case>` of a TAP report. A run that prints
-neither a pass line nor a fail line for a named case gives no result, and the card is blocked. So a test file with
-named cases must print a pass line for each case that passes.
+also passes when the file passes, and so does any case when the test runner keeps no log of its own. A case of an
+engine case file also passes when its case record says so, with no pass line. A case fails when the run prints a fail
+line for it: `FAIL [<case>]`, or `not ok <n> - <case>` of a TAP report. It also fails when its case record says so,
+and when the run of its file goes past its time limit. A run that gives a named case none of these gives no result,
+and the card is blocked. So a test file with named cases must print a pass line for each case that passes.
 
 A main-red fix card whose session changes no file runs its cases again on main. When they pass, the card ends as
 `closed`. When they do not all pass (a case fails, or a run gives no result) and newer main-red fix cards hold
@@ -265,6 +266,9 @@ check fails, the card blocks with the reason `push check: <check> failed on the 
 output. The check is the word after the last `FAILED` that the hook prints. If the hook runs past its time limit, the
 card blocks with the reason `push check: its checks not finished: ...`. A hook that does not name
 the push-gate variable runs only at the push.
+When a session brought a card onto main by a change to documentation files alone, and its change outside them is the
+one that passed its tests, the push checks also run on its new change before the landing gate. When they fail, no
+batch takes the card, and the landing gate blocks it at its turn.
 
 A card that waits on another card runs no lint, checks or tests while it waits. This is true when it waits for the
 files of the other card, when it is stacked on the other card, and when it waits for the landing turn. When its turn
@@ -403,8 +407,8 @@ Board, that review shows "Fix loop ended:" and the reason.
 
 The judge, when it is on (`conveyor.sh control judge on`), reads each review and declines a finding that does not earn
 its place. A declined finding causes no fix and no follow-up (`conveyor/README.md`, The judge). After a fix round,
-the judge also gets the findings that the round was told to fix, each with the reason that the judge gave when it
-accepted it.
+the judge also gets the findings that the round was told to fix. Each one comes with the reason that the judge gave
+when it accepted it, when the judge gave a reason that can be read for that finding; else it comes with no reason.
 
 The judge's cost is a step of its own. Each review that the judge reads leaves a `judge` step in the card's steps, right
 before the review, with the judge's model, effort, seconds and usage. A judge that fails leaves it with the result
@@ -532,8 +536,10 @@ Board and the Foreman's status say when the sort ran.
 A change can need a step when you deploy it: a migration before the deploy, a new environment value or a flag. The
 reviewer writes this step as a `ROLLOUT:` line: the action, what fails without it, and its file and line. The builder
 writes one as a `Rollout:` line of the card's commit trailers. A rollout action is not a finding. It does not stop the
-card, and the judge does not read it. The card's commit message has each one as a `Rollout:` line, so the push carries
-it, and the Landed today panel shows it under the card. The reviewer's steps come first, then the builder's, each in
+card, and the judge does not read it. A later review that gives GO decides the reviewer's actions: it gets the actions
+in force, and drops each one that it does not write again, for example one that a fix made obsolete. The card's commit
+message has each action in force as a `Rollout:` line, so the push carries it, and the Landed today panel shows it
+under the card. The reviewer's steps come first, then the builder's, each in
 the order it was written. When the pack's `privacy.mode` is public, each part of these lines that the privacy check
 flags goes in as a mark of what it is, such as `<home path>`. If the host file names a terms file that cannot be read,
 the check cannot be made. That blocks the card, not the action.

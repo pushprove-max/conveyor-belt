@@ -297,8 +297,9 @@ the same question when it finds the pack not committed. `doctor` prints one `ok:
 `missing:` line, with its fix, for each thing that is not. You can run `setup` again: it changes only what is not there
 yet.
 
-Setup and `doctor` also check the root of your checkout for the two files that give Conveyor's sessions your
-project's context. `CLAUDE.md` is read by the builder, the fixer, the Foreman and the lanes. `AGENTS.md` is read by
+Setup and `doctor` also check the root of your main checkout for the two files that give Conveyor's sessions your
+project's context. When you run setup from a linked worktree, that is the main checkout, not the worktree, and setup
+writes a missing file there. `CLAUDE.md` is read by the builder, the fixer, the Foreman and the lanes. `AGENTS.md` is read by
 the Codex reviewer. Each one gets an `ok:` line when it is there and a `missing:` line when it is not. A missing one
 does not stop Conveyor, but its sessions then know your project only from the card rules. For each missing one,
 `/conveyor-belt:setup` asks if it should write an optimized one. On yes, it writes the file from your project: what
