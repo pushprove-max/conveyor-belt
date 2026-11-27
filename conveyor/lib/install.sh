@@ -113,12 +113,13 @@ samecode() {
 # folder it runs from: every file under conveyor/ but its tests and state folders, its *.test.sh files, its README.md
 # and the test pack's card rules (lib/test-*.md, which only tests copy), with the card rules (conveyor/rules/*.md,
 # cardrules()) and the Foreman's owner-rules.md; shim.sh; the guard hooks a card's settings run (.claude/hooks/,
-# cardsettings()) but their tests; and the scripts the loop and cards run from .claude/scripts/ (decision.sh, which
-# lib/needsask.sh runs; dashboard_limit.py and the dashboard_limit_*.py parts it loads, noprice()). A loop on an
-# install that goes on past a commit runs its new cards from the install it started on, so a file left out here would
-# keep its old copy there. The rest of .claude/scripts/ is the Board's. A pathspec's * matches /.
+# cardsettings()) but their tests; the plugin's bin/ (ast-grep and cb-ast, which sessions and reviews run from the
+# folder the loop runs from: reviewtools(), lib/review.sh) but its tests; and the scripts the loop and cards run from
+# .claude/scripts/ (decision.sh, which lib/needsask.sh runs; dashboard_limit.py and the dashboard_limit_*.py parts it
+# loads, noprice()). A loop on an install that goes on past a commit runs its new cards from the install it started
+# on, so a file left out here would keep its old copy there. The rest of .claude/scripts/ is the Board's. A pathspec's * matches /.
 noengine() {
-  git -C "$1" diff --quiet "$2" "$3" -- conveyor shim.sh .claude/hooks .claude/scripts/decision.sh '.claude/scripts/dashboard_limit*.py' \
+  git -C "$1" diff --quiet "$2" "$3" -- conveyor shim.sh bin .claude/hooks .claude/scripts/decision.sh '.claude/scripts/dashboard_limit*.py' \
     ':(exclude)conveyor/tests' ':(exclude)conveyor/state' ':(exclude)*.test.sh' ':(exclude)conveyor/README.md' \
     ':(exclude)conveyor/lib/test-*.md' ':(exclude).claude/hooks/__tests__' 2>/dev/null
 }

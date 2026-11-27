@@ -298,28 +298,29 @@ t_followtakelight() {
 # Bug (issue 1401): a commit of a card rules page (conveyor/rules/*.md), a guard hook (.claude/hooks/) or a script the
 # loop runs from .claude/scripts/ (decision.sh, dashboard_limit*.py) alone counted as no engine code: a loop on an
 # install took it with no restart, and the cards it started from then on kept the old install's rules, guards and
-# scripts. A commit of the Board's server and pages, a hook's test fixture, the test pack's card rules
+# scripts. Bug (#1646 follow-up): the same for the plugin's bin/ (ast-grep, cb-ast), which reviews and sessions run
+# from the install: a loop kept the old read-only wrapper. A commit of the Board's server and pages, a hook's test fixture, the test pack's card rules
 # (conveyor/lib/test-card-rules.md, which only tests copy) and conveyor/README.md alone is still no engine code. noengine(), which stale() asks for both a take and a commit of a checkout, is called on each commit
 # and the one before it: a take (t_followtakelight) adds an install and a pack check to each, and shows no more of
 # which files count.
 t_enginefiles() {
   local g=$T/$CASE/g f
   eval "$(sed -n '/^noengine() {/,/^}/p' "$SRC/lib/install.sh")"
-  mkdir -p "$g/conveyor/rules" "$g/conveyor/lib" "$g/conveyor/foreman" "$g/.claude/hooks/__tests__" "$g/.claude/scripts" "$g/.claude/dashboard" \
+  mkdir -p "$g/bin/__tests__" "$g/conveyor/rules" "$g/conveyor/lib" "$g/conveyor/foreman" "$g/.claude/hooks/__tests__" "$g/.claude/scripts" "$g/.claude/dashboard" \
     && git init -q "$g" && for f in conveyor/README.md conveyor/lib/test-card-rules.md conveyor/rules/card-core.md conveyor/foreman/owner-rules.md \
-      .claude/hooks/git-safety.sh .claude/hooks/__tests__/x.json \
+      .claude/hooks/git-safety.sh .claude/hooks/__tests__/x.json bin/ast-grep bin/cb-ast bin/__tests__/cb-ast.test.sh \
       .claude/scripts/decision.sh .claude/scripts/dashboard_limit.py .claude/scripts/dashboard_limit_usage.py \
       .claude/scripts/dashboard_server.py .claude/dashboard/x.js; do echo x > "$g/$f"; done \
     && git -C "$g" add -A && git -C "$g" commit -qm base || fail "the case's repository was not made"
   for f in conveyor/rules/card-core.md conveyor/foreman/owner-rules.md .claude/hooks/git-safety.sh .claude/scripts/decision.sh \
-    .claude/scripts/dashboard_limit.py .claude/scripts/dashboard_limit_usage.py; do
+    bin/ast-grep bin/cb-ast .claude/scripts/dashboard_limit.py .claude/scripts/dashboard_limit_usage.py; do
     echo y >> "$g/$f" && git -C "$g" commit -qam "$f" || fail "the commit of $f was not made"
     ! noengine "$g" HEAD~1 HEAD || fail "a commit of $f alone counted as no engine code: a loop on an install goes on with no restart, and its new cards keep the old copy"
   done
   for f in .claude/scripts/dashboard_server.py .claude/dashboard/x.js .claude/hooks/__tests__/x.json conveyor/lib/test-card-rules.md \
-    conveyor/README.md; do echo y >> "$g/$f"; done
+    conveyor/README.md bin/__tests__/cb-ast.test.sh; do echo y >> "$g/$f"; done
   git -C "$g" commit -qam board || fail "the commit of the Board was not made"
-  noengine "$g" HEAD~1 HEAD || fail "a commit of the Board's server and pages, a hook's test fixture, conveyor/lib/test-card-rules.md and conveyor/README.md counted as engine code, so the loop restarts on it"
+  noengine "$g" HEAD~1 HEAD || fail "a commit of the Board's server and pages, a hook's test fixture, a bin/ test, conveyor/lib/test-card-rules.md and conveyor/README.md counted as engine code, so the loop restarts on it"
 }
 # Bug (#192): the old-engine line read the last take that worked only from the hooks' log, so a take that worked by
 # setup, the loop or `conveyor.sh take` (none of which writes that log) was shown as "none in the log" or an older time.
