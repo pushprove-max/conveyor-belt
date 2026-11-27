@@ -195,8 +195,10 @@ contractborrow() { # [<checker>]
 # at the checker's answer from a commit main has been at (--base-only <tip> <from>). #6 (src/six.ts and a test naming
 # Gizmo and readWidget) lands with a leftover finding and no filed follow-up; the batch of #7 (src/seven.ts) then #8
 # (shared/gizmo.ts) moves main once. #9 adds "// Gizmo" beside readWidget: it passes from origin/main and from #8's
-# commit (the checker's answer from #6's), the bases a push can start at, and is refused from #7's commit, where main
-# never was, and from #6's, where no push starts. Through land(): #9 lands.
+# commit (the checker's answer from #6's), the bases the engine checks from, and is refused from #7's commit, where main
+# never was, and from #6's itself. The engine checks from the checker's answer for each commit main has been at, as a
+# pre-push hook that asks --base-only for its base does; this fixture's hook checks from the remote commit as it is, so
+# a push made while main was at #6 would check from #6, but this case pushes nothing. Through land(): #9 lands.
 t_contractbatchstart() {
   contractmain '[]'
   CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
@@ -216,7 +218,7 @@ t_contractbatchstart() {
   [ "$(grep -c '^from \(origin/main\|main\): 0$' "$T/$CASE/run.out")" = 2 ] && [ "$(grep -c '^from #[67]: 2$' "$T/$CASE/run.out")" = 2 ] \
     || fail "#9 (// Gizmo beside readWidget) does not pass from origin/main and #8's commit, or is not refused from #7's and #6's commits, so this case proves nothing: $(cat "$T/$CASE/run.out")"
   grep -qx 'land 9: 0' "$T/$CASE/run.out" && git -C "$R" show main:src/repositories/widget-repository.ts | grep -qx '  // Gizmo' \
-    || fail "#9 (// Gizmo beside readWidget) did not land, refused from #7's or #6's commit, which no push starts at: $(cat "$T/$CASE/run.out")"
+    || fail "#9 (// Gizmo beside readWidget) did not land, refused from #7's or #6's commit, which the engine does not check from:$(cat "$T/$CASE/run.out")"
 }
 # Bug it catches: in a batch, the checker has no landed line yet for the cards before the card, so its answer stopped
 # at one of them, though the push, which reads their lines, starts after them. One batch of three reviewed cards: #5
