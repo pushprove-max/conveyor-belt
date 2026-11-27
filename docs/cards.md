@@ -93,7 +93,8 @@ condition in that line does not count as a risk. A risk named in a sentence that
 not affect security.`, does not count either. An issue that does not use those words is not held.
 
 The card builds in a fresh git worktree. Claude build, fix and review sessions start without your account's connectors
-(its MCP servers), so a card never sees your mail, drives or notes.
+(its MCP servers), so a card never sees your mail, drives or notes. Codex sessions start with each MCP server in your
+Codex `config.toml` turned off.
 
 A Claude build or fix session cannot use the tools that schedule work, send messages or start other agents:
 `ScheduleWakeup`, `CronCreate`, `CronDelete`, `CronList`, `Monitor`, `RemoteTrigger`, `PushNotification`,

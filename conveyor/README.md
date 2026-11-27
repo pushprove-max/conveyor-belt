@@ -444,7 +444,7 @@ session runs. A refusal is exit 2 with the hook's message, which Codex gives the
 | Denied reads (`permissions.deny`, `Read(**/package-lock.json)`) | permission rule | `guard.sh` refuses a call of that tool on a matching path; Codex has no Read tool (it reads with commands, which a Claude session's Bash may do too) |
 | `worker-ask-guard.sh`: a card session asks nobody | PreToolUse hook on AskUserQuestion | `codex exec` does not run `request_user_input`, and the hook refuses it |
 | No subagent (`--disallowedTools Agent`) | flag | the hook refuses `spawn_agent` and every other agent tool |
-| No MCP server (`--strict-mcp-config`) | flag | the hook refuses every tool it does not map to a Claude tool, each MCP tool among them |
+| No MCP server (`--strict-mcp-config`) | flag | each MCP server that the Codex config files name (`config.toml` in the Codex home and in `.codex/` of the session's folder) is turned off (`-c mcp_servers.<name>.enabled=false`), and the hook refuses every tool it does not map to a Claude tool, each MCP tool among them |
 | No web search beyond what the hooks see | (Claude's WebSearch goes through the hooks) | Codex's web search is off: Codex runs it on its side and gives it no hook |
 
 The hook maps `Bash`, `apply_patch`, `update_plan` (as TodoWrite) and `view_image` (as Read); any other

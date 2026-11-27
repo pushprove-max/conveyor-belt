@@ -794,18 +794,52 @@ proxyenv() {
 # API (proxyroute codex), Codex's -c settings of a provider, conveyor-proxy, at codexProxy's baseUrl on the Responses
 # API, its env_key the variable keyEnv names when its key is found (routekey()), exported in the session's subshell
 # this is called in, so a key the service's bare environment lacks still reaches Codex. A proxy (not kind api) with no
-# key found is given the stand-in key (NOKEY) in NOKEYENV, so Codex never sends it the machine's own login.
+# key found is given the stand-in key (NOKEY) in NOKEYENV, so Codex never sends it the machine's own login. On every
+# route, each MCP server the Codex config files name is turned off after them (codexmcpoff()).
 CODEXPROV=conveyor-proxy
 NOKEYENV=CONVEYOR_PROXY_NOKEY
 codexargs() {
   local p b k
-  CODEX_PX=(); [ "$(proxyroute codex)" = proxy ] || return 0
+  CODEX_PX=(); [ "$(proxyroute codex)" = proxy ] || { codexmcpoff; return 0; }
   p=$(codexproxyset); b=$(jq -r '.baseUrl | strings' <<<"$p"); k=$(jq -r '.keyEnv | strings' <<<"$p")
-  [ -n "$b" ] || return 0
+  [ -n "$b" ] || { codexmcpoff; return 0; }
   routekey "$p"
   if [[ $k =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && [ -n "$KEY_V" ]; then declare -gx "$k=$KEY_V"
   elif [ -z "$KEY_V" ] && [ "$(jq -r .kind <<<"$p")" != api ]; then k=$NOKEYENV; declare -gx "$k=$NOKEY"; else k=''; fi
-  codexpx "$b" "$k"
+  codexpx "$b" "$k" && codexmcpoff
+}
+# A card session loads no MCP server, as a Claude one does (--strict-mcp-config): Codex reads [mcp_servers.<name>]
+# from its home's config.toml (CODEX_HOME, else ~/.codex) and from .codex/config.toml in the folder it starts in (the
+# current one, when that file is there), so each such name, at most 50, gets -c mcp_servers.<name>.enabled=false at
+# the end of CODEX_PX. Codex reads the project file only in a project it trusts, and it does not start when a -c
+# setting makes a server with no command or url; so a name that only the project file has also gets a stand-in of its
+# own kind before that (command="true", or url="http://127.0.0.1:9" for a server with a url): a server that is turned
+# off and never starts, whether Codex reads that file or not.
+codexmcpoff() {
+  local n k h p
+  h=$(codexmcpnames "${CODEX_HOME:-$HOME/.codex}/config.toml" | sed 's/ .*/ -/'); p=$(codexmcpnames "$PWD/.codex/config.toml")
+  while read -r n k; do
+    [ "$k" = - ] || CODEX_PX+=(-c "mcp_servers.$n.$k")
+    CODEX_PX+=(-c "mcp_servers.$n.enabled=false")
+  done < <(printf '%s\n%s\n' "$h" "$p" | awk 'NF && !s[$1]++' | sort | head -n 50)
+}
+# Each server that the Codex config file <file> names, one a line, as "<name> <stand-in>": command="true", or
+# url="http://127.0.0.1:9" when its table has a url. A header is read as TOML allows it: with spaces around its parts,
+# either part quoted and a comment after it ([ "mcp_servers".'x' ] # note). A sub-table ([mcp_servers.<name>.env]) is
+# no server. No file prints nothing; a file that is there but cannot be read prints nothing, and "codex config not
+# read: <file>" goes to stderr, the session's log.
+codexmcpnames() { # <file>
+  [ -e "$1" ] || return 0
+  { [ -f "$1" ] && [ -r "$1" ] && awk -v q="'" '
+    function key(s) { return "(" s "|\"" s "\"|" q s q ")" }
+    BEGIN { sp = "[ \t]*"; hd = "^" sp "\\[" sp key("mcp_servers") sp "\\." sp key("[A-Za-z0-9_-]+") sp "\\]" sp "(#.*)?$"
+      ur = "^" sp key("url") sp "=" }
+    /^[ \t]*\[/ { c = ""
+      if ($0 ~ hd) { c = $0; sub(/^[^.]*\.[ \t]*/, "", c); sub(/[ \t]*\].*$/, "", c); gsub("[\"" q "]", "", c)
+        if (!(c in t)) { t[c] = "command=\"true\""; o[++m] = c } }
+      next }
+    c != "" && $0 ~ ur { t[c] = "url=\"http://127.0.0.1:9\"" }
+    END { for (i = 1; i <= m; i++) print o[i], t[o[i]] }' "$1" 2>/dev/null; } || echo "codex config not read: $1" >&2
 }
 # The sandbox of a Codex session that runs commands (a build's, a review's, a judge's), in the array CODEX_SB: Codex's
 # own (-s <mode>), except in a benchmark's task container (CONVEYOR_BENCH_BOX, which the bench sets on a conveyor arm's
@@ -846,6 +880,7 @@ routecall() { # <claude|codex> <model, or "" for the CLI's own default> [<route 
     fi
     CODEX_PX=()
     if [ -n "${3:-}" ]; then { [ -n "$k" ] && [ -n "$v" ] && export "$k=$v"; } || k=''; codexpx "$(jq -r '.baseUrl | strings' <<<"$3")" "$k"; fi
+    codexmcpoff # no MCP server, as a session (codexargs())
     exec timeout --kill-after=10 120 codex exec --skip-git-repo-check -s read-only "${CODEX_PX[@]}" ${2:+-m "$2"} - <<<"Reply with the one word OK." 2>&1); rc=$?
   rm -rf "$d"
   if [ "$1" = claude ]; then

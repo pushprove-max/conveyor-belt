@@ -267,3 +267,72 @@ t_codexnoreply() {
     || fail "the blocked line's tail is not the session's error output: $(st 'select(.issue == 7 and .step == "blocked") | .tail')"
   grep -q 'model stream closed early' "$ST/kept/$c/$c.err" && [ -s "$ST/kept/$c/$c.out" ] || fail "the session's output and errors are not in kept/$c/: $(ls "$ST/kept/$c" 2>&1)"
 }
+
+# A Codex home of the case's own whose config.toml, with <toml> given, holds it (none without); and a codex on PATH
+# that keeps the arguments of its last call, one a line, in $STUB/mcp-args, then runs the shared stub.
+mcpsetup() { # [toml]
+  setup "[$(issue 7 2026-01-01)]"; mkdir -p "$T/$CASE/bin" "$T/$CASE/cards"
+  export CODEX_HOME=$T/$CASE/mcp-home; mkdir -p "$CODEX_HOME"; [ -z "${1:-}" ] || printf '%s\n' "$1" > "$CODEX_HOME/config.toml"
+  # stub: the shared stub reads and drops its arguments; this one keeps them for the case
+  printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$@" > "$STUB/mcp-args"' 'exec "$STUB/codex" "$@"' > "$T/$CASE/bin/codex"
+  chmod +x "$T/$CASE/bin/codex"; export PATH=$T/$CASE/bin:$PATH
+}
+# Each header in a form TOML allows: a comment after it, spaces inside its brackets, a quoted name, both parts quoted
+# (bug: ["mcp_servers".'web'] kept its server on).
+MCPTOML=$'model = "x"\n[mcp_servers.serena] # local\ncommand = "serena"\n[ mcp_servers."node_repl" ]\ncommand = "/opt/node_repl"\n[mcp_servers.node_repl.env]\nA = "1"\n["mcp_servers".\'web\']\nurl = "https://example.com/mcp"'
+# mcpcheck <what ran> <name>[:<stand-in>]...: its last codex call (or CODEX_PX, in $STUB/mcp-args) turned off each
+# <name>, sorted, each with -c, after its <stand-in> setting (command="true") when one is given, and nothing else of
+# mcp_servers.
+mcpcheck() {
+  local w=$1 n a want='' off=''; shift
+  for n in "$@"; do
+    for a in ${n#"${n%%:*}"} enabled=false; do a=mcp_servers.${n%%:*}.${a#:}; want+=$a$'\n'; off+=" -c $a"; done
+  done
+  [ "$(grep '^mcp_servers' "$STUB/mcp-args")" = "${want%$'\n'}" ] && [[ " $(tr '\n' ' ' < "$STUB/mcp-args")" == *"$off "* ]] \
+    || fail "$w, with a Codex config.toml of the servers serena ('# local' after its header), node_repl (quoted, spaced) and web (both parts quoted) and node_repl's env sub-table, did not start codex with${off} alone: $(tr '\n' ' ' < "$STUB/mcp-args") $(cat "$T/$CASE/run.out")"
+}
+# Bug (#1824): a Codex review loaded every MCP server of the user's Codex config (a slow or broken one held up each
+# review), as Codex has no --strict-mcp-config. Each server the config names is turned off, also with a comment after
+# its header (bug: such a server stayed on), a sub-table is no server, and a project config there but unreadable (a
+# folder here) is named in the log. The route check (doctor's) turns them off too.
+t_codexmcpoff() {
+  mcpsetup "$MCPTOML"
+  fx_in 'w=$CARDS/c7-7 && git -C "$MAIN" worktree add -q --detach "$w" && mkdir -p "$w/.codex/config.toml" && codexreview "$w" brief instructions m low'
+  mcpcheck "codexreview <worktree> brief instructions m low" node_repl serena web
+  grep -qxF "codex config not read: $T/$CASE/cards/c7-7/.codex/config.toml" "$T/$CASE/run.out" \
+    || fail "a review whose worktree's .codex/config.toml cannot be read (a folder) did not log it: $(cat "$T/$CASE/run.out")"
+  fx_in 'routecall codex ""'
+  mcpcheck 'routecall codex ""' node_repl serena web
+}
+# Bug (#1824): with no Codex config file, a session must get no mcp_servers setting (and no log line).
+t_codexmcpnone() {
+  mcpsetup
+  fx_in 'w=$CARDS/c7-7 && git -C "$MAIN" worktree add -q --detach "$w" && codexreview "$w" brief instructions m low'
+  [ -s "$STUB/mcp-args" ] && ! grep -q 'mcp_servers\|codex config not read' "$STUB/mcp-args" "$T/$CASE/run.out" \
+    || fail "codexreview with no Codex config.toml started codex with an mcp_servers setting, or none ran: $(tr '\n' ' ' < "$STUB/mcp-args" 2>&1) $(cat "$T/$CASE/run.out")"
+}
+# Bug (#1824): as t_codexmcpoff, for the review's judge (judgecall()) and the pick's judge (askmodel()) on Codex; the
+# judge's worktree has its own .codex/config.toml, whose servers (proj, and pweb with a url) are turned off too (bug: a
+# readable project config's servers stayed on), and whose env sub-table, with a url in it, is no server. Codex reads
+# that file only in a project it trusts, and does not start when a setting makes a server with no command or url
+# (invalid transport), so each project-only server gets a stand-in of its own kind (bug: enabled=false alone stopped
+# Codex in a fresh worktree). The stub cannot show Codex's refusal; the arguments that prevent it are checked.
+t_codexmcpjudge() {
+  mcpsetup "$MCPTOML"
+  fx_in 'w=$CARDS/c7-7 && git -C "$MAIN" worktree add -q --detach "$w" && mkdir -p "$w/.codex" && printf "%s\n" "[mcp_servers.proj]" "command = \"p\"" "[mcp_servers.proj.env]" "url = \"e\"" "[mcp_servers.pweb]" "url = \"https://example.com/p\"" > "$w/.codex/config.toml" \
+    && CALLSEAT="{\"agent\":\"codex\",\"model\":\"x\",\"effort\":\"low\"}" judgecall "$w" instructions findings'
+  mcpcheck "judgecall <worktree with .codex/config.toml of the servers proj and pweb> instructions findings, on Codex model x" \
+    node_repl 'proj:command="true"' 'pweb:url="http://127.0.0.1:9"' serena web
+  echo '{"ok":1}' > "$STUB/codex-answer"; tune '.models.allowed["codex-builder"] = ["cx-1"]'; seatset model cx-1
+  fx_in 'd=$(mktemp -d) && askmodel "$d" 60 low "" question'
+  mcpcheck 'askmodel <folder> 60 low "" question, on the Codex builder cx-1' node_repl serena web
+}
+# Bug (#1824): a session through the Codex proxy (codexProxy, kind proxy) keeps the proxy's provider settings and gets
+# the same MCP shutoff after them (bug: the proxy route could drop it while every login-route case passed).
+t_codexmcpproxy() {
+  mkdir -p "$XDG_CONFIG_HOME/conveyor" && jq -n '{codexProxy: {kind: "proxy", baseUrl: "http://127.0.0.1:9/v1", roles: {reviewer: "proxy"}}}' > "$XDG_CONFIG_HOME/conveyor/host.json"
+  mcpsetup "$MCPTOML"
+  fx_in 'cd "$(mktemp -d)" && PROXY_ROLE=reviewer codexargs && printf "%s\n" "${CODEX_PX[@]}" > "$STUB/mcp-args"'
+  grep -qxF "model_provider=\"conveyor-proxy\"" "$STUB/mcp-args" || fail "PROXY_ROLE=reviewer codexargs, with codexProxy of kind proxy for the reviewer, gave no proxy provider: $(tr '\n' ' ' < "$STUB/mcp-args") $(cat "$T/$CASE/run.out")"
+  mcpcheck 'PROXY_ROLE=reviewer codexargs (codexProxy of kind proxy for the reviewer)' node_repl serena web
+}
