@@ -433,8 +433,10 @@ askrun() { # <command>: run where the record is, stopped at the ask limit (exit 
 # filed issue: a card queued with no GitHub issue prints its title, which can name another issue's link. Its limit is
 # the ask limit and GHWAIT more, gh_write()'s own limit on gh (lib/issues.sh): stopped while gh waits on GitHub, the
 # issue could be made with no link printed. Failed after the link (stopped at its limit, or the ssh connection lost: 255), the issue is made: the
-# ask prints the link, says the hold may not be in, and ends 0, so the Foreman does not file it again. Stopped, or the
-# connection lost, before the link, it says to look for the issue before it is filed again.
+# ask prints the link, says the hold may not be in, and ends 0, so the Foreman does not file it again. Failed after the
+# line "Card queued with no GitHub issue: <title>" (printed once the card is in the record), it says the card is queued
+# and ends 0, so the Foreman does not order it again. Stopped, or the connection lost, before either, it says to look
+# for the issue before it is filed again.
 GHWAIT=60
 askfiling() { # <repo> <command>
   local out rc u how lim=$((${ASK_LIMIT:-45} + GHWAIT))
@@ -445,6 +447,10 @@ askfiling() { # <repo> <command>
   u=$(grep -xE '[^[:space:]]*/issues/[0-9]+' <<<"$out" | tail -n 1) # a line that is the link alone: a title can end in one
   if [ -n "$u" ]; then
     echo "foreman: the filing $how after it filed $u: do not file it again. Its hold may not be in: hold it (foreman.sh ask $1 control hold ${u##*/}) unless the owner has said yes, and take its built label off" >&2
+    return 0
+  fi
+  if grep -q '^Card queued with no GitHub issue: ' <<<"$out"; then # printed once the card is in the record (testcard(), cardnew())
+    echo "foreman: the filing $how after it queued its card with no GitHub issue: the card is in the record, do not order it again" >&2
     return 0
   fi
   case $rc in 124 | 137 | 255) echo "foreman: the filing $how before it printed an issue link: look for the issue in $1 before you file it again" >&2 ;; esac

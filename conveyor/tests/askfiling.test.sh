@@ -99,14 +99,19 @@ t_cardasksshafter() {
 }
 # Bug this catches (an ssh record): with Foreman orders set to make cards with no GitHub issue, the engine prints the
 # card's title; a title that ended in a parent issue's link, with the connection then lost, was taken for a filed issue,
-# and the Foreman was told to hold that parent issue.
+# and the Foreman was told to hold that parent issue. Also: the engine had said the card was queued, yet the ask ended
+# 255 and told the Foreman to look for an issue that does not exist, so a retry queued a second card.
 t_cardasksshtitle() {
   local a=(card "Fix the row of https://github.com/o/alpha/issues/77" "Make it so.")
   tassh after; tasetup
   loop control rules foremanissues=off > /dev/null || fail "control rules foremanissues=off was refused"
   taask 10 0 - "${a[@]}"
-  [ "$rc" = 255 ] && ! grep -qF 'after it filed' "$STUB/ask.err" && ! grep -qF 'control hold 77' "$STUB/ask.err" \
-    || fail "ask alpha ${a[*]:0:2} with no GitHub issue, over a lost ssh connection, took the title's link for a filed issue (exit $rc): $out $(cat "$STUB/ask.err")"
+  [ "$rc" = 0 ] && ! grep -qF 'after it filed' "$STUB/ask.err" && ! grep -qF 'control hold 77' "$STUB/ask.err" \
+    || fail "ask alpha ${a[*]:0:2} with no GitHub issue, over a lost ssh connection, did not end 0 or took the title's link for a filed issue (exit $rc): $out $(cat "$STUB/ask.err")"
+  grep -qF 'after it queued its card with no GitHub issue' "$STUB/ask.err" && grep -qF 'do not order it again' "$STUB/ask.err" \
+    && ! grep -qF 'look for the issue' "$STUB/ask.err" \
+    || fail "ask alpha ${a[*]:0:2} with no GitHub issue, over a lost ssh connection, does not say the card is queued and must not be ordered again: $(cat "$STUB/ask.err")"
+  [ "$(jq '.cards | length' "$ST/testactions/cards.json")" = 1 ] || fail "ask alpha ${a[*]:0:2} with no GitHub issue did not queue exactly one card: $(cat "$ST/testactions/cards.json")"
 }
 # Bug this catches (an ssh record): the connection lost before a link came ended the ask 255 with no word that GitHub
 # may have made the issue.
