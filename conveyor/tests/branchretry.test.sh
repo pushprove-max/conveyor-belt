@@ -198,6 +198,18 @@ t_branchretrylane() {
     || fail "retry $BRC (CONVEYOR_FOREMAN=1) was refused but still gave the card back: $(st "select(.card == \"$BRC\")") $(cat "$ST/testactions/cards.json" 2>&1)"
 }
 
+# Review follow-up of #1673. Bug it catches: a Foreman's `retry <card id>` over ssh (foreman/lib.sh ask() sets
+# CONVEYOR_RETRYBY=foreman, not CONVEYOR_FOREMAN=1, and its session id does not reach the host) queued the blocked
+# fast-lane landing, as owneronly() read neither.
+t_branchretrylaneby() {
+  local out
+  brsetup "" fast-lane
+  out=$(CONVEYOR_RETRYBY=foreman loop retry "$BRC" 2>&1); [ $? != 0 ] && grep -qF "the owner's alone" <<<"$out" \
+    || fail "retry $BRC (CONVEYOR_RETRYBY=foreman) of the blocked fast-lane landing was not refused as the owner's alone: $out"
+  [ "$(st "select(.card == \"$BRC\") | .step" | tail -n 1)" = blocked ] && ! grep -qF "$BRC" "$ST/testactions/cards.json" 2>/dev/null \
+    || fail "retry $BRC (CONVEYOR_RETRYBY=foreman) was refused but still gave the card back: $(st "select(.card == \"$BRC\")") $(cat "$ST/testactions/cards.json" 2>&1)"
+}
+
 # #1673 D2. Bug it catches: Needs you and `foreman status` named a blocked land-branch card of issue 0 "#0", which
 # `retry 0` refuses. Health's blocked list names it "Branch: lb", and the Foreman's status (watch-conveyor.sh --status)
 # shows that name with its card id, read from the engine's own snapshot.

@@ -287,9 +287,12 @@ lanehere() { # <what to do once the change is committed>
 # Land and reset run on the owner's command only: never in a Foreman session (the launcher's CONVEYOR_FOREMAN=1, or
 # the session /conveyor-belt:foreman marked: Claude Code gives a session's commands its id, CLAUDE_CODE_SESSION_ID,
 # and the Foreman's mark, foreman/lib.sh MARK, holds the marked one's), never inside a card (its sessions have
-# CONVEYOR_CARD set, session(); or the command is called from the cards folder).
+# CONVEYOR_CARD set, session(); or the command is called from the cards folder), never in a retry another runs (RETRYBY,
+# commands/retry.sh, or CONVEYOR_RETRYBY: a Foreman's over ssh, foreman/lib.sh ask(), carries neither the mark nor
+# the session id).
 owneronly() { # <command>
-  local w='' c s=''
+  local w='' c s='' by=${RETRYBY:-${CONVEYOR_RETRYBY:-owner}}
+  [ "$by" = owner ] || w="a retry by $by"
   c=$(cd "$CARDS" 2>/dev/null && pwd -P)
   read -r s _ 2>/dev/null < "${XDG_STATE_HOME:-$HOME/.local/state}/conveyor/foreman/session"
   [ "${CONVEYOR_FOREMAN:-}" != 1 ] && { [ -z "$s" ] || [ "${CLAUDE_CODE_SESSION_ID:-}" != "$s" ]; } || w='a Foreman session'
