@@ -379,6 +379,30 @@ printf '## What to build\nA note.\n## Design\nNotes are kept in notes.json.\n' >
 passes "gh issue create --title 'New' --body-file $T/new.md"
 }
 
+# Bug (#1730 review): a command that files two issues was read as one text, so a `## Design` (or `## Cause`) in one
+# issue, or a `bug` label on one, counted for the other: an issue with no Design, or a fix with no Cause, passed.
+# Each issue is now read in its own part (filing_parts).
+t_two() {
+case_ two
+out=$(hook "gh issue create --title One --body \$'## What to build\nA note.'; gh issue create --title Two --body \$'## Design\nUse notes.json.'")
+jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | test("## Design"))' <<<"$out" >/dev/null \
+  || fail "the first issue's missing Design section was not refused, as the second's Design counted for it; output: $out"
+refused "gh issue create --title One --body \$'## What happens now\nIt breaks.'; gh issue create --title Two --body \$'## Cause\nStale.'"
+refused "gh issue create --label bug --title One --body 'It breaks.' && gh issue create --title Two --body \$'## Cause\nStale.'"
+refused "$(body $'## What happens now\nIt breaks.'); $(body $'## Cause\nStale.')"
+refused "gh issue create --title One --body \$'## Cause\nStale.'; foreman.sh ask alpha testissue conveyor/x.test.sh Slow 'It is slow.'"
+passes "gh issue create --title One --body \$'## What to build\nA.\n## Design\nB.'; gh issue create --label bug --title Two --body \$'## Cause\nStale.'"
+# Bug (#1730 review): a quoted `create` or a line continuation in the second filing hid it from the split, so the
+# second issue's sections still counted for the first. Each form is read as Bash reads it.
+refused "gh issue create --label bug --title One --body 'It breaks.'; gh issue 'create' --title Two --body \$'## Cause\nStale.'"
+refused "gh issue create --label bug --title One --body 'It breaks.'; gh \\
+ issue create --title Two --body \$'## Cause\nStale.'"
+# A `gh issue create` in a title, a quote or a here-document body starts no issue: the body's Cause after it counts.
+passes "gh issue create --label bug --title 'x; gh issue create' --body \$'Run\ngh issue create\n## Cause\nStale.'"
+# The body has no quote mark of its own, so only the here-document mask (heredocs 2) keeps its line from a split.
+passes "$(body $'Run it:\ngh issue create\n## Cause\nStale.' '--label bug')"
+}
+
 # Bug (#1702): the body file path was read up to the next space or quote, so `--body-file x.md)` closing a `$( )` named the
 # file `x.md)`, which does not exist: its Cause section was never seen and the hook refused a good body. `;`, `|` and `&`
 # after the path were taken in the same way. A body with no Cause is still refused in each form, and a body file that
@@ -443,7 +467,7 @@ grep -qxF conveyor/foreman/filing-cause.test.sh "$W/plist" \
   || fail "the project's selector (.conveyor/test-changed.sh) does not select conveyor/foreman/filing-cause.test.sh for a change to no_cause in $f; its list: $(tr '\n' ' ' < "$W/plist")"
 }
 
-cases=(what heading list quote fence bug new design closer linked)
+cases=(what heading list quote fence bug new design two closer linked)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

@@ -9,7 +9,8 @@
 # (foreman.sh files, or `ask <project> testissue`), and the text it carries (a body file it names, when readable, too, and
 # for `--body-file -` the file a `< file` redirect names) has a `## What happens now` section or a `bug` label (`--label bug`, `-l foo,bug`, `--label=bug`); `testissue` always
 # files with the pack's type label (`bug` in this pack), so it counts as a fix issue too. The section is read as
-# written in the command, as files is: its text is not judged, and a body made by an expansion is not seen.
+# written in the command, as files is: its text is not judged, and a body made by an expansion is not seen. A command
+# that files more than one issue is read one issue at a time (filing_parts), and is refused when one of them is.
 # no_design: 0 when that text has a `## What to build` section and no `## Design` section (any issue the Foreman files).
 # shellcheck disable=SC2034 # NO_CAUSE and NO_DESIGN are read in foreman.sh filing
 NO_CAUSE='Not run: a fix issue needs a "## Cause" section, and this one has none. Name the source of the problem, not only what the reader sees. The section holds three things. First, where the bad data or behaviour comes from and why it is there at all. Second, a place in the code that already solves the same problem, or that none was found. Third, what the reader sees when the data is stale or missing. Add the section and file it again.'
@@ -201,12 +202,14 @@ unquoted() {
 # before the bodies and in place of each end word, so a body starts and ends a paragraph. The text after the bodies is
 # read again from its start, as Bash reads it. With a second argument `0`, the bodies are left out (each is one blank
 # line): only the shell text stays, where the options are read, so a quote or a `#` in a body changes no comment after it.
+# With `2`, each body line and end word is made spaces of its own length and no blank line is added, so the text keeps
+# the command's length (in bytes) and a place in it is the same place in the command (filing_parts).
 heredocs() {
   # LC_ALL=C (exported to the awks): the awk below and Bash's ${u:0:at} and ${s:at} all count bytes. In a UTF-8 locale
   # mawk counts bytes and Bash counts characters, so each multibyte character before a `<<WORD` line moved the cut into
   # the body.
   local -x LC_ALL=C
-  local s=$1 nb=${2:-1} o='' r='' u q ru rq at ops op w line
+  local s=$1 nb=${2:-1} o='' r='' u q ru rq at ops op w line raw nl
   while [ -n "$s" ]; do
     # r: the shell text read so far, without the bodies. The text after a body is read on from it, not from a new
     # start, so a quote open when the body began (`"$(cat <<EOF` ... `)"`) is still open: its closing `"` opens none,
@@ -235,28 +238,77 @@ heredocs() {
           w = substr(u, i, RLENGTH); gsub(/["\047]/, "", w); ops = ops " " d w; i += RLENGTH }
         i-- } }')
     if [ -z "$at" ]; then o+=$u; break; fi
-    o+=${u:0:at}$'\n'; r+=${s:0:at}; s=${s:at}
+    o+=${u:0:at}; [ "$nb" = 2 ] || o+=$'\n'
+    r+=${s:0:at}; s=${s:at}
     for op in $ops; do
       w=${op#-}
       while [ -n "$s" ]; do
-        line=${s%%$'\n'*}
-        if [[ $s == *$'\n'* ]]; then s=${s#*$'\n'}; else s=''; fi
+        line=${s%%$'\n'*} raw=${s%%$'\n'*} nl=''
+        if [[ $s == *$'\n'* ]]; then s=${s#*$'\n'} nl=$'\n'; else s=''; fi
+        if [ "$nb" = 2 ]; then o+=${raw//?/ }$nl; fi
         if [ "$op" != "$w" ]; then while [[ $line == $'\t'* ]]; do line=${line:1}; done; fi
-        if [ "$line" = "$w" ]; then o+=$'\n'; break; fi
-        [ "$nb" = 0 ] || o+=$line$'\n'
+        if [ "$line" = "$w" ]; then [ "$nb" = 2 ] || o+=$'\n'; break; fi
+        [ "$nb" != 1 ] || o+=$line$'\n'
       done
     done
   done
   printf '%s' "$o"
 }
 # filing_read <hook input>: reads the issue text of a filing command, once, for no_cause and no_design: 0 when the
-# command files an issue, with FT_TEXT the text it carries (see no_cause), FT_TI 1 for a `testissue` and FT_O the command
-# without its comments and here-document bodies, FT_UNREAD the path of the body file it names when that file cannot be
-# read (else empty); 1 when it files none (the four are then not set).
-FT_TEXT='' FT_TI=0 FT_O='' FT_UNREAD=''
+# command files an issue, with one entry for each issue it files (filing_parts) in FT_TEXTS, FT_TIS, FT_OS and
+# FT_UNREADS, each as filing_part reads it; 1 when it files none (the four are then not set).
+FT_TEXTS=() FT_TIS=() FT_OS=() FT_UNREADS=()
 filing_read() {
-  local cmd f t ti=0 fc=
+  local cmd t p parts=()
   cmd=$(jq -r '.tool_input.command // ""' <<<"$1" 2>/dev/null) || return 1
+  t=$(heredocs "$cmd" 0); t=${t//$'\\\n'/}; t=${t//[\"\']/}
+  [[ $t =~ (^|[[:space:];\&|])ask[[:space:]]+[^[:space:]]+[[:space:]]+testissue([[:space:]]|$) ]] || files "$1" || return 1
+  FT_TEXTS=() FT_TIS=() FT_OS=() FT_UNREADS=()
+  mapfile -d '' parts < <(filing_parts "$cmd")
+  for p in "${parts[@]}"; do
+    filing_part "$p"
+    FT_TEXTS+=("$FT_TEXT") FT_TIS+=("$FT_TI") FT_OS+=("$FT_O") FT_UNREADS+=("$FT_UNREAD")
+  done
+}
+# filing_parts <command>: the command cut into one part for each issue it files, each part ended by a NUL byte. A part
+# starts at a `gh issue create` (or `new`, with gh's flags before and after `issue`) or an `ask <project> testissue` that
+# starts a word outside a quote, a comment and a here-document body; the text before the second goes with the first.
+# Each issue's sections and labels are read in its own part, so a `## Cause` or a `## Design` in one issue lets no
+# other issue pass. The places are found in the command with its comments made spaces, its bodies made spaces
+# (heredocs 2) and its quoted text made x (unquoted), all of which keep its length in bytes (LC_ALL=C, as in heredocs).
+# The words are then read as Bash reads them (t): a line continuation and the quote marks are dropped, and a quoted or
+# \-escaped character is its own character, or x when it is a space or a character that ends a word, so
+# `gh issue 'create'` and `gh \<newline> issue create` start an issue and `--title 'x; gh issue create'` starts none.
+# p[k] is the place in the command where the word part of t's character k starts (its first dropped mark).
+filing_parts() {
+  local -x LC_ALL=C
+  local s=$1 at p=0 h
+  h=$(heredocs "$s" 2)
+  while read -r at; do printf '%s\0' "${s:p:at - p}"; p=$at; done < <(unquoted "$h" | FP_H=$h awk '
+    { s = s (NR > 1 ? "\n" : "") $0 }
+    END {
+      h = ENVIRON["FP_H"]; q = "\047"; t = ""; n = 0; st = 0
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1); nx = substr(s, i + 1, 1)
+        if (!st) st = i
+        if (c == "\\" && nx == "\n") { i++; continue }
+        if (c == "\"" || c == q || (c == "$" && (nx == "\"" || nx == q))) continue
+        if (c == "\\") { i++; c = substr(h, i, 1); if (c ~ /[ \t\n;&|()`]/) c = "x" }
+        else if (c == "x") { c = substr(h, i, 1); if (c ~ /[ \t\n;&|()`]/) c = "x" }
+        t = t c; p[++n] = st; st = 0 }
+      v = "([ \t]+-[^ \t\n]+([ \t]+[^- \t\n;&|][^ \t\n;&|]*)?)*"
+      f = "(gh(-write)?" v "[ \t]+issue" v "[ \t]+(create|new)|ask[ \t]+[^ \t\n;&|]+[ \t]+testissue)([ \t\n;&|)]|$)"
+      for (o = 0; match(substr(t, o + 1), f); o = i) {
+        i = o + RSTART
+        if ((i == 1 || substr(t, i - 1, 1) ~ /[ \t\n;&|(`]/) && k++) print p[i] - 1 } }')
+  printf '%s\0' "${s:p}"
+}
+# filing_part <part>: reads one issue's part of a filing command (filing_parts): FT_TEXT the text it carries (see
+# no_cause), FT_TI 1 for a `testissue` and FT_O the part without its comments and here-document bodies, FT_UNREAD the
+# path of the body file it names when that file cannot be read (else empty).
+FT_TEXT='' FT_TI=0 FT_O='' FT_UNREAD=''
+filing_part() {
+  local cmd=$1 f t ti=0 fc=
   # u: the command with its shell comments made spaces (uncommented), as bash reads no word in them. o: u with its
   # here-document bodies left out (heredocs), so a quote in a body (`It's`) opens no quote that hides a comment after the
   # body. The options (`ask ... testissue`, `--body-file`, its `< file`, `--label`) are read in o: one written in a
@@ -269,7 +321,6 @@ filing_read() {
   local j=${o//$'\\\n'/}
   t=${j//[\"\']/}
   [[ $t =~ (^|[[:space:];\&|])ask[[:space:]]+[^[:space:]]+[[:space:]]+testissue([[:space:]]|$) ]] && ti=1
-  files "$1" || [ "$ti" = 1 ] || return 1
   # A quoted path ends at its closing quote. A bare one ends at a space, a quote or a character that closes or ends the word
   # (`)` of a `$( )`, a backtick, `;`, `|`, `&`, `<`, `>`: `--body-file -<<<'text'` names `-`, not `-<<<`).
   local bf=$'(--body-file|-F)[[:space:]=]+("([^"]+)"|\'([^\']+)\'|["\']?([^[:space:]"\';|&<>)`]+))'
@@ -334,8 +385,21 @@ has_heading() {
   local hs=$'(^|\n|["\'])[ ]{0,3}##[[:space:]]+' he=$'[ \t]*(\n|$)' t=${1// /\\ }
   [[ $FT_TEXT =~ ${hs}${t}${he} ]]
 }
-# no_cause: 0 when the command filing (read by filing_read) files a fix issue with no `## Cause` section.
-no_cause() {
+# filing_each <check>: 0 when the check is 0 for one issue of the command filing (read by filing_read), with FT_TEXT,
+# FT_TI, FT_O and FT_UNREAD set to that issue's; 1 when it is 0 for none.
+filing_each() {
+  local i
+  for i in "${!FT_TEXTS[@]}"; do
+    FT_TEXT=${FT_TEXTS[i]} FT_TI=${FT_TIS[i]} FT_O=${FT_OS[i]} FT_UNREAD=${FT_UNREADS[i]}
+    "$1" && return 0
+  done
+  return 1
+}
+# no_cause: 0 when the command filing (read by filing_read) files a fix issue with no `## Cause` section; FT_UNREAD is
+# then that issue's.
+no_cause() { filing_each issue_no_cause; }
+# issue_no_cause: 0 when the issue read into FT_TEXT, FT_TI and FT_O is a fix issue with no `## Cause` section.
+issue_no_cause() {
   has_heading Cause && return 1
   if has_heading 'What happens now' || [ "$FT_TI" = 1 ]; then return 0; fi
   grep -qiE "(^|[[:space:]])(--label|-l)(=|[[:space:]]+)?[\"']?([^[:space:]\"']*,)?bug([,\"'[:space:]]|\$)" <<<"$FT_O"
@@ -347,7 +411,9 @@ cause_refusal() {
     printf 'Not run: the body file %s cannot be read, so its "## Cause" section could not be checked. Write the file there, or name the path of a file that exists, and run the command again.' "$FT_UNREAD"
   else printf '%s' "$NO_CAUSE"; fi
 }
-# no_design: 0 when the command filing (read by filing_read) has a `## What to build` section and no `## Design` section.
-no_design() {
+# no_design: 0 when the command filing (read by filing_read) files an issue with a `## What to build` section and no
+# `## Design` section.
+no_design() { filing_each issue_no_design; }
+issue_no_design() {
   has_heading 'What to build' && ! has_heading Design
 }
