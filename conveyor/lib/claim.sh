@@ -400,7 +400,9 @@ stackto() { # <card> <worktree> <claim()'s wait> <issue json>
 # landed line, never on a later line of the card.
 waitlap() { # <card> <worktree> [name] [new]
   local n t
-  if read -r n t < "$2.waitlap" 2>/dev/null && [ -z "${4:-}" ]; then
+  # 2>/dev/null before the read's < (redirects go left to right): a card with no lap open yet (its first wait) printed
+  # "No such file or directory" on stderr.
+  if read -r n t 2>/dev/null < "$2.waitlap" && [ -z "${4:-}" ]; then
     [[ ! $t =~ ^[0-9]+$ ]] || [ $((EPOCHSECONDS - t)) -le 0 ] || waitnote "$1" "$n" "$((EPOCHSECONDS - t))" || :
   elif [ -z "${4:-}" ]; then return 0; fi
   if [ -n "${3:-}" ]; then printf '%s %s\n' "$3" "$EPOCHSECONDS" > "$2.waitlap"; else rm -f "$2.waitlap"; fi
