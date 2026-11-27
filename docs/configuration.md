@@ -440,6 +440,14 @@ records the verdict, the slices and the reason.
   open ([A change that grows while it is built](#a-change-that-grows-while-it-is-built)), or when it cannot read the
   open follow-ups of the issue. The `split` line tells why.
 
+A card can stop while it files the slices of a split. Then the next card of the issue files the slices that are
+missing, if the rule is On and you did not edit the issue. A kept slice that depends on a slice filed again also
+gets `Depends on:` the new slice. In all other cases, the issue gets back the place of the slices that the stopped
+card filed in the pick order, and Conveyor holds those slices and then withdraws them. Conveyor blocks the card and does not build the
+issue in these conditions: it cannot read those slices, GitHub does not confirm that it closed one of them, or a card
+already took one of them. Conveyor also blocks a card when a slice of its split is not filed and GitHub does not
+confirm that it closed the slices filed before it.
+
 The Health panel shows the cards that Conveyor checked while the rule was Shadow or On: how many it kept and how many
 would split, and the first-review GO rate and the fix rounds of each group.
 
@@ -457,12 +465,21 @@ Done-when items of its own and the files of the change that it takes. Each file 
   issue are held, and the others go in the queue. Conveyor puts the files of the slices back to what main has, and
   one fix session makes the rest work alone. Then the card goes on to its review. The track on the Board and in
   /units shows that the card was split for its size, with the count of files before and after. If an earlier card
-  of the issue filed slices that are still open and that take files of the new slices, Conveyor first closes those
-  earlier slices and then files the new slices. Thus each part has one open follow-up. The `grown` line names the
-  closed slices in `withdrawn`. Conveyor files no slice, and the change stays whole, in these conditions: it cannot
-  read the open follow-ups of the issue, an earlier slice also takes a file that is not in the change, or it cannot
-  close an earlier slice. In the last case, `withdrawn` names the earlier slices that it did close. The `grown` line
-  tells why, and the card's track on the Board shows "kept whole: <n> files" with the judge's why and the reason.
+  of the issue filed slices that are still open and that take files of the new slices, Conveyor closes those earlier
+  slices and then files the new slices. Thus each part has one open follow-up. If you held an earlier slice, the new
+  slices that take its files are held too. An open issue that has `Depends on:` an earlier slice gets `Depends on:`
+  the issue before Conveyor closes that slice, and then `Depends on:` the new slices that take its files. Until the
+  issue lands, each issue that has `Depends on:` a closed earlier slice waits on the issue, also if it got that line
+  while Conveyor closed the slice. This is also
+  true when the card that closed the earlier slice stopped before it filed the new slices. If that card stopped after
+  it filed them, the next card of the issue does this when it starts, with each setting of Split large issues, or
+  Conveyor blocks that card. The `grown` line names the closed slices in `withdrawn`. Conveyor files no slice, and the
+  change stays whole, in these conditions: it cannot read the open follow-ups of the issue, an earlier slice also
+  takes a file that is not in the change, an issue that has `Depends on:` an earlier slice cannot get `Depends on:` the
+  issue, or it cannot close an earlier slice. If Conveyor cannot hold the new slices
+  or change those `Depends on:` lines, it withdraws the new slices, and the change stays whole. The `grown` line tells
+  why, and the card's track on the Board shows "kept whole: <n> files" with the judge's why and the reason. If GitHub
+  does not confirm that it closed a new slice, Conveyor blocks the card.
 
 Conveyor does not count the files of a follow-up or of a fix card that has no issue.
 

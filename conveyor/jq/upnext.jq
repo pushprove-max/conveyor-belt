@@ -3,7 +3,12 @@
     # The graph, the landed issues and the lines that name follow-ups, each worked out once (DEPS): worked out again
     # for each open issue, they were most of a snapshot's time.
     | map(.number) as $open | graph($cards) as $g | (if $all == "" then [] else cyclesof($g) | add // [] end) as $cyc
-    | landed($cards) as $done | ($cards | map(select(.followups))) as $fc
+    # A slice that a grown change's filing closes (replaces, on its start line: growcheck(), lib/slices.sh) counts as
+    # filed from its parent: an issue that depends on it waits on that parent until it lands. The line is written
+    # before the close and is read under the lock: no pick between the close and the edits that move the waits
+    # (growafter()) takes such an issue, also one filed after the filing read the open issues. Bug: a pick there took it.
+    | landed($cards) as $done
+    | ($cards | map(select(.followups)) + [$cards[], $retried[] | .issue as $p | .replaces // empty | .[] | {issue: .n, followups: [$p]}]) as $fc
     | ($cards | map(select(.step == "landed") | .followups // [] | .[])) as $ready
     # The issues whose card is filing the slices of their split now: its newest line is the start of file (splitcheck(),
     # lib/slices.sh), written before the first slice is created; the split line comes once each is held or placed.

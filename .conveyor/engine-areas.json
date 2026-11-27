@@ -736,6 +736,7 @@
 {"area": "slices", "test": "slices.test.sh"}
 {"area": "slices", "test": "slicewithdraw.test.sh"}
 {"area": "slices", "test": "slicesopen.test.sh"}
+{"area": "slices", "test": "slicesgrownedit.test.sh"}
 {"area": "slices", "test": "slicedefaults.test.sh"}
 {"area": "slices", "test": "parts.test.sh"}
 {"area": "slices", "test": "testcards.test.sh"}

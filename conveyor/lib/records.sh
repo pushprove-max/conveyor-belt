@@ -200,8 +200,10 @@ linesum() { # <records file> <kept> <to> <filter>
 }
 # A card's line written that is not a start line holds the waits noted for it (line()): the notes go, so no later line
 # counts them again, whether record() or another writer of a line() (a batch's landed lines, a closed line) wrote it.
+# With RECSYNC set (`RECSYNC=1 began ...`: a line that alone records the action outside that follows it, lib/slices.sh),
+# the line is on disk before the append returns, else it fails with 3 (state.py append ... sync).
 append() { # <line>
-  printf '%s\n' "$1" | stdb append cards || return
+  printf '%s\n' "$1" | stdb append cards ${RECSYNC:+sync} || return
   [[ $1 =~ ^\{\"card\":\"([^\"/]+)\",\"issue\":-?[0-9]+,\"step\":\"([^\"]+)\" ]] && [ "${BASH_REMATCH[2]}" != start ] && rm -f "$CARDS/${BASH_REMATCH[1]}.waits"
   return 0
 }
@@ -314,13 +316,14 @@ outkeep() { # <card> <step> <the line>
 }
 # A step's line is always written: one whose extra fields are not one JSON object is written without them,
 # and says so (unread, with the start of what they were), so the card goes on. A line that cannot be written at all
-# (twice, a second apart) ends the card as blocked (block keeps its change as a patch and removes its worktree), so
+# (twice, a second apart), or that RECSYNC asks on disk and that is written and not synced (append's 3: written once,
+# never again, as the file holds it), ends the card as blocked (block keeps its change as a patch and removes its worktree), so
 # a card is never left open with its worktree behind; then this process stops. A build, fix or rebase line with no
 # price to read keeps its session's output (outkeep).
 record() { # <card> <issue> <step> <result> [extra json]
   local l
   l=$(line "$@" 2>/dev/null) || l=$(line "$1" "$2" "$3" "$4" "$(jq -cn --arg x "${5:0:300}" '{unread: ("the fields of this line were not one JSON object, so they were left out: " + $x)}')" 2>/dev/null) || l=''
-  [ -n "$l" ] && { locked append "$l" || { sleep 1; locked append "$l"; }; } && {
+  [ -n "$l" ] && { locked append "$l" || { [ $? != 3 ] && sleep 1 && locked append "$l"; }; } && {
     outkeep "$1" "$3" "$l"; return 0; }
   echo "conveyor: cannot record $1 $3" >&2
   [ "$3" = blocked ] || [ ! -d "$CARDS/$1" ] || block "$1" "$2" "$CARDS/$1" "conveyor: the engine could not write the $3 line of this card to the card records"

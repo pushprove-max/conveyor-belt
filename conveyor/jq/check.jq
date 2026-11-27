@@ -13,7 +13,7 @@ def fails: type == "object" and (keys - ["stopped", "notRun", "ownLimit"]) == ["
 def need: ["card", "issue", "reason", "result", "sha", "step", "time", "tokens"];
 def known: ["product", "title", "usage", "kept", "leftover", "followups", "outside", "sec", "visible", "branch", "base", "created", "counts", "of", "model", "effort",
   "stats", "tests", "diff", "limit", "depth", "spent", "unread", "retriedAt", "head", "yesFrom", "paths", "pid", "started", "tail", "firstTry", "doneWhen", "doneWhenItems", "doneWhenHolds", "excerpts", "batch", "failures", "rerun", "repo", "account", "reviewAccount", "engine", "stalls", "judge", "patch", "main", "seen", "reused", "cost", "survived", "answers",
-  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "partial", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "noIssue", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "retriedBy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "plan", "pick","lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed", "port", "alsoUsed", "cacheFirst", "proofLines", "waits", "before"];
+  "wait", "run", "slotsFree", "selected", "ended", "list", "coverage", "slow", "timed", "times", "clocks", "carried", "partial", "kind", "check", "why", "wholeSuite", "ranCases", "verdicts", "mainRun", "refused", "mainRed", "testFile", "noIssue", "beyond", "speed", "testedits", "route", "speedcheck", "retriedWhy", "retriedBy", "waitSec", "wide", "pr", "doneLines", "ran", "checks", "split", "grown", "rollout", "plan", "pick","lint", "stop", "pass", "rounds", "flaky", "waitFor", "log", "brokeMain", "class", "resumed", "port", "alsoUsed", "cacheFirst", "proofLines", "waits", "before", "replaces", "handed"];
 def steps: ["picked", "split", "worktree", "deps", "brief", "start", "build", "review", "test", "fix", "rebase", "filed", "landed", "closed", "blocked", "push", "pushed", "issue", "bugproof", "grown", "lint", "seats", "judge"];
 # Each required field's own test.
 def needok($k): if $k == "issue" then .issue | type == "number" elif $k == "time" then (try (.time | fromdate | type == "number") catch false)
@@ -182,7 +182,10 @@ def ok: . as $r | (keys - known) == need
         # the verdict and why, the slices of a split, the issues filed for them and whether they started held (On), the
         # card whose unrecorded plan this card finished or ended (resumed), the answer that broke the rules, forced: true
         # when the check was made for an issue with two blocked cards. The plan: on the
-        # start line of the filing, the split it files and whether its slices are cards with no GitHub issue.
+        # start line of the filing, the split it files and whether its slices are cards with no GitHub issue. Replaces:
+        # on the start line of a grown change's filing (growcheck()), the earlier slices it closes, each {n, files}. Handed:
+        # on a start line of a filing (growresume()), the slices that a card closed and stopped before it recorded, each
+        # {n, files}: the files of it whose holds and waits this card handed to the slices filed in their place.
         # A card's pick (modelpick(), lib/modelpick.sh), on each of its lines from the pick on: its group, the
         # builder chosen, by whom, whether it is a trial, and the rule's setting; on a trial card, the pipeline files its
         # change touches (trialflag()), when there are any; on a card of a promoted group on the challenger
@@ -210,6 +213,10 @@ def ok: . as $r | (keys - known) == need
         and ((.step == "split") == (.split != null))
         and (.plan == null or (.step == "start" and .of == "file" and (.plan | type == "object" and keys == ["cards", "split"]
           and (.cards | type == "boolean") and (.split | type == "object" and .verdict == "split" and (.slices | type == "array")))))
+        and (.replaces == null or (.step == "start" and .of == "file" and (.replaces | type == "array"
+          and all(type == "object" and keys == ["files", "n"] and (.n | type == "number") and (.files | type == "array" and all(type == "string"))))))
+        and (.handed == null or (.step == "start" and .of == "file" and (.handed | type == "array" and length > 0
+          and all(type == "object" and keys == ["files", "n"] and (.n | type == "number") and (.files | type == "array" and length > 0 and all(type == "string"))))))
         and (.split == null or ((.result | IN("kept", "split")) and (.split | type == "object"
           and (keys - ["slices", "filed", "cards", "held", "resumed", "answer", "forced"]) == ["hash", "mode", "size", "verdict", "why"]
           and (.resumed // "" | type == "string") and ((has("forced") | not) or .forced == true)

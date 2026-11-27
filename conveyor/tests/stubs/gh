@@ -13,7 +13,9 @@ case $2 in
     # Each issue with the fields --json names alone, as gh gives them: a caller that asks for too few is not given more.
     fields() { jq -c --arg f "$j" '($f | split(",")) as $k | map(with_entries(select(.key | IN($k[]))))'; }
     if [ "$4" = closed ]; then echo "$*" >> "$STUB/closed-asked"; [ ! -e "$STUB/closed-fail" ] || exit 1; { cat "$STUB/closed-issues.json" 2>/dev/null || echo '[]'; } | fields; else [ ! -f "$STUB/list-cmd" ] || . "$STUB/list-cmd"
-    if [ "$4" = all ]; then issues | jq -c "sort_by(-.number) | .[:$6]" | fields; else issues | jq -c ".[:$6]" | fields; fi; fi ;; # all: newest first, as on GitHub
+    # all: newest first, as on GitHub, each issue's state CLOSED when it is in $STUB/closed (gh issue close), else OPEN.
+    if [ "$4" = all ]; then issues | jq -c --rawfile cl <(cat "$STUB/closed" 2>/dev/null) "(\$cl | split(\"\n\")) as \$cl | map(.state //= (if .number | tostring | IN(\$cl[]) then \"CLOSED\" else \"OPEN\" end)) | sort_by(-.number) | .[:$6]" | fields
+    else issues | jq -c ".[:$6]" | fields; fi; fi ;;
   # Another repository's issue (gh issue view <n> --repo <owner/repo> --json state): $STUB/repo.<owner_repo>.<n> holds
   # its state, else CLOSED; with $STUB/repo-fail.<owner_repo>, that repository cannot be read. Each ask is a line <owner/repo>#<n> of $STUB/far-viewed.
   view) case "$*" in *' --repo '*) k=${5//\//_}; echo "$5#$3" >> "$STUB/far-viewed"; [ ! -e "$STUB/repo-fail.$k" ] || { echo "GraphQL: Could not resolve to a Repository with the name '$5'. (repository)" >&2; exit 1; }
@@ -28,6 +30,9 @@ case $2 in
   # ($STUB/subs: a line "<parent> <part>" for each; a part not among the open issues is closed), or when the
   # awaiting-deploy labels were added.
   graphql) case "$*" in *fullDatabaseId*) n=$(printf '%s\n' "$@" | sed -n 's/^number=//p'); echo "{\"data\": {\"repository\": {\"issue\": {\"fullDatabaseId\": \"$((n + 6488700000))\"}}}}" ;;
+      # Why an issue was closed: COMPLETED when $STUB/completed names it (one a line), else NOT_PLANNED.
+      *stateReason*) n=$(printf '%s\n' "$@" | sed -n 's/^number=//p'); r=NOT_PLANNED; ! grep -qx "$n" "$STUB/completed" 2>/dev/null || r=COMPLETED
+        echo "{\"data\": {\"repository\": {\"issue\": {\"stateReason\": \"$r\"}}}}" ;;
       # One issue's sub-issues, open or closed (onlyParts, lib/issues.sh onlyparts()): its parts in $STUB/subs, a line
       # "<parent> <part> <OPEN or CLOSED>" each. An issue named in $STUB/deleted (one a line) gets GitHub's NOT_FOUND
       # answer and gh's exit 1.
@@ -69,9 +74,11 @@ case $2 in
     printf '%s\n' "${a[*]}" >> "$STUB/comments" ;;
   close) echo "$3" >> "$STUB/closed"; shift 3; printf '%s\n' "$*" >> "$STUB/close-comments" ;;
   reopen) echo "$3" >> "$STUB/reopened"; shift 3; printf '%s\n' "$*" >> "$STUB/reopen-comments" ;;
-  # gh issue edit <n> --remove-label <label>: the label is taken off the issue's line in $STUB/filed (any other edit is ignored),
-  # after $STUB/edit-cmd, when there is one, is sourced (it sees the issue as it was before the edit).
-  edit) n=$3; [ ! -f "$STUB/edit-cmd" ] || . "$STUB/edit-cmd"; shift 3; while [ $# -gt 0 ]; do [ "$1" != --remove-label ] || { jq -c --argjson n "$n" --arg l "$2" 'if .number == $n then .labels |= map(select(.name != $l)) else . end' "$STUB/filed" > "$STUB/filed.new" && mv -f "$STUB/filed.new" "$STUB/filed"; }; shift; done ;;
+  # gh issue edit <n> --remove-label <label>: the label is taken off the issue's line in $STUB/filed; --body-file <file>
+  # (- for stdin): that line's body is the file's text (any other edit is ignored). $STUB/edit-cmd, when there is one,
+  # is sourced first (it sees the issue as it was before the edit).
+  edit) n=$3; [ ! -f "$STUB/edit-cmd" ] || . "$STUB/edit-cmd"; shift 3; while [ $# -gt 0 ]; do [ "$1" != --remove-label ] || { jq -c --argjson n "$n" --arg l "$2" 'if .number == $n then .labels |= map(select(.name != $l)) else . end' "$STUB/filed" > "$STUB/filed.new" && mv -f "$STUB/filed.new" "$STUB/filed"; }
+    [ "$1" != --body-file ] || { b=$(cat -- "$2"; echo x); jq -c --argjson n "$n" --arg b "${b%x}" 'if .number == $n then .body = $b else . end' "$STUB/filed" > "$STUB/filed.new" && mv -f "$STUB/filed.new" "$STUB/filed"; }; shift; done ;;
   create) shift 2; n=$((100101 + $(cat "$STUB/filed" 2>/dev/null | wc -l))); l=(); m=
     [ ! -f "$STUB/create-cmd" ] || . "$STUB/create-cmd"
     # The option that gave the body (--body or --body-file) is noted in $STUB/body-from, a line per issue filed.

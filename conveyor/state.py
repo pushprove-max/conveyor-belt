@@ -163,7 +163,7 @@ def opened(folder, tables):
                     pass
 
 
-def append(folder, t):
+def append(folder, t, durable=False):
     data = sys.stdin.buffer.read()
     if not data:
         return 0
@@ -174,10 +174,24 @@ def append(folder, t):
         db = opened(folder, [t])
     except (sqlite3.Error, OSError) as e:
         print(f"state.py: the database could not be read ({e}); the lines go to the file alone", file=sys.stderr)
-    path = os.path.join(folder, TABLES[t])
+    path, synced = os.path.join(folder, TABLES[t]), True
     try:
         with open(path, "ab") as f:
             f.write(data)
+            # With <durable>, on disk before the append returns: the line comes just before an action outside that
+            # only it records (a split's plan before its slices are filed on GitHub, lib/slices.sh), and a power cut
+            # that lost it would leave that action unknown. A sync that fails fails the append with 3, not 1: the
+            # line is in the file, so the caller must not write it again (record(), lib/records.sh), and it must not
+            # act on it as kept. Bug: the line was left in the page cache, and the next card filed the slices again.
+            # Other lines are not synced: their callers (a pick, a move to the retried file) act on the append's 0,
+            # and a sync error that failed them would leave a line with nothing done for it.
+            if durable:
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except OSError as e:
+                    print(f"state.py: {path} could not be synced to disk: {e}", file=sys.stderr)
+                    synced = False
     except OSError as e:
         print(f"state.py: cannot write {path}: {e}", file=sys.stderr)
         if db:
@@ -189,7 +203,7 @@ def append(folder, t):
             db.commit()
         except sqlite3.Error as e:
             print(f"state.py: the database did not take the lines ({e}); it takes them from the file next", file=sys.stderr)
-    return 0
+    return 0 if synced else 3
 
 
 def rewrite(folder, t, data):
@@ -376,10 +390,10 @@ def ask(folder, argv):
 
 def main(argv):
     if len(argv) < 3:
-        fail("usage: state.py <state folder> append <table> | ask <question> [<arg>...] [-- ...]")
+        fail("usage: state.py <state folder> append <table> [sync] | ask <question> [<arg>...] [-- ...]")
     folder, cmd = argv[1], argv[2]
-    if cmd == "append" and len(argv) == 4 and argv[3] in TABLES:
-        return append(folder, argv[3])
+    if cmd == "append" and len(argv) in (4, 5) and argv[3] in TABLES and argv[4:] in ([], ["sync"]):
+        return append(folder, argv[3], argv[4:] == ["sync"])
     if cmd == "rewrite" and len(argv) == 4 and argv[3] in TABLES:
         return rewrite(folder, argv[3], sys.stdin.buffer.read())
     if cmd == "keep" and len(argv) == 6 and argv[3] in TABLES and argv[4].isdigit() and argv[5].isdigit():

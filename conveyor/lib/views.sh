@@ -349,7 +349,7 @@ SPLITM='def splitm($all): [$all | group_by(.card)[] | select(any(.step == "split
 # were most of the bytes it read. A test line's times only as whether they are an object (untimed).
 HEALTHLINE='select(. != "") | fromjson | {card, issue, step, of, time, result, followups} + if .step == "worktree" then {pid, started}
     elif .step == "blocked" then {reason, retriedAt, retriedBy} elif .step == "landed" then {sha} elif .step == "push" then {sha, reason, kind, check, log} elif .step == "pushed" then {pr, flaky}
-    elif .step == "picked" then {mainRed, testFile, noIssue} elif .step == "lint" then {skipped: any(.lint.commands[]?; .result | strings | startswith("skipped"))} elif .step == "test" then {refused, reused, ended, selected, times: (if (.times | type) == "object" then {} else null end)}
+    elif .step == "picked" then {mainRed, testFile, noIssue} elif .step == "start" and .replaces then {replaces} elif .step == "lint" then {skipped: any(.lint.commands[]?; .result | strings | startswith("skipped"))} elif .step == "test" then {refused, reused, ended, selected, times: (if (.times | type) == "object" then {} else null end)}
     else {} end'
 # Who gave a blocked card back is kept as its line's retriedBy (retry(), lib/issues.sh): `conveyor.sh retry` sets it
 # (commands/retry.sh), review-retry for the standing review-retry's (needsretry(), lib/needsask.sh, and the Foreman's

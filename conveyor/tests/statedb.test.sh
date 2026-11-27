@@ -106,6 +106,67 @@ t_statedbappend() {
     || fail "the database made anew does not hold the file's lines: $(diff <(statedb_rows "$s" cards) "$s/cards.jsonl" | head -n 5)"
 }
 
+# state.py's append of c5's line to cards.jsonl in <state folder> (`append cards sync` with <sync> "sync", else
+# `append cards`), with os.fsync watched: prints "synced" when a sync of that file found c5's line in the file, else
+# "not synced", then the append's exit. With <fail>, each sync fails as a failing disk's does (EIO). A power cut cannot
+# be made here: the cases ask what the append synced, and when.
+fsyncappend() { # <state folder> <sync or ""> [fail]
+  mkdir -p "$1"
+  printf '%s\n' '{"card":"c5","issue":5,"step":"picked","time":"2026-03-02T00:00:00Z"}' | python3 -c 'import errno, os, runpy, sys
+p, s, y, f = sys.argv[1:5]
+path, seen, real = os.path.join(s, "cards.jsonl"), [], os.fsync
+def fsync(fd):
+    a, b = os.fstat(fd), os.stat(path)
+    if (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino) and b"\"card\":\"c5\"" in open(path, "rb").read():
+        seen.append(fd)
+    if f:
+        raise OSError(errno.EIO, "Input/output error")
+    real(fd)
+os.fsync = fsync
+sys.argv = [p, s, "append", "cards"] + ([y] if y else [])
+try:
+    runpy.run_path(p, run_name="__main__")
+    rc = 0
+except SystemExit as e:
+    rc = e.code or 0
+print("synced" if seen else "not synced", rc)' "$SRC/state.py" "$1" "$2" "${3:-}" 2>/dev/null
+}
+
+# Bugs caught (review of #1684): an appended line asked on disk (a split's plan, then its slices filed on GitHub) was
+# left in the page cache, so a power cut just after it could lose it, and the next card filed the slices again; a sync
+# made before the line left Python's buffer for the file synced the file without it.
+t_statedbfsync() {
+  local out; out=$(fsyncappend "$T/$CASE/st" sync)
+  [ "$out" = 'synced 0' ] && [ "$(grep -c '"card":"c5"' "$T/$CASE/st/cards.jsonl")" = 1 ] \
+    || fail "state.py append cards sync of c5's line did not sync cards.jsonl with the line in it before it returned 0: $out"
+}
+
+# Bug caught (review of #1684): a sync that failed was only said, the append returned 0, and the card filed slices
+# with no plan known to be on disk. The append fails with 3, and the line is in the file once.
+t_statedbfsyncfail() {
+  local out; out=$(fsyncappend "$T/$CASE/st" sync fail)
+  [ "$out" = 'synced 3' ] && [ "$(grep -c '"card":"c5"' "$T/$CASE/st/cards.jsonl")" = 1 ] \
+    || fail "state.py append cards sync of c5's line, with each sync failing (EIO), did not write it once and exit 3: $out"
+}
+
+# Bug caught (review of #1684): every append was synced and failed with 3 on a sync error, so a pick's line stayed in
+# the records with no card launched for it, and later picks skipped the issue. An append not asked on disk makes no
+# sync, and a failing disk's sync does not fail it.
+t_statedbnosync() {
+  local out; out=$(fsyncappend "$T/$CASE/st" '' fail)
+  [ "$out" = 'not synced 0' ] && [ "$(grep -c '"card":"c5"' "$T/$CASE/st/cards.jsonl")" = 1 ] \
+    || fail "state.py append cards of c5's picked line, with each sync failing (EIO), synced it or did not write it once and exit 0: $out"
+}
+
+# Bug caught (review of #1684): record() wrote a line again a second after an append that wrote it and could not sync
+# it (3), so the file held it twice. It is written once, and the card ends (exit 1).
+t_statedbsyncrecord() {
+  setup '[]'; mkdir -p "$ST"
+  fx_in 'append() { printf "%s\n" "$1" >> "$ST/cards.jsonl"; return 3; }; record c5 5 start ok'
+  [ "$RC" = 1 ] && [ "$(grep -c '"card":"c5"' "$ST/cards.jsonl")" = 1 ] \
+    || fail "record c5 5 start ok, with an append that wrote the line and could not sync it (3), did not write it once and fail (exit $RC): $(cat "$ST/cards.jsonl" "$T/$CASE/run.out")"
+}
+
 # Bug: an engine write that does not go through the helper (here `declined add`, as the card records' and the
 # samples' appends) leaves the database behind its file until a reader brings it up to date.
 t_statedbengine() {
