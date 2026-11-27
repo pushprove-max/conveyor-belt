@@ -350,13 +350,13 @@ p_cover() {
   [ "$got" = "bg:the hkb check hk:ha,hc" ] && ok "changed hook functions run only the case_on cases and check texts the map lists" || no "hka and hkb changed: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- .claude/hooks/hk.sh
   printf 'xthree() {\n  echo three\n}\n' >> "$R/conveyor/x.sh"; got=$(ran)
-  [ "$got" = "aone atwo" ] && ok "D3: a function the coverage map does not hold runs its file's area, as before" || no "xthree added: ran '$got': $(cat "$T/out")"
+  [ "$got" = "aone atwo" ] && ok "D3: an added function that no mapped function calls runs its file's area, as before" || no "xthree added: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- conveyor/x.sh; echo 'echo top' >> "$R/conveyor/x.sh"; got=$(ran)
   [ "$got" = "aone atwo" ] && ok "a changed line outside the functions runs the area" || no "top-level line: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- conveyor/x.sh
   sed 's/echo one/echo uno/' "$R/conveyor/x.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/x.sh"; git -C "$R" commit -qam since
   sed 's/echo uno/echo eins/' "$R/conveyor/x.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/x.sh"; got=$(ran)
-  [ "$got" = "aone atwo" ] && ok "a function changed since the coverage map was traced runs the area" || no "xone changed since the trace: ran '$got': $(cat "$T/out")"
+  [ "$got" = aone ] && ok "a function changed since the coverage map was traced runs the cases the map lists for it as traced, not the area" || no "xone changed since the trace: ran '$got': $(cat "$T/out")"
 }
 
 # Issue 598. Bug it catches: a change to lib/a.sh broke tests/l.test.sh, which no card changing lib/a.sh selects, so it

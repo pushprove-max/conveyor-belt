@@ -41,10 +41,11 @@
 # changed function: engine cases through the runner, parts of dashboard.test.sh and of the hooks' tests (partsof;
 # CONVEYOR_SHELL_TEST_CASE, comma-separated), other test
 # files whole; and of the tests named after the file or listed for it (TESTS_OF), those the map names nowhere (that the
-# trace did not run). A part runs only when nothing selects its test file whole. A change outside any function, to a
-# function the map does not hold or lists no case for, or to one changed since the map was traced (its sum differs),
-# runs by the rules above (callersof, else its area; a hook library, .claude/hooks/lib/, the hooks' tests that reach
-# it: hooklibtests).
+# trace did not run). A part runs only when nothing selects its test file whole. A function changed since the map was
+# traced (its sum differs) runs the cases the map lists for it as traced; a function the change adds runs the cases of
+# the functions of its file that call it (up to 3 calls away). A change outside any function, to a function the map
+# does not hold or lists no case for, or an added one that no mapped function of its file calls, runs by the rules above
+# (callersof, else its area; a hook library, .claude/hooks/lib/, the hooks' tests that reach it: hooklibtests).
 # The map check says how old the coverage map is.
 # A change to the map itself runs the map check, the map's own tests (MAPTESTS: .conveyor/test-changed.test.sh,
 # .conveyor/test-changed-map.test.sh and .conveyor/test-changed-areas.test.sh, which read this checkout's map) and the case files whose naming changed: each
@@ -1151,16 +1152,19 @@ keysof() {
   parse[$f]=1
 }
 # covof <file> (issue 527): when the change of a shell file (TXFROM to TXTO) edits or removes its functions alone (FUNCS;
-# its other lines the same but for comments and blanks, TEXT), and the coverage map ($COV) holds each of them as it was
-# at TXFROM (one sum, the same as sumsof's there) with at least one case: the cases it lists for them. An engine case
+# its other lines the same but for comments and blanks, TEXT), and the coverage map ($COV) holds each of them with at
+# least one case: the cases it lists for them. The map's row of a function stands for it whatever its sum: one changed
+# since the trace runs the cases that ran it then. A function the change adds stands as the functions of the changed
+# file that call it, up to 3 calls away (an added caller of an added function looks one call further). An engine case
 # into ccase (the runner's cases), a part of a test file into npart, a whole test file into run. It leaves the changed
 # functions' names in CFN once it has read them. It fails, and the rules after it pick, when there is no map or it cannot be read, the file cannot be read either side, a line outside
-# its functions changed, a function is added, or the map lacks one, lists no case for one, holds an older sum of one,
+# its functions changed, an added function has no caller the map can stand on, or the map lacks one, lists no case for one,
 # names a unit or test file number twice or one it does not name, or names a test file, an engine case or a part
 # (partok) that is not there now.
 covof() {
-  local f=$1 a b sa sb s sel t c ac
-  local -a fn
+  local f=$1 a b sa sb sel t c ac k n body x y z
+  local -a fn front next
+  local -A old=() kb=() use=() seen=()
   [ -n "$TXFROM" ] && [ -s "$COV" ] || return 1
   a=$(git show "$TXFROM:$f" 2>/dev/null) && a=$(awk "$FUNCS" <<<"$a") || return 1
   if [ -n "$TXTO" ]; then b=$(git show "$TXTO:$f" 2>/dev/null) && b=$(awk "$FUNCS" <<<"$b") || return 1
@@ -1171,20 +1175,39 @@ covof() {
   mapfile -t fn < <(grep '^K' <<<"$a"$'\n'"$b" | LC_ALL=C sort | uniq -u | cut -f2 | LC_ALL=C sort -u)
   [ ${#fn[@]} -gt 0 ] || return 1
   CFN=${fn[*]}
-  # Each one's sum as TXFROM has it: one a function, or the change added one.
-  s=$(sumsof <<<"$a" | awk -F'\t' 'NR == FNR { w[$0]; next } $1 in w' <(printf '%s\n' "${fn[@]}") -)
-  [ -n "$s" ] && [ "$(grep -c . <<<"$s")" = ${#fn[@]} ] || return 1
+  # The functions TXFROM has (old) and the bodies of those the change leaves (kb). A function TXFROM has stands for
+  # itself; an added one, for the functions TXFROM has that call it in kb, a call being its name as a whole word.
+  while IFS=$'\t' read -r k n body; do [ "$k" != K ] || old[$n]=1; done <<<"$a"
+  while IFS=$'\t' read -r k n body; do [ "$k" != K ] || kb[$n]=$body; done <<<"$b"
+  for x in "${fn[@]}"; do
+    [ -z "${old[$x]:-}" ] || { use[$x]=1; continue; }
+    front=("$x"); seen=([$x]=1); z=
+    for _ in 1 2 3; do
+      next=()
+      for y in "${!kb[@]}"; do
+        [ -z "${seen[$y]:-}" ] || continue
+        for n in "${front[@]}"; do
+          [[ ${kb[$y]} =~ (^|[^A-Za-z0-9_])$n([^A-Za-z0-9_]|$) ]] || continue
+          seen[$y]=1
+          if [ -n "${old[$y]:-}" ]; then use[$y]=1; z=1; else next+=("$y"); fi
+          break
+        done
+      done
+      [ ${#next[@]} -gt 0 ] || break
+      front=("${next[@]}")
+    done
+    [ -n "$z" ] || return 1
+  done
   # The map's form (coverage.sh): its test files and units by number, each number named once (else two maps were
-  # merged and no number can be trusted), and each function's row with the numbers of the units that ran it.
-  sel=$(jq -rn --arg f "$f" --arg s "$s" '[inputs | objects] as $m | [$s | split("\n")[] | select(. != "") | split("\t")] as $fs
+  # merged and no number can be trusted), and each function's rows with the numbers of the units that ran it.
+  sel=$(jq -rn --arg f "$f" --arg s "$(printf '%s\n' "${!use[@]}")" '[inputs | objects] as $m | [$s | split("\n")[] | select(. != "")] as $fs
     | [$m[] | select(has("testfile") and has("path"))] as $tf | [$m[] | select(has("unit"))] as $un
     | (reduce $tf[] as $x ({}; .[$x.testfile | tostring] = $x.path)) as $p
     | (reduce $un[] as $x ({}; .[$x.unit | tostring] = [$p[$x.testfile | tostring], $x.case // ""])) as $u
     | [$m[] | select(.file == $f and has("sum"))] as $rows
     | if ($p | length) == ($tf | length) and ($u | length) == ($un | length)
-        and all($fs[]; .[0] as $n | .[1] as $x | [$rows[] | select(.fn == $n)]
-          | length > 0 and all(.sum == $x) and any((.units // []) | length > 0))
-      then [$rows[] | select(.fn as $n | any($fs[]; .[0] == $n)) | .units[] | $u[tostring]]
+        and all($fs[]; . as $n | [$rows[] | select(.fn == $n)] | any((.units // []) | length > 0))
+      then [$rows[] | select(.fn as $n | any($fs[]; . == $n)) | .units[] | $u[tostring]]
         | if all(.[]; . != null and .[0] != null) then .[] | @tsv else error("not held") end
       else error("not held") end' "$COV" 2>/dev/null) && [ -n "$sel" ] || return 1
   ac=$(allcases)

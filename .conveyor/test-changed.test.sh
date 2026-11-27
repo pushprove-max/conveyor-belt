@@ -250,8 +250,10 @@ p_unlisted() {
 # Issue 527. Bug: a change to one engine function ran its whole area, and one to one function of dashboard.sh all of
 # dashboard.test.sh (55 CPU s). D2: a change to a function the coverage map holds runs only the cases it lists for it;
 # D4: of dashboard.sh, only the parts of dashboard.test.sh it lists. D3: a function the map does not hold, or lists no
-# case for, one changed since the trace, or a line outside the functions, runs by the area rule, as before. The map
-# check says how old the map is.
+# case for, or a line outside the functions, runs by the area rule, as before. The map check says how old the map is.
+# Bug it also catches: a function changed on main since the trace, or one a card added, ran its whole area (#1709's
+# part 2, one change to pushtests(), ran 65 test files): a changed one runs the cases the map lists for it as traced,
+# an added one the cases of the mapped functions that call it.
 p_cover() {
   local d=.claude/scripts/__tests__/dashboard.test.sh
   (cd "$R" && bash .conveyor/test-changed.sh --check) | grep -q '^coverage map: none' && ok "the map check says there is no coverage map" || no "no coverage map: $(cd "$R" && bash .conveyor/test-changed.sh --check)"
@@ -295,13 +297,17 @@ p_cover() {
   [ "$got" = "bg:the hkb check hk:ha,hc" ] && ok "changed hook functions run only the case_on cases and check texts the map lists" || no "hka and hkb changed: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- .claude/hooks/hk.sh
   printf 'xthree() {\n  echo three\n}\n' >> "$R/conveyor/x.sh"; got=$(ran)
-  [ "$got" = "aone atwo" ] && ok "D3: a function the coverage map does not hold runs its file's area, as before" || no "xthree added: ran '$got': $(cat "$T/out")"
+  [ "$got" = "aone atwo" ] && ok "D3: an added function that no mapped function calls runs its file's area, as before" || no "xthree added: ran '$got': $(cat "$T/out")"
+  git -C "$R" checkout -q -- conveyor/x.sh
+  printf 'xone() {\n  echo one; xthree\n}\nxtwo() {\n  echo two\n}\nxthree() {\n  xfour\n}\nxfour() {\n  echo four\n}\n' > "$R/conveyor/x.sh"; got=$(ran)
+  [ "$got" = aone ] && ok "an added function runs the cases the map lists for the mapped function that calls it, two calls away too, not its area" \
+    || no "xthree and xfour added, called from xone: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- conveyor/x.sh; echo 'echo top' >> "$R/conveyor/x.sh"; got=$(ran)
   [ "$got" = "aone atwo" ] && ok "a changed line outside the functions runs the area" || no "top-level line: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- conveyor/x.sh
   sed 's/echo one/echo uno/' "$R/conveyor/x.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/x.sh"; git -C "$R" commit -qam since
   sed 's/echo uno/echo eins/' "$R/conveyor/x.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/x.sh"; got=$(ran)
-  [ "$got" = "aone atwo" ] && ok "a function changed since the coverage map was traced runs the area" || no "xone changed since the trace: ran '$got': $(cat "$T/out")"
+  [ "$got" = aone ] && ok "a function changed since the coverage map was traced runs the cases the map lists for it as traced, not the area" || no "xone changed since the trace: ran '$got': $(cat "$T/out")"
 }
 
 # Issue 598. Bug it catches: a change to lib/a.sh broke tests/l.test.sh, which no card changing lib/a.sh selects, so it
