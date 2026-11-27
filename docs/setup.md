@@ -315,6 +315,9 @@ From a shell, in your project's checkout, the same steps are
 `conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-machine yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
+To see the board in the Chat tab of Claude Desktop, run `conveyor.sh setup desktop` in your project's checkout
+([In Claude Desktop](units.md#in-claude-desktop)).
+
 ## Following releases or main, or pinning a commit
 
 The pack's `plugin` names the engine the project runs, in one of three ways:

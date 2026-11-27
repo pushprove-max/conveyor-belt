@@ -339,6 +339,38 @@ heldstart() {
     || { rm -f "$CONTROL.new"; echo "conveyor: the control record $CONTROL could not be written with the open issues held (gh issue list, or the folder); run setup again" >&2; return 1; }
   echo "conveyor: wrote the control record $CONTROL: new issues start held; $(heldline "$(jq length <<<"$open")")"
 }
+# `conveyor.sh setup desktop`: /units for Claude Desktop's Chat tab, as the bundle conveyor-units.mcpb in the state
+# folder's desktop/: a zip of manifest.json (written here) and the plugin's desktop/units-mcp/server.py and view.html.
+# The manifest runs server.py with the python3 found here (3.11 or newer, as server.py needs) and this PATH, as Desktop
+# starts it with neither, and with its one user config value, the checkout, set to this project's main checkout, where
+# the server runs the fetch. On macOS it opens the bundle, so Claude Desktop asks to install it; elsewhere it prints
+# the path.
+desktopbundle() {
+  local src=$HERE/../desktop/units-mcp d=$ST/desktop py v t rc
+  [ $# = 0 ] || { echo "usage: conveyor.sh setup desktop" >&2; return 2; }
+  [ -f "$src/server.py" ] && [ -f "$src/view.html" ] || { echo "conveyor: $src has no server.py or view.html: the Desktop bundle is not built" >&2; return 1; }
+  py=$(command -v python3) && "$py" -c 'import sys; sys.exit(sys.version_info < (3, 11))' \
+    || { echo "conveyor: the Desktop bundle needs python3 3.11 or newer on PATH: the bundle is not built" >&2; return 1; }
+  v=$(jq -er '.version | strings' "$HERE/../.claude-plugin/plugin.json") || { echo "conveyor: the plugin's version cannot be read: the Desktop bundle is not built" >&2; return 1; }
+  mkdir -p "$d" && t=$(mktemp -d "$d/build.XXXXXX") || return 1
+  jq -n --arg v "$v" --arg py "$py" --arg path "$PATH" --arg main "$MAIN" '{manifest_version: "0.3", name: "conveyor-units",
+    display_name: "Conveyor /units", version: $v, description: "Conveyor'"'"'s board in the Chat tab: what needs you, the belt, the queue and today'"'"'s dollars. It only reads.",
+    author: {name: "Conveyor"}, license: "Apache-2.0",
+    server: {type: "python", entry_point: "server.py",
+      mcp_config: {command: $py, args: ["${__dirname}/server.py", "${user_config.checkout}"], env: {PATH: $path}}},
+    user_config: {checkout: {type: "directory", title: "Project checkout",
+      description: "The main checkout of a project that Conveyor runs, where /units reads the board.", required: true, default: $main}},
+    compatibility: {platforms: ["darwin", "win32", "linux"], runtimes: {python: ">=3.11"}}}' > "$t/manifest.json" \
+    && (cd "$t" && "$py" -m zipfile -c bundle.mcpb manifest.json "$src/server.py" "$src/view.html") && mv -f "$t/bundle.mcpb" "$d/conveyor-units.mcpb"; rc=$?
+  rm -rf "$t"
+  [ "$rc" = 0 ] || { echo "conveyor: the Desktop bundle could not be written in $d" >&2; return 1; }
+  if p_darwin; then
+    open "$d/conveyor-units.mcpb" || { echo "conveyor: $d/conveyor-units.mcpb could not be opened: open it in Claude Desktop" >&2; return 1; }
+    echo "opened $d/conveyor-units.mcpb: Claude Desktop asks to install it"
+  else
+    echo "$d/conveyor-units.mcpb: open it in Claude Desktop to install it"
+  fi
+}
 # `conveyor.sh setup pack-commit [yes | no]`: the pack (.conveyor/project.json) committed on the default branch, in the
 # main checkout, when it is not committed or differs from its commit; /conveyor-belt:setup and the Foreman ask the owner
 # first, so the owner never types a git command. With no answer it commits nothing: it prints `ask: <the question>` and

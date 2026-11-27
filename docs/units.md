@@ -276,6 +276,30 @@ A section with nothing to show has one dim line: `nothing on the belt`, `nothing
 The pane and `/units` write times of day in the form that the Board's **Time** setting gives, or the `time` setting
 ([Settings](#settings)).
 
+## In Claude Desktop
+
+Claude Desktop's Chat tab can show the board as a card in the chat. Ask Claude for Conveyor's board, and the card
+shows:
+
+- Five figures: On belt, Ready, Waiting, Needs you and Day spend.
+- The first five cards that need you, then `and N more` when there are more.
+- Two buttons. Open the board shows the whole board in a large view, with the belt, the queue and the waiting issues.
+  Read again reads the board again. The card also reads it again every 30 seconds while you can see it.
+- A foot line with the time of the read. When a read fails, the card keeps the last board, and the foot line gives
+  the time of the last good read and why the read failed.
+
+The card only reads. Claude also gets the board as text, the head lines that `/units` shows.
+
+To install it, run `conveyor.sh setup desktop` in your project's checkout. It writes the file
+`conveyor-units.mcpb` in the `desktop` folder of the state folder. On macOS, it opens the file, and Claude Desktop
+asks you to install it. On other systems, it prints the path of the file: open that file in Claude Desktop on the
+same computer. The file needs Python 3.11 or newer, and the command stops when it cannot find it. The file has one
+setting, the project checkout. Setup sets it to your project's main checkout. Run the command again after you update
+the plugin.
+
+The Code tab of Claude Desktop runs the plugin itself, with `/units` and the pane, the same as Claude Code. It does
+not need this file.
+
 ## Settings
 
 `time`, in `/config` under the plugin: `12-hour` (`3:04 PM`, the default) or `24-hour` (`15:04`). When the Board runs on
