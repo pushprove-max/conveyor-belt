@@ -222,7 +222,8 @@ snapprint() {
 # for one loop.json's cards still name, in either list: running counts it until the loop's next turn; started,
 # each card picked since that the kept belt does not hold, with no closing line since and still in the records, as a
 # belt card {card, issue, name, title, step (from its last step line, as rows.jq names it, roughly), stepAt, landed
-# false, fromRecords true: it is in no full build yet, so it has no track, model or cost}. Nothing is
+# false, fromRecords true: it is in no full build yet, so it has no track, model or cost}; lines, each card with a line
+# since (one the kept snapshot names stuck has moved on: the Foreman's watcher, recheck()). Nothing is
 # printed when the pack names no owner. A line since is one stamped at <snapshotAt> or later, or a card's line past
 # that card's count in <counts> (KEPTREAD, snapkeep): a line stamped before the build began that waited for the
 # records' lock is appended after the build copied them. A line the snapshot may hold (of the second the build began,
@@ -274,7 +275,8 @@ recordsnow() { # <snapshotAt> [<counts>]
                 step: (if $l == null then "brief" elif $l.step == "brief" then "build" elif $l.step | IN("build", "fix", "rebase") then "review"
                   elif $l.step == "test" then (if $l.result == "fail" then "fix" else "landing" end)
                   elif $l.result == "GO" then "tests" elif $l.result == "NO-GO" then "fix" else "review" end),
-                stepAt: last.time, landed: false, fromRecords: true}])}
+                stepAt: last.time, landed: false, fromRecords: true}]),
+         lines: ([$new[].card] | unique)}
       # loop.json is written before its turn picks, and again only when it changes: a card in progress that its cards
       # do not name, picked at or after its last write (its mtime, at), is in progress too, on the kept belt or started.
       | if (.running | type) == "number" then .running += ([

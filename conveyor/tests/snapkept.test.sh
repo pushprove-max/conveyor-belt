@@ -286,10 +286,12 @@ t_snapkeptnow() {
   # cards on the belt than it held: landed counts it.
   # Bug (#1305): the count left out a card in review or in its Test step: running is loop.json's count of every card
   # in progress.
+  # lines names c2, c3 and c6, each with a line since, and not c5, whose lines are older: the Foreman's watcher drops
+  # a card it names stuck from the kept snapshot when that card has a line since (#1784).
   jq -e --arg now "$now" '.recordsNewer == true and .recordsNow == {building: 2, waitingCount: 1, running: 4, landed: 1, blocked: [
       {card: "c5", issue: 5, name: null, title: null, reason: "old block", since: "2026-11-17T10:08:00Z"},
       {card: "c3", issue: 0, name: "Main is red (abcdef012345)", title: "red", reason: "the session made no change", since: $now}],
-      waiting: [{card: "c6", issue: 6, name: null, title: "six", reason: "visible to customers or staff: needs Dana'"'"'s yes: a new button", since: $now, sentence: "a new button"}], started: []}' <<<"$out" > /dev/null \
+      waiting: [{card: "c6", issue: 6, name: null, title: "six", reason: "visible to customers or staff: needs Dana'"'"'s yes: a new button", since: $now, sentence: "a new button"}], started: [], lines: ["c2", "c3", "c6"]}' <<<"$out" > /dev/null \
     || fail "the reader did not give what the records and loop.json say now: $(jq -c '{recordsNewer, recordsNow}' <<<"$out")"
   dead=$(sh -c 'echo $$'); jq -cn --argjson p "$dead" '{pid: $p, state: "running", building: 2, waiting: 1, running: 4}' > "$ST/loop.json"
   out=$(loop snapshot) && jq -e '.recordsNow | .building == null and .waitingCount == null and .running == null' <<<"$out" > /dev/null \

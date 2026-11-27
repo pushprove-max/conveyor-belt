@@ -22,7 +22,7 @@
 #     stopped) names the stopped process, since when health first read it so, and the command that resumes it, in
 #     place of stuck, and a stopped engine (health's engineStopped), idle or not, is one item that does so for the
 #     engine and names the cards it holds, and the command for each of their own processes stopped too; each only once
-#     two polls in a row, at least a poll apart, list it
+#     two polls in a row, at least a poll apart, list it, and `conveyor.sh health`, read now, too when it reads (recheck())
 #   a card that has waited for main to change, or on another card, for the pack's foreman.waitWake minutes (default
 #     10): it names the card, what it waits on and that card's step and last action (for main, each main-red fix card
 #     open or blocked); once per wait, and "still waiting" after each further waitWake minutes of it
@@ -364,18 +364,18 @@ keepsnap() { # <repo> <snapshot>
   { mkdir -p "$FD" && (umask 077 && printf '%s\n' "$2" > "$FD/conveyor-snapshot-$1.json.$$") && mv -f "$FD/conveyor-snapshot-$1.json.$$" "$FD/conveyor-snapshot-$1.json"; } 2>/dev/null \
     || rm -f "$FD/conveyor-snapshot-$1.json.$$"
 }
-# recheck <repo> <main> <snapshot>: the snapshot, with only the blocked cards (health.blocked) that `conveyor.sh health`,
-# read from the card records and the retried lines now, still lists blocked, when the records changed after the
-# snapshot was made (recordsNewer) and it lists a blocked card (#1114: a card retried, picked again or building since
-# was named blocked again, and the Foreman acted on it again). When health does not read, the cards the snapshot's
-# recordsNow (commands/snapshot.sh) holds blocked: a card retried since is not blocked there either. When neither
-# reads, the snapshot as it is.
+# recheck <repo> <main> <snapshot>: the snapshot, with only the blocked and stuck cards that `conveyor.sh health`, read
+# from the card records, the retried lines and the live records now, still lists so: blocked ones when the records
+# changed after the snapshot was made (recordsNewer; #1114: a card retried since was named blocked again), stuck ones
+# always, as new live output (.live) changes no card record (#1784: a card in its test step was named stuck from an older
+# snapshot). When health does not read, the blocked cards the snapshot's recordsNow (commands/snapshot.sh) holds and,
+# of a snapshot older than the records, the stuck ones with no line since (recordsNow's lines); else it as it is.
 recheck() {
-  local cards
-  if jq -e '.recordsNewer == true and (.health.blocked | arrays | length > 0)' <<<"$3" >/dev/null 2>&1 \
-    && { cards=$(ask "$1" "$2" health 2>/dev/null | jq -ce 'select(type == "object" and (.blocked | type == "array")) | [.blocked[] | objects | .card]' 2>/dev/null) \
-      || cards=$(jq -ce '.recordsNow | select(type == "object" and (.blocked | type == "array")) | [.blocked[] | objects | .card]' <<<"$3" 2>/dev/null); } \
-    && jq -c --argjson c "$cards" '.health.blocked |= map(select(.card | IN($c[])))' <<<"$3" 2>/dev/null; then return; fi
+  local h=''
+  jq -e '(.recordsNewer == true and (.health.blocked | arrays | length > 0)) or (.health.stuck | arrays | length > 0)' <<<"$3" >/dev/null 2>&1 && { h=$(ask "$1" "$2" health 2>/dev/null) || h=''; } \
+    && jq -c --arg h "$h" '([$h | fromjson? | objects] | first) as $h | (.recordsNewer == true) as $n | ([$h.blocked, .recordsNow.blocked? | arrays] | first) as $b | ([.recordsNow.lines? | arrays] | first) as $l
+      | ([$h.stuck | arrays | map(objects | .card)] | first) as $s | if $n and $b and (.health.blocked | type) == "array" then .health.blocked |= map(select(.card | IN($b[] | objects | .card))) else . end
+      | if (.health.stuck | type) != "array" then . elif $s then .health.stuck |= map(select(.card | IN($s[]))) elif $n and $l then .health.stuck |= map(select(.card | IN($l[]) | not)) else . end' <<<"$3" 2>/dev/null && return
   printf '%s\n' "$3"
 }
 
