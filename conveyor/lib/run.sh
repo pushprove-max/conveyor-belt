@@ -669,8 +669,8 @@ turnask() {
   [ "$asking" != 1 ] || [ -z "$issues" ] || approved "$issues"
   # So is a card blocked by a session that never began its work, once a check session starts (startagain()).
   [ "$asking" != 1 ] || [ -z "$issues" ] || startagain "$issues"
-  # A parent whose GitHub sub-issues are each closed or landed, and an umbrella of a split issue whose slices have all landed or
-  # are already done on main, is closed (umbrellas(), lib/slices.sh).
+  redstale # A main-red fix card blocked with no change closes once newer fix cards on the belt hold each of its cases (bugproof.sh).
+  # A parent whose GitHub sub-issues are each closed or landed, and an umbrella of a split issue whose slices have all landed or are already done on main, is closed (umbrellas(), lib/slices.sh).
   [ "$asking" != 1 ] || [ -z "$issues" ] || umbrellas "$issues"
   # The sample of the minute, and while a card is in progress a weekly limit reading (reading() asks at
   # most every LIMIT_TTL seconds). Both are taken out of the loop's job list (they may take seconds: the sample asks

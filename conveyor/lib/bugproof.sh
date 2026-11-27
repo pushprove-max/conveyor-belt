@@ -527,6 +527,32 @@ redreplaced() { # <card> <issue> <reason>
   exec {lock}>&-
   return $rc
 }
+# The main-red fix cards that nochange() blocked (issue 0, the last end a blocked line whose reason starts with
+# REDNOCHANGE), from the card lines on stdin: "<card>\t<the first line of its reason>", one a line.
+REDNOCHANGE='the session made no change'
+redblockedq() {
+  jq -rs --arg nc "$REDNOCHANGE" 'map(select(.step != "push")) | group_by(.card)[] | select(.[0].issue == 0)
+    | (map(select(.step | IN("landed", "closed", "blocked", "pushed"))) | . as $e
+      | [range(length) as $i | $e[$i] | select(.step != "pushed" and (.step != "blocked" or ($e[$i + 1:] | all(.step == "blocked"))))] | last) as $l
+    | select($l.step == "blocked" and ($l.reason | strings | startswith($nc))) | "\(.[0].card)\t\($l.reason | split("\n")[0] | .[0:600])"' 2>/dev/null
+}
+# At each turn of the loop: a main-red fix card that nochange() blocked before newer fix cards took its work over is
+# closed as replaced once they hold each of its cases (redreplaced()), so it leaves Needs you with no person (the shut
+# check of the loop skips issue 0). Only cards on the belt count: no run on main now shows a case passes (REDPASS is
+# []). A card that keeps a patch ($ST/kept/<card>/<card>.patch: a rebuild's reviewed change) stays blocked, as in
+# nochange(). Under the records' lock the card is read again: a `retry` or a shut since the first read leaves it alone.
+redstale() {
+  local c why
+  while IFS=$'\t' read -r c why; do
+    [ ! -e "$ST/kept/$c/$c.patch" ] && jq -e --arg c "$c" 'any(.reds[]?; .card == $c and .push == null)' "$MAINRED" >/dev/null 2>&1 \
+      && redtakers "$c" >/dev/null && locked redstaleclose "$c" || true
+  done < <(turncards | redblockedq)
+}
+redstaleclose() { # <card>
+  local why
+  why=$(cardall "$1" | redblockedq | awk -F'\t' -v c="$1" '$1 == c { print $2 }') && [ -n "$why" ] && [ ! -e "$ST/kept/$1/$1.patch" ] || return 1
+  REDSHA='' REDPASS='[]' redreplaced "$1" 0 "it was blocked: $why"
+}
 # The check that comes before a main-red fix card's build session (card.sh cardbuild()): the cases its entry holds run alone
 # on main's code at the card's commit, as redproof() runs them without the change, FULL_ALONE times (the runs the flaky rule
 # asks of a case that failed in a full run: lib/fulltest.sh). Exit 0 when every case passes in every run: main is no longer

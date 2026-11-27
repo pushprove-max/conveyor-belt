@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 300
 # Engine cases: a main-red fix card whose session made no change while its cases do not all pass on main closes when newer
-# fix cards took its work over (bugproof.sh redreplaced(), called by followups.sh nochange()), and the reason
+# fix cards took its work over (bugproof.sh redreplaced(), called by followups.sh nochange(), and by redstale() at each
+# turn of the loop for a card already blocked), and the reason
 # redproof() gives when some of its cases pass on main. Its cases call mainredproof.test.sh's redsetup() and
 # redcheck(), and mainred.test.sh's eng().
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
@@ -169,4 +170,51 @@ t_mainrednotreplaced() {
   [[ $(st 'select(.card == "cfix" and .step == "blocked") | .reason') == "the session made no change, so there is nothing to review. Its cases on main as it is now: "*'still fails on main'"'"'s code at '*', and there is no change to run them with.'* ]] \
     && [ -z "$(st 'select(.card == "cfix" and .step == "closed")')" ] \
     || fail "nochange on cfix (no newer card on the belt holding every case: cold older, cblk blocked, cpart with a.test: one alone, clnd landed) closed it, or did not block it: $out: $(st 'select(.card == "cfix") | "\(.step) \(.reason)"' | tr '\n' ,)"
+}
+
+# replfix's fixture with cfix already blocked by nochange() (picked as a main-red fix card, then blocked with no change)
+# and cnew1, on the belt, holding both its cases.
+replblocked() {
+  replfix '[{"sha": "new1", "cases": [{"case": "a.test: one", "file": "a.test"}, {"case": "c.test", "file": "c.test"}], "card": "cnew1"}]' \
+    '[{"card": "cfix", "step": "picked", "mainRed": "abc1234"},
+      {"card": "cfix", "step": "blocked", "result": "blocked", "reason": "the session made no change, so there is nothing to review. Its cases still fail.\nmore"},
+      {"card": "cnew1", "step": "picked"}]'
+}
+
+# Bug it catches: nochange() looks for newer fix cards only as it blocks, and the loop's shut check skips issue 0, so a
+# card blocked before cnew1 took its cases over stayed under Needs you until a person shut it. The loop's turn check
+# (bugproof.sh redstale(), called by run.sh at each turn) closes it, naming cnew1 and its block reason's first line.
+t_mainredstale() {
+  replblocked
+  local out r="Replaced: newer main-red fix cards hold each of its cases, on the belt or landed for a case that passes on main: cnew1. It was blocked: the session made no change, so there is nothing to review. Its cases still fail."
+  out=$(eng 'redstale; redopen cfix && echo STILLOPEN' 2>&1)
+  [ "$(st 'select(.card == "cfix" and .step == "closed") | .reason')" = "$r" ] && [[ $out != *STILLOPEN* ]] \
+    || fail "redstale on cfix (blocked with no change, its cases held by cnew1 on the belt) did not close it naming cnew1: $out: $(st 'select(.card == "cfix") | "\(.step) \(.reason)"' | tr '\n' ,)"
+  recok "$ST/cards.jsonl" "the turn check of blocked fix cards"
+}
+
+# Bug it catches: the turn check closed a blocked card that keeps a patch (a rebuild's reviewed change, kept by
+# block()), which is the owner's to land or drop, as nochange() leaves it blocked too. It stays blocked.
+t_mainredstalepatch() {
+  replblocked
+  mkdir -p "$ST/kept/cfix" && printf 'diff\n' > "$ST/kept/cfix/cfix.patch" || fail "the kept patch could not be made"
+  local out
+  out=$(eng 'redstale' 2>&1)
+  [ -z "$(st 'select(.card == "cfix" and .step == "closed")')" ] \
+    || fail "redstale on cfix (blocked with a kept patch, its cases held by cnew1) closed it: $out"
+}
+
+# What must stay true: the turn check closes a card only while it is still blocked. The other writer: `retry cfix`
+# (issues.sh retry(), under the records' lock), which moves its lines out so its next card starts. It is made to act at
+# the weak point, after the check read the takers outside the lock and before it takes the lock. Bug it catches: the
+# card was not read again under the lock, so a closed line was written for the card just given back, and its next
+# card was never picked. No closed line is written, and the retry stands.
+t_mainredstaleretry() {
+  replblocked
+  local out
+  out=$(eng 'eval "real$(declare -f redtakers)"
+    redtakers() { [ -e "$STUB/retried" ] || { : > "$STUB/retried"; locked retry cfix >&2; }; realredtakers "$@"; }
+    redstale' 2>&1)
+  [ -z "$(st 'select(.card == "cfix")')" ] && jq -e 'select(.card == "cfix" and .step == "blocked")' "$ST/retried.jsonl" >/dev/null 2>&1 \
+    || fail "redstale on cfix (blocked, its cases held by cnew1; retry cfix after the takers were read) wrote a line for it or the retry did not move it out: $out: $(st 'select(.card == "cfix") | "\(.step) \(.reason)"' | tr '\n' ,)"
 }
