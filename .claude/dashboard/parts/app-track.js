@@ -469,9 +469,9 @@
   }
   // What step s of bar b says under the bar. A blocked step's sentence and the output it failed on, and a NO-GO review's
   // findings, as Needs you shows them. A lint step with its commands shows a row for each in place of its reason
-  // (lintRows). A failed test run shows its failing files and cases in place of its reason, and
-  // its output under "Show full output". Its output stays open through a redraw: the toggle it replaces is the one of
-  // the same step (its place among the card's steps, which only grow at the end, and its name).
+  // (lintRows). A reason (a judge's free text too, track.jq) draws its code as code (fill). A failed test run shows its
+  // failing files and cases in place of its reason, and its output under "Show full output". Its output stays open through
+  // a redraw: the toggle it replaces is the one of the same step (its place among the card's steps, which only grow).
   function stepSaid(b, s, at) {
     const els = [];
     const fails = testFails(s.failures);
@@ -484,7 +484,7 @@
       // The rows say each command's result: the one note of the reason they do not is kept (lintline(), lib/lint.sh).
       if (/(^|; )tools ran as installed(;|$)/.test(s.why || '')) els.push(h('p', 'detail-why', 'Tools ran as installed'));
     }
-    else if (typeof s.why === 'string' && s.why) els.push(h('p', 'detail-why', s.why));
+    else if (typeof s.why === 'string' && s.why) els.push(fill(h('p', 'detail-why'), s.why, at.repoUrl, new Set(pathsIn(s.why)), 'detail-why'));
     const cov = testCoverage(s.coverage);
     if (cov) els.push(cov);
     const old = at.mine ? Array.from(at.mine.querySelectorAll('details.output')).find((x) => x.dataset.step === step) : null;

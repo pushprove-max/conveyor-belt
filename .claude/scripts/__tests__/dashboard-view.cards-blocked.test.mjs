@@ -188,6 +188,21 @@ test('a Tests step the project\'s checks failed shows its recorded reason, not a
   assert.equal(step.querySelector('.detail-why').textContent, 'the project\'s checks failed; no test file ran');
 });
 
+// Bug: a step's reason was written as plain text, so a split kept whole showed the judge's why (track.jq) with its
+// backticks as written, not as code spans.
+test("a step's reason draws its backticked code as code spans, not as backticks", () => {
+  const w = boot();
+  const data = full();
+  const why = 'apart: `lib/a.sh` and `lib/b.sh` change apart; no slice is filed, so the change is kept whole.';
+  const records = [{ name: 'kept whole: 5 files', state: 'done', sec: 1, why }];
+  Object.assign(data.panels.needs.data.cards.blocked[0], { track: { ...trackOf('++!...', ''), at: null, records } });
+  deliver(w, data);
+  const [step] = panel(w, 'needs').querySelectorAll('li[data-key="blocked:c2-13"] details.track-detail .timeline > li');
+  const said = step.querySelector('.detail-why');
+  assert.deepEqual(Array.from(said.querySelectorAll('code.why-code'), (c) => c.textContent), ['lib/a.sh', 'lib/b.sh'], `the code spans of ${why}`);
+  assert.equal(said.textContent, why.replaceAll('`', ''), `the reason ${why} is shown whole, with no backticks`);
+});
+
 // Bug: a URL naming the card was taken for its worktree, so two different URLs both became "https:./log" and were
 // folded into one line ×2, losing which host each named; a protocol-relative //host URL likewise became "?path=./log",
 // and a quoted one became "'./log'".
