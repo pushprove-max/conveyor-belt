@@ -143,12 +143,16 @@ for a in '"-z", "--", "*.sh"' '"-s"'; do
 done
 
 # A trace that found node_modules/jsdom, a path here that is not tracked (a dependency folder linked from main), as Node
-# does when a test loads jsdom: no inputs line, and the file still passes. Bug it catches: a test that loaded jsdom kept
-# its pass after a file of jsdom was deleted, as no input named the files it read there.
+# does when a test loads jsdom: no inputs line, but a reads line with the same list as the trace without it (the
+# engine picks the file by it and keeps no pass: conveyor/tests/testcache.test.sh t_testcachereads), and the file
+# still passes. Bugs it catches: a test that loaded jsdom kept its pass after a file of jsdom was deleted, as no input
+# named the files it read there; and its trace gave no line at all, so adding hooks/package.json, which it looked for,
+# ran no test.
 { cat "$T/trace"; echo '100 statx(AT_FDCWD<<root>>, "node_modules/jsdom", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mode=S_IFDIR|0755, ...}) = 0'; } > "$T/trace.deps"
-got=$(run deps "$T/trace.deps")
-[ -z "$got" ] && [ "$(cat "$T/deps.rc")" = 0 ] && grep -qxF -- '-- ok hooks/r.test.sh' "$T/deps/test-changed.log" \
-  || no "given the trace $T/trace.deps, which finds node_modules/jsdom (not tracked), the run named inputs or did not pass: '$got', exit $(cat "$T/deps.rc"): $(cat "$T/deps.out")"
+got=$(run deps "$T/trace.deps"); rd=$(sed -n 's/^TESTRUN reads\t//p' "$T/deps/test-changed.log" 2>/dev/null | tr '\t' ' ')
+[ -z "$got" ] && [ "$rd" = "hooks/r.test.sh conveyor/lib/ conveyor/lib/x.sh conveyor/read.sh hooks/package.json link.md nope tools/exec.sh tools/gone.json tools/run.sh tools/stat.sh" ] \
+  && [ "$(cat "$T/deps.rc")" = 0 ] && grep -qxF -- '-- ok hooks/r.test.sh' "$T/deps/test-changed.log" \
+  || no "given the trace $T/trace.deps, which finds node_modules/jsdom (not tracked), the run named inputs, did not name its reads or did not pass: inputs '$got', reads '$rd', exit $(cat "$T/deps.rc"): $(cat "$T/deps.out")"
 
 # CONVEYOR_TEST_NOTRACE set (the run before a push, for a file whose list of inputs is fresh): the file runs untraced,
 # naming no inputs, and passes. Bug it catches: such a file was traced again, the slow part of the run before a push.

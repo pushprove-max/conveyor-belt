@@ -1002,6 +1002,9 @@ main, keeps off a file whose hash in its worktree matches a kept one: its list g
 tests run again after main moved, a test file that read a file that main changed runs again, and the cache keeps off
 each test file whose inputs did not change. A file with
 no `TESTRUN inputs` line is never kept off in this way.
+A runner can give `TESTRUN reads<TAB><file><TAB><input file>...` in place of the inputs line, when the test file also
+read a path that is not tracked (such as a file in `node_modules`). Conveyor keeps that line too, but never keeps the
+test file off with it. A change to one of its inputs still adds the test file to a card's test list.
 A card's test list also gets each test file whose last kept pass read a file that the change touches, or listed a
 folder that the change adds a file to or deletes a file from. Such a file runs whole, also when the card's own change
 selects only some of its cases. When a fix, or a newer main, changes a file that a test file's last kept pass read,

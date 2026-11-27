@@ -143,13 +143,17 @@ cachesums() { # <worktree>
 # engine case file whose case lines name every `t_<case>() {` case it holds, run whole, #1619) and no `ok`, `fail` or
 # `off` line of the list the run was given (some of its cases kept or left out) names. A file a path of whose line is
 # absolute or climbs out of the worktree (`..`) is not kept, nor is any file of a worktree whose HEAD cannot be read.
+# A file its log names in a `TESTRUN reads` line in place of an inputs line (it read a path that is not tracked, such
+# as node_modules: .conveyor/test-changed.sh inputsof()) is kept with `-` before its hash, which no hash in a worktree
+# matches: cachereaders() picks it for a change to one of its inputs, and cachehits() never keeps it off.
 cachekeep() { # <worktree>
-  local l=() add sums lock r=/dev/null cs h
-  mapfile -t l < <(testlogs "$1"); [ ${#l[@]} -gt 0 ] && grep -qh $'^TESTRUN inputs\t' "${l[@]}" 2>/dev/null || return 0
+  local l=() add sums lock r=/dev/null cs h rf
+  mapfile -t l < <(testlogs "$1"); [ ${#l[@]} -gt 0 ] && grep -qhE $'^TESTRUN (inputs|reads)\t' "${l[@]}" 2>/dev/null || return 0
   h=$(git -C "$1" rev-parse -q --verify HEAD 2>/dev/null) && [ -n "$h" ] || return 0
   [ ! -f "$1.rerun" ] || r=$1.rerun
+  rf=$(cat "${l[@]}" 2>/dev/null | awk -F'\t' '$1 == "TESTRUN reads" { print $2 }')
   # Each case each file with an inputs line holds, `<file>\t<case>`.
-  cs=$(cat "${l[@]}" 2>/dev/null | awk -F'\t' '$1 == "TESTRUN inputs" { print $2 }' | sort -u | while IFS= read -r f; do
+  cs=$(cat "${l[@]}" 2>/dev/null | awk -F'\t' '$1 == "TESTRUN inputs" || $1 == "TESTRUN reads" { print $2 }' | sort -u | while IFS= read -r f; do
     [ ! -f "$1/$f" ] || sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$1/$f" | awk -v f="$f" '{ print f "\t" $0 }'; done | sort -u)
   add=$(C=$cs awk -F'\t' -v L="$r" 'function bad(p) { return p == "" || p ~ /^\// || p ~ /(^|\/)\.\.(\/|$)/ }
     BEGIN { n = split(ENVIRON["C"], x, "\n"); for (i = 1; i <= n; i++) if (split(x[i], y, "\t") == 2) { all[y[1], y[2]] = 1; na[y[1]]++ } }
@@ -157,11 +161,12 @@ cachekeep() { # <worktree>
     /^-- ok / { ok[substr($0, 7)] = 1; next }
     /^-- FAIL / { part[substr($0, 9)] = 1; next }
     $1 == "TESTRUN case" { hc[$2] = 1; if (!(($2, $3) in all)) part[$2] = 1; else if (!(($2, $3) in got)) { got[$2, $3] = 1; ng[$2]++ }; next }
-    $1 == "TESTRUN inputs" { if (bad($2)) next; seen[$2] = 1; for (i = 3; i <= NF; i++) { if (bad($i)) part[$2] = 1; inp[$2] = inp[$2] "\t" $i } }
+    $1 == "TESTRUN inputs" || $1 == "TESTRUN reads" { if (bad($2)) next; seen[$2] = 1; for (i = 3; i <= NF; i++) { if (bad($i)) part[$2] = 1; inp[$2] = inp[$2] "\t" $i } }
     END { for (f in seen) if ((f in ok) && !(f in part) && (!(f in hc) || ng[f] == na[f])) print f inp[f] }' "$r" "${l[@]}")
   [ -n "$add" ] || return 0
-  # Each line `<hash>\t<file>\t<input>...` with the run's commit after its hash.
-  sums=$(printf '%s\n' "$add" | cachesums "$1" | awk -v h="$h" '{ i = index($0, "\t"); print substr($0, 1, i) h substr($0, i) }') && [ -n "$sums" ] || return 1
+  # Each line `<hash>\t<file>\t<input>...` with the run's commit after its hash, and `-` before the hash of a reads one.
+  sums=$(printf '%s\n' "$add" | cachesums "$1" | R=$rf awk -F'\t' -v h="$h" 'BEGIN { n = split(ENVIRON["R"], x, "\n"); for (j = 1; j <= n; j++) rd[x[j]] = 1 }
+    { i = index($0, "\t"); print ($2 in rd ? "-" : "") substr($0, 1, i) h substr($0, i) }') && [ -n "$sums" ] || return 1
   { exec {lock}>>"$TESTCACHE.lock"; } 2>/dev/null || return 1
   flock "$lock" || { exec {lock}>&-; return 1; }
   # Each hash once, at its last place; the last TESTCACHE_KEEP lines.
@@ -192,7 +197,7 @@ cacheoff() { # <worktree>
   at=$(cachehits "$1" at) || return 0; m=$(cut -f1 <<<"$at")
   while IFS= read -r f; do
     [ -n "$f" ] && ! grep -qxF -- "$f" <<<"$m" && ! grep -qxF -e "pass"$'\t'"$f" -e "off"$'\t'"$f" "$1.rerun" 2>/dev/null || continue
-    if cut -f3 "$TESTCACHE" 2>/dev/null | grep -qxF -- "$f"; then printf 'TESTRUN why\t%s\tits inputs changed since its last pass, so the test runs again\n' "$f"
+    if awk -F'\t' '$1 !~ /^-/ { print $3 }' "$TESTCACHE" 2>/dev/null | grep -qxF -- "$f"; then printf 'TESTRUN why\t%s\tits inputs changed since its last pass, so the test runs again\n' "$f"
     else printf 'TESTRUN why\t%s\tno pass of it is on record with the files it reads, so the test runs\n' "$f"; fi
   done <<<"${TEST_FILES:-}"
   [ -n "$m" ] || return 0

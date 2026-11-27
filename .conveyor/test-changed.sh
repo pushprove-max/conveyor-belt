@@ -1846,16 +1846,19 @@ else TRACE=(); fi
 # a trace that names a path here with a byte strace escapes, which no tracked path can be matched to; that opens this
 # checkout's Git index or a file of its Git objects (a `git ls-files -s`, a `git diff`, a `git show`): what the test then
 # reads is the list of tracked files or their content in Git, which no input names, so a pass kept on its inputs could
-# stand after a file was added; or that read a path here that is not tracked and was there (a dependency folder linked
-# from main, such as node_modules, or a file a test left): no input names its content, so a pass kept could stand
-# after a file in it changed or was deleted. But a process that opens the index after its exec of a `git ls-files` that
-# prints only the tracked paths (lists(): its options -z, -c, --cached, --full-name, --error-unmatch and
-# --exclude-standard, and paths) reads the list of tracked files alone: its inputs name every folder that holds a
-# tracked file, so a file added or deleted anywhere changes them, and the engine runs the test for it. Bug: spdx.test.sh
-# lists the tracked files so and named no inputs, and no map, link or name selects it for a new file, so a new
-# hooks/new.sh with no SPDX line ran no test that fails on it.
+# stand after a file was added. But a process that opens the index after its exec of a `git ls-files` that prints
+# only the tracked paths (lists(): its options -z, -c, --cached, --full-name, --error-unmatch and --exclude-standard,
+# and paths) reads the list of tracked files alone: its inputs name every folder that holds a tracked file, so a file
+# added or deleted anywhere changes them, and the engine runs the test for it. Bug: spdx.test.sh lists the tracked
+# files so and named no inputs, and no map, link or name selects it for a new file, so a new hooks/new.sh with no SPDX
+# line ran no test that fails on it. A trace that read a path here that is not tracked and was there (a dependency
+# folder linked from main, such as node_modules, or a file a test left) gives the same list as a `TESTRUN reads` line:
+# no input names that path's content, so the engine keeps no pass on it (a pass kept could stand after a file in it
+# changed or was deleted), but it still picks the file for a change to one of its inputs (conveyor/lib/testlist.sh
+# cachekeep()). Bug: such a trace gave no line, so a test that loads jsdom named no input, and adding the package.json
+# that Node looked for beside it picked no test.
 inputsof() {
-  local in g c
+  local in g c k=inputs rc=0
   [ -s "$2" ] && git -c core.quotePath=false ls-files > "$o.tracked" && g=$(git rev-parse --absolute-git-dir) && g=$(cd "$g" && pwd -P) \
     && c=$(git rev-parse --path-format=absolute --git-common-dir) && c=$(cd "$c" && pwd -P) || return 1
   in=$(awk -v r="$(pwd -P)" -v r2="$PWD" -v t="$1" -v T="$o.tracked" -v G="$g" -v C="$c" '
@@ -1887,7 +1890,7 @@ inputsof() {
       if (x ~ /^\.git(\/|$)/ || x == t) return
       if (index(x, "\\")) { bad = 1; return }
       if (x in f) use[x] = 1; else if (x == "./") { if (op) use[x] = 1 } else if ((x "/") in d) { if (op) use[x "/"] = 1 }
-      else if (st == "ENOENT" || st == "ENOTDIR") use[x] = 1; else bad = 1 }
+      else if (st == "ENOENT" || st == "ENOTDIR") use[x] = 1; else ut = 1 }
     # The call c of process q on the path x, its result on the line l.
     function done(q, c, x, l,   st) {
       st = "ok"; if (match(l, / = -1 E[A-Z0-9]+( \(.*\))?$/)) { st = substr(l, RSTART + 6); sub(/ .*/, "", st) }
@@ -1915,8 +1918,9 @@ inputsof() {
       done(pid, c, x, $0); next }
     # A call strace split: the path from the line it began on, the result from this one.
     match($0, /^[0-9]+ +<\.\.\. [a-z0-9_]+ resumed>/) && (pid in px) { c = pc[pid]; x = px[pid]; delete pc[pid]; delete px[pid]; done(pid, c, x, $0) }
-    END { if (bad) exit 1; if (all) for (x in d) use[x] = 1; for (x in use) print x }' "$o.tracked" "$2") || return 1
-  printf 'TESTRUN inputs\t%s%s\n' "$1" "$(LC_ALL=C sort <<<"$in" | awk 'length { printf "\t%s", $0 }')"
+    END { if (bad) exit 1; if (all) for (x in d) use[x] = 1; for (x in use) print x; exit ut ? 3 : 0 }' "$o.tracked" "$2") || rc=$?
+  [ $rc = 0 ] || { [ $rc = 3 ] && k=reads; } || return 1
+  printf 'TESTRUN %s\t%s%s\n' "$k" "$1" "$(LC_ALL=C sort <<<"$in" | awk 'length { printf "\t%s", $0 }')"
 }
 # failstop [--in <line>] <command>...: runs it, its output and errors to this run's output. With FAILFAST (a card's
 # run that stops at its first failure), it ends the command and all it started (its own process group) at the first

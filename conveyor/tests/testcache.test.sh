@@ -264,3 +264,24 @@ t_testcachefix() {
   [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sed 1,3d "$w.rerun")" = $'pass\tq.test.sh\nchanged\te.txt' ] \
     || fail "after a fix changed e.txt, which r.test.sh's last pass read, the list still keeps r.test.sh, or lost q.test.sh's pass (exit $(cat "$T/$CASE/rc")): $(cat "$w.rerun" "$T/$CASE/run.out" 2>&1)"
 }
+
+# cachekeep() of a run that passed d.test.sh, whose log names its reads in a `TESTRUN reads` line (it read a path
+# that is not tracked, such as node_modules: .conveyor/test-changed.sh inputsof()), e.txt and pkg/package.json, which
+# was not there. The cache holds the line, so cachereaders() picks d.test.sh for a change that adds pkg/package.json,
+# but cachehits() does not keep it off, though its inputs are the same. Bugs it catches: such a test named no inputs,
+# so adding the package.json that Node looked for beside it ran no test; and a pass kept on such a line kept the test
+# off after a file of node_modules, which no input names, changed.
+t_testcachereads() {
+  setup '[]'
+  echo d > "$R/d.test.sh"; echo e > "$R/e.txt"; cachelistsetup d.test.sh e.txt
+  mkdir -p "$T/$CASE/cards/c7.testlog" && printf -- '-- ok d.test.sh\nTESTRUN reads\td.test.sh\te.txt\tpkg/package.json\n' > "$T/$CASE/cards/c7.testlog/run.log" \
+    || fail "the run's log could not be written"
+  LASTPASS=$'x.test.sh\te.txt' cachelistrun 'cachekeep "$wt" && cut -f3- "$TESTCACHE" > "$T/$CASE/got" && cachehits "$wt" > "$T/$CASE/hits" \
+    && cachereaders $'"'"'A\tpkg/package.json'"'"' > "$T/$CASE/readers"'
+  grep -qxF $'d.test.sh\te.txt\tpkg/package.json' "$T/$CASE/got" \
+    || fail "given the log line 'TESTRUN reads d.test.sh e.txt pkg/package.json', the cache does not hold d.test.sh's reads: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(cat "$T/$CASE/readers")" = d.test.sh ] \
+    || fail "given the log line 'TESTRUN reads d.test.sh e.txt pkg/package.json', a change that adds pkg/package.json does not pick d.test.sh: '$(cat "$T/$CASE/readers")' $(cat "$T/$CASE/run.out")"
+  ! grep -qxF d.test.sh "$T/$CASE/hits" \
+    || fail "given the log line 'TESTRUN reads d.test.sh e.txt pkg/package.json', the cache keeps d.test.sh off, though it read a path no input names"
+}
