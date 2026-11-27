@@ -65,7 +65,8 @@ t_benefithold() {
   done
   # A run limited by --only to a held issue hears wait, so it polls until the owner's yes comes, not ends.
   fx_in 'ONLY="[1]" locked pick "" "" "$(cat "$STUB/issues.json")"'
-  [ "$(cat "$T/$CASE/run.out")" = wait ] || fail "pick with --only [1], #1 held by the benefit rule (body \"No live case known.\"), did not say wait: $(cat "$T/$CASE/run.out")"
+  # run.out also holds the loop log: the release limit's reason (rellimit(), lib/pick.sh), not part of the pick's answer.
+  [ "$(grep -v '^conveyor: the release limit ' "$T/$CASE/run.out")" = wait ] || fail "pick with --only [1], #1 held by the benefit rule (body \"No live case known.\"), did not say wait: $(cat "$T/$CASE/run.out")"
   # ... and one limited to #15, whose Depends on: line no approval makes readable, does not wait for the benefit's yes.
   fx_in 'ONLY="[15]" locked pick "" "" "$(cat "$STUB/issues.json")"'
   [ -z "$(cat "$T/$CASE/run.out")" ] || fail "pick with --only [15] (body \"Depends on: # 2 3 ... Not measured.\") waits or picks, though no benefit approval can queue it: $(cat "$T/$CASE/run.out")"
