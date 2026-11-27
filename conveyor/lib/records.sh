@@ -282,7 +282,7 @@ unpricedleft() { # <worktree>: an earlier try with no price left its output (out
   return 1
 }
 outkeep() { # <card> <step> <the line>
-  local d=$ST/kept/$1 f n=1 o i=1 u=''
+  local d=$ST/kept/$1 f n=1 o i=1 u='' j
   case $2 in build | fix | rebase) ;; *) return 0 ;; esac
   # Each <card>.out.first* is a try with no price to read, kept whatever the line says: a line stopped() writes in a
   # later try's wait reads that later try alone when it wrote output, or else the tries' fold ($wt.spent), either of
@@ -292,9 +292,17 @@ outkeep() { # <card> <step> <the line>
   while :; do
     if [ -s "$o" ] && { [ -n "$u" ] || [ "$o" != "$CARDS/$1.out" ]; }; then
       f=$d/$1.$2.out; while [ -e "$f" ]; do n=$((n + 1)); f=$d/$1.$2-$n.out; done
-      # An earlier try's output is removed only once it is kept: one that could not be (a full disk) is the only copy.
+      # An earlier try's output is removed only once it is kept: one that could not be (a full disk) is the only copy,
+      # renamed beside the card to <card>.<step>.unkept.out (-2 and on), a name that neither clean() (lib/push.sh) nor a
+      # later session() (lib/session.sh) removes, as each removes <card>.out.first*. A rename takes no disk space.
       if mkdir -p "$d" 2>/dev/null && cp "$o" "$f" 2>/dev/null; then [ "$o" = "$CARDS/$1.out" ] || rm -f "$o"
-      else echo "conveyor: card $1: its $2 line has no price to read, and its output could not be kept in $d$([ "$o" = "$CARDS/$1.out" ] || echo "; it is left at $o")" >&2; fi
+      else
+        if [ "$o" != "$CARDS/$1.out" ]; then
+          f=$CARDS/$1.$2.unkept.out j=1; while [ -e "$f" ]; do j=$((j + 1)); f=$CARDS/$1.$2.unkept-$j.out; done
+          mv -f "$o" "$f" 2>/dev/null && o=$f
+        fi
+        echo "conveyor: card $1: its $2 line has no price to read, and its output could not be kept in $d$([ "$o" = "$CARDS/$1.out" ] || echo "; it is left at $o")" >&2
+      fi
     elif [ "$o" != "$CARDS/$1.out" ]; then rm -f "$o"
     fi
     [ "$o" != "$CARDS/$1.out" ] || break

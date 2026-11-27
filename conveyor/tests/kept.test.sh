@@ -143,12 +143,14 @@ t_keptfirstsleft() {
 }
 # E3 (review). Bug it catches: outkeep() removed <card>.out.first, an earlier try's output with no price to read, even
 # when its copy to the kept folder failed (a full disk; here the folder's place is taken), so the only copy was lost.
+# Then it left the output at <card>.out.first, which clean() (as control stop ends the card) and a later session()
+# remove: it is renamed out of their way, and the message names where it went.
 t_keptfirstfail() {
   local cd=$T/$CASE/cards
   setup '[]'; mkdir -p "$cd" "$ST/kept" && : > "$ST/kept/c7" && echo try1 > "$cd/c7.out.first" && echo try2 > "$cd/c7.out" || fail "the outputs could not be made"
-  fx_in 'outkeep c7 build "{\"step\":\"build\",\"usage\":null}"'
-  [ "$(cat "$cd/c7.out.first" 2>&1)" = try1 ] && grep -qF "it is left at $cd/c7.out.first" "$T/$CASE/run.out" \
-    || fail "outkeep c7 build, with the kept folder's place taken, removed try 1's output or did not say where it is: $(cat "$T/$CASE/run.out")"
+  fx_in 'outkeep c7 build "{\"step\":\"build\",\"usage\":null}" && clean "$CARDS/c7"'
+  [ "$(cat "$cd/c7.build.unkept.out" 2>&1)" = try1 ] && grep -qF "it is left at $cd/c7.build.unkept.out" "$T/$CASE/run.out" \
+    || fail "outkeep c7 build then clean, with the kept folder's place taken, removed try 1's output or did not say where it is: $(cat "$T/$CASE/run.out"; ls "$cd")"
 }
 
 # NO-GO with more findings than a brief may hold, its fix, then a review that fails: the NO-GO's findings are kept.
