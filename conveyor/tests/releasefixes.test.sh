@@ -173,6 +173,31 @@ t_relfixesclosed() {
   fixrec "a fix closed with no landed card is not named, or a run started" '.state == "failed" and .restarted == null and .fixes == [{issue: 20, state: "landed"}, {issue: 21, state: "closed"}]'
   [ ! -e "${RUN%/*}/run.log" ] || fail "a run started over a fix closed with no landed card: $(cat "${RUN%/*}/run.log")"
 }
+# Bug it catches: the owner stopped the wait of the red run (waitStopped) while its record listed fix #20 open; #20
+# then landed, but relfixes() no longer read a stopped run, so the record (and the Board's fix list) kept #20 open for
+# good. The list is written again with #20 landed, and the run, its one fix landed at origin's head, still does not start.
+t_relfixesstopped() {
+  setup "$(fixissue 20 11 OPEN 'Release fix: 1.1.0' | jq -s .)"
+  fixred; jq -c '.waitStopped = "2026-11-19T11:30:00Z" | .fixes = [{issue: 20, state: "open"}]' "$RUN" > "$RUN.x" && mv "$RUN.x" "$RUN" \
+    && landed 20 | jq -c --arg s "$(git -C "$R" rev-parse HEAD)" '.sha = $s' >> "$ST/cards.jsonl" || fail "the fixture could not be made"
+  fixcall
+  fixrec "a fix landed after the wait was stopped is not recorded as landed, or the stopped run started again" \
+    '.state == "failed" and .restarted == null and .waitStopped == "2026-11-19T11:30:00Z" and .fixes == [{issue: 20, state: "landed"}]'
+  [ ! -e "${RUN%/*}/run.log" ] || fail "a run whose wait the owner stopped started again: $(cat "${RUN%/*}/run.log")"
+}
+# Bug it catches: relfixes() read the red record (no waitStopped yet), then the owner's `release-run stop` wrote
+# waitStopped before relfixes() took the release lock; a restart decided on the first read, not on the record read under
+# the lock, started the stopped run. What must stay true: a run whose record has waitStopped under the lock is never
+# started by relfixes(). flock is wrapped so the real stop command runs at that point, once, through the real relfixes().
+t_relfixesstoplate() {
+  setup "$(fixissue 20 11 OPEN 'Release fix: 1.1.0' | jq -s .)"
+  fixred; landed 20 | jq -c --arg s "$(git -C "$R" rev-parse HEAD)" '.sha = $s' >> "$ST/cards.jsonl" || fail "the fixture could not be made"
+  fx_in 'flock() { [ -n "${stopped:-}" ] || { stopped=1; bash "$SRC/conveyor.sh" release-run stop || return 1; }; command flock "$@"; }; relfixes'
+  [ "$RC" = 0 ] || fail "relfixes, with release-run stop run before it took the release lock, failed ($RC): $(cat "$T/$CASE/run.out")"
+  fixrec "a stop that came before relfixes() took the lock did not hold, or the fix is not recorded as landed: $(cat "$T/$CASE/run.out")" \
+    '.state == "failed" and .restarted == null and (.waitStopped | type) == "string" and .fixes == [{issue: 20, state: "landed"}]'
+  [ ! -e "${RUN%/*}/run.log" ] || fail "a run whose wait the owner stopped before relfixes() took the lock started again: $(cat "${RUN%/*}/run.log")"
+}
 # Bugs it catches (follow-up of #1461): the release lock held a moment (by a `release-run stop` that read the wait just
 # before) refused the release-run relfixes() starts a waiting run with, and the record kept its restarted mark: the run
 # never started, every stop skipped it, and it held every other version (relother(), lib/fulltest.sh) for ever. The

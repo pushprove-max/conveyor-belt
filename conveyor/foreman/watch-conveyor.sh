@@ -166,13 +166,13 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     ($snap.suites | arrays | .[] | objects | select(.ended != null)
       | ["suite:\(.kind | tostring | gsub("\\s"; "-")):\(.ended)", "suite ended", "", suiteline($now) | gsub("\\s+"; " ")]),
     # The fix cards of a red release run (the release record'"'"'s fixes, each {issue, state}, and restarted, which the
-    # engine'"'"'s relfixes() writes, conveyor/lib/fulltest.sh; a run it started has by "fixes landed"): once a run. A
-    # started run that ends red is read for its own fixes as any red run is.
+    # engine'"'"'s relfixes() writes, conveyor/lib/fulltest.sh; a run it started has by "fixes landed"): once a run. A started
+    # run that ends red is read for its own fixes as any red run is; one whose wait the owner stopped (waitStopped) not.
     ($snap.suites | arrays | .[] | objects | select(.kind == "release") | (.version | tostring) as $v
       | [.fixes | arrays | .[] | objects | select(.issue | numbers)] as $fx | ($fx | map("#\(.issue)") | join(", ")) as $all
       | if .by == "fixes landed" and .ended == null then ["relfix:\($v):\(.since)", "release started again", "",
           "every fix card of release \($v)'"'"'s failed suite has landed: release-prep \($v) started again at \(.since)"]
-        elif .step != "release-prep" or .state != "failed" or $fx == [] then empty
+        elif .step != "release-prep" or .state != "failed" or .waitStopped != null or $fx == [] then empty
         elif all($fx[]; .state == "landed") then
           # relfixes() writes fixes and restarted in one go: all landed with no restarted is a hold it found. A card on
           # the belt, or a push owed, ends by itself and wakes nothing, unless the rule "Push when a card lands" is off

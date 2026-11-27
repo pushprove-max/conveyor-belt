@@ -123,6 +123,14 @@ check 'a closed fix of a run started by its fixes wakes' poll again
 check 'its wake names the closed fix, not the restart' has again 'again: fix card #758 of release 1.6.0'
 check 'its wake has no restart notice beside the closed fix' nope has again 'started again'
 
+# Bug caught: relfixes() writes the fixes of a run whose wait the owner stopped (waitStopped), for the Board. With its
+# last fix landed, the belt empty and no landing pull request, the wake said the suite's commit lacked the fixes, though
+# the run did not start because the owner stopped it; a fix closed after the stop woke too. Neither wakes.
+fixture stopped "$(red '[{"issue": 753, "state": "landed"}]' | jq -c '.waitStopped = "2026-11-17T07:30:00Z"')"
+check 'the landed fixes of a run whose wait the owner stopped give no wake' nope poll stopped
+fixture stopclosed "$(red '[{"issue": 755, "state": "closed"}]' | jq -c '.waitStopped = "2026-11-17T07:30:00Z"')"
+check 'a closed fix of a run whose wait the owner stopped gives no wake' nope poll stopclosed
+
 # A fix still open: nothing to report yet.
 fixture open "$(red '[{"issue": 757, "state": "open"}, {"issue": 753, "state": "landed"}]')"
 check 'a fix still open gives no wake' nope poll open

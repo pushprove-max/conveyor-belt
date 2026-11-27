@@ -650,7 +650,8 @@ relstopwaiting() { # [<version> | <since>]
 # The list itself, relfixlist(): its input the issues as gh gives them (number, body, createdAt, state; [] for a run
 # that waits on its notes card), $c the card records' lines, $t the Tests page's cards; rellimit() reads it the same way.
 # A red run whose wait the owner stopped (waitStopped: relstopwaiting()) is not read, and never starts again by itself:
-# a stop between the read and the lock (as the issues are read) is found again under the lock, and nothing is written.
+# a stop between the read and the lock (as the issues are read) is found again under the lock, and it does not restart;
+# the fixes already read are still written, so the Board shows a fix that lands after the stop as landed.
 RELFIXJQ='def relfixlist($v; $e; $n; $c; $t): ($c | map(select(.step == "landed") | .issue)) as $landed
   | ("(^|\\n)[ \\t]*Release fix:[ \\t]*" + ($v | gsub("\\."; "\\.")) + "[ \\t]*\\r?(\\n|$)") as $re | ($t | map(.filed | numbers)) as $filed
   | ([.[] | select(.createdAt > $e and ((.body // "") | test($re)) and (.number | IN($filed[]) | not))
@@ -661,7 +662,7 @@ RELFIXJQ='def relfixlist($v; $e; $n; $c; $t): ($c | map(select(.step == "landed"
 relfixes() { # [record]
   local f=$CARDS/release/run.json r v e s is='[]' cs ce fx busy lk go='' sha hd nc m a rec=${1:-}
   r=$(jq -ce 'select(.kind == "release" and ((.step | IN("release-prep", "release")) and .state == "failed" or (.step == "release-prep" and .state == "waiting" and (.notes.card | type) == "string"))
-    and (.ended | type) == "string" and .restarted == null and .waitStopped == null)' "$f" 2>/dev/null) || return 0
+    and (.ended | type) == "string" and .restarted == null)' "$f" 2>/dev/null) || return 0
   v=$(jq -r .version <<<"$r") && e=$(jq -r .ended <<<"$r") && s=$(jq -r .since <<<"$r") && nc=$(jq -r '.notes.card // ""' <<<"$r") || return 1
   { [ -n "$nc" ] || is=$(timeout 60 gh issue list --state all --limit 1000 --json number,body,createdAt,state --search "\"Release fix: $v\" in:body" < /dev/null 2>/dev/null); } \
     && cs=$(stdb ask lines cards 2>/dev/null) && ce=$(endedrecs) && ce=$ce$'\n'$cs \
@@ -672,15 +673,15 @@ relfixes() { # [record]
     || { echo "conveyor: the fix cards of release $v's failed suite could not be read (gh issue list, or the card records)" >&2; return 1; }
   # A landed fix whose commit the suite would not run on yet holds the run: busy. Asked only when nothing else holds
   # it, as relhead() fetches; a remote that cannot be read holds it too.
-  if [ -z "$rec" ] && [ "$busy" = false ] && jq -e 'length > 0 and all(.[]; .state == "landed")' <<<"$fx" > /dev/null; then
+  if [ -z "$rec" ] && [ "$busy" = false ] && jq -e '.waitStopped == null' <<<"$r" > /dev/null && jq -e 'length > 0 and all(.[]; .state == "landed")' <<<"$fx" > /dev/null; then
     hd=$(relhead 2>/dev/null) || busy=true
     while IFS= read -r sha; do [ -n "$hd" ] && [ -n "$sha" ] && git merge-base --is-ancestor "$sha" "$hd" 2>/dev/null || busy=true
     done < <(printf '%s' "$ce" | jq -r --argjson x "$fx" '($x | map(.issue | numbers)) as $l | ($x | map(.ids // [] | .[])) as $k | select(.step == "landed" and ((.issue | IN($l[])) or (.card | IN($k[])))) | .sha // ""')
   fi
   { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null || return 1
   if [ -n "$rec" ]; then flock -w 10 "$lk" || { exec {lk}>&-; return 1; }; else flock -n "$lk" || { exec {lk}>&-; return 0; }; fi
-  go=$(jq -c --arg s "$s" --arg st "$(jq -r .state <<<"$r")" --argjson x "$fx" --argjson b "$busy" --arg t "$(clock)" --arg rec "$rec" 'select(.since == $s and .state == $st and .restarted == null and .waitStopped == null)
-    | .fixes = $x | .fixesRead = (now | floor) | if $rec == "" and $x != [] and all($x[]; .state == "landed") and ($b | not) then .restarted = $t else . end' "$f" 2>/dev/null) \
+  go=$(jq -c --arg s "$s" --arg st "$(jq -r .state <<<"$r")" --argjson x "$fx" --argjson b "$busy" --arg t "$(clock)" --arg rec "$rec" 'select(.since == $s and .state == $st and .restarted == null)
+    | .fixes = $x | .fixesRead = (now | floor) | if $rec == "" and .waitStopped == null and $x != [] and all($x[]; .state == "landed") and ($b | not) then .restarted = $t else . end' "$f" 2>/dev/null) \
     && [ -n "$go" ] && printf '%s\n' "$go" > "$f.new" && mv -f "$f.new" "$f" || go=''
   exec {lk}>&-
   [ -z "$rec" ] || return 0
