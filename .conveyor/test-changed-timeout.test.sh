@@ -49,8 +49,13 @@ key=$(git -C "$R" rev-parse HEAD)-$(. "$ROOT/conveyor/lib/donewhen.sh" && treeof
 # got to their case (.git/aone) before the limit: at one run in five, all 60 miss it about one time in 650,000. A test
 # with fewer in MAXR rounds fails, as its runs could not show the bug. The busy case's low priority keeps the other
 # runs' starts within the limit.
+# Under a tracer (the engine's input trace, strace -f -e trace=%file, follows each process of the test), every file
+# open stops for the one tracer: at the TERM each run's eend() pkill reads /proc whole, thousands of opens, and 24 of
+# them at once queued past the 10 s KILL, so the runs "did not end on its TERM". Traced, the runs go 6 side by side in
+# more rounds, the same 120 runs at most.
 # Each output is cut at 20 MB (ulimit -f): a run that writes the error again and again ends there.
 N=24 NEED=60 MAXR=5 began=0 round=0
+[ "$(awk '/^TracerPid:/ { print $2 }' /proc/self/status 2>/dev/null)" -gt 0 ] 2>/dev/null && N=6 MAXR=20
 while [ "$began" -lt $NEED ] && [ $round -lt $MAXR ] && [ $fails = 0 ]; do
   ks=$(seq $((round * N + 1)) $((round * N + N))); round=$((round + 1))
   for k in $ks; do
