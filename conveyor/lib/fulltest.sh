@@ -649,7 +649,8 @@ relstopwaiting() { # [<version> | <since>]
 # ended list (endedrecs(), lib/records.sh) both: one whose lines went to the archive is landed, not open or closed.
 # The list itself, relfixlist(): its input the issues as gh gives them (number, body, createdAt, state; [] for a run
 # that waits on its notes card), $c the card records' lines, $t the Tests page's cards; rellimit() reads it the same way.
-# A red run whose wait the owner stopped (waitStopped: relstopwaiting()) is not read, and never starts again by itself.
+# A red run whose wait the owner stopped (waitStopped: relstopwaiting()) is not read, and never starts again by itself:
+# a stop between the read and the lock (as the issues are read) is found again under the lock, and nothing is written.
 RELFIXJQ='def relfixlist($v; $e; $n; $c; $t): ($c | map(select(.step == "landed") | .issue)) as $landed
   | ("(^|\\n)[ \\t]*Release fix:[ \\t]*" + ($v | gsub("\\."; "\\.")) + "[ \\t]*\\r?(\\n|$)") as $re | ($t | map(.filed | numbers)) as $filed
   | ([.[] | select(.createdAt > $e and ((.body // "") | test($re)) and (.number | IN($filed[]) | not))
@@ -678,7 +679,7 @@ relfixes() { # [record]
   fi
   { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null || return 1
   if [ -n "$rec" ]; then flock -w 10 "$lk" || { exec {lk}>&-; return 1; }; else flock -n "$lk" || { exec {lk}>&-; return 0; }; fi
-  go=$(jq -c --arg s "$s" --arg st "$(jq -r .state <<<"$r")" --argjson x "$fx" --argjson b "$busy" --arg t "$(clock)" --arg rec "$rec" 'select(.since == $s and .state == $st and .restarted == null)
+  go=$(jq -c --arg s "$s" --arg st "$(jq -r .state <<<"$r")" --argjson x "$fx" --argjson b "$busy" --arg t "$(clock)" --arg rec "$rec" 'select(.since == $s and .state == $st and .restarted == null and .waitStopped == null)
     | .fixes = $x | .fixesRead = (now | floor) | if $rec == "" and $x != [] and all($x[]; .state == "landed") and ($b | not) then .restarted = $t else . end' "$f" 2>/dev/null) \
     && [ -n "$go" ] && printf '%s\n' "$go" > "$f.new" && mv -f "$f.new" "$f" || go=''
   exec {lk}>&-

@@ -284,6 +284,21 @@ t_relstoprestarted() {
     || fail "the stop of a run started again as it took the lock did not fail saying it stopped nothing ($RC): $(cat "$T/$CASE/run.out")"
   fixrec "the stop changed the record of the run started again" '.state == "waiting" and .restarted == "2026-11-19T11:00:00Z" and .reasons == []'
 }
+# Bug it catches: relfixes() read the red record, then the issues (gh issue list, up to 60 s), and only then took the
+# release lock; a `release-run stop` in that time set waitStopped and said the run no longer waits, yet the locked
+# check did not look at waitStopped, so relfixes() set restarted and started release-prep. The gh stub's issue list
+# runs the real stop at that point (list-cmd); the only fix has landed and is pushed, so without the stop it would start.
+t_relfixesstopped() {
+  setup "$(fixissue 20 11 CLOSED 'Release fix: 1.1.0' | jq -s .)"
+  fixred; landed 20 | jq -c --arg s "$(git -C "$R" rev-parse HEAD)" '.sha = $s' >> "$ST/cards.jsonl"
+  printf 'CONVEYOR_MAIN=%q CONVEYOR_CARDS=%q bash %q release-run stop > "$STUB/stop.out" 2>&1; echo $? > "$STUB/stop.rc"\n' \
+    "$R" "$T/$CASE/cards" "$SRC/conveyor.sh" > "$STUB/list-cmd"
+  fixcall
+  [ "$(cat "$STUB/stop.rc" 2>/dev/null)" = 0 ] || fail "release-run stop, run as relfixes() read the issues, did not stop the red run's wait: $(cat "$STUB/stop.out" 2>/dev/null)"
+  fixrec "relfixes() marked the red run restarted after release-run stop ended its wait, as it read the issues" '.state == "failed" and .waitStopped != null and .restarted == null'
+  ! grep -q 'starts again' "$T/$CASE.fix" || fail "relfixes() started release-prep 1.1.0 after release-run stop reported success: $(cat "$T/$CASE.fix")"
+  [ ! -e "${RUN%/*}/run.log" ] || fail "a run started after release-run stop ended the wait: $(cat "${RUN%/*}/run.log")"
+}
 # engine_once (lib.sh), which fixcall runs relfixes() in. Bugs it catches: a load per call (each fixcall paid a whole
 # engine load again), whether it starts conveyor.sh again or only sources the libraries of commands/run.sh again; a
 # call after a pack change run in the load of the pack before (the engine reads the pack as it loads); a call run with
