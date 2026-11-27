@@ -591,11 +591,11 @@ t_slicesgrownunread() {
 }
 # #100101 (src/s1.sh) is closed, then GitHub refuses to close #100102 (src/s2.sh): no slice is filed in their place,
 # the change is kept whole, and the grown line names #100101 as withdrawn. Bugs caught: a failed close left two open
-# follow-ups of one part; the grown line left out a slice closed before a later close failed.
+# follow-ups of one part; the grown line left out a slice closed before a later close failed; the change lost src/s1.sh.
 t_slicesgrownclose() {
   grownagain '' 'eval "real_$(declare -f gh_write)"; gh_write() { [ "$1 $2 $3" != "issue close 100102" ] || return 1; real_gh_write "$@"; }; ' '["src/s1.sh"]' '["src/s2.sh"]'
-  [ "$RC" = 0 ] && [ -e "$FXWT/src/s2.sh" ] && [ "$(cat "$STUB/closed" 2>/dev/null)" = 100101 ] && [ "$(jq -s length "$STUB/filed")" = 2 ] \
-    || fail "a slice was filed in place of one that could not be closed, or the change was not kept whole (exit $RC): $(cat "$T/$CASE/run.out" "$STUB/closed" 2>/dev/null)"
+  [ "$RC" = 0 ] && [ "$(cat "$STUB/closed" 2>/dev/null)" = 100101 ] && [ "$(jq -s length "$STUB/filed")" = 2 ] && [ "$(cat "$FXWT/src/s2.sh" 2>/dev/null)" = new ] \
+    && [ "$(cat "$FXWT/src/s1.sh" 2>/dev/null)" = "$(printf 'main s1\nmore')" ] || fail "a slice was filed in place of one that could not be closed, or the change was not kept whole with the edit to src/s1.sh of the closed #100101 (exit $RC): $(cat "$T/$CASE/run.out" "$STUB/closed" "$FXWT/src/s1.sh" 2>/dev/null)"
   [ "$(grownwhy)" = '["split",null,[100101],"the tests apart; no slice is filed, so the change is kept whole: #100102, a slice that an earlier card filed for #7, could not be closed, so no slice is filed in its place"]' ] \
     || fail "the grown line does not say why no slice was filed: $(cat "$ST/cards.jsonl")"
 }
