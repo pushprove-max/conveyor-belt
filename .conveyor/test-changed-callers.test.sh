@@ -58,9 +58,10 @@ p_callers() {
     && ok "the run says callersof picked the changed function's tests" || no "lib/w.sh target() changed: no callersof rule line: $(cat "$T/out")"
 }
 # A helper that many functions call reaches most cases through them: with 26 callers, target() runs its area. Bug it
-# catches: a limit of 26 or more (cfix 25 is helper() and v0 to v24, 26 callers, one over the limit of 25).
+# catches: a limit of 26 or more (cfix 24 is helper(), v0 to v23 and upmain() of commands/up.sh, 26 callers, one over
+# the limit of 25; the code of commands/go.sh outside its functions is no caller).
 p_callersmany() {
-  cfix 25; edit 's/echo one/: one/'; got=$(ran)
+  cfix 24; edit 's/echo one/: one/'; got=$(ran)
   [ "$got" = "wcmd wfour wone wthree wtwo wup" ] && [ "$(cat "$T/rc")" = 0 ] \
     && ok "a changed function with more than 25 callers runs its area's case files" \
     || no "lib/w.sh target() with 26 callers changed: ran '$got', want its area, exit $(cat "$T/rc"): $(cat "$T/out")"
