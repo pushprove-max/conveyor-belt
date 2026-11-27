@@ -285,3 +285,19 @@ t_trackjudge() {
     && [ "$(jq -c '.[0].steps[] | select(.step == "review") | .sec' "$T/$CASE/rows")" = 30 ] \
     || fail "the review's record has not the 30 seconds since the build with the judge's line before it, or the failed judge is not drawn failed with its reason and its own 25 seconds: $out"
 }
+
+# A judge line is a step of the card's steps, which the Board prices by step and model (dashboard_limit_pricing.py)
+# and the snapshot's metrics timeline lists. Bugs caught: fold() left the judge line out of the steps, so the judge's
+# tokens and cost were in no total; and a judge step taking the review's 30 seconds in place of its own 12.
+t_judgestep() {
+  local out
+  jq -nc 'def g($s; $t; $x): {card: "c1", issue: 7, step: $s, time: "2026-11-01T00:00:\($t)Z", result: "ok", tokens: {claude: 0, codex: 0}, reason: ""} + $x;
+    g("picked"; "00"; {}), g("build"; "20"; {}),
+    g("judge"; "50"; {of: "review", model: "claude-haiku-5-5", sec: 12, tokens: {claude: 900, codex: 0}, usage: {input: 800, output: 100}}),
+    g("review"; "50"; {result: "GO", model: "claude-sonnet-5-5", tokens: {claude: 5000, codex: 0}, usage: {input: 4000, output: 1000}})' > "$T/$CASE/rec" \
+    || fail "the fixture could not be written"
+  out=$(jq -cs --argjson max 3 --arg nodeps "" --arg yes "" --arg lintyes "" --arg shut "" --arg ownshut "" --arg engshut "" -f "$SRC/jq/rows.jq" "$T/$CASE/rec" \
+    | jq -c '.[0].steps | map(select(.step != "build") | [.step, .model, .sec, .tokens.claude, .usage])') || fail "the rows of the fixture could not be made: $out"
+  [ "$out" = '[["judge","claude-haiku-5-5",12,900,{"input":800,"output":100}],["review","claude-sonnet-5-5",30,5000,{"input":4000,"output":1000}]]' ] \
+    || fail "a card with a judge line (claude-haiku-5-5, 12 s, 900 tokens) before its review has not a judge step with the judge's model, seconds, tokens and usage: $out"
+}
