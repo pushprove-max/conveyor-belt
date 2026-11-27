@@ -223,12 +223,15 @@ t_filededit() {
 }
 # #1701: filed told the Foreman to hold "each issue it filed" after a command that filed none, because files.jq reads a
 # `$` word after `gh` or after the word `issue` as a create held in a variable. Bug caught: the message after an edit
-# of an issue with `gh api -X PATCH`, whose output links no issue.
+# of an issue with `gh api -X PATCH`, whose output links no issue, also with two spaces, or a space and a tab, between the words
+# before -X (Bash runs the same edit; the edit check took only one space there, so the `=@` read as a filing).
 t_filedpatch() {
   filedsetup
-  cmd='f=$(mktemp); echo text > "$f"; gh api -X PATCH repos/o/r/issues/4 -F body=@"$f" && foreman.sh ask p retry 4'
-  out=$(hook filed "$cmd" $'ok\n')
-  [ -z "$out" ] || fail "filed said something after an edit of #4 that links no issue (command: $cmd): $out"
+  for cmd in 'f=$(mktemp); echo text > "$f"; gh api -X PATCH repos/o/r/issues/4 -F body=@"$f" && foreman.sh ask p retry 4' \
+    'f=$(mktemp); gh api  -X PATCH repos/o/r/issues/4 -F body=@"$f"' $'gh api repos/o/r/issues/4 \t-X PATCH -F body=@x'; do
+    out=$(hook filed "$cmd" $'ok\n')
+    [ -z "$out" ] || fail "filed said something after an edit of #4 that links no issue (command: $cmd): $out"
+  done
 }
 # Bug caught: the message after a search that has the word issue before a variable in its pattern and runs no gh.
 t_filedgrep() {
