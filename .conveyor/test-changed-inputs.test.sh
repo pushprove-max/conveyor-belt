@@ -13,7 +13,8 @@
 # named as an input; and a trace with a path strace escaped (one no tracked path can match), one that read the
 # checkout's Git index or objects (the tracked files listed through Git), or one that read a path here that is not
 # tracked and was there (a dependency in node_modules, linked from main), named in part, so a change to that file, a
-# file added, or a dependency file deleted, would not run the test.
+# file added, or a dependency file deleted, would not run the test; and a test that lists the tracked paths alone
+# (`git ls-files -z`, as spdx.test.sh does) named no inputs, so nothing selected it for a file added.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
@@ -27,9 +28,11 @@ no() { echo "not ok - $1"; fails=1; }
 # a.test.sh's one case), the engine's runner (which passes), b.test.sh, a second engine case file (with a.test.sh alone,
 # its cases would be every engine case, and the whole-only runner would take that run, as a whole engine run), the
 # hooks test hooks/r.test.sh, which reads conveyor/read.sh, lists conveyor/lib/, reads the link link.md (to
-# conveyor/read.sh) and checks that tools/run.sh can run, the plugin test file hooks/u.test.ts, and tools/exec.sh and
-# tools/stat.sh.
+# conveyor/read.sh) and checks that tools/run.sh can run, hooks/l.test.sh, which lists the tracked files as
+# spdx.test.sh does (git -C <a folder of a name longer than strace prints whole> ls-files -z), the plugin test file
+# hooks/u.test.ts, and tools/exec.sh and tools/stat.sh.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests" "$R/conveyor/lib" "$R/hooks" "$R/tools" "$T/bin"
+echo 'git -C "$PWD/hooks/../tools/../conveyor/lib/../.." ls-files -z > /dev/null' > "$R/hooks/l.test.sh"
 cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "a", "file": "conveyor/read.sh"}' '{"area": "a", "file": "conveyor/unread.sh"}' \
   '{"area": "a", "file": "conveyor/lib/x.sh"}' '{"area": "a", "test": "a.test.sh"}' '{"area": "b", "test": "b.test.sh"}' > "$R/.conveyor/engine-areas.json"
@@ -121,6 +124,24 @@ for x in index objects/pack/pack-1.idx; do
     || no "given the trace $T/trace.${x%%/*}, which opens .git/$x, the run named inputs or did not pass: '$got', exit $(cat "$T/git${x%%/*}.rc"): $(cat "$T/git${x%%/*}.out")"
 done
 
+# A process that opens the index after its exec of `git -C <folder> ls-files -z -- <path>` (the folder's name cut short
+# by strace) lists the tracked files alone: the inputs name every folder that holds a tracked file too, so a file
+# added or deleted anywhere runs the test. Bug it catches: spdx.test.sh, which lists the tracked files so, named no
+# inputs, and nothing selected it for a new hooks/new.sh with no SPDX line, which it fails on. Its exec of
+# `git ls-files -s` (the staged content of each file, which no input names) still gives no inputs line.
+for a in '"-z", "--", "*.sh"' '"-s"'; do
+  n=ls${a:2:1}
+  { cat "$T/trace"; echo "106 execve(\"/usr/bin/git\", [\"git\", \"-C\", \"<root>/hooks/../tools/../conveyor/\"..., \"ls-files\", $a], 0x7ffd0000 /* 20 vars */) = 0"
+    echo '106 openat(AT_FDCWD<<root>>, ".git/index", O_RDONLY|O_CLOEXEC) = 3<<root>/.git/index>'; } > "$T/trace.$n"
+  got=$(run "$n" "$T/trace.$n")
+  if [ "$n" = lsz ]; then
+    want="hooks/r.test.sh $(printf '%s\n' ./ .conveyor/ conveyor/ conveyor/lib/ conveyor/lib/x.sh conveyor/read.sh conveyor/tests/ hooks/ \
+      hooks/package.json link.md nope tools/ tools/exec.sh tools/gone.json tools/run.sh tools/stat.sh | LC_ALL=C sort | paste -sd' ')"
+  else want=; fi
+  [ "$got" = "$want" ] && [ "$(cat "$T/$n.rc")" = 0 ] && grep -qxF -- '-- ok hooks/r.test.sh' "$T/$n/test-changed.log" \
+    || no "given the trace $T/trace.$n, an exec of git ls-files $a that opens the index, the inputs line is '$got', not '$want', exit $(cat "$T/$n.rc"): $(cat "$T/$n.out")"
+done
+
 # A trace that found node_modules/jsdom, a path here that is not tracked (a dependency folder linked from main), as Node
 # does when a test loads jsdom: no inputs line, and the file still passes. Bug it catches: a test that loaded jsdom kept
 # its pass after a file of jsdom was deleted, as no input named the files it read there.
@@ -147,6 +168,10 @@ if command -v strace > /dev/null 2>&1 && [ -z "$(strace -D -f -qq --seccomp-bpf 
   got=$(run real)
   [ "$got" = "hooks/r.test.sh conveyor/lib/ conveyor/read.sh link.md tools/run.sh" ] && [ "$(cat "$T/real.rc")" = 0 ] \
     || no "under the host's strace, hooks/r.test.sh (cat conveyor/read.sh; ls conveyor/lib; readlink link.md; [ -x tools/run.sh ]) did not name its reads as inputs: '$got', exit $(cat "$T/real.rc"): $(cat "$T/real.out")"
+  # The real strace cuts the long -C folder short, as the stub's trace above does, and git opens the index itself.
+  got=$(run reallist "" hooks/l.test.sh)
+  [ "$got" = "hooks/l.test.sh ./ .conveyor/ conveyor/ conveyor/lib/ conveyor/tests/ hooks/ tools/" ] && [ "$(cat "$T/reallist.rc")" = 0 ] \
+    || no "under the host's strace, hooks/l.test.sh (git -C <a long folder> ls-files -z) did not name every folder that holds a tracked file: '$got', exit $(cat "$T/reallist.rc"): $(cat "$T/reallist.out")"
 else
   echo "# the host's strace cannot trace here: its own case did not run"
 fi

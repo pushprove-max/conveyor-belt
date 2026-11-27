@@ -1844,11 +1844,16 @@ else TRACE=(); fi
 # (its last AT_FDCWD, or its last chdir that did not fail), else of the checkout. A call strace split (`<unfinished
 # ...>`) takes its result from the line it resumed on. Not the file itself, nor .git. Nothing, and so no pass kept, for
 # a trace that names a path here with a byte strace escapes, which no tracked path can be matched to; that opens this
-# checkout's Git index or a file of its Git objects (a `git ls-files`, a `git diff`, a `git show`): what the test then
+# checkout's Git index or a file of its Git objects (a `git ls-files -s`, a `git diff`, a `git show`): what the test then
 # reads is the list of tracked files or their content in Git, which no input names, so a pass kept on its inputs could
 # stand after a file was added; or that read a path here that is not tracked and was there (a dependency folder linked
 # from main, such as node_modules, or a file a test left): no input names its content, so a pass kept could stand
-# after a file in it changed or was deleted.
+# after a file in it changed or was deleted. But a process that opens the index after its exec of a `git ls-files` that
+# prints only the tracked paths (lists(): its options -z, -c, --cached, --full-name, --error-unmatch and
+# --exclude-standard, and paths) reads the list of tracked files alone: its inputs name every folder that holds a
+# tracked file, so a file added or deleted anywhere changes them, and the engine runs the test for it. Bug: spdx.test.sh
+# lists the tracked files so and named no inputs, and no map, link or name selects it for a new file, so a new
+# hooks/new.sh with no SPDX line ran no test that fails on it.
 inputsof() {
   local in g c
   [ -s "$2" ] && git -c core.quotePath=false ls-files > "$o.tracked" && g=$(git rev-parse --absolute-git-dir) && g=$(cd "$g" && pwd -P) \
@@ -1858,8 +1863,24 @@ inputsof() {
       n = split(p, a, "/"); k = 0
       for (i = 1; i <= n; i++) { if (a[i] == "" || a[i] == ".") continue; if (a[i] == "..") { if (k) k--; continue }; s[++k] = a[i] }
       o = ""; for (i = 1; i <= k; i++) o = o "/" s[i]; return o == "" ? "/" : o }
-    # x read by a call (op: an open) whose result was st: ok, or the error it failed with (ENOENT and so on).
-    function add(x, op, st) {
+    # Whether the arguments s of an exec (`, ["git", ...], ...`, after its path) are a git ls-files that prints only
+    # the tracked paths: else, or when strace cut short the list or an option of it (`...`), not. A path or a value
+    # strace cut short (`"<its first characters>"...`: a -C folder of a long name) still counts.
+    function lists(s,   a, cut, n, i, k, w) {
+      if (substr(s, 1, 3) != ", [") return 0; s = substr(s, 4); n = 0
+      while (match(s, /^"([^"\\]|\\.)*"/)) {
+        a[++n] = substr(s, 2, RLENGTH - 2); s = substr(s, RLENGTH + 1)
+        if (substr(s, 1, 3) == "...") { cut[n] = 1; s = substr(s, 4) }
+        if (substr(s, 1, 2) != ", ") break; s = substr(s, 3) }
+      if (substr(s, 1, 1) != "]" || a[1] !~ /(^|\/)git$/ || (1 in cut)) return 0
+      for (i = 2; i <= n && a[i] != "ls-files"; i++) if (!(i in cut) && (a[i] == "-C" || a[i] == "-c")) i++; else return 0
+      if (i > n || (i in cut)) return 0
+      for (k = 0; ++i <= n;) { w = a[i]; if (k || w !~ /^-/) continue
+        if ((i in cut) || w !~ /^(--|-[zc]+|--cached|--full-name|--error-unmatch|--exclude-standard)$/) return 0; if (w == "--") k = 1 }
+      return 1 }
+    # x read by process q by a call (op: an open) whose result was st: ok, or the error it failed with (ENOENT and so on).
+    function add(x, op, st, q) {
+      if (op && x == G "/index" && ls[q]) { all = 1; return }
       if (op && (x == G "/index" || index(x, C "/objects/") == 1)) { bad = 1; return }
       if (x == r || x == r2) x = "./"; else if (index(x, r "/") == 1) x = substr(x, length(r) + 2)
       else if (index(x, r2 "/") == 1) x = substr(x, length(r2) + 2); else return
@@ -1870,8 +1891,10 @@ inputsof() {
     # The call c of process q on the path x, its result on the line l.
     function done(q, c, x, l,   st) {
       st = "ok"; if (match(l, / = -1 E[A-Z0-9]+( \(.*\))?$/)) { st = substr(l, RSTART + 6); sub(/ .*/, "", st) }
-      if (c == "chdir") { if (st == "ok") cwd[q] = x; else add(x, 0, st); return }
-      add(x, c ~ /^open/, st) }
+      if (c == "chdir") { if (st == "ok") cwd[q] = x; else add(x, 0, st, q); return }
+      # An exec: whether the program q runs now is a git ls-files of the tracked paths alone (lists, of the line it began on).
+      if (c ~ /^execve/ && st == "ok") ls[q] = pv[q]
+      add(x, c ~ /^open/, st, q) }
     FILENAME == T { f[$0] = 1; d["./"] = 1; n = split($0, a, "/"); p = ""; for (i = 1; i < n; i++) { p = p a[i] "/"; d[p] = 1 }; next }
     /O_WRONLY/ { next }
     { pid = $1; at = r }
@@ -1879,19 +1902,20 @@ inputsof() {
     pid in cwd { at = cwd[pid] }
     # An open: the path of the file it opened (its fd, -y), on its line or on the line it resumed on.
     match($0, /^[0-9]+ +(<\.\.\. )?open(at2?)?[ (]/) && match($0, / = [0-9]+<.*>$/) {
-      x = substr($0, RSTART, RLENGTH); sub(/^ = [0-9]+</, "", x); sub(/>$/, "", x); add(x, 1, "ok") }
+      x = substr($0, RSTART, RLENGTH); sub(/^ = [0-9]+</, "", x); sub(/>$/, "", x); add(x, 1, "ok", pid) }
     # The path the call was given: its first string, of the folder its first argument names when that is one.
     match($0, /^[0-9]+ +[a-z0-9_]+\(/) {
       c = substr($0, RSTART, RLENGTH - 1); sub(/^[0-9]+ +/, "", c); g = substr($0, RSTART + RLENGTH)
       if (c !~ /^(open|openat2?|l?stat(64)?|newfstatat|fstatat64|statx|access|faccessat2?|readlink(at)?|execve(at)?|chdir)$/) next
       b = at; if (match(g, /^(AT_FDCWD|[0-9]+)<[^>]*>, /)) { b = substr(g, 1, RLENGTH - 3); sub(/^[^<]*</, "", b); g = substr(g, RLENGTH + 1) }
       if (!match(g, /^"([^"\\]|\\.)*"/)) next
+      if (c ~ /^execve/) pv[pid] = lists(substr(g, RLENGTH + 1))
       x = substr(g, 2, RLENGTH - 2); x = (substr(x, 1, 1) == "/") ? norm(x) : norm(b "/" x)
       if ($0 ~ /<unfinished \.\.\.>$/) { pc[pid] = c; px[pid] = x; next }
       done(pid, c, x, $0); next }
     # A call strace split: the path from the line it began on, the result from this one.
     match($0, /^[0-9]+ +<\.\.\. [a-z0-9_]+ resumed>/) && (pid in px) { c = pc[pid]; x = px[pid]; delete pc[pid]; delete px[pid]; done(pid, c, x, $0) }
-    END { if (bad) exit 1; for (x in use) print x }' "$o.tracked" "$2") || return 1
+    END { if (bad) exit 1; if (all) for (x in d) use[x] = 1; for (x in use) print x }' "$o.tracked" "$2") || return 1
   printf 'TESTRUN inputs\t%s%s\n' "$1" "$(LC_ALL=C sort <<<"$in" | awk 'length { printf "\t%s", $0 }')"
 }
 # failstop [--in <line>] <command>...: runs it, its output and errors to this run's output. With FAILFAST (a card's
