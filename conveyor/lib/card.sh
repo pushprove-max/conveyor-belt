@@ -180,9 +180,11 @@ reviewseen() { # <worktree> <the proof's heading>
   printf '%s' "$m"
 }
 # The commit message of a card of an issue: its subject from the pack's type label (fix, else feat) and area prefix
-# (its first area label, else product), then its Closes and card lines; a card with no GitHub issue's (number 0) names no issue, and carries its body (the words it came from), a closing keyword's issue named without its # or address so the push closes none. With the pack's privacy.mode public, such a message has each word the privacy check flags masked (privmask(), lib/issues.sh), as a follow-up's text is: the body can quote test output, and the push checks no commit message. Fails when the pack or the check could not be read.
-cardsubject() { # <card> <issue json>
-  local m pm; m=$(jq -r --arg c "$1" --arg t "$TYPE" --arg p "$AREA" '(.labels | map(.name)) as $l | (.number != 0) as $i | "\(if $l | index($t) then "fix" else "feat" end)(\($l | map(select(startswith($p)) | ltrimstr($p)) | .[0] // "product")): \(.title)\(if $i then " (#\(.number))" else "" end)\n\n\(if $i then "Closes #\(.number)\n" else .body // "" | gsub("(?i)\\b(?<k>close[sd]?|fix(?:e[sd])?|resolve[sd]?)(?<s>:?\\s+)(?:https?://\\S+/(?:issues|pull)/|(?<r>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#)(?<n>[0-9]+)"; "\(.k)\(.s)issue \(if .r then .r + " " else "" end)\(.n)") | sub("\\s+\\z"; "") | if . == "" then "" else . + "\n\n" end end)Conveyor card \($c)"' <<<"$2") && packget privacy.mode pm || return 1
+# (its first area label, else product), then its Closes and card lines; a card with no GitHub issue's (number 0) names no issue, and carries its body (the words it came from), a closing keyword's issue named without its # or address so the push closes none. With the pack's privacy.mode public, such a message has each word the privacy check flags masked (privmask(), lib/issues.sh), as a follow-up's text is: the body can quote test output, and the push checks no commit message. Fails when the pack or the check could not be read. A branch that names no issue lands under its stand-in's title alone (its first commit's subject, or its slice's title), with its card and branch line, masked as above: a slice's title is staff text.
+cardsubject() { # <card> <issue json> [<branch>]
+  local m='' pm
+  [ -z "${3:-}" ] || [ "$(jq -r .number <<<"$2")" != 0 ] || m=$(jq -r --arg c "$1" --arg b "$3" '"\(.title)\n\nConveyor card \($c), branch \($b)"' <<<"$2") || return 1
+  [ -n "$m" ] || m=$(jq -r --arg c "$1" --arg t "$TYPE" --arg p "$AREA" '(.labels | map(.name)) as $l | (.number != 0) as $i | "\(if $l | index($t) then "fix" else "feat" end)(\($l | map(select(startswith($p)) | ltrimstr($p)) | .[0] // "product")): \(.title)\(if $i then " (#\(.number))" else "" end)\n\n\(if $i then "Closes #\(.number)\n" else .body // "" | gsub("(?i)\\b(?<k>close[sd]?|fix(?:e[sd])?|resolve[sd]?)(?<s>:?\\s+)(?:https?://\\S+/(?:issues|pull)/|(?<r>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#)(?<n>[0-9]+)"; "\(.k)\(.s)issue \(if .r then .r + " " else "" end)\(.n)") | sub("\\s+\\z"; "") | if . == "" then "" else . + "\n\n" end end)Conveyor card \($c)"' <<<"$2") && packget privacy.mode pm || return 1
   if [ "$pm" = public ] && [ "$(jq -r .number <<<"$2")" = 0 ]; then privmask "$m"; else printf '%s\n' "$m"; fi
 }
 # A failed (or held) test step's line, past its common fields: the run's record (testrec()), its reason (the exit, and
@@ -303,9 +305,7 @@ card() { # <card> <issue> [<branch> <tip>]
   [ -n "$br" ] || [ "$n" = 0 ] || modelpick "$c" "$n"
   go=end; cardopen; sx=$?; [ "$go" != end ] || return $sx
   go=end; cardbuild; sx=$?; [ "$go" != end ] || return $sx
-  msg=$(cardsubject "$c" "$issue") || { block "$c" "$n" "$wt" "the engine could not make the card's commit message, or its privacy check could not be made, so nothing landed"; return; }
-  # A branch that names no issue lands under its own first commit's subject, which names no issue to close.
-  [ "$n" != 0 ] || [ -z "$br" ] || msg=$(jq -r --arg c "$c" --arg b "$br" '"\(.title)\n\nConveyor card \($c), branch \($b)"' <<<"$issue")
+  msg=$(cardsubject "$c" "$issue" "$br") || { block "$c" "$n" "$wt" "the engine could not make the card's commit message, or its privacy check could not be made, so nothing landed"; return; }
   prv=$'\n\n'"$PORTREVIEW"$'\n'"The difference is the file $wt.port."; kp=$fromk/$from.patch
   # A NO-GO is fixed and reviewed again; a NO-GO on a last review (review MAX_REVIEWS, counting the rounds a retried
   # card carries, or the one review after a landing conflict, a test fix or the landing gate's lint fix, or one that

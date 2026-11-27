@@ -137,3 +137,16 @@ t_branchslice() {
   [ "$RC" != 0 ] && grep -qF "slice $a is done already, as card $c" "$T/$CASE/run.out" && [ "$(jq -r --arg a "$a" '.cards[] | select(.id == $a) | .card' "$(nicards)")" = "$c" ] \
     || fail "a second land-branch $a, after slice $a landed as $c, was not refused, or took the slice (exit $RC): $(cat "$T/$CASE/run.out") $(cat "$(nicards)")"
 }
+
+# Bug it catches: with privacy.mode public, a branch landed as a slice of no GitHub issue took its commit message from
+# the slice's title (card() put it in place of cardsubject()'s masked message), so a private term in the title landed
+# and the push sent it with no privacy check. cardsubject() now makes the branch's message and masks it.
+t_branchprivmsg() {
+  H=/home; export XDG_CONFIG_HOME=$T/$CASE/config # the home path is put together here, so this file holds none itself
+  setup '[]'; mkdir -p "$XDG_CONFIG_HOME/conveyor"; echo 'case:Zed' > "$STUB/terms"
+  jq -n --arg t "$STUB/terms" '{terms: $t}' > "$XDG_CONFIG_HOME/conveyor/host.json"; tune '.privacy.mode = "public"'
+  local issue; issue=$(jq -cn --arg h "$H/x" '{number: 0, title: "Slice for Zed in \($h)", body: "the slice", labels: []}')
+  fx_in "cardsubject c0-0 '$issue' slice-b"
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = $'Slice for <private term> in <home path>\n\nConveyor card c0-0, branch slice-b' ] \
+    || fail "cardsubject c0-0 '$issue' slice-b with privacy.mode public did not mask the slice's title in the branch's message (exit $RC): $(cat "$T/$CASE/run.out")"
+}
