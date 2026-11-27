@@ -152,6 +152,10 @@
 # packPick: the models the rule Pick settings may give each seat, shown and set in the Rules tab's Pick settings row
 #   (`conveyor.sh pick models`): {lists: the pack's pick ({<seat>: {<model>: {min, max}}}; {} when it sets none),
 #   efforts: the efforts each program takes (EFFORTS, lib/paths.sh), the words of each model's effort menus}.
+# packSplit: the four limits of the rule Split large issues in force (split.doneWhen, split.files, split.areas and
+#   split.chars, read by splitcheck(), lib/slices.sh), shown and set in the Rules tab (`conveyor.sh split-limits`):
+#   {doneWhen, files, areas, chars}, each {n, from: pack when the pack sets it, default when the schema's default
+#   counts, default: the schema's default, which Use default sets}; null when the pack cannot be read.
 # packLandAs: the pack's push.landAs (main or pr), the rule Land as while the control record's landAs is null; null
 #   when the pack cannot be read.
 # packPrMerge: the pack's push.prMerge (button, release or idle), the rule Merge PR while the control record's prMerge
@@ -1073,6 +1077,11 @@ snapshot() (
   packget push.landAs pla 2>/dev/null || pla=''
   packget push.prMerge ppm 2>/dev/null || ppm=''
   packget pick pef 2>/dev/null && [ -n "$pef" ] || pef='{}'
+  sw='' sf='' sa='' sc='' psp=null; packget split.doneWhen sw split.files sf split.areas sa split.chars sc 2>/dev/null \
+    && psp=$(jq -ce --slurpfile s "$SCHEMA" '(.split // {}) as $p | $s[0].properties.split.properties as $d | $ARGS.positional as $v
+      | [["doneWhen", "files", "areas", "chars"] | to_entries[] | .value as $k | {key: $k, value: {n: ($v[.key] | tonumber),
+        from: (if $p | has($k) then "pack" else "default" end), default: $d[$k].default}}] | from_entries' \
+      --args "$sw" "$sf" "$sa" "$sc" < "$PACK" 2>/dev/null) || psp=null
   # Each card with its metrics and its runs' sums, then the waits ($d/cards: two arrays, $all[0] and $all[1]), from a
   # summary kept beside the card records ($STATE.cardruns): only the issues whose cards changed are made again.
   printf '%s\n%s\n' "$METRICS" "$CARDRUNS" > "$d/cardruns.jq" \
@@ -1088,7 +1097,7 @@ snapshot() (
          queued: (if (.cards | type) == "array" then $e else null end)}' "$TACARDS" 2>/dev/null; } \
       || echo '{"tac":{},"tid":{},"queued":null}') \
     --arg shut0 "$SHUT" --arg shut1 "$OWNSHUT" --arg shut2 "$ENGSHUT" --slurpfile soff <(printf '[%s]' "$soffj") --slurpfile fl <(printf '%s' "$fl") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson np "$np" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
-    --slurpfile iss "$d/issues" --slurpfile cf "$cardfar" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --arg pef "$pef" --argjson efforts "$EFFORTS" \
+    --slurpfile iss "$d/issues" --slurpfile cf "$cardfar" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --arg pef "$pef" --argjson efforts "$EFFORTS" --argjson psp "$psp" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson pn "$pn" --argjson cr "$cr" --argjson ts "$ts" \
     --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg lintyes "$lintyes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
     --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q
@@ -1479,6 +1488,7 @@ snapshot() (
        packLandAs: (if $pla == "" then null else $pla end),
        packPrMerge: (if $ppm == "" then null else $ppm end),
        packPick: (try {lists: ($pef | fromjson), efforts: $efforts} catch null),
+       packSplit: $psp,
        waitWake: $ww,
        forecast: forecast,
        awaitingDeploy: $built,

@@ -47,17 +47,21 @@
   // The project's is the one of view d read at read: the one on screen, or one a change was sent from (run()), whose
   // answer can come after another project is picked.
   const savedShown = (s, now, d = S.d, read = S.read) => !!s && s.repo === d.repo && (s.at !== null && read !== null ? read < s.at : s.for === now);
-  // The value saved here for the project of view d (S.priceSaved, S.standingSaved, S.pickSaved keep one a project, by
+  // The value saved here for the project of view d (S.priceSaved, S.standingSaved, S.pickSaved, S.splitSaved keep one a project, by
   // repo), while it shows.
   const savedFor = (m, d, read, now) => { const s = m.get(d.repo); return savedShown(s, now, d, read) ? s : null; };
   // The pack's standing kinds as shown: as a change saved here left them, until a snapshot read after it comes; null
-  // from a snapshot without them. Each of these three is for the project on screen, or the one of view d read at read.
+  // from a snapshot without them. Each of these four is for the project on screen, or the one of view d read at read.
   const standingShown = (d = S.d, read = S.read) => { const s = savedFor(S.standingSaved, d, read, d.standing); return s ? s.over
     : Array.isArray(d.standing) ? d.standing : null; };
   // The pack's pick lists of Pick settings (pick: {<seat>: {<model>: {min, max}}}) as shown: as a change saved here
   // left them, until a snapshot read after it comes; null from a snapshot without them.
   const pickShown = (d = S.d, read = S.read) => { const s = savedFor(S.pickSaved, d, read, d.packPick); return s ? s.over
     : d.packPick && typeof d.packPick === 'object' && d.packPick.lists && typeof d.packPick.lists === 'object' ? d.packPick.lists : null; };
+  // The four limits of Split large issues ({<limit>: {n, from}}, the snapshot's packSplit) as shown: as a change saved
+  // here left them, until a snapshot read after it comes; null from a snapshot without them.
+  const splitShown = (d = S.d, read = S.read) => { const s = savedFor(S.splitSaved, d, read, d.packSplit); return s ? s.over
+    : d.packSplit && typeof d.packSplit === 'object' ? d.packSplit : null; };
   // The pack's prices as shown: as the changes saved here left them, until a snapshot read after them comes.
   const pricesShown = (d = S.d, read = S.read) => { const s = savedFor(S.priceSaved, d, read, d.prices); return s ? s.over
     : d.prices && d.prices.overrides && typeof d.prices.overrides === 'object' ? d.prices.overrides : {}; };
@@ -545,6 +549,6 @@
   }
   window.DASH_APP.part('rules-prices', function (shared) {
     ({ MODEL, ROLES, S, num, list, ctl, plural, say, run, button, draw } = shared);
-    return { savedShown, standingShown, pickShown, pricesShown, applied, priceWords, pricesSection };
+    return { savedShown, standingShown, pickShown, splitShown, pricesShown, applied, priceWords, pricesSection };
   });
 })();

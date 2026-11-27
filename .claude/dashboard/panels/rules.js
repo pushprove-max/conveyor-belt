@@ -19,7 +19,7 @@
 // build (the labels, each removable, and a field to add one, with the area labels of the open issues to pick from), New
 // issues start in (Queue or Held), Dependency guard (On or Off; drawn disabled, "needs a newer engine", for a project
 // whose control record has no depGuard), Split large issues (Off, Shadow or On; disabled the same way for a record with
-// no rules.split), Pick settings (Off, Shadow or On; disabled the same way for a record with no rules.pick; and each
+// no rules.split; under it, a row for each of its four limits in force, for a snapshot with packSplit), Pick settings (Off, Shadow or On; disabled the same way for a record with no rules.pick; and each
 // seat's allowed models, each with a checkbox and its lowest and highest effort, and Save, for a snapshot with packPick), Self-heals
 // expiry (days), Card dollar limit and Issue dollar limit (Off or dollars; no row for a record without the limit). Landing
 // and push: Push on landing (On or Off; disabled the same way for a record with no rules.push), Land as (Main or Pull
@@ -106,7 +106,7 @@
   const SETS = [
     ['models', 'Models', 'Three seats for each card.', ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account']],
     ['capacity', 'Capacity', 'Build slots and machine limits.', ['cap', 'guard', 'atonce', 'suite-mode', 'suite', 'failfast', 'teststeponly', 'cores']],
-    ['picking', 'Picking', 'Choose which issues enter the belt.', ['build', 'never', 'start', 'dep-guard', 'split', 'pick', 'healsdays', 'cardusd', 'issueusd']],
+    ['picking', 'Picking', 'Choose which issues enter the belt.', ['build', 'never', 'start', 'dep-guard', 'split', 'split-donewhen', 'split-files', 'split-areas', 'split-chars', 'pick', 'healsdays', 'cardusd', 'issueusd']],
     ['landing', 'Landing and push', 'Decide how finished cards reach the repository.', ['push', 'land-as', 'pr-merge', 'push-check', 'pushbatch', 'lint', 'visible']],
     ['standing', 'Done without asking', 'Choose when the Foreman can act on your behalf.', STANDING.map(([k]) => `standing-${k}`).concat([NOISSUE])],
     ['order', 'Issue order', 'Inspect held issues and set the order of pinned work.', ['held', 'order']],
@@ -130,7 +130,7 @@
     kept: new Map(), at: new Map(), from: PART, heard: new WeakSet(), raw: null, ctx: null, busy: false, area: '', kind: '', keep: null, search: '', by: 'area',
     open: new Set(), armed: null, unarm: null, asking: null, withLabels: false, moved: new Map(), picked: new Set(), waitsOpen: false, dep: null, depText: '',
     drafts: null, priceEdit: null, priceAdd: null, priceFind: '', priceSaved: new Map(), priceThis: new Map(), priceOpen: new Set(),
-    standingSaved: new Map(), pickSaved: new Map(), pickDraft: new Map(), cores: null, bare: null, bareFor: null, idle: null, shown: new Map(),
+    standingSaved: new Map(), pickSaved: new Map(), splitSaved: new Map(), pickDraft: new Map(), cores: null, bare: null, bareFor: null, idle: null, shown: new Map(),
     ruleSet: 'models', ruleFind: '', pinsAll: false, pinMenu: null, dragPin: null, choosing: null };
   // choosing: the overlay's ctx.picking, kept from its last draw: true while the tab in view shows the project choice.
   // S.ctx.picking() cannot say it: a panel's own ctx says so for that panel, whichever tab is in view.
@@ -147,8 +147,8 @@
   // (pricesSection): priceEdit, the row open in Edit as typed; priceAdd, the Add model form as typed; priceFind, the
   // search typed; priceSaved, each project's pack prices as the changes saved here left them, by repo, until a snapshot
   // read after them (savedShown); priceThis, the model picked for each ID's This is…; priceOpen, the folded groups
-  // opened. standingSaved and pickSaved, by repo too: the pack's standing kinds, and its pick lists of Pick settings,
-  // as a change saved here left them, until a snapshot read after it (savedShown);
+  // opened. standingSaved, pickSaved and splitSaved, by repo too: the pack's standing kinds, its pick lists of Pick
+  // settings and its limits of Split large issues, as a change saved here left them, until a snapshot read after it (savedShown);
   // pickDraft, each project's seat's models checked and ranges picked, not yet saved ("<repo> <seat>": {<model>: {min, max}}).
   // The Rules panel's index (index()), kept for this page only: ruleSet, the group picked (SETS); ruleFind, the search
   // typed. pinsAll: every pin shown; pinMenu, the pin whose menu is open; dragPin, the place of the pin being dragged.
@@ -336,6 +336,7 @@
           }
           S.pickSaved.set(repo, { repo, for: view.packPick, at: res.at, over });
         }
+        if (action === 'split-limits' && view) splitSave(repo, view, viewRead, args, res.at);
         // The values the change replaced, kept from before the first change no snapshot has read yet: a snapshot that
         // still holds one did not read it. A setting the record holds at its old value again waits for nothing.
         const at = repo === S.d.repo ? S : S.kept.get(repo), now = res.rec || (guess && guess[0]);
@@ -360,6 +361,17 @@
       }
       return free(ok);
     }, () => { tell('Not done: the host did not answer.'); return free(false); });
+  }
+
+  // A split limit saved shows at once too, as long as a model price (run): `split-limits <limit>=<n | default>`; one set
+  // to default shows the schema's default that the snapshot gave with it (packSplit's default).
+  function splitSave(repo, view, viewRead, args, at) {
+    const over = Object.assign({}, splitShown(view, viewRead));
+    list(args).forEach((w) => {
+      const [k, v] = String(w).split('='), d = over[k] && typeof over[k] === 'object' ? num(over[k].default) : null;
+      over[k] = v === 'default' ? { n: d, from: 'default', default: d } : { n: Number(v), from: 'pack', default: d };
+    });
+    S.splitSaved.set(repo, { repo, for: view.packSplit, at, over });
   }
 
   function button(text, cls, act, label, fn) {
@@ -636,7 +648,7 @@
   Object.assign(shared, window.DASH_APP.use('rules-setup', shared));
   const { MOVES, moveMark, readOf, moveJudge, guessed, tabLine, post, send, undoSkips, undoLabel, undoAsk, guarded,
     held, rules, index, produce, heldSection, STATES, ISORTS, filtersOf, openIssues, issueChoice, shownIssues,
-    pinnedFirst, bulk, issueRow, savedShown, standingShown, pickShown, pricesShown, applied, pricesSection,
+    pinnedFirst, bulk, issueRow, savedShown, standingShown, pickShown, splitShown, pricesShown, applied, pricesSection,
     onbConfirm, onbFocusable, onbClose, onbFocusStep, onbNext, onbDraw, drawOnboard } = shared;
 
   // The part as text without the readAt of each project's view (the part's own and each of others'), worked out once a part.
@@ -685,7 +697,7 @@
     // drawing it again replaced an open select (Group by) for the same content (issue 294). It is still the part drawn (S.raw).
     const key = bareOf(d);
     const saved = S.d && (savedShown(S.standingSaved.get(S.d.repo), S.d.standing) || savedShown(S.priceSaved.get(S.d.repo), S.d.prices)
-      || savedShown(S.pickSaved.get(S.d.repo), S.d.packPick));
+      || savedShown(S.pickSaved.get(S.d.repo), S.d.packPick) || savedShown(S.splitSaved.get(S.d.repo), S.d.packSplit));
     if (drawn && S.d && S.bare === key && view.repo === S.d.repo && !(S.ctl || S.turned || S.moved.size || saved)) {
       S.raw = [d, read, view.repo]; S.d = view; S.read = read; S.ctx = ctx;
       S.idle = d;

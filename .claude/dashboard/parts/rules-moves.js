@@ -6,7 +6,7 @@
   'use strict';
   // What this part uses of panels/rules.js, set when rules.js asks for the part (DASH_APP.part, at the end).
   let AREA, RELEASE_MAX, STANDING, ARM_MS, BUILDS, S, ONB, OB, num, list, ctl, plural, prio, pre, isArea,
-    areaName, PRMERGE, undoOf, say, run, button, priceWords, draw;
+    areaName, PRMERGE, undoOf, say, run, button, priceWords, splitShown, draw;
 
   // ---- the issues an action here moved (Queue, Queue all, Hold, a label removed, and their Undo) ----
   // By project and issue: {repo, issue, action ('release', 'hold' or 'unlabel'), labels (those unlabel removes), out (sent,
@@ -106,6 +106,7 @@
     depends: (a) => `#${a[0]} ${a[1] === 'add' ? 'depends on' : 'no longer depends on'} ${a.slice(2).map((n) => `#${n}`).join(', ')}`,
     prices: (a) => priceWords(a),
     'pick-models': (a) => (a[1] === 'clear' ? `${a[0]}: all models, any effort` : `${a[0]}: ${a.slice(1).join(', ')}`),
+    'split-limits': (a) => `split limit ${a.map((w) => w.replace('=', ': ')).join(', ')}`,
     standing: (a) => `${(STANDING.find(([k]) => k === a[0]) || [a[0], a[0]])[1]} without asking: ${a[1]}`,
   };
   // A change in words, for the head.
@@ -434,11 +435,34 @@
       }))));
     });
   }
+  // The four limits of Split large issues (the pack's split.doneWhen, split.files, split.areas and split.chars, as
+  // splitShown has them: {n, from, default}), a row each under its switch, whatever the rule's setting: with the rule On
+  // or Shadow, an issue that reaches one goes to the Judge (Off checks no issue: splitcheck(), lib/slices.sh). Each
+  // label starts with the rule's name, so a search for Split large issues finds the four rows too (index()). The limit in force is pressed, and the row says whether the pack sets it or the default counts;
+  // a limit the pack sets has Use default. A click sends `split-limits <limit>=<n>` (Use default: <limit>=default), its
+  // Undo the value it replaced. A snapshot with no packSplit (an older engine) shows none.
+  const SPLIT_LIMITS = [['doneWhen', 'Done-when items', 'Done-when items', [2, 3, 4, 5, 6, 8]], ['files', 'Files named', 'file paths', [3, 4, 6, 8, 10, 15]],
+    ['areas', 'Areas named', 'areas', [2, 3, 4, 5]], ['chars', 'Characters', 'characters in its title and body', [1500, 3000, 5000, 8000]]];
+  function rulesSplitLimits(el) {
+    const ps = splitShown(), h = S.ctx.h;
+    if (!ps) return;
+    SPLIT_LIMITS.forEach(([k, name, what, ns]) => {
+      const x = ps[k] && typeof ps[k] === 'object' ? ps[k] : null, n = x && num(x.n), dflt = !!x && x.from === 'default';
+      if (!x || (n === null && !dflt)) return;
+      const was = dflt ? `${k}=default` : `${k}=${n}`, label = `Split large issues: ${name}`;
+      const to = (v) => () => { if (v !== was) send('split-limits', [v], null, ['split-limits', [was]]); };
+      el.append(row(`split-${k.toLowerCase()}`, label, `with the rule On or Shadow, an issue with this many ${what} or more goes to the Judge`,
+        seg(label, ...(n === null || ns.includes(n) ? ns : ns.concat([n]).sort((a, b) => a - b))
+          .map((m) => choice(String(m), `split-${k}-${m}`, `${label}: ${m}`, n === m, to(`${k}=${m}`)))),
+        h('span', 'board-from', dflt ? 'default' : 'set in the pack'),
+        dflt ? null : button('Use default', 'btn-quiet', `split-${k}-default`, `${label}: use the default`, to(`${k}=default`))));
+    });
+  }
   window.DASH_APP.part('rules-moves', function (shared) {
     ({ AREA, RELEASE_MAX, STANDING, ARM_MS, BUILDS, S, ONB, OB, num, list, ctl, plural, prio, pre, isArea,
-      areaName, PRMERGE, undoOf, say, run, button, priceWords, draw } = shared);
+      areaName, PRMERGE, undoOf, say, run, button, priceWords, splitShown, draw } = shared);
     return { MOVES, moveOf, moveMark, readOf, moveJudge, moveNote, words, guessed, tabLine, post, send, undoSkips,
       undoLabel, undoAsk, guarded, choice, seg, judgeRare, pickList, stepper, row, wouldSkip, skipWords, fieldLabel, areaWould,
-      held, unlisted, heldUnknown, groups, labelMark, matches, arm, queueOne, queueAll, rulesHeals, rulesDollars };
+      held, unlisted, heldUnknown, groups, labelMark, matches, arm, queueOne, queueAll, rulesHeals, rulesDollars, rulesSplitLimits };
   });
 })();

@@ -523,6 +523,13 @@ and the issue is built whole". On files the slices as follow-ups and as sub-issu
 as their umbrella until all its slices are closed. On files no slice, and builds the issue whole, when a slice of
 the issue's grown change is still open or when it cannot read the open follow-ups of the issue. Off checks no issue ([Split large issues](configuration.md#split-large-issues)).
 
+Under **Split large issues** are four rows, one for each limit: **Split large issues: Done-when items**, **Files
+named**, **Areas named** and **Characters**. They show for each setting of the rule. With the rule On or Shadow, an
+issue that reaches one limit goes to the Judge. With the rule Off, the limits have no effect. Each row shows the limit in force as the pressed choice, and says "set in the pack" or "default". A limit that
+you set with the command, and that the row does not list, shows as one more choice. Click a number to set the limit in
+`.conveyor/project.json`. **Use default** removes the limit from the pack, and the default counts again. Each click
+does the same as `conveyor.sh split-limits`. With an older Conveyor on the build machine, the tab shows no limit rows.
+
 **Pick settings** has three settings per project: Off, Shadow and On. Off is the default. Shadow and On record the
 group of each card, the builder that the rule chooses for it, and the Judge's choice of seats. With Shadow, the card
 builds on its builder as before, and the tab says "shadow: the pick is recorded, and the card builds on its builder

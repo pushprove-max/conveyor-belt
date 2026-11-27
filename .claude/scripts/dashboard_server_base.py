@@ -107,6 +107,8 @@ SETUP_PAGE = b'''<!doctype html><meta charset=utf-8><title>Conveyor Board: set y
 # or an alias: `conveyor.sh prices`),
 # or pick-models (the Rules tab's Pick settings: one seat's models, each with its effort range, set or cleared,
 # `conveyor.sh pick models`),
+# or split-limits (the Rules tab's limit rows under Split large issues: one to four of the limits set to a whole number
+# or to the schema's default, `conveyor.sh split-limits`),
 # or testmap (the Tests page's Build the test map and its Stop: `conveyor.sh testmap build | stop`; an admin's alone),
 # or bench (the Benchmarks tab: Start, Stop, List versions, an arm's preflight, an arm saved, Compare, and Archive,
 # Restore and Delete of runs: `conveyor.sh bench swe <n> [--solo | [--arm <arm>]... [--task <id>] [--engine <version>]] [--settings
@@ -145,6 +147,8 @@ CARD_SEATS = frozenset({'builder', 'reviewer', 'judge'})  # the seats one issue 
 KINDS_MAX = 20
 # The standing kinds of routine yes, as conveyor.sh's auto standing takes them (conveyor/lib/standing.sh).
 STANDING = frozenset({'asked-fix', 'review-followup', 'release-check', 'fixed-block', 'review-retry'})
+# One limit of the rule Split large issues, as conveyor.sh's split-limits takes it: a whole number of 1 or more, or default.
+SPLIT_LIMIT = re.compile(r'(doneWhen|files|areas|chars)=(default|[1-9][0-9]{0,8})')
 # An area rule is the pack's area prefix and a name: any label here; conveyor.sh checks the prefix.
 # The rules Split large issues (split) and Pick settings (pick) take off, shadow or on. The run of Push after a combined
 # test run starts after 1 to 100 landings or at a UTC time HH:MM (pushbatchwhen), on the linked or all test files (pushbatchtests).

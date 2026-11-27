@@ -46,3 +46,16 @@ t_splitlimitsrefused() {
     [ "$(cat "$R/.conveyor/project.json")" = "$before" ] || fail "split-limits $a changed the pack: $(jq -c '.split' "$R/.conveyor/project.json")"
   done
 }
+
+# The snapshot's packSplit, which the Rules tab's four limit rows under Split large issues show. Bug caught: the
+# snapshot drops the limits, gives one the wrong value, or says pack for a limit the schema's default sets (or default
+# for one the pack sets), so the row shows a limit that is not in force; or it drops a limit's schema default, so
+# Use default left its row with no number pressed until the next snapshot.
+t_splitlimitssnap() {
+  local s
+  setup '[]'
+  tune '.split = {files: 5}'
+  s=$(loop snapshot) || fail "the snapshot failed"
+  [ "$(jq -c .packSplit <<<"$s")" = '{"doneWhen":{"n":4,"from":"default","default":4},"files":{"n":5,"from":"pack","default":6},"areas":{"n":3,"from":"default","default":3},"chars":{"n":3000,"from":"default","default":3000}}' ] \
+    || fail "the snapshot's packSplit, with the pack's split {files: 5}: $(jq -c .packSplit <<<"$s")"
+}

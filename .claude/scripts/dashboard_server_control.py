@@ -164,6 +164,8 @@ def control_ok(body):
         return n == 2 and v[0] in STANDING and v[1] in ('on', 'off')
     if a == 'pick-models':  # the Rules tab's Pick settings: one seat's models, each <model>[=<min>-<max>], or clear
         return n >= 2 and v[0] in ('builder', 'reviewer', 'judge') and (v[1:] == ['clear'] or ('clear' not in v[1:] and all(pick_model_ok(x) for x in v[1:])))
+    if a == 'split-limits':  # the Rules tab's limits of Split large issues: each <limit>=<n | default>
+        return 1 <= n <= 4 and all(globals()['SPLIT_LIMIT'].fullmatch(x) for x in v)  # the base part's
     if a == 'prices':  # the Rules tab's Model prices: one model's price, added model, display name or alias
         return n >= 2 and MODEL.fullmatch(v[1]) is not None and (
             (n in (5, 6) and v[0] == 'set' and all(PRICE.fullmatch(x) for x in v[2:]))
@@ -549,7 +551,7 @@ def control_script(action, args, main, today, record=None, user=None):
         # alone (Draft notes, Run suite); or Stop. A release over a red suite (anyway) is logged under the Board user who
         # confirmed it.
         return '%s release-run %s%s' % (conv, ' '.join(q(x) for x in args), ' --by %s' % q('Board user %s' % user) if args[:1] == ['anyway'] else '')
-    if action in ('test-settings', 'prices'):
+    if action in ('test-settings', 'prices', 'split-limits'):
         # The record's pack (.conveyor/project.json of its main), changed by the engine's own command, which checks it.
         return '%s %s %s' % (conv, action, ' '.join(q(x) for x in args))
     if action == 'pick-models':

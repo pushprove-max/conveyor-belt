@@ -156,7 +156,7 @@ P=$(snap '{"needsYou": {"waiting": [{"card": "c1-12", "issue": 12, "title": "But
   "control": {"mode": "pause", "cap": null, "guard": 90, "held": [30], "order": [], "rules": {"P0": true, "P1": true, "P2": true, "followups": true, "never": ["area:infra"], "healsdays": 30}, "model": null, "reviewer": null, "judgeOn": true, "suiteMachine": {"kind": "ssh", "target": "dev@192.0.2.7", "dir": "~/suite"}},
   "modelSettings": {"builder": {"model": "claude-x", "effort": "medium", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-x"], "efforts": ["low"]},
     "judge": {"model": "claude-j", "effort": "high", "modelFrom": "seed", "effortFrom": "seed", "choices": ["claude-j"], "efforts": ["high"], "default": "claude-j"}},
-  "prices": {"seen": []}, "areaPrefix": "team/", "packLandAs": "pr", "packPrMerge": "idle", "packPick": {"lists": {"builder": {"claude-x": {"min": "medium", "max": "high"}}}, "efforts": {"claude": ["low", "medium", "high"]}}, "standing": ["asked-fix"], "pushCheck": false, "lintCommands": [{"run": "shellcheck {files}", "files": ["*.sh"]}], "snapshotAt": "2026-11-05T00:00:02Z",
+  "prices": {"seen": []}, "areaPrefix": "team/", "packLandAs": "pr", "packPrMerge": "idle", "packPick": {"lists": {"builder": {"claude-x": {"min": "medium", "max": "high"}}}, "efforts": {"claude": ["low", "medium", "high"]}}, "packSplit": {"files": {"n": 5, "from": "pack"}}, "standing": ["asked-fix"], "pushCheck": false, "lintCommands": [{"run": "shellcheck {files}", "files": ["*.sh"]}], "snapshotAt": "2026-11-05T00:00:02Z",
   "health": {"state": "paused", "reason": "the loop says why", "unchecked": 2, "guard": {"at": 90, "reading": 42, "readAt": "'"$(ago 60)"'", "missing": false}, "cycles": [[40, 41]],
     "engineStopped": {"pid": 1234, "since": "2026-11-05T00:00:00Z", "pids": [1234, 1235]},
     "pressure": {"state": "Busy", "cpu": 45.5, "memory": 1.5, "wakeMs": 0.2, "freeMB": null, "why": "CPU pressure 45.5% is at or above 40%"},
@@ -355,6 +355,8 @@ q '.panels.board.data | .pushing.line == "3/9 passed" and .pushLast.ahead == 1 a
 # show or set them, and without a card's seats its page cannot show what the Judge gave it.
 q '.panels.rules.data.packPick == {lists: {builder: {"claude-x": {min: "medium", max: "high"}}}, efforts: {claude: ["low", "medium", "high"]}} and (.panels.board.data.review | map(select(.issue == 801) | .seats)) == [{failed: "the judge timed out"}]' \
   "the Rules part gives the pack's pick lists, and a Board card the seats of its pick"
+# Split large issues: without the limits in force the Rules tab's four limit rows cannot show them.
+q '.panels.rules.data.packSplit == {files: {n: 5, from: "pack"}}' "the Rules part gives the pack's split limits"
 # The Rules tab has the loop's state (its tab's count), the models, the limit reading, the waits and every held
 # issue with its labels and reasons, as the Board has them; the pack's push.check false is kept false, not dropped as
 # null (a `//` would drop it, and the Test before a push row would show On).

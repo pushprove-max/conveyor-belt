@@ -126,7 +126,8 @@
 #           one), packPrMerge (the pack's push.prMerge, Merge PR while the record's prMerge is null; null from a snapshot
 #           without it), packLandAs (the pack's push.landAs, Land as while the record's landAs is null; null from a snapshot
 #           without it), packPick (the models Pick settings may give each seat, each with its effort range, and the
-#           efforts each program takes; null from a snapshot without it), held, queue (each with its areas), skipped and waits (the snapshot's queue.waiting and, after it,
+#           efforts each program takes; null from a snapshot without it), packSplit (the four limits of Split large
+#           issues in force, each {n, from}; null from a snapshot without it), held, queue (each with its areas), skipped and waits (the snapshot's queue.waiting and, after it,
 #           the held, skipped or yes-gated issues that wait too (keptWaits), each with waitsFor; each null,
 #           with issuesError, when GitHub did not list the issues), cards (the snapshot's queue.cards, the waiting cards
 #           with no GitHub issue; null when their record was not read), building (how many cards are on the belt), onBelt
@@ -297,7 +298,7 @@ PANELS_JQ='
   # computes no queue of its own.
   def rulesOf($r): $r.snap as $s
     | {repo: $r.repo, repoUrl: ($r.repoUrl // null), state: $s.health.state, control: $s.control, cap: $s.health.builderCap, guard: $s.health.guard,
-       modelSettings: ($s.modelSettings // null), accounts: ($s.accounts // null), areaPrefix: ($s.areaPrefix // null), packLandAs: ($s.packLandAs // null), packPrMerge: ($s.packPrMerge // null), packPick: ($s.packPick // null), limit: limitOf($s),
+       modelSettings: ($s.modelSettings // null), accounts: ($s.accounts // null), areaPrefix: ($s.areaPrefix // null), packLandAs: ($s.packLandAs // null), packPrMerge: ($s.packPrMerge // null), packPick: ($s.packPick // null), packSplit: ($s.packSplit // null), limit: limitOf($s),
        held: ($s.queue.holding | if . == null then null else few($r) end),
        queue: ($s.queue.order | if . == null then null else few($r) end),
        skipped: ($s.queue.skipped | if . == null then null else few($r) end),
