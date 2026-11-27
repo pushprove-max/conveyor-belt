@@ -946,6 +946,7 @@
 {"area": "pick", "test": "archive.test.sh"}
 {"area": "pick", "test": "redcap.test.sh"}
 {"area": "pick", "test": "deps.test.sh"}
+{"area": "pick", "test": "benefit.test.sh"}
 {"area": "pick", "test": "startrule.test.sh"}
 {"area": "pick", "test": "machine.test.sh"}
 {"area": "pick", "test": "machineend.test.sh"}

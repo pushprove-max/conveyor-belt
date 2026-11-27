@@ -508,7 +508,8 @@ inheritance() { # <review file>
 }
 # Approve before build (the rule at the top). SEE reads an issue (jq): section is the text of its section headed
 # `## What customers or staff will see` (to the next heading of level one or two, or an approval line; null when it
-# has none, or an empty one); seen is "none", "nothing" (the section says `Nothing visible changes.`) or "change";
+# has none, or an empty one), less its lines of a benefit approval (BENEFIT, lib/pick.sh), which end nothing: one put
+# above the change would hide it; seen is "none", "nothing" (the section says `Nothing visible changes.`) or "change";
 # approvals counts its lines starting `Visible change approved:`; before($area; $np) is an issue not to be picked yet: its section names a change and it has
 # no approval line, and it is a product issue: its labels starting with the pack's areaPrefix ($area) are not
 # only ones of its nonProductAreas ($np) (an issue with no area label counts as product); a tooling issue is picked as
@@ -517,7 +518,7 @@ inheritance() { # <review file>
 SEE='def section: [.body // "" | splits("\r?\n")] as $l
     | ([range($l | length) as $k | select($l[$k] | test("^##[[:space:]]+What customers or staff will see[[:space:]]*:?[[:space:]]*$"; "i")) | $k] | first) as $i
     | if $i == null then null else $l[$i + 1:] | ([range(length) as $k | select(.[$k] | test("^#{1,2}[[:space:]]|^Visible change approved:")) | $k] | first) as $e
-      | (if $e == null then . else .[:$e] end) | join("\n") | sub("\\A[[:space:]]+"; "") | sub("[[:space:]]+\\z"; "") | if . == "" then null else . end end;
+      | (if $e == null then . else .[:$e] end) | map(select(startswith("Benefit approved:") | not)) | join("\n") | sub("\\A[[:space:]]+"; "") | sub("[[:space:]]+\\z"; "") | if . == "" then null else . end end;
   def seen: section as $s | if $s == null then "none" elif $s | test("\\ANothing visible changes\\.?\\z"; "i") then "nothing" else "change" end;
   def approvals: [.body // "" | splits("\r?\n") | select(startswith("Visible change approved:"))] | length;
   def productissue($area; $np): [.labels // [] | .[].name | select(startswith($area))] | length == 0 or any(IN($np[]) | not);

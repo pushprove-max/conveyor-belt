@@ -80,6 +80,13 @@ Each card builds, reviews, tests and lands as any card does. No size check split
 
 ## Build
 
+An issue that says no live case is known, or that the gain was not measured, does not start a card unless it names a
+risk it guards against: security, compliance, data loss, a silent fallback or fail-loud. The Board shows it as
+skipped by the rule `no live benefit`, a rule of Conveyor's own: you cannot queue it from the Board or change it in
+Rules. To release it, add a `Benefit approved:` line to the issue. A `Visible change approved:` line does not release
+it, and a condition in that line does not count as a risk. A risk named in a sentence that denies it, such as `This
+change does not affect security.`, does not count either. An issue that does not use those words is not held.
+
 The card builds in a fresh git worktree. Claude build, fix and review sessions start without your account's connectors
 (its MCP servers), so a card never sees your mail, drives or notes.
 

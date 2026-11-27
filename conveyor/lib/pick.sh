@@ -29,8 +29,25 @@
 # list while it waits; nothing else (a release, the order list, a retry) lets one through.
 # Approve before build (SEE above): an issue whose section names a change and that has no approval line gets
 # before (unless the control record's rule "visible changes need the owner's yes" is off), and is left out of the list unless it is asked for whole, like a held one.
+# The benefit check (BENEFIT, jq: benefitwait) holds an issue for the owner's yes on its benefit: it says no live case
+# is known or the gain was not (or never) measured, names no risk it guards against (security, compliance, data loss,
+# a silent fallback, fail-loud) and has no line starting `Benefit approved:`, the approval-line pattern of a visible
+# change. A `Visible change approved:` line is no yes to the benefit, and the rule "visible changes need the owner's
+# yes" does not turn it off. The wording and the risk are read from the issue's other lines: a condition in an
+# approval line (`; condition: security staff only`) names no risk the issue guards. A risk is named only in a clause
+# (cut at . ; ! ? a line end or "but") with no word of denial (no, not, never, none, nothing, without, cannot, n't):
+# `This change does not affect security.` names none. Such an issue gets the rule
+# NOBENEFIT, as the run names it; the Board shows it as a rule of Conveyor's own (snapshot.sh), not one of Rules.
+BENEFIT='def benefitwait: [.body // "" | splits("\r?\n")] as $l
+    | ($l | map(select(test("^(Visible change|Benefit) approved:") | not)) | join("\n")) as $b
+    | ($b | test("no live cases? (is |are |was |were )?known|\\b(not|never) (been )?measured"; "i"))
+    and ([$b | splits("[.;!?\n]|\\bbut\\b"; "i")] | any(test("security|compliance|data[- ]loss|silent(ly)? fall[- ]?back|fail[- ]loud"; "i")
+      and (test("\\b(no|not|never|none|nothing|without|cannot)\\b|n[^[:alnum:][:space:]]t\\b"; "i") | not)) | not)
+    and ($l | any(.[]; startswith("Benefit approved:")) | not);'
+NOBENEFIT='no live benefit: the issue says no live case is known or the gain was not measured, and names no risk it guards against; a line starting "Benefit approved:" in the issue releases it'
 # A run limited by --only that finds nothing to pick hears `wait` when an issue of its list is held, waits or
-# waits for approval before its build, and is not excluded or stuck: the run goes on polling for
+# waits for approval before its build (or for the owner's yes on its benefit, NOBENEFIT), and is not excluded or
+# stuck: the run goes on polling for
 # it instead of ending (a held one is neither landed, closed nor blocked: it is built once released).
 # The monthly test-speed survey's card (lib/survey.sh) measures while the machine is quiet: its issue (titled
 # "Test-speed survey, ...") gets the rule "the survey hour" outside the pack's test.surveyHour, local time
@@ -60,8 +77,8 @@ upnext() { # <open issues json> [retried] [all] [the control record, when the ca
   [ -z "$tsv" ] || cards=$(jq -cR 'split("\t") | select(length >= 2 and (.[1] | test("^[0-9]+$")))
     | {card: .[0], issue: (.[1] | tonumber), step: "landed", sha: (.[2] // ""), time: (.[3] // "")}' <<<"$tsv")$'\n'$cards || return 1
   jq -c --slurpfile cards <(printf '%s' "$cards") --slurpfile retried <(printf '%s' "$old") --arg mode "${2:-}" --arg built "$BUILT" --argjson only "${ONLY:-null}" --argjson sh "$sh" \
-    --argjson ctl "$c" --arg all "${3:-}" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson np "$NONPRODUCT" --argjson guarded "$gd" \
-    "$DEPS$SEE$LEVEL$INSIDE$(<"$HERE/jq/upnext.jq")" <<<"$1"
+    --argjson ctl "$c" --arg all "${3:-}" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson np "$NONPRODUCT" --argjson guarded "$gd" --arg nobenefit "$NOBENEFIT" \
+    "$DEPS$SEE$BENEFIT$LEVEL$INSIDE$(<"$HERE/jq/upnext.jq")" <<<"$1"
 }
 # One Conveyor per machine (docs/setup.md, Run): the machine's settings are the host file's, over every project's loop.
 # cap is the most cards building, reviewing or testing at once on this machine across every project (each project's
@@ -195,7 +212,7 @@ pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues
   [ -z "$n" ] || room "${n% *}" >/dev/null || { echo wait; return 0; }
   if [ -z "$n" ]; then
     [ -z "$RUNNING" ] || slotturn "$RUNNING" # nothing to pick: no card of it waits for a slot
-    [ -n "$ONLY" ] && upnext "$issues" "${1:-}" all | jq -e 'any(.[]; .rule == null and (.stuck | not) and (.hold or .waits != [] or .before))' >/dev/null && echo wait
+    [ -n "$ONLY" ] && upnext "$issues" "${1:-}" all | jq -e --arg nb "$NOBENEFIT" 'any(.[]; (.rule == null or .rule == $nb) and (.stuck | not) and (.hold or .waits != [] or .before or .rule == $nb))' >/dev/null && echo wait
     return 0
   fi
   again=${n#* }; n=${n% *}

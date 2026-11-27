@@ -1099,7 +1099,7 @@ snapshot() (
     --arg shut0 "$SHUT" --arg shut1 "$OWNSHUT" --arg shut2 "$ENGSHUT" --slurpfile soff <(printf '[%s]' "$soffj") --slurpfile fl <(printf '%s' "$fl") --slurpfile ft <(printf '%s' "$ft") --slurpfile su <(printf '%s' "$su") --argjson rl "$rl" --argjson dr "$dr" --argjson eng "$eng" --argjson tr "$tr" --argjson np "$np" --argjson m "$models" --argjson next "$next" --slurpfile built <(printf '%s' "$built") \
     --slurpfile iss "$d/issues" --slurpfile cf "$cardfar" --slurpfile ua "$d/upall" --arg builtl "$BUILT" --arg fu "$FOLLOWUP" --argjson prio "$PRIOS" --arg area "$AREA" --argjson ww "$ww" --arg pla "$pla" --arg ppm "$ppm" --arg pef "$pef" --argjson efforts "$EFFORTS" --argjson psp "$psp" \
     --argjson control "$control" --argjson settings "$settings" --argjson accts "$(acctnames)" --argjson ga "$ga" --slurpfile q <(printf '%s' "$queue") --slurpfile lim "$d/limit" --slurpfile smp "$d/samples" --slurpfile pu "$d/pushes" --argjson every "$SAMPLE" --argjson priced "$pricedok" --argjson pn "$pn" --argjson cr "$cr" --argjson ts "$ts" \
-    --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg lintyes "$lintyes" --arg day "$day" --arg since "$since" --arg prev "$prev" \
+    --argjson max "$MAX_REVIEWS" --argjson wait "$((CLOSE_WAIT + 300))" --arg yes "$yes" --arg lintyes "$lintyes" --arg nobenefit "$NOBENEFIT" --arg day "$day" --arg since "$since" --arg prev "$prev" \
     --argjson t0d "$t0d" --argjson t0w "$t0w" --argjson t0p "$t0p" '$fl[0] as $fl | $ft[0] as $ft | $su[0] as $su | $built[0] as $built | $q[0] as $q
     | [$shut0, $shut1, $shut2] as $shuts | [$tt[0].tac] as $tac | [$tt[0].tid] as $tid | '"$DEPS$LEVEL$INSIDE$TCQUEUE"'
     def day: fromdate | strflocaltime("%Y-%m-%d");
@@ -1253,7 +1253,8 @@ snapshot() (
     # neither queued nor on the belt, each with why (reasons, one or more): you (the control record holds it; with
     # outside: true when someone outside the project opened it, INSIDE, so it waits for a release by the owner), label
     # (the built label, awaiting-deploy, holds it back; label names it), rule (a rule of the
-    # control record excludes it; rule names it), waits (an open issue it depends on; waitsFor), card (a card of it
+    # control record excludes it; rule names it), standing (the benefit hold, NOBENEFIT in lib/pick.sh: a rule of
+    # Conveyor itself, which a line in the issue releases, not Rules; rule names it), waits (an open issue it depends on; waitsFor), card (a card of it
     # is blocked, or landed with the issue still open; step; notPushed: true when it landed while push is off and is
     # not pushed yet) or parent (a follow-up filed before its parent card
     # landed) or approve (it waits for the yes of the owner before its
@@ -1276,7 +1277,7 @@ snapshot() (
             | ($l | index($fu) != null) as $isfu
             | ([(if $i.number | IN($mine[]) then {kind: "you"} + (if ($i.authorAssociation | type == "string") and ($i | inside | not) then {outside: true} else {} end) else empty end),
                 ($l[] | select(. == $builtl) | {kind: "label", label: .}),
-                (if $e.rule != null then {kind: "rule", rule: $e.rule} else empty end),
+                (if $e.rule == $nobenefit then {kind: "standing", rule: $e.rule} elif $e.rule != null then {kind: "rule", rule: $e.rule} else empty end),
                 (if ($e.waits // []) != [] then {kind: "waits", waitsFor: $e.waits} else empty end),
                 (if $e.before then {kind: "approve"} else empty end),
                 ([$c[] | select(.issue == $i.number and .result != "")] | last | if . == null then empty else {kind: "card", step: .step, card: .card}

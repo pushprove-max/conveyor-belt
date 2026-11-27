@@ -1,4 +1,4 @@
-# upnext() in conveyor.sh, after DEPS, SEE and LEVEL: the open issues with no card, in pick order. Its arguments are named there.
+# upnext() in conveyor.sh, after DEPS, SEE, BENEFIT and LEVEL: the open issues with no card, in pick order. Its arguments are named there.
 ($cards | map(.issue)) as $taken
     # The graph, the landed issues and the lines that name follow-ups, each worked out once (DEPS): worked out again
     # for each open issue, they were most of a snapshot's time.
@@ -51,7 +51,10 @@
         // (if .number | IN($guarded[]) then "the weekly limit guard" else null end)
         # A Depends on: line it cannot read (baddeps, DEPS) would otherwise count as only the #N it holds (none for
         # `# 2 3`, #2 alone for `#2 3`), and the issue would start before the other issues it names.
-        // (baddeps | first // null | if . == null then null else "the line \"\(.[0:200])\", not a list of issues in the form #N" end))})
+        // (baddeps | first // null | if . == null then null else "the line \"\(.[0:200])\", not a list of issues in the form #N" end)
+        # Last: the benefit hold (BENEFIT) is the one rule a run limited by --only waits on (pick.sh), so a rule that no
+        # approval clears, above, is named first, not hidden behind it.
+        // (if benefitwait then $nobenefit else null end))})
     # named: the issues another open issue waits on (a Depends on line), read before the filter below drops the waiting
     # issues. Of equal owner order, follow-up position and priority, one of them is picked first: it unblocks others.
     | (reduce (.[] | .number as $m | .waits[] | numbers | select(. != $m)) as $d ({}; .[$d | tostring] = true)) as $named
