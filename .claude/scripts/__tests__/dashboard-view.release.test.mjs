@@ -395,6 +395,15 @@ test('#760 D2: a fix closed with no landed card is named, and the release waits 
   assert.equal(fixNext(w), '#755 was closed with no landed card: the release waits for the Foreman.');
 });
 
+// Bug it catches: `release-run stop` ends a red run's wait on its fix cards (waitStopped) and keeps its failed suite, but
+// the panel still said the suite runs again when every fix has landed. Release anyway stays: the suite failed.
+test('a red run whose wait was stopped says the suite does not run again by itself, and keeps Release anyway', () => {
+  const w = boot();
+  deliver(w, data({ ...RED, fixes: [{ issue: 754, state: 'open' }], waitStopped: '2026-11-14T09:00:00Z' }));
+  assert.equal(fixNext(w), 'The wait was stopped. The suite does not run again by itself.');
+  assert.ok(act(card(w), 'release-anyway'), 'Release anyway goes over the failed suite of the stopped run');
+});
+
 test('#760 D3: a red run with no fixes shows no fixes part', () => {
   const w = boot();
   deliver(w, data({ ...RED, fixes: [] }));

@@ -231,15 +231,17 @@ redpickmark() { # <picks left>
   fx_in 'mkdir -p "$CARDS"; card() { echo "loopfix=${LOOPFIX:-none}"; }
     asking=1 urgent="" red="" building=0 cap=3 left='"$1"' pct="" running=0 serve=1 pusher="" started=0 waits="" ctl=$(ctl) issues=$(cat "$STUB/issues.json")
     declare -A mine=(); turnpick; wait'
+  # The marks the cards were started with: run.out also holds the loop log (the release limit's reason, rellimit()).
+  MARKS=$(grep '^loopfix=' "$T/$CASE/run.out")
 }
 # Bug it catches (E9): the mark never reached a card, or reached each card of a run of a number of cards: with no limit
 # on its picks the loop starts a fix card whenever main is red, so its cards wait for it.
 t_mainredholdunlimited() {
   redpickmark -1
-  [ "$(cat "$T/$CASE/run.out")" = 'loopfix=1' ] || fail "a card of a loop with no limit on its picks was not marked: $(cat "$T/$CASE/run.out")"
+  [ "$MARKS" = 'loopfix=1' ] || fail "a card of a loop with no limit on its picks was not marked: $(cat "$T/$CASE/run.out")"
 }
 # Bug it catches (E9): a card of `run 1` waited for a fix card its loop cannot pick once its one pick is spent.
 t_mainredholdlimited() {
   redpickmark 1
-  [ "$(cat "$T/$CASE/run.out")" = 'loopfix=none' ] || fail "a card of a loop with a limit on its picks was marked: $(cat "$T/$CASE/run.out")"
+  [ "$MARKS" = 'loopfix=none' ] || fail "a card of a loop with a limit on its picks was marked: $(cat "$T/$CASE/run.out")"
 }

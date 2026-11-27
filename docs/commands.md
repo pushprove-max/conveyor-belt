@@ -269,6 +269,9 @@ Reading the belt:
 - `product <commit>` exits 0 when that commit changed product code.
 - `pushable` exits 0 when no follow-up of the first two priorities waits. Else it lists them.
 - `pick --dry --issues <file> --state <dir>` prints the issue a pick would take from those inputs, and writes nothing.
+  It also reads the project's release run, as the loop does: while a release holds the queue
+  ([Which cards start while a release waits](releases.md#which-cards-start-while-a-release-waits)), it prints only an
+  issue that the release lets start.
 - `pick replay judge <model> [<effort>] [--last <n>] [--estimate]` gives the findings that the project's judge ruled
   on to another judge, and compares the rulings ([Judge replay](configuration.md#judge-replay)). `--estimate` prints
   the estimated cost, and calls no model.

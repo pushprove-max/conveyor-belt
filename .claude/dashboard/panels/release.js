@@ -385,7 +385,9 @@
       ul.append(li);
     });
     const closed = fx.filter((f) => f.state === 'closed').map((f) => (f.issue === null ? f.card : `#${f.issue}`));
-    const next = closed.length
+    // waitStopped: `release-run stop` ended the wait (relstopwaiting(), lib/fulltest.sh); the run keeps its failed suite.
+    const next = typeof x.waitStopped === 'string' ? 'The wait was stopped. The suite does not run again by itself.'
+      : closed.length
       ? `${closed.join(', ')} ${closed.length === 1 ? 'was' : 'were'} closed with no landed card: the release waits for the Foreman.`
       : !fx.every((f) => f.state === 'landed') ? 'The suite runs again when every fix has landed.'
         : typeof x.restarted === 'string' ? 'The suite runs again now.'

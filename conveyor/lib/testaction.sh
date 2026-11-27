@@ -268,7 +268,7 @@ TADONE='(.step == "landed" or (.step == "closed" and ((.reason // "") | IN($shut
 # A run limited by --only (ONLY, a json list of issues) takes only the cards that follow up one of them (parent: a review follow-up
 # or a split part), as it takes their issues': an issue it names grows to its GitHub parts (an open parent's, and each open issue whose umbrella it is) and the follow-ups of its cards, as
 # upnext() grows it (jq/upnext.jq), so a follow-up of a part of a named umbrella is taken; with the Follow-ups rule off (rules.followups false) no follow-up card or split part
-# is taken, as no follow-up issue is (jq/upnext.jq): a card is one by its follow-up label.
+# is taken, as no follow-up issue is (jq/upnext.jq): a card is one by its follow-up label. While the release limit is on (RELONLY: rellimit(), lib/pick.sh), only its cards.
 testpick() { # <the open issues json>
   local lock rec i l card have h=1 old fuoff never open cards c far parts
   [ -s "$TACARDS" ] || return 0
@@ -309,7 +309,7 @@ testpick() { # <the open issues json>
       || { rm -f "$TACARDS.new"; exec {lock}>&-; echo "conveyor: the Tests page's card about $(jq -r --argjson i "$i" '.[$i] | .file // .title' <<<"$rec") could not be picked" >&2; return 1; }
     exec {lock}>&-; echo "$card 0 false"; return 0
   # The record and the lines go to jq on its input: Linux refuses an argument over 128 KiB.
-  done < <(printf '%s\n%s\n' "$rec" "$have" | jq -Rrn --argjson h "$h" --argjson only "${ONLY:-null}" --argjson rf "${REDFILES:-null}" --argjson fuoff "${fuoff:-false}" --argjson never "${never:-[]}" --argjson open "${open:-[]}" --argjson parts "$parts" \
+  done < <(printf '%s\n%s\n' "$rec" "$have" | jq -Rrn --argjson h "$h" --argjson only "${ONLY:-null}" --argjson rf "${REDFILES:-null}" --argjson rel "${RELONLY:-null}" --argjson fuoff "${fuoff:-false}" --argjson never "${never:-[]}" --argjson open "${open:-[]}" --argjson parts "$parts" \
     --slurpfile cards <(printf '%s' "$cards") --arg fu "$FOLLOWUP" --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" \
     "$DEPS"'input | fromjson as $r | [inputs | fromjson? | objects] as $l
     | ($l | map(.card | strings) | INDEX(.)) as $have | ($l | map(select('"$TADONE"') | .card) | INDEX(.)) as $landed
@@ -319,7 +319,7 @@ testpick() { # <the open issues json>
       (if $only == null then null else $only | grow end) as $only
     | def cardlanded($d): ((first($r[] | . as $e | select($d | IN($e.id, $e.card, ($e.was // [])[]))) | .card) // $d) as $k | $landed[$k] != null;
     $r | to_entries[] | select((.value.held | not) and (.value.card == null or ($h == 1 and $have[.value.card] == null))
-      and ($only == null or (.value.parent | IN($only[]))) and ($rf == null or (.value.file | IN($rf[]))) and (($fuoff | not) or ((.value.labels // []) | index($fu) == null))
+      and ($only == null or (.value.parent | IN($only[]))) and ($rf == null or (.value.file | IN($rf[]))) and ($rel == null or ([.value.id, .value.card, (.value.was // [])[]] | any(IN($rel.cards[])))) and (($fuoff | not) or ((.value.labels // []) | index($fu) == null))
       and ((.value.labels // []) | any(IN($never[])) | not)
       and (.value | [ups($fc; needs)[] | select(IN($open[]) and (IN($idone[]) | not))] == [])
       and (.value | [farneeds[] as $x | select(.far[$x].open != false) | $x] == [])

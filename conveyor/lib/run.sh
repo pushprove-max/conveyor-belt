@@ -693,7 +693,7 @@ turnpick() {
   # Below the cap, the issue it would take is first read beside the cards on the belt (overlap(), outside the lock).
   [ -n "$picked" ] || [ "$building" -ge "$cap" ] || [ "$asking" != 1 ] || { overlap "${issues:-}" "$([ "$left" != 0 ] || echo retried)" "$ctl"; issues=$OVL; }
   [ -n "$picked" ] || [ "$building" -ge "$cap" ] \
-    || picked=$([ "$asking" = 1 ] && lockedfor pick fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "${ctl:-null}") || { [ "$running" != 0 ] || [ -n "${!mine[*]}" ] || [ -n "$serve" ] || [ -n "$pusher" ] || exit 1; picked=''; }
+    || picked=$([ "$asking" = 1 ] && RELSEEN=${OVLREL--} lockedfor pick fresh pick "$([ "$left" != 0 ] || echo retried)" "$pct" "${issues:-}" "${ctl:-null}") || { [ "$running" != 0 ] || [ -n "${!mine[*]}" ] || [ -n "$serve" ] || [ -n "$pusher" ] || exit 1; picked=''; }
   [ "$picked" != stale ] || return 1 # the next turn says so and stops picking
   [ "$picked" != wait ] || { waits=1; picked=''; }
   [ -n "$picked" ] || return 0

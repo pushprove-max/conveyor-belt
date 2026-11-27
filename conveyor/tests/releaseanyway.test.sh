@@ -80,3 +80,15 @@ t_relanywaymoved() {
   [ -z "$(git -C "$T/$CASE/origin" tag -l v1.1.0)" ] && ! grep -q '^release' "$STUB/gh-calls" && [ "$(wc -l < "$STUB/runs")" = 1 ] \
     || fail "the moved head was tested again or released: $(cat "$STUB/gh-calls")"
 }
+# Bug: `release-run stop` of a failed release-prep (its wait on its fix cards, relstopwaiting(), lib/fulltest.sh)
+# marked the record stopped, and release keeps a failed suite to go over only from a failed release-prep (relstart()):
+# `release --anyway` on the same commit was refused, as if no suite had failed. The stop keeps the failed suite.
+t_relanywaystopped() {
+  local O RUN out
+  anysetup
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] || fail "release-prep did not fail on the red suite: $out"
+  out=$(loop release-run stop 2>&1) && grep -q 'no longer waits on its fix cards' <<<"$out" || fail "release-run stop did not stop the failed run's wait: $out: $(cat "$RUN")"
+  out=$(loop release 1.1.0 --anyway --by 'the owner' 2>&1) || fail "after release-run stop, release 1.1.0 --anyway over release-prep's failed suite was refused: $out"
+  jq -e --arg o "$O" '.state == "released" and .anyway == {sha: $o, files: ["a.test"], cases: ["breaks"], by: "the owner"}' "$RUN" > /dev/null \
+    || fail "the release after the stop does not say it went over the failed suite: $(cat "$RUN")"
+}

@@ -263,6 +263,25 @@ card has landed, its commit is in the commit that step 4 tests, and no card is o
 `idle`, step 4 tests `main` on GitHub, so this waits until the pull request is merged. The record of the new run says `by: "fixes landed"`. The run uses the passes of the earlier suite, as step 4 does. A
 fix card that was closed with no landed card stops this. Then run step 4 again yourself.
 
+### Which cards start while a release waits
+
+While `release-prep` or `release` runs, also while it makes the coverage map, the loop starts no new card, except the
+fix card for a red `main`. This is also true between `release-prep` and `release` when `release-run` runs the two.
+While a failed run has a fix card or fix issue that is open, the loop starts only these cards:
+
+- the fix cards and fix issues of that release, and the GitHub sub-issues of a fix issue,
+- their review follow-ups, and the follow-ups of those follow-ups,
+- the fix card for a red `main`.
+
+Other issues and cards stay in the queue. A fix that you file holds the queue at the next loop turn, also before the
+run's `fixes` list shows it. When you remove the line `Release fix: <version>` from an open issue or card, the next
+loop turn does not start it as a fix. A card that is already on the belt continues. When the release goes out,
+when the next run starts and ends, or when you stop the run with `conveyor.sh release-run stop`, the next loop turn
+picks from the full queue again. The Board has no **Stop** for a run that waits on its fix cards. A stop of such a
+run leaves the cards open, and the run does not start again by itself. The failed suite stays in the record, so you
+can still release over it ([A release over a failed suite](#a-release-over-a-failed-suite)). When the record of the
+run cannot be read, the loop picks from the full queue. The loop log tells when the limit starts and stops, and why.
+
 ## A release over a failed suite
 
 Use this only when the owner says so, and only when the failures are not in the code that you release. An example is

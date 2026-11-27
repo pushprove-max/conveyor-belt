@@ -601,25 +601,31 @@ relother() { # <command name> <version>
 # way and none waits; 1: the lock is held 10 s on, or the record changed before the lock was taken (relfixes() started
 # the run again, or another run began), or the run that waits is not of <version>, when one is given: nothing stopped.
 # With <since>: only the wait of the run that began then; 1 when the record is no longer that wait (a run that began
-# after it is never stopped).
+# after it is never stopped). A red run (state failed, not started again) waits on its fix cards (relfixes()) the same
+# way, and is stopped the same way, whether or not its record lists them yet (its fixes are read only now and then):
+# the release limit on the pick (rellimit(), lib/pick.sh) then ends, and its cards stay open. Its record keeps state
+# failed, with waitStopped (the time of the stop) in place of state stopped: `release --anyway` goes over only a failed
+# release-prep's suite (relstart(), commands/release-prep.sh), and the Board's Release anyway the same.
 relstopwaiting() { # [<version> | <since>]
-  local r s v c lk='' rc=1
-  r=$(jq -ce 'select(.state == "waiting" and (.ended | type) == "string" and .restarted == null and (.notes.card | type) == "string")' "$RELRUN" 2>/dev/null) \
+  local r s v c st lk='' rc=1
+  r=$(jq -ce 'select((.ended | type) == "string" and .restarted == null and .waitStopped == null
+    and (.state == "waiting" and (.notes.card | type) == "string" or .state == "failed"))' "$RELRUN" 2>/dev/null) \
     || { [[ ${1:-} == *T* ]] || { echo "conveyor: release-run stop: no release run is under way; nothing stopped" >&2; return 2; }; r=null; }
   s=$(jq -r .since <<<"$r") || { echo "conveyor: release-run stop: $RELRUN could not be read; nothing stopped" >&2; return 1; }
   [[ ${1:-} != *T* ]] || [ "$s" = "$1" ] \
     || { echo "conveyor: release-run stop: the release run that began at $1 no longer waits on its notes card (it started again, or another run began); nothing stopped" >&2; return 1; }
-  v=$(jq -r .version <<<"$r") && c=$(jq -r .notes.card <<<"$r") || { echo "conveyor: release-run stop: $RELRUN could not be read; nothing stopped" >&2; return 1; }
+  v=$(jq -r .version <<<"$r") && c=$(jq -r 'if .notes.card | type == "string" then "notes card \(.notes.card)" else "its fix cards" end' <<<"$r") && st=$(jq -r .state <<<"$r") \
+    || { echo "conveyor: release-run stop: $RELRUN could not be read; nothing stopped" >&2; return 1; }
   [ -z "${1:-}" ] || [[ $1 == *T* ]] || [ "$v" = "$1" ] || { echo "conveyor: release-run stop: the release run that waits is of $v, not $1; nothing stopped" >&2; return 1; }
   { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null && flock -w 10 "$lk" && rc=0
-  if [ $rc = 0 ] && ! jq -e --arg s "$s" '.since == $s and .state == "waiting" and .restarted == null' "$RELRUN" > /dev/null 2>&1; then
+  if [ $rc = 0 ] && ! jq -e --arg s "$s" --arg st "$st" '.since == $s and .state == $st and .restarted == null and .waitStopped == null' "$RELRUN" > /dev/null 2>&1; then
     exec {lk}>&-
-    echo "conveyor: release-run stop: the release run of $v no longer waits on notes card $c (it started again, or another run began); nothing stopped" >&2; return 1
+    echo "conveyor: release-run stop: the release run of $v no longer waits on $c (it started again, or another run began); nothing stopped" >&2; return 1
   fi
-  [ $rc != 0 ] || relrec --arg t "$(clock)" '.state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"]' || rc=1
+  [ $rc != 0 ] || relrec --arg t "$(clock)" 'if .state == "failed" then .waitStopped = $t else .state = "stopped" | .ended = $t | .reasons = ["stopped by the owner"] end' || rc=1
   [ -z "$lk" ] || exec {lk}>&-
-  [ $rc = 0 ] || { echo "conveyor: release-run stop: the record of release $v could not be written; the run still starts again when notes card $c lands" >&2; return 1; }
-  echo "conveyor: release-run: the release run of $v no longer waits on notes card $c, and starts nothing when it lands; \`conveyor.sh shut\` closes the card"
+  [ $rc = 0 ] || { echo "conveyor: release-run stop: the record of release $v could not be written; the run still waits on $c, and starts again by itself" >&2; return 1; }
+  echo "conveyor: release-run: the release run of $v no longer waits on $c, and does not start again by itself; \`conveyor.sh shut\` closes a card"
 }
 # The fix cards of a red release run: the issues, and the cards with no GitHub issue (rules.releaseissues false: `conveyor.sh card
 # --release`, cardnew(), lib/testaction.sh; their fixes entry has card and ids in place of issue), whose body has the line `Release fix: <version>` for the version of
@@ -637,38 +643,46 @@ relstopwaiting() { # [<version> | <since>]
 # A release-prep that waits on its notes card (state waiting, notes.card: relnotescard(), commands/release-prep.sh) is
 # held and started again the same way, with that card, and no issue, as its one fix: the run as it was started,
 # `release-run [prep] <version> [--serial | --parallel] [--machine local]` from its notes (no mode: the control
-# record's suiteMode then), its record's by "notes landed".
-relfixes() {
-  local f=$CARDS/release/run.json r v e s is='[]' cs fx busy lk go='' sha hd nc m a
+# record's suiteMode then), its record's by "notes landed". Each write sets fixesRead (epoch seconds). `relfixes
+# record` (the release limit, rellimit(), lib/pick.sh) only writes fixes and fixesRead: it waits up to 10 s for the
+# lock, fails when that runs out, and never starts the run. A fix's landing is read from the card records and from the
+# ended list (endedrecs(), lib/records.sh) both: one whose lines went to the archive is landed, not open or closed.
+# The list itself, relfixlist(): its input the issues as gh gives them (number, body, createdAt, state; [] for a run
+# that waits on its notes card), $c the card records' lines, $t the Tests page's cards; rellimit() reads it the same way.
+# A red run whose wait the owner stopped (waitStopped: relstopwaiting()) is not read, and never starts again by itself.
+RELFIXJQ='def relfixlist($v; $e; $n; $c; $t): ($c | map(select(.step == "landed") | .issue)) as $landed
+  | ("(^|\\n)[ \\t]*Release fix:[ \\t]*" + ($v | gsub("\\."; "\\.")) + "[ \\t]*\\r?(\\n|$)") as $re | ($t | map(.filed | numbers)) as $filed
+  | ([.[] | select(.createdAt > $e and ((.body // "") | test($re)) and (.number | IN($filed[]) | not))
+    | {issue: .number, state: (if .number | IN($landed[]) then "landed" elif .state == "OPEN" then "open" else "closed" end)}] | sort_by(.issue))
+  + ([$t[] | select(if $n != "" then .id == $n else .time > $e and ((.body // "") | test($re)) end) | ([.id, .card, (.was // [])[]] | map(select(. != null))) as $ids | (.card // .id) as $now
+    | {issue: null, card: .id, ids: $ids, state: (if any($c[]; .step == "landed" and (.card | IN($ids[]))) then "landed"
+        elif any($c[]; .step == "closed" and .card == $now) then "closed" else "open" end)}] | sort_by(.card));'
+relfixes() { # [record]
+  local f=$CARDS/release/run.json r v e s is='[]' cs ce fx busy lk go='' sha hd nc m a rec=${1:-}
   r=$(jq -ce 'select(.kind == "release" and ((.step | IN("release-prep", "release")) and .state == "failed" or (.step == "release-prep" and .state == "waiting" and (.notes.card | type) == "string"))
-    and (.ended | type) == "string" and .restarted == null)' "$f" 2>/dev/null) || return 0
+    and (.ended | type) == "string" and .restarted == null and .waitStopped == null)' "$f" 2>/dev/null) || return 0
   v=$(jq -r .version <<<"$r") && e=$(jq -r .ended <<<"$r") && s=$(jq -r .since <<<"$r") && nc=$(jq -r '.notes.card // ""' <<<"$r") || return 1
   { [ -n "$nc" ] || is=$(timeout 60 gh issue list --state all --limit 1000 --json number,body,createdAt,state --search "\"Release fix: $v\" in:body" < /dev/null 2>/dev/null); } \
-    && cs=$(stdb ask lines cards 2>/dev/null) \
-    && fx=$(jq -c --arg v "$v" --arg e "$e" --arg n "$nc" --slurpfile c <(printf '%s' "$cs") --slurpfile t <(jq -c '.cards | arrays' "${TACARDS:-/dev/null}" 2>/dev/null) \
-      '($c | map(select(.step == "landed") | .issue)) as $landed | ("(^|\\n)[ \\t]*Release fix:[ \\t]*" + ($v | gsub("\\."; "\\.")) + "[ \\t]*\\r?(\\n|$)") as $re
-      | (($t[0] // []) | map(.filed | numbers)) as $filed
-      | ([.[] | select(.createdAt > $e and ((.body // "") | test($re)) and (.number | IN($filed[]) | not))
-        | {issue: .number, state: (if .number | IN($landed[]) then "landed" elif .state == "OPEN" then "open" else "closed" end)}] | sort_by(.issue))
-      + ([$t[0][]? | select(if $n != "" then .id == $n else .time > $e and ((.body // "") | test($re)) end) | ([.id, .card, (.was // [])[]] | map(select(. != null))) as $ids | (.card // .id) as $now
-        | {issue: null, card: .id, ids: $ids, state: (if any($c[]; .step == "landed" and (.card | IN($ids[]))) then "landed"
-            elif any($c[]; .step == "closed" and .card == $now) then "closed" else "open" end)}] | sort_by(.card))' <<<"$is") \
+    && cs=$(stdb ask lines cards 2>/dev/null) && ce=$(endedrecs) && ce=$ce$'\n'$cs \
+    && fx=$(jq -c --arg v "$v" --arg e "$e" --arg n "$nc" --slurpfile c <(printf '%s' "$ce") --slurpfile t <(jq -c '.cards | arrays' "${TACARDS:-/dev/null}" 2>/dev/null) \
+      "$RELFIXJQ"'relfixlist($v; $e; $n; $c; $t[0] // [])' <<<"$is") \
     && busy=$(printf '%s' "$cs" | jq -s 'map(select(.step | IN("push", "pushed", "issue", "bugproof") | not)) | group_by(.card)
       | any(.[]; any(.[]; .step | IN("filed", "landed", "closed", "blocked")) | not)') \
     || { echo "conveyor: the fix cards of release $v's failed suite could not be read (gh issue list, or the card records)" >&2; return 1; }
   # A landed fix whose commit the suite would not run on yet holds the run: busy. Asked only when nothing else holds
   # it, as relhead() fetches; a remote that cannot be read holds it too.
-  if [ "$busy" = false ] && jq -e 'length > 0 and all(.[]; .state == "landed")' <<<"$fx" > /dev/null; then
+  if [ -z "$rec" ] && [ "$busy" = false ] && jq -e 'length > 0 and all(.[]; .state == "landed")' <<<"$fx" > /dev/null; then
     hd=$(relhead 2>/dev/null) || busy=true
     while IFS= read -r sha; do [ -n "$hd" ] && [ -n "$sha" ] && git merge-base --is-ancestor "$sha" "$hd" 2>/dev/null || busy=true
-    done < <(printf '%s' "$cs" | jq -r --argjson x "$fx" '($x | map(.issue | numbers)) as $l | ($x | map(.ids // [] | .[])) as $k | select(.step == "landed" and ((.issue | IN($l[])) or (.card | IN($k[])))) | .sha // ""')
+    done < <(printf '%s' "$ce" | jq -r --argjson x "$fx" '($x | map(.issue | numbers)) as $l | ($x | map(.ids // [] | .[])) as $k | select(.step == "landed" and ((.issue | IN($l[])) or (.card | IN($k[])))) | .sha // ""')
   fi
   { exec {lk}>>"$CARDS/release/lock"; } 2>/dev/null || return 1
-  flock -n "$lk" || { exec {lk}>&-; return 0; }
-  go=$(jq -c --arg s "$s" --arg st "$(jq -r .state <<<"$r")" --argjson x "$fx" --argjson b "$busy" --arg t "$(clock)" 'select(.since == $s and .state == $st and .restarted == null)
-    | .fixes = $x | if $x != [] and all($x[]; .state == "landed") and ($b | not) then .restarted = $t else . end' "$f" 2>/dev/null) \
+  if [ -n "$rec" ]; then flock -w 10 "$lk" || { exec {lk}>&-; return 1; }; else flock -n "$lk" || { exec {lk}>&-; return 0; }; fi
+  go=$(jq -c --arg s "$s" --arg st "$(jq -r .state <<<"$r")" --argjson x "$fx" --argjson b "$busy" --arg t "$(clock)" --arg rec "$rec" 'select(.since == $s and .state == $st and .restarted == null)
+    | .fixes = $x | .fixesRead = (now | floor) | if $rec == "" and $x != [] and all($x[]; .state == "landed") and ($b | not) then .restarted = $t else . end' "$f" 2>/dev/null) \
     && [ -n "$go" ] && printf '%s\n' "$go" > "$f.new" && mv -f "$f.new" "$f" || go=''
   exec {lk}>&-
+  [ -z "$rec" ] || return 0
   [ -n "$(jq -r '.restarted // empty' <<<"${go:-null}")" ] || return 0
   if [ -n "$nc" ]; then
     a=(prep "$v"); [ "$(jq -r '.notes.then' <<<"$r")" != release ] || a=("$v")

@@ -55,6 +55,8 @@ fi
 . "$HERE/lib/control.sh" || exit 1
 . "$HERE/lib/issues.sh" || exit 1
 . "$HERE/lib/pick.sh" || exit 1
+. "$HERE/lib/fulltest.sh" || exit 1 # the release limit's fix list (RELFIXJQ), read by the dry pick
+. "$HERE/lib/push.sh" || exit 1 # the release hold (relheld()), read by the dry pick's release limit
 . "$HERE/lib/run.sh" || exit 1
 . "$HERE/lib/machine.sh" || exit 1
 . "$HERE/lib/install.sh" || exit 1

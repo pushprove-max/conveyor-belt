@@ -56,7 +56,11 @@ NOBENEFIT='no live benefit: the issue says no live case is known or the gain was
 # lines (HEALTHLINE, lib/views.sh: every field the order below reads), from their kept summaries: the snapshot then
 # reads only the lines past them, not every line of the records each time (#398).
 upnext() { # <open issues json> [retried] [all] [the control record, when the caller has read it]
-  local c=${4:-} sh cards old gd n tsv e; [ -n "$c" ] || c=$(ctl) || return 1
+  local c=${4:-} sh cards old gd n tsv e
+  # While the release limit is on (RELONLY, set by pick(), overlap() and drypick() from rellimit()), only that release's issues:
+  # filtered here, so the same-file check judges the issue the pick then takes.
+  if [ -n "${RELONLY:-}" ]; then tsv=$(RELONLY='' upnext "$@") && jq -c --argjson rel "$RELONLY" 'map(select(.number | IN($rel.issues[])))' <<<"$tsv"; return; fi
+  [ -n "$c" ] || c=$(ctl) || return 1
   packget test.surveyHour sh || return 1
   # The open issues whose own seats' accounts are at the guard: the pick, the same-file check, the dry pick and the
   # Board's order all leave them out, so none of them names an issue the loop will not start.
@@ -180,8 +184,74 @@ redtests() { # <the loop's own cards in progress, card ids one a line>
     | (index(": ") as $i | if $i then .[:$i] else . end)] | unique) as $f | select($f != []) | [.cards[]? | objects | select(.file | strings | IN($f[]))] as $tc
     | select(all($tc[] | .card | strings | select(IN($own[])); $lv[0][.].mainWait? != null)) | select(any($tc[]; (.held | not) and .card == null)) | $f' "$TACARDS" 2>/dev/null
 }
+# The release limit (docs/releases.md): while a release run is under way (its record, $CARDS/release/run.json, has not
+# ended, or makes its coverage map, coverage: "running", and its process runs conveyor.sh) or a red one waits on a fix
+# card that is still open, pick takes only that release's fix issues and fix cards and their review follow-ups (the
+# follow-ups the card records name, live or in the ended list, and the review follow-up cards with no GitHub issue, by
+# the follow-up label, that follow up one of them or depend on its card; and the GitHub sub-issues of an issue among
+# them, as upnext() never takes the parent itself), at any depth, after the main-red fix card, which it always takes.
+# Prints {issues, cards}: the issues and card ids pick may take (none while a run is under way, also between the
+# release-prep and the release of one `release-run`, while it holds the release hold);
+# nothing while the limit is off: no release, a run that ended or was stopped (`release-run stop`), or a record that
+# does not read. Whether a fix is open is read now (relfixlist(), lib/fulltest.sh), from the open issues the pick was
+# given, the Tests page's cards and the card records: a fix filed since relfixes() last wrote the record's fixes holds
+# the queue at once, and an open issue or a card that no longer says `Release fix: <version>` is no fix at once. The
+# record's fixes add only the fixes not read now (a landed fix closed on GitHub), for their follow-ups; those not read in the last IDLE seconds (fixesRead) are read first (`relfixes record`), as `run` never
+# reads them. A read that fails stops the pick. The loop log says why each time the limit changes (the last reason is
+# in RELLIMITF). A card on the belt is never stopped. A dry pick (DRYPICK) reads only: no `relfixes record`, no log.
+RELLIMITF=${STATE%/*}/release-limit.txt
+rellimit() { # <the open issues json, as the pick was given them>
+  local f=$CARDS/release/run.json r k p v why set='' fc ta
+  if [ -z "${DRYPICK:-}" ] && jq -e --argjson idle "${IDLE:-0}" 'objects | (.ended | type) == "string" and .restarted == null and .waitStopped == null and (.state | IN("failed", "waiting"))
+    and (.fixesRead | numbers // 0) + $idle <= now' "$f" > /dev/null 2>&1; then
+    relfixes record || { echo "conveyor: the release limit: the fix cards of the red release could not be read; nothing is picked this turn" >&2; return 1; }
+  fi
+  if [ ! -e "$f" ]; then why="the release limit is off: no release has run; pick takes the queue in its order"
+  elif ! r=$(jq -cer 'objects | [(if .ended == null or .coverage == "running" then "run" elif (.state | IN("failed", "waiting")) and .restarted == null and .waitStopped == null then "red" else "off" end),
+      (.pid // "" | tostring), "\(.step // "release") \(.version // "")", (if .waitStopped != null then "failed, and its wait on its fix cards was stopped" else .state // "" end)] | join("\t")' "$f" 2>/dev/null); then
+    why="the release limit is off: the release record $f could not be read; pick takes the queue in its order"
+  else
+    IFS=$'\t' read -r k p v r <<<"$r"
+    # A record whose run died with no end written holds nothing: only a live run's process (as releasestop() checks it).
+    if [ "$k" = run ] && ! { [[ $p =~ ^[1-9][0-9]*$ ]] && kill -0 "$p" 2>/dev/null && ps -o args= -p "$p" 2>/dev/null | grep -q 'conveyor\.sh'; }; then k=off r='ended with no record of its end'; fi
+    # `release-run` runs release-prep, then release, under one release hold (relhold(), lib/push.sh): between the two,
+    # the record says release-prep ended (passed) and release has not written its start, but the run is still under way.
+    # The file is read only when it is there, so a dry pick makes none.
+    if [ "$k" = off ] && [ -e "$RELHOLD" ] && relheld; then k=held; fi
+    if [ "$k" = red ]; then
+      # Read first (a read that fails stops the pick), and given to jq as files: a long history is over the argument limit.
+      fc=$(endedrecs) && fc=$fc$'\n'$(recs) && ta=$(jq -c '.cards | arrays' "${TACARDS:-/dev/null}" 2>/dev/null || echo '[]') \
+        && set=$(jq -c --arg fu "$FOLLOWUP" --slurpfile is <(printf '%s' "${1:-[]}") --slurpfile lines <(printf '%s' "$fc") --slurpfile ta <(printf '%s' "${ta:-[]}") "$RELFIXJQ"'
+            $ta[0] as $ta | ($lines | map(select(.followups))) as $fc | def grow: . as $s
+              | ($s.issues + [$fc[] | select((.issue | IN($s.issues[])) or (.card | IN($s.cards[]))) | .followups[] | numbers]
+                  + [$is[0][] | select(.number | IN($s.issues[])) | (.parts // [])[] | .number | numbers]
+                  + [$is[0][] | select(.umbrella | numbers | IN($s.issues[])) | .number] | unique) as $i
+              | ($s.cards + [$ta[] | [.id, .card, (.was // [])[] | strings] as $ids | select(any($ids[]; IN($s.cards[])) or (.parent | IN($i[]))
+                  or ((.labels // []) | index($fu) != null) and any(.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*-[0-9]+(?![A-Za-z0-9_])"); IN($s.cards[])))
+                  | $ids[]] | unique) as $c
+              | {issues: $i, cards: $c} | if . == $s then . else grow end;
+            ($is[0] | map(.number)) as $open | [$ta[] | .id, .card, (.was // [])[] | strings] as $tids
+            | .version as $v | .ended as $e | (.notes.card // "") as $n
+            | (if .fixes | type == "array" then .fixes else [] end
+              | map(select(if .issue | type == "number" then .issue | IN($open[]) | not else [.card, (.ids // [])[] | strings] | any(IN($tids[])) | not end))) as $old
+            | (if $n != "" then [] else $is[0] | map(.state = "OPEN") end | relfixlist($v; $e; $n; $lines; $ta)) as $now
+            | select(any($now[]; .state == "open")) | $old + $now
+            | {issues: ([.[].issue | numbers] | unique), cards: ([.[] | .card, (.ids // [])[] | strings] | unique)} | grow' "$f") \
+        || { echo "conveyor: the release limit: the fix cards of $v, or the card records, could not be read; nothing is picked this turn" >&2; return 1; }
+      [ -z "$set" ] || k=fix
+    fi
+    case $k in
+      run) set='{"issues": [], "cards": []}'; why="the release limit is on: $v is under way; pick takes only a main-red fix card until it ends" ;;
+      held) set='{"issues": [], "cards": []}'; why="the release limit is on: a release run holds the release hold ($v $r, the next command not yet started); pick takes only a main-red fix card until it ends" ;;
+      fix) why="the release limit is on: $v waits on its fix cards; pick takes only them, their review follow-ups and a main-red fix card" ;;
+      *) why="the release limit is off: $v ${r:-ended}; pick takes the queue in its order" ;;
+    esac
+  fi
+  [ -n "${DRYPICK:-}" ] || [ "$(cat "$RELLIMITF" 2>/dev/null)" = "$why" ] || { echo "conveyor: $why" >&2; printf '%s\n' "$why" > "$RELLIMITF"; }
+  [ -z "$set" ] || printf '%s\n' "$set"
+}
 pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues, as asked() gives them] [the control record the reading was taken for]
-  local issues=${3:-} n card l again c u m f
+  local issues=${3:-} n card l again c u m f RELONLY
   m=''
   check && c=$(ctl) || return 1
   [ -z "$issues" ] || adopt "$issues" || return 1
@@ -200,6 +270,13 @@ pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues
   if [ -n "${BEYOND:-}" ]; then
     [ -z "${1:-}" ] && [ -n "${REDFILES:-}" ] && [ -s "${TACARDS:-}" ] && n=$(testpick "$issues") && [ -n "$n" ] && echo "$n"; return 0
   fi
+  # The release limit (rellimit(), above): while it is on, the cards with no GitHub issue and the issues below are only that release's.
+  # The same-file check judged the queue under the limit it read (RELSEEN, its OVLREL, given by turnpick(): unset when
+  # it judged nothing): a limit that changed since (a stop, a run that began or ended, a fix filed) gives other issues,
+  # which it never judged. Nothing is picked; the next turn checks again.
+  RELONLY=$(rellimit "$issues") || return 1
+  [ "${RELSEEN--}" = - ] || [ "$RELSEEN" = "$RELONLY" ] \
+    || { echo "conveyor: the release limit changed after the same-file check; nothing is picked, and the next turn checks again" >&2; echo wait; return 0; }
   # Then a card with no GitHub issue (testpick(), lib/testaction.sh), asked for at once, ahead of the queue, the same way.
   # A run limited by --only takes only the review follow-ups and split parts of the issues it names (testpick() reads ONLY).
   # It holds back a card as an issue is held: one that depends on an open issue, or has a label the owner set to never build.
@@ -242,11 +319,13 @@ pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues
 # list, ended list and weekly limit readings; a file it lacks is read as the loop starts it, empty). The guard is applied to the folder's newest
 # reading as the loop applies it (lastpct): one older than LIMIT_OLD is no reading, else the dry pick would hold an
 # issue the loop then picks; no new reading is asked for. It writes nothing, there or anywhere: no lock, no check mark, no hold of adopt() saved (the
-# record is read with them) and no card. Prints the issue number, or nothing when pick would take none.
+# record is read with them) and no card. Prints the issue number, or nothing when pick would take none. The release
+# limit (rellimit()) is applied as the pick applies it, from the project's release record, the folder's records and
+# its Tests page's cards (testactions/cards.json), with no write: while a release runs, no issue.
 drypick() { # <open issues file> <state folder>
   # shellcheck disable=SC2034 # DRYPICK is read by recs(), olds() and lastread() in lib/records.sh
   # shellcheck disable=SC2034 # LANDEDTSV and ENDED are read by landedall() and endedrecs() in lib/records.sh: the folder's own lists
-  local issues c bad w DRYPICK=1 LANDEDTSV=$2/landed.tsv ENDED=$2/archive/ended.jsonl
+  local issues c bad w DRYPICK=1 LANDEDTSV=$2/landed.tsv ENDED=$2/archive/ended.jsonl TACARDS=$2/testactions/cards.json RELONLY
   issues=$(jq -ce 'arrays' "$1") || { echo "conveyor: $1 is not a list of open issues" >&2; return 1; }
   READ=$2/$(basename "$STATE"); READ_OLD=$2/$(basename "$RETRIED"); CONTROL=$2/control.json; LIMIT=$2/$(basename "$LIMIT")
   [ -e "$READ" ] || READ=/dev/null; [ -e "$READ_OLD" ] || READ_OLD=/dev/null
@@ -256,6 +335,7 @@ drypick() { # <open issues file> <state folder>
   bad=$(head -n "$w" "$READ" | jq -Rrn -f "$HERE/jq/check.jq") || return 1
   c=$(ctl) && c=$(adopted "$c" "$issues") && [ -n "$c" ] || return 1
   [ "$(state "$c" "$(guardread "$c" | jq -r '.pct // empty')")" = running ] || return 0
+  RELONLY=$(READ=<(head -n "$w" "$READ" | awk -F'\t' 'NR == FNR { b[$1]; next } !(FNR in b)' <(printf '%s\n' "$bad") -) rellimit "$issues") || return 1
   READ=<(head -n "$w" "$READ" | awk -F'\t' 'NR == FNR { b[$1]; next } !(FNR in b)' <(printf '%s\n' "$bad") -) upnext "$issues" '' '' "$c" | jq -r '.[0].number // empty'
 }
 
@@ -285,13 +365,18 @@ touch such as README.md is not enough. When in doubt, answer NONE.
 Answer with exactly one line and nothing else, one of:
 DEPENDS #<the number of the card'"'"'s issue>: <the file both change>
 NONE'
-overlap() { # <open issues json> <retried or ""> <the control record>: sets OVL to the open issues, with the lines it added
-  local all n belt ans d f
-  OVL=$1
+overlap() { # <open issues json> <retried or ""> <the control record>: sets OVL to the open issues, with the lines it added, and OVLREL
+  local all n belt ans d f r
+  OVL=$1 OVLREL=-
   [ -n "$1" ] && all=$(turncards 2>/dev/null) && [ -n "$all" ] || return 0
+  # The release limit, as the pick reads it (rellimit()), given to upnext() as RELONLY: it then gives the issue the
+  # pick takes. OVLREL keeps it (- when none was read): the pick after this check takes nothing when it reads another
+  # (pick(): RELSEEN).
+  r=$(rellimit "$1") || return 0
+  OVLREL=$r
   belt=$(jq -cs '[group_by(.card)[] | select(.[0].issue != 0 and any(.step == "picked") and all(.step | IN("landed", "closed", "blocked") | not)) | .[0].issue] | unique' <<<"$all" 2>/dev/null) || return 0
   [ "$belt" != '[]' ] || return 0
-  while n=$(READ=<(printf '%s\n' "$all") upnext "$OVL" "$2" '' "$3" 2>/dev/null | jq -r '.[0].number // empty') && [ -n "$n" ]; do
+  while n=$(READ=<(printf '%s\n' "$all") RELONLY=$OVLREL upnext "$OVL" "$2" '' "$3" 2>/dev/null | jq -r '.[0].number // empty') && [ -n "$n" ]; do
     [ -z "${OVL_SEEN[$n]+1}" ] && [ -z "${OVL_SEEN[$n $belt]+1}" ] || return 0
     OVL_SEEN[$n $belt]=1
     ans=$(overlapcall "$n" "$belt" "$OVL" "$3") || { echo "conveyor: the same-file check of #$n failed ($ans); it is picked without it" >&2; return 0; }
