@@ -87,9 +87,12 @@ t_testsfix() {
   # file run, once however many lines name it, and gadget.test.ts is not the a.test.sh the run was given, so the
   # count of 2 stops the run (testrun.sh tests(), <worktree>.wide) before each fix round.
   # Each run's last failure names the run, and each session notes the run its brief names and the run before it:
-  # a fix round handed an earlier run's failures (#1695) shows as a pair that differs.
-  echo 'echo x >> "$STUB/tests"; seq 300 | sed "s/^/out line /"; for i in $(seq 59); do printf "FAIL %03000d\n" 0; done; echo "FAIL gadget.test.ts: expected 2 (run $(wc -l < "$STUB/tests"))"; exit 1' > "$STUB/test-cmd"
-  echo 'echo two >> a.txt; r=$(grep -o "expected 2 (run [0-9]*)" "$STUB/brief" | tail -n 1); [ -z "$r" ] || echo "$r $(wc -l < "$STUB/tests")" >> "$STUB/seen"' > "$STUB/build"
+  # a fix round handed an earlier run's failures (#1695) shows as a pair that differs. The run is named twice: in the
+  # output's tail, and in a `FAIL [<case>]:` line that testfails() parses as a case of a.test.sh, so the brief's list
+  # of failing cases (testfixprompt()'s 4th argument, from cardfailed()) names it too; a round handed the first run's
+  # parsed failures with a fresh tail shows as a case of another run.
+  echo 'echo x >> "$STUB/tests"; seq 300 | sed "s/^/out line /"; echo "FAIL [case-of-run-$(wc -l < "$STUB/tests")]: expected 2"; for i in $(seq 59); do printf "FAIL %03000d\n" 0; done; echo "FAIL gadget.test.ts: expected 2 (run $(wc -l < "$STUB/tests"))"; exit 1' > "$STUB/test-cmd"
+  echo 'echo two >> a.txt; r=$(grep -o "expected 2 (run [0-9]*)" "$STUB/brief" | tail -n 1); c=$(sed -n "/^# The failing cases of the changed tests/,/^# The changed tests fail/p" "$STUB/brief" | grep -o "case-of-run-[0-9]*" | head -n 1); [ -z "$r" ] || echo "$r ${c:-no-case} $(wc -l < "$STUB/tests")" >> "$STUB/seen"' > "$STUB/build"
   head=$(git -C "$R" rev-parse HEAD)
   # A whole card: the TESTFIXES (3) fix rounds, and the block after them, are card()'s test step, which only the
   # card's own run takes after its reviews.
@@ -103,8 +106,8 @@ t_testsfix() {
   # heading is counted, and ends with the output's last line (the run's LINKED note).
   out=$(sed '1,/^# The changed tests fail (exit 1): fix that and nothing else\. The end of the test output:$/d' "$STUB/brief")
   # Each failed run is run again (tests()), and that run's output is the one the round is handed: runs 2, 4 and 6.
-  [ "$(paste -sd, "$STUB/seen")" = 'expected 2 (run 2) 2,expected 2 (run 4) 4,expected 2 (run 6) 6' ] \
-    || fail "the 3 fix rounds were not each handed the failures of the test run just before it (brief's run, runs so far): $(paste -sd, "$STUB/seen")"
+  [ "$(paste -sd, "$STUB/seen")" = 'expected 2 (run 2) case-of-run-2 2,expected 2 (run 4) case-of-run-4 4,expected 2 (run 6) case-of-run-6 6' ] \
+    || fail "the 3 fix rounds were not each handed the output and the failing cases of the test run just before it (brief's tail run, brief's case, runs so far): $(paste -sd, "$STUB/seen")"
   grep -q '^# The changed tests fail' "$STUB/brief" && grep -qx 'FAIL gadget.test.ts: expected 2 (run 6)' <<<"$out" && grep -qx 'out line 300' <<<"$out" \
     && ! grep -qx 'out line 160' <<<"$out" && [ "$(grep -c '' <<<"$out")" = 200 ] && [[ "$(tail -n 1 <<<"$out")" == "conveyor: the change adds or changes no test file"* ]] \
     && grep -q '^# Issue #7:' "$STUB/brief" || fail "the fix session was not handed the issue and the last 200 lines of the test output: $(grep -c '' <<<"$out") lines, the last $(tail -n 1 <<<"$out" | cut -c1-200)"
