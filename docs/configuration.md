@@ -253,12 +253,14 @@ file runs whole when the change touches a line outside all cases, such as a help
 when no changed case is found in it. The card's test step says "the card ran 3 changed cases of 3 test files", and
 the Board shows this note with the step. Each test file that `.conveyor/test-links.json` links to a changed file
 also runs, whole. This is true also when the changed file is a test file of which the change touches only one case:
-that change can make another test file run in full.
+that change can make another test file run in full. The card also runs at most 5 of the test files linked to the
+other files of the change, as below, and the note says how many ran and how many did not.
 
 If the change adds or changes no test file, the card runs 5 of the test files linked to the changed files:
 
 - the test files that `.conveyor/test-links.json` links to a changed file, if your project has that file
-  (`{"<file>": ["<test file>", ...]}`), and the test files that the [test map](#the-test-map) says cover it;
+  (`{"<file>": ["<test file>", ...]}`), and the test files that the [test map](#the-test-map) says cover it. A key
+  with a `*` links each file that it matches, and the `*` matches any characters except `/`;
 - if neither gives a test, the test files whose name holds the name of that file, from the nearest folders. For
   example, a change to `src/cart/total.js` runs the test file of `total` in `src/cart/`, not one in another folder.
 

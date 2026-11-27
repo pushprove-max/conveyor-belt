@@ -652,6 +652,12 @@ READLINKED=' It also ran <k> more of the linked files, because their last pass r
 OWNCASES='the card ran <n> changed case<s> of <m> test file<s>'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 OWNWHOLE=', and <w> test file<s> whole'
+# Added to OWNCASES (or after "the card ran ") when the test map gives <k> more test files to the other files of a
+# change that has test files of its own (listcmd()), with MAPLEFT when the cap of <max> left <left> of the <all> out.
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+MAPOWN='<k> more test file<s> for the other files that the change touches'
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+MAPLEFT=' (<left> of the <all> did not run, as a card runs at most <max> of them, those that failed most recently first)'
 # What the bug-card check says when more test files are linked to its change than the pack's
 # test.cardFiles (testcap()).
 # shellcheck disable=SC2034 # used in lib/testrun.sh

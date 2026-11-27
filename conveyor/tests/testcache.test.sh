@@ -298,6 +298,79 @@ t_testcachetestreads() {
     || fail "a change to e.txt, which conveyor/tests/k.test.sh's pass read, did not pick it alone: '$(cat "$T/$CASE/src" 2>&1)' $(cat "$T/$CASE/run.out")"
 }
 
+# Every case starts the engine, which sources every library file, so the traced pass of each engine case file names
+# each of them as read. The pass of the case file conveyor/tests/k.test.sh and of s.test.sh, a test run on its own,
+# read conveyor/lib/x.sh: a change to it picks s.test.sh alone (cachereaders()); the test map gives a card the case
+# files of a library file (listcmd()). Bug it catches: a change to bugproof.sh picked budgetkept.test.sh and 24 more
+# case files that run none of its functions (2026-11-27).
+t_testcachelibreads() {
+  setup '[]'
+  mkdir -p "$R/conveyor/tests" "$R/conveyor/lib" && echo k > "$R/conveyor/tests/k.test.sh" && echo x > "$R/conveyor/lib/x.sh" && echo s > "$R/s.test.sh" \
+    && git -C "$R" add -f conveyor || fail "the engine files could not be added"
+  cachelistsetup s.test.sh
+  LASTPASS=$'conveyor/tests/k.test.sh\tconveyor/lib/x.sh\ns.test.sh\tconveyor/lib/x.sh' \
+    cachelistrun 'cachereaders $'"'"'M\tconveyor/lib/x.sh'"'"' > "$T/$CASE/got"'
+  [ "$(cat "$T/$CASE/got" 2>&1)" = s.test.sh ] \
+    || fail "a change to conveyor/lib/x.sh, which both passes read, did not pick s.test.sh alone: '$(cat "$T/$CASE/got" 2>&1)' $(cat "$T/$CASE/run.out")"
+}
+
+# A file the change adds holds a new name in its own folder alone. The pass of t.test.sh listed ./, of u.test.sh
+# docs/ and of v.test.sh docs/sub/: a change that adds docs/sub/new.md picks v.test.sh alone, and one that adds top.md
+# picks t.test.sh alone (cachereaders()). Bug it catches: an added file marked each folder above it too, so adding a
+# case file picked each test that listed ./ or conveyor/.
+t_testcacheaddfolder() {
+  setup '[]'
+  echo t > "$R/t.test.sh"; echo u > "$R/u.test.sh"; echo v > "$R/v.test.sh"; cachelistsetup t.test.sh u.test.sh v.test.sh
+  LASTPASS=$'t.test.sh\t./\nu.test.sh\tdocs/\nv.test.sh\tdocs/sub/' cachelistrun 'cachereaders $'"'"'A\tdocs/sub/new.md'"'"' > "$T/$CASE/sub" \
+    && cachereaders $'"'"'A\ttop.md'"'"' > "$T/$CASE/top"'
+  [ "$(cat "$T/$CASE/sub" 2>&1)" = v.test.sh ] \
+    || fail "a change that adds docs/sub/new.md did not pick v.test.sh alone, which listed docs/sub/: '$(cat "$T/$CASE/sub" 2>&1)' $(cat "$T/$CASE/run.out")"
+  [ "$(cat "$T/$CASE/top" 2>&1)" = t.test.sh ] \
+    || fail "a change that adds top.md did not pick t.test.sh alone, which listed ./: '$(cat "$T/$CASE/top" 2>&1)' $(cat "$T/$CASE/run.out")"
+}
+
+# Card c7 changes the case t_one of its own test file o.test.sh and the file src.txt, to which the test map gives
+# o.test.sh and seven files m0 to m6.test.sh. The list is o.test.sh's t_one and five of the seven (CARDLINKED), and its
+# note says so and that two did not run (listcmd()). Bug it catches: a card with a test file of its own ran none of
+# the tests the map gives its other files, so a card that added redflaky.test.sh and changed bugproof.sh ran none of
+# the 25 main-red cases the coverage map gives the functions it changed (#1827).
+t_testcacheownmap() {
+  setup '[]'
+  local i ms=()
+  printf 't_one() {\n  :\n}\nt_two() {\n  :\n}\n' > "$R/o.test.sh"; echo s > "$R/src.txt"
+  for i in 0 1 2 3 4 5 6; do echo x > "$R/m$i.test.sh"; ms+=("m$i.test.sh"); done; cachelistsetup o.test.sh src.txt "${ms[@]}"
+  printf 't_one() {\n  echo one\n}\nt_two() {\n  :\n}\n' > "$T/$CASE/cards/c7/o.test.sh" && echo two >> "$T/$CASE/cards/c7/src.txt" \
+    && git -C "$T/$CASE/cards/c7" add -A || fail "the card's change could not be staged"
+  LASTPASS='' cachelistrun 'testsel() { printf "%s\n" "{\"by\": \"map\"}" o.test.sh '"${ms[*]}"'; }
+    listcmd "$wt" && printf "%s|%s" "$(echo $TEST_FILES)" "$TEST_CASES" > "$T/$CASE/got"'
+  [ "$(cat "$T/$CASE/got" 2>&1)" = $'o.test.sh m0.test.sh m1.test.sh m2.test.sh m3.test.sh m4.test.sh|o.test.sh\tone' ] \
+    || fail "the list of a change to o.test.sh's t_one and src.txt is not t_one and five of the seven files the map gives src.txt (files|cases): $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+  jq -e '.left == 2 and .why == "the card ran 1 changed case of 1 test file, and 5 more test files for the other files that the change touches (2 of the 7 did not run, as a card runs at most 5 of them, those that failed most recently first)"' \
+    "$T/$CASE/cards/c7.testlist" > /dev/null || fail "the list does not say five map files ran and two did not: $(cat "$T/$CASE/cards/c7.testlist" 2>&1)"
+}
+
+
+# The links key t/*.test.sh links each test file of t/ to t/x.test.sh. Card c7 changes the case t_one of t/a.test.sh:
+# its list is t_one and t/x.test.sh whole (changelinks()). The test t/sub/b.test.sh matches no key, and this
+# repository's own links bring testcountrunner.test.sh for a case file (linksto()). Bug it catches (#1827 review): a
+# card that added a case file whose function name another case file defines did not run testcountrunner.test.sh,
+# whose t_casefnclash is the one check of such a name, and the duplicate landed.
+t_testcachelinkglob() {
+  setup '[]'
+  local w=$T/$CASE/cards/c7
+  mkdir -p "$R/t/sub" && printf 't_one() {\n  :\n}\nt_two() {\n  :\n}\n' > "$R/t/a.test.sh" && echo x > "$R/t/x.test.sh" && echo b > "$R/t/sub/b.test.sh"
+  linkset '{"t/*.test.sh": ["t/x.test.sh"]}'; cachelistsetup t/a.test.sh t/x.test.sh t/sub/b.test.sh
+  printf 't_one() {\n  echo one\n}\nt_two() {\n  :\n}\n' > "$w/t/a.test.sh" && git -C "$w" add -A || fail "the card's change could not be staged"
+  LASTPASS='' cachelistrun 'listcmd "$wt" && printf "%s|%s" "$(echo $TEST_FILES)" "$TEST_CASES" > "$T/$CASE/got" \
+    && echo t/sub/b.test.sh | linksto "$wt" > "$T/$CASE/sub" && echo conveyor/tests/zz.test.sh | linksto "$SRC/.." > "$T/$CASE/own"'
+  [ "$(cat "$T/$CASE/got" 2>&1)" = $'t/a.test.sh t/x.test.sh|t/a.test.sh\tone' ] \
+    || fail "a change to t_one of t/a.test.sh did not run t_one and t/x.test.sh, which t/*.test.sh links, whole (files|cases): $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+  [ ! -s "$T/$CASE/sub" ] || fail "t/sub/b.test.sh, in a folder below t/, matched t/*.test.sh: $(cat "$T/$CASE/sub")"
+  [ "$(cat "$T/$CASE/own" 2>&1)" = conveyor/tests/testcountrunner.test.sh ] \
+    || fail "this repository's links do not bring testcountrunner.test.sh for a change to a case file: '$(cat "$T/$CASE/own" 2>&1)'"
+}
+
+
 # cachekeep() of a run that passed d.test.sh, whose log names its reads in a `TESTRUN reads` line (it read a path
 # that is not tracked, such as node_modules: .conveyor/test-changed.sh inputsof()), e.txt and pkg/package.json, which
 # was not there. The cache holds the line, so cachereaders() picks d.test.sh for a change that adds pkg/package.json,

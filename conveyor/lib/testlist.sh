@@ -245,15 +245,23 @@ readersin() { # <worktree>
 # still picked: spdx.test.sh reads the SPDX line of each tracked file in a run of its own. A case file's own read of
 # another (testcountrunner.test.sh's check of function names) cannot be told from the runner's, so it brings no
 # reader either; the full test suite, which does not use the cache, still runs it. The changed case file
-# itself still runs: it is the card's own test (listcmd()).
+# itself still runs: it is the card's own test (listcmd()). An engine library file (conveyor/lib/<name>.sh) that
+# changes brings no reader that is an engine case file either: every case starts the engine, which sources every
+# library file, so each case file's trace names each of them (a change to bugproof.sh picked budgetkept.test.sh,
+# which runs none of its functions, 2026-11-27). The test map gives a card the case files of a library file
+# (listcmd()). A file the change adds or deletes marks its own folder alone as touched (./ for a file at the top),
+# not each folder above it: those folders hold the same names (bug: adding a case file picked each test that
+# listed ./ or conveyor/).
 cachereaders() { # <changes>
   [ -s "$TESTCACHE" ] && [ -n "$1" ] || return 0
-  # ch: what the change touches; cx: the same, less what an engine case file of it touches, for an engine case file.
+  # ch: what the change touches; cx: the same, less what an engine case file or library file of it touches, for an
+  # engine case file.
   C=$1 awk -F'\t' 'function eng(p) { return p ~ /^conveyor\/tests\/[^\/]+\.test\.sh$/ }
+    function src(p) { return eng(p) || p ~ /^conveyor\/lib\/[^\/]+\.sh$/ }
     function mark(p, e) { ch[p] = 1; if (!e) cx[p] = 1 }
     BEGIN { n = split(ENVIRON["C"], l, "\n")
-      for (i = 1; i <= n; i++) { if (split(l[i], x, "\t") < 2) continue; e = eng(x[2]); mark(x[2], e); if (x[1] !~ /^[AD]/) continue
-        mark("./", e); m = split(x[2], p, "/"); q = ""; for (j = 1; j < m; j++) { q = q p[j] "/"; mark(q, e) } } }
+      for (i = 1; i <= n; i++) { if (split(l[i], x, "\t") < 2) continue; e = src(x[2]); mark(x[2], e); if (x[1] !~ /^[AD]/) continue
+        q = x[2]; if (sub(/[^\/]+$/, "", q) && q == "") q = "./"; mark(q, e) } }
     { last[$3] = $0 }
     END { for (f in last) { k = split(last[f], a, "\t"); e = eng(f)
         for (i = 4; i <= k; i++) if (e ? ((a[i] in cx) || (a[i] !~ /\/$/ && (a[i] "/") in cx)) : ((a[i] in ch) || (a[i] !~ /\/$/ && (a[i] "/") in ch))) { print f; break } } }' "$TESTCACHE" | LC_ALL=C sort
@@ -689,7 +697,8 @@ rerunsince() { # <worktree> <the staged change's id> <HEAD> <tree>
   fi
   # A test file whose last pass on record read a file that differs between the two trees (cachereaders(), #1619) keeps
   # no `pass`, `ok` or `fail` line, so it runs whole though the command selects none of it (runfiles()): bug, a fix
-  # that changed a file a passed test read kept that pass, and runfiles() left the test off.
+  # that changed a file a passed test read kept that pass, and runfiles() left the test off. A linked test file keeps
+  # its pass: the `changed` lines make the command run the links of each changed file (.conveyor/test-changed.sh).
   RERUN_WHY="the files that differ between the tree last tested ($ot) and the tree now cannot be read"
   rd=$(git -C "$1" -c core.quotePath=false diff --name-status --no-renames "$ot" "$4" -- 2>/dev/null) && rd=$(cachereaders "$rd") || return 1
   RERUN_WHY="the list for this run could not be written"
@@ -707,14 +716,22 @@ mainlinks() { # <worktree> <the commit last tested on>
     | jq -Rr --slurpfile m <(cat "$1/.conveyor/test-links.json" 2>/dev/null || echo '{}') '$m[0]["main:" + .] | arrays[] | strings' 2>/dev/null \
     | sort -u | while IFS= read -r f; do [ ! -f "$1/$f" ] || printf '%s\n' "$f"; done
 }
-# The test files .conveyor/test-links.json links to each file the staged change in <worktree> touches, a test file or
-# not, those still there, one a line, A to Z; a link of a file to itself is left out. listcmd() runs each whole and
-# never leaves one out for its cap: a link says a change to that file broke the test before (bug: a card that changed
-# foreman.sh and a test file ran none of foreman.sh's links, and with no test file the cap ran 5 of its 9).
-changelinks() { # <worktree>
-  git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null \
-    | jq -Rr --slurpfile m <(cat "$1/.conveyor/test-links.json" 2>/dev/null || echo '{}') '. as $k | $m[0][$k] | arrays[] | strings | select(. != $k)' 2>/dev/null \
+# The test files .conveyor/test-links.json in <worktree> links to each file named on stdin (one a line), those still
+# there, one a line, A to Z; a link of a file to itself is left out. A key with a * links each file it matches, the *
+# standing for any characters but / (conveyor/tests/*.test.sh: each engine case file brings testcountrunner.test.sh,
+# whose t_casefnclash is the one check of a function name that two case files define; the owner, 2026-11-27).
+linksto() { # <worktree>
+  jq -Rr --slurpfile m <(cat "$1/.conveyor/test-links.json" 2>/dev/null || echo '{}') '. as $k | $m[0] | objects | to_entries[]
+    | .key as $p | select($p == $k or (($p | contains("*")) and ($k | test("^" + ($p | gsub("(?<c>[.+?^${}()|\\[\\]\\\\])"; "\\\(.c)") | gsub("\\*"; "[^/]*")) + "$"))))
+    | .value | arrays[] | strings | select(. != $k)' 2>/dev/null \
     | sort -u | while IFS= read -r f; do [ -z "$f" ] || [ ! -f "$1/$f" ] || printf '%s\n' "$f"; done
+}
+# The test files .conveyor/test-links.json links to each file the staged change in <worktree> touches, a test file or
+# not (linksto()). listcmd() runs each whole and never leaves one out for its cap: a link says a change to that file
+# broke the test before (bug: a card that changed foreman.sh and a test file ran none of foreman.sh's links, and with
+# no test file the cap ran 5 of its 9).
+changelinks() { # <worktree>
+  git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | linksto "$1"
 }
 # listcmd()'s capped list fs with each linked file (lk, listcmd()'s) added that the cap left out and that
 # changelinks() gives <worktree>'s change; KEPTLINKS: how many it added (bug: a change to foreman.sh alone ran 5 of

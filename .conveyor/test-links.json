@@ -93,6 +93,7 @@
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "README-pages.test.sh",
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -103,6 +104,7 @@
     ".claude/scripts/__tests__/dashboard-view.overview.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "README-pages.test.sh",
     "conveyor/tests/landas.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -110,6 +112,7 @@
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "README-pages.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   ".claude/dashboard/app.css": [
@@ -472,6 +475,7 @@
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     ".claude/scripts/__tests__/dashboard-view.rules-index.test.mjs",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "README-pages.test.sh",
     "conveyor/tests/landas.test.sh",
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/port.test.sh",
@@ -592,6 +596,7 @@
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "README-pages.test.sh",
     "conveyor/foreman/foreman.test.sh",
     "conveyor/tests/metrics.test.sh"
   ],
@@ -857,10 +862,12 @@
   "docs/cards.md": [
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "README-pages.test.sh",
     "conveyor/foreman/foreman.test.sh",
     "conveyor/tests/metrics.test.sh"
   ],
   "docs/releases.md": [
+    "README-pages.test.sh",
     "conveyor/tests/metrics.test.sh"
   ],
   "conveyor/lib/modelpick.sh": [
@@ -912,6 +919,7 @@
   ],
   "docs/units.md": [
     ".claude/scripts/__tests__/dashboard.test.sh",
+    "README-pages.test.sh",
     "conveyor/tests/port.test.sh"
   ],
   "hooks/sources.test.tsx": [
@@ -1130,5 +1138,17 @@
     ".claude/hooks/__tests__/git-safety-quoted-options.refute.test.sh",
     ".claude/hooks/__tests__/git-safety.test.sh",
     ".claude/hooks/__tests__/plugin-hooks.test.sh"
+  ],
+  "docs/benchmarks.md": [
+    "README-pages.test.sh"
+  ],
+  "docs/credits.md": [
+    "README-pages.test.sh"
+  ],
+  "docs/lanes.md": [
+    "README-pages.test.sh"
+  ],
+  "conveyor/tests/*.test.sh": [
+    "conveyor/tests/testcountrunner.test.sh"
   ]
 }

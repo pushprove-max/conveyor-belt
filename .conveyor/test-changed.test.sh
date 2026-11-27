@@ -367,6 +367,19 @@ p_caselinked() {
   [ "$got" = "aone atwo bone" ] && ok "a change to a linked case file's helper runs it whole and the case files that call it" \
     || no "a.test.sh aset changed: ran '$got': $(cat "$T/out")"
 }
+# A links key with a * (conveyor/tests/*.test.sh, as this repository links each case file to testcountrunner.test.sh)
+# links each case file it matches: a change to one case of a.test.sh runs that case and b.test.sh's cases (a run after a fix
+# picks the tests of its `changed` lines with the same links). Bug it catches (#1827
+# review): a card that added a function name that another case file defines did not run testcountrunner.test.sh, the
+# one check of such a name.
+p_globlinked() {
+  echo '{"conveyor/tests/*.test.sh": ["conveyor/tests/b.test.sh"]}' > "$R/.conveyor/test-links.json"
+  printf 't_aone() {\n  :\n}\nt_atwo() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"
+  git -C "$R" add -A && git -C "$R" commit -qm links
+  printf 't_aone() {\n  :\n}\nt_atwo() {\n  true\n}\n' > "$R/conveyor/tests/a.test.sh"; got=$(mran2)
+  [ "$got" = "atwo bone" ] && ok "a change to one case of a case file runs the case file that a * key links to it" \
+    || no "a.test.sh atwo changed, conveyor/tests/*.test.sh links b.test.sh: ran '$got': $(cat "$T/out")"
+}
 # Issue 1001. Bug it catches: a case of this checkout's slots.test.sh that the reader of case files (CASES) cannot
 # read (t_slotnoroom's `...; }` on a line of its own body) made a change to one case run the file whole, and so every
 # file it links to. The file is a.test.sh here: the scratch map names a.test.sh.
@@ -402,7 +415,7 @@ p_mapnames() {
 # The parts on this checkout's map copy are in test-changed-map.test.sh, and the map's own parts (checkout, area,
 # selected, the map changes, the shellcheck of changed lines and the time lines) are in test-changed-areas.test.sh
 # alone: a map change runs all three files (MAPTESTS), so a copy here ran each twice.
-for p in rerun mainrun mainwhole nodecases flakyoff slowoff killed fixengine fixtest mainmoved fixpassed core firstwhy handrun noarea why unlisted \
+for p in globlinked rerun mainrun mainwhole nodecases flakyoff slowoff killed fixengine fixtest mainmoved fixpassed core firstwhy handrun noarea why unlisted \
   cover linked caselinked slotsparse; do part "$p"; done
 part mapnames
 results

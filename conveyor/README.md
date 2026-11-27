@@ -855,7 +855,9 @@ main has, it runs only the cases (`t_<case>() {` to its `}` line, with the comme
 the change adds or changes; a file whose change touches a line outside every case (a helper or setup), a new file,
 and a file with no such case run whole. The command gets those cases in `CONVEYOR_TEST_CASES`, one `<file><TAB><case>`
 line each; a command that does not read it runs each file whole. The list then has `cases`, `[{"file", "case"}]`, and
-a `why`, `the card ran <n> changed cases of <m> test files`, which the output and the Board's step show. A change with
+a `why`, `the card ran <n> changed cases of <m> test files`, which the output and the Board's step show. The test
+files that the test map and the links give the change's other files also run, at most 5 of them, as for a change with
+no test file, and the `why` says how many. A change with
 none runs at most 5 of the test files the test map and the links give its files, and its output says so. Either
 way, each test file that `.conveyor/test-links.json` links to a changed file also runs, whole, and the note says how
 many of them ran past the 5. When the
@@ -1054,9 +1056,11 @@ folder that the change adds a file to or deletes a file from. Such a file runs w
 selects only some of its cases. When a fix, or a newer main, changes a file that a test file's last kept pass read,
 the card's next test run does not use the pass of that file from the card's earlier run. One exception applies to all
 of these rules, for an inputs line and a `TESTRUN reads` line alike: a change to an engine case file
-(`conveyor/tests/<name>.test.sh`) does not add another engine case file. The engine's runner loads every case file, so
-each pass of a case file reads all of them. A test file that is not an engine case file and read the changed file
-still gets on the list. The test map and the test
+(`conveyor/tests/<name>.test.sh`) or to an engine library file (`conveyor/lib/<name>.sh`) does not add an engine case
+file. The engine's runner loads every case file, and every case loads every library file, so each pass of a case file
+reads all of them. The test map gives a card the case files of a library file. A test file that is not an engine case
+file and read the changed file still gets on the list. A file that the change adds or deletes changes only the folder
+that holds it, not the folders above it. The test map and the test
 links still give the tests that have no kept pass. Each
 other file on the card's list gets a `TESTRUN why` line that tells why it runs: its inputs changed since its last
 pass, or no pass of it is kept with its inputs.

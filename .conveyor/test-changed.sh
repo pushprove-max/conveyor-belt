@@ -543,7 +543,9 @@ boardtests() {
 # the files of the landing that broke it. .conveyor/test-links.json, {"<changed file>": ["<test file>", ...]}, written
 # by the engine (conveyor/lib/mainred.sh brokeby(), testlinks()) and committed by the main-red fix card. LINKS holds
 # one `<changed file><TAB><test file>` a line; a link whose test file no longer exists is dropped as it is read, and a
-# file that cannot be read links nothing. Each test file a link adds to a pick (an engine case file to the engine's
+# file that cannot be read links nothing. A key with a * links each file it matches, the * standing for any characters
+# but / (conveyor/tests/*.test.sh brings testcountrunner.test.sh for each case file: the owner, 2026-11-27), as the
+# engine reads it (conveyor/lib/testlist.sh linksto()). Each test file a link adds to a pick (an engine case file to the engine's
 # runner, as a changed one; a meta-runner by its pack mark, below) the log names: linked, `<test file><TAB><changed file>`.
 LINKS=$(jq -r 'to_entries[] | .key as $k | .value | arrays[] | strings | "\($k)\t\(.)"' .conveyor/test-links.json 2>/dev/null \
   | while IFS=$'\t' read -r f t; do [ ! -f "$t" ] || printf '%s\t%s\n' "$f" "$t"; done)
@@ -1230,7 +1232,8 @@ for f; do
   # A part of a Board script (PART_OF): the script's links, too.
   of=${PART_OF[$f]:-$f}
   [ -z "$LINKS" ] || [ -n "$NOTEXT" ] || while IFS=$'\t' read -r s t; do
-    [ "$s" = "$f" ] || [ "$s" = "$of" ] || continue
+    [ "$s" = "$f" ] || [ "$s" = "$of" ] || { [[ $s == *'*'* ]] && [ "$t" != "$f" ] \
+      && [[ $f =~ ^$(sed 's/[.+?^${}()|[\]\\]/\\&/g; s/\*/[^\/]*/g' <<<"$s")$ ]]; } || continue
     case $t in conveyor/tests/*.test.sh) [ -z "$helpers" ] || ! grep -qwF -f <(printf '%s\n' "$helpers") -- "$t" || continue ;; esac
     case $t in conveyor/tests/*.test.sh) area[$t]=1 ;; *) run[$t]=1 ;; esac
     linked[$t$'\t'$f]=1

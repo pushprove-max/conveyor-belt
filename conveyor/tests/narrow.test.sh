@@ -246,24 +246,27 @@ t_narrowownsrclinks() {
 }
 
 # D1 (#384). Bug it catches: a card ran every test file the map links to its change (65 to 173 a card), holding test
-# slots for hours, though it changed a test file of its own. A change to lib/card.sh, which the links tie to 40 test
-# files, and to tests/samefile.test.sh runs only samefile.test.sh, and says nothing of linked files (the fixture's
-# main ignores conveyor/, so the issue's conveyor/lib/card.sh and conveyor/tests/samefile.test.sh are without it).
+# slots for hours, though it changed a test file of its own. A change to lib/card.sh, which the map ties to 40 test
+# files, and to tests/samefile.test.sh runs samefile.test.sh and 5 of the 40 (CARDLINKED: the owner, 2026-11-27, so a
+# card with a test file of its own still runs the map's tests of its other files), and the list says 35 did not run
+# (the fixture's main ignores conveyor/, so the issue's conveyor/lib/card.sh and conveyor/tests/samefile.test.sh are
+# without it).
 t_narrowown() {
   caprun 40 lib/card.sh 'mkdir -p tests && echo y >> tests/samefile.test.sh'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(cat "$STUB/got" 2>&1)" = 'one:tests/samefile.test.sh' ] \
-    || fail "the card did not run only its own test file (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
-  [ "$(jq -c .list "$T/$CASE/cards/c7.rec")" = '{"mode":"changed","files":1,"by":"own"}' ] && ! grep -q 'linked to it' "$T/$CASE/cards/c7.test" \
-    || fail "the test line's list, or the output: $(cat "$T/$CASE/cards/c7.rec" "$T/$CASE/cards/c7.test")"
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:t001.test.js\none:t002.test.js\none:t003.test.js\none:t004.test.js\none:t005.test.js\none:tests/samefile.test.sh' ] \
+    || fail "the card did not run its own test file and 5 of the 40 the map gives lib/card.sh (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(jq -c '.list | [.files, .by, .left, .why]' "$T/$CASE/cards/c7.rec")" = '[6,"own",35,"the card ran 5 more test files for the other files that the change touches (35 of the 40 did not run, as a card runs at most 5 of them, those that failed most recently first)"]' ] \
+    || fail "the test line's list: $(cat "$T/$CASE/cards/c7.rec")"
 }
 
 # D1 (#384). Bug it catches: a test file whose name starts with setup (tests/setup.test.sh, tests/setupservice.test.sh)
-# was read as a shared setup file, so the card ran 5 linked files in place of its own two.
+# was read as a shared setup file, so the card ran 5 linked files in place of its own two. Its own two run, with 5 of
+# the 40 files the map gives lib/card.sh (t_narrowown).
 t_narrowownsetup() {
   caprun 40 lib/card.sh 'mkdir -p tests && echo y >> tests/setup.test.sh && echo y >> tests/setupservice.test.sh'
-  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:tests/setup.test.sh\none:tests/setupservice.test.sh' ] \
-    && [ "$(jq -c .list "$T/$CASE/cards/c7.rec")" = '{"mode":"changed","files":2,"by":"own"}' ] \
-    || fail "the card did not run only its own setup test files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" "$T/$CASE/cards/c7.rec" 2>&1)"
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = $'one:t001.test.js\none:t002.test.js\none:t003.test.js\none:t004.test.js\none:t005.test.js\none:tests/setup.test.sh\none:tests/setupservice.test.sh' ] \
+    && [ "$(jq -c '.list | [.files, .by]' "$T/$CASE/cards/c7.rec")" = '[7,"own"]' ] \
+    || fail "the card did not run its own setup test files as test files (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" "$T/$CASE/cards/c7.rec" 2>&1)"
 }
 
 # #414. Main holds tests/a.test.sh, tests/b.test.sh, tests/c.test.sh and tests/e.test.sh, each a helper (h<x>) and two cases

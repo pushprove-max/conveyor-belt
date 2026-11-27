@@ -442,7 +442,7 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # reports more: tests()). <report args> (reportask() files) go after the command, before each file's path. TEST_FAST is
 # `fast` when the command stops at its first failure (failfast()), else empty, as for a main-red fix card (in $MAINRED): cardland.sh redelse() needs a verdict of each case it fails.
 listcmd() { # <worktree> [report args]
-  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 KEPTLINKS=0 SELN=0 SELALL=0
+  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 KEPTLINKS=0 SELN=0 SELALL=0 own=() ms=() mall=0 mleft=0 mmax=0
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
   # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only while it is not set.
   # A suite runner (SUITERUNNERS) is on no list (#382): testpaths() leaves each off the card's own files, and
@@ -465,6 +465,22 @@ listcmd() { # <worktree> [report args]
       if c=$(owncases "$1" "$f"); then nf=$((nf + 1)); TEST_CASES+=$(awk -v f="$f" '{print f "\t" $0}' <<<"$c")$'\n'
       else nw=$((nw + 1)); fi
     done
+    # The test files the test map gives the change's other files run too, as for a change with no test file
+    # (testsel() narrow, selfirst(), testcap(): at most CARDLINKED, more when the changed-tests command selects more),
+    # each whole but where the command selects its cases (the owner, 2026-11-27): bug, a card that added a test file
+    # ran none of the cases the coverage map gives a function it changed (#1827: redproofkept.test.sh for
+    # bugproof.sh). The links' files are not among them: each runs below, with no cap. MAPOWN and MAPLEFT in the note
+    # say how many ran and how many the cap left out.
+    own=("${fs[@]}")
+    s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
+      narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
+    fs=(); [[ $s != *$'\n'* ]] || mapfile -t fs < <(printf '%s\n' "${s#*$'\n'}" | grep -vxF -f <(printf '%s\n' "${own[@]}"; changelinks "$1"))
+    runnersout
+    if [ ${#fs[@]} != 0 ]; then
+      mall=${#fs[@]}; selfirst "$1" "$CARDLINKED"
+      mmax=$((SELALL && SELN > CARDLINKED ? SELN : CARDLINKED)); CAPMAX=$mmax CAPFIRST=$SELN testcap "${fs[@]}"; ms=("${CAPFILES[@]}"); mleft=$CAPLEFT
+    fi
+    fs=("${own[@]}" "${ms[@]}"); CAPLEFT=0; CAPNOTE=''
     # Each file the change touches, each of the card's test files (whole or only its changed cases) and each other
     # file, brings the test files .conveyor/test-links.json links to it, those still there, each run whole
     # (testlist.sh changelinks()): they call its helpers (#1000), or a change that needed this file changed broke them
@@ -486,6 +502,13 @@ listcmd() { # <worktree> [report args]
       c=$(grep -c . <<<"$TEST_CASES"); CAPNOTE=${OWNCASES/'<n>'/$c}; CAPNOTE=${CAPNOTE/'<s>'/$([ "$c" = 1 ] || echo s)}
       CAPNOTE=${CAPNOTE/'<m>'/$nf}; CAPNOTE=${CAPNOTE/'<s>'/$([ $nf = 1 ] || echo s)}
       [ $nw = 0 ] || { c=${OWNWHOLE/'<w>'/$nw}; CAPNOTE+=${c/'<s>'/$([ $nw = 1 ] || echo s)}; }
+    fi
+    if [ ${#ms[@]} != 0 ]; then
+      c=${MAPOWN/'<k>'/${#ms[@]}}; c=${c/'<s>'/$([ ${#ms[@]} = 1 ] || echo s)}
+      # shellcheck disable=SC2153 # MAPLEFT is lib/prompts.sh's text, not a misspelling of CAPLEFT
+      [ "$mleft" = 0 ] || { f=${MAPLEFT/'<left>'/$mleft}; f=${f/'<all>'/$mall}; c+=${f/'<max>'/$mmax}; }
+      if [ -n "$CAPNOTE" ]; then CAPNOTE+=", and $c"; else CAPNOTE="the card ran $c"; fi
+      CAPLEFT=$mleft
     fi
   else
     s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
