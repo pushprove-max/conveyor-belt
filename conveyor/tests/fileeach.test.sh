@@ -143,6 +143,23 @@ t_fileeachkeep() {
   [ "$(jq -c .passed "$T/$CASE/fails")" = '["a.test.sh","b.test.sh","c.test.sh"]' ] || fail "the run's result is not three files that passed: $(cat "$T/$CASE/fails")"
 }
 
+# Bug it catches: a file's runner that logged its pass (`-- ok <file>` in a log of its own, as .conveyor/test-changed.sh
+# does) and then cleaned up had no end line in the run's log `files` yet, so a machine that stopped in that cleanup
+# left the file open there, testfails() dropped its pass, and recovery ran it again. a.test.sh logs its pass in a log
+# of its own, then waits for $T/$CASE/go; the log as a stopped machine leaves it then (copied) reads a.test.sh passed.
+t_fileeachrunnerok() {
+  local rc sp l=$T/$CASE/wt.testlog/a
+  sidewt 1
+  printf '%s\n' "printf '== a.test.sh\nok one\n-- ok a.test.sh\n' > $l" "until [ -e $T/$CASE/go ]; do sleep 0.1; done" > "$T/$CASE/wt/a.test.sh" # sleep: the runner's cleanup, in its own shell (no wait_until there)
+  siderun a.test.sh > "$T/$CASE/out" 2>&1 & sp=$!
+  wait_until "grep -qxF -- '-- ok a.test.sh' '$l'" || { touch "$T/$CASE/go"; wait "$sp"; fail "a.test.sh did not log its pass: $(cat "$T/$CASE/out" "$T/$CASE/wt.test" 2>&1)"; }
+  cp -R "$T/$CASE/wt.testlog" "$T/$CASE/cut.testlog" && : > "$T/$CASE/cut.test" || fail "the copy of the log"
+  rc=$( (cd "$R" && . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/serve.sh")" && testfails "$T/$CASE/cut.test" 137 | jq -c .passed) 2>&1)
+  touch "$T/$CASE/go"; wait "$sp"; [ $? = 0 ] || fail "the run of a file that passes failed: $(cat "$T/$CASE/out" "$T/$CASE/wt.test" 2>&1)"
+  grep -qxF '== a.test.sh' "$T/$CASE/cut.testlog/files" && ! grep -qF -- '-- ok' "$T/$CASE/cut.testlog/files" || fail "the copy is not of a.test.sh begun and not ended in files: $(cat "$T/$CASE/cut.testlog/files")"
+  [ "$rc" = '["a.test.sh"]' ] || fail "the log of a run stopped as a.test.sh's runner cleaned up after its pass does not read a.test.sh passed: $rc $(cat "$T/$CASE/cut.testlog"/*)"
+}
+
 # Bug it catches (#1594): the run's limit stopped the runner but not the files beside the one it waited for, which ran
 # on, holding their slots. Three files that never end, side by side, and the run's limit (testTimeout 2): the run times
 # out, each file is printed begun with no end line, and none of their processes is left.
