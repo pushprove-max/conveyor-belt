@@ -424,7 +424,9 @@ one control, and the value in force is the selected part.
    **Review retry**, each On or Off. Under them, the group **Cards with no GitHub issue** has **Tests page actions**,
    On or Off.
 6. **Issue order**: **Held issues** shows the count. Click it to go to the held list. **Pinned issues** shows one
-   row for each pinned issue, with its number and title. Conveyor picks them first, from top to bottom. Drag a row to
+   row for each pinned issue, with its number and title, and then one row for each pinned card ID. Conveyor picks
+   the issues first, from top to bottom, then the cards with no GitHub issue. The Queue on the Board also shows each
+   pinned card ID, after the pinned issues. Drag a row to
    a new place, or use its menu (**⋯**): **Move up**, **Move down** or **Unpin**. The first five pins show. **View
    remaining N pins** shows the others.
 

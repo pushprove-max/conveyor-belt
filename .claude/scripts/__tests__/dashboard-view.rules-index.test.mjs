@@ -163,6 +163,34 @@ test('Rules: Pinned issues shows a pin newer than the open list, and a move send
   assert.deepEqual(down, [{ action: 'order', args: ['9', '4', '1'], repo: 'sample' }], 'Move down for #1 keeps #9 in the order sent');
 });
 
+// Bug it catches: a card id in the record's order (`control order` takes card ids) was hidden from Pinned issues, as it
+// is in no open-issue list, or shown as "#c2026..."; a move of another pin then sent an order without it. And: a card id
+// saved above an issue was shown above it, though pick() takes a ready pinned issue before every card.
+test('Rules: Pinned issues shows a pinned card id as text after the pinned issues, and a move sends it with the others', async () => {
+  const w = boot({ tab: 'rules' });
+  const d = full(), id = 'c20261101T000001-sample-0';
+  d.panels.rules.data.control.order = [1, id, 4];
+  d.panels.rules.data.open = { ...d.panels.rules.data.open, issues: [1, 4].map((issue) => ({ issue, title: `Open ${issue}`, labels: [] })) };
+  w.reply = record({ order: [1, id, 4] });
+  deliver(w, d);
+  const pins = () => Array.from(rulesP(w).querySelectorAll('[data-rule="order"] .rules-pin-row'));
+  assert.deepEqual(pins().map((p) => p.querySelector('.rules-pin').textContent), ['#1 Open 1', '#4 Open 4', id], `order [1, ${id}, 4]: the card id is not shown as its id, after the issues`);
+  const up = await sent(w, () => pins()[2].querySelector('[data-act="pin-up"]').click());
+  assert.deepEqual(up, [{ action: 'order', args: ['1', id, '4'], repo: 'sample' }], `order [1, ${id}, 4]: Move up of the card id`);
+});
+
+// Bug it catches: Next up drew the ready cards with no GitHub issue in the snapshot's record order, so with B pinned by
+// its id it showed A first, though testpick() takes B first.
+test('Rules: Next up shows a ready card pinned by its id before an older one not pinned', () => {
+  const w = boot({ tab: 'rules' });
+  const d = full(), a = 'c20261101T000000-sample-0', b = 'c20261101T000001-sample-0';
+  d.panels.rules.data.cards = [a, b].map((card, i) => ({ card, title: `Card ${i}`, kind: 'Card', priority: null, created: '2026-11-01T00:00:00Z', held: false, waitsFor: [], rule: null }));
+  d.panels.rules.data.control.order = [b];
+  deliver(w, d);
+  const rows = Array.from(w.document.querySelectorAll('.rules-produce .rules-next[data-card]'), (x) => x.dataset.card);
+  assert.deepEqual(rows, [b, a], `cards [${a}, ${b}] with order [${b}]: Next up's cards`);
+});
+
 // Bugs: an On/Off rule's state was not the pressed part of one control, or it waited for a Save; a seat's pick was sent
 // before its Save, or the seat said its model again beside the selects that show it.
 test('Rules: an On/Off rule is one control with its state pressed and saves at once; a seat saves only on its Save', async () => {

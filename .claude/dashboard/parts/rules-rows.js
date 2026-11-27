@@ -664,7 +664,7 @@
     el.append(unlisted() ? row('held', 'Held issues', 'parked issues', h('span', 'board-from', heldUnknown()))
       : row('held', 'Held issues', 'parked issues', all.length ? link : h('span', 'board-value', 'No issue is held.')));
   }
-  // The pinned order, when there is one: one row a pin, with its number and title (as the snapshot's queue, held,
+  // The pinned order, when there is one: one row a pin, the issues first and then the card ids (pick() takes a pinned issue before every card; a stable sort), with its number (a card id as text) and title (as the snapshot's queue, held,
   // waiting, skipped and open issues give it), a drag handle and a menu of Move up (not on the first), Move down (not on the
   // last) and Unpin; the first PINS_SHOWN, then "View remaining N pins". unpin takes this one issue out of the
   // record's order on the host, under its lock: an order sent whole from here would drop a pin set elsewhere (the Board).
@@ -672,7 +672,7 @@
   // its number is above every listed one: it may be newer than the list, and the engine keeps it. No list: every pin shows.
   function rulesPins(el, c, d) {
     const h = S.ctx.h, opened = d.open && Array.isArray(d.open.issues) ? new Set(d.open.issues.map((x) => x && x.issue)) : null;
-    const order = list(c.order).filter((n) => !opened || opened.has(n) || n > Math.max(0, ...opened));
+    const order = list(c.order).filter((n) => typeof n === 'string' || !opened || opened.has(n) || n > Math.max(0, ...opened)).sort((x, y) => (typeof x === 'string') - (typeof y === 'string'));
     if (!order.length) return;
     const titles = new Map(list(d.queue).concat(list(d.held), list(d.waits), list(d.skipped), list(d.open && d.open.issues), list(d.open && d.open.held))
       .filter((x) => x && typeof x.title === 'string' && x.title).map((x) => [x.issue, x.title]));
@@ -693,7 +693,7 @@
       const next = box && box.querySelectorAll('[data-rule="order"] .rules-pin-row')[PINS_SHOWN];
       if (next) next.querySelector('.rules-menu > summary').focus({ preventScroll: true });
     };
-    el.append(row('order', 'Pinned issues', 'Picked first, from top to bottom.', pins,
+    el.append(row('order', 'Pinned issues', 'Picked first, from top to bottom: the issues, then the cards with no GitHub issue.', pins,
       rest > 0 && !S.pinsAll ? button(`View remaining ${plural(rest, 'pin', 'pins')}`, 'btn-quiet', 'pins-all', null, showRest) : null));
   }
   // The row of pin n, at place i of the pinned order (rulesPins); move(i, j) moves a pin.
@@ -701,7 +701,7 @@
     const h = S.ctx.h, item = h('li', 'rules-item rules-pin-row');
     item.dataset.issue = String(n);
     item.draggable = true;
-    item.addEventListener('dragstart', (e) => { S.dragPin = i; if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', `#${n}`); } });
+    item.addEventListener('dragstart', (e) => { S.dragPin = i; if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', ref); } });
     item.addEventListener('dragend', () => { S.dragPin = null; });
     item.addEventListener('dragover', (e) => { if (S.dragPin !== null) e.preventDefault(); });
     item.addEventListener('drop', (e) => {
@@ -711,15 +711,15 @@
       e.preventDefault();
       if (from !== i && !S.busy) move(from, i);
     });
-    const grip = h('span', 'rules-grip', '⠿'), pin = titles.has(n) ? `#${n} ${titles.get(n)}` : `#${n}`;
+    const ref = typeof n === 'string' ? n : `#${n}`, grip = h('span', 'rules-grip', '⠿'), pin = titles.has(n) ? `${ref} ${titles.get(n)}` : ref;  // a card id as text
     grip.setAttribute('aria-hidden', 'true');
     const menu = h('details', 'rules-menu'), sum = h('summary', 'btn btn-quiet', '⋯'), acts = h('span', 'rules-menu-acts');
-    sum.setAttribute('aria-label', `Actions for #${n}`); sum.dataset.act = 'pin-menu';  // a redraw gives the focus back by data-act
+    sum.setAttribute('aria-label', `Actions for ${ref}`); sum.dataset.act = 'pin-menu';  // a redraw gives the focus back by data-act
     menu.open = S.pinMenu === n;
     menu.addEventListener('toggle', () => { if (menu.open) S.pinMenu = n; else if (S.pinMenu === n) S.pinMenu = null; });
-    acts.append(...[i > 0 ? button('Move up', 'btn-quiet', 'pin-up', `Move #${n} up in the pinned order`, () => move(i, i - 1)) : null,
-      i < order.length - 1 ? button('Move down', 'btn-quiet', 'pin-down', `Move #${n} down in the pinned order`, () => move(i, i + 1)) : null,
-      button('Unpin', 'btn-quiet', 'unpin', `Unpin #${n}: pick takes it in its own order`, () => send('unpin', [String(n)], null, ['order', order.map(String)]))].filter(Boolean));
+    acts.append(...[i > 0 ? button('Move up', 'btn-quiet', 'pin-up', `Move ${ref} up in the pinned order`, () => move(i, i - 1)) : null,
+      i < order.length - 1 ? button('Move down', 'btn-quiet', 'pin-down', `Move ${ref} down in the pinned order`, () => move(i, i + 1)) : null,
+      button('Unpin', 'btn-quiet', 'unpin', `Unpin ${ref}: pick takes it in its own order`, () => send('unpin', [String(n)], null, ['order', order.map(String)]))].filter(Boolean));
     menu.append(sum, acts);
     item.append(grip, Object.assign(h('span', 'rules-pin', pin), { title: pin }), menu);  // the whole title on hover: a long one ends in an ellipsis (app.css, .rules-pin)
     return item;

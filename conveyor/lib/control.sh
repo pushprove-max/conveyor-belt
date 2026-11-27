@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # The control record, whole: the file's keys over CTL0's, so a record written before a key existed still reads.
-# mode is run, pause or stop; cap and guard are a number or null; held and order are issue numbers; rules.never is
+# mode is run, pause or stop; cap and guard are a number or null; held is issue numbers, order issue numbers and card ids (a card id is a string, CARDIDRE); rules.never is
 # the area labels never built, rules.healsdays the days an entry of the self-heals list may go unfixed and unseen before it leaves the list (healsexpire(), lib/heals.sh; a whole number from 1 to 3650, 30 at first), rules.cardusd and rules.issueusd the dollars a card, and all the cards of one issue, may spend before a session does not start and the card is blocked (usdstop(), lib/records.sh; a whole number from 1 to 100000, 0 for off, 10 and 25 at first), rules.push whether a card that lands is pushed (off: land only, owed()), rules.visible whether a visible change
 # needs the owner's yes (yesrule()), rules.lint the rule Lint check (lintgate(), lib/lint.sh), rules.failfast the rule Stop a card's tests at the first failure (failfast(), lib/testrun.sh), rules.teststeponly the rule Only the Test step runs tests (teststeponly(), lib/prompts.sh), rules.pushbatch the rule Push after a combined test run (pushbatch(), lib/push.sh), rules.pushbatchwhen when its run starts (a number of landings or a UTC time of day, batchdue()), rules.pushbatchtests which tests it runs (linked or all, pushtests(), lib/pushrun.sh), rules.testissues, foremanissues, followupissues, releaseissues and splitissues the Rules tab's Cards with no GitHub issue: Tests page actions, the Foreman's orders, review follow-ups, release fix cards and split parts, each On while its rule is false (testissue(), cardnew(), lib/testaction.sh; followups(), lib/followups.sh; relfixes(), lib/fulltest.sh; splitcheck(), lib/slices.sh), rules.split the rule Split large issues, off, shadow or on (splitcheck(), lib/slices.sh), rules.pick the rule Pick settings, the same (modelpick(), lib/modelpick.sh), picks the owner's decision on each group's trial challenger ({"<small|medium> <docs|code>": {decision: promote, keep, drop, add or next, at, challenger and promoted: {model, effort}, when the owner's next set them}}) and on the reviewer and judge seats ({"reviewer" or "judge": {decision: promote, at, choice: {model, effort}}}, `control pick`) and pickBack null or {at, reason}, the rule's own return to shadow (pickback()); model, reviewer and judge (the review's judge, judgeseat()) are null or {cli: the
 # CLI that runs the seat (claude, codex or opencode), model, effort (null: the seed's)}, cli left out of one that names
@@ -73,10 +73,13 @@ ctlread() { # sets CTL_V to the control record, as ctl prints it
   if [ "$a" = 1 ]; then CTL_V=$(ctlcheck <<<"$t") && CTL_K=("$t" "$CTL_V"); else CTL_V=$(ctlcheck "$CONTROL"); fi \
     || { echo "conveyor: $(notwhole)" >&2; return 1; }
 }
+# A card id in the control record's order (`control order`, testpick(), lib/testaction.sh): c<date>T<time>-<project>-<issue>.
+CARDIDRE='^c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-[0-9]+$'
 ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit non-zero
-  jq -ce --argjson d "$CTL0" '($d * .) | .rules = ($d.rules * .rules) | select((.mode | IN("run", "pause", "stop")) and (.cap == null or (.cap | type == "number" and . >= 1 and . <= 100 and . == floor))
+  jq -ce --argjson d "$CTL0" --arg cid "$CARDIDRE" '($d * .) | .rules = ($d.rules * .rules) | select((.mode | IN("run", "pause", "stop")) and (.cap == null or (.cap | type == "number" and . >= 1 and . <= 100 and . == floor))
       and (.guard == null or (.guard | type == "number" and . >= 1 and . <= 100))
-      and ([.held, .order] | all(type == "array" and all(type == "number")))
+      and (.held | type == "array" and all(type == "number"))
+      and (.order | type == "array" and all(type == "number" or (type == "string" and test($cid))))
       and (.pushCheck == null or (.pushCheck | type == "boolean"))
       and (.start | IN("queue", "held")) and (.startSeen | type == "array" and all(type == "number"))
       and (.filing == null or (.filing | type == "number"))
@@ -1217,7 +1220,7 @@ control() { # [action [arguments]]
   local c a=${1:-} f=. new x ag es bx sz top=0 p='' open=''
   c=$(ctl) || return 1
   [ $# = 0 ] || shift
-  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-mode <serial|parallel> | tests-from <UTC time | clear> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | adopt since <UTC time> | filing <on|off> | order [<issue>...] | unpin <issue>... | rules <P0|P1|P2|P3|followups|push|visible|lint|failfast|teststeponly|pushbatch|testissues|foremanissues|followupissues|releaseissues|splitissues|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | rules healsdays=<1-3650> | rules <cardusd|issueusd>=<1-100000|off> | rules pushbatchwhen=<1-100|HH:MM> | rules pushbatchtests=<linked|all> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | judge rare <P0|P1|P2|P3>... | judge rare none | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off|default> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
+  bad() { echo "usage: conveyor.sh control [pause | resume | stop | cap <1-100|off> | guard <1-100|off> | atonce <number> | suite-mode <serial|parallel> | tests-from <UTC time | clear> | suite-machine <local | ssh <target> [--dir <d>] | devbox [--size <s>] [--box <name>] [--setup-at <time>]> | hold <issue>... | release <issue>... | adopt <issue>... | adopt since <UTC time> | filing <on|off> | order [<issue | card id>...] | unpin <issue | card id>... | rules <P0|P1|P2|P3|followups|push|visible|lint|failfast|teststeponly|pushbatch|testissues|foremanissues|followupissues|releaseissues|splitissues|<areaPrefix><name>>=<on|off>... | rules <split|pick>=<off|shadow|on> | rules healsdays=<1-3650> | rules <cardusd|issueusd>=<1-100000|off> | rules pushbatchwhen=<1-100|HH:MM> | rules pushbatchtests=<linked|all> | pick <small|medium> <docs|code> <promote|keep|drop|add|next> | pick <reviewer|judge> <promote <model> [effort]|drop> | model <cli> <model> [effort] | model default | reviewer <cli> <model> [effort] | reviewer default | judge <cli> <model> [effort] | judge default | tests <cli> <model> [effort] | tests default | judge <on|off> | judge always [<kind>...] | judge rare <P0|P1|P2|P3>... | judge rare none | account [<name>] | review-account [<name>] | start <queue|held> | start queue filed | dep-guard <on|off> | land-as <main|pr> | pr-merge <button|release|idle> | push-check <on|off|default> | force <issue> | depends <issue> <add|remove> <issue>... | onboarded <rule>... | card <issue> <builder|reviewer|judge> <model> [effort] | card <issue> [builder|reviewer|judge] clear | card <issue> pick]" >&2; return 2; }
   nums() { local x; for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ ]] || return 1; done; }
   # A main-red fix card is of no issue (issue 0), named by its card id: there is nothing of it to hold or release.
   case $a in hold | release) for x; do [[ ! $x =~ ^(0+|c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]+-0)$ ]] || {
@@ -1318,8 +1321,10 @@ control() { # [action [arguments]]
       f='.held -= ($v | map(tonumber)) | .startSeen = (.startSeen + ($v | map(tonumber)) | unique)'
       [ -n "${CONVEYOR_RELEASEBY:-}" ] || f='((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate) as $t | .held as $h
          | .released += ([$v[] | tonumber | select(IN($h[]) or ($ENV.CONVEYOR_UNLABELED // "") != "")] | map({key: tostring, value: $t}) | from_entries) | '"$f" ;;
-    order) nums "$@" || { bad; return; }; f='.order = reduce ($v[] | tonumber) as $n ([]; if index($n) then . else . + [$n] end)' ;;
-    unpin) [ $# != 0 ] && nums "$@" || { bad; return; }; f='.order -= ($v | map(tonumber))' ;;
+    # order and unpin take issue numbers and card ids (CARDIDRE); a card id stays a string in the record.
+    order | unpin) [ "$a" = order ] || [ $# != 0 ] || { bad; return; }
+      for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ || $x =~ $CARDIDRE ]] || { echo "conveyor: control $a: \"$x\" is not an issue number or a card id; nothing changed" >&2; return 2; }; done
+      f='($v | map(tonumber? // .)) as $o | if $a == "unpin" then .order -= $o else .order = reduce $o[] as $n ([]; if index([$n]) then . else . + [$n] end) end' ;;
     # The dependency guard; with it off, `force` lets one issue be picked while issues it depends on are open.
     dep-guard) [ $# = 1 ] && [[ $1 =~ ^(on|off)$ ]] || { bad; return; }; f='.depGuard = ($v[0] == "on")' ;;
     # Land as: main pushes main to the pack's branch, pr to one pull request (landas(), lib/push.sh).
@@ -1696,7 +1701,8 @@ adopt() { # <open issues json>
 # The record with adopt's holds added, saved nowhere: adopt saves it, and `pick --dry` reads it as the record. A
 # forced issue (`control force`) leaves forced, and a pinned one (`control order`) leaves order, once a card of it has
 # landed or it is no longer open. A pin numbered above every open issue stays: the issue may be newer than the list
-# (filed after it was read), not closed; it goes once a newer issue is open or its card has landed. The landed issues
+# (filed after it was read), not closed; it goes once a newer issue is open or its card has landed. A card id stays
+# until `control order` or `unpin` takes it out. The landed issues
 # are read only while forced or order lists one (landedissues). When they cannot be read, forced and order keep every
 # issue they list, and stderr says so.
 adopted() { # <control record> <open issues json>
@@ -1710,7 +1716,7 @@ adopted() { # <control record> <open issues json>
     | map(.number) as $open | ($open | max // 0) as $top
     | if $n == [] then $c else $c | .held = (.held + $n | unique) | .startSeen = (.startSeen + $n | unique) end
     | if $ok then .forced |= map(select(IN($open[]) and (IN($landed[]) | not)))
-        | .order |= map(select((IN($open[]) or . > $top) and (IN($landed[]) | not))) else . end' <<<"$2"
+        | .order |= map(select(type == "string" or ((IN($open[]) or . > $top) and (IN($landed[]) | not)))) else . end' <<<"$2"
 }
 # What landedissues reads of each line of the card records (linesum(), lib/records.sh): the issue of a landed line.
 LANDEDLINE='fromjson? | objects | select(.step == "landed") | .issue'

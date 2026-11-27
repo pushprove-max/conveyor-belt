@@ -68,6 +68,9 @@
 - `conveyor.sh control` with no action prints the control record. Its other actions (pause, cap, order, rules, models,
   the judge, accounts, the dependency guard, the push check) are in `conveyor/README.md`, Control.
   A ready issue that `control order` names starts before the queued cards with no GitHub issue.
+  `control order` also takes card IDs: a ready card with no GitHub issue that it names starts before the other cards,
+  in the order given. `control unpin` takes an issue number or a card ID. Any other word is refused, and the order
+  stays as it was.
 
 ## Every command `conveyor.sh` takes
 

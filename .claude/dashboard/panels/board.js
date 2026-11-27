@@ -132,6 +132,22 @@
     const came = (x) => (S.moved.has(x.issue) ? Object.assign({}, x, { since: S.moved.get(x.issue) }) : x);
     return { held: all.filter((x) => x.reasons.length).map(came), queue: pinned.concat(queue.filter((x) => !order.includes(x.issue))).map(came), waits };
   }
+  // A pinned card id (`control order`) names a card with no GitHub issue, so it is in no lane: the Queue shows it as its
+  // id, as text, after the pinned issues and before the issues not pinned, as pick() takes them. It is not dragged:
+  // Rules' Pinned issues moves and unpins it. rows: the cards drawn for xs (or the empty note, which a pin replaces).
+  function withPins(xs, rows) {
+    const h = S.ctx.h, order = issues((ctl() || {}).order), ids = order.filter((n) => typeof n === 'string');
+    if (!ids.length) return rows;
+    const pins = ids.map((id) => {
+      const li = h('li', 'board-pin');
+      li.dataset.card = id;
+      li.append(h('code', null, id), h('p', 'board-title', 'Pinned card with no GitHub issue'));
+      return li;
+    });
+    if (!xs.length) return pins;
+    const at = xs.findIndex((x) => !order.includes(x.issue));  // the pinned issues lead the Queue
+    return at < 0 ? rows.concat(pins) : rows.slice(0, at).concat(pins, rows.slice(at));
+  }
   const kinds = (x) => issues(x.reasons).map((r) => r.kind);
   // Its card landed while push is off and is not pushed yet: done, waiting for the push, not held back.
   const notPushed = (x) => issues(x && x.reasons).some((r) => r && r.kind === 'card' && r.notPushed === true);
@@ -227,7 +243,8 @@
   }
   // The issue goes before `before` in the queue: the order sent is the queue up to it, and every issue the record
   // already put first, so nothing that was ordered loses its place. A pin above every open issue (filed after the
-  // snapshot's list was read, so not in the queue yet) is kept too, as the engine keeps it: it goes after every pin the
+  // snapshot's list was read, so not in the queue yet) is kept too, as the engine keeps it, and so is a pinned card id
+  // (`control order`), which is in no issue queue: it goes after every pin the
   // record had above it and before every pin the record had below it, so it moves past none of them. The issue moved does
   // not set that place, as it can now be anywhere; but when it was above the newer pin and still is in that place, the
   // newer pin stays after it.
@@ -242,7 +259,7 @@
     // Undo puts the order back as the record had it.
     const was = pinned.map(String);
     const listed = S.d.open && Array.isArray(S.d.open.issues) ? S.d.open.issues.map((x) => x && x.issue) : null;
-    const fresh = !listed ? [] : pinned.filter((n) => n > Math.max(0, ...listed) && !q.some((x) => x.issue === n)).map(String);
+    const fresh = pinned.filter((n) => typeof n === 'string' || (listed && n > Math.max(0, ...listed) && !q.some((x) => x.issue === n))).map(String);
     const out = rest.slice(0, last + 1).map((x) => String(x.issue));
     const moved = String(item.issue), wasAt = was.indexOf(moved);
     const kept = (m) => m !== moved && out.includes(m), placeOf = (m) => out.indexOf(m);
@@ -612,7 +629,7 @@
         // Landed today pages by landing: the cards of one batch are one entry, so a page never cuts a batch short.
         const rows = k === 'landed' ? landings(got || []) : got || [];
         const none = () => (filtering() && raw[k] && raw[k].length ? unmatched('li', UNMATCHED[k]) : k === 'queue' ? queueEmpty(raw.held) : h('li', 'board-empty', EMPTY[k]));
-        more = cx(PART).more(k, rows, (xs) => { list.replaceChildren(...(xs.length || got === null ? (k === 'landed' ? xs.map((x) => (Array.isArray(x) ? landing(x) : card(k, x))) : apart(xs)) : [none()])); lock(list); }, k === 'landed' ? LANDED : PAGE);
+        more = cx(PART).more(k, rows, (xs) => { list.replaceChildren(...(k === 'queue' ? withPins(xs, xs.length || got === null ? apart(xs) : [none()]) : xs.length || got === null ? (k === 'landed' ? xs.map((x) => (Array.isArray(x) ? landing(x) : card(k, x))) : apart(xs)) : [none()])); lock(list); }, k === 'landed' ? LANDED : PAGE);
       }
       const old = col.querySelector('.show-more');
       if (old) old.remove();

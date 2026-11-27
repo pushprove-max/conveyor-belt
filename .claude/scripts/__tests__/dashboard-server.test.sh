@@ -737,6 +737,8 @@ done_part
 # This part's Board runs with the Foreman's mark, as one the Foreman's claim started does (test_issue_and_close_reach_conveyor).
 ( export CONVEYOR_FOREMAN=1 CLAUDE_CODE_SESSION_ID=foreman-1; control_part control "${PORTS[5]}"
 control_actions 'pause' 'resume' 'stop' 'cap 3' 'cap 9' 'cap 100' 'cap off' 'guard 90' 'guard off' 'atonce 3' 'atonce 999' 'hold 12 13' 'release 12' 'order 13 12' 'order' 'unpin 13'
+# Bug: a card id in the pinned order (`control order` takes them) was refused, so the Board could not move or unpin it.
+control_actions 'order 13 c20261101T000001-x-0' 'unpin c20261101T000001-x-0'
 # The release suite machine's rule: each form of `control suite-machine` reaches it as sent. Check the box answers the
 # check's JSON line, with 200, though the check exits 1 for a missing tool; a check with no output answers its error.
 # Bug: a form the Rules row sends was refused with a Bad Request; a missing tool's check answered as a failed action,

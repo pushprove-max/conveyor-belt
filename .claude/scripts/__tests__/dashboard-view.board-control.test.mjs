@@ -267,6 +267,31 @@ test('the Board: a move in the queue keeps the pin of an issue newer than the op
   assert.deepEqual(w.posts.pop(), { url: 'control', body: { action: 'order', args: ['90', '22', '20', '21'], repo: 'sample' } }, 'the order sent keeps #90 first');
 });
 
+// Bug it catches: a pinned card id (`control order` takes card ids) is in no issue queue, so a move in the queue sent
+// the order without it, and the host saved the order with the card's pin lost.
+test('the Board: a move in the queue keeps a pinned card id', async () => {
+  const w = boot({ tab: 'control' });
+  const d = full(), id = 'c20261101T000001-sample-0';
+  d.panels.board.data.control.order = [id, 21];
+  d.panels.board.data.open = { issues: [20, 21, 22].map((issue) => ({ issue })) };
+  deliver(w, d);
+  dragTo(w, bcard(w, 22), bcard(w, 20));
+  await settle();
+  assert.deepEqual(w.posts.pop(), { url: 'control', body: { action: 'order', args: [id, '22', '20', '21'], repo: 'sample' } }, `saved order [${id}, 21], #22 dragged onto #20: the card id stays first`);
+});
+
+// Bug it catches: the Queue drew only issue rows, so a card pinned by its id (`control order`) showed nowhere on the
+// Board; it goes after the pinned issues and before the rest, as pick() takes them.
+test('the Board: the Queue shows a pinned card id as text, after the pinned issues', () => {
+  const w = boot({ tab: 'control' });
+  const d = full(), id = 'c20261101T000001-sample-0';
+  d.panels.board.data.control.order = [id, 20];
+  deliver(w, d);
+  const rows = Array.from(w.document.querySelectorAll('.board-col[data-col="queue"] .board-cards > li'), (x) => x.dataset.card || x.dataset.issue);
+  assert.deepEqual(rows, ['20', id, '21', '22'], `order [${id}, 20], queue #20 #21 #22: the Queue's rows`);
+  assert.equal(w.document.querySelector(`.board-col[data-col="queue"] [data-card="${id}"] code`).textContent, id, `order [${id}, 20]: the card id is not shown as its text`);
+});
+
 // Bug: the newer pin was put at the front of the order sent, so with saved order [20, 90, 21] a drag of #22 onto #21
 // sent 90 20 22 21, and the host saved #90 ahead of #20, against the order the user set.
 test('the Board: a move in the queue keeps a newer pin behind the pins that were above it', async () => {

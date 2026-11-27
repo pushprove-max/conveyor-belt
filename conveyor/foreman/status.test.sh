@@ -33,7 +33,8 @@ poll() { CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --once 2>"$T/err"; }
 # and time in it, a card waiting on others, a held issue, the release run under way with its failed cases, the blocked
 # card, the push error and (#157) a card records line set aside with the field the check refused: the loop reads on
 # without it, so only the status tells the Foreman it is gone. Last, the Foreman's waiter (#215: the owner saw it down
-# and never why): here none has run.
+# and never why): here none has run. The pinned order (`control order`) has its line, a card id in it as its text: the
+# Foreman orders cards by id, and without the line could not see the order it set.
 t_status() {
 CASE=status; fixture status
 # Issue 357: the watcher's last poll, from its poll log. Bug it catches: a wake 5 minutes late, and nothing told how
@@ -41,7 +42,7 @@ CASE=status; fixture status
 mkdir -p "$FD" && echo '2026-11-15T11:59:00Z 2026-11-15T11:59:47Z 47s alpha: slow, read health; woke' > "$FD/conveyor-polls.log"
 echo alpha/blocked:c7 > "$FD/conveyor-reported.txt" # #7 was reported (t_unreported in status-unrep.test.sh is the case of one that was not)
 snap '.belt = ['"$(card 3 'Fix the login form on the account page so that it keeps the address typed' build),$(card 4 'Add a field' review),$(card 5 'Speed up tests' tests)"']
-  | .queue.waiting = [{issue: 6, title: "Later", waitsFor: [3]}] | .open.held = [{issue: 8}]
+  | .queue.waiting = [{issue: 6, title: "Later", waitsFor: [3]}] | .open.held = [{issue: 8}] | .control.order = [6, "c20261101T000001-alpha-0"]
   | .health.blocked = [{card: "c7", issue: 7, since: "2026-11-15T11:00:00Z", reason: "tests failed twice"}]
   | .health.pushFailingSince = "2026-11-15T11:59:00Z" | .health.pushError = {reason: "remote rejected the push"}
   | .health.quarantined = [{line: 2518, field: "list", time: "2026-11-15T11:57:00Z"}]
@@ -49,7 +50,7 @@ snap '.belt = ['"$(card 3 'Fix the login form on the account page so that it kee
       state: "running", done: 40, of: 120, failed: 2, cases: ["stall", "metrics"], moved: false, reasons: []}]'
 out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status 2>&1) || fail "foreman status failed: $out"
 for l in 'alpha: 3 on the belt' '  #3 build 12m Fix the login form on the account page so that it keeps the' '  #4 review 12m Add a field' \
-  '  #5 tests 12m Speed up tests' 'waiting: #6 on #3' 'held: #8' \
+  '  #5 tests 12m Speed up tests' 'waiting: #6 on #3' 'pinned: #6 c20261101T000001-alpha-0' 'held: #8' \
   'release 1.2.0 running on abcdef012345 for 30m: 40 of 120 cases done, 2 failed: stall, metrics' \
   'needs you: #7 is blocked since 2026-11-15T11:00:00Z: tests failed twice' \
   'needs you: the push has failed since 2026-11-15T11:59:00Z: remote rejected the push' \
@@ -59,7 +60,7 @@ for l in 'alpha: 3 on the belt' '  #3 build 12m Fix the login form on the accoun
   grep -qxF -- "$l" <<<"$out" || fail "no line '$l' in: $out"
 done
 grep -q '[{}]' <<<"$out" && fail "the status holds JSON: $out"
-[ "$(wc -l <<<"$out")" -le 12 ] || fail "the status holds more than its items: $out"
+[ "$(wc -l <<<"$out")" -le 13 ] || fail "the status holds more than its items: $out"
 # A project that is none of the Foreman's is refused, not shown as empty.
 out=$(cd "$M" && bash "$SRC/../conveyor.sh" foreman status beta 2>&1) && fail "a project not the Foreman's gave a status: $out"
 grep -qF 'beta is none of' <<<"$out" || fail "the refusal does not name the project: $out"

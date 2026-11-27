@@ -58,10 +58,11 @@ def control_ok(body):
         return v[:1] == ['ssh'] and n in (2, 4) and suite_word(v[1], '._', '._@-', 128) and (n == 2 or (v[2] == '--dir' and suite_dir_ok(v[3])))
     if a == 'suite-machine-check':  # Check the box: what the suite machine has
         return n == 0
-    if a in ('hold', 'release', 'unpin'):
+    if a in ('hold', 'release'):
         return issues(1, 50)
-    if a == 'order':
-        return issues(0, 500)
+    # The pinned order holds issue numbers and card ids (`control order`): the host checks a card id's shape again.
+    if a in ('order', 'unpin'):
+        return (0 if a == 'order' else 1) <= n <= (500 if a == 'order' else 50) and all(globals()['ISSUE'].fullmatch(x) or globals()['CARD'].fullmatch(x) for x in v)  # the base part's
     if a == 'rules':
         # Self-heals expiry (the days before an unfixed, unseen entry leaves the Self-heals list) goes alone: a whole
         # number from 1 to 3650, as conveyor.sh's control rules takes it.

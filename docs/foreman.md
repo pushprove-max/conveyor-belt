@@ -119,6 +119,8 @@ see only that project. It shows:
 - when the snapshot shows the engine stopped and the engine runs now, "the engine (pid <n>) runs". The status reads
   the engine's process state each time it runs, on the machine of the belt (over `ssh` when the host file names a
   host).
+- the pinned order that `control order` sets, first to last, as `pinned: #6 c20261101T000001-alpha-0`: an issue
+  by its number, a card with no GitHub issue by its card ID
 - the cards that wait on other issues, and the held issues, by number. After each held issue, in brackets, what holds it
   and the step that clears it: `#12 (your hold: control release)`, `#13 (split: waits for its parts #14 #15)` or
   `#16 (card blocked: retry)`. `control release` frees only an issue you hold. For any other, it changes nothing and

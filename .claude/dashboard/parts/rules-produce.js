@@ -45,7 +45,8 @@
     };
     return list(d.waits).filter((x) => list(x.waitsFor).length && x.forced !== true).map((x) => ({ x, also: also(x) }));
   }
-  // The cards with no GitHub issue that wait to be picked (the snapshot's queue.cards, in the order pick takes them);
+  // The cards with no GitHub issue that wait to be picked (the snapshot's queue.cards, in record order; nextUp() puts
+  // the pinned ones first);
   // none when their record was not read (produce() says so). Each is held, skipped by a rule, waiting on another card
   // or ready.
   const cards = () => list(S.d.cards);
@@ -239,7 +240,10 @@
     let at = 0;
     next.forEach((y, i) => { if (q.includes(y) && pin(y.issue) !== Infinity) at = i + 1; });
     const rows = next.slice(0, NEXT_ROWS).map(nextRow);
-    rows.splice(at, 0, ...folded('next', readyCards(), (x) => cardRow('rules-next', x, waitMarks(x))));
+    // A ready card pinned by its id (`control order`) goes first, by its place in the order; the rest keep the
+    // snapshot's order (testpick(), conveyor/lib/testaction.sh). sort is stable.
+    const ready = readyCards().slice().sort((x, y) => pin(x.card) - pin(y.card) || 0);
+    rows.splice(at, 0, ...folded('next', ready, (x) => cardRow('rules-next', x, waitMarks(x))));
     el.append(h('h4', 'board-label', 'Next up'));
     if (rows.length) {
       const flow = h('ol', 'rules-flow');

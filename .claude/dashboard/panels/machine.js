@@ -30,7 +30,8 @@
     // An open decision of the project's ledger names no issue: it is said as a decision, its question beside it.
     // titled: each issue's title is shown beside its number, not on hover only.
     else list.forEach((x) => {
-      const a = x.decision ? h('span', 'decision', `decision: ${x.title || x.decision}`) : ctx.issueLink(x);
+      // A pinned card id (`control order`) is no issue: it is shown as its id, as text, with no link.
+      const a = x.decision ? h('span', 'decision', `decision: ${x.title || x.decision}`) : x.pinnedCard ? h('code', null, x.pinnedCard) : ctx.issueLink(x);
       if (x.title) a.title = x.title;
       if (titled && !x.decision && x.title) { const s = h('span', 'project-item'); s.append(a, h('span', 'project-item-title', x.title)); p.append(s); } else p.append(a);
     });
@@ -80,7 +81,7 @@
     // The pinned issues with their titles, from the project's lists (waiting: a pinned issue waiting on a dependency is
     // in none of the lists shown).
     const titles = new Map([].concat(p.queue || [], p.held || [], p.waiting || [], p.belt || []).filter((x) => x && x.title).map((x) => [x.issue, x.title]));
-    const order = Array.isArray(p.order) ? p.order.map((n) => ({ issue: n, title: titles.get(n) || null })) : null;
+    const order = Array.isArray(p.order) ? p.order.map((n) => (typeof n === 'string' ? { pinnedCard: n } : { issue: n, title: titles.get(n) || null })) : null;
     li.append(issues('Pinned order', order, ctx, true));
     li.append(h('p', 'project-rules', rulesSaid(p.rules)));
     li.append(h('p', 'project-models', p.models ? `Builder ${modelOf(p.models.builder)}; reviewer ${modelOf(p.models.reviewer)}; ${judgeOf(p.models.judge)}` : 'Models: not read'));

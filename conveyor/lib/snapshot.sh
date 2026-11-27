@@ -132,7 +132,7 @@
 #   moved.json (MOVED) dates it, so the Board sorts those columns by the time in them, not by the issue's age.
 #   Each issue of the queue, and each card of belt and needsYou.blocked, that is a GitHub sub-issue of a parent
 #   (openissues()) also has umbrella: that parent's number.
-#   cards: every card with no GitHub issue that waits to be picked (TCQUEUE), in the order pick takes them: {card: its
+#   cards: every card with no GitHub issue that waits to be picked (TCQUEUE), in record order (pick takes a card pinned by `control order` first, testpick()): {card: its
 #   id, title, kind: the name the Board shows it by, priority, created: when it was filed, held, waitsFor: issue numbers,
 #   "owner/repo#N" and card ids, rule: the area label never built or "follow-ups" that skips it, else null}. null when
 #   their record is missing or cannot be read. Given with or without the open issues.

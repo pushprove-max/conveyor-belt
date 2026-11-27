@@ -139,6 +139,18 @@ test('the machine: two projects are two sections, each with its own state, slots
   assert.deepEqual([new URL(w.location.href).searchParams.get('tab'), new URL(w.location.href).searchParams.get('repo')], ['rules', 'widgetshop']);
 });
 
+// Bug it catches: a card id in the pinned order (`control order` takes card ids) was shown as an issue, "branch",
+// with no id. It shows as its id, as text, beside the pinned issue.
+test('the machine: a pinned card id shows as its id, as text, not as an issue', () => {
+  const w = boot({ tab: 'control' });
+  const d = two(), id = 'c20261101T000001-widgetshop-0';
+  d.panels.machine.data.projects[1].order = [id, 46];
+  deliver(w, d);
+  const list = section(w, 'widgetshop').querySelector('[data-list="Pinned order"]');
+  assert.equal(list.querySelector('code').textContent, id, `order [${id}, 46]: the card id is not shown as text`);
+  assert.deepEqual(Array.from(list.querySelectorAll('.issue'), (a) => a.textContent), ['#46'], `order [${id}, 46]: only the issue is shown as an issue`);
+});
+
 // The judge decides which review findings count: the project list named each project's builder and reviewer but not
 // whether a judge reads its reviews, nor on which model.
 test('the machine: each project names its judge beside its builder and reviewer: its model when on, "judge off" when off', () => {
