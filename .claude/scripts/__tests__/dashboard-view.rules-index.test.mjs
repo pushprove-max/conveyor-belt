@@ -96,6 +96,19 @@ test('Rules: a pinned row shows its title; dragging the first pin onto the secon
   const pins = () => Array.from(rulesP(w).querySelectorAll('[data-rule="order"] .rules-pin-row'));
   assert.deepEqual(pins().map((p) => p.querySelector('.rules-pin').textContent), ['#21 Later', '#23 Infra thing', '#20 Next up', '#22 Last', '#24 Second half'],
     'the first five, each with its title (#23 is only in the skipped and open issues)');
+  // Bug (hand/pins-overflow): a long title widened the pinned list past the panel, or wrapped the row under its grip and
+  // menu; the title ends in an ellipsis, so with no title on hover its end could not be read at all.
+  assert.deepEqual(pins().map((p) => p.querySelector('.rules-pin').title), ['#21 Later', '#23 Infra thing', '#20 Next up', '#22 Last', '#24 Second half'],
+    'each pin has its whole title on hover');
+  const st = w.document.createElement('style'); st.textContent = css; w.document.head.append(st);  // the row layout, by the computed styles of app.css
+  const list = w.getComputedStyle(rulesP(w).querySelector('[data-rule="order"] .rules-pins'));
+  assert.equal(list.display, 'grid');
+  assert.equal(list.gridTemplateColumns, 'minmax(0px, 1fr)', 'a title\'s own width does not set the list\'s');
+  assert.equal(list.minWidth, '0px', 'the list shrinks to the panel');
+  const rowStyle = w.getComputedStyle(pins()[0]), text = w.getComputedStyle(pins()[0].querySelector('.rules-pin'));
+  assert.equal(rowStyle.flexWrap, 'nowrap', 'the grip, title and menu keep to one line (over .rules-item\'s wrap)');
+  assert.equal(rowStyle.minWidth, '0px');
+  assert.deepEqual([text.minWidth, text.overflow, text.textOverflow, text.whiteSpace], ['0px', 'hidden', 'ellipsis', 'nowrap'], 'a long title ends in an ellipsis');
   // With the search box empty the panel shows one group at a time, and a control in a hidden group cannot take the focus: open the group that holds the pins.
   act(rulesP(w), 'rules-set-order').click();
   const more = act(rulesP(w), 'pins-all');
