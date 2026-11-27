@@ -365,14 +365,15 @@ giveway() { # <card> <worktree> [fixing|fix|red]; under the lock
 # Stacking (the owner, 2026-11-17: a card waited 4 hours on a holder that looped through its fixes). With batches on
 # (the pack's landBatch over 1), a card that claim() tells to wait on card H does not sleep: its change is fitted at
 # once onto main plus H's kept change (H's <worktree>.cpatch, made a commit of its own: the stack's base), as settle()
-# fits a change onto main, with the one session it would need after H lands anyway, and it is reviewed there. It then
-# waits on H at its claim as before (claim() does not count H as applying together with it), running no test there
-# (settle()): it is tested once, at its turn, after H landed. When H fails its tests (H gives way for their fix), the card waits no
+# fits a change onto main, with the one session it would need after H lands anyway, and it is reviewed and tested
+# there. It then waits on H at its claim as before (claim() does not count H as applying together with it), and a batch
+# H takes it into lands both, H first (gather()). When H fails its tests (H gives way for their fix), the card waits no
 # more: it is fitted onto main alone and lands, and H is brought onto it after its fix. When H's kept change changes
 # after the stack (or the card is to wait on another card), the card is stacked again once; after that it waits, as a
 # card did before stacking. A card whose
 # issue names H's in a `Depends on:` line only waits. Nor is a card stacked on an H of its rank in the control record's
-# order list (claim()) whose tests have not passed (readysince()): it waits on main (settle()). <worktree>.stack: {on: H, id: git patch-id of H's change at the
+# order list (claim()) whose tests have not passed (readysince()): it waits running its own on main (settle()), and
+# once they passed it goes past H and lands first (claim(): a ready card lands first). <worktree>.stack: {on: H, id: git patch-id of H's change at the
 # stack, base: the base commit, restacks}. Prints the base when the card is to be stacked now; else returns 1.
 stackto() { # <card> <worktree> <claim()'s wait> <issue json>
   local h n id s d b rc o
@@ -426,11 +427,11 @@ waitlap() { # <card> <worktree> [name] [new]
 # conflict at landing, as before. Returns 1 when it blocked the card, 2 when a session changed the
 # card's change outside documentation (*.md) or when main moved after an ordered card went past the card at its last
 # claim (it needs a review),
-# 3 when a batch landed it, 4 when it broke a batch's tests (card()'s trc
+# 3 when a batch landed it, 4 when its own tests failed while it waited or it broke a batch's tests (card()'s trc
 # and sec say how), else 0. Each merge here (a clean three-way one, a union one, or the session's) sets parsecheck:
 # card() then checks that the merged files parse (parses()) before any test runs.
 settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to begin> <issue json>; sets card()'s caught, trc, sec, waitsec, behind and parsecheck; reads its ph
-  local me=$BASHPID w waited='' ws wb wn='' wo old err t moved=0 away bl bf bt bs bp id mt cf tf ix docs dp onto stk
+  local me=$BASHPID w waited='' ws wb wn='' wo old err t moved=0 away b bl bf bt bs bp out id mt cf tf ix docs dp onto stk rd rt
   ! jq -e '.away == true and (.to | type) == "number"' "$3.claim" >/dev/null 2>&1 || caught=''
   rm -f "$3.waitlap" # a lap an earlier call left open is no wait of this one
   while :; do
@@ -462,7 +463,6 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
         || { bl=false bf=false bp=0; }
       [ "$bl" != true ] || { rm -f "$3.idle"; return 3; }
       # That run was the batch card's: its wait and run are not known here (testrec()).
-      # shellcheck disable=SC2034 # trc and sec are read by cardlanding() (lib/cardland.sh), settle()'s caller
       [ "$bf" != true ] || { trc=$bt; sec=$bs; TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; rm -f "$3.batch" "$3.idle"; locked waitlap "$1" "$3" || :; capowed "$1" "$2" "$3" "$5"; return 4; }
       if kill -0 "$bp" 2>/dev/null; then [ -n "$w" ] || { : > "$3.idle"; sleep "$LIVE"; continue; }; else rm -f "$3.batch"; fi
     fi
@@ -486,15 +486,63 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
       # The live record names the card it waits on now: one `retry` gives back is picked first, past the cap (urgent).
       # It names too (waited) what the card waited before this wait (before: the seconds of its waits that ended) and
       # every card it has waited on, in order (behind), so `health` can say when all its waits together pass WAIT_LIMIT.
-      # One jq for both (#595): the list on its first line, then the live record; a list that does not read is none.
-      t=''; { IFS= read -r behind && IFS= read -r t; } < <(jq -cn --slurpfile wf <(printf '%s' "$w") --arg at "$waited" --arg s "$5" --argjson wb "$wb" --arg bh "$behind" '
+      # One jq for both (#595): the list on its first line, then the live record; a list that does not read is none. Its
+      # third line says whether <worktree>.ready marks it tested, alone or stackred (rt: true or false; none when that
+      # jq did not run, and then its checks and tests do not run this turn).
+      rd=''; { rd=$(<"$3.ready"); } 2>/dev/null
+      t='' rt=''; { IFS= read -r behind && IFS= read -r t && IFS= read -r rt; } < <(jq -cn --slurpfile wf <(printf '%s' "$w") --arg at "$waited" --arg s "$5" --argjson wb "$wb" --arg bh "$behind" --rawfile rd <(printf '%s' "$rd") '
         $wf[0] as $w | ([$bh | try fromjson catch null | arrays] | first // [] | if index($w.on) then . else . + [$w.on] end) as $bh
         | $bh, {step: $s, at: $at, last: (now | todate), turns: 0, waits: ($w | {on, paths}), waited: {before: $wb, behind: $bh},
-        action: (if $w.turn then "queued for the next batch: card \($w.on) has the landing turn" else "waiting on card \($w.on), which changes the same files: \($w.paths | join(", "))" end)}' 2>/dev/null) || behind='[]'
+        action: (if $w.turn then "queued for the next batch: card \($w.on) has the landing turn" else "waiting on card \($w.on), which changes the same files: \($w.paths | join(", "))" end)},
+        ([$rd | try fromjson catch null | try (.tested == true or .alone == true or .stackred == true) catch false] | first // false)' 2>/dev/null) || behind='[]'
       [ -z "$t" ] || { printf '%s\n' "$t" > "$3.live.tmp" && mv -f "$3.live.tmp" "$3.live"; } 2>/dev/null
-      # While it waits on another card (its files, a stack or the landing turn) it runs no check and no test (the
-      # owner, 2026-11-25: cards that depend on each other wait their turn): it runs its Test step once, at its turn,
-      # on main as it is after that card landed (cardtest(), lib/cardland.sh).
+      # Waiting after a GO (<worktree>.ready), with batches on, it runs its own product checks and changed tests,
+      # holding nothing: only a card whose own tests passed is ready, so no batch lands a card that fails alone. Its
+      # checks failing block it, as at its turn; its tests failing send it to its fix (4). Not one merged onto main
+      # whose files have not been found to parse (parses()): that check runs first, at its turn (card()). A stacked card
+      # (stackto()) is checked here, so it is tested on its base while it waits. On its base, its checks or tests that
+      # fail may fail for that card's change, which has not passed its own yet: it is not blocked or fixed for that, but
+      # marked (stackred) and waits on, untested; it runs them again where it goes next (fitted onto main once that card
+      # landed or failed its tests).
+      [ -z "$parsecheck" ] || [ ! -e "$3.stack" ] || ! parses "$3" >/dev/null 2>&1 || parsecheck=''
+      # Not while main is red at its commit, nor while its worktree is on a commit the main-red record holds an entry for
+      # (mainred.sh redhere()): main may have moved past that commit while the card waited, and the run would fail there on
+      # the old failure, before the fit onto main below. As in its test step (cardland.sh mainredhold()), it waits on.
+      if [ -z "$parsecheck" ] && [ -e "$3.ready" ] && [ "$rt" = false ] && packget landBatch b && [ "$b" -gt 1 ] \
+        && ! redhere "$1" >/dev/null && ! redhere "$1" "$3" >/dev/null; then
+        # Its wait so far may have lent its slot under the cap to a held card (capowed(), lib/cardland.sh). The seconds
+        # of that wait for room, and of the checks and tests below, are not noted as its wait on cards: a new lap starts.
+        rm -f "$3.idle" "$3.nocap"; capowed "$1" "$2" "$3" "$5"; locked waitlap "$1" "$3" "$wn" new || :
+        # The gate for a waiting card first (lintwait(), lib/lint.sh): a finding or an execution error removes
+        # <worktree>.ready, so it waits on with no check, test or session, and its landing gate deals with it. Its lint
+        # line goes after the wait's start line: a new start line makes the wait the card's last step again, so the
+        # Board and `health` see the wait and its time limit. The persisted-contract check (contractwait(),
+        # lib/contract.sh) after it, the same way: a batch lands a card with no turn at its landing gate. Then its push
+        # checks (pushgatewait(), lib/contract.sh), the same way.
+        { lintwait "$1" "$2" "$3" && contractwait "$1" "$3" && pushgatewait "$1" "$3"; } || { began "$1" "$2" "$5"; : > "$3.idle"; sleep "$LIVE"; continue; }
+        sec=$SECONDS; trc=''
+        if ! out=$(checks "$3"); then
+          trc=1; [ "$(git -C "$3" rev-parse HEAD 2>/dev/null)" = "$(jq -r .base "$3.stack" 2>/dev/null)" ] || { block "$1" "$2" "$3" "a product check failed; nothing landed."$'\n'"$out"; return 1; }
+        else began "$1" "$2" test; tests "$3"; trc=$?; fi
+        sec=$((SECONDS - sec)); locked waitlap "$1" "$3" "$wn" new || :
+        # Its run did not run or was stopped (tests(): <worktree>.stop): blocked
+        # with that reason, as at its turn (card()).
+        [ "$trc" = 0 ] || [ ! -s "$3.stop" ] || { block "$1" "$2" "$3" "test: $(<"$3.stop")"; return 1; }
+        if [ "$trc" != 0 ] && [ "$(git -C "$3" rev-parse HEAD 2>/dev/null)" = "$(jq -r .base "$3.stack" 2>/dev/null)" ]; then
+          echo "conveyor: card $1: its checks or tests failed on main with the change of card $(jq -r .on "$3.stack"), which has not passed its own yet: it waits on, and runs them again after that card"
+          readyput "$3" '. + {stackred: true}' || rm -f "$3.ready"
+          trc=''; began "$1" "$2" "$5"; continue
+        fi
+        [ "$trc" = 0 ] || { waitsec=$((wb + SECONDS - ws)); locked waitlap "$1" "$3" || :; return 4; }
+        # Its test files' times go on its test line (testlist.sh slowtests()).
+        trc=''; slowtests "$3" || :
+        record "$1" "$2" test pass "$(jq -cn --slurpfile x <(testrec "$3" 0 "$sec") --slurpfile r <(firstrun "$3" pass) --slurpfile s <(slowrec "$3") '$x[0] + $r[0] + $s[0]')"
+        testrulespass > /dev/null
+        tested "$3"; began "$1" "$2" "$5"; continue
+      fi
+      # With batches off it runs no check and no test while it waits on another card (its files or the landing turn;
+      # the owner, 2026-11-25: cards that depend on each other wait their turn): it runs its Test step once, at its
+      # turn, on main as it is after that card landed (cardtest(), lib/cardland.sh).
       : > "$3.idle"; sleep "$LIVE"; continue
     fi
     # The wait ended: a later wait of this call begins anew, what the card waited before it counted once.
@@ -504,8 +552,8 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     [ "$old" != "$(git rev-parse "$onto" 2>/dev/null)" ] || return $moved
     # Stacked, it is reviewed again on the base. A stacked card that waits no more (that card landed, or failed its
     # tests) is not put back on the base it left: a change that no longer applies on main is brought there by a session.
-    # One that leaves its stack's base: a pass marked there (tested()) would hold that card's change, no pass of its
-    # change alone (readysince()), so it is dropped and its tests run on main before it lands (testedhere(), card()).
+    # One that leaves its stack's base: its tests passed there with that card's change (tested()), which is no pass of
+    # its change alone (readysince()), so they run again on main before it lands (testedhere(), card()).
     if [ -n "$stk" ]; then moved=2; caught=''
     elif [ "$old" = "$(jq -r .base "$3.stack" 2>/dev/null)" ]; then caught=''
       readyput "$3" 'del(.tested)' || rm -f "$3.ready"
@@ -585,7 +633,6 @@ settle() { # <card> <issue> <worktree> <the sessions' prompt> <step it waits to 
     if [ -n "$mt" ] && git -C "$3" add -A 2>/dev/null && inconflicts "$3" "$mt" "$cf"; then record "$1" "$2" fix ok "$t"
     else rm -f "$3.rerun"; echo 'merge in doubt: the session that brought the change onto main edited it outside the conflicts' > "$3.whole"; checked "$1" "$2" "$3" "$6" "$4" fix "$t" || return 1; fi
     git -C "$3" add -A && ! git -C "$3" diff --cached --quiet || { block "$1" "$2" "$3" "fix: the session that brought the card's change onto main left no change"; return 1; }
-    # shellcheck disable=SC2034 # parsecheck is read by cardtest() (lib/cardland.sh), settle()'s caller
     parsecheck=1; rm -f "$3.base"
     # A clash in documentation alone (a README), and a session that changed nothing outside it: the card's review and
     # its test pass stand once its push checks pass on its new change (docstested()), so only its product checks run

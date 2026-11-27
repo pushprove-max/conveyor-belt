@@ -260,7 +260,8 @@ commit the pack pins, or the newest commit taken on this machine. So a change th
 not land. A refusal goes to a fix session with the check's message. Then the card goes to a review again. The check
 names one writer at a time, so a refusal that names a different writer gets its own fix session. A refusal that a fix
 session already had blocks the card with the reason `contract: the persisted-contract check still refuses the change
-after its fix session; nothing landed: <the check's BLOCKED line>`.
+after its fix session; nothing landed: <the check's BLOCKED line>`. With batches on, a card that waits to land runs the same
+check after its lint. A refusal stops its checks and tests, no batch takes it, and its landing gate deals with it.
 The check also runs on each commit just before it lands, so a card in a batch is checked on top of the cards before
 it. A refusal there lands nothing, and the card goes back to its own landing gate. If the landing gate then
 passes the change and the same refusal comes again when the card lands, the card is blocked.
@@ -285,9 +286,18 @@ When a session brought a card onto main by a change to documentation files alone
 one that passed its tests, the push checks also run on its new change before the landing gate. When they fail, no
 batch takes the card, and the landing gate blocks it at its turn.
 
-A card that waits on another card runs no lint, checks or tests while it waits. This is true when it waits for the
-files of the other card, when it is stacked on the other card, and when it waits for the landing turn. When its turn
-comes, it runs its Test step once, on main after the other card landed. When a card starts its Test step, the order of
+With batches on, a card that waits to land runs the push checks too, after the persisted-contract check. If they fail
+or do not finish, it runs no checks or tests, no batch takes it, and at its turn its landing gate runs them again and
+blocks it if they fail again.
+
+With batches on, a card that waits to land after its `GO` runs its own product checks and tests while it waits. The
+same lint commands run first, once in the wait. A pass and a missing tool let its checks and tests run. A finding or an
+execution error stops them, with no fix session. The card is then not ready: no batch takes it, and the lint does not
+run again while it waits. At its turn, its landing gate gives it its fix session, or blocks it on an execution error.
+
+With batches off, a card that waits on another card runs no lint, checks or tests while it waits. This is true when it
+waits for the files of the other card, and when it waits for the landing turn. When its turn comes, it runs its Test
+step once, on main after the other card landed. With batches on or off, when a card starts its Test step, the order of
 the cards that wait on its files is fixed. The claim of each of those cards names the card that it lands after.
 
 A batch runs the same lint commands on the combined change of its cards, before its product checks and tests. This is
@@ -694,8 +704,8 @@ lands. A card in the `order` list still goes before the cards that are not in it
 
 With batches on (the pack's `landBatch` over 1), a card whose change does not apply with the change of the card that
 holds its files, and that will not go past that card, does not wait for that card to land. It is stacked: its change is put on main plus the other card's
-change, then reviewed there. It runs no tests while it waits. When the other card lands, the stacked card is put on
-main and tested there once. When the other card fails its tests, the stacked card is put on main alone and lands first. When the other
+change, then reviewed and tested there. When the other card passes its tests, the two land in one batch, the other
+card first. When the other card fails its tests, the stacked card is put on main alone and lands first. When the other
 card's change changes, the card is stacked again once; after that it waits. A card whose issue has a `Depends on:`
 line that names the other card's issue waits.
 

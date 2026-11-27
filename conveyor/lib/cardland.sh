@@ -124,7 +124,8 @@ cardlanding() {
   merged=''
   while :; do
     if [ -n "$trc" ]; then
-      # It broke the tests of the batch that took it: that run's exit and output are its own. No run of its own tests is on this pass (own: testlist.sh carriedrec(), slowrec()).
+      # Its own tests failed while it waited (batches on only: settle(), lib/claim.sh), or it broke the tests of the
+      # batch that took it: that run's exit and output are its own. No run of its own tests is on this pass (own: testlist.sh carriedrec(), slowrec()).
       rc=$trc; trc=''; own=''; rm -f "$wt.ready"
     else
       go=end; cardtest; sx=$?

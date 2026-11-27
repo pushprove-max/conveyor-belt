@@ -32,12 +32,12 @@ gweng() {
     names && cd "$R" && "$@" )
 }
 # A change of #8 that applies only on #7's (line 1 seven): #8 stacked on #7 (stackto()), its worktree on main plus #7's
-# change and its own change after it, after its GO and untested there. On main alone #8 is not ready (ready()).
+# change and its own change after it, red there (stackred). On main alone #8 is not ready (ready()).
 gwstack8() {
   gwchg 7 1s/.*/seven/
   (cd "$CARDS/c8-8" && sed -i 1s/.*/seven/ a.txt && git commit -qam "main plus #7's change" && sed -i 1s/.*/seven-eight/ a.txt && git add -A)
   jq -cn --arg b "$(git -C "$CARDS/c8-8" rev-parse HEAD)" '{on: "c7-7", base: $b, id: "x", restacks: 0}' > "$CARDS/c8-8.stack"
-  echo '{"issue":8}' > "$CARDS/c8-8.ready"
+  echo '{"issue":8,"stackred":true}' > "$CARDS/c8-8.ready"
 }
 # Main gets b.txt, a file no card touches, as another card's landing in other files moves it.
 gwmainb() { echo flag > "$R/b.txt" && git -C "$R" add b.txt && git -C "$R" commit -qm "main adds b.txt"; }
@@ -205,7 +205,7 @@ t_givewaykeep() {
 
 # Bug: a card ready to land waited on a holder through the fix of the holder's failed tests (an hour of fix, review and
 # tests). The owner: "why are other cards waiting for it? can't they go in front". #7 holds a.txt and its tests fail
-# while #8, stacked on it and untested there (gwstack8), waits: #7 gives way for the fix (fixing), #8 goes past it (on main
+# while #8, stacked on it and red there (gwstack8), waits: #7 gives way for the fix (fixing), #8 goes past it (on main
 # alone it is not ready: only a give-way for a fix lets a stacked card go on), and #7's claim, its live record
 # (watch()) and the Board (the snapshot's gaveWay and gaveWayFixing) name #8.
 t_givewayfix() {
@@ -213,7 +213,7 @@ t_givewayfix() {
   gweng giveway c7-7 "$CARDS/c7-7" fixing && [ "$(gwc 7 '[.held, .away, .gave, .for, .fixing]')" = '[false,true,1,["c8-8"],true]' ] \
     || fail "#7 did not give way to #8 for the fix of its failed tests: $(cat "$CARDS/c7-7.claim")"
   w=$(gweng claim c8-8 "$CARDS/c8-8" $$) && [ -z "$w" ] && [ "$(gwc 8 .held)" = true ] \
-    || fail "#8, stacked on #7 and untested there, waited on #7 away for the fix of its tests: $w $(cat "$CARDS/c8-8.claim")"
+    || fail "#8, stacked on #7 and red there, waited on #7 away for the fix of its tests: $w $(cat "$CARDS/c8-8.claim")"
   [ "$(gwc 7 .to)" = 8 ] || fail "#7's claim does not name #8, which went in front: $(cat "$CARDS/c7-7.claim")"
   gwlive 7; [ "$(jq -c '[.step, .gaveWay]' "$STUB/live" 2>/dev/null)" = '["fix",8]' ] || fail "#7's live record does not name #8: $(cat "$STUB/live" 2>/dev/null)"
   # The file's one whole snapshot (about 2 s): #7, given way, and #8, which did not, show how snapshot() reads aways().
@@ -271,7 +271,7 @@ t_givewaypast() {
 # again; changed, once more (restacks 1); changed again, not: #8 waits, as before stacking. Bug it catches too: a card
 # whose issue says `Depends on: #7` was stacked; it only waits. Bug it catches too (a ready card lands first, the
 # owner, 2026-11-18): #8 was stacked on #7 while #7's tests had not passed, so #8, tested on #7's change, waited for
-# them; it waits on main instead (claim()).
+# them; it waits running its own on main instead, and goes past #7 once they pass (claim()).
 t_stackonce() {
   setup '[]'; seq 20 > "$R/a.txt"; git -C "$R" commit -qam "a longer a.txt"
   CARDS=$T/$CASE/cards; mkdir -p "$CARDS"; git -C "$R" worktree add -q "$CARDS/c7-7" -b card-7 main

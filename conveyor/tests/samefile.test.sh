@@ -102,6 +102,21 @@ t_samefileowedbatch() {
     || fail "settle of #8, owed, its batch failed (batch: fail 1): it did not wait for room before its fix: $(cat "$T/$CASE/run.out")"
 }
 
+# Bug it catches (E1 of a follow-up of issue 1538): a ready card that waits on another card at its claim, its slot lent
+# to a held card (capfree() marks it "owed"), ran its product checks at once, with batches on. It waits for room first:
+# the check notes whether the mark still stood when it ran.
+t_samefileowedcheck() {
+  setup '[]'; sfclaim; sfcard 7 'echo seven >> a.txt'; sfcard 8 'echo eight >> a.txt'
+  printf '%s\n' "[ -e '$CARDS/c8-8.capheld' ] && echo early >> '$STUB/checked' || echo after >> '$STUB/checked'" > "$STUB/check"
+  tune --arg c "$STUB/check" '.landBatch = 2 | .checks += [$c]'
+  echo '{"issue":8,"msg":"title 8 (#8)","extra":{"waitSec":0}}' > "$CARDS/c8-8.ready"; echo owed > "$CARDS/c8-8.capheld"
+  [ -z "$(cl 7)" ] || fail "#7 waited with no other claim"
+  sfheld 8
+  # Tested, #8 goes past #7, not ready, and settle() returns 0 (as in lintwait.test.sh's t_lintwaitskip).
+  [ "$(cat "$STUB/checked" 2>/dev/null)" = after ] && grep -qx "$SFHELD" "$T/$CASE/run.out" && [ "$(sfout)" = "settle: 0" ] \
+    || fail "settle of #8, owed, ready and waiting on #7 (landBatch 2): its checks did not run once, after it waited for room ($(cat "$STUB/checked" 2>/dev/null)): $(cat "$T/$CASE/run.out")"
+}
+
 # Bug: two cards in flight that change the same file both went on to land, and the second met "rebase onto main
 # conflicts". The second, #8, waits at its landing claim while #7 holds a.txt, its live record naming #7 and the file,
 # and says it waits once however many looks the wait takes. Once #7 has landed (during the second look) #8's patch no
@@ -291,13 +306,15 @@ sfteststubs() {
   lintgate() { return 0; }; contractgate() { return 0; }; pushgate() { return 0; }; checks() { :; }; treecheck() { :; }
   gather() { return 0; }; slowtests() { :; }; tests() { git -C "$1" rev-parse HEAD >> "$STUB/tested"; return 0; }
 }
-# Bug it catches (#1698 D1): with batches on, a ready card that waited on another card's files ran its tests while it
-# waited, on main as it was then; once that card landed, main had moved and it ran them again. #8 (ready, a.txt)
+# Bug it catches (#1698 D1): a ready card that waited on another card's files ran its tests while it waited, on main
+# as it was then; once that card landed, main had moved and it ran them again. With batches off (this case) it runs
+# none while it waits. With batches on it still does, as a batch takes only cards whose own tests passed
+# (budgetwait.test.sh). #8 (ready, a.txt)
 # waits on #7, which holds a.txt, through three looks, the real settle() and claim(); #7 lands at the second look. Then
 # #8's Test step (the real cardtest(), as cardlanding() calls it after settle()) runs its tests once, on main after #7.
 t_samewaitonce() {
   setup '[]'; sfclaim; sfcard 7 'echo seven >> a.txt'; sfcard 8 'echo eight >> a.txt'
-  tune '.landBatch = 2'
+  tune '.landBatch = 1'
   echo '{"issue":8,"msg":"title 8 (#8)","extra":{"waitSec":0}}' > "$CARDS/c8-8.ready"
   [ -z "$(cl 7)" ] || fail "#7 waited with no other claim"
   atlook() { [ "$SLEPT" != 2 ] || { cp "$STUB/tested" "$STUB/inwait" 2>/dev/null; gone 7 'echo other > other.txt'; }; }

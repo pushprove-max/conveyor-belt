@@ -3,7 +3,8 @@
 # The lint check (docs/configuration.md, Lint): the pack's lint.commands, each run on the files of a change it reads,
 # and its result. Sourced, never run: by commands/lint.sh (conveyor.sh lint), commands/size.sh (lintsizelist),
 # commands/doctor.sh (lintdoctor), commands/setup.sh (lintprobe), commands/retry.sh (lintrule) and lib/card.sh (the review and landing gates,
-# lintgate; lintbatch and lintleave, the gate for a batch, by batch() and rebatch() in lib/claim.sh). It uses packget (lib/prompts.sh) and the
+# lintgate; lintwait, the gate for a waiting card, is called by settle() in lib/claim.sh, in a card's shell, and
+# lintbatch and lintleave, the gate for a batch, by batch() and rebatch()). It uses packget (lib/prompts.sh) and the
 # test slots (lib/slots.sh), sourced before it; lintratchet also uses depdirs (lib/push.sh) and CARDS (lib/paths.sh); lintgate
 # the card's steps (block, session, checked, record, giveway, cardpatch), which a card's shell has.
 #
@@ -588,7 +589,7 @@ lintbrief() {
 # rename), no command's triggers or size exempt file, and no file a command without {files} reads: lint gives the
 # same result there, so that pass is the card's. A command with {files} (a size entry too) whose trigger the change
 # changes, or any command when the change changes the pack's lint field, read every file its `files` match
-# (lintscope()): for it, main must have changed none of those files either. A later run that finds the change red (lintleave) removes
+# (lintscope()): for it, main must have changed none of those files either. A later run that finds the change red (lintwait, lintleave) removes
 # <worktree>.linted: a linter can read a file no trigger names, so that finding, not the earlier pass, decides.
 lintpassed() { printf '%s\t%s\t%s\n' "$(cardpatch "$1")" "$2" "$(git hash-object --stdin <<<"$3")" > "$1.linted"; } # <worktree> <base> <lint field>
 lintstands() { # <worktree> <lint field>
@@ -664,12 +665,32 @@ lintgate() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <br
   return 2
 }
 
+# The gate for a waiting card (settle(), lib/claim.sh): with batches on, before the product checks and changed tests a
+# ready card runs while it waits. 0: they run (a pass, a missing tool, no lint command or the rule off). 1: a finding
+# of the change's or an execution error, recorded on its lint line: no check, test or session runs, and its
+# <worktree>.ready is removed, so no batch takes it (gather()) and this gate does not run again while it waits, and its
+# <worktree>.linted, so no earlier pass of its landing gate stands (lintstands()). At its turn the landing gate
+# (lintgate) gives it its fix session, or blocks it on an execution error.
+lintwait() { # <card> <issue> <worktree>
+  local l base o rc
+  lintrule || return 0
+  packget lint l || { rm -f "$3.ready"; return 1; }
+  [ -n "$l" ] || return 0
+  base=$(git -C "$3" rev-parse -q --verify HEAD) && o=$(mktemp) || { rm -f "$3.ready"; return 1; }
+  lintrun "$3" "$base" "$1" "$o"; rc=$?; lintline "$1" "$2" "$o" $rc wait; rm -f "$o"
+  [ $rc != 0 ] || return 0
+  rm -f "$3.ready" "$3.linted"
+  echo "conveyor: card $1: its lint found $([ $rc = 1 ] && echo findings || echo 'an execution error') while it waits: it runs no check or test, and its landing gate deals with it at its turn"
+  return 1
+}
+
 # The gate for a batch's combined change (batch() and rebatch(), lib/claim.sh), before its product checks: the same
 # run on <worktree>'s staged change, the change of <the run's cards> on the commit the worktree is on. 0: the run goes
 # on (a pass, a missing tool, no lint command or the rule off); 1: findings of the change's or an execution error
 # (it prints which), a red run for the batch's split only. It writes no lint line: a line on a card that waits in the
 # batch would end that card's wait on the Board. The card alone, holding the change its own tests passed on, on the
-# commit they passed on (tested()), runs nothing: its gate passed there before those tests (the landing gate), so a batch whose other cards all leave lints the card no second time. On main moved since
+# commit they passed on (tested()), runs nothing: its gate passed there before those tests (the landing gate, or the
+# gate for a waiting card), so a batch whose other cards all leave lints the card no second time. On main moved since
 # (rebatch()), it runs.
 lintbatch() { # <card> <worktree> <the run's cards>
   local c=$1 wt=$2 l base o rc
