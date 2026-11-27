@@ -91,12 +91,20 @@ t_waittick() {
   wait_until "! kill -0 $(cat "$d/tick") 2>/dev/null" || fail "a condition blocked when the clock moved on before the read was left running"
 }
 # Bugs: cases_side starts every case at once, so a file of many cases overloads the machine; it runs them one after
-# another, so a file takes the sum of its cases; it runs a case twice or drops one; it waits for a background job the
-# caller started before it, or passes when a case failed.
-# Each of the 20 cases records how many case shells are alive as it starts, then stays alive a short while.
+# another, so a file takes the sum of its cases; it waits for more than one slot to free before it starts the next, so
+# slow cases hold slots empty; it runs a case twice or drops one; it waits for a background job the caller started
+# before it, or passes when a case failed.
+# Each of the 20 cases records how many case shells are alive as it starts, then stays alive a short while. Cases 1
+# to 7 stay alive until every case has started, so cases 8 to f must take turns in the one slot left: a helper that
+# waits for more than one slot to free (a whole batch of 8, or the 7 other cases) before it starts the next never
+# starts case 9 while cases 1 to 7 live, so they record that they were still waiting.
 side_case() {
   touch "$D/alive/$BASHPID"; ls "$D/alive" | wc -l >> "$D/counts"; echo "$1" >> "$D/ran"
-  sleep 0.2 # sleep: the case stays alive a while, so cases started side by side overlap
+  if [[ $1 == [1-7] ]]; then
+    WAIT_CEILING=10 wait_until "[ \$(wc -l < '$D/ran') -ge 20 ]" 2> /dev/null || wc -l < "$D/ran" > "$D/held"
+  else
+    sleep 0.2 # sleep: the case stays alive a while, so cases started side by side overlap
+  fi
   rm "$D/alive/$BASHPID"; [ "$1" != f ]
 }
 t_casesside() {
@@ -110,6 +118,7 @@ t_casesside() {
   [ "$rc" = 1 ] || fail "cases_side side_ 1..19 f returned $rc, not 1, when case f failed"
   [ "$(sort -n "$D/counts" | tail -1)" -le 8 ] || fail "cases_side side_ 1..19 f had more than 8 cases alive: $(sort -n "$D/counts" | tr '\n' ' ')"
   [ "$(sort -n "$D/counts" | tail -1)" -ge 2 ] || fail "cases_side side_ 1..19 f ran its cases one after another: $(sort -n "$D/counts" | tr '\n' ' ')"
+  [ ! -e "$D/held" ] || fail "cases_side side_ 1..19 f did not start the next case when one of 8 slots was free: only $(cat "$D/held") of 20 cases started while cases 1 to 7 were alive"
   [ "$(sort "$D/ran" | tr '\n' ' ')" = "$(printf '%s\n' $(seq 1 19) f | sort | tr '\n' ' ')" ] \
     || fail "cases_side side_ 1..19 f did not run each case one time: $(sort "$D/ran" | tr '\n' ' ')"
 }
