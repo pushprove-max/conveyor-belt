@@ -379,7 +379,7 @@ The card landed without a fix for it. Fix it in this issue."
 Finding: $g
 Where: ${where:-the finding names no file:line}
 Kind: $ek$clean$cost$masked
-Follow-up depth: $((depth + 1))"
+Follow-up depth: $((depth + 1))$(fuattempts "$1" "$2" "$pn" "$pm")"
     if [ -n "$nocard" ]; then
       # The standing yes is logged before the card exists (it has no id yet); one that cannot be logged is held, as an issue is.
       [ -z "$free" ] || standinglog review-followup "a follow-up card of $pn (card $1) was not held: its finding names only files of that card's change: ${f:0:200}" >/dev/null 2>&1 || free=''

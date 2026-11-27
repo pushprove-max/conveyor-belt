@@ -87,7 +87,7 @@ retry() { # <issue, or the card id of a card with no GitHub issue> [fresh: the n
   MOVETAG='(if $bk != "" and .step == "blocked" and (.kept // "") == "" then .kept = $bk else . end) | if .step == "blocked" and .retriedAt == null then . + {retriedAt: $at} + (if $why == "" then {} else {retriedWhy: $why} end) + (if $by == "" then {} else {retriedBy: $by} end) else . end' \
     moveout "$k" "${a[@]}" --arg why "${RETRYWHY:-}" --arg by "${RETRYBY:-}" --arg bk "$BACKKEPT" || { [ -z "$BACKID" ] || branchdrop "$BACKID"; return 1; }
   echo "conveyor: $what $([ -n "${HELDSTAYS:-}" ] && echo 'is given back, and stays held' || echo 'can be picked again'); its old lines are in $RETRIED"
-  [ -z "${2:-}" ] || { echo "conveyor: its next card $([ -n "$BACKKEPT" ] && echo "starts from its branch's tip" || echo 'builds from nothing'); $([ -d "$d" ] && echo "its kept work is in $d" || echo "it had no kept work")"; return 0; }
+  [ -z "${2:-}" ] || { [ ! -d "$d" ] || freshattempt "$([ "$k" = '.issue == $n' ] && echo "$n" || attemptkey "$(jq -rs 'map(.issue | numbers) | first // 0' <<<"$l")" "$n")" "$d" "$ends" || :; echo "conveyor: its next card $([ -n "$BACKKEPT" ] && echo "starts from its branch's tip" || echo 'builds from nothing'); $([ -d "$d" ] && echo "its kept work is in $d" || echo "it had no kept work")"; return 0; } # freshattempt(): the line of the attempts record of the issue, or of the key its card's lines give (attemptkey(), lib/attempts.sh)
   [ "$k" = '.issue == $n' ] || return 0
   p=$(prior "$n"); ends=$(jq -r 'select(.kept != "") | "\(.kept)/\(.card).patch"' <<<"$p")
   [ -n "$ends" ] && [ -s "$ends" ] || return 0
@@ -293,17 +293,17 @@ keptway() { # <issue json> <kept body file>
     if ($now | section) != ($was | section) then "build" elif ($now | asks) != ($was | asks) then "review"
     elif ($now | approvals) > ($was | approvals) then "land" else "wait" end'
 }
-# What the brief of a retried issue's card carries: the findings of the review now beside the worktree (the
+# What the brief of a retried issue's card carries: the latest entries of the issue's attempts record (attempts(), lib/attempts.sh; kept by `retry --fresh` too), the findings of the review now beside the worktree (the
 # blocked card's last one, put there by card()) and the finding of every follow-up withdrawn for the issue.
 # Every finding is carried, none cut: when they are too many for a brief (a prompt must not grow without bound), the
 # brief holds the first of them, whole lines, and names the file beside the worktree that holds them all.
 # The withdrawn follow-ups are read from two places, each once (by issue number): the .withdrawn files of the issue's
 # blocked cards, and GitHub, for an issue that `retry` gave back: withdrawn() below. The files alone miss a follow-up
 # withdrawn before they were written (withdrawn and closed as "completed") or on another machine.
-# When GitHub does not answer, the brief says the list may be short and where to look.
-carried() { # <issue> <worktree>
-  local f w k g='' miss='' all head max=60000 old
-  f=$(grep -Ev "$NOTFINDING" "$2.review" 2>/dev/null)
+# When GitHub does not answer, the brief says the list may be short and where to look. Of a card with no GitHub issue (issue 0), only its attempts record, read by <card> (attemptkey()).
+carried() { # <issue> <worktree> [<card>]
+  local f w k g='' miss='' all head max=60000 old at # at: the latest entries of the issue's attempts record (lib/attempts.sh), first, apart from the findings: it has a limit of its own, so it is never cut with them nor put in their file
+  at=$(attempts "$(attemptkey "$1" "${3:-}")"); [ -z "$at" ] || printf '%s\n\n' "$at"; [ "$1" != 0 ] || return 0; f=$(grep -Ev "$NOTFINDING" "$2.review" 2>/dev/null)
   old=$(stdb ask issue retried "$1" 2>/dev/null)
   w=$(jq -r --argjson n "$1" --arg st "$ST" 'select(.issue == $n and .step == "blocked" and (.kept // "") != "") | "\($st)/\(.kept)/\(.card).withdrawn"' <<<"$old" 2>/dev/null \
     | while IFS= read -r k; do cat "$k" 2>/dev/null; done)

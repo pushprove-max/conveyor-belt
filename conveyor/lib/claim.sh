@@ -1215,6 +1215,7 @@ landone() { # <the arguments of land()>
     # A card the batch took ends the lap of its wait it sleeps in (waitlap()): that lap goes on its landed line.
     [ ! -e "${wts[i]}.batch" ] || waitlap "${a[i * 5]}" "${wts[i]}"
     l=$(line "${a[i * 5]}" "${a[i * 5 + 1]}" landed ok "${ls[i]}") && append "$l" || { echo "landed as ${shas[i]} but the record line failed"; return 1; }
+    attemptsgone "$(attemptkey "${a[i * 5 + 1]}" "${a[i * 5]}")" # its issue's attempts record ends with the landing (lib/attempts.sh)
     [ ! -e "${wts[i]}.batch" ] || { jq -c --arg s "${shas[i]}" '. + {landed: $s}' "${wts[i]}.batch" > "${wts[i]}.batch.new" && mv -f "${wts[i]}.batch.new" "${wts[i]}.batch"; }
   done
 }

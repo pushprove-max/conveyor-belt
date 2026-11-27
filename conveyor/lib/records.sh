@@ -145,6 +145,8 @@ cardall() { # <card>
 }
 # The archive run, which moves finished cards' lines there (archiverun(), at the start of a loop turn).
 . "$HERE/lib/archive.sh" || exit 1
+# The attempts record of each issue (attempt(), attempts()): its writers and readers are in several files.
+. "$HERE/lib/attempts.sh" || exit 1
 # The findings the judge ruled OUTSIDE on the cards of an issue (and on a card), from their review lines: the
 # judge.outside ones, and the judge.selfheals ones marked outside (an OUTSIDE ruling whose effect sends it to the
 # self-heals list), the last 50, each with its effect and reason, as the judge is given them (judged(): a repeat of one

@@ -135,9 +135,9 @@ cardprompt() { # <card> <header> <rules> <brief>
   printf '%s' "$rhead"$'# Rules\n\n'"$3"$'\n\n'"${4#"$rhead"}"
 }
 # The prompts of the sessions after the build, each the card's prompt (cardprompt()) with its own part after it: a fix
-# of review findings, a fix of the changed tests (the failing cases, then the last 200 lines of their output), and a rebuild or a port onto main.
-fixprompt() { # <card prompt> <the findings, each led by its id, and what follows them> [<repeats() lines>: FIXBACK follows FIX when there are any]
-  printf '%s' "$1"$'\n\n'"$FIX$([ -z "${3:-}" ] || printf '\n%s' "$FIXBACK")"$'\n'"$2"
+# of review findings, a fix of the changed tests (the failing cases, then the last 200 lines of their output), and a rebuild or a port onto main. Each fix's card prompt ends with the latest entries of the attempts record of <key> (attemptsin(), lib/attempts.sh).
+fixprompt() { # <card prompt> <the findings, each led by its id, and what follows them> [<repeats() lines>: FIXBACK follows FIX when there are any] [<key>]
+  printf '%s' "$(attemptsin "$1" "${4:-}")"$'\n\n'"$FIX$([ -z "${3:-}" ] || printf '\n%s' "$FIXBACK")"$'\n'"$2"
 }
 # Why a review ends the fix loop, the first that holds: go (a GO), max-reviews (it is review MAX_REVIEWS, counting the rounds a retried card carries), rebased (the one review after a landing conflict), test-fix (after a test fix),
 # lint-fix (after the landing gate's lint fix), land (the kept review of a kept patch landed with no review), repeat (a NO-GO that repeats a fixed finding, each P0 or P1 of it a repeat; afterreview() ends the loop so too when a repeated harm one is P0 or P1), new-p2 (from review 1 on, a NO-GO with findings that repeats none, none of them P0 or P1 (a finding with no level is P1): the card lands, each harm finding filed as a follow-up and each of another kind sent to its list, issue 1578; afterreview() drops it at the follow-up depth cap). Prints nothing when a fix round follows.
@@ -152,7 +152,7 @@ loopstop() { # <verdict> <reviews so far: pass + rounds> <rebased> <tfix> <lfix>
   elif [ -z "$7" ] && [ "$(findings "$8" | jq -s 'length > 0 and all(.level != "P0" and .level != "P1")')" = true ]; then echo new-p2
   fi
 }
-testfixprompt() { # <card prompt> <worktree> <the test run's exit> [the failures json of testfails(), as cardfailed() read them]
+testfixprompt() { # <card prompt> <worktree> <the test run's exit> [the failures json of testfails(), as cardfailed() read them] [<attempts key>]
   local f='' file name line n
   # Each failing case with its file and the place it failed, first. A case's line ends with ` (at <file>:<line>: <text>)`
   # when the output gave a stack; a shell case gives none, so its place is the line of its t_<name>() in its file, or, in a
@@ -164,7 +164,7 @@ testfixprompt() { # <card prompt> <worktree> <the test run's exit> [the failures
     f+="- $file${line:+: $line}"$'\n'
   done < <([ -z "${4:-}" ] || jq -r '.files[]? | .file as $f | if (.cases // []) != [] then .cases[] | [$f, (.name // ""), .line] elif .at then [$f, "", .at] else [$f, "", ""] end | join("\u001f")' <<<"$4" 2>/dev/null)
   [ -z "$f" ] || f=$'\n\n# The failing cases of the changed tests, each with its file and the place it failed:\n'"$f"
-  printf '%s' "$1$f"$'\n\n# The changed tests fail (exit '"$3"$'): fix that and nothing else. The end of the test output:\n'"$(tail -n 200 "$2.test" 2>/dev/null | tr -d '\000')"
+  printf '%s' "$(attemptsin "$1" "${5:-}")$f"$'\n\n# The changed tests fail (exit '"$3"$'): fix that and nothing else. The end of the test output:\n'"$(tail -n 200 "$2.test" 2>/dev/null | tr -d '\000')"
 }
 rebaseprompt() { # <card prompt> <worktree> <the conflict message> <the commit its patch was made against> [port]
   local p=''; [ -z "${5:-}" ] || p=$'\nOne review of this port alone follows: change nothing else.'
@@ -386,7 +386,7 @@ cardopen() {
   rules=$(cardrules "$issue") || { block "$c" "$n" "$wt" "brief: ${rules:0:400}"; return; }
   err=$(cardsettings "$wt.settings" 2>&1) || { block "$c" "$n" "$wt" "brief: the engine could not make the card settings from $CARD_SETTINGS and the hooks.json of the pack: ${err:0:400}"; return; }
   [ -z "$br" ] || b+=$'\n\n# This card skipped the build\nIts change is the change of branch '"$br"$' against main. It is already in this worktree, staged: review that change, or fix what you are told to fix in it. Do not build it again.'
-  [ "$n" = 0 ] || for more in "$(carried "$n" "$wt")" "$(healsbrief "$n")"; do [ -z "$more" ] || b+=$'\n\n'"$more"; done
+  for more in "$(carried "$n" "$wt" "$c")" "$([ "$n" = 0 ] || healsbrief "$n")"; do [ -z "$more" ] || b+=$'\n\n'"$more"; done # of a card with no GitHub issue, carried() gives only its attempts record
   # A follow-up whose parent (or an issue up its chain) has the owner's yes: the brief says so, and the reviewer
   # is asked whether this change stays inside that yes.
   [ -z "$inh" ] || { b+=$'\n\n'"$(inherited_brief "$inh")"; rv=$REVIEW$'\n\n'$INHERIT; }
@@ -617,13 +617,13 @@ cardfix() {
     old=$(git -C "$wt" write-tree); more=''; [ -z "$rep" ] || more=$'\n\n'"$(again "$rep")"
     # The fix is told the accepted findings only: a finding the judge declined (a DECLINED line) or found outside the change (an OUTSIDE line, filed when the card lands), a P3 listed only
     # (a MINOR line, minor()), or a rollout action (a ROLLOUT line, no defect), is not its to fix. Each finding it is told is led by its id (donewhen.sh numbered(), fixlines()).
-    # It runs on the fix seat (seat(): the builder's unless the control record sets fix).
+    # It runs on the fix seat (seat(): the builder's unless the control record sets fix). Its round's number is one no round in the folder has (roundno()), and its entry in the attempts record, which the next fix prompt and a retry's brief show (fixattempt(), lib/attempts.sh), is written when it ends, with its reply: checked() can run a session that replaces that reply, and can block the card.
     ids=$(numbered "$wt") && fl=$(fixlines "$wt" "$ids") || { block "$c" "$n" "$wt" "fix: the engine could not give the review's findings their ids"; return; }
-    redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(fixprompt "$sprompt" "$fl$more" "$rep")" fix fix "$([ "$fixed" = 0 ] || echo up)") || { block "$c" "$n" "$wt" "fix: $t"; return; }
-    fixed=$((fixed + 1))
+    redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(fixprompt "$sprompt" "$fl$more" "$rep" "$(attemptkey "$n" "$c")")" fix fix "$([ "$fixed" = 0 ] || echo up)") || { block "$c" "$n" "$wt" "fix: $t"; return; }
+    fixed=$((fixed + 1)); local fr; fr=$(roundno "$wt" "$((pass + rounds))"); fixattempt "$(attemptkey "$n" "$c")" "$c" "$wt" "$fr" "$pass" "$res" "$(lastreply "$wt.out")" "$ids" "$rl" || :
     checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return
-    # This fix round's findings, with their ids, and the diff it made, for the review after it (donewhen.sh repeats(), rereview()), under a number no round in the folder has (roundno()).
-    local fr; fr=$(roundno "$wt" "$((pass + rounds))"); mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$fr.diff" \
+    # This fix round's findings, with their ids, and the diff it made, for the review after it (donewhen.sh repeats(), rereview()).
+    mkdir -p "$wt.rounds" && git -C "$wt" add -A && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/$fr.diff" \
       && rounded "$wt" "$fr" "$ids" "$rl" && refix=$fr && fixtree=$old
     go=next; return
   fi

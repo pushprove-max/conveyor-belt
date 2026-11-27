@@ -684,6 +684,8 @@
 {"area": "card", "file": "conveyor/lib/card.sh"}
 {"area": "card", "file": "conveyor/lib/cardland.sh"}
 {"area": "contract", "file": "conveyor/lib/contract.sh"}
+{"area": "attempts", "file": "conveyor/lib/attempts.sh"}
+{"area": "attempts", "test": "attempts.test.sh"}
 {"area": "contract", "test": "contractgate.test.sh"}
 {"area": "card", "why": "card.sh runs each step of a card (brief, build, review, fix, test, landing), so every case that runs a whole card tests it, and case files split to stay under the CPU budget each count apart"}
 {"area": "flaky", "test": "flaky.test.sh"}

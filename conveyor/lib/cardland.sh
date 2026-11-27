@@ -488,10 +488,10 @@ cardfailed() {
   fi
   if [ "$route" = block ] || [ "$route" = fix ]; then
     tmain=''
-    [ "$route" != block ] || { keepbody "$wt" "$issue"; block "$c" "$n" "$wt" "the changed tests failed again after their $tfix fix rounds (exit $rc$(jq -r '.notRun // [] | if . == [] then empty else "; the run stopped at its first failure, so these files did not run: " + join(", ") end' <<<"${out:-null}" 2>/dev/null)); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
+    [ "$route" != block ] || { testattempt "$(attemptkey "$n" "$c")" "$c" "$wt" "$((${tfix:-0} + 1))" "$rc" "${out:-null}" || :; keepbody "$wt" "$issue"; block "$c" "$n" "$wt" "the changed tests failed again after their $tfix fix rounds (exit $rc$(jq -r '.notRun // [] | if . == [] then empty else "; the run stopped at its first failure, so these files did not run: " + join(", ") end' <<<"${out:-null}" 2>/dev/null)); nothing landed."$'\n'"$(tail -n 60 "$wt.test" 2>/dev/null | tr -d '\000')"; return; }
     tfix=$((${tfix:-0} + 1)); locked giveway "$c" "$wt" fixing; began "$c" "$n" fix
-    # On the testFix seat (seat(): the builder's unless the control record sets testFix); the card's second fix session of any kind runs one effort level up.
-    redbrief "$c" "$n" "$br"; t=$(session "$wt" "$(testfixprompt "$sprompt" "$wt" "$rc" "$out")" fix testFix "$([ "$fixed" = 0 ] || echo up)") \
+    # On the testFix seat (seat(): the builder's unless the control record sets testFix); the card's second fix session of any kind runs one effort level up. Its prompt holds the earlier entries of the attempts record; this failure's entry is written after it, as the prompt gives its output (testattempt(), lib/attempts.sh). The failure after the last fix round (block, above) has its entry too, before the block's.
+    redbrief "$c" "$n" "$br"; t=$(testfixprompt "$sprompt" "$wt" "$rc" "$out" "$(attemptkey "$n" "$c")"); testattempt "$(attemptkey "$n" "$c")" "$c" "$wt" "$tfix" "$rc" "${out:-null}" || :; t=$(session "$wt" "$t" fix testFix "$([ "$fixed" = 0 ] || echo up)") \
       || { block "$c" "$n" "$wt" "fix: $t"; return; }
     fixed=$((fixed + 1))
     checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$t" || return

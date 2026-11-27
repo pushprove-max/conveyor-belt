@@ -1082,6 +1082,8 @@ block() { # <card> <issue> <worktree> <reason> [post the reason on the issue wha
   [ -z "$f${5:-}$patch" ] || [ "$2" = 0 ] || err=$(gh_write issue comment "$2" --body "$body" 2>&1 >/dev/null) || if [ $? = 3 ]; then
     reason="${reason:0:1100} [$([ -n "$f" ] && echo "the review's findings" || echo this) not posted on the issue: ${err:0:600}]"
   else reason="${reason:0:1100} [$([ -n "$f" ] && echo "the review's findings" || echo this) could not be posted on the issue]"; fi
+  # Its entry in the attempts record of its issue, read before its session output and test output move (blockattempt(), lib/attempts.sh).
+  blockattempt "$(attemptkey "$2" "$1")" "$1" "$3" "$reason" || :
   # covered: the COVERED-BY lines of its replies (speedproof.sh hollowproof()), which a retry that lands its kept patch is checked on;
   # outside: the findings its judge found outside its change (judged()), which the retry files when it lands;
   # effects: the kind (harm or self-heals) its judge gave each finding it accepted (judged()), which the retry's filing reads;
