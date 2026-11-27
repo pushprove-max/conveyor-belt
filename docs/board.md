@@ -444,7 +444,8 @@ costs 1.25 times the input price. A 1-hour cache write costs twice the input pri
 - **In use by this project** comes first. Each row has a mark: builder, reviewer, judge, Tests or research lane, or the
   number of sessions that used it in the last 30 days.
 - Then **Claude**, **OpenAI** and **Other**, by family, newest first. Older versions fold under "Older Claude models".
-  A model's fast mode is the second line of its row.
+  A model's fast mode is the second line of its row. A fast mode whose model has no price is a row of its own, with
+  its own marks and session count.
 - **OpenCode** lists the models that OpenCode can run on the build machine. Each says where its price comes from:
   "as OpenCode reports" (the default), "your price" (**Set my price**; **Back to OpenCode's** undoes it), or the
   price of a known model, when you mark the ID with **This is…**. Those not in use and not priced fold under "All
@@ -681,10 +682,11 @@ file, reused 2 passed files from <commit>". A change to the `test` settings of t
 commands name, runs the whole suite ([Releases](releases.md)).
 
 **Push now**, beside Push landed, pushes the landed commits at once, with no full test run. Click it, then click again.
-It pushes main as Conveyor does after each card when the rule is On: through the project's pre-push hook only. If the
-hook fails, nothing is pushed and the card shows in Needs you with the failed check. It is greyed while a full test
-run is under way, or when nothing waits for a push. Use Push now for a small change that the card's own tests and the
-pre-push hook cover. Use Push landed when you want the whole suite to run before the push: it pushes when
+It pushes main as Conveyor does after each card when the rule is On. When **Test before a push** or **Push after a
+combined test run** is On, the test files linked to the landings since the last push run first, as before each push.
+Then the push goes through the project's pre-push hook. If a test file or the hook fails, nothing is pushed and the
+card shows in Needs you with the failed check. It is greyed while a full test run is under way, or when nothing waits
+for a push. Use Push now for a small change that the card's own tests and the pre-push hook cover. Use Push landed when you want the whole suite to run before the push: it pushes when
 the suite is green, or when each failed case passes alone.
 
 Under the buttons, the Board shows the push. While it runs: the commit, what runs ("Tests before the push running",

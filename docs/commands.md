@@ -127,8 +127,9 @@ Tests:
 
 - `full-test` runs the pack's `test.full` on main. `full-test push` runs it and pushes what landed when it is green.
   `full-test anyway <run id> [--by <who>]` pushes over a red run.
-- `push-now` pushes what landed through the project's pre-push hook only, as Conveyor pushes each card when the rule
-  is On, with no `test.full` run. It refuses when nothing waits for a push or a full test run is under way. Use it for
+- `push-now` pushes what landed as Conveyor pushes each card when the rule is On, with no `test.full` run: the test
+  files linked to the landings run first when `push.check` or Push after a combined test run is on, then the project's
+  pre-push hook. It refuses when nothing waits for a push or a full test run is under way. Use it for
   a small change. Use `full-test push` when the whole suite must pass first.
 - `pr merge` merges the open pull request of Land as `pr` now, with a merge commit, whatever the rule Merge PR says
   ([Merge PR](configuration.md#merge-pr)). It fails with GitHub's reason when GitHub refuses the merge.
