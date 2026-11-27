@@ -629,7 +629,7 @@ NORUNNER='the pack sets no test.fileCommand, and Conveyor cannot run <file> itse
 NONELINKED='no test file is linked to the files the change touches, so no test ran; the release'"'"'s whole-suite run covers this change'
 # What a card's test step says when its change adds or changes no test file, so it runs <n> of
 # the <all> test files linked to its change, at most CARDLINKED (the owner, 2026-11-18: listcmd(),
-# testcap()).
+# testcap()), or more when the changed-tests command leaves out a linked file and selects more (SELALL, SELLINKED).
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 CARDLINKED=5
 # shellcheck disable=SC2034 # used in lib/testrun.sh

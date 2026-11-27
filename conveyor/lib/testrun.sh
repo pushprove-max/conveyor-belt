@@ -429,7 +429,7 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # files in TEST_FILES). A card never runs the whole suite: the list is the test files its own change adds or changes
 # (by: "own"), of each only the cases its change adds or changes where testlist.sh owncases() can name them (TEST_CASES; the
 # list's cases, [{file, case}], and its why, OWNCASES, say so); with none, testsel()'s narrow one, the test files the
-# test map and the links give the changed files, up to CARDLINKED of them (testcap(); the output says so, LINKED, and
+# test map and the links give the changed files, up to CARDLINKED of them and each the changed-tests command selects when it narrows the list (testcap(); the output says so, LINKED, and
 # the list, {mode: "changed", files, by, left, why}, says how many were left out); notTests, [{file, why}], names each
 # test runner the change touches, RUNNERFIX, which is on no list: #350). <worktree>.testlist says which: {mode:
 # "changed", files: <count>, by: "own", "map" or "name", age: the commits the made test map is behind (only with
@@ -439,7 +439,7 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # reports more: tests()). <report args> (reportask() files) go after the command, before each file's path. TEST_FAST is
 # `fast` when the command stops at its first failure (failfast()), else empty, as for a main-red fix card (in $MAINRED): cardland.sh redelse() needs a verdict of each case it fails.
 listcmd() { # <worktree> [report args]
-  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 KEPTLINKS=0 SELN=0
+  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 KEPTLINKS=0 SELN=0 SELALL=0
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
   # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only while it is not set.
   # A suite runner (SUITERUNNERS) is on no list (#382): testpaths() leaves each off the card's own files, and
@@ -448,7 +448,7 @@ listcmd() { # <worktree> [report args]
   # The test files the card's own change adds or changes (the pack's test patterns: testpaths(), so no runner and no
   # document; no shared helper, which testsel() does not run as a test either) are the card's tests (#384); with
   # none, the CARDLINKED test files the test map and the links give the change (testsel() narrow), those that failed
-  # most recently first, after those the pack's changed-tests command selects (selfirst(), testcap()), and its output says so (LINKED).
+  # most recently first, after those the pack's changed-tests command selects (selfirst(), testcap()), each of which runs past the cap too when the command leaves out a linked file (SELALL), and each it adds that is not linked (bug: the cap left out files of the cases the coverage map selects), and its output says so (LINKED).
   # Either way each test file .conveyor/test-links.json links to a changed file runs (changelinks()). The run before the push runs the files the map
   # links to every landing (pushtests(), lib/pushrun.sh).
   mapfile -t fs < <(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames --diff-filter=AM HEAD -- 2>/dev/null | testpaths \
@@ -488,14 +488,14 @@ listcmd() { # <worktree> [report args]
     s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
       narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
     by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"; runnersout
-    lk=("${fs[@]}"); selfirst "$1" "$CARDLINKED"; CAPMAX=$CARDLINKED CAPFIRST=$SELN testcap "${fs[@]}"; fs=("${CAPFILES[@]}")
+    lk=("${fs[@]}"); selfirst "$1" "$CARDLINKED"; CAPMAX=$((SELALL && SELN > CARDLINKED ? SELN : CARDLINKED)) CAPFIRST=$SELN testcap "${fs[@]}"; fs=("${CAPFILES[@]}")
     # Past the cap, each linked file .conveyor/test-links.json links to a changed file (testlist.sh linkskept(), KEPTLINKS).
     linkskept "$1"; CAPLEFT=$((CAPLEFT - KEPTLINKS))
     # Past the cap, each file whose last pass read a file the change touches (testlist.sh readersin(), #1619): a linked one (READLINKS) is not left out: bug, the list said 5 of 10 were left out with 6 on it.
     readersin "$1"; CAPLEFT=$((CAPLEFT - READLINKS))
     # The note's <n> counts only the linked files the cap chose, most recent failure first (those the changed-tests command selects, SELN, before them: SELLINKED); the linked files past it that ran for their links (KEPTLINKS: LINKKEPT) or for the last passes (READLINKS) get their own sentences (READLINKED): bug, the note said all of them ran in order of most recent failure.
     [ ${#lk[@]} = 0 ] || [ ${#fs[@]} = 0 ] || { CAPNOTE=${LINKED//'<n>'/$((${#lk[@]} - CAPLEFT - READLINKS - KEPTLINKS))}; CAPNOTE=${CAPNOTE//'<all>'/${#lk[@]}}
-      [ "$SELN" = 0 ] || CAPNOTE+=${SELLINKED//'<k>'/$((SELN < CARDLINKED ? SELN : CARDLINKED))}; [ "$KEPTLINKS" = 0 ] || CAPNOTE+=${LINKKEPT//'<k>'/$KEPTLINKS}
+      [ "$SELN" = 0 ] || CAPNOTE+=${SELLINKED//'<k>'/$((SELALL || SELN < CARDLINKED ? SELN : CARDLINKED))}; [ "$KEPTLINKS" = 0 ] || CAPNOTE+=${LINKKEPT//'<k>'/$KEPTLINKS}
       [ "$READLINKS" = 0 ] || CAPNOTE+=${READLINKED//'<k>'/$READLINKS}; }
   fi
   [ -z "${MAINFROM:-}" ] || [ ${#fs[@]} = 0 ] || while IFS= read -r f; do printf '%s\n' "${fs[@]}" | grep -qxF -- "$f" || fs+=("$f"); done < <(mainlinks "$1" "$MAINFROM")

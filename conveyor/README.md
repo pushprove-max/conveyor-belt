@@ -819,6 +819,8 @@ none runs at most 5 of the test files the test map and the links give its files,
 way, each test file that `.conveyor/test-links.json` links to a changed file also runs, whole, and the note says how
 many of them ran past the 5. When the
 pack sets `test.changed`, the files that `test.command` lists for the change run first, in the order of its list.
+When the list leaves out a linked file, all the files on it run, also past the 5 and also a file that is not linked.
+When the list keeps every linked file, 5 of them run.
 Then the files that failed most recently run. A change with no linked test file runs nothing and passes, its list
 `{"mode": "changed", "files": 0, ..., "why": "..."}`. When linked files are left out, the list has `left` (how many did not run) and a `why` that
 says the run before the push runs them all, except each one that passed before with the same inputs. The Board shows this note with the step. The live record and the test

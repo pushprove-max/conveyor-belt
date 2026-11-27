@@ -209,6 +209,8 @@ caprun() { # <n> <source> [<more>] [<line>...]
   [ $# -lt 4 ] || printf '%s\n' "${@:4}" >> "$ST/cards.jsonl"
   mkdir -p "$R/${s%/*}" && echo x > "$R/$s"
   for ((i = 1; i <= $1; i++)); do printf -v f 't%03d.test.js' "$i"; fs+=("$f"); echo x > "$R/$f"; done
+  # CAPEXTRA: a test file on main that nothing links to the change.
+  [ -z "${CAPEXTRA:-}" ] || echo x > "$R/$CAPEXTRA"
   jq -cn --arg s "$s" '{($s): $ARGS.positional}' --args "${fs[@]}" > "$R/testmap.json" \
     && git -C "$R" add -A && git -C "$R" add -f testmap.json && git -C "$R" commit -qm tests || fail "main's test files could not be committed"
   narrowrun "echo y >> $s${m:+ && $m}"
@@ -398,6 +400,33 @@ t_narrowcapsel() {
     || fail "120 linked files, t001 to t004 failed on record, the command listing t120 then t110.test.js: the card did not run those two first, then t004 to t002 (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/cards/c7.testlog/files" "$T/$CASE/run.out" 2>&1)"
   jq -r '.list.why' "$T/$CASE/cards/c7.rec" | grep -qF ' The test command selects 2 of the files that ran for the change, and they ran first.' \
     || fail "the note does not say the command chose 2 of the files that ran: $(cat "$T/$CASE/cards/c7.rec")"
+}
+
+# Bug it catches: the cap kept at most CARDLINKED (5) of the files the pack's changed-tests command selects, and none
+# that the test map and the links do not give the change, so the files of the other cases its coverage map selects
+# never ran (a change to inlinekinds() of lib/bugproof.sh alone: the map selects cases in case files of other areas,
+# reviewland.test.sh and serve.test.sh). Of 120 linked files, the command lists t101 to t107.test.js and x001.test.js,
+# which is not linked: the card runs those 8 and no other, and its note says the command chose 8 and 113 were left out.
+t_narrowcapselall() {
+  CAPEXTRA=x001.test.js CAPTUNE='.test.changed = "sel.sh" | .test.command = "{ grep -xE \"t10[1-7][.]test[.]js\" \"$CONVEYOR_TEST_FILELIST\"; echo x001.test.js; } > \"${CONVEYOR_TEST_LIST:?}\""' \
+    caprun 120 lib/cartsum.js
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = "$(printf 'one:t%03d.test.js\n' 101 102 103 104 105 106 107; echo one:x001.test.js)" ] \
+    || fail "120 linked files, the command listing t101 to t107.test.js and x001.test.js: the card did not run exactly those 8 (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  jq -e '.list.left == 113 and (.list.why | contains(" The test command selects 8 of the files that ran for the change, and they ran first."))' "$T/$CASE/cards/c7.rec" > /dev/null \
+    || fail "the note does not say the command chose 8 and 113 were left out: $(cat "$T/$CASE/cards/c7.rec")"
+}
+
+# Bug it catches: when the changed-tests command narrows nothing (it lists every linked file, as a change that is not
+# one function's body lists a whole area), the cap still keeps CARDLINKED (5) of them: a fix that ran each file the
+# command lists ran all 88 case files of the testrun area. Of 8 linked files, the command lists all 8 and x001.test.js,
+# which is not linked: the card runs t001 to t005 alone, and its note says the command chose 5 and 3 were left out.
+t_narrowcapselwhole() {
+  CAPEXTRA=x001.test.js CAPTUNE='.test.changed = "sel.sh" | .test.command = "{ cat \"$CONVEYOR_TEST_FILELIST\"; echo x001.test.js; } > \"${CONVEYOR_TEST_LIST:?}\""' \
+    caprun 8 lib/cartsum.js
+  [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = "$(printf 'one:t%03d.test.js\n' 1 2 3 4 5)" ] \
+    || fail "8 linked files, the command listing all 8 and x001.test.js: the card did not run exactly t001 to t005 (exit $(cat "$T/$CASE/rc")): $(cat "$STUB/got" "$T/$CASE/run.out" 2>&1)"
+  jq -e '.list.left == 3 and (.list.why | contains(" The test command selects 5 of the files that ran for the change, and they ran first."))' "$T/$CASE/cards/c7.rec" > /dev/null \
+    || fail "the note does not say the command chose 5 and 3 were left out: $(cat "$T/$CASE/cards/c7.rec")"
 }
 
 # D3, #351 scenario 8. Bug it catches: the bug card's proof run on main gave the suite command every test file of the

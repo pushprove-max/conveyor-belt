@@ -570,18 +570,28 @@ runfiles() { # <worktree>
 # library's tests that run the most of its users, test-changed.sh hooklibtests()), so a cap keeps those.
 # The command is asked as runfiles() asks it, with the linked files as the list and no earlier run's list; only a pack
 # that sets test.changed is asked. With none, or when the command fails or writes no list, the order stays.
-# shellcheck disable=SC2034 # SELN is read by listcmd() (lib/testrun.sh)
+# shellcheck disable=SC2034 # SELN and SELALL are read by listcmd() (lib/testrun.sh)
 selfirst() { # <worktree> <max>
-  local cmd tc o=()
-  SELN=0
+  local cmd tc o=() l r=0 ks=()
+  SELN=0; SELALL=0
   [ ${#fs[@]} -gt "$2" ] && packget test.changed tc && [ -n "$tc" ] && packget test.command cmd && [ -n "$cmd" ] || return 0
   rm -f "$1.capsel"; printf '%s\n' "${fs[@]}" > "$1.capfiles" \
     && (cd "$1" && CONVEYOR_TEST_LIST=$1.capsel CONVEYOR_TEST_RERUN='' CONVEYOR_TEST_FILELIST=$1.capfiles CONVEYOR_TEST_CASES='' CONVEYOR_TEST_LOG='' \
       timeout 300 bash -c "$cmd" > /dev/null 2>&1 < /dev/null 8>&-) && [ -f "$1.capsel" ] \
-    && mapfile -t o < <(awk 'FILENAME == ARGV[1] { l[$0] = 1; f[++n] = $0; next } ($0 in l) && !($0 in s) { s[$0] = 1; print "s\t" $0 }
-      END { for (i = 1; i <= n; i++) if (!(f[i] in s)) print "r\t" f[i] }' "$1.capfiles" "$1.capsel") && [ ${#o[@]} = ${#fs[@]} ] \
-    && fs=("${o[@]#?$'\t'}") && SELN=$(printf '%s\n' "${o[@]}" | grep -c '^s') || :
-  rm -f "$1.capsel" "$1.capfiles"; return 0
+    && mapfile -t o < <(awk 'FILENAME == ARGV[1] { l[$0] = 1; f[++n] = $0; next } $0 != "" && !($0 in s) { s[$0] = 1; print (($0 in l) ? "s" : "x") "\t" $0 }
+      END { for (i = 1; i <= n; i++) if (!(f[i] in s)) print "r\t" f[i] }' "$1.capfiles" "$1.capsel") \
+    && [ "$(printf '%s\n' "${o[@]}" | grep -c $'^[sr]\t')" = ${#fs[@]} ] || o=()
+  rm -f "$1.capsel" "$1.capfiles"; [ ${#o[@]} != 0 ] || return 0
+  # SELALL: the command narrowed the list (it left out a linked file), so each file it selects runs, past the cap too, and
+  # with it each file it selects that is not linked (x) but is there (the case files of the cases its coverage map selects,
+  # .conveyor/test-changed.sh: bug, the cap left them out). A list that keeps every linked file narrowed nothing (a whole
+  # area): the cap keeps CARDLINKED of it, and a file it adds that is not linked does not run.
+  ! printf '%s\n' "${o[@]}" | grep -q $'^r\t' || r=1
+  for l in "${o[@]}"; do
+    [[ $l != x$'\t'* ]] || { [ "$r" = 1 ] && [ -f "$1/${l#x$'\t'}" ]; } || continue
+    ks+=("${l#?$'\t'}"); [[ $l == r$'\t'* ]] || SELN=$((SELN + 1))
+  done
+  fs=("${ks[@]}"); SELALL=$r
 }
 # The files that differ between two trees or commits, one a line (read NUL-separated: a name with spaces is whole).
 treediff() { # <worktree> <from> <to>
