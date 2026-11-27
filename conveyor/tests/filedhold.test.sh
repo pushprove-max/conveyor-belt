@@ -247,7 +247,14 @@ t_filedgrep() {
 # quotes ($(...) or backticks), which runs and so is no quoted text, also with parentheses in its quoted title or a
 # substitution nested in it or a case arm whose pattern ends in ) inside it, also with the case after if, or a backtick
 # filing escaped (\`) or a \$( inside an outer backtick command, in quotes or not, which bash unescapes and runs when it
-# reads the outer command (an unquoted \` there opens a command, not closes one).
+# reads the outer command (an unquoted \` there opens a command, not closes one); and a filing after an apostrophe in a #
+# comment (on the line before, or in a backtick that closes the comment, where an escaped backtick does not close it),
+# which bash skips but scan read as a quote that never closed; a filing with a # comment after it that says -X PATCH,
+# which bash skips but the edit check read; and a filing with a # right after a $(...) or backtick in one of its words,
+# which is text, not a comment, so the -X PATCH in a quoted text after it is still no flag; a filing after a comment that
+# ends in a backslash, where bash ends the comment at the newline but a line continuation read there joined the filing
+# to the comment; and a filing after a URL with a %20 and then a # in one word, where the %20 decoded before scan made the
+# # start a comment.
 t_filedvar() {
   filedsetup
   for cmd in 'v=create; gh issue "$v" --title a --body a >/dev/null' 'gh api -X PATCH repos/o/r/issues/4 -f body=x; gh api repos/o/r/issues -f title=a --jq .number' \
@@ -259,7 +266,14 @@ t_filedvar() {
     'printf '"'%s\n'"' "$(case x in x) gh api repos/o/r/issues -f title=a --jq .number;; esac)"' \
     'printf '"'%s\n'"' "$(if case x in x) gh api repos/o/r/issues -f title=a --jq .number;; esac; then :; fi)"' \
     "gh api repos/o/r/issues -f title='Document gh api -X PATCH calls' --jq .number" \
-    "gh api graphql -f query='mutation { createIssue(input: {repositoryId: \"R_kgDOExample\", title: \"a\"}) { issue { url } } }' --silent"; do
+    "gh api graphql -f query='mutation { createIssue(input: {repositoryId: \"R_kgDOExample\", title: \"a\"}) { issue { url } } }' --silent" \
+    $'# don\'t print a link\ngh api repos/o/r/issues -f title=a --jq .number' $'echo `true # don\'t`; gh api repos/o/r/issues -f title=a --jq .number' \
+    $'echo "`true # don\'t expand \\` here`"; gh api repos/o/r/issues -f title=a --jq .number' \
+    "gh api repos/o/r/issues -f title=a --jq .number # don't use -X PATCH" \
+    "gh api repos/o/r/issues -f title=\$(printf a)# -f body='Use -X PATCH here' --jq .number" \
+    "gh api repos/o/r/issues -f title=\`printf a\`# -f body='Use -X PATCH here' --jq .number" \
+    $'# don\'t print a link \\\ngh api repos/o/r/issues -f title=a --jq .number' \
+    'gh api -f body=https://example.com/release%20#changes repos/o/r/issues --jq .number'; do
     out=$(hook filed "$cmd" $'5\n')
     jq -e '.hookSpecificOutput.additionalContext | test("no link for each issue")' <<<"$out" >/dev/null \
       || fail "filed did not say the output links no issue (command: $cmd, output: 5): $out"
@@ -267,14 +281,17 @@ t_filedvar() {
 }
 # Bug caught: a quoted `gh issue` in a search read as a gh issue call whose verb is `$f`, and a quoted -X 'PATCH' that
 # the edit check did not see, alone or beside a quoted path (the two quotes read as one text with a space in it), and an
-# escaped \$( or \` in double quotes outside a backtick command, which bash prints as text and does not run, and quoted
-# text after a substitution that holds a case, whose esac ends it so the next ) ends the substitution.
+# escaped \$( or \` in double quotes outside a backtick command, which bash prints as text and does not run, quoted
+# text after a substitution that holds a case, whose esac ends it so the next ) ends the substitution; a # after a line
+# continuation that follows a space, which starts a comment as the continuation is removed; and a %20 in a quoted search,
+# which is text in the quotes.
 t_filedquoted() {
   filedsetup
   for cmd in 'f=conveyor/foreman/foreman.sh; grep -q '"'gh issue'"' "$f"' "gh api -X 'PATCH' repos/{owner}/{repo}/issues/4 -F body=@\"\$f\" --silent" \
     "gh api -X 'PATCH' 'repos/{owner}/{repo}/issues/4' -F body=@\"\$f\" --silent" 'echo "see \$(gh api repos/o/r/issues -f title=a)"' \
     'echo "see \`gh api repos/o/r/issues -f title=a\`"' \
-    'grep "$(case $v in x) echo y;; esac) gh issue $f" log'; do
+    'grep "$(case $v in x) echo y;; esac) gh issue $f" log' \
+    $'echo a \\\n# gh api repos/o/r/issues -f title=a --jq .number' "grep -q 'gh%20issue%20create' f"; do
     out=$(hook filed "$cmd" $'ok\n')
     [ -z "$out" ] || fail "filed said something after a command that files no issue (command: $cmd): $out"
   done

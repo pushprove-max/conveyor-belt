@@ -12,30 +12,45 @@
 def strict: ($ARGS.named.strict // "") != "";
 def flags: "(?>\\s+-(-[^\\s=]*(=\\S*|\\s+[^-\\s]\\S*)?|[^-\\s](\\s+[^-\\s]\\S*)?(?=\\s)|[^-\\s]\\S+))*";
 def vword: if strict then "(?!)" else "(?!-)\\S*[$`]" end;
-# The stack .k holds the open contexts: s and d quotes, c for ( or $(, b for a backtick, B for an escaped backtick (\`)
+# The stack .k holds the open contexts: s and d quotes, c for (, C for $(, b for a backtick, B for an escaped backtick (\`)
 # inside a backtick command, which only another \` ends (a \` in a b opens a B), a for a case up to its esac (a ) that
-# ends a case pattern ends no substitution); none open is the command itself.
-def scan: reduce (explode[] | [.] | implode) as $c ({o: [], k: [], e: false, p: ""};
+# ends a case pattern ends no substitution), h for a # comment (a # that starts a word, out of quotes; quotes in it open
+# nothing, and it ends at the line's end or at the backtick it is in, where a backslash makes the next character text, so
+# \` does not end it; bash skips it, so scan drops its text); none open is the command itself. .p is the last character,
+# but "a" after the ) of a $( or a closing backtick: the word goes on there, so a # after one is text, not a comment. A
+# backslash and a newline out of single quotes and comments are a line continuation: bash removes both, so .p stays the
+# character before them. In a comment out of backticks the newline still ends it, as it does in bash; in a backtick bash
+# removes the pair before it reads the comment, so the comment goes on. An escape (\u, \x or %, as decoded reads it) is
+# text in the word it is in: scan decodes it there, and what it gives opens no quote or comment, so a %20 in a URL does
+# not make the # after it start a comment.
+def hex: ascii_downcase | explode | reduce .[] as $c (0; . * 16 + if $c >= 97 then $c - 87 else $c - 48 end);
+def esc: "\\\\u(?<u>[0-9a-fA-F]{4})|\\\\x(?<x>[0-9a-fA-F]{2})|%(?<p>[0-9a-fA-F]{2})";
+def decoded: gsub(esc; [.u // .x // .p | hex] | implode);
+def scan: reduce (match("\(esc)|(?s:.)"; "g").string) as $c ({o: [], k: [], e: false, p: ""};
   (.k[-1] // "") as $t | ($c | test("\\s")) as $w
-  | if .e then (if $c == "`" and any(.k[]; . == "b") then (if $t == "B" then .k |= .[:-1] else .k += ["B"] end) else . end)
-      | .o += [if $w and ($t == "s" or $t == "d") then "_" else $c end] | .e = false
-      | .p = (if $c == "$" and any(.k[]; . == "b") then "$" else "" end)
+  | if ($c | length) > 1 then (if $t == "h" then . else ($c | decoded) as $d
+      | .o += [if ($d | test("\\s")) and ($t == "s" or $t == "d") then "_" else $d end] | .p = "a" end) | .e = false
+    elif .e then (if $c == "\n" and $t != "h" then . else (if $c == "`" and $t != "h" and any(.k[]; . == "b") then (if $t == "B" then .k |= .[:-1] else .k += ["B"] end) else . end)
+      | .o += [if $t == "h" then empty elif $w and ($t == "s" or $t == "d") then "_" else $c end]
+      | .p = (if $c == "$" and any(.k[]; . == "b") then "$" else "\\" end) end) | .e = false
+    elif $t == "h" then (if $c == "\n" then .k |= .[:-1] | .o += [$c] | .p = $c elif .k[-2] != "b" then . elif $c == "\\" then .e = true
+      elif $c == "`" then .k |= .[:-2] | .o += [$c] | .p = "a" else . end)
     elif $t == "s" then (if $c == "\u0027" then .k |= .[:-1] else . end) | .o += [if $w then "_" else $c end] | .p = $c
     elif $t == "d" then (if $c == "\\" then .e = true elif $c == "\"" then .k |= .[:-1] elif $c == "`" then .k += ["b"]
-      elif $c == "(" and .p == "$" then .k += ["c"] else . end) | .o += [if $w then "_" else $c end] | .p = $c
+      elif $c == "(" and .p == "$" then .k += ["C"] else . end) | .o += [if $w then "_" else $c end] | .p = (if $c == "\\" then .p else $c end)
+    elif $c == "#" and (.p | test("^$|[\\s;&|()<>`]")) then .k += ["h"] | .p = $c
     else (if $t == "a" and ($c | test("[\\s;&|)`]")) and (.o | join("") | test("(^|[;&|()`\\n]|\\bin\\s)\\s*esac$")) then .k |= .[:-1] else . end)
       | (.k[-1] // "") as $t
       | (if $c == "\\" then .e = true elif $c == "\u0027" then .k += ["s"] elif $c == "\"" then .k += ["d"]
-      elif $c == "`" then (if $t == "b" then .k |= .[:-1] else .k += ["b"] end) elif $c == "(" then .k += ["c"]
-      elif $c == ")" and $t == "c" then .k |= .[:-1]
-      elif $w and (.o | join("") | test("(^|[;&|()`{!\\n]|\\b(do|then|else|if|elif|while|until|time)\\s)\\s*case$")) then .k += ["a"] else . end) | .o += [$c] | .p = $c
+      elif $c == "`" then (if $t == "b" then .k |= .[:-1] else .k += ["b"] end) elif $c == "(" then .k += [if .p == "$" then "C" else "c" end]
+      elif $c == ")" and ($t == "c" or $t == "C") then .k |= .[:-1]
+      elif $w and (.o | join("") | test("(^|[;&|()`{!\\n]|\\b(do|then|else|if|elif|while|until|time)\\s)\\s*case$")) then .k += ["a"] else . end) | .o += [$c]
+      | .p = (if ($c == "`" and $t == "b") or ($c == ")" and $t == "C") then "a" elif $c == "\\" then .p else $c end)
     end) | .o | join("");
-def masked: if strict then gsub("\\\\\n"; "") | scan else . end;
+def masked: if strict then scan else decoded end;
 def unedits: if strict then [splits("[;&|\n]")] | map(select(test("\\bgh(-write)?\(flags)\\s+api(\\s+\\S+)*?\\s+(-X\\s*|--method[=\\s]\\s*)(?i:PATCH)\\b") | not)) | join(";") else . end;
 def writes: test("(?i:\\bpost\\b)|\\s-(-(data|json|form|upload-file|body)|[a-zA-Z]*[dFT])");
-def hex: ascii_downcase | explode | reduce .[] as $c (0; . * 16 + if $c >= 97 then $c - 87 else $c - 48 end);
-.tool_input.command // "" | gsub("\\\\u(?<u>[0-9a-fA-F]{4})|\\\\x(?<x>[0-9a-fA-F]{2})|%(?<p>[0-9a-fA-F]{2})"; [.u // .x // .p | hex] | implode)
-| masked
+.tool_input.command // "" | masked
 | gsub("\\$?[\"\u0027]|\\\\"; "")
 | unedits
 | test("\\b(issue(?>\\s+-(-[^\\s=]*(=\\S*|\\s+[^-\\s]\\S*)?|[^-\\s](\\s+[^-\\s]\\S*)?(?=\\s)|[^-\\s]\\S+))*\\s+((create|new)\\b|\(vword))|gh(-write)?\(flags)\\s+issue\(flags)\\s+(?!-)\\S*[$`]|gh(-write)?(?>\\s+-(-[^\\s=]*(=\\S*|\\s+[^-\\s]\\S*)?|[^-\\s](\\s+[^-\\s]\\S*)?(?=\\s)|[^-\\s]\\S+))*\\s+(?!-)\\S*[$`]|gh(-write)?(?>\\s+-(-[^\\s=]*(=\\S*|\\s+[^-\\s]\\S*)?|[^-\\s](\\s+[^-\\s]\\S*)?(?=\\s)|[^-\\s]\\S+))*\\s+api\\s[^;&|\\n]*(\\bissues(?![/\\w-])|createIssue|=@|--input\\b|[$`]))")
