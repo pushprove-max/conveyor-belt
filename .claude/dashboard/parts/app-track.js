@@ -523,11 +523,11 @@
     b.tip.textContent = `${b.name}: ${STEP_WORD[b.state]}, ${time}${clocks}${reason}`;
   }
   // The total line over "Every step" (total): the axis's length and ends, the time in steps when pauses make it
-  // shorter, and the queue's wait apart. ax: the axis's bars, its start (from), whether its bars have their times
-  // (timed), whether a step runs (open), and the wait.
+  // shorter (a judge's bar not added: its seconds are in its review's), and the queue's wait apart. ax: the axis's
+  // bars, its start (from), whether its bars have their times (timed), whether a step runs (open), and the wait.
   function totalSaid(total, ax) {
     const { bars, from, timed, open, wait } = ax;
-    const to = Math.max(from, ...bars.map((b) => b.from + b.secs * 1000)), span = to - from, work = bars.reduce((a, b) => a + b.secs, 0);
+    const to = Math.max(from, ...bars.map((b) => b.from + b.secs * 1000)), span = to - from, work = bars.reduce((a, b) => a + (b.parts[0].name === 'judge' ? 0 : b.secs), 0);
     const at = (ms) => when(new Date(ms).toISOString());
     const text = (timed ? `${took(span / 1000)} from ${at(from)} to ${open ? 'now' : at(to)}${work < span / 1000 - 60 ? `, ${took(work)} of it in steps` : ''}` : `${took(work)} in steps`)
       + (num(wait) ? ` · waited ${took(wait)} in the queue before` : '');

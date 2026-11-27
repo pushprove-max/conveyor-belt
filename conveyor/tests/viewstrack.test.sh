@@ -271,16 +271,17 @@ t_trackgrown() {
 
 # A judge line (reviewlines(), lib/card.sh) is written right before its review line, in the same second. Bugs caught (#1741): the
 # review took only the seconds between the two lines, so its time read 0 (the Board's time in review, metrics' reviewSec) and the
-# judge line took the review's; and a judge that failed was drawn as done, with no reason.
+# judge line took the review's; and a judge that failed was drawn as done, with no reason. Then its record had no
+# seconds, so its bar read 0 s: it shows its line's own sec (25), and the review's step keeps the 30 that hold them.
 t_trackjudge() {
   local out
   jq -nc 'def g($s; $t; $x): {card: "c1", issue: 7, step: $s, time: "2026-11-01T00:00:\($t)Z", result: "ok", tokens: {claude: 0, codex: 0}, reason: ""} + $x;
-    g("picked"; "00"; {}), g("build"; "20"; {}), g("judge"; "50"; {result: "failed", of: "review", model: "m", reason: "the judge call failed"}), g("review"; "50"; {result: "NO-GO"})' > "$T/$CASE/rec" \
+    g("picked"; "00"; {}), g("build"; "20"; {}), g("judge"; "50"; {result: "failed", of: "review", model: "m", sec: 25, reason: "the judge call failed"}), g("review"; "50"; {result: "NO-GO"})' > "$T/$CASE/rec" \
     && jq -cs --argjson max 3 --arg nodeps "" --arg yes "" --arg lintyes "" --arg shut "" --arg ownshut "" --arg engshut "" -f "$SRC/jq/rows.jq" "$T/$CASE/rec" > "$T/$CASE/rows" \
     || fail "the rows of the fixture could not be made"
   out=$(jq -c "$(<"$SRC/jq/track.jq")"' sort_by(.card)[] | track(null; null) | .records[] | select(.name | test("^(judge|review)")) | [.name, .state, .sec, .why]' "$T/$CASE/rows") \
     || fail "the track of a card with a judge line could not be drawn: $out"
-  [ "$out" = $'["judge","failed",null,"the judge call failed"]\n["review 1 (NO-GO)","done",30,null]' ] \
+  [ "$out" = $'["judge","failed",25,"the judge call failed"]\n["review 1 (NO-GO)","done",30,null]' ] \
     && [ "$(jq -c '.[0].steps[] | select(.step == "review") | .sec' "$T/$CASE/rows")" = 30 ] \
-    || fail "the review's record has not the 30 seconds since the build with the judge's line before it, or the failed judge is not drawn failed with its reason: $out"
+    || fail "the review's record has not the 30 seconds since the build with the judge's line before it, or the failed judge is not drawn failed with its reason and its own 25 seconds: $out"
 }

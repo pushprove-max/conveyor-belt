@@ -476,6 +476,25 @@ test("a card's steps are bars in order on one time axis, the set-up folded, a re
   assert.ok(Math.abs(parseFloat(failed[failed.length - 3].querySelector('.tl-bar').style.left) - (2640 / 2790) * 100) < 0.01, 'the pause is still a gap');
 });
 
+// Bug: a judge's bar read "0 s" for a judge that ran for minutes (its record had no seconds, track.jq). Its seconds
+// are also in its review's, so the time in steps counts them once.
+test("a judge's bar shows the judge's own seconds, and the time in steps counts them once", () => {
+  const P0 = T0 - 3600000;
+  const at = (s) => iso(P0 + s * 1000);
+  const records = [{ name: 'picked', state: 'done', sec: null, at: at(0) }, { name: 'worktree ready', state: 'done', sec: 10, at: at(10) },
+    { name: 'building', state: 'done', sec: 600, at: at(610) }, { name: 'judge', state: 'done', sec: 290, at: at(910) },
+    { name: 'review 1 (GO)', state: 'done', sec: 300, at: at(910), counts: counts(0, 0, 0, 0) },
+    { name: 'tests passed', state: 'done', sec: 60, at: at(1150) }, { name: 'landing', state: 'done', sec: 30, at: at(1180) }];
+  const w = boot();
+  const data = full();
+  data.panels.landed.data.cards[0].track = trackOf('++++++', '', { at: null, since: null, records });
+  deliver(w, data);
+  const judge = Array.from(panel(w, 'landed').querySelectorAll('.timeline > li.tl-item')).find((li) => li.querySelector('.tl-label').textContent.startsWith('Judge'));
+  assert.equal(judge.querySelector('.tl-dur').textContent, '4 min', 'the judge bar of a judge record with sec 290');
+  // 1180 s from the pick-up to the landing, 1000 s of it in steps (the judge's 290 s within the review's 300 s).
+  assert.equal(panel(w, 'landed').querySelector('.tl-total').textContent, '19 min from 11:00 AM to 11:19 AM, 16 min of it in steps', 'the total of a judge with sec 290 inside a review of 300');
+});
+
 // Bug (#545): a retried card's overall time counted its earlier card's seconds, but "Every step" showed only its own
 // steps, so the two did not add up and nothing said why. The earlier attempt is a closed line above its steps, with
 // its times and why it ended, opening to its own steps; the overall time says on hover that it includes it.

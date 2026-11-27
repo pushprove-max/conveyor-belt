@@ -185,7 +185,7 @@
                   else $l.step end),
                  state: (if ($l.step == "test" and $l.result == "fail") or ($l.step == "issue" and $l.result != "ok") or ($l.step == "review" and ($l.result | IN("fail", "stopped")))
                    or ($l.step == "judge" and $l.result == "failed") or ($l.step == "blocked" and $l.stop != "yes") then "failed" else "done" end),
-                 sec: (if $l.step == "picked" then null else $l.took // null end), at: $l.time}
+                 sec: (if $l.step == "picked" then null elif $l.step == "judge" then $l.sec // null else $l.took // null end), at: $l.time}
                 # A filed line's outside: the findings the judge found outside the card's change, each {finding, issue}.
                 + (if $l.step == "filed" then {n: ($l.n // 0)} + (if $l.outside then {outside: $l.outside} else {} end) elif $l.step == "review" then {counts: ($l.counts // null), judge: ($l.judge // null)}
                    elif $l.step == "test" and $l.result == "pass" and $l.rerun != null then {rerun: true} else {} end)

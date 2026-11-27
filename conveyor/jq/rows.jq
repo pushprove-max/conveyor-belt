@@ -64,7 +64,7 @@ def row: . as $s | $s.first as $f | $s.r as $r | $s.l as $l
              pick: $s.pk,
              log: $s.log}};
 # The log entry of a line: $i its place in the card's lines, $pt the time of the line before it.
-def logline($i; $pt): {step, of, result, time, counts, created, sec: (if .step == "pushed" then .sec else null end), pr: (if .step == "pushed" then .pr else null end), flaky: (if .step == "pushed" then .flaky else null end), failed: (if .step == "blocked" then .spent.step else null end), n: (if .step == "filed" then .followups | length else null end),
+def logline($i; $pt): {step, of, result, time, counts, created, sec: (if .step | IN("pushed", "judge") then .sec else null end), pr: (if .step == "pushed" then .pr else null end), flaky: (if .step == "pushed" then .flaky else null end), failed: (if .step == "blocked" then .spent.step else null end), n: (if .step == "filed" then .followups | length else null end),
                # An issue line, a test line and a review that failed, a blocked line (its sentence), a fix line (what started it), a worktree line (how it took up a kept patch) and a lint line (its commands' results) keep their reason; a blocked line and a failed test line their output and a NO-GO review its findings (tail); a failed test line its failing files (failures).
                reason: (if (.step == "issue" and .result != "ok") or (.step == "test" and .result != "pass") or (.step == "review" and (.result | IN("fail", "stopped"))) or (.step == "judge" and .result == "failed")
                  or .step == "blocked" or .step == "fix" or .step == "worktree" or .step == "lint" then .reason else null end),
@@ -120,7 +120,8 @@ def logline($i; $pt): {step, of, result, time, counts, created, sec: (if .step =
                # A grown line (growcheck(), lib/slices.sh): the files of the change before, and after the split (On); its rule
                # (mode), the slices filed and the judge's why: the track names an On split with none filed "kept whole", with its why.
                grown: (if .step == "grown" then {files: .grown.files, after: (.grown.after // null), mode: .grown.mode, filed: .grown.filed, why: .grown.why} else null end),
-               # A judge line has no time of its own: the judge's seconds are part of its review line's (see fold()).
+               # A judge line takes no time between lines: the judge's seconds are part of its review line's (see fold()); its
+               # own seconds are its sec (reviewlines(), lib/card.sh), which its record on the track shows.
                took: (if $i == 0 or .step == "judge" then null else (.time | fromdate) - ($pt | fromdate) end)} | with_entries(select(.value != null));
 # A review record of a line written before BOTHTRIES kept what a failed first try counted: that try's usage was only in
 # firstTry.spent when it ran on another model or the retry read none. It is taken from there as BOTHTRIES now keeps it
