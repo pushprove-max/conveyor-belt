@@ -12,7 +12,7 @@
 #   - answers a wake (the turn's opening entry holds the first line of last-wake.txt, waiter.sh) with more than what
 #     needs the owner: a still-running line, a progress count, a "nothing needs you", a reply that never says you,
 #     your or owner, or a sentence reporting a card (landed, merged, done ...) without them; a reply to a wake says only
-#     what needs the owner (and a "Done without asking (<kind>): ...; logged as <id>" line, the standing-yes receipt), otherwise one word (Idle); a turn in which the owner typed a message (a queued_command
+#     what needs the owner (and a "Done without asking (<kind>): ...; logged as <id>" line, the standing-yes receipt, and one push-block line), otherwise one word (Idle); a turn in which the owner typed a message (a queued_command
 #     entry of human origin after the opening) answers the owner, so its reply is not judged as a wake reply;
 #   - leaves the Foreman's own work undone ("haven't filed it", "I still need to file", "I'll fix", "want me to ..."); an "I'll <verb>" in a
 #     sentence that ties it to a later event or a standing rule (when, once, after, until, every, if ...) is not that.
@@ -205,6 +205,12 @@ shopt -u nocasematch
 # owner hears of an act taken for them, so a wake reply may carry it. It must have the whole form, kind and id.
 DONE='^[[:space:]*_>-]*done without asking \([^)]+\):.*; logged as [^[:space:]]+[[:space:]*_]*$'
 REST=$(grep -viE "$PLUG" <<<"$REPLY" | grep -viE "$DONE")
+# So is one push-block line (issue 1683): while a push is blocked, what blocks it and which card clears it ("Push
+# blocked: <check> failed after <card>; cleared by <fix card>"), or, once it is pushed, "Push went through: <what>".
+# Each is one sentence (a dot only inside a name, such as a file's), and a second such line is read as narration. With
+# it taken out, PUSHW is 0, so even one word left beside it (Working.) is judged as the reply, not passed as Idle.
+PUSHW=1 PUSHL='^[[:space:]*_>-]*(push blocked: ([^;.!?]|\.[^[:space:]])+; cleared by ([^;.!?]|\.[^[:space:]])+|push went through(: ([^;.!?]|\.[^[:space:]])+)?)[.[:space:]*_]*$'
+[ "$(grep -ciE "$PUSHL" <<<"$REST")" != 1 ] || { REST=$(grep -viE "$PUSHL" <<<"$REST"); PUSHW=0; }
 # In the plugin's own repository (plugin_home) a plugin problem is the Foreman's to file there: a line naming no
 # issue is refused at every stop, not once per turn (reply-mark is not read or set here), so a reply never ends with it
 # unfiled; filing it, or leaving the line out (its note stays listed at start-up), lets the stop pass. In any other
@@ -328,14 +334,14 @@ MARK=$FD/reply-mark
 [ "$(cat "$MARK" 2>/dev/null)" != "$U" ] || exit 0
 refuse() { { mkdir -p "$FD" && printf '%s\n' "$U" > "$MARK"; } 2>/dev/null || exit 0; block "$1"; }
 
-if [ -n "$W" ] && jq -e --arg w "$W" '(.opening | contains($w)) and (.owner | not)' <<<"$TURN" >/dev/null 2>&1 && [ "$(wc -w <<<"$REST")" -gt 1 ]; then
+if [ -n "$W" ] && jq -e --arg w "$W" '(.opening | contains($w)) and (.owner | not)' <<<"$TURN" >/dev/null 2>&1 && [ "$(wc -w <<<"$REST")" -gt "$PUSHW" ]; then
   # What needs the owner is said to them: a reply that never says you, your or owner reports, and so does a sentence
   # that gives a card's progress without them.
   HIT=$(grep -oiE 'still (running|working|in progress)|not done yet|\b[0-9]+ ?(of|/) ?[0-9]+\b[^.]*\b(done|passed|landed|tests?)\b|nothing (needs|for) you|no action (needed|required)' <<<"$REST" | head -3 | paste -sd'|' -)
   [ -n "$HIT" ] || grep -qiwE "you|your|owner('?s)?" <<<"$REST" || HIT="a report"
   [ -n "$HIT" ] || HIT=$(tr '\n' ' ' <<<"$REST" | grep -oE '[^.!?]+' | grep -viwE "you|your|owner('?s)?" \
     | grep -iwE 'landed|merged|pushed|passed|succeeded|finished|completed|released|deployed|done|running|in progress' | sed 's/^ *//' | head -3 | paste -sd'|' -)
-  [ -z "$HIT" ] || refuse "A reply to a wake says only what needs the owner to act or decide ($HIT is not that). Rewrite it without that, or reply with the one word Idle if nothing needs them and no act is left to tell them of (that line, \"Done without asking (<kind>): <what>; logged as <id>.\", is kept). A suspected defect in Conveyor itself needs the owner: keep it, as its own line in the form $(plugin_home && echo "${FORM%\'}, filed as #<n>' (this is the plugin's own repository: file it here first)" || echo "$FORM")."
+  [ -z "$HIT" ] || refuse "A reply to a wake says only what needs the owner to act or decide ($HIT is not that). Rewrite it without that, or reply with the one word Idle if nothing needs them and no act is left to tell them of (that line, \"Done without asking (<kind>): <what>; logged as <id>.\", is kept, and so is one line \"Push blocked: <check> failed after <card>; cleared by <fix card>.\" or \"Push went through: <what>.\"). A suspected defect in Conveyor itself needs the owner: keep it, as its own line in the form $(plugin_home && echo "${FORM%\'}, filed as #<n>' (this is the plugin's own repository: file it here first)" || echo "$FORM")."
 fi
 HIT=$({ grep -oiE "(haven'?t|have not|did not|didn'?t|not yet) (filed|file it|sent|fixed|checked)|not filed yet|want me to|shall i|should i |if you'?d like|i can (also )?(file|fix|send|check|do|open|run)|let me know if|\b(i|we) (still|yet) (need|have|got) to|\bi (need|have) to (file|fix|send|check|retry|open|run|hold|release)|\b(next|later),? i('ll| will)" <<<"$REST"
   # An "I'll <verb>" is undone work only in a sentence that ties it to no later event or standing rule ("When the

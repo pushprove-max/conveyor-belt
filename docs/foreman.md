@@ -284,7 +284,11 @@ go away too. A note that went away does not come back, also when the same sessio
 it again.
 
 The Foreman's reply to a wake says only what needs you, and the `Done without asking` line for each step it took on a
-standing yes since its last reply. If neither is owed, the reply is the one word Idle. But while a wake names a
+standing yes since its last reply. While a push is blocked, the reply can also have one line that says what blocks
+the push and which card clears it, for example `Push blocked: typecheck-web failed after #12; cleared by <card>.` A
+wake for a blocked push with the same check and the same error as an earlier one says that it is a repeat of that
+block, not a new one. When the push goes through after such a wake, one more wake comes, and the reply says
+`Push went through: <what>.` If none of these is owed, the reply is the one word Idle. But while a wake names a
 blocked card as `not yet reported`, the Foreman cannot end its turn until it takes a step on that card: it logs an act
 for it with `auto act`, it asks you about it, or the card moves (retried, shut or landed). The same holds on a turn
 that you open, while `foreman status` names a card `not yet reported`, also when the build host is down and the

@@ -7,6 +7,9 @@ A release's suite: before you run conveyor.sh release-run prep <version> or rele
 ## A card that waits
 A wake that a card has waited (or is still waiting) for main to change, or on another card: do not only report it. Find why it waits: read the waited-on card's logs (<card>.out, .err, .test, .testlog beside its worktree) and mainred.json (in the folder conveyor.sh state-dir prints). Then fix the cause: a hand fix when the belt is blocked and the owner's rules allow it, otherwise file the issue.
 
+## A blocked push
+A wake "push blocked: <check> failed after <card>; it will not pass on a retry": the engine makes the fix card for it and picks it ahead of the queue, so do not file a second fix card. 1. Read the fix card the wake names (ask <project> health: pushError.fix). 2. Do the step the wake gives the owner (start or resume the loop, push main with Push now, retry the fix card when it is blocked) when the owner's rules let you, else say it to the owner. 3. While the push is blocked, a wake reply may carry one line "Push blocked: <check> failed after <card>; cleared by <fix card>." 4. A wake that says "a repeat of that block, not a new one" is the same block: take no new step for it. 5. At the wake "the push went through", reply with the one line "Push went through: <check> passes."
+
 ## The pack not committed
 In a project's main checkout, run conveyor.sh setup pack-commit (with no answer: it reads the size entries' exempt paths from the pack, so do not gate it on a git status of fixed paths); on ok: there is nothing to do; on an ask: line, ask the owner by the picker "Commit the Conveyor pack (.conveyor/project.json) on <default branch> now?" (yes / no), with the change it printed; on yes run conveyor.sh setup pack-commit yes, on no the same with no; say what it printed. Never list a git command for the owner to run.
 

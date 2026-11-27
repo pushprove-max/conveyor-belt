@@ -108,6 +108,27 @@ jq -e '[.hooks.Stop[].hooks[] | select(.command | endswith("waiter.sh")) | .asyn
 jq -e '[.hooks.SessionStart[] | select(.matcher == null) | .hooks[] | select(.command | test("CONVEYOR_WAITER_START=1 .*shim\\.sh conveyor/foreman/waiter\\.sh$")) | .asyncRewake] == [true]' "$P" >/dev/null \
   || fail "no SessionStart hook of every source starts the waiter that can wake the session: $(jq -c '.hooks.SessionStart' "$P")"
 }
+# The start's and the procedures' rules on a blocked card and a blocked push, in <out> (both texts); called by t_setup.
+proc_checks() { # <out>
+local out=$1
+# Issue 1685: the start names taking a blocked card among the times to run the procedures, and they give the note
+# command (foreman.sh note), so /units and the Board show the card as the Foreman's. Bug it catches: a start or
+# procedures that do not say it, so the Foreman never writes a note.
+grep -qE 'run [^ ]*foreman\.sh procedures and follow what it prints before you run conveyor\.sh release-run or take a blocked card,' <<<"$out" \
+  && grep -qF 'When you take a blocked card (a hand run, a fix card, a picker to the owner), run `note <card> <what you do about it>`' <<<"$out" \
+  && grep -qF 'run `note <card> --ask <the question>`' <<<"$out" \
+  || fail "the Foreman's start and procedures do not tell it to run note <card> <what you do> when it takes a blocked card: $out"
+# Bug (issue 1683): a push blocked by its check had no procedure, so the Foreman filed a fix card of its own under another
+# kind and answered the repeat wake Idle. foreman.sh procedures prints the push-block steps, and the start sends the
+# Foreman to them on that wake. The rules are text the Foreman's model reads, so their text is the behaviour here.
+grep -qF 'on a wake that a push is blocked' <<<"$out" && grep -qF '## A blocked push' <<<"$out" && grep -qF 'so do not file a second fix card' <<<"$out" \
+  && grep -qF '"Push blocked: <check> failed after <card>; cleared by <fix card>."' <<<"$out" && grep -qF '"Push went through: <check> passes."' <<<"$out" \
+  && grep -qF '"a repeat of that block, not a new one" is the same block' <<<"$out" || fail "foreman.sh procedures does not print the push-block steps, or the start does not send the Foreman to them: $out"
+# Bug (review of issue 1683): the start's wake rule owed only what needs the owner and the Done-without-asking lines,
+# so it told the Foreman to answer the wake that the push went through with Idle.
+grep -qF 'on a wake that a push is blocked or went through the one push line the procedures give ("Push went through: <check> passes." for the push that went through); when none of these is owed, reply Idle.' <<<"$out" \
+  || fail "the Foreman's start tells it to reply Idle to the wake that a push went through: $out"
+}
 t_setup() {
 CASE=setup
 CONVEYOR_MAIN=$M bash "$SRC/foreman.sh" setup > "$T/setup.out" 2>&1 || fail "setup failed: $(cat "$T/setup.out")"
@@ -142,13 +163,7 @@ grep -qE 'run [^ ]*foreman\.sh procedures and follow what it prints before you r
   && grep -qF 'on a wake that a card waits for main to change or on another card' <<<"$out" \
   || fail "the Foreman's start context does not name the command that prints its procedures: $out"
 out+=$'\n'$(cd "$M" && bash "$SRC/foreman.sh" procedures) || fail "foreman.sh procedures failed"
-# Issue 1685: the start names taking a blocked card among the times to run the procedures, and they give the note
-# command (foreman.sh note), so /units and the Board show the card as the Foreman's. Bug it catches: a start or
-# procedures that do not say it, so the Foreman never writes a note.
-grep -qE 'run [^ ]*foreman\.sh procedures and follow what it prints before you run conveyor\.sh release-run or take a blocked card,' <<<"$out" \
-  && grep -qF 'When you take a blocked card (a hand run, a fix card, a picker to the owner), run `note <card> <what you do about it>`' <<<"$out" \
-  && grep -qF 'run `note <card> --ask <the question>`' <<<"$out" \
-  || fail "the Foreman's start and procedures do not tell it to run note <card> <what you do> when it takes a blocked card: $out"
+proc_checks "$out"
 # Bug (#187): the Foreman listed a git command for the owner to commit the pack. Its rules put the question by the picker.
 grep -qF 'ask the owner by the picker "Commit the Conveyor pack (.conveyor/project.json) on <default branch> now?"' <<<"$out" \
   && grep -qF 'on yes run conveyor.sh setup pack-commit yes' <<<"$out" \
@@ -375,11 +390,12 @@ bash "$SRC/watch-conveyor.sh" --once || fail "a push the Board lists under Needs
   || fail "the push the Board lists woke as: $(cat "$FD"/pending/*.wake)"
 # #1079 ask 2. Bug it catches: a push that went on over a pre-push hook that failed naming a test file that passed
 # alone (health pushFlaky) said nothing, or that the check "will not pass on a retry". It wakes once, "flaky: passed
-# alone", naming the file and the held issue.
+# alone", naming the file and the held issue. This push ends the check block of #12 woken above, so the same wake says
+# the push went through (lib.sh pushsame(), issue 1683): the transport polls between them do not lose that wake.
 rm -f "$FD"/pending/*.wake
 snap '[]' '[]' | jq -c '.health.pushFlaky = {time: "2026-11-11T11:58:00Z", card: "c12", issue: 12, files: ["lib/a.test.sh"], issues: [101]}' > "$T/ask/alpha"
 bash "$SRC/watch-conveyor.sh" --once || fail "a push over a flaky hook did not wake"
-[ "$(cat "$FD"/pending/*.wake)" = $'Conveyor: alpha: push flaky: #101\nalpha: push went on: the pre-push hook failed naming lib/a.test.sh, flaky: passed alone; held for the owner: #101' ] \
+[ "$(cat "$FD"/pending/*.wake)" = $'Conveyor: alpha: push flaky: #101; push went through\nalpha: push went on: the pre-push hook failed naming lib/a.test.sh, flaky: passed alone; held for the owner: #101\nalpha: the push went through: the push block of typecheck-web failed after #12 (since 2026-11-11T12:00:00Z) is cleared' ] \
   || fail "the push over a flaky hook woke as: $(cat "$FD"/pending/*.wake)"
 rm -f "$FD"/pending/*.wake
 bash "$SRC/watch-conveyor.sh" --once && fail "a flaky push already reported woke again: $(cat "$FD"/pending/*.wake)"

@@ -356,6 +356,25 @@ local out
 out=$(stop "$(say Idle)"); [ -z "$out" ] || fail "wake [$WAKE], reply Idle, nothing blocked in health: the stop was refused: $out"
 }
 
+# A wake of a blocked push: the reply may carry the one push-block line (what blocks the push, which card clears it),
+# and "Push went through" once it is pushed; narration beside it, a second such line, or a second sentence in it is
+# still refused, also one word beside it (the hook passed a reply of one word left as Idle). Bug caught (issue 1683): the hook refused every line but what needs the owner, so the Foreman answered
+# the wake Idle and the owner saw no sign that anything cleared the block. reply-mark is removed before each refused
+# reply, as a turn is refused once and its next stop passes.
+t_pushline() {
+local WAKE=$'Conveyor: alpha: push blocked\nalpha: push blocked: typecheck-web failed after #12; it will not pass on a retry; its fix card c20261125T022929-alpha-0 is blocked'
+fixture pushline '{}'
+local line='Push blocked: typecheck-web failed after #12; cleared by c20261125T022929-alpha-0.' r out
+for r in "$line" 'Push went through: typecheck-web passes on apps/web/x.test.ts.'; do
+  out=$(stop "$(say "$r")"); [ -z "$out" ] || fail "wake [$WAKE], reply [$r]: the stop was refused: $out"
+done
+for r in "$line"$'\nCard #14 landed and #15 is still running.' "$line"$'\nWorking.' "$line"$'\n'"$line" 'Push blocked: typecheck-web failed after #12. Card #14 landed; cleared by c20261125T022929-alpha-0.'; do
+  rm -f "$FD/reply-mark"
+  out=$(stop "$(say "$r")"); refused "$out" && grep -qF 'A reply to a wake says only what needs the owner' <<<"$out" \
+    || fail "wake [$WAKE], reply [$r]: the stop was not refused as narration: $out"
+done
+}
+
 # recmain finds alpha's main under the stop hook's pipefail though the records it reads after mine (which names alpha
 # first) fail. Bug caught: its awk left at the first match, so with an awk that leaves at once (gawk, BSD awk) records'
 # write to the closed pipe failed the lookup, and the hook then read no health, repository or host act log for the
@@ -370,7 +389,7 @@ out=$(bash -c 'set -uo pipefail; . "$1/lib.sh" || exit 1; eval "real_$(declare -
 [ "$out" = "$T/alpha" ] || fail "recmain alpha under pipefail, records failing after mine named alpha: gave [$out], not $T/alpha"
 }
 
-cases=(idle act fake ask first fork same solo paste unrep unrepdown unrep70 other down prev moved recmain)
+cases=(idle act fake ask first fork same solo paste unrep unrepdown unrep70 other down prev moved recmain pushline)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

@@ -40,7 +40,7 @@
 #   the fix cards of a red release run (its record's fixes): each has landed, once, with release-prep started again
 #     or why it did not start; one closed with no landed card, once, naming it, as the release then waits on the Foreman
 #   a push that failed its check (health's pushError.kind check), at once and again for each commit it fails on: the
-#     loop does not push again until main moves. Only while the owner must act (pushError.fix.needsYou: no loop runs, or its fix card, redfix.sh pushred(), is blocked, closed or gone, or landed with no automatic push): that card is named
+#     loop does not push again until main moves. Only while the owner must act (pushError.fix.needsYou: no loop runs, or its fix card, redfix.sh pushred(), is blocked, closed or gone, or landed with no automatic push): that card is named. One with the check and error of the first block since the last push that went through names that block as a repeat; the push that went through after one woke wakes once (lib.sh pushsame())
 #   a card's test step that refused a full run of its tests (health's refused: the engine's tests()), once a test line
 #   the machine hold (health's machineHold: the engine's mainred.sh machinehold()), once a hold, naming the controls and the cases that fail
 #   a merge of the landing pull request that GitHub refused (health's landingPr.merge), once a refusal, with GitHub's reason
@@ -613,7 +613,7 @@ record() { # <repo> <main> <now> <await>
       $1 ~ /^(stuck|stopped):/ { s = ($1 in t) ? t[$1] : now; print $1 "\t" s > (f ".tmp"); if (now - s < poll) next }
       { print }' "$stuckf" - <<<"$cur") && mv "$stuckf.tmp" "$stuckf"; then cur=$held; fi
     reviewretry
-    stillblocked
+    stillblocked; pushsame
   else
     # A failed poll breaks a run of idle polls, of polls that did not reach GitHub, and of polls with gh signed out.
     grep -qxF "$repo/idle" "$SEEN" || rm -f "$idle"

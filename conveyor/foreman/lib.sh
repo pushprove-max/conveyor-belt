@@ -495,6 +495,36 @@ rrheld() {
   awk -F'\t' -v OFS='\t' 'FILENAME == ARGV[1] { if ($2 == "held") n["blocked:" $1] = $3; next }
     ($1 in n) && $4 != "" { $4 = $4 "; review-retry left it for the owner: its reason names " n[$1] } { print }' <(printf '%s\n' "$1") -
 }
+# pushsame: a push blocked by its check (health pushError, kind check) after another landing is a new commit, so a new
+# push:<sha> key and a new wake, but the same block when its check and error are the same: that wake's line names the
+# first block, so it does not read as a new one (issue 1683). The error is the reason's lines that say where the hook's
+# tests failed (lib/push.sh failat()), else the whole reason less the push's time limit, which push.sh sets by the
+# machine's load. $FD/conveyor-pushblock-<repo>.json holds the first block since the last push that went through
+# ({check, error, sha, name, since, woken}); a block with another check or error takes its place. woken is set once a
+# push: line of the record has a wake text or is in $SEEN, and it stays set until the push goes through: a poll while
+# the fix card runs (needsYou false) has no push: line, so $SEEN alone forgets the wake. A snapshot with no push failing
+# removes the file, and, when it is woken, adds one problem: the push went through. Called by watch-conveyor.sh
+# record() with its $rec, $repo, $SEEN and $cur, which it changes.
+pushsame() {
+  local f=$FD/conveyor-pushblock-$repo.json e first w=false
+  e=$(jq -c '.health | objects | .pushError | objects | select(.kind == "check")
+    | {check, error: ((.reason // "" | tostring | [splits("\n")] | map(select(startswith("conveyor: a test of the hook failed at "))) | join("\n"))
+        as $at | if $at == "" then .reason // "" | tostring | sub("^exit (?<c>[0-9]+) \\(124 is the [0-9]+s timeout\\): "; "exit \(.c): ") else $at end),
+      sha, name: ((.name | strings) // (.issue | numbers | select(. > 0) | "#\(.)") // .card // "the last landing"), since: .time}' <<<"$rec" 2>/dev/null)
+  if [ -z "$e" ]; then
+    jq -e '.health | objects | .pushFailingSince == null' <<<"$rec" >/dev/null 2>&1 && [ -e "$f" ] || return 0
+    jq -e '.woken == true' "$f" >/dev/null 2>&1 \
+      && cur+=$'\n'$(jq -r '["pushok:\(.sha):\(.since)", "push went through", "", "the push went through: the push block of \(.check) failed after \(.name) (since \(.since)) is cleared"] | join("\t")' "$f" 2>/dev/null)
+    rm -f "$f"; return 0
+  fi
+  { grep -q "^$repo/push:" "$SEEN" 2>/dev/null || awk -F'\t' '$1 ~ /^push:/ && $4 != ""' <<<"$cur" | grep -q .; } && w=true
+  first=$(jq -c --argjson e "$e" 'objects | select(.check == $e.check and .error == $e.error)' "$f" 2>/dev/null)
+  jq -cn --argjson e "$e" --argjson f "${first:-null}" --argjson w "$w" --argjson was "$(jq -c '.woken == true' "$f" 2>/dev/null || echo false)" \
+    '($f // $e) + {woken: ($was or $w)}' > "$f.tmp" 2>/dev/null && mv "$f.tmp" "$f"
+  [ -n "$first" ] || return 0
+  cur=$(jq -rR --argjson e "$e" --argjson f "$first" 'split("\t") | if length == 4 and (.[0] | startswith("push:\($e.sha)")) and $f.sha != $e.sha and .[3] != ""
+    then .[3] += "; the same check and error as the push block of \($f.sha[0:12]) after \($f.name) (since \($f.since)): a repeat of that block, not a new one" else . end | join("\t")' <<<"$cur")
+}
 
 # The pending items (a watcher's wake, owed to the session). $FD/pending holds one file per wake, written as
 # <name>.tmp and renamed into place, so a reader sees a whole file or none. A watcher puts its wake here BEFORE it
