@@ -48,10 +48,13 @@ offmain() { # <main's commit>
 # in the record of the cards with no GitHub issue) takes <card> as its card, the card it had going to its was, as
 # testpick() does for a card given back. So the slice is done once <card> lands: its umbrella closes (umbrellas(),
 # lib/slices.sh) and a card that depends on the slice by its id starts (testpick()). Refused while the slice's own
-# card is open (no landed, closed or blocked line): the loop is building it; and once that card is done (TADONE),
-# its lines archived or not (cardall(), lib/records.sh).
+# card is open (no landed, closed or blocked line): the loop is building it; and once that card, or an earlier card of
+# the slice (its id or a was), is done (TADONE), its lines archived or not (cardall(), lib/records.sh), as umbrellas()
+# and the Board count the slice done by any of them. A landed line whose commit main does not hold (offmain()) is
+# not done, as umbrellas() and the snapshot do not count it: with push off and the pack's defaultBranch set to a branch
+# from before the slice landed, the slice waits, and land-branch lands it again. Main unread: each landed line is done.
 slicetake() { # <slice: its card id> <card>
-  local rec cur got='' rc=1
+  local rec cur got='' all c fin rc=1
   if ! rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) \
     || ! cur=$(jq -er --arg s "$1" 'first(.[] | select(. as $e | $s | IN($e.id, $e.card, ($e.was // [])[]))) | .card // ""' <<<"$rec"); then
     echo "conveyor: slice $1 is not in the record of the cards with no GitHub issue; nothing recorded" >&2
@@ -61,8 +64,16 @@ slicetake() { # <slice: its card id> <card>
     echo "conveyor: slice $1 has its card $cur still open; nothing recorded" >&2
   # A slice already done stays done: a second landing of its branch would make the slice's card one that may block,
   # and a card that depends on the slice (testpick()) or its umbrella (umbrellas()) would wait on that card again.
-  elif [ -n "$got" ] && jq -es --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" "any(.[]; $TADONE)" <<<"$got" > /dev/null; then
-    echo "conveyor: slice $1 is done already, as card $cur; land the further change on a branch with another name; nothing recorded" >&2
+  # Each card the slice has had (its id, its card and its was), as umbrellas() and the Board count the slice done by any of them.
+  elif ! all=$(for c in $(jq -r --arg s "$1" 'first(.[] | select(. as $e | $s | IN($e.id, $e.card, ($e.was // [])[]))) | [.id, .card] + (.was // []) | map(strings) | unique[]' <<<"$rec"); do
+      if [ "$c" = "$cur" ]; then printf '%s\n' "$got"; else cardall "$c" || exit 1; fi; done); then
+    echo "conveyor: the lines of slice $1's earlier cards could not be read; nothing recorded" >&2
+  elif ! fin=$(jq -rs --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" \
+      --rawfile off <(b=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}") && jq -r 'select(.step == "landed") | .sha | strings' <<<"$all" | offmain "$b") \
+      '($off | split("\n") - [""]) as $off | first(.[] | select('"$TADONE"' and (.step != "landed" or (.sha | IN($off[]) | not))) | .card) // ""' <<<"$all"); then
+    echo "conveyor: the lines of slice $1's cards could not be read; nothing recorded" >&2
+  elif [ -n "$fin" ]; then
+    echo "conveyor: slice $1 is done already, as card $fin; land the further change on a branch with another name; nothing recorded" >&2
   elif jq -c --arg s "$1" --arg c "$2" '{cards: map(if . as $e | $s | IN($e.id, $e.card, ($e.was // [])[]) then (if .card == null then . else .was = (.was // []) + [.card] end) | .card = $c else . end)}' <<<"$rec" > "$TACARDS.new" \
     && mv -f "$TACARDS.new" "$TACARDS"; then rc=0
   else rm -f "$TACARDS.new"; echo "conveyor: the record of the cards with no GitHub issue could not be written; nothing recorded" >&2; fi

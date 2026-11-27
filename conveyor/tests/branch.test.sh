@@ -150,3 +150,28 @@ t_branchprivmsg() {
   [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = $'Slice for <private term> in <home path>\n\nConveyor card c0-0, branch slice-b' ] \
     || fail "cardsubject c0-0 '$issue' slice-b with privacy.mode public did not mask the slice's title in the branch's message (exit $RC): $(cat "$T/$CASE/run.out")"
 }
+
+# Push off: slice cOff landed a commit of the branch side, which main does not hold (as after the pack's defaultBranch
+# was set to a branch from before the slice landed), and slice cOn landed main's own commit. Bug caught: slicetake()
+# counted any landed line done (TADONE), so land-branch of cOff was refused as done already, though umbrellas() and
+# the snapshot count it as waiting. cOn, on main, is still refused. Slice cWas landed main's commit as cWas, then
+# again off main as cWasB (its card now, cWas in its was). Bug caught: slicetake() read only its card's lines, so it
+# took cWas again, though umbrellas() and the Board count it landed by cWas.
+t_branchoffmain() {
+  local h sd
+  setup "[]"
+  h=$(git -C "$R" rev-parse HEAD) && git -C "$R" switch -qc side && git -C "$R" commit -q --allow-empty -m 'slice' \
+    && sd=$(git -C "$R" rev-parse HEAD) && git -C "$R" switch -q main || fail "the side branch's commit could not be made"
+  mkdir -p "$ST/testactions" && jq -cn '{cards: [{id: "cOff", card: "cOff", title: "off", body: "Do off."}, {id: "cOn", card: "cOn", title: "on", body: "Do on."}, {id: "cWas", card: "cWasB", was: ["cWas"], title: "was", body: "Do was."}]}' > "$(nicards)"
+  fx_in 'append "$(line cOff 0 picked ok "{}")"; append "$(line cOff 0 landed ok "{\"sha\":\"'"$sd"'\"}")"
+    append "$(line cOn 0 picked ok "{}")"; append "$(line cOn 0 landed ok "{\"sha\":\"'"$h"'\"}")"
+    append "$(line cWas 0 picked ok "{}")"; append "$(line cWas 0 landed ok "{\"sha\":\"'"$h"'\"}")"
+    append "$(line cWasB 0 picked ok "{}")"; append "$(line cWasB 0 landed ok "{\"sha\":\"'"$sd"'\"}")"
+    slicetake cOn cNewOn; echo "on $?"; slicetake cOff cNewOff; echo "off $?"; slicetake cWas cNewWas; echo "was $?"'
+  grep -qx 'on 1' "$T/$CASE/run.out" && grep -qF 'slice cOn is done already, as card cOn' "$T/$CASE/run.out" \
+    || fail "slicetake cOn cNewOn did not refuse slice cOn, whose landed commit $h main holds: $(cat "$T/$CASE/run.out")"
+  grep -qx 'was 1' "$T/$CASE/run.out" && grep -qF 'slice cWas is done already, as card cWas' "$T/$CASE/run.out" \
+    || fail "slicetake cWas cNewWas did not refuse slice cWas, whose earlier card cWas landed $h, which main holds: $(cat "$T/$CASE/run.out")"
+  grep -qx 'off 0' "$T/$CASE/run.out" && [ "$(jq -c '[.cards[] | [.id, .card, .was]]' "$(nicards)")" = '[["cOff","cNewOff",["cOff"]],["cOn","cOn",null],["cWas","cWasB",["cWas"]]]' ] \
+    || fail "slicetake cOff cNewOff refused slice cOff, whose landed commit $sd main does not hold, or did not give it the new card: $(cat "$T/$CASE/run.out") $(cat "$(nicards)")"
+}

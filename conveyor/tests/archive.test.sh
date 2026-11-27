@@ -200,14 +200,14 @@ t_archappend() {
 # #12 is still open; reopened() and retry no longer give back #23, whose card was shut when its issue was closed
 # by hand and which is open again; the next main-red pick (redpick()) starts a new fix card for the red commit whose
 # fix card cM the owner shut (read as given back), and redopen() and redlive() read cM as open; the land-branch command (slicetake()) takes over cT's entry,
-# though cT is done; and the Tests page (testlines()) loses cT's test run from its history.
+# though cT is done (its landed commit is main's); and the Tests page (testlines()) loses cT's test run from its history.
 t_archreaders() {
   local h p=c20260101T000000-main-22 old
   setup "[$(issue 10 2026-11-01), $(issue 11 2026-11-02), $(issue 12 2026-11-03), $(issue 21 2026-11-04), $(issue 23 2026-11-05)]"
   printf '10 11\n10 12\n' > "$STUB/subs"; h=$(git -C "$R" rev-parse HEAD); old=$(ago 3)
   { landcard cP11 11 "$old" "$h"; archline cO 21 picked "$old"; archline cO 21 closed "$old" | jq -c '.reason = "shut by the owner"'
     archline cR 23 picked "$old"; archline cR 23 closed "$old" | jq -c '.reason = "the issue was closed by hand while the card was blocked"'
-    landcard cT 0 "$old" | jq -c 'if .step == "picked" then .testFile = "t.test.sh" else . end'; landcard "$p" 22 "$old"
+    landcard cT 0 "$old" "$h" | jq -c 'if .step == "picked" then .testFile = "t.test.sh" else . end'; landcard "$p" 22 "$old"
     archline cT 0 test "$old" | jq -c '.times = {"t.test.sh": 3}'
     archline cM 0 picked "$old" | jq -c --arg h "$h" '.mainRed = $h'; archline cM 0 closed "$old" | jq -c '.reason = "shut by the owner"'
     archline cP12 12 picked "$(ago 0)"; archline cP12 12 landed "$(ago 0)" | jq -c --arg s "$h" '.sha = $s'; } > "$ST/cards.jsonl"
