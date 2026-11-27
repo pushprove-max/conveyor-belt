@@ -355,7 +355,7 @@ pretest() {
     treecheck "$wt" > /dev/null || { tmain=''; go=''; return 0; }
     began "$c" "$n" test '{"before":"review"}' # its start line marked too: the Board draws the run before the reviews, not as the Test step (track.jq)
     sec=$SECONDS; own=1; ran=1; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"; red=''
-    TEST_STILL=pretestok tests "$wt"; rc=$?; [ $rc != 0 ] || slowtests "$wt" || :; sec=$((SECONDS - sec))
+    tests "$wt" '' pretest; rc=$?; [ $rc != 0 ] || slowtests "$wt" || :; sec=$((SECONDS - sec))
     [ -z "$red" ] || { tmain=''; go=''; return 0; } # main went red while it waited for its test slot (pretestok()): no test ran, on to the review
     [ ! -s "$wt.stop" ] || { block "$c" "$n" "$wt" "test: $(<"$wt.stop")"; return; }
     voidrun "$wt" "$rc" > /dev/null || voids=0
@@ -375,7 +375,7 @@ pretest() {
     tmain=''; go=''; return 0
   done
 }
-# pretest()'s check once tests() holds the test slot (TEST_STILL): it fails, and sets pretest()'s red, when main is red
+# pretest()'s check once tests() holds the test slot: it fails, and sets pretest()'s red, when main is red
 # now, as main can go red while the card waits for a slot, after pretest() asked before the wait.
 pretestok() { ! redmain || { red=1; return 1; }; }
 # Whether main is red at its commit now, whichever card asks: the main-red record (mainred.sh) holds an entry for main's

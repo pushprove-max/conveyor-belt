@@ -284,7 +284,7 @@ testrec() { # <worktree> <exit> <seconds>
 # its output saying so (NONELINKED); and a run that reports more test files than it was given (TEST_GIVEN: watch()
 # ends it, <worktree>.wide) does not run again and fails with <worktree>.stop saying why. card() blocks a card whose
 # run left <worktree>.stop.
-tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alone]
+tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alone|pretest]
   local cmd at rc r p='' b='' t='' f o l=() wn wb w=$SECONDS t0 ob mf mw off kp ko ka kc cw='' x RUNOFF='' TEST_BEFORE='' LISTNONE='' CAPNOTE='' TEST_CASES='' TEST_GIVEN=${TEST_GIVEN:-} TEST_FAST=''
   TEST_WAIT=''; TEST_RUN=''; TEST_FREE=''; TEST_REFUSED=''; TEST_FILES=''; rm -f "$1.testlist" "$1.stop" "$1.wide" "$1.noresult"
   # The files the run before timed (testlist.sh timed()): kept below when this run keeps its passes and so may not run them; not when a pass line holds those times already (<worktree>.timesrec, cardland.sh pretest(): the Tests page would count that run twice).
@@ -351,8 +351,8 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
         action: $a}' > "$1.live.tmp" 2>/dev/null && mv -f "$1.live.tmp" "$1.live"
     done
   fi
-  # TEST_STILL (pretest() in lib/cardland.sh): checked once the slot is held; on failure nothing runs, <worktree>.whole stays, exit 1.
-  if [ -n "${TEST_STILL:-}" ] && ! "$TEST_STILL"; then [ -z "$mw" ] || printf '%s\n' "$mw" > "$1.whole"
+  # A pretest checks main again once it holds the slot. A nested test run chooses its own mode.
+  if [ "${3:-}" = pretest ] && ! pretestok; then [ -z "$mw" ] || printf '%s\n' "$mw" > "$1.whole"
     [ -n "$SLOT_HOME" ] || slot_free; slot_unask; return 1; fi
   TEST_WAIT=$((SECONDS - w)); TEST_FREE=$((SLOT_N - $(slot_used))); w=$SECONDS; t0=$(date +%s)
   # The `off` lines (flakyoff()), which testlist.sh rerunlist() does not keep: given to the run again too, so it runs no
