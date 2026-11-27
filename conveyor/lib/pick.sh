@@ -280,15 +280,17 @@ pick() { # [retried or ""] [the weekly limit reading's percent] [the open issues
   # Then a card with no GitHub issue (testpick(), lib/testaction.sh), asked for at once, ahead of the queue, the same way.
   # A run limited by --only takes only the review follow-ups and split parts of the issues it names (testpick() reads ONLY).
   # It holds back a card as an issue is held: one that depends on an open issue, or has a label the owner set to never build.
-  # One exception: the first issue upnext() gives is in the control record's order list (`control order`): it starts before
-  # these cards, which the loop would otherwise start one per turn ahead of it.
+  # One exception: the first issue upnext() gives is in the control record's order list (`control order`): ordered
+  # issues and ordered cards go by their place in it, so testpick() is given that issue (m) and takes only a card placed
+  # before it; with none, the issue starts before these cards, which the loop would otherwise start one per turn ahead
+  # of it. testpick() finds the issue's place in the order it reads itself: adopt() above may have taken pins out of the
+  # order since $c was read, and a place from $c would then let a card jump the issue.
   if [ -z "${1:-}" ] && [ -s "${TACARDS:-}" ]; then
     if jq -e '.order != []' <<<"$c" >/dev/null; then
       u=$(upnext "$issues" "" | jq -r '.[] | "\(.number) \(.again)"') || return 1
-      m=${u%%$'\n'*}
-      jq -e --argjson n "${m%% *}" '.order | index($n) != null' <<<"$c" >/dev/null 2>&1 && m=ordered || m=''
+      m=${u%%$'\n'*}; m=${m%% *}
     fi
-    if [ "$m" != ordered ] && n=$(testpick "$issues") && [ -n "$n" ]; then echo "$n"; return 0; fi
+    if n=$(testpick "$issues" "$m") && [ -n "$n" ]; then echo "$n"; return 0; fi
   fi
   [ -n "${u+x}" ] || u=$(upnext "$issues" "${1:-}" | jq -r '.[] | "\(.number) \(.again)"') || return 1
   # The first issue whose fields for its picked line read as JSON: one that does not is named in the log and skipped,

@@ -54,7 +54,7 @@ once with no GitHub issue. Its record is only in Conveyor. The five kinds:
 A review follow-up and a split part are follow-ups, so the Follow-ups rule in the Rules tab holds them back when it is
 Off. `conveyor.sh run --only <issue>` also runs the review follow-ups and the split parts of that issue, and the review follow-ups of those parts. A follow-up of a split part names the umbrella as its parent, so it inherits the same yes.
 
-A queued card with no GitHub issue starts before the issues. A ready issue that `conveyor.sh control order` names starts before it. Among the cards, a ready card whose card ID `conveyor.sh control order` names starts first, in the order given. A held issue stays held.
+A queued card with no GitHub issue starts before the issues. `conveyor.sh control order` takes issue numbers and card IDs. A card's place in that list is the first place that holds its card ID, its parent issue, or the umbrella of that parent. So an umbrella issue in the list puts its split parts and their follow-ups there too. Ready issues and cards with a place start first, lowest place first. Then the cards with no place start, oldest first, and then the issues. A held issue stays held.
 
 Each card builds, reviews, tests and lands as any card does. No size check splits it.
 

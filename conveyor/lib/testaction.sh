@@ -258,7 +258,7 @@ tcfree() { # <the record's cards json>
 # to was, so the new card starts from its kept work (resumeplan(), lib/card.sh). First, a card blocked the first time
 # is given back so, with no one asked (TCRETRY on its blocked line); blocked again, it stays blocked, for the owner in
 # Needs you. Not one stopped for the owner's yes: that waits on the owner, not on a second try. With the records of
-# issue 0 unread, nothing is retried, and only a card not picked yet is picked. A ready card whose id (its entry's id, card or a card given back, was) is in the control record's order (`control order`) goes first, by its place there, lowest first; then the others, oldest first.
+# issue 0 unread, nothing is retried, and only a card not picked yet is picked. A ready card's place in the control record's order (`control order`) is the first position that holds its id (its entry's id, card or a card given back, was), the issue it follows up (parent) or that issue's umbrella (its GitHub parent, or the umbrella it names); the ready cards with a place go first, lowest first, then the others, oldest first. Given the first ready issue (pick()) and that issue in the order as this reads it, only a card placed before the issue is picked.
 TCRETRY='retried once with its kept work: a card with no GitHub issue is tried again once before it goes to the owner'
 # A card record line (a jq filter, with $shut, $own and $eng the SHUT, OWNSHUT and ENGSHUT reasons) that ends a card whose work is on main: it
 # landed, or it ended closed because main already did what it asks (closed(), lib/followups.sh: ALREADY-DONE), as umbrellas() reads
@@ -269,14 +269,14 @@ TADONE='(.step == "landed" or (.step == "closed" and ((.reason // "") | IN($shut
 # or a split part), as it takes their issues': an issue it names grows to its GitHub parts (an open parent's, and each open issue whose umbrella it is) and the follow-ups of its cards, as
 # upnext() grows it (jq/upnext.jq), so a follow-up of a part of a named umbrella is taken; with the Follow-ups rule off (rules.followups false) no follow-up card or split part
 # is taken, as no follow-up issue is (jq/upnext.jq): a card is one by its follow-up label. While the release limit is on (RELONLY: rellimit(), lib/pick.sh), only its cards.
-testpick() { # <the open issues json>
+testpick() { # <the open issues json> [the first ready issue]
   local lock rec i l card have h=1 old fuoff never open cards c far parts ord
   [ -s "$TACARDS" ] || return 0
   { exec {lock}>>"$TACARDS.lock"; } 2>/dev/null && flock "$lock" || { echo "conveyor: the record of the Tests page's cards could not be locked; its cards wait" >&2; return 1; }
   rec=$(jq -ce '.cards | arrays' "$TACARDS" 2>/dev/null) || rec='[]'
   c=$(ctl 2>/dev/null) || c=null
   fuoff=$(jq -r 'if .rules.followups == false then true else false end' <<<"$c" 2>/dev/null) || fuoff=false
-  never=$(jq -c '.rules.never // []' <<<"$c" 2>/dev/null) || never='[]'; ord=$(jq -c '[.order // [] | .[] | strings]' <<<"$c" 2>/dev/null) || ord='[]'
+  never=$(jq -c '.rules.never // []' <<<"$c" 2>/dev/null) || never='[]'; ord=$(jq -c '.order // [] | arrays' <<<"$c" 2>/dev/null) || ord='[]'
   open=$(jq -c 'map(.number)' <<<"${1:-[]}" 2>/dev/null) || open='[]'
   parts=$(jq -c '[(.[] | select((.parts // []) != []) | {k: .number, v: [.parts[] | .number | numbers]}), (.[] | select(.umbrella | numbers) | {k: .umbrella, v: [.number]})] | group_by(.k) | map({key: (.[0].k | tostring), value: (map(.v[]) | unique)}) | from_entries' <<<"${1:-[]}" 2>/dev/null) || parts='{}'
   # The unheld cards not picked yet are read as an issue is: the state of each issue of another repository their `Depends on:` lines name is asked now (farstates()); the record and its far states go to jq on its input, as Linux refuses an argument over 128 KiB.
@@ -310,7 +310,7 @@ testpick() { # <the open issues json>
     exec {lock}>&-; echo "$card 0 false"; return 0
   # The record and the lines go to jq on its input: Linux refuses an argument over 128 KiB.
   done < <(printf '%s\n%s\n' "$rec" "$have" | jq -Rrn --argjson h "$h" --argjson only "${ONLY:-null}" --argjson rf "${REDFILES:-null}" --argjson rel "${RELONLY:-null}" --argjson fuoff "${fuoff:-false}" --argjson never "${never:-[]}" --argjson open "${open:-[]}" --argjson parts "$parts" \
-    --slurpfile cards <(printf '%s' "$cards") --arg fu "$FOLLOWUP" --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" --argjson ord "${ord:-[]}" \
+    --slurpfile cards <(printf '%s' "$cards") --arg fu "$FOLLOWUP" --arg shut "$SHUT" --arg own "$OWNSHUT" --arg eng "$ENGSHUT" --argjson ord "${ord:-[]}" --argjson first "${2:-null}" \
     "$DEPS"'input | fromjson as $r | [inputs | fromjson? | objects] as $l
     | ($l | map(.card | strings) | INDEX(.)) as $have | ($l | map(select('"$TADONE"') | .card) | INDEX(.)) as $landed
     | landed($cards) as $idone | ($cards | map(select(.followups))) as $fc
@@ -323,7 +323,7 @@ testpick() { # <the open issues json>
       and ((.value.labels // []) | any(IN($never[])) | not)
       and (.value | [ups($fc; needs)[] | select(IN($open[]) and (IN($idone[]) | not))] == [])
       and (.value | [farneeds[] as $x | select(.far[$x].open != false) | $x] == [])
-      and all(.value.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*-[0-9]+(?![A-Za-z0-9_])"); cardlanded(.)))] | sort_by(.value as $e | [$e.id, $e.card, ($e.was // [])[] | strings | . as $x | $ord | index($x) | numbers] | min | [. == null, .]) | .[].key')
+      and all(.value.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*-[0-9]+(?![A-Za-z0-9_])"); cardlanded(.)))] | map(.place = (.value as $e | [($e.id, $e.card, ($e.was // [])[] | strings), ($e.parent | numbers | . as $p | ., ($parts | to_entries[] | select(.value | index([$p])) | .key | tonumber)) | . as $x | $ord | index($x) | numbers] | min)) | (if $first == null then null else $ord | index($first) end) as $below | map(select($below == null or (.place != null and .place < $below))) | sort_by([.place == null, .place]) | .[].key')
   exec {lock}>&-
 }
 # The cards given back of a card with no GitHub issue (its entry's was, testpick()), oldest first, one a line, whose

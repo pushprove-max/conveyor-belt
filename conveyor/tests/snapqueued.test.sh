@@ -43,6 +43,20 @@ t_sqcards() {
   [ "$(loop snapshot --fresh | jq -c .queue.cards)" = null ] || fail "with a record that does not read, queue.cards is not null"
 }
 
+# Bug it catches: the Board placed a card in Next up by its own id alone, so a split part of an ordered umbrella showed
+# behind older cards while pick took it first. queue.cards gives each card its pins: its id and cards given back, its
+# parent issue #20 and its umbrella #9 (#20 is a GitHub sub-issue of #9).
+t_sqpins() {
+  setup '[{"number":9,"title":"U","body":"","labels":[],"createdAt":"2026-11-01T00:00:00Z"},
+    {"number":20,"title":"P","body":"","labels":[],"createdAt":"2026-11-01T00:00:00Z"}]'
+  echo '9 20' > "$STUB/subs"; mkdir -p "$ST/testactions"
+  jq -cn '{cards: [{id: "c20261102T000001-sample-0", card: null, title: "a", time: "2026-11-02T00:00:01Z", body: "b", was: ["c20261101T000001-sample-0"]},
+    {id: "c20261102T000002-sample-0", card: null, title: "b", time: "2026-11-02T00:00:02Z", body: "b", parent: 20}]}' > "$ST/testactions/cards.json"
+  local out; out=$(loop snapshot --fresh) || fail "no snapshot"
+  [ "$(jq -c '.queue.cards | map(.pins)' <<<"$out")" = '[["c20261101T000001-sample-0","c20261102T000001-sample-0"],[9,20,"c20261102T000002-sample-0"]]' ] \
+    || fail "queue.cards does not give each card its pins (id, was, parent, umbrellas): $(jq -c '.queue.cards | map(.pins)' <<<"$out")"
+}
+
 # Bugs it catches (#1714): a card still shown as waiting for an issue of another repository after it closed, when no
 # open issue names that one (its state was read only from the open issues); the state not kept in the stream's GitHub
 # folder, or a change of it not seen by the stream; and, with the open issues not listed, a card that waits on one shown

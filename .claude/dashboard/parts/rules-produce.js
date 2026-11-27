@@ -235,15 +235,30 @@
     const pin = (i) => { const k = order.indexOf(i); return k < 0 ? Infinity : k; };
     const before = (x, y) => { const a = pin(x.issue), b = pin(y.issue); return a !== b ? a < b : a === Infinity && ahead(x, y); };
     w.forEach((x) => { const at = next.findIndex((y) => before(x, y)); next.splice(at < 0 ? next.length : at, 0, x); });
-    // Pick takes these cards after the ready issues pinned ahead of every other and before the rest (pick(),
-    // conveyor/lib/pick.sh).
+    // A ready card's place in the order (`control order`) is the first place of its pins (its id, its parent issue and
+    // that issue's umbrellas: the snapshot's queue.cards); the placed cards go first, lowest first, and the rest keep
+    // the snapshot's order (testpick(), conveyor/lib/testaction.sh). sort is stable.
+    const place = (x) => Math.min(...(list(x.pins).length ? list(x.pins) : [x.card]).map(pin));
+    const ready = readyCards().slice().sort((x, y) => place(x) - place(y) || 0);
+    // Pick takes a ready pinned issue after the cards placed before it, and the other cards after the last ready
+    // pinned issue, before the rest (pick(), conveyor/lib/pick.sh).
     let at = 0;
     next.forEach((y, i) => { if (q.includes(y) && pin(y.issue) !== Infinity) at = i + 1; });
-    const rows = next.slice(0, NEXT_ROWS).map(nextRow);
-    // A ready card pinned by its id (`control order`) goes first, by its place in the order; the rest keep the
-    // snapshot's order (testpick(), conveyor/lib/testaction.sh). sort is stable.
-    const ready = readyCards().slice().sort((x, y) => pin(x.card) - pin(y.card) || 0);
-    rows.splice(at, 0, ...folded('next', ready, (x) => cardRow('rules-next', x, waitMarks(x))));
+    const rows = [];
+    let k = 0;
+    // The cards not taken yet that are placed before lim (an issue's place; with none, every one left).
+    const cardsTo = (lim, where) => {
+      let j = k;
+      while (j < ready.length && (lim === null || place(ready[j]) < lim)) j += 1;
+      rows.push(...folded(where, ready.slice(k, j), (x) => cardRow('rules-next', x, waitMarks(x))));
+      k = j;
+    };
+    for (let i = 0; i <= next.length && rows.length < NEXT_ROWS; i += 1) {
+      const y = next[i];
+      if (i === at) cardsTo(null, 'next');
+      else if (y && q.includes(y) && pin(y.issue) !== Infinity) cardsTo(pin(y.issue), `next-${y.issue}`);
+      if (y) rows.push(nextRow(y));
+    }
     el.append(h('h4', 'board-label', 'Next up'));
     if (rows.length) {
       const flow = h('ol', 'rules-flow');

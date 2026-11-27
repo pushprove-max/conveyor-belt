@@ -816,7 +816,9 @@ snapowners() { local defs refs; testowners; printf '%s\n%s\n' "$defs" "$refs"; }
 # one whose file fails on main beside a card waiting for main, watch-conveyor.sh). What a card waits on, the rules that skip it and a card given back are read as testpick()
 # (lib/testaction.sh) reads them. Another repository's issue is open unless the read of it says closed: $cf, the read
 # for these cards (queuedfar(); null: none), else an open issue's. With the open issues not listed ($iss null), an
-# issue a card waits on counts as open.
+# issue a card waits on counts as open. pins: the ids and issues whose first place in the control record's order is
+# the card's place there, as testpick() reads it: its id, card and cards given back (was), the issue it follows up
+# (parent) and that issue's umbrellas among the open issues (its GitHub parent, or the umbrella it names).
 TCQUEUE='def tcqueue($e; $c; $iss; $cf; $shuts; $fu; $rules; $prio):
   if $e == null then null else
     ([$c[] | {key: .card, value: true}] | from_entries) as $have
@@ -827,6 +829,8 @@ TCQUEUE='def tcqueue($e; $c; $iss; $cf; $shuts; $fu; $rules; $prio):
     [$e[] | select(.card == null or $have[.card] == null) | (.labels // [$prio[-1]]) as $l
       | {card: .id, title: (.title // "")[0:200], kind: (.label // (if .file != null then "Tests page" else "Card" end)),
          priority: level($l; $prio), created: .time, held: (.held == true), file: ((.file | strings) // null),
+         pins: ([.id, .card, (.was // [])[] | strings] + [.parent | numbers | . as $p | ., (($iss // [])[]
+           | (select(any((.parts // [])[]; .number == $p)) | .number), (select(.number == $p) | .umbrella | numbers))] | unique),
          waitsFor: ([ups($fc; needs)[] | select(($open == null or IN($open[])) and (IN($done[]) | not))]
            + [farneeds[] as $r | select($far[$r].open != false) | $r]
            + [.body // "" | splits("\r?\n") | select(test("^\\s*Depends on:")) | scan("c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]*-[0-9]+(?![A-Za-z0-9_])")

@@ -37,6 +37,20 @@ test('Rules: a pinned issue stays ahead of the cards with no GitHub issue in Nex
   assert.deepEqual(flow(w).map((x) => x[0]), ['#20', 'Review follow-up of #3', 'Docs sweep', 'Split part of #2', '#22']);
 });
 
+// Bug: Next up put every pinned issue before every card, so with order [card 2, 20] it showed #20 first while pick()
+// starts card 2 first.
+test('Rules: a card pinned before an issue shows before it in Next up', () => {
+  const w = shown(rules(THREE(), [card(2).card, 20]));
+  assert.deepEqual(flow(w).map((x) => x[0]), ['Docs sweep', '#20', 'Review follow-up of #3', 'Split part of #2', '#22'], 'order [card 2, 20]');
+});
+
+// Bug: Next up placed a card by its own id alone, not by its pins, so a split part of the ordered umbrella #9 showed
+// behind the older cards while pick() starts it first.
+test('Rules: a card whose parent umbrella is pinned shows by that pin in Next up', () => {
+  const w = shown(rules([...THREE(), card(4, 'Split part of #9', { pins: [card(4).card, 30, 9] })], [9]));
+  assert.deepEqual(flow(w).map((x) => x[0]), ['Split part of #9', 'Review follow-up of #3', 'Docs sweep', 'Split part of #2', '#20'], 'order [9], card 4 pins [its id, 30, 9]');
+});
+
 // Bug: cards that pick does not take filled Next up, so the issue Conveyor picks next dropped off it.
 test('Rules: cards with no GitHub issue that cannot start take no row of Next up', () => {
   const w = shown(rules(Array.from({ length: 5 }, (_, i) => card(i, 'Foreman order', { waitsFor: [99] }))));
