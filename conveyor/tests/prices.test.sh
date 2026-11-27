@@ -129,3 +129,26 @@ t_pricesmodels() {
   [ "$(cat "$R/.conveyor/project.json")" = "$before" ] || fail "a refused change changed the pack"
   loop prices remove my-model > /dev/null && [ "$(jq -c '.prices | keys' "$R/.conveyor/project.json")" = '["claude-opus-5-5"]' ] || fail "remove left the model"
 }
+
+# A review's judge line (reviewlines(), lib/card.sh) holds the judge's own tokens and usage, which no review line holds,
+# so Metrics prices it as a step at its model: in the card's dollars and under its model in perLanded. A judge line with
+# no sec ran no call and costs nothing (spent(), lib/records.sh): it is no step, so it adds no unpriced step. Bug caught:
+# fold() (jq/rows.jq) put no judge line in the card's steps, so the judge's dollars were in no Metrics total.
+t_pricesjudge() {
+  local d out s step res x n=0 u='{"input":1000000,"write":0,"write1h":0,"read":0,"output":0}'
+  export TZ=UTC; setup '[]'; mkdir -p "$ST"; d=$(date -u +%F)
+  tune '.prices = {"claude-new-9": {input: 3, output: 15, cacheRead: 0.3, provider: "claude"}, "claude-opus-5-5": {input: 1, output: 5, cacheRead: 0.1}}'
+  for s in 'picked ok {}' "build ok {\"model\":\"claude-opus-5-5\",\"usage\":$u}" \
+    "judge ok {\"of\":\"review\",\"model\":\"claude-new-9\",\"sec\":9,\"tokens\":{\"claude\":1000000,\"codex\":0},\"usage\":$u}" \
+    "review NO-GO {\"model\":\"claude-opus-5-5\",\"usage\":$u}" "fix ok {\"model\":\"claude-opus-5-5\",\"usage\":$u}" \
+    'judge failed {"of":"review","model":"claude-new-9","reason":"no call"}' "review GO {\"model\":\"claude-opus-5-5\",\"usage\":$u}" \
+    'landed ok {"sha":"s1","product":false}'; do
+    read -r step res x <<<"$s"
+    jq -cn --arg s "$step" --arg r "$res" --arg t "${d}T00:0$((n += 1)):00Z" --argjson x "$x" \
+      '{card: "c1", issue: 1, step: $s, time: $t, tokens: {claude: 0, codex: 0}, result: $r, sha: "", reason: "", title: "T1"} * $x' >> "$ST/cards.jsonl"
+  done
+  out=$(loop snapshot --fresh) || fail "snapshot exited non-zero"
+  jq -e '.landed[0].metrics | [([.timeline[] | [.step, .usd]]), .usd, .unpriced]
+    == [[["build", 1], ["judge", 3], ["review", 1], ["fix", 1], ["review", 1]], 7, 0]' <<<"$out" > /dev/null \
+    || fail "the judge with a call is not priced as a step of the card, or the one with none is a step: $(jq -c '.landed[0].metrics | {timeline, usd, unpriced}' <<<"$out")"
+}

@@ -28,7 +28,7 @@ def row: . as $s | $s.first as $f | $s.r as $r | $s.l as $l
          stage: ({picked: 0, build: 1, fix: 3, landing: 5}[$at] // (if $r + (if $l.step == "review" then 0 else 1 end) > 1 then 4 else 2 end)),
          reviews: $r, startedAt: $f.time, stepAt: $s.gt,
          # seats: the judge's call of the rule Pick settings before the card (pickjudge(), lib/modelpick.sh), priced as a step of its own.
-         # The sessions and reviews (stepline), then the ones a blocked line says failed (spentline).
+         # The sessions, reviews and judge calls (stepline), then the ones a blocked line says failed (spentline).
          steps: ($s.s1 + $s.s2),
          # A card the loop retried itself (retriedWhy, retry()) says why after its reason; x.retriedWhy holds that note
          # alone, so the snapshot's earlier attempt can keep it out of the reason it parses (lib/snapshot.sh reasonOf).
@@ -166,7 +166,10 @@ def fold($x): .an as $i | .at as $pt | .gt as $gt | ($x.step | IN("start", "file
       | if $x.step == "blocked" then .lb = $x.time else . end
       | if $mark then . else
           (if .n == 0 then .first = ($x | {card, issue, mainRed, testFile, noIssue, title, time, branch, base, beyond})
-           elif $x.step | IN("seats", "build", "review", "test", "fix", "rebase") then .s1 += [$x | stepline($gt)]
+           # A judge line is a step of its own (its tokens and usage are in no review's), priced at its model; one with
+           # no sec ran no call and costs nothing (spent(), lib/records.sh), so it is no step.
+           elif ($x.step | IN("seats", "build", "review", "test", "fix", "rebase")) or ($x.step == "judge" and ($x | has("sec")))
+             then .s1 += [$x | stepline($gt)]
            elif $x.step == "blocked" and ($x.spent | type) == "object" then .s2 += [$x | spentline($gt)] else . end)
           | .n += 1 | .gt = (if $x.step == "judge" then $gt else $x.time end)
           | if $x.step | IN("landed", "closed", "blocked", "judge") then . else .l = ($x | {step, result}) end
