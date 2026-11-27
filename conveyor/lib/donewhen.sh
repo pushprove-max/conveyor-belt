@@ -330,14 +330,18 @@ dwchecked() { # <card> <issue> <worktree> <issue json> <the sessions' prompt> <s
 # that line, each run of white space made one space and the ends trimmed), differs (other text, a file the staged tree
 # lacks or a line past its end) or none (no such part). It drops no finding: the judge reads the word. A finding the
 # judge declined, ruled outside or sent to a list, and a MINOR one, counts too (its prefix and the judge's reason are left out).
-proofline() { # <worktree>
-  local f p n want got re='^.*At ([A-Za-z0-9_./-]+):([0-9]+): `(.+)`' real
+# A quoted path that starts with the worktree's path is read inside it. A replay (lib/replay.sh) checks the findings in
+# a worktree of its own, so it names the card's own worktree as <was>, whose path the findings quote: that prefix is
+# taken away too, with the real path of its folder (the worktree itself is gone).
+proofline() { # <worktree> [<was>]
+  local f p n want got re='^.*At ([A-Za-z0-9_./-]+):([0-9]+): `(.+)`' real was=${2:-} wreal=''
   real=$(cd "$1" && pwd -P) || return 1
+  [ -z "$was" ] || wreal=$(cd "${was%/*}" 2>/dev/null && pwd -P)/${was##*/} || wreal=''
   sed -E 's/^[[:space:]]*((DECLINED|MINOR|OUTSIDE|SELFHEALS):[[:space:]]*)+//; s/ \(judge: .*\)$//' "$1.review" | grep -Ev "$NOTFINDING" \
     | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | awk 'NF && !seen[$0]++' | while IFS= read -r f; do
     [[ $f =~ $re ]] || { echo none; continue; }
     p=${BASH_REMATCH[1]}; n=$((10#${BASH_REMATCH[2]})); want=$(proofnorm "${BASH_REMATCH[3]}")
-    p=${p#"$1"/}; p=${p#"$real"/}; p=${p#./}
+    p=${p#"$1"/}; p=${p#"$real"/}; [ -z "$was" ] || p=${p#"$was"/}; [ -z "$wreal" ] || p=${p#"$wreal"/}; p=${p#./}
     got=$(git -C "$1" cat-file blob ":$p" 2>/dev/null | awk -v n="$n" 'NR == n') || got=''
     got=$(proofnorm "$got")
     if [ -n "$got" ] && [ "$got" = "$want" ]; then echo match; else echo differs; fi

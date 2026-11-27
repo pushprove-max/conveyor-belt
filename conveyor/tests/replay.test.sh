@@ -15,7 +15,8 @@
 # - c1-6 (issue 8, in the retried lines, as `retry 8 --fresh` leaves it): F-nine accepted; no diff, so it is skipped.
 # - c1-8 (issue 8, blocked, in the retried lines; its kept patch adds "four" to a.txt): F1 of a kind always accepted,
 #   that the judge declined, so its own ruling is a decline. Built from nothing after c1-6, its judge was given no
-#   findings of a fix round before it (no back).
+#   findings of a fix round before it (no back). F1 quotes its line by the whole path of the card's own worktree
+#   ($CARDS/c1-8), as a reviewer may.
 # - c1-9 (issue 9): no landed commit and no kept patch, so it has no diff and is skipped.
 # - c1-10: a review the record marks as failed, with F-five accepted and F-eight undecided (no readable decision).
 # - c1-11 (issue 9, landed as the same commit as c1-7): F1 accepted; the replay judge's call on it fails. Its judge
@@ -56,7 +57,7 @@ replaysetup() {
   printf '%s\n' '{"id":"d000000000001","time":"2026-11-01T00:00:30Z","card":"c1-7","issue":7,"finding":"[P2] a.txt:1 F-old","by":"judge","why":"nothing new","kind":"claim wrong","repo":"r"}' \
     '{"id":"d000000000002","time":"2026-11-01T00:00:58Z","card":"c1-7","issue":7,"finding":"[P2] a.txt:1 F-two","by":"judge","why":"style","repo":"r"}' >> "$ST/declined.jsonl"
   rline c1-6 8 2 "$P8" '{"accepted":[{"n":1,"finding":"[P1] a.txt:3 F-nine","place":"inside","reason":"real","cost":"none"}],"declined":[]}' "$ST/retried.jsonl"
-  base=$sha rline c1-8 8 3 "$P8" '{"accepted":[{"n":1,"finding":"[P1][security] a.txt:3 F-three","place":"inside","reason":"always accepted: a security finding (the judge declined it: weak)","cost":"none"}],"declined":[]}' "$ST/retried.jsonl"
+  base=$sha rline c1-8 8 3 "$P8" "$(jq -cn --arg f "[P1][security] a.txt:3 F-three. Proof: p. At $T/$CASE/cards/c1-8/a.txt:3: \`l2\`" '{accepted: [{n: 1, finding: $f, place: "inside", reason: "always accepted: a security finding (the judge declined it: weak)", cost: "none"}], declined: []}')" "$ST/retried.jsonl"
   jq -cn '{card: "c1-8", issue: 8, step: "blocked", time: "2026-11-01T00:04:00Z", tokens: {claude: 0, codex: 0}, result: "blocked", sha: "", reason: "tests failed", kept: "kept/c1-8"}' >> "$ST/retried.jsonl"
   rline c1-9 9 5 "$P7" '{"accepted":[{"n":1,"finding":"[P1] a.txt:1 F-four","place":"inside","reason":"real","cost":"none"}],"declined":[]}'
   rline c1-10 9 6 "$P7" '{"failed":"the judge call failed","accepted":[{"n":1,"finding":"[P1] a.txt:1 F-five","place":"inside","reason":"real","cost":"none"},{"n":2,"finding":"[P1] a.txt:1 F-eight","place":"inside","reason":"the judge gave no line for this finding that could be read","cost":null}]}'
@@ -120,6 +121,10 @@ t_replayjudge() {
   grep -q '^+three$' "$STUB/judged" && grep -q '^+four$' "$STUB/judged" && grep -q '^F1 \[inside the diff; proof line: match\] \[P1\] a.txt:2 F-one. Proof: p. At a.txt:2: `l2`$' "$STUB/judged" \
     && grep -q '^F2 \[outside the diff; proof line: none\] \[P2\] a.txt:1 F-two$' "$STUB/judged" && grep -q '^#7 title 7$' "$STUB/judged" \
     || fail "the judge was not given each case's diff, issue and findings: $(cat "$STUB/judged")"
+  # Bug caught: c1-8's F1 quotes its line by the whole path of the card's own worktree ($CARDS/c1-8), which its review's
+  # judge read as match; the replay read it in its own worktree, kept that prefix and marked it differs.
+  awk '/^== /{on = /c1-8$/} on' "$STUB/judged" | grep -q '^F1 \[[a-z ]* the diff; proof line: match\] \[P1\]\[security\] a.txt:3 F-three' \
+    || fail "c1-8's F1, quoting $T/$CASE/cards/c1-8/a.txt:3, is not marked match for the replay judge: $(awk '/^== /{on = /c1-8$/} on' "$STUB/judged" | grep '^F')"
   # Bug caught (#1381): the replay judge's prompt says each finding is followed by the lines it cites and a small staged
   # change is in the message, but replay sent the finding text alone, so it judged with less than the live judge has.
   # The message is checked from the diff heading to its end: the diff's own lines and the last finding's (F2) lines

@@ -152,8 +152,9 @@ replay() { # judge <model> [<effort>] [--last <n>] [--estimate]
     back=$(jq -r '.back | arrays | if length > 0 then "# The findings the last fix round was told to fix\n\(join("\n"))" else empty end' <<<"$k")
     # The findings as judged() gives them (judgefindings(): the small staged change, the lines each finding cites), from the marks file it reads.
     # Each finding's proof line mark (proofline()) is read from the findings written as a review beside the rebuilt worktree.
+    # A quote that names the card's own worktree ($CARDS/<card>, gone now) by its whole path is read in the rebuilt one.
     jq -r '.findings[].finding' <<<"$k" > "$d/wt.review"
-    jq -c --rawfile pl <(proofline "$d/wt") '($pl | split("\n")) as $pw | [.findings | to_entries[] | {n: (.key + 1), place: (.value.place | if . == "inside" or . == "outside" then . else "none" end), proof: ($pw[.key] // "none"), finding: .value.finding}]' <<<"$k" > "$d/wt.judge.marks"
+    jq -c --rawfile pl <(proofline "$d/wt" "$CARDS/$(jq -r .card <<<"$k")") '($pl | split("\n")) as $pw | [.findings | to_entries[] | {n: (.key + 1), place: (.value.place | if . == "inside" or . == "outside" then . else "none" end), proof: ($pw[.key] // "none"), finding: .value.finding}]' <<<"$k" > "$d/wt.judge.marks"
     out=$(CALLSEAT=$s CALLSTEP=replay CALLACT="the replay judge reads the findings of $(jq -r .card <<<"$k")" judgecall "$d/wt" "$jp" "$brief"$'\n\n'"${back:+$back$'\n\n'}${before:+$before$'\n\n'}${outside:+$outside$'\n\n'}$(judgefindings "$d/wt")") && f=ok || f=''
     jq -e objects <<<"$out" >/dev/null 2>&1 || out='{"failed": "the judge call printed no fields"}'
     ans='[]'; [ -z "$f" ] || ans=$(jq -cRn '[inputs | gsub("^[[:space:]`*-]+|[[:space:]`*]+$"; "") | capture("^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE|OUTSIDE):[[:space:]]*(?<r>.*)$")]' "$d/wt.judge" 2>/dev/null) || ans='[]'

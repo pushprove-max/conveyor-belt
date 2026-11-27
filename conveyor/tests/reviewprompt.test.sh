@@ -148,6 +148,12 @@ t_proofline() {
   grep -qF 'F1 [inside the diff; proof line: match] [P1] a.txt:3 f1' <<<"$x" \
     && grep -qF 'F4 [outside the diff; proof line: differs] ' <<<"$x" && grep -qF 'F9 [outside the diff; proof line: none] ' <<<"$x" \
     || fail "the judge's message lacks the proof line marks: $(grep '^F' <<<"$x")"
+  # Bug caught: a replay reads the findings in a worktree of its own, so a quote by the whole path of the card's own
+  # worktree (gone by then), or by that path with its folder's links resolved, kept its prefix and was marked differs.
+  mkdir -p "$T/$CASE/real" && ln -s real "$T/$CASE/link" || fail "the folder link could not be made"
+  printf '%s\n' "[P1] f1. Proof: p. At $T/$CASE/link/c1/a.txt:1: \`one\`" "[P1] f2. Proof: p. At $T/$CASE/real/c1/a.txt:2: \`two words\`" > "$w.review"
+  m=$(eval "$(grep -E '^(ROLLOUT|NOTFINDING)=' "$SRC/lib/prompts.sh")"; . "$SRC/lib/donewhen.sh"; proofline "$w" "$T/$CASE/link/c1" | tr '\n' ' ')
+  [ "$m" = 'match match ' ] || fail "proofline $w $T/$CASE/link/c1 on quotes by that path and by $T/$CASE/real/c1 gives: $m"
 }
 
 # Bug (#1749): the review's record line counted only the findings the review still held as findings: one the judge
