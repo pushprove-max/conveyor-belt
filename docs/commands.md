@@ -254,6 +254,9 @@ Setup and the engine:
   ([Lanes](lanes.md)). `--link yes|no` answers if each card's worktree links the dependency folders that setup found,
   and `--worktree-setup <command>` installs them in each card's worktree instead. `--serena yes` installs Serena when
   it is not installed and turns on the rule Serena ([The rule Serena](configuration.md#the-rule-serena)).
+  `--lean-settings yes|no` turns off Claude Code's prompt suggestions and away summaries, caps skill descriptions at
+  400 characters and turns off Serena's web dashboard on this machine, or takes these settings away
+  ([Setup](setup.md#setup)). Given alone, it changes only these settings.
   `doctor` also tries each of the pack's lint commands once in the main checkout: a command with `{files}` on one
   tracked file that its `files` match, a command without it as it is. It prints one line for each command: `ok`,
   `findings: <n>`, `missing: <tool>`, `error: <first line>`, or `empty` when no tracked file matches (the command is

@@ -186,3 +186,67 @@ t_installold() {
   ( . "$SRC/lib/install.sh" && installed "$A" ro "$V/$A" ) && [ "$(compgen -G "$V/$A.part*")" = "$V/$A.part" ] \
     || fail "the published $V/$A does not pass installed $A ro, or the install left its own folder: $(ls -a "$V")"
 }
+# Bug (#1825): an engine update did not write the lean settings, and one that wrote them all again would undo the
+# user's removal. An install of a new commit, on a machine with no record, changes nothing; on the machine's yes, it
+# writes each key the record does not name (away summaries, the skill listing's cap), and neither the key the user
+# took away after setup wrote it (prompt suggestions) nor Serena's dashboard line the user set back to true.
+t_leaninstall() {
+  coderepo; X=$D/conveyor/conveyor.sh; trap 'chmod -R u+w "$T/$CASE"' EXIT
+  export CLAUDE_CONFIG_DIR=$T/$CASE/cc SERENA_HOME=$T/$CASE/serena; mkdir -p "$CLAUDE_CONFIG_DIR" "$SERENA_HOME" "$XDG_DATA_HOME/conveyor"
+  echo '{"env": {}}' > "$CLAUDE_CONFIG_DIR/settings.json"; echo 'web_dashboard: true' > "$SERENA_HOME/serena_config.yml"
+  bash "$X" install "$A" > "$T/$CASE/out" 2>&1 || fail "the install of $A failed: $(cat "$T/$CASE/out")"
+  [ "$(jq -c . "$CLAUDE_CONFIG_DIR/settings.json")" = '{"env":{}}' ] && [ "$(cat "$SERENA_HOME/serena_config.yml")" = 'web_dashboard: true' ] \
+    && [ ! -e "$XDG_DATA_HOME/conveyor/lean-settings.json" ] \
+    || fail "an install on a machine with no lean settings' record changed the Claude settings or Serena's config: $(cat "$CLAUDE_CONFIG_DIR/settings.json" "$SERENA_HOME/serena_config.yml")"
+  echo '{"answer": "yes", "added": ["env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "serena:web_dashboard"], "at": "2026-11-27T00:00:00Z"}' > "$XDG_DATA_HOME/conveyor/lean-settings.json"
+  bash "$X" install "$B" > "$T/$CASE/out" 2>&1 || fail "the install of $B failed: $(cat "$T/$CASE/out")"
+  [ "$(jq -cS . "$CLAUDE_CONFIG_DIR/settings.json")" = '{"env":{"CLAUDE_CODE_ENABLE_AWAY_SUMMARY":"0"},"skillListingMaxDescChars":400}' ] \
+    || fail "the install of a new commit on the machine's yes did not write the keys never written, or wrote again the one the user took away: $(cat "$CLAUDE_CONFIG_DIR/settings.json"); $(cat "$T/$CASE/out")"
+  [ "$(cat "$SERENA_HOME/serena_config.yml")" = 'web_dashboard: true' ] && [ "$(jq -c .added "$XDG_DATA_HOME/conveyor/lean-settings.json")" \
+    = '["env.CLAUDE_CODE_ENABLE_AWAY_SUMMARY","env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION","serena:web_dashboard","skillListingMaxDescChars"]' ] \
+    || fail "the install turned Serena's dashboard off again, or did not record the keys it wrote: $(cat "$SERENA_HOME/serena_config.yml"); $(cat "$XDG_DATA_HOME/conveyor/lean-settings.json")"
+  # Doctor named the dashboard line the user set back to true as missing, as it looked only for false.
+  out=$( . "$SRC/lib/portable.sh" && . "$SRC/lib/lean.sh" && leandoctor 2>&1)
+  [[ $out == *'; Serena config: web_dashboard set by the user' ]] \
+    || fail "doctor, with Serena's config holding web_dashboard: true the user set back, did not name it set by the user: $out"
+}
+# Bug (#1825): setup's yes and an engine update each read the Claude settings and write them whole. What must stay
+# true: the update reads the record and the settings again only after setup's write ends, under the record's lock.
+# Here setup is paused after its read, at its write's first step (the backup, a cp stand-in), holding the lock; the
+# update (`conveyor.sh install`) then runs until it waits on that lock (a flock stand-in says so) or ends. Without the
+# lock it read the record setup had not finished, wrote the three keys a second time with a second backup, and its
+# copy and setup's would each be written whole over the other.
+t_leanrace() {
+  local b=$T/$CASE/bin ev=$T/$CASE/ev go=$T/$CASE/go e
+  coderepo; X=$D/conveyor/conveyor.sh; trap 'chmod -R u+w "$T/$CASE"' EXIT
+  export CLAUDE_CONFIG_DIR=$T/$CASE/cc SERENA_HOME=$T/$CASE/serena; mkdir -p "$CLAUDE_CONFIG_DIR" "$b" && echo '{}' > "$CLAUDE_CONFIG_DIR/settings.json" \
+    && mkfifo "$ev" "$go" && touch "$T/$CASE/pause" || fail "the case's folders were not made"
+  printf '#!/usr/bin/env bash\ncase ${3-} in *settings.json.conveyor-*.bak) [ ! -e %q ] || { rm -f %q; echo paused > %q; read -r _ < %q; } ;; esac\nexec %q "$@"\n' \
+    "$T/$CASE/pause" "$T/$CASE/pause" "$ev" "$go" "$(command -v cp)" > "$b/cp"
+  printf '#!/usr/bin/env bash\n[ -z "${LEANLOCKEV-}" ] || ! [ /dev/fd/9 -ef %q ] || echo lock > "$LEANLOCKEV"\nexec %q "$@"\n' \
+    "$XDG_DATA_HOME/conveyor/lean-settings.json.lock" "$(command -v flock)" > "$b/flock"
+  chmod +x "$b/cp" "$b/flock" || fail "the stand-ins were not made"
+  exec 7<>"$ev" # held open read and write, so each event's writer never waits for a reader
+  ( cd "$D" && PATH=$b:$PATH bash "$X" setup --lean-settings yes > "$T/$CASE/setup.out" 2>&1; echo "setup $?" > "$ev" ) &
+  read -t 120 -r e <&7 && [ "$e" = paused ] || fail "setup --lean-settings yes did not reach its write of the settings: $e $(cat "$T/$CASE/setup.out")"
+  ( PATH=$b:$PATH LEANLOCKEV=$ev bash "$X" install "$B" > "$T/$CASE/install.out" 2>&1; echo "install $?" > "$ev" ) &
+  read -t 120 -r e <&7 || fail "the install neither waited on the lean settings' lock nor ended"
+  echo go > "$go"; wait
+  [ "$e" = lock ] && ! grep -q 'wrote' "$T/$CASE/install.out" && [ "$(compgen -G "$CLAUDE_CONFIG_DIR/settings.json.conveyor-*.bak" | wc -l)" = 1 ] \
+    && [ "$(jq -c '[.answer, .added]' "$XDG_DATA_HOME/conveyor/lean-settings.json")" = '["yes",["env.CLAUDE_CODE_ENABLE_AWAY_SUMMARY","env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION","skillListingMaxDescChars"]]' ] \
+    || fail "the install, run while setup --lean-settings yes was between its read and its write, did not wait for it, or wrote the settings again (first event: $e): $(cat "$T/$CASE/install.out"); $(ls "$CLAUDE_CONFIG_DIR"); $(cat "$T/$CASE/setup.out")"
+}
+# Bug (#1825): take() drops an install's stdout, so on a machine's yes an engine update through take, or its repair of
+# a missing install, hid the line naming a Claude settings file that is not valid JSON.
+t_leantake() {
+  setup '[]'; coderepo; X=$D/conveyor/conveyor.sh; trap 'chmod -R u+w "$T/$CASE"' EXIT
+  tune '.plugin = {follow: "main"}'
+  export CLAUDE_CONFIG_DIR=$T/$CASE/cc; mkdir -p "$CLAUDE_CONFIG_DIR" "$XDG_DATA_HOME/conveyor" && echo '{' > "$CLAUDE_CONFIG_DIR/settings.json" \
+    && echo '{"answer": "yes", "added": []}' > "$XDG_DATA_HOME/conveyor/lean-settings.json" || fail "the case's files were not made"
+  local l="Claude settings not changed: $CLAUDE_CONFIG_DIR/settings.json is not valid JSON"
+  out=$(CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards bash "$X" take wait 2>&1)
+  grep -qxF "$l" <<<"$out" || fail "conveyor.sh take wait, installing a new commit, did not show: $l; it printed: $out"
+  c=$(jq -r .commit "$R/.git/conveyor-engine.json") && chmod -R u+w "$V/$c" && rm -rf "${V:?}/$c" || fail "the taken install was not removed"
+  out=$(CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards bash "$X" take wait 2>&1)
+  grep -qxF "$l" <<<"$out" || fail "conveyor.sh take wait, installing the project's missing commit again, did not show: $l; it printed: $out"
+}

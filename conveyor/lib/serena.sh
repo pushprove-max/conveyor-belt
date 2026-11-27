@@ -5,8 +5,9 @@
 # server a card session may get, with its web dashboard and GUI log window off and (a Serena that has the option, 2.x)
 # its agent interface tools on its command line, whatever the user's ~/.serena/serena_config.yml says (its REPL
 # interface, Serena 2.1's default, gives serena_repl alone in place of find_symbol and the other search tools, and no
-# session is allowed serena_repl). The engine does not change that file (Serena itself adds each project it starts in
-# to the file's list of projects). Sourced by lib/control.sh.
+# session is allowed serena_repl). The engine changes only that file's web_dashboard line, on the machine's yes to the
+# lean settings (lib/lean.sh) (Serena itself adds each project it starts in to the file's list of projects). Sourced
+# by lib/control.sh.
 # shellcheck disable=SC2034 # the roles the rule takes, read by control() (lib/control.sh)
 SERENAROLES='build|fix|testfix|review|judge'
 # The line a session's prompt gets with Serena (SERENA_SAY): which tool answers which search, and grep for the rest.

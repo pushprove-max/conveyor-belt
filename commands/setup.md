@@ -33,7 +33,14 @@ no) before step 1, and add `--serena yes` or `--serena no`, as answered, to each
 setup's lines for it: with yes it installs Serena with `uv tool install serena-agent` when Serena is missing, then sets
 the rule Serena to build, fix and testfix; with no `uv`, or with uv's folder not on PATH, its line says what to do and
 the rule stays off. Card sessions always start Serena with its web dashboard off; do not change
-`~/.serena/serena_config.yml` here.
+`~/.serena/serena_config.yml` yourself: the next question covers its web dashboard.
+
+When the file `${XDG_DATA_HOME:-$HOME/.local/share}/conveyor/lean-settings.json` is not there, ask the user "Turn off
+Claude Code's prompt suggestions and away summaries, and cap skill descriptions at 400 characters, in your Claude
+settings on this machine, and turn off Serena's web dashboard in your Serena config?" (yes (Recommended) / no) before
+step 1, and add `--lean-settings yes` or `--lean-settings no`, as answered, to each run of step 1's setup command.
+Show setup's lines for it: the settings it wrote or took away, the answer it saved, and a `Claude settings not
+changed` line when the user's settings file is not valid JSON. Do not edit either file yourself.
 
 First install the requirements, then sign in, before step 1:
 

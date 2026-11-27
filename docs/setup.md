@@ -108,8 +108,36 @@ code that calls it without reading whole files ([The rule Serena](configuration.
 (`setup --serena yes`), setup installs Serena with `uv tool install serena-agent` when it is not installed, then sets
 the rule Serena to build, fix and test fix sessions. When `uv` is not installed, setup shows the command that installs
 Serena and does not set the rule. When the folder that uv puts Serena in is not on PATH, setup says so and does not
-set the rule. With no, setup changes nothing. Setup does not change Serena's own settings file. Card sessions always
-start Serena with its web dashboard off. `conveyor.sh doctor` shows where Serena is installed and its version.
+set the rule. With no, setup changes nothing. This answer does not change Serena's own settings file. Card sessions
+always start Serena with its web dashboard off. `conveyor.sh doctor` shows where Serena is installed and its version.
+
+Setup also asks "Turn off Claude Code's prompt suggestions and away summaries, and cap skill descriptions at 400
+characters, in your Claude settings on this machine, and turn off Serena's web dashboard in your Serena config?". The
+answer is for this machine, not for one project. With yes (`setup --lean-settings yes`), setup adds these settings to
+your Claude Code settings file, `~/.claude/settings.json` (or `settings.json` in `$CLAUDE_CONFIG_DIR`):
+
+- `env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` set to `"false"`: Claude Code does not suggest your next prompt. Each
+  suggestion sends the whole conversation again.
+- `env.CLAUDE_CODE_ENABLE_AWAY_SUMMARY` set to `"0"`: Claude Code does not write a summary of a session when you come
+  back to it.
+- `skillListingMaxDescChars` set to `400`: each skill's description in the list of skills that a session gets has
+  400 characters or fewer, so each request is smaller.
+
+Setup adds a setting only when your file does not have it, and it does not change a value that you set. Before it
+changes the file, it copies the file to `settings.json.conveyor-<UTC time>.bak`. When the file is not valid JSON,
+setup does not change it and shows `Claude settings not changed: <path> is not valid JSON`. When
+`~/.serena/serena_config.yml` (or `serena_config.yml` in `$SERENA_HOME`) has the line `web_dashboard: true`, setup
+changes that line to `web_dashboard: false`. Before it does, it copies the file to
+`serena_config.yml.conveyor-<UTC time>.bak`. Card sessions do not read these files: the settings change only your
+own Claude Code and Serena sessions.
+
+After you answer yes, each time Conveyor installs a new version on this machine, it adds each of these settings that
+it did not add before. After you answer no, or when you did not answer, it adds none. It does not add a setting
+again after you remove it. To undo them, run `conveyor.sh setup --lean-settings no` in your project's checkout.
+Given alone, `--lean-settings` changes only these settings. It removes each setting that still has the value that
+Conveyor wrote, and sets Serena's line back to `web_dashboard: true` while it is still `false`. The updates and the
+undo use the files that Conveyor changed first, also after you change `CLAUDE_CONFIG_DIR` or `SERENA_HOME`. A setting that you changed stays as it is. `conveyor.sh
+doctor` shows your answer, and each setting as `set`, `set by the user` or `missing`.
 
 Setup also reads the names of your project's tracked files and your test command, to find how your test files are
 named ([How test files are found](configuration.md#how-test-files-are-found)). It also reads the config of your test
@@ -327,7 +355,7 @@ changes a `CLAUDE.md` or an `AGENTS.md` that is already there.
 - `--pin` pins a new project to the commit of the plugin copy, in place of following releases (below).
 
 From a shell, in your project's checkout, the same steps are
-`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-machine yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]`,
+`conveyor.sh setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-machine yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--lean-settings yes|no] [--pin] [--foreman]`,
 then `conveyor.sh doctor`.
 
 To see the board in the Chat tab of Claude Desktop, run `conveyor.sh setup desktop` in your project's checkout

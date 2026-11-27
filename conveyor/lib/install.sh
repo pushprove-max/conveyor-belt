@@ -32,7 +32,7 @@ installed() { # <commit> [ro] [folder]
 # Puts this repository (the origin of the checkout this script is in, or the repository given) at <commit> into
 # VERSIONS/<commit> and marks it read-only. Only a full commit id names a version folder, and the folder is kept only
 # when it is that commit as installed() verifies it: a hook (a Git template's post-checkout) may change the files the
-# checkout wrote.
+# checkout wrote. A new commit put in place runs leansettings().
 install() { # <commit> [<repository>]
   local c=$1 d=$VERSIONS/$1 src=${2:-} m=$VERSIONS/mirror.git rc p
   [[ $c =~ ^[0-9a-f]{40}$ ]] || { echo "conveyor: $c is not a full commit id: an install cannot be verified against it" >&2; return 1; }
@@ -64,8 +64,13 @@ install() { # <commit> [<repository>]
       chmod -R a-w "$p" && mv "$p" "$d" \
         || { [ -e "$d" ] || exit 2; [ ! -e "$p" ] || { chmod -R u+w "$p" && rm -rf "$p"; } || exit 2; exit 3; }
     ) 9>>"$m.lock" 2>/dev/null; rc=$?
+    # A new commit installed is an engine update: on the machine's yes to the lean settings, each lean key Conveyor
+    # never wrote is written (leansettings(), lib/lean.sh, loaded here from this file's folder: about 40 commands load
+    # this file and only an install needs it); a failed write there leaves the install as it is. Its lines go to
+    # stderr, which take() shows when the install worked, as it drops the install's stdout.
     case $rc in
-      0) echo "conveyor: $c is installed in $d, read-only"; return 0 ;;
+      0) echo "conveyor: $c is installed in $d, read-only"
+        { declare -F leansettings >/dev/null || . "${BASH_SOURCE[0]%/*}/lean.sh"; } && leansettings >&2 || :; return 0 ;;
       2) echo "conveyor: commit $c was checked out and verified in a $d.part.* folder, and could not be made read-only and moved to $d" >&2; return 1 ;;
       3) ;;
       *) echo "conveyor: commit $c could not be fetched from $src, checked out and verified" >&2; return 1 ;;
@@ -230,6 +235,8 @@ taken() {
   fi
   if [ "$h" != "$(jq -r '.commit // ""' "$ENGINE" 2>/dev/null)" ] && [ "$h" != "$(jq -r '.refused.commit // ""' "$ENGINE" 2>/dev/null)" ]; then
     why=$(install "$h" "$u" 2>&1 >/dev/null) || { echo "conveyor: Conveyor commit $h of the plugin's $n could not be installed: $why" >&2; return 1; }
+    # An install that worked writes stderr only for the lean settings (leansettings(), lib/lean.sh): shown.
+    [ -z "$why" ] || printf '%s\n' "$why"
     if ! why=$("$VERSIONS/$h/conveyor/lib/pack.sh" check "$PACK" 2>&1); then why="its check of the pack failed: ${why//$'\n'/; }"
     elif why=$(hooksmissing "$VERSIONS/$h") && [ -n "$why" ]; then why="it lacks hooks .claude/settings.json runs through shim.sh: ${why//$'\n'/, }"
     else why=''; fi
@@ -250,6 +257,7 @@ taken() {
   c=$(jq -r '.commit // empty' "$ENGINE" 2>/dev/null)
   if [[ $c =~ ^[0-9a-f]{40}$ ]] && [ ! -e "$VERSIONS/$c" ]; then
     t=$(install "$c" "$u" 2>&1 >/dev/null) || { echo "conveyor: Conveyor commit $c, the project's engine, is not installed and could not be installed again: $t" >&2; return 1; }
+    [ -z "$t" ] || printf '%s\n' "$t"
     echo "conveyor: Conveyor commit $c, the project's engine, was not installed: installed it again"
   fi
   prune ${why:+"$h"} || return
