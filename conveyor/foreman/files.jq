@@ -5,16 +5,20 @@
 # with a space in it is read as one word, its spaces turned to _ and its other characters kept (a search for 'gh issue' or a
 # title that says -X PATCH is no command, and a mutation in quotes still shows createIssue), except a command substitution
 # ($(...) or backticks, at any depth and with parentheses in its own quotes) inside double quotes, which runs and is read
-# as a command (scan reads the quotes as bash nests them; a backslash makes the next character text), a word that holds $ or a
+# as a command (scan reads the quotes as bash nests them; a backslash makes the next character text, except \` and \$ inside
+# a backtick command, which bash reads as ` and $ when it reads that command, so they nest), a word that holds $ or a
 # backtick after `issue` alone could be a search pattern, and a `gh api` call with -X PATCH edits an issue and files none,
 # so none of them counts.
 def strict: ($ARGS.named.strict // "") != "";
 def flags: "(?>\\s+-(-[^\\s=]*(=\\S*|\\s+[^-\\s]\\S*)?|[^-\\s](\\s+[^-\\s]\\S*)?(?=\\s)|[^-\\s]\\S+))*";
 def vword: if strict then "(?!)" else "(?!-)\\S*[$`]" end;
-# The stack .k holds the open contexts: s and d quotes, c for ( or $(, b for a backtick; none open is the command itself.
+# The stack .k holds the open contexts: s and d quotes, c for ( or $(, b for a backtick, B for an escaped backtick (\`)
+# inside a backtick command, which only another \` ends (a \` in a b opens a B); none open is the command itself.
 def scan: reduce (explode[] | [.] | implode) as $c ({o: [], k: [], e: false, p: ""};
   (.k[-1] // "") as $t | ($c | test("\\s")) as $w
-  | if .e then .o += [if $w and ($t == "s" or $t == "d") then "_" else $c end] | .e = false | .p = ""
+  | if .e then (if $c == "`" and any(.k[]; . == "b") then (if $t == "B" then .k |= .[:-1] else .k += ["B"] end) else . end)
+      | .o += [if $w and ($t == "s" or $t == "d") then "_" else $c end] | .e = false
+      | .p = (if $c == "$" and any(.k[]; . == "b") then "$" else "" end)
     elif $t == "s" then (if $c == "\u0027" then .k |= .[:-1] else . end) | .o += [if $w then "_" else $c end] | .p = $c
     elif $t == "d" then (if $c == "\\" then .e = true elif $c == "\"" then .k |= .[:-1] elif $c == "`" then .k += ["b"]
       elif $c == "(" and .p == "$" then .k += ["c"] else . end) | .o += [if $w then "_" else $c end] | .p = $c
