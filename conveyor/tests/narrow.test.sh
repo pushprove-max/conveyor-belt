@@ -321,7 +321,7 @@ t_narrowowncaselinks() {
 t_narrowcap() {
   caprun 120 lib/cartsum.js '' '{"card":"c1","issue":1,"step":"test","time":"2026-11-10T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"t100.test.js","cases":[]}],"timeout":null}}' \
     '{"card":"c2","issue":2,"step":"test","time":"2026-11-12T12:00:00Z","result":"fail","failures":{"of":1,"files":[{"file":"t090.test.js","cases":[]}],"timeout":null}}'
-  local note='the change adds or changes no test file, so the card ran 5 of the 120 test files linked to it, those that failed most recently first. The run before the push runs all of them.'
+  local note='the change adds or changes no test file, so the card ran 5 of the 120 test files linked to it, those that failed most recently first. The run before the push runs all of them, except each one that passed before with the same inputs.'
   # The files start in the list's order (their `== ` lines in the run's log), and side by side each writes when it runs.
   [ "$(cat "$T/$CASE/rc")" = 0 ] && [ "$(sort "$STUB/got" 2>&1)" = "$(printf 'one:%s\n' t001.test.js t002.test.js t003.test.js t090.test.js t100.test.js)" ] \
     && [ "$(sed -n 's/^== //p' "$T/$CASE/cards/c7.testlog/files" 2>&1)" = "$(printf '%s\n' t090.test.js t100.test.js t001.test.js t002.test.js t003.test.js)" ] \

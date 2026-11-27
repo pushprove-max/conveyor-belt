@@ -801,12 +801,13 @@ none runs at most 5 of the test files the test map and the links give its files,
 pack sets `test.changed`, the files that `test.command` lists for the change run first, in the order of its list.
 Then the files that failed most recently run. A change with no linked test file runs nothing and passes, its list
 `{"mode": "changed", "files": 0, ..., "why": "..."}`. When linked files are left out, the list has `left` (how many did not run) and a `why` that
-says the run before the push runs them all. The Board shows this note with the step. The live record and the test
+says the run before the push runs them all, except each one that passed before with the same inputs. The Board shows this note with the step. The live record and the test
 line hold `list`: `{"mode": "changed", "files": <count>, "by": "own", "map" or "name", "age": <commits>}` (`age`, the
 commits the made test map is behind, only with one). The Board shows it with the test step (`changed: 7 files (map)
 · map 12 commits old`, `changed: 7 files (by name)`); `/units` shows `changed: 7 files`. Before each push, the loop
-runs the test files the test map and the links give each landing since the last push, each alone, once a commit; a
-file that fails is run on the landings in turn, goes to the main-fix card of main's commit naming the landing that
+runs the test files the test map and the links give each landing since the last push, each alone, once a commit. It
+does not run a file whose kept pass in the test results cache has the inputs that main has (a card's Test step keeps
+one), unless `pushbatchtests` is `all`, which runs every file. A file that fails is run on the landings in turn, goes to the main-fix card of main's commit naming the landing that
 broke it, and holds the push (`lib/push.sh` `pushtests`, [Push](../docs/cards.md#push)), unless the push check is off
 (`push.check`, `conveyor.sh control push-check`). A run that reports more test files than it was given is stopped,
 and the card is blocked with a reason that names the file that ran the rest.
@@ -985,6 +986,8 @@ links still give the tests that have no kept pass. Each
 other file on the card's list gets a `TESTRUN why` line that tells why it runs: its inputs changed since its last
 pass, or no pass of it is kept with its inputs.
 The full test suite does not use the cache. A path that is absolute or contains `..` is not kept.
+The run before a push keeps passes the same way. When it runs a file whose kept pass has the same inputs (with
+`pushbatchtests` set to `all`), it gives the runner `CONVEYOR_TEST_NOTRACE=1`: the runner need not find the inputs again.
 
 A slow test file never sends a card to its review, a fix or another test step, and nothing is filed for it as a
 follow-up. Conveyor files an issue about a test file only by a test

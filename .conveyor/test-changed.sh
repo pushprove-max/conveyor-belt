@@ -1798,8 +1798,10 @@ fshare() { # <test file> <command>...
 # traces each call that takes a path (%file): a test can read a file with no open (a readlink, a stat, an access check
 # or an exec of it). It traces the calls that failed too: a lookup of a file that is not there (a package.json that
 # Node looks for) changes what the test does once that file is added.
+# CONVEYOR_TEST_NOTRACE set (the run before a push, for a file whose list of inputs is fresh: lib/pushrun.sh pushfile())
+# traces nothing: the trace would give the list the engine already holds.
 TRACE=(strace -D -f -qq --seccomp-bpf -y -e trace=%file -o)
-if [ -d "${CONVEYOR_TEST_LOG:-}" ] && command -v strace > /dev/null 2>&1 && tp=$("${TRACE[@]}" /dev/null true 2>&1) && [ -z "$tp" ]; then :
+if [ -d "${CONVEYOR_TEST_LOG:-}" ] && [ -z "${CONVEYOR_TEST_NOTRACE:-}" ] && command -v strace > /dev/null 2>&1 && tp=$("${TRACE[@]}" /dev/null true 2>&1) && [ -z "$tp" ]; then :
 else TRACE=(); fi
 # inputsof <test file> <trace>: its `TESTRUN inputs<TAB><file><TAB><input>...` line, from the trace: each tracked file
 # of this checkout that a call read, by the path the call was given (a symbolic link as itself, not its target) and, for

@@ -4,7 +4,8 @@
 # The run before a push of main (pushone(); the owner, 2026-11-18: a card runs only its own test files, listcmd() in
 # lib/testrun.sh, and the files the test map links to its change run here): the test files the test map and the
 # links give each landing since the last push (testsel() narrow, of the landing's own change: the union, in order),
-# each run alone, once: a commit whose run passed ($PUSHED.tested; PUSHTESTED names another such file) is not run again.
+# each run alone, once: a commit whose run passed ($PUSHED.tested; PUSHTESTED names another such file) is not run again,
+# nor a file whose pass in the test results cache holds with the commit's inputs (cachehits(), lib/testlist.sh).
 # With the rule Push after a combined test run on and its pushbatchtests all, every test file of the commit in their
 # place (testtracked(), less the pack's runners); that pass is kept as "<commit> all", so a pass of the linked files
 # does not clear a push that the owner then asked all the files for. Never a test runner or the whole
@@ -28,7 +29,7 @@ PUSHRAN='the run before the push failed'
 PUSHNOFILE='the test files linked to the landings did not run before the push: the test command cannot be given one test file; set test.fileCommand in .conveyor/project.json'
 pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
   local c=$1 n=$2 sha=$3 wt=$CARDS/pushtest lands=() fs=() bad=() l f s i tc fc lm by old what why='' all='' took=$SECONDS tested=${PUSHTESTED:-$PUSHED.tested}
-  local -A fat=() # fat: why each failed file failed (pushfile()), which the reason gives after the landing that broke it
+  local -A fat=() hit=() # fat: why each failed file failed (pushfile()), which the reason gives after the landing that broke it; hit: cachehits()
   shift 3
   # Until #395 (the push.check rule): a state folder holding push.check.off runs no test before a push (owner's order),
   # unless the rule Push after a combined test run is on (pushbatch(), lib/push.sh): the owner asked for the run then.
@@ -67,10 +68,23 @@ pushtests() { # <card> <issue> <the commit to push> [<a commit origin holds>...]
       done | awk 'NF && !seen[$0]++')
     what='linked to the landings since the last push'
   fi
+  # The files whose last pass in the test results cache read the same inputs as the commit has (cachehits(),
+  # lib/testlist.sh): a linked one does not run again, as that pass (a card's Test step, most often) holds on the
+  # commit. With pushbatchtests all every file still runs, but such a file runs untraced: its list of inputs is fresh.
+  [ ${#fs[@]} = 0 ] || while IFS= read -r f; do [ -z "$f" ] || hit[$f]=1; done < <(cachehits "$wt" 2>/dev/null)
+  if [ -z "$all" ] && [ ${#hit[@]} != 0 ]; then
+    l=${#fs[@]}; mapfile -t fs < <(for f in "${fs[@]}"; do [ -n "${hit[$f]:-}" ] || printf '%s\n' "$f"; done)
+    echo "conveyor: before the push of ${sha:0:12}, $((l - ${#fs[@]})) test file(s) $what passed before with the same inputs and do not run again" >&2
+  fi
   if [ ${#fs[@]} != 0 ]; then
     echo "conveyor: before the push of ${sha:0:12}, ${#fs[@]} test file(s) $what run, each alone (${#lands[@]} landing(s) since the last push)" >&2
     [ -n "$SLOT_HOME" ] || until slot_try || slot_wait; do :; done
-    for f in "${fs[@]}"; do pushfile "$wt" "$f" || { bad+=("$f"); fat[$f]=$(head -n 1 "$wt.failat" 2>/dev/null); }; done
+    for f in "${fs[@]}"; do pushfile "$wt" "$f" "${hit[$f]:-}" || { bad+=("$f"); fat[$f]=$(head -n 1 "$wt.failat" 2>/dev/null); }; done
+    # The passes those runs traced are kept (cachekeep()), so a later push or card takes them while their inputs hold;
+    # never of a file whose run failed (a `fail` line in <worktree>.rerun), though its log has `-- ok` for it: a check
+    # of the command after its tests (mapcheck, .conveyor/test-changed.sh) can fail the file alone.
+    { [ ${#bad[@]} = 0 ] || printf 'fail\t%s\n' "${bad[@]}"; } > "$wt.rerun"
+    cachekeep "$wt" 2>/dev/null || :
     for f in "${bad[@]}"; do
       by=''
       for ((i = ${#lands[@]} - 1; i >= 0; i--)); do
@@ -110,7 +124,7 @@ pushcheck() {
 # A worktree of the run before the push (pushtests()), with main's dependency links, made anew at <commit>; with no
 # commit, removed.
 pushwt() { # <worktree> [<commit>]
-  git worktree remove --force "$1" 2>/dev/null; rm -rf "$1" "$1.testlog" "$1.failat"; git worktree prune 2>/dev/null
+  git worktree remove --force "$1" 2>/dev/null; rm -rf "$1" "$1.testlog" "$1.failat" "$1.rerun"; git worktree prune 2>/dev/null
   [ -n "${2:-}" ] || return 0
   git worktree add -q --detach "$1" "$2" > /dev/null 2>&1 && deps "$1" > /dev/null && mkdir -p "$1.testlog"
 }
@@ -119,15 +133,17 @@ pushwt() { # <worktree> [<commit>]
 # folder, the load factor (CONVEYOR_LOAD_FACTOR: loadfactor()) and CONVEYOR_TEST_TIME, which a test.fileCommand the
 # Board's Record CPU time wrapped calls (cputwrap()). When it fails, <worktree>.failat says why, a line each: `it
 # failed at <place>` for each place its output's stack traces say it failed (failat(), lib/failat.sh), or, when it ran
-# past its time limit, that limit with the load factor it was scaled by.
-pushfile() { # <worktree> <test file>
+# past its time limit, that limit with the load factor it was scaled by. With <fresh> set (the test results cache holds
+# a pass of the file with the inputs it has here: pushtests()), CONVEYOR_TEST_NOTRACE=1 tells the command that its list
+# of inputs is fresh, so it need not trace the file's reads (`TESTRUN inputs`).
+pushfile() { # <worktree> <test file> [<fresh>]
   local cmd n=0 rc f s
   rm -f "$1.failat"; cmd=$(mapone "$1" "$2" '') || return 1
   [ ! -f "$1.log" ] || n=$(wc -l < "$1.log") || n=0
   # Its time limit is testTimeout times the load factor (LOADSCALE, lib/testrun.sh), which a timeout's line names.
   f=$(loadfactor); s=$(awk -v n="${TEST_TIMEOUT:-3600}" -v f="$f" "$LOADSCALE")
   { echo "== $2"; ( cd "$1" && { [ -n "$SLOT_HOME" ] || slot_mine; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog \
-      CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_LOAD_FACTOR=$f exec timeout --kill-after=30 "$s" bash -c "$cmd" < /dev/null 8>&- ); } >> "$1.log" 2>&1
+      CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_LOAD_FACTOR=$f CONVEYOR_TEST_NOTRACE=${3:+1} exec timeout --kill-after=30 "$s" bash -c "$cmd" < /dev/null 8>&- ); } >> "$1.log" 2>&1
   rc=$?
   if [ $rc = 124 ]; then
     echo "it ran past its time limit, $s s (testTimeout's ${TEST_TIMEOUT:-3600} s times the load factor $f), and was stopped there" > "$1.failat"

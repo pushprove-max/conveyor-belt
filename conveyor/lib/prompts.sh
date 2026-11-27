@@ -633,7 +633,7 @@ NONELINKED='no test file is linked to the files the change touches, so no test r
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 CARDLINKED=5
 # shellcheck disable=SC2034 # used in lib/testrun.sh
-LINKED='the change adds or changes no test file, so the card ran <n> of the <all> test files linked to it, those that failed most recently first. The run before the push runs all of them.'
+LINKED='the change adds or changes no test file, so the card ran <n> of the <all> test files linked to it, those that failed most recently first. The run before the push runs all of them, except each one that passed before with the same inputs.'
 # Added to LINKED when the pack's changed-tests command selects <k> of those <n> (testlist.sh selfirst()), which ran
 # before the rest.
 # shellcheck disable=SC2034 # used in lib/testrun.sh

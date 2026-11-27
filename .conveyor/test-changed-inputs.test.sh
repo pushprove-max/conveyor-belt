@@ -129,6 +129,12 @@ got=$(run deps "$T/trace.deps")
 [ -z "$got" ] && [ "$(cat "$T/deps.rc")" = 0 ] && grep -qxF -- '-- ok hooks/r.test.sh' "$T/deps/test-changed.log" \
   || no "given the trace $T/trace.deps, which finds node_modules/jsdom (not tracked), the run named inputs or did not pass: '$got', exit $(cat "$T/deps.rc"): $(cat "$T/deps.out")"
 
+# CONVEYOR_TEST_NOTRACE set (the run before a push, for a file whose list of inputs is fresh): the file runs untraced,
+# naming no inputs, and passes. Bug it catches: such a file was traced again, the slow part of the run before a push.
+got=$(CONVEYOR_TEST_NOTRACE=1 run notrace "$T/trace")
+[ -z "$got" ] && [ "$(cat "$T/notrace.rc")" = 0 ] && grep -qxF -- '-- ok hooks/r.test.sh' "$T/notrace/test-changed.log" \
+  || no "given the trace $T/trace and CONVEYOR_TEST_NOTRACE=1, the run named inputs or did not pass: '$got', exit $(cat "$T/notrace.rc"): $(cat "$T/notrace.out")"
+
 # A path here that strace wrote escaped: no inputs line at all, and the file still passes.
 { cat "$T/trace"; echo '100 openat(AT_FDCWD<<root>>, "conveyor/r\303\251ad.sh", O_RDONLY) = 3<<root>/conveyor/r\303\251ad.sh>'; } > "$T/trace2"
 got=$(run escaped "$T/trace2")

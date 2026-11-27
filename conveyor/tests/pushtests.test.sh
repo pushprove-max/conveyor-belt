@@ -93,6 +93,67 @@ $l4 lib/tax.test.js
 $l4 lib/fee.test.js" ] || fail "pushtests c4 4 $l4 $l1 did not run the files of every landing since c1 (c2: lib/cart.test.js, c3: lib/tax.test.js, c4: lib/fee.test.js), each once: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
 }
 
+# The file command's first line in the cases below: it notes each file it is given with CONVEYOR_TEST_NOTRACE (or
+# "traced"). PUSHONE: the whole command of a file that passes, which, as a traced runner does, logs a traced file's
+# pass with its inputs (lib/cart.js).
+PUSHNOTE='echo "$(git rev-parse HEAD) $1 ${CONVEYOR_TEST_NOTRACE:-traced}" >> "$STUB/ran"'
+PUSHONE="$PUSHNOTE"'
+[ -n "$CONVEYOR_TEST_NOTRACE" ] || printf -- "-- ok %s\nTESTRUN inputs\t%s\tlib/cart.js\n" "$1" "$1" >> "$CONVEYOR_TEST_LOG/test-changed.log"'
+# A pass of lib/cart.test.js in the test results cache, read with lib/cart.js as the checkout <dir> has it.
+PUSHPASS='mkdir -p "${TESTCACHE%/*}" && printf "lib/cart.test.js\tlib/cart.js\n" | cachesums'
+# #1709 D1. Bug it catches: the run before the push ran lib/cart.test.js again (and held the push on it) though the
+# cache holds its pass with the inputs main has, as a card's Test step left it. The pass is written here, not by a
+# card's run, so the stub's run of the file would fail it (main's lib/cart.js is bad): no file runs, and c2 is pushed.
+t_pushtestsreuse() {
+  local l1 l2 base
+  pushfix true
+  pushnow "$PUSHPASS \"\$R\" > \"\$TESTCACHE\" || exit 1; push c2 2; checkheld && echo held > \"\$T/\$CASE/held\""
+  [ ! -e "$STUB/ran" ] || fail "the run before the push ran a file whose pass holds with main's inputs: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+  [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$l2" ] && [ ! -e "$T/$CASE/held" ] || fail "c2 was not pushed: $(cat "$T/$CASE/push.out")"
+  grep -qF '1 test file(s) linked to the landings since the last push passed before with the same inputs and do not run again' "$T/$CASE/push.out" \
+    || fail "the push does not say the file was not run again: $(cat "$T/$CASE/push.out")"
+}
+
+# #1709 D2, D3. Bug it catches: a pass of lib/cart.test.js read with c1's lib/cart.js (good), which c2 changed, kept the
+# file off the run, so c2's broken lib/cart.js went out; or the file ran untraced, so its new inputs were never kept.
+t_pushtestsstale() {
+  local l1 l2 base
+  pushfix true
+  printf '%s\n' "$PUSHNOTE" 'bash "$1"' > "$STUB/one"
+  pushnow "pushwt \"\$CARDS/old\" $l1 && $PUSHPASS \"\$CARDS/old\" > \"\$TESTCACHE\" && pushwt \"\$CARDS/old\" || exit 1
+    push c2 2; checkheld && echo held > \"\$T/\$CASE/held\""
+  [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$base" ] && [ -e "$T/$CASE/held" ] || fail "the push was not held: $(cat "$T/$CASE/push.out")"
+  [ "$(head -n 1 "$STUB/ran" 2>&1)" = "$l2 lib/cart.test.js traced" ] \
+    || fail "lib/cart.test.js, whose input lib/cart.js changed since its pass, did not run traced on main: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+}
+
+# #1709 D3. With pushbatchtests all every file runs: lib/cart.test.js, whose pass in the cache holds with main's inputs,
+# untraced (CONVEYOR_TEST_NOTRACE=1), and a.test.sh, with no pass there, traced, its pass then kept with its inputs.
+# Bugs it catches: a file whose list of inputs is fresh was traced again; a pass the run traced was not kept, so its
+# trace was for nothing and the next push ran the file again.
+t_pushtestsnotrace() {
+  local l1 l2 base
+  pushfix true
+  printf '%s\n' "$PUSHONE" > "$STUB/one"
+  loop control rules pushbatch=on pushbatchtests=all > /dev/null || fail "control rules pushbatch=on pushbatchtests=all failed"
+  pushnow "$PUSHPASS \"\$R\" > \"\$TESTCACHE\" || exit 1; pushtests c2 2 $l2 $base && cut -f2 \"\$TESTCACHE\" | sort > \"\$T/\$CASE/kept\""
+  [ "$(cat "$STUB/ran" 2>&1)" = "$l2 a.test.sh traced
+$l2 lib/cart.test.js 1" ] || fail "pushtests c2 2 $l2 $base with pushbatchtests all did not run a.test.sh traced and lib/cart.test.js untraced: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+  [ "$(cat "$T/$CASE/kept" 2>&1)" = $'a.test.sh\nlib/cart.test.js' ] || fail "the traced pass of a.test.sh was not kept in the cache: $(cat "$T/$CASE/kept" "$T/$CASE/push.out" 2>&1)"
+}
+
+# Bug it catches: the file command logged a traced pass of lib/cart.test.js (`-- ok` and its inputs) and then failed
+# it, as a check of .conveyor/test-changed.sh after the tests (mapcheck) does; the cache kept that pass, so a later push
+# whose inputs still matched skipped the file and the check that failed it.
+t_pushtestsfailkeep() {
+  local l1 l2 base
+  pushfix true
+  printf '%s\n' "$PUSHONE" 'exit 1' > "$STUB/one"
+  pushnow "pushtests c2 2 $l2 $base; cut -f2 \"\$TESTCACHE\" > \"\$T/\$CASE/kept\" 2>/dev/null"
+  [ "$(head -n 1 "$STUB/ran" 2>&1)" = "$l2 lib/cart.test.js traced" ] || fail "pushtests c2 2 $l2 $base did not run lib/cart.test.js traced: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+  ! grep -qxF lib/cart.test.js "$T/$CASE/kept" 2>/dev/null || fail "pushtests c2 2 $l2 $base kept the pass of lib/cart.test.js, whose run failed: $(cat "$T/$CASE/kept" "$T/$CASE/push.out" 2>&1)"
+}
+
 # #1084. Bug it catches: the run before the push named the failing file and the landing that broke it, but not where
 # it failed, so a failure that printed no message of its own (only a stack) could not be read without a run again.
 # The file command prints a stack frame of the push worktree's lib/cart.test.js, line 1, when the file fails: the push
