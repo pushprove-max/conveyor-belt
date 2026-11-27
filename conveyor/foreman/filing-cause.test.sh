@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 120
 # The Foreman's filing hook (foreman.sh filing, filing-cause.sh no_cause, no_design) refuses a fix issue with no `## Cause` section (#1293)
-# and an issue with a `## What to build` section and no `## Design` section (#1730).
+# and an issue with a `## What to build` section and no `## Design` section (#1730), and an issue with no `Benefit:` or
+# `Guards:` line (no_benefit).
 # Bug caught: the Foreman filed a fix that named a symptom ("the reader is over its size cap") and never the source of
 # the problem, because nothing in the filing path asked for the cause.
 set -uo pipefail
@@ -27,7 +28,21 @@ refused() { # <command>: the refusal says what the Cause section holds
   jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | test("## Cause") and test("where the bad data or behaviour comes from and why it is there at all") and test("already solves the same problem, or that none was found") and test("stale or missing"))' <<<"$out" >/dev/null \
     || fail "a fix issue with no Cause section was not refused with what the section holds; command: $1; output: $out"
 }
-passes() { out=$(hook "$1"); [ -z "$out" ] || fail "the command was refused though it needed no Cause section; command: $1; output: $out"; }
+# passes <command>: the Cause and Design checks let it through: the hook prints nothing, or only the benefit refusal,
+# which comes after them (t_benefit checks that one; the bodies here are about the sections).
+passes() {
+  out=$(hook "$1")
+  [ -z "$out" ] || jq -e '.hookSpecificOutput.permissionDecisionReason | startswith("Not run: each issue you file needs a line \"Benefit:")' <<<"$out" >/dev/null \
+    || fail "the command was refused though it needed no Cause section; command: $1; output: $out"
+}
+# nobenefit <command>: the hook refuses it, saying a benefit line is missing.
+nobenefit() {
+  out=$(hook "$1")
+  jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | test("needs a line \"Benefit: <the live case it fixes, or the gain as measured>\" or \"Guards: <the risk>\""))' <<<"$out" >/dev/null \
+    || fail "an issue with no benefit line was not refused for it; command: $1; output: $out"
+}
+# filed <command>: the hook lets it through with no word.
+filed() { out=$(hook "$1"); [ -z "$out" ] || fail "an issue with a benefit line was refused; command: $1; output: $out"; }
 body() { printf 'gh issue create --title "Fix it" %s --body "$(cat <<'"'EOF'"'\n%s\nEOF\n)"' "${2:-}" "$1"; }
 
 # D1: `## What happens now` with no `## Cause` is refused (gh and `ask <project> testissue`); the same body with one passes.
@@ -254,7 +269,7 @@ passes $'gh issue create --label bug --title Example --body "The form fails. `tr
 # Bug (#1623 review, follow-up): in a UTF-8 locale awk (mawk) counted the bytes of the `<<EOF` line and Bash cut the
 # command at that many characters, so the `é` in the title moved the cut into the body: `## Cause` read as `# Cause`.
 # mb, not c: the runner below names each case in c, and its `.passed` mark is written with it.
-mb=$'gh issue create --label bug --title \'Café fails\' --body-file - <<EOF\n## Cause\nThe cache is stale.\nEOF'
+mb=$'gh issue create --label bug --title \'Café fails\' --body-file - <<EOF\n## Cause\nThe cache is stale.\nBenefit: the form works.\nEOF'
 out=$(LC_ALL=C.UTF-8 hook "$mb"); [ -z "$out" ] || fail "a Cause section after a multibyte title was refused in C.UTF-8; command: $mb; output: $out"
 # The body of a split `<\` `<EOF` here-document is still read: its real Cause section lets the issue through.
 passes $'gh issue create --label bug --title Example --body-file - <\\\n<EOF\nThe form fails.\n## Cause\nx\nEOF'
@@ -350,6 +365,50 @@ passes "foreman.sh ask alpha card 'Add a row' 'Make it so.'"
 passes "foreman.sh ask alpha card --release 1.1.0 'Fix a.test.sh' 'It fails.'"
 out=$(cd "$M" && jq -cn --arg c "$(body $'## What happens now\nIt breaks.')" '{session_id: "s2", tool_use_id: "x", tool_input: {command: $c}}' | bash "$SRC/foreman.sh" filing 2>&1)
 [ -z "$out" ] || fail "a fix issue filed in a session that is not the Foreman's was checked; command: $(body $'## What happens now\nIt breaks.'); output: $out"
+}
+
+# Bug caught: only `ask <project> card` and `testissue` (lib.sh benefit_line) asked for a benefit line, so a Foreman's
+# `gh issue create` with a Cause section and no `Benefit:` or `Guards:` line was filed, and the benefit hold could not
+# read why the issue is worth building. The hook now asks it of every issue the Foreman files.
+t_benefit() {
+case_ benefit
+nobenefit "$(body $'Something is wrong.\n## Cause\nA stale file.' '--label bug')"
+nobenefit "foreman.sh ask alpha testissue conveyor/x.test.sh 'Speed up tests' 'Measured: 12 CPU s.
+## Cause
+The suite runs twice.'"
+nobenefit "$(body $'## Done when\nThe row shows.\nBenefit:\n## Cause\nNone.')"
+nobenefit "gh issue create --title x --body 'Benefit:'"
+nobenefit "$(body $'```\nBenefit: a row\n```\n## Done when\nThe row shows.')"
+nobenefit "gh issue create --title One --body 'Benefit: a row'; gh issue create --title Two --body 'No line.'"
+nobenefit "gh -R example/alpha issue 'create' --title x --body 'No line.'"
+nobenefit "conveyor.sh gh-write issue --repo example/alpha new --title x"
+# Bug caught (E1, E2): a direct `conveyor.sh testissue`, a `gh api` post to an issues list and a subcommand made by an
+# expansion that carries a body filed with no benefit line, as only `gh issue create` and `ask ... testissue` were read.
+nobenefit "bash \"\$HOME/conveyor/conveyor.sh\" testissue conveyor/x.test.sh 'Speed up tests' \$'Measured: 12 CPU s.\n## Cause\nThe suite runs twice.'"
+# A direct testissue files a fix issue, as `ask <project> testissue` does: it needs its Cause section first.
+refused "conveyor.sh testissue conveyor/x.test.sh 'Speed up tests' \$'Measured: 12 CPU s.\nBenefit: 12 CPU s less a run.'"
+nobenefit 'gh api repos/example/alpha/issues -f title=example -f body=example'
+nobenefit 'gh api -f title=example repos/example/alpha/issues'
+nobenefit 'sub=create; gh issue "$sub" --title example --body example'
+filed "conveyor/conveyor.sh testissue conveyor/x.test.sh 'Speed up tests' \$'Measured: 12 CPU s.\nBenefit: 12 CPU s less a run.\n## Cause\nThe suite runs twice.'"
+filed "gh api repos/example/alpha/issues -f title=example -f 'body=Benefit: the owner asked for it.'"
+filed "sub=create; gh issue \"\$sub\" --title example --body 'Guards: data loss on restart.'"
+# A command taken for filing whose body cannot be read (another client, a subcommand made by an expansion with no body)
+# is held, not refused: refusing it would block the Foreman's reads of the issues list too.
+filed "curl --netrc https://api.github.com/repos/example/alpha/issues"
+filed 'gh api repos/example/alpha/issues'
+filed 'sub=create; gh issue "$sub" --title x'
+filed 'gh issue "$sub" 7'
+filed "$(body $'Something is wrong.\n## Cause\nA stale file.\nBenefit: the owner saw the pane empty.' '--label bug')"
+filed "$(body $'## Done when\nThe row shows.\n  Guards: data loss on restart.')"
+filed "gh issue create --title x --body 'Benefit: the owner asked for it.'"
+filed "foreman.sh ask alpha testissue conveyor/x.test.sh 'Speed up tests' \$'Measured: 12 CPU s.\nBenefit: 12 CPU s less a run.\n## Cause\nThe suite runs twice.'"
+printf 'Benefit: a row.\n' > "$T/good.md"
+filed "gh issue create --title x --body-file $T/good.md"
+# A body file that cannot be read is refused with its path, as its line could not be seen.
+out=$(hook "gh issue create --title x --body-file $T/none.md")
+jq -e --arg p "$T/none.md" '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("cannot be read") and contains($p) and contains("Benefit:"))' <<<"$out" >/dev/null \
+  || fail "an unreadable body file was not refused with its path named; command: gh issue create --title x --body-file $T/none.md; output: $out"
 }
 
 # Bug (#1730): an issue that asks for new work (`## What to build`) left its design to the builder (where data is kept, its
@@ -480,7 +539,7 @@ grep -qxF conveyor/foreman/filing-cause.test.sh "$W/plist" \
   || fail "the project's selector (.conveyor/test-changed.sh) does not select conveyor/foreman/filing-cause.test.sh for a change to no_cause in $f; its list: $(tr '\n' ' ' < "$W/plist")"
 }
 
-cases=(what heading list quote fence bug new design two closer linked)
+cases=(what heading list quote fence bug new benefit design two closer linked)
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done
 read -ra cases <<<"$SEL"

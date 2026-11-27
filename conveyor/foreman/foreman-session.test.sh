@@ -228,7 +228,7 @@ ready
 # held; after it, each issue linked is held in its own record, and the records start new issues in the queue again.
 : > "$T/calls"
 fileask
-cmd='conveyor.sh gh-write issue create --repo example/beta --title example --body example; gh issue create -R example/beta --title example --body example; gh issue create --title example --body example'
+cmd='conveyor.sh gh-write issue create --repo example/beta --title example --body "Benefit: example"; gh issue create -R example/beta --title example --body "Benefit: example"; gh issue create --title example --body "Benefit: example"'
 out=$(jq -cn --arg c "$cmd" '{hook_event_name: "PreToolUse", tool_input: {command: $c}}' | bash "$SRC/foreman.sh" filing)
 [ -z "$out" ] || fail "the filing command was refused: $out"
 [ "$(grep -c 'control start held' "$T/calls")" = 2 ] || fail "not every record starts new issues held before the command runs: $(cat "$T/calls")"
@@ -268,7 +268,7 @@ echo go > "$T/turn"; wait "$turn"; wait "$filed"
 [ "$(cat "$T/calls")" = 'alpha control start queue filed' ] && [ ! -s "$FH" ] \
   || fail "the Foreman did not start new issues in the queue again once the filer's turn was free: $(cat "$T/calls" "$T/filed")"
 # A quoted subcommand files an issue just the same: it is held before and after.
-cmd="gh issue 'create' --repo example/alpha --title example --body example"
+cmd="gh issue 'create' --repo example/alpha --title example --body 'Benefit: example'"
 : > "$T/calls"
 out=$(jq -cn --arg c "$cmd" '{hook_event_name: "PreToolUse", tool_input: {command: $c}}' | bash "$SRC/foreman.sh" filing)
 grep -q 'control start held' "$T/calls" || fail "a quoted filing command was not seen before it ran: $(cat "$T/calls")"
@@ -282,12 +282,12 @@ grep -qx 'alpha control adopt 31' "$T/calls" || fail "a quoted filing command's 
 # escape (\u, \x, %) spells the endpoint or createIssue all the same. So naming either endpoint is held, and so is a
 # request read from a file (a curl config, a wget input file) or made by an expansion.
 bs='\'
-for cmd in 'sub=create; gh issue "$sub" --title example --body example' 'gh issue ${sub} --title example' 'gh issue $(echo create) --title example' 'gh issue `echo new` --title example' \
+for cmd in "sub=create; gh issue \"\$sub\" --title example --body 'Benefit: example'" 'gh issue ${sub} --title example' 'gh issue $(echo create) --title example' 'gh issue `echo new` --title example' \
   'sub=create; gh issue --repo example/alpha "$sub" --title example' 'gh issue -R example/alpha $sub' 'gh issue --repo=example/alpha $sub' \
-  'gh issue --repo example/alpha create --title example' 'gh issue -R example/alpha new' \
-  'noun=issue; sub=create; gh "$noun" "$sub" --title example --body example' 'gh -R example/alpha $noun $sub' 'conveyor.sh gh-write "$noun" create' \
-  'repo=example/alpha; gh issue --repo "$repo" "$sub"' 'sub=create; gh issue -Rexample/alpha "$sub" --title example --body example' \
-  'gh -Rexample/alpha issue $sub' 'gh -Rexample/alpha $noun create' 'gh api repos/example/alpha/issues -f title=example -f body=example' \
+  "gh issue --repo example/alpha create --title example --body 'Benefit: example'" "gh issue -R example/alpha new --body 'Benefit: example'" \
+  "noun=issue; sub=create; gh \"\$noun\" \"\$sub\" --title example --body 'Benefit: example'" 'gh -R example/alpha $noun $sub' 'conveyor.sh gh-write "$noun" create' \
+  'repo=example/alpha; gh issue --repo "$repo" "$sub"' "sub=create; gh issue -Rexample/alpha \"\$sub\" --title example --body 'Benefit: example'" \
+  'gh -Rexample/alpha issue $sub' 'gh -Rexample/alpha $noun create' "gh api repos/example/alpha/issues -f title=example -f 'body=Benefit: example'" \
   "gh api graphql -f query='mutation { createIssue(input: {repositoryId: \"x\", title: \"example\"}) { issue { url } } }'" \
   'gh api graphql -F query=@reports/create.graphql' 'gh api graphql --input reports/create.json' 'gh api graphql -f query="$q"' \
   "curl --netrc -X POST https://api.github.com/repos/example/alpha/issues -H 'Content-Type: application/json' -d '{\"title\":\"example\"}'" \
@@ -312,7 +312,7 @@ for cmd in 'gh issue view 7 --json "$f"' 'gh issue -R example/alpha view 7 --jso
   out=$(jq -cn --arg c "$cmd" '{hook_event_name: "PreToolUse", tool_input: {command: $c}}' | bash "$SRC/foreman.sh" filing)
   [ ! -s "$T/calls" ] || fail "reading an issue was taken for filing ($cmd): $(cat "$T/calls")"
 done
-cmd="gh issue 'create' --repo example/alpha --title example --body example"
+cmd="gh issue 'create' --repo example/alpha --title example --body 'Benefit: example'"
 # Records that cannot be read hold nothing, so the filing command is refused, not run.
 jq '.records = []' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/h" && cp "$XDG_CONFIG_HOME/conveyor/host.json" "$T/h0" && mv "$T/h" "$XDG_CONFIG_HOME/conveyor/host.json"
 out=$(jq -cn --arg c "$cmd" '{hook_event_name: "PreToolUse", tool_input: {command: $c}}' | bash "$SRC/foreman.sh" filing)

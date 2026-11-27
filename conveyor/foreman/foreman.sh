@@ -63,7 +63,7 @@
 #   command holding `issue create` or `issue new`: gh's, or the engine's gh-write) starts held, so nothing it files is
 #   built before the owner's yes; the Foreman releases it (conveyor.sh control release) once the owner says yes. A fix
 #   issue (a `## What happens now` section or a `bug` label) with no `## Cause` section is refused first (no_cause); an
-#   issue with a `## What to build` section and no `## Design` section is refused next (no_design).
+#   issue with a `## What to build` section and no `## Design` section is refused next (no_design), and after that an issue filed by `issue create` (or `new`), `ask <project> testissue`, `conveyor.sh testissue` or another filing command that carries a body or posts fields to an issues list, with no line `Benefit: <text>` or `Guards: <text>` (no_benefit).
 #   filing, before the command runs, marks every record (conveyor.sh control filing on: its loop holds a follow-up too) and sets each whose new issues start in the queue to start them held
 #   (another project's too, as the command may file there) (conveyor.sh control start held), so an issue is held from its first sight, however long the command runs on;
 #   when a record cannot be set, or the command is to run in the background, the command is refused. filed holds every
@@ -622,7 +622,7 @@ context_state() {
 # The program is files.jq, which the plugin's hook lines (filing-hook.sh) read too, so a command that files no issue
 # ends there, before the shim looks for the engine.
 files() { jq -e -f "$FHERE/files.jq" <<<"$1" >/dev/null 2>&1; }
-# filing_read, no_cause and no_design, and their refusals NO_CAUSE and NO_DESIGN: filing-cause.sh.
+# filing_read, no_cause, no_design and no_benefit, and their refusals NO_CAUSE, NO_DESIGN and benefit_refusal: filing-cause.sh.
 . "$FHERE/filing-cause.sh" || exit 1
 # Every Foreman of the host file, and every lane's filer, files against the same records, so what filing set held is
 # kept in one list for all ($SF/held, beside the host file), and each filing in flight adds a line to $SF/in (the
@@ -635,7 +635,7 @@ filing() {
   in=$IN
   if foreman "$SID" && filing_read "$in"; then
     if no_cause; then deny "$(cause_refusal)"; return 0; fi
-    if no_design; then deny "$NO_DESIGN"; return 0; fi
+    if no_design; then deny "$NO_DESIGN"; return 0; elif no_benefit; then deny "$(benefit_refusal)"; return 0; fi
   fi
   files "$in" || return 0
   # A command run in the background has its filed hook as soon as it starts: the records would start new issues in

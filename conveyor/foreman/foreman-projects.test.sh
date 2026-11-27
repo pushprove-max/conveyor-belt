@@ -204,14 +204,14 @@ at "$M" bash "$SRC/foreman.sh" claim a2 > /dev/null && at "$T/beta" bash "$SRC/f
 # -R`), so an issue there is held from its first sight too (no filing is in flight: the filing cases above ran no filed hook).
 : > "$T/calls"; : > "$FH"; : > "${FH%/*}/in"
 ASKC="echo \"\$CONVEYOR_REPO \$CONVEYOR_CMD\" >> $T/calls; [ \"\$CONVEYOR_CMD\" != control ] || echo '{\"start\":\"queue\"}'"
-jq -cn '{session_id: "a2", tool_input: {command: "gh issue create -R example/beta --title example --body example"}}' | (cd "$M" && CONVEYOR_FOREMAN_ASK=$ASKC bash "$SRC/foreman.sh" filing) > /dev/null
+jq -cn '{session_id: "a2", tool_input: {command: "gh issue create -R example/beta --title example --body \"Benefit: example\""}}' | (cd "$M" && CONVEYOR_FOREMAN_ASK=$ASKC bash "$SRC/foreman.sh" filing) > /dev/null
 grep -qx 'beta control start held' "$T/calls" || fail "filing in beta from alpha's Foreman left beta's new issues buildable: $(cat "$T/calls")"
-jq -cn '{session_id: "a2", tool_input: {command: "gh issue create -R example/beta --title example --body example"}, tool_response: {stdout: "https://github.com/example/beta/issues/60\n"}}' \
+jq -cn '{session_id: "a2", tool_input: {command: "gh issue create -R example/beta --title example --body \"Benefit: example\""}, tool_response: {stdout: "https://github.com/example/beta/issues/60\n"}}' \
   | (cd "$M" && CONVEYOR_FOREMAN_ASK=$ASKC bash "$SRC/foreman.sh" filed) > /dev/null
 grep -qx 'beta control adopt 60' "$T/calls" && grep -qx 'beta control start queue filed' "$T/calls" || fail "the issue filed in beta was not held, or beta's gate not set back: $(cat "$T/calls")"
 # Two Foremen filing at once share the gate: alpha's filing sets both held, beta's finds them held and sets nothing,
 # and alpha's ending does not start new issues in the queue again while beta's command runs on; beta's ending does.
-: > "$T/calls"; ci='{tool_input: {command: "gh issue create -R example/beta --title example --body example"}, tool_response: {stdout: ""}}'
+: > "$T/calls"; ci='{tool_input: {command: "gh issue create -R example/beta --title example --body \"Benefit: example\""}, tool_response: {stdout: ""}}'
 jq -cn "{session_id: \"a2\"} + $ci" | (cd "$M" && CONVEYOR_FOREMAN_ASK=$ASKC bash "$SRC/foreman.sh" filing) > /dev/null
 jq -cn "{session_id: \"b1\"} + $ci" | (cd "$T/beta" && CONVEYOR_FOREMAN_ASK="echo \"\$CONVEYOR_REPO \$CONVEYOR_CMD\" >> $T/calls; echo '{\"start\":\"held\"}'" bash "$SRC/foreman.sh" filing) > /dev/null
 jq -cn "{session_id: \"a2\"} + $ci" | (cd "$M" && CONVEYOR_FOREMAN_ASK=$ASKC bash "$SRC/foreman.sh" filed) > /dev/null

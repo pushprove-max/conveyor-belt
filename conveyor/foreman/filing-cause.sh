@@ -12,9 +12,14 @@
 # written in the command, as files is: its text is not judged, and a body made by an expansion is not seen. A command
 # that files more than one issue is read one issue at a time (filing_parts), and is refused when one of them is.
 # no_design: 0 when that text has a `## What to build` section and no `## Design` section (any issue the Foreman files).
-# shellcheck disable=SC2034 # NO_CAUSE and NO_DESIGN are read in foreman.sh filing
+# no_benefit: 0 when that text has no line `Benefit: <text>` or `Guards: <text>` (an issue the Foreman files by gh's or
+# gh-write's `issue create`, `ask <project> testissue` or `conveyor.sh testissue`, or by any filing command that carries
+# a body or posts fields to an issues list), as lib.sh benefit_line asks of `ask <project> card` and `testissue`: a
+# direct `gh issue create` goes through no ask. A `testissue` is `ask <project> testissue` or `<path>conveyor.sh testissue`.
+# shellcheck disable=SC2034 # NO_CAUSE, NO_DESIGN and NO_BENEFIT are read in foreman.sh filing
 NO_CAUSE='Not run: a fix issue needs a "## Cause" section, and this one has none. Name the source of the problem, not only what the reader sees. The section holds three things. First, where the bad data or behaviour comes from and why it is there at all. Second, a place in the code that already solves the same problem, or that none was found. Third, what the reader sees when the data is stale or missing. Add the section and file it again.'
 NO_DESIGN='Not run: an issue with a "## What to build" section needs a "## Design" section, and this one has none. The section decides what "## What to build" leaves open, so the builder does not choose it. It names four things. First, where each new piece of data is kept (the file or record) and its key. Second, each limit as a number with its unit. Third, the one place that reads it. Fourth, each choice made where the text says "for example" or "A or B". Add the section and file the issue again.'
+NO_BENEFIT='Not run: each issue you file needs a line "Benefit: <the live case it fixes, or the gain as measured>" or "Guards: <the risk>", and this one has none. The benefit hold reads that line to know why the issue is worth building. Add the line to the body and file it again.'
 # unfenced <inline> <quote> <text>: the text without its fenced code blocks. A fence is a line of three or more backticks
 # or tildes, up to three spaces before them; an opener of backticks has no backtick after them (Markdown). The block ends
 # at a line of that fence character at least as often with nothing after it, or at the end of the text. With <inline> 1
@@ -265,7 +270,7 @@ filing_read() {
   local cmd t p parts=()
   cmd=$(jq -r '.tool_input.command // ""' <<<"$1" 2>/dev/null) || return 1
   t=$(heredocs "$cmd" 0); t=${t//$'\\\n'/}; t=${t//[\"\']/}
-  [[ $t =~ (^|[[:space:];\&|])ask[[:space:]]+[^[:space:]]+[[:space:]]+testissue([[:space:]]|$) ]] || files "$1" || return 1
+  [[ $t =~ (^|[[:space:];\&|])(ask[[:space:]]+[^[:space:]]+|[^[:space:];\&|]*conveyor\.sh)[[:space:]]+testissue([[:space:]]|$) ]] || files "$1" || return 1
   FT_TEXTS=() FT_TIS=() FT_OS=() FT_UNREADS=()
   mapfile -d '' parts < <(filing_parts "$cmd")
   for p in "${parts[@]}"; do
@@ -300,7 +305,7 @@ filing_parts() {
         else if (c == "x") { c = substr(h, i, 1); if (c ~ /[ \t\n;&|()`]/) c = "x" }
         t = t c; p[++n] = st; st = 0 }
       v = "([ \t]+-[^ \t\n]+([ \t]+[^- \t\n;&|][^ \t\n;&|]*)?)*"
-      f = "(gh(-write)?" v "[ \t]+issue" v "[ \t]+(create|new)|ask[ \t]+[^ \t\n;&|]+[ \t]+testissue)([ \t\n;&|)]|$)"
+      f = "(gh(-write)?" v "[ \t]+issue" v "[ \t]+(create|new)|(ask[ \t]+[^ \t\n;&|]+|[^ \t\n;&|]*conveyor[.]sh)[ \t]+testissue)([ \t\n;&|)]|$)"
       for (o = 0; match(substr(t, o + 1), f); o = i) {
         i = o + RSTART
         if ((i == 1 || substr(t, i - 1, 1) ~ /[ \t\n;&|(`]/) && k++) print p[i] - 1 } }')
@@ -323,7 +328,7 @@ filing_part() {
   # `ask <project> testissue` is matched in it.
   local j=${o//$'\\\n'/}
   t=${j//[\"\']/}
-  [[ $t =~ (^|[[:space:];\&|])ask[[:space:]]+[^[:space:]]+[[:space:]]+testissue([[:space:]]|$) ]] && ti=1
+  [[ $t =~ (^|[[:space:];\&|])(ask[[:space:]]+[^[:space:]]+|[^[:space:];\&|]*conveyor\.sh)[[:space:]]+testissue([[:space:]]|$) ]] && ti=1
   # A quoted path ends at its closing quote. A bare one ends at a space, a quote or a character that closes or ends the word
   # (`)` of a `$( )`, a backtick, `;`, `|`, `&`, `<`, `>`: `--body-file -<<<'text'` names `-`, not `-<<<`).
   local bf=$'(--body-file|-F)[[:space:]=]+("([^"]+)"|\'([^\']+)\'|["\']?([^[:space:]"\';|&<>)`]+))'
@@ -355,7 +360,7 @@ filing_part() {
     # is text: the body quote comes from the real `--body`.
     local w="((\\\$'([^'\\\\]|\\\\.)*'|'[^']*'|\"([^\"\\\\]|\\\\.)*\"|\\\\.|\\\$[^'\"[:space:]\\\\]|[^[:space:]'\"\\\\\$])+)"
     local pre="^(([[:space:];&|]|${w})*[[:space:];&|])?" rest n at r i e qs=() ats=()
-    local ask="ask[[:space:]]+${w}[[:space:]]+[\"\']?testissue[\"\']?[[:space:]]+${w}[[:space:]]+${w}[[:space:]]+"
+    local ask="(ask[[:space:]]+${w}|[^[:space:]]*conveyor\\.sh[\"\']?)[[:space:]]+[\"\']?testissue[\"\']?[[:space:]]+${w}[[:space:]]+${w}[[:space:]]+"
     # A command that files more than one issue has a body quote for each: the longest match finds the last body, and
     # the text before it is searched again. Each body is read from its `--body` (or `ask`) word with its own quote, so
     # one body's quote is never used to read another's fences. at: where that word starts in u, as rest has no line
@@ -419,4 +424,37 @@ cause_refusal() {
 no_design() { filing_each issue_no_design; }
 issue_no_design() {
   has_heading 'What to build' && ! has_heading Design
+}
+# no_benefit: 0 when the command filing (read by filing_read) files an issue with no benefit line; FT_UNREAD is then that
+# issue's.
+no_benefit() { filing_each issue_no_benefit; }
+# issue_no_benefit: 0 when the part read into FT_O and FT_TI files an issue in a form that can be read (issue_files) and
+# FT_TEXT has no line that starts (after spaces, the quote that opens the body, or the `body=` of a field) with
+# `Benefit:` or `Guards:` and some text: a quote is no text, as it closes the body (`--body 'Benefit:'`). Other
+# commands taken for filing (curl, a GraphQL mutation, a subcommand made by an expansion with no body) are held, not
+# refused: they may only read issues, and their body cannot be read.
+issue_no_benefit() {
+  local b=$'(^|\n|["\']|body=)[ \t]*(Benefit|Guards):[ \t]*[^[:space:]"\']'
+  issue_files && ! [[ $FT_TEXT =~ $b ]]
+}
+# issue_files: 0 when FT_O (its quotes and line continuations taken out) holds gh's or gh-write's `issue create` or
+# `issue new` (flags with their values may come before and after `issue`), or FT_TI is 1 (a `testissue`), or it carries
+# an issue body: `--body`, `--body-file`, `-b`, `-F <file>` (a `-F` value with no `=`), or a `body=` field (`gh api`'s
+# `-f`, `-F`, `--field`, `--raw-field`), so `gh issue "$sub" --body x` is read too; or it posts fields to an issues
+# list (`gh api repos/<owner>/<repo>/issues -f title=x`), which makes an issue with no body.
+issue_files() {
+  local t=${FT_O//$'\\\n'/} v='([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:];&|][^[:space:];&|]*)?)*'
+  local s='(^|[[:space:];&|(`])' e='([[:space:];&|)`]|$)' fl='(-f|-F|--field|--raw-field)([[:space:]]+|=)?'
+  local bo='(--body(-file)?|-b)([[:space:]=]|$)' bf='-F[[:space:]]*[^-[:space:]=][^[:space:]=]*' il='/?repos/[^/[:space:]]+/[^/[:space:]]+/issues'
+  t=${t//[\"\']/}
+  [ "$FT_TI" = 1 ] || [[ $t =~ ${s}gh(-write)?${v}[[:space:]]+issue${v}[[:space:]]+(create|new)${e} ]] \
+    || [[ $t =~ ${s}${bo} ]] || [[ $t =~ ${s}${bf}${e} ]] || [[ $t =~ ${s}${fl}body= ]] \
+    || { [[ $t =~ ${s}${il}${e} ]] && [[ $t =~ ${s}${fl}[^[:space:]] ]]; }
+}
+# benefit_refusal: the refusal text of no_benefit: NO_BENEFIT, or, when the body file the command names cannot be read,
+# a text that names its path (FT_UNREAD).
+benefit_refusal() {
+  if [ -n "$FT_UNREAD" ]; then
+    printf 'Not run: the body file %s cannot be read, so its "Benefit:" line could not be checked. Write the file there, or name the path of a file that exists, and run the command again.' "$FT_UNREAD"
+  else printf '%s' "$NO_BENEFIT"; fi
 }
