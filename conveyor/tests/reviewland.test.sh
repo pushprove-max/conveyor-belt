@@ -185,6 +185,30 @@ t_reviewlandlater() {
   [ "$(cat "$T/$CASE/run.out")" = $'|last|[P1] b.txt:2 drops the line\nport|last|[P1] b.txt:2 drops the line' ] \
     || fail "afterreview() on a GO after the kept review of a retry by review-land (mode '' and port) did not end as a last review carrying its finding: $(cat "$T/$CASE/run.out")"
 }
+# Bug guarded (review follow-up of #1578): a P2 lost after a landing conflict. After a retry by review-land, a review
+# after a test fix added a P2; cardland() merged it with rlrev's findings into the review; the landing conflicted, and
+# the port kept that merged review (fin NO-GO, finrev). afterreview() then put rlrev back in earlier, so a GO after
+# the fix of the port's own finding filed rlrev's P1 alone.
+# rlport: afterreview() as card() calls it on a port (t_portnogo, port.test.sh): first on the port's review, a NO-GO
+# with its own finding (fin NO-GO), then on the GO after that finding's fix (fin cleared by the first call), earlier
+# carried between them; prints "<res>|<after>|<earlier>" for each, newlines as '/'.
+# shellcheck disable=SC2034 # card()'s variables, read by afterreview() through bash's dynamic scope
+rlport() {
+  local wt=$T/$CASE/wt issue='{"number": 7, "body": "", "labels": []}' fin=NO-GO finend='{}' pass=1 rounds=0 rebased='' tfix='' lfix='' privfix='' p1fix=''
+  local rlrev=$'[P1] b.txt:2 drops the line\nVERDICT: NO-GO' mode=port res earlier='' after
+  local finrev=$'[P1] b.txt:2 drops the line\n[P2] c.txt:4 skips the check\nVERDICT: NO-GO'
+  printf '%s\n' '[P1] d.txt:3 the port drops a guard' 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$wt.review"
+  res=NO-GO; afterreview; printf '%s|%s|%s\n' "$res" "$after" "${earlier//$'\n'//}"
+  echo 'VERDICT: GO' > "$wt.review"; pass=2
+  res=GO; afterreview; printf '%s|%s|%s\n' "$res" "$after" "${earlier//$'\n'//}"
+}
+t_reviewlandportp2() {
+  setup "[$(issue 7 2026-01-01)]"
+  fx_in rlport
+  local e='[P1] b.txt:2 drops the line/[P2] c.txt:4 skips the check/VERDICT: NO-GO'
+  [ "$(cat "$T/$CASE/run.out")" = "NO-GO|fix|$e"$'\n'"GO|last|$e" ] \
+    || fail "afterreview() on a port's NO-GO with its own finding and then on the GO after its fix, with fin NO-GO, finrev holding rlrev's P1 and a new P2, and rlrev holding the P1 alone, did not keep the P2 in earlier through both: $(cat "$T/$CASE/run.out")"
+}
 
 # Bug guarded (#1612, review): the next card lands unreviewed only on review-land's own retry (prior(), lib/issues.sh,
 # which resumeplan() reads). c1-7, given back by review-land, kept the patch; when a later card c3-7, which kept no work
