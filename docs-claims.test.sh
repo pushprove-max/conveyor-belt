@@ -109,5 +109,23 @@ has docs/cards.md "For the push checks to run before a card lands, add that vari
 awk '/^## / { on = ($0 == "## Lint"); next } on' "$SRC/conveyor/README.md" | tr '\n' ' ' | tr -s ' ' \
   | grep -qF "\`CONVEYOR_PUSH_GATE\`. To let the push checks run before a card lands, a project's pre-push hook names that variable" \
   || say "conveyor/README.md's Lint section does not tell a project to name CONVEYOR_PUSH_GATE in its pre-push hook"
+# Release 1.12.0 notes, each against the code that runs it: lib/followups.sh (only harm is filed; none at the depth cap),
+# lib/review.sh judged() (<worktree>.outside, filed at landing), lib/heals.sh (a held or busy entry stays out of a batch),
+# the healsdays rule (docs/configuration.md Self-heals expiry), lib/card.sh loopstop()/afterreview() (new-p2 only with no
+# P0, P1 or repeat, cleared at the cap), lib/mainred.sh redhere() (the fix card is exempt), lib/slices.sh umbrellas()
+# (every part done), hooks/sources.ts (short IDs: fu, split, test, red) and foreman/stop.sh (retry, shut, act or ask).
+# Bug: notes that promise more than the code does.
+has docs/releases/1.12.0.md 'each harm finding that is still open becomes a follow-up.' 'the 1.12.0 notes file every open finding as a follow-up'
+has docs/releases/1.12.0.md 'A card at the follow-up depth cap files no follow-up' 'the 1.12.0 notes leave out the depth cap'
+has docs/releases/1.12.0.md "outside the card's change becomes a follow-up when the card lands." 'the 1.12.0 notes file an outside finding at once'
+has docs/releases/1.12.0.md 'It leaves out an entry that another batch card holds, and an entry whose card has not landed or closed.' 'the 1.12.0 notes say a batch takes every entry of an area'
+has docs/releases/1.12.0.md 'for the number of days in the rule `healsdays` leaves the list.' 'the 1.12.0 notes give the expiry as a fixed number'
+has docs/releases/1.12.0.md 'An entry that a batch card holds does not expire.' 'the 1.12.0 notes leave out the held-entry exception'
+has docs/releases/1.12.0.md 'when the review has no P0 or P1 finding and no repeated finding. A card at the follow-up depth cap gets a fix round for it.' 'the 1.12.0 notes never give a new P2 a fix round'
+has docs/releases/1.12.0.md 'A card that fixes the red main starts its Test step.' 'the 1.12.0 notes hold the main-red fix card too'
+has docs/releases/1.12.0.md "When the project's pre-push hook names the push-gate variable" 'the 1.12.0 notes leave out the hook opt-in'
+has docs/releases/1.12.0.md 'A parent closes when all its parts are done' 'the 1.12.0 notes close a parent on one landed part'
+has docs/releases/1.12.0.md 'a Tests page card by its test file, a main-red fix card by the red commit. Its Title shows the work of the card.' 'the 1.12.0 notes give every card with no issue a parent and a finding'
+has docs/releases/1.12.0.md 'The step is to retry or shut the card, to log an act of a standing kind, or to ask you.' 'the 1.12.0 notes say the Foreman must report each blocked card'
 [ "$fails" = 0 ] || exit 1
 echo "ok docs-claims"
