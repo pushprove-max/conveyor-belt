@@ -159,7 +159,8 @@ replay() { # judge <model> [<effort>] [--last <n>] [--estimate]
     ans='[]'; [ -z "$f" ] || ans=$(jq -cRn '[inputs | gsub("^[[:space:]`*-]+|[[:space:]`*]+$"; "") | capture("^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE|OUTSIDE):[[:space:]]*(?<r>.*)$")]' "$d/wt.judge" 2>/dev/null) || ans='[]'
     jq -c --slurpfile k "$d/case" '$k[0] as $k | {card: $k.card, issue: $k.issue} + ({model, effort, sec, tokens, usage, failed} | del(.[] | nulls))' <<<"$out" >> "$w/calls"
     printf '%s\n' "$out" >> "$w/steps"; jq -c .judge <<<"$k" >> "$w/rec"
-    # Each finding's ruling: the one line the replay judge gave for it, else none (unanswered).
+    # Each finding's ruling: the one line the replay judge gave for it (accept, decline or outside), else none (unanswered).
+    # An OUTSIDE answer never agrees: no recorded ruling replayed is an OUTSIDE one (replaycases()).
     jq -c --slurpfile k "$d/case" '$k[0] as $k | . as $a | $k.findings | to_entries[] | (.key + 1) as $i | .value as $x
       | [$a[] | select((.n | tonumber) == $i)] as $d
       | {card: $k.card, issue: $k.issue, n: $x.n, finding: $x.finding, recorded: (if $x.accept then "accept" else "decline" end),

@@ -110,7 +110,8 @@ t_replayjudge() {
   out=$(tail -n 1 "$T/$CASE/run.out")
   jq -e '{reviews, skipped, findings, agree, unanswered, usd, recordedUsd, model, effort} == {"reviews":3,"skipped":3,"findings":3,"agree":2,"unanswered":1,"usd":0.3,"recordedUsd":6,"model":"claude-haiku-5-5","effort":"low"}' <<<"$out" >/dev/null \
     || fail "the replay's counts and costs: $out"
-  # Bug caught: an OUTSIDE answer, which the judge's prompt asks for, was not read, so F2 counted as unanswered.
+  # Bug caught: the replay read only ACCEPT and DECLINE lines, so c1-7's F2 OUTSIDE (a repeat of an OUTSIDE ruling, as the
+  # judge's rules ask) counted as unanswered.
   [ "$(jq -c .differ <<<"$out")" = '[{"card":"c1-7","issue":7,"n":2,"finding":"[P2] a.txt:1 F-two","recorded":"decline","replay":"outside","reason":"harm: b.txt:1 was already ruled outside"}]' ] \
     || fail "the findings where the rulings differ: $(jq -c .differ <<<"$out")"
   [ "$(jq -c '.calls | map([.card, .usage.input, .failed // ""])' <<<"$out")" = '[["c1-7",1000000,""],["c1-8",1000000,""],["c1-11",1000000,"the judge call failed (timeout)"]]' ] \
