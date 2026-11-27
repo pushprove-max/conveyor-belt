@@ -74,7 +74,7 @@ TESTKEEP=5
 # runner is not that runner's. testowners sets the caller's defs (each case name to the files that define it) and refs
 # (each test file to the test file names it holds); OWNERS is the jq that reads them, given as files (they grow with
 # the project, too long for an argument: `--slurpfile defs <(printf '%s' "$defs")`, and refs the same), at the start
-# of the program: caseowners (the files a flaky entry's case counts for) and failedfiles (the files a failed test line counts for).
+# of the program: caseowners (the files a flaky entry's case counts for) and failedfiles (the files a failed test line counts for: a time-out counts for the file it names and each file its own limit stopped, testfails() ownLimit; a file the run's limit only stopped beside them did not end, so it did not fail, as in NOTPASSED, lib/testrun.sh).
 testowners() {
   local all=() tf=() f p r o=()
   # Main's test files (testtracked(), lib/issues.sh); none, no search. A link, or a file below one, is no file (as in
@@ -94,7 +94,7 @@ OWNERS='$defs[0] as $defs | $refs[0] as $refs | def owners($f; $c): ($defs[$c //
       | if $c == null or any($d[]; . == $f) then [$f] else [$f] + [$d[] | select(any($refs[.][]?; . == $n))] end;
     def caseowners: index(": ") as $i | if $i == null then [.] else owners(.[:$i]; .[$i + 2:]) end;
     def failedfiles: [(.failures.files | arrays | .[] | objects | (.file | strings) as $f
-        | if (.cases | arrays | length) > 0 then .cases[] | owners($f; .name | strings)[] else $f end), (.failures.timeout.file? | strings)] | unique;'
+        | if (.cases | arrays | length) > 0 then .cases[] | owners($f; .name | strings)[] else $f end), (.failures.timeout.file? | strings), (.failures.ownLimit? | arrays | .[] | strings)] | unique;'
 # One failed test line, as a failure of the file $f it counts for (failedfiles), read with OWNERS: {card, issue, time,
 # verdict, cases, caseVerdicts, tail}. verdict: the test line's verdicts (verdicts(), lib/mainred.sh) of the cases that count for $f,
 # main when one of them failed on main too, else flaky when one failed and then passed when run again, else card (the
@@ -103,12 +103,12 @@ OWNERS='$defs[0] as $defs | $refs[0] as $refs | def owners($f; $c): ($defs[$c //
 # case). caseVerdicts: each of those cases with a verdict, its own ({<case>: <verdict>}): a step whose cases' verdicts differ is a catch of the card for its card cases and a failure to fix for the rest (the Board's caughtOf() and fixable(); R323: one verdict for the step hid the catch).
 # tail: the last 1500 characters of the step's output (the line's tail), null with none. failedrun: a test line as a failed step: a line that failed, with its first run's failures (in rerun, firstrun(), when the run went again) added to its own, so a case that passed on the run again (its verdict flaky) still counts while another file
 # failed again, with the first run's output's end as its tail (the files that failed again kept in again, with the
-# line's own tail); a first run's time-out as its file failing naming no case; a line that passed on re-run (card():
+# line's own tail); a first run's time-out as the file it names and each file its own limit stopped (testfails() timeout and ownLimit) failing naming no case; a line that passed on re-run (card():
 # `test pass` with the first run's failures and output's end in rerun) with those failures and that tail as its own;
 # no other line.
 FAILURE='def failedrun: if .result == "fail" then (if (.rerun.failures | type) == "object"
         then .again = failedfiles | .failures.files = [(.failures.files | arrays | .[]), (.rerun.failures.files | arrays | .[]),
-          (.rerun.failures.timeout.file? | strings | {file: ., cases: []})] else . end)
+          ((.rerun.failures.timeout.file? | strings), (.rerun.failures.ownLimit? | arrays | .[] | strings) | {file: ., cases: []})] else . end)
       elif .result == "pass" and (.rerun.failures | type) == "object" then .failures = .rerun.failures | .tail = .rerun.tail
       else empty end;
     def failure($f): [.verdicts | arrays | .[] | objects | select(any((.case | strings | caseowners[]); . == $f)) | .verdict | strings] as $v
