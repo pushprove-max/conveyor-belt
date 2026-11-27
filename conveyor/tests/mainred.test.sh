@@ -421,7 +421,7 @@ t_mainredold() {
   printf '# run alone: bash ../r.test.sh\nt_one() { :; }\n' > "$r/tests/b.test.sh"; land l1 1 lib/a.sh one
   land ca 2 lib/a.sh none; a=$(git -C "$r" rev-parse HEAD); h=$a
   jq -cn '{reds: [{sha: "0ld", cases: [{case: "r.test.sh: one", file: "r.test.sh", files: ["tests/b.test.sh"]}], card: null}]}' > "$w/mainred.json"
-  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^redopen() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^redrun() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/mainred.sh")"
+  got=$( cd "$r" && eval "$(sed -n '/^mainred() {/,/^}/p; /^redopen() {/,/^}/p; /^brokeby() {/,/^}/p; /^landingof() {/,/^}/p; /^redrun() {/,/^}/p; /^TESTLINK_DEPTH=/p' "$SRC/lib/mainred.sh"; sed -n '/^scoped() {/,/^}/p' "$SRC/lib/testrun.sh")"
     stdb() { cat "$w/cards.jsonl"; }
     tests() { :; }; testlogs() { echo log; }; testfails() { echo '{"files": [{"file": "tests/b.test.sh", "cases": [{"name": "one"}]}]}'; }
     export MAINRED=$w/mainred.json
@@ -581,7 +581,7 @@ t_redrunprinted() {
   local w=$T/$CASE/wt got
   mkdir -p "$T/$CASE"
   printf '%s\n' "import test from 'node:test';" "console.log('✔ X (1ms)'); console.log('ok 7 - X');" "import assert from 'node:assert';" "test('Y', () => {});" "test('Z', () => { assert.equal('other', '✔ X (1ms)\\nok 7 - X\\n'); });" > "$T/$CASE/f.test.mjs"
-  got=$( cd "$T/$CASE" && eval "$(sed -n '/^redrun() {/,/^}/p' "$SRC/lib/mainred.sh"; sed -n '/^testfails() {/,/^}/p; /^RECJQ=/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh"; sed -n '/^tapjq() {/p' "$SRC/lib/failat.sh")
+  got=$( cd "$T/$CASE" && eval "$(sed -n '/^redrun() {/,/^}/p' "$SRC/lib/mainred.sh"; sed -n '/^scoped() {/,/^}/p; /^testfails() {/,/^}/p; /^RECJQ=/p' "$SRC/lib/testrun.sh"; sed -n '/^testlogs() {/,/^}/p' "$SRC/lib/session.sh"; sed -n '/^tapjq() {/p' "$SRC/lib/failat.sh")
       $(grep '^NODETEST=' "$SRC/../.conveyor/test-changed.sh")"
     packget() { return 1; }; export TEST_TIMEOUT=600
     tests() { # <worktree>

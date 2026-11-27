@@ -186,7 +186,7 @@ mainprobe() { # <name> <units, json> <units no control is taken from, json> <oth
     # nothing runs on main (<worktree>.stop), and each failure is the card's.
     lim=${TEST_TIMEOUT:-}; [[ $lim =~ ^[1-9][0-9]*$ ]] || { packget tunables.testTimeout lim 2>/dev/null && [[ $lim =~ ^[1-9][0-9]*$ ]]; } || lim=3600
     awk -F'\t' -v OFS='\t' '$1 != "fail" { print; next } !s[$2]++ { print "fail", $2 }' "$mwt.rerun" > "$mwt.rerun.new" && mv -f "$mwt.rerun.new" "$mwt.rerun"
-    s=$SECONDS; TEST_PACKONLY=1 CONVEYOR_TEST_ONESLOT=1 TEST_HARD=$lim tests "$mwt" test.fileCommand alone; rc=$?; s=$((SECONDS - s))
+    s=$SECONDS; CONVEYOR_TEST_ONESLOT=1 scoped TEST_PACKONLY 1 scoped TEST_HARD "$lim" tests "$mwt" test.fileCommand alone; rc=$?; s=$((SECONDS - s))
     # A run that passed failed nothing (testfails() names a command that wrote no log as a file whatever its exit);
     # one that did not run (<worktree>.stop) ran nothing on main, and is not kept.
     if [ -s "$mwt.stop" ]; then mf=null; echo "conveyor: card $1: its failing cases did not run on main: $(head -n 1 "$mwt.stop")" >&2; elif [ $rc = 0 ]; then mf='{"files":[]}'; else mf=$(testfails "$mwt.test" "$rc") || mf=null; fi
@@ -438,7 +438,8 @@ cleanrun() { # <worktree> <command> [<list>]
 # change renames it, is no proof of
 # that case); none when they name neither. A command that writes no logs says only its exit, of every case: run
 # through test.fileCommand (filecmd(), whose own log, `files`, is then the run's only one), its exit for each file,
-# of every case of that file.
+# of every case of that file. A run that failed with no log and no output at all never started (tests() returned
+# before its command ran: no slot, a refused check): none, of every case, not fail, so no proof reads it as main red.
 redrun() { # <worktree> <cases json>
   local rc t=null
   # A case its entry names under a suite runner (SUITERUNNERS, which a card's list holds no line of: #382) runs under
@@ -449,11 +450,13 @@ redrun() { # <worktree> <cases json>
       else "fail\t\(.file)\t\(.case)" end' <<<"$2" > "$1.rerun"
   # With no test.fileCommand, the way the pack's test command runs a file, as verdicts() runs it (#1275); when that
   # cannot be given one file, nothing runs (<worktree>.stop), and the run names no case: none.
-  TEST_PACKONLY=1 tests "$1" test.fileCommand alone; rc=$?
+  rm -f "$1.test"
+  scoped TEST_PACKONLY 1 tests "$1" test.fileCommand alone; rc=$?
   if [ -s "$1.stop" ]; then t='{}'; elif [ -n "$(testlogs "$1")" ]; then t=$(testfails "$1.test" "$rc" | jq -ce objects) || t='{}'; fi
+  local ran=true; [ "$t" != null ] || [ $rc = 0 ] || [ -s "$1.test" ] || ran=false
   local own=false; ! testlogs "$1" | grep -qvxF "$1.testlog/files" || own=true # a log of the runner's own, beside filecmd()'s
-  jq -c --slurpfile t <(printf '%s' "$t") --argjson rc "$rc" --argjson own "$own" '$t[0] as $t | def of($x): . == $x.file or ($x.case != "" and IN($x.files[]?; .));
-    map(. as $c | . + {verdict: (if $t == null then (if $rc == 0 then "pass" else "fail" end)
+  jq -c --slurpfile t <(printf '%s' "$t") --argjson rc "$rc" --argjson own "$own" --argjson ran "$ran" '$t[0] as $t | def of($x): . == $x.file or ($x.case != "" and IN($x.files[]?; .));
+    map(. as $c | . + {verdict: (if $t == null then (if $rc == 0 then "pass" elif $ran then "fail" else "none" end)
     elif any($t.files[]?; (.file | of($c)) and ($c.case == "" or ($own | not) or any(.cases[]?; .name == $c.case))) or $t.timeout.file? == $c.file or IN(($t.stopped? // [])[]; $c.file) then "fail"
     elif (($c.case == "" or ($own | not)) and any($t.passed[]?; . == $c.file)) or any(($t.okcases // []) + ($t.passcases // []) | .[]; (.file | of($c)) and any(.cases[]?; . == $c.case)) then "pass"
     else "none" end)})' <<<"$2"

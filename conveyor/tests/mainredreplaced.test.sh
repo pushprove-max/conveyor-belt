@@ -103,16 +103,17 @@ t_redproofonepass() {
 # bug-card check; TEST_HARD, mainred.sh verdicts(); TEST_PACKONLY, redrun()) was in the environment of the test command
 # that call ran, as bash exports it for the call. A test that calls the engine read it there as its own: in a card's
 # tests before its first review (TEST_STILL=pretestok), each run on main of this file's cases, whose fixture's main is
-# red, ran nothing and failed every case (the loop, 2026-11-27: 13 failed runs). The test command has none of the four.
+# red, ran nothing and failed every case (the loop, 2026-11-27: 13 failed runs). The test command has none of them,
+# nor PACK or MUT_RUN, and still gets CONVEYOR_TEST_ONESLOT, which is for it.
 t_testrunownenv() {
   redsetup ''
   local w=$T/$CASE/cards/mainrun/x got
-  printf '%s\n' 'echo "${TEST_STILL-none} ${TEST_GIVEN-none} ${TEST_HARD-none} ${TEST_PACKONLY-none}" > "$STUB/env"' \
+  printf '%s\n' 'echo "${TEST_STILL-none} ${TEST_GIVEN-none} ${TEST_HARD-none} ${TEST_PACKONLY-none} ${PACK-none} ${MUT_RUN-none} ${CONVEYOR_TEST_ONESLOT-none}" > "$STUB/env"' \
     | cat - "$STUB/mainrun-cmd" > "$STUB/mainrun-cmd.new" && mv "$STUB/mainrun-cmd.new" "$STUB/mainrun-cmd" || fail "the runner could not be made"
   mkdir -p "${w%/*}" && git -C "$R" worktree add -q --detach "$w" HEAD && printf 'fail\ta.test\tone\n' > "$w.rerun" || fail "the run's worktree could not be made"
-  got=$(eng 'TEST_STILL=true TEST_GIVEN=1 TEST_HARD=60 TEST_PACKONLY=1 tests "$CONVEYOR_CARDS/mainrun/x" test.fileCommand alone' 2>&1)
-  [ "$(cat "$STUB/env" 2>/dev/null)" = "none none none none" ] \
-    || fail "a run called with TEST_STILL, TEST_GIVEN, TEST_HARD and TEST_PACKONLY gave them to its test command (it saw: $(cat "$STUB/env" 2>/dev/null)): $got"
+  got=$(eng 'TEST_STILL=true TEST_GIVEN=1 TEST_HARD=60 TEST_PACKONLY=1 PACK=$PACK MUT_RUN=1 CONVEYOR_TEST_ONESLOT=1 tests "$CONVEYOR_CARDS/mainrun/x" test.fileCommand alone' 2>&1)
+  [ "$(cat "$STUB/env" 2>/dev/null)" = "none none none none none none 1" ] \
+    || fail "a run called with TEST_STILL, TEST_GIVEN, TEST_HARD, TEST_PACKONLY, PACK and MUT_RUN gave them to its test command, or kept CONVEYOR_TEST_ONESLOT from it (it saw: $(cat "$STUB/env" 2>/dev/null)): $got"
 }
 
 # Issue 1666, what must stay true: a landed card counts for a case only on passes of main as it is when the closed line

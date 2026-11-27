@@ -769,7 +769,7 @@ aloneproof() { # <card> <worktree> <test file>
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt" \
       && git -C "$2" diff --cached --binary --no-renames HEAD | git -C "$mwt" apply --index; } 2>&1 < /dev/null); then
     # The run reads the pack the change leaves (pp), so a change to test.fileCommand is the command it proves.
-    printf 'fail\t%s\n' "${fs[@]}" > "$mwt.rerun"; PACK=$pp tests "$mwt" test.fileCommand alone; rc=$?
+    printf 'fail\t%s\n' "${fs[@]}" > "$mwt.rerun"; scoped PACK "$pp" tests "$mwt" test.fileCommand alone; rc=$?
     if [ -s "$mwt.stop" ]; then why=$(<"$mwt.stop")
     elif [ "$rc" != 0 ]; then
       x=$(testfails "$mwt.test" "$rc" 2>/dev/null | jq -r '[.files[]?.cases[]?.name | select(. != "")] | unique | join(", ")' 2>/dev/null)

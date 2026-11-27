@@ -260,7 +260,7 @@ t_mainprobeengine() {
   mrshared
   for c in c7 c8; do
     git -C "$R" worktree add -q --detach "$T/$CASE/cards/$c" || fail "card $c's worktree could not be made"
-    eng 'RAN=e'"${c#c}"'; TEST_GIVEN=; TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts '"$c"' "$CONVEYOR_CARDS/'"$c"'" '"'$fl'"'' > "$STUB/v.$c" 2>&1
+    eng 'RAN=e'"${c#c}"'; TEST_WAIT=; TEST_RUN=; TEST_FREE=; verdicts '"$c"' "$CONVEYOR_CARDS/'"$c"'" '"'$fl'"'' > "$STUB/v.$c" 2>&1
   done
   [ "$(tr '\n' ' ' < "$STUB/mainruns")" = 'a.test a.test ' ] \
     || fail "card c8, failing $fl under engine e8 at the commit c7 ran a.test on under engine e7, read c7's run and did not run a.test on main again: $(cat "$STUB/mainruns" "$STUB/v.c8")"
@@ -272,11 +272,28 @@ t_mainprobeengine() {
 t_redrunstopped() {
   local got c='[{"name":"c.test","file":"c.test","files":[],"case":""},{"name":"d.test","file":"d.test","files":[],"case":""}]'
   mkdir -p "$T/$CASE"
-  got=$( cd "$T/$CASE" && eval "$(sed -n '/^redrun() {/,/^}/p' "$SRC/lib/mainred.sh")"
+  got=$( cd "$T/$CASE" && eval "$(sed -n '/^redrun() {/,/^}/p' "$SRC/lib/mainred.sh")"; eval "$(sed -n '/^scoped() {/,/^}/p' "$SRC/lib/testrun.sh")"
     names() { :; }; tests() { mkdir -p "$1.testlog" && : > "$1.testlog/a.log"; return 124; }; testlogs() { echo "$1.testlog/a.log"; }
     testfails() { echo '{"files":[],"timeout":{"sec":1,"file":"d.test"},"stopped":["c.test","d.test"]}'; }
     redrun "$T/$CASE/wt" "$c" | jq -c 'map(.verdict)' ) || fail "redrun() did not run: $got"
   [ "$got" = '["fail","fail"]' ] || fail "redrun of $c, with testfails() naming c.test and d.test stopped, did not fail both: $got"
+}
+
+# Bug it catches: a run on main that never started (tests() returned before its command ran; in the loop, 2026-11-27,
+# a TEST_STILL a test inherited made its engine's check refuse) left no log and no output and exited 1, and redrun()
+# gave each case fail, so the proof read main as red for cases that never ran. Each gets none. A command that writes
+# output but no log still says only its exit: fail.
+t_redrunnostart() {
+  local got c='[{"name":"c.test","file":"c.test","files":[],"case":""},{"name":"d.test","file":"d.test","files":[],"case":""}]'
+  mkdir -p "$T/$CASE"
+  got=$( cd "$T/$CASE" && eval "$(sed -n '/^redrun() {/,/^}/p' "$SRC/lib/mainred.sh")"; eval "$(sed -n '/^scoped() {/,/^}/p' "$SRC/lib/testrun.sh")"
+    names() { :; }; tests() { return 1; }; testlogs() { :; }
+    redrun "$T/$CASE/wt" "$c" | jq -c 'map(.verdict)' ) || fail "redrun() did not run: $got"
+  [ "$got" = '["none","none"]' ] || fail "redrun of $c, whose run never started (no log, no output, exit 1), did not give each none: $got"
+  got=$( cd "$T/$CASE" && eval "$(sed -n '/^redrun() {/,/^}/p' "$SRC/lib/mainred.sh")"; eval "$(sed -n '/^scoped() {/,/^}/p' "$SRC/lib/testrun.sh")"
+    names() { :; }; tests() { echo broken > "$1.test"; return 1; }; testlogs() { :; }
+    redrun "$T/$CASE/wt" "$c" | jq -c 'map(.verdict)' ) || fail "redrun() did not run: $got"
+  [ "$got" = '["fail","fail"]' ] || fail "redrun of $c, whose command printed output and exited 1 with no log, did not fail each: $got"
 }
 
 # R273. Bug it catches: when the main-red entry of main's commit names no landing, verdicts() took brokeMain from the

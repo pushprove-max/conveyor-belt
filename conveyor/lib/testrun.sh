@@ -781,8 +781,14 @@ nopass() { # <worktree> <the run's record>
 # the environment over Linux's 128 KiB limit stops the command from starting.
 # TEST_HARD, when set, is a limit in seconds (scaled, as above) that timeout itself keeps: the run ends there even while a runner of the
 # command waits for a whole-suite turn, which stops testclock's clock (the check on main, mainred.sh verdicts()).
-# The command gets none of the variables the engine gives one call of its own (TEST_STILL, TEST_GIVEN, TEST_HARD,
-# TEST_PACKONLY: bash exports them for the call): a test that calls the engine would read them as its own.
+# The command gets none of the engine's own settings (TEST_STILL, TEST_GIVEN, TEST_HARD, TEST_PACKONLY, PACK and
+# MUT_RUN; one set in front of a call, `VAR=value tests`, bash exports): a test that calls the engine would read
+# them as its own. A setting for the command itself is a CONVEYOR_ one (CONVEYOR_TEST_ONESLOT, CONVEYOR_SUITE_FILES).
+# Runs <command>... with <name> set to <value> for that call only, and not exported, as a prefix assignment would be
+# (`<name>=<value> <command>`): a test command the call starts would inherit it (.conveyor/lint-prefix.sh).
+scoped() { # <name> <value> <command>...
+  local +x "$1=$2"; shift 2; "$@"
+}
 testonce() { # <worktree> <cmd>
   local pid clock rc r='' t0 lf lim hard=${TEST_HARD:-0} given='' KEEP=()
   [ ! -s "$1.rerun" ] || r=$1.rerun; rm -f "$1.report" "$1".report.[0-9]* "$1.testfiles"
@@ -795,7 +801,7 @@ testonce() { # <worktree> <cmd>
   printf '%s\n' "$lim" > "$1.limit" || return 1
   [ -z "${TALIMIT:-}" ] || talimit "$lim"
   [ "$hard" = 0 ] || hard=$(awk -v n="$hard" -v f="$lf" "$LOADSCALE") || hard=$TEST_HARD
-  (cd "$1" && unset TEST_STILL TEST_GIVEN TEST_HARD TEST_PACKONLY && { [ -n "$SLOT_HOME" ] || slot_mine; } && { [ ${#REPORT_ENV[@]} = 0 ] || export "${REPORT_ENV[@]}"; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_TEST_TURNWAIT=$1.turnwait \
+  (cd "$1" && unset TEST_STILL TEST_GIVEN TEST_HARD TEST_PACKONLY PACK MUT_RUN && { [ -n "$SLOT_HOME" ] || slot_mine; } && { [ ${#REPORT_ENV[@]} = 0 ] || export "${REPORT_ENV[@]}"; } && CONVEYOR_TEST_SLOTS=$HERE/lib/slots.sh CONVEYOR_TEST_LOG=$1.testlog CONVEYOR_TEST_TURNWAIT=$1.turnwait \
     CONVEYOR_TEST_TIME=$HERE/tools/testtime.sh CONVEYOR_LOAD_FACTOR=$lf CONVEYOR_TEST_RERUN=$r CONVEYOR_TEST_FILELIST=$given CONVEYOR_TEST_CASES=${TEST_CASES:-} exec "${KEEP[@]}" timeout --kill-after=30 "$hard" bash -c "$2" > "$1.test" 2>&1 < /dev/null 8>&-) &
   pid=$!; testclock $pid "$1.turnwait" "$lim" & clock=$!
   watch $pid "$1.test" "$1.live" test; rc=$?

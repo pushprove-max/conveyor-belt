@@ -339,7 +339,7 @@ bugproofed() { # <card> <worktree> <issue json>
 bugmain() { # <card> <worktree> <issue json>
   # A run that reports more test files than it was given is stopped (watch(), tests(): <worktree>.stop), as is one
   # with no test.fileCommand, and the check fails with that reason (exit 2), as a build session cannot change the pack.
-  TEST_GIVEN=${#fs[@]} bugrun "$mwt" "${fs[@]}"; rc=$?
+  scoped TEST_GIVEN "${#fs[@]}" bugrun "$mwt" "${fs[@]}"; rc=$?
   [ ! -s "$mwt.stop" ] || stop=$(<"$mwt.stop")
   [ -n "$stop" ] || ! testfailed "$mwt" "$rc" "$3" || held=1
   # A failed run that proved nothing and gave no result for a file it was given (noresult()) says nothing either
@@ -347,7 +347,7 @@ bugmain() { # <card> <worktree> <issue json>
   # that failed without the bug's own error, or whose command could not run (NOTBUGWHY), is not that: it is no proof,
   # and the build is told so (exit 1).
   if [ -z "$stop" ] && [ -z "$held" ] && [ -z "$NOTBUGWHY" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}"); then
-    TEST_GIVEN=${#fs[@]} bugrun "$mwt" "${fs[@]}"; rc=$?
+    scoped TEST_GIVEN "${#fs[@]}" bugrun "$mwt" "${fs[@]}"; rc=$?
     [ ! -s "$mwt.stop" ] || stop=$(<"$mwt.stop")
     [ -n "$stop" ] || ! testfailed "$mwt" "$rc" "$3" || held=1
     [ -z "$stop" ] && [ -z "$held" ] && [ -z "$NOTBUGWHY" ] && nr=$(noresult "$mwt" "$rc" "${fs[@]}") || nr=''
@@ -390,11 +390,11 @@ bugnamed() { # <card> <worktree> <issue json>
     # test.fileCommand; a run that reports more files than it was given is stopped, as above; at most
     # test.cardFiles of them run (testcap()).
     testcap "${nf[@]}"; nf=("${CAPFILES[@]}"); cn=$CAPNOTE
-    TEST_GIVEN=${#nf[@]} bugrun "$mwt" "${nf[@]}"; fx=$?
+    scoped TEST_GIVEN "${#nf[@]}" bugrun "$mwt" "${nf[@]}"; fx=$?
     [ ! -s "$mwt.stop" ] || stop=$(<"$mwt.stop")
     # Main's code put back fails the check (rc empty): the logs left are those of the run with the fix.
     if [ -n "$stop" ]; then rc=''
-    elif git -C "$mwt" reset -q --hard; then TEST_GIVEN=${#nf[@]} bugrun "$mwt" "${nf[@]}"; rc=$?; [ ! -s "$mwt.stop" ] || stop=$(<"$mwt.stop")
+    elif git -C "$mwt" reset -q --hard; then scoped TEST_GIVEN "${#nf[@]}" bugrun "$mwt" "${nf[@]}"; rc=$?; [ ! -s "$mwt.stop" ] || stop=$(<"$mwt.stop")
     else rc=''; fi
     [ -z "$stop" ] || BUGWHY=$stop
     [ -n "$stop" ] || [ "$fx" != 0 ] || [ -z "$rc" ] || ! testfailed "$mwt" "$rc" "$3" || held=1

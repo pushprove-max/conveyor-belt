@@ -29,6 +29,8 @@
         ".claude/hooks/": "area:hooks",
         "hooks/": "area:hooks",
         ".conveyor/lint-funcs.awk": "area:linter",
+        ".conveyor/lint-prefix.sh": "area:linter",
+        ".conveyor/lint-prefix.test.sh": "area:linter",
         ".conveyor/lint-funcs.sh": "area:linter",
         ".conveyor/lint-funcs.test.sh": "area:linter",
         ".conveyor/lint-js.sh": "area:linter",
@@ -172,6 +174,16 @@
           ".conveyor/lint-shell.sh"
         ],
         "run": "bash .conveyor/lint-shell.sh {files}"
+      },
+      {
+        "files": [
+          "conveyor/lib/*.sh",
+          "conveyor/commands/*.sh"
+        ],
+        "triggers": [
+          ".conveyor/lint-prefix.sh"
+        ],
+        "run": "bash .conveyor/lint-prefix.sh {files}"
       },
       {
         "files": [
