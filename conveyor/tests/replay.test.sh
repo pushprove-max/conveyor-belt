@@ -70,14 +70,14 @@ replaysetup() {
   eval "$SUMS" > "$STUB/before"
 }
 # The stub judge: it keeps the staged change and what it was given ($STUB/judged) and c1-7's whole staged diff
-# ($STUB/c1-7.diff), answers the findings of c1-7 with F1 ACCEPT and F2 ACCEPT (so F2 differs from the recorded
+# ($STUB/c1-7.diff), answers the findings of c1-7 with F1 ACCEPT and F2 OUTSIDE (so F2 differs from the recorded
 # decline), the one of c1-8 with a DECLINE (as its judge did), and fails on c1-11 (a timeout) with the usage the call
 # had used, as judgecall() prints it.
 STUBJUDGE='judgecall() {
   { echo "== $CALLACT"; git -C "$1" diff --cached | grep "^+[a-z]\|^@@"; printf "%s\n" "$3"; } >> "$STUB/judged"; printf "%s\n" "$2" >> "$STUB/judge-prompt"
   case $CALLACT in
     *c1-7) git -C "$1" diff --cached > "$STUB/c1-7.diff"
-      printf "%s\n" "F1 ACCEPT: real. Cost to every card: none" "F2 ACCEPT: the change causes it. Cost to every card: none" > "$1.judge"
+      printf "%s\n" "F1 ACCEPT: real. Cost to every card: none" "F2 OUTSIDE: harm: b.txt:1 was already ruled outside" > "$1.judge"
       echo "{\"model\":\"claude-haiku-5-5\",\"effort\":\"low\",\"sec\":3,\"usage\":$U}" ;;
     *c1-8) echo "F1 DECLINE: weak" > "$1.judge"; echo "{\"model\":\"claude-haiku-5-5\",\"effort\":\"low\",\"sec\":3,\"usage\":$U}" ;;
     *) echo "{\"model\":\"claude-haiku-5-5\",\"effort\":\"low\",\"sec\":9,\"usage\":$U,\"failed\":\"the judge call failed (timeout)\"}"; return 1 ;;
@@ -110,7 +110,8 @@ t_replayjudge() {
   out=$(tail -n 1 "$T/$CASE/run.out")
   jq -e '{reviews, skipped, findings, agree, unanswered, usd, recordedUsd, model, effort} == {"reviews":3,"skipped":3,"findings":3,"agree":2,"unanswered":1,"usd":0.3,"recordedUsd":6,"model":"claude-haiku-5-5","effort":"low"}' <<<"$out" >/dev/null \
     || fail "the replay's counts and costs: $out"
-  [ "$(jq -c .differ <<<"$out")" = '[{"card":"c1-7","issue":7,"n":2,"finding":"[P2] a.txt:1 F-two","recorded":"decline","replay":"accept","reason":"the change causes it. Cost to every card: none"}]' ] \
+  # Bug caught: an OUTSIDE answer, which the judge's prompt asks for, was not read, so F2 counted as unanswered.
+  [ "$(jq -c .differ <<<"$out")" = '[{"card":"c1-7","issue":7,"n":2,"finding":"[P2] a.txt:1 F-two","recorded":"decline","replay":"outside","reason":"harm: b.txt:1 was already ruled outside"}]' ] \
     || fail "the findings where the rulings differ: $(jq -c .differ <<<"$out")"
   [ "$(jq -c '.calls | map([.card, .usage.input, .failed // ""])' <<<"$out")" = '[["c1-7",1000000,""],["c1-8",1000000,""],["c1-11",1000000,"the judge call failed (timeout)"]]' ] \
     || fail "each call's usage, the failed one's too, is not recorded: $(jq -c .calls <<<"$out")"

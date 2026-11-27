@@ -100,8 +100,8 @@ replayusd() { # < <steps json array>
 # usd: the recorded judges' token use priced at <model>, recordedUsd}. Else it calls the judge once a case and appends
 # one line to REPLAYS, which it also prints: {time, seat: "judge", model, effort, last, reviews (the cases replayed),
 # skipped (the cases with no change to stage, or not the change their review read), findings (those compared),
-# agree, unanswered (the findings of a call that failed or gave no line for them), differ: [{card, issue, n, finding, recorded, replay: "accept" or "decline",
-# reason: the replay judge's}], usd (the replay's calls), recordedUsd (the recorded judges of the same cases), calls:
+# agree, unanswered (the findings of a call that failed or gave no line for them), differ: [{card, issue, n, finding, recorded, replay: "accept", "decline" or "outside"
+# (an OUTSIDE answer, which differs from either recorded ruling), reason: the replay judge's}], usd (the replay's calls), recordedUsd (the recorded judges of the same cases), calls:
 # each call's own usage, {card, issue, model, effort, sec, tokens, usage}, with failed (why) when it failed}. One
 # replay runs at a time.
 replay() { # judge <model> [<effort>] [--last <n>] [--estimate]
@@ -156,7 +156,7 @@ replay() { # judge <model> [<effort>] [--last <n>] [--estimate]
     jq -c --rawfile pl <(proofline "$d/wt") '($pl | split("\n")) as $pw | [.findings | to_entries[] | {n: (.key + 1), place: (.value.place | if . == "inside" or . == "outside" then . else "none" end), proof: ($pw[.key] // "none"), finding: .value.finding}]' <<<"$k" > "$d/wt.judge.marks"
     out=$(CALLSEAT=$s CALLSTEP=replay CALLACT="the replay judge reads the findings of $(jq -r .card <<<"$k")" judgecall "$d/wt" "$jp" "$brief"$'\n\n'"${back:+$back$'\n\n'}${before:+$before$'\n\n'}${outside:+$outside$'\n\n'}$(judgefindings "$d/wt")") && f=ok || f=''
     jq -e objects <<<"$out" >/dev/null 2>&1 || out='{"failed": "the judge call printed no fields"}'
-    ans='[]'; [ -z "$f" ] || ans=$(jq -cRn '[inputs | gsub("^[[:space:]`*-]+|[[:space:]`*]+$"; "") | capture("^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE):[[:space:]]*(?<r>.*)$")]' "$d/wt.judge" 2>/dev/null) || ans='[]'
+    ans='[]'; [ -z "$f" ] || ans=$(jq -cRn '[inputs | gsub("^[[:space:]`*-]+|[[:space:]`*]+$"; "") | capture("^F(?<n>[0-9]+) (?<d>ACCEPT|DECLINE|OUTSIDE):[[:space:]]*(?<r>.*)$")]' "$d/wt.judge" 2>/dev/null) || ans='[]'
     jq -c --slurpfile k "$d/case" '$k[0] as $k | {card: $k.card, issue: $k.issue} + ({model, effort, sec, tokens, usage, failed} | del(.[] | nulls))' <<<"$out" >> "$w/calls"
     printf '%s\n' "$out" >> "$w/steps"; jq -c .judge <<<"$k" >> "$w/rec"
     # Each finding's ruling: the one line the replay judge gave for it, else none (unanswered).
