@@ -141,16 +141,22 @@ t_pushtestsstale() {
 # #1709 D3. With pushbatchtests all every file runs: lib/cart.test.js, whose pass in the cache holds with main's inputs,
 # untraced (CONVEYOR_TEST_NOTRACE=1), and a.test.sh, with no pass there, traced, its pass then kept with its inputs.
 # Bugs it catches: a file whose list of inputs is fresh was traced again; a pass the run traced was not kept, so its
-# trace was for nothing and the next push ran the file again.
+# trace was for nothing and the next push ran the file again; the pass was kept without its input lib/cart.js, so a
+# later push would reuse it though lib/cart.js had changed. cachehits(), as the next push asks it, must name both
+# files on main as it is, and neither once lib/cart.js changes.
 t_pushtestsnotrace() {
   local l1 l2 base
   pushfix true; pushpool 1 # one slot: the two files run one at a time, in order (t_pushtestsside runs them side by side)
   printf '%s\n' "$PUSHONE" > "$STUB/one"
   loop control rules pushbatch=on pushbatchtests=all > /dev/null || fail "control rules pushbatch=on pushbatchtests=all failed"
-  pushnow "$PUSHPASS \"\$R\" > \"\$TESTCACHE\" || exit 1; pushtests c2 2 $l2 $base && cut -f3 \"\$TESTCACHE\" | sort > \"\$T/\$CASE/kept\""
+  pushnow "$PUSHPASS \"\$R\" > \"\$TESTCACHE\" || exit 1; pushtests c2 2 $l2 $base && cachehits \"\$R\" > \"\$T/\$CASE/kept\" \\
+    && echo changed > \"\$R/lib/cart.js\" && cachehits \"\$R\" > \"\$T/\$CASE/changed\""
   [ "$(cat "$STUB/ran" 2>&1)" = "$l2 a.test.sh traced
 $l2 lib/cart.test.js 1" ] || fail "pushtests c2 2 $l2 $base with pushbatchtests all did not run a.test.sh traced and lib/cart.test.js untraced: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
-  [ "$(cat "$T/$CASE/kept" 2>&1)" = $'a.test.sh\nlib/cart.test.js' ] || fail "the traced pass of a.test.sh was not kept in the cache: $(cat "$T/$CASE/kept" "$T/$CASE/push.out" 2>&1)"
+  [ "$(cat "$T/$CASE/kept" 2>&1)" = $'a.test.sh\nlib/cart.test.js' ] \
+    || fail "cachehits on main after pushtests c2 2 $l2 $base does not name a.test.sh, so its traced pass is not reusable: $(cat "$T/$CASE/kept" "$T/$CASE/push.out" 2>&1)"
+  [ -e "$T/$CASE/changed" ] && [ ! -s "$T/$CASE/changed" ] \
+    || fail "cachehits with lib/cart.js changed still names a file whose kept pass read it (its input was lost): $(cat "$T/$CASE/changed" "$T/$CASE/push.out" 2>&1)"
 }
 
 # #1709 D2. With pushbatchtests all, a.test.sh and lib/cart.test.js run on a pool of three slots: each file's command
