@@ -11,7 +11,8 @@
 #   --auto_stop_idle_timeout <idleStop>` leases a devbox, whose lease id is kept (SH_LEASE, and machine.lease in the
 #   record), and the devbox is checked as a box over ssh is, each command sent by `devbox exec --lease_id <id>`. With
 #   a box named in the rule (box), no devbox is acquired: `devbox exec <box> -- true` starts that box, the box is kept
-#   in the record (machine.box), and each command is sent by `devbox exec <box> --`; it is never given back.
+#   in the record (machine.box), and each command is sent by `devbox exec <box> --`, its input first put there by
+#   `devbox upload <box>` (hostsshin()); it is never given back.
 # - setup: local, nothing. ssh: the tested commit's .conveyor/test-machine.sh runs there when its blob is not the one the
 #   box last ran (<dir>/<repo>/setup.blob); with no such file it is skipped.
 # - checkout: the worktree of the commit here ($CARDS/release/wt, deps()), which the changed-tests selection and the

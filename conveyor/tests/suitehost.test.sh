@@ -556,7 +556,7 @@ t_devboxnamed() {
   jq -e '.state == "passed" and .machine.kind == "devbox" and .machine.box == "hand-made" and .machine.lease == null and .machine.step == "done"' "$RUN" > /dev/null \
     || fail "the run did not pass on the named box hand-made: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
   [ "$(devboxcalls)" = 'auth check-login;exec start;exec facts;exec dir;upload hand-made wt.in;exec checkout;exec dir;upload hand-made wt.in;exec upload;exec -d run;exec poll' ] \
-    || fail "the calls were not login, start, facts, checkout, upload, run and polls (no setup script in this commit), with no acquire or release: $(devboxcalls)"
+    || fail "the calls were not login, start, facts, checkout, upload, run and polls (no setup script in this commit; each input uploaded first), with no acquire or release: $(devboxcalls)"
   ! grep -q hand-made "$STUB/gh-calls" || fail "the commit status names the owner's box: $(cat "$STUB/gh-calls")"
 }
 # Bugs: suite-machine check passed while the account was at its devbox limit with no box to use, so the problem showed only
