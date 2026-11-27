@@ -161,9 +161,9 @@ t_reviewlandwordfree() {
   fx_in 'followups c1-7 "$(jq -c ".[0]" "$STUB/issues.json")" "$FXWT.review"'
   [ "$RC" = 0 ] && jq -e --arg f "$f" '[.cards[] | select(.body | contains($f))] | length == 1 and .[0].held != true' "$ST/testactions/cards.json" >/dev/null \
     || fail "followups() with review-followup on, auto.reserved [\"rea\"] and the finding '$f' on the card's own pipeline file b.txt held its card (exit $RC): $(cat "$T/$CASE/run.out" "$ST/testactions/cards.json" 2>&1)"
-  fx_in 'rlfind=x; printf "%s %s\n" "$(rlpick "x already" cost "[\"rea\"]")" "$(rlpick "x rea" cost "[\"rea\"]")"'
+  fx_in 'rlfind=x; printf "%s %s\n" "$(rlpick "x already" "[\"rea\"]")" "$(rlpick "x rea" "[\"rea\"]")"'
   [ "$(cat "$T/$CASE/run.out")" = 'rl hold' ] \
-    || fail "rlpick with rlfind x, a cost and held [\"rea\"], on 'x already' then on 'x rea', gave '$(cat "$T/$CASE/run.out")', not 'rl hold'"
+    || fail "rlpick with rlfind x and held [\"rea\"], on 'x already' then on 'x rea', gave '$(cat "$T/$CASE/run.out")', not 'rl hold'"
 }
 # Bug guarded (#1612, review): a later review dropped the finding that blocked the card. The card of a retry by
 # review-land keeps its kept review (rlrev, resumeplan()). A review after that one still ends the loop as a last review
@@ -250,8 +250,10 @@ t_reviewlandprofile() {
 # Bug guarded (#1612, review): with follow-ups filed as GitHub issues while the Foreman files issues (`control filing
 # on`), every issue opened after the mark is held at its first sight (adopted(), lib/control.sh), so the released
 # follow-up of the finding a retry by review-land names was held all the same: followups() releases it.
-t_reviewlandfiling() {
-  local f='[P1] b.txt:2 drops the line' num
+# rlfiling <finding>: followups() with rlfind <finding>, follow-ups as GitHub issues and filing on, then adopted() on
+# its follow-up, as the next snapshot reads it; fails when that follow-up is held.
+rlfiling() {
+  local f=$1 num
   rlblocked '[P1] a.txt:2 drops the line'
   tune '.pipelineFiles = ["b.txt"]'
   loop control rules followupissues=on > /dev/null && loop control filing on > /dev/null || fail "followupissues=on or filing on was refused"
@@ -261,6 +263,10 @@ t_reviewlandfiling() {
   [ "$RC" = 0 ] && [ -n "$num" ] && jq -e --argjson n "$num" 'index($n) == null' "$T/$CASE/held" >/dev/null \
     || fail "followups() with rlfind '$f' and filing on: its follow-up #$num is held at its next sight ($(cat "$T/$CASE/held" 2>&1), exit $RC): $(cat "$T/$CASE/run.out")"
 }
+t_reviewlandfiling() { rlfiling '[P1] b.txt:2 drops the line'; }
+# Bug guarded (#1612, review of its follow-up): rlpick() answered only for a finding on a pipeline file, so a finding
+# on README.md (outside pipelineFiles: b.txt) was not released, and the filing mark held its follow-up.
+t_reviewlandfilingdoc() { rlfiling '[P1] README.md:2 drops the line'; }
 # The retry by review-land reads the owner's answer to the card's decision, then moves the card's lines. What must stay
 # true: no answer of the owner is saved once that read let the card be given back, as needsask() takes no step for the
 # answer to a card no longer blocked, and the card would land over it. The other writer is the Board's answer

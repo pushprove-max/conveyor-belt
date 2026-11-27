@@ -291,16 +291,16 @@ unfile() { # <parent issue> <review file> <follow-up issue>...
   done < "${r%.review}.fucards"
   rm -f "${r%.review}.fucards"
 }
-# rlpick <finding> <cost> <held>: what followups() does with the finding whose fix did not hold on a card the owner's
-# standing order lands (rlfind, its block reason's part: resumeplan(), lib/card.sh; landable(), commands/retry.sh), on a
-# pipeline file (<cost> not empty). "rl" when the whole finding holds nothing of <held> (heldlist(), lib/standing.sh):
-# its follow-up is filed released, and its issue released too, as a filing mark (`control filing on`) would hold it at
-# its first sight (adopted(), lib/control.sh). "hold" when it holds something: held, even when review-followup would
-# free it. Nothing for another finding. Bugs: the block reason keeps only the finding's first 300 characters, so a
-# reserved word after them was released; and free reads auto.reserved alone, so a profile item was released through it.
+# rlpick <finding> <held>: what followups() does with the finding whose fix did not hold on a card the owner's
+# standing order lands (rlfind: resumeplan(), lib/card.sh; landable(), commands/retry.sh), on any file. "rl" when the
+# whole finding holds nothing of <held> (heldlist(), lib/standing.sh): its follow-up is filed released, and its issue
+# released too, as a filing mark (`control filing on`) would hold it at its first sight (adopted(), lib/control.sh).
+# "hold" when it holds something: held on a pipeline file, even when review-followup would free it; not released on
+# another. Nothing for another finding. Bugs: a reserved word past the block reason's first 300 characters, and a
+# profile item (free reads auto.reserved alone), were released; one on a file outside pipelineFiles was held by filing.
 rlpick() {
-  [ -n "$2" ] && [ -n "${rlfind:-}" ] && [[ $1 == "$rlfind"* ]] || return 0
-  if [ "$(jq --arg f "$1" "$HELDIN"'. as $l | $f | heldin($l)' <<<"$3" 2>/dev/null)" = false ]; then echo rl; else echo hold; fi
+  [ -n "${rlfind:-}" ] && [[ $1 == "$rlfind"* ]] || return 0
+  if [ "$(jq --arg f "$1" "$HELDIN"'. as $l | $f | heldin($l)' <<<"$2" 2>/dev/null)" = false ]; then echo rl; else echo hold; fi
 }
 followups() { # <card> <issue json> <review file>
   local f mark where out num n pn nums=() more=() found=() pipe cost own='' free rl held='' res pm g masked depth kind clean body area fa nocard='' fc=${3%.review}.fucards
@@ -348,7 +348,7 @@ followups() { # <card> <issue json> <review file>
     free=''; [ -z "$cost" ] || [ -z "$own" ] \
       || [ "$(jq --arg f "$f" "$HELDIN"'. as $l | $f | heldin($l)' <<<"$res" 2>/dev/null)" != false ] \
       || free=$(ownonly "$f" "${3%.review}")
-    rl=$(rlpick "$f" "$cost" "$held"); [ "$rl" != hold ] || free=''; [ "$rl" = rl ] || rl='' # the finding of a retry by review-land, released or held
+    rl=$(rlpick "$f" "$held"); [ "$rl" != hold ] || free=''; [ "$rl" = rl ] || rl='' # the finding of a retry by review-land, released or held
     cost=${cost:+$'\nCost to every card: not assessed'}
     # A finding the reviewer marks [cleanup] (REVIEWT: its fix changes no behaviour, as a comment, dead code or a
     # redundant check) is filed without the pack's type label, so its card skips the bug-card check (card.sh): no test
