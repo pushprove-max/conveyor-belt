@@ -22,7 +22,8 @@ printf 't_aone() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"; echo 'echo one' >
 (cd "$ROOT" && git ls-files -z "$D" .claude/dashboard/panels .claude/dashboard/app.css .claude/dashboard/app.js | tar -cf - --null -T -) | tar -xf - -C "$R" || { echo "not ok - the Board files could not be copied"; exit 1; }
 # This checkout's links of the page's stylesheet, app.js and guide (.conveyor/test-links.json), so the links of the
 # other files changed below do not add to their lists.
-jq '{".claude/dashboard/app.css": .[".claude/dashboard/app.css"], ".claude/dashboard/app.js": .[".claude/dashboard/app.js"], "docs/board.md": .["docs/board.md"]}' \
+jq '{".claude/dashboard/app.css": .[".claude/dashboard/app.css"], ".claude/dashboard/app.js": .[".claude/dashboard/app.js"], "docs/board.md": .["docs/board.md"],
+  ".claude/scripts/__tests__/dashboard-view.selfheals.test.mjs": .[".claude/scripts/__tests__/dashboard-view.selfheals.test.mjs"]}' \
   "$HERE/test-links.json" > "$R/.conveyor/test-links.json" || { echo "not ok - the page's test links could not be read"; exit 1; }
 mkdir -p "$R/docs"; cp "$ROOT/docs/board.md" "$R/docs/board.md"; cp "$ROOT/docs-claims.test.sh" "$R/docs-claims.test.sh"
 # Tests no list names: a new one that imports the fixture and draws Landed is selected by both rules; one that only
@@ -98,5 +99,12 @@ grep -qxF docs-claims.test.sh <<<"$got" \
   || no "a change to docs/board.md alone does not list docs-claims.test.sh, which reads it: $(tr '\n' ' ' <<<"$got")"
 head -n 5 <<<"$got" | grep -qxF "$D/dashboard-view.rules-index.test.mjs" \
   || no "dashboard-view.rules-index.test.mjs is not among the first 5 files listed for a change to docs/board.md alone, so a card's run leaves it out: $(tr '\n' ' ' <<<"$got")"
+
+# Bug: a retired word in dashboard-view.selfheals.test.mjs broke main, as dashboard-local.test.sh scans that file for
+# retired words; the link named conveyor/tests/healsact.test.sh instead, so a card that changed the selfheals test
+# alone ran only that test, and the scan never ran.
+got=$(listed "$D/dashboard-view.selfheals.test.mjs")
+has "$got" dashboard-local.test.sh \
+  || no "a change to dashboard-view.selfheals.test.mjs alone does not list dashboard-local.test.sh, which scans it: $(tr '\n' ' ' <<<"$got")"
 
 [ ! -s "$T/notok" ] && echo "ok - a change to the Board's fixture or a panel lists the test files that import it or draw it" || exit 1
