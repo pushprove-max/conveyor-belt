@@ -805,6 +805,19 @@ test('QUEUE whose issues all wait says nothing can be picked and names what they
   expect(part.split('\n').slice(0, 2)).toEqual(['QUEUE', '  nothing can be picked: waiting for #3959 (blocked), #3967 (held)'])
 })
 
+// Bug: with the only queued issue waiting and a ready card with no GitHub issue (a docs sweep), pick takes the card,
+// yet /units said "nothing can be picked". A card that is held, waits or is skipped by a rule is not ready: with only
+// those, nothing can be picked.
+test('QUEUE whose issues all wait says no issue can be picked when a card with no GitHub issue is ready', () => {
+  const waiting = [{ issue: 3950, title: 'Second half', waitsFor: [3967], waitsOn: [{ issue: 3967, state: 'held' }] }]
+  const notReady = [{ card: 'c20261102T000001-sample-0', held: true }, { card: 'c20261102T000002-sample-0', waitsFor: [3967] },
+    { card: 'c20261102T000003-sample-0', rule: 'follow-ups' }]
+  const firstTwo = (cards: object[]) => section(tableText(board({ queue: { next: [], waiting, cards } }), 100), 'QUEUE').split('\n').slice(0, 2)
+  const sweep = { card: 'c20261102T000004-sample-0', kind: 'Docs sweep', waitsFor: [], rule: null }
+  expect(firstTwo([...notReady, sweep]), 'queue: one waiting issue, a ready docs sweep').toEqual(['QUEUE', '  no issue can be picked: waiting for #3967 (held)'])
+  expect(firstTwo(notReady), 'queue: one waiting issue, cards held, waiting or rule-skipped').toEqual(['QUEUE', '  nothing can be picked: waiting for #3967 (held)'])
+})
+
 test('the issues built and waiting for a PROD deploy are a section of their own under QUEUE, with how long each has waited; with none there is no section', () => {
   const awaitingDeploy = [{ issue: 3476, title: 'Stack split', since: ago(2 * 24 * 60) }, { issue: 3500, title: 'Label time not read', since: null }]
   const text = tableText(board({ queue: { next: queued(1) }, awaitingDeploy }), 80)

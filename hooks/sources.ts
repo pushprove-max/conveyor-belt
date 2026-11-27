@@ -134,7 +134,7 @@ export type Push = {
 }
 // own: the session's own project, whose cards carry no project name ('' or absent: none is). foremanHas: the blocked
 // cards the Foreman works on (a note that is not a question to the owner), apart from needs.
-export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; foremanHas?: Need[]; belt: Belt[]; queue: Queued[] | null; order?: { repo: string; issue: number; umbrella: number | null }[]; queueMore: boolean; waits: Waiting[]; held: [string, number][]; cards?: number; badDeps?: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; todayEstimate?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
+export type Snap = { own?: string; pushes?: Push[]; loops: Loop[]; needs: Need[]; foremanHas?: Need[]; belt: Belt[]; queue: Queued[] | null; order?: { repo: string; issue: number; umbrella: number | null }[]; queueMore: boolean; waits: Waiting[]; held: [string, number][]; cards?: number; cardsReady?: number; badDeps?: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut?: number; todayEstimate?: number; judgeDeclined: number[]; suites?: Suite[]; umbrellas: Umbrella[]; unpushed?: { repo: string; issue: number }[]; kept?: { repo: string; at: number }[] }
 export type Fast = { state: 'none' | 'unread' | 'norecord' } | { state: 'ok'; branch: string; ahead: number; dirty: number; subject: string }
 export type Research = { state: 'none' } | { state: 'ok'; lastAt: number | null }
 export type Limit = { pct: number; resetsAt: number }
@@ -290,7 +290,7 @@ const heldCounts =(skipped: unknown, holding: unknown): Record<string, number> =
   if (n > 0) out.held = n
   return out
 }
-type Rec = { loop: Loop; needs: Need[]; foremanHas: Need[]; belt: Belt[]; queue: Queued[] | null; order: { repo: string; issue: number; umbrella: number | null }[]; waits: Waiting[]; held: Record<string, number>; cards: number; badDeps: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; todayEstimate: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
+type Rec = { loop: Loop; needs: Need[]; foremanHas: Need[]; belt: Belt[]; queue: Queued[] | null; order: { repo: string; issue: number; umbrella: number | null }[]; waits: Waiting[]; held: Record<string, number>; cards: number; cardsReady: number; badDeps: Ref[]; deploy: Deploy[]; landed: Landed[]; landedCount: number; todayUsd: number | null; todayLeftOut: number; todayEstimate: number; judgeDeclined: { id: string; at: number }[]; suites: Suite[]; umbrellas: Umbrella[]; unpushed: number[]; push: Push; snapshotAt: number | null }
 const pushOf = (repo: string, h: any): Push => {
   const r = h?.pushing, l = h?.pushLast
   return {
@@ -341,6 +341,9 @@ export const parseRecord = (repo: string, json: unknown, retried: string[] = [])
     held: heldCounts(j.queue.skipped, j.queue.holding),
     // How many cards with no GitHub issue wait to be picked (queue.cards); none when their record was not read.
     cards: Array.isArray(j.queue.cards) ? j.queue.cards.length : 0,
+    // Of those, the ones pick takes now: not held, waiting for nothing and skipped by no rule.
+    cardsReady: (Array.isArray(j.queue.cards) ? j.queue.cards : []).filter((x: any) => x && typeof x === 'object' && x.held !== true
+      && !(Array.isArray(x.waitsFor) && x.waitsFor.length) && (x.rule ?? null) === null).length,
     // The issues skipped for a Depends on: line with no #N, by number; one with no number shows in the count only.
     badDeps: (Array.isArray(j.queue.skipped) ? j.queue.skipped : []).filter((x: any) => x && typeof x === 'object' && num(x.issue) !== null && BAD_DEPS_RULE.test(one(x.rule)))
       .map((x: any): Ref => ({ repo, issue: num(x.issue) as number, title: one(x.title) })),
@@ -484,6 +487,7 @@ const boardFrom = (name: string, records: { repo: string; json: unknown; retried
       held: [...held].sort((a, b) => a[0].localeCompare(b[0])),
       badDeps: recs.flatMap(r => r.badDeps),
       cards: recs.reduce((n, r) => n + r.cards, 0),
+      cardsReady: recs.reduce((n, r) => n + r.cardsReady, 0),
       deploy: recs.flatMap(r => r.deploy),
       unpushed: recs.flatMap(r => r.unpushed.map(issue => ({ repo: r.loop.repo, issue }))),
       pushes: recs.map(r => r.push).filter(p => p.running || p.last),
@@ -1225,8 +1229,9 @@ export const queueModel = (snap: Snap, w: number): Line[] => {
   return [
     [{ t: 'QUEUE', c: C.head, b: true }, ...(next.length ? [{ t: more ? `  next ${next.length} of ${all}${snap.queueMore ? '+' : ''}` : `  ${next.length}`, d: true }] : [])],
     // A queue whose only issues wait on others is not empty: nothing can be picked, and it names what they wait on.
+    // A card with no GitHub issue that pick can take now makes it "no issue can be picked": pick takes that card.
     ...(snap.queue === null ? [empty('not read: GitHub did not list the issues')] : next.length ? []
-      : snap.waits.length ? wrapParts(['nothing can be picked: waiting for', ...waitedOn(snap.waits, snap.own ?? '')], w, '  ', ' ', { d: true })
+      : snap.waits.length ? wrapParts([`${snap.cardsReady ? 'no issue' : 'nothing'} can be picked: waiting for`, ...waitedOn(snap.waits, snap.own ?? '')], w, '  ', ' ', { d: true })
       : [empty(snap.cards ? 'no issue is queued' : 'the queue is empty')]),
     ...readyRows(snap, w),
     // The issues that wait on another: not in the pick order, each with what it waits for.
