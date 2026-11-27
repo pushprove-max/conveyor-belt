@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 120
+# timeout: 300
+# The limit is the whole file's in a card's run (lib/fileeach.sh): each of its ten cases makes a repo, a worktree and a
+# run of a test file, and on a busy machine they wait for slots and take turns on one. Card runs took up to 149 s, so a
+# limit of 120 s (times the load factor) stopped the file at random (#1755).
 # Engine cases: the check of the Board's Make it run alone card (#190; aloneproof(), conveyor/lib/speedproof.sh): the
 # pack as the change leaves it no longer marks the file wholeOnly, and the file runs alone through the pack's
 # test.fileCommand, on a test slot, and passes. fx_in and fx_wt are in lib.sh.
