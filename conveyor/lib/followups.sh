@@ -269,13 +269,13 @@ privown() {
   done < <(leftovers "$1.review")
   rm -f "$t"; return 0
 }
-# <text>: a follow-up's title, the text cut at 200 characters; a word the cut falls in is dropped, unless it is the
-# title's only word. Bug: an example.com address cut at its 200th character read as another address (example.com with its last letter cut),
-# which the privacy check flags, so the follow-up was not filed and nothing landed.
+# <text>: a follow-up's title, the text cut at 200 characters; a word the cut falls in is dropped, unless it is the title's only word, and a
+# code span the cut leaves open is closed with its own backticks, or dropped when nothing of it is left. Bugs: an example.com address cut at its
+# last letter read as another address, so the privacy check did not file the follow-up; a lone backtick showed as text on the Board (fill()).
 futitle() {
-  local t=${1:0:200}
-  [ ${#1} -le 200 ] || [[ ${1:200:1} == [[:space:]] ]] || [[ $t != *[[:space:]]* ]] || t=${t%[[:space:]]*}
-  printf '%s' "$t"
+  local t=${1:0:200} s o='' in='' re='^[^`]*(`+)(.*)$'; [ ${#1} -le 200 ] || [[ ${1:200:1} == [[:space:]] ]] || [[ $t != *[[:space:]]* ]] || t=${t%[[:space:]]*}
+  s=$t; while [ ${#1} -gt 200 ] && [[ $s =~ $re ]]; do s=${BASH_REMATCH[2]}; if [ -z "$o" ]; then o=${BASH_REMATCH[1]} in=$s; elif [ "${BASH_REMATCH[1]}" = "$o" ]; then o=''; fi; done
+  [ -z "$o" ] || { t=${t%"${t##*[![:space:]]}"}; if [[ $in == *[![:space:]]* ]]; then t+=$o; else t=${t%"$o"}; t=${t%"${t##*[![:space:]]}"}; fi; }; printf '%s' "$t"
 }
 unfile() { # <parent issue> <review file> <follow-up issue>...
   local n=$1 r=$2 i j=0 found=(); shift 2

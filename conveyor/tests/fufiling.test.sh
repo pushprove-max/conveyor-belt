@@ -113,6 +113,19 @@ t_futitlecut() {
   [ "$(jq -r .title "$STUB/filed")" = "$a$w" ] || fail "the title of '$f' is not cut before the address: $(jq -r .title "$STUB/filed")"
 }
 
+# Bug: a cut inside a code span left its opening backtick with no closing one, and the Board's fill() (app-text.js)
+# drew that backtick as text in the Rules tab. The cut span is closed; a span with nothing of it left is dropped.
+t_futitlecode() {
+  local w f g
+  w=$(printf '%*s' 170 '' | tr ' ' y)
+  f="[P2] $w run \`conveyor.sh setup desktop now\` to fix it"
+  g="[P2] $w and more words go \`\` conveyor.sh setup desktop \`\`"
+  setup "[$(issue 7 2026-01-01)]"
+  fx_in 'futitle "$f"; echo; futitle "$g"'
+  [ "$RC" = 0 ] && [ "$(cat "$T/$CASE/run.out")" = "[P2] $w run \`conveyor.sh setup\`"$'\n'"[P2] $w and more words go" ] \
+    || fail "futitle of '$f' and of '$g' did not close or drop the cut code span (exit $RC): $(cat "$T/$CASE/run.out")"
+}
+
 # #1736 D3: a card at depth 1 whose last review holds a P1, a P2 and a P3 harm finding files one follow-up, at depth 2,
 # for the P1; the P2 and the P3 go on the self-heals list, under the parent's area, with FULOW as their reason. Bug: each
 # got a follow-up of its own, so each follow-up card spawned more cards for findings that block nothing. The P2 comes
