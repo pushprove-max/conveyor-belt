@@ -528,3 +528,22 @@ EOT
   st 'select(.card == "c7" and .step == "build")' | jq -se 'length == 1 and (.[0] | .result == "stopped" and (.unread | type) == "string" and (.model | type) == "string" and .model != "")' >/dev/null \
     || fail "the build stopped in try 3's wait did not write one stopped line with the tries' unread use and its model: $(st 'select(.card == "c7")' | jq -c . 2>&1)"
 }
+# Bug (follow-up of issue 1628; it catches): try 1 a 429 on stdout with no usage, try 2 refused on stderr alone. Stopped
+# after try 2's <card>.spent was written and before apitries() wrote its live file again (watch() removed it), stopped()
+# read no model from the live file and dropped .spent's from the line, so the Board could not price it. The stop is the
+# loop's two calls, made from nostart(), which session1() calls after it writes <card>.spent: in that window.
+t_apistopnolive() {
+  setup '[]'; tune '.tunables.apiPause = 0.02'; fx_wt : b.txt one
+  cat > "$STUB/build" <<'EOT'
+echo x >> "$STUB/calls"; n=$(wc -l < "$STUB/calls")
+[ "$n" = 1 ] || { printf 'API Error: 503 Service Unavailable\n' >&2; exit 1; }
+echo '{"type": "result", "is_error": true, "result": "API Error: 429 Too Many Requests, try 1"}'; exit 1
+EOT
+  # shellcheck disable=SC2016 # expanded in fx_in's shell
+  local stop='eval "$(declare -f nostart | sed "1s/nostart/realnostart/")"; nostart() { [ "$(wc -l < "$STUB/calls")" -lt 2 ] || { [ ! -e "$FXWT.live" ] && [ -s "$FXWT.spent" ] && echo window; stopped c7 7; clean "$FXWT"; echo stopped; exit 0; }; realnostart "$@"; }' # nostart: the engine's own, until try 2, where the stop comes
+  apicall "$stop"'; began c7 7 build && session "$FXWT" "Build the issue."'
+  grep -qx window "$T/$CASE/run.out" && grep -qx stopped "$T/$CASE/run.out" && [ "$(wc -l < "$STUB/calls")" = 2 ] \
+    || fail "the build was not stopped after try 2 wrote <card>.spent with no live file: $(cat "$T/$CASE/run.out")"
+  st 'select(.card == "c7" and .step == "build")' | jq -se 'length == 1 and (.[0] | .result == "stopped" and (.model | type) == "string" and .model != "")' >/dev/null \
+    || fail "the build stopped with no live file after try 2's stderr-only refusal did not keep .spent's model on its stopped line: $(st 'select(.card == "c7")' | jq -c . 2>&1)"
+}
