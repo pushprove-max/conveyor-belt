@@ -504,6 +504,24 @@ t_taexplainwindow() {
   grep -qF 'oldest first, each with its card and its diff of those files: none: no commit that changed one of these files was made in that window.' <<<"$out" \
     && ! grep -qE '^(Card|Commit) ' <<<"$out" || fail "the facts of a window with no commit in it do not say so: $out"
 }
+# Bug it catches: once the archive moved a card's lines to the ended list (archwrite(), lib/archive.sh), the Tests
+# table still showed its runs, but testfacts() read only the retried lines and the records, so Judge and Explain the
+# slowdown lost those runs (and the newest run); and tachanges() lost the card of a timed run's landing commit. Every
+# card's lines are moved as the archive moves them (its ENDSEL and ENDTEST filters), and the facts and the changes
+# must be what they were with the lines live.
+t_taexplainended() {
+  taslowed 2 'nc -l 8080 & wait'; local out
+  out=$( export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards; . "$SRC/conveyor.sh" state-dir > /dev/null && eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/testaction.sh")" \
+    && f=$(testfacts tests/x.test.sh) && c=$(tachanges tests/x.test.sh "$f" "$R") && mkdir -p "$ARCHIVE" \
+    && jq -cR "(fromjson? | objects | select($ENDSEL)) // ($TESTLINE | $ENDTEST)" "$ST/cards.jsonl" > "$ENDED" && : > "$ST/cards.jsonl" \
+    || { echo 'the lines could not be read or moved'; exit 0; }
+    [ -z "$(recs)" ] || { echo 'the live records were not emptied'; exit 0; }
+    f2=$(testfacts tests/x.test.sh) && c2=$(tachanges tests/x.test.sh "$f2" "$R") || { echo 'the facts could not be read after the move'; exit 0; }
+    [ "$f2" = "$f" ] || printf 'the facts changed: %s\nfrom: %s\n' "$f2" "$f"
+    [ "$c2" = "$c" ] || printf 'the changes changed: %s\nfrom: %s\n' "$c2" "$c"
+    grep -qF "Card c9-14 (#14), landed as commit $TASHA" <<<"$c" || printf 'the fixture names no landed card c9-14: %s\n' "$c" )
+  [ -z "$out" ] || fail "testfacts or tachanges of tests/x.test.sh, its cards' lines moved to the ended list: $out"
+}
 
 # Bug this guards (R128): an issue filed for a Foreman session (new issues start in the queue) was open and unheld
 # until testissue held it, so a pick that listed the open issues in between took it before the owner's yes. The pick

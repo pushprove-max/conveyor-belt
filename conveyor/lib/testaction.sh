@@ -485,7 +485,7 @@ tafail() { # <id> <why>: a queued action that could not start, failed
 # Only what is on or after the test history's start (histstart(), HISTFROM: lib/testfiles.sh) is given: no run, flaky
 # entry, failure or newest run before it.
 # What the session is given of <file>: {runs: each run that timed it, oldest first, the runs the Tests page shows: each
-# test line of a card, {card, issue, time} and its times, clocks (its seconds on the clock), and timed parts for
+# test line of a card (the ended list's too, endedrecs(), lib/records.sh: an archived card's), {card, issue, time} and its times, clocks (its seconds on the clock), and timed parts for
 # the file, and carried: true on a line that kept it as passed and did not run it, its times an earlier step's of the
 # same card (testlist.sh carriedrec(); a failed step saves none, so they may be the only ones of that run), and so its
 # time that of the latest earlier line of that card that did not carry the file, did not run only some cases of it
@@ -509,7 +509,7 @@ testfacts() { # <file>
   st=$(histstart)
   fl=$(jq -c --arg f "$1" --arg st "$st" "$HISTFROM"'[.entries | arrays | .[] | objects | select(.case == $f or ((.case | strings) | startswith($f + ": "))) | fromstart($st)]' "$FLAKY" 2>/dev/null) || fl='[]'
   testowners
-  { olds; recs; } 2>/dev/null | jq -cRn --arg f "$1" --arg st "$st" --slurpfile fl <(printf '%s' "$fl") --argjson n "$TAFAILS" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") \
+  { olds; endedrecs; recs; } 2>/dev/null | jq -cRn --arg f "$1" --arg st "$st" --slurpfile fl <(printf '%s' "$fl") --argjson n "$TAFAILS" --slurpfile defs <(printf '%s' "$defs") --slurpfile refs <(printf '%s' "$refs") \
     --slurpfile su <(jq -cR 'fromjson? | objects' "$SUITERUNS" 2>/dev/null) --slurpfile sv <(testsurvey) \
     --slurpfile ta <(cat "$TESTACTS"/*.json 2>/dev/null | jq -cR --arg f "$1" 'fromjson? | objects | select(.action == "run" and .file == $f and (.result | strings) and (.end | strings))' 2>/dev/null) "$HISTFROM"'$fl[0] as $fl | ($su | map(fromstart($st))) as $su | ($ta | map(select($st == "" or (.end | strings) >= $st))) as $ta | ($sv[0] | map(fromstart($st))) as $sv | '"$OWNERS$FAILURE"'([inputs | fromjson? | objects | select(.step == "test")] | startlines($st)) as $ls
     | ([$ls[] | failedrun | select(any(failedfiles[]; . == $f)) | failure($f)] | sort_by(.time) | reverse | .[:$n]) as $fails
@@ -560,14 +560,14 @@ tawhen() { # <hours>
 # that run when it changed one of them (its test step ran its change before it landed); not the other cards that ran
 # it or landed then (#770). The commit of that card comes first and the others after it oldest first (the diff budget
 # goes to its change before an older one's; a whole-suite run has no card, so all of them are oldest first), each with
-# its card and issue (its last landed record, or none on record), its time, its subject, its changed files with lines
+# its card and issue (its last landed record, the ended list's too: an archived card's, or none on record), its time, its subject, its changed files with lines
 # added and removed, and its diff of those files. Times are on a clock of <hours> (tawhen()). The diffs together
 # keep to TACHANGEMAX characters: the part past it is left out, and the text says which lines and files.
 TACHANGEMAX=60000
 tachanges() { # <file> <facts> <worktree> [<hours>]
   local ld cs fs files=() card issue sha at d keep rest k n out used=0 cut own shas=() w
   w=$(tawhen "${4:-}")
-  ld=$({ olds; recs; } 2>/dev/null | jq -cRn '[inputs | fromjson? | objects | select(.step == "landed" and (.card | type) == "string" and (.sha | strings | test("^[0-9a-f]{40}$")))
+  ld=$({ olds; endedrecs; recs; } 2>/dev/null | jq -cRn '[inputs | fromjson? | objects | select(.step == "landed" and (.card | type) == "string" and (.sha | strings | test("^[0-9a-f]{40}$")))
     | {card, issue, sha, time}]') || ld='[]'
   # The landed records go in as a file: as one argument, a long history passes the 128 KiB Linux takes (#344).
   cs=$(jq -c --slurpfile l <(printf '%s' "$ld") '$l[0] as $l | def mean: add / length; def sse: mean as $m | map((. - $m) * (. - $m)) | add;

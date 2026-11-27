@@ -130,7 +130,8 @@ landedall() { [ ! -e "$LANDEDTSV" ] || cat -- "$LANDEDTSV"; }
 # page reads them (ENDTEST), kept live. endedrecs prints it (nothing when there is none; in a snapshot, the copy
 # snapcopy() took with the records', READ_ENDED). The readers that ask whether a card or an issue ended read it beside
 # the live records: the pick (upnext(), lib/pick.sh), the Tests page's pick and its history (testpick(),
-# lib/testaction.sh; testlines(), lib/testfiles.sh), umbrellas() (lib/slices.sh), reopened() and retry
+# lib/testaction.sh; testlines(), lib/testfiles.sh), the facts of Judge and Explain the slowdown (testfacts() and
+# tachanges(), lib/testaction.sh), umbrellas() (lib/slices.sh), reopened() and retry
 # (lib/issues.sh), and, through cardall, the main-red fix cards (lib/mainred.sh, lib/redfix.sh, lib/bugproof.sh), the
 # land-branch command (slicetake(), lib/lane.sh) and File on GitHub (cardissue(), lib/testaction.sh). A retry moves its
 # card's lines from it to the retried file, as from the records (moveout()).
