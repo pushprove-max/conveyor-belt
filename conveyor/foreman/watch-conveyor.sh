@@ -320,11 +320,11 @@ unreported() {
 STATUS=$SUITE$REF$(healsdef)'def num: if type == "number" then "#\(.)" else tostring end;
   # A split issue (its parts, or its slices made cards with no GitHub issue: sliceCards; and its last card closed) is held by Conveyor until they finish; a release of it would
   # build nothing (the Board gives it no Queue), so its own hold adds no text and the split reason says what it waits for: the slice cards not landed, a shut one as shut (each landed: umbrellas() closes it at the next turn).
-  # A parent with parts and no closed card is not split: its hold is the owner'"'"'s, and shows as such.
+  # A parent with parts and no closed card is not split: its hold is the owner'"'"'s, and shows as such. The benefit hold (standing: NOBENEFIT, a rule of Conveyor'"'"'s own that no rule change releases) shows by the name the procedures give it.
   def heldwhy($h): ($h.reasons | arrays | any(.[]; objects | .kind == "card" and .step == "closed")) as $closed | ((($h.sliceCards // []) | length > 0) and $closed) as $cards | ($cards or ((($h.umbrella // []) | length > 0) and $closed)) as $split
     | if .kind == "you" then (if $split then empty else "your hold: control release" end)
     elif .kind == "label" then "label \(.label): remove the label"
-    elif .kind == "rule" then "rule \(.rule): change the rule"
+    elif .kind == "rule" then "rule \(.rule): change the rule" elif .kind == "standing" then "rule no live benefit: ask the owner; on yes, add a \"Benefit approved:\" line to the issue"
     elif .kind == "waits" then "waits for \(.waitsFor | arrays | map(num) | join(" "))"
     elif .kind == "approve" then "waits for your yes"
     elif .kind == "card" and .step == "closed" and $split then (if $cards then ($h.sliceCards | map(select(.state != "landed") | .card + (if .state == "shut" then " (shut)" else "" end)) | "held as the umbrella of a split: \(if . == [] then "each slice landed; the loop closes it at its next turn" else "waits for \(join(" "))" end)") else "split: waits for its parts \($h.umbrella | map(num) | join(" "))" end)
