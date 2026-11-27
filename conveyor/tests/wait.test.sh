@@ -93,11 +93,13 @@ t_waittick() {
 # Bugs: cases_side starts every case at once, so a file of many cases overloads the machine; it runs them one after
 # another, so a file takes the sum of its cases; it waits for more than one slot to free before it starts the next, so
 # slow cases hold slots empty; it runs a case twice or drops one; it waits for a background job the caller started
-# before it, or passes when a case failed.
+# before it, or passes when a case failed while it freed a slot.
 # Each of the 20 cases records how many case shells are alive as it starts, then stays alive a short while. Cases 1
-# to 7 stay alive until every case has started, so cases 8 to f must take turns in the one slot left: a helper that
+# to 7 stay alive until every case has started, so cases 8 to 19 must take turns in the one slot left: a helper that
 # waits for more than one slot to free (a whole batch of 8, or the 7 other cases) before it starts the next never
-# starts case 9 while cases 1 to 7 live, so they record that they were still waiting.
+# starts case 9 while cases 1 to 7 live, so they record that they were still waiting. Case f fails and starts first,
+# so it is the case that ends to free the slot for case 8: its status comes from the `wait -n` that frees a slot, not
+# from the final waits, and a cases_side that drops a failure there returns 0.
 side_case() {
   touch "$D/alive/$BASHPID"; ls "$D/alive" | wc -l >> "$D/counts"; echo "$1" >> "$D/ran"
   if [[ $1 == [1-7] ]]; then
@@ -110,15 +112,23 @@ side_case() {
 t_casesside() {
   local D=$T/$CASE job rc n; mkdir -p "$D/alive"
   # cases_side runs <prefix><case>, so each case is a function side_<case> that runs side_case with its own name.
-  for n in $(seq 1 19) f; do eval "side_$n() { side_case $n; }"; done
+  for n in f $(seq 1 19); do eval "side_$n() { side_case $n; }"; done
   sleep 30 & job=$! # sleep: a background job of the caller's own, which cases_side must not wait for
-  cases_side side_ $(seq 1 19) f; rc=$?
+  cases_side side_ f $(seq 1 19); rc=$?
   kill -0 "$job" 2>/dev/null || fail "cases_side waited for a background job the caller started before it"
   kill "$job"
-  [ "$rc" = 1 ] || fail "cases_side side_ 1..19 f returned $rc, not 1, when case f failed"
-  [ "$(sort -n "$D/counts" | tail -1)" -le 8 ] || fail "cases_side side_ 1..19 f had more than 8 cases alive: $(sort -n "$D/counts" | tr '\n' ' ')"
-  [ "$(sort -n "$D/counts" | tail -1)" -ge 2 ] || fail "cases_side side_ 1..19 f ran its cases one after another: $(sort -n "$D/counts" | tr '\n' ' ')"
-  [ ! -e "$D/held" ] || fail "cases_side side_ 1..19 f did not start the next case when one of 8 slots was free: only $(cat "$D/held") of 20 cases started while cases 1 to 7 were alive"
-  [ "$(sort "$D/ran" | tr '\n' ' ')" = "$(printf '%s\n' $(seq 1 19) f | sort | tr '\n' ' ')" ] \
-    || fail "cases_side side_ 1..19 f did not run each case one time: $(sort "$D/ran" | tr '\n' ' ')"
+  [ "$rc" = 1 ] || fail "cases_side side_ f 1..19 returned $rc, not 1, when case f failed while it freed a slot"
+  [ "$(sort -n "$D/counts" | tail -1)" -le 8 ] || fail "cases_side side_ f 1..19 had more than 8 cases alive: $(sort -n "$D/counts" | tr '\n' ' ')"
+  [ "$(sort -n "$D/counts" | tail -1)" -ge 2 ] || fail "cases_side side_ f 1..19 ran its cases one after another: $(sort -n "$D/counts" | tr '\n' ' ')"
+  [ ! -e "$D/held" ] || fail "cases_side side_ f 1..19 did not start the next case when one of 8 slots was free: only $(cat "$D/held") of 20 cases started while cases 1 to 7 were alive"
+  [ "$(sort "$D/ran" | tr '\n' ' ')" = "$(printf '%s\n' f $(seq 1 19) | sort | tr '\n' ' ')" ] \
+    || fail "cases_side side_ f 1..19 did not run each case one time: $(sort "$D/ran" | tr '\n' ' ')"
+}
+# Bug: cases_side passes when a case failed and only the final waits get its status. With 2 cases no slot is freed, so
+# the failing case f ends in the final waits; t_casesside gets f's status from `wait -n` and cannot see this.
+t_casessidelast() {
+  local D=$T/$CASE rc n; mkdir -p "$D/alive"
+  for n in 8 f; do eval "side_$n() { side_case $n; }"; done
+  cases_side side_ 8 f; rc=$?
+  [ "$rc" = 1 ] || fail "cases_side side_ 8 f returned $rc, not 1, when case f failed"
 }
