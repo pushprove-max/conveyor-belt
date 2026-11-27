@@ -7,7 +7,8 @@
 # of the queue (the loop can have picked it already), and the next card of the issue files only the slices that are
 # missing and records the split; with the rule Shadow, or the issue edited, the next card files none of the plan's
 # slices, withdraws those filed, and checks the issue anew. The earlier card is stopped inside its own splitcheck() at
-# the point named in each case, as a restart would stop it.
+# the point named in each case, as a restart would stop it, and the next loop takes up its gone process (revive(),
+# lib/run.sh): its `retry` moves the card's lines, the plan's too, to the retried records before the next card runs.
 # The fixtures (slices, big, SPLIT2, nicards) are those of slices.test.sh and testcards.test.sh: the runner sources
 # every case file into one shell.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
@@ -15,6 +16,17 @@
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
   exec bash "$(dirname "$0")/../conveyor.test.sh"
 
+# The next loop takes up card c6, its process gone, as run() does: revive() blocks it and gives #7 back (retry), and
+# the plan c6 left is in the retried records alone. c6 has no worktree line, as card() calls splitcheck() before
+# cardopen() writes one: revive() finds it by the pid on its split check's start line. Bugs caught: revive() read the
+# pid from a worktree line only, so a card stopped in its split was never taken up; and a splitplan() that read the
+# active records only did not see c6's plan after a real restart, so the next card filed its slices again.
+restart() {
+  fx_in 'revive ""'
+  grep -qF 'card c6 had an open record and its process was gone' "$T/$CASE/run.out" || fail "revive did not take up card c6, its process gone (exit $RC): $(cat "$T/$CASE/run.out")"
+  [ -z "$(st 'select(.card == "c6") | .step')" ] && [ "$(jq -c 'select(.card == "c6" and .step == "start" and .plan != null) | .issue' "$ST/retried.jsonl")" = 7 ] \
+    || fail "c6's plan did not move to the retried records: $(cat "$ST/cards.jsonl") $(cat "$ST/retried.jsonl" 2>&1)"
+}
 splitline() { st 'select(.step == "split" and .card == "c7-7") | [.split.filed, .split.cards, .split.resumed] | @json'; }
 # Card c6 splits #7 and is killed as gh files its second slice: #100101 is filed and nothing else.
 stopfiling() {
@@ -24,11 +36,13 @@ stopfiling() {
     while [ "${p:-1}" -gt 1 ] && [ "$p" != "$c" ]; do k+=("$p"); p=$(ps -o ppid= -p "$p" | tr -d " "); done; [ "$p" != "$c" ] || kill -9 "${k[@]}" "$c"; exit 1; } || :' > "$STUB/create-cmd"
   fx_in 'echo "$BASHPID" > "$STUB/cardpid"; splitcheck c6 7'
   [ -e "$STUB/killed" ] && [ "$(jq -sc 'map(.number)' "$STUB/filed")" = '[100101]' ] || fail "card c6 was not stopped after its first slice (exit $RC): $(cat "$STUB/filed" 2>/dev/null)"
+  restart
 }
 # Card c6 splits #7 and is killed as it writes its split line, after every slice is filed and placed.
 stopline() {
   fx_in 'eval "c6_$(declare -f record)"; record() { [ "$3" != split ] || kill -9 "$BASHPID"; c6_record "$@"; }; splitcheck c6 7'
   [ "$RC" = 137 ] && [ -z "$(st 'select(.step == "split") | .card')" ] || fail "card c6 was not stopped at its split line (exit $RC): $(cat "$T/$CASE/run.out")"
+  restart
 }
 
 # Card c6 splits #7, pinned first in the pick order, and is killed as it files its second slice. Card c7-7 then checks

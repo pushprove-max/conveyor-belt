@@ -181,8 +181,8 @@ speedretry() {
 }
 # The cards with an open record whose process is gone, at the loop's start and at each look: the machine or the loop
 # stopped under them (a power cut, a reboot, a loop killed with its cards), and nothing would ever close them. Only a
-# card whose worktree line names its process (pid and start) counts, and none of the loop's own (given, card ids one a
-# line): a card that has not written that line yet is still starting. A card whose process runs is never touched.
+# card whose worktree line or split check's start line (stuckcard()) names its process (pid, start) counts, none of the
+# loop's own (given, one a line): one with neither is still starting. One whose process runs is never touched.
 # Each is blocked as a card that stops is (block()): its worktree's change, staged, unstaged and untracked, kept as a
 # patch. One stopped in its test run keeps what that run had passed, as a run cut short does (testlist.sh rerunlist()), beside the
 # patch: its next card's run goes on from there (card()); so does a list an earlier run of it left. Then its issue is
@@ -229,7 +229,7 @@ revive() { # <the loop's own cards, one a line>
     stdbkeeps
   done < <(jq -rs '[group_by(.card)[] | select(all(.step | IN("landed", "closed", "blocked") | not))
       | (last | if .step == "start" then .of else .step end) as $s
-      | map(select(.step == "worktree" and (.pid | type) == "number" and (.started | type) == "string")) | last | select(.)
+      | map(select((.step == "worktree" or (.step == "start" and .of == "split")) and (.pid | type) == "number" and (.started | type) == "string")) | last | select(.)
       | [.card, .issue, .pid, .started, $s] | @tsv] | .[]' < <(turncards) 2>/dev/null)
 }
 # A card of the loop: card() in a process of its own, under this one, which writes that process's exit status to
