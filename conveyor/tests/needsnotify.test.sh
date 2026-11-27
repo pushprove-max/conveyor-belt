@@ -102,11 +102,12 @@ t_notifybranch() {
 }
 
 # Bug it catches: a notice sent for a block that does not wait for the owner: one with no decision and no yes to ask for, and
-# one whose decision the owner answered. Both stay silent, and a card that landed after its block is not a card that waits.
+# one whose decision the owner answered. Both stay silent, and a card that landed after its block is not a card that waits:
+# c0-10's block stops for the owner's yes, so only its landed record keeps it silent.
 t_notifynone() {
   nnsetup "[$(issue 7 2026-01-01), $(issue 9 2026-01-01), $(issue 10 2026-01-01)]"
   nnblock 7 'build: it failed'
-  nnblock 9 'build: it failed' kept; nnblock 10 'build: it failed'; landed 10 >> "$ST/cards.jsonl"
+  nnblock 9 'build: it failed' kept; nnblock 10 "lint policy: needs the owner's yes: a new rule"; landed 10 >> "$ST/cards.jsonl"
   nnrun needsask
   bash "$SRC/../.claude/scripts/decision.sh" answer blocked-c0-9 'Leave it held' > "$T/$CASE/answer.out" 2>&1 || fail "the answer: $(cat "$T/$CASE/answer.out")"
   nnrun needsnotify
