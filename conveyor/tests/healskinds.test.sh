@@ -270,7 +270,9 @@ t_kindslock() {
 # The first review of card c0, judged, then fix round 1 (the diff card() writes, from <fix>, a command run in the
 # worktree), then a GO with no finding line, judged; prints nothing and fails the case when the GO does not stand as a
 # GO or judged() prints the line.
-kgoafterfix() { # <fix>
+# With <fix 2>, fix round 2 follows; with <between>, a change staged between the rounds that no round's diff holds
+# runs first (the lint fix lintgate() makes before the next review).
+kgoafterfix() { # <fix> [<fix 2> [<between>]]
   local wt=$T/$CASE/cards/c0 old is review='USER-VISIBLE: no / VERDICT: GO'
   judging '[]'
   is=$(hissue 0 "a branch landing" "$(fubody "$KHARM" | sed 's/Follow-up depth: 1/Follow-up depth: 2/')")
@@ -282,6 +284,10 @@ kgoafterfix() { # <fix>
     || fail "the first review of c0 (review: $KHARM / $KCLEAN / $KDRIFT; issue: Follow-up depth: 2) is not a NO-GO with its cleanup entry and its docs entry listed: $(jf 0 .) $(cat "$ST/selfheals.jsonl" "$ST/docsdrift.jsonl" 2>&1)"
   old=$(git -C "$wt" write-tree) && (cd "$wt" && eval "$1") && git -C "$wt" add -A && mkdir -p "$wt.rounds" \
     && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/1.diff" || fail "fix round 1 of c0 ($1) could not be made"
+  # The review between the rounds is left out: it lists nothing, and fixedheals() reads the trees, not the reviews.
+  [ -z "${3:-}" ] || { (cd "$wt" && eval "$3") && git -C "$wt" add -A; } || fail "the change between the rounds of c0 ($3) could not be made"
+  [ -z "${2:-}" ] || { old=$(git -C "$wt" write-tree) && (cd "$wt" && eval "$2") && git -C "$wt" add -A \
+    && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/2.diff"; } || fail "fix round 2 of c0 ($2) could not be made"
   printf '%s\n' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review"
   : > "$T/$CASE/judged.err"
   JUDGEISSUE=$is JUDGEWRAP='exec 2>> "$T/$CASE/judged.err"' judgeone 0 "$STUB/review"
@@ -302,4 +308,48 @@ t_kindsgoafterotherfix() {
   kgoafterfix 'echo b > b.txt'
   [ "$(heals .finding)" = "$KCLEAN" ] && [ "$(kdocs .finding)" = "$KDRIFT" ] \
     || fail "after fix round 1 changed only b.txt and the GO review, the entries of c0's findings at a.txt:2 left their lists: $(cat "$ST/selfheals.jsonl" "$ST/docsdrift.jsonl" 2>&1)"
+}
+# Bug (review of 1686): fixedheals() checked the entry's line in the last round's diff alone. Round 1 puts a line above
+# a.txt:2 (its line is a.txt:3 now) and round 2 replaces the new a.txt:2: both entries stood, yet both left their lists.
+t_kindsgoaftershift() {
+  kgoafterfix "printf 'zero\none\ntwo\n' > a.txt" "printf 'zero\nONE\ntwo\n' > a.txt"
+  [ "$(heals .finding)" = "$KCLEAN" ] && [ "$(kdocs .finding)" = "$KDRIFT" ] \
+    || fail "after fix round 1 moved a.txt:2 to a.txt:3, round 2 replaced the new a.txt:2 and the GO review, the entries of c0's findings at a.txt:2 left their lists: $(cat "$ST/selfheals.jsonl" "$ST/docsdrift.jsonl" 2>&1)"
+}
+# Bug (review of card 0): no case showed a GO takes off an entry whose line round 1 moved and round 2 replaced, so
+# fixedheals() could keep every entry after two rounds. Round 1 moves a.txt:2 to a.txt:3, round 2 replaces it.
+t_kindsgoaftershiftfix() {
+  kgoafterfix "printf 'zero\none\ntwo\n' > a.txt" "printf 'zero\none\nTWO\n' > a.txt"
+  [ -z "$(heals 'select(.card == "c0")')$(kdocs 'select(.card == "c0")')" ] \
+    || fail "after fix round 1 moved a.txt:2 to a.txt:3, round 2 replaced a.txt:3 and the GO review, an entry of c0 stayed on its list: $(cat "$ST/selfheals.jsonl" "$ST/docsdrift.jsonl" 2>&1)"
+}
+# Bug (review of card 0): fixedheals() followed the line through the rounds' diffs alone, so a lint fix between them
+# was lost. Round 1 puts zero above a.txt:2 and three below it, the lint fix takes zero off again (a.txt:2 is back at
+# 2), round 2 replaces a.txt:3: the replay put the line at 3 and took off both entries whose line still stands.
+t_kindsgoafterlintfix() {
+  kgoafterfix "printf 'zero\none\ntwo\nthree\n' > a.txt" "printf 'one\ntwo\nTHREE\n' > a.txt" "printf 'one\ntwo\nthree\n' > a.txt"
+  [ "$(heals .finding)" = "$KCLEAN" ] && [ "$(kdocs .finding)" = "$KDRIFT" ] \
+    || fail "after round 1 moved a.txt:2 to a.txt:3, a lint fix put it back at a.txt:2, round 2 replaced a.txt:3 and the GO review, the entries of c0's findings at a.txt:2 left their lists: $(cat "$ST/selfheals.jsonl" "$ST/docsdrift.jsonl" 2>&1)"
+}
+# An entry a review after fix round 1 lists names its line as round 1 left it: round 1 replaced the a.txt:2 the first
+# review saw, round 2 changes only b.txt, so the later entry at a.txt:2 stands and must stay after the GO.
+t_kindsgolistedlater() {
+  local wt=$T/$CASE/cards/c0 old is
+  judging '[]'
+  is=$(hissue 0 "a branch landing" "$(fubody "$KHARM" | sed 's/Follow-up depth: 1/Follow-up depth: 2/')")
+  printf '%s\n' "$KHARM" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  echo 'F1 ACCEPT: harm: the first line is lost. Cost to every card: none' > "$STUB/judge.1"
+  JUDGEISSUE=$is judgeone 0 "$STUB/review" fix
+  old=$(git -C "$wt" write-tree) && (cd "$wt" && printf 'one\nthree\n' > a.txt) && git -C "$wt" add -A && mkdir -p "$wt.rounds" \
+    && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/1.diff" || fail "fix round 1 of c0 could not be made"
+  printf '%s\n' "$KCLEAN" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"
+  echo 'F1 ACCEPT: cleanup: the name changes nothing the code does. Cost to every card: none' > "$STUB/judge.2"
+  JUDGEISSUE=$is judgeone 0 "$STUB/review" fix
+  [ "$(heals .finding)" = "$KCLEAN" ] || fail "the review of c0 after fix round 1 (review: $KCLEAN) did not list its cleanup entry: $(cat "$ST/selfheals.jsonl" 2>&1)"
+  old=$(git -C "$wt" write-tree) && (cd "$wt" && echo b > b.txt) && git -C "$wt" add -A \
+    && git -C "$wt" diff "$old" "$(git -C "$wt" write-tree)" > "$wt.rounds/2.diff" || fail "fix round 2 of c0 could not be made"
+  printf '%s\n' 'USER-VISIBLE: no' 'VERDICT: GO' > "$STUB/review"
+  JUDGEISSUE=$is judgeone 0 "$STUB/review"
+  [ "$(jf 0 .verdict)" = GO ] && [ "$(heals .finding)" = "$KCLEAN" ] \
+    || fail "after round 1 replaced a.txt:2, a later review listed $KCLEAN, round 2 changed only b.txt and the GO review, the entry left the list: $(jf 0 .) $(cat "$ST/selfheals.jsonl" 2>&1)"
 }

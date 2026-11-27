@@ -24,11 +24,11 @@ mainfile() { mkdir -p "$R/lib/tests" && echo 't_one() { :; }' > "$R/lib/tests/x.
 # the finding names its file; and the issue's label won over the file. Through healsput(), as a review writes them.
 t_areaentry() {
   amap; said '[P2] lib/tests/x.test.sh:3 a slow wait. Proof: lib/tests/x.test.sh:3'
-  fx_in 'healsput c1-7 7 "" "$STUB/said"'
+  fx_in 'healsput c1-7 7 "" "$STUB/said" "$STUB/wt"'
   [ "$RC" = 0 ] && [ "$(area c1-7)" = '"area:tests"' ] \
     || fail "healsput c1-7 7 '' of the finding '[P2] lib/tests/x.test.sh:3 ...' wrote area $(area c1-7), not area:tests (exit $RC): $(cat "$T/$CASE/run.out")"
   said '[P2] `lib/a.sh`: a late line'
-  fx_in 'healsput c2-8 8 area:board "$STUB/said"'
+  fx_in 'healsput c2-8 8 area:board "$STUB/said" "$STUB/wt"'
   [ "$(area c2-8)" = '"area:engine"' ] || fail "healsput c2-8 8 area:board of the finding '[P2] \`lib/a.sh\`: ...' wrote area $(area c2-8), not its file's area:engine"
 }
 # Bug (review of #1693): a finding listed again kept the null area of its entry, listed before the pack had the map.
@@ -39,8 +39,8 @@ t_areaagain() {
     IFS='|' read -r i a f <<<"$x"
     jq -cn --arg i "$i" --argjson a "$a" --arg f "$f" '{id: $i, time: "2026-11-20T00:00:00Z", card: "c0", issue: 5, area: $a, finding: $f, why: "w", effect: "self-heals", from: "review"}' >> "$ST/selfheals.jsonl"
   done
-  said '[P2] lib/a.sh:1 a late line'; fx_in 'healsput c1-7 7 "" "$STUB/said"'
-  said '[P2] lib/b.sh:1 a slow poll'; fx_in 'healsput c2-8 8 "" "$STUB/said"'
+  said '[P2] lib/a.sh:1 a late line'; fx_in 'healsput c1-7 7 "" "$STUB/said" "$STUB/wt"'
+  said '[P2] lib/b.sh:1 a slow poll'; fx_in 'healsput c2-8 8 "" "$STUB/said" "$STUB/wt"'
   [ "$(jq -c '[.id, .card, .area]' "$ST/selfheals.jsonl" | paste -sd' ' -)" = '["h00000000001","c1-7","area:engine"] ["h00000000002","c2-8","area:board"]' ] \
     || fail "healsput of '[P2] lib/a.sh:1 a late line' (entry of no area) and '[P2] lib/b.sh:1 a slow poll' (entry of area:board) again left the list: $(cat "$ST/selfheals.jsonl") ($(cat "$T/$CASE/run.out"))"
 }
@@ -48,8 +48,8 @@ t_areaagain() {
 # under No area, never hidden).
 t_areaentrynofile() {
   # Two findings: one finding listed again moves its entry to the later card (healsagain(), lib/healslist.sh).
-  amap; said '[P2] the wait is long'; fx_in 'healsput c1-7 7 area:board "$STUB/said"'
-  said '[P2] the poll is slow'; fx_in 'healsput c2-8 8 "" "$STUB/said"'
+  amap; said '[P2] the wait is long'; fx_in 'healsput c1-7 7 area:board "$STUB/said" "$STUB/wt"'
+  said '[P2] the poll is slow'; fx_in 'healsput c2-8 8 "" "$STUB/said" "$STUB/wt"'
   [ "$(area c1-7)" = '"area:board"' ] && [ "$(area c2-8)" = null ] \
     || fail "healsput of the findings '[P2] the wait is long' (issue label area:board) and '[P2] the poll is slow' (no label), no file in either, wrote areas $(area c1-7) and $(area c2-8), not area:board and null"
 }
@@ -58,8 +58,8 @@ t_areaentrynofile() {
 t_areanomap() {
   # Two findings: one finding listed again moves its entry to the later card (healsagain(), lib/healslist.sh).
   setup '[]'; mainfile
-  said '[P2] lib/a.sh:1 a late line'; fx_in 'healsput c1-7 7 area:board "$STUB/said"'
-  said '[P2] lib/b.sh:1 a slow poll'; fx_in 'healsput c2-8 8 "" "$STUB/said"; testissue lib/tests/x.test.sh "Speed up x" "Measured."'
+  said '[P2] lib/a.sh:1 a late line'; fx_in 'healsput c1-7 7 area:board "$STUB/said" "$STUB/wt"'
+  said '[P2] lib/b.sh:1 a slow poll'; fx_in 'healsput c2-8 8 "" "$STUB/said" "$STUB/wt"; testissue lib/tests/x.test.sh "Speed up x" "Measured."'
   [ "$(area c1-7)" = '"area:board"' ] && [ "$(area c2-8)" = null ] \
     || fail "with no map, healsput of '[P2] lib/a.sh:1 ...' (issue label area:board) and '[P2] lib/b.sh:1 ...' (no label) wrote areas $(area c1-7) and $(area c2-8), not area:board and null"
   [ "$(labels 1 | jq 'map(select(startswith("area:"))) | length')" = 0 ] || fail "with no map, testissue lib/tests/x.test.sh filed the labels $(labels 1)"

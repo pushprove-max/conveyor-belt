@@ -628,11 +628,11 @@ guardsaid() { # <worktree>
 }
 # Each finding of the judge's decisions (<the decisions file>, judged()) marked heals is written to the list of its kind
 # (healsadd(), lib/followups.sh), as a finding of <card> and <issue> in the area of the file it names, else <area>. One whose entry cannot be written loses
-# its mark and its kind, so it stays a finding with no kind (fixed or filed as harm is) and is not lost. Fails only when the file cannot be written again.
-healsput() { # <card> <issue> <area> <the decisions file>
+# its mark and its kind, so it stays a finding with no kind (fixed or filed as harm is) and is not lost. Each one written is noted with the tree this review read (healstree(), lib/donewhen.sh). Fails only when a file cannot be written.
+healsput() { # <card> <issue> <area> <the decisions file> <worktree>
   local n e why f keep=()
   while IFS=$'\t' read -r n e why f; do
-    healsadd "$1" "$2" "$3" "$why" "$f" review "$e" >/dev/null || { keep+=("$n"); echo "conveyor: card $1: a $e finding could not be written to its list, so it stays a finding: ${f:0:200}" >&2; }
+    if healsadd "$1" "$2" "$3" "$why" "$f" review "$e" >/dev/null; then healstree "$5" "$f" || return 1; else keep+=("$n"); echo "conveyor: card $1: a $e finding could not be written to its list, so it stays a finding: ${f:0:200}" >&2; fi
   done < <(jq -r '.d[] | select(.heals) | [.n, .effect, .reason, .finding] | map(tostring | gsub("[[:space:]]+"; " ")) | join("\t")' "$4")
   [ ${#keep[@]} = 0 ] || { jq -c '($ARGS.positional | map(tonumber)) as $k | .d |= map(if .n | IN($k[]) then del(.heals, .effect) else . end) | '"$HEALSEVERY" "$4" --args "${keep[@]}" > "$4.new" && mv -f "$4.new" "$4"; }
 }
@@ -676,7 +676,7 @@ healsunput() { # <card> <the decisions file> [all]
 }
 # The review of <worktree> stands as the reviewer wrote it (no judge, or a judge that failed: judged()), so no earlier
 # round's ruling of its findings holds: each finding's kind leaves <worktree>.effects (with none, followups() files it
-# as harm) and its entry leaves its list (healsunput()). A GO with no finding line, which can review the fix alone, takes off only the entries whose line that fix removed (fixedheals(), lib/donewhen.sh). Fails when either cannot be written again.
+# as harm) and its entry leaves its list (healsunput()). A GO with no finding line, which can review the fix alone, takes off only the entries whose line the code changed since the review that listed them removed (fixedheals(), lib/donewhen.sh). Fails when either cannot be written again.
 healsnone() { # <card> <worktree>
   local fs; fs=$(leftovers "$2.review" | jq -Rcs 'split("\n") | map(select(. != ""))') || return 1
   [ "$fs" != '[]' ] || [ "$(verdict "$2.review")" != GO ] || fs=$(fixedheals "$1" "$2") || return 1
@@ -737,7 +737,7 @@ judged() { # <card> <issue> <worktree> <brief> <the review's fields> [<the issue
       | if all($s[]; .undecided) then error("none") else {whole: (all($s[]; .undecided | not) and ($all | length) == ($said | length) and ($said | length) == ($s | length)),
         d: (if $every then $s | map(if .accept then .heals = true else . end) else $s end)} + (if $every then {every: true} else {} end) end' > "$wt.judge.said" 2>/dev/null; then
     j=$(jq -c --rawfile r "$wt.judge" '. + {failed: "the answer of the judge holds no decision line that could be read", decided: 0, raw: ($r | .[-2000:])}' <<<"$j"); stood=1
-  elif ! guardsaid "$wt" || ! healsput "$1" "$2" "$area" "$wt.judge.said"; then
+  elif ! guardsaid "$wt" || ! healsput "$1" "$2" "$area" "$wt.judge.said" "$wt"; then
     # The review stands as the reviewer wrote it, each finding a finding: none stays on the list (healsnone(), below).
     j=$(jq -cn '{failed: "the findings for the self-heals list could not be sorted from the answer of the judge"}'); stood=1
   # The review with each declined finding as a DECLINED line, each outside one as an OUTSIDE line and each one for a

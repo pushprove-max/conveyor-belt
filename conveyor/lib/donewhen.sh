@@ -455,15 +455,34 @@ roundno() { # <worktree> <pass + rounds>
   done
   echo "$r"
 }
+# A review of <worktree> wrote <finding> to the self-heals list or the docs list (healsput(), lib/review.sh): it is
+# recorded in <worktree>.rounds/heals.jsonl as {finding, tree: the staged tree that review read (review(), judged()),
+# or null when git cannot write it}, as its file:line is a place in that tree (fixedheals()).
+healstree() { # <worktree> <finding>
+  local t; t=$(git -C "$1" write-tree 2>/dev/null) || t=''
+  mkdir -p "$1.rounds" && jq -cn --arg f "$2" --arg t "$t" "$HEALSONE"'{finding: ($f | one), tree: (if $t == "" then null else $t end)}' >> "$1.rounds/heals.jsonl"
+}
 # The findings of the entries an earlier review of <card> wrote to the self-heals list or the docs list (from: review)
-# whose file:line the last fix round's diff in <worktree>.rounds removed or replaced (moveto()), as a JSON array: none
-# when no fix round has run, and never one with no file:line or one whose line that fix kept.
+# whose file:line the code changed since that review removed or replaced, as a JSON array. The line is followed
+# (moveto()) through one diff, from the tree the last review that listed it read (heals.jsonl, healstree()) to the
+# staged tree now, which the GO review read: it holds every fix round since and every change between them, as a lint
+# fix (lintgate(), lib/lint.sh), so a line one change moved is never checked at its old place. Never one with no
+# file:line, one whose line that diff kept, or one with no tree recorded or whose tree git no longer has.
 fixedheals() { # <card> <worktree>
-  local r; r=$(($(roundno "$2" 1) - 1)); [ -f "$2.rounds/$r.diff" ] || { echo '[]'; return 0; }
-  { cat "$SELFHEALS" "$DOCSDRIFT" 2>/dev/null || :; } | jq -Rcs --arg c "$1" --rawfile d "$2.rounds/$r.diff" --rawfile ls <(git -C "$2" ls-files) "$MOVEJQ"'
-    ($d | files) as $fs | ($ls | split("\n") | map(select(. != ""))) as $l
-    | [split("\n")[] | fromjson? | objects | select(.card == $c and .from == "review") | .finding
-      | select([scan("[A-Za-z0-9_./-]+:[0-9]+")] | first // "" | capture("^(?<p>.*):(?<n>[0-9]+)$")? | moveto($fs; $l; .p; (.n | tonumber)) == null)]'
+  local now t d ds=''
+  [ -s "$2.rounds/heals.jsonl" ] || { echo '[]'; return 0; }
+  now=$(git -C "$2" write-tree) || return 1
+  while IFS= read -r t; do
+    d=$(git -C "$2" diff "$t" "$now" 2>/dev/null) || continue
+    ds+=$(jq -Rsc --arg t "$t" '{t: $t, d: .}' <<<"$d")$'\n' || return 1
+  done < <(jq -r '.tree // empty' "$2.rounds/heals.jsonl" | sort -u)
+  [ -n "$ds" ] || { echo '[]'; return 0; }
+  { cat "$SELFHEALS" "$DOCSDRIFT" 2>/dev/null || :; } | jq -Rcs --arg c "$1" --slurpfile ds <(printf '%s' "$ds") --slurpfile h "$2.rounds/heals.jsonl" \
+    --rawfile ls <(git -C "$2" ls-files) "$MOVEJQ"'
+    ($ds | map({key: .t, value: (.d | files)}) | from_entries) as $fs | ($ls | split("\n") | map(select(. != ""))) as $l
+    | [split("\n")[] | fromjson? | objects | select(.card == $c and .from == "review") | .finding | . as $f
+      | ([$h[] | select(.finding == $f) | .tree] | last) as $t | select($t != null and $fs[$t] != null)
+      | select([scan("[A-Za-z0-9_./-]+:[0-9]+")] | first // "" | capture("^(?<p>.*):(?<n>[0-9]+)$")? | moveto($fs[$t]; $l; .p; (.n | tonumber)) == null)]'
 }
 # The review beside the worktree as its fix session is told it (FIX): every line but the DECLINED, MINOR, OUTSIDE, SELFHEALS and ROLLOUT
 # ones (a rollout action is no defect, rollouts()), each finding led by its id (<numbered() lines>).
