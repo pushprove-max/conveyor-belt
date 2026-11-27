@@ -241,7 +241,7 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
     # belt'"'"'s pack is not on this machine; 10 when it gives none) on another card (health waitingOnCard) or for main to change (its live action,
     # mainred.sh mainwait(); the snapshot'"'"'s belt live.at is when that wait began): what it waits on, with that card'"'"'s step and last action, or, for
     # main, each main-red fix card open or blocked, named "Main is red (<commit>)" (red: not a named follow-up or Tests page card), and each queued card
-    # held for the owner whose test file (queue.cards file) fails there (#1813). Its key holds the wait'"'"'s start and how many times $wake it has lasted, so each wait wakes once, and again after each further $wake minutes.
+    # held for the owner whose test file (queue.cards file) fails there (#1813), then the failing tests last, so the cut to 600 characters drops the end of a long case list, never a card it names. Its key holds the wait'"'"'s start and how many times $wake it has lasted, so each wait wakes once, and again after each further $wake minutes.
     (.blocked as $hb | (($snap.waitWake | numbers | select(. >= 1)) // 10) as $wake
       | def about($h): ($h | ref) as $r | ([$snap.belt | arrays | .[] | objects | select(.card == $h.card)] | first) as $b
           | ([$hb[] | select(.card == $h.card)] | first) as $x
@@ -252,7 +252,7 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
       | ((.waitingOnCard | arrays | .[] | objects | {c: ., since, on: about(.waitsOn | objects)}),
          ($snap.belt | arrays | .[] | objects | select(.live.action | strings | startswith("waiting for main to change")) | (.live.action | ltrimstr("waiting for main to change: ")) as $a
            | [$snap.queue.cards | arrays | .[] | objects | select(.held == true and (.file | strings | . as $f | ", " + ($a | sub(" fail on main at [0-9a-f]+ too$"; "")) + "," | contains(", " + $f + ":") or contains(", " + $f + ",")))
-             | "fix card \(.card) is held for the owner"] as $held | {c: ., since: .live.at, on: "main to change (\($a)); \($reds + $held | if . == [] then "no main-red fix card is open" else join("; ") end)"}))
+             | "fix card \(.card) is held for the owner"] as $held | {c: ., since: .live.at, on: "main to change; \($reds + $held | if . == [] then "no main-red fix card is open" else join("; ") end); \($a)"}))
       | (.since | strings | fromdate?) as $t | (($now - $t) / 60 | floor) as $m | ($m / $wake | floor) as $n | select($n >= 1)
       | (.c | ref) as $r
       | ["wait:\(.c.card):\(.since):\($n)", "card waiting", $r,

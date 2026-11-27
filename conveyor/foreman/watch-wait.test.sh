@@ -36,7 +36,7 @@ fixture main "$(jq -cn --arg at "$AT" '{queue: {next: []}, health: '"$HEALTH"', 
 check 'a wait under 10 minutes gives no wake' nope poll main 9
 check 'a wait of 10 minutes gives a wake' poll main 10
 check 'the wake names the card, what it waits on and the main-red card with its step and last action' \
-  has main 'main: #44 has waited 10 minutes on main to change (serve fail on main at 0123456789ab too); main-red fix card Main is red (0123456789ab) (at fix, last action: Bash: npm test)'
+  has main 'main: #44 has waited 10 minutes on main to change; main-red fix card Main is red (0123456789ab) (at fix, last action: Bash: npm test); serve fail on main at 0123456789ab too'
 check 'the wake is one line for the one card' test "$(grep -c '#44' "$T/main.wake")" = 2
 check 'the same wait a poll later gives no second wake' nope poll main 11
 check 'the same wait 20 minutes on gives "still waiting"' poll main 20
@@ -52,7 +52,7 @@ fixture follow "$(jq -cn --arg at "$AT" '{queue: {next: []}, health: ('"$HEALTH"
   {card: "ctp", issue: 0, name: "Tests page: a.test.sh", step: "build", landed: false, live: null}]}')" '{}'
 check 'a wait for main beside a blocked follow-up and a Tests page card wakes' poll follow 10
 check 'its line names the blocked main-red fix card only, not the follow-up nor the Tests page card' \
-  has follow 'follow: #45 has waited 10 minutes on main to change (serve fail on main at 0123456789ab too); main-red fix card Main is red (fedcba987654) (blocked: tests failed)'
+  has follow 'follow: #45 has waited 10 minutes on main to change; main-red fix card Main is red (fedcba987654) (blocked: tests failed); serve fail on main at 0123456789ab too'
 # Only #45's wait line: the wake also holds the blocked follow-up's own "is blocked" line, which is right.
 check 'the wait line names neither the follow-up nor the Tests page card' \
   nope grep -qE '#45 has waited .*(Review follow-up|Tests page)' "$T/follow.wake"
@@ -60,13 +60,16 @@ check 'the wait line names neither the follow-up nor the Tests page card' \
 # Bug (#1813): with the fix card for main's failing test held for the owner (a Tests page card of the queue), every
 # wake of a card waiting for main said "no main-red fix card is open" for hours. The held card whose test file fails
 # there is named; a held card of another file, a held one of no file and an unheld one of that file are not.
-fixture held "$(jq -cn --arg at "$AT" '{health: '"$HEALTH"', belt: [
-  {card: "c46", issue: 46, step: "tests", live: {action: "waiting for main to change: src/a.test.ts: case one, src/b.test.ts fail on main at 0123456789ab too", at: $at}}],
+# Bug: the wake put the held cards after the failing cases and kept its first 600 characters, so a real list of
+# 1,741 characters cut them out. Here src/a.test.ts fails 60 cases, about 1,600 characters.
+CASES=$(seq -f 'case %02g of the long list' 60 | paste -sd, - | sed 's/,/, /g')
+fixture held "$(jq -cn --arg at "$AT" --arg cases "$CASES" '{health: '"$HEALTH"', belt: [
+  {card: "c46", issue: 46, step: "tests", live: {action: "waiting for main to change: src/a.test.ts: \($cases), src/b.test.ts fail on main at 0123456789ab too", at: $at}}],
   queue: {next: [], cards: [{card: "cheld", held: true, file: "src/a.test.ts"}, {card: "cother", held: true, file: "src/a.test.tsx"},
     {card: "cnofile", held: true, file: null}, {card: "cfree", held: false, file: "src/b.test.ts"}, {card: "cheldb", held: true, file: "src/b.test.ts"}]}}')" '{}'
 check 'a wait for main beside a held fix card wakes' poll held 10
-check 'its line names each held card of a failing test file in place of "no main-red fix card is open"' \
-  has held 'held: #46 has waited 10 minutes on main to change (src/a.test.ts: case one, src/b.test.ts fail on main at 0123456789ab too); fix card cheld is held for the owner; fix card cheldb is held for the owner'
+check 'its line names each held card of a failing test file in place of "no main-red fix card is open", before the long case list' \
+  has held 'held: #46 has waited 10 minutes on main to change; fix card cheld is held for the owner; fix card cheldb is held for the owner; src/a.test.ts: case 01 of the long list, '
 check 'the wait line names no held card of another file or of no file, and no unheld card' \
   nope grep -qE '#46 has waited .*(cother|cnofile|cfree|no main-red fix card is open)' "$T/held.wake"
 
