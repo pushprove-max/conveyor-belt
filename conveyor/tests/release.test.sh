@@ -177,6 +177,20 @@ t_relrefused() {
     && [ ! -e "$ST/release/1.1.0.md" ] && [ ! -e "$ST/release/1.1.0.sources.json" ] && ! grep -qs 'docs/releases/1.1.0.md' "$cards" \
     || fail "a refusal from the model started a notes card, left a draft, or its first line is not in the reason: $out"
 }
+# Bug (a #1704 follow-up): a draft that breaks the style goes to the model for a rewrite (relfix()); a model that
+# refused there gave lines with no source, the trace of the rewrite left every one out, and the style check passed what
+# was left (the title alone), which started a notes card. The run now ends non-zero with the refusal's first line (not
+# its heading), no
+# draft, no card.
+t_relfixrefused() {
+  local out cards
+  relsetup true nonotes; cards=$ST/testactions/cards.json
+  relmodels $'# 1.1.0\n\n- Cards can wait. Closes #5 [#5]' $'# 1.1.0\n\nI cannot rewrite these release notes.'
+  out=$(loop release-prep 1.1.0 2>&1); [ $? = 1 ] && [ "$(cat "$STUB/notes-calls" 2>&1)" = 2 ] \
+    && grep -qF 'the notes draft could not be written: the model gave no notes in its style rewrite: I cannot rewrite these release notes.; nothing run' <<<"$out" \
+    && [ ! -e "$ST/release/1.1.0.md" ] && [ ! -e "$ST/release/1.1.0.sources.json" ] && ! grep -qs 'docs/releases/1.1.0.md' "$cards" \
+    || fail "release-prep 1.1.0, the style rewrite refused, started a notes card, left a draft, or does not say the rewrite gave no notes: $out"
+}
 # notesshut: the notes card the release run waits on (its record's notes.card) is closed, so the next release-prep
 # drafts again.
 notesshut() {

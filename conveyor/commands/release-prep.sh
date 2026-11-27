@@ -170,7 +170,7 @@ relnotes() { # <version> <last tag, or empty> <commit> <file>
     + "\n# The commit subjects\n\n" + $s' <<<"$iss") || { echo "the issues could not be read"; return 1; }
   relask "$p" "$4.raw" || return 1; first=$(grep -m 1 -v '^[[:space:]]*$' "$4.raw" | cut -c 1-200) # read before reltrace() replaces the raw answer with its kept lines
   t=$(reltrace "$4.raw" "$4" "$iss" "$hs" "$2") || { rm -f "$4.raw"; echo "$t"; return 1; }; jq -e 'length > 0' "${4%.md}.sources.json" > /dev/null || { rm -f "$4.raw"; echo "the model gave no notes: $first"; return 1; }
-  printf '%s' "$t"; relfix "$4" "$4.raw" "$iss" "$hs" "$2"; rm -f "$4.raw"; relheadsrefuse "$3" "$4" "$1"
+  p=$(relfix "$4" "$4.raw" "$iss" "$hs" "$2") || { rm -f "$4.raw"; echo "$p"; return 1; }; printf '%s%s' "$t" "$p"; rm -f "$4.raw"; relheadsrefuse "$3" "$4" "$1"
 }
 # The draft <raw> traced to the release's issues (<issues>: those its commits name that gh read, a JSON array of
 # {number, title, body}) and commits (<commit hashes>, one a line) since <last tag>, and written to <file>. Each line
@@ -241,9 +241,10 @@ relask() { # <prompt> <file>
 # tag) is rewritten from <raw>, and the rewrite is traced again before it is the draft, so a line the rewrite adds or
 # changes is kept only when its sources support it, and the side file names the rewrite's lines. Prints the trace's
 # words on the rewrite, then nothing when the draft passes; else " The draft breaks the release notes style: <the
-# findings>.", and the draft is kept with those findings in a note at its top.
+# findings>.", and the draft is kept with those findings in a note at its top. Fails, with why on stdout, when the
+# traced rewrite keeps no line with a source (a refusal; the reason is its first line that is not a heading).
 relfix() { # <file> [<raw> <issues> <commit hashes> <last tag>]
-  local f=$1 out rc why
+  local f=$1 out rc why first
   out=$("$HERE/tools/notes-check.sh" "$f"); rc=$?
   [ "$rc" != 0 ] || return 0
   if [ "$rc" = 1 ]; then
@@ -251,11 +252,10 @@ relfix() { # <file> [<raw> <issues> <commit hashes> <last tag>]
       why=$(relask "$RELFIX"$'\n\n# The notes\n\n'"$(cat "$f")"$'\n\n# The lines the style check refuses\n\n'"$out" "$f.fix") \
         && mv "$f.fix" "$f" || echo "conveyor: release-prep: the draft could not be rewritten to the style: $why" >&2
       rm -f "$f.fix"
-    else
-      why=$(relask "$RELFIX"$'\n\n# The notes\n\n'"$(cat "$2")"$'\n\n# The lines the style check refuses\n\n'"$out" "$2") \
-        && why=$(reltrace "$2" "$f" "$3" "$4" "$5") && printf '%s' "$why" \
-        || echo "conveyor: release-prep: the draft could not be rewritten to the style: $why" >&2
-    fi
+    elif why=$(relask "$RELFIX"$'\n\n# The notes\n\n'"$(cat "$2")"$'\n\n# The lines the style check refuses\n\n'"$out" "$2") \
+      && first=$(grep -m 1 -vE '^[[:space:]]*(#.*)?$' "$2" | cut -c 1-200) && why=$(reltrace "$2" "$f" "$3" "$4" "$5"); then
+      jq -e 'length > 0' "${f%.md}.sources.json" > /dev/null || { echo "the model gave no notes in its style rewrite: $first"; return 1; }; printf '%s' "$why" # no sourced line: a refusal, passed by the style check as it stands
+    else echo "conveyor: release-prep: the draft could not be rewritten to the style: $why" >&2; fi
     out=$("$HERE/tools/notes-check.sh" "$f"); rc=$?
     [ "$rc" != 0 ] || return 0
   fi
