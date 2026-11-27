@@ -105,8 +105,13 @@ $l4 lib/fee.test.js" ] || fail "pushtests c4 4 $l4 $l1 did not run the files of 
 PUSHNOTE='echo "$(git rev-parse HEAD) $1 ${CONVEYOR_TEST_NOTRACE:-traced}" >> "$STUB/ran"'
 PUSHONE="$PUSHNOTE"'
 [ -n "$CONVEYOR_TEST_NOTRACE" ] || printf -- "-- ok %s\nTESTRUN inputs\t%s\tlib/cart.js\n" "$1" "$1" >> "$CONVEYOR_TEST_LOG/test-changed.log"'
-# A pass of lib/cart.test.js in the test results cache, read with lib/cart.js as the checkout <dir> has it.
-PUSHPASS='mkdir -p "${TESTCACHE%/*}" && printf "lib/cart.test.js\tlib/cart.js\n" | cachesums'
+# A pass of lib/cart.test.js in the test results cache, read with lib/cart.js as the checkout <dir> has it, as
+# cachekeep() writes it: `<hash>\t<commit>\t<file>\t<input>`, the commit the HEAD of <dir>.
+pushpass() { # <dir>
+  mkdir -p "${TESTCACHE%/*}" && printf 'lib/cart.test.js\tlib/cart.js\n' | cachesums "$1" \
+    | awk -v h="$(git -C "$1" rev-parse HEAD)" 'BEGIN { FS = OFS = "\t" } { $1 = $1 OFS h } 1'
+}
+PUSHPASS=pushpass
 # #1709 D1. Bug it catches: the run before the push ran lib/cart.test.js again (and held the push on it) though the
 # cache holds its pass with the inputs main has, as a card's Test step left it. The pass is written here, not by a
 # card's run, so the stub's run of the file would fail it (main's lib/cart.js is bad): no file runs, and c2 is pushed.
@@ -142,7 +147,7 @@ t_pushtestsnotrace() {
   pushfix true; pushpool 1 # one slot: the two files run one at a time, in order (t_pushtestsside runs them side by side)
   printf '%s\n' "$PUSHONE" > "$STUB/one"
   loop control rules pushbatch=on pushbatchtests=all > /dev/null || fail "control rules pushbatch=on pushbatchtests=all failed"
-  pushnow "$PUSHPASS \"\$R\" > \"\$TESTCACHE\" || exit 1; pushtests c2 2 $l2 $base && cut -f2 \"\$TESTCACHE\" | sort > \"\$T/\$CASE/kept\""
+  pushnow "$PUSHPASS \"\$R\" > \"\$TESTCACHE\" || exit 1; pushtests c2 2 $l2 $base && cut -f3 \"\$TESTCACHE\" | sort > \"\$T/\$CASE/kept\""
   [ "$(cat "$STUB/ran" 2>&1)" = "$l2 a.test.sh traced
 $l2 lib/cart.test.js 1" ] || fail "pushtests c2 2 $l2 $base with pushbatchtests all did not run a.test.sh traced and lib/cart.test.js untraced: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
   [ "$(cat "$T/$CASE/kept" 2>&1)" = $'a.test.sh\nlib/cart.test.js' ] || fail "the traced pass of a.test.sh was not kept in the cache: $(cat "$T/$CASE/kept" "$T/$CASE/push.out" 2>&1)"
@@ -178,7 +183,7 @@ t_pushtestsfailkeep() {
   local l1 l2 base
   pushfix true
   printf '%s\n' "$PUSHONE" 'exit 1' > "$STUB/one"
-  pushnow "pushtests c2 2 $l2 $base; cut -f2 \"\$TESTCACHE\" > \"\$T/\$CASE/kept\" 2>/dev/null"
+  pushnow "pushtests c2 2 $l2 $base; cut -f3 \"\$TESTCACHE\" > \"\$T/\$CASE/kept\" 2>/dev/null"
   [ "$(head -n 1 "$STUB/ran" 2>&1)" = "$l2 lib/cart.test.js traced" ] || fail "pushtests c2 2 $l2 $base did not run lib/cart.test.js traced: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
   ! grep -qxF lib/cart.test.js "$T/$CASE/kept" 2>/dev/null || fail "pushtests c2 2 $l2 $base kept the pass of lib/cart.test.js, whose run failed: $(cat "$T/$CASE/kept" "$T/$CASE/push.out" 2>&1)"
 }
