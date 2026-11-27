@@ -416,6 +416,10 @@ for c in ')' ' && echo ok)' ';' '; echo ok' '|' ' | cat' '&' ' & echo ok' ' >/de
   passes "u=\$(gh issue create --title x --label bug --body-file $T/good.md$c"
   refused "u=\$(gh issue create --title x --label bug --body-file $T/bad.md$c"
 done
+# A closing backtick ends the path as `)` does: read as part of it, the file `good.md`` ` does not exist and a good body
+# is refused.
+passes "u=\`gh issue create --title x --label bug --body-file $T/good.md\` && echo \"\$u\""
+refused "u=\`gh issue create --title x --label bug --body-file $T/bad.md\` && echo \"\$u\""
 passes "u=\$(gh issue create --title x --body-file=$T/good.md) && echo \"\$u\""
 refused "u=\$(gh issue create --title x --body-file=$T/bad.md) && echo \"\$u\""
 # A quoted path ends at its closing quote: a `)` or `;` inside it is part of the name, not the end of the word.
