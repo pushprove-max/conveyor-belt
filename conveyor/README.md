@@ -887,11 +887,17 @@ In this repository, `.conveyor/test-changed.sh` picks the tests for a change to 
 It uses three rules, in this order:
 
 1. The coverage map (`.conveyor/coverage.jsonl`): the cases that ran each changed function when the map was made.
+   For a function that more than 50 cases ran, the map also keeps the cases that ran each of its lines. A change to
+   such a function runs only the cases that ran a changed line (the rule `lines`). A changed line that ran in no
+   case, as `else` or `fi`, counts as the nearest line before it and after it in the function that ran. When main
+   changed the function after the map was made, or the map has no line data for it, the change runs the cases that
+   ran the function.
 2. The callers: the test files that name a changed function or a function that calls it. When one of these
    functions is in a command script (`conveyor/commands/`), the tests that run that command also run. This rule
-   applies when the map does not have the function, or when there is no map.
+   applies when the map does not have the function, or when there is no map. It applies however many functions call
+   the changed one.
 3. The area: every case file of the file's area in `.conveyor/engine-areas.json`. This rule applies when the change
-   is outside every function, when a changed function runs at start-up, and when more than 25 functions call it.
+   is outside every function, and when a changed function runs at start-up.
 
 The output has one `coverage map rule:` line for each changed function. The line names the rule that picked its tests.
 A change to texts, comments or blank lines alone has no such line. A change to texts runs the tests that hold those

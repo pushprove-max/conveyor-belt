@@ -29,7 +29,7 @@
 # A change to functions alone of an engine shell file (conveyor/lib/paths.sh too) runs the test files that name a
 # changed function or a function that calls one (one hop), and of a command script whose lines outside its functions
 # call one, the case files that run its commands, and the tests named after the file or listed for it; not its area,
-# unless one runs at start-up or they have more than 25 callers (issue 1775: callersof). A change to lines of
+# unless one runs at start-up (issue 1775: callersof; issue 1830: however many callers it has). A change to lines of
 # conveyor.sh's command table alone (a command added, removed or changed, with its usage text) runs the case files that
 # run those commands (cmdsof; issue 530). Else each runs the whole, as before. A change to keys of the control record's
 # defaults (conveyor/lib/control-defaults.json) runs the case files of the code that reads those keys and of the case
@@ -39,7 +39,8 @@
 # Ahead of those, a change to functions alone of a shell file the coverage map holds (.conveyor/coverage.jsonl,
 # written by a traced run of every case: .conveyor/coverage.sh; issue 527: covof) runs the cases the map lists for each
 # changed function: engine cases through the runner, parts of dashboard.test.sh and of the hooks' tests (partsof;
-# CONVEYOR_SHELL_TEST_CASE, comma-separated), other test
+# CONVEYOR_SHELL_TEST_CASE, comma-separated), other test files whole. Of a function the map holds by its lines (more
+# than 50 units ran it: issue 1830), only the units that ran a changed line (covlines): the rule `lines`. Other test
 # files whole; and of the tests named after the file or listed for it (TESTS_OF), those the map names nowhere (that the
 # trace did not run). A part runs only when nothing selects its test file whole. A function changed since the map was
 # traced (its sum differs) runs the cases the map lists for it as traced and the tests callersof gives (issue 1822;
@@ -459,8 +460,9 @@ COVTESTS=
 # COVSEL: set when the coverage map chose the tests of a changed file (covof, in pick), for cnarrow (below). COVSTALE:
 # set when a changed function of the file pick reads has a stale row (covof), for callersof in pick.
 COVSEL=; COVSTALE=
-# CFN: the changed functions of the file pick reads (covof, callersof); RULES: which rule picked each one's tests (rulefor).
-CFN=; RULES=
+# CFN: the changed functions of the file pick reads (covof, callersof); RULES: which rule picked each one's tests
+# (rulefor); COVLINES: `<file><TAB><function>` of each one covof picked by its changed lines (covlines).
+CFN=; RULES=; declare -A COVLINES=()
 # RANKED: the test files hooklibtests gave, one a line, most of the library's users first: the list (CONVEYOR_TEST_LIST,
 # below) names them first, in this order.
 RANKED=
@@ -994,8 +996,8 @@ callers() {
 # read either side, a line outside its functions changed, a code line outside the functions of the file, or any code
 # line of conveyor/conveyor.sh or conveyor/lib/portable.sh, names a changed function (it runs at start-up), a line
 # outside the functions of another engine file (but a command script) names one, a command script that names one has
-# no command, an engine file that names one cannot be read (FUNCS), or the changed functions have more than 25 callers
-# (a helper that many functions use).
+# no command, or an engine file that names one cannot be read (FUNCS). However many callers the changed functions have,
+# it gives their tests, never the area (issue 1830: a cap of 25 callers ran cardland.sh's whole area, 86 files).
 callersof() {
   local f=$1 a b sa sb st w re t k n c
   local -a fn=() files=() hit=() cmds=()
@@ -1034,7 +1036,6 @@ callersof() {
         for (i = 1; i <= k; i++) if (l[i] !~ /^[ \t]*#/ && l[i] ~ re) { print "K\t" n; break } }
       /^S\t/ && !s { x = substr($0, 3); if (x !~ /^[ \t]*#/ && x ~ re) { print "S\t-"; s = 1 } }' <<<"$c")
   done
-  [ ${#who[@]} -le 25 ] || return 1
   for t in "${!scr[@]}"; do
     n=$(awk -v s="${t##*/}" '$1 == "cmd" && $3 == s { print $2 }' conveyor/conveyor.sh) && [ -n "$n" ] || return 1
     mapfile -t -O "${#cmds[@]}" cmds <<<"$n"
@@ -1127,6 +1128,54 @@ keysof() {
   done
   parse[$f]=1
 }
+# covlines <file> <FUNCS output of it at TXFROM> <function>... (issue 1830): of each function the map holds by its
+# lines (its `line` rows: coverage.sh, for a function more than 50 units ran), the units that ran a line the change
+# (TXFROM to TXTO) changed, into LOV ({<function>: [<unit>, ...]}), and `<file><TAB><function>` into COVLINES, so the
+# run names the rule `lines`. A changed line is read on its old side (a line added after line n: lines n and n+1), as
+# the file was at the map's commit (its `sha`): moved by the lines main added or removed above the function since. A
+# line with no row (no command starts on it: `else`, `fi`, a continued line) stands as the nearest lines of the
+# function before and after it that have one. A function is left to its row's units (no LOV) when the map has no sha
+# or the commit is not here, main changed a line of the function since the trace, the change touches none of its
+# lines, or the map has no line row of it.
+covlines() {
+  local f=$1 a=$2 sha src d h x s e n delta lines q='{}'
+  shift 2
+  [ $# -gt 0 ] || return 0
+  sha=$(jq -rn '[inputs | objects | .sha? // empty] | first // empty' "$COV" 2>/dev/null)
+  [ -n "$sha" ] && git cat-file -e "$sha^{commit}" 2>/dev/null && src=$(git show "$TXFROM:$f" 2>/dev/null) || return 0
+  # The change's hunks, old side (<start><TAB><count>, no count for 1), and main's from the map's commit to TXFROM
+  # (<old start><TAB><old count><TAB><new start><TAB><new count>).
+  if [ -n "$TXTO" ]; then d=$(git diff -U0 --no-color --no-ext-diff "$TXFROM" "$TXTO" -- "$f" 2>/dev/null)
+  else d=$(git diff -U0 --no-color --no-ext-diff "$TXFROM" -- "$f" 2>/dev/null); fi || return 0
+  d=$(sed -nE 's/^@@ -([0-9]+)(,([0-9]+))? .*/\1\t\3/p' <<<"$d")
+  h=$(git diff -U0 --no-color --no-ext-diff "$sha" "$TXFROM" -- "$f" 2>/dev/null) || return 0
+  h=$(sed -nE 's/^@@ -([0-9]+)(,([0-9]+))? \+([0-9]+)(,([0-9]+))? .*/\1\t\3\t\4\t\6/p' <<<"$h")
+  for x; do
+    s=$(grep -nE "^(function[ \t]+)?${x}[ \t]*\(\)" <<<"$src" | head -n 1 | cut -d: -f1)
+    n=$(awk -F'\t' -v x="$x" '$1 == "K" && $2 == x { print split($3, l, "\001"); exit }' <<<"$a")
+    [ -n "$s" ] && [ -n "$n" ] || continue
+    e=$((s + n - 1))
+    lines=$(awk -F'\t' -v s="$s" -v e="$e" 'NF { c = ($2 == "" ? 1 : $2); lo = $1; hi = (c == 0 ? $1 + 1 : $1 + c - 1)
+        for (i = lo; i <= hi; i++) if (i >= s && i <= e) print i }' <<<"$d" | LC_ALL=C sort -un | paste -sd, -)
+    [ -n "$lines" ] || continue
+    delta=$(awk -F'\t' -v s="$s" -v e="$e" 'NF { oc = ($2 == "" ? 1 : $2); ns = $3; nc = ($4 == "" ? 1 : $4)
+        if (nc == 0) { if (ns >= s && ns < e) { x = 1; exit } if (ns < s) d += nc - oc }
+        else { if (ns <= e && ns + nc - 1 >= s) { x = 1; exit } if (ns + nc - 1 < s) d += nc - oc } }
+        END { print (x ? "x" : d + 0) }' <<<"$h")
+    [ "$delta" != x ] || continue
+    q=$(jq -cn --argjson q "$q" --arg n "$x" --arg l "$lines" --argjson lo $((s - delta)) --argjson hi $((e - delta)) --argjson dl "$delta" \
+      '$q + {($n): {lines: ($l | split(",") | map(tonumber - $dl)), lo: $lo, hi: $hi}}') || return 0
+  done
+  [ "$q" != '{}' ] || return 0
+  LOV=$(jq -cn --arg f "$f" --argjson q "$q" '[inputs | objects | select(.file == $f and has("line"))] as $r
+    | $q | with_entries(.key as $n | .value as $v
+      | ([$r[] | select(.fn == $n and .line >= $v.lo and .line <= $v.hi)] | sort_by(.line)) as $L
+      | .value = (if $L == [] then null else [$v.lines[] as $l | [$L[] | select(.line == $l)] as $x
+          | if $x != [] then $x[0].units[] else ([$L[] | select(.line < $l)] | last), ([$L[] | select(.line > $l)] | first)
+            | select(. != null) | .units[] end] | unique | if . == [] then null else . end end))
+    | with_entries(select(.value != null))' "$COV" 2>/dev/null) || LOV='{}'
+  for x in $(jq -r 'keys[]' <<<"$LOV"); do COVLINES[$f$'\t'$x]=1; done
+}
 # covof <file> (issue 527): when the change of a shell file (TXFROM to TXTO) edits or removes its functions alone (FUNCS;
 # its other lines the same but for comments and blanks, TEXT), and the coverage map ($COV) holds each of them with at
 # least one case: the cases it lists for them. The map's row of a function stands for it whatever its sum: one changed
@@ -1140,7 +1189,7 @@ keysof() {
 # names a unit or test file number twice or one it does not name, or names a test file, an engine case or a part
 # (partok) that is not there now.
 covof() {
-  local f=$1 a b sa sb sel t c ac k n body x y z ts rs
+  local f=$1 a b sa sb sel t c ac k n body x y z ts rs LOV='{}'
   local -a fn front next
   local -A old=() kb=() use=() seen=()
   [ -n "$TXFROM" ] && [ -s "$COV" ] || return 1
@@ -1176,16 +1225,20 @@ covof() {
     done
     [ -n "$z" ] || return 1
   done
+  # Of each changed function TXFROM has that the map holds by its lines, the units that ran a changed line (LOV).
+  next=(); for x in "${fn[@]}"; do [ -z "${old[$x]:-}" ] || next+=("$x"); done
+  covlines "$f" "$a" "${next[@]}"
   # The map's form (coverage.sh): its test files and units by number, each number named once (else two maps were
-  # merged and no number can be trusted), and each function's rows with the numbers of the units that ran it.
-  sel=$(jq -rn --arg f "$f" --arg s "$(printf '%s\n' "${!use[@]}")" '[inputs | objects] as $m | [$s | split("\n")[] | select(. != "")] as $fs
+  # merged and no number can be trusted), and each function's rows with the numbers of the units that ran it, or of a
+  # function in LOV, the units that ran its changed lines.
+  sel=$(jq -rn --arg f "$f" --argjson lov "$LOV" --arg s "$(printf '%s\n' "${!use[@]}")" '[inputs | objects] as $m | [$s | split("\n")[] | select(. != "")] as $fs
     | [$m[] | select(has("testfile") and has("path"))] as $tf | [$m[] | select(has("unit"))] as $un
     | (reduce $tf[] as $x ({}; .[$x.testfile | tostring] = $x.path)) as $p
     | (reduce $un[] as $x ({}; .[$x.unit | tostring] = [$p[$x.testfile | tostring], $x.case // ""])) as $u
     | [$m[] | select(.file == $f and has("sum"))] as $rows
     | if ($p | length) == ($tf | length) and ($u | length) == ($un | length)
         and all($fs[]; . as $n | [$rows[] | select(.fn == $n)] | any((.units // []) | length > 0))
-      then [$rows[] | select(.fn as $n | any($fs[]; . == $n)) | .units[] | $u[tostring]]
+      then [$rows[] | select(.fn as $n | any($fs[]; . == $n)) | (.fn as $n | $lov[$n] // .units)[] | $u[tostring]]
         | if all(.[]; . != null and .[0] != null) then .[] | @tsv else error("not held") end
       else error("not held") end' "$COV" 2>/dev/null) && [ -n "$sel" ] || return 1
   ac=$(allcases)
@@ -1209,10 +1262,10 @@ covof() {
 }
 # rulefor <file> <rule> (issue 1775): a line `<file><TAB><function><TAB><rule>` in RULES for each changed function
 # (CFN), `-` for none: which rule picked the tests of each (covof, callersof, covof+callersof for a stale row, or
-# area), which the run prints.
+# area; lines for covof by changed lines, COVLINES: issue 1830), which the run prints.
 rulefor() {
-  local n
-  for n in ${CFN:--}; do RULES+=$1$'\t'$n$'\t'$2$'\n'; done
+  local n r
+  for n in ${CFN:--}; do r=$2; [ -z "${COVLINES[$1$'\t'$n]:-}" ] || r=${r/covof/lines}; RULES+=$1$'\t'$n$'\t'$r$'\n'; done
 }
 # The tests of the changed files <file>...: into run (test files), area (engine case files) and all (the whole engine
 # test), then (but in textonly's pick) pick's cases (the engine runner's cases, none for all of them) and run[the runner].

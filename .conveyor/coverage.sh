@@ -29,42 +29,83 @@
 # The map is one fact a line, sorted (issue 1593: one row a function, each test file and unit named once by its
 # number, about a twentieth of the size of a row for each function and unit). Its numbers are this map's own, so two
 # maps do not merge by union; a release writes it whole.
-#   {"traced": <UTC time>}
+#   {"traced": <UTC time>, "sha": <HEAD at the trace>}   no "sha" when HEAD could not be read
 #   {"testfile": <n>, "path": <test file>}   each test file that ran a traced function, numbered from 1
 #   {"unit": <n>, "testfile": <n>, "case": <case or part>}   each unit that ran one, numbered from 1; no "case" for a
 #                                                            test file run whole
 #   {"file": <file>, "fn": <function>, "sum": <sum>, "units": [<n>, ...]}   each function of each traced file, as it
 #                                                                           was traced (sumsof), and the units that ran it
+#   {"file": <file>, "fn": <function>, "line": <n>, "units": [<n>, ...]}   issue 1830: of each function more than
+#        LINEUNITS (50) units ran, each of its lines (as the file was at "sha") and the units that ran it, so a change
+#        to one line of a function most cases run (testrun.sh tests()) runs only the cases that ran that line (covof).
+#        The map stays at most COVMAX bytes (20 MB): over that, the line rows of the functions with the most lines go
+#        first, each named in the output, and those functions select by their units alone.
+# The trace's line of a command is the line it starts on (bash's LINENO): a line no command starts on (`else`, `fi`, a
+# continued line) has no row, and covof reads it as the nearest lines before and after it that have one.
 # A unit that fails is named, with the end of its output, and the map is still written (what it ran, it ran); the
 # exit is then 1. A trace takes several times the time of the run it traces, and its logs, each removed as its unit
 # ends, are under TMPDIR.
-# `coverage.sh --write <traced> <sums> <runs>` prints the map made from a run's two lists (covwrite, below), and
-# traces nothing.
+# `coverage.sh --write <traced> <sums> <runs> [<lines> <sha>]` prints the map made from a run's lists (covwrite,
+# below), and traces nothing.
 set -u
 COV=.conveyor/coverage.jsonl
-# covwrite <traced> <sums> <runs>: the map, from the traced files' functions (<file><TAB><function><TAB><sum>) and
-# the functions each unit ran (<file><TAB><function><TAB><test file><TAB><case, or nothing>). A line of <runs> that is
-# not such a fact is dropped: of another shape (a line of a unit's output), of a function no traced file defines, or
-# with no test file or an absolute one. It fails when jq or sort does, so a failed write is never an empty map.
-# The facts, sorted by test file and case, are numbered in that order: a T line for each test file, a U line for each
-# unit, then an F line for each function with its units' numbers, each line made a row by jq.
+LINEUNITS=50 COVMAX=${COVERAGE_MAX_BYTES:-20971520}
+# covwrite <traced> <sums> <runs> [<lines> <sha>]: the map, from the traced files' functions
+# (<file><TAB><function><TAB><sum>), the functions each unit ran (<file><TAB><function><TAB><test file><TAB><case, or
+# nothing>) and the lines each unit ran (<file><TAB><function><TAB><line><TAB><test file><TAB><case, or nothing>). A
+# line of <runs> or <lines> that is not such a fact is dropped: of another shape (a line of a unit's output), of a
+# function no traced file defines, or with no test file or an absolute one. It fails when jq or sort does, so a failed
+# write is never an empty map. The facts, sorted by test file and case, are numbered in that order: a T line for each
+# test file, a U line for each unit, then an F line for each function with its units' numbers, and an L line for each
+# line of a function more than LINEUNITS units ran, each line made a row by jq. COVMAX (COVERAGE_MAX_BYTES, for the
+# tests) caps the map's bytes: over it, the L rows of the functions with the most of them are dropped until it fits,
+# each function named on stderr.
 covwrite() (
   set -o pipefail
-  { jq -cn --arg t "$1" '{traced: $t}' \
-    && awk -F'\t' 'NR == FNR { if (NF == 3) has[$1 FS $2] = 1; next }
-        NF == 4 && $3 != "" && substr($3, 1, 1) != "/" && (($1 FS $2) in has)' "$2" "$3" \
-      | LC_ALL=C sort -u | LC_ALL=C sort -t $'\t' -k3,3 -k4,4 \
-      | awk -F'\t' 'NR == FNR { if (NF == 3) fns[++n] = $0; next }
-          $3 != t { t = $3; tn++; print "T\t" tn "\t" t }
-          ($3 FS $4) != k { k = $3 FS $4; un++; print "U\t" un "\t" tn "\t" $4 }
-          { x = $1 FS $2; if (x in u) u[x] = u[x] "," un; else u[x] = un }
-          END { for (i = 1; i <= n; i++) { split(fns[i], a, FS); x = a[1] FS a[2]; print "F\t" fns[i] "\t" ((x in u) ? u[x] : "") } }' "$2" - \
-      | jq -cR 'split("\t") | if .[0] == "T" then {testfile: (.[1] | tonumber), path: .[2]}
-          elif .[0] == "U" then {unit: (.[1] | tonumber), testfile: (.[2] | tonumber)} + (if .[3] != "" then {case: .[3]} else {} end)
-          else {file: .[1], fn: .[2], sum: .[3], units: (.[4] | if . == "" then [] else split(",") | map(tonumber) end)} end'
-  } | LC_ALL=C sort -u
+  w=$(mktemp -d) || exit 1
+  trap 'rm -rf "$w"' EXIT
+  awk -F'\t' 'NR == FNR { if (NF == 3) has[$1 FS $2] = 1; next }
+      NF == 4 && $3 != "" && substr($3, 1, 1) != "/" && (($1 FS $2) in has)' "$2" "$3" \
+    | LC_ALL=C sort -u | LC_ALL=C sort -t $'\t' -k3,3 -k4,4 \
+    | awk -F'\t' 'NR == FNR { if (NF == 3) fns[++n] = $0; next }
+        $3 != t { t = $3; tn++; print "T\t" tn "\t" t }
+        ($3 FS $4) != k { k = $3 FS $4; un++; print "U\t" un "\t" tn "\t" $4 }
+        { x = $1 FS $2; if (x in u) u[x] = u[x] "," un; else u[x] = un }
+        END { for (i = 1; i <= n; i++) { split(fns[i], a, FS); x = a[1] FS a[2]; print "F\t" fns[i] "\t" ((x in u) ? u[x] : "") } }' "$2" - \
+    > "$w/facts" || exit 1
+  # The L lines: each line of a function of more than LINEUNITS units, with the units (by test file and case) that ran it.
+  : > "$w/lines"
+  [ -z "${4:-}" ] || awk -F'\t' -v max="$LINEUNITS" '
+      FILENAME == ARGV[1] { if ($1 == "T") tp[$2] = $3; else if ($1 == "U") un[tp[$3] FS $4] = $2
+        else if ($1 == "F" && split($5, x, ",") > max) big[$2 FS $3] = 1; next }
+      NF == 5 && ($1 FS $2) in big && $3 ~ /^[0-9]+$/ && (($4 FS $5) in un) { k = $1 FS $2 FS $3; v = un[$4 FS $5]
+        if (!((k FS v) in seen)) { seen[k FS v] = 1; if (k in l) l[k] = l[k] "," v; else l[k] = v } }
+      END { for (k in l) print "L\t" k "\t" l[k] }' "$w/facts" "$4" > "$w/lines" || exit 1
+  { jq -cn --arg t "$1" --arg s "${5:-}" '{traced: $t} + (if $s != "" then {sha: $s} else {} end)' \
+    && jq -cR 'split("\t") | if .[0] == "T" then {testfile: (.[1] | tonumber), path: .[2]}
+        elif .[0] == "U" then {unit: (.[1] | tonumber), testfile: (.[2] | tonumber)} + (if .[3] != "" then {case: .[3]} else {} end)
+        else {file: .[1], fn: .[2], sum: .[3], units: (.[4] | if . == "" then [] else split(",") | map(tonumber) end)} end' "$w/facts"
+  } > "$w/rows" || exit 1
+  jq -cR 'split("\t") | {file: .[1], fn: .[2], line: (.[3] | tonumber), units: (.[4] | split(",") | map(tonumber) | sort)}' "$w/lines" > "$w/lrows" || exit 1
+  # Over COVMAX: the line rows of the functions with the most of them go first, until the map fits.
+  r=$(wc -c < "$w/rows") && l=$(wc -c < "$w/lrows") || exit 1
+  if [ $((r + l)) -gt "$COVMAX" ]; then
+    # <rows of the function><TAB><its bytes><TAB><file><TAB><function>, the most rows first.
+    jq -r '[.file, .fn, (tostring | length + 1)] | @tsv' "$w/lrows" \
+      | awk -F'\t' '{ k = $1 FS $2; c[k]++; b[k] += $3 } END { for (k in c) print c[k] "\t" b[k] "\t" k }' \
+      | LC_ALL=C sort -t $'\t' -k1,1nr -k3,4 > "$w/byfn" || exit 1
+    : > "$w/drop"
+    while IFS=$'\t' read -r _ b f n; do
+      [ $((r + l)) -gt "$COVMAX" ] || break
+      l=$((l - b)); printf '%s\t%s\n' "$f" "$n" >> "$w/drop"
+      echo "coverage.sh: the map is over $COVMAX bytes: the line rows of $f $n() are dropped; a change to it runs the cases that ran it" >&2
+    done < "$w/byfn"
+    jq -c --rawfile d "$w/drop" '($d | split("\n")) as $x | select(([.file, .fn] | join("\t")) as $k | any($x[]; . == $k) | not)' \
+      "$w/lrows" > "$w/kept" && mv "$w/kept" "$w/lrows" || exit 1
+  fi
+  cat "$w/rows" "$w/lrows" | LC_ALL=C sort -u
 )
-if [ "${1:-}" = --write ]; then covwrite "$2" "$3" "$4"; exit; fi
+if [ "${1:-}" = --write ]; then covwrite "$2" "$3" "$4" "${5:-}" "${6:-}"; exit; fi
 [ -f .conveyor/test-changed.sh ] || { echo "coverage.sh: run it from the checkout's root" >&2; exit 2; }
 # timeout, on macOS too.
 . conveyor/lib/portable.sh && p_tools || exit 1
@@ -73,7 +114,7 @@ trap 'rm -rf "$TR"' EXIT
 traced=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 cat > "$TR/env.sh" <<'EOF'
 if [ -n "${COVERAGE_LOG:-}" ] && exec {COVERAGE_FD}>>"$COVERAGE_LOG"; then
-  BASH_XTRACEFD=$COVERAGE_FD; PS4=$'\001${BASH_SOURCE[0]-}\t${FUNCNAME[0]-}\002'; set -x
+  BASH_XTRACEFD=$COVERAGE_FD; PS4=$'\001${BASH_SOURCE[0]-}\t${FUNCNAME[0]-}\t${LINENO}\002'; set -x
 fi 2>/dev/null
 EOF
 
@@ -123,8 +164,8 @@ checks() {
       else printf '%s\t\n' "$t"; fi
     done; } > "$TR/units"
 
-# unit <n> <test file> <case>: runs it traced; its functions, <bash's file><TAB><function>, in $TR/<n>.fn, its exit in
-# $TR/<n>.rc.
+# unit <n> <test file> <case>: runs it traced; the lines of its functions it ran, <bash's file><TAB><function><TAB><line>,
+# in $TR/<n>.fn, its exit in $TR/<n>.rc.
 unit() {
   local n=$1 t=$2 c=$3
   local -a cmd
@@ -141,7 +182,7 @@ unit() {
     > "$TR/$n.out" 2>&1 < /dev/null
   echo $? > "$TR/$n.rc"; rm -rf "$TR/$n.bin"
   awk 'substr($0, 1, 1) == "\001" && (i = index($0, "\002")) { x = substr($0, 1, i - 1); sub(/^\001+/, "", x)
-    if (x ~ /\t./) print x }' "$TR/$n.log" 2>/dev/null | LC_ALL=C sort -u > "$TR/$n.fn"
+    if (x ~ /\t[^\t]+\t[0-9]+$/) print x }' "$TR/$n.log" 2>/dev/null | LC_ALL=C sort -u > "$TR/$n.fn"
   rm -f "$TR/$n.log"
 }
 n=0
@@ -172,7 +213,7 @@ wait
 
 # Each unit's functions, named by the traced file they belong to: <file><TAB><function><TAB><test><TAB><case>. Only
 # the facts go to $TR/runs; a failed unit's lines go to this run's output (issue 1593: they were written to the map).
-bad=0; n=0; : > "$TR/runs"
+bad=0; n=0; : > "$TR/runs"; : > "$TR/lines"
 while IFS=$'\t' read -r t c; do
   n=$((n + 1))
   if [ "$(cat "$TR/$n.rc" 2>/dev/null)" != 0 ]; then
@@ -180,8 +221,9 @@ while IFS=$'\t' read -r t c; do
     tail -n 15 "$TR/$n.out" | sed 's/^/  /'
   fi
   ! grep -qxF -- "$t" "$TR/whole" || c=
-  # The case through ENVIRON: a check's text may hold a backslash, which awk -v would read as an escape.
-  T=$t C=$c awk -F'\t' '
+  # The case through ENVIRON: a check's text may hold a backslash, which awk -v would read as an escape. Each line it
+  # ran goes to $TR/lines too (LF), for the line rows (issue 1830).
+  LF=$TR/lines T=$t C=$c awk -F'\t' '
     BEGIN { t = ENVIRON["T"]; c = ENVIRON["C"] }
     function score(a, b, x, y, i, j, k) {
       i = split(a, x, "/"); j = split(b, y, "/"); k = 0
@@ -212,11 +254,15 @@ while IFS=$'\t' read -r t c; do
       for (i = 1; i <= m; i++) { s = score($1, fs[i]); if (s > best) { best = s; got = fs[i] } else if (s == best && s > 0) got = got " " fs[i] }
       if (best == 0 && ($1 == "" || $1 == "environment" || evald($1, $2))) got = substr(of[$2], 2)
       m = split(got, fs, " ")
-      for (i = 1; i <= m; i++) if ((fs[i], $2) in has) print fs[i] "\t" $2 "\t" t "\t" c
+      for (i = 1; i <= m; i++) if ((fs[i], $2) in has) {
+        if (!((fs[i], $2) in done)) { done[fs[i], $2] = 1; print fs[i] "\t" $2 "\t" t "\t" c }
+        print fs[i] "\t" $2 "\t" $3 "\t" t "\t" c >> ENVIRON["LF"]
+      }
     }' "$TR/sums" "$TR/$n.fn" >> "$TR/runs"
 done < "$TR/units"
 
 # The map, sorted, one fact a line, written whole.
-covwrite "$traced" "$TR/sums" "$TR/runs" > "$TR/map" && mv "$TR/map" "$COV" || { echo "coverage.sh: $COV could not be written" >&2; exit 1; }
+covwrite "$traced" "$TR/sums" "$TR/runs" "$TR/lines" "$(git rev-parse -q --verify HEAD 2>/dev/null)" > "$TR/map" && mv "$TR/map" "$COV" \
+  || { echo "coverage.sh: $COV could not be written" >&2; exit 1; }
 echo "coverage.sh: $COV: $(grep -c '"sum"' "$COV") functions, $(wc -l < "$TR/units") units traced"
 exit $bad

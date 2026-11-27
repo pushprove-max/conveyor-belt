@@ -4,8 +4,8 @@
 # file ran every case file of the file's area, though most of them never reach the function (#1696 ran 63 test files).
 # test-changed.sh's callersof runs, in its place, the case files that name a changed function or a function that
 # calls it, and of a command script that calls it (in its functions or outside them), the case files that run its
-# commands; a function with more than 25
-# callers, and a change outside any function, still run by the area. The shared setup is in test-changed.lib.sh.
+# commands, however many callers it has (issue 1830); a change outside any function still runs by the area. The
+# shared setup is in test-changed.lib.sh.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 # shellcheck disable=SC2034 # ROOT is read by test-changed.lib.sh
@@ -57,16 +57,17 @@ p_callers() {
   grep -qxF 'coverage map rule: conveyor/lib/w.sh target(): callersof' "$T/out" \
     && ok "the run says callersof picked the changed function's tests" || no "lib/w.sh target() changed: no callersof rule line: $(cat "$T/out")"
 }
-# A helper that many functions call reaches most cases through them: with 26 callers, target() runs its area. Bug it
-# catches: a limit of 26 or more (cfix 24 is helper(), v0 to v23 and upmain() of commands/up.sh, 26 callers, one over
-# the limit of 25; the code of commands/go.sh outside its functions is no caller).
+# Issue 1830 (the owner's order, in place of issue 1775's cap of 25 callers): a function with 26 callers (cfix 24 is
+# helper(), v0 to v23 and upmain() of commands/up.sh) runs its callers' case files as one with two does, not its area.
+# Bug it catches: the cap ran the whole area, so a change to a helper many functions call (cardland.sh: 86 files) ran
+# every case file of it; here wthree and wfour, which reach no caller.
 p_callersmany() {
   cfix 24; edit 's/echo one/: one/'; got=$(ran)
-  [ "$got" = "wcmd wfour wone wthree wtwo wup" ] && [ "$(cat "$T/rc")" = 0 ] \
-    && ok "a changed function with more than 25 callers runs its area's case files" \
-    || no "lib/w.sh target() with 26 callers changed: ran '$got', want its area, exit $(cat "$T/rc"): $(cat "$T/out")"
-  grep -qxF 'coverage map rule: conveyor/lib/w.sh target(): area' "$T/out" \
-    && ok "the run says the area picked the tests of a function with more than 25 callers" || no "26 callers: no area rule line: $(cat "$T/out")"
+  [ "$got" = "wcmd wone wtwo wup" ] && [ "$(cat "$T/rc")" = 0 ] \
+    && ok "a changed function with 26 callers runs its callers' case files, not its area" \
+    || no "lib/w.sh target() with 26 callers changed: ran '$got', want 'wcmd wone wtwo wup', exit $(cat "$T/rc"): $(cat "$T/out")"
+  grep -qxF 'coverage map rule: conveyor/lib/w.sh target(): callersof' "$T/out" \
+    && ok "the run says callersof picked the tests of a function with 26 callers" || no "26 callers: no callersof rule line: $(cat "$T/out")"
 }
 # A line outside every function runs when a command sources the file, so no caller can be named: the area runs.
 p_callerstop() {

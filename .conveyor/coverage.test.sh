@@ -102,7 +102,7 @@ facts() {
 runs() { facts "$M" | F=$1 N=$2 awk -F'\t' '$1 == ENVIRON["F"] && $2 == ENVIRON["N"] { print $3 ":" $4 }' | sort | paste -sd ' ' -; }
 # notfacts <map>: its rows of no form coverage.sh writes, and those that hold an absolute path or this run's folder.
 notfacts() {
-  jq -c --arg t "$T" 'select((keys | IN(["traced"], ["path", "testfile"], ["testfile", "unit"], ["case", "testfile", "unit"], ["file", "fn", "sum", "units"]) | not)
+  jq -c --arg t "$T" 'select((keys | IN(["traced"], ["sha", "traced"], ["path", "testfile"], ["testfile", "unit"], ["case", "testfile", "unit"], ["file", "fn", "sum", "units"]) | not)
     or any(.. | strings; startswith("/") or contains($t)))' "$1"
 }
 # Issue 1593. Bug: a failed unit's output lines went into the map as rows ("fn": null, the line as "file", with the
