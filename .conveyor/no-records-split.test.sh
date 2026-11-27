@@ -37,7 +37,7 @@ done
 # hide that: the run must exit 1 for the splitting file and 0 for a clean one.
 fixture() { # <name> <landed.sh source>: a committed small repo at $T/<name> holding that file as its one engine file
   local d=$T/$1; mkdir -p "$d/.conveyor" "$d/conveyor/lib"
-  cp "$ROOT/.conveyor/test-changed.sh" "$ROOT/.conveyor/test-share.sh" "$ROOT/.conveyor/lint-shell.sh" "$ROOT/.conveyor/no-records-split.sh" "$d/.conveyor/"
+  cp "$ROOT/.conveyor/test-changed.sh" "$ROOT/.conveyor/funcs.awk" "$ROOT/.conveyor/test-share.sh" "$ROOT/.conveyor/lint-shell.sh" "$ROOT/.conveyor/no-records-split.sh" "$d/.conveyor/"
   : > "$d/.conveyor/test-lint.sh"; : > "$d/.conveyor/no-browser-tests.sh"; cp "$2" "$d/conveyor/lib/landed.sh"
   printf '%s\n' '{"area": "core", "tests": "all"}' '{"area": "core", "why": "fixture"}' '{"area": "core", "file": "conveyor/lib/landed.sh"}' > "$d/.conveyor/engine-areas.json"
   git -C "$d" init -q && git -C "$d" add -A && git -C "$d" -c user.name=t -c user.email=t@example.com commit -qm init

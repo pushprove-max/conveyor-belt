@@ -51,6 +51,7 @@
     "conveyor/conveyor.sh",
     "conveyor/lib/",
     ".conveyor/test-changed.sh",
+    ".conveyor/funcs.awk",
     ".conveyor/engine-areas.json"
   ],
   "coverageMap": {

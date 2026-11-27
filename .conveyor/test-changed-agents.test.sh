@@ -17,7 +17,7 @@ unset CONVEYOR_TEST_LOG CONVEYOR_SHELL_TEST_CASE CONVEYOR_TEST_FILE CONVEYOR_TES
 # CLAUDE.test.sh and README.test.sh (a link to a missing file is dropped). README.test.sh, which no link names for
 # AGENTS.md, shows that the listing does not name every test.
 R=$T/r; mkdir -p "$R/.conveyor"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-links.json" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-links.json" "$R/.conveyor/"
 : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"; : > "$R/.conveyor/no-records-split.sh"
 echo '{"outside": "conveyor/foreman/"}' > "$R/.conveyor/engine-areas.json"
 echo c > "$R/CLAUDE.md"; echo r > "$R/README.md"; ln -s CLAUDE.md "$R/AGENTS.md"

@@ -20,7 +20,7 @@ no() { echo "not ok - $1"; }
 # heading, a `(pass)` or `(fail)` line a test), exits 1 when one says (fail), and counts its runs in $R/runs. When
 # $R/write is there, it writes 600 KB in its TMPDIR for each of the two test files, as each file's tests would.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/hooks" "$R/bin"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
 echo '{"outside": "conveyor/README.md"}' > "$R/.conveyor/engine-areas.json"
 for s in a b; do echo "export const $s = 1" > "$R/hooks/$s.ts"; printf "test('%s one', () => {})\ntest('%s two', () => {})\n" "$s" "$s" > "$R/hooks/$s.test.tsx"; done
 # Its `plugin validate` (the checks' run of it on a change to hooks/: issue 604) passes.

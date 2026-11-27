@@ -16,7 +16,7 @@ no() { echo "not ok - $1"; fails=1; }
 
 # A scratch repo: the real script, two engine case files, and a runner that writes each case it runs to a file.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "a", "file": "conveyor/x.sh"}' '{"area": "a", "test": "a.test.sh"}' '{"area": "a", "test": "b.test.sh"}' > "$R/.conveyor/engine-areas.json"
 echo 'echo one' > "$R/conveyor/x.sh"
 # The script runs an engine case file's cases through the runner, so the case files need only their cases.

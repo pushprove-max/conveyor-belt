@@ -21,7 +21,7 @@ no() { echo "not ok - $1"; }
 # other. $R/stub/claude only notes its runs, for the parts that check only whether the check runs.
 CLAUDE=$(command -v claude) || { no "claude is not installed: the plugin's validate cannot be tested"; exit 1; }
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/lib" "$R/conveyor/tests" "$R/bin" "$R/stub" "$T/head"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
 cp -a "$ROOT/hooks" "$ROOT/types" "$ROOT/.claude-plugin" "$R/"
 printf '%s\n' '{"area": "a", "file": "conveyor/lib/x.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 echo 'x() { :; }' > "$R/conveyor/lib/x.sh"; printf 't_aone() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"

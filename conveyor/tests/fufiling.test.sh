@@ -22,6 +22,16 @@ t_fupipeunder() {
   done
 }
 
+# Bug: the test step's function reader moved out of .conveyor/test-changed.sh into .conveyor/funcs.awk, and a finding
+# that names only that file was not held for the owner, though it changes which tests a card runs.
+# shellcheck disable=SC1090 # sources one function cut from $SRC/lib/followups.sh by sed
+t_fupipefuncs() {
+  local p f='a finding on .conveyor/funcs.awk'
+  p=$(jq -c .pipelineFiles "$SRC/../.conveyor/project.json") || fail "the checked-in pack's pipelineFiles cannot be read"
+  . <(sed -n '/^onpipeline() {/,/^}/p' "$SRC/lib/followups.sh")
+  [ "$(onpipeline "$f" <<<"$p")" = 1 ] || fail "onpipeline '$f' with the pipelineFiles $p did not print 1"
+}
+
 # #1661: the follow-up card of a card with no GitHub issue and no parent issue names its parent by the branch a
 # land-branch card landed (its picked line), else by its card id. Bug: its label read "Review follow-up of #" and its
 # body "Follow-up to # (Conveyor card ...)", naming no parent. fuparent <branch or ""> <name it must have>.

@@ -42,6 +42,8 @@
 - A Board change shows a finding, a reason or code through the Board's shared finding layout (`findingEl()` in
   `panels/declined.js`, the text parts of `parts/app-text.js`) and its existing parts (badges, pills, chips, code
   spans), never as plain text of its own: text in backticks shows as a code span, never with its backticks.
+- To find a bash function of the engine, its callers and its tests, run `bash .conveyor/where.sh <function>` before you
+  grep.
 
 Your own test runs, in a build or fix session:
 - In a build or fix session, run the cases you added or changed and the existing cases that cover the code you changed.

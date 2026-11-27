@@ -21,7 +21,7 @@ n=$(jq -er '.test.cardFiles' "$HERE/project.json") || { echo "not ok - test.card
 # file than a card runs (a0.test.sh ...), each sorting before testruns.test.sh, so testruns.test.sh comes only from the
 # links. Each case file is a stub of one empty case.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests" "$R/conveyor/jq"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-links.json" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-links.json" "$R/.conveyor/"
 : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"; : > "$R/.conveyor/no-records-split.sh"
 echo '{"area": "a", "file": "conveyor/jq/check.jq"}' > "$R/.conveyor/engine-areas.json"
 for i in $(seq 0 "$n"); do

@@ -20,7 +20,7 @@ no() { echo "not ok - $1"; fails=1; }
 # A scratch repo: the real script and this checkout's real links, this checkout's hooks (their libraries and tests), and
 # an area map of one engine file, so the map check passes.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-links.json" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-links.json" "$R/.conveyor/"
 : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"; : > "$R/.conveyor/no-records-split.sh"
 printf '%s\n' '{"area": "a", "file": "conveyor/x.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 echo one > "$R/conveyor/x.sh"; printf 't_one() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"

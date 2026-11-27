@@ -21,7 +21,7 @@ no() { echo "not ok - $1"; fails=1; }
 # that holds standing.sh as the real one does, and empty stubs of the Foreman test files (a link to a missing file is
 # dropped). waiter.test.sh, linked to none of the three, shows that the listing does not name every Foreman test.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests" "$R/conveyor/lib" "$R/conveyor/foreman"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-links.json" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-links.json" "$R/.conveyor/"
 : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"; : > "$R/.conveyor/no-records-split.sh"
 printf '%s\n' '{"outside": "conveyor/foreman/"}' '{"outside": "conveyor/commands/foreman.sh"}' '{"area": "cmd-auto", "file": "conveyor/lib/standing.sh"}' \
   '{"area": "cmd-auto", "test": "standing.test.sh"}' > "$R/.conveyor/engine-areas.json"

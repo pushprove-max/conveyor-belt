@@ -33,7 +33,7 @@ no() { echo "not ok - $1"; fails=1; }
 # hooks/u.test.ts, and tools/exec.sh and tools/stat.sh.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests" "$R/conveyor/lib" "$R/hooks" "$R/tools" "$T/bin"
 echo 'git -C "$PWD/hooks/../tools/../conveyor/lib/../.." ls-files -z > /dev/null' > "$R/hooks/l.test.sh"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "a", "file": "conveyor/read.sh"}' '{"area": "a", "file": "conveyor/unread.sh"}' \
   '{"area": "a", "file": "conveyor/lib/x.sh"}' '{"area": "a", "test": "a.test.sh"}' '{"area": "b", "test": "b.test.sh"}' > "$R/.conveyor/engine-areas.json"
 printf 't_aone() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"; printf 't_bone() {\n  :\n}\n' > "$R/conveyor/tests/b.test.sh"

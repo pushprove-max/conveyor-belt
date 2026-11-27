@@ -22,7 +22,7 @@ no() { echo "not ok - $1"; }
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
 # The test lint and the browser check, which every run starts, are empty here: no part checks them, and each run of
 # the real ones is time paid ~100 times a file run (test-lint.test.sh checks that a run runs the lint).
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"; : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"; : > "$R/.conveyor/no-records-split.sh"
+cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"; : > "$R/.conveyor/test-lint.sh"; : > "$R/.conveyor/no-browser-tests.sh"; : > "$R/.conveyor/no-records-split.sh"
 cat > "$R/.conveyor/engine-areas.json" <<'EOF'
 {"outside": "conveyor/README.md"}
 {"area": "core", "file": "conveyor/core.sh"}
@@ -323,7 +323,7 @@ p_badline() {
 # main three-way as the landing merges it (git apply --3way, claim.sh settle()), with no conflict, and the map reads both.
 p_union() {
   local u=$T/u f
-  mkdir -p "$u/.conveyor" && cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/engine-areas.json" "$u/.conveyor/" && cp "$ROOT/.gitattributes" "$u/" \
+  mkdir -p "$u/.conveyor" && cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/engine-areas.json" "$u/.conveyor/" && cp "$ROOT/.gitattributes" "$u/" \
     && git -C "$u" init -q && git -C "$u" add -A && git -C "$u" commit -qm init || { no "the map's merge: no scratch repo"; return; }
   f=$u/.conveyor/engine-areas.json
   for n in one two; do

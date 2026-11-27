@@ -13,7 +13,7 @@ HERE=$(cd "$(dirname "$0")" && pwd -P); ROOT=$(dirname "$HERE")
 # copy of it (M). A run here loops over every case file of the map, so each of these parts makes one run (two only
 # where both are cheap whole runs), and the parts that start from the same commit build it with one <name>fix function.
 M=$T/m; mkdir -p "$M/.conveyor" "$M/conveyor/tests"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/engine-areas.json" "$M/.conveyor/"; : > "$M/.conveyor/test-lint.sh"; : > "$M/.conveyor/no-browser-tests.sh"; : > "$M/.conveyor/no-records-split.sh"
+cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/engine-areas.json" "$M/.conveyor/"; : > "$M/.conveyor/test-lint.sh"; : > "$M/.conveyor/no-browser-tests.sh"; : > "$M/.conveyor/no-records-split.sh"
 jq -r '.areas[].files[] | split("/")[:-1] | join("/")' "$HMAP" | sort -u | (cd "$M" && xargs mkdir -p)
 jq -r '.areas[].files[]' "$HMAP" | while read -r f; do echo one > "$M/$f"; done
 for c in "$ROOT"/conveyor/tests/*.test.sh; do s=${c##*/}; s=${s%.test.sh}; printf 't_%s() {\n  :\n}\n' "$s" > "$M/conveyor/tests/$s.test.sh"; done

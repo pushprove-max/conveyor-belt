@@ -20,7 +20,7 @@ no() { n=$((n + 1)); echo "not ok $n - $1"; bad=1; }
 # eval and calls it with a stub of the first that it defines itself; dashboard.sh with two functions and a test file of two
 # parts that each run one; a hook with a function its whole test file runs and one no test runs.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/lib" "$R/conveyor/tests" "$R/.claude/scripts/__tests__" "$R/.claude/hooks/__tests__"
-cp "$HERE/coverage.sh" "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"; cp "$ROOT/conveyor/lib/portable.sh" "$R/conveyor/lib/"
+cp "$HERE/coverage.sh" "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"; cp "$ROOT/conveyor/lib/portable.sh" "$R/conveyor/lib/"
 # portable.sh outside the map, so the map check of a one-file run passes (issue 1723's checks of its exit, below).
 printf '%s\n' '{"outside": "conveyor/lib/portable.sh"}' '{"area": "a", "file": "conveyor/lib/f.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 printf 'fone() {\n  echo one\n}\nftwo() {\n  echo two\n}\nfbare() {\n  echo bare\n}\nfthree() {\n  echo three\n}\n' > "$R/conveyor/lib/f.sh"

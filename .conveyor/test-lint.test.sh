@@ -208,7 +208,7 @@ bash "$HERE/test-lint.sh" "$T/none.test.sh" > "$T/out" 2>&1 && no "a file that i
 # test-changed.sh runs the lint on every run: a sleep-then-check in a test file fails a whole run (no --file, no test
 # step's log), whatever changed. Its one-file mode in a test step lints once a tree: test-changed-one.test.sh checks it.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests"
-cp "$HERE/test-changed.sh" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
+cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "core", "file": "conveyor/core.sh"}' '{"area": "core", "tests": "all"}' '{"area": "a", "file": "conveyor/x.sh"}' \
   '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 echo one > "$R/conveyor/core.sh"; echo one > "$R/conveyor/x.sh"; printf 't_one() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"; echo 'exit 0' > "$R/conveyor/conveyor.test.sh"
