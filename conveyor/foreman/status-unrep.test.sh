@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # timeout: 60
 # The Foreman's status (watch-conveyor.sh --status) and wakes on a blocked card no session has got yet: its "not yet
-# reported" lines; and its self-heals line, which is never something to act on. Split from status.test.sh, which shares the fixture below, to keep each file under 600 lines.
+# reported" lines, and how a wake names a card of no issue; and its self-heals line, which is never something to act on. Split from status.test.sh, which shares the fixture below, to keep each file under 600 lines.
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 B=$(mktemp -d); trap 'rm -rf "$B"' EXIT
@@ -157,7 +157,22 @@ out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the
   || fail "with follow-ups c1 (reported, delivered) and c2 (its wake pending) of #7 blocked, the status does not name c2 alone as not yet reported: $out"
 }
 
-cases=(unreported unrepsent unrepasof unrepretry unrepsentasof selfheals unrepfollowups)
+# Bug caught (#1800): a card with no issue and no name was named "#0"; its card ID names it now, once: the line of
+# a blocked one, already named by its card ID, does not add "(card <id>)" again. A stuck card of no issue with a
+# name, which follow-ups share (the issue's "Review follow-up of #"), was named by that name alone: its card ID too.
+t_unrepnoissue() {
+CASE=unrepnoissue; fixture unrepnoissue
+snap '.health.blocked = [{card: "c3", issue: 0, since: "2026-11-15T11:00:00Z", reason: "tests failed twice"}]
+  | .health.stuck = [{card: "c4", issue: 0, name: "Review follow-up of #", step: "file", since: "2026-11-15T11:00:00Z"}]'
+out=$(CONVEYOR_MAIN=$M bash "$SRC/watch-conveyor.sh" --status 2>&1) || fail "the status failed: $out"
+[ "$(grep '^not yet reported: ' <<<"$out")" = 'not yet reported: blocked c3' ] \
+  || fail "with c3, of no issue and no name, blocked an hour, the status does not name it 'blocked c3': $out"
+poll && CONVEYOR_FOREMAN_NOW=$((NOW + 60)) poll || fail "a poll of a snapshot with c4 stuck failed: $(cat "$T/err")"
+grep -qF 'alpha: Review follow-up of # (card c4) is stuck: ' <<<"$(cat "$FD"/pending/*.wake)" \
+  || fail "the wake of c4, stuck with no issue and the name 'Review follow-up of #', does not name its card ID: $(cat "$FD"/pending/*.wake)"
+}
+
+cases=(unreported unrepsent unrepasof unrepretry unrepsentasof selfheals unrepfollowups unrepnoissue)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for c in $SEL; do case " ${cases[*]} " in *" $c "*) ;; *) echo "unknown case $c" >&2; exit 2 ;; esac; done

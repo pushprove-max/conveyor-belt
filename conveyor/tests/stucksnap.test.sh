@@ -11,23 +11,26 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# A line of card c<n>-<n>'s records, its step <step> (start:<of> for a start line) at <epoch seconds>.
-stucksnap_line() { # <n> <step> <epoch seconds>
-  jq -cn --argjson n "$1" --arg s "$2" --argjson t "$3" '($s | split(":")) as [$s, $of]
-    | {card: "c\($n)-\($n)", issue: $n, step: $s, time: ($t | todate), tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: ""}
+# A line of card c<n>-<n>'s records, its step <step> (start:<of> for a start line) at <epoch seconds>, of issue <n>
+# or of no issue (0) when <issue> is 0.
+stucksnap_line() { # <n> <step> <epoch seconds> [<issue>]
+  jq -cn --argjson n "$1" --arg s "$2" --argjson t "$3" --argjson i "${4:-$1}" '($s | split(":")) as [$s, $of]
+    | {card: "c\($n)-\($n)", issue: $i, step: $s, time: ($t | todate), tokens: {claude: 0, codex: 0}, result: "ok", sha: "", reason: ""}
       + if $s == "picked" then {title: "t", created: "2026-01-01T00:00:00Z"} elif $of then {of: $of} else {} end' >> "$ST/cards.jsonl"
 }
-# The fixture of every case: cards c7-7 and c8-8 each began their build an hour ago and wrote nothing since, past the
-# pack's tunables.stuck (1200 s), and the snapshot built and kept from those records names both stuck. The kept lock is
+# The fixture of every case: cards c7-7 and c8-8 each began their build (or step <of>) an hour ago and wrote nothing
+# since, past the pack's tunables.stuck (1200 s), and the snapshot built and kept from those records names both stuck;
+# c8-8 is of no issue (0) when <issue8> is 0. The kept lock is
 # then held to the case's end: a snapshot read starts a rebuild when an input changed, and a rebuild finished between
 # two polls would hide the stale snapshot that each case is about. The watcher reads this checkout as the record alpha.
-stucksnap_setup() {
-  local t lk
+stucksnap_setup() { # [<of> [<issue8>]]
+  local t lk of=${1:-build}
   export XDG_CONFIG_HOME=$T/$CASE/config
   setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-01)]"; mkdir -p "$ST" "$T/$CASE/cards" "$XDG_CONFIG_HOME/conveyor"
   jq -n --arg m "$R" '{records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"
   t=$(($(date +%s) - 3600))
-  for n in 7 8; do stucksnap_line "$n" picked "$t"; stucksnap_line "$n" start:build "$t"; done
+  stucksnap_line 7 picked "$t"; stucksnap_line 7 "start:$of" "$t"
+  stucksnap_line 8 picked "$t" "${2:-8}"; stucksnap_line 8 "start:$of" "$t" "${2:-8}"
   loop snapshot --fresh > /dev/null && jq -e '.health.stuck | map(.card) | sort == ["c7-7", "c8-8"]' "$ST/snapshot.json" > /dev/null \
     || fail "the fixture's snapshot does not name c7-7 and c8-8 stuck: $(jq -c .health.stuck "$ST/snapshot.json" 2>&1)"
   exec {lk}>>"$ST/snapshot.json.lock" && flock "$lk" || fail "the kept lock could not be held"
@@ -70,4 +73,19 @@ t_stucksnaplive() {
   stucksnap_setup
   jq -cn --argjson t "$(date +%s)" '{step: "build", at: ($t - 3600 | todate), last: ($t | todate), turns: 1}' > "$T/$CASE/cards/c7-7.live"
   stucksnap_polls; stucksnap_only8 "printing live output"
+}
+# Bug (#1800): c7-7 filed and landed after the snapshot named it stuck at its file step, and the watcher woke the
+# Foreman with "#7 is stuck: ... (last step: file)" for a card that was done. c8-8, still at file in the records past
+# the stuck limit, wakes as stuck: the check drops only a card the records moved on.
+t_stucksnaplanded() {
+  stucksnap_setup file; stucksnap_line 7 filed "$(date +%s)"; stucksnap_line 7 landed "$(date +%s)"
+  stucksnap_polls; stucksnap_only8 "filing and landing"
+  grep -qF '(last step: file)' <<<"$wake" || fail "the stuck wake of #8 does not name its file step: $wake"
+}
+# Bug (#1800): a stuck card with no issue (issue 0) was named "#" or "#0" in the wake, which names no card: it is
+# named by its card ID.
+t_stucksnapnoissue() {
+  stucksnap_setup build 0; stucksnap_polls
+  grep -qF 'c8-8 is stuck' <<<"$wake" && ! grep -qE '#0? ' <<<"$wake" \
+    || fail "the stuck wake of c8-8, a card with no issue, does not name it by its card ID: ${wake:-no wake} $(cat "$T/$CASE/watch.err")"
 }

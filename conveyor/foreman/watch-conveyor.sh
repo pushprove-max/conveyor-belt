@@ -101,8 +101,8 @@ PUSHED='def pushed($hist): [.health.unpushed | arrays | .[] | objects | .card] a
   | [(., ($hist | objects)) | (.metrics.cards | arrays | .[] | objects | select(.state == "landed" and (.card | IN($unpushed[]) | not)) | .issue | numbers),
      (.pushedCards | arrays | .[] | objects | .issue | numbers)];'
 # A card by its issue, "#n"; a main-red fix card, which has no issue (issue 0), by its name, "Main is red (<commit>)"
-# (health and the snapshot give it: rows.jq), its blocked line (who) with " (card <id>)": follow-ups share a name.
-REF='def ref: (.name | strings) // "#\(.issue)"; def who: ref + (if (.name | type) == "string" and (.card | type) == "string" then " (card \(.card))" else "" end);'
+# (rows.jq), its blocked and stuck lines (who) with " (card <id>)", as follow-ups share a name; one of no name by its card ID.
+REF='def ref: (.name | strings) // (.issue | numbers | select(. > 0) | "#\(.)") // (.card | strings) // "#\(.issue)"; def who: ref + (if (.name | type) == "string" and (.card | type) == "string" then " (card \(.card))" else "" end);'
 # A snapshot's problems, one per line: <key> TAB <kind> TAB <issue numbers, "#n" by spaces> TAB <text>. Fails for
 # anything but a snapshot holding a health record. idle is a candidate here: record() reports it on its second poll.
 # An awaited issue that landed names its commit (the snapshot's or the history's landed, pushedCards or metrics.cards
@@ -141,9 +141,9 @@ PROBLEMS=$SUITE$PUSHED$REF'def one: tostring | gsub("\\s+"; " ") | .[0:240];
         + (if $held == [] then "" else " (it holds \($held | join(", ")))" end) + ($own | join(""))]),
     (.stuck[] | if .stopped.of? == "engine" then empty
       elif ((.stopped | objects | .pid) // null | type) == "number" then ["stopped:\(.card):\(.stopped.pid)", "stopped", ref,
-        "\(ref): its process is stopped (state T) since \(.stopped.since // .since): \(.stopped | cont) resumes it"]
-      elif .did then ["stuck:\(.card):\(.did)", "stuck", ref, "\(ref) is stuck: no progress since \(.since) at \(.step); the engine \(.did) it"]
-      else ["stuck:\(.card)", "stuck", ref, "\(ref) is stuck: " + (
+        "\(who): its process is stopped (state T) since \(.stopped.since // .since): \(.stopped | cont) resumes it"]
+      elif .did then ["stuck:\(.card):\(.did)", "stuck", ref, "\(who) is stuck: no progress since \(.since) at \(.step); the engine \(.did) it"]
+      else ["stuck:\(.card)", "stuck", ref, "\(who) is stuck: " + (
       if (.waitedOn | type) == "array" then "it has waited on other cards for \(.waitedMin) minutes in all (\([.waitedOn[] | objects | ref] | join(", ")))"
       elif (.cases | type) == "array" then "its test step has had \(.cases | map(tostring) | join(", ") | one) running since \(.since)"
       # A session says which signs of life it lacks: live output (none recorded in the step) and a working process.
@@ -301,7 +301,7 @@ unreported() {
     | ("\($repo): \($text)" | bare) as $w
     | select($now - $t >= 2 * $poll and (("\($repo)/\(.[1])" | IN($seen[]) | not) or any($pend[]; startswith($w) and (.[($w | length):] | tail))))
     | ($text | sub(" is blocked since .*$"; "")) as $who | (.[1] | ltrimstr("blocked:")) as $id
-    | "\($repo): not yet reported: blocked \($who)\(if ($who | test(" \\(card [A-Za-z0-9._-]+\\)$")) or $id == "null" or ($id | test("^[A-Za-z0-9._-]+$") | not) then "" else " (card \($id))" end)"'
+    | "\($repo): not yet reported: blocked \($who)\(if ($who | test(" \\(card [A-Za-z0-9._-]+\\)$")) or $who == $id or $id == "null" or ($id | test("^[A-Za-z0-9._-]+$") | not) then "" else " (card \($id))" end)"'
 }
 
 # --status [<project>] (`conveyor.sh foreman status`): each record's state now as short plain text, read from one
