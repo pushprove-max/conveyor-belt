@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 120
+# timeout: 300
+# The limit is the whole file's in a card's test step (lib/fileeach.sh), times the load factor read as the run starts:
+# its cases took 200 s run alone with a load of 46 on 16 cores (67 s of cpu), and longer beside the step's other
+# files, so 120 s stopped the file at random with no case failed (#1767).
 # Engine cases: the test results cache (tests(): testlist.sh cachekeep(), cacheoff()). A test file that passed with the same
 # inputs is not run again by a later run, of this card or another; one whose inputs changed runs, and so does one
 # whose command names no inputs for it.
