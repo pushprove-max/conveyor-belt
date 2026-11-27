@@ -8,7 +8,7 @@
   let KIND, MODEL, KINDS_MAX, STANDING, SETS, PINS_SHOWN, KNOWN_KINDS, GUARDS, BUILDS, ROLES, OTHER, S, ONB, OB,
     num, list, ctl, same, plural, pre, isArea, depKnown, landNow, landKnown, PRMERGE, prNow, prKnown, pushCheckOn,
     draftOf, draftPut, draftDrop, say, send, button, choice, seg, pickList, stepper, row, wouldSkip, skipWords,
-    fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw, relength, rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, rulesPushBatch, suiteSlots, run, judgeRare, rulesHeals, rulesDollars, rulesSplitLimits;
+    fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw, relength, rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, rulesSerena, rulesPushBatch, suiteSlots, run, judgeRare, rulesHeals, rulesDollars, rulesSplitLimits;
 
   // ---- left: one row a rule ----
   // A role: its CLI (one of those installed on the loop's host, s.clis; the judge's the reviewer's too), then a model
@@ -225,7 +225,7 @@
     }
     const r = c.rules && typeof c.rules === 'object' ? c.rules : {};
     rulesBuild(el, r); rulesNever(el, d, r); rulesCap(el, d, c); rulesGuard(el, d, c); rulesAtOnce(el, c); rulesMode(el, c); rulesSuite(el, c); rulesFailFast(el, r); rulesTestStepOnly(el, r); rulesSeats(el, d); rulesJudge(el, c, d);
-    rulesAccounts(el, c); rulesGates(el, c, r); rulesLand(el, c); rulesCheck(el, c, r); rulesPushBatch(el, r); rulesLint(el, r); rulesSplit(el, r); rulesSplitLimits(el); rulesHeals(el, r); rulesDollars(el, r); rulesTestIssues(el, r);
+    rulesAccounts(el, c); rulesSerena(el, r); rulesGates(el, c, r); rulesLand(el, c); rulesCheck(el, c, r); rulesPushBatch(el, r); rulesLint(el, r); rulesSplit(el, r); rulesSplitLimits(el); rulesHeals(el, r); rulesDollars(el, r); rulesTestIssues(el, r);
     rulesPick(el, d, r); rulesCores(el); rulesStanding(el); rulesHeld(el, all); rulesPins(el, c, d); rulesIndexed(el);
     return el;
   }
@@ -794,7 +794,7 @@
       num, list, ctl, same, plural, pre, isArea, depKnown, landNow, landKnown, PRMERGE, prNow, prKnown, pushCheckOn,
       draftOf, draftPut, draftDrop, say, send, button, choice, seg, pickList, stepper, row, wouldSkip, skipWords,
       fieldLabel, areaWould, unlisted, heldUnknown, arm, limitsLine, standingShown, pickShown, CAP0, draw,
-      relength, rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, rulesPushBatch, suiteSlots, run, judgeRare, rulesHeals, rulesDollars, rulesSplitLimits } = shared);
+      relength, rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, rulesSerena, rulesPushBatch, suiteSlots, run, judgeRare, rulesHeals, rulesDollars, rulesSplitLimits } = shared);
     return { rules, index };
   });
 })();

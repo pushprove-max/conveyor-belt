@@ -103,6 +103,14 @@ the project's settings file `.conveyor/project.json`, keeps the answer (`test.fi
 again. To ask for a survey later, run
 `/conveyor-belt:setup --survey`, or `setup --survey yes` from a shell.
 
+Setup also asks "Use Serena for code search in card sessions?". Serena lets a card session find a function and the
+code that calls it without reading whole files ([The rule Serena](configuration.md#the-rule-serena)). With yes
+(`setup --serena yes`), setup installs Serena with `uv tool install serena-agent` when it is not installed, then sets
+the rule Serena to build, fix and test fix sessions. When `uv` is not installed, setup shows the command that installs
+Serena and does not set the rule. When the folder that uv puts Serena in is not on PATH, setup says so and does not
+set the rule. With no, setup changes nothing. Setup does not change Serena's own settings file. Card sessions always
+start Serena with its web dashboard off. `conveyor.sh doctor` shows where Serena is installed and its version.
+
 Setup also reads the names of your project's tracked files and your test command, to find how your test files are
 named ([How test files are found](configuration.md#how-test-files-are-found)). It also reads the config of your test
 runner in the root of the main checkout:

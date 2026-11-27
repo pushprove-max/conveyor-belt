@@ -81,9 +81,9 @@ mpsinstalled() { jq -e --arg p "$MPS" '.plugins[$p] | type == "array" and length
 # project whose cards may change a lockfile needs in place of links to main's folders. Once the pack has either, the
 # question is not asked and a rerun changes neither.
 LOCKFILES=(package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lockb poetry.lock uv.lock Pipfile.lock Gemfile.lock Cargo.lock composer.lock Podfile.lock)
-SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-machine yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--size <lines>|no] [--size-files <pathspec>]... [--size-skip <folder>]... [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--pin] [--foreman]'
+SETUP_USAGE='setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no] [--test-machine yes|no] [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--link yes|no] [--worktree-setup <command>] [--lint <command> --lint-files <pathspec>...] [--lint-ready yes|no] [--lint-shared yes|no] [--size <lines>|no] [--size-files <pathspec>]... [--size-skip <folder>]... [--builder-route subscription|fallback|proxy|api] [--reviewer-route subscription|fallback|proxy|api] [--fallback-route proxy|api] [--claude-key none|settings|<key file>] [--codex-key none|settings|<key file>] [--claude-proxy <base URL>] [--codex-proxy <base URL>] [--claude-proxy-key settings|<key file>] [--codex-proxy-key settings|<key file>] [--serena yes|no] [--pin] [--foreman]'
 setup() { # as SETUP_USAGE
-  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla='' tmc='' tma='' tmt='' tmw='' lc='' lfs=() lra='' lsa='' lro='' sz='' szf=() szs=()
+  local owner='' test='' prods=() need=() b p f have l n x fm='' pin='' sv='' se='' fl='' rl='' br='' rr='' fr='' w first full c lk='' ws='' lf='' wsx='' dds=() lks tp='' tpa='' tn tl='' tla='' tmc='' tma='' tmt='' tmw='' lc='' lfs=() lra='' lsa='' lro='' sz='' szf=() szs=()
   local -A keyarg=() pxarg=() pkarg=() rcli=() lg=() pxu=() ak=() akf=() pk=() pkf=() as=() kd=(); local clis=()
   local ask='--survey <yes or no: run a first test-speed survey now?>'
   while [ $# -gt 0 ]; do
@@ -98,6 +98,7 @@ setup() { # as SETUP_USAGE
       --fast-lane) fl=${2-}; [[ $fl == yes || $fl == no ]] || { set -- x; break; } ;;
       --research-lane) rl=${2-}; [[ $rl == yes || $rl == no ]] || { set -- x; break; } ;;
       --link) lk=${2-}; [[ $lk == yes || $lk == no ]] || { set -- x; break; } ;;
+      --serena) se=${2-}; [[ $se == yes || $se == no ]] || { set -- x; break; } ;;
       --worktree-setup) ws=${2-}; [ -n "$ws" ] || { set -- x; break; } ;;
       --lint) lc=${2-}; [ -n "$lc" ] || { set -- x; break; } ;;
       --lint-files) lfs+=("${2-}"); [ -n "${2-}" ] || { set -- x; break; } ;;
@@ -226,6 +227,8 @@ setup() { # as SETUP_USAGE
   else install "$p" || return 1; fi
   # Before hostadd: once the host file names the project, a machine's service already running serves it.
   heldstart || return 1
+  # With the control record there: Serena installed and the rule Serena set on --serena yes (serenasetup(), lib/serena.sh).
+  serenasetup "$se" || return 1
   hostadd || return 1
   # Before any other pack field is written: a machine's service on older Conveyor than the project's commit refuses
   # a field its schema does not name, so it is started again on that commit first (servicerenew()).
@@ -1276,6 +1279,7 @@ doctor() {
   elif timeout 20 gh auth status >/dev/null 2>&1; then ok "gh, signed in"; else no "gh signed in" "run /conveyor-belt:setup, which starts gh auth login"; fi
   if mpsinstalled; then ok "the plugin $MPS, for /conveyor-belt:plan"
   else no "the plugin $MPS, for /conveyor-belt:plan" "run claude plugin install $MPS"; fi
+  ! command -v jq >/dev/null || serenadoctor # Serena, for the rule Serena (lib/serena.sh): optional, so never a missing: line
   if [ ! -e "$HOST" ]; then no "the host file $HOST" "run /conveyor-belt:setup, which writes it"
   elif ! command -v jq >/dev/null; then echo "not checked: the host file $HOST: it is read with jq"
   elif ! jq -e 'type == "object"' "$HOST" >/dev/null 2>&1; then no "a readable host file at $HOST" "make it a JSON object"

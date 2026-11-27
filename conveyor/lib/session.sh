@@ -484,7 +484,7 @@ newtexts() { # <the name of a variable that holds a prompt>
 # Claude: bypass mode, as any other mode asks before a write under .claude/, and a headless session cannot answer, so
 # a tooling card ended with no change; the card hooks (the settings file) still run in this mode. It has none of the
 # tools that schedule, message or start other agents (BUILDNOTOOLS): a headless run with a wakeup pending waits for
-# it, even past its time limit. WebFetch and WebSearch stay open.
+# it, even past its time limit. WebFetch and WebSearch stay open. Its one MCP server is Serena, when the rule Serena names the session's role (serenaargs(), lib/serena.sh: SERENA_A, SERENA_NO and SERENA_SAY); a Codex session gets none, as its guard hook refuses every MCP tool.
 # OpenCode (README.md, OpenCode builder): `opencode run` in the worktree, the prompt on stdin, its events as JSON
 # lines; --auto approves what nothing denies, as bypass mode does; the config file (ocready()) loads the guard plugin,
 # which runs the same settings file's hooks before each call; the project's own OpenCode config is not read, as a
@@ -522,8 +522,8 @@ builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: clau
       exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" opencode run --model "${3#opencode:}" --format json --auto <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
     antigravity) agyrun "$1" "$2" "$3" "$4" ;;
     *) proxyenv && acctrun "$5" || exit 1; [ -z "${7:-}" ] || a=(--resume "$7") # the session it resumes (session1())
-      exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" claude -p "${a[@]}" --model "$3" --effort "$4" --permission-mode bypassPermissions --disallowedTools "$BUILDNOTOOLS" \
-        --setting-sources "" --strict-mcp-config --settings "$1.settings" --output-format stream-json --verbose <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
+      exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" claude -p "${a[@]}" --model "$3" --effort "$4" --permission-mode bypassPermissions --disallowedTools "$BUILDNOTOOLS${SERENA_NO-}" \
+        --setting-sources "" --strict-mcp-config "${SERENA_A[@]}" --settings "$1.settings" --output-format stream-json --verbose <<<"$2${SERENA_SAY-}" > "$1.out" 2> "$1.err" 8>&- ;;
   esac
 }
 # An OpenCode session starts only with every guard in place, else it prints why and fails: OpenCode 1.x on PATH (the
@@ -572,7 +572,7 @@ session1() {
     codex) read=$CODEXREAD; model=$(codexmodel "$model") || { echo "$model"; return 1; }; f=$(cxready "$1") || { echo "$f"; return 1; } ;;
     *) dir=$(acctenv "$ACCT") || { echo "$dir"; return 1; } ;;
   esac
-  rm -f "$1.spent" "$1.stalled"
+  rm -f "$1.spent" "$1.stalled"; serenaargs "$1" "$(serenarole "${3:-build}" "$role")" "$agent" # Serena when the rule Serena names its role (lib/serena.sh): SERENA_A, SERENA_NO and SERENA_SAY, for builder()
   # The session runs on the cores left for card work (lib/slots.sh slot_keepwords).
   local KEEP bp p rid rd='' k; slot_keepwords
   # A session that stalls (watch()) is ended and runs once more after REVIEW_PAUSE, as a review with no verdict does

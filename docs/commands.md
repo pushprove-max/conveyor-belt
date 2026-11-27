@@ -252,7 +252,8 @@ Setup and the engine:
 - `setup [--owner <name>] [--product <path>]... [--test <command>] [--survey yes|no] [--test-patterns yes|no] [--file-command yes|no]
   [--test-map yes|no] --fast-lane yes|no --research-lane yes|no [--pin] [--foreman]` and `doctor` ([Setup](setup.md)). Yes to a lane makes that lane
   ([Lanes](lanes.md)). `--link yes|no` answers if each card's worktree links the dependency folders that setup found,
-  and `--worktree-setup <command>` installs them in each card's worktree instead.
+  and `--worktree-setup <command>` installs them in each card's worktree instead. `--serena yes` installs Serena when
+  it is not installed and turns on the rule Serena ([The rule Serena](configuration.md#the-rule-serena)).
   `doctor` also tries each of the pack's lint commands once in the main checkout: a command with `{files}` on one
   tracked file that its `files` match, a command without it as it is. It prints one line for each command: `ok`,
   `findings: <n>`, `missing: <tool>`, `error: <first line>`, or `empty` when no tracked file matches (the command is

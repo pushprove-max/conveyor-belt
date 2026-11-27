@@ -7,7 +7,8 @@
 // (SETS) on the left, the group picked on the right; with search text, every rule that matches, by group (index()).
 // One row a rule, each with what it does and its control; a choice of two or more is one segmented control (seg).
 // Models: Builder and Reviewer (CLI, model and effort), Judge (on or off, CLI, model and effort), Always accept (the
-// finding kinds the judge always accepts, with the kinds the review prompt names to pick from), Account, Review account.
+// finding kinds the judge always accepts, with the kinds the review prompt names to pick from), Account, Review account,
+// Serena (the card sessions that start with Serena, a checkbox a role, with what the build machine found: parts/rules-suite.js).
 // Capacity: Cards at once, Weekly pause (Off, 90%, 95%, 98%, beside the weekly limit's use), Test files at once (a
 // stepper for the record's suiteAtOnce, 1 to 999; a note when it is above the machine's test slots, which it runs
 // at; "needs a newer Conveyor" for a record without it), Release suite mode (the record's suiteMode: One by one or In parallel, what a release takes when its press names no mode; "needs a newer Conveyor" for a record without it), Release suite runs on (the record's suiteMachine: This
@@ -104,7 +105,7 @@
   // The Rules panel's six groups, in the index's order: key, name, what it holds, and what it shows: a row (by its
   // rule) or a group of rows (NOISSUE) each.
   const SETS = [
-    ['models', 'Models', 'Three seats for each card.', ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account']],
+    ['models', 'Models', 'Three seats for each card.', ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account', 'serena']],
     ['capacity', 'Capacity', 'Build slots and machine limits.', ['cap', 'guard', 'atonce', 'suite-mode', 'suite', 'failfast', 'teststeponly', 'cores']],
     ['picking', 'Picking', 'Choose which issues enter the belt.', ['build', 'never', 'start', 'dep-guard', 'split', 'split-donewhen', 'split-files', 'split-areas', 'split-chars', 'pick', 'healsdays', 'cardusd', 'issueusd']],
     ['landing', 'Landing and push', 'Decide how finished cards reach the repository.', ['push', 'land-as', 'pr-merge', 'push-check', 'pushbatch', 'lint', 'visible']],

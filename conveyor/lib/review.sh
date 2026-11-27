@@ -143,8 +143,9 @@ nostartsaid() { # <reviewkeep()'s note> <worktree>
   else printf '%s' "$w"; fi
 }
 # A worktree put back after a Codex review or judge run with no Codex sandbox (codexsb()): its index read back from
-# <tree>, the one it was given (everything is staged before a review), so a file the run staged is unstaged too; then
-# its files made to match that index, and each file it added removed. git restore and clean alone kept a staged file.
+# <tree>, the one it was given (everything is staged before a review), so a file the run staged is unstaged too; then its
+# files made to match it, each file it added removed, bar Serena's .serena/ (git's exclude file names it): git restore
+# and clean alone kept a staged file.
 cxputback() { # <worktree> <tree>
   [ -n "$2" ] && git -C "$1" read-tree --reset "$2" && git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq
 }
@@ -152,8 +153,8 @@ codexreview() { # <worktree> <brief> <instructions> <model> <effort>: one Codex 
   local model=$4 effort=$5 rc roll s sec f run='' no='' kn='' t=''
   rm -f "$1.review.new"; sec=$SECONDS; codexsb read-only
   [ "${CODEX_SB[0]}" = -s ] || t=$(git -C "$1" write-tree) || { echo "the staged change could not be read before the review"; return 1; }
-  (cd "$1" && codexargs && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json "${CODEX_SB[@]}" "${CODEX_PX[@]}" -m "$model" \
-    -c "model_reasoning_effort=\"$effort\"" -o "$1.review.new" - <<<"$3"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
+  (cd "$1" && codexargs && serenaargs "$1" review codex && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json "${CODEX_SB[@]}" "${CODEX_PX[@]}" "${SERENA_A[@]}" -m "$model" \
+    -c "model_reasoning_effort=\"$effort\"" -o "$1.review.new" - <<<"$3$SERENA_SAY"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) & # Serena by the rule Serena (lib/serena.sh)
   watch $! "$1.events" "$1.live" review "$model" "" "$effort"; rc=$?; sec=$((SECONDS - sec))
   # With no Codex sandbox (codexsb()), a write the review made is undone: the worktree is put back to the change it was given.
   [ "${CODEX_SB[0]}" = -s ] || cxputback "$1" "$t" || { echo "the worktree could not be put back after the review"; return 1; }
@@ -262,7 +263,7 @@ opencodereview() { # <worktree> <brief> <instructions> <model> <effort>
   echo "$s"; return "${no:-1}"
 }
 # What a Claude review or judge (claudereview(), judgecall()) may run, in REVIEW_TOOLS, and is told of its shell, in
-# REVIEW_SAY: Read, Grep and Glob, no settings or MCP servers, permission mode default (a headless session is refused what
+# REVIEW_SAY: Read, Grep and Glob, no settings or MCP servers (Serena's search tools are added by serenaargs(), lib/serena.sh, when the rule Serena names the session), permission mode default (a headless session is refused what
 # its rules do not allow). With ast-grep installed (bin/ast-grep runs) and no noshell (a judge call outside the review),
 # also Bash, whose one allowed command is cb-ast, with bin/ on its PATH (reviewpath(), in the session's subshell): Claude
 # Code's own read-only commands (ls, git status) run too; a write, a cb-ast write option, a chain, a redirect or an env prefix is refused.
@@ -278,20 +279,19 @@ reviewpath() { [ -z "$REVIEW_BIN" ] || export PATH="$REVIEW_BIN:$PATH"; }
 # One Claude review (a backup when Codex usage runs out), called by review() and ending as it does: the same
 # instructions and brief, the same answer file, record fields and spent file, its stream read as a session's is
 # (SESSIONREAD). It cannot change anything: its tools are Read, Grep and Glob, with a shell for cb-ast alone when
-# ast-grep is installed, and no tool that edits or writes; it is given no settings, hooks or MCP servers (reviewtools()).
-# Should a write get through all the same, the worktree is put back to the change review() was given (everything is
-# staged before a review): any file it changed or added is undone. The staged change is put in a folder beside the
-# worktree, given to it alone. Codex reads AGENTS.md by itself; this review is given the
-# worktree's, once, in its prompt, so both review against the same rules.
+# ast-grep is installed, and no tool that edits or writes; no settings, hooks or MCP servers (reviewtools()) but Serena's
+# search tools by the rule Serena (serenaargs()). Should a write get through all the same, the worktree is put back to the
+# change review() was given (everything is staged before a review): any file it changed or added is undone, bar Serena's
+# .serena/ (git's exclude file names it). The staged change is put in a folder beside the worktree, given to it alone. Codex reads AGENTS.md by itself; this review is given the worktree's, once, in its prompt, so both review against the same rules.
 claudereview() { # <worktree> <brief> <instructions> <model> <effort>
   local rc sec f s p d no='' kn=''
   # The card's review account, else its builder's.
   d=$(acctenv "${RACCT:-$ACCT}") || { echo "$d"; return 1; }
-  reviewtools; p=$(noshell "$1" "$2" "$3" "$REVIEW_SAY") || { echo "$p"; return 1; }
+  reviewtools; p=$(noshell "$1" "$2" "$3" "$REVIEW_SAY") || { echo "$p"; return 1; }; serenaargs "$1" review claude # Serena by the rule Serena (lib/serena.sh)
   sec=$SECONDS
-  (cd "$1" && proxyenv && cacheenv && acctrun "$d" && reviewpath && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$4" --effort "$5" "${REVIEW_TOOLS[@]}" \
+  (cd "$1" && proxyenv && cacheenv && acctrun "$d" && reviewpath && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$4" --effort "$5" "${REVIEW_TOOLS[@]}" "${SERENA_A[@]}" \
     --add-dir "$1.rv" --no-session-persistence --output-format stream-json --verbose \
-    <<<"$p"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
+    <<<"$p$SERENA_SAY"$'\n\n'"$2" > "$1.events" 2> "$1.err" 8>&-) &
   watch $! "$1.events" "$1.live" review "$4" "" "$5"; rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
   git -C "$1" restore -q --worktree -- . && git -C "$1" clean -fdq || { echo "the worktree could not be put back after the review"; return 1; }
   f=$(jq -cRn --arg m "$4" --arg e "$5" --argjson s "$sec" "$SESSIONREAD" "$1.events" 2>/dev/null | tail -n 1)
@@ -547,9 +547,9 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
     # The card's review account, else its builder's; the staged change is a file given to it alone; a review's tools (reviewtools()), the cb-ast shell for the review's judge and its replay alone.
     d=$(acctenv "${RACCT:-$ACCT}") || { jq -cn --arg r "$d" '{failed: $r}'; return 1; }
     rm -rf "$1.rv"; mkdir "$1.rv" && git -C "$1" diff --cached > "$1.rv/staged.diff" || { jq -cn '{failed: "the staged change could not be written for the judge"}'; return 1; }
-    case ${CALLSTEP:-review} in review | replay) reviewtools ;; *) reviewtools noshell ;; esac
-    p=$2$'\n\n'"$REVIEW_SAY: the staged change (\`git diff --cached\`) is the file $1.rv/staged.diff. Read it there, in parts if it is large."
-    (cd "$1" && proxyenv && cacheenv && acctrun "$d" && reviewpath && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$model" --effort "$effort" "${REVIEW_TOOLS[@]}" \
+    case ${CALLSTEP:-review} in review | replay) reviewtools ;; *) reviewtools noshell ;; esac; serenaargs "$1" "$([ "${CALLSTEP:-review}" != review ] || echo judge)" claude # Serena for a card's judge, by the rule Serena (lib/serena.sh)
+    p=$2$SERENA_SAY$'\n\n'"$REVIEW_SAY: the staged change (\`git diff --cached\`) is the file $1.rv/staged.diff. Read it there, in parts if it is large."
+    (cd "$1" && proxyenv && cacheenv && acctrun "$d" && reviewpath && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" claude -p --model "$model" --effort "$effort" "${REVIEW_TOOLS[@]}" "${SERENA_A[@]}" \
       --add-dir "$1.rv" --no-session-persistence --output-format stream-json --verbose \
       <<<"$p"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec)); rm -rf "$1.rv"
     f=$(jq -cRn --arg m "$model" --arg e "$effort" --argjson s "$sec" "$SESSIONREAD" "$1.judge.events" 2>/dev/null | tail -n 1 | jq -c '{model, effort, sec, tokens, usage, stats, ok} | del(.[] | nulls)' 2>/dev/null)
@@ -571,8 +571,8 @@ judgecall() { # <worktree> <instructions> <the brief and the findings>
     model=$(codexmodel "$model") || { jq -cn --arg r "$model" '{failed: $r}'; return 1; }
     codexsb read-only
     [ "${CODEX_SB[0]}" = -s ] || t=$(git -C "$1" write-tree) || { jq -cn '{failed: "the staged change could not be read before the judge"}'; return 1; }
-    (cd "$1" && codexargs && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json "${CODEX_SB[@]}" "${CODEX_PX[@]}" -m "$model" \
-      -c "model_reasoning_effort=\"$effort\"" -o "$1.judge" - <<<"$2"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec))
+    (cd "$1" && codexargs && serenaargs "$1" "$([ "${CALLSTEP:-review}" != review ] || echo judge)" codex && slot_keepwords && exec "${KEEP[@]}" timeout --kill-after=30 "$REVIEW_TIMEOUT" codex exec --json "${CODEX_SB[@]}" "${CODEX_PX[@]}" "${SERENA_A[@]}" -m "$model" \
+      -c "model_reasoning_effort=\"$effort\"" -o "$1.judge" - <<<"$2$SERENA_SAY"$'\n\n'"$3" > "$1.judge.events" 2> "$1.judge.err" 8>&-); rc=$?; sec=$((SECONDS - sec))
     # With no Codex sandbox (codexsb()), the worktree is put back after the judge, as after an OpenCode one.
     [ "${CODEX_SB[0]}" = -s ] || cxputback "$1" "$t" || rc=1
     roll=$(rollout "$1.judge.events"); [ -z "$roll" ] || { run=$(grep '"token_count"' "$roll" | tail -n 1 | jq -c '.payload.info.total_token_usage | objects' 2>/dev/null); rm -f "$roll"; }

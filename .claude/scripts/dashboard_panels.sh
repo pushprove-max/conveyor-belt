@@ -141,7 +141,8 @@
 #           from a snapshot without them), standing (the snapshot's: the pack's auto.standing, the standing kinds
 #           of routine yes that are on; null from a snapshot without it), pushCheck (the snapshot's: the pack's
 #           push.check, true or false; null from a snapshot without it), lintCommands (the snapshot's: the pack's
-#           lint commands, each {run, files}; null from a snapshot without them), open (as the Board's: every held issue
+#           lint commands, each {run, files}; null from a snapshot without them), serena (the snapshot's: the serena
+#           on the build machine, {installed, path, version}; null from a snapshot without it), open (as the Board's: every held issue
 #           with its labels and reasons, and every open issue) and readAt (when the build of the record's snapshot
 #           began: by this machine's clock from the live feed, else the host's snapshotAt; older than updatedAt when
 #           the snapshot is; null from a snapshot that does not say).
@@ -309,7 +310,7 @@ PANELS_JQ='
        beltSteps: [$s.belt[] | {issue, step, landed: (.landed == true)}],
        splitting: [$s.belt[] | select(.landed != true and (.split.filed | type == "array" and length > 0)) | .issue],
        blocked: [$s.needsYou.blocked[] | {card, issue, name: (.name // null), title, since}] | few($r), forecast: ($s.forecast // null),
-       prices: ($s.prices | if type == "object" then . + {missing: [$s.needsYou.prices.models | arrays | .[] | strings]} else null end), standing: ($s.standing // null), pushCheck: ($s.pushCheck | if type == "boolean" then . else null end), lintCommands: ($s.lintCommands | if type == "array" then . else null end), open: openOf($r), readAt: ($r.readAt // null)};
+       prices: ($s.prices | if type == "object" then . + {missing: [$s.needsYou.prices.models | arrays | .[] | strings]} else null end), standing: ($s.standing // null), pushCheck: ($s.pushCheck | if type == "boolean" then . else null end), lintCommands: ($s.lintCommands | if type == "array" then . else null end), serena: ($s.serena | if type == "object" then . else null end), open: openOf($r), readAt: ($r.readAt // null)};
   # From the first pick-up of the work of the card to its landing: totalSec of the snapshot, else the time in its card id.
   def took: (.totalSec | numbers) // (try ((.card | capture("^c(?<d>[0-9]{8}T[0-9]{6})-").d | strptime("%Y%m%dT%H%M%S") | mktime) as $s
     | ((.time | fromdate) - $s) | select(. >= 0)) catch null) // null;

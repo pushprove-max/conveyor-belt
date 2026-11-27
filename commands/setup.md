@@ -1,5 +1,5 @@
 ---
-description: Set up Conveyor Belt in this project (the pack, the plugin releases or main it follows or the commit it pins, its install, the Board's virtualenv, the labels, a first test-speed survey if wanted, the host file's record), then check this machine with conveyor doctor, offer to write a missing CLAUDE.md or AGENTS.md, and start Conveyor and the Board as this machine's services if wanted; with --foreman, also set up Foreman mode; with --survey, ask again whether to run a test-speed survey
+description: Set up Conveyor Belt in this project (the pack, the plugin releases or main it follows or the commit it pins, its install, the Board's virtualenv, the labels, a first test-speed survey if wanted, Serena for card sessions if wanted, the host file's record), then check this machine with conveyor doctor, offer to write a missing CLAUDE.md or AGENTS.md, and start Conveyor and the Board as this machine's services if wanted; with --foreman, also set up Foreman mode; with --survey, ask again whether to run a test-speed survey
 argument-hint: "[--foreman] [--pin] [--survey]"
 allowed-tools: Bash, AskUserQuestion, Read, Glob, Grep, Write
 ---
@@ -26,6 +26,14 @@ leave out?" (folders / none), before step 1. Add `--size <lines>` or `--size no`
 pathspec and `--size-skip <folder>` once per folder, each quoted for the shell, to each run of step 1's setup command.
 Show setup's line for the size entry: it names the exempt file `.conveyor/size-exempt.txt`, which step 3 commits
 with the pack.
+
+When `"${CLAUDE_PLUGIN_ROOT}/conveyor/conveyor.sh" control` fails, or prints a record whose `rules.serena` is empty
+or missing, ask the user "Use Serena for code search in card sessions? Setup installs it when it is missing." (yes /
+no) before step 1, and add `--serena yes` or `--serena no`, as answered, to each run of step 1's setup command. Show
+setup's lines for it: with yes it installs Serena with `uv tool install serena-agent` when Serena is missing, then sets
+the rule Serena to build, fix and testfix; with no `uv`, or with uv's folder not on PATH, its line says what to do and
+the rule stays off. Card sessions always start Serena with its web dashboard off; do not change
+`~/.serena/serena_config.yml` here.
 
 First install the requirements, then sign in, before step 1:
 
@@ -127,7 +135,7 @@ First install the requirements, then sign in, before step 1:
    gives the admin `admin` the password (adding it when it is not a user) and starts the Board; then remove the folder. Never put the password in a command, and never show it
    again. Never ask the user to run a command with `!` to finish setup. On no, say that running
    `/conveyor-belt:setup` again in this checkout asks again and starts it on yes.
-6. Reply with what setup changed (its `wrote`, `follows`, `took`, `pinned`, `installed`, `created`, `filed` and `saved` lines; none means it was already set up; or the failure it showed), doctor's line "N open issues held; release one with
+6. Reply with what setup changed (its `wrote`, `follows`, `took`, `pinned`, `installed`, `set`, `created`, `filed` and `saved` lines; none means it was already set up; or the failure it showed), doctor's line "N open issues held; release one with
    `conveyor.sh control release <issue>` or on the Board", and each `missing:` line
    doctor printed, with its fix, the Board's address (the `the Board runs` line of step 5, or doctor's Board line), and each instruction file you wrote. List the lanes setup made (its `created: the fast lane` and `created: the research
    lane's worktree` lines), with the command that starts the research lane when setup printed one. Make no change of your own to the pack, the pin or the labels. With `--foreman`, add

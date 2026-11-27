@@ -94,7 +94,8 @@ not affect security.`, does not count either. An issue that does not use those w
 
 The card builds in a fresh git worktree. Claude build, fix and review sessions start without your account's connectors
 (its MCP servers), so a card never sees your mail, drives or notes. Codex sessions start with each MCP server in your
-Codex `config.toml` turned off.
+Codex `config.toml` turned off. The one MCP server a card session can get is Serena, a code search tool, when the
+rule Serena names the session ([The rule Serena](configuration.md#the-rule-serena)).
 
 A Claude build or fix session cannot use the tools that schedule work, send messages or start other agents:
 `ScheduleWakeup`, `CronCreate`, `CronDelete`, `CronList`, `Monitor`, `RemoteTrigger`, `PushNotification`,

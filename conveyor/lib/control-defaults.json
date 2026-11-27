@@ -28,6 +28,7 @@
     "pushbatch": false,
     "pushbatchwhen": 2,
     "pushbatchtests": "linked",
+    "serena": [],
     "never": []
   },
   "model": {

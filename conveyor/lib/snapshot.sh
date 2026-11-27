@@ -165,6 +165,8 @@
 #   tab; null when the pack cannot be read.
 # pushCheck: the pack's push.check (true or false), whether the run before a push runs when the control record's
 #   pushCheck is null, for the Rules tab; null when the pack cannot be read.
+# serena: the serena on this machine, {installed, path, version} (serenastatus(), lib/serena.sh), for the Rules tab's
+#   rule Serena; kept while the file serena is stays the same (serenakey()).
 # lintCommands: the pack's lint.commands, each {run, files}, listed read-only beside the rule Lint check on the Rules
 #   tab; [] when the pack sets none, null when the pack cannot be read.
 # waitWake: the pack's foreman.waitWake (default 10), the minutes a card waits for main to change, or on another card,
@@ -1613,6 +1615,7 @@ snapshot() (
   snappart tests "$SK_TESTS" "$d/tests" testspart "$since" 2>/dev/null && [ -s "$d/tests" ] || echo null > "$d/tests"
   # testMap: the Test map part (mapboard(), lib/testmap.sh).
   snappart testmap "$SK_MAP" "$d/testmap" mapboard "$MAIN" 2>/dev/null && [ -s "$d/testmap" ] || echo null > "$d/testmap"
+  snappart serena "$(serenakey)" "$d/serena" serenastatus 2>/dev/null && [ -s "$d/serena" ] || echo null > "$d/serena"
   # bench: the Benchmarks tab's live part, board.json of `conveyor.sh bench swe` (bench/swe.sh); a run in progress whose process
   # is gone (killed with no end written) is shown stopped, and soloKey is the key of the builder seat in force now
   # (swe_solokey()), not the one board.json kept from its last write.
@@ -1627,8 +1630,8 @@ snapshot() (
     bk=$(. "$HERE/bench/swe.sh" && swe_solokey "$(swe_solomodel)") || bk=''
     jq -c --arg bk "$bk" "$bf"' | if $bk == "" then . else .soloKey = $bk end' "$ST/bench/swe/board.json" > "$d/bench.new" 2>/dev/null && [ -s "$d/bench.new" ] && mv -f "$d/bench.new" "$d/bench"
   fi
-  jq -c --slurpfile bn "$d/bench" --argjson bv "$bv" --slurpfile tm "$d/testmap" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --slurpfile sh <(healssnap) --slurpfile ta <(testacts) --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" --argjson pc "$pc" --argjson lc "$lc" \
-    --slurpfile rp <({ tail -n 1 "$REPLAYS" 2>/dev/null || :; } | jq -c 'objects' 2>/dev/null) '$ta[0] as $ta | del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .selfheals = $sh[0] | .prices = $pr[0] | .standing = $sk | .pushCheck = $pc | .lintCommands = $lc
+  jq -c --slurpfile bn "$d/bench" --argjson bv "$bv" --slurpfile tm "$d/testmap" --slurpfile sr "$d/serena" --argjson mv "${moved:-null}" --slurpfile dec "$d/declined" --slurpfile sh <(healssnap) --slurpfile ta <(testacts) --argjson tl "${TESTACTION_TIMEOUT:-null}" --slurpfile tp "$d/tests" --slurpfile pr "$d/prices" --argjson sk "$sk" --argjson pc "$pc" --argjson lc "$lc" \
+    --slurpfile rp <({ tail -n 1 "$REPLAYS" 2>/dev/null || :; } | jq -c 'objects' 2>/dev/null) '$ta[0] as $ta | del(.cols) | .declined = $dec[0].shown | .declinedRest = $dec[0].rest | .selfheals = $sh[0] | .prices = $pr[0] | .standing = $sk | .pushCheck = $pc | .lintCommands = $lc | .serena = $sr[0]
     | .cost.replay = ($rp[0] // null | if . == null then null else del(.calls) end)
     | .testActions = {seat: (.control // {} | .tests // null), limit: $tl, actions: $ta, allowed: ((.modelSettings | objects | .builder.allowed) // null)} | .tests = $tp[0] | .testMap = $tm[0] | .bench = ($bn[0] | if $bv == null then . else (objects // {}) | .versions = $bv end) | def since: . + {since: $mv[.issue | tostring].at};
     if $mv == null then . else (.queue.order, .queue.holding, .queue.waiting) |= (if . == null then null else map(since) end) | .open.held |= map(since) end

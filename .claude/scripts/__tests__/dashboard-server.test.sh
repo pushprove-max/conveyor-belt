@@ -724,11 +724,14 @@ control_actions() {
 
 ( control_part actions "${PORTS[9]}"
 # #1621: the Board's settings of Push after a combined test run (pushbatchwhen, pushbatchtests) were refused as no rule.
+# #1823: the Board's checkboxes of the rule Serena (serena=<roles>|off) were refused as no rule; a role it does not know
+# is refused below.
 # Bug: the Board's Save of antigravity as the builder (model antigravity ...) was refused; its other seats stay refused
 # below (control_bad_value_refused), as the engine runs agy for the builder alone.
 control_actions 'rules P1=off followups=on area:infra=on' 'rules P3=off' 'rules P3=on' 'rules team/billing=off' 'rules visible=off' 'rules visible=on' 'rules lint=off' 'rules lint=on' 'rules split=shadow' 'rules split=on' 'rules pick=shadow' 'rules pushbatchwhen=3' 'rules pushbatchwhen=02:30' 'rules pushbatchtests=all' 'model claude claude-opus-5-5 high' 'model claude claude-opus-5-5' 'model default' 'reviewer codex gpt-6.1-sol low' 'reviewer default' 'start held' 'start queue' \
   'reviewer opencode openrouter/vendor/model-1:free high' 'judge opencode openrouter/vendor/model-1' 'model claude opus[1m]' 'model codex gpt-6.1-sol' 'model antigravity gem-1 high' \
   'judge on' 'judge off' 'judge claude claude-opus-5-5 high' 'judge default' 'judge always security data' 'judge always' 'judge rare P2 P3' 'judge rare none' \
+  'rules serena=build,fix,testfix' 'rules serena=review' 'rules serena=off' \
   'account second' 'account default' 'account' 'review-account first' 'review-account' 'dep-guard off' 'dep-guard on' 'push-check off' 'push-check on' 'push-check default' 'force 12' 'land-as pr' 'land-as main' 'pr-merge idle' 'pr-merge release' 'pr-merge button' 'onboarded build review-account dep-guard'
 grep -q "dashboard: control model default by max from 127.0.0.1" "$M/server.err" || fail "control_is_logged: no line for the control in the log"
 done_part
@@ -1180,6 +1183,7 @@ pass=$((pass + 4))
 # An unknown action, a bad value, or a body of another shape: 400, and nothing reaches the host.
 for b in "$(act frob)" "$(act 'pause;rm')" "$(act pause now)" "$(act cap 101)" "$(act cap 0)" "$(act cap 08)" "$(act cap)" "$(act guard 0)" "$(act guard 101)" \
   "$(act hold)" "$(act hold x)" "$(act hold '12; rm -rf /')" "$(act hold 012)" "$(act release -1)" "$(act order 12 '$(id)')" \
+  "$(act rules serena=deploy)" "$(act rules 'serena=build,')" "$(act rules 'serena=build;id')" \
   "$(act start)" "$(act start maybe)" "$(act start held queue)" "$(act start 'held;id')" \
   "$(act rules)" "$(act rules P4=off)" "$(act rules P1=maybe)" "$(act rules 'area:a b=off')" "$(act rules split=maybe)" "$(act rules pick=maybe)" "$(act rules 'split=on;id')" \
   "$(act model)" "$(act model --help)" "$(act model claude m bogus)" "$(act model default high)" "$(act model claude m high x)" "$(act reviewer codex 'm;id')" \

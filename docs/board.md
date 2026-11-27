@@ -375,7 +375,12 @@ one control, and the value in force is the selected part.
    case. **Always accept** lists the
    finding kinds the Judge accepts every time. **Account** and **Review account** pick the accounts
    ([Accounts](#accounts)). A seat is saved only when you press its **Save**. While a seat has a change that is not
-   saved, the row shows the model in force.
+   saved, the row shows the model in force. **Serena (code search in card sessions)** has one checkbox for each kind
+   of card session: Build, Fix, Test fix, Review and Judge. A checked session starts with Serena
+   ([The rule Serena](configuration.md#the-rule-serena)). Under the boxes, a line says what the build machine
+   has: `Installed: <version> at <path>`, or `Not installed on the build machine: setup can install it`. When Serena
+   is not installed, you cannot check a box, and a rule that is on says `Serena rule on, but serena is not
+   installed`. You can still clear a box that is checked.
 2. **Capacity**: **Cards at once**. It counts every card on the belt, in any step, a card that
    waits too. A card that lands or pushes, or has landed or pushed, does not count. The machine's test slots limit
    tests. The On the belt figure gives the same count.

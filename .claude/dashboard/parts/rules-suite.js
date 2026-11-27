@@ -185,6 +185,34 @@
     el.append(row('teststeponly', name, "a card's sessions do not run tests; the Test step runs them",
       seg(name, tOn, tOff), note));
   }
+  // Serena (Models): the record's rules.serena (`control rules serena=<role,...|off>`), the card sessions that start
+  // with Serena, one checkbox a role; under them the snapshot's serena, what the build machine found. With serena not
+  // installed there, a box that is off is disabled (a box that is on can still turn its role off), and a rule that names
+  // a role says those sessions start without it. A record without the rule is drawn disabled.
+  const SERENA_ROLES = [['build', 'Build'], ['fix', 'Fix'], ['testfix', 'Test fix'], ['review', 'Review'], ['judge', 'Judge']];
+  function rulesSerena(el, r) {
+    const h = S.ctx.h, s = S.d && S.d.serena && typeof S.d.serena === 'object' ? S.d.serena : null, known = Array.isArray(r.serena);
+    const has = s !== null && s.installed === true, on = known ? SERENA_ROLES.map(([k]) => k).filter((k) => r.serena.includes(k)) : [];
+    const arg = (roles) => `serena=${roles.length ? roles.join(',') : 'off'}`, box = h('span', 'rules-list');
+    SERENA_ROLES.forEach(([k, name]) => {
+      const lab = h('label', 'rules-check'), b = h('input');
+      b.type = 'checkbox'; b.dataset.act = `serena-${k}`; b.checked = on.includes(k);
+      b.disabled = !known || (!has && !b.checked);
+      b.setAttribute('aria-label', `Serena in ${name} sessions`);
+      b.addEventListener('change', () => {
+        const to = SERENA_ROLES.map(([x]) => x).filter((x) => (x === k) !== on.includes(x));
+        send('rules', [arg(to)], null, ['rules', [arg(on)]]);
+      });
+      lab.append(b, h('span', null, name));
+      box.append(lab);
+    });
+    let found = null;
+    if (!known) found = h('span', 'board-from', 'needs a newer Conveyor');
+    else if (has) { found = h('span', 'board-from', `Installed: ${s.version || 'version not read'} at `); found.append(h('code', null, s.path)); }
+    else if (s) found = h('span', 'board-from', 'Not installed on the build machine: setup can install it');
+    const warn = known && !has && s && on.length ? h('span', 'warn-note', 'Serena rule on, but serena is not installed') : null;
+    el.append(row('serena', 'Serena (code search in card sessions)', 'the card sessions that start with Serena, its web dashboard off', box, found, warn));
+  }
   // Push after a combined test run (Landing and push): the record's rules.pushbatch (`control rules pushbatch=on|off`).
   // Off (the default), each card is pushed when it lands; On, the cards that land wait until the run is due, then the
   // tests run on main and they are pushed together once those pass. When it starts is rules.pushbatchwhen: a number
@@ -273,6 +301,6 @@
   }
   window.DASH_APP.part('rules-suite', function (shared) {
     ({ S, num, send, button, post, row, draw, choice, seg } = shared);
-    return { rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, rulesPushBatch, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
+    return { rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, rulesSerena, rulesPushBatch, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
   });
 })();

@@ -1133,6 +1133,19 @@ CLI cannot run fails in the card, and the card shows the error.
 The effort is one that the CLI takes. The judge can run on the reviewer's CLI, and the Rules tab then says it is of
 the same family. Left at default, the judge runs on another CLI than the reviewer's.
 
+### The rule Serena
+
+The rule **Serena** is off in a new project. It names the card sessions that start with Serena, a code search tool:
+build, fix, test fix, review and judge. Such a session can find a function, and the code that calls it, without
+reading whole files. Its prompt tells it to use Serena's `find_symbol` and `find_referencing_symbols` first. It can
+use only Serena's search tools: Serena's tools that change files or run commands are not open to it. Serena starts
+with its web dashboard off and its search tools on, whatever your `~/.serena/serena_config.yml` says. Serena's own
+project files, in `.serena/`, never join a card's change: the repository's `.git/info/exclude` file names `/.serena/`. A Codex build or fix session gets no
+Serena, and neither does an OpenCode or Antigravity session. When Serena is not installed on the build machine, the
+sessions start without it, and the log says `Serena rule on, but serena is not installed`. The Rules tab's row in
+Models sets the rule, as does `conveyor.sh control rules serena=build,fix,testfix`; `serena=off` turns it off.
+`conveyor.sh setup --serena yes` installs Serena and turns the rule on ([Setup](setup.md#setup)).
+
 ### Settings for one card
 
 An issue can have its own builder, reviewer and judge, before it is picked or while its card is on the belt. Each one

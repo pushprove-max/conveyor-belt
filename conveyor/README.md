@@ -81,6 +81,19 @@ its own, and the Board's Rules tab sets them in its Judge row.
   or a UTC time of day, `HH:MM`. The default is in `lib/control-defaults.json`.
 - `pushbatchtests`: which tests that run runs: `linked` (the default), the test files linked to the landings; `all`,
   every test file of main but the pack's runners of the whole suite.
+- `serena`: the rule Serena, the card sessions that start with Serena, a code search tool: a list of `build`, `fix`,
+  `testfix`, `review` and `judge`, empty (off) by default (`conveyor.sh control rules serena=<role,...|off>`). A
+  Claude session of a role in the list gets Serena as its one MCP server, from the file `<card>.mcp.json` beside the
+  worktree. A Codex review or judge gets it with `-c mcp_servers.serena...` settings, and the other servers of the
+  Codex config stay off. Serena starts as `serena start-mcp-server --context claude-code --project <worktree>
+  --agent-interface tools --enable-web-dashboard false --enable-gui-log-window false`, so its web dashboard is off
+  and its search tools are there whatever `~/.serena/serena_config.yml` says. A Serena whose `start-mcp-server --help`
+  does not list `--agent-interface` (Serena 1.x) starts without that option. The repository's git exclude file
+  (`.git/info/exclude`) gets the line `/.serena/`, so Serena's project files never join a card's change. A session can use only its search tools (`find_symbol`,
+  `find_referencing_symbols`, `get_symbols_overview`), and its prompt has one line that names them. A Codex build or
+  fix session, an OpenCode session and an Antigravity session get no Serena: the Codex guard hook refuses each MCP
+  tool. When serena is not on PATH, the session starts without it, and the loop's log says `Serena rule on, but
+  serena is not installed`.
 - `split`: the rule Split large issues, `off`, `shadow` or `on`. It is on by default (`conveyor.sh control rules split=<off|shadow|on>`).
   Before a card builds, code measures its issue against the pack's `split` limits; an issue that reaches
   one goes to the judge one time, which answers keep or 2 or 3 slices. Shadow records the verdict on the card's

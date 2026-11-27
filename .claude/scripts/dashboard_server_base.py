@@ -153,7 +153,9 @@ SPLIT_LIMIT = re.compile(r'(doneWhen|files|areas|chars)=(default|[1-9][0-9]{0,8}
 # An area rule is the pack's area prefix and a name: any label here; conveyor.sh checks the prefix.
 # The rules Split large issues (split) and Pick settings (pick) take off, shadow or on. The run of Push after a combined
 # test run starts after 1 to 100 landings or at a UTC time HH:MM (pushbatchwhen), on the linked or all test files (pushbatchtests).
+# The rule Serena (serena) names the card sessions that start with Serena, or is off.
 RULE = re.compile(r'(split|pick)=(off|shadow|on)|pushbatchwhen=(100|[1-9][0-9]?|([01][0-9]|2[0-3]):[0-5][0-9])|pushbatchtests=(linked|all)'
+                  r'|serena=(off|(build|fix|testfix|review|judge)(,(build|fix|testfix|review|judge)){0,4})'
                   r'|(P[0-3]|followups|(?!P[0-9]+=)[A-Za-z0-9][A-Za-z0-9._:/-]{0,79})=(on|off)')
 LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,59}')
 RUN_ID = re.compile(r'[0-9a-f]{12}')  # a full test run's id, as conveyor.sh's full-test anyway takes it

@@ -75,9 +75,11 @@
     pushbatchwhen: (o) => `combined test run ${/^\d+$/.test(o) ? `after ${o} landings` : `at ${o} UTC`}`,
     pushbatchtests: (o) => `combined test run on ${o === 'all' ? 'every test file' : 'the linked test files'}`,
   };
+  // The rule Serena (rules.serena): the roles whose card sessions start with Serena, or off.
+  const serenaWords = (o) => (o === 'off' ? 'Serena off' : `Serena in ${o.split(',').join(', ')} sessions`);
   const WORDS = {
     rules: (a) => a.map((x) => { const [k, o] = x.split('='); return isArea(k) ? `${o === 'off' ? 'never build' : 'build'} ${k}`
-      : own(BATCH_WORDS, k) ? BATCH_WORDS[k](o) : own(NOISSUE_WORDS, k) ? `${NOISSUE_WORDS[k]} with no GitHub issue ${o === 'off' ? 'on' : 'off'}` : `${own(RULE_WORDS, k) ? RULE_WORDS[k] : k} ${o}`; }).join(', '),
+      : k === 'serena' ? serenaWords(o) : own(BATCH_WORDS, k) ? BATCH_WORDS[k](o) : own(NOISSUE_WORDS, k) ? `${NOISSUE_WORDS[k]} with no GitHub issue ${o === 'off' ? 'on' : 'off'}` : `${own(RULE_WORDS, k) ? RULE_WORDS[k] : k} ${o}`; }).join(', '),
     cap: (a) => (a[0] === 'off' ? 'at once: the default' : `at once ${a[0]}`),
     guard: (a) => (a[0] === 'off' ? 'pause at: off' : `pause at ${a[0]}%`),
     atonce: (a) => `parallel suite: ${a[0]} test file${a[0] === '1' ? '' : 's'} at once`,
@@ -163,11 +165,12 @@
       if (key === 'cardusd' || key === 'issueusd') { r.rules[key] = o === 'off' ? 0 : Number(o); return; } // dollars; the record keeps off as 0
       if (key === 'pushbatchwhen') { r.rules[key] = /^\d+$/.test(o) ? Number(o) : o; return; } // a number of landings, or a UTC time HH:MM
       if (key === 'pushbatchtests') { r.rules[key] = o; return; } // linked or all
+      if (key === 'serena') { r.rules[key] = o === 'off' ? [] : o.split(',').sort(); return; } // the roles, sorted as the record keeps them
       if (!isArea(key)) { r.rules[key] = o === 'on'; return; }
       const never = list(r.rules.never).filter((y) => y !== key);
       r.rules.never = o === 'off' ? never.concat([key]) : never;
     });
-    return [r, own(BATCH_WORDS, k) ? 'pushbatch' : isArea(k) ? 'never' : ['push', 'visible', 'lint', 'failfast', 'teststeponly', 'pushbatch', 'testissues', 'foremanissues', 'followupissues', 'releaseissues', 'splitissues', 'split', 'pick', 'healsdays', 'cardusd', 'issueusd'].includes(k) ? k : 'build'];
+    return [r, own(BATCH_WORDS, k) ? 'pushbatch' : isArea(k) ? 'never' : ['push', 'visible', 'lint', 'failfast', 'teststeponly', 'pushbatch', 'testissues', 'foremanissues', 'followupissues', 'releaseissues', 'splitissues', 'split', 'pick', 'healsdays', 'cardusd', 'issueusd', 'serena'].includes(k) ? k : 'build'];
   }
   // A setting as the record would hold it once the host takes it, and the row it is in; null for an action that is
   // not one setting (release, order, unpin...): those show when the host answers.
