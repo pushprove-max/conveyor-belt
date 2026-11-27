@@ -126,6 +126,10 @@ pushlast() { # <card> <issue>
   # The push record goes once the result is written, so a reader never finds neither.
   [ "$st" = false ] || rm -f "$PUSHING"
 }
+# Main's commit, read under the card records' lock (locked(), lib/records.sh). land() (lib/claim.sh), always run under
+# that lock, moves main before it writes each landed line: read outside it, main can be a landing that has no landed
+# line yet, so pushtests() runs none of that landing's linked test files and pushone() pushes it.
+mainsha() { locked git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null; }
 pushone() { # <card> <issue> [<commit>]
   local wt=$CARDS/push sha out rc=0 a c n s t state round=0 before=() got=() pend=() rest=() took=$SECONDS try m want=${3:-} at la to nv='' ff=() fl='' ho='' pf plim=''; local -A said=()
   la=$(landas) || { pwhy="the rule Land as could not be read (the pack's push.landAs or the control record)"; echo "conveyor: $pwhy; nothing pushed" >&2; return 1; }
@@ -133,10 +137,10 @@ pushone() { # <card> <issue> [<commit>]
   for a in "$(pushed)" "refs/remotes/$REMOTE/$BRANCH"; do
     [ -z "$a" ] || ! a=$(git rev-parse -q --verify "$a^{commit}" 2>/dev/null) || before+=("$a")
   done
-  # Main as it is now runs the test files linked to its landings first (pushtests()), and that commit is pushed: one
-  # that lands meanwhile waits for the next push. A given commit had the full test run.
+  # Main as it is now, with its landed lines (mainsha()), runs the test files linked to its landings first (pushtests()),
+  # and that commit is pushed: one that lands meanwhile waits for the next push. A given commit had the full test run.
   at=${want:-refs/heads/$BRANCH}
-  if [ -z "$want" ] && sha=$(git rev-parse -q --verify "refs/heads/$BRANCH^{commit}" 2>/dev/null); then
+  if [ -z "$want" ] && sha=$(mainsha); then
     pushing "$sha" tests; pushtests "$1" "$2" "$sha" "${before[@]}" || return 1; at=$sha
   fi
   # A pre-push hook that failed naming test files that each pass alone (hookalone()) failed under load, not in the
@@ -173,7 +177,7 @@ pushone() { # <card> <issue> [<commit>]
     # Main is the merge with the remote's commits now (remerge()): a tree the run before the push has not run on, so it
     # runs there (pushtests()) before the merge is pushed, and a file that fails on it holds the push as on main's commit.
     at=refs/heads/$BRANCH
-    if m=$(git rev-parse -q --verify "$at^{commit}"); then pushing "$m" tests; pushtests "$1" "$2" "$m" "${before[@]}" || return 1; at=$m; fi
+    if m=$(mainsha); then pushing "$m" tests; pushtests "$1" "$2" "$m" "${before[@]}" || return 1; at=$m; fi
   done
   [ $rc != 0 ] && [ -z "$nv" ] && [ $rc != 124 ] && [ $rc != 137 ] && hookfailed "$wt.trace" || break
   pushing "$sha" tests; m=$(hookalone "$sha" "$out") || { [ -z "$m" ] || out+=$'\n'"conveyor: $m"; break; }

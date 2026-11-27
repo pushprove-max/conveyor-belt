@@ -475,3 +475,31 @@ t_pushheldnone() {
   jq -e 'keys == ["at", "held", "pid", "sha", "turns"] and (.pid | type) == "number" and (.at | fromdate) > 0 and .sha == null and .held == null and .turns == 0' "$ST/pushwait" > /dev/null \
     || fail "pushheld '' after a held turn did not write {pid, at, sha: null, held: null, turns: 0}: $(cat "$ST/pushwait")"
 }
+
+# Bug it catches: the push read main outside the card records' lock while land() (lib/claim.sh) had moved main but not
+# yet written that card's landed line, so the run before the push did not see that landing, ran none of its linked test
+# files, and pushed it. Card c3 lands through locked land(), as cardland() lands it, and stops right after main moves
+# (turnfree(), its next call) until the push asks for that lock (flock 9, locked()); c3 adds lib/fee.test.js, which
+# fails. The push must run that file on c3's commit and hold the push, origin left at base.
+t_pushtestslanding() {
+  local l1 l2 base l3
+  pushfix true
+  printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"; [ "$1" != lib/fee.test.js ]' > "$STUB/one" # only c3's file fails
+  CARDS=$T/$CASE/cards; mkdir -p "$CARDS"
+  git -C "$R" worktree add -q --detach "$CARDS/c3" refs/heads/main && echo fee > "$CARDS/c3/lib/fee.js" \
+    && echo 'exit 1' > "$CARDS/c3/lib/fee.test.js" && git -C "$CARDS/c3" add -A || fail "the change of card c3 could not be staged"
+  # Waits on real processes: a direct check cannot stop the real landing between its ref move and its landed line, nor
+  # see the push wait on the lock. The landing's wait has a ceiling of 20 s, reached only when the push reads main with
+  # no wait on the lock (the bug); then the landing goes on and the push's checks below fail.
+  ( fx_in 'eval "orig_$(declare -f turnfree)"; turnfree() { touch "$T/$CASE/moved"; WAIT_CEILING=20 wait_until "[ -e \"$T/$CASE/waits\" ]"; orig_turnfree "$@"; }
+    locked land c3 3 "$CARDS/c3" "title 3 (#3)"; echo "land: $?"' ) &
+  wait_until '[ -e "$T/$CASE/moved" ]' || { wait; fail "locked land c3 3 did not move main: $(cat "$T/$CASE/run.out")"; }
+  l3=$(git -C "$R" rev-parse main)
+  pushnow 'flock() { [ "$1" != 9 ] || touch "$T/$CASE/waits"; command flock "$@"; }; push c2 2'
+  wait
+  [ "$(tail -n 1 "$T/$CASE/run.out")" = "land: 0" ] || fail "locked land c3 3 failed: $(cat "$T/$CASE/run.out")"
+  grep -qxF "$l3 lib/fee.test.js" "$STUB/ran" \
+    || fail "push c2 2, started while locked land c3 3 had moved main to ${l3:0:12} but not written its landed line, did not run c3's lib/fee.test.js on it: $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+  [ "$(git -C "$T/$CASE/origin" rev-parse main)" = "$base" ] \
+    || fail "push c2 2 pushed c3's ${l3:0:12} to origin though its linked lib/fee.test.js fails: $(cat "$T/$CASE/push.out")"
+}
