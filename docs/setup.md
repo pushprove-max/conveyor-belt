@@ -40,6 +40,13 @@ found and where.
   line, and `conveyor.sh doctor` shows a warning with the command that installs it.
 - OpenCode 1.x, only for OpenCode models (`npm install -g opencode-ai`). Setup does not install it. See
   [Models](configuration.md#models).
+- The Antigravity CLI (`agy`), only for a builder on antigravity (`conveyor.sh control model antigravity <model>`).
+  Setup does not install it. Sign in once: run `agy` in a terminal. To use a Gemini API key, set `modelProvider` to
+  `gemini` in `~/.gemini/antigravity-cli/settings.json` and set `GEMINI_API_KEY`. When `agy` is installed, setup and
+  `conveyor.sh doctor` check its sign-in and show the command to run when it has none. A missing sign-in is a
+  warning until a seat runs on antigravity. An `agy` session needs `node`: the card guards run before each of its tool
+  calls, from the file `.agents/hooks.json` that Conveyor writes in the card's worktree. A project that tracks its own
+  `.agents/hooks.json` cannot run an `agy` builder.
 
 Conveyor runs on macOS and Linux.
 

@@ -138,6 +138,7 @@ CARD = re.compile(r'c[0-9]{8}T[0-9]{6}-[A-Za-z0-9._-]{1,200}')  # any card id, a
 # A seat: the CLI that runs it, then a model as that CLI names it (OpenCode's <provider>/<model> may hold / and :; a
 # Claude alias may hold [1m]), one word that starts with a letter or a digit, as conveyor.sh's control takes it.
 CLIS = frozenset({'claude', 'codex', 'opencode'})
+BUILDER_CLIS = CLIS | {'antigravity'}  # antigravity (agy) runs the builder seat alone, as conveyor.sh's control takes it
 MODEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,191}')
 ACCOUNT = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}')  # an account name, as conveyor.sh's control takes it
 EFFORTS = frozenset({'minimal', 'low', 'medium', 'high', 'xhigh', 'max'})  # claude's, codex's and opencode's, as conveyor.sh's EFFORTS

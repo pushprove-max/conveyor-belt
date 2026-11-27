@@ -80,7 +80,8 @@ def control_ok(body):
     if a == 'judge' and v[:1] == ['rare']:  # the levels at which it may decline a finding as a rare case, whole; none clears them
         return v[1:] == ['none'] or (2 <= n <= 5 and all(x in ('P0', 'P1', 'P2', 'P3') for x in v[1:]))
     if a in ('model', 'reviewer', 'judge', 'tests'):  # tests: the Tests seat of the Tests page's actions
-        return v == ['default'] or (n in (2, 3) and v[0] in CLIS and MODEL.fullmatch(v[1]) is not None and (n == 2 or v[2] in EFFORTS))
+        clis = globals()['BUILDER_CLIS'] if a == 'model' else globals()['CLIS']  # the base part's: antigravity runs the builder alone
+        return v == ['default'] or (n in (2, 3) and v[0] in clis and globals()['MODEL'].fullmatch(v[1]) is not None and (n == 2 or v[2] in globals()['EFFORTS']))
     if a == 'card':  # one issue's own seat: a model (the host checks the pack allows it) and an effort, or clear; or Pick for me
         if n < 2 or not ISSUE.fullmatch(v[0]):
             return False

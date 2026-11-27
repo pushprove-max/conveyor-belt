@@ -1388,6 +1388,15 @@ doctor() {
     else no "$p, for the models the pack's models.allowed lists for it" "install it ($(case $p in claude) echo "npm install -g @anthropic-ai/claude-code" ;;
       codex) echo "npm install -g @openai/codex" ;; *) echo "npm install -g opencode-ai, a 1.x release, then opencode auth login for each provider its models name" ;; esac)), or take its models out of models.allowed"; fi
   done
+  # agy on PATH: the builder seat can run on antigravity (control model), so its sign-in is checked (agysignin(), lib/agy.sh).
+  # One that is missing is a missing line only while a seat runs on antigravity: else a warning, so setup still
+  # offers to start the service on a project whose seats need no agy.
+  if command -v agy >/dev/null; then
+    s=''; for t in builder fix testFix; do c=$(seat "$t" 2>/dev/null) && [ "$(jq -r '.agent // empty' <<<"$c" 2>/dev/null)" = antigravity ] && s=1; done
+    if e=$(agysignin); then echo "$e"
+    elif [ -n "$s" ]; then echo "$e"; bad=1
+    else echo "warning: no seat runs on antigravity now, so agy needs no sign-in yet: ${e#missing: }"; fi
+  fi
   modelswarn
   # The builder and the reviewer in force (the control record's, its defaults' or the seed's): one whose CLI is not
   # installed here does not start (seatready), and the loop starts no card, so doctor names that seat.

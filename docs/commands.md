@@ -122,6 +122,10 @@ Cards:
 - `control [<action>]` changes the control record. `control depends` writes an issue's `Depends on:` line on GitHub.
   `control card <issue> ...` sets an issue's own builder, reviewer and judge, and `control card <issue> pick` asks the
   judge to choose them ([Configuration](configuration.md#settings-for-one-card)).
+  `control model|reviewer|judge <cli> <model> [effort]` sets a seat on claude, codex, opencode or antigravity.
+  antigravity runs the builder only (`control model antigravity <model> [effort]`). With no effort, `agy` uses its
+  default for the model. Its session runs `agy -p` in the card's worktree. It ends at the pack's
+  `tunables.buildTimeout` setting, also when it makes no progress for the pack's `tunables.stuck`.
 
 Tests:
 
@@ -255,7 +259,8 @@ Setup and the engine:
 - `install <commit>` installs that commit read-only.
 - `take`: a project that follows main takes main's newest commit when it passes its check.
 - `wording adversarial|review` prints the review wording.
-- `clis` reads each CLI's models again and prints them.
+- `clis` reads each CLI's models again and prints them. The CLIs are claude, codex, opencode and antigravity (the
+  `agy` command), each one that is installed.
 
 Reading the belt:
 

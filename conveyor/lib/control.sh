@@ -89,7 +89,7 @@ ctlcheck() { # [<file>]: the record on the input, or in the file, whole, or exit
         and (.pushbatchwhen | type == "number" and . >= 1 and . <= 100 and . == floor or type == "string" and test("^([01][0-9]|2[0-3]):[0-5][0-9]$"))
         and (.pushbatchtests | IN("linked", "all")))
       and ([.model, .reviewer, .judge, .tests, .fix, .testFix] | all(. == null or (type == "object" and (keys - ["effort", "cli"]) == ["model"] and (.model | type == "string")
-        and (.effort == null or (.effort | type == "string")) and (.cli == null or (.cli | IN("claude", "codex", "opencode"))))))
+        and (.effort == null or (.effort | type == "string")) and (.cli == null or (.cli | IN("claude", "codex", "opencode", "antigravity"))))))
       and (.tests == null or .tests.cli != null)
       and (.cards | type == "object" and all(to_entries[]; (.key | test("^[1-9][0-9]{0,8}$")) and (.value | type == "object" and length > 0
         and (keys - ["builder", "reviewer", "judge"]) == [] and all(.[]; type == "object" and (keys - ["effort"]) == ["model"] and (.model | type == "string")
@@ -164,7 +164,8 @@ diskfree() {
 # the CLI that runs the model: the one the record names with it (cli), whatever the pack lists; for a record that
 # names a model alone, the program the pack's models.allowed lists it under (okmodels). A record that does not read,
 # or names no CLI and a model the pack does not list for the seat, sets nothing: the seed's. effort is null for an
-# OpenCode builder, which is given none. Nothing when neither the record nor the pack names a model for the seat.
+# OpenCode builder, which is given none; an Antigravity builder's is the record's own, else "" (agy's default for the
+# model: agy's efforts depend on the model, so the seed's is not given). Nothing when neither the record nor the pack names a model for the seat.
 # Whether the seat's CLI and model are on this host is seatready()'s. An OpenCode model is named opencode:<provider>/<model>
 # (ocmark), as the pack names one: the live record, a stopped step and the Board's prices know an OpenCode step by
 # that mark, and the record holds it as OpenCode lists it. seatnow($s; $c) is that answer in jq, from
@@ -176,6 +177,7 @@ SEATNOW="$OKMODELS"'def ocmark: if .agent == "opencode" and (.model | startswith
     | (if $o.model != null and ($o.cli != null or ([$ok[][]] | index($o.model))) then $o else {} end) as $o
     | ($o.model // $d.model) as $m
     | {model: $m, effort: ($o.effort // $d.effort), agent: ($o.cli // ([$ok | to_entries[] | select(.value | index($m)) | .key] | first))} | ocmark
+    | if .agent == "antigravity" then .effort = ($o.effort // "") else . end
     | ($s == "builder" and .agent == "opencode") as $none | if $none then .effort = null else . end
     | select((.model | type == "string") and ($none or (.effort | type == "string")) and .agent != null);'
 # Several values of one JSON object, as `jq -r .<key>` prints each, read in one jq run (each ended by a NUL), so a step
@@ -461,6 +463,8 @@ climodels() { # <cli>
       jq -cn --argjson a "${own:-[]}" --argjson b "${px:-[]}" 'reduce ($a + $b)[] as $m ([]; if index([$m]) then . else . + [$m] end)' || return 1
       [ -z "$px" ] || echo px ;;
     opencode) timeout 20 opencode models < /dev/null 2>/dev/null | jq -Rsce '[splits("\n") | select(test("^[^/[:space:]]+/[^[:space:]]+$"))] | select(length > 0)' 2>/dev/null ;;
+    # agy models: one model a line, its slug then its display name.
+    antigravity) timeout 20 agy models < /dev/null 2>/dev/null | jq -Rsce '[splits("\n") | capture("^(?<s>[A-Za-z0-9][A-Za-z0-9._:-]*)(\\s|$)").s] | select(length > 0)' 2>/dev/null ;;
     *) return 1 ;;
   esac
 }
@@ -523,7 +527,7 @@ HOST_K=() # the key, then CLIS read as an object, when it was read (.at, whole s
 hostclis() { # [fresh | due | <cli>]
   local c old r found=() one=${1:-} t='' a=1 k='' x px='' l ci='' tmp
   HOST_R=''
-  for c in $CLINAMES; do command -v "$c" >/dev/null && k+=" $c"; done
+  for c in $CLINAMES; do command -v "${CLIBIN[$c]:-$c}" >/dev/null && k+=" $c"; done
   [ ! -e "$CLIS" ] || { a=''; { IFS= read -r -d '' t; a=$?; } 2>/dev/null <"$CLIS"; }
   # A file with a NUL byte is read as before and never kept (a bash variable cannot hold it).
   [ "$a" = 1 ] && [ "${#HOST_K[@]}" = 5 ] && [ "${HOST_K[0]}" = "$k"$'\037'"$t" ] || {
@@ -540,7 +544,7 @@ hostclis() { # [fresh | due | <cli>]
   [ "$one" != fresh ] && [ "$one" != codex ] || px=false
   # Each installed CLI and its models: read now, or "*" for those CLIS has (null when it has none).
   for c in $CLINAMES; do
-    command -v "$c" >/dev/null || continue
+    command -v "${CLIBIN[$c]:-$c}" >/dev/null || continue
     if [ "$c" = codex ] && { [ "$one" = fresh ] || [ "$one" = codex ]; }; then ci=${#found[@]}; found+=("$c" null)
     elif [ "$one" = fresh ] || [ "$one" = "$c" ]; then found+=("$c" "$(climodels "$c" || echo null)")
     else found+=("$c" '"*"'); fi
@@ -1050,7 +1054,7 @@ inforce() { # [the control record, when the caller has read it]
 # allowed: the same by CLI ({<cli>: its models, OpenCode's without the opencode: mark}: the list the Board offers after
 # a CLI's own models, each once),
 # efforts: the efforts the program of the model in force takes, agent: that program (null when no model is in
-# force), clis: the CLIs installed on this host that the seat can be set to, each {models: the models it has
+# force), clis: the CLIs installed on this host that the seat can be set to (antigravity the builder's alone), each {models: the models it has
 # registered (null: it offers no list, so the Board offers allowed's alone; either way, then a typed name), efforts: the efforts it takes in this seat}, and
 # missing: why the seat in force cannot start on this host (MISSING; null when it can)}, and judge, the review's judge
 # (judgeseat()): the same fields, its choices (and allowed) the models the pack allows the review and its clis every
@@ -1059,7 +1063,7 @@ inforce() { # [the control record, when the caller has read it]
 # settings($c; $e; $h) is that answer in jq, from models.allowed (its input), the control record $c, EFFORTS ($e) and
 # the host's report $h (hostclis()).
 SETTINGS="$SEATNOW$JUDGENOW$MISSING"'def settings($c; $e; $h): . as $a | (first(seatnow("builder"; $c)) // null) as $b | (first(seatnow("reviewer"; $c)) // null) as $r
-    | def offer($s; $x): $x | with_entries(.value = {models: .value, efforts: (if $s == "builder" and .key == "opencode" then [] else $e[.key] end)});
+    | def offer($s; $x): $x | (if $s == "builder" then . else del(.antigravity) end) | with_entries(.value = {models: .value, efforts: (if $s == "builder" and .key == "opencode" then [] else $e[.key] end)});
       def gone($now): if $now == null then null else $now | missing($h) end;
       def bycli($m): $m | with_entries(.value |= map(sub("^opencode:"; "")));
       def one($s; $k; $now): ($a | [okmodels($s)[][]]) as $ok | ($c // {} | .[$k] // {}) as $o
@@ -1409,6 +1413,8 @@ control() { # [action [arguments]]
       [ $# -ge 2 ] && [[ " $CLINAMES " == *" $ag "* ]] && [[ $2 =~ $x ]] || { bad; return; }
       x=$(hostclis) && x=$(jq -rn --argjson h "$x" --arg c "$ag" --arg m "$2" "$MISSING"'{model: $m, agent: $c} | missing($h) // empty') || return 1
       [ -z "$x" ] || { echo "conveyor: $x; nothing changed" >&2; return 2; }
+      # Antigravity runs the builder seat alone: the review, the judge and the test actions have no agy run yet.
+      [ "$ag" != antigravity ] || [ "$a" = model ] || { echo "conveyor: antigravity runs only the builder seat (control model antigravity <model>); nothing changed" >&2; return 2; }
       # The OpenCode builder takes no effort (seatnow()).
       es=$(jq -c --arg a "$ag" --arg s "$a" 'if $s == "model" and $a == "opencode" then [] else .[$a] end' <<<"$EFFORTS")
       [ $# = 2 ] || jq -en --argjson e "$es" --arg x "$3" '$e | index($x)' >/dev/null \

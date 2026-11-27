@@ -115,7 +115,7 @@ liveusage() { { if [ $# = 0 ]; then printf '%s' "${WATCHED:-}"; else cat "$1"; f
 # file's size and are no progress. The output is read first each time, so a line that came since the last look counts; and the clock runs from when the files last changed, not from when that was
 # seen, so a change made while the session still talked gives it no second wait. Its exit is then the ended
 # process's, and <worktree>.stalled holds when its progress stopped; a step that begins with that file there is the
-# one run after such a stall, and its live record says so (stalled: that time).
+# one run after such a stall, and its live record says so (stalled: that time). An agy session (6th argument antigravity) is never ended here: it runs to its step time limit, buildTimeout (agyrun(), lib/agy.sh).
 # A file's change time counts beside its modification time: a write that keeps the old modification time (`cp -p`,
 # a restore from an archive) moves neither that nor its folder's, and the change time is the one no write can set.
 holds() { # <worktree>: when it last changed, epoch seconds: the newest of its files and folders, ignored ones too, and of its HEAD
@@ -124,7 +124,7 @@ holds() { # <worktree>: when it last changed, epoch seconds: the newest of its f
   { find "$1" ${g:+"$g/HEAD" "$g/logs/HEAD"} -printf '%T@\n%C@\n' 2>/dev/null; git -C "$1" log -1 --format=%ct 2>/dev/null; } \
     | awk -v n="$EPOCHSECONDS" '{t = int($1)} t <= n && t > m {m = t} END {print m + 0}' # a time after now is a wrong clock, not progress
 }
-watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the program that runs it: codex for a Codex build, fix or rebase] [the effort it runs at]
+watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the program that runs it: codex for a Codex build, fix or rebase, antigravity for an agy one] [the effort it runs at]
   local pid=$1 f=$2 out=$3 st='' new who rc=0 timer n have=0 size=0 now logs roll='' rsize=0 wt=${3%.live} was='' seen=$EPOCHSECONDS at lines=0 rhave=0 rn cs dn cx=false wn wb wk=0 gk='' cpu=0 cpt=0
   [ "${6:-}" != codex ] || cx=true
   # rm only when there is a file to remove (#532: most steps have none).
@@ -246,7 +246,7 @@ watch() { # <pid> <output file> <live file> <step> [the model it runs on] [the p
           | .zero = (.id != null and (.usage // {} | [.[] | numbers] | add // 0) == 0)
           | if any($ls[]; test("\\S")) then .last = ([($t | todate), (.last // "")] | max) else . end' 2>/dev/null) && [ -n "$new" ] && st=$new && have=$n && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"
     fi; [ "$4" = review ] || [ $((EPOCHSECONDS - cpt)) -lt $((SESSION_STUCK / 10)) ] || { cpt=$EPOCHSECONDS; cpu=$(p_cpurose "$pid" "$cpu") && new=$(jq -c --argjson t "$cpt" '.cpuAt = ($t | todate)' <<<"$st") && [ -n "$new" ] && st=$new && printf '%s\n' "$st" > "$out.tmp" && mv -f "$out.tmp" "$out"; } # a session's CPU use, a sign of life beside its output (health): read from the first look on, each tenth of SESSION_STUCK, its last use is cpuAt, the look that read it (p_cpurose())
-    [ $((EPOCHSECONDS - seen)) -ge "$STUCK" ] || continue
+    [ "${6:-}" != antigravity ] && [ $((EPOCHSECONDS - seen)) -ge "$STUCK" ] || continue
     at=$(holds "$wt")
     if [ "$at" -gt "$seen" ]; then
       seen=$at
@@ -286,13 +286,13 @@ transcribed() { # <the step's fields> <output file> <worktree> <account folder, 
     jq -c --argjson u "$u" 'del(.unread) + {tokens: $u.tokens, usage: $u.usage} + (if $u.cacheFirst == null then {} else {cacheFirst: $u.cacheFirst} end) | .stats = ((.stats // {}) + $u.stats)' <<<"$1"
   else printf '%s\n' "$1"; fi
 }
-# An OpenCode session's output (`opencode run --format json`) gives the same fields (opencoderead.jq), and a Codex
-# session's (`codex exec --json`) too (codexread.jq).
+# An OpenCode session's output (`opencode run --format json`) gives the same fields (opencoderead.jq), a Codex session's
+# (`codex exec --json`) too (codexread.jq), and an agy one's (AGYREAD: lib/agy.sh, sourced here, holds its CLI's parts).
+. "$HERE/lib/agy.sh" || return 1
 OPENCODEREAD=$(<"$HERE/jq/opencoderead.jq")
 CODEXREAD=$(<"$HERE/jq/codexread.jq")
 # What a Codex review's events say of it: its tokens and split (the turns completed, else $run, the running
-# total its session file held), and its turns and tool calls by kind (the items that are not a message or
-# reasoning). Nothing when no usage is there.
+# total its session file held), and its turns and tool calls by kind (the items that are not a message or reasoning). Nothing when no usage is there.
 REVIEWREAD='[inputs | fromjson? // empty] as $all
   | ([$all[] | select(.type == "item.completed") | .item.type // "item"]) as $it
   | ($all | map(select(.type == "turn.completed") | .usage | objects)) as $t
@@ -306,8 +306,7 @@ REVIEWREAD='[inputs | fromjson? // empty] as $all
 # OpenCode prices it, and cost where the Board prices an OpenCode step from (usage.cost), as an OpenCode build's is;
 # tokens.codex (the review's count, whichever program runs it: inforce()) is input, cache writes and
 # output, as a Claude review's leaves out the cache reads. cost is left out unless every step reports one; a usage that
-# no step reports, or that a step reports only in part, is left out and unread says why. stats: its steps (turns) and
-# its tool calls by tool.
+# no step reports, or that a step reports only in part, is left out and unread says why. stats: its steps (turns) and its tool calls by tool.
 OCREVIEWREAD='[inputs | fromjson? // empty | objects] as $all
   | [$all[] | select(.type == "step_finish") | .part] as $t
   | ($t | all((.tokens | type) == "object" and ([.tokens.input, .tokens.output, .tokens.reasoning, .tokens.cache.read?, .tokens.cache.write?] | all(type == "number")))) as $whole
@@ -370,8 +369,7 @@ stopped() { # <card> <issue>
   f=$(line "$1" "$2" "$of" stopped "$(jq -c --arg k "$kn" '. + {reason: ("stopped by control stop while it ran" + $k)}' <<<"$f")") && locked append "$f" && { outkeep "$1" "$of" "$f" || :; } \
     || echo "conveyor: card $1 was stopped, but what its $of used could not be written to the card records" >&2
 }
-# One headless session with the safety hooks only and no subagents; model and effort are read at each launch
-# (seat(): the control record's).
+# One headless session with the safety hooks only and no subagents; model and effort are read at each launch (seat(): the control record's).
 # Output goes to a file, not a pipe, so a killed session's children cannot hold the loop: the session's events, one
 # JSON object a line as they come, the last of them its result. Prints the step's record fields: its fresh tokens,
 # the split the dashboard prices (cache writes apart by lifetime, cache reads), and the model and effort it ran on.
@@ -391,8 +389,7 @@ stopped() { # <card> <issue>
 # APISAID: the words a failed session's output ends with ($codex: whether it is Codex's, a review's or a build's). A Claude session's are
 # its error result. Codex's are its error event, or a line that is no JSON at all: Codex can say
 # "API Error: 429" in plain words, and that is an error as an event is. Only Codex's words name a status after the
-# word "status": a Claude session's result is the card's own words too, and "expected status 500, got 200" is a failed
-# test, not an outage.
+# word "status": a Claude session's result is the card's own words too, and "expected status 500, got 200" is a failed test, not an outage.
 APISAID='([inputs | select(test("\\S")) | (fromjson? // {type: "plain", message: .}) | objects
     | select(.type | if $codex then IN("error", "turn.failed", "plain") else . == "result" end)] | last) as $r
   | if $r == null then (if $codex then empty else $e end) elif $r.type == "result" then $r | select(.is_error == true) | .result
@@ -482,7 +479,7 @@ newtexts() { # <the name of a variable that holds a prompt>
   for i in "${!SWAPOLD[@]}"; do fr=${fr//"${SWAPOLD[i]}"/"${SWAPNEW[i]}"}; done
 }
 # The builder program, the one seat() names for the model (its agent: the CLI the control record names, or the one the
-# pack's models.allowed lists the model under): OpenCode, Codex or Claude Code. Run in the background (watch() follows it), so it
+# pack's models.allowed lists the model under): OpenCode, Codex, Antigravity (agyrun(), lib/agy.sh: its guard hook in the worktree's .agents/hooks.json) or Claude Code. Run in the background (watch() follows it), so it
 # execs the program in its own subshell, which a stall's kill ends, behind the words session1 puts it on the cores left for card work with (KEEP).
 # Claude: bypass mode, as any other mode asks before a write under .claude/, and a headless session cannot answer, so
 # a tooling card ended with no change; the card hooks (the settings file) still run in this mode. It has none of the
@@ -505,7 +502,7 @@ newtexts() { # <the name of a variable that holds a prompt>
 RESUMEBRIEF='Your session was cut off (it made no progress for a while, or the model API refused it) and is now resumed. The worktree holds what you did so far: go on with the task from where you stopped, and end as the brief asks.' # what a resumed build session is told (session1())
 BUILDNOTOOLS=Agent,ScheduleWakeup,CronCreate,CronDelete,CronList,Monitor,RemoteTrigger,PushNotification,SendMessage,ListAgents,Workflow
 sq() { local q="'"; printf "'%s'" "${1//$q/$q\\$q$q}"; } # <word>: it single-quoted for a shell
-builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: claude, opencode or codex> [Claude session id to resume]
+builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: claude, opencode, codex or antigravity> [Claude session id to resume]
   local h a=()
   cd "$1" && mkdir -p "$1.briefs" || exit 1; ! "${HERE%/*}/bin/ast-grep" --version >/dev/null 2>&1 || export PATH="${HERE%/*}/bin:$PATH" # PATH: the plugin's bin/ when ast-grep is installed (bin/ast-grep runs), for each CLI, so the session runs `ast-grep` by name: a card session loads no plugin, so its CLI puts no bin/ there
   export CONVEYOR_CARD=${1##*/} CONVEYOR_BRIEFS=$1.briefs CONVEYOR_TESTSTEPONLY=0; ! teststeponly || CONVEYOR_TESTSTEPONLY=1 # BRIEFS: kept long outputs (tools/outbrief.sh), gone with the card. TESTSTEPONLY: the rule Only the Test step runs tests (teststeponly(), lib/prompts.sh), 1 on, 0 off whatever the loop inherited, for the card's command guard (.claude/hooks/bash-guardrails.sh), which refuses the session's test commands while it is on.
@@ -523,6 +520,7 @@ builder() { # <worktree> <prompt> <model> <effort> <account folder> <agent: clau
         --enable hooks --dangerously-bypass-hook-trust --disable unified_exec_tty -c "hooks.PreToolUse=$h" - <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
     opencode) export CLAUDE_PROJECT_DIR=$1 CONVEYOR_GUARD_SETTINGS=$1.settings OPENCODE_CONFIG=$1.opencode.json OPENCODE_DISABLE_PROJECT_CONFIG=1
       exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" opencode run --model "${3#opencode:}" --format json --auto <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
+    antigravity) agyrun "$1" "$2" "$3" "$4" ;;
     *) proxyenv && acctrun "$5" || exit 1; [ -z "${7:-}" ] || a=(--resume "$7") # the session it resumes (session1())
       exec "${KEEP[@]}" timeout --kill-after=30 "$BUILD_TIMEOUT" claude -p "${a[@]}" --model "$3" --effort "$4" --permission-mode bypassPermissions --disallowedTools "$BUILDNOTOOLS" \
         --setting-sources "" --strict-mcp-config --settings "$1.settings" --output-format stream-json --verbose <<<"$2" > "$1.out" 2> "$1.err" 8>&- ;;
@@ -567,9 +565,10 @@ session1() {
   # The CLI the seat names, never another: one that is gone starts no session; one gone for a moment is waited for (seatwait()).
   # A second fix round (5th argument up) runs one effort level above the seat's, inside the pack's range (effortup()).
   f=$(seatwait "$role" "$s" "$1" "${3:-build}") || { echo "$f"; return 1; }; [ "${5:-}" != up ] || [ -z "$effort" ] || effort=$(effortup "$agent" "$model" "$effort")
-  # OpenCode takes no effort here; OpenCode and Codex run on no Claude account. A Codex model named by its family is the newest of it (codexmodel()).
+  # OpenCode takes no effort here; OpenCode, Codex and agy run on no Claude account. A Codex model named by its family is the newest of it (codexmodel()).
   case $agent in
     opencode) effort=''; read=$OPENCODEREAD; f=$(ocready "$1") || { echo "$f"; return 1; } ;;
+    antigravity) read=$AGYREAD; f=$(agyready "$1") || { echo "$f"; return 1; } ;;
     codex) read=$CODEXREAD; model=$(codexmodel "$model") || { echo "$model"; return 1; }; f=$(cxready "$1") || { echo "$f"; return 1; } ;;
     *) dir=$(acctenv "$ACCT") || { echo "$dir"; return 1; } ;;
   esac
@@ -601,7 +600,7 @@ session1() {
   done
   [ -z "$x" ] || f=$(jq -c --argjson f "$x" --argjson n "$([ -e "$1.stalled" ] && echo 2 || echo 1)" "$BOTHTRIES"' | .stalls = $n' <<<"$f"); [ -z "$rd" ] || f=$(jq -c '.resumed = 1' <<<"$f")
   [ "$agent" != claude ] || proxypack
-  [ "$agent" = opencode ] || f=$(routed "$f" "$agent")
+  [[ $agent =~ ^(opencode|antigravity)$ ]] || f=$(routed "$f" "$agent")
   s=$(awk -F'\t' '++n[$1] == 2 { print "guard " $1 " is failing: " $2; exit }' "$1.guardfail" 2>/dev/null); rm -f "$1.guardfail" # guardrun.sh: blocks the card
   [ -z "$s" ] || { [ "$agent" != claude ] || routedone 1; jq -c --arg st "${3:-build}" '{step: $st} + del(.ok)' <<<"$f" > "$1.spent"; printf '%s\n' "$s"; return 1; }
   # A session whose last result says it succeeded goes on, its usage or stats read or not (unread says why not).
@@ -613,14 +612,14 @@ session1() {
     jq -c --argjson s "$NOSTART_START" '. + {start: $s}' "$1.spent" > "$1.spent.new" && mv -f "$1.spent.new" "$1.spent"
     [ "$agent" != claude ] || routedone 0
     # Its subscription login failed and the proxy is its role's fallback: the same step at once through the proxy.
-    if [ "$agent" != opencode ] && proxyfallback "$agent"; then
+    if [[ ! $agent =~ ^(opencode|antigravity)$ ]] && proxyfallback "$agent"; then
       s=$NOSTART_WHY; f=$(PROXY_NOW=1 session1 "$@") && { printf '%s\n' "$f"; return 0; }
       bothsaid "$s" "$f"; return 1
     fi
     signinstop "${3:-build}"; printf '%s\n' "$NOSTART_WHY"; return 1
   fi
   [ "$agent" != claude ] || routedone 1
-  [ $rc = 0 ] || { printf 'session failed (%s)\n%s\n' "$(exitsaid "$rc" "$BUILD_TIMEOUT")" "$(tail -n 60 "$1.err")"; return 1; }
+  [ $rc = 0 ] || { if [ "$agent" = antigravity ]; then agyfailed "$rc" "$1"; else printf 'session failed (%s)\n%s\n' "$(exitsaid "$rc" "$BUILD_TIMEOUT")" "$(tail -n 60 "$1.err")"; fi; return 1; }
   echo "session ended with an error result, or with no result"; return 1
 }
 # The exit of a session or review as its reason says it: the timeout is named only when the exit is the timeout's (124).
@@ -673,7 +672,7 @@ LOGINSAID='not logged in|log ?in|invalid api key|authenticat|unauthori[sz]ed|oau
 loginfallback() { # <exit> <claude|codex|opencode> <its output file> [<its stderr file>]
   local raw
   NOSTART_LOGIN=''
-  [ "$1" != 0 ] && [ "$1" != 124 ] && [ "$2" != opencode ] || return 1
+  [ "$1" != 0 ] && [ "$1" != 124 ] && [[ ! $2 =~ ^(opencode|antigravity)$ ]] || return 1
   raw=$( { jq -rRn "$NOSTARTSAID" "$3" 2>/dev/null; [ -z "${4:-}" ] || tail -n 20 "$4" 2>/dev/null; } | tr -d '\000')
   grep -Eqi "$LOGINSAID" <<<"$raw" && ! grep -Eqi "(^|[^a-z])$2: (command )?not found" <<<"$raw" || return 1
   NOSTART_LOGIN='not set'; ! grep -Eqi 'expired|refresh|revoked|refused' <<<"$raw" || NOSTART_LOGIN=expired
@@ -718,7 +717,7 @@ nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <mode
   words=$(cliwords "$raw")
   # The route it took, when that is a proxy or the API: "the proxy at <base URL>" or "the API at <base URL>".
   px=''
-  if [ "$5" != opencode ] && [ "$(proxyroute "$5")" = proxy ]; then
+  if [[ ! $5 =~ ^(opencode|antigravity)$ ]] && [ "$(proxyroute "$5")" = proxy ]; then
     if [ "$5" = codex ]; then p=$(codexproxyset); else p=$(claudeproxy); fi
     px=$(jq -r '"the \(if .kind == "api" then "API" else "proxy" end) at \(.baseUrl // "https://api.anthropic.com")"' <<<"$p")
   fi
@@ -740,6 +739,7 @@ nostart() { # <exit> <the step's fields> <output file> <stderr file> <cli> <mode
     else case $5 in
       codex) cause="the Codex sign-in $cause"; todo="run codex login (or set up the proxy route)" ;;
       opencode) cause="the OpenCode sign-in $cause"; todo="run opencode auth login" ;;
+      antigravity) cause="the agy sign-in $cause"; todo="run agy in a terminal and sign in" ;;
       *) cause="Claude Code's own sign-in $cause"; todo="run claude /login${8:+ on the account $8} (or set up the proxy route)" ;;
     esac; fi
     todo+=", then conveyor.sh control resume"; NOSTART_SIGNIN="$cause; $todo"
@@ -779,8 +779,7 @@ startnow() { # <{seat, cli, model, account}>
   [ "$a" != codex ] || m=$(PROXY_ROLE=$p codexmodel "$m") || return 1
   jq -c --arg c "$a" --arg m "$m" '{seat, cli: $c, model: $m, account: (if $c == "claude" then .account // "" else "" end)}' <<<"$1"
 }
-# A check session: the CLI, model and account startnow() gives, asked for one
-# word in an empty folder, under 120 s, with no project settings, on its seat's route. Succeeds when it ends well (exit 0).
+# A check session: the CLI, model and account startnow() gives, asked for one word in an empty folder, under 120 s, with no project settings, on its seat's route. Succeeds when it ends well (exit 0).
 startcheck() { # <{seat, cli, model, account}>
   local cli m a d rc
   jqget "$1" cli cli model m account a || return 1
@@ -792,6 +791,7 @@ startcheck() { # <{seat, cli, model, account}>
       && exec timeout --kill-after=10 120 claude -p --model "$m" --setting-sources "" --strict-mcp-config --no-session-persistence <<<"Reply with the one word OK." >"$d.out" 2>&1 8>&-) ;;
     codex) (cd "$d" && codexargs && exec timeout --kill-after=10 120 codex exec --skip-git-repo-check -s read-only "${CODEX_PX[@]}" -m "$m" - <<<"Reply with the one word OK." >"$d.out" 2>&1 8>&-) ;;
     opencode) (cd "$d" && OPENCODE_DISABLE_PROJECT_CONFIG=1 exec timeout --kill-after=10 120 opencode run --model "${m#opencode:}" <<<"Reply with the one word OK." >/dev/null 2>&1 8>&-) ;;
+    antigravity) (cd "$d" && exec timeout --kill-after=10 120 agy -p 'Reply with the one word OK.' --model "$m" --print-timeout 110s < /dev/null >"$d.out" 2>&1 8>&-) ;;
     *) false ;;
   esac; rc=$?
   # Its login failed and the proxy is its role's fallback: checked again at once through the proxy.

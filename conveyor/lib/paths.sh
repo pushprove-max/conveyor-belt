@@ -282,7 +282,9 @@ CAP0=6
 # The efforts each agent takes: claude --effort, codex's model_reasoning_effort (a Codex reviewer's and builder's),
 # and opencode's --variant for the reviewer and the judge (each provider's own: a model that has no such variant runs
 # without one). The OpenCode builder is given none (seatnow(), and `control model` and the Board's settings offer it none).
-EFFORTS='{"claude":["low","medium","high","xhigh","max"],"codex":["minimal","low","medium","high","xhigh"],"opencode":["minimal","low","medium","high","xhigh","max"]}'
+# agy's --effort (an Antigravity builder's) takes those its model offers, from low to max.
+# shellcheck disable=SC2034 # read by lib/control.sh and lib/modelpick.sh, which conveyor.sh sources beside this file
+EFFORTS='{"claude":["low","medium","high","xhigh","max"],"codex":["minimal","low","medium","high","xhigh"],"opencode":["minimal","low","medium","high","xhigh","max"],"antigravity":["low","medium","high","xhigh","max"]}'
 # The pack's own models for a seat, by the program that runs them, from its models.allowed: the seed's (the first
 # of them) and the program of a seat the control record names by its model alone (no cli). They limit nothing the
 # record names with its CLI (seatnow()): any CLI installed here runs any model named, listed by it or not. The builder's
@@ -303,7 +305,11 @@ OKMODELS='def okmodels($s): def oc: startswith("opencode:"); . as $a | if $s == 
 MODELS0='{"claude":["claude-opus-5-5","claude-fable-5-2","claude-sonnet-5-5","claude-haiku-5-5"],"codex":["gpt-6.2-sol","gpt-6.2-astra","gpt-6.1-terra","gpt-6.1-sol","gpt-6-astra","gpt-6-sol","gpt-6-luna","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna","gpt-daybreak-blue-latest"],"claude-reviewer":["claude-opus-5-5","claude-sonnet-5-5","claude-fable-5-2"]}'
 # The CLIs a seat can run, and how each lists the models it has registered on this host (climodels()); a CLI that
 # offers no list (Claude Code's --model takes an alias or a full name, and nothing lists them) has null for its models.
-CLINAMES='claude codex opencode'
+# CLIBIN: the command of a CLI whose name is not its command (antigravity runs as agy, lib/agy.sh).
+# shellcheck disable=SC2034 # read by lib/control.sh, which conveyor.sh sources beside this file
+CLINAMES='claude codex opencode antigravity'
+# shellcheck disable=SC2034 # read by lib/control.sh, which conveyor.sh sources beside this file
+declare -gA CLIBIN=([antigravity]=agy)
 # The host's report (hostclis()): {at: when it was read, clis: {<cli>: its models, or null}, seen: [<cli>...], px},
 # one key of clis for each CLI that was installed then; seen, each CLI a report of this host has listed (seatwait());
 # px, true when Codex's list was read with the Codex proxy on (pxon()), so it is read again once a role leaves the proxy. Read again once it is CLI_TTL seconds old by `watch`'s slower timer (github()), by a
@@ -315,7 +321,7 @@ CLI_TTL=600
 # Other…) is given to the CLI, and one it cannot run fails in the card, as any model the CLI refuses does. null when
 # it can start. bare is the model as its CLI names it (an OpenCode model without the opencode: mark seatnow() gives it).
 MISSING='def bare: if .agent == "opencode" then .model | ltrimstr("opencode:") else .model end;
-  def missing($h): . as $s | if $s.agent == null then null elif ($h | has($s.agent) | not) then "\($s.agent) is not installed on this host (not on PATH)" else null end;'
+  def missing($h): . as $s | if $s.agent == null then null elif ($h | has($s.agent) | not) then "\($s.agent | if . == "antigravity" then "antigravity (agy)" else . end) is not installed on this host (not on PATH)" else null end;'
 SAMPLES=${STATE%/*}/samples.jsonl # the loop's and the host's samples, one a minute (README.md)
 PUSHED=${STATE%/*}/pushed         # the last push that worked: "<commit> <remote> <branch>"
 # Any push's record (Push now's and Push landed's too), from its start to its end, with its stage and its log too:
@@ -357,6 +363,9 @@ CARD_SETTINGS=${CONVEYOR_CARD_SETTINGS:-$HERE/card-settings.json}
 OC_GUARD=${CONVEYOR_OPENCODE_GUARD:-$HERE/opencode/guard.mjs}
 # The guard hook every Codex build, fix and rebase session runs (cxready(), README.md Codex builder).
 CX_GUARD=${CONVEYOR_CODEX_GUARD:-$HERE/codex/guard.mjs}
+# The guard hook every agy build, fix and rebase session runs (agyready(), lib/agy.sh).
+# shellcheck disable=SC2034 # read by lib/agy.sh, which conveyor.sh sources beside this file
+AGY_GUARD=${CONVEYOR_AGY_GUARD:-$HERE/agy/guard.mjs}
 MAX_REVIEWS=3 # the review rule in README.md
 # shellcheck disable=SC2034 # read by lib/mainred.sh testroute(), which conveyor.sh sources beside this file
 TESTFIXES=3   # the fix rounds a card's failing changed tests get before the card blocks (cardfailed(), lib/cardland.sh; issue 1695)

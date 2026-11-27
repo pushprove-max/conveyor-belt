@@ -196,7 +196,7 @@ donewhen() { # <worktree> <issue json>
   git -C "$1" add -A 2>/dev/null && ! git -C "$1" diff --cached --quiet 2>/dev/null || return 0
   m=$(addedmarks "$1") || return 1
   # The issue and the reply come on stdin and in a file: either can be more than one argument can hold.
-  k=$(jq -c --rawfile r <(jq -Rrjn '[inputs | fromjson? // empty | objects | select(.type == "result") | .result | strings] | last // ""' "$1.out" 2>/dev/null) \
+  k=$(jq -c --rawfile r <(jq -Rrjn '[inputs | fromjson? // empty | objects | if .type == "result" then .result elif .event == "result" then .result.response? else empty end | strings] | last // ""' "$1.out" 2>/dev/null) \
     --argjson m "$m" --arg wt "$1" "$DONEWHEN" <<<"$2") || return 1
   [ -n "$k" ] || return 0
   while IFS=$'\t' read -r n p; do
