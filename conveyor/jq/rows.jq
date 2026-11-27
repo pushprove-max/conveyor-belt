@@ -135,7 +135,8 @@ def firstused: (.firstTry.spent // {}) as $f
           | if .stats == null and $s == {} then . else .stats = ((.stats // {}) | del(.byModel, .models)) + $s end
         else . end;
 # A step of a line that is no mark and not the card's first such line: $pt is the time of the one before it. A judge
-# line moves no clock (see fold()): its seconds are its own sec, null when the judge call ran none.
+# line moves no clock (see fold()): its seconds are its own call's sec (reviewlines(), lib/card.sh), not the time since
+# $pt, null when the judge call ran none.
 def stepline($pt): firstused | {step, time, sec: (if .step == "judge" then .sec else (.time | fromdate) - ($pt | fromdate) end), tokens, usage} + (if .model then {model} else {} end)
       # judgeWrites: the cache writes of a review's judge session (the review line's judge), {model, write, write1h},
       # when it wrote any. A Claude judge keeps no transcript (--no-session-persistence), so its line is their one record.
@@ -167,8 +168,9 @@ def fold($x): .an as $i | .at as $pt | .gt as $gt | ($x.step | IN("start", "file
       | if $x.step == "blocked" then .lb = $x.time else . end
       | if $mark then . else
           (if .n == 0 then .first = ($x | {card, issue, mainRed, testFile, noIssue, title, time, branch, base, beyond})
-           # A judge line is a step of its own: its tokens and usage are the judge's, which the review line's do not hold. One
-           # with no sec ran no call and costs nothing (spent(), lib/records.sh), so it is no step.
+           # A judge line is a step of its own: its tokens and usage are the judge's, which the review line's do not hold. It is
+           # priced at its model as the engine's spent() prices it (SPENTSTEPS, lib/records.sh). One with no sec ran no call
+           # and costs nothing (spent(), lib/records.sh), so it is no step.
            elif ($x.step | IN("seats", "build", "review", "test", "fix", "rebase")) or ($x.step == "judge" and ($x | has("sec")))
              then .s1 += [$x | stepline($gt)]
            elif $x.step == "blocked" and ($x.spent | type) == "object" then .s2 += [$x | spentline($gt)] else . end)

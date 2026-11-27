@@ -424,6 +424,23 @@ t_metricsbymodel() {
     || fail "a day with an unpriced step drawn as measured: $(jq -c '.metrics.days' <<<"$out")"
 }
 
+# Bug: the snapshot's steps (fold(), jq/rows.jq) leave out the judge line, so the judge's usage is in no card or model
+# total: the card is $4 (the build's 1M Opus input tokens), never $5 with the judge's 10M Haiku ones, and Haiku has no
+# total. The judge took 30 s of its own: its step says so, not the 9 minutes since the build line.
+t_metricsjudge() {
+  export TZ=UTC; setup '[]'; S=$ST; mkdir -p "$S"; y=$(date -u -d yesterday +%F)
+  l 2 01:00 picked ok '{"title":"T2"}'; l 2 01:10 build ok '{"model":"claude-opus-5-5","usage":{"input":1000000,"write":0,"read":0,"output":0}}'
+  l 2 01:19 judge ok '{"of":"review","model":"claude-haiku-5-5","sec":30,"usage":{"input":10000000,"write":0,"read":0,"output":0}}'
+  l 2 01:20 review GO '{"model":"claude-opus-5-5","usage":{"input":0,"write":0,"read":0,"output":0}}'
+  l 2 01:30 landed ok '{"sha":"s1","product":false}'
+  recok "$S/cards.jsonl" "the judge fixture"
+  out=$(loop snapshot --fresh) || fail "snapshot of the judge fixture exited non-zero"
+  [ "$(jq -c '[(.metrics.cards[] | select(.card == "c2") | .metrics | [.usd, (.timeline | map(select(.step == "judge") | .sec))]), .metrics.week.perLanded.byModel["claude-haiku-5-5"].usd] == [[5, [30]], 1]' <<<"$out")" = true ] || fail "the judge's cost or seconds left out of the totals: $(jq -c '[(.metrics.cards[] | select(.card == "c2") | .metrics | [.usd, .timeline]), .metrics.week.perLanded]' <<<"$out")"
+  # The timeline reads ran first, so the step's own sec is read from the card's row: its judge step is 30 s, not 540.
+  [ "$(jq -cs --argjson max 3 --arg nodeps x --arg yes x --arg lintyes x --arg shut x --arg ownshut x --arg engshut x -f "$SRC/jq/rows.jq" "$S/cards.jsonl" \
+    | jq -c '[.[0].steps[] | select(.step == "judge") | .sec]')" = '[30]' ] || fail "the judge step's sec is not its own: $(jq -cs --argjson max 3 --arg nodeps x --arg yes x --arg lintyes x --arg shut x --arg ownshut x --arg engshut x -f "$SRC/jq/rows.jq" "$S/cards.jsonl" | jq -c '.[0].steps')"
+}
+
 # Waiting on the owner ends when `retry` gives the card back: blocked 10:00, retried 11:00 and picked again 12:00 is one
 # hour, and before that pick the hour is already counted.
 t_metricsretried() {
