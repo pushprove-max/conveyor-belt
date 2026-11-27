@@ -283,6 +283,24 @@ t_resumeyes() {
     || fail "a kept patch approved with a condition was not taken up to be reviewed against it, with no build: $RESUMED"
 }
 
+# Bug it catches: an approval line with a time (its colon) and a note of what the yes is for, but no `; condition:`,
+# was read as a yes with a condition, so retry held the approved kept patch for a review round it did not need. The
+# line is read as unconditional (retry's held path in conveyor/lib/issues.sh, by conditional(), says it lands), and the
+# next card lands the kept patch with no build and no review.
+t_resumeyesnote() {
+  local old=c1-12 a='Visible change approved: Dana, 2026-11-24 20:05 ET, picker yes for the matrix title change'
+  resumesetup 12
+  portkept 12 "$old" "visible to customers or staff: needs Dana's yes: guests see a new Pay button" 'echo twelve > t.txt; mkdir -p web; echo twelve > web/t.ts' \
+    "$(printf '%s\n' "$YES" 'VERDICT: GO')"
+  issue 12 2026-01-01 | jq -c '{body}' > "$K/$old.body"
+  issue 12 2026-01-01 | jq -c --arg a "$a" '[.body += "\n" + $a]' > "$STUB/issues.json"
+  loop retry 12 | grep -q 'lands from the kept patch .*-12\.patch, with no build and no review' \
+    || fail "retry of an issue whose approval line is '$a' does not say the kept patch lands with no review"
+  resumed 12
+  [ "$(jq -c '[.rc, .mode, .note, .staged]' <<<"$RESUMED")" = "[0,\"land\",\"landing from the kept patch of card $old: no build and no review\",[\"t.txt\",\"web/t.ts\"]]" ] \
+    || fail "a kept patch approved by '$a' was not taken up to land with no build and no review: $RESUMED"
+}
+
 # Bug it catches: a card stopped for the owner's yes whose issue was then rewritten to ask for another change (its
 # section of what customers or staff will see changed), and whose kept patch no longer applies to main, was ported:
 # its one session was told to keep what that card changed, so the refused change came back. Its next card is built
