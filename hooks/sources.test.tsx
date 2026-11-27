@@ -818,6 +818,16 @@ test('QUEUE whose issues all wait says no issue can be picked when a card with n
   expect(firstTwo(notReady), 'queue: one waiting issue, cards held, waiting or rule-skipped').toEqual(['QUEUE', '  nothing can be picked: waiting for #3967 (held)'])
 })
 
+// Bug: with every GitHub issue waiting and a card with no issue ready, QUEUE still said "nothing can be picked",
+// though the loop can pick that card. It says no issue can be picked, and the card count stays below.
+test('QUEUE whose issues all wait but a card with no issue is ready does not say nothing can be picked', () => {
+  const waiting = [{ issue: 3950, title: 'Second half', waitsFor: [3967], waitsOn: [{ issue: 3967, state: 'held' }] }]
+  const part = section(tableText(board({ queue: { next: [], waiting, cards: [{ card: 'c20261102T000001-sample-0' }] } }), 100), 'QUEUE')
+  expect(part).not.toContain('nothing can be picked')
+  expect(part.split('\n').slice(0, 2)).toEqual(['QUEUE', '  no issue can be picked: waiting for #3967 (held)'])
+  expect(part).toContain('cards with no GitHub issue: 1 waiting')
+})
+
 test('the issues built and waiting for a PROD deploy are a section of their own under QUEUE, with how long each has waited; with none there is no section', () => {
   const awaitingDeploy = [{ issue: 3476, title: 'Stack split', since: ago(2 * 24 * 60) }, { issue: 3500, title: 'Label time not read', since: null }]
   const text = tableText(board({ queue: { next: queued(1) }, awaitingDeploy }), 80)

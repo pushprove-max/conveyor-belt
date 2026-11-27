@@ -1228,8 +1228,8 @@ export const queueModel = (snap: Snap, w: number): Line[] => {
   const all = snap.queue?.length ?? 0, more = all > NEXT || snap.queueMore
   return [
     [{ t: 'QUEUE', c: C.head, b: true }, ...(next.length ? [{ t: more ? `  next ${next.length} of ${all}${snap.queueMore ? '+' : ''}` : `  ${next.length}`, d: true }] : [])],
-    // A queue whose only issues wait on others is not empty: nothing can be picked, and it names what they wait on.
-    // A card with no GitHub issue that pick can take now makes it "no issue can be picked": pick takes that card.
+    // A queue whose only issues wait on others is not empty: no issue can be picked, and it names what they wait on.
+    // It says nothing can be picked only when no card with no GitHub issue can be picked now either (snap.cardsReady): pick takes that card.
     ...(snap.queue === null ? [empty('not read: GitHub did not list the issues')] : next.length ? []
       : snap.waits.length ? wrapParts([`${snap.cardsReady ? 'no issue' : 'nothing'} can be picked: waiting for`, ...waitedOn(snap.waits, snap.own ?? '')], w, '  ', ' ', { d: true })
       : [empty(snap.cards ? 'no issue is queued' : 'the queue is empty')]),
