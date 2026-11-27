@@ -331,10 +331,10 @@ testpick() { # <the open issues json>
 testcardwas() { # <card>
   [ -n "$1" ] && jq -r --arg c "$1" 'first(.cards[]? | select(.card == $c)) | (.was // [])[]' "$TACARDS" 2>/dev/null
 }
-# The issue a card with no GitHub issue follows up (its entry's parent: a review follow-up or a split part), 0 for any other card.
-# A follow-up of such a card follows up that issue too, so its body names it, and its brief reads that issue's yes (inherit()).
+# The issue a card with no GitHub issue follows up (its entry's parent: a review follow-up or a split part), 0 for any other card, one with no entry too
+# (bug: "Follow-up to # (", unread by jq/upnext.jq). A follow-up of such a card follows up that issue too, so its body names it, and its brief reads that issue's yes (inherit()).
 tcparent() { # <card>
-  [ -n "$1" ] && jq -r --arg c "$1" 'first(.cards[]? | select(.card == $c)) | .parent // 0' "$TACARDS" 2>/dev/null || echo 0
+  [ -n "$1" ] && jq -r --arg c "$1" '(first(.cards[]? | select(.card == $c)) | .parent) // 0' "$TACARDS" 2>/dev/null || echo 0
 }
 # `conveyor.sh cardissue <card id>`: the Board's File on GitHub on a landed card with no GitHub issue (testcard()).
 # It files an issue with the card's title and body through the GitHub write path, and closes it at once with a

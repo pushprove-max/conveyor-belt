@@ -312,7 +312,7 @@ followups() { # <card> <issue json> <review file>
   area=$(jq -r --arg p "$AREA" '.labels | map(.name | select(startswith($p))) | .[0] // empty' <<<"$2") || { echo "cannot read the parent issue's labels"; return 1; }
   n=$(jq -r .number <<<"$2") && mapfile -t more < <(jq -r '.milestone.title // empty | "--milestone", .' <<<"$2") || { echo "cannot read the parent issue's milestone"; return 1; } # its area label is each follow-up's fa (filearea(), below)
   # Issue 0's parent is the issue its card follows up, if any (--only takes its follow-ups). pn names it in a follow-up card: #<issue>, else the branch,
-  # else the card id (bug: "Review follow-up of #"); a follow-up issue keeps "Follow-up to #<n>", the only form jq/upnext.jq and snapshot.sh read.
+  # else the card id (bug: "Review follow-up of #"); a follow-up issue keeps "Follow-up to #<n>" (#0 with no parent), the only form jq/upnext.jq and snapshot.sh read.
   [ "$n" != 0 ] || n=$(tcparent "$1"); [[ $n =~ ^[1-9][0-9]*$ ]] && pn="#$n" || pn=$(stdb ask card "$1" 2>/dev/null | jq -rn 'first(inputs | objects | select(.step == "picked") | .branch | strings) // empty' 2>/dev/null); pn=${pn:-$1}
   rm -f "${3%.review}.fulow"; mapfile -t found < <(tofile "$3")
   rm -f "$fc" "$ofc"; [ "$(ctl 2>/dev/null | jq -r '.rules.followupissues' 2>/dev/null)" != false ] || nocard=1; [ -n "$nocard" ] || pn="#$n"

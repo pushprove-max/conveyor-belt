@@ -43,6 +43,10 @@ t_fuparentcard() { fuparent '' c20261101T000000-main-0; }
 t_fuparentissue() {
   local c=c20261101T000000-main-0
   setup "[$(issue 7 2026-01-01)]"
+  # The record of cards with no issue holds another card, not this one, as when a land-branch card lands while a Foreman
+  # order is queued. Bug: tcparent printed nothing for it, so the body read "Follow-up to # (Conveyor card".
+  mkdir -p "$ST/testactions" && jq -cn '{cards: [{card: "c20261101T000000-main-1", title: "t", body: "b"}]}' > "$ST/testactions/cards.json" \
+    || fail "the record of cards with no issue could not be written"
   printf '%s\n' '[P2] a.txt:1 the word is wrong' 'VERDICT: NO-GO' > "$STUB/r.review"
   jq -cn '{title: "t", branch: "hand/fix"}' > "$STUB/picked.json" \
     && jq -cn '{number: 0, title: "t", body: "b", labels: [], milestone: null}' > "$STUB/parent.json" || fail "the fixture's JSON could not be written"
