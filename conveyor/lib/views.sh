@@ -229,7 +229,8 @@ cards() {
 # GitHub last showed it ($LANDPR, prstate() and prsync(), lib/push.sh), with how many cards its pushed lines name or it carried from one closed unmerged, and its last merge (a merge
 # GitHub refused gives the reason), for the Board's Merge and the Foreman; null with none open; landingMerged ({number,
 # merged, issues}): the last landing pull request merged, by Conveyor or on GitHub ($LANDPR's merged, until a new one is opened), with
-# the issues whose pushed lines name it or an earlier one (each went to LANDING before it, so is merged with it), for
+# the issues whose pushed lines name it or an earlier one (each went to LANDING before it, so is merged with it) or
+# whose cards it carried (a newer one closed unmerged, then it reopened: $LANDPR's carried), for
 # the Foreman's watcher, else null. Every object of it that names a main-red fix card
 # (card) also has name, "Main is red (<commit>)", as rows.jq names it, and so does a Tests page card ("Tests page:
 # <file>") and a land-branch card of a branch that names no issue ("Branch: <branch>"): the card has no issue (issue 0) to be shown by.
@@ -521,7 +522,7 @@ health() {
     --arg state "$st" --arg why "$why" --argjson commit "$cm" --argjson ctl "$c" --argjson r "$r" --arg yes "$YES" --arg lintyes "$LINTYES" \
     --slurpfile pw <([ ! -s "$PUSHWAIT" ] || jq -c 'objects | select(.at | strings | fromdate?)' "$PUSHWAIT" 2>/dev/null) --argjson turn "$((POLL > IDLE ? POLL : IDLE))" \
     --argjson cap "$cap" --argjson bw "$bw" --arg repo "$REPO" --argjson room "$rm" --argjson machine "$mc" --argjson cores "$co" --argjson force "$(inforce "$c")" --argjson cycles "$cyc" --slurpfile before <(printf '%s\n' "$bf") --argjson pushing "$pu" --argjson pushlast "$pl" --argjson homes "$(homes "$c")" --argjson routes "$(routesnow)" --argjson report "$tr" --argjson serviceold "$so" \
-    --slurpfile old "$hd/old" --slurpfile mh <([ ! -s "$MACHINEHOLD" ] || jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile rd <({ [ -s "$MAINRED" ] && jq -c '[.reds[]? | select(.push != null) | {check: .push.check, card}]' "$MAINRED" 2>/dev/null; } || echo '[]') --slurpfile lp <([ ! -s "$LANDPR" ] || jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge, carried: (.carried // [] | arrays)}' "$LANDPR" 2>/dev/null) --slurpfile lm <([ ! -s "$LANDPR" ] || jq -c 'objects | select(.merged != null and (.number | type) == "number") | {number, merged}' "$LANDPR" 2>/dev/null) --slurpfile qt <([ ! -s "$QUARANTINE" ] || jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) --rawfile carry <(printf '%s\n' "$carry") "$UNTIMED$SPLITM$REVIEWAGAIN"'
+    --slurpfile old "$hd/old" --slurpfile mh <([ ! -s "$MACHINEHOLD" ] || jq -c 'objects | {since, card, sha, controls, cases}' "$MACHINEHOLD" 2>/dev/null) --slurpfile rd <({ [ -s "$MAINRED" ] && jq -c '[.reds[]? | select(.push != null) | {check: .push.check, card}]' "$MAINRED" 2>/dev/null; } || echo '[]') --slurpfile lp <([ ! -s "$LANDPR" ] || jq -c 'objects | select(.merged == null and .closed == null and (.number | type) == "number") | {number, url, merge, carried: (.carried // [] | arrays)}' "$LANDPR" 2>/dev/null) --slurpfile lm <([ ! -s "$LANDPR" ] || jq -c 'objects | select(.merged != null and (.number | type) == "number") | {number, merged, carried: (.carried // [] | arrays)}' "$LANDPR" 2>/dev/null) --slurpfile qt <([ ! -s "$QUARANTINE" ] || jq -c 'objects | {line, field, time}' "$QUARANTINE" 2>/dev/null) --rawfile ahead <(git rev-list "refs/heads/$BRANCH" --not "${not[@]}" 2>/dev/null) --rawfile carry <(printf '%s\n' "$carry") "$UNTIMED$SPLITM$REVIEWAGAIN"'
     $livef[0] as $live | (($ENV.CONVEYOR_NOW // "" | tonumber?) // now) as $now
     | ($ahead | split("\n") | map(select(. != "")) | INDEX(.)) as $ahead
     | ([.[], $old[] | select(.step == "picked") | if (.mainRed | type) == "string" then {key: .card, value: "Main is red (\(.mainRed[0:12]))"}
@@ -625,8 +626,8 @@ health() {
        unchecked: ([group_by(.card)[] | select(any(.step == "landed")) | map(select(.step == "lint")) | last | select(.skipped == true)] | length), report: $report, routes: $routes, quarantined: $qt, serviceOld: $serviceold, machineHold: ($mh[0] // null),
        landingPr: ([.[] | select(.step == "pushed" and (.pr | type) == "number") | {pr, card}] as $pp
          | $lp[0] // null | if . == null then null else del(.carried) + {cards: ([($pp[] | select(.pr == $lp[0].number) | .card), $lp[0].carried[]] | unique | length)} end),
-       landingMerged: ([.[] | select(.step == "pushed" and (.pr | type) == "number" and .pr <= $lm[0].number) | .issue | numbers] as $mi
-         | $lm[0] // null | if . == null then null else . + {issues: ($mi | unique)} end)}
+       landingMerged: ([.[] | select(.step == "pushed" and (.pr | type) == "number" and (.pr <= $lm[0].number or (.card | IN($lm[0].carried[]?)))) | .issue | numbers] as $mi
+         | $lm[0] // null | if . == null then null else del(.carried) + {issues: ($mi | unique)} end)}
     | walk(if type == "object" and (.card | type) == "string" and $names[.card] then .name = $names[.card] else . end)' "$hd/rec"
   rc=$?; rm -rf "$hd"; return $rc
 }

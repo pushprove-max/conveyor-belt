@@ -230,6 +230,10 @@ t_prclosed() {
   echo OPEN > "$STUB/state.2"
   body=$(loop pr merge 2>&1) || fail "pr merge failed: $body"
   grep -qx 2 "$STUB/closed" 2>/dev/null || fail "the merge of #7 left issue 2, carried from #8, open: $(cat "$STUB/closed" 2>&1)"
+  # Bug it catches too: landingMerged took only pushed lines naming #7 or an earlier one, so issue 2 (its line names #8)
+  # was left out, and the Foreman's watcher did not say its fix had merged.
+  [ "$(loop health | jq -c '[.landingMerged.number, .landingMerged.issues]')" = '[7,[1,2,3]]' ] \
+    || fail "after the merge of #7, health's landingMerged leaves out issue 2, carried from #8: $(loop health | jq -c .landingMerged)"
 }
 # Bug it catches: a switch of the open pull request with no push between (#8 closed and #7 reopened on GitHub, then
 # back) started $LANDPR anew with no carried cards (prsync(), prstate()), so health counted only the cards whose pushed
