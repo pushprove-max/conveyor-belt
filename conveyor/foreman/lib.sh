@@ -372,8 +372,15 @@ status_tail() {
 # The command reads nothing, unless ASK_IN names a file: the command then reads that file (`auto rulings`).
 # CONVEYOR_FOREMAN_ASK, when set, runs in its place with CONVEYOR_REPO, CONVEYOR_MAIN and CONVEYOR_CMD (the command
 # and its arguments, space-separated) set (the tests' seam).
+# A card or testissue, an issue the Foreman files, is refused (exit 2, nothing filed) when its body (the last argument)
+# has no line `Benefit: <text>` or `Guards: <text>` (benefit_line): the benefit hold reads why the issue is worth building.
 host_ssh() { # the host file's ssh target, empty when it names none (or one that is not a plain host name)
   jq -er '.ssh | select(type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._@-]*$"))' "$HOSTF" 2>/dev/null || :
+}
+benefit_line() { # <body>: 0 when a line of it starts with `Benefit:` or `Guards:` and some text; else says so on stderr
+  grep -qE '^[[:space:]]*(Benefit|Guards):[[:space:]]*[^[:space:]]' <<<"$1" && return 0
+  echo 'foreman: not filed: the body has no line "Benefit: <the live case it fixes, or the gain as measured>" or "Guards: <the risk>". Add one and file it again.' >&2
+  return 1
 }
 ask() {
   local cmd fm=
@@ -381,6 +388,7 @@ ask() {
   [ -z "${CONVEYOR_REVIEWRETRY:-}" ] || fm+="CONVEYOR_REVIEWRETRY=$(printf %q "$CONVEYOR_REVIEWRETRY") "
   [ "$3" != retry ] || fm+='CONVEYOR_RETRYBY=foreman '
   if [ -n "${CONVEYOR_FOREMAN_ASK:-}" ]; then CONVEYOR_REPO=$1 CONVEYOR_MAIN=$2 CONVEYOR_CMD="${*:3}" bash -c "$CONVEYOR_FOREMAN_ASK" < "${ASK_IN:-/dev/null}"; return; fi
+  case $3 in card | testissue) benefit_line "${@: -1}" || return 2 ;; esac
   printf -v cmd '%s && %sCONVEYOR_MAIN=%q bash "$e"' "$(engine_at "$2")" "$fm" "$2"
   printf -v cmd '%s%s' "$cmd" "$(printf ' %q' "${@:3}")"
   case $3 in card | testissue) askfiling "$1" "$cmd" ;; *) askrun "$cmd" ;; esac

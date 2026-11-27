@@ -45,7 +45,7 @@ tassh() {
 # The hold waits on the lock past the limit (10 s, the engine reaches the filing well inside it): the link is printed,
 # and the ask says the issue was filed.
 t_cardaskslow() {
-  local a=(card "Add a Rules row" "$(printf "Make it so.\n## Cause\nNo row exists.")")
+  local a=(card "Add a Rules row" "$(printf "Make it so.\nBenefit: the owner asked for the row.\n## Cause\nNo row exists.")")
   tasetup
   taask 10 0 lock "${a[@]}"; tafiled "${a[@]}"
   grep -qF 'after it filed' "$STUB/ask.err" && grep -qF 'do not file it again' "$STUB/ask.err" \
@@ -53,7 +53,7 @@ t_cardaskslow() {
 }
 # The same for testissue: its link was printed only after the hold.
 t_taissueaskslow() {
-  local a=(testissue tests/x.test.sh "Speed up tests/x.test.sh" "Measured: 12 CPU s.")
+  local a=(testissue tests/x.test.sh "Speed up tests/x.test.sh" "Benefit: measured 12 CPU s a run.")
   tasetup
   taask 10 0 lock "${a[@]}"; tafiled "${a[@]}"
   grep -qF 'after it filed' "$STUB/ask.err" \
@@ -66,7 +66,7 @@ t_taissueaskslow() {
 # the ask's limit and the limit gh_write() gives gh's create, then runs the real one, so the case checks the ask leaves
 # gh its whole limit past the ask limit (2 s) with no wait of gh's own length.
 t_cardaskgh() {
-  local a=(card "Add a Rules row" "$(printf "Make it so.\n## Cause\nNo row exists.")") real ask gh
+  local a=(card "Add a Rules row" "$(printf "Make it so.\nBenefit: the owner asked for the row.\n## Cause\nNo row exists.")") real ask gh
   tasetup; real=$(command -v timeout)
   printf '%s\n' '#!/usr/bin/env bash' '[ "$1 $2 $4" != "-k 2 bash" ] || echo "ask $3" >> "$STUB/limits"' \
     '[ "$2 $3 $4" != "gh issue create" ] || echo "gh $1" >> "$STUB/limits"' "exec '$real' \"\$@\"" > "$STUB/timeout" \
@@ -83,7 +83,7 @@ t_cardaskgh() {
 t_cardasknolink() {
   tasetup
   echo 'sleep 4' > "$STUB/create-cmd" # sleep: a slow GitHub answer is gh's time itself, past the ask limit, which no condition stands for
-  taask 1 0 - card "Add a Rules row" "$(printf "Make it so.\n## Cause\nNo row exists.")"
+  taask 1 0 - card "Add a Rules row" "$(printf "Make it so.\nBenefit: the owner asked for the row.\n## Cause\nNo row exists.")"
   [[ $rc = 124 || $rc = 137 ]] && ! grep -q '/issues/' <<<"$out" \
     && grep -qF 'before it printed an issue link: look for the issue in alpha before you file it again' "$STUB/ask.err" \
     || fail "ask alpha card 'Add a Rules row', stopped before gh answered, did not end 124 with the warning to look for the issue (exit $rc): $out $(cat "$STUB/ask.err")"
@@ -91,7 +91,7 @@ t_cardasknolink() {
 # Bug this catches (an ssh record): the connection lost after the engine printed the link ended the ask 255, and the
 # Foreman, with a failed ask, filed the issue again.
 t_cardasksshafter() {
-  local a=(card "Add a Rules row" "$(printf "Make it so.\n## Cause\nNo row exists.")")
+  local a=(card "Add a Rules row" "$(printf "Make it so.\nBenefit: the owner asked for the row.\n## Cause\nNo row exists.")")
   tassh after; tasetup
   taask 10 0 - "${a[@]}"; tafiled "${a[@]}"
   grep -qF 'lost its connection to the host after it filed' "$STUB/ask.err" \
@@ -102,7 +102,7 @@ t_cardasksshafter() {
 # and the Foreman was told to hold that parent issue. Also: the engine had said the card was queued, yet the ask ended
 # 255 and told the Foreman to look for an issue that does not exist, so a retry queued a second card.
 t_cardasksshtitle() {
-  local a=(card "Fix the row of https://github.com/o/alpha/issues/77" "Make it so.")
+  local a=(card "Fix the row of https://github.com/o/alpha/issues/77" "Guards: a wrong row.")
   tassh after; tasetup
   loop control rules foremanissues=off > /dev/null || fail "control rules foremanissues=off was refused"
   taask 10 0 - "${a[@]}"
@@ -113,11 +113,26 @@ t_cardasksshtitle() {
     || fail "ask alpha ${a[*]:0:2} with no GitHub issue, over a lost ssh connection, does not say the card is queued and must not be ordered again: $(cat "$STUB/ask.err")"
   [ "$(jq '.cards | length' "$ST/testactions/cards.json")" = 1 ] || fail "ask alpha ${a[*]:0:2} with no GitHub issue did not queue exactly one card: $(cat "$ST/testactions/cards.json")"
 }
+# Bug this catches: an issue the Foreman filed (card or testissue) went to gh with no benefit or guarded-risk line, so
+# the benefit hold could not read why it is worth building. Each body below lacks one (a `Benefit:` in the title, an
+# empty `Benefit:`, none at all), and has a Cause section, so the engine itself would file it: the real ask ends 2,
+# says what to add, and files nothing.
+t_askbenefit() {
+  local a c=$'\n## Cause\nNo row exists.'
+  tasetup
+  for a in "card|Benefit: a row|Make it so.$c" "card|Add a row|Benefit:$c" "testissue|tests/x.test.sh|Speed up x|Measured: 12 CPU s.$c"; do
+    IFS='|' read -d '' -ra a <<<"$a"; a[-1]=${a[-1]%$'\n'}
+    taask 10 0 - "${a[@]}"
+    [ "$rc" = 2 ] && grep -qF 'not filed: the body has no line "Benefit: ' "$STUB/ask.err" \
+      || fail "ask alpha ${a[*]} with no benefit line did not end 2 saying the line is missing (exit $rc): $out $(cat "$STUB/ask.err")"
+    [ ! -s "$STUB/filed" ] || fail "ask alpha ${a[*]} with no benefit line filed an issue: $(cat "$STUB/filed")"
+  done
+}
 # Bug this catches (an ssh record): the connection lost before a link came ended the ask 255 with no word that GitHub
 # may have made the issue.
 t_cardasksshbefore() {
   tassh before; tasetup
-  taask 10 0 - card "Add a Rules row" "$(printf "Make it so.\n## Cause\nNo row exists.")"
+  taask 10 0 - card "Add a Rules row" "$(printf "Make it so.\nBenefit: the owner asked for the row.\n## Cause\nNo row exists.")"
   [ "$rc" = 255 ] && grep -qF 'lost its connection to the host before it printed an issue link: look for the issue in alpha' "$STUB/ask.err" \
     || fail "ask alpha card 'Add a Rules row' over an ssh connection lost at once did not end 255 with the warning to look for the issue (exit $rc): $out $(cat "$STUB/ask.err")"
 }

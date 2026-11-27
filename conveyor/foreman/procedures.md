@@ -15,3 +15,9 @@ In a project's main checkout, run conveyor.sh setup pack-commit (with no answer:
 
 ## A blocked card you take
 When you take a blocked card (a hand run, a fix card, a picker to the owner), run `note <card> <what you do about it>` after the same path as the `ask <project>` commands, one short line, so /units and the Board show the card as yours and not as one that needs the owner. When the card waits on the owner's answer to your picker, run `note <card> --ask <the question>`: it stays with the cards that need the owner and says it waits for their answer. Write it again when what you do changes; a retry, a landing or a shut ends it.
+
+## Filing an issue
+Each issue you file has a line `Benefit: <the live case it fixes, or the gain as measured>`, or `Guards: <the risk>` (security, compliance, data loss, a silent fallback, fail-loud).
+
+## An issue held for its benefit
+An issue skipped by the rule `no live benefit` waits for the owner's yes. Ask the owner by the picker. The question says plainly that no live case is known or the gain was never measured, and "Recommended" goes on closing the issue or measuring first. On yes, add a line `Benefit approved: <date>` to the issue.

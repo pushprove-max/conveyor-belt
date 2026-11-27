@@ -344,7 +344,7 @@ out=$(askg 2>&1)
 # file, so the issue it filed was queued at once. ask adds the mark to testissue alone (the case clears the inherited
 # one first): a card session would claim the role.
 printf '#!/usr/bin/env bash\necho "$1 mark=${CONVEYOR_FOREMAN:-}"\n' > "$XDG_DATA_HOME/conveyor/versions/$PIN2/conveyor/conveyor.sh"
-for c in testissue health; do out=$(env -u CONVEYOR_FOREMAN -u CONVEYOR_FOREMAN_ASK CONVEYOR_FOREMAN_DIR="$FD" bash -c '. "$1/lib.sh" && ask gamma "$2" "$3" x' _ "$SRC" "$T/gamma" "$c" 2>&1); echo "$out"; done > "$T/marks"
+for c in testissue health; do out=$(env -u CONVEYOR_FOREMAN -u CONVEYOR_FOREMAN_ASK CONVEYOR_FOREMAN_DIR="$FD" bash -c '. "$1/lib.sh" && ask gamma "$2" "$3" "Benefit: x"' _ "$SRC" "$T/gamma" "$c" 2>&1); echo "$out"; done > "$T/marks"
 [ "$(cat "$T/marks")" = $'testissue mark=1\nhealth mark=' ] || fail "the Foreman's mark did not reach testissue alone: $(cat "$T/marks")"
 # Bug caught (#1589): over ssh the host's command has none of this machine's environment, so the watcher's
 # CONVEYOR_REVIEWRETRY must be in the command itself, or the host's retry is not marked as review-retry's and the
@@ -416,6 +416,21 @@ out=$(sess s2 | bash "$SRC/stop.sh" state); [ -z "$out" ] || fail "a session tha
 echo small > "$FD/state.md"
 # Continued or resumed with the same id, it is still the Foreman: its start gives it its rules.
 out=$(sess s1 resume | bash "$SRC/foreman.sh" start | ctx); grep -qF 'Foreman mode: you are Ada' <<<"$out" || fail "the resumed Foreman got no Foreman start: $out"
+# Bugs: an issue the Foreman files carries no benefit or guarded-risk line, so the benefit hold cannot read why it is
+# worth building; the Foreman's question on an issue held by `no live benefit` hides that no live case is known or the
+# gain was never measured, and does not recommend closing or measuring first. The Foreman's Claude session writes both
+# texts, steered only by the rules its start and `foreman.sh procedures` give it, so no command makes them: the check is
+# that the start sends the Foreman to the procedures before it files an issue and on that hold, and they give both rules.
+# (The start's room is full: the size cases in foreman-size.test.sh fail when the rules themselves go in it.)
+grep -qE 'run [^ ]*foreman\.sh procedures and follow what it prints .*, before you file an issue, and on a "no live benefit" hold\.' <<<"$out" \
+  || fail "the start of the resumed Foreman (session s1, source resume) does not send it to the procedures before it files an issue and on a \"no live benefit\" hold: $(grep -F 'Procedures:' <<<"$out")"
+p=$(bash "$SRC/foreman.sh" procedures)
+for r in 'Each issue you file has a line `Benefit: <the live case it fixes, or the gain as measured>`, or `Guards: <the risk>`' \
+  'An issue skipped by the rule `no live benefit` waits for the owner'"'"'s yes. Ask the owner by the picker.' \
+  'says plainly that no live case is known or the gain was never measured' \
+  '"Recommended" goes on closing the issue or measuring first' 'add a line `Benefit approved: <date>` to the issue'; do
+  grep -qF -- "$r" <<<"$p" || fail "foreman.sh procedures does not print \"$r\": ${p: -800}"
+done
 out=$(sess s2 startup | bash "$SRC/foreman.sh" start); [ -z "$out" ] || fail "another session got the Foreman's start: $out"
 # A claim from a second session moves the mark, and the first session's waiter and its watchers exit at once.
 # The waiter's output goes through cat, which ends only once nothing the waiter started holds it open.
