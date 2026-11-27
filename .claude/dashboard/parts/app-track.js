@@ -586,23 +586,22 @@
     return det;
   }
 
-  // Why a blocked card stopped, as one plain sentence first ("2 tests failed: a, b", "Review said NO-GO three times",
-  // "Push refused: the check typecheck failed"), and its explanation under it, shown without a tap (no <details>, so
-  // a phone, with no hover, reads it too). c: the card as Needs you has it (reason, track, reviews, push, check).
+  // Why a blocked card stopped, as one sentence first ("2 tests failed after 3 fix rounds: a, b", "Review said NO-GO
+  // three times", "Push refused: the check typecheck failed"), and its explanation under it, shown without a tap (no
+  // <details>, so a phone, with no hover, reads it too). c: the card as Needs you has it (reason, track, reviews, push, check).
   const TIMES = ['', 'once', 'twice', 'three times'];
   function failure(c) {
     const full = typeof c.reason === 'string' && c.reason.trim() ? c.reason.trim() : 'no reason recorded';
-    const steps = sixOf(c.track) ? c.track.steps : [];
-    const at = steps.map((s) => s.state).lastIndexOf('failed');
-    const { names, timeout, fails } = failedTests(stepsOf(c.track), full);
+    const steps = sixOf(c.track) ? c.track.steps : [], at = steps.map((s) => s.state).lastIndexOf('failed');
+    const { names, timeout, fails, rounds } = failedTests(stepsOf(c.track), full);
     const nogo = (Array.isArray(c.reviews) ? c.reviews : []).filter((r) => r && r.verdict === 'NO-GO').length;
     // A review that could not finish ("review 2: review failed (exit 3; …)", "review 2 ended without one clear
     // verdict") stopped the card, not an earlier round's NO-GO: its own sentence leads.
     const reviewBroke = /^review \d+(:| ended\b)/i.test(full);
     let said;
     if (c.push || /^push\b/i.test(full)) said = pushRefused(c, full);
-    else if (names.length) said = `${names.length} test${names.length === 1 ? '' : 's'} failed: ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}`;
-    else if (timeout) said = `The tests timed out${typeof timeout.file === 'string' && timeout.file ? ` in ${timeout.file}` : ''}`;
+    else if (names.length) said = `${names.length} test${names.length === 1 ? '' : 's'} failed${rounds}: ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}`;
+    else if (timeout) said = `The tests timed out${typeof timeout.file === 'string' && timeout.file ? ` in ${timeout.file}` : ''}${rounds}`;
     else if (nogo && !reviewBroke && (at === 1 || /NO-GO/.test(full))) said = `Review asked for changes ${TIMES[nogo] || `${nogo} times`}`;
     else said = first(full);
     const checks = ranNoTest(fails);
@@ -614,10 +613,10 @@
   function ranNoTest(fails) {
     return !!fails && !fails.timeout && fails.of === 0;
   }
-  // The failed tests of a blocked card (failure), from its steps recs: the cases' names, the timeout and the last
-  // failed run's failures. The failed tests are the cause only when the card stopped for them (its reason full: "the
-  // changed tests failed again…"): a card whose fix of those tests then failed ("fix: …") stopped for its fix, and an
-  // earlier run's names are not why.
+  // The failed tests of a blocked card (failure), from its steps recs: the cases' names, the timeout, the last failed
+  // run's failures and the fix rounds full counts (" after 3 fix rounds"). The failed tests are the cause only when the
+  // card stopped for them (its reason full: "the changed tests failed again…"): a card whose fix of those tests then
+  // failed ("fix: …") stopped for its fix, and an earlier run's names are not why.
   function failedTests(recs, full) {
     const names = [];
     let timeout = null, fails = null;
@@ -627,7 +626,8 @@
       if (s.failures.timeout && typeof s.failures.timeout === 'object') timeout = s.failures.timeout;
       fails = s.failures;
     });
-    return { names, timeout, fails };
+    const n = (/\bthe changed tests failed again after their (\d+) fix rounds?\b/.exec(full.split('\n')[0]) || [])[1];
+    return { names, timeout, fails, rounds: n ? ` after ${n} fix round${n === '1' ? '' : 's'}` : '' };
   }
   // The sentence of a card whose push was refused (failure): the check that failed, else the reason's first sentence.
   function pushRefused(c, full) {

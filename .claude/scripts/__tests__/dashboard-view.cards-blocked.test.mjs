@@ -260,3 +260,21 @@ test('a new "Needs you" item is marked once, in this browser', () => {
   deliver(again, later);
   assert.equal(panel(again, 'needs').querySelectorAll('.is-new').length, 0, 'a reload does not mark what this browser has shown');
 });
+
+// Bug: a card that the Test step blocked after its fix rounds ("the changed tests failed again after their 3 fix
+// rounds") led on the Board and in Needs you with the failed cases or the timeout only ("The tests timed out in
+// a.test.sh"): the owner could not see that the card had used its fix rounds, though the issue comment says it.
+test('a card the Test step blocked after its fix rounds says the round count beside its failed cases or its timeout', () => {
+  const w = boot();
+  const data = full();
+  const ran = (failures) => ({ ...trackOf('+++!..', ''), at: null, records: [{ name: 'tests failed', state: 'failed', sec: 60, failures }] });
+  const blocked = data.panels.needs.data.cards.blocked;
+  Object.assign(blocked[0], { reason: 'the changed tests failed again after their 3 fix rounds (exit 124); nothing landed.',
+    track: ran({ of: 1, files: [], timeout: { sec: 600, file: 'a.test.sh' } }) });
+  blocked.push({ ...clone(blocked[0]), card: 'c8-14', issue: 14, reason: 'the changed tests failed again after their 1 fix round (exit 1); nothing landed.',
+    track: ran({ of: 4, timeout: null, files: [{ file: 'b.test.sh', cases: [{ name: 'beta', line: 'FAIL [beta]' }] }] }) });
+  deliver(w, data);
+  const said = (card) => panel(w, 'needs').querySelector(`li[data-key="blocked:${card}"] .why-said`).textContent;
+  assert.equal(said('c2-13'), 'The tests timed out in a.test.sh after 3 fix rounds', `a timeout, for the reason: ${blocked[0].reason}`);
+  assert.equal(said('c8-14'), '1 test failed after 1 fix round: beta', `a failed case, for the reason: ${blocked[1].reason}`);
+});
