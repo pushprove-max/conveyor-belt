@@ -4,11 +4,12 @@
 // Shared setup: dashboard-view.helpers.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boot, deliver, next, settle, full, act, rulesP, ruled } from './dashboard-view.helpers.mjs';
+import { boot, deliver, next, settle, full, act, rulesP, ruled, record, T0 } from './dashboard-view.helpers.mjs';
 
 // The Rules part with the record's two limits as given; a key left out is left out of the record (an older engine).
-function data(limits) {
-  const d = full(), r = d.panels.rules.data;
+// now: when the snapshot was taken (its collector began 20 s before).
+function data(limits, now = T0) {
+  const d = full(now), r = d.panels.rules.data;
   r.control = { ...r.control, rules: { ...r.control.rules } };
   delete r.control.rules.cardusd;
   delete r.control.rules.issueusd;
@@ -54,4 +55,19 @@ test('Rules: with no dollar limits in the record, neither row shows and the tab 
   assert.equal(row(w, 'cardusd'), null);
   assert.equal(row(w, 'issueusd'), null);
   assert.doesNotMatch(rulesP(w).textContent, /dollar limit/i);
+});
+
+// Bug this guards: a snapshot begun after the Board's save that held the limit the save replaced was taken as stale,
+// so a command that set that limit back while the save was out ($20 saved, then `control rules cardusd=10`) left $20
+// pressed on every later snapshot.
+test('Rules: a dollar limit the command sets back after a Board save shows once a snapshot begun after the save holds it', async () => {
+  const w = boot({ tab: 'rules' });
+  deliver(w, data({ cardusd: 10, issueusd: 35 }));
+  const was = data({ cardusd: 10, issueusd: 35 }).panels.rules.data.control;
+  w.reply = record({ ...was, rules: { ...was.rules, cardusd: 20 } }, T0);
+  act(rulesP(w), 'cardusd-20').click();
+  await settle();
+  assert.equal(shown(w, 'cardusd')[3], '$20:true', 'the saved limit shows at once');
+  next(w, data({ cardusd: 10, issueusd: 35 }, T0 + 30000));
+  assert.deepEqual(shown(w, 'cardusd').filter((x) => x.endsWith(':true')), ['$10:true'], 'the command\'s $10, read after the save, is pressed');
 });

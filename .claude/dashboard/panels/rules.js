@@ -338,7 +338,7 @@
         }
         if (action === 'split-limits' && view) splitSave(repo, view, viewRead, args, res.at);
         // The values the change replaced, kept from before the first change no snapshot has read yet: a snapshot that
-        // still holds one did not read it. A setting the record holds at its old value again waits for nothing.
+        // still holds one did not read it, when the answer has no time (render). A setting the record holds at its old value again waits for nothing.
         const at = repo === S.d.repo ? S : S.kept.get(repo), now = res.rec || (guess && guess[0]);
         if (guess && at) {
           new Set(Object.keys(was.shown).concat(Object.keys(guess[0]))).forEach((k) => {
@@ -719,8 +719,11 @@
     S.ctx = ctx; S.read = read;
     if (S.d && !S.ctl && S.floor !== null && read !== null && read < S.floor) { S.turned = true; draw(); return; }
     const rec = view.control && typeof view.control === 'object' ? view.control : {};
-    const stale = Object.keys(S.was).some((k) => same(rec[k], S.was[k]));
-    if (S.ctl && !S.guessed && !stale && (S.ctlAt === null || (read !== null && read >= S.ctlAt))) {
+    // A snapshot begun at or after the answer read the record after the change: a replaced value it holds was set
+    // again since (by the command), and is shown. With no time for the answer, one that holds a replaced value is
+    // taken as read before the change.
+    const fresh = S.ctlAt === null ? !Object.keys(S.was).some((k) => same(rec[k], S.was[k])) : read !== null && read >= S.ctlAt;
+    if (S.ctl && !S.guessed && fresh) {
       if (S.ctlAt !== null) S.floor = S.ctlAt;
       S.ctl = null; S.ctlAt = null; S.was = {};
     }
