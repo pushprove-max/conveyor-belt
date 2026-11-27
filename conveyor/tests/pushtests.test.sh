@@ -318,6 +318,28 @@ ${ls[1]} lib/cart.test.js" ] || fail "the file did not run on main (c3), then on
     || fail "the push line does not name c3: $(st 'select(.step == "push") | .reason')"
 }
 
+# #1621 D1: the files linked to the landings since the last push are those of every landing. Bug it catches: the
+# selection (pushtests(), lib/pushrun.sh) took the test files of one landing alone, the oldest or the newest, so a file
+# only another landing links never ran before the push. c1 adds lib/cart.js and lib/cart.test.js, c2 adds lib/bag.js
+# and lib/bag.test.js: each landing links a file the other does not, and both run on main.
+t_pushtestsevery() {
+  local base i s f
+  setup '[]'; base=$(git -C "$R" rev-parse HEAD)
+  printf '%s\n' 'echo "$(git rev-parse HEAD) $1" >> "$STUB/ran"; bash "$1"' > "$STUB/one"
+  tune '.push.check = true | .test.fileCommand = "bash \"$STUB/one\""'
+  mkdir -p "$R/lib" || fail "lib could not be made"
+  for i in 1 2; do
+    f=$([ $i = 1 ] && echo cart || echo bag)
+    echo good > "$R/lib/$f.js" && echo "grep -qx good lib/$f.js" > "$R/lib/$f.test.js" && git -C "$R" add -A && git -C "$R" commit -qm "c$i" \
+      && s=$(git -C "$R" rev-parse HEAD) \
+      && jq -cn --arg s "$s" --argjson i $i '{card: "c\($i)", issue: $i, step: "landed", time: "2026-11-18T1\($i):00:00Z", result: "ok", sha: $s}' >> "$ST/cards.jsonl" \
+      || fail "landing $i could not be made"
+  done
+  pushnow "pushtests c2 2 $s $base"
+  [ "$(sort "$STUB/ran" 2>&1)" = "$s lib/bag.test.js
+$s lib/cart.test.js" ] || fail "pushtests c2 2 $s $base did not run on main the files linked to c1 (lib/cart.test.js) and to c2 (lib/bag.test.js): $(cat "$STUB/ran" "$T/$CASE/push.out" 2>&1)"
+}
+
 # R103 of #1389. Bug it catches: a push the remote refused, as it held a commit made by hand, merged that commit into
 # main and pushed the merge with no run of the linked test files on it, so a file that fails only on the merged tree
 # went out. c1 adds lib/cart.test.js, which fails once hand.txt is there; hand.txt is the commit by hand on origin. The
