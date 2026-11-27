@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 120
+# timeout: 300
+# The limit is the whole file's in a card's test step, where it gets one test slot and its 11 release fixtures run one
+# at a time: 84 s on an idle machine, and past 120 s under a busy step's load (issue 1766: no case failed, the file ran
+# out of time with 6 of them done).
 # Engine cases: the coverage map each release makes again and commits (issue 1593; the pack's coverageMap,
 # lib/relcov.sh). Their fixture is covsetup, below, on releaseboard.test.sh's runsetup (release.test.sh's cutsetup);
 # t_relcovdevbox's is suitehost.test.sh's devboxsetup.
