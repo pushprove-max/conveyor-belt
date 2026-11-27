@@ -16,7 +16,8 @@
 #   box last ran (<dir>/<repo>/setup.blob); with no such file it is skipped.
 # - checkout: the worktree of the commit here ($CARDS/release/wt, deps()), which the changed-tests selection and the
 #   records read. ssh: also a git bundle of the commit, sent on ssh's input and checked out in <dir>/<repo>/wt (the box
-#   needs no clone access and is given no GitHub token), then the pack's worktree.setup run there.
+#   needs no clone access and is given no GitHub token), then the pack's worktree.setup run there. A devbox gets no
+#   input from `devbox exec`: what a box over ssh gets on its input, a devbox gets as a file sent first (hostin()).
 # - run: local, tests() on this machine's test slots. ssh: test.full started there with nohup (each run alone of a
 #   failed case too, fullalone()), told the run's CONVEYOR_SUITE_* and its log folder; a poller copies its output and
 #   log folder back to <worktree>.test and <worktree>.testlog at least every 10 s and writes <worktree>.live, so the
@@ -83,6 +84,32 @@ hostssh() { # <script> [seconds] [detach]
   if [ "$SH_KIND" = devbox ] && [ -n "$SH_BOX" ]; then "${t[@]}" devbox exec "${d[@]}" "$SH_BOX" -- bash -c "$1"; return; fi
   [ "$SH_KIND" != devbox ] || { "${t[@]}" devbox exec "${d[@]}" --lease_id "$SH_LEASE" -- bash -c "$1"; return; }
   "${t[@]}" ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -- "$SH_TARGET" "bash -c $(hostq "$1")"
+}
+# The name of the run's devbox: the rule's box, else the one acquire leased (hostlease()): the last word of the line
+# before the lease id in its output, the marks around it left out. Nothing when acquire named none.
+hostboxname() {
+  local a
+  [ -z "$SH_BOX" ] || { printf %s "$SH_BOX"; return; }
+  a=$(grep . <<<"${SH_ACQ:-}" | tail -n 2 | head -n 1); a=${a##*[[:space:]]}
+  [[ $a =~ ^[^A-Za-z0-9]*(.*[A-Za-z0-9])[^A-Za-z0-9]*$ ]] && printf %s "${BASH_REMATCH[1]}"
+}
+# <script> run as hostssh() runs it, with this machine's standard input as its input. Bug: `devbox exec` passes no input,
+# so on a devbox the setup script, the commit's bundle and the run's files reached the box empty, and the run never
+# started. On a devbox the input is first sent as the file <dir>/<repo>/wt.in by `devbox upload` to the box's name
+# (hostboxname()), the script reads it, and the file is removed. Fails with the reason on standard error when the
+# input cannot be sent.
+hostin() { # <script> [seconds]
+  [ "$SH_KIND" = devbox ] || { hostssh "$@"; return; }
+  local b d f o rc
+  b=$(hostboxname) && [ -n "$b" ] || { echo "the devbox's name is not known (devbox acquire named none), so no file can be sent to it" >&2; return 1; }
+  d=$(hostssh "$SH_D"'; mkdir -p "$D" && printf "conveyor-dir %s\n" "$D"' 60 < /dev/null 2>&1) && d=$(sed -n 's/^conveyor-dir //p' <<<"$d" | tail -n 1) && [ -n "$d" ] \
+    || { echo "the run's folder on $SH_NAME could not be made: $(grep . <<<"$d" | tail -n 1)" >&2; return 1; }
+  f=$(mktemp) || return 1
+  cat > "$f" && o=$(timeout --kill-after=5 600 devbox upload "$b" "$f" "$d/wt.in" --force --mkdir 2>&1 < /dev/null); rc=$?
+  rm -f "$f"
+  [ $rc = 0 ] || { echo "the input could not be sent to $SH_NAME with devbox upload (exit $rc): $(grep . <<<"$o" | tail -n 1)" >&2; return 1; }
+  hostssh "$SH_D"'; { '"$1"'
+} < "$D/wt.in"; r=$?; rm -f "$D/wt.in"; exit $r' "${2:-}" < /dev/null
 }
 # The rule of this run, in SH_KIND, SH_NAME, SH_POST (the name a commit status gives it: a host's name is never
 # posted, as the status is public; a devbox's is its name), SH_TARGET, SH_SIZE, SH_TAG, SH_IDLE (a devbox's), SH_DIR and SH_D (the shell line that sets D, the run's folder on the
@@ -219,7 +246,7 @@ hoststart() { # <command name>
   [ "$SH_KIND" != devbox ] || hostacquire || { hostfail "$1" "$SH_WHY"; return 1; }
   [ "$SH_KIND" = local ] || hostneeds || { hostfail "$1" "$SH_WHY"; return 1; }
 }
-# setup: the commit's .conveyor/test-machine.sh, sent on ssh's input, run on the box when it last ran another blob. The box
+# setup: the commit's .conveyor/test-machine.sh, sent on the box's input (hostin()), run on the box when it last ran another blob. The box
 # keeps the time of that run in setup.at beside setup.blob (a box set up before that file, the mtime of setup.blob, or now
 # where date cannot read it), and says it on its last line; a devbox's rule keeps it (setupAt, hostsetupat()), whether the
 # script ran in this call or an earlier one. Then the box has each tool the script's `# needs:` lines name, or the run
@@ -231,7 +258,7 @@ hostsetup() { # <command name> <commit>
   local h out t tools=()
   hoststep setup
   [ "$SH_KIND" != local ] && h=$(git rev-parse -q --verify "$2:.conveyor/test-machine.sh" 2>/dev/null) || return 0
-  out=$(git cat-file blob "$h" | hostssh "$SH_D"'; mkdir -p "$D" && cd "$D" && { [ "$(cat setup.blob 2> /dev/null)" = '"$h"' ] || { bash -s && echo '"$h"' > setup.blob && date -u +%Y-%m-%dT%H:%M:%SZ > setup.at; }; } \
+  out=$(git cat-file blob "$h" | hostin "$SH_D"'; mkdir -p "$D" && cd "$D" && { [ "$(cat setup.blob 2> /dev/null)" = '"$h"' ] || { bash -s && echo '"$h"' > setup.blob && date -u +%Y-%m-%dT%H:%M:%SZ > setup.at; }; } \
     && { [ -s setup.at ] || { date -u -r setup.blob +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u +%Y-%m-%dT%H:%M:%SZ; } > setup.at; } && echo "conveyor-setup-at $(cat setup.at)"' 2>&1) \
     || { hostfail "$1" "its .conveyor/test-machine.sh failed: $(grep . <<<"$out" | tail -n 5 | paste -sd ';' -)"; return 1; }
   if [ "$SH_KIND" = devbox ]; then
@@ -257,7 +284,7 @@ hostcheckout() { # <command name> <worktree> <commit>
   [ "$SH_KIND" != local ] || return 0
   packget worktree.setup s || { hostfail "$1" "the pack's worktree.setup cannot be read"; return 1; }
   [ -z "$s" ] || s="&& cd wt && bash -c $(hostq "$s") < /dev/null"
-  out=$(git -C "$2" bundle create - HEAD 2>/dev/null | hostssh "$SH_D"'; mkdir -p "$D" && cd "$D" && { p=$(cat wt.pid 2> /dev/null) && kill -TERM -- -"$p" 2> /dev/null; rm -f wt.pid
+  out=$(git -C "$2" bundle create - HEAD 2>/dev/null | hostin "$SH_D"'; mkdir -p "$D" && cd "$D" && { p=$(cat wt.pid 2> /dev/null) && kill -TERM -- -"$p" 2> /dev/null; rm -f wt.pid
     rm -rf wt && cat > wt.bundle && git init -q wt && git -C wt fetch -q "$D/wt.bundle" HEAD && git -C wt checkout -q --detach FETCH_HEAD; } && rm -f wt.bundle
     [ "$(git -C wt rev-parse HEAD 2> /dev/null)" = '"$3"' ] '"$s" 2>&1) \
     || { hostfail "$1" "the commit ${3:0:12} could not be checked out there: $(grep . <<<"$out" | tail -n 5 | paste -sd ';' -)"; return 1; }
@@ -278,9 +305,8 @@ hosttests() { # <worktree> <field> [alone]
   [ -z "${CONVEYOR_SUITE_FILES:-}" ] || { cp "$CONVEYOR_SUITE_FILES" "$1.send/files" && e+=' CONVEYOR_SUITE_FILES="$D/in/files"'; } || return 1
   [ "${3:-}" != alone ] || { cp "$1.rerun" "$1.send/rerun" && e+=' CONVEYOR_TEST_RERUN="$D/in/rerun"'; } || return 1
   [ ! -s "${CONVEYOR_SUITE_RECORD:-}" ] || { cp "$CONVEYOR_SUITE_RECORD" "$1.send/record" && e+=' CONVEYOR_SUITE_RECORD="$D/in/record"'; } || return 1
-  # Two commands: the files sent on the first's input, then the run started (on a devbox, detached with `exec -d`, which
-  # takes no input).
-  if ! out=$({ tar -C "$1.send" -cf - . | hostssh "$SH_D"'; cd "$D/wt" && cd .. && rm -rf wt.test wt.testlog wt.rc wt.pid in && mkdir wt.testlog in && : > wt.test && tar -xf - -C in' 60 \
+  # Two commands: the files sent on the first's input (hostin()), then the run started (on a devbox, detached with `exec -d`).
+  if ! out=$({ tar -C "$1.send" -cf - . | hostin "$SH_D"'; cd "$D/wt" && cd .. && rm -rf wt.test wt.testlog wt.rc wt.pid in && mkdir wt.testlog in && : > wt.test && tar -xf - -C in' 60 \
     && hostssh "$SH_D"'; cd "$D/wt" && export '"$e"' || exit 1
       S=$(command -v setsid || :); nohup $S bash -c '"$(hostq "$HOSTRUN")"' _ '"$(hostq "$cmd") $(hostq "$lim") $(hostq "$SH_NAME")"' > /dev/null 2>&1 < /dev/null & echo $! > ../wt.pid' 60 detach < /dev/null; } 2>&1); then
     printf 'conveyor: the suite could not be started on %s: %s\n' "$SH_NAME" "$(grep . <<<"$out" | tail -n 1)" > "$1.test"; return 1
@@ -367,11 +393,10 @@ hostboxneed() { # [no-create]
     ok=true msg="the run reuses the box tagged $SH_TAG, or creates one; this check does not ask for one"
   elif hostlease 100; then
     ok=true msg="the run reuses the box tagged $SH_TAG"
-    # Created: the box leased is one the list did not have before. Its name is the one acquire resolves: the last word of
-    # the line before the lease id, the marks around it left out. A box another project made meanwhile is new to the list
-    # too, but is not that name, even when its name is a word of acquire's other lines.
-    a=$(grep . <<<"$SH_ACQ" | tail -n 2 | head -n 1); a=${a##*[[:space:]]}
-    [[ $a =~ ^[^A-Za-z0-9]*(.*[A-Za-z0-9])[^A-Za-z0-9]*$ ]] && a=${BASH_REMATCH[1]} || a=''
+    # Created: the box leased is one the list did not have before. Its name is the one acquire resolves (hostboxname()). A
+    # box another project made meanwhile is new to the list too, but is not that name, even when its name is a word of
+    # acquire's other lines.
+    a=$(hostboxname) || a=''
     if [ -n "$was" ] && [ -n "$a" ] && hostboxes && jq -e --argjson w "$was" --arg a "$a" '. - $w | index($a) != null' <<<"$SH_BOXES" > /dev/null; then
       msg="no box tagged $SH_TAG was found, so a new one was created for the run to reuse"; fi
     hostrelease suite-machine || msg="$msg (the lease taken to try it could not be given back; it stops itself when idle)"

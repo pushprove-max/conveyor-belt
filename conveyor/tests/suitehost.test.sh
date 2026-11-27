@@ -345,16 +345,16 @@ t_hostnostdinpath() {
     || fail "release-run atonce (hostneeds) did not accept a box whose bash cannot open /dev/stdin by path and print its 2 test slots: $out"
 }
 # The stand-in devbox of the cases below: no case reaches a Namespace account. It notes each call in $STUB/devbox-calls,
-# an exec by what its script does (facts, setup, checkout, upload, run, poll or kill: the box's steps), and runs the script in
-# the box's folder as boxsetup's ssh does, its exit 1 for any exit of the script but 0, as the real `devbox exec` gives; a lease it handed out (acquire) is held until release, and an exec or a
-# release of any other lease, or of one given back, fails. A file $STUB/devbox-nologin is a login that has expired.
+# an exec by what its script does (facts, dir, setup, checkout, upload, run, poll or kill: the box's steps), and runs the script in
+# the box's folder as boxsetup's ssh does, with no standard input and its exit 1 for any exit of the script but 0, as the real `devbox exec` gives; a lease it handed out (acquire) is held until release, and an exec or a
+# release of any other lease, or of one given back, fails. `devbox upload <box> <file> <path>` copies the file to the
+# path when the box is hand-made or the box acquire named while its lease is held, else fails. A file $STUB/devbox-nologin is a login that has expired.
 # A file $STUB/devbox-full is an account at its devbox limit: acquire refuses. $STUB/devbox-list is what `devbox list -o json`
 # prints (no file: no boxes). A box named hand-made is the account's own, with no tag: exec reaches it by name, with no lease.
 # A file $STUB/devbox-tagged is a box already tagged (tagged-box): acquire reuses it; with none, acquire makes a box
 # (conveyor-made) in the list; either way it names the box on the line before the lease id, as the real acquire prints
 # the box's name. A file $STUB/devbox-other is another project's box made while acquire runs: a box named devbox, a
 # word of acquire's own lines, joins the list.
-# A file $STUB/devbox-nostdin makes exec pass no standard input, as the real one does.
 DEVBOX='#!/usr/bin/env bash
 L=lease-1274
 note() { printf "%s\n" "$*" >> "$STUB/devbox-calls"; }
@@ -368,16 +368,17 @@ case $1 in
     if [ -e "$STUB/devbox-tagged" ]; then echo "Reused devbox \"tagged-box\"."; else echo "Created devbox \"conveyor-made\"."; fi
     echo "$L"; : > "$STUB/devbox-leased" ;;
   release) note "$@"; [ "$2 $3" = "--lease_id $L" ] && [ -e "$STUB/devbox-leased" ] || { echo "no such lease" >&2; exit 1; }; rm -f "$STUB/devbox-leased"; echo "$L" >> "$STUB/devbox-released" ;;
+  upload) note "upload $2 ${4##*/}"; [ "$2" = hand-made ] || { [ -e "$STUB/devbox-leased" ] && case $2 in conveyor-made|tagged-box) ;; *) false ;; esac; } || { echo "no such devbox: $2" >&2; exit 1; }
+    mkdir -p "$(dirname "$4")" && cp "$3" "$4" ;;
   exec) shift; d=; [ "${1:-}" != -d ] || { d=-d; shift; }
     if [ "$1 $2" = "hand-made --" ]; then shift 2
     else [ "$1 $2 $3" = "--lease_id $L --" ] && [ -e "$STUB/devbox-leased" ] || { echo "no such lease" >&2; exit 1; }; shift 3; fi
     s=$*
     [ "$s" != true ] || { note "exec start"; exit 0; }
-    case $s in *setup.blob*) t=setup ;; *wt.bundle*) t=checkout ;; *nohup*) t=run ;; *"tar -cf"*) t=poll ;; *"tar -xf"*) t=upload ;; *"kill -TERM"*) t=kill ;; *) t=facts ;; esac
+    case $s in *conveyor-dir*) t=dir ;; *setup.blob*) t=setup ;; *wt.bundle*) t=checkout ;; *nohup*) t=run ;; *"tar -cf"*) t=poll ;; *"tar -xf"*) t=upload ;; *"kill -TERM"*) t=kill ;; *) t=facts ;; esac
     note "exec${d:+ -d} $t"
-    [ -z "$d" ] || exec < /dev/null
     for f in /dev/fd/*; do f=${f##*/}; [ "$f" -le 2 ] || eval "exec $f>&-"; done 2> /dev/null
-    [ ! -e "$STUB/devbox-nostdin" ] || exec < /dev/null
+    exec < /dev/null
     cd "$STUB/box" && env -i HOME="$STUB/box" PATH="$STUB/box/bin:$(cat "$STUB/box/path" 2> /dev/null || printf %s "$PATH")" STUB="$STUB" "$@" || exit 1 ;;
   *) note "$@"; exit 2 ;;
 esac'
@@ -408,7 +409,7 @@ t_devboxsetupat() {
   # shellcheck disable=SC2034,SC2088,SC2317 # the box's ~ is text; the variables and functions are suitehost.sh's and control.sh's, read by hostsetup()
   at() { (cd "$R" && REPO=main CONTROL=$C; relrec() { :; }; locked() { "$@"; }; ctl() { cat "$CONTROL"; }
     eval "$(sed -n '/^ctlput() {/,/^}/p' "$SRC/lib/control.sh")"; clock() { :; }
-    . "$SRC/lib/suitehost.sh" && SH_KIND=devbox SH_LEASE=lease-1274 SH_DIR='~/conveyor-suite' && hostd && hostsetup t "$s") 2>&1; }
+    . "$SRC/lib/suitehost.sh" && SH_KIND=devbox SH_LEASE=lease-1274 SH_ACQ=$'Created devbox "conveyor-made".\nlease-1274' SH_DIR='~/conveyor-suite' && hostd && hostsetup t "$s") 2>&1; }
   out=$(at) || fail "the setup on the devbox failed: $out"
   t1=$(jq -r '.suiteMachine.setupAt // ""' "$C")
   [ "$t1" = "$(cat "$BOX/setup.at")" ] && [[ $t1 =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]] || fail "the run that ran the script did not keep the box's setup.at ($(cat "$BOX/setup.at" 2>&1)) as setupAt: $(jq -c .suiteMachine "$C") $out"
@@ -427,7 +428,8 @@ t_devboxsetupat() {
 # Bugs (D1, D7): a release-run prep with the devbox rule did not lease the devbox with the size and the idle stop, ran a
 # step out of its order (start, setup, checkout, run, results), ran the suite elsewhere than the devbox's checkout of
 # the commit, started the run attached (not `exec -d`), reached for ssh, named another machine in the record or the
-# status, or left the lease held. The stand-in devbox fails an exec on a lease given back.
+# status, or left the lease held. The stand-in devbox fails an exec on a lease given back. Bug: the setup script, the
+# bundle and the run's files went on exec's input, which a devbox drops: here they must go by `devbox upload`.
 t_devboxrun() {
   local O RUN out
   runsetup "$BOXSUITE"; devboxsetup 3
@@ -441,7 +443,7 @@ t_devboxrun() {
   jq -e '.machine | .kind == "devbox" and .name == "Namespace Devbox 4x8" and .lease == "lease-1274" and .target == null and .dir == null and .step == "done" and .reason == null
     and (.secs | keys_unsorted) == ["start", "setup", "checkout", "run", "results"]' "$RUN" > /dev/null \
     || fail "the record's machine is not the devbox, done, with each step's seconds in order: $(jq -c .machine "$RUN")"
-  [ "$(devboxcalls)" = 'auth check-login;acquire conveyor-suite-main --size 4x8 --auto_stop_idle_timeout 15m;exec facts;exec setup;exec checkout;exec upload;exec -d run;exec poll;release --lease_id lease-1274' ] \
+  [ "$(devboxcalls)" = 'auth check-login;acquire conveyor-suite-main --size 4x8 --auto_stop_idle_timeout 15m;exec facts;exec dir;upload conveyor-made wt.in;exec setup;exec dir;upload conveyor-made wt.in;exec checkout;exec dir;upload conveyor-made wt.in;exec upload;exec -d run;exec poll;release --lease_id lease-1274' ] \
     || fail "the devbox's calls are not login, acquire, facts, setup, checkout, upload, run detached, polls, release: $(devboxcalls)"
   [ "$(cat "$STUB/devbox-released")" = lease-1274 ] && [ ! -e "$STUB/devbox-leased" ] && [ ! -e "$STUB/ssh-calls" ] || fail "the lease was not given back once, or ssh was called: $(cat "$STUB/devbox-released" 2>&1) $(cat "$STUB/ssh-calls" 2>&1)"
   [ "$(cat "$STUB/setups" 2>&1)" = "$BOX" ] || fail "the commit's .conveyor/test-machine.sh did not run once in the devbox's run folder $BOX: $(cat "$STUB/setups" 2>&1)"
@@ -553,7 +555,7 @@ t_devboxnamed() {
   relwait "the run on the named devbox did not end" '.ended != null'
   jq -e '.state == "passed" and .machine.kind == "devbox" and .machine.box == "hand-made" and .machine.lease == null and .machine.step == "done"' "$RUN" > /dev/null \
     || fail "the run did not pass on the named box hand-made: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
-  [ "$(devboxcalls)" = 'auth check-login;exec start;exec facts;exec checkout;exec upload;exec -d run;exec poll' ] \
+  [ "$(devboxcalls)" = 'auth check-login;exec start;exec facts;exec dir;upload hand-made wt.in;exec checkout;exec dir;upload hand-made wt.in;exec upload;exec -d run;exec poll' ] \
     || fail "the calls were not login, start, facts, checkout, upload, run and polls (no setup script in this commit), with no acquire or release: $(devboxcalls)"
   ! grep -q hand-made "$STUB/gh-calls" || fail "the commit status names the owner's box: $(cat "$STUB/gh-calls")"
 }

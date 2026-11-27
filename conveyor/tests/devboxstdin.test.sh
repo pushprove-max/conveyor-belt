@@ -3,7 +3,7 @@
 # timeout: 120
 # Engine cases: a devbox whose `devbox exec` passes no standard input (lib/suitehost.sh). Its own file, to keep the
 # suitehost case file under the 600 lines a case file may have. The helpers and the stand-in devbox are that file's
-# (devboxsetup, DEVBOX, whose file $STUB/devbox-nostdin gives exec no input).
+# (devboxsetup, DEVBOX, whose exec gives the box no input, as the real one does).
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
 # file runs its own cases through the runner.
 [ "${BASH_SOURCE[0]}" != "$0" ] || CONVEYOR_SHELL_TEST_CASE=${CONVEYOR_SHELL_TEST_CASE:-$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$0" | tr '\n' ' ')} \
@@ -16,7 +16,7 @@
 t_devboxnostdin() {
   local out t
   setup '[]'; devboxsetup 3
-  : > "$STUB/devbox-nostdin"; echo '[{"name":"hand-made"}]' > "$STUB/devbox-list"
+  echo '[{"name":"hand-made"}]' > "$STUB/devbox-list"
   loop control suite-machine devbox --box hand-made > /dev/null 2>&1 || fail "control suite-machine devbox --box hand-made did not set the rule"
   out=$(loop suite-machine check --json 2>&1) && jq -e '.ok and .cpus == 3 and .slots == 2 and (.needs | map(select(.need == "test slots" and .ok)) | length == 1)' <<<"$out" > /dev/null \
     || fail "check of a named box whose devbox exec passes no input did not report 3 CPUs and 2 test slots: $out"
