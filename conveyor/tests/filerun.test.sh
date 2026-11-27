@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 60
+# timeout: 120
+# 120, not 60 (#1765): the file's limit counts each of its 19 cases' wait for a test slot (lib/slots.sh), not only its
+# cases' own seconds (about 15 in all), and on a busy machine those waits alone ran past 60 s, so it timed out at random.
 # Engine cases (#376, #377, #351 scenarios 11 and 12): Conveyor's own per-file runner (lib/filerun.sh), which a card's run
 # gives each test file when the pack sets no test.fileCommand. Each case calls filerun.sh on a fixture project whose
 # runner is a stub on PATH that records the folder it ran in and its arguments: no real toolchain is needed. Each
