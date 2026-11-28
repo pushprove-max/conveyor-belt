@@ -459,7 +459,8 @@ declare -A npart=() tparts=() twhole=()
 # larea: each engine case file a link gives the pick under way, with the changed files that link it, one a line;
 # covpick: each changed file whose tests the coverage map picked with no stale row (covof); COVCASES: the engine cases
 # the map holds as units, one a line (mapcases).
-declare -A larea=() covpick=()
+declare -A larea=() covpick=() CALLERIN=()
+PICKALL=
 COVCASES=
 oparts=
 COVTESTS=
@@ -1065,7 +1066,8 @@ callersof() {
     [ "$t" != conveyor/conveyor.sh ] \
       || mapfile -t -O "${#cmds[@]}" cmds < <(awk '$1 == "cmd" && $2 ~ /^[a-z][a-z-]*$/' "$t" | grep -E -- "$re" | awk '{ print $2 }')
     while IFS=$'\t' read -r k n; do
-      if [ "$k" = K ]; then { [ "$t" = "$f" ] && [[ " $CFN " == *" $n "* ]]; } || { [ -n "$was" ] && ! grep -qxF -- "$n" <<<"$was"; } || who[$n]=1
+      # CALLERIN: each file with such a new caller. Its changed lines hold the call, so their tests are this file's too.
+      if [ "$k" = K ]; then { [ "$t" = "$f" ] && [[ " $CFN " == *" $n "* ]]; } || { [ -n "$was" ] && ! grep -qxF -- "$n" <<<"$was" && CALLERIN[$t]=1; } || who[$n]=1
       elif [ "$t" != "$f" ] && [[ $t != conveyor/commands/*.sh ]] && [ "$t" != conveyor/conveyor.sh ] \
         && [ "$t" != conveyor/lib/portable.sh ]; then return 1; fi
       [[ $t != conveyor/commands/*.sh ]] || scr[$t]=1
@@ -1420,7 +1422,9 @@ mapcases() {
 pick() {
 local f t s named stem dir cov cal cpart helpers of nmap
 # PICKING: the files this pick reads, one a line, for callersof (not in textonly's pick, NOTEXT: its files are not changed).
-[ -n "$NOTEXT" ] || { npart=(); PICKING=$(printf '%s\n' "$@"); }
+# A pick of one file of a change (freshen) reads the files of the whole change (PICKALL), so that it selects what the
+# pick of the whole change selects for the file.
+[ -n "$NOTEXT" ] || { npart=(); PICKING=${PICKALL:-$(printf '%s\n' "$@")}; }
 for f; do
   # A change to its comment and blank lines alone: no test, its linked ones and itself, a test file, too (commentonly).
   [ -n "$NOTEXT" ] || ! commentonly "$f" || continue
@@ -1609,8 +1613,14 @@ for t in "${!run[@]}"; do full[$t]=1; done; fullcases=$cases
 declare -A fresh=() why=() cwhy=() only=() nocase=()
 fcases=
 freshen() { # <reason> <only within the change's selection: 1, or empty> <file>...
-  local w=$1 o=$2 f t c a
+  local w=$1 o=$2 f t c a PICKALL
   shift 2
+  # Each file is picked alone, but as one file of the change it is in (PICKALL: the card's change, or what main
+  # changed). A function the change adds that only a new line of another file of the change calls (callersof's
+  # CALLERIN) gets the tests of that file's changed lines: the file is picked with it. Bug: picked alone, such a
+  # function ran each test file that holds the name of its caller, in a run again after a session changed it (all 60
+  # cases for 2), as before issue 1829 in the first run.
+  if [ -n "$o" ]; then PICKALL=$(printf '%s\n' "$@"); else PICKALL=$(printf '%s\n' "${changed[@]}" "$@"); fi
   # A file changed in its texts alone (textonly) is judged on the card's whole change, or on what main changed in it
   # since the main of the last run (the list's `from` line; with none, as any change).
   if [ -n "$o" ]; then TXFROM=$(awk -F'\t' '$1 == "from" {print $2; exit}' "$RERUN"); TXTO=HEAD; else TXFROM=HEAD; TXTO=; fi
@@ -1625,7 +1635,10 @@ freshen() { # <reason> <only within the change's selection: 1, or empty> <file>.
     elif [ -n "$o" ] && [ "$f" = "$MAP" ]; then
       run[conveyor/conveyor.test.sh]=1; cases=
       for t in $MAPTESTS; do [ ! -f "$t" ] || run[$t]=1; done
-    else pick "$f"; fi
+    else
+      CALLERIN=(); pick "$f"
+      [ ${#CALLERIN[@]} = 0 ] || { run=(); area=(); ccase=(); allby=(); all=; pick "$f" "${!CALLERIN[@]}"; }
+    fi
     for t in "${!run[@]}"; do
       c=$cases
       if [ -n "$o" ]; then

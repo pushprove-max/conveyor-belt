@@ -89,6 +89,14 @@ got=$(cases)
   && grep -qxF 'coverage map rule: conveyor/lib/f.sh big(): lines' "$F/out" \
   && ok "an added function called from a new line of another changed file runs the cases of that line, not each test that names the caller" \
   || no "added() added to g.sh and called from line 4 of big() (run by c01, c02): ran '$got': $(cat "$F/out")"
+# A run again after a session changed g.sh (the list's `changed` line; a.test.sh passed before): g.sh is picked alone,
+# as a file of the same change, and the two cases of the calling line run again. Bugs it catches: picked alone, added()
+# ran each case that names big (60); and with its caller left out, a change to it ran no case again.
+printf 'change\tabc\npass\tconveyor/tests/a.test.sh\nchanged\tconveyor/lib/g.sh\n' > "$F/rerun"
+rm -rf "$F/log"; mkdir "$F/log"; (cd "$R" && CONVEYOR_TEST_LOG=$F/log CONVEYOR_TEST_RERUN=$F/rerun bash .conveyor/test-changed.sh) > "$F/out" 2>&1
+got=$(sed -n 's/^TESTRUN case	conveyor\/tests\/a.test.sh	//p' "$F/log/test-changed.log" | LC_ALL=C sort | paste -sd ' ' -)
+[ "$got" = "c01 c02" ] && ok "a run again after a session changed the added function runs the cases of the line that calls it" \
+  || no "a run again, g.sh changed by a session, a.test.sh passed before: ran '$got': $(cat "$F/out")"
 git -C "$R" checkout -q -- conveyor/lib/f.sh
 # The caller's file is not in the change (big() called added() before): its name still brings its tests, as lone()'s
 # callers do below. added() changed alone runs each case of a.test.sh, which names big.
