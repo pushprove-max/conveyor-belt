@@ -29,12 +29,15 @@
 # and never before it.
 # A line the check refuses (jq/check.jq names the field it refused) is set aside, not read: quarantine() moves it out
 # of the card records to $QUARANTINE, under the records' lock (taken here, for LOCKLIMIT seconds at most, unless the
-# caller holds it: LOCKHELD), and health names it until the owner deals with it. A copy a reader holds (READ, not STATE: whole(), the snapshot)
+# caller holds it: LOCKHELD), and health names it until the owner deals with it or the check accepts it (putback(): here
+# for the records themselves; a reader of a copy puts back before it takes the copy). A copy a reader holds (READ, not
+# STATE: whole(), the snapshot)
 # drops the same lines, and the copy's lineage (READG: the snapshot's copy is then no longer the one it keeps,
 # snapcopy()). The check then reads the rest again; a line still refused after three tries
 # stops the reader.
 check() {
   local rc
+  [ "$READ" != "$STATE" ] || [ ! -s "$QUARANTINE" ] || putback || return 1
   for _ in 1 2 3; do
     checkpart; rc=$?
     [ $rc = 3 ] || return $rc
@@ -67,6 +70,65 @@ quarantine() {
   rm -f "$STATE.qall" "$STATE.qrest"
   while IFS=$'\t' read -r l f; do echo "conveyor: $STATE line $l is not a whole record of a known step (the check refused $f); it is set aside in $QUARANTINE" >&2; done <<<"$bad"
 }
+# A set-aside record that the check accepts now (a writer and jq/check.jq learn a new field in separate commits) goes
+# back into the card records, before the first record whose time is later than its own (a record with no time keeps
+# its place), and leaves $QUARANTINE; one still refused stays there, and health names it. So does one whose card's
+# lines have left the card records (`retry` moved them to the retried file, or the archive run to the archive, whose
+# ended list names the card): put back alone, it would make that finished card look open. They are tested first with
+# no lock and no file written, so a check that has none to put back takes no lock and writes nothing; then again under
+# the records' lock (taken here, as for quarantine(), unless the caller holds it: LOCKHELD) and the lock on
+# $STATE.checked.lock, in that order, as a quarantine() or a move while it waits can change what is set aside. A reader
+# of a copy of the records (whole(), the snapshot) calls it before it takes the copy, so the copy and all the reader
+# reads beside it (the pushes, the retried lines) hold the records put back. Each record put back, and each one kept
+# for its card's move, is named on stderr.
+putback() {
+  local s
+  s=$(qsplit) || { echo "conveyor: cannot read $QUARANTINE, the retried file or the ended list to test the set-aside records again; nothing put back" >&2; return 0; }
+  if [[ $s != back* && $s != *$'\n'back* ]]; then qsay "$s"
+  elif [ -n "${LOCKHELD:-}" ]; then qputback
+  else lockedfor "the put-back of a set-aside record" qputback; fi
+}
+# $QUARANTINE's entries, in their order, each as `<what>\t<entry>`: back (to put back), keep (refused) or moved
+# (accepted, but its card's lines have left the card records). It writes no file. The refused entries and the cards
+# that left go to jq on its input, not as arguments: the ended list only grows, and an argument has a size limit.
+qsplit() {
+  local bad gone
+  bad=$(jq -r .record "$QUARANTINE" | jq -Rrn -f "$HERE/jq/check.jq" | cut -f1 | jq -Rsc 'split("\n") | map(select(. != "") | tonumber)') \
+    && gone=$({ stdb ask lines retried && { [ ! -e "$ENDED" ] || cat -- "$ENDED"; }; } | jq -Rnc '[inputs | fromjson? | .card? | strings | {key: ., value: true}] | from_entries') \
+    && { printf '%s\n%s\n' "$bad" "$gone" && cat -- "$QUARANTINE"; } | jq -nr 'input as $bad | input as $gone | [inputs] | to_entries[]
+      | (if (.key + 1) | IN($bad[]) then "keep" elif $gone[.value.record | fromjson | .card] then "moved" else "back" end) + "\t" + (.value | tojson)'
+}
+# The stderr lines of a split (qsplit()): each record put back, and each one kept for its card's move.
+qsay() { # <split>
+  jq -Rr --arg s "$STATE" --arg q "$QUARANTINE" 'split("\t") | select(.[0] | IN("back", "moved")) | (.[1] | fromjson | .record | fromjson | .card) as $c
+    | if .[0] == "back" then "conveyor: a set-aside record of card \($c) passes the record check now; it is back in \($s)"
+      else "conveyor: a set-aside record of card \($c) passes the record check now, but the card'"'"'s lines have left \($s) (retry or the archive run moved them); it stays in \($q)" end' <<<"$1" >&2
+}
+# Under the records' lock: qsplit() again, on what is set aside and moved now, then the records rewritten with the
+# records to put back at their time place, and $QUARANTINE with those that stay (removed when none does). Its files are
+# in a folder of its own beside the records ($STATE.qput.<random>), so no other check can change or remove them.
+qputback() {
+  local s t
+  s=$(qsplit) || { echo "conveyor: cannot read $QUARANTINE, the retried file or the ended list to test the set-aside records again; nothing put back" >&2; return 1; }
+  [[ $s == back* || $s == *$'\n'back* ]] || { qsay "$s"; return 0; }
+  t=$(mktemp -d "$STATE.qput.XXXXXX") || { echo "conveyor: cannot make a folder beside $STATE to put the set-aside records back; nothing put back" >&2; return 1; }
+  awk -F'\t' -v back="$t/back" -v keep="$t/keep" '$1 == "back" { print $2 > back; next } { print $2 > keep }' <<<"$s" \
+    && ( flock 5 || exit 1
+      stdb ask -o "$t/all" lines cards && timeplace "$t/back" < "$t/all" > "$t/rest" && stdb rewrite cards < "$t/rest" || exit 1
+      if [ -s "$t/keep" ]; then mv -f "$t/keep" "$QUARANTINE"; else rm -f "$QUARANTINE"; fi
+    ) 5>>"$STATE.checked.lock" \
+    || { echo "conveyor: the set-aside records could not be put back; what the card records held is in $t/all" >&2; return 1; }
+  qsay "$s"; rm -rf -- "$t"
+}
+# The card records on stdin, with each entry's record of the file named put before the first record whose time is
+# later than its own; a line with no time, or that is not JSON, keeps its place.
+timeplace() { # <file of $QUARANTINE entries>
+  jq -nRr --slurpfile b "$1" 'def t: [try (fromjson | .time | strings) catch empty] | first;
+    foreach ((inputs | {l: .}), {end: true}) as $x ({p: ($b | map({r: .record, t: (.record | t)}) | sort_by(.t)), o: []};
+      if $x.end then .o = [.p[].r] | .p = []
+      else ($x.l | t) as $t | if $t == null then .o = [$x.l] else .o = [(.p[] | select(.t < $t) | .r), $x.l] | .p |= map(select(.t >= $t)) end end;
+      .o[])'
+}
 # 3: a whole line the check refuses.
 # A copy with a lineage (the snapshot's: READG, `<lineage> <bytes>`, snapcopy(), lib/snapshot.sh) is not read to sum
 # it: its first bytes are the ones checked while the lineage is the same. What checked of it is kept apart
@@ -95,10 +157,10 @@ checkpart() (
 
 # A reader that holds no records' lock reads only their whole lines, from a copy (READ, READ_OLD, removed when the
 # script exits) the state database gives in one call: a last line with no newline may still be being written, as
-# check() says.
+# check() says. A set-aside record the check accepts now is put back first (putback()), so the copy holds it.
 # shellcheck disable=SC2064 # d is local: the trap must hold its value now, as it runs after this function returns
 whole() {
-  local d; d=$(mktemp -d) && trap "rm -rf '$d'" EXIT && stdb ask -o "$d/records" lines cards -- -o "$d/old" lines retried \
+  local d; { [ ! -s "$QUARANTINE" ] || putback; } && d=$(mktemp -d) && trap "rm -rf '$d'" EXIT && stdb ask -o "$d/records" lines cards -- -o "$d/old" lines retried \
     && READ=$d/records && READ_OLD=$d/old
 }
 
@@ -220,7 +282,7 @@ cards() {
 # pack's test.report ({runner, format, path, env, args, option}: the runner setup found and how its times are read), null with
 # none; routes: each
 # Claude route, subscription and proxy, with its state (routesnow()); quarantined (line, field, time): each line of the
-# card records the check set aside ($QUARANTINE, check()), until the owner removes it from that file; serviceOld
+# card records the check set aside ($QUARANTINE, check()), until the owner removes it from that file or the check accepts it again (putback()); serviceOld
 # (commit: the commit the machine's Conveyor runs, refused: the pack fields its schema does not name, or its check's
 # lines, project: the project's commit, or null): the machine's Conveyor on another commit refuses this pack, so it
 # does not serve the project (machinerefuses(), lib/install.sh); null when it reads it; machineHold ({since, card, sha,

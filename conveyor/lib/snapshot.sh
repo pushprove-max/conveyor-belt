@@ -874,6 +874,9 @@ snapshot() (
   saw=$(clock) || exit 1
   if [ -n "$GITHUB" ] && [ -s "$ISSUES" ] && [ "$ISSUES" -nt "$GITHUB/issues" ]; then issues=$(<"$ISSUES")
   else issues=$(openissues "$FIELDS" 2>/dev/null) || issues=''; fi
+  # A set-aside record the check accepts now goes back before the copy (putback(), lib/views.sh): the copy and what
+  # snapcopy reads beside it (the pushes among them) then all hold it.
+  { [ ! -s "$QUARANTINE" ] || putback; } || exit 1
   snapcopy "$issues"; case $? in 0) ;; 3) issues='' ;; *) echo "conveyor: cannot copy the card records" >&2; exit 1 ;; esac
   # READ is the kept copy of the card records (snapcopy's link) and READG its lineage and size, which the check, the
   # rows and the summaries of READ (linesum(), lib/records.sh) read in place of a sum of the whole copy.

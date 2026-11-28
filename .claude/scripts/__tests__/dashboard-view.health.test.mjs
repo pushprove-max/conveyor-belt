@@ -469,6 +469,9 @@ test('Health: a card record line set aside names its line and the field the chec
   const row = dd(w, 'Records set aside');
   assert.equal(row.querySelector(':scope > .chip.chip-warn').textContent, '1 line');
   assert.match(row.textContent, /line 2518: list refused.*Next: .*quarantined\.jsonl/);
+  // Bug (#1791): the next step said to remove every line, so a right record was deleted before the check, once
+  // fixed, could put it back. A right record is kept in place for that.
+  assert.match(row.textContent, /when the record is right, fix conveyor\/jq\/check\.jq and keep the line, as the next record check puts it back/);
   assert.equal(panel(at([]), 'health').querySelector('dt[data-check="Records set aside"]'), null, 'nothing set aside shows no row');
 });
 

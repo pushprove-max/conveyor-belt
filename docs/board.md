@@ -308,6 +308,11 @@ lists every project's rows, so it stays as it is.
   a script of your project, it files a held card with no GitHub issue. The card asks to wrap each test file's run
   in that script, because the script is yours. Release the card when you agree. When no plan applies, the row
   points to the section "Test file times" in `conveyor/README.md`.
+- **Records set aside** in Health names each line of the card records that the record check refused, with its line
+  number and the field it refused. Each line is in `quarantined.jsonl` in the state folder. When the record is right
+  and the check is wrong, fix `conveyor/jq/check.jq` and keep the line: the next record check puts it back in the card
+  records, in time order, and the row no longer names it. A line whose card was given back with `retry`, or archived,
+  stays set aside. When the writer is wrong, fix the writer, then remove the line from that file.
 - A Health row whose error is one line says what failed in a short sentence, for example "The Board could not get
   main from GitHub." Click **Raw error** to read the error as it came, with **Copy output** to copy it.
 - **Work now**, at the foot of Health, shows what keeps the Conveyor machine busy now. Open it to read the machine.

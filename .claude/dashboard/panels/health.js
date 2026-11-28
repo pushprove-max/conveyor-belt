@@ -205,11 +205,12 @@ window.DASH_APP.panel({
       if (typeof r.unchecked === 'number' && r.unchecked > 0) check(`Lint check${of}`, ctx.chip(`${r.unchecked} unchecked`, 'ok'),
         `${r.unchecked === 1 ? '1 card' : `${r.unchecked} cards`} landed with a lint command skipped for a missing tool`);
       // The card records' lines the record check set aside (quarantined: [{line, field, time}]; conveyor/lib/views.sh
-      // check()): the loop reads on without them, and the owner decides what each was.
+      // check()): the loop reads on without them, and the owner decides what each was. A line the check accepts again
+      // goes back by itself (putback()), so the next step keeps a right record in place for that.
       const quarantined = Array.isArray(r.quarantined) ? r.quarantined.filter((q) => q && typeof q === 'object') : [];
       if (quarantined.length) check(`Records set aside${of}`, ctx.chip(`${quarantined.length} line${quarantined.length === 1 ? '' : 's'}`, 'warn'),
         plain(quarantined.map((q) => `line ${q.line}: ${q.field} refused, ${q.time}`).join('; '))).next =
-        'Look at each line in quarantined.jsonl in the state folder: fix the writer or conveyor/jq/check.jq, then remove the line from that file.';
+        'Look at each line in quarantined.jsonl in the state folder: when the record is right, fix conveyor/jq/check.jq and keep the line, as the next record check puts it back; when the writer is wrong, fix the writer, then remove the line from that file.';
       // Each Claude route (routes; conveyor/lib/control.sh routesnow()): the subscription login and the API proxy, each
       // in the state the last session on it found. A failed login is a warning while a fallback proxy works.
       const routes = r.routes && typeof r.routes === 'object' ? r.routes : null;

@@ -41,6 +41,117 @@ t_recloop() {
   recok "$ST/cards.jsonl" "a card of the loop"
 }
 
+# Bug (#1791): a writer and the check learn a new field in separate commits, and a valid line written between them
+# was set aside for good: nothing tested $QUARANTINE again, so health said "needs you" after the check caught up and
+# the history lost the step. Now the check puts back each set-aside record it accepts, at its time place, and keeps
+# the one it still refuses, which health still names.
+# Bug (#1791, review): the put-back dropped a record with no time (the record check then had nothing to set aside); it
+# put back a Test line of a card whose lines `retry` had moved to the retried file, so that card looked open again;
+# and `cards` answered from the copy it took before the put-back, so it left out the record it had just put back.
+# Bug (#1791, review 2): the cards whose lines left went to jq as one argument, so once the ended list's map passed
+# the kernel's limit for one argument (128 KiB on Linux), jq could not start and nothing was put back.
+qrec() { echo "{\"card\":\"c0-$1\",\"issue\":$1,\"step\":\"picked\",\"time\":\"2026-11-01T0$1:00:00Z\",\"tokens\":{\"claude\":0,\"codex\":0},\"result\":\"ok\",\"sha\":\"\",\"reason\":\"\"${2:-}}"; }
+t_recputback() {
+  local out err r5
+  setup '[]'
+  printf '%s\n' "$(qrec 1)" '{"card":"c","issue":7,"step":"landed"}' "$(qrec 3)" > "$ST/cards.jsonl"
+  r5=$(qrec 5); echo "${r5/picked/blocked}" > "$ST/retried.jsonl"
+  mkdir -p "$ST/archive" && awk 'BEGIN { for (i = 0; i < 4000; i++) printf "{\"card\":\"c20261101T000000-conveyor-belt-%d\",\"issue\":%d,\"step\":\"landed\"}\n", i, i }' > "$ST/archive/ended.jsonl"
+  jq -cn --arg ok "$(qrec 2)" --arg bad "$(qrec 4 ',"later":1')" --arg gone "$r5" '{line: 2, field: "rerun", time: "2026-11-02T00:00:00Z", record: $ok},
+    {line: 3, field: "later", time: "2026-11-02T00:00:00Z", record: $bad}, {line: 5, field: "rerun", time: "2026-11-02T00:00:00Z", record: $gone}' > "$ST/quarantined.jsonl"
+  out=$(loop cards 2> "$STUB/cards.err") || fail "cards failed with a set-aside record the check accepts: $(cat "$STUB/cards.err")"; err=$(cat "$STUB/cards.err")
+  jq -e '.cards | any(.card == "c0-2")' <<<"$out" > /dev/null || fail "cards left out the record its own check put back: $out"
+  [ "$(jq -r .card "$ST/cards.jsonl" | tr '\n' ' ')" = 'c0-1 c0-2 c0-3 ' ] || fail "the accepted record is not back in the records at its time place: $(cat "$ST/cards.jsonl")"
+  grep -qF 'a set-aside record of card c0-2 passes the record check now' <<<"$err" || fail "the check did not name the record it put back: $err"
+  grep -qF "card c0-5 passes the record check now, but the card's lines have left" <<<"$err" || fail "the check did not name the record it kept for its card's move: $err"
+  [ "$(jq -sc 'map(.record | fromjson | .card)' "$ST/quarantined.jsonl")" = '["c0-4","c0-5","c"]' ] \
+    || fail "the quarantine does not hold the refused record, the moved card's record and the line with no time: $(cat "$ST/quarantined.jsonl")"
+  loop health 2> /dev/null | jq -e '.quarantined | map(.line) == [3, 5, 2]' > /dev/null || fail "health does not name only the records still set aside: $(loop health 2>&1)"
+}
+
+# Bug (#1791, review 2): the snapshot put the record back after snapcopy() had read the pushes, so a push line put back
+# was in the card rows but not in the day's push count.
+t_recputbacksnap() {
+  local now r out
+  setup '[]'; now=$(date -u +%FT%TZ)
+  r="{\"card\":\"cP\",\"issue\":9,\"step\":\"picked\",\"time\":\"$now\",\"tokens\":{\"claude\":0,\"codex\":0},\"result\":\"ok\",\"sha\":\"\",\"reason\":\"\"}"
+  echo "$r" > "$ST/cards.jsonl"
+  r=${r/picked/pushed}; jq -cn --arg ok "${r%\}},\"head\":\"cP\"}" '{line: 2, field: "head", time: "2026-11-02T00:00:00Z", record: $ok}' > "$ST/quarantined.jsonl"
+  out=$(loop snapshot --fresh 2> "$T/$CASE/snap.err" | jq -c '.metrics.today.pushes.ok') && [ "$out" = 1 ] \
+    || fail "the snapshot's push count of today is $out, not 1, with the push line it put back: $(cat "$T/$CASE/snap.err")"
+  [ "$(jq -r .step "$ST/cards.jsonl" | tr '\n' ' ')" = 'picked pushed ' ] || fail "the push line is not back in the records: $(cat "$ST/cards.jsonl")"
+}
+
+# flocking <pid> <fd>: a process under <pid> waits on, or holds, `flock <fd>`.
+flocking() {
+  ps -A -ww -o pid=,ppid=,args= | awk -v r="$1" -v fd="$2" '{ p[NR] = $1; pp[NR] = $2; $1 = $2 = ""; a[NR] = $0 }
+    END { t[r] = 1; do { n = 0; for (i = 1; i <= NR; i++) if ((pp[i] in t) && !(p[i] in t)) { t[p[i]] = 1; n = 1 } } while (n)
+      for (i = 1; i <= NR; i++) if ((p[i] in t) && a[i] ~ ("^ *flock " fd " *$")) f = 1; exit !f }'
+}
+
+# Bug (#1791, review 2): two checks at once shared the put-back's files ($STATE.qkeep among them). What must stay true:
+# a refused record stays in $QUARANTINE, whatever another check does. The other writer: a second `conveyor.sh check`,
+# whose first pass removed and wrote those files with no lock. The first check is held at the weak point (it has split
+# the set-aside records under the records' lock and waits for $STATE.checked.lock, which this test holds); the second
+# then runs its first pass, made to fail by an ended list it cannot read, and waits for the same lock. The first then
+# put back the accepted record and removed $QUARANTINE, as its list of those to keep was gone. Real processes, as only
+# two checks at once show it.
+t_recputbackrace() {
+  local d=$T/$CASE a b
+  setup '[]'
+  printf '%s\n' "$(qrec 1)" "$(qrec 3)" > "$ST/cards.jsonl"
+  jq -cn --arg ok "$(qrec 2)" --arg bad "$(qrec 4 ',"later":1')" '{line: 2, field: "rerun", time: "2026-11-02T00:00:00Z", record: $ok},
+    {line: 3, field: "later", time: "2026-11-02T00:00:00Z", record: $bad}' > "$ST/quarantined.jsonl"
+  ( flock 9 && : > "$d/held" && wait_until '[ -e "$d/go" ]' ) 9>>"$ST/cards.jsonl.checked.lock" &
+  wait_until '[ -e "$d/held" ]' || fail "the test never took the lock on the checked file"
+  (loop check > "$d/a.out" 2>&1; echo $? > "$d/a.rc") & a=$!
+  wait_until "[ -s '$d/a.rc' ] || flocking $a 5" || { : > "$d/go"; wait; fail "the first check never waited for the checked file's lock"; }
+  [ ! -s "$d/a.rc" ] || { : > "$d/go"; wait; fail "the first check ended while the checked file's lock was held: $(cat "$d/a.out")"; }
+  mkdir -p "$ST/archive/ended.jsonl"
+  (loop check > "$d/b.out" 2>&1; echo $? > "$d/b.rc") & b=$!
+  wait_until "[ -s '$d/b.rc' ] || flocking $b 5" || { : > "$d/go"; wait; fail "the second check never waited for the checked file's lock"; }
+  rmdir "$ST/archive/ended.jsonl"; : > "$d/go"; wait
+  [ "$(cat "$d/a.rc")" = 0 ] || fail "the first check failed (exit $(cat "$d/a.rc")): $(cat "$d/a.out")"
+  [ "$(jq -r .card "$ST/cards.jsonl" | tr '\n' ' ')" = 'c0-1 c0-2 c0-3 ' ] || fail "the accepted record is not back in the records at its time place: $(cat "$ST/cards.jsonl")"
+  [ "$(jq -sc 'map(.record | fromjson | .card)' "$ST/quarantined.jsonl" 2>&1)" = '["c0-4"]' ] \
+    || fail "the refused record is not kept in the quarantine after a second check ran beside the put-back: $(cat "$ST/quarantined.jsonl" 2>&1); second check: $(cat "$d/b.out")"
+}
+
+# Bug (#1791, review 2): the put-back's first pass wrote three files even when every set-aside record was still
+# refused. With the state folder made read-only after a first check, a second check that has nothing to put back must
+# still pass, with no complaint that it cannot test the records.
+t_recputbackread() {
+  local out rc
+  setup '[]'
+  printf '%s\n' "$(qrec 1)" > "$ST/cards.jsonl"
+  jq -cn --arg bad "$(qrec 4 ',"later":1')" '{line: 2, field: "later", time: "2026-11-02T00:00:00Z", record: $bad}' > "$ST/quarantined.jsonl"
+  out=$(loop check 2>&1) || fail "the first check failed: $out"
+  chmod a-w "$ST"; out=$(loop check 2>&1); rc=$?; chmod u+w "$ST"
+  [ $rc = 0 ] && [ -z "$out" ] || fail "a check with nothing to put back, in a read-only state folder, failed or wrote something (exit $rc): $out"
+}
+
+# Bug (#1791, review): what is set aside can change while the put-back waits for the records' lock (a quarantine()
+# under that lock): a put-back that wrote $QUARANTINE from its read before the lock lost what was added. Another
+# process holds the records' lock and adds an entry once the check's flock is seen waiting under it: a real process,
+# as only two processes at once show what the waiting one reads. The entry added is put back too, and with none left,
+# $QUARANTINE is removed.
+t_recputbacklock() {
+  local d=$T/$CASE
+  setup '[]'
+  printf '%s\n' "$(qrec 1)" "$(qrec 3)" > "$ST/cards.jsonl"
+  jq -cn --arg ok "$(qrec 2)" '{line: 2, field: "rerun", time: "2026-11-02T00:00:00Z", record: $ok}' > "$ST/quarantined.jsonl"
+  ( flock 9 && : > "$d/held" && wait_until '[ -e "$d/go" ]' && jq -cn --arg ok "$(qrec 4)" '{line: 3, field: "rerun", time: "2026-11-02T00:00:00Z", record: $ok}' >> "$ST/quarantined.jsonl" ) 9>>"$ST/cards.jsonl" &
+  wait_until '[ -e "$d/held" ]' || fail "the other process never took the records' lock"
+  (loop check > "$d/check.out" 2>&1; echo $? > "$d/check.rc") &
+  # The check's flock on the records' lock, under the check, or the check's end.
+  wait_until "[ -s '$d/check.rc' ] || flocking $! 9"
+  [ ! -s "$d/check.rc" ] || { : > "$d/go"; wait; fail "the check ended while another process held the records' lock: $(cat "$d/check.out")"; }
+  : > "$d/go"; wait
+  [ "$(cat "$d/check.rc")" = 0 ] || fail "the check failed (exit $(cat "$d/check.rc")): $(cat "$d/check.out")"
+  [ "$(jq -r .card "$ST/cards.jsonl" | tr '\n' ' ')" = 'c0-1 c0-2 c0-3 c0-4 ' ] || fail "the records do not hold both records put back, at their time place: $(cat "$ST/cards.jsonl")"
+  [ ! -e "$ST/quarantined.jsonl" ] || fail "the quarantine file is left with nothing set aside: $(cat "$ST/quarantined.jsonl")"
+}
+
 # A card whose build session fails after changing a file: its blocked line, with its kept patch, the files it changed,
 # the end of what the session said and what it spent, checks.
 t_recblocked() {
