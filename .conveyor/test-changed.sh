@@ -1547,9 +1547,41 @@ shellcases() { # <shell test files>
 }
 # casefiles <cases>: the engine case files that hold any of the cases (words), one a line.
 casefiles() { [ -n "${1// /}" ] && grep -lE "^t_($(tr ' ' '\n' <<<"$1" | grep . | paste -sd'|' -))\(\) \{" conveyor/tests/*.test.sh; }
-pick "${changed[@]}"
-for f in "${!conly[@]}"; do echo "comment-only change: $f, no tests selected"; done | LC_ALL=C sort
-covrules
+# The selection of a tree is made once a test step, as its checks are (above): a one-file run of the loop's test step
+# keeps it in sel/<treekey>.vars and what it printed in sel/<treekey>.out of the step's log folder, and a later
+# one-file run of that tree reads them and says so. Kept: each variable the selection set or changed (selsnap before
+# and after it; so none it sets is missed). With flock, the runs that start side by side wait for the first to make
+# it. What a run again adds (freshen, below) each run makes from its own list. Bug: each one-file run made the whole
+# selection again, 26 s of clock for a file that then ran no case, and a step has a run for each file.
+selmake() {
+  pick "${changed[@]}"
+  for f in "${!conly[@]}"; do echo "comment-only change: $f, no tests selected"; done | LC_ALL=C sort
+  covrules
+}
+# selsnap: each variable as bash declares it, a line of one \001 character after each; not bash's own, which change by
+# themselves or cannot be set, nor those of the block below.
+selsnap() {
+  local n
+  for n in $(compgen -v); do
+    case $n in BASH*|EPOCH*|FUNCNAME|GROUPS|DIRSTACK|PIPESTATUS|RANDOM|SRANDOM|SECONDS|LINENO|COMP_*|EUID|UID|PPID|SHELLOPTS|_|n|sk|sl) ;;
+      *) declare -p "$n" 2> /dev/null && printf '\001\n' ;; esac
+  done
+}
+sk=; sl=; [ -z "$ck" ] || sk=${ck%/checks/*}/sel/$tk
+if [ -n "$sk" ] && mkdir -p "${sk%/*}"; then
+  ! command -v flock > /dev/null 2>&1 || { exec {sl}> "$sk.lock" && flock "$sl"; } 2> /dev/null || sl=
+  if [ -s "$sk.vars" ] && [ -f "$sk.out" ]; then
+    # shellcheck disable=SC1090 # the file this script wrote: the declarations selsnap printed
+    . "$sk.vars"; cat "$sk.out"
+    echo "test-changed: the selection of this tree was made before this one-file run of this step (an earlier one): it is kept"
+  else
+    selsnap > "$sk.was.$$"; selmake > "$sk.out.$$"; cat "$sk.out.$$"; selsnap > "$sk.now.$$"
+    jq -rn --rawfile b "$sk.was.$$" --rawfile a "$sk.now.$$" '($a | split("\u0001\n")) - ($b | split("\u0001\n")) | .[]' > "$sk.vars.$$" 2> /dev/null \
+      && [ -s "$sk.vars.$$" ] && mv "$sk.out.$$" "$sk.out" && mv "$sk.vars.$$" "$sk.vars"
+    rm -f "$sk.was.$$" "$sk.now.$$" "$sk.out.$$" "$sk.vars.$$"
+  fi
+  [ -z "$sl" ] || exec {sl}>&-
+else selmake; fi
 # The tests the engine chose for the change (#150): a card's run is given them in the file CONVEYOR_TEST_FILELIST names
 # (conveyor/lib/testrun.sh testonce()), one path a line (testsel(), reading .conveyor/engine-areas.json through
 # conveyor/lib/testmap.sh mapread(), as a user's card reads its map); so is each one-file run (ONE) of the loop of

@@ -149,6 +149,27 @@ printf 'conveyor/tests/%s.test.sh\n' a b d > "$F/fl"; rm -f "$F/nc" "$F/ls"
 grep -qxF 'test-changed: --file: the coverage map selects none of the cases of conveyor/tests/b.test.sh for this change: none run' "$F/out" \
   && ok "a one-file run of a file the list mode names so runs no case" || no "a one-file run of b.test.sh, line 4 of big() changed: $(cat "$F/out")"
 git -C "$R" checkout -q -- conveyor/lib/f.sh
+# The selection of a tree is made once a step: two one-file runs of a.test.sh in one step's log folder run the same
+# two cases, and the second says it kept the selection; a third, of another tree (line 6 changed too), makes its own
+# and runs each case. Bug it catches: each one-file run made the whole selection again (26 s each on card 1829).
+sed -i.bak '4s/echo x/echo X/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
+rm -rf "$F/log"; mkdir "$F/log"
+onerun() {
+  : > "$F/log/test-changed.log"; (cd "$R" && CONVEYOR_TEST_LOG=$F/log bash .conveyor/test-changed.sh --file conveyor/tests/a.test.sh) > "$F/one$1" 2>&1
+  sed -n 's/^TESTRUN case	conveyor\/tests\/a.test.sh	//p' "$F/log/test-changed.log" | LC_ALL=C sort | paste -sd ' ' -
+}
+kept='test-changed: the selection of this tree was made before this one-file run of this step (an earlier one): it is kept'
+got=$(onerun 1); got2=$(onerun 2)
+[ "$got" = "c01 c02" ] && [ "$got2" = "c01 c02" ] && ! grep -qxF "$kept" "$F/one1" && grep -qxF "$kept" "$F/one2" \
+  && grep -qxF 'coverage map rule: conveyor/lib/f.sh big(): lines' "$F/one2" \
+  && [ "$(grep -vxF "$kept" "$F/one2" | grep -v '^test-changed: the checks of this tree')" = "$(grep -v '^test-changed: the checks of this tree' "$F/one1")" ] \
+  && ok "a second one-file run of a tree in a step keeps the first one's selection, and runs and prints the same" \
+  || no "two one-file runs of a.test.sh, line 4 of big() changed: ran '$got' and '$got2': first: $(cat "$F/one1"); second: $(cat "$F/one2")"
+sed -i.bak '6s/echo y/echo Y/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
+got=$(onerun 3); want=$(seq -w 1 60 | sed 's/^/c/' | paste -sd ' ' -)
+[ "$got" = "$want" ] && ! grep -qxF "$kept" "$F/one3" && ok "a one-file run of another tree makes its own selection" \
+  || no "a one-file run after line 6 changed too: ran '$got': $(cat "$F/one3")"
+git -C "$R" checkout -q -- conveyor/lib/f.sh
 # A change outside every function is not the map's to pick: the link runs the case file whole.
 sed -i.bak '1s/^/X=1\n/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
 got=$(cases); want=$(seq -w 1 60 | sed 's/^/c/' | paste -sd ' ' -)
