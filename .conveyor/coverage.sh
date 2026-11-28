@@ -108,7 +108,7 @@ covwrite() (
 if [ "${1:-}" = --write ]; then covwrite "$2" "$3" "$4" "${5:-}" "${6:-}"; exit; fi
 [ -f .conveyor/test-changed.sh ] || { echo "coverage.sh: run it from the checkout's root" >&2; exit 2; }
 # timeout, on macOS too.
-. conveyor/lib/portable.sh && p_tools || exit 1
+. conveyor/lib/portable.sh && p_tools && . conveyor/lib/loadfactor.sh || exit 1
 # The units at once: half the cores, as the slots read them (portable.sh p_ncpu), at least 1. A fixed 4 left a
 # 32-core machine three quarters idle and took two hours on a 16-thread one.
 JOBS=${COVERAGE_JOBS:-$(( $(p_ncpu || echo 2) / 2 ))}
@@ -117,8 +117,10 @@ TR=$(mktemp -d "${TMPDIR:-/tmp}/coverage.XXXXXX") || exit 1
 trap 'rm -rf "$TR"' EXIT
 traced=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 cat > "$TR/env.sh" <<'EOF'
-if [ -n "${COVERAGE_LOG:-}" ] && exec {COVERAGE_FD}>>"$COVERAGE_LOG"; then
-  BASH_XTRACEFD=$COVERAGE_FD; PS4=$'\001${BASH_SOURCE[0]-}\t${FUNCNAME[0]-}\t${LINENO}\002'; set -x
+if [ -n "${COVERAGE_LOG:-}" ]; then
+  for COVERAGE_FD in /dev/fd/*; do COVERAGE_FD=${COVERAGE_FD##*/}; [ "/dev/fd/$COVERAGE_FD" -ef "$COVERAGE_LOG" ] && break; COVERAGE_FD=; done
+  [ -n "$COVERAGE_FD" ] || exec {COVERAGE_FD}>>"$COVERAGE_LOG" || COVERAGE_FD=
+  [ -z "$COVERAGE_FD" ] || { BASH_XTRACEFD=$COVERAGE_FD; PS4=$'\001${BASH_SOURCE[0]-}\t${FUNCNAME[0]-}\t${LINENO}\002'; set -x; }
 fi 2>/dev/null
 EOF
 
@@ -186,13 +188,28 @@ unit() {
     *.py) cmd=(python3 "$t") ;;
     *) cmd=(bash "$t") ;;
   esac
+  # The trace goes down a pipe ($TR/<n>.fifo), which one reader writes to the unit's log: a size limit a test sets
+  # (ulimit -f: test-share.sh, test-full.sh) caps the files a shell writes, the log too, and the first trace line past
+  # it killed that shell (SIGXFSZ), but it caps no pipe. This runner holds the pipe open while the unit runs (the unit
+  # does not get that descriptor), so the reader ends once the unit and all it started have closed it; one left
+  # running (an orphan) holds it, and the reader is stopped 10 s after the unit ends.
+  local w r i lf
+  mkfifo "$TR/$n.fifo" && { cat "$TR/$n.fifo" > "$TR/$n.log" & r=$!; } && exec {w}> "$TR/$n.fifo" || { echo 1 > "$TR/$n.rc"; return; }
   # The unit's own bash, first on its PATH: it sets the trace again in a bash started with env -i (above), and leaves
-  # a BASH_ENV a test set (a case's own hook) as it is.
-  mkdir -p "$TR/$n.bin" && printf '#!%s\n[ -n "${BASH_ENV:-}" ] || export COVERAGE_LOG=%q BASH_ENV=%q\nexec %q "$@"\n' "$BASH" "$TR/$n.log" "$TR/env.sh" "$BASH" \
-    > "$TR/$n.bin/bash" && chmod +x "$TR/$n.bin/bash" || { echo 1 > "$TR/$n.rc"; return; }
-  env PATH="$TR/$n.bin:$PATH" COVERAGE_LOG="$TR/$n.log" BASH_ENV="$TR/env.sh" ${c:+"CONVEYOR_SHELL_TEST_CASE=$c"} timeout 900 "${cmd[@]}" \
-    > "$TR/$n.out" 2>&1 < /dev/null
+  # a BASH_ENV a test set (a case's own hook) as it is. It runs bash under the name it was called by (bash), so a
+  # process list shows the command as the test started it (machinestray reads `bash <file> serve`).
+  mkdir -p "$TR/$n.bin" && printf '#!%s\n[ -n "${BASH_ENV:-}" ] || export COVERAGE_LOG=%q BASH_ENV=%q\nexec -a bash %q "$@"\n' "$BASH" "$TR/$n.fifo" "$TR/env.sh" "$BASH" \
+    > "$TR/$n.bin/bash" && chmod +x "$TR/$n.bin/bash" || { echo 1 > "$TR/$n.rc"; exec {w}>&-; return; }
+  # The unit's time limits scale as a loop's test run's do (CONVEYOR_LOAD_FACTOR, lib/loadfactor.sh): the machine's
+  # load factor as the unit starts, times the trace's own cost, 1.2 (a case traced alone ran 1.0 to 1.2 times as long
+  # as untraced, 2026-11-27), at most 3. The units run side by side, and 16 at once timed cases out.
+  lf=$(awk -v f="$(loadfactor)" 'BEGIN { f *= 1.2; if (f > 3) f = 3; printf "%.2f", f }')
+  env PATH="$TR/$n.bin:$PATH" COVERAGE_LOG="$TR/$n.fifo" BASH_ENV="$TR/env.sh" CONVEYOR_LOAD_FACTOR="$lf" ${c:+"CONVEYOR_SHELL_TEST_CASE=$c"} timeout 900 "${cmd[@]}" \
+    > "$TR/$n.out" 2>&1 < /dev/null {w}>&-
   echo $? > "$TR/$n.rc"; rm -rf "$TR/$n.bin"
+  exec {w}>&-
+  for ((i = 0; i < 100; i++)); do kill -0 "$r" 2>/dev/null || break; sleep 0.1; done
+  kill "$r" 2>/dev/null; wait "$r" 2>/dev/null; rm -f "$TR/$n.fifo"
   awk 'substr($0, 1, 1) == "\001" && (i = index($0, "\002")) { x = substr($0, 1, i - 1); sub(/^\001+/, "", x)
     if (x ~ /\t[^\t]+\t[0-9]+$/) print x }' "$TR/$n.log" 2>/dev/null | LC_ALL=C sort -u > "$TR/$n.fn"
   rm -f "$TR/$n.log"
