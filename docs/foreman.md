@@ -28,7 +28,9 @@ items to an archive file. The cap on the saved state counts only its open lines,
 lines go over the cap, the first try to end the turn is refused, with a request to mark the finished items and make
 the rest shorter. The next try ends the turn. The same first try is refused when an open line waits on something that is over: an
 issue it waits on ("after #<n> lands", "close #<n>") that is no longer open, or a path it says to remove that is gone,
-on this machine and on the build host. The request names each line and why.
+on this machine and on the build host. The request names each line and why. The open issues come from the last
+status that the Foreman kept. An issue that has a higher number than all the issues in that status is not checked on a
+line that you wrote after that status was made: the issue can be new. The next status checks it.
 
 Claude Code keeps the output of a hook over 10,000 characters out of the session. So the Foreman's start sends its text
 in two outputs, each kept short. The first holds the fixed text, the rules of auto mode, the standing kinds of routine,

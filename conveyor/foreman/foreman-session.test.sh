@@ -130,7 +130,7 @@ t_state_stop_over() {
   CASE=state-stop-over
   ready
   mkdir -p "$T/keep"
-  jq -n '{open: {issues: [{issue: 7}]}}' > "$FD/conveyor-snapshot-alpha.json"
+  jq -n '{open: {issues: [{issue: 7}]}, landed: [{issue: 10}]}' > "$FD/conveyor-snapshot-alpha.json"
   gone="- 2026-11-27 10:03 ET: OWED: remove $T/gone." close='- 2026-11-27 10:04 ET: OWED: close #9 once its fix is out.'
   printf '%s\n' '- 2026-11-27 10:00 ET: OWED after #7 lands: check its readers.' '- 2026-11-27 10:01 ET: OWED after #8 lands: check the archive.' \
     "- 2026-11-27 10:02 ET: OWED: remove worktree $T/keep once it lands." "$gone" "$close" '- DONE 2026-11-27 10:05 ET: close #10.' > "$FD/state.md"
@@ -147,7 +147,24 @@ t_state_stop_over() {
   out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state)
   jq -e '.decision == "block" and (.reason | contains("#7 is no longer open"))' <<<"$out" >/dev/null \
     || fail "state.md line [after #7 lands], with a snapshot of {open: {issues: []}}, did not refuse the stop: $out"
+  # Bug: an issue filed after the snapshot was built (above every number it names) was named "no longer open". The
+  # snapshot (10:05 ET) holds #12 open, so the limit is 12 and the line's #13, written after it, is not judged; its #11
+  # is. With no landed card above, a limit read from the landed list alone would let #11 through.
+  jq -n '{snapshotAt: "2026-11-27T15:05:00Z", open: {issues: [{issue: 7}, {issue: 12}]}, landed: [{issue: 5}]}' > "$FD/conveyor-snapshot-alpha.json"
+  echo '- 2026-11-27 10:06 ET: OWED: close #13 once it is fixed by hand, and after #11 lands.' > "$FD/state.md"
+  out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state)
+  r=$(jq -r 'select(.decision == "block") | .reason' <<<"$out" 2>/dev/null)
+  grep -qF '#11 is no longer open' <<<"$r" || fail "state.md line [close #13 ... after #11 lands], snapshot open [7, 12], did not refuse the stop for #11: $out"
+  ! grep -qF '#13 is no longer open' <<<"$r" || fail "state.md line [10:06 ET: close #13], #13 above every issue the snapshot of 10:05 ET names (7, 12, 5), was named: $r"
+  # Bug: #12, the highest open issue, was closed by hand; the next snapshot names nothing above 7, so a line written
+  # before that snapshot about #12 was let through as if #12 were filed after it.
+  jq -n '{snapshotAt: "2026-11-27T15:10:00Z", open: {issues: [{issue: 7}]}, landed: [{issue: 5}]}' > "$FD/conveyor-snapshot-alpha.json"
+  echo '- 2026-11-27 10:06 ET: OWED after #12 lands: check its readers.' > "$FD/state.md"
+  out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state)
+  jq -e '.decision == "block" and (.reason | contains("#12 is no longer open"))' <<<"$out" >/dev/null \
+    || fail "state.md line [10:06 ET: after #12 lands], snapshot of 10:10 ET with open [7], did not refuse the stop: $out"
   rm "$FD/conveyor-snapshot-alpha.json"
+  echo '- 2026-11-27 10:00 ET: OWED after #7 lands: check its readers.' > "$FD/state.md"
   out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state); [ -z "$out" ] || fail "state.md line [after #7 lands] was judged with no snapshot to read: $out"
 }
 # Bug: a path to remove is on the build host (askrun runs there over ssh), so one gone only here is not gone; and when

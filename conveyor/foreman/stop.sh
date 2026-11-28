@@ -49,16 +49,25 @@ block() {
 # characters>": <why>`, joined by "; "; nothing when none is. An issue it waits on ("after|once|when|until #<n>
 # lands|landed|closes|is closed", or "close #<n>") that no kept snapshot of this Foreman's records
 # ($FD/conveyor-snapshot-*.json, open.issues) holds open; a snapshot whose open.issues is empty holds none open, and with
-# no snapshot that has the list, no issue is judged. A path it says to remove ("remove [the] [worktree|clone|folder|file]
+# no snapshot that has the list, no issue is judged; nor is an issue above the highest number a snapshot names (open or
+# landed) on a line that may be newer than the oldest snapshot (its "YYYY-MM-DD HH:MM ET" time is not a full minute
+# before that snapshot's snapshotAt, or one of the two does not read). A path it says to remove ("remove [the] [worktree|clone|folder|file]
 # <path>") that is gone: from this machine, and from the host file's ssh target when it names one (askrun: the build
 # host's folders, /mnt/..., are not on this machine); when that host does not answer in 10 s, no path is judged.
 # Bug (the owner, 2026-11-27): finished items stayed open in state.md until it filled its cap again, as nothing but its
 # size was checked.
 overlines() {
-  local open l n p g c ids host gone='' asked=0 miss=() lost=() why=() res=()
+  local open l n p g c ids top built at host gone='' asked=0 miss=() lost=() why=() res=()
   open=$(cat)
   # ids: "read" for each snapshot that has the list, then the issues it holds open; empty when no snapshot has it.
   ids=$(jq -r '.open.issues | arrays | "read", (.[].issue? | numbers)' "$FD"/conveyor-snapshot-*.json 2>/dev/null)
+  # top: the highest issue number a snapshot names (open or landed); built: the oldest snapshot's snapshotAt, in epoch
+  # seconds. An issue above top, on a line written after a snapshot was built, may be filed after it, so its absence
+  # there says nothing (bug: #1840, filed 15 min after the snapshot, was named "no longer open"). A line written before
+  # the snapshot names an issue that was there then, so one above top is judged too: an issue closed by hand while
+  # it was the highest open one is in no snapshot built after.
+  top=$(jq -rs '[.[] | (.open.issues | arrays | .[].issue?), (.landed | arrays | .[].issue?) | numbers] | max // empty' "$FD"/conveyor-snapshot-*.json 2>/dev/null)
+  built=$(jq -rs '[.[] | .snapshotAt | strings | fromdate?] | min // empty' "$FD"/conveyor-snapshot-*.json 2>/dev/null)
   rmpaths() { grep -oiE 'remove (the )?(worktree |clone |folder |file )?(~|/)[^ ,;:()]*' | awk '{print $NF}' | sed -e 's/[.]$//' -e "s#^~#$HOME#"; }
   while IFS= read -r p; do [ -z "$p" ] || [ -e "$p" ] || miss+=("$p"); done < <(rmpaths <<<"$open" | sort -u)
   host=$(host_ssh)
@@ -71,9 +80,13 @@ overlines() {
     elif [ "$asked" = 1 ]; then ! grep -qxF -- "$p" <<<"$gone" || lost+=("$p"); fi
   done
   while IFS= read -r l; do
-    why=()
+    why=() at=''
     if [ -n "$ids" ]; then
+      # at: the line's time, in epoch seconds, kept only when its minute ended by the time the oldest snapshot was built.
+      [[ $l =~ ^-\ ([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2})\ ET[:\ ] ]] \
+        && at=$(TZ=America/New_York p_date "${BASH_REMATCH[1]}" +%s 2>/dev/null) && [ -n "$built" ] && [ $((at + 60)) -le "$built" ] || at=''
       for n in $(grep -oiE '(after|once|when|until|till) #[0-9]+ (lands|landed|closes|is closed)|close #[0-9]+' <<<"$l" | grep -oE '#[0-9]+' | tr -d '#' | sort -u); do
+        [ -n "$at" ] || [ -z "$top" ] || [ "$n" -le "$top" ] || continue
         grep -qx "$n" <<<"$ids" || why+=("#$n is no longer open")
       done
     fi
