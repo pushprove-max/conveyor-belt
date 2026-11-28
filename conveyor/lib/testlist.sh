@@ -760,7 +760,8 @@ changelinks() { # <worktree> [all]
 # none of them, so none starts: bug, each linked test file started, and its one-file run made the selection again,
 # found no case of the file and passed (4 files of card 1829). A file the command leaves off its list is not taken
 # off for that: a command that does not know the variable writes no such file, and each file stays. Never one of the
-# card's own test files (own), which run the cases the card names (TEST_CASES).
+# card's own test files (own), which run the cases the card names (TEST_CASES). The same start of the command gives
+# ALSOADD (alsoin(), below).
 # nocaseout <array>: takes the files of NOCASEOFF off the array (listcmd()'s fs, or its lk).
 nocaseout() {
   local -n arr=$1
@@ -771,17 +772,41 @@ nocaseout() {
 }
 nocaseask() { # <worktree> <testsel's output>
   local cmd tc c
-  NOCASEOFF=''
+  NOCASEOFF=''; ALSOADD=''
   packget test.changed tc && [ -n "$tc" ] && packget test.command cmd && [ -n "$cmd" ] || return 0
   c=$(git -C "$1" -c core.quotePath=false diff --cached --name-status --no-renames HEAD -- 2>/dev/null) || c=''
-  rm -f "$1.nocase" "$1.capsel"
+  rm -f "$1.nocase" "$1.capsel" "$1.also"
   { [[ $2 != *$'\n'* ]] || printf '%s\n' "${2#*$'\n'}"; changelinks "$1"; [ ! -s "$TESTCACHE" ] || [ -z "$c" ] || cachereaders "$c"; } \
     | grep . | LC_ALL=C sort -u > "$1.capfiles"
-  [ -s "$1.capfiles" ] \
-    && (cd "$1" && CONVEYOR_TEST_LIST=$1.capsel CONVEYOR_TEST_NOCASE=$1.nocase CONVEYOR_TEST_RERUN='' CONVEYOR_TEST_FILELIST=$1.capfiles CONVEYOR_TEST_CASES=${TEST_CASES:-} CONVEYOR_TEST_LOG='' \
-      timeout 300 bash -c "$cmd" > /dev/null 2>&1 < /dev/null 8>&-) && [ -f "$1.capsel" ] && [ -s "$1.nocase" ] \
-    && NOCASEOFF=$(grep -xF -f "$1.capfiles" "$1.nocase" | grep -vxF -f <(printf '%s\n' "${own[@]}") | LC_ALL=C sort -u)
-  rm -f "$1.nocase" "$1.capsel" "$1.capfiles"
+  # With no file the list could hold, the command gets no file list (its own selection), and is still asked for ALSOADD.
+  if (cd "$1" && CONVEYOR_TEST_LIST=$1.capsel CONVEYOR_TEST_NOCASE=$1.nocase CONVEYOR_TEST_ALSO=$1.also CONVEYOR_TEST_RERUN='' \
+      CONVEYOR_TEST_FILELIST=$([ ! -s "$1.capfiles" ] || echo "$1.capfiles") CONVEYOR_TEST_CASES=${TEST_CASES:-} CONVEYOR_TEST_LOG='' \
+      timeout 300 bash -c "$cmd" > /dev/null 2>&1 < /dev/null 8>&-) && [ -f "$1.capsel" ]; then
+    [ ! -s "$1.nocase" ] || NOCASEOFF=$(grep -xF -f "$1.capfiles" "$1.nocase" | grep -vxF -f <(printf '%s\n' "${own[@]}") | LC_ALL=C sort -u)
+    [ ! -s "$1.also" ] || ALSOADD=$(awk -F'\t' '$1 != "" && NF <= 2' "$1.also" | LC_ALL=C sort -u)
+  fi
+  rm -f "$1.nocase" "$1.capsel" "$1.capfiles" "$1.also"
+}
+# ALSOADD: the test files the changed-tests command names for the change in the file CONVEYOR_TEST_ALSO names, when
+# nocaseask() asks it (#1829): a line `<file>` for a file to run whole, or `<file><TAB><case>` for each case of it to
+# run. They are tests the command knows and the engine cannot (the tests that name a changed page). alsoin <worktree>
+# adds each to the list (fs) that is a test file there, that the list does not hold and that is no file of no case
+# (NOCASEOFF). ALSON: how many it added; ALSOCASES: the lines of each one all of whose lines name a case, which
+# listcmd() adds to TEST_CASES, so the file runs those cases as a card's own changed cases run. One the list holds
+# already stays as it is listed. Bug: the engine took a file the command adds only into a list of more than 5 files
+# that the command narrowed (selfirst()), so a card that changed only a page ran none of the cases that read it.
+alsoin() { # <worktree>
+  local f l
+  ALSON=0; ALSOCASES=''
+  [ -n "${ALSOADD:-}" ] || return 0
+  while IFS= read -r f; do
+    [ -n "$f" ] && [ -f "$1/$f" ] || continue
+    ! grep -qxF -- "$f" <<<"$(printf '%s\n' "${fs[@]}")" || continue
+    [ -z "${NOCASEOFF:-}" ] || ! grep -qxF -- "$f" <<<"$NOCASEOFF" || continue
+    fs+=("$f"); ALSON=$((ALSON + 1))
+    l=$(awk -F'\t' -v f="$f" '$1 == f' <<<"$ALSOADD")
+    grep -qvE $'^[^\t]+\t[^\t]+$' <<<"$l" || ALSOCASES+=$l$'\n'
+  done < <(cut -f1 <<<"$ALSOADD" | LC_ALL=C sort -u | testpaths)
 }
 # listcmd()'s capped list fs with each linked file (lk, listcmd()'s) added that the cap left out and that
 # changelinks() gives <worktree>'s change; KEPTLINKS: how many it added (bug: a change to foreman.sh alone ran 5 of

@@ -145,6 +145,21 @@ p_doctests() {
   grep -qxF conveyor/tests/wdoc.test.sh "$T/list" && grep -qxF .claude/scripts/__tests__/wall.test.mjs "$T/list" && ! grep -qF -e wnone.test.mjs -e wother.test.mjs "$T/list" \
     && ok "a changed page lists the test files that name its path or its folder's pages" \
     || no "docs/page.md changed: the list is '$(paste -sd ' ' "$T/list" 2>&1)', want wdoc.test.sh and wall.test.mjs, not wnone.test.mjs or wother.test.mjs: $(cat "$T/out")"
+  # The loop is handed the same tests with their cases (CONVEYOR_TEST_ALSO), and a one-file run that gets a case back
+  # from the loop (CONVEYOR_TEST_CASES) runs it alone, though the loop's list names the file. Bug it catches: a card
+  # that changed only a page ran none of the cases that read it, as the loop takes a file this script adds only into
+  # a list of more than 5 files that this script narrowed.
+  (cd "$R" && CONVEYOR_TEST_LIST=$T/list2 CONVEYOR_TEST_ALSO=$T/also bash .conveyor/test-changed.sh) > "$T/out" 2>&1
+  grep -qxF $'conveyor/tests/wdoc.test.sh\twdoc' "$T/also" && grep -qxF .claude/scripts/__tests__/wall.test.mjs "$T/also" \
+    && [ "$(grep -c wdoc.test.sh "$T/also")" = 1 ] && ! grep -qF -e wnone.test.mjs -e wnopass.test.mjs "$T/also" \
+    && ok "the list mode hands the loop the tests of a changed page, a case file with the cases that name it" \
+    || no "docs/page.md changed: the file of CONVEYOR_TEST_ALSO holds '$(paste -sd ' ' "$T/also" 2>&1)': $(cat "$T/out")"
+  rm -rf "$T/log"; mkdir "$T/log"; echo conveyor/tests/wdoc.test.sh > "$T/fl"
+  (cd "$R" && CONVEYOR_TEST_LOG=$T/log CONVEYOR_TEST_FILELIST=$T/fl CONVEYOR_TEST_CASES=$'conveyor/tests/wdoc.test.sh\twdoc' \
+    bash .conveyor/test-changed.sh --file conveyor/tests/wdoc.test.sh) > "$T/out" 2>&1
+  got=$(sed -n 's/^TESTRUN case\tconveyor\/tests\/wdoc.test.sh\t//p' "$T/log/test-changed.log" | paste -sd ' ' -)
+  [ "$got" = wdoc ] && ok "a one-file run that the loop gives the case back runs that case alone" \
+    || no "docs/page.md changed, wdoc.test.sh on the loop's list with the case wdoc: it ran '$got': $(cat "$T/out")"
   grep -qxF .claude/scripts/__tests__/wpass.test.mjs "$T/list" && ! grep -qF wnopass.test.mjs "$T/list" \
     && ok "a test file whose last pass did not read the changed page is not selected for naming it" \
     || no "docs/page.md changed, passes on record: the list is '$(paste -sd ' ' "$T/list" 2>&1)', want wpass.test.mjs and not wnopass.test.mjs: $(cat "$T/out")"

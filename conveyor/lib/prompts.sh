@@ -658,6 +658,10 @@ OWNWHOLE=', and <w> test file<s> whole'
 MAPOWN='<k> more test file<s> for the other files that the change touches'
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 MAPLEFT=' (<left> of the <all> did not run, as a card runs at most <max> of them, those that failed most recently first)'
+# Added to a card's list note (after "the card ran ", after ", and ", or as a sentence " It also ran ... .") when the
+# pack's changed-tests command names <k> test files for the change that the list did not hold (testlist.sh alsoin()).
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+ALSONAMED='<k> test file<s> that the test command names for the change'
 # What the bug-card check says when more test files are linked to its change than the pack's
 # test.cardFiles (testcap()).
 # shellcheck disable=SC2034 # used in lib/testrun.sh

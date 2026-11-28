@@ -223,6 +223,30 @@ t_testcacheownonce() {
   [ "$(grep -cxF own.test.sh "$T/$CASE/got")" = 1 ] && grep -qxF m1.test.sh "$T/$CASE/got" \
     || fail "the list does not hold the card's own test file once, with m1.test.sh: $(paste -sd ' ' "$T/$CASE/got" 2>&1): $(head -c 600 "$T/$CASE/run.out")"
 }
+# #1829: card c7 changes only d.md, which no map or link gives a test. The command of the changed tests names
+# l1.test.sh with its case ca and l2.test.sh whole in the file CONVEYOR_TEST_ALSO: both are on the list, l1.test.sh with
+# that case alone, and the note says so. With d.md linked to l1.test.sh, that file is on the list for the link and
+# runs whole: no case of it is named. Bug it catches: a card that changed only a page ran none of the cases that read
+# it, as a file the command adds was taken only into a list of more than 5 files that the command narrowed.
+t_testcachealso() {
+  setup '[]'
+  local w=$T/$CASE/cards/c7 i
+  for i in l1 l2; do echo x > "$R/$i.test.sh"; done; echo d > "$R/d.md"
+  printf '%s\n' 'ls | grep -E "^l[12][.]test" > "$CONVEYOR_TEST_LIST"' \
+    '[ -z "${CONVEYOR_TEST_ALSO:-}" ] || printf "l1.test.sh\tca\nl2.test.sh\n" > "$CONVEYOR_TEST_ALSO"' > "$R/sel.sh"
+  cachelistsetup l1.test.sh l2.test.sh d.md sel.sh
+  tune '.test.changed = "sel.sh" | .test.command = "bash sel.sh"'
+  echo two >> "$w/d.md" && git -C "$w" add -A || fail "the card's change could not be staged"
+  LASTPASS=$'z.test.sh\tz.txt' cachelistrun 'listcmd "$wt" && echo $TEST_FILES > "$T/$CASE/got"; printf "%s" "$TEST_CASES" > "$T/$CASE/cs"; jq -c "[.files, .cases, .why]" "$wt.testlist" > "$T/$CASE/rec"'
+  [ "$(tr ' ' '\n' < "$T/$CASE/got" | sort | paste -sd ' ' -)" = "l1.test.sh l2.test.sh" ] && [ "$(cat "$T/$CASE/cs")" = $'l1.test.sh\tca' ] \
+    && [ "$(cat "$T/$CASE/rec")" = '[2,[{"file":"l1.test.sh","case":"ca"}],"the card ran 2 test files that the test command names for the change"]' ] \
+    || fail "the list of a change to d.md is not the two files the command names, l1.test.sh with its case ca: $(cat "$T/$CASE/got" "$T/$CASE/cs" "$T/$CASE/rec" "$T/$CASE/run.out" 2>&1)"
+  linkset '{"d.md": ["l1.test.sh"]}'; cp "$R/.conveyor/test-links.json" "$w/.conveyor/test-links.json"
+  git -C "$w" reset -q && git -C "$w" add -f .conveyor/test-links.json && git -C "$w" commit -qm links && git -C "$w" add -A || fail "the card's links could not be set"
+  LASTPASS=$'z.test.sh\tz.txt' cachelistrun 'listcmd "$wt" && echo $TEST_FILES > "$T/$CASE/got2"; printf "%s" "$TEST_CASES" > "$T/$CASE/cs2"'
+  [ "$(tr ' ' '\n' < "$T/$CASE/got2" | sort | paste -sd ' ' -)" = "l1.test.sh l2.test.sh" ] && [ ! -s "$T/$CASE/cs2" ] \
+    || fail "with d.md linked to l1.test.sh, the list is not the two files, l1.test.sh whole: $(cat "$T/$CASE/got2" "$T/$CASE/cs2" "$T/$CASE/run.out" 2>&1)"
+}
 cachelistsetup() {
   git -C "$R" add -- "$@" && git -C "$R" commit -qm files || fail "main's files could not be committed"
   tune '.test.fileCommand = "true" | .tests.patterns = ["*.test.sh"]'

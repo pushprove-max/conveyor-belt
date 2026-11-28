@@ -443,7 +443,8 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # reports more: tests()). <report args> (reportask() files) go after the command, before each file's path. TEST_FAST is
 # `fast` when the command stops at its first failure (failfast()), else empty, as for a main-red fix card (in $MAINRED): cardland.sh redelse() needs a verdict of each case it fails.
 listcmd() { # <worktree> [report args]
-  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 KEPTLINKS=0 SELN=0 SELALL=0 own=() ms=() mall=0 mleft=0 mmax=0 NOCASEOFF=''
+  # shellcheck disable=SC2034 # ALSOADD is read by testlist.sh alsoin()
+  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 KEPTLINKS=0 SELN=0 SELALL=0 own=() ms=() mall=0 mleft=0 mmax=0 NOCASEOFF='' ALSOADD='' ALSON=0 ALSOCASES=''
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
   # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only while it is not set.
   # A suite runner (SUITERUNNERS) is on no list (#382): testpaths() leaves each off the card's own files, and
@@ -531,6 +532,13 @@ listcmd() { # <worktree> [report args]
       [ "$READLINKS" = 0 ] || CAPNOTE+=${READLINKED//'<k>'/$READLINKS}; }
   fi
   [ -z "${MAINFROM:-}" ] || [ ${#fs[@]} = 0 ] || while IFS= read -r f; do grep -qxF -- "$f" <<<"$(printf '%s\n' "${fs[@]}")" || fs+=("$f"); done < <(mainlinks "$1" "$MAINFROM")
+  # Each test file the changed-tests command names for the change beyond the list (testlist.sh alsoin(), #1829), with
+  # the cases it names of it (TEST_CASES); the note says how many (ALSONAMED).
+  alsoin "$1"
+  if [ "$ALSON" != 0 ]; then
+    TEST_CASES+=$ALSOCASES; c=${ALSONAMED/'<k>'/$ALSON}; c=${c/'<s>'/$([ "$ALSON" = 1 ] || echo s)}
+    case $CAPNOTE in '') CAPNOTE="the card ran $c" ;; *.) CAPNOTE+=" It also ran $c." ;; *) CAPNOTE+=", and $c" ;; esac
+  fi
   # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.
   [ -z "${TESTRUNNERS:-}" ] || rn=$(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | grep -xF -f <(printf '%s\n' "$TESTRUNNERS")) || rn=''
   jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" --argjson l "$CAPLEFT" --arg c "$CAPNOTE" --arg rn "$rn" --arg rf "$RUNNERFIX" --arg cs "$TEST_CASES" --arg nc "$NOCASEOFF" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end

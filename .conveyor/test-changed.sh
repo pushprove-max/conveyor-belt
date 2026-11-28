@@ -143,6 +143,11 @@ TCASES=${CONVEYOR_TEST_CASES:-}; unset CONVEYOR_TEST_CASES
 # (CONVEYOR_TEST_NOCASE, written in the list mode below; conveyor/lib/testlist.sh nocaseask() reads it and lists
 # none of them: issue 1829); unset, as the list is.
 NOCASE=${CONVEYOR_TEST_NOCASE:-}; unset CONVEYOR_TEST_NOCASE
+# The file the loop names for the test files this script adds for the change that no map, link or pass gives the loop
+# (CONVEYOR_TEST_ALSO, written in the list mode: DOCALSO, the tests that name a changed page; issue 1829), a line
+# `<file>` for a file to run whole or `<file><TAB><case>` for each case of it to run. The loop lists them
+# (conveyor/lib/testlist.sh alsoin()) and gives the cases back as the cases to run (TCASES); unset, as the list is.
+ALSO=${CONVEYOR_TEST_ALSO:-}; unset CONVEYOR_TEST_ALSO
 # onecases <engine case file> <chosen cases, words> [narrow]: the cases of that file a run of it alone runs, one a line:
 # the chosen ones it holds, else all its cases (with narrow, none: cnarrow, below), and of those the cases the loop
 # names of it (TCASES) when it names any. Fails when the file holds no case.
@@ -464,7 +469,7 @@ declare -A npart=() tparts=() twhole=()
 # covpick: each changed file whose tests the coverage map picked with no stale row (covof); COVCASES: the engine cases
 # the map holds as units, one a line (mapcases).
 declare -A larea=() covpick=() CALLERIN=()
-PICKALL=
+PICKALL=; DOCALSO=
 COVCASES=
 oparts=
 COVTESTS=
@@ -1466,8 +1471,8 @@ doctests() {
       (top ? index(x, "\001" d) : index(x, d) || (g != "" && index(x, g))) { print (n == "" ? "-" : n) }' "$t" | LC_ALL=C sort -u)
     [ -n "$c" ] || continue
     case $t in
-      conveyor/tests/*.test.sh) if grep -qx -- - <<<"$c"; then area[$t]=1; else for c in $c; do ccase[$c]=1; done; fi ;;
-      *) run[$t]=1 ;;
+      conveyor/tests/*.test.sh) if grep -qx -- - <<<"$c"; then area[$t]=1; DOCALSO+=$t$'\n'; else for c in $c; do ccase[$c]=1; DOCALSO+=$t$'\t'$c$'\n'; done; fi ;;
+      *) run[$t]=1; DOCALSO+=$t$'\n' ;;
     esac
   done < <(git grep -lF -e "${d##*/}" ${g:+-e "$g"} -- '*.test.sh' '*.test.mjs' '*.test.py' '*.test.ts' '*.test.tsx' 2>/dev/null)
 }
@@ -1643,6 +1648,7 @@ if [ -n "$sk" ] && mkdir -p "${sk%/*}"; then
   fi
   [ -z "$sl" ] || exec {sl}>&-
 else selmake; fi
+[ -z "$ALSO" ] || [ -z "${CONVEYOR_TEST_LIST:-}" ] || printf '%s' "$DOCALSO" | LC_ALL=C sort -u > "$ALSO"
 # The tests the engine chose for the change (#150): a card's run is given them in the file CONVEYOR_TEST_FILELIST names
 # (conveyor/lib/testrun.sh testonce()), one path a line (testsel(), reading .conveyor/engine-areas.json through
 # conveyor/lib/testmap.sh mapread(), as a user's card reads its map); so is each one-file run (ONE) of the loop of

@@ -870,7 +870,9 @@ When the list leaves out a linked file, all the files on it run, also past the 5
 When the list keeps every linked file, 5 of them run.
 Before it makes the list, Conveyor also gives `test.command` the file `CONVEYOR_TEST_NOCASE`. A test file that the
 command writes there does not start, and the list names it in `noCase`. A test file that the command only leaves off
-its list stays.
+its list stays. In the same start, the command gets the file `CONVEYOR_TEST_ALSO`. Each test file that the command
+writes there runs too, also when the list holds 5 files or fewer: a line `<file>` for the whole file, or a line
+`<file><TAB><case>` for each case to run. The note of the list says how many files the command named.
 Then the files that failed most recently run. A change with no linked test file runs nothing and passes, its list
 `{"mode": "changed", "files": 0, ..., "why": "..."}`. When linked files are left out, the list has `left` (how many did not run) and a `why` that
 says the run before the push runs them all, except each one that passed before with the same inputs. The Board shows this note with the step. The live record and the test
