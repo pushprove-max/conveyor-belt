@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 120
+# timeout: 300
+# The limit is the whole file's in a card's test step (lib/fileeach.sh), where its cases wait for test slots and run one
+# at a time: two of them make 10 and 4 test runs, and one runs a whole card. 25 s run one after another with a load of
+# 10 on 16 cores, and past 120 s (times the load factor read as the run starts) on a busy step, so the file was stopped
+# at random with no case failed, once with steadypass still running (#1771).
 # Engine cases: the check of a Fix failures card (speedproof.sh steadyproof(), #188): its test file runs alone 10 times in a row with
 # the change, on a test slot, and every run must pass.
 # The runner, ../conveyor.test.sh, sources this file after the shared setup (lib.sh) and runs its cases; run alone, this
