@@ -903,7 +903,9 @@ It uses three rules, in this order:
 1. The coverage map (`.conveyor/coverage.jsonl`): the cases that ran each changed function when the map was made.
    For a function that more than 50 cases ran, the map also keeps the cases that ran each of its lines. A change to
    such a function runs only the cases that ran a changed line (the rule `lines`). A changed line that ran in no
-   case, as `else` or `fi`, counts as the nearest line before it and after it in the function that ran. A changed
+   case, as `else` or `fi`, counts as the nearest line before it and after it in the function that ran. A comment
+   line or a blank line that changes is not a changed line, and a function in which only such lines change selects
+   no case. A changed
    condition line (`if`, `elif`, `while`, `until`, `case`, or a line that ends in `&& {` or `|| {`) that more than
    50 cases ran runs only the cases that ran the code it guards (the rule `branch`). When no case ran that code, it
    runs the cases that ran the line. When main changed the function after the map was made, or the map has no line

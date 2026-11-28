@@ -875,7 +875,8 @@ textonly() {
 # a line that starts with `//` (not in CSS, where `//` is no comment and drops the next rule); in JS, TS and CSS a line
 # inside `/* */`, and in HTML inside `<!-- -->`, with nothing else on it. A line of a shell heredoc, of a Python triple-quoted string or of a JS template string
 # is data, and counted as code, though it starts with `#` or `//` or is blank. A block comment that opens after code on
-# a line is not followed: its next lines count as code.
+# a line is not followed: its next lines count as code. With keep, a comment or blank line is printed as one \001
+# character, so each line keeps its number (codehunks).
 CODE='function heredoc(x) {
   x = $0; gsub(/<<</, "", x)
   if (match(x, /<<-?[ \t]*[\047"\\]?[A-Za-z_0-9.-]+/)) { x = substr(x, RSTART, RLENGTH); hdt = (x ~ /^<<-/); sub(/^<<-?[ \t]*[\047"\\]?/, "", x); hd = x }
@@ -894,9 +895,9 @@ lang == "sh" && hd != "" { print; x = $0; if (hdt) sub(/^\t+/, "", x); if (x == 
 q != "" { print; x = $0; gsub(/\\./, "", x); if (gsub(q, "", x) % 2) q = ""; next }
 NR == 1 && /^#!/ { print; next }
 lang == "sh" && /^[ \t]*#[ \t]*shellcheck[ \t]/ { print; next }
-lang ~ /^(sh|py|yml)$/ && /^[ \t]*(#|$)/ { next }
-lang ~ /^(js|css)$/ && blk("/*", "*/") { next }
-lang == "html" && blk("<!--", "-->") { next }
+lang ~ /^(sh|py|yml)$/ && /^[ \t]*(#|$)/ { if (keep) print "\001"; next }
+lang ~ /^(js|css)$/ && blk("/*", "*/") { if (keep) print "\001"; next }
+lang == "html" && blk("<!--", "-->") { if (keep) print "\001"; next }
 { print; x = $0; gsub(/\\./, "", x)
   if (lang == "sh") heredoc()
   else if (lang == "py") { if (gsub(/"""/, "", x) % 2) q = "\"\"\""; else if (gsub(/\047\047\047/, "", x) % 2) q = "\047\047\047" }
@@ -1047,8 +1048,9 @@ callersof() {
   if [ -n "$TXTO" ]; then b=$(git show "$TXTO:$f" 2>/dev/null) && b=$(awk "$FUNCS" <<<"$b") || return 1
   else b=$(awk "$FUNCS" "$f") || return 1; fi
   ! grep -qx U <<<"$a"$'\n'"$b" || return 1
-  # The functions changed, added or removed: a K line on one side alone.
+  # The functions changed, added or removed: a K line on one side alone, less those whose code is the same (codefns).
   mapfile -t fn < <(grep '^K' <<<"$a"$'\n'"$b" | LC_ALL=C sort | uniq -u | cut -f2 | LC_ALL=C sort -u)
+  [ ${#fn[@]} = 0 ] || mapfile -t fn < <(codefns "$f" "$a" "$b" "${fn[@]}")
   [ ${#fn[@]} -gt 0 ] || return 1
   CFN=${fn[*]}
   sa=$(awk 'sub(/^S\t/, "")' <<<"$a" | awk -v lang=sh "$TEXT") && sb=$(awk 'sub(/^S\t/, "")' <<<"$b" | awk -v lang=sh "$TEXT") || return 1
@@ -1266,6 +1268,53 @@ function flush(   k) { if (!bad && !d && st == "" && hd == "") for (k in pend) o
   if (nexthd != "") hd = nexthd
 }
 END { flush(); for (k in out) print k "\t" out[k] }'
+# codehunks <lang> <file>: the hunks of the change of <file> (TXFROM to TXTO, or to the worktree) as its code changed,
+# old side, one `<start><TAB><count>` a line as covlines reads them (no count for 1 line; 0 for lines added after
+# <start>). Each side is read with its comment and blank lines emptied (CODE, keep), so a hunk of comment and blank
+# lines alone is none. A hunk that adds no code line (as many code lines on its old side as on its new, or more) is
+# its old code lines alone, one a line: a comment or blank line changed in it is no changed line. A hunk that adds
+# code keeps each of its old lines: the code it adds can stand at any of them. Bug (card 1798): a comment changed
+# above a changed line of control() (conveyor/lib/control.sh) stood as the line before it, the last line of the
+# branch above, so the 47 units that ran that branch ran for a change none of them reaches.
+codehunks() {
+  local r
+  diff -U0 <(git show "$TXFROM:$2" 2>/dev/null | awk -v lang="$1" -v keep=1 "$CODE") \
+    <(if [ -n "$TXTO" ]; then git show "$TXTO:$2" 2>/dev/null; else cat -- "$2" 2>/dev/null; fi | awk -v lang="$1" -v keep=1 "$CODE") \
+    | awk 'function flush(   i) {
+        if (h && nc > oc) print a "\t" (b == 1 ? "" : b)
+        else if (h) for (i = 1; i <= b; i++) if (o[i]) print a + i - 1 "\t"
+        h = 0
+      }
+      /^@@ / { flush(); h = 1; split($2, x, ","); a = substr(x[1], 2) + 0; b = (x[2] == "" ? 1 : x[2] + 0); k = oc = nc = 0; delete o; next }
+      !h { next }
+      /^-/ { k++; if ($0 != "-\001") { o[k] = 1; oc++ } next }
+      /^\+/ { if ($0 != "+\001") nc++ }
+      END { flush() }'
+  r=${PIPESTATUS[0]}; [ "$r" -le 1 ]
+}
+# fnrange <the file's text at TXFROM> <FUNCS output of it> <function>: the function's first and last line there, as
+# `<first> <last>`; fails when it cannot be found.
+fnrange() {
+  local s n
+  s=$(grep -nE "^(function[ \t]+)?${3}[ \t]*\(\)" <<<"$1" | head -n 1 | cut -d: -f1)
+  n=$(awk -F'\t' -v x="$3" '$1 == "K" && $2 == x { print split($3, l, "\001"); exit }' <<<"$2")
+  [ -n "$s" ] && [ -n "$n" ] && echo "$s $((s + n - 1))"
+}
+# codefns <file> <FUNCS output of it at TXFROM> <FUNCS output of its new side> <function>...: of those changed
+# functions (covof, callersof), the ones whose code changed, one a line: not a function both sides have with no hunk
+# of code in its lines at TXFROM (codehunks). Its comment and blank lines alone changed, so its change reaches no
+# test. Bug: a comment edited in one function, with code changed in another, ran each unit the map lists for the
+# first, or, when the map did not hold it, each test that names it. Each of them when the hunks cannot be read.
+codefns() {
+  local f=$1 a=$2 b=$3 hk src x s e
+  shift 3
+  hk=$(codehunks sh "$f") && src=$(git show "$TXFROM:$f" 2>/dev/null) || { printf '%s\n' "$@"; return; }
+  for x; do
+    read -r s e < <(fnrange "$src" "$a" "$x") && grep -q $'^K\t'"$x"$'\t' <<<"$b" \
+      && ! awk -F'\t' -v s="$s" -v e="$e" 'NF { c = ($2 == "" ? 1 : $2); hi = (c == 0 ? $1 + 1 : $1 + c - 1); if ($1 <= e && hi >= s) f = 1 }
+        END { exit !f }' <<<"$hk" || echo "$x"
+  done
+}
 # covlines <file> <FUNCS output of it at TXFROM> <function>... (issue 1830): of each function the map holds by its
 # lines (its `line` rows: coverage.sh, for a function more than 50 units ran), the units that ran a line the change
 # (TXFROM to TXTO) changed, into LOV ({<function>: [<unit>, ...]}), and `<file><TAB><function>` into COVLINES, so the
@@ -1279,23 +1328,18 @@ END { flush(); for (k in out) print k "\t" out[k] }'
 # or the commit is not here, main changed a line of the function since the trace, the change touches none of its
 # lines, or the map has no line row of it.
 covlines() {
-  local f=$1 a=$2 sha src d h x s e n delta lines g r q='{}'
+  local f=$1 a=$2 sha src d h x s e delta lines g r q='{}'
   shift 2
   [ $# -gt 0 ] || return 0
   sha=$(jq -rn '[inputs | objects | .sha? // empty] | first // empty' "$COV" 2>/dev/null)
   [ -n "$sha" ] && git cat-file -e "$sha^{commit}" 2>/dev/null && src=$(git show "$TXFROM:$f" 2>/dev/null) || return 0
-  # The change's hunks, old side (<start><TAB><count>, no count for 1), and main's from the map's commit to TXFROM
+  # The change's hunks as its code changed, old side (codehunks), and main's from the map's commit to TXFROM
   # (<old start><TAB><old count><TAB><new start><TAB><new count>).
-  if [ -n "$TXTO" ]; then d=$(git diff -U0 --no-color --no-ext-diff "$TXFROM" "$TXTO" -- "$f" 2>/dev/null)
-  else d=$(git diff -U0 --no-color --no-ext-diff "$TXFROM" -- "$f" 2>/dev/null); fi || return 0
-  d=$(sed -nE 's/^@@ -([0-9]+)(,([0-9]+))? .*/\1\t\3/p' <<<"$d")
+  d=$(codehunks sh "$f") || return 0
   h=$(git diff -U0 --no-color --no-ext-diff "$sha" "$TXFROM" -- "$f" 2>/dev/null) || return 0
   h=$(sed -nE 's/^@@ -([0-9]+)(,([0-9]+))? \+([0-9]+)(,([0-9]+))? .*/\1\t\3\t\4\t\6/p' <<<"$h")
   for x; do
-    s=$(grep -nE "^(function[ \t]+)?${x}[ \t]*\(\)" <<<"$src" | head -n 1 | cut -d: -f1)
-    n=$(awk -F'\t' -v x="$x" '$1 == "K" && $2 == x { print split($3, l, "\001"); exit }' <<<"$a")
-    [ -n "$s" ] && [ -n "$n" ] || continue
-    e=$((s + n - 1))
+    read -r s e < <(fnrange "$src" "$a" "$x") || continue
     lines=$(awk -F'\t' -v s="$s" -v e="$e" 'NF { c = ($2 == "" ? 1 : $2); lo = $1; hi = (c == 0 ? $1 + 1 : $1 + c - 1)
         for (i = lo; i <= hi; i++) if (i >= s && i <= e) print i }' <<<"$d" | LC_ALL=C sort -un | paste -sd, -)
     [ -n "$lines" ] || continue
@@ -1351,6 +1395,7 @@ covof() {
   sa=$(awk 'sub(/^S\t/, "")' <<<"$a" | awk -v lang=sh "$TEXT") && sb=$(awk 'sub(/^S\t/, "")' <<<"$b" | awk -v lang=sh "$TEXT") || return 1
   ! grep -qx U <<<"$sa"$'\n'"$sb" && [ "$sa" = "$sb" ] || return 1
   mapfile -t fn < <(grep '^K' <<<"$a"$'\n'"$b" | LC_ALL=C sort | uniq -u | cut -f2 | LC_ALL=C sort -u)
+  [ ${#fn[@]} = 0 ] || mapfile -t fn < <(codefns "$f" "$a" "$b" "${fn[@]}")
   [ ${#fn[@]} -gt 0 ] || return 1
   CFN=${fn[*]}
   # The functions TXFROM has (old) and the bodies of those the change leaves (kb). A function TXFROM has stands for

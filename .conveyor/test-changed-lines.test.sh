@@ -78,6 +78,26 @@ sed -i.bak '5s/else/else :/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.
 got=$(cases); want=$(seq -w 1 60 | sed 's/^/c/' | paste -sd ' ' -)
 [ "$got" = "$want" ] && ok "a changed line with no row (else) runs the cases of the lines around it" || no "line 5 (else) changed: ran '$got'"
 git -C "$R" checkout -q -- conveyor/lib/f.sh
+# Card 1798: a comment line changed beside a changed line of code is no changed line. A comment added after line 4
+# (the x path, which c01 and c02 ran) with a change to line 6 (the other path) runs the 58 cases of line 6. Bug it
+# catches: the comment stood as the lines around it, so the cases of the x path ran too (on the engine, a comment
+# changed above a changed line of control() ran the 47 units of the branch above it, none of which reaches the line).
+edit() { awk "$1" "$R/conveyor/lib/f.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/lib/f.sh"; } # <awk program>
+edit 'NR == 6 { sub(/echo y/, "echo Y") } { print } NR == 4 { print "    # a note" }'
+got=$(cases); want=$(seq -w 3 60 | sed 's/^/c/' | paste -sd ' ' -)
+[ "$got" = "$want" ] && grep -qxF 'coverage map rule: conveyor/lib/f.sh big(): lines' "$F/out" \
+  && ok "a comment added beside a changed line of code selects no case of its own" \
+  || no "a comment added after line 4 and line 6 of big() changed (run by c03 to c60): ran '$got': $(cat "$F/out")"
+git -C "$R" checkout -q -- conveyor/lib/f.sh
+# A function whose comment lines alone changed is no changed function: a comment added in gate(), which the map does
+# not hold, with a change to line 4 of big(), runs the two cases of that line. Bug it catches: gate() counted as
+# changed, the map had no row of it, and each test that names it ran (all 60 cases).
+edit 'NR == 4 { sub(/echo x/, "echo X") } { print } NR == 11 { print "    # a note" }'
+got=$(cases)
+[ "$got" = "c01 c02" ] && grep -qxF 'coverage map rule: conveyor/lib/f.sh big(): lines' "$F/out" && ! grep -qF 'gate()' "$F/out" \
+  && ok "a function whose comment lines alone changed selects no case" \
+  || no "a comment added in gate() and line 4 of big() changed (run by c01, c02): ran '$got': $(cat "$F/out")"
+git -C "$R" checkout -q -- conveyor/lib/f.sh
 # Issue 1829: a function the change adds to one file (added(), g.sh) and calls from a new line of a function of another
 # file (big(), f.sh, its line 4) is reached only through that line, whose cases the map gives: c01 and c02. Bug it
 # catches: callersof took big() as a caller of added() and ran each test file that holds the word `big`, whole: all 60
