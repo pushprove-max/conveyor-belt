@@ -662,6 +662,11 @@ MAPLEFT=' (<left> of the <all> did not run, as a card runs at most <max> of them
 # pack's changed-tests command names <k> test files for the change that the list did not hold (testlist.sh alsoin()).
 # shellcheck disable=SC2034 # used in lib/testrun.sh
 ALSONAMED='<k> test file<s> that the test command names for the change'
+# The last sentence of a card's list note when the change touches <files>, files that the test map marks as read by
+# most tests (testlist.sh sharedin()): the rule that lists each test file whose last pass read a changed file does not
+# apply to them, as it would list the whole suite.
+# shellcheck disable=SC2034 # used in lib/testrun.sh
+SHAREDREAD='The change touches <files>, which most tests read: no test file ran only because its last pass read such a file, and the whole-suite run of the release covers that change.'
 # What the bug-card check says when more test files are linked to its change than the pack's
 # test.cardFiles (testcap()).
 # shellcheck disable=SC2034 # used in lib/testrun.sh

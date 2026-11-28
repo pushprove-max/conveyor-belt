@@ -1070,7 +1070,10 @@ read a path that is not tracked (such as a file in `node_modules`). Conveyor kee
 test file off with it. A change to one of its inputs still adds the test file to a card's test list.
 A card's test list also gets each test file whose last kept pass read a file that the change touches, or listed a
 folder that the change adds a file to or deletes a file from. Such a file runs whole, also when the card's own change
-selects only some of its cases. When a fix, or a newer main, changes a file that a test file's last kept pass read,
+selects only some of its cases. This rule does not apply to a changed file that the test map marks as shared (a file
+of an area that runs all tests, or a file that more than half of the mapped tests touch): most last passes read such
+a file, and a card does not run the whole suite. The list names these files in `sharedRead`, and its note says that
+the whole-suite run of the release covers that change. When a fix, or a newer main, changes a file that a test file's last kept pass read,
 the card's next test run does not use the pass of that file from the card's earlier run. One exception applies to all
 of these rules, for an inputs line and a `TESTRUN reads` line alike: a change to an engine case file
 (`conveyor/tests/<name>.test.sh`) or to an engine library file (`conveyor/lib/<name>.sh`) does not add an engine case

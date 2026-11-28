@@ -435,7 +435,8 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # test map and the links give the changed files, up to CARDLINKED of them and each the changed-tests command selects when it narrows the list (testcap(); the output says so, LINKED, and
 # the list, {mode: "changed", files, by, left, why}, says how many were left out); notTests, [{file, why}], names each
 # test runner the change touches, RUNNERFIX, which is on no list: #350; noCase, [<file>], names each
-# file the changed-tests command says a run would start with no case, which is not listed: testlist.sh nocaseask(), #1829). <worktree>.testlist says which: {mode:
+# file the changed-tests command says a run would start with no case, which is not listed: testlist.sh nocaseask(), #1829;
+# sharedRead, [<file>], names each file of the change that most tests read, for which no test file was listed by its last pass: readersin()). <worktree>.testlist says which: {mode:
 # "changed", files: <count>, by: "own", "map" or "name", age: the commits the made test map is behind (only with
 # one)}. A list of none runs nothing (LISTNONE set; the list, {mode: "changed", files: 0, by, why}, says so). With no
 # test.fileCommand set, Conveyor's own runner runs each file (testlist.sh ownrunner()); when it has none for one of them, nothing
@@ -444,7 +445,7 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # `fast` when the command stops at its first failure (failfast()), else empty, as for a main-red fix card (in $MAINRED): cardland.sh redelse() needs a verdict of each case it fails.
 listcmd() { # <worktree> [report args]
   # shellcheck disable=SC2034 # ALSOADD is read by testlist.sh alsoin()
-  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 KEPTLINKS=0 SELN=0 SELALL=0 own=() ms=() mall=0 mleft=0 mmax=0 NOCASEOFF='' ALSOADD='' ALSON=0 ALSOCASES=''
+  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 KEPTLINKS=0 SELN=0 SELALL=0 own=() ms=() mall=0 mleft=0 mmax=0 NOCASEOFF='' ALSOADD='' ALSON=0 ALSOCASES='' READSHARED=''
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
   # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only while it is not set.
   # A suite runner (SUITERUNNERS) is on no list (#382): testpaths() leaves each off the card's own files, and
@@ -543,13 +544,20 @@ listcmd() { # <worktree> [report args]
     TEST_CASES+=$ALSOCASES; c=${ALSONAMED/'<k>'/$ALSON}; c=${c/'<s>'/$([ "$ALSON" = 1 ] || echo s)}
     case $CAPNOTE in '') CAPNOTE="the card ran $c" ;; *.) CAPNOTE+=" It also ran $c." ;; *) CAPNOTE+=", and $c" ;; esac
   fi
+  # The files of the change that most tests read (READSHARED, testlist.sh readersin()): no test file was listed only
+  # because its last pass read one, and the note says the release's whole run covers that change (SHAREDREAD).
+  if [ -n "$READSHARED" ]; then
+    c=${SHAREDREAD/'<files>'/$(paste -sd, - <<<"$READSHARED" | sed 's/,/, /g')}
+    case $CAPNOTE in '') CAPNOTE=$c ;; *.) CAPNOTE+=" $c" ;; *) CAPNOTE+=". $c" ;; esac
+  fi
   # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.
   [ -z "${TESTRUNNERS:-}" ] || rn=$(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | grep -xF -f <(printf '%s\n' "$TESTRUNNERS")) || rn=''
-  jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" --argjson l "$CAPLEFT" --arg c "$CAPNOTE" --arg rn "$rn" --arg rf "$RUNNERFIX" --arg cs "$TEST_CASES" --arg nc "$NOCASEOFF" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
+  jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" --argjson l "$CAPLEFT" --arg c "$CAPNOTE" --arg rn "$rn" --arg rf "$RUNNERFIX" --arg cs "$TEST_CASES" --arg nc "$NOCASEOFF" --arg sr "$READSHARED" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
     + if $n == 0 then {why: $w} elif $l > 0 then {left: $l, why: $c} else {} end
     + ([$cs | split("\n")[] | select(. != "") | split("\t") | {file: .[0], case: .[1]}] | if . == [] then {} else {cases: ., why: $c} end)
     + ([$rn | split("\n")[] | select(. != "") | {file: ., why: $rf}] | if . == [] then {} else {notTests: .} end)
-    + ([$nc | split("\n")[] | select(. != "")] | if . == [] then {} else {noCase: .} end)' > "$1.testlist" || return 1
+    + ([$nc | split("\n")[] | select(. != "")] | if . == [] then {} else {noCase: .} end)
+    + ([$sr | split("\n")[] | select(. != "")] | if . == [] then {} else {sharedRead: .} + (if $n == 0 then {} else {why: $c} end) end)' > "$1.testlist" || return 1
   [ ${#fs[@]} != 0 ] || { LISTNONE=1; return 0; }
   packget test.fileCommand fc || return 1
   [ -n "$fc" ] || fc=$(ownrunner "$1" "${fs[@]}") || { narrowstop "$fc" > "$1.stop"; return 1; }

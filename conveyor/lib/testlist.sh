@@ -218,11 +218,31 @@ cacheoff() { # <worktree>
 # already on the list with only some of its cases (TEST_CASES) runs whole: a case it does not name can read that file.
 # READADD: the files it added; READLINKS: how many of them are linked files (lk, listcmd()'s) the cap left out;
 # READWHOLE: set when it made one run whole (listcmd() counts these in its note).
+# sharedin <worktree> <changes>: of the files the change touches (name-status lines), those the test map marks as
+# shared (mapread()'s shared: a source of an area that runs all tests, or one that more than half the mapped tests
+# touch), one a line. The last pass of each test file read such a file (the engine's conveyor/tests/lib.sh, which
+# each case file sources), so by the rule of the last passes its change is a run of the whole suite, which a card
+# never makes: the release's whole run covers it, as for the map's own answer to such a change (testsel(): no test).
+# lessshared <worktree> <changes>: the changes less those lines.
+sharedin() {
+  local tm
+  tm=$(mapread "$1" 2>/dev/null) && [ -n "$tm" ] || return 0
+  cut -f2 <<<"$2" | grep -xF -f <(jq -r '.shared // [] | .[] | strings' <<<"$tm" 2>/dev/null) | LC_ALL=C sort -u
+}
+lessshared() {
+  local s
+  s=$(sharedin "$1" "$2")
+  if [ -z "$s" ]; then printf '%s\n' "$2"; else awk -F'\t' 'NR == FNR { s[$0] = 1; next } !($2 in s)' <(printf '%s\n' "$s") <(printf '%s\n' "$2"); fi
+}
 # shellcheck disable=SC2034,SC2154 # READWHOLE is read by listcmd() (lib/testrun.sh), and lk is its own
 readersin() { # <worktree>
   local f c
-  READADD=(); READWHOLE=''; READLINKS=0
+  READADD=(); READWHOLE=''; READLINKS=0; READSHARED=''
   [ -s "$TESTCACHE" ] && c=$(git -C "$1" -c core.quotePath=false diff --cached --name-status --no-renames HEAD -- 2>/dev/null) && [ -n "$c" ] || return 0
+  # Not for a file most tests read (sharedin(), above; READSHARED names them for the list's note, SHAREDREAD). Bug: a
+  # card that changed conveyor/tests/lib.sh ran 97 test files, 95 of them whole: each case file's last pass read it.
+  READSHARED=$(sharedin "$1" "$c"); [ -z "$READSHARED" ] || c=$(lessshared "$1" "$c")
+  [ -n "$c" ] || return 0
   while IFS= read -r f; do
     [ -f "$1/$f" ] || continue
     [ -z "${NOCASEOFF:-}" ] || ! grep -qxF -- "$f" <<<"$NOCASEOFF" || continue # a run would start it with no case (nocaseask())
@@ -775,6 +795,7 @@ nocaseask() { # <worktree> <testsel's output>
   NOCASEOFF=''; ALSOADD=''
   packget test.changed tc && [ -n "$tc" ] && packget test.command cmd && [ -n "$cmd" ] || return 0
   c=$(git -C "$1" -c core.quotePath=false diff --cached --name-status --no-renames HEAD -- 2>/dev/null) || c=''
+  [ -z "$c" ] || c=$(lessshared "$1" "$c") # as readersin() reads the change
   rm -f "$1.nocase" "$1.capsel" "$1.also"
   { [[ $2 != *$'\n'* ]] || printf '%s\n' "${2#*$'\n'}"; changelinks "$1"; [ ! -s "$TESTCACHE" ] || [ -z "$c" ] || cachereaders "$c"
     [ -z "${MAINFROM:-}" ] || mainlinks "$1" "$MAINFROM"; } | grep . | LC_ALL=C sort -u > "$1.capfiles"

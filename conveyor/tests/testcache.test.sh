@@ -270,6 +270,28 @@ t_testcachemainnocase() {
   [ "$(cat "$T/$CASE/got2")" = l1.test.sh ] && [ "$(cat "$T/$CASE/nc")" = '["m.test.sh"]' ] \
     || fail "with m.test.sh named as a file with no case, the list is not l1.test.sh alone: $(cat "$T/$CASE/got2" "$T/$CASE/nc" "$T/$CASE/run.out" 2>&1)"
 }
+# The owner, 2026-11-28: card c7 changes tests/lib.sh, a file of an area of the test map that runs all tests, which the
+# last pass of each of a, b and c.test.sh read, and e.txt, which the last pass of c.test.sh read. The list is
+# c.test.sh alone, and its record and note name tests/lib.sh as left to the release's whole run. A change to
+# tests/lib.sh alone lists no test file. Bug it catches: the rule of the last passes had no stop for a file that every
+# test reads, so a card that changed the engine cases' shared harness ran 97 test files, 95 of them whole.
+t_testcacheshared() {
+  setup '[]'
+  local w=$T/$CASE/cards/c7 i lp=$'a.test.sh\ttests/lib.sh\ta.txt\nb.test.sh\ttests/lib.sh\nc.test.sh\ttests/lib.sh\te.txt'
+  mkdir -p "$R/tests"; for i in a b c; do echo x > "$R/$i.test.sh"; done; echo l > "$R/tests/lib.sh"; echo a > "$R/a.txt"; echo e > "$R/e.txt"
+  printf '%s\n' '{"area": "core", "tests": "all"}' '{"area": "core", "file": "tests/lib.sh"}' '{"area": "a", "file": "a.txt"}' \
+    '{"area": "a", "test": "a.test.sh"}' > "$R/areas.json"
+  cachelistsetup a.test.sh b.test.sh c.test.sh tests/lib.sh a.txt e.txt areas.json; tune '.test.map = "areas.json"'
+  echo two >> "$w/tests/lib.sh" && echo two >> "$w/e.txt" && git -C "$w" add -A || fail "the card's change could not be staged"
+  LASTPASS=$lp cachelistrun 'listcmd "$wt" && echo $TEST_FILES > "$T/$CASE/got"; jq -c "[.files, .sharedRead, .why]" "$wt.testlist" > "$T/$CASE/rec"'
+  [ "$(cat "$T/$CASE/got")" = c.test.sh ] \
+    && [ "$(cat "$T/$CASE/rec")" = '[1,["tests/lib.sh"],"The change touches tests/lib.sh, which most tests read: no test file ran only because its last pass read such a file, and the whole-suite run of the release covers that change."]' ] \
+    || fail "a change to tests/lib.sh and e.txt did not list c.test.sh alone, with tests/lib.sh named as left to the release: $(cat "$T/$CASE/got" "$T/$CASE/rec" "$T/$CASE/run.out" 2>&1)"
+  git -C "$w" reset -q && git -C "$w" checkout -q e.txt && git -C "$w" add -A || fail "the card's change could not be made tests/lib.sh alone"
+  LASTPASS=$lp cachelistrun 'listcmd "$wt" && echo "[$TEST_FILES]" > "$T/$CASE/got2"; jq -c "[.files, .sharedRead]" "$wt.testlist" > "$T/$CASE/rec2"'
+  [ "$(cat "$T/$CASE/got2")" = '[]' ] && [ "$(cat "$T/$CASE/rec2")" = '[0,["tests/lib.sh"]]' ] \
+    || fail "a change to tests/lib.sh alone listed test files: $(cat "$T/$CASE/got2" "$T/$CASE/rec2" "$T/$CASE/run.out" 2>&1)"
+}
 cachelistsetup() {
   git -C "$R" add -- "$@" && git -C "$R" commit -qm files || fail "main's files could not be committed"
   tune '.test.fileCommand = "true" | .tests.patterns = ["*.test.sh"]'
