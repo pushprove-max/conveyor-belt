@@ -133,7 +133,8 @@ t_foremannote() {
   { head -n 1 "$ST/foreman-notes"; sed -n 2p "$ST/foreman-notes" | jq -c --arg k "$(c 16)" --arg d "$d" '.[$k].since = "\($d)T00:00:30Z"'; } > "$ST/n" && mv "$ST/n" "$ST/foreman-notes"
   # notes [<snapshot>]: {<card>: "<note>|<ask>|<since is a time>", or null with no note} for each blocked card of the
   # kept snapshot and of recordsNow. A plain read can start a build in the background, after which recordsNow is gone
-  # and the kept snapshot holds the cards it held: the two lists together say the same either way.
+  # and the kept snapshot holds the cards it held: the two lists together say the same either way, but for a retried
+  # card (c15, below): the kept needsYou.blocked holds it, with no note, until a build that began after the retry.
   notes() { jq -cS '[(.needsYou.blocked[], (.recordsNow.blocked // [])[]) | {(.card | sub(".*-"; "c")): (.foreman | if . then "\(.note)|\(.ask)|\(.since | test("^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ$"))" else null end)}] | add' <<<"${1:-$(loop snapshot)}"; }
   # The records not changed since the build (no recordsNow): the notes are on the kept snapshot's needsYou.blocked.
   snap=$(loop snapshot); out=$(notes "$snap")
@@ -181,6 +182,10 @@ t_foremannote() {
   loop foreman note sess-2 renew || fail "the renewal by sess-2 was refused"
   out=$(loop snapshot | jq -c '[(.needsYou.blocked[], (.recordsNow.blocked // [])[]) | select(.foreman != null) | .card]')
   [ "$out" = '[]' ] || fail "after a renewal by sess-2 (the role moved), the notes of sess-1 still show on $out"
+  # The checks below name each blocked card of the snapshot, so the kept one must be built after retry 15. A plain
+  # read prints the kept snapshot at once and waits for no build, and --fresh builds it here. Bug of the case: it read
+  # on while the writer's build ran, and on a busy machine the kept snapshot still held c15 at the first check below.
+  loop snapshot --fresh > /dev/null || fail "snapshot --fresh after retry 15 exited non-zero"
   # The Foreman's session gone: its watcher no longer renews the notes, and the last renewal is older than NOTELEASE
   # (300 s). The same session resumed later (conveyor.sh foreman resumes it) renews again, and writes a note: neither
   # brings the old notes back. Bug: the renewal set the time of the old notes anew, so they showed again.
