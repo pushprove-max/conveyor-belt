@@ -45,10 +45,11 @@ unset CARDCTL CONVEYOR_CARD_SETTINGS CONVEYOR_OPENCODE_GUARD CONVEYOR_CODEX_GUAR
 # that reads the suiteMachine rule (hostrule) would take this machine, whatever its fixture's rule says. A case that
 # wants it passes `--machine local` to the engine.
 unset CONVEYOR_RELEASE_MACHINE
-# The load factor of the test run this runner is part of (CONVEYOR_LOAD_FACTOR, lib/loadfactor.sh loadfactor(); 1 when
-# unset) scales each case's time limit (run_case). The cases get 1, which a loop a case runs keeps (loadfactor()): a
-# time limit a case checks is the same on a busy machine as on an idle one.
-CASE_LOAD=$(awk -v f="${CONVEYOR_LOAD_FACTOR:-1}" 'BEGIN { f += 0; if (f < 1) f = 1; if (f > 3) f = 3; print f }')
+# The load factor of the test run this runner is part of (CONVEYOR_LOAD_FACTOR, lib/loadfactor.sh loadfactor(); when
+# unset, a run by hand, the machine's own, read as an engine run reads it: a by-hand run on a busy machine kept the
+# limits of an idle one, and t_stall failed at its 45 s) scales each case's time limit (run_case). The cases get 1,
+# which a loop a case runs keeps (loadfactor()): a time limit a case checks is the same on a busy machine as on an idle one.
+. "$SRC/lib/loadfactor.sh"; CASE_LOAD=$(loadfactor)
 export CONVEYOR_LOAD_FACTOR=1
 # The file this runner runs (CONVEYOR_TEST_FILE, which the run names; else the runner), for its cases' records
 # (run_case). In a loop's test step it says, as it starts, that it writes them: a record {file} with no case in
