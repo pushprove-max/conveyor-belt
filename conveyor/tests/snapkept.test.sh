@@ -560,3 +560,23 @@ t_snapkeptretried() {
     || fail "after retry 3 --fresh and $c9 of issue 3 picked, foreman status lists #3 off the belt, blocked or needing the owner: $st"
   loop snapshot --fresh > /dev/null || fail "the snapshot after the read exited non-zero"
 }
+
+# Bug: a paused belt's snapshot was built again every 30 s on the clock alone, up to 10 s of a core each on a long
+# history, with no input changed and GitHub answering the same. A reader of a 40 s old kept snapshot then starts a
+# writer that dates it again and builds nothing (the python3 shim counts the builds). With a card running (loop.json's
+# cards), its times move with the clock: the same reader's writer builds.
+# loop.json as <json>, and it and the pack's folder (an input by its own time, snapinputs) dated in 2000 as the rest
+# (snapkept_quiet): the kept snapshot 40 s old, due on the clock alone.
+snapkeptidleold() { jq -cn "$1" > "$ST/loop.json" && snapkept_quiet 40 && touch -t 200001010000 "$ST/loop.json" "$R/.conveyor" || fail "the fixture's times could not be set"; }
+snapkeptidlewait() { wait_until "PATH=$T/$CASE/bin:\$PATH loop snapshot < /dev/null | jq -e '.snapshotAge < 10' > /dev/null"; }
+t_snapkeptidle() {
+  local log=$T/$CASE/builds
+  snapkept_setup; snapkept_py "echo build >> '$log'"
+  snapkeptidleold '{state: "paused", cards: []}'
+  snapkeptidlewait || fail "the reader's writer left the kept snapshot 40 s old"
+  sleep 2 # sleep: a build, had the writer begun one, is given time to start; a run that never starts cannot be waited for
+  [ ! -s "$log" ] || fail "an idle belt's snapshot, due on the clock alone, was built again $(wc -l < "$log") times"
+  jq -e '.belt' "$ST/snapshot.json" > /dev/null || fail "the kept snapshot was not left in place"
+  snapkeptidleold '{state: "running", cards: ["c2"]}'
+  snapkeptidlewait && [ -s "$log" ] || fail "with a card running, the reader's writer did not build the 40 s old snapshot again"
+}

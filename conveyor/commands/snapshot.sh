@@ -13,6 +13,8 @@
 # The writer is one process a project (it holds KEPT.lock while it builds; a second one finds it held and ends): it
 # builds, writes the new snapshot beside KEPT, dates it when its build began and renames it into place, so a reader
 # never reads half a file; then it builds again while an input changed meanwhile, at most once every SNAPGAP seconds.
+# A writer started on the clock alone builds nothing while the kept snapshot is still what a build would make
+# (snapsame): it dates KEPT when it looked, so snapshotAt and snapshotAge then count from that look.
 # With no kept snapshot yet, and with --fresh (a caller that needs the view after its own change, as a test does, or
 # after a change no input shows: the stream's loop process ending), the snapshot is built here, under the same lock,
 # kept and printed. A call that waited for the lock prints the build another call began after this one asked (its
@@ -24,7 +26,7 @@
 # the lock, and with it every other writer (the stream's, which has its own GitHub folder), until it answers. One
 # call asks at a time (SNAPGH.lock), and a call asks nothing when another one asked after it began (--fresh) or after
 # the kept snapshot's build began (the writer): two calls for one rebuild ask GitHub once.
-KEPT=$ST/snapshot.json SNAPOLD=30 SNAPGAP=5 SNAPGH=$ST/snapgh KEPTREAD=$ST/snapshot.json.records
+KEPT=$ST/snapshot.json SNAPOLD=30 SNAPGAP=5 SNAPIDLE=300 SNAPGH=$ST/snapgh KEPTREAD=$ST/snapshot.json.records
 # The Foreman's notes on blocked cards (snapprint); NOTELEASE is the same as commands/foreman-note.sh's.
 NOTES=$ST/foreman-notes NOTELEASE=300
 SNAPLIBS='slots prompts control views snapshot issues pick testrun push flaky fulltest testaction testfiles testrules lane run machine install setup'
@@ -44,6 +46,21 @@ snapinputs() {
     -o -path "$M/test-map.json" -o -path "$M/test-map.run.json" \) -newer "$KEPT" -print -quit 2>/dev/null)" ]
 }
 snapdue() { snapinputs || ! p_newer "$KEPT" "$SNAPOLD"; }
+# GitHub's answers the next build reads (the feed's, or SNAPGH as snapask() asked them), as one sum. KEPT.gh holds the
+# kept snapshot's (snapkeep takes it before the build reads them) and is dated when that build ended.
+snapghsum() { cat "${GITHUB:-$SNAPGH}"/* 2>/dev/null | cksum; }
+# Whether the kept snapshot, due on the clock alone, is still what a build would make: GitHub answered the same as for
+# its build, no card runs (loop.json's cards; no loop.json: none runs here) and its build ended under SNAPIDLE seconds
+# ago. Every other input is a file (snapinputs), and only a running card's times move much with the clock. A paused
+# belt was built again every 30 s, up to 10 s of a core each on a long history (148 CPU s in 10 minutes, 2026-11-27).
+# Not when a --fresh call waits (its asked marker): it gets a build. Not when the plugin-bugs.md the build read
+# (KEPT.notes) changed after it: snapprint then leaves its notes out, and a newer KEPT would put them back.
+snapsame() {
+  local pf
+  p_newer "$KEPT.gh" "$SNAPIDLE" && [ "$(snapghsum)" = "$(cat "$KEPT.gh" 2>/dev/null)" ] && ! compgen -G "$KEPT.*.asked" > /dev/null \
+    && { ! { read -r pf < "$KEPT.notes"; } 2>/dev/null || [ -z "$pf" ] || [ ! "$pf" -nt "$KEPT" ]; } \
+    && { [ ! -e "$ST/loop.json" ] || [ "$(jq -r '(.cards // []) | length' "$ST/loop.json" 2>/dev/null)" = 0 ]; }
+}
 # GitHub's answers and the guard's usage readings for the next build, asked outside the build lock into SNAPGH, when
 # there is no `watch` feed: the build then reads them as a feed's (GITHUB set), and reading() asks nothing in it.
 # SNAPGH/at is dated when the last asking began. <since> is a file: when the last asking began after it was dated,
@@ -94,13 +111,15 @@ snapask() { # <since> [nowait]
 # line of a card aside and keeps its others: when it was counted (the build's own check sets aside a bad line the count
 # took), that card's count is over its lines, and as many of its next lines are read only by their time.
 snapkeep() {
-  local n=$KEPT.$BASHPID rc GITHUB=${GITHUB:-$SNAPGH} a p c=$KEPTREAD.$BASHPID
+  local n=$KEPT.$BASHPID rc GITHUB=${GITHUB:-$SNAPGH} a p c=$KEPTREAD.$BASHPID g
   for a in "$KEPT".*.asked; do
     p=${a#"$KEPT".}; p=${p%.asked}
     [[ $p =~ ^[0-9]+$ ]] && ! kill -0 "$p" 2>/dev/null && rm -f -- "$a"
   done
+  g=$(snapghsum)
   : > "$KEPT.at" && SNAPCOUNTS=$c SNAPNOTES=$KEPT.notes snapshot > "$n" && [ -s "$n" ] && touch -r "$KEPT.at" "$n" && mv -f "$n" "$KEPT"; rc=$?
   # A count that could not be taken leaves the last one, now older than the kept snapshot: recordsnow takes none.
+  [ "$rc" != 0 ] || printf '%s\n' "$g" > "$KEPT.gh" || :
   if [ "$rc" = 0 ]; then [ ! -e "$c" ] || { mv -f "$c" "$KEPTREAD" && touch "$KEPTREAD"; } 2>/dev/null || :; else rm -f "$n" "$c"; fi
   return "$rc"
 }
@@ -114,6 +133,13 @@ snapwriter() {
     snapask "$KEPT" nowait || break
     ( flock -n 9 || exit 3
       $due || exit 0
+      # Still current (snapsame): KEPT and KEPT.at are dated when the look began (KEPT.checked), not built, so an input
+      # that changes after the look is newer than KEPT. KEPTREAD, when it was the kept build's, is dated after them.
+      # Exit 4: the writer ends.
+      if [ "$due" = snapdue ]; then
+        r=; [ ! "$KEPTREAD" -nt "$KEPT" ] || r=1; : > "$KEPT.checked" || exit 1
+        ! snapinputs && snapsame && touch -r "$KEPT.checked" "$KEPT.at" "$KEPT" && { [ -z "$r" ] || touch "$KEPTREAD"; exit 4; }
+      fi
       s=$(($(p_mtimes "$KEPT" | cut -d' ' -f1) + SNAPGAP - $(date +%s))); [ "$s" -le 0 ] || sleep "$s"
       snapkeep ) 9>>"$KEPT.lock"; rc=$?
     # Another writer holds the lock (it builds again for a change after its own build began), or the build failed.

@@ -2079,7 +2079,10 @@ has it. When `recordsNewer` is true, `conveyor.sh foreman status`, and the Board
 of <time>, the belt has changed since" and take their blocked and waiting cards from `recordsNow`, and the Board takes
 its building count from it too. When only `loop.json` changed, the Board shows the building count of the snapshot.
 When no loop runs, the Board counts no card building. When a record line, the control record, a card's live record or the
-list of issues changes, one process makes a new snapshot in the background and puts it in place whole. A reader does
+list of issues changes, one process makes a new snapshot in the background and puts it in place whole. It also does
+this when the snapshot is more than 30 seconds old. But while no card runs and GitHub gives the same answers, it does
+not make a new snapshot for up to 5 minutes after the last one: it dates the last one again, and `snapshotAt` and
+`snapshotAge` then count from that time. A reader does
 not wait for it, and it does not get a part of a snapshot. `conveyor.sh snapshot --fresh` makes a new snapshot now,
 prints it and keeps it. When a snapshot is already being made, it waits until that one is done. Then the calls that
 waited make one new snapshot between them, and each prints it. A project with no snapshot yet gets its first one that way. The Board's Health panel and
