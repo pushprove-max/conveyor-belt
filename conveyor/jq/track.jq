@@ -188,7 +188,7 @@
               | {name: (if $l.step == "picked" then "picked" elif $l.step == "worktree" then "worktree ready" elif $l.step == "deps" then "dependencies linked"
                   elif $l.step == "brief" then "brief written" elif $l.step == "build" then "building"
                   elif $l.step == "review" then "review \($nth)" + (if ($l.result // "") == "" then "" else " (\($l.result))" end)
-                  elif $l.step == "fix" then "fix \($nth)" elif $l.step == "test" then "tests " + (if $l.result == "pass" then "passed" elif $l.result == "held" then "held: the machine" else "failed" end)
+                  elif $l.step == "fix" then "fix \($nth)" elif $l.step == "test" then "tests " + (if $l.result == "pass" then "passed" elif $l.result == "held" then "held: the machine" elif $l.result == "skipped" then "skipped" else "failed" end)
                   elif $l.step == "start" then "landing (met a conflict)" elif $l.step == "rebase" then "rebuild" elif $l.step == "landed" then "landing"
                   elif $l.step == "closed" then "landing (issue closed)"
                   # A push that went on over a pre-push hook that failed naming test files that each passed alone (pushone()).

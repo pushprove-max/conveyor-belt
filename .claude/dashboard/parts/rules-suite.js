@@ -185,6 +185,18 @@
     el.append(row('teststeponly', name, "a card's sessions do not run tests; the Test step runs them",
       seg(name, tOn, tOff), note));
   }
+  // Skip the Test step: the record's rules.testskip (`control rules testskip=on|off`). Off (the default), a card's Test
+  // step runs the tests of its change; On, the step runs no test and the card goes on to land. A card's sessions keep
+  // their own test runs with either setting. A record without it is drawn disabled.
+  function rulesTestSkip(el, r) {
+    const h = S.ctx.h, on = r.testskip === true, known = typeof r.testskip === 'boolean', name = 'Skip the Test step';
+    const tOn = choice('On', 'testskip-on', `${name}: on`, on, () => { if (!on) send('rules', ['testskip=on'], null, ['rules', ['testskip=off']]); });
+    const tOff = choice('Off', 'testskip-off', `${name}: off`, !on, () => { if (on) send('rules', ['testskip=off'], null, ['rules', ['testskip=on']]); });
+    tOn.disabled = tOff.disabled = !known;
+    const note = !known ? h('span', 'board-from', 'needs a newer Conveyor') : on ? h('span', 'board-from', "on: a card's sessions still run their own tests") : null;
+    el.append(row('testskip', name, "a card's Test step runs no tests; lint, review and land still run",
+      seg(name, tOn, tOff), note));
+  }
   // Serena (Models): the record's rules.serena (`control rules serena=<role,...|off>`), the card sessions that start
   // with Serena, one checkbox a role; under them the snapshot's serena, what the build machine found. With serena not
   // installed there, a box that is off is disabled (a box that is on can still turn its role off), and a rule that names
@@ -301,6 +313,6 @@
   }
   window.DASH_APP.part('rules-suite', function (shared) {
     ({ S, num, send, button, post, row, draw, choice, seg } = shared);
-    return { rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, rulesSerena, rulesPushBatch, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
+    return { rulesSuite, rulesMode, rulesFailFast, rulesTestStepOnly, rulesTestSkip, rulesSerena, rulesPushBatch, suiteSlots, suiteAgain: (c) => again(c, true), undoArgs };
   });
 })();

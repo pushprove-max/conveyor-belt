@@ -444,8 +444,8 @@ cardbuild() {
     [ -z "$sf" ] || { t=$(speedbrief "$c" "$wt" "$sf" "$issue") && more+=$'\n\n'"$t"; } \
       || { block "$c" "$n" "$wt" "brief: the engine could not read the project pack for the split allowance of $sf"; return; }
     # A main-red fix card (its entry in the main-red record names it, with no push block: redfix.sh pushred(), whose check its cases passing does not make pass)
-    # whose cases all pass on main, in each of the flaky rule's runs (bugproof.sh redgreen()), closes as already done before its build session starts, as redproof() closes one after it.
-    if jq -e --arg c "$c" 'any(.reds[]?; .card == $c and .push == null)' "$MAINRED" >/dev/null 2>&1 && redgreen "$c" "$wt"; then greenclose "$c" "$n" "$wt"; return; fi
+    # whose cases all pass on main, in each of the flaky rule's runs (bugproof.sh redgreen()), closes as already done before its build session starts, as redproof() closes one after it. Not with the rule Skip the Test step on (testskip(), lib/testrun.sh): its cases do not run.
+    if jq -e --arg c "$c" 'any(.reds[]?; .card == $c and .push == null)' "$MAINRED" >/dev/null 2>&1 && ! testskip && redgreen "$c" "$wt"; then greenclose "$c" "$n" "$wt"; return; fi
     more+=$(startbrief "$wt" "$issue" 2>/dev/null) || :; began "$c" "$n" build # startbrief() gives its own blank line, or nothing
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt$more") || { BLOCKCLASS=$(failclass "$t") block "$c" "$n" "$wt" "build: $t"; return; }
     checked "$c" "$n" "$wt" "$issue" "$sprompt" build "$t" || return

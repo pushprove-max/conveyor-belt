@@ -41,9 +41,9 @@
              (if $c.x.blockedAt != null then ($c.x.endAt | fromdate) - ($c.x.blockedAt | fromdate) else empty end)] | if length == 0 then null else add end),
          leadSec: (if ($c.step | IN("landed", "closed")) and $c.x.blockedAt == null and $cr != null then ($c.x.endAt | fromdate) - $cr else null end),
          cycleSec: (if ($c.step | IN("landed", "closed")) and $c.x.blockedAt == null then ($c.x.endAt | fromdate) - $pk else null end),
-         # runSec: the card's pick-up to its end (to now while it is open); fixes and testRuns: its fix and test lines.
+         # runSec: the card's pick-up to its end (to now while it is open); fixes and testRuns: its fix and test lines, but for the test line of a step that ran no test (result skipped).
          runSec: ([(($c.x.endAt | if . == null then $now else fromdate end) - $pk), 0] | max),
-         fixes: ([$log[] | select(.step == "fix")] | length), testRuns: ([$log[] | select(.step == "test")] | length),
+         fixes: ([$log[] | select(.step == "fix")] | length), testRuns: ([$log[] | select(.step == "test" and .result != "skipped")] | length),
          reviews: ($rv | length), firstReview: ($rv[0].result // null),
          findings: (if ($rv | length) == 0 or any($rv[]; .counts == null) then null
            else reduce $rv[].counts as $k ({P0: 0, P1: 0, P2: 0, P3: 0}; with_entries(.value += $k[.key])) end),

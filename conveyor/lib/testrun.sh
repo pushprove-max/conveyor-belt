@@ -427,6 +427,20 @@ tests() { # <worktree> [the pack's field of the command: test.fileCommand] [alon
 # The rule Stop a card's tests at the first failure (rules.failfast of the control record the card started on, CARDCTL,
 # else the one in force): on unless it is false. Only a card's run reads it (listcmd()): a release's runs every case.
 failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>/dev/null)" != false ]; }
+# The rule Skip the Test step (rules.testskip of the control record the card started on, CARDCTL, else the one in
+# force): off unless it is true. On, a card runs no test in its Test step: not its changed tests before its first
+# review (cardland.sh pretest()), at the step itself, alone or in a batch (cardtest(): its test line's result is
+# skipped, its reason TESTSKIPPED, and the card goes on as after a pass), or while it waits to land (claim.sh
+# settle()); and not the cases that prove a fix on main's code (bugproof.sh bugproof(), a main-red fix card's too, and
+# its check before the build, card.sh cardbuild()). Its lint, its product checks, the project's checks, its reviews,
+# its landing and its push are as with the rule off, as are the check of a Tests page card on its test file
+# (lib/speedproof.sh) and the run of a main-red fix card's cases after a session that made no change (followups.sh
+# nochange()), which decide more than a pass. A card's sessions do not read the rule: their own test runs are
+# the rule Only the Test step runs tests' (teststeponly(), lib/prompts.sh). Nor does a run that is no card's: the
+# run before a push (lib/pushrun.sh) and a release's run as before.
+testskip() { [ "$(jq -r '.rules.testskip' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>/dev/null)" = true ]; }
+# shellcheck disable=SC2034 # used in lib/cardland.sh and lib/bugproof.sh
+TESTSKIPPED='the rule Skip the Test step is on: no test ran'
 # The command of a card's run (tests()) given the list of the tests its change touches (README.md, The list of tests a
 # card's run is given), in LISTCMD: test.fileCommand, which runs each file of the list alone (filecmd() files, the
 # files in TEST_FILES). A card never runs the whole suite: the list is the test files its own change adds or changes

@@ -14,7 +14,8 @@
 // at; "needs a newer Conveyor" for a record without it), Release suite mode (the record's suiteMode: One by one or In parallel, what a release takes when its press names no mode; "needs a newer Conveyor" for a record without it), Release suite runs on (the record's suiteMachine: This
 // machine, a Namespace Devbox or a Linux box over ssh, with Check the box; parts/rules-suite.js), Stop a card's tests at
 // the first failure (the record's rules.failfast: On or Off; parts/rules-suite.js), Only the Test step runs tests (the
-// record's rules.teststeponly: On or Off; parts/rules-suite.js), Reserved cores (shown, not
+// record's rules.teststeponly: On or Off; parts/rules-suite.js), Skip the Test step (the record's rules.testskip: On or
+// Off; parts/rules-suite.js), Reserved cores (shown, not
 // set here: the machine's reserveCores, the cores it keeps and the test slots left, or why the machine cannot keep
 // cores; with "Test limits are on the Tests page.", #520). Picking: Build issues (P0, P1, P2, P3, Follow-ups), Never
 // build (the labels, each removable, and a field to add one, with the area labels of the open issues to pick from), New
@@ -106,7 +107,7 @@
   // rule) or a group of rows (NOISSUE) each.
   const SETS = [
     ['models', 'Models', 'Three seats for each card.', ['builder', 'reviewer', 'judge', 'judge-always', 'account', 'review-account', 'serena']],
-    ['capacity', 'Capacity', 'Build slots and machine limits.', ['cap', 'guard', 'atonce', 'suite-mode', 'suite', 'failfast', 'teststeponly', 'cores']],
+    ['capacity', 'Capacity', 'Build slots and machine limits.', ['cap', 'guard', 'atonce', 'suite-mode', 'suite', 'failfast', 'teststeponly', 'testskip', 'cores']],
     ['picking', 'Picking', 'Choose which issues enter the belt.', ['build', 'never', 'start', 'dep-guard', 'split', 'split-donewhen', 'split-files', 'split-areas', 'split-chars', 'pick', 'healsdays', 'cardusd', 'issueusd']],
     ['landing', 'Landing and push', 'Decide how finished cards reach the repository.', ['push', 'land-as', 'pr-merge', 'push-check', 'pushbatch', 'lint', 'visible']],
     ['standing', 'Done without asking', 'Choose when the Foreman can act on your behalf.', STANDING.map(([k]) => `standing-${k}`).concat([NOISSUE])],

@@ -244,6 +244,14 @@ bugproof() { # <card> <worktree> <issue json>
   rm -f "$2.unfixed"; BUGWHY=$UNFIXED
   # No change at all (an ALREADY-DONE) is not checked: it goes its own way (nochange()).
   git -C "$2" add -A 2>/dev/null && ! git -C "$2" diff --cached --quiet HEAD 2>/dev/null || return 0
+  # The rule Skip the Test step on (testskip(), lib/testrun.sh): the check is part of the card's Test step, so no test
+  # runs on main's code, a main-red fix card's cases neither (redproof()), and the check holds. The review is told,
+  # and the card's `bugproof` line (result skipped) says why.
+  if testskip; then
+    echo "${TESTSKIPPED^}, so the check did not run and no test ran on main's code." > "$2.unfixed"
+    record "$1" "$(jq -r '.number // 0' <<<"$3")" bugproof skipped "$(jq -cn --arg r "$TESTSKIPPED" '{reason: $r}')"
+    return 0
+  fi
   # A main-red fix card (its entry in the main-red record names it) is proved by main's own failing cases (redproof()).
   # Its change that is only the links the engine staged (mainred.sh linksonly()) is no change, as above: card() drops it.
   # A push block's fix card (redfix.sh pushred()), with or without cases, is checked as any bug card: its cases passing

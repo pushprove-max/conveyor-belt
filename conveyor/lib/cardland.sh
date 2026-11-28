@@ -145,14 +145,17 @@ cardlanding() {
     # A batch's run (batch(): TEST_BATCH) says in selected how many passes it kept, and no case ran when it ran none.
     # A card the repair lane passed (mainred.sh repairlane()): its line says so, with the clean run of its changed tests;
     # a main-red fix card whose failures are other entries' (redelse()) says why it goes on.
-    if [ -n "$repaired" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --arg r "$repaired" '$x[0] + {reason: $r}')"
+    # With the rule Skip the Test step on (cardtest()) no test ran: the line's result is skipped, and its reason says so.
+    if testskip; then record "$c" "$n" test skipped "$(jq -cn --arg r "$TESTSKIPPED" '{reason: $r, sec: 0, usage: {input:0,write:0,write1h:0,read:0,output:0}}')"
+    elif [ -n "$repaired" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --arg r "$repaired" '$x[0] + {reason: $r}')"
     elif [ -n "$ran" ]; then record "$c" "$n" test pass "$(jq -cn --slurpfile x <(testrec "$wt" 0 "$sec") --slurpfile r <(firstrun "$wt" pass) --argjson b "${TEST_BATCH:-null}" \
       --slurpfile s <([ -z "$own" ] && echo '{}' || slowrec "$wt") '$x[0] + $r[0] + $s[0] | if $b then .selected += $b else . end')"
     else record "$c" "$n" test pass "$(jq -cn --argjson s "$sec" '{sec:$s,usage:{input:0,write:0,write1h:0,read:0,output:0},reused:true}')"; fi
     # The test rules read the line just recorded (lib/testrules.sh): with their switch off, they file nothing.
     [ -z "$ran" ] || testrulespass > /dev/null
-    # A Make it run card (#189) holds only when its test step ran its file and the file passed.
-    [ -z "$mk" ] || t=$(ranproof "$wt" "$mk") || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "test: $t"; return; }
+    # A Make it run card (#189) holds only when its test step ran its file and the file passed. Not asked of a step
+    # that ran no test (the rule Skip the Test step, testskip()).
+    [ -z "$mk" ] || testskip || t=$(ranproof "$wt" "$mk") || { BLOCKCLASS='proof check' block "$c" "$n" "$wt" "test: $t"; return; }
     # A card that gave way claims its files now; a card whose change is not on main as it is now (main moved while it
     # was away or during its tests) is fitted onto it, and its checks run again there, holding its files (its tests
     # too when the fitted change is not the one that passed: testedhere()).
@@ -231,6 +234,13 @@ cardtest() {
     redbrief "$c" "$n" "$br"; t=$(session "$wt" "$sprompt"$'\n\n'"$CHECKFIX"$'\n'"$out" fix) || { block "$c" "$n" "$wt" "fix: $t"; return; }
     checked "$c" "$n" "$wt" "$issue" "$sprompt" fix "$(jq -c '. + {reason: "the project'"'"'s checks failed (test.checkCommand)"}' <<<"$t")" || return
     go=next; return
+  fi
+  # The rule Skip the Test step on (testskip(), lib/testrun.sh): no test of the card runs, alone or in a batch, and
+  # the card does not wait for a red main, where it would run nothing. The step ends as a pass of a card alone does,
+  # and cardlanding() writes its test line, result skipped.
+  if testskip; then
+    [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null)
+    sec=0; rc=0; ran=''; own=''; apart=''; queued=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"; go=''; return
   fi
   mainredhold; rc=$?; [ $rc = 9 ] || return $rc; [ -z "$away" ] || away=$(git rev-parse "refs/heads/$BRANCH" 2>/dev/null) # main red: the step waits (mainredhold())
   sec=$SECONDS; rc=0; ran=''; own=''; apart=''; queued=''; repaired=''; TEST_BATCH=''; TEST_REFUSED=''; rm -f "$wt.stop"
@@ -344,7 +354,8 @@ redelse() { # <card> <issue> <branch> <verdicts() json> <testfails() of its run>
 pretest() {
   local fc red
   go=end; [ -z "${pretested:-}" ] || { go=''; return 0; }; pretested=1 # card() sets pretested; a test that calls cardreview() alone may not
-  if [ -n "$fin" ] || redmain || ! packget test.fileCommand fc || [ -z "$fc" ]; then tmain=''; go=''; return 0; fi # tmain: a fit of an earlier run of these tests (cardfailed(): settle() gave next) is not the Test step's either
+  # With the rule Skip the Test step on (testskip(), lib/testrun.sh) no test runs here either: on to the review, with no test line.
+  if testskip || [ -n "$fin" ] || redmain || ! packget test.fileCommand fc || [ -z "$fc" ]; then tmain=''; go=''; return 0; fi # tmain: a fit of an earlier run of these tests (cardfailed(): settle() gave next) is not the Test step's either
   while :; do
     # A fit onto main that moved (cardfailed(): settle()) may merge files that no longer parse: they are checked
     # before the tests run there, as cardtest() checks them; the fix session after a fail is a fix round with no review.

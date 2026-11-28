@@ -66,7 +66,7 @@
   // The words of each action's change (words), from its args a.
   const seatWords = (a, action) => `${action === 'model' ? 'builder' : 'reviewer'} ${a[0] === 'default' ? 'back to the default' : a.join(' ')}`;
   const accountWords = (a, action) => `${action === 'account' ? 'account' : 'review account'} ${a.length ? a[0] : 'back to the default'}`;
-  const RULE_WORDS = { followups: 'Follow-ups', push: 'Push on landing', visible: 'Approve visible changes', lint: 'Lint check', failfast: "Stop a card's tests at the first failure", teststeponly: 'Only the Test step runs tests', pushbatch: 'Push after a combined test run', split: 'Split large issues', pick: 'Pick settings', healsdays: 'Self-heals expiry days', cardusd: 'Card dollar limit', issueusd: 'Issue dollar limit' };
+  const RULE_WORDS = { followups: 'Follow-ups', push: 'Push on landing', visible: 'Approve visible changes', lint: 'Lint check', failfast: "Stop a card's tests at the first failure", teststeponly: 'Only the Test step runs tests', testskip: 'Skip the Test step', pushbatch: 'Push after a combined test run', split: 'Split large issues', pick: 'Pick settings', healsdays: 'Self-heals expiry days', cardusd: 'Card dollar limit', issueusd: 'Issue dollar limit' };
   // The five switches of Cards with no GitHub issue (the record's rules.testissues, foremanissues, followupissues, releaseissues and
   // splitissues): each kind is On while its rule is off.
   const NOISSUE_WORDS = { testissues: 'Tests page actions', foremanissues: 'Foreman orders', followupissues: 'Review follow-ups', releaseissues: 'Release fix cards', splitissues: 'Split parts' };
@@ -170,7 +170,7 @@
       const never = list(r.rules.never).filter((y) => y !== key);
       r.rules.never = o === 'off' ? never.concat([key]) : never;
     });
-    return [r, own(BATCH_WORDS, k) ? 'pushbatch' : isArea(k) ? 'never' : ['push', 'visible', 'lint', 'failfast', 'teststeponly', 'pushbatch', 'testissues', 'foremanissues', 'followupissues', 'releaseissues', 'splitissues', 'split', 'pick', 'healsdays', 'cardusd', 'issueusd', 'serena'].includes(k) ? k : 'build'];
+    return [r, own(BATCH_WORDS, k) ? 'pushbatch' : isArea(k) ? 'never' : ['push', 'visible', 'lint', 'failfast', 'teststeponly', 'testskip', 'pushbatch', 'testissues', 'foremanissues', 'followupissues', 'releaseissues', 'splitissues', 'split', 'pick', 'healsdays', 'cardusd', 'issueusd', 'serena'].includes(k) ? k : 'build'];
   }
   // A setting as the record would hold it once the host takes it, and the row it is in; null for an action that is
   // not one setting (release, order, unpin...): those show when the host answers.

@@ -72,6 +72,15 @@ its own, and the Board's Rules tab sets them in its Judge row.
   say that the Test step runs the tests and that a session reads the last Test step's result. The card's command
   guard also refuses each test command of a session, a named case or test file too. Off, the card rules are the text
   of their files.
+- `testskip`: the rule Skip the Test step, off by default. On, a card runs no test in its Test step: not the run
+  before its first review (it writes no test line), not the step's run, alone or in a batch, not a run while the card
+  waits to land, and not the cases that prove a fix on main's code (the bug-card check, a main-red fix card's cases).
+  The card's test line has the result `skipped` and the reason `the rule Skip the Test step is on: no test ran`, and
+  the card goes on to land. Lint, the product checks, the project's checks, the reviews, the landing, the run before
+  a push and a release's suite do not change. A card's sessions do not read the rule: a build or fix session keeps
+  its own test runs, its card rules and its command guard as they are, and only `teststeponly` changes them. The
+  check of a Tests page card on its test file still runs, and so does the run of a main-red fix card's cases on main
+  when its session made no change.
 - `pushbatch`: the rule Push after a combined test run, off by default. On, the loop pushes no landing until the run
   is due (`pushbatchwhen`). Then it pushes all the landings since the last push together, after their tests pass on
   main (the run before a push, which then runs even with `push.check` off). A file that fails holds them all, and the

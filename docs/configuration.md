@@ -295,6 +295,18 @@ session gives: a named case, the changed tests or a named test file. Put your ow
 that line. When the rule is off, a session gets the rules as the files hold them. The Rules tab's row in Capacity
 sets the rule, as do `conveyor.sh control rules teststeponly=on` and `teststeponly=off`.
 
+The rule **Skip the Test step** is off in a new project. When it is on, a card's Test step runs no test. The run of
+the card's tests before its first review is part of the Test step: it does not run, and the card has no test line
+before that review. After the review, and after each fix round, the card goes on to land with no test run. The check
+of a bug card does not run its tests on main's code. The card's test line has the result `skipped`, and its reason is
+`the rule Skip the Test step is on: no test ran`. The Board shows the Test step as skipped. The lint check, the
+product checks, the project's checks, the reviews, the landing and the push run as usual. The run before a push and a
+release's suite do not change. The rule leaves the test runs of the build and fix sessions as they are: a session
+runs the tests of its change while it works, unless the rule **Only the Test step runs tests** is on. Two checks
+still run tests with the rule on: the check of a Tests page card on its test file, and the run of a main-red fix
+card's cases on main when its session made no change. The Rules tab's row in Capacity sets the rule, as do
+`conveyor.sh control rules testskip=on` and `testskip=off`.
+
 When a run fails, the card runs again only the files that did not pass. After a fix session that changed the card's
 change, every file of its list runs again. A test file with a failed case in the run before the fix can also run
 again, though the fix did not change it. This occurs when the card's change links the file to a changed file.

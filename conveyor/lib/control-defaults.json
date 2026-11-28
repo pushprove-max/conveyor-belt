@@ -25,6 +25,7 @@
     "issueusd": 25,
     "failfast": true,
     "teststeponly": false,
+    "testskip": false,
     "pushbatch": false,
     "pushbatchwhen": 2,
     "pushbatchtests": "linked",

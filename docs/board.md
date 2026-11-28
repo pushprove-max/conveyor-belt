@@ -418,7 +418,10 @@ one control, and the value in force is the selected part.
    by default. On, the rules that a card's sessions get do not tell them to run tests. The rules say that the Test
    step runs the tests, and that a session reads the result of the last Test step. A session cannot run a test
    command. Off, the sessions get the usual
-   rules and run the tests of their change. **Reserved cores**
+   rules and run the tests of their change. **Skip the Test step** is Off by default. On, a card's Test step runs
+   no test, and the run of its tests before its first review does not run either. The card lands after its
+   review, and its test line says that no test ran. The build and fix sessions still run their own tests. Off, the
+   step runs the tests of the change. **Reserved cores**
    shows the cores that card work does not use. You set them in the host file
    ([Reserved cores](configuration.md#cores-kept-for-you)). The row also links to the Tests page, which holds the test
    limits.
