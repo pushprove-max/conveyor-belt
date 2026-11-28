@@ -8,14 +8,7 @@
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
-    "conveyor/foreman/foreman.test.sh",
-    "conveyor/tests/codex.test.sh",
-    "conveyor/tests/metrics.test.sh",
-    "conveyor/tests/models.test.sh",
-    "conveyor/tests/modelsproxy.test.sh",
-    "conveyor/tests/opencode.test.sh",
-    "conveyor/tests/proxyroute.test.sh",
-    "conveyor/tests/snapexec.test.sh"
+    "conveyor/foreman/foreman.test.sh"
   ],
   "commands/setup.md": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
@@ -929,8 +922,7 @@
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "README-pages.test.sh",
-    "conveyor/foreman/foreman.test.sh",
-    "conveyor/tests/metrics.test.sh"
+    "conveyor/foreman/foreman.test.sh"
   ],
   "docs/releases.md": [
     "README-pages.test.sh",
