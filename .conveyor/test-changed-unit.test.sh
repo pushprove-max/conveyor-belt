@@ -33,7 +33,10 @@ sed -i.bak "s/grep -aEv '^(@@|index )'/grep -aEv '^(index )'/" "$R/conveyor/lib/
 cmp -s "$R/conveyor/lib/portable.sh" "$R/conveyor/lib/portable.sh.bak" && { echo "not ok - could not break diffid: its filter is not the one this test changes"; exit 1; }
 rm "$R/conveyor/lib/portable.sh.bak"
 runchecks
-if [ "$rc" = 1 ] && grep -q '^FAIL conveyor/unit/portable.unit.sh u_diffid: ' "$T/out" && grep -q '^unit: 2 cases of 1 unit files, 1 failed' "$T/out"; then
+# Every case portable.unit.sh holds runs, and one fails. The count is read from the file, as unit.sh reads it. Bug: a
+# count written here (2) failed this test once the file got a third case (u_ncpu), with the checks right.
+n=$(grep -c '^u_[A-Za-z0-9_]*() {' "$ROOT/conveyor/unit/portable.unit.sh")
+if [ "$rc" = 1 ] && grep -q '^FAIL conveyor/unit/portable.unit.sh u_diffid: ' "$T/out" && grep -q "^unit: $n cases of 1 unit files, 1 failed" "$T/out"; then
   echo "ok - a change that breaks diffid fails the checks on its unit case alone"
 else
   no "test-changed.sh --checks with a broken diffid in conveyor/lib/portable.sh (no other check failing) must exit 1 on its unit case: exit $rc: $(cat "$T/out")"

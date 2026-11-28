@@ -350,7 +350,10 @@ p_cover() {
   [ "$got" = "bg:the hkb check hk:ha,hc" ] && ok "changed hook functions run only the case_on cases and check texts the map lists" || no "hka and hkb changed: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- .claude/hooks/hk.sh
   printf 'xthree() {\n  echo three\n}\n' >> "$R/conveyor/x.sh"; got=$(ran)
-  [ "$got" = "aone atwo" ] && ok "D3: an added function that no mapped function calls runs its file's area, as before" || no "xthree added: ran '$got': $(cat "$T/out")"
+  # callersof gives its callers' tests: nothing calls it, so none (issue 1830: before, the scratch repo's missing
+  # conveyor.sh made callersof fail here, and the area ran; a real checkout got none already).
+  [ "$got" = "" ] && grep -qxF 'coverage map rule: conveyor/x.sh xthree(): callersof' "$T/out" \
+    && ok "D3: an added function that nothing calls runs the tests callersof gives (none), not its file's area" || no "xthree added: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- conveyor/x.sh; echo 'echo top' >> "$R/conveyor/x.sh"; got=$(ran)
   [ "$got" = "aone atwo" ] && ok "a changed line outside the functions runs the area" || no "top-level line: ran '$got': $(cat "$T/out")"
   git -C "$R" checkout -q -- conveyor/x.sh

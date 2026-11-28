@@ -61,7 +61,11 @@ L=$T/both/test-changed.log
   || no "two areas: each case file did not run its own cases alone, side by side on a slot: '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
 all=$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$R"/conveyor/tests/[ab].test.sh | sort | paste -sd' ' -)
 [ "$(cut -d: -f2 <<<"${got//|/$'\n'}" | tr ' ' '\n' | sort | paste -sd' ' -)" = "$all" ] || no "a case of the runner ran in no case file: '$got', want '$all'"
-grep -qxF -- '-- ok conveyor/tests/a.test.sh' "$L" && grep -qxF -- '-- FAIL conveyor/tests/b.test.sh' "$L" && ! grep -q 'conveyor/conveyor.test.sh' "$L" \
+# No result is under the runner's name. The list of what a.test.sh read is no result: a run the host can trace (strace;
+# a run of this file by hand, as the loop's own trace of this file lets no trace start inside it) names the runner
+# there (`TESTRUN inputs` or `TESTRUN reads`). Bug: that line failed this check on such a host.
+grep -qxF -- '-- ok conveyor/tests/a.test.sh' "$L" && grep -qxF -- '-- FAIL conveyor/tests/b.test.sh' "$L" \
+  && ! grep -Ev $'^TESTRUN (inputs|reads)\t' "$L" | grep -q 'conveyor/conveyor.test.sh' \
   && grep -qxF '== conveyor/tests/b.test.sh (cases: bone)' "$T/out" \
   || no "the results do not name each case file, or one file's failure failed the other: $(cat "$L")"
 [ "$(sed -n 's/^TESTRUN case\t//p' "$L" | sort | tr '\t\n' ':|')" = "conveyor/tests/a.test.sh:aone|conveyor/tests/a.test.sh:atwo|conveyor/tests/b.test.sh:bone|" ] \

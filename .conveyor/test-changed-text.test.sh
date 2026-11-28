@@ -68,10 +68,15 @@ p_echo() {
   [ "$got" = bone ] && [ "$(cat "$T/rc")" = 0 ] && ok "a reworded echo message runs only the case files that hold it" \
     || no "echo reworded: ran '$got', exit $(cat "$T/rc"): $(cat "$T/out")"
 }
-# D2: a jq program is code, though it is quoted: m.sh's whole area runs.
+# D2: a jq program is code, though it is quoted: the change is one to its function, stop, and the test that names
+# stop runs (callersof), not only the tests that hold the text (none does). Before issue 1830 the scratch repo's
+# missing conveyor.sh made callersof fail here, and m.sh's area ran with no test naming stop; a real checkout got the
+# tests callersof gives already.
 p_jq() {
+  printf 't_aone() {\n  stop pack\n}\n' > "$R/conveyor/tests/a.test.sh"; git -C "$R" commit -qam names
   edit '| .name' '| .title' conveyor/lib/m.sh; got=$(ran)
-  [ "$got" = aone ] && ok "a change to a jq filter string runs the file's whole area" || no "jq changed: ran '$got': $(cat "$T/out")"
+  [ "$got" = aone ] && grep -qxF 'coverage map rule: conveyor/lib/m.sh stop(): callersof' "$T/out" \
+    && ok "a change to a jq filter string runs the tests that name its function, as a change to code does" || no "jq changed: ran '$got': $(cat "$T/out")"
 }
 # D3: a comment alone runs no case file; a #! line and a shellcheck line are code.
 p_comment() {

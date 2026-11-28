@@ -24,6 +24,11 @@ no() { echo "not ok - $1"; fails=1; }
 # A scratch repo: the real script, a map of one area, and the test files.
 D=.claude/scripts/__tests__
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/tests" "$R/conveyor/lib" "$R/$D" "$R/hooks" "$T/bin"
+# The Board files below run in the real case pool, whose workers load jsdom as the checkout's own Board tests do (npm
+# ci installs it). Bug: in a checkout with no node_modules each case failed on `Cannot find module 'jsdom'`, and this
+# test said the file whose flaky case is kept off had not run its later case.
+node -e 'require("node:module").createRequire(process.argv[1]).resolve("jsdom")' "$HERE/../$D/dashboard-view.helpers.mjs" 2> /dev/null \
+  || { echo "not ok - this checkout has no jsdom for the Board's case pool (dashboard-view.helpers.mjs): run npm ci"; exit 1; }
 cp "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$HERE/test-lint.sh" "$HERE/no-browser-tests.sh" "$HERE/no-records-split.sh" "$R/.conveyor/"
 printf '%s\n' '{"area": "a", "file": "conveyor/x.sh"}' '{"area": "a", "test": "a.test.sh"}' > "$R/.conveyor/engine-areas.json"
 printf 't_aone() {\n  :\n}\n' > "$R/conveyor/tests/a.test.sh"; echo 'echo one' > "$R/conveyor/x.sh"
