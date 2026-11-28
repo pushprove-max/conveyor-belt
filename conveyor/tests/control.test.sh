@@ -266,7 +266,7 @@ t_heldclose() {
 # the new key when it writes the record, so the newer engine loses its setting.
 t_controlnewkey() {
   local CTL0 r; CTL0=$(jq -c . "$SRC/lib/control-defaults.json")
-  eval "$(sed -n '/^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
+  eval "$(sed -n '/^CARDIDRE=/p; /^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
   r=$(jq -c '.later = {cli: "codex"} | .rules.later = "on"' <<<"$CTL0")
   [ "$(ctlcheck <<<"$r" | jq -c '[.later, .rules.later]')" = '[{"cli":"codex"},"on"]' ] \
     || fail "a whole record with keys this copy does not know was refused, or the keys were not passed through"
@@ -289,7 +289,7 @@ t_controlkept() {
   # shellcheck disable=SC2034 # CTL_K and HERE are read by ctlread, run by the eval
   local CTL0 CTL_K=() CTL_V CONTROL=$T/$CASE/control.json HERE=$SRC
   CTL0=$(jq -c . "$SRC/lib/control-defaults.json")
-  eval "$(sed -n '/^ctlread() {/,/^}/p; /^ctlcheck() {/,/^}/p; /^notwhole() {/p' "$SRC/lib/control.sh")"
+  eval "$(sed -n '/^CARDIDRE=/p; /^ctlread() {/,/^}/p; /^ctlcheck() {/,/^}/p; /^notwhole() {/p' "$SRC/lib/control.sh")"
   mkdir -p "$T/$CASE" && echo '{"cap":2,"judgeOn":false}' > "$CONTROL"
   ctlread || fail "a record that sets cap and judgeOn alone did not read"
   [ "$(jq -c '[.cap, .judgeOn, .guard, .model, .reviewer, .judge, .rules.visible, .rules.push, .rules.split, .depGuard, .start]' <<<"$CTL_V")" \
@@ -352,7 +352,7 @@ t_controlonboarded() {
 # runs on every slot of the machine; a value that is no whole number from 1 reads, and the suite is given it.
 t_controlatonce() {
   local CTL0 v; CTL0=$(jq -c . "$SRC/lib/control-defaults.json")
-  eval "$(sed -n '/^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
+  eval "$(sed -n '/^CARDIDRE=/p; /^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
   [ "$(ctlcheck <<<'{}' | jq .suiteAtOnce)" = 2 ] || fail "a record with no suiteAtOnce does not read 2: $(ctlcheck <<<'{}' | jq .suiteAtOnce)"
   [ "$(ctlcheck <<<'{"suiteAtOnce":4}' | jq .suiteAtOnce)" = 4 ] || fail "the record {\"suiteAtOnce\":4} did not keep its 4"
   for v in 0 -1 1.5 '"2"' null; do
@@ -366,7 +366,7 @@ t_controlatonce() {
 # refuses another of them, or a limit it refuses changes a record that exists.
 t_controlusd() {
   local CTL0 v k before; CTL0=$(jq -c . "$SRC/lib/control-defaults.json")
-  eval "$(sed -n '/^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
+  eval "$(sed -n '/^CARDIDRE=/p; /^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
   [ "$(ctlcheck <<<'{}' | jq -c '[.rules.cardusd, .rules.issueusd]')" = '[10,25]' ] || fail "a record with no dollar limits does not read 10 and 25: $(ctlcheck <<<'{}' | jq -c .rules)"
   [ "$(ctlcheck <<<'{"rules":{"cardusd":0,"issueusd":100000}}' | jq -c '[.rules.cardusd, .rules.issueusd]')" = '[0,100000]' ] || fail "a record with the limits 0 and 100000 did not keep them"
   for k in cardusd issueusd; do
@@ -398,7 +398,7 @@ t_controlatoncerule() {
 # no suiteMode reads anything but serial, so other projects' releases change; a stored word that is no mode is read.
 t_controlsuitemode() {
   local v out CTL0; CTL0=$(jq -c . "$SRC/lib/control-defaults.json")
-  eval "$(sed -n '/^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
+  eval "$(sed -n '/^CARDIDRE=/p; /^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
   [ "$(ctlcheck <<<'{}' | jq -r .suiteMode)" = serial ] || fail "a record with no suiteMode does not read serial: $(ctlcheck <<<'{}' | jq -c .suiteMode)"
   for v in '"mixed"' null 1 '"Parallel"'; do
     ! ctlcheck <<<"{\"suiteMode\":$v}" >/dev/null || fail "the record {\"suiteMode\":$v} was read, though $v is no mode"
@@ -419,7 +419,7 @@ t_controlsuitemode() {
 # here) or a folder the box cannot place; a refusal changed the record.
 t_controlsuitemachine() {
   local CTL0 a out; CTL0=$(jq -c . "$SRC/lib/control-defaults.json")
-  eval "$(sed -n '/^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
+  eval "$(sed -n '/^CARDIDRE=/p; /^ctlcheck() {/,/^}/p' "$SRC/lib/control.sh")"
   [ "$(ctlcheck <<<'{}' | jq -c .suiteMachine)" = '{"kind":"local"}' ] || fail "a record with no suiteMachine does not read this machine: $(ctlcheck <<<'{}' | jq -c .suiteMachine)"
   for a in '{"kind":"ssh","target":"-oProxyCommand=x","dir":"~"}' '{"kind":"ssh","target":"h","dir":"rel"}' '{"kind":"ssh","target":"h"}' '{"kind":"box"}' '{"kind":"local","target":"h"}'; do
     ! ctlcheck <<<"{\"suiteMachine\":$a}" >/dev/null || fail "the record {\"suiteMachine\":$a} was read"
