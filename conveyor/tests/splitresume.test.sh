@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 120
+# timeout: 300
+# The limit is the whole file's in a card's test step (lib/fileeach.sh), and each of its 21 cases waits there for a test
+# slot of its own. Their own times added up to 154 s (119 s of CPU) on a busy machine, so on a busy step the waits for
+# slots took the file past 120 s (times the load factor: 126 s once) with no case failed: all 3 flaky sightings were
+# that time-out (#1826).
 # Engine cases: a split before the build whose card stopped after it filed slices and before its split line was
 # recorded (splitplan(), splitmade(), splitend(), lib/slices.sh). What must stay true: each slice of the split is filed
 # once; while the rule is On and the issue's text is the plan's, none that the earlier card filed is closed or taken out
