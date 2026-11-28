@@ -443,7 +443,7 @@ hostcheck() { # [json [no-create]]
     ok=false; [[ $v =~ ^([0-9]+)\.([0-9]+)$ ]] && { [ "${BASH_REMATCH[1]}" -gt 5 ] || { [ "${BASH_REMATCH[1]}" = 5 ] && [ "${BASH_REMATCH[2]}" -ge 1 ]; }; } && ok=true
     n+=("$(jq -cn --argjson ok $ok --arg v "$v" '{need: "bash 5.1+", ok: $ok, detail: (if $v == "" then "no bash answered" else "bash \($v)" end)}')")
     for v in jq git "${tools[@]}"; do
-      n+=("$(jq -cn --arg t "$v" --argjson ok "$(grep -qxF "$(printf 'tool\t%s\tok' "$v")" <<<"$f" && echo true || echo false)" --argjson m "$(printf '%s\n' "${tools[@]}" | grep -qxF -- "$v" && echo true || echo false)" \
+      n+=("$(jq -cn --arg t "$v" --argjson ok "$(grep -qxF "$(printf 'tool\t%s\tok' "$v")" <<<"$f" && echo true || echo false)" --argjson m "$(grep -qxF -- "$v" <<<"$(printf '%s\n' "${tools[@]}")" && echo true || echo false)" \
         '{need: $t, ok: $ok, detail: (if $ok then "installed" else "not installed" end + if $m then " (.conveyor/test-machine.sh)" else "" end)}')")
     done
     v=$(sed -n 's/^cpus\t\([1-9][0-9]*\)$/\1/p' <<<"$f")

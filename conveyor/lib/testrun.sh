@@ -495,7 +495,7 @@ listcmd() { # <worktree> [report args]
     mapfile -t lk < <(changelinks "$1")
     for f in "${lk[@]}"; do
       [ -n "$f" ] && [ -f "$1/$f" ] || continue
-      if printf '%s\n' "${fs[@]}" | grep -qxF -- "$f"; then
+      if grep -qxF -- "$f" <<<"$(printf '%s\n' "${fs[@]}")"; then
         TEST_CASES=$(awk -F'\t' -v f="$f" '$1 != f' <<<"$TEST_CASES"); TEST_CASES=${TEST_CASES:+$TEST_CASES$'\n'}
       else fs+=("$f"); fi
     done
@@ -530,7 +530,7 @@ listcmd() { # <worktree> [report args]
       [ "$SELN" = 0 ] || CAPNOTE+=${SELLINKED//'<k>'/$((SELALL || SELN < CARDLINKED ? SELN : CARDLINKED))}; [ "$KEPTLINKS" = 0 ] || CAPNOTE+=${LINKKEPT//'<k>'/$KEPTLINKS}
       [ "$READLINKS" = 0 ] || CAPNOTE+=${READLINKED//'<k>'/$READLINKS}; }
   fi
-  [ -z "${MAINFROM:-}" ] || [ ${#fs[@]} = 0 ] || while IFS= read -r f; do printf '%s\n' "${fs[@]}" | grep -qxF -- "$f" || fs+=("$f"); done < <(mainlinks "$1" "$MAINFROM")
+  [ -z "${MAINFROM:-}" ] || [ ${#fs[@]} = 0 ] || while IFS= read -r f; do grep -qxF -- "$f" <<<"$(printf '%s\n' "${fs[@]}")" || fs+=("$f"); done < <(mainlinks "$1" "$MAINFROM")
   # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.
   [ -z "${TESTRUNNERS:-}" ] || rn=$(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | grep -xF -f <(printf '%s\n' "$TESTRUNNERS")) || rn=''
   jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" --argjson l "$CAPLEFT" --arg c "$CAPNOTE" --arg rn "$rn" --arg rf "$RUNNERFIX" --arg cs "$TEST_CASES" --arg nc "$NOCASEOFF" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
@@ -699,7 +699,7 @@ filecmd() { # <the pack's test.fileCommand> [files [fast]]
   else
     printf '%s\n' 'fs=(); l=$CONVEYOR_TEST_LOG/files' \
       'while IFS=$'"'"'\t'"'"' read -r k f _; do' \
-      '  [ "$k" = fail ] && [ -n "$f" ] || continue; [ ${#fs[@]} = 0 ] || ! printf "%s\n" "${fs[@]}" | grep -qxF -- "$f" || continue; fs+=("$f")' \
+      '  [ "$k" = fail ] && [ -n "$f" ] || continue; [ ${#fs[@]} = 0 ] || ! grep -qxF -- "$f" <<<"$(printf "%s\n" "${fs[@]}")" || continue; fs+=("$f")' \
       'done < "${CONVEYOR_TEST_RERUN:-/dev/null}"'
   fi
   printf '%s\n' "$(declare -f fileeach)" "fileeach $m $q $(printf %q "${FILELIMIT:-}") $(printf %q "${LOADSCALE:-}") \"\$l\" \"\${fs[@]}\""

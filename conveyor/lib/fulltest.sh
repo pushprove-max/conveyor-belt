@@ -147,7 +147,7 @@ suitereuse() { # <worktree> <commit>
   [ "$(git show "$b:$pk" 2>/dev/null | jq -c .test 2>/dev/null)" = "$(git show "$sha:$pk" 2>/dev/null | jq -c .test 2>/dev/null)" ] || return 1
   mapfile -t ch < <(git diff --name-only --no-renames "$b" "$sha") || return 1
   while read -ra w; do
-    for f in "${w[@]}"; do printf '%s\n' "${ch[@]}" | grep -qxF -- "${f#./}" && return 1; done
+    for f in "${w[@]}"; do grep -qxF -- "${f#./}" <<<"$(printf '%s\n' "${ch[@]}")" && return 1; done
   done < <(jq -r '.test | [.full, (.wholeCommands // [])[]] | .[] | strings' "$PACK" 2>/dev/null)
   packget test.command cmd && [ -n "$cmd" ] || return 1
   rm -f "$wt.sel"

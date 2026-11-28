@@ -226,10 +226,10 @@ readersin() { # <worktree>
   while IFS= read -r f; do
     [ -f "$1/$f" ] || continue
     [ -z "${NOCASEOFF:-}" ] || ! grep -qxF -- "$f" <<<"$NOCASEOFF" || continue # a run would start it with no case (nocaseask())
-    if [ ${#fs[@]} != 0 ] && printf '%s\n' "${fs[@]}" | grep -qxF -- "$f"; then
+    if [ ${#fs[@]} != 0 ] && grep -qxF -- "$f" <<<"$(printf '%s\n' "${fs[@]}")"; then
       cut -f1 <<<"${TEST_CASES:-}" | grep -qxF -- "$f" || continue
       TEST_CASES=$(awk -F'\t' -v f="$f" '$1 != f' <<<"$TEST_CASES"); TEST_CASES=${TEST_CASES:+$TEST_CASES$'\n'}; READWHOLE=1
-    else fs+=("$f"); READADD+=("$f"); [ ${#lk[@]} = 0 ] || ! printf '%s\n' "${lk[@]}" | grep -qxF -- "$f" || READLINKS=$((READLINKS + 1)); fi
+    else fs+=("$f"); READADD+=("$f"); [ ${#lk[@]} = 0 ] || ! grep -qxF -- "$f" <<<"$(printf '%s\n' "${lk[@]}")" || READLINKS=$((READLINKS + 1)); fi
   done < <(cachereaders "$c")
   runnersout
 }
@@ -609,7 +609,7 @@ selfirst() { # <worktree> <max>
   # area): the cap keeps CARDLINKED of it, and a file it adds that is not linked does not run.
   # off: the test files only a link the last passes rule out gives the change (linkslive()). The command reads the links
   # file itself, so it lists them: none is added here (readersin() adds one whose last pass read a changed file).
-  ! printf '%s\n' "${o[@]}" | grep -q $'^r\t' || r=1
+  ! grep -q $'^r\t' <<<"$(printf '%s\n' "${o[@]}")" || r=1
   off=$(LC_ALL=C comm -23 <(changelinks "$1" all | LC_ALL=C sort -u) <(changelinks "$1" | LC_ALL=C sort -u))
   for l in "${o[@]}"; do
     [[ $l != x$'\t'* ]] || { [ "$r" = 1 ] && [ -f "$1/${l#x$'\t'}" ] && ! grep -qxF -- "${l#x$'\t'}" <<<"$off"; } || continue
@@ -787,8 +787,12 @@ nocaseask() { # <worktree> <testsel's output>
 linkskept() { # <worktree>
   local f
   KEPTLINKS=0
+  # A list is looked up from a here-string, here and wherever the engine asks whether a list holds a value, never as
+  # `printf '%s\n' "${list[@]}" | grep -q`: under pipefail that pipe fails (141) when grep ends at its match before
+  # printf has written a list of more than one buffer (4096 bytes), so a file on the list was read as not on it (20 of
+  # 3000 lookups in a list of 105 files): a linked file was left off the list, or one on it was listed twice.
   while IFS= read -r f; do
-    printf '%s\n' "${lk[@]}" | grep -qxF -- "$f" && ! printf '%s\n' "${fs[@]}" | grep -qxF -- "$f" || continue
+    grep -qxF -- "$f" <<<"$(printf '%s\n' "${lk[@]}")" && ! grep -qxF -- "$f" <<<"$(printf '%s\n' "${fs[@]}")" || continue
     fs+=("$f"); KEPTLINKS=$((KEPTLINKS + 1))
   done < <(changelinks "$1")
 }

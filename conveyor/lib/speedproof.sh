@@ -358,7 +358,7 @@ optproof() { # <card> <worktree> <issue json> <test file>
       elif [ ${#into[@]} != 0 ]; then why="the verdict is delete, and the change also changes test files, as a merge does: ${into[*]}"; fi ;;
     merge) if [ ${#add[@]} != 0 ]; then why="the verdict is merge, and the change adds test files: ${add[*]}"
       elif [ -e "$2/$f" ]; then
-        printf '%s\n' "${into[@]}" | grep -qxF -- "$f" && [ ${#gone[@]} != 0 ] \
+        grep -qxF -- "$f" <<<"$(printf '%s\n' "${into[@]}")" && [ ${#gone[@]} != 0 ] \
           || why="the verdict is merge, and the change neither removes the test file $f nor merges another test file into it"
       elif [ ${#into[@]} = 0 ]; then why="the verdict is merge, and the change removes the test file $f without changing another test file"; fi ;;
     'speed up' | keep | stabilise) if [ ! -e "$2/$f" ]; then why="the verdict is $v, and the change removes the test file $f"

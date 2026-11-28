@@ -194,6 +194,20 @@ t_testcachenocase() {
   [ "$(tr ' ' '\n' < "$T/$CASE/got3" | sort | paste -sd ' ' -)" = "l1.test.sh x.test.sh" ] \
     || fail "with 8 linked files, 7 of them with no case, and x.test.sh on the command's list, the list is not l1.test.sh and x.test.sh: $(cat "$T/$CASE/got3" "$T/$CASE/run.out" 2>&1)"
 }
+# #1829: a change to d.md, which the links give 400 test files with long names (a list of more than 4096 bytes): each
+# is on the list, once. Bug it catches: a lookup in the list by `printf | grep -q` failed under pipefail when grep
+# ended at its match before printf had written the whole list, so a linked file past the 5 was left off the list
+# (the lookup that says it is linked failed), or one of the 5 was listed twice (the lookup that says it is listed).
+t_testcachelonglist() {
+  setup '[]'
+  local w=$T/$CASE/cards/c7 i ls=()
+  for i in $(seq 400); do ls+=("a-long-name-of-a-test-file-that-fills-the-list-of-the-card-$i.test.sh"); echo x > "$R/${ls[-1]}"; done; echo d > "$R/d.md"
+  linkset "$(printf '%s\n' "${ls[@]}" | jq -Rn '{"d.md": [inputs]}')"; cachelistsetup "${ls[@]}" d.md
+  echo two >> "$w/d.md" && git -C "$w" add -A || fail "the card's change could not be staged"
+  LASTPASS=$'z.test.sh\tz.txt' cachelistrun 'listcmd "$wt" && printf "%s\n" "$TEST_FILES" > "$T/$CASE/got"'
+  [ "$(grep -c . "$T/$CASE/got")" = 400 ] && [ "$(LC_ALL=C sort -u "$T/$CASE/got" | grep -c .)" = 400 ] \
+    || fail "the list of a change that 400 test files are linked to holds $(grep -c . "$T/$CASE/got" 2>&1) lines and $(LC_ALL=C sort -u "$T/$CASE/got" 2>&1 | grep -c .) files, not each of the 400 once: $(head -c 600 "$T/$CASE/run.out")"
+}
 cachelistsetup() {
   git -C "$R" add -- "$@" && git -C "$R" commit -qm files || fail "main's files could not be committed"
   tune '.test.fileCommand = "true" | .tests.patterns = ["*.test.sh"]'
