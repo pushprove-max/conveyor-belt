@@ -366,3 +366,41 @@ t_stallmainrun() {
     *) fail "a card in its test step with no live record and no write was not found stuck: $(cat "$T/$CASE/out")" ;;
   esac
 }
+
+# Bugs (found 2026-11-27, t_stallwait under load): the loop ended a card as "no process of this step ran for 2s" 0.94 s
+# after its build's start line, before its session wrote its first live record. stuckcard() counted whole seconds and
+# took "at the limit" as past it, so a second could be missing; and with `turn` it judged from the records the turn
+# kept, which lacked the start line. Card c1's process is this shell, with no live record. Its start line 3 s old in
+# whole seconds (stuck 2 and reviewPause 1) is not stuck, one 4 s old is. With `turn`, records the turn kept that end
+# at an old brief line do not end it while the store holds a start line of this second; when the store holds no
+# newer line, it is stuck, as before.
+t_stallcount() {
+  # shellcheck disable=SC2034 # STUCK and REVIEW_PAUSE are read by stuckcard(), sourced below
+  local CARDS=$T/$CASE/cards STUCK=2 REVIEW_PAUSE=1
+  mkdir -p "$CARDS"
+  ( . "$SRC/lib/portable.sh"; eval "$(sed -n '/^stuckcard() {/,/^}/p' "$SRC/lib/run.sh")"
+    started=$(p_started $$) || exit 1
+    # The card's records: its worktree and brief lines, old, and a start line of its build at <epoch second>, if given.
+    recs() { jq -cn --argjson p $$ --arg s "$started" --arg t "${1:-}" '{card: "c1", issue: 1, step: "worktree", pid: $p, started: $s, time: "2026-01-01T00:00:00Z"},
+      {card: "c1", issue: 1, step: "brief", time: "2026-01-01T00:01:00Z"}, ($t | select(. != "") | {card: "c1", issue: 1, step: "start", of: "build", time: (tonumber | todate)})'; }
+    stdb() { recs "$when"; } # the store's answer; when, not at: stuckcard() has a local at
+    # At the limit: asked again when the clock's second changed during the look, as the line is then a second older.
+    for i in 1 2 3 4 5 6; do
+      now=$EPOCHSECONDS when=$((now - 3)); out=$(stuckcard c1); rc=$?
+      [ "$EPOCHSECONDS" != "$now" ] || break
+      [ "$i" != 6 ] || exit 1
+    done
+    [ "$rc" != 0 ] || { echo "a start line 3 s old: $out"; exit 2; }
+    when=$((EPOCHSECONDS - 4)); out=$(stuckcard c1) && [ "$out" = "$$ build stuck" ] || { echo "a start line 4 s old: '$out'"; exit 3; }
+    turncards() { recs; } # the records the turn kept: none newer than the brief line
+    when=$EPOCHSECONDS; ! out=$(stuckcard c1 turn) || { echo "the store holds a start line of this second: $out"; exit 4; }
+    when=''; out=$(stuckcard c1 turn) && [ "$out" = "$$ build stuck" ] || { echo "the store holds no newer line: '$out'"; exit 5; } ) > "$T/$CASE/out" 2>&1
+  case $? in
+    0) ;;
+    1) fail "the card's process start could not be read, or no look ended within its second: $(cat "$T/$CASE/out")" ;;
+    2) fail "a card whose last line is as old as stuck and reviewPause in whole seconds, so maybe a second less, was found stuck: $(cat "$T/$CASE/out")" ;;
+    3) fail "a card with no live record and a last line older than stuck and reviewPause was not found stuck: $(cat "$T/$CASE/out")" ;;
+    4) fail "the loop's look found a card stuck from the records its turn kept, which lack the card's newest line: $(cat "$T/$CASE/out")" ;;
+    *) fail "the loop's look did not find stuck a card that the store's records show stuck too: $(cat "$T/$CASE/out")" ;;
+  esac
+}

@@ -269,17 +269,17 @@ cardgone() { # <card> <its last step>
 # last line. A step's process (a session, a review, a test run, a wait at the claim or for the machine or the model API,
 # a bug card's run on main's code, the run on main of its failing cases, the repair lane's run: $CARDS/mainrun/<card>
 # .unfixed.live, .live, .repair.live) keeps a live record while it runs, and watch() ends one that makes no progress for
-# STUCK seconds; the step then waits REVIEW_PAUSE and runs once more, writing nothing meanwhile. So a card in its build, review, fix or test step with no live record, and with no
-# new line and no write to any of its files for STUCK and REVIEW_PAUSE together, has no process of that step. Prints
-# "<pid> <step> gone" or "<pid> <step> stuck"; fails for any other card. With `turn`, the loop's look at its cards, it
-# reads the card records its turn kept (turncards()), asking the store nothing: a card is stuck only after minutes with
-# no new line, so that reading, of this turn, holds its last line then. Outside the loop's turn (`retry` and `shut`),
-# a process that a signal stopped (ps state T: `kill -STOP`, a Ctrl-Z) does no work until someone starts it again, so
-# it prints "<pid> <step> stopped"; the loop never leaves a card's process stopped (freeze() kills it at once). With
-# `any` (`shut`), a card whose process runs prints "<pid> <step> running" too.
-stuckcard() { # <card> [turn | any]
+# STUCK seconds; the step then waits REVIEW_PAUSE and runs once more, writing nothing meanwhile. So a card in its build,
+# review, fix or test step with no live record, and with no new line and no write to its files for over STUCK and
+# REVIEW_PAUSE (whole-second times can read a second over the time passed), has no process of that step. Prints "<pid>
+# <step> gone" or "<pid> <step> stuck"; fails otherwise. With `turn` it reads the records the loop's turn kept
+# (turncards()), which can lack the newest line: only a reading from the store (fresh) ends a card. Outside the turn
+# (`retry`, `shut`), a process that a signal stopped (ps state T: `kill -STOP`, Ctrl-Z) does no work, so it prints
+# "<pid> <step> stopped"; the loop never leaves one stopped (freeze() kills it). With `any` (`shut`), a card whose
+# process runs prints "<pid> <step> running" too.
+stuckcard() { # <card> [turn | any] [fresh: with turn, the card's records are asked of the store]
   local c=$1 p t s at m f
-  IFS=$'\t' read -r p t s at < <(if [ "${2:-}" = turn ]; then turncards; else stdb ask card "$c"; fi 2>/dev/null | jq -rs --arg c "$c" 'map(select(.card == $c and .step != "push")) as $l
+  IFS=$'\t' read -r p t s at < <(if [ "${2:-}" = turn ] && [ -z "${3:-}" ]; then turncards; else stdb ask card "$c"; fi 2>/dev/null | jq -rs --arg c "$c" 'map(select(.card == $c and .step != "push")) as $l
     | ($l | map(select((.step == "worktree" or (.step == "start" and .of == "split")) and (.pid | type) == "number" and (.started | type) == "string")) | last) as $w | ($l | last) as $z
     | select($w != null and all($l[]; .step | IN("landed", "closed", "blocked", "pushed") | not))
     | [$w.pid, $w.started, (if $z.step == "start" then $z.of elif $z.step | IN("build", "fix", "rebase") then "review" elif $z.step == "brief" then "build"
@@ -291,8 +291,8 @@ stuckcard() { # <card> [turn | any]
   [[ $s =~ ^(build|review|fix|test)$ ]] && [ ! -e "$CARDS/$c.live" ] && [ ! -e "$CARDS/mainrun/$c.live" ] && [ ! -e "$CARDS/mainrun/$c.unfixed.live" ] && [ ! -e "$CARDS/mainrun/$c.repair.live" ] || return 1
   m=$at
   while read -r f _; do [[ ! $f =~ ^[0-9]+$ ]] || [ "$f" -le "$m" ] || m=$f; done < <(p_mtimes "$CARDS/$c" "$CARDS/$c".* "$CARDS/mainrun/$c".* 2>/dev/null)
-  [ $((EPOCHSECONDS - m)) -ge $((STUCK + REVIEW_PAUSE)) ] || return 1
-  echo "$p $s stuck"
+  [ $((EPOCHSECONDS - m)) -gt $((STUCK + REVIEW_PAUSE)) ] || return 1
+  if [ "${2:-}" = turn ] && [ -z "${3:-}" ]; then stuckcard "$c" turn fresh; else echo "$p $s stuck"; fi
 }
 # The reason a card stuck in flight is blocked with: <step> <gone | stopped | stuck>, as stuckcard() prints them.
 stuckwhy() { # <step> <gone | stopped | stuck>
