@@ -4,7 +4,9 @@
 # function more than 50 units ran, the units that ran each of its lines, and test-changed.sh (covof, covlines) runs
 # only those of the changed lines. Bug it catches: a 2-line change to one branch of testrun.sh tests(), which 573 of
 # 3132 cases ran, picked 387 test files; and a function the map did not hold with more than 25 callers ran its file's
-# whole area (callersof's cap): 86 files for cardland.sh.
+# whole area (callersof's cap): 86 files for cardland.sh. And a change to a condition line ran every unit that tested
+# it, not the units that ran the code it guards (the rule `branch`): 586 units for testrun.sh tests()'s pretest `if`,
+# whose branch 1 unit ran.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd -P); ROOT=$(dirname "$HERE")
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
@@ -16,8 +18,9 @@ bad=0; n=0
 ok() { n=$((n + 1)); echo "ok $n - $1"; }
 no() { n=$((n + 1)); echo "not ok $n - $1"; bad=1; }
 
-# A scratch checkout: f.sh's big() (line 4 runs on the x path alone, line 6 on the other), run by the 60 cases of
-# a.test.sh (c01 and c02 take the x path); g.sh's lone(), which the map does not hold, named by 26 functions of
+# A scratch checkout: f.sh's big() (line 4 runs on the x path alone, line 6 on the other) and gate() (its guarded
+# lines 12, 15 and 19 run on the x path alone, 16 and 22 on none), run by the 60 cases of a.test.sh (c01 and c02 take
+# the x path); g.sh's lone(), which the map does not hold, named by 26 functions of
 # h.sh and by b.test.sh's case alone; g.sh's area also lists d.test.sh, which names none of them.
 R=$T/r; mkdir -p "$R/.conveyor" "$R/conveyor/lib" "$R/conveyor/tests"
 cp "$HERE/coverage.sh" "$HERE/test-changed.sh" "$HERE/funcs.awk" "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$R/.conveyor/"
@@ -27,10 +30,12 @@ printf '%s\n' '{"outside": "conveyor/lib/portable.sh"}' '{"area": "a", "file": "
   '{"area": "g", "test": "d.test.sh"}' '{"area": "g", "file": "conveyor/conveyor.sh"}' > "$R/.conveyor/engine-areas.json"
 # callersof reads conveyor.sh's start-up lines (a changed function they name runs the area).
 printf '#!/usr/bin/env bash\ntrue\n' > "$R/conveyor/conveyor.sh"
-printf '%s\n' 'big() {' '  echo start' '  if [ "${1:-}" = x ]; then' '    echo x' '  else' '    echo y' '  fi' '  echo end' '}' > "$R/conveyor/lib/f.sh"
+printf '%s\n' 'big() {' '  echo start' '  if [ "${1:-}" = x ]; then' '    echo x' '  else' '    echo y' '  fi' '  echo end' '}' \
+  'gate() {' '  if [ "${1:-}" = x ]; then' '    echo x' '  fi' '  case "${1:-}" in' '    x) echo cx ;;' '    z) echo cz ;;' '  esac' \
+  '  [ "${1:-}" != x ] || {' '    echo gx' '  }' '  if [ "${1:-}" = z ]; then' '    echo z' '  fi' '}' > "$R/conveyor/lib/f.sh"
 printf 'lone() {\n  echo lone\n}\n' > "$R/conveyor/lib/g.sh"
 for i in $(seq -w 1 26); do printf 'hc%s() {\n  lone\n}\n' "$i"; done > "$R/conveyor/lib/h.sh"
-for i in $(seq -w 1 60); do [ "$i" -le 2 ] && a=x || a=y; printf 't_c%s() {\n  big %s\n}\n' "$i" "$a"; done > "$R/conveyor/tests/a.test.sh"
+for i in $(seq -w 1 60); do [ "$i" -le 2 ] && a=x || a=y; printf 't_c%s() {\n  big %s\n  gate %s\n}\n' "$i" "$a" "$a"; done > "$R/conveyor/tests/a.test.sh"
 printf 't_bone() {\n  hc01\n}\n' > "$R/conveyor/tests/b.test.sh"
 printf 't_done() {\n  :\n}\n' > "$R/conveyor/tests/d.test.sh"
 cat > "$R/conveyor/conveyor.test.sh" <<'EOF'
@@ -73,6 +78,30 @@ sed -i.bak '5s/else/else :/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.
 got=$(cases); want=$(seq -w 1 60 | sed 's/^/c/' | paste -sd ' ' -)
 [ "$got" = "$want" ] && ok "a changed line with no row (else) runs the cases of the lines around it" || no "line 5 (else) changed: ran '$got'"
 git -C "$R" checkout -q -- conveyor/lib/f.sh
+
+# The rule branch: a changed condition line that more than 50 units ran runs the units that ran the code it guards.
+# gate()'s map: its condition lines 11, 14, 18 and 21 run by each case, its guarded lines 12, 15 and 19 by c01 and c02.
+for i in $(seq -w 1 60); do
+  printf 'conveyor/lib/f.sh\tgate\tconveyor/conveyor.test.sh\tc%s\n' "$i"
+done | cat "$F/runs" - > "$F/gruns"
+for i in $(seq -w 1 60); do
+  for l in 11 14 18 21 $([ "$i" -le 2 ] && echo 12 15 19); do printf 'conveyor/lib/f.sh\tgate\t%s\tconveyor/conveyor.test.sh\tc%s\n' "$l" "$i"; done
+done | cat "$F/lines" - > "$F/glines"
+bash "$HERE/coverage.sh" --write 2026-11-27T00:00:00Z "$F/sums" "$F/gruns" "$F/glines" "$SHA" > "$M" && git -C "$R" add -A && git -C "$R" commit -qm gmap \
+  || no "the map of gate() could not be written"
+two="c01 c02"; all=$(seq -w 1 60 | sed 's/^/c/' | paste -sd ' ' -)
+# <line> <sed> <cases> <rule> <what>: a change (<sed>) to line <line> of f.sh runs <cases>, by <rule>.
+branch() {
+  sed -i.bak "$1$2" "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
+  got=$(cases)
+  [ "$got" = "$3" ] && grep -qxF "coverage map rule: conveyor/lib/f.sh $4" "$F/out" && ok "$5" || no "$5: line $1 changed: ran '$got': $(cat "$F/out")"
+  git -C "$R" checkout -q -- conveyor/lib/f.sh
+}
+branch 11 s/x/X/ "$two" "gate(): branch" "a changed if line 60 cases ran runs the 2 that ran its then branch, by the rule branch"
+branch 3 s/x/X/ "$all" "big(): branch" "a changed if line with an else runs the cases of both its branches, by the rule branch"
+branch 14 s/:-// "$two" "gate(): branch" "a changed case line runs the cases that ran its branches"
+branch 18 s/x/X/ "$two" "gate(): branch" "a changed || { line runs the cases that ran the group it guards"
+branch 21 s/z/Z/ "$all" "gate(): lines" "a changed if line whose branch no case ran runs the cases that ran the line"
 
 # Main added two lines above big() since the trace: the lines are read as the map's commit had them, so a change to
 # line 6 (now line 8: echo y) runs the 58 cases of the y path.

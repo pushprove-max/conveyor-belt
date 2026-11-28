@@ -40,7 +40,8 @@
 # written by a traced run of every case: .conveyor/coverage.sh; issue 527: covof) runs the cases the map lists for each
 # changed function: engine cases through the runner, parts of dashboard.test.sh and of the hooks' tests (partsof;
 # CONVEYOR_SHELL_TEST_CASE, comma-separated), other test files whole. Of a function the map holds by its lines (more
-# than 50 units ran it: issue 1830), only the units that ran a changed line (covlines): the rule `lines`. Other test
+# than 50 units ran it: issue 1830), only the units that ran a changed line (covlines): the rule `lines`; of a changed
+# condition line more than 50 units ran, only the units that ran the code it guards: the rule `branch`. Other test
 # files whole; and of the tests named after the file or listed for it (TESTS_OF), those the map names nowhere (that the
 # trace did not run). A part runs only when nothing selects its test file whole. A function changed since the map was
 # traced (its sum differs) runs the cases the map lists for it as traced and the tests callersof gives (issue 1822;
@@ -461,8 +462,9 @@ COVTESTS=
 # set when a changed function of the file pick reads has a stale row (covof), for callersof in pick.
 COVSEL=; COVSTALE=
 # CFN: the changed functions of the file pick reads (covof, callersof); RULES: which rule picked each one's tests
-# (rulefor); COVLINES: `<file><TAB><function>` of each one covof picked by its changed lines (covlines).
-CFN=; RULES=; declare -A COVLINES=()
+# (rulefor); COVLINES: `<file><TAB><function>` of each one covof picked by its changed lines (covlines), COVBRANCH of
+# each of those picked by the code a changed condition line guards.
+CFN=; RULES=; declare -A COVLINES=() COVBRANCH=()
 # RANKED: the test files hooklibtests gave, one a line, most of the library's users first: the list (CONVEYOR_TEST_LIST,
 # below) names them first, in this order.
 RANKED=
@@ -1133,17 +1135,110 @@ keysof() {
   done
   parse[$f]=1
 }
+# GUARDS (issue 1830, the rule `branch`: covlines) reads a shell file as the code each of its condition lines guards: a
+# line `<condition line><TAB><line>,<line>,...` for each `if`, `elif`, `while`, `until` and `case` line, and each line
+# that ends in `&& {` or `|| {`, whose guarded lines are lines of their own. An `if` guards each of its branches
+# (then, elif, else), an `elif` its own branch and the ones after it, a `while` or `until` its body, a `case` its
+# lines up to `esac`, and a `&& {` or `|| {` its group up to `}`. A branch that ends on its closing line (`cmd; fi`)
+# keeps that line, and one that starts on its condition line (`if a; then b`) starts on the next line, so a guard on
+# one line (`a && b`, `if a; then b; fi`) guards no line. Quoted text, comments, here-documents and arithmetic are
+# skipped. Each function is read on its own: one whose keywords do not pair up gives no line, the others still do.
+GUARDS='function strip(s,   o, i, c, t, nx) {
+  # st: the open quotes, command substitutions and ${...} expansions, innermost last, kept from line to line (q for a
+  # single quote, a for $"..." with a single quote, d for a double quote, p for $( and b for ${).
+  o = ""
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1); nx = substr(s, i + 1, 1); t = substr(st, length(st))
+    if (t == "q") { if (c == "\047") st = substr(st, 1, length(st) - 1); continue }
+    if (t == "a") { if (c == "\\") { i++; continue } if (c == "\047") st = substr(st, 1, length(st) - 1); continue }
+    if (t == "d") {
+      if (c == "\\") { i++; continue }
+      if (c == "\"") { st = substr(st, 1, length(st) - 1); continue }
+      if (c == "$" && nx == "(") { st = st "p"; i++ }
+      if (c == "$" && nx == "{") { st = st "b"; i++ }
+      continue
+    }
+    if (t == "b") {
+      if (c == "\\") { i++; continue }
+      if (c == "\047") { st = st "q"; continue }
+      if (c == "\"") { st = st "d"; continue }
+      if (c == "}") st = substr(st, 1, length(st) - 1)
+      continue
+    }
+    if (c == "\\") { i++; continue }
+    if (c == "$" && nx == "\047") { st = st "a"; i++; continue }
+    if (c == "\047") { st = st "q"; continue }
+    if (c == "\"") { st = st "d"; continue }
+    if (c == "$" && nx == "(") { st = st "p"; o = o "$("; i++; continue }
+    if (c == "$" && nx == "{") { st = st "b"; i++; continue }
+    if (t == "p" && c == "(") { st = st "p"; o = o c; continue }
+    if (t == "p" && c == ")") { st = substr(st, 1, length(st) - 1); o = o c; continue }
+    if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[ \t;&|(]/)) break
+    o = o c
+  }
+  return o
+}
+function shut(e,   k) { k = nb[d]; if (bs[d, k] != "" && e >= bs[d, k]) be[d, k] = e; else bs[d, k] = "" }
+function emit(   k, j, i, g) {
+  for (k = 1; k <= (ty[d] == "if" ? nb[d] : 1); k++) {
+    if (bc[d, k] == "") continue
+    g = ""
+    for (j = k; j <= (ty[d] == "if" ? nb[d] : 1); j++) if (bs[d, j] != "") for (i = bs[d, j]; i <= be[d, j]; i++) g = g (g == "" ? "" : ",") i
+    if (g != "") pend[bc[d, k]] = g
+  }
+}
+function opn(kind, c, b) { d++; ty[d] = kind; nb[d] = 1; bc[d, 1] = c; bs[d, 1] = b; ln[d] = NR; wait[d] = (b == "") }
+function cls(kind, e) { if (!d || ty[d] != kind) { bad = 1; return } shut(e); if (NR > ln[d]) emit(); d-- }
+function flush(   k) { if (!bad && !d && st == "" && hd == "") for (k in pend) out[k] = pend[k]; delete pend; d = 0; st = ""; hd = ""; bad = 0 }
+/^(function[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)[ \t]*\{?[ \t]*$/ { flush() }
+{
+  if (hd != "") { t = $0; if (hdt) sub(/^\t+/, "", t); if (t == hd) hd = ""; next }
+  t = $0; gsub(/<<</, "", t); nexthd = ""
+  if (st == "" && match(t, /<<-?[ \t]*[\047"]?[A-Za-z_][A-Za-z0-9_]*/)) {
+    nexthd = substr(t, RSTART, RLENGTH); hdt = (nexthd ~ /^<<-/); sub(/^<<-?[ \t]*[\047"]?/, "", nexthd)
+  }
+  s = strip($0)
+  gsub(/\$?\(\([^()]*\)\)/, "", s)
+  if (s ~ /^[ \t]*\}/) { if (d && (ty[d] == "brace" || ty[d] == "group")) cls(ty[d], NR - 1); else if (d) bad = 1 }
+  gsub(/;;&|;&|;;/, ";", s)
+  n = split(s, seg, /[;&|()]+/)
+  for (j = 1; j <= n && !bad; j++) {
+    x = seg[j]; sub(/^[ \t!{}]+/, "", x); m = split(x, wd, /[ \t]+/)
+    for (o = 1; o <= m && !bad; o++) {
+      w = wd[o]; first = (j == 1 && o == 1 && w != "")
+      if (w == "if") opn("if", NR, "")
+      else if (w == "elif" && d && ty[d] == "if") { shut(NR - first); nb[d]++; bc[d, nb[d]] = NR; bs[d, nb[d]] = ""; wait[d] = 1 }
+      else if (w == "then" && d && ty[d] == "if" && wait[d]) { bs[d, nb[d]] = NR + 1; wait[d] = 0 }
+      else if (w == "else" && d && ty[d] == "if") { shut(NR - first); nb[d]++; bc[d, nb[d]] = ""; bs[d, nb[d]] = NR + 1 }
+      else if (w == "fi") cls("if", NR - first)
+      else if (w == "while" || w == "until") opn("loop", NR, "")
+      else if (w == "for") opn("loop", "", "")
+      else if (w == "do" && d && ty[d] == "loop" && wait[d]) { bs[d, 1] = NR + 1; wait[d] = 0 }
+      else if (w == "done") cls("loop", NR - first)
+      else if (w == "case") opn("case", NR, NR + 1)
+      else if (w == "esac") cls("case", NR - first)
+      # A word that opens a body can start the next command in the same piece: `then if ...`.
+      if (w != "then" && w != "do" && w != "else" && w != "{" && w != "!") break
+    }
+  }
+  if (!bad && s ~ /\{[ \t]*$/) opn(s ~ /(&&|\|\|)[ \t]*\{[ \t]*$/ ? "brace" : "group", s ~ /(&&|\|\|)[ \t]*\{[ \t]*$/ ? NR : "", NR + 1)
+  if (nexthd != "") hd = nexthd
+}
+END { flush(); for (k in out) print k "\t" out[k] }'
 # covlines <file> <FUNCS output of it at TXFROM> <function>... (issue 1830): of each function the map holds by its
 # lines (its `line` rows: coverage.sh, for a function more than 50 units ran), the units that ran a line the change
 # (TXFROM to TXTO) changed, into LOV ({<function>: [<unit>, ...]}), and `<file><TAB><function>` into COVLINES, so the
-# run names the rule `lines`. A changed line is read on its old side (a line added after line n: lines n and n+1), as
-# the file was at the map's commit (its `sha`): moved by the lines main added or removed above the function since. A
+# run names the rule `lines` (or `branch`: COVBRANCH too). A changed line is read on its old side (a line added after
+# line n: lines n and n+1), as the file was at the map's commit (its `sha`): moved by the lines main added or removed above the function since. A
 # line with no row (no command starts on it: `else`, `fi`, a continued line) stands as the nearest lines of the
-# function before and after it that have one. A function is left to its row's units (no LOV) when the map has no sha
+# function before and after it that have one. A changed condition line (GUARDS, read from the file at the map's
+# commit) that more than 50 units ran stands as the lines it guards (the rule `branch`, COVBRANCH): the units that ran
+# the code it guards, not every unit that tested it. When no unit ran that code, it stands as itself. A function is
+# left to its row's units (no LOV) when the map has no sha
 # or the commit is not here, main changed a line of the function since the trace, the change touches none of its
 # lines, or the map has no line row of it.
 covlines() {
-  local f=$1 a=$2 sha src d h x s e n delta lines q='{}'
+  local f=$1 a=$2 sha src d h x s e n delta lines g r q='{}'
   shift 2
   [ $# -gt 0 ] || return 0
   sha=$(jq -rn '[inputs | objects | .sha? // empty] | first // empty' "$COV" 2>/dev/null)
@@ -1172,14 +1267,24 @@ covlines() {
       '$q + {($n): {lines: ($l | split(",") | map(tonumber - $dl)), lo: $lo, hi: $hi}}') || return 0
   done
   [ "$q" != '{}' ] || return 0
-  LOV=$(jq -cn --arg f "$f" --argjson q "$q" '[inputs | objects | select(.file == $f and has("line"))] as $r
+  # The lines each condition line guards, at the map's commit ({<line>: [<line>, ...]}): none when it cannot be read.
+  g=$(git show "$sha:$f" 2>/dev/null | awk "$GUARDS" 2>/dev/null \
+    | jq -cRn '[inputs | split("\t") | {key: .[0], value: (.[1] | split(",") | map(tonumber))}] | from_entries' 2>/dev/null)
+  [ -n "$g" ] || g='{}'
+  r=$(jq -cn --arg f "$f" --argjson q "$q" --argjson g "$g" '[inputs | objects | select(.file == $f and has("line"))] as $r
     | $q | with_entries(.key as $n | .value as $v
       | ([$r[] | select(.fn == $n and .line >= $v.lo and .line <= $v.hi)] | sort_by(.line)) as $L
       | .value = (if $L == [] then null else [$v.lines[] as $l | [$L[] | select(.line == $l)] as $x
-          | if $x != [] then $x[0].units[] else ([$L[] | select(.line < $l)] | last), ([$L[] | select(.line > $l)] | first)
-            | select(. != null) | .units[] end] | unique | if . == [] then null else . end end))
-    | with_entries(select(.value != null))' "$COV" 2>/dev/null) || LOV='{}'
+          | if $x == [] then {u: [([$L[] | select(.line < $l)] | last), ([$L[] | select(.line > $l)] | first) | select(. != null) | .units[]]}
+            elif ($x[0].units | length) > 50 and $g[$l | tostring] != null
+            then [$g[$l | tostring][] as $k | $L[] | select(.line == $k) | .units[]] as $b
+              | if $b == [] then {u: $x[0].units} else {u: $b, b: true} end
+            else {u: $x[0].units} end]
+          | {u: ([.[].u[]] | unique), b: any(.[]; .b == true)} | if .u == [] then null else . end end))
+    | with_entries(select(.value != null))' "$COV" 2>/dev/null) || r='{}'
+  LOV=$(jq -c 'map_values(.u)' <<<"$r") || LOV='{}'
   for x in $(jq -r 'keys[]' <<<"$LOV"); do COVLINES[$f$'\t'$x]=1; done
+  for x in $(jq -r 'to_entries[] | select(.value.b) | .key' <<<"$r"); do COVBRANCH[$f$'\t'$x]=1; done
 }
 # covof <file> (issue 527): when the change of a shell file (TXFROM to TXTO) edits or removes its functions alone (FUNCS;
 # its other lines the same but for comments and blanks, TEXT), and the coverage map ($COV) holds each of them with at
@@ -1267,10 +1372,11 @@ covof() {
 }
 # rulefor <file> <rule> (issue 1775): a line `<file><TAB><function><TAB><rule>` in RULES for each changed function
 # (CFN), `-` for none: which rule picked the tests of each (covof, callersof, covof+callersof for a stale row, or
-# area; lines for covof by changed lines, COVLINES: issue 1830), which the run prints.
+# area; lines for covof by changed lines, COVLINES, and branch by the code a changed condition line guards, COVBRANCH:
+# issue 1830), which the run prints.
 rulefor() {
   local n r
-  for n in ${CFN:--}; do r=$2; [ -z "${COVLINES[$1$'\t'$n]:-}" ] || r=${r/covof/lines}; RULES+=$1$'\t'$n$'\t'$r$'\n'; done
+  for n in ${CFN:--}; do r=$2; [ -z "${COVLINES[$1$'\t'$n]:-}" ] || r=${r/covof/lines}; [ -z "${COVBRANCH[$1$'\t'$n]:-}" ] || r=${r/lines/branch}; RULES+=$1$'\t'$n$'\t'$r$'\n'; done
 }
 # The tests of the changed files <file>...: into run (test files), area (engine case files) and all (the whole engine
 # test), then (but in textonly's pick) pick's cases (the engine runner's cases, none for all of them) and run[the runner].

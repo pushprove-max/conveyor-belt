@@ -889,9 +889,11 @@ It uses three rules, in this order:
 1. The coverage map (`.conveyor/coverage.jsonl`): the cases that ran each changed function when the map was made.
    For a function that more than 50 cases ran, the map also keeps the cases that ran each of its lines. A change to
    such a function runs only the cases that ran a changed line (the rule `lines`). A changed line that ran in no
-   case, as `else` or `fi`, counts as the nearest line before it and after it in the function that ran. When main
-   changed the function after the map was made, or the map has no line data for it, the change runs the cases that
-   ran the function.
+   case, as `else` or `fi`, counts as the nearest line before it and after it in the function that ran. A changed
+   condition line (`if`, `elif`, `while`, `until`, `case`, or a line that ends in `&& {` or `|| {`) that more than
+   50 cases ran runs only the cases that ran the code it guards (the rule `branch`). When no case ran that code, it
+   runs the cases that ran the line. When main changed the function after the map was made, or the map has no line
+   data for it, the change runs the cases that ran the function.
 2. The callers: the test files that name a changed function or a function that calls it. When one of these
    functions is in a command script (`conveyor/commands/`), the tests that run that command also run. This rule
    applies when the map does not have the function, or when there is no map. It applies however many functions call
