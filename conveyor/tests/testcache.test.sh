@@ -208,6 +208,21 @@ t_testcachelonglist() {
   [ "$(grep -c . "$T/$CASE/got")" = 400 ] && [ "$(LC_ALL=C sort -u "$T/$CASE/got" | grep -c .)" = 400 ] \
     || fail "the list of a change that 400 test files are linked to holds $(grep -c . "$T/$CASE/got" 2>&1) lines and $(LC_ALL=C sort -u "$T/$CASE/got" 2>&1 | grep -c .) files, not each of the 400 once: $(head -c 600 "$T/$CASE/run.out")"
 }
+# #1829: card c7 changes its own test file own.test.sh and s.txt, which the test map gives m1 to m6; the command of
+# the changed tests lists own.test.sh and m1.test.sh and leaves the rest out. The list holds own.test.sh once. Bug it
+# catches: a file the command lists that the map does not give was added to the map's files, also when it was the
+# card's own test file, which the list held already: it was listed twice, and started twice.
+t_testcacheownonce() {
+  setup '[]'
+  local w=$T/$CASE/cards/c7 i ls=(own.test.sh)
+  for i in 1 2 3 4 5 6; do ls+=("m$i.test.sh"); done; for i in "${ls[@]}"; do echo x > "$R/$i"; done; echo s > "$R/s.txt"
+  printf '%s\n' "${ls[@]:1}" | jq -Rn '{"s.txt": [inputs]}' > "$R/areas.json"; cachelistsetup "${ls[@]}" s.txt areas.json
+  tune '.test.map = "areas.json" | .test.changed = "sel.sh" | .test.command = "ls | grep -E \"^(own|m1)[.]test\" > \"$CONVEYOR_TEST_LIST\""'
+  echo two >> "$w/s.txt" && echo y >> "$w/own.test.sh" && git -C "$w" add -A || fail "the card's change could not be staged"
+  LASTPASS=$'z.test.sh\tz.txt' cachelistrun 'listcmd "$wt" && printf "%s\n" "$TEST_FILES" > "$T/$CASE/got"'
+  [ "$(grep -cxF own.test.sh "$T/$CASE/got")" = 1 ] && grep -qxF m1.test.sh "$T/$CASE/got" \
+    || fail "the list does not hold the card's own test file once, with m1.test.sh: $(paste -sd ' ' "$T/$CASE/got" 2>&1): $(head -c 600 "$T/$CASE/run.out")"
+}
 cachelistsetup() {
   git -C "$R" add -- "$@" && git -C "$R" commit -qm files || fail "main's files could not be committed"
   tune '.test.fileCommand = "true" | .tests.patterns = ["*.test.sh"]'

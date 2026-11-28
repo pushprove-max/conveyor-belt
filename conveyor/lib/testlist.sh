@@ -612,7 +612,10 @@ selfirst() { # <worktree> <max>
   ! grep -q $'^r\t' <<<"$(printf '%s\n' "${o[@]}")" || r=1
   off=$(LC_ALL=C comm -23 <(changelinks "$1" all | LC_ALL=C sort -u) <(changelinks "$1" | LC_ALL=C sort -u))
   for l in "${o[@]}"; do
-    [[ $l != x$'\t'* ]] || { [ "$r" = 1 ] && [ -f "$1/${l#x$'\t'}" ] && ! grep -qxF -- "${l#x$'\t'}" <<<"$off"; } || continue
+    # Nor one of the card's own test files (own, listcmd()), which the list holds already: bug, it was listed twice.
+    # shellcheck disable=SC2154 # own is listcmd()'s (lib/testrun.sh)
+    [[ $l != x$'\t'* ]] || { [ "$r" = 1 ] && [ -f "$1/${l#x$'\t'}" ] && ! grep -qxF -- "${l#x$'\t'}" <<<"$off" \
+      && ! grep -qxF -- "${l#x$'\t'}" <<<"$(printf '%s\n' "${own[@]}")"; } || continue
     ks+=("${l#?$'\t'}"); [[ $l == r$'\t'* ]] || SELN=$((SELN + 1))
   done
   fs=("${ks[@]}"); SELALL=$r
