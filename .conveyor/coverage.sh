@@ -138,13 +138,21 @@ done < <({ jq -r '.areas[].files[] | select(endswith(".sh"))' <<<"$areas"
 # one a check its whole run, untraced, prints (`ok   <label>`, `FAIL <label> (expected ...`), whose text is the end of
 # the label after its last comma, or else the longest run of its words the file holds (the leftmost of equal ones), as
 # an expansion at its start or end (`($SEAT)`) leaves words the file does not hold: the text selects that check, maybe
-# with others. Each <file><TAB><label><TAB><text> into $TR/labels, for the proof below. It fails, and the file is
-# traced whole, when that run fails or a label leaves no text.
+# with others. The text is searched for only in the lines the case filter can select (.claude/hooks/__tests__/lib/
+# case-filter.sh): those outside a function whose first word is check or a function that calls check. A text in a
+# helper's body or a loop's word list selected no check, and its unit failed. Each <file><TAB><label><TAB><text>
+# into $TR/labels, for the proof below. It fails, and the file is traced whole, when that run fails or a label
+# leaves no text.
 checks() {
   local t=$1 l s src x i k
   local -a w
   env -u CONVEYOR_SHELL_TEST_CASE timeout 900 bash "$t" > "$TR/list" 2>&1 < /dev/null || return 1
-  src=$(< "$t")
+  src=$(awk 'function def() { return match($0, /^[A-Za-z_][A-Za-z0-9_]*\(\) *\{/) }
+    function one() { return $0 ~ /\}[[:space:]]*(#.*)?$/ }
+    function calls() { return $0 ~ /(^|[^A-Za-z0-9_-])check([^A-Za-z0-9_-]|$)/ }
+    FNR == NR { if (def()) { f = substr($0, 1, index($0, "(") - 1); in_f = !one(); if (f != "check" && calls()) k[f] = 1; next }
+      if (in_f) { if (/^}/) in_f = 0; else if (f != "check" && calls()) k[f] = 1 }; next }
+    def() { in_f = !one(); next } in_f { if (/^}/) in_f = 0; next } $1 == "check" || $1 in k' "$t" "$t")
   : > "$TR/these"
   while IFS= read -r l; do
     read -ra w <<<"${l##*,}"; s=
