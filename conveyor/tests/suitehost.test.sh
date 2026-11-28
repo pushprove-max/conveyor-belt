@@ -54,7 +54,7 @@ t_hostssh() {
   wait_until "! flock -n '$pool/1' true" || fail "the case could not hold the slot"
   out=$(unset CONVEYOR_TEST_SLOT; CONVEYOR_TEST_POOL=1:$pool loop release-run prep 1.1.0 --parallel 2>&1) || fail "release-run prep did not start the run: $out"
   # relwait: release-run starts the run in the background and returns; only its record shows when the run has ended.
-  relwait "the run on the box did not end (one that waits for this machine's held slot never does)" '.ended != null'
+  relwait "the run on the box did not end (one that waits for this machine's held slot never does)" '.ended != null and (.machine.step == "done" or .machine.reason != null)'
   pkill -P "$held" 2>/dev/null; kill "$held" 2>/dev/null
   jq -e '.state == "passed" and .done == 2 and .files.done == 2 and .failed == 0' "$RUN" > /dev/null || fail "the run did not pass with the box's counts, 2 cases and 2 files: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
   jq -e '.machine | .kind == "ssh" and .name == "box.example.com" and .step == "done" and .reason == null and (.secs | keys) == ["checkout", "results", "run", "setup", "start"]' "$RUN" > /dev/null \
@@ -121,7 +121,7 @@ t_hostlocal() {
   jq -c 'del(.suiteMachine)' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json" || fail "the fixture could not be made"
   out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
   # relwait: release-run starts the run in the background and returns; only its record shows when the run has ended.
-  relwait "the run did not end" '.ended != null'
+  relwait "the run did not end" '.ended != null and (.machine.step == "done" or .machine.reason != null)'
   jq -e '.state == "passed" and .done == 2 and (.machine | .kind == "local" and .name == "this machine" and .step == "done")' "$RUN" > /dev/null \
     || fail "the run with no suiteMachine did not pass here: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
   [ "$(cat "$STUB/full-pwd")" = "$T/$CASE/cards/release/wt" ] && [ ! -e "$STUB/ssh-calls" ] || fail "the suite did not run in this machine's worktree, or ssh was called: $(cat "$STUB/full-pwd") $(cat "$STUB/ssh-calls" 2>&1)"
@@ -438,7 +438,7 @@ t_devboxrun() {
     && git -C "$R" push -q origin main && O=$(git -C "$R" rev-parse HEAD) || fail "the fixture could not be made"
   out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
   # relwait: release-run starts the run in the background and returns; only its record shows when the run has ended.
-  relwait "the run on the devbox did not end" '.ended != null'
+  relwait "the run on the devbox did not end" '.ended != null and (.machine.step == "done" or .machine.reason != null)'
   jq -e '.state == "passed" and .done == 2 and .failed == 0' "$RUN" > /dev/null || fail "the run did not pass with the devbox's counts: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
   jq -e '.machine | .kind == "devbox" and .name == "Namespace Devbox 4x8" and .lease == "lease-1274" and .target == null and .dir == null and .step == "done" and .reason == null
     and (.secs | keys_unsorted) == ["start", "setup", "checkout", "run", "results"]' "$RUN" > /dev/null \
@@ -552,7 +552,7 @@ t_devboxnamed() {
   out=$(loop control suite-machine devbox --box hand-made 2>&1) || fail "control suite-machine devbox --box hand-made did not set the rule: $out"
   out=$(loop release-run prep 1.1.0 2>&1) || fail "release-run prep did not start the run: $out"
   # relwait: release-run starts the run in the background and returns; only its record shows when the run has ended.
-  relwait "the run on the named devbox did not end" '.ended != null'
+  relwait "the run on the named devbox did not end" '.ended != null and (.machine.step == "done" or .machine.reason != null)'
   jq -e '.state == "passed" and .machine.kind == "devbox" and .machine.box == "hand-made" and .machine.lease == null and .machine.step == "done"' "$RUN" > /dev/null \
     || fail "the run did not pass on the named box hand-made: $(cat "$RUN") $(cat "$T/$CASE/cards/release/run.log")"
   [ "$(devboxcalls)" = 'auth check-login;exec start;exec facts;exec dir;upload hand-made wt.in;exec checkout;exec dir;upload hand-made wt.in;exec upload;exec -d run;exec poll' ] \
