@@ -17,7 +17,7 @@ TOP=$(cd "$(mktemp -d "${TMPDIR:-/tmp}"/dashboard-stream-test.XXXXXX)" && pwd -P
 trap 'rm -rf "$TOP"' EXIT
 # The host file is XDG_CONFIG_HOME's when it is set, ahead of the test's HOME: an inherited one is the owner's real host.
 unset XDG_CONFIG_HOME
-fail() { echo "FAIL: $*" >&2; [ ! -s "$T/feed.err" ] || sed 's/^/  feed: /' "$T/feed.err" >&2; exit 1; }
+fail() { echo "FAIL: $*" >&2; [ -z "${T:-}" ] || [ ! -s "$T/feed.err" ] || sed 's/^/  feed: /' "$T/feed.err" >&2; exit 1; } # T: no part's folder at the end
 
 # The feeds below run side by side, each in a part of its own (( fresh <part>; ... ) &): one whose stream drops and
 # fails, one whose host goes quiet and comes back, one whose host file changes, one sent ten changes in a second and
@@ -115,8 +115,8 @@ data | jq -e '(.updatedAt | fromdate) - (.panels.rules.data.readAt | fromdate) |
 until_is "a_live_line_reaches_data_js" data '.panels.belt.data.cards[0] | .live.action == "Bash: npm test" and .usd == 1.25 and .tokens.claude == 5000 and .reading and .atEnd == false' .panels.belt
 until_is "health_says_live" data '.panels.health.data.stream | .live == true and (.heardAt | type) == "string" and .since == null'
 # Bug #456: a card the host gave back stayed Blocked, with Retry, until a snapshot without it came, which can take
-# long after a retry. The host's retried line, which no snapshot waits for, reaches Needs you at once.
-until_is "a_retried_line_reaches_needs_you" data '.panels.needs.data.retried == [{repo: "sample", card: "c9", issue: 9}]' .panels.needs.data.retried
+# long after a retry. The host's retried line, which no snapshot waits for, reaches Needs you at once, not held.
+until_is "a_retried_line_reaches_needs_you" data '.panels.needs.data.retried == [{repo: "sample", card: "c9", issue: 9, held: false}]' .panels.needs.data.retried
 pass=$((pass + 7))
 
 # A stream that drops is opened again, and starts from a whole snapshot: the live line of the first is gone with it.
