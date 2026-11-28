@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 120
+# timeout: 300
+# The limit is the whole file's in a card's test step (lib/fileeach.sh), and each of its 17 cases waits there for a test
+# slot of its own. A card's step ran the file in 70 to 86 s, but on a busy step the waits for slots took it past 120 s
+# (times the load factor, 273 s once) with no case failed: all 3 flaky sightings were that time-out (#1773).
 # Engine cases: a red release run's fix cards (relfixes(), lib/fulltest.sh, issue 758): the issues that carry
 # `Release fix: <version>` are recorded in the run's record, and release-prep starts again by itself once they have
 # all landed, are in the commit release-prep tests and no card is open; so does a release-prep that waits on its notes
