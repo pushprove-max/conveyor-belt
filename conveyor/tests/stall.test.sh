@@ -248,8 +248,12 @@ srcd() {
 # A card waiting by design (here to land, on a same-file card that lands first) is never ended, however long it waits:
 # #8 waits on #7, whose tests end only 5 s (more than twice `stuck`) after #8 is seen waiting. Then #8 goes on from
 # main: one session brings its change there.
+# reviewPause is the engine's default (60 s), not the fixture's 0: no step of this case waits it out, and with 0 the
+# loop's stuck-card check (stuckcard(), lib/run.sh: t_stallnostep) ended #7 at its build, `stuck` whole seconds after
+# its brief line: a card has no live record from its pick to its first session's first look, 1 to 2.5 s on a busy
+# machine, and the loop looks at #7 in the turn after it picks #8.
 t_stallwait() {
-  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; tune '.tunables.stuck = 2'; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
+  setup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]"; tune '.tunables.stuck = 2 | .tunables.reviewPause = 60'; for i in 1 2 3; do echo "$GO" > "$STUB/review.$i"; done
   # Both append to a.txt; #8 builds once #7 is in review, talking meanwhile.
   cat > "$STUB/build" <<'EOF'
 if grep -q '^# Main moved: apply the same change' "$STUB/brief"; then printf 'one\nseven\neight\n' > a.txt
