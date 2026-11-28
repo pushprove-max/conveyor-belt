@@ -276,4 +276,31 @@ fresh=$(sed -n 's/^( fresh \([a-z0-9]*\).*/\1/p' "$ROOT/.claude/scripts/__tests_
 [ -n "$parts" ] && [ "$parts" = "$fresh" ] && ok "each part of dashboard.test.sh starts with fresh <its name>" || no "parts '$parts', fresh '$fresh'"
 (cd "$ROOT" && CONVEYOR_SHELL_TEST_CASE=nosuch bash .claude/scripts/__tests__/dashboard.test.sh) > "$T/dash" 2>&1
 [ $? = 2 ] && grep -q 'unknown part nosuch' "$T/dash" && ok "dashboard.test.sh refuses a part it does not have" || no "unknown part: $(cat "$T/dash")"
+
+# The units at once (COVERAGE_JOBS, else half the cores): a scratch checkout of three cases that each count how many
+# of them run at that moment, each held a second. One at a time, none ever sees another; three at once, they overlap.
+# Bug it catches: a fixed 4 ran four units at once whatever the machine (two hours on a 16-thread machine).
+J=$T/j; mkdir -p "$J/.conveyor" "$J/conveyor/lib" "$J/conveyor/tests" && cp "$HERE/coverage.sh" "$HERE/test-changed.sh" "$HERE/funcs.awk" \
+  "$HERE/test-share.sh" "$HERE/lint-shell.sh" "$J/.conveyor/" && cp "$ROOT/conveyor/lib/portable.sh" "$J/conveyor/lib/" \
+  && cp "$R/conveyor/conveyor.test.sh" "$J/conveyor/" && cp "$R/conveyor/lib/f.sh" "$J/conveyor/lib/" || no "the jobs checkout could not be made"
+printf '%s\n' '{"outside": "conveyor/lib/portable.sh"}' '{"area": "a", "file": "conveyor/lib/f.sh"}' '{"area": "a", "test": "c.test.sh"}' > "$J/.conveyor/engine-areas.json"
+for c in test-lint no-browser-tests no-records-split; do : > "$J/.conveyor/$c.sh"; done
+cat > "$J/conveyor/tests/c.test.sh" <<'EOF'
+conc() {
+  exec 9>> "$CONC/lock"; flock 9; local k; k=$(( $(cat "$CONC/now" 2>/dev/null || echo 0) + 1 )); echo "$k" > "$CONC/now"
+  [ "$k" -le "$(cat "$CONC/max" 2>/dev/null || echo 0)" ] || echo "$k" > "$CONC/max"; flock -u 9; fone > /dev/null; sleep 1
+  flock 9; echo $(( $(cat "$CONC/now") - 1 )) > "$CONC/now"; flock -u 9
+}
+t_ca() { conc; }
+t_cb() { conc; }
+t_cc() { conc; }
+EOF
+git -C "$J" init -q && git -C "$J" add -A && git -C "$J" commit -qm init
+for w in 1 3; do
+  mkdir -p "$T/conc$w"; (cd "$J" && CONC=$T/conc$w COVERAGE_JOBS=$w bash .conveyor/coverage.sh) > "$T/jout$w" 2>&1
+  git -C "$J" checkout -q -- . 2>/dev/null
+done
+m1=$(cat "$T/conc1/max" 2>/dev/null); m3=$(cat "$T/conc3/max" 2>/dev/null)
+[ "$m1" = 1 ] && [ "${m3:-0}" -ge 2 ] && ok "coverage.sh runs COVERAGE_JOBS units at once (1: at most $m1; 3: up to $m3)" \
+  || no "coverage.sh did not run COVERAGE_JOBS units at once (1: at most ${m1:-none}; 3: at most ${m3:-none}): $(tail -3 "$T/jout1")"
 exit $bad

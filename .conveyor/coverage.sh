@@ -8,7 +8,7 @@
 # The traced files: the engine's shell files (each .sh file of .conveyor/engine-areas.json), the Board's collector
 # (.claude/scripts/dashboard.sh) and the hooks' (.claude/hooks/, its lib/ too), each one test-changed.sh --funcs can
 # read (FUNCS).
-# The units, run 4 at once: each case of the engine's runner (conveyor/conveyor.test.sh, CONVEYOR_SHELL_TEST_CASE=<case>);
+# The units, run half the machine's cores at once (nproc --all, at least 1; COVERAGE_JOBS sets the number): each case of the engine's runner (conveyor/conveyor.test.sh, CONVEYOR_SHELL_TEST_CASE=<case>);
 # each part of a test file under .claude/scripts/__tests__ or .claude/hooks/__tests__ that CONVEYOR_SHELL_TEST_CASE
 # runs by parts (test-changed.sh --parts: `) & started <part>` lines, as dashboard.test.sh; a `CASES=" ... "` line, as
 # the hooks' case_on files); each check of one that selects its checks by their text (bash-guardrails.test.sh: checks,
@@ -109,6 +109,10 @@ if [ "${1:-}" = --write ]; then covwrite "$2" "$3" "$4" "${5:-}" "${6:-}"; exit;
 [ -f .conveyor/test-changed.sh ] || { echo "coverage.sh: run it from the checkout's root" >&2; exit 2; }
 # timeout, on macOS too.
 . conveyor/lib/portable.sh && p_tools || exit 1
+# The units at once: half the cores, as the slots read them (slots.sh: nproc --all), at least 1. A fixed 4 left a
+# 32-core machine three quarters idle and took two hours on a 16-thread one.
+JOBS=${COVERAGE_JOBS:-$(( $(nproc --all 2>/dev/null || echo 2) / 2 ))}
+[[ $JOBS =~ ^[1-9][0-9]*$ ]] || JOBS=1
 TR=$(mktemp -d "${TMPDIR:-/tmp}/coverage.XXXXXX") || exit 1
 trap 'rm -rf "$TR"' EXIT
 traced=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -188,7 +192,7 @@ unit() {
 n=0
 while IFS=$'\t' read -r t c; do
   n=$((n + 1))
-  [ "$(jobs -rp | wc -l)" -lt 4 ] || wait -n
+  [ "$(jobs -rp | wc -l)" -lt "$JOBS" ] || wait -n
   unit "$n" "$t" "$c" &
 done < "$TR/units"
 wait
@@ -206,7 +210,7 @@ n=$(wc -l < "$TR/units")
 while IFS= read -r t; do
   echo "coverage.sh: a check of $t is not run by its text alone; the file is traced and mapped whole"
   n=$((n + 1)); printf '%s\t\n' "$t" >> "$TR/units"
-  [ "$(jobs -rp | wc -l)" -lt 4 ] || wait -n
+  [ "$(jobs -rp | wc -l)" -lt "$JOBS" ] || wait -n
   unit "$n" "$t" "" &
 done < <(LC_ALL=C sort -u "$TR/whole")
 wait
