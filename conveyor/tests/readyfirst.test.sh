@@ -78,13 +78,22 @@ t_readyclaim() {
 
 # The fixture of batchreuse.test.sh (reusesetup): #7 and #8 change a.txt (#7 its first line, #8 a line at its end) and
 # a file each, x.txt and y.txt; a.txt selects s.test, x.txt x.test, y.txt y.test. #7 holds a.txt first, and a product
-# check holds it before its tests until #8, its tests passed, waits at its claim. #7's first tests end only once #8 has
+# check holds it before its tests until #8, its tests passed, has gone past it at its claim (holds a.txt): #7's Test
+# step fixes the order of the cards that still wait on it (orderfix()), so a #7 let go while #8 waited landed #8 first
+# or after #7 by which of the two took the lock first. The check gives up once #8, tested, waits on at its claim (its
+# live record's `last` over a second after its tests passed) or is gone. #7's first tests end only once #8 has
 # landed ($STUB/during then), is gone, or writes a wait at its claim after they began (its live record's `last`; the
 # bug: #8 waits on #7, which waits in its tests on #8), so a change in who waits fails the cases rather than hanging
 # them. No card is in the order list.
 rfsetup() {
   reusesetup "[$(issue 7 2026-01-01),$(issue 8 2026-01-02)]" 'a.txt s.test' 'x.txt x.test' 'y.txt y.test'
   jq -c '.order = []' "$ST/control.json" > "$STUB/c.new" && mv "$STUB/c.new" "$ST/control.json"
+  cat > "$STUB/hold" <<'EOF'
+case $PWD in *-7) [ -e "$STUB/held" ] || while [ -d "$STUB" ]; do
+  s=$(jq -e 'select(.tested) | .since' ../*-8.ready 2>/dev/null) && { jq -e '.held == true' ../*-8.claim >/dev/null 2>&1 \
+    || jq -e --argjson s "$s" '.waits.on and (.last | fromdate) > $s + 1' ../*-8.live >/dev/null 2>&1; } && { : > "$STUB/held"; exit 0; }
+  ls -d ../*-8 >/dev/null 2>&1 || { : > "$STUB/held"; exit 0; }; sleep 0.1; done ;; esac
+EOF
   cat >> "$STUB/test-cmd" <<'EOF'
 case $PWD in *-7) [ -e "$STUB/ran7" ] || { : > "$STUB/ran7"; s=$(date +%s); while [ -d "$STUB" ]; do
   jq -e 'select(.issue == 8 and .step == "landed")' "$ST/cards.jsonl" >/dev/null 2>&1 && { : > "$STUB/during"; break; }
@@ -102,7 +111,7 @@ t_readyfirst() {
   # loop: only a whole run shows #8 landing while card() holds #7 in its tests, and #7 then landing on its pass
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ -e "$STUB/during" ] && [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] \
-    || fail "#8, ready, did not land while #7 was in its tests: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,) $(st 'select(.step == "blocked") | .reason')"
+    || fail "#8, ready, did not land while #7 was in its tests: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,) $(grep 'lands after card' <<<"$out") $(st 'select(.step == "blocked") | .reason')"
   [ "$(runs)" = "8 s1 y1 y2,7 s1 x1 x2," ] || fail "#7 ran its tests again after #8 landed on s.test, its test file: $(runs): $out"
   [ "$(st 'select(.step == "review") | "\(.issue) \(.result)"' | tr '\n' ,)" = "7 GO,8 GO," ] && [ -z "$(st 'select(.step == "fix") | .issue')" ] \
     || fail "#7 was reviewed again or brought onto main by a session, though its change applied there: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
@@ -122,7 +131,7 @@ EOF
   echo 'case $PWD in *-7) [ ! -e "$STUB/during" ] || git -C "$R" log --format=%s > "$STUB/main-at-7" ;; esac' >> "$STUB/review-cmd"
   out=$(loop run 2>&1) || fail "run exited non-zero: $out"
   [ -e "$STUB/during" ] && [ "$(st 'select(.step == "landed") | .issue' | tr '\n' ' ')" = "8 7 " ] \
-    || fail "#8, ready, did not land while #7 was in its tests: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,)"
+    || fail "#8, ready, did not land while #7 was in its tests: $(st '"\(.issue) \(.step) \(.result)"' | tr '\n' ,) $(grep 'lands after card' <<<"$out")"
   # The session is the landing's rebuild (step rebase), told the conflict: its tests ran on the change put back as it
   # was (settle(): caught).
   [ "$(st 'select(.issue == 7 and .step == "rebase") | .issue')" = 7 ] && grep -q 'rebase onto main conflicts' "$STUB/fit.7" \

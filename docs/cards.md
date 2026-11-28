@@ -305,7 +305,9 @@ run again while it waits. At its turn, its landing gate gives it its fix session
 With batches off, a card that waits on another card runs no lint, checks or tests while it waits. This is true when it
 waits for the files of the other card, and when it waits for the landing turn. When its turn comes, it runs its Test
 step once, on main after the other card landed. With batches on or off, when a card starts its Test step, the order of
-the cards that wait on its files is fixed. The claim of each of those cards names the card that it lands after.
+the cards that wait on its files is fixed. The claim of each of those cards names the card that it lands after. A
+ready card is the exception: a waiting card whose tests passed before the tests of that card gets no place in the
+order. It lands first, as the ready rule says. A card whose tests pass after it got its place lands first too.
 
 A batch runs the same lint commands on the combined change of its cards, before its product checks and tests. This is
 true each time the batch is split, and when the batch runs again on main after main moved. A pass and a missing tool

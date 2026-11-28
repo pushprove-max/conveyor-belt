@@ -43,7 +43,8 @@
 # The lists of files and the claims go to jq by file, never as arguments: one argument over 128 KiB fails to start jq on Linux.
 # The order orderfix() fixed: while the card it lands after (its claim's after, af) has a live claim on a file of this
 # one, and has not given way (giveway(): away; back at its claim it has its turn again), it waits on that card, whatever
-# the other rules say (a batch that took it aside). A card away is left to the other rules, as before; when they too
+# the other rules say (a batch that took it aside), except when it is ready and goes past that card by the ready rule
+# (fit(): its tests passed since it got its place in the order). A card away is left to the other rules, as before; when they too
 # make it wait on that card, its claim keeps naming the card it lands after. It never waits on a card whose after leads
 # back to it (leads()), or the two would wait on each other.
 claim() { # <card> <worktree> <the card's pid>; under the lock
@@ -116,7 +117,7 @@ claim() { # <card> <worktree> <the card's pid>; under the lock
       # A holder it goes past as a ready card (fit): of its rank, its tests not passed, or passed after its own.
       | def fit($c): $ms != null and rank($c) == $r and key($c) > key($me);
         def leads($c; $k): ([$raw[] | select(.card == $c) | .after | strings] | first) as $a | $a != null and $k < 100 and ($a == $me or leads($a; $k + 1));
-      ([$raw[] | select($af != "" and .card == $af and (.away != true or .back == true) and at(.card) >= 0 and (.card | IN($ended[]) | not) and (.card | IN($ap[]) | not)) | . + {shared: (.paths - (.paths - $mine))} | select(.shared != [])] | first) as $aw
+      ([$raw[] | select($af != "" and .card == $af and (.away != true or .back == true) and at(.card) >= 0 and (.card | IN($ended[]) | not) and (.card | IN($ap[]) | not) and (fit(.card) | not)) | . + {shared: (.paths - (.paths - $mine))} | select(.shared != [])] | first) as $aw
       | [$o[] | select(at(.card) >= 0 and (.card | IN($ended[]) | not) and (leads(.card; 0) | not)) | . + {shared: (.paths - (.paths - $mine))} | select(.shared != [])] as $s
       | ([$s[] | select(.card == $by or if .held == true then ($r == $n or rank(.card) < $n) and (fit(.card) | not) else key(.card) < key($me) and (rank(.card) < $r or (.card | IN($un[]) | not)) or (.card | IN($for[])) and rank(.card) <= $r end)]
         | min_by(key(.card))) as $w
@@ -1104,9 +1105,13 @@ turnfree() { [ "$(jq -r '.card' "$CARDS/land.turn" 2>/dev/null)" != "$1" ] || rm
 # the earlier in the control record's order first, then the older pick. Each lands after the last card before it in
 # the order that shares a file with it, else after <card>. Its claim then names the card it lands after (after), and
 # claim() keeps it waiting on that card while that card has a live claim on one of its files. A card that starts its
-# Test step again (after a fix round) adds the cards that came to wait on it since. Under the lock.
+# Test step again (after a fix round) adds the cards that came to wait on it since. A waiting card that is ready gets
+# no place in the order (the owner, 2026-11-27: a ready card lands first): its tests passed on the change it holds and
+# that change fits main (readysince(), ready()), it is of <card>'s rank in the control record's order, and the tests
+# of <card> have not passed on its change, or passed later. At its next claim it goes past <card> (claim(): fit()).
+# Under the lock.
 orderfix() { # <card>
-  local o r c ord t x a
+  local o r c ord t x a s ms rdy
   o=$(for r in "$CARDS"/*.claim; do
       [ -e "$r" ] && [ "$r" != "$CARDS/$1.claim" ] || continue
       c=${r##*/}
@@ -1115,12 +1120,18 @@ orderfix() { # <card>
     done | jq -sc .) || return 1
   [ "$o" != '[]' ] || return 0
   ord=$(ctl 2>/dev/null) && ord=$(jq -c '.order // [] | arrays' <<<"$ord") && [ -n "$ord" ] || ord='[]'
+  # When the tests of <card> and of each waiting card that is ready passed (readysince()): rdy "<card>\t<since>" lines.
+  ms=$(readysince "$CARDS/$1") || ms=''
+  rdy=$(jq -r --arg me "$1" '.[] | select(.on == $me and .after == null and .turn != true) | .card' <<<"$o" | while read -r c; do
+      s=$(readysince "$CARDS/$c") && ready "$CARDS/$c" && printf '%s\t%s\n' "$c" "$s"; done)
   # The claims go to jq by file: one argument over 128 KiB fails to start jq on Linux (claim()).
-  t=$(stdb ask lines cards | jq -rn --arg me "$1" --slurpfile o <(printf '%s' "$o") --argjson ord "$ord" '
+  t=$(stdb ask lines cards | jq -rn --arg me "$1" --slurpfile o <(printf '%s' "$o") --argjson ord "$ord" --arg ms "$ms" --arg rdy "$rdy" '
       $o[0] as $o | [inputs | select(.step == "picked")] as $p | ($p | map(.card)) as $at | ($ord | length) as $n
+      | ($rdy | split("\n") | map(select(. != "") | split("\t") | {(.[0]): (.[1] | tonumber)}) | add // {}) as $rdy
       | def rank($c): ($p | map(select(.card == $c)) | first | .issue) as $i | ($ord | index($i)) // $n;
+        def fit($c): $rdy[$c] != null and rank($c) == rank($me) and ($ms == "" or ($ms | tonumber) > $rdy[$c]);
         def chain($t; $k): ([$o[] | select(.after == $t)] | first) as $x | if $x == null or $k >= 100 then [] else [$x] + chain($x.card; $k + 1) end;
-      [$o[] | select(.on == $me and .after == null and .turn != true)] | sort_by(.card as $c | [rank($c), ($at | index($c) // 1e9)])
+      [$o[] | select(.on == $me and .after == null and .turn != true and (fit(.card) | not))] | sort_by(.card as $c | [rank($c), ($at | index($c) // 1e9)])
       | reduce .[] as $c ({l: chain($me; 0), out: []};
           ([.l[] | select((.paths - (.paths - $c.paths)) != []) | .card] | last // $me) as $a | .l += [$c] | .out += ["\($c.card) \($a)"])
       | .out[]') || return 1

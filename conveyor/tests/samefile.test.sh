@@ -365,6 +365,37 @@ t_sameorderfix() {
   w=$(cl 8) && [ -z "$w" ] && [ "$(jq .held "$CARDS/c8-8.claim")" = true ] || fail "#8 did not take a.txt once #7 landed, #9 waiting on it: $w"
 }
 
+# Bug (the owner, 2026-11-27: a ready card lands first): #7's Test step gave #8 a place in the order after #7, though
+# #8's tests had passed on its change and #7's had not, so #8 waited on #7 through #7's tests. #8 and #9 wait on #7
+# for a.txt; #8's tests pass in its wait. #7's Test step (the real cardtest()) gives #9 its place after #7 and none to
+# #8, and #8 then goes past #7 at its claim.
+t_sameorderready() {
+  setup '[]'; sfclaim; sfcard 7 'echo seven >> a.txt'; sfcard 8 'echo eight >> a.txt'; sfcard 9 'echo nine >> a.txt'
+  [ -z "$(cl 7)" ] && w=$(cl 8) && [ "$(jq -r .on <<<"$w")" = c7-7 ] && w=$(cl 9) && [ "$(jq -r .on <<<"$w")" = c7-7 ] \
+    || fail "#8 or #9 did not wait on #7 for a.txt: $w"
+  echo '{"issue":8}' > "$CARDS/c8-8.ready" && tested "$CARDS/c8-8" && readysince "$CARDS/c8-8" >/dev/null || fail "#8's tests were not marked passed"
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'cd "$R" || exit 9; c=c7-7 n=7 wt=$CARDS/c7-7 issue="{}" sprompt="" br="" parsecheck="" tmain="" away="" apart="" me=$$ cmsg=x mates=() mainsec=0
+    sfteststubs; go=end; cardtest; echo "cardtest: go=$go rc=$rc"'
+  [ "$(jq -r .after "$CARDS/c8-8.claim")" = null ] && ! grep -q 'card c8-8 lands after' "$T/$CASE/run.out" \
+    || fail "#7's Test step put #8, ready, in the order behind #7: #8 $(jq -c '{on, after}' "$CARDS/c8-8.claim"): $(cat "$T/$CASE/run.out")"
+  [ "$(jq -r .after "$CARDS/c9-9.claim")" = c7-7 ] || fail "#7's Test step did not put #9, not ready, in the order after #7: #9 $(jq -c '{on, after}' "$CARDS/c9-9.claim"): $(cat "$T/$CASE/run.out")"
+  w=$(cl 8) && [ -z "$w" ] && [ "$(jq .held "$CARDS/c8-8.claim")" = true ] || fail "#8, ready, did not go past #7 in its tests: $w"
+}
+
+# Bug it catches too (the owner, 2026-11-27): #7's Test step gave #8, not ready, its place after #7; #8's tests then
+# passed in its wait while #7 was in its own, and #8 kept waiting on #7 by that place. At its next claim it goes past #7.
+t_sameorderlate() {
+  setup '[]'; sfclaim; sfcard 7 'echo seven >> a.txt'; sfcard 8 'echo eight >> a.txt'
+  [ -z "$(cl 7)" ] && w=$(cl 8) && [ "$(jq -r .on <<<"$w")" = c7-7 ] || fail "#8 did not wait on #7 for a.txt: $w"
+  # shellcheck disable=SC2016 # expanded by fx_in's eval
+  fx_in 'cd "$R" || exit 9; c=c7-7 n=7 wt=$CARDS/c7-7 issue="{}" sprompt="" br="" parsecheck="" tmain="" away="" apart="" me=$$ cmsg=x mates=() mainsec=0
+    sfteststubs; go=end; cardtest; echo "cardtest: go=$go rc=$rc"'
+  [ "$(jq -r .after "$CARDS/c8-8.claim")" = c7-7 ] || fail "#7's Test step did not put #8, not ready, in the order after #7: $(cat "$T/$CASE/run.out")"
+  echo '{"issue":8}' > "$CARDS/c8-8.ready" && tested "$CARDS/c8-8" || fail "#8's tests were not marked passed"
+  w=$(cl 8) && [ -z "$w" ] && [ "$(jq .held "$CARDS/c8-8.claim")" = true ] || fail "#8, ready after its place was given, still waited on #7 in its tests: $w"
+}
+
 # Bug: a card that blocked while it held a file, and was given back by `retry`, kept every card that shares the file
 # waiting on it, each holding a builder slot (8 of 10 slots for 70 minutes). A card that is not on the belt holds no
 # file: card c1-7, its claim on a.txt standing and its process alive, makes #8 wait only while it is on the belt.

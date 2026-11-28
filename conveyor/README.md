@@ -1939,7 +1939,10 @@ leaves it not ready, for its landing gate at its turn), and the card whose turn 
 tests while it waits: it runs its Test step once, at its turn, on main after that card landed. When a card starts its
 Test step (`orderfix()`, `lib/claim.sh`), the order of the cards that wait on its files is fixed: the claim of each one
 names the card it lands after (`after`), and it waits on that card while that card has a live claim and has not given
-way, whatever card goes first by the rules below. When a ready card's turn to land comes, it takes the
+way, whatever card goes first by the rules below. A ready card is the one exception (a ready card lands first): a
+waiting card whose tests passed on the change it holds, before the tests of that card passed, gets no place in the
+order, and goes past that card at its next claim. A card whose tests pass after it got its place goes past that card
+too. When a ready card's turn to land comes, it takes the
 landing turn, then the other ready cards waiting to land that are queued for the next batch (on any files) or share a
 file with it, or with a card taken before (in turn), up to the pack's
 `landBatch` (8 by default; 1 turns batches off), and holds the files of them all until the batch lands: a card that
