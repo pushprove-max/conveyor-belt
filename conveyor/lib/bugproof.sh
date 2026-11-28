@@ -511,8 +511,13 @@ redcases() { # <card>
 # would end the entry's hold on it (mainred.sh redlisted()). Nor while its entry holds a push block: redfix.sh pushred()
 # may add one, under the same lock, after the caller's read (card.sh cardbuild(), bugproof(), nochange()) and while the
 # cases ran, and the cases passing does not make its check pass. Else nothing is written, and it prints why, exit 1 (R86).
+# Once closed, each case that passed in each run (REDPASS of redproof() or redgreen(), only those of REDRAN: this card's)
+# gets one entry in the flaky-test record (flaky(), lib/flaky.sh), the card its source (issue 1827): a case that fails
+# only beside other files closes as already done each time, and FLAKY_SOURCES closes in FLAKY_DAYS file its flaky issue
+# (flakyfile(), which may call gh while the caller holds the records' lock). A record that cannot be written is said on
+# stderr (the card's log) and leaves the close as it is.
 redclosed() { # <card> <closed line>
-  local lock add rc=1
+  local lock add rc=1 e
   { exec {lock}>>"$MAINRED.lock"; } 2>/dev/null && flock "$lock" || { echo "The main-red record could not be locked, so the card was not closed."; return 1; }
   add=$(redcases "$1" | jq -r --argjson r "${REDRAN:-[]}" '[.[] | select(IN($r[]) | not) | "`\(.name)`"] | join(", ")' 2>/dev/null) || add='its cases could not be read'
   if [ -n "$add" ]; then echo "The card was not closed: a case joined its entry in the main-red record while its cases ran, and did not run: $add."
@@ -521,7 +526,12 @@ redclosed() { # <card> <closed line>
   elif append "$2"; then rc=0
   else echo "The engine could not write the closed line."; fi
   exec {lock}>&-
-  return $rc
+  [ $rc = 0 ] || return $rc
+  e=$(jq -cn --arg c "$1" --arg n "failed on main, then passed $FULL_ALONE runs alone on main at ${REDSHA:0:12}: closed as already done" \
+    --argjson p "${REDPASS:-[]}" --argjson r "${REDRAN:-[]}" '[$p[] | strings | select(IN($r[].name)) | {case: ., card: $c, note: $n}] | unique_by(.case)' 2>/dev/null) || e='[]'
+  [ "$e" = '[]' ] || flaky "$1" "$e" \
+    || echo "conveyor: card $1: the flaky-test record could not be written: $(jq -r '[.[].case] | join(", ")' <<<"$e")" >&2
+  return 0
 }
 # The fix cards that took over main-red fix card <card>'s work (issue 1666): each case its entry in $MAINRED holds is
 # held, by the same name, by an entry after it (made later, for a later red commit) whose fix card is on the belt
@@ -600,10 +610,11 @@ redstaleclose() { # <card>
 # red for them, and the result (<worktree>.unfixed, whose first line card() gives as the close reason) says the card closes as
 # already done, with no session. Exit 1 when a case fails or gives no result in any run (one that fails in one run in three
 # is not closed), or a run could not be made: the build session goes on as it would, and the check after it decides.
-# Sets REDRAN: the cases it ran (redclosed()).
+# Sets REDRAN: the cases it ran (redclosed()); and, when it exits 0, REDPASS: their names, and REDSHA: the commit
+# they ran on, as redproof() sets them (redclosed() records them flaky).
 redgreen() { # <card> <worktree>
   local mwt=$CARDS/mainrun/$1.unfixed cs sha wo='' i=0
-  rm -f "$2.unfixed"; REDRAN=''
+  rm -f "$2.unfixed"; REDRAN='' REDPASS='[]' REDSHA=''
   if cs=$(redcases "$1") && REDRAN=$cs && sha=$(git -C "$2" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) \
     && { git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; git worktree prune; mkdir -p "${mwt%/*}" \
       && git worktree add -q --detach "$mwt" "$sha" && deps "$mwt"; } > /dev/null 2>&1 < /dev/null; then
@@ -611,6 +622,7 @@ redgreen() { # <card> <worktree>
       wo=$(redrun "$mwt" "$cs") && [ -n "$wo" ] && [ -z "$(rednames fail "$wo")$(rednames none "$wo")" ] || break
     done
   fi
+  [ "$i" -ne "$FULL_ALONE" ] || { REDPASS=$(jq -c '[.[] | select(.verdict == "pass") | .name]' <<<"$wo" 2>/dev/null) || REDPASS='[]'; REDSHA=$sha; }
   [ "$i" -ne "$FULL_ALONE" ] || printf '%s\n' "Main is no longer red for $(rednames pass "$wo"): they pass on main's code at $sha without the change in each of $FULL_ALONE runs, so the card closes as already done." > "$2.unfixed"
   git worktree remove --force "$mwt" 2>/dev/null; rm -rf "$mwt" "$mwt".*; rmdir "${mwt%/*}" 2>/dev/null # the folder, once no card's run is in it
   [ "$i" -eq "$FULL_ALONE" ]

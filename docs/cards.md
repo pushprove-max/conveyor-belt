@@ -158,6 +158,11 @@ for each case it holds. A newer card that landed counts only for a case that pas
 and only while main is still the commit of those runs. A card that keeps a
 reviewed change from a rebuild after a landing conflict does not close this way. Otherwise the card is blocked.
 
+When a main-red fix card ends as `closed` because its cases pass on main, each of those cases gets one entry on the
+flaky-test record, with the card as its source. Such a case failed on main and then passed when it ran alone. Each
+card is a different source. So when such cards close often for one case, the rule of the flaky-test record (below)
+files its issue, and card test steps keep the case off.
+
 A "Push blocked" fix card (see Push, below) is not a main-red fix card here, also when main is red at its commit.
 Its cases passing on main do not close it, as its push check can still fail. Before its build session it runs no
 case. Its change is checked as a bug card's change. When its session changes no file, it goes the way below.
