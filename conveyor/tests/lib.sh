@@ -326,6 +326,10 @@ setup() { # <issues json>: a fresh main repo, the three stubs, one billing and o
     "$SRC/lib/test-pack.json" > "$R/.conveyor/project.json"
   filemode
   seed
+  # The release limit's reason as a loop logs it once, on its first turn with no release (rellimit(), lib/pick.sh,
+  # RELLIMITF): a case that reads what pick or the loop prints does not get that line first; releaselimit.test.sh
+  # reads the other reasons, which differ from it and so are still logged.
+  mkdir -p "$ST" && echo 'the release limit is off: no release has run; pick takes the queue in its order' > "$ST/release-limit.txt"
   echo "$1" > "$STUB/issues.json"; PATH=$STUB:$PATH
 }
 # The per-file fixture, every case's, as a card runs each test file alone (tests(), lib/testrun.sh): main commits
