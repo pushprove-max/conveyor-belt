@@ -189,6 +189,12 @@ sed -i.bak '6s/echo y/echo Y/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/
 got=$(onerun 3); want=$(seq -w 1 60 | sed 's/^/c/' | paste -sd ' ' -)
 [ "$got" = "$want" ] && ! grep -qxF "$kept" "$F/one3" && ok "a one-file run of another tree makes its own selection" \
   || no "a one-file run after line 6 changed too: ran '$got': $(cat "$F/one3")"
+# Each link of the change is in a step's log once, however many one-file runs of the step make the selection. Bug it
+# catches: each one-file run wrote each link again (756 `TESTRUN linked` lines for the 9 links of one card's step).
+: > "$F/log/test-changed.log"
+for i in 1 2; do (cd "$R" && CONVEYOR_TEST_LOG=$F/log bash .conveyor/test-changed.sh --file conveyor/tests/a.test.sh) > "$F/one$i" 2>&1; done
+[ "$(grep -c '^TESTRUN linked' "$F/log/test-changed.log")" = 1 ] && ok "two one-file runs of a step log each link once" \
+  || no "two one-file runs, f.sh linked to a.test.sh: $(grep -c '^TESTRUN linked' "$F/log/test-changed.log") linked lines: $(cat "$F/one2")"
 git -C "$R" checkout -q -- conveyor/lib/f.sh
 # A change outside every function is not the map's to pick: the link runs the case file whole.
 sed -i.bak '1s/^/X=1\n/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
@@ -230,6 +236,18 @@ got=$(cases); want=$(seq -w 3 60 | sed 's/^/c/' | paste -sd ' ' -)
 [ "$got" = "$want" ] && grep -qxF 'coverage map rule: conveyor/lib/f.sh big(): lines' "$F/out" \
   && ok "lines main moved since the trace are read as the map's commit had them" || no "line 8 (was 6) changed after main moved big(): ran '$got': $(cat "$F/out")"
 git -C "$R" checkout -q -- conveyor/lib/f.sh
+
+# Main added a comment line inside big() since the trace (after its line 4, now line 6): its code is the same, so the
+# lines still hold, each read as the map's commit had it: a change to `echo y` (now line 9) runs the 58 cases of the
+# y path. Bug it catches: any hunk of main inside the function turned its lines off, and every case that ran it ran.
+awk '{ print } NR == 6 { print "    # a note of main" }' "$R/conveyor/lib/f.sh" > "$T/e" && cat "$T/e" > "$R/conveyor/lib/f.sh" \
+  && git -C "$R" commit -qam "main notes big" || no "the main commit of a comment could not be made"
+sed -i.bak '9s/echo y/echo Y/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
+got=$(cases); want=$(seq -w 3 60 | sed 's/^/c/' | paste -sd ' ' -)
+[ "$got" = "$want" ] && grep -qxF 'coverage map rule: conveyor/lib/f.sh big(): lines' "$F/out" \
+  && ok "a comment main added inside a function since the trace leaves its lines in force" \
+  || no "line 9 (was 6) changed after main added a comment inside big(): ran '$got': $(cat "$F/out")"
+git -C "$R" reset -q --hard HEAD~1
 
 # Done when 3: main changed a line inside big() since the trace (line 4 of the map's commit): the lines can no longer be
 # trusted, and a change to it runs the cases that ran the function, by its row (covof).

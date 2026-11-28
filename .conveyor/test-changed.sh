@@ -76,6 +76,9 @@
 # In a test step, each test file it runs whole (an engine case file with every case it holds, but a plugin test file)
 # runs under strace where the host can trace, and when it passes, its log names the files it read (`TESTRUN inputs`,
 # issue 1619: TRACE, below).
+# A Board test file run so also names the lines it ran of each page script (`TESTRUN lines`: linesof), and a change to
+# a page script then lists it only when the change touches one of those lines (ranlines, and the engine's
+# cachereaders()).
 # A run again of the same change (conveyor.sh tests(): CONVEYOR_TEST_RERUN names what passed and what failed) runs
 # no file that passed, and of the engine's runner only the cases that failed, when the run before named them, else
 # those of its selection that did not print `ok <case>` (a runner killed part-way). A file the list names failed cases
@@ -479,7 +482,7 @@ COVSEL=; COVSTALE=
 # CFN: the changed functions of the file pick reads (covof, callersof); RULES: which rule picked each one's tests
 # (rulefor); COVLINES: `<file><TAB><function>` of each one covof picked by its changed lines (covlines), COVBRANCH of
 # each of those picked by the code a changed condition line guards.
-CFN=; RULES=; declare -A COVLINES=() COVBRANCH=()
+CFN=; RULES=; declare -A COVLINES=() COVBRANCH=() COVSAME=()
 # RANKED: the test files hooklibtests gave, one a line, most of the library's users first: the list (CONVEYOR_TEST_LIST,
 # below) names them first, in this order.
 RANKED=
@@ -555,8 +558,51 @@ boardtests() {
     *) return 0 ;;
   esac
   mapfile -t tests < <(git ls-files -co --exclude-standard "$d" | grep -E '[.]test[.](mjs|js|ts|tsx)$')
-  [ ${#tests[@]} = 0 ] || grep -lE -- "$re" "${tests[@]}" 2>/dev/null
+  [ ${#tests[@]} = 0 ] || grep -lE -- "$re" "${tests[@]}" 2>/dev/null | ranlines "$f"
   return 0
+}
+# ranlines <file>: of the test files on stdin, those the change of <file> (TXFROM to TXTO, or to the worktree) can
+# reach by the lines on record: a test file with no record of the lines it ran of <file>, and one whose record the
+# change touches. The engine keeps, with each pass of a test file in a card's Test step, the lines it ran of each
+# source its log names (`TESTRUN lines`, linesof below; testlines.tsv beside the passes, conveyor/lib/testlines.sh),
+# each with the source's content then (a git blob). A change touches a record when it changes or removes a line the
+# test ran, or adds lines where the test ran (conveyor/jq/ranlines.jq, which the engine's list of a card's tests
+# reads too: cachereaders()). A record whose blob is gone counts as touched. With no record file (no engine here, a
+# state folder with none), each test file, as before.
+LINESREC=
+ranlines() {
+  local f=$1 ts rows b d=''
+  ts=$(cat)
+  [ -n "$ts" ] || return 0
+  [ -n "$LINESREC" ] || LINESREC=${PASSES:+${PASSES%/*}/testlines.tsv}
+  [ -s "$LINESREC" ] && [ -f conveyor/jq/ranlines.jq ] || { printf '%s\n' "$ts"; return 0; }
+  rows=$(awk -F'\t' -v f="$f" 'NR == FNR { want[$0] = 1; next } $2 == f && ($1 in want)' <(printf '%s\n' "$ts") "$LINESREC")
+  [ -n "$rows" ] || { printf '%s\n' "$ts"; return 0; }
+  grep -vxF -f <(cut -f1 <<<"$rows") <<<"$ts"
+  while IFS= read -r b; do
+    d+="K"$'\t'"$f"$'\t'"$b"$'\n'
+    if git cat-file -e "$b" 2>/dev/null; then
+      d+=$(diff -U0 <(git cat-file -p "$b") <(if [ -n "$TXTO" ]; then git show "$TXTO:$f"; else cat -- "$f"; fi 2>/dev/null) | grep '^@@ ')$'\n'
+    else d+='!'$'\n'; fi
+  done < <(cut -f3 <<<"$rows" | LC_ALL=C sort -u)
+  jq -Rrn --rawfile d <(printf '%s' "$d") -f conveyor/jq/ranlines.jq <<<"$rows" || cut -f1 <<<"$rows"
+}
+# linesof <test file> <folder>: the file's `TESTRUN lines<TAB><test file><TAB><source><TAB><blob><TAB><lines><TAB><gaps>`
+# lines, from what its case workers wrote in <folder> (dashboard-view.helpers.mjs, CONVEYOR_TEST_LINES): for each
+# page script (.claude/dashboard/) every worker gives lines of, the lines with code the file ran and the lines whose
+# end it ran, as ranges (`3-7,12`; `-` for none), and the script's content as it ran, written as a git blob so a
+# later change can be compared with it. A script a worker gives none of (null: read as data, or run wrapped) has no
+# line here, so a change to it lists the file as before.
+linesof() {
+  local s l g b
+  jq -rs 'def ranges: reduce .[] as $n ([]; if length > 0 and .[-1][1] + 1 == $n then .[-1][1] = $n else . + [[$n, $n]] end)
+      | map(if .[0] == .[1] then "\(.[0])" else "\(.[0])-\(.[1])" end) | join(",") | if . == "" then "-" else . end;
+    map(to_entries[]) | group_by(.key)[] | select(all(.[]; .value != null))
+    | [.[0].key, ([.[].value.lines[]] | unique | ranges), ([.[].value.gaps[]] | unique | ranges)] | join("\t")' "$2"/*.json 2>/dev/null \
+    | while IFS=$'\t' read -r s l g; do
+        b=$(git hash-object -w -- ".claude/dashboard/$s" 2>/dev/null) || continue
+        printf 'TESTRUN lines\t%s\t%s\t%s\t%s\t%s\n' "$1" ".claude/dashboard/$s" "$b" "$l" "$g"
+      done
 }
 # The test links (issue 598): a test that broke main without the card running it is run by later cards that change
 # the files of the landing that broke it. .conveyor/test-links.json, {"<changed file>": ["<test file>", ...]}, written
@@ -1276,16 +1322,20 @@ END { flush(); for (k in out) print k "\t" out[k] }'
 # code keeps each of its old lines: the code it adds can stand at any of them. Bug (card 1798): a comment changed
 # above a changed line of control() (conveyor/lib/control.sh) stood as the line before it, the last line of the
 # branch above, so the 47 units that ran that branch ran for a change none of them reaches.
-codehunks() {
+# With both: each hunk, a hunk of comment and blank lines too, as `<old start><TAB><old count><TAB><new start><TAB><new
+# count><TAB><1 when it changes code, else 0>` (covlines, for what main changed since the map's commit).
+codehunks() { # <lang> <file> [both]
   local r
   diff -U0 <(git show "$TXFROM:$2" 2>/dev/null | awk -v lang="$1" -v keep=1 "$CODE") \
     <(if [ -n "$TXTO" ]; then git show "$TXTO:$2" 2>/dev/null; else cat -- "$2" 2>/dev/null; fi | awk -v lang="$1" -v keep=1 "$CODE") \
-    | awk 'function flush(   i) {
-        if (h && nc > oc) print a "\t" (b == 1 ? "" : b)
+    | awk -v both="${3:-}" 'function flush(   i) {
+        if (h && both != "") print a "\t" b "\t" c "\t" d "\t" (oc || nc ? 1 : 0)
+        else if (h && nc > oc) print a "\t" (b == 1 ? "" : b)
         else if (h) for (i = 1; i <= b; i++) if (o[i]) print a + i - 1 "\t"
         h = 0
       }
-      /^@@ / { flush(); h = 1; split($2, x, ","); a = substr(x[1], 2) + 0; b = (x[2] == "" ? 1 : x[2] + 0); k = oc = nc = 0; delete o; next }
+      /^@@ / { flush(); h = 1; split($2, x, ","); a = substr(x[1], 2) + 0; b = (x[2] == "" ? 1 : x[2] + 0)
+        split($3, y, ","); c = substr(y[1], 2) + 0; d = (y[2] == "" ? 1 : y[2] + 0); k = oc = nc = 0; delete o; next }
       !h { next }
       /^-/ { k++; if ($0 != "-\001") { o[k] = 1; oc++ } next }
       /^\+/ { if ($0 != "+\001") nc++ }
@@ -1319,7 +1369,10 @@ codefns() {
 # lines (its `line` rows: coverage.sh, for a function more than 50 units ran), the units that ran a line the change
 # (TXFROM to TXTO) changed, into LOV ({<function>: [<unit>, ...]}), and `<file><TAB><function>` into COVLINES, so the
 # run names the rule `lines` (or `branch`: COVBRANCH too). A changed line is read on its old side (a line added after
-# line n: lines n and n+1), as the file was at the map's commit (its `sha`): moved by the lines main added or removed above the function since. A
+# line n: lines n and n+1), as the file was at the map's commit (its `sha`): moved by the lines main added or removed
+# above the function since, and by the comment and blank lines main added or removed inside it (a line of such a hunk
+# stands at the hunk's place, with no row). Bug: one comment main added inside a function turned its lines off, and a
+# change to it ran each unit that ran the function. A
 # line with no row (no command starts on it: `else`, `fi`, a continued line) stands as the nearest lines of the
 # function before and after it that have one. A changed condition line (GUARDS, read from the file at the map's
 # commit) that more than 50 units ran stands as the lines it guards (the rule `branch`, COVBRANCH): the units that ran
@@ -1328,28 +1381,39 @@ codefns() {
 # or the commit is not here, main changed a line of the function since the trace, the change touches none of its
 # lines, or the map has no line row of it.
 covlines() {
-  local f=$1 a=$2 sha src d h x s e delta lines g r q='{}'
+  local f=$1 a=$2 sha src d h x s e lo hi lines g r q='{}'
   shift 2
   [ $# -gt 0 ] || return 0
   sha=$(jq -rn '[inputs | objects | .sha? // empty] | first // empty' "$COV" 2>/dev/null)
   [ -n "$sha" ] && git cat-file -e "$sha^{commit}" 2>/dev/null && src=$(git show "$TXFROM:$f" 2>/dev/null) || return 0
-  # The change's hunks as its code changed, old side (codehunks), and main's from the map's commit to TXFROM
-  # (<old start><TAB><old count><TAB><new start><TAB><new count>).
+  # The change's hunks as its code changed, old side (codehunks), and main's from the map's commit to TXFROM, both
+  # sides, each marked when it changes code.
   d=$(codehunks sh "$f") || return 0
-  h=$(git diff -U0 --no-color --no-ext-diff "$sha" "$TXFROM" -- "$f" 2>/dev/null) || return 0
-  h=$(sed -nE 's/^@@ -([0-9]+)(,([0-9]+))? \+([0-9]+)(,([0-9]+))? .*/\1\t\3\t\4\t\6/p' <<<"$h")
+  h=$(TXTO=$TXFROM; TXFROM=$sha; codehunks sh "$f" both) || return 0
   for x; do
     read -r s e < <(fnrange "$src" "$a" "$x") || continue
     lines=$(awk -F'\t' -v s="$s" -v e="$e" 'NF { c = ($2 == "" ? 1 : $2); lo = $1; hi = (c == 0 ? $1 + 1 : $1 + c - 1)
         for (i = lo; i <= hi; i++) if (i >= s && i <= e) print i }' <<<"$d" | LC_ALL=C sort -un | paste -sd, -)
     [ -n "$lines" ] || continue
-    delta=$(awk -F'\t' -v s="$s" -v e="$e" 'NF { oc = ($2 == "" ? 1 : $2); ns = $3; nc = ($4 == "" ? 1 : $4)
-        if (nc == 0) { if (ns >= s && ns < e) { x = 1; exit } if (ns < s) d += nc - oc }
-        else { if (ns <= e && ns + nc - 1 >= s) { x = 1; exit } if (ns + nc - 1 < s) d += nc - oc } }
-        END { print (x ? "x" : d + 0) }' <<<"$h")
-    [ "$delta" != x ] || continue
-    q=$(jq -cn --argjson q "$q" --arg n "$x" --arg l "$lines" --argjson lo $((s - delta)) --argjson hi $((e - delta)) --argjson dl "$delta" \
-      '$q + {($n): {lines: ($l | split(",") | map(tonumber - $dl)), lo: $lo, hi: $hi}}') || return 0
+    # Each line as the map's commit had it (at): less what main's hunks before it added; a line of a hunk of comment
+    # lines main added is the hunk's place there (half a line after the line before, when the hunk replaced none). x:
+    # a hunk of main that changes code is in the function.
+    IFS=$'\t' read -r lo hi lines < <(awk -F'\t' -v s="$s" -v e="$e" -v L="$lines" '
+      function at(l,   i, d) { d = 0
+        for (i = 1; i <= n; i++) {
+          if (nc[i] == 0) { if (ns[i] < l) d -= oc[i] }
+          else if (ns[i] + nc[i] - 1 < l) d += nc[i] - oc[i]
+          else if (ns[i] <= l) return (oc[i] ? os[i] : os[i] + 0.5)
+        }
+        return l - d }
+      NF { n++; os[n] = $1; oc[n] = $2; ns[n] = $3; nc[n] = $4; k[n] = $5 }
+      END { for (i = 1; i <= n; i++) if (k[i] && (nc[i] == 0 ? (ns[i] >= s && ns[i] < e) : (ns[i] <= e && ns[i] + nc[i] - 1 >= s))) { print "x"; exit }
+        m = split(L, w, ","); o = at(s) "\t" at(e) "\t"; for (i = 1; i <= m; i++) o = o (i > 1 ? "," : "") at(w[i]); print o }' <<<"$h")
+    [ "$lo" != x ] || continue
+    # Its code is as the map's commit had it: its row is not stale for a sum that main's comments changed (covof).
+    COVSAME[$f$'\t'$x]=1
+    q=$(jq -cn --argjson q "$q" --arg n "$x" --arg l "$lines" --argjson lo "$lo" --argjson hi "$hi" \
+      '$q + {($n): {lines: ($l | split(",") | map(tonumber)), lo: $lo, hi: $hi}}') || return 0
   done
   [ "$q" != '{}' ] || return 0
   # The lines each condition line guards, at the map's commit ({<line>: [<line>, ...]}): none when it cannot be read.
@@ -1376,7 +1440,8 @@ covlines() {
 # least one case: the cases it lists for them. The map's row of a function stands for it whatever its sum: one changed
 # since the trace runs the cases that ran it then, and covof sets COVSTALE (issue 1822) when the row's sum is not the
 # function's sum at TXFROM (sumsof), so pick also runs callersof for the file: a test that reaches it through a path added
-# since the trace is in no row. A function the change adds stands as the functions of the changed
+# since the trace is in no row. A row is not stale when main changed only comment and blank lines of its function since
+# the trace (COVSAME, covlines). A function the change adds stands as the functions of the changed
 # file that call it, up to 3 calls away (an added caller of an added function looks one call further). An engine case
 # into ccase (the runner's cases), a part of a test file into npart, a whole test file into run. It leaves the changed
 # functions' names in CFN once it has read them. It fails, and the rules after it pick, when there is no map or it cannot be read, the file cannot be read either side, a line outside
@@ -1451,7 +1516,7 @@ covof() {
   ts=$(sumsof <<<"$a")
   rs=$(jq -rn --arg f "$f" 'inputs | objects | select(.file == $f and has("sum")) | "\(.fn)\t\(.sum)"' "$COV" 2>/dev/null)
   for x in "${fn[@]}"; do
-    [ -n "${old[$x]:-}" ] || continue
+    [ -n "${old[$x]:-}" ] && [ -z "${COVSAME[$f$'\t'$x]:-}" ] || continue
     [ "$(awk -F'\t' -v n="$x" '$1 == n { print $2; exit }' <<<"$ts")" = "$(awk -F'\t' -v n="$x" '$1 == n { print $2; exit }' <<<"$rs")" ] || COVSTALE=1
   done
   parse[$f]=1
@@ -1957,7 +2022,9 @@ fi
 # The loop's test step reads which files ran and which failed from a log in the folder it names (conveyor.sh
 # testfails()), where no test's own output can pass for these lines.
 log=/dev/null; [ ! -d "${CONVEYOR_TEST_LOG:-}" ] || log=$CONVEYOR_TEST_LOG/test-changed.log
-for t in "${!linked[@]}"; do printf 'TESTRUN linked\t%s\n' "$t" >> "$log"; done
+# Once a log: each one-file run of a step makes the selection, and wrote each link again (bug: 756 lines for the 9
+# links of one card's step).
+for t in "${!linked[@]}"; do grep -qxF -- "TESTRUN linked"$'\t'"$t" "$log" 2>/dev/null || printf 'TESTRUN linked\t%s\n' "$t" >> "$log"; done
 # enginewhole: 0 when the runner's run starts every case file of the engine: no cases chosen, or a case of each (issue
 # 546: a whole run with a flaky case kept off; a file an `off` line keeps off whole is not run so). Such a run sources
 # them all, which the hook does not see: it is a meta-runner's run (issue 584).
@@ -2500,6 +2567,9 @@ for t in "${order[@]}"; do
     [ -z "$p" ] || tr , '\n' <<<"$p" | grep . | while IFS= read -r c; do printf 'TESTRUN case\t%s\t%s\n' "$t" "$c"; done >> "$log"
     # It runs under strace when this run traces (TRACE, inputsof above) and it runs whole (trc), but a plugin test file.
     tf=; [ ${#TRACE[@]} = 0 ] || [ -n "$p" ] || [[ $t == *.ts || $t == *.tsx ]] || { trc=1; tf=$o.trace; rm -f "$tf"; }
+    # A node test file it traces, run with every case: its case workers write the lines they ran of each page script
+    # (ld: CONVEYOR_TEST_LINES), which its log names when it passes (linesof).
+    ld=; [ -z "$tf" ] || [[ $t != *.mjs ]] || { nodecases "$t"; [ ${#nargs[@]} != 0 ] || { ld=$o.lines; rm -rf "$ld"; mkdir "$ld" || ld=; }; }
     echo "== $t${p:+ (parts: $p)}"; s=${EPOCHREALTIME/,/.}; times > "$o.cpu"; [[ $t != *.ts && $t != *.tsx ]] || nr=$o.tmp/p.noroom
     rm -f "$o.fcpu"
     # shellcheck disable=SC2034 # SHARE_CPU is read by share_run (.conveyor/test-share.sh)
@@ -2507,7 +2577,7 @@ for t in "${order[@]}"; do
     # A meta-runner runs in its card mode (the pack's test.files cardMode, mk above): its own checks, with a stub in
     # place of the files it starts.
     case $t in
-      *.mjs) nodecases "$t"; failstop fshare "$t" env "${mk[@]}" ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} "${NODETEST[@]}" ${FAILFAST:+"--import=$NODEHOLD"} "${nargs[@]}" "$t" ;;
+      *.mjs) nodecases "$t"; failstop fshare "$t" env "${mk[@]}" ${ld:+"CONVEYOR_TEST_LINES=$ld"} ${FAILFAST:+"CONVEYOR_TEST_FAILFAST=$FAILFAST"} "${NODETEST[@]}" ${FAILFAST:+"--import=$NODEHOLD"} "${nargs[@]}" "$t" ;;
       *.py) fshare "$t" env "${mk[@]}" python3 "$t" ${FAILFAST:+-f} ;;
       *.ts|*.tsx) plugintest "$t" ;;
       # An engine case file's run with no case (nocase, above): a selection of a blank, which the file keeps (it gives
@@ -2516,6 +2586,7 @@ for t in "${order[@]}"; do
     esac 2>&1 | tee "$o"; st=${PIPESTATUS[0]}; [ "$st" = 0 ] || r=FAIL; [ "$st" != "$SHARE_NOSTART" ] || ns=1
     marked "$t" || r=FAIL; metaran "$t" || r=FAIL
     [ -z "$tf" ] || [ $r != ok ] || inputsof "$t" "$tf" >> "$log"; trc=
+    [ -z "$ld" ] || { [ $r != ok ] || linesof "$t" "$ld" >> "$log"; rm -rf "$ld"; }
     times >> "$o.cpu"; unset SHARE_CPU
     # Its own time and CPU seconds, for the times the loop records of a test file (conveyor/README.md, The test step); not
     # of a run of some of its parts, which is not the file's time.

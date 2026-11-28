@@ -103,6 +103,9 @@ carriedrec() { # <worktree> [<partial file>]
 # TESTCACHE_KEEP lines are kept; one writer at a time, under a lock of its own. Its name is not the one of the cache
 # with no commit (testcache.tsv): a line of that form, read as this one, gave a file it read as a test file to run.
 TESTCACHE=${STATE%/*}/testpasses.tsv TESTCACHE_KEEP=5000
+# The lines a test file ran of a file it read (`TESTRUN lines`), which a pass keeps too, and the readers of a change by
+# them (cachereaders()): lib/testlines.sh.
+. "${BASH_SOURCE[0]%/*}/testlines.sh" || return 1
 # Of lines `<file>\t<input>...` on stdin, each as `<hash>\t<the line>`: the hash of the line's paths, in its order,
 # each with the hash of its content in the worktree and whether it can run (a path that is no file there counts as
 # missing), by two git calls. A symbolic link counts as the path it names, not the file it leads to (#1619): a test
@@ -173,6 +176,7 @@ cachekeep() { # <worktree>
   { cat "$TESTCACHE" 2>/dev/null; printf '%s\n' "$sums"; } | awk -F'\t' 'length { a[++n] = $0; k[n] = $1; at[$1] = n }
     END { for (i = 1; i <= n; i++) if (at[k[i]] == i) print a[i] }' | tail -n "$TESTCACHE_KEEP" > "$TESTCACHE.new" \
     && mv -f "$TESTCACHE.new" "$TESTCACHE" || rm -f "$TESTCACHE.new"
+  lineskeep "$add" "${l[@]}"
   exec {lock}>&-
 }
 # The files of $TESTCACHE whose hash in the worktree is a kept one, one a line: each passed before with the inputs it
@@ -250,42 +254,8 @@ readersin() { # <worktree>
       cut -f1 <<<"${TEST_CASES:-}" | grep -qxF -- "$f" || continue
       TEST_CASES=$(awk -F'\t' -v f="$f" '$1 != f' <<<"$TEST_CASES"); TEST_CASES=${TEST_CASES:+$TEST_CASES$'\n'}; READWHOLE=1
     else fs+=("$f"); READADD+=("$f"); [ ${#lk[@]} = 0 ] || ! grep -qxF -- "$f" <<<"$(printf '%s\n' "${lk[@]}")" || READLINKS=$((READLINKS + 1)); fi
-  done < <(cachereaders "$c")
+  done < <(cachereaders "$c" "$1")
   runnersout
-}
-# The test files whose last pass in $TESTCACHE read a file of <changes> (`git diff --name-status --no-renames` lines),
-# one a line, A to Z: one of its inputs; a folder it listed (an input that ends in /) that a file of it is added to or
-# deleted from (status A or D); or a path it looked for that a file is added under (status A: the path made a folder).
-# Not for a change to the test file itself: the card's own test files run as before, only the cases the change touches
-# when it touches only some (owncases()). readersin() adds them to a card's list; rerunsince() drops what the card's last
-# run kept of them.
-# An engine case file (conveyor/tests/<name>.test.sh) that changes, or is added or deleted, brings no reader that is an
-# engine case file: the runner sources every case file to find its cases (conveyor.test.sh: `. tests/*.test.sh`), so
-# the trace of each one names every other one, and its folder, as read, and a change to one case file picked every
-# engine case file with a traced pass (34 for a 6-line change to review.test.sh, 2026-11-27). Any other reader is
-# still picked: spdx.test.sh reads the SPDX line of each tracked file in a run of its own. A case file's own read of
-# another (testcountrunner.test.sh's check of function names) cannot be told from the runner's, so it brings no
-# reader either; the full test suite, which does not use the cache, still runs it. The changed case file
-# itself still runs: it is the card's own test (listcmd()). An engine library file (conveyor/lib/<name>.sh) that
-# changes brings no reader that is an engine case file either: every case starts the engine, which sources every
-# library file, so each case file's trace names each of them (a change to bugproof.sh picked budgetkept.test.sh,
-# which runs none of its functions, 2026-11-27). The test map gives a card the case files of a library file
-# (listcmd()). A file the change adds or deletes marks its own folder alone as touched (./ for a file at the top),
-# not each folder above it: those folders hold the same names (bug: adding a case file picked each test that
-# listed ./ or conveyor/).
-cachereaders() { # <changes>
-  [ -s "$TESTCACHE" ] && [ -n "$1" ] || return 0
-  # ch: what the change touches; cx: the same, less what an engine case file or library file of it touches, for an
-  # engine case file.
-  C=$1 awk -F'\t' 'function eng(p) { return p ~ /^conveyor\/tests\/[^\/]+\.test\.sh$/ }
-    function src(p) { return eng(p) || p ~ /^conveyor\/lib\/[^\/]+\.sh$/ }
-    function mark(p, e) { ch[p] = 1; if (!e) cx[p] = 1 }
-    BEGIN { n = split(ENVIRON["C"], l, "\n")
-      for (i = 1; i <= n; i++) { if (split(l[i], x, "\t") < 2) continue; e = src(x[2]); mark(x[2], e); if (x[1] !~ /^[AD]/) continue
-        q = x[2]; if (sub(/[^\/]+$/, "", q) && q == "") q = "./"; mark(q, e) } }
-    { last[$3] = $0 }
-    END { for (f in last) { k = split(last[f], a, "\t"); e = eng(f)
-        for (i = 4; i <= k; i++) if (e ? ((a[i] in cx) || (a[i] !~ /\/$/ && (a[i] "/") in cx)) : ((a[i] in ch) || (a[i] !~ /\/$/ && (a[i] "/") in ch))) { print f; break } } }' "$TESTCACHE" | LC_ALL=C sort
 }
 # The cases of the test file <file> that the staged change in <worktree> adds or changes (listcmd(), #414), A to Z, one
 # a line: by the case scan (CASESCAN, lib/testfiles.sh) of main's file (HEAD) and of the staged one, each case of the
@@ -797,7 +767,7 @@ nocaseask() { # <worktree> <testsel's output>
   c=$(git -C "$1" -c core.quotePath=false diff --cached --name-status --no-renames HEAD -- 2>/dev/null) || c=''
   [ -z "$c" ] || c=$(lessshared "$1" "$c") # as readersin() reads the change
   rm -f "$1.nocase" "$1.capsel" "$1.also"
-  { [[ $2 != *$'\n'* ]] || printf '%s\n' "${2#*$'\n'}"; changelinks "$1"; [ ! -s "$TESTCACHE" ] || [ -z "$c" ] || cachereaders "$c"
+  { [[ $2 != *$'\n'* ]] || printf '%s\n' "${2#*$'\n'}"; changelinks "$1"; [ ! -s "$TESTCACHE" ] || [ -z "$c" ] || cachereaders "$c" "$1"
     [ -z "${MAINFROM:-}" ] || mainlinks "$1" "$MAINFROM"; } | grep . | LC_ALL=C sort -u > "$1.capfiles"
   # With no file the list could hold, the command gets no file list (its own selection), and is still asked for ALSOADD.
   if (cd "$1" && CONVEYOR_TEST_LIST=$1.capsel CONVEYOR_TEST_NOCASE=$1.nocase CONVEYOR_TEST_ALSO=$1.also CONVEYOR_TEST_RERUN='' \

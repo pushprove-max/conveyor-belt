@@ -4,6 +4,7 @@
 // dashboard-view.page.test.mjs, split so the runner runs them side by side. Shared setup: dashboard-view.helpers.mjs.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -236,6 +237,34 @@ test('a panel whose only ctx.more list is inside a row counts its rows, not the 
   p.querySelector('[data-list="longs:changes:one"] [data-act="list-all"]').click();
   assert.equal(p.querySelector('.panel-rows').textContent, '1 of 2', 'the panel stays at the length the owner set');
   assert.ok(p.querySelector('.scrolls'));
+});
+
+// ---- the lines a file's cases ran (CONVEYOR_TEST_LINES): what the engine lists a test file by ----
+// A test file of one case, run as the Test step runs it. The case draws the page and no more, so the record holds
+// some lines of app.js and not all of them; the panel list, which the helpers run wrapped in a function, has none
+// (null: every change to it lists the file). Bug it catches: with no record, a change to any line of a page script
+// listed every test file that draws the page.
+test('a test file run with CONVEYOR_TEST_LINES passes and writes the lines of each page script its cases ran', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dash-lines-'));
+  try {
+    const file = path.join(dir, 'one.test.mjs'), helpers = new URL('./dashboard-view.helpers.mjs', import.meta.url).href;
+    fs.writeFileSync(file, `import assert from 'node:assert/strict';\nimport { boot, cases } from ${JSON.stringify(helpers)};\n`
+      + "const test = cases(import.meta.url);\ntest('the page opens', () => assert.ok(boot().document.body));\n");
+    const env = { ...process.env, CONVEYOR_TEST_LINES: dir };
+    delete env.NODE_TEST_CONTEXT;
+    execFileSync(process.execPath, ['--test', file], { env, stdio: 'pipe' });
+    const wrote = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+    assert.equal(wrote.length, 1, 'the one worker that ran the case wrote its record');
+    const rec = JSON.parse(fs.readFileSync(path.join(dir, wrote[0]), 'utf8')), app = rec['app.js'];
+    const code = read('app.js').split('\n').filter((l) => /\S/.test(l)).length;
+    assert.ok(app && app.lines.length > 0 && app.lines.length < code, 'app.js: some of its lines ran, not all of them');
+    assert.ok(app.gaps.length > 0 && app.lines.every((n, i) => Number.isInteger(n) && n >= 1 && (i === 0 || n > app.lines[i - 1])), 'its lines are line numbers in order');
+    // A function the case never called: its first line counts as run (its name is the page's to use), its body not.
+    const text = read('app.js').split('\n'), heads = text.map((l, i) => (/^\s*function \w+\(.*\{$/.test(l) ? i + 1 : 0)).filter(Boolean);
+    assert.ok(heads.length > 0 && heads.every((n) => app.lines.includes(n)), 'the first line of each function of app.js is on record');
+    assert.ok(heads.some((n) => /\S/.test(text[n]) && !app.lines.includes(n + 1)), 'the body of a function that no case called is not');
+    assert.equal(rec['panels/index.js'], null, 'a script that was not run as the page runs it has no lines');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ---- each panel: data, empty, failed to load; the second half is in dashboard-view.page-states ----

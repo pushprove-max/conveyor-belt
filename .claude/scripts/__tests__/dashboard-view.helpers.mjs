@@ -11,8 +11,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test as nodeTest } from 'node:test';
-import { Worker, parentPort, workerData } from 'node:worker_threads';
-import { createRequire, enableCompileCache } from 'node:module';
+import { Worker, parentPort, threadId, workerData } from 'node:worker_threads';
+import { createRequire, enableCompileCache, syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 // cases(import.meta.url) -- the `test` a file registers its cases with. Each case runs in one of a few worker threads,
@@ -96,9 +96,95 @@ export function caseNames(file) {
   const wk = new Worker(new URL(import.meta.url), { workerData: { dashboardCases: file, listCases: true }, execArgv: [] });
   return new Promise((res, rej) => { wk.once('message', res); wk.once('error', rej); }).finally(() => wk.terminate());
 }
+// The lines a file's cases ran of each page script (a .js file under .claude/dashboard that a case ran with eval), for
+// the engine's record of them (conveyor/README.md, `TESTRUN lines`): with CONVEYOR_TEST_LINES=<folder>, which
+// .conveyor/test-changed.sh sets when a card's Test step runs the file whole, each worker keeps V8's block coverage on
+// and, after each case, writes <folder>/<file>.<thread>.json, {<script>: {lines: [...], gaps: [...]}}: the lines with
+// code that ran, and the lines whose end ran (a line added after one of these runs). A script is found by its text,
+// so a case reads the same text with and without the record. A script the worker read more often than a page ran its
+// text with eval (a case that reads the text as data, or runs it wrapped in a function) is null: a change to any line
+// of it can reach the file. V8 keeps one script for the pages that run the same text, so the reads are counted
+// against the eval calls, not the scripts. Each page a case makes is kept until its case ends (held): V8 drops what
+// a script ran when the script is collected.
+const LINES = (POOL && !workerData.listCases && process.env.CONVEYOR_TEST_LINES) || '';
+const reads = new Map(), texts = new Map(), scripts = new Map(), ran = new Map(), held = [];
+let session = null;
+async function linesStart() {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'dashboard') + path.sep;
+  const note = (file, text) => {
+    const at = typeof file === 'string' || file instanceof URL ? path.resolve(file instanceof URL ? fileURLToPath(file) : file) : '';
+    if (!at.startsWith(root) || !at.endsWith('.js')) return;
+    const name = at.slice(root.length).split(path.sep).join('/'), r = reads.get(name) || { text: null, n: 0, evals: 0 };
+    r.n += 1; if (typeof text === 'string') { r.text = text; texts.set(text, name); }
+    reads.set(name, r);
+  };
+  const sync = fs.readFileSync, later = fs.readFile, promised = fs.promises.readFile;
+  fs.readFileSync = function readFileSync(file, ...rest) { const text = sync.call(this, file, ...rest); note(file, text); return text; };
+  fs.readFile = function readFile(file, ...rest) { note(file); return later.call(this, file, ...rest); };
+  fs.promises.readFile = function readFile(file, ...rest) { note(file); return promised.call(this, file, ...rest); };
+  syncBuiltinESMExports();
+  const lib = createRequire(import.meta.url)('jsdom'), Page = lib.JSDOM;
+  lib.JSDOM = class JSDOM extends Page {
+    constructor(...given) {
+      super(...given); held.push(this);
+      const run = this.window.eval;
+      this.window.eval = (code) => { const name = texts.get(code); if (name) reads.get(name).evals += 1; return run(code); };
+    }
+  };
+  const { Session } = await import('node:inspector/promises');
+  session = new Session(); session.connect();
+  await session.post('Profiler.enable');
+  await session.post('Profiler.startPreciseCoverage', { callCount: false, detailed: true });
+}
+async function linesTake() {
+  const { result } = await session.post('Profiler.takePreciseCoverage');
+  const sizes = new Set(Array.from(reads.values(), (r) => (r.text || '').length));
+  const fresh = result.filter((sc) => sc.url === '' && !scripts.has(sc.scriptId));
+  // A script with no name is one a case ran with eval: its text says which file it is. The debugger is on only here.
+  if (fresh.length) await session.post('Debugger.enable');
+  for (const sc of fresh) {
+    const top = sc.functions.find((f) => f.functionName === '' && f.ranges[0].startOffset === 0);
+    let name = null;
+    if (!top || sizes.has(top.ranges[0].endOffset)) {
+      const got = await session.post('Debugger.getScriptSource', { scriptId: sc.scriptId }).catch(() => null);
+      name = (got && texts.get(got.scriptSource)) || null;
+    }
+    scripts.set(sc.scriptId, name);
+  }
+  if (fresh.length) await session.post('Debugger.disable');
+  for (const sc of result) {
+    const name = scripts.get(sc.scriptId);
+    if (!name) continue;
+    const text = reads.get(name).text, at = ran.get(name) || { lines: new Set(), gaps: new Set() };
+    ran.set(name, at);
+    // The smallest range that holds a character says whether it ran: a wider range is written first. A function no
+    // case called keeps its first line as the code around it ran: its name is that code's to use, so a test that
+    // ran that code is listed when the name changes or the function goes.
+    const on = new Uint8Array(text.length + 1);
+    const body = (r) => { const nl = text.indexOf('\n', r.startOffset); return { ...r, startOffset: nl < 0 || nl >= r.endOffset ? r.endOffset : nl + 1 }; };
+    const ranges = sc.functions.flatMap((f) => f.ranges.map((r, i) => (i === 0 && !r.count ? body(r) : r)))
+      .sort((a, b) => (b.endOffset - b.startOffset) - (a.endOffset - a.startOffset));
+    for (const r of ranges) on.fill(r.count ? 1 : 0, Math.min(r.startOffset, text.length), Math.min(r.endOffset, text.length + 1));
+    let line = 1, code = false;
+    for (let i = 0; i <= text.length; i++) {
+      if (i < text.length && text[i] !== '\n') { if (on[i] && text[i] !== ' ' && text[i] !== '\t') code = true; continue; }
+      if (code) at.lines.add(line);
+      if (on[i]) at.gaps.add(line);
+      line += 1; code = false;
+    }
+  }
+  const out = {};
+  for (const [name, r] of reads) {
+    const at = ran.get(name), sorted = (set) => Array.from(set).sort((a, b) => a - b);
+    out[name] = at && r.n <= r.evals ? { lines: sorted(at.lines), gaps: sorted(at.gaps) } : null;
+  }
+  fs.writeFileSync(path.join(LINES, `${path.basename(POOL)}.${threadId}.json`), JSON.stringify(out));
+  held.length = 0;
+}
 if (POOL && workerData.listCases) {
   import(POOL).then(() => parentPort.postMessage(registered.map((c) => c.name)));
 } else if (POOL) {
+  if (LINES) await linesStart();
   // The worker loads the file, and jsdom with it, while the others start.
   const loaded = import(POOL).then(() => dom());
   loaded.catch(() => {});
@@ -108,6 +194,7 @@ if (POOL && workerData.listCases) {
       const c = registered[index];
       assert.ok(c && c.name === name, `case ${index} of ${POOL} is "${name}" in the worker too`);
       await c.fn();
+      if (LINES) await linesTake();
       parentPort.postMessage({ ok: true });
     } catch (e) {
       parentPort.postMessage({ ok: false, message: String(e && e.message), stack: String(e && e.stack) });

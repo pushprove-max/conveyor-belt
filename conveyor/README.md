@@ -555,6 +555,8 @@ Both take `--json`.
 The engine runs the test step from `lib/testrun.sh`. These files hold its parts:
 
 - `lib/testlist.sh`: the times a run records, the test results cache, and what the next run need not run again.
+- `lib/testlines.sh`: the lines that a test file ran of a file it read, and the test files that a change reaches by
+  them.
 - `lib/mainred.sh`: the run on main of the tests that did not pass, the machine hold, and the fix cards of a red main.
 - `lib/bugproof.sh`: the bug-card check.
 - `lib/speedproof.sh`: the checks of the fix cards that the Tests page files.
@@ -1084,6 +1086,15 @@ no `TESTRUN inputs` line is never kept off in this way.
 A runner can give `TESTRUN reads<TAB><file><TAB><input file>...` in place of the inputs line, when the test file also
 read a path that is not tracked (such as a file in `node_modules`). Conveyor keeps that line too, but never keeps the
 test file off with it. A change to one of its inputs still adds the test file to a card's test list.
+A runner can also give the lines that a test file ran of a file that it read:
+`TESTRUN lines<TAB><test file><TAB><file><TAB><blob><TAB><lines><TAB><gaps>` in its log. `<blob>` is the git object of
+the file's content in that run (the runner writes it with `git hash-object -w`). `<lines>` are the lines with code
+that ran, and `<gaps>` are the lines whose end ran, each as ranges such as `3-7,12` (`-` for none). When the test file
+passes whole, Conveyor keeps these lines in `testlines.tsv` in the state folder, in place of the lines of its earlier
+pass. A change that edits such a file then adds the test file to a card's test list only when the change touches a
+line that the test file ran: it changes or removes one of the lines, or it adds lines at a place whose end ran. A test
+file with no such lines for the changed file, or whose blob is no longer in the repository, gets on the list as
+before. In this repository, the page tests of the Board give these lines for the scripts of the page.
 A card's test list also gets each test file whose last kept pass read a file that the change touches, or listed a
 folder that the change adds a file to or deletes a file from. Such a file runs whole, also when the card's own change
 selects only some of its cases. This rule does not apply to a changed file that the test map marks as shared (a file

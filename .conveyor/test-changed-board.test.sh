@@ -107,4 +107,31 @@ got=$(listed "$D/dashboard-view.selfheals.test.mjs")
 has "$got" dashboard-local.test.sh \
   || no "a change to dashboard-view.selfheals.test.mjs alone does not list dashboard-local.test.sh, which scans it: $(tr '\n' ' ' <<<"$got")"
 
+# Card 1798: the lines on record. The engine's state folder (a stub conveyor.sh names it) holds a pass of two tests
+# that draw Landed, and of zz-new the lines it ran of panels/landed.js: line 1 alone. A line added at the panel's end
+# does not list zz-new, and lists cards-needs, which has no lines on record; with every line on record as run, or
+# with the blob of its lines gone, zz-new is listed. Bug it catches: a change to one function of a panel listed each
+# test that draws the panel (about 40 of the Board's test files for a change to the undo of a move, which 2 run).
+P=.claude/dashboard/panels/landed.js
+mkdir -p "$R/conveyor/jq" "$T/state" && cp "$ROOT/conveyor/jq/ranlines.jq" "$R/conveyor/jq/" \
+  && printf '#!/usr/bin/env bash\n[ "${1:-}" != state-dir ] || echo "%s"\n' "$T/state" > "$R/conveyor/conveyor.sh" \
+  && git -C "$R" add -A && git -C "$R" commit -qm engine || no "the engine's stub could not be committed"
+b=$(git -C "$R" rev-parse "HEAD:$P"); pn=$(wc -l < "$R/$P")
+printf 'h%s\tc0\t%s\t%s\n' 1 "$D/zz-new.test.mjs" "$P" 2 "$D/dashboard-view.cards-needs.test.mjs" "$P" > "$T/state/testpasses.tsv"
+printf '%s\t%s\t%s\t1\t1\n' "$D/zz-new.test.mjs" "$P" "$b" > "$T/state/testlines.tsv"
+got=$(listed "$P")
+! has "$got" zz-new.test.mjs && has "$got" dashboard-view.cards-needs.test.mjs \
+  || no "a line added at the end of panels/landed.js, of which zz-new ran line 1 alone, did not list cards-needs without zz-new: $(tr '\n' ' ' <<<"$got")"
+printf '%s\t%s\t%s\t1-%s\t1-%s\n' "$D/zz-new.test.mjs" "$P" "$b" "$pn" "$pn" > "$T/state/testlines.tsv"
+got=$(listed "$P"); has "$got" zz-new.test.mjs || no "a line added where zz-new ran did not list it: $(tr '\n' ' ' <<<"$got")"
+printf '%s\t%s\t%040d\t1\t1\n' "$D/zz-new.test.mjs" "$P" 0 > "$T/state/testlines.tsv"
+got=$(listed "$P"); has "$got" zz-new.test.mjs || no "with the blob of its lines gone, zz-new was not listed: $(tr '\n' ' ' <<<"$got")"
+# linesof: what two case workers wrote of a test file becomes its `TESTRUN lines` lines: the lines either ran, as
+# ranges, with the script's blob; a script one of them gives none of (null) has no line.
+mkdir -p "$T/ln" && echo '{"panels/landed.js": {"lines": [1, 2, 3, 7], "gaps": [1, 2]}, "app.js": {"lines": [5], "gaps": []}}' > "$T/ln/x.1.json" \
+  && echo '{"panels/landed.js": {"lines": [3, 4], "gaps": [9]}, "app.js": null}' > "$T/ln/x.2.json"
+got=$(cd "$R" && eval "$(sed -n '/^linesof() {/,/^}/p' .conveyor/test-changed.sh)" && linesof "$D/zz-new.test.mjs" "$T/ln" 2>&1)
+[ "$got" = "TESTRUN lines"$'\t'"$D/zz-new.test.mjs"$'\t'"$P"$'\t'"$b"$'\t'"1-4,7"$'\t'"1-2,9" ] && git -C "$R" cat-file -e "$b" \
+  || no "the lines two workers wrote did not become one TESTRUN lines line of panels/landed.js: $got"
+
 [ ! -s "$T/notok" ] && echo "ok - a change to the Board's fixture or a panel lists the test files that import it or draw it" || exit 1

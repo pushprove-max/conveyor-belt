@@ -548,3 +548,30 @@ t_testcachereads() {
   ! grep -qxF d.test.sh "$T/$CASE/hits" \
     || fail "given the log line 'TESTRUN reads d.test.sh e.txt pkg/package.json', the cache keeps d.test.sh off, though it read a path no input names"
 }
+
+# Card 1798: the lines on record. v.test.sh and w.test.sh passed whole and read s.js; the run's log names the lines
+# v.test.sh ran of it (1 and 2, and the ends of 1 to 3), and none for w.test.sh. The pass keeps them ($TESTLINES), and a
+# card's list holds v.test.sh only for a change that touches them: a ran line changed, or lines added where it ran;
+# w.test.sh, with no lines on record, is listed for each change, as is v.test.sh when its blob is gone. Bug it
+# catches: each test file whose last pass read a changed file was listed, whatever lines of it the test ran (the 96
+# page tests of the Board for a change to one function of one script).
+t_testcachelines() {
+  setup '[]'
+  local wt=$T/$CASE/cards/c7 b lp=$'v.test.sh\ts.js\nw.test.sh\ts.js' both=$'v.test.sh\nw.test.sh'
+  echo v > "$R/v.test.sh"; echo w > "$R/w.test.sh"; printf '%s\n' one two three four five six > "$R/s.js"; cachelistsetup v.test.sh w.test.sh s.js
+  b=$(git -C "$R" rev-parse HEAD:s.js)
+  mkdir -p "$wt.testlog" && { printf -- '-- ok %s\n' v.test.sh w.test.sh; printf 'TESTRUN inputs\t%s\ts.js\n' v.test.sh w.test.sh
+    printf 'TESTRUN lines\tv.test.sh\ts.js\t%s\t1-2\t1-3\n' "$b"; printf 'TESTRUN lines\tx.test.sh\ts.js\t%s\t1\t1\n' "$b"; } > "$wt.testlog/run.log" \
+    || fail "the run's log could not be written"
+  # listed <code before the list> <s.js's lines>...: the card's list for that s.js, staged.
+  listed() { local c=$1; shift; printf '%s\n' "$@" > "$wt/s.js" && git -C "$wt" add -A || fail "the card's change could not be staged"
+    LASTPASS=$lp cachelistrun "$c"' listcmd "$wt" && printf "%s\n" "$TEST_FILES" > "$T/$CASE/got"'; cat "$T/$CASE/got"; }
+  [ "$(listed 'cachekeep "$wt" && cp "$TESTLINES" "$T/$CASE/kept" || exit 1;' one two three four FIVE six)" = w.test.sh ] \
+    && [ "$(cat "$T/$CASE/kept")" = "v.test.sh"$'\t'"s.js"$'\t'"$b"$'\t'"1-2"$'\t'"1-3" ] \
+    || fail "the pass did not keep v.test.sh's lines alone, or a change to line 5, which it did not run, did not list w.test.sh alone: $(cat "$T/$CASE/got" "$T/$CASE/kept" "$T/$CASE/run.out" 2>&1)"
+  [ "$(listed '' one TWO three four five six)" = "$both" ] || fail "a change to line 2, which v.test.sh ran, did not list both: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(listed '' one two three new four five six)" = "$both" ] || fail "a line added after line 3, whose end v.test.sh ran, did not list both: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(listed '' one two three four five six seven)" = w.test.sh ] || fail "a line added after line 6, which v.test.sh did not run, did not list w.test.sh alone: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(listed 'printf "v.test.sh\ts.js\t%040d\t1-2\t1-3\n" 0 > "$TESTLINES";' one two three four FIVE six)" = "$both" ] \
+    || fail "with the blob of its lines gone, v.test.sh was not listed for a change to s.js: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+}
