@@ -513,6 +513,10 @@ t_narrowownrunner() {
 t_narrowfiletimeout() {
   local c
   setup '[]'
+  # The rule Stop a card's tests at the first failure is off: with it on, the timeout of a.test.sh ends the run, and
+  # b.test.sh ran only when it had its slot before that limit, 1 s (never, with every other slot of the pool held by the
+  # cases that run beside this one). t_failfasttimeout (failfast.test.sh) has the rule on.
+  loop control rules failfast=off > /dev/null || fail "control rules failfast=off was refused"
   printf '%s\n' 'echo "one:$CONVEYOR_TEST_FILE" >> "$STUB/got"' '[ "$CONVEYOR_TEST_FILE" = a.test.sh ] || exit 0' \
     '(sleep 300; echo leaked >> "$STUB/got") & echo $! > "$STUB/child"; sleep 300' > "$STUB/test-cmd" # sleep: a hang, which the limit cuts
   local s=$SECONDS
