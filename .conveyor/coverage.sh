@@ -8,7 +8,7 @@
 # The traced files: the engine's shell files (each .sh file of .conveyor/engine-areas.json), the Board's collector
 # (.claude/scripts/dashboard.sh) and the hooks' (.claude/hooks/, its lib/ too), each one test-changed.sh --funcs can
 # read (FUNCS).
-# The units, run half the machine's cores at once (nproc --all, at least 1; COVERAGE_JOBS sets the number): each case of the engine's runner (conveyor/conveyor.test.sh, CONVEYOR_SHELL_TEST_CASE=<case>);
+# The units, run half the machine's cores at once (portable.sh p_ncpu, at least 1; COVERAGE_JOBS sets the number): each case of the engine's runner (conveyor/conveyor.test.sh, CONVEYOR_SHELL_TEST_CASE=<case>);
 # each part of a test file under .claude/scripts/__tests__ or .claude/hooks/__tests__ that CONVEYOR_SHELL_TEST_CASE
 # runs by parts (test-changed.sh --parts: `) & started <part>` lines, as dashboard.test.sh; a `CASES=" ... "` line, as
 # the hooks' case_on files); each check of one that selects its checks by their text (bash-guardrails.test.sh: checks,
@@ -109,9 +109,9 @@ if [ "${1:-}" = --write ]; then covwrite "$2" "$3" "$4" "${5:-}" "${6:-}"; exit;
 [ -f .conveyor/test-changed.sh ] || { echo "coverage.sh: run it from the checkout's root" >&2; exit 2; }
 # timeout, on macOS too.
 . conveyor/lib/portable.sh && p_tools || exit 1
-# The units at once: half the cores, as the slots read them (slots.sh: nproc --all), at least 1. A fixed 4 left a
+# The units at once: half the cores, as the slots read them (portable.sh p_ncpu), at least 1. A fixed 4 left a
 # 32-core machine three quarters idle and took two hours on a 16-thread one.
-JOBS=${COVERAGE_JOBS:-$(( $(nproc --all 2>/dev/null || echo 2) / 2 ))}
+JOBS=${COVERAGE_JOBS:-$(( $(p_ncpu || echo 2) / 2 ))}
 [[ $JOBS =~ ^[1-9][0-9]*$ ]] || JOBS=1
 TR=$(mktemp -d "${TMPDIR:-/tmp}/coverage.XXXXXX") || exit 1
 trap 'rm -rf "$TR"' EXIT

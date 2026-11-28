@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # The machine's test slots. Sourced, never run.
+# p_ncpu (the CPU count) is portable.sh's: a runner that sources this file alone gets it here.
+declare -F p_ncpu > /dev/null || . "${BASH_SOURCE[0]%/*}/portable.sh"
 # One pool for the machine, shared by every Conveyor on it (each checkout the host file names, and a test runner started
 # by hand): the folder /tmp/conveyor-test-slots, the same whatever the user's environment names, holding one file per
 # slot, 1 to N. N is the host file's testSlots, never more than the machine's cores less those kept for the user
@@ -32,7 +34,7 @@ slot_cpuset() {
   local l r x k a=() c=() n
   SLOT_CORES=(); SLOT_KEPT=()
   command -v taskset >/dev/null || return 0
-  n=$(nproc --all) || n=''
+  n=$(p_ncpu) || n=''
   l=$({ [ -z "$n" ] || taskset -cp "0-$((n - 1))" "$BASHPID"; } >/dev/null 2>&1; taskset -cp "$BASHPID" 2>/dev/null)
   l=${l##*: }; IFS=, read -ra r <<<"$l"
   mapfile -t SLOT_KEPT < <(slot_reserved "$n"); k=" ${SLOT_KEPT[*]} "
@@ -49,7 +51,7 @@ slot_cpuset() {
 slot_reserved() { # [the machine's cores (nproc --all), when the caller has read them]
   local n=${1:-}
   command -v taskset >/dev/null || return 0
-  [ -n "$n" ] || n=$(nproc --all) || return 0
+  [ -n "$n" ] || n=$(p_ncpu) || return 0
   jq -r --argjson n "$n" '.reserveCores
     | if type == "number" then floor | select(. > 0) | [range([$n - ., 1] | max; $n)]
       elif type == "array" then map(numbers | floor | select(. >= 0 and . < $n)) | unique | if length >= $n then .[1:] else . end
@@ -61,7 +63,7 @@ slot_reserved() { # [the machine's cores (nproc --all), when the caller has read
 slot_keep() {
   local k kl c=() i n
   mapfile -t kl < <(slot_reserved); [ ${#kl[@]} -gt 0 ] || return 1
-  k=" ${kl[*]} "; n=$(nproc --all) || return 1
+  k=" ${kl[*]} "; n=$(p_ncpu) || return 1
   for ((i = 0; i < n; i++)); do [[ $k == *" $i "* ]] || c+=("$i"); done
   local IFS=,; echo "${c[*]}"
 }
@@ -91,7 +93,7 @@ slot_pool() {
   SLOT_DIR=${h[0]:-}; [ -n "$SLOT_DIR" ] \
     || if [[ ${CONVEYOR_TEST_POOL:-} =~ ^([1-9][0-9]{0,5}):(/.*)$ ]]; then p=${BASH_REMATCH[1]} SLOT_DIR=${BASH_REMATCH[2]}; else SLOT_DIR=/tmp/conveyor-test-slots; fi
   # The cores, each followed by a space, read with no program but slot_cpus's own (#532).
-  slot_cpuset; c=("${SLOT_CORES[@]}"); SLOT_CPUS=''; n=${#c[@]}; [ "$n" = 0 ] || printf -v SLOT_CPUS '%s ' "${c[@]}"; [ "$n" -ge 1 ] || n=$(nproc --all)
+  slot_cpuset; c=("${SLOT_CORES[@]}"); SLOT_CPUS=''; n=${#c[@]}; [ "$n" = 0 ] || printf -v SLOT_CPUS '%s ' "${c[@]}"; [ "$n" -ge 1 ] || n=$(p_ncpu)
   # A pool larger than the cores would put two slots on one core: it is the cores.
   SLOT_N=${p:-${h[1]:-}} && [ -n "$SLOT_N" ] && [ "$SLOT_N" -le "$n" ] || SLOT_N=$n
   mkdir -p "$SLOT_DIR" || { echo "conveyor: the test slots folder $SLOT_DIR cannot be made: no test can take a slot" >&2; return 1; }

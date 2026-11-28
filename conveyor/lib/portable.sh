@@ -79,6 +79,13 @@ p_load() {
   else local l; { read -r l _ < /proc/loadavg && printf '%s\n' "$l"; } 2>/dev/null; fi
 }
 
+# The machine's CPU count (Linux: nproc --all; macOS has no nproc: sysctl hw.ncpu); exit 1 when neither answers.
+p_ncpu() {
+  local n
+  if p_darwin; then n=$(sysctl -n hw.ncpu 2>/dev/null); else n=$(nproc --all 2>/dev/null); fi
+  [[ $n =~ ^[1-9][0-9]*$ ]] && echo "$n"
+}
+
 # "<used KiB> <total KiB>"; used is what is not available (macOS: free, inactive and speculative pages are available).
 p_mem() {
   if p_darwin; then
