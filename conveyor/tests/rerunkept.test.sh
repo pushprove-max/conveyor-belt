@@ -186,9 +186,9 @@ t_rerunkilledcase() {
 # and the passed cases of the card's other files ran again). a.test failed `one` and passed `two`; the fix edits x.txt,
 # which selects `one` alone, and `one` hangs: the run again runs `one`, and `two` stays kept.
 t_rerunfixtimeoutok() {
-  rerunwt 'echo two >> a.txt' '1 fail one' '2 fail one' '3 hang one'; tune '.tunables.testTimeout = 2'
+  rerunwt 'echo two >> a.txt' '1 fail one' '2 fail one' '3 hang one'
   ! rerunstep || fail "the first test step passed"
-  rerunedit 'echo x >> x.txt'; rerunstep || fail "the step after the fix did not pass on its run again: $(ran 4)"
+  rerunedit 'echo x >> x.txt'; tuned '.tunables.testTimeout = 2' rerunstep || fail "the step after the fix did not pass on its run again: $(ran 4)"
   [ "$(grep $'^changed\t' "$STUB/rerun.3")" = $'changed\tx.txt' ] && [ "$(ran 3)" = one ] \
     || fail "the run after the fix was not of the failed case alone: $(ran 3): $(cat "$STUB/rerun.3" 2>&1)"
   [ "$(sed 1,3d "$STUB/rerun.4" | tr '\t\n' ':|')" = "pass:b.test|pass:c.test|ok:a.test:two|" ] \
@@ -199,9 +199,9 @@ t_rerunfixtimeoutok() {
 # The same for a file that had passed: a.test passed, the fix edits x.txt, which selects its case `one`, and `one`
 # hangs. The run again runs `one` alone, not a.test whole.
 t_rerunfixtimeoutpass() {
-  rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky' '3 hang one'; tune '.tunables.testTimeout = 2'
+  rerunwt 'echo two >> a.txt' '1 fail flaky' '2 fail flaky' '3 hang one'
   ! rerunstep || fail "the first test step passed"
-  rerunedit 'echo x >> x.txt'; rerunstep || fail "the step after the fix did not pass on its run again: $(ran 4)"
+  rerunedit 'echo x >> x.txt'; tuned '.tunables.testTimeout = 2' rerunstep || fail "the step after the fix did not pass on its run again: $(ran 4)"
   [ "$(ran 3)" = one ] || fail "the run after the fix was not cut off in a.test's case one: $(ran 3): $(cat "$STUB/rerun.3" 2>&1)"
   [ "$(sed 1,3d "$STUB/rerun.4" | tr '\t\n' ':|')" = "pass:a.test|pass:c.test|fail:a.test:one|" ] \
     || fail "the run again after the timeout was not told a.test passed but for one: $(cat "$STUB/rerun.4" 2>&1)"

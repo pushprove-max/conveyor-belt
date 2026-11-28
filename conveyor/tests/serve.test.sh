@@ -146,7 +146,7 @@ t_followdoctor() {
   # It runs in main's checkout: from the case's folder, not a checkout, doctor stops before this check. Each doctor
   # costs seconds (it looks at every process of the machine), so the checkout behind is one whose path holds a
   # backslash: the one look shows both that it warns and that it reads such a path. The checkout is at $B (coderepo).
-  servefollowsetup; sleep 60 & z=$!; t=$(p_started $z) # sleep: a stand-in for a running loop's process
+  servefollowsetup; sleep infinity & z=$!; trap 'kill "$z" 2> /dev/null' EXIT; t=$(p_started $z) # sleep: a stand-in for a running loop's process, with no set life (one of 60 s ended before the three doctors did on a busy machine): the case ends it
   says() { jq -n --argjson p "$z" --arg t "$t" --arg c "$1" --arg h "$2" '{pid: $p, started: $t, state: "running", commit: $c, checkout: (if $h == "" then null else $h end)}' > "$S/loop.json"; }
   says "$B" "$D"; out=$(cd "$R" && loop doctor 2>&1); ! grep -q '^warning: the running loop' <<<"$out" || fail "doctor warned of a loop on its checkout's HEAD: $out"
   ln -s "$D" "$T/$CASE/code\\repo"; says "$A" "$T/$CASE/code\\repo"; out=$(cd "$R" && loop doctor 2>&1)
