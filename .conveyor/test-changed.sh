@@ -567,10 +567,11 @@ boardtests() {
 # (issue 1829: it ran each Board test file a link of mainred.sh names, none of which reads it). A checkout with no
 # engine, or a state folder with no pass, reads each link of the file. The state folder is this checkout's (not one
 # the environment names: a test of this script in a scratch checkout reads no pass of the engine that runs it).
+# PASSES: that record of passes, when this checkout has one (doctests reads it too).
+PASSES=$([ -f conveyor/conveyor.sh ] && p=$(env -u CONVEYOR_MAIN -u CONVEYOR_CARDS bash conveyor/conveyor.sh state-dir 2>/dev/null) \
+  && [ -n "$p" ] && [ -s "$p/testpasses.tsv" ] && echo "$p/testpasses.tsv")
 livelinks() {
-  local p
-  [ -f conveyor/jq/linkslive.jq ] && [ -f conveyor/conveyor.sh ] && p=$(env -u CONVEYOR_MAIN -u CONVEYOR_CARDS bash conveyor/conveyor.sh state-dir 2>/dev/null) \
-    && [ -n "$p" ] && p=$p/testpasses.tsv && [ -s "$p" ] && jq -c --rawfile t <(cut -f3 "$p" | LC_ALL=C sort -u) -f conveyor/jq/linkslive.jq .conveyor/test-links.json 2>/dev/null \
+  [ -f conveyor/jq/linkslive.jq ] && [ -n "$PASSES" ] && jq -c --rawfile t <(cut -f3 "$PASSES" | LC_ALL=C sort -u) -f conveyor/jq/linkslive.jq .conveyor/test-links.json 2>/dev/null \
     || cat .conveyor/test-links.json 2>/dev/null
 }
 LINKS=$(livelinks | jq -r 'to_entries[] | .key as $k | .value | arrays[] | strings | "\($k)\t\(.)"' 2>/dev/null \
@@ -1415,24 +1416,54 @@ rulefor() {
 }
 # doctests <page> (issue 1829): the tests of a changed page (.md): each tracked test file with a line, no comment, that
 # names its path. A line names it by the path itself, by the pages of its folder as a pattern (<folder>/*.md), or
-# from the engine's folder or the checkout's (`$SRC/`, `$SRC/../`, `$ROOT/`, read here as conveyor/ and the root). A
-# page in the root (README.md) is named only so: its bare name is the page of a test's scratch checkout. A line that
-# names it inside the longer path of another tracked file (more/docs/page.md) does not name it. Of an engine case
+# under a variable that stands for a folder of the checkout: SRC, ROOT or HERE, where the test file sets it from its
+# own place (`SRC=$(cd "$(dirname "$0")/.." && pwd ...)`, varroot), and SRC in an engine case file (conveyor/). A
+# page in the root (README.md) is named only so: its bare name is the page of a test's scratch checkout. A path under
+# any other variable (`"$R/conveyor/README.md"`) is a file of a scratch checkout, and a line that names the page
+# inside the longer path of another tracked file (more/docs/page.md) does not name it. A test file with a pass on
+# record (PASSES) whose last pass did not read the page or its folder does not read it, whatever its text holds: the
+# trace is the better witness (on card 1819, 4 test files of this script that write a conveyor/README.md of their
+# own were selected for a change to the engine's). Of an engine case
 # file, the cases that name it (ccase), or the file whole (area) when a line outside its cases does; another test file
 # into run. Bug: a change to docs/cards.md ran none of the cases that read a sentence of it (healskinds, lintgate,
 # recshut, review) and not README-pages.test.sh, which reads each page: no link and no pass on record named them.
+# varroot <test file> <name>: the folder of the checkout that the file sets the variable <name> to from its own place
+# (`<name>=$(cd "$(dirname "$0")[/..]..." && pwd`), as a prefix ("" for the root, else "<folder>/"); `-` when it sets
+# none so. In an engine case file SRC is the engine's folder, which the runner sets.
+varroot() {
+  local l p=${1%/*} u
+  [[ $1 == */* ]] || p=.
+  if [ "$2" = SRC ] && [[ $1 == conveyor/tests/*.test.sh && $1 != conveyor/tests/*/* ]]; then echo conveyor/; return; fi
+  l=$(grep -m1 -E "^$2=\"?[$][(]cd \"[$][(]dirname \"[$](0|[{]BASH_SOURCE\[0\][}])\"[)](/[.][.])*\" && pwd" "$1") || { echo -; return; }
+  l=${l%%&&*}
+  u=$(grep -o '/[.][.]' <<<"$l" | grep -c .)
+  while [ "$u" -gt 0 ]; do
+    case $p in .) echo -; return ;; */*) p=${p%/*} ;; *) p=. ;; esac
+    u=$((u - 1))
+  done
+  if [ "$p" = . ]; then echo ''; else echo "$p/"; fi
+}
 doctests() {
-  local d=$1 g='' t c o
+  local d=$1 g='' t c o tr=''
   [[ $d != */* ]] || g="${d%/*}/*.${d##*.}"
   o=$(git ls-files -- "*/$d" 2>/dev/null)
+  # tr: each test file with a pass on record, after 1 when its last pass read the page or its folder, else after 0.
+  [ -z "$PASSES" ] || tr=$(awk -F'\t' -v d="$d" -v dd="${d%/*}/" '{ r = 0; for (i = 4; i <= NF; i++) if ($i == d || $i == dd) r = 1; last[$3] = r }
+    END { for (f in last) print last[f] "\t" f }' "$PASSES")
   while IFS= read -r t; do
     [ -n "$t" ] && [ "$t" != "$d" ] && [ -f "$t" ] || continue
-    c=$(awk -v d="$d" -v g="$g" -v o="$o" 'BEGIN { k = split(o, lp, "\n"); root = (d !~ /\//) }
+    ! grep -qxF -- $'0\t'"$t" <<<"$tr" || continue
+    c=$(awk -v d="$d" -v g="$g" -v o="$o" -v src="$(varroot "$t" SRC)" -v root="$(varroot "$t" ROOT)" -v here="$(varroot "$t" HERE)" '
+      function under(name, pre) { if (pre != "-") gsub("\"?[$][{]?" name "[}]?\"?/", "\001" pre, x) }
+      function cut(s,   j) { while (s != "" && (j = index(x, s))) x = substr(x, 1, j - 1) substr(x, j + length(s)) }
+      BEGIN { k = split(o, lp, "\n"); top = (d !~ /\//) }
       /^t_[a-z0-9]*\(\) \{/ { n = $1; sub(/\(.*/, "", n); sub(/^t_/, "", n) } /^\}/ { n = ""; next }
       /^[ \t]*(#|\/\/)/ { next }
-      { x = $0; gsub(/"?[$][{]?SRC[}]?"?\/[.][.]\//, "\001", x); gsub(/"?[$][{]?ROOT[}]?"?\//, "\001", x); gsub(/"?[$][{]?SRC[}]?"?\//, "\001conveyor/", x)
-        for (i = 1; i <= k; i++) while (lp[i] != "" && (j = index(x, lp[i]))) x = substr(x, 1, j - 1) substr(x, j + length(lp[i])) }
-      (root ? index(x, "\001" d) : index(x, d) || (g != "" && index(x, g))) { print (n == "" ? "-" : n) }' "$t" | LC_ALL=C sort -u)
+      { x = $0; under("SRC", src); under("ROOT", root); under("HERE", here)
+        while (match(x, /[^\/\001"\047 ]+\/[.][.]\//)) x = substr(x, 1, RSTART - 1) substr(x, RSTART + RLENGTH)
+        gsub(/[$][{]?[A-Za-z_][A-Za-z0-9_]*[}]?"?\//, "\002", x); cut("\002" d); if (g != "") cut("\002" g)
+        for (i = 1; i <= k; i++) cut(lp[i]) }
+      (top ? index(x, "\001" d) : index(x, d) || (g != "" && index(x, g))) { print (n == "" ? "-" : n) }' "$t" | LC_ALL=C sort -u)
     [ -n "$c" ] || continue
     case $t in
       conveyor/tests/*.test.sh) if grep -qx -- - <<<"$c"; then area[$t]=1; else for c in $c; do ccase[$c]=1; done; fi ;;

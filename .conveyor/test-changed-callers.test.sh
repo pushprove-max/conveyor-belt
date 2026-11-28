@@ -120,12 +120,22 @@ p_callerscomment() {
 # change to docs/page.md runs wdoc, the case of wdoc.test.sh that names its path, not the file's other cases, and
 # lists wall.test.mjs, which reads each page of the folder, not wnone.test.mjs, which names it in a comment, nor
 # wother.test.mjs, which names another page whose path ends with its path. A change to note.md, a page in the root,
-# runs wroot, which reads it from the checkout, not wscratch, which writes a note.md of its own scratch checkout.
+# runs wroot, which reads it from the checkout, not wscratch, which writes a note.md of its own scratch checkout, and
+# lists tool/wtool.test.sh, which reads it under the SRC it sets to the folder above its own. wscrpage writes a
+# docs/page.md of a scratch checkout: no mention. With passes on record, wpass.test.mjs, whose last pass read
+# docs/page.md, is listed, and wnopass.test.mjs, whose last pass did not, is not, though both name it in code. Bug
+# these catch: on card 1819, 4 test files that write a conveyor/README.md of their own scratch checkout were selected
+# for a change to the engine's, though the last pass of each names what it read, and not that page.
 p_doctests() {
   local g='*.md'
   cfix; mkdir -p "$R/docs" "$R/more/docs" "$R/.claude/scripts/__tests__"; echo page > "$R/docs/page.md"; echo other > "$R/more/docs/page.md"; echo note > "$R/note.md"
   printf '%s\n' 't_wdoc() {' '  grep -q page "$SRC/../docs/page.md"' '}' 't_wplain() {' '  :' '}' \
-    't_wroot() {' '  grep -q note "$SRC/../note.md"' '}' 't_wscratch() {' '  echo x > "$R/note.md"' '}' > "$R/conveyor/tests/wdoc.test.sh"
+    't_wroot() {' '  grep -q note "$SRC/../note.md"' '}' 't_wscratch() {' '  echo x > "$R/note.md"' '}' \
+    't_wscrpage() {' '  echo x > "$R/docs/page.md"' '}' > "$R/conveyor/tests/wdoc.test.sh"
+  mkdir -p "$R/tool" "$T/state"; printf '%s\n' 'SRC=$(cd "$(dirname "$0")/.." && pwd -P)' 'grep -q note "$SRC/note.md"' > "$R/tool/wtool.test.sh"
+  for g in wpass wnopass; do printf '%s\n' "test('p', () => read('docs/page.md'));" > "$R/.claude/scripts/__tests__/$g.test.mjs"; done; g='*.md'
+  printf '#!/usr/bin/env bash\n[ "${1:-}" != state-dir ] || echo "%s"\n' "$T/state" > "$R/conveyor/conveyor.sh"
+  printf 'h1\tc0\t.claude/scripts/__tests__/%s\n' $'wpass.test.mjs\tdocs/page.md\tlib/a.js' $'wnopass.test.mjs\tlib/a.js' > "$T/state/testpasses.tsv"
   echo '{"area": "w", "test": "wdoc.test.sh"}' >> "$R/.conveyor/engine-areas.json"
   printf '%s\n' "for (const p of glob('docs/$g')) test(p, () => {});" > "$R/.claude/scripts/__tests__/wall.test.mjs"
   printf '%s\n' '// docs/page.md is the guide' "test('z', () => {});" > "$R/.claude/scripts/__tests__/wnone.test.mjs"
@@ -135,6 +145,9 @@ p_doctests() {
   grep -qxF conveyor/tests/wdoc.test.sh "$T/list" && grep -qxF .claude/scripts/__tests__/wall.test.mjs "$T/list" && ! grep -qF -e wnone.test.mjs -e wother.test.mjs "$T/list" \
     && ok "a changed page lists the test files that name its path or its folder's pages" \
     || no "docs/page.md changed: the list is '$(paste -sd ' ' "$T/list" 2>&1)', want wdoc.test.sh and wall.test.mjs, not wnone.test.mjs or wother.test.mjs: $(cat "$T/out")"
+  grep -qxF .claude/scripts/__tests__/wpass.test.mjs "$T/list" && ! grep -qF wnopass.test.mjs "$T/list" \
+    && ok "a test file whose last pass did not read the changed page is not selected for naming it" \
+    || no "docs/page.md changed, passes on record: the list is '$(paste -sd ' ' "$T/list" 2>&1)', want wpass.test.mjs and not wnopass.test.mjs: $(cat "$T/out")"
   # <page>: the cases a one-file run of wdoc.test.sh runs for the change to it.
   onepage() {
     rm -rf "$T/log"; mkdir "$T/log"
@@ -147,6 +160,9 @@ p_doctests() {
   git -C "$R" checkout -q -- docs/page.md; echo more >> "$R/note.md"; got=$(onepage)
   [ "$got" = wroot ] && ok "a changed page in the root runs the case that reads it from the checkout, not one that writes its own" \
     || no "note.md changed, wdoc.test.sh run alone: it ran '$got', want wroot alone: $(cat "$T/out")"
+  (cd "$R" && CONVEYOR_TEST_LIST=$T/list bash .conveyor/test-changed.sh) > "$T/out" 2>&1
+  grep -qxF tool/wtool.test.sh "$T/list" && ok "a test file that reads the page under the variable it sets to a folder of the checkout is selected" \
+    || no "note.md changed: the list is '$(paste -sd ' ' "$T/list" 2>&1)', want tool/wtool.test.sh: $(cat "$T/out")"
 }
 
 for p in callers callersmany callerstop callersstartup callerstable callerscomment doctests; do part "$p"; done
