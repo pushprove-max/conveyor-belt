@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 120
+# timeout: 300
+# The limit is the whole file's in a card's test step (lib/fileeach.sh), and each of its 11 cases waits there for a test
+# slot of its own. They run in some 16 s one after another, but on a busy step the waits for slots took the file past
+# 120 s (times the load factor) with no case failed: all 3 flaky sightings were that time-out (#1772).
 # Engine cases: a Claude call that runs without the card settings (--setting-sources "" and no --settings) gets the
 # card settings' prompt cache lifetime, so it does not write its cache at the 1-hour price; a build session keeps the
 # value of its own settings file. The step line's cacheFirst (the cache read and write of a session's first answer) is
