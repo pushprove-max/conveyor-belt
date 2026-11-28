@@ -3,7 +3,8 @@
 # stop.sh state | reply -- the Foreman's Stop hooks (the Foreman session only; every other session passes).
 # state: while the open lines of the saved state ($FD/state.md: all but the '- DONE' items, with their indented lines,
 #   which the next start archives, archive.py) are over the cap (CAP in foreman.sh), the stop is blocked once with their size; the
-#   second stop (stop_hook_active) passes, so it never loops. A warning at startup alone was ignored. First, each stop
+#   second stop (stop_hook_active) passes, so it never loops. A warning at startup alone was ignored. So are open lines that wait
+#   on something that is over (overlines(): an issue no longer open, a path to remove that is gone), with each line and why. First, each stop
 #   sends the owner's profile items to the build hosts when they changed since last sent (`conveyor.sh auto send`); when
 #   that fails (a host not reached), the stop is blocked once with its error, so the owner is told.
 # reply: the turn's last reply (every text block after its last tool call or user entry, such as a refused stop's
@@ -44,6 +45,45 @@ block() {
   jq -cn --arg r "$1" '{decision: "block", reason: $r}'; exit 0
 }
 
+# overlines: of the open lines of state.md (stdin), each whose own words name a wait that is over, as `"<its first 50
+# characters>": <why>`, joined by "; "; nothing when none is. An issue it waits on ("after|once|when|until #<n>
+# lands|landed|closes|is closed", or "close #<n>") that no kept snapshot of this Foreman's records
+# ($FD/conveyor-snapshot-*.json, open.issues) holds open; a snapshot whose open.issues is empty holds none open, and with
+# no snapshot that has the list, no issue is judged. A path it says to remove ("remove [the] [worktree|clone|folder|file]
+# <path>") that is gone: from this machine, and from the host file's ssh target when it names one (askrun: the build
+# host's folders, /mnt/..., are not on this machine); when that host does not answer in 10 s, no path is judged.
+# Bug (the owner, 2026-11-27): finished items stayed open in state.md until it filled its cap again, as nothing but its
+# size was checked.
+overlines() {
+  local open l n p g c ids host gone='' asked=0 miss=() lost=() why=() res=()
+  open=$(cat)
+  # ids: "read" for each snapshot that has the list, then the issues it holds open; empty when no snapshot has it.
+  ids=$(jq -r '.open.issues | arrays | "read", (.[].issue? | numbers)' "$FD"/conveyor-snapshot-*.json 2>/dev/null)
+  rmpaths() { grep -oiE 'remove (the )?(worktree |clone |folder |file )?(~|/)[^ ,;:()]*' | awk '{print $NF}' | sed -e 's/[.]$//' -e "s#^~#$HOME#"; }
+  while IFS= read -r p; do [ -z "$p" ] || [ -e "$p" ] || miss+=("$p"); done < <(rmpaths <<<"$open" | sort -u)
+  host=$(host_ssh)
+  if [ ${#miss[@]} != 0 ] && [ -n "$host" ]; then
+    printf -v c '%q ' "${miss[@]}"
+    gone=$(ASK_LIMIT=10 askrun "for p in $c; do [ -e \"\$p\" ] || printf '%s\\n' \"\$p\"; done" 2>/dev/null) && asked=1
+  fi
+  for p in "${miss[@]}"; do
+    if [ -z "$host" ]; then lost+=("$p")
+    elif [ "$asked" = 1 ]; then ! grep -qxF -- "$p" <<<"$gone" || lost+=("$p"); fi
+  done
+  while IFS= read -r l; do
+    why=()
+    if [ -n "$ids" ]; then
+      for n in $(grep -oiE '(after|once|when|until|till) #[0-9]+ (lands|landed|closes|is closed)|close #[0-9]+' <<<"$l" | grep -oE '#[0-9]+' | tr -d '#' | sort -u); do
+        grep -qx "$n" <<<"$ids" || why+=("#$n is no longer open")
+      done
+    fi
+    while IFS= read -r p; do
+      for g in "${lost[@]}"; do [ "$g" != "$p" ] || why+=("$p is gone"); done
+    done < <(rmpaths <<<"$l" | sort -u)
+    [ ${#why[@]} = 0 ] || res+=("\"${l:0:50}\": $(printf '%s, ' "${why[@]}" | sed 's/, $//')")
+  done <<<"$open"
+  [ ${#res[@]} = 0 ] || printf '%s; ' "${res[@]}" | sed 's/; $//'
+}
 case ${1:-} in
   state)
     # An item the turn added to the owner's profile goes to the build hosts now (commands/auto.sh send), not at the next
@@ -56,9 +96,15 @@ case ${1:-} in
     cap=$(sed -n 's/^CAP=\([0-9][0-9]*\)[ ;].*/\1/p' "$(dirname "${BASH_SOURCE[0]}")/foreman.sh" 2>/dev/null)
     [ -n "$cap" ] || { echo "stop.sh: no CAP=<bytes> line in foreman.sh" >&2; exit 2; }
     # The same split archive.py makes: an item starts at a line beginning '- DONE', or beginning '- ' and ending ' - DONE', and runs over the indented lines after it.
-    n=$(LC_ALL=C awk '/^- DONE/ || /^- .* - DONE[ \t]*$/ { skip = 1; next } /^[ \t]/ { if (!skip) print; next } { skip = 0; print }' "$FD/state.md" 2>/dev/null | wc -c | tr -d ' ')
-    [ "${n:-0}" -gt "$cap" ] || exit 0
-    block "state.md has $n bytes of open lines, over its $cap-byte cap: begin the line of a finished item with '- DONE', as '- DONE 2026-11-21 08:20 ET: ...' (they are archived at the next start) and shorten the rest" ;;
+    ow='/^- DONE/ || /^- .* - DONE[ \t]*$/ { skip = 1; next } /^[ \t]/ { if (!skip) print; next } { skip = 0; print }'
+    open=$(LC_ALL=C awk "$ow" "$FD/state.md" 2>/dev/null)
+    n=$(LC_ALL=C awk "$ow" "$FD/state.md" 2>/dev/null | wc -c | tr -d ' ')
+    msg=''
+    [ "${n:-0}" -le "$cap" ] || msg="state.md has $n bytes of open lines, over its $cap-byte cap: begin the line of a finished item with '- DONE', as '- DONE 2026-11-21 08:20 ET: ...' (they are archived at the next start) and shorten the rest"
+    over=$(overlines <<<"$open")
+    [ -z "$over" ] || msg="${msg:+$msg. }These open lines of state.md wait on something that is over: $over. Do what each still owes now, then begin its line with '- DONE', or write in it what is still owed"
+    [ -z "$msg" ] || block "$msg"
+    exit 0 ;;
   reply) ;;
   *) echo "usage: stop.sh state | reply" >&2; exit 2 ;;
 esac

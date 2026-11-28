@@ -121,6 +121,59 @@ t_state_stop_cap() {
   out=$(echo '{"stop_hook_active": false}' | bash "$T/copy/conveyor/foreman/stop.sh" state)
   jq -e '.decision == "block" and (.reason | test("7000-byte cap"))' <<<"$out" >/dev/null || fail "8000 open bytes under CAP=7000 did not block with that cap: $out"
 }
+# Bug (the owner, 2026-11-27): only the size of state.md was checked, so finished items stayed open until it filled its cap
+# again. A line that waits on an issue no snapshot holds open, or says to remove a path that is gone, refuses the stop
+# once, naming the line and why; one whose wait still holds, a DONE item, and an issue with no snapshot to read, do not.
+# A snapshot whose open list is empty holds no issue open: the last issue to close was missed when it was read as none.
+t_state_stop_over() {
+  local out r gone close
+  CASE=state-stop-over
+  ready
+  mkdir -p "$T/keep"
+  jq -n '{open: {issues: [{issue: 7}]}}' > "$FD/conveyor-snapshot-alpha.json"
+  gone="- 2026-11-27 10:03 ET: OWED: remove $T/gone." close='- 2026-11-27 10:04 ET: OWED: close #9 once its fix is out.'
+  printf '%s\n' '- 2026-11-27 10:00 ET: OWED after #7 lands: check its readers.' '- 2026-11-27 10:01 ET: OWED after #8 lands: check the archive.' \
+    "- 2026-11-27 10:02 ET: OWED: remove worktree $T/keep once it lands." "$gone" "$close" '- DONE 2026-11-27 10:05 ET: close #10.' > "$FD/state.md"
+  out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state)
+  r=$(jq -r 'select(.decision == "block") | .reason' <<<"$out" 2>/dev/null)
+  grep -qF '"- 2026-11-27 10:01 ET: OWED after #8 lands: check ": #8 is no longer open' <<<"$r" \
+    || fail "state.md line [after #8 lands], #8 in no snapshot, did not refuse the stop with the line and why: $out"
+  grep -qF "\"${gone:0:50}\": $T/gone is gone" <<<"$r" || fail "state.md line [$gone], the path gone, did not refuse the stop with the line and why: $out"
+  grep -qF "\"${close:0:50}\": #9 is no longer open" <<<"$r" || fail "state.md line [$close], #9 in no snapshot, did not refuse the stop with the line and why: $out"
+  ! grep -qE "#7|#10|$T/keep" <<<"$r" || fail "state.md lines [after #7 lands] (#7 open), [remove worktree $T/keep] (it is there) or [- DONE ... close #10] were named: $r"
+  out=$(echo '{"stop_hook_active": true}' | bash "$SRC/stop.sh" state); [ -z "$out" ] || fail "the second stop was refused again: $out"
+  jq -n '{open: {issues: []}}' > "$FD/conveyor-snapshot-alpha.json"
+  echo '- 2026-11-27 10:00 ET: OWED after #7 lands: check its readers.' > "$FD/state.md"
+  out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state)
+  jq -e '.decision == "block" and (.reason | contains("#7 is no longer open"))' <<<"$out" >/dev/null \
+    || fail "state.md line [after #7 lands], with a snapshot of {open: {issues: []}}, did not refuse the stop: $out"
+  rm "$FD/conveyor-snapshot-alpha.json"
+  out=$(echo '{"stop_hook_active": false}' | bash "$SRC/stop.sh" state); [ -z "$out" ] || fail "state.md line [after #7 lands] was judged with no snapshot to read: $out"
+}
+# Bug: a path to remove is on the build host (askrun runs there over ssh), so one gone only here is not gone; and when
+# the host does not answer, the stop cannot know, so it judges no path. The ssh stub stands in for the host: it has
+# every path (no output), does not answer (255), or runs the check here, where the path is gone.
+t_state_stop_over_host() {
+  local out line
+  CASE=state-stop-over-host
+  ready
+  jq '.ssh = "example-host"' "$XDG_CONFIG_HOME/conveyor/host.json" > "$T/h" && mv "$T/h" "$XDG_CONFIG_HOME/conveyor/host.json"
+  # With an ssh target the records are on a host, so each stop sends them the owner's profile (auto send) through ask: here it is sent.
+  mkdir -p "$T/bin" "$T/ask" && : > "$T/ask/alpha" && : > "$T/ask/beta"
+  printf '#!/usr/bin/env bash\ncase $(cat %q) in all) exit 0 ;; down) exit 255 ;; *) exec bash -c "${*: -1}" ;; esac\n' "$T/hostmode" > "$T/bin/ssh" && chmod +x "$T/bin/ssh"
+  line="- 2026-11-27 10:03 ET: OWED: remove worktree $T/onhost."
+  echo "$line" > "$FD/state.md"
+  echo all > "$T/hostmode"
+  out=$(echo '{"stop_hook_active": false}' | PATH="$T/bin:$PATH" bash "$SRC/stop.sh" state)
+  [ -z "$out" ] || fail "state.md line [$line], the path gone here but on the build host, refused the stop: $out"
+  echo down > "$T/hostmode"
+  out=$(echo '{"stop_hook_active": false}' | PATH="$T/bin:$PATH" bash "$SRC/stop.sh" state)
+  [ -z "$out" ] || fail "state.md line [$line], the build host not answering, refused the stop: $out"
+  echo here > "$T/hostmode"
+  out=$(echo '{"stop_hook_active": false}' | PATH="$T/bin:$PATH" bash "$SRC/stop.sh" state)
+  jq -e --arg w "\"${line:0:50}\": $T/onhost is gone" '.decision == "block" and (.reason | contains($w))' <<<"$out" >/dev/null \
+    || fail "state.md line [$line], the path gone on the build host too, did not refuse the stop with the line and why: $out"
+}
 # lines <bytes> <prefix>: that many bytes of 50-byte lines (49 characters and a newline), each starting with prefix.
 lines() { local i l; for ((i = 0; i < $1 / 50; i++)); do l="$2 $i"; printf '%s%s\n' "$l" "$(head -c $((49 - ${#l})) /dev/zero | tr '\0' x)"; done; }
 
@@ -514,7 +567,7 @@ out=$(sess s5 | CONVEYOR_FOREMAN_WATCHERS="echo \$\$ > $T/w5" bash "$SRC/waiter.
 
 # Every case side by side (cases_side, at most 8 at a time), each in a subshell on its own fixture; each one's output
 # is shown once all have ended, and the test passes only when each case ran to its end.
-cases=(state_stop state_stop_done state_stop_done_end state_stop_cap reply_stop filing ask_pin ask_self session session_fork)
+cases=(state_stop state_stop_done state_stop_done_end state_stop_cap state_stop_over state_stop_over_host reply_stop filing ask_pin ask_self session session_fork)
 # The cases CONVEYOR_SHELL_TEST_CASE names (comma-separated), as the runner selects them; all of them with none set.
 SEL=${CONVEYOR_SHELL_TEST_CASE:-${cases[*]}}; SEL=${SEL//,/ }
 for one_case in $SEL; do case " ${cases[*]} " in *" $one_case "*) ;; *) echo "unknown case $one_case" >&2; exit 2 ;; esac; done

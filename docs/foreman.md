@@ -26,7 +26,9 @@ The Foreman keeps its saved state in `state.md`, in the Foreman's folder (`forem
 `conveyor.sh state-dir` prints). The line of a finished item starts with `- DONE`, and the next start moves those
 items to an archive file. The cap on the saved state counts only its open lines, not the `- DONE` items. When the open
 lines go over the cap, the first try to end the turn is refused, with a request to mark the finished items and make
-the rest shorter. The next try ends the turn.
+the rest shorter. The next try ends the turn. The same first try is refused when an open line waits on something that is over: an
+issue it waits on ("after #<n> lands", "close #<n>") that is no longer open, or a path it says to remove that is gone,
+on this machine and on the build host. The request names each line and why.
 
 Claude Code keeps the output of a hook over 10,000 characters out of the session. So the Foreman's start sends its text
 in two outputs, each kept short. The first holds the fixed text, the rules of auto mode, the standing kinds of routine,
