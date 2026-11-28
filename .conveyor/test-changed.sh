@@ -2397,8 +2397,10 @@ for t in "${order[@]}"; do
     marked "$t" || r=FAIL; metaran "$t" || r=FAIL
     [ -z "${etr[$t]:-}" ] || [ $r != ok ] || inputsof "$t" "${etr[$t]}" >> "$log"
   else
-    # Its CPU seconds are the shell's children's user and system times (`times`) after it, less those before: the
-    # file's process tree, each process counted as it is waited for.
+    # Its CPU seconds are those share_run measures of the file's own process tree (SHARE_CPU, .conveyor/test-share.sh:
+    # not the guard's, nor those of what this script starts around the file). A plugin test file, which more than one
+    # share_run runs, and a file that did not start: the shell's children's user and system times (`times`) after it,
+    # less those before, as before.
     # The parts of it the coverage map selected (covof), when nothing selected it whole, or the cases the one-file mode
     # runs of it (oparts): CONVEYOR_SHELL_TEST_CASE.
     # Each part it runs is logged as it starts (`TESTRUN case`), as an engine case file's cases are: the step's record
@@ -2409,6 +2411,9 @@ for t in "${order[@]}"; do
     # It runs under strace when this run traces (TRACE, inputsof above) and it runs whole (trc), but a plugin test file.
     tf=; [ ${#TRACE[@]} = 0 ] || [ -n "$p" ] || [[ $t == *.ts || $t == *.tsx ]] || { trc=1; tf=$o.trace; rm -f "$tf"; }
     echo "== $t${p:+ (parts: $p)}"; s=${EPOCHREALTIME/,/.}; times > "$o.cpu"; [[ $t != *.ts && $t != *.tsx ]] || nr=$o.tmp/p.noroom
+    rm -f "$o.fcpu"
+    # shellcheck disable=SC2034 # SHARE_CPU is read by share_run (.conveyor/test-share.sh)
+    { SHARE_CPU=; [[ $t == *.ts || $t == *.tsx ]] || SHARE_CPU=$o.fcpu; }
     # A meta-runner runs in its card mode (the pack's test.files cardMode, mk above): its own checks, with a stub in
     # place of the files it starts.
     case $t in
@@ -2421,12 +2426,14 @@ for t in "${order[@]}"; do
     esac 2>&1 | tee "$o"; st=${PIPESTATUS[0]}; [ "$st" = 0 ] || r=FAIL; [ "$st" != "$SHARE_NOSTART" ] || ns=1
     marked "$t" || r=FAIL; metaran "$t" || r=FAIL
     [ -z "$tf" ] || [ $r != ok ] || inputsof "$t" "$tf" >> "$log"; trc=
-    times >> "$o.cpu"
+    times >> "$o.cpu"; unset SHARE_CPU
     # Its own time and CPU seconds, for the times the loop records of a test file (conveyor/README.md, The test step); not
     # of a run of some of its parts, which is not the file's time.
     [ -n "$p" ] || printf 'TESTRUN sec\t%s\t%s\t%s\n' "$t" "$(awk -v a="$s" -v b="${EPOCHREALTIME/,/.}" 'BEGIN { printf "%.1f", b - a }')" \
-      "$(awk 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }
-        NR == 2 || NR == 4 { n[NR] = c($1) + c($2) } END { printf "%.1f", n[4] - n[2] }' "$o.cpu")" >> "$log"
+      "$(if [[ $(cat "$o.fcpu" 2>/dev/null) =~ ^[0-9]+\.[0-9]$ ]]; then cat "$o.fcpu"; else
+        awk 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }
+        NR == 2 || NR == 4 { n[NR] = c($1) + c($2) } END { printf "%.1f", n[4] - n[2] }' "$o.cpu"; fi)" >> "$log"
+    rm -f "$o.fcpu"
     [ -s "$nr" ] || [ -n "$ns" ] || ended "$t" $r "$o" "$p"
   fi
   # Bug #1662: a file that did not start for want of room in the temp space failed, and the engine marked main red on

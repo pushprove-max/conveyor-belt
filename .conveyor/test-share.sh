@@ -200,6 +200,12 @@ share_guard() {
 # tell such a file from one that failed: no command's exit is 75 here, as a command's own 75 is 1. A TERM, INT or HUP
 # to it is passed to the command, and the folder is still removed; a run stopped with KILL leaves the folder to its
 # caller's own temp folder, which <folder> is in. It runs in a subshell of its own, so its traps are not its caller's.
+# SHARE_CPU, when the caller names a file in it: the CPU seconds (user plus system, one decimal) of the command and
+# all it started, written there: this subshell's children's times (`times`) when the command has ended, less those
+# before it started. The guard is not in them: it still runs then, and a child's time is counted when it is waited
+# for. Bug: the caller took the time from its own children's times around this call, so the guard's `du` and `sleep`
+# every 0.1 s of clock time, and this function's own `du` and `find`, were counted as the file's: a file's CPU
+# seconds rose with its clock time and with the host's load (a start-up that burns 0.6 CPU s was timed 0.8 to 0.9).
 SHARE_NOSTART=75
 share_run() (
   local label=$1 ft=$2 g c='' k st o f pr; shift 2
@@ -209,10 +215,14 @@ share_run() (
     { echo "$label did not start: $SHARE_WHY" > "$ft.noroom"; } 2>/dev/null && return 1; return "$SHARE_NOSTART"; }
   trap '[ -z "$c" ] || kill -TERM "$c" 2>/dev/null' TERM INT HUP
   share_guard "$ft" "$ft.pid" "$ft.over" > /dev/null 2>&1 < /dev/null & g=$!
+  [ -z "${SHARE_CPU:-}" ] || times > "$ft.cpu"
   ( echo "$BASHPID" > "$ft.pid"; ulimit -f "$LIMKB" 2>/dev/null; export TMPDIR=$ft
     if [ "$(type -t "$1")" = function ]; then "$@"; else exec "$@"; fi ) & c=$!
   # A wait a signal cut short is waited again until the command has ended.
   while wait "$c"; st=$?; kill -0 "$c" 2>/dev/null; do :; done
+  [ -z "${SHARE_CPU:-}" ] || { times >> "$ft.cpu"
+    awk 'function c(x, a) { sub(/s$/, "", x); split(x, a, "m"); return a[1] * 60 + a[2] } { gsub(/,/, ".") }
+      NR == 2 || NR == 4 { n[NR] = c($1) + c($2) } END { printf "%.1f\n", n[4] - n[2] }' "$ft.cpu" > "$SHARE_CPU"; rm -f "$ft.cpu"; } 2>/dev/null
   [ "$st" != "$SHARE_NOSTART" ] || st=1
   kill "$g" 2>/dev/null; wait "$g" 2>/dev/null
   k=$(du -sk "$ft" 2>/dev/null | cut -f1); [ ! -s "$ft.over" ] || read -r k < "$ft.over"
