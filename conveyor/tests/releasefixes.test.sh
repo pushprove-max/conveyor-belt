@@ -176,7 +176,7 @@ t_relfixesclosed() {
 # Bug it catches: the owner stopped the wait of the red run (waitStopped) while its record listed fix #20 open; #20
 # then landed, but relfixes() no longer read a stopped run, so the record (and the Board's fix list) kept #20 open for
 # good. The list is written again with #20 landed, and the run, its one fix landed at origin's head, still does not start.
-t_relfixesstopped() {
+t_relfixesstoppedlands() {
   setup "$(fixissue 20 11 OPEN 'Release fix: 1.1.0' | jq -s .)"
   fixred; jq -c '.waitStopped = "2026-11-19T11:30:00Z" | .fixes = [{issue: 20, state: "open"}]' "$RUN" > "$RUN.x" && mv "$RUN.x" "$RUN" \
     && landed 20 | jq -c --arg s "$(git -C "$R" rev-parse HEAD)" '.sha = $s' >> "$ST/cards.jsonl" || fail "the fixture could not be made"

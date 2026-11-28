@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# fnclash.sh <file>...: each function name that more than one of the shell files defines at the top level, one line
-# each, `<name>: <file> <file>...` (file names without their folder), sorted; exit 1 when there is one, 2 when a file
+# fnclash.sh <file>...: each function name the shell files define at the top level more than once, in two files or
+# twice in one, one line each, `<name>: <file> <file>...` (file names without their folder, a file once per
+# definition), sorted; exit 1 when there is one, 2 when a file
 # cannot be read. The engine's test runner (conveyor.test.sh) loads lib.sh and every tests/*.test.sh into one shell, so
 # a second definition of a name replaces the first, and the cases of the first file run the other file's function.
+# A case defined twice in one file runs once, as its second, and the runner counts one case more than it runs, so a
+# run of every case is not taken for a whole-suite run (releasefixes.test.sh's t_relfixesstopped, ff95d35c2).
 # The body of a heredoc is a script written to a file, not a definition of the shell, and is skipped.
 set -uo pipefail
 [ $# -gt 0 ] || { echo "usage: fnclash.sh <file>..." >&2; exit 2; }
@@ -14,7 +17,7 @@ out=$(awk '
   {
     if (match($0, /^(function[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/)) {
       n = substr($0, 1, RLENGTH); sub(/^function[ \t]+/, "", n); sub(/[ \t]*\(\)$/, "", n)
-      if (!((n, f) in seen)) { seen[n, f] = 1; files[n] = files[n] " " f; count[n]++ }
+      files[n] = files[n] " " f; count[n]++
     }
     s = $0
     while ((i = index(s, "<<")) > 0) {

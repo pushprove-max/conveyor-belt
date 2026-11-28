@@ -54,7 +54,9 @@ t_testcountinner() {
 # Bug (#35): releaserun.test.sh defined reusesetup(), the name of batchreuse.test.sh's fixture. The runner loads every
 # case file into one shell, so the later definition replaced the batch one, and four batchreuse cases failed on main.
 # tools/fnclash.sh fails on a fixture of two case files that both define helperx(), and names both files and helperx;
-# a definition inside a heredoc (a script a case writes) is not one. The files the runner loads pass it.
+# a definition inside a heredoc (a script a case writes) is not one. A file that defines t_twice() twice fails it too:
+# the runner ran the second alone and took a run of every case for less than whole (ff95d35c2). The files the runner
+# loads pass it.
 t_casefnclash() {
   local d=$T/$CASE/fx out
   mkdir -p "$d" || fail "the fixture could not be made"
@@ -62,5 +64,8 @@ t_casefnclash() {
   printf '%s\n' 'helperx() { echo two; }' 'only2() { :; }' 'cat > y <<-EOF' 'only() { :; }' '	EOF' 'only2x() { :; }' > "$d/two.test.sh"
   out=$(bash "$SRC/tools/fnclash.sh" "$d/one.test.sh" "$d/two.test.sh" 2>&1); [ $? = 1 ] && [ "$out" = "helperx: one.test.sh two.test.sh" ] \
     || fail "two case files that both define helperx() were not named as a clash: $out"
-  out=$(bash "$SRC/tools/fnclash.sh" "$SRC/tests/lib.sh" "$SRC"/tests/*.test.sh 2>&1) || fail "two files the runner loads define one function: $out"
+  printf '%s\n' 't_twice() { :; }' 't_twice() { echo second; }' > "$d/three.test.sh"
+  out=$(bash "$SRC/tools/fnclash.sh" "$d/three.test.sh" 2>&1); [ $? = 1 ] && [ "$out" = "t_twice: three.test.sh three.test.sh" ] \
+    || fail "a case file that defines t_twice() twice was not named as a clash: $out"
+  out=$(bash "$SRC/tools/fnclash.sh" "$SRC/tests/lib.sh" "$SRC"/tests/*.test.sh 2>&1) || fail "a function is defined twice in the files the runner loads: $out"
 }
