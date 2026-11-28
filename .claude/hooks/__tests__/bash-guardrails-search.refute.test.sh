@@ -7,8 +7,9 @@ set -u
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/bash-guardrails.sh"
 PASS=0 FAIL=0
 # A log directory with no checkout in it. The real /tmp/conveyor can hold git
-# clones, and a folder holding one is rightly refused as a repo walk.
-LOGS=$(mktemp -d); trap 'rm -rf "$LOGS"' EXIT
+# clones, and a folder holding one is rightly refused as a repo walk. Under /tmp, the scratch space the hook knows
+# (bash-guardrails.sh), not under $TMPDIR: a TMPDIR under $HOME is no scratch space, and its searches are rewritten.
+LOGS=$(mktemp -d /tmp/pp-search-logs.XXXXXX); trap 'rm -rf "$LOGS"' EXIT
 . "$(dirname "${BASH_SOURCE[0]}")/lib/said.sh" # a FAIL line names the hook's last input (json notes each payload)
 # Every case below runs from a throwaway MAIN checkout: a worker pane's unbounded path is rewritten (last section),
 # main's is refused, and these cases pin the refusal.

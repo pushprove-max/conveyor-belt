@@ -6,7 +6,10 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 . "$SRC/lib/portable.sh"; p_tools
 # wait_until: a case waits for a condition, never a set time (wait.sh).
 . "$SRC/tests/wait.sh"
-T=$(mktemp -d); trap 'chmod -R u+w "$T"; rm -rf "$T"' EXIT # u+w: the installs are read-only
+# The cases' folder: in TMPDIR, but under /tmp when TMPDIR is under $HOME. The cases write their folder into tracked
+# files and run the privacy check on them, which names a home path (checkblock, relreuseset failed so).
+case ${TMPDIR:-/tmp}/ in "$HOME"/*) T=$(mktemp -d /tmp/tmp.XXXXXXXXXX) ;; *) T=$(mktemp -d) ;; esac
+trap 'chmod -R u+w "$T"; rm -rf "$T"' EXIT # u+w: the installs are read-only
 # Git reaches only the scratch folder's repos (lib/gitfence.sh): under the GIT_DIR `git bisect run` exports, the
 # fixture's `git -C "$R" init`, `commit -qm init` and `git init --bare .../origin` (fixture(), below) worked on the
 # checkout the run was started in. Each case starts in its own folder, $T/$CASE (case_keep). With no fence (gitfence()
