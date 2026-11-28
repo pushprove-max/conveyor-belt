@@ -22,6 +22,7 @@ conveyor/lib/claim.sh	settle
 conveyor/lib/control.sh
 conveyor/lib/control.sh	control
 conveyor/lib/install.sh	installservice
+conveyor/lib/prompts.sh
 conveyor/lib/push.sh
 conveyor/lib/session.sh	watch
 conveyor/lib/setup.sh
@@ -30,6 +31,9 @@ conveyor/lib/setup.sh	setup
 conveyor/lib/snapshot.sh
 conveyor/lib/snapshot.sh	snapshot
 conveyor/lib/testfiles.sh	testspart
+conveyor/lib/testlist.sh
+conveyor/lib/testrun.sh
+conveyor/lib/testrun.sh	listcmd
 conveyor/lib/testrun.sh	tests
 conveyor/lib/views.sh	health
 conveyor/tests/kept.test.sh	t_keptgate

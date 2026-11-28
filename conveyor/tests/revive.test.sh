@@ -67,8 +67,8 @@ t_gonetest() {
   # The card's files run side by side on free slots (lib/fileeach.sh): b.test.sh's first run waits, before anything
   # else, until the run has logged a.test.sh's pass, so the stop below finds a.test.sh passed, and the count n is not
   # raced, however many slots the run gets.
-  cat > "$STUB/test-cmd" <<'EOF'
-[ "$CONVEYOR_TEST_FILE" = a.test.sh ] || [ -e "$STUB/tested" ] || until grep -qxF -- '-- ok a.test.sh' "$CONVEYOR_TEST_LOG/files" 2>/dev/null; do sleep 0.1; done
+  wait_fn > "$STUB/test-cmd"; cat >> "$STUB/test-cmd" <<'EOF'
+[ "$CONVEYOR_TEST_FILE" = a.test.sh ] || [ -e "$STUB/tested" ] || wait_poll grep -qsxF -- '-- ok a.test.sh' "$CONVEYOR_TEST_LOG/files"
 n=$(( $(cat "$STUB/n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB/n"; cp "${CONVEYOR_TEST_RERUN:-/dev/null}" "$STUB/rerun.$n"
 echo "$n $CONVEYOR_TEST_FILE" >> "$STUB/ran"
 [ "$CONVEYOR_TEST_FILE" = a.test.sh ] || [ -e "$STUB/tested" ] || { : > "$STUB/tested"; exec sleep 600; } # sleep: a test the machine stops

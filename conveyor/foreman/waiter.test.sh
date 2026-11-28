@@ -8,6 +8,11 @@
 set -uo pipefail
 SRC=$(cd "$(dirname "$0")" && pwd -P)
 . "$SRC/../tests/wait.sh"
+# hold <condition>: the text of a stand-in's wait for as long as <condition> holds, with a check every 0.1 s. A stand-in
+# that the test never lets go ends at the ceiling of the tests' wait (WAIT_CEILING, 120 s: ../tests/wait.sh) times the
+# run's load factor: with no ceiling it ran on until a limit outside the test ended it.
+HOLD=$(awk -v c="${WAIT_CEILING:-120}" -v f="${CONVEYOR_LOAD_FACTOR:-1}" 'BEGIN { x = c * f; print (x == int(x)) ? x : int(x) + 1 }')
+hold() { echo "i=0; while $1; do [ \$((i += 1)) -le $((HOLD * 10)) ] || exit 1; sleep 0.1; done"; }
 B=$(mktemp -d); trap 'rm -rf "$B"' EXIT
 cd "$B" || exit 1
 unset CONVEYOR_FOREMAN_ASK CONVEYOR_FOREMAN_LAUNCH CONVEYOR_MAIN CLAUDE_PROJECT_DIR CONVEYOR_FOREMAN_DOWN CONVEYOR_FOREMAN_END CONVEYOR_FOREMAN_STOP CONVEYOR_FOREMAN_WATCHERS
@@ -24,7 +29,7 @@ fixture() { # <case>
   sleep 600 & SP=$! # sleep: the stand-in for the session's process, ended with the case
   export CONVEYOR_FOREMAN_SESSION_PID=$SP
   trap 'kill $SP 2>/dev/null' EXIT
-  W="echo \$\$ >> $T/starts; while [ ! -e $T/go ]; do sleep 0.1; done; mv $T/go $T/took.\$\$ && . $SRC/lib.sh && pending_put < $T/took.\$\$" # sleep: the stand-in watcher's poll
+  W="echo \$\$ >> $T/starts; $(hold "[ ! -e $T/go ]"); mv $T/go $T/took.\$\$ && . $SRC/lib.sh && pending_put < $T/took.\$\$" # the stand-in watcher's poll
 }
 put() { printf '%s\n' "$1" > "$T/go.new" && mv "$T/go.new" "$T/go"; } # <text>: the stand-in watcher's next find
 stop() { echo '{}' | CONVEYOR_FOREMAN_WATCHERS=${1:-$W} bash "$SRC/waiter.sh" 2> "$T/wake" > /dev/null; } # [<watchers>]: a stop, the Stop hook to its end
@@ -156,7 +161,7 @@ second() { sleep 600 & SP2=$!; trap 'kill $SP2 2>/dev/null' EXIT; } # sleep: the
 # (CONVEYOR_FOREMAN_LOOK=600), the waiter ends only once the watcher has polled.
 t_goneblock() {
 fixture goneblock; belt
-export CONVEYOR_FOREMAN_ASK="touch $T/asked; while [ ! -e $T/gate ]; do sleep 0.1; done; cat $T/snap" # sleep: the gate's poll
+CONVEYOR_FOREMAN_ASK="touch $T/asked; $(hold "[ ! -e $T/gate ]"); cat $T/snap"; export CONVEYOR_FOREMAN_ASK # the gate's poll
 echo '{}' | CONVEYOR_FOREMAN_LOOK=600 CONVEYOR_FOREMAN_WATCHERS=$BW bash "$SRC/waiter.sh" 2> "$T/wake" > /dev/null & sw=$!
 wait_until "[ -e $T/asked ]" || fail "the watcher never read the snapshot"
 ended; blocked 255; touch "$T/gate"
@@ -553,7 +558,7 @@ CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" = health ] || exit 3; echo "{\"blocked\"
 # stale <exit>: a watcher that puts a wake of alpha's #7 blocked, which health (staleask) no longer holds, waits
 # until the stop's freshness check takes it out at a poll (it runs on while the waiter drops its wake, as a watcher of
 # several projects does), then exits with <exit>.
-stale() { echo "echo \$\$ >> $T/starts; . $SRC/lib.sh && printf '%s\n' 'Conveyor: alpha: blocked: #7' 'alpha: #7 is blocked since 2026-11-19T09:58:00Z: tests failed' | pending_put; while compgen -G \"$FD/pending/*-\$\$-*.wake\" > /dev/null; do sleep 0.1; done; exit $1"; } # sleep: a wait for the waiter's poll to take the wake out
+stale() { echo "echo \$\$ >> $T/starts; . $SRC/lib.sh && printf '%s\n' 'Conveyor: alpha: blocked: #7' 'alpha: #7 is blocked since 2026-11-19T09:58:00Z: tests failed' | pending_put; $(hold "compgen -G \"$FD/pending/*-\$\$-*.wake\" > /dev/null"); exit $1"; } # a wait for the waiter's poll to take the wake out
 staleask() { mkdir -p "$XDG_CONFIG_HOME/conveyor" "$T/alpha"; jq -n --arg m "$T/alpha" '{records: [{repo: "alpha", main: $m}]}' > "$XDG_CONFIG_HOME/conveyor/host.json"; export CONVEYOR_FOREMAN_ASK='[ "$CONVEYOR_CMD" = health ] && echo "{\"blocked\": []}"'; }
 # Bug caught (issue 1659): the stop's waiter counted a watcher that put a wake (exit 0) toward WATCHER DOWN when the
 # freshness check took that wake out as stale, so a watcher that put 4 stale wakes in an hour was set down as dead;
@@ -586,7 +591,7 @@ stop "$(stale 1)"; rc=$?
 t_stalerace() {
 fixture stalerace; staleask
 local r d n=0 first
-r="echo \$\$ >> $T/starts; n=\$(wc -l < $T/starts); [ \$n -lt 5 ] || exec sleep 600; [ \$n = 1 ] || exit 1; until pgrep -P \$PPID -xf 'sleep 5' > /dev/null; do sleep 0.1; done; . $SRC/lib.sh && printf '%s\n' 'Conveyor: alpha: blocked: #7' 'alpha: #7 is blocked since 2026-11-19T09:58:00Z: tests failed' | pending_put" # sleep: a wait for the waiter's 5 s pause before it starts D again
+r="echo \$\$ >> $T/starts; n=\$(wc -l < $T/starts); [ \$n -lt 5 ] || exec sleep 600; [ \$n = 1 ] || exit 1; $(hold "! pgrep -P \$PPID -xf 'sleep 5' > /dev/null"); . $SRC/lib.sh && printf '%s\n' 'Conveyor: alpha: blocked: #7' 'alpha: #7 is blocked since 2026-11-19T09:58:00Z: tests failed' | pending_put" # sleep: a wait for the waiter's 5 s pause before it starts D again
 while :; do
   d="[ -e $T/died ] || { touch $T/died; exit 1; }; sleep 600 # $n" # sleep: a watcher that finds nothing once it died
   first=$(bash -c 'declare -A C=() P=(); C[$1]=1; C[$2]=1; for k in "${!C[@]}"; do P[$k]=1; done; for k in "${!P[@]}"; do printf "%s" "$k"; break; done' _ "$r" "$d")

@@ -17,7 +17,9 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # script prints the command and exits 1, so a hold the case never lets go fails with what it waited for: a loop of
 # the script's own (`until [ -e <file> ]; do sleep 0.1; done`) runs until a limit outside the test ends it, and the
 # pack's lint (.conveyor/lint-poll.sh) fails it. The text is one line with no single quote and no backslash: it
-# stands in quoted text, and in an argument of printf or sed. It is here, with its case (t_waitpoll), and each case
+# stands in quoted text, and in an argument of printf or sed. A case whose command must run in its own shell (one
+# that takes a lock or a slot: wait_until runs its condition in a shell of its own, which would take it and lose it)
+# makes wait_poll there with `eval "$(wait_fn)"`. It is here, with its case (t_waitpoll), and each case
 # has it, as the runner sources every case file before it runs a case: wait.sh is in the map's area core, and a
 # change to it runs every engine case.
 wait_fn() {

@@ -33,7 +33,10 @@ echo "$*" >> "${0%/*}/../asked"
 # Admitted: the receipt, of the project's own record (its id file), then the run or check goes on while $T/hold is there.
 if [ "$3" = arms ]; then shift 4; [ "$1" != --settings ] || shift 2; for a; do echo "$a: checking k-$(cat "$CONVEYOR_MAIN/id")"; done
 else echo "conveyor: run $(cat "$CONVEYOR_MAIN/id") started"; fi
-while [ -e "${0%/*}/../../hold" ]; do sleep 0.1; done
+# The hold ends at the ceiling of the tests' wait (WAIT_CEILING, 120 s, times the run's load factor) and says so: with
+# no ceiling, a hold the test never took away ran until a limit outside the test ended it.
+n=$(awk -v c="${WAIT_CEILING:-120}" -v f="${CONVEYOR_LOAD_FACTOR:-1}" 'BEGIN { printf "%d", c * f * 10 + 0.999 }'); i=0
+while [ -e "${0%/*}/../../hold" ]; do [ $((i += 1)) -le "$n" ] || { echo "conveyor: the hold is still there after $((n / 10)) s" >&2; exit 1; }; sleep 0.1; done
 EOF
 # One machine's host file (dashboard-server-onemachine.test.sh), for Compare sent over POST /control; a second project,
 # other, whose record is its own checkout.

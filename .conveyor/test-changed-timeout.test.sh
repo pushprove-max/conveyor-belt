@@ -58,6 +58,7 @@ N=24 NEED=60 MAXR=5 began=0 round=0
 [ "$(awk '/^TracerPid:/ { print $2 }' /proc/self/status 2>/dev/null)" -gt 0 ] 2>/dev/null && N=6 MAXR=20
 while [ "$began" -lt $NEED ] && [ $round -lt $MAXR ] && [ $fails = 0 ]; do
   ks=$(seq $((round * N + 1)) $((round * N + N))); round=$((round + 1))
+  # shellcheck disable=SC2167 # the k of fileeach.sh is set in the subshell that sources it, below
   for k in $ks; do
     cp -a "$R" "$T/r$k" && mkdir -p "$T/log$k/checks" && echo conveyor/tests/a.test.sh > "$T/list$k" \
       && cp "$T/checks.out" "$T/log$k/checks/$key.out" && cp "$T/checks.rc" "$T/log$k/checks/$key.rc" || { no "the copy $k of the scratch repo"; break; }

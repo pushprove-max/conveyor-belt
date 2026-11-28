@@ -83,7 +83,7 @@ t_bugpasses() {
 # t_bughungdefault): the result names a.test.sh as timed out at 1 s, not 15 s, and it counts as failing without the
 # fix (the check holds).
 t_bughung() {
-  TUNE='.tunables.testTimeout = 15' bugtest $'# timeout: 1\nuntil grep -qx two a.txt; do sleep 0.2; done' # sleep: the new test's own wait, which never ends on main's code
+  TUNE='.tunables.testTimeout = 15' bugtest $'# timeout: 1\n'"$(wait_fn)"$'\nwait_poll grep -qx two a.txt' # the new test's own wait, which goes on past its limit on main's code
   hungsaid 1 'it was stopped there' 124 # 124: a file past its own limit ends the run as timed out (filecmd())
 }
 # The checks of t_bughung and t_bughungdefault: the result says a.test.sh timed out at <seconds> (the output's line
@@ -100,7 +100,7 @@ hungsaid() { # <seconds> <stop> <exit>
 # 2 s here) with nothing naming it, so the run gave no failing file and did not count as proof; the card went back to
 # build. The file is named as stopped by the run's testTimeout limit and counts as failing without the fix.
 t_bughungdefault() {
-  TUNE='.tunables.testTimeout = 2' bugtest 'until grep -qx two a.txt; do sleep 0.2; done' # sleep: the new test's own wait, which never ends on main's code
+  TUNE='.tunables.testTimeout = 2' bugtest "$(wait_fn)"$'\nwait_poll grep -qx two a.txt' # the new test's own wait, which goes on past its limit on main's code
   grep -qE "^conveyor: a\.test\.sh timed out: the run's time limit, 2 s \(testTimeout\), stopped the run after the file ran [0-2] s$" "$FXWT.unfixed" \
     && grep -q "^The run failed there (exit 124): at least one fails without the fix" "$FXWT.unfixed" \
     && grep -qE "^a\.test\.sh timed out: the run's time limit, 2 s, stopped it after it ran [0-2] s\. A test that hangs without the fix counts as failing without it\.$" "$FXWT.unfixed" \

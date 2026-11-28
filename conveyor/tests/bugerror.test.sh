@@ -47,7 +47,7 @@ t_bugcmdexit() {
 # a run with no result for the file, as noresult() sees no result for a timed out file, so the build never heard that its
 # test fails for another reason. The check fails with NOTBUG (exit 1), as for any other failure without the error.
 t_bugerrorhung() {
-  TUNE='.tunables.testTimeout = 15' bugerr $'Bug error: index out of range' $'# timeout: 1\nuntil grep -qx two a.txt; do sleep 0.2; done' # sleep: the new test's own wait, which never ends on main's code
+  TUNE='.tunables.testTimeout = 15' bugerr $'Bug error: index out of range' $'# timeout: 1\n'"$(wait_fn)"$'\nwait_poll grep -qx two a.txt' # the new test's own wait, which goes on past its limit on main's code
   notbug 'does not hold "index out of range"'
 }
 

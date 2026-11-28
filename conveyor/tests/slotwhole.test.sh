@@ -65,7 +65,7 @@ wholeorder() { # <pool size>
 # <name>.wait on each look, as a card's runner does. The slot outlives the runner until told (<name>.free), as a
 # card's step holds its slot around its runner.
 cardrun() { # <name>
-  ( slot_pool && until slot_try; do sleep 0.1; done; : > "$d/$1.slot"
+  ( slot_pool && eval "$(wait_fn)" && wait_poll slot_try; : > "$d/$1.slot"
     wait_until "[ -e '$d/$1.ask' ]" || exit 1
     ( export CONVEYOR_TEST_SLOT=$SLOT_FD CONVEYOR_TEST_TURNWAIT=$d/$1.wait; slot_pool && [ -n "$SLOT_HOME" ] && slot_whole 2> "$d/$1.err" || exit 1; : > "$d/$1.on"
       wait_until "[ -e '$d/$1.go' ]" ); : > "$d/$1.ran"
@@ -130,7 +130,7 @@ t_slotwholeyield() {
   local d=$T/$CASE w
   slotpool 2; mkdir -p "$d/slots/whole"; unset CONVEYOR_TEST_WHOLE CONVEYOR_TEST_TURNWAIT
   cardrun E; wait_until "[ -e '$d/E.slot' ]" || fail "a card did not get a slot"
-  ( slot_pool && until slot_try; do sleep 0.1; done; : > "$d/P.slot"; wait_until "[ -e '$d/P.free' ]" ) &
+  ( slot_pool && eval "$(wait_fn)" && wait_poll slot_try; : > "$d/P.slot"; wait_until "[ -e '$d/P.free' ]" ) &
   wait_until "[ -e '$d/P.slot' ]" || { : > "$d/E.free"; wait; fail "a second card did not get a slot"; }
   ( exec {w}>>"$d/slots/whole/1"; flock "$w"; echo w1 > "$d/slots/whole/1"; : > "$d/W.held"
     wait_until "[ -e '$d/W.go' ]" ) &

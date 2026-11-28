@@ -23,8 +23,13 @@ FD=$CONVEYOR_FOREMAN_DIR
 mkdir -p "$XDG_CONFIG_HOME" "$HOME" "$FD" || fail "the fixture was not made"
 sleep 600 & SP=$! # sleep: the stand-in for the session's process, ended with the test
 export CONVEYOR_FOREMAN_SESSION_PID=$SP
+# hold <condition>: the text of a stand-in's wait for as long as <condition> holds, with a check every 0.1 s. A stand-in
+# that the test never lets go ends at the ceiling of the tests' wait (WAIT_CEILING, 120 s: ../tests/wait.sh) times the
+# run's load factor: with no ceiling it ran on until a limit outside the test ended it.
+HOLD=$(awk -v c="${WAIT_CEILING:-120}" -v f="${CONVEYOR_LOAD_FACTOR:-1}" 'BEGIN { x = c * f; print (x == int(x)) ? x : int(x) + 1 }')
+hold() { echo "i=0; while $1; do [ \$((i += 1)) -le $((HOLD * 10)) ] || exit 1; sleep 0.1; done"; }
 # Stand-in watcher <name>: notes its start, waits for $T/go, puts one wake, then waits for $T/out.<name> and exits 0.
-w() { echo "n=$1; echo \$\$ >> $T/starts; while [ ! -e $T/go ]; do sleep 0.1; done; . $SRC/lib.sh && echo \"Alert: \$n\" | pending_put && echo \$\$ >> $T/put; while [ ! -e $T/out.\$n ]; do sleep 0.1; done; echo \$\$ >> $T/exited"; } # sleep: the watcher's poll
+w() { echo "n=$1; echo \$\$ >> $T/starts; $(hold "[ ! -e $T/go ]"); . $SRC/lib.sh && echo \"Alert: \$n\" | pending_put && echo \$\$ >> $T/put; $(hold "[ ! -e $T/out.\$n ]"); echo \$\$ >> $T/exited"; } # the watcher's poll
 n() { cat "$T/$1" 2>/dev/null | wc -l | tr -d ' '; } # <file>: its lines
 echo '{}' | CONVEYOR_FOREMAN_WATCHERS="$(w a)"$'\n'"$(w b)" bash "$SRC/waiter.sh" --check > /dev/null 2>&1
 for r in 1 2 3 4; do

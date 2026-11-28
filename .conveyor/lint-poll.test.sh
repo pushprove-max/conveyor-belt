@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # The pack's lint command for a test's wait with no ceiling (lint-poll.sh): a card that brings back
 # `until [ -e <file> ]; do sleep 0.1; done` in a test, or in a script a test writes (issue 1840: a fixture whose file
-# never came held a proof run for 35 minutes, until it was stopped by hand), must be a finding the engine reads; a wait
-# that ends (wait_until, wait_poll, a second condition, a count, a timeout around it) and a comment must not; and the
-# test files the pack gives the command must pass.
+# never came held a proof run for 35 minutes, until it was stopped by hand), or a wait of that kind for a file to go
+# or for a command (`while [ -e <file> ]`, `until mkdir <lock>`), must be a finding the engine reads; a wait that ends
+# (wait_until, wait_poll, a second condition, a count, a timeout around it), a wait on the clock, a stand-in with no
+# condition and a comment must not; and the test files the pack gives the command must pass.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
@@ -14,27 +15,32 @@ no() { n=$((n + 1)); bad=1; echo "not ok $n - $1"; }
 run() { rc=0; out=$(cd "$T" && bash "$HERE/lint-poll.sh" "$@" 2>&1) || rc=$?; }
 printf '%s\n' 'until [ -e "$T/up" ]; do sleep 0.1; done' '( flock 9 && while [ ! -s "$T/pid" ]; do sleep 0.05; done ) 9>> "$T/lock" &' \
   "printf '%s\\n' 'until [ -e \"\$1\" ]; do sleep 0.1; done' > \"\$T/session\"" "hook='#!/usr/bin/env bash\\nuntil [ -e %q/end ]; do sleep 0.05; done\\n'" \
-  'until [[ -f $T/x ]]; do' '  sleep 1 # sleep: the pause' 'done' 'while ! test -e "$T/y"; do sleep 1; done' > "$T/bad.sh"
+  'until [[ -f $T/x ]]; do' '  sleep 1 # sleep: the pause' 'done' 'while ! test -e "$T/y"; do sleep 1; done' \
+  'while [ -e "$T/hold" ]; do sleep 0.1; done' 'until mkdir "$T/lock" 2>/dev/null; do sleep 0.05; done' \
+  'until grep -qx two "$T/a.txt" > /dev/null 2>&1; do sleep 0.2; done' '( slot_pool && until slot_try; do sleep 0.1; done; : > "$T/slot" ) &' > "$T/bad.sh"
 printf '%s\n' "wait_until '[ -e \"\$T/up\" ]' || fail \"not up\"" '# until [ -e "$T/up" ]; do sleep 0.1; done' \
   'until [ -e "$T/up" ] || ! kill -0 "$pid"; do sleep 0.1; done' 'i=0; until [ -e "$T/up" ]; do [ $((i += 1)) -le 100 ] || exit 1; sleep 0.1; done' \
   'until [ -e "$T/up" ]; do sleep 0.1; kill -0 "$pid" || exit 1; done' "timeout 20 bash -c 'until [ -e \"\$1\" ]; do sleep 0.05; done' _ \"\$T/up\" || exit 1" \
-  "printf '%s\\n' \"\$(wait_fn)\" 'wait_poll [ -e \"\$1\" ]' > \"\$T/session\"" > "$T/good.sh"
+  "printf '%s\\n' \"\$(wait_fn)\" 'wait_poll [ -e \"\$1\" ]' > \"\$T/session\"" \
+  'while :; do sleep 1; done' 'until [ "${EPOCHREALTIME: -6}" -lt 300000 ]; do sleep 0.05; done' 'while [ "$(date +%s)" = "$c" ]; do sleep 0.1; done' \
+  'while [ -d "$STUB" ] && [ ! -e "$STUB/go" ]; do sleep 0.1; done' '( slot_pool && eval "$(wait_fn)" && wait_poll slot_try; : > "$T/slot" ) &' > "$T/good.sh"
 
-# Bug: a wait for a file with no ceiling passed the lint, in a test's own code and in the text of a script it writes.
+# Bug: a wait with no ceiling passed the lint: for a file to come or to go, or for a command, in a test's own code
+# and in the text of a script it writes.
 run bad.sh
 printf '%s\n' "$out" > "$T/out"; printf 'bad.sh\0' > "$T/paths"
 # shellcheck source=/dev/null
 . "$HERE/../conveyor/lib/lint.sh"
 found=$(lintfindings "$T/out" "$T/paths" | jq -sc 'map([.file, .line])')
-[ "$rc" = 1 ] && [[ $out == *"a wait for a file with no ceiling"* ]] \
-  && [ "$found" = '[["bad.sh",1],["bad.sh",2],["bad.sh",3],["bad.sh",4],["bad.sh",5],["bad.sh",8]]' ] \
-  && ok "a wait for a file with no ceiling is a finding the engine reads, on one line or on several, exit 1" \
+[ "$rc" = 1 ] && [[ $out == *"a wait with no ceiling"* ]] \
+  && [ "$found" = '[["bad.sh",1],["bad.sh",2],["bad.sh",3],["bad.sh",4],["bad.sh",5],["bad.sh",8],["bad.sh",9],["bad.sh",10],["bad.sh",11],["bad.sh",12]]' ] \
+  && ok "a wait with no ceiling is a finding the engine reads, on one line or on several, exit 1" \
   || no "bad.sh: exit $rc, engine read $found: $out"
 
-# Bug: a wait that ends (wait_until, wait_poll, a second condition, a count, a check in the loop, a timeout around it)
-# or a comment was a finding.
+# Bug: a wait that ends (wait_until, wait_poll, a second condition, a count, a check in the loop, a timeout around it),
+# a wait on the clock, a stand-in with no condition or a comment was a finding.
 run good.sh
-[ "$rc" = 0 ] && [ -z "$out" ] && ok "a wait that ends and a comment pass" || no "good.sh: exit $rc: $out"
+[ "$rc" = 0 ] && [ -z "$out" ] && ok "a wait that ends, a wait on the clock, a stand-in and a comment pass" || no "good.sh: exit $rc: $out"
 
 # What must stay true: the test files the pack gives the command have no such wait.
 mapfile -t ps < <(jq -r '.lint.commands[] | select(.run == "bash .conveyor/lint-poll.sh {files}") | .files[]' "$HERE/project.json")

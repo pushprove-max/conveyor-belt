@@ -189,9 +189,9 @@
       },
       {
         "files": [
-          ".conveyor/*.test.sh",
-          "conveyor/tests/*.test.sh",
+          "*.test.sh",
           ".claude/hooks/__tests__/*.sh",
+          ".claude/scripts/__tests__/*.sh",
           ":(exclude).conveyor/lint-poll.test.sh",
           ":(exclude).conveyor/test-lint.test.sh"
         ],

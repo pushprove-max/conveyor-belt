@@ -48,7 +48,7 @@ case $PWD in *-7) [ -e "$STUB/held" ] || while [ -d "$STUB" ]; do
   ls -d ../*-8 >/dev/null 2>&1 || { : > "$STUB/held"; exit 0; }; sleep 0.1; done ;; esac
 EOF
   tune --arg h "$STUB/hold" '.checks = [$h]'
-  cat > "$STUB/test-cmd" <<'EOF'
+  wait_fn > "$STUB/test-cmd"; cat >> "$STUB/test-cmd" <<'EOF'
 L=$CONVEYOR_TEST_LOG/run.log; RR=${CONVEYOR_TEST_RERUN:-/dev/null}; f=$CONVEYOR_TEST_FILE
 [ "${CONVEYOR_TEST_N:-1}" != 1 ] || echo x >> "$STUB/tests"
 tf() { while read -r f; do awk -v f="$f" '$1 == f {print $2}' "$STUB/map"; done | sort -u; } # changed files on stdin: their test files
@@ -68,7 +68,7 @@ f=${f%%"$f"}; c=${PWD##*-}
 # dropped its cases): one writer at a time. The run's first file to take the lock adds its line, and keeps the line's
 # number in a folder of the run's log folder (no log: the run reads only the files there, and makes the folder new each
 # run); each file keeps its cases there by its place in the run, and the line is made again from them in that order.
-until mkdir "$STUB/runs.lock" 2>/dev/null; do sleep 0.05; done
+runslock() { mkdir "$STUB/runs.lock" 2>/dev/null; }; wait_poll runslock
 d=$CONVEYOR_TEST_LOG/stub-runs; mkdir -p "$d"; printf '%s' "$ran" > "$d/${CONVEYOR_TEST_N:-1}"
 [ -s "$d/line" ] || { echo "$c" >> "$STUB/runs"; wc -l < "$STUB/runs" > "$d/line"; }
 awk -v n="$(cat "$d/line")" -v r="$c$(for p in $(ls "$d" | grep -x '[0-9]*' | sort -n); do cat "$d/$p"; done)" '{ print (NR == n ? r : $0) }' \

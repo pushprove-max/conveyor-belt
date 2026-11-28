@@ -69,7 +69,8 @@ A test says why the behaviour matters and fails when it breaks; an existing test
 - A test waits for a file or a process with `wait_until` (`conveyor/tests/wait.sh`), and a script that an engine
   case writes waits with `wait_poll` (the text that `wait_fn` prints, `conveyor/tests/wait.test.sh`). Each has a
   ceiling and says what it waited for. The pack's `lint` field runs `.conveyor/lint-poll.sh` on the test files: a
-  loop that waits for a file with only a pause (`until [ -e <file> ]; do sleep 0.1; done`) has no ceiling and is a
+  loop that waits for a file or for a command with only a pause (`until [ -e <file> ]; do sleep 0.1; done`,
+  `while [ -e <file> ]; do sleep 0.1; done`, `until mkdir <lock>; do sleep 0.1; done`) has no ceiling and is a
   finding.
 
 - An engine test that needs a `claude`, `codex`, `opencode` or `gh` uses the shared stub in `conveyor/tests/stubs/`

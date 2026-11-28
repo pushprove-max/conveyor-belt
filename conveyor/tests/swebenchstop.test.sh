@@ -92,8 +92,8 @@ t_swestoppre() {
 # live.json back as it was, and records no run.
 t_swestopsetup() {
   swe; local out id
-  printf '%s\n' '#!/usr/bin/env bash' \
-    '[ "$2" != tasks ] || { : > "$SWE_FX/tasks-asked"; while [ -e "$SWE_FX/thold" ]; do sleep 0.1; done; } # sleep: held until the case removes thold' \
+  printf '%s\n' '#!/usr/bin/env bash' "$(wait_fn)" \
+    '[ "$2" != tasks ] || { : > "$SWE_FX/tasks-asked"; wait_poll [ ! -e "$SWE_FX/thold" ]; } # held until the case removes thold' \
     'exec "$SWE_FX/py" "$@"' > "$T/$CASE/py" && chmod +x "$T/$CASE/py" && : > "$SWE_FX/thold" || fail "the held harness was not made"
   CONVEYOR_BENCH_PYTHON=$T/$CASE/py loop bench swe 1 > "$T/$CASE/run.out" 2>&1 &
   wait_until "[ -e '$SWE_FX/tasks-asked' ]" "cat '$T/$CASE/run.out'" || fail "the run did not reach its task list's fetch"
@@ -230,9 +230,9 @@ t_swewaitmain() {
 # The git stand-in holds ls-remote once Docker has refused (the lookup), until the hold file is gone.
 t_swestoprelname() {
   swe; local out id g=$T/$CASE/gitbin
-  mkdir -p "$g" && : > "$T/$CASE/hold" && printf '%s\n' '#!/usr/bin/env bash' \
+  mkdir -p "$g" && : > "$T/$CASE/hold" && printf '%s\n' '#!/usr/bin/env bash' "$(wait_fn)" \
     "if [ \"\$1\" = ls-remote ] && [ -e '$SWE_FX/nodocker' ] && grep -qx info '$SWE_FX/docker.log' 2>/dev/null; then" \
-    "  : > '$T/$CASE/inlookup'; while [ -e '$T/$CASE/hold' ]; do sleep 0.1; done; fi" \
+    "  : > '$T/$CASE/inlookup'; wait_poll [ ! -e '$T/$CASE/hold' ]; fi" \
     "PATH=\${PATH#*gitbin:} exec git \"\$@\"" > "$g/git" && chmod +x "$g/git" && : > "$SWE_FX/nodocker" || fail "the git stand-in was not made"
   PATH=$g:$PATH loop bench swe 1 --solo --arm conveyor --engine "$EA" > "$T/$CASE/run.out" 2>&1 &
   # A poll: the run reaches the lookup in its own time, after its setup is refused.

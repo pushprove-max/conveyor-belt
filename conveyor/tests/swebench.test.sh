@@ -29,10 +29,10 @@ swemake() { # <folder>
 #!/usr/bin/env bash
 case $1 in state-dir) echo "$CONVEYOR_MAIN/conveyor/state" ;; run) . "$(dirname "$0")/lib/fake.sh" ;; esac
 EOF
-  cat > "$e/conveyor/lib/fake.sh" <<'EOF'
+  wait_fn > "$e/conveyor/lib/fake.sh"; cat >> "$e/conveyor/lib/fake.sh" <<'EOF'
 V=A
 t=$(gh issue list --json title | jq -r '.[0].title'); echo "$V $t" >> "$SWE_FX/log"; echo $$ > "$SWE_FX/pid"
-while [ -e "$SWE_FX/hold" ]; do sleep 0.1; done
+wait_poll [ ! -e "$SWE_FX/hold" ]
 [ ! -e "$SWE_FX/efail" ] || { echo ENGINE-FAIL-SAID; exit 1; }
 # The real loop starts no card unless its queue takes the task's issue: the dry pick on the sandbox's pack, control
 # record and issue, by the engine under test (a fake that skipped it missed an arm's policy keeping the issue off).
@@ -77,17 +77,16 @@ EOF
     && sed -i 's/^V=A/V=B/' "$e/conveyor/lib/fake.sh" && printf '%s\n' 'reviewed() { echo stricter; }' > "$e/conveyor/lib/review.sh" \
     && echo '{"fix": null, "testFix": null}' > "$e/conveyor/lib/control-defaults.json" && git -C "$e" add -A \
     && git -C "$e" commit -qm 'review: stricter findings' && git clone -q --bare "$e" "$F/eng.git" && rm -rf "$e" || return 1
-  cat > "$F/py" <<'EOF'
-#!/usr/bin/env bash
+  printf '%s\n' '#!/usr/bin/env bash' "$(wait_fn)" > "$F/py"; cat >> "$F/py" <<'EOF'
 shift # the harness script's path
 case $1 in
   tasks) for t in proj__a-1 proj__b-2; do jq -nc --arg t "$t" --arg u "file://$SWE_FX/task.git" --arg b "$(git -C "$SWE_FX/task.git" rev-parse main)" \
       '{id: $t, repo: "o/proj", url: $u, base: $b, issue: "Fix x.py for \($t)", image: "img-\($t)", env: "source \"$SWE_FX/activate\"", cmd: "true"}'; done > "$4" ;;
-  image) while [ -e "$SWE_FX/ihold" ]; do sleep 0.1; done; [ "$(cat "$SWE_FX/broken" 2>/dev/null)" != "$2" ] || exit 3 ;;
+  image) wait_poll [ ! -e "$SWE_FX/ihold" ]; [ "$(cat "$SWE_FX/broken" 2>/dev/null)" != "$2" ] || exit 3 ;;
   # grade: its container named as the harness names it, with the run's ID ($7), held while $SWE_FX/ghold is there
   # and removed when the grade ends (left when it is killed).
   grade) echo "$2 $3 $4" >> "$SWE_FX/graded"; mkdir -p "$SWE_FX/boxes/sweb.eval.$4.conveyor-$7-$4"
-    while [ -e "$SWE_FX/ghold" ]; do sleep 0.1; done; rm -rf "$SWE_FX/boxes/sweb.eval.$4.conveyor-$7-$4"
+    wait_poll [ ! -e "$SWE_FX/ghold" ]; rm -rf "$SWE_FX/boxes/sweb.eval.$4.conveyor-$7-$4"
     if [ -s "$SWE_FX/gradeout" ]; then cat "$SWE_FX/gradeout"
     elif grep -q fixed "$5" && [ "$(cat "$SWE_FX/wrong" 2>/dev/null)" != "$4" ]; then echo '{"resolved":true}'; else echo '{"resolved":false}'; fi ;;
 esac
@@ -129,7 +128,7 @@ EOF
   # the line their fired filter looks for, and note the Claude login their container was given. stub-quiet fires on
   # the preflight's task only: on a real task it changes x.py but prints nothing. stub-codex uses a Codex login.
   local a hello='[ ! -e hello.py ] || echo "print(\"hello\")" > hello.py'
-  local hold='while [ -e "$SWE_FX/phold" ]; do sleep 0.1; done' # sleep: stub-slow's preflight runs until the case removes phold
+  local hold; hold="$(wait_fn)"'; wait_poll [ ! -e "$SWE_FX/phold" ]' # stub-slow's preflight runs until the case removes phold
 
   for a in conveyor solo; do jq '.install = "true"' "$SRC/bench/arms/$a.json" > "$F/arms/$a.json" || return 1; done
   stub() { # <name> <login> <its file in the home> <run>

@@ -20,7 +20,7 @@ watchstart() {
   # Every gh call says so ($STUB/slowed) and waits for as long as $STUB/slow is there: GitHub that does not answer.
   # `gh auth token` is not held: it reads the token without the network (ghok, lib/issues.sh), and held, each snapshot
   # waited out its 20 s timeout.
-  mkdir -p "$STUB/slowbin"; printf '#!/usr/bin/env bash\n[ "$1 $2" = "auth token" ] || [ ! -e "%s/slow" ] || { : > "%s/slowed"; while [ -e "%s/slow" ]; do sleep 0.1; done; }\nexec "%s/gh" "$@"\n' \
+  mkdir -p "$STUB/slowbin"; printf '#!/usr/bin/env bash\n%s\n[ "$1 $2" = "auth token" ] || [ ! -e "%s/slow" ] || { : > "%s/slowed"; wait_poll [ ! -e "%s/slow" ]; }\nexec "%s/gh" "$@"\n' "$(wait_fn)" \
     "$STUB" "$STUB" "$STUB" "$STUB" > "$STUB/slowbin/gh"; chmod +x "$STUB/slowbin/gh"
   # No wait here is a number of seconds (a bug: on a busy machine a line that was on its way missed a 4 s window, and
   # a record written 0.5 s after the stream's launch was there before the stream first looked, so it was no change).
