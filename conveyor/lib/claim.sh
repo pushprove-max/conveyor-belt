@@ -917,6 +917,15 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
     elif git -C "$CARDS/$m" diff --cached --binary --no-renames > "$CARDS/$m.bpatch" 2>/dev/null && checks "$CARDS/$m" >/dev/null 2>&1 \
       && git -C "$wt" apply --index "$CARDS/$m.bpatch" 2>/dev/null; then s+=("$m"); else unbatch "$m"; fi
   done
+  # A card apart from its batch keeps its own run for its test line (cardlanding()): the runs of its batch in its
+  # worktree write their output, logs, list and times over it. They are put back when the batch ends, as for a card
+  # in its batch.
+  rm -f "$wt.batchtestlist"
+  if [ -n "$apart" ] && [ -e "$wt.test" ]; then
+    keeprun "$wt" "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst" "$wt.batchuncovered" "$wt.batchnoresult" || return 1
+    [ ! -e "$wt.testlist" ] || cp -f "$wt.testlist" "$wt.batchtestlist" || return 1
+    bw=${TEST_WAIT:-} br=${TEST_RUN:-} bf=${TEST_FREE:-} bz=${TEST_REFUSED:-}
+  fi
   # Each part to run: "<the split it comes of> <0: first half, 1: second> <its cards>".
   todo=("0 0 ${s[*]}")
   while [ ${#todo[@]} != 0 ]; do
@@ -927,7 +936,7 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
     if [ -n "$lost" ]; then
       unbatch "${good[@]}" "${s[@]}" $(for t in "${todo[@]}"; do echo "${t#* * }"; done)
       git -C "$wt" reset -q --hard && git -C "$wt" apply --index "$wt.bpatch" || { norun "$wt" "the card's change could not be put back in its worktree after its batch's tests"; return 1; }
-      rm -rf "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst" "$wt.batchuncovered" "$wt.batchnoresult"; echo "conveyor: card $c: its change no longer applied in its batch, so it is tested alone"; tests "$wt"; return
+      rm -rf "$wt.batchtest" "$wt.batchtestlog" "$wt.batchfirst" "$wt.batchuncovered" "$wt.batchnoresult" "$wt.batchtestlist"; echo "conveyor: card $c: its change no longer applied in its batch, so it is tested alone"; tests "$wt"; return
     fi
     [ ${#in[@]} != 0 ] || continue
     bt=''; TEST_REFUSED=''; lr=''
@@ -969,6 +978,7 @@ batch() { # <card> <worktree> <the batch's cards, in order, the card among them>
   [ ! -e "$wt.batchtest" ] || { rm -f "$wt.uncovered"; [ ! -e "$wt.batchuncovered" ] || mv -f "$wt.batchuncovered" "$wt.uncovered"; }
   [ ! -e "$wt.batchtest" ] || { rm -f "$wt.noresult"; [ ! -e "$wt.batchnoresult" ] || mv -f "$wt.batchnoresult" "$wt.noresult"; } # the card's own run says why it gave no result (voidrun())
   rm -f "$wt.first"; [ ! -e "$wt.batchtest" ] || { rm -rf "$wt.testlog"; mv -f "$wt.batchtest" "$wt.test"; [ ! -d "$wt.batchtestlog" ] || mv -f "$wt.batchtestlog" "$wt.testlog"; [ ! -e "$wt.batchfirst" ] || mv -f "$wt.batchfirst" "$wt.first"; TEST_WAIT=$bw TEST_RUN=$br TEST_FREE=$bf TEST_REFUSED=$bz TEST_BATCH=$bb; }
+  [ ! -e "$wt.batchtestlist" ] || mv -f "$wt.batchtestlist" "$wt.testlist"
   [ ${#good[@]} -lt 2 ] && [ "${good[0]:-$c}" = "$c" ] || mates=("${good[@]}")
   [ -z "$apart" ] || return 0
   return $lrc

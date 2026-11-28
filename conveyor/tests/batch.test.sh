@@ -298,10 +298,14 @@ EOF
 # A card whose patch does not apply on top of those before it in the batch leaves it, even the card whose turn it is:
 # #8 and #9 became ready before #7, which changes the line #8 changes, so #8 and #9 land on one test run in the order
 # they became ready, and #7 is apart (fitted after, as a waiting card is), its worktree holding its own change again.
+# Bug it catches too: #7's test line (cardlanding()) held the facts of its batch's run, not of its own run before it:
+# its output, its list of test files and its times.
 t_batchleft() {
   bmain
   bwt 7 'sed -i 1s/.*/seven/ a.txt' 300 true; bwt 8 'sed -i 1s/.*/eight/ a.txt' 100; bwt 9 'sed -i 10s/.*/nine/ a.txt' 200
-  bfx "$BRUN; $BMATES"
+  bfx 'echo "own run" > "$W.test"; echo "{\"mode\":\"own\"}" > "$W.testlist"; TEST_WAIT=41; TEST_RUN=42; '"$BRUN; $BMATES"'
+    echo "own: $(cat "$W.test") $(cat "$W.testlist" 2>/dev/null) $TEST_WAIT $TEST_RUN"'
+  bout 'own: own run {"mode":"own"} 41 42' || fail "#7, apart, did not keep its own run's output, list and times for its test line: $(grep "^own:" "$T/$CASE/run.out")"
   bout 'gather: c8-8 c9-9 c7-7' && [ "$(bruns)" = 'c8-8 c9-9' ] && [ "$(wc -l < "$STUB/tests")" = 1 ] || fail "#7's batch was not #8 then #9, on one test run: $(cat "$T/$CASE/run.out")"
   bout 'batch: 0 apart=1 mates=c8-8 c9-9' || fail "#7 was not apart from its batch: $(cat "$T/$CASE/run.out")"
   bout 'land: 0' && [ "$(landedon)" = '8 c8-8 c9-9,9 c8-8 c9-9,' ] || fail "#8 and #9 did not land as one batch: $(landedon) $(cat "$T/$CASE/run.out")"
