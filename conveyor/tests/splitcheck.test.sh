@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 120
+# timeout: 300
+# The limit is the whole file's in a card's test step (lib/fileeach.sh), and each of its 14 cases waits there for a test
+# slot of its own. They run in some 13 s alone, but on a busy step the waits for slots took the file past 120 s (times
+# the load factor: 204 s, with 242 s on the clock) with no case failed: all 3 flaky sightings were a time-out (#1778).
 # Engine cases: the check of an Optimize card's split (speedproof.sh speedproof()): its files' CPU seconds summed against the old
 # file's on record and a start-up allowance for each file a split adds. No file is held to a CPU budget (#349). And
 # whose failure the check's reason names when its run fails (#602).
