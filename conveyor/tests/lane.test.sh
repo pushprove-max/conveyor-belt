@@ -83,8 +83,8 @@ t_lanelock() {
   # Another lane's create holds the host file (its lock) and writes its own lane while this create waits: both
   # lanes stay written. Unlocked, this create would put back the file it read first, without the research lane.
   jq 'del(.records[1].lanes)' "$HF" > "$HF.t" && mv "$HF.t" "$HF"
-  flock "$HF.lock" sh -c 'touch "$1.held"; until [ -e "$1.go" ]; do sleep 0.1; done' sh "$HF" & lk=$!
-  until [ -e "$HF.held" ]; do sleep 0.1; done
+  flock "$HF.lock" sh -c "$(wait_fn)"'; touch "$1.held"; wait_poll [ -e "$1.go" ]' sh "$HF" & lk=$!
+  wait_until '[ -e "$HF.held" ]' || fail "the lock of the host file was not taken"
   loop lane fast create > "$T/$CASE/create.out" 2>&1 & cr=$!
   # While the lock is held, create waits at it (its flock runs) and has neither ended nor written: a create that
   # took no lock would have done both.

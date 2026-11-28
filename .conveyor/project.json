@@ -31,6 +31,8 @@
         ".conveyor/lint-funcs.awk": "area:linter",
         ".conveyor/lint-prefix.sh": "area:linter",
         ".conveyor/lint-prefix.test.sh": "area:linter",
+        ".conveyor/lint-poll.sh": "area:linter",
+        ".conveyor/lint-poll.test.sh": "area:linter",
         ".conveyor/lint-funcs.sh": "area:linter",
         ".conveyor/lint-funcs.test.sh": "area:linter",
         ".conveyor/lint-js.sh": "area:linter",
@@ -184,6 +186,19 @@
           ".conveyor/lint-prefix.sh"
         ],
         "run": "bash .conveyor/lint-prefix.sh {files}"
+      },
+      {
+        "files": [
+          ".conveyor/*.test.sh",
+          "conveyor/tests/*.test.sh",
+          ".claude/hooks/__tests__/*.sh",
+          ":(exclude).conveyor/lint-poll.test.sh",
+          ":(exclude).conveyor/test-lint.test.sh"
+        ],
+        "triggers": [
+          ".conveyor/lint-poll.sh"
+        ],
+        "run": "bash .conveyor/lint-poll.sh {files}"
       },
       {
         "files": [

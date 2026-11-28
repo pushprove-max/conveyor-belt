@@ -20,7 +20,7 @@ taask() {
   mkdir -p "$R/conveyor" && printf '#!/usr/bin/env bash\nexec bash %q "$@"\n' "$SRC/conveyor.sh" > "$R/conveyor/conveyor.sh" \
     || fail "the checkout's engine could not be made"
   if [ "$lock" = lock ]; then
-    fx_in 'locked bash -c "touch \"\$STUB/locked\"; until [ -e \"\$STUB/free\" ]; do sleep 0.1; done" &'
+    fx_in 'locked bash -c "$(wait_fn); touch \"\$STUB/locked\"; wait_poll [ -e \"\$STUB/free\" ]" &'
     wait_until '[ -e "$STUB/locked" ]' || { touch "$STUB/free"; fail "the record's lock was not taken: $(cat "$T/$CASE/run.out")"; }
   fi
   out=$( ( export CONVEYOR_CARDS=$T/$CASE/cards; unset CONVEYOR_FOREMAN_ASK; . "$SRC/foreman/lib.sh" \

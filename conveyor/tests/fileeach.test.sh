@@ -130,8 +130,8 @@ t_fileeachwide() {
 t_fileeachkeep() {
   local rc sp
   sidewt 2; sidefile c.test.sh 1
-  printf '%s\n' "( until [ -e $T/$CASE/go ]; do sleep 0.1; done ) < /dev/null > /dev/null 2>&1 &" "echo ok > $T/$CASE/a.done" > "$T/$CASE/wt/a.test.sh" # sleep: a process a.test.sh leaves, in its own shell (no wait_until there)
-  printf '%s\n' "until [ -e $T/$CASE/go ]; do sleep 0.1; done" > "$T/$CASE/wt/b.test.sh" # sleep: b.test.sh holds its slot until go, in its own shell (no wait_until there)
+  printf '%s\n' "$(wait_fn)" "( wait_poll [ -e $T/$CASE/go ] ) < /dev/null > /dev/null 2>&1 &" "echo ok > $T/$CASE/a.done" > "$T/$CASE/wt/a.test.sh" # a process a.test.sh leaves, in its own shell (no wait_until there)
+  printf '%s\n' "$(wait_fn)" "wait_poll [ -e $T/$CASE/go ]" > "$T/$CASE/wt/b.test.sh" # b.test.sh holds its slot until go, in its own shell (no wait_until there)
   siderun a.test.sh b.test.sh c.test.sh > "$T/$CASE/out" 2>&1 & sp=$!
   wait_until "[ -s '$T/$CASE/a.done' ]" || { touch "$T/$CASE/go"; wait "$sp"; fail "a.test.sh did not run: $(cat "$T/$CASE/out" "$T/$CASE/wt.test" 2>&1)"; }
   WAIT_CEILING=$(loadlimit 10) wait_until "grep -qxF -- '-- ok a.test.sh' '$T/$CASE/wt.testlog/files'" \
@@ -150,7 +150,7 @@ t_fileeachkeep() {
 t_fileeachrunnerok() {
   local rc sp l=$T/$CASE/wt.testlog/a
   sidewt 1
-  printf '%s\n' "printf '== a.test.sh\nok one\n-- ok a.test.sh\n' > $l" "until [ -e $T/$CASE/go ]; do sleep 0.1; done" > "$T/$CASE/wt/a.test.sh" # sleep: the runner's cleanup, in its own shell (no wait_until there)
+  printf '%s\n' "$(wait_fn)" "printf '== a.test.sh\nok one\n-- ok a.test.sh\n' > $l" "wait_poll [ -e $T/$CASE/go ]" > "$T/$CASE/wt/a.test.sh" # the runner's cleanup, in its own shell (no wait_until there)
   siderun a.test.sh > "$T/$CASE/out" 2>&1 & sp=$!
   wait_until "grep -qxF -- '-- ok a.test.sh' '$l'" || { touch "$T/$CASE/go"; wait "$sp"; fail "a.test.sh did not log its pass: $(cat "$T/$CASE/out" "$T/$CASE/wt.test" 2>&1)"; }
   cp -R "$T/$CASE/wt.testlog" "$T/$CASE/cut.testlog" && : > "$T/$CASE/cut.test" || fail "the copy of the log"

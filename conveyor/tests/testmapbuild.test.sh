@@ -53,7 +53,7 @@ t_testmapbuild() {
 # ends the build's processes, frees the slot, leaves the map there as it was and records stopped.
 t_testmapbuildstop() {
   local out
-  tmbsetup 'echo $$ > "$STUB/pid"; until [ -e "$STUB/go" ]; do sleep 0.1; done'
+  tmbsetup "$(wait_fn)"'; echo $$ > "$STUB/pid"; wait_poll [ -e "$STUB/go" ]'
   out=$(loop testmap build 2>&1) || fail "the build did not start: $out"
   wait_until '[ -s "$STUB/pid" ]' || fail "the build's first test file did not start"
   out=$(loop testmap build 2>&1); [ $? = 2 ] && [ "$out" = 'conveyor: a build of the test map is running; nothing started' ] \

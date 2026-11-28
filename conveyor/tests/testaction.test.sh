@@ -18,13 +18,15 @@
 tasetup() {
   setup "[$(issue 7 2026-01-01)]"
   mkdir -p "$R/tests" && echo 'echo ok' > "$R/tests/x.test.sh" && git -C "$R" add tests && git -C "$R" commit -qm 'a test file' || fail "the test file could not be committed"
+  wait_fn > "$STUB/wait-poll" # wait_poll, which the stand-in session reads
   cat > "$STUB/claude" <<'EOF'
 #!/usr/bin/env bash
+. "$STUB/wait-poll"
 printf '%s\n' "$*" >> "$STUB/ta-args"; cat > "$STUB/ta-prompt.$$"
 echo '{"type":"assistant","message":{"content":[{"type":"text","text":"first words"}]}}'
 gh issue create --title t --body b > /dev/null 2>&1; echo "gh $?" >> "$STUB/ta-tries"
 { echo changed >> a.txt; } 2>/dev/null; echo "write $?" >> "$STUB/ta-tries"
-until [ -e "$STUB/ta-go" ]; do sleep 0.1; done
+wait_poll [ -e "$STUB/ta-go" ]
 [ ! -f "$STUB/ta-last" ] || jq -cn --rawfile t "$STUB/ta-last" '{type: "assistant", message: {content: [{type: "text", text: $t}]}}'
 echo '{"type":"result","is_error":false,"result":"end"}'
 EOF

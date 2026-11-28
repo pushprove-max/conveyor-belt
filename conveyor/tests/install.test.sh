@@ -136,7 +136,7 @@ t_installrace() {
   bash "$X" install "$A" >/dev/null && mv "$V/$A" "$V/first" || fail "the first install was not made"
   trap 'kill ${lk:-} ${ip:-} 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT
   # The first install holds the mirror's lock; the second is started and waits on it.
-  ( flock 9 && : > "$w/locked" && until [ -e "$w/go" ]; do sleep 0.1; done ) 9>>"$V/mirror.git.lock" & lk=$!
+  ( flock 9 && : > "$w/locked" && wait_until '[ -e "$w/go" ]' ) 9>>"$V/mirror.git.lock" & lk=$!
   until [ -e "$w/locked" ]; do kill -0 $lk 2>/dev/null || fail "the lock was not taken"; sleep 0.1; done
   bash "$X" install "$A" > "$w/out" 2>&1 & ip=$!
   until for p in $(below $ip); do ps -o args= -p "$p"; done 2>/dev/null | grep -q '^flock -w 600'; do

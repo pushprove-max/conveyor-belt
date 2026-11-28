@@ -186,7 +186,7 @@ trap 'deaf & exit' TERM; : > "$STUB/deafup"
 while :; do sleep 1 & wait $!; done # sleep: a stand-in that goes on until TERM
 EOF2
   bash "$STUB/deaf.sh" & k=$!; until [ -e "$STUB/deafup" ] || ! kill -0 $k 2>/dev/null; do sleep 0.1; done; kill -TERM $k
-  wait $k; until [ -s "$STUB/spawned" ]; do sleep 0.1; done # the one it started on TERM writes its pid as it starts
+  wait $k; wait_until '[ -s "$STUB/spawned" ]' # the one it started on TERM writes its pid as it starts
   [ -s "$STUB/spawned" ] && kill -0 "$(cat "$STUB/spawned")" 2>/dev/null || fail "the process that ignores TERM did not start another on TERM"
   kill -KILL "$(cat "$STUB/spawned")"; rm "$STUB/spawned" "$STUB/deafup"
   # #8 in review, that review under it, started on $A; #9 started on $B. The loop on $B restarts on $A, the pin's move back.

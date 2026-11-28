@@ -19,12 +19,12 @@ trsetup() {
   mkdir -p "$XDG_CONFIG_HOME/conveyor" && echo "{\"testSlots\": 1, \"testSlotsDir\": \"$T/$CASE/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json" \
     || fail "the host file was not written"
   tasetup
-  cat > "$STUB/test-cmd" <<'EOF'
+  wait_fn > "$STUB/test-cmd"; cat >> "$STUB/test-cmd" <<'EOF'
 cat "$CONVEYOR_TEST_RERUN" > "$STUB/tr-list"; echo $$ > "$STUB/tr-pid"
 if flock -n "$STUB/../slots/1" true; then echo free; else echo held; fi > "$STUB/tr-held"
 echo "running tests/x.test.sh"
 printf 'TESTRUN sec\ttests/x.test.sh\t3.5\t2.25\n' > "$CONVEYOR_TEST_LOG/r.log"
-until [ -e "$STUB/tr-go" ]; do sleep 0.1; done
+wait_poll [ -e "$STUB/tr-go" ]
 exit "$(cat "$STUB/tr-rc" 2>/dev/null || echo 0)"
 EOF
 }

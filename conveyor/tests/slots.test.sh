@@ -103,7 +103,7 @@ t_slotkill() {
   slot_pool
   ( CASE=slotnap; run_case ) & pid=$!
   slot_free
-  until [ -s "$T/$CASE/nap" ]; do sleep 0.05; done
+  wait_until '[ -s "$T/$CASE/nap" ]' || fail "the one worker of the pool did not start"
   ! slot_try || fail "a slot was taken while the pool's one worker ran"
   ! slot_wait 0.2 || fail "a slot was waited for and got while the pool's one worker ran"
   [ "$(slot_used)" = 1 ] || fail "slots in use while the worker ran: $(slot_used)"
@@ -291,10 +291,10 @@ t_slotcores() {
 t_slotleft() {
   local i w=$T/$CASE/cards/c7
   slotpool 1; setup "[]"; cardchange "$w" || fail "the worktree could not be made"
-  cat > "$STUB/test-cmd" <<'EOF2'
+  wait_fn > "$STUB/test-cmd"; cat >> "$STUB/test-cmd" <<'EOF2'
 echo x >> "$STUB/tests"
 ( for ((f = 3; f < 256; f++)); do eval "exec $f>&-"; done; echo "$BASHPID" > "$STUB/left"; exec sleep 3600 ) > /dev/null 2>&1 & # sleep: a stand-in for a process the test command leaves, alive until the case kills it
-until [ -s "$STUB/left" ]; do sleep 0.05; done
+wait_poll [ -s "$STUB/left" ]
 EOF2
   out=$(teststep "$w" 2>&1) || fail "the card's test step did not pass: $out $(cat "$w.test" 2>&1)"
   [ -s "$STUB/tests" ] || fail "the card's test command did not run: $out"
@@ -316,7 +316,7 @@ t_slotcase() {
   slotpool 1; slot_pool && slot_take || fail "the pool's slot could not be taken"
   t_slotstay() {
     ( for ((i = 3; i < 256; i++)); do eval "exec $i>&-"; done; echo "$BASHPID" > "$T/slotcase/left"; exec sleep 60 ) > /dev/null 2>&1 & # sleep: the process the case leaves, alive until the test kills it
-    until [ -s "$T/slotcase/left" ]; do sleep 0.05; done
+    wait_until '[ -s "$T/slotcase/left" ]' || fail "the process the case leaves did not start"
   }
   ( CASE=slotstay; run_case ) > "$d/out" 2>&1 & pid=$!
   slot_free
@@ -343,7 +343,7 @@ t_slotcaseterm() {
   }
   ( CASE=slotterm; run_case ) > "$d/out" 2>&1 & pid=$!
   slot_free
-  until [ -s "$d/left" ]; do sleep 0.05; done
+  wait_until '[ -s "$d/left" ]' || fail "the process the case leaves did not start: $(cat "$d/out")"
   s=$SECONDS; kill -TERM $pid; wait $pid; [ $? = 143 ] || fail "the case told to end did not end so: $(cat "$d/out")"
   lim=$(loadlimit 10 60) # under the case's 60 s
   [ $((SECONDS - s)) -lt "$lim" ] || fail "the case told to end took $((SECONDS - s)) s to end, not about 3 s and the looks after it (limit $lim s: 10 s times the load factor $CASE_LOAD)"

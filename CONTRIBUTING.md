@@ -66,6 +66,11 @@ A test says why the behaviour matters and fails when it breaks; an existing test
   sleeps a set time and then checks, and a full-loop run (`loop run`, `loop serve`, `conveyor.sh run` or
   `conveyor.sh serve`) on a line the change added or changed with no `# loop: <why>` comment on that line or the line
   above. The comment says what only a whole loop run shows. A line the change did not touch is not checked.
+- A test waits for a file or a process with `wait_until` (`conveyor/tests/wait.sh`), and a script that an engine
+  case writes waits with `wait_poll` (the text that `wait_fn` prints, `conveyor/tests/wait.test.sh`). Each has a
+  ceiling and says what it waited for. The pack's `lint` field runs `.conveyor/lint-poll.sh` on the test files: a
+  loop that waits for a file with only a pause (`until [ -e <file> ]; do sleep 0.1; done`) has no ceiling and is a
+  finding.
 
 - An engine test that needs a `claude`, `codex`, `opencode` or `gh` uses the shared stub in `conveyor/tests/stubs/`
   (`conveyor/tests/lib.sh` puts it on `PATH`), set by files in `$STUB`, and does not write its own: the stub answers

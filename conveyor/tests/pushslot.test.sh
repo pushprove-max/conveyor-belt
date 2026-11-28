@@ -24,15 +24,15 @@ t_pushslot() {
   mkdir -p "$d" "$XDG_CONFIG_HOME/conveyor" && echo "{\"testSlots\": 2, \"testSlotsDir\": \"$P\"}" > "$XDG_CONFIG_HOME/conveyor/host.json"
   setup '[]'
   # The hook says the cgroup it ran in and that it ran, then holds its slot until the case ends it.
-  hook='#!/usr/bin/env bash\ncat /proc/self/cgroup > %q/hookcg 2>/dev/null\necho push >> %q/order\nuntil [ -e %q/end ]; do sleep 0.05; done\n' # sleep: the hook's poll for its end
-  printf "$hook" "$d" "$d" "$d" > "$R/.git/hooks/pre-push" && chmod +x "$R/.git/hooks/pre-push"
+  hook='#!/usr/bin/env bash\n%s\ncat /proc/self/cgroup > %q/hookcg 2>/dev/null\necho push >> %q/order\nwait_poll [ -e %q/end ]\n' # the hook's poll for its end
+  printf "$hook" "$(wait_fn)" "$d" "$d" "$d" > "$R/.git/hooks/pre-push" && chmod +x "$R/.git/hooks/pre-push"
   mkdir -p "$P"; : >> "$P/1"; : >> "$P/2"
-  for u in 1 2; do flock "$P/$u" bash -c 'until [ -e "$0" ]; do sleep 0.05; done' "$d/free$u" & done
+  for u in 1 2; do flock "$P/$u" bash -c "$(wait_fn)"'; wait_poll [ -e "$0" ]' "$d/free$u" & done
   wait_until '! flock -n "$P/1" true && ! flock -n "$P/2" true' || fail "the two slots were not held"
   for u in 1 2; do
     ( . "$SRC/lib/slots.sh"; slot_pool || exit 1; : > "$d/waits$u"
       until slot_try || slot_wait; do :; done
-      echo unit >> "$d/order"; until [ -e "$d/end" ]; do sleep 0.05; done ) &
+      echo unit >> "$d/order"; wait_until '[ -e "$d/end" ]' ) &
   done
   wait_until '[ -e "$d/waits1" ] && [ -e "$d/waits2" ]' || fail "the test units did not start waiting"
   echo x > "$R/n.txt"; git -C "$R" add -A; git -C "$R" commit -qm next; sha=$(git -C "$R" rev-parse HEAD)
@@ -73,7 +73,7 @@ t_pushslotload() {
   hook='#!/usr/bin/env bash\nprintf %%s "${CONVEYOR_LOAD_FACTOR-unset}" > %q/hookfactor\nsleep 3\n: > %q/past3\nsleep 1.5\n' # sleep: past pushTimeout 2, then past its scaled 4 s
   printf "$hook" "$d" "$d" > "$R/.git/hooks/pre-push" && chmod +x "$R/.git/hooks/pre-push" || fail "the hook could not be written"
   mkdir -p "$P"; : >> "$P/1"; echo 0 > "$d/load"
-  flock "$P/1" bash -c 'until [ -e "$0" ]; do sleep 0.05; done' "$d/free1" &
+  flock "$P/1" bash -c "$(wait_fn)"'; wait_poll [ -e "$0" ]' "$d/free1" &
   wait_until '! flock -n "$P/1" true' || fail "the slot was not held"
   echo x > "$R/n.txt"; git -C "$R" add -A; git -C "$R" commit -qm next; sha=$(git -C "$R" rev-parse HEAD)
   # The loop's shell, as in t_pushslot, with the machine's load (p_load) read from $d/load.

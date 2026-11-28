@@ -352,7 +352,7 @@ t_pridle() {
   # Bug (#1076): it merged while a release run was under way, so main moved under the run's suite. A stand-in run
   # holds the release hold until the case lets it go.
   local hp
-  ( exec {hp}>>"$ST/release.hold" && flock -x "$hp" && touch "$STUB/held" && while [ ! -e "$STUB/letgo" ]; do sleep 0.1; done ) & hp=$! # sleep: the stand-in run holds the hold until the case lets it go
+  ( exec {hp}>>"$ST/release.hold" && flock -x "$hp" && touch "$STUB/held" && wait_until '[ -e "$STUB/letgo" ]' ) & hp=$! # the stand-in run holds the hold until the case lets it go
   wait_until '[ -e "$STUB/held" ]' || fail "the stand-in run did not take the release hold"
   la_eng idlemerge; touch "$STUB/letgo"; wait "$hp"
   [ "$(la_prst 7)" = OPEN ] || fail "the pull request merged while a release run was under way"

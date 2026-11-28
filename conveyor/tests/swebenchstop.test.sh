@@ -360,7 +360,7 @@ swecostbox() { # <run id> <task> <main>
     '{"card":"c1","issue":1,"step":"start","result":"ok","of":"review"}' '{"card":"c1","issue":1,"step":"review","result":"GO","model":"bench-m","usage":{"read":1000000}}' > "$s/cards.jsonl" \
     || fail "the trial's container and its card's lines were not made"
   swedocker 'if [ "$1" = ps ]; then : > "$SWE_FX/go"; i=0; while [ ! -e "$SWE_FX/wrote" ] && kill -0 "$(cat "$SWE_FX/writer")" 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; fi' # sleep: the stand-in's ps holds Stop at its weak point while a session still running writes
-  docker exec "$c" bash -c 'echo $$ > "$SWE_FX/writer"; until [ -e "$SWE_FX/go" ]; do sleep 0.05; done
+  docker exec "$c" bash -c "$(wait_fn)"'; echo $$ > "$SWE_FX/writer"; wait_poll [ -e "$SWE_FX/go" ]
     echo "{\"card\":\"c1\",\"issue\":1,\"step\":\"fix\",\"result\":\"ok\",\"model\":\"bench-m\",\"usage\":{\"read\":1000000}}" >> "$1/cards.jsonl"; : > "$SWE_FX/wrote"' _ "$s" > /dev/null 2>&1 &
   # A poll on the session: it runs in the container (its process group the stand-in keeps) before Stop comes.
   wait_until "[ -s '$SWE_FX/writer' ] && [ -n \"\$(ls '$SWE_FX/boxes/$c/groups' 2>/dev/null)\" ]" || fail "the session in the trial's container did not start"

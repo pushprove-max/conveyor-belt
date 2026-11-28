@@ -16,7 +16,7 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 wholerun() { # <name>
   ( slot_pool && slot_whole 2> "$d/$1.err" || exit 1; : > "$d/$1.on"
     ( slot_pool && slot_whole 2>> "$d/$1.err" ) && : > "$d/$1.inner"
-    until [ -e "$d/$1.go" ]; do sleep 0.1; done ) &
+    wait_until "[ -e '$d/$1.go' ]" ) &
 }
 
 # The owner (2026-11-13): a whole-suite run took half the pool, and with three other cards testing beside it a run
@@ -66,10 +66,10 @@ wholeorder() { # <pool size>
 # card's step holds its slot around its runner.
 cardrun() { # <name>
   ( slot_pool && until slot_try; do sleep 0.1; done; : > "$d/$1.slot"
-    until [ -e "$d/$1.ask" ]; do sleep 0.1; done
+    wait_until "[ -e '$d/$1.ask' ]" || exit 1
     ( export CONVEYOR_TEST_SLOT=$SLOT_FD CONVEYOR_TEST_TURNWAIT=$d/$1.wait; slot_pool && [ -n "$SLOT_HOME" ] && slot_whole 2> "$d/$1.err" || exit 1; : > "$d/$1.on"
-      until [ -e "$d/$1.go" ]; do sleep 0.1; done ); : > "$d/$1.ran"
-    until [ -e "$d/$1.free" ]; do sleep 0.1; done ) &
+      wait_until "[ -e '$d/$1.go' ]" ); : > "$d/$1.ran"
+    wait_until "[ -e '$d/$1.free' ]" ) &
 }
 
 # A card's step has its slot before its runner asks for a turn: it must still wait behind a run that asked before it
@@ -130,10 +130,10 @@ t_slotwholeyield() {
   local d=$T/$CASE w
   slotpool 2; mkdir -p "$d/slots/whole"; unset CONVEYOR_TEST_WHOLE CONVEYOR_TEST_TURNWAIT
   cardrun E; wait_until "[ -e '$d/E.slot' ]" || fail "a card did not get a slot"
-  ( slot_pool && until slot_try; do sleep 0.1; done; : > "$d/P.slot"; until [ -e "$d/P.free" ]; do sleep 0.1; done ) &
+  ( slot_pool && until slot_try; do sleep 0.1; done; : > "$d/P.slot"; wait_until "[ -e '$d/P.free' ]" ) &
   wait_until "[ -e '$d/P.slot' ]" || { : > "$d/E.free"; wait; fail "a second card did not get a slot"; }
   ( exec {w}>>"$d/slots/whole/1"; flock "$w"; echo w1 > "$d/slots/whole/1"; : > "$d/W.held"
-    until [ -e "$d/W.go" ]; do sleep 0.1; done ) &
+    wait_until "[ -e '$d/W.go' ]" ) &
   wait_until "[ -e '$d/W.held' ]" || fail "the stand-in ticket was not taken"
   : > "$d/E.ask"
   wait_until "flock -n '$d/slots/1' true" "cat '$d/E.err'" || : > "$d/E.kept"

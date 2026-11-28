@@ -57,7 +57,7 @@ t_fullpush() {
     || fail "the snapshot does not say why there is no full test: $(loop snapshot --fresh | jq -c .fullTest)"
   out=$(loop full-test now 2>&1); [ $? = 2 ] && grep -q usage <<<"$out" || fail "a bad full-test argument was not refused: $out"
   tune '.test.full = ". \"$STUB/full-cmd\""'
-  echo 'git rev-parse HEAD >> "$STUB/full-at"; until [ -e "$STUB/go" ]; do sleep 0.1; done' > "$STUB/full-cmd"
+  echo "$(wait_fn)"'; git rev-parse HEAD >> "$STUB/full-at"; wait_poll [ -e "$STUB/go" ]' > "$STUB/full-cmd"
   # A card lands, land only: one landed commit is unpushed.
   ftland; A=$(ftmain)
   # Run full test suite: it runs on main, and a second press while it runs is refused, starting nothing.
@@ -218,9 +218,9 @@ t_fullredprog() {
   setup '[]'
   local s
   tune '.test.full = ". \"$STUB/full-cmd\""'
-  cat > "$STUB/full-cmd" <<'EOF'
+  wait_fn > "$STUB/full-cmd"; cat >> "$STUB/full-cmd" <<'EOF'
 C=$CONVEYOR_TEST_LOG/cases; mkdir -p "$C/ok" "$C/failed"
-if [ -n "${CONVEYOR_TEST_RERUN:-}" ]; then : > "$STUB/alone"; until [ -e "$STUB/go" ]; do sleep 0.1; done; exit 1; fi
+if [ -n "${CONVEYOR_TEST_RERUN:-}" ]; then : > "$STUB/alone"; wait_poll [ -e "$STUB/go" ]; exit 1; fi
 : > "$C/ok/one"; : > "$C/ok/two"; : > "$C/failed/three"; echo "FAIL [three]: no"; exit 1
 EOF
   loop full-test > /dev/null || fail "the full test did not start"
@@ -300,8 +300,8 @@ t_pushnow() {
 t_pushlive() {
   ftnow; local A s l
   A=$(ftmain)
-  printf '%s\n' '#!/usr/bin/env bash' 'echo "running the suite"; until [ -e "$STUB/next" ]; do sleep 0.1; done' \
-    'echo "1/3 passed"; echo "  a.test ok"; until [ -e "$STUB/go" ]; do sleep 0.1; done' > "$R/.git/hooks/pre-push"
+  printf '%s\n' '#!/usr/bin/env bash' "$(wait_fn)" 'echo "running the suite"; wait_poll [ -e "$STUB/next" ]' \
+    'echo "1/3 passed"; echo "  a.test ok"; wait_poll [ -e "$STUB/go" ]' > "$R/.git/hooks/pre-push"
   tune '.tunables.closeWait = 100' # the fixture's 0 would not wait for GitHub to close the issue, below
   loop push-now > /dev/null || fail "push-now did not start"
   wait_until '[ "$(loop health | jq -r .pushing.line)" = "running the suite" ]' 'cat "$ST/pushnow.log" "$ST/pushing"' || fail "the hook's newest line is not shown while it runs"
@@ -340,7 +340,7 @@ t_pushahead() {
 # was running can be left behind so.
 t_pushstale() {
   ftnow; local pid l
-  printf '%s\n' '#!/usr/bin/env bash' 'echo started; until [ -e "$STUB/go" ]; do sleep 0.1; done; : > "$STUB/hookdone"; exit 1' > "$R/.git/hooks/pre-push"
+  printf '%s\n' '#!/usr/bin/env bash' "$(wait_fn)" 'echo started; wait_poll [ -e "$STUB/go" ]; : > "$STUB/hookdone"; exit 1' > "$R/.git/hooks/pre-push"
   loop push-now > /dev/null || fail "push-now did not start"
   wait_until 'grep -q started "$(jq -r .log "$ST/pushing" 2>/dev/null)"' 'cat "$ST/pushnow.log" "$ST/pushing"' || fail "the hook did not start"
   pid=$(jq .pid "$ST/pushing"); l=$(jq -r .log "$ST/pushing"); kill -9 "$pid"
@@ -357,7 +357,7 @@ t_fulldead() {
   setup '[]'
   local pid s A
   tune '.test.full = ". \"$STUB/full-cmd\""'
-  echo 'echo x >> "$STUB/full-at"; until [ -e "$STUB/go" ]; do sleep 0.1; done' > "$STUB/full-cmd"
+  echo "$(wait_fn)"'; echo x >> "$STUB/full-at"; wait_poll [ -e "$STUB/go" ]' > "$STUB/full-cmd"
   loop full-test > /dev/null || fail "the full test did not start"
   wait_until '[ -s "$STUB/full-at" ] && jq -e .pid "$ST/fulltest.jsonl.running" > /dev/null' 'cat "$ST/fulltest.jsonl.log" "$ST/fulltest.jsonl.running"' \
     || fail "the run did not start, or its marker names no process"
@@ -463,7 +463,7 @@ t_fullreapstop() {
 t_pushnowbusy() {
   ftnow; local O0 out
   O0=$(ftorigin)
-  echo 'git rev-parse HEAD >> "$STUB/full-at"; until [ -e "$STUB/go" ]; do sleep 0.1; done' > "$STUB/full-cmd"
+  echo "$(wait_fn)"'; git rev-parse HEAD >> "$STUB/full-at"; wait_poll [ -e "$STUB/go" ]' > "$STUB/full-cmd"
   loop full-test > /dev/null || fail "full-test did not start"
   wait_until '[ -s "$STUB/full-at" ]' 'cat "$ST/fulltest.jsonl.log"'
   out=$(loop push-now 2>&1); [ $? = 2 ] && grep -q 'a full test run is under way' <<<"$out" || fail "push-now during a full test run was not refused: $out"

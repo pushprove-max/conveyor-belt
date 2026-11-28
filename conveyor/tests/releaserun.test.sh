@@ -30,9 +30,9 @@ relsnap() {
 # it selected 3 (`TESTRUN cases=3`), and the snapshot's of says so.
 t_relrecord() {
   local O pid s
-  relsetup 'mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && printf "%s\n" "TESTRUN cases=3" "TESTRUN files=2" "-- FAIL a.test" > "$CONVEYOR_TEST_LOG/run.log" && : > "$CONVEYOR_TEST_LOG/cases/ok/one" && : > "$STUB/at1"
-until [ -e "$STUB/go" ]; do sleep 0.1; done; : > "$CONVEYOR_TEST_LOG/cases/ok/two"; : > "$STUB/at2"
-until [ -e "$STUB/go2" ]; do sleep 0.1; done'
+  relsetup "$(wait_fn)"'; mkdir -p "$CONVEYOR_TEST_LOG/cases/ok" && printf "%s\n" "TESTRUN cases=3" "TESTRUN files=2" "-- FAIL a.test" > "$CONVEYOR_TEST_LOG/run.log" && : > "$CONVEYOR_TEST_LOG/cases/ok/one" && : > "$STUB/at1"
+wait_poll [ -e "$STUB/go" ]; : > "$CONVEYOR_TEST_LOG/cases/ok/two"; : > "$STUB/at2"
+wait_poll [ -e "$STUB/go2" ]'
   loop release-prep 1.1.0 > "$T/$CASE.prep" 2>&1 & pid=$!
   wait_until '[ -e "$STUB/at1" ]' || fail "the suite did not start: $(cat "$T/$CASE.prep")"
   relsnap "the snapshot does not show the run on $O, 1 case done" --arg o "$O" '.state == "running" and .sha == $o and .version == "1.1.0" and .done == 1 and .of == 3 and .ended == null'
@@ -102,7 +102,7 @@ t_relbigrun() {
 # no release can use. A card lands (main moves) while the stub suite waits; the snapshot must say moved before it ends.
 t_relmoving() {
   local O pid
-  relsetup ': > "$STUB/at1"; until [ -e "$STUB/go" ]; do sleep 0.1; done'
+  relsetup "$(wait_fn)"'; : > "$STUB/at1"; wait_poll [ -e "$STUB/go" ]'
   loop release-prep 1.1.0 > "$T/$CASE.prep" 2>&1 & pid=$!
   wait_until '[ -e "$STUB/at1" ]' || fail "the suite did not start: $(cat "$T/$CASE.prep")"
   relsnap "the snapshot says main moved before any card landed" '.state == "running" and .moved == false and (has("main") | not)'

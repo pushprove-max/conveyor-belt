@@ -9,6 +9,22 @@
 # The engine folder, as lib.sh sets it: named here too, so the release closure (tools/closure.sh) follows this file's paths.
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
+# wait_fn: prints the text of wait_poll, the wait of a script a case writes. Such a script runs in a shell of its own
+# (sh too, or one with no environment), where wait_until is not. The case puts the text in the script
+# (`"$(wait_fn)"`), and the script calls `wait_poll <command> [<argument>...]`, as `wait_poll [ -e "$STUB/go" ]`: the
+# command is run every 0.1 s until it holds. The ceiling is that of the case as it writes the script: WAIT_CEILING
+# seconds (120) times the run's load factor (CONVEYOR_LOAD_FACTOR, 1 with none), rounded up. When it is reached, the
+# script prints the command and exits 1, so a hold the case never lets go fails with what it waited for: a loop of
+# the script's own (`until [ -e <file> ]; do sleep 0.1; done`) runs until a limit outside the test ends it, and the
+# pack's lint (.conveyor/lint-poll.sh) fails it. The text is one line with no single quote and no backslash: it
+# stands in quoted text, and in an argument of printf or sed. It is here, with its case (t_waitpoll), and each case
+# has it, as the runner sources every case file before it runs a case: wait.sh is in the map's area core, and a
+# change to it runs every engine case.
+wait_fn() {
+  local n; n=$(awk -v c="${WAIT_CEILING:-120}" -v f="${CONVEYOR_LOAD_FACTOR:-1}" 'BEGIN { x = c * f; print (x == int(x)) ? x : int(x) + 1 }')
+  printf 'wait_poll() { _wp=0; until "$@"; do _wp=$((_wp + 1)); [ "$_wp" -le %s ] || { echo "wait_poll: not true after %s s: $*" >&2; exit 1; }; sleep 0.1; done; }\n' "$((n * 10))" "$n"
+}
+
 # Bugs: a wait gives up on a condition that is not true yet, so a case fails on a busy machine; a wait on a condition
 # that never comes true hangs the run, or ends without saying what it waited for and what it last saw, so the
 # failure cannot be read; a wait that ended at its ceiling passes for one that was met; a wait gives up before or
@@ -50,6 +66,28 @@ t_waitexit() {
   local out
   out=$(WAIT_CEILING=1 wait_until 'return 7' 2>&1) && fail "a failing condition passed"
   grep -qF 'last state: exit 7, nothing printed' <<<"$out" || fail "the ceiling does not print the condition's exit status: $out"
+}
+# Bugs: a script a test writes waits for its file with a loop of its own, so a file that never comes holds the run
+# until a limit outside the test ends it (issue 1840: 35 minutes of a proof run); the wait the script is given
+# (wait_fn) does not run in sh; its ceiling is not the test's, times the run's load factor; at the ceiling the script
+# goes on, or does not say what it waited for.
+t_waitpoll() {
+  local d=$T/$CASE out rc s; mkdir -p "$d"
+  # Met: the script, run by sh, goes on once its file is there, and not before.
+  printf '%s\n' "$(wait_fn)" ': > "$1/up"; wait_poll [ -e "$1/go" ]; : > "$1/on"' > "$d/met.sh"
+  sh "$d/met.sh" "$d" 2> "$d/met.err" & s=$!
+  wait_until '[ -e "$d/up" ]' || fail "the script did not start: $(cat "$d/met.err")"
+  [ ! -e "$d/on" ] || fail "the script went on before its file was there"
+  : > "$d/go"; wait "$s" || fail "the script failed though its file came: $(cat "$d/met.err")"
+  [ -e "$d/on" ] || fail "the script did not go on once its file was there"
+  # Never met: the script ends at the ceiling of the test that wrote it (1 s times the load factor 1.5: 2 s), says
+  # what it waited for, and runs nothing after.
+  ( export WAIT_CEILING=1 CONVEYOR_LOAD_FACTOR=1.5; printf '%s\n' "$(wait_fn)" 'wait_poll [ -e "$1/never" ]; : > "$1/past"' > "$d/never.sh" )
+  s=$SECONDS; out=$(timeout 60 sh "$d/never.sh" "$d" 2>&1); rc=$?
+  [ "$rc" = 1 ] || fail "a script whose file never comes did not fail at its ceiling (exit $rc): $out"
+  [ $((SECONDS - s)) -ge 2 ] || fail "a script with a ceiling of 2 s gave up after $((SECONDS - s)) s"
+  [ "$out" = "wait_poll: not true after 2 s: [ -e $d/never ]" ] || fail "the script does not say what it waited for: $out"
+  [ ! -e "$d/past" ] || fail "the script went on past the wait that was not met"
 }
 # A condition that blocks is ended at the ceiling with what it started, though they ignore the signal to end (the
 # child takes that from it), and the failure says it was still running.

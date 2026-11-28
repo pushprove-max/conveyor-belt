@@ -207,8 +207,8 @@ t_machinemode() {
   # Bug: the pause was written under the machine's lock alone, and a lane's note replaces the host file under the
   # host file's own lock: a note that read the file before the pause wrote its older reading over it, and the machine
   # ran on. The pause waits for the host file's lock, so it reads what the note wrote.
-  flock "$H.lock" sh -c 'touch "$1.held"; until [ -e "$1.go" ]; do sleep 0.1; done; jq ".noted = true" "$1" > "$1.note" && mv "$1.note" "$1"' sh "$H" & local lk=$!
-  until [ -e "$H.held" ]; do sleep 0.1; done
+  flock "$H.lock" sh -c "$(wait_fn)"'; touch "$1.held"; wait_poll [ -e "$1.go" ]; jq ".noted = true" "$1" > "$1.note" && mv "$1.note" "$1"' sh "$H" & local lk=$!
+  wait_until '[ -e "$H.held" ]' || fail "the lock of the host file was not taken"
   loop "$A" machine pause >/dev/null & local mp=$!
   # While the lock is held, the pause waits at it (its flock runs) and has neither ended nor written.
   wait_until 'under "$mp" flock || ! kill -0 "$mp" 2>/dev/null'; kill -0 "$mp" 2>/dev/null && [ "$(jq -r '.mode // "none"' "$H")" = none ] \

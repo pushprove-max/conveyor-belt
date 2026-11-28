@@ -294,13 +294,13 @@ t_snapshotbatch() {
   { issue 7 2026-01-01; issue 8 2026-01-01; } | jq -cs . > "$STUB/issues.json"
   # The second push, of main at card 8, by the loop's push(): its pre-push hook writes nothing and holds until go; the
   # push then holds before its first pushed line until rows (record, wrapped), with $PUSHED already at card 8.
-  mkdir -p "$d"; printf '#!/usr/bin/env bash\n: > %q/hook\nuntil [ -e %q/go ]; do sleep 0.05; done\n' "$d" "$d" > "$R/.git/hooks/pre-push" && chmod +x "$R/.git/hooks/pre-push" # sleep: the hook's poll for its release
+  mkdir -p "$d"; printf '#!/usr/bin/env bash\n%s\n: > %q/hook\nwait_poll [ -e %q/go ]\n' "$(wait_fn)" "$d" "$d" > "$R/.git/hooks/pre-push" && chmod +x "$R/.git/hooks/pre-push" # the hook's poll for its release
   # shellcheck disable=SC2034 # HERE is read by the lines of conveyor.sh and commands/run.sh run by the eval
   ( HERE=$SRC; export CONVEYOR_MAIN=$R CONVEYOR_CARDS=$T/$CASE/cards
     eval "$(sed -n '/^\. "\$HERE\/lib\/portable.sh"/,/^\. "\$HERE\/lib\/records.sh"/p' "$SRC/conveyor.sh")"
     eval "$(grep '^\. "\$HERE/lib/' "$SRC/commands/run.sh")"
     eval "$(declare -f record | sed '1s/^record /realrecord /')"
-    record() { [ "$3" != pushed ] || { : > "$d/gap"; until [ -e "$d/rows" ]; do sleep 0.05; done; }; realrecord "$@"; } # sleep: the poll for the case's release
+    record() { [ "$3" != pushed ] || { : > "$d/gap"; wait_until '[ -e "$d/rows" ]' || exit 1; }; realrecord "$@"; } # the poll for the case's release
     names || exit 1; push c8 8 ) > "$d/push.out" 2>&1 & pid=$!
   wait_until '[ -e "$d/hook" ]' "cat '$d/push.out'" || fail "the second push's hook did not start"
   out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot during the second push exited non-zero"

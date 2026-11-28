@@ -419,7 +419,7 @@ t_followtakingrefused() {
 t_followfetch() {
   prunesetup; trap 'touch "$STUB/go"; kill $tp 2>/dev/null; chmod -R u+w "$T/$CASE"' EXIT; tp=''
   # A new commit whose pack check waits for $STUB/go: its take runs until then.
-  pushed "sed -i '2i until [ -e $STUB/go ]; do sleep 0.1; done' conveyor/lib/pack.sh" # sleep: the pause of the pack check's own wait for $STUB/go
+  pushed "sed -i '2i $(wait_fn); wait_poll [ -e $STUB/go ]' conveyor/lib/pack.sh" # the pause of the pack check's own wait for $STUB/go
   GIT_TRACE=$STUB/trace takeby "$A" > "$STUB/take.out" 2>&1 & tp=$!
   for _ in $(seq 300); do [ -d "$V/$NEW" ] && break; sleep 0.1; done
   [ -d "$V/$NEW" ] || fail "the first take did not install $NEW: $(cat "$STUB/take.out")"

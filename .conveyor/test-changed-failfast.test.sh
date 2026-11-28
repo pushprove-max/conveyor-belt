@@ -57,12 +57,17 @@ printf '%s\n' 'import pathlib' 'import unittest' '' '' 'class W(unittest.TestCas
   "if __name__ == '__main__':" '    unittest.main()' > "$R/$D/w.test.py"
 printf '%s\n' 'echo "not ok - first"' "sleep $L; : > '$T/sh-later'; echo 'ok - later'; exit 1 # sleep: the later case, past the stop" > "$R/conveyor/lib/s.test.sh"
 printf '%s\n' 'echo "FAIL: broken" >&2' "sleep $L; : > '$T/fail-later'; exit 1 # sleep: the later part, past the stop" > "$R/conveyor/lib/f.test.sh"
+# poll <file>: the text of a fixture's wait for a file a process it started writes. Its ceiling is that of the tests'
+# wait (WAIT_CEILING, 120 s: conveyor/tests/wait.sh) times the run's load factor: a fixture whose file never comes
+# fails then, and says what it waited for (issue 1840: with no ceiling, one held a proof run for 35 minutes).
+WS=$(awk -v c="${WAIT_CEILING:-120}" -v f="${CONVEYOR_LOAD_FACTOR:-1}" 'BEGIN { x = c * f; print (x == int(x)) ? x : int(x) + 1 }')
+poll() { echo "i=0; until [ -s '$1' ]; do [ \$((i += 1)) -le $((WS * 10)) ] || { echo 'no $1 after $WS s' >&2; exit 1; }; sleep 0.1; done"; }
 # A shell test file whose later part runs in a group of its own (timeout's), started before its failed case.
 printf '%s\n' "timeout 60 bash -c \"echo \\\$\\\$ > '$T/grp-pid'; sleep $L; : > '$T/grp-later'\" & # sleep: the later part, past the stop" \
-  "while [ ! -s '$T/grp-pid' ]; do sleep 0.1; done # poll: the later part's start is seen only in the file it writes" \
+  "$(poll "$T/grp-pid") # poll: the later part's start is seen only in the file it writes" \
   "echo 'not ok - first'; wait; exit 1" > "$R/conveyor/lib/g.test.sh"
 printf '%s\n' "timeout 600 bash -c \"echo \\\$\\\$ > '$T/long-pid2'; exec sleep 300\" & # sleep: runs until the run's end ends it" \
-  "while [ ! -s '$T/long-pid2' ]; do sleep 0.1; done # poll: the nested group's start is seen only in the file it writes" \
+  "$(poll "$T/long-pid2") # poll: the nested group's start is seen only in the file it writes" \
   "echo \$\$ > '$T/long-pid'; wait" > "$R/conveyor/lib/long.test.sh"
 printf '%s\n' "test('one', () => {});" "test('first', () => {});" > "$R/hooks/w.test.ts"; printf '%s\n' "test('other', () => {});" > "$R/hooks/other.test.ts"
 # The plugin test run (claude plugin test): another file's failed case, then this file's passed and failed ones, and

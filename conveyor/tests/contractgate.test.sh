@@ -483,7 +483,7 @@ t_pushgateslot() {
   pushgatehook "h=0; flock -n $(printf %q "$p/1") true 2>/dev/null || h=1; [ -e $(printf %q "$fr") ] && f=1 || f=0; echo \"slots=\$h freed=\$f live=\$(jq -r .action \"\$PWD.live\" 2>&1)\" > $(printf %q "$o")"
   FXWT=$T/$CASE/cards/c7; git -C "$R" worktree add -q --detach "$FXWT" && echo 'export const n = 1' > "$FXWT/web.ts" && git -C "$FXWT" add -A || fail "the card's change"
   mkdir -p "$p" && : >> "$p/1" || fail "the test slot"
-  flock "$p/1" bash -c 'until [ -e "$0" ]; do sleep 0.05; done' "$fr" & # sleep: the other test run's poll for the case to give its slot back
+  flock "$p/1" bash -c "$(wait_fn)"'; wait_poll [ -e "$0" ]' "$fr" & # the other test run's poll for the case to give its slot back
   # The path is put in here: wait_run() has a local p of its own, so "$p" in the condition would read that one.
   wait_until "! flock -n $(printf %q "$p/1") true" || fail "the one test slot was not held"
   # shellcheck disable=SC2016 # expanded in fx_in's shell

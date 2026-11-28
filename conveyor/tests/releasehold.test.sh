@@ -92,7 +92,7 @@ t_relholdstop() {
 t_relholdtwice() {
   local O RUN out rc l log=$T/$CASE/cards/release/run.log
   runsetup true
-  ( exec {l}>>"$ST/release.landing" && flock -s "$l" && touch "$STUB/pushing" && while [ ! -e "$STUB/pushgo" ]; do sleep 0.1; done ) & # sleep: the stand-in push runs until the case lets it go
+  ( exec {l}>>"$ST/release.landing" && flock -s "$l" && touch "$STUB/pushing" && wait_until '[ -e "$STUB/pushgo" ]' ) & # the stand-in push runs until the case lets it go
   wait_until '[ -e "$STUB/pushing" ]' || fail "the stand-in push did not take its share of the hold"
   out=$(loop release-run prep 1.1.0 2>&1) || { touch "$STUB/pushgo"; fail "release-run did not start the run: $out"; }
   wait_until "grep -q 'a push runs: the run starts once it ends' '$log'" "cat '$log'" || { touch "$STUB/pushgo"; fail "the run did not wait for the push"; }
@@ -107,7 +107,7 @@ t_relholdtwice() {
 # A release run's stand-in: it holds the hold until the case lets it go ($STUB/letgo).
 rh_hold() {
   local h
-  ( exec {h}>>"$ST/release.hold" && flock -x "$h" && touch "$STUB/held" && while [ ! -e "$STUB/letgo" ]; do sleep 0.1; done ) & # sleep: the stand-in run holds the hold until the case lets it go
+  ( exec {h}>>"$ST/release.hold" && flock -x "$h" && touch "$STUB/held" && wait_until '[ -e "$STUB/letgo" ]' ) & # the stand-in run holds the hold until the case lets it go
   wait_until '[ -e "$STUB/held" ]' || fail "the stand-in run did not take the hold"
 }
 # Bug (#1076): a card that finished its tests while a release run was under way landed. The run's stand-in holds the
@@ -145,7 +145,7 @@ rh_boardpush() { # <the Board's push, as loop arguments...>
     || { touch "$STUB/letgo"; fail "$* refused during a release run does not show as the last push, with its reason: $(loop health | jq -c .pushLast)"; }
   touch "$STUB/letgo"; wait_until "flock -n -x '$ST/release.hold' true" || fail "the stand-in run did not let the hold go"
   [ "$(ftorigin)" != "$(ftmain)" ] || fail "$* pushed during a release run"
-  ( exec {pl}>>"$ST/pushed.lock" && flock -x "$pl" && touch "$STUB/pushlocked" && while [ ! -e "$STUB/pushgo" ]; do sleep 0.1; done ) & # sleep: the loop's stand-in push holds the push lock until the case lets it go
+  ( exec {pl}>>"$ST/pushed.lock" && flock -x "$pl" && touch "$STUB/pushlocked" && wait_until '[ -e "$STUB/pushgo" ]' ) & # the loop's stand-in push holds the push lock until the case lets it go
   wait_until '[ -e "$STUB/pushlocked" ]' || fail "the stand-in push did not take the push lock"
   out=$(loop "$@" 2>&1) || { touch "$STUB/pushgo"; fail "$* was refused with no release run under way: $out"; }
   ( exec {h}>>"$ST/release.hold" {l}>>"$ST/release.landing" && flock -x "$h" && touch "$STUB/relheld" && flock -x "$l" && ftorigin > "$STUB/relstart" ) &

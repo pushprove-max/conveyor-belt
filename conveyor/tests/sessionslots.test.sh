@@ -88,7 +88,7 @@ t_sessionslotsqueue() {
   mkdir -p "$XDG_CONFIG_HOME/conveyor" "$c" && echo "{\"testSlots\": 10, \"testSlotsDir\": \"$d/slots\"}" > "$XDG_CONFIG_HOME/conveyor/host.json" \
     && : > "$c/1" && : > "$c/2" || fail "the case's host file or permits could not be made"
   # The session's other runs: a process of its own holds both permits, so the runs below do not inherit their locks.
-  ( exec 7>>"$c/1" 8>>"$c/2"; flock 7 && flock 8 && : > "$d/held"; while [ ! -e "$d/release" ]; do sleep 0.1; done ) &
+  ( exec 7>>"$c/1" 8>>"$c/2"; flock 7 && flock 8 && : > "$d/held"; wait_until '[ -e "$d/release" ]' ) &
   while [ ! -e "$d/held" ] && [ $i -lt 100 ]; do i=$((i + 1)); sleep 0.05; done
   [ -e "$d/held" ] || fail "the session's permits could not be held"
   ( CONVEYOR_CARD=c20261118T000000-test-1 slot_pool && slot_whole 2>/dev/null && : > "$d/session" ) &

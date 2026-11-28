@@ -58,7 +58,7 @@ livestream() {
     jq -cn --arg s "$s" --argjson t "$now" '{card:"c7-7",issue:7,step:$s,time:($t | todate),tokens:{claude:0,codex:0},result:"ok",sha:"",reason:""}
       + if $s == "start" then {of: "build"} else {} end' >> "$ST/cards.jsonl"
   done
-  cp "$1" "$w.out"; printf '%s\n' 'until [ -e "$1" ]; do sleep 0.1; done' > "$T/$CASE/session" # sleep: a session that runs until the case ends it
+  cp "$1" "$w.out"; printf '%s\n' "$(wait_fn)" 'wait_poll [ -e "$1" ]' > "$T/$CASE/session" # a session that runs until the case ends it
   ( . "$SRC/lib/portable.sh"; eval "$(sed -n '/^watch() {/,/^}/p' "$SRC/lib/session.sh")"
     # shellcheck disable=SC2034 # LIVE, STUCK and SESSION_STUCK are read by watch(), defined by the eval
     LIVE=0.2 STUCK=1200 SESSION_STUCK=600; bash "$T/$CASE/session" "$T/$CASE/end" < /dev/null > /dev/null 2>&1 &
@@ -125,11 +125,11 @@ t_zerousagesplit() {
 # it and each look after, which read it again, so the live record never named the answer after it.
 t_livewedge() {
   local w=$T/$CASE/cards/c7-7 run r; setup "[$(issue 7 2026-01-01)]"; mkdir -p "$T/$CASE/cards"
-  cat > "$T/$CASE/session" <<'EOF'
+  wait_fn > "$T/$CASE/session"; cat >> "$T/$CASE/session" <<'EOF'
 echo 42
 until [ -s "$1.live" ] || [ -e "$2" ]; do sleep 0.1; done # sleep: the answer comes once watch() has made the live record
 echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","name":"Bash","input":{"command":"make"}}],"usage":{"input_tokens":10,"output_tokens":1}}}'
-until [ -e "$2" ]; do sleep 0.1; done # sleep: a session that runs until the case ends it
+wait_poll [ -e "$2" ] # a session that runs until the case ends it
 EOF
   ( . "$SRC/lib/portable.sh"; eval "$(sed -n '/^watch() {/,/^}/p' "$SRC/lib/session.sh")"
     # shellcheck disable=SC2034 # LIVE, STUCK and SESSION_STUCK are read by watch(), defined by the eval

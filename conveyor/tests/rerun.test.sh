@@ -33,14 +33,14 @@ rerunsetup() {
   printf '%s\n' 'a.test one two' 'b.test flaky' 'c.test three' > "$STUB/cases"
   printf '%s\n' 'a.txt a.test' 'core.txt all' 'x.txt a.test:one' > "$STUB/map"
   printf '%s\n' "$@" > "$STUB/plan"
-  cat > "$STUB/test-cmd" <<'EOF'
+  wait_fn > "$STUB/test-cmd"; cat >> "$STUB/test-cmd" <<'EOF'
 L=$CONVEYOR_TEST_LOG/run.log; RR=${CONVEYOR_TEST_RERUN:-/dev/null}
 p=; [ ! -e "$STUB/perfile" ] || p=1 S=$CONVEYOR_TEST_LOG/stub
 # With $STUB/perfile a run's files run side by side (filecmd(), lib/fileeach.sh): the run's number n is its first
 # file's, which the others wait for (in $S/n), and a file with cases to run waits below for the files before it to end
 # (each leaves $S/<its place>), so $STUB/ran has one file's cases at a time, in order, as a run one at a time has them.
 case $PWD in */mainrun/*) n=main ;;
-  *) if [ -n "$p" ] && [ "${CONVEYOR_TEST_N:-1}" != 1 ]; then until [ -s "$S/n" ]; do sleep 0.05; done; n=$(cat "$S/n")
+  *) if [ -n "$p" ] && [ "${CONVEYOR_TEST_N:-1}" != 1 ]; then wait_poll [ -s "$S/n" ]; n=$(cat "$S/n")
      else n=$(($(cat "$STUB/n" 2>/dev/null || echo 0) + 1)); echo "$n" > "$STUB/n"; [ -z "$p" ] || { mkdir -p "$S" && echo "$n" > "$S/n"; }; fi ;;
 esac
 [ "$RR" = /dev/null ] || cp "$RR" "$STUB/rerun.$n"
@@ -63,7 +63,7 @@ for f in $fs; do
     [ -z "$fc" ] || cs=$(sed -n "s/^$f //p" "$STUB/cases" | tr ' ' '\n' | grep -xFf <(printf '%s\n' $cs $fc))
   fi
   [ "$(echo $cs)" = "$(sed -n "s/^$f //p" "$STUB/cases")" ] || for c in $cs; do printf 'TESTRUN case\t%s\t%s\n' "$f" "$c" >> "$L"; done
-  [ -z "$p" ] || for ((j = 1; j < ${CONVEYOR_TEST_N:-1}; j++)); do until [ -e "$S/$j" ]; do sleep 0.05; done; done
+  [ -z "$p" ] || for ((j = 1; j < ${CONVEYOR_TEST_N:-1}; j++)); do wait_poll [ -e "$S/$j" ]; done
   echo "== $f"; echo "== $f" >> "$L"; r=ok
   [ "$RR" = /dev/null ] || { [ -z "$dn" ] || w="${w}did not pass|"; tr '|' '\n' <<<"$w" | awk -v f="$f" 'length { printf "TESTRUN why\t%s\t%s\n", f, $0 }' >> "$L"; }
   for c in $cs; do

@@ -100,7 +100,7 @@ t_tclock() {
 t_tcpicklock() {
   tkcards; local d=$T/$CASE p rc lk
   ( fx_in 'eval "$(declare -f farstates | sed "1s/^farstates /tkfar0 /")"
-    farstates() { if [ "${FUNCNAME[1]}" = testpick ]; then : > "'"$d"'/paused"; until [ -e "'"$d"'/go" ]; do sleep 0.1; done; fi; tkfar0 "$@"; } # sleep: the paused pick waits for the case to let it go
+    farstates() { if [ "${FUNCNAME[1]}" = testpick ]; then : > "'"$d"'/paused"; wait_until "[ -e \"'"$d"'/go\" ]" || exit 1; fi; tkfar0 "$@"; } # the paused pick waits for the case to let it go
     locked pick "" "" "[]"'; echo "$RC" > "$d/pick.rc" ) & p=$!
   wait_until "[ -e '$d/paused' ]" || fail "the pick did not reach its read of the record"
   exec {lk}>>"$ST/testactions/cards.json.lock"

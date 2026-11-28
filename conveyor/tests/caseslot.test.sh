@@ -27,7 +27,7 @@ t_caseslot() {
       deaf() { trap '' TERM; while :; do sleep 1; done; } # sleep: a stand-in that goes on until it is killed
       trap 'deaf & exit' TERM; echo "$BASHPID" > "$T/caseslot/left"
       while :; do sleep 1; done ) > /dev/null 2>&1 & # sleep: the process the case leaves, holding the slot
-    until [ -s "$T/caseslot/left" ]; do sleep 0.05; done
+    wait_until '[ -s "$T/caseslot/left" ]' || fail "the process the case leaves did not start"
     ! flock -n "$T/caseslot/held" true || fail "the process the case leaves does not hold the slot: the case shows nothing"
   }
   t_slotnext() {
