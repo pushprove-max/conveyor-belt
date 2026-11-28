@@ -139,6 +139,10 @@ RERUN0=$RERUN
 # The cases the loop names of the test files it gives (conveyor/lib/testlist.sh owncases(): `<file><TAB><case>` lines),
 # read in one-file mode (below); unset, as the list is, so no test this runs reads the loop's.
 TCASES=${CONVEYOR_TEST_CASES:-}; unset CONVEYOR_TEST_CASES
+# The file the loop names for the answer to "which files of my list would a run start with no case?"
+# (CONVEYOR_TEST_NOCASE, written in the list mode below; conveyor/lib/testlist.sh nocaseask() reads it and lists
+# none of them: issue 1829); unset, as the list is.
+NOCASE=${CONVEYOR_TEST_NOCASE:-}; unset CONVEYOR_TEST_NOCASE
 # onecases <engine case file> <chosen cases, words> [narrow]: the cases of that file a run of it alone runs, one a line:
 # the chosen ones it holds, else all its cases (with narrow, none: cnarrow, below), and of those the cases the loop
 # names of it (TCASES) when it names any. Fails when the file holds no case.
@@ -1569,7 +1573,10 @@ while IFS= read -r t; do
       # runs (onecases), as every case of the runner is explicit, so a case of the file the loop did not name is no reason to start it.
       if [ -n "${CONVEYOR_TEST_LIST:-}" ]; then
         [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || [ -n "$cases" ] || cases=$(allcases)
-        add=$(onecases "$t" "${cnarrow:+$cases}" "$cnarrow") && [ -n "$add" ] || continue
+        # A file with none of them is named in NOCASE (above): its one-file run (below) would run no case. Not a file
+        # that holds no case, or one in a folder of conveyor/tests/, which a one-file run does not read as a case file.
+        add=$(onecases "$t" "${cnarrow:+$cases}" "$cnarrow") || continue
+        [ -n "$add" ] || { [ -z "$NOCASE" ] || [[ $t == conveyor/tests/*/* ]] || echo "$t" >> "$NOCASE"; continue; }
         cases=$({ tr ' ' '\n' <<<"$cases" | grep -vxF -f <(comm -23 <(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$t" | sort -u) <(sort -u <<<"$add")); echo "$add"; } | grep . | sort -u | tr '\n' ' ')
       else
         [ -z "${run[conveyor/conveyor.test.sh]:-}" ] || [ -n "$cases" ] || continue

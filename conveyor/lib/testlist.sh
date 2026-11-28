@@ -225,6 +225,7 @@ readersin() { # <worktree>
   [ -s "$TESTCACHE" ] && c=$(git -C "$1" -c core.quotePath=false diff --cached --name-status --no-renames HEAD -- 2>/dev/null) && [ -n "$c" ] || return 0
   while IFS= read -r f; do
     [ -f "$1/$f" ] || continue
+    [ -z "${NOCASEOFF:-}" ] || ! grep -qxF -- "$f" <<<"$NOCASEOFF" || continue # a run would start it with no case (nocaseask())
     if [ ${#fs[@]} != 0 ] && printf '%s\n' "${fs[@]}" | grep -qxF -- "$f"; then
       cut -f1 <<<"${TEST_CASES:-}" | grep -qxF -- "$f" || continue
       TEST_CASES=$(awk -F'\t' -v f="$f" '$1 != f' <<<"$TEST_CASES"); TEST_CASES=${TEST_CASES:+$TEST_CASES$'\n'}; READWHOLE=1
@@ -746,7 +747,38 @@ linksto() { # <worktree> [all]
 # broke the test before (bug: a card that changed foreman.sh and a test file ran none of foreman.sh's links, and with
 # no test file the cap ran 5 of its 9).
 changelinks() { # <worktree> [all]
-  git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | linksto "$1" ${2:+"$2"}
+  git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | linksto "$1" ${2:+"$2"} \
+    | { [ -z "${NOCASEOFF:-}" ] && cat || grep -vxF -- "$NOCASEOFF" || :; } # not a file a run would start with no case (nocaseask())
+}
+# NOCASEOFF: of the test files a card's list could hold (those testsel() gave, <its output>, those the links give the
+# change and those whose last pass read it), each one the pack's changed-tests command says a run of the change would
+# start with no case, one a line (#1829). The command is asked in its list mode (CONVEYOR_TEST_LIST, as selfirst()
+# asks it) with those files as its file list and CONVEYOR_TEST_NOCASE, the file it names them in. listcmd() lists
+# none of them, so none starts: bug, each linked test file started, and its one-file run made the selection again,
+# found no case of the file and passed (4 files of card 1829). A file the command leaves off its list is not taken
+# off for that: a command that does not know the variable writes no such file, and each file stays. Never one of the
+# card's own test files (own), which run the cases the card names (TEST_CASES).
+# nocaseout <array>: takes the files of NOCASEOFF off the array (listcmd()'s fs, or its lk).
+nocaseout() {
+  local -n arr=$1
+  local f k=()
+  [ -n "${NOCASEOFF:-}" ] || return 0
+  for f in "${arr[@]}"; do grep -qxF -- "$f" <<<"$NOCASEOFF" || k+=("$f"); done
+  arr=("${k[@]}")
+}
+nocaseask() { # <worktree> <testsel's output>
+  local cmd tc c
+  NOCASEOFF=''
+  packget test.changed tc && [ -n "$tc" ] && packget test.command cmd && [ -n "$cmd" ] || return 0
+  c=$(git -C "$1" -c core.quotePath=false diff --cached --name-status --no-renames HEAD -- 2>/dev/null) || c=''
+  rm -f "$1.nocase" "$1.capsel"
+  { [[ $2 != *$'\n'* ]] || printf '%s\n' "${2#*$'\n'}"; changelinks "$1"; [ ! -s "$TESTCACHE" ] || [ -z "$c" ] || cachereaders "$c"; } \
+    | grep . | LC_ALL=C sort -u > "$1.capfiles"
+  [ -s "$1.capfiles" ] \
+    && (cd "$1" && CONVEYOR_TEST_LIST=$1.capsel CONVEYOR_TEST_NOCASE=$1.nocase CONVEYOR_TEST_RERUN='' CONVEYOR_TEST_FILELIST=$1.capfiles CONVEYOR_TEST_CASES=${TEST_CASES:-} CONVEYOR_TEST_LOG='' \
+      timeout 300 bash -c "$cmd" > /dev/null 2>&1 < /dev/null 8>&-) && [ -f "$1.capsel" ] && [ -s "$1.nocase" ] \
+    && NOCASEOFF=$(grep -xF -f "$1.capfiles" "$1.nocase" | grep -vxF -f <(printf '%s\n' "${own[@]}") | LC_ALL=C sort -u)
+  rm -f "$1.nocase" "$1.capsel" "$1.capfiles"
 }
 # listcmd()'s capped list fs with each linked file (lk, listcmd()'s) added that the cap left out and that
 # changelinks() gives <worktree>'s change; KEPTLINKS: how many it added (bug: a change to foreman.sh alone ran 5 of

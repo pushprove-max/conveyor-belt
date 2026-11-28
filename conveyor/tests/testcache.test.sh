@@ -161,6 +161,39 @@ t_testcachelink() {
 }
 
 # cachelistsetup <file>...: main holds the files (each made before), and card c7's worktree, whose change the case makes.
+# #1829: the command of the changed tests, asked in its list mode with CONVEYOR_TEST_NOCASE, names l2.test.sh (a
+# linked file) and k.test.sh (its last pass read the change) as files a run would start with no case: neither is on
+# the list, and the list's record names both (noCase). A command that only leaves them off its list, and names no
+# such file, keeps all three: a project's command that knows no links cannot take a linked file off. Bugs it catches:
+# each linked file started, and its one-file run made the selection, found no case and passed; and a file was taken
+# off because the command's list did not hold it.
+t_testcachenocase() {
+  setup '[]'
+  local w=$T/$CASE/cards/c7 i ls=()
+  for i in k l1 l2; do echo x > "$R/$i.test.sh"; ls+=("$i.test.sh"); done; echo d > "$R/d.md"
+  linkset '{"d.md": ["l1.test.sh", "l2.test.sh"]}'; cachelistsetup "${ls[@]}" d.md
+  echo two >> "$w/d.md" && git -C "$w" add -A || fail "the card's change could not be staged"
+  tune '.test.changed = "sel.sh" | .test.command = "ls | grep -E \"^l1[.]test\" > \"$CONVEYOR_TEST_LIST\""'
+  LASTPASS=$'k.test.sh\td.md' cachelistrun 'listcmd "$wt" && echo $TEST_FILES > "$T/$CASE/got"; jq -c .noCase "$wt.testlist" > "$T/$CASE/nc"'
+  [ "$(tr ' ' '\n' < "$T/$CASE/got" | sort | paste -sd ' ' -)" = "k.test.sh l1.test.sh l2.test.sh" ] && [ "$(cat "$T/$CASE/nc")" = null ] \
+    || fail "a command that lists l1.test.sh alone and names no file with no case did not keep the three files: $(cat "$T/$CASE/got" "$T/$CASE/nc" "$T/$CASE/run.out" 2>&1)"
+  tune '.test.command = "ls | grep -E \"^l1[.]test\" > \"$CONVEYOR_TEST_LIST\"; [ -z \"${CONVEYOR_TEST_NOCASE:-}\" ] || ls | grep -E \"^(k|l2)[.]test\" > \"$CONVEYOR_TEST_NOCASE\""'
+  LASTPASS=$'k.test.sh\td.md' cachelistrun 'listcmd "$wt" && echo $TEST_FILES > "$T/$CASE/got2"; jq -c "[.files, .noCase]" "$wt.testlist" > "$T/$CASE/nc2"'
+  [ "$(cat "$T/$CASE/got2")" = l1.test.sh ] && [ "$(cat "$T/$CASE/nc2")" = '[1,["k.test.sh","l2.test.sh"]]' ] \
+    || fail "the list of a change to d.md is not l1.test.sh alone, with k.test.sh and l2.test.sh named as files with no case: $(cat "$T/$CASE/got2" "$T/$CASE/nc2" "$T/$CASE/run.out" 2>&1)"
+  # d.md links 8 files now, and the command lists l1.test.sh, and x.test.sh, which no link names, and names the 7
+  # others as files with no case: the list is l1.test.sh and x.test.sh. Bug it catches: with the files of no case
+  # taken off before the command's list was read, that list left no linked file out, so it was read as one that
+  # narrowed nothing and the file it adds did not run (on card 1829, the case files of the cases the coverage map
+  # selects: 32 cases ran of the 100 and more it selects).
+  for i in l3 l4 l5 l6 l7 l8 x; do echo x > "$w/$i.test.sh"; done
+  linkset "$(printf 'l%s.test.sh\n' 1 2 3 4 5 6 7 8 | jq -Rn '{"d.md": [inputs]}')"; cp "$R/.conveyor/test-links.json" "$w/.conveyor/test-links.json"
+  git -C "$w" add -A && git -C "$w" commit -qm 'more files' && echo three >> "$w/d.md" && git -C "$w" add -A || fail "the card's files could not be added"
+  tune '.test.command = "ls | grep -E \"^(l1|x)[.]test\" > \"$CONVEYOR_TEST_LIST\"; [ -z \"${CONVEYOR_TEST_NOCASE:-}\" ] || ls | grep -E \"^(k|l[2-8])[.]test\" > \"$CONVEYOR_TEST_NOCASE\""'
+  LASTPASS=$'k.test.sh\td.md' cachelistrun 'listcmd "$wt" && echo $TEST_FILES > "$T/$CASE/got3"'
+  [ "$(tr ' ' '\n' < "$T/$CASE/got3" | sort | paste -sd ' ' -)" = "l1.test.sh x.test.sh" ] \
+    || fail "with 8 linked files, 7 of them with no case, and x.test.sh on the command's list, the list is not l1.test.sh and x.test.sh: $(cat "$T/$CASE/got3" "$T/$CASE/run.out" 2>&1)"
+}
 cachelistsetup() {
   git -C "$R" add -- "$@" && git -C "$R" commit -qm files || fail "main's files could not be committed"
   tune '.test.fileCommand = "true" | .tests.patterns = ["*.test.sh"]'

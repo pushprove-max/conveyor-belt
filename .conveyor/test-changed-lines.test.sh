@@ -135,6 +135,20 @@ got=$(listed)
 [ "$got" = v.test.mjs ] && ok "a link to a test file that has a pass on record is not followed, as in a card's Test step" \
   || no "f.sh changed, a pass of w.test.mjs on record: listed '$got': $(cat "$F/out")"
 git -C "$R" checkout -q -- conveyor/lib/f.sh; git -C "$R" reset -q --hard HEAD~1
+# The loop asks which files of its list a run would start with no case (CONVEYOR_TEST_NOCASE, in the list mode): of
+# a.test.sh, b.test.sh and d.test.sh, the two that hold no case of the change, and a one-file run of one of them runs
+# no case. Bug it catches: the loop started each linked case file, and its one-file run made the selection and ran no
+# case (4 files of card 1829, 26 s each).
+sed -i.bak '4s/echo x/echo X/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
+printf 'conveyor/tests/%s.test.sh\n' a b d > "$F/fl"; rm -f "$F/nc" "$F/ls"
+(cd "$R" && CONVEYOR_TEST_LIST=$F/ls CONVEYOR_TEST_NOCASE=$F/nc CONVEYOR_TEST_FILELIST=$F/fl bash .conveyor/test-changed.sh) > "$F/out" 2>&1
+[ "$(LC_ALL=C sort "$F/nc" 2>&1 | paste -sd ' ' -)" = "conveyor/tests/b.test.sh conveyor/tests/d.test.sh" ] && grep -qxF conveyor/tests/a.test.sh "$F/ls" \
+  && ok "the list mode names the listed case files a run would start with no case" \
+  || no "line 4 of big() changed, the list a, b and d: no-case files '$(cat "$F/nc" 2>&1)', list '$(cat "$F/ls" 2>&1)': $(cat "$F/out")"
+(cd "$R" && CONVEYOR_TEST_FILELIST=$F/fl bash .conveyor/test-changed.sh --file conveyor/tests/b.test.sh) > "$F/out" 2>&1
+grep -qxF 'test-changed: --file: the coverage map selects none of the cases of conveyor/tests/b.test.sh for this change: none run' "$F/out" \
+  && ok "a one-file run of a file the list mode names so runs no case" || no "a one-file run of b.test.sh, line 4 of big() changed: $(cat "$F/out")"
+git -C "$R" checkout -q -- conveyor/lib/f.sh
 # A change outside every function is not the map's to pick: the link runs the case file whole.
 sed -i.bak '1s/^/X=1\n/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
 got=$(cases); want=$(seq -w 1 60 | sed 's/^/c/' | paste -sd ' ' -)

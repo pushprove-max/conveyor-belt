@@ -434,7 +434,8 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # list's cases, [{file, case}], and its why, OWNCASES, say so); with none, testsel()'s narrow one, the test files the
 # test map and the links give the changed files, up to CARDLINKED of them and each the changed-tests command selects when it narrows the list (testcap(); the output says so, LINKED, and
 # the list, {mode: "changed", files, by, left, why}, says how many were left out); notTests, [{file, why}], names each
-# test runner the change touches, RUNNERFIX, which is on no list: #350). <worktree>.testlist says which: {mode:
+# test runner the change touches, RUNNERFIX, which is on no list: #350; noCase, [<file>], names each
+# file the changed-tests command says a run would start with no case, which is not listed: testlist.sh nocaseask(), #1829). <worktree>.testlist says which: {mode:
 # "changed", files: <count>, by: "own", "map" or "name", age: the commits the made test map is behind (only with
 # one)}. A list of none runs nothing (LISTNONE set; the list, {mode: "changed", files: 0, by, why}, says so). With no
 # test.fileCommand set, Conveyor's own runner runs each file (testlist.sh ownrunner()); when it has none for one of them, nothing
@@ -442,7 +443,7 @@ failfast() { [ "$(jq -r '.rules.failfast' <<<"${CARDCTL:-$(ctl 2>/dev/null)}" 2>
 # reports more: tests()). <report args> (reportask() files) go after the command, before each file's path. TEST_FAST is
 # `fast` when the command stops at its first failure (failfast()), else empty, as for a main-red fix card (in $MAINRED): cardland.sh redelse() needs a verdict of each case it fails.
 listcmd() { # <worktree> [report args]
-  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 KEPTLINKS=0 SELN=0 SELALL=0 own=() ms=() mall=0 mleft=0 mmax=0
+  local s fs=() by fc rn='' f c nf=0 nw=0 lk=() READADD=() READWHOLE='' READLINKS=0 KEPTLINKS=0 SELN=0 SELALL=0 own=() ms=() mall=0 mleft=0 mmax=0 NOCASEOFF=''
   LISTCMD=''; TEST_FILES=''; TEST_CASES=''; LISTNONE=''
   # The list that could not be made says why (the error of the command that failed); test.fileCommand is named only while it is not set.
   # A suite runner (SUITERUNNERS) is on no list (#382): testpaths() leaves each off the card's own files, and
@@ -474,10 +475,14 @@ listcmd() { # <worktree> [report args]
     own=("${fs[@]}")
     s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
       narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
-    fs=(); [[ $s != *$'\n'* ]] || mapfile -t fs < <(printf '%s\n' "${s#*$'\n'}" | grep -vxF -f <(printf '%s\n' "${own[@]}"; changelinks "$1"))
+    # NOCASEOFF: the files a run would start with no case (testlist.sh nocaseask(), #1829), none of which is listed.
+    # Those the map gives leave the list after selfirst() (nocaseout): it reads a list the command left a file out of
+    # as one the command narrowed, and then runs each file the command selects.
+    nocaseask "$1" "$s"
+    fs=(); [[ $s != *$'\n'* ]] || mapfile -t fs < <(printf '%s\n' "${s#*$'\n'}" | grep -vxF -f <(printf '%s\n' "${own[@]}"; NOCASEOFF='' changelinks "$1"))
     runnersout
     if [ ${#fs[@]} != 0 ]; then
-      mall=${#fs[@]}; selfirst "$1" "$CARDLINKED"
+      selfirst "$1" "$CARDLINKED"; nocaseout fs; mall=${#fs[@]}
       mmax=$((SELALL && SELN > CARDLINKED ? SELN : CARDLINKED)); CAPMAX=$mmax CAPFIRST=$SELN testcap "${fs[@]}"; ms=("${CAPFILES[@]}"); mleft=$CAPLEFT
     fi
     fs=("${own[@]}" "${ms[@]}"); CAPLEFT=0; CAPNOTE=''
@@ -513,8 +518,9 @@ listcmd() { # <worktree> [report args]
   else
     s=$(testsel "$1" narrow) || { packget test.fileCommand fc 2>/dev/null || fc=''
       narrowstop "the list of the card's tests could not be made: $s" ${fc:+bare} > "$1.stop"; return 1; }
+    nocaseask "$1" "$s" # NOCASEOFF and nocaseout, as above
     by=${s%%$'\n'*}; [[ $s != *$'\n'* ]] || mapfile -t fs <<<"${s#*$'\n'}"; runnersout
-    lk=("${fs[@]}"); selfirst "$1" "$CARDLINKED"; CAPMAX=$((SELALL && SELN > CARDLINKED ? SELN : CARDLINKED)) CAPFIRST=$SELN testcap "${fs[@]}"; fs=("${CAPFILES[@]}")
+    lk=("${fs[@]}"); nocaseout lk; selfirst "$1" "$CARDLINKED"; nocaseout fs; CAPMAX=$((SELALL && SELN > CARDLINKED ? SELN : CARDLINKED)) CAPFIRST=$SELN testcap "${fs[@]}"; fs=("${CAPFILES[@]}")
     # Past the cap, each linked file .conveyor/test-links.json links to a changed file (testlist.sh linkskept(), KEPTLINKS).
     linkskept "$1"; CAPLEFT=$((CAPLEFT - KEPTLINKS))
     # Past the cap, each file whose last pass read a file the change touches (testlist.sh readersin(), #1619): a linked one (READLINKS) is not left out: bug, the list said 5 of 10 were left out with 6 on it.
@@ -527,10 +533,11 @@ listcmd() { # <worktree> [report args]
   [ -z "${MAINFROM:-}" ] || [ ${#fs[@]} = 0 ] || while IFS= read -r f; do printf '%s\n' "${fs[@]}" | grep -qxF -- "$f" || fs+=("$f"); done < <(mainlinks "$1" "$MAINFROM")
   # A test runner the change touches (TESTRUNNERS) is on no list: notTests says why.
   [ -z "${TESTRUNNERS:-}" ] || rn=$(git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | grep -xF -f <(printf '%s\n' "$TESTRUNNERS")) || rn=''
-  jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" --argjson l "$CAPLEFT" --arg c "$CAPNOTE" --arg rn "$rn" --arg rf "$RUNNERFIX" --arg cs "$TEST_CASES" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
+  jq -cn --argjson n ${#fs[@]} --argjson b "$by" --arg w "$NONELINKED" --argjson l "$CAPLEFT" --arg c "$CAPNOTE" --arg rn "$rn" --arg rf "$RUNNERFIX" --arg cs "$TEST_CASES" --arg nc "$NOCASEOFF" '{mode: "changed", files: $n, by: $b.by} + if $b.age == null then {} else {age: $b.age} end
     + if $n == 0 then {why: $w} elif $l > 0 then {left: $l, why: $c} else {} end
     + ([$cs | split("\n")[] | select(. != "") | split("\t") | {file: .[0], case: .[1]}] | if . == [] then {} else {cases: ., why: $c} end)
-    + ([$rn | split("\n")[] | select(. != "") | {file: ., why: $rf}] | if . == [] then {} else {notTests: .} end)' > "$1.testlist" || return 1
+    + ([$rn | split("\n")[] | select(. != "") | {file: ., why: $rf}] | if . == [] then {} else {notTests: .} end)
+    + ([$nc | split("\n")[] | select(. != "")] | if . == [] then {} else {noCase: .} end)' > "$1.testlist" || return 1
   [ ${#fs[@]} != 0 ] || { LISTNONE=1; return 0; }
   packget test.fileCommand fc || return 1
   [ -n "$fc" ] || fc=$(ownrunner "$1" "${fs[@]}") || { narrowstop "$fc" > "$1.stop"; return 1; }

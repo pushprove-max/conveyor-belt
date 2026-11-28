@@ -804,7 +804,9 @@ says in its log how many cases of its selection it kept as passed and did not ru
 `test.command` once with `CONVEYOR_TEST_LIST` (the file it writes the selected test files to, one a line),
 `CONVEYOR_TEST_RERUN`, `CONVEYOR_TEST_FILELIST` and `CONVEYOR_TEST_CASES` (the cases the card named of each file, as
 a start of a file gets them) and `CONVEYOR_TEST_LOG`. A pack's script that gets `CONVEYOR_TEST_LIST` runs no test and no
-check, and logs the cases it keeps of the files it leaves out as `TESTRUN kept=<n>`. The step does not start a file
+check, and logs the cases it keeps of the files it leaves out as `TESTRUN kept=<n>`. When it also gets
+`CONVEYOR_TEST_NOCASE`, it can write to that file each file of `CONVEYOR_TEST_FILELIST` that a run of the change would
+start with no case, one a line. The step does not start a file
 that the list keeps something of (a `pass`, `ok` or `off` line) and that this selection names no case of. Of a file that ran again in that run, a case that failed is no longer listed as passed, and the
 cases it did not run stay listed as they were: a file listed as passed keeps its `pass` line beside its new `fail`
 lines, and of such a file the command runs those failed cases alone. A file that failed naming no case or never
@@ -866,6 +868,9 @@ used. When the
 pack sets `test.changed`, the files that `test.command` lists for the change run first, in the order of its list.
 When the list leaves out a linked file, all the files on it run, also past the 5 and also a file that is not linked.
 When the list keeps every linked file, 5 of them run.
+Before it makes the list, Conveyor also gives `test.command` the file `CONVEYOR_TEST_NOCASE`. A test file that the
+command writes there does not start, and the list names it in `noCase`. A test file that the command only leaves off
+its list stays.
 Then the files that failed most recently run. A change with no linked test file runs nothing and passes, its list
 `{"mode": "changed", "files": 0, ..., "why": "..."}`. When linked files are left out, the list has `left` (how many did not run) and a `why` that
 says the run before the push runs them all, except each one that passed before with the same inputs. The Board shows this note with the step. The live record and the test
