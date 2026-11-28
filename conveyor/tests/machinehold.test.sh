@@ -214,10 +214,12 @@ repairsetup() {
   linkset '{"a.txt": ["a.test", "b.test", "c.test"], "conveyor/lib/slots.sh": ["b.test"]}'
   tune --arg s "$STUB" '.test.fileCommand = "STUB=\($s); " + .test.fileCommand | .test.command = .test.fileCommand | .tunables.poll = 1' # a clean run is given no STUB
   holdpass $'c.test\tc.txt'
+  # The descriptors a clean run holds past 2, but the one a shell traced with set -x writes its trace to
+  # (BASH_XTRACEFD: .conveyor/coverage.sh's trace), which is not the run's.
   cat >> "$STUB/pre" <<EOF
 case \${CONVEYOR_TEST_SLOTS:-} in "$SRC"/*) ;; *)
   if . "\$CONVEYOR_TEST_SLOTS" && harness; then n=mended; else n=broken; fi
-  fds=''; for f in /dev/fd/*; do f=\${f##*/}; [ "\$f" -le 2 ] || [ ! -e "/dev/fd/\$f" ] || fds="\$fds \$f"; done
+  fds=''; for f in /dev/fd/*; do f=\${f##*/}; [ "\$f" -le 2 ] || [ "\$f" = "\${BASH_XTRACEFD:-}" ] || [ ! -e "/dev/fd/\$f" ] || fds="\$fds \$f"; done
   s=\$(ps -o comm= -p "\$(python3 -c 'import os; print(os.getsid(0))')"); s=\${s##*/}
   echo "\${PWD##*/} \$n sid=\$s fds=[\${fds# }] main=\${CONVEYOR_MAIN-unset} slots=\${CONVEYOR_TEST_SLOTS#"\$PWD"/}" >> "\$STUB/clean" ;;
 esac

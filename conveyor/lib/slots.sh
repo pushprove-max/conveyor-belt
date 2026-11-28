@@ -361,11 +361,12 @@ slot_mine() {
 # Closes every descriptor from 3 up this shell holds, whatever its number, but those named. A shell that inherited
 # many takes its lock and slot descriptors above 255, so a loop up to 255 left them open in the process that should
 # hold none. /dev/fd lists the shell's own descriptors on Linux and macOS (the one the listing itself opens is closed
-# again before the loop reaches it).
+# again before the loop reaches it). A shell traced with set -x into a descriptor (BASH_XTRACEFD, as
+# .conveyor/coverage.sh traces) keeps that one: closed, bash writes the trace to stderr, into the run's output.
 closefds() { # [<fd to keep>...]
   local f k
   for f in /dev/fd/*; do
-    f=${f##*/}; [[ $f =~ ^[0-9]+$ ]] && [ "$f" -ge 3 ] || continue
+    f=${f##*/}; [[ $f =~ ^[0-9]+$ ]] && [ "$f" -ge 3 ] && [ "$f" != "${BASH_XTRACEFD:-}" ] || continue
     for k; do [ "$f" != "$k" ] || continue 2; done
     eval "exec $f>&-" 2>/dev/null
   done
