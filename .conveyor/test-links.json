@@ -45,6 +45,9 @@
     "conveyor/foreman/foreman.test.sh",
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/push.sh": [
@@ -52,7 +55,10 @@
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/metrics.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/lib/setup.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
@@ -73,7 +79,10 @@
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     "conveyor/tests/judgeminor.test.sh",
     "conveyor/tests/judgesnap.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/tests/mainred.test.sh": [
     "conveyor/tests/mainredproof.test.sh"
@@ -125,6 +134,9 @@
   ".claude/dashboard/app.js": [
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs",
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   ".claude/dashboard/panels/belt.js": [
@@ -153,6 +165,9 @@
   ".claude/scripts/__tests__/dashboard-view.helpers.mjs": [
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-view.output-rows.test.mjs": [
@@ -175,6 +190,9 @@
   ],
   ".claude/scripts/__tests__/dashboard-view.tests-fixes.test.mjs": [
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-view.tests-limits.test.mjs": [
@@ -246,6 +264,9 @@
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/conveyor.test.sh": [
@@ -303,6 +324,9 @@
   "conveyor/lib/testaction.sh": [
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/lib/testfiles.sh": [
@@ -346,6 +370,9 @@
     "conveyor/tests/modelsproxy.test.sh",
     "conveyor/tests/opencode.test.sh",
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/proxyroute.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
@@ -372,6 +399,9 @@
     "conveyor/tests/modelsproxy.test.sh",
     "conveyor/tests/opencode.test.sh",
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/proxyroute.test.sh",
     "conveyor/tests/snapexec.test.sh",
     "conveyor/tests/testruns.test.sh"
@@ -387,6 +417,9 @@
     "conveyor/tests/modelsproxy.test.sh",
     "conveyor/tests/opencode.test.sh",
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/proxyroute.test.sh",
     "conveyor/tests/snapexec.test.sh",
     "conveyor/tests/testruns.test.sh"
@@ -448,6 +481,9 @@
   ],
   "conveyor/tests/testaction.test.sh": [
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/snapexec.test.sh"
   ],
   "conveyor/tests/testactrun.test.sh": [
@@ -479,6 +515,9 @@
     "conveyor/tests/landas.test.sh",
     "conveyor/tests/metrics.test.sh",
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/snapexec.test.sh",
     "docs-claims.test.sh"
   ],
@@ -571,7 +610,10 @@
     "conveyor/foreman/foreman-standing.test.sh",
     "conveyor/foreman/foreman.test.sh",
     "conveyor/tests/metrics.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/foreman/lib.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
@@ -619,7 +661,10 @@
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     ".claude/scripts/__tests__/dashboard.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/foreman/foreman.test.sh": [
     ".claude/scripts/__tests__/dashboard-cards.test.sh",
@@ -643,6 +688,9 @@
   ],
   "conveyor/tests/rerun.test.sh": [
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/rerunkept.test.sh"
   ],
   "conveyor/tests/visible.test.sh": [
@@ -657,6 +705,9 @@
   "conveyor/tests/resume.test.sh": [
     "conveyor/tests/kept.test.sh",
     "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh",
     "conveyor/tests/rerunkept.test.sh",
     "conveyor/tests/review.test.sh",
     "conveyor/tests/reviewback.test.sh",
@@ -685,7 +736,10 @@
   "conveyor/foreman/foreman-size.test.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     "conveyor/tests/judge.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "hooks/hooks.json": [
     ".claude/scripts/__tests__/dashboard-local.test.sh"
@@ -720,7 +774,10 @@
   ".claude/scripts/dashboard_panels.sh": [
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
     ".claude/scripts/__tests__/dashboard.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   ".claude/scripts/dashboard_server_auth.py": [
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
@@ -736,7 +793,10 @@
   ],
   ".claude/scripts/dashboard_server_pages.py": [
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   ".claude/scripts/dashboard_service.sh": [
     ".claude/scripts/__tests__/dashboard-view.page-live.test.mjs"
@@ -784,7 +844,10 @@
   "conveyor/bench/swe.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh",
     "conveyor/tests/filedhold.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/bench/swe_arms.sh": [
     ".claude/scripts/__tests__/dashboard-local.test.sh",
@@ -838,7 +901,10 @@
   ],
   "conveyor/lib/fulltest.sh": [
     "conveyor/tests/metrics.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/lib/pick.sh": [
     "conveyor/tests/metrics.test.sh"
@@ -884,59 +950,107 @@
     ".claude/scripts/__tests__/dashboard-view.focus.test.mjs"
   ],
   ".claude/dashboard/parts/rules-prices.js": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   ".claude/dashboard/parts/tests-mutation.js": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-cards.test.sh": [
     ".claude/scripts/__tests__/dashboard.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-server-time.test.sh": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-view.rules-prices.test.mjs": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   ".claude/scripts/__tests__/dashboard-view.timeformat.test.mjs": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/tests/mainredproof.test.sh": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/tests/release.test.sh": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/tests/swebenchshow.test.sh": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/tests/testhistory.test.sh": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/tests/viewslive.test.sh": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "docs/units.md": [
     ".claude/scripts/__tests__/dashboard.test.sh",
     "README-pages.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "hooks/sources.test.tsx": [
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/foreman/foreman-size.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "hooks/sources.ts": [
     ".claude/scripts/__tests__/dashboard.test.sh",
     "conveyor/foreman/foreman-size.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "hooks/units.test.tsx": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "hooks/units.tsx": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   ".claude/dashboard/head.js": [
     ".claude/scripts/__tests__/dashboard.test.sh"
@@ -949,7 +1063,10 @@
   ],
   "conveyor/foreman/watch-conveyor.sh": [
     ".claude/scripts/__tests__/dashboard.test.sh",
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/foreman/watch-recordsnewer.test.sh": [
     ".claude/scripts/__tests__/dashboard.test.sh"
@@ -973,7 +1090,10 @@
     "conveyor/tests/filedhold.test.sh"
   ],
   "conveyor/foreman/watch-retry.test.sh": [
-    "conveyor/tests/port.test.sh"
+    "conveyor/tests/port.test.sh",
+    "conveyor/tests/portagain.test.sh",
+    "conveyor/tests/portauto.test.sh",
+    "conveyor/tests/portfix.test.sh"
   ],
   "conveyor/tests/lintyes.test.sh": [
     "conveyor/tests/fail.test.sh"

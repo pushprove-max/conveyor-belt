@@ -118,7 +118,7 @@ t_reviewretry() {
   # none could not be checked: they are kept, as a failed review's are.
   [ -e "$ST/kept/c11-11/$k" ] && grep -qx 'stderr: no usage' "$ST/kept/c11-11/${k%.events}.err" \
     || fail "the events or err of a review that reported no token usage were not kept as $k: $(ls "$ST/kept/c11-11" 2>&1)"
-  # A NO-GO is a verdict: that review runs once, and the fix goes to the next review (port.test.sh t_autoport: three
+  # A NO-GO is a verdict: that review runs once, and the fix goes to the next review (portauto.test.sh t_autoport: three
   # NO-GOs and a GO are four reviews).
   # A review that wrote its NO-GO and then exited non-zero gave a verdict: it is not run again.
   echo "$NOGO" > "$STUB/review.1"; echo 'cat "$STUB/review.1" > "$out"; exit 3' > "$STUB/review-cmd"; flreview 11; rm "$STUB/review-cmd"
@@ -253,7 +253,7 @@ t_reviewliveusage() {
 # Bugs: a review that answers both ways, or says GO beside an open finding (in the asked format or any other, here
 # numbered), lands as a clean GO; a review that says GO twice (once mid-way, once at the end) blocks as having no
 # clear verdict. Read as the engine reads a review (followups.sh's verdict()): a review with no clear verdict blocks
-# its card (visible.test.sh t_unclearnogo), and a NO-GO goes to a fix round (port.test.sh t_autoport), so no card run is
+# its card (visible.test.sh t_unclearnogo), and a NO-GO goes to a fix round (portauto.test.sh t_autoport), so no card run is
 # needed for the answers.
 verdictof() { # <the review's lines...>
   # shellcheck disable=SC2034 # ROLLOUT is read by the eval'd NOTFINDING line of prompts.sh

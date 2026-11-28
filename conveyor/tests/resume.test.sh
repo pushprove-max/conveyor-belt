@@ -10,7 +10,7 @@
 # shellcheck disable=SC2034 # the closure tool reads this line; the cases here do not use SRC
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
-# A last review's NO-GO whose landing conflicted, and conflicted again after its port (t_portfix runs such a card):
+# A last review's NO-GO whose landing conflicted, and conflicted again after its port (portfix.test.sh t_portfix runs such a card):
 # blocked, its follow-ups withdrawn. Retried, its kept patch does not apply to main as it is now. Bug: the card was
 # built from nothing. Bug: its loop had finished (a last NO-GO, follow-ups filed) and only the landing conflict stopped
 # it, yet the port went through a fresh loop of up to three reviews and two fixes. The next card ports the kept patch
