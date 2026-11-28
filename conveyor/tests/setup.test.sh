@@ -383,11 +383,12 @@ t_setupfresh() {
   boardup; out=$(cd "$S" && PATH=$T/$CASE/board:$PATH CONVEYOR_DASHBOARD_PORT=8791 bash "$X" doctor 2>&1) || fail "doctor failed after setup with no terms file: $out"
   # Besides ok: lines, doctor prints only each seat's route (builder:, reviewer:) and the progress line of each seat's
   # check call (and of the judge's, askcheck()), which are information, not a check; and the one warning a fresh pack
-  # is meant to get: setup sets no test.fileCommand, so a card with tests stops at its test step. Any other line is a fault.
-  ! grep -vE '^(ok|builder|reviewer): |^conveyor: (checking .* with one call|asking the [a-z]+ \(.*\) one question with no tools) \(up to [0-9]+ s\)\.\.\.$' <<<"$out" \
+  # is meant to get: setup sets no test.fileCommand, so a card with tests stops at its test step. Doctor's one line on the
+  # lean settings (leandoctor(), lib/lean.sh, #1825) is information too. Any other line is a fault.
+  ! grep -vE '^(ok|builder|reviewer): |^note: lean settings \(setup --lean-settings\): answer |^conveyor: (checking .* with one call|asking the [a-z]+ \(.*\) one question with no tools) \(up to [0-9]+ s\)\.\.\.$' <<<"$out" \
     | grep -qvxF 'warning: a card runs each of its test files alone, and the pack sets no test.fileCommand, and Conveyor cannot run a.test.sh itself: it has no runner for a file of this kind; set test.fileCommand in .conveyor/project.json to a command that runs one test file' \
     && grep -qx 'ok: no terms file (it is optional): the privacy check runs with no word list' <<<"$out" \
-    || fail "doctor after setup printed a line that is not ok:, a seat's route or check progress, or the test.list warning, or did not say the terms file is optional: $out"
+    || fail "doctor after setup printed a line that is not ok:, a seat's route or check progress, the lean settings note or the test.list warning, or did not say the terms file is optional: $out"
   # Bug (#111, t_setupheld): doctor says what the control record setup wrote holds.
   grep -qxF 'ok: 2 open issues held; release one with `conveyor.sh control release <issue>` or on the Board' <<<"$out" || fail "doctor did not say what is held: $out"
 }

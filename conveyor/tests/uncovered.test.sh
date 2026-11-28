@@ -56,7 +56,10 @@ t_uncoveredlcov() {
 t_uncoveredrerun() {
   local w=$T/$CASE/wt s=$T/$CASE/run.sh out
   uc_card "bash $(printf %q "$s")"
+  # Only the card's own test file counts its runs: the test map's file for src/a.js (a.test.sh, by name) runs once too
+  # (listcmd(), own mode), and passes.
   cat > "$s" <<'EOF'
+case " $* " in *' t/a.test.js '*) ;; *) echo 'ok other'; exit 0 ;; esac
 n=$(( $(cat ../n 2>/dev/null || echo 0) + 1 )); echo "$n" > ../n; h=0; [ "$n" != 1 ] || h=1
 mkdir -p coverage; printf 'SF:src/a.js\nDA:4,1\nDA:5,%s\nDA:6,0\nend_of_record\n' "$h" > coverage/lcov.info
 if [ "$n" = 1 ]; then echo 'FAIL [flaky]: wrong'; exit 1; fi

@@ -175,7 +175,7 @@ t_snapshotprice() { snapshotstart
   out=$(loop snapshot --fresh 2>/dev/null) || fail "snapshot without gh exited non-zero"
   [ "$(q .awaitingDeploy)" = null ] && [ "$(q .open)" = null ] || fail "awaitingDeploy or open when the issues were not listed: $(q '[.awaitingDeploy, .open]')"
   [ "$(q '[.queue, .cost.today, .cost.todayLeftOut, .cost.week, .cost.weekLeftOut, .cost.perLanded, .cost.perLandedLeftOut, .cost.unpricedSteps, .belt[2].usd, .belt[3].usd, (.needsYou.waiting | length), (.cost.cards | map(select(.week == null) | .issue) | sort)]')" \
-    = '[{"next":null,"order":null,"holding":null,"skipped":null,"waiting":null},26,3,32,3,5.25,0,3,2,null,1,[4,6]]' ] \
+    = '[{"next":null,"order":null,"holding":null,"skipped":null,"waiting":null,"cards":null},26,3,32,3,5.25,0,3,2,null,1,[4,6]]' ] \
     || fail "unpriced steps or a failed issue list: $(q '[.cost, .belt[3]]')"
   [ "$(q '.cost.unpriced | map("\(.card) \(.step) \(.why)") | sort | join(", ")')" = '"c4 build no model recorded, c4 review no model recorded, c6 build no price for its model: m"' ] \
     || fail "the unpriced steps do not say why: $(q .cost.unpriced)"

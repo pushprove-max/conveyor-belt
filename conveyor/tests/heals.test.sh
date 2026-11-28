@@ -23,10 +23,11 @@ heals() { jq -rc "$1" "$ST/selfheals.jsonl" 2>/dev/null; } # <jq filter>: of eac
 # Bugs (issue 1559): on a follow-up card's review a self-heals finding gets a fix round, or is filed as a follow-up
 # again, so each fix files the next card; it is lost instead of listed; a harm finding, or a self-heals one whose Proof
 # says it was seen in real logs, is moved to the list and never fixed; the kind and the judge's reason are missing
-# from the follow-up the harm finding files.
+# from the follow-up the harm finding files. Both harm findings are P1: a P2 or P3 harm finding of a follow-up card
+# goes on the self-heals list with FULOW (#1736, fufiling.test.sh), not to a follow-up.
 t_healsfollowup() {
   local slow='[P2] a.txt:2 the poll waits one turn more. Proof: a.txt:2' lost='[P1] a.txt:2 drops the record line. Proof: a.txt:2'
-  local seen='[P2] a.txt:2 a slot stays over its cap. Proof: seen in the logs of card c5 at 10:02' stale='[P2] b.txt:1 stale text until the next poll. Proof: cat b.txt' is
+  local seen='[P1] a.txt:2 a slot stays over its cap. Proof: seen in the logs of card c5 at 10:02' stale='[P2] b.txt:1 stale text until the next poll. Proof: cat b.txt' is
   is=$(hissue 7 "[P2] a.txt:1 a follow-up" "$(fubody '[P2] a.txt:1 a follow-up')" conveyor-followup bug P2 area:engine)
   judging "[$is]"; printf '%s\n' "$is" > "$T/$CASE/issue7"
   printf '%s\n' "$slow" "$lost" "$seen" "$stale" 'USER-VISIBLE: no' 'VERDICT: NO-GO' > "$STUB/review"

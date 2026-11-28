@@ -180,9 +180,9 @@ t_packcommitflags() {
   packsetup; local out
   out=$(loop setup pack-commit --foreman 2>&1); [ $? -eq 2 ] || fail "pack-commit took --foreman: $out"
   ! grep -q 'every setup command' "$SRC/../commands/setup.md" || fail "setup.md adds its flags to every setup command"
-  [ "$(grep -c "to each run of step 1's setup command" "$SRC/../commands/setup.md")" -eq 4 ] \
+  [ "$(grep -c "to each run of step 1's setup command" "$SRC/../commands/setup.md")" -eq 6 ] \
     && grep -q '^`setup pack-commit` in step 3: it takes no other argument' "$SRC/../commands/setup.md" \
-    || fail "setup.md does not keep --foreman, --pin, --survey and the --size flags to step 1's setup command"
+    || fail "setup.md does not keep --foreman, --pin, --survey, the --size flags, --serena and --lean-settings to step 1's setup command"
 }
 
 # Bug: a pack with a conflict is committed with its conflict marks, or a question is asked.
