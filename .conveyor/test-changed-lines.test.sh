@@ -78,6 +78,43 @@ sed -i.bak '5s/else/else :/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.
 got=$(cases); want=$(seq -w 1 60 | sed 's/^/c/' | paste -sd ' ' -)
 [ "$got" = "$want" ] && ok "a changed line with no row (else) runs the cases of the lines around it" || no "line 5 (else) changed: ran '$got'"
 git -C "$R" checkout -q -- conveyor/lib/f.sh
+# Issue 1829: a function the change adds to one file (added(), g.sh) and calls from a new line of a function of another
+# file (big(), f.sh, its line 4) is reached only through that line, whose cases the map gives: c01 and c02. Bug it
+# catches: callersof took big() as a caller of added() and ran each test file that holds the word `big`, whole: all 60
+# cases of a.test.sh (on the engine, 19 case files and 2 Board test files that hold the word `verdicts`).
+printf 'added() {\n  echo added\n}\n' >> "$R/conveyor/lib/g.sh"
+sed -i.bak '4s/echo x/added/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
+got=$(cases)
+[ "$got" = "c01 c02" ] && grep -qxF 'coverage map rule: conveyor/lib/g.sh added(): callersof' "$F/out" \
+  && grep -qxF 'coverage map rule: conveyor/lib/f.sh big(): lines' "$F/out" \
+  && ok "an added function called from a new line of another changed file runs the cases of that line, not each test that names the caller" \
+  || no "added() added to g.sh and called from line 4 of big() (run by c01, c02): ran '$got': $(cat "$F/out")"
+git -C "$R" checkout -q -- conveyor/lib/f.sh
+# The caller's file is not in the change (big() called added() before): its name still brings its tests, as lone()'s
+# callers do below. added() changed alone runs each case of a.test.sh, which names big.
+sed -i.bak '4s/echo x/added/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak" && git -C "$R" commit -qam "big calls added" \
+  || no "the commit of big()'s call could not be made"
+sed -i.bak 's/echo added/echo more/' "$R/conveyor/lib/g.sh" && rm -f "$R/conveyor/lib/g.sh.bak"
+got=$(cases); want=$(seq -w 1 60 | sed 's/^/c/' | paste -sd ' ' -)
+[ "$got" = "$want" ] && ok "a changed function runs the tests that name a caller the change does not touch" \
+  || no "added() changed, called by big() since before the change: ran '$got': $(cat "$F/out")"
+git -C "$R" reset -q --hard HEAD~1
+# Issue 1829: a link of f.sh to a.test.sh (a landing that changed f.sh broke it once). The map holds each case of
+# a.test.sh, so a change to line 4 of big() runs the two cases that ran the line. Bug it catches: the link ran the case
+# file whole, all 60 cases (on the engine, six case files whole, none of whose 70 cases runs the changed function).
+echo '{"conveyor/lib/f.sh": ["conveyor/tests/a.test.sh"]}' > "$R/.conveyor/test-links.json" && git -C "$R" add -A && git -C "$R" commit -qm link \
+  || no "the link could not be committed"
+sed -i.bak '4s/echo x/echo X/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
+got=$(cases)
+[ "$got" = "c01 c02" ] && ok "a linked case file whose cases the map holds runs the cases the map gives the change, not whole" \
+  || no "line 4 of big() changed, f.sh linked to a.test.sh: ran '$got': $(cat "$F/out")"
+git -C "$R" checkout -q -- conveyor/lib/f.sh
+# A change outside every function is not the map's to pick: the link runs the case file whole.
+sed -i.bak '1s/^/X=1\n/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
+got=$(cases); want=$(seq -w 1 60 | sed 's/^/c/' | paste -sd ' ' -)
+[ "$got" = "$want" ] && ok "a linked case file runs whole for a change the coverage map does not pick" \
+  || no "a line outside the functions of f.sh changed, f.sh linked to a.test.sh: ran '$got': $(cat "$F/out")"
+git -C "$R" reset -q --hard HEAD~1
 
 # The rule branch: a changed condition line that more than 50 units ran runs the units that ran the code it guards.
 # gate()'s map: its condition lines 11, 14, 18 and 21 run by each case, its guarded lines 12, 15 and 19 by c01 and c02.

@@ -456,6 +456,11 @@ declare -A run=() area=() ccase=() allby=()
 # The parts of a test file the coverage map selects (covof): npart, of the pick under way; tparts, of every pick; and
 # twhole, each file a pick also selected whole, which then runs whole.
 declare -A npart=() tparts=() twhole=()
+# larea: each engine case file a link gives the pick under way, with the changed files that link it, one a line;
+# covpick: each changed file whose tests the coverage map picked with no stale row (covof); COVCASES: the engine cases
+# the map holds as units, one a line (mapcases).
+declare -A larea=() covpick=()
+COVCASES=
 oparts=
 COVTESTS=
 # COVSEL: set when the coverage map chose the tests of a changed file (covof, in pick), for cnarrow (below). COVSTALE:
@@ -993,7 +998,12 @@ callers() {
 # .claude/hooks/__tests__/ into run; and when the changed function, a caller, or a line outside the functions is in a
 # command script (conveyor/commands/), the tests cmdtests gives for that script's commands (no test names its entry
 # function, as releaseprep() of release-prep.sh: they run `loop release-prep`). A caller is a function of an engine
-# shell file of the map with a line that names a changed function as a word and is no comment. It leaves the changed functions'
+# shell file of the map with a line that names a changed function as a word and is no comment. A caller in another file
+# this pick reads (PICKING) that named none of them before the change (TXFROM) calls one on a line the change adds: that
+# file's own pick gives the tests of its changed lines, so its name brings no test here (issue 1829: flakycard(), added
+# to flaky.sh and called from one new line of mainred.sh verdicts(), whose 71 cases the coverage map gave, also brought
+# each test file that holds the word `verdicts`, most as a key of a record: 19 case files whole and 2 Board test
+# files). It leaves the changed functions'
 # names in CFN once it has read them. It fails, and the rules after it pick (the file's area), when the file cannot be
 # read either side, a line outside its functions changed, a code line outside the functions of the file names a
 # changed function, a line outside the functions of another engine file names one (but a command script, and
@@ -1003,7 +1013,7 @@ callers() {
 # no command, or an engine file that names one cannot be read (FUNCS). However many callers the changed functions have,
 # it gives their tests, never the area (issue 1830: a cap of 25 callers ran cardland.sh's whole area, 86 files).
 callersof() {
-  local f=$1 a b sa sb st w re t k n c
+  local f=$1 a b sa sb st w re t k n c nm was
   local -a fn=() files=() hit=() cmds=()
   local -A who=() scr=()
   CFN=
@@ -1028,20 +1038,26 @@ callersof() {
   mapfile -t hit < <(grep -lwE -- "$w" "${files[@]}" 2>/dev/null < /dev/null)
   # A command script's functions run by its commands (scr): the changed ones, when the file is one, and its callers.
   [[ $f != conveyor/commands/*.sh ]] || scr[$f]=1
+  # nm, an awk program: of FUNCS output, `K<TAB><function>` for each function with a line that names one and is no
+  # comment, and `S<TAB>-` when a line outside the functions is such a line.
+  nm='/^K\t/ { n = substr($0, 3); sub(/\t.*/, "", n); k = split(substr($0, length(n) + 4), l, "\001")
+        sub(/^(function[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/, "", l[1])
+        for (i = 1; i <= k; i++) if (l[i] !~ /^[ \t]*#/ && l[i] ~ re) { print "K\t" n; break } }
+      /^S\t/ && !s { x = substr($0, 3); if (x !~ /^[ \t]*#/ && x ~ re) { print "S\t-"; s = 1 } }'
   for t in "${hit[@]}"; do
     c=$(awk "$FUNCS" "$t") && ! grep -qx U <<<"$c" || return 1
+    # was: of another file this pick reads, its functions that named one at TXFROM, one a line, then a `.`; else empty.
+    was=; [ "$t" = "$f" ] || [[ $'\n'${PICKING:-}$'\n' != *$'\n'$t$'\n'* ]] \
+      || was=$(git show "$TXFROM:$t" 2>/dev/null | awk "$FUNCS" | awk -v re="$re" "$nm" | sed -n 's/^K\t//p'; echo .)
     # conveyor.sh's command table: a line that names one brings the case files that run its command.
     [ "$t" != conveyor/conveyor.sh ] \
       || mapfile -t -O "${#cmds[@]}" cmds < <(awk '$1 == "cmd" && $2 ~ /^[a-z][a-z-]*$/' "$t" | grep -E -- "$re" | awk '{ print $2 }')
     while IFS=$'\t' read -r k n; do
-      if [ "$k" = K ]; then { [ "$t" = "$f" ] && [[ " $CFN " == *" $n "* ]]; } || who[$n]=1
+      if [ "$k" = K ]; then { [ "$t" = "$f" ] && [[ " $CFN " == *" $n "* ]]; } || { [ -n "$was" ] && ! grep -qxF -- "$n" <<<"$was"; } || who[$n]=1
       elif [ "$t" != "$f" ] && [[ $t != conveyor/commands/*.sh ]] && [ "$t" != conveyor/conveyor.sh ] \
         && [ "$t" != conveyor/lib/portable.sh ]; then return 1; fi
       [[ $t != conveyor/commands/*.sh ]] || scr[$t]=1
-    done < <(awk -v re="$re" '/^K\t/ { n = substr($0, 3); sub(/\t.*/, "", n); k = split(substr($0, length(n) + 4), l, "\001")
-        sub(/^(function[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/, "", l[1])
-        for (i = 1; i <= k; i++) if (l[i] !~ /^[ \t]*#/ && l[i] ~ re) { print "K\t" n; break } }
-      /^S\t/ && !s { x = substr($0, 3); if (x !~ /^[ \t]*#/ && x ~ re) { print "S\t-"; s = 1 } }' <<<"$c")
+    done < <(awk -v re="$re" "$nm" <<<"$c")
   done
   for t in "${!scr[@]}"; do
     n=$(awk -v s="${t##*/}" '$1 == "cmd" && $3 == s { print $2 }' conveyor/conveyor.sh) && [ -n "$n" ] || return 1
@@ -1378,11 +1394,21 @@ rulefor() {
   local n r
   for n in ${CFN:--}; do r=$2; [ -z "${COVLINES[$1$'\t'$n]:-}" ] || r=${r/covof/lines}; [ -z "${COVBRANCH[$1$'\t'$n]:-}" ] || r=${r/lines/branch}; RULES+=$1$'\t'$n$'\t'$r$'\n'; done
 }
+# mapcases <engine case file>: whether the coverage map holds each case of the file as a unit of the engine's runner
+# (a case added since the trace is in no row, so the map cannot say what it reaches).
+mapcases() {
+  [ -n "$COVCASES" ] || COVCASES=$(jq -rn '[inputs | objects] as $m
+    | ($m[] | select(has("path") and .path == "conveyor/conveyor.test.sh") | .testfile) as $n
+    | $m[] | select(has("unit") and .testfile == $n) | .case // empty' "$COV" 2>/dev/null | LC_ALL=C sort -u)
+  [ -n "$COVCASES" ] && [ -f "$1" ] \
+    && [ -z "$(sed -n 's/^t_\([a-z0-9]*\)() {.*/\1/p' "$1" | LC_ALL=C sort -u | LC_ALL=C comm -23 - <(printf '%s\n' "$COVCASES"))" ]
+}
 # The tests of the changed files <file>...: into run (test files), area (engine case files) and all (the whole engine
 # test), then (but in textonly's pick) pick's cases (the engine runner's cases, none for all of them) and run[the runner].
 pick() {
 local f t s named stem dir cov cal cpart helpers of nmap
-[ -n "$NOTEXT" ] || npart=()
+# PICKING: the files this pick reads, one a line, for callersof (not in textonly's pick, NOTEXT: its files are not changed).
+[ -n "$NOTEXT" ] || { npart=(); PICKING=$(printf '%s\n' "$@"); }
 for f; do
   # A change to its comment and blank lines alone: no test, its linked ones and itself, a test file, too (commentonly).
   [ -n "$NOTEXT" ] || ! commentonly "$f" || continue
@@ -1399,7 +1425,7 @@ for f; do
     [ "$s" = "$f" ] || [ "$s" = "$of" ] || { [[ $s == *'*'* ]] && [ "$t" != "$f" ] \
       && [[ $f =~ ^$(sed 's/[.+?^${}()|[\]\\]/\\&/g; s/\*/[^\/]*/g' <<<"$s")$ ]]; } || continue
     case $t in conveyor/tests/*.test.sh) [ -z "$helpers" ] || ! grep -qwF -f <(printf '%s\n' "$helpers") -- "$t" || continue ;; esac
-    case $t in conveyor/tests/*.test.sh) area[$t]=1 ;; *) run[$t]=1 ;; esac
+    case $t in conveyor/tests/*.test.sh) larea[$t]+=$f$'\n' ;; *) run[$t]=1 ;; esac
     linked[$t$'\t'$f]=1
   done <<<"$LINKS"
   if [ "$f" = "$MAP" ]; then
@@ -1441,7 +1467,7 @@ for f; do
   [ -n "$NOTEXT" ] || ! textonly "$f" || continue
   # A change to functions alone that the coverage map holds: the cases it lists (issue 527), and of the tests below,
   # those the map names nowhere (a test the trace did not run); not its area.
-  cov=; COVSTALE=; [ -n "$NOTEXT" ] || ! covof "$f" || { cov=1; COVSEL=1; }
+  cov=; COVSTALE=; [ -n "$NOTEXT" ] || ! covof "$f" || { cov=1; COVSEL=1; [ -n "$COVSTALE" ] || covpick[$f]=1; }
   # Else, or with a stale row (COVSTALE, issue 1822), a change to functions alone of an engine shell file: the tests that
   # name them or their callers, and the tests named after the file or listed for it; not its area (issue 1775).
   cal=; [ -n "$NOTEXT" ] || { [ -n "$cov" ] && [ -z "$COVSTALE" ]; } || ! callersof "$f" || cal=1
@@ -1464,6 +1490,14 @@ for f; do
   [ -n "$cov$cal" ] || [ -n "$NOTEXT" ] || case $f in conveyor/tests/*) ;; conveyor/*.sh) rulefor "$f" area ;; esac
   [ -n "$cov$cal" ] || case $f in conveyor/*) areaof "$f" ;; .claude/hooks/lib/*.sh) while read -r t; do [ -z "$t" ] || { run[$t]=1; RANKED+=$t$'\n'; }; done < <(hooklibtests "$f") ;; esac
 done
+# A linked engine case file (larea) runs whole, but when the coverage map picked the change of each file that links it
+# (covpick) and holds each of its cases (mapcases): the map then gives the cases of it that reach the changed
+# functions, as it does in place of the file's area (issue 1829: a link of mainred.sh ran models.test.sh and five
+# more case files whole for a change to verdicts(), which none of their 70 cases runs).
+[ -n "$NOTEXT" ] || { for t in "${!larea[@]}"; do
+    s=; while IFS= read -r f; do [ -z "$f" ] || [ -n "${covpick[$f]:-}" ] || s=1; done <<<"${larea[$t]}"
+    [ -z "$s" ] && mapcases "$t" || area[$t]=1
+  done; larea=(); covpick=(); }
 # A part the coverage map selected runs as a part, unless this pick, or another, selected its file whole (run, here).
 [ -n "$NOTEXT" ] || { for t in "${!run[@]}"; do twhole[$t]=1; done
   for t in "${!npart[@]}"; do run[$t]=1; tparts[$t]+=${npart[$t]}; done; }
