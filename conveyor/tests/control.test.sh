@@ -74,7 +74,7 @@ t_control() {
     && [ "$(ctl reviewer codex x2 medium | jq -c .reviewer)" = '{"cli":"codex","model":"x2","effort":"medium"}' ] && [ "$(ctl model claude m | jq -c .model)" = '{"cli":"claude","model":"m","effort":null}' ] \
     && [ "$(ctl model claude m2 | jq -c .model)" = '{"cli":"claude","model":"m2","effort":null}' ] && [ "$(ctl model claude m2 high | jq -c .model)" = '{"cli":"claude","model":"m2","effort":"high"}' ] \
     && [ "$(ctl pause | jq -r .mode)" = pause ] && [ "$(ctl stop | jq -r .mode)" = stop ] && [ "$(ctl resume | jq -r .mode)" = run ] \
-    && [ "$(ctl guard off | jq .guard)" = null ] && [ "$(ctl cap 5 | jq .cap)" = 5 ] && [ "$(ctl order | jq -c .order)" = '[]' ] \
+    && [ "$(ctl guard off | jq .guard)" = null ] && [ "$(ctl cap 5 | jq .cap)" = 5 ] \
     || fail "an action did not change the record as asked: $(cat "$C")"
   h=$(loop health)
   [ "$(jq -c '[.models, .efforts, .builderCap]' <<<"$h")" = '[{"claude":"m2","codex":"x2"},{"claude":"high","codex":"medium"},5]' ] || fail "health does not name the models in force: $h"
@@ -149,6 +149,15 @@ t_controlcap() {
   ctl cap 1 >/dev/null; tuned '.tunables.poll = 1' loop run 2 >/dev/null 2>&1
   [ "$(st 'select(.issue >= 20 and (.step | IN("picked", "landed"))) | .step' | tr '\n' ' ')" = "picked landed picked landed " ] \
     || fail "cap 1 let two cards run at once, or the two did not land: $(st 'select(.issue >= 20 and (.step | IN("picked", "landed"))) | "\(.issue) \(.step)"' | tr '\n' ,)"
+}
+# `control order` sets the whole pinned list. Bug it catches (#1798): `control order` with no numbers, run to read the
+# list, set it to [] with no word, so every pinned issue lost its place; it is refused as release and unpin are.
+t_controlorderempty() {
+  controlsetup "$(jq -cs . <(issue 5 2026-01-01 P2))"
+  ctl order 5 6 >/dev/null
+  local out rc; out=$(ctl order); rc=$?
+  [ "$rc" != 0 ] && [ "$(jq -c .order "$C")" = '[5,6]' ] || fail "control order (no numbers), with order [5,6]: exit $rc, order $(jq -c .order "$C"), said: $out"
+  [ "$(ctl order 7 | jq -c .order)" = '[7]' ] && [ "$(jq -c .order "$C")" = '[7]' ] || fail "control order 7, with order [5,6], did not set the order to [7]: $(jq -c .order "$C")"
 }
 # The record is read at every use, but checked only when its text is not the one last checked (ctlread). Bugs: it is
 # checked again at every use, one jq run each, though it has not changed (about 37 in one card's run); or the check

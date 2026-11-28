@@ -486,13 +486,15 @@ test('the Board: Hold, Queue, Move and Pause act on one click, and the line that
   assert.equal(note(w), 'Done. The Board shows it in about a minute. Undo');
   w.reply = null;
   await undo({ action: 'hold', args: ['76'] });
-  // A move: Undo sends the order as the record had it.
+  // A move: Undo sends the order as the record had it; with no pins before, it unpins what the move pinned, as the
+  // engine refuses an order with no issues (#1798).
   next(w, full());
   const was = (d.panels.board.data.control.order || []).map(String);
   act(bcard(w, 22), 'up').click();
   await settle();
-  assert.equal(w.posts.splice(0)[0].body.action, 'order');
-  await undo({ action: 'order', args: was });
+  const moved = w.posts.splice(0)[0].body;
+  assert.equal(moved.action, 'order');
+  await undo(was.length ? { action: 'order', args: was } : { action: 'unpin', args: moved.args });
   act(loopP(w), 'pause').click();
   await settle();
   w.posts.splice(0);

@@ -511,9 +511,12 @@
     else if (action === 'retry') ns.forEach((n) => steps.push(['retry', [n]]));
     else steps.push(['order', pinnedFirst(ns)]);
     const said = { hold: 'held', release: 'queued', retry: 'retried', order: 'pinned first' }[action];
-    // Hold and Queue undo each other, and Order first undoes to the order as it was; a retry is not undone.
+    // Hold and Queue undo each other, and Order first undoes to the order as it was (with no pins before, it unpins
+    // the issues it pinned, RELEASE_MAX at a time: the engine refuses an order with no issues); a retry is not undone.
+    const was = list((ctl() || {}).order).map(String), unpins = [];
+    for (let i = 0; i < ns.length; i += RELEASE_MAX) unpins.push(['unpin', ns.slice(i, i + RELEASE_MAX)]);
     const back = action === 'hold' || action === 'release' ? steps.map(([a, args]) => [a === 'hold' ? 'release' : 'hold', args])
-      : action === 'order' ? [['order', list((ctl() || {}).order).map(String)]] : null;
+      : action === 'order' ? (was.length ? [['order', was]] : unpins) : null;
     run(steps, `${said} ${plural(ns.length, 'issue', 'issues')}`, () => { S.picked.clear(); }, back);
   }
   function issueRow(x) {

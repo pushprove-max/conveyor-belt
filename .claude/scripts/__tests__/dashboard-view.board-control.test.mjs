@@ -254,6 +254,19 @@ test('the Board: a card dragged between Held and Queue, or onto a queued card, s
   assert.deepEqual([inCol(w, 'held'), inCol(w, 'queue')], [[76, 23], [20, 21, 22]], 'the snapshot replaces what the host answered');
 });
 
+// Bug it catches (#1798): with no pins before a move in the queue, its Undo sent `control order` with no issues, which
+// the engine refuses (it would clear the list), so the move could not be undone; Undo unpins what the move pinned.
+test('the Board: Undo of a move in the queue, with no pins before, unpins the issues the move pinned', async () => {
+  const w = boot({ tab: 'control' });
+  deliver(w, full());
+  dragTo(w, bcard(w, 22), bcard(w, 20));
+  await settle();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'order', args: ['22'], repo: 'sample' }], 'saved order [], #22 dragged onto #20');
+  w.document.querySelector('[data-act="undo"]').click();
+  await settle();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'unpin', args: ['22'], repo: 'sample' }], 'Undo of order [22] over saved order []');
+});
+
 // Bug (#1558): a pin of an issue filed after the open list was read (#90, above every listed number) is kept by the
 // engine, but a move in the queue sent the order without it, and the host replaced the saved order, so #90 lost its pin.
 test('the Board: a move in the queue keeps the pin of an issue newer than the open list', async () => {

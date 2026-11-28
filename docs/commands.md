@@ -68,6 +68,8 @@
   entry for each parent with its parts done (closed, or landed and not pushed) of all and its parts on the belt.
 - `conveyor.sh control` with no action prints the control record. Its other actions (pause, cap, order, rules, models,
   the judge, accounts, the dependency guard, the push check) are in `conveyor/README.md`, Control.
+  `control order <issue>...` sets the whole order list, in the order given: it replaces the list, so give every
+  issue that is to stay on it. With no issue, it is refused. `control unpin <issue>...` takes issues out of the list.
   `control order` takes issue numbers and card IDs. Ready issues and ready cards in the list start first, in the
   order given. A card also takes the place of its parent issue, or of the umbrella of that parent: an umbrella issue in
   the list puts its split parts and their follow-ups there. Then the other cards with no GitHub issue start, then the

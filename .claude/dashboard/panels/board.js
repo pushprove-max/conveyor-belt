@@ -269,7 +269,11 @@
       const hi = Math.min(out.length, ...was.slice(k + 1).filter(kept).map(placeOf));
       out.splice(wasAt >= 0 && wasAt < k && i >= lo && i < hi ? i + 1 : lo, 0, n);
     }
-    return send('order', out, null, null, (r) => send('order', was, null, r));
+    // With no pins before, Undo unpins what this pinned (50 at a time, as the host takes them): the engine refuses an
+    // order with no issues.
+    const back = (r) => (was.length ? send('order', was, null, r)
+      : out.reduce((p, n, i) => (i % 50 ? p : p.then((ok) => ok && send('unpin', out.slice(i, i + 50), null, r))), Promise.resolve(true)));
+    return send('order', out, null, null, back);
   }
   function shift(item, by) {
     const q = lanes().queue || [], i = q.findIndex((x) => x.issue === item.issue), to = i + by;

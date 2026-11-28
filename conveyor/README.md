@@ -130,6 +130,11 @@ its own, and the Board's Rules tab sets them in its Judge row.
 Every rule is on by default, except `push` and `visible`, which are off, `pick`, which is `off`, `healsdays`, which is a number of days, 30 at first, and `cardusd` and `issueusd`, which are numbers of dollars, 10 and 25 at first. An issue a rule excludes is left out of the pick and listed as skipped, with the rule
 that skips it. A record saved before a rule existed reads that rule at its default.
 
+`conveyor.sh control order <issue>...` sets the whole order list (`order` in the record), in the order given: it
+replaces the list, so give every issue that is to stay on it. It takes issue numbers and card IDs. With no issue, it
+is refused and the list stays as it was; `conveyor.sh control` prints the list. `conveyor.sh control unpin <issue>...`
+takes issues out of the list and leaves the others in their order.
+
 `conveyor.sh control land-as main|pr` sets Land as (`landAs` in the record; null, the default, is the pack's
 `push.landAs`). With `pr`, the push sends main to `conveyor/landing` and keeps one pull request open from it into the
 default branch ([Land as](../docs/configuration.md#land-as)).

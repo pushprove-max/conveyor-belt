@@ -250,6 +250,23 @@ test('every project: Order first pins the picked issues in that project\'s order
   assert.deepEqual(w.posts.splice(0), [{ url: 'control', body: { action: 'unpin', args: ['46'], repo: 'widgetshop' } }]);
 });
 
+// Bug it catches (#1798): with no pins before, Undo of Order first sent `control order` with no issues, which the
+// engine refuses (it would clear the list), so the pins stayed; Undo unpins the issues Order first pinned.
+test('every project: Undo of Order first, with no pins before, unpins the issues it pinned', async () => {
+  const w = boot({ query: '?tab=rules&repo=widgetshop&project=widgetshop' });
+  const d = two();
+  d.panels.rules.data.others.widgetshop.control.order = [];
+  deliver(w, d);
+  const b = listP(w).querySelector('.rules-issue[data-issue="49"] [data-act="pick"]');
+  b.checked = true; b.dispatchEvent(new w.Event('change'));
+  act(listP(w), 'bulk-order').click();
+  await settle();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'order', args: ['49'], repo: 'widgetshop' }], 'saved order [], #49 pinned first');
+  w.document.querySelector('[data-act="undo"]').click();
+  await settle();
+  assert.deepEqual(w.posts.splice(0).map((p) => p.body), [{ action: 'unpin', args: ['49'], repo: 'widgetshop' }], 'Undo of order [49] over saved order []');
+});
+
 test('every project: the Board filters every column by priority, area and label and sorts it, the choice kept in the address', async () => {
   const w = boot({ query: '?tab=control&repo=widgetshop&project=widgetshop' });
   // Two cards building: #5 picked up two hours ago and in its tests for a minute, #50 picked up an hour ago and still

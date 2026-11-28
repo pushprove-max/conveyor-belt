@@ -1360,8 +1360,9 @@ control() { # [action [arguments]]
       f='.held -= ($v | map(tonumber)) | .startSeen = (.startSeen + ($v | map(tonumber)) | unique)'
       [ -n "${CONVEYOR_RELEASEBY:-}" ] || f='((($ENV.CONVEYOR_NOW // "" | tonumber?) // now) | todate) as $t | .held as $h
          | .released += ([$v[] | tonumber | select(IN($h[]) or ($ENV.CONVEYOR_UNLABELED // "") != "")] | map({key: tostring, value: $t}) | from_entries) | '"$f" ;;
-    # order and unpin take issue numbers and card ids (CARDIDRE); a card id stays a string in the record.
-    order | unpin) [ "$a" = order ] || [ $# != 0 ] || { bad; return; }
+    # order and unpin take issue numbers and card ids (CARDIDRE); a card id stays a string in the record. order sets
+    # the whole list, so an order with none is refused: it would clear the list (`control` alone prints it).
+    order | unpin) [ $# != 0 ] || { bad; return; }
       for x; do [[ $x =~ ^[1-9][0-9]{0,8}$ || $x =~ $CARDIDRE ]] || { echo "conveyor: control $a: \"$x\" is not an issue number or a card id; nothing changed" >&2; return 2; }; done
       f='($v | map(tonumber? // .)) as $o | if $a == "unpin" then .order -= $o else .order = reduce $o[] as $n ([]; if index([$n]) then . else . + [$n] end) end' ;;
     # The dependency guard; with it off, `force` lets one issue be picked while issues it depends on are open.
