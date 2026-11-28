@@ -160,20 +160,21 @@ window.DASH_APP.panel({
       // A dependency cycle: its issues wait on each other, so none of them is ever picked.
       if (Array.isArray(r.cycles) && r.cycles.length) check(`Dependency cycles${of}`, ctx.chip(`${r.cycles.length} cycle${r.cycles.length === 1 ? '' : 's'}`, 'bad'),
         plain(r.cycles.map((c) => c.map((n) => `#${n}`).join(' ↔ ')).join('; '))).next = "Break each cycle: take one issue off another's Depends on: line on GitHub.";
-      // The cases that failed and then passed when run again in the last 7 days (conveyor/lib/flaky.sh): how many on
-      // the row's line, and under "Show output" one row each (item): its name, a chip of how many re-runs, and the
+      // The cases that failed and then passed in the last 7 days (conveyor/lib/flaky.sh: when run again, or on main in a
+      // file the card did not change): how many on the row's line, and under "Show output" one row each (item): its
+      // name, a chip of how many times, and the
       // issue filed for it when there is one. A record from before the snapshot gave them has none.
       if (Array.isArray(r.flaky)) {
         const cases = r.flaky.filter((f) => f && typeof f.case === 'string' && typeof f.count === 'number');
         if (cases.length) {
           const det = h('details', 'output'), list = h('ul', 'output-findings flaky-list');
           // A case is "<file>: <case>", or the file alone when the run named no case (conveyor/lib/testrun.sh notpassed).
-          list.append(...cases.map((f) => item(r.repoUrl, f.case, /^(.+?): /.exec(f.case)?.[1] ?? f.case, `${f.count} ${f.count === 1 ? 're-run' : 're-runs'}`, f)));
+          list.append(...cases.map((f) => item(r.repoUrl, f.case, /^(.+?): /.exec(f.case)?.[1] ?? f.case, `${f.count} ${f.count === 1 ? 'time' : 'times'}`, f)));
           det.append(h('summary', null, 'Show output'), list);
           check(`Flaky tests${of}`, ctx.chip(`${cases.length} case${cases.length === 1 ? '' : 's'}`, 'warn'),
-            `${cases.length === 1 ? '1 case' : `${cases.length} cases`} passed only on re-run in the last 7 days`, det).next =
+            `${cases.length === 1 ? '1 case' : `${cases.length} cases`} failed and then passed in the last 7 days`, det).next =
             'Fix each case, or the fixture under it. If a case has an issue, fix the case through that issue.';
-        } else check(`Flaky tests${of}`, ctx.chip('None', 'ok'), 'no case passed only on re-run in the last 7 days');
+        } else check(`Flaky tests${of}`, ctx.chip('None', 'ok'), 'no case failed and then passed in the last 7 days');
       }
       // The project's last card test runs recorded no test times (untimed: how many; conveyor/lib/views.sh): its test
       // command prints no `TESTRUN sec` lines and no report of its runner was read. When setup found a runner whose report Conveyor cannot read now (report: the pack's test.report with

@@ -1425,11 +1425,15 @@ issue, not a review follow-up. While that issue is open, later entries file noth
 made after it closed count, and the next entry that meets the rule with them files a new one that lists only them. When GitHub does not say whether it is open, nothing is filed until the next entry.
 
 A card whose run again still failed adds an entry for each case that passed in it (its file passed, or the case
-printed `ok`); a case that failed again, or did not run, adds none.
+printed `ok`); a case that failed again, or did not run, adds none from that run. A case that the card gets to fix
+(it failed in each run of the card) adds one entry, with the card as its source, when it passed on main (its file
+passed, or the case printed `ok`) and is in a file the card's change does not add, edit, rename or delete. A later fix
+round of the same card adds no second entry.
 
 A case the record names as `<file>: <case>` is kept off card test steps until its flaky issue
 closes: while no issue is filed for it yet, while the last one is open or GitHub does not say, and after it closed
-only when an entry came after the closing. A card's run is told to keep the case as passed (an `ok` line in its
+only when an entry came after the closing. An entry for a case that passed on main does not keep the case off until
+its issue is filed, so the next cards still run the case and can add their entries. A card's run is told to keep the case as passed (an `ok` line in its
 `CONVEYOR_TEST_RERUN` list, unless the list already names the case or its file as passed, and an
 `off<TAB><file><TAB><case>` line, unless a `fail` line names the case), so the command does not run it. An `ok` line
 alone is also a case that passed in a run killed part-way, which a `changed` or `main` line that selects it runs

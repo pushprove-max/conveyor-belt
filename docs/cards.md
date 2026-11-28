@@ -692,8 +692,9 @@ that step as "tests held: the machine", not as failed. When those files
 pass on main again, the loop picks again and the waiting cards run their tests again (`conveyor/README.md`, The test
 step).
 
-A case that failed and then passed goes on the flaky-test record. `conveyor.sh flaky add <case> <source> <note>` adds
-an entry from outside a card. A case with entries from three sources within seven days gets one issue, "Flaky test:
+A case that failed and then passed goes on the flaky-test record. A case that fails in a card, passes on main and is
+in a file the card does not change counts as one entry too, with the card as its source.
+`conveyor.sh flaky add <case> <source> <note>` adds an entry from outside a card. A case with entries from three sources within seven days gets one issue, "Flaky test:
 <case> fails at random". Until that issue closes, card test steps keep the case off. The full test suite still runs
 it. The Board's Health panel has a "Flaky tests" line (`conveyor/README.md`, Flaky tests).
 

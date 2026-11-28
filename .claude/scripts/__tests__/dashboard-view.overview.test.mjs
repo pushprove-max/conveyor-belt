@@ -480,7 +480,8 @@ test('health shows the Codex limit when the Claude reading failed', () => {
 });
 
 // The owner, 2026-11-13: a case that fails at random held cards up and nothing showed which. Health's "Flaky tests" line
-// names each case that passed only on re-run in the 7 days, with its count and the issue filed for it, linked.
+// names each case that failed and then passed in the 7 days, with its count and the issue filed for it, linked. Bug it
+// catches (issue 1829): a case that failed in a card and passed on main was counted as passing on a re-run.
 test('health draws a Flaky tests line: each case with its count and its issue number when one is filed', () => {
   const w = boot();
   const data = full();
@@ -489,14 +490,14 @@ test('health draws a Flaky tests line: each case with its count and its issue nu
   const dt = panel(w, 'health').querySelector('dt[data-check="Flaky tests"]');
   assert.ok(dt, 'a Flaky tests line');
   const dd = dt.nextElementSibling;
-  assert.match(dd.textContent, /2 cases.*b\.test: flaky3 re-runs#16c\.test: other1 re-run$/s);
+  assert.match(dd.textContent, /2 cases.*b\.test: flaky3 times#16c\.test: other1 time$/s);
   const a = dd.querySelector('a.issue');
   assert.equal(a && a.getAttribute('href'), `${P}/16`, 'the issue filed links to it');
   assert.equal(dd.querySelectorAll('.issue').length, 1, 'a case with no issue filed shows none');
   // No case in the 7 days: the line says so; a snapshot from before the record draws none.
   data.panels.health.data.records[0].flaky = [];
   next(w, data);
-  assert.match(panel(w, 'health').querySelector('dt[data-check="Flaky tests"]').nextElementSibling.textContent, /None.*no case passed only on re-run/);
+  assert.match(panel(w, 'health').querySelector('dt[data-check="Flaky tests"]').nextElementSibling.textContent, /None.*no case failed and then passed/);
   data.panels.health.data.records[0].flaky = null;
   next(w, data);
   assert.equal(panel(w, 'health').querySelector('dt[data-check="Flaky tests"]'), null);

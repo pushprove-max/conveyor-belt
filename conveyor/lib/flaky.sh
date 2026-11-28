@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # The flaky-test record (README.md, Flaky tests): each time a test case failed and then passed when run again with
-# nothing changed. A card's test run that passed on re-run (tests(): <worktree>.first) adds one entry for each case
+# nothing changed, or failed in a card and passed on main (flakycard()). A card's test run that passed on re-run (tests(): <worktree>.first) adds one entry for each case
 # that had not passed (flakyrun()); `conveyor.sh flaky add <case> <source> <note>` adds one from outside a card (the
 # nightly whole test: a case that failed in the full run and passed alone); `flaky off` adds one the same way and files
 # no issue (the Board's Keep a case off, an action that files none). A case it names is kept off card test steps
@@ -9,7 +9,7 @@
 # each whole file (flakypush()); a whole file is kept off card test steps only while an issue filed for that file is
 # open, and when the push reopens the closed issue last filed for a case of that file (`<file>: <case>`), flakyoff()
 # keeps that case off again while it is open.
-# $FLAKY keeps {entries: [{case, source, time} + {card, issue} (a card's) or {note} (flaky add or off)], filed: [{case,
+# $FLAKY keeps {entries: [{case, source, time} + {card, issue} (a card's; with a note: it passed on main, flakycard()) or {note} (flaky add or off)], filed: [{case,
 # issue} + {time} (a push's)], the issue last filed for each case}. An entry older than FLAKY_KEEP days is dropped at the next write.
 # A case with entries from FLAKY_SOURCES different sources within FLAKY_DAYS days, and no open issue filed for it,
 # gets one issue (flakyfile()). One writer at a time: a lock of its own, held through the filing, so two cards that
@@ -96,7 +96,7 @@ flakyfile() { # <case> <now>, under flaky()'s lock
   fi
   title="Flaky test: $1 fails at random"; title=${title:0:200}
   body=$(jq -r --arg c "$1" --arg now "$2" --arg at "$at" --argjson d "$FLAKY_DAYS" --argjson k "$FLAKY_SOURCES" "$counted"'
-    "The test case `\($c)` failed and then passed when run again, with nothing changed, from \($k) or more different sources within \($d) days. Until this issue is closed, card test steps are told to keep the case off: it runs only in the full test suite and the whole test on main.\n\nIts entries in the flaky-test record of Conveyor:\n"
+    "The test case `\($c)` failed and then passed (when run again with nothing changed, or on the code of main, in a file the card did not change), from \($k) or more different sources within \($d) days. Until this issue is closed, card test steps are told to keep the case off: it runs only in the full test suite and the whole test on main.\n\nIts entries in the flaky-test record of Conveyor:\n"
     + ([counted
         | "- \(.time) \(.source)" + (if .issue != null then ", issue #\(.issue)" else "" end) + (if (.note // "") != "" then ": \(.note)" else "" end)] | join("\n"))
     + "\n\nMake the test reliable, or remove it.\n\nDone when: the case passes alone and in the whole test."' <<<"$rec") || return 1
@@ -222,6 +222,35 @@ flakyrun() { # <worktree> [testfails() of the run again, when it failed]
   fi
   flaky "$c" "$e" || echo "conveyor: card $c: its flaky-test entries were not all recorded" >&2
 }
+# Issue 1829: a case that failed every run of a card (as on a busy machine) and passed on main got the verdict card
+# (mainred.sh verdicts()) and was never a flaky entry, however many cards it failed in. Each such case adds one entry,
+# the card its source: its verdict card, and main's run at <main's commit> names it passed (mainprobe() mp: its file
+# passed, for a unit naming no case; the case printed ok, for a case), so a case main's run did not run (not started
+# for want of room: testfails() host; a case its file does not hold) adds none; a file the card's change (staged in
+# <worktree>) adds, edits, renames or deletes is the card's own, and adds none, as does every case when the change
+# cannot be read. A second fix round of the card that fails the case again adds no entry (one card is one source:
+# flakyfile()). Such an entry (a card's, with a note) keeps the case off card test steps only once its issue is filed
+# (flakyoff()). The verdicts stay as they are when the record cannot be written: the card's log gets one line.
+flakycard() { # <card> <worktree> <verdicts: [{case, file, verdict}]> <the units main's run names passed: [{file, case}]> <main's commit>
+  local chg e err n=${1##*-} w=()
+  [ -n "$5" ] && [ "$4" != '[]' ] || return 0
+  [[ $n =~ ^[1-9][0-9]*$ ]] || n=null
+  chg=$(git -C "$2" -c core.quotePath=false diff --cached --name-only --no-renames HEAD 2>/dev/null) || return 0
+  chg=$(jq -cRn '[inputs | select(. != "")]' <<<"$chg") || return 0
+  mapfile -t w < <(jq -r --slurpfile p <(printf '%s' "$4") --argjson chg "$chg" '[$p[0][] | if .case == null then .file else "\(.file): \(.case)" end] as $ok
+    | .[] | select(.verdict == "card" and (.file | strings) and (.file | IN($chg[]) | not) and (.case | IN($ok[]))) | .case' <<<"$3" 2>/dev/null)
+  [ ${#w[@]} != 0 ] || return 0
+  # A case the record already has from this card (an earlier fix round) is left out: it is no new sighting.
+  e=$(jq -cn --arg k "$1" --argjson n "$n" --arg s "${5:0:12}" --slurpfile r <(jq -ce objects "$FLAKY" 2>/dev/null || echo '{}') '[$r[0].entries[]? | select(.source == $k) | .case] as $had
+    | [$ARGS.positional[] | select(IN($had[]) | not)
+    | {case: ., card: $k, issue: $n, note: "failed in the card, passed on main at \($s); the card does not change its file"}]' --args "${w[@]}") || e=''
+  [ "$e" != '[]' ] || return 0
+  # flaky()'s own line for a record it could not lock or write ("; nothing added") is replaced by the card's one line;
+  # what it says of an issue it could not file, after the entries were written, is kept as it is.
+  if [ -z "$e" ]; then err="conveyor: card $1: the flaky-test record could not be written"
+  elif ! err=$(flaky "$1" "$e" 2>&1 >/dev/null) && [[ $err == *'; nothing added'* ]]; then err="conveyor: card $1: the flaky-test record could not be written"; fi
+  [ -z "$err" ] || printf '%s\n' "$err" >&2
+}
 # Of a first run's record ({exit, failures}, tests()), the units that did not pass in it ($l: testfails() of the run
 # again) passed in the run again: its file passed, or (a case) the case printed ok. Each as notpassed() names it: a
 # file the run's time limit only stopped beside the one that ran out of time is not one; a file its own limit stopped
@@ -233,7 +262,9 @@ PASSEDAGAIN='def passedagain($l): if ($l | type) != "object" then [] else
 # The cases the flaky-test record keeps off card test steps (the owner, 2026-11-14): each case it names as
 # `<file>: <case>`, and each whole file with an issue filed for it (the owner, 2026-11-25: a file whose command
 # cannot run part of it, as #1690's; a whole file with no issue filed, or a case with no file, is never kept off),
-# while no issue filed for it has closed since its last entry: none filed yet, the last one open or its state unread, or closed before a newer entry. A case
+# while no issue filed for it has closed since its last entry: none filed yet, the last one open or its state unread, or closed before a newer entry.
+# An entry of a case that passed on main (flakycard(): a card's, with a note) is no such entry: one card whose change
+# broke a test in another file would else keep it off every later card, and no later card could add its sighting. A case
 # whose entries have aged out of the record (FLAKY_KEEP) is still named by its filed issue, so it stays off while that
 # issue is open. They run in the full suite and the whole test on main, which are given no such list. tests() adds an
 # `ok` line to the card's list (<worktree>.rerun, CONVEYOR_TEST_RERUN) for each, unless the list already names the case
@@ -252,7 +283,7 @@ flakyoff() { # <worktree>
       # A whole file: kept off only while its issue is open, so an entry newer than its closing does not keep it off.
       [ "$k" != - ] || [ "${s%%$'\t'*}" != CLOSED ] || continue
       # Closed: kept off only by an entry newer than its closing (when GitHub says when).
-      [ "${s%%$'\t'*}" != CLOSED ] || jq -e --arg c "$c" --arg at "${s#*$'\t'}" '$at != "" and any(.entries[]; .case == $c and .time > $at)' <<<"$rec" >/dev/null || continue
+      [ "${s%%$'\t'*}" != CLOSED ] || jq -e --arg c "$c" --arg at "${s#*$'\t'}" '$at != "" and any(.entries[]; .case == $c and .time > $at and (.card == null or .note == null))' <<<"$rec" >/dev/null || continue
     fi
     if [ "$k" = - ]; then # a whole file
       ! grep -qxF "fail"$'\t'"$f" "$1.rerun" 2>/dev/null || continue
@@ -263,7 +294,7 @@ flakyoff() { # <worktree>
     ! grep -qxF "fail"$'\t'"$f"$'\t'"$k" "$1.rerun" 2>/dev/null || continue
     grep -qxF -e "pass"$'\t'"$f" -e "ok"$'\t'"$f"$'\t'"$k" "$1.rerun" 2>/dev/null || add+="ok"$'\t'"$f"$'\t'"$k"$'\n'
     grep -qxF "off"$'\t'"$f"$'\t'"$k" "$1.rerun" 2>/dev/null || add+="off"$'\t'"$f"$'\t'"$k"$'\n'
-  done < <(jq -r '. as $r | [(.entries[]?.case), (.filed[]?.case) | strings
+  done < <(jq -r '. as $r | [(.entries[]? | select(.card == null or .note == null) | .case), (.filed[]?.case) | strings
       | (capture("^(?<f>.+?): (?<k>.+)$") // (select(. as $c | any($r.filed[]?; .case == $c and .issue != null)) | {f: ., k: "-"}))] | unique[] as $x
     | (if $x.k == "-" then $x.f else "\($x.f): \($x.k)" end) as $c
     | ([$r.filed[]? | select(.case == $c) | .issue][-1] // "-") as $n | [$c, $n, $x.f, $x.k] | @tsv' <<<"$rec") # "-": no issue filed, or no case: a whole file (a tab IFS would join an empty field)

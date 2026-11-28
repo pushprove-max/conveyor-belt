@@ -273,7 +273,7 @@ lists every project's rows, so it stays as it is.
 ## Health and Lanes
 
 - **Flaky tests** in Health lists each test case on its own row under **Show output**. A row shows the name, a count
-  ("3 re-runs") and the issue filed for it, as a link, when there is one.
+  ("3 times") and the issue filed for it, as a link, when there is one.
 - **Plugin problems** in Health shows when a Foreman noted a problem in Conveyor itself, in `plugin-bugs.md` in its
   folder. Each note is one row: the time, the card and what the Foreman saw. Fix the problem, or file it as an issue
   in the repository of Conveyor. Then click **Dismiss** to remove that note from `plugin-bugs.md`, unless you filed it

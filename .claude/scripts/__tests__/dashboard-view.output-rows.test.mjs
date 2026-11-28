@@ -21,7 +21,7 @@ test('Health: each flaky case is one row with its name, count chip and issue lin
   const w = boot();
   deliver(w, data);
   const flaky = Array.from(dd(w, 'Flaky tests').querySelectorAll(':scope > details.output li.output-finding'));
-  assert.deepEqual(flaky.map(row), [['b.test: flaky', '3 re-runs', `${P}/16`], ['c.test: other', '1 re-run', null], ['d.test', '1 re-run', null]]);
+  assert.deepEqual(flaky.map(row), [['b.test: flaky', '3 times', `${P}/16`], ['c.test: other', '1 time', null], ['d.test', '1 time', null]]);
   for (const li of flaky) assert.equal(li.querySelector('pre.output-text'), null, 'no mono block in a row');
   // Bug #437: a flaky case's file was plain text, unlike a declined finding's paths: each is code
   // linked to the file in the record's repository, a case with no issue filed too, and a whole file the run named no

@@ -94,7 +94,7 @@ test('Health: a failing push is one plain line with its output under "Show outpu
   assert.match(line, /^Failing Push failing for 8 min: typecheck-web failed Next: /);
   assert.ok(!line.includes('error TS2322'), `the row's own line carries none of the output: ${line}`);
   const flaky = dd(w, 'Flaky tests');
-  assert.match(flaky.textContent, /^1 case1 case passed only on re-run in the last 7 days/);
+  assert.match(flaky.textContent, /^1 case1 case failed and then passed in the last 7 days/);
   assert.ok(flaky.querySelector(':scope > details.output .issue'), 'each case and its issue under Show output');
   // The row's words, less its closed "Raw error" that holds the error as the host gave it.
   const usage = Array.from(dd(w, 'Account default on this machine').children).filter((n) => !n.matches('details.output')).map((n) => n.textContent).join('');
