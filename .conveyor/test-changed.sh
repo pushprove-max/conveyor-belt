@@ -1011,7 +1011,8 @@ callers() {
 # callersof <file> (issue 1775): when the change of an engine shell file (a .sh file of the map under conveyor/, not
 # under conveyor/tests/; TXFROM to TXTO) edits, adds or removes its functions alone (FUNCS; its other lines the same
 # but for comments and blanks, TEXT), the test files that name a changed function or a function that calls one (one
-# hop, no more): each case file under conveyor/tests/ into area, each test file under .claude/scripts/__tests__/ and
+# hop, no more) on a line that is no comment (`#`, or `//` in a Board test: bug, a `//` comment that held the word
+# `verdicts` ran two Board test files for a change to verdicts()): each case file under conveyor/tests/ into area, each test file under .claude/scripts/__tests__/ and
 # .claude/hooks/__tests__/ into run; and when the changed function, a caller, or a line outside the functions is in a
 # command script (conveyor/commands/), the tests cmdtests gives for that script's commands (no test names its entry
 # function, as releaseprep() of release-prep.sh: they run `loop release-prep`). A caller is a function of an engine
@@ -1085,7 +1086,7 @@ callersof() {
   mapfile -t files < <(git ls-files -co --exclude-standard 'conveyor/tests/*.test.sh' '.claude/scripts/__tests__/*' \
     '.claude/hooks/__tests__/*' | grep -E '[.]test[.][a-z]+$' | while read -r t; do [ ! -f "$t" ] || echo "$t"; done)
   [ ${#files[@]} = 0 ] || while read -r t; do case $t in conveyor/tests/*) area[$t]=1 ;; *) run[$t]=1 ;; esac; done \
-    < <(awk -v p="(^|[^A-Za-z0-9_])($w)([^A-Za-z0-9_]|\$)" '!/^[ \t]*#/ && $0 ~ p { print FILENAME; nextfile }' "${files[@]}" < /dev/null)
+    < <(awk -v p="(^|[^A-Za-z0-9_])($w)([^A-Za-z0-9_]|\$)" '!/^[ \t]*(#|\/\/)/ && $0 ~ p { print FILENAME; nextfile }' "${files[@]}" < /dev/null)
   [ ${#cmds[@]} = 0 ] || cmdtests "${cmds[@]}"
   parse[$f]=1
 }

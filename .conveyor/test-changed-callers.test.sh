@@ -101,5 +101,19 @@ p_callerstable() {
     || no "lib/w.sh go(), a command of the table, changed: ran '$got', want 'wcmd', exit $(cat "$T/rc"): $(cat "$T/out")"
 }
 
-for p in callers callersmany callerstop callersstartup callerstable; do part "$p"; done
+# Bug it catches: a Board test file whose `//` comment holds the name of a changed function ran (two of them on card
+# 1829, for the word `verdicts`). One that calls nothing of target() but names it in a comment is not listed; one
+# that names it in code is.
+p_callerscomment() {
+  cfix; mkdir -p "$R/.claude/scripts/__tests__"
+  printf '%s\n' '// target is drawn by the page' "test('x', () => {});" > "$R/.claude/scripts/__tests__/wnote.test.mjs"
+  printf '%s\n' "test('y', () => run('target'));" > "$R/.claude/scripts/__tests__/wcode.test.mjs"
+  git -C "$R" add -A && git -C "$R" commit -qm board; edit 's/echo one/: one/'
+  (cd "$R" && CONVEYOR_TEST_LIST=$T/list bash .conveyor/test-changed.sh) > "$T/out" 2>&1
+  grep -qxF .claude/scripts/__tests__/wcode.test.mjs "$T/list" && ! grep -qF wnote.test.mjs "$T/list" \
+    && ok "a Board test that names a changed function in a // comment alone is not selected" \
+    || no "lib/w.sh target() changed: the list is '$(paste -sd ' ' "$T/list" 2>&1)', want wcode.test.mjs and not wnote.test.mjs: $(cat "$T/out")"
+}
+
+for p in callers callersmany callerstop callersstartup callerstable callerscomment; do part "$p"; done
 results
