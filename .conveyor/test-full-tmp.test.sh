@@ -56,5 +56,20 @@ kill -ALRM "$pid"; wait "$pid"
 [ ! -e "${d[c]}" ] || no "lib/c.test.sh's temp folder ${d[c]} is left once the run was stopped at its time limit"
 grep -qxF -- '-- ok lib/a.test.sh' "$T/out" && grep -qxF -- '-- FAIL lib/b.test.sh' "$T/out" \
   || no "the files did not pass and fail as written: $(cat "$T/out")"
+
+# A TMPDIR under $HOME (a devbox's): the run's scratch folder is under /tmp, so each file's TMPDIR is outside $HOME.
+# Bug: an engine case file makes its cases' folder under /tmp, not in a TMPDIR under $HOME (conveyor/tests/lib.sh), and
+# nothing removed that folder when the file's run was killed; in a TMPDIR outside $HOME it makes the folder there, and
+# the suite removes it with the TMPDIR. HOME is a scratch folder here, and the repo has one file, which passes.
+R2=$T/r2; mkdir -p "$R2/.conveyor" "$R2/lib" "$T/home/tmp"
+cp "$HERE/test-full.sh" "$HERE/test-share.sh" "$R2/.conveyor/"
+printf '%s\n' 'echo "$TMPDIR" > "$(dirname "$0")/../dir"' > "$R2/lib/h.test.sh"; echo dir > "$R2/.gitignore"
+git -C "$R2" init -q && git -C "$R2" add -A && git -C "$R2" commit -qm init
+(cd "$R2" && unset CONVEYOR_TEST_SLOT CONVEYOR_CARD CONVEYOR_TEST_WHOLE CONVEYOR_TEST_LOG CONVEYOR_SUITE_MODE \
+  && HOME=$T/home TMPDIR=$T/home/tmp XDG_CONFIG_HOME=$T/config timeout --kill-after=30 60 bash .conveyor/test-full.sh) > "$T/out2" 2>&1
+h=$(cat "$R2/dir" 2> /dev/null)
+case $h in '' | "$T/home"/*) no "with a TMPDIR under \$HOME, lib/h.test.sh's TMPDIR was not a folder outside \$HOME: '$h'; $(cat "$T/out2")" ;; esac
+[ -z "$h" ] || [ ! -e "$h" ] || no "with a TMPDIR under \$HOME, lib/h.test.sh's temp folder $h is left once the file ended"
+[ -z "$(ls -A "$T/home/tmp")" ] || no "the run left files in a TMPDIR under \$HOME: $(ls -A "$T/home/tmp")"
 [ "$fails" = 0 ] && echo "ok - each file's temp folder is gone once it passed, failed or was stopped"
 exit $fails

@@ -66,6 +66,19 @@ for f in a.test.sh b.test.sh fine; do
 done
 [ -z "$(ls -A "$T/share.tmp")" ] || no "the step left files in its TMPDIR: $(ls -A "$T/share.tmp")"
 
+# A TMPDIR under $HOME (a devbox's): the step's scratch folder is under /tmp, so each file's TMPDIR is outside $HOME.
+# Bug: an engine case file makes its cases' folder under /tmp, not in a TMPDIR under $HOME (conveyor/tests/lib.sh), and
+# nothing removed that folder when the file's run was killed; in a TMPDIR outside $HOME it makes the folder there, and
+# the step removes it with the TMPDIR. HOME is a scratch folder here.
+rm -f "$R"/dirs/*; mkdir -p "$T/home.log" "$T/home/tmp"
+(cd "$R" && env HOME="$T/home" CONVEYOR_TEST_LOG="$T/home.log" XDG_CONFIG_HOME="$T/share.config" TMPDIR="$T/home/tmp" timeout 120 bash .conveyor/test-changed.sh) > "$T/home.out" 2>&1
+for f in a.test.sh fine; do
+  read -r d < "$R/dirs/$f" || { no "with a TMPDIR under \$HOME, $f noted no TMPDIR: $(cat "$T/home.out")"; continue; }
+  case $d in "$T/home"/*) no "with a TMPDIR under \$HOME, $f's TMPDIR was under \$HOME too: '$d'" ;; esac
+  [ ! -e "$d" ] || no "with a TMPDIR under \$HOME, $f's temp folder $d is left once it ended"
+done
+[ -z "$(ls -A "$T/home/tmp")" ] || no "the step left files in a TMPDIR under \$HOME: $(ls -A "$T/home/tmp")"
+
 # Bug #1662: a file that did not start for want of room in the temp space was a failed test (`-- FAIL`), and the
 # engine marked main red on it. With no room for a share, no file of another run holding one and a wait for room of
 # 1 s, the run waits, and then each file is a host problem: not run (`-- notrun`), and a `TESTRUN host` line with the

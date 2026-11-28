@@ -80,7 +80,8 @@ in chat. The project runs no GitHub Actions: every step runs on the build machin
 
    Each test file writes its temp files in a folder of its own. The suite removes the folder when the file ends,
    also when the run stops at its time limit. A card's test step runs its test files in the same way. All the files
-   share the space of that folder's file system (`TMPDIR`, else `/tmp`) with each other and with Conveyor. That space
+   share the space of that folder's file system (`TMPDIR`, else `/tmp`) with each other and with Conveyor. When
+   `TMPDIR` is in your home folder, the folder is in `/tmp`. That space
    is the free space of the file system, or what is left of your user's quota on it when that is less. Each file
    gets a share of that space: the host file's `testTmpMB`, in MB ([Setup](setup.md#the-host-file)), or 2048 when
    the host file does not set it. A file that fills its temp folder to its share stops and fails, and its output

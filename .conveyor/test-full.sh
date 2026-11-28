@@ -40,10 +40,14 @@ AT=${CONVEYOR_SUITE_AT_ONCE:-2}; unset CONVEYOR_SUITE_AT_ONCE
 # The host file's testTmpMB (docs/setup.md) is each test file's share, in MB, of the space its temp files go in (the
 # file system of TMPDIR, else /tmp), 2048 when unset: a file that writes past it fails alone, and the others and the
 # belt keep their space (runone; .conveyor/test-share.sh, which the card's test step uses too).
+# With a TMPDIR under $HOME the run's scratch folder is under /tmp: an engine case file makes its cases' folder under
+# /tmp then, not in a TMPDIR under $HOME (conveyor/tests/lib.sh), and nothing removed that folder when the file's run
+# was killed. In a TMPDIR that is under /tmp it makes the folder there, and share_run removes it with the TMPDIR.
 # shellcheck source=.conveyor/test-share.sh
 . "${BASH_SOURCE[0]%/*}/test-share.sh" || { echo "test-full: ${BASH_SOURCE[0]%/*}/test-share.sh could not be read; nothing run" >&2; exit 2; }
 rc=0
-tmp=$(mktemp -d) || exit 1
+tb=${TMPDIR:-/tmp}; case $tb/ in "${HOME:-/nonexistent}"/*) tb=/tmp ;; esac
+tmp=$(mktemp -d "$tb/tmp.XXXXXXXXXX") || exit 1
 share_init "$tmp" > "$tmp/share.why" || { echo "test-full: $(cat "$tmp/share.why"); nothing run" >&2; rm -rf "$tmp"; exit 2; }
 # A run stopped before its files end (the test step's timeout, testTimeout: testlist.sh testclock(), stops the whole
 # process group) still names in the run's log the cases that ended in each file run in parallel that is still running

@@ -1576,6 +1576,11 @@ for f; do
   [ -n "$cov$cal" ] || [ -n "$NOTEXT" ] || case $f in conveyor/tests/*) ;; conveyor/*.sh) rulefor "$f" area ;; esac
   [ -n "$cov$cal" ] || case $f in conveyor/*) areaof "$f" ;; .claude/hooks/lib/*.sh) while read -r t; do [ -z "$t" ] || { run[$t]=1; RANKED+=$t$'\n'; }; done < <(hooklibtests "$f") ;; esac
 done
+pickend
+}
+# The end of pick, once each changed file is read: its linked case files, its parts and the engine runner's cases.
+pickend() {
+local f t s
 # A linked engine case file (larea) runs whole, but when the coverage map picked the change of each file that links it
 # (covpick) and holds each of its cases (mapcases): the map then gives the cases of it that reach the changed
 # functions, as it does in place of the file's area (issue 1829: a link of mainred.sh ran models.test.sh and five
@@ -2081,7 +2086,10 @@ nostart() {
   echo "$1; nothing run"; exit 1
 }
 # No temp file: it stops before the trap, as an empty $o would make "$o".* every hidden file here.
-o=$(mktemp) && [ -n "$o" ] || nostart "test-changed: no temp file could be made in ${TMPDIR:-/tmp}"
+# Under /tmp when TMPDIR is under $HOME, as the full suite's is (.conveyor/test-full.sh): the folder of an engine case
+# file's cases is then in the file's TMPDIR, and is removed with it though the file's run was killed.
+ob=${TMPDIR:-/tmp}; case $ob/ in "${HOME:-/nonexistent}"/*) ob=/tmp ;; esac
+o=$(mktemp "$ob/tmp.XXXXXXXXXX") && [ -n "$o" ] || nostart "test-changed: no temp file could be made in $ob"
 trap 'chmod -R u+w "$o.tmp" 2>/dev/null; rm -rf "$o" "$o".* "${rlist:-}"' EXIT
 # Each test file runs with a share of the temp space and a TMPDIR of its own in $o.tmp, removed when it ends, and
 # with $o.tmp when this run ends (share_run, .conveyor/test-share.sh, as the full suite runs them): a file that writes
