@@ -147,9 +147,13 @@ hostd() {
 hostfacts() { # <tool>...
   local s
   s="set -- $(printf '%q ' "$@"); $HOSTFACTS"
-  # `devbox exec` passes no standard input: on a devbox the text of slots.sh goes in the script (SLOTS_SRC), not on the input.
-  if [ "$SH_KIND" = devbox ]; then hostssh "SLOTS_SRC=$(printf '%q' "$(< "$HERE/lib/slots.sh")"); $s" 60 < /dev/null
-  elif [ "$SH_KIND" = local ]; then bash -c "$s" < "$HERE/lib/slots.sh"; else hostssh "$s" 60 < "$HERE/lib/slots.sh"; fi
+  # The text sent is portable.sh, then slots.sh: slots.sh counts the cores with portable.sh's p_ncpu and, read as text,
+  # has no folder to source it from. With no p_ncpu, a shell held to one core counted one slot, and no core kept for
+  # the user was left out.
+  # `devbox exec` passes no standard input: on a devbox the text goes in the script (SLOTS_SRC), not on the input.
+  if [ "$SH_KIND" = devbox ]; then hostssh "SLOTS_SRC=$(printf '%q' "$(cat "$HERE/lib/portable.sh" "$HERE/lib/slots.sh")"); $s" 60 < /dev/null
+  elif [ "$SH_KIND" = local ]; then bash -c "$s" < <(cat "$HERE/lib/portable.sh" "$HERE/lib/slots.sh")
+  else hostssh "$s" 60 < <(cat "$HERE/lib/portable.sh" "$HERE/lib/slots.sh"); fi
 }
 # The tools a .conveyor/test-machine.sh names on its `# needs: <tool> [<version>]` lines, one a line, jq and git left
 # out (hostneeds() and hostcheck() name those apart): the script of <blob> (a commit's, hostsetup()), else the main
