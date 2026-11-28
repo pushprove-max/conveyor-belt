@@ -531,7 +531,11 @@ listcmd() { # <worktree> [report args]
       [ "$SELN" = 0 ] || CAPNOTE+=${SELLINKED//'<k>'/$((SELALL || SELN < CARDLINKED ? SELN : CARDLINKED))}; [ "$KEPTLINKS" = 0 ] || CAPNOTE+=${LINKKEPT//'<k>'/$KEPTLINKS}
       [ "$READLINKS" = 0 ] || CAPNOTE+=${READLINKED//'<k>'/$READLINKS}; }
   fi
-  [ -z "${MAINFROM:-}" ] || [ ${#fs[@]} = 0 ] || while IFS= read -r f; do grep -qxF -- "$f" <<<"$(printf '%s\n' "${fs[@]}")" || fs+=("$f"); done < <(mainlinks "$1" "$MAINFROM")
+  # Not one a run would start with no case (NOCASEOFF, testlist.sh nocaseask()).
+  [ -z "${MAINFROM:-}" ] || [ ${#fs[@]} = 0 ] || while IFS= read -r f; do
+    [ -z "$NOCASEOFF" ] || ! grep -qxF -- "$f" <<<"$NOCASEOFF" || continue
+    grep -qxF -- "$f" <<<"$(printf '%s\n' "${fs[@]}")" || fs+=("$f")
+  done < <(mainlinks "$1" "$MAINFROM")
   # Each test file the changed-tests command names for the change beyond the list (testlist.sh alsoin(), #1829), with
   # the cases it names of it (TEST_CASES); the note says how many (ALSONAMED).
   alsoin "$1"

@@ -754,7 +754,7 @@ changelinks() { # <worktree> [all]
     | { [ -z "${NOCASEOFF:-}" ] && cat || grep -vxF -- "$NOCASEOFF" || :; } # not a file a run would start with no case (nocaseask())
 }
 # NOCASEOFF: of the test files a card's list could hold (those testsel() gave, <its output>, those the links give the
-# change and those whose last pass read it), each one the pack's changed-tests command says a run of the change would
+# change, those whose last pass read it, and those the links give what main changed: mainlinks(), MAINFROM), each one the pack's changed-tests command says a run of the change would
 # start with no case, one a line (#1829). The command is asked in its list mode (CONVEYOR_TEST_LIST, as selfirst()
 # asks it) with those files as its file list and CONVEYOR_TEST_NOCASE, the file it names them in. listcmd() lists
 # none of them, so none starts: bug, each linked test file started, and its one-file run made the selection again,
@@ -776,8 +776,8 @@ nocaseask() { # <worktree> <testsel's output>
   packget test.changed tc && [ -n "$tc" ] && packget test.command cmd && [ -n "$cmd" ] || return 0
   c=$(git -C "$1" -c core.quotePath=false diff --cached --name-status --no-renames HEAD -- 2>/dev/null) || c=''
   rm -f "$1.nocase" "$1.capsel" "$1.also"
-  { [[ $2 != *$'\n'* ]] || printf '%s\n' "${2#*$'\n'}"; changelinks "$1"; [ ! -s "$TESTCACHE" ] || [ -z "$c" ] || cachereaders "$c"; } \
-    | grep . | LC_ALL=C sort -u > "$1.capfiles"
+  { [[ $2 != *$'\n'* ]] || printf '%s\n' "${2#*$'\n'}"; changelinks "$1"; [ ! -s "$TESTCACHE" ] || [ -z "$c" ] || cachereaders "$c"
+    [ -z "${MAINFROM:-}" ] || mainlinks "$1" "$MAINFROM"; } | grep . | LC_ALL=C sort -u > "$1.capfiles"
   # With no file the list could hold, the command gets no file list (its own selection), and is still asked for ALSOADD.
   if (cd "$1" && CONVEYOR_TEST_LIST=$1.capsel CONVEYOR_TEST_NOCASE=$1.nocase CONVEYOR_TEST_ALSO=$1.also CONVEYOR_TEST_RERUN='' \
       CONVEYOR_TEST_FILELIST=$([ ! -s "$1.capfiles" ] || echo "$1.capfiles") CONVEYOR_TEST_CASES=${TEST_CASES:-} CONVEYOR_TEST_LOG='' \

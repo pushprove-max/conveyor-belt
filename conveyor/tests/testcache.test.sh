@@ -247,6 +247,29 @@ t_testcachealso() {
   [ "$(tr ' ' '\n' < "$T/$CASE/got2" | sort | paste -sd ' ' -)" = "l1.test.sh l2.test.sh" ] && [ ! -s "$T/$CASE/cs2" ] \
     || fail "with d.md linked to l1.test.sh, the list is not the two files, l1.test.sh whole: $(cat "$T/$CASE/got2" "$T/$CASE/cs2" "$T/$CASE/run.out" 2>&1)"
 }
+# #1829: main changed m.txt since card c7 last ran its tests (MAINFROM), and the links give that change m.test.sh
+# (`main:m.txt`): the list of c7's change to d.md, linked to l1.test.sh, holds both. When the command of the changed
+# tests names m.test.sh as a file a run would start with no case, the list holds l1.test.sh alone. Bug it catches:
+# the question of the files with no case did not cover the files main's links add, so such a file still started.
+t_testcachemainnocase() {
+  setup '[]'
+  local w=$T/$CASE/cards/c7 i at
+  for i in l1 m; do echo x > "$R/$i.test.sh"; done; echo d > "$R/d.md"; echo m > "$R/m.txt"
+  printf '%s\n' 'ls | grep -E "^l1[.]test" > "$CONVEYOR_TEST_LIST"' \
+    '[ ! -f "$PWD/../nocase-on" ] || [ -z "${CONVEYOR_TEST_NOCASE:-}" ] || echo m.test.sh > "$CONVEYOR_TEST_NOCASE"' > "$R/sel.sh"
+  linkset '{"d.md": ["l1.test.sh"], "main:m.txt": ["m.test.sh"]}'
+  git -C "$R" add l1.test.sh m.test.sh d.md m.txt sel.sh && git -C "$R" commit -qm files || fail "main's files could not be committed"
+  at=$(git -C "$R" rev-parse HEAD); echo two >> "$R/m.txt"; cachelistsetup m.txt
+  tune '.test.changed = "sel.sh" | .test.command = "bash sel.sh"'
+  echo two >> "$w/d.md" && git -C "$w" add -A || fail "the card's change could not be staged"
+  LASTPASS=$'z.test.sh\tz.txt' cachelistrun "MAINFROM=$at"' listcmd "$wt" && echo $TEST_FILES > "$T/$CASE/got"'
+  [ "$(tr ' ' '\n' < "$T/$CASE/got" | sort | paste -sd ' ' -)" = "l1.test.sh m.test.sh" ] \
+    || fail "after main changed m.txt, the list is not l1.test.sh and m.test.sh: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+  touch "$T/$CASE/cards/nocase-on"
+  LASTPASS=$'z.test.sh\tz.txt' cachelistrun "MAINFROM=$at"' listcmd "$wt" && echo $TEST_FILES > "$T/$CASE/got2"; jq -c .noCase "$wt.testlist" > "$T/$CASE/nc"'
+  [ "$(cat "$T/$CASE/got2")" = l1.test.sh ] && [ "$(cat "$T/$CASE/nc")" = '["m.test.sh"]' ] \
+    || fail "with m.test.sh named as a file with no case, the list is not l1.test.sh alone: $(cat "$T/$CASE/got2" "$T/$CASE/nc" "$T/$CASE/run.out" 2>&1)"
+}
 cachelistsetup() {
   git -C "$R" add -- "$@" && git -C "$R" commit -qm files || fail "main's files could not be committed"
   tune '.test.fileCommand = "true" | .tests.patterns = ["*.test.sh"]'
