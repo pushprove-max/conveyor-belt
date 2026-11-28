@@ -115,5 +115,39 @@ p_callerscomment() {
     || no "lib/w.sh target() changed: the list is '$(paste -sd ' ' "$T/list" 2>&1)', want wcode.test.mjs and not wnote.test.mjs: $(cat "$T/out")"
 }
 
-for p in callers callersmany callerstop callersstartup callerstable callerscomment; do part "$p"; done
+# Issue 1829. Bug it catches: a change to a page ran none of the cases that read it (on the engine, a change to
+# docs/cards.md ran no case of healskinds, lintgate, recshut or review, each of which reads a sentence of it). A
+# change to docs/page.md runs wdoc, the case of wdoc.test.sh that names its path, not the file's other cases, and
+# lists wall.test.mjs, which reads each page of the folder, not wnone.test.mjs, which names it in a comment, nor
+# wother.test.mjs, which names another page whose path ends with its path. A change to note.md, a page in the root,
+# runs wroot, which reads it from the checkout, not wscratch, which writes a note.md of its own scratch checkout.
+p_doctests() {
+  local g='*.md'
+  cfix; mkdir -p "$R/docs" "$R/more/docs" "$R/.claude/scripts/__tests__"; echo page > "$R/docs/page.md"; echo other > "$R/more/docs/page.md"; echo note > "$R/note.md"
+  printf '%s\n' 't_wdoc() {' '  grep -q page "$SRC/../docs/page.md"' '}' 't_wplain() {' '  :' '}' \
+    't_wroot() {' '  grep -q note "$SRC/../note.md"' '}' 't_wscratch() {' '  echo x > "$R/note.md"' '}' > "$R/conveyor/tests/wdoc.test.sh"
+  echo '{"area": "w", "test": "wdoc.test.sh"}' >> "$R/.conveyor/engine-areas.json"
+  printf '%s\n' "for (const p of glob('docs/$g')) test(p, () => {});" > "$R/.claude/scripts/__tests__/wall.test.mjs"
+  printf '%s\n' '// docs/page.md is the guide' "test('z', () => {});" > "$R/.claude/scripts/__tests__/wnone.test.mjs"
+  printf '%s\n' "test('o', () => read('more/docs/page.md'));" > "$R/.claude/scripts/__tests__/wother.test.mjs"
+  git -C "$R" add -A && git -C "$R" commit -qm page; echo more >> "$R/docs/page.md"
+  (cd "$R" && CONVEYOR_TEST_LIST=$T/list bash .conveyor/test-changed.sh) > "$T/out" 2>&1
+  grep -qxF conveyor/tests/wdoc.test.sh "$T/list" && grep -qxF .claude/scripts/__tests__/wall.test.mjs "$T/list" && ! grep -qF -e wnone.test.mjs -e wother.test.mjs "$T/list" \
+    && ok "a changed page lists the test files that name its path or its folder's pages" \
+    || no "docs/page.md changed: the list is '$(paste -sd ' ' "$T/list" 2>&1)', want wdoc.test.sh and wall.test.mjs, not wnone.test.mjs or wother.test.mjs: $(cat "$T/out")"
+  # <page>: the cases a one-file run of wdoc.test.sh runs for the change to it.
+  onepage() {
+    rm -rf "$T/log"; mkdir "$T/log"
+    (cd "$R" && CONVEYOR_TEST_LOG=$T/log bash .conveyor/test-changed.sh --file conveyor/tests/wdoc.test.sh) > "$T/out" 2>&1
+    sed -n 's/^TESTRUN case\tconveyor\/tests\/wdoc.test.sh\t//p' "$T/log/test-changed.log" | paste -sd ' ' -
+  }
+  got=$(onepage)
+  [ "$got" = wdoc ] && ok "a run of the case file runs the case that names the changed page, not the file's other cases" \
+    || no "docs/page.md changed, wdoc.test.sh run alone: it ran '$got', want wdoc alone: $(cat "$T/out")"
+  git -C "$R" checkout -q -- docs/page.md; echo more >> "$R/note.md"; got=$(onepage)
+  [ "$got" = wroot ] && ok "a changed page in the root runs the case that reads it from the checkout, not one that writes its own" \
+    || no "note.md changed, wdoc.test.sh run alone: it ran '$got', want wroot alone: $(cat "$T/out")"
+}
+
+for p in callers callersmany callerstop callersstartup callerstable callerscomment doctests; do part "$p"; done
 results

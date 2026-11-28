@@ -1413,6 +1413,33 @@ rulefor() {
   local n r
   for n in ${CFN:--}; do r=$2; [ -z "${COVLINES[$1$'\t'$n]:-}" ] || r=${r/covof/lines}; [ -z "${COVBRANCH[$1$'\t'$n]:-}" ] || r=${r/lines/branch}; RULES+=$1$'\t'$n$'\t'$r$'\n'; done
 }
+# doctests <page> (issue 1829): the tests of a changed page (.md): each tracked test file with a line, no comment, that
+# names its path. A line names it by the path itself, by the pages of its folder as a pattern (<folder>/*.md), or
+# from the engine's folder or the checkout's (`$SRC/`, `$SRC/../`, `$ROOT/`, read here as conveyor/ and the root). A
+# page in the root (README.md) is named only so: its bare name is the page of a test's scratch checkout. A line that
+# names it inside the longer path of another tracked file (more/docs/page.md) does not name it. Of an engine case
+# file, the cases that name it (ccase), or the file whole (area) when a line outside its cases does; another test file
+# into run. Bug: a change to docs/cards.md ran none of the cases that read a sentence of it (healskinds, lintgate,
+# recshut, review) and not README-pages.test.sh, which reads each page: no link and no pass on record named them.
+doctests() {
+  local d=$1 g='' t c o
+  [[ $d != */* ]] || g="${d%/*}/*.${d##*.}"
+  o=$(git ls-files -- "*/$d" 2>/dev/null)
+  while IFS= read -r t; do
+    [ -n "$t" ] && [ "$t" != "$d" ] && [ -f "$t" ] || continue
+    c=$(awk -v d="$d" -v g="$g" -v o="$o" 'BEGIN { k = split(o, lp, "\n"); root = (d !~ /\//) }
+      /^t_[a-z0-9]*\(\) \{/ { n = $1; sub(/\(.*/, "", n); sub(/^t_/, "", n) } /^\}/ { n = ""; next }
+      /^[ \t]*(#|\/\/)/ { next }
+      { x = $0; gsub(/"?[$][{]?SRC[}]?"?\/[.][.]\//, "\001", x); gsub(/"?[$][{]?ROOT[}]?"?\//, "\001", x); gsub(/"?[$][{]?SRC[}]?"?\//, "\001conveyor/", x)
+        for (i = 1; i <= k; i++) while (lp[i] != "" && (j = index(x, lp[i]))) x = substr(x, 1, j - 1) substr(x, j + length(lp[i])) }
+      (root ? index(x, "\001" d) : index(x, d) || (g != "" && index(x, g))) { print (n == "" ? "-" : n) }' "$t" | LC_ALL=C sort -u)
+    [ -n "$c" ] || continue
+    case $t in
+      conveyor/tests/*.test.sh) if grep -qx -- - <<<"$c"; then area[$t]=1; else for c in $c; do ccase[$c]=1; done; fi ;;
+      *) run[$t]=1 ;;
+    esac
+  done < <(git grep -lF -e "${d##*/}" ${g:+-e "$g"} -- '*.test.sh' '*.test.mjs' '*.test.py' '*.test.ts' '*.test.tsx' 2>/dev/null)
+}
 # mapcases <engine case file>: whether the coverage map holds each case of the file as a unit of the engine's runner
 # (a case added since the trace is in no row, so the map cannot say what it reaches).
 mapcases() {
@@ -1449,6 +1476,8 @@ for f; do
     case $t in conveyor/tests/*.test.sh) larea[$t]+=$f$'\n' ;; *) run[$t]=1 ;; esac
     linked[$t$'\t'$f]=1
   done <<<"$LINKS"
+  # A page: the tests that name its path (doctests), whatever else selects.
+  [ -n "$NOTEXT" ] || case $f in *.md) doctests "$f" ;; esac
   if [ "$f" = "$MAP" ]; then
     # The map's own tests (MAPTESTS), and the case files whose naming changed: each one an area lists now that it did
     # not list at HEAD, and each one of an area whose files changed (in the map now, else at HEAD). "all", or a map either side
