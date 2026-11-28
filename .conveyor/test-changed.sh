@@ -556,7 +556,19 @@ boardtests() {
 # but / (conveyor/tests/*.test.sh brings testcountrunner.test.sh for each case file: the owner, 2026-11-27), as the
 # engine reads it (conveyor/lib/testlist.sh linksto()). Each test file a link adds to a pick (an engine case file to the engine's
 # runner, as a changed one; a meta-runner by its pack mark, below) the log names: linked, `<test file><TAB><changed file>`.
-LINKS=$(jq -r 'to_entries[] | .key as $k | .value | arrays[] | strings | "\($k)\t\(.)"' .conveyor/test-links.json 2>/dev/null \
+# The links are read as the engine reads them (conveyor/lib/testlist.sh linkslive(), by its conveyor/jq/linkslive.jq):
+# less each link to a test file that has a pass on record in the engine's state folder (testpasses.tsv), which the
+# engine runs when that pass read a changed file. So a session's own run follows the links a card's Test step follows
+# (issue 1829: it ran each Board test file a link of mainred.sh names, none of which reads it). A checkout with no
+# engine, or a state folder with no pass, reads each link of the file. The state folder is this checkout's (not one
+# the environment names: a test of this script in a scratch checkout reads no pass of the engine that runs it).
+livelinks() {
+  local p
+  [ -f conveyor/jq/linkslive.jq ] && [ -f conveyor/conveyor.sh ] && p=$(env -u CONVEYOR_MAIN -u CONVEYOR_CARDS bash conveyor/conveyor.sh state-dir 2>/dev/null) \
+    && [ -n "$p" ] && p=$p/testpasses.tsv && [ -s "$p" ] && jq -c --rawfile t <(cut -f3 "$p" | LC_ALL=C sort -u) -f conveyor/jq/linkslive.jq .conveyor/test-links.json 2>/dev/null \
+    || cat .conveyor/test-links.json 2>/dev/null
+}
+LINKS=$(livelinks | jq -r 'to_entries[] | .key as $k | .value | arrays[] | strings | "\($k)\t\(.)"' 2>/dev/null \
   | while IFS=$'\t' read -r f t; do [ ! -f "$t" ] || printf '%s\t%s\n' "$f" "$t"; done)
 declare -A linked=()
 # Test names that are no source file's beside them (<folder>/<name>): dashboard-view.* test the page in

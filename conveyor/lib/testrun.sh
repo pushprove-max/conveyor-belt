@@ -646,7 +646,7 @@ testsel() { # <worktree> [narrow] [<from commit> <to commit>]
     --rawfile ch <(git -C "$1" -c core.quotePath=false diff --name-only --no-renames "${d[@]}" -- 2>/dev/null) \
     --rawfile ct <(git -C "$1" -c core.quotePath=false diff --name-only --no-renames "${d[@]}" -- 2>/dev/null | testpaths) \
     --rawfile all <(git -C "$1" -c core.quotePath=false ls-files 2>/dev/null | testpaths) \
-    --slurpfile map <(jq -c . "$1/.conveyor/test-links.json" 2>/dev/null || :) --arg rn "$rn" --argjson rt "$rt" --arg mp "$mp" --slurpfile om <(printf '%s' "$om") 2>&1) \
+    --slurpfile map <(linkslive "$1") --arg rn "$rn" --argjson rt "$rt" --arg mp "$mp" --slurpfile om <(printf '%s' "$om") 2>&1) \
     || { out=${out#jq: error (at <unknown>): }; printf '%s\n' "${out:-the list of tests could not be made}"; return 1; }
   printf '%s\n' "$out"
 }

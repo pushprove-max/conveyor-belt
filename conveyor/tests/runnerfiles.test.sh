@@ -27,13 +27,13 @@ rflist() { # <command>
 # Bug it catches: the awk pass giving this repository's own pack (its commands, the scripts they run, its
 # package.json) another list than the bash loop it replaced: a runner left off is run alone as a test, and a test taken
 # for a runner never runs alone. The list is the one the loop gave; a change to the runner scripts that changes it on
-# purpose changes it here.
+# purpose changes it here (#1829: conveyor/jq/linkslive.jq, which .conveyor/test-changed.sh reads its links through).
 t_rfrepo() {
   setup '[]'
   local out
   out=$(rfeng 'MAIN=$(cd "$SRC/.." && pwd -P) PACK=$MAIN/.conveyor/project.json; runnerfiles | paste -sd " " -') \
     || fail "runnerfiles() failed on this repository's pack: $out"
-  [ "$out" = '.claude/scripts/__tests__/dashboard-server.test.sh .conveyor/lint-shell.sh .conveyor/no-browser-tests.sh .conveyor/no-records-split.sh .conveyor/test-changed-map.test.sh .conveyor/test-changed.sh .conveyor/test-full.sh .conveyor/test-lint.sh conveyor/conveyor.sh conveyor/conveyor.test.sh conveyor/foreman/foreman-projects.test.sh conveyor/lib/pick.sh conveyor/unit/unit.sh' ] \
+  [ "$out" = '.claude/scripts/__tests__/dashboard-server.test.sh .conveyor/lint-shell.sh .conveyor/no-browser-tests.sh .conveyor/no-records-split.sh .conveyor/test-changed-map.test.sh .conveyor/test-changed.sh .conveyor/test-full.sh .conveyor/test-lint.sh conveyor/conveyor.sh conveyor/conveyor.test.sh conveyor/foreman/foreman-projects.test.sh conveyor/jq/linkslive.jq conveyor/lib/pick.sh conveyor/unit/unit.sh' ] \
     || fail "this repository's pack (.conveyor/project.json) gave another runner list: $out"
 }
 

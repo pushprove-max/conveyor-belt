@@ -592,7 +592,7 @@ runfiles() { # <worktree>
 # that sets test.changed is asked. With none, or when the command fails or writes no list, the order stays.
 # shellcheck disable=SC2034 # SELN and SELALL are read by listcmd() (lib/testrun.sh)
 selfirst() { # <worktree> <max>
-  local cmd tc o=() l r=0 ks=()
+  local cmd tc o=() l r=0 ks=() off
   SELN=0; SELALL=0
   [ ${#fs[@]} -gt "$2" ] && packget test.changed tc && [ -n "$tc" ] && packget test.command cmd && [ -n "$cmd" ] || return 0
   rm -f "$1.capsel"; printf '%s\n' "${fs[@]}" > "$1.capfiles" \
@@ -606,9 +606,12 @@ selfirst() { # <worktree> <max>
   # with it each file it selects that is not linked (x) but is there (the case files of the cases its coverage map selects,
   # .conveyor/test-changed.sh: bug, the cap left them out). A list that keeps every linked file narrowed nothing (a whole
   # area): the cap keeps CARDLINKED of it, and a file it adds that is not linked does not run.
+  # off: the test files only a link the last passes rule out gives the change (linkslive()). The command reads the links
+  # file itself, so it lists them: none is added here (readersin() adds one whose last pass read a changed file).
   ! printf '%s\n' "${o[@]}" | grep -q $'^r\t' || r=1
+  off=$(LC_ALL=C comm -23 <(changelinks "$1" all | LC_ALL=C sort -u) <(changelinks "$1" | LC_ALL=C sort -u))
   for l in "${o[@]}"; do
-    [[ $l != x$'\t'* ]] || { [ "$r" = 1 ] && [ -f "$1/${l#x$'\t'}" ]; } || continue
+    [[ $l != x$'\t'* ]] || { [ "$r" = 1 ] && [ -f "$1/${l#x$'\t'}" ] && ! grep -qxF -- "${l#x$'\t'}" <<<"$off"; } || continue
     ks+=("${l#?$'\t'}"); [[ $l == r$'\t'* ]] || SELN=$((SELN + 1))
   done
   fs=("${ks[@]}"); SELALL=$r
@@ -716,12 +719,24 @@ mainlinks() { # <worktree> <the commit last tested on>
     | jq -Rr --slurpfile m <(cat "$1/.conveyor/test-links.json" 2>/dev/null || echo '{}') '$m[0]["main:" + .] | arrays[] | strings' 2>/dev/null \
     | sort -u | while IFS= read -r f; do [ ! -f "$1/$f" ] || printf '%s\n' "$f"; done
 }
+# <worktree>'s .conveyor/test-links.json, on one line, less each link the last passes rule out (#1829). A link names a
+# test file for each file of the landing that broke it, whatever the test reads, and a pass in $TESTCACHE names the
+# files the test read: readersin() runs the test when its last pass read a file the change touches, so a link to a
+# test file that has a pass there adds no test the change can reach, and with no such read it ran one the change
+# cannot reach (of the 270 links to a test file with a pass, the last pass of 234 did not read the linked file; card
+# #1829 ran 8 such test files). Kept: a link to a test file with no pass on record, a `main:` key (mainlinks()), and a
+# link of an engine case file or library file to an engine case file, whose pass names each of those files whatever it
+# runs (cachereaders()). Prints nothing when the file cannot be read.
+linkslive() { # <worktree>
+  jq -c --rawfile t <(cut -f3 "$TESTCACHE" 2>/dev/null | LC_ALL=C sort -u) -f "$HERE/jq/linkslive.jq" "$1/.conveyor/test-links.json" 2>/dev/null
+}
 # The test files .conveyor/test-links.json in <worktree> links to each file named on stdin (one a line), those still
 # there, one a line, A to Z; a link of a file to itself is left out. A key with a * links each file it matches, the *
 # standing for any characters but / (conveyor/tests/*.test.sh: each engine case file brings testcountrunner.test.sh,
 # whose t_casefnclash is the one check of a function name that two case files define; the owner, 2026-11-27).
-linksto() { # <worktree>
-  jq -Rr --slurpfile m <(cat "$1/.conveyor/test-links.json" 2>/dev/null || echo '{}') '. as $k | $m[0] | objects | to_entries[]
+# With all, each link the file holds; else only the links linkslive() keeps.
+linksto() { # <worktree> [all]
+  jq -Rr --slurpfile m <(if [ "${2:-}" = all ]; then cat "$1/.conveyor/test-links.json"; else linkslive "$1" | grep .; fi 2>/dev/null || echo '{}') '. as $k | $m[0] | objects | to_entries[]
     | .key as $p | select($p == $k or (($p | contains("*")) and ($k | test("^" + ($p | gsub("(?<c>[.+?^${}()|\\[\\]\\\\])"; "\\\(.c)") | gsub("\\*"; "[^/]*")) + "$"))))
     | .value | arrays[] | strings | select(. != $k)' 2>/dev/null \
     | sort -u | while IFS= read -r f; do [ -z "$f" ] || [ ! -f "$1/$f" ] || printf '%s\n' "$f"; done
@@ -730,8 +745,8 @@ linksto() { # <worktree>
 # not (linksto()). listcmd() runs each whole and never leaves one out for its cap: a link says a change to that file
 # broke the test before (bug: a card that changed foreman.sh and a test file ran none of foreman.sh's links, and with
 # no test file the cap ran 5 of its 9).
-changelinks() { # <worktree>
-  git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | linksto "$1"
+changelinks() { # <worktree> [all]
+  git -C "$1" -c core.quotePath=false diff --cached --name-only --no-renames HEAD -- 2>/dev/null | linksto "$1" ${2:+"$2"}
 }
 # listcmd()'s capped list fs with each linked file (lk, listcmd()'s) added that the cap left out and that
 # changelinks() gives <worktree>'s change; KEPTLINKS: how many it added (bug: a change to foreman.sh alone ran 5 of

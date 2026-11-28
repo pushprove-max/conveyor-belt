@@ -14,7 +14,8 @@
 
 # Main holds two test files: a.test.sh, whose command names a.txt, e.txt, the link ln.txt (to e.txt; e2.txt holds the
 # same text) and the folder lst/ (which holds one.txt) as its inputs (`TESTRUN inputs`), and b.test.sh, which it
-# names no inputs for. The test links give both to each of a.txt, c.txt and d.txt (not to e.txt, ln.txt or lst/), so a card that changes one runs
+# names no inputs for. The pack's test map (areas.json) gives both to each of a.txt, c.txt and d.txt (not to e.txt, ln.txt or lst/; not the test
+# links, which give a card no test file that has a pass on record: linkslive(), #1829), so a card that changes one runs
 # each file its list (CONVEYOR_TEST_RERUN) does not name as passed alone, through test.fileCommand, which writes
 # `<card> <file>` to $STUB/ran for each, and both pass. Card c7, whose change is d.txt (which neither file reads), runs
 # them both once, on main as it was then; main then moves (c.txt, which neither reads either), and the second card's
@@ -24,7 +25,9 @@ cachesetup() {
   echo 'a' > "$R/a.test.sh"; echo 'b' > "$R/b.test.sh"; echo e > "$R/e.txt"; echo e > "$R/e2.txt"; ln -s e.txt "$R/ln.txt"
   mkdir "$R/lst" && echo one > "$R/lst/one.txt"
   git -C "$R" add a.test.sh b.test.sh e.txt e2.txt ln.txt lst/one.txt || fail "main's test files could not be staged"
-  linkset '{"a.txt": ["a.test.sh", "b.test.sh"], "c.txt": ["a.test.sh", "b.test.sh"], "d.txt": ["a.test.sh", "b.test.sh"]}'
+  echo '{"a.txt": ["a.test.sh", "b.test.sh"], "c.txt": ["a.test.sh", "b.test.sh"], "d.txt": ["a.test.sh", "b.test.sh"]}' > "$R/areas.json" \
+    && git -C "$R" add areas.json && git -C "$R" commit -qm 'test map' && git -C "$R" push -q origin main || fail "main's test map could not be set"
+  tune '.test.map = "areas.json"'
   cat > "$STUB/test-cmd" <<'EOF'
 f=$CONVEYOR_TEST_FILE; echo "${PWD##*/} $f" >> "$STUB/ran"
 [ "$f" != a.test.sh ] || printf 'TESTRUN inputs\ta.test.sh\ta.txt\te.txt\tln.txt\tlst/\n' >> "$CONVEYOR_TEST_LOG/run.log"
@@ -118,9 +121,9 @@ t_testcachemain() {
     || fail "the step line does not say a.test.sh ran for its changed input and b.test.sh was kept from the run at $at: $(cat "$w.rec")"
 }
 
-# #1619, D1: both files name their inputs (b.test.sh reads e2.txt), and card c8 changes c.txt, which the test links
-# give to both and which neither read: neither runs, and the run's log names both passes it used. Bug it catches: a
-# change no test read ran the tests the links name, as the cache kept off only a file the map did not pick.
+# #1619, D1: both files name their inputs (b.test.sh reads e2.txt), and card c8 changes c.txt, which the test map
+# gives to both and which neither read: neither runs, and the run's log names both passes it used. Bug it catches: a
+# change no test read ran the tests the map names, as the cache kept off only a file the map did not pick.
 t_testcachenone() {
   cachesetup binputs
   cachestep c8 'echo three > c.txt' || fail "the second card's test step failed: $(cat "$T/$CASE/c8.out" "$T/$CASE/cards/c8.test" 2>&1)"
@@ -370,6 +373,29 @@ t_testcachelinkglob() {
     || fail "this repository's links do not bring testcountrunner.test.sh for a change to a case file: '$(cat "$T/$CASE/own" 2>&1)'"
 }
 
+# Issue 1829: .conveyor/test-links.json links d.md to j.test.sh, k.test.sh and l1.test.sh to l6.test.sh (a landing that
+# changed d.md broke each once). j.test.sh's last pass read e.txt alone, k.test.sh's read d.md, and the six have no pass
+# on record. Card c7 changes d.md: its list is the six (their links stand) and k.test.sh (its last pass read d.md), not
+# j.test.sh, which d.md cannot reach; and not when the pack's command of the changed tests lists j.test.sh, as it
+# reads the links file itself. Bug it catches: a link ran its test whole for every later change to the file,
+# whatever the test read (8 of card #1829's test files read no file it changed).
+t_testcachelinkread() {
+  setup '[]'
+  local w=$T/$CASE/cards/c7 i ls=() want='l1.test.sh l2.test.sh l3.test.sh l4.test.sh l5.test.sh l6.test.sh k.test.sh'
+  for i in j k l1 l2 l3 l4 l5 l6; do echo x > "$R/$i.test.sh"; ls+=("$i.test.sh"); done; echo d > "$R/d.md"; echo e > "$R/e.txt"
+  linkset "$(printf '%s\n' "${ls[@]}" | jq -Rn '{"d.md": [inputs]}')"; cachelistsetup "${ls[@]}" d.md e.txt
+  echo two >> "$w/d.md" && git -C "$w" add -A || fail "the card's change could not be staged"
+  LASTPASS=$'j.test.sh\te.txt\nk.test.sh\td.md' cachelistrun 'listcmd "$wt" && echo $TEST_FILES > "$T/$CASE/got"
+    echo d.md | linksto "$wt" all | grep -c . > "$T/$CASE/all"'
+  [ "$(tr ' ' '\n' < "$T/$CASE/got" | sort | paste -sd ' ' -)" = "$(tr ' ' '\n' <<<"$want" | sort | paste -sd ' ' -)" ] \
+    || fail "the list of a change to d.md is not the six linked files with no pass on record and k.test.sh, which read d.md: $(cat "$T/$CASE/got" "$T/$CASE/run.out" 2>&1)"
+  [ "$(cat "$T/$CASE/all" 2>&1)" = 8 ] || fail "linksto all does not give each of the 8 links the file holds: $(cat "$T/$CASE/all" 2>&1)"
+  # The command lists j.test.sh and l1.test.sh by a pattern: a test file that the command names is taken as its runner.
+  tune '.test.changed = "sel.sh" | .test.command = "ls | grep -E \"^(j|l1)[.]test\" > \"$CONVEYOR_TEST_LIST\""'
+  LASTPASS=$'j.test.sh\te.txt\nk.test.sh\td.md' cachelistrun 'listcmd "$wt" && echo $TEST_FILES > "$T/$CASE/got2"'
+  [ "$(tr ' ' '\n' < "$T/$CASE/got2" | sort | paste -sd ' ' -)" = "$(tr ' ' '\n' <<<"$want" | sort | paste -sd ' ' -)" ] \
+    || fail "with a command of the changed tests that lists j.test.sh and l1.test.sh, the list is not the six and k.test.sh: $(cat "$T/$CASE/got2" "$T/$CASE/run.out" 2>&1)"
+}
 
 # cachekeep() of a run that passed d.test.sh, whose log names its reads in a `TESTRUN reads` line (it read a path
 # that is not tracked, such as node_modules: .conveyor/test-changed.sh inputsof()), e.txt and pkg/package.json, which

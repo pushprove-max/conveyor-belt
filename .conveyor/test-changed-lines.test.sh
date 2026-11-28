@@ -109,6 +109,24 @@ got=$(cases)
 [ "$got" = "c01 c02" ] && ok "a linked case file whose cases the map holds runs the cases the map gives the change, not whole" \
   || no "line 4 of big() changed, f.sh linked to a.test.sh: ran '$got': $(cat "$F/out")"
 git -C "$R" checkout -q -- conveyor/lib/f.sh
+# Issue 1829: the links are read as the engine reads them. f.sh links two Board test files; with no pass on record
+# both are listed, and with a pass of w.test.mjs on record in the state folder (the files it read) only v.test.mjs is:
+# the engine runs w.test.mjs when that pass read a changed file. Bug it catches: a session's own run followed each
+# link of the file, so it ran tests a card's Test step does not (the Board test files a link of mainred.sh names).
+mkdir -p "$R/.claude/scripts/__tests__" "$R/conveyor/jq" "$F/state" && cp "$ROOT/conveyor/jq/linkslive.jq" "$R/conveyor/jq/"
+for i in v w; do printf "test('%s', () => {});\n" "$i" > "$R/.claude/scripts/__tests__/$i.test.mjs"; done
+echo '{"conveyor/lib/f.sh": [".claude/scripts/__tests__/v.test.mjs", ".claude/scripts/__tests__/w.test.mjs"]}' > "$R/.conveyor/test-links.json"
+printf '#!/usr/bin/env bash\n[ "${1:-}" != state-dir ] || echo "%s"\n' "$F/state" > "$R/conveyor/conveyor.sh"
+git -C "$R" add -A && git -C "$R" commit -qm 'board links' || no "the Board links could not be committed"
+sed -i.bak '4s/echo x/echo X/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
+listed() { (cd "$R" && CONVEYOR_TEST_LIST=$F/ls bash .conveyor/test-changed.sh) > "$F/out" 2>&1; grep -F .test.mjs "$F/ls" | sed 's|.*/||' | LC_ALL=C sort | paste -sd ' ' -; }
+got=$(listed)
+[ "$got" = "v.test.mjs w.test.mjs" ] && ok "with no pass on record each linked test file is listed" || no "f.sh changed, no pass on record: listed '$got': $(cat "$F/out")"
+printf 'h1\tc0\t.claude/scripts/__tests__/w.test.mjs\tconveyor/lib/g.sh\n' > "$F/state/testpasses.tsv"
+got=$(listed)
+[ "$got" = v.test.mjs ] && ok "a link to a test file that has a pass on record is not followed, as in a card's Test step" \
+  || no "f.sh changed, a pass of w.test.mjs on record: listed '$got': $(cat "$F/out")"
+git -C "$R" checkout -q -- conveyor/lib/f.sh; git -C "$R" reset -q --hard HEAD~1
 # A change outside every function is not the map's to pick: the link runs the case file whole.
 sed -i.bak '1s/^/X=1\n/' "$R/conveyor/lib/f.sh" && rm -f "$R/conveyor/lib/f.sh.bak"
 got=$(cases); want=$(seq -w 1 60 | sed 's/^/c/' | paste -sd ' ' -)

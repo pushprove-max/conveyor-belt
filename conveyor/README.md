@@ -860,7 +860,9 @@ files that the test map and the links give the change's other files also run, at
 no test file, and the `why` says how many. A change with
 none runs at most 5 of the test files the test map and the links give its files, and its output says so. Either
 way, each test file that `.conveyor/test-links.json` links to a changed file also runs, whole, and the note says how
-many of them ran past the 5. When the
+many of them ran past the 5. A link to a test file that has a pass on record with the files it read is not used:
+that test file runs when its last pass read a file that the change touches. A link between two engine files is always
+used. When the
 pack sets `test.changed`, the files that `test.command` lists for the change run first, in the order of its list.
 When the list leaves out a linked file, all the files on it run, also past the 5 and also a file that is not linked.
 When the list keeps every linked file, 5 of them run.

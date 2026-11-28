@@ -489,6 +489,7 @@
 {"area": "testrun", "test": "reserve.test.sh"}
 {"area": "testrun", "file": "conveyor/lib/testrun.sh"}
 {"area": "testrun", "file": "conveyor/lib/testlist.sh"}
+{"area": "testrun", "file": "conveyor/jq/linkslive.jq"}
 {"area": "testrun", "file": "conveyor/lib/mainred.sh"}
 {"area": "testrun", "file": "conveyor/lib/redfix.sh"}
 {"area": "testrun", "file": "conveyor/lib/bugproof.sh"}
