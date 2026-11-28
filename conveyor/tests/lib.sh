@@ -74,6 +74,25 @@ export CONVEYOR_NOPRICE_CMD=false
 # that writes a cache exports its own CODEX_HOME under $T/$CASE, as cases run side by side and one case's cache there
 # changed the models another case's snapshot read (clis.test.sh).
 export CODEX_HOME=$T/codex-home; mkdir -p "$CODEX_HOME"; chmod a-w "$CODEX_HOME"
+# The Antigravity CLI (agy) is never this machine's own: doctor asks an agy it finds on PATH for its sign-in with one
+# real call, of up to 60 s, and prints the answer (agysignin(), lib/agy.sh). On a machine with agy and no sign-in,
+# t_setupfresh's doctor printed that warning, a line the case does not allow, and t_followdoctor's three doctors ran
+# on after the 60 s of the process that stands in for its loop. Each folder of PATH that holds an agy gives way to a
+# folder of links to its other programs; a case that runs agy has a stub of its own ($STUB/agy, antigravity.test.sh).
+noagy() {
+  local d f i=0 ds=() p=()
+  IFS=: read -ra ds <<<"$PATH"
+  for d in "${ds[@]}"; do
+    if [ -n "$d" ] && [ -e "$d/agy" ]; then
+      i=$((i + 1)); mkdir -p "$T/noagy/$i" || return 1
+      for f in "$d"/*; do [ "${f##*/}" = agy ] || ln -s "$f" "$T/noagy/$i/" || return 1; done
+      d=$T/noagy/$i
+    fi
+    p+=("$d")
+  done
+  PATH=$(IFS=:; printf %s "${p[*]}")
+}
+! command -v agy > /dev/null || noagy || { echo "the machine's agy could not be left out of the cases' PATH" >&2; exit 1; }
 # The same-file check before a pick (overlap(), lib/pick.sh) is never a model call here: it fails, so each issue is
 # picked as it is. A case of that check sets its own (deps.test.sh).
 export CONVEYOR_OVERLAP_CMD=false
