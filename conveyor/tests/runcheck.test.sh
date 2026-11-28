@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# timeout: 120
+# timeout: 300
+# The limit is the whole file's in a card's test step (lib/fileeach.sh), and each of its 6 cases waits there for a test
+# slot of its own. They run in some 22 s alone, but on a busy step the waits for slots took the file past 120 s (times
+# the load factor: 287 s once) with no case failed: all 3 flaky sightings were that time-out (#1781).
 # Engine cases: the checks of the Board's fix cards for a test file that never ran (#189): Make it run (speedproof.sh runproof(),
 # and ranproof() after its test step: the step ran the file and it passed) and Delete it (speedproof.sh deleteproof(): the change
 # removes the file, then it is checked as an Optimize delete). fx_in and fx_wt are in lib.sh.
