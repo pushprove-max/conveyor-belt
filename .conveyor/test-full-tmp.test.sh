@@ -15,10 +15,12 @@ no() { echo "not ok - $1"; fails=1; }
 # '/tmp'): the suite removes only the folder it gives as TMPDIR, so such a folder was left whenever its file was
 # stopped (#1238 review: dashboard-alive.test.sh, dashboard-local.test.sh). A source scan, as which files do so can only
 # be read from them: a run of each here would be a run of the whole suite. A line that only names such a path in a
-# command a hook test hands to a hook (run_hook, json) is no folder the test makes.
+# command a hook test hands to a hook (run_hook, json) is no folder the test makes. One line is left out by name: the
+# arm of bash-guardrails-search.refute.test.sh that makes its log folder under /tmp only when the run's TMPDIR is not
+# in the scratch space its hook knows (a TMPDIR under $HOME); in a TMPDIR that is, its other arm makes it there.
 fixed=$(git -C "$HERE/.." ls-files -co --exclude-standard -- '*.test.sh' '*.test.mjs' '*.test.js' '*.test.ts' '*.test.py' \
   | (cd "$HERE/.." && xargs grep -nE "mktemp[^|;)]*( |-p ?|--tmpdir=)/tmp(/|[ )\"]|$)|mkdtemp(Sync)?\\(['\"]/tmp|dir=['\"]/tmp") \
-  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#|run_hook|json ')
+  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#|run_hook|json |^\.claude/hooks/__tests__/bash-guardrails-search\.refute\.test\.sh:[0-9]+:[[:space:]]*\*\) LOGS=')
 [ -z "$fixed" ] || no "test files make their temp folder at a fixed /tmp path, not in TMPDIR: $fixed"
 
 # A scratch repo with the real script and three files, run one at a time in this order: a passes, b fails and c runs
